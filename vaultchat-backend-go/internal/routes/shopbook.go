@@ -2070,9 +2070,17 @@ func sbOwnerLedger(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// No customer selected → summarise pending per customer.
+	// staleDays is DAYS SINCE THE LAST PAYMENT — deliberately not invoice
+	// aging. Real aging means allocating payments against purchases FIFO and
+	// reporting the age of the oldest uncovered one; that is a different
+	// (and much bigger) calculation. "No payment in 45 days" is cheap, exact,
+	// and the thing an owner actually acts on. Named for what it is so nobody
+	// later reads it as aged debt.
 	rows, err := db.Pool.Query(ctx, `
 		SELECT l.customer_user_id, COALESCE(u.name,''),
-		       SUM(CASE WHEN l.type='purchase' THEN l.amount ELSE -l.amount END) AS pending
+		       SUM(CASE WHEN l.type='purchase' THEN l.amount ELSE -l.amount END) AS pending,
+		       MAX(l.created_at) FILTER (WHERE l.type='payment'),
+		       MIN(l.created_at)
 		  FROM shopbook_ledger l LEFT JOIN users u ON u.id=l.customer_user_id
 		 WHERE l.shop_id=$1
 		 GROUP BY l.customer_user_id, u.name
@@ -2086,11 +2094,25 @@ func sbOwnerLedger(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var id, name string
 		var pending float64
-		if err := rows.Scan(&id, &name, &pending); err != nil {
+		var lastPaid, firstEntry *time.Time
+		if err := rows.Scan(&id, &name, &pending, &lastPaid, &firstEntry); err != nil {
 			continue
 		}
+		// Never paid at all → measure from the first entry, so a customer who
+		// has owed since day one does not read as "0 days".
+		since := lastPaid
+		if since == nil {
+			since = firstEntry
+		}
+		staleDays := 0
+		if since != nil {
+			staleDays = int(time.Since(*since).Hours() / 24)
+		}
 		out = append(out, map[string]any{
-			"customerId": id, "customerName": name, "pending": math.Round(pending*100) / 100,
+			"customerId": id, "customerName": name,
+			"pending":       math.Round(pending*100) / 100,
+			"lastPaymentAt": httpx.JST(lastPaid),
+			"staleDays":     staleDays,
 		})
 	}
 	httpx.JSON(w, 200, map[string]any{"customers": out})
@@ -2108,6 +2130,31 @@ type sbLedgerItemIn struct {
 	TaxPercent float64 `json:"taxPercent"`
 }
 
+// sbLedgerItemsTotal validates the lines and returns what they add up to, in
+// cents. The ONE place a credit entry's worth is decided, so the ledger row,
+// the customer's balance and the invoice built from it cannot disagree.
+//
+// Rounds per line, not on the grand total: 3 × ₹33.335 is three roundable
+// prices, and summing floats first then rounding once drifts from what the
+// printed lines say. The printed lines are what the customer checks.
+//
+// Trims Name in place — the caller inserts these same structs.
+func sbLedgerItemsTotal(items []sbLedgerItemIn) (money, error) {
+	if len(items) > 200 {
+		return 0, errors.New("too many item lines (max 200)")
+	}
+	var sum money
+	for i := range items {
+		it := &items[i]
+		it.Name = strings.TrimSpace(it.Name)
+		if it.Name == "" || it.Qty <= 0 || it.Price < 0 {
+			return 0, errors.New("every item needs a name, a positive qty and a non-negative price")
+		}
+		sum += money(math.Round(it.Qty * it.Price * 100))
+	}
+	return sum, nil
+}
+
 func sbAddLedgerEntry(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	shopID, ok := ownerShopID(ctx, w, httpx.UserFrom(r).ID)
@@ -2121,6 +2168,9 @@ func sbAddLedgerEntry(w http.ResponseWriter, r *http.Request) {
 		Remark         string           `json:"remark"`
 		IdempotencyKey string           `json:"idempotencyKey"`
 		Items          []sbLedgerItemIn `json:"items"`
+		// Set by the app only after the owner has seen the over-limit warning
+		// and chosen to proceed anyway.
+		ConfirmOverLimit bool `json:"confirmOverLimit"`
 	}
 	if err := httpx.Body(r, &b); err != nil || b.CustomerID == "" || (b.Type != "purchase" && b.Type != "payment") {
 		httpx.Err(w, http.StatusBadRequest, "customerId and type(purchase|payment) required")
@@ -2140,20 +2190,10 @@ func sbAddLedgerEntry(w http.ResponseWriter, r *http.Request) {
 	// add up to the total it also prints, which is worse than having no lines.
 	amount := money(math.Round(b.Amount * 100))
 	if len(b.Items) > 0 {
-		if len(b.Items) > 200 {
-			httpx.Err(w, http.StatusBadRequest, "too many item lines (max 200)")
+		sum, err := sbLedgerItemsTotal(b.Items)
+		if err != nil {
+			httpx.Err(w, http.StatusBadRequest, err.Error())
 			return
-		}
-		var sum money
-		for i := range b.Items {
-			it := &b.Items[i]
-			it.Name = strings.TrimSpace(it.Name)
-			if it.Name == "" || it.Qty <= 0 || it.Price < 0 {
-				httpx.Err(w, http.StatusBadRequest,
-					"every item needs a name, a positive qty and a non-negative price")
-				return
-			}
-			sum += money(math.Round(it.Qty * it.Price * 100))
 		}
 		amount = sum
 	}
@@ -2191,6 +2231,28 @@ func sbAddLedgerEntry(w http.ResponseWriter, r *http.Request) {
 			"Customer limit reached on the Free plan — upgrade to add more customers",
 			map[string]any{"upgrade": true, "limit": "customers"})
 		return
+	}
+
+	// CREDIT CEILING — the same sbCreditCheck the order path uses, so a shop's
+	// limit means one thing regardless of how the debt arrives. Only a purchase
+	// can breach it; a payment moves the balance the right way and must never
+	// be obstructed.
+	//
+	// Unlike the order path, which attaches a warning to a write that already
+	// happened, this one asks first: here the owner is still typing, so it is
+	// a decision they can act on rather than a notice about a fait accompli.
+	// Overridable, because the owner knows the customer and the app does not.
+	if b.Type == "purchase" && !b.ConfirmOverLimit {
+		if over, pending, limit := sbCreditCheck(ctx, db.Pool, shopID, b.CustomerID, amount); over {
+			httpx.Err(w, http.StatusConflict,
+				"This entry puts the customer over their credit limit",
+				map[string]any{
+					"code":    "over_credit_limit",
+					"pending": pending.Float(), "limit": limit.Float(),
+					"afterEntry": (pending + amount).Float(),
+				})
+			return
+		}
 	}
 
 	// Idempotency: a retried payment must not credit the customer twice.
@@ -2233,6 +2295,9 @@ func sbAddLedgerEntry(w http.ResponseWriter, r *http.Request) {
 			After: map[string]any{
 				"customerId": b.CustomerID, "type": b.Type,
 				"amount": amount.Float(), "items": len(b.Items),
+				// Overriding a credit ceiling is a judgement call the owner is
+				// entitled to make, and exactly the kind that needs a record.
+				"overLimitOverride": b.ConfirmOverLimit,
 			},
 			Reason: b.Remark, IP: sbClientIP(r),
 		})
@@ -2251,10 +2316,26 @@ func sbAddLedgerEntry(w http.ResponseWriter, r *http.Request) {
 		httpx.Err(w, http.StatusInternalServerError, "db error")
 		return
 	}
+	// Tell the customer their balance moved, either way. A khata the customer
+	// only hears about on the weekly reminder is one they can be surprised by;
+	// the shop writes debt against them, so the debit needs a receipt too, not
+	// just the credit. Balance is re-read rather than derived from `amount`, so
+	// the number pushed is the same one the customer will see on screen.
+	var pending float64
+	_ = db.Pool.QueryRow(ctx, `
+		SELECT COALESCE(SUM(CASE WHEN type='purchase' THEN amount ELSE -amount END),0)
+		  FROM shopbook_ledger WHERE shop_id=$1 AND customer_user_id=$2`,
+		shopID, b.CustomerID).Scan(&pending)
 	if b.Type == "payment" {
 		sbNotify(ctx, b.CustomerID, "Payment recorded ✅",
-			sbMoney(ctx, shopID, amount.Float())+" payment recorded on your account",
+			sbMoney(ctx, shopID, amount.Float())+" payment recorded — "+
+				sbMoney(ctx, shopID, pending)+" now pending",
 			map[string]any{"event": "payment", "shopId": shopID})
+	} else {
+		sbNotify(ctx, b.CustomerID, "Added to your khata 🧾",
+			sbMoney(ctx, shopID, amount.Float())+" added — "+
+				sbMoney(ctx, shopID, pending)+" now pending",
+			map[string]any{"event": "khata_purchase", "shopId": shopID})
 	}
 	httpx.JSON(w, 201, map[string]any{"id": id})
 }

@@ -51,6 +51,7 @@ import { requestBackgroundPermission } from '../lib/family/background';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   requestIgnoreBatteryOptimizations, needsAutoStartGuidance, openAutoStartSettings, getManufacturer,
+  isIgnoringBatteryOptimizations,
 } from '../lib/batteryOptimization';
 import { loadAlerts, recordAlert, useUnreadCount } from '../lib/family/alerts';
 import { type CircleMember, type MemberPresence, STALE_MS, SPEED_ALERT_CHOICES, DEFAULT_SPEED_ALERT_KMH } from '../lib/family/types';
@@ -554,11 +555,18 @@ export default function FamilySpaceScreen() {
       try {
         const askedKey = 'vc_family_bg_asked';
         const asked = await AsyncStorage.getItem(askedKey);
-        if (!asked) {
+        // Re-ask when the exemption is genuinely MISSING, even if we asked
+        // before — "asked once" was the right rule while we could not read the
+        // answer, but it also meant a user who declined (or an OEM that revoked
+        // it later) was never told again, and their locked-screen sharing just
+        // quietly stopped working. Now the state decides, not the memory of a
+        // dialog.
+        const exempt = await isIgnoringBatteryOptimizations();
+        if (!asked || !exempt) {
           await AsyncStorage.setItem(askedKey, '1');
           const bg = await canShareInBackground();
           if (!bg) await requestBackgroundPermission();
-          await requestIgnoreBatteryOptimizations();
+          if (!exempt) await requestIgnoreBatteryOptimizations();
           if (await needsAutoStartGuidance()) {
             Alert.alert(
               'Keep sharing when locked',

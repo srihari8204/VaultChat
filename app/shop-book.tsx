@@ -3126,12 +3126,36 @@ function OwnerKhata() {
 
   if (sel) return <KhataDetail customer={sel} onBack={() => { setSel(null); load(); }} />;
 
+  const owed = customers.filter((c) => c.pending > 0);
+  const owedTotal = owed.reduce((n, c) => n + c.pending, 0);
+  // Sorted so stale[0] is the longest-quiet customer, which is the one named.
+  const stale = owed.filter((c) => (c.staleDays ?? 0) > 30)
+    .sort((a, b) => (b.staleDays ?? 0) - (a.staleDays ?? 0));
+
   return (
     <ScrollView contentContainerStyle={s.body}
       refreshControl={<RefreshControl refreshing={loading} onRefresh={load} tintColor={C.green} />}>
       <Text style={s.sectionLabel}>Customer Khata</Text>
       {loading && <ActivityIndicator color={C.green} style={{ marginTop: 16 }} />}
       {!loading && customers.length === 0 && <Empty icon="people-outline" text="No customer ledgers yet." />}
+
+      {/* What the owner cannot see from a list sorted by amount: who has gone
+          quiet. A ₹400 debt untouched for four months is a worse sign than a
+          ₹4,000 one paid down last week. */}
+      {owed.length > 0 && (
+        <View style={[s.panel, { borderColor: C.amber }]}>
+          <Text style={{ color: C.amber, fontWeight: '700' }}>
+            {owed.length} customer{owed.length > 1 ? 's owe' : ' owes'} you {formatINR(owedTotal)}
+          </Text>
+          {stale.length > 0 && (
+            <Text style={s.hint}>
+              {stale.length} {stale.length > 1 ? 'have' : 'has'} not paid in over 30 days
+              {' '}— longest {stale[0].staleDays} days.
+            </Text>
+          )}
+        </View>
+      )}
+
       {customers.map((c) => (
         <TouchableOpacity key={c.customerId} style={s.card} onPress={() => setSel(c)}>
           <View style={s.shopIcon}><Ionicons name="person" size={20} color={C.green} /></View>
@@ -3140,6 +3164,11 @@ function OwnerKhata() {
             <Text style={[s.price, { color: c.pending > 0 ? C.danger : C.green }]}>
               {c.pending > 0 ? `Pending ${formatINR(c.pending)}` : 'Settled'}
             </Text>
+            {c.pending > 0 && (c.staleDays ?? 0) > 30 && (
+              <Text style={s.staleWarn}>
+                {c.lastPaymentAt ? `No payment in ${c.staleDays} days` : `Never paid — ${c.staleDays} days`}
+              </Text>
+            )}
           </View>
           <Ionicons name="chevron-forward" size={20} color={C.sub} />
         </TouchableOpacity>
@@ -3155,6 +3184,12 @@ function KhataDetail({ customer, onBack }: { customer: SB.CustomerPending; onBac
   const [remark, setRemark] = useState('');
   const [busy, setBusy] = useState(false);
   const [method, setMethod] = useState<SB.PaymentMethod>('cash');
+  // Held as strings: a half-typed "12." is not a number yet, and coercing on
+  // every keystroke fights the keyboard.
+  const [items, setItems] = useState<{ name: string; qty: string; price: string }[]>([]);
+  const setItem = (i: number, patch: Partial<{ name: string; qty: string; price: string }>) =>
+    setItems((prev) => prev.map((it, j) => (j === i ? { ...it, ...patch } : it)));
+  const itemsTotal = items.reduce((n, it) => n + num(it.qty) * num(it.price), 0);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -3166,9 +3201,17 @@ function KhataDetail({ customer, onBack }: { customer: SB.CustomerPending; onBac
   // to the row already written, but the next payment gets its own key.
   const entryKey = useRef(clientKey());
 
-  const add = async (type: 'purchase' | 'payment') => {
-    const amt = num(amount);
-    if (amt <= 0) { Alert.alert('Enter an amount'); return; }
+  const add = async (type: 'purchase' | 'payment', confirmOverLimit = false) => {
+    const lines = type === 'purchase' ? items : [];
+    // A blank row is someone who tapped "add product" and changed their mind —
+    // drop it rather than making them hunt for the × to submit.
+    const filled = lines.filter((it) => it.name.trim() || it.price.trim());
+    if (filled.some((it) => !it.name.trim() || num(it.qty) <= 0 || num(it.price) < 0)) {
+      Alert.alert('Check the products', 'Every product needs a name, a quantity above 0 and a price.');
+      return;
+    }
+    const amt = filled.length ? itemsTotal : num(amount);
+    if (amt <= 0) { Alert.alert(filled.length ? 'Product prices add up to ₹0' : 'Enter an amount'); return; }
     setBusy(true);
     try {
       if (type === 'payment') {
@@ -3180,12 +3223,61 @@ function KhataDetail({ customer, onBack }: { customer: SB.CustomerPending; onBac
           reference: remark.trim(), idempotencyKey: entryKey.current,
         });
       } else {
-        await SB.addLedgerEntry(customer.customerId, type, amt, remark.trim(), entryKey.current);
+        await SB.addLedgerEntry(customer.customerId, type, amt, remark.trim(),
+          entryKey.current,
+          filled.length
+            ? filled.map((it) => ({
+                name: it.name.trim(), brand: '', unit: '',
+                qty: num(it.qty), price: num(it.price), taxPercent: 0,
+              }))
+            : undefined,
+          confirmOverLimit);
       }
       entryKey.current = clientKey();
-      setAmount(''); setRemark(''); load();
-    } catch (e: any) { Alert.alert('Error', e?.message ?? 'Try again'); }
+      setAmount(''); setRemark(''); setItems([]); load();
+    } catch (e: any) {
+      // Over the credit limit is a question, not a failure. Keep the same
+      // idempotency key on the retry so confirming cannot double-post.
+      const breach = SB.creditBreachFrom(e);
+      if (breach) {
+        Alert.alert(
+          'Over credit limit',
+          `${customer.customerName || 'This customer'} owes ${formatINR(breach.pending)}. `
+          + `This entry takes them to ${formatINR(breach.afterEntry)}, past their `
+          + `${formatINR(breach.limit)} limit.`,
+          [{ text: 'Cancel', style: 'cancel' },
+           { text: 'Add anyway', style: 'destructive', onPress: () => add(type, true) }],
+        );
+        return;
+      }
+      Alert.alert('Error', e?.message ?? 'Try again');
+    }
     finally { setBusy(false); }
+  };
+
+  // Issue the document, fetch the server-rendered HTML, hand it to the printer.
+  // Issuing is idempotent server-side (partial unique index on ledger_id), so
+  // sharing the same entry twice reuses one numbered document rather than
+  // burning a second invoice number.
+  const shareDoc = async (entry: SB.LedgerEntry) => {
+    const isPay = entry.type === 'payment';
+    setBusy(true);
+    try {
+      const { id } = isPay
+        ? await SB.issueKhataReceipt(entry.id)
+        : await SB.issueKhataInvoice(entry.id);
+      const html = await SB.invoiceHtml(id);
+      const { uri } = await Print.printToFileAsync({ html });
+      if (await Sharing.isAvailableAsync()) {
+        await Sharing.shareAsync(uri, {
+          mimeType: 'application/pdf',
+          dialogTitle: isPay ? 'Payment receipt' : 'Bill',
+        });
+      }
+    } catch (e: any) {
+      Alert.alert(isPay ? 'Could not create the receipt' : 'Could not create the bill',
+        e?.message ?? 'Try again');
+    } finally { setBusy(false); }
   };
 
   const remind = async () => {
@@ -3217,8 +3309,47 @@ function KhataDetail({ customer, onBack }: { customer: SB.CustomerPending; onBac
         )}
         <View style={s.panel}>
           <Text style={s.panelTitle}>Add entry</Text>
-          <TextInput style={s.input} placeholder="Amount (₹)" placeholderTextColor={C.sub}
-            keyboardType="numeric" value={amount} onChangeText={setAmount} />
+
+          {/* Products given on credit. Optional — a shopkeeper in a hurry still
+              just types a number. When lines ARE given the amount stops being
+              typeable: the server derives it from them, so an editable field
+              here would show a total the saved entry disagrees with. */}
+          {items.map((it, i) => (
+            <View key={i} style={{ flexDirection: 'row', gap: 6, marginBottom: 8 }}>
+              <TextInput style={[s.input, { flex: 3, marginBottom: 0 }]} placeholder="Product"
+                placeholderTextColor={C.sub} value={it.name}
+                onChangeText={(v) => setItem(i, { name: v })} />
+              <TextInput style={[s.input, { flex: 1, marginBottom: 0 }]} placeholder="Qty"
+                placeholderTextColor={C.sub} keyboardType="numeric" value={it.qty}
+                onChangeText={(v) => setItem(i, { qty: v })} />
+              <TextInput style={[s.input, { flex: 1.4, marginBottom: 0 }]} placeholder="₹ each"
+                placeholderTextColor={C.sub} keyboardType="numeric" value={it.price}
+                onChangeText={(v) => setItem(i, { price: v })} />
+              <TouchableOpacity onPress={() => setItems(items.filter((_, j) => j !== i))}
+                hitSlop={8} style={{ justifyContent: 'center' }}>
+                <Ionicons name="close-circle" size={22} color={C.danger} />
+              </TouchableOpacity>
+            </View>
+          ))}
+          <TouchableOpacity style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 10 }}
+            onPress={() => setItems([...items, { name: '', qty: '1', price: '' }])}>
+            <Ionicons name="add-circle-outline" size={18} color={C.green} />
+            <Text style={{ color: C.green, fontWeight: '700', fontSize: 13 }}>
+              {items.length ? 'Add another product' : 'Add products & cost (optional)'}
+            </Text>
+          </TouchableOpacity>
+
+          {items.length > 0 ? (
+            <View style={[s.input, { justifyContent: 'center' }]}>
+              <Text style={{ color: C.text, fontWeight: '700' }}>
+                Total {formatINR(itemsTotal)}
+                <Text style={{ color: C.sub, fontWeight: '400' }}> · from {items.length} item{items.length > 1 ? 's' : ''}</Text>
+              </Text>
+            </View>
+          ) : (
+            <TextInput style={s.input} placeholder="Amount (₹)" placeholderTextColor={C.sub}
+              keyboardType="numeric" value={amount} onChangeText={setAmount} />
+          )}
           <TextInput style={s.input} placeholder="Reference / remark (UPI ref, cheque no…)"
             placeholderTextColor={C.sub} value={remark} onChangeText={setRemark} />
           {/* How the money arrived. Recorded on the payment, not guessed from
@@ -3233,14 +3364,21 @@ function KhataDetail({ customer, onBack }: { customer: SB.CustomerPending; onBac
             <TouchableOpacity style={[s.primaryBtn, { flex: 1 }, busy && { opacity: 0.6 }]} disabled={busy} onPress={() => add('purchase')}>
               <Text style={s.primaryBtnText}>+ Purchase</Text>
             </TouchableOpacity>
-            <TouchableOpacity style={[s.outlineBtn, { flex: 1 }]} disabled={busy} onPress={() => add('payment')}>
+            {/* Products describe goods going out, so they only belong on a
+                purchase. Disabled rather than silently dropped — the amount
+                field is hidden while lines exist, so a tap here would
+                otherwise fail with a confusing "enter an amount". */}
+            <TouchableOpacity style={[s.outlineBtn, { flex: 1 }, (busy || items.length > 0) && { opacity: 0.5 }]}
+              disabled={busy || items.length > 0} onPress={() => add('payment')}>
               <Text style={s.outlineBtnText}>+ Payment</Text>
             </TouchableOpacity>
           </View>
         </View>
         <Text style={s.sectionLabel}>History</Text>
         {ledger?.entries.length === 0 && <Empty icon="book-outline" text="No transactions yet." />}
-        {ledger?.entries.map((e) => <LedgerRow key={e.id} entry={e} />)}
+        {ledger?.entries.map((e) => (
+          <LedgerRow key={e.id} entry={e} onShare={busy ? undefined : () => shareDoc(e)} />
+        ))}
       </ScrollView>
     </>
   );
@@ -3765,17 +3903,40 @@ function AvailabilityTag({ a, altName }: { a: ItemAvailability; altName: string 
   return <Text style={[s.availTag, { color: C.amber }]}>🔁 Alternative: {altName}</Text>;
 }
 
-function LedgerRow({ entry }: { entry: SB.LedgerEntry }) {
+// onShare is owner-only: a customer may read their ledger but cannot issue the
+// shop's numbered documents, so the customer view simply omits the prop.
+function LedgerRow({ entry, onShare }: { entry: SB.LedgerEntry; onShare?: () => void }) {
   const isPay = entry.type === 'payment';
+  const at = new Date(entry.createdAt);
+  // Date AND time. "₹500 on 14 Aug" is not something either side can reconcile
+  // against a day with several entries — which is the normal case on a khata.
+  const stamp = `${at.toLocaleDateString('en-IN')} · ${at.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
+  const items = entry.items ?? [];
   return (
-    <View style={s.card}>
+    <View style={[s.card, { alignItems: 'flex-start' }]}>
       <View style={{ flex: 1 }}>
         <Text style={s.cardTitle}>{isPay ? 'Payment received' : 'Purchase'}</Text>
-        <Text style={s.cardSub}>{new Date(entry.createdAt).toLocaleDateString('en-IN')}{entry.remark ? ` · ${entry.remark}` : ''}</Text>
+        <Text style={s.cardSub}>{stamp}{entry.remark ? ` · ${entry.remark}` : ''}</Text>
+        {items.map((it, i) => (
+          <Text key={i} style={s.ledgerItemLine} numberOfLines={1}>
+            {it.name}{it.unit ? ` (${it.unit})` : ''} · {it.qty} × {formatINR(it.price)}
+          </Text>
+        ))}
       </View>
-      <Text style={[s.price, { color: isPay ? C.green : C.danger }]}>
-        {isPay ? '−' : '+'}{formatINR(entry.amount)}
-      </Text>
+      <View style={{ alignItems: 'flex-end', gap: 6 }}>
+        <Text style={[s.price, { color: isPay ? C.green : C.danger }]}>
+          {isPay ? '−' : '+'}{formatINR(entry.amount)}
+        </Text>
+        {onShare && (
+          <TouchableOpacity onPress={onShare} hitSlop={8}
+            style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+            <Ionicons name="share-outline" size={14} color={C.green} />
+            <Text style={{ color: C.green, fontSize: 12, fontWeight: '700' }}>
+              {isPay ? 'Receipt' : 'Bill'}
+            </Text>
+          </TouchableOpacity>
+        )}
+      </View>
     </View>
   );
 }
@@ -4001,6 +4162,8 @@ const s = StyleSheet.create({
   },
   linkCardText: { color: C.text, fontSize: 13, fontWeight: '700', textAlign: 'center' },
   linkChevron: { position: 'absolute', top: 8, right: 8 },
+  ledgerItemLine: { color: C.sub, fontSize: 12, marginTop: 2 },
+  staleWarn: { color: C.amber, fontSize: 12, fontWeight: '600', marginTop: 2 },
 
   // ── Phase 2b ───────────────────────────────────────
   row: { flexDirection: 'row', alignItems: 'center' },

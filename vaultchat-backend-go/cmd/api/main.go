@@ -92,6 +92,7 @@ func main() {
 	routes.RegisterShopBook(mux)
 	routes.RegisterShopBookStock(mux)
 	routes.RegisterShopBookBilling(mux)
+	routes.RegisterShopBookDocuments(mux)
 	routes.RegisterShopBookPayments(mux)
 	routes.RegisterShopBookPurchases(mux)
 	routes.RegisterShopBookReturns(mux)

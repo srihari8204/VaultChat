@@ -146,8 +146,40 @@ BEGIN
     IF SQLERRM = 'issued invoice was UPDATEable' THEN RAISE; END IF;
   END;
 
+  -- The snapshot columns matter as much as the money: rewriting the shop's
+  -- address on an issued document forges history just as effectively.
+  BEGIN
+    UPDATE shopbook_invoice SET customer_name = 'Someone Else'
+     WHERE id='66666666-0000-4000-8000-0000000000d1';
+    RAISE EXCEPTION 'issued invoice customer was rewritable';
+  EXCEPTION WHEN raise_exception THEN
+    IF SQLERRM = 'issued invoice customer was rewritable' THEN RAISE; END IF;
+  END;
+
   SELECT total INTO v FROM shopbook_invoice WHERE id='66666666-0000-4000-8000-0000000000d1';
   IF v <> 630.00 THEN RAISE EXCEPTION 'invoice total mutated to %', v; END IF;
+END $$;
+
+-- ── 5b. …but it CAN still be cancelled or credited ────────────────
+-- 094 defines these as the lifecycle states an actor chooses. A blanket UPDATE
+-- ban would have quietly removed that capability while looking like safety.
+DO $$
+DECLARE st TEXT;
+BEGIN
+  UPDATE shopbook_invoice SET status='cancelled'
+   WHERE id='66666666-0000-4000-8000-0000000000d1';
+
+  SELECT status INTO st FROM shopbook_invoice WHERE id='66666666-0000-4000-8000-0000000000d1';
+  IF st <> 'cancelled' THEN RAISE EXCEPTION 'status did not move (got %)', st; END IF;
+
+  -- Cancelling must not become a back door for editing the numbers with it.
+  BEGIN
+    UPDATE shopbook_invoice SET status='credited', total=1.00
+     WHERE id='66666666-0000-4000-8000-0000000000d1';
+    RAISE EXCEPTION 'total changed alongside status';
+  EXCEPTION WHEN raise_exception THEN
+    IF SQLERRM = 'total changed alongside status' THEN RAISE; END IF;
+  END;
 END $$;
 
 -- ── 6. …but the shop can still be deleted ─────────────────────────

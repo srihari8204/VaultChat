@@ -116,9 +116,24 @@ CREATE INDEX IF NOT EXISTS idx_shopbook_invoice_source
 -- exception propagates. Rewriting an issued document is the thing being
 -- prevented; erasing a shop's records wholesale is a different operation with
 -- its own (deletion / retention) rules, and must stay possible.
+--
+-- CONTENT is frozen; `status` is NOT. 094 defines draft/issued/cancelled/
+-- credited as "the lifecycle states an actor chooses", so a blanket UPDATE ban
+-- would make cancelling or crediting an invoice permanently impossible — it
+-- would silently delete a designed capability rather than protect anything.
+-- That is also how invoicing works outside software: you never edit an issued
+-- document's numbers, you cancel it or raise a credit note against it.
+--
+-- Compared as jsonb-minus-status rather than by listing 23 columns, so a
+-- column added by a later migration is frozen automatically instead of
+-- becoming a silent hole in the guarantee.
 CREATE OR REPLACE FUNCTION shopbook_invoice_is_immutable() RETURNS TRIGGER AS $$
 BEGIN
-  RAISE EXCEPTION 'shopbook_invoice is immutable once issued (attempted %)', TG_OP;
+  IF to_jsonb(NEW) - 'status' IS DISTINCT FROM to_jsonb(OLD) - 'status' THEN
+    RAISE EXCEPTION
+      'shopbook_invoice is immutable once issued — only status may change (cancel or credit it instead)';
+  END IF;
+  RETURN NEW;
 END $$ LANGUAGE plpgsql;
 
 DROP TRIGGER IF EXISTS shopbook_invoice_no_change ON shopbook_invoice;

@@ -517,12 +517,23 @@ export interface Supplier {
   note: string;
 }
 
+export interface LedgerItem {
+  name: string;
+  brand: string;
+  unit: string;
+  qty: number;
+  price: number;
+  taxPercent: number;
+}
+
 export interface LedgerEntry {
   id: string;
   type: 'purchase' | 'payment';
   amount: number;
   remark: string;
   createdAt: string;
+  /** Lines behind a credit entry. Always [] for a payment. */
+  items: LedgerItem[];
 }
 
 export interface Ledger {
@@ -553,6 +564,14 @@ export interface CustomerPending {
   customerId: string;
   customerName: string;
   pending: number;
+  /** ISO time of their most recent payment; null if they have never paid. */
+  lastPaymentAt: string | null;
+  /**
+   * Days since that payment — or since their first entry if they have never
+   * paid. Deliberately NOT invoice aging: it does not allocate payments
+   * against individual purchases. "No payment in 45 days", nothing more.
+   */
+  staleDays: number;
 }
 
 // ── customer ──────────────────────────────────────────────────────
@@ -767,13 +786,59 @@ export function ownerCustomerLedger(customerId: string) {
 // `idempotencyKey` makes a retried payment resolve to the one already
 // recorded instead of crediting the customer twice. Generate it once per
 // entry the owner is trying to save, and reuse it across retries.
+/**
+ * `items` is optional. When supplied the SERVER derives the amount from the
+ * lines and ignores whatever `amount` says — so a caller passing both cannot
+ * produce an entry whose lines disagree with its total.
+ */
 export function addLedgerEntry(
   customerId: string, type: 'purchase' | 'payment', amount: number, remark = '',
-  idempotencyKey?: string,
+  idempotencyKey?: string, items?: LedgerItem[], confirmOverLimit = false,
 ) {
   return api<{ id: string; duplicate?: boolean }>(`/shopbook/my-shop/ledger`, {
-    method: 'POST', json: { customerId, type, amount, remark, idempotencyKey },
+    method: 'POST',
+    json: { customerId, type, amount, remark, idempotencyKey, items, confirmOverLimit },
   });
+}
+
+// ── documents (migration 110) ─────────────────────────────────────
+// Four sources, one immutable numbered document, one server-rendered layout.
+// The phone never lays out a line or adds up a column.
+
+/** Paper for goods given on credit. Idempotent: returns duplicate:true if already issued. */
+export function issueKhataInvoice(ledgerId: string) {
+  return api<{ id: string; duplicate?: boolean }>(
+    `/shopbook/my-shop/ledger/${ledgerId}/invoice`, { method: 'POST' });
+}
+
+/** Paper for money received against a khata. */
+export function issueKhataReceipt(ledgerId: string) {
+  return api<{ id: string; duplicate?: boolean }>(
+    `/shopbook/my-shop/ledger/${ledgerId}/receipt`, { method: 'POST' });
+}
+
+/** Cash sale to someone who is not a VaultChat user. Writes no ledger entry —
+ *  nothing is owed, so it must not appear as a debt. */
+export function counterSale(name: string, phone: string, items: LedgerItem[]) {
+  return api<{ id: string; total: number }>(`/shopbook/my-shop/counter-sale`, {
+    method: 'POST', json: { name, phone, items },
+  });
+}
+
+/** The rendered document as HTML. api() returns raw text when the body is not
+ *  JSON, so this needs no special transport. Feed it to Print/WebView. */
+export function invoiceHtml(invoiceId: string) {
+  return api<string>(`/shopbook/invoices/${invoiceId}/render`);
+}
+
+// A 409 from addLedgerEntry when the purchase would push the customer past the
+// credit limit their shop set. A WARNING, not a refusal — resend with
+// confirmOverLimit to proceed. The owner knows the customer; the app does not.
+export interface CreditBreach { pending: number; limit: number; afterEntry: number }
+export function creditBreachFrom(err: any): CreditBreach | null {
+  const b = err?.body;
+  if (err?.status !== 409 || b?.code !== 'over_credit_limit') return null;
+  return { pending: b.pending ?? 0, limit: b.limit ?? 0, afterEntry: b.afterEntry ?? 0 };
 }
 
 // ── Phase 2b: payment reminders, plan, reports ────────────────────

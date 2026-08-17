@@ -32,6 +32,44 @@ export async function getManufacturer(): Promise<Manufacturer> {
   } catch { return 'other'; }
 }
 
+/**
+ * IS the app currently exempt from battery optimization?
+ *
+ * The counterpart to requestIgnoreBatteryOptimizations below, and the reason
+ * the native VaultPower module exists: until this, the app could ASK for the
+ * exemption but never read the answer, so it asked and then assumed. That is
+ * the same "reported success while doing nothing" shape that hid a dead
+ * background location service for an entire session.
+ *
+ * Returns TRUE when unknown — on iOS, on a build without the native module, or
+ * if the platform call fails. A false alarm telling someone their location
+ * sharing is broken when it is fine is worse than staying quiet: this value
+ * only ever decides whether to WARN.
+ */
+export async function isIgnoringBatteryOptimizations(): Promise<boolean> {
+  if (Platform.OS !== 'android') return true;
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { NativeModules } = require('react-native');
+    const mod = NativeModules?.VaultPower;
+    if (!mod?.isIgnoringBatteryOptimizations) return true;
+    return await mod.isIgnoringBatteryOptimizations();
+  } catch { return true; }
+}
+
+/** Is the device in system-wide power-save mode? Throttles background location
+ *  on top of any per-app exemption, so it is a separate question. */
+export async function isPowerSaveMode(): Promise<boolean> {
+  if (Platform.OS !== 'android') return false;
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { NativeModules } = require('react-native');
+    const mod = NativeModules?.VaultPower;
+    if (!mod?.isPowerSaveMode) return false;
+    return await mod.isPowerSaveMode();
+  } catch { return false; }
+}
+
 /** Ask the OS to exempt the app from battery optimization (system dialog). */
 export async function requestIgnoreBatteryOptimizations(): Promise<void> {
   if (Platform.OS !== 'android') return;
