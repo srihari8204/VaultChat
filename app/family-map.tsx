@@ -20,7 +20,7 @@ import MeetHereSheet, { type MeetDestination } from '../components/family/MeetHe
 import { type MemberInput } from '../lib/family/distance';
 import { circleMembers } from '../lib/family/circle';
 import { subscribeCircle, type PresenceEvent } from '../lib/family/presence';
-import { freshnessOf, foldPresence, markSharingOff, type Freshness } from '../lib/family/status';
+import { freshnessOf, markSharingOff, type Freshness } from '../lib/family/status';
 import { subscribeSpaceLocations, mergePresence, fetchSpaceSnapshot } from '../lib/location/live';
 import { startRefreshController } from '../lib/family/refresh';
 import { type CircleMember, type MemberPresence } from '../lib/family/types';

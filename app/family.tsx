@@ -23,7 +23,7 @@ import FamilyMap, { type FamilyMarker } from '../components/family/FamilyMap';
 // to the group registry and must survive the switch — dropping it would bring
 // back a phone retrying a dead circle on every focus.
 import { getSettings, setSettings, removeCircle, getPlaces } from '../lib/family/store';
-import { freshnessOf, speedBand, statusBoard, foldPresence, markSharingOff } from '../lib/family/status';
+import { freshnessOf, speedBand, statusBoard, markSharingOff } from '../lib/family/status';
 import { subscribeSpaceLocations, mergePresence, fetchSpaceSnapshot } from '../lib/location/live';
 import { startRefreshController } from '../lib/family/refresh';
 import { setPresenceForeground, currentPlan } from '../lib/family/presence';
