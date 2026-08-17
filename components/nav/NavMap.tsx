@@ -27,18 +27,14 @@ import { type LatLng } from '../../lib/nav/geo';
 import { LEAFLET_JS_B64, LEAFLET_CSS_B64 } from './leafletAsset';
 import { MAPLIBRE_JS_B64, MAPLIBRE_CSS_B64 } from './maplibreAsset';
 import { NAV_MAP_3D } from '../../constants/flags';
+import { leafletTileUrl, maplibreTileUrls } from '../../lib/map/tileProvider';
 
-const TILES = {
-  dark: 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
-  light: 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png',
-};
-// MapLibre wants explicit subdomain URLs + no {r} retina token. Expand {s}→a..d.
-const mlTiles = (scheme: 'dark' | 'light') => {
-  const base = scheme === 'light'
-    ? 'basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png'
-    : 'basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png';
-  return ['a', 'b', 'c', 'd'].map((s) => `https://${s}.${base}`);
-};
+// Tiles come from lib/map/tileProvider — the ONE seam for the deferred vector
+// upgrade. Both engines' URL shapes live there because they disagree ({s}/{r}
+// tokens on Leaflet, explicit subdomains on MapLibre) and that is a provider
+// detail. Local aliases keep the call sites below unchanged.
+const TILES = { dark: leafletTileUrl('dark'), light: leafletTileUrl('light') };
+const mlTiles = (scheme: 'dark' | 'light') => maplibreTileUrls(scheme);
 
 /** Camera modes for the 3D map. follow = pitched chase-cam that rotates to your
  *  heading; north = flat, north-up follow; overview = fit the whole route. */

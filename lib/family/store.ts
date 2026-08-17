@@ -44,3 +44,16 @@ export async function setSettings(patch: Partial<FamilySettings>): Promise<Famil
   await AsyncStorage.setItem(K_SETTINGS, JSON.stringify(next));
   return next;
 }
+
+/** Which of my places leads my published reference distance in this circle. */
+export async function getDefaultRef(circleId: string): Promise<string | null> {
+  return (await getSettings()).defaultRef?.[circleId] ?? null;
+}
+
+/** Choose (or clear, with null) my reference place for one circle. */
+export async function setDefaultRef(circleId: string, placeName: string | null): Promise<void> {
+  const cur = (await getSettings()).defaultRef ?? {};
+  const next = { ...cur };
+  if (placeName) next[circleId] = placeName; else delete next[circleId];
+  await setSettings({ defaultRef: next });
+}

@@ -26,6 +26,7 @@ import { createDirectChat } from '../lib/chatService';
 import { navigateTo } from '../lib/nav/openNavigation';
 import { haversine } from '../lib/nav/geo';
 import { freshnessOf } from '../lib/family/status';
+import { getRelations, setRelation, RELATION_PRESETS } from '../lib/family/relations';
 // v3 — shared Location Lock engine classifiers/formatters (same bands as Navigate)
 import { classifyDistance, zoneColor } from '../lib/lock/zoneMachine';
 import { fmtSpeed, gpsQuality, QUALITY_LABEL, QUALITY_COLOR } from '../lib/lock/format';
@@ -70,6 +71,33 @@ export default function FamilyMemberScreen() {
   // Same gate as the history screen, so History cannot be reached sideways from
   // here when the group withholds it. Starts denied.
   const [mayViewHistory, setMayViewHistory] = useState(false);
+  /** What this person is to me. Server-owned; this screen is where it is set. */
+  const [relation, setRelationState] = useState('');
+  const [savingRel, setSavingRel] = useState(false);
+
+  useEffect(() => {
+    if (!circleId || !userId) return;
+    let live = true;
+    getRelations(circleId).then((r) => { if (live) setRelationState(r[userId] ?? ''); });
+    return () => { live = false; };
+  }, [circleId, userId]);
+
+  /** Tap a preset to set it, tap the active one to clear. Optimistic, but it
+   *  REVERTS if the server refuses — a label that looks saved and is not is
+   *  worse than one that visibly did not take. */
+  const chooseRelation = async (next: string) => {
+    if (savingRel) return;
+    const prev = relation;
+    const value = relation === next ? '' : next;
+    setRelationState(value);
+    setSavingRel(true);
+    const ok = await setRelation(circleId, userId, value);
+    setSavingRel(false);
+    if (!ok) {
+      setRelationState(prev);
+      Alert.alert('Could not save', 'The relationship was not saved. Check your connection and try again.');
+    }
+  };
 
   const alerts = useFamilyAlerts(circleId || null, 'all');
   useEffect(() => { loadAlerts(); }, []);
@@ -228,6 +256,40 @@ export default function FamilyMemberScreen() {
           }))}
         </View>
 
+        {/* RELATIONSHIP. Stored per (space, viewer, member) on the server, so
+            what I call someone is mine — the same person is "Mother" to me and
+            "Wife" to someone else in this circle, both true at once. */}
+        <Text style={[st.h, { color: colors.text }]}>Relationship</Text>
+        <View style={st.relWrap}>
+          {RELATION_PRESETS.map((r) => {
+            const on = relation === r;
+            return (
+              <TouchableOpacity
+                key={r}
+                onPress={() => chooseRelation(r)}
+                disabled={savingRel}
+                accessibilityRole="button"
+                accessibilityState={{ selected: on }}
+                accessibilityLabel={`${name} is my ${r}`}
+                style={[st.relChip, {
+                  borderColor: on ? colors.primary : colors.border,
+                  backgroundColor: on ? brandAlpha(0.12) : 'transparent',
+                  opacity: savingRel ? 0.6 : 1,
+                }]}
+              >
+                <Text style={{ color: on ? colors.primary : colors.textDim, fontSize: 12.5, fontWeight: on ? '800' : '600' }}>
+                  {r}
+                </Text>
+              </TouchableOpacity>
+            );
+          })}
+        </View>
+        <Text style={{ color: colors.textFaint, fontSize: 11.5, marginTop: 8 }}>
+          {relation
+            ? `Shown as “${relation} · ${name}” on your family map. Only you see this label.`
+            : 'Tap one to show it beside their name on your family map.'}
+        </Text>
+
         {/* today at a glance */}
         <Text style={[st.h, { color: colors.text }]}>Today</Text>
         <View style={[st.statRow, { backgroundColor: colors.card, borderColor: colors.border }]}>
@@ -346,4 +408,6 @@ const st = StyleSheet.create({
   statDiv: { width: 1, height: 28 },
   evt: { flexDirection: 'row', alignItems: 'center', gap: 11, paddingVertical: 11, borderBottomWidth: StyleSheet.hairlineWidth },
   evtIcon: { width: 28, height: 28, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
+  relWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 7 },
+  relChip: { borderWidth: 1, borderRadius: 999, paddingHorizontal: 12, minHeight: 32, justifyContent: 'center' },
 });

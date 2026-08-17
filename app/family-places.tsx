@@ -22,7 +22,7 @@ import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../lib/theme';
 import { brandAlpha } from '../constants/theme';
-import { getPlaces, setPlaces } from '../lib/family/store';
+import { getPlaces, setPlaces, getDefaultRef, setDefaultRef } from '../lib/family/store';
 import { reloadPlaces } from '../lib/family/presence';
 import { isZoneActive, type Geofence, type ZoneSchedule } from '../lib/family/geofence';
 // v3 — shared Location Lock engine (ONE engine app-wide; see lib/family/lockBridge)
@@ -104,6 +104,20 @@ export default function FamilyPlacesScreen() {
 
   useEffect(() => { if (cid) getPlaces(cid).then(setPlacesState).catch(() => {}); }, [cid]);
 
+  // Which place my circle sees me measured against ("1.2 km from Home").
+  // Never inferred — the spec is explicit that it must not be guessed from
+  // relationship, age or occupation. Absent until the member picks one.
+  const [refName, setRefName] = useState<string | null>(null);
+  useEffect(() => { if (cid) getDefaultRef(cid).then(setRefName).catch(() => {}); }, [cid]);
+
+  /** Choose (or clear) my reference place, and push it into the live publisher. */
+  const chooseRef = async (nameOrNull: string | null) => {
+    const next = refName === nameOrNull ? null : nameOrNull;   // tapping the chosen one clears it
+    setRefName(next);
+    await setDefaultRef(cid, next);
+    await reloadPlaces(cid);   // the broadcaster caches this; refresh it now
+  };
+
   // Per-place lock stats from the SHARED history store (visits · time inside).
   useEffect(() => {
     (async () => {
@@ -165,7 +179,14 @@ export default function FamilyPlacesScreen() {
   const remove = (p: Geofence) => {
     Alert.alert('Delete place?', `"${p.name}" will stop producing arrive/leave alerts.`, [
       { text: 'Cancel', style: 'cancel' },
-      { text: 'Delete', style: 'destructive', onPress: () => { persist(places.filter((x) => x.id !== p.id)); setEditing(null); } },
+      { text: 'Delete', style: 'destructive', onPress: async () => {
+        // Deleting the place I am measured from must clear the choice, or the
+        // publisher keeps looking for a name that no longer exists and the
+        // reference line silently disappears with no way to see why.
+        if (p.name === refName) { setRefName(null); await setDefaultRef(cid, null); }
+        await persist(places.filter((x) => x.id !== p.id));
+        setEditing(null);
+      } },
     ]);
   };
 
@@ -212,6 +233,12 @@ export default function FamilyPlacesScreen() {
     if (!Number.isFinite(r) || r < MIN_RADIUS || r > MAX_RADIUS) {
       Alert.alert('Radius', `Pick a radius between ${MIN_RADIUS} and ${MAX_RADIUS} metres.`);
       return;
+    }
+    // The reference is stored by NAME, so a rename has to follow it across or
+    // the choice silently detaches from the place it was made for.
+    if (editing.name === refName && nm !== refName) {
+      setRefName(nm);
+      await setDefaultRef(cid, nm);
     }
     await persist(places.map((p) => (p.id === editing.id ? {
       ...p, name: nm, radiusM: r, icon: iconFor(nm),
@@ -279,6 +306,44 @@ export default function FamilyPlacesScreen() {
           <Text style={{ color: colors.textDim, fontSize: 13.5 }}>
             No places yet. Add one and your circle gets an alert when you arrive or leave.
           </Text>
+        )}
+
+        {/* Reference place (spec §14). What the circle sees is the DISTANCE —
+            "3.7 km from Business" — computed on this device. The place's
+            coordinate is never published, synced, or stored on the server, so
+            choosing one tells your family how far away you are without telling
+            them where your home, shop or school actually is. */}
+        {places.length > 0 && (
+          <View style={{ marginTop: 14 }}>
+            <Text style={{ color: colors.text, fontSize: 12.5, fontWeight: '700' }}>Measure me from</Text>
+            <Text style={{ color: colors.textDim, fontSize: 11.5, marginTop: 3, marginBottom: 9 }}>
+              Your circle sees the distance only — never where this place is.
+            </Text>
+            <View style={st.radii}>
+              {places.map((p) => {
+                const on = refName === p.name;
+                return (
+                  <TouchableOpacity
+                    key={p.id}
+                    onPress={() => chooseRef(p.name)}
+                    accessibilityRole="button"
+                    accessibilityState={{ selected: on }}
+                    accessibilityLabel={`Measure me from ${p.name}${on ? ', selected' : ''}`}
+                    style={[st.rchip, { borderColor: on ? colors.primary : colors.border, backgroundColor: on ? brandAlpha(0.1) : 'transparent' }]}
+                  >
+                    <Text style={{ color: on ? colors.primary : colors.text, fontWeight: on ? '700' : '500', fontSize: 13 }}>
+                      {p.name}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+            {!refName && (
+              <Text style={{ color: colors.textFaint, fontSize: 11.5, marginTop: 7 }}>
+                None chosen — your first place leads.
+              </Text>
+            )}
+          </View>
         )}
 
         {places.map((p) => {

@@ -37,6 +37,15 @@ export function mergePresence(
     [p.userId]: {
       userId: p.userId, pos: { lat: p.lat, lng: p.lng },
       speed: p.spd, accuracy: p.acc, battery: p.bat, ts: p.ts,
+      // Reference distances ("1.2 km from Home") ride the sealed relay only —
+      // the server has no reference places to send. The two paths carry the
+      // SAME fix, so whichever arrives second would otherwise blank the ref
+      // line, making it flicker as the sources race.
+      //
+      // Carried forward ONLY at an identical coordinate, which is precisely
+      // that race. Any real movement drops them: a distance-from-Home computed
+      // for where they used to be is a wrong number, and blank beats wrong.
+      refs: cur && cur.pos.lat === p.lat && cur.pos.lng === p.lng ? cur.refs : undefined,
     },
   };
 }
@@ -56,6 +65,44 @@ export interface PlatformEvent {
   /** The member EXPLICITLY stopped sharing — retain their last-known, never
    *  render LIVE. Distinct from point:null (a bare clear). */
   sharingOff?: boolean;
+}
+
+/**
+ * Fetch the authoritative snapshot ONCE, without subscribing to anything.
+ *
+ * This is what FamilyMapRefreshController calls to reconcile. It deliberately
+ * does NOT re-subscribe: re-running subscribeSpaceLocations to "refresh" would
+ * add a second set of socket listeners every time, which is precisely the
+ * duplicate-subscription failure §100 exists to prevent, and the symptom would
+ * be members' positions arriving two, then three, then four times over.
+ *
+ * Returns events for the caller to fold through the same mergePresence path as
+ * live ones, so a reconcile updates only the members who actually changed —
+ * never the whole map.
+ *
+ * Never throws: the endpoint may not be deployed (404) or the device may be
+ * offline, and a failed reconcile must leave the existing state alone rather
+ * than blank the screen.
+ */
+export async function fetchSpaceSnapshot(chatId: string, meId: string): Promise<PlatformEvent[]> {
+  const out: PlatformEvent[] = [];
+  try {
+    const res = await apiMod()(`/chats/${encodeURIComponent(chatId)}/locations/latest`);
+    for (const m of res?.members ?? []) {
+      const p: PlatformPoint = {
+        userId: String(m?.userId ?? ''), lat: Number(m?.lat), lng: Number(m?.lng),
+        ts: Number(m?.ts), spd: m?.spd ?? undefined, acc: m?.acc ?? undefined, bat: m?.bat ?? undefined,
+      };
+      if (!p.userId || p.userId === String(meId) || !isFinite(p.lat) || !isFinite(p.lng) || !isFinite(p.ts)) continue;
+      const pres: MemberPresence = {
+        userId: p.userId, pos: { lat: p.lat, lng: p.lng },
+        speed: p.spd, accuracy: p.acc, battery: p.bat, ts: p.ts,
+      };
+      out.push({ userId: p.userId, point: pres });
+      if (m?.sharingEnabled === false) out.push({ userId: p.userId, point: null, sharingOff: true });
+    }
+  } catch { /* not deployed, or offline — the caller keeps what it has */ }
+  return out;
 }
 
 /**
@@ -173,6 +220,16 @@ if (require.main === module) {
   // garbage refused
   if (mergePresence(s, { userId: '', lat: 1, lng: 1, ts: 1 }) !== s) fail('empty uid accepted');
   if (mergePresence(s, P('c', NaN)) !== s) fail('NaN ts accepted');
+
+  // refs: the platform carries none, so the same fix arriving twice must not
+  // blank the ref line — but a MOVED member must not keep a stale distance.
+  let r: Record<string, MemberPresence> = {
+    d: { userId: 'd', pos: { lat: 10, lng: 70 }, ts: 100, refs: [{ n: 'Home', d: 1200 }] },
+  };
+  const same = mergePresence(r, P('d', 150, 10));           // identical coordinate, newer ts
+  if (same.d.refs?.[0]?.d !== 1200) fail('same-position merge must keep refs');
+  const moved = mergePresence(r, P('d', 150, 11));          // actually moved
+  if (moved.d.refs !== undefined) fail('a moved member must not keep a stale ref distance');
 
   console.log('location/live self-check OK');
 }

@@ -10,7 +10,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, ScrollView, Alert, ActivityIndicator,
   Switch, Modal, TextInput, Animated, Vibration, Pressable, KeyboardAvoidingView, Platform,
-  Linking,
+  Linking, AppState,
 } from 'react-native';
 import * as Location from 'expo-location';
 import { Stack, useRouter, useFocusEffect, useLocalSearchParams } from 'expo-router';
@@ -24,7 +24,10 @@ import FamilyMap, { type FamilyMarker } from '../components/family/FamilyMap';
 // back a phone retrying a dead circle on every focus.
 import { getSettings, setSettings, removeCircle, getPlaces } from '../lib/family/store';
 import { freshnessOf, speedBand, statusBoard, foldPresence, markSharingOff } from '../lib/family/status';
-import { subscribeSpaceLocations, mergePresence } from '../lib/location/live';
+import { subscribeSpaceLocations, mergePresence, fetchSpaceSnapshot } from '../lib/location/live';
+import { startRefreshController } from '../lib/family/refresh';
+import { setPresenceForeground, currentPlan } from '../lib/family/presence';
+import { getRelations, memberLabel, type RelationMap } from '../lib/family/relations';
 import { type Geofence } from '../lib/family/geofence';
 // Groups & Circles: the registry is now typed groups. A Family Space circle is
 // one of them (migrated on first load by lib/groups/store), so this screen is
@@ -44,6 +47,10 @@ import {
   canShareInBackground, type PresenceEvent,
 } from '../lib/family/presence';
 import { requestBackgroundPermission } from '../lib/family/background';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import {
+  requestIgnoreBatteryOptimizations, needsAutoStartGuidance, openAutoStartSettings, getManufacturer,
+} from '../lib/batteryOptimization';
 import { loadAlerts, recordAlert, useUnreadCount } from '../lib/family/alerts';
 import { type CircleMember, type MemberPresence, STALE_MS, SPEED_ALERT_CHOICES, DEFAULT_SPEED_ALERT_KMH } from '../lib/family/types';
 import { sendMessage, getMessages, decryptFromChat, getChat, listChats, sendAnnouncement, isAnnouncement } from '../lib/chatService';
@@ -55,6 +62,10 @@ import {
   type Trip, type TripPing,
 } from '../lib/groups/trips';
 import { haversine } from '../lib/nav/geo';
+import {
+  memberDistances, summarize as summarizeDistances, sortMembers, defaultRef,
+  formatMetres, type SortMode,
+} from '../lib/family/distance';
 
 const SOS_HOLD_MS = 1500;
 const AVATAR_COLORS = ['#4A9FFF', '#EC4899', '#22C55E', '#F59E0B', '#A855F7', '#EF4444', '#14B8A6', '#F97316'];
@@ -160,6 +171,19 @@ export default function FamilySpaceScreen() {
    *  loading" from "genuinely a space of one" — see `roster` below. */
   const [membersLoaded, setMembersLoaded] = useState(false);
   const [presences, setPresences] = useState<Record<string, MemberPresence>>({});
+  /** How the roster is ordered (spec §9). Nearest first is the useful default. */
+  const [sortMode, setSortMode] = useState<SortMode>('nearest');
+  /**
+   * What every distance is measured FROM (spec §34–39). null = me; otherwise
+   * one of MY saved places, by name — "how far is everyone from Home".
+   *
+   * Measured against MY place, using MY coordinate for it, entirely on this
+   * device. That is the only version of this question that can be answered
+   * without anyone's place coordinate leaving their phone.
+   */
+  const [originName, setOriginName] = useState<string | null>(null);
+  /** memberId → "Mother"/"Father"/… Fetched ready-made from the server. */
+  const [relations, setRelations] = useState<RelationMap>({});
   const [share, setShare] = useState(false);
   // My own high-speed alert (off by default; detected on this device only).
   const [speedAlert, setSpeedAlert] = useState<{ enabled: boolean; thresholdKmh: number }>(
@@ -231,8 +255,14 @@ export default function FamilySpaceScreen() {
     if (!cs.length) { router.replace('/group-create' as any); return; }
     // Reopen on the group the user was last in, not blindly the first.
     const remembered = await resolveActiveGroup();
-    setActive((prev) => prev ?? remembered ?? cs[0]);
+    // Settings are READ BEFORE the first setState so active + share land in ONE
+    // render. The await that used to sit between them split this into two, and
+    // the presence effect (deps: active.id, me.id, share) fired twice — once
+    // with share=false, then with share=true — starting two overlapping
+    // startPresence calls that raced on module state. presence.ts now guards
+    // that race properly; this removes the reason it happens at all.
     const s = await getSettings();
+    setActive((prev) => prev ?? remembered ?? cs[0]);
     setShare(s.sharing);
     setSpeedAlert(s.speedAlert ?? { enabled: false, thresholdKmh: DEFAULT_SPEED_ALERT_KMH });
     setLoading(false);
@@ -393,6 +423,59 @@ export default function FamilySpaceScreen() {
   // stop broadcasting when the screen loses focus (map still resumes on return)
   useFocusEffect(React.useCallback(() => () => { stopPresence(); }, []));
 
+  /**
+   * FamilyMapRefreshController — the "never frozen" watchdog (spec §59/§60).
+   *
+   * Realtime stays the primary path; this only notices when it has quietly
+   * stopped working (app resumed, screen unlocked, socket reconnected, network
+   * came back, or nothing has arrived for too long) and re-fetches the
+   * authoritative snapshot.
+   *
+   * It folds through the SAME mergePresence the live events use, so only
+   * members whose fix actually changed move. The MapView is never remounted
+   * and the camera is never reset — a reconcile the user can see is a bug.
+   *
+   * One controller, mounted once, torn down on unmount: stop() removes the
+   * AppState, socket and NetInfo listeners plus the timer, so §100's
+   * "exactly one subscription and one timer" holds across navigation.
+   */
+  useEffect(() => {
+    if (!active?.id || !me?.id) return;
+    const circleId = active.id, myId = me.id;
+    return startRefreshController({
+      onReconcile: async () => {
+        for (const e of await fetchSpaceSnapshot(circleId, myId)) {
+          setPresences((prev) => (e.point
+            ? mergePresence(prev, {
+              userId: e.userId, lat: e.point.pos.lat, lng: e.point.pos.lng,
+              ts: e.point.ts, spd: e.point.speed, acc: e.point.accuracy, bat: e.point.battery,
+            })
+            : markSharingOff(prev, e.userId)));
+        }
+      },
+    });
+  }, [active?.id, me?.id]);
+
+  // Relations ("Mother", "Father") arrive READY from the server, keyed by
+  // member id and already scoped to me as the viewer — the app looks one up
+  // while rendering a row and computes nothing. A failure leaves the map empty
+  // and the roster renders plain names, exactly as it did before this existed.
+  useEffect(() => {
+    if (!active?.id) { setRelations({}); return; }
+    let live = true;
+    getRelations(active.id).then((r) => { if (live) setRelations(r); });
+    return () => { live = false; };
+  }, [active?.id]);
+
+  // Tell the adaptive engine whether anyone is looking. Foreground + moving is
+  // the only situation that justifies a 5 s GPS cadence; everything else steps
+  // down. AppState 'active' covers both app-switching and screen unlock.
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (s) => setPresenceForeground(s === 'active'));
+    setPresenceForeground(AppState.currentState === 'active');
+    return () => sub.remove();
+  }, []);
+
   // Refresh on focus — /family-add and /family-setup both mutate state this
   // screen already has in memory, and neither changes active.id, so nothing
   // else would re-read it. Places too: /family-places edits them and comes
@@ -457,6 +540,33 @@ export default function FamilySpaceScreen() {
     setShare(ok);
     setLocDenied(v && !ok);
     await setSettings({ sharing: ok });
+
+    // TURNING SHARING ON IS THE MOMENT TO ASK FOR THE THINGS THAT KEEP IT ON.
+    // A location foreground service is not enough by itself on most Android
+    // phones sold here: EMUI/MIUI/ColorOS kill background work aggressively, so
+    // a locked phone stops publishing and the family sees someone "vanish"
+    // while the app believes it is sharing. Asked ONCE per circle, never
+    // nagged — the flag records that we have asked, not that they said yes.
+    if (ok && v) {
+      try {
+        const askedKey = 'vc_family_bg_asked';
+        const asked = await AsyncStorage.getItem(askedKey);
+        if (!asked) {
+          await AsyncStorage.setItem(askedKey, '1');
+          const bg = await canShareInBackground();
+          if (!bg) await requestBackgroundPermission();
+          await requestIgnoreBatteryOptimizations();
+          if (await needsAutoStartGuidance()) {
+            Alert.alert(
+              'Keep sharing when locked',
+              `${(await getManufacturer()).toUpperCase()} phones stop background apps to save power, which stops your location too.\n\n`
+              + 'Turn ON auto-start for VaultChat so your family keeps seeing you while the screen is locked.',
+              [{ text: 'Later', style: 'cancel' }, { text: 'Open settings', onPress: () => { openAutoStartSettings().catch(() => {}); } }],
+            );
+          }
+        }
+      } catch { /* guidance is best-effort; sharing itself already succeeded */ }
+    }
     if (v && !ok) {
       Alert.alert(
         'Location is turned off',
@@ -626,6 +736,71 @@ export default function FamilySpaceScreen() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [presences, tick, share, me?.id]);
 
+  /**
+   * The distance layer (spec §7–12): every member's straight-line distance from
+   * me, plus the family summary.
+   *
+   * Computed HERE, on the viewing device, from presences this device already
+   * decrypted — not on the server. That is a deliberate exception to the
+   * thin-client rule: on the sealed relay the server never sees a coordinate,
+   * so it could not compute these even if we asked it to.
+   *
+   * A member with no usable fix gets fromMe: null, never zero — counting the
+   * unlocatable as "0 km away" would make the summary claim the family is
+   * closer together than it is.
+   */
+  const distanceRows = useMemo(() => {
+    const now = Date.now();
+    const mineNow = me ? presences[me.id] : undefined;
+    // The origin every distance is measured from: my own position by default,
+    // or one of MY saved places when one is picked ("how far is everyone from
+    // Home"). A picked place that has since been deleted falls back to me
+    // rather than silently measuring from nowhere.
+    const origin = originName
+      ? (places.find((p) => p.name === originName)?.center ?? mineNow?.pos ?? null)
+      : (mineNow?.pos ?? null);
+    return memberDistances(members.map((m) => {
+      const p = presences[m.id];
+      const usable = !!p && freshnessOf(p.ts, now) !== 'unavailable';
+      return {
+        id: m.id,
+        // The relation LEADS when set — "Mother · Arun" identifies a person on
+        // a family map faster than a display name does. Server-supplied, so
+        // this is a lookup, not a computation.
+        name: m.id === me?.id ? 'You' : memberLabel(m.name, relations[m.id]),
+        pos: usable ? p.pos : null,
+        refs: p?.sharingOff ? null : p?.refs,
+        ts: p?.ts,
+        // Measuring from a PLACE makes me an ordinary traveller to it — my own
+        // distance from Home is exactly the number being asked for. Measuring
+        // from myself keeps me excluded, since "You are 0 km from You" is noise.
+        self: m.id === me?.id && !originName,
+        unavailable: !usable,
+      };
+    }), origin);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [presences, members, me?.id, tick, originName, places, relations]);
+
+  const distanceSummary = useMemo(() => summarizeDistances(distanceRows), [distanceRows]);
+  /**
+   * Is there anyone at all we could measure — INCLUDING me?
+   *
+   * The origin chips are gated on this rather than on the summary's `available`,
+   * which deliberately excludes self. Gating on `available` was a chicken-and-egg
+   * bug: in a circle where I am the only member with a fix, available is 0, so
+   * the chips stayed hidden, so I could never switch the origin to Home — the
+   * one case where my own distance IS the answer being asked for.
+   */
+  const anyoneLocatable = useMemo(
+    () => distanceRows.some((r) => r.fromMe != null) || (!!me && !!presences[me.id]),
+    [distanceRows, me, presences],
+  );
+  /** Member ids in the chosen order, for the roster to follow. */
+  const sortedIds = useMemo(
+    () => sortMembers(distanceRows, sortMode).map((r) => r.id),
+    [distanceRows, sortMode],
+  );
+
   // Contact picker: add someone straight from the phone's contacts.
   //
   // The shareable invite CODE that used to sit alongside this is gone. Under
@@ -766,15 +941,28 @@ export default function FamilySpaceScreen() {
   //
   // Same rule as everywhere else in this change: not-yet-known and known-empty
   // are different states, and only one of them may be asserted.
-  const roster = members.length
+  const unsortedRoster = members.length
     ? members
     : (membersLoaded && me ? [{ id: me.id, name: 'You', role: 'guardian' as const, avatar: null }] : []);
+  // Apply the chosen order (spec §9). A member the distance layer has not seen
+  // sorts LAST rather than first — an unranked row floating to the top would
+  // read as "nearest", which is the one thing it is not known to be. n ≤ 10,
+  // so the rank lookup is a map build, not a concern.
+  const rank = new Map(sortedIds.map((id, i) => [id, i]));
+  const roster = [...unsortedRoster].sort(
+    (a, b) => (rank.get(a.id) ?? Infinity) - (rank.get(b.id) ?? Infinity),
+  );
   const allGood = liveCount > 0;
   const firstName = (me?.name || 'there').split(/\s+/)[0];
 
   const memberRow = (m: CircleMember, i: number) => {
     const p = presences[m.id];
     const isMe = m.id === me?.id;
+    // The reference distance THIS MEMBER published ("1.2 km from Home").
+    // Derived on their device from their own places — we hold the number and
+    // the place's name, never its coordinate. Absent for members on older
+    // builds, for anyone who has saved no places, and once they stop sharing.
+    const ref = p && !p.sharingOff ? defaultRef(p.refs) : null;
     const d = p && mine && !isMe ? dist(haversine(mine.pos, p.pos)) : null;
     // Freshness tier for the row's caption (spec: LIVE / RECENT / STALE /
     // UNAVAILABLE). A fix past the recent window is "Last known", never live.
@@ -820,12 +1008,23 @@ export default function FamilySpaceScreen() {
         </View>
         <View style={{ flex: 1 }}>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-            <Text style={{ color: colors.text, fontWeight: '600' }} numberOfLines={1}>{isMe ? 'You' : m.name}</Text>
+            <Text style={{ color: colors.text, fontWeight: '600' }} numberOfLines={1}>
+              {isMe ? 'You' : memberLabel(m.name, relations[m.id])}
+            </Text>
             {m.role === 'guardian' && <Ionicons name="star" size={11} color={colors.primary} />}
           </View>
           <Text style={{ color: fresh === 'live' ? colors.success : colors.textDim, fontSize: 12 }} numberOfLines={1}>
             {rowCaption}
           </Text>
+          {/* Their own reference distance, on its own line so the freshness
+              caption above keeps its meaning. Only shown with a usable fix —
+              a distance-from-Home computed for a position we no longer trust
+              is exactly the stale number the freshness tiers exist to prevent. */}
+          {ref && fresh !== 'unavailable' && fresh !== 'stale' && (
+            <Text style={{ color: colors.textDim, fontSize: 12 }} numberOfLines={1}>
+              {formatMetres(ref.d)} from {ref.n}
+            </Text>
+          )}
         </View>
         {p?.battery != null && (
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 2 }}>
@@ -860,6 +1059,19 @@ export default function FamilySpaceScreen() {
       {locDenied && (
         <Text style={{ color: colors.textDim, fontSize: 12, lineHeight: 17, marginTop: -4, marginBottom: 10 }}>
           {locationRationale(active?.groupType)}
+        </Text>
+      )}
+      {/* What the adaptive engine is doing right now, in words.
+          §71 forbids claiming battery optimisation without measurement — and
+          until this line existed there was no way to observe the engine at all
+          from a device: expo-location registers through Play Services, so
+          `dumpsys location` attributes our interval to com.google.android.gms
+          and shows nothing for this app. It also tells a user why their dot
+          updates slowly, which is the most common "it's broken" report. */}
+      {share && !!currentPlan() && (
+        <Text style={{ color: colors.textFaint, fontSize: 11.5, marginTop: -4, marginBottom: 10 }} numberOfLines={2}>
+          {currentPlan()!.reason} · every {Math.round(currentPlan()!.timeIntervalMs / 1000)}s
+          {currentPlan()!.publish ? '' : ' · not publishing'}
         </Text>
       )}
     </>
@@ -1162,6 +1374,27 @@ export default function FamilySpaceScreen() {
               </Text>
             </TouchableOpacity>
 
+            {/* MEET HERE (§40). This tile exists because without it the whole
+                feature was unreachable: the Live Map tile above expands the map
+                INLINE (setExpanded) and never routes, and the only other path to
+                /family-map is a member's "Follow", which refuses unless that
+                member has a same-day fix. Found on the Honor — Meet Here and
+                Family Center were built and shipped behind a door with no
+                handle, which no self-check could ever have caught. */}
+            <TouchableOpacity
+              onPress={() => active && router.push({
+                pathname: '/family-map' as any,
+                params: { circleId: active.id, circleName: active.name },
+              })}
+              style={[st.qa, { backgroundColor: colors.card, borderColor: colors.border }]}
+            >
+              <View style={[st.qaIcon, { backgroundColor: colors.primary + '22' }]}>
+                <Ionicons name="search" size={19} color={colors.primary} />
+              </View>
+              <Text style={[st.qaTitle, { color: colors.text }]}>Meet Here</Text>
+              <Text style={[st.qaSub, { color: colors.textDim }]} numberOfLines={1}>Pick a place to meet</Text>
+            </TouchableOpacity>
+
             <TouchableOpacity
               onPress={() => router.push('/emergency-sos' as any)}
               style={[st.qa, { backgroundColor: colors.card, borderColor: colors.border }]}
@@ -1361,6 +1594,114 @@ export default function FamilySpaceScreen() {
               </TouchableOpacity>
             )}
           </View>
+          {/* FAMILY DISTANCE (spec §11). Only once there is something to
+              compare — a one-person circle has no nearest and no average, and
+              printing "Nearest: —" would be noise, not information. */}
+          {distanceSummary.available > 0 && (
+            <View style={[st.card, { backgroundColor: colors.card, borderColor: colors.border, marginBottom: 10 }]}>
+              <View style={st.distRow}>
+                <View style={st.distCell}>
+                  <Text style={[st.distVal, { color: colors.text }]} numberOfLines={1}>
+                    {formatMetres(distanceSummary.nearest!.fromMe!)}
+                  </Text>
+                  <Text style={[st.distLbl, { color: colors.textDim }]} numberOfLines={1}>
+                    Nearest · {distanceSummary.nearest!.name}
+                  </Text>
+                </View>
+                <View style={[st.distDiv, { backgroundColor: colors.border }]} />
+                <View style={st.distCell}>
+                  <Text style={[st.distVal, { color: colors.text }]} numberOfLines={1}>
+                    {formatMetres(distanceSummary.farthest!.fromMe!)}
+                  </Text>
+                  <Text style={[st.distLbl, { color: colors.textDim }]} numberOfLines={1}>
+                    Farthest · {distanceSummary.farthest!.name}
+                  </Text>
+                </View>
+                <View style={[st.distDiv, { backgroundColor: colors.border }]} />
+                <View style={st.distCell}>
+                  <Text style={[st.distVal, { color: colors.text }]} numberOfLines={1}>
+                    {formatMetres(distanceSummary.averageM!)}
+                  </Text>
+                  <Text style={[st.distLbl, { color: colors.textDim }]}>Average</Text>
+                </View>
+              </View>
+              {/* "9 / 10 available" is a statement about the CIRCLE, so the
+                  total counts everyone — including the members we could not
+                  measure and who are therefore absent from the figures above. */}
+              <Text style={{ color: colors.textDim, fontSize: 11.5, textAlign: 'center', marginTop: 8 }}>
+                {/* Names the ORIGIN, always. A distance with no stated origin
+                    is the easiest number on this screen to misread. */}
+                Straight-line from {originName ?? 'you'} · {distanceSummary.available} of{' '}
+                {distanceSummary.total - (originName ? 0 : 1)} members located
+              </Text>
+            </View>
+          )}
+
+          {/* DISTANCE FROM (spec §34–39). "Near Me" is the default; picking a
+              saved place re-measures EVERY member against it, which is the
+              "how far is everyone from Home" question. Only appears once
+              there is a place to pick, so a circle with none is unchanged. */}
+          {places.length > 0 && anyoneLocatable && (
+            <View style={st.sortRow}>
+              <TouchableOpacity
+                onPress={() => setOriginName(null)}
+                accessibilityRole="button"
+                accessibilityState={{ selected: !originName }}
+                style={[st.sortChip, {
+                  borderColor: !originName ? colors.primary : colors.border,
+                  backgroundColor: !originName ? brandAlpha(0.12) : 'transparent',
+                }]}
+              >
+                <Text style={{ color: !originName ? colors.primary : colors.textDim, fontSize: 12, fontWeight: !originName ? '800' : '600' }}>
+                  Near me
+                </Text>
+              </TouchableOpacity>
+              {places.map((p) => {
+                const on = originName === p.name;
+                return (
+                  <TouchableOpacity
+                    key={p.id}
+                    onPress={() => setOriginName(on ? null : p.name)}
+                    accessibilityRole="button"
+                    accessibilityState={{ selected: on }}
+                    accessibilityLabel={`Measure everyone from ${p.name}`}
+                    style={[st.sortChip, {
+                      borderColor: on ? colors.primary : colors.border,
+                      backgroundColor: on ? brandAlpha(0.12) : 'transparent',
+                    }]}
+                  >
+                    <Text style={{ color: on ? colors.primary : colors.textDim, fontSize: 12, fontWeight: on ? '800' : '600' }}>
+                      Near {p.name}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+          )}
+
+          {/* sort (spec §9) */}
+          {roster.length > 2 && (
+            <View style={st.sortRow}>
+              {([['nearest', 'Nearest'], ['farthest', 'Farthest'], ['alpha', 'A–Z'], ['recent', 'Recent']] as const).map(([mode, label]) => (
+                <TouchableOpacity
+                  key={mode}
+                  onPress={() => setSortMode(mode)}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: sortMode === mode }}
+                  style={[st.sortChip, {
+                    borderColor: sortMode === mode ? colors.primary : colors.border,
+                    backgroundColor: sortMode === mode ? brandAlpha(0.12) : 'transparent',
+                  }]}
+                >
+                  <Text style={{
+                    color: sortMode === mode ? colors.primary : colors.textDim,
+                    fontSize: 12, fontWeight: sortMode === mode ? '800' : '600',
+                  }}>{label}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          )}
+
           <View style={[st.card, { backgroundColor: colors.card, borderColor: colors.border }]}>
             {roster.map(memberRow)}
           </View>
@@ -1653,6 +1994,15 @@ const st = StyleSheet.create({
   secHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 8, marginBottom: 8 },
   secTitle: { fontSize: 13, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 0.4 },
   card: { borderWidth: 1, borderRadius: 16, paddingHorizontal: 12, marginBottom: 4 },
+  distRow: { flexDirection: 'row', alignItems: 'flex-start', paddingTop: 14 },
+  distCell: { flex: 1, alignItems: 'center', gap: 3, paddingHorizontal: 4 },
+  distVal: { fontSize: 15, fontWeight: '800' },
+  distLbl: { fontSize: 11, textAlign: 'center' },
+  distDiv: { width: 1, height: 30 },
+  sortRow: { flexDirection: 'row', gap: 7, marginBottom: 9 },
+  // 30 px min height keeps these inside the accessible touch-target floor while
+  // still reading as chips rather than buttons.
+  sortChip: { borderWidth: 1, borderRadius: 999, paddingHorizontal: 12, minHeight: 30, justifyContent: 'center' },
   sheet: { borderTopWidth: 1, borderTopLeftRadius: 18, borderTopRightRadius: 18, paddingHorizontal: 14, paddingTop: 12, paddingBottom: 14, gap: 6 },
   row: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 9, borderTopWidth: StyleSheet.hairlineWidth },
   dot: { width: 34, height: 34, borderRadius: 17, alignItems: 'center', justifyContent: 'center' },

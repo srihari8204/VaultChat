@@ -206,4 +206,23 @@ export const LOCATION_LOCK = true;
 // low-end handsets) before it's considered proven. Flip OFF to force Leaflet.
 export const NAV_MAP_3D = true;
 
-export default { E2EE_ENABLED, VAULT_SESSION_SEALED, VAULT_CACHE_ENCRYPTED, MEDIA_E2EE, STORY_E2EE, GROUP_E2EE, SCHEDULED_LOCAL, VB_AUTODOWNLOAD, VB_AUTO_MAX_BYTES, VB_RELIABILITY_FIXES, VB_SEAMLESS_RESUME, CALL_ENGINE_V2, CALL_SESSIONS, LOCATION_LOCK, NAV_MAP_3D };
+// FAMILY_MAP_3D does for the FAMILY map what NAV_MAP_3D did for Navigate: swaps
+// components/family/FamilyMap's Leaflet page for MapLibre GL, giving the family
+// map real pitch, heading-up rotation and follow/north/overview cameras. Both
+// pages expose the identical JS API, so the screens using FamilyMap are
+// unchanged, and a device that cannot init WebGL/worker downgrades to Leaflet at
+// runtime before first paint. Tiles still come from lib/map/tileProvider (raster
+// today) — this flag is about the ENGINE, not the tile source. Defaults ON;
+// wants a real-device pass on a low-end handset. Flip OFF to force Leaflet.
+export const FAMILY_MAP_3D = true;
+
+// STREETVIEW_API_KEY enables the maplibre-pegman Street View control on the
+// family map. EMPTY BY DEFAULT, and that default is a decision, not an
+// oversight: Street View sends the viewed coordinate to Google, which puts a
+// commercial third party in the location path of an app whose stated rule is
+// that positions and saved places do not leave without a reason. The library is
+// bundled and ready; set a key here (or wire one from config) to switch it on
+// deliberately. With no key the control is simply never added.
+export const STREETVIEW_API_KEY = '';
+
+export default { E2EE_ENABLED, VAULT_SESSION_SEALED, VAULT_CACHE_ENCRYPTED, MEDIA_E2EE, STORY_E2EE, GROUP_E2EE, SCHEDULED_LOCAL, VB_AUTODOWNLOAD, VB_AUTO_MAX_BYTES, VB_RELIABILITY_FIXES, VB_SEAMLESS_RESUME, CALL_ENGINE_V2, CALL_SESSIONS, LOCATION_LOCK, NAV_MAP_3D, FAMILY_MAP_3D };

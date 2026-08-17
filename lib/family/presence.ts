@@ -15,7 +15,9 @@ import { emit, getSocket, joinChatRoom, leaveChatRoom } from '../socket';
 import { newLiveKey, sealJSON, openJSON, putLiveKey, getLiveKey, clearLiveKey } from '../liveLocationCrypto';
 import { sendMessage, getMessages, decryptFromChat, type Message } from '../chatService';
 import { type Geofence } from './geofence';
-import { getPlaces } from './store';
+import { getPlaces, getDefaultRef } from './store';
+import { refDistancesFor } from './distance';
+import { planFor, shouldRearm, type LocationPlan } from './adaptive';
 import { getGroupPrivacy } from '../groups/store';
 import { applyPrivacy, isPublishing, type GroupPrivacy } from '../groups/privacy';
 import { readBattery } from './battery';
@@ -40,6 +42,10 @@ let myId = '';
 let myName = 'A member';
 let circleIds: string[] = [];
 const places = new Map<string, Geofence[]>();
+// Which of MY places leads the reference distances I publish, per circle.
+// Cached beside `places` for the same reason: onFix runs on an 8s cadence and
+// must not hit AsyncStorage every time.
+const defaultRefs = new Map<string, string | null>();
 // Per-group privacy, loaded at start and refreshed by reloadPrivacy(). Absent
 // means "not loaded yet", which publishes nothing — failing closed.
 const privacy = new Map<string, GroupPrivacy>();
@@ -58,15 +64,132 @@ let selfCb: ((p: MemberPresence) => void) | null = null;
 // reflects a device that is genuinely still reporting from that position.
 let keepalive: ReturnType<typeof setInterval> | null = null;
 let lastLoc: Location.LocationObject | null = null;
-const KEEPALIVE_MS = 30_000;
-function startKeepalive() {
+
+// ── adaptive cadence (AdaptiveFamilyLocationEngine) ──
+// The watcher's interval is no longer a constant. `plan` is the cadence
+// currently armed; after each fix the engine re-decides from movement,
+// battery, charge, GPS quality and foreground state, and the watcher is
+// re-armed only when the numbers actually change (shouldRearm).
+let plan: LocationPlan | null = null;
+let foreground = true;
+let lastRearmAt = 0;
+/** Bumped by every startPresence; a call whose generation is stale aborts
+ *  rather than overwriting a newer one's state. See startPresence. */
+let startGen = 0;
+/**
+ * Floor between watcher re-arms. Speed hovering either side of the 10 km/h
+ * moving threshold — stop-start traffic, a slow walk — would otherwise flip the
+ * tier on alternate fixes and tear down the OS watcher every few seconds, which
+ * costs more than the cadence saves and risks the platform refusing one.
+ */
+const REARM_FLOOR_MS = 30_000;
+/**
+ * Speed fed to the engine for the OPENING arm only, so it selects its fastest
+ * tier before any real fix exists. Not a claim that the device is moving —
+ * nothing is published from it, and the first genuine fix replaces the plan.
+ */
+const OPENING_SPEED_MS = 15;
+/** The screen has told us the app went background/locked. */
+export function setPresenceForeground(v: boolean): void {
+  if (foreground === v) return;
+  foreground = v;
+  // Re-plan on the next fix rather than immediately: re-arming the OS watcher
+  // during a backgrounding transition is exactly when the platform is least
+  // willing to hand one back.
+}
+
+const ACCURACY: Record<LocationPlan['accuracy'], Location.Accuracy> = {
+  high: Location.Accuracy.High,
+  balanced: Location.Accuracy.Balanced,
+  low: Location.Accuracy.Low,
+};
+
+function startKeepalive(ms: number) {
   stopKeepalive();
+  if (!ms) return;
   keepalive = setInterval(() => {
     if (!sharing || !myKey || !lastLoc || !watcher) return;
+    // Re-asserting the LAST REAL FIX with a current timestamp. This is a true
+    // statement — the device is still reporting from that position — and is
+    // the opposite of fabricating one: no coordinate is invented, ever.
     onFix({ ...lastLoc, timestamp: Date.now() });
-  }, KEEPALIVE_MS);
+  }, ms);
 }
 function stopKeepalive() { if (keepalive) { clearInterval(keepalive); keepalive = null; } }
+
+/**
+ * Arm (or re-arm) the OS watcher at the planned cadence.
+ *
+ * THE NEW WATCHER IS CREATED BEFORE THE OLD ONE IS REMOVED, and that order is
+ * load-bearing. Removing first and then failing to create leaves the device
+ * with NO location watcher at all — sharing silently dead until the screen is
+ * re-entered — and this runs from inside the old watcher's own callback, which
+ * is exactly where a platform is most likely to refuse. Overlapping for a few
+ * milliseconds is harmless: onFix is idempotent per fix and the extra one is
+ * gone before the next tick.
+ */
+async function armWatcher(next: LocationPlan): Promise<void> {
+  const old = watcher;
+  const fresh = await Location.watchPositionAsync(
+    {
+      accuracy: ACCURACY[next.accuracy],
+      timeInterval: next.timeIntervalMs,
+      distanceInterval: next.distanceIntervalM,
+    },
+    onFix,
+  );
+  watcher = fresh;
+  try { old?.remove(); } catch {}
+  plan = next;
+  lastRearmAt = Date.now();
+  if (sharing) startKeepalive(next.keepaliveMs);
+}
+
+/**
+ * Re-decide the cadence after a fix, and re-arm if it materially changed.
+ *
+ * Never throws into the fix path: a platform that refuses a new watcher leaves
+ * the OLD one running, which is a working state, not a failure. Dropping the
+ * watcher on the floor here would stop location entirely — a far worse
+ * outcome than an out-of-date cadence.
+ */
+async function replan(loc: Location.LocationObject, bat: { level?: number; charging?: boolean }): Promise<void> {
+  const speed = loc.coords.speed != null && loc.coords.speed >= 0 ? loc.coords.speed : null;
+  const acc = loc.coords.accuracy != null && loc.coords.accuracy >= 0 ? loc.coords.accuracy : null;
+  const next = planFor({
+    foreground,
+    // This module cannot observe the lock screen directly; a backgrounded app
+    // is the closest honest proxy, and the background task owns the truly
+    // locked case.
+    locked: false,
+    sharing,
+    speedMs: speed,
+    batteryPct: bat.level ?? null,
+    charging: bat.charging,
+    accuracyM: acc,
+  });
+  if (!shouldRearm(plan, next)) { plan = next; return; }
+  // Hold the current cadence until the floor passes. The plan is still
+  // recorded, so the diagnostics row tells the truth about the situation even
+  // while the watcher is deliberately lagging behind it.
+  if (Date.now() - lastRearmAt < REARM_FLOOR_MS) { plan = next; return; }
+  // A failure here leaves the EXISTING watcher running — armWatcher creates
+  // before it removes, so there is always one.
+  try { await armWatcher(next); } catch { /* keep the watcher we have */ }
+}
+
+/** The cadence currently in force, for the diagnostics row. Null = not watching. */
+export function currentPlan(): LocationPlan | null { return plan; }
+
+/** Re-plan from the last known fix — used when sharing is toggled, which
+ *  changes the tier without a new position arriving. */
+async function replanNow(): Promise<void> {
+  if (!watcher) return;
+  if (lastLoc) { await replan(lastLoc, await readBattery()); return; }
+  const next = planFor({ foreground, locked: false, sharing });
+  if (shouldRearm(plan, next)) { try { await armWatcher(next); } catch {} }
+  else { plan = next; if (sharing) startKeepalive(next.keepaliveMs); }
+}
 
 async function deliverKeys() {
   if (!myKey) return;
@@ -102,16 +225,29 @@ async function onFix(loc: Location.LocationObject) {
     if (sharing && myKey && priv) {
       const reduced = applyPrivacy(raw, priv, now);
       if (reduced) {
-        const blob = sealJSON(myKey, reduced as FamilyPing);
+        const ping = reduced as FamilyPing;
+        // Reference distances ("1.2 km from Home") are derived HERE, on the
+        // device that owns the places, and only the derived metres travel — no
+        // place coordinate is ever published, synced or stored server-side.
+        //
+        // Computed from the REDUCED position, not the precise fix: publishing
+        // an exact distance-from-Home next to a grid-snapped coordinate would
+        // hand back the precision that "approximate" exists to withhold.
+        const refs = refDistancesFor({ lat: ping.lat, lng: ping.lng }, places.get(cid) ?? [], defaultRefs.get(cid));
+        if (refs.length) ping.refs = refs;
+        const blob = sealJSON(myKey, ping);
         if (blob) emit('live_location_update', { chatId: cid, blob, until: u }).catch(() => {});
         // Additive server ingest (all-space location platform, migration 103):
         // the SAME privacy-reduced point, batched with offline queue + dedupe.
         // The server enforces per-space read authorization; uploading is the
         // act of sharing, so this rides exactly the sealed-publish gate above.
-        const rp = reduced as FamilyPing;
+        //
+        // `refs` are deliberately NOT sent here. They ride the sealed relay
+        // only; the server stores positions, never a member's reference places
+        // or the distances derived from them.
         publishPoint(cid, {
-          lat: rp.lat, lng: rp.lng, ts: rp.ts || ts, spd: rp.spd,
-          acc: rp.acc, bat: rp.bat, src: 'fused',
+          lat: ping.lat, lng: ping.lng, ts: ping.ts || ts, spd: ping.spd,
+          acc: ping.acc, bat: ping.bat, src: 'fused',
         }).catch(() => {});
       }
     }
@@ -130,6 +266,11 @@ async function onFix(loc: Location.LocationObject) {
       announce: announcing ? (text) => { sendMessage(cid, text, 'system').catch(() => {}); } : undefined,
     });
   }
+
+  // Re-decide the cadence now that this fix has told us whether the device is
+  // moving, how good the GPS is and where the battery stands. Last, and
+  // awaited-but-guarded, so a re-arm can never delay or break publishing.
+  await replan(loc, bat);
 }
 
 export interface StartPresenceOpts {
@@ -164,12 +305,32 @@ export interface PresenceStart { watching: boolean; denied: boolean }
  * alert. Receiving needs no permission at all; the two must not share a fate.
  */
 export async function startPresence(o: StartPresenceOpts): Promise<PresenceStart> {
+  // GENERATION GUARD. Every field below is module-level, and this function is
+  // full of awaits, so two overlapping calls interleave and the one that
+  // finishes LAST wins — regardless of which was asked for last.
+  //
+  // That is not hypothetical. app/family.tsx loads settings with
+  //   setActive(...);  await getSettings();  setShare(s.sharing);
+  // and the await between them splits those into TWO renders, so the presence
+  // effect fires twice: once with share=false, then with share=true. The
+  // stale share=false call could land second and set `sharing = false` while
+  // the switch on screen read ON — a device that published nothing all
+  // session with sharing apparently enabled. Found on the Honor via the
+  // adaptive diagnostics line ("Not sharing location" under a checked switch).
+  //
+  // A superseded call now bails at every point where it would otherwise
+  // mutate shared state.
+  const gen = ++startGen;
+  const stale = () => gen !== startGen;
+
   await stopPresence();
+  if (stale()) return { watching: false, denied: false };
 
   let status = (await Location.getForegroundPermissionsAsync()).status;
   if (status !== 'granted' && o.requestPermission) {
     status = (await Location.requestForegroundPermissionsAsync()).status;
   }
+  if (stale()) return { watching: false, denied: false };
 
   // Circle context is recorded either way, so enabling sharing later needs no
   // re-entry into this function.
@@ -179,14 +340,21 @@ export async function startPresence(o: StartPresenceOpts): Promise<PresenceStart
   if (status !== 'granted') {
     for (const cid of circleIds) {
       places.set(cid, await getPlaces(cid));
+      defaultRefs.set(cid, await getDefaultRef(cid));
       privacy.set(cid, await getGroupPrivacy(cid));
     }
     return { watching: false, denied: true };
   }
   for (const cid of circleIds) {
     places.set(cid, await getPlaces(cid));
+    // defaultRefs was missing from THIS branch — the granted path, i.e. the
+    // only one that ever publishes. The chosen reference place was therefore
+    // never loaded, so refDistancesFor fell back to "first place wins" and a
+    // member who picked Business was published as measured from Home.
+    defaultRefs.set(cid, await getDefaultRef(cid));
     privacy.set(cid, await getGroupPrivacy(cid));
   }
+  if (stale()) return { watching: false, denied: false };
   if (sharing) {
     myKey = newLiveKey();
     await deliverKeys();
@@ -196,11 +364,17 @@ export async function startPresence(o: StartPresenceOpts): Promise<PresenceStart
     // stop — re-enabling must therefore announce itself).
     for (const cid of circleIds) publishStart(cid).catch(() => {});
   }
-  watcher = await Location.watchPositionAsync(
-    { accuracy: Location.Accuracy.Balanced, timeInterval: 8000, distanceInterval: 15 },
-    onFix,
-  );
-  if (sharing) startKeepalive();
+  // OPEN FAST, THEN STEP DOWN. The engine cannot know whether this device is
+  // moving until a fix has told it, and its stationary guess (20 s / 25 m) is
+  // the wrong bet for the very first one: a phone on a desk may produce nothing
+  // for a long time behind a 25 m distance gate, and the screen sits on
+  // "Waiting for GPS fix…" with no dot and no distances. Seen on the Honor.
+  //
+  // So the opening arm always uses the fast tier; the first real fix calls
+  // replan(), which immediately settles it to whatever the situation warrants.
+  // The cost is one accurate fix, paid once per start — which is exactly what
+  // someone opening the screen is waiting for.
+  await armWatcher(planFor({ foreground, locked: false, sharing, speedMs: OPENING_SPEED_MS }));
   return { watching: true, denied: false };
 }
 
@@ -210,9 +384,22 @@ export async function startPresence(o: StartPresenceOpts): Promise<PresenceStart
  * we simply stay foreground-only, which is the old behaviour.
  */
 async function handOffToBackground(): Promise<boolean> {
-  if (!sharing || !circleIds.length) return false;
-  try { return await startBackgroundPresence({ circleIds, myId, myName, key: myKey }); }
-  catch { return false; }
+  if (!sharing || !circleIds.length) {
+    console.warn('[family/bg] not handing off — sharing:', sharing, 'circles:', circleIds.length);
+    return false;
+  }
+  try {
+    const ok = await startBackgroundPresence({ circleIds, myId, myName, key: myKey });
+    // console.WARN, not log: release builds strip console.log (babel.config.js),
+    // and this silently returning false is exactly the failure that made
+    // locked-screen sharing look unimplemented while foreground worked fine.
+    // On the Honor there was no service and no notification, and NOTHING said why.
+    console.warn('[family/bg] startBackgroundPresence →', ok);
+    return ok;
+  } catch (e: any) {
+    console.warn('[family/bg] startBackgroundPresence THREW:', e?.message ?? String(e));
+    return false;
+  }
 }
 
 /** Is the always-on background publisher currently running? */
@@ -239,19 +426,18 @@ export async function setSharing(share: boolean): Promise<boolean> {
     if (status !== 'granted') return false;
     // Entering a space no longer starts a watcher, so turning sharing on may be
     // the first thing that needs one.
-    if (!watcher) {
-      watcher = await Location.watchPositionAsync(
-        { accuracy: Location.Accuracy.Balanced, timeInterval: 8000, distanceInterval: 15 },
-        onFix,
-      );
-    }
+    // Same fast opening as startPresence: turning sharing on is a moment
+    // someone is watching for their own dot to appear.
+    if (!watcher) await armWatcher(planFor({ foreground, locked: false, sharing: true, speedMs: OPENING_SPEED_MS }));
   }
   sharing = share;
   if (share) {
     myKey = newLiveKey();
     await deliverKeys();
     await handOffToBackground();
-    startKeepalive();
+    // Sharing changes the plan (notSharing → a real tier), so re-arm rather
+    // than keeping the idle cadence a non-sharing watcher was opened with.
+    await replanNow();
     for (const cid of circleIds) publishStart(cid).catch(() => {});
   } else {
     myKey = null;
@@ -278,6 +464,7 @@ export async function stopPresence(): Promise<void> {
   try { watcher?.remove(); } catch {}
   watcher = null;
   selfCb = null;
+  plan = null;          // the next start re-plans from scratch, never from a stale tier
   stopKeepalive();
 
   if (sharing && await isBackgroundRunning()) {
@@ -285,7 +472,7 @@ export async function stopPresence(): Promise<void> {
     return;
   }
   if (sharing) for (const cid of circleIds) emit('live_location_stop', { chatId: cid }).catch(() => {});
-  sharing = false; myKey = null; circleIds = []; places.clear(); privacy.clear();
+  sharing = false; myKey = null; circleIds = []; places.clear(); defaultRefs.clear(); privacy.clear();
 }
 
 export function isSharing(): boolean { return sharing; }
@@ -304,9 +491,16 @@ export function isSharing(): boolean { return sharing; }
  */
 export function currentLiveKey(): string | null { return myKey; }
 
-/** Refresh a circle's geofences into the live broadcaster (call after editing Places). */
+/**
+ * Refresh a circle's geofences into the live broadcaster (call after editing
+ * Places). Also re-reads the chosen reference place, because renaming or
+ * deleting a place is exactly the edit that can invalidate it — and a stale
+ * choice would keep publishing a reference the member no longer has.
+ */
 export async function reloadPlaces(circleId: string): Promise<void> {
-  if (circleIds.includes(circleId)) places.set(circleId, await getPlaces(circleId));
+  if (!circleIds.includes(circleId)) return;
+  places.set(circleId, await getPlaces(circleId));
+  defaultRefs.set(circleId, await getDefaultRef(circleId));
 }
 
 /** Refresh a group's privacy into the live publisher (call after editing it). */
@@ -404,6 +598,9 @@ export async function subscribeCircle(circleId: string, meId: string, onEvent: (
       onEvent({ userId: uid, presence: {
         userId: uid, pos: { lat: ping.lat, lng: ping.lng }, speed: ping.spd,
         battery: ping.bat, charging: ping.chg, accuracy: ping.acc, ts,
+        // Derived on THEIR device; we receive names and metres, never the
+        // coordinates behind them. Absent on pings from older builds.
+        refs: Array.isArray(ping.refs) ? ping.refs : undefined,
       } });
       // Keep this member's local history. Their geofences are evaluated on THEIR
       // device, so this records the track only — see fixPipeline.processFix.

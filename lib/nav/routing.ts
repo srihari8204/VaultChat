@@ -143,6 +143,46 @@ export async function fetchRoutes(from: LatLng, to: LatLng, costing: Costing = '
   return parseRoutes(resp);
 }
 
+/** One origin's road distance + duration to the shared destination. */
+export interface MatrixResult {
+  /** Index into the ORIGINS array that was passed in. */
+  index: number;
+  distanceM: number;
+  durationS: number;
+}
+
+/**
+ * Road distance + ETA from many origins to ONE destination, in a single call
+ * (POST /nav/matrix → Valhalla sources_to_targets).
+ *
+ * This is what Meet Here runs on. Ten members must not mean ten routings, ten
+ * round-trips and ten rate-limit tokens for one screen.
+ *
+ * ORIGINS ARE SENT AS A BARE ORDERED LIST — no ids, no names, no circle. The
+ * server is asked "how far are these points from that one", never "where is
+ * this person", and it stores nothing. Road distance is a property of the road
+ * network, so there is no version of this that keeps the coordinates on-device.
+ *
+ * An origin the road network cannot reach is OMITTED from the results rather
+ * than returned as zero, so callers must match on `index` and treat a missing
+ * one as unknown — never as "0 km away", which would rank as the nearest.
+ */
+export async function fetchMatrix(
+  origins: LatLng[],
+  target: LatLng,
+  costing: Costing = 'auto',
+): Promise<MatrixResult[]> {
+  if (!origins.length) return [];
+  const { api } = require('../api');
+  const resp = await api('/nav/matrix', {
+    method: 'POST',
+    json: { sources: origins.map((o) => ({ lat: o.lat, lng: o.lng })), target, costing },
+  });
+  const rows = Array.isArray(resp?.results) ? resp.results : [];
+  return rows.filter((r: any) =>
+    Number.isFinite(r?.index) && Number.isFinite(r?.distanceM) && Number.isFinite(r?.durationS));
+}
+
 // ── self-check: `npx tsx lib/nav/routing.ts` ──
 function _selfCheck(): void {
   const A = (c: boolean, m: string) => { if (!c) throw new Error('routing: ' + m); };
