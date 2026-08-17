@@ -28,6 +28,7 @@ import { subscribeSpaceLocations, mergePresence, fetchSpaceSnapshot } from '../l
 import { startRefreshController } from '../lib/family/refresh';
 import { setPresenceForeground, currentPlan } from '../lib/family/presence';
 import { getRelations, memberLabel, type RelationMap } from '../lib/family/relations';
+import { useVisibleTick } from '../lib/family/useVisibleTick';
 import { type Geofence } from '../lib/family/geofence';
 // Groups & Circles: the registry is now typed groups. A Family Space circle is
 // one of them (migrated on first load by lib/groups/store), so this screen is
@@ -194,8 +195,10 @@ export default function FamilySpaceScreen() {
   // the dashboard stayed open (observed on-device: 2.5 min after sharing was
   // switched off the card still claimed live). Same load-bearing tick as
   // space-ops-map and family-map.
-  const [tick, setTick] = useState(0);
-  useEffect(() => { const t = setInterval(() => setTick((n) => n + 1), 30_000); return () => clearInterval(t); }, []);
+  // Ticks only while the app is FOREGROUNDED — a backgrounded hub re-rendering
+  // its roster and summary every 30 s is pure battery for pixels nobody sees.
+  // Publishing is unaffected: that lives in presence.ts and the background task.
+  const tick = useVisibleTick(30_000);
   // Location was refused (or never asked for). Not an error state — the space
   // works without it; only our own dot on the map is missing.
   const [locDenied, setLocDenied] = useState(false);

@@ -1414,6 +1414,11 @@ function OwnerApp({ me }: { me: { id: string; name: string } | null }) {
   );
 }
 
+// Every quick-link card opens a screen, so every one carries the same affordance.
+// Corner-pinned: the cards are centered columns, so a chevron in the flow stacks
+// under the label instead of reading as "forward".
+const LinkChevron = () => <Ionicons name="chevron-forward" size={14} color={C.sub} style={s.linkChevron} />;
+
 function OwnerDashboard({ shop, onSettings, onCoupons, onSuppliers, onPlans, onReports,
                          onPurchases, onReturns, onAudit, onVerify }: {
   shop: SB.Shop; onSettings: () => void; onCoupons: () => void; onSuppliers: () => void;
@@ -1535,44 +1540,49 @@ function OwnerDashboard({ shop, onSettings, onCoupons, onSuppliers, onPlans, onR
       )}
 
       {/* Phase 2 quick links */}
-      <View style={{ flexDirection: 'row', gap: 10, marginTop: 4 }}>
+      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginTop: 4 }}>
         <TouchableOpacity style={s.linkCard} onPress={onCoupons}>
-          <Text style={{ fontSize: 24 }}>🏷️</Text>
+          <Ionicons name="ticket-outline" size={20} color={C.green} />
           <Text style={s.linkCardText}>Offers & Coupons</Text>
+          <LinkChevron />
         </TouchableOpacity>
         <TouchableOpacity style={s.linkCard} onPress={onPurchases}>
           <Ionicons name="cart-outline" size={20} color={C.green} />
           <Text style={s.linkCardText}>Purchases &amp; cost</Text>
-          <Ionicons name="chevron-forward" size={18} color={C.sub} />
+          <LinkChevron />
         </TouchableOpacity>
         <TouchableOpacity style={s.linkCard} onPress={onReturns}>
           <Ionicons name="arrow-undo-outline" size={20} color={C.green} />
           <Text style={s.linkCardText}>Returns</Text>
-          <Ionicons name="chevron-forward" size={18} color={C.sub} />
+          <LinkChevron />
         </TouchableOpacity>
         <TouchableOpacity style={s.linkCard} onPress={onVerify}>
           <Ionicons name="shield-checkmark-outline" size={20} color={shop.verified ? C.blue : C.green} />
           <Text style={s.linkCardText}>{shop.verified ? 'Verified shop' : 'Get verified'}</Text>
-          <Ionicons name="chevron-forward" size={18} color={C.sub} />
+          <LinkChevron />
         </TouchableOpacity>
         <TouchableOpacity style={s.linkCard} onPress={onAudit}>
           <Ionicons name="document-text-outline" size={20} color={C.green} />
           <Text style={s.linkCardText}>Activity log</Text>
-          <Ionicons name="chevron-forward" size={18} color={C.sub} />
+          <LinkChevron />
         </TouchableOpacity>
         <TouchableOpacity style={s.linkCard} onPress={onSuppliers}>
-          <Text style={{ fontSize: 24 }}>🚚</Text>
+          <Ionicons name="business-outline" size={20} color={C.green} />
           <Text style={s.linkCardText}>Suppliers</Text>
+          <LinkChevron />
         </TouchableOpacity>
       </View>
       <View style={{ flexDirection: 'row', gap: 10, marginTop: 10 }}>
         <TouchableOpacity style={s.linkCard} onPress={onReports}>
-          <Text style={{ fontSize: 24 }}>📊</Text>
+          <Ionicons name="bar-chart-outline" size={20} color={C.green} />
           <Text style={s.linkCardText}>Daily Reports{shop.plan !== 'pro' ? ' 🔒' : ''}</Text>
+          <LinkChevron />
         </TouchableOpacity>
         <TouchableOpacity style={s.linkCard} onPress={onPlans}>
-          <Text style={{ fontSize: 24 }}>{shop.plan === 'pro' ? '⭐' : '⬆️'}</Text>
+          <Ionicons name={shop.plan === 'pro' ? 'star' : 'arrow-up-circle-outline'}
+            size={20} color={shop.plan === 'pro' ? C.amber : C.green} />
           <Text style={s.linkCardText}>{shop.plan === 'pro' ? 'My Plan' : 'Upgrade to Pro'}</Text>
+          <LinkChevron />
         </TouchableOpacity>
       </View>
     </ScrollView>
@@ -3984,10 +3994,13 @@ const s = StyleSheet.create({
   loyaltySub: { color: '#CBD5E1', fontSize: 12, marginTop: 2 },
 
   linkCard: {
-    flex: 1, backgroundColor: C.card, borderRadius: 14, padding: 16, alignItems: 'center',
-    gap: 6, borderWidth: 1, borderColor: C.border,
+    // flexBasis 30% => 3 per row, then wrap. flex:1 crammed all six onto one
+    // row and each label wrapped one character per line.
+    flexGrow: 1, flexBasis: '30%', backgroundColor: C.card, borderRadius: 14,
+    padding: 16, alignItems: 'center', gap: 6, borderWidth: 1, borderColor: C.border,
   },
   linkCardText: { color: C.text, fontSize: 13, fontWeight: '700', textAlign: 'center' },
+  linkChevron: { position: 'absolute', top: 8, right: 8 },
 
   // ── Phase 2b ───────────────────────────────────────
   row: { flexDirection: 'row', alignItems: 'center' },

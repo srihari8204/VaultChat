@@ -175,6 +175,7 @@ export function startRefreshController(o: RefreshOptions): () => void {
     appSub = AppState.addEventListener('change', (next: string) => {
       const wasBackground = !state.foreground;
       state.foreground = next === 'active';
+      syncTimer();
       if (state.foreground && wasBackground) maybe('appResume');
     });
   } catch { /* not on a device (tsx/self-check) — the timer half still works */ }
@@ -211,13 +212,23 @@ export function startRefreshController(o: RefreshOptions): () => void {
   // ── staleness watchdog ──
   // Reads local timestamps only. It is NOT a data poll: while realtime is
   // healthy every tick decides to do nothing and costs one comparison.
-  const timer = setInterval(() => maybe(), checkEveryMs);
+  //
+  // The timer is STOPPED while backgrounded rather than left running to be
+  // rejected by shouldReconcile. A backgrounded screen can never reconcile —
+  // the first guard refuses it — so those wakeups did nothing but cost battery,
+  // three times a minute, for as long as the app stayed resident. The appResume
+  // trigger already covers the return, so nothing is missed by sleeping.
+  let timer: ReturnType<typeof setInterval> | null = null;
+  const stopTimer = () => { if (timer) { clearInterval(timer); timer = null; } };
+  const startTimer = () => { stopTimer(); timer = setInterval(() => maybe(), checkEveryMs); };
+  const syncTimer = () => { if (state.foreground && !stopped) startTimer(); else stopTimer(); };
 
+  syncTimer();
   maybe();   // initial load
 
   return () => {
     stopped = true;
-    clearInterval(timer);
+    stopTimer();
     try { appSub?.remove(); } catch {}
     try { offConn?.(); } catch {}
     try { offNet?.(); } catch {}

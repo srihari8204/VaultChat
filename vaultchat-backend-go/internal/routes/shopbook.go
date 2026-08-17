@@ -963,10 +963,16 @@ func sbCustomerLedger(w http.ResponseWriter, r *http.Request) {
 }
 
 func ledgerJSON(ctx context.Context, w http.ResponseWriter, shopID, custID string) {
+	// Lines come back with their entry in one query. A per-entry follow-up
+	// would be 200 round trips to render one khata screen.
 	rows, err := db.Pool.Query(ctx,
-		`SELECT id, type, amount, remark, created_at
-		   FROM shopbook_ledger WHERE shop_id=$1 AND customer_user_id=$2
-		  ORDER BY created_at DESC LIMIT 200`, shopID, custID)
+		`SELECT l.id, l.type, l.amount, l.remark, l.created_at,
+		        COALESCE((SELECT json_agg(json_build_object(
+		                    'name', i.name, 'brand', i.brand, 'unit', i.unit,
+		                    'qty', i.qty, 'price', i.price, 'taxPercent', i.tax_percent))
+		                    FROM shopbook_ledger_item i WHERE i.ledger_id = l.id), '[]')
+		   FROM shopbook_ledger l WHERE l.shop_id=$1 AND l.customer_user_id=$2
+		  ORDER BY l.created_at DESC LIMIT 200`, shopID, custID)
 	if err != nil {
 		httpx.Err(w, http.StatusInternalServerError, "db error")
 		return
@@ -978,7 +984,8 @@ func ledgerJSON(ctx context.Context, w http.ResponseWriter, shopID, custID strin
 		var id, typ, remark string
 		var amount float64
 		var created time.Time
-		if err := rows.Scan(&id, &typ, &amount, &remark, &created); err != nil {
+		var items []byte
+		if err := rows.Scan(&id, &typ, &amount, &remark, &created, &items); err != nil {
 			continue
 		}
 		if typ == "purchase" {
@@ -988,6 +995,7 @@ func ledgerJSON(ctx context.Context, w http.ResponseWriter, shopID, custID strin
 		}
 		entries = append(entries, map[string]any{
 			"id": id, "type": typ, "amount": amount, "remark": remark, "createdAt": httpx.JST(&created),
+			"items": json.RawMessage(items),
 		})
 	}
 	httpx.JSON(w, 200, map[string]any{
@@ -2088,6 +2096,18 @@ func sbOwnerLedger(w http.ResponseWriter, r *http.Request) {
 	httpx.JSON(w, 200, map[string]any{"customers": out})
 }
 
+// sbLedgerItemIn is one line of a credit entry. Mirrors shopbook_order_item's
+// shape so the invoice renderer reads one item structure whether the document
+// came from an order or from the khata.
+type sbLedgerItemIn struct {
+	Name       string  `json:"name"`
+	Brand      string  `json:"brand"`
+	Unit       string  `json:"unit"`
+	Qty        float64 `json:"qty"`
+	Price      float64 `json:"price"`
+	TaxPercent float64 `json:"taxPercent"`
+}
+
 func sbAddLedgerEntry(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	shopID, ok := ownerShopID(ctx, w, httpx.UserFrom(r).ID)
@@ -2095,17 +2115,52 @@ func sbAddLedgerEntry(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var b struct {
-		CustomerID     string  `json:"customerId"`
-		Type           string  `json:"type"` // purchase | payment
-		Amount         float64 `json:"amount"`
-		Remark         string  `json:"remark"`
-		IdempotencyKey string  `json:"idempotencyKey"`
+		CustomerID     string           `json:"customerId"`
+		Type           string           `json:"type"` // purchase | payment
+		Amount         float64          `json:"amount"`
+		Remark         string           `json:"remark"`
+		IdempotencyKey string           `json:"idempotencyKey"`
+		Items          []sbLedgerItemIn `json:"items"`
 	}
-	if err := httpx.Body(r, &b); err != nil || b.CustomerID == "" || (b.Type != "purchase" && b.Type != "payment") || b.Amount <= 0 {
-		httpx.Err(w, http.StatusBadRequest, "customerId, type(purchase|payment) and positive amount required")
+	if err := httpx.Body(r, &b); err != nil || b.CustomerID == "" || (b.Type != "purchase" && b.Type != "payment") {
+		httpx.Err(w, http.StatusBadRequest, "customerId and type(purchase|payment) required")
 		return
 	}
+
+	// A payment is a number, not a basket. Accepting lines here would produce a
+	// receipt itemising goods that were not part of the payment.
+	if b.Type == "payment" && len(b.Items) > 0 {
+		httpx.Err(w, http.StatusBadRequest, "a payment cannot carry item lines")
+		return
+	}
+
+	// AMOUNT IS DERIVED WHEN LINES ARE GIVEN. The client's own total is ignored
+	// rather than trusted-and-compared, matching sbLineIn on the order path.
+	// The alternative — storing both — lets an invoice print lines that do not
+	// add up to the total it also prints, which is worse than having no lines.
 	amount := money(math.Round(b.Amount * 100))
+	if len(b.Items) > 0 {
+		if len(b.Items) > 200 {
+			httpx.Err(w, http.StatusBadRequest, "too many item lines (max 200)")
+			return
+		}
+		var sum money
+		for i := range b.Items {
+			it := &b.Items[i]
+			it.Name = strings.TrimSpace(it.Name)
+			if it.Name == "" || it.Qty <= 0 || it.Price < 0 {
+				httpx.Err(w, http.StatusBadRequest,
+					"every item needs a name, a positive qty and a non-negative price")
+				return
+			}
+			sum += money(math.Round(it.Qty * it.Price * 100))
+		}
+		amount = sum
+	}
+	if amount <= 0 {
+		httpx.Err(w, http.StatusBadRequest, "positive amount required")
+		return
+	}
 
 	// AUTHORIZATION: a shop may only write to a khata it already has.
 	// customerId arrived from the client and was trusted, so any owner could
@@ -2150,11 +2205,39 @@ func sbAddLedgerEntry(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Entry, its lines and its audit stamp are one transaction. Split up, a
+	// crash between them leaves either an itemless credit entry the customer
+	// cannot check, or money moved with nothing recording who moved it.
 	var id string
-	err := db.Pool.QueryRow(ctx,
-		`INSERT INTO shopbook_ledger (shop_id, customer_user_id, type, amount, remark, idempotency_key)
-		 VALUES ($1,$2,$3,`+sbAmt("$4")+`,$5,$6) RETURNING id`,
-		shopID, b.CustomerID, b.Type, int64(amount), b.Remark, idem).Scan(&id)
+	err := db.WithUser(ctx, httpx.UserFrom(r).ID, func(tx pgx.Tx) error {
+		if err := tx.QueryRow(ctx,
+			`INSERT INTO shopbook_ledger (shop_id, customer_user_id, type, amount, remark, idempotency_key)
+			 VALUES ($1,$2,$3,`+sbAmt("$4")+`,$5,$6) RETURNING id`,
+			shopID, b.CustomerID, b.Type, int64(amount), b.Remark, idem).Scan(&id); err != nil {
+			return err
+		}
+		for _, it := range b.Items {
+			if _, err := tx.Exec(ctx,
+				`INSERT INTO shopbook_ledger_item (ledger_id, name, brand, unit, qty, price, tax_percent)
+				 VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+				id, it.Name, it.Brand, it.Unit, it.Qty, it.Price, it.TaxPercent); err != nil {
+				return err
+			}
+		}
+		// The gap 095 named and did not close: "ledger adjustments happened
+		// silently". A shop can move a customer's balance; that must leave a
+		// trace the shop cannot edit.
+		sbAudit(ctx, tx, sbAuditEntry{
+			ShopID: shopID, Actor: httpx.UserFrom(r).ID,
+			Action: "ledger." + b.Type, Entity: "ledger", EntityID: id,
+			After: map[string]any{
+				"customerId": b.CustomerID, "type": b.Type,
+				"amount": amount.Float(), "items": len(b.Items),
+			},
+			Reason: b.Remark, IP: sbClientIP(r),
+		})
+		return nil
+	})
 	if err != nil {
 		if idem != "" && strings.Contains(err.Error(), "idx_shopbook_ledger_idem") {
 			if db.Pool.QueryRow(ctx,
@@ -2164,6 +2247,7 @@ func sbAddLedgerEntry(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
+		log.Printf("[shopbook] ledger entry failed (shop=%s type=%s): %v", shopID, b.Type, err)
 		httpx.Err(w, http.StatusInternalServerError, "db error")
 		return
 	}

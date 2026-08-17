@@ -23,6 +23,7 @@ import { subscribeCircle, type PresenceEvent } from '../lib/family/presence';
 import { freshnessOf, markSharingOff, type Freshness } from '../lib/family/status';
 import { subscribeSpaceLocations, mergePresence, fetchSpaceSnapshot } from '../lib/location/live';
 import { startRefreshController } from '../lib/family/refresh';
+import { useVisibleTick } from '../lib/family/useVisibleTick';
 import { type CircleMember, type MemberPresence } from '../lib/family/types';
 import { formatMetres, formatRoute } from '../lib/family/distance';
 import { fetchRoute } from '../lib/nav/routing';
@@ -70,8 +71,15 @@ export default function FamilyMapScreen() {
    *  the screen exists to show — but dismissible when the map gets busy. */
   const [showLinks, setShowLinks] = useState(true);
   // Render tick so "LIVE" decays to "5 min ago" without a new ping arriving.
-  const [now, setNow] = useState(Date.now());
-  useEffect(() => { const t = setInterval(() => setNow(Date.now()), 30_000); return () => clearInterval(t); }, []);
+  //
+  // Gated on visibility: backgrounded, this screen was re-rendering the map,
+  // every member row and every distance every 30 s for pixels nobody could
+  // see. `now` is derived from the tick rather than stored, so returning to
+  // the foreground recomputes freshness immediately instead of showing a
+  // timestamp frozen at the moment the user left.
+  const visibleTick = useVisibleTick(30_000);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const now = useMemo(() => Date.now(), [visibleTick]);
 
   /**
    * My own position, for "1.2 km from You".
