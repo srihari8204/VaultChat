@@ -89,3 +89,8 @@ keystore.properties
 .cgr-dir-mtimes.json
 .cgr-hash-cache.json
 .cgr-parser-fingerprint
+
+# device-test capture output (hundreds of MB of logcat, machine-local)
+p2p-device-tests/
+# generated audit reports
+docs/audit/

@@ -118,6 +118,20 @@ async function main() {
     console.log(`  FAILED: ${failed.sort(bySort).map((f) => f.rel).join(', ')}`);
     process.exit(1);
   }
+  // The migrations/tests/*.sql suite lives outside this runner's world: it needs
+  // a database, not tsx. Invoked here so `npm test` really does mean every test,
+  // which is this file's whole premise. It SKIPS (exit 0) when the stack is not
+  // up, so a developer without Docker is not blocked; CI sets MIGRATION_TESTS=1
+  // to turn that skip into a failure.
+  const mig = require('child_process').spawnSync(
+    process.execPath, [path.join(__dirname, 'test-migrations.js')],
+    { stdio: 'inherit' },
+  );
+  if (mig.status !== 0) {
+    console.log('\n  FAILED: migration tests');
+    process.exit(1);
+  }
+
   console.log('\nALL SUITES PASSED ✓');
 }
 

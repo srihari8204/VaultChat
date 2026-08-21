@@ -11,6 +11,7 @@
     "lint": "expo lint",
     "typecheck": "node scripts/check-sdk-versions.js && tsc --noEmit",
     "test": "node ./scripts/test-all.js",
+    "test:migrations": "node ./scripts/test-migrations.js",
     "test:e2ee": "tsx services/crypto/e2ee.selftest.ts && tsx services/crypto/senderKey.selftest.ts && tsx services/crypto/shamir.selftest.ts && tsx services/security/safetyNumber.selftest.ts && tsx services/crypto/vectors.selftest.ts && tsx services/crypto/vaultbeam-vectors.selftest.ts && tsx services/crypto/parity.selftest.ts && tsx services/crypto/vaultbeam-parity.selftest.ts",
     "test:localdb": "tsx lib/localDb.queue.selftest.ts",
     "bench:e2ee": "tsx services/crypto/e2ee.bench.ts",
