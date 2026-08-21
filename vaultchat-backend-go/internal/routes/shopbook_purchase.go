@@ -305,7 +305,7 @@ func sbCreatePurchase(w http.ResponseWriter, r *http.Request) {
 		return nil
 	})
 	if err != nil {
-		if idem != "" && strings.Contains(err.Error(), "idx_shopbook_purchase_idem") {
+		if idem != "" && sbIsUniqueViolation(err, "idx_shopbook_purchase_idem") {
 			var id string
 			if db.Pool.QueryRow(ctx,
 				`SELECT id FROM shopbook_purchase WHERE shop_id=$1 AND idempotency_key=$2`,
@@ -314,7 +314,7 @@ func sbCreatePurchase(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
-		if strings.Contains(err.Error(), "idx_shopbook_purchase_supplier_invoice") {
+		if sbIsUniqueViolation(err, "idx_shopbook_purchase_supplier_invoice") {
 			httpx.Err(w, http.StatusConflict,
 				"You already recorded that supplier invoice",
 				map[string]any{"code": "duplicate_supplier_invoice"})

@@ -163,7 +163,7 @@ func sbRequestReturn(w http.ResponseWriter, r *http.Request) {
 	case err != nil && err.Error() == "bad line":
 		httpx.Err(w, http.StatusBadRequest, "That item is not on this order")
 		return
-	case err != nil && strings.Contains(err.Error(), "idx_shopbook_return_one_open"):
+	case err != nil && sbIsUniqueViolation(err, "idx_shopbook_return_one_open"):
 		httpx.Err(w, http.StatusConflict, "There is already an open return for this order")
 		return
 	case err != nil:

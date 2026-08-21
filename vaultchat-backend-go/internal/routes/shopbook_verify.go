@@ -425,7 +425,7 @@ func sbRequestLocationChange(w http.ResponseWriter, r *http.Request) {
 		shopID, curLat, curLng, curAddr, *b.Lat, *b.Lng, b.Address,
 		drift, strings.TrimSpace(b.Reason), user.ID).Scan(&id)
 	if err != nil {
-		if strings.Contains(err.Error(), "idx_shopbook_location_request_one_open") {
+		if sbIsUniqueViolation(err, "idx_shopbook_location_request_one_open") {
 			httpx.Err(w, http.StatusConflict, "You already have a location change awaiting review")
 			return
 		}

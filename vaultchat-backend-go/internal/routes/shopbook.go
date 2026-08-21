@@ -485,7 +485,7 @@ func sbPlaceOrder(w http.ResponseWriter, r *http.Request) {
 	// Free-plan limit: up to 200 unique customers per shop. Existing customers
 	// keep working — only a brand-new relationship is blocked (spec:
 	// subscription-plans / Customer limit reached).
-	if ok, err := sbCustomerLimitOK(ctx, body.ShopID, user.ID); err != nil {
+	if ok, err := sbCustomerLimitOK(ctx, body.ShopID, user.ID, ""); err != nil {
 		httpx.Err(w, http.StatusInternalServerError, "db error")
 		return
 	} else if !ok {
@@ -581,7 +581,7 @@ func sbPlaceOrder(w http.ResponseWriter, r *http.Request) {
 	}
 	if err != nil {
 		// A duplicate key here is the concurrent retry the pre-check missed.
-		if idem != "" && strings.Contains(err.Error(), "idx_shopbook_order_idem") {
+		if idem != "" && sbIsUniqueViolation(err, "idx_shopbook_order_idem") {
 			var id, status string
 			if db.Pool.QueryRow(ctx,
 				`SELECT id, status FROM shopbook_order WHERE customer_user_id=$1 AND idempotency_key=$2`,
@@ -687,28 +687,63 @@ func sbOrderEvent(ctx context.Context, tx pgx.Tx, orderID, status, note string) 
 
 // sbCustomerLimitOK enforces the Free plan's 200-unique-customer cap at
 // relationship-creation time. Pro shops and existing relationships pass.
-func sbCustomerLimitOK(ctx context.Context, shopID, custID string) (bool, error) {
+// sbCustomerLimitOK enforces the Free plan's customer cap.
+//
+// TWO KINDS OF CUSTOMER, ONE CAP. An account customer is identified by
+// customer_user_id; a walk-in by khata_customer_id (migration 111). Exactly one
+// of custID / khataCustID is non-empty — the ledger's party CHECK enforces the
+// same exclusivity in the database.
+//
+// WHY THE COUNT CHANGED. It used to be:
+//
+//	SELECT COUNT(*) FROM (SELECT customer_user_id FROM shopbook_order …
+//	                      UNION SELECT customer_user_id FROM shopbook_ledger …)
+//
+// Every walk-in ledger row contributes a NULL there, and UNION collapses them
+// to ONE row that COUNT(*) then counts as a customer. So a thousand walk-ins
+// counted as one, and the cap became avoidable simply by using walk-in khata —
+// a paywall bypass that nothing would have reported. NULLs are now excluded
+// explicitly and walk-ins counted on their own identity.
+func sbCustomerLimitOK(ctx context.Context, shopID, custID, khataCustID string) (bool, error) {
 	if shopPlan(ctx, shopID) == "pro" {
 		return true, nil
 	}
+	// An existing customer's next transaction never consumes quota — they are
+	// already inside the count. Asked on the identity being written, so a
+	// walk-in is recognised by the same rule an account customer is.
 	var existing bool
-	err := db.Pool.QueryRow(ctx, `
-		SELECT EXISTS(SELECT 1 FROM shopbook_order  WHERE shop_id=$1 AND customer_user_id=$2)
-		    OR EXISTS(SELECT 1 FROM shopbook_ledger WHERE shop_id=$1 AND customer_user_id=$2)`,
-		shopID, custID).Scan(&existing)
+	var err error
+	if khataCustID != "" {
+		err = db.Pool.QueryRow(ctx,
+			`SELECT EXISTS(SELECT 1 FROM shopbook_ledger WHERE shop_id=$1 AND khata_customer_id=$2)`,
+			shopID, khataCustID).Scan(&existing)
+	} else {
+		err = db.Pool.QueryRow(ctx, `
+			SELECT EXISTS(SELECT 1 FROM shopbook_order  WHERE shop_id=$1 AND customer_user_id=$2)
+			    OR EXISTS(SELECT 1 FROM shopbook_ledger WHERE shop_id=$1 AND customer_user_id=$2)`,
+			shopID, custID).Scan(&existing)
+	}
 	if err != nil {
 		return false, err
 	}
 	if existing {
 		return true, nil
 	}
+	// Distinct account customers PLUS distinct walk-ins. The IS NOT NULL guards
+	// are what stop the walk-in NULLs being counted as a phantom customer on
+	// the account side and double-counted on the walk-in side.
 	var count int
 	err = db.Pool.QueryRow(ctx, `
-		SELECT COUNT(*) FROM (
-			SELECT customer_user_id FROM shopbook_order  WHERE shop_id=$1
-			UNION
-			SELECT customer_user_id FROM shopbook_ledger WHERE shop_id=$1
-		) t`, shopID).Scan(&count)
+		SELECT (SELECT COUNT(*) FROM (
+					SELECT customer_user_id FROM shopbook_order
+					 WHERE shop_id=$1 AND customer_user_id IS NOT NULL
+					UNION
+					SELECT customer_user_id FROM shopbook_ledger
+					 WHERE shop_id=$1 AND customer_user_id IS NOT NULL
+				) t)
+		     + (SELECT COUNT(DISTINCT khata_customer_id) FROM shopbook_ledger
+		         WHERE shop_id=$1 AND khata_customer_id IS NOT NULL)`,
+		shopID).Scan(&count)
 	if err != nil {
 		return false, err
 	}
@@ -1710,7 +1745,7 @@ func sbOwnerSetStatus(w http.ResponseWriter, r *http.Request) {
 			var orderTotal int64
 			_ = tx.QueryRow(ctx,
 				`SELECT `+sbCents("total")+` FROM shopbook_order WHERE id=$1`, orderID).Scan(&orderTotal)
-			if over, pending, limit := sbCreditCheck(ctx, tx, shopID, custID, money(orderTotal)); over {
+			if over, pending, limit := sbCreditCheck(ctx, tx, shopID, custID, "", money(orderTotal)); over {
 				creditWarning = map[string]any{
 					"overLimit": true,
 					"pending":   pending.Float(), "limit": limit.Float(),
@@ -2162,18 +2197,29 @@ func sbAddLedgerEntry(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var b struct {
-		CustomerID     string           `json:"customerId"`
-		Type           string           `json:"type"` // purchase | payment
-		Amount         float64          `json:"amount"`
-		Remark         string           `json:"remark"`
-		IdempotencyKey string           `json:"idempotencyKey"`
-		Items          []sbLedgerItemIn `json:"items"`
+		CustomerID string `json:"customerId"`
+		// A walk-in has no VaultChat account: the shop's own khata customer
+		// (migration 111). Exactly one of the two names the party — the ledger's
+		// party CHECK enforces the same exclusivity in the database.
+		KhataCustomerID string           `json:"khataCustomerId"`
+		Type            string           `json:"type"` // purchase | payment
+		Amount          float64          `json:"amount"`
+		Remark          string           `json:"remark"`
+		IdempotencyKey  string           `json:"idempotencyKey"`
+		Items           []sbLedgerItemIn `json:"items"`
 		// Set by the app only after the owner has seen the over-limit warning
 		// and chosen to proceed anyway.
 		ConfirmOverLimit bool `json:"confirmOverLimit"`
 	}
-	if err := httpx.Body(r, &b); err != nil || b.CustomerID == "" || (b.Type != "purchase" && b.Type != "payment") {
+	if err := httpx.Body(r, &b); err != nil || (b.Type != "purchase" && b.Type != "payment") {
 		httpx.Err(w, http.StatusBadRequest, "customerId and type(purchase|payment) required")
+		return
+	}
+	// Rejected rather than resolved by precedence: sending both is the client
+	// being wrong about who it is billing, and silently picking one writes debt
+	// to a party the caller did not mean.
+	if (b.CustomerID == "") == (b.KhataCustomerID == "") {
+		httpx.Err(w, http.StatusBadRequest, "exactly one of customerId or khataCustomerId is required")
 		return
 	}
 
@@ -2202,28 +2248,54 @@ func sbAddLedgerEntry(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// AUTHORIZATION: a shop may only write to a khata it already has.
+	// AUTHORIZATION. Two parties, two different threats, so two different
+	// checks — the account-customer rule is NOT reused for walk-ins and NOT
+	// weakened for accounts.
+	//
+	// ACCOUNT CUSTOMER: a shop may only write to a khata it already has.
 	// customerId arrived from the client and was trusted, so any owner could
 	// post debt against any VaultChat user id — money on a stranger's account,
 	// visible to them in /shopbook/my-ledgers. The relationship must exist
 	// first, and it is only ever created by that customer placing an order.
-	var related bool
-	if err := db.Pool.QueryRow(ctx, `
-		SELECT EXISTS(SELECT 1 FROM shopbook_order  WHERE shop_id=$1 AND customer_user_id=$2)
-		    OR EXISTS(SELECT 1 FROM shopbook_ledger WHERE shop_id=$1 AND customer_user_id=$2)`,
-		shopID, b.CustomerID).Scan(&related); err != nil {
-		httpx.Err(w, http.StatusInternalServerError, "db error")
-		return
-	}
-	if !related {
-		httpx.Err(w, http.StatusForbidden,
-			"That customer has no account with your shop yet — they appear in your khata after their first order")
-		return
+	//
+	// WALK-IN: there is no stranger to victimise — the row is the shop's own
+	// record and belongs to nobody else, so "must already have transacted"
+	// would only mean a walk-in could never receive its first entry. What has
+	// to hold instead is ownership: the khata customer must exist AND sit in
+	// THIS shop, or an owner could post into another shop's walk-in book by
+	// guessing an id.
+	if b.KhataCustomerID != "" {
+		var owned bool
+		if err := db.Pool.QueryRow(ctx,
+			`SELECT EXISTS(SELECT 1 FROM shopbook_khata_customer WHERE id=$1 AND shop_id=$2)`,
+			b.KhataCustomerID, shopID).Scan(&owned); err != nil {
+			httpx.Err(w, http.StatusInternalServerError, "db error")
+			return
+		}
+		if !owned {
+			httpx.Err(w, http.StatusForbidden, "That walk-in customer is not in your shop")
+			return
+		}
+	} else {
+		var related bool
+		if err := db.Pool.QueryRow(ctx, `
+			SELECT EXISTS(SELECT 1 FROM shopbook_order  WHERE shop_id=$1 AND customer_user_id=$2)
+			    OR EXISTS(SELECT 1 FROM shopbook_ledger WHERE shop_id=$1 AND customer_user_id=$2)`,
+			shopID, b.CustomerID).Scan(&related); err != nil {
+			httpx.Err(w, http.StatusInternalServerError, "db error")
+			return
+		}
+		if !related {
+			httpx.Err(w, http.StatusForbidden,
+				"That customer has no account with your shop yet — they appear in your khata after their first order")
+			return
+		}
 	}
 
 	// A manually added customer is a new khata relationship — the Free
-	// plan's 200-customer cap applies here exactly as on first order.
-	if okLimit, err := sbCustomerLimitOK(ctx, shopID, b.CustomerID); err != nil {
+	// plan's 200-customer cap applies here exactly as on first order, and a
+	// walk-in consumes quota on the same terms.
+	if okLimit, err := sbCustomerLimitOK(ctx, shopID, b.CustomerID, b.KhataCustomerID); err != nil {
 		httpx.Err(w, http.StatusInternalServerError, "db error")
 		return
 	} else if !okLimit {
@@ -2243,7 +2315,7 @@ func sbAddLedgerEntry(w http.ResponseWriter, r *http.Request) {
 	// a decision they can act on rather than a notice about a fait accompli.
 	// Overridable, because the owner knows the customer and the app does not.
 	if b.Type == "purchase" && !b.ConfirmOverLimit {
-		if over, pending, limit := sbCreditCheck(ctx, db.Pool, shopID, b.CustomerID, amount); over {
+		if over, pending, limit := sbCreditCheck(ctx, db.Pool, shopID, b.CustomerID, b.KhataCustomerID, amount); over {
 			httpx.Err(w, http.StatusConflict,
 				"This entry puts the customer over their credit limit",
 				map[string]any{
@@ -2270,12 +2342,21 @@ func sbAddLedgerEntry(w http.ResponseWriter, r *http.Request) {
 	// Entry, its lines and its audit stamp are one transaction. Split up, a
 	// crash between them leaves either an itemless credit entry the customer
 	// cannot check, or money moved with nothing recording who moved it.
+	// Typed as any so the unused party column goes in as NULL rather than '' —
+	// the party CHECK counts an empty string as present and would reject the row.
+	var custParty, khataParty any
+	if b.KhataCustomerID != "" {
+		khataParty = b.KhataCustomerID
+	} else {
+		custParty = b.CustomerID
+	}
+
 	var id string
 	err := db.WithUser(ctx, httpx.UserFrom(r).ID, func(tx pgx.Tx) error {
 		if err := tx.QueryRow(ctx,
-			`INSERT INTO shopbook_ledger (shop_id, customer_user_id, type, amount, remark, idempotency_key)
-			 VALUES ($1,$2,$3,`+sbAmt("$4")+`,$5,$6) RETURNING id`,
-			shopID, b.CustomerID, b.Type, int64(amount), b.Remark, idem).Scan(&id); err != nil {
+			`INSERT INTO shopbook_ledger (shop_id, customer_user_id, khata_customer_id, type, amount, remark, idempotency_key)
+			 VALUES ($1,$2,$3,$4,`+sbAmt("$5")+`,$6,$7) RETURNING id`,
+			shopID, custParty, khataParty, b.Type, int64(amount), b.Remark, idem).Scan(&id); err != nil {
 			return err
 		}
 		for _, it := range b.Items {
@@ -2293,7 +2374,8 @@ func sbAddLedgerEntry(w http.ResponseWriter, r *http.Request) {
 			ShopID: shopID, Actor: httpx.UserFrom(r).ID,
 			Action: "ledger." + b.Type, Entity: "ledger", EntityID: id,
 			After: map[string]any{
-				"customerId": b.CustomerID, "type": b.Type,
+				"customerId": b.CustomerID, "khataCustomerId": b.KhataCustomerID,
+				"type":   b.Type,
 				"amount": amount.Float(), "items": len(b.Items),
 				// Overriding a credit ceiling is a judgement call the owner is
 				// entitled to make, and exactly the kind that needs a record.
@@ -2304,7 +2386,7 @@ func sbAddLedgerEntry(w http.ResponseWriter, r *http.Request) {
 		return nil
 	})
 	if err != nil {
-		if idem != "" && strings.Contains(err.Error(), "idx_shopbook_ledger_idem") {
+		if idem != "" && sbIsUniqueViolation(err, "idx_shopbook_ledger_idem") {
 			if db.Pool.QueryRow(ctx,
 				`SELECT id FROM shopbook_ledger WHERE shop_id=$1 AND idempotency_key=$2`,
 				shopID, idem).Scan(&id) == nil {

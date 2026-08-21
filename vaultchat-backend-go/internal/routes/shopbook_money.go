@@ -22,6 +22,7 @@ package routes
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -469,4 +470,43 @@ func sbIdemKey(header, body string) string {
 		k = k[:100]
 	}
 	return k
+}
+
+// pgUniqueViolation is Postgres's SQLSTATE for "you tried to write a row that
+// already exists". Named rather than inlined because 23503 (foreign key) and
+// 23514 (check) sit one digit away and mean something entirely different.
+const pgUniqueViolation = "23505"
+
+// sbIsUniqueViolation reports whether err is a Postgres unique violation raised
+// by a SPECIFIC index.
+//
+// WHY THIS EXISTS
+//
+// Every duplicate-recovery branch in Shop Book used to ask
+// `strings.Contains(err.Error(), "idx_shopbook_payment_idem")` — matching the
+// index name inside the driver's formatted message. That works today and is
+// coupled to two things it should not be: the driver's error formatting, and
+// the index's name appearing in it. Rename an index, or take a pgx release that
+// formats errors differently, and every one of those branches silently stops
+// matching. Nothing would break loudly: the unique index still refuses the
+// second row, so MONEY STAYS CORRECT — but the caller receives a 500 instead of
+// the existing row, concludes its payment vanished, and retries under a fresh
+// idempotency key. That retry is a legitimately new payment.
+//
+// So the failure is one step removed from financial harm rather than being
+// financial harm, and this closes that step.
+//
+// errors.As, not a type assertion: pgx wraps its errors, and a bare assertion
+// misses a wrapped *pgconn.PgError entirely — which would fail closed in the
+// same silent way.
+//
+// ConstraintName carries the INDEX name for a unique-index violation (as
+// opposed to a table-level UNIQUE constraint), which is exactly what these
+// indexes are — see migrations 092/094/095/110.
+func sbIsUniqueViolation(err error, constraint string) bool {
+	var pgErr *pgconn.PgError
+	if !errors.As(err, &pgErr) {
+		return false
+	}
+	return pgErr.Code == pgUniqueViolation && pgErr.ConstraintName == constraint
 }

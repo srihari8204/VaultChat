@@ -205,7 +205,7 @@ func sbIssueFromLedger(w http.ResponseWriter, r *http.Request, source, wantType,
 	if err != nil {
 		// The partial unique index on ledger_id is what enforces one document
 		// per entry; a retry must read as "already issued", not as a failure.
-		if strings.Contains(err.Error(), "idx_shopbook_invoice_ledger_once") {
+		if sbIsUniqueViolation(err, "idx_shopbook_invoice_ledger_once") {
 			_ = db.Pool.QueryRow(ctx,
 				`SELECT id FROM shopbook_invoice WHERE ledger_id=$1`, ledgerID).Scan(&id)
 			httpx.JSON(w, 200, map[string]any{"id": id, "duplicate": true})

@@ -158,7 +158,7 @@ func sbRecordPayment(w http.ResponseWriter, r *http.Request) {
 			b.Reference, b.Note, user.ID, ledgerID, idem).Scan(&paymentID)
 	})
 	if err != nil {
-		if idem != "" && strings.Contains(err.Error(), "idx_shopbook_payment_idem") {
+		if idem != "" && sbIsUniqueViolation(err, "idx_shopbook_payment_idem") {
 			var id string
 			if db.Pool.QueryRow(ctx,
 				`SELECT id FROM shopbook_payment WHERE shop_id=$1 AND idempotency_key=$2`,
@@ -290,15 +290,40 @@ func sbSetCreditLimit(w http.ResponseWriter, r *http.Request) {
 // a threshold does, and refusing an order outright at the counter is how a
 // real relationship gets broken by software. The owner sees the number and
 // decides. (Blocking is a per-shop policy P1 can add on top of this.)
-func sbCreditCheck(ctx context.Context, q sbQ, shopID, custID string, orderTotal money) (bool, money, money) {
+// Exactly one of custID / khataCustID identifies the party, matching the
+// ledger's party CHECK. Both paths derive `pending` the same way — SUM over the
+// ledger — so there is one balance model and one ceiling rule, only two ways of
+// naming whose ledger it is.
+//
+// ONE CEILING RULE, TWO PLACES TO KEEP IT. An account customer's limit lives on
+// shopbook_customer (keyed by customer_user_id, which is a users FK); a walk-in's
+// lives on shopbook_khata_customer (migration 112), because a walk-in has no
+// users row and Postgres refuses that shape. Both are NUMERIC rupees read
+// through sbCents, and both are compared against the SAME derived balance —
+// SUM over the ledger. There is no second balance and no second rule.
+//
+// Zero still means "no ceiling configured" for either party, which is what keeps
+// every walk-in created before 112 behaving exactly as it did.
+func sbCreditCheck(ctx context.Context, q sbQ, shopID, custID, khataCustID string, orderTotal money) (bool, money, money) {
 	var limit, pending int64
-	err := q.QueryRow(ctx, `
-		SELECT COALESCE((SELECT `+sbCents("credit_limit")+` FROM shopbook_customer
-		                  WHERE shop_id=$1 AND customer_user_id=$2), 0),
-		       COALESCE((SELECT SUM(CASE WHEN type='purchase' THEN `+sbCents("amount")+`
-		                                 ELSE -`+sbCents("amount")+` END)
-		                   FROM shopbook_ledger WHERE shop_id=$1 AND customer_user_id=$2), 0)`,
-		shopID, custID).Scan(&limit, &pending)
+	var err error
+	if khataCustID != "" {
+		err = q.QueryRow(ctx, `
+			SELECT COALESCE((SELECT `+sbCents("credit_limit")+` FROM shopbook_khata_customer
+			                  WHERE id=$2 AND shop_id=$1), 0),
+			       COALESCE((SELECT SUM(CASE WHEN type='purchase' THEN `+sbCents("amount")+`
+			                                 ELSE -`+sbCents("amount")+` END)
+			                   FROM shopbook_ledger WHERE shop_id=$1 AND khata_customer_id=$2), 0)`,
+			shopID, khataCustID).Scan(&limit, &pending)
+	} else {
+		err = q.QueryRow(ctx, `
+			SELECT COALESCE((SELECT `+sbCents("credit_limit")+` FROM shopbook_customer
+			                  WHERE shop_id=$1 AND customer_user_id=$2), 0),
+			       COALESCE((SELECT SUM(CASE WHEN type='purchase' THEN `+sbCents("amount")+`
+			                                 ELSE -`+sbCents("amount")+` END)
+			                   FROM shopbook_ledger WHERE shop_id=$1 AND customer_user_id=$2), 0)`,
+			shopID, custID).Scan(&limit, &pending)
+	}
 	if err != nil || limit <= 0 {
 		return false, 0, 0 // no limit configured → nothing to warn about
 	}
