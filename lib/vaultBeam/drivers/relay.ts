@@ -18,6 +18,7 @@
 // keeps this file importable in Node.
 
 import { ChunkBitmap, type ChunkRun, CHUNK_BYTES } from '../bitmap';
+import { resolveBlockBytes } from '../blockSize';
 import { TransferSession } from '../session';
 import {
   type TransportDriver, type DriverOutcome, type DriverReport, type TransportChannel,
@@ -273,7 +274,20 @@ export async function defaultRelayIO(): Promise<RelayIO> {
     markUploaded: async (t, b) => { await relay.relayMarkUploaded(t, b); },
     uploadBlock: (op) => native.uploadBlock(op as any),
     downloadBlock: (op) => native.downloadBlock(op as any),
-    nextBlockBytes: async () => (await store.startingGeometry(null)).blockBytes,
+    // A pinned physical block size wins over the adaptive one; unset (the
+    // default) leaves startingGeometry's value exactly as it was. This is the
+    // ONE seam where the block size is decided, so there is nowhere else for an
+    // unvalidated size to enter. The logical 512 KiB crypto chunk is untouched —
+    // resolveBlockBytes only ever returns whole multiples of it.
+    nextBlockBytes: async () => {
+      const adaptive = (await store.startingGeometry(null)).blockBytes;
+      try {
+        const { getSettingsCached } = await import('../../vaultBeamSettings');
+        return resolveBlockBytes(getSettingsCached().blockBytes, adaptive);
+      } catch {
+        return adaptive;   // settings unavailable → adaptive, never a hard fail
+      }
+    },
   };
 }
 

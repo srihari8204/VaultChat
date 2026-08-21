@@ -29,7 +29,15 @@ import { sendTransfer, receiveTransfer } from './vaultBeamTransfer';
 import { persistVbTransfer, loadVbTransfers, pruneVbTransfers } from './localDb';
 import NetInfo from '@react-native-community/netinfo';
 import { serveDirect, receiveDirect } from './vaultBeamDirect';
+import { markStart, markComplete, report, forget as forgetMetrics, noteFallbackStart } from './vaultBeam/transferMetrics';
+import { beginEpoch, guard as epochGuard, endTransfer as endEpochs } from './vaultBeam/transportEpoch';
+import { openLocalFile, type OpenResult } from './vaultBeam/openFile';
+import { syncService } from './vaultBeam/backgroundService';
+import { classifyTransport, type TransportKind } from './vaultBeam/transportLabel';
+import { normalizeDigest } from './vaultBeam/fileDigest';
 import { isNativeStreamAvailable } from './vaultBeamStreamNative';
+import { isOfferExpired } from './vaultBeam/offerExpiry';
+import { loadRecvBitmap } from './vaultBeamRecvBitmap';
 import { relayAbort, MAX_BYTES, CHUNK_BYTES } from './vaultbeamRelay';
 
 // vbm2 (2026-07): manifest gained the segmented-geometry `plan`. A version bump
@@ -48,7 +56,8 @@ export type VBStatus =
   | 'paused'      // recipient: auto-download paused (e.g. left Wi-Fi)
   | 'complete'    // done (delivered / saved)
   | 'cancelled'
-  | 'failed';
+  | 'failed'
+  | 'expired';   // recipient: the offer aged out before anyone accepted it
 
 export interface VBTransfer {
   transferId: string;
@@ -60,11 +69,35 @@ export interface VBTransfer {
   totalBytes: number;
   name: string;
   error?: string;
-  savedPath?: string;  // recipient: local path once complete
+  /** The local file this bubble refers to: the receiver's copy once complete,
+   *  or — for a sender — the source it picked, so BOTH ends can open it. The
+   *  sender's copy sits in the DocumentPicker cache, which Android may evict;
+   *  a missing file there is normal, not a fault. */
+  savedPath?: string;
   // Which pipe is moving bytes right now. When a direct tier (LAN/P2P) dies and
   // the relay takes over, the upload genuinely RESTARTS from 0 — the bubble
   // shows "via relay" so the bar reset reads as a tier switch, not a glitch.
   tier?: 'direct' | 'relay';
+  /**
+   * WHAT ACTUALLY MOVED THE BYTES — 'LAN' | 'WEBRTC_DIRECT' | 'WEBRTC_TURN' |
+   * 'R2_RELAY'. Diagnostic only; nothing branches on it.
+   *
+   * `tier` above cannot answer this: TURN is an ICE candidate type inside
+   * WebRTC, not a tier, so a relayed transfer and a peer-to-peer one are both
+   * `tier: 'direct'`. That distinction is the difference between free and paid.
+   *
+   * Address-free by construction — see lib/vaultBeam/transportLabel.ts.
+   */
+  /**
+   * How many logical chunks the RECEIVER has verified, from the server's
+   * `vb_have` nudge. Sender-side only: a sender's own progress is what it has
+   * pushed, which is not the same as what the peer has actually verified — on a
+   * direct transfer that broke, the two diverge sharply.
+   */
+  peerVerified?: number;
+  transport?: TransportKind;
+  /** Address-free candidate-pair detail, e.g. 'srflx-relay / IPv4'. */
+  transportDetail?: string;
   auto?: boolean;      // this receive was auto-started (no manual Accept)
   // Live meter (computed from VERIFIED progress ticks — same truth as the bar).
   rateBps?: number;    // rolling ~5s window
@@ -134,14 +167,30 @@ function setState(id: string, patch: Partial<VBTransfer>) {
           bytes: patch.bytes ?? prev?.bytes ?? 0, totalBytes: prev?.totalBytes ?? 0,
           avgBps: Math.round(prev?.avgBps ?? 0), peakBps: Math.round(prev?.peakBps ?? 0),
           durMs: m ? Date.now() - m.startT : undefined,
+          // §5 timings. `ttfvcMs` is the honest one — it is stamped only after a
+          // chunk passed GCM, was written at its offset and committed, so it can
+          // be undefined on a transport (LAN) that verifies inside native code.
+          ...(() => {
+            if (patch.status === 'complete') markComplete(id, patch.bytes ?? prev?.bytes);
+            const r = report(id);
+            return r ? { connectMs: r.connectMs, ttfbMs: r.ttfbMs, ttfvcMs: r.timeToFirstVerifiedChunkMs,
+                         stallMs: r.directStallDurationMs, fallbackReason: r.fallbackReason } : {};
+          })(),
         });
       } catch {}
     }
+    forgetMetrics(id);
+    endEpochs(id);   // any tier still talking after this is stale by definition
     meters.delete(id);
     patch = { ...patch, rateBps: undefined, etaSec: undefined };
   }
   const next = { ...(prev ?? ({ transferId: id } as VBTransfer)), ...patch } as VBTransfer;
   states.set(id, next);
+  // Reconcile the Android foreground service against the whole store. Driven
+  // from here because setState is the one place every transfer state change
+  // passes through, so the service can never drift from reality. Derived, never
+  // authoritative — and it swallows its own errors.
+  try { syncService(states.values()); } catch {}
   emit(id);
   persistSoon(id, patch.status !== undefined);
   // §13: mirror the set of active transfers into the Android foreground-service
@@ -202,7 +251,21 @@ const VB_DIR = `${FileSystem.documentDirectory}VaultBeam`;
 // `plan` is the serialized segmented-geometry manifest (vaultBeamSegments) — the
 // relay tier reads it for per-block chunk/block sizes + offsets. Absent on a
 // direct-only (LAN/P2P) transfer, which stays uniform 512 KiB.
-export interface VBManifest { v: string; keyB64: string; fileId: string; name: string; mime: string; size: number; token: string; plan?: string }
+export interface VBManifest {
+  v: string; keyB64: string; fileId: string; name: string; mime: string; size: number; token: string;
+  plan?: string;
+  /**
+   * Whole-file SHA-256, lowercase hex. OPTIONAL and permanently so.
+   *
+   * The receiver's gate already existed in vaultBeamTransfer (hash, compare,
+   * throw BEFORE relayComplete); it was simply never fed. This is what feeds
+   * it. Absent — an older sender, or a source we could not hash — keeps the
+   * previous behaviour exactly: per-chunk AES-GCM plus bitmap completeness.
+   * Absent must never mean fail-closed, or every in-flight legacy transfer
+   * would break.
+   */
+  sha256?: string;
+}
 
 export function parseManifest(plainContent: string | null | undefined): VBManifest | null {
   if (!plainContent) return null;
@@ -211,7 +274,10 @@ export function parseManifest(plainContent: string | null | undefined): VBManife
     if (m?.v === VB_MANIFEST_VERSION && m.keyB64 && m.fileId) {
       return { v: m.v, keyB64: m.keyB64, fileId: m.fileId, name: m.name || 'file',
         mime: m.mime || 'application/octet-stream', size: Number(m.size) || 0, token: m.token || '',
-        plan: typeof m.plan === 'string' ? m.plan : undefined };
+        plan: typeof m.plan === 'string' ? m.plan : undefined,
+        // Validated here so a malformed or hostile digest becomes 'absent'
+        // (legacy path) rather than something the gate would try to enforce.
+        sha256: normalizeDigest(m.sha256) };
     }
   } catch {}
   return null;
@@ -280,12 +346,49 @@ let _listenersArmed = false;
 async function ensureListeners() {
   if (_listenersArmed) return;
   _listenersArmed = true;
+  // Cancel tapped on the foreground-service notification. The service knows
+  // nothing about transfers, so it just says "the user asked to cancel" and the
+  // decision of WHAT that means is made here, through the normal cancel path.
+  // Cancels every active transfer, because one consolidated notification cannot
+  // express which of several the user meant.
+  try {
+    const { DeviceEventEmitter } = require('react-native');
+    DeviceEventEmitter.addListener('vbServiceCancel', () => {
+      for (const [id, st] of states) {
+        if (st.status === 'uploading' || st.status === 'receiving' || st.status === 'queued') {
+          cancelTransfer(id).catch(() => {});
+        }
+      }
+    });
+  } catch {}
   try {
     const { addPersistentListener } = await import('./socket');
     addPersistentListener('vb_complete', (d: any) => {
       const id = d?.transferId; if (!id) return;
       const s = states.get(id);
       if (s && s.role === 'sender') setState(id, { status: 'complete', done: s.total, bytes: s.totalBytes });
+    });
+    // RECEIVER PROGRESS, PUSHED.
+    //
+    // relay/received already emits this to the sender the moment the receiver
+    // commits verified chunks — the server comment calls it a nudge "so it
+    // re-derives its work-list immediately rather than waiting for its next
+    // poll" — but nothing was listening, so the signal went nowhere.
+    //
+    // DELIBERATELY PASSIVE. It records what the peer holds and does NOT kick a
+    // re-send: sendTransfer re-derives its work-list from relayState on its next
+    // pass, and forcing a second derivation from here could stage the same block
+    // twice, which is exactly the duplicate sending this must not cause.
+    // Monotonic, so an out-of-order nudge cannot walk the count backwards.
+    addPersistentListener('vb_have', (d: any) => {
+      const id = d?.transferId; if (!id) return;
+      const got = Number(d?.received);
+      if (!Number.isFinite(got) || got < 0) return;
+      const s = states.get(id);
+      if (!s || s.role !== 'sender') return;
+      if (s.status === 'complete' || s.status === 'cancelled' || s.status === 'failed') return;
+      if (typeof s.peerVerified === 'number' && got <= s.peerVerified) return;
+      setState(id, { peerVerified: got });
     });
     addPersistentListener('vb_abort', (d: any) => {
       const id = d?.transferId; if (!id) return;
@@ -325,9 +428,22 @@ export async function startSend(opts: {
   setState(transferId, {
     transferId, role: 'sender', status: 'uploading',
     done: 0, total: 0, bytes: 0, totalBytes: opts.size, name: opts.name,
+    // The sender keeps a handle on what it sent, so its own bubble can open the
+    // file too — previously only the recipient could. Same content-URI path;
+    // DocumentPicker already copied it somewhere the FileProvider covers.
+    savedPath: opts.srcPath,
   });
 
-  const manifest: VBManifest = { v: VB_MANIFEST_VERSION, keyB64, fileId, name: opts.name, mime: opts.mime, size: opts.size, token };
+  // Hash the SOURCE once, before the manifest goes out. Best-effort: a file we
+  // cannot hash still transfers, it just travels without the extra gate — the
+  // same position every pre-digest transfer is already in.
+  let srcDigest: string | undefined;
+  try {
+    const { sha256File, isNativeStreamAvailable } = await import('./vaultBeamStreamNative');
+    if (isNativeStreamAvailable()) srcDigest = normalizeDigest(await sha256File(opts.srcPath));
+  } catch { /* no digest — legacy behaviour */ }
+
+  const manifest: VBManifest = { v: VB_MANIFEST_VERSION, keyB64, fileId, name: opts.name, mime: opts.mime, size: opts.size, token, sha256: srcDigest };
   const meta = { vaultbeam: true, transferId, size: opts.size };
   const msg = await sendMessage(opts.chatId, JSON.stringify(manifest), 'vaultbeam', { meta });
   // Persist so a killed relay upload resumes on next launch (manifest already sent).
@@ -339,19 +455,33 @@ export async function startSend(opts: {
   const chunkCount = chunkCountFor(opts.size);
   (async () => {
     try {
+      // One measurement window per TRANSFER, not per transport: a direct tier
+      // that starves and hands over to the relay is still the same transfer, so
+      // the clock starts here and survives every tier change below.
+      markStart(transferId);
       // Tier 1/2: serve the peer directly (LAN then P2P) if it comes online and
       // asks. Returns the tier used, or null → nobody pulled → use the relay.
+      const directEpoch = beginEpoch(transferId);   // §8, same race as the receive path
       const tier = await serveDirect({
         transferId, fileId, keyB64, token, peerId: opts.recipientId,
         chunkBytes: CHUNK_BYTES, chunkCount, totalBytes: opts.size, srcPath: opts.srcPath, signal: ac.signal,
-        onProgress: (done, total) => setState(transferId, { status: 'uploading', tier: 'direct', done, total, bytes: done * CHUNK_BYTES, totalBytes: opts.size }),
+        onProgress: epochGuard(transferId, directEpoch, (done: number, total: number) => setState(transferId, {
+          status: 'uploading', tier: 'direct', done, total,
+          // Clamped: the last chunk is usually partial, so done*CHUNK_BYTES can
+          // exceed the file and would render as >100%.
+          bytes: Math.min(done * CHUNK_BYTES, opts.size), totalBytes: opts.size,
+        })),
       });
       if (tier) {
+        noteTransport(transferId, tier);   // 'lan' | 'p2p' — ICE already refined p2p
         setState(transferId, { status: 'complete', done: chunkCount, total: chunkCount, bytes: opts.size }); // delivered peer-to-peer
         return;
       }
       // Tier 3: R2 relay (guaranteed baseline — works even if the peer is offline).
+      beginEpoch(transferId);   // every direct callback is stale from here on
+      noteFallbackStart(transferId, 'R2_RELAY');   // SLA clock stops here
       setState(transferId, { status: 'uploading', tier: 'relay', done: 0, total: 0, bytes: 0, totalBytes: opts.size });
+      noteTransport(transferId, 'relay');
       await sendTransfer({
         srcPath: opts.srcPath, totalBytes: opts.size, fileId, transferId, keyB64, linkType, signal: ac.signal,
         onProgress: (p) => setState(transferId, { status: 'uploading', done: p.done, total: p.total, bytes: p.bytes, totalBytes: p.totalBytes }),
@@ -371,6 +501,12 @@ export async function startSend(opts: {
 // the server bitmask), verify natively, and land the plaintext file locally.
 export async function startReceive(opts: {
   transferId: string; manifest: VBManifest; peerId: string; auto?: boolean;
+  /**
+   * Message.createdAt of the offer — the SERVER's stamp, passed straight
+   * through. Optional: an offer that arrives without one is accepted exactly
+   * as it is today (see offerExpiry's fail-open note).
+   */
+  offerCreatedAt?: string | null;
 }): Promise<void> {
   if (!isNativeStreamAvailable()) throw new Error('Large-file transfer needs the latest app build (Android).');
   const { transferId, manifest, peerId } = opts;
@@ -379,6 +515,23 @@ export async function startReceive(opts: {
   if (controllers.has(transferId)) return;
   const cur = states.get(transferId);
   if (cur && (cur.status === 'receiving' || cur.status === 'complete')) return;
+
+  // OFFER AGE — checked here and nowhere else, because here is the only place a
+  // transfer is ACCEPTED. Everything past this line is an accepted transfer and
+  // must never be interrupted by the offer's age, however long it runs.
+  //
+  // `alreadyStarted` comes from the persisted receive bitmap: a non-empty one
+  // proves this transfer was accepted before, so a resume after an app restart
+  // — which re-enters this function with the same old message — is recognised
+  // as a resume rather than expired out of existence.
+  const startedBefore = (await loadRecvBitmap(transferId).catch(() => new Set<number>())).size > 0;
+  if (isOfferExpired({ offerCreatedAt: opts.offerCreatedAt, now: Date.now(), alreadyStarted: startedBefore })) {
+    setState(transferId, {
+      transferId, role: 'recipient', status: 'expired',
+      done: 0, total: 0, bytes: 0, totalBytes: manifest.size, name: manifest.name,
+    });
+    return;                                     // no transport, no file, no retry
+  }
   const dstPath = `${VB_DIR}/${sanitize(manifest.name)}`;
   const chunkCount = chunkCountFor(manifest.size);
 
@@ -396,20 +549,50 @@ export async function startReceive(opts: {
     // Direct chunks land contiguously (ordered channel), so the high-water mark
     // is a verified plaintext prefix the relay tier can credit instead of
     // re-downloading — a 50% direct transfer resumes at 50% on the relay.
-    let directDone = 0;
+    let directDone = 0;      // chunks VERIFIED (may contain gaps) — for the UI
+    let directPrefix = 0;    // chunks verified from 0 with NO gap — for haveBytes
+    markStart(transferId);   // spans direct → relay handover; see the sender side
+    // §8 epoch. A tier that loses its stall race is NOT cancelled — p2pReceive's
+    // promise never settles, so its datachannel stays open and keeps calling
+    // back. Stamping the callback with the epoch it was opened under means the
+    // abandoned tier can keep talking without being able to move `tier` back to
+    // 'direct' or regress `done`.
+    const directEpoch = beginEpoch(transferId);
     const gotDirect = manifest.token ? await receiveDirect({
       transferId, fileId: manifest.fileId, keyB64: manifest.keyB64, token: manifest.token, peerId,
       chunkBytes: CHUNK_BYTES, chunkCount, totalBytes: manifest.size, dstPath, signal: ac.signal,
-      onProgress: (done, total) => { if (done > directDone) directDone = done; setState(transferId, { status: 'receiving', tier: 'direct', done, total, bytes: done * CHUNK_BYTES, totalBytes: manifest.size }); },
+      onProgress: epochGuard(transferId, directEpoch, (done: number, total: number, contiguous?: number) => {
+        if (done > directDone) directDone = done;
+        // TWO DIFFERENT NUMBERS. `directDone` is how many chunks are verified —
+        // what the bar shows. `directPrefix` is how many are verified from 0
+        // with no gap, and it is the ONLY one that may become a byte offset.
+        // A transport that streams strictly sequentially omits `contiguous`,
+        // and for those `done` already is a prefix.
+        const c = contiguous ?? done;
+        if (c > directPrefix) directPrefix = c;
+        setState(transferId, { status: 'receiving', tier: 'direct', done, total, bytes: Math.min(done * CHUNK_BYTES, manifest.size), totalBytes: manifest.size });
+      }),
     }) : false;
 
     if (!gotDirect) {
       // Tier 3: pull from the R2 relay (the sender uploads there as the baseline).
+      // New epoch FIRST: from here on every direct callback is stale by definition.
+      beginEpoch(transferId);
+      noteFallbackStart(transferId, 'R2_RELAY');
       setState(transferId, { status: 'receiving', tier: 'relay', done: 0, total: 0, bytes: 0 });
+      noteTransport(transferId, 'relay');
       await receiveTransfer({
         transferId, dstPath, totalBytes: manifest.size, fileId: manifest.fileId, keyB64: manifest.keyB64,
         linkType: await getLinkType(),
-        haveBytes: Math.min(directDone * CHUNK_BYTES, manifest.size),
+        // Contiguous prefix ONLY. Using the verified count here would claim a
+        // chunk sitting behind a gap is on disk; the relay tier would then skip
+        // fetching it and the hole would survive to the whole-file digest.
+        haveBytes: Math.max(0, Math.min(directPrefix * CHUNK_BYTES, manifest.size)),
+        // Feeds the gate that already lives in vaultBeamTransfer: it hashes the
+        // assembled file and throws BEFORE relayComplete, so a corrupt result
+        // never causes the relay copy — the only thing left to retry from — to
+        // be purged. Undefined ⇒ the gate is skipped, exactly as before.
+        expectedSha256: manifest.sha256,
         signal: ac.signal,
         onProgress: (p) => setState(transferId, { status: 'receiving', done: p.done, total: p.total, bytes: p.bytes, totalBytes: p.totalBytes }),
       });
@@ -420,6 +603,16 @@ export async function startReceive(opts: {
       // the TRANSFER, not of the transport that happened to win, so record it
       // whichever tier delivered. Best-effort: the direct transfer already
       // succeeded, and failing to finalize must not fail it.
+      // SAME GATE ON THE DIRECT PATH. relayComplete purges the relay objects,
+      // so the digest must be checked first here too — otherwise a file that
+      // arrived corrupt over LAN/P2P would destroy the recoverable copy.
+      if (manifest.sha256) {
+        const { sha256File } = await import('./vaultBeamStreamNative');
+        const got = normalizeDigest(await sha256File(dstPath));
+        if (got !== manifest.sha256) {
+          throw new Error('sha256 mismatch — file corrupt, not purging relay');
+        }
+      }
       const { relayComplete } = await import('./vaultbeamRelay');
       await relayComplete(transferId).catch(() => {});
     }
@@ -442,9 +635,39 @@ export function markTransferQueued(transferId: string, name: string, totalBytes:
 // Auto-accept an incoming transfer. Thin wrapper over startReceive with the auto
 // flag; the single-flight guard inside startReceive prevents a double-start if
 // the user also tapped Accept. Errors surface via the transfer store, not throw.
-export async function autoStartReceive(opts: { transferId: string; manifest: VBManifest; peerId: string }): Promise<void> {
+export async function autoStartReceive(opts: { transferId: string; manifest: VBManifest; peerId: string; offerCreatedAt?: string | null }): Promise<void> {
   try { await startReceive({ ...opts, auto: true }); }
   catch (e: any) { setState(opts.transferId, { status: 'failed', error: e?.message }); }
+}
+
+/**
+ * Record which transport carried this transfer, and — for WebRTC — whether the
+ * winning ICE pair was relayed.
+ *
+ * Best-effort and never throws: observability must not be able to fail a
+ * transfer. Only ever called with candidate TYPES; classifyTransport emits from
+ * a closed set of constants, so nothing here can put an address into the state.
+ */
+export function noteTransport(
+  transferId: string,
+  driverId: string | null | undefined,
+  ice?: { localType?: string; remoteType?: string; isIPv6?: boolean } | null,
+): void {
+  try {
+    const cur = states.get(transferId);
+    if (!cur) return;
+    const label = classifyTransport(driverId, ice);
+    // A BLIND CALL MUST NEVER DEMOTE AN OBSERVED ONE.
+    //
+    // Two things report a p2p transfer: the ICE hook, which knows the candidate
+    // pair, and the tier return, which knows only "p2p". Classifying the latter
+    // yields WEBRTC_DIRECT — so letting it land after the ICE hook would rewrite
+    // a genuine WEBRTC_TURN as direct and quietly zero the relay-rate metric.
+    // Evidence wins over inference; equal-evidence still refreshes.
+    if (!ice && cur.transport && cur.transport.startsWith('WEBRTC') && label.kind.startsWith('WEBRTC')) return;
+    if (cur.transport === label.kind && cur.transportDetail === label.detail) return;
+    setState(transferId, { transport: label.kind, transportDetail: label.detail });
+  } catch { /* diagnostics never break a transfer */ }
 }
 
 // Cancel an in-flight transfer (either side): abort the byte pipeline + purge
@@ -457,9 +680,19 @@ export async function cancelTransfer(transferId: string): Promise<void> {
 }
 
 // Open / share a received file with the OS handler.
-export async function openSaved(path: string): Promise<void> {
-  const Sharing = await import('expo-sharing');
-  if (await Sharing.isAvailableAsync()) await Sharing.shareAsync(path);
+/**
+ * Open a finished VaultBeam file in whatever app handles its type.
+ *
+ * Was `Sharing.shareAsync(path)`, which could not work: the file lives in
+ * app-private storage, and Android has rejected `file://` URIs handed to other
+ * apps since API 24 — hence the "Cannot open" every recipient saw. It was also
+ * the wrong verb; a share sheet is not "play this video".
+ *
+ * Returns a structured failure instead of throwing so the bubble can say
+ * something true. See lib/vaultBeam/openFile.ts for why no new FileProvider.
+ */
+export async function openSaved(path: string, name?: string): Promise<OpenResult> {
+  return openLocalFile(path, name);
 }
 
 export default {};

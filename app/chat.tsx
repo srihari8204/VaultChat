@@ -1965,7 +1965,15 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
     const peer = chat?.type === 'direct' && meId ? chat.members.find(m => m.userId !== meId) : null;
     if (!peer?.userId) { Alert.alert('VaultBeam', 'Large-file transfer is available in 1:1 chats only.'); return; }
     if (!vbNativeAvailable()) { Alert.alert('VaultBeam', 'Large-file transfer needs the latest app build (Android). Update to send big files.'); return; }
-    const result = await DocumentPicker.getDocumentAsync({ type: '*/*', multiple: false, copyToCacheDirectory: true });
+    // copyToCacheDirectory:false — VaultBeam streams the source in place.
+    //
+    // With the copy enabled a picked file was DUPLICATED into app cache before
+    // the transfer started, so a 12 GB send needed 12 GB of free space on top
+    // of the original plus a long silent copy, and Android was free to evict
+    // that copy mid-transfer. The native reader now opens the picked
+    // content:// URI directly (SrcReader in VaultBeamStreamModule.kt), so the
+    // duplicate buys nothing.
+    const result = await DocumentPicker.getDocumentAsync({ type: '*/*', multiple: false, copyToCacheDirectory: false });
     if (result.canceled || !result.assets?.[0]) return;
     const asset = result.assets[0];
     const size = Number(asset.size) || 0;

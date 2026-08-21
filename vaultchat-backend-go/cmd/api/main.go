@@ -94,6 +94,7 @@ func main() {
 	routes.RegisterShopBookBilling(mux)
 	routes.RegisterShopBookDocuments(mux)
 	routes.RegisterShopBookPayments(mux)
+	routes.RegisterShopBookKhata(mux) // walk-in customers (migration 111)
 	routes.RegisterShopBookPurchases(mux)
 	routes.RegisterShopBookReturns(mux)
 	routes.RegisterShopBookVerify(mux)
@@ -195,12 +196,27 @@ func main() {
 		httpx.JSON(w, 200, map[string]any{"ok": true})
 	})
 
-	// Reap stale VaultBeam relay rows hourly (mirrors server.js).
+	// Reap expired VaultBeam relay objects: ONCE AT STARTUP, then hourly.
+	//
+	// time.Tick(time.Hour) does not deliver until a full hour has elapsed, so
+	// the first sweep used to land at start + 1h. A go-api that restarts more
+	// often than that - a crash loop, a rolling deploy, an operator cycling the
+	// container - would therefore never reach its first tick, and expired R2
+	// relay objects would accumulate with the 24h ceiling silently unenforced.
+	//
+	// Running the SAME function once before entering the loop closes that hole.
+	// The interval is unchanged, the sweep is unchanged, and there is still
+	// exactly one scheduler - `sweep` is a name for the existing call, not a
+	// second implementation.
 	go func() {
-		for range time.Tick(time.Hour) {
+		sweep := func() {
 			if err := routes.VaultbeamSweepExpired(ctx); err != nil {
 				log.Printf("[vaultbeam] sweep: %v", err)
 			}
+		}
+		sweep()
+		for range time.Tick(time.Hour) {
+			sweep()
 		}
 	}()
 
@@ -223,6 +239,9 @@ func main() {
 	// value that persists is the signal that the expiry sweep has stopped and
 	// the three-hour guarantee is silently not being met.
 	routes.RegisterBodyGauges()
+	// pgxpool already counts these; this only exposes them, and only at scrape
+	// time. See internal/db/metrics.go for why there is no query tracer.
+	db.RegisterPoolGauges()
 
 	// Anything else reaching us is a proxy misconfiguration — say so loudly.
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {

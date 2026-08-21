@@ -12,6 +12,11 @@
 import {
   isNativeStreamAvailable, prealloc, uploadBlock, downloadBlock, sha256File,
 } from './vaultBeamStreamNative';
+import { blocksReceiverAlreadyHas, blocksToSkip } from './vaultBeam/senderWorkList';
+import { chunkMaskFromBlocks, reportReceivedSoon, forgetReported } from './vaultBeam/reportReceived';
+import {
+  markStart, markFirstByte, markFirstVerifiedChunk, markComplete, forget as forgetMetrics,
+} from './vaultBeam/transferMetrics';
 import {
   relayBlockUrls, relayMarkUploaded, relayState, relayComplete, relayGrow,
   uploadedBlocks, MAX_BYTES,
@@ -91,7 +96,35 @@ export async function sendTransfer(opts: {
   const st = await relayState(opts.transferId);               // resume: what does the server already hold?
   let plan: SegmentPlan = (st.plan && deserializePlan(st.plan))
     || newPlan(opts.totalBytes, VB_SEAMLESS_RESUME ? SEGMENT_PLAN_V2 : SEGMENT_PLAN_V1);
-  const have = new Set(uploadedBlocks(st.uploadedMask, st.blockCount));
+  // WHAT THE SENDER DOES NOT HAVE TO STAGE.
+  //
+  // Two independent sources, and until now only the first was consulted:
+  //   uploadedMask — blocks R2 already holds
+  //   recvMask     — blocks the RECEIVER already holds and verified
+  //
+  // A direct transfer that breaks part-way leaves the second set large and the
+  // first empty, which is how a 280 MB transfer that died at 74% was about to
+  // re-upload all 280 MB to deliver the missing ~73 MB. `received` corroborates
+  // the mask; without it, or on any inconsistency, blocksReceiverAlreadyHas
+  // returns an empty set and this behaves exactly as it did before.
+  const receiverHas = blocksReceiverAlreadyHas({
+    recvMask: st.recvMask,
+    expectedReceived: st.received,
+    chunkCount: st.chunkCount,
+    blockCount: st.blockCount,
+    // The transfer's OWN logical chunk size, from the server, rather than a
+    // module constant — so this cannot drift from what the transfer was planned with.
+    chunkBytes: st.chunkBytes,
+    locate: (b) => {
+      const loc = locateBlock(plan, b);
+      return loc ? { blockPlainOffset: loc.blockPlainOffset, blockBytes: loc.blockBytes } : null;
+    },
+  });
+  const have = blocksToSkip(uploadedBlocks(st.uploadedMask, st.blockCount), receiverHas);
+  if (receiverHas.size > 0) {
+    console.warn('[vb] sender work-list: receiver already holds',
+      `${receiverHas.size}/${st.blockCount} blocks — not re-staging them`);
+  }
   let uploadedBytes = 0;
 
   const push = async (indices: number[]) => {
@@ -207,6 +240,12 @@ export async function receiveTransfer(opts: {
       if (credited) {
         lastProgressAt = Date.now();
         if (VB_RELIABILITY_FIXES) saveRecvBitmapSoon(opts.transferId, got);
+        // Tell the SERVER too, not just this device. Without this recv_mask
+        // stays empty, vb_have never fires, and the sender re-stages blocks
+        // the receiver already holds. Throttled + best-effort.
+        reportReceivedSoon(opts.transferId, chunkMaskFromBlocks(
+          got, (b) => { const l = locateBlock(p, b); return l ? { blockPlainOffset: l.blockPlainOffset, blockBytes: l.blockBytes } : null; },
+          st.chunkBytes, st.chunkCount));
         opts.onProgress?.({ done: got.size, total: totalBlocks(p) || got.size, bytes: Math.min(downloadedBytes, opts.totalBytes), totalBytes: opts.totalBytes });
       }
     }
@@ -220,6 +259,7 @@ export async function receiveTransfer(opts: {
       await mapPool(urls, par, async ({ blockIndex, url }) => {
         const loc = locateBlock(p, blockIndex)!;
         const t0 = Date.now();
+        markFirstByte(opts.transferId);   // relay GET starting; not yet trusted
         await downloadBlock({
           url, dstPath: opts.dstPath, keyB64: opts.keyB64, transferId: opts.transferId,
           fileId: opts.fileId, blockIndex, chunkBytes: loc.chunkBytes, blockBytes: loc.blockBytes,
@@ -227,9 +267,19 @@ export async function receiveTransfer(opts: {
           idScheme: idSchemeForPlan(p),
         });
         recordSample(opts.linkType, loc.blockBytes, Math.max(1, Date.now() - t0), Date.now()).catch(() => {});
+        // downloadBlock verified every chunk's GCM tag and wrote them at their
+        // offsets; committing to `got` is the bitmap commit. Only now is a chunk
+        // genuinely "verified" — and only the first call actually stamps.
+        markFirstVerifiedChunk(opts.transferId);
         got.add(blockIndex); downloadedBytes += loc.blockBytes;
         lastProgressAt = Date.now();                           // real forward progress
-        if (VB_RELIABILITY_FIXES) saveRecvBitmapSoon(opts.transferId, got);   // persist for resume
+        if (VB_RELIABILITY_FIXES) saveRecvBitmapSoon(opts.transferId, got);
+        // Tell the SERVER too, not just this device. Without this recv_mask
+        // stays empty, vb_have never fires, and the sender re-stages blocks
+        // the receiver already holds. Throttled + best-effort.
+        reportReceivedSoon(opts.transferId, chunkMaskFromBlocks(
+          got, (b) => { const l = locateBlock(p, b); return l ? { blockPlainOffset: l.blockPlainOffset, blockBytes: l.blockBytes } : null; },
+          st.chunkBytes, st.chunkCount));   // persist for resume
         opts.onProgress?.({ done: got.size, total: totalBlocks(p) || got.size, bytes: Math.min(downloadedBytes, opts.totalBytes), totalBytes: opts.totalBytes });
       }, opts.signal);
     }
@@ -243,7 +293,8 @@ export async function receiveTransfer(opts: {
     }
     await wait(POLL_MS);
   }
-  if (VB_RELIABILITY_FIXES) clearRecvBitmap(opts.transferId).catch(() => {});   // resume record no longer needed
+  if (VB_RELIABILITY_FIXES) clearRecvBitmap(opts.transferId).catch(() => {});
+  forgetReported(opts.transferId);   // resume record no longer needed
 
   // Whole-file integrity gate before we let the server purge the only other copy.
   let verified = true;

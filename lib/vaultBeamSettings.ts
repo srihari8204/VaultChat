@@ -8,6 +8,7 @@
 import { useSyncExternalStore } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { VB_AUTO_MAX_BYTES } from '../constants/flags';
+import { normalizeBlockBytes, type SupportedBlockBytes } from './vaultBeam/blockSize';
 
 export type VBMode = 'manual' | 'auto';
 export type VBNetwork = 'wifi' | 'cellular' | 'any';
@@ -21,6 +22,15 @@ export interface VBSettings {
   onlyCharging: boolean;
   notLowBattery: boolean;
   pauseRoaming: boolean;
+  /**
+   * PHYSICAL block size for the wire / R2 object, in bytes — 524288, 1048576 or
+   * 2097152. `null` means adaptive (measured throughput picks it), which is the
+   * shipped behaviour and the default.
+   *
+   * NOT the encryption unit. The logical AES-GCM chunk is a fixed 512 KiB and is
+   * not configurable from anywhere; see lib/vaultBeam/blockSize.ts.
+   */
+  blockBytes: SupportedBlockBytes | null;
 }
 
 // Defaults keep existing users unchanged (Manual). When a user switches to Auto,
@@ -34,6 +44,8 @@ export const DEFAULT_SETTINGS: VBSettings = {
   onlyCharging: false,
   notLowBattery: true,
   pauseRoaming: true,
+  // Adaptive, exactly as before this setting existed.
+  blockBytes: null,
 };
 
 // Selectable auto caps — deliberately no "Unlimited"; 2.5 GB is the hard max.
@@ -64,6 +76,9 @@ function normalize(raw: any): VBSettings {
     onlyCharging: !!raw.onlyCharging,
     notLowBattery: raw.notLowBattery !== false,
     pauseRoaming: raw.pauseRoaming !== false,
+    // Anything not one of the three supported sizes becomes null (adaptive),
+    // so a stale or hand-edited preference can never reach a buffer size.
+    blockBytes: normalizeBlockBytes(raw.blockBytes),
   });
 }
 

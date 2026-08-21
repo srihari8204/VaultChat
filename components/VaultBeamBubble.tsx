@@ -10,6 +10,8 @@
 import React, { useCallback } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, Alert } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { useRouter } from 'expo-router';
+import { messageFor, isVideo } from '../lib/vaultBeam/openFile';
 import { useTheme } from '../lib/theme';
 import { BRAND_ACCENT } from '../constants/theme';
 import { VB_AUTO_MAX_BYTES } from '../constants/flags';
@@ -36,33 +38,60 @@ function fmtEta(sec?: number): string | null {
 export default function VaultBeamBubble({
   msg, isMine, plain,
 }: {
-  msg: { meta?: any; content?: string | null; senderId?: string };
+  msg: { meta?: any; content?: string | null; senderId?: string; createdAt?: string | null };
   isMine: boolean;
   plain: string;       // decrypted message content (the manifest JSON)
 }) {
   const { colors } = useTheme();
+  const router = useRouter();
   const transferId: string | undefined = msg.meta?.transferId;
   const st = useTransfer(transferId);
   const manifest = parseManifest(plain);
 
   const name = manifest?.name ?? st?.name ?? 'File';
   const totalBytes = manifest?.size || Number(msg.meta?.size) || st?.totalBytes || 0;
-  const pct = st && st.total > 0
-    ? Math.min(100, Math.round((st.done / st.total) * 100))
-    : (st && st.totalBytes > 0 ? Math.min(100, Math.round((st.bytes / st.totalBytes) * 100)) : 0);
+  // BYTES FIRST, BLOCKS ONLY AS A LAST RESORT.
+  //
+  // `st.total` is the number of blocks PLANNED SO FAR, and the v2 plan is built
+  // reactively — relayGrow appends segments as throughput is measured. Measured
+  // on a real 755 MB send: 32 -> 96 -> 157 blocks, so a done/total bar filled to
+  // ~100%, the plan grew, and it dropped back and climbed again. That is
+  // indistinguishable from re-uploading, and it makes the ETA meaningless.
+  //
+  // totalBytes comes from the manifest and never changes, and the byte counters
+  // underneath are cumulative, so this denominator cannot move. Floor, not
+  // round, so the bar never reads 100% while bytes are still outstanding.
+  const pct = st && st.totalBytes > 0
+    ? Math.min(100, Math.floor((Math.max(0, Math.min(st.bytes, st.totalBytes)) / st.totalBytes) * 100))
+    : (st && st.total > 0 ? Math.min(100, Math.floor((st.done / st.total) * 100)) : 0);
   const status = st?.status;
   const active = status === 'uploading' || status === 'receiving';
 
   const onAccept = useCallback(async () => {
     if (!transferId || !manifest || !msg.senderId) { Alert.alert('Transfer unavailable', 'This transfer can’t be opened yet — try again in a moment.'); return; }
-    try { await startReceive({ transferId, manifest, peerId: msg.senderId }); }
+    // The offer's SERVER stamp, passed straight through — the receiver decides
+    // whether it is still acceptable, using the same clock that issued it.
+    try { await startReceive({ transferId, manifest, peerId: msg.senderId, offerCreatedAt: msg.createdAt }); }
     catch (e: any) { Alert.alert('Download failed', e?.message ?? 'Try again'); }
-  }, [transferId, manifest, msg.senderId]);
+  }, [transferId, manifest, msg.senderId, msg.createdAt]);
 
   const onCancel = useCallback(() => { if (transferId) cancelTransfer(transferId); }, [transferId]);
+  // openSaved returns a structured verdict rather than throwing, so the user
+  // gets a cause ("no app can open this") instead of a native exception string.
   const onOpen = useCallback(async () => {
-    if (st?.savedPath) { try { await openSaved(st.savedPath); } catch (e: any) { Alert.alert('Cannot open', e?.message ?? 'No handler for this file type'); } }
-  }, [st?.savedPath]);
+    if (!st?.savedPath) return;
+    // Video stays INSIDE the app. The root layout holds FLAG_SECURE, so an
+    // in-app player cannot be screen-recorded; handing the file to an external
+    // player drops that protection for a file that arrived E2E encrypted.
+    // Everything else (images, PDFs, documents) has no in-app viewer here, so
+    // it keeps the content:// + ACTION_VIEW path.
+    if (isVideo(st.name || st.savedPath)) {
+      router.push({ pathname: '/video-player', params: { uri: st.savedPath, filename: st.name || 'Video' } });
+      return;
+    }
+    const r = await openSaved(st.savedPath, st.name);
+    if (!r.ok) Alert.alert('Cannot open', messageFor(r.failure ?? 'UNKNOWN_ERROR'));
+  }, [st?.savedPath, st?.name, router]);
 
   // Status line + optional trailing action, per role × status.
   // Live meter (rate/ETA) comes from verified progress only — same truth as the bar.
@@ -71,21 +100,41 @@ export default function VaultBeamBubble({
   let line = fmtBytes(totalBytes);
   let action: React.ReactNode = null;
 
+  // THE TRANSPORT, IN THE ONE PLACE A HUMAN CAN SEE IT.
+  //
+  // `tier` only says direct-vs-relay, which cannot tell WEBRTC_DIRECT from
+  // WEBRTC_TURN — both are 'direct' — nor which address family won. That
+  // distinction is the difference between free peer-to-peer and a paid relay,
+  // and noteTransport already records it; it was simply never rendered, so on a
+  // release build (where the diagnostic logs are __DEV__-gated out) there was no
+  // way to observe it at all. Appended only when known, so nothing changes for a
+  // transfer that has not classified yet.
+  // The detail is suppressed when it merely repeats the kind: classifyTransport
+  // returns detail 'R2_RELAY' for the relay (there is no finer fact to give —
+  // R2 has no candidate pair), which rendered as the nonsense "R2_RELAY
+  // (R2_RELAY)". Guarding here rather than in classifyTransport keeps the fix
+  // true for every future kind whose detail happens to equal its name.
+  const detail = st?.transportDetail && st.transportDetail !== st.transport ? st.transportDetail : '';
+  const via = st?.transport ? ` · ${st.transport}${detail ? ` (${detail})` : ''}` : '';
+
   if (isMine) {
-    if (status === 'uploading') { line = `${st?.tier === 'relay' ? 'Uploading via relay' : 'Sending direct'}… ${pct}%${meter ? ` · ${meter}` : ''}`; action = <CancelBtn onPress={onCancel} colors={colors} />; }
-    else if (status === 'sent') { line = `${fmtBytes(totalBytes)} · Sent`; action = <Ionicons name="checkmark-done" size={18} color={colors.textDim} />; }
-    else if (status === 'complete') { line = `${fmtBytes(totalBytes)} · Delivered${avg ? ` · avg ${avg}` : ''}`; action = <Ionicons name="checkmark-done" size={18} color={BRAND_ACCENT} />; }
+    if (status === 'uploading') { line = `${st?.tier === 'relay' ? 'Uploading via relay' : 'Sending direct'}… ${pct}%${meter ? ` · ${meter}` : ''}${via}`; action = <CancelBtn onPress={onCancel} colors={colors} />; }
+    else if (status === 'sent') { line = `${fmtBytes(totalBytes)} · Sent`; action = st?.savedPath ? <PillBtn label="Open" icon="open-outline" onPress={onOpen} colors={colors} /> : <Ionicons name="checkmark-done" size={18} color={colors.textDim} />; }
+    else if (status === 'complete') { line = `${fmtBytes(totalBytes)} · Delivered${avg ? ` · avg ${avg}` : ''}${via}`; action = st?.savedPath ? <PillBtn label="Open" icon="open-outline" onPress={onOpen} colors={colors} /> : <Ionicons name="checkmark-done" size={18} color={BRAND_ACCENT} />; }
     else if (status === 'failed') { line = st?.error ? `Upload failed — ${st.error}` : 'Upload failed'; }
     else if (status === 'cancelled') { line = 'Cancelled'; }
+    // No retry affordance: the offer is past its window and the relay copy it
+    // depended on is gone, so a button here would only fail slowly.
+    else if (status === 'expired') { line = 'Transfer expired'; }
     else { line = `${fmtBytes(totalBytes)} · Sent`; action = <Ionicons name="cloud-upload-outline" size={18} color={colors.textDim} />; }
   } else {
     if (status === 'queued') { line = `${fmtBytes(totalBytes)} · Queued`; action = <CancelBtn onPress={onCancel} colors={colors} />; }
     else if (status === 'paused') { line = st?.error ? `Paused — ${st.error}` : 'Auto-download paused'; action = <PillBtn label="Resume" icon="download-outline" onPress={onAccept} colors={colors} />; }
     else if (status === 'receiving') {
       const verb = st?.auto ? 'Auto-downloading' : (st?.tier === 'relay' ? 'Downloading via relay' : 'Receiving direct');
-      line = `${verb}… ${pct}%${meter ? ` · ${meter}` : ''}`; action = <CancelBtn onPress={onCancel} colors={colors} />;
+      line = `${verb}… ${pct}%${meter ? ` · ${meter}` : ''}${via}`; action = <CancelBtn onPress={onCancel} colors={colors} />;
     }
-    else if (status === 'complete') { line = `${fmtBytes(totalBytes)} · Saved${avg ? ` · avg ${avg}` : ''}`; action = <PillBtn label="Open" icon="open-outline" onPress={onOpen} colors={colors} />; }
+    else if (status === 'complete') { line = `${fmtBytes(totalBytes)} · Saved${avg ? ` · avg ${avg}` : ''}${via}`; action = <PillBtn label="Open" icon="open-outline" onPress={onOpen} colors={colors} />; }
     else if (status === 'failed') { line = st?.error ? `Failed — ${st.error}` : 'Download failed'; action = <PillBtn label="Retry" icon="refresh" onPress={onAccept} colors={colors} />; }
     else if (status === 'cancelled') { line = 'Cancelled'; action = <PillBtn label="Accept" icon="download-outline" onPress={onAccept} colors={colors} />; }
     else {

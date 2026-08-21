@@ -1,5 +1,8 @@
 package com.vaultchat.app.vaultbeam
 
+import android.content.Context
+import android.net.Uri
+import android.os.ParcelFileDescriptor
 import android.util.Base64
 import com.facebook.react.bridge.Arguments
 import com.facebook.react.bridge.Promise
@@ -15,7 +18,10 @@ import java.io.DataInputStream
 import java.io.DataOutputStream
 import java.io.File
 import java.io.IOException
+import java.io.FileInputStream
 import java.io.RandomAccessFile
+import java.nio.ByteBuffer
+import java.nio.channels.FileChannel
 import java.net.HttpURLConnection
 import java.net.Inet4Address
 import java.net.InetSocketAddress
@@ -63,6 +69,70 @@ class VaultBeamStreamModule(reactContext: ReactApplicationContext) : ReactContex
 
     // Strip a file:// URI down to a filesystem path (RandomAccessFile needs a path,
     // not a URI). Callers pass app-owned cache/file paths, never content:// URIs.
+
+    /**
+     * Positional reader over the transfer SOURCE, which may be a local path or
+     * a `content://` URI.
+     *
+     * WHY THIS EXISTS
+     * ---------------
+     * DocumentPicker used copyToCacheDirectory=true, so a picked file was
+     * DUPLICATED into app cache before the transfer began. For a 12 GB send
+     * that means 12 GB of free space on top of the original and a long silent
+     * copy — which is why the nominal 12 GB ceiling was unreachable in
+     * practice, and why Android could evict the copy mid-transfer.
+     *
+     * Reading the picked URI directly removes the duplicate entirely. A
+     * content:// URI cannot be opened by RandomAccessFile, so it goes through
+     * ContentResolver.openFileDescriptor and a FileChannel instead.
+     *
+     * Positional reads (`FileChannel.read(buf, position)`) rather than
+     * seek+read: they do not move the channel position, so concurrent chunk
+     * reads on the IO pool cannot interleave into each other's offsets. That
+     * matters here because the upload pool reads several blocks at once.
+     */
+    private class SrcReader(ctx: Context, spec: String) : java.io.Closeable {
+        private val pfd: ParcelFileDescriptor?
+        private val raf: RandomAccessFile?
+        private val fis: FileInputStream?
+        private val ch: FileChannel
+
+        init {
+            if (spec.startsWith("content://")) {
+                pfd = ctx.contentResolver.openFileDescriptor(Uri.parse(spec), "r")
+                    ?: throw IOException("cannot open $spec")
+                fis = FileInputStream(pfd.fileDescriptor)
+                raf = null
+                ch = fis.channel
+            } else {
+                pfd = null
+                fis = null
+                raf = RandomAccessFile(if (spec.startsWith("file://")) spec.substring(7) else spec, "r")
+                ch = raf.channel
+            }
+        }
+
+        fun size(): Long = ch.size()
+
+        /** Fill dst[0..len) from `position`. Throws if the source ends early. */
+        fun readAt(position: Long, dst: ByteArray, len: Int) {
+            val buf = ByteBuffer.wrap(dst, 0, len)
+            var pos = position
+            while (buf.hasRemaining()) {
+                val n = ch.read(buf, pos)
+                if (n <= 0) throw IOException("short read at $pos")
+                pos += n.toLong()
+            }
+        }
+
+        override fun close() {
+            try { ch.close() } catch (_: Throwable) {}
+            try { fis?.close() } catch (_: Throwable) {}
+            try { raf?.close() } catch (_: Throwable) {}
+            try { pfd?.close() } catch (_: Throwable) {}
+        }
+    }
+
     private fun fsPath(p: String) = if (p.startsWith("file://")) p.substring(7) else p
 
     // nonce = 4B transferId prefix ‖ u64 big-endian globalChunkIndex (matches JS).
@@ -172,7 +242,7 @@ class VaultBeamStreamModule(reactContext: ReactApplicationContext) : ReactContex
                 // Seal each chunk into memory (≤ block + 8·16B overhead). Bounded —
                 // never the whole file — which is the entire point of the native path.
                 val parts = ArrayList<ByteArray>(chunksPerBlock)
-                RandomAccessFile(srcPath, "r").use { raf ->
+                SrcReader(reactApplicationContext, srcPath).use { src ->
                     var i = 0
                     while (i < chunksPerBlock) {
                         val plainOffset = blockPlainOffset + i.toLong() * chunkBytes
@@ -180,7 +250,7 @@ class VaultBeamStreamModule(reactContext: ReactApplicationContext) : ReactContex
                         val id = chunkIdFor(scheme, firstChunk, i, plainOffset, chunkBytes)
                         val plainLen = minOf(chunkBytes.toLong(), totalBytes - plainOffset).toInt()
                         val plain = ByteArray(plainLen)
-                        raf.seek(plainOffset); raf.readFully(plain, 0, plainLen)
+                        src.readAt(plainOffset, plain, plainLen)
                         val aad = "$transferId|$fileId|$id".toByteArray(Charsets.UTF_8)
                         parts.add(gcm(Cipher.ENCRYPT_MODE, keyBytes, chunkNonce(transferId, id), aad).doFinal(plain))
                         i++
@@ -272,9 +342,18 @@ class VaultBeamStreamModule(reactContext: ReactApplicationContext) : ReactContex
         io.execute {
             try {
                 val md = MessageDigest.getInstance("SHA-256")
-                RandomAccessFile(fsPath(path), "r").use { raf ->
+                // Streamed in 1 MiB windows, never whole-file: this hashes the
+                // SOURCE, which for a 12 GB send is the picked content:// URI.
+                SrcReader(reactApplicationContext, path).use { src ->
+                    val total = src.size()
                     val buf = ByteArray(1 shl 20)
-                    while (true) { val r = raf.read(buf); if (r <= 0) break; md.update(buf, 0, r) }
+                    var pos = 0L
+                    while (pos < total) {
+                        val n = minOf(buf.size.toLong(), total - pos).toInt()
+                        src.readAt(pos, buf, n)
+                        md.update(buf, 0, n)
+                        pos += n.toLong()
+                    }
                 }
                 promise.resolve(md.digest().joinToString("") { "%02x".format(it) })
             } catch (e: Throwable) { promise.reject("sha256", e) }
@@ -324,7 +403,7 @@ class VaultBeamStreamModule(reactContext: ReactApplicationContext) : ReactContex
                 val plainOffset = g * chunkBytes.toLong()
                 val plainLen = minOf(chunkBytes.toLong(), totalBytes - plainOffset).toInt()
                 val plain = ByteArray(plainLen)
-                RandomAccessFile(srcPath, "r").use { it.seek(plainOffset); it.readFully(plain, 0, plainLen) }
+                SrcReader(reactApplicationContext, srcPath).use { it.readAt(plainOffset, plain, plainLen) }
                 val aad = "$transferId|$fileId|$g".toByteArray(Charsets.UTF_8)
                 val ct = gcm(Cipher.ENCRYPT_MODE, keyBytes, chunkNonce(transferId, g), aad).doFinal(plain)
                 promise.resolve(Base64.encodeToString(ct, Base64.NO_WRAP))
@@ -415,13 +494,13 @@ class VaultBeamStreamModule(reactContext: ReactApplicationContext) : ReactContex
 
                 val indices = runIndices(opts, chunkCount)
                 val expected = indices.size
-                RandomAccessFile(srcPath, "r").use { raf ->
+                SrcReader(reactApplicationContext, srcPath).use { src ->
                     for (n in indices.indices) {
                         val g = indices[n]
                         val plainOffset = g * chunkBytes.toLong()
                         val plainLen = minOf(chunkBytes.toLong(), totalBytes - plainOffset).toInt()
                         val plain = ByteArray(plainLen)
-                        raf.seek(plainOffset); raf.readFully(plain, 0, plainLen)
+                        src.readAt(plainOffset, plain, plainLen)
                         val aad = "$transferId|$fileId|$g".toByteArray(Charsets.UTF_8)
                         val ct = gcm(Cipher.ENCRYPT_MODE, keyBytes, chunkNonce(transferId, g), aad).doFinal(plain)
                         out.writeInt(g.toInt()); out.writeInt(ct.size); out.write(ct)
@@ -498,5 +577,52 @@ class VaultBeamStreamModule(reactContext: ReactApplicationContext) : ReactContex
             } catch (e: Throwable) { promise.reject("lanConnect", e) }
             finally { try { sock?.close() } catch (_: Throwable) {} }
         }
+    }
+
+    // ── BACKGROUND EXECUTION ────────────────────────────────────────
+    // Thin passthrough to VaultBeamForegroundService. No transfer logic lives
+    // here or in the service: JS owns transfer state and simply says "keep me
+    // alive, and show this text". See VaultBeamForegroundService.kt.
+
+    @ReactMethod
+    fun startTransferService(title: String?, text: String?, promise: Promise) {
+        try {
+            VaultBeamForegroundService.onCancelRequested = {
+                // Same-process hop back into JS; VaultBeam owns what cancelling
+                // actually means (AbortSignal + persisted state).
+                try {
+                    reactApplicationContext
+                        .getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
+                        .emit("vbServiceCancel", Arguments.createMap())
+                } catch (_: Throwable) {}
+            }
+            VaultBeamForegroundService.start(
+                reactApplicationContext,
+                title ?: "VaultBeam",
+                text ?: "Transferring…",
+            )
+            promise.resolve(true)
+        } catch (e: Throwable) { promise.reject("startTransferService", e) }
+    }
+
+    @ReactMethod
+    fun updateTransferService(title: String?, text: String?, promise: Promise) {
+        try {
+            VaultBeamForegroundService.update(
+                reactApplicationContext,
+                title ?: "VaultBeam",
+                text ?: "Transferring…",
+            )
+            promise.resolve(true)
+        } catch (e: Throwable) { promise.reject("updateTransferService", e) }
+    }
+
+    @ReactMethod
+    fun stopTransferService(promise: Promise) {
+        try {
+            VaultBeamForegroundService.onCancelRequested = null
+            VaultBeamForegroundService.stop(reactApplicationContext)
+            promise.resolve(true)
+        } catch (e: Throwable) { promise.reject("stopTransferService", e) }
     }
 }

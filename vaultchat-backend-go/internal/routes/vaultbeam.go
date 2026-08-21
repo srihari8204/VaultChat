@@ -193,37 +193,56 @@ func vbAuthErr(w http.ResponseWriter, status int) {
 // ── S3/R2 via stdlib SigV4 (lib/storage.js ops this route uses) ─────
 
 func vbStoreEnabled() bool {
-	return os.Getenv("S3_ENDPOINT") != "" && os.Getenv("S3_ACCESS_KEY") != ""
+	return vbServerEndpoint() != "" && vbAccessKey() != ""
 }
 
-func vbBucket() string {
-	if b := os.Getenv("S3_BUCKET"); b != "" {
-		return b
+// VAULTBEAM STORAGE IS ADDRESSABLE SEPARATELY FROM EVERYTHING ELSE.
+//
+// S3_BUCKET is read by three unrelated subsystems — user media (user.go),
+// general storage (storage/storage.go) and this one. Repointing S3_BUCKET to
+// move transfers would silently move ATTACHMENTS AND ALL OTHER MEDIA with
+// them, to a bucket that does not contain them. The VAULTBEAM_* overrides
+// below give transfers their own backend without touching the others, exactly
+// as BROADCAST_BUCKET already does for HLS segments (storage.go:84).
+//
+// Every one falls back to the shared S3_* value, so with no VAULTBEAM_* set
+// the behaviour is byte-identical to before this existed.
+func vbEnv(vbKey, sharedKey, def string) string {
+	if v := os.Getenv(vbKey); v != "" {
+		return v
 	}
-	return "vaultchat-media"
+	if v := os.Getenv(sharedKey); v != "" {
+		return v
+	}
+	return def
 }
 
-func vbRegion() string {
-	if r := os.Getenv("S3_REGION"); r != "" {
-		return r
-	}
-	return "auto"
-}
+func vbBucket() string    { return vbEnv("VAULTBEAM_S3_BUCKET", "S3_BUCKET", "vaultchat-media") }
+func vbAccessKey() string { return vbEnv("VAULTBEAM_S3_ACCESS_KEY", "S3_ACCESS_KEY", "") }
+func vbSecretKey() string { return vbEnv("VAULTBEAM_S3_SECRET_KEY", "S3_SECRET_KEY", "") }
+
+func vbRegion() string { return vbEnv("VAULTBEAM_S3_REGION", "S3_REGION", "auto") }
 
 // Presigned URLs encode the PUBLIC endpoint (what clients hit); server-side
 // ops (HEAD/list/delete) use the INTERNAL endpoint — same split as storage.js.
 func vbSignEndpoint() string {
-	if e := os.Getenv("S3_PUBLIC_ENDPOINT"); e != "" {
+	if e := vbPublicRaw(); e != "" {
 		return e
 	}
-	return os.Getenv("S3_ENDPOINT")
+	return vbEnv("VAULTBEAM_S3_ENDPOINT", "S3_ENDPOINT", "")
+}
+
+// Split out so vbServerEndpoint can fall back to the public value without the
+// two helpers calling each other in a loop.
+func vbPublicRaw() string {
+	return vbEnv("VAULTBEAM_S3_PUBLIC_ENDPOINT", "S3_PUBLIC_ENDPOINT", "")
 }
 
 func vbServerEndpoint() string {
-	if e := os.Getenv("S3_ENDPOINT"); e != "" {
+	if e := vbEnv("VAULTBEAM_S3_ENDPOINT", "S3_ENDPOINT", ""); e != "" {
 		return e
 	}
-	return vbSignEndpoint()
+	return vbPublicRaw()
 }
 
 // vbURIEscape is AWS SigV4 URI escaping (RFC 3986 unreserved; uppercase hex).
@@ -294,7 +313,7 @@ func vbPresign(method, key string, ttlSec int) string {
 	canonPath := vbURIEscape(vbObjectPath(u.Path, key), false)
 	q := vbCanonicalQuery([][2]string{
 		{"X-Amz-Algorithm", "AWS4-HMAC-SHA256"},
-		{"X-Amz-Credential", os.Getenv("S3_ACCESS_KEY") + "/" + scope},
+		{"X-Amz-Credential", vbAccessKey() + "/" + scope},
 		{"X-Amz-Date", amzDate},
 		{"X-Amz-Expires", strconv.Itoa(ttlSec)},
 		{"X-Amz-SignedHeaders", "host"},
@@ -302,7 +321,7 @@ func vbPresign(method, key string, ttlSec int) string {
 	canonReq := method + "\n" + canonPath + "\n" + q +
 		"\nhost:" + u.Host + "\n\nhost\nUNSIGNED-PAYLOAD"
 	sts := "AWS4-HMAC-SHA256\n" + amzDate + "\n" + scope + "\n" + vbSHA256Hex([]byte(canonReq))
-	sig := hex.EncodeToString(vbHMAC(vbSigningKey(os.Getenv("S3_SECRET_KEY"), dateStamp, region), []byte(sts)))
+	sig := hex.EncodeToString(vbHMAC(vbSigningKey(vbSecretKey(), dateStamp, region), []byte(sts)))
 	return u.Scheme + "://" + u.Host + canonPath + "?" + q + "&X-Amz-Signature=" + sig
 }
 
@@ -344,7 +363,7 @@ func vbS3Request(ctx context.Context, method, key string, query [][2]string, bod
 	canonReq := method + "\n" + canonPath + "\n" + canonQuery + "\n" +
 		canonHeaders + "\n" + signedHeaders + "\n" + payloadHash
 	sts := "AWS4-HMAC-SHA256\n" + amzDate + "\n" + scope + "\n" + vbSHA256Hex([]byte(canonReq))
-	sig := hex.EncodeToString(vbHMAC(vbSigningKey(os.Getenv("S3_SECRET_KEY"), dateStamp, region), []byte(sts)))
+	sig := hex.EncodeToString(vbHMAC(vbSigningKey(vbSecretKey(), dateStamp, region), []byte(sts)))
 
 	full := u.Scheme + "://" + u.Host + canonPath
 	if canonQuery != "" {
@@ -360,7 +379,7 @@ func vbS3Request(ctx context.Context, method, key string, query [][2]string, bod
 		req.Header.Set("Content-MD5", contentMD5)
 	}
 	req.Header.Set("Authorization",
-		"AWS4-HMAC-SHA256 Credential="+os.Getenv("S3_ACCESS_KEY")+"/"+scope+
+		"AWS4-HMAC-SHA256 Credential="+vbAccessKey()+"/"+scope+
 			", SignedHeaders="+signedHeaders+", Signature="+sig)
 	return vbHTTPClient.Do(req)
 }
@@ -397,13 +416,29 @@ type vbDeleteReq struct {
 	Objects []vbDeleteObj `xml:"Object"`
 }
 
-// vbDeletePrefix — storage.js deletePrefix: list + batch DeleteObjects (each
-// ListObjectsV2 page ≤ 1000 keys, matching the S3 DeleteObjects cap).
-// Best-effort like Node: errors are logged, never surfaced to the route.
+// vbDeletePrefix — best-effort wrapper, unchanged for every existing caller.
 func vbDeletePrefix(ctx context.Context, prefix string) {
+	_, _ = vbDeletePrefixCount(ctx, prefix)
+}
+
+// vbDeletePrefixCount — storage.js deletePrefix: list + batch DeleteObjects
+// (each ListObjectsV2 page ≤ 1000 keys, matching the S3 DeleteObjects cap).
+//
+// RETURNS AN ERROR, and that is the point.
+//
+// The reaper must not drop a vb_transfer row until the objects it names are
+// actually gone: transfer_id is the ONLY handle that maps a transfer to its
+// `vault_relay/<id>/` prefix, so deleting the row first turns a transient R2
+// failure into an object that nothing can ever enumerate again. The row is the
+// work queue; it may only be discarded once the queue item is done.
+//
+// Returns the number of objects deleted, and a non-nil error if ANY page failed
+// — a partially-deleted prefix counts as failure so it is retried.
+func vbDeletePrefixCount(ctx context.Context, prefix string) (int, error) {
 	if !vbStoreEnabled() {
-		return
+		return 0, fmt.Errorf("relay storage not configured")
 	}
+	deleted := 0
 	token := ""
 	for {
 		q := [][2]string{{"list-type", "2"}, {"prefix", prefix}}
@@ -412,19 +447,16 @@ func vbDeletePrefix(ctx context.Context, prefix string) {
 		}
 		resp, err := vbS3Request(ctx, "GET", "", q, nil, "")
 		if err != nil {
-			log.Printf("[storage] deletePrefix: %v", err)
-			return
+			return deleted, err
 		}
 		data, _ := io.ReadAll(resp.Body)
 		resp.Body.Close()
 		if resp.StatusCode != 200 {
-			log.Printf("[storage] deletePrefix: list %d", resp.StatusCode)
-			return
+			return deleted, fmt.Errorf("list %d", resp.StatusCode)
 		}
 		var list vbListResult
 		if err := xml.Unmarshal(data, &list); err != nil {
-			log.Printf("[storage] deletePrefix: %v", err)
-			return
+			return deleted, err
 		}
 		if len(list.Contents) > 0 {
 			del := vbDeleteReq{Quiet: true}
@@ -436,18 +468,17 @@ func vbDeletePrefix(ctx context.Context, prefix string) {
 			dresp, err := vbS3Request(ctx, "POST", "", [][2]string{{"delete", ""}},
 				body, base64.StdEncoding.EncodeToString(sum[:]))
 			if err != nil {
-				log.Printf("[storage] deletePrefix: %v", err)
-				return
+				return deleted, err
 			}
 			io.Copy(io.Discard, dresp.Body) //nolint:errcheck
 			dresp.Body.Close()
 			if dresp.StatusCode != 200 {
-				log.Printf("[storage] deletePrefix: delete %d", dresp.StatusCode)
-				return
+				return deleted, fmt.Errorf("delete %d", dresp.StatusCode)
 			}
+			deleted += len(del.Objects)
 		}
 		if !list.IsTruncated || list.NextToken == "" {
-			return
+			return deleted, nil
 		}
 		token = list.NextToken
 	}
@@ -637,6 +668,22 @@ func vbRelayBlockURL(w http.ResponseWriter, r *http.Request) {
 		httpx.Err(w, 410, "transfer "+t.State)
 		return
 	}
+	// THE 24H DEADLINE ENDS ACCESS, NOT JUST STORAGE.
+	//
+	// vbLoadTransfer reads expires_at but never compares it, so until this gate
+	// the only thing that ended access was the hourly sweep. Measured on prod
+	// 2026-08-20: a transfer whose deadline had passed two hours earlier still
+	// minted a working presigned GET and R2 still served the bytes.
+	//
+	// The retention promise is that a relay object is unreachable once its
+	// transfer expires — a sweep that has not run yet is not a reason to hand
+	// out a fresh key to it. Deliberately gated HERE and not in vbLoadTransfer:
+	// relay/complete and relay/abort must stay callable on an expired transfer,
+	// because abort is a cleanup path and blocking it would strand objects.
+	if !t.ExpiresAt.IsZero() && !time.Now().Before(t.ExpiresAt) {
+		httpx.Err(w, 410, "transfer expired")
+		return
+	}
 
 	urls := []map[string]any{}
 	for _, raw := range b.Blocks {
@@ -653,19 +700,44 @@ func vbRelayBlockURL(w http.ResponseWriter, r *http.Request) {
 		}
 		var u string
 		if op == "put" {
-			u = vbPresign("PUT", vbRelayKey(tid, i), vbPutTTL)
+			u = vbPresign("PUT", vbRelayKey(tid, i), vbClampTTL(vbPutTTL, t.ExpiresAt))
 		} else {
-			u = vbPresign("GET", vbRelayKey(tid, i), vbGetTTL)
+			u = vbPresign("GET", vbRelayKey(tid, i), vbClampTTL(vbGetTTL, t.ExpiresAt))
 		}
 		if u != "" {
 			urls = append(urls, map[string]any{"blockIndex": i, "url": u})
 		}
 	}
-	ttl := vbPutTTL
+	ttl := vbClampTTL(vbPutTTL, t.ExpiresAt)
 	if op == "get" {
-		ttl = vbGetTTL
+		ttl = vbClampTTL(vbGetTTL, t.ExpiresAt)
 	}
 	httpx.JSON(w, 200, map[string]any{"op": op, "ttl": ttl, "urls": urls})
+}
+
+// vbClampTTL shortens a presigned URL's lifetime so it cannot outlive the
+// transfer's absolute deadline.
+//
+// Without this the deadline gate above is only half a fix: a URL minted one
+// second before expiry stays valid for its full hour, which is a working key to
+// an object the policy says is finished. Clamping is the difference between "we
+// stop issuing keys" and "no key works past the deadline".
+//
+// Only ever SHORTENS — it cannot extend a TTL, and it never touches expires_at.
+// A floor of 1s keeps a signature valid-but-useless rather than malformed;
+// callers past the deadline are already refused above.
+func vbClampTTL(ttlSec int, deadline time.Time) int {
+	if deadline.IsZero() {
+		return ttlSec
+	}
+	left := int(time.Until(deadline).Seconds())
+	if left < 1 {
+		return 1
+	}
+	if left < ttlSec {
+		return left
+	}
+	return ttlSec
 }
 
 // POST /vaultbeam/relay/uploaded — sender reports finished PUTs (HEAD-verified).
@@ -967,7 +1039,14 @@ func vbRelayComplete(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	vbDeletePrefix(ctx, "vault_relay/"+t.TransferID+"/")
+	// DELETION HAPPENS HERE AND NOWHERE EARLIER.
+	//
+	// Everything above is the integrity gate: recipient authorisation, session
+	// version, and a completion claim whose bitmap must cover every chunk. A
+	// per-block delete as each block downloaded would destroy the resume path
+	// the moment a receiver's SHA-256 came out wrong, so the relay copy lives
+	// until the receiver asserts the WHOLE file.
+	vbCleanupRelay(ctx, t.TransferID, "SUCCESS")
 	if _, err := db.Pool.Exec(ctx,
 		`UPDATE vb_transfer SET state = 'complete', uploaded_mask = '\x' WHERE transfer_id = $1`,
 		t.TransferID); err != nil {
@@ -1002,7 +1081,7 @@ func vbRelayAbort(w http.ResponseWriter, r *http.Request) {
 		httpx.Err(w, 410, "transfer complete")
 		return
 	}
-	vbDeletePrefix(ctx, "vault_relay/"+t.TransferID+"/")
+	vbCleanupRelay(ctx, t.TransferID, "ABORTED")
 	if _, err := db.Pool.Exec(ctx,
 		`UPDATE vb_transfer SET state = 'aborted', uploaded_mask = '\x' WHERE transfer_id = $1`,
 		t.TransferID); err != nil {
@@ -1017,10 +1096,124 @@ func vbRelayAbort(w http.ResponseWriter, r *http.Request) {
 	httpx.JSON(w, 200, map[string]any{"ok": true})
 }
 
-// VaultbeamSweepExpired reaps stale vb_transfer rows (objects are auto-purged
-// by the 24h R2 lifecycle rule). Node: hourly setInterval in server.js —
-// schedule this from the Go orchestrator the same way.
+// vbSweepBatch caps how many expired transfers one tick handles. Each costs a
+// list + a delete against R2, and the sweep runs hourly — a bound keeps a
+// backlog from turning one tick into a long-running storm.
+const vbSweepBatch = 200
+
+// vbCleanupRelay deletes a transfer's relay objects on a terminal transition
+// (a verified receive, or an abort) and records what happened.
+//
+// NEVER fails the request. On the success path the file is already verified by
+// the time this runs, and telling a receiver their transfer failed because a
+// storage DELETE returned 500 would be a lie about the only thing they care
+// about.
+//
+// On failure it pulls `expires_at` FORWARD to now so the hourly reaper retries
+// within the hour rather than leaving objects for up to 24h. LEAST, never
+// GREATEST: this may only ever SHORTEN retention. Nothing in this file may
+// extend a deadline — that is the sliding-TTL the policy forbids, and a transfer
+// that has just reached a terminal state has no retention left to claim anyway.
+func vbCleanupRelay(ctx context.Context, transferID, reason string) {
+	started := time.Now()
+	n, err := vbDeletePrefixCount(ctx, "vault_relay/"+transferID+"/")
+	if err == nil {
+		log.Printf("RELAY_CLEANUP_SUCCESS transferId=%s reason=%s objects=%d durationMs=%d",
+			transferID, reason, n, time.Since(started).Milliseconds())
+		return
+	}
+	log.Printf("RELAY_CLEANUP_FAILED transferId=%s reason=%s objects=%d durationMs=%d err=%v",
+		transferID, reason, n, time.Since(started).Milliseconds(), err)
+	if _, uerr := db.Pool.Exec(ctx,
+		`UPDATE vb_transfer SET expires_at = LEAST(expires_at, NOW()) WHERE transfer_id = $1`,
+		transferID); uerr != nil {
+		log.Printf("RELAY_CLEANUP_RETRY transferId=%s could not arm reaper: %v", transferID, uerr)
+		return
+	}
+	log.Printf("RELAY_CLEANUP_RETRY transferId=%s armed for the next sweep", transferID)
+}
+
+// VaultbeamSweepExpired enforces the 24h relay retention ceiling.
+//
+// # WHAT THIS REPLACED, AND WHY IT WAS NOT ENOUGH
+//
+// It used to be one statement:
+//
+//	DELETE FROM vb_transfer WHERE expires_at < NOW()
+//
+// with a comment saying "objects are auto-purged by the 24h R2 lifecycle rule".
+// That deletes the ROW ONLY. The application never deleted a single expired
+// object, so the entire retention guarantee rested on a bucket lifecycle rule
+// living outside this codebase — and on 2026-08-20 that rule could not be
+// confirmed to exist (the API token is not permitted to read lifecycle config).
+//
+// Worse than unverified: transfer_id is the ONLY handle mapping a transfer to
+// its `vault_relay/<id>/` prefix. Dropping the row first destroys the ability to
+// ever enumerate those objects again, so if the rule is absent the leak is both
+// permanent and invisible. A retention policy may not depend on something this
+// process cannot see.
+//
+// Now: delete the objects, and drop the row ONLY once they are gone.
+//
+// # IDEMPOTENT BY CONSTRUCTION — no lock, no claim, no new state
+//
+// Deleting an absent prefix is a no-op and deleting an absent row is a no-op,
+// so two workers racing the same transfer duplicate work and corrupt nothing.
+// A failure leaves the row in place, which means the NEXT tick retries it: the
+// row is the work queue, and that is what makes this survive an API restart, a
+// crashed worker, and a receiver who never comes back — with no extra column
+// and no migration.
 func VaultbeamSweepExpired(ctx context.Context) error {
-	_, err := db.Pool.Exec(ctx, `DELETE FROM vb_transfer WHERE expires_at < NOW()`)
-	return err
+	rows, err := db.Pool.Query(ctx,
+		`SELECT transfer_id, state FROM vb_transfer
+		  WHERE expires_at < NOW()
+		  ORDER BY expires_at
+		  LIMIT $1`, vbSweepBatch)
+	if err != nil {
+		return err
+	}
+	type item struct{ id, state string }
+	var todo []item
+	for rows.Next() {
+		var it item
+		if err := rows.Scan(&it.id, &it.state); err != nil {
+			rows.Close()
+			return err
+		}
+		todo = append(todo, it)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	if len(todo) == 0 {
+		return nil
+	}
+
+	started := time.Now()
+	objects, cleared, failed := 0, 0, 0
+	for _, it := range todo {
+		n, derr := vbDeletePrefixCount(ctx, "vault_relay/"+it.id+"/")
+		objects += n
+		if derr != nil {
+			// Row deliberately left in place: it is the retry ticket, and the
+			// only way back to these object keys.
+			failed++
+			log.Printf("RELAY_CLEANUP_FAILED transferId=%s state=%s objects=%d err=%v — row kept for retry",
+				it.id, it.state, n, derr)
+			continue
+		}
+		if _, err := db.Pool.Exec(ctx, `DELETE FROM vb_transfer WHERE transfer_id = $1`, it.id); err != nil {
+			// Objects are gone; the row will be re-selected next tick and its
+			// (now empty) prefix deleted again as a no-op. Safe either way.
+			failed++
+			log.Printf("RELAY_CLEANUP_RETRY transferId=%s objects=%d rowErr=%v", it.id, n, err)
+			continue
+		}
+		cleared++
+		log.Printf("RELAY_CLEANUP_EXPIRED transferId=%s state=%s objects=%d", it.id, it.state, n)
+	}
+	log.Printf("RELAY_CLEANUP_COMPLETED scanned=%d cleared=%d failed=%d objects=%d durationMs=%d",
+		len(todo), cleared, failed, objects, time.Since(started).Milliseconds())
+	return nil
 }

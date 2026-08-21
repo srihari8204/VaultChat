@@ -61,7 +61,10 @@ export async function onIncomingVaultbeamMessage(m: any): Promise<void> {
     if (!decision.auto) return;
 
     markTransferQueued(transferId, manifest.name, manifest.size || size);
-    enqueueAutoDownload(transferId, () => autoStartReceive({ transferId, manifest, peerId: senderId ?? '' }));
+    // Same server stamp the manual card passes. Auto-download must not be the
+    // path that quietly accepts an offer the manual card would refuse.
+    const offerCreatedAt: string | null = (pick(m.createdAt, m.created_at) as string) ?? null;
+    enqueueAutoDownload(transferId, () => autoStartReceive({ transferId, manifest, peerId: senderId ?? '', offerCreatedAt }));
   } catch { /* fail-safe: never let ingest break message delivery */ }
 }
 

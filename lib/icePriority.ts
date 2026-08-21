@@ -105,6 +105,20 @@ export interface ConnectionOutcome {
   isDirect: boolean;   // host/reflexive = free; relay = you paid
   isIPv6: boolean;
   roundTripTimeMs?: number;
+  /**
+   * BOTH ends of the winning pair, as bare ICE types ('host' | 'srflx' |
+   * 'prflx' | 'relay' | 'unknown').
+   *
+   * The local type alone cannot answer "did this go through TURN?": a pair is
+   * relayed if EITHER end is a relay candidate, and the common asymmetric case
+   * is one peer behind a symmetric NAT relaying to a peer that is not. Reading
+   * only the local side reports that transfer as direct, which is the wrong
+   * answer to the only question this telemetry exists to settle.
+   *
+   * Types only — never addresses. See lib/vaultBeam/transportLabel.ts.
+   */
+  localType: string;
+  remoteType: string;
 }
 
 /** Parse getStats() into the chosen (nominated, succeeded) pair, or null. */
@@ -115,7 +129,9 @@ export function readWinningPair(stats: any): ConnectionOutcome | null {
   stats.forEach((report: any) => {
     if (report?.type === 'candidate-pair' && report.state === 'succeeded' && report.nominated) {
       const local = get(report.localCandidateId);
+      const remote = get(report.remoteCandidateId);
       const type: string = local?.candidateType ?? 'unknown';
+      const rtype: string = remote?.candidateType ?? 'unknown';
       const addr: string = local?.address ?? local?.ip ?? '';
       const v6 = addr.includes(':') && !addr.includes('.');
       let wonVia: CandidateClass | 'unknown' = 'unknown';
@@ -123,8 +139,13 @@ export function readWinningPair(stats: any): ConnectionOutcome | null {
       else if (type === 'srflx' || type === 'prflx') wonVia = v6 ? 'ipv6Reflexive' : 'ipv4Reflexive';
       else if (type === 'relay') wonVia = v6 ? 'ipv6Relay' : 'ipv4Relay';
       outcome = {
-        wonVia, isDirect: type !== 'relay', isIPv6: v6,
+        wonVia,
+        // EITHER end being a relay means the media was relayed.
+        isDirect: type !== 'relay' && rtype !== 'relay',
+        isIPv6: v6,
         roundTripTimeMs: report.currentRoundTripTime != null ? Math.round(report.currentRoundTripTime * 1000) : undefined,
+        localType: type,
+        remoteType: rtype,
       };
     }
   });

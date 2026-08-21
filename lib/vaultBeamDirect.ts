@@ -16,6 +16,8 @@
 // Signaling is BUFFERED from the moment of pull so an early offer/ice is never
 // lost while the LAN attempt is still running.
 
+import { markFirstByte, markFirstVerifiedChunk, markTransportConnected, notePeerProgress, noteStall } from './vaultBeam/transferMetrics';
+import { chunkMaskFromCommitted, contiguousVerifiedPrefix, reportReceivedSoon } from './vaultBeam/reportReceived';
 import { getSocket } from './socket';
 import { type IceServer } from './chatService';
 import { getIceServers } from './iceConfig';
@@ -45,6 +47,16 @@ const SERVE_WAIT_MS  = 60000;       // sender: wait for a pull before giving up 
 const CONNECT_MS     = 12000;       // either side: give up on direct if nothing CONNECTS in time
 const P2P_OFFER_MS   = 8000;        // recipient: wait for the sender's datachannel offer
 const STALL_MS       = 15000;       // recipient: abandon a direct tier that goes silent → relay
+/**
+ * SLA ceiling, not a timer.
+ *
+ * A direct sender must never sit stalled longer than this after the last
+ * GENUINE peer-progress event. STALL_MS (15 s) is the actual detector and is
+ * deliberately well under it — this constant exists so the margin is asserted
+ * by a test rather than assumed, and so nobody "meets the requirement" by
+ * raising the detector to 45 s. The observed pre-fix behaviour was minutes.
+ */
+export const DIRECT_STALL_MAX_MS = 45000;
 const ACK_TIMEOUT_MS = 30000;       // sender: wait for the receiver's delivery ack after eof
 
 // A direct tier that CONNECTS but then goes silent (Wi-Fi drop, peer suspended)
@@ -65,7 +77,15 @@ export interface DirectGeom {
   transferId: string; fileId: string; keyB64: string; token: string; peerId: string;
   chunkBytes: number; chunkCount: number; totalBytes: number;
 }
-export type ProgressCb = (done: number, total: number) => void;
+/**
+ * @param done   chunks VERIFIED so far — the honest progress number for a UI.
+ * @param total  chunk count.
+ * @param contiguous  chunks verified from 0 with NO gap. Only this may be
+ *   turned into a byte prefix (haveBytes); `done` may not, because writes can
+ *   complete out of order. Omitted by transports that stream strictly
+ *   sequentially, where the caller's existing `done` is already a prefix.
+ */
+export type ProgressCb = (done: number, total: number, contiguous?: number) => void;
 
 const b64ToU8 = (b64: string): Uint8Array => new Uint8Array(Buffer.from(b64, 'base64'));
 const u8ToB64 = (u8: Uint8Array): string => Buffer.from(u8).toString('base64');
@@ -93,11 +113,22 @@ async function iceServers(): Promise<IceServer[]> {
 }
 // Log which candidate pair actually won (measures the real Jio/Airtel IPv6
 // hit-rate — direct vs paid relay). Best-effort; never blocks the transfer.
-function logIceWin(pc: any, tag: string): void {
+function logIceWin(pc: any, tag: string, transferId?: string): void {
   try {
     pc.getStats().then((s: any) => {
       const o = readWinningPair(s);
-      if (o) perf.mark('vaultbeam_ice_win', { tag, wonVia: o.wonVia, direct: o.isDirect, ipv6: o.isIPv6, rttMs: o.roundTripTimeMs });
+      if (!o) return;
+      perf.mark('vaultbeam_ice_win', { tag, wonVia: o.wonVia, direct: o.isDirect, ipv6: o.isIPv6, rttMs: o.roundTripTimeMs });
+      // Also record it ON THE TRANSFER, not just in the ring buffer, so "did
+      // this go through TURN?" is answerable after the fact. Types only — the
+      // stats object holds addresses and none of them are passed on.
+      if (transferId) {
+        import('./vaultBeamController')
+          .then((m) => m.noteTransport(transferId, 'p2p', {
+            localType: o.localType, remoteType: o.remoteType, isIPv6: o.isIPv6,
+          }))
+          .catch(() => {});
+      }
     }).catch(() => {});
   } catch {}
 }
@@ -152,10 +183,16 @@ export async function serveDirect(g: DirectGeom & { srcPath: string; onProgress?
   if (!gotPull) { for (const c of cleanups) c(); return null; }
 
   let connected = false;
+  // Sender-side stall watchdog + the signal that unblocks a wedged send. Hoisted
+  // to serve scope so `cleanups` can always release them, on every exit path.
+  let sendGuard: ReturnType<typeof stallGuard> | null = null;
+  const sendAc = new AbortController();
+  cleanups.push(() => { sendGuard?.cancel(); sendAc.abort(); });
   const result = await new Promise<'lan' | 'p2p' | null>((resolve) => {
     let settled = false;
     const done = (v: 'lan' | 'p2p' | null) => { if (!settled) { settled = true; resolve(v); } };
-    const markConnected = () => { connected = true; };
+    // Single funnel for both tiers: LAN progress and the p2p datachannel open.
+    const markConnected = () => { connected = true; markTransportConnected(g.transferId); };
 
     // LAN: advertise the bound port, mirror native progress onto the card.
     let lanIpVal: string | null = null;
@@ -211,13 +248,38 @@ export async function serveDirect(g: DirectGeom & { srcPath: string; onProgress?
           try {
             if (typeof m.data !== 'string') return;
             const c = JSON.parse(m.data);
-            if (c?.t === 'ack') ackResolve?.();
-            else if (c?.t === 'p' && Number.isInteger(c.n) && c.n >= 1 && c.n <= g.chunkCount) g.onProgress?.(c.n, g.chunkCount);
+            if (c?.t === 'ack') { sendGuard?.ping(); notePeerProgress(g.transferId); ackResolve?.(); }
+            else if (c?.t === 'p' && Number.isInteger(c.n) && c.n >= 1 && c.n <= g.chunkCount) {
+              // The ONLY proof of forward progress: the receiver verified this
+              // chunk (GCM ok + on disk). An open channel, a changing
+              // bufferedAmount or a locally-read chunk prove nothing about the
+              // peer, so none of them may feed the watchdog.
+              sendGuard?.ping();
+              notePeerProgress(g.transferId);   // the SLA clock: peer-sourced only
+              g.onProgress?.(c.n, g.chunkCount);
+            }
           } catch {}
         };
         // Connected but stalled / no ack in time → resolve null so the caller
         // falls back to the relay instead of the send hanging on a dead channel.
-        dc.onopen = () => { markConnected(); logIceWin(pc, 'send'); p2pSend(dc, g, ackP).then(() => done('p2p')).catch(() => done(null)); };
+        dc.onopen = () => {
+          markConnected();
+          logIceWin(pc, 'send', g.transferId);
+          // SENDER STALL WATCHDOG. Started at connect, because until then the
+          // CONNECT_MS timer covers us; from here on nothing else can. Without
+          // it a receiver that dies mid-stream leaves this send spinning on a
+          // channel that will never drain, and the relay fallback — the thing
+          // that makes delivery guaranteed — never runs. Observed in production
+          // on transfer 209910ee…: frozen at 14% for five minutes with
+          // uploaded_mask=0B.
+          sendGuard = stallGuard(STALL_MS);
+          sendGuard.promise.then(() => {
+            noteStall(g.transferId, 'DIRECT_STALL_TIMEOUT');
+            sendAc.abort();   // unblock the backpressure wait in p2pSend
+            done(null);       // same latch as success/cancel → single winner
+          });
+          p2pSend(dc, g, ackP, sendAc.signal).then(() => done('p2p')).catch(() => done(null));
+        };
 
         // Apply the (buffered) answer, THEN release the queued remote candidates.
         (async () => {
@@ -314,7 +376,7 @@ export async function receiveDirect(g: DirectGeom & { dstPath: string; onProgres
     const ready = await until(() => inbox.state.ready, PULL_WAIT_MS, g.signal);
     if (ready?.lanIp && ready?.lanPort) {
       const guard = stallGuard(STALL_MS);
-      const offP = onLanEvent('vbLanProgress', (d) => { if (d?.transferId === g.transferId) { guard.ping(); g.onProgress?.(d.done, d.total); } });
+      const offP = onLanEvent('vbLanProgress', (d) => { if (d?.transferId === g.transferId) { guard.ping(); markTransportConnected(g.transferId); g.onProgress?.(d.done, d.total); } });
       try {
         const res = await Promise.race([
           lanConnect({
@@ -330,13 +392,15 @@ export async function receiveDirect(g: DirectGeom & { dstPath: string; onProgres
 
     // P2P — answer the sender's (buffered) datachannel offer and pull chunks.
     const guard2 = stallGuard(STALL_MS);
+    // Abandoning the tier must actually tear it down, not just stop awaiting it.
+    const abandon2 = new AbortController();
     try {
       const res = await Promise.race([
-        p2pReceive({ ...g, onProgress: (d, t) => { guard2.ping(); g.onProgress?.(d, t); } }, inbox).then((ok) => (ok ? 'done' : 'fail')),
+        p2pReceive({ ...g, abandon: abandon2.signal, onProgress: (d, t) => { guard2.ping(); g.onProgress?.(d, t); } }, inbox).then((ok) => (ok ? 'done' : 'fail')),
         guard2.promise,
       ]);
       if (res === 'done') return true;
-    } finally { guard2.cancel(); }
+    } finally { guard2.cancel(); abandon2.abort(); }
 
     emit('vaultbeam_tier', { to: g.peerId, transferId: g.transferId, mode: 'relay' });
     return false;
@@ -346,16 +410,22 @@ export async function receiveDirect(g: DirectGeom & { dstPath: string; onProgres
 // ── P2P datachannel data path (bounded to one chunk in JS heap) ──────
 // Per chunk: a JSON control frame {t:'c',i,len} then the ciphertext in ≤16 KiB
 // binary frames; {t:'eof'} ends the stream. Ordered channel → sequential.
-async function p2pSend(dc: any, g: DirectGeom & { srcPath: string; onProgress?: ProgressCb; signal?: AbortSignal }, ackP: Promise<void>): Promise<void> {
+async function p2pSend(dc: any, g: DirectGeom & { srcPath: string; onProgress?: ProgressCb; signal?: AbortSignal }, ackP: Promise<void>, abandon?: AbortSignal): Promise<void> {
+  // `abandon` is the sender's stall watchdog. It must be honoured in BOTH waits
+  // below: a dead peer stops draining SCTP, so `bufferedAmount` stays pinned
+  // above BP_HIGH and the backpressure loop would otherwise spin forever on a
+  // channel nobody is reading. Checking a flag costs nothing and does not
+  // serialize the pipeline — frames still stream until the watchdog fires.
+  const dead = () => g.signal?.aborted || abandon?.aborted;
   for (let i = 0; i < g.chunkCount; i++) {
-    if (g.signal?.aborted) throw new Error('aborted');
+    if (dead()) throw new Error('aborted');
     const ct = b64ToU8(await readCipherChunk({
       srcPath: g.srcPath, keyB64: g.keyB64, transferId: g.transferId, fileId: g.fileId,
       chunkIndex: i, chunkBytes: g.chunkBytes, chunkCount: g.chunkCount, totalBytes: g.totalBytes,
     }));
     dc.send(JSON.stringify({ t: 'c', i, len: ct.length }));
     for (let off = 0; off < ct.length; off += FRAME) {
-      while (dc.bufferedAmount > BP_HIGH) { if (g.signal?.aborted) throw new Error('aborted'); await sleep(15); }
+      while (dc.bufferedAmount > BP_HIGH) { if (dead()) throw new Error('aborted'); await sleep(15); }
       dc.send(new Uint8Array(ct.subarray(off, off + FRAME)));
     }
     // No onProgress here: "sent" only means buffered into SCTP. The sender's
@@ -367,7 +437,7 @@ async function p2pSend(dc: any, g: DirectGeom & { srcPath: string; onProgress?: 
   await Promise.race([ackP, sleep(ACK_TIMEOUT_MS).then(() => { throw new Error('no p2p delivery ack'); })]);
 }
 
-async function p2pReceive(g: DirectGeom & { dstPath: string; onProgress?: ProgressCb; signal?: AbortSignal }, inbox: Awaited<ReturnType<typeof openInbox>>): Promise<boolean> {
+async function p2pReceive(g: DirectGeom & { dstPath: string; onProgress?: ProgressCb; signal?: AbortSignal; abandon?: AbortSignal }, inbox: Awaited<ReturnType<typeof openInbox>>): Promise<boolean> {
   const offerMsg = await until(() => inbox.state.offer, P2P_OFFER_MS, g.signal);
   if (!offerMsg?.offer) return false;
   // Decrypt the sealed offer + derive the cipher (plaintext passthrough for a
@@ -379,6 +449,16 @@ async function p2pReceive(g: DirectGeom & { dstPath: string; onProgress?: Progre
     return await new Promise<boolean>((resolve) => {
       let settled = false;
       const done = (v: boolean) => { if (!settled) { settled = true; resolve(v); } };
+      // ABANDONMENT. Losing the caller's stall race does NOT cancel this
+      // function — the race just stops waiting on it. Without this the promise
+      // never settles, so the `finally` below never closes `pc`, and the
+      // datachannel keeps writing chunks and firing onProgress long after the
+      // caller has moved to the relay. Registered first, so a stall during ICE
+      // setup is caught as well as one mid-stream.
+      if (g.abandon) {
+        if (g.abandon.aborted) { done(false); return; }
+        try { g.abandon.addEventListener?.('abort', () => done(false)); } catch {}
+      }
       (async () => {
         try {
           pc = makePc(await iceServers());
@@ -393,9 +473,22 @@ async function p2pReceive(g: DirectGeom & { dstPath: string; onProgress?: Progre
 
           pc.ondatachannel = (ev: any) => {
             const dc = ev.channel;
-            dc.onopen = () => logIceWin(pc, 'recv');   // measure the winning pair (IPv6 vs relay)
+            dc.onopen = () => { markTransportConnected(g.transferId); logIceWin(pc, 'recv', g.transferId); };   // winning pair (IPv6 vs relay), onto the transfer
             let cur: { i: number; len: number; buf: Uint8Array; off: number } | null = null;
             let received = 0;
+            // THE COMMITTED SET, not a count.
+            //
+            // `received` counts writes that FINISHED. It is not a contiguous
+            // prefix: dc.onmessage is async and yields at writeCipherChunk, so
+            // while chunk N is being written the handler already accepts N+1.
+            // The channel is ordered, but ordering guarantees ARRIVAL, not
+            // completion — concurrent native writes can land out of order.
+            //
+            // So a bitmap built as "chunks 0..received-1" could claim a chunk
+            // that is still in flight, and the sender would then skip staging
+            // the one chunk nothing holds. This set records exactly which chunk
+            // ids are committed, which is the only honest thing to report.
+            const committed = new Set<number>();
             // Ack only after every chunk is decrypted + written, so the sender's
             // "Delivered" is truthful. Delay the resolve briefly so the ack egresses
             // before p2pReceive's finally closes the peer connection.
@@ -410,6 +503,7 @@ async function p2pReceive(g: DirectGeom & { dstPath: string; onProgress?: Progre
                 }
                 if (!cur) return;
                 const bytes = m.data instanceof ArrayBuffer ? new Uint8Array(m.data) : new Uint8Array(m.data.buffer || m.data);
+                markFirstByte(g.transferId);   // payload seen; not yet trusted
                 const take = Math.min(bytes.length, cur.len - cur.off);
                 cur.buf.set(bytes.subarray(0, take), cur.off);
                 cur.off += take;
@@ -420,7 +514,25 @@ async function p2pReceive(g: DirectGeom & { dstPath: string; onProgress?: Progre
                     chunkIndex: i, chunkBytes: g.chunkBytes, chunkCount: g.chunkCount, totalBytes: g.totalBytes, ctB64,
                   });
                   received++;
-                  g.onProgress?.(received, g.chunkCount);
+                  committed.add(i);
+                  // TELL THE SERVER WHAT WE HOLD.
+                  //
+                  // Only vaultBeamTransfer did this, so a transfer that ran
+                  // purely over the direct tier left recv_mask EMPTY. When
+                  // direct then failed, the sender's work-list subtracted
+                  // nothing and it re-staged the whole file to R2 — including
+                  // everything the receiver had already verified. Reported from
+                  // `committed`, after the write, through the existing 1.5 s
+                  // coalescing. Fire-and-forget: this must never fail a receive.
+                  reportReceivedSoon(g.transferId, chunkMaskFromCommitted(committed, g.chunkCount));
+                  // The honest first-verified-chunk mark: GCM tag checked,
+                  // decrypted and written at its offset above. Idempotent, so
+                  // only the first chunk of the transfer actually stamps.
+                  markFirstVerifiedChunk(g.transferId);
+                  // Both numbers, deliberately. `received` is what the user sees
+                  // move; the prefix is the only one that may become haveBytes.
+                  g.onProgress?.(received, g.chunkCount,
+                                 contiguousVerifiedPrefix(committed, g.chunkCount));
                   // Verified-progress ack: this chunk passed its GCM tag and is
                   // on disk. (A tag failure lands in the catch below → tier fails
                   // → relay takes over; retransmitting identical bytes over a
