@@ -84,3 +84,8 @@ keystore.properties
 .device.log
 *.device.log
 .shot.png
+
+# code-graph-rag local caches (machine-specific, never shared)
+.cgr-dir-mtimes.json
+.cgr-hash-cache.json
+.cgr-parser-fingerprint
