@@ -26,6 +26,9 @@ const READ_CAP   = 10_000;
 const OUTBOX_DIR = (FileSystem as any).documentDirectory + 'outbox/';
 const BACKOFF_MS = [1_000, 3_000, 8_000, 20_000, 45_000, 60_000];
 const PERIODIC_MS = 30_000;
+/** Transient failures beyond this degrade to 'failed' (tap-to-retry). The
+ *  ceiling is what stops a poisoned item from grinding the app forever. */
+const MAX_TRANSIENT_ATTEMPTS = 8;
 
 // A media rejection is only PERMANENT for the same reasons a text one is
 // (mirrors messageQueue): blocked/not-a-member, gone, malformed, too large.
@@ -139,8 +142,30 @@ export async function flush(): Promise<void> {
   try {
     const q = await load();
     let anyRetry = false;
+
+    // PRE-FLIGHT: retire anything already past the attempt ceiling BEFORE
+    // trying it. The post-attempt cap below cannot help an item that is
+    // already poisoned: reaching that code costs one more full attempt, and a
+    // full attempt re-encrypts the whole file on the JS thread — the exact
+    // multi-second freeze this ceiling exists to stop. Devices upgrading from
+    // the retry-forever build carry such items (found on the Honor at
+    // attempts=15), so this doubles as their migration.
+    const stale = q.filter((m) => m.state !== 'failed' && m.attempts >= MAX_TRANSIENT_ATTEMPTS);
+    if (stale.length) {
+      const cur = await load();
+      for (const s of stale) {
+        const it = cur.find((m) => m.tempId === s.tempId);
+        if (it) { it.state = 'failed'; it.lastError = it.lastError ?? 'too many attempts'; }
+      }
+      await save(cur);
+      for (const s of stale) {
+        emit('failed', { tempId: s.tempId, chatId: s.chatId, error: s.lastError ?? 'too many attempts' });
+      }
+    }
+    const retired = new Set(stale.map((m) => m.tempId));
+
     for (const item of q) {
-      if (inFlight.has(item.tempId) || item.state === 'failed') continue;
+      if (inFlight.has(item.tempId) || item.state === 'failed' || retired.has(item.tempId)) continue;
       inFlight.add(item.tempId);
       const ac = new AbortController();
       aborters.set(item.tempId, ac);
@@ -162,9 +187,27 @@ export async function flush(): Promise<void> {
           if (it) { it.state = 'failed'; it.lastError = err?.message ?? 'failed'; await save(cur); }
           emit('failed', { tempId: item.tempId, chatId: item.chatId, error: err?.message ?? 'failed' });
         } else {
-          // Transient (offline / 5xx) → clock, retry forever.
+          // Transient (offline / 5xx) → clock and retry — but NOT forever.
+          //
+          // "Retry forever" froze the whole app: a file stuck at attempt 15
+          // ("Vishwanath and Sons…", device-diagnosed 2026-08-22) re-ran
+          // sendMediaMessage on every boot, reconnect and 30s tick, and each
+          // attempt re-encrypts the ENTIRE file in ~3s pure-JS chunks on the
+          // JS thread — 100% CPU, frozen taps, ANR, on every single launch.
+          // A transient error that survives this many attempts is not
+          // transient; it degrades to the failed state, where the bubble's
+          // tap-to-retry (attempts reset to 0) remains the human escape hatch.
           const cur = await load(); const it = cur.find(m => m.tempId === item.tempId);
-          if (it) { it.attempts++; it.lastError = err?.message ?? null; await save(cur); anyRetry = true; }
+          if (it) {
+            it.attempts++; it.lastError = err?.message ?? null;
+            if (it.attempts >= MAX_TRANSIENT_ATTEMPTS) {
+              it.state = 'failed';
+              await save(cur);
+              emit('failed', { tempId: item.tempId, chatId: item.chatId, error: it.lastError ?? 'failed' });
+            } else {
+              await save(cur); anyRetry = true;
+            }
+          }
         }
       } finally { inFlight.delete(item.tempId); aborters.delete(item.tempId); }
     }

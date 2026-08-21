@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -62,6 +63,14 @@ var SysPool *pgxpool.Pool
 // (and ONLY it) to Node's 404s — any other DB error stays a 500, so an outage
 // never masquerades as "not found" and makes clients purge local state.
 func NoRows(err error) bool { return errors.Is(err, pgx.ErrNoRows) }
+
+// IsUniqueViolation reports a Postgres unique-constraint failure (23505) —
+// the signal routes use when an INSERT race is resolved by an index rather
+// than by client timing (e.g. space_trips' one-active-trip-per-space rule).
+func IsUniqueViolation(err error) bool {
+	var pgErr *pgconn.PgError
+	return errors.As(err, &pgErr) && pgErr.Code == "23505"
+}
 
 // WithUser mirrors Node db.withUser: a transaction with app.current_user_id
 // set so the RLS policies (004_rls.sql) see the caller.

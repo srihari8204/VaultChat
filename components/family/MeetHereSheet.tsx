@@ -33,13 +33,19 @@ const SEARCH_DEBOUNCE_MS = 350;
 
 export interface MeetDestination extends LatLng { name: string }
 
-export default function MeetHereSheet({ members, myPos, destination, onDestination, onClose }: {
+export default function MeetHereSheet({ members, myPos, destination, onDestination, onClose, onStartTrip, tripActive }: {
   /** Everyone in the circle, in a STABLE order — matrix results map by index. */
   members: MemberInput[];
   myPos?: LatLng | null;
   destination: MeetDestination | null;
   onDestination: (d: MeetDestination | null) => void;
   onClose: () => void;
+  /** Broadcast this destination to the whole circle as a family trip. The
+   *  sheet only offers it; starting (and the consent that implies) is the
+   *  screen's job. Absent = the plain viewer-local Meet Here. */
+  onStartTrip?: (d: MeetDestination) => void;
+  /** A trip is already running — offer no second one. */
+  tripActive?: boolean;
 }) {
   const { colors } = useTheme();
   const [q, setQ] = useState('');
@@ -279,10 +285,24 @@ export default function MeetHereSheet({ members, myPos, destination, onDestinati
             ) : null}
           </View>
 
+          {/* FAMILY TRIP: one tap broadcasts this destination to the circle —
+              every member's phone shows the trip, draws their own route and
+              shares their ETA. Only derived numbers travel; see tripSession. */}
+          {!!onStartTrip && !tripActive && (
+            <TouchableOpacity
+              onPress={() => onStartTrip(destination)}
+              accessibilityRole="button"
+              style={[st.btn, { borderColor: colors.primary, backgroundColor: brandAlpha(0.1), marginTop: 10 }]}
+            >
+              <Ionicons name="car" size={16} color={colors.primary} />
+              <Text style={{ color: colors.primary, fontWeight: '800', fontSize: 13 }}>Start family trip here</Text>
+            </TouchableOpacity>
+          )}
+
           <TouchableOpacity
             onPress={() => onDestination(null)}
             accessibilityRole="button"
-            style={[st.btn, { borderColor: colors.border }]}
+            style={[st.btn, { borderColor: colors.border, marginTop: onStartTrip && !tripActive ? 8 : 10 }]}
           >
             <Ionicons name="swap-horizontal" size={16} color={colors.primary} />
             <Text style={{ color: colors.primary, fontWeight: '700', fontSize: 13 }}>Change destination</Text>

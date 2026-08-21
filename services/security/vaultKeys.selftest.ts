@@ -86,6 +86,40 @@ function main(): void {
   assert(!checkPinRecord({ v: 2, salt: rec.salt, verifier: rec.verifier } as any, '4829'),
     'an unknown record version fails closed');
 
+  // ── P5: the native-GCM wire-format contract ──────────────────────────
+  // On device, seal/open run on quick-crypto (OpenSSL). Node's crypto is the
+  // same OpenSSL API, so sealing here with node:crypto and opening with the
+  // @noble path (QC is absent under Node) proves the exact byte layout the
+  // native branch emits — base64( nonce(12) || ct || tag(16) ) — opens under
+  // @noble, and vice versa. If either direction drifts, sealed caches written
+  // by one engine would silently stop opening under the other.
+  {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const nodeCrypto = require('node:crypto');
+    const { seal, open } = require('./vaultKeys');
+    const key = nodeCrypto.randomBytes(32);
+    const msg = 'engine-compat: ఇద్దరూ ఒకటే bytes ✓';
+
+    // native-style seal (OpenSSL) → @noble open
+    const nonce = nodeCrypto.randomBytes(12);
+    const c = nodeCrypto.createCipheriv('aes-256-gcm', key, nonce);
+    const ct = Buffer.concat([c.update(Buffer.from(msg, 'utf8')), c.final(), c.getAuthTag()]);
+    const envelope = Buffer.concat([nonce, ct]).toString('base64');
+    assert(open(new Uint8Array(key), envelope) === msg,
+      'an OpenSSL-sealed envelope opens under @noble');
+
+    // @noble seal → native-style open (OpenSSL)
+    const env2 = Buffer.from(seal(new Uint8Array(key), msg), 'base64');
+    const d = nodeCrypto.createDecipheriv('aes-256-gcm', key, env2.subarray(0, 12));
+    d.setAuthTag(env2.subarray(env2.length - 16));
+    const back = Buffer.concat([d.update(env2.subarray(12, env2.length - 16)), d.final()]).toString('utf8');
+    assert(back === msg, 'a @noble-sealed envelope opens under OpenSSL');
+
+    // empty plaintext stays exactly at the 28-byte floor and round-trips
+    assert(open(new Uint8Array(key), seal(new Uint8Array(key), '')) === '',
+      'an empty plaintext round-trips (28-byte envelope floor)');
+  }
+
   console.log(`\nALL ${passed} VAULT-SEPARATION CHECKS PASSED`);
 }
 

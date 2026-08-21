@@ -100,6 +100,8 @@ func RegisterChats(mux *http.ServeMux) {
 	RegisterSpaceDevicesOnID(id)    // Spaces & Operations devices + theft protection
 	RegisterSpaceLocationsOnID(id)  // All-space location platform (migration 103)
 	RegisterFamilyRelationsOnID(id) // Who each member is to you (migration 109)
+	RegisterSpaceTripsOnID(id)      // Server-backed family trips (migration 113)
+	RegisterSpaceItemsOnID(id)      // Shared BLE item finder (migration 114)
 	mux.Handle("/chats/{id}/", id)  // subtree forward; `id` re-matches the full path
 }
 

@@ -196,6 +196,26 @@ export function minutesUntil(etaAt: number, now: number): number {
   return Math.max(0, Math.round((etaAt - now) / 60000));
 }
 
+/**
+ * A trip announcement older than this is over, whether or not anyone said so.
+ *
+ * Announcements are harvested from group message HISTORY, and history has no
+ * expiry — without a TTL, yesterday's convoy re-appears as an active trip on
+ * every fresh subscribe until 60 newer messages push it out of the window.
+ */
+export const TRIP_TTL_MS = 8 * 3600_000;
+
+/**
+ * Is a harvested trip still the group's live trip?
+ *
+ * `endedIds` are trip ids an end-marker was seen for (same history harvest).
+ * An explicit end beats everything; the TTL catches the trip nobody ended.
+ */
+export function tripLive(t: Trip, endedIds: Iterable<string>, now: number): boolean {
+  for (const id of endedIds) if (id === t.id) return false;
+  return now - t.startedAt <= TRIP_TTL_MS;
+}
+
 // ── self-check ──
 if (require.main === module) {
   const now = 1_700_000_000_000;
@@ -283,6 +303,18 @@ if (require.main === module) {
   // 10. minutes
   if (minutesUntil(now + 90_000, now) !== 2) throw new Error('90s rounds to 2 minutes');
   if (minutesUntil(now - 60_000, now) !== 0) throw new Error('a passed ETA floors at zero');
+
+  // 11. trip liveness — a harvested announcement must not resurrect last
+  //     week's convoy. Ended beats age; age alone also ends it.
+  const t = (startedAt: number): Trip => ({
+    id: 'trip_x', groupId: 'g', destination: dest, destinationName: 'Cafe',
+    startedBy: 'a', startedAt, leaderId: null,
+  });
+  if (!tripLive(t(now - 60_000), [], now)) throw new Error('a fresh trip is live');
+  if (tripLive(t(now - 60_000), ['trip_x'], now)) throw new Error('an explicitly ended trip is dead');
+  if (tripLive(t(now - TRIP_TTL_MS - 1), [], now)) throw new Error('a trip past the TTL is dead');
+  if (!tripLive(t(now - TRIP_TTL_MS + 60_000), [], now)) throw new Error('a trip inside the TTL is live');
+  if (tripLive(t(now - 60_000), ['other', 'trip_x'], now)) throw new Error('ended-list membership, not position, decides');
 
   // simplifyRoute — follow-the-leader shares a bounded route
   const line = (n: number): LatLng[] =>

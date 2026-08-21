@@ -30,6 +30,7 @@ import {
 import { type FamilyPing, type MemberPresence } from './types';
 import { type LatLng } from '../nav/geo';
 import { publishPoint, publishStart, publishStop, stopPublisher } from '../location/publisher';
+import { currentTrip, publishTripState } from '../groups/tripSession';
 
 const LIVE_WINDOW_MS = 24 * 3600 * 1000;
 const until = () => Date.now() + LIVE_WINDOW_MS;
@@ -71,6 +72,15 @@ let lastLoc: Location.LocationObject | null = null;
 // battery, charge, GPS quality and foreground state, and the watcher is
 // re-armed only when the numbers actually change (shouldRearm).
 let plan: LocationPlan | null = null;
+/**
+ * What the OS watcher is ACTUALLY armed with — distinct from `plan`, which is
+ * the cadence the engine currently WANTS (and what the diagnostics row shows).
+ *
+ * They diverge whenever a re-arm is deferred by REARM_FLOOR_MS, and conflating
+ * the two silently disabled adaptation entirely (see replan). Only armWatcher
+ * may write this.
+ */
+let armedPlan: LocationPlan | null = null;
 let foreground = true;
 let lastRearmAt = 0;
 /** Bumped by every startPresence; a call whose generation is stale aborts
@@ -96,6 +106,17 @@ export function setPresenceForeground(v: boolean): void {
   // Re-plan on the next fix rather than immediately: re-arming the OS watcher
   // during a backgrounding transition is exactly when the platform is least
   // willing to hand one back.
+  //
+  // Backgrounding is also the moment to land the history write-behind cache:
+  // the OS may kill the process any time after this, and a flushed track is
+  // the difference between losing nothing and losing the last 30 seconds.
+  if (!v) recordFlush();
+}
+function recordFlush(): void {
+  // Lazy require, matching how history is consumed elsewhere in this module's
+  // graph — a static import cycle here would be the only thing it could buy.
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  try { (require('./history') as typeof import('./history')).flushHistory().catch(() => {}); } catch {}
 }
 
 const ACCURACY: Record<LocationPlan['accuracy'], Location.Accuracy> = {
@@ -141,6 +162,7 @@ async function armWatcher(next: LocationPlan): Promise<void> {
   watcher = fresh;
   try { old?.remove(); } catch {}
   plan = next;
+  armedPlan = next;      // the ONLY place the armed cadence is recorded
   lastRearmAt = Date.now();
   if (sharing) startKeepalive(next.keepaliveMs);
 }
@@ -168,10 +190,20 @@ async function replan(loc: Location.LocationObject, bat: { level?: number; charg
     charging: bat.charging,
     accuracyM: acc,
   });
-  if (!shouldRearm(plan, next)) { plan = next; return; }
-  // Hold the current cadence until the floor passes. The plan is still
-  // recorded, so the diagnostics row tells the truth about the situation even
-  // while the watcher is deliberately lagging behind it.
+  // COMPARE AGAINST WHAT IS ACTUALLY ARMED, never against what we last wanted.
+  //
+  // This used to test `shouldRearm(plan, next)` while both early returns below
+  // assigned `plan = next`. One fix inside the re-arm floor was therefore
+  // enough to make `plan` describe the DESIRED cadence, after which every
+  // later comparison was desired-vs-desired — identical, so `shouldRearm`
+  // said no and the watcher never re-armed at all. Measured on the Honor:
+  // the opening fast arm (5 s) survived indefinitely while the diagnostics row
+  // read "every 15s" — 3x the intended GPS cost, and a UI that stated the
+  // opposite of what the device was doing.
+  if (!shouldRearm(armedPlan, next)) { plan = next; return; }
+  // Hold the current cadence until the floor passes. `plan` still advances so
+  // the diagnostics row tells the truth about the SITUATION, while
+  // `armedPlan` keeps telling the truth about the WATCHER.
   if (Date.now() - lastRearmAt < REARM_FLOOR_MS) { plan = next; return; }
   // A failure here leaves the EXISTING watcher running — armWatcher creates
   // before it removes, so there is always one.
@@ -187,7 +219,7 @@ async function replanNow(): Promise<void> {
   if (!watcher) return;
   if (lastLoc) { await replan(lastLoc, await readBattery()); return; }
   const next = planFor({ foreground, locked: false, sharing });
-  if (shouldRearm(plan, next)) { try { await armWatcher(next); } catch {} }
+  if (shouldRearm(armedPlan, next)) { try { await armWatcher(next); } catch {} }
   else { plan = next; if (sharing) startKeepalive(next.keepaliveMs); }
 }
 
@@ -265,6 +297,16 @@ async function onFix(loc: Location.LocationObject) {
       // Only tell a group about a crossing if I am actually visible to it.
       announce: announcing ? (text) => { sendMessage(cid, text, 'system').catch(() => {}); } : undefined,
     });
+  }
+
+  // An active group trip rides the SAME fix pulse. This was the missing link:
+  // publishTripState existed with zero callers, so every trip screen said
+  // "Waiting for ETAs…" forever. Not gated on `sharing` — joining a trip is
+  // itself consent to share the DERIVED numbers (remaining distance, ETA,
+  // arrival), and the position itself never rides the trip channel.
+  const trip = currentTrip();
+  if (trip && circleIds.includes(trip.groupId)) {
+    publishTripState(pos, spd, myName).catch(() => {});
   }
 
   // Re-decide the cadence now that this fix has told us whether the device is
@@ -465,6 +507,7 @@ export async function stopPresence(): Promise<void> {
   watcher = null;
   selfCb = null;
   plan = null;          // the next start re-plans from scratch, never from a stale tier
+  armedPlan = null;     // …and must not believe a dead watcher's cadence is armed
   stopKeepalive();
 
   if (sharing && await isBackgroundRunning()) {

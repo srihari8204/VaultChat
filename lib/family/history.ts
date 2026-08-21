@@ -81,6 +81,44 @@ async function write(circleId: string, samples: TrackSample[]): Promise<void> {
 const lastKept = new Map<string, TrackSample>();
 const lk = (cid: string, uid: string) => `${cid}|${uid}`;
 
+// ── write-behind cache (P5) ─────────────────────────────────────────────
+// recordSample used to read→decrypt→append→encrypt→write the WHOLE blob per
+// accepted fix. At 4000 samples that is a few hundred KB sealed through
+// AES-GCM on the JS thread for EVERY ping of EVERY member — as the blob grew
+// through a week of pings it crossed the point where pings arrived faster
+// than they could be sealed, and the JS thread wedged at 100% CPU until the
+// ANR dialog (device-diagnosed on the Honor, 2026-08-21).
+//
+// Now the circle's samples live in memory after one read, appends are O(1),
+// and the sealed write happens AT MOST once per FLUSH_MS per circle. The
+// trade: a process death loses at most FLUSH_MS of track — a track is
+// derived telemetry, and 30 seconds of it is nothing next to a frozen app.
+const FLUSH_MS = 30_000;
+const _cache = new Map<string, TrackSample[]>();          // circleId → samples (loaded)
+const _dirty = new Set<string>();
+const _flushTimers = new Map<string, ReturnType<typeof setTimeout>>();
+
+async function loadCache(circleId: string): Promise<TrackSample[]> {
+  let c = _cache.get(circleId);
+  if (!c) { c = await read(circleId); _cache.set(circleId, c); }
+  return c;
+}
+
+async function flush(circleId: string): Promise<void> {
+  const t = _flushTimers.get(circleId);
+  if (t) { clearTimeout(t); _flushTimers.delete(circleId); }
+  if (!_dirty.has(circleId)) return;
+  _dirty.delete(circleId);
+  const c = _cache.get(circleId);
+  if (c) await write(circleId, c);
+}
+
+function scheduleFlush(circleId: string): void {
+  _dirty.add(circleId);
+  if (_flushTimers.has(circleId)) return;
+  _flushTimers.set(circleId, setTimeout(() => { flush(circleId).catch(() => {}); }, FLUSH_MS));
+}
+
 /**
  * Append a fix to a circle's history if it clears the movement/time threshold.
  * Returns true when it was actually stored. Safe to call on every GPS tick.
@@ -89,9 +127,11 @@ export async function recordSample(circleId: string, s: TrackSample): Promise<bo
   const key = lk(circleId, s.u);
   if (!shouldRecord(lastKept.get(key), s)) return false;
   lastKept.set(key, s);
-  const all = await read(circleId);
+  const all = await loadCache(circleId);
   all.push(s);
-  await write(circleId, pruneSamples(all, s.ts));
+  const pruned = pruneSamples(all, s.ts);
+  if (pruned !== all) _cache.set(circleId, pruned);
+  scheduleFlush(circleId);
   return true;
 }
 
@@ -101,7 +141,10 @@ export async function getTrack(
   opts: { from: number; to?: number; userId?: string },
 ): Promise<TrackSample[]> {
   const to = opts.to ?? Date.now();
-  const all = await read(circleId);
+  // Through the write-behind cache: pending (unflushed) samples must be
+  // visible to the history screen, and a cache hit also spares the screen a
+  // full-blob decrypt on every open.
+  const all = await loadCache(circleId);
   return all
     .filter((s) => s.ts >= opts.from && s.ts <= to && (!opts.userId || s.u === opts.userId))
     .sort((a, b) => a.ts - b.ts);
@@ -169,11 +212,23 @@ export function timeAtPlace(
 /** Forget a circle's history (called when a circle is left/deleted). */
 export async function clearHistory(circleId: string): Promise<void> {
   for (const k of [...lastKept.keys()]) if (k.startsWith(`${circleId}|`)) lastKept.delete(k);
+  // Drop the write-behind state too, or a scheduled flush would resurrect
+  // the very blob this call deletes.
+  const t = _flushTimers.get(circleId);
+  if (t) { clearTimeout(t); _flushTimers.delete(circleId); }
+  _dirty.delete(circleId);
+  _cache.delete(circleId);
   try { await storage().removeItem(kHist(circleId)); } catch {}
 }
 
 /** Reset the in-memory throttle (used by tests and when presence restarts). */
 export function resetThrottle(): void { lastKept.clear(); }
+
+/** Flush every dirty circle now — called when the app backgrounds, so the
+ *  at-most-FLUSH_MS loss window only ever spans time the app was alive. */
+export async function flushHistory(): Promise<void> {
+  await Promise.all([..._dirty].map((cid) => flush(cid).catch(() => {})));
+}
 
 // ── self-check ──
 if (require.main === module) {

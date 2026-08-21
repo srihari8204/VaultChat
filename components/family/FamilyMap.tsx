@@ -80,6 +80,18 @@ ${MARKER_CSS(selfColor)}
 var map=L.map('map',{zoomControl:false}).setView([20.6,78.9],4);
 L.tileLayer('${tileUrl}',{maxZoom:19,subdomains:'abcd',attribution:'&copy; OpenStreetMap &copy; CARTO'}).addTo(map);
 var RN=window.ReactNativeWebView, markers={}, fitted=false;
+// Glide a marker to its new fix instead of teleporting: 15s pings then read as
+// movement. A jump past ~2 km snaps — gliding across a city would draw a road
+// nobody drove.
+function slide(mk,la,ln){ var f=mk.getLatLng();
+  var dLat=la-f.lat, dLng=ln-f.lng;
+  if(Math.abs(dLat)+Math.abs(dLng)>0.02){ mk.setLatLng([la,ln]); return; }
+  if(mk._sl) cancelAnimationFrame(mk._sl);
+  var t0=Date.now(), DUR=900;
+  (function step(){ var k=Math.min(1,(Date.now()-t0)/DUR);
+    mk.setLatLng([f.lat+dLat*k, f.lng+dLng*k]);
+    if(k<1) mk._sl=requestAnimationFrame(step); })();
+}
 function setMembers(list){ var seen={};
   list.forEach(function(m){ seen[m.id]=1;
     var isCl=m.count>1;
@@ -87,7 +99,7 @@ function setMembers(list){ var seen={};
     var body=isCl?String(m.count):m.ini;
     var sz=isCl?42:34, anc=sz/2;
     var ic=L.divIcon({className:'',html:'<div class="'+cls+'" style="background:'+m.color+'">'+body+'</div>',iconSize:[sz,sz],iconAnchor:[anc,anc]});
-    if(markers[m.id]){ markers[m.id].setLatLng([m.lat,m.lng]).setIcon(ic); }
+    if(markers[m.id]){ slide(markers[m.id],m.lat,m.lng); markers[m.id].setIcon(ic); }
     else { var mk=L.marker([m.lat,m.lng],{icon:ic}).addTo(map);
       mk.on('click',(function(id,cluster,ll){return function(){
         // A cluster has no single member to select, so tapping it zooms in
@@ -104,7 +116,9 @@ function fitAll(){ var ids=Object.keys(markers); if(!ids.length)return;
   else { map.fitBounds(L.featureGroup(ids.map(function(id){return markers[id];})).getBounds().pad(0.25)); }
   fitted=true;
 }
-function focus(id){ if(markers[id]) map.setView(markers[id].getLatLng(),16,{animate:true}); }
+// Optional zoom: the follow camera passes a speed-derived one (auto-zoom
+// while traveling); a bare focus keeps the classic close-up.
+function focus(id,z){ if(markers[id]) map.setView(markers[id].getLatLng(),z||16,{animate:true}); }
 // Location-history track. Drawn under the markers; fitting the line wins over
 // fitAll() because when a path is supplied it IS the subject of the view.
 var pathLine=null, pathDots=[];
@@ -169,6 +183,26 @@ function setRoute(pts){
   map.fitBounds(routeLine.getBounds().pad(0.25));
   fitted=true;
 }
+// ALWAYS-ON ROAD ROUTES me → every member, each in that member's colour with a
+// "2.4 km · 6 min" label. road:false entries are the straight-line fallback
+// (routing failed/loading) and draw dashed so a fallback never reads as a road.
+var mrLines=[], mrTags=[];
+function setMemberRoutes(list){
+  mrLines.forEach(function(l){ map.removeLayer(l); }); mrLines=[];
+  mrTags.forEach(function(t){ map.removeLayer(t); }); mrTags=[];
+  if(!list||!list.length) return;
+  list.forEach(function(r){
+    if(!r.pts||r.pts.length<2) return;
+    var ll=r.pts.map(function(p){ return [p.lat,p.lng]; });
+    mrLines.push(L.polyline(ll,{color:r.color,weight:r.road?3.5:2.5,opacity:.85,
+      dashArray:r.road?null:'6,6',lineJoin:'round',lineCap:'round'}).addTo(map));
+    if(r.label){
+      var mid=ll[Math.floor(ll.length/2)];
+      mrTags.push(L.marker(mid,{interactive:false,icon:L.divIcon({className:'',
+        html:'<div class="lnk">'+r.label+'</div>',iconSize:[0,0]})}).addTo(map));
+    }
+  });
+}
 function reportZoom(){ if(RN)RN.postMessage('zoom:'+map.getZoom()); }
 map.on('zoomend', reportZoom);
 if(RN)RN.postMessage('ready');
@@ -221,6 +255,17 @@ function mkEl(m){
   });
   return w;
 }
+// Glide to the new fix instead of teleporting — the Leaflet page's slide(),
+// same thresholds, so both engines move a member identically.
+function slide(rec,ln,la){ var f=rec.mk.getLngLat();
+  var dLng=ln-f.lng, dLat=la-f.lat;
+  if(Math.abs(dLat)+Math.abs(dLng)>0.02){ rec.mk.setLngLat([ln,la]); return; }
+  if(rec.anim) cancelAnimationFrame(rec.anim);
+  var t0=Date.now(), DUR=900;
+  (function step(){ var k=Math.min(1,(Date.now()-t0)/DUR);
+    rec.mk.setLngLat([f.lng+dLng*k, f.lat+dLat*k]);
+    if(k<1) rec.anim=requestAnimationFrame(step); })();
+}
 function setMembers(list){
   var seen={};
   list.forEach(function(m){
@@ -230,7 +275,7 @@ function setMembers(list){
     // every ping would restart the DOM node 8s apart per member and throw away
     // MapLibre's own position transition — the "teleporting markers" of §51.
     var sig=[m.count,m.self?1:0,m.stale?1:0,m.ini,m.color].join('|');
-    if(cur&&cur.sig===sig){ cur.mk.setLngLat([m.lng,m.lat]); }
+    if(cur&&cur.sig===sig){ slide(cur,m.lng,m.lat); }
     else{
       if(cur) cur.mk.remove();
       var mk=new maplibregl.Marker({element:mkEl(m)}).setLngLat([m.lng,m.lat]).addTo(map);
@@ -261,13 +306,15 @@ function applyCam(ll){
   else { o.pitch=0; o.bearing=0; o.zoom=Math.max(map.getZoom(),15); }
   map.easeTo(o);
 }
-function focus(id){
+function focus(id,z){
   if(!markers[id]) return;
   var ll=markers[id].mk.getLngLat();
   // Focusing is an explicit request, so it overrides overview — but it must not
   // silently switch the user into a pitched chase-cam they did not ask for.
   if(cam==='overview') cam='north';
-  map.easeTo({center:ll,zoom:Math.max(map.getZoom(),16),duration:500});
+  // z is the follow camera's speed-derived zoom (auto-zoom while traveling);
+  // without it, the classic "never zoom OUT on focus" rule holds.
+  map.easeTo({center:ll,zoom:(z||Math.max(map.getZoom(),16)),duration:500});
 }
 function setCamera(mode){
   cam=mode;
@@ -379,6 +426,34 @@ function setRoute(pts){
   map.fitBounds(b,{padding:70,duration:500});
   fitted=true;
 }
+// ALWAYS-ON ROAD ROUTES me → every member — see the Leaflet page. One source,
+// two layers: solid for real roads, dashed for the straight-line fallback
+// (dasharray cannot be data-driven, so the split is a filter, not a property).
+var mrTags=[];
+function setMemberRoutes(list){
+  mrTags.forEach(function(m){ m.remove(); }); mrTags=[];
+  var fc={type:'FeatureCollection',features:[]};
+  (list||[]).forEach(function(r){
+    if(!r.pts||r.pts.length<2) return;
+    fc.features.push({type:'Feature',properties:{color:r.color,road:r.road?1:0},
+      geometry:{type:'LineString',coordinates:r.pts.map(function(p){ return [p.lng,p.lat]; })}});
+    if(r.label){
+      var mid=r.pts[Math.floor(r.pts.length/2)];
+      var el=document.createElement('div'); el.className='lnk'; el.textContent=r.label;
+      mrTags.push(new maplibregl.Marker({element:el}).setLngLat([mid.lng,mid.lat]).addTo(map));
+    }
+  });
+  if(map.getSource('mroutes')) map.getSource('mroutes').setData(fc);
+  else{
+    map.addSource('mroutes',{type:'geojson',data:fc});
+    map.addLayer({id:'mroutes-r',type:'line',source:'mroutes',filter:['==',['get','road'],1],
+      paint:{'line-color':['get','color'],'line-width':3.5,'line-opacity':.85},
+      layout:{'line-join':'round','line-cap':'round'}});
+    map.addLayer({id:'mroutes-s',type:'line',source:'mroutes',filter:['==',['get','road'],0],
+      paint:{'line-color':['get','color'],'line-width':2.5,'line-opacity':.75,'line-dasharray':[2,2]},
+      layout:{'line-cap':'round'}});
+  }
+}
 function reportZoom(){ if(RN)RN.postMessage('zoom:'+Math.round(map.getZoom())); }
 map.on('zoomend',reportZoom);
 map.on('dragstart',function(){lastTouch=Date.now();});
@@ -439,8 +514,17 @@ map.on('error',function(e){
 </script></body></html>`;
 }
 
+/** One always-on member route: my road to that member, in their colour. */
+export interface MemberRoute {
+  id: string;                                  // the member's id — colour follows the marker's
+  pts: { lat: number; lng: number }[];
+  label?: string;                              // "2.4 km · 6 min"
+  /** False = straight-line fallback (routing failed) — drawn dashed. */
+  road: boolean;
+}
+
 export default function FamilyMap({
-  members, onSelect, focusId, followId, path, destination, linkFrom, route, style,
+  members, onSelect, focusId, followId, followZoom, path, destination, linkFrom, route, memberRoutes, style,
   headingDeg, cameraMode, camera3D = FAMILY_MAP_3D,
 }: {
   members: FamilyMarker[];
@@ -453,6 +537,10 @@ export default function FamilyMap({
    * than a flag on focusId.
    */
   followId?: string | null;
+  /** Zoom for the follow camera, derived from the followed member's speed
+   *  (lib/family/status.zoomForSpeed) — auto-zoom while traveling. Omitted,
+   *  the map keeps its classic never-zoom-out-on-focus behaviour. */
+  followZoom?: number | null;
   /** Location-history track, oldest→newest. Start/end get green/red caps. */
   path?: { lat: number; lng: number }[];
   /** Meeting destination pin (Meet Here). Null clears it. */
@@ -465,6 +553,10 @@ export default function FamilyMap({
   linkFrom?: { lat: number; lng: number } | null;
   /** Road-route polyline for ONE member, from Valhalla. Solid, not dashed. */
   route?: { lat: number; lng: number }[] | null;
+  /** Always-on road routes from me to EVERY member, each in the member's own
+   *  colour with a distance·time label. Replaces the dashed connectors when
+   *  supplied — the screen decides which picture it wants. */
+  memberRoutes?: MemberRoute[] | null;
   style?: any;
   /** Device heading. Rotates the basemap in 'follow' (heading-up) only. */
   headingDeg?: number | null;
@@ -534,8 +626,10 @@ export default function FamilyMap({
   const followed = followId ? members.find((m) => m.id === followId) : undefined;
   useEffect(() => {
     if (!ready || !followed || !ref.current) return;
-    ref.current.injectJavaScript(`focus(${JSON.stringify(followed.id)});true;`);
-  }, [ready, followed?.id, followed?.lat, followed?.lng]);
+    const z = followZoom != null && Number.isFinite(followZoom) ? `,${followZoom}` : '';
+    ref.current.injectJavaScript(`focus(${JSON.stringify(followed.id)}${z});true;`);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ready, followed?.id, followed?.lat, followed?.lng, followZoom]);
 
   // Thin the track before it crosses the bridge: a month of samples is thousands
   // of points and Leaflet gains nothing from more than a few hundred.
@@ -585,6 +679,30 @@ export default function FamilyMap({
     if (!ready || !ref.current) return;
     ref.current.injectJavaScript(`setRoute(${JSON.stringify(route ?? [])});true;`);
   }, [ready, route]);
+
+  // Always-on member routes. Coloured HERE by the same rule the markers use
+  // (index order, self keeps the accent), so a route always matches its dot.
+  // Shapes are thinned before crossing the bridge — a 15 km route is hundreds
+  // of vertices and the line loses nothing at 100.
+  const memberRoutesJs = useMemo(() => {
+    if (!memberRoutes?.length) return '[]';
+    const colorOf = new Map(members.map((m, i) => [m.id, m.self ? colors.primary : COLORS[i % COLORS.length]]));
+    const thin = (pts: { lat: number; lng: number }[]) => {
+      const step = Math.ceil(pts.length / 100);
+      return step > 1 ? pts.filter((_, i) => i % step === 0 || i === pts.length - 1) : pts;
+    };
+    return JSON.stringify(memberRoutes.map((r) => ({
+      color: colorOf.get(r.id) ?? colors.primary,
+      label: r.label ?? '',
+      road: !!r.road,
+      pts: thin(r.pts).map((p) => ({ lat: p.lat, lng: p.lng })),
+    })));
+  }, [memberRoutes, members, colors.primary]);
+
+  useEffect(() => {
+    if (!ready || !ref.current) return;
+    ref.current.injectJavaScript(`setMemberRoutes(${memberRoutesJs});true;`);
+  }, [ready, memberRoutesJs]);
 
   // Camera + heading — MapLibre only. Leaflet has no setCamera/setHeading, and
   // calling them there would throw inside the page on every update.

@@ -98,23 +98,27 @@ export function inBatterySaver(ctx: LocationContext): boolean {
   return ctx.batteryPct != null && ctx.batteryPct <= SAVER_PCT;
 }
 
+// THE ALWAYS-15s DOCTRINE (owner directive, 2026-08-21): while sharing, every
+// tier except battery saver publishes at 15 s or faster — open, backgrounded or
+// locked, moving or parked — so the family map moves live continuously. The
+// battery cost of that is accepted and deliberate. Stationary/locked tiers are
+// time-driven (distanceInterval 0): a displacement gate on a parked phone is
+// exactly what used to silence it for minutes, and "silent" and "vanished" look
+// identical to the family.
 const PLANS: Record<AdaptiveMode, Omit<LocationPlan, 'mode' | 'publish' | 'reason'>> = {
   // Someone is watching the map and the subject is moving: the one case that
-  // justifies real GPS cost.
+  // justifies real GPS cost. Faster than the 15 s floor, on purpose.
   movingForeground: { timeIntervalMs: 5_000, distanceIntervalM: 10, keepaliveMs: 20_000, accuracy: 'high' },
-  // Still on screen, but parked. The map is not wrong at 20 s; it is just not
-  // spending a battery to redraw the same dot.
-  stationaryForeground: { timeIntervalMs: 20_000, distanceIntervalM: 25, keepaliveMs: 45_000, accuracy: 'balanced' },
+  // Still on screen, but parked. Time-driven so the dot's freshness never lies.
+  stationaryForeground: { timeIntervalMs: 15_000, distanceIntervalM: 0, keepaliveMs: 20_000, accuracy: 'balanced' },
   // Pocket, in a car. The case background location exists for.
-  movingBackground: { timeIntervalMs: 30_000, distanceIntervalM: 50, keepaliveMs: 90_000, accuracy: 'balanced' },
-  // Pocket, sitting at a desk. Distance-gated so a still phone is nearly silent.
-  stationaryBackground: { timeIntervalMs: 120_000, distanceIntervalM: 100, keepaliveMs: 300_000, accuracy: 'balanced' },
-  // Locked and travelling — the school-run case. Same tier as moving
-  // background: the OS delivers these, and this is what the family needs.
-  lockedMoving: { timeIntervalMs: 30_000, distanceIntervalM: 50, keepaliveMs: 90_000, accuracy: 'balanced' },
-  // Locked and still: overnight. The slowest tier that still proves the phone
-  // is alive.
-  lockedStationary: { timeIntervalMs: 180_000, distanceIntervalM: 150, keepaliveMs: 600_000, accuracy: 'low' },
+  movingBackground: { timeIntervalMs: 15_000, distanceIntervalM: 0, keepaliveMs: 45_000, accuracy: 'balanced' },
+  // Pocket, sitting at a desk. Same 15 s pulse — the map must not go quiet.
+  stationaryBackground: { timeIntervalMs: 15_000, distanceIntervalM: 0, keepaliveMs: 45_000, accuracy: 'balanced' },
+  // Locked and travelling — the school-run case.
+  lockedMoving: { timeIntervalMs: 15_000, distanceIntervalM: 0, keepaliveMs: 45_000, accuracy: 'balanced' },
+  // Locked and still: overnight. Same pulse, cheaper fixes.
+  lockedStationary: { timeIntervalMs: 15_000, distanceIntervalM: 0, keepaliveMs: 45_000, accuracy: 'low' },
   // Low battery outranks everything except charging. Coarse and slow — a
   // family would rather have a rough position for six more hours than a
   // precise one until the phone dies.
@@ -233,8 +237,27 @@ if (typeof require !== 'undefined' && require.main === module) {
   const ms = (c: LocationContext) => planFor(c).timeIntervalMs;
   A(ms(ctx({ speedMs: fast })) < ms(ctx({ speedMs: slow })), 'moving must poll faster than stationary');
   A(ms(ctx({ speedMs: fast })) < ms(ctx({ foreground: false, speedMs: fast })), 'foreground must beat background');
-  A(ms(ctx({ foreground: false, speedMs: slow })) < ms(ctx({ locked: true, speedMs: slow })), 'locked+still is the quietest normal tier');
   A(ms(ctx({ batteryPct: 5, speedMs: fast })) > ms(ctx({ speedMs: fast })), 'battery saver must be slower than normal');
+
+  // 2b. THE ALWAYS-15s DOCTRINE (owner, 2026-08-21): while sharing, every tier
+  //     except battery saver publishes at 15 s or faster — app open, backgrounded
+  //     or locked, moving or parked. The battery cost is accepted; the one
+  //     exception is a phone at ≤20% and not charging, because a dead phone
+  //     shares nothing at all.
+  const LIVE_MS = 15_000;
+  for (const [label, c] of [
+    ['stationary foreground', ctx({ speedMs: slow })],
+    ['moving background',     ctx({ foreground: false, speedMs: fast })],
+    ['stationary background', ctx({ foreground: false, speedMs: slow })],
+    ['locked moving',         ctx({ foreground: false, locked: true, speedMs: fast })],
+    ['locked stationary',     ctx({ foreground: false, locked: true, speedMs: slow })],
+  ] as [string, LocationContext][]) {
+    const p = planFor(c);
+    A(p.timeIntervalMs <= LIVE_MS, `${label}: must publish every ${LIVE_MS / 1000}s or faster, got ${p.timeIntervalMs}`);
+    // Time drives delivery, not displacement: a distance gate on a parked phone
+    // is exactly what used to silence it for minutes at a stretch.
+    A(p.distanceIntervalM === 0, `${label}: must not be displacement-gated, got ${p.distanceIntervalM}m`);
+  }
 
   // 3. charging cancels the saver — a car charger is when live matters most
   A(planFor(ctx({ batteryPct: 5, charging: true, speedMs: fast })).mode === 'movingForeground',
@@ -279,10 +302,45 @@ if (typeof require !== 'undefined' && require.main === module) {
     planFor(ctx({ foreground: false, locked: true, speedMs: fast }))),
     'same cadence under a different name must not re-arm');
 
+  // 7b. THE STEP-DOWN MUST SURVIVE A DEFERRED RE-ARM.
+  //
+  // presence.replan compares the next plan against the ARMED one and, while
+  // inside the re-arm floor, records the desired plan for the UI without
+  // re-arming. Comparing against that recorded plan instead is what broke
+  // adaptation on the Honor: the opening fast tier stayed armed forever while
+  // the diagnostics row claimed the slow one. This simulates both loops.
+  {
+    const opening = planFor(ctx({ speedMs: fast }));   // fast arm
+    const settled = planFor(ctx({ speedMs: slow }));                    // what we want
+    // BROKEN shape: compare against the desired plan, which the floor updated.
+    let uiPlan = opening;
+    let armed = opening;
+    for (let i = 0; i < 5; i++) {
+      const next = planFor(ctx({ speedMs: slow }));
+      if (shouldRearm(uiPlan, next)) { /* would re-arm only if it still differs */ }
+      uiPlan = next;                    // the floor's optimistic assignment
+    }
+    A(!shouldRearm(uiPlan, settled),
+      'sanity: after the desired plan is recorded, desired-vs-desired stops asking to re-arm');
+    A(armed.timeIntervalMs === opening.timeIntervalMs,
+      'sanity: nothing re-armed the watcher in the broken shape');
+    // CORRECT shape: compare against what is actually armed.
+    uiPlan = opening; armed = opening;
+    for (let i = 0; i < 5; i++) {
+      const next = planFor(ctx({ speedMs: slow }));
+      if (shouldRearm(armed, next)) armed = next;   // armWatcher would run
+      uiPlan = next;
+    }
+    A(armed.timeIntervalMs === settled.timeIntervalMs,
+      `comparing against the ARMED plan must step down: got ${armed.timeIntervalMs}, want ${settled.timeIntervalMs}`);
+    A(armed.timeIntervalMs !== opening.timeIntervalMs,
+      'the fast opening arm must not survive the step-down');
+  }
+
   // 8. every mode is reachable and every plan is sane
   for (const mode of Object.keys(PLANS) as AdaptiveMode[]) {
     const p = PLANS[mode];
-    A(p.timeIntervalMs > 0 && p.distanceIntervalM > 0, `${mode}: non-positive interval`);
+    A(p.timeIntervalMs > 0 && p.distanceIntervalM >= 0, `${mode}: bad interval`);
     A(p.keepaliveMs === 0 || p.keepaliveMs > p.timeIntervalMs, `${mode}: keepalive must outlast the poll`);
   }
 

@@ -54,11 +54,14 @@ import {
   isIgnoringBatteryOptimizations,
 } from '../lib/batteryOptimization';
 import { loadAlerts, recordAlert, useUnreadCount } from '../lib/family/alerts';
+import { deriveWatchAlerts, emptyWatchState } from '../lib/family/watchAlerts';
+import { emptyCrashState, feedSpeed, feedImpact, COUNTDOWN_S } from '../lib/family/crash';
+import { Accelerometer } from 'expo-sensors';
 import { type CircleMember, type MemberPresence, STALE_MS, SPEED_ALERT_CHOICES, DEFAULT_SPEED_ALERT_KMH } from '../lib/family/types';
 import { sendMessage, getMessages, decryptFromChat, getChat, listChats, sendAnnouncement, isAnnouncement } from '../lib/chatService';
 import { getCurrentUserAsync } from './(constants)/authService';
 import { navigateTo } from '../lib/nav/openNavigation';
-import { subscribeTrip, currentTrip } from '../lib/groups/tripSession';
+import { subscribeTrip, joinTrip, currentTrip } from '../lib/groups/tripSession';
 import {
   foldParticipants, lastEta, everyoneArrived, minutesUntil,
   type Trip, type TripPing,
@@ -290,7 +293,17 @@ export default function FamilySpaceScreen() {
             ? [...prev.filter((p) => p.userId !== e.userId), e.ping]
             : prev.filter((p) => p.userId !== e.userId)));
         },
-        (t) => { if (live) setTrip((cur) => cur ?? t); },
+        // null = ended or expired — the card must clear, not linger forever.
+        (t) => {
+          if (!live) return;
+          if (t === null) { setTrip(null); setTripPings([]); return; }
+          setTrip((cur) => cur ?? t);
+          // AUTO-JOIN: a family trip is for the whole circle, so every
+          // member's device adopts it and starts reporting its own DERIVED
+          // ETA on the next fix — no joining ceremony. The position itself
+          // never rides the trip channel.
+          if (me?.id && !currentTrip()) joinTrip(t, me.id).catch(() => {});
+        },
       ).catch(() => null);
       if (live && unsub) off = unsub; else unsub?.();
     })();
@@ -855,6 +868,71 @@ export default function FamilySpaceScreen() {
     if (sosTimer.current) { clearTimeout(sosTimer.current); sosTimer.current = null; }
     Animated.timing(sosProg, { toValue: 0, duration: 120, useNativeDriver: true }).start();
   };
+
+  // ── Watch alerts: low battery + went-quiet for OTHER members ─────────
+  // Derived HERE, on the viewing device, from presences already decrypted —
+  // a member's battery rides every ping and their silence is the absence of
+  // pings, so only a watcher can raise either. Edge-detected in the pure
+  // engine (one episode = one alert); recordAlert's 60s dedupe absorbs the
+  // hub and map both deriving. State resets per circle.
+  const watchRef = useRef(emptyWatchState());
+  useEffect(() => { watchRef.current = emptyWatchState(); }, [active?.id]);
+  useEffect(() => {
+    if (!active?.id || !me?.id || !membersLoaded) return;
+    const nameById = new Map(members.map((mm) => [mm.id, mm.name]));
+    const snaps = Object.entries(presences)
+      .filter(([uid]) => uid !== me.id)
+      .map(([uid, p]) => ({
+        id: uid, name: nameById.get(uid) || 'A member',
+        battery: p.battery, charging: p.charging, ts: p.ts, sharingOff: p.sharingOff,
+      }));
+    if (!snaps.length) return;
+    const r = deriveWatchAlerts(watchRef.current, snaps, Date.now());
+    watchRef.current = r.state;
+    for (const a of r.alerts) {
+      recordAlert({ circleId: active.id, kind: a.kind, actorId: a.actorId, actorName: a.actorName, text: a.text })
+        .catch(() => {});
+    }
+  // `tick` drives the quiet detection: silence, by definition, changes no state.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [presences, tick, active?.id, me?.id, members, membersLoaded]);
+
+  // ── Crash detection (MY device): impact after driving → countdown → SOS ──
+  // The accelerometer is armed only while sharing is on — the situation a
+  // family expects protection in — and the decision logic is pure and
+  // self-checked (lib/family/crash). A suspect opens a loud full-screen
+  // countdown; SOS fires unless the person says they are OK.
+  const crashRef = useRef(emptyCrashState());
+  const [crashAsk, setCrashAsk] = useState(false);
+  const [crashLeft, setCrashLeft] = useState(COUNTDOWN_S);
+  useEffect(() => {
+    const sp = me ? presences[me.id]?.speed : undefined;
+    crashRef.current = feedSpeed(crashRef.current, sp ?? null, Date.now());
+  }, [presences, me]);
+  useEffect(() => {
+    if (!share) return;
+    Accelerometer.setUpdateInterval(200);
+    const sub = Accelerometer.addListener(({ x, y, z }) => {
+      const g = Math.sqrt(x * x + y * y + z * z);
+      const r = feedImpact(crashRef.current, g, Date.now());
+      crashRef.current = r.state;
+      if (r.suspect) {
+        setCrashLeft(COUNTDOWN_S);
+        setCrashAsk(true);
+        Vibration.vibrate([0, 600, 200, 600, 200, 600]);
+      }
+    });
+    return () => sub.remove();
+  }, [share]);
+  useEffect(() => {
+    if (!crashAsk) return;
+    if (crashLeft <= 0) { setCrashAsk(false); fireSos(); return; }
+    const t = setTimeout(() => setCrashLeft((v) => v - 1), 1000);
+    return () => clearTimeout(t);
+  // fireSos is stable enough here: the countdown re-renders every second, so
+  // the closure is always the current one.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [crashAsk, crashLeft]);
 
   // ── Check-in ─────────────────────────────────────────────────────────
   const sendCheckin = async (c: typeof CHECKINS[number]) => {
@@ -1459,6 +1537,20 @@ export default function FamilySpaceScreen() {
               )}
             </TouchableOpacity>
 
+            {/* FIND MY THINGS — BLE item finder. Offered to every member: a
+                person's keys are their own business, and it needs no
+                permission the space grants. */}
+            <TouchableOpacity
+              onPress={() => active && router.push({ pathname: '/family-items' as any, params: { circleId: active.id } })}
+              style={[st.qa, { backgroundColor: colors.card, borderColor: colors.border }]}
+            >
+              <View style={[st.qaIcon, { backgroundColor: colors.primary + '22' }]}>
+                <Ionicons name="key" size={19} color={colors.primary} />
+              </View>
+              <Text style={[st.qaTitle, { color: colors.text }]}>Find Things</Text>
+              <Text style={[st.qaSub, { color: colors.textDim }]} numberOfLines={1}>Keys, wallet, bag</Text>
+            </TouchableOpacity>
+
             {canHistory && (
               <TouchableOpacity
                 onPress={() => active && router.push({ pathname: '/family-history' as any, params: { circleId: active.id, circleName: active.name } })}
@@ -1955,6 +2047,36 @@ export default function FamilySpaceScreen() {
           </View>
         </KeyboardAvoidingView>
       </Modal>
+
+      {/* ── Crash detected: loud, full-screen, and biased toward asking for
+          help. Doing nothing sends the SOS; only "I'm OK" stops it. ── */}
+      <Modal visible={crashAsk} transparent animationType="fade" onRequestClose={() => setCrashAsk(false)}>
+        <View style={[st.crashWrap, { backgroundColor: 'rgba(0,0,0,0.82)' }]}>
+          <View style={[st.crashCard, { backgroundColor: colors.card, borderColor: colors.danger }]}>
+            <Text style={{ fontSize: 40 }}>🚨</Text>
+            <Text style={[st.crashTitle, { color: colors.text }]}>Possible crash detected</Text>
+            <Text style={{ color: colors.textDim, fontSize: 13.5, textAlign: 'center', lineHeight: 19 }}>
+              A hard impact was detected while driving. If you don’t respond,
+              your circle gets an SOS with your live location.
+            </Text>
+            <Text style={[st.crashCount, { color: colors.danger }]}>{crashLeft}</Text>
+            <TouchableOpacity
+              onPress={() => setCrashAsk(false)}
+              accessibilityRole="button"
+              style={[st.crashBtn, { backgroundColor: colors.success }]}
+            >
+              <Text style={st.crashBtnTxt}>I’m OK</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              onPress={() => { setCrashAsk(false); fireSos(); }}
+              accessibilityRole="button"
+              style={[st.crashBtn, { backgroundColor: colors.danger }]}
+            >
+              <Text style={st.crashBtnTxt}>Send SOS now</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -2030,4 +2152,10 @@ const st = StyleSheet.create({
   saveBtn: { width: 46, height: 46, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
   mRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 13, borderTopWidth: StyleSheet.hairlineWidth },
   mTxt: { fontSize: 15, fontWeight: '600' },
+  crashWrap: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 26 },
+  crashCard: { width: '100%', maxWidth: 360, borderWidth: 2, borderRadius: 22, padding: 22, alignItems: 'center', gap: 10 },
+  crashTitle: { fontSize: 19, fontWeight: '900', textAlign: 'center' },
+  crashCount: { fontSize: 44, fontWeight: '900', fontVariant: ['tabular-nums'] },
+  crashBtn: { alignSelf: 'stretch', height: 52, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
+  crashBtnTxt: { color: '#fff', fontSize: 15.5, fontWeight: '800' },
 });

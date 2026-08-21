@@ -78,6 +78,8 @@ import { getLocalDb } from '../lib/localDb';
 import perf from '../lib/perf';
 global.Buffer = Buffer;
 
+
+
 // Keep the native splash up until the cold-start router (app/index.tsx) has made
 // its auth decision and navigated. This is the WhatsApp trick: no intermediate
 // spinner/white-flash between the splash and the chats list — index.tsx hides

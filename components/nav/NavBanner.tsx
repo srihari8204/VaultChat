@@ -15,7 +15,8 @@ const ICON: Record<string, keyof typeof Ionicons.glyphMap> = {
   right: 'arrow-forward', slightRight: 'arrow-forward-outline',
   uturn: 'arrow-undo', roundabout: 'sync', destination: 'flag',
 };
-const iconFor = (e: HapticEvent | null) => (e && ICON[e]) || 'arrow-up';
+/** Exported: the family map's member turn indicator draws the same glyphs. */
+export const iconFor = (e: HapticEvent | null) => (e && ICON[e]) || 'arrow-up';
 
 function fmtDist(m: number): string {
   if (m < 1000) return `${Math.round(m / 10) * 10} m`;

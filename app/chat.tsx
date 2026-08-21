@@ -243,6 +243,28 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
     const out: DisplayMessage[] = [];
     for (const m of messages) {
       if (m.type === 'reaction') continue;   // F4: reference messages, never timeline bubbles
+      // SPACE PLUMBING, NOT CONVERSATION (owner directive 2026-08-21: location
+      // coordinates never appear in the chat page — the map is where they
+      // live). Trip announcements/end markers and the family live-location
+      // key-delivery messages exist only so late joiners can harvest them from
+      // history; rendering them painted raw JSON and coordinate bubbles into
+      // the family's thread.
+      if (m.type === 'system' && typeof m.content === 'string'
+        && (m.content.startsWith('VCTRIP1:') || m.content.startsWith('VCTRIPEND1:'))) continue;
+      // Live-location plumbing, in BOTH the readable and the unreadable case.
+      //
+      // The `family:true` test alone only works once a message has decrypted,
+      // and on device many of these do not (their sender-key iteration is long
+      // past). Those fell through and rendered as "unable to decrypt" bubbles —
+      // the exact clutter this filter exists to remove, just wearing a padlock.
+      // A live-location envelope (`live:true` + a session key) is never
+      // conversation, and an unreadable one carries nothing a person can act
+      // on, so both are dropped. A genuine shared pin (`live:false`, no key)
+      // still renders — that is a deliberate user action, not plumbing.
+      if (m.type === 'location' && typeof m.content === 'string'
+        && (m.content.includes('"family":true')
+          || m.content.includes('"live":true')
+          || looksEncrypted(m.content))) continue;
       const k = m._tempId ?? String(m.id);
       if (seen.has(k)) continue;
       seen.add(k);

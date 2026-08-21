@@ -108,21 +108,34 @@ func (h *Hub) registerChatHandlers(s *socket.Socket) {
 	// nowhere and no member ever saw another member's ETA. Socket.IO drops
 	// unknown events silently, which is why it looked like it worked.
 	//
-	// blob is sealed with the trip key the starter published in an E2EE message,
-	// so what passes through here is opaque: no destination, no ETA, no route.
+	// TWO PAYLOAD SHAPES, ONE RELAY:
+	//   blob  — legacy trips, sealed with the trip key the starter published in
+	//           an E2EE message; opaque here (no destination, ETA or route).
+	//   plain — server-backed trips (migration 113). Space activities are exempt
+	//           from E2EE by owner directive, and a plain ping carries only
+	//           DERIVED numbers (remaining metres, an ETA, an arrived flag) —
+	//           never a position, so it discloses nothing presence does not.
+	// Membership is enforced identically for both; a ping with neither field is
+	// dropped rather than fanned out empty.
 	s.On("trip_update", func(args ...any) {
 		m := argMap(args)
 		chatID := mstr(m, "chatId")
 		blob := mstr(m, "blob")
-		if chatID == "" || blob == "" {
+		plain, hasPlain := m["plain"]
+		if chatID == "" || (blob == "" && !hasPlain) {
 			return
 		}
 		if !h.liveLocAllowed(d, chatID) {
 			return
 		}
-		s.To(socket.Room("chat:"+chatID)).Emit("trip_update", map[string]any{
-			"userId": d.uid, "tripId": m["tripId"], "blob": blob,
-		})
+		out := map[string]any{"userId": d.uid, "tripId": m["tripId"]}
+		if blob != "" {
+			out["blob"] = blob
+		}
+		if hasPlain {
+			out["plain"] = plain
+		}
+		s.To(socket.Room("chat:"+chatID)).Emit("trip_update", out)
 	})
 	s.On("trip_end", func(args ...any) {
 		m := argMap(args)

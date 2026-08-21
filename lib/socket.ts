@@ -169,6 +169,7 @@ export function disconnect(): void {
   // Drop the room set: a different account must not inherit this one's rooms;
   // live screens re-join on mount.
   joinedChatRooms.clear();
+  roomRefs.clear();
 }
 
 /**
@@ -220,12 +221,25 @@ export async function emit(event: string, data?: any): Promise<void> {
 const joinedChatRooms = new Set<string>();
 
 // Convenience wrappers for the most common chat events.
+//
+// REFCOUNTED. Several independent subscribers share one room — a circle's
+// presence relay, the space-location platform and the trip channel all join
+// the same chatId — and an unconditional leave meant the FIRST one to
+// unsubscribe silently kicked the rest out of the room. The refcount makes
+// join/leave pairs compose; a double join_chat on the wire is harmless.
+const roomRefs = new Map<string, number>();
 export async function joinChatRoom(chatId: string): Promise<void> {
-  joinedChatRooms.add(String(chatId));
+  const id = String(chatId);
+  roomRefs.set(id, (roomRefs.get(id) ?? 0) + 1);
+  joinedChatRooms.add(id);
   await emit('join_chat', { chatId });
 }
 export async function leaveChatRoom(chatId: string): Promise<void> {
-  joinedChatRooms.delete(String(chatId));
+  const id = String(chatId);
+  const n = (roomRefs.get(id) ?? 1) - 1;
+  if (n > 0) { roomRefs.set(id, n); return; }   // someone still needs the room
+  roomRefs.delete(id);
+  joinedChatRooms.delete(id);
   await emit('leave_chat', { chatId });
 }
 export async function emitTypingStart(chatId: string, uid: string): Promise<void> {

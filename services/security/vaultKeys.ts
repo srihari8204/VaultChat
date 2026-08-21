@@ -73,9 +73,64 @@ export function newSalt(): Uint8Array {
   return randomBytes(16);
 }
 
+// P5: native AES-GCM engine (react-native-quick-crypto → OpenSSL) for
+// seal/open, same treatment scrypt got above and for the same reason — @noble
+// runs in interpreted Hermes at ~1 MB/s, and cacheCrypto routes EVERY sealed
+// field through here. The family history store seals a few-hundred-KB blob per
+// accepted location ping, which at pure-JS speed became seconds of JS-thread
+// CPU per ping: pings arrived faster than they could be sealed and the app
+// wedged at 100% CPU until the ANR dialog (device-diagnosed on the Honor,
+// 2026-08-21 — async steps of 2.9–15.7s, every JS tracer silent).
+//
+// Byte-identical wire format — base64( nonce(12) || ct || tag(16) ), AES-256-GCM,
+// no AAD — proven by a startup round-trip probe in BOTH directions against
+// @noble. If the probe fails, the engine stays off and @noble handles
+// everything, so a device without the native module never notices.
+let _gcmProbe: boolean | null = null;
+// LAZY, not module-load: quick-crypto's cipher needs crypto.getRandomValues,
+// which the app's polyfills install after this module is first imported — a
+// load-time probe always failed with "crypto.getRandomValues must be defined"
+// and silently pinned every seal to the slow JS path (device-diagnosed).
+function gcmNative(): boolean {
+  if (_gcmProbe !== null) return _gcmProbe;
+  _gcmProbe = (() => {
+  try {
+    if (!QC?.createCipheriv || !QC?.createDecipheriv) return false;
+    const k = new Uint8Array(32).fill(7);
+    const probe = 'vc-gcm-probe';
+    // native-sealed → noble-opened
+    const n1 = randomBytes(12);
+    const c = QC.createCipheriv('aes-256-gcm', Buffer.from(k), Buffer.from(n1));
+    const ct = Buffer.concat([c.update(Buffer.from(TE.encode(probe))), c.final(), c.getAuthTag()]);
+    const nobleSide = TD.decode(gcm(k, n1).decrypt(new Uint8Array(ct)));
+    if (nobleSide !== probe) return false;
+    // noble-sealed → native-opened
+    const n2 = randomBytes(12);
+    const nct = gcm(k, n2).encrypt(TE.encode(probe));
+    const body = Buffer.from(nct.slice(0, nct.length - 16));
+    const tag = Buffer.from(nct.slice(nct.length - 16));
+    const d = QC.createDecipheriv('aes-256-gcm', Buffer.from(k), Buffer.from(n2));
+    d.setAuthTag(tag);
+    const back = Buffer.concat([d.update(body), d.final()]).toString('utf8');
+    return back === probe;
+  } catch { return false; }
+  })();
+  return _gcmProbe;
+}
+
 /** Seal a string under a key → base64( nonce(12) || ciphertext+tag ). */
 export function seal(key: Uint8Array, plaintext: string): string {
   const nonce = randomBytes(12);
+  if (gcmNative()) {
+    try {
+      const c = QC.createCipheriv('aes-256-gcm', Buffer.from(key), Buffer.from(nonce));
+      const ct = Buffer.concat([c.update(Buffer.from(TE.encode(plaintext))), c.final(), c.getAuthTag()]);
+      const out = new Uint8Array(12 + ct.length);
+      out.set(nonce, 0);
+      out.set(new Uint8Array(ct), 12);
+      return toB64(out);
+    } catch { /* fall through to @noble */ }
+  }
   const ct = gcm(key, nonce).encrypt(TE.encode(plaintext));
   const out = new Uint8Array(nonce.length + ct.length);
   out.set(nonce, 0);
@@ -87,12 +142,26 @@ export function seal(key: Uint8Array, plaintext: string): string {
  * Open a sealed blob. Returns the plaintext, or null if `key` is wrong — the
  * GCM auth tag fails to verify, so a non-owning key cannot decrypt it. This
  * null-on-wrong-key is exactly the property the duress split relies on.
+ *
+ * On the native engine a decrypt throw means the auth tag refused the key —
+ * the same null the @noble path reports. The startup probe already proved the
+ * engine itself works, so a throw here is a verdict, not an outage; and the
+ * fail direction is safe regardless (a rejected REAL header falls through to
+ * the decoy, which its key also refuses — the PIN is rejected, never misrouted).
  */
 export function open(key: Uint8Array, envelope: string): string | null {
   try {
     const buf = fromB64(envelope);
-    if (buf.length <= 12) return null;
+    // 12-byte nonce + 16-byte tag is the floor; an empty plaintext is exactly 28.
+    if (buf.length < 12 + 16) return null;
     const nonce = buf.slice(0, 12);
+    if (gcmNative()) {
+      const body = Buffer.from(buf.slice(12, buf.length - 16));
+      const tag = Buffer.from(buf.slice(buf.length - 16));
+      const d = QC.createDecipheriv('aes-256-gcm', Buffer.from(key), Buffer.from(nonce));
+      d.setAuthTag(tag);
+      return Buffer.concat([d.update(body), d.final()]).toString('utf8');
+    }
     const ct = buf.slice(12);
     return TD.decode(gcm(key, nonce).decrypt(ct));
   } catch {

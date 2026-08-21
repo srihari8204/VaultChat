@@ -143,6 +143,49 @@ export async function fetchRoutes(from: LatLng, to: LatLng, costing: Costing = '
   return parseRoutes(resp);
 }
 
+/** The next cue-worthy maneuver ahead of a position on a route. */
+export interface NextTurn {
+  event: NonNullable<Maneuver['event']>;
+  instruction: string;
+  roadName: string;
+  /** Metres ALONG THE ROUTE from the position to the maneuver. */
+  distM: number;
+  /** Index into the maneuvers array — callers de-dupe cues per turn with it. */
+  index: number;
+}
+
+/**
+ * Find the next left/right/uturn/roundabout/destination ahead of `pos` (pure).
+ *
+ * Built for WATCHING someone travel: the family map holds a member's route and
+ * their live pings, and this answers "what does their road do next" — the same
+ * question navigationService answers for the driver, but for an arbitrary
+ * position instead of this device's GPS. Maneuvers with no haptic event
+ * ("continue") are skipped: they are not worth an indicator, let alone a buzz.
+ */
+export function nextTurnAlong(shape: LatLng[], maneuvers: Maneuver[], pos: LatLng): NextTurn | null {
+  if (!shape.length || !maneuvers.length) return null;
+  const { haversine } = require('./geo') as typeof import('./geo');
+  // Nearest shape vertex — same approach navigationService uses.
+  let near = 0, bestD = Infinity;
+  for (let i = 0; i < shape.length; i++) {
+    const d = haversine(shape[i], pos);
+    if (d < bestD) { bestD = d; near = i; }
+  }
+  for (let i = 0; i < maneuvers.length; i++) {
+    const m = maneuvers[i];
+    // STRICT: a maneuver behind the nearest vertex is already taken. This is a
+    // watcher's indicator, not the driver's timeline — announcing a turn the
+    // subject has visibly passed reads as broken.
+    if (!m.event || m.beginIndex < near) continue;
+    // Along-route distance: pos → nearest vertex → the maneuver point.
+    let dist = haversine(pos, shape[Math.min(near, shape.length - 1)]);
+    for (let j = near; j < m.beginIndex && j + 1 < shape.length; j++) dist += haversine(shape[j], shape[j + 1]);
+    return { event: m.event, instruction: m.instruction, roadName: m.roadName, distM: Math.round(dist), index: i };
+  }
+  return null;
+}
+
 /** One origin's road distance + duration to the shared destination. */
 export interface MatrixResult {
   /** Index into the ORIGINS array that was passed in. */
@@ -224,6 +267,25 @@ function _selfCheck(): void {
   A(!rw.costing_options, 'pedestrian ignores toll/highway avoidance');
   const rs = buildRouteRequest(p0, p0, 'pedestrian', { shortest: true });
   A(rs.costing_options.pedestrian.shortest === true, 'pedestrian shortest still applies');
+
+  // next turn along a route for an arbitrary position (family map watches a
+  // member travel: their next left/right, from THEIR route and THEIR pings)
+  const ll = (lat: number): LatLng => ({ lat, lng: 77 });
+  // straight south→north line, ~111 m per step
+  const tShape = [ll(12.000), ll(12.001), ll(12.002), ll(12.003), ll(12.004)];
+  const tMans: Maneuver[] = [
+    { event: null, turnAngle: 0, instruction: 'Head north', roadName: '', point: tShape[0], beginIndex: 0, lengthM: 222, timeS: 20 },
+    { event: 'left', turnAngle: 90, instruction: 'Turn left', roadName: 'Main Rd', point: tShape[2], beginIndex: 2, lengthM: 222, timeS: 20 },
+    { event: 'destination', turnAngle: 0, instruction: 'Arrive', roadName: '', point: tShape[4], beginIndex: 4, lengthM: 0, timeS: 0 },
+  ];
+  const t1 = nextTurnAlong(tShape, tMans, ll(12.0));
+  A(t1 !== null && t1.event === 'left', 'the first CUE-WORTHY maneuver leads — a null continue is skipped');
+  A(t1!.distM > 180 && t1!.distM < 260, `distance to the turn should be ~222 m along the route, got ${t1?.distM}`);
+  const t2 = nextTurnAlong(tShape, tMans, ll(12.0031));
+  A(t2 !== null && t2.event === 'destination', 'past the turn, the destination is next');
+  A(t2!.distM < 140, `close to the end the remaining distance is small, got ${t2?.distM}`);
+  A(nextTurnAlong(tShape, [], ll(12.0)) === null, 'no maneuvers → no turn to announce');
+  A(nextTurnAlong([], tMans, ll(12.0)) === null, 'no shape → nothing to measure along');
 
   // alternatives: parsed when present, never invented when absent
   const tripFix = { legs: [{ shape: enc, maneuvers: [{ type: 4, begin_shape_index: 1, length: 0, time: 0 }] }], summary: { length: 1.2, time: 90 } };

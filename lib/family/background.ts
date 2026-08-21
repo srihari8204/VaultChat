@@ -30,10 +30,11 @@ import { refDistancesFor } from './distance';
 import { planFor } from './adaptive';
 import { getGroupPrivacy } from '../groups/store';
 import { applyPrivacy, isPublishing } from '../groups/privacy';
-import { publishPoint } from '../location/publisher';
+import { publishPoint, flushAll } from '../location/publisher';
 import { haversine } from '../nav/geo';
 import { readBattery } from './battery';
 import { processFix } from './fixPipeline';
+import { currentTrip, publishTripState } from '../groups/tripSession';
 import { type FamilyPing } from './types';
 
 export const BG_TASK = 'vc-family-bg-location';
@@ -146,10 +147,21 @@ TaskManager.defineTask(BG_TASK, async ({ data, error }: any) => {
         // member explicitly stopped (the flag outranks a stale task).
         // refs stay off this path on purpose — the server stores positions,
         // never reference places or the distances derived from them.
-        publishPoint(cid, {
+        // QUEUE, THEN UPLOAD IN THIS SAME WAKE — never on the flush timer.
+        //
+        // publishPoint only enqueues; the upload rides a 15 s setInterval that
+        // belongs to a LIVE JS context. A headless wake has none: the OS runs
+        // this task just long enough to hand over the batch and then freezes
+        // the runtime, so that interval never fires and the points sit in the
+        // persisted queue until someone opens the app. Measured on the Honor —
+        // home button + screen off produced ZERO server rows for 110 s while
+        // the location foreground-service was demonstrably alive. Awaiting the
+        // flush here is what makes "keeps sharing with the app closed" true.
+        await publishPoint(cid, {
           lat: ping.lat, lng: ping.lng, ts: ping.ts || ts, spd: ping.spd,
           acc: ping.acc, bat: ping.bat, src: 'fused',
         }).catch(() => {});
+        await flushAll().catch(() => {});
       }
     }
 
@@ -162,6 +174,14 @@ TaskManager.defineTask(BG_TASK, async ({ data, error }: any) => {
       fences,
       announce: visible ? (text) => { sendMessage(cid, text, 'system').catch(() => {}); } : undefined,
     });
+  }
+
+  // An active group trip keeps its ETA flowing from a pocket too. Only when
+  // this JS context still holds the trip — a headless cold start has no trip
+  // state, and that is fine: the ETA resumes with the app.
+  const trip = currentTrip();
+  if (trip && ctx.circleIds.includes(trip.groupId)) {
+    publishTripState(pos, spd, ctx.myName).catch(() => {});
   }
 });
 

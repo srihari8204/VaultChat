@@ -55,6 +55,21 @@ export function speedBand(spdMs: number | null | undefined): SpeedBand | null {
 }
 
 /**
+ * Follow-camera zoom for a subject moving at this speed (auto-zoom while
+ * traveling). Faster → wider, so a car on a highway shows the road ahead
+ * instead of a blur of one block. Rides the same bands as speedBand so
+ * "moving" means one thing app-wide; unknown speed zooms like stationary.
+ */
+export function zoomForSpeed(spdMs: number | null | undefined): number {
+  switch (speedBand(spdMs)) {
+    case 'very_high': return 13.5;
+    case 'high': return 14.5;
+    case 'normal': return 15.5;
+    default: return 16.5;   // stationary, or no speed reported
+  }
+}
+
+/**
  * High-speed alert decision (spec §24): over the threshold, respecting a
  * cooldown so one motorway drive is one alert, not one per ping.
  */
@@ -324,6 +339,16 @@ if (require.main === module) {
   if (speedBand(39 / KMH_PER_MS) !== 'normal') fail('39 km/h is normal');
   if (speedBand(79 / KMH_PER_MS) !== 'high') fail('79 km/h is high');
   if (speedBand(81 / KMH_PER_MS) !== 'very_high') fail('81 km/h is very high');
+
+  // follow-camera zoom: the faster the subject, the wider the view — strictly
+  // monotonic so a band change never zooms the wrong way, and unknown speed
+  // behaves exactly like stationary (never a surprise wide shot).
+  const z0 = zoomForSpeed(null), zS = zoomForSpeed(5 / KMH_PER_MS),
+    zN = zoomForSpeed(30 / KMH_PER_MS), zH = zoomForSpeed(60 / KMH_PER_MS),
+    zV = zoomForSpeed(100 / KMH_PER_MS);
+  if (z0 !== zS) fail('unknown speed must zoom like stationary');
+  if (!(zS > zN && zN > zH && zH > zV)) fail(`zoom must widen with speed: ${zS} ${zN} ${zH} ${zV}`);
+  if (zV < 12 || zS > 18) fail('zooms must stay in a sane map range');
 
   // speed alert: threshold + cooldown, and "no speed" never alerts
   if (shouldSpeedAlert(null, 80, null, now)) fail('no speed must not alert');

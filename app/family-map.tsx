@@ -9,8 +9,8 @@
 // Sharing stays a deliberate switch on the hub (and is off by default), so
 // opening a map must not prompt for a permission or broadcast anything.
 
-import React, { useEffect, useMemo, useState } from 'react';
-import { View, Text, ScrollView, ActivityIndicator, StyleSheet, TouchableOpacity } from 'react-native';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { View, Text, ScrollView, ActivityIndicator, StyleSheet, TouchableOpacity, Alert } from 'react-native';
 import * as Location from 'expo-location';
 import { Ionicons } from '@expo/vector-icons';
 import { Stack, useLocalSearchParams } from 'expo-router';
@@ -26,8 +26,21 @@ import { startRefreshController } from '../lib/family/refresh';
 import { useVisibleTick } from '../lib/family/useVisibleTick';
 import { type CircleMember, type MemberPresence } from '../lib/family/types';
 import { formatMetres, formatRoute } from '../lib/family/distance';
-import { fetchRoute } from '../lib/nav/routing';
+import { zoomForSpeed } from '../lib/family/status';
+import { getPlaces, getDefaultRef } from '../lib/family/store';
+import { type Geofence } from '../lib/family/geofence';
+import { fetchRoute, nextTurnAlong, type Maneuver } from '../lib/nav/routing';
 import { haversine } from '../lib/nav/geo';
+import { startNavigation, stopNavigation, useNavBanner } from '../lib/nav/navigationService';
+import { loadNavSettings, getNavSettings } from '../lib/nav/navSettings';
+import { playHaptic } from '../lib/nav/hapticPlayer';
+import NavBanner, { iconFor } from '../components/nav/NavBanner';
+import {
+  startTrip, joinTrip, endTrip, leaveTrip, subscribeTrip, currentTrip, setTripRoute,
+} from '../lib/groups/tripSession';
+import { foldParticipants, lastEta, minutesUntil, type Trip, type TripPing } from '../lib/groups/trips';
+import { leavePlan, formatLeaveIn } from '../lib/family/leaveNow';
+import { armLeaveNow, cancelLeaveNow } from '../lib/family/leaveNowAlarm';
 import { getCurrentUserAsync } from './(constants)/authService';
 
 const AGO = (ms: number) => {
@@ -67,6 +80,18 @@ export default function FamilyMapScreen() {
   /** Meet Here (§40). A mode over the same map, never a separate screen (§4). */
   const [meetOpen, setMeetOpen] = useState(false);
   const [destination, setDestination] = useState<MeetDestination | null>(null);
+  /**
+   * The circle's live FAMILY TRIP (shared destination). Discovered from the
+   * same announcement channel the hub watches; while one is running it OWNS
+   * the destination pin, so every member's map shows the same place without
+   * anyone typing it.
+   */
+  const [trip, setTrip] = useState<Trip | null>(currentTrip());
+  const [tripPings, setTripPings] = useState<TripPing[]>([]);
+  /** True while a navigation session started FROM THIS SCREEN is running —
+   *  so ending the trip stops OUR guidance and never someone's unrelated
+   *  Navigate-app session. */
+  const navHere = useRef(false);
   /** Dashed distance lines to every member. On by default — it is the picture
    *  the screen exists to show — but dismissible when the map gets busy. */
   const [showLinks, setShowLinks] = useState(true);
@@ -146,9 +171,66 @@ export default function FamilyMapScreen() {
         });
         if (live) { const prevOff = off; off = () => { prevOff?.(); un2(); }; } else un2();
       } catch { /* platform absent — sealed relay stands alone */ }
+      // The circle's family trip: discover it, AUTO-JOIN it, and keep its
+      // per-member ETAs flowing into the rows below. Auto-join is deliberate —
+      // a member a trip was started for should see their route and share their
+      // ETA without a joining ceremony. Only DERIVED numbers ride the trip
+      // channel; the circle already sees this member's position via presence.
+      try {
+        const un3 = await subscribeTrip(
+          circleId, myId,
+          (e) => {
+            if (!live) return;
+            setTripPings((prev) => (e.ping
+              ? [...prev.filter((p) => p.userId !== e.userId), e.ping]
+              : prev.filter((p) => p.userId !== e.userId)));
+          },
+          (t) => {
+            if (!live) return;
+            if (t === null) { setTrip(null); setTripPings([]); return; }
+            setTrip(t);
+            if (!currentTrip()) joinTrip(t, myId).catch(() => {});
+          },
+        );
+        if (live) { const prevOff = off; off = () => { prevOff?.(); un3(); }; } else un3();
+      } catch { /* trips degrade to a plain map */ }
     })();
     return () => { live = false; off?.(); };
   }, [circleId]);
+
+  /**
+   * A live trip OWNS the destination pin: every member's map shows the same
+   * place, nobody types it. Ending the trip releases it.
+   */
+  useEffect(() => {
+    if (trip) setDestination({ name: trip.destinationName, lat: trip.destination.lat, lng: trip.destination.lng });
+    else {
+      setDestination(null);
+      // The trip is over — guidance started for it stops with it.
+      if (navHere.current) { stopNavigation(); navHere.current = false; }
+    }
+  // Keyed on the trip's ID: a manual Meet Here destination (trip never set)
+  // must not be clobbered by re-renders.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [trip?.id]);
+
+  /** MY saved places, for the From-Home route. Device-local by doctrine —
+   *  the coordinate never leaves this phone, so this route can only ever be
+   *  drawn for MY OWN home, never another member's. */
+  const [myPlaces, setMyPlaces] = useState<Geofence[]>([]);
+  const [homeName, setHomeName] = useState<string | null>(null);
+  useEffect(() => {
+    if (!circleId) return;
+    let live = true;
+    (async () => {
+      const [ps, ref] = await Promise.all([getPlaces(circleId), getDefaultRef(circleId)]);
+      if (!live) return;
+      setMyPlaces(ps);
+      setHomeName(ref ?? ps[0]?.name ?? null);
+    })();
+    return () => { live = false; };
+  }, [circleId]);
+  const homePlace = homeName ? myPlaces.find((p) => p.name === homeName) ?? null : null;
 
   /**
    * Road route to ONE member, fetched on demand (spec §8/§42).
@@ -157,22 +239,30 @@ export default function FamilyMapScreen() {
    * routings for lines nobody asked to see. The dashed connectors already
    * answer "who is where and how far"; this answers "how do I actually get to
    * THIS one", and only when asked.
+   *
+   * WITH A DESTINATION SET the same tap answers the trip's question instead:
+   * THAT member's own road to the destination ("individual route path"), not
+   * my road to them.
    */
   const [routeTo, setRouteTo] = useState<string | null>(null);
   const [routeShape, setRouteShape] = useState<{ lat: number; lng: number }[] | null>(null);
+  /** The tapped route's maneuvers — they feed the member turn indicator. */
+  const [routeMans, setRouteMans] = useState<Maneuver[] | null>(null);
   const [routeInfo, setRouteInfo] = useState<string | null>(null);
   const [routeBusy, setRouteBusy] = useState(false);
 
   useEffect(() => {
-    if (!routeTo || !mine) { setRouteShape(null); setRouteInfo(null); return; }
-    const target = presences[routeTo];
-    if (!target) { setRouteShape(null); setRouteInfo(null); return; }
+    const target = routeTo ? presences[routeTo] : undefined;
+    const from = destination ? target?.pos : mine?.pos;
+    const to = destination ? { lat: destination.lat, lng: destination.lng } : target?.pos;
+    if (!routeTo || !target || !from || !to) { setRouteShape(null); setRouteMans(null); setRouteInfo(null); return; }
     let live = true;
     setRouteBusy(true);
-    fetchRoute(mine.pos, target.pos, 'auto')
+    fetchRoute(from, to, 'auto')
       .then((r) => {
         if (!live) return;
         setRouteShape(r.shape);
+        setRouteMans(r.maneuvers);
         // Road figures, explicitly labelled as such — never mixed with the
         // straight-line numbers on the connectors (§8).
         setRouteInfo(formatRoute(r.lengthM, r.timeS));
@@ -180,6 +270,7 @@ export default function FamilyMapScreen() {
       .catch(() => {
         if (!live) return;
         setRouteShape(null);
+        setRouteMans(null);
         setRouteInfo('Route unavailable');
       })
       .finally(() => { if (live) setRouteBusy(false); });
@@ -187,7 +278,171 @@ export default function FamilyMapScreen() {
   // Keyed on the target's COORDINATES: re-route when they actually move, not on
   // every ping that repeats the same position.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [routeTo, mine?.pos.lat, mine?.pos.lng, presences[routeTo ?? '']?.pos.lat, presences[routeTo ?? '']?.pos.lng]);
+  }, [routeTo, mine?.pos.lat, mine?.pos.lng, presences[routeTo ?? '']?.pos.lat, presences[routeTo ?? '']?.pos.lng, destination?.lat, destination?.lng]);
+
+  /**
+   * MY OWN road to the destination, drawn automatically the moment one exists
+   * (a trip landing, or a Meet Here pick). This is the "your route" half of a
+   * family trip — no tap required. Also feeds the trip's deviation check, so
+   * "left the route" is measured against the road actually drawn.
+   */
+  const [destRoute, setDestRoute] = useState<{ lat: number; lng: number }[] | null>(null);
+  const [destInfo, setDestInfo] = useState<string | null>(null);
+  /** Road seconds to the destination — what "leave now" is computed from.
+   *  Kept separate from destInfo, which is a formatted human string. */
+  const [destSecs, setDestSecs] = useState<number | null>(null);
+  useEffect(() => {
+    if (!destination || !mine) { setDestRoute(null); setDestInfo(null); setDestSecs(null); return; }
+    let live = true;
+    fetchRoute(mine.pos, { lat: destination.lat, lng: destination.lng }, 'auto')
+      .then((r) => {
+        if (!live) return;
+        setDestRoute(r.shape);
+        setDestInfo(formatRoute(r.lengthM, r.timeS));
+        setDestSecs(r.timeS);
+        const t = currentTrip();
+        // Never override a leader's shared route — that is the road the group
+        // agreed on; mine only stands in when nobody is leading.
+        if (t && !t.leaderId) setTripRoute(r.shape);
+      })
+      .catch(() => { if (live) { setDestRoute(null); setDestInfo(null); setDestSecs(null); } });
+    return () => { live = false; };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [destination?.lat, destination?.lng, mine?.pos.lat, mine?.pos.lng]);
+
+  /** From-Home: the road from MY reference place to where I am now. */
+  const [showHomeRoute, setShowHomeRoute] = useState(false);
+  const [homeRoute, setHomeRoute] = useState<{ lat: number; lng: number }[] | null>(null);
+  const [homeInfo, setHomeInfo] = useState<string | null>(null);
+  useEffect(() => {
+    if (!showHomeRoute || !homePlace || !mine) { setHomeRoute(null); setHomeInfo(null); return; }
+    let live = true;
+    fetchRoute(homePlace.center, mine.pos, 'auto')
+      .then((r) => { if (live) { setHomeRoute(r.shape); setHomeInfo(formatRoute(r.lengthM, r.timeS)); } })
+      .catch(() => { if (live) { setHomeRoute(null); setHomeInfo('Route unavailable'); } });
+    return () => { live = false; };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showHomeRoute, homePlace?.center.lat, homePlace?.center.lng, mine?.pos.lat, mine?.pos.lng]);
+
+  /**
+   * ALWAYS-ON member road routes (owner, 2026-08-21): the road from me to EVERY
+   * member, with "2.4 km · 6 min" on the line — visible without any tap.
+   *
+   * One Valhalla call per member, but re-fetched only when either endpoint has
+   * moved ≥250 m — a stationary family costs one call each and then nothing.
+   * A failed routing falls back to the straight line, drawn dashed and
+   * labelled with the straight-line figure so a fallback never reads as road.
+   */
+  const MR_MOVE_M = 250;
+  const mrCache = useRef<Record<string, {
+    from: { lat: number; lng: number }; to: { lat: number; lng: number };
+    pts: { lat: number; lng: number }[]; label: string; road: boolean;
+  }>>({});
+  const mrInflight = useRef<Set<string>>(new Set());
+  const [mrVersion, setMrVersion] = useState(0);
+  useEffect(() => {
+    if (!showLinks || !mine) return;
+    for (const [uid, p] of Object.entries(presences)) {
+      if (uid === me || freshnessOf(p.ts, now) === 'unavailable') continue;
+      const c = mrCache.current[uid];
+      if (c && haversine(c.from, mine.pos) < MR_MOVE_M && haversine(c.to, p.pos) < MR_MOVE_M) continue;
+      if (mrInflight.current.has(uid)) continue;
+      mrInflight.current.add(uid);
+      const from = mine.pos, to = p.pos;
+      fetchRoute(from, to, 'auto')
+        .then((r) => { mrCache.current[uid] = { from, to, pts: r.shape, label: formatRoute(r.lengthM, r.timeS), road: true }; })
+        .catch(() => { mrCache.current[uid] = { from, to, pts: [from, to], label: formatMetres(haversine(from, to)), road: false }; })
+        .finally(() => { mrInflight.current.delete(uid); setMrVersion((v) => v + 1); });
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [presences, mine?.pos.lat, mine?.pos.lng, showLinks, me, now]);
+
+  const memberRoutes = useMemo(() => {
+    if (!showLinks || !mine) return [];
+    return Object.entries(mrCache.current)
+      .filter(([uid]) => uid !== me && presences[uid] && freshnessOf(presences[uid].ts, now) !== 'unavailable')
+      .map(([uid, c]) => ({ id: uid, pts: c.pts, label: c.label, road: c.road }));
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mrVersion, showLinks, me, presences, now, mine]);
+
+  /**
+   * NEXT TURN of the member whose route is on screen — the watcher's
+   * indicator: their route, their live pings, their next left/right. The cue
+   * also FIRES (sound per nav settings' mode, vibration per profile) once per
+   * maneuver as they close within the trigger distance.
+   */
+  useEffect(() => { loadNavSettings().catch(() => {}); }, []);
+  const routedPos = routeTo ? presences[routeTo]?.pos : null;
+  const memberTurn = useMemo(() => {
+    if (!routeTo || !routeShape || !routeMans || !routedPos) return null;
+    return nextTurnAlong(routeShape, routeMans, routedPos);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [routeTo, routeShape, routeMans, routedPos?.lat, routedPos?.lng]);
+  const TURN_FIRE_M = 250;
+  const firedTurn = useRef<string | null>(null);
+  useEffect(() => {
+    if (!memberTurn || !routeTo) return;
+    const key = `${routeTo}:${memberTurn.index}`;
+    if (memberTurn.distM <= TURN_FIRE_M && firedTurn.current !== key) {
+      firedTurn.current = key;
+      const s = getNavSettings();
+      playHaptic(memberTurn.event, s.profile, { mode: s.mode });
+    }
+  }, [memberTurn, routeTo]);
+
+  /**
+   * MY OWN turn-by-turn to the destination — the REAL navigation loop
+   * (navigationService): GPS, adaptive haptic timeline, voice per the user's
+   * nav settings, missed-turn reroute — rendered here through the same
+   * NavBanner the Navigate app uses. Left running on navigate-away on
+   * purpose; STOP (or the trip ending) ends it.
+   */
+  const navBanner = useNavBanner();
+  const startNav = async () => {
+    if (!destination) return;
+    try {
+      const s = await loadNavSettings();
+      await startNavigation({
+        to: { lat: destination.lat, lng: destination.lng },
+        profile: s.profile, mode: s.mode, timing: s.timing,
+        costing: s.costing, custom: s.custom, routeOpts: s.routeOpts,
+      });
+      navHere.current = true;
+    } catch (e: any) { Alert.alert('Navigation', e?.message ?? 'Could not start navigation.'); }
+  };
+  const stopNav = () => { stopNavigation(); navHere.current = false; };
+
+  /**
+   * LEAVE NOW (§ Life360 parity). The trip knows where; the road route knows
+   * how long. Given an arrival time, this is the only number a family
+   * actually plans around: when to walk out of the door.
+   *
+   * The alarm is AlarmManager-backed (leaveNowAlarm), so it survives Doze and
+   * the app being closed — a reminder that only fires while the screen is on
+   * is not a reminder.
+   */
+  const [arriveBy, setArriveBy] = useState<number | null>(null);
+  const leave = useMemo(
+    () => leavePlan(arriveBy, destSecs, now),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [arriveBy, destSecs, now],
+  );
+  useEffect(() => {
+    if (!circleId) return;
+    if (!destination || arriveBy == null || destSecs == null) { cancelLeaveNow(circleId); return; }
+    armLeaveNow(circleId, destination.name, arriveBy, destSecs).catch(() => {});
+    // Re-armed whenever the ROUTE or the deadline changes: a re-route that
+    // adds twenty minutes must move the alarm, not leave it on the old road.
+  }, [circleId, destination?.name, destination?.lat, destination?.lng, arriveBy, destSecs]);
+  // The destination going away (trip ended, pin cleared) takes the alarm with it.
+  useEffect(() => { if (!destination) setArriveBy(null); }, [destination]);
+
+  /** Offer round arrival times: +30m, +1h, +2h from now. One tap, no picker —
+   *  a family setting off decides in seconds, not in a date dialog. */
+  const arriveChoices = useMemo(() => {
+    const base = Math.ceil(now / (15 * 60_000)) * (15 * 60_000);   // next quarter hour
+    return [30, 60, 120].map((m) => base + m * 60_000);
+  }, [now]);
 
   const nameOf = useMemo(() => new Map(members.map((m) => [m.id, m.name])), [members]);
   const markers: FamilyMarker[] = useMemo(() => Object.entries(presences)
@@ -254,6 +509,39 @@ export default function FamilyMapScreen() {
     return rows;
   }, [members, presences, me, mine, now]);
 
+  /** Am I an active participant of the shown trip (sharing my ETA)? */
+  const joined = !!trip && currentTrip()?.id === trip.id;
+  const tripEta = useMemo(
+    () => (trip ? lastEta(foldParticipants(tripPings, {}, now)) : null),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [trip?.id, tripPings, now],
+  );
+
+  const beginTrip = async (d: MeetDestination) => {
+    if (!me) return;
+    try {
+      const t = await startTrip(circleId, me, { lat: d.lat, lng: d.lng }, d.name);
+      setTrip(t);
+      setMeetOpen(false);
+    } catch (e: any) { Alert.alert('Family trip', e?.message ?? 'Could not start the trip.'); }
+  };
+
+  const tripAction = async () => {
+    if (!trip || !me) return;
+    if (trip.startedBy === me) {
+      Alert.alert('End the trip?', 'The trip is over for everyone in the circle.', [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'End trip', style: 'destructive', onPress: async () => { await endTrip(); setTrip(null); setTripPings([]); } },
+      ]);
+    } else if (joined) {
+      await leaveTrip();
+      setTrip({ ...trip });   // re-render: the button flips to JOIN
+    } else {
+      await joinTrip(trip, me).catch(() => {});
+      setTrip({ ...trip });
+    }
+  };
+
   if (!circleId) {
     return (
       <View style={[st.center, { backgroundColor: colors.bg }]}>
@@ -271,16 +559,26 @@ export default function FamilyMapScreen() {
         headerStyle: { backgroundColor: colors.bg }, headerTintColor: colors.text,
         headerShadowVisible: false,
       }} />
+      {/* MY turn-by-turn strip — the same mini banner the Navigate app shows.
+          Renders nothing unless a navigation session is running. */}
+      <NavBanner />
       <View style={{ flex: 1 }}>
         <FamilyMap
           members={markers} focusId={focusId} followId={followId}
+          // Auto-zoom while traveling: the follow camera widens with the
+          // followed member's live speed (highway = wide, parked = close).
+          followZoom={followId ? zoomForSpeed(presences[followId]?.speed) : null}
           destination={destination}
-          // Connectors fan out from ME to every member, each labelled with its
-          // straight-line distance — the "ten members, ten distances" picture.
-          // Dropped while a road route is on screen so the two line styles
-          // never compete for the same reading.
-          linkFrom={showLinks && !routeShape && mine ? mine.pos : null}
-          route={routeShape}
+          // ROAD ROUTES to every member are the default picture now; the
+          // dashed straight-line connectors only stand in until the first
+          // routes arrive (memberRoutes empty), and per member on a routing
+          // failure (road:false entries, drawn dashed).
+          linkFrom={showLinks && !routeShape && !homeRoute && !memberRoutes.length && mine ? mine.pos : null}
+          memberRoutes={memberRoutes}
+          // One highlighted-route channel, by priority: an explicitly
+          // requested member route beats the From-Home route beats my
+          // automatic route to the destination.
+          route={routeShape ?? homeRoute ?? destRoute}
           onSelect={(id) => setFocusId(id)} style={{ flex: 1 }}
         />
 
@@ -297,10 +595,67 @@ export default function FamilyMapScreen() {
             <Text style={{ color: destination ? colors.text : colors.textDim, fontSize: 14, flex: 1 }} numberOfLines={1}>
               {destination ? destination.name : 'Search a place to meet'}
             </Text>
-            {destination
+            {/* During a trip the destination belongs to the trip — it is ended
+                from the trip bar, never silently un-pinned here. */}
+            {destination && !trip
               ? <Ionicons name="close-circle" size={17} color={colors.textFaint} onPress={() => setDestination(null)} />
               : <Ionicons name="people" size={16} color={colors.primary} />}
           </TouchableOpacity>
+        )}
+
+        {/* FAMILY TRIP BAR: whose trip, where to, when everyone is in — and
+            the way out of it. */}
+        {trip && !meetOpen && (
+          <View style={[st.tripBar, { backgroundColor: colors.card, borderColor: colors.primary }]}>
+            <Ionicons name="car" size={16} color={colors.primary} />
+            <View style={{ flex: 1, minWidth: 0 }}>
+              <Text style={{ color: colors.text, fontWeight: '800', fontSize: 13 }} numberOfLines={1}>
+                Trip to {trip.destinationName}
+              </Text>
+              <Text style={{ color: colors.textDim, fontSize: 11 }} numberOfLines={1}>
+                started by {trip.startedBy === me ? 'you' : (nameOf.get(trip.startedBy) || 'a member')}
+                {tripEta != null ? ` · all in by ~${minutesUntil(tripEta, now)} min` : ''}
+              </Text>
+            </View>
+            <Text onPress={tripAction} style={{ color: trip.startedBy === me || joined ? colors.danger : colors.primary, fontWeight: '800', fontSize: 12 }}>
+              {trip.startedBy === me ? 'END' : joined ? 'LEAVE' : 'JOIN'}
+            </Text>
+          </View>
+        )}
+
+        {/* LEAVE NOW. Only offered once a road duration exists — without one
+            there is no honest leave time, and this refuses to invent one
+            (leaveNow.leavePlan returns null and nothing renders). */}
+        {!!destination && !meetOpen && destSecs != null && (
+          <View style={[st.leaveBar, { backgroundColor: colors.card, borderColor: leave?.warn ? colors.danger : colors.border }]}>
+            <Ionicons name="alarm-outline" size={15} color={leave?.warn ? colors.danger : colors.primary} />
+            {leave ? (
+              <>
+                <Text style={{ color: colors.text, fontWeight: '700', fontSize: 11.5, flex: 1 }} numberOfLines={1}>
+                  {leave.late ? 'Running late' : `Leave ${formatLeaveIn(leave.inMs)}`}
+                  <Text style={{ color: colors.textDim, fontWeight: '400' }}>
+                    {'  ·  arrive '}{new Date(arriveBy!).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}
+                  </Text>
+                </Text>
+                <Text onPress={() => setArriveBy(null)}
+                  style={{ color: colors.primary, fontWeight: '800', fontSize: 11 }}>CLEAR</Text>
+              </>
+            ) : (
+              <>
+                <Text style={{ color: colors.textDim, fontSize: 11.5 }}>Arrive by</Text>
+                {arriveChoices.map((t) => (
+                  <Text
+                    key={t}
+                    onPress={() => setArriveBy(t)}
+                    accessibilityRole="button"
+                    style={{ color: colors.primary, fontWeight: '800', fontSize: 11.5, paddingHorizontal: 7 }}
+                  >
+                    {new Date(t).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}
+                  </Text>
+                ))}
+              </>
+            )}
+          </View>
         )}
 
         {/* Connector toggle — ten dashed lines are the point on one screen and
@@ -310,26 +665,76 @@ export default function FamilyMapScreen() {
             onPress={() => setShowLinks((v) => !v)}
             accessibilityRole="button"
             accessibilityState={{ selected: showLinks }}
-            accessibilityLabel={showLinks ? 'Hide distance lines' : 'Show distance lines to every member'}
+            accessibilityLabel={showLinks ? 'Hide member routes' : 'Show road routes to every member'}
             style={[st.linkFab, { backgroundColor: colors.card, borderColor: showLinks ? colors.primary : colors.border }]}
           >
             <Ionicons name="git-network" size={17} color={showLinks ? colors.primary : colors.textDim} />
             <Text style={{ color: showLinks ? colors.primary : colors.textDim, fontSize: 10, fontWeight: '800' }}>
-              Distances
+              Routes
             </Text>
           </TouchableOpacity>
         )}
 
+        {/* FROM-HOME: the road from MY reference place to me, while traveling.
+            My own place only — place coordinates never leave a device, so no
+            such route can exist for another member (their published number
+            "1.2 km from Home" already rides their pings). */}
+        {!meetOpen && homePlace && !!mine && (
+          <TouchableOpacity
+            onPress={() => setShowHomeRoute((v) => !v)}
+            accessibilityRole="button"
+            accessibilityState={{ selected: showHomeRoute }}
+            accessibilityLabel={showHomeRoute ? `Hide the route from ${homeName}` : `Show the road from ${homeName} to you`}
+            style={[st.linkFab, { bottom: 64, backgroundColor: colors.card, borderColor: showHomeRoute ? colors.primary : colors.border }]}
+          >
+            <Ionicons name="home" size={16} color={showHomeRoute ? colors.primary : colors.textDim} />
+            <Text style={{ color: showHomeRoute ? colors.primary : colors.textDim, fontSize: 10, fontWeight: '800' }} numberOfLines={1}>
+              From {homeName}
+            </Text>
+          </TouchableOpacity>
+        )}
+
+        {/* NEXT TURN of the routed member — the watcher's indicator. Their
+            route, their live pings; the buzz fires from the effect above. */}
+        {memberTurn && routeShape && (
+          <View style={[st.turnBar, { backgroundColor: colors.card, borderColor: colors.border }]}>
+            <Ionicons name={iconFor(memberTurn.event)} size={16} color={colors.primary} />
+            <Text style={{ color: colors.text, fontWeight: '700', fontSize: 12, flex: 1 }} numberOfLines={1}>
+              {nameOf.get(routeTo ?? '') || 'Member'} · {memberTurn.instruction || memberTurn.event}
+            </Text>
+            <Text style={{ color: colors.primary, fontWeight: '800', fontSize: 12 }}>
+              {formatMetres(memberTurn.distM)}
+            </Text>
+          </View>
+        )}
+
         {/* Active road route: says whose it is, what it costs BY ROAD, and how
-            to get rid of it. */}
-        {routeShape && (
+            to get rid of it. Trip routes have no CLEAR — they end with the
+            trip; instead they carry NAVIGATE, which starts real turn-by-turn
+            guidance (banner + vibration + voice per nav settings). */}
+        {(routeShape || homeRoute || destRoute) && (
           <View style={[st.routeBar, { backgroundColor: colors.card, borderColor: colors.primary }]}>
             <Ionicons name="navigate-circle" size={16} color={colors.primary} />
             <Text style={{ color: colors.text, fontWeight: '700', fontSize: 13, flex: 1 }} numberOfLines={1}>
-              {nameOf.get(routeTo ?? '') || 'Member'}{routeInfo ? ` · ${routeInfo}` : ''}
+              {routeShape
+                ? `${nameOf.get(routeTo ?? '') || 'Member'}${destination ? ` → ${destination.name}` : ''}${routeInfo ? ` · ${routeInfo}` : ''}`
+                : homeRoute
+                  ? `${homeName} → You${homeInfo ? ` · ${homeInfo}` : ''}`
+                  : `You → ${destination?.name ?? 'destination'}${destInfo ? ` · ${destInfo}` : ''}`}
             </Text>
-            <Text onPress={() => { setRouteTo(null); setRouteShape(null); }}
-              style={{ color: colors.primary, fontWeight: '800', fontSize: 12 }}>CLEAR</Text>
+            {routeShape ? (
+              <Text onPress={() => { setRouteTo(null); setRouteShape(null); setRouteMans(null); }}
+                style={{ color: colors.primary, fontWeight: '800', fontSize: 12 }}>CLEAR</Text>
+            ) : homeRoute ? (
+              <Text onPress={() => setShowHomeRoute(false)}
+                style={{ color: colors.primary, fontWeight: '800', fontSize: 12 }}>CLEAR</Text>
+            ) : navBanner.active ? (
+              <Text onPress={stopNav}
+                style={{ color: colors.danger, fontWeight: '800', fontSize: 12 }}>STOP NAV</Text>
+            ) : (
+              <Text onPress={startNav}
+                style={{ color: colors.primary, fontWeight: '800', fontSize: 12 }}>NAVIGATE</Text>
+            )}
           </View>
         )}
         {/* Following banner (spec: "Following X" + "Stop following"). Only
@@ -359,6 +764,9 @@ export default function FamilyMapScreen() {
           // Closing keeps the destination: the pin stays on the map and
           // reopening returns to the same meeting rather than a blank search.
           onClose={() => setMeetOpen(false)}
+          // One tap turns the picked place into a circle-wide family trip.
+          onStartTrip={beginTrip}
+          tripActive={!!trip}
         />
       ) : (
       <View style={[st.sheet, { backgroundColor: colors.card, borderColor: colors.border }]}>
@@ -391,6 +799,13 @@ export default function FamilyMapScreen() {
               // fix (silent, or sharing off) cannot be followed — offering it
               // would promise something the map cannot do.
               const canFollow = !!p && !p.sharingOff && f !== 'unavailable' && m.id !== me;
+              // This member's own trip report: THEIR device computed the ETA
+              // and sealed it; we only render it. Never invented from distance.
+              const tp = trip ? tripPings.find((x) => x.userId === m.id) : undefined;
+              const tripLine = tp
+                ? (tp.arrived ? `Arrived at ${trip!.destinationName}`
+                  : tp.etaAt != null ? `${minutesUntil(tp.etaAt, now)} min to ${trip!.destinationName}` : null)
+                : null;
               return (
                 <View key={m.id} style={{ borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border }}>
                   <View style={st.rowWrap}>
@@ -403,11 +818,12 @@ export default function FamilyMapScreen() {
                       <Text style={{ color: liveNow ? colors.success : colors.textDim, fontSize: 12 }}>
                         {'   '}{freshLabel(f, p?.ts, now, p?.sharingOff)}
                         {fromMe != null ? `   ·   ${formatMetres(fromMe)} from You` : ''}
+                        {tripLine ? `   ·   ${tripLine}` : ''}
                       </Text>
                     </Text>
-                    {/* Road route to THIS member — one Valhalla call, on
-                        request. Needs my own position to route from. */}
-                    {canFollow && !!mine && (
+                    {/* Road route — to THIS member normally; with a trip or
+                        Meet Here destination set, THEIR road to it instead. */}
+                    {canFollow && (!!mine || !!destination) && (
                       <Text
                         onPress={() => { setRouteTo(routeTo === m.id ? null : m.id); setFocusId(m.id); }}
                         style={{ color: routeTo === m.id ? colors.primary : colors.textDim, fontWeight: '700', fontSize: 12, paddingHorizontal: 6 }}
@@ -494,5 +910,23 @@ const st = StyleSheet.create({
     position: 'absolute', left: 12, right: 12, top: 12,
     flexDirection: 'row', alignItems: 'center', gap: 8,
     borderWidth: 1, borderRadius: 999, paddingHorizontal: 14, paddingVertical: 9,
+  },
+  // Sits UNDER the search bar — the trip is context, the search stays a search.
+  tripBar: {
+    position: 'absolute', left: 12, right: 12, top: 64,
+    flexDirection: 'row', alignItems: 'center', gap: 9,
+    borderWidth: 1, borderRadius: 14, paddingHorizontal: 13, paddingVertical: 8, elevation: 4,
+  },
+  // Between the trip bar and the map: the leave-now countdown / arrive-by picker.
+  leaveBar: {
+    position: 'absolute', left: 12, right: 12, top: 122,
+    flexDirection: 'row', alignItems: 'center', gap: 7,
+    borderWidth: 1, borderRadius: 12, paddingHorizontal: 12, minHeight: 38, elevation: 3,
+  },
+  // Rides just above the route bar: the routed member's next left/right.
+  turnBar: {
+    position: 'absolute', left: 12, right: 12, bottom: 58,
+    flexDirection: 'row', alignItems: 'center', gap: 8,
+    borderWidth: 1, borderRadius: 999, paddingHorizontal: 13, minHeight: 36, elevation: 3,
   },
 });

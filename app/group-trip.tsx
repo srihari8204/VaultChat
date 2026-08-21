@@ -23,7 +23,7 @@ import {
   type Participant, type TripPing, type Trip,
 } from '../lib/groups/trips';
 import {
-  startTrip, joinTrip, leaveTrip, subscribeTrip, currentTrip,
+  startTrip, joinTrip, leaveTrip, endTrip, subscribeTrip, currentTrip,
 } from '../lib/groups/tripSession';
 import { type CircleMember } from '../lib/family/types';
 
@@ -70,7 +70,12 @@ export default function GroupTripScreen() {
             ? [...prev.filter((p) => p.userId !== e.userId), e.ping]
             : prev.filter((p) => p.userId !== e.userId)));
         },
-        (t) => { if (live) setTrip((cur) => cur ?? t); },
+        // null = the trip ended (or expired) — clear it, don't just ignore it.
+        (t) => {
+          if (!live) return;
+          if (t === null) { setTrip(null); setPings([]); }
+          else setTrip((cur) => cur ?? t);
+        },
       );
       if (live) unsub = off; else off();
     })();
@@ -125,7 +130,10 @@ export default function GroupTripScreen() {
   const join = async () => {
     if (!trip || !me) return;
     try {
-      await joinTrip(trip, me, '');
+      // The sealing key resolves from the harvested announcement inside
+      // joinTrip — passing '' here used to make a joiner seal with a key
+      // nobody else held.
+      await joinTrip(trip, me);
       navigateTo(trip.destination.lat, trip.destination.lng, trip.destinationName);
     } catch (e: any) { Alert.alert('Could not join', e?.message ?? 'Try again.'); }
   };
@@ -134,6 +142,13 @@ export default function GroupTripScreen() {
     Alert.alert('Leave the trip?', 'You stop sharing your ETA. The trip continues for everyone else.', [
       { text: 'Cancel', style: 'cancel' },
       { text: 'Leave', style: 'destructive', onPress: async () => { await leaveTrip(); setTrip(null); setPings([]); } },
+    ]);
+  };
+
+  const end = () => {
+    Alert.alert('End the trip?', 'The trip is over for everyone in the group.', [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'End trip', style: 'destructive', onPress: async () => { await endTrip(); setTrip(null); setPings([]); } },
     ]);
   };
 
@@ -207,10 +222,18 @@ export default function GroupTripScreen() {
                 <Ionicons name="navigate" size={18} color={colors.primary} />
                 <Text style={[st.actionTxt, { color: colors.text }]}>Navigate</Text>
               </TouchableOpacity>
-              <TouchableOpacity onPress={leave} style={[st.action, { borderColor: colors.danger, backgroundColor: colors.danger + '12' }]}>
-                <Ionicons name="exit-outline" size={18} color={colors.danger} />
-                <Text style={[st.actionTxt, { color: colors.danger }]}>Leave</Text>
-              </TouchableOpacity>
+              {/* The starter ends it for everyone; anyone else can only leave. */}
+              {trip.startedBy === me ? (
+                <TouchableOpacity onPress={end} style={[st.action, { borderColor: colors.danger, backgroundColor: colors.danger + '12' }]}>
+                  <Ionicons name="flag-outline" size={18} color={colors.danger} />
+                  <Text style={[st.actionTxt, { color: colors.danger }]}>End trip</Text>
+                </TouchableOpacity>
+              ) : (
+                <TouchableOpacity onPress={leave} style={[st.action, { borderColor: colors.danger, backgroundColor: colors.danger + '12' }]}>
+                  <Ionicons name="exit-outline" size={18} color={colors.danger} />
+                  <Text style={[st.actionTxt, { color: colors.danger }]}>Leave</Text>
+                </TouchableOpacity>
+              )}
             </View>
 
             <Text style={[st.h, { color: colors.text, marginTop: 26 }]}>
