@@ -32,6 +32,7 @@ import {
   canCustomerCollect, notCollectedGate, isTerminalFailure,
   couponDiscount, couponLabel, starText, loyaltyTier, parseBulkProducts,
   type CartItem, type OrderStatus, type ItemAvailability,
+  UNIT_PRESETS, normalizeUnit,
 } from '../utils/shopbook';
 import * as SB from '../services/shopBookService';
 import { listShopLists, saveShopList, deleteShopList, type ShopList } from '../db/shopLists';
@@ -528,9 +529,20 @@ function Catalog({ shop, cart, setCart, onCart }: {
   const [products, setProducts] = useState<SB.Product[]>([]);
   const [q, setQ] = useState('');
   // "Type any product" form
+  // The typed-product panel is the FALLBACK path, so it starts collapsed and
+  // now sits below the catalog: a wall of unit chips was the first thing a
+  // customer saw instead of the shop's products.
+  const [typeOpen, setTypeOpen] = useState(false);
+  // The free-text unit box only appears behind this, so the common case costs
+  // one tap instead of a second full-width input duplicating the chips.
+  const [customUnit, setCustomUnit] = useState(false);
   const [tName, setTName] = useState('');
   const [tBrand, setTBrand] = useState('');
   const [tQty, setTQty] = useState('1');
+  // What ONE of the thing is. Without this a typed "soap" reached the owner as a
+  // bare number and they had to guess pieces vs a box; catalog lines already
+  // carry the product's unit, so only the typed line was blind.
+  const [tUnit, setTUnit] = useState('');
   const [tNote, setTNote] = useState('');
   const [listening, setListening] = useState(false);
 
@@ -558,7 +570,40 @@ function Catalog({ shop, cart, setCart, onCart }: {
   // reaches the owner as a request to quote.
   const add = (name: string, brand: string, qty: number, price: number, note: string,
                unit = '', taxPercent = 0, productId?: string) => {
+    // MERGE, don't append. Tapping Add twice used to create two lines of qty 1,
+    // which the new stepper would then disagree with — it edits one line while
+    // the cart shows two. Only catalog lines merge: a free-typed request has no
+    // productId and two "rice" requests may genuinely be different things.
+    if (productId) {
+      const at = cart.findIndex((c) => c.productId === productId);
+      if (at >= 0) {
+        setCart(cart.map((c, i) => (i === at ? { ...c, qty: c.qty + qty } : c)));
+        return;
+      }
+    }
     setCart([...cart, { key: clientKey(), productId, name, brand, qty, price, note, unit, taxPercent }]);
+  };
+
+  // The cart is the single source of truth for quantity; the row just reads and
+  // nudges it. Keeping a second copy in this component is how a stepper and a
+  // cart badge end up disagreeing.
+  const lineFor = (productId: string) => cart.find((c) => c.productId === productId);
+  const bump = (productId: string, d: number) => {
+    const line = lineFor(productId);
+    if (!line) return;
+    const next = line.qty + d;
+    // Stepping below 1 removes the line: a cart row of qty 0 is not a thing a
+    // customer means, and leaving it stranded makes them hunt for a delete.
+    setCart(next <= 0 ? cart.filter((c) => c.key !== line.key)
+                      : cart.map((c) => (c.key === line.key ? { ...c, qty: next } : c)));
+  };
+  const setExact = (productId: string, raw: string) => {
+    const line = lineFor(productId);
+    if (!line) return;
+    // Typed, not stepped: loose weight is 2.5 kg and no +/- can express that.
+    const v = Math.max(0, num(raw));
+    setCart(v <= 0 ? cart.filter((c) => c.key !== line.key)
+                   : cart.map((c) => (c.key === line.key ? { ...c, qty: v } : c)));
   };
 
   const filtered = products.filter(
@@ -573,9 +618,52 @@ function Catalog({ shop, cart, setCart, onCart }: {
           value={q} onChangeText={setQ} />
       </View>
 
-      {/* Type any product */}
+      <Text style={s.sectionLabel}>Catalog</Text>
+      {loading && <ActivityIndicator color={C.green} style={{ marginTop: 16 }} />}
+      {!loading && filtered.length === 0 && <Empty icon="pricetags-outline" text="No listed products. Use “Type any product” below." />}
+      {filtered.map((p) => (
+        <View key={p.id} style={s.card}>
+          <View style={{ flex: 1 }}>
+            <Text style={s.cardTitle}>{p.name}{p.unit ? ` · ${p.unit}` : ''}</Text>
+            <Text style={s.cardSub}>{[p.brand, p.category].filter(Boolean).join(' · ')}</Text>
+            <Text style={s.price}>{formatINR(p.price)}{!p.inStock ? '  ·  Out of stock' : ''}</Text>
+          </View>
+          {(() => {
+            const line = lineFor(p.id);
+            if (!line) {
+              return (
+                <TouchableOpacity style={[s.addBtn, !p.inStock && { opacity: 0.4 }]} disabled={!p.inStock}
+                  onPress={() => add(p.name, p.brand, 1, p.price, '', p.unit, p.taxPercent, p.id)}>
+                  <Text style={s.addBtnText}>Add</Text>
+                </TouchableOpacity>
+              );
+            }
+            return (
+              <View style={s.qtyRow}>
+                <TouchableOpacity style={s.qtyBtn} onPress={() => bump(p.id, -1)}>
+                  <Text style={s.qtyBtnText}>−</Text>
+                </TouchableOpacity>
+                {/* Tap the number to type an exact amount. The unit sits beside it
+                    so "2" is never ambiguous between 2 pieces and 2 kg. */}
+                <TextInput style={s.qtyInput} keyboardType="numeric" selectTextOnFocus
+                  value={String(line.qty)} onChangeText={(v) => setExact(p.id, v)} />
+                {!!p.unit && <Text style={s.qtyUnit}>{p.unit}</Text>}
+                <TouchableOpacity style={s.qtyBtn} onPress={() => bump(p.id, 1)}>
+                  <Text style={s.qtyBtnText}>+</Text>
+                </TouchableOpacity>
+              </View>
+            );
+          })()}
+        </View>
+      ))}
+
+      {/* The FALLBACK path, so it lives below the catalog and starts closed. */}
+      <TouchableOpacity style={s.outlineBtn} onPress={() => setTypeOpen(!typeOpen)}>
+        <Ionicons name={typeOpen ? 'chevron-up' : 'chevron-down'} size={16} color={C.green} />
+        <Text style={s.outlineBtnText}>  ✍️ Type any product</Text>
+      </TouchableOpacity>
+      {typeOpen && (
       <View style={s.panel}>
-        <Text style={s.panelTitle}>✍️ Type any product</Text>
         <View style={{ flexDirection: 'row', gap: 8 }}>
           <TextInput style={[s.input, { flex: 1, marginBottom: 0 }]} placeholder="Product name (e.g. Maggi)" placeholderTextColor={C.sub}
             value={tName} onChangeText={setTName} />
@@ -592,34 +680,34 @@ function Catalog({ shop, cart, setCart, onCart }: {
           <TextInput style={[s.input, { width: 80 }]} placeholder="Qty" placeholderTextColor={C.sub}
             keyboardType="numeric" value={tQty} onChangeText={setTQty} />
         </View>
+{/* ONE row that scrolls. Wrapped, ten chips took four rows and pushed
+    the actual form off the screen. */}
+<ScrollView horizontal showsHorizontalScrollIndicator={false}
+  contentContainerStyle={{ gap: 6, paddingVertical: 2 }} style={{ marginBottom: 8 }}>
+  {UNIT_PRESETS.map((u) => (
+    <Chip key={u} label={u} icon="" active={tUnit === u}
+      onPress={() => { setCustomUnit(false); setTUnit(tUnit === u ? '' : u); }} />
+  ))}
+  <Chip label="+ custom" icon="" active={customUnit}
+    onPress={() => { setCustomUnit(!customUnit); if (!customUnit) setTUnit(''); }} />
+</ScrollView>
+{customUnit && (
+  <TextInput style={s.input} placeholder="Unit (500g packet, 5kg bag...)" placeholderTextColor={C.sub}
+    value={tUnit} onChangeText={setTUnit} autoFocus />
+)}
         <TextInput style={s.input} placeholder="Note (e.g. small pack)" placeholderTextColor={C.sub}
           value={tNote} onChangeText={setTNote} />
         <TouchableOpacity style={s.primaryBtn} onPress={() => {
           if (!tName.trim()) return;
-          add(tName.trim(), tBrand.trim(), Math.max(1, num(tQty)), 0, tNote.trim());
-          setTName(''); setTBrand(''); setTQty('1'); setTNote('');
+          add(tName.trim(), tBrand.trim(), Math.max(1, num(tQty)), 0, tNote.trim(),
+              normalizeUnit(tUnit));
+          setTName(''); setTBrand(''); setTQty('1'); setTUnit(''); setTNote('');
         }}>
           <Ionicons name="add" size={18} color="#fff" />
           <Text style={s.primaryBtnText}>Add to Order</Text>
         </TouchableOpacity>
       </View>
-
-      <Text style={s.sectionLabel}>Catalog</Text>
-      {loading && <ActivityIndicator color={C.green} style={{ marginTop: 16 }} />}
-      {!loading && filtered.length === 0 && <Empty icon="pricetags-outline" text="No listed products. Use “Type any product” above." />}
-      {filtered.map((p) => (
-        <View key={p.id} style={s.card}>
-          <View style={{ flex: 1 }}>
-            <Text style={s.cardTitle}>{p.name}{p.unit ? ` · ${p.unit}` : ''}</Text>
-            <Text style={s.cardSub}>{[p.brand, p.category].filter(Boolean).join(' · ')}</Text>
-            <Text style={s.price}>{formatINR(p.price)}{!p.inStock ? '  ·  Out of stock' : ''}</Text>
-          </View>
-          <TouchableOpacity style={[s.addBtn, !p.inStock && { opacity: 0.4 }]} disabled={!p.inStock}
-            onPress={() => add(p.name, p.brand, 1, p.price, '', p.unit, p.taxPercent, p.id)}>
-            <Text style={s.addBtnText}>Add</Text>
-          </TouchableOpacity>
-        </View>
-      ))}
+      )}
 
       {cart.length > 0 && (
         <TouchableOpacity style={s.stickyCart} onPress={onCart}>
@@ -705,7 +793,7 @@ function CartView({ shop, cart, setCart, onPlaced, coupons }: {
       {cart.map((it) => (
         <View key={it.key} style={s.card}>
           <View style={{ flex: 1 }}>
-            <Text style={s.cardTitle}>{it.name}{it.brand ? ` (${it.brand})` : ''}</Text>
+            <Text style={s.cardTitle}>{it.name}{it.brand ? ` (${it.brand})` : ''}{it.unit ? ` · ${it.unit}` : ''}</Text>
             {!!it.note && <Text style={s.cardSub}>📝 {it.note}</Text>}
             <Text style={s.price}>{it.price > 0 ? formatINR(it.price) : 'Price on confirm'}</Text>
           </View>
@@ -1003,7 +1091,8 @@ function OrderTrack({ orderId, onBack }: { orderId: string; onBack: () => void }
 
   const share = async () => {
     if (!order) return;
-    const lines = order.items.map((it) => `• ${it.name}${it.brand ? ` (${it.brand})` : ''} × ${it.qty}`);
+    const lines = order.items.map((it) =>
+      `• ${it.name}${it.brand ? ` (${it.brand})` : ''}${it.unit ? ` · ${it.unit}` : ''} × ${it.qty}`);
     await Share.share({
       message: `🛍️ Shop Book order ${order.id.slice(0, 8).toUpperCase()}\n${lines.join('\n')}\nTotal: ${formatINR(order.total)}`,
     }).catch(() => {});
@@ -2261,6 +2350,15 @@ function ProductEditor({ product, currency, onDone }: {
         <Field label="Product name" value={name} onChange={setName} placeholder="Aashirvaad Atta" />
         <Field label="Brand (optional)" value={brand} onChange={setBrand} placeholder="Aashirvaad" />
         <Field label="Category" value={category} onChange={setCategory} placeholder="Groceries" />
+        {/* Same vocabulary the customer's order line and the khata line offer,
+            so one shop cannot end up with kg / Kg / KG as three units. The
+            Field below still accepts anything, including a pack like "5kg". */}
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginBottom: 6 }}>
+          {UNIT_PRESETS.map((u) => (
+            <Chip key={u} label={u} icon="" active={unit === u}
+              onPress={() => setUnit(unit === u ? '' : u)} />
+          ))}
+        </View>
         <Field label="Unit" value={unit} onChange={setUnit} placeholder="5kg" />
         <Field label={`Price (${currency || '₹'})`} value={price} onChange={setPrice} placeholder="285" keyboardType="numeric" />
         <Field label="Tax % (optional)" value={taxPercent} onChange={setTaxPercent} placeholder="5" keyboardType="numeric" />
@@ -3117,6 +3215,11 @@ function OwnerKhata() {
   const [loading, setLoading] = useState(true);
   const [customers, setCustomers] = useState<SB.CustomerPending[]>([]);
   const [sel, setSel] = useState<SB.CustomerPending | null>(null);
+  // Adding a walk-in: someone with no VaultChat account who buys on credit.
+  const [adding, setAdding] = useState(false);
+  const [newName, setNewName] = useState('');
+  const [newMobile, setNewMobile] = useState('');
+  const [saving, setSaving] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -3125,6 +3228,30 @@ function OwnerKhata() {
   useEffect(() => { load(); }, [load]);
 
   if (sel) return <KhataDetail customer={sel} onBack={() => { setSel(null); load(); }} />;
+
+  const saveCustomer = async () => {
+    const name = newName.trim();
+    if (!name) { Alert.alert('Name needed', 'Enter the customer name.'); return; }
+    const mobile = newMobile.replace(/[^0-9+]/g, '');
+    setSaving(true);
+    try {
+      const r = await SB.createKhataCustomer({ name, mobile });
+      // ONE HOUSEHOLD, ONE KHATA. The server dedups on (shop, mobile), so a
+      // wife or son buying on the family number lands on the SAME khata. Say so
+      // plainly: an owner who thinks they created a second customer would go
+      // looking for a duplicate that does not exist.
+      if (r.duplicate) {
+        Alert.alert('Existing khata', `${mobile} already has a khata at this shop. Opening it — new items will be added to the same account.`);
+      }
+      setAdding(false); setNewName(''); setNewMobile('');
+      const list = await SB.ownerLedgerSummary();
+      setCustomers(list);
+      const found = list.find((c) => c.customerId === r.id);
+      if (found) setSel(found);
+    } catch (e: any) {
+      Alert.alert('Could not save', e?.message ?? 'Try again');
+    } finally { setSaving(false); }
+  };
 
   const owed = customers.filter((c) => c.pending > 0);
   const owedTotal = owed.reduce((n, c) => n + c.pending, 0);
@@ -3136,6 +3263,38 @@ function OwnerKhata() {
     <ScrollView contentContainerStyle={s.body}
       refreshControl={<RefreshControl refreshing={loading} onRefresh={load} tintColor={C.green} />}>
       <Text style={s.sectionLabel}>Customer Khata</Text>
+
+      {/* Walk-ins: the customer standing at the counter who has no VaultChat
+          account. Without this the khata only ever listed people who already
+          had one, so a shop could not start a tab for anybody new. */}
+      {!adding ? (
+        <TouchableOpacity style={s.outlineBtn} onPress={() => setAdding(true)}>
+          <Ionicons name="person-add-outline" size={16} color={C.green} />
+          <Text style={s.outlineBtnText}>  Add customer</Text>
+        </TouchableOpacity>
+      ) : (
+        <View style={s.panel}>
+          <TextInput style={s.input} placeholder="Customer name" placeholderTextColor={C.sub}
+            value={newName} onChangeText={setNewName} autoFocus />
+          <TextInput style={s.input} placeholder="Mobile number (optional)" placeholderTextColor={C.sub}
+            value={newMobile} onChangeText={setNewMobile} keyboardType="phone-pad" />
+          <Text style={s.hint}>
+            Family members who buy on the same mobile share one khata, so a wife
+            or son taking goods adds to the same account instead of opening a new
+            one. Leave the number blank to keep two same-name customers apart.
+          </Text>
+          <View style={{ flexDirection: 'row', gap: 8, marginTop: 8 }}>
+            <TouchableOpacity style={[s.primaryBtn, { flex: 1 }, saving && { opacity: 0.6 }]}
+              disabled={saving} onPress={saveCustomer}>
+              <Text style={s.primaryBtnText}>{saving ? 'Saving...' : 'Save customer'}</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={[s.outlineBtn, { flex: 1 }]} disabled={saving}
+              onPress={() => { setAdding(false); setNewName(''); setNewMobile(''); }}>
+              <Text style={s.outlineBtnText}>Cancel</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      )}
       {loading && <ActivityIndicator color={C.green} style={{ marginTop: 16 }} />}
       {!loading && customers.length === 0 && <Empty icon="people-outline" text="No customer ledgers yet." />}
 
@@ -3161,6 +3320,7 @@ function OwnerKhata() {
           <View style={s.shopIcon}><Ionicons name="person" size={20} color={C.green} /></View>
           <View style={{ flex: 1 }}>
             <Text style={s.cardTitle}>{c.customerName || 'Customer'}</Text>
+            {!!c.mobile && <Text style={s.hint}>{c.mobile}</Text>}
             <Text style={[s.price, { color: c.pending > 0 ? C.danger : C.green }]}>
               {c.pending > 0 ? `Pending ${formatINR(c.pending)}` : 'Settled'}
             </Text>
@@ -3186,15 +3346,15 @@ function KhataDetail({ customer, onBack }: { customer: SB.CustomerPending; onBac
   const [method, setMethod] = useState<SB.PaymentMethod>('cash');
   // Held as strings: a half-typed "12." is not a number yet, and coercing on
   // every keystroke fights the keyboard.
-  const [items, setItems] = useState<{ name: string; qty: string; price: string }[]>([]);
-  const setItem = (i: number, patch: Partial<{ name: string; qty: string; price: string }>) =>
+  const [items, setItems] = useState<{ name: string; qty: string; price: string; unit: string }[]>([]);
+  const setItem = (i: number, patch: Partial<{ name: string; qty: string; price: string; unit: string }>) =>
     setItems((prev) => prev.map((it, j) => (j === i ? { ...it, ...patch } : it)));
   const itemsTotal = items.reduce((n, it) => n + num(it.qty) * num(it.price), 0);
 
   const load = useCallback(async () => {
     setLoading(true);
-    try { setLedger(await SB.ownerCustomerLedger(customer.customerId)); } catch {} finally { setLoading(false); }
-  }, [customer.customerId]);
+    try { setLedger(await SB.ownerCustomerLedger(customer.customerId, !!customer.isKhata)); } catch {} finally { setLoading(false); }
+  }, [customer.customerId, customer.isKhata]);
   useEffect(() => { load(); }, [load]);
 
   // A key per entry the owner is composing: a retry of THIS payment resolves
@@ -3214,7 +3374,19 @@ function KhataDetail({ customer, onBack }: { customer: SB.CustomerPending; onBac
     if (amt <= 0) { Alert.alert(filled.length ? 'Product prices add up to ₹0' : 'Enter an amount'); return; }
     setBusy(true);
     try {
-      if (type === 'payment') {
+      if (type === 'payment' && customer.isKhata) {
+          // A walk-in has no account, and /payments validates the payer against
+          // shopbook_customer / shopbook_order, neither of which a walk-in can
+          // appear in. The ledger endpoint already accepts khataCustomerId with
+          // type 'payment', so the balance is recorded there. Method/reference
+          // metadata for walk-ins is a separate change; the remark carries it
+          // rather than the detail being silently dropped.
+          await SB.addLedgerEntry(
+            customer.customerId, 'payment', amt,
+            [method, remark.trim()].filter(Boolean).join(' - '),
+            entryKey.current, undefined, false, true,
+          );
+        } else if (type === 'payment') {
         // Money received is a payment RECORD — method and reference included,
         // and it posts its own khata entry server-side (P0-E). Partial is
         // normal: whatever is left simply stays pending.
@@ -3227,11 +3399,11 @@ function KhataDetail({ customer, onBack }: { customer: SB.CustomerPending; onBac
           entryKey.current,
           filled.length
             ? filled.map((it) => ({
-                name: it.name.trim(), brand: '', unit: '',
+                name: it.name.trim(), brand: '', unit: normalizeUnit(it.unit),
                 qty: num(it.qty), price: num(it.price), taxPercent: 0,
               }))
             : undefined,
-          confirmOverLimit);
+          confirmOverLimit, !!customer.isKhata);
       }
       entryKey.current = clientKey();
       setAmount(''); setRemark(''); setItems([]); load();
@@ -3322,6 +3494,13 @@ function KhataDetail({ customer, onBack }: { customer: SB.CustomerPending; onBac
               <TextInput style={[s.input, { flex: 1, marginBottom: 0 }]} placeholder="Qty"
                 placeholderTextColor={C.sub} keyboardType="numeric" value={it.qty}
                 onChangeText={(v) => setItem(i, { qty: v })} />
+              {/* What ONE of the thing is: soap in pieces, rice in kg. The
+                  column has always existed on shopbook_ledger_item and the
+                  invoice already renders it; the form simply never asked, so
+                  every khata line in production stored an empty unit. */}
+              <TextInput style={[s.input, { flex: 1.2, marginBottom: 0 }]} placeholder="Unit"
+                placeholderTextColor={C.sub} value={it.unit}
+                onChangeText={(v) => setItem(i, { unit: v })} />
               <TextInput style={[s.input, { flex: 1.4, marginBottom: 0 }]} placeholder="₹ each"
                 placeholderTextColor={C.sub} keyboardType="numeric" value={it.price}
                 onChangeText={(v) => setItem(i, { price: v })} />
@@ -3332,7 +3511,7 @@ function KhataDetail({ customer, onBack }: { customer: SB.CustomerPending; onBac
             </View>
           ))}
           <TouchableOpacity style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 10 }}
-            onPress={() => setItems([...items, { name: '', qty: '1', price: '' }])}>
+            onPress={() => setItems([...items, { name: '', qty: '1', price: '', unit: '' }])}>
             <Ionicons name="add-circle-outline" size={18} color={C.green} />
             <Text style={{ color: C.green, fontWeight: '700', fontSize: 13 }}>
               {items.length ? 'Add another product' : 'Add products & cost (optional)'}
@@ -4061,6 +4240,11 @@ const s = StyleSheet.create({
   qtyRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   qtyBtn: { width: 30, height: 30, borderRadius: 8, backgroundColor: C.greenSoft, justifyContent: 'center', alignItems: 'center' },
   qtyBtnText: { color: C.green, fontSize: 18, fontWeight: '800' },
+  qtyInput: {
+    minWidth: 44, textAlign: 'center', fontSize: 15, fontWeight: '700',
+    color: C.text, paddingVertical: 2, paddingHorizontal: 4,
+  },
+  qtyUnit: { fontSize: 12, color: C.sub, marginHorizontal: 2 },
   qtyText: { minWidth: 22, textAlign: 'center', fontSize: 15, fontWeight: '700', color: C.text },
 
   totalRow: {

@@ -564,6 +564,15 @@ export interface CustomerPending {
   customerId: string;
   customerName: string;
   pending: number;
+  /**
+   * True when this party is a WALK-IN (shopbook_khata_customer), not a
+   * VaultChat account. The two live in different columns of shopbook_ledger and
+   * `shopbook_ledger_party_ck` rejects a row that sets both, so every write has
+   * to know which one it is dealing with.
+   */
+  isKhata?: boolean;
+  /** Walk-ins only. The number the khata is keyed on; '' when none was given. */
+  mobile?: string;
   /** ISO time of their most recent payment; null if they have never paid. */
   lastPaymentAt: string | null;
   /**
@@ -779,8 +788,12 @@ export function ownerLedgerSummary() {
   return api<{ customers: CustomerPending[] }>(`/shopbook/my-shop/ledger`).then((r) => r.customers);
 }
 
-export function ownerCustomerLedger(customerId: string) {
-  return api<Ledger>(`/shopbook/my-shop/ledger?customerId=${customerId}`);
+export function ownerCustomerLedger(customerId: string, isKhata = false) {
+  // A walk-in's history is in khata_customer_id, so it needs its own parameter.
+  // Passing a khata id as customerId would return an EMPTY ledger rather than an
+  // error — the screen would show a customer who owes nothing.
+  const q = isKhata ? 'khataCustomerId' : 'customerId';
+  return api<Ledger>(`/shopbook/my-shop/ledger?${q}=${encodeURIComponent(customerId)}`);
 }
 
 // `idempotencyKey` makes a retried payment resolve to the one already
@@ -794,11 +807,61 @@ export function ownerCustomerLedger(customerId: string) {
 export function addLedgerEntry(
   customerId: string, type: 'purchase' | 'payment', amount: number, remark = '',
   idempotencyKey?: string, items?: LedgerItem[], confirmOverLimit = false,
+  isKhata = false,
 ) {
+  // Exactly one party column, enforced server-side by shopbook_ledger_party_ck.
+  // Sending both would be rejected; sending the wrong one writes debt against
+  // the wrong person, so the caller passes the discriminator it read from the
+  // summary rather than this guessing from the id's shape.
+  const party = isKhata ? { khataCustomerId: customerId } : { customerId };
   return api<{ id: string; duplicate?: boolean }>(`/shopbook/my-shop/ledger`, {
     method: 'POST',
-    json: { customerId, type, amount, remark, idempotencyKey, items, confirmOverLimit },
+    json: { ...party, type, amount, remark, idempotencyKey, items, confirmOverLimit },
   });
+}
+
+// ── walk-in khata customers (migrations 111/112) ──────────────────
+// A customer with no VaultChat account: the person who walks in, takes goods on
+// credit and is known to the shop by a name and a phone number.
+
+export interface KhataCustomer {
+  id: string;
+  /** True when this mobile already had a khata and the existing one was returned. */
+  duplicate?: boolean;
+}
+
+/**
+ * Create a walk-in khata customer, or return the existing one for this mobile.
+ *
+ * ONE HOUSEHOLD, ONE KHATA. The server deduplicates on (shop, mobile), so when
+ * a wife, a son or anyone else from the same family buys on the same number
+ * they land on the SAME khata rather than opening a second one that has to be
+ * reconciled by hand later. `duplicate: true` says that happened.
+ *
+ * A blank mobile is deliberately NOT deduplicated — the unique index is partial
+ * (WHERE mobile <> '') so a shop can still keep several name-only customers
+ * apart. Two different people called "Ramesh" with no number are two khatas.
+ */
+export function createKhataCustomer(p: {
+  name: string; mobile?: string; altMobile?: string; address?: string; notes?: string;
+}) {
+  return api<KhataCustomer>(`/shopbook/my-shop/khata-customers`, {
+    method: 'POST',
+    json: {
+      name: p.name.trim(),
+      mobile: (p.mobile ?? '').trim(),
+      altMobile: (p.altMobile ?? '').trim(),
+      address: (p.address ?? '').trim(),
+      notes: (p.notes ?? '').trim(),
+    },
+  });
+}
+
+/** Set a walk-in's credit ceiling. 0 means no ceiling (migration 112 default). */
+export function setKhataCreditLimit(khataCustomerId: string, creditLimit: number) {
+  return api<{ ok: boolean }>(
+    `/shopbook/my-shop/khata-customers/${khataCustomerId}/credit-limit`,
+    { method: 'POST', json: { creditLimit } });
 }
 
 // ── documents (migration 110) ─────────────────────────────────────

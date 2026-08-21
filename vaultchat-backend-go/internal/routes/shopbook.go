@@ -994,10 +994,14 @@ func sbCustomerDecision(w http.ResponseWriter, r *http.Request) {
 
 func sbCustomerLedger(w http.ResponseWriter, r *http.Request) {
 	user := httpx.UserFrom(r)
-	ledgerJSON(r.Context(), w, r.PathValue("shopId"), user.ID)
+	ledgerJSON(r.Context(), w, r.PathValue("shopId"), user.ID, false)
 }
 
-func ledgerJSON(ctx context.Context, w http.ResponseWriter, shopID, custID string) {
+func ledgerJSON(ctx context.Context, w http.ResponseWriter, shopID, partyID string, isKhata bool) {
+	partyCol := "l.customer_user_id"
+	if isKhata {
+		partyCol = "l.khata_customer_id"
+	}
 	// Lines come back with their entry in one query. A per-entry follow-up
 	// would be 200 round trips to render one khata screen.
 	rows, err := db.Pool.Query(ctx,
@@ -1006,8 +1010,8 @@ func ledgerJSON(ctx context.Context, w http.ResponseWriter, shopID, custID strin
 		                    'name', i.name, 'brand', i.brand, 'unit', i.unit,
 		                    'qty', i.qty, 'price', i.price, 'taxPercent', i.tax_percent))
 		                    FROM shopbook_ledger_item i WHERE i.ledger_id = l.id), '[]')
-		   FROM shopbook_ledger l WHERE l.shop_id=$1 AND l.customer_user_id=$2
-		  ORDER BY l.created_at DESC LIMIT 200`, shopID, custID)
+		   FROM shopbook_ledger l WHERE l.shop_id=$1 AND `+partyCol+`=$2
+		  ORDER BY l.created_at DESC LIMIT 200`, shopID, partyID)
 	if err != nil {
 		httpx.Err(w, http.StatusInternalServerError, "db error")
 		return
@@ -2101,7 +2105,14 @@ func sbOwnerLedger(w http.ResponseWriter, r *http.Request) {
 	}
 	custID := r.URL.Query().Get("customerId")
 	if custID != "" {
-		ledgerJSON(ctx, w, shopID, custID)
+		ledgerJSON(ctx, w, shopID, custID, false)
+		return
+	}
+	// A walk-in's history lives in a different column, so it needs its own
+	// parameter rather than a flag on the same one — passing a khata id as
+	// customerId would silently return an empty ledger instead of an error.
+	if kID := r.URL.Query().Get("khataCustomerId"); kID != "" {
+		ledgerJSON(ctx, w, shopID, kID, true)
 		return
 	}
 	// No customer selected → summarise pending per customer.
@@ -2111,14 +2122,35 @@ func sbOwnerLedger(w http.ResponseWriter, r *http.Request) {
 	// (and much bigger) calculation. "No payment in 45 days" is cheap, exact,
 	// and the thing an owner actually acts on. Named for what it is so nobody
 	// later reads it as aged debt.
+	// BOTH kinds of party, in one list.
+	//
+	// This used to GROUP BY customer_user_id alone, so a walk-in khata customer
+	// was invisible here no matter how much they owed — migration 111 gave them
+	// a party column and the write path fills it, but the screen the owner
+	// actually looks at never read it.
+	//
+	// The khata arm is a LEFT JOIN so a customer added a moment ago, with no
+	// entries yet, still appears. Otherwise "add customer" would look broken:
+	// you would create one and the list would not change.
 	rows, err := db.Pool.Query(ctx, `
-		SELECT l.customer_user_id, COALESCE(u.name,''),
+		SELECT l.customer_user_id::text AS party_id, COALESCE(u.name,'') AS party_name,
+		       '' AS mobile, false AS is_khata,
 		       SUM(CASE WHEN l.type='purchase' THEN l.amount ELSE -l.amount END) AS pending,
+		       MAX(l.created_at) FILTER (WHERE l.type='payment') AS last_paid,
+		       MIN(l.created_at) AS first_entry
+		  FROM shopbook_ledger l LEFT JOIN users u ON u.id=l.customer_user_id
+		 WHERE l.shop_id=$1 AND l.customer_user_id IS NOT NULL
+		 GROUP BY l.customer_user_id, u.name
+		UNION ALL
+		SELECT k.id::text, k.name, COALESCE(k.mobile,''), true,
+		       COALESCE(SUM(CASE WHEN l.type='purchase' THEN l.amount ELSE -l.amount END), 0),
 		       MAX(l.created_at) FILTER (WHERE l.type='payment'),
 		       MIN(l.created_at)
-		  FROM shopbook_ledger l LEFT JOIN users u ON u.id=l.customer_user_id
-		 WHERE l.shop_id=$1
-		 GROUP BY l.customer_user_id, u.name
+		  FROM shopbook_khata_customer k
+		  LEFT JOIN shopbook_ledger l
+		         ON l.khata_customer_id = k.id AND l.shop_id = k.shop_id
+		 WHERE k.shop_id=$1
+		 GROUP BY k.id, k.name, k.mobile
 		 ORDER BY pending DESC`, shopID)
 	if err != nil {
 		httpx.Err(w, http.StatusInternalServerError, "db error")
@@ -2127,10 +2159,11 @@ func sbOwnerLedger(w http.ResponseWriter, r *http.Request) {
 	defer rows.Close()
 	out := []map[string]any{}
 	for rows.Next() {
-		var id, name string
+		var id, name, mobile string
+		var isKhata bool
 		var pending float64
 		var lastPaid, firstEntry *time.Time
-		if err := rows.Scan(&id, &name, &pending, &lastPaid, &firstEntry); err != nil {
+		if err := rows.Scan(&id, &name, &mobile, &isKhata, &pending, &lastPaid, &firstEntry); err != nil {
 			continue
 		}
 		// Never paid at all → measure from the first entry, so a customer who
@@ -2148,6 +2181,11 @@ func sbOwnerLedger(w http.ResponseWriter, r *http.Request) {
 			"pending":       math.Round(pending*100) / 100,
 			"lastPaymentAt": httpx.JST(lastPaid),
 			"staleDays":     staleDays,
+			// The client must know which party column to post against — an
+			// account customer and a walk-in are written to different columns
+			// and `shopbook_ledger_party_ck` rejects anything that sets both.
+			"isKhata": isKhata,
+			"mobile":  mobile,
 		})
 	}
 	httpx.JSON(w, 200, map[string]any{"customers": out})

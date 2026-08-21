@@ -276,4 +276,44 @@ export function parseBulkProducts(text: string): ParsedProduct[] {
   return out;
 }
 
+// ── units ──────────────────────────────────────────────────────────
+// One vocabulary for the product form, the customer's order line and the khata
+// line, so the same shop does not end up with "kg", "Kg", "KG" and "kgs" as
+// four different things. Production already drifted that way: 1kg, 250g, 100g,
+// 500g, 1L and 1pc all exist as free text.
+//
+// THE MEANING OF A UNIT HERE IS A PACK, NOT A MEASURE.
+//
+// `unit` labels what ONE of something is, and `qty` counts those. So 2 x "1kg"
+// is two one-kilo packs, and loose weight is expressed as qty 2.5 of unit "kg".
+// This is what the existing 63 order lines already mean, which is why it stays
+// that way — reinterpreting them as measures would silently change what every
+// historical invoice claims was sold.
+
+/** Offered as chips. Free text is still allowed for anything not listed. */
+export const UNIT_PRESETS = [
+  'pc', 'kg', 'g', 'L', 'ml', 'packet', 'dozen', 'box', 'bag', 'bottle',
+] as const;
+
+/**
+ * Tidy a typed unit without changing what the owner meant.
+ *
+ * Case-folds ONLY when the result matches a preset, so "KG" becomes "kg" but a
+ * deliberate "5Kg Bag" is left exactly as written. Nothing is rejected: a shop
+ * selling something we never thought of must still be able to write it down.
+ */
+export function normalizeUnit(raw: string): string {
+  const u = (raw ?? '').trim();
+  if (!u) return '';
+  const hit = UNIT_PRESETS.find((p) => p.toLowerCase() === u.toLowerCase());
+  return hit ?? u;
+}
+
+/** "2 x 1kg" / "3 pc" / "2" — what a human reads on a line. */
+export function formatQtyUnit(qty: number, unit?: string): string {
+  const q = Number.isFinite(qty) ? qty : 0;
+  const u = (unit ?? '').trim();
+  return u ? `${q} x ${u}` : String(q);
+}
+
 export default {};
