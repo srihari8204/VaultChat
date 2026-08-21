@@ -244,6 +244,13 @@ async function join(s: Session): Promise<void> {
     video: s.kind === 'video',
     publish: cred.role !== 'audience',
     events: {
+      // The reducer already owns both of these: 'reconnecting' is ignored
+      // unless the call is connected, and 'recovered' is ignored unless it is
+      // reconnecting (machine.ts:168-181). So they are dispatched unguarded —
+      // a second Reconnecting, or one arriving while the call is still
+      // dialling, costs nothing and changes nothing.
+      onReconnecting: () => dispatch({ type: 'reconnecting' }),
+      onReconnected: () => dispatch({ type: 'recovered' }),
       onParticipants: (count, joined, left) => {
         if (left) {
           dispatch({ type: 'peer_left', uid: left.identity });

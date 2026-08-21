@@ -34,6 +34,7 @@ import (
 	"vaultchat/backend-go/internal/db"
 	"vaultchat/backend-go/internal/golive"
 	"vaultchat/backend-go/internal/httpx"
+	"vaultchat/backend-go/internal/livekit"
 )
 
 func RegisterGoLiveWebhook(mux *http.ServeMux) {
@@ -77,7 +78,7 @@ type goliveEvent struct {
 	Event           string                 `json:"event"`
 	EgressInfo      *goliveEgressInfo      `json:"egressInfo,omitempty"`
 	EgressInfoProto *goliveEgressInfoProto `json:"egress_info,omitempty"`
-	Room *struct {
+	Room            *struct {
 		Name string `json:"name"`
 	} `json:"room,omitempty"`
 	Participant *struct {
@@ -255,6 +256,74 @@ func goliveHostPresence(r *http.Request, room, identity string, joined bool) {
 		}
 		goliveLog(event, "", room, identity)
 	}
+
+	// THE HOST IS BACK, BUT THE TRANSCODER IS NOT.
+	//
+	// While they were away the egress reported a fault. broadcast_webhook.go
+	// held the session open (host inside grace) and cleared egress_id to say
+	// "this stream has no transcoder". Nothing else restarts one, so without
+	// this the broadcast stays 'live' with no playlist advancing — worse than
+	// the failure it replaced.
+	//
+	// Only ever on a REJOIN, and only when egress_id IS NULL, so:
+	//   • a healthy broadcast is never touched (its egress_id is set)
+	//   • a deliberate End cannot resurrect — that row is 'ended', not 'live'
+	//   • a second egress cannot be started for a stream that still has one
+	// The broadcast id, room, host and HLS URL are all unchanged; PlaybackURL is
+	// derived from the broadcast id, so a viewer's URL survives the restart.
+	if joined {
+		goliveRestartEgress(r, room, identity)
+	}
+}
+
+// goliveRestartEgress starts a replacement transcoder for a session whose host
+// has just returned and whose egress died while they were gone.
+//
+// Non-fatal throughout, like the original start in broadcasts.go: a broadcast
+// whose egress will not start is one the host can still end and retry, and a
+// webhook is the wrong place to fail loudly.
+func goliveRestartEgress(r *http.Request, room, identity string) {
+	ctx := r.Context()
+	gocfg := golive.ConfigFromEnv()
+	if !gocfg.Usable() {
+		return
+	}
+
+	// Claim the restart in the same statement that finds it. Two webhooks for
+	// the same rejoin would otherwise both see egress_id IS NULL and start two
+	// transcoders; the sentinel makes the second find nothing.
+	var bid string
+	err := db.SysPool.QueryRow(ctx,
+		`UPDATE broadcast_sessions
+		    SET egress_id = 'restarting'
+		  WHERE room = $1 AND host_id = $2::uuid
+		    AND status IN ('starting', 'live')
+		    AND egress_id IS NULL
+		  RETURNING id::text`, room, identity).Scan(&bid)
+	if err != nil {
+		return // no such row (the normal case: egress is healthy)
+	}
+
+	egressID, e := livekit.StartHLS(ctx, gocfg.Config, room, bid)
+	if e != nil {
+		// Release the claim so a later rejoin — or the next webhook — can retry.
+		// Leaving the sentinel would strand the session with no transcoder and
+		// no way to acquire one.
+		_, _ = db.SysPool.Exec(ctx,
+			`UPDATE broadcast_sessions SET egress_id = NULL
+			  WHERE id = $1::uuid AND egress_id = 'restarting'`, bid)
+		goliveMetric("egress_restart_failed")
+		goliveLog("EGRESS_RESTART_FAILED", bid, room, identity, "error="+e.Error())
+		return
+	}
+	if _, err := db.SysPool.Exec(ctx,
+		`UPDATE broadcast_sessions SET egress_id = $2
+		  WHERE id = $1::uuid`, bid, egressID); err != nil {
+		goliveLog("EGRESS_RESTART_SAVE_FAILED", bid, room, identity, "error="+err.Error())
+		return
+	}
+	goliveMetric("egress_restarted")
+	goliveLog("EGRESS_RESTARTED", bid, room, identity, "egress_id="+egressID)
 }
 
 // isUUID reports whether s is shaped like a canonical UUID.

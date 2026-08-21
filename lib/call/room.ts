@@ -21,7 +21,9 @@
 // What is left here is the small amount that is genuinely ours: which room,
 // which key, and turning SDK events into the app's call state.
 
+import { Dimensions, PixelRatio } from 'react-native';
 import { AudioSession, registerGlobals, setLogLevel } from '@livekit/react-native';
+import { screenCaptureSize, screenCaptureBitrate } from './screenCapture';
 import { Room, RoomEvent, Track, type RemoteParticipant, type RemoteTrackPublication } from 'livekit-client';
 
 // livekit-client is a browser library: registerGlobals installs the React Native
@@ -63,6 +65,23 @@ export interface CallRoomEvents {
   onScreenShareStopped(): void;
   /** The room ended or the transport gave up. */
   onClosed(): void;
+  /**
+   * The SDK lost the transport and is rebuilding it. OPTIONAL, and optional on
+   * purpose: every existing caller predates these two, and a call that ignores
+   * them behaves exactly as it did before.
+   *
+   * The machine and both call screens have handled `reconnecting` since they
+   * were written — `voicecall.tsx` even carries a comment saying the branch
+   * must exist — but nothing ever dispatched it, because these two events were
+   * the only things that could and they were never subscribed. The status was
+   * unreachable, so a call being rebuilt looked identical to a healthy one.
+   *
+   * NOT a retry hook. livekit-client owns reconnection via its own policy;
+   * these only report what it is already doing.
+   */
+  onReconnecting?(): void;
+  /** The SDK rebuilt the transport. Pairs with onReconnecting. */
+  onReconnected?(): void;
 }
 
 export interface CallRoom {
@@ -212,6 +231,17 @@ export async function joinCallRoom(a: JoinArgs): Promise<CallRoom> {
     console.warn('[call] room: disconnected —', String(reason));
     safe('closed', () => a.events.onClosed());
   });
+  // Deliberately NOT tearing anything down here: the transport is still being
+  // rebuilt, and dropping tracks or leaving on Reconnecting is what would turn
+  // a survivable blip into a dead call. Same reasoning as lib/golive/room.ts.
+  room.on(RoomEvent.Reconnecting, () => {
+    console.warn('[call] room: reconnecting');
+    safe('reconnecting', () => a.events.onReconnecting?.());
+  });
+  room.on(RoomEvent.Reconnected, () => {
+    console.warn('[call] room: reconnected');
+    safe('reconnected', () => a.events.onReconnected?.());
+  });
   room.on(RoomEvent.ConnectionStateChanged, st => console.warn('[call] room state →', st));
 
   // The OS audio session: routing, focus, and the in-call volume stream. The
@@ -323,16 +353,27 @@ export async function joinCallRoom(a: JoinArgs): Promise<CallRoom> {
       // logged five screen tracks and zero sender reports for them, which is
       // the definition of "capture is not delivering frames".
       //
-      // 720p at 15fps is a size every encoder on the market accepts, and it is
-      // what a phone screen is legible at on another phone anyway.
+      // THE RESOLUTION HINT IS INERT ON REACT NATIVE. See lib/golive/hostMedia.ts
+      // for the measurement: @livekit/react-native-webrtc declares
+      // `getDisplayMedia()` with no parameters, so Android captures the panel at
+      // its native size whatever is asked for. Computed anyway because it costs
+      // nothing, is correct if RN ever honours constraints, and feeds the
+      // bitrate below — which is publish-side and does apply.
+      const px = PixelRatio.get();
+      const scr = Dimensions.get('screen');
+      const cap = screenCaptureSize(Math.round(scr.width * px), Math.round(scr.height * px));
+      console.warn('[call] screen share capture', `${cap.width}x${cap.height}@${cap.frameRate}`);
       await room.localParticipant.setScreenShareEnabled(on, on ? {
-        resolution: { width: 1280, height: 720, frameRate: 15 },
+        resolution: cap,
         contentHint: 'detail',
         audio: false,
       } : undefined, on ? {
         videoCodec: 'vp8',
         simulcast: false,
-        videoEncoding: { maxBitrate: 1_500_000, maxFramerate: 15 },
+        // Scaled with the capture area rather than pinned to the old 720p
+        // budget, so a smaller portrait capture does not overpay and a larger
+        // one is not starved.
+        videoEncoding: { maxBitrate: screenCaptureBitrate(cap), maxFramerate: cap.frameRate },
       } : undefined);
       if (!on) return;
 

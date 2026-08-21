@@ -42,8 +42,12 @@
 // what makes the line below legal.
 import { AudioSession, registerGlobals } from '@livekit/react-native';
 import { startBroadcastAudio, stopBroadcastAudio } from './audio';
-import { LocalAudioTrack, LocalVideoTrack, Room, RoomEvent, Track, type RemoteParticipant, type RemoteTrack } from 'livekit-client';
+import { DefaultReconnectPolicy, LocalAudioTrack, LocalVideoTrack, Room, RoomEvent, Track, type RemoteParticipant, type RemoteTrack } from 'livekit-client';
 import { enableFrameCrypto, type FrameCryptoHandle } from '../call/frameCrypto';
+import { assertConnectionEventNames, wireConnectionEvents } from './connectionEvents';
+// The ICE/TURN configuration that already exists — cached, expiry-aware, and
+// never throwing. Reused rather than reimplemented; see the connect() call.
+import { getIceServers } from '../iceConfig';
 
 // livekit-client is a WEB library: it expects navigator.mediaDevices,
 // RTCPeerConnection and friends as globals. registerGlobals installs the React
@@ -148,9 +152,37 @@ export interface JoinArgs {
    * the mute controls would be pointing at a track nobody is sending.
    */
   tracks?: any[];
-  /** A remote track arrived: participant identity (the user id) + stream URL. */
-  onTrack?: (uid: string, url: string | null, kind: 'audio' | 'video') => void;
+  /**
+   * A remote track arrived or went away: participant identity (the user id),
+   * stream URL (null = gone), and WHICH publication it is.
+   *
+   * `screen` is not cosmetic. A host on stage publishes camera and screen as
+   * two separate video tracks under ONE identity, so a caller keying by
+   * identity alone silently keeps whichever arrived last and drops the other —
+   * which is exactly how a screen share ends up replacing the host's face
+   * instead of appearing beside it. Optional, so existing callers compile
+   * unchanged and simply ignore the distinction.
+   */
+  onTrack?: (uid: string, url: string | null, kind: 'audio' | 'video', screen?: boolean) => void;
   onParticipant?: (p: RemoteParticipant, joined: boolean) => void;
+  /**
+   * The SDK LOST the transport and is recovering it.
+   *
+   * THE APP DOES NOT RETRY. livekit-client owns the reconnect policy — its
+   * DefaultReconnectPolicy retries on [0, 300, 1200, 2700, 4800, 7000×5] ms,
+   * ten attempts over roughly forty-four seconds — and a second scheduler on
+   * top of that is how two connections end up racing to publish into the same
+   * room. These three callbacks EXIST ONLY TO REPORT what the SDK is already
+   * doing, so the UI can stop claiming the broadcast is healthy.
+   *
+   * That forty-four-second window is the actual defect they close: without it
+   * the host keeps talking to an audience that stopped receiving long ago, and
+   * the screen still says LIVE.
+   */
+  onReconnecting?: () => void;
+  /** The SDK got the transport back. Publishing resumes on its own. */
+  onReconnected?: () => void;
+  /** The SDK gave up. Terminal — this is the only one that ends anything. */
   onDisconnected?: () => void;
   /**
    * Something about what WE publish changed — a track published, unpublished,
@@ -174,10 +206,54 @@ export interface JoinArgs {
   onLocalMedia?: () => void;
 }
 
+// The wiring itself lives in ./connectionEvents so it can be exercised under
+// `npx tsx` — this module cannot, because it opens a real transport. Checked
+// once here against the SDK's own enum so a rename cannot silently stop the
+// callbacks from firing.
+assertConnectionEventNames(RoomEvent);
+
 export async function joinSfuRoom(a: JoinArgs): Promise<SfuSession> {
   ensureGlobals();
 
+  // STARTED HERE, AWAITED AT connect(). Everything between this line and the
+  // connect — constructing the Room, registering handlers, bringing up the
+  // audio session — runs while the request is in flight, so on a warm cache
+  // this costs nothing and on a cold one it costs the overlap, not the sum.
+  //
+  // Deliberately NOT awaited here: doing so would put a network round trip
+  // directly in front of going live, which is the exact delay lib/iceConfig.ts
+  // was written to remove from the call path.
+  const iceServersPromise = getIceServers();
+
   const room = new Room({
+    /**
+     * RECONNECT BUDGET — the SDK's own policy, lengthened. Not a second
+     * reconnect system: livekit-client still owns every attempt, the backoff and
+     * the give-up decision. Only the delay table it reads is different.
+     *
+     * WHY. The server holds a broadcast open for hostGrace() — 90s — after the
+     * host drops, and restarts the transcoder when they rejoin
+     * (golive_webhook.go). That recovery can only fire if the host ACTUALLY
+     * rejoins, and the stock policy is [0, 300, 1200, 2700, 4800, 7000 x5] =
+     * 44s over 10 attempts. Measured on device: the SDK gave up, emitted
+     * Disconnected, no participant_joined ever reached the server, and the
+     * grace expired with nothing to recover. The two mechanisms could not
+     * cooperate because the client stopped trying first.
+     *
+     * THE NUMBER. Same shape, eight 7s attempts instead of five:
+     *   0 + 300 + 1200 + 2700 + 4800 + 7000x8 = 65,000ms over 13 attempts.
+     * nextRetryDelayInMs adds up to 1000ms of jitter per attempt after the
+     * second (11 of them here), so the worst case is ~76s — still inside the
+     * 90s grace, with ~14s left for the rejoin, the webhook and StartHLS.
+     *
+     * Deliberately biased LONG rather than short. Overshooting costs a few
+     * wasted retries against a room the reaper has already closed; undershooting
+     * loses a broadcast that was recoverable, which is the bug this exists for.
+     *
+     * Changing hostGrace() means recomputing this — they are one budget split
+     * across two processes.
+     */
+    reconnectPolicy: new DefaultReconnectPolicy([0, 300, 1200, 2700, 4800, 7000, 7000, 7000, 7000, 7000, 7000, 7000, 7000]),
     // Let the SDK drop layers under congestion rather than freezing. The same
     // reasoning as lib/call/quality.ts on the mesh path: degrade, do not stall.
     // FALSE, as lib/call/room.ts sets it. The last client difference between
@@ -253,13 +329,13 @@ export async function joinSfuRoom(a: JoinArgs): Promise<SfuSession> {
     console.warn('[call] sfu remote published', pub.kind, 'by', p.identity, '— awaiting subscribe'));
   room.on(RoomEvent.TrackSubscriptionFailed, (sid, p, reason) =>
     console.warn('[call] sfu SUBSCRIBE FAILED', sid, 'from', p.identity, '—', String(reason)));
-  if (a.onDisconnected) room.on(RoomEvent.Disconnected, a.onDisconnected);
+  wireConnectionEvents(room, a);
   // The SFU's equivalent of `ontrack`, and the only signal that says a call on
   // this transport is actually up. Without it a call joins a room, publishes,
   // and sits in "calling…" until the ring budget hangs it up.
   let crypto: FrameCryptoHandle | null = null;
 
-  room.on(RoomEvent.TrackSubscribed, (track: RemoteTrack, _pub, p: RemoteParticipant) => {
+  room.on(RoomEvent.TrackSubscribed, (track: RemoteTrack, _pub: any, p: RemoteParticipant) => {
     // NOTHING in here may throw. This handler is invoked from inside the SDK's
     // event emitter, so an exception does not just skip the rest of this
     // function — it unwinds into livekit-client's own subscription handling.
@@ -278,9 +354,24 @@ export async function joinSfuRoom(a: JoinArgs): Promise<SfuSession> {
     const kind = track.kind === Track.Kind.Video ? 'video' : 'audio';
     // Logged because this is the event that decides whether a call is
     // "connected". Its absence was indistinguishable from a dead SFU.
-    console.warn('[call] sfu track subscribed —', kind, 'from', p.identity, url ? 'with stream' : 'NO STREAM URL');
-    try { a.onTrack?.(p.identity, url, kind); } catch (err) {
+    const screen = _pub?.source === Track.Source.ScreenShare;
+    console.warn('[call] sfu track subscribed —', kind, screen ? '(screen)' : '', 'from', p.identity, url ? 'with stream' : 'NO STREAM URL');
+    try { a.onTrack?.(p.identity, url, kind, screen); } catch (err) {
       console.warn('[call] onTrack handler threw —', (err as any)?.message ?? err);
+    }
+  });
+
+  // THE OTHER HALF. Without this, a track only ever disappears when its
+  // publisher disconnects — so a host who stops sharing their screen but stays
+  // on stage leaves the last captured frame frozen on every viewer, and the
+  // stream looks stuck rather than un-shared. Same guarantee as above: nothing
+  // in here may throw back into the SDK's emitter.
+  room.on(RoomEvent.TrackUnsubscribed, (track: RemoteTrack, _pub: any, p: RemoteParticipant) => {
+    const kind = track.kind === Track.Kind.Video ? 'video' : 'audio';
+    const screen = _pub?.source === Track.Source.ScreenShare;
+    console.warn('[call] sfu track unsubscribed —', kind, screen ? '(screen)' : '', 'from', p.identity);
+    try { a.onTrack?.(p.identity, null, kind, screen); } catch (err) {
+      console.warn('[call] onTrack handler threw on unsubscribe —', (err as any)?.message ?? err);
     }
   });
   // A reconnect rebuilds the transports, and the new senders/receivers come up
@@ -316,7 +407,26 @@ export async function joinSfuRoom(a: JoinArgs): Promise<SfuSession> {
   // autoSubscribe explicitly, as the call path does. A broadcast host has
   // nothing to subscribe to, but a promoted co-host does, and leaving it to the
   // SDK default is the kind of difference that is invisible until it is not.
-  await room.connect(a.url, a.token, { autoSubscribe: true });
+  // TURN AS A FALLBACK CANDIDATE, NOT A ROUTE CHANGE.
+  //
+  // Until now a Go Live client received only what the SFU advertised, and both
+  // livekit YAMLs set `turn: enabled: false` — deliberately, because the intent
+  // recorded there is to "reuse the coturn already running on this host".
+  // Nothing ever carried out that intent, so no relay candidate was offered at
+  // all and a host on a 443-only network could not go live.
+  //
+  // This hands the SDK the ICE list the app ALREADY builds (lib/iceConfig.ts:
+  // cached, expiry-aware, one in-flight request shared by concurrent callers).
+  // ICE priority is untouched: host and server-reflexive pairs are tried first
+  // by the protocol itself, and relay is last resort. A host on a normal
+  // network connects exactly as before and never touches the relay.
+  //
+  // FAILURE IS ALREADY SAFE: getIceServers() never throws and never returns
+  // empty — it degrades to the last good config, then to STUN only. So a TURN
+  // outage or an unauthenticated /user/turn leaves this list STUN-only, which
+  // is precisely what the SDK was working with before this line existed.
+  const iceServers = await iceServersPromise;
+  await room.connect(a.url, a.token, { autoSubscribe: true, rtcConfig: { iceServers } });
 
   // [GOLIVE_MEDIA] — publisher truth, not inference.
   //

@@ -26,6 +26,8 @@
 //
 // Rediscovering that on the Go Live path would mean shipping the same bug twice.
 
+import { Dimensions, PixelRatio } from 'react-native';
+import { screenCaptureSize, screenCaptureBitrate } from '../call/screenCapture';
 import { Track } from 'livekit-client';
 import type { Room } from 'livekit-client';
 import {
@@ -129,11 +131,27 @@ export async function setScreenShare(room: Room, on: boolean): Promise<void> {
   // See lib/golive/native.ts.
   await beforeScreenShare();
 
+  // THE RESOLUTION HINT IS INERT ON REACT NATIVE — measured, not assumed.
+  //
+  // @livekit/react-native-webrtc's MediaDevices declares `getDisplayMedia()`
+  // with NO PARAMETERS, so every capture constraint is dropped on the floor and
+  // Android captures the panel at its native size. Verified on device
+  // 2026-08-20: the SFU logged the Honor's share as 1200x2664, its exact
+  // physical resolution, not the 576x1280 computed here.
+  //
+  // Which also means the 1280x720 this replaced was equally inert, and never
+  // letterboxed anything. Kept because it costs nothing, is correct the day RN
+  // honours constraints, and still feeds the bitrate below — which is a
+  // publish-side setting and does apply.
+  const px = PixelRatio.get();
+  const scr = Dimensions.get('screen');
+  const cap = screenCaptureSize(Math.round(scr.width * px), Math.round(scr.height * px));
+
   try {
     await room.localParticipant.setScreenShareEnabled(
       true,
-      { resolution: { width: 1280, height: 720, frameRate: 15 }, contentHint: 'detail', audio: false },
-      { videoCodec: 'vp8', simulcast: false, videoEncoding: { maxBitrate: 1_500_000, maxFramerate: 15 } },
+      { resolution: cap, contentHint: 'detail', audio: false },
+      { videoCodec: 'vp8', simulcast: false, videoEncoding: { maxBitrate: screenCaptureBitrate(cap), maxFramerate: cap.frameRate } },
     );
   } catch (err) {
     // The user declined the system capture prompt, or the platform refused.
@@ -220,5 +238,6 @@ export function localPreviewURL(room: Room): string | null {
 }
 
 export default {
-  hostMediaState, setMic, setCamera, setScreenShare, stopAllHostMedia, localPreviewURL,
+  hostMediaState, setMic, setCamera, setScreenShare, stopAllHostMedia,
+  localPreviewURL,
 };

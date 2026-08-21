@@ -157,6 +157,41 @@ func markBroadcastLive(r *http.Request, egressID string) {
 // when the host has not already ended it — a normal host-ended broadcast also
 // produces egress_ended, and that one must stay 'ended'.
 func markBroadcastEgressGone(r *http.Request, egressID, status string) {
+	// THE HOST MAY SIMPLY BE RECONNECTING.
+	//
+	// When a host's network drops, the egress loses its publisher and reports a
+	// fault within seconds. Terminating here made that the end of the broadcast
+	// — measured on device: a 20s outage killed the stream permanently even
+	// though the client's transport recovered moments later.
+	//
+	// The system already knows how to wait. golive_webhook.go stamps
+	// host_left_at when the host leaves and clears it when they return, and
+	// golive_reaper.go ends the session only if they stay gone past hostGrace().
+	// That verdict never got a chance: this UPDATE moved the row out of
+	// ('starting','live') first, so the rejoin path could no longer match it and
+	// the grace window was dead code for exactly the case it was written for.
+	//
+	// So: if the host is inside their grace window, do NOT end the broadcast.
+	// Clear egress_id instead — the transcoder really is gone, and a NULL is
+	// what tells the rejoin path to start a fresh one. The reaper still ends
+	// this row if the host never comes back, so nothing leaks.
+	//
+	// Scoped by DATA, not by caller: host_left_at is only ever set for Go Live
+	// rooms, so an ordinary broadcast (NULL) still terminates immediately,
+	// exactly as before.
+	ct, err := db.SysPool.Exec(r.Context(),
+		`UPDATE broadcast_sessions
+		    SET egress_id = NULL
+		  WHERE egress_id = $1 AND status IN ('starting', 'live')
+		    AND host_left_at IS NOT NULL
+		    AND host_left_at > now() - $2::interval`,
+		egressID, hostGrace().String())
+	if err == nil && ct.RowsAffected() > 0 {
+		metrics.Inc("broadcast_egress_grace")
+		log.Printf("[broadcast] egress %s gone while host is within grace — holding session open", egressID)
+		return
+	}
+
 	if _, err := db.SysPool.Exec(r.Context(),
 		`UPDATE broadcast_sessions
 		    SET status = 'failed', ended_at = now()

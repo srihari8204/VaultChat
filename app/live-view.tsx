@@ -13,8 +13,10 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   View, StyleSheet, TouchableOpacity, ActivityIndicator, Alert,
-  ScrollView, TextInput,
+  ScrollView, TextInput, Pressable, KeyboardAvoidingView, Platform,
+  useWindowDimensions, Share,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { ResizeMode, Video } from 'expo-av';
@@ -22,8 +24,8 @@ import { ResizeMode, Video } from 'expo-av';
 // LiveKit <VideoTrack> component: that wants a components-react TrackReference,
 // and this screen holds a plain Room. A stream URL is all RTCView needs.
 import { RTCView } from '@livekit/react-native-webrtc';
-import { Share } from 'react-native';
 import * as Clipboard from 'expo-clipboard';
+import { pickStage, pipSize } from '../lib/golive/stageLayout';
 import { useColors } from '../lib/theme';
 import { AppText } from '../components/ui/Text';
 import { SPACING, RADIUS } from '../constants/theme';
@@ -65,6 +67,14 @@ export default function LiveViewScreen() {
   const [b, setB] = useState<Broadcast | null>(null);
   const [waiting, setWaiting] = useState(true);
   const [failed, setFailed] = useState(false);
+  /**
+   * The SDK is recovering the transport. TEMPORARY and non-destructive — the
+   * broadcast is not over, the tracks are not torn down, and nothing here
+   * retries. It exists so the screen can stop claiming LIVE during the window
+   * the SDK spends reconnecting. Cleared by onReconnected, or superseded by
+   * `failed` if the SDK ultimately gives up.
+   */
+  const [reconnecting, setReconnecting] = useState(false);
   /** The host stopped, or the stream failed server-side, while we were watching. */
   const [ended, setEnded] = useState(false);
 
@@ -89,6 +99,41 @@ export default function LiveViewScreen() {
   const mediaLib = useRef<typeof import('../lib/golive/hostMedia') | null>(null);
   /** Our own capture, held so it can be stopped — the SDK does not own it. */
   const localStream = useRef<any>(null);
+
+  /**
+   * Release everything THIS SCREEN owns: the SFU session and the capture we
+   * opened. Nothing else — tracks the SDK owns are left to the SDK.
+   *
+   * IDEMPOTENT BY CONSTRUCTION. Both refs are cleared before the awaits, so a
+   * second call finds null and does nothing. That is what makes it safe to
+   * call from a terminal event AND still have the unmount cleanup run after,
+   * which is exactly the pair that happens when a broadcast fails and the user
+   * then leaves the screen.
+   *
+   * Why this exists: the failure paths marked the broadcast failed and stopped
+   * there. livekit-client does not know the BROADCAST ended — only that its
+   * transport dropped — so the session kept retrying under its own policy, and
+   * our capture stayed open with it. Measured on device: a room from a finished
+   * broadcast still logging `reconnecting -> connected` six minutes later,
+   * beside the next broadcast's room.
+   */
+  const releaseOwnedMedia = useCallback(async () => {
+    const s = hostSession.current;
+    hostSession.current = null;
+    mediaLib.current = null;
+    const ls = localStream.current;
+    localStream.current = null;
+    // WE opened this capture, so we close it. userProvidedTrack means LiveKit
+    // will not stop it for us, and a camera left open keeps the indicator lit.
+    try { ls?.getTracks?.().forEach((t: any) => t.stop()); } catch {}
+    if (s) {
+      try {
+        const { stopAllHostMedia } = await import('../lib/golive/hostMedia');
+        await stopAllHostMedia(s.room);
+      } catch { /* leaving regardless */ }
+      try { await s.leave(); } catch {}
+    }
+  }, []);
   const [media, setMedia] = useState({ mic: startMic, camera: startCam, screen: false });
   const [busy, setBusy] = useState<'mic' | 'camera' | 'screen' | null>(null);
   /** Local camera stream URL — the host's own preview, not the HLS copy. */
@@ -153,10 +198,16 @@ export default function LiveViewScreen() {
    * keeps the audience unbounded while the stage stays capped.
    */
   const [stagePeers, setStagePeers] = useState<Record<string, string>>({});
-  // The publisher's video, once subscribed. On a private live the stage is the
-  // host and any co-hosts, so the first tile is what this viewer came to watch.
-  // Declared here rather than beside `lowLatency` because it reads stagePeers.
-  const llStream = lowLatency ? Object.values(stagePeers)[0] : undefined;
+  /**
+   * Remote SCREEN shares, identity -> stream URL. A separate map, not a second
+   * entry in stagePeers, because a publisher sends camera and screen under one
+   * identity: keyed together the later arrival silently evicts the earlier, and
+   * the host's face vanished the moment they shared their screen.
+   */
+  const [stageScreens, setStageScreens] = useState<Record<string, string>>({});
+  // The publisher's video is read further down, where the stage is picked —
+  // see pickStage(). On a private live the stage is the host and any co-hosts,
+  // so the first tile is what this viewer came to watch.
   /** The join was refused in the way a full room is refused — see the catch below. */
   const [stageFull, setStageFull] = useState(false);
 
@@ -245,9 +296,10 @@ export default function LiveViewScreen() {
           e2eeKey: null,
           // Other stage members' video. Audience members never appear here —
           // they are on HLS and never join the room at all.
-          onTrack: (uid, url, kind) => {
+          onTrack: (uid, url, kind, screen) => {
             if (kind !== 'video') return;
-            setStagePeers(prev => {
+            const put = screen ? setStageScreens : setStagePeers;
+            put(prev => {
               if (!url) { const { [uid]: _drop, ...rest } = prev; return rest; }
               return { ...prev, [uid]: url };
             });
@@ -255,6 +307,7 @@ export default function LiveViewScreen() {
           onParticipant: (p, joined) => {
             if (joined) return;
             setStagePeers(prev => { const { [p.identity]: _gone, ...rest } = prev; return rest; });
+            setStageScreens(prev => { const { [p.identity]: _gone, ...rest } = prev; return rest; });
           },
           // Resync the toggles from the room whenever what we publish changes,
           // including changes we did not initiate — Android's own "Stop
@@ -268,6 +321,34 @@ export default function LiveViewScreen() {
             // The preview URL dies with the camera track, and a stale one
             // renders a frozen frame of whatever was last captured.
             setPreview(lib.localPreviewURL(s.room));
+          },
+          // ── connection state, REPORTED not managed ──────────────────
+          //
+          // The SDK owns reconnection: DefaultReconnectPolicy retries ten times
+          // across roughly forty-four seconds. Nothing below retries, rejoins or
+          // tears down — these three only stop the screen from lying.
+          //
+          // Before this, Reconnecting was unobserved and onDisconnected was
+          // never supplied, so for that whole window the host went on talking to
+          // an audience that had stopped receiving, under a banner that still
+          // said LIVE.
+          //
+          // Deliberately NOT calling leave() on Reconnecting: the session is
+          // still recovering, and tearing it down is what would turn a survivable
+          // blip into a dead broadcast.
+          onReconnecting: () => { if (!cancelled) setReconnecting(true); },
+          onReconnected: () => { if (!cancelled) setReconnecting(false); },
+          // Terminal — the SDK exhausted its policy. Reuse the existing failure
+          // state rather than inventing a second error path.
+          onDisconnected: () => {
+            if (cancelled) return;
+            setReconnecting(false);
+            setFailed(true);
+            // Terminal means terminal: hand back the camera, the microphone
+            // and the room now rather than at unmount. The screen stays on
+            // FAILED, so "at unmount" could be minutes of a lit camera
+            // indicator and an Android audio session nobody is using.
+            void releaseOwnedMedia();
           },
         });
         if (cancelled) { await session.leave(); return; }
@@ -333,6 +414,11 @@ export default function LiveViewScreen() {
           setStageFull(/signal connection|could not connect/i.test(String(e?.message ?? '')));
           setFailed(true);
           setWaiting(false);
+          // This catch also covers everything AFTER hostSession.current was
+          // set — the foreground service and the media setup — so a throw
+          // there would otherwise strand the very session that had just
+          // succeeded. A no-op when the join itself was what failed.
+          void releaseOwnedMedia();
         }
       }
     })();
@@ -344,6 +430,7 @@ export default function LiveViewScreen() {
       mediaLib.current = null;
       // Their tiles would otherwise persist as frozen frames after we leave.
       setStagePeers({});
+      setStageScreens({});
       // Stop the screen capture BEFORE leaving the room. Android keeps the
       // capture session — and its persistent "recording" notification — alive
       // past a plain disconnect, which reads to the user as VaultChat still
@@ -488,6 +575,19 @@ export default function LiveViewScreen() {
             // stream.
             alive = false;
             setEnded(true);
+            // AND LET GO OF THE ROOM. Stopping the poll used to be all this
+            // did, which left the SFU session connected to a broadcast the
+            // server had already finished. livekit-client does not know the
+            // broadcast ended — it only knows its transport dropped — so it
+            // kept retrying under its own policy, indefinitely, holding the
+            // microphone and camera senders and waking the radio.
+            //
+            // Measured on device: a room from an ended broadcast was still
+            // logging `reconnecting -> connected` six minutes later, alongside
+            // the room of the NEXT broadcast. That is the same two-rooms-one-
+            // camera collision endBroadcast() above already guards against —
+            // this is the one path into the terminal state that never did.
+            await releaseOwnedMedia();
             return;
           }
         } catch { /* transient — the next tick tries again */ }
@@ -625,6 +725,103 @@ export default function LiveViewScreen() {
     [{ text: 'Keep going', style: 'cancel' }, { text: 'End', style: 'destructive', onPress: stop }],
   );
 
+  // ── THE IMMERSIVE STAGE ─────────────────────────────────────────
+  //
+  // Everything below used to be absolutely positioned at hand-measured pixel
+  // offsets — top: 100, bottom: 300, bottom: 352 — chosen against one handset.
+  // On a short screen the poll card and the chat overlapped the controls; on a
+  // tall one the status pill floated in the middle of nowhere. The offsets are
+  // gone: the chrome is now a flex column pinned to the real safe area, so it
+  // lands correctly on a 5" 16:9 phone and a 6.9" 20:9 one without either being
+  // measured.
+
+  /** Nothing to be immersive about until there is something on the stage. */
+  const stageReady = !waiting && !failed && !ended;
+
+  /**
+   * Which stream owns the full frame, and which shrinks to the corner.
+   *
+   * A screen share always wins the stage: it is the thing being shown, and it
+   * carries text that is unreadable in a thumbnail. The camera keeps a face on
+   * screen — the reason a live stream is worth watching over a screenshot — so
+   * it becomes the picture-in-picture rather than disappearing.
+   */
+  const llStreamCam = lowLatency ? Object.values(stagePeers)[0] : undefined;
+  const llScreen = lowLatency ? Object.values(stageScreens)[0] : undefined;
+  // A HOST NEVER RENDERS THEIR OWN SCREEN CAPTURE.
+  //
+  // FLAG_SECURE excludes VaultChat's own window from MediaProjection — that is
+  // the rule, and it is not negotiable. The consequence is that the host's own
+  // capture is BLACK for exactly as long as they are looking at this screen, so
+  // promoting it to the stage replaced the host's camera with a black rectangle
+  // and read as "screen sharing is broken". It was not: viewers were receiving
+  // the share the whole time.
+  //
+  // So the host keeps their camera on the stage and a chip that says a share is
+  // running. Viewers — who are not excluded from anything — get the share on
+  // the stage with the host's camera in the corner, which is the whole point.
+  const screenStream = onStage ? null : (llScreen ?? null);
+  const stage = pickStage(onStage ? preview : llStreamCam, screenStream);
+  const mainStream = stage.main;
+  const pipStream = stage.pip;
+
+  const win = useWindowDimensions();
+  const insets = useSafeAreaInsets();
+  /**
+   * PIP GEOMETRY, DERIVED — never a fixed 120x160 box.
+   *
+   * A quarter of the SHORT edge, so it is the same visual weight in portrait
+   * and landscape and on any panel size, then clamped so it is neither a
+   * postage stamp on a small phone nor a second stage on a tablet.
+   */
+  const { width: pipW, height: pipH } = pipSize(win.width, win.height);
+
+  /**
+   * Chrome: shown, then out of the way.
+   *
+   * Hidden permanently would strand a viewer with no way off the screen, so it
+   * starts visible, retires after a few seconds of an undisturbed stream, and
+   * comes back on a double tap. Forced ON whenever there is no stream — a
+   * waiting or failed screen has nothing to reveal and every reason to keep its
+   * exit reachable.
+   */
+  const [chrome, setChrome] = useState(true);
+  const chromeShown = chrome || !stageReady;
+  const [chatOpen, setChatOpen] = useState(false);
+  const [unread, setUnread] = useState(0);
+  const seenChat = useRef(0);
+
+  useEffect(() => {
+    if (chatOpen) { seenChat.current = messages.length; setUnread(0); }
+    else setUnread(Math.max(0, messages.length - seenChat.current));
+  }, [messages, chatOpen]);
+
+  // Anything the user has deliberately opened pins the chrome open: retiring
+  // the bar out from under a half-typed message is the kind of "helpful" that
+  // loses the message.
+  const pinned = chatOpen || inviteOpen || pollDraft !== null;
+  useEffect(() => {
+    if (!stageReady || !chrome || pinned) return;
+    const t = setTimeout(() => setChrome(false), 5000);
+    return () => clearTimeout(t);
+  }, [stageReady, chrome, pinned]);
+
+  /**
+   * DOUBLE TAP toggles the chrome.
+   *
+   * Single tap is deliberately inert: on a live stream the only thing a stray
+   * tap could do is hide the exit, and a thumb resting on a phone is a stray
+   * tap. 320ms is the standard double-tap window.
+   */
+  const lastTap = useRef(0);
+  const tapStage = useCallback(() => {
+    const now = Date.now();
+    if (now - lastTap.current < 320) { lastTap.current = 0; setChrome(v => !v); return; }
+    lastTap.current = now;
+  }, []);
+
+  const openChat = useCallback(() => { setChatOpen(true); setChrome(true); }, []);
+
   return (
     <View style={S.root}>
       <Stack.Screen options={{ title: b?.title || 'Live', headerTransparent: true, headerTintColor: '#fff' }} />
@@ -669,16 +866,29 @@ export default function LiveViewScreen() {
         //
         // Mirrored, like every self-view: an unmirrored front camera reads as
         // wrong to the person looking at it.
-        preview ? (
+        mainStream ? (
+          // A screen share takes the stage and the camera drops to the corner.
+          // `contain` for a screen, never `cover`: cropping a shared screen
+          // cuts off exactly the edges — toolbars, the last column — that the
+          // host is sharing it to show. `cover` stays right for a camera, where
+          // a cropped face beats a letterboxed one.
+          //
+          // Mirrored only for the camera. A mirrored screen share is unreadable.
           <>
-            <RTCView streamURL={preview} style={S.video} objectFit="cover" mirror />
+            <RTCView
+              streamURL={mainStream}
+              style={S.video}
+              objectFit={screenStream ? 'contain' : 'cover'}
+              mirror={!screenStream}
+              zOrder={0}
+            />
             {media.screen && (
-              // The preview shows the CAMERA; the screen is a second
-              // publication the host cannot see here. Saying so beats a viewer
-              // asking why their screen is not on the stream.
-              <View style={S.sharingChip}>
+              // The one thing the host cannot see for themselves. Says a share
+              // is live AND why this screen is not showing it, so a black
+              // rectangle is never the answer to "is it working?".
+              <View style={[S.sharingChip, { top: insets.top + 56 }]} pointerEvents="none">
                 <Ionicons name="phone-portrait" size={13} color="#fff" />
-                <AppText style={S.sharingText}>Sharing your screen</AppText>
+                <AppText style={S.sharingText}>Sharing your screen — viewers see it</AppText>
               </View>
             )}
           </>
@@ -698,7 +908,7 @@ export default function LiveViewScreen() {
             </AppText>
           </View>
         )
-      ) : lowLatency && !llStream ? (
+      ) : lowLatency && !mainStream ? (
         // A low-latency join is in flight. Show the spinner rather than falling
         // through to HLS: starting the HLS player here spins up a decoder and
         // fetches segments we are about to throw away, and the viewer watches
@@ -711,10 +921,13 @@ export default function LiveViewScreen() {
           <ActivityIndicator size="large" color={colors.primary} />
           <AppText style={S.centerText}>Connecting…</AppText>
         </View>
-      ) : llStream ? (
+      ) : mainStream ? (
         // Sub-second path: the publisher's track straight off the SFU. No
         // playlist, no segments, no buffer — which is the entire point.
-        <RTCView streamURL={llStream} style={S.video} objectFit="contain" />
+        //
+        // Same stage rule as the host's own view: their screen share, if they
+        // have one, is what this viewer came to look at.
+        <RTCView streamURL={mainStream} style={S.video} objectFit="contain" zOrder={0} />
       ) : !b?.hlsUrl ? (
         <View style={S.center}>
           <Ionicons name="cloud-offline-outline" size={40} color="#94A3B8" />
@@ -730,326 +943,431 @@ export default function LiveViewScreen() {
           style={S.video}
           resizeMode={ResizeMode.CONTAIN}
           shouldPlay
-          useNativeControls
+          // NO NATIVE CONTROLS. They have no job on a live edge — there is
+          // nothing to seek and nothing to resume — and they used to be the
+          // only thing on screen, swallowing the taps that reveal our own
+          // chrome and leaving a viewer with no way off the screen at all.
+          useNativeControls={false}
           // Live HLS has no meaningful end; looping a live edge would restart
           // playback at the first cached segment instead of following the feed.
           isLooping={false}
         />
       )}
 
-      {/* OTHER PEOPLE ON THE STAGE.
-          A strip of small tiles, not a grid: the main frame belongs to whoever
-          this device is watching, and the stage is at most 20 people while the
-          audience is unbounded. Rendered only for stage members — an audience
-          member is on HLS and has no room to draw these from. */}
-      {onStage && Object.keys(stagePeers).length > 0 && (
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          style={S.stageStrip}
-          contentContainerStyle={S.stageStripInner}
-        >
-          {Object.entries(stagePeers).map(([uid, url]) => (
-            <RTCView key={uid} streamURL={url} style={S.stageTile} objectFit="cover" />
-          ))}
-        </ScrollView>
-      )}
+      {/* DOUBLE-TAP CATCHER.
+          Full-bleed and BELOW the chrome, so it only ever sees taps that
+          landed on the stream itself — a tap on Leave stays a tap on Leave. */}
+      {stageReady && <Pressable style={StyleSheet.absoluteFill} onPress={tapStage} />}
 
-      {/* Honest status strip. `e2ee` comes from the server. */}
-      {b && (
-        <View style={S.bar}>
-          <View style={S.liveDot} />
-          <AppText style={S.barText}>
-            {b.status === 'live' ? 'LIVE' : b.status.toUpperCase()}
-          </AppText>
-          {/* Live count from Redis, falling back to the stored snapshot before
-              the first heartbeat lands. */}
-          <AppText style={S.barDim}>{viewers || b.viewerCount} watching</AppText>
-          {!b.e2ee && <AppText style={S.barDim}>· Not encrypted</AppText>}
+      {/* CAMERA PICTURE-IN-PICTURE.
+          Only while something else owns the stage, which today means a screen
+          share. Sized from the window rather than fixed, and parked below the
+          top row so it never sits under the status pill on a notched phone.
+          pointerEvents="none": it must not eat the double tap it floats over. */}
+      {stageReady && pipStream && (
+        <View
+          style={[S.pip, { width: pipW, height: pipH, top: insets.top + 56, right: SPACING.lg }]}
+          pointerEvents="none"
+        >
+          <RTCView
+            streamURL={pipStream}
+            style={S.pipVideo}
+            objectFit="cover"
+            mirror={onStage}
+            // Above the stage's own surface. Without this, Android composites
+            // the two SurfaceViews in creation order and the PiP renders
+            // BEHIND the stream — present in the tree, invisible on the glass.
+            zOrder={1}
+          />
         </View>
       )}
 
-      {/* LEAVE — for the audience only.
-          The host has "End broadcast"; a viewer had NOTHING. Once the HLS
-          <Video> is playing it fills the screen with only its own native
-          transport controls, so there was no way off this screen at all — and
-          the hardware back button is not a substitute, because a viewer who
-          arrived through an invitation link got here via router.replace and has
-          no history to go back to. On that path back exits the app.
-
-          leaveAsViewer, not router.back(), for exactly that reason.
-
-          Rendered outside the status bar's own View so it stays put whether or
-          not the bar is showing. */}
-      {!isOwner && (
-        <TouchableOpacity
-          onPress={leaveAsViewer}
-          style={S.leaveBtn}
-          activeOpacity={0.85}
-          hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+      {/* ── CHROME ──────────────────────────────────────────────────
+          One flex column against the real safe area. Every child is laid out,
+          not positioned: nothing here carries a pixel offset that assumes a
+          screen size. box-none throughout so the stream keeps receiving taps
+          everywhere the chrome has not actually drawn a control. */}
+      {!ended && chromeShown && (
+        <View
+          style={[S.chrome, { paddingTop: insets.top + SPACING.sm, paddingBottom: insets.bottom + SPACING.sm }]}
+          pointerEvents="box-none"
         >
-          <Ionicons name="close" size={18} color="#fff" />
-          <AppText style={S.leaveText}>Leave</AppText>
-        </TouchableOpacity>
-      )}
-
-      {/* PRIVATE INVITATION — the link IS the access mechanism.
-          Shows the URL, and nothing else: no room name, no key, no
-          infrastructure detail. Copy and Share both hand over the same opaque
-          code, which grants VIEWING only — a seat on the stage still needs the
-          host to promote you. */}
-      {inviteOpen && inviteUrl && (
-        <View style={S.inviteSheet}>
-          <View style={S.inviteHead}>
-            <Ionicons name="lock-closed" size={14} color="#FCD34D" />
-            <AppText style={S.inviteTitle}>Private live — invite people</AppText>
-            <TouchableOpacity onPress={() => setInviteOpen(false)}>
-              <Ionicons name="close" size={18} color="#94A3B8" />
-            </TouchableOpacity>
-          </View>
-          <AppText style={S.inviteHint}>
-            {pc
-              ? 'Viewers need this link AND the passcode. Send them separately — that is what makes a forwarded link useless on its own.'
-              : 'Anyone with this link can watch. Send it however you like.'}
-          </AppText>
-          <AppText style={S.inviteUrl} numberOfLines={2} selectable>{inviteUrl}</AppText>
-
-          {/* The passcode, if this broadcast has one.
-
-              Shown from the route param, not from the server: only a bcrypt
-              hash is stored, so there is nothing to fetch back. Its own Copy
-              button because it must travel on a DIFFERENT channel from the
-              link — pasting both into one message defeats the entire point. */}
-          {!!pc && (
-            <View style={S.pcRow}>
-              <View style={{ flex: 1 }}>
-                <AppText style={S.pcLabel}>Passcode</AppText>
-                <AppText style={S.pcValue} selectable>{pc}</AppText>
+          {/* TOP ROW — status on the left, every action as a small icon on the
+              right. The exit lives here on purpose: it is the one control a
+              viewer must always be able to find. */}
+          <View style={S.topRow} pointerEvents="box-none">
+            {b && (
+              <View style={S.bar}>
+                {/* Amber, not red: the stream is not live and it has not ended
+                    either. The SDK is still recovering the transport, so the
+                    strip must say so rather than keep asserting LIVE — that
+                    assertion is the defect this closes. */}
+                <View style={[S.liveDot, reconnecting && S.reconnectDot]} />
+                <AppText style={S.barText}>
+                  {reconnecting
+                    ? 'RECONNECTING…'
+                    // `failed` BEFORE b.status, because b.status is the last
+                    // snapshot the POLL managed to fetch — and the poll is
+                    // exactly what cannot run when the network is the thing
+                    // that broke. Local terminal knowledge is fresher than an
+                    // unreachable server, so it wins.
+                    : failed ? 'FAILED'
+                    : b.status === 'live' ? 'LIVE' : b.status.toUpperCase()}
+                </AppText>
+                <AppText style={S.barDim}>{viewers || b.viewerCount}</AppText>
+                {!b.e2ee && <AppText style={S.barDim}>· Not encrypted</AppText>}
               </View>
+            )}
+
+            <View style={S.grow} pointerEvents="none" />
+
+            {stageReady && (
               <TouchableOpacity
-                style={S.inviteBtn}
-                onPress={async () => {
-                  await Clipboard.setStringAsync(pc);
-                  Alert.alert('Copied', 'Passcode copied. Send it separately from the link.');
-                }}
+                onPress={openChat}
+                style={[S.icon, chatOpen && S.iconOn]}
+                accessibilityLabel="Chat"
+                hitSlop={8}
               >
-                <Ionicons name="copy-outline" size={15} color="#fff" />
-                <AppText style={S.inviteBtnText}>Copy</AppText>
+                <Ionicons name="chatbubble-ellipses-outline" size={18} color="#fff" />
+                {/* Chat is folded away by default now, so a silent icon would
+                    hide the whole conversation. The count is what says
+                    something is happening down there. */}
+                {!chatOpen && unread > 0 && (
+                  <View style={S.badge}>
+                    <AppText style={S.badgeText}>{unread > 99 ? '99+' : String(unread)}</AppText>
+                  </View>
+                )}
               </TouchableOpacity>
-            </View>
-          )}
-          <View style={S.inviteRow}>
-            <TouchableOpacity
-              style={S.inviteBtn}
-              onPress={async () => {
-                await Clipboard.setStringAsync(inviteUrl);
-                Alert.alert('Copied', 'Invite link copied.');
-              }}
-            >
-              <Ionicons name="copy-outline" size={15} color="#fff" />
-              <AppText style={S.inviteBtnText}>Copy</AppText>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={S.inviteBtn}
-              onPress={() => Share.share({
-                message: `Join my private live on VaultChat
-${inviteUrl}`,
-              })}
-            >
-              <Ionicons name="share-social-outline" size={15} color="#fff" />
-              <AppText style={S.inviteBtnText}>Share</AppText>
-            </TouchableOpacity>
-            <TouchableOpacity style={S.inviteBtn} onPress={makeInvite} disabled={inviteBusy}>
-              <Ionicons name="refresh-outline" size={15} color="#fff" />
-              <AppText style={S.inviteBtnText}>New link</AppText>
-            </TouchableOpacity>
-          </View>
-        </View>
-      )}
+            )}
 
-      {/* Re-open it later. Private streams only — a public one needs no invite. */}
-      {isOwner && b?.visibility === 'private' && !inviteOpen && !waiting && !failed && !ended && (
-        <TouchableOpacity
-          onPress={() => (inviteUrl ? setInviteOpen(true) : makeInvite())}
-          style={S.inviteFab}
-          accessibilityLabel="Invite people"
-        >
-          <Ionicons name="person-add-outline" size={18} color="#fff" />
-        </TouchableOpacity>
-      )}
+            {isOwner && stageReady && (
+              <TouchableOpacity
+                onPress={() => setPollDraft({ q: '', opts: ['', ''] })}
+                style={S.icon}
+                accessibilityLabel="Create a poll"
+                hitSlop={8}
+              >
+                <Ionicons name="stats-chart" size={18} color="#fff" />
+              </TouchableOpacity>
+            )}
 
-      {/* POLLS — above the chat, because a poll is a call to action and chat is
-          ambient. Only the newest OPEN poll is shown: stacking several would
-          bury the stream this is drawn on top of. Closed ones stay in the list
-          server-side for the record. */}
-      {!waiting && !failed && !ended && polls.filter(p => !p.closed).slice(0, 1).map(p => {
-        const answered = p.myVote >= 0;
-        return (
-          <View key={p.id} style={S.poll}>
-            <View style={S.pollHead}>
-              <Ionicons name="stats-chart" size={13} color="#FCD34D" />
-              <AppText style={S.pollQ} numberOfLines={2}>{p.question}</AppText>
-              {isOwner && (
-                <TouchableOpacity onPress={() => { void closePoll(String(id), p.id); setPolls(prev => prev.map(x => x.id === p.id ? { ...x, closed: true } : x)); }}>
-                  <AppText style={S.pollClose}>End</AppText>
-                </TouchableOpacity>
-              )}
-            </View>
-            {p.options.map((opt, i) => {
-              // Percentages only AFTER voting. Showing the running tally to
-              // someone who has not answered biases the answer, and on an
-              // unbounded audience that is not a rounding error.
-              const pct = p.total > 0 ? Math.round((p.counts[i] ?? 0) * 100 / p.total) : 0;
-              const mine = p.myVote === i;
-              return (
+            {isOwner && b?.visibility === 'private' && stageReady && (
+              <TouchableOpacity
+                onPress={() => (inviteUrl ? setInviteOpen(true) : makeInvite())}
+                style={S.icon}
+                accessibilityLabel="Invite people"
+                hitSlop={8}
+              >
+                <Ionicons name="person-add-outline" size={18} color="#fff" />
+              </TouchableOpacity>
+            )}
+
+            {/* THE EXIT. The host ends the broadcast (confirmed first — it
+                disconnects everyone); a viewer just leaves.
+
+                leaveAsViewer, not router.back(): a viewer who arrived through
+                an invitation link got here via router.replace and has no
+                history, so back exits the app. */}
+            {isOwner ? (
+              !waiting && (
                 <TouchableOpacity
-                  key={i}
-                  disabled={answered || voting !== null}
-                  onPress={() => vote(p.id, i)}
-                  style={S.pollOpt}
-                  activeOpacity={0.85}
+                  onPress={confirmStop}
+                  style={[S.icon, S.iconDanger]}
+                  accessibilityLabel="End broadcast"
+                  hitSlop={8}
                 >
-                  {answered && <View style={[S.pollBar, { width: `${pct}%` }, mine && S.pollBarMine]} />}
-                  <AppText style={[S.pollOptText, mine && S.pollOptMine]} numberOfLines={1}>
-                    {mine ? '✓ ' : ''}{opt}
-                  </AppText>
-                  {answered && <AppText style={S.pollPct}>{pct}%</AppText>}
+                  <Ionicons name="stop" size={18} color="#fff" />
                 </TouchableOpacity>
-              );
-            })}
-            <AppText style={S.pollTotal}>
-              {answered ? `${p.total} ${p.total === 1 ? 'vote' : 'votes'}` : 'Tap to vote'}
-            </AppText>
-          </View>
-        );
-      })}
-
-      {/* Host: compose a poll. */}
-      {isOwner && !waiting && !failed && !ended && (
-        pollDraft ? (
-          <View style={S.pollCompose}>
-            <TextInput
-              value={pollDraft.q}
-              onChangeText={t => setPollDraft(d => d && { ...d, q: t })}
-              placeholder="Ask your viewers something…"
-              placeholderTextColor="#94A3B8"
-              style={S.pollInput}
-              maxLength={200}
-              autoFocus
-            />
-            {pollDraft.opts.map((o, i) => (
-              <TextInput
-                key={i}
-                value={o}
-                onChangeText={t => setPollDraft(d => d && { ...d, opts: d.opts.map((x, j) => j === i ? t : x) })}
-                placeholder={`Option ${i + 1}`}
-                placeholderTextColor="#64748B"
-                style={S.pollInput}
-                maxLength={100}
-              />
-            ))}
-            <View style={S.pollBtnRow}>
-              {pollDraft.opts.length < 10 && (
-                <TouchableOpacity onPress={() => setPollDraft(d => d && { ...d, opts: [...d.opts, ''] })}>
-                  <AppText style={S.pollAdd}>+ Option</AppText>
-                </TouchableOpacity>
-              )}
-              <TouchableOpacity onPress={() => setPollDraft(null)}>
-                <AppText style={S.pollCancel}>Cancel</AppText>
+              )
+            ) : (
+              <TouchableOpacity
+                onPress={leaveAsViewer}
+                style={[S.icon, S.iconDanger]}
+                accessibilityLabel="Leave"
+                hitSlop={8}
+              >
+                <Ionicons name="close" size={18} color="#fff" />
               </TouchableOpacity>
-              <TouchableOpacity onPress={submitPoll}>
-                <AppText style={S.pollGo}>Start poll</AppText>
-              </TouchableOpacity>
-            </View>
+            )}
           </View>
-        ) : (
-          <TouchableOpacity
-            onPress={() => setPollDraft({ q: '', opts: ['', ''] })}
-            style={S.pollFab}
-            accessibilityLabel="Create a poll"
-          >
-            <Ionicons name="stats-chart" size={18} color="#fff" />
-          </TouchableOpacity>
-        )
-      )}
 
-      {/* Chat overlays the video rather than splitting the screen — a phone in
-          portrait has no room for both, and viewers came for the stream. */}
-      {!waiting && !failed && !ended && (
-        <View style={S.chatWrap} pointerEvents="box-none">
-          <ScrollView
-            style={S.chatList}
-            contentContainerStyle={S.chatListInner}
-            showsVerticalScrollIndicator={false}
-          >
-            {messages.map(m => (
-              <AppText key={m.id} style={S.chatLine} numberOfLines={3}>
-                <AppText style={S.chatName}>{m.name || 'Someone'} </AppText>
-                {m.message}
-              </AppText>
-            ))}
-          </ScrollView>
-          <View style={S.chatInputRow}>
-            <TextInput
-              value={draft}
-              onChangeText={setDraft}
-              placeholder="Say something…"
-              placeholderTextColor="#94A3B8"
-              style={S.chatInput}
-              maxLength={500}
-              onSubmitEditing={send}
-              returnKeyType="send"
-            />
-            <TouchableOpacity onPress={send} style={S.chatSend}>
-              <Ionicons name="send" size={18} color="#fff" />
-            </TouchableOpacity>
-          </View>
-        </View>
-      )}
-
-      {/* Host controls. Rendered only when there is a session to drive — a host
-          whose publish failed gets no buttons rather than dead ones.
-
-          The publish permission is in the TOKEN, not here: an audience grant has
-          canPublish=false and an empty source list, so hiding these is a
-          courtesy and the media server is the enforcement. */}
-      {onStage && !waiting && !failed && hostSession.current && (
-        <View style={S.controls}>
-          {([
-            ['mic', media.mic ? 'mic' : 'mic-off', 'Microphone'],
-            ['camera', media.camera ? 'videocam' : 'videocam-off', 'Camera'],
-            ['screen', media.screen ? 'phone-portrait' : 'phone-portrait-outline', 'Screen'],
-          ] as const).map(([what, icon, label]) => (
-            <TouchableOpacity
-              key={what}
-              onPress={() => toggle(what)}
-              disabled={busy !== null}
-              accessibilityLabel={label}
-              accessibilityRole="button"
-              accessibilityState={{ selected: media[what], disabled: busy !== null }}
-              style={[
-                S.ctrl,
-                // Screen share is the one that is ON when highlighted; mic and
-                // camera are highlighted when OFF, because "muted" is the state
-                // a host needs to spot at a glance.
-                (what === 'screen' ? media.screen : !media[what]) && S.ctrlActive,
-              ]}
-              activeOpacity={0.85}
+          {/* OTHER PEOPLE ON THE STAGE.
+              A strip of small tiles, not a grid: the main frame belongs to
+              whoever this device is watching, and the stage is at most 20
+              people while the audience is unbounded. Cameras only — a screen
+              share belongs on the stage or in the corner, never in a 72px tile
+              where nothing on it can be read. */}
+          {onStage && Object.keys(stagePeers).length > 0 && (
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              style={S.stageStrip}
+              contentContainerStyle={S.stageStripInner}
             >
-              {busy === what
-                ? <ActivityIndicator color="#fff" size="small" />
-                : <Ionicons name={icon as any} size={20} color="#fff" />}
-            </TouchableOpacity>
-          ))}
+              {Object.entries(stagePeers).map(([uid, url]) => (
+                <RTCView key={uid} streamURL={url} style={S.stageTile} objectFit="cover" zOrder={1} />
+              ))}
+            </ScrollView>
+          )}
+
+          <View style={S.grow} pointerEvents="none" />
+
+          {/* ── BOTTOM STACK ────────────────────────────────────────
+              Stacked in one column instead of each pinned at its own hard
+              offset, which is what used to let the poll card, the invite sheet
+              and the chat draw on top of each other on a short screen. */}
+          {stageReady && (
+            <KeyboardAvoidingView
+              // The whole point of the chat icon: tapping it must lift the
+              // composer clear of the keyboard rather than bury it under one.
+              behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+              style={S.bottom}
+              pointerEvents="box-none"
+            >
+              {/* POLLS — above the chat, because a poll is a call to action and
+                  chat is ambient. Only the newest OPEN poll is shown: stacking
+                  several would bury the stream this is drawn on top of. Closed
+                  ones stay in the list server-side for the record. */}
+              {polls.filter(pl => !pl.closed).slice(0, 1).map(pl => {
+                const answered = pl.myVote >= 0;
+                return (
+                  <View key={pl.id} style={S.poll}>
+                    <View style={S.pollHead}>
+                      <Ionicons name="stats-chart" size={13} color="#FCD34D" />
+                      <AppText style={S.pollQ} numberOfLines={2}>{pl.question}</AppText>
+                      {isOwner && (
+                        <TouchableOpacity onPress={() => { void closePoll(String(id), pl.id); setPolls(prev => prev.map(x => x.id === pl.id ? { ...x, closed: true } : x)); }}>
+                          <AppText style={S.pollClose}>End</AppText>
+                        </TouchableOpacity>
+                      )}
+                    </View>
+                    {pl.options.map((opt, i) => {
+                      // Percentages only AFTER voting. Showing the running
+                      // tally to someone who has not answered biases the
+                      // answer, and on an unbounded audience that is not a
+                      // rounding error.
+                      const pct = pl.total > 0 ? Math.round((pl.counts[i] ?? 0) * 100 / pl.total) : 0;
+                      const mine = pl.myVote === i;
+                      return (
+                        <TouchableOpacity
+                          key={i}
+                          disabled={answered || voting !== null}
+                          onPress={() => vote(pl.id, i)}
+                          style={S.pollOpt}
+                          activeOpacity={0.85}
+                        >
+                          {answered && <View style={[S.pollBar, { width: `${pct}%` }, mine && S.pollBarMine]} />}
+                          <AppText style={[S.pollOptText, mine && S.pollOptMine]} numberOfLines={1}>
+                            {mine ? '✓ ' : ''}{opt}
+                          </AppText>
+                          {answered && <AppText style={S.pollPct}>{pct}%</AppText>}
+                        </TouchableOpacity>
+                      );
+                    })}
+                    <AppText style={S.pollTotal}>
+                      {answered ? `${pl.total} ${pl.total === 1 ? 'vote' : 'votes'}` : 'Tap to vote'}
+                    </AppText>
+                  </View>
+                );
+              })}
+
+              {/* Host: compose a poll. */}
+              {isOwner && pollDraft && (
+                <View style={S.pollCompose}>
+                  <TextInput
+                    value={pollDraft.q}
+                    onChangeText={t => setPollDraft(d => d && { ...d, q: t })}
+                    placeholder="Ask your viewers something…"
+                    placeholderTextColor="#94A3B8"
+                    style={S.pollInput}
+                    maxLength={200}
+                    autoFocus
+                  />
+                  {pollDraft.opts.map((o, i) => (
+                    <TextInput
+                      key={i}
+                      value={o}
+                      onChangeText={t => setPollDraft(d => d && { ...d, opts: d.opts.map((x, j) => j === i ? t : x) })}
+                      placeholder={`Option ${i + 1}`}
+                      placeholderTextColor="#64748B"
+                      style={S.pollInput}
+                      maxLength={100}
+                    />
+                  ))}
+                  <View style={S.pollBtnRow}>
+                    {pollDraft.opts.length < 10 && (
+                      <TouchableOpacity onPress={() => setPollDraft(d => d && { ...d, opts: [...d.opts, ''] })}>
+                        <AppText style={S.pollAdd}>+ Option</AppText>
+                      </TouchableOpacity>
+                    )}
+                    <TouchableOpacity onPress={() => setPollDraft(null)}>
+                      <AppText style={S.pollCancel}>Cancel</AppText>
+                    </TouchableOpacity>
+                    <TouchableOpacity onPress={submitPoll}>
+                      <AppText style={S.pollGo}>Start poll</AppText>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              )}
+
+              {/* PRIVATE INVITATION — the link IS the access mechanism.
+                  Shows the URL, and nothing else: no room name, no key, no
+                  infrastructure detail. Copy and Share both hand over the same
+                  opaque code, which grants VIEWING only — a seat on the stage
+                  still needs the host to promote you. */}
+              {inviteOpen && inviteUrl && (
+                <View style={S.inviteSheet}>
+                  <View style={S.inviteHead}>
+                    <Ionicons name="lock-closed" size={14} color="#FCD34D" />
+                    <AppText style={S.inviteTitle}>Private live — invite people</AppText>
+                    <TouchableOpacity onPress={() => setInviteOpen(false)} hitSlop={8}>
+                      <Ionicons name="close" size={18} color="#94A3B8" />
+                    </TouchableOpacity>
+                  </View>
+                  <AppText style={S.inviteHint}>
+                    {pc
+                      ? 'Viewers need this link AND the passcode. Send them separately — that is what makes a forwarded link useless on its own.'
+                      : 'Anyone with this link can watch. Send it however you like.'}
+                  </AppText>
+                  <AppText style={S.inviteUrl} numberOfLines={2} selectable>{inviteUrl}</AppText>
+
+                  {/* The passcode, if this broadcast has one.
+
+                      Shown from the route param, not from the server: only a
+                      bcrypt hash is stored, so there is nothing to fetch back.
+                      Its own Copy button because it must travel on a DIFFERENT
+                      channel from the link — pasting both into one message
+                      defeats the entire point. */}
+                  {!!pc && (
+                    <View style={S.pcRow}>
+                      <View style={S.grow}>
+                        <AppText style={S.pcLabel}>Passcode</AppText>
+                        <AppText style={S.pcValue} selectable>{pc}</AppText>
+                      </View>
+                      <TouchableOpacity
+                        style={S.inviteBtn}
+                        onPress={async () => {
+                          await Clipboard.setStringAsync(pc);
+                          Alert.alert('Copied', 'Passcode copied. Send it separately from the link.');
+                        }}
+                      >
+                        <Ionicons name="copy-outline" size={15} color="#fff" />
+                        <AppText style={S.inviteBtnText}>Copy</AppText>
+                      </TouchableOpacity>
+                    </View>
+                  )}
+                  <View style={S.inviteRow}>
+                    <TouchableOpacity
+                      style={S.inviteBtn}
+                      onPress={async () => {
+                        await Clipboard.setStringAsync(inviteUrl);
+                        Alert.alert('Copied', 'Invite link copied.');
+                      }}
+                    >
+                      <Ionicons name="copy-outline" size={15} color="#fff" />
+                      <AppText style={S.inviteBtnText}>Copy</AppText>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={S.inviteBtn}
+                      onPress={() => Share.share({ message: 'Join my private live on VaultChat\n' + inviteUrl })}
+                    >
+                      <Ionicons name="share-social-outline" size={15} color="#fff" />
+                      <AppText style={S.inviteBtnText}>Share</AppText>
+                    </TouchableOpacity>
+                    <TouchableOpacity style={S.inviteBtn} onPress={makeInvite} disabled={inviteBusy}>
+                      <Ionicons name="refresh-outline" size={15} color="#fff" />
+                      <AppText style={S.inviteBtnText}>New link</AppText>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              )}
+
+              {/* CHAT — folded away behind the icon in the top row.
+                  It used to sit open over the bottom third of every stream,
+                  which on a phone is the third the stream is actually in. Open
+                  it and the composer takes focus immediately, because tapping a
+                  chat icon has exactly one intention. */}
+              {chatOpen && (
+                <View style={S.chatWrap} pointerEvents="box-none">
+                  <View style={S.chatHead}>
+                    <AppText style={S.chatHeadText}>Live chat</AppText>
+                    <TouchableOpacity onPress={() => setChatOpen(false)} hitSlop={10}>
+                      <Ionicons name="chevron-down" size={18} color="#94A3B8" />
+                    </TouchableOpacity>
+                  </View>
+                  <ScrollView
+                    style={[S.chatList, { maxHeight: Math.round(win.height * 0.28) }]}
+                    contentContainerStyle={S.chatListInner}
+                    showsVerticalScrollIndicator={false}
+                  >
+                    {messages.map(m => (
+                      <AppText key={m.id} style={S.chatLine} numberOfLines={3}>
+                        <AppText style={S.chatName}>{m.name || 'Someone'} </AppText>
+                        {m.message}
+                      </AppText>
+                    ))}
+                  </ScrollView>
+                  <View style={S.chatInputRow}>
+                    <TextInput
+                      value={draft}
+                      onChangeText={setDraft}
+                      placeholder="Say something…"
+                      placeholderTextColor="#94A3B8"
+                      style={S.chatInput}
+                      maxLength={500}
+                      onSubmitEditing={send}
+                      returnKeyType="send"
+                      autoFocus
+                    />
+                    <TouchableOpacity onPress={send} style={S.chatSend}>
+                      <Ionicons name="send" size={18} color="#fff" />
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              )}
+
+              {/* Host controls. Rendered only when there is a session to drive
+                  — a host whose publish failed gets no buttons rather than dead
+                  ones.
+
+                  The publish permission is in the TOKEN, not here: an audience
+                  grant has canPublish=false and an empty source list, so hiding
+                  these is a courtesy and the media server is the enforcement. */}
+              {onStage && hostSession.current && (
+                <View style={S.controls}>
+                  {([
+                    ['mic', media.mic ? 'mic' : 'mic-off', 'Microphone'],
+                    ['camera', media.camera ? 'videocam' : 'videocam-off', 'Camera'],
+                    ['screen', media.screen ? 'phone-portrait' : 'phone-portrait-outline', 'Screen'],
+                  ] as const).map(([what, icon, label]) => (
+                    <TouchableOpacity
+                      key={what}
+                      onPress={() => toggle(what)}
+                      disabled={busy !== null}
+                      accessibilityLabel={label}
+                      accessibilityRole="button"
+                      accessibilityState={{ selected: media[what], disabled: busy !== null }}
+                      style={[
+                        S.ctrl,
+                        // Screen share is the one that is ON when highlighted;
+                        // mic and camera are highlighted when OFF, because
+                        // "muted" is the state a host needs to spot at a glance.
+                        (what === 'screen' ? media.screen : !media[what]) && S.ctrlActive,
+                      ]}
+                      activeOpacity={0.85}
+                    >
+                      {busy === what
+                        ? <ActivityIndicator color="#fff" size="small" />
+                        : <Ionicons name={icon as any} size={20} color="#fff" />}
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              )}
+            </KeyboardAvoidingView>
+          )}
         </View>
       )}
 
-      {isOwner && !waiting && (
-        <TouchableOpacity onPress={confirmStop} style={S.endBtn} activeOpacity={0.85}>
-          <Ionicons name="stop-circle-outline" size={20} color="#fff" />
-          <AppText style={S.endText}>End broadcast</AppText>
-        </TouchableOpacity>
-      )}
     </View>
   );
 }
@@ -1059,43 +1377,72 @@ const S = StyleSheet.create({
   video: { flex: 1 },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: SPACING.lg, padding: SPACING.xl },
   centerText: { color: '#CBD5E1', fontSize: 15, textAlign: 'center' },
-  // Top-RIGHT, opposite the LIVE bar at top-left, so it cannot cover the status
-  // it sits beside. Above the video (zIndex) or the native transport controls
-  // would swallow the tap.
-  leaveBtn: {
-    position: 'absolute', top: 100, right: SPACING.lg, zIndex: 20,
-    flexDirection: 'row', alignItems: 'center', gap: 6,
-    paddingHorizontal: SPACING.md, paddingVertical: SPACING.sm,
-    borderRadius: RADIUS.pill, backgroundColor: 'rgba(15,23,42,0.85)',
-  },
-  leaveText: { color: '#fff', fontWeight: '700', fontSize: 13 },
   backBtn: { paddingHorizontal: SPACING.xl, paddingVertical: SPACING.md, borderRadius: RADIUS.pill, backgroundColor: '#1E293B' },
   backText: { color: '#fff', fontWeight: '600' },
-  bar: {
-    position: 'absolute', top: 100, left: SPACING.lg,
-    flexDirection: 'row', alignItems: 'center', gap: SPACING.sm,
-    backgroundColor: 'rgba(0,0,0,0.6)', paddingHorizontal: SPACING.md,
-    paddingVertical: SPACING.sm, borderRadius: RADIUS.pill,
+
+  // ── ADAPTIVE CHROME ───────────────────────────────────────────────
+  //
+  // No `top:`, no `bottom:`, no magic numbers. The layer fills the screen and
+  // its children flex within it; the only offsets are the safe-area insets,
+  // supplied at render time by the device. That is the whole of what makes this
+  // fit a 5" phone and a 6.9" one without either being measured.
+  chrome: {
+    ...StyleSheet.absoluteFillObject,
+    paddingHorizontal: SPACING.lg,
   },
-  liveDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: '#EF4444' },
-  barText: { color: '#fff', fontSize: 11, fontWeight: '800', letterSpacing: 0.5 },
-  barDim: { color: '#94A3B8', fontSize: 11 },
-  endBtn: {
-    position: 'absolute', bottom: SPACING.xxl, alignSelf: 'center',
+  /** Eats the leftover space. Used both as a row spacer and a column spacer. */
+  grow: { flex: 1 },
+  topRow: {
     flexDirection: 'row', alignItems: 'center', gap: SPACING.sm,
-    backgroundColor: '#B91C1C', paddingHorizontal: SPACING.xl,
-    paddingVertical: SPACING.md, borderRadius: RADIUS.pill,
+    // Wraps rather than squeezing: a host on a narrow phone has status plus
+    // four icons, and a squeezed row is how a control ends up unhittable.
+    flexWrap: 'wrap',
   },
-  endText: { color: '#fff', fontWeight: '700' },
+  /** Every top-row action. One size, so the row reads as a set. */
+  icon: {
+    width: 38, height: 38, borderRadius: 19,
+    alignItems: 'center', justifyContent: 'center',
+    backgroundColor: 'rgba(15,23,42,0.85)',
+  },
+  iconOn: { backgroundColor: 'rgba(59,130,246,0.9)' },
+  iconDanger: { backgroundColor: 'rgba(185,28,28,0.92)' },
+  badge: {
+    position: 'absolute', top: -2, right: -2, minWidth: 17, height: 17,
+    borderRadius: 9, paddingHorizontal: 4,
+    alignItems: 'center', justifyContent: 'center', backgroundColor: '#EF4444',
+  },
+  badgeText: { color: '#fff', fontSize: 10, fontWeight: '800' },
+
+  /** Camera picture-in-picture. Width and height come from the window. */
+  pip: {
+    position: 'absolute', borderRadius: RADIUS.md, overflow: 'hidden',
+    backgroundColor: '#0F172A',
+    borderWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(255,255,255,0.25)',
+  },
+  pipVideo: { flex: 1 },
+
+  /** Bottom stack: polls, invite, chat, controls — in that order, in one flow. */
+  bottom: { gap: SPACING.sm },
+  /** Host-only "a share is running" chip. `top` is supplied from the insets. */
   sharingChip: {
-    position: 'absolute', top: 140, alignSelf: 'center',
+    position: 'absolute', alignSelf: 'center',
     flexDirection: 'row', alignItems: 'center', gap: SPACING.xs,
     backgroundColor: 'rgba(185,28,28,0.9)', paddingHorizontal: SPACING.md,
     paddingVertical: SPACING.xs, borderRadius: RADIUS.pill,
   },
   sharingText: { color: '#fff', fontSize: 11, fontWeight: '700' },
+
+  bar: {
+    flexDirection: 'row', alignItems: 'center', gap: SPACING.sm,
+    backgroundColor: 'rgba(0,0,0,0.6)', paddingHorizontal: SPACING.md,
+    paddingVertical: SPACING.sm, borderRadius: RADIUS.pill,
+  },
+  liveDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: '#EF4444' },
+  /** Amber while the SDK reconnects — not red (live), not grey (ended). */
+  reconnectDot: { backgroundColor: '#F59E0B' },
+  barText: { color: '#fff', fontSize: 11, fontWeight: '800', letterSpacing: 0.5 },
+  barDim: { color: '#94A3B8', fontSize: 11 },
   inviteSheet: {
-    position: 'absolute', left: SPACING.lg, right: SPACING.lg, bottom: 300,
     backgroundColor: 'rgba(15,23,42,0.96)', borderRadius: RADIUS.lg,
     padding: SPACING.md, gap: 6,
   },
@@ -1119,13 +1466,7 @@ const S = StyleSheet.create({
     backgroundColor: 'rgba(51,65,85,0.9)',
   },
   inviteBtnText: { color: '#fff', fontSize: 12, fontWeight: '600' },
-  inviteFab: {
-    position: 'absolute', right: SPACING.lg, bottom: 352,
-    width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center',
-    backgroundColor: 'rgba(30,41,59,0.9)',
-  },
   poll: {
-    position: 'absolute', left: SPACING.lg, right: SPACING.lg, bottom: 300,
     backgroundColor: 'rgba(15,23,42,0.92)', borderRadius: RADIUS.lg, padding: SPACING.md, gap: 6,
   },
   pollHead:    { flexDirection: 'row', alignItems: 'center', gap: SPACING.xs, marginBottom: 2 },
@@ -1144,7 +1485,6 @@ const S = StyleSheet.create({
   pollPct:     { color: '#CBD5E1', fontSize: 11, fontWeight: '700' },
   pollTotal:   { color: '#94A3B8', fontSize: 10, marginTop: 2 },
   pollCompose: {
-    position: 'absolute', left: SPACING.lg, right: SPACING.lg, bottom: 300,
     backgroundColor: 'rgba(15,23,42,0.96)', borderRadius: RADIUS.lg, padding: SPACING.md, gap: 6,
   },
   pollInput: {
@@ -1155,35 +1495,30 @@ const S = StyleSheet.create({
   pollAdd:     { color: '#93C5FD', fontSize: 12, fontWeight: '600' },
   pollCancel:  { color: '#94A3B8', fontSize: 12, marginLeft: 'auto' },
   pollGo:      { color: '#FCD34D', fontSize: 12, fontWeight: '800' },
-  pollFab: {
-    position: 'absolute', right: SPACING.lg, bottom: 300,
-    width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center',
-    backgroundColor: 'rgba(30,41,59,0.9)',
-  },
-  // Above the controls, below the chat: the stage is context, the stream is the
-  // subject.
-  stageStrip:      { position: 'absolute', top: 150, left: 0, right: 0, maxHeight: 96 },
-  stageStripInner: { paddingHorizontal: SPACING.lg, gap: SPACING.sm },
-  stageTile:       { width: 72, height: 96, borderRadius: RADIUS.md, backgroundColor: '#0F172A' },
-  // Above the End button, so the destructive control is never the one a thumb
-  // reaches first.
+  // Directly under the top row, in flow: the stage is context, the stream is
+  // the subject.
+  stageStrip:      { flexGrow: 0, marginTop: SPACING.sm, maxHeight: 96 },
+  stageStripInner: { gap: SPACING.sm },
+  stageTile:       { width: 72, height: 96, borderRadius: RADIUS.md, backgroundColor: '#0F172A', overflow: 'hidden' },
   controls: {
-    position: 'absolute', bottom: 96, alignSelf: 'center',
-    flexDirection: 'row', gap: SPACING.md,
+    flexDirection: 'row', alignSelf: 'center', gap: SPACING.md, marginTop: SPACING.xs,
   },
   ctrl: {
     width: 48, height: 48, borderRadius: 24, alignItems: 'center', justifyContent: 'center',
     backgroundColor: 'rgba(30,41,59,0.85)',
   },
   ctrlActive: { backgroundColor: '#B91C1C' },
-  // Bottom third only: the stream stays the subject, chat is context.
-  chatWrap:      { position: 'absolute', left: 0, right: 0, bottom: 90, maxHeight: '38%' },
-  chatList:      { maxHeight: 180 },
-  chatListInner: { paddingHorizontal: SPACING.lg, gap: 4 },
+  // Opened on demand, and only as tall as the window allows — the maxHeight is
+  // computed from the live window at render time, not guessed at here.
+  chatWrap:      { backgroundColor: 'rgba(2,6,23,0.72)', borderRadius: RADIUS.lg, paddingVertical: SPACING.sm },
+  chatHead:      { flexDirection: 'row', alignItems: 'center', paddingHorizontal: SPACING.md, paddingBottom: 4 },
+  chatHeadText:  { flex: 1, color: '#94A3B8', fontSize: 11, fontWeight: '700', letterSpacing: 0.5 },
+  chatList:      {},
+  chatListInner: { paddingHorizontal: SPACING.md, gap: 4 },
   chatLine:      { color: '#E2E8F0', fontSize: 13, textShadowColor: 'rgba(0,0,0,0.9)', textShadowRadius: 3 },
   chatName:      { color: '#FCD34D', fontWeight: '700' },
   chatInputRow:  { flexDirection: 'row', alignItems: 'center', gap: SPACING.sm,
-                   paddingHorizontal: SPACING.lg, marginTop: SPACING.sm },
+                   paddingHorizontal: SPACING.md, marginTop: SPACING.sm },
   chatInput:     { flex: 1, color: '#fff', backgroundColor: 'rgba(0,0,0,0.55)',
                    borderRadius: RADIUS.pill, paddingHorizontal: SPACING.lg, paddingVertical: SPACING.sm },
   chatSend:      { backgroundColor: 'rgba(0,0,0,0.55)', padding: SPACING.md, borderRadius: RADIUS.pill },
