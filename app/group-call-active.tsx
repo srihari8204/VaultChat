@@ -139,7 +139,11 @@ function GroupCallEngine() {
       // in-progress call passes none.
       ring: members ? String(members).split(',').filter(Boolean) : [],
     });
-    return () => { engine.hangUp('local_hangup', true); engine.release(); };
+    // Scoped like the 1:1 screens: unscoped, this cleanup ended whatever call
+    // was live, so leaving a group call that had already been replaced by a
+    // newly answered 1:1 hung THAT up instead. A group session is identified by
+    // an empty peerUid — the same key startGroup's duplicate guard uses.
+    return () => { engine.leaveScreen({ chatId: String(chatId ?? ''), peerUid: '' }); };
   }, [chatId, name, isVideo, members]);
 
   useEffect(() => { if (status === 'connected') engine.onConnected(); }, [status]);
