@@ -8,7 +8,7 @@
 import { useFocusEffect, useRouter } from 'expo-router';
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  ActivityIndicator, Alert, Image, Modal, Pressable, RefreshControl, ScrollView, SectionList,
+  ActivityIndicator, Alert, AppState, Image, Modal, Pressable, RefreshControl, ScrollView, SectionList,
   StyleSheet, Text, TouchableOpacity, View,
 } from 'react-native';
 import { useWindowDimensions } from 'react-native';
@@ -268,6 +268,26 @@ export default function ChatsScreen() {
           clearTimeout(typingTimers.current[e.chatId]);
           setTypingChats(prev => { const n = new Set(prev); n.delete(e.chatId!); return n; });
         };
+        // RESYNC ON RECONNECT — the list has no other way to learn what it missed.
+        //
+        // Socket.IO does not replay events sent while a client was away, so a
+        // message that arrives during a drop (backgrounded, doze, a tunnel) is
+        // simply never seen by this screen. The only other refresh triggers are
+        // a socket event and useFocusEffect — and if the user is ALREADY sitting
+        // on the Chats tab, focus never changes, so the list stays stale
+        // indefinitely.
+        //
+        // For an existing chat that shows as a stale preview. For a chat that
+        // did not exist yet — someone messaging you for the first time — there
+        // is no row at all, so the whole conversation is invisible until
+        // something else happens to re-focus the tab. That is the reported bug:
+        // "not showing in chats page, but if I open it from Contacts I can see
+        // it" — navigating away and back is what silently fixed it.
+        //
+        // Same shape as the room re-join in lib/socket.ts, which exists because
+        // this identical gap once stopped live location dead after any reconnect.
+        const onReconnect = () => refresh();
+        s.on('connect', onReconnect);
         s.on('new_message', refresh);
         s.on('message_deleted', refresh);
         s.on('message_edited', refresh);
@@ -275,6 +295,7 @@ export default function ChatsScreen() {
         s.on('typing_start', onTyping);
         s.on('typing_stop', onTypingStop);
         if (!cancelled) off = () => {
+          s.off('connect', onReconnect);
           s.off('new_message', refresh); s.off('message_deleted', refresh);
           s.off('message_edited', refresh); s.off('presence_changed', onPresence);
           s.off('typing_start', onTyping); s.off('typing_stop', onTypingStop);
@@ -282,6 +303,19 @@ export default function ChatsScreen() {
       } catch (e: any) { if (!cancelled) setError(e?.message ?? 'Realtime unavailable'); }
     })();
     return () => { cancelled = true; if (off) off(); };
+  }, [scheduleRefresh]);
+
+  // Resync when the app comes back to the foreground.
+  //
+  // The socket reconnect above covers most of it, but not the case where the
+  // OS froze the process outright: on resume the socket may report itself
+  // connected without ever firing 'connect', so no event arrives and — if the
+  // Chats tab was already the focused one — useFocusEffect does not re-run
+  // either. Coming back to a phone that was in a pocket is the single most
+  // common way to be looking at a stale list.
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', s => { if (s === 'active') scheduleRefresh(); });
+    return () => sub.remove();
   }, [scheduleRefresh]);
 
   useEffect(() => { getCurrentUserAsync().then(u => setMeId(u?.id ?? null)).catch(() => {}); }, []);
