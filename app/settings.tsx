@@ -17,6 +17,7 @@ import {
   ActivityIndicator,
   Alert,
   Image,
+  Linking,
   ScrollView,
   StyleSheet,
   Switch,
@@ -24,6 +25,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+import { SERVER_URL } from '../constants/server';
 import { logoutUser } from './(constants)/authService';
 import { api, getAccessToken } from '../lib/api';
 import { getAutoDownload, setAutoDownload, type AutoDownloadPolicy } from '../lib/mediaPrefs';
@@ -167,12 +169,16 @@ export default function SettingsScreen() {
     }
   }, [exporting]);
 
-  // Delete account → confirm twice → soft-delete server-side → sign out.
+  // Delete account → confirm twice → server ERASES the identity → sign out.
+  // Not a disable flag any more: the server nulls the encrypted profile, the
+  // MPIN and security-answer hashes, and the published E2EE identity, then drops
+  // every device and session. Say so plainly here, because the copy used to
+  // promise "disable" for something that is now irreversible.
   const onDeleteAccount = useCallback(() => {
     if (deleting) return;
     Alert.alert(
       'Delete account?',
-      'This will permanently disable your VaultChat account. Existing chat history with other members remains on their devices but you will no longer be reachable.',
+      'Your profile, PIN, recovery answers and encryption keys are erased from our servers. Messages you already sent stay on the recipients’ devices — they are theirs — but you will no longer be reachable.',
       [
         { text: 'Cancel', style: 'cancel' },
         { text: 'Delete', style: 'destructive', onPress: () => {
@@ -360,7 +366,12 @@ export default function SettingsScreen() {
           <LinkRow icon="speedometer-outline" title="Privacy dashboard" sub="Your privacy score and what is protecting you" onPress={() => router.push('/privacy-dashboard' as any)} />
           <LinkRow icon="checkmark-done-outline" title="Read receipts" sub="Control who sees when you have read a message" onPress={() => router.push('/receipt-control' as any)} />
           <LinkRow icon="time-outline" title="Last seen & online" sub="Who can see when you were last active" onPress={() => router.push('/last-seen-privacy' as any)} />
-          <LinkRow icon="flame-outline" title="Memory Shield" sub="Panic wipe, auto-destruct, failed-login limit" onPress={() => router.push('/memoryshield' as any)} last />
+          <LinkRow icon="flame-outline" title="Memory Shield" sub="Panic wipe, auto-destruct, failed-login limit" onPress={() => router.push('/memoryshield' as any)} />
+          {/* Opens in the browser, not a WebView: a privacy policy is the one
+              document a person should be able to see is served from the real
+              domain, with the padlock their own browser drew. Play also expects
+              this link to exist in-app, not only on the store listing. */}
+          <LinkRow icon="document-text-outline" title="Privacy Policy" sub="What we collect, and what we cannot read" onPress={() => Linking.openURL(`${SERVER_URL}/privacy`)} last />
         </View>
       </View>
 

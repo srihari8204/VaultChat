@@ -1551,13 +1551,59 @@ func userAccountDelete(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	user := httpx.UserFrom(r)
 	err := authTx(ctx, func(tx pgx.Tx) error {
+		// ERASE the identity, do not merely flag it.
+		//
+		// This used to set is_deleted and stop, leaving every encrypted field,
+		// the MPIN hash, the recovery answers and the published E2EE identity
+		// exactly where they were. "Delete my account" has to actually delete,
+		// both because Play requires it of any app with accounts and because a
+		// flag is not what a person asking to be forgotten is asking for.
+		//
+		// Nulling the lookup hashes also frees the address: the duplicate check
+		// in /auth/profile/init only counts rows where is_deleted = FALSE, so
+		// without this a returning user could re-register but we would still be
+		// holding an HMAC of their old email and phone forever.
 		if _, err := tx.Exec(ctx,
-			`UPDATE users SET is_deleted = TRUE, deleted_at = NOW() WHERE id = $1`, user.ID); err != nil {
+			`UPDATE users SET
+			   is_deleted = TRUE, deleted_at = NOW(), updated_at = NOW(),
+			   email = NULL, phone = NULL, name = NULL, dob = NULL, status = NULL,
+			   email_lookup = NULL, phone_lookup = NULL, phone_hash = NULL,
+			   email_cipher = NULL, phone_cipher = NULL,
+			   first_name_cipher = NULL, last_name_cipher = NULL,
+			   dob_cipher = NULL, status_cipher = NULL,
+			   photo_url = NULL, photo_key_cipher = NULL,
+			   mpin_hash = NULL, pin_hash = NULL, google_sub = NULL, vault_id = NULL
+			 WHERE id = $1`, user.ID); err != nil {
 			return err
 		}
-		_, err := tx.Exec(ctx,
-			`UPDATE refresh_tokens SET revoked_at = NOW() WHERE user_id = $1 AND revoked_at IS NULL`, user.ID)
-		return err
+
+		// The row itself STAYS. Deleting it would be one statement and is the
+		// wrong statement: messages.sender_id is ON DELETE CASCADE, so a hard
+		// delete would take every message this person ever sent out of everyone
+		// else's conversations — destroying other people's history to honour one
+		// person's request. The tombstone keeps those foreign keys valid while
+		// holding nothing that identifies anyone.
+		//
+		// Their own message bodies are not orphaned by this: the delivery-bound
+		// sweep in jobs.go already erases server-side ciphertext once every
+		// device has it, and each recipient's copy is on their own device,
+		// encrypted to keys we never had.
+		for _, q := range []string{
+			`DELETE FROM user_security_questions WHERE user_id = $1`, // recovery credential
+			`DELETE FROM identity_keys           WHERE user_id = $1`, // published E2EE identity
+			`DELETE FROM signed_prekeys          WHERE user_id = $1`,
+			`DELETE FROM one_time_prekeys        WHERE user_id = $1`,
+			`DELETE FROM user_backup_keys        WHERE user_id = $1`, // encrypted-backup key material
+			`DELETE FROM devices                 WHERE user_id = $1`, // device records + push tokens
+			`DELETE FROM user_sync_devices       WHERE user_id = $1`,
+			`DELETE FROM trusted_contacts        WHERE owner_id = $1`,
+			`DELETE FROM refresh_tokens          WHERE user_id = $1`, // sign every session out, permanently
+		} {
+			if _, err := tx.Exec(ctx, q, user.ID); err != nil {
+				return err
+			}
+		}
+		return nil
 	})
 	if err != nil {
 		httpx.Err(w, 500, "Failed to delete account")
