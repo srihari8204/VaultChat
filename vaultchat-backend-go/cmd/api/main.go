@@ -23,6 +23,25 @@ import (
 )
 
 func main() {
+	// JWT_SECRET is read lazily, per request, by httpx.VerifyAccess and by the
+	// HLS ticket HMAC. Go's os.Getenv returns "" for an unset variable rather
+	// than failing, so an env_file that lost this line does not crash the
+	// container — it starts a server whose HS256 key is the empty string, where
+	// a token anyone can mint verifies against every RequireAuth route. That is
+	// a total auth bypass presenting as a healthy deploy, which is exactly the
+	// failure a boot check is for.
+	//
+	// Refuse to start on EMPTY only. A length rule here would be a footgun of
+	// its own: it could refuse to start on a secret that is short but real and
+	// already in production, turning a hardening change into an outage. Short
+	// secrets get a loud line in the log instead.
+	if os.Getenv("JWT_SECRET") == "" {
+		log.Fatal("[boot] JWT_SECRET is empty — refusing to start: every authenticated route would accept forged tokens")
+	}
+	if len(os.Getenv("JWT_SECRET")) < 32 {
+		log.Printf("[boot] WARNING: JWT_SECRET is under 32 chars — brute-forceable offline; rotate to 32+ random bytes")
+	}
+
 	ctx := context.Background()
 	if err := db.Connect(ctx); err != nil {
 		log.Fatalf("[db] %v", err)

@@ -95,20 +95,25 @@ export async function lookupUser(email: string, phone: string): Promise<{ exists
   return api('/auth/lookup', { method: 'POST', json: { email, phone }, auth: false });
 }
 
+// Returns the new userId AND a short-lived setup ticket bound to it. The two
+// calls that follow write credentials but cannot send a JWT — there is no
+// session until the MPIN exists — so the ticket is what proves to the server
+// that this client is the one that just passed the email OTP. Carry it to both
+// of them; without it they now 401.
 export async function initProfile(input: {
   email: string; phone: string; emailTicket: string;
   firstName: string; lastName: string; dob: string; status: string; profilePicUrl?: string | null;
-}): Promise<string> {
-  const r = await api<{ userId: string }>('/auth/profile/init', { method: 'POST', json: input, auth: false });
-  return r.userId;
+}): Promise<{ userId: string; setupTicket: string }> {
+  const r = await api<{ userId: string; setupTicket: string }>('/auth/profile/init', { method: 'POST', json: input, auth: false });
+  return { userId: r.userId, setupTicket: r.setupTicket };
 }
 
-export async function saveSecurityQuestions(userId: string, answers: { questionCode: string; answer: string }[]): Promise<void> {
-  await api('/auth/security-questions/save', { method: 'POST', json: { userId, answers }, auth: false });
+export async function saveSecurityQuestions(userId: string, setupTicket: string, answers: { questionCode: string; answer: string }[]): Promise<void> {
+  await api('/auth/security-questions/save', { method: 'POST', json: { userId, setupTicket, answers }, auth: false });
 }
 
-export async function setMpinRemote(userId: string, mpin: string): Promise<void> {
-  await api('/auth/mpin/set', { method: 'POST', json: { userId, mpin }, auth: false });
+export async function setMpinRemote(userId: string, setupTicket: string, mpin: string): Promise<void> {
+  await api('/auth/mpin/set', { method: 'POST', json: { userId, setupTicket, mpin }, auth: false });
 }
 
 // Verifies MPIN, stores the issued JWTs, returns nothing (caller routes to chats).

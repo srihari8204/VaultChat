@@ -1169,6 +1169,23 @@ func authOnboardVerifyOtp(w http.ResponseWriter, r *http.Request) {
 		authEnvErr(w, 400, "bad_request", "email and code required")
 		return
 	}
+	// A 6-digit code is a million guesses; unlimited attempts inside the OTP's
+	// validity window make it a formality, and this ticket is what /profile/init
+	// accepts as proof of email ownership. Same 5-per-15-minutes shape as
+	// /mpin/verify. Per-email AND per-IP: the email key alone lets one host walk
+	// a list of addresses, the IP key alone is defeated by rotating them.
+	gate := redisx.Consume(ctx, "onboard-otp:"+e, 5, 900)
+	if gate.Allowed {
+		gate = redisx.Consume(ctx, "onboard-otp-ip:"+authClientIP(r), 50, 900)
+	}
+	if !gate.Allowed {
+		reset := gate.ResetInSec
+		if reset == 0 {
+			reset = 900
+		}
+		authEnvErr(w, http.StatusLocked, "locked", fmt.Sprintf("Too many attempts. Try again in %ds", reset))
+		return
+	}
 	var otpID int64
 	var codeHash string
 	err := db.Pool.QueryRow(ctx,
@@ -1416,8 +1433,25 @@ func authProfileInit(w http.ResponseWriter, r *http.Request) {
 		authEnvErr(w, 500, "server_error", "Could not create profile")
 		return
 	}
-	httpx.JSON(w, 200, map[string]any{"userId": userID})
+	// Onboarding continues with /security-questions/save and /mpin/set, both of
+	// which write credentials keyed on a body userId. Neither can require a JWT
+	// (there is no session until the MPIN exists), so they take THIS ticket
+	// instead — minted only here, only after the email OTP proved ownership,
+	// and bound to the id we just created. Without it those two endpoints hand
+	// any caller another user's account.
+	setupTicket, err := vault.SignTicket(authSetupTicketData(userID), 900)
+	if err != nil {
+		authEnvErr(w, 500, "server_error", "Could not create profile")
+		return
+	}
+	httpx.JSON(w, 200, map[string]any{"userId": userID, "setupTicket": setupTicket})
 }
+
+// authSetupTicketData is the ticket binding shared by /security-questions/save
+// and /mpin/set. Kept in one function so the two verifiers cannot drift from
+// the minter — a mismatch here fails open on neither side, but it does brick
+// onboarding, and the string is easy to mistype in three places.
+func authSetupTicketData(userID string) string { return "setup:" + userID }
 
 // ── POST /auth/security-questions/save ─────────────────────────────────
 
@@ -1429,13 +1463,22 @@ type authAnswerBody struct {
 func authSecurityQuestionsSave(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	var b struct {
-		UserID  any              `json:"userId"`
-		Answers []authAnswerBody `json:"answers"`
+		UserID      any              `json:"userId"`
+		SetupTicket any              `json:"setupTicket"`
+		Answers     []authAnswerBody `json:"answers"`
 	}
 	_ = httpx.Body(r, &b)
 	userID := authStr(b.UserID)
 	if userID == "" || b.Answers == nil || len(b.Answers) != 5 {
 		authEnvErr(w, 400, "bad_request", "Exactly 5 answers required")
+		return
+	}
+	// Ownership: these answers ARE a credential — /security-questions/verify
+	// trades them for a recovery ticket, which /mpin/recover trades for a
+	// session. Overwriting them on an established account is account takeover,
+	// so the caller must hold the setup ticket from /auth/profile/init.
+	if !vault.VerifyTicket(authStr(b.SetupTicket), authSetupTicketData(userID)) {
+		authEnvErr(w, 401, "not_verified", "Start onboarding again to set your security questions")
 		return
 	}
 	codes := map[string]bool{}
@@ -1493,14 +1536,25 @@ func authSecurityQuestionsSave(w http.ResponseWriter, r *http.Request) {
 func authMpinSet(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	var b struct {
-		UserID any `json:"userId"`
-		Mpin   any `json:"mpin"`
+		UserID      any `json:"userId"`
+		SetupTicket any `json:"setupTicket"`
+		Mpin        any `json:"mpin"`
 	}
 	_ = httpx.Body(r, &b)
 	userID := authStr(b.UserID)
 	mpin := authStr(b.Mpin)
 	if userID == "" {
 		authEnvErr(w, 400, "bad_request", "userId required")
+		return
+	}
+	// Ownership, gate 1 of 2. This endpoint writes the credential that
+	// /mpin/verify trades for a session, so without proof of ownership it is a
+	// one-call account takeover of any userId the caller can name. It cannot
+	// require a JWT — no session exists yet — so it takes the setup ticket
+	// /auth/profile/init minted after the email OTP. Resets do NOT come here;
+	// they go to /mpin/recover, which has always required its own ticket.
+	if !vault.VerifyTicket(authStr(b.SetupTicket), authSetupTicketData(userID)) {
+		authEnvErr(w, 401, "not_verified", "Start onboarding again to set your MPIN")
 		return
 	}
 	if authIsWeakMpin(mpin) {
@@ -1524,10 +1578,25 @@ func authMpinSet(w http.ResponseWriter, r *http.Request) {
 		authEnvErr(w, 500, "server_error", "Could not set MPIN")
 		return
 	}
-	if _, err := db.Pool.Exec(ctx,
-		`UPDATE users SET mpin_hash = $1, onboarding_complete = TRUE, updated_at = NOW() WHERE id = $2`,
-		hash, userID); err != nil {
+	// Ownership, gate 2 of 2: FIRST-SET ONLY. The ticket above is the real
+	// gate; this is what contains the damage if one ever leaks (a crash report,
+	// a proxy log) inside its 15-minute life — a replay cannot overwrite a PIN
+	// that already exists.
+	tag, err := db.Pool.Exec(ctx,
+		`UPDATE users SET mpin_hash = $1, onboarding_complete = TRUE, updated_at = NOW()
+		   WHERE id = $2 AND mpin_hash IS NULL`,
+		hash, userID)
+	if err != nil {
 		authEnvErr(w, 500, "server_error", "Could not set MPIN")
+		return
+	}
+	// Zero rows means the PIN was already set. Answer 200, not an error: the
+	// only caller that reaches here holds a valid ticket for THIS id, so this is
+	// the onboarding client retrying after a reply was lost in flight, and
+	// failing it would strand a real user on the last step of signup. An
+	// attacker holding the same ticket learns nothing and changes nothing.
+	if tag.RowsAffected() == 0 {
+		httpx.JSON(w, 200, map[string]any{"ok": true, "already": true})
 		return
 	}
 	httpx.JSON(w, 200, map[string]any{"ok": true})

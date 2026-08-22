@@ -50,13 +50,13 @@ export default function OnboardMpin() {
     setBusy(true); setMsg(null);
     try {
       const st = onboarding.get();
-      const userId = await initProfile({
+      const { userId, setupTicket } = await initProfile({
         email: st.email, phone: st.phone, emailTicket: st.emailTicket,
         firstName: st.firstName, lastName: st.lastName, dob: st.dob, status: st.status,
         profilePicUrl: st.profilePicUrl,
       });
-      await saveSecurityQuestions(userId, st.securityAnswers);
-      await setMpinRemote(userId, v);
+      await saveSecurityQuestions(userId, setupTicket, st.securityAnswers);
+      await setMpinRemote(userId, setupTicket, v);
       onboarding.set({ userId, mpin: v });                  // mpin kept (RAM) for the success login
       router.replace({ pathname: '/onboard-success', params: { userId } } as any);
     } catch (e: any) {

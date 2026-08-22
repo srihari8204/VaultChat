@@ -568,12 +568,29 @@ router.post('/onboard/send-otp', async (req, res) => {
   }
 });
 
+// The ticket binding shared by /security-questions/save and /mpin/set. Kept in
+// one function so the two verifiers cannot drift from the minter in
+// /profile/init — a mismatch fails open on neither side, but it does brick
+// onboarding, and the string is easy to mistype in three places. Must stay
+// byte-identical to authSetupTicketData in the Go backend.
+function setupTicketData(userId) { return `setup:${userId}`; }
+
 // POST /auth/onboard/verify-otp — verify email OTP → short-lived ownership ticket.
 router.post('/onboard/verify-otp', async (req, res) => {
   try {
     const e = vault.normalizeEmail(req.body?.email);
     const code = (req.body?.code || '').toString().trim();
     if (!e || !code) return envErr(res, 400, 'bad_request', 'email and code required');
+    // A 6-digit code is a million guesses; unlimited attempts inside the OTP's
+    // validity window make it a formality, and this ticket is what /profile/init
+    // accepts as proof of email ownership. Same 5-per-15-minutes shape as
+    // /mpin/verify. Per-email AND per-IP: the email key alone lets one host walk
+    // a list of addresses, the IP key alone is defeated by rotating them.
+    let gate = await rateLimit.consume(`onboard-otp:${e}`, 5, 900);
+    if (gate.allowed) gate = await rateLimit.consume(`onboard-otp-ip:${req.ip}`, 50, 900);
+    if (!gate.allowed) {
+      return envErr(res, 423, 'locked', `Too many attempts. Try again in ${gate.resetInSec || 900}s`);
+    }
     const r = await db.query(
       `SELECT id, code_hash FROM otp_codes
        WHERE email = $1 AND consumed_at IS NULL AND expires_at > NOW()
@@ -674,7 +691,16 @@ router.post('/profile/init', async (req, res) => {
         profilePicUrl, discoveryPhoneHash(phone),
       ],
     );
-    return res.json({ userId: ins.rows[0].id });
+    // Onboarding continues with /security-questions/save and /mpin/set, both of
+    // which write credentials keyed on a body userId. Neither can require a JWT
+    // (there is no session until the MPIN exists), so they take THIS ticket
+    // instead — minted only here, only after the email OTP proved ownership,
+    // and bound to the id we just created. Without it those two endpoints hand
+    // any caller another user's account.
+    return res.json({
+      userId: ins.rows[0].id,
+      setupTicket: vault.signTicket(setupTicketData(ins.rows[0].id)),
+    });
   } catch (err) {
     console.error('[auth/profile/init]', err.message);
     return envErr(res, 500, 'server_error', 'Could not create profile');
@@ -688,6 +714,13 @@ router.post('/security-questions/save', async (req, res) => {
     const answers = Array.isArray(req.body?.answers) ? req.body.answers : null;
     if (!userId || !answers || answers.length !== 5) {
       return envErr(res, 400, 'bad_request', 'Exactly 5 answers required');
+    }
+    // Ownership: these answers ARE a credential — /security-questions/verify
+    // trades them for a recovery ticket, which /mpin/recover trades for a
+    // session. Overwriting them on an established account is account takeover,
+    // so the caller must hold the setup ticket from /auth/profile/init.
+    if (!vault.verifyTicket((req.body?.setupTicket || '').toString(), setupTicketData(userId))) {
+      return envErr(res, 401, 'not_verified', 'Start onboarding again to set your security questions');
     }
     const codes = answers.map(a => (a?.questionCode || '').toString());
     if (new Set(codes).size !== 5) return envErr(res, 400, 'duplicate_question', 'Questions must be unique');
@@ -720,15 +753,35 @@ router.post('/mpin/set', async (req, res) => {
     const userId = (req.body?.userId || '').toString();
     const mpin   = (req.body?.mpin   || '').toString();
     if (!userId) return envErr(res, 400, 'bad_request', 'userId required');
+    // Ownership, gate 1 of 2. This endpoint writes the credential that
+    // /mpin/verify trades for a session, so without proof of ownership it is a
+    // one-call account takeover of any userId the caller can name. It cannot
+    // require a JWT — no session exists yet — so it takes the setup ticket
+    // /auth/profile/init minted after the email OTP. Resets do NOT come here;
+    // they go to /mpin/recover, which has always required its own ticket.
+    if (!vault.verifyTicket((req.body?.setupTicket || '').toString(), setupTicketData(userId))) {
+      return envErr(res, 401, 'not_verified', 'Start onboarding again to set your MPIN');
+    }
     if (isWeakMpin(mpin)) return envErr(res, 400, 'weak_mpin', 'Choose a less predictable MPIN');
     const u = await db.query(`SELECT id FROM users WHERE id = $1 AND is_deleted = FALSE`, [userId]);
     if (!u.rows[0]) return envErr(res, 404, 'not_found', 'User not found');
 
     const hash = await vault.hashSecret(mpin);
-    await db.query(
-      `UPDATE users SET mpin_hash = $1, onboarding_complete = TRUE, updated_at = NOW() WHERE id = $2`,
+    // Ownership, gate 2 of 2: FIRST-SET ONLY. The ticket above is the real
+    // gate; this is what contains the damage if one ever leaks (a crash report,
+    // a proxy log) inside its 15-minute life — a replay cannot overwrite a PIN
+    // that already exists.
+    const upd = await db.query(
+      `UPDATE users SET mpin_hash = $1, onboarding_complete = TRUE, updated_at = NOW()
+         WHERE id = $2 AND mpin_hash IS NULL`,
       [hash, userId],
     );
+    // Zero rows means the PIN was already set. Answer 200, not an error: the
+    // only caller that reaches here holds a valid ticket for THIS id, so this is
+    // the onboarding client retrying after a reply was lost in flight, and
+    // failing it would strand a real user on the last step of signup. An
+    // attacker holding the same ticket learns nothing and changes nothing.
+    if (upd.rowCount === 0) return res.json({ ok: true, already: true });
     return res.json({ ok: true });
   } catch (err) {
     console.error('[auth/mpin/set]', err.message);
