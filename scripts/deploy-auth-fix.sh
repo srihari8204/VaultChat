@@ -66,6 +66,12 @@ scp -q vaultchat-backend-go/internal/routes/auth_setup_ticket_test.go "$HOST:$ST
 scp -q vaultchat-backend-go/cmd/api/main.go "$HOST:$STAGE/cmdapi/"
 scp -q caddy/public/privacy.html caddy/public/delete-account.html "$HOST:$STAGE/public/"
 
+# vaultchat-backend/routes/auth.js carries the identical fix and is deliberately
+# NOT copied: no Node process runs on prod at all since the VaultLens removal,
+# and Caddy routes the entire client surface to go-api. It is kept in lockstep
+# in the repo so a rollback to Node is not a rollback to the vulnerability —
+# not because anything on the box executes it.
+
 # ── 3. INSTALL + VERIFY BY CHECKSUM ───────────────────────────────────
 # The copy is only believable if the bytes match afterwards. Compare md5 both
 # sides; a mismatch means the file did not land, whatever the exit code said.
