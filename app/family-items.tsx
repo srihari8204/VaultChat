@@ -80,11 +80,30 @@ export default function FamilyItemsScreen() {
     }
   }, [circleId]);
 
+  /** Advertisements seen since the last flush. Buffered in a ref, NEVER in
+   *  state — see onSeen. */
+  const pendingRef = useRef<Map<string, Seen>>(new Map());
+
   // Re-render on a slow pulse so bands/trends update without a render per
   // advertisement — a busy room produces dozens of callbacks a second.
+  //
+  // This pulse is also the ONLY writer of `nearby`. The pulse used to exist
+  // while onSeen still called setNearby per advertisement, so the throttle
+  // never applied to the thing that actually re-renders: with
+  // allowDuplicates:true and seven tags in range, every advertisement copied
+  // the whole Map and re-rendered the list. That storm starved the JS thread
+  // and the app went "isn't responding" on device (2026-08-22) — which looks
+  // exactly like a dead button, because nothing can respond to a tap.
   useEffect(() => {
     if (!scanning) return;
-    const t = setInterval(() => setTick((n) => n + 1), 800);
+    const t = setInterval(() => {
+      const batch = pendingRef.current;
+      if (batch.size) {
+        pendingRef.current = new Map();
+        setNearby((m) => { const n = new Map(m); batch.forEach((v, k) => n.set(k, v)); return n; });
+      }
+      setTick((n) => n + 1);
+    }, 800);
     return () => clearInterval(t);
   }, [scanning]);
 
@@ -92,7 +111,9 @@ export default function FamilyItemsScreen() {
     const prev = rssiRef.current.get(s.id);
     if (prev != null) prevRssiRef.current.set(s.id, prev);
     rssiRef.current.set(s.id, smoothRssi(prev, s.rssi));
-    setNearby((m) => { const n = new Map(m); n.set(s.id, s); return n; });
+    // Buffer only. The 800 ms pulse above turns a burst of advertisements
+    // into ONE state update.
+    pendingRef.current.set(s.id, s);
   }, []);
 
   const start = useCallback(async () => {
@@ -112,7 +133,13 @@ export default function FamilyItemsScreen() {
         Alert.alert('Bluetooth is off', bleLastError() ?? 'Turn Bluetooth on to search for your items.');
         return;
       }
-      stopRef.current = await startScan(onSeen);
+      stopRef.current = await startScan(onSeen, (msg) => {
+        // The radio can drop the scan long after it started. Without this the
+        // screen kept spinning with an empty list and no way to know why.
+        stopRef.current = null;
+        setScanning(false);
+        Alert.alert('Search stopped', msg);
+      });
       if (!stopRef.current) { Alert.alert('Could not search', bleLastError() ?? 'The scan did not start.'); return; }
       setScanning(true);
     } catch (e: any) {
@@ -184,8 +211,18 @@ export default function FamilyItemsScreen() {
     });
     setItems(next);
     if (circleId) {
-      registerSharedItem(circleId, pairing.id, name, pairIcon).catch(() => {});
-      fetchSharedItems(circleId).then(setShared).catch(() => {});
+      // Crowd-find is the whole point of sharing a tag: without this call no
+      // other member's phone can answer "have you seen it". Swallowing the
+      // failure left the item looking shared when only this phone knew of it.
+      registerSharedItem(circleId, pairing.id, name, pairIcon)
+        .then((ok) => {
+          if (!ok) throw new Error('rejected');
+          return fetchSharedItems(circleId).then(setShared);
+        })
+        .catch(() => Alert.alert(
+          'Saved, but not shared',
+          `"${name}" is on this phone. It could not be shared with your space, so other members cannot help find it yet.`,
+        ));
     }
     setPairing(null);
     setPairName('');
@@ -264,7 +301,18 @@ export default function FamilyItemsScreen() {
                   { text: 'Cancel', style: 'cancel' },
                   { text: 'Remove', style: 'destructive', onPress: async () => {
                     setItems(await removeItem(it.id));
-                    if (circleId) forgetSharedItem(circleId, it.id).catch(() => {});
+                    // A removal that only happened locally is the worst
+                    // outcome: the owner believes the tag is forgotten while
+                    // the space still lists it and members still report
+                    // sightings of it. Say so rather than swallow it.
+                    if (circleId) {
+                      forgetSharedItem(circleId, it.id)
+                        .then(() => fetchSharedItems(circleId).then(setShared))
+                        .catch(() => Alert.alert(
+                          'Removed here only',
+                          `"${it.name}" is gone from this phone, but your space could not be updated. Others may still see it — try again when you are back online.`,
+                        ));
+                    }
                   } },
                 ])}
                 style={{ padding: 6 }}
@@ -372,8 +420,9 @@ export default function FamilyItemsScreen() {
         )}
 
         <Text style={{ color: colors.textFaint, fontSize: 11.5, lineHeight: 16, marginTop: 16 }}>
-          Works with any Bluetooth tag — no brand lock-in, no subscription. Everything stays
-          on this phone: the tag list and its last-seen place are encrypted locally and never uploaded.
+          Works with any Bluetooth tag — no brand lock-in, no subscription. Tags you pair, and
+          where they were last heard, are shared with this space so any member&apos;s phone can help
+          find them. The tag&apos;s maker is never involved.
         </Text>
       </ScrollView>
     </View>

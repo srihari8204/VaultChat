@@ -83,19 +83,50 @@ export async function isBluetoothOn(): Promise<boolean> {
  * from the same device, which is exactly what the proximity smoother wants.
  * Returns a stop function; calling it twice is safe.
  */
-export async function startScan(onSeen: (s: Seen) => void): Promise<() => void> {
+export async function startScan(
+  onSeen: (s: Seen) => void,
+  onError?: (message: string) => void,
+): Promise<(() => void) | null> {
   // NEVER let a native failure escape as an unhandled rejection: the caller is
   // async, so a throw here silently did nothing on screen.
+  //
+  // Returns null — NOT a no-op function — when the scan cannot start. The
+  // caller guards with `if (!stop)`, and a `() => {}` is truthy, so the old
+  // shape made that guard (and its error dialog) unreachable.
   let m: any;
   try { m = bleManager(); }
-  catch (e: any) { lastError = String(e?.message || e); return () => {}; }
-  if (scanning) { try { m.stopDeviceScan(); } catch {} }
+  catch (e: any) { lastError = String(e?.message || e); return null; }
+
+  // Clear the flag with the stop, never independently. The old code set
+  // `scanning = true` before knowing the scan took and never cleared it on
+  // failure, so the flag wedged true and every later tap did nothing but emit
+  // one more stop_scan — a button that looked completely dead on device
+  // (diagnosed on the Honor 2026-08-22: lone stop_scan, never a start_scan).
+  if (scanning) { try { m.stopDeviceScan(); } catch {} scanning = false; }
+
+  try {
+    m.startDeviceScan(null, { allowDuplicates: true }, (err: any, dev: any) => {
+      // A BLE scan can fail long AFTER it starts — adapter reset, registration
+      // refused, OS scan throttling. Folding that into the same `return` as an
+      // uninteresting advertisement meant the screen searched forever with
+      // nothing to show and nothing to say.
+      if (err) {
+        lastError = String(err?.message || err);
+        scanning = false;
+        try { m.stopDeviceScan(); } catch {}
+        onError?.(lastError);
+        return;
+      }
+      if (!dev?.id || typeof dev.rssi !== 'number') return;
+      onSeen({ id: String(dev.id), name: dev.name ?? dev.localName ?? null, rssi: dev.rssi, at: Date.now() });
+    });
+  } catch (e: any) {
+    lastError = String(e?.message || e);
+    scanning = false;
+    return null;
+  }
+
   scanning = true;
-  m.startDeviceScan(null, { allowDuplicates: true }, (err: any, dev: any) => {
-    if (err || !dev?.id) return;
-    if (typeof dev.rssi !== 'number') return;
-    onSeen({ id: String(dev.id), name: dev.name ?? dev.localName ?? null, rssi: dev.rssi, at: Date.now() });
-  });
   return () => {
     if (!scanning) return;
     scanning = false;

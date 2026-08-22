@@ -564,7 +564,12 @@ export default function FamilyMapScreen() {
     if (trip.startedBy === me) {
       Alert.alert('End the trip?', 'The trip is over for everyone in the circle.', [
         { text: 'Cancel', style: 'cancel' },
-        { text: 'End trip', style: 'destructive', onPress: async () => { await endTrip(); setTrip(null); setTripPings([]); } },
+        // Clearing local state only when the server agreed: a silent throw
+        // here left the trip on screen and the tap looking like a no-op.
+        { text: 'End trip', style: 'destructive', onPress: async () => {
+          try { await endTrip(); setTrip(null); setTripPings([]); }
+          catch (e: any) { Alert.alert('Family trip', e?.message ?? 'Could not end the trip.'); }
+        } },
       ]);
     } else if (joined) {
       await leaveTrip();
