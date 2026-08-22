@@ -77,6 +77,27 @@
 		respond `[{"relation":["delegate_permission/common.handle_all_urls"],"target":{"namespace":"android_app","package_name":"com.vaultchat.app","sha256_cert_fingerprints":["5F:C1:97:FC:3F:09:F6:84:C6:86:1B:7E:58:76:BE:58:24:D4:AA:CB:BC:26:CC:30:9F:D6:4A:97:DC:79:1A:59"]}}]` 200
 	}
 
+	# ── Play-required legal pages ────────────────────────────────────
+	#
+	# Google Play will not publish an app that handles personal data without a
+	# reachable privacy policy URL, and an app with accounts must also give a
+	# web address where deletion can be requested by someone who cannot open the
+	# app. Both are fetched by Google during review, so they have to be real
+	# pages on a real host — not a doc in the repo.
+	#
+	# From a bind mount rather than inline `respond` (the assetlinks trick
+	# above): these are documents that will be edited by a human, and a policy
+	# escaped into a Caddyfile string is a policy nobody will keep accurate.
+	# Extensionless paths so the printed URLs stay clean.
+	@legal path /privacy /privacy.html /delete-account /delete-account.html
+	handle @legal {
+		root * /srv/public
+		rewrite /privacy /privacy.html
+		rewrite /delete-account /delete-account.html
+		header Content-Type "text/html; charset=utf-8"
+		file_server
+	}
+
 	# ── everything else → Go ─────────────────────────────────────────
 	handle {
 		reverse_proxy go-api:4000

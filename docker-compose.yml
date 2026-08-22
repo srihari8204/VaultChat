@@ -24,6 +24,11 @@ services:
     restart: unless-stopped
     volumes:
       - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      # The privacy policy and account-deletion pages Google Play fetches during
+      # review. Read-only, static, and served by the @legal route in the
+      # Caddyfile — no backend involvement, so they stay up even if go-api does
+      # not, which is the point: a policy URL that 502s fails the review.
+      - ./caddy/public:/srv/public:ro
     ports:
       - "18080:80"            # bench/staging entry; docker-compose.prod.yml maps 80/443
     # livekit runs with network_mode: host (RTC needs the host's real address),

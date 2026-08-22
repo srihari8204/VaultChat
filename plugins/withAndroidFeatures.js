@@ -50,6 +50,36 @@ const OPTIONAL_FEATURES = [
   'android.hardware.wifi',
 ];
 
+/**
+ * Permissions a DEPENDENCY declares that this app does not use.
+ *
+ * The merged manifest is the union of every library's manifest, so a permission
+ * can appear without a single line of our code asking for it. Each one still
+ * costs: Play wants a written justification for the restricted ones, and the
+ * user reads the whole list on the store page. An E2EE messenger asking to
+ * MODIFY the address book is exactly the kind of thing that makes someone close
+ * the page — and reviewers ask about it too.
+ *
+ * Only permissions with NO caller in this codebase belong here. Removing one a
+ * library genuinely needs breaks that feature at runtime with a SecurityException
+ * the merger cannot warn about, so verify before adding.
+ */
+const REMOVED_PERMISSIONS = [
+  // expo-contacts declares read AND write; contactSync.ts only ever reads.
+  // Nothing calls addContactAsync / updateContactAsync anywhere in app/ or lib/.
+  'android.permission.WRITE_CONTACTS',
+];
+
+/**
+ * Permissions that are legacy-only, capped instead of removed.
+ *
+ * WRITE_EXTERNAL_STORAGE does nothing from API 29 and is ignored outright from
+ * 33, but declared unbounded it still shows up as broad storage access on the
+ * store listing and in Play's data review. Capping keeps it working on the old
+ * devices minSdk 24 still admits, and makes it invisible everywhere else.
+ */
+const CAPPED_PERMISSIONS = { 'android.permission.WRITE_EXTERNAL_STORAGE': '28' };
+
 module.exports = function withAndroidFeatures(config) {
   return withAndroidManifest(config, (cfg) => {
     const manifest = cfg.modResults.manifest;
@@ -67,6 +97,32 @@ module.exports = function withAndroidFeatures(config) {
         });
       }
     }
+
+    // tools:node="remove" rather than deleting the element: the permission is
+    // introduced by a LIBRARY manifest, so dropping our own copy achieves
+    // nothing — the merger would just re-add theirs. Only an explicit remove
+    // marker survives the merge.
+    manifest.$ = manifest.$ || {};
+    manifest.$['xmlns:tools'] = 'http://schemas.android.com/tools';
+    manifest['uses-permission'] = manifest['uses-permission'] || [];
+
+    for (const name of REMOVED_PERMISSIONS) {
+      const existing = manifest['uses-permission'].find((p) => p.$?.['android:name'] === name);
+      const marker = { $: { 'android:name': name, 'tools:node': 'remove' } };
+      if (existing) Object.assign(existing.$, marker.$);
+      else manifest['uses-permission'].push(marker);
+    }
+
+    for (const [name, maxSdk] of Object.entries(CAPPED_PERMISSIONS)) {
+      const existing = manifest['uses-permission'].find((p) => p.$?.['android:name'] === name);
+      // tools:overrideLibrary is not enough here — the merger takes the WIDEST
+      // maxSdkVersion across manifests, so the cap has to replace the library's
+      // attribute rather than sit beside it.
+      const attrs = { 'android:name': name, 'android:maxSdkVersion': maxSdk, 'tools:node': 'replace' };
+      if (existing) Object.assign(existing.$, attrs);
+      else manifest['uses-permission'].push({ $: attrs });
+    }
+
     return cfg;
   });
 };
