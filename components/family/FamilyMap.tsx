@@ -525,7 +525,7 @@ export interface MemberRoute {
 
 export default function FamilyMap({
   members, onSelect, focusId, followId, followZoom, path, destination, linkFrom, route, memberRoutes, style,
-  headingDeg, cameraMode, camera3D = FAMILY_MAP_3D,
+  headingDeg, cameraMode, camera3D = FAMILY_MAP_3D, controlsBottom = 12,
 }: {
   members: FamilyMarker[];
   onSelect?: (id: string) => void;
@@ -565,6 +565,9 @@ export default function FamilyMap({
   /** Use the MapLibre engine. Defaults to FAMILY_MAP_3D; a device that cannot
    *  init WebGL/worker auto-falls-back to the proven Leaflet map. */
   camera3D?: boolean;
+  /** Floor for the map's own controls, so a screen stacking bars along the
+   *  bottom can lift them clear instead of having them covered. */
+  controlsBottom?: number;
 }) {
   const { scheme, colors } = useTheme();
   const ref = useRef<WebView>(null);
@@ -784,7 +787,7 @@ export default function FamilyMap({
           onPress={cycleCam}
           accessibilityRole="button"
           accessibilityLabel={`Camera: ${camLabel}. Tap to change.`}
-          style={[styles.camFab, { backgroundColor: colors.card, borderColor: colors.border }]}
+          style={[styles.camFab, { bottom: controlsBottom + 54, backgroundColor: colors.card, borderColor: colors.border }]}
         >
           <Ionicons name={camIcon as any} size={17} color={colors.primary} />
           <Text style={{ color: colors.primary, fontSize: 10, fontWeight: '800' }}>{camLabel}</Text>
@@ -794,7 +797,7 @@ export default function FamilyMap({
         onPress={() => ref.current?.injectJavaScript('fitAll();true;')}
         accessibilityRole="button"
         accessibilityLabel="Fit all family members on screen"
-        style={[styles.fab, { backgroundColor: colors.card, borderColor: colors.border }]}
+        style={[styles.fab, { bottom: controlsBottom, backgroundColor: colors.card, borderColor: colors.border }]}
       >
         <Ionicons name="scan" size={20} color={colors.primary} />
       </TouchableOpacity>

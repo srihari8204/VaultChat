@@ -444,6 +444,39 @@ export default function FamilyMapScreen() {
     return [30, 60, 120].map((m) => base + m * 60_000);
   }, [now]);
 
+  /**
+   * OVERLAY SLOTS. Every floating bar used to carry a hardcoded offset, and
+   * three pairs collided the moment their conditions were both true: the
+   * follow banner sat exactly on the search bar, the Routes chip sat under
+   * the full-width route bar, and the From-Home chip sat on the turn strip.
+   * Offsets are computed from what is actually on screen instead, so bars
+   * stack in a fixed reading order and never share a pixel.
+   */
+  // Compact by intent: every pixel of chrome is a pixel of map the family
+  // cannot see. Bars are sized to their content and stacked at that pitch.
+  const TOP_0 = 8, TOP_PITCH = 46;
+  const BOT_0 = 10, BOT_PITCH = 44;
+  const showTrip = !!trip && !meetOpen;
+  const showFollowBar = !!followId && !meetOpen;
+  const showLeave = !!destination && !meetOpen && destSecs != null;
+  const showSearch = !meetOpen;
+  const slots = useMemo(() => {
+    let i = 0;
+    const searchTop = showSearch ? TOP_0 + TOP_PITCH * i++ : 0;
+    const tripTop = showTrip ? TOP_0 + TOP_PITCH * i++ : 0;
+    const followTop = showFollowBar ? TOP_0 + TOP_PITCH * i++ : 0;
+    const leaveTop = showLeave ? TOP_0 + TOP_PITCH * i++ : 0;
+    return { searchTop, tripTop, followTop, leaveTop };
+  }, [showSearch, showTrip, showFollowBar, showLeave]);
+
+  const anyRouteBar = !!(routeShape || homeRoute || destRoute);
+  const showTurnBar = !!(memberTurn && routeShape);
+  // Bottom bars claim the floor first; the chips and the map's own controls
+  // then start above whatever is there.
+  const routeBarBottom = BOT_0;
+  const turnBarBottom = BOT_0 + (anyRouteBar ? BOT_PITCH : 0);
+  const chipsBottom = BOT_0 + (anyRouteBar ? BOT_PITCH : 0) + (showTurnBar ? BOT_PITCH : 0);
+
   const nameOf = useMemo(() => new Map(members.map((m) => [m.id, m.name])), [members]);
   const markers: FamilyMarker[] = useMemo(() => Object.entries(presences)
     .filter(([, p]) => freshnessOf(p.ts, now) !== 'unavailable')
@@ -579,6 +612,9 @@ export default function FamilyMapScreen() {
           // requested member route beats the From-Home route beats my
           // automatic route to the destination.
           route={routeShape ?? homeRoute ?? destRoute}
+          // Lift the map's own camera/fit controls above whatever bars are
+          // currently occupying the bottom of the screen.
+          controlsBottom={chipsBottom}
           onSelect={(id) => setFocusId(id)} style={{ flex: 1 }}
         />
 
@@ -589,7 +625,7 @@ export default function FamilyMapScreen() {
             onPress={() => setMeetOpen(true)}
             accessibilityRole="search"
             accessibilityLabel="Search a place for the family to meet"
-            style={[st.searchBar, { backgroundColor: colors.card, borderColor: colors.border }]}
+            style={[st.searchBar, { top: slots.searchTop, backgroundColor: colors.card, borderColor: colors.border }]}
           >
             <Ionicons name="search" size={17} color={colors.textDim} />
             <Text style={{ color: destination ? colors.text : colors.textDim, fontSize: 14, flex: 1 }} numberOfLines={1}>
@@ -606,7 +642,7 @@ export default function FamilyMapScreen() {
         {/* FAMILY TRIP BAR: whose trip, where to, when everyone is in — and
             the way out of it. */}
         {trip && !meetOpen && (
-          <View style={[st.tripBar, { backgroundColor: colors.card, borderColor: colors.primary }]}>
+          <View style={[st.tripBar, { top: slots.tripTop, backgroundColor: colors.card, borderColor: colors.primary }]}>
             <Ionicons name="car" size={16} color={colors.primary} />
             <View style={{ flex: 1, minWidth: 0 }}>
               <Text style={{ color: colors.text, fontWeight: '800', fontSize: 13 }} numberOfLines={1}>
@@ -627,7 +663,7 @@ export default function FamilyMapScreen() {
             there is no honest leave time, and this refuses to invent one
             (leaveNow.leavePlan returns null and nothing renders). */}
         {!!destination && !meetOpen && destSecs != null && (
-          <View style={[st.leaveBar, { backgroundColor: colors.card, borderColor: leave?.warn ? colors.danger : colors.border }]}>
+          <View style={[st.leaveBar, { top: slots.leaveTop, backgroundColor: colors.card, borderColor: leave?.warn ? colors.danger : colors.border }]}>
             <Ionicons name="alarm-outline" size={15} color={leave?.warn ? colors.danger : colors.primary} />
             {leave ? (
               <>
@@ -666,7 +702,7 @@ export default function FamilyMapScreen() {
             accessibilityRole="button"
             accessibilityState={{ selected: showLinks }}
             accessibilityLabel={showLinks ? 'Hide member routes' : 'Show road routes to every member'}
-            style={[st.linkFab, { backgroundColor: colors.card, borderColor: showLinks ? colors.primary : colors.border }]}
+            style={[st.linkFab, { bottom: chipsBottom, backgroundColor: colors.card, borderColor: showLinks ? colors.primary : colors.border }]}
           >
             <Ionicons name="git-network" size={17} color={showLinks ? colors.primary : colors.textDim} />
             <Text style={{ color: showLinks ? colors.primary : colors.textDim, fontSize: 10, fontWeight: '800' }}>
@@ -685,7 +721,7 @@ export default function FamilyMapScreen() {
             accessibilityRole="button"
             accessibilityState={{ selected: showHomeRoute }}
             accessibilityLabel={showHomeRoute ? `Hide the route from ${homeName}` : `Show the road from ${homeName} to you`}
-            style={[st.linkFab, { bottom: 64, backgroundColor: colors.card, borderColor: showHomeRoute ? colors.primary : colors.border }]}
+            style={[st.linkFab, { bottom: chipsBottom + 52, backgroundColor: colors.card, borderColor: showHomeRoute ? colors.primary : colors.border }]}
           >
             <Ionicons name="home" size={16} color={showHomeRoute ? colors.primary : colors.textDim} />
             <Text style={{ color: showHomeRoute ? colors.primary : colors.textDim, fontSize: 10, fontWeight: '800' }} numberOfLines={1}>
@@ -697,7 +733,7 @@ export default function FamilyMapScreen() {
         {/* NEXT TURN of the routed member — the watcher's indicator. Their
             route, their live pings; the buzz fires from the effect above. */}
         {memberTurn && routeShape && (
-          <View style={[st.turnBar, { backgroundColor: colors.card, borderColor: colors.border }]}>
+          <View style={[st.turnBar, { bottom: turnBarBottom, backgroundColor: colors.card, borderColor: colors.border }]}>
             <Ionicons name={iconFor(memberTurn.event)} size={16} color={colors.primary} />
             <Text style={{ color: colors.text, fontWeight: '700', fontSize: 12, flex: 1 }} numberOfLines={1}>
               {nameOf.get(routeTo ?? '') || 'Member'} · {memberTurn.instruction || memberTurn.event}
@@ -713,7 +749,7 @@ export default function FamilyMapScreen() {
             trip; instead they carry NAVIGATE, which starts real turn-by-turn
             guidance (banner + vibration + voice per nav settings). */}
         {(routeShape || homeRoute || destRoute) && (
-          <View style={[st.routeBar, { backgroundColor: colors.card, borderColor: colors.primary }]}>
+          <View style={[st.routeBar, { bottom: routeBarBottom, backgroundColor: colors.card, borderColor: colors.primary }]}>
             <Ionicons name="navigate-circle" size={16} color={colors.primary} />
             <Text style={{ color: colors.text, fontWeight: '700', fontSize: 13, flex: 1 }} numberOfLines={1}>
               {routeShape
@@ -741,7 +777,7 @@ export default function FamilyMapScreen() {
             shown while a follow is active, and it is the way OUT — a map that
             keeps recentring with no visible reason feels broken. */}
         {followId && (
-          <View style={[st.followBar, { backgroundColor: colors.card, borderColor: colors.primary }]}>
+          <View style={[st.followBar, { top: slots.followTop, backgroundColor: colors.card, borderColor: colors.primary }]}>
             <Ionicons name="navigate-circle" size={16} color={colors.primary} />
             <Text style={{ color: colors.text, fontWeight: '700', fontSize: 13, flex: 1 }} numberOfLines={1}>
               Following {nameOf.get(followId) || 'member'}
@@ -773,7 +809,7 @@ export default function FamilyMapScreen() {
         {!membersLoaded ? (
           <View style={st.center}><ActivityIndicator color={colors.primary} /></View>
         ) : (
-          <ScrollView style={{ maxHeight: 210 }} contentContainerStyle={{ paddingBottom: 6 }}>
+          <ScrollView style={{ maxHeight: 148 }} contentContainerStyle={{ paddingBottom: 4 }}>
             {members.map((m) => {
               // My own row falls back to the OS's last known position. This
               // screen never starts a watcher (read-only by design), so
@@ -887,41 +923,41 @@ export default function FamilyMapScreen() {
 const st = StyleSheet.create({
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24 },
   sheet: {
-    borderTopLeftRadius: 20, borderTopRightRadius: 20, borderWidth: 1,
-    paddingHorizontal: 16, paddingTop: 8, paddingBottom: 14,
+    borderTopLeftRadius: 18, borderTopRightRadius: 18, borderWidth: 1,
+    paddingHorizontal: 14, paddingTop: 4, paddingBottom: 8,
   },
   searchBar: {
     position: 'absolute', left: 12, right: 12, top: 12, flexDirection: 'row', alignItems: 'center', gap: 9,
-    borderWidth: 1, borderRadius: 14, paddingHorizontal: 13, minHeight: 46, elevation: 4,
+    borderWidth: 1, borderRadius: 12, paddingHorizontal: 12, minHeight: 40, elevation: 4,
   },
   linkFab: {
     position: 'absolute', left: 12, bottom: 12, alignItems: 'center', justifyContent: 'center',
-    gap: 1, borderWidth: 1, borderRadius: 14, paddingHorizontal: 9, minHeight: 44, elevation: 3,
+    gap: 1, borderWidth: 1, borderRadius: 12, paddingHorizontal: 8, minHeight: 38, elevation: 3,
   },
   routeBar: {
     position: 'absolute', left: 12, right: 12, bottom: 12, flexDirection: 'row', alignItems: 'center', gap: 8,
-    borderWidth: 1, borderRadius: 999, paddingHorizontal: 14, minHeight: 42, elevation: 3,
+    borderWidth: 1, borderRadius: 999, paddingHorizontal: 12, minHeight: 32, elevation: 3,
   },
   rowWrap: { flexDirection: 'row', alignItems: 'center' },
-  row: { paddingVertical: 10, fontSize: 14.5, fontWeight: '600' },
-  refWrap: { paddingBottom: 10, paddingLeft: 14, gap: 2 },
+  row: { paddingVertical: 7, fontSize: 14, fontWeight: '600' },
+  refWrap: { paddingBottom: 6, paddingLeft: 12, gap: 1 },
   refLine: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   followBar: {
     position: 'absolute', left: 12, right: 12, top: 12,
     flexDirection: 'row', alignItems: 'center', gap: 8,
-    borderWidth: 1, borderRadius: 999, paddingHorizontal: 14, paddingVertical: 9,
+    borderWidth: 1, borderRadius: 999, paddingHorizontal: 13, paddingVertical: 6,
   },
   // Sits UNDER the search bar — the trip is context, the search stays a search.
   tripBar: {
     position: 'absolute', left: 12, right: 12, top: 64,
     flexDirection: 'row', alignItems: 'center', gap: 9,
-    borderWidth: 1, borderRadius: 14, paddingHorizontal: 13, paddingVertical: 8, elevation: 4,
+    borderWidth: 1, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 5, elevation: 4,
   },
   // Between the trip bar and the map: the leave-now countdown / arrive-by picker.
   leaveBar: {
     position: 'absolute', left: 12, right: 12, top: 122,
     flexDirection: 'row', alignItems: 'center', gap: 7,
-    borderWidth: 1, borderRadius: 12, paddingHorizontal: 12, minHeight: 38, elevation: 3,
+    borderWidth: 1, borderRadius: 11, paddingHorizontal: 11, minHeight: 32, elevation: 3,
   },
   // Rides just above the route bar: the routed member's next left/right.
   turnBar: {

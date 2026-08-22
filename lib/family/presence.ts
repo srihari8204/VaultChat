@@ -83,6 +83,8 @@ let plan: LocationPlan | null = null;
 let armedPlan: LocationPlan | null = null;
 let foreground = true;
 let lastRearmAt = 0;
+/** Pending recovery timer for a re-arm the platform refused. */
+let rearmRetry: ReturnType<typeof setTimeout> | null = null;
 /** Bumped by every startPresence; a call whose generation is stale aborts
  *  rather than overwriting a newer one's state. See startPresence. */
 let startGen = 0;
@@ -141,26 +143,50 @@ function stopKeepalive() { if (keepalive) { clearInterval(keepalive); keepalive 
 /**
  * Arm (or re-arm) the OS watcher at the planned cadence.
  *
- * THE NEW WATCHER IS CREATED BEFORE THE OLD ONE IS REMOVED, and that order is
- * load-bearing. Removing first and then failing to create leaves the device
- * with NO location watcher at all — sharing silently dead until the screen is
- * re-entered — and this runs from inside the old watcher's own callback, which
- * is exactly where a platform is most likely to refuse. Overlapping for a few
- * milliseconds is harmless: onFix is idempotent per fix and the extra one is
- * gone before the next tick.
+ * THE OLD WATCHER IS REMOVED BEFORE THE NEW ONE IS CREATED, and that order is
+ * load-bearing — the opposite of what this function used to do.
+ *
+ * Creating first and removing second looks safer (no gap), but on device it
+ * silently killed location entirely: expo-location hands both subscriptions to
+ * the same fused provider request, so removing the "old" one tore down the
+ * delivery the "fresh" one was relying on. Measured on the Honor — publishing
+ * ran for ~60 s after launch and then stopped dead at exactly the first
+ * re-arm, while the diagnostics row happily reported "every 15s" because a
+ * plan is recorded when a watcher is ARMED, not when a fix arrives. It stayed
+ * hidden until the step-down bug was fixed, because before that the watcher
+ * never re-armed at all.
+ *
+ * The gap this introduces is milliseconds. The risk it introduces — a failed
+ * create leaving NO watcher — is handled explicitly below rather than by
+ * ordering: one immediate retry, then a delayed retry, because a device with
+ * no watcher publishes nothing and has no fix coming to fix itself with.
  */
 async function armWatcher(next: LocationPlan): Promise<void> {
-  const old = watcher;
-  const fresh = await Location.watchPositionAsync(
-    {
-      accuracy: ACCURACY[next.accuracy],
-      timeInterval: next.timeIntervalMs,
-      distanceInterval: next.distanceIntervalM,
-    },
-    onFix,
-  );
-  watcher = fresh;
-  try { old?.remove(); } catch {}
+  const opts = {
+    accuracy: ACCURACY[next.accuracy],
+    timeInterval: next.timeIntervalMs,
+    distanceInterval: next.distanceIntervalM,
+  };
+  try { watcher?.remove(); } catch {}
+  watcher = null;
+  try {
+    watcher = await Location.watchPositionAsync(opts, onFix);
+  } catch {
+    // Immediate retry: the platform most often refuses when asked from inside
+    // the outgoing watcher's own callback, and succeeds a tick later.
+    try { watcher = await Location.watchPositionAsync(opts, onFix); } catch { watcher = null; }
+  }
+  if (!watcher) {
+    // Nothing is listening now, and nothing will call us again. Schedule the
+    // recovery ourselves rather than leaving the device silently dark.
+    if (rearmRetry) clearTimeout(rearmRetry);
+    rearmRetry = setTimeout(() => {
+      rearmRetry = null;
+      if (!watcher) armWatcher(next).catch(() => {});
+    }, 5_000);
+    return;                       // do NOT record a plan we failed to arm
+  }
+  if (rearmRetry) { clearTimeout(rearmRetry); rearmRetry = null; }
   plan = next;
   armedPlan = next;      // the ONLY place the armed cadence is recorded
   lastRearmAt = Date.now();
@@ -508,6 +534,7 @@ export async function stopPresence(): Promise<void> {
   selfCb = null;
   plan = null;          // the next start re-plans from scratch, never from a stale tier
   armedPlan = null;     // …and must not believe a dead watcher's cadence is armed
+  if (rearmRetry) { clearTimeout(rearmRetry); rearmRetry = null; }
   stopKeepalive();
 
   if (sharing && await isBackgroundRunning()) {

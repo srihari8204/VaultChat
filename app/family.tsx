@@ -206,6 +206,9 @@ export default function FamilySpaceScreen() {
   // Location was refused (or never asked for). Not an error state — the space
   // works without it; only our own dot on the map is missing.
   const [locDenied, setLocDenied] = useState(false);
+  /** Bumped every time this screen regains focus — see the focus effect below
+   *  for why presence needs that in its dependency list. */
+  const [focusTick, setFocusTick] = useState(0);
   const [loading, setLoading] = useState(true);
   const [focusId, setFocusId] = useState<string | null>(null);
   const [expanded, setExpanded] = useState(false);
@@ -435,10 +438,28 @@ export default function FamilySpaceScreen() {
   // but startPresence never began BROADCASTING and never delivered keys.
   // Verified server-side: a whole session with the switch on produced zero
   // key messages. The eslint exhaustive-deps warning on this line was right.
-  }, [active?.id, me?.id, share]);
+  }, [active?.id, me?.id, share, focusTick]);
 
   // stop broadcasting when the screen loses focus (map still resumes on return)
-  useFocusEffect(React.useCallback(() => () => { stopPresence(); }, []));
+  /**
+   * RE-ARM ON RETURN. The blur cleanup below stops the watcher, but the
+   * presence effect above is keyed on [active.id, me.id, share] — none of
+   * which change when the user simply comes BACK. So one visit to the map (or
+   * any other screen) left the device permanently not sharing until the app
+   * was restarted or the switch was toggled, with the switch still reading ON.
+   *
+   * Measured on the Honor: silent for 18 minutes with the switch on, then
+   * publishing again 24 s after a cold start. It is also why family trips
+   * never collected ETAs — only one phone was ever publishing.
+   *
+   * Bumping a counter on focus puts "we are back" into the effect's own
+   * dependency list. startPresence already guards against overlapping calls
+   * with its generation check, so the extra run on first focus is harmless.
+   */
+  useFocusEffect(React.useCallback(() => {
+    setFocusTick((t) => t + 1);
+    return () => { stopPresence(); };
+  }, []));
 
   /**
    * FamilyMapRefreshController — the "never frozen" watchdog (spec §59/§60).
@@ -2084,15 +2105,15 @@ export default function FamilySpaceScreen() {
 const st = StyleSheet.create({
   screen: { flex: 1 },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
-  dash: { padding: 14 },
-  greetRow: { flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 12 },
+  dash: { padding: 12 },
+  greetRow: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 8 },
   chip: { borderWidth: 1, borderRadius: 999, paddingHorizontal: 14, paddingVertical: 7 },
-  status: { flexDirection: 'row', alignItems: 'center', gap: 10, padding: 12, borderWidth: 1, borderRadius: 16, marginBottom: 10 },
+  status: { flexDirection: 'row', alignItems: 'center', gap: 10, padding: 10, borderWidth: 1, borderRadius: 14, marginBottom: 8 },
   statusIcon: { width: 38, height: 38, borderRadius: 19, alignItems: 'center', justifyContent: 'center' },
   avatarRow: { flexDirection: 'row', alignItems: 'center' },
   miniDot: { width: 26, height: 26, borderRadius: 13, alignItems: 'center', justifyContent: 'center', borderWidth: 2 },
   miniDotTxt: { color: '#fff', fontWeight: '800', fontSize: 11 },
-  mapCard: { height: 200, borderRadius: 18, borderWidth: 1, overflow: 'hidden', marginBottom: 10 },
+  mapCard: { height: 300, borderRadius: 18, borderWidth: 1, overflow: 'hidden', marginBottom: 10 },
   mapBadge: { position: 'absolute', top: 10, right: 10, flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 10, paddingVertical: 5, borderRadius: 999, borderWidth: 1 },
   collapse: { position: 'absolute', top: 12, right: 12, width: 38, height: 38, borderRadius: 19, borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
   // 5 tiles wrap onto two rows at ~3 per row (30% basis + the 10px gaps).
