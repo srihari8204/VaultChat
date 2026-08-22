@@ -89,5 +89,104 @@ const f = new Rekey();
 f.receive('a', 0, true);
 check('one peer\'s floor does not block another', f.receive('b', 0, true));
 
+// ── CONVERGENCE ───────────────────────────────────────────────────────
+//
+// The rate limits above bound how OFTEN a reset happens. They cannot make the
+// resets stop, because both devices run the same function: A resets, which
+// breaks the session B just built, so B resets, which breaks A's. A cooldown
+// only sets the period of that flip-flop — measured on device as resets
+// alternating between two phones every ~113s, with "unable to decrypt" the
+// whole time and sending still working, which is the signature of the loop.
+//
+// Two rules end it, and this models both against the mutual-failure case:
+//   1. exactly one side is the designated resetter (lower user id)
+//   2. a repeat of an already-answered complaint (same epoch) is dropped
+
+class Device {
+  complaint = new Map<string, number>();   // mirrors _complaintEpoch
+  inEpisode = new Set<string>();           // mirrors _inEpisode
+  selfReset = new Map<string, number>();   // mirrors _selfResetEpoch
+  handled = new Map<string, number>();     // mirrors _handledRekeyEpoch
+  lastReset = new Map<string, number>();
+  resets = 0;
+
+  constructor(readonly id: string) {}
+
+  /** The number this device puts on the wire when it asks for a re-key. */
+  epochFor(peer: string): number { return this.complaint.get(peer) ?? 0; }
+
+  /** Mirrors maybeAutoRecoverSession once the fail streak trips. */
+  decryptFailed(peer: string, now: number): void {
+    if (!this.inEpisode.has(peer)) {                 // beginComplaintEpisode
+      this.inEpisode.add(peer);
+      this.complaint.set(peer, this.epochFor(peer) + 1);
+    }
+    if (now - (this.lastReset.get(peer) ?? -Infinity) < NORMAL_COOLDOWN_MS) return;
+    if (this.id > peer) return;                      // not the designated initiator → ask only
+    if (this.selfReset.get(peer) === this.epochFor(peer)) return;  // one tear-down per breakage
+    this.selfReset.set(peer, this.epochFor(peer));
+    this.reset(peer, now);
+  }
+
+  /** Mirrors handleRekeyRequest for a background (non-forced) request. */
+  rekeyRequested(peer: string, now: number, peerEpoch: number): void {
+    if (this.handled.get(peer) === peerEpoch) return;          // same complaint as before
+    if (now - (this.lastReset.get(peer) ?? -Infinity) < NORMAL_COOLDOWN_MS) return;
+    this.handled.set(peer, peerEpoch);
+    this.reset(peer, now);
+  }
+
+  /** A message from this peer decrypted — the breakage is over. */
+  decryptSucceeded(peer: string): void { this.inEpisode.delete(peer); }
+
+  private reset(peer: string, now: number): void {
+    this.lastReset.set(peer, now);
+    this.resets++;
+  }
+}
+
+// Both sides stuck, both failing to decrypt every 5s for ten minutes — the
+// device scenario, run long enough that a 60s flip-flop would show ~10 resets
+// per side.
+const A = new Device('aaaa-1111');
+const B = new Device('bbbb-2222');
+for (let t = 0; t <= 600_000; t += 5_000) {
+  A.decryptFailed(B.id, t);
+  B.rekeyRequested(A.id, t, A.epochFor(B.id));
+  B.decryptFailed(A.id, t);
+  A.rekeyRequested(B.id, t, B.epochFor(A.id));
+}
+check('the loop converges instead of beating forever', A.resets + B.resets <= 3);
+check('...and at least one heal actually happened', A.resets + B.resets >= 1);
+check('ten minutes of mutual failure costs at most one reset each way', A.resets <= 2 && B.resets <= 2);
+
+// Liveness: after the pair recovers, a LATER breakage must still be healed.
+// Suppressing duplicates is only safe if it cannot turn into deafness.
+A.decryptSucceeded(B.id); B.decryptSucceeded(A.id);
+const before = A.resets + B.resets;
+for (let t = 900_000; t <= 1_000_000; t += 5_000) {
+  A.decryptFailed(B.id, t);
+  B.rekeyRequested(A.id, t, A.epochFor(B.id));
+}
+check('a NEW breakage after a recovery is still acted on', A.resets + B.resets > before);
+
+// A repeat of the SAME complaint is dropped even after the timer has expired —
+// this is the half a clock alone cannot do.
+const C = new Device('cccc');
+C.rekeyRequested('dddd', 0, 7);
+check('a first complaint is acted on', C.resets === 1);
+C.rekeyRequested('dddd', 120_000, 7);
+check('the same epoch two minutes later is still a duplicate', C.resets === 1);
+C.rekeyRequested('dddd', 240_000, 8);
+check('a genuinely new epoch IS acted on', C.resets === 2);
+
+// The peer reinstalled: its in-memory epoch restarts at 0, BELOW what we have
+// recorded. A `<=` rule would ignore that peer until one of the two processes
+// died; `!==` treats any change as news.
+const E = new Device('eeee');
+E.rekeyRequested('ffff', 0, 5);
+E.rekeyRequested('ffff', 120_000, 0);
+check('a peer that restarted at epoch 0 is not ignored forever', E.resets === 2);
+
 console.log(failures ? `\n  ${failures} FAILED\n` : '\n  all re-key rate-limit checks passed\n');
 process.exit(failures ? 1 : 0);

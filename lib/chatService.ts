@@ -344,6 +344,10 @@ export async function decryptFromChat(
   try {
     const pt = await e2ee.e2eeDecrypt(chatId, peerId, messageId ?? 0, ciphertext);
     _decryptFailStreak.delete(peerId);                 // healthy session — clear recovery counter
+    // Reading this peer again ends the breakage episode, so a LATER failure is
+    // new damage and earns a fresh complaint epoch the peer will act on. This
+    // is what keeps duplicate-suppression from ever becoming deafness.
+    _inEpisode.delete(peerId);
     return pt;
   } catch (err) {
     const m = String((err as any)?.message || '');
@@ -390,6 +394,34 @@ export async function decryptFromChat(
 // auto-recovery, so users never have to reset a session by hand.
 const _decryptFailStreak = new Map<string, number>();
 const AUTO_RECOVER_AFTER = 2;
+
+/**
+ * Which BREAKAGE a re-key request is about, per peer — the number that goes on
+ * the wire so the peer can tell a new problem from one it has already answered.
+ *
+ * Deliberately NOT sessionEpoch(), which counts resets. That distinction is the
+ * whole fix. A reset performed as a favour — because the PEER asked — is not
+ * news about our own inbound, but a reset-counter bumps for it anyway, so our
+ * next complaint looks new, so the peer resets again, so its complaint looks new
+ * to us. Two devices modelling each other's helpfulness as fresh damage is
+ * exactly the loop, and it survives any cooldown; the timer only sets its period.
+ *
+ * An EPISODE spans one continuous run of not being able to read a peer. It
+ * opens when the fail streak trips and closes on the first successful decrypt
+ * (see decryptOne). Repeated complaints inside one episode carry the same
+ * number and are recognisably the same complaint. A genuinely new breakage —
+ * necessarily after something decrypted — gets a new one and is acted on, so
+ * suppressing duplicates costs no liveness.
+ */
+const _complaintEpoch = new Map<string, number>();
+const _inEpisode = new Set<string>();
+/** Complaint epoch we last self-reset for, per peer — one tear-down per breakage. */
+const _selfResetEpoch = new Map<string, number>();
+function beginComplaintEpisode(peerId: string): void {
+  if (_inEpisode.has(peerId)) return;
+  _inEpisode.add(peerId);
+  _complaintEpoch.set(peerId, (_complaintEpoch.get(peerId) ?? 0) + 1);
+}
 
 // A reset must not be able to destroy the session a previous reset just built.
 // Measured on device: three AUTO-RESETs for one peer inside 21ms —
@@ -517,6 +549,9 @@ async function maybeAutoRecoverSession(peerId: string, errMsg: string): Promise<
   console.warn(`[e2ee] decrypt failed (${n}/${AUTO_RECOVER_AFTER}):`, errMsg);
   if (n < AUTO_RECOVER_AFTER) return;
   _decryptFailStreak.delete(peerId);
+  // Open the episode BEFORE anything asks the peer for help, so the request
+  // below carries the number that identifies this breakage.
+  beginComplaintEpisode(peerId);
 
   const now = Date.now();
   const last = _lastAutoReset.get(peerId) ?? 0;
@@ -538,6 +573,39 @@ async function maybeAutoRecoverSession(peerId: string, errMsg: string): Promise<
     requestPeerRekey(peerId);
     return;
   }
+
+  // ONLY ONE SIDE TEARS DOWN. This is the root cause of the oscillation: both
+  // devices run this identical function, so both reset, and each destroys the
+  // session the other has just rebuilt. No timer fixes that — a cooldown only
+  // sets the PERIOD of the flip-flop, which is why the device capture showed it
+  // beating steadily at roughly the cooldown length instead of settling.
+  //
+  // Break the symmetry the same way the session layer breaks X3DH glare
+  // (e2eeSession.ts — lower identity key yields): compare the two user ids and
+  // let exactly one side be the one that resets. It does not matter which, only
+  // that both devices compute the same answer from data they already have.
+  //
+  // Skipping our own reset costs nothing, because it was never the half that
+  // healed us: a local reset only re-keys what we SEND. What fixes our INBOUND
+  // is the peer re-initiating, and the request below is what asks for that. The
+  // peer's X3DH header is then adopted by decryptFromPeer without us having
+  // dropped anything.
+  if (meId > peerId) {
+    console.warn('[e2ee] not the designated re-key initiator for', peerId, '— asking instead of resetting');
+    requestPeerRekey(peerId);
+    return;
+  }
+  // ONCE PER EPISODE. A second self-reset for the same breakage cannot help:
+  // dropping our ratchet re-keys what we SEND, and nobody has complained about
+  // that — we are the one who cannot read. Repeating it only invalidates the
+  // session the peer built in answer to our first request, which restarts the
+  // very loop this is here to end.
+  if (_selfResetEpoch.get(peerId) === (_complaintEpoch.get(peerId) ?? 0)) {
+    console.warn('[e2ee] already re-keyed for this breakage of', peerId, '— asking again instead');
+    requestPeerRekey(peerId);
+    return;
+  }
+  _selfResetEpoch.set(peerId, _complaintEpoch.get(peerId) ?? 0);
   _lastAutoReset.set(peerId, now);
 
   try {
@@ -576,14 +644,34 @@ export async function requestPeerRekey(peerId: string, force = false): Promise<v
   try {
     const { getSocket } = await import('./socket');
     const s = await getSocket();
-    s.emit('e2ee_rekey', { to: peerId, force });
+    // The epoch names WHICH breakage we are complaining about, so the peer can
+    // tell a fresh problem from one it has already answered. Without it every
+    // request looks identical and the only possible defence is a blind timer —
+    // which is what let the two sides alternate resets forever, each destroying
+    // the session the other had just built.
+    //
+    // The server relays the whole payload verbatim (realtime/handlers.go
+    // copyMap), so adding a field needs no backend change and an older peer
+    // that ignores it simply falls back to the timer.
+    s.emit('e2ee_rekey', { to: peerId, force, epoch: _complaintEpoch.get(peerId) ?? 0 });
   } catch {}
 }
+
+/**
+ * Highest re-key epoch already acted on per peer.
+ *
+ * Compared with `!==` rather than `<=` on purpose. The epoch lives in memory
+ * and restarts at 0 with the app, so a peer that reinstalls or is force-stopped
+ * would send epochs BELOW what we have recorded — and a `<=` rule would ignore
+ * that peer's requests for as long as both processes lived. Any change of
+ * epoch, in either direction, means the peer is telling us something new.
+ */
+const _handledRekeyEpoch = new Map<string, number>();
 
 /** Handle an inbound peer re-key request: drop my session with that peer so my
  *  next message to them re-initiates X3DH (they were stuck decrypting me).
  *  Wired once as a persistent socket listener in app/_layout.tsx. */
-export async function handleRekeyRequest(fromPeerId: string, force = false): Promise<void> {
+export async function handleRekeyRequest(fromPeerId: string, force = false, peerEpoch?: number): Promise<void> {
   if (!E2EE_ENABLED || !fromPeerId) return;
   // A forced request comes from a peer whose CALL could not be set up. It jumps
   // the 60s window below — a person who just failed to place a call will not
@@ -624,6 +712,27 @@ export async function handleRekeyRequest(fromPeerId: string, force = false): Pro
   // again. Observed on device as repeated "peer requested re-key" seconds after
   // our own reset. Ignoring a request inside the window is safe: if the peer
   // still cannot decrypt after it, it will ask again once the window closes.
+  // ONE reset per distinct complaint.
+  //
+  // A peer that still cannot read us keeps asking — its fail streak re-arms
+  // every few seconds — and every one of those asks is about the SAME breakage.
+  // Honouring each of them tore down the session we had just rebuilt, so the
+  // peer's next message failed and it asked again: the loop, measured on device
+  // as resets alternating between the two phones roughly every 113 seconds.
+  //
+  // The epoch settles it without a clock. While the peer is merely waiting for
+  // our re-handshake its epoch does not move, so a repeat carries the same
+  // number and is recognisably the same complaint. It changes only when the
+  // peer genuinely re-keys again, which is exactly when we should act.
+  //
+  // Forced (call-setup) requests deliberately skip this: a person retrying a
+  // call has not re-keyed, so their epoch is unchanged, and suppressing the
+  // retry would fail the call outright. FORCED_RESET_FLOOR_MS above is what
+  // bounds those.
+  if (typeof peerEpoch === 'number' && _handledRekeyEpoch.get(fromPeerId) === peerEpoch) {
+    console.warn('[e2ee] rekey request ignored for', fromPeerId, `— already handled epoch ${peerEpoch}`);
+    return;
+  }
   const now = Date.now();
   const last = _lastAutoReset.get(fromPeerId) ?? 0;
   if (now - last < AUTO_RESET_COOLDOWN_MS) {
@@ -631,6 +740,7 @@ export async function handleRekeyRequest(fromPeerId: string, force = false): Pro
     return;
   }
   _lastAutoReset.set(fromPeerId, now);
+  if (typeof peerEpoch === 'number') _handledRekeyEpoch.set(fromPeerId, peerEpoch);
   try {
     const e2ee = await import('../services/crypto/e2eeSession.rn');
     await e2ee.e2eeResetSession(fromPeerId);

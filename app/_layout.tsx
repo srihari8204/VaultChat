@@ -282,7 +282,13 @@ function RootLayout() {
       const from = data?.from ?? data?.fromUid;
       // `force` marks a peer whose CALL setup failed — honoured immediately
       // rather than being held back by the anti-thrash window.
-      if (from) import('../lib/chatService').then(m => m.handleRekeyRequest(String(from), data?.force === true)).catch(() => {});
+      //
+      // `epoch` identifies WHICH breakage the peer is reporting, so a repeat of
+      // a complaint we have already acted on can be recognised and dropped
+      // instead of tearing down the session we rebuilt for it. Left undefined
+      // by peers on older builds, which falls back to the timer alone.
+      const epoch = typeof data?.epoch === 'number' ? data.epoch : undefined;
+      if (from) import('../lib/chatService').then(m => m.handleRekeyRequest(String(from), data?.force === true, epoch)).catch(() => {});
     });
 
     // ── Boot work that the user is WAITING for ─────────────────────────
