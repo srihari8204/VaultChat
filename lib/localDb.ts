@@ -502,19 +502,27 @@ export function looksLikeEnvelope(text: string | null | undefined): boolean {
  */
 export async function getLastMessagePerChat(): Promise<Map<string, { content: string | null; type: string | null; senderId: string | null; id: number }>> {
   const db = await getLocalDb();
-  // P4.2: the old single query GROUP BY'd the ENTIRE messages table on every
-  // chat-list render — O(all cached messages), growing forever. Instead: one
-  // cheap DISTINCT for the chat list, then a per-chat newest-row lookup that
-  // idx_messages_preview serves in O(log n) each. Chat counts are dozens, so
-  // this is dozens of index probes instead of a full-table scan.
-  const chats = await db.getAllAsync(`SELECT DISTINCT chat_id FROM messages`, []);
+  // P4.2 replaced a whole-table GROUP BY with a DISTINCT plus one indexed
+  // lookup per chat — right about the scan, wrong about the cost that was left.
+  // Each of those lookups is a separate round trip across the JS/native bridge,
+  // so a user with fifty chats paid fifty-one crossings every time the chat
+  // list rendered, and the bridge dominates a query the index answers in
+  // microseconds.
+  //
+  // A window function gets both properties at once: still an index-ordered
+  // scan, but ONE crossing. ROW_NUMBER partitions by chat and the outer filter
+  // keeps only each chat's newest row, which is exactly what the loop computed.
+  // SQLite has had window functions since 3.25; both engines used here are far
+  // newer.
+  const rows = await db.getAllAsync(
+    `SELECT chat_id, id, content, type, sender_id FROM (
+       SELECT chat_id, id, content, type, sender_id,
+              ROW_NUMBER() OVER (PARTITION BY chat_id ORDER BY id DESC) AS rn
+         FROM messages
+        WHERE deleted_at IS NULL AND type <> 'reaction'   -- F4: reference messages never preview
+     ) WHERE rn = 1`, []);
   const out = new Map<string, { content: string | null; type: string | null; senderId: string | null; id: number }>();
-  for (const c of chats as any[]) {
-    const r = await db.getFirstAsync(
-      `SELECT chat_id, id, content, type, sender_id FROM messages
-        WHERE chat_id = ? AND deleted_at IS NULL AND type <> 'reaction'   -- F4: reference messages never preview
-        ORDER BY id DESC LIMIT 1`, [c.chat_id]);
-    if (!r) continue;
+  for (const r of rows as any[]) {
     const text = decField(r.content);
     // Never surface an un-decrypted envelope as preview text — null it so the
     // chat list shows a lock placeholder instead of raw ciphertext.

@@ -170,6 +170,14 @@ const TYPING_IDLE_MS = 2500;
 const REVOKE_WINDOW_MS = 60 * 60 * 60 * 1000;
 
 const PAGE_SIZE = 50;
+/**
+ * Most messages kept in JS state at once — eight pages.
+ *
+ * Enough that ordinary scrolling never touches disk, small enough that a chat
+ * left open all day does not accumulate every message it has ever shown. Only
+ * enforced while the user is at the bottom; see the trim effect below.
+ */
+const MAX_LOADED = 400;
 
 // MUST MATCH chatsEditWindowMS IN THE SERVER (routes/chats.go).
 //
@@ -2123,6 +2131,37 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
   // Keep a ref to loaded messages for the jump-to-message paging loop.
   useEffect(() => { messagesRef.current = messages; }, [messages]);
 
+  /**
+   * Cap the in-memory window.
+   *
+   * Nothing trimmed this array. A long-lived chat grew it forever — every
+   * message ever paged in stayed in JS state, each one a decrypted string plus
+   * a base64 thumbnail for media, and a single jumpToMessage could add two
+   * thousand in one action. The cost is not only memory: every setMessages
+   * re-derives the whole list, so the whole screen gets slower the longer it
+   * stays open.
+   *
+   * ONLY WHEN AT THE BOTTOM, and that condition is the whole design. The tail
+   * of this array is the OLDEST message (it is newest-first), so trimming while
+   * the user is scrolled up — or has just jumped to a search hit — would delete
+   * the messages they are looking at and yank the viewport. At the bottom they
+   * are reading live and the tail is off-screen by definition.
+   *
+   * Dropping older messages means there is more to page again, so hasMore has
+   * to go back to true even if we had previously reached the true start of the
+   * conversation. onEndReached pages from the oldest LOADED id and the cache
+   * still holds them, so scrolling up refills from disk with no network.
+   *
+   * As an effect rather than inside each setMessages: the array grows from six
+   * different places (sends, socket arrivals, optimistic rows), and a guard in
+   * one place cannot be forgotten by the seventh.
+   */
+  useEffect(() => {
+    if (!atBottomRef.current || messages.length <= MAX_LOADED) return;
+    setMessages(prev => (prev.length > MAX_LOADED ? prev.slice(0, MAX_LOADED) : prev));
+    setHasMore(true);
+  }, [messages.length]);
+
   // Jump to a specific message (from in-chat search): page older until it's
   // loaded, scroll to it, and briefly flash it.
   const jumpToMessage = useCallback(async (targetId: number) => {
@@ -2144,13 +2183,24 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
         }
       } catch { break; }
       if (!older.length) { setHasMore(false); break; }
+      // Accumulate in the ref only. This used to setMessages on EVERY lap, so
+      // jumping to an old search hit re-rendered a growing list up to forty
+      // times — forty full re-derivations of a list on its way to two thousand
+      // rows — before the user saw anything. The screen is committed once,
+      // below, when we actually have the target.
       const next = [...messagesRef.current, ...older];
       messagesRef.current = next;
-      setMessages(next);
       if (older.length < PAGE_SIZE) setHasMore(false);
       idx = next.findIndex(m => m.id === targetId);
     }
-    if (idx < 0) return;
+    if (idx < 0) {
+      // Not found: still publish what we paged in, or the ref and the rendered
+      // list disagree about what is loaded and the next onEndReached would page
+      // from an id the screen never showed.
+      setMessages(messagesRef.current);
+      return;
+    }
+    setMessages(messagesRef.current);
     const at = idx;
     requestAnimationFrame(() => {
       try { listRef.current?.scrollToIndex({ index: at, animated: true, viewPosition: 0.5 }); } catch {}
