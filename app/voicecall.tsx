@@ -149,8 +149,10 @@ function VoiceCallEngine() {
     // release the mic and the foreground service — the engine's disposal
     // registry makes this safe to call redundantly.
     return () => {
-      engine.hangUp('local_hangup', true);
-      engine.release();
+      // Scoped to THIS call. Unscoped, this cleanup ended whatever call was
+      // live — so answering a second call, which replaces the session, was
+      // followed by this screen unmounting and hanging the NEW call up.
+      engine.leaveScreen({ chatId: args.chatId, peerUid: args.peerUid });
       // Release the ring claim taken when this call was answered from the OS
       // notification, or the NEXT call from the same person is silently
       // suppressed as a duplicate ring.

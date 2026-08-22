@@ -246,8 +246,10 @@ function VideoCallEngine() {
       engine.startOutgoing(args);
     }
     return () => {
-      engine.hangUp('local_hangup', true);
-      engine.release();
+      // Scoped to THIS call — see the note in voicecall.tsx. Unscoped, this
+      // cleanup hung up whatever call was live, which after a second call
+      // replaced the session meant hanging up the new one.
+      engine.leaveScreen({ chatId: args.chatId, peerUid: args.peerUid });
       // Release the ring claim taken when this call was answered from the OS
       // notification, or the NEXT call from the same person is silently
       // suppressed as a duplicate ring.

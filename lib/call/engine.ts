@@ -96,10 +96,33 @@ function alreadyRunning(a: { chatId: string; peerUid: string }): boolean {
 
 // ── lifecycle ─────────────────────────────────────────────────────────
 
-/** End the call. Idempotent — safe from any path, at any time. */
-export function hangUp(reason: EndReason = 'local_hangup', notifyPeer = true): void {
+/**
+ * End the call. Idempotent — safe from any path, at any time.
+ *
+ * `only` scopes the hang-up to ONE call, and a screen unmounting must always
+ * pass it. There is a single module-wide session, so a second call replaces the
+ * first (bootstrap hangs the first up as 'replaced'); the first screen then
+ * unmounts and, without this guard, its cleanup hung up whatever was active —
+ * which by then is the NEW call. Answering a second call therefore killed it a
+ * moment after it connected, and the cause looked like the second call failing
+ * rather than the first call's teardown reaching across into it.
+ *
+ * Unscoped calls (the End button, a socket 'end', an error path) still mean
+ * "end the current call, whatever it is", which is right for those.
+ */
+export function hangUp(
+  reason: EndReason = 'local_hangup',
+  notifyPeer = true,
+  only?: { chatId: string; peerUid: string },
+): void {
   const s = session;
   if (!s) return;
+  if (only && !(s.chatId === only.chatId && s.peerUid === only.peerUid)) {
+    // Not ours any more — a newer call owns the engine. Saying so is worth a
+    // line: silence here reads identically to "there was nothing to hang up".
+    console.warn('[call] stale unmount for', only.peerUid?.slice(0, 8), '— live call is', s.peerUid?.slice(0, 8), '— not hanging up');
+    return;
+  }
   const snap = getSnapshot();
 
   if (!s.logged) {
@@ -131,6 +154,26 @@ export function hangUp(reason: EndReason = 'local_hangup', notifyPeer = true): v
 
 /** Clear the finished snapshot once the screen has popped. */
 export function release(): void { reset(); }
+
+/**
+ * The screen-unmount path: end and clear, but ONLY if this screen still owns
+ * the engine.
+ *
+ * Both halves have to be scoped together. hangUp(only) protects the newer
+ * call's SESSION, but a bare release() would still reset() the shared snapshot
+ * out from under it — the call would stay connected while its UI reverted to
+ * an ended state, which is a worse bug than the one being fixed because the
+ * audio keeps running with no way to end it.
+ */
+export function leaveScreen(only: { chatId: string; peerUid: string }): void {
+  const s = session;
+  if (s && !(s.chatId === only.chatId && s.peerUid === only.peerUid)) {
+    console.warn('[call] stale unmount for', only.peerUid?.slice(0, 8), '— live call is', s.peerUid?.slice(0, 8), '— leaving it alone');
+    return;
+  }
+  hangUp('local_hangup', true, only);
+  release();
+}
 
 interface StartArgs {
   chatId: string;
