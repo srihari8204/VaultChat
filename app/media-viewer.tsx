@@ -7,7 +7,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, StatusBar,
   ActivityIndicator, Dimensions, ScrollView, Animated,
-  PanResponder, Alert, Share,
+  PanResponder, Alert,
 } from 'react-native';
 import { useLocalSearchParams, Stack, useRouter } from 'expo-router';
 import { Video, Audio, ResizeMode, type AVPlaybackStatusSuccess } from 'expo-av';
@@ -164,6 +164,33 @@ export default function MediaViewerScreen() {
   useEffect(() => {
     if (fileUri.startsWith('http')) fetch(fileUri, { method: 'HEAD' }).then(r => setFileSize(parseInt(r.headers.get('content-length') || '0'))).catch(() => {});
   }, [fileUri]);
+
+  // Share the FILE, not a string.
+  //
+  // This used to be React Native's Share.share({ url: fileUri }). Two problems,
+  // and together they are the reported crash:
+  //   * `url` is iOS-only. On Android it is ignored, so the sheet offered the
+  //     filename as text and never the media.
+  //   * fileUri is a file:// path (media is decrypted to disk before viewing),
+  //     and handing a file:// URI to another app trips Android's StrictMode
+  //     FileUriExposedException. Other apps must receive a content:// URI from
+  //     a FileProvider.
+  //
+  // expo-sharing does the FileProvider work, and it is what saveToDevice below
+  // and every path in file-viewer.tsx already use — this button was the one
+  // place still on the old API.
+  const shareFile = async () => {
+    try {
+      if (!fileUri) return;
+      if (!(await Sharing.isAvailableAsync())) { Alert.alert('Sharing unavailable', 'No app on this device can receive this file.'); return; }
+      await Sharing.shareAsync(fileUri, {
+        mimeType: mime ? String(mime) : undefined,
+        dialogTitle: fileName,
+      });
+    } catch (e: any) {
+      Alert.alert('Could not share', e?.message ?? 'Try again');
+    }
+  };
 
   const saveToDevice = async () => {
     try {
@@ -367,7 +394,7 @@ export default function MediaViewerScreen() {
         // recipient a permanent copy through the app's own UI — the protection
         // has to hold in the viewer, not only on the server.
         headerRight: () => isViewOnce ? null : <View style={{flexDirection:'row',gap:20,marginRight:8}}>
-          <TouchableOpacity onPress={()=>Share.share({url:fileUri,message:fileName})} hitSlop={8}><Ionicons name="share-social-outline" size={22} color="#fff" /></TouchableOpacity>
+          <TouchableOpacity onPress={shareFile} hitSlop={8}><Ionicons name="share-social-outline" size={22} color="#fff" /></TouchableOpacity>
           <TouchableOpacity onPress={saveToDevice} hitSlop={8}><Ionicons name="download-outline" size={22} color="#fff" /></TouchableOpacity>
         </View>,
       }} />

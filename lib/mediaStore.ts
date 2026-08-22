@@ -219,21 +219,33 @@ export async function getMedia(attachmentId: string, opts: MediaOpts & { cacheOn
   await ensureTree(opts, folder);
 
   const token = await getAccessToken();
-  const res = await RNFS.downloadFile({
-    fromUrl: attachmentUrl(attachmentId),
-    toFile: path,
-    headers: token ? { Authorization: `Bearer ${token}` } : {},
-    progressInterval: 150,
-    progress: opts.onProgress
-      ? (p: any) => { if (p.contentLength > 0) opts.onProgress!(Math.min(1, p.bytesWritten / p.contentLength)); }
-      : undefined,
-  }).promise;
+  // Download to `.part`, then move. The existence check above accepts any file
+  // at `path`, so writing there directly meant an interrupted transfer left a
+  // TRUNCATED file that every later call returned as if it were finished — a
+  // video that plays to the cut and freezes, forever, because nothing ever
+  // re-fetches it. Same fix as getAttachmentLocalUri in mediaAttachments.ts.
+  const part = `${path}.part`;
+  await RNFS.unlink(part).catch(() => {});   // sweep a leftover from a crash
+  try {
+    const res = await RNFS.downloadFile({
+      fromUrl: attachmentUrl(attachmentId),
+      toFile: part,
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+      progressInterval: 150,
+      progress: opts.onProgress
+        ? (p: any) => { if (p.contentLength > 0) opts.onProgress!(Math.min(1, p.bytesWritten / p.contentLength)); }
+        : undefined,
+    }).promise;
 
-  if (res.statusCode && res.statusCode >= 400) {
-    await RNFS.unlink(path).catch(() => {});
-    throw new Error(`attachment ${attachmentId} download failed (${res.statusCode})`);
+    if (res.statusCode && res.statusCode >= 400) {
+      throw new Error(`attachment ${attachmentId} download failed (${res.statusCode})`);
+    }
+    await RNFS.moveFile(part, path);
+    return `file://${path}`;
+  } catch (e) {
+    await RNFS.unlink(part).catch(() => {});
+    throw e;
   }
-  return `file://${path}`;
 }
 
 /**

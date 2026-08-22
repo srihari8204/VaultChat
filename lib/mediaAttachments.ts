@@ -127,8 +127,26 @@ export async function getAttachmentLocalUri(attachmentId: string): Promise<strin
 
   await ensureMediaDir();
   const cached = MEDIA_DIR + `media_${attachmentId}`;
+  // WRITE SOMEWHERE ELSE, THEN MOVE.
+  //
+  // Both writers below used to write straight to `cached`, and the check under
+  // this comment accepts any file with a non-zero size. So an interrupted
+  // transfer — app killed, process frozen, network dropped, decrypt aborted
+  // mid-stream — left a TRUNCATED file sitting at the final path, and every
+  // later open returned it instantly because it exists and is non-empty.
+  //
+  // A truncated video plays fine up to the point the bytes stop and then
+  // freezes. Permanently, and only for that one attachment, because nothing
+  // ever re-downloads it: that is the "video gets stuck in the middle" report.
+  // An image shows the same way, half-drawn.
+  //
+  // Moving into place is atomic on the same filesystem, so `cached` only ever
+  // exists complete. A partial write now lands on `.part` and is discarded.
+  const part = cached + '.part';
   const info = await FileSystem.getInfoAsync(cached);
   if (info.exists && (info as any).size) return cached;
+  // Sweep any leftover from a previous crash before reusing the name.
+  await FileSystem.deleteAsync(part, { idempotent: true }).catch(() => {});
 
   // Adopt a copy left in the cache dir by the old getDecryptedAttachmentUri.
   // This is not just an optimisation: the server purges media after delivery,
@@ -143,22 +161,28 @@ export async function getAttachmentLocalUri(attachmentId: string): Promise<strin
     }
   } catch { /* fall through to a normal fetch */ }
 
-  if (!mk) {
-    // Plaintext: STREAM the bytes straight to disk. Never load the whole file
-    // into memory — doing that (fetch→arrayBuffer→base64) OOM'd when several
-    // video bubbles resolved at once. downloadAsync (legacy) writes to disk.
-    const r = await FileSystem.downloadAsync(attachmentUrl(attachmentId), cached, { headers });
-    if ((r.status ?? 0) >= 400) {
-      await FileSystem.deleteAsync(cached, { idempotent: true }).catch(() => {});
-      throw new Error(`attachment ${attachmentId} download failed (${r.status})`);
+  try {
+    if (!mk) {
+      // Plaintext: STREAM the bytes straight to disk. Never load the whole file
+      // into memory — doing that (fetch→arrayBuffer→base64) OOM'd when several
+      // video bubbles resolved at once. downloadAsync (legacy) writes to disk.
+      const r = await FileSystem.downloadAsync(attachmentUrl(attachmentId), part, { headers });
+      if ((r.status ?? 0) >= 400) {
+        throw new Error(`attachment ${attachmentId} download failed (${r.status})`);
+      }
+    } else {
+      // Encrypted: download to disk + streaming decrypt (P3.1) — bounded memory
+      // even when several video bubbles resolve at once.
+      await downloadAndDecrypt(attachmentId, mk, part, headers);
     }
+    // Only a COMPLETE file earns the real name.
+    await FileSystem.moveAsync({ from: part, to: cached });
     return cached;
+  } catch (e) {
+    // Leave nothing behind that a later call would mistake for a finished file.
+    await FileSystem.deleteAsync(part, { idempotent: true }).catch(() => {});
+    throw e;
   }
-
-  // Encrypted: download to disk + streaming decrypt (P3.1) — bounded memory
-  // even when several video bubbles resolve at once.
-  await downloadAndDecrypt(attachmentId, mk, cached, headers);
-  return cached;
 }
 
 // ── Media envelope (the E2E-encrypted message content for a media message) ──

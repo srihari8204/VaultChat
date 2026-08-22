@@ -58,6 +58,44 @@ const EXT_MAP: Record<string, string> = {};
 ['ppt', 'pptx', 'doc', 'docx', 'xls', 'xlsx'].forEach(e => (EXT_MAP[e] = 'office'));
 ['txt', 'json', 'js', 'jsx', 'ts', 'tsx', 'py', 'md', 'csv', 'xml', 'html', 'css', 'sql', 'sh', 'yaml', 'yml', 'toml', 'ini', 'log', 'rb', 'go', 'rs', 'java', 'c', 'cpp', 'swift', 'kt', 'dart', 'php'].forEach(e => (EXT_MAP[e] = 'text'));
 
+/**
+ * MIME for the Android VIEW intent, derived from the extension.
+ *
+ * An intent carrying a content:// URI and NO type resolves to no activity on
+ * most devices: Android matches on the type, not the file name. The hand-off
+ * then does nothing at all — no chooser, no error, no crash — which is exactly
+ * how "open in another app" appeared broken.
+ *
+ * The caller does not reliably supply one. Chat bubbles pass whatever mime the
+ * attachment row carried, and for anything sent before that was recorded (or
+ * sent by a client that never set it) that is empty. Guessing from the
+ * extension is what every file manager does, and it costs one lookup.
+ */
+const MIME_BY_EXT: Record<string, string> = {
+  pdf: 'application/pdf',
+  doc: 'application/msword',
+  docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  xls: 'application/vnd.ms-excel',
+  xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  ppt: 'application/vnd.ms-powerpoint',
+  pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+  txt: 'text/plain', csv: 'text/csv', json: 'application/json',
+  xml: 'application/xml', html: 'text/html', md: 'text/markdown',
+  zip: 'application/zip', rar: 'application/vnd.rar', '7z': 'application/x-7z-compressed',
+  jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', gif: 'image/gif',
+  webp: 'image/webp', heic: 'image/heic', svg: 'image/svg+xml',
+  mp4: 'video/mp4', mov: 'video/quicktime', mkv: 'video/x-matroska', webm: 'video/webm',
+  mp3: 'audio/mpeg', wav: 'audio/wav', m4a: 'audio/mp4', aac: 'audio/aac', ogg: 'audio/ogg',
+};
+
+/** The caller's mime if it gave one, else guessed from the name. */
+function resolveMime(filename: string, mimeType?: string): string | undefined {
+  if (mimeType) return mimeType;
+  const ext = (filename.split('.').pop() || '').toLowerCase();
+  // Last resort: */* still shows a chooser, which beats silently doing nothing.
+  return MIME_BY_EXT[ext] ?? (ext ? '*/*' : undefined);
+}
+
 function detectType(filename: string, mimeType?: string): string {
   if (mimeType) {
     if (mimeType.startsWith('image/')) return 'image';
@@ -369,14 +407,20 @@ export default function FileViewerScreen() {
         if (dl.status >= 400) throw new Error(`Download failed (${dl.status})`);
         localUri = dl.uri;
       }
-      const mime = (params.mimeType as string | undefined) || undefined;
+      // Guess from the extension when the caller gave no mime — an intent with
+      // no type matches no activity, and the hand-off then does nothing at all.
+      const mime = resolveMime(fileName, (params.mimeType as string | undefined) || undefined);
 
       if (Platform.OS === 'android') {
         try {
           const contentUri = await FileSystem.getContentUriAsync(localUri);
           await IntentLauncher.startActivityAsync('android.intent.action.VIEW', {
             data: contentUri,
-            flags: 1,               // FLAG_GRANT_READ_URI_PERMISSION
+            // 1 = GRANT_READ_URI_PERMISSION (without it the target app cannot
+            // read the file), 0x10000000 = NEW_TASK. Launching from a non-
+            // Activity context without NEW_TASK is the other way this silently
+            // fails to start anything.
+            flags: 1 | 0x10000000,
             type: mime,
           });
         } catch {
