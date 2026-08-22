@@ -97,6 +97,7 @@ export default function MediaViewerScreen() {
   useEffect(() => {
     if (needsAuth) getAccessToken().then(t => { if (t) setAuthHeaders({ Authorization: `Bearer ${t}` }); });
   }, [needsAuth]);
+
   const fileType = msgType === 'image' ? 'image' : msgType === 'video' ? 'video' : msgType === 'audio' ? 'audio' : getFileType(fileName);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -106,6 +107,25 @@ export default function MediaViewerScreen() {
   // instead of the bubble awaiting a download (which made taps feel unreliable
   // and stacked multiple viewers).
   const [fileUri, setFileUri] = useState<string>((mediaUrl || uri || '') + '');
+
+  // ONE source rule for every player.
+  //
+  // saveToDevice sends the bearer token and so did the Image — but Video and
+  // Audio were built with a bare { uri }, so authenticated media DOWNLOADED
+  // fine and refused to PLAY. The server answers 401, expo-av reports a generic
+  // load failure, and it looks like a broken player rather than a missing
+  // header. Images kept working, which is exactly what makes this read as "the
+  // video player is broken" rather than "the request was unauthenticated".
+  const remoteNeedsAuth = !!needsAuth && /^https?:\/\//i.test(fileUri);
+  const mediaSource = () =>
+    remoteNeedsAuth && authHeaders ? { uri: fileUri, headers: authHeaders } : { uri: fileUri };
+
+  // Mounting a player before the token resolves is the same 401 with extra
+  // steps: getAccessToken is async, expo-av loads a source once and does NOT
+  // retry, so a player that loses that race stays broken until the screen is
+  // reopened — intermittently, which is the worst way to hit it.
+  const waitingForAuth = remoteNeedsAuth && !authHeaders;
+
   useEffect(() => {
     if (fileUri || !attachmentId) return;
     let cancel = false;
@@ -185,7 +205,7 @@ export default function MediaViewerScreen() {
     return (
       <View style={s.full} {...panResponder.panHandlers}>
         {!imgLoaded && <ActivityIndicator color={C.accent} style={s.center} />}
-        <Animated.Image source={needsAuth && fileUri.startsWith('http') ? { uri: fileUri, headers: authHeaders } : { uri: fileUri }} style={[s.fullImg, { transform: [{ scale }] }]} resizeMode="contain"
+        <Animated.Image source={mediaSource()} style={[s.fullImg, { transform: [{ scale }] }]} resizeMode="contain"
           onLoad={() => { setImgLoaded(true); setLoading(false); markViewedAfterLoad(); }} onError={() => { setError('Failed to load image'); setLoading(false); }} />
       </View>
     );
@@ -197,10 +217,13 @@ export default function MediaViewerScreen() {
     const [st, setSt] = useState<PlaybackState>({});
     const [ctrl, setCtrl] = useState(true);
     const [shouldPlay, setShouldPlay] = useState(true);
-    useEffect(() => { setLoading(false); }, []);
+    useEffect(() => { if (!waitingForAuth) setLoading(false); }, []);
+    // expo-av loads a source once and never retries, so mounting before the
+    // token is ready would fail permanently rather than briefly.
+    if (waitingForAuth) return <View style={s.full}><ActivityIndicator color={C.accent} style={s.center} /></View>;
     return (
       <TouchableOpacity style={s.full} activeOpacity={1} onPress={() => setCtrl(!ctrl)}>
-        <Video ref={videoRef} source={{ uri: fileUri }} style={s.fullVid} resizeMode={ResizeMode.CONTAIN}
+        <Video ref={videoRef} source={mediaSource()} style={s.fullVid} resizeMode={ResizeMode.CONTAIN}
           shouldPlay={shouldPlay} isLooping={false} useNativeControls={false} progressUpdateIntervalMillis={250}
           onPlaybackStatusUpdate={(status) => { if (!status.isLoaded) return; setSt(status); if (status.didJustFinish) setShouldPlay(false); }}
           onLoad={() => { setLoading(false); markViewedAfterLoad(); }} onError={() => { setError('Failed to load video'); setLoading(false); }} />
@@ -237,13 +260,19 @@ export default function MediaViewerScreen() {
     const soundRef = useRef(null);
     const [ast, setAst] = useState<PlaybackState>({});
     useEffect(() => {
+      if (waitingForAuth) return;                 // createAsync would 401, and it does not retry
+      let dead = false;
       (async () => {
         await Audio.setAudioModeAsync({ playsInSilentModeIOS: true });
-        const { sound } = await Audio.Sound.createAsync({ uri: fileUri }, { shouldPlay: false, progressUpdateIntervalMillis: 200 }, (st) => { if (st.isLoaded) setAst(st); });
+        const { sound } = await Audio.Sound.createAsync(mediaSource(), { shouldPlay: false, progressUpdateIntervalMillis: 200 }, (st) => { if (st.isLoaded) setAst(st); });
+        // The screen can close while createAsync is in flight; without this the
+        // sound is created after unmount and never unloaded — it keeps playing
+        // with no controls left to stop it.
+        if (dead) { sound.unloadAsync().catch(() => {}); return; }
         soundRef.current = sound; setLoading(false);
       })();
-      return () => { soundRef.current?.unloadAsync(); };
-    }, []);
+      return () => { dead = true; soundRef.current?.unloadAsync(); };
+    }, [waitingForAuth]);
     const prog = (ast.positionMillis||0) / (ast.durationMillis||1);
     return (
       <View style={s.audioWrap}>
