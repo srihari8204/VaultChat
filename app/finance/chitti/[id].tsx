@@ -1,21 +1,23 @@
-// app/finance/chitti/[id].tsx — Chitti group detail: Members + manual Collections.
-// v1 (no auctions): add members, and mark each installment paid/pending/overdue.
+// app/finance/chitti/[id].tsx — Lucky Draw group detail: Members + manual Collections.
+// Members carry name, mobile (validated) and address. Local-only — see db/chitti.ts.
 
 import React, { useCallback, useMemo, useState } from 'react';
-import { View, Text, ScrollView, StyleSheet, TouchableOpacity, TextInput, Alert } from 'react-native';
+import { View, Text, ScrollView, StyleSheet, TouchableOpacity, Alert } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter, useFocusEffect } from 'expo-router';
 import { FIN } from '../../../constants/financeTheme';
-import { FinHeader, HeroCard, Segment, StatTile, Field, Btn } from '../../../components/finance/ui';
-import { inrShort, fmtDate, num } from '../../../utils/financeFormat';
+import { FinHeader, HeroCard, Segment, StatTile, Field, Btn, Label, Card } from '../../../components/finance/ui';
+import { inrShort, fmtDate, fmtDateTime, num } from '../../../utils/financeFormat';
 import { formatINR } from '../../../utils/interest';
 import {
-  getGroup, deleteGroup, insertMember, listMembers, deleteMember,
+  getGroup, deleteGroup, insertMember, updateMember, listMembers, deleteMember, normalizeMobile,
   markCollection, listCollections, recordAuction, listAuctions, deleteAuction,
   type ChittiGroup, type ChittiMember, type ChittiCollection, type CollectionStatus, type ChittiAuction,
 } from '../../../db/chitti';
+import { listTimeline, type TimelineRow } from '../../../db/financeTimeline';
+import { splitEvenly } from '../../../utils/money';
 
-type Tab = 'members' | 'collections' | 'auctions';
+type Tab = 'members' | 'collections' | 'auctions' | 'history';
 const CYCLE: CollectionStatus[] = ['pending', 'paid', 'overdue'];
 const COL_META: Record<CollectionStatus, { fg: string; bg: string; label: string; icon: keyof typeof Ionicons.glyphMap }> = {
   paid:    { fg: FIN.good, bg: FIN.goodSoft, label: 'Paid',    icon: 'checkmark-circle' },
@@ -31,8 +33,15 @@ export default function ChittiDetail() {
   const [members, setMembers] = useState<ChittiMember[]>([]);
   const [collections, setCollections] = useState<ChittiCollection[]>([]);
   const [auctions, setAuctions] = useState<ChittiAuction[]>([]);
+  const [timeline, setTimeline] = useState<TimelineRow[]>([]);
   const [month, setMonth] = useState(1);
-  const [newMember, setNewMember] = useState('');
+
+  // member add/edit form — one card serves both, keyed by editingId
+  const [showMemberForm, setShowMemberForm] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [mName, setMName] = useState('');
+  const [mPhone, setMPhone] = useState('');
+  const [mAddress, setMAddress] = useState('');
 
   // auction form
   const [winnerId, setWinnerId] = useState<string | null>(null);
@@ -45,6 +54,7 @@ export default function ChittiDetail() {
     listMembers(id).then(setMembers);
     listCollections(id).then(setCollections);
     listAuctions(id).then(setAuctions);
+    listTimeline('chitti', id).then(setTimeline).catch(() => {});
   }, [id]);
   useFocusEffect(reload);
 
@@ -58,12 +68,34 @@ export default function ChittiDetail() {
     [members, statusFor],
   );
 
-  if (!g) return <View style={s.screen}><FinHeader title="Chitti Group" /></View>;
+  if (!g) return <View style={s.screen}><FinHeader title="Lucky Draw Group" /></View>;
 
-  const addMember = async () => {
-    if (!newMember.trim()) return;
-    await insertMember({ group_id: g.id, name: newMember.trim(), phone: null, number: members.length + 1 });
-    setNewMember('');
+  const openAddMember = () => {
+    setEditingId(null); setMName(''); setMPhone(''); setMAddress('');
+    setShowMemberForm(true);
+  };
+  const openEditMember = (m: ChittiMember) => {
+    setEditingId(m.id); setMName(m.name); setMPhone(m.phone ?? ''); setMAddress(m.address ?? '');
+    setShowMemberForm(true);
+  };
+  const closeMemberForm = () => setShowMemberForm(false);
+
+  const saveMember = async () => {
+    const name = mName.trim();
+    if (!name) return Alert.alert('Name', 'Enter the member’s name.');
+    let phone: string | null = null;
+    if (mPhone.trim()) {
+      const norm = normalizeMobile(mPhone);
+      if (!norm) return Alert.alert('Mobile number', 'Enter a valid 10-digit mobile number.');
+      phone = norm;
+    }
+    const address = mAddress.trim() || null;
+    if (editingId) {
+      await updateMember(editingId, { name, phone, address });
+    } else {
+      await insertMember({ group_id: g.id, name, phone, address, number: members.length + 1 });
+    }
+    setShowMemberForm(false);
     reload();
   };
 
@@ -83,13 +115,15 @@ export default function ChittiDetail() {
     setBid(''); setCommission(''); setWinnerId(null);
     reload();
   };
-  const previewDividend = () => {
+  // Mirrors recordAuction exactly, so the preview can never promise a number
+  // the recorded auction won't produce.
+  const previewSplit = () => {
     const b = num(bid), c = num(commission) || 0;
-    if (!(b > 0)) return 0;
-    return Math.max(0, b - c) / (g.members || 1);
+    if (!(b > 0)) return { each: 0, remainder: 0, remainderPaise: 0 };
+    return splitEvenly(Math.max(0, b - c), g.members || 1);
   };
 
-  const onDelete = () => Alert.alert('Delete group?', `Delete ${g.name} and all its members/collections?`, [
+  const onDelete = () => Alert.alert('Delete group?', `Delete ${g.name} with its members, dues, auctions and history? This cannot be undone.`, [
     { text: 'Cancel', style: 'cancel' },
     { text: 'Delete', style: 'destructive', onPress: () => deleteGroup(g.id).then(() => router.back()) },
   ]);
@@ -99,7 +133,20 @@ export default function ChittiDetail() {
   return (
     <View style={s.screen}>
       <FinHeader title={g.name} right={
-        <TouchableOpacity onPress={onDelete} hitSlop={8}><Ionicons name="trash-outline" size={20} color={FIN.bad} /></TouchableOpacity>
+        <>
+          {/* Reuses the existing finance reminders flow (local notifications)
+              via its refType/refId/title prefill — no separate scheduler. */}
+          <TouchableOpacity
+            onPress={() => router.push({
+              pathname: '/finance/reminders',
+              params: { refType: 'chitti', refId: g.id, title: `${g.name} — collection due` },
+            })}
+            hitSlop={8}
+          >
+            <Ionicons name="notifications-outline" size={20} color={FIN.brandDeep} />
+          </TouchableOpacity>
+          <TouchableOpacity onPress={onDelete} hitSlop={8}><Ionicons name="trash-outline" size={20} color={FIN.bad} /></TouchableOpacity>
+        </>
       } />
       <ScrollView contentContainerStyle={s.body} showsVerticalScrollIndicator={false}>
         <HeroCard>
@@ -118,24 +165,46 @@ export default function ChittiDetail() {
         </View>
 
         <View style={{ marginTop: 16 }}>
-          <Segment<Tab> options={[{ k: 'members', label: 'Members' }, { k: 'collections', label: 'Collections' }, { k: 'auctions', label: 'Auctions' }]} value={tab} onChange={setTab} small />
+          <Segment<Tab> options={[{ k: 'members', label: 'Members' }, { k: 'collections', label: 'Dues' }, { k: 'auctions', label: 'Auctions' }, { k: 'history', label: 'History' }]} value={tab} onChange={setTab} small />
         </View>
 
         {tab === 'members' ? (
           <>
             {/* @members */}
-            <View style={s.addRow}>
-              <TextInput style={s.addInput} value={newMember} onChangeText={setNewMember} placeholder="Add member name" placeholderTextColor={FIN.faint} onSubmitEditing={addMember} returnKeyType="done" />
-              <TouchableOpacity style={s.addBtn} onPress={addMember}><Ionicons name="add" size={22} color="#fff" /></TouchableOpacity>
-            </View>
+            {showMemberForm ? (
+              <Card style={{ marginTop: 16 }}>
+                <Label>Name</Label>
+                <Field value={mName} onChangeText={setMName} placeholder="Member's full name" />
+                <Label hint="(optional)">Mobile Number</Label>
+                <Field value={mPhone} onChangeText={setMPhone} placeholder="e.g. 98765 43210" keyboardType="phone-pad" />
+                <Label hint="(optional)">Address</Label>
+                <Field value={mAddress} onChangeText={setMAddress} placeholder="Door no., street, area, city" multiline />
+                <View style={{ flexDirection: 'row', gap: 8, marginTop: 14 }}>
+                  <Btn label="Cancel" kind="ghost" onPress={closeMemberForm} wide />
+                  <Btn label={editingId ? 'Save Changes' : 'Add Member'} icon="checkmark" onPress={saveMember} wide />
+                </View>
+              </Card>
+            ) : (
+              <TouchableOpacity style={s.addRow} onPress={openAddMember} activeOpacity={0.85}>
+                <View style={s.addBtn}><Ionicons name="add" size={20} color="#fff" /></View>
+                <Text style={s.addRowTxt}>Add member</Text>
+              </TouchableOpacity>
+            )}
             {members.length === 0 ? <Text style={s.empty}>No members yet — add them above.</Text> : members.map(m => (
-              <View key={m.id} style={s.memRow}>
+              <TouchableOpacity key={m.id} style={s.memRow} activeOpacity={0.85} onPress={() => openEditMember(m)}>
                 <View style={s.memNum}><Text style={s.memNumTxt}>{m.number}</Text></View>
-                <Text style={s.memName}>{m.name}</Text>
+                <View style={{ flex: 1, minWidth: 0 }}>
+                  <Text style={s.memName} numberOfLines={1}>{m.name}</Text>
+                  {(m.phone || m.address) && (
+                    <Text style={s.memSub} numberOfLines={1}>
+                      {[m.phone, m.address].filter(Boolean).join(' · ')}
+                    </Text>
+                  )}
+                </View>
                 <TouchableOpacity onPress={() => deleteMember(m.id).then(reload)} hitSlop={8}>
                   <Ionicons name="close" size={16} color={FIN.faint} />
                 </TouchableOpacity>
-              </View>
+              </TouchableOpacity>
             ))}
           </>
         ) : tab === 'collections' ? (
@@ -154,7 +223,7 @@ export default function ChittiDetail() {
               return (
                 <TouchableOpacity key={m.id} style={s.memRow} activeOpacity={0.85} onPress={() => cycleStatus(m)}>
                   <View style={s.memNum}><Text style={s.memNumTxt}>{m.number}</Text></View>
-                  <Text style={s.memName}>{m.name}</Text>
+                  <Text style={[s.memName, { flex: 1 }]} numberOfLines={1}>{m.name}</Text>
                   <View style={[s.colPill, { backgroundColor: meta.bg }]}>
                     <Ionicons name={meta.icon} size={13} color={meta.fg} />
                     <Text style={[s.colTxt, { color: meta.fg }]}>{meta.label}</Text>
@@ -164,7 +233,7 @@ export default function ChittiDetail() {
             })}
             {members.length > 0 && <Text style={s.hint}>Tap a row to cycle Pending → Paid → Overdue</Text>}
           </>
-        ) : (
+        ) : tab === 'auctions' ? (
           <>
             {/* @auctions */}
             {members.length === 0 ? <Text style={s.empty}>Add members first to record auctions.</Text> : (
@@ -189,7 +258,19 @@ export default function ChittiDetail() {
                   <View style={{ flex: 1 }}><Text style={s.formLabel}>Winning bid</Text><Field value={bid} onChangeText={setBid} placeholder="₹ 0" keyboardType="numeric" /></View>
                   <View style={{ flex: 1 }}><Text style={s.formLabel}>Commission</Text><Field value={commission} onChangeText={setCommission} placeholder="₹ 0" keyboardType="numeric" /></View>
                 </View>
-                <Text style={s.dividendHint}>Dividend / member ≈ {formatINR(previewDividend())}</Text>
+                {(() => {
+                  const sp = previewSplit();
+                  return (
+                    <>
+                      <Text style={s.dividendHint}>Dividend / member {formatINR(sp.each)} × {g.members}</Text>
+                      {sp.remainderPaise > 0 && (
+                        <Text style={s.dividendNote}>
+                          {formatINR(sp.remainder)} cannot divide evenly and stays in the pot.
+                        </Text>
+                      )}
+                    </>
+                  );
+                })()}
                 <View style={{ marginTop: 10 }}><Btn label="Record Auction" icon="hammer-outline" onPress={submitAuction} wide /></View>
               </View>
             )}
@@ -204,6 +285,21 @@ export default function ChittiDetail() {
                   <Text style={s.aDiv}>Dividend/member {formatINR(a.dividend)}</Text>
                 </View>
                 <TouchableOpacity onPress={() => deleteAuction(a.id).then(reload)} hitSlop={8}><Ionicons name="close" size={16} color={FIN.faint} /></TouchableOpacity>
+              </View>
+            ))}
+          </>
+        ) : (
+          <>
+            {/* @history — append-only record of every change to this group. */}
+            {timeline.length === 0 ? (
+              <Text style={s.empty}>No activity yet. Adding members and marking dues will show up here.</Text>
+            ) : timeline.map(t => (
+              <View key={t.id} style={s.histRow}>
+                <View style={s.histDot} />
+                <View style={{ flex: 1, minWidth: 0 }}>
+                  <Text style={s.histTxt}>{t.detail}</Text>
+                  <Text style={s.histAt}>{fmtDateTime(t.at)}</Text>
+                </View>
               </View>
             ))}
           </>
@@ -223,14 +319,15 @@ const s = StyleSheet.create({
   heroFootTxt: { color: 'rgba(255,255,255,0.9)', fontSize: 12, fontWeight: '600' },
   tileRow: { flexDirection: 'row', gap: 8, marginTop: 12 },
 
-  addRow: { flexDirection: 'row', gap: 8, marginTop: 16 },
-  addInput: { flex: 1, backgroundColor: FIN.card, borderWidth: 1, borderColor: FIN.border, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 11, fontSize: 15, color: FIN.text },
-  addBtn: { width: 48, borderRadius: 10, backgroundColor: FIN.brandDeep, alignItems: 'center', justifyContent: 'center' },
+  addRow: { flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 16, backgroundColor: FIN.card, borderRadius: 12, padding: 10, borderWidth: 1, borderColor: FIN.border },
+  addRowTxt: { color: FIN.brandDeep, fontSize: 14.5, fontWeight: '700' },
+  addBtn: { width: 36, height: 36, borderRadius: 10, backgroundColor: FIN.brandDeep, alignItems: 'center', justifyContent: 'center' },
 
   memRow: { flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: FIN.card, borderRadius: 12, padding: 13, marginTop: 10, borderWidth: 1, borderColor: FIN.border },
   memNum: { width: 26, height: 26, borderRadius: 13, backgroundColor: FIN.brandSoft, alignItems: 'center', justifyContent: 'center' },
   memNumTxt: { color: FIN.brandDeep, fontSize: 12, fontWeight: '800' },
-  memName: { flex: 1, color: FIN.text, fontSize: 15, fontWeight: '600' },
+  memName: { color: FIN.text, fontSize: 15, fontWeight: '600' },
+  memSub: { color: FIN.sub, fontSize: 12, marginTop: 2 },
 
   monthRow: { gap: 8, paddingVertical: 14 },
   monthChip: { paddingHorizontal: 14, paddingVertical: 8, borderRadius: 999, borderWidth: 1, borderColor: FIN.border, backgroundColor: FIN.card },
@@ -250,6 +347,7 @@ const s = StyleSheet.create({
   winnerChipOn: { backgroundColor: FIN.brand, borderColor: FIN.brand },
   winnerTxt: { color: FIN.sub, fontSize: 12.5, fontWeight: '700' },
   dividendHint: { color: FIN.brandDeep, fontSize: 12.5, fontWeight: '700', marginTop: 10 },
+  dividendNote: { color: FIN.sub, fontSize: 11.5, marginTop: 3 },
 
   auctionRow: { flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: FIN.card, borderRadius: 12, padding: 13, marginTop: 10, borderWidth: 1, borderColor: FIN.border },
   aMonth: { width: 34, height: 34, borderRadius: 10, backgroundColor: FIN.brandSoft, alignItems: 'center', justifyContent: 'center' },
@@ -257,4 +355,9 @@ const s = StyleSheet.create({
   aWinner: { color: FIN.text, fontSize: 14.5, fontWeight: '700' },
   aSub: { color: FIN.sub, fontSize: 12, marginTop: 2 },
   aDiv: { color: FIN.good, fontSize: 12, fontWeight: '700', marginTop: 2 },
+
+  histRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 10, backgroundColor: FIN.card, borderRadius: 12, padding: 13, marginTop: 10, borderWidth: 1, borderColor: FIN.border },
+  histDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: FIN.brand, marginTop: 5 },
+  histTxt: { color: FIN.text, fontSize: 13.5, fontWeight: '600' },
+  histAt: { color: FIN.sub, fontSize: 11.5, marginTop: 3 },
 });

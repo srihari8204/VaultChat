@@ -9,6 +9,7 @@ import { useLocalSearchParams, useRouter, useFocusEffect } from 'expo-router';
 import { FIN, STATUS_COLORS } from '../../constants/financeTheme';
 import { FinHeader, HeroCard, StatTile, Pill, EmptyState } from '../../components/finance/ui';
 import { useMe } from '../../components/finance/useMe';
+import { sumRupees } from '../../utils/money';
 import { formatINR, fmtDate, inrShort, PERIOD_LABEL } from '../../utils/financeFormat';
 import { listLedger, type LedgerEntry } from '../../db/ledger';
 
@@ -24,14 +25,14 @@ export default function CustomerProfile() {
   }, [me, name]);
   useFocusEffect(reload);
 
-  const totals = useMemo(() => {
-    let lent = 0, borrowed = 0, remaining = 0;
-    for (const l of rows) {
-      if (l.direction === 'lend') { lent += l.principal; remaining += l.remaining; }
-      else borrowed += l.principal;
-    }
-    return { lent, borrowed, remaining };
-  }, [rows]);
+  // Paise-exact, same rule as the dashboard and reports — a customer's total
+  // that disagrees with the dashboard by a paise is the kind of thing an
+  // organizer notices and cannot explain.
+  const totals = useMemo(() => ({
+    lent: sumRupees(rows.filter(l => l.direction === 'lend').map(l => l.principal)),
+    borrowed: sumRupees(rows.filter(l => l.direction !== 'lend').map(l => l.principal)),
+    remaining: sumRupees(rows.filter(l => l.direction === 'lend').map(l => l.remaining)),
+  }), [rows]);
 
   const mobile = rows.find(r => r.mobile)?.mobile ?? null;
 
@@ -49,7 +50,7 @@ export default function CustomerProfile() {
 
         <HeroCard>
           <Text style={s.heroLabel}>NET POSITION</Text>
-          <Text style={s.heroVal}>{inrShort(totals.lent - totals.borrowed)}</Text>
+          <Text style={s.heroVal}>{inrShort(sumRupees([totals.lent, -totals.borrowed]))}</Text>
           <View style={s.heroFoot}>
             <Text style={s.heroFootTxt}>Lent {inrShort(totals.lent)}</Text>
             <Text style={s.heroFootTxt}>Borrowed {inrShort(totals.borrowed)}</Text>

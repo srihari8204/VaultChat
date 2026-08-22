@@ -17,6 +17,14 @@ export async function financeDb(): Promise<SQLite.SQLiteDatabase> {
   _ready = (async () => {
     const d = await SQLite.openDatabaseAsync('interest.db');
     await d.execAsync(SCHEMA);
+    // Additive migration: CREATE TABLE IF NOT EXISTS above is a no-op on an
+    // install that already has chitti_members without `address`. ALTER TABLE
+    // ADD COLUMN has no IF NOT EXISTS in SQLite, so guard it by checking the
+    // column list first — safe to run on every boot.
+    const cols = await d.getAllAsync<{ name: string }>(`PRAGMA table_info(chitti_members)`);
+    if (!cols.some(c => c.name === 'address')) {
+      await d.execAsync(`ALTER TABLE chitti_members ADD COLUMN address TEXT`);
+    }
     _db = d;
     return d;
   })();
@@ -95,6 +103,7 @@ CREATE TABLE IF NOT EXISTS chitti_members (
   group_id   TEXT NOT NULL,
   name       TEXT NOT NULL,
   phone      TEXT,
+  address    TEXT,
   number     INTEGER NOT NULL,         -- member number in the group
   created_at INTEGER NOT NULL
 );

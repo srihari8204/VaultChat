@@ -11,12 +11,15 @@ import { FinHeader, Segment, Btn, Card } from '../../components/finance/ui';
 import { useMe } from '../../components/finance/useMe';
 import { fmtDate } from '../../utils/financeFormat';
 import { listLedger, insertLedger } from '../../db/ledger';
-import { listGroups } from '../../db/chitti';
-import { exportCsv, exportExcel } from '../../utils/financeIO';
+import { listGroups, listMembers, listCollections, listAuctions } from '../../db/chitti';
+import { exportCsv, exportExcel, shareTextFile } from '../../utils/financeIO';
+import { buildBackup, restoreBackup } from '../../db/financeBackup';
 import type { LedgerPeriod } from '../../utils/finance';
 
-type Dataset = 'ledger' | 'chitti';
+type Dataset = 'ledger' | 'chitti' | 'backup';
 type Format = 'excel' | 'csv';
+
+const LD_HEADERS = ['Group', 'MemberNo', 'Name', 'Mobile', 'Address', 'Paid', 'Pending', 'Overdue', 'Won'];
 
 const LEDGER_HEADERS = ['Name', 'Mobile', 'Direction', 'InterestType', 'Principal', 'Rate', 'RateMode', 'Period', 'Remaining', 'Status', 'Notes', 'Created'];
 
@@ -33,26 +36,74 @@ export default function FinanceIO() {
         if (rows.length === 0) return Alert.alert('Nothing to export', 'No ledgers yet.');
         const data = rows.map(l => [l.name, l.mobile ?? '', l.direction, l.interest_type, l.principal, l.rate, l.rate_mode, l.period, l.remaining, l.status, l.notes ?? '', fmtDate(l.created_at)]);
         format === 'excel' ? await exportExcel('vault-ledger', LEDGER_HEADERS, data) : await exportCsv('vault-ledger', LEDGER_HEADERS, data);
+      } else if (dataset === 'backup') {
+        // Full round-trippable backup — the only export that can be restored.
+        const snap = await buildBackup(me.id);
+        if (snap.ledgers.length === 0 && snap.groups.length === 0) {
+          return Alert.alert('Nothing to back up', 'Add a ledger or a Lucky Draw group first.');
+        }
+        const stamp = new Date().toISOString().slice(0, 10);
+        const n = snap.groups.length + snap.ledgers.length;
+        await shareTextFile(`vault-finance-backup-${stamp}.json`, JSON.stringify(snap), 'application/json');
+        // Explicit confirmation: this file is the only restore path, and the
+        // share sheet is easy to dismiss by accident. Without this the user
+        // cannot tell "backed up" from "nothing happened".
+        Alert.alert('Backup created',
+          `${n} record${n === 1 ? '' : 's'} saved to vault-finance-backup-${stamp}.json.\n\n` +
+          'Save it to Drive or Files — it stays only on this device otherwise.');
       } else {
+        // Member-level sheet: one row per member with their dues tally. Far more
+        // useful to an organizer than the old group-only sheet, which omitted
+        // every member, collection and auction.
         const groups = await listGroups(me.id);
-        if (groups.length === 0) return Alert.alert('Nothing to export', 'No chitti groups yet.');
-        const headers = ['Name', 'ChitValue', 'Installment', 'Members', 'Duration', 'Foreman', 'Status', 'Start'];
-        const data = groups.map(g => [g.name, g.chit_value, g.installment, g.members, g.duration, g.foreman ?? '', g.status, fmtDate(g.start_date)]);
-        format === 'excel' ? await exportExcel('vault-chitti', headers, data) : await exportCsv('vault-chitti', headers, data);
+        if (groups.length === 0) return Alert.alert('Nothing to export', 'No Lucky Draw groups yet.');
+        const data: (string | number)[][] = [];
+        for (const g of groups) {
+          const [members, cols, aucs] = await Promise.all([
+            listMembers(g.id), listCollections(g.id), listAuctions(g.id),
+          ]);
+          for (const m of members) {
+            const mine = cols.filter(c => c.member_id === m.id);
+            const won = aucs.filter(a => a.winner_id === m.id).map(a => `M${a.month}`).join(' ');
+            data.push([
+              g.name, m.number, m.name, m.phone ?? '', m.address ?? '',
+              mine.filter(c => c.status === 'paid').length,
+              mine.filter(c => c.status === 'pending').length,
+              mine.filter(c => c.status === 'overdue').length,
+              won,
+            ]);
+          }
+        }
+        if (data.length === 0) return Alert.alert('Nothing to export', 'Your Lucky Draw groups have no members yet.');
+        format === 'excel' ? await exportExcel('vault-lucky-draw', LD_HEADERS, data) : await exportCsv('vault-lucky-draw', LD_HEADERS, data);
       }
     } catch (e: any) { Alert.alert('Export failed', e?.message ?? 'Try again'); }
   };
 
   const onImport = async () => {
     if (!me) return;
-    if (dataset !== 'ledger') return Alert.alert('Ledger only', 'CSV import currently supports the Ledger Book.');
+    if (dataset === 'chitti') {
+      return Alert.alert('Use Full Backup', 'The Lucky Draw sheet is for reading in Excel. To restore Lucky Draw data, choose Full Backup and import the .json file.');
+    }
     try {
-      const res = await DocumentPicker.getDocumentAsync({ type: ['text/csv', 'text/comma-separated-values', 'application/vnd.ms-excel', '*/*'], copyToCacheDirectory: true });
+      const res = await DocumentPicker.getDocumentAsync({ type: ['*/*'], copyToCacheDirectory: true });
       if (res.canceled || !res.assets?.[0]) return;
       const content = await FileSystem.readAsStringAsync(res.assets[0].uri);
+
+      if (dataset === 'backup') {
+        const parsed = JSON.parse(content);
+        const c = await restoreBackup(me.id, parsed);
+        return Alert.alert('Restore complete',
+          `${c.groups} Lucky Draw group${c.groups === 1 ? '' : 's'}, ${c.members} member${c.members === 1 ? '' : 's'}, ` +
+          `${c.collections} due${c.collections === 1 ? '' : 's'}, ${c.auctions} auction${c.auctions === 1 ? '' : 's'} and ` +
+          `${c.ledgers} ledger${c.ledgers === 1 ? '' : 's'} restored.`);
+      }
+
       const count = await importLedgerCsv(me.id, content);
       Alert.alert('Import complete', `${count} ledger${count === 1 ? '' : 's'} imported.`);
-    } catch (e: any) { Alert.alert('Import failed', e?.message ?? 'Could not read the file.'); }
+    } catch (e: any) {
+      Alert.alert('Import failed', e?.message ?? 'Could not read the file.');
+    }
   };
 
   return (
@@ -60,24 +111,48 @@ export default function FinanceIO() {
       <FinHeader title="Import / Export" />
       <ScrollView contentContainerStyle={s.body} showsVerticalScrollIndicator={false}>
         <Text style={s.label}>Data</Text>
-        <Segment<Dataset> options={[{ k: 'ledger', label: 'Ledger Book' }, { k: 'chitti', label: 'Chitti Paata' }]} value={dataset} onChange={setDataset} />
+        <Segment<Dataset>
+          options={[{ k: 'ledger', label: 'Ledger' }, { k: 'chitti', label: 'Lucky Draw' }, { k: 'backup', label: 'Full Backup' }]}
+          value={dataset} onChange={setDataset}
+        />
 
-        <Text style={s.label}>Format</Text>
-        <Segment<Format> options={[{ k: 'excel', label: 'Excel (.xls)' }, { k: 'csv', label: 'CSV' }]} value={format} onChange={setFormat} />
+        {dataset !== 'backup' && (
+          <>
+            <Text style={s.label}>Format</Text>
+            <Segment<Format> options={[{ k: 'excel', label: 'Excel (.xls)' }, { k: 'csv', label: 'CSV' }]} value={format} onChange={setFormat} />
+          </>
+        )}
 
         <Card style={{ marginTop: 20 }}>
-          <View style={s.infoRow}><Ionicons name="cloud-upload-outline" size={18} color={FIN.brandDeep} /><Text style={s.infoTxt}>Export creates a file you can share or back up. Everything stays on your device.</Text></View>
+          <View style={s.infoRow}>
+            <Ionicons name={dataset === 'backup' ? 'shield-checkmark-outline' : 'cloud-upload-outline'} size={18} color={FIN.brandDeep} />
+            <Text style={s.infoTxt}>
+              {dataset === 'backup'
+                ? 'A complete .json copy of your ledgers and Lucky Draw groups — members, dues, auctions and history. This is the only export you can restore from. Keep it somewhere safe.'
+                : 'Export creates a spreadsheet you can share or print. Everything stays on your device.'}
+            </Text>
+          </View>
         </Card>
 
         <View style={{ marginTop: 16 }}>
-          <Btn label={`Export ${dataset === 'ledger' ? 'Ledger' : 'Chitti'}`} icon="download-outline" onPress={onExport} wide />
+          <Btn
+            label={dataset === 'backup' ? 'Export Full Backup' : `Export ${dataset === 'ledger' ? 'Ledger' : 'Lucky Draw'}`}
+            icon="download-outline" onPress={onExport} wide
+          />
         </View>
         <View style={{ marginTop: 12 }}>
-          <Btn label="Import Ledger from CSV" kind="ghost" icon="cloud-upload-outline" onPress={onImport} wide />
+          <Btn
+            label={dataset === 'backup' ? 'Restore from Backup' : 'Import Ledger from CSV'}
+            kind="ghost" icon="cloud-upload-outline" onPress={onImport} wide
+          />
         </View>
 
         <Text style={s.hint}>
-          CSV import expects the same columns as the export:{'\n'}{LEDGER_HEADERS.join(', ')}
+          {dataset === 'backup'
+            ? 'Restoring merges the file into your data — rows you already have are updated, nothing is deleted. Importing the same file twice is safe.'
+            : dataset === 'chitti'
+              ? `Spreadsheet columns:\n${LD_HEADERS.join(', ')}\n\nTo restore Lucky Draw data, use Full Backup.`
+              : `CSV import expects the same columns as the export:\n${LEDGER_HEADERS.join(', ')}`}
         </Text>
         <View style={{ height: 30 }} />
       </ScrollView>

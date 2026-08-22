@@ -1,4 +1,4 @@
-// app/finance/chitti/new.tsx — Create a Chitti Paata group.
+// app/finance/chitti/new.tsx — Create a Lucky Draw group.
 
 import React, { useState } from 'react';
 import { View, ScrollView, StyleSheet, Alert, KeyboardAvoidingView, Platform } from 'react-native';
@@ -42,7 +42,7 @@ export default function NewChitti() {
 
   return (
     <View style={s.screen}>
-      <FinHeader title="New Chitti Group" />
+      <FinHeader title="New Lucky Draw Group" />
       <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
         <ScrollView contentContainerStyle={s.body} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
           <Label>Group Name</Label>

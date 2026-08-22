@@ -1,4 +1,4 @@
-// app/finance/chitti/index.tsx — Chitti Paata group list with progress + status.
+// app/finance/chitti/index.tsx — Lucky Draw group list with progress + status.
 
 import React, { useCallback, useMemo, useState } from 'react';
 import { View, Text, ScrollView, StyleSheet, TouchableOpacity } from 'react-native';
@@ -40,7 +40,7 @@ export default function ChittiList() {
 
   return (
     <View style={s.screen}>
-      <FinHeader title="Chitti Paata" right={
+      <FinHeader title="Lucky Draw" right={
         <TouchableOpacity onPress={() => router.push('/finance/chitti/new')} hitSlop={8}>
           <Ionicons name="add-circle" size={26} color={FIN.brandDeep} />
         </TouchableOpacity>
@@ -53,7 +53,7 @@ export default function ChittiList() {
       </View>
       <ScrollView contentContainerStyle={s.body} showsVerticalScrollIndicator={false}>
         {shown.length === 0 ? (
-          <EmptyState icon="people-outline" title={`No ${tab} groups`} sub="Create a chit-fund group to track members and collections." />
+          <EmptyState icon="people-outline" title={`No ${tab} groups`} sub="Create a Lucky Draw group to track members and collections." />
         ) : shown.map(g => (
           <TouchableOpacity key={g.id} style={s.card} activeOpacity={0.85}
             onPress={() => router.push({ pathname: '/finance/chitti/[id]', params: { id: g.id } })}>
@@ -70,7 +70,7 @@ export default function ChittiList() {
       </ScrollView>
       <TouchableOpacity style={s.fab} activeOpacity={0.9} onPress={() => router.push('/finance/chitti/new')}>
         <Ionicons name="add" size={22} color="#fff" />
-        <Text style={s.fabTxt}>New Chitti Group</Text>
+        <Text style={s.fabTxt}>New Lucky Draw Group</Text>
       </TouchableOpacity>
     </View>
   );

@@ -19,7 +19,7 @@ type Tab = 'all' | Kind;
 const KIND_META: Record<Kind, { label: string; fg: string; bg: string }> = {
   ledger:   { label: 'Ledger',   fg: FIN.good, bg: FIN.goodSoft },
   interest: { label: 'Interest', fg: FIN.warn, bg: FIN.warnSoft },
-  chitti:   { label: 'Chitti',   fg: FIN.info, bg: FIN.infoSoft },
+  chitti:   { label: 'Lucky Draw', fg: FIN.info, bg: FIN.infoSoft },
 };
 
 export default function Saved() {
@@ -66,13 +66,13 @@ export default function Saved() {
       <FinHeader title="Saved & History" />
       <View style={s.filterWrap}>
         <Segment<Tab>
-          options={[{ k: 'all', label: 'All' }, { k: 'ledger', label: 'Ledger' }, { k: 'interest', label: 'Interest' }, { k: 'chitti', label: 'Chitti' }]}
+          options={[{ k: 'all', label: 'All' }, { k: 'ledger', label: 'Ledger' }, { k: 'interest', label: 'Interest' }, { k: 'chitti', label: 'Lucky Draw' }]}
           value={tab} onChange={setTab} small
         />
       </View>
       <ScrollView contentContainerStyle={s.body} showsVerticalScrollIndicator={false}>
         {shown.length === 0 ? (
-          <EmptyState icon="bookmark-outline" title="Nothing saved yet" sub="Ledgers, interest calculations and chitti groups you create show up here." />
+          <EmptyState icon="bookmark-outline" title="Nothing saved yet" sub="Ledgers, interest calculations and Lucky Draw groups you create show up here." />
         ) : shown.map(item => {
           const m = KIND_META[item.kind];
           return (

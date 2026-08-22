@@ -6,6 +6,7 @@
 
 import { financeDb, uuid, now } from './financeDb';
 import { addTimeline } from './financeTimeline';
+import { toPaise, fromPaise } from '../utils/money';
 import type { LedgerStatus } from '../constants/financeTheme';
 import type { LedgerPeriod } from '../utils/finance';
 
@@ -44,10 +45,14 @@ type NewLedger = Omit<LedgerEntry, 'id' | 'created_at' | 'last_updated' | 'remai
 export async function insertLedger(row: NewLedger): Promise<LedgerEntry> {
   const d = await financeDb();
   const t = now();
+  // Money normalised to paise at the write boundary — same rule as db/chitti.ts,
+  // so totals across the two halves of the finance DB cannot drift apart.
+  const principal = fromPaise(toPaise(row.principal));
   const full: LedgerEntry = {
     ...row,
     id: uuid(),
-    remaining: row.remaining ?? row.principal,
+    principal,
+    remaining: fromPaise(toPaise(row.remaining ?? principal)),
     status: row.status ?? 'running',
     created_at: t,
     last_updated: t,
@@ -81,6 +86,9 @@ export async function deleteLedger(id: string): Promise<void> {
   const d = await financeDb();
   await d.runAsync(`DELETE FROM ledger_entries WHERE id = ?`, [id]);
   await d.runAsync(`DELETE FROM ledger_updates WHERE ledger_id = ?`, [id]);
+  // Same rule as deleteGroup: no FKs, no cascades, so the history has to be
+  // named explicitly or it outlives the ledger it describes, unreachable.
+  await d.runAsync(`DELETE FROM finance_timeline WHERE ref_type = 'ledger' AND ref_id = ?`, [id]);
 }
 
 /** Re-insert a full row verbatim — used to restore an undo-deleted ledger. */
@@ -96,9 +104,13 @@ export async function restoreLedger(e: LedgerEntry): Promise<void> {
 }
 
 /** Record a manual amount update: log it, set remaining + status, timeline it. */
-export async function addLedgerUpdate(ledgerId: string, received: number, remaining: number, note: string | null): Promise<void> {
+export async function addLedgerUpdate(ledgerId: string, rawReceived: number, rawRemaining: number, note: string | null): Promise<void> {
   const d = await financeDb();
   const t = now();
+  // Repayments are where drift would compound fastest — every update rewrites
+  // `remaining`, so an unrounded value would carry forward into the next one.
+  const received = fromPaise(toPaise(rawReceived));
+  const remaining = fromPaise(toPaise(rawRemaining));
   const status: LedgerStatus = remaining <= 0 ? 'completed' : 'running';
   await d.runAsync(
     `INSERT INTO ledger_updates (id,ledger_id,received,remaining,note,updated_at) VALUES (?,?,?,?,?,?)`,
@@ -124,10 +136,11 @@ export async function updateLedgerDetails(id: string, f: EditableFields): Promis
   const d = await financeDb();
   const cur = await d.getFirstAsync<LedgerEntry>(`SELECT * FROM ledger_entries WHERE id = ?`, [id]);
   if (!cur) return;
-  const remaining = cur.remaining === cur.principal ? f.principal : cur.remaining;
+  const principal = fromPaise(toPaise(f.principal));
+  const remaining = fromPaise(toPaise(cur.remaining === cur.principal ? principal : cur.remaining));
   await d.runAsync(
     `UPDATE ledger_entries SET name=?, mobile=?, interest_type=?, principal=?, rate=?, rate_mode=?, period=?, start_date=?, end_date=?, notes=?, remaining=?, last_updated=? WHERE id=?`,
-    [f.name, f.mobile, f.interest_type, f.principal, f.rate, f.rate_mode, f.period, f.start_date, f.end_date, f.notes, remaining, now(), id],
+    [f.name, f.mobile, f.interest_type, principal, f.rate, f.rate_mode, f.period, f.start_date, f.end_date, f.notes, remaining, now(), id],
   );
   await addTimeline('ledger', id, 'edit', `Terms edited · ${f.name} · ₹${f.principal.toLocaleString('en-IN')} @ ${f.rate}${f.rate_mode === 'rupees' ? '₹' : '%'} ${f.period}`);
 }

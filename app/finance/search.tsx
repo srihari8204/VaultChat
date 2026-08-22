@@ -63,7 +63,7 @@ export default function FinanceSearch() {
       </View>
 
       <ScrollView contentContainerStyle={s.body} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
-        {query.length === 0 && <EmptyState icon="search-outline" title="Search your finances" sub="Find ledgers and chitti groups by name, mobile number or amount." />}
+        {query.length === 0 && <EmptyState icon="search-outline" title="Search your finances" sub="Find ledgers and Lucky Draw groups by name, mobile number or amount." />}
         {empty && <EmptyState icon="sad-outline" title="No matches" sub={`Nothing found for “${q}”.`} />}
 
         {matchedLedgers.length > 0 && <Text style={s.section}>Ledgers · {matchedLedgers.length}</Text>}
@@ -85,7 +85,7 @@ export default function FinanceSearch() {
           );
         })}
 
-        {matchedGroups.length > 0 && <Text style={s.section}>Chitti groups · {matchedGroups.length}</Text>}
+        {matchedGroups.length > 0 && <Text style={s.section}>Lucky Draw groups · {matchedGroups.length}</Text>}
         {matchedGroups.map(g => (
           <TouchableOpacity key={g.id} style={s.card} activeOpacity={0.85}
             onPress={() => router.push({ pathname: '/finance/chitti/[id]', params: { id: g.id } })}>

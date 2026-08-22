@@ -13,6 +13,7 @@ import { listLedger } from '../../db/ledger';
 import { listGroups } from '../../db/chitti';
 import { listReminders } from '../../db/reminders';
 import { round2 } from '../../utils/interest';
+import { sumRupees } from '../../utils/money';
 import { periodRateToAnnualPct } from '../../utils/finance';
 
 interface Totals {
@@ -41,8 +42,13 @@ export default function FinanceDashboard() {
         const annual = periodRateToAnnualPct(l.rate, l.rate_mode, l.period);
         const years = l.end_date ? Math.max(0, (l.end_date - l.start_date) / 31536000000) : 1;
         const interest = round2((l.principal * annual * years) / 100);
-        if (l.direction === 'lend') { acc.lent += l.principal; acc.earned += l.status === 'completed' ? interest : 0; acc.pending += l.status === 'completed' ? 0 : interest; }
-        else { acc.borrowed += l.principal; }
+        // Accumulate in paise: `acc.lent += l.principal` over many rows drifts,
+        // and these are the headline numbers on the dashboard.
+        if (l.direction === 'lend') {
+          acc.lent = sumRupees([acc.lent, l.principal]);
+          if (l.status === 'completed') acc.earned = sumRupees([acc.earned, interest]);
+          else acc.pending = sumRupees([acc.pending, interest]);
+        } else { acc.borrowed = sumRupees([acc.borrowed, l.principal]); }
         if (l.status === 'running') acc.active += 1;
         if (l.status === 'overdue') acc.overdue += 1;
       }
@@ -104,7 +110,7 @@ export default function FinanceDashboard() {
           <StatTile value={String(t.active)} label="Active loans" tone="good" />
           <StatTile value={String(t.overdue)} label="Overdue" tone="bad" />
           <StatTile value={String(t.today)} label="Today's dues" tone="warn" />
-          <StatTile value={String(t.chitti)} label="Chitti groups" tone="brand" />
+          <StatTile value={String(t.chitti)} label="Lucky Draw groups" tone="brand" />
         </View>
 
         {/* Quick actions */}
@@ -113,7 +119,7 @@ export default function FinanceDashboard() {
           <QuickAction icon="book" label="Ledger Book" onPress={() => go('/finance/ledger')} colors={[FIN.good, '#0f7a38']} />
           <QuickAction icon="trending-up" label="Interest" onPress={() => go('/finance/interest')} colors={[FIN.brand, FIN.brandDeep]} />
           <QuickAction icon="calculator" label="EMI Calc" onPress={() => go('/finance/emi')} colors={[FIN.info, '#1e40af']} />
-          <QuickAction icon="people" label="Chitti Paata" onPress={() => go('/finance/chitti')} colors={['#DB2777', '#9d174d']} />
+          <QuickAction icon="people" label="Lucky Draw" onPress={() => go('/finance/chitti')} colors={['#DB2777', '#9d174d']} />
           <QuickAction icon="notifications" label="Reminders" onPress={() => go('/finance/reminders')} colors={[FIN.warn, '#92400e']} />
           <QuickAction icon="calendar" label="Calendar" onPress={() => go('/finance/calendar')} colors={['#0891B2', '#155e75']} />
           <QuickAction icon="bar-chart" label="Reports" onPress={() => go('/finance/reports')} colors={[FIN.accent, '#5b21b6']} />
@@ -125,7 +131,7 @@ export default function FinanceDashboard() {
           <View style={s.ioIcon}><Ionicons name="swap-vertical" size={18} color={FIN.brandDeep} /></View>
           <View style={{ flex: 1 }}>
             <Text style={s.ioTitle}>Import / Export</Text>
-            <Text style={s.ioSub}>Back up ledgers &amp; chitti to CSV or Excel</Text>
+            <Text style={s.ioSub}>Back up ledgers &amp; Lucky Draw to CSV or Excel</Text>
           </View>
           <Ionicons name="chevron-forward" size={18} color={FIN.faint} />
         </TouchableOpacity>

@@ -38,6 +38,18 @@ import { exportAll, importAll } from './localDb';
 import { api } from './api';
 import { BACKUP_ROOT, ensureDir } from './storageRoots';
 import { e2eeGetCached, e2eeCachePlaintext } from '../services/crypto/e2eeSession.rn';
+import { buildBackup as buildFinanceBackup, restoreBackup as restoreFinanceBackup } from '../db/financeBackup';
+import { getCurrentUserAsync } from '../app/(constants)/authService';
+
+/**
+ * The id finance rows are tagged with. MUST match components/finance/useMe —
+ * including its 'local' fallback — or a restore writes rows the finance screens
+ * will never query back.
+ */
+async function financeUserId(): Promise<string> {
+  const u = await getCurrentUserAsync().catch(() => null);
+  return u?.id ?? 'local';
+}
 
 export interface BackupMeta { exists: boolean; sizeBytes?: number; messageCount?: number; updatedAt?: string }
 
@@ -80,15 +92,25 @@ async function buildEncryptedBackup(secret: string): Promise<{ blob: string; mes
     } catch {}
   }
 
+  // 4. Vault Finance — ledgers, Lucky Draw groups/members/dues/auctions.
+  //    These live in a SEPARATE SQLite file (interest.db) that no backup path
+  //    covered, so losing the phone lost every ledger and collection record.
+  //    Best-effort: a finance read must never sink a chat backup.
+  let finance: any = null;
+  try { finance = await buildFinanceBackup(await financeUserId()); }
+  catch (e) { console.warn('[backup] finance snapshot skipped:', (e as any)?.message); }
+
   // NOTE: no e2eeKeys. v2 bundles carried the identity + per-peer ratchets; v3
   // deliberately does not (see the header). Restores re-key instead.
+  // v4 adds `finance`; it is purely additive, so v3 bundles still restore.
   const bundle = JSON.stringify({
-    v: 3,
+    v: 4,
     createdAt: new Date().toISOString(),
     asyncStorage,
     messages: local.messages,
     chats: local.chats,
     plaintexts,
+    finance,
   });
   const blob = JSON.stringify(vaultEncrypt(secret, bundle)); // real AES-256-GCM
   return { blob, messageCount: local.messages.length, sizeBytes: bundle.length };
@@ -118,6 +140,13 @@ async function applyEncryptedBackup(secret: string, blob: string): Promise<numbe
       const id = parseInt(k.slice(i + 1), 10);
       if (chatId && id > 0) { try { await e2eeCachePlaintext(chatId, id, pt); } catch {} }
     }
+  }
+  // v4+ bundles carry finance; v3 and earlier simply don't have the field.
+  // Best-effort and non-destructive (merge by row id), so a finance failure
+  // never costs the caller their restored messages.
+  if (data.finance) {
+    try { await restoreFinanceBackup(await financeUserId(), data.finance); }
+    catch (e) { console.warn('[backup] finance restore skipped:', (e as any)?.message); }
   }
   return n;
 }

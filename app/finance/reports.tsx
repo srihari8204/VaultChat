@@ -9,6 +9,7 @@ import { useMe } from '../../components/finance/useMe';
 import { inrShort, fmtDate } from '../../utils/financeFormat';
 import { formatINR, round2, simpleInterest } from '../../utils/interest';
 import { periodRateToAnnualPct } from '../../utils/finance';
+import { sumRupees } from '../../utils/money';
 import { listLedger, type LedgerEntry } from '../../db/ledger';
 import { listGroups } from '../../db/chitti';
 import { sharePdf, pdfDocument, kvTable, exportExcel } from '../../utils/financeIO';
@@ -45,11 +46,14 @@ export default function Reports() {
         const annual = periodRateToAnnualPct(l.rate, l.rate_mode, l.period);
         const years = l.end_date ? Math.max(0, (l.end_date - l.start_date) / 31536000000) : 1;
         const interest = round2(simpleInterest(l.principal, annual, years).interest);
+        // Paise-exact accumulation — a report that disagrees with the ledger by
+        // a few paise is worse than no report.
         if (l.direction === 'lend') {
-          acc.lent += l.principal;
-          if (l.status === 'completed') acc.earned += interest; else acc.pending += interest;
-          acc.collections += l.principal - l.remaining;
-        } else acc.borrowed += l.principal;
+          acc.lent = sumRupees([acc.lent, l.principal]);
+          if (l.status === 'completed') acc.earned = sumRupees([acc.earned, interest]);
+          else acc.pending = sumRupees([acc.pending, interest]);
+          acc.collections = sumRupees([acc.collections, l.principal, -l.remaining]);
+        } else acc.borrowed = sumRupees([acc.borrowed, l.principal]);
         if (l.status === 'running') acc.active += 1;
         if (l.status === 'overdue') acc.overdue += 1;
         if (l.status === 'completed') acc.completed += 1;
@@ -72,7 +76,7 @@ export default function Reports() {
     { k: 'Active loans', v: String(r.active) },
     { k: 'Overdue loans', v: String(r.overdue) },
     { k: 'Completed loans', v: String(r.completed) },
-    { k: 'Active chitti groups', v: String(r.chitti) },
+    { k: 'Active Lucky Draw groups', v: String(r.chitti) },
   ];
 
   const onPdf = async () => {
@@ -108,7 +112,7 @@ export default function Reports() {
           <RowLine k="Active loans" v={String(r.active)} />
           <RowLine k="Overdue loans" v={String(r.overdue)} tone="bad" />
           <RowLine k="Completed loans" v={String(r.completed)} />
-          <RowLine k="Active chitti groups" v={String(r.chitti)} />
+          <RowLine k="Active Lucky Draw groups" v={String(r.chitti)} />
         </Card>
 
         <View style={s.btnRow}>
