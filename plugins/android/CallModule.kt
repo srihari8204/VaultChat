@@ -127,6 +127,18 @@ class CallModule(reactContext: ReactApplicationContext) : ReactContextBaseJavaMo
             promise.resolve(map)
             return
         }
+        // Games turn/invite tap: route to the exact table, not the games hub.
+        if (action == "open_game") {
+            val map = Arguments.createMap()
+            map.putString("action", action)
+            map.putString("game", intent.getStringExtra("vc_game"))
+            map.putString("room", intent.getStringExtra("vc_room"))
+            intent.removeExtra("vc_action")
+            intent.removeExtra("vc_game")
+            intent.removeExtra("vc_room")
+            promise.resolve(map)
+            return
+        }
         val callId = intent.getStringExtra("callId")
         if (callId == null) {
             promise.resolve(null)

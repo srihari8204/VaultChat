@@ -188,9 +188,11 @@ export async function drainDeclinedCall(): Promise<string | null> {
 }
 
 export type InitialCallIntent = {
-  action: 'incoming_call' | 'answer' | 'open_chat' | string;
+  action: 'incoming_call' | 'answer' | 'open_chat' | 'open_game' | string;
   callId?: string; callerId?: string; callerName?: string; isVideo?: boolean;
   chatId?: string;   // set for action 'open_chat' (message-notification tap, F2)
+  // set for action 'open_game' (VaultGames turn/invite tap) — the table to open
+  game?: string; room?: string;
 };
 
 /** If the app was opened by tapping the full-screen call notification, returns

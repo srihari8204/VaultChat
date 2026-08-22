@@ -49,9 +49,11 @@ class VaultCallMessagingService : FirebaseMessagingService() {
         const val INCOMING_CHANNEL = "vaultchat_incoming_calls"
         const val MISSED_CHANNEL = "vaultchat_missed_calls"
         const val MESSAGES_CHANNEL = "vaultchat_messages"
+        const val GAMES_CHANNEL = "vaultchat_games"
         const val INCOMING_NOTIF_ID = 0xC411
         const val MISSED_NOTIF_ID = 0xC412
         const val MSG_NOTIF_ID = 0xC413
+        const val GAMES_NOTIF_ID = 0xC414
         const val PREFS = "vaultchat_call_prefs"
         const val KEY_FCM = "fcm_token"
         const val KEY_CHAT_DIR = "chat_dir"          // JSON map chatId → display name (set by JS)
@@ -70,6 +72,7 @@ class VaultCallMessagingService : FirebaseMessagingService() {
         val data = msg.data
         when (data["type"]) {
             "incoming_call" -> showIncoming(data)
+            "games_turn" -> showGameTurn(data)
             "call_cancelled" -> handleCancel(data["callId"])
             "message" -> {
                 // A notification alone left the sender on ONE TICK: nothing
@@ -163,6 +166,68 @@ class VaultCallMessagingService : FirebaseMessagingService() {
             .build()
         // Tag by chatId: one collapsed notification per chat (newest replaces).
         nm.notify(chatId, MSG_NOTIF_ID, n)
+    }
+
+    /**
+     * VaultGames turn / invite nudge (POST /games/notify → fcm).
+     *
+     * This is what makes ASYNCHRONOUS play possible. The games platform has ~19
+     * players and almost never two online at once, so a match that needs both
+     * present at the same moment is a match that ends in a bot offer. Your
+     * opponent moves, this fires hours later, and the tap has to land on the
+     * exact table — anything less and the player has to go hunting for their own
+     * game, which is the same as not being told.
+     *
+     * NOT suppressed in the foreground, unlike showMessage: the games server
+     * already refuses to notify a player who is currently connected to it, so a
+     * push that reaches us is by definition for someone who is not looking at
+     * that table — even if VaultChat itself happens to be open.
+     */
+    private fun showGameTurn(data: Map<String, String>) {
+        val game = data["game"].orEmpty()
+        val room = data["room"].orEmpty()
+        val title = data["title"]?.ifBlank { null } ?: "VaultGames"
+        val body = data["body"]?.ifBlank { null } ?: "It is your turn"
+
+        ensureGamesChannel()
+
+        val launch = packageManager.getLaunchIntentForPackage(packageName)?.apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP
+            putExtra("vc_action", "open_game")
+            putExtra("vc_game", game)
+            putExtra("vc_room", room)
+        } ?: Intent()
+        // Request code per table, so two games waiting on you keep two distinct
+        // PendingIntents instead of the newer one silently retargeting the older.
+        val pi = PendingIntent.getActivity(this, ("g:$room").hashCode(), launch, piFlags())
+
+        val n = NotificationCompat.Builder(this, GAMES_CHANNEL)
+            .setSmallIcon(applicationInfo.icon)
+            .setContentTitle(title)
+            .setContentText(body)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(body))
+            .setCategory(NotificationCompat.CATEGORY_SOCIAL)
+            .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+            .setAutoCancel(true)
+            .setContentIntent(pi)
+            .build()
+        // Tagged by table: a second nudge for the same game replaces the first
+        // rather than stacking, while a different table gets its own line.
+        (getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager)
+            .notify(room.ifBlank { "games" }, GAMES_NOTIF_ID, n)
+    }
+
+    private fun ensureGamesChannel() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
+        val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        if (nm.getNotificationChannel(GAMES_CHANNEL) == null) {
+            // IMPORTANCE_DEFAULT, not HIGH: a turn in an asynchronous board game
+            // is not worth a heads-up banner over whatever the user is doing.
+            nm.createNotificationChannel(NotificationChannel(GAMES_CHANNEL, "Games", NotificationManager.IMPORTANCE_DEFAULT).apply {
+                description = "Your turn, invites and friend requests in VaultGames"
+                lockscreenVisibility = Notification.VISIBILITY_PRIVATE
+            })
+        }
     }
 
     private fun isAppForeground(): Boolean = try {

@@ -73,6 +73,29 @@ func fcmTokensFor(ctx context.Context, userID string) []string {
 	return out
 }
 
+// registerFcmDevice upserts one device's native FCM token.
+//
+// ONE ROW PER DEVICE, NOT ONE PER FEATURE. Calls, chat pushes and games turn
+// notifications all read `devices.fcm_token` through fcmTokensFor, so they must
+// all WRITE it the same way — a second registration path that inserted its own
+// row would hand every sender a duplicate token and every recipient a duplicate
+// notification. Shared by POST /call/token and POST /games/device-token.
+func registerFcmDevice(ctx context.Context, userID, fcmToken, platform string) error {
+	_, err := db.Pool.Exec(ctx,
+		`INSERT INTO devices (user_id, push_token, fcm_token, platform, last_seen_at)
+		 VALUES ($1, $2, $3, $4, NOW())
+		 ON CONFLICT (user_id, push_token) DO UPDATE SET fcm_token = EXCLUDED.fcm_token, last_seen_at = NOW()`,
+		userID, "fcm:"+truncRunes(fcmToken, 40), fcmToken, platform)
+	if err == nil {
+		return nil
+	}
+	// devices may require a unique push_token; fall back like Node.
+	_, err = db.Pool.Exec(ctx,
+		`UPDATE devices SET fcm_token = $1 WHERE user_id = $2 AND fcm_token = $1`,
+		fcmToken, userID)
+	return err
+}
+
 func callToken(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	user := httpx.UserFrom(r)
@@ -90,19 +113,9 @@ func callToken(w http.ResponseWriter, r *http.Request) {
 		httpx.Err(w, 400, "fcmToken required")
 		return
 	}
-	_, err := db.Pool.Exec(ctx,
-		`INSERT INTO devices (user_id, push_token, fcm_token, platform, last_seen_at)
-		 VALUES ($1, $2, $3, $4, NOW())
-		 ON CONFLICT (user_id, push_token) DO UPDATE SET fcm_token = EXCLUDED.fcm_token, last_seen_at = NOW()`,
-		user.ID, "fcm:"+truncRunes(fcmToken, 40), fcmToken, platform)
-	if err != nil {
-		// devices may require a unique push_token; fall back like Node.
-		if _, err := db.Pool.Exec(ctx,
-			`UPDATE devices SET fcm_token = $1 WHERE user_id = $2 AND fcm_token = $1`,
-			fcmToken, user.ID); err != nil {
-			httpx.Err(w, 500, "Failed to register token")
-			return
-		}
+	if err := registerFcmDevice(ctx, user.ID, fcmToken, platform); err != nil {
+		httpx.Err(w, 500, "Failed to register token")
+		return
 	}
 	httpx.JSON(w, 200, map[string]any{"ok": true})
 }

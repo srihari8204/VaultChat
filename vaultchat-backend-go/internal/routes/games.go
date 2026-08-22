@@ -19,6 +19,7 @@ import (
 	"errors"
 	"net/http"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -26,6 +27,7 @@ import (
 
 	"vaultchat/backend-go/internal/db"
 	"vaultchat/backend-go/internal/httpx"
+	"vaultchat/backend-go/internal/vault"
 )
 
 const (
@@ -90,6 +92,10 @@ func parseGamesKey(pemStr string) (ed25519.PrivateKey, error) {
 
 func RegisterGames(mux *http.ServeMux) {
 	mux.HandleFunc("POST /games/launch-token", httpx.RequireAuth(gamesLaunchToken))
+	// Inbound turn/invite pushes from the games server, and the device
+	// registration that makes them deliverable. Both live in games_notify.go.
+	mux.HandleFunc("POST /games/notify", gamesNotify)
+	mux.HandleFunc("POST /games/device-token", httpx.RequireAuth(gamesDeviceToken))
 }
 
 // gamesLaunchToken mints a launch token for the already-authenticated caller.
@@ -105,11 +111,26 @@ func gamesLaunchToken(w http.ResponseWriter, r *http.Request) {
 
 	// sub MUST be the vaultId: the games server keys balances, stats and shared
 	// deep links by it. The internal user id is not portable across the boundary.
-	var vaultID, name string
+	//
+	// THE NAME LIVES IN THE CIPHERS, NOT IN users.name.
+	//
+	// Same trap that made every incoming call ring as "VaultChat user" — see the
+	// long note on callerIdentity in calls.go. Every account created through the
+	// vault onboarding flow writes first_name_cipher/last_name_cipher and leaves
+	// the legacy plaintext column NULL, so `COALESCE(name,'')` returned '' for
+	// all of them and the fallback below shipped the vaultId AS the display name.
+	// That is why real players sat in the games lobby, on its leaderboards and in
+	// its "your turn" pushes as `v337da54a1d30`.
+	//
+	// The fallback stays — the games server rejects an empty name outright — but
+	// it is now the last resort it was written to be, not the path everyone took.
+	var vaultID string
+	var fnc, lnc, legacyName *string
 	err = db.Pool.QueryRow(r.Context(),
-		`SELECT COALESCE(vault_id, ''), COALESCE(name, '') FROM users WHERE id = $1 AND is_deleted = FALSE`,
+		`SELECT COALESCE(vault_id, ''), first_name_cipher, last_name_cipher, name
+		   FROM users WHERE id = $1 AND is_deleted = FALSE`,
 		user.ID,
-	).Scan(&vaultID, &name)
+	).Scan(&vaultID, &fnc, &lnc, &legacyName)
 	if err != nil {
 		httpx.Err(w, http.StatusNotFound, "User not found")
 		return
@@ -118,8 +139,11 @@ func gamesLaunchToken(w http.ResponseWriter, r *http.Request) {
 		httpx.Err(w, http.StatusConflict, "User has no VaultID")
 		return
 	}
-	if name == "" {
-		name = vaultID // the games server rejects an empty display name
+	name := vaultID
+	if nm := vault.IdentityFromRow(fnc, lnc, nil, nil, nil, nil, legacyName, nil, nil, nil, nil).Name; nm != nil {
+		if trimmed := strings.TrimSpace(*nm); trimmed != "" {
+			name = trimmed
+		}
 	}
 
 	tok, nonce, exp, err := mintGamesToken(key, vaultID, name, time.Now())

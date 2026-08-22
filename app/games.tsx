@@ -13,16 +13,43 @@
 // would put the session cookie in the app's jar, not the WebView's, and the
 // page would still see no session.
 
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, BackHandler, Linking, Share, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 // useFocusEffect from expo-router, NOT @react-navigation/native: both work, but
 // only one of them is a dependency this app actually needs.
-import { Stack, useFocusEffect, useRouter } from 'expo-router';
+import { Stack, useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { WebView, type WebViewNavigation } from 'react-native-webview';
 import { useColors } from '../lib/theme';
 import { api } from '../lib/api';
 
 const GAMES_URL = 'https://games.corefinite.com';
+
+/**
+ * Bound a slug that is about to be interpolated into the games URL.
+ *
+ * The server validates these before they ever enter a push (gamesNotifySlug in
+ * games_notify.go), and this is the same rule applied again on arrival. Worth
+ * repeating rather than trusting: these params reach here through a navigation
+ * route, which anything holding a deep link can drive — not only our own
+ * notification. Anything with a slash, a quote, a `?` or a `#` in it would
+ * rewrite the URL rather than fill it in.
+ */
+const slug = (v: unknown): string => {
+  const s = typeof v === 'string' ? v.trim() : '';
+  return s.length > 0 && s.length <= 64 && /^[A-Za-z0-9_-]+$/.test(s) ? s : '';
+};
+
+/**
+ * The table to open, or the hub when there is no valid deep link.
+ *
+ * Both halves are required: a game with no room is a lobby, not the table the
+ * player was nudged about, so it falls back rather than opening something
+ * confidently wrong.
+ */
+const startUrlFor = (game: unknown, room: unknown): string => {
+  const g = slug(game), r = slug(room);
+  return g && r ? `${GAMES_URL}/${g}.html?room=${encodeURIComponent(r)}` : GAMES_URL;
+};
 
 /**
  * Exchange the launch token for a games session, in the page's own context.
@@ -51,6 +78,16 @@ export default function GamesScreen() {
   const colors = useColors();
   const router = useRouter();
   const webRef = useRef<WebView>(null);
+
+  // Set when the screen was opened by tapping a VaultGames turn/invite push.
+  // Memoised on the two values, not on the params object: expo-router hands
+  // back a fresh object every render, which would rebuild the uri each time and
+  // reload the WebView out from under a game in progress.
+  const params = useLocalSearchParams<{ game?: string; room?: string }>();
+  const startUrl = useMemo(
+    () => startUrlFor(params.game, params.room),
+    [params.game, params.room],
+  );
 
   const [loading, setLoading] = useState(true);
   const [failed, setFailed] = useState(false);
@@ -135,7 +172,7 @@ export default function GamesScreen() {
         <>
           <WebView
             ref={webRef}
-            source={{ uri: GAMES_URL }}
+            source={{ uri: startUrl }}
             style={s.fill}
             onNavigationStateChange={onNav}
             onLoadEnd={() => {

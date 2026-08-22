@@ -144,6 +144,7 @@ func StartAll(ctx context.Context) {
 	run("sweep-expired-messages", sweepInterval, sweepExpiredMessages)
 	run("media-retention", sweepInterval, sweepDeliveredAttachments)
 	run("sweep-expired-stories", sweepInterval, sweepExpiredStories)
+	run("sweep-games-notify-seen", sweepInterval, sweepGamesNotifySeen)
 	// Broadcast recordings had no lifecycle at all — see sweepEndedBroadcasts.
 	run("broadcast-retention", sweepInterval, sweepEndedBroadcasts)
 	run("scheduled-messages", schedInterval, sweepScheduledMessages)
@@ -677,6 +678,22 @@ func sweepExpiredStories(ctx context.Context) {
 	batchedSweep(ctx, "sweep stories",
 		`DELETE FROM stories
 		  WHERE ctid IN (SELECT ctid FROM stories
+		                  WHERE expires_at <= NOW()
+		                  LIMIT $1)`)
+}
+
+// ── games notify replay guard ──────────────────────────────────────────
+
+// sweepGamesNotifySeen drops jti records whose event can no longer be replayed.
+//
+// Once a token is past its exp the signature check rejects it before dedupe is
+// ever consulted, so the row protects nothing and is pure growth — small growth
+// (one row per turn taken), but growth with no ceiling, which is how a table
+// nobody is looking at becomes the thing that fills a disk.
+func sweepGamesNotifySeen(ctx context.Context) {
+	batchedSweep(ctx, "sweep games-notify-seen",
+		`DELETE FROM games_notify_seen
+		  WHERE ctid IN (SELECT ctid FROM games_notify_seen
 		                  WHERE expires_at <= NOW()
 		                  LIMIT $1)`)
 }

@@ -41,9 +41,15 @@ services:
     environment:
       FIREBASE_SERVICE_ACCOUNT_FILE: /run/secrets/firebase-sa.json
       GAMES_SIGNING_PRIVATE_KEY_FILE: /run/secrets/games-signing.key
+      # The OTHER games keypair, and the other direction: the games server signs
+      # turn/invite events, we verify them. Public half only — there is nothing
+      # secret in this file, it is mounted alongside the others purely so the
+      # two games keys are configured in one place and cannot drift apart.
+      GAMES_NOTIFY_PUBLIC_KEY_FILE: /run/secrets/games-notify.pub
     volumes:
       - ./secrets/fcm-service-account.json:/run/secrets/firebase-sa.json:ro
       - ./secrets/games-signing.key:/run/secrets/games-signing.key:ro
+      - ./secrets/games-notify.pub:/run/secrets/games-notify.pub:ro
   postgres:
     ports: !override []      # in-network only
   redis:

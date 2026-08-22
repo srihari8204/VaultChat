@@ -365,6 +365,11 @@ function RootLayout() {
         if (ci?.action === 'open_chat' && ci.chatId) {
           // Native message-notification tap (F2 content-free doorbell).
           router.push({ pathname: '/chat', params: { id: ci.chatId } } as any);
+        } else if (ci?.action === 'open_game') {
+          // VaultGames turn/invite tap. game+room are carried through so the
+          // WebView opens the exact table the push was about — landing on the
+          // hub instead would make the player hunt for their own game.
+          router.push({ pathname: '/games', params: { game: ci.game ?? '', room: ci.room ?? '' } } as any);
         } else if (ci?.callId && ci.action !== 'open_calls') {
           const to = ci.action === 'answer' ? routeToCall : routeToIncoming;
           to({
