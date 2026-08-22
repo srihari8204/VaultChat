@@ -3,7 +3,7 @@
 // (tap to open). Phone-number add + invite-link join live under "New contact"
 // and a footer row. Full address-book discovery stays on /contacts.
 
-import { useRouter } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator, Alert, FlatList, KeyboardAvoidingView, Platform,
@@ -14,7 +14,7 @@ import { type Palette } from '../constants/theme';
 import { useTheme } from '../lib/theme';
 import { Avatar } from '../components/ui';
 import { PhoneField, toE164 } from '../components/auth/PhoneField';
-import { createDirectChat, listChats, attachmentUrl, type ChatSummary } from '../lib/chatService';
+import { createDirectChat, listChats, attachmentUrl, setDisappearing, type ChatSummary } from '../lib/chatService';
 import { getAccessToken } from '../lib/api';
 
 type Contact = { chatId: string; userId: string; name: string; photoURL: string | null; online: boolean };
@@ -23,6 +23,36 @@ export default function NewChatScreen() {
   const { colors } = useTheme();
   const S = useS();
   const router = useRouter();
+
+  // Temporary-chat mode, carried from the Chats header. When set, whichever
+  // chat is opened from this screen gets its disappearing-messages timer set to
+  // this many seconds first.
+  //
+  // Applied on the way OUT rather than at creation because both routes off this
+  // screen matter — a brand-new chat started by phone number, and an existing
+  // one picked from the list. Doing it only in createDirectChat would silently
+  // make "start a temporary chat with someone you already talk to" a normal one.
+  const { ttl } = useLocalSearchParams<{ ttl?: string }>();
+  const ttlSeconds = Number(ttl) > 0 ? Number(ttl) : null;
+  const ttlLabel = ttlSeconds === 3600 ? '1 hour' : ttlSeconds === 10800 ? '3 hours' : ttlSeconds ? `${Math.round(ttlSeconds / 60)} min` : '';
+
+  // Set the timer, THEN open. If it fails the chat still opens — but as a
+  // normal one, so say so rather than letting someone believe a conversation
+  // disappears when it will not. That belief is the whole point of the feature.
+  const openWithTtl = async (chatId: string, replace = false) => {
+    if (ttlSeconds) {
+      try {
+        await setDisappearing(chatId, ttlSeconds);
+      } catch (e: any) {
+        Alert.alert(
+          'Could not make this chat temporary',
+          `Messages here will NOT disappear. ${e?.message ?? 'Try again from the chat’s settings.'}`,
+        );
+      }
+    }
+    const to = { pathname: '/chat', params: { id: chatId } } as any;
+    if (replace) router.replace(to); else router.push(to);
+  };
 
   const [query, setQuery] = useState('');
   const [contacts, setContacts] = useState<Contact[]>([]);
@@ -68,7 +98,7 @@ export default function NewChatScreen() {
     setAdding(true);
     try {
       const res = await createDirectChat({ phone: e164 });
-      router.replace({ pathname: '/chat', params: { id: res.id } } as any);
+      await openWithTtl(res.id, true);
     } catch (e: any) {
       Alert.alert('Could not start chat', e?.message ?? 'The number may not be on VaultChat yet.');
     } finally { setAdding(false); }
@@ -89,8 +119,21 @@ export default function NewChatScreen() {
         <TouchableOpacity onPress={() => router.back()} style={S.backBtn} activeOpacity={0.7}>
           <Ionicons name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
-        <Text style={S.title}>New chat</Text>
+        <Text style={S.title}>{ttlSeconds ? 'Temporary chat' : 'New chat'}</Text>
       </View>
+
+      {/* Say what is about to happen, on the screen where the person is chosen.
+          Without this the only difference between a temporary chat and a normal
+          one is a header word, and picking the wrong contact means messages you
+          expected to vanish quietly do not. */}
+      {ttlSeconds != null && (
+        <View style={S.ttlBanner}>
+          <Ionicons name="timer-outline" size={16} color={colors.accent} />
+          <Text style={S.ttlBannerTxt}>
+            Messages will disappear <Text style={S.ttlBannerStrong}>{ttlLabel}</Text> after they are sent. Pick who to chat with.
+          </Text>
+        </View>
+      )}
 
       <View style={S.searchWrap}>
         <Ionicons name="search" size={18} color={colors.textDim} />
@@ -134,7 +177,7 @@ export default function NewChatScreen() {
           )
         }
         renderItem={({ item }) => (
-          <TouchableOpacity style={S.row} activeOpacity={0.7} onPress={() => router.push({ pathname: '/chat', params: { id: item.chatId } } as any)}>
+          <TouchableOpacity style={S.row} activeOpacity={0.7} onPress={() => openWithTtl(item.chatId)}>
             <Avatar uri={item.photoURL && authHeader ? attachmentUrl(item.photoURL) : null} headers={authHeader ? { Authorization: authHeader } : undefined} name={item.name} size={46} presence={item.online ? 'online' : null} />
             <View style={{ flex: 1 }}>
               <Text style={S.rowName} numberOfLines={1}>{item.name}</Text>
@@ -161,6 +204,11 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   header: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingTop: 56, paddingBottom: 12, gap: 8 },
   backBtn: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
   title: { color: c.text, fontSize: 20, fontWeight: '800' },
+  ttlBanner: { flexDirection: 'row', alignItems: 'center', gap: 8, marginHorizontal: 16, marginBottom: 4,
+               paddingHorizontal: 12, paddingVertical: 10, borderRadius: 12,
+               backgroundColor: c.surface, borderWidth: 1, borderColor: c.accent },
+  ttlBannerTxt: { flex: 1, color: c.textDim, fontSize: 12.5, lineHeight: 17 },
+  ttlBannerStrong: { color: c.text, fontWeight: '800' },
   searchWrap: { flexDirection: 'row', alignItems: 'center', gap: 8, marginHorizontal: 14, marginBottom: 8, paddingHorizontal: 14, height: 42, borderRadius: 21, backgroundColor: c.card },
   searchInput: { flex: 1, color: c.text, fontSize: 15 },
   action: { flexDirection: 'row', alignItems: 'center', gap: 16, paddingVertical: 12, paddingHorizontal: 18 },

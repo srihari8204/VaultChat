@@ -324,6 +324,13 @@ export default function ChatsScreen() {
   const onOpenChat = (id: string) => router.push({ pathname: '/chat', params: { id } } as any);
   const onNewChat = () => router.push('/new-chat' as any);
 
+  // Temporary chat: choose the lifetime here, choose the person on /new-chat.
+  const [tempSheet, setTempSheet] = useState(false);
+  const startTemporary = useCallback((seconds: number) => {
+    setTempSheet(false);
+    router.push({ pathname: '/new-chat', params: { ttl: String(seconds) } } as any);
+  }, [router]);
+
   // Avatar tap (WhatsApp): peer has a story → open it; else show photo popup.
   const [avatarView, setAvatarView] = useState<ChatSummary | null>(null);
   const onAvatarPress = useCallback(async (chat: ChatSummary) => {
@@ -502,7 +509,11 @@ export default function ChatsScreen() {
             )}
             <TouchableOpacity onPress={() => router.push('/search' as any)} style={S.headerBtn}><Ionicons name="search" size={22} color={colors.text} /></TouchableOpacity>
             <TouchableOpacity onPress={() => router.push('/alerts' as any)} style={S.headerBtn}><Ionicons name="notifications-outline" size={22} color={colors.text} /></TouchableOpacity>
-            <TouchableOpacity onPress={() => router.push('/mini' as any)} style={S.headerBtn}><Ionicons name="grid-outline" size={22} color={colors.text} /></TouchableOpacity>
+            {/* Was the Mini Apps shortcut. Dropped, not lost — /mini is the
+                centre tab ("Apps"), so it already had a permanent home and this
+                was a second door to the same room. The header slot buys more as
+                a temporary chat, which has no entry point at all otherwise. */}
+            <TouchableOpacity onPress={() => setTempSheet(true)} style={S.headerBtn} accessibilityLabel="Start a temporary chat"><Ionicons name="timer-outline" size={22} color={colors.text} /></TouchableOpacity>
             <TouchableOpacity onPress={() => router.push('/contacts' as any)} style={S.headerBtn}><Ionicons name="people-outline" size={22} color={colors.text} /></TouchableOpacity>
             <TouchableOpacity onPress={() => router.push('/broadcast' as any)} style={S.headerBtn}><Ionicons name="megaphone-outline" size={22} color={colors.text} /></TouchableOpacity>
           </View>
@@ -613,6 +624,23 @@ export default function ChatsScreen() {
             <SheetItem icon={menuChat?.muted ? 'notifications-outline' : 'notifications-off-outline'} label={menuChat?.muted ? 'Unmute' : 'Mute'} onPress={() => { const c = menuChat!; setMenuChat(null); doMute(c); }} />
             <SheetItem icon={menuChat?.archived ? 'archive' : 'archive-outline'} label={menuChat?.archived ? 'Unarchive' : 'Archive'} onPress={() => { const c = menuChat!; setMenuChat(null); doArchive(c); }} />
             <SheetItem icon="trash-outline" label="Delete chat" danger onPress={() => { const c = menuChat!; setMenuChat(null); doDelete(c); }} />
+          </Pressable>
+        </Pressable>
+      </Modal>
+
+      {/* Temporary chat — pick how long messages live, then pick who with.
+          The duration is carried to /new-chat and applied to whichever chat is
+          opened there, so the choice is made once and cannot be forgotten
+          halfway through. Values are the chat's existing disappearing-messages
+          timer, not a new mechanism: the server already expires on
+          chats.disappearing_seconds. */}
+      <Modal visible={tempSheet} transparent animationType="fade" onRequestClose={() => setTempSheet(false)}>
+        <Pressable style={S.sheetBackdrop} onPress={() => setTempSheet(false)}>
+          <Pressable style={S.sheet} onPress={() => {}}>
+            <View style={S.sheetHandle} />
+            <Text style={S.sheetTitle}>TEMPORARY CHAT — MESSAGES DELETE THEMSELVES</Text>
+            <SheetItem icon="timer-outline" label="1 hour" onPress={() => startTemporary(3600)} />
+            <SheetItem icon="timer-outline" label="3 hours" onPress={() => startTemporary(10800)} />
           </Pressable>
         </Pressable>
       </Modal>
