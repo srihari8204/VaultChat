@@ -52,7 +52,11 @@ rtc:
   # here is delivered as literal characters to a field expecting an IP. If a
   # future deploy sits behind NAT where STUN resolves wrongly, put a literal
   # address here, never a variable.
-  use_external_ip: true
+  # Stated outright rather than STUN-detected, and matching livekit.yaml — see
+  # the longer note there. Both must be set together; node_ip alongside
+  # use_external_ip: true is contradictory.
+  use_external_ip: false
+  node_ip: 65.21.229.167
 
 # Reuse the coturn already running on this host, exactly as calling does. One
 # relay, one credential, one thing to monitor — and TURN is stateless with
@@ -80,9 +84,18 @@ turn:
 # deployment exists to remove. The calling SFU uses the default db when it is
 # enabled at all, and golive-egress must be pointed at db 3 too or it registers
 # somewhere its server cannot see it.
+# A SEPARATE REDIS INSTANCE, NOT A SEPARATE DATABASE ON THE SHARED ONE.
+#
+# This pointed at 16379 db 3 — calling's redis — on the reasoning above that a
+# different db number is enough isolation. Production does not run it that way
+# and should not: `db: 3` still puts Go Live's room state inside the process
+# whose failure must never take calling with it, which is the entire point of
+# the split. Go Live has its own instance (vaultchat-golive-redis-1) on 16380.
+#
+# golive-egress must be pointed at THIS address too, or it registers somewhere
+# its own server cannot see it.
 redis:
-  address: 127.0.0.1:16379
-  db: 3
+  address: 127.0.0.1:16380
 
 # Egress lifecycle -> the Go Live backend.
 #
