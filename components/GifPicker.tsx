@@ -237,16 +237,18 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   gifCell:   { flex: 1, margin: 2, height: 100, backgroundColor: c.surface, borderRadius: 8, overflow: 'hidden' },
   gifImg:    { width: '100%', height: '100%' },
   empty:     { color: c.textDim, textAlign: 'center', marginTop: 40, fontSize: 14 },
-  // 82x16 ≈ the asset's 5.89 ratio; with resizeMode contain a mismatched box
-  // silently shrinks the mark, which is exactly how the watermark went missing.
-  klipyLogo: { width: 82, height: 16, opacity: 0.9 },
+  // Boxes here MUST match the asset's ratio. The horizontal "Powered by KLIPY"
+  // mark is 640x137 = 4.67; under resizeMode contain a box with a different
+  // ratio silently shrinks the logo to fit the tighter axis, which is exactly
+  // how the sent-card watermark ended up drawing at 40px and looking absent.
+  klipyLogo: { width: 84, height: 18, opacity: 0.95 },
 
   previewBackdrop: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
                      backgroundColor: 'rgba(0,0,0,0.75)', alignItems: 'center', justifyContent: 'center', padding: 24 },
   previewCard:     { width: '100%', maxWidth: 340, backgroundColor: c.surfaceSolid, borderRadius: 18,
                      padding: 16, alignItems: 'center', gap: 12 },
   previewImg:      { width: '100%', height: 240, borderRadius: 12, backgroundColor: c.surface },
-  previewKlipy:    { width: 104, height: 18, opacity: 0.9 },
+  previewKlipy:    { width: 112, height: 24, opacity: 1 },   // 4.67, the asset's ratio
   previewActions:  { flexDirection: 'row', gap: 10, width: '100%' },
   previewCancel:   { flex: 1, paddingVertical: 12, borderRadius: 12, alignItems: 'center',
                      backgroundColor: c.surface, borderWidth: StyleSheet.hairlineWidth, borderColor: c.border },

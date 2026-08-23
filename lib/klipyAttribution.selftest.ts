@@ -109,21 +109,35 @@ check('a stale preview cannot survive a tab change or a close',
   (PICKER.match(/setPreview\(null\)/g) ?? []).length >= 3,
   'otherwise reopening shows an item from the previous tab');
 
-// ── the bug that made the watermark look absent ───────────────────────
+// ── every logo box must match its ASSET'S ratio ───────────────────────
 // resizeMode="contain" fits the TIGHTER axis, so a box whose ratio disagrees
-// with the asset silently shrinks the mark. The asset is 390x134 (2.91); the
-// box was 54x14 (3.86), which drew it ~40px wide — present, unreadable, and
-// indistinguishable from "the watermark never rendered".
-const wm = /klipyWatermark:[\s\S]{0,400}?width:\s*(\d+)[\s\S]{0,80}?height:\s*(\d+)/.exec(STYLES);
-if (!wm) {
-  check('the watermark box declares a width and height', false);
-} else {
-  const ratio = Number(wm[1]) / Number(wm[2]);
-  check(`the watermark box matches the asset ratio (2.91), got ${ratio.toFixed(2)}`,
-    Math.abs(ratio - 2.91) < 0.35,
+// with the artwork silently shrinks the mark. That is not a cosmetic slip: the
+// sent-card watermark drew at ~40px on a 220px card, which is present, correct,
+// and completely indistinguishable from "it never rendered".
+//
+// Ratios are read from the PNG headers rather than hardcoded, so swapping in a
+// different brand variant re-checks itself instead of quietly regressing.
+function pngRatio(path: string): number {
+  const b = readFileSync(path);
+  return b.readUInt32BE(16) / b.readUInt32BE(20);   // IHDR width / height
+}
+
+for (const [name, asset, src, re, minW] of [
+  ['sent-card watermark', 'assets/klipy/watermark-klipy-light.png', STYLES,
+   /klipyWatermark:[\s\S]{0,400}?width:\s*(\d+)[\s\S]{0,80}?height:\s*(\d+)/, 60],
+  ['picker logo', 'assets/klipy/powered-by-klipy-black.png', PICKER,
+   /klipyLogo:\s*\{[^}]*width:\s*(\d+)[^}]*height:\s*(\d+)/, 70],
+  ['preview logo', 'assets/klipy/powered-by-klipy-black.png', PICKER,
+   /previewKlipy:\s*\{[^}]*width:\s*(\d+)[^}]*height:\s*(\d+)/, 90],
+] as [string, string, string, RegExp, number][]) {
+  const m = re.exec(src);
+  if (!m) { check(`${name}: box declares width and height`, false); continue; }
+  const want = pngRatio(asset);
+  const got = Number(m[1]) / Number(m[2]);
+  check(`${name} box matches its asset ratio (${want.toFixed(2)}), got ${got.toFixed(2)}`,
+    Math.abs(got - want) < 0.35,
     'a mismatched box shrinks the mark under resizeMode contain');
-  check('...and is large enough to actually read on a 220px card',
-    Number(wm[1]) >= 60);
+  check(`...${name} is large enough to read`, Number(m[1]) >= minW);
 }
 
 check('the white mark gets a shadow so it survives pale content',
