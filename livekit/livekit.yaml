@@ -33,10 +33,21 @@ rtc:
   # IP address. Nothing in the compose file could have fixed it — the
   # substitution has to happen before LiveKit reads the file, and it never did.
   #
-  # If a future deploy sits behind NAT where STUN resolves the wrong address,
-  # replace this with a literal `external_ip: 1.2.3.4` — a real address, not a
-  # variable reference.
-  use_external_ip: true
+  # STUN AUTO-DETECTION IS OFF, AND THE ADDRESS IS STATED OUTRIGHT.
+  #
+  # This box has one stable public address, so asking STUN to rediscover it on
+  # every start buys nothing and can resolve wrong. node_ip removes the guess:
+  # LiveKit advertises exactly this in its ICE candidates.
+  #
+  # Set them together. use_external_ip: true with node_ip present is
+  # contradictory, and the older `external_ip: ${LIVEKIT_EXTERNAL_IP}` form was
+  # a bug — LiveKit reads this file as plain YAML and does NOT expand ${VAR}, so
+  # it delivered fourteen literal characters to a field expecting an IP.
+  #
+  # Moving to another host means editing this line. That is the cost of not
+  # guessing, and it is the cheaper mistake.
+  use_external_ip: false
+  node_ip: 65.21.229.167
 
 # Reuse the coturn already running on this host rather than LiveKit's embedded
 # TURN. One relay, one credential, one thing to monitor — and it is already
@@ -44,13 +55,21 @@ rtc:
 turn:
   enabled: false
 
-# Single node: no Redis. LiveKit only needs it to share room state across
-# instances, and adding it now would couple the SFU's health to Redis for a
-# benefit that does not exist below a few thousand concurrent participants.
-# When a second node is added, point this at the redis service already in the
-# compose file and nothing else changes.
-# redis:
-#   address: redis:6379
+# REDIS IS REQUIRED, EVEN ON ONE NODE. This was commented out on the reasoning
+# that a single node does not need shared room state — which is true of state
+# and false of startup: without a store LiveKit cannot allocate a room node, so
+# EVERY authenticated join returned HTTP 500 on /rtc/v1 instead of upgrading the
+# WebSocket. Calling was completely down and the SFU still looked healthy.
+#
+# 127.0.0.1 and not the `redis` service name: this container runs with
+# network_mode: host, so it is not on the compose network and cannot resolve
+# service names. The port is the one redis is published on for the loopback.
+#
+# Go Live's SFU uses a DIFFERENT redis on 16380 (livekit/golive.yaml). They must
+# never share one: the two servers use the same key names, so a shared instance
+# has each reading the other's rooms.
+redis:
+  address: 127.0.0.1:16379
 
 # Egress lifecycle → the backend, so a broadcast becomes 'live' only when there
 # is genuinely something to play.
@@ -63,15 +82,17 @@ turn:
 #
 # THE URL MUST BE REACHABLE FROM THIS CONTAINER. livekit runs with
 # network_mode: host, so it does NOT share the compose network and cannot use
-# the `go-api` service name. Point this at whatever address go-api is actually
-# published on for this deployment — commented out because guessing it would be
-# worse than leaving it off, and this file is read verbatim (no ${VAR}
-# expansion, see use_external_ip above).
+# the `go-api` service name — hence the published loopback port, not `go-api:4000`.
 #
-# webhook:
-#   api_key: <the same key as LIVEKIT_API_KEY — selects the secret to sign with>
-#   urls:
-#     - http://127.0.0.1:14000/internal/livekit/webhook
+# api_key MUST BE EDITED BY HAND ON DEPLOY. It selects which secret from
+# LIVEKIT_KEYS signs the webhook, and this file gets NO ${VAR} expansion
+# (see use_external_ip above), so a placeholder left in place means every
+# webhook is signed with a key the receiver rejects — and broadcasts silently
+# never leave 'starting'. Set it to the same key id as LIVEKIT_API_KEY in .env.
+webhook:
+  api_key: REPLACE_WITH_LIVEKIT_API_KEY
+  urls:
+    - http://127.0.0.1:14000/internal/livekit/webhook
 
 logging:
   level: info
