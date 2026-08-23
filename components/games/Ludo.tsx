@@ -22,7 +22,7 @@
  * views so they can hop independently of a static board.
  */
 
-import React, { useEffect, useMemo, useRef } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Pressable, ScrollView, Text, View, useWindowDimensions, type ViewStyle } from 'react-native';
 import Svg, {
   Defs, RadialGradient, LinearGradient as SvgLinear, Stop, Rect, G as SvgG, Polygon,
@@ -36,7 +36,9 @@ import * as Haptics from 'expo-haptics';
 import { useGameSocket, type AutoStart } from '../../lib/games/useGameSocket';
 import { TableBackground, Panel, Btn, Banner, PlayerRow, useType } from './ui';
 import { C, S, R, D3, mix, goldLine } from '../../lib/games/theme';
-import { playSfx, preloadSfx } from '../../lib/games/sfx';
+import { playSfx, preloadSfx, soundEnabled, setSoundEnabled } from '../../lib/games/sfx';
+import { Toasts, Confetti, Sheet, SettingRow } from './feedback';
+import { inviteToTable, shareResult } from '../../lib/games/invite';
 
 /** 52-cell ring [row,col] on a 15x15 board, clockwise from red's start. */
 const RING: [number, number][] = [
@@ -106,6 +108,9 @@ export default function Ludo({ roomId = 'ludo-main', auto, autoBot }: { roomId?:
 
   const L = state.lobby;
   const G = state.game;
+  const [showSettings, setShowSettings] = useState(false);
+  const [showEmotes, setShowEmotes] = useState(false);
+  const [sound, setSound] = useState(soundEnabled());
 
   const size = Math.min(width - S[4] * 2, 460);
   const cell = size / 15;
@@ -180,6 +185,20 @@ export default function Ludo({ roomId = 'ludo-main', auto, autoBot }: { roomId?:
     );
   }
 
+  /**
+   * Seat `n` bots, then deal.
+   *
+   * The bots have to be seated before `start`, and each `addbot` is answered by
+   * a fresh lobby snapshot, so this fires them together and lets the auto-start
+   * in useGameSocket deal once the seats appear — sending `start` immediately
+   * would race the last bot into an empty chair.
+   */
+  const fillAndStart = (n: number) => {
+    const seated = L?.members?.length ?? 1;
+    for (let i = seated; i < n + 1; i++) send({ t: 'addbot' });
+    setTimeout(() => send({ t: 'start' }), 400);
+  };
+
   const finished = G?.phase === 'finished';
 
   // ── lobby ─────────────────────────────────────────────────────────
@@ -208,10 +227,27 @@ export default function Ludo({ roomId = 'ludo-main', auto, autoBot }: { roomId?:
               <Text style={{ color: C.muted, fontSize: t.sm }}>Two players minimum — add a bot to start now.</Text>
             )}
           </Panel>
-          <Btn label="Add a bot" icon="🤖" onPress={() => send({ t: 'addbot' })} />
-          <Btn label="Start game" kind="gold" onPress={() => send({ t: 'start' })} disabled={!host || members.length < 2} />
-          {events.length > 0 && <Text style={{ color: C.muted, fontSize: t.sm }}>{events[events.length - 1]}</Text>}
+          {/* The web offers these as distinct ways in rather than making
+              everyone assemble a table by hand. Filling seats then starting is
+              two taps that always go together. */}
+          <Btn
+            label="Quick game vs 1 bot"
+            icon="🤖"
+            kind="gold"
+            disabled={!host}
+            onPress={() => { fillAndStart(1); }}
+          />
+          <Btn
+            label="Play 3 bots"
+            icon="🤖"
+            disabled={!host}
+            onPress={() => { fillAndStart(3); }}
+          />
+          <Btn label="Add a bot" onPress={() => send({ t: 'addbot' })} disabled={!host} />
+          <Btn label="Invite a friend" icon="🔗" onPress={() => { void inviteToTable('ludo', roomId); }} disabled={!roomId} />
+          <Btn label="Start now" kind="gold" onPress={() => send({ t: 'start' })} disabled={!host || members.length < 2} />
         </ScrollView>
+        <Toasts events={events} />
       </TableBackground>
     );
   }
@@ -284,12 +320,49 @@ export default function Ludo({ roomId = 'ludo-main', auto, autoBot }: { roomId?:
           </View>
         </View>
 
-        {events.length > 0 && (
-          <Text numberOfLines={2} style={{ color: C.muted, fontSize: t.sm, width: size }}>
-            {events[events.length - 1]}
-          </Text>
+        <View style={{ width: size, flexDirection: 'row', gap: S[2] }}>
+          <Btn label="Emote" icon="💬" compact style={{ flex: 1 }} onPress={() => setShowEmotes(true)} />
+          <Btn label="Invite" icon="🔗" compact style={{ flex: 1 }} onPress={() => { void inviteToTable('ludo', roomId); }} disabled={!roomId} />
+          <Btn label="⚙" compact onPress={() => setShowSettings(true)} accessibilityLabel="Settings" />
+        </View>
+
+        {finished && (
+          <View style={{ width: size, flexDirection: 'row', gap: S[2] }}>
+            <Btn label="Play again" kind="gold" icon="↻" style={{ flex: 1 }} onPress={() => send({ t: 'start' })} />
+            <Btn label="Share" icon="📣" onPress={() => { void shareResult('ludo', G.winnerId === state.you); }} />
+          </View>
         )}
       </ScrollView>
+
+      <Toasts events={events} />
+      <Confetti show={!!finished && G.winnerId === state.you} />
+
+      <Sheet visible={showEmotes} title="Say something" onClose={() => setShowEmotes(false)}>
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: S[2] }}>
+          {['👍', '😂', '😮', '😢', '🔥', '👏', '🎲', '😎', '💀', '🤝'].map(e => (
+            <Pressable
+              key={e}
+              onPress={() => { send({ t: 'emote', emoji: e }); playSfx('tick'); setShowEmotes(false); }}
+              accessibilityRole="button"
+              accessibilityLabel={`Send ${e}`}
+              style={{
+                width: 56, height: 56, borderRadius: R[2], alignItems: 'center', justifyContent: 'center',
+                borderWidth: 1, borderColor: goldLine[22], backgroundColor: C.panel2,
+              }}
+            >
+              <Text style={{ fontSize: 26 }}>{e}</Text>
+            </Pressable>
+          ))}
+        </View>
+      </Sheet>
+
+      <Sheet visible={showSettings} title="Table" onClose={() => setShowSettings(false)}>
+        <SettingRow
+          label="Sound"
+          value={sound ? 'On' : 'Off'}
+          onPress={() => { const n = !sound; setSound(n); void setSoundEnabled(n); }}
+        />
+      </Sheet>
     </TableBackground>
   );
 }

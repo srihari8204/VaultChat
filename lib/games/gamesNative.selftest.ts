@@ -117,6 +117,17 @@ check('the boards share one set of table furniture',
   [TTT, LUDO, RUMMY].every(src => /from '\.\/ui'/.test(src)),
   'per-board buttons and panels are how four screens drift apart');
 
+// ── every board has the same furniture ────────────────────────────────
+// These were added one game at a time and drifted immediately: a win that
+// showed confetti in Ludo and nothing in Rummy reads as a bug in Rummy. If a
+// fifth board ever appears, this is what tells you what it still owes.
+for (const [name, src] of [['TicTacToe', TTT], ['Chess', CHESS], ['Ludo', LUDO], ['Rummy', RUMMY]] as [string, string][]) {
+  check(`${name} shows server notices as toasts`, /<Toasts events=/.test(src));
+  check(`${name} celebrates a win`, /<Confetti show=/.test(src));
+  check(`${name} can invite someone to the table`, /inviteToTable\(/.test(src));
+  check(`${name} offers a rematch and a share`, /shareResult\(/.test(src) && /(Rematch|Play again|Deal again)/.test(src));
+}
+
 // ── online ────────────────────────────────────────────────────────────
 // Without matchmaking the only opponent reachable from the app is a bot, which
 // is what made a fully multiplayer game feel like single-player.

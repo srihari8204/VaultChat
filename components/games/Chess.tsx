@@ -26,6 +26,9 @@ import { useGameSocket, isMyTurn, type GameState, type AutoStart } from '../../l
 import { Btn, Panel, Banner, PlayerRow, Chip, useType } from './ui';
 import { C, S, R, D3, E, mix, goldLine } from '../../lib/games/theme';
 import { playSfx, preloadSfx } from '../../lib/games/sfx';
+import { Toasts, Confetti, Sheet, SettingRow } from './feedback';
+import { inviteToTable, shareResult } from '../../lib/games/invite';
+import { soundEnabled, setSoundEnabled } from '../../lib/games/sfx';
 
 type Piece = { t: 'p' | 'n' | 'b' | 'r' | 'q' | 'k'; c: 'w' | 'b' } | null;
 type Move = { from: number; to: number; promo?: string };
@@ -64,6 +67,14 @@ export default function Chess({ roomId, auto, autoBot }: { roomId: string } & Au
   const [sel, setSel] = useState<number | null>(null);
   const [promo, setPromo] = useState<{ from: number; to: number; opts: Move[] } | null>(null);
   const [theme, setTheme] = useState<ThemeName>('classic');
+  const [showSettings, setShowSettings] = useState(false);
+  const [coords, setCoords] = useState(true);
+  const [sound, setSound] = useState(soundEnabled());
+  // A draw offer is a question that has to be answerable. The web shows a
+  // banner with Accept; without it the offer arrives as a toast that scrolls
+  // away and the player has no way to say yes.
+  const [drawOffer, setDrawOffer] = useState(false);
+  const [botLevel, setBotLevel] = useState(2);
   const t = useType();
   const { width } = useWindowDimensions();
 
@@ -113,6 +124,14 @@ export default function Chess({ roomId, auto, autoBot }: { roomId: string } & Au
     prevCount.current = count;
   }, [G, board, lastMove]);
 
+  useEffect(() => {
+    const last = events[events.length - 1] ?? '';
+    if (/draw/i.test(last) && /offer/i.test(last)) setDrawOffer(true);
+  }, [events]);
+
+  // Any move settles the question, so a stale banner cannot linger.
+  useEffect(() => { setDrawOffer(false); }, [G?.history?.length]);
+
   const ended = useRef(false);
   useEffect(() => {
     if (!G?.result) { ended.current = false; return; }
@@ -147,7 +166,9 @@ export default function Chess({ roomId, auto, autoBot }: { roomId: string } & Au
       <Lobby
         state={state}
         events={events}
-        onAddBot={() => send({ t: 'addbot', level: 2 })}
+        botLevel={botLevel}
+        onBotLevel={setBotLevel}
+        onAddBot={() => send({ t: 'addbot', level: botLevel })}
         onStart={() => send({ t: 'start' })}
       />
     );
@@ -195,8 +216,8 @@ export default function Chess({ roomId, auto, autoBot }: { roomId: string } & Au
                 bg={light ? th.light : th.dark}
                 tint={isSel ? th.sel : isLast ? th.hl : null}
                 check={inCheck}
-                coordFile={d >> 3 === 7 ? FILES[flipped ? 7 - c : c] : null}
-                coordRank={(d & 7) === 0 ? String(flipped ? r + 1 : 8 - r) : null}
+                coordFile={coords && d >> 3 === 7 ? FILES[flipped ? 7 - c : c] : null}
+                coordRank={coords && (d & 7) === 0 ? String(flipped ? r + 1 : 8 - r) : null}
                 coordColor={light ? th.dark : th.light}
                 piece={p}
                 pieceSize={cell * 0.78}
@@ -228,10 +249,40 @@ export default function Chess({ roomId, auto, autoBot }: { roomId: string } & Au
 
         <StatusLine game={G} mine={mine} spectator={state.spectator} width={size} />
 
-        <View style={{ flexDirection: 'row', gap: S[2], width: size }}>
-          <Btn label="Resign" kind="danger" compact style={{ flex: 1 }} onPress={() => send({ t: 'resign' })} disabled={!!G.result} />
-          <Btn label="Offer draw" compact style={{ flex: 1 }} onPress={() => send({ t: 'draw-offer' })} disabled={!!G.result} />
-        </View>
+        {drawOffer && !G.result && (
+          <View style={{
+            width: size, flexDirection: 'row', alignItems: 'center', gap: S[2],
+            padding: S[3], borderRadius: R[2],
+            borderWidth: 1, borderColor: 'rgba(245,196,81,.55)', backgroundColor: 'rgba(245,196,81,.12)',
+          }}>
+            <Text style={{ flex: 1, color: '#ffd97a', fontSize: t.sm, fontWeight: '700' }}>
+              Your opponent offers a draw
+            </Text>
+            <Btn label="Accept" kind="gold" compact onPress={() => { send({ t: 'draw-accept' }); setDrawOffer(false); }} />
+            <Btn label="No" compact onPress={() => setDrawOffer(false)} />
+          </View>
+        )}
+
+        {G.result ? (
+          <View style={{ flexDirection: 'row', gap: S[2], width: size }}>
+            <Btn label="Rematch" kind="gold" icon="↻" style={{ flex: 1 }} onPress={() => send({ t: 'start' })} />
+            <Btn label="Share" icon="📣" onPress={() => { void shareResult('chess', G.winner === state.you); }} />
+          </View>
+        ) : (
+          <View style={{ flexDirection: 'row', gap: S[2], width: size }}>
+            <Btn label="Resign" kind="danger" compact style={{ flex: 1 }} onPress={() => send({ t: 'resign' })} />
+            <Btn label="Offer draw" compact style={{ flex: 1 }} onPress={() => send({ t: 'draw-offer' })} />
+            <Btn label="⚙" compact onPress={() => setShowSettings(true)} accessibilityLabel="Board settings" />
+          </View>
+        )}
+
+        <Btn
+          label="Invite a friend"
+          icon="🔗"
+          style={{ width: size }}
+          onPress={() => { void inviteToTable('chess', roomId); }}
+          disabled={!roomId}
+        />
 
         <Swatches value={theme} onChange={setTheme} width={size} />
 
@@ -246,6 +297,23 @@ export default function Chess({ roomId, auto, autoBot }: { roomId: string } & Au
           </Panel>
         )}
       </ScrollView>
+
+      <Toasts events={events} />
+      <Confetti show={!!G.result && G.winner === state.you} />
+
+      <Sheet visible={showSettings} title="Board" onClose={() => setShowSettings(false)}>
+        <SettingRow
+          label="Coordinates"
+          hint="Rank and file letters on the board edge"
+          value={coords ? 'On' : 'Off'}
+          onPress={() => setCoords(v => !v)}
+        />
+        <SettingRow
+          label="Sound"
+          value={sound ? 'On' : 'Off'}
+          onPress={() => { const n = !sound; setSound(n); void setSoundEnabled(n); }}
+        />
+      </Sheet>
 
       {promo && (
         <PromoPicker
@@ -475,8 +543,11 @@ function PromoPicker({
 }
 
 function Lobby({
-  state, events, onAddBot, onStart,
-}: { state: GameState; events: string[]; onAddBot: () => void; onStart: () => void }) {
+  state, events, onAddBot, onStart, botLevel, onBotLevel,
+}: {
+  state: GameState; events: string[]; onAddBot: () => void; onStart: () => void;
+  botLevel: number; onBotLevel: (n: number) => void;
+}) {
   const t = useType();
   const members = state.lobby?.members ?? [];
   const host = state.lobby?.hostId === state.you;
@@ -500,10 +571,22 @@ function Lobby({
             <Text style={{ color: C.muted, fontSize: t.sm }}>Two players minimum — add a bot to start now.</Text>
           )}
         </Panel>
+        <View style={{ flexDirection: 'row', gap: S[2], alignItems: 'center' }}>
+          <Text style={{ flex: 1, color: '#8b95ad', fontSize: t.sm }}>Bot strength</Text>
+          {[1, 2, 3].map(n => (
+            <Btn
+              key={n}
+              label={['Easy', 'Even', 'Hard'][n - 1]}
+              compact
+              kind={botLevel === n ? 'gold' : 'secondary'}
+              onPress={() => onBotLevel(n)}
+            />
+          ))}
+        </View>
         <Btn label="Add a bot" icon="🤖" onPress={onAddBot} />
         <Btn label="Start game" kind="gold" onPress={onStart} disabled={!host || members.length < 2} />
-        {events.length > 0 && <Text style={{ color: C.muted, fontSize: t.sm }}>{events[events.length - 1]}</Text>}
       </ScrollView>
+      <Toasts events={events} />
     </View>
   );
 }

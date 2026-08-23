@@ -31,7 +31,9 @@ import * as Haptics from 'expo-haptics';
 import { useGameSocket, type AutoStart } from '../../lib/games/useGameSocket';
 import { TableBackground, Panel, Btn, Banner, PlayerRow, Chip, useType } from './ui';
 import { C, S, R, D3, mix, goldLine } from '../../lib/games/theme';
-import { playSfx, preloadSfx } from '../../lib/games/sfx';
+import { playSfx, preloadSfx, soundEnabled, setSoundEnabled } from '../../lib/games/sfx';
+import { Toasts, Confetti, Sheet, SettingRow } from './feedback';
+import { inviteToTable, shareResult } from '../../lib/games/invite';
 import { reconcile, groupUp, ungroup, sortLoose, sameGroups, type Groups } from '../../lib/games/handGroups';
 
 type Card = { id: string; suit: string; rank: string };
@@ -67,6 +69,9 @@ export default function Rummy({ tableId = '', auto, autoBot }: { tableId?: strin
   // declaration. Nothing about it is game truth, so it never leaves this file
   // except as an explicit intent.
   const [picked, setPicked] = useState<string[]>([]);
+  const [showSettings, setShowSettings] = useState(false);
+  const [confirmDeclare, setConfirmDeclare] = useState(false);
+  const [sound, setSound] = useState(soundEnabled());
 
   const L = state.lobby;
   const G = state.game;
@@ -165,9 +170,10 @@ export default function Rummy({ tableId = '', auto, autoBot }: { tableId?: strin
             <Text style={{ color: C.muted, fontSize: t.sm }}>{members.length} seated</Text>
           </Panel>
           <Btn label="Add a bot" icon="🤖" onPress={() => send({ t: 'addbot' })} />
+          <Btn label="Invite a friend" icon="🔗" onPress={() => { void inviteToTable('rummy', tableId); }} disabled={!tableId} />
           <Btn label="Deal" kind="gold" onPress={() => send({ t: 'start' })} disabled={!host || members.length < 2} />
-          {events.length > 0 && <Text style={{ color: C.muted, fontSize: t.sm }}>{events[events.length - 1]}</Text>}
         </ScrollView>
+        <Toasts events={events} />
       </TableBackground>
     );
   }
@@ -197,6 +203,11 @@ export default function Rummy({ tableId = '', auto, autoBot }: { tableId?: strin
     setPicked([]);
   };
 
+  /**
+   * Declaring ends the round whether or not the hand stands up, and an invalid
+   * declaration is scored against the player. The web asks first; Declare sits
+   * next to Discard, and a mis-tap would otherwise cost a whole round.
+   */
   const declare = () => {
     if (picked.length !== 1) return;
     // The server judges the hand. `groups` carries the player's own
@@ -335,7 +346,7 @@ export default function Rummy({ tableId = '', auto, autoBot }: { tableId?: strin
         {/* playing */}
         <View style={{ width: feltW, flexDirection: 'row', gap: S[2] }}>
           <Btn label="Discard" compact style={{ flex: 1 }} onPress={discard} disabled={!mine || picked.length !== 1} />
-          <Btn label="Declare" kind="gold" compact style={{ flex: 1 }} onPress={declare} disabled={!mine || picked.length !== 1} />
+          <Btn label="Declare" kind="gold" compact style={{ flex: 1 }} onPress={() => setConfirmDeclare(true)} disabled={!mine || picked.length !== 1} />
           <Btn label="Drop" kind="danger" compact onPress={() => send({ t: 'drop' })} disabled={!mine} />
         </View>
 
@@ -347,12 +358,42 @@ export default function Rummy({ tableId = '', auto, autoBot }: { tableId?: strin
               : `${picked.length} selected — Group them, or pick one card to discard.`}
         </Text>
 
-        {events.length > 0 && (
-          <Text numberOfLines={2} style={{ color: C.muted, fontSize: t.sm, width: feltW }}>
-            {events[events.length - 1]}
-          </Text>
+        <View style={{ width: feltW, flexDirection: 'row', gap: S[2] }}>
+          <Btn label="Invite" icon="🔗" compact style={{ flex: 1 }} onPress={() => { void inviteToTable('rummy', tableId); }} disabled={!tableId} />
+          <Btn label="⚙" compact onPress={() => setShowSettings(true)} accessibilityLabel="Settings" />
+        </View>
+
+        {finished && (
+          <View style={{ width: feltW, flexDirection: 'row', gap: S[2] }}>
+            <Btn label="Deal again" kind="gold" icon="↻" style={{ flex: 1 }} onPress={() => send({ t: 'start' })} />
+            <Btn label="Share" icon="📣" onPress={() => { void shareResult('rummy', G.winnerId === state.you); }} />
+          </View>
         )}
       </ScrollView>
+
+      <Toasts events={events} />
+      <Confetti show={!!finished && G.winnerId === state.you} />
+
+      <Sheet visible={confirmDeclare} title="Declare?" onClose={() => setConfirmDeclare(false)}>
+        <Text style={{ color: C.muted, fontSize: t.sm, lineHeight: 20 }}>
+          This ends the round. The table checks your hand — if the melds do not stand up, the round is scored against you.
+        </Text>
+        <Btn label="Declare" kind="gold" onPress={() => { setConfirmDeclare(false); declare(); }} />
+      </Sheet>
+
+      <Sheet visible={showSettings} title="Table" onClose={() => setShowSettings(false)}>
+        <SettingRow
+          label="Sound"
+          value={sound ? 'On' : 'Off'}
+          onPress={() => { const n = !sound; setSound(n); void setSoundEnabled(n); }}
+        />
+        <SettingRow
+          label="Leave table"
+          hint="Drops you from this hand"
+          value="Leave"
+          onPress={() => { setShowSettings(false); send({ t: 'drop' }); }}
+        />
+      </Sheet>
     </TableBackground>
   );
 }

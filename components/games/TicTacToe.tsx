@@ -20,6 +20,8 @@ import { useGameSocket, isMyTurn, type AutoStart } from '../../lib/games/useGame
 import { TableBackground, Panel, Btn, Banner, PlayerRow, useType } from './ui';
 import { C, S, R, D3, E, mix, goldLine, MOTION } from '../../lib/games/theme';
 import { playSfx, preloadSfx } from '../../lib/games/sfx';
+import { Toasts, Confetti } from './feedback';
+import { inviteToTable, shareResult } from '../../lib/games/invite';
 
 const TEAL = '#4be0c1';
 const PINK = '#ff6fb5';
@@ -109,9 +111,10 @@ export default function TicTacToe({ roomId, auto, autoBot }: { roomId: string } 
             )}
           </Panel>
           <Btn label="Add a bot" icon="🤖" onPress={() => send({ t: 'addbot' })} />
+          <Btn label="Invite a friend" icon="🔗" onPress={() => { void inviteToTable('tictactoe', roomId); }} disabled={!roomId} />
           <Btn label="Start game" kind="gold" onPress={() => send({ t: 'start' })} disabled={!host || members.length < 2} />
-          {events.length > 0 && <Text style={{ color: C.muted, fontSize: t.sm }}>{events[events.length - 1]}</Text>}
         </ScrollView>
+        <Toasts events={events} />
       </TableBackground>
     );
   }
@@ -163,8 +166,17 @@ export default function TicTacToe({ roomId, auto, autoBot }: { roomId: string } 
             : <TurnLine mine={mine} name={them?.name ?? 'your opponent'} />}
         </View>
 
-        {finished && <Btn label="Play again" kind="gold" onPress={() => send({ t: 'start' })} style={{ width: size }} />}
+        {finished ? (
+          <View style={{ width: size, flexDirection: 'row', gap: S[2] }}>
+            <Btn label="Rematch" kind="gold" icon="↻" style={{ flex: 1 }} onPress={() => send({ t: 'start' })} />
+            <Btn label="Share" icon="📣" onPress={() => { void shareResult('tictactoe', G.winnerId === state.you); }} />
+          </View>
+        ) : (
+          <Btn label="Invite a friend" icon="🔗" style={{ width: size }} onPress={() => { void inviteToTable('tictactoe', roomId); }} disabled={!roomId} />
+        )}
       </ScrollView>
+      <Toasts events={events} />
+      <Confetti show={finished && G.winnerId === state.you} />
     </TableBackground>
   );
 }
