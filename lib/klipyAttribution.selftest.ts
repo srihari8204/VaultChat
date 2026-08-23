@@ -93,5 +93,42 @@ check('the watermark is gated on that stamp',
   /msg\.meta\?\.source === 'klipy'/.test(BUBBLE),
   'gating on gifUrl alone would stamp pre-switch GIPHY messages with KLIPY\'s mark');
 
+// ── 4. preview dialog before send (guideline "Version 2") ─────────────
+check('tapping a tile opens a preview instead of sending outright',
+  /onPress=\{\(\) => setPreview\(item\)\}/.test(PICKER),
+  'a 100px tile is not enough to know what you are about to send');
+
+check('the preview carries the Powered by KLIPY mark',
+  /previewKlipy/.test(PICKER) && /previewCard[\s\S]{0,700}powered-by-klipy-/.test(PICKER),
+  'the preview area is the guideline\'s other sanctioned placement');
+
+check('the preview can send, and can be dismissed without sending',
+  /onSelect\(p\.url, p\.preview\)/.test(PICKER) && /setPreview\(null\)/.test(PICKER));
+
+check('a stale preview cannot survive a tab change or a close',
+  (PICKER.match(/setPreview\(null\)/g) ?? []).length >= 3,
+  'otherwise reopening shows an item from the previous tab');
+
+// ── the bug that made the watermark look absent ───────────────────────
+// resizeMode="contain" fits the TIGHTER axis, so a box whose ratio disagrees
+// with the asset silently shrinks the mark. The asset is 390x134 (2.91); the
+// box was 54x14 (3.86), which drew it ~40px wide — present, unreadable, and
+// indistinguishable from "the watermark never rendered".
+const wm = /klipyWatermark:[\s\S]{0,400}?width:\s*(\d+)[\s\S]{0,80}?height:\s*(\d+)/.exec(STYLES);
+if (!wm) {
+  check('the watermark box declares a width and height', false);
+} else {
+  const ratio = Number(wm[1]) / Number(wm[2]);
+  check(`the watermark box matches the asset ratio (2.91), got ${ratio.toFixed(2)}`,
+    Math.abs(ratio - 2.91) < 0.35,
+    'a mismatched box shrinks the mark under resizeMode contain');
+  check('...and is large enough to actually read on a 220px card',
+    Number(wm[1]) >= 60);
+}
+
+check('the white mark gets a shadow so it survives pale content',
+  /klipyWatermark:[\s\S]{0,400}?shadowColor/.test(STYLES),
+  'white-on-white is not "visible with minimal distraction"');
+
 console.log(failures ? `\n  ${failures} FAILED\n` : '\n  all KLIPY attribution checks passed\n');
 process.exit(failures ? 1 : 0);

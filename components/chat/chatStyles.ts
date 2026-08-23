@@ -283,7 +283,18 @@ export const makeStyles = (c: Palette) => StyleSheet.create({
   // KLIPY watermark on a sent GIF/sticker/emoji card. Bottom-left and
   // semi-transparent, per their brand guideline: visible enough to attribute,
   // faint enough not to compete with the content it sits on.
-  klipyWatermark: { position: 'absolute', left: 6, bottom: 6, width: 54, height: 14, opacity: 0.7 },
+  // 68x23 is the ASSET'S OWN RATIO (390x134 = 2.91). It was 54x14 = 3.86, and
+  // with resizeMode contain the image fits the tighter axis — so it drew about
+  // 40px wide, present but far too small to read, which is why the watermark
+  // looked absent rather than wrong.
+  //
+  // The mark is white, so on pale content it needs help: a soft dark shadow
+  // gives it an edge without a visible box. The guideline asks for visibility
+  // with minimal distraction, and white-on-white is neither.
+  klipyWatermark: {
+    position: 'absolute', left: 8, bottom: 8, width: 68, height: 23, opacity: 0.9,
+    shadowColor: '#000', shadowOpacity: 0.5, shadowRadius: 3, shadowOffset: { width: 0, height: 1 },
+  },
   klipyWatermarkImg: { width: '100%', height: '100%' },
   dlOverlay:     { ...StyleSheet.absoluteFillObject, alignItems: 'center', justifyContent: 'center', gap: 4, backgroundColor: 'rgba(0,0,0,0.25)' },
   dlOverlayTxt:  { color: '#fff', fontSize: 12, fontWeight: '700' },

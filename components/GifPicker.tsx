@@ -54,6 +54,9 @@ export default function GifPicker({ visible, onClose, onSelect }: Props) {
   const [results, setResults] = useState<GifResult[]>([]);
   const [loading, setLoading] = useState(false);
   const [note,    setNote]    = useState('');   // shown when there's nothing to display
+  // Tapping a tile opens a preview instead of sending outright — see the
+  // dialog at the bottom of this file for why.
+  const [preview, setPreview] = useState<GifResult | null>(null);
 
   const search = useCallback(async (q: string, type: TabType) => {
     setLoading(true);
@@ -96,12 +99,13 @@ export default function GifPicker({ visible, onClose, onSelect }: Props) {
   useEffect(() => {
     if (!visible) return;
     if (timer.current) clearTimeout(timer.current);
+    setPreview(null);
     search(query, tab);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visible, tab]);
 
   // Reset to a clean sheet on close, or reopening shows the last search.
-  useEffect(() => { if (!visible) { setQuery(''); setResults([]); setNote(''); } }, [visible]);
+  useEffect(() => { if (!visible) { setQuery(''); setResults([]); setNote(''); setPreview(null); } }, [visible]);
 
   if (!visible) return null;
 
@@ -162,7 +166,7 @@ export default function GifPicker({ visible, onClose, onSelect }: Props) {
           renderItem={({ item }) => (
             <TouchableOpacity
               style={s.gifCell}
-              onPress={() => { onSelect(item.url, item.preview); onClose(); }}
+              onPress={() => setPreview(item)}
             >
               {/* contain, not cover: stickers and emojis are transparent and
                   non-square, and cropping them cuts the subject off. */}
@@ -171,6 +175,47 @@ export default function GifPicker({ visible, onClose, onSelect }: Props) {
           )}
           ListEmptyComponent={!loading ? <Text style={s.empty}>{note || 'Type to search'}</Text> : null}
         />
+
+        {/* PREVIEW BEFORE SEND — the guideline's "Version 2", and the WhatsApp
+            behaviour: a tile is a choice, not a send. Two reasons it earns its
+            place beyond attribution: a grid tile is 100px and you cannot really
+            tell what you are about to send, and a mis-tap in a 3-wide grid used
+            to put the wrong GIF in someone's chat with no undo.
+
+            It is also the second sanctioned home for the KLIPY mark — the
+            guideline names "the preview area" alongside the search bar — and
+            here it sits directly under the content it is attributing, at full
+            size, which is the clearest placement in the app. */}
+        {preview && (
+          <Pressable style={s.previewBackdrop} onPress={() => setPreview(null)}>
+            <Pressable style={s.previewCard} onPress={() => {}}>
+              <Image source={{ uri: preview.preview }} style={s.previewImg} resizeMode="contain" />
+
+              <Image
+                source={scheme === 'light'
+                  ? require('../assets/klipy/powered-by-klipy-black.png')
+                  : require('../assets/klipy/powered-by-klipy-white.png')}
+                style={s.previewKlipy}
+                resizeMode="contain"
+                accessibilityLabel="Powered by KLIPY"
+              />
+
+              <View style={s.previewActions}>
+                <TouchableOpacity style={s.previewCancel} onPress={() => setPreview(null)} activeOpacity={0.8}>
+                  <Text style={s.previewCancelTxt}>Cancel</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={s.previewSend}
+                  onPress={() => { const p = preview; setPreview(null); onSelect(p.url, p.preview); onClose(); }}
+                  activeOpacity={0.85}
+                >
+                  <Ionicons name="send" size={16} color="#fff" />
+                  <Text style={s.previewSendTxt}>Send</Text>
+                </TouchableOpacity>
+              </View>
+            </Pressable>
+          </Pressable>
+        )}
       </Pressable>
     </Pressable>
   );
@@ -192,5 +237,21 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   gifCell:   { flex: 1, margin: 2, height: 100, backgroundColor: c.surface, borderRadius: 8, overflow: 'hidden' },
   gifImg:    { width: '100%', height: '100%' },
   empty:     { color: c.textDim, textAlign: 'center', marginTop: 40, fontSize: 14 },
+  // 82x16 ≈ the asset's 5.89 ratio; with resizeMode contain a mismatched box
+  // silently shrinks the mark, which is exactly how the watermark went missing.
   klipyLogo: { width: 82, height: 16, opacity: 0.9 },
+
+  previewBackdrop: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
+                     backgroundColor: 'rgba(0,0,0,0.75)', alignItems: 'center', justifyContent: 'center', padding: 24 },
+  previewCard:     { width: '100%', maxWidth: 340, backgroundColor: c.surfaceSolid, borderRadius: 18,
+                     padding: 16, alignItems: 'center', gap: 12 },
+  previewImg:      { width: '100%', height: 240, borderRadius: 12, backgroundColor: c.surface },
+  previewKlipy:    { width: 104, height: 18, opacity: 0.9 },
+  previewActions:  { flexDirection: 'row', gap: 10, width: '100%' },
+  previewCancel:   { flex: 1, paddingVertical: 12, borderRadius: 12, alignItems: 'center',
+                     backgroundColor: c.surface, borderWidth: StyleSheet.hairlineWidth, borderColor: c.border },
+  previewCancelTxt:{ color: c.textDim, fontSize: 15, fontWeight: '700' },
+  previewSend:     { flex: 2, flexDirection: 'row', gap: 8, paddingVertical: 12, borderRadius: 12,
+                     alignItems: 'center', justifyContent: 'center', backgroundColor: c.primary },
+  previewSendTxt:  { color: '#fff', fontSize: 15, fontWeight: '800' },
 });
