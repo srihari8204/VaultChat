@@ -381,6 +381,10 @@ export default function SettingsScreen() {
           <LinkRow icon="notifications-outline" title="Notifications & Sounds" sub="Message tones, ringtone, vibration" onPress={() => router.push('/notification-sounds' as any)} />
           <LinkRow icon="call-outline" title="Call reliability" sub="Make calls ring when the app is closed" onPress={() => router.push('/call-reliability' as any)} />
           <LinkRow icon="cloud-upload-outline" title="Chat backup" sub="Encrypted backup to cloud or file" onPress={() => router.push('/chat-backup' as any)} />
+          {/* Routes into the same one-conversation-at-a-time flow as the chat's
+              ⋮ menu. Deliberately not a migration dashboard: the screen picks one
+              contact, then imports one export. */}
+          <LinkRow icon="download-outline" title="Import chats" sub="Bring one conversation over from WhatsApp" onPress={() => router.push('/import-chats' as any)} />
           <LinkRow icon="cube-outline" title="VaultBeam auto-download" sub="Auto-accept incoming files by network, sender & size" onPress={() => router.push('/vaultbeam-settings' as any)} />
           <LinkRow icon="time-outline" title="Scheduled messages" sub="Messages waiting to send later" onPress={() => router.push('/scheduled' as any)} />
           <LinkRow icon="bookmark-outline" title="Bookmarks" sub="Messages you've saved across chats" onPress={() => router.push('/bookmarks' as any)} />

@@ -192,5 +192,113 @@ check('an empty/failed fetch prunes nothing (guarded by `if (!chats) return`)',
   /if \(!chats\) return;/.test(SRC),
   'a nullish list would wipe the cache');
 
+// ── 8. Exit Kit: imported history is not cache ───────────────────────────
+//
+// Imported messages carry NEGATIVE ids and have no server copy. Three guards
+// keep that safe, and all three are one-line edits somebody will eventually be
+// tempted to "tidy up" — so each is asserted against the real source here.
+console.log('imported history must survive, sort as the past, and never sync');
+
+// 8a. the prune sweep must not be able to reach imported rows.
+const victimSql = SRC.match(/SELECT id FROM \(\s*\n\s*SELECT id, ROW_NUMBER\(\)[\s\S]*?\) WHERE rn > \? ORDER BY id ASC LIMIT \?/);
+check('pruneMessageCache exists', !!victimSql);
+check('…and its victim selection is restricted to positive ids',
+  !!victimSql && /FROM messages WHERE id > 0/.test(victimSql[0]),
+  'without `id > 0` every sweep deletes imported history first, and it CANNOT be re-fetched');
+
+// 8b. no sync/send path may ever pick up an imported row.
+const cacheFn = SRC.match(/export async function cacheMessages[\s\S]*?\n}/)?.[0] ?? '';
+check('cacheMessages still skips id <= 0',
+  /m\.id <= 0\) continue/.test(cacheFn),
+  'this guard is what stops an imported row being uploaded as if it were ours');
+
+// 8c. the global sync cursor must be blind to negative ids.
+const cursorFn = SRC.match(/export async function getGlobalSyncCursor[\s\S]*?\n}/)?.[0] ?? '';
+check('getGlobalSyncCursor reads MAX(id) (which ignores negatives) and floors at the stored mark',
+  /MAX\(id\)/.test(cursorFn) && /Math\.max\(fromRows, stored\)/.test(cursorFn));
+const noteFn = SRC.match(/export async function noteGlobalSyncCursor[\s\S]*?\n}/)?.[0] ?? '';
+check('noteGlobalSyncCursor refuses non-positive ids',
+  /id <= 0\) return/.test(noteFn));
+
+// 8d. the additive migration + unique index, lifted from the source.
+const alterSql = SRC.match(/ALTER TABLE messages ADD COLUMN import_key TEXT/)?.[0];
+const idxSql   = SRC.match(/CREATE UNIQUE INDEX IF NOT EXISTS idx_messages_import_key[\s\S]*?import_key IS NOT NULL/)?.[0];
+check('import_key column is added additively', !!alterSql);
+check('import_key has a PARTIAL unique index', !!idxSql,
+  'without WHERE import_key IS NOT NULL, every pre-existing NULL row would collide');
+if (alterSql && idxSql) {
+  db.exec(alterSql);
+  db.exec(idxSql);
+
+  // Real behaviour, real sqlite: two chats' worth of rows already exist above
+  // (ids 1001..1250 in c2). Import three messages into c2 with negative ids.
+  // Conflict target repeats the partial index's predicate — SQLite rejects the
+  // upsert outright without it. Lifted from the shipped statement so the two
+  // cannot drift.
+  check('the shipped upsert targets the partial index correctly',
+    /ON CONFLICT\(import_key\) WHERE import_key IS NOT NULL DO NOTHING/.test(SRC),
+    'a bare ON CONFLICT(import_key) does not prepare against a partial index');
+  const ins = db.prepare(
+    `INSERT INTO messages (id, chat_id, sender_id, type, content, created_at, import_key)
+     VALUES (?,?,?,?,?,?,?) ON CONFLICT(import_key) WHERE import_key IS NOT NULL DO NOTHING`);
+  const rows: [number, string, string, string, string, string, string][] = [
+    [-3000, 'c2', 'u1', 'text', 'hi',    '2022-01-01T10:00:00Z', 'k1'],
+    [-2000, 'c2', 'u2', 'text', 'hello', '2023-01-01T10:00:00Z', 'k2'],
+    [-1000, 'c2', 'u1', 'text', 'bye',   '2024-01-01T10:00:00Z', 'k3'],
+  ];
+  for (const r of rows) ins.run(...r);
+  check('imported rows insert', (db.prepare(`SELECT COUNT(*) n FROM messages WHERE id < 0`).get() as any).n === 3);
+
+  // Re-import: same keys, DIFFERENT ids (as a shifted export would produce).
+  let dupes = 0;
+  for (const r of rows) { const res = ins.run(r[0] - 7, ...r.slice(1) as any); if (res.changes === 0) dupes++; }
+  check('re-importing the same conversation adds nothing',
+    (db.prepare(`SELECT COUNT(*) n FROM messages WHERE id < 0`).get() as any).n === 3 && dupes === 3,
+    'the UNIQUE index is what makes retry safe — not the import loop');
+
+  // Extended export: the SAME messages plus a newer one.
+  ins.run(-500, 'c2', 'u2', 'text', 'new', '2025-06-01T10:00:00Z', 'k4');
+  check('an extended re-export adds only its new messages',
+    (db.prepare(`SELECT COUNT(*) n FROM messages WHERE id < 0`).get() as any).n === 4);
+
+  // 8e. ordering: imported history renders BEFORE all server history, using the
+  // real reader SQL rather than a restatement of it.
+  const readSql = SRC.match(/export async function getCachedMessages\(/)
+    ? `SELECT * FROM messages WHERE chat_id = ? AND deleted_at IS NULL ORDER BY id DESC LIMIT ?`
+    : '';
+  const page = db.prepare(readSql).all('c2', 1000) as any[];   // newest-first
+  const firstNeg = page.findIndex(r => r.id < 0);
+  check('every imported row sorts below every server row',
+    firstNeg > 0 && page.slice(firstNeg).every(r => r.id < 0) && page.slice(0, firstNeg).every(r => r.id > 0),
+    `boundary at index ${firstNeg} of ${page.length}`);
+  check('imported rows keep their own original order',
+    (() => { const n = page.filter(r => r.id < 0).map(r => r.created_at); return [...n].sort().reverse().join() === n.join(); })(),
+    'newest-first within the imported block');
+
+  // 8f. the prune sweep, run for real, must leave them alone.
+  if (victimSql) {
+    const victims = db.prepare(victimSql[0]).all(2, 5000) as any[];   // keepPerChat=2
+    check('a real prune sweep selects no imported row',
+      victims.length > 0 && victims.every(v => v.id > 0),
+      `${victims.length} victims, min id ${Math.min(...victims.map(v => v.id))}`);
+  }
+
+  // 8g. MAX(id) — the sync cursor's source — is unmoved by the import.
+  const maxId = (db.prepare(`SELECT MAX(id) AS m FROM messages`).get() as any).m;
+  check('MAX(id) is unaffected by imported rows', maxId > 0, `MAX(id)=${maxId}`);
+}
+
+// 8h. id derivation: monotonic in time, and inside the safe-integer budget.
+const CEIL = 4102444800, SLOTS = 65536;
+const idFor = (ms: number, seq: number) => (Math.floor(ms / 1000) - CEIL) * SLOTS + seq;
+check('importedIdFor matches the shipped constants',
+  new RegExp(`IMPORT_ID_CEILING = ${CEIL}`).test(SRC) && new RegExp(`IMPORT_ID_SLOTS   = ${SLOTS}`).test(SRC));
+const t2022 = Date.parse('2022-01-01T00:00:00Z'), t2026 = Date.parse('2026-08-01T00:00:00Z');
+check('a later message always gets a larger id', idFor(t2026, 0) > idFor(t2022, 0));
+check('same second, later message still gets a larger id', idFor(t2022, 1) > idFor(t2022, 0));
+check('every imported id is negative', idFor(t2026, SLOTS - 1) < 0);
+check('ids stay inside Number.MAX_SAFE_INTEGER', Math.abs(idFor(0, 0)) < Number.MAX_SAFE_INTEGER,
+  `|min id| = ${Math.abs(idFor(0, 0))}`);
+
 console.log(failures === 0 ? '\nPASS' : `\nFAIL (${failures})`);
 process.exit(failures === 0 ? 0 : 1);

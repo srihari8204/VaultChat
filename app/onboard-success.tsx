@@ -22,7 +22,11 @@ export default function OnboardSuccess() {
 
   useEffect(() => { deviceSecurityAvailable().then(setHasDeviceSecurity).catch(() => setHasDeviceSecurity(false)); }, []);
 
-  const finish = async () => {
+  // `next` lets the same login run land somewhere other than the chat list.
+  // Exit Kit needs a real session (and a contact to import into), and neither
+  // exists until verifyMpinRemote below has returned a JWT — so the import entry
+  // point cannot be a shortcut that skips this, it has to be a destination for it.
+  const finish = async (next?: string) => {
     if (busy) return;
     const { userId, mpin } = onboarding.get();
     if (!userId || !mpin) { Alert.alert('Session expired', 'Please sign in again.'); router.replace('/onboard' as any); return; }
@@ -41,7 +45,7 @@ export default function OnboardSuccess() {
         }
       }
       onboarding.reset();                                // wipe plaintext MPIN/answers
-      router.replace('/(tabs)/chats' as any);
+      router.replace((next ?? '/(tabs)/chats') as any);
     } catch (e: any) {
       setBusy(false);
       Alert.alert('Could not continue', onboardingError(e, 'Please try again'));
@@ -67,8 +71,19 @@ export default function OnboardSuccess() {
           )}
         </View>
 
-        <TouchableOpacity style={s.cta} onPress={finish} disabled={busy} activeOpacity={0.85}>
+        <TouchableOpacity style={s.cta} onPress={() => finish()} disabled={busy} activeOpacity={0.85}>
           {busy ? <ActivityIndicator color="#fff" /> : <Text style={s.ctaTxt}>Continue to Chats</Text>}
+        </TouchableOpacity>
+
+        {/* Secondary on purpose: importing is something a few people want on day
+            one, and nobody should be nudged into it before they have a chat. */}
+        <TouchableOpacity
+          style={s.secondary}
+          onPress={() => finish('/import-chats')}
+          disabled={busy}
+          activeOpacity={0.7}
+        >
+          <Text style={s.secondaryTxt}>Import an existing conversation</Text>
         </TouchableOpacity>
       </View>
     </View>
@@ -89,6 +104,8 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   radioDot: { width: 12, height: 12, borderRadius: 6, backgroundColor: c.primary },
   radioTxt: { color: c.text, fontSize: 14, flex: 1, lineHeight: 19 },
   note: { color: c.textFaint, fontSize: 12, marginTop: 10, lineHeight: 16 },
-  cta: { width: '100%', marginTop: 'auto', marginBottom: 32, height: 56, borderRadius: 16, backgroundColor: c.primary, alignItems: 'center', justifyContent: 'center' },
+  cta: { width: '100%', marginTop: 'auto', height: 56, borderRadius: 16, backgroundColor: c.primary, alignItems: 'center', justifyContent: 'center' },
   ctaTxt: { color: '#fff', fontSize: 16, fontWeight: '800' },
+  secondary: { width: '100%', marginTop: 12, marginBottom: 32, paddingVertical: 12, alignItems: 'center' },
+  secondaryTxt: { color: c.textDim, fontSize: 14, fontWeight: '700' },
 });

@@ -161,6 +161,20 @@ export function getLocalDb(): Promise<LocalDb> {
           ON messages(chat_id, id DESC)
           WHERE deleted_at IS NULL AND type <> 'reaction';
       `);
+      // Exit Kit: additive migration for installs created before imports existed.
+      // ADD COLUMN throws when the column is already there — that's the whole
+      // check, same as lib/lock/lockStore.ts. The partial unique index is what
+      // makes an import idempotent: re-importing the same export hits the
+      // constraint and DO NOTHING, so "safe to retry" is a property of the
+      // schema rather than of the import loop. It is null for every pre-existing
+      // row, so the index covers nothing until someone actually imports.
+      try { await db.execAsync(`ALTER TABLE messages ADD COLUMN import_key TEXT`); } catch {}
+      try {
+        await db.execAsync(
+          `CREATE UNIQUE INDEX IF NOT EXISTS idx_messages_import_key
+             ON messages(import_key) WHERE import_key IS NOT NULL`,
+        );
+      } catch {}
       // P4.2: blind search index — FTS5 over HMAC'd tokens (see the "Encrypted
       // search" section below). Created OUTSIDE the main schema batch so a
       // build whose SQLite lacks FTS5 degrades to the legacy scan instead of
@@ -377,6 +391,189 @@ export async function cacheMessages(chatId: string, msgs: Message[]): Promise<vo
       [chatId, maxId],
     );
   }
+}
+
+// ═══ Exit Kit — importing local-only history ═══════════════════════════
+//
+// An imported message is NOT cache. There is no server copy, so it can never be
+// re-fetched, and it must never be mistaken for a synced row. Three properties
+// of this store make that delicate, and all three are handled by one decision:
+// imported ids are NEGATIVE.
+//
+//   * The chat renders and pages by `id`, never by created_at. A negative id
+//     sorts below every server id (BIGSERIAL, always positive), so imported
+//     history lands in the past with no change to the ordering model.
+//   * getGlobalSyncCursor() is max(MAX(id), stored). A positive id above the
+//     server head would push the delta cursor past it and the device would stop
+//     receiving new messages IN EVERY CHAT, silently. MAX() ignores negatives,
+//     and noteGlobalSyncCursor already refuses id <= 0.
+//   * cacheMessages() skips id <= 0, so no sync or send path can ever pick an
+//     imported row up and try to upload it. That guard is load-bearing — do not
+//     relax it. importMessages() below is the ONLY writer of negative ids.
+//
+// The id is derived from the original timestamp rather than a counter:
+//
+//     id = (unixSeconds - CEILING) * SLOTS + seq
+//
+// which makes ordering-by-id identical to ordering-by-original-time, for free.
+// A counter would have been simpler to write and wrong to live with: re-importing
+// an export that has GROWN since last time appends messages that are newer in
+// time but would be allocated lower ids, so a year of new history would render
+// as the oldest messages in the conversation. Deriving from the timestamp also
+// means the ids are fully deterministic — no persisted allocator state, and a
+// re-import computes the same ids it did the first time.
+//
+// Budget check: CEILING * SLOTS = 4.10e9 * 65536 ≈ 2.69e14, comfortably inside
+// Number.MAX_SAFE_INTEGER (9.01e15) and SQLite's 64-bit INTEGER.
+
+const IMPORT_ID_CEILING = 4102444800;   // 2100-01-01Z in unix seconds
+const IMPORT_ID_SLOTS   = 65536;        // distinct messages representable per second
+
+/** The id an imported message at `tsMs` with in-second sequence `seq` gets. */
+export function importedIdFor(tsMs: number, seq: number): number {
+  const sec = Math.floor(tsMs / 1000);
+  return (sec - IMPORT_ID_CEILING) * IMPORT_ID_SLOTS + seq;
+}
+
+/** One parsed message on its way into the local store. */
+export interface ImportRow {
+  /** Deterministic dedupe key (hex). The UNIQUE index on it is what makes a retry safe. */
+  importKey: string;
+  senderId:  string | null;
+  type:      Message['type'];
+  /** The exported body, byte-for-byte. Provenance goes in `meta`, never in here. */
+  content:   string | null;
+  meta:      any;
+  /** ORIGINAL timestamp (ms since epoch) — becomes both created_at and the id. */
+  tsMs:      number;
+  createdAt: string;
+}
+
+/**
+ * Write imported history for one chat.
+ *
+ * Batched so each commit is short: one transaction over 100k rows would hold the
+ * write lock long enough to stall the socket writer (transactions are serialised
+ * on the single connection by txLock) and would lose everything on a crash.
+ *
+ * Idempotent by construction — the partial UNIQUE index on import_key refuses a
+ * duplicate and DO NOTHING absorbs it, so a retry after a crash re-runs the
+ * committed rows for free and lands only what is missing. `skipped` counts the
+ * refusals, which is exactly the "duplicates skipped" figure the completion
+ * screen reports.
+ *
+ * Deliberately does NOT touch sync_cursor: imported rows are not synced.
+ */
+export async function importMessages(
+  chatId: string,
+  rows: ImportRow[],
+  opts?: { batch?: number; onProgress?: (done: number, total: number) => void; signal?: { cancelled: boolean } },
+): Promise<{ inserted: number; skipped: number }> {
+  if (!rows || !rows.length) return { inserted: 0, skipped: 0 };
+  const db = await getLocalDb();
+  const ftsKey = _ftsOk ? await ftsKeyBytes() : null;
+  const batch = Math.max(1, opts?.batch ?? 500);
+
+  // In-second sequence numbers, assigned in transcript order so the id ordering
+  // matches the export's ordering even at WhatsApp's minute-level granularity
+  // (where every message in a minute shares one timestamp).
+  const seqBySec = new Map<number, number>();
+  let inserted = 0, skipped = 0;
+
+  for (let i = 0; i < rows.length; i += batch) {
+    if (opts?.signal?.cancelled) break;
+    const chunk = rows.slice(i, i + batch);
+    await db.withTransactionAsync(async () => {
+      for (const r of chunk) {
+        const sec = Math.floor(r.tsMs / 1000);
+        const seq = seqBySec.get(sec) ?? 0;
+        seqBySec.set(sec, seq + 1);
+        let id = importedIdFor(r.tsMs, seq);
+
+        // The import_key index catches a genuine re-import. A PRIMARY KEY clash
+        // is a different thing: a row from ANOTHER import already occupies this
+        // slot (same peer, same second, different source). Probe forward for a
+        // free slot rather than dropping the message.
+        let res: RunResult | null = null;
+        for (let probe = 0; probe < 64; probe++) {
+          try {
+            res = await db.runAsync(
+              `INSERT INTO messages
+                 (id, chat_id, sender_id, type, content, reply_to_id, meta,
+                  created_at, edited_at, deleted_at, expires_at, import_key)
+               VALUES (?,?,?,?,?,?,?,?,NULL,NULL,NULL,?)
+               -- The WHERE is not decoration: SQLite refuses to target a PARTIAL
+               -- index in an upsert unless the conflict target repeats the
+               -- index's predicate ("ON CONFLICT clause does not match any
+               -- PRIMARY KEY or UNIQUE constraint"). A plain INSERT OR IGNORE
+               -- would prepare fine and be wrong — it swallows the PRIMARY KEY
+               -- clash too, silently dropping the message the probe below exists
+               -- to place.
+               ON CONFLICT(import_key) WHERE import_key IS NOT NULL DO NOTHING`,
+              [
+                id, chatId, r.senderId, r.type ?? 'text',
+                encField(r.content ?? null), null,
+                encField(r.meta != null ? JSON.stringify(r.meta) : null),
+                r.createdAt, r.importKey,
+              ],
+            );
+            break;
+          } catch (e: any) {
+            // Only a primary-key clash is retryable; anything else is a real error.
+            if (!/UNIQUE|PRIMARY KEY|constraint/i.test(String(e?.message ?? e))) throw e;
+            id += 1;
+            res = null;
+          }
+        }
+        if (!res) { skipped++; continue; }
+        if (res.changes > 0) {
+          inserted++;
+          // Imported history is searchable like any other — same blind index,
+          // rowid == the (negative) id. Best-effort, as everywhere else.
+          if (ftsKey && r.content != null) await ftsUpsert(db, ftsKey, id, r.type ?? 'text', r.content, false);
+        } else {
+          skipped++;   // import_key already present — this is a re-import
+        }
+      }
+    });
+    opts?.onProgress?.(Math.min(i + chunk.length, rows.length), rows.length);
+  }
+  return { inserted, skipped };
+}
+
+/**
+ * The imported id range for a chat, or null when it holds no imported history.
+ * Used by the chat's scroll-back to know it has reached the true start of the
+ * conversation without asking the server (which has none of this).
+ */
+export async function importedRange(chatId: string): Promise<{ min: number; max: number; count: number } | null> {
+  const db = await getLocalDb();
+  const r: any = await db.getFirstAsync(
+    `SELECT MIN(id) AS lo, MAX(id) AS hi, COUNT(*) AS n FROM messages WHERE chat_id = ? AND id < 0`,
+    [chatId],
+  );
+  if (!r || !Number(r.n)) return null;
+  return { min: Number(r.lo), max: Number(r.hi), count: Number(r.n) };
+}
+
+/**
+ * Undo an import. Purely local — there was never any server state, which is what
+ * makes this a complete reversal rather than a best effort.
+ */
+export async function deleteImportedMessages(chatId: string): Promise<number> {
+  const db = await getLocalDb();
+  const rows = await db.getAllAsync(`SELECT id FROM messages WHERE chat_id = ? AND id < 0`, [chatId]);
+  const ids = (rows as any[]).map(r => Number(r.id));
+  if (!ids.length) return 0;
+  await db.withTransactionAsync(async () => {
+    for (let i = 0; i < ids.length; i += 500) {
+      const chunk = ids.slice(i, i + 500);
+      const ph = chunk.map(() => '?').join(',');
+      await db.runAsync(`DELETE FROM messages WHERE id IN (${ph})`, chunk);
+      if (_ftsOk) await db.runAsync(`DELETE FROM msg_fts WHERE rowid IN (${ph})`, chunk).catch(() => {});
+    }
+  });
+  return ids.length;
 }
 
 /** Newest `limit` messages for a chat, newest-first (matches the inverted list). */
@@ -614,10 +811,15 @@ export async function pruneMessageCache(maxTotal = 200000, keepPerChat = 300): P
     const total = Number(row?.n ?? 0);
     if (total <= maxTotal) return 0;
     const surplus = Math.min(total - maxTotal, 5000);
+    // `id > 0` is load-bearing, not a tidy-up. Imported rows (Exit Kit) carry
+    // NEGATIVE ids, so they are the lowest ids in their chat and would be the
+    // first victims of every sweep — and unlike real messages there is no server
+    // to re-fetch them from, so a sweep would destroy them permanently. Server
+    // history is re-fetchable; imported history is not, so it is not cache.
     const victims = await db.getAllAsync(
       `SELECT id FROM (
          SELECT id, ROW_NUMBER() OVER (PARTITION BY chat_id ORDER BY id DESC) AS rn
-           FROM messages
+           FROM messages WHERE id > 0
        ) WHERE rn > ? ORDER BY id ASC LIMIT ?`,
       [keepPerChat, surplus],
     );

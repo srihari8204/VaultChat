@@ -32,6 +32,7 @@ import { useRouter } from 'expo-router';
 import { memo, useCallback, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, Image, Linking, Platform, ScrollView, Text, TouchableOpacity, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { IMPORT_SOURCE } from '../../constants/importSources';
 import { Swipeable } from 'react-native-gesture-handler';
 import * as Haptics from 'expo-haptics';
 import LinkPreview, { extractUrl } from '../../components/LinkPreview';
@@ -828,6 +829,28 @@ function ReaderAffordance({ text, title, author, at }: {
   );
 }
 
+/**
+ * The seam between imported history and messages actually sent in VaultChat.
+ *
+ * Imported rows carry negative ids, so the boundary is wherever the sign flips —
+ * no extra bookkeeping, and it stays correct as native messages accumulate above
+ * it.
+ */
+export function ImportedDivider({ origin, atStart }: { origin: string; atStart?: boolean }) {
+  const S = useS();
+  const src = IMPORT_SOURCE[origin];
+  if (!src) return null;
+  return (
+    <View style={S.unreadDivRow}>
+      <Text style={S.unreadDivTxt}>
+        {atStart ? '' : '↑ '}
+        <Ionicons name={src.icon} size={12} color={src.tint} />
+        {` Imported from ${src.label}`}
+      </Text>
+    </View>
+  );
+}
+
 export function DateChip({ iso }: { iso: string }) {
   const S = useS();
   return (
@@ -1398,7 +1421,21 @@ function MessageBubble({
         })()}
 
         <Text style={[S.bubbleMeta, (!isMine || isImage || isVideo || isGif) && { color: colors.bubbleMetaIn }, (isImage || isVideo || isGif) && { paddingHorizontal: 4 }]}>
+          {/* createdAt IS the original timestamp for an imported message — it is
+              never the import time — so this line needs no special case to show
+              the right hour. */}
           {new Date(msg.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+          {/* Where this message came from, as the messenger's own mark. A word
+              ("· WhatsApp") costs a third of the bubble's width on every single
+              imported row and stops being readable at all once three sources
+              exist; the logo is recognised without being read, and each source
+              keeps its own colour so they never look alike. */}
+          {(() => {
+            const src = IMPORT_SOURCE[msg.meta?.origin];
+            return src ? (
+              <Text> · <Ionicons name={src.icon} size={11} color={src.tint} /></Text>
+            ) : null;
+          })()}
           {msg.editedAt ? ' · edited' : ''}
           {msg._state === 'failed'  ? ' · failed (tap to retry)' : ''}
           {msg.expiresAt && (

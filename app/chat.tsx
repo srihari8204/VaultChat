@@ -192,8 +192,9 @@ const EDIT_WINDOW_MS = 15 * 60 * 1000;
 
 
 import { useS, idealText, HL, makeStyles, type DisplayMessage } from '../components/chat/chatStyles';
+import { IMPORT_SOURCE } from '../constants/importSources';
 import {
-  MemoBubble, DateChip, UnreadDivider, SwipeToReply, EmojiPanel, FileBubble,
+  MemoBubble, DateChip, UnreadDivider, ImportedDivider, SwipeToReply, EmojiPanel, FileBubble,
   DISAPPEARING_PRESETS, bumpPollVote, formatDisappearing, formatLastSeen,
   formatRecDuration, formatScreenshotMode, isSameCalendarDay, renderWithHighlight,
 } from '../components/chat/MessageBubble';
@@ -1547,6 +1548,17 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
     }
 
     if (peer) {
+      // Exit Kit is 1:1 only, and deliberately so: a group export contains third
+      // parties' messages, and there is no honest way to place those in a
+      // two-person conversation. `peer` being non-null IS the direct-chat test.
+      actions.push({
+        label: 'Exit Kit',
+        icon: 'download-outline',
+        onPress: () => router.push({
+          pathname: '/import-chats' as any,
+          params: { chatId, peerName: peer.name ?? peer.email ?? '' },
+        }),
+      });
       actions.push({
         label: 'Ghost Mode',
         icon: 'eye-off-outline',
@@ -2099,7 +2111,13 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
       // A FULL page from disk answered the request: no network, no decrypt.
       // A SHORT page means the cache horizon, not the end of history — so top
       // up from the server rather than ending pagination on a cache boundary.
-      if (older.length < PAGE_SIZE) {
+      //
+      // …unless we have paged into imported history (Exit Kit), which carries
+      // NEGATIVE ids. The server has no copy of it, so `before=-17559…` would be
+      // a guaranteed-empty round-trip on every scroll, and it would put a
+      // synthetic local id on the wire. Imported history is the true start of the
+      // conversation, so a short page there really is the end.
+      if (older.length < PAGE_SIZE && Number(oldest) > 0) {
         try {
           const olderRaw = await getMessages(chatId, { before: oldest, limit: PAGE_SIZE });
           const fetched = await hydrateMessages(chatId, olderRaw);  // decrypt once at ingest
@@ -2113,6 +2131,11 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
           // Offline. Whatever the cache gave us still renders, and hasMore is
           // deliberately left alone so a later attempt can resume.
         }
+      } else if (older.length < PAGE_SIZE && Number(oldest) < 0) {
+        // Inside imported history with nothing older on disk: this is the start
+        // of the conversation. Nobody else can tell us so, because nobody else
+        // has these messages.
+        setHasMore(false);
       }
       // Dedupe against what's already loaded — a page boundary can overlap and
       // would otherwise inject duplicate ids (duplicate React keys).
@@ -2177,7 +2200,10 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
       let older;
       try {
         older = await getCachedMessagesBefore(chatId, Number(oldest), PAGE_SIZE);
-        if (!older.length) {
+        // Same rule as onEndReached: a negative id is imported history, which the
+        // server has never seen. Asking it would be an empty round-trip and would
+        // put a local-only id on the wire.
+        if (!older.length && Number(oldest) > 0) {
           older = await hydrateMessages(chatId, await getMessages(chatId, { before: oldest, limit: PAGE_SIZE }));
           cacheMessages(chatId, older).catch(() => {});
         }
@@ -2655,8 +2681,18 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
           // Unread separator above the first message newer than the read boundary.
           const showUnread = !!unreadInfo && item.id > unreadInfo.boundaryId &&
             (!older || older.id <= unreadInfo.boundaryId);
+          // Exit Kit: imported history carries negative ids, so the seam between
+          // it and real VaultChat messages is exactly where the sign flips. Two
+          // cases — the transition, and the top of a chat that is ALL imported
+          // (nothing has been sent here yet), which has no transition to mark.
+          const mine   = item.meta?.origin as string | undefined;
+          const theirs = older?.meta?.origin as string | undefined;
+          const importMark = !IMPORT_SOURCE[mine!] && IMPORT_SOURCE[theirs!] ? { origin: theirs!, atStart: false }
+            : IMPORT_SOURCE[mine!] && !older ? { origin: mine!, atStart: true }
+            : null;
           return (
           <View>
+            {importMark && <ImportedDivider origin={importMark.origin} atStart={importMark.atStart} />}
             {showDate && <DateChip iso={item.createdAt} />}
             {showUnread && <UnreadDivider count={unreadInfo!.count} />}
             <SwipeToReply onReply={() => { if (!item.deletedAt && item.type !== 'system') setReplyTo(item); }}>
