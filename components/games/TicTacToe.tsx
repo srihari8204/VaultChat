@@ -20,7 +20,8 @@ import { useGameSocket, isMyTurn, type AutoStart } from '../../lib/games/useGame
 import { TableBackground, Panel, Btn, Banner, PlayerRow, useType } from './ui';
 import { C, S, R, D3, E, mix, goldLine, MOTION } from '../../lib/games/theme';
 import { playSfx, preloadSfx } from '../../lib/games/sfx';
-import { Toasts, Confetti } from './feedback';
+import { Toasts, Confetti, VoiceBar } from './feedback';
+import { useTableVoice } from '../../lib/games/useTableVoice';
 import { inviteToTable, shareResult } from '../../lib/games/invite';
 
 const TEAL = '#4be0c1';
@@ -32,6 +33,7 @@ export default function TicTacToe({ roomId, auto, autoBot }: { roomId: string } 
   const { phase, error, state, events, send, retry } = useGameSocket('tictactoe', roomId, { auto, autoBot });
   const t = useType();
   const { width } = useWindowDimensions();
+  const voice = useTableVoice('tictactoe', roomId);
 
   const G = state.game;
   const mine = isMyTurn(state);
@@ -165,6 +167,18 @@ export default function TicTacToe({ roomId, auto, autoBot }: { roomId: string } 
               />
             : <TurnLine mine={mine} name={them?.name ?? 'your opponent'} />}
         </View>
+
+        <VoiceBar
+          width={size}
+          phase={voice.phase}
+          error={voice.error}
+          canSpeak={voice.canSpeak}
+          muted={voice.muted}
+          participants={voice.participants}
+          onJoin={voice.join}
+          onLeave={voice.leave}
+          onToggleMute={voice.toggleMute}
+        />
 
         {finished ? (
           <View style={{ width: size, flexDirection: 'row', gap: S[2] }}>

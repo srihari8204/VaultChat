@@ -37,7 +37,8 @@ import { useGameSocket, type AutoStart } from '../../lib/games/useGameSocket';
 import { TableBackground, Panel, Btn, Banner, PlayerRow, useType } from './ui';
 import { C, S, R, D3, mix, goldLine } from '../../lib/games/theme';
 import { playSfx, preloadSfx, soundEnabled, setSoundEnabled } from '../../lib/games/sfx';
-import { Toasts, Confetti, Sheet, SettingRow } from './feedback';
+import { Toasts, Confetti, Sheet, SettingRow, VoiceBar } from './feedback';
+import { useTableVoice } from '../../lib/games/useTableVoice';
 import { inviteToTable, shareResult } from '../../lib/games/invite';
 
 /** 52-cell ring [row,col] on a 15x15 board, clockwise from red's start. */
@@ -111,6 +112,7 @@ export default function Ludo({ roomId = 'ludo-main', auto, autoBot }: { roomId?:
   const [showSettings, setShowSettings] = useState(false);
   const [showEmotes, setShowEmotes] = useState(false);
   const [sound, setSound] = useState(soundEnabled());
+  const voice = useTableVoice('ludo', roomId);
 
   const size = Math.min(width - S[4] * 2, 460);
   const cell = size / 15;
@@ -319,6 +321,18 @@ export default function Ludo({ roomId = 'ludo-main', auto, autoBot }: { roomId?:
             )}
           </View>
         </View>
+
+        <VoiceBar
+          width={size}
+          phase={voice.phase}
+          error={voice.error}
+          canSpeak={voice.canSpeak}
+          muted={voice.muted}
+          participants={voice.participants}
+          onJoin={voice.join}
+          onLeave={voice.leave}
+          onToggleMute={voice.toggleMute}
+        />
 
         <View style={{ width: size, flexDirection: 'row', gap: S[2] }}>
           <Btn label="Emote" icon="💬" compact style={{ flex: 1 }} onPress={() => setShowEmotes(true)} />

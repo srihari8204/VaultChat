@@ -32,7 +32,8 @@ import { useGameSocket, type AutoStart } from '../../lib/games/useGameSocket';
 import { TableBackground, Panel, Btn, Banner, PlayerRow, Chip, useType } from './ui';
 import { C, S, R, D3, mix, goldLine } from '../../lib/games/theme';
 import { playSfx, preloadSfx, soundEnabled, setSoundEnabled } from '../../lib/games/sfx';
-import { Toasts, Confetti, Sheet, SettingRow } from './feedback';
+import { Toasts, Confetti, Sheet, SettingRow, VoiceBar } from './feedback';
+import { useTableVoice } from '../../lib/games/useTableVoice';
 import { inviteToTable, shareResult } from '../../lib/games/invite';
 import { reconcile, groupUp, ungroup, sortLoose, sameGroups, type Groups } from '../../lib/games/handGroups';
 
@@ -72,6 +73,7 @@ export default function Rummy({ tableId = '', auto, autoBot }: { tableId?: strin
   const [showSettings, setShowSettings] = useState(false);
   const [confirmDeclare, setConfirmDeclare] = useState(false);
   const [sound, setSound] = useState(soundEnabled());
+  const voice = useTableVoice('rummy', tableId);
 
   const L = state.lobby;
   const G = state.game;
@@ -357,6 +359,18 @@ export default function Rummy({ tableId = '', auto, autoBot }: { tableId?: strin
               ? 'Discard this card, or Declare with it as your final discard.'
               : `${picked.length} selected — Group them, or pick one card to discard.`}
         </Text>
+
+        <VoiceBar
+          width={feltW}
+          phase={voice.phase}
+          error={voice.error}
+          canSpeak={voice.canSpeak}
+          muted={voice.muted}
+          participants={voice.participants}
+          onJoin={voice.join}
+          onLeave={voice.leave}
+          onToggleMute={voice.toggleMute}
+        />
 
         <View style={{ width: feltW, flexDirection: 'row', gap: S[2] }}>
           <Btn label="Invite" icon="🔗" compact style={{ flex: 1 }} onPress={() => { void inviteToTable('rummy', tableId); }} disabled={!tableId} />

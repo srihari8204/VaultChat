@@ -26,7 +26,8 @@ import { useGameSocket, isMyTurn, type GameState, type AutoStart } from '../../l
 import { Btn, Panel, Banner, PlayerRow, Chip, useType } from './ui';
 import { C, S, R, D3, E, mix, goldLine } from '../../lib/games/theme';
 import { playSfx, preloadSfx } from '../../lib/games/sfx';
-import { Toasts, Confetti, Sheet, SettingRow } from './feedback';
+import { Toasts, Confetti, Sheet, SettingRow, VoiceBar } from './feedback';
+import { useTableVoice } from '../../lib/games/useTableVoice';
 import { inviteToTable, shareResult } from '../../lib/games/invite';
 import { soundEnabled, setSoundEnabled } from '../../lib/games/sfx';
 
@@ -75,6 +76,7 @@ export default function Chess({ roomId, auto, autoBot }: { roomId: string } & Au
   // away and the player has no way to say yes.
   const [drawOffer, setDrawOffer] = useState(false);
   const [botLevel, setBotLevel] = useState(2);
+  const voice = useTableVoice('chess', roomId);
   const t = useType();
   const { width } = useWindowDimensions();
 
@@ -275,6 +277,18 @@ export default function Chess({ roomId, auto, autoBot }: { roomId: string } & Au
             <Btn label="⚙" compact onPress={() => setShowSettings(true)} accessibilityLabel="Board settings" />
           </View>
         )}
+
+        <VoiceBar
+          width={size}
+          phase={voice.phase}
+          error={voice.error}
+          canSpeak={voice.canSpeak}
+          muted={voice.muted}
+          participants={voice.participants}
+          onJoin={voice.join}
+          onLeave={voice.leave}
+          onToggleMute={voice.toggleMute}
+        />
 
         <Btn
           label="Invite a friend"

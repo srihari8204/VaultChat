@@ -207,3 +207,73 @@ export function SettingRow({
     </Pressable>
   );
 }
+
+/* ── table voice ────────────────────────────────────────────────────── */
+
+/**
+ * The voice control every board shares.
+ *
+ * Deliberately one control rather than a panel: at a game table the microphone
+ * is a thing you switch on and then forget, and the only state worth showing
+ * once you are in is who is talking and whether you are muted.
+ */
+export function VoiceBar({
+  phase, error, canSpeak, muted, participants, onJoin, onLeave, onToggleMute, width,
+}: {
+  phase: string;
+  error: string | null;
+  canSpeak: boolean;
+  muted: boolean;
+  participants: string[];
+  onJoin: () => void;
+  onLeave: () => void;
+  onToggleMute: () => void;
+  width?: number;
+}) {
+  const t = useType();
+
+  if (phase === 'unavailable') {
+    return (
+      <Text style={{ width, color: C.muted, fontSize: 12, textAlign: 'center' }}>
+        {error ?? 'Voice is not available at this table.'}
+      </Text>
+    );
+  }
+
+  if (phase === 'off' || phase === 'error') {
+    return (
+      <View style={{ width, gap: S[1] }}>
+        <Btn label="Talk at the table" icon="🎤" compact onPress={onJoin} />
+        {error ? <Text style={{ color: C.bad, fontSize: 11, textAlign: 'center' }}>{error}</Text> : null}
+      </View>
+    );
+  }
+
+  if (phase === 'asking' || phase === 'connecting') {
+    return <Btn label={phase === 'asking' ? 'Microphone…' : 'Connecting…'} compact busy style={{ width }} onPress={() => {}} />;
+  }
+
+  return (
+    <View style={{
+      width, flexDirection: 'row', alignItems: 'center', gap: S[2],
+      paddingVertical: S[2], paddingHorizontal: S[3],
+      borderRadius: R[2], borderWidth: 1, borderColor: goldLine[38],
+      backgroundColor: mix(C.panel2, 86, '#ffffff'),
+    }}>
+      <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: C.good }} />
+      <Text style={{ flex: 1, color: C.text, fontSize: t.sm, fontWeight: '700' }}>
+        {canSpeak ? `Voice on · ${participants.length}` : `Listening · ${participants.length}`}
+      </Text>
+      {canSpeak && (
+        <Btn
+          label={muted ? 'Unmute' : 'Mute'}
+          icon={muted ? '🔇' : '🎙'}
+          compact
+          onPress={onToggleMute}
+          accessibilityLabel={muted ? 'Unmute your microphone' : 'Mute your microphone'}
+        />
+      )}
+      <Btn label="Leave" compact kind="danger" onPress={onLeave} accessibilityLabel="Leave voice" />
+    </View>
+  );
+}

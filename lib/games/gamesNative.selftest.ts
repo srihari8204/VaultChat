@@ -128,6 +128,25 @@ for (const [name, src] of [['TicTacToe', TTT], ['Chess', CHESS], ['Ludo', LUDO],
   check(`${name} offers a rematch and a share`, /shareResult\(/.test(src) && /(Rematch|Play again|Deal again)/.test(src));
 }
 
+// ── voice ─────────────────────────────────────────────────────────────
+const VOICE = readFileSync('lib/games/useTableVoice.ts', 'utf8');
+
+check('voice asks the SERVER whether this player may speak',
+  /canPublish/.test(VOICE) && /\/api\/voice\/token/.test(VOICE),
+  'a client deciding its own publish rights is the weakness that endpoint closes');
+
+check('...and never requests a microphone for a spectator',
+  /if \(mayPublish && Platform\.OS === 'android'\)/.test(VOICE),
+  'a listen-only seat cannot be heard even if permission is granted');
+
+check('...and does not re-install the WebRTC globals',
+  /typeof g\.RTCPeerConnection !== 'undefined'/.test(VOICE),
+  'registering twice swaps the constructors under a running SDK');
+
+check('the microphone cannot outlive the table',
+  /alive\.current = false; void teardown\(\)/.test(VOICE),
+  'a room left connected keeps publishing from a board nobody is looking at');
+
 // ── online ────────────────────────────────────────────────────────────
 // Without matchmaking the only opponent reachable from the app is a bot, which
 // is what made a fully multiplayer game feel like single-player.
