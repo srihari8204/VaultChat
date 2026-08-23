@@ -25,6 +25,7 @@ import * as Haptics from 'expo-haptics';
 import { useGameSocket, isMyTurn, type GameState, type AutoStart } from '../../lib/games/useGameSocket';
 import { Btn, Panel, Banner, PlayerRow, Chip, useType } from './ui';
 import { C, S, R, D3, E, mix, goldLine } from '../../lib/games/theme';
+import { playSfx, preloadSfx } from '../../lib/games/sfx';
 
 type Piece = { t: 'p' | 'n' | 'b' | 'r' | 'q' | 'k'; c: 'w' | 'b' } | null;
 type Move = { from: number; to: number; promo?: string };
@@ -93,6 +94,33 @@ export default function Chess({ roomId, auto, autoBot }: { roomId: string } & Au
   // Clear a stale selection whenever the position changes underneath it.
   useEffect(() => { setSel(null); }, [G?.history?.length, G?.turn]);
 
+  useEffect(() => { void preloadSfx(['move', 'capture2', 'check', 'promote', 'select', 'win', 'lose', 'draw']); }, []);
+
+  // Sound is driven off the SNAPSHOT, not off the tap, so a move the opponent
+  // makes sounds the same as one of ours — and a move the server rejected makes
+  // no sound at all, which is the correct feedback.
+  const seen = useRef<string>('');
+  const prevCount = useRef<number | null>(null);
+  useEffect(() => {
+    if (!G) return;
+    const count = board.reduce((n, p) => n + (p ? 1 : 0), 0);
+    const key = `${G.history?.length ?? 0}:${lastMove?.from ?? -1}:${lastMove?.to ?? -1}`;
+    if (lastMove && key !== seen.current) {
+      seen.current = key;
+      const took = prevCount.current != null && count < prevCount.current;
+      playSfx(G.check ? 'check' : took ? 'capture2' : 'move');
+    }
+    prevCount.current = count;
+  }, [G, board, lastMove]);
+
+  const ended = useRef(false);
+  useEffect(() => {
+    if (!G?.result) { ended.current = false; return; }
+    if (ended.current) return;
+    ended.current = true;
+    playSfx(G.result === 'draw' || !G.winner ? 'draw' : G.winner === state.you ? 'win' : 'lose');
+  }, [G?.result, G?.winner, state.you]);
+
   const onSquare = (i: number) => {
     if (!mine || state.spectator) return;
     if (sel != null && targets.has(i)) {
@@ -108,7 +136,7 @@ export default function Chess({ roomId, auto, autoBot }: { roomId: string } & Au
     // Only squares the server says can move are selectable, so an illegal
     // selection is impossible rather than merely rejected.
     const can = legal.some(m => m.from === i);
-    if (can) Haptics.selectionAsync().catch(() => {});
+    if (can) { Haptics.selectionAsync().catch(() => {}); playSfx('select'); }
     setSel(can ? i : null);
   };
 
@@ -223,7 +251,7 @@ export default function Chess({ roomId, auto, autoBot }: { roomId: string } & Au
         <PromoPicker
           opts={promo.opts}
           color={myColor ?? 'w'}
-          onPick={(m) => { send({ t: 'move', from: m.from, to: m.to, promo: m.promo }); setPromo(null); setSel(null); }}
+          onPick={(m) => { playSfx('promote'); send({ t: 'move', from: m.from, to: m.to, promo: m.promo }); setPromo(null); setSel(null); }}
           onCancel={() => setPromo(null)}
         />
       )}

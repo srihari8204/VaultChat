@@ -19,6 +19,7 @@ import * as Haptics from 'expo-haptics';
 import { useGameSocket, isMyTurn, type AutoStart } from '../../lib/games/useGameSocket';
 import { TableBackground, Panel, Btn, Banner, PlayerRow, useType } from './ui';
 import { C, S, R, D3, E, mix, goldLine, MOTION } from '../../lib/games/theme';
+import { playSfx, preloadSfx } from '../../lib/games/sfx';
 
 const TEAL = '#4be0c1';
 const PINK = '#ff6fb5';
@@ -39,6 +40,24 @@ export default function TicTacToe({ roomId, auto, autoBot }: { roomId: string } 
   const size = Math.min(width - S[4] * 2, 380);
   const gap = 10;
   const cell = (size - gap * 2 - 20) / 3;
+
+  useEffect(() => { void preloadSfx(['tick', 'win', 'lose', 'draw']); }, []);
+
+  // Driven off `lastCell` so the opponent's mark clicks too.
+  const lastHeard = useRef<number | null>(null);
+  useEffect(() => {
+    const c = typeof G?.lastCell === 'number' ? G.lastCell : null;
+    if (c != null && c !== lastHeard.current) playSfx('tick');
+    lastHeard.current = c;
+  }, [G?.lastCell]);
+
+  const ended = useRef(false);
+  useEffect(() => {
+    if (G?.phase !== 'finished') { ended.current = false; return; }
+    if (ended.current) return;
+    ended.current = true;
+    playSfx(!G.winnerId ? 'draw' : G.winnerId === state.you ? 'win' : 'lose');
+  }, [G?.phase, G?.winnerId, state.you]);
 
   if (error && phase !== 'connected') {
     return (

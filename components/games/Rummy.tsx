@@ -31,6 +31,8 @@ import * as Haptics from 'expo-haptics';
 import { useGameSocket, type AutoStart } from '../../lib/games/useGameSocket';
 import { TableBackground, Panel, Btn, Banner, PlayerRow, Chip, useType } from './ui';
 import { C, S, R, D3, mix, goldLine } from '../../lib/games/theme';
+import { playSfx, preloadSfx } from '../../lib/games/sfx';
+import { reconcile, groupUp, ungroup, sortLoose, sameGroups, type Groups } from '../../lib/games/handGroups';
 
 type Card = { id: string; suit: string; rank: string };
 
@@ -72,6 +74,51 @@ export default function Rummy({ tableId = '', auto, autoBot }: { tableId?: strin
   const mine = G?.turnPlayerId === state.you;
 
   const feltW = Math.min(width - S[4] * 2, 460);
+
+  useEffect(() => { void preloadSfx(['deal', 'discard', 'select', 'tick', 'win', 'lose']); }, []);
+
+  // The player's arrangement. Cosmetic: the server judges the declaration.
+  // It is kept in step with the authoritative hand on every snapshot, because
+  // a group holding a card they no longer own produces a rejection whose cause
+  // is invisible on screen.
+  const [groups, setGroups] = useState<Groups>([[]]);
+  const byId = React.useMemo(() => new Map(hand.map(c => [c.id, c])), [hand]);
+
+  useEffect(() => {
+    setGroups(prev => {
+      const next = reconcile(prev, hand.map(c => c.id));
+      return sameGroups(prev, next) ? prev : next;
+    });
+  }, [hand]);
+
+  // Persist the arrangement so a reconnect does not dump thirteen loose cards
+  // back on someone mid-hand. Only on real change: the snapshot arrives
+  // constantly and resending would be chatter.
+  const sentGroups = useRef<Groups | null>(null);
+  useEffect(() => {
+    if (!G || groups.flat().length === 0) return;
+    if (sentGroups.current && sameGroups(sentGroups.current, groups)) return;
+    sentGroups.current = groups;
+    send({ t: 'arrange', groups });
+  }, [groups, G, send]);
+
+  // A card arriving in the hand is a draw; one leaving is a discard.
+  const prevHand = useRef<number | null>(null);
+  useEffect(() => {
+    const n = hand.length;
+    if (prevHand.current != null && n !== prevHand.current) {
+      playSfx(n > prevHand.current ? 'deal' : 'discard');
+    }
+    prevHand.current = n;
+  }, [hand.length]);
+
+  const ended = useRef(false);
+  useEffect(() => {
+    if (G?.phase !== 'finished') { ended.current = false; return; }
+    if (ended.current) return;
+    ended.current = true;
+    playSfx(G.winnerId === state.you ? 'win' : 'lose');
+  }, [G?.phase, G?.winnerId, state.you]);
 
   if (error && phase !== 'connected') {
     return (
@@ -133,6 +180,7 @@ export default function Rummy({ tableId = '', auto, autoBot }: { tableId?: strin
 
   const toggle = (id: string) => {
     Haptics.selectionAsync().catch(() => {});
+    playSfx('select');
     setPicked(p => (p.includes(id) ? p.filter(x => x !== id) : [...p, id]));
   };
 
@@ -151,9 +199,10 @@ export default function Rummy({ tableId = '', auto, autoBot }: { tableId?: strin
 
   const declare = () => {
     if (picked.length !== 1) return;
-    // The server judges the hand. `groups` carries the player's arrangement
-    // only so the table can show how they laid it out.
-    send({ t: 'declare', discardId: picked[0], groups: [hand.filter(c => c.id !== picked[0]).map(c => c.id)] });
+    // The server judges the hand. `groups` carries the player's own
+    // arrangement, minus the card they are discarding to declare.
+    const laid = groups.map(g => g.filter(id => id !== picked[0])).filter(g => g.length > 0);
+    send({ t: 'declare', discardId: picked[0], groups: laid });
     setPicked([]);
   };
 
@@ -212,23 +261,78 @@ export default function Rummy({ tableId = '', auto, autoBot }: { tableId?: strin
           </Text>
         )}
 
-        {/* your hand */}
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={{ paddingHorizontal: S[2], paddingVertical: S[4], gap: 6 }}
-          style={{ width: feltW + S[4] * 2, marginHorizontal: -S[4] }}
-        >
-          {hand.map(c => (
-            <HandCard
-              key={c.id}
-              card={c}
-              selected={picked.includes(c.id)}
-              onPress={() => toggle(c.id)}
-            />
-          ))}
-        </ScrollView>
+        {/* your hand, in the groups the player arranged */}
+        <View style={{ width: feltW, gap: S[2] }}>
+          {groups.map((g, gi) => {
+            const loose = gi === groups.length - 1;
+            if (g.length === 0 && !loose) return null;
+            return (
+              <View
+                key={gi}
+                accessibilityLabel={loose ? `Ungrouped, ${g.length} cards` : `Group ${gi + 1}, ${g.length} cards`}
+                style={{
+                  borderRadius: R[2],
+                  borderWidth: loose ? 0 : 1,
+                  borderColor: goldLine[22],
+                  backgroundColor: loose ? 'transparent' : 'rgba(255,255,255,0.04)',
+                  paddingVertical: loose ? 0 : S[2],
+                  paddingHorizontal: loose ? 0 : S[2],
+                }}
+              >
+                {!loose && (
+                  <Text style={{ color: C.muted, fontSize: 11, fontWeight: '800', marginBottom: 2 }}>
+                    {`GROUP ${gi + 1}`}
+                  </Text>
+                )}
+                <ScrollView
+                  horizontal
+                  showsHorizontalScrollIndicator={false}
+                  contentContainerStyle={{ gap: 6, paddingVertical: S[3], paddingHorizontal: 2 }}
+                >
+                  {g.map(id => {
+                    const c = byId.get(id);
+                    return c ? (
+                      <HandCard key={id} card={c} selected={picked.includes(id)} onPress={() => toggle(id)} />
+                    ) : null;
+                  })}
+                  {g.length === 0 && (
+                    <Text style={{ color: C.muted, fontSize: 12, paddingVertical: S[4] }}>
+                      No loose cards — everything is grouped.
+                    </Text>
+                  )}
+                </ScrollView>
+              </View>
+            );
+          })}
+        </View>
 
+        {/* arranging */}
+        <View style={{ width: feltW, flexDirection: 'row', gap: S[2] }}>
+          <Btn
+            label="Group"
+            compact
+            style={{ flex: 1 }}
+            onPress={() => { setGroups(g => groupUp(g, picked)); setPicked([]); playSfx('tick'); }}
+            disabled={picked.length < 2}
+            accessibilityLabel="Put the selected cards into a group"
+          />
+          <Btn
+            label="Ungroup"
+            compact
+            style={{ flex: 1 }}
+            onPress={() => { setGroups(g => ungroup(g, picked)); setPicked([]); playSfx('tick'); }}
+            disabled={picked.length === 0}
+          />
+          <Btn
+            label="Sort"
+            compact
+            style={{ flex: 1 }}
+            onPress={() => { setGroups(g => sortLoose(g, id => byId.get(id))); playSfx('tick'); }}
+            accessibilityLabel="Sort the ungrouped cards by suit"
+          />
+        </View>
+
+        {/* playing */}
         <View style={{ width: feltW, flexDirection: 'row', gap: S[2] }}>
           <Btn label="Discard" compact style={{ flex: 1 }} onPress={discard} disabled={!mine || picked.length !== 1} />
           <Btn label="Declare" kind="gold" compact style={{ flex: 1 }} onPress={declare} disabled={!mine || picked.length !== 1} />
@@ -237,10 +341,10 @@ export default function Rummy({ tableId = '', auto, autoBot }: { tableId?: strin
 
         <Text style={{ color: C.muted, fontSize: 12, textAlign: 'center', width: feltW }}>
           {picked.length === 0
-            ? 'Tap a card to pick it, then Discard or Declare.'
+            ? 'Tap cards to select. Two or more can be grouped into a run or a set.'
             : picked.length === 1
               ? 'Discard this card, or Declare with it as your final discard.'
-              : 'Pick exactly one card to discard.'}
+              : `${picked.length} selected — Group them, or pick one card to discard.`}
         </Text>
 
         {events.length > 0 && (

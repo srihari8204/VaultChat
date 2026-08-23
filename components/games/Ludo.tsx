@@ -36,6 +36,7 @@ import * as Haptics from 'expo-haptics';
 import { useGameSocket, type AutoStart } from '../../lib/games/useGameSocket';
 import { TableBackground, Panel, Btn, Banner, PlayerRow, useType } from './ui';
 import { C, S, R, D3, mix, goldLine } from '../../lib/games/theme';
+import { playSfx, preloadSfx } from '../../lib/games/sfx';
 
 /** 52-cell ring [row,col] on a 15x15 board, clockwise from red's start. */
 const RING: [number, number][] = [
@@ -108,6 +109,54 @@ export default function Ludo({ roomId = 'ludo-main', auto, autoBot }: { roomId?:
 
   const size = Math.min(width - S[4] * 2, 460);
   const cell = size / 15;
+
+  useEffect(() => { void preloadSfx(['roll', 'move', 'capture', 'home', 'six', 'win', 'lose']); }, []);
+
+  // Every token's step from the previous snapshot, so a change can be told
+  // apart: back to base is a CAPTURE, past the last home step is a token in,
+  // anything else forward is a plain move. Without the comparison all three
+  // would sound identical, and a capture is the one moment in Ludo that has to
+  // land.
+  const prevSteps = useRef<Record<string, number>>({});
+  useEffect(() => {
+    if (!G?.players) return;
+    const next: Record<string, number> = {};
+    let captured = false, homed = false, moved = false;
+    for (const p of G.players as LPlayer[]) {
+      (p.tokens ?? []).forEach((tok, i) => {
+        const k = `${p.seat}:${i}`;
+        next[k] = tok.step;
+        const was = prevSteps.current[k];
+        if (was === undefined) return;
+        if (tok.step < 0 && was >= 0) captured = true;
+        else if (tok.step >= HOME_STEP && was < HOME_STEP) homed = true;
+        else if (tok.step > was) moved = true;
+      });
+    }
+    const first = Object.keys(prevSteps.current).length === 0;
+    prevSteps.current = next;
+    if (first) return;                       // the deal is not a move
+    if (captured) playSfx('capture');
+    else if (homed) playSfx('home');
+    else if (moved) playSfx('move');
+  }, [G?.players]);
+
+  // The die is announced by the snapshot, so a six sounds different the moment
+  // the server publishes it rather than when this phone guessed.
+  const prevDie = useRef<number | null>(null);
+  useEffect(() => {
+    const d = typeof G?.pendingDie === 'number' ? G.pendingDie : null;
+    if (d != null && d !== prevDie.current) playSfx(d === 6 ? 'six' : 'roll');
+    prevDie.current = d;
+  }, [G?.pendingDie]);
+
+  const ended = useRef(false);
+  useEffect(() => {
+    if (G?.phase !== 'finished') { ended.current = false; return; }
+    if (ended.current) return;
+    ended.current = true;
+    playSfx(G.winnerId === state.you ? 'win' : 'lose');
+  }, [G?.phase, G?.winnerId, state.you]);
 
   if (error && phase !== 'connected') {
     return (

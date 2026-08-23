@@ -1,0 +1,91 @@
+// lib/games/handGroups.selftest.ts — run: npx tsx lib/games/handGroups.selftest.ts
+//
+// The invariant that matters: an arrangement always contains EXACTLY the hand,
+// each card once. A group holding a card the player no longer owns produces a
+// declaration the server rejects for a reason the player cannot see on screen,
+// and a card that falls out of every group vanishes from their hand entirely.
+
+import { reconcile, groupUp, ungroup, sortLoose, sameGroups, type Groups } from './handGroups';
+
+let failures = 0;
+const check = (name: string, ok: boolean, detail = '') => {
+  if (!ok) failures++;
+  console.log(`  ${ok ? '✓' : '✗'} ${name}${!ok && detail ? `  (${detail})` : ''}`);
+};
+
+/** Every card in the hand appears exactly once across all groups. */
+const holds = (g: Groups, hand: string[]) => {
+  const flat = g.flat();
+  return flat.length === hand.length
+    && new Set(flat).size === flat.length
+    && hand.every(id => flat.includes(id));
+};
+
+console.log('\nRummy hand grouping\n');
+
+// ── reconcile ────────────────────────────────────────────────────────
+const hand13 = Array.from({ length: 13 }, (_, i) => `c${i}`);
+
+let g = reconcile([], hand13);
+check('a fresh deal lands as one loose pile', holds(g, hand13) && g.length === 1);
+
+g = groupUp(g, ['c0', 'c1', 'c2']);
+check('grouping pulls the picked cards out', holds(g, hand13) && g[0].join() === 'c0,c1,c2');
+check('...and keeps a loose pile last', g[g.length - 1].length === 10);
+
+// A draw: the new card must land loose, not vanish and not join a meld.
+const drawn = [...hand13, 'c13'];
+g = reconcile(g, drawn);
+check('a drawn card joins the loose pile', holds(g, drawn) && g[g.length - 1].includes('c13'));
+check('...without disturbing an existing group', g[0].join() === 'c0,c1,c2');
+
+// A discard from inside a group: the group shrinks, nothing else moves.
+const afterDiscard = drawn.filter(id => id !== 'c1');
+g = reconcile(g, afterDiscard);
+check('discarding from a group removes just that card',
+  holds(g, afterDiscard) && g[0].join() === 'c0,c2');
+
+// A whole new deal shares no ids: everything old must go.
+const newDeal = Array.from({ length: 13 }, (_, i) => `n${i}`);
+g = reconcile(g, newDeal);
+check('a new deal replaces the arrangement entirely', holds(g, newDeal));
+
+// ── ungroup ──────────────────────────────────────────────────────────
+g = reconcile([], hand13);
+g = groupUp(g, ['c0', 'c1', 'c2']);
+g = groupUp(g, ['c3', 'c4']);
+check('two groups plus a loose pile', g.length === 3 && holds(g, hand13));
+
+g = ungroup(g, ['c1']);
+check('ungrouping one card dissolves its whole group',
+  holds(g, hand13) && g.length === 2 && !g[0].includes('c0'));
+check('...and the freed cards go loose', ['c0', 'c1', 'c2'].every(id => g[g.length - 1].includes(id)));
+
+// ── sort ─────────────────────────────────────────────────────────────
+const deck: Record<string, { suit: string; rank: string }> = {
+  a: { suit: 'H', rank: 'K' }, b: { suit: 'S', rank: '2' },
+  c: { suit: 'H', rank: '3' }, d: { suit: 'S', rank: 'A' },
+};
+const sorted = sortLoose([['a', 'b', 'c', 'd']], id => deck[id]);
+check('sorting the loose pile orders by suit then rank',
+  sorted[0].join() === 'd,b,c,a',
+  'spades before hearts, ace before king');
+
+const withGroup = sortLoose([['a', 'b'], ['c', 'd']], id => deck[id]);
+check('...and never reorders a group the player built',
+  withGroup[0].join() === 'a,b',
+  'that arrangement is the whole point of the screen');
+
+// ── idempotence ──────────────────────────────────────────────────────
+const twice = reconcile(reconcile([], hand13), hand13);
+check('reconciling an unchanged hand changes nothing',
+  sameGroups(twice, reconcile([], hand13)),
+  'otherwise every snapshot would resend `arrange`');
+
+// A duplicate id in the incoming arrangement must not survive: two decks are in
+// play, so ids are the only thing telling two identical cards apart.
+const deduped = reconcile([['x', 'x'], []], ['x', 'y']);
+check('a duplicated id is not kept twice', holds(deduped, ['x', 'y']));
+
+console.log(failures ? `\n  ${failures} FAILED\n` : '\n  all hand-grouping checks passed\n');
+process.exit(failures ? 1 : 0);
