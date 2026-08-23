@@ -75,11 +75,27 @@ Board cells: `-1` empty, `0` seat-0, `1` seat-1. Marks are `✕` and `◯`.
 **Send:** `join{roomId, tc}` · `addbot{level}` · `move{from, to, promo}` ·
 `draw-offer` · `draw-accept`
 
-**`game`:** `board`, `turn`, `history`, `lastMove`, `result`, `winner`,
-`played`, `best`, `rating`
+**Top-level (beside `game`):** `color` (`'w'|'b'|null` — chess seats by COLOUR,
+not seat index), **`legal: [{from,to,promo}]`**, `clock`.
 
-`from`/`to` are square indices; `promo` is a piece letter (`'q'` by default).
-The server rejects an illegal move with `error` — the client does not validate.
+**`game`:** `board`, `turn`, `check`, `result`, `winner`, `lastMove`, `history`
+
+**`legal` IS THE MOVE GENERATOR.** The server sends the complete legal-move list
+for the player to move, every frame, along with `check`. So the native client
+needs *no chess rules at all* — no sliding-piece generation, no pin detection,
+no castling or en-passant special cases, no checkmate search. Tapping a piece is
+`legal.filter(m => m.from === square)`.
+
+Several entries sharing a `to` with different `promo` values means a promotion:
+ask the player which piece before sending.
+
+`board` is 64 entries, `index = row*8 + col`, **row 0 = rank 8** (black's back
+rank). A square is `null` or `{t:'p'|'n'|'b'|'r'|'q'|'k', c:'w'|'b'}`.
+`game` is `null` while in the lobby.
+
+Verified against the server source
+(`go-server/internal/realtime/chessrooms.go`,
+`internal/games/chess/engine.go`), not inferred from the shipped client.
 
 ### Ludo
 

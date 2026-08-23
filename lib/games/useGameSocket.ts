@@ -34,6 +34,16 @@ export interface GameState {
   spectator: boolean;
   lobby: GameLobby | null;
   game: any;
+  /**
+   * The whole `state` frame, untouched.
+   *
+   * Games carry their own TOP-LEVEL fields beside `game`, and they differ:
+   * chess sends `color`, `legal` (the full legal-move list) and `clock`;
+   * others send `seat` and `commitHash`. Narrowing to a fixed shape here would
+   * silently drop the field a board depends on — and `legal` is what removes
+   * the need for a chess rules engine, so losing it is not a small matter.
+   */
+  raw: any;
 }
 
 export interface UseGameSocket {
@@ -47,7 +57,7 @@ export interface UseGameSocket {
   retry: () => void;
 }
 
-const EMPTY: GameState = { you: '', seat: null, spectator: false, lobby: null, game: null };
+const EMPTY: GameState = { you: '', seat: null, spectator: false, lobby: null, game: null, raw: null };
 
 export function useGameSocket(game: GameKind, roomId = ''): UseGameSocket {
   const [phase, setPhase] = useState<Phase>('idle');
@@ -105,6 +115,7 @@ export function useGameSocket(game: GameKind, roomId = ''): UseGameSocket {
         spectator: !!s.spectator,
         lobby: s.lobby ?? null,
         game: s.game ?? null,
+        raw: s,
       });
     });
 
