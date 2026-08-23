@@ -112,3 +112,27 @@ export function sameGroups(a: Groups, b: Groups): boolean {
   if (a.length !== b.length) return false;
   return a.every((g, i) => g.length === b[i].length && g.every((id, j) => id === b[i][j]));
 }
+
+/**
+ * Move one card into a specific group — the drop half of drag-and-drop.
+ *
+ * `target` is an index into the CURRENT groups array. Out-of-range drops land
+ * in the loose pile rather than being refused: a finger released between two
+ * rows should put the card somewhere sensible, not silently do nothing and
+ * leave the player wondering whether the gesture registered.
+ *
+ * Removing the card first, then inserting, is what makes a move within the same
+ * group behave — otherwise the index shifts under the insert.
+ */
+export function moveCard(groups: Groups, cardId: string, target: number): Groups {
+  if (!groups.some(g => g.includes(cardId))) return groups;
+
+  const without = groups.map(g => g.filter(id => id !== cardId));
+  const idx = target >= 0 && target < without.length ? target : without.length - 1;
+  const out = without.map((g, i) => (i === idx ? [...g, cardId] : g));
+
+  // Empty groups are dropped, but the loose pile always survives so the next
+  // draw and the next drop both have somewhere to land.
+  const kept = out.filter((g, i, arr) => g.length > 0 || i === arr.length - 1);
+  return kept.length ? kept : [[]];
+}

@@ -5,7 +5,7 @@
 // declaration the server rejects for a reason the player cannot see on screen,
 // and a card that falls out of every group vanishes from their hand entirely.
 
-import { reconcile, groupUp, ungroup, sortLoose, sameGroups, type Groups } from './handGroups';
+import { reconcile, groupUp, ungroup, sortLoose, sameGroups, moveCard, type Groups } from './handGroups';
 
 let failures = 0;
 const check = (name: string, ok: boolean, detail = '') => {
@@ -86,6 +86,32 @@ check('reconciling an unchanged hand changes nothing',
 // play, so ids are the only thing telling two identical cards apart.
 const deduped = reconcile([['x', 'x'], []], ['x', 'y']);
 check('a duplicated id is not kept twice', holds(deduped, ['x', 'y']));
+
+// ── moveCard — the drop half of drag-and-drop ────────────────────────
+let m = reconcile([], hand13);
+m = groupUp(m, ['c0', 'c1', 'c2']);
+
+m = moveCard(m, 'c5', 0);
+check('dropping a card into a group puts it there',
+  holds(m, hand13) && m[0].includes('c5'));
+check('...and removes it from where it was',
+  m[m.length - 1].indexOf('c5') === -1);
+
+m = moveCard(m, 'c5', m.length - 1);
+check('dropping it back onto the loose pile works',
+  holds(m, hand13) && !m[0].includes('c5') && m[m.length - 1].includes('c5'));
+
+const stray = moveCard(m, 'c0', 99);
+check('a drop outside every group lands loose rather than vanishing',
+  holds(stray, hand13) && stray[stray.length - 1].includes('c0'),
+  'a finger released between rows must still do something sensible');
+
+check('dropping a card that is not in the hand changes nothing',
+  sameGroups(moveCard(m, 'nope', 0), m));
+
+check('moving a card into the group it already sits in is safe',
+  holds(moveCard(m, m[0][0], 0), hand13),
+  'remove first, then insert — otherwise the index shifts under the insert');
 
 console.log(failures ? `\n  ${failures} FAILED\n` : '\n  all hand-grouping checks passed\n');
 process.exit(failures ? 1 : 0);

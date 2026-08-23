@@ -40,6 +40,7 @@ import { playSfx, preloadSfx, soundEnabled, setSoundEnabled } from '../../lib/ga
 import { Toasts, Confetti, Sheet, SettingRow, VoiceBar } from './feedback';
 import { useTableVoice } from '../../lib/games/useTableVoice';
 import { inviteToTable, shareResult } from '../../lib/games/invite';
+import { useWallet, STAKES, stakeLabel } from '../../lib/games/useWallet';
 
 /** 52-cell ring [row,col] on a 15x15 board, clockwise from red's start. */
 const RING: [number, number][] = [
@@ -128,7 +129,16 @@ export default function Ludo({ roomId = 'ludo-main', auto, autoBot }: { roomId?:
   const [showSettings, setShowSettings] = useState(false);
   const [showEmotes, setShowEmotes] = useState(false);
   const [sound, setSound] = useState(soundEnabled());
+  const [stake, setStake] = useState(0);
+  const wallet = useWallet();
   const voice = useTableVoice('ludo', roomId);
+  // The tumble is local and deliberate. The server answers in tens of
+  // milliseconds, so without a held animation the number simply appears and the
+  // player never sees a roll happen — which is the single thing that makes dice
+  // feel fair. See rollFor() below.
+  const [tumbling, setTumbling] = useState(false);
+  const tumbleTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => { if (tumbleTimer.current) clearTimeout(tumbleTimer.current); }, []);
 
   // Up to four seat cards above, plus the die row and two button rows.
   const size = useBoardSize(400, 460);
@@ -215,7 +225,7 @@ export default function Ludo({ roomId = 'ludo-main', auto, autoBot }: { roomId?:
   const fillAndStart = (n: number) => {
     const seated = L?.members?.length ?? 1;
     for (let i = seated; i < n + 1; i++) send({ t: 'addbot' });
-    setTimeout(() => send({ t: 'start' }), 400);
+    setTimeout(() => send({ t: 'start', mode: 'classic', stake }), 400);
   };
 
   const finished = G?.phase === 'finished';
@@ -246,6 +256,36 @@ export default function Ludo({ roomId = 'ludo-main', auto, autoBot }: { roomId?:
               <Text style={{ color: C.muted, fontSize: t.sm }}>Two players minimum — add a bot to start now.</Text>
             )}
           </Panel>
+          {/* Stake. Free is first and the default: a table that quietly costs
+              something is how a player loses coins they did not mean to put up.
+              These are PLAY coins — the games server mints them and they buy
+              nothing outside these tables. */}
+          <Panel style={{ gap: S[2] }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+              <Text style={{ flex: 1, color: C.text, fontSize: t.md, fontWeight: '800' }}>Stake</Text>
+              {wallet.balance != null && (
+                <Text style={{ color: C.gold, fontSize: t.sm, fontWeight: '800' }}>{`🪙 ${wallet.balance}`}</Text>
+              )}
+            </View>
+            <View style={{ flexDirection: 'row', gap: S[2] }}>
+              {STAKES.map(v => (
+                <Btn
+                  key={v}
+                  label={stakeLabel(v)}
+                  compact
+                  style={{ flex: 1 }}
+                  kind={stake === v ? 'gold' : 'secondary'}
+                  disabled={!host || (wallet.balance != null && v > wallet.balance)}
+                  onPress={() => setStake(v)}
+                  accessibilityLabel={v === 0 ? 'Play for free' : `Stake ${v} play coins`}
+                />
+              ))}
+            </View>
+            <Text style={{ color: C.muted, fontSize: 11 }}>
+              Play coins. They are not money and cannot be cashed out.
+            </Text>
+          </Panel>
+
           {/* The web offers these as distinct ways in rather than making
               everyone assemble a table by hand. Filling seats then starting is
               two taps that always go together. */}
@@ -264,7 +304,7 @@ export default function Ludo({ roomId = 'ludo-main', auto, autoBot }: { roomId?:
           />
           <Btn label="Add a bot" onPress={() => send({ t: 'addbot' })} disabled={!host} />
           <Btn label="Invite a friend" icon="🔗" onPress={() => { void inviteToTable('ludo', roomId); }} disabled={!roomId} />
-          <Btn label="Start now" kind="gold" onPress={() => send({ t: 'start' })} disabled={!host || members.length < 2} />
+          <Btn label="Start now" kind="gold" onPress={() => send({ t: 'start', mode: 'classic', stake })} disabled={!host || members.length < 2} />
         </ScrollView>
         <Toasts events={events} />
       </TableBackground>
@@ -313,7 +353,7 @@ export default function Ludo({ roomId = 'ludo-main', auto, autoBot }: { roomId?:
         </View>
 
         <View style={{ width: size, flexDirection: 'row', alignItems: 'center', gap: S[3] }}>
-          <Die value={die} rolling={canRoll} seat={mySeat} />
+          <Die value={die} tumbling={tumbling} armed={canRoll} seat={mySeat} />
           <View style={{ flex: 1, gap: S[2] }}>
             {finished ? (
               <Banner
@@ -323,11 +363,18 @@ export default function Ludo({ roomId = 'ludo-main', auto, autoBot }: { roomId?:
             ) : (
               <>
                 <Btn
-                  label={canRoll ? 'Roll the dice' : die != null ? `Rolled ${die}` : 'Waiting…'}
+                  label={tumbling ? 'Rolling…' : canRoll ? 'Roll the dice' : die != null ? `Rolled ${die}` : 'Waiting…'}
                   kind="gold"
                   icon="🎲"
-                  disabled={!canRoll}
-                  onPress={() => send({ t: 'roll', clientSeed: seed() })}
+                  disabled={!canRoll || tumbling}
+                  onPress={() => {
+                    // Start the tumble first, then ask. The result is held back
+                    // until the animation has run its course.
+                    setTumbling(true);
+                    if (tumbleTimer.current) clearTimeout(tumbleTimer.current);
+                    tumbleTimer.current = setTimeout(() => setTumbling(false), 850);
+                    send({ t: 'roll', clientSeed: seed() });
+                  }}
                 />
                 <Text style={{ color: C.muted, fontSize: t.sm, textAlign: 'center' }}>
                   {!mine ? `${turnName} is playing`
@@ -588,42 +635,66 @@ const PIPS: Record<number, number[]> = {
   1: [4], 2: [0, 8], 3: [0, 4, 8], 4: [0, 2, 6, 8], 5: [0, 2, 4, 6, 8], 6: [0, 2, 3, 5, 6, 8],
 };
 
-function Die({ value, rolling, seat }: { value: number | null; rolling: boolean; seat: number }) {
+/**
+ * The die.
+ *
+ * `armed` is "your turn, not yet rolled" — a slow breath, an invitation.
+ * `tumbling` is the roll itself: the cube spins hard and the FACE CHANGES,
+ * which is what reads as a roll. A die that only wobbles while keeping the same
+ * pips looks like a stuck animation.
+ *
+ * The face shown while tumbling is deliberately random and means nothing; the
+ * server's number replaces it the moment the animation ends. Rolling the real
+ * result early would be showing an answer the player has not seen arrive.
+ */
+function Die({ value, tumbling, armed, seat }: { value: number | null; tumbling: boolean; armed: boolean; seat: number }) {
   const shake = useSharedValue(0);
+  const spin = useSharedValue(0);
+  const [flicker, setFlicker] = useState(6);
 
   useEffect(() => {
-    if (rolling) {
+    if (tumbling) {
+      spin.value = 0;
+      spin.value = withTiming(1, { duration: 850, easing: Easing.out(Easing.cubic) });
       shake.value = withRepeat(
         withSequence(
-          withTiming(1, { duration: 140, easing: Easing.inOut(Easing.quad) }),
-          withTiming(-1, { duration: 140, easing: Easing.inOut(Easing.quad) }),
+          withTiming(1, { duration: 70, easing: Easing.inOut(Easing.quad) }),
+          withTiming(-1, { duration: 70, easing: Easing.inOut(Easing.quad) }),
         ), -1, true);
-    } else {
-      cancelAnimation(shake);
-      shake.value = withSpring(0, { damping: 14, stiffness: 200 });
+      // Cycle the face so the cube is visibly changing, not merely shaking.
+      const id = setInterval(() => setFlicker(1 + Math.floor(Math.random() * 6)), 90);
+      return () => { clearInterval(id); cancelAnimation(shake); cancelAnimation(spin); };
     }
-    return () => cancelAnimation(shake);
-  }, [rolling, shake]);
+    cancelAnimation(shake);
+    shake.value = withSpring(0, { damping: 14, stiffness: 200 });
+    if (armed) {
+      // A slow breath while it is the player's turn to roll.
+      shake.value = withRepeat(withTiming(0.22, { duration: 900, easing: Easing.inOut(Easing.ease) }), -1, true);
+    }
+    spin.value = withTiming(0, { duration: 200 });
+    return () => { cancelAnimation(shake); cancelAnimation(spin); };
+  }, [tumbling, armed, shake, spin]);
 
   const a = useAnimatedStyle(() => ({
     transform: [
-      { rotate: `${shake.value * 9}deg` },
-      { translateY: -Math.abs(shake.value) * 3 },
+      { rotate: `${shake.value * 12 + spin.value * 540}deg` },
+      { translateY: -Math.abs(shake.value) * 6 },
+      { scale: 1 + Math.abs(shake.value) * 0.06 },
     ] as ViewStyle['transform'],
   }));
 
-  const face = value ?? 6;
+  const face = tumbling ? flicker : (value ?? 6);
   const on = new Set(PIPS[face] ?? []);
 
   return (
     <Animated.View
-      accessibilityLabel={value == null ? 'Dice, not rolled' : `Dice showing ${value}`}
+      accessibilityLabel={tumbling ? 'Rolling the dice' : value == null ? 'Dice, not rolled' : `Dice showing ${value}`}
       style={[{
         width: 62, height: 62, borderRadius: 12, padding: 7,
         backgroundColor: '#fdf8ec',
         borderWidth: 1, borderColor: 'rgba(0,0,0,0.25)',
         boxShadow: '0 8px 18px rgba(0,0,0,0.45), inset 0 2px 3px rgba(255,255,255,0.9), inset 0 -3px 6px rgba(120,90,40,0.28)',
-        opacity: value == null && !rolling ? 0.55 : 1,
+        opacity: value == null && !tumbling && !armed ? 0.55 : 1,
       }, a]}
     >
       <View style={{ flex: 1, flexDirection: 'row', flexWrap: 'wrap' }}>
@@ -632,7 +703,7 @@ function Die({ value, rolling, seat }: { value: number | null; rolling: boolean;
             {on.has(i) && (
               <View style={{
                 width: 9, height: 9, borderRadius: 5,
-                backgroundColor: value == null ? '#b0a48c' : P[seat],
+                backgroundColor: tumbling ? '#8d7f66' : value == null ? '#b0a48c' : P[seat],
               }} />
             )}
           </View>

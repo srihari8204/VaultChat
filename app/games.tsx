@@ -26,6 +26,7 @@ import { useQuickMatch } from '../lib/games/useQuickMatch';
 import { TableBackground, Panel, Btn, useType } from '../components/games/ui';
 import { C, S, R, D3, E, mix, goldLine } from '../lib/games/theme';
 import { playSfx, setSoundEnabled, soundEnabled } from '../lib/games/sfx';
+import { useWallet } from '../lib/games/useWallet';
 
 import TicTacToe from '../components/games/TicTacToe';
 import Chess from '../components/games/Chess';
@@ -91,6 +92,7 @@ function Hub({ onOpen }: { onOpen: (g: GameKind, opts?: Record<string, string>) 
   const t = useType();
   const [code, setCode] = React.useState('');
   const qm = useQuickMatch();
+  const wallet = useWallet();
   const [seeking, setSeeking] = React.useState<Entry | null>(null);
 
   // A found room is opened once, then the searching sheet is dismissed.
@@ -120,6 +122,7 @@ function Hub({ onOpen }: { onOpen: (g: GameKind, opts?: Record<string, string>) 
       <ScrollView contentContainerStyle={{ padding: S[4], gap: S[3], paddingBottom: S[6] }}>
         <View style={{ flexDirection: 'row', alignItems: 'center' }}>
           <Text style={{ flex: 1, color: C.text, fontSize: t['2xl'], fontWeight: '800', letterSpacing: 0.3 }}>Games</Text>
+          <CoinChip balance={wallet.balance} />
           <SoundToggle />
         </View>
         <Text style={{ color: C.muted, fontSize: t.sm, lineHeight: 19 }}>
@@ -173,6 +176,32 @@ function Hub({ onOpen }: { onOpen: (g: GameKind, opts?: Record<string, string>) 
  * make noise. The preference is persisted, so this is not a per-session toggle
  * the player has to hunt for again every time.
  */
+/**
+ * The coin balance.
+ *
+ * Labelled "play coins" wherever it appears. They are not money and cannot be
+ * cashed out — the games server's own engines say "demo coins only" — and the
+ * wording has to keep saying so rather than leaving a number that looks like a
+ * wallet balance.
+ */
+function CoinChip({ balance }: { balance: number | null }) {
+  if (balance == null) return null;
+  return (
+    <View
+      accessibilityLabel={`${balance} play coins`}
+      style={{
+        flexDirection: 'row', alignItems: 'center', gap: 5,
+        paddingHorizontal: S[3], paddingVertical: S[2], borderRadius: R.pill,
+        borderWidth: 1, borderColor: goldLine[38], backgroundColor: C.panel2,
+        marginRight: S[2],
+      }}
+    >
+      <Text style={{ fontSize: 13 }}>🪙</Text>
+      <Text style={{ color: C.gold, fontSize: 13, fontWeight: '800' }}>{balance}</Text>
+    </View>
+  );
+}
+
 function SoundToggle() {
   const [on, setOn] = React.useState(soundEnabled());
   return (
