@@ -1,255 +1,99 @@
-// app/games.tsx — Games mini app: games.corefinite.com in a WebView.
+// app/games.tsx — Games hub. Native, no WebView.
 //
-// LAUNCH HANDSHAKE (matches what the site actually does — read from the live
-// page's boot(), not assumed):
+// WAS a WebView onto games.corefinite.com. The four games are now React Native
+// screens talking to the same server over a native WebSocket
+// (lib/gamesSocket.ts + lib/games/useGameSocket.ts), so the page, its cookie
+// jar and the whole launch-handshake dance are gone.
 //
-//   dev  : the site fetches its own /dev/launch-token, then POSTs it to
-//          /api/session to get a cookie.
-//   prod : /dev/launch-token is 404 and GAMES_CONFIG.dev is false, so the site
-//          mints NOTHING. It waits on "a secure launch from VaultChat".
+// The server is unchanged and still authoritative — it owns the deck, the dice
+// and the rules, and the native screens render its snapshots exactly as the web
+// clients did. See docs/GAMES_PROTOCOL.md.
 //
-// So we mint the Ed25519-signed token from our own backend and exchange it at
-// /api/session INSIDE the WebView. Doing that POST from React Native instead
-// would put the session cookie in the app's jar, not the WebView's, and the
-// page would still see no session.
+// `game` and `room` params are preserved because deep links and the turn
+// notifications already in the wild point here with them
+// (gamesNotifySlug in the backend mints those slugs), so an invite that opened
+// the WebView keeps working and now lands on the native board instead.
 
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, BackHandler, Linking, Share, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
-// useFocusEffect from expo-router, NOT @react-navigation/native: both work, but
-// only one of them is a dependency this app actually needs.
-import { Stack, useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
-import { WebView, type WebViewNavigation } from 'react-native-webview';
-import { useColors } from '../lib/theme';
-import { api } from '../lib/api';
+import React from 'react';
+import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
+import { useTheme } from '../lib/theme';
+import { type Palette } from '../constants/theme';
+import type { GameKind } from '../lib/gamesSocket';
 
-const GAMES_URL = 'https://games.corefinite.com';
+import TicTacToe from '../components/games/TicTacToe';
+import Chess from '../components/games/Chess';
+import Ludo from '../components/games/Ludo';
+import Rummy from '../components/games/Rummy';
 
-/**
- * Bound a slug that is about to be interpolated into the games URL.
- *
- * The server validates these before they ever enter a push (gamesNotifySlug in
- * games_notify.go), and this is the same rule applied again on arrival. Worth
- * repeating rather than trusting: these params reach here through a navigation
- * route, which anything holding a deep link can drive — not only our own
- * notification. Anything with a slash, a quote, a `?` or a `#` in it would
- * rewrite the URL rather than fill it in.
- */
-const slug = (v: unknown): string => {
-  const s = typeof v === 'string' ? v.trim() : '';
-  return s.length > 0 && s.length <= 64 && /^[A-Za-z0-9_-]+$/.test(s) ? s : '';
-};
+const GAMES: { kind: GameKind; name: string; icon: string; blurb: string }[] = [
+  { kind: 'chess',     name: 'Chess',        icon: '♛', blurb: 'Server-refereed. Your legal moves come from the table.' },
+  { kind: 'rummy',     name: 'Rummy',        icon: '🂡', blurb: '13 cards, two decks. Your hand never leaves the server.' },
+  { kind: 'ludo',      name: 'Ludo',         icon: '🎲', blurb: 'Two to four players, provably fair dice.' },
+  { kind: 'tictactoe', name: 'Tic-Tac-Toe',  icon: '✕', blurb: 'Three in a row. Quick one.' },
+];
 
-/**
- * The table to open, or the hub when there is no valid deep link.
- *
- * Both halves are required: a game with no room is a lobby, not the table the
- * player was nudged about, so it falls back rather than opening something
- * confidently wrong.
- */
-const startUrlFor = (game: unknown, room: unknown): string => {
-  const g = slug(game), r = slug(room);
-  return g && r ? `${GAMES_URL}/${g}.html?room=${encodeURIComponent(r)}` : GAMES_URL;
-};
-
-/**
- * Exchange the launch token for a games session, in the page's own context.
- *
- * Idempotent by design: it asks /api/profile first and returns early when a
- * session already exists, so the reload below cannot loop. The token is
- * embedded as a JSON string literal — it is opaque, short-lived (15 min) and
- * single-use on the games server, and it never leaves this WebView.
- */
-const sessionBootstrap = (token: string) => `(async function(){
-  try {
-    var pr = await fetch('/api/profile', { credentials: 'include' });
-    var pj = await pr.json().catch(function(){ return null; });
-    if (pj && pj.ok) return;
-    await fetch('/api/session', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      credentials: 'include',
-      body: JSON.stringify({ token: ${JSON.stringify(token)} }),
-    });
-    location.reload();
-  } catch (e) {}
-})(); true;`;
+/** Only these four are exposed; anything else falls back to the menu. */
+const KINDS = new Set(GAMES.map(g => g.kind));
 
 export default function GamesScreen() {
-  const colors = useColors();
+  const { colors } = useTheme();
+  const s = React.useMemo(() => makeStyles(colors), [colors]);
   const router = useRouter();
-  const webRef = useRef<WebView>(null);
-
-  // Set when the screen was opened by tapping a VaultGames turn/invite push.
-  // Memoised on the two values, not on the params object: expo-router hands
-  // back a fresh object every render, which would rebuild the uri each time and
-  // reload the WebView out from under a game in progress.
   const params = useLocalSearchParams<{ game?: string; room?: string }>();
-  const startUrl = useMemo(
-    () => startUrlFor(params.game, params.room),
-    [params.game, params.room],
-  );
 
-  const [loading, setLoading] = useState(true);
-  const [failed, setFailed] = useState(false);
-  const [token, setToken] = useState<string | null>(null);
-  // null = still minting, '' = minting failed. Distinguished so a backend
-  // without GAMES_SIGNING_PRIVATE_KEY_PEM (503) still opens the site rather
-  // than blocking the screen — the page shows its own "Open from VaultChat"
-  // state, which is the truth.
-  useEffect(() => {
-    let cancelled = false;
-    api<{ token: string }>('/games/launch-token', { method: 'POST' })
-      .then(r => { if (!cancelled) setToken(r?.token ?? ''); })
-      .catch(() => { if (!cancelled) setToken(''); });
-    return () => { cancelled = true; };
-  }, []);
-  // Tracked so the hardware back button walks the site's own history before it
-  // leaves the screen — otherwise one back press from three pages deep drops the
-  // user out of the whole mini app, which is the usual complaint about WebViews.
-  const canGoBack = useRef(false);
+  const kind = typeof params.game === 'string' && KINDS.has(params.game as GameKind)
+    ? (params.game as GameKind)
+    : null;
+  const room = typeof params.room === 'string' ? params.room : '';
 
-  // ANDROID HARDWARE BACK.
-  //
-  // Bound on focus and released on blur, NOT in a bare useEffect: a listener
-  // that outlives the screen keeps swallowing back presses on whatever is on
-  // top of it afterwards. Returning true means "handled" — returning false lets
-  // the navigator pop, which is exactly what we want at the site's root.
-  useFocusEffect(
-    useCallback(() => {
-      const sub = BackHandler.addEventListener('hardwareBackPress', () => {
-        if (canGoBack.current) { webRef.current?.goBack(); return true; }
-        return false;
-      });
-      return () => sub.remove();
-    }, []),
-  );
-
-  const onNav = (e: WebViewNavigation) => { canGoBack.current = e.canGoBack; };
-
-  const reload = () => { setFailed(false); setLoading(true); webRef.current?.reload(); };
+  const title = kind ? (GAMES.find(g => g.kind === kind)?.name ?? 'Games') : 'Games';
 
   return (
-    <View style={[s.fill, { backgroundColor: colors.bg }]}>
-      {/* The root layout sets headerShown:false app-wide, so every screen must
-          opt back in or its top ~150px sits under the status bar and silently
-          eats taps — the fault that made several screens' actions unreachable.
-          The native header also gives us a working back affordance for free. */}
-      <Stack.Screen
-        options={{
-          headerShown: true,
-          title: 'Games',
-          headerStyle: { backgroundColor: colors.bg },
-          headerTintColor: colors.text,
-          headerShadowVisible: false,
-          headerRight: () => (
-            <TouchableOpacity onPress={reload} hitSlop={12} accessibilityLabel="Reload games">
-              <Text style={{ color: colors.text, fontSize: 18 }}>⟳</Text>
-            </TouchableOpacity>
-          ),
-        }}
-      />
+    <>
+      <Stack.Screen options={{ title, headerBackTitle: 'Games' }} />
+      {kind ? <Board kind={kind} room={room} /> : (
+        <ScrollView contentContainerStyle={s.wrap}>
+          <Text style={s.h1}>Games</Text>
+          <Text style={s.sub}>Play someone in your chats, or add a bot. Every table is refereed by the server, so both players always see the same board.</Text>
 
-      {failed ? (
-        <View style={[s.fill, s.centered]}>
-          <Text style={[s.msg, { color: colors.text }]}>Could not load Games</Text>
-          <Text style={[s.sub, { color: colors.text }]}>Check your connection and try again.</Text>
-          <TouchableOpacity onPress={reload} style={[s.btn, { borderColor: colors.text }]}>
-            <Text style={{ color: colors.text }}>Retry</Text>
-          </TouchableOpacity>
-          <TouchableOpacity onPress={() => router.back()} style={s.close}>
-            <Text style={{ color: colors.text, opacity: 0.7 }}>Close</Text>
-          </TouchableOpacity>
-        </View>
-      ) : token === null ? (
-        // Hold the WebView back until the mint settles. Loading the page first
-        // would let boot() run with no session, land the user on the site's
-        // "Open from VaultChat" screen, and only then inject — a visible
-        // false-failure followed by a reload.
-        <View style={[s.fill, s.centered]}>
-          <ActivityIndicator size="large" color={colors.text} />
-        </View>
-      ) : (
-        <>
-          <WebView
-            ref={webRef}
-            source={{ uri: startUrl }}
-            style={s.fill}
-            onNavigationStateChange={onNav}
-            onLoadEnd={() => {
-              setLoading(false);
-              // Injected AFTER load, not before: the bootstrap calls
-              // /api/profile and /api/session on the page's own origin, which
-              // needs the document to exist. It self-checks and reloads once,
-              // exactly mirroring what the site's own dev path does.
-              if (token) webRef.current?.injectJavaScript(sessionBootstrap(token));
-            }}
-            // The site already speaks this bridge: on a win/invite it posts
-            // {type:'vaultchat-share'} expecting the native shell to handle it.
-            // Without this handler those taps silently do nothing in-app.
-            onMessage={(e) => {
-              try {
-                const msg = JSON.parse(e.nativeEvent.data);
-                if (msg?.type === 'vaultchat-share') {
-                  const p = msg.payload ?? {};
-                  Share.share({
-                    title: p.title,
-                    message: [p.message, p.url].filter(Boolean).join(' '),
-                  }).catch(() => {});
-                }
-              } catch { /* not our message — the page posts other things too */ }
-            }}
-            onError={() => { setLoading(false); setFailed(true); }}
-            onHttpError={({ nativeEvent }) => {
-              // A 404/500 still fires onLoadEnd, so without this the spinner
-              // clears and the user is left staring at the site's error page
-              // with no way to tell it apart from a game that just looks broken.
-              if (nativeEvent.statusCode >= 400) { setLoading(false); setFailed(true); }
-            }}
-            // Games are the one thing that legitimately wants the screen: let
-            // them go fullscreen and keep the media/audio behaviour they expect.
-            allowsFullscreenVideo
-            mediaPlaybackRequiresUserAction={false}
-            // Responsiveness comes from the SITE, not from us — the viewport
-            // meta tag is what makes it fit. Forcing scalesPageToFit or a
-            // desktop UA would fight it. This just refuses a zoomed-out
-            // desktop layout on a phone.
-            scalesPageToFit={false}
-            javaScriptEnabled
-            domStorageEnabled
-            // Keeps sessions across visits once auth lands.
-            sharedCookiesEnabled
-            thirdPartyCookiesEnabled
-            // Anything that is not games.corefinite.com opens in the real
-            // browser instead of inside our chrome-less WebView, so a stray
-            // link cannot impersonate the app.
-            onShouldStartLoadWithRequest={(req) => {
-              if (req.url.startsWith(GAMES_URL)) return true;
-              if (req.url.startsWith('about:')) return true;
-              // react-native's own Linking — expo-linking adds nothing we need
-              // here and is not otherwise used by this app.
-              Linking.openURL(req.url).catch(() => {});
-              return false;
-            }}
-          />
-          {loading && (
-            <View style={[s.overlay, { backgroundColor: colors.bg }]} pointerEvents="none">
-              <ActivityIndicator size="large" color={colors.text} />
-            </View>
-          )}
-        </>
+          {GAMES.map(g => (
+            <Pressable
+              key={g.kind}
+              style={s.card}
+              onPress={() => router.push({ pathname: '/games', params: { game: g.kind } } as any)}
+              accessibilityLabel={`Play ${g.name}`}
+            >
+              <Text style={s.icon}>{g.icon}</Text>
+              <View style={s.cardBody}>
+                <Text style={s.cardName}>{g.name}</Text>
+                <Text style={s.cardBlurb}>{g.blurb}</Text>
+              </View>
+            </Pressable>
+          ))}
+        </ScrollView>
       )}
-    </View>
+    </>
   );
 }
 
-const s = StyleSheet.create({
-  fill: { flex: 1 },
-  centered: { alignItems: 'center', justifyContent: 'center', padding: 24 },
-  // Covers the WebView while it paints so the user never sees a white flash of
-  // an empty page on a dark theme.
-  overlay: { ...StyleSheet.absoluteFillObject, alignItems: 'center', justifyContent: 'center' },
-  msg: { fontSize: 17, fontWeight: '600', marginBottom: 6 },
-  sub: { fontSize: 13, opacity: 0.7, textAlign: 'center', marginBottom: 18 },
-  btn: { borderWidth: StyleSheet.hairlineWidth, borderRadius: 10, paddingVertical: 10, paddingHorizontal: 24 },
-  close: { marginTop: 14, padding: 8 },
+function Board({ kind, room }: { kind: GameKind; room: string }) {
+  switch (kind) {
+    case 'chess':     return <Chess roomId={room} />;
+    case 'ludo':      return <Ludo roomId={room || 'ludo-main'} />;
+    case 'rummy':     return <Rummy tableId={room} />;
+    case 'tictactoe': return <TicTacToe roomId={room} />;
+  }
+}
+
+const makeStyles = (c: Palette) => StyleSheet.create({
+  wrap:      { padding: 20, gap: 12 },
+  h1:        { color: c.text, fontSize: 26, fontWeight: '800' },
+  sub:       { color: c.textDim, fontSize: 13, lineHeight: 19, marginBottom: 6 },
+  card:      { flexDirection: 'row', alignItems: 'center', gap: 14, padding: 16, borderRadius: 16,
+               backgroundColor: c.surface, borderWidth: StyleSheet.hairlineWidth, borderColor: c.border },
+  icon:      { fontSize: 30, width: 40, textAlign: 'center', color: c.text },
+  cardBody:  { flex: 1, gap: 3 },
+  cardName:  { color: c.text, fontSize: 17, fontWeight: '800' },
+  cardBlurb: { color: c.textDim, fontSize: 12.5, lineHeight: 17 },
 });

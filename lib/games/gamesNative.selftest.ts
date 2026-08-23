@@ -1,0 +1,104 @@
+// lib/games/gamesNative.selftest.ts — run: npx tsx lib/games/gamesNative.selftest.ts
+//
+// Guards the one property the native games rest on: THE CLIENT DECIDES NOTHING.
+//
+// The games server owns the deck, the dice and the rules, and sends the legal
+// moves outright (`legal` for chess, `movable` for ludo). The moment a board
+// starts computing game truth locally it becomes a second rulebook, and the
+// two players see different boards with no way to tell which is right. That
+// failure is invisible in review — the code looks like a helpful improvement.
+//
+// So this asserts the shape of the dependency, not the pixels.
+
+import { readFileSync, existsSync } from 'node:fs';
+
+const HUB    = readFileSync('app/games.tsx', 'utf8');
+const TTT    = readFileSync('components/games/TicTacToe.tsx', 'utf8');
+const CHESS  = readFileSync('components/games/Chess.tsx', 'utf8');
+const LUDO   = readFileSync('components/games/Ludo.tsx', 'utf8');
+const RUMMY  = readFileSync('components/games/Rummy.tsx', 'utf8');
+const HOOK   = readFileSync('lib/games/useGameSocket.ts', 'utf8');
+
+let failures = 0;
+const check = (name: string, ok: boolean, detail = '') => {
+  if (!ok) failures++;
+  console.log(`  ${ok ? '✓' : '✗'} ${name}${!ok && detail ? `  (${detail})` : ''}`);
+};
+
+console.log('\nNative games\n');
+
+// ── the WebView is gone ───────────────────────────────────────────────
+check('the games hub no longer uses a WebView',
+  !/react-native-webview/.test(HUB),
+  'the whole point of this change');
+
+// Comments stripped first: the header explains what this replaced, and naming
+// the old URL there is documentation, not a dependency.
+const stripComments = (src: string) => src.replace(/\/\*[\s\S]*?\*\/|\/\/.*$/gm, '');
+
+check('...and no longer loads the games site as a page',
+  !/games\.corefinite\.com/.test(stripComments(HUB)),
+  'the native screens reach the same server over a socket instead');
+
+// ── all four are reachable ────────────────────────────────────────────
+for (const [name, file] of [
+  ['TicTacToe', 'components/games/TicTacToe.tsx'],
+  ['Chess', 'components/games/Chess.tsx'],
+  ['Ludo', 'components/games/Ludo.tsx'],
+  ['Rummy', 'components/games/Rummy.tsx'],
+] as [string, string][]) {
+  check(`${name} exists`, existsSync(file));
+  check(`...and the hub routes to it`, new RegExp(`<${name}\\b`).test(HUB));
+}
+
+// Deep links and the turn notifications already in the wild carry ?game=&room=.
+// Dropping those params would silently break every invite ever sent.
+check('the hub still honours the game/room deep-link params',
+  /useLocalSearchParams<\{ game\?: string; room\?: string \}>/.test(HUB),
+  'existing invites and push notifications point here with them');
+
+// ── every board goes through the shared socket ────────────────────────
+for (const [name, src] of [['TicTacToe', TTT], ['Chess', CHESS], ['Ludo', LUDO], ['Rummy', RUMMY]] as [string, string][]) {
+  check(`${name} renders from the server socket`,
+    /useGameSocket\(/.test(src),
+    'a board with its own transport would drift from the shared lifecycle');
+}
+
+// ── the client decides nothing ────────────────────────────────────────
+// Chess must take its moves from the server's list, never generate them.
+check('chess uses the server-sent legal move list',
+  /state\.raw\?\.legal/.test(CHESS) && /legal\.filter\(m => m\.from === /.test(CHESS),
+  'the alternative is a client rules engine and two disagreeing boards');
+
+check('...and contains no move generation of its own',
+  !/knight|bishopDirs|isInCheck|generateMoves|castl/i.test(CHESS.replace(/\/\*[\s\S]*?\*\/|\/\/.*$/gm, '')),
+  'rules belong to the server; comments may mention them, code may not');
+
+// Ludo must take movable tokens from the server, not compute reachability.
+check('ludo uses the server-sent movable token list',
+  /G\.movable/.test(LUDO) && /movable\.includes\(/.test(LUDO));
+
+// Rummy must not judge a declaration — that is the whole game.
+check('rummy does not validate melds locally',
+  !/isValidSequence|isValidSet|validateMeld|scoreHand/i.test(RUMMY),
+  'a client rulebook would reject or accept a hand the server disagrees with');
+
+check('rummy shows other players a COUNT, never their cards',
+  /handCount/.test(RUMMY) && !/opponentHand|otherHand/.test(RUMMY),
+  'the server sends only this player\'s hand — that is the privacy property');
+
+// ── the snapshot is authoritative ─────────────────────────────────────
+check('state frames replace local state wholesale',
+  /raw: s,/.test(HOOK) && /setState\(\{/.test(HOOK),
+  'the protocol sends full snapshots, never deltas');
+
+check('the hook keeps the raw frame',
+  /raw: any/.test(HOOK),
+  'chess legal/color and rummy hand ride at the TOP level beside `game`');
+
+check('the socket is disposed on unmount',
+  /sock\.dispose\(\)/.test(HOOK),
+  'four screens sharing one hook means one place to leak, or none');
+
+console.log(failures ? `\n  ${failures} FAILED\n` : '\n  all native-games checks passed\n');
+process.exit(failures ? 1 : 0);
