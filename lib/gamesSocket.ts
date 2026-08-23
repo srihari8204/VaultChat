@@ -34,6 +34,39 @@ const GAMES_WS = GAMES_HTTP.replace(/^http/, "ws");
 
 export type GameKind = "tictactoe" | "ludo" | "chess" | "rummy";
 
+/**
+ * Mint a launch token and exchange it for a games session cookie.
+ *
+ * Shared because the matchmaking socket (/live/ws) needs exactly the same
+ * session as a table socket — it is the same server and the same cookie jar.
+ * Duplicating the handshake would mean two places to get the credentials mode
+ * wrong, and `credentials: "include"` is the whole reason the WebSocket is
+ * authenticated at all.
+ */
+export async function establishGamesSession(onExchange?: () => void): Promise<void> {
+  const res = await api<{ token: string }>("/games/launch-token", { method: "POST" });
+  const token = res?.token;
+  if (!token) throw new Error("No launch token returned by VaultChat backend.");
+
+  onExchange?.();
+  const sessionRes = await fetch(`${GAMES_HTTP}/api/session`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    credentials: "include",
+    body: JSON.stringify({ token }),
+  });
+  if (!sessionRes.ok) {
+    throw new Error(
+      `Games session rejected (${sessionRes.status}). The games server may be down.`,
+    );
+  }
+}
+
+/** Base URL of the games WebSocket, for sockets other than a game table. */
+export const GAMES_WS_BASE = GAMES_WS;
+
+
+
 /** The WebSocket path for each game (matches games-server/realtime/ws.ts). */
 const WS_PATH: Record<GameKind, string> = {
   tictactoe: "/tictactoe/ws",
@@ -84,31 +117,8 @@ export class GamesSocket {
     this.reconnectAttempts = 0;
 
     try {
-      // 1. Mint the launch token from VaultChat's OWN backend.
-      const res = await api<{ token: string }>("/games/launch-token", {
-        method: "POST",
-      });
-      const token = res?.token;
-      if (!token) {
-        throw new Error("No launch token returned by VaultChat backend.");
-      }
-
-      // 2. Exchange it for a games session cookie (gsid). credentials:'include'
-      //    stores the cookie in the native cookie jar so the WebSocket sends it.
-      this.setPhase("connecting");
-      const sessionRes = await fetch(`${GAMES_HTTP}/api/session`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include",
-        body: JSON.stringify({ token }),
-      });
-      if (!sessionRes.ok) {
-        throw new Error(
-          `Games session rejected (${sessionRes.status}). The games server may be down.`,
-        );
-      }
-
-      // 3. Open the WebSocket. The gsid cookie is sent from the same jar.
+      await establishGamesSession(() => this.setPhase("connecting"));
+      // The gsid cookie is now in the native jar, and the WebSocket sends it.
       this.openSocket();
     } catch (err) {
       this.handleError(err instanceof Error ? err.message : String(err));

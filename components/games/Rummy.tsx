@@ -15,28 +15,52 @@
  *
  * Card: { id, suit: 'S'|'H'|'D'|'C'|'JOKER', rank } — id is unique per physical
  * card because two decks are in play and duplicates genuinely exist.
+ *
+ * Visuals ported from games-web/rummy.css: a green baize oval with a gold rim,
+ * seats around it, and real card faces with corner indices.
  */
 
-import React, { useMemo, useState } from 'react';
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
-import { useTheme } from '../../lib/theme';
-import { type Palette } from '../../constants/theme';
-import { useGameSocket } from '../../lib/games/useGameSocket';
+import React, { useEffect, useRef, useState } from 'react';
+import { Pressable, ScrollView, Text, View, useWindowDimensions, type ViewStyle } from 'react-native';
+import Svg, { Defs, RadialGradient, Stop, Rect, Ellipse, Line } from 'react-native-svg';
+import Animated, {
+  useSharedValue, useAnimatedStyle, withSpring, withTiming, withRepeat, withSequence,
+  Easing, cancelAnimation,
+} from 'react-native-reanimated';
+import * as Haptics from 'expo-haptics';
+import { useGameSocket, type AutoStart } from '../../lib/games/useGameSocket';
+import { TableBackground, Panel, Btn, Banner, PlayerRow, Chip, useType } from './ui';
+import { C, S, R, D3, mix, goldLine } from '../../lib/games/theme';
 
 type Card = { id: string; suit: string; rank: string };
 
 const SUIT_GLYPH: Record<string, string> = { S: '♠', H: '♥', D: '♦', C: '♣', JOKER: '★' };
+const SUIT_NAME: Record<string, string> = { S: 'spades', H: 'hearts', D: 'diamonds', C: 'clubs', JOKER: 'joker' };
 const RED = new Set(['H', 'D']);
+
+/** Baize, from rummy.css --felt / --felt-2 / --felt-3. */
+const FELT = ['#1c9257', '#0a4c2c', '#073a20'];
+const CARD_FACE = '#fffdf6';
+const CARD_EDGE = '#caa44a';
+const CARD_RED = '#d8213f';
+const CARD_INK = '#16181f';
+const JOKER_PURPLE = '#7c3aed';
 
 function label(c: Card): string {
   if (c.suit === 'JOKER' || !c.rank) return '★';
   return `${c.rank}${SUIT_GLYPH[c.suit] ?? ''}`;
 }
 
-export default function Rummy({ tableId = '' }: { tableId?: string }) {
-  const { colors } = useTheme();
-  const s = useMemo(() => makeStyles(colors), [colors]);
-  const { phase, error, state, events, send, retry } = useGameSocket('rummy', tableId);
+function spoken(c: Card): string {
+  if (c.suit === 'JOKER' || !c.rank) return 'joker';
+  return `${c.rank} of ${SUIT_NAME[c.suit] ?? c.suit}`;
+}
+
+export default function Rummy({ tableId = '', auto, autoBot }: { tableId?: string } & AutoStart) {
+  const { phase, error, state, events, send, retry } = useGameSocket('rummy', tableId, { auto, autoBot });
+  const t = useType();
+  const { width } = useWindowDimensions();
+
   // Selection is local: which cards the player has picked for a discard or a
   // declaration. Nothing about it is game truth, so it never leaves this file
   // except as an explicit intent.
@@ -45,244 +69,410 @@ export default function Rummy({ tableId = '' }: { tableId?: string }) {
   const L = state.lobby;
   const G = state.game;
   const hand: Card[] = Array.isArray(state.raw?.hand) ? state.raw.hand : [];
+  const mine = G?.turnPlayerId === state.you;
+
+  const feltW = Math.min(width - S[4] * 2, 460);
 
   if (error && phase !== 'connected') {
     return (
-      <View style={s.center}>
-        <Text style={s.title}>Can’t reach the table</Text>
-        <Text style={s.muted}>{error}</Text>
-        <Pressable style={s.btn} onPress={retry}><Text style={s.btnTxt}>Try again</Text></Pressable>
-      </View>
+      <Center>
+        <Text style={{ fontSize: 46 }}>🂡</Text>
+        <Text style={{ color: C.text, fontSize: t.lg, fontWeight: '800' }}>Can’t reach the table</Text>
+        <Text style={{ color: C.muted, fontSize: t.sm, textAlign: 'center' }}>{error}</Text>
+        <Btn label="Try again" kind="gold" onPress={retry} />
+      </Center>
     );
   }
-  if (!L) {
+
+  if (phase !== 'connected' || !L) {
     return (
-      <View style={s.center}>
-        <ActivityIndicator color={colors.primary} />
-        <Text style={s.muted}>{phase === 'minting' ? 'Taking your seat…' : 'Joining the table…'}</Text>
-      </View>
+      <Center>
+        <Text style={{ fontSize: 46 }}>🂡</Text>
+        <Text style={{ color: C.muted, fontSize: t.md }}>
+          {phase === 'minting' ? 'Taking your seat…' : 'Joining the table…'}
+        </Text>
+      </Center>
     );
   }
 
   const finished = G?.phase === 'finished';
 
-  // ── lobby ──────────────────────────────────────────────────────────
-  if (L.status === 'lobby' && !finished) {
-    const isHost = L.hostId === state.you;
-    const n = L.members?.length ?? 0;
+  if (!G || (L.status === 'lobby' && !finished)) {
+    const members = L.members ?? [];
+    const host = L.hostId === state.you;
     return (
-      <ScrollView contentContainerStyle={s.lobbyWrap}>
-        <Text style={s.title}>Rummy</Text>
-        <Text style={s.muted}>Thirteen cards, two decks. The table deals and judges every declaration — your cards are never sent to another player’s device.</Text>
-        <View style={s.seatList}>
-          {(L.members ?? []).map((m: any, i: number) => (
-            <View key={m.vaultId ?? i} style={s.seatRow}>
-              <Text style={s.seatName} numberOfLines={1}>
-                {m.name}{m.vaultId === state.you ? ' (you)' : ''}{m.isBot ? ' 🤖' : ''}
-              </Text>
-            </View>
-          ))}
-          <Text style={s.muted}>{n} seated</Text>
-        </View>
-        {state.spectator ? (
-          <Text style={s.muted}>👁 You’re watching this table.</Text>
-        ) : (
-          <View style={s.lobbyActions}>
-            <Pressable style={s.btn} onPress={() => send({ t: 'addbot' })}>
-              <Text style={s.btnTxt}>Add a bot</Text>
-            </Pressable>
-            {isHost && n >= 2 && (
-              <Pressable style={[s.btn, s.btnPrimary]} onPress={() => send({ t: 'start' })}>
-                <Text style={[s.btnTxt, s.btnPrimaryTxt]}>Start game</Text>
-              </Pressable>
-            )}
-            {!isHost && n >= 2 && <Text style={s.muted}>Waiting for the host to start…</Text>}
-          </View>
-        )}
-        <Events events={events} s={s} />
-      </ScrollView>
+      <TableBackground>
+        <ScrollView contentContainerStyle={{ padding: S[4], gap: S[3] }}>
+          <Text style={{ color: C.text, fontSize: t.xl, fontWeight: '800' }}>Rummy</Text>
+          <Text style={{ color: C.muted, fontSize: t.sm, lineHeight: 19 }}>
+            Thirteen cards, two decks. The table deals and judges every declaration — your cards are never sent to another player’s device.
+          </Text>
+          <Panel style={{ gap: S[2] }}>
+            {members.map(m => (
+              <PlayerRow
+                key={m.vaultId}
+                name={m.name}
+                tag={m.vaultId === state.you ? 'you' : m.isBot ? 'bot' : undefined}
+              />
+            ))}
+            <Text style={{ color: C.muted, fontSize: t.sm }}>{members.length} seated</Text>
+          </Panel>
+          <Btn label="Add a bot" icon="🤖" onPress={() => send({ t: 'addbot' })} />
+          <Btn label="Deal" kind="gold" onPress={() => send({ t: 'start' })} disabled={!host || members.length < 2} />
+          {events.length > 0 && <Text style={{ color: C.muted, fontSize: t.sm }}>{events[events.length - 1]}</Text>}
+        </ScrollView>
+      </TableBackground>
     );
   }
 
-  // ── table ──────────────────────────────────────────────────────────
-  const players: any[] = G?.players ?? [];
-  const myTurn = !state.spectator && G?.turnPlayerId === state.you;
-  const openTop: Card | null = G?.openTop ?? null;
-  const wild: Card | null = G?.wildJokerCard ?? null;
-  const toMove = players.find(p => p.id === G?.turnPlayerId);
-  const winner = players.find(p => p.id === G?.winnerId);
+  const players: any[] = Array.isArray(G.players) ? G.players : [];
+  const others = players.filter(p => (p.id ?? p.vaultId) !== state.you);
+  const openTop: Card | null = G.openTop ?? null;
+  const closedCount: number = typeof G.closedCount === 'number' ? G.closedCount : 0;
+  const wild: Card | null = G.wildJokerCard ?? null;
 
-  // 13 cards means the draw is spent and a discard is owed; 14 means it is not.
-  // The server enforces this — the count only decides which controls to show.
-  const mustDiscard = myTurn && hand.length > 13;
-  const canDraw = myTurn && hand.length <= 13;
-
-  const toggle = (id: string) =>
+  const toggle = (id: string) => {
+    Haptics.selectionAsync().catch(() => {});
     setPicked(p => (p.includes(id) ? p.filter(x => x !== id) : [...p, id]));
+  };
 
-  const status = finished
-    ? (G?.winnerId === state.you ? 'You won' : `${winner?.name ?? 'Someone'} won`)
-    : state.spectator ? `${toMove?.name ?? '…'} to play`
-    : canDraw ? 'Your turn — draw a card'
-    : mustDiscard ? 'Discard one card'
-    : `${toMove?.name ?? 'Opponent'} to play`;
+  const draw = (source: 'open' | 'closed') => {
+    if (!mine) return;
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+    send({ t: 'draw', source });
+  };
+
+  const discard = () => {
+    if (picked.length !== 1) return;
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
+    send({ t: 'discard', cardId: picked[0] });
+    setPicked([]);
+  };
+
+  const declare = () => {
+    if (picked.length !== 1) return;
+    // The server judges the hand. `groups` carries the player's arrangement
+    // only so the table can show how they laid it out.
+    send({ t: 'declare', discardId: picked[0], groups: [hand.filter(c => c.id !== picked[0]).map(c => c.id)] });
+    setPicked([]);
+  };
 
   return (
-    <ScrollView contentContainerStyle={s.tableWrap}>
-      <Text style={[s.status, finished && s.statusDone]}>{status}</Text>
+    <TableBackground>
+      <ScrollView contentContainerStyle={{ padding: S[4], gap: S[3], alignItems: 'center', paddingBottom: S[6] }}>
 
-      <View style={s.pilesRow}>
-        <Pressable
-          style={[s.pile, canDraw && s.pileLive]}
-          onPress={() => canDraw && send({ t: 'draw', source: 'closed' })}
-          disabled={!canDraw}
-        >
-          <Text style={s.pileBack}>🂠</Text>
-          <Text style={s.pileLabel}>{G?.closedCount ?? 0} left</Text>
-        </Pressable>
+        <View style={{ width: feltW }}>
+          <Felt width={feltW}>
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', gap: S[3], paddingTop: S[2] }}>
+              {others.map(p => (
+                <Seat
+                  key={p.id ?? p.vaultId}
+                  name={p.name}
+                  count={p.handCount ?? 0}
+                  bot={!!p.isBot}
+                  turn={G.turnPlayerId === (p.id ?? p.vaultId)}
+                  out={!!p.dropped}
+                />
+              ))}
+            </View>
 
-        <Pressable
-          style={[s.pile, canDraw && !!openTop && s.pileLive]}
-          onPress={() => canDraw && openTop && send({ t: 'draw', source: 'open' })}
-          disabled={!canDraw || !openTop}
-        >
-          <Text style={[s.pileCard, openTop && RED.has(openTop.suit) && s.red]}>
-            {openTop ? label(openTop) : '–'}
-          </Text>
-          <Text style={s.pileLabel}>Open</Text>
-        </Pressable>
-
-        <View style={s.pile}>
-          <Text style={[s.pileCard, wild && RED.has(wild.suit) && s.red]}>
-            {wild ? label(wild) : '–'}
-          </Text>
-          <Text style={s.pileLabel}>Wild</Text>
+            <View style={{ flexDirection: 'row', gap: S[5], justifyContent: 'center', alignItems: 'flex-start', paddingVertical: S[3] }}>
+              <Pile
+                label={`${closedCount} left`}
+                live={mine}
+                onPress={() => draw('closed')}
+                back
+              />
+              <Pile
+                label="Open"
+                live={mine && !!openTop}
+                onPress={() => draw('open')}
+                card={openTop}
+              />
+              {wild ? (
+                <View style={{ alignItems: 'center', gap: 5 }}>
+                  <CardFace card={wild} w={44} wild />
+                  <Text style={{ color: '#e7f3ea', fontSize: 11, fontWeight: '700' }}>Wild</Text>
+                </View>
+              ) : null}
+            </View>
+          </Felt>
         </View>
-      </View>
 
-      <View style={s.playerRow}>
-        {players.map((p) => (
-          <View key={p.id} style={[s.chip, p.id === G?.turnPlayerId && !finished && s.chipOn]}>
-            <Text style={s.chipName} numberOfLines={1}>
-              {p.name}{p.id === state.you ? ' (you)' : ''}
-            </Text>
-            {/* Other players are a COUNT, never cards. That is the privacy
-                property, not a rendering shortcut. */}
-            <Text style={s.chipSub}>{p.handCount ?? 0} cards</Text>
+        {finished ? (
+          <View style={{ width: feltW }}>
+            <Banner
+              text={G.winnerId === state.you ? 'You win!' : `${players.find(p => (p.id ?? p.vaultId) === G.winnerId)?.name ?? 'Someone'} wins`}
+              tone={G.winnerId === state.you ? 'win' : 'lose'}
+            />
           </View>
-        ))}
-      </View>
+        ) : (
+          <Text style={{ color: mine ? C.gold : C.muted, fontSize: t.md, fontWeight: '700' }}>
+            {mine ? 'Your turn — draw, then discard one' : `${players.find(p => (p.id ?? p.vaultId) === G.turnPlayerId)?.name ?? 'Someone'} is playing`}
+          </Text>
+        )}
 
-      <Text style={s.handLabel}>Your hand · {hand.length} cards</Text>
-      <View style={s.hand}>
-        {hand.map((c) => {
-          const on = picked.includes(c.id);
-          return (
-            <Pressable
+        {/* your hand */}
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={{ paddingHorizontal: S[2], paddingVertical: S[4], gap: 6 }}
+          style={{ width: feltW + S[4] * 2, marginHorizontal: -S[4] }}
+        >
+          {hand.map(c => (
+            <HandCard
               key={c.id}
-              style={[s.card, on && s.cardOn]}
+              card={c}
+              selected={picked.includes(c.id)}
               onPress={() => toggle(c.id)}
-              accessibilityLabel={`${label(c)}${on ? ', selected' : ''}`}
-            >
-              <Text style={[s.cardTxt, RED.has(c.suit) && s.red]}>{label(c)}</Text>
-            </Pressable>
-          );
-        })}
-      </View>
+            />
+          ))}
+        </ScrollView>
 
-      {!finished && !state.spectator && (
-        <View style={s.actions}>
-          <Pressable
-            style={[s.btn, mustDiscard && picked.length === 1 && s.btnPrimary]}
-            disabled={!mustDiscard || picked.length !== 1}
-            onPress={() => { send({ t: 'discard', cardId: picked[0] }); setPicked([]); }}
-          >
-            <Text style={[s.btnTxt, mustDiscard && picked.length === 1 && s.btnPrimaryTxt]}>
-              Discard{picked.length === 1 ? '' : ' (pick 1)'}
-            </Text>
-          </Pressable>
-
-          <Pressable
-            style={s.btn}
-            disabled={!mustDiscard || picked.length !== 1}
-            onPress={() => {
-              // The server validates the melds. Sending the hand as one group
-              // is honest about what this client knows: it has not grouped
-              // anything, and pretending otherwise would be inventing a rulebook.
-              const rest = hand.filter(c => c.id !== picked[0]).map(c => c.id);
-              send({ t: 'declare', discardId: picked[0], groups: [rest] });
-              setPicked([]);
-            }}
-          >
-            <Text style={s.btnTxt}>Declare</Text>
-          </Pressable>
-
-          <Pressable style={s.btn} onPress={() => send({ t: 'drop' })}>
-            <Text style={s.btnTxt}>Drop</Text>
-          </Pressable>
+        <View style={{ width: feltW, flexDirection: 'row', gap: S[2] }}>
+          <Btn label="Discard" compact style={{ flex: 1 }} onPress={discard} disabled={!mine || picked.length !== 1} />
+          <Btn label="Declare" kind="gold" compact style={{ flex: 1 }} onPress={declare} disabled={!mine || picked.length !== 1} />
+          <Btn label="Drop" kind="danger" compact onPress={() => send({ t: 'drop' })} disabled={!mine} />
         </View>
-      )}
 
-      <Events events={events} s={s} />
-    </ScrollView>
+        <Text style={{ color: C.muted, fontSize: 12, textAlign: 'center', width: feltW }}>
+          {picked.length === 0
+            ? 'Tap a card to pick it, then Discard or Declare.'
+            : picked.length === 1
+              ? 'Discard this card, or Declare with it as your final discard.'
+              : 'Pick exactly one card to discard.'}
+        </Text>
+
+        {events.length > 0 && (
+          <Text numberOfLines={2} style={{ color: C.muted, fontSize: t.sm, width: feltW }}>
+            {events[events.length - 1]}
+          </Text>
+        )}
+      </ScrollView>
+    </TableBackground>
   );
 }
 
-function Events({ events, s }: { events: string[]; s: any }) {
-  if (!events.length) return null;
+/* ── the felt ───────────────────────────────────────────────────────── */
+
+function Felt({ width, children }: { width: number; children: React.ReactNode }) {
+  const h = Math.max(268, width * 0.72);
   return (
-    <View style={s.events}>
-      {events.slice(-3).map((e, i) => <Text key={i} style={s.eventTxt}>{e}</Text>)}
+    <View style={{ width, minHeight: h, padding: 12, justifyContent: 'center' }}>
+      <Svg width={width} height={h} style={{ position: 'absolute' }}>
+        <Defs>
+          <RadialGradient id="baize" cx="50%" cy="12%" rx="72%" ry="60%">
+            <Stop offset="0" stopColor={FELT[0]} />
+            <Stop offset="0.62" stopColor={FELT[1]} />
+            <Stop offset="1" stopColor={FELT[2]} />
+          </RadialGradient>
+          <RadialGradient id="sheenR" cx="50%" cy="0%" rx="70%" ry="40%">
+            <Stop offset="0" stopColor="#ffffff" stopOpacity="0.07" />
+            <Stop offset="1" stopColor="#ffffff" stopOpacity="0" />
+          </RadialGradient>
+        </Defs>
+        <Rect x="1" y="1" width={width - 2} height={h - 2} rx={Math.min(width, h) * 0.34} fill="url(#baize)" stroke="#a9791b" strokeWidth="2" />
+        <Rect x="8" y="8" width={width - 16} height={h - 16} rx={Math.min(width, h) * 0.32} fill="none" stroke="rgba(0,0,0,0.24)" strokeWidth="7" />
+        <Rect x="8" y="8" width={width - 16} height={h - 16} rx={Math.min(width, h) * 0.32} fill="url(#sheenR)" />
+      </Svg>
+      {children}
     </View>
   );
 }
 
-const makeStyles = (c: Palette) => StyleSheet.create({
-  center:      { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 10, padding: 28 },
-  title:       { color: c.text, fontSize: 22, fontWeight: '800' },
-  muted:       { color: c.textDim, fontSize: 13, textAlign: 'center', lineHeight: 19 },
+function Seat({ name, count, bot, turn, out }: { name: string; count: number; bot: boolean; turn: boolean; out: boolean }) {
+  const spin = useSharedValue(0);
+  useEffect(() => {
+    if (turn) {
+      spin.value = withRepeat(withTiming(1, { duration: 3400, easing: Easing.linear }), -1, false);
+    } else {
+      cancelAnimation(spin);
+      spin.value = 0;
+    }
+    return () => cancelAnimation(spin);
+  }, [turn, spin]);
+  const a = useAnimatedStyle(() => ({ transform: [{ rotate: `${spin.value * 360}deg` }] }));
 
-  lobbyWrap:   { padding: 20, gap: 14 },
-  seatList:    { gap: 8, marginTop: 4 },
-  seatRow:     { flexDirection: 'row', alignItems: 'center', gap: 10, padding: 12, borderRadius: 12,
-                 backgroundColor: c.surface, borderWidth: StyleSheet.hairlineWidth, borderColor: c.border },
-  seatName:    { flex: 1, color: c.text, fontSize: 14, fontWeight: '700' },
-  lobbyActions:{ gap: 10, marginTop: 6 },
+  const initials = name.split(/\s+/).map(w => w[0]).join('').slice(0, 2).toUpperCase();
 
-  tableWrap:   { padding: 16, gap: 14 },
-  status:      { color: c.text, fontSize: 16, fontWeight: '800', textAlign: 'center' },
-  statusDone:  { color: c.primary },
+  return (
+    <View style={{ width: 86, alignItems: 'center', opacity: out ? 0.5 : 1 }}
+      accessibilityLabel={`${name}, ${count} cards${turn ? ', playing now' : ''}`}>
+      <View style={{ width: 50, height: 50, borderRadius: 25, padding: 3, backgroundColor: '#0a1710', justifyContent: 'center' }}>
+        {turn && (
+          <Animated.View style={[{
+            position: 'absolute', inset: 0, borderRadius: 25,
+            borderWidth: 3, borderColor: C.gold, borderTopColor: C.gold2, borderBottomColor: C.goldDeep,
+          }, a]} />
+        )}
+        <View style={{
+          flex: 1, borderRadius: 24, alignItems: 'center', justifyContent: 'center',
+          backgroundColor: bot ? '#6f9bff' : C.gold,
+        }}>
+          <Text style={{ color: '#2a1c00', fontWeight: '800', fontSize: 17 }}>{bot ? '🤖' : initials}</Text>
+        </View>
+      </View>
+      <Text numberOfLines={1} style={{ color: '#fff', fontWeight: '700', fontSize: 13, marginTop: 3, textShadowColor: 'rgba(0,0,0,0.7)', textShadowRadius: 2, textShadowOffset: { width: 0, height: 1 } }}>
+        {name}
+      </Text>
+      <Text style={{ color: '#e7f3ea', fontSize: 11 }}>{count} cards</Text>
+    </View>
+  );
+}
 
-  pilesRow:    { flexDirection: 'row', gap: 12, justifyContent: 'center' },
-  pile:        { width: 78, height: 96, borderRadius: 10, alignItems: 'center', justifyContent: 'center', gap: 4,
-                 backgroundColor: c.surface, borderWidth: StyleSheet.hairlineWidth, borderColor: c.border },
-  pileLive:    { borderColor: c.primary, borderWidth: 2 },
-  pileBack:    { fontSize: 34, color: c.textDim },
-  pileCard:    { fontSize: 22, fontWeight: '800', color: c.text },
-  pileLabel:   { fontSize: 11, color: c.textDim },
-  red:         { color: '#D64545' },
+function Pile({
+  label: text, live, onPress, card, back,
+}: { label: string; live: boolean; onPress: () => void; card?: Card | null; back?: boolean }) {
+  const bob = useSharedValue(0);
+  useEffect(() => {
+    if (live) {
+      bob.value = withRepeat(withTiming(1, { duration: 800, easing: Easing.inOut(Easing.ease) }), -1, true);
+    } else {
+      cancelAnimation(bob);
+      bob.value = withTiming(0, { duration: 160 });
+    }
+    return () => cancelAnimation(bob);
+  }, [live, bob]);
+  const a = useAnimatedStyle(() => ({ transform: [{ translateY: -bob.value * 3 }] }));
 
-  playerRow:   { flexDirection: 'row', gap: 8, flexWrap: 'wrap', justifyContent: 'center' },
-  chip:        { alignItems: 'center', paddingHorizontal: 12, paddingVertical: 7, borderRadius: 16,
-                 backgroundColor: c.surface, borderWidth: StyleSheet.hairlineWidth, borderColor: c.border },
-  chipOn:      { borderColor: c.primary },
-  chipName:    { color: c.text, fontSize: 12, fontWeight: '700', maxWidth: 110 },
-  chipSub:     { color: c.textDim, fontSize: 11 },
+  return (
+    <Pressable
+      onPress={live ? onPress : undefined}
+      disabled={!live}
+      accessibilityRole="button"
+      accessibilityLabel={back ? `Closed deck, ${text}` : card ? `${spoken(card)}, ${text}` : text}
+      style={{ alignItems: 'center', gap: 5 }}
+    >
+      <Animated.View style={a}>
+        {back ? <CardBack live={live} /> : card ? <CardFace card={card} w={50} glow={live} /> : <EmptySlot />}
+      </Animated.View>
+      <Text style={{ color: '#e7f3ea', fontSize: 11, fontWeight: '700', textShadowColor: 'rgba(0,0,0,0.5)', textShadowRadius: 2, textShadowOffset: { width: 0, height: 1 } }}>
+        {text}
+      </Text>
+    </Pressable>
+  );
+}
 
-  handLabel:   { color: c.textDim, fontSize: 12, fontWeight: '700', marginTop: 4 },
-  hand:        { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
-  card:        { width: 46, height: 64, borderRadius: 8, alignItems: 'center', justifyContent: 'center',
-                 backgroundColor: c.surfaceSolid, borderWidth: StyleSheet.hairlineWidth, borderColor: c.border },
-  cardOn:      { borderColor: c.primary, borderWidth: 2, transform: [{ translateY: -6 }] },
-  cardTxt:     { fontSize: 16, fontWeight: '800', color: c.text },
+/** The diagonal-stripe card back from rummy.css, drawn as SVG lines. */
+function CardBack({ live }: { live: boolean }) {
+  const w = 50, h = 70;
+  return (
+    <View style={{
+      width: w, height: h, borderRadius: 8, overflow: 'hidden',
+      borderWidth: 1, borderColor: CARD_EDGE,
+      boxShadow: live
+        ? '0 0 0 2px #f3c245, 0 0 16px rgba(232,194,95,0.55), 0 4px 10px rgba(0,0,0,0.5)'
+        : '0 3px 9px rgba(0,0,0,0.55)',
+    }}>
+      <Svg width={w} height={h}>
+        <Rect x="0" y="0" width={w} height={h} fill="#a3163f" />
+        {Array.from({ length: 18 }, (_, i) => (
+          <Line key={i} x1={-h + i * 10} y1={h} x2={-h + i * 10 + h} y2={0} stroke="#86112f" strokeWidth="5" />
+        ))}
+        <Rect x="3" y="3" width={w - 6} height={h - 6} rx="5" fill="none" stroke="rgba(247,244,234,0.14)" strokeWidth="3" />
+      </Svg>
+    </View>
+  );
+}
 
-  actions:     { flexDirection: 'row', gap: 8, flexWrap: 'wrap', marginTop: 4 },
-  btn:         { paddingVertical: 11, paddingHorizontal: 18, borderRadius: 12, alignItems: 'center',
-                 backgroundColor: c.surface, borderWidth: StyleSheet.hairlineWidth, borderColor: c.border },
-  btnTxt:      { color: c.text, fontSize: 14, fontWeight: '700' },
-  btnPrimary:  { backgroundColor: c.primary, borderColor: c.primary },
-  btnPrimaryTxt:{ color: '#fff' },
+function EmptySlot() {
+  return (
+    <View style={{
+      width: 50, height: 70, borderRadius: 8,
+      borderWidth: 1, borderStyle: 'dashed', borderColor: 'rgba(255,255,255,0.35)',
+    }} />
+  );
+}
 
-  events:      { marginTop: 6, gap: 3 },
-  eventTxt:    { color: c.textDim, fontSize: 12, textAlign: 'center' },
-});
+/** A card face with corner indices and a centre pip, as in rummy.css. */
+function CardFace({ card, w, glow, wild }: { card: Card; w: number; glow?: boolean; wild?: boolean }) {
+  const h = Math.round(w * 1.385);
+  const joker = card.suit === 'JOKER';
+  const color = joker ? JOKER_PURPLE : RED.has(card.suit) ? CARD_RED : CARD_INK;
+  const idx = Math.round(w * 0.27);
+
+  return (
+    <View style={{
+      width: w, height: h, borderRadius: 8,
+      backgroundColor: joker ? '#f6efff' : CARD_FACE,
+      borderWidth: 1, borderColor: wild ? C.gold : CARD_EDGE,
+      boxShadow: glow
+        ? '0 0 0 2px #f3c245, 0 3px 8px rgba(0,0,0,0.4)'
+        : wild
+          ? '0 0 0 2px #f3c245, 0 3px 8px rgba(0,0,0,0.4)'
+          : '0 2px 6px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.8)',
+      overflow: 'hidden',
+    }}>
+      <Text style={{ position: 'absolute', top: 3, left: 4, fontSize: idx, lineHeight: idx * 1.1, fontWeight: '800', color }}>
+        {joker ? '★' : card.rank}
+      </Text>
+      {!joker && (
+        <Text style={{ position: 'absolute', top: 3 + idx * 1.05, left: 4, fontSize: idx * 0.78, lineHeight: idx * 0.85, color }}>
+          {SUIT_GLYPH[card.suit]}
+        </Text>
+      )}
+      <Text style={{
+        position: 'absolute', left: 0, right: 0, top: h / 2 - w * 0.31,
+        textAlign: 'center', fontSize: w * 0.5, lineHeight: w * 0.62, color, opacity: 0.9,
+      }}>
+        {joker ? '★' : SUIT_GLYPH[card.suit]}
+      </Text>
+    </View>
+  );
+}
+
+/**
+ * A card in the player's hand.
+ *
+ * Selection lifts the card 12px with a gold rim — the same affordance the web
+ * client uses, and the reason a discard never needs a confirm step: the card
+ * you are about to lose is visibly out of the fan.
+ */
+function HandCard({ card, selected, onPress }: { card: Card; selected: boolean; onPress: () => void }) {
+  const lift = useSharedValue(selected ? 1 : 0);
+  const pop = useSharedValue(0);
+  const first = useRef(true);
+
+  useEffect(() => {
+    lift.value = withSpring(selected ? 1 : 0, { damping: 15, stiffness: 260 });
+  }, [selected, lift]);
+
+  // drawPop — a newly arrived card drops in rather than appearing.
+  useEffect(() => {
+    if (!first.current) return;
+    first.current = false;
+    pop.value = 1;
+    pop.value = withSpring(0, { damping: 11, stiffness: 200 });
+  }, [pop]);
+
+  const a = useAnimatedStyle(() => ({
+    transform: [
+      { translateY: -lift.value * 12 - pop.value * 16 },
+      { scale: 1 + pop.value * 0.1 },
+    ] as ViewStyle['transform'],
+  }));
+
+  return (
+    <Animated.View style={a}>
+      <Pressable
+        onPress={onPress}
+        accessibilityRole="button"
+        accessibilityState={{ selected }}
+        accessibilityLabel={`${spoken(card)}${selected ? ', selected' : ''}`}
+        style={selected ? { borderRadius: 9, borderWidth: 2, borderColor: C.gold } : undefined}
+      >
+        <CardFace card={card} w={52} glow={selected} />
+      </Pressable>
+    </Animated.View>
+  );
+}
+
+function Center({ children }: { children: React.ReactNode }) {
+  return (
+    <TableBackground>
+      <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', padding: S[5], gap: S[3] }}>
+        {children}
+      </View>
+    </TableBackground>
+  );
+}

@@ -16,13 +16,26 @@
  *
  * Token step encoding (server): -1 base · 0..50 ring · 51..55 home column ·
  * 56 HOME (finished).
+ *
+ * The board is one SVG because a 15x15 grid is 225 views otherwise, and the
+ * cream/gold surface needs gradients per cell. Tokens sit above it as animated
+ * views so they can hop independently of a static board.
  */
 
-import React, { useMemo } from 'react';
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
-import { useTheme } from '../../lib/theme';
-import { type Palette } from '../../constants/theme';
-import { useGameSocket } from '../../lib/games/useGameSocket';
+import React, { useEffect, useMemo, useRef } from 'react';
+import { Pressable, ScrollView, Text, View, useWindowDimensions, type ViewStyle } from 'react-native';
+import Svg, {
+  Defs, RadialGradient, LinearGradient as SvgLinear, Stop, Rect, G as SvgG, Polygon,
+  Text as SvgText, Circle,
+} from 'react-native-svg';
+import Animated, {
+  useSharedValue, useAnimatedStyle, withSpring, withTiming, withRepeat, withSequence,
+  Easing, cancelAnimation,
+} from 'react-native-reanimated';
+import * as Haptics from 'expo-haptics';
+import { useGameSocket, type AutoStart } from '../../lib/games/useGameSocket';
+import { TableBackground, Panel, Btn, Banner, PlayerRow, useType } from './ui';
+import { C, S, R, D3, mix, goldLine } from '../../lib/games/theme';
 
 /** 52-cell ring [row,col] on a 15x15 board, clockwise from red's start. */
 const RING: [number, number][] = [
@@ -44,14 +57,33 @@ const BASE_SPOTS: [number, number][][] = [
   [[1,1],[1,4],[4,1],[4,4]], [[1,10],[1,13],[4,10],[4,13]],
   [[10,10],[10,13],[13,10],[13,13]], [[10,1],[10,4],[13,1],[13,4]],
 ];
-const COLORS = ['#e23b3b', '#2bb24c', '#f0c419', '#2f7be0'];
+
+/**
+ * Jewel tones from ludo.css — a light, a base and a dark per seat so surfaces
+ * can be shaded rather than filled flat.
+ */
+const P  = ['#d8283f', '#12a054', '#eeb013', '#2168d6'];
+const PD = ['#8d1226', '#076536', '#a96f06', '#103f8f'];
+const PL = ['#ff6b78', '#58e08d', '#ffdb63', '#6fa9ff'];
 const COLOR_NAMES = ['Red', 'Green', 'Yellow', 'Blue'];
-/** Safe ring cells — starts and star squares. Decorative only; the server enforces. */
+
+/**
+ * SHAPE MARKERS — accessibility, not decoration.
+ *
+ * Red and green are the classic deuteranopia pair, and identifying seats by
+ * colour alone makes the game unplayable rather than merely harder for roughly
+ * one man in twelve. Each seat carries a distinct shape as well.
+ */
+const SHAPE = ['▲', '●', '■', '◆'];
+
+const CREAM = '#f6efdd';
+const CREAM_2 = '#e6dcc2';
+
+/** Safe ring cells — starts and star squares. Decorative; the server enforces. */
 const SAFE = new Set([0, 8, 13, 21, 26, 34, 39, 47]);
 
-/** Board pixel size. 15 cells, so a whole number keeps the grid crisp. */
-const CELL = 22;
-const BOARD = CELL * 15;
+/** Yard origin [row,col] per corner, each 6x6 of the 15x15 grid. */
+const YARD_RC: [number, number][] = [[0, 0], [0, 9], [9, 9], [9, 0]];
 
 /** Where a token sits, given its owner's corner and its step. */
 function coord(corner: number, tokenIdx: number, step: number): [number, number] {
@@ -61,247 +93,452 @@ function coord(corner: number, tokenIdx: number, step: number): [number, number]
   return HOME_COORDS[corner][Math.min(step - 51, 4)];
 }
 
-export default function Ludo({ roomId = 'ludo-main' }: { roomId?: string }) {
-  const { colors } = useTheme();
-  const s = useMemo(() => makeStyles(colors), [colors]);
-  const { phase, error, state, events, send, retry } = useGameSocket('ludo', roomId);
+type Token = { step: number };
+type LPlayer = { id?: string; vaultId?: string; name: string; seat: number; tokens: Token[]; isBot?: boolean };
+
+const pid = (p: LPlayer) => p.id ?? p.vaultId ?? '';
+
+export default function Ludo({ roomId = 'ludo-main', auto, autoBot }: { roomId?: string } & AutoStart) {
+  const { phase, error, state, events, send, retry } = useGameSocket('ludo', roomId, { auto, autoBot });
+  const t = useType();
+  const { width } = useWindowDimensions();
 
   const L = state.lobby;
   const G = state.game;
 
+  const size = Math.min(width - S[4] * 2, 460);
+  const cell = size / 15;
+
   if (error && phase !== 'connected') {
     return (
-      <View style={s.center}>
-        <Text style={s.title}>Can’t reach the table</Text>
-        <Text style={s.muted}>{error}</Text>
-        <Pressable style={s.btn} onPress={retry}><Text style={s.btnTxt}>Try again</Text></Pressable>
-      </View>
+      <Center>
+        <Text style={{ fontSize: 46 }}>🎲</Text>
+        <Text style={{ color: C.text, fontSize: t.lg, fontWeight: '800' }}>Can’t reach the table</Text>
+        <Text style={{ color: C.muted, fontSize: t.sm, textAlign: 'center' }}>{error}</Text>
+        <Btn label="Try again" kind="gold" onPress={retry} />
+      </Center>
     );
   }
-  if (!L) {
+
+  if (phase !== 'connected' || !L) {
     return (
-      <View style={s.center}>
-        <ActivityIndicator color={colors.primary} />
-        <Text style={s.muted}>{phase === 'minting' ? 'Taking your seat…' : 'Joining the table…'}</Text>
-      </View>
+      <Center>
+        <Text style={{ fontSize: 46 }}>🎲</Text>
+        <Text style={{ color: C.muted, fontSize: t.md }}>
+          {phase === 'minting' ? 'Taking your seat…' : 'Joining the table…'}
+        </Text>
+      </Center>
     );
   }
 
   const finished = G?.phase === 'finished';
 
-  // ── lobby ──────────────────────────────────────────────────────────
-  if (L.status === 'lobby' && !finished) {
-    const isHost = L.hostId === state.you;
-    const n = L.members?.length ?? 0;
+  // ── lobby ─────────────────────────────────────────────────────────
+  if (!G || (L.status === 'lobby' && !finished)) {
+    const members = L.members ?? [];
+    const host = L.hostId === state.you;
     return (
-      <ScrollView contentContainerStyle={s.lobbyWrap}>
-        <Text style={s.title}>Ludo</Text>
-        <Text style={s.muted}>Two to four players. The table rolls the dice and settles every capture — neither phone decides anything.</Text>
-        <View style={s.seatList}>
-          {(L.members ?? []).map((m: any, i: number) => (
-            <View key={m.vaultId ?? i} style={s.seatRow}>
-              <View style={[s.swatch, { backgroundColor: COLORS[i % 4] }]} />
-              <Text style={s.seatName} numberOfLines={1}>
-                {m.name}{m.vaultId === state.you ? ' (you)' : ''}{m.isBot ? ' 🤖' : ''}
-              </Text>
-              <Text style={s.seatSub}>{COLOR_NAMES[i % 4]}</Text>
-            </View>
-          ))}
-          {n < 4 && <Text style={s.muted}>{n} seated · up to 4</Text>}
-        </View>
-        {state.spectator ? (
-          <Text style={s.muted}>👁 You’re watching this table.</Text>
-        ) : (
-          <View style={s.lobbyActions}>
-            {n < 4 && (
-              <Pressable style={s.btn} onPress={() => send({ t: 'addbot' })}>
-                <Text style={s.btnTxt}>Add a bot</Text>
-              </Pressable>
+      <TableBackground>
+        <ScrollView contentContainerStyle={{ padding: S[4], gap: S[3] }}>
+          <Text style={{ color: C.text, fontSize: t.xl, fontWeight: '800' }}>Ludo</Text>
+          <Text style={{ color: C.muted, fontSize: t.sm, lineHeight: 19 }}>
+            Two to four players. The table rolls the dice and settles every capture — neither phone decides anything.
+          </Text>
+          <Panel style={{ gap: S[2] }}>
+            {members.map((m, i) => (
+              <PlayerRow
+                key={m.vaultId}
+                name={m.name}
+                accent={P[i % 4]}
+                subtitle={COLOR_NAMES[i % 4]}
+                tag={m.vaultId === state.you ? 'you' : m.isBot ? 'bot' : undefined}
+              />
+            ))}
+            <Text style={{ color: C.muted, fontSize: t.sm }}>{members.length} seated · up to 4</Text>
+            {members.length < 2 && (
+              <Text style={{ color: C.muted, fontSize: t.sm }}>Two players minimum — add a bot to start now.</Text>
             )}
-            {isHost && n >= 2 && (
-              <Pressable style={[s.btn, s.btnPrimary]} onPress={() => send({ t: 'start' })}>
-                <Text style={[s.btnTxt, s.btnPrimaryTxt]}>Start game</Text>
-              </Pressable>
-            )}
-            {isHost && n < 2 && <Text style={s.muted}>Two players minimum — add a bot to start now.</Text>}
-            {!isHost && n >= 2 && <Text style={s.muted}>Waiting for the host to start…</Text>}
-          </View>
-        )}
-        <Events events={events} s={s} />
-      </ScrollView>
+          </Panel>
+          <Btn label="Add a bot" icon="🤖" onPress={() => send({ t: 'addbot' })} />
+          <Btn label="Start game" kind="gold" onPress={() => send({ t: 'start' })} disabled={!host || members.length < 2} />
+          {events.length > 0 && <Text style={{ color: C.muted, fontSize: t.sm }}>{events[events.length - 1]}</Text>}
+        </ScrollView>
+      </TableBackground>
     );
   }
 
-  // ── board ──────────────────────────────────────────────────────────
-  const players: any[] = G?.players ?? [];
-  const me = players.find(p => p.id === state.you);
-  const myTurn = !state.spectator && !!me && G?.turnPlayerId === me.id;
-  const movable: number[] = Array.isArray(G?.movable) ? G.movable : [];
-  const die: number | null = G?.pendingDie ?? G?.lastDie ?? null;
-  const toMove = players.find(p => p.id === G?.turnPlayerId);
-  const winner = players.find(p => p.id === G?.winnerId);
+  // ── table ─────────────────────────────────────────────────────────
+  const players: LPlayer[] = Array.isArray(G.players) ? G.players : [];
+  const mySeat = players.find(p => pid(p) === state.you)?.seat ?? 0;
+  const mine = G.turnPlayerId === state.you;
+  const movable: number[] = Array.isArray(G.movable) ? G.movable : [];
+  const die: number | null = typeof G.pendingDie === 'number' ? G.pendingDie : null;
 
-  // A roll is pending until it has been spent on a move.
-  const canRoll = myTurn && G?.pendingDie == null && !finished;
-  const canMove = myTurn && G?.pendingDie != null && movable.length > 0;
-
-  const status = finished
-    ? (G?.winnerId === state.you ? 'You won' : `${winner?.name ?? 'Someone'} won`)
-    : state.spectator ? `${toMove?.name ?? '…'} to play`
-    : canRoll ? 'Your turn — roll'
-    : canMove ? 'Pick a token'
-    : myTurn ? 'No legal move — passing'
-    : `${toMove?.name ?? 'Opponent'} to play`;
+  const canRoll = mine && die == null && !finished;
+  const canMove = mine && die != null && movable.length > 0;
+  const turnName = players.find(p => pid(p) === G.turnPlayerId)?.name ?? 'Someone';
 
   return (
-    <ScrollView contentContainerStyle={s.boardWrap}>
-      <Text style={[s.status, finished && s.statusDone]}>{status}</Text>
+    <TableBackground>
+      <ScrollView contentContainerStyle={{ padding: S[4], gap: S[3], alignItems: 'center', paddingBottom: S[6] }}>
 
-      <View style={s.board}>
-        {/* Home yards, one per corner, in seat colour. */}
-        {[[0,0],[0,9],[9,9],[9,0]].map(([r, c], i) => (
-          <View key={`yard${i}`} style={[s.yard, {
-            top: r * CELL, left: c * CELL,
-            borderColor: COLORS[[0,1,2,3][i]],
-          }]} />
-        ))}
-
-        {/* The ring, drawn cell by cell so safe squares can be marked. */}
-        {RING.map(([r, c], i) => (
-          <View key={`ring${i}`} style={[s.cell, {
-            top: r * CELL, left: c * CELL,
-            backgroundColor: SAFE.has(i) ? 'rgba(0,0,0,0.10)' : '#FFFFFF',
-          }]} />
-        ))}
-
-        {/* Home columns, in each corner's colour. */}
-        {HOME_COORDS.map((col, ci) => col.map(([r, c], j) => (
-          <View key={`home${ci}-${j}`} style={[s.cell, {
-            top: r * CELL, left: c * CELL, backgroundColor: COLORS[ci], opacity: 0.55,
-          }]} />
-        )))}
-
-        <View style={[s.centre, { top: 6 * CELL, left: 6 * CELL }]} />
-
-        {/* Tokens. `seat` is the BOARD CORNER, not the players-array index —
-            a 2-player game seats corners 0 and 2 so the players sit opposite,
-            so indexing colours or coordinates by array position would put the
-            second player's tokens in the wrong corner entirely. */}
-        {players.map((p) => {
-          const corner = typeof p.seat === 'number' ? p.seat : 0;
-          const mine = p.id === state.you;
-          return (p.tokens ?? []).map((step: number, ti: number) => {
-            const [r, c] = coord(corner, ti, step);
-            const selectable = mine && canMove && movable.includes(ti);
-            return (
-              <Pressable
-                key={`${p.id}-${ti}`}
-                style={[
-                  s.token,
-                  { top: r * CELL + 3, left: c * CELL + 3, backgroundColor: COLORS[corner] },
-                  selectable && s.tokenLive,
-                ]}
-                onPress={() => selectable && send({ t: 'move', tokenIndex: ti })}
-                disabled={!selectable}
-                accessibilityLabel={`${COLOR_NAMES[corner]} token ${ti + 1}${selectable ? ', movable' : ''}`}
-              />
-            );
-          });
-        })}
-      </View>
-
-      <View style={s.controls}>
-        <View style={s.die}>
-          <Text style={s.dieTxt}>{die ?? '–'}</Text>
+        <View style={{ width: size, gap: S[2] }}>
+          {players.map(p => (
+            <SeatCard key={p.seat} player={p} you={pid(p) === state.you} active={G.turnPlayerId === pid(p)} />
+          ))}
         </View>
-        {canRoll && (
-          <Pressable style={[s.btn, s.btnPrimary]} onPress={() => send({ t: 'roll', clientSeed: seed() })}>
-            <Text style={[s.btnTxt, s.btnPrimaryTxt]}>Roll</Text>
-          </Pressable>
-        )}
-      </View>
 
-      <View style={s.playerRow}>
-        {players.map((p) => (
-          <View key={p.id} style={[s.chip, p.id === G?.turnPlayerId && !finished && s.chipOn]}>
-            <View style={[s.swatch, { backgroundColor: COLORS[p.seat ?? 0] }]} />
-            <Text style={s.chipName} numberOfLines={1}>
-              {p.name}{p.id === state.you ? ' (you)' : ''}
-            </Text>
-            <Text style={s.chipHome}>{p.home ?? 0}/4</Text>
+        <View style={{ width: size, height: size }}>
+          <BoardSvg size={size} />
+          {players.map(p =>
+            (p.tokens ?? []).map((tok, i) => (
+              <TokenView
+                key={`${p.seat}:${i}`}
+                seat={p.seat}
+                index={i}
+                step={tok.step}
+                cell={cell}
+                movable={canMove && pid(p) === state.you && movable.includes(i)}
+                onPress={() => {
+                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
+                  send({ t: 'move', tokenIndex: i });
+                }}
+              />
+            )),
+          )}
+        </View>
+
+        <View style={{ width: size, flexDirection: 'row', alignItems: 'center', gap: S[3] }}>
+          <Die value={die} rolling={canRoll} seat={mySeat} />
+          <View style={{ flex: 1, gap: S[2] }}>
+            {finished ? (
+              <Banner
+                text={G.winnerId === state.you ? 'You win!' : `${players.find(p => pid(p) === G.winnerId)?.name ?? 'Someone'} wins`}
+                tone={G.winnerId === state.you ? 'win' : 'lose'}
+              />
+            ) : (
+              <>
+                <Btn
+                  label={canRoll ? 'Roll the dice' : die != null ? `Rolled ${die}` : 'Waiting…'}
+                  kind="gold"
+                  icon="🎲"
+                  disabled={!canRoll}
+                  onPress={() => send({ t: 'roll', clientSeed: seed() })}
+                />
+                <Text style={{ color: C.muted, fontSize: t.sm, textAlign: 'center' }}>
+                  {!mine ? `${turnName} is playing`
+                    : canMove ? 'Tap a token to move'
+                    : die != null ? 'No legal move — passing' : 'Your turn'}
+                </Text>
+              </>
+            )}
           </View>
-        ))}
-      </View>
+        </View>
 
-      <Events events={events} s={s} />
-    </ScrollView>
+        {events.length > 0 && (
+          <Text numberOfLines={2} style={{ color: C.muted, fontSize: t.sm, width: size }}>
+            {events[events.length - 1]}
+          </Text>
+        )}
+      </ScrollView>
+    </TableBackground>
   );
 }
 
+/* ── the board ──────────────────────────────────────────────────────── */
+
 /**
- * This player's half of the die roll.
- *
- * The server combines it with its own secret and publishes a commit hash, so
- * neither side alone decides the number and either can check afterwards. Sending
- * a constant would hand the whole roll to the server and quietly void that.
+ * The whole static board in one SVG, drawn in grid units (0..15) so every
+ * coordinate below reads as a cell reference rather than a pixel.
  */
-function seed(): string {
-  return Math.random().toString(36).slice(2) + Date.now().toString(36);
+function BoardSvg({ size }: { size: number }) {
+  const homeCells = useMemo(() => {
+    const out: { rc: [number, number]; seat: number }[] = [];
+    for (let s = 0; s < 4; s++) for (let i = 0; i < 5; i++) out.push({ rc: HOME_COORDS[s][i], seat: s });
+    return out;
+  }, []);
+  const stars = useMemo(() => [...SAFE].filter(i => !START_OFFSET.includes(i)), []);
+
+  return (
+    <Svg width={size} height={size} viewBox="0 0 15 15" style={{ position: 'absolute', borderRadius: 14 }}>
+      <Defs>
+        <RadialGradient id="lfelt" cx="50%" cy="50%" rx="65%" ry="65%">
+          <Stop offset="0.42" stopColor={CREAM} />
+          <Stop offset="1" stopColor={CREAM_2} />
+        </RadialGradient>
+        <RadialGradient id="lsheen" cx="26%" cy="18%" rx="60%" ry="60%">
+          <Stop offset="0" stopColor="#ffffff" stopOpacity="0.55" />
+          <Stop offset="0.55" stopColor="#ffffff" stopOpacity="0" />
+        </RadialGradient>
+        <RadialGradient id="lyard" cx="50%" cy="28%" rx="60%" ry="60%">
+          <Stop offset="0" stopColor="#ffffff" />
+          <Stop offset="0.72" stopColor="#f2ecdc" />
+          <Stop offset="1" stopColor="#e2d9c2" />
+        </RadialGradient>
+        <RadialGradient id="lsafe" cx="32%" cy="26%" rx="60%" ry="60%">
+          <Stop offset="0" stopColor="#fffdf4" />
+          <Stop offset="0.62" stopColor={CREAM} />
+          <Stop offset="1" stopColor="#e2d6b8" />
+        </RadialGradient>
+        {P.map((_, i) => (
+          <SvgLinear
+            key={i} id={`lhome${i}`}
+            x1="0" y1="0"
+            x2={i === 1 || i === 3 ? '0' : '1'}
+            y2={i === 1 || i === 3 ? '1' : '0'}
+          >
+            <Stop offset="0" stopColor={PL[i]} />
+            <Stop offset="0.55" stopColor={P[i]} />
+            <Stop offset="1" stopColor={PD[i]} />
+          </SvgLinear>
+        ))}
+      </Defs>
+
+      <Rect x="0" y="0" width="15" height="15" fill="url(#lfelt)" />
+      <Rect x="0" y="0" width="15" height="15" fill="url(#lsheen)" />
+
+      {RING.map(([r, c], i) => (
+        <Rect
+          key={`r${i}`} x={c} y={r} width="1" height="1"
+          fill={SAFE.has(i) ? 'url(#lsafe)' : CREAM}
+          stroke="rgba(0,0,0,0.09)" strokeWidth="0.03"
+        />
+      ))}
+
+      {homeCells.map(({ rc: [r, c], seat }, i) => (
+        <Rect key={`h${i}`} x={c} y={r} width="1" height="1" fill={`url(#lhome${seat})`} stroke="rgba(0,0,0,0.10)" strokeWidth="0.03" />
+      ))}
+
+      {/* start squares — solid colour plus an arrow pointing into the track */}
+      {START_OFFSET.map((off, seat) => {
+        const [r, c] = RING[off];
+        return (
+          <SvgG key={`s${seat}`}>
+            <Rect x={c} y={r} width="1" height="1" fill={P[seat]} stroke="rgba(0,0,0,0.12)" strokeWidth="0.03" />
+            <SvgText
+              x={c + 0.5} y={r + 0.72} fontSize="0.62" fill="rgba(255,255,255,0.92)" textAnchor="middle"
+              transform={`rotate(${seat * 90} ${c + 0.5} ${r + 0.5})`}
+            >➜</SvgText>
+          </SvgG>
+        );
+      })}
+
+      {stars.map(i => {
+        const [r, c] = RING[i];
+        return <SvgText key={`st${i}`} x={c + 0.5} y={r + 0.78} fontSize="0.72" fill="#c2951f" textAnchor="middle">★</SvgText>;
+      })}
+
+      {/* centre — four triangles meeting in the middle, one per seat */}
+      <Polygon points="6,6 9,6 7.5,7.5" fill={P[1]} />
+      <Polygon points="9,6 9,9 7.5,7.5" fill={P[2]} />
+      <Polygon points="9,9 6,9 7.5,7.5" fill={P[3]} />
+      <Polygon points="6,9 6,6 7.5,7.5" fill={P[0]} />
+      <Rect x="6" y="6" width="3" height="3" fill="none" stroke="rgba(255,255,255,0.55)" strokeWidth="0.08" />
+      <SvgText x="7.5" y="7.85" fontSize="0.9" fill="#ffdd72" textAnchor="middle">★</SvgText>
+
+      {/* the four yards */}
+      {YARD_RC.map(([r, c], seat) => (
+        <SvgG key={`y${seat}`}>
+          <Rect x={c + 0.2} y={r + 0.2} width="5.6" height="5.6" rx="0.8" fill="url(#lyard)" stroke={P[seat]} strokeWidth="0.3" />
+          {BASE_SPOTS[seat].map(([br, bc], i) => (
+            <Circle key={i} cx={bc + 0.5} cy={br + 0.5} r="0.62" fill="#ece4d0" stroke={P[seat]} strokeWidth="0.09" />
+          ))}
+        </SvgG>
+      ))}
+    </Svg>
+  );
 }
 
-function Events({ events, s }: { events: string[]; s: any }) {
-  if (!events.length) return null;
+/* ── a token ────────────────────────────────────────────────────────── */
+
+/**
+ * One glossy disc.
+ *
+ * Position animates with a springy overshoot — the classic Ludo hop, and the
+ * same curve ludo.css uses on left/top. Movable tokens breathe so the player
+ * can see at a glance which ones this roll allows rather than trying each.
+ */
+function TokenView({
+  seat, index, step, cell, movable, onPress,
+}: { seat: number; index: number; step: number; cell: number; movable: boolean; onPress: () => void }) {
+  const [r, c] = coord(seat, index, step);
+  const d = cell * 0.78;
+  // Tokens sharing a square are nudged apart so a stack is still countable.
+  const nudge = step >= 0 && step < HOME_STEP ? (index - 1.5) * cell * 0.11 : 0;
+  const tx = c * cell + (cell - d) / 2 + nudge;
+  const ty = r * cell + (cell - d) / 2;
+
+  const x = useSharedValue(tx);
+  const y = useSharedValue(ty);
+  const lift = useSharedValue(0);
+  const pulse = useSharedValue(0);
+  const first = useRef(true);
+
+  useEffect(() => {
+    if (first.current) { first.current = false; x.value = tx; y.value = ty; return; }
+    x.value = withSpring(tx, { damping: 12, stiffness: 220, mass: 0.8 });
+    y.value = withSpring(ty, { damping: 12, stiffness: 220, mass: 0.8 });
+    // A brief rise on the way makes the move read as a hop, not a slide.
+    lift.value = withSequence(
+      withTiming(1, { duration: 90, easing: Easing.out(Easing.quad) }),
+      withTiming(0, { duration: 150, easing: Easing.in(Easing.quad) }),
+    );
+  }, [tx, ty, x, y, lift]);
+
+  useEffect(() => {
+    if (movable) {
+      pulse.value = withRepeat(withTiming(1, { duration: 620, easing: Easing.inOut(Easing.ease) }), -1, true);
+    } else {
+      cancelAnimation(pulse);
+      pulse.value = withTiming(0, { duration: 160 });
+    }
+    return () => cancelAnimation(pulse);
+  }, [movable, pulse]);
+
+  const a = useAnimatedStyle(() => ({
+    transform: [
+      { translateX: x.value },
+      { translateY: y.value - lift.value * cell * 0.35 },
+      { scale: 1 + lift.value * 0.12 + pulse.value * 0.1 },
+    ] as ViewStyle['transform'],
+  }));
+
   return (
-    <View style={s.events}>
-      {events.slice(-3).map((e, i) => <Text key={i} style={s.eventTxt}>{e}</Text>)}
+    <Animated.View style={[{ position: 'absolute', left: 0, top: 0, width: d, height: d }, a]}>
+      <Pressable
+        onPress={movable ? onPress : undefined}
+        disabled={!movable}
+        hitSlop={6}
+        accessibilityRole="button"
+        accessibilityLabel={`${COLOR_NAMES[seat]} token ${index + 1}${movable ? ', can move' : ''}`}
+        style={{
+          width: '100%', height: '100%', borderRadius: d / 2,
+          backgroundColor: P[seat],
+          borderWidth: movable ? 2 : 1,
+          borderColor: movable ? '#ffffff' : 'rgba(0,0,0,0.45)',
+          alignItems: 'center', justifyContent: 'center',
+          boxShadow: '0 5px 10px rgba(0,0,0,0.5), 0 1px 2px rgba(0,0,0,0.42), inset 0 -3px 6px rgba(0,0,0,0.4), inset 0 2px 3px rgba(255,255,255,0.55)',
+        }}
+      >
+        <Text style={{ fontSize: d * 0.5, lineHeight: d * 0.62, color: 'rgba(0,0,0,0.66)', fontWeight: '700' }}>
+          {SHAPE[seat]}
+        </Text>
+      </Pressable>
+    </Animated.View>
+  );
+}
+
+/* ── the die ────────────────────────────────────────────────────────── */
+
+/** Pip positions per face, as indices into a 3x3 grid. */
+const PIPS: Record<number, number[]> = {
+  1: [4], 2: [0, 8], 3: [0, 4, 8], 4: [0, 2, 6, 8], 5: [0, 2, 4, 6, 8], 6: [0, 2, 3, 5, 6, 8],
+};
+
+function Die({ value, rolling, seat }: { value: number | null; rolling: boolean; seat: number }) {
+  const shake = useSharedValue(0);
+
+  useEffect(() => {
+    if (rolling) {
+      shake.value = withRepeat(
+        withSequence(
+          withTiming(1, { duration: 140, easing: Easing.inOut(Easing.quad) }),
+          withTiming(-1, { duration: 140, easing: Easing.inOut(Easing.quad) }),
+        ), -1, true);
+    } else {
+      cancelAnimation(shake);
+      shake.value = withSpring(0, { damping: 14, stiffness: 200 });
+    }
+    return () => cancelAnimation(shake);
+  }, [rolling, shake]);
+
+  const a = useAnimatedStyle(() => ({
+    transform: [
+      { rotate: `${shake.value * 9}deg` },
+      { translateY: -Math.abs(shake.value) * 3 },
+    ] as ViewStyle['transform'],
+  }));
+
+  const face = value ?? 6;
+  const on = new Set(PIPS[face] ?? []);
+
+  return (
+    <Animated.View
+      accessibilityLabel={value == null ? 'Dice, not rolled' : `Dice showing ${value}`}
+      style={[{
+        width: 62, height: 62, borderRadius: 12, padding: 7,
+        backgroundColor: '#fdf8ec',
+        borderWidth: 1, borderColor: 'rgba(0,0,0,0.25)',
+        boxShadow: '0 8px 18px rgba(0,0,0,0.45), inset 0 2px 3px rgba(255,255,255,0.9), inset 0 -3px 6px rgba(120,90,40,0.28)',
+        opacity: value == null && !rolling ? 0.55 : 1,
+      }, a]}
+    >
+      <View style={{ flex: 1, flexDirection: 'row', flexWrap: 'wrap' }}>
+        {Array.from({ length: 9 }, (_, i) => (
+          <View key={i} style={{ width: '33.33%', height: '33.33%', alignItems: 'center', justifyContent: 'center' }}>
+            {on.has(i) && (
+              <View style={{
+                width: 9, height: 9, borderRadius: 5,
+                backgroundColor: value == null ? '#b0a48c' : P[seat],
+              }} />
+            )}
+          </View>
+        ))}
+      </View>
+    </Animated.View>
+  );
+}
+
+/* ── chrome ─────────────────────────────────────────────────────────── */
+
+function SeatCard({ player, you, active }: { player: LPlayer; you: boolean; active: boolean }) {
+  const t = useType();
+  const tokens = player.tokens ?? [];
+  const done = tokens.filter(k => k.step >= HOME_STEP).length;
+  const pct = tokens.length
+    ? Math.round((tokens.reduce((n, k) => n + Math.max(0, Math.min(k.step, HOME_STEP)), 0) / (tokens.length * HOME_STEP)) * 100)
+    : 0;
+
+  return (
+    <View style={{
+      flexDirection: 'row', alignItems: 'center', gap: S[2],
+      paddingVertical: S[2], paddingHorizontal: S[3],
+      borderRadius: R[2], borderWidth: 1,
+      borderColor: active ? P[player.seat] : goldLine[14],
+      backgroundColor: mix(C.panel2, 86, '#ffffff'),
+      boxShadow: active ? '0 6px 18px rgba(0,0,0,0.35)' : D3.lift1,
+    }}>
+      <Text style={{ fontSize: 14, color: P[player.seat] }}>{SHAPE[player.seat]}</Text>
+      <Text numberOfLines={1} style={{ flex: 1, color: C.text, fontSize: t.sm, fontWeight: '700' }}>
+        {player.name}{you ? ' (you)' : ''}{player.isBot ? ' 🤖' : ''}
+      </Text>
+      <Text style={{ color: C.muted, fontSize: 11 }}>{done}/{tokens.length || 4} home</Text>
+      <View style={{ width: 54, height: 5, borderRadius: 3, backgroundColor: C.panel2, overflow: 'hidden' }}>
+        <View style={{ width: `${pct}%`, height: '100%', backgroundColor: P[player.seat] }} />
+      </View>
     </View>
   );
 }
 
-const makeStyles = (c: Palette) => StyleSheet.create({
-  center:      { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 10, padding: 28 },
-  title:       { color: c.text, fontSize: 22, fontWeight: '800' },
-  muted:       { color: c.textDim, fontSize: 13, textAlign: 'center', lineHeight: 19 },
+function Center({ children }: { children: React.ReactNode }) {
+  return (
+    <TableBackground>
+      <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', padding: S[5], gap: S[3] }}>
+        {children}
+      </View>
+    </TableBackground>
+  );
+}
 
-  lobbyWrap:   { padding: 20, gap: 14 },
-  seatList:    { gap: 8, marginTop: 4 },
-  seatRow:     { flexDirection: 'row', alignItems: 'center', gap: 10, padding: 12, borderRadius: 12,
-                 backgroundColor: c.surface, borderWidth: StyleSheet.hairlineWidth, borderColor: c.border },
-  swatch:      { width: 14, height: 14, borderRadius: 7 },
-  seatName:    { flex: 1, color: c.text, fontSize: 14, fontWeight: '700' },
-  seatSub:     { color: c.textDim, fontSize: 12 },
-  lobbyActions:{ gap: 10, marginTop: 6 },
-
-  boardWrap:   { padding: 16, gap: 14, alignItems: 'center' },
-  status:      { color: c.text, fontSize: 16, fontWeight: '800' },
-  statusDone:  { color: c.primary },
-
-  board:       { width: BOARD, height: BOARD, backgroundColor: '#F3F0E7', borderRadius: 10, overflow: 'hidden' },
-  yard:        { position: 'absolute', width: CELL * 6, height: CELL * 6, borderWidth: 3, borderRadius: 8, opacity: 0.5 },
-  cell:        { position: 'absolute', width: CELL, height: CELL, borderWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(0,0,0,0.18)' },
-  centre:      { position: 'absolute', width: CELL * 3, height: CELL * 3, backgroundColor: '#DCd6c4', borderRadius: 6 },
-  token:       { position: 'absolute', width: CELL - 6, height: CELL - 6, borderRadius: (CELL - 6) / 2,
-                 borderWidth: 2, borderColor: 'rgba(255,255,255,0.9)' },
-  tokenLive:   { borderColor: '#111', borderWidth: 3 },
-
-  controls:    { flexDirection: 'row', alignItems: 'center', gap: 14 },
-  die:         { width: 52, height: 52, borderRadius: 12, alignItems: 'center', justifyContent: 'center',
-                 backgroundColor: c.surface, borderWidth: StyleSheet.hairlineWidth, borderColor: c.border },
-  dieTxt:      { color: c.text, fontSize: 24, fontWeight: '800' },
-
-  playerRow:   { flexDirection: 'row', gap: 8, flexWrap: 'wrap', justifyContent: 'center' },
-  chip:        { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 10, paddingVertical: 6,
-                 borderRadius: 18, backgroundColor: c.surface, borderWidth: StyleSheet.hairlineWidth, borderColor: c.border },
-  chipOn:      { borderColor: c.primary },
-  chipName:    { color: c.text, fontSize: 12, fontWeight: '600', maxWidth: 96 },
-  chipHome:    { color: c.textDim, fontSize: 11 },
-
-  btn:         { paddingVertical: 12, paddingHorizontal: 22, borderRadius: 12, alignItems: 'center',
-                 backgroundColor: c.surface, borderWidth: StyleSheet.hairlineWidth, borderColor: c.border },
-  btnTxt:      { color: c.text, fontSize: 15, fontWeight: '700' },
-  btnPrimary:  { backgroundColor: c.primary, borderColor: c.primary },
-  btnPrimaryTxt:{ color: '#fff' },
-
-  events:      { marginTop: 6, gap: 3, alignSelf: 'stretch' },
-  eventTxt:    { color: c.textDim, fontSize: 12, textAlign: 'center' },
-});
+/**
+ * This player's half of the commit-reveal die roll.
+ *
+ * The server combines it with its own secret and publishes a commit hash, so
+ * neither side alone decides the number. Sending a constant would hand the
+ * whole roll to the server and quietly void that.
+ */
+function seed(): string {
+  let s = '';
+  for (let i = 0; i < 4; i++) s += Math.floor(Math.random() * 0xffffffff).toString(16).padStart(8, '0');
+  return s;
+}

@@ -59,7 +59,20 @@ export interface UseGameSocket {
 
 const EMPTY: GameState = { you: '', seat: null, spectator: false, lobby: null, game: null, raw: null };
 
-export function useGameSocket(game: GameKind, roomId = ''): UseGameSocket {
+/**
+ * Options for a table opened by matchmaking rather than by hand.
+ *
+ * Quick Match drops both players straight into a room, so the lobby they land
+ * in exists only to be left: nobody chose those seats and there is nothing to
+ * arrange. `auto` starts it for them. `autoBot` covers the matchmaker's
+ * `botoffer` — nobody was waiting, so the table fills the second seat itself.
+ */
+export interface AutoStart {
+  auto?: boolean;
+  autoBot?: boolean;
+}
+
+export function useGameSocket(game: GameKind, roomId = '', opts: AutoStart = {}): UseGameSocket {
   const [phase, setPhase] = useState<Phase>('idle');
   const [error, setError] = useState<string | null>(null);
   const [state, setState] = useState<GameState>(EMPTY);
@@ -139,6 +152,38 @@ export function useGameSocket(game: GameKind, roomId = ''): UseGameSocket {
   const send = useCallback((msg: GamesMessage) => {
     sockRef.current?.send(msg);
   }, []);
+
+  // ── auto-start, for tables that came from matchmaking ────────────────
+  //
+  // Lives here rather than in each board because all four have the same lobby
+  // shape, and four copies would be four chances to fire `start` twice. The
+  // refs make each intent once-only for the life of the socket: the server
+  // answers a second `start` with an error, which would surface to the player
+  // as a broken table on an otherwise fine game.
+  const botSent = useRef(false);
+  const startSent = useRef(false);
+  const { auto, autoBot } = opts;
+
+  useEffect(() => { botSent.current = false; startSent.current = false; }, [game, roomId, attempt]);
+
+  useEffect(() => {
+    if (!auto || phase !== 'connected') return;
+    const lobby = state.lobby;
+    // Only the host may seat a bot or deal; anyone else waits for them.
+    if (!lobby || !state.you || lobby.hostId !== state.you) return;
+    if (state.game) return;                       // already dealt
+
+    const seated = lobby.members?.length ?? 0;
+    if (autoBot && seated < 2 && !botSent.current) {
+      botSent.current = true;
+      sockRef.current?.send({ t: 'addbot' });
+      return;                                     // wait for the seat to appear
+    }
+    if (seated >= 2 && !startSent.current) {
+      startSent.current = true;
+      sockRef.current?.send({ t: 'start' });
+    }
+  }, [auto, autoBot, phase, state.lobby, state.you, state.game]);
 
   const retry = useCallback(() => {
     setError(null);

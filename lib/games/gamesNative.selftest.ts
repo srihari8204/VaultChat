@@ -53,8 +53,11 @@ for (const [name, file] of [
 
 // Deep links and the turn notifications already in the wild carry ?game=&room=.
 // Dropping those params would silently break every invite ever sent.
+// Matched loosely on purpose: the param type has grown (auto/bot for
+// matchmaking) and will grow again. What must not change is that `game` and
+// `room` are still read from the URL.
 check('the hub still honours the game/room deep-link params',
-  /useLocalSearchParams<\{ game\?: string; room\?: string \}>/.test(HUB),
+  /useLocalSearchParams<\{[^}]*\bgame\?: string;[^}]*\broom\?: string;/.test(HUB),
   'existing invites and push notifications point here with them');
 
 // ── every board goes through the shared socket ────────────────────────
@@ -99,6 +102,36 @@ check('the hook keeps the raw frame',
 check('the socket is disposed on unmount',
   /sock\.dispose\(\)/.test(HOOK),
   'four screens sharing one hook means one place to leak, or none');
+
+// ── the look is shared, not re-invented per board ─────────────────────
+// The first native boards styled themselves from VaultChat's app palette and
+// came out looking like four different settings screens. The table has its own
+// identity and every board draws from it.
+for (const [name, src] of [['TicTacToe', TTT], ['Ludo', LUDO], ['Rummy', RUMMY]] as [string, string][]) {
+  check(`${name} uses the games theme`,
+    /from '\.\.\/\.\.\/lib\/games\/theme'/.test(src) && !/from '\.\.\/\.\.\/lib\/theme'/.test(src),
+    'the app palette makes a card table look like a form');
+}
+
+check('the boards share one set of table furniture',
+  [TTT, LUDO, RUMMY].every(src => /from '\.\/ui'/.test(src)),
+  'per-board buttons and panels are how four screens drift apart');
+
+// ── online ────────────────────────────────────────────────────────────
+// Without matchmaking the only opponent reachable from the app is a bot, which
+// is what made a fully multiplayer game feel like single-player.
+check('the hub can find a real opponent',
+  /useQuickMatch\(/.test(HUB),
+  'Quick Match is the difference between multiplayer and playing the house');
+
+const QM = readFileSync('lib/games/useQuickMatch.ts', 'utf8');
+check('...over the matchmaker socket, reusing the games session',
+  /\/live\/ws/.test(QM) && /establishGamesSession/.test(QM),
+  'a second session handshake is a second place to get credentials wrong');
+
+check('...and leaves the queue when the player walks away',
+  /return \(\) => \{ aliveRef\.current = false; close\(\); \}/.test(QM),
+  'a stale queue entry pairs someone against a socket that stopped listening');
 
 console.log(failures ? `\n  ${failures} FAILED\n` : '\n  all native-games checks passed\n');
 process.exit(failures ? 1 : 0);
