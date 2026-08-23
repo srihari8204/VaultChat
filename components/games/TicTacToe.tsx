@@ -17,7 +17,7 @@ import Animated, {
 } from 'react-native-reanimated';
 import * as Haptics from 'expo-haptics';
 import { useGameSocket, isMyTurn, type AutoStart } from '../../lib/games/useGameSocket';
-import { TableBackground, Panel, Btn, Banner, PlayerRow, useType } from './ui';
+import { TableBackground, Panel, Btn, Banner, PlayerRow, useType, useBoardSize } from './ui';
 import { C, S, R, D3, E, mix, goldLine, MOTION } from '../../lib/games/theme';
 import { playSfx, preloadSfx } from '../../lib/games/sfx';
 import { Toasts, Confetti, VoiceBar } from './feedback';
@@ -41,9 +41,15 @@ export default function TicTacToe({ roomId, auto, autoBot }: { roomId: string } 
   const line: number[] = Array.isArray(G?.line) ? G.line : [];
   const finished = G?.phase === 'finished';
 
-  const size = Math.min(width - S[4] * 2, 380);
+  // Three columns, two gaps, and the board's own padding. Floored so three
+  // integer cells always fit inside the frame: flex-wrap with a fractional
+  // width drops the third cell onto its own row, which is what put the grid
+  // out of alignment.
+  const size = useBoardSize(330, 380);
   const gap = 10;
-  const cell = (size - gap * 2 - 20) / 3;
+  const pad = 10;
+  const cell = Math.floor((size - pad * 2 - gap * 2) / 3);
+  const inner = cell * 3 + gap * 2 + pad * 2;
 
   useEffect(() => { void preloadSfx(['tick', 'win', 'lose', 'draw']); }, []);
 
@@ -135,27 +141,33 @@ export default function TicTacToe({ roomId, auto, autoBot }: { roomId: string } 
         </View>
 
         <View style={{
-          width: size, height: size, padding: 10, borderRadius: 24,
-          flexDirection: 'row', flexWrap: 'wrap', gap,
+          width: inner, height: inner, padding: pad, borderRadius: 24, gap,
           backgroundColor: 'rgba(6,10,24,0.5)',
           borderWidth: 1, borderColor: goldLine[18],
           boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.05), 0 30px 70px rgba(0,0,0,0.5)',
         }}>
-          {Array.from({ length: 9 }, (_, i) => (
-            <Cell
-              key={i}
-              value={board[i] ?? -1}
-              size={cell}
-              won={line.includes(i)}
-              fresh={G.lastCell === i}
-              playable={mine && !finished && (board[i] ?? -1) < 0}
-              onPress={() => {
-                if (!mine || finished || (board[i] ?? -1) >= 0) return;
-                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
-                send({ t: 'mark', cell: i });
-              }}
-              index={i}
-            />
+          {[0, 1, 2].map(row => (
+            <View key={row} style={{ flexDirection: 'row', gap }}>
+              {[0, 1, 2].map(col => {
+                const i = row * 3 + col;
+                return (
+                  <Cell
+                    key={i}
+                    value={board[i] ?? -1}
+                    size={cell}
+                    won={line.includes(i)}
+                    fresh={G.lastCell === i}
+                    playable={mine && !finished && (board[i] ?? -1) < 0}
+                    onPress={() => {
+                      if (!mine || finished || (board[i] ?? -1) >= 0) return;
+                      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
+                      send({ t: 'mark', cell: i });
+                    }}
+                    index={i}
+                  />
+                );
+              })}
+            </View>
           ))}
         </View>
 

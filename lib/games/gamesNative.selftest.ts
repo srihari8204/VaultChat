@@ -103,6 +103,23 @@ check('the socket is disposed on unmount',
   /sock\.dispose\(\)/.test(HOOK),
   'four screens sharing one hook means one place to leak, or none');
 
+// ── wire shapes that have already bitten ──────────────────────────────
+// Both of these rendered a perfect-looking board that could not be played,
+// which is why they survived review: nothing looks wrong until you touch it.
+
+// The server sends `Tokens []int` — a token IS its step. Reading `.step` off it
+// yields undefined, coord() then returns undefined, and destructuring that
+// crashes the whole board the moment a game starts.
+check('ludo reads token steps as plain numbers',
+  !/tok\.step|\.tokens\[[^\]]*\]\.step|k\.step/.test(LUDO),
+  'tokens are number[], not {step}[]');
+
+// Chess seats by COLOUR. isMyTurn() only understands turnPlayerId or a numeric
+// turn against a numeric seat, so using it here made every square inert.
+check('chess decides the turn by colour, not by seat',
+  /G\?\.turn === myColor/.test(CHESS) && !/isMyTurn\(/.test(stripComments(CHESS)),
+  'the shared seat-index helper always returns false for chess');
+
 // ── the look is shared, not re-invented per board ─────────────────────
 // The first native boards styled themselves from VaultChat's app palette and
 // came out looking like four different settings screens. The table has its own

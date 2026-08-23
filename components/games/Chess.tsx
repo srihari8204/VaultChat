@@ -22,8 +22,8 @@ import Animated, {
   Easing, cancelAnimation, type SharedValue,
 } from 'react-native-reanimated';
 import * as Haptics from 'expo-haptics';
-import { useGameSocket, isMyTurn, type GameState, type AutoStart } from '../../lib/games/useGameSocket';
-import { Btn, Panel, Banner, PlayerRow, Chip, useType } from './ui';
+import { useGameSocket, type GameState, type AutoStart } from '../../lib/games/useGameSocket';
+import { Btn, Panel, Banner, PlayerRow, Chip, useType, useBoardSize } from './ui';
 import { C, S, R, D3, E, mix, goldLine } from '../../lib/games/theme';
 import { playSfx, preloadSfx } from '../../lib/games/sfx';
 import { Toasts, Confetti, Sheet, SettingRow, VoiceBar } from './feedback';
@@ -87,10 +87,19 @@ export default function Chess({ roomId, auto, autoBot }: { roomId: string } & Au
   const legal: Move[] = Array.isArray(state.raw?.legal) ? state.raw.legal : [];
   const board: Piece[] = Array.isArray(G?.board) ? G.board : [];
   const lastMove: Move | null = G?.lastMove ?? null;
-  const mine = isMyTurn(state);
+
+  /**
+   * Chess seats by COLOUR, so the turn is 'w' or 'b' — not a seat index.
+   *
+   * The shared isMyTurn() only understands `turnPlayerId` or a numeric `turn`
+   * against a numeric seat, so for chess it always returned false and NO SQUARE
+   * WAS EVER TAPPABLE. The board rendered perfectly and could not be played.
+   */
+  const mine = !state.spectator && myColor != null && G?.turn === myColor;
 
   const th = THEMES[theme];
-  const size = Math.min(width - S[4] * 2, 460);
+  // Seats above and below, the status line and two button rows.
+  const size = useBoardSize(360, 460);
   const cell = size / 8;
 
   // Black plays from the far side, so the board is flipped for them.

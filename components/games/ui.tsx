@@ -24,6 +24,29 @@ import {
 
 const AnimPressable = Animated.createAnimatedComponent(Pressable);
 
+/**
+ * A board edge that fits THIS screen, not just its width.
+ *
+ * Sizing a square board off width alone overflows on short screens and on
+ * landscape, where the height is the binding constraint — the board then runs
+ * off the bottom and the controls under it become unreachable. `chrome` is the
+ * vertical space the seats, buttons and status line need around it.
+ */
+export function useBoardSize(chrome = 300, max = 460) {
+  const { width, height } = useWindowDimensions();
+  const byWidth = width - S[4] * 2;
+  const byHeight = height - chrome;
+  // A floor keeps the board usable rather than letting it collapse to nothing
+  // on a very small screen; it may scroll instead.
+  return Math.max(200, Math.min(byWidth, byHeight, max));
+}
+
+/** Landscape when the screen is meaningfully wider than it is tall. */
+export function useLandscape(): boolean {
+  const { width, height } = useWindowDimensions();
+  return width > height * 1.2;
+}
+
 /** Fluid type sizes, resolved against the real screen width. */
 export function useType() {
   const { width } = useWindowDimensions();

@@ -29,7 +29,8 @@ import Animated, {
 } from 'react-native-reanimated';
 import * as Haptics from 'expo-haptics';
 import { useGameSocket, type AutoStart } from '../../lib/games/useGameSocket';
-import { TableBackground, Panel, Btn, Banner, PlayerRow, Chip, useType } from './ui';
+import * as ScreenOrientation from 'expo-screen-orientation';
+import { TableBackground, Panel, Btn, Banner, PlayerRow, Chip, useType, useLandscape } from './ui';
 import { C, S, R, D3, mix, goldLine } from '../../lib/games/theme';
 import { playSfx, preloadSfx, soundEnabled, setSoundEnabled } from '../../lib/games/sfx';
 import { Toasts, Confetti, Sheet, SettingRow, VoiceBar } from './feedback';
@@ -80,7 +81,38 @@ export default function Rummy({ tableId = '', auto, autoBot }: { tableId?: strin
   const hand: Card[] = Array.isArray(state.raw?.hand) ? state.raw.hand : [];
   const mine = G?.turnPlayerId === state.you;
 
-  const feltW = Math.min(width - S[4] * 2, 460);
+  const land = useLandscape();
+
+  /**
+   * Rummy is played sideways.
+   *
+   * Thirteen cards plus the piles do not fit across a portrait phone at a
+   * legible card size — the real rummy apps are all landscape for this reason.
+   * The app is portrait-locked, so this screen unlocks landscape while it is
+   * mounted and puts it back on the way out, the same way the video player
+   * does. Restoring on unmount is the part that matters: leaving the whole app
+   * unlocked would let every other screen rotate.
+   */
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        await ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.LANDSCAPE);
+      } catch {}
+    })();
+    return () => {
+      cancelled = true;
+      void (async () => {
+        try { await ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP); } catch {}
+      })();
+    };
+  }, []);
+
+  // In landscape the felt takes the left half and the hand the right, so
+  // thirteen cards stay legible instead of being squeezed to fit a phone width.
+  const feltW = land
+    ? Math.min(width * 0.52 - S[4], 520)
+    : Math.min(width - S[4] * 2, 460);
 
   useEffect(() => { void preloadSfx(['deal', 'discard', 'select', 'tick', 'win', 'lose']); }, []);
 
@@ -221,9 +253,17 @@ export default function Rummy({ tableId = '', auto, autoBot }: { tableId?: strin
 
   return (
     <TableBackground>
-      <ScrollView contentContainerStyle={{ padding: S[4], gap: S[3], alignItems: 'center', paddingBottom: S[6] }}>
-
-        <View style={{ width: feltW }}>
+      <ScrollView
+        contentContainerStyle={{
+          padding: S[4], gap: S[3], paddingBottom: S[6],
+          alignItems: land ? 'flex-start' : 'center',
+          flexDirection: land ? 'row' : 'column',
+        }}
+      >
+        {/* LEFT in landscape: the table. RIGHT: the player's own hand. Split
+            this way because thirteen cards need the width more than the felt
+            does, and the piles stay reachable with either thumb. */}
+        <View style={{ width: feltW, gap: S[3] }}>
           <Felt width={feltW}>
             <View style={{ flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', gap: S[3], paddingTop: S[2] }}>
               {others.map(p => (
@@ -259,8 +299,10 @@ export default function Rummy({ tableId = '', auto, autoBot }: { tableId?: strin
               ) : null}
             </View>
           </Felt>
+
         </View>
 
+        <View style={{ flex: land ? 1 : undefined, alignItems: 'center', gap: S[3] }}>
         {finished ? (
           <View style={{ width: feltW }}>
             <Banner
@@ -383,6 +425,7 @@ export default function Rummy({ tableId = '', auto, autoBot }: { tableId?: strin
             <Btn label="Share" icon="📣" onPress={() => { void shareResult('rummy', G.winnerId === state.you); }} />
           </View>
         )}
+        </View>
       </ScrollView>
 
       <Toasts events={events} />

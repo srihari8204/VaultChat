@@ -34,7 +34,7 @@ import Animated, {
 } from 'react-native-reanimated';
 import * as Haptics from 'expo-haptics';
 import { useGameSocket, type AutoStart } from '../../lib/games/useGameSocket';
-import { TableBackground, Panel, Btn, Banner, PlayerRow, useType } from './ui';
+import { TableBackground, Panel, Btn, Banner, PlayerRow, useType, useBoardSize } from './ui';
 import { C, S, R, D3, mix, goldLine } from '../../lib/games/theme';
 import { playSfx, preloadSfx, soundEnabled, setSoundEnabled } from '../../lib/games/sfx';
 import { Toasts, Confetti, Sheet, SettingRow, VoiceBar } from './feedback';
@@ -89,16 +89,32 @@ const SAFE = new Set([0, 8, 13, 21, 26, 34, 39, 47]);
 /** Yard origin [row,col] per corner, each 6x6 of the 15x15 grid. */
 const YARD_RC: [number, number][] = [[0, 0], [0, 9], [9, 9], [9, 0]];
 
-/** Where a token sits, given its owner's corner and its step. */
+/**
+ * Where a token sits, given its owner's corner and its step.
+ *
+ * Total by construction. Every lookup here is indexed by data that arrives off
+ * the wire, and returning `undefined` for an unexpected seat or step crashes
+ * the whole board at the destructure rather than misplacing one disc — which
+ * is exactly what happened when `step` was accidentally undefined.
+ */
 function coord(corner: number, tokenIdx: number, step: number): [number, number] {
-  if (step < 0) return BASE_SPOTS[corner][tokenIdx];
-  if (step <= 50) return RING[(START_OFFSET[corner] + step) % 52];
-  if (step >= HOME_STEP) return CENTER_RC;
-  return HOME_COORDS[corner][Math.min(step - 51, 4)];
+  const c = Number.isInteger(corner) && corner >= 0 && corner < 4 ? corner : 0;
+  const i = Number.isInteger(tokenIdx) && tokenIdx >= 0 && tokenIdx < 4 ? tokenIdx : 0;
+  const s = Number.isFinite(step) ? step : -1;
+  if (s < 0) return BASE_SPOTS[c][i];
+  if (s <= 50) return RING[(START_OFFSET[c] + s) % 52];
+  if (s >= HOME_STEP) return CENTER_RC;
+  return HOME_COORDS[c][Math.max(0, Math.min(s - 51, 4))];
 }
 
-type Token = { step: number };
-type LPlayer = { id?: string; vaultId?: string; name: string; seat: number; tokens: Token[]; isBot?: boolean };
+/**
+ * A token IS its step. The server sends `Tokens []int` and the web client reads
+ * them straight through (`p.tokens.filter(s => s >= HOME_STEP)`); wrapping them
+ * in `{step}` produced `undefined` everywhere and crashed the board the moment
+ * a game started, because `coord()` then returned undefined and the caller
+ * destructured it.
+ */
+type LPlayer = { id?: string; vaultId?: string; name: string; seat: number; tokens: number[]; isBot?: boolean };
 
 const pid = (p: LPlayer) => p.id ?? p.vaultId ?? '';
 
@@ -114,7 +130,8 @@ export default function Ludo({ roomId = 'ludo-main', auto, autoBot }: { roomId?:
   const [sound, setSound] = useState(soundEnabled());
   const voice = useTableVoice('ludo', roomId);
 
-  const size = Math.min(width - S[4] * 2, 460);
+  // Up to four seat cards above, plus the die row and two button rows.
+  const size = useBoardSize(400, 460);
   const cell = size / 15;
 
   useEffect(() => { void preloadSfx(['roll', 'move', 'capture', 'home', 'six', 'win', 'lose']); }, []);
@@ -130,14 +147,14 @@ export default function Ludo({ roomId = 'ludo-main', auto, autoBot }: { roomId?:
     const next: Record<string, number> = {};
     let captured = false, homed = false, moved = false;
     for (const p of G.players as LPlayer[]) {
-      (p.tokens ?? []).forEach((tok, i) => {
+      (p.tokens ?? []).forEach((step, i) => {
         const k = `${p.seat}:${i}`;
-        next[k] = tok.step;
+        next[k] = step;
         const was = prevSteps.current[k];
         if (was === undefined) return;
-        if (tok.step < 0 && was >= 0) captured = true;
-        else if (tok.step >= HOME_STEP && was < HOME_STEP) homed = true;
-        else if (tok.step > was) moved = true;
+        if (step < 0 && was >= 0) captured = true;
+        else if (step >= HOME_STEP && was < HOME_STEP) homed = true;
+        else if (step > was) moved = true;
       });
     }
     const first = Object.keys(prevSteps.current).length === 0;
@@ -278,12 +295,12 @@ export default function Ludo({ roomId = 'ludo-main', auto, autoBot }: { roomId?:
         <View style={{ width: size, height: size }}>
           <BoardSvg size={size} />
           {players.map(p =>
-            (p.tokens ?? []).map((tok, i) => (
+            (p.tokens ?? []).map((step, i) => (
               <TokenView
                 key={`${p.seat}:${i}`}
                 seat={p.seat}
                 index={i}
-                step={tok.step}
+                step={step}
                 cell={cell}
                 movable={canMove && pid(p) === state.you && movable.includes(i)}
                 onPress={() => {
@@ -630,9 +647,9 @@ function Die({ value, rolling, seat }: { value: number | null; rolling: boolean;
 function SeatCard({ player, you, active }: { player: LPlayer; you: boolean; active: boolean }) {
   const t = useType();
   const tokens = player.tokens ?? [];
-  const done = tokens.filter(k => k.step >= HOME_STEP).length;
+  const done = tokens.filter(s => s >= HOME_STEP).length;
   const pct = tokens.length
-    ? Math.round((tokens.reduce((n, k) => n + Math.max(0, Math.min(k.step, HOME_STEP)), 0) / (tokens.length * HOME_STEP)) * 100)
+    ? Math.round((tokens.reduce((n, s) => n + Math.max(0, Math.min(s, HOME_STEP)), 0) / (tokens.length * HOME_STEP)) * 100)
     : 0;
 
   return (
