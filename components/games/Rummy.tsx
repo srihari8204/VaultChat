@@ -26,7 +26,7 @@ import {
   Pressable, ScrollView, Text, View, useWindowDimensions, type ViewStyle,
 } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
-import Svg, { Defs, RadialGradient, Stop, Rect, Line } from 'react-native-svg';
+import Svg, { Defs, RadialGradient, Stop, Rect, Line, Ellipse } from 'react-native-svg';
 import Animated, {
   useSharedValue, useAnimatedStyle, withSpring, withTiming, withRepeat,
   Easing, cancelAnimation, runOnJS,
@@ -39,7 +39,8 @@ import { Toasts, Confetti, Sheet, SettingRow, VoiceBar } from './feedback';
 import { useTableVoice } from '../../lib/games/useTableVoice';
 import { playSfx, preloadSfx, soundEnabled, setSoundEnabled } from '../../lib/games/sfx';
 import {
-  reconcile, groupUp, ungroup, sortLoose, sameGroups, moveCard, type Groups,
+  reconcile, groupUp, ungroup, sortLoose, sameGroups, moveCard, autoArrange,
+  type Groups,
 } from '../../lib/games/handGroups';
 import { analyzeHand, type MeldType } from '../../lib/games/meldHint';
 import { inviteToTable, shareResult } from '../../lib/games/invite';
@@ -99,12 +100,27 @@ export default function Rummy({ tableId = '', auto, autoBot }: { tableId?: strin
   const [groups, setGroups] = useState<Groups>([[]]);
   const byId = React.useMemo(() => new Map(hand.map(c => [c.id, c])), [hand]);
 
+  // A new deal arrives pre-arranged into candidate melds, the way every native
+  // rummy app does it. Arranging thirteen loose cards from scratch each hand is
+  // the tedious part of the game, not the interesting one — and the player can
+  // drag anything they disagree with.
+  const dealtFor = useRef<string>('');
   useEffect(() => {
+    if (hand.length === 0) return;
+    const fingerprint = hand.map(c => c.id).sort().join('|');
+
     setGroups(prev => {
+      const held = prev.flat();
+      // A hand that shares nothing with the arrangement is a fresh deal.
+      const fresh = held.length === 0 || !held.some(id => hand.some(c => c.id === id));
+      if (fresh && dealtFor.current !== fingerprint) {
+        dealtFor.current = fingerprint;
+        return autoArrange(hand, c => c.suit === 'JOKER' || (!!G?.wildRank && c.rank === G.wildRank));
+      }
       const next = reconcile(prev, hand.map(c => c.id));
       return sameGroups(prev, next) ? prev : next;
     });
-  }, [hand]);
+  }, [hand, G?.wildRank]);
 
   const sentGroups = useRef<Groups | null>(null);
   useEffect(() => {
@@ -238,43 +254,60 @@ export default function Rummy({ tableId = '', auto, autoBot }: { tableId?: strin
   const wild: Card | null = G.wildJokerCard ?? null;
 
   // Thirteen cards plus gaps and group padding have to fit across the strip.
-  const cardW = Math.max(36, Math.min(54, Math.floor((width - S[4] * 2) / 16)));
+  // Cards inside a group OVERLAP, so the width each one costs after the first
+  // is only FAN of its own width — which is what keeps five groups on screen.
+  const cardW = Math.max(40, Math.min(58, Math.floor((width - S[4] * 2) / 13)));
+  // The cloth takes the top share; the hand and controls take the rest.
+  const tableH = Math.max(150, Math.min(height * 0.42, 260));
 
   return (
     <View style={{ flex: 1 }}>
       <Baize width={width} height={height} />
 
-      {/* seats + table controls */}
-      <View style={{ flexDirection: 'row', alignItems: 'center', gap: S[2], paddingHorizontal: S[4], paddingTop: S[2] }}>
-        <View style={{ flexDirection: 'row', gap: S[2], flex: 1 }}>
-          {others.map(p => (
-            <Seat
-              key={p.id ?? p.vaultId}
-              name={p.name}
-              count={p.handCount ?? 0}
-              bot={!!p.isBot}
-              turn={G.turnPlayerId === (p.id ?? p.vaultId)}
-              out={!!p.dropped}
-            />
-          ))}
-        </View>
-        <Btn label="⚙" compact onPress={() => setShowSettings(true)} accessibilityLabel="Table settings" />
-      </View>
+      {/* The table itself — an oval with a gold rail, inset from the screen so
+          it reads as an object you are sitting at rather than a green
+          background. Seats sit ON its far edge; the hand is outside it, in
+          front of the player, as at a real table. */}
+      <View style={{ height: tableH, marginHorizontal: S[4], marginTop: S[2] }}>
+        <TableTop width={width - S[4] * 2} height={tableH} />
 
-      {/* piles */}
-      <View style={{ flexDirection: 'row', gap: S[5], justifyContent: 'center', alignItems: 'center', paddingVertical: S[1] }}>
-        <Pile label={`${closedCount} left`} live={mine} onPress={() => draw('closed')} back w={cardW} />
-        <Pile label="Open" live={mine && !!openTop} onPress={() => draw('open')} card={openTop} w={cardW} />
-        {wild ? (
-          <View style={{ alignItems: 'center', gap: 3 }}>
-            <CardFace card={wild} w={cardW} wild />
-            <Text style={{ color: '#e7f3ea', fontSize: 10, fontWeight: '700' }}>Wild</Text>
+        <View style={{ position: 'absolute', top: 0, left: 0, right: 0, alignItems: 'center', paddingTop: S[1] }}>
+          <View style={{ flexDirection: 'row', gap: S[5], justifyContent: 'center' }}>
+            {others.map(p => (
+              <Seat
+                key={p.id ?? p.vaultId}
+                name={p.name}
+                count={p.handCount ?? 0}
+                bot={!!p.isBot}
+                turn={G.turnPlayerId === (p.id ?? p.vaultId)}
+                out={!!p.dropped}
+              />
+            ))}
           </View>
-        ) : null}
+        </View>
+
+        <View style={{ position: 'absolute', top: S[2], right: S[3] }}>
+          <Btn label="⚙" compact onPress={() => setShowSettings(true)} accessibilityLabel="Table settings" />
+        </View>
+
+        {/* piles, in the middle of the cloth */}
+        <View style={{
+          position: 'absolute', left: 0, right: 0, bottom: S[2],
+          flexDirection: 'row', gap: S[5], justifyContent: 'center', alignItems: 'center',
+        }}>
+          <Pile label={`${closedCount} left`} live={mine} onPress={() => draw('closed')} back w={cardW} />
+          <Pile label="Open" live={mine && !!openTop} onPress={() => draw('open')} card={openTop} w={cardW} />
+          {wild ? (
+            <View style={{ alignItems: 'center', gap: 3 }}>
+              <CardFace card={wild} w={cardW} wild />
+              <Text style={{ color: '#e7f3ea', fontSize: 10, fontWeight: '700' }}>Wild</Text>
+            </View>
+          ) : null}
+        </View>
       </View>
 
       {/* status strip */}
-      <View style={{ paddingHorizontal: S[4], alignItems: 'center' }}>
+      <View style={{ paddingHorizontal: S[4], alignItems: 'center', paddingTop: S[1] }}>
         {finished ? (
           <Banner
             text={G.winnerId === state.you ? 'You win!' : `${players.find(p => (p.id ?? p.vaultId) === G.winnerId)?.name ?? 'Someone'} wins`}
@@ -303,7 +336,7 @@ export default function Rummy({ tableId = '', auto, autoBot }: { tableId?: strin
       <ScrollView
         horizontal
         showsHorizontalScrollIndicator={false}
-        contentContainerStyle={{ paddingHorizontal: S[4], gap: S[3], alignItems: 'flex-end', paddingVertical: S[2] }}
+        contentContainerStyle={{ paddingHorizontal: S[4], gap: S[5], alignItems: 'flex-end', paddingVertical: S[2] }}
         style={{ flexGrow: 0 }}
       >
         {groups.map((g, gi) => (
@@ -313,7 +346,8 @@ export default function Rummy({ tableId = '', auto, autoBot }: { tableId?: strin
             loose={gi === groups.length - 1}
             verdict={hint.groups[gi]}
             onMeasure={setZone}
-            minW={cardW * 3}
+            minW={cardW * 1.6}
+            overlap={Math.round(cardW * 0.42)}
           >
             {g.map(id => {
               const c = byId.get(id);
@@ -341,7 +375,17 @@ export default function Rummy({ tableId = '', auto, autoBot }: { tableId?: strin
       <View style={{ flexDirection: 'row', gap: S[2], paddingHorizontal: S[4], alignItems: 'center' }}>
         <Btn label="Group" compact onPress={() => { setGroups(g => groupUp(g, picked)); setPicked([]); playSfx('tick'); }} disabled={picked.length < 2} />
         <Btn label="Ungroup" compact onPress={() => { setGroups(g => ungroup(g, picked)); setPicked([]); playSfx('tick'); }} disabled={picked.length === 0} />
-        <Btn label="Sort" compact onPress={() => { setGroups(g => sortLoose(g, id => byId.get(id))); playSfx('tick'); }} />
+        <Btn
+          label="Auto sort"
+          compact
+          icon="⚡"
+          accessibilityLabel="Rearrange the whole hand into melds"
+          onPress={() => {
+            setGroups(autoArrange(hand, c => c.suit === 'JOKER' || (!!G?.wildRank && c.rank === G.wildRank)));
+            setPicked([]);
+            playSfx('tick');
+          }}
+        />
         <View style={{ flex: 1 }} />
         <Btn label="Discard" compact onPress={discard} disabled={!mine || picked.length !== 1} />
         <Btn label="Declare" kind="gold" compact onPress={() => setConfirmDeclare(true)} disabled={!mine || picked.length !== 1} />
@@ -398,6 +442,40 @@ export default function Rummy({ tableId = '', auto, autoBot }: { tableId?: strin
 
 /* ── the felt, full screen ──────────────────────────────────────────── */
 
+/**
+ * The cloth.
+ *
+ * A green screen is not a table. The oval, its gold rail and the shadow under
+ * it are what make the piles read as sitting ON something — and give the other
+ * players somewhere to be.
+ */
+function TableTop({ width, height }: { width: number; height: number }) {
+  const rx = width / 2 - 2;
+  const ry = height / 2 - 2;
+  return (
+    <Svg width={width} height={height} style={{ position: 'absolute' }} pointerEvents="none">
+      <Defs>
+        <RadialGradient id="cloth" cx="50%" cy="30%" rx="70%" ry="75%">
+          <Stop offset="0" stopColor="#1c9257" />
+          <Stop offset="0.65" stopColor="#0a4c2c" />
+          <Stop offset="1" stopColor="#073a20" />
+        </RadialGradient>
+        <RadialGradient id="rail" cx="50%" cy="0%" rx="70%" ry="90%">
+          <Stop offset="0" stopColor="#ffe89a" />
+          <Stop offset="0.45" stopColor="#a9791b" />
+          <Stop offset="1" stopColor="#5f4110" />
+        </RadialGradient>
+      </Defs>
+      <Ellipse cx={width / 2} cy={height / 2} rx={rx} ry={ry} fill="url(#rail)" />
+      <Ellipse cx={width / 2} cy={height / 2} rx={rx - 9} ry={ry - 9} fill="url(#cloth)" />
+      <Ellipse
+        cx={width / 2} cy={height / 2} rx={rx - 9} ry={ry - 9}
+        fill="none" stroke="rgba(0,0,0,0.30)" strokeWidth="6"
+      />
+    </Svg>
+  );
+}
+
 function Baize({ width, height }: { width: number; height: number }) {
   return (
     <Svg width={width} height={height} style={{ position: 'absolute', top: 0, left: 0 }} pointerEvents="none">
@@ -417,13 +495,14 @@ function Baize({ width, height }: { width: number; height: number }) {
 /* ── a drop zone ────────────────────────────────────────────────────── */
 
 function GroupZone({
-  index, loose, verdict, onMeasure, minW, children,
+  index, loose, verdict, onMeasure, minW, overlap, children,
 }: {
   index: number;
   loose: boolean;
   verdict?: { type: MeldType; label: string };
   onMeasure: (i: number, z: Zone) => void;
   minW: number;
+  overlap: number;
   children: React.ReactNode;
 }) {
   const ref = useRef<View>(null);
@@ -448,7 +527,11 @@ function GroupZone({
         gap: 3,
       }}
     >
-      <View style={{ flexDirection: 'row', gap: 4, alignItems: 'flex-end', minHeight: 10 }}>{children}</View>
+      {/* Cards overlap into a fan the way a held hand does. gap is NEGATIVE:
+          five groups of three at full width would not fit any phone. */}
+      <View style={{ flexDirection: 'row', gap: -overlap, alignItems: 'flex-end', minHeight: 10, paddingRight: overlap }}>
+        {children}
+      </View>
       <View style={{ height: 15, justifyContent: 'center' }}>
         <MeldBadge verdict={verdict} loose={loose} />
       </View>

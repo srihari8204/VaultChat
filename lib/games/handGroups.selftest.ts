@@ -5,7 +5,10 @@
 // declaration the server rejects for a reason the player cannot see on screen,
 // and a card that falls out of every group vanishes from their hand entirely.
 
-import { reconcile, groupUp, ungroup, sortLoose, sameGroups, moveCard, type Groups } from './handGroups';
+import {
+  reconcile, groupUp, ungroup, sortLoose, sameGroups, moveCard,
+  autoArrange, DEFAULT_GROUPS, MAX_GROUPS, type Groups,
+} from './handGroups';
 
 let failures = 0;
 const check = (name: string, ok: boolean, detail = '') => {
@@ -112,6 +115,43 @@ check('dropping a card that is not in the hand changes nothing',
 check('moving a card into the group it already sits in is safe',
   holds(moveCard(m, m[0][0], 0), hand13),
   'remove first, then insert — otherwise the index shifts under the insert');
+
+// ── autoArrange — the hand a deal starts in ──────────────────────────
+const sc = (s: string) => ({ id: s, suit: s === 'JK' ? 'JOKER' : s[0], rank: s === 'JK' ? '' : s.slice(1) });
+const isJk = (c: { suit: string }) => c.suit === 'JOKER';
+
+// A run, a set, and four strays.
+const dealt = ['H4', 'H5', 'H6', 'S7', 'D7', 'C7', 'SK', 'D2', 'C9', 'JK'].map(sc);
+const arranged = autoArrange(dealt, isJk);
+
+check('a dealt hand arrives already arranged, not as one loose pile',
+  arranged.length >= DEFAULT_GROUPS,
+  'four groups by default, as native rummy apps do');
+
+check('...holding every dealt card exactly once',
+  holds(arranged, dealt.map(c => c.id)));
+
+check('...with the run pulled out',
+  arranged.some(g => g.length === 3 && ['H4', 'H5', 'H6'].every(id => g.includes(id))));
+
+check('...and the set pulled out',
+  arranged.some(g => g.length === 3 && ['S7', 'D7', 'C7'].every(id => g.includes(id))));
+
+check('a joker is left loose rather than spent for you',
+  arranged.some(g => g.includes('JK') && !['H4', 'S7'].some(id => g.includes(id))),
+  'auto-placing a joker into a meld the player did not want is worse than leaving it');
+
+check('never more than five groups',
+  autoArrange(
+    ['H2','H3','H4','S5','S6','S7','D8','D9','D10','CJ','CQ','CK','H9','S9','C9'].map(sc),
+    isJk,
+  ).length <= MAX_GROUPS,
+  'overflow merges into the last group rather than dropping cards');
+
+// Every id distinct: two decks give duplicate CARDS, never duplicate ids.
+const manyIds = ['H2','H3','H4','S5','S6','S7','D8','D9','D10','CJ','CQ','CK','H9','S9','C9'];
+check('...and still holds every card after the merge',
+  holds(autoArrange(manyIds.map(sc), isJk), manyIds));
 
 console.log(failures ? `\n  ${failures} FAILED\n` : '\n  all hand-grouping checks passed\n');
 process.exit(failures ? 1 : 0);

@@ -136,3 +136,108 @@ export function moveCard(groups: Groups, cardId: string, target: number): Groups
   const kept = out.filter((g, i, arr) => g.length > 0 || i === arr.length - 1);
   return kept.length ? kept : [[]];
 }
+
+/**
+ * How many groups a rummy hand is laid out in.
+ *
+ * From games-web/rummy.js: four by default, five at most. Native rummy apps all
+ * do this — a dealt hand arrives already sorted into candidate melds rather
+ * than as thirteen loose cards, because arranging from scratch every deal is
+ * the tedious part of the game, not the interesting one.
+ */
+export const DEFAULT_GROUPS = 4;
+export const MAX_GROUPS = 5;
+
+export interface SortCard { id: string; suit: string; rank: string }
+
+/**
+ * Greedy meld finder — runs of 3+ per suit first, then sets of 3-4.
+ *
+ * DISPLAY ONLY. It suggests a starting arrangement; the server still judges the
+ * declaration. Greedy rather than optimal on purpose: it matches the reference
+ * client's output, and a player who disagrees just drags a card.
+ *
+ * Jokers are deliberately left out of the melds and fall through to the
+ * leftovers, so the player decides where to spend them — a joker auto-placed
+ * into a run the player did not want is worse than one left loose.
+ */
+export function findMelds(
+  hand: SortCard[],
+  isJoker: (c: SortCard) => boolean,
+): { melds: string[][]; leftover: string[] } {
+  const nats = hand.filter(c => !isJoker(c));
+  const used = new Set<string>();
+  const melds: string[][] = [];
+
+  for (const suit of ['S', 'H', 'C', 'D']) {
+    const sc = nats
+      .filter(c => c.suit === suit && !used.has(c.id))
+      .sort((a, b) => rankIndex(a.rank) - rankIndex(b.rank));
+
+    let run: SortCard[] = [];
+    const flush = () => {
+      if (run.length >= 3) {
+        melds.push(run.map(c => c.id));
+        run.forEach(c => used.add(c.id));
+      }
+    };
+    for (const c of sc) {
+      if (run.length === 0) { run = [c]; continue; }
+      const d = rankIndex(c.rank) - rankIndex(run[run.length - 1].rank);
+      if (d === 1) run.push(c);
+      else if (d === 0) { /* duplicate rank — leave it for a set */ }
+      else { flush(); run = [c]; }
+    }
+    flush();
+  }
+
+  const byRank = new Map<string, SortCard[]>();
+  for (const c of nats) {
+    if (used.has(c.id)) continue;
+    const list = byRank.get(c.rank) ?? [];
+    list.push(c);
+    byRank.set(c.rank, list);
+  }
+  for (const list of byRank.values()) {
+    const suits = new Set<string>();
+    const grp: SortCard[] = [];
+    for (const c of list) if (!suits.has(c.suit)) { suits.add(c.suit); grp.push(c); }
+    if (grp.length >= 3) {
+      melds.push(grp.map(c => c.id));
+      grp.forEach(c => used.add(c.id));
+    }
+  }
+
+  return { melds, leftover: hand.filter(c => !used.has(c.id)).map(c => c.id) };
+}
+
+const RANK_ORDER = ['A', '2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K'];
+const rankIndex = (r: string) => RANK_ORDER.indexOf(r);
+
+/**
+ * Fold a list of groups to at most MAX_GROUPS, padding out to DEFAULT_GROUPS.
+ *
+ * Overflow is merged into the LAST real group rather than dropped — losing a
+ * card here would take it out of the player's hand on screen while the server
+ * still has it.
+ */
+export function capAndPad(groups: Groups): Groups {
+  const out = groups.map(g => g.slice());
+  while (out.length > MAX_GROUPS) {
+    const extra = out.pop() as string[];
+    out[out.length - 1] = [...out[out.length - 1], ...extra];
+  }
+  while (out.length < DEFAULT_GROUPS) out.push([]);
+  return out;
+}
+
+/**
+ * The arrangement a freshly dealt hand starts in: melds first, everything else
+ * (jokers included) in one group after them, padded to four.
+ */
+export function autoArrange(hand: SortCard[], isJoker: (c: SortCard) => boolean): Groups {
+  const { melds, leftover } = findMelds(hand, isJoker);
+  const arr: Groups = melds.map(m => m.slice());
+  if (leftover.length) arr.push(leftover);
+  return capAndPad(arr.length ? arr : [[]]);
+}
