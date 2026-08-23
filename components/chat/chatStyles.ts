@@ -280,6 +280,11 @@ export const makeStyles = (c: Palette) => StyleSheet.create({
   pollFooter:             { color: c.textDim, fontSize: 11, marginTop: 6 },
   pollFooterMine:         { color: c.bubbleMetaOut },
   attachedImage: { width: 220, height: 220, borderRadius: 8, backgroundColor: '#0F1217' },
+  // KLIPY watermark on a sent GIF/sticker/emoji card. Bottom-left and
+  // semi-transparent, per their brand guideline: visible enough to attribute,
+  // faint enough not to compete with the content it sits on.
+  klipyWatermark: { position: 'absolute', left: 6, bottom: 6, width: 54, height: 14, opacity: 0.7 },
+  klipyWatermarkImg: { width: '100%', height: '100%' },
   dlOverlay:     { ...StyleSheet.absoluteFillObject, alignItems: 'center', justifyContent: 'center', gap: 4, backgroundColor: 'rgba(0,0,0,0.25)' },
   dlOverlayTxt:  { color: '#fff', fontSize: 12, fontWeight: '700' },
   imageError:    { width: 180, padding: 16, alignItems: 'center', gap: 4 },

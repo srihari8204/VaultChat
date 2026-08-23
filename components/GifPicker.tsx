@@ -23,11 +23,22 @@ interface GifResult {
 
 /** The three KLIPY collections we expose. `type` is the server's query param. */
 const TABS = [
-  { type: 'gifs',     label: 'GIFs',     placeholder: 'Search GIFs…' },
-  { type: 'stickers', label: 'Stickers', placeholder: 'Search stickers…' },
-  { type: 'emojis',   label: 'Emojis',   placeholder: 'Search emojis…' },
+  { type: 'gifs',     label: 'GIFs' },
+  { type: 'stickers', label: 'Stickers' },
+  { type: 'emojis',   label: 'Emojis' },
 ] as const;
 type TabType = typeof TABS[number]['type'];
+
+/**
+ * REQUIRED by KLIPY's attribution guideline, and it does not vary by tab: the
+ * placeholder must read exactly "Search KLIPY", with the brand fully
+ * capitalised, so the source of the content library is identifiable from the
+ * search bar itself.
+ *
+ * Attribution compliance is a stated condition of production API approval, so
+ * this is not a wording preference — a per-tab "Search GIFs…" fails it.
+ */
+const SEARCH_PLACEHOLDER = 'Search KLIPY';
 
 interface Props {
   visible: boolean;
@@ -94,8 +105,6 @@ export default function GifPicker({ visible, onClose, onSelect }: Props) {
 
   if (!visible) return null;
 
-  const active = TABS.find(t => t.type === tab)!;
-
   return (
     <Pressable style={s.overlay} onPress={onClose}>
       <Pressable style={s.sheet} onPress={() => {}}>
@@ -104,11 +113,24 @@ export default function GifPicker({ visible, onClose, onSelect }: Props) {
         <View style={s.searchRow}>
           <TextInput
             style={s.input}
-            placeholder={active.placeholder}
+            placeholder={SEARCH_PLACEHOLDER}
             placeholderTextColor={colors.textDim}
             value={query}
             onChangeText={q => { setQuery(q); queueSearch(q, tab); }}
             autoFocus
+          />
+          {/* "Powered by KLIPY" belongs NEXT TO THE SEARCH BAR and must stay
+              visible the whole time the selector is open — that is where their
+              guideline puts it, and it is why this sits in the search row
+              rather than at the foot of the sheet where a long grid can push
+              it out of view. Black on light, white on dark, from the brand pack. */}
+          <Image
+            source={scheme === 'light'
+              ? require('../assets/klipy/powered-by-klipy-black.png')
+              : require('../assets/klipy/powered-by-klipy-white.png')}
+            style={s.klipyLogo}
+            resizeMode="contain"
+            accessibilityLabel="Powered by KLIPY"
           />
           <TouchableOpacity onPress={onClose} hitSlop={8}>
             <Ionicons name="close" size={22} color={colors.textDim} />
@@ -149,20 +171,6 @@ export default function GifPicker({ visible, onClose, onSelect }: Props) {
           )}
           ListEmptyComponent={!loading ? <Text style={s.empty}>{note || 'Type to search'}</Text> : null}
         />
-
-        {/* Attribution is a condition of using KLIPY, not decoration — it stays
-            visible with the picker rather than hidden behind a scroll. Black on
-            light, white on dark, from the brand pack. */}
-        <View style={s.attribution}>
-          <Image
-            source={scheme === 'light'
-              ? require('../assets/klipy/powered-by-klipy-black.png')
-              : require('../assets/klipy/powered-by-klipy-white.png')}
-            style={s.klipyLogo}
-            resizeMode="contain"
-            accessibilityLabel="Powered by KLIPY"
-          />
-        </View>
       </Pressable>
     </Pressable>
   );
@@ -184,6 +192,5 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   gifCell:   { flex: 1, margin: 2, height: 100, backgroundColor: c.surface, borderRadius: 8, overflow: 'hidden' },
   gifImg:    { width: '100%', height: '100%' },
   empty:     { color: c.textDim, textAlign: 'center', marginTop: 40, fontSize: 14 },
-  attribution: { alignItems: 'center', justifyContent: 'center', paddingVertical: 8, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: c.border },
-  klipyLogo: { width: 104, height: 18, opacity: 0.85 },
+  klipyLogo: { width: 82, height: 16, opacity: 0.9 },
 });

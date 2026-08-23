@@ -2051,7 +2051,11 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
     setGifOpen(false);
     if (!url) return;
     try {
-      const msg = await sendMessage(chatId, '', 'image', { meta: { gifUrl: url, preview } });
+      // source marks WHERE this came from, so the bubble can show KLIPY's
+      // watermark on KLIPY content and only on KLIPY content. Messages sent
+      // before the switch came from GIPHY and carry no source — stamping those
+      // with KLIPY's mark would misattribute someone else's library.
+      const msg = await sendMessage(chatId, '', 'image', { meta: { gifUrl: url, preview, source: 'klipy' } });
       setMessages(prev => prev.some(x => x.id === msg.id) ? prev : [msg, ...prev]);
     } catch (e: any) {
       Alert.alert('Could not send GIF', e?.message ?? 'Try again');

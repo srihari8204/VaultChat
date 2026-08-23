@@ -1235,11 +1235,34 @@ function MessageBubble({
             </Text>
           </TouchableOpacity>
         ) : isGif ? (
-          <Image
-            source={{ uri: msg.meta.gifUrl }}
-            style={S.attachedImage}
-            resizeMode="cover"
-          />
+          // KLIPY watermark, bottom-left, semi-transparent white — their brand
+          // guideline for a sent GIF/sticker/emoji card. Attribution compliance
+          // is a stated condition of production API approval, not a courtesy.
+          //
+          // Gated on meta.source rather than on gifUrl alone: messages sent
+          // before the KLIPY switch came from GIPHY, and stamping someone
+          // else's content with KLIPY's mark would be a worse attribution
+          // failure than showing none.
+          <View>
+            <Image
+              source={{ uri: msg.meta.gifUrl }}
+              style={S.attachedImage}
+              resizeMode="cover"
+            />
+            {msg.meta?.source === 'klipy' && (
+              // pointerEvents on the WRAPPER, not the Image: the card is
+              // tappable (it opens the viewer) and an overlay that swallowed
+              // touches would create a small dead zone in its corner.
+              <View style={S.klipyWatermark} pointerEvents="none">
+                <Image
+                  source={require('../../assets/klipy/watermark-klipy-light.png')}
+                  style={S.klipyWatermarkImg}
+                  resizeMode="contain"
+                  accessibilityLabel="via KLIPY"
+                />
+              </View>
+            )}
+          </View>
         ) : isImage ? (
           <ImageAttachment
             attachmentId={msg.meta.attachmentId || ''}
