@@ -15,7 +15,16 @@
 set -euo pipefail
 
 VC=/home/srihari/vaultchat
-VHOST=/etc/nginx/sites-available/vaultchat
+
+# sites-ENABLED, deliberately. On this host sites-enabled/vaultchat is a REGULAR
+# FILE, not the usual symlink into sites-available, so the two are independent
+# copies and only this one is read. Editing sites-available changes nothing and
+# looks like it worked.
+#
+# Do not "tidy" that up by symlinking them either: sites-available is stale and
+# still proxies to 127.0.0.1:3001, the retired Node backend. Linking them would
+# point the whole API at a dead port.
+VHOST=/etc/nginx/sites-enabled/vaultchat
 ENVF=$VC/.env
 BACKUP_SH=/home/srihari/vaultchat-backups/backup.sh
 TS=$(date +%Y%m%d-%H%M%S)
@@ -77,10 +86,16 @@ cmd_uploads() {
     awk '
       /^    location \/ \{/ && !d {
         print "    # Object store — presigned attachment uploads."
+        print "    #"
+        print "    # The prefix has NO trailing slash on purpose. S3 clients probe"
+        print "    # HEAD /<bucket> to check a bucket exists, and a /<bucket>/ prefix"
+        print "    # never matches that, so the probe fell through to the API and came"
+        print "    # back 404 — which the client reports as \"bucket does not exist\"."
+        print "    #"
         print "    # Host passed through unchanged: SigV4 signs it, and rewriting it"
         print "    # invalidates every signature. Body limit lifted and buffering off so"
         print "    # a large upload streams straight through instead of spooling to disk."
-        print "    location /vaultchat-media/ {"
+        print "    location /vaultchat-media {"
         print "        proxy_pass              http://127.0.0.1:19000;"
         print "        proxy_http_version      1.1;"
         print "        proxy_set_header        Host              $host;"
@@ -120,7 +135,10 @@ cmd_uploads() {
 # whole path: DNS, TLS, nginx, Host preservation, signature, MinIO.
 cmd_verify() {
   need_root
-  local AK SK
+  # EXPORTED, not just assigned: `docker run -e AK` copies from the exported
+  # environment, so plain shell variables arrive empty and every call fails as
+  # a permissions error that looks exactly like a broken signature.
+  export AK SK
   AK=$(docker exec vaultchat-minio-1 printenv MINIO_ROOT_USER)
   SK=$(docker exec vaultchat-minio-1 printenv MINIO_ROOT_PASSWORD)
   [ -n "$AK" ] && [ -n "$SK" ] || { no "could not read store credentials"; exit 1; }
@@ -129,9 +147,12 @@ cmd_verify() {
   head -c 250000000 /dev/urandom > "$TMP/big.bin"      # 250 MB — past the old 100 MB cap
   echo "  test object: 250 MB"
 
-  docker run --rm --network host -v "$TMP:/w" -e AK -e SK minio/mc:latest sh -c '
+  # --entrypoint sh: the mc image's entrypoint IS mc, so `sh -c ...` would
+  # otherwise be parsed as an mc subcommand ("`sh` is not a recognized command").
+  docker run --rm --network host -v "$TMP:/w" -e AK -e SK --entrypoint sh minio/mc:latest -c '
     mc alias set pub https://api.corefinite.com "$AK" "$SK" >/dev/null 2>&1 || exit 3
-    mc cp /w/big.bin pub/vaultchat-media/healthcheck/upload-test.bin >/dev/null 2>&1 || exit 4
+    mc ls pub/vaultchat-media >/dev/null 2>&1 || exit 5
+    mc cp -q /w/big.bin pub/vaultchat-media/healthcheck/upload-test.bin >/dev/null 2>&1 || exit 4
     mc stat pub/vaultchat-media/healthcheck/upload-test.bin | head -3
     mc rm pub/vaultchat-media/healthcheck/upload-test.bin >/dev/null 2>&1
   ' && ok "250 MB uploaded and removed through https://api.corefinite.com" \
