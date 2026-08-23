@@ -227,8 +227,10 @@ export default function Chess({ roomId, auto, autoBot }: { roomId: string } & Au
                 bg={light ? th.light : th.dark}
                 tint={isSel ? th.sel : isLast ? th.hl : null}
                 check={inCheck}
-                coordFile={coords && d >> 3 === 7 ? FILES[flipped ? 7 - c : c] : null}
-                coordRank={coords && (d & 7) === 0 ? String(flipped ? r + 1 : 8 - r) : null}
+                coordFile={coords && (d >> 3 === 7 || d >> 3 === 0) ? FILES[flipped ? 7 - c : c] : null}
+                coordRank={coords && ((d & 7) === 0 || (d & 7) === 7) ? String(flipped ? r + 1 : 8 - r) : null}
+                coordFileTop={d >> 3 === 0}
+                coordRankRight={(d & 7) === 7}
                 coordColor={light ? th.dark : th.light}
                 piece={p}
                 pieceSize={cell * 0.78}
@@ -354,13 +356,17 @@ export default function Chess({ roomId, auto, autoBot }: { roomId: string } & Au
 
 function Square({
   d, cell, bg, tint, check, coordFile, coordRank, coordColor, piece, pieceSize,
-  target, capture, slideFrom, onPress, edge,
+  target, capture, slideFrom, onPress, edge, coordFileTop, coordRankRight,
 }: {
   d: number; cell: number; bg: string; tint: string | null; check: boolean;
   coordFile: string | null; coordRank: string | null; coordColor: string;
   piece: Piece; pieceSize: number; target: boolean; capture: boolean;
   slideFrom: { dx: number; dy: number; key: string } | null;
   onPress: () => void; edge: number;
+  /** Files repeat along the top edge and ranks down the right, as on a real
+      board — the printed reference has all four, and with only two the player
+      has to count squares from the far side. */
+  coordFileTop?: boolean; coordRankRight?: boolean;
 }) {
   const pulse = useSharedValue(0);
   useEffect(() => {
@@ -390,12 +396,20 @@ function Square({
       <Animated.View pointerEvents="none" style={[{ position: 'absolute', inset: 0, backgroundColor: CHECK_TINT }, aCheck]} />
 
       {coordRank ? (
-        <Text style={{ position: 'absolute', top: 2, left: 4, fontSize: 10, fontWeight: '700', color: coordColor, opacity: 0.7 }}>
+        <Text style={{
+          position: 'absolute', top: 2, fontSize: 10, fontWeight: '700',
+          color: coordColor, opacity: 0.7,
+          ...(coordRankRight ? { right: 4 } : { left: 4 }),
+        }}>
           {coordRank}
         </Text>
       ) : null}
       {coordFile ? (
-        <Text style={{ position: 'absolute', bottom: 2, right: 4, fontSize: 10, fontWeight: '700', color: coordColor, opacity: 0.7 }}>
+        <Text style={{
+          position: 'absolute', right: 4, fontSize: 10, fontWeight: '700',
+          color: coordColor, opacity: 0.7,
+          ...(coordFileTop ? { top: 2 } : { bottom: 2 }),
+        }}>
           {coordFile}
         </Text>
       ) : null}

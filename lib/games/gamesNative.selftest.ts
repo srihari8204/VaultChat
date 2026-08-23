@@ -82,9 +82,20 @@ check('ludo uses the server-sent movable token list',
   /G\.movable/.test(LUDO) && /movable\.includes\(/.test(LUDO));
 
 // Rummy must not judge a declaration — that is the whole game.
-check('rummy does not validate melds locally',
-  !/isValidSequence|isValidSet|validateMeld|scoreHand/i.test(RUMMY),
-  'a client rulebook would reject or accept a hand the server disagrees with');
+// Rummy now labels each group ("Pure Sequence", "Set") and warns before a
+// misdeclare, which the reference client does too. The line that matters is not
+// "no rules on the client" — it is that the hint may never GATE anything. If
+// the hint and the server disagree, the player must still be able to declare
+// and the server's answer must still be the one that counts.
+check('the rummy meld hint never blocks a declaration',
+  /label=\{hint\.valid \? 'Declare & win' : 'Declare anyway'\}/.test(RUMMY)
+    && !/disabled=\{[^}]*hint\./.test(RUMMY),
+  'a hint that disables Declare becomes a second rulebook with veto power');
+
+check('...and the hint lives apart from the board',
+  /from '\.\.\/\.\.\/lib\/games\/meldHint'/.test(RUMMY)
+    && !/isValidSequence|isValidSet|validateMeld|scoreHand/i.test(RUMMY),
+  'keeping it in one tested module is what stops it drifting into authority');
 
 check('rummy shows other players a COUNT, never their cards',
   /handCount/.test(RUMMY) && !/opponentHand|otherHand/.test(RUMMY),

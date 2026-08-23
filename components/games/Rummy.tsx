@@ -37,6 +37,7 @@ import { Toasts, Confetti, Sheet, SettingRow, VoiceBar } from './feedback';
 import { useTableVoice } from '../../lib/games/useTableVoice';
 import { inviteToTable, shareResult } from '../../lib/games/invite';
 import { reconcile, groupUp, ungroup, sortLoose, sameGroups, type Groups } from '../../lib/games/handGroups';
+import { analyzeHand, type MeldType } from '../../lib/games/meldHint';
 
 type Card = { id: string; suit: string; rank: string };
 
@@ -218,6 +219,19 @@ export default function Rummy({ tableId = '', auto, autoBot }: { tableId?: strin
   const closedCount: number = typeof G.closedCount === 'number' ? G.closedCount : 0;
   const wild: Card | null = G.wildJokerCard ?? null;
 
+  /**
+   * ADVISORY ONLY — the server judges the declaration.
+   *
+   * Labels each group and warns before a misdeclare. It never disables Declare
+   * and never decides a score: if this and the server disagree, the player must
+   * still be able to do what they intended, and the server's answer is the one
+   * that counts.
+   */
+  const hint = React.useMemo(
+    () => analyzeHand(groups, id => byId.get(id), G?.wildRank ?? null),
+    [groups, byId, G?.wildRank],
+  );
+
   const toggle = (id: string) => {
     Haptics.selectionAsync().catch(() => {});
     playSfx('select');
@@ -335,9 +349,10 @@ export default function Rummy({ tableId = '', auto, autoBot }: { tableId?: strin
                 }}
               >
                 {!loose && (
-                  <Text style={{ color: C.muted, fontSize: 11, fontWeight: '800', marginBottom: 2 }}>
-                    {`GROUP ${gi + 1}`}
-                  </Text>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: S[2], marginBottom: 2 }}>
+                    <Text style={{ color: C.muted, fontSize: 11, fontWeight: '800' }}>{`GROUP ${gi + 1}`}</Text>
+                    <MeldBadge verdict={hint.groups[gi]} />
+                  </View>
                 )}
                 <ScrollView
                   horizontal
@@ -359,6 +374,27 @@ export default function Rummy({ tableId = '', auto, autoBot }: { tableId?: strin
               </View>
             );
           })}
+        </View>
+
+        {/* What the hand looks like right now. A guess, shown as one — the
+            server has the last word, and Declare stays enabled either way. */}
+        <View style={{ width: feltW, flexDirection: 'row', alignItems: 'center', gap: S[2] }}>
+          <Text style={{
+            flex: 1, fontSize: 12.5, fontWeight: '700',
+            color: hint.valid ? C.good : C.muted,
+          }}>
+            {hint.valid
+              ? '✓ Looks like a valid hand'
+              : !hint.hasPure ? 'No pure sequence yet'
+              : !hint.hasTwoSeq ? 'Needs a second sequence'
+              : !hint.allArranged ? 'Not every card is melded'
+              : 'Keep arranging'}
+          </Text>
+          {!hint.valid && hint.fullCount > 0 && (
+            <Text style={{ color: C.bad, fontSize: 12, fontWeight: '700' }}>
+              {`${hint.fullCount} pts if you declare`}
+            </Text>
+          )}
         </View>
 
         {/* arranging */}
@@ -435,7 +471,16 @@ export default function Rummy({ tableId = '', auto, autoBot }: { tableId?: strin
         <Text style={{ color: C.muted, fontSize: t.sm, lineHeight: 20 }}>
           This ends the round. The table checks your hand — if the melds do not stand up, the round is scored against you.
         </Text>
-        <Btn label="Declare" kind="gold" onPress={() => { setConfirmDeclare(false); declare(); }} />
+        <Text style={{ color: hint.valid ? C.good : C.bad, fontSize: t.md, fontWeight: '800' }}>
+          {hint.valid
+            ? '✓ This looks like a winning hand.'
+            : `✗ This does not look valid${hint.hasPure ? '' : ' — no pure sequence'}. Declaring now scores ${hint.fullCount} points against you.`}
+        </Text>
+        <Btn
+          label={hint.valid ? 'Declare & win' : 'Declare anyway'}
+          kind={hint.valid ? 'gold' : 'danger'}
+          onPress={() => { setConfirmDeclare(false); declare(); }}
+        />
       </Sheet>
 
       <Sheet visible={showSettings} title="Table" onClose={() => setShowSettings(false)}>
@@ -666,6 +711,25 @@ function HandCard({ card, selected, onPress }: { card: Card; selected: boolean; 
         <CardFace card={card} w={52} glow={selected} />
       </Pressable>
     </Animated.View>
+  );
+}
+
+/** The group badge. Colour carries the same meaning as the label. */
+function MeldBadge({ verdict }: { verdict?: { type: MeldType; label: string } }) {
+  if (!verdict || verdict.type === 'empty' || !verdict.label) return null;
+  const good = verdict.type === 'pure' || verdict.type === 'impure' || verdict.type === 'set';
+  const color = verdict.type === 'pure' ? C.good : good ? C.gold : C.bad;
+  return (
+    <View style={{
+      flexDirection: 'row', alignItems: 'center', gap: 3,
+      paddingHorizontal: S[2], paddingVertical: 1, borderRadius: R.pill,
+      borderWidth: 1, borderColor: mix(color, 45, C.line),
+      backgroundColor: C.panel2,
+    }}>
+      <Text style={{ color, fontSize: 10, fontWeight: '800' }}>
+        {good ? '✓' : '✗'} {verdict.label}
+      </Text>
+    </View>
   );
 }
 
