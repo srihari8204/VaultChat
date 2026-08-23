@@ -12,6 +12,24 @@ config.resolver.unstable_enablePackageExports = true;
 // and the google-services Gradle plugin + google-services.json come from Expo's
 // own default prebuild chain via app.json's android.googleServicesFile. Neither
 // goes through @react-native-firebase.
+// ─── SVG as components (react-native-svg-transformer) ────────────
+// Brand marks ship as vectors so they stay crisp at any size and cannot be
+// silently mis-scaled by a style box that disagrees with a raster's aspect
+// ratio — which is exactly how the KLIPY watermark ended up drawing at 40px.
+//
+// The three lines are a set: svg has to LEAVE assetExts (or Metro keeps
+// treating it as an image and `require` returns a URI) and JOIN sourceExts (so
+// the transformer compiles it to a component). Doing one without the other
+// fails at runtime, not at build time.
+//
+// Uses the "/expo" entry point, which is the variant that understands Expo's
+// asset plugin chain — the bare one drops Expo's own transforms.
+config.transformer.babelTransformerPath = require.resolve(
+  "react-native-svg-transformer/expo",
+);
+config.resolver.assetExts = config.resolver.assetExts.filter((e) => e !== "svg");
+config.resolver.sourceExts = [...config.resolver.sourceExts, "svg"];
+
 const shimDir = path.resolve(__dirname, "shims");
 
 // ─── Redirect the native WebRTC module to a web shim on web ──────

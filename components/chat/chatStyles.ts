@@ -283,19 +283,22 @@ export const makeStyles = (c: Palette) => StyleSheet.create({
   // KLIPY watermark on a sent GIF/sticker/emoji card. Bottom-left and
   // semi-transparent, per their brand guideline: visible enough to attribute,
   // faint enough not to compete with the content it sits on.
-  // 68x23 is the ASSET'S OWN RATIO (390x134 = 2.91). It was 54x14 = 3.86, and
-  // with resizeMode contain the image fits the tighter axis — so it drew about
-  // 40px wide, present but far too small to read, which is why the watermark
-  // looked absent rather than wrong.
+  // The KLIPY mark on a sent card: bottom-left, per their guideline.
   //
-  // The mark is white, so on pale content it needs help: a soft dark shadow
-  // gives it an edge without a visible box. The guideline asks for visibility
-  // with minimal distraction, and white-on-white is neither.
+  // A SCRIM, not a shadow. The first attempt used shadowColor/shadowRadius,
+  // which Android ignores outright — it only honours `elevation` — so a WHITE
+  // outlined wordmark on a pale or busy GIF was drawn correctly and was
+  // effectively invisible. That is indistinguishable from "no watermark", which
+  // is how it was reported. A soft dark pill behind the mark guarantees
+  // contrast on any content and leaves KLIPY's artwork untouched, which matters:
+  // the mark itself must not be recoloured or altered.
+  //
+  // Sized to the SVG's viewBox (389.2 x 133.2 = 2.92) plus the pill's padding.
   klipyWatermark: {
-    position: 'absolute', left: 8, bottom: 8, width: 68, height: 23, opacity: 0.9,
-    shadowColor: '#000', shadowOpacity: 0.5, shadowRadius: 3, shadowOffset: { width: 0, height: 1 },
+    position: 'absolute', left: 8, bottom: 8,
+    paddingHorizontal: 6, paddingVertical: 3, borderRadius: 6,
+    backgroundColor: 'rgba(0,0,0,0.42)',
   },
-  klipyWatermarkImg: { width: '100%', height: '100%' },
   dlOverlay:     { ...StyleSheet.absoluteFillObject, alignItems: 'center', justifyContent: 'center', gap: 4, backgroundColor: 'rgba(0,0,0,0.25)' },
   dlOverlayTxt:  { color: '#fff', fontSize: 12, fontWeight: '700' },
   imageError:    { width: 180, padding: 16, alignItems: 'center', gap: 4 },

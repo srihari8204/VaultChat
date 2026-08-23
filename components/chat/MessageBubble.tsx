@@ -64,6 +64,9 @@ import { useS, idealText, HL, type DisplayMessage } from './chatStyles';
 import { useMemo } from 'react';
 import { BRAND_ACCENT } from '../../constants/theme';
 import { couldBeLongRead, readStats } from '../../lib/reader';
+// Vector, so the mark stays crisp and cannot be mis-scaled by a style box whose
+// ratio disagrees with a raster's — the failure that made this look absent.
+import KlipyWatermark from '../../assets/klipy/watermark-klipy-light.svg';
 
 function colorMentions(body: string): any {
   if (!body || body.indexOf('@') === -1) return body;
@@ -1250,16 +1253,20 @@ function MessageBubble({
               resizeMode="cover"
             />
             {msg.meta?.source === 'klipy' && (
-              // pointerEvents on the WRAPPER, not the Image: the card is
+              // pointerEvents on the WRAPPER, not the mark: the card is
               // tappable (it opens the viewer) and an overlay that swallowed
               // touches would create a small dead zone in its corner.
+              //
+              // The scrim is why this is now visible. The mark is a WHITE
+              // outlined wordmark, and the previous attempt leaned on
+              // shadowColor — which Android ignores entirely, it only honours
+              // elevation. So on a pale or busy GIF the watermark was drawn,
+              // correct, and effectively invisible, which reads as "no
+              // watermark". A soft dark pill behind it guarantees contrast on
+              // any content without touching KLIPY's artwork, which must not be
+              // recoloured or altered.
               <View style={S.klipyWatermark} pointerEvents="none">
-                <Image
-                  source={require('../../assets/klipy/watermark-klipy-light.png')}
-                  style={S.klipyWatermarkImg}
-                  resizeMode="contain"
-                  accessibilityLabel="via KLIPY"
-                />
+                <KlipyWatermark width={62} height={21} accessibilityLabel="via KLIPY" />
               </View>
             )}
           </View>

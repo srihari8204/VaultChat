@@ -48,37 +48,32 @@ check('no per-tab placeholder has crept back in',
   'a per-tab placeholder fails the requirement');
 
 // ── 2. logo in the picker ─────────────────────────────────────────────
-check('the Powered by KLIPY assets are present',
-  existsSync('assets/klipy/powered-by-klipy-black.png')
-  && existsSync('assets/klipy/powered-by-klipy-white.png'));
-
 check('the logo is rendered in the picker',
-  /powered-by-klipy-(black|white)\.png/.test(PICKER));
+  /<KlipyMark/.test(PICKER));
 
 // Placement: it must sit in the search row, which is what keeps it on screen
 // while the selector is open. At the foot of the sheet a long grid pushes it
 // out of view, which is the arrangement the guideline rules out.
 const searchRow = PICKER.slice(PICKER.indexOf('<View style={s.searchRow}>'), PICKER.indexOf('<View style={s.tabs}>'));
 check('the logo sits in the search row, not at the foot of the sheet',
-  /powered-by-klipy-/.test(searchRow),
+  /<KlipyMark/.test(searchRow),
   'it must stay visible for as long as the selector is open');
 
 check('theme-aware — black on light, white on dark',
-  /scheme === 'light'[\s\S]{0,120}powered-by-klipy-black[\s\S]{0,120}powered-by-klipy-white/.test(PICKER));
+  /scheme === 'light' \? KlipyBlack : KlipyWhite/.test(PICKER));
 
 // ── 3. watermark on the sent card ─────────────────────────────────────
-check('the watermark asset is present',
-  existsSync('assets/klipy/watermark-klipy-light.png'));
-
 check('the sent card renders the watermark',
-  /watermark-klipy-light\.png/.test(BUBBLE));
+  /<KlipyWatermark/.test(BUBBLE));
 
 check('...bottom-left, per the guideline',
   /klipyWatermark:[^}]*left:\s*\d+[^}]*bottom:\s*\d+/.test(STYLES),
   'the guideline specifies the bottom-left corner');
 
-check('...and semi-transparent',
-  /klipyWatermark:[^}]*opacity:\s*0?\.\d+/.test(STYLES));
+// "Visible with minimal distraction" — the scrim must be see-through, not a
+// solid black box sitting on someone's GIF.
+check('...on a semi-transparent scrim, not an opaque box',
+  /klipyWatermark:[\s\S]{0,500}?rgba\(0,0,0,0\.[0-5]\d?\)/.test(STYLES));
 
 check('the overlay cannot swallow taps on the card',
   /pointerEvents="none"/.test(BUBBLE),
@@ -99,7 +94,7 @@ check('tapping a tile opens a preview instead of sending outright',
   'a 100px tile is not enough to know what you are about to send');
 
 check('the preview carries the Powered by KLIPY mark',
-  /previewKlipy/.test(PICKER) && /previewCard[\s\S]{0,700}powered-by-klipy-/.test(PICKER),
+  /previewCard[\s\S]{0,900}<KlipyMark/.test(PICKER),
   'the preview area is the guideline\'s other sanctioned placement');
 
 check('the preview can send, and can be dismissed without sending',
@@ -109,40 +104,49 @@ check('a stale preview cannot survive a tab change or a close',
   (PICKER.match(/setPreview\(null\)/g) ?? []).length >= 3,
   'otherwise reopening shows an item from the previous tab');
 
-// ── every logo box must match its ASSET'S ratio ───────────────────────
-// resizeMode="contain" fits the TIGHTER axis, so a box whose ratio disagrees
-// with the artwork silently shrinks the mark. That is not a cosmetic slip: the
-// sent-card watermark drew at ~40px on a 220px card, which is present, correct,
-// and completely indistinguishable from "it never rendered".
-//
-// Ratios are read from the PNG headers rather than hardcoded, so swapping in a
-// different brand variant re-checks itself instead of quietly regressing.
-function pngRatio(path: string): number {
-  const b = readFileSync(path);
-  return b.readUInt32BE(16) / b.readUInt32BE(20);   // IHDR width / height
+// ── the marks are VECTORS, sized from their own viewBox ───────────────
+// A raster under resizeMode="contain" fits the tighter axis, so a style box
+// whose ratio disagreed with the artwork silently shrank it — the sent-card
+// watermark drew at ~40px on a 220px card, which is present, correct, and
+// indistinguishable from "it never rendered". SVG removes that whole class of
+// bug, but only if the declared height still follows the viewBox.
+function svgRatio(path: string): number {
+  const m = /viewBox="[\d.]+\s+[\d.]+\s+([\d.]+)\s+([\d.]+)"/.exec(readFileSync(path, 'utf8'));
+  if (!m) throw new Error(`no viewBox in ${path}`);
+  return Number(m[1]) / Number(m[2]);
 }
 
-for (const [name, asset, src, re, minW] of [
-  ['sent-card watermark', 'assets/klipy/watermark-klipy-light.png', STYLES,
-   /klipyWatermark:[\s\S]{0,400}?width:\s*(\d+)[\s\S]{0,80}?height:\s*(\d+)/, 60],
-  ['picker logo', 'assets/klipy/powered-by-klipy-black.png', PICKER,
-   /klipyLogo:\s*\{[^}]*width:\s*(\d+)[^}]*height:\s*(\d+)/, 70],
-  ['preview logo', 'assets/klipy/powered-by-klipy-black.png', PICKER,
-   /previewKlipy:\s*\{[^}]*width:\s*(\d+)[^}]*height:\s*(\d+)/, 90],
-] as [string, string, string, RegExp, number][]) {
-  const m = re.exec(src);
-  if (!m) { check(`${name}: box declares width and height`, false); continue; }
-  const want = pngRatio(asset);
-  const got = Number(m[1]) / Number(m[2]);
-  check(`${name} box matches its asset ratio (${want.toFixed(2)}), got ${got.toFixed(2)}`,
-    Math.abs(got - want) < 0.35,
-    'a mismatched box shrinks the mark under resizeMode contain');
-  check(`...${name} is large enough to read`, Number(m[1]) >= minW);
+for (const f of ['powered-by-klipy-black', 'powered-by-klipy-white', 'watermark-klipy-light']) {
+  check(`${f}.svg is present`, existsSync(`assets/klipy/${f}.svg`));
 }
 
-check('the white mark gets a shadow so it survives pale content',
-  /klipyWatermark:[\s\S]{0,400}?shadowColor/.test(STYLES),
-  'white-on-white is not "visible with minimal distraction"');
+check('the marks are imported as SVG components, not rasters',
+  /from '\.\.\/assets\/klipy\/powered-by-klipy-black\.svg'/.test(PICKER)
+  && /from '\.\.\/\.\.\/assets\/klipy\/watermark-klipy-light\.svg'/.test(BUBBLE));
+
+check('no raster KLIPY asset is still referenced',
+  !/klipy\/[a-z-]+\.png/.test(PICKER) && !/klipy\/[a-z-]+\.png/.test(BUBBLE),
+  'a leftover require() would reintroduce the resizeMode scaling trap');
+
+// The picker mark derives height from the viewBox ratio rather than a second
+// hardcoded number, so the two can never drift apart.
+const ratio = svgRatio('assets/klipy/powered-by-klipy-black.svg');
+const declared = /width \/ ([\d.]+)/.exec(PICKER);
+check(`the picker mark divides width by the viewBox ratio (${ratio.toFixed(2)})`,
+  !!declared && Math.abs(Number(declared[1]) - ratio) < 0.1,
+  `code says ${declared?.[1]}, asset says ${ratio.toFixed(2)}`);
+
+// ── the reason it was invisible ───────────────────────────────────────
+// shadowColor is a NO-OP on Android — it honours `elevation` only — so a white
+// outlined wordmark on a pale GIF was drawn and unreadable. A scrim is the
+// thing that actually works, and it leaves KLIPY's artwork untouched, which
+// matters because the mark must not be recoloured.
+check('the watermark sits on a scrim, not an Android-ignored shadow',
+  /klipyWatermark:[\s\S]{0,500}?backgroundColor:\s*'rgba\(0,0,0/.test(STYLES),
+  'shadowColor does nothing on Android; white-on-pale reads as no watermark');
+
+check('...and no longer relies on shadowColor',
+  !/klipyWatermark:[\s\S]{0,500}?shadowColor/.test(STYLES));
 
 console.log(failures ? `\n  ${failures} FAILED\n` : '\n  all KLIPY attribution checks passed\n');
 process.exit(failures ? 1 : 0);

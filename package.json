@@ -1,7 +1,7 @@
 {
   "name": "vaultchat",
   "main": "expo-router/entry",
-  "version": "1.2.2",
+  "version": "1.2.7",
   "scripts": {
     "start": "expo start",
     "reset-project": "node ./scripts/reset-project.js",
@@ -153,6 +153,7 @@
     "eslint": "^9.39.4",
     "eslint-config-expo": "~10.0.0",
     "patch-package": "^8.0.1",
+    "react-native-svg-transformer": "^1.5.3",
     "tsx": "^4.23.1",
     "typescript": "~5.9.2"
   },

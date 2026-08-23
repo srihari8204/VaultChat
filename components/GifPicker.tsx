@@ -12,6 +12,16 @@ import { Ionicons } from '@expo/vector-icons';
 import { api } from '../lib/api';
 import { useTheme } from '../lib/theme';
 import { type Palette } from '../constants/theme';
+// Vector marks: crisp at any size, and immune to the aspect-ratio mis-scaling
+// that a raster suffers under resizeMode="contain".
+import KlipyBlack from '../assets/klipy/powered-by-klipy-black.svg';
+import KlipyWhite from '../assets/klipy/powered-by-klipy-white.svg';
+
+/** Powered by KLIPY, themed. viewBox 640x107.3 = 5.97, so sizes keep that ratio. */
+function KlipyMark({ scheme, width }: { scheme: string; width: number }) {
+  const Mark = scheme === 'light' ? KlipyBlack : KlipyWhite;
+  return <Mark width={width} height={Math.round(width / 5.97)} accessibilityLabel="Powered by KLIPY" />;
+}
 
 interface GifResult {
   id: string;
@@ -128,14 +138,7 @@ export default function GifPicker({ visible, onClose, onSelect }: Props) {
               guideline puts it, and it is why this sits in the search row
               rather than at the foot of the sheet where a long grid can push
               it out of view. Black on light, white on dark, from the brand pack. */}
-          <Image
-            source={scheme === 'light'
-              ? require('../assets/klipy/powered-by-klipy-black.png')
-              : require('../assets/klipy/powered-by-klipy-white.png')}
-            style={s.klipyLogo}
-            resizeMode="contain"
-            accessibilityLabel="Powered by KLIPY"
-          />
+          <KlipyMark scheme={scheme} width={92} />
           <TouchableOpacity onPress={onClose} hitSlop={8}>
             <Ionicons name="close" size={22} color={colors.textDim} />
           </TouchableOpacity>
@@ -191,14 +194,7 @@ export default function GifPicker({ visible, onClose, onSelect }: Props) {
             <Pressable style={s.previewCard} onPress={() => {}}>
               <Image source={{ uri: preview.preview }} style={s.previewImg} resizeMode="contain" />
 
-              <Image
-                source={scheme === 'light'
-                  ? require('../assets/klipy/powered-by-klipy-black.png')
-                  : require('../assets/klipy/powered-by-klipy-white.png')}
-                style={s.previewKlipy}
-                resizeMode="contain"
-                accessibilityLabel="Powered by KLIPY"
-              />
+              <KlipyMark scheme={scheme} width={132} />
 
               <View style={s.previewActions}>
                 <TouchableOpacity style={s.previewCancel} onPress={() => setPreview(null)} activeOpacity={0.8}>
@@ -237,18 +233,12 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   gifCell:   { flex: 1, margin: 2, height: 100, backgroundColor: c.surface, borderRadius: 8, overflow: 'hidden' },
   gifImg:    { width: '100%', height: '100%' },
   empty:     { color: c.textDim, textAlign: 'center', marginTop: 40, fontSize: 14 },
-  // Boxes here MUST match the asset's ratio. The horizontal "Powered by KLIPY"
-  // mark is 640x137 = 4.67; under resizeMode contain a box with a different
-  // ratio silently shrinks the logo to fit the tighter axis, which is exactly
-  // how the sent-card watermark ended up drawing at 40px and looking absent.
-  klipyLogo: { width: 84, height: 18, opacity: 0.95 },
 
   previewBackdrop: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
                      backgroundColor: 'rgba(0,0,0,0.75)', alignItems: 'center', justifyContent: 'center', padding: 24 },
   previewCard:     { width: '100%', maxWidth: 340, backgroundColor: c.surfaceSolid, borderRadius: 18,
                      padding: 16, alignItems: 'center', gap: 12 },
   previewImg:      { width: '100%', height: 240, borderRadius: 12, backgroundColor: c.surface },
-  previewKlipy:    { width: 112, height: 24, opacity: 1 },   // 4.67, the asset's ratio
   previewActions:  { flexDirection: 'row', gap: 10, width: '100%' },
   previewCancel:   { flex: 1, paddingVertical: 12, borderRadius: 12, alignItems: 'center',
                      backgroundColor: c.surface, borderWidth: StyleSheet.hairlineWidth, borderColor: c.border },
