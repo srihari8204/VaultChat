@@ -52,6 +52,9 @@ const SUIT_GLYPH: Record<string, string> = { S: '♠', H: '♥', D: '♦', C: '�
 const SUIT_NAME: Record<string, string> = { S: 'spades', H: 'hearts', D: 'diamonds', C: 'clubs', JOKER: 'joker' };
 const RED = new Set(['H', 'D']);
 
+/** Thirteen-card Indian rummy: the hand a player holds between turns. */
+const HAND_SIZE = 13;
+
 /** Baize, from rummy.css --felt / --felt-2 / --felt-3. */
 const FELT = ['#1c9257', '#0a4c2c', '#073a20'];
 const CARD_FACE = '#fffdf6';
@@ -83,6 +86,21 @@ export default function Rummy({ tableId = '', auto, autoBot }: { tableId?: strin
   const G = state.game;
   const hand: Card[] = Array.isArray(state.raw?.hand) ? state.raw.hand : [];
   const mine = G?.turnPlayerId === state.you;
+
+  /**
+   * A rummy turn is draw-then-discard, and the hand SIZE says which half you
+   * are in: thirteen cards means you still owe a draw, fourteen means you owe a
+   * discard. The server sends no explicit flag, but it does not need to — the
+   * count is unambiguous and it is already authoritative. Thirteen-card
+   * Indian rummy is what this server deals, which is the same assumption
+   * meldHint makes when it requires all thirteen melded.
+   *
+   * Without this the board offered both actions at once, so a player could tap
+   * Discard before drawing and get a rejection for something the UI had just
+   * invited them to do.
+   */
+  const mustDraw = mine && hand.length > 0 && hand.length <= HAND_SIZE;
+  const mustDiscard = mine && !mustDraw;
 
   /**
    * Take landscape while this table is open, and give it back on the way out.
@@ -177,13 +195,13 @@ export default function Rummy({ tableId = '', auto, autoBot }: { tableId?: strin
   };
 
   const draw = (source: 'open' | 'closed') => {
-    if (!mine) return;
+    if (!mustDraw) return;
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
     send({ t: 'draw', source });
   };
 
   const discard = () => {
-    if (picked.length !== 1) return;
+    if (picked.length !== 1 || !mustDiscard) return;
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
     send({ t: 'discard', cardId: picked[0] });
     setPicked([]);
@@ -252,6 +270,8 @@ export default function Rummy({ tableId = '', auto, autoBot }: { tableId?: strin
   const openTop: Card | null = G.openTop ?? null;
   const closedCount: number = typeof G.closedCount === 'number' ? G.closedCount : 0;
   const wild: Card | null = G.wildJokerCard ?? null;
+  const me = players.find(p => (p.id ?? p.vaultId) === state.you);
+  const myPoints: number | null = typeof me?.points === 'number' ? me.points : null;
 
   // Thirteen cards plus gaps and group padding have to fit across the strip.
   // Cards inside a group OVERLAP, so the width each one costs after the first
@@ -278,6 +298,7 @@ export default function Rummy({ tableId = '', auto, autoBot }: { tableId?: strin
                 key={p.id ?? p.vaultId}
                 name={p.name}
                 count={p.handCount ?? 0}
+                points={typeof p.points === 'number' ? p.points : null}
                 bot={!!p.isBot}
                 turn={G.turnPlayerId === (p.id ?? p.vaultId)}
                 out={!!p.dropped}
@@ -295,8 +316,8 @@ export default function Rummy({ tableId = '', auto, autoBot }: { tableId?: strin
           position: 'absolute', left: 0, right: 0, bottom: S[2],
           flexDirection: 'row', gap: S[5], justifyContent: 'center', alignItems: 'center',
         }}>
-          <Pile label={`${closedCount} left`} live={mine} onPress={() => draw('closed')} back w={cardW} />
-          <Pile label="Open" live={mine && !!openTop} onPress={() => draw('open')} card={openTop} w={cardW} />
+          <Pile label={`${closedCount} left`} live={mustDraw} onPress={() => draw('closed')} back w={cardW} />
+          <Pile label="Open" live={mustDraw && !!openTop} onPress={() => draw('open')} card={openTop} w={cardW} />
           {wild ? (
             <View style={{ alignItems: 'center', gap: 3 }}>
               <CardFace card={wild} w={cardW} wild />
@@ -320,7 +341,13 @@ export default function Rummy({ tableId = '', auto, autoBot }: { tableId?: strin
             backgroundColor: 'rgba(4,26,14,0.55)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.12)',
           }}>
             <Text style={{ color: mine ? '#ffdd72' : '#cfe8d8', fontSize: t.sm, fontWeight: '800' }}>
-              {mine ? 'Your turn — draw, then discard' : `${players.find(p => (p.id ?? p.vaultId) === G.turnPlayerId)?.name ?? 'Someone'} is playing`}
+              {!mine
+                ? `${players.find(p => (p.id ?? p.vaultId) === G.turnPlayerId)?.name ?? 'Someone'} is playing`
+                : mustDraw
+                  ? 'Your turn — take a card from either pile'
+                  : hint.valid
+                    ? 'Pick a card and declare'
+                    : 'Group your cards, then discard one'}
             </Text>
             <Text style={{ color: hint.valid ? '#5fe08c' : '#cfa0a0', fontSize: 12, fontWeight: '700' }}>
               {hint.valid ? '✓ valid hand'
@@ -387,8 +414,13 @@ export default function Rummy({ tableId = '', auto, autoBot }: { tableId?: strin
           }}
         />
         <View style={{ flex: 1 }} />
-        <Btn label="Discard" compact onPress={discard} disabled={!mine || picked.length !== 1} />
-        <Btn label="Declare" kind="gold" compact onPress={() => setConfirmDeclare(true)} disabled={!mine || picked.length !== 1} />
+        {myPoints != null && (
+          <Text style={{ color: '#e7f3ea', fontSize: 12, fontWeight: '700', marginRight: S[2] }}>
+            {`Score ${myPoints}`}
+          </Text>
+        )}
+        <Btn label="Discard" compact onPress={discard} disabled={!mustDiscard || picked.length !== 1} />
+        <Btn label="Declare" kind="gold" compact onPress={() => setConfirmDeclare(true)} disabled={!mustDiscard || picked.length !== 1} />
         <Btn label="Drop" kind="danger" compact onPress={() => send({ t: 'drop' })} disabled={!mine} />
       </View>
 
@@ -521,8 +553,11 @@ function GroupZone({
         borderRadius: R[2],
         borderWidth: 1,
         borderStyle: loose ? 'dashed' : 'solid',
-        borderColor: loose ? 'rgba(255,255,255,0.30)' : goldLine[38],
-        backgroundColor: loose ? 'rgba(0,0,0,0.14)' : 'rgba(0,0,0,0.26)',
+        // Light trays, not dark ones. Cards are cream; a dark holder behind
+        // them muddies the edges and the group stops reading as a unit — which
+        // is the whole job of the tray.
+        borderColor: loose ? 'rgba(255,255,255,0.35)' : 'rgba(255,255,255,0.55)',
+        backgroundColor: loose ? 'rgba(255,255,255,0.06)' : 'rgba(255,255,255,0.16)',
         paddingHorizontal: S[2], paddingTop: S[2], paddingBottom: S[1],
         gap: 3,
       }}
@@ -715,7 +750,9 @@ function HandCard({
 
 /* ── seats ──────────────────────────────────────────────────────────── */
 
-function Seat({ name, count, bot, turn, out }: { name: string; count: number; bot: boolean; turn: boolean; out: boolean }) {
+function Seat({
+  name, count, points, bot, turn, out,
+}: { name: string; count: number; points?: number | null; bot: boolean; turn: boolean; out: boolean }) {
   const spin = useSharedValue(0);
   useEffect(() => {
     if (turn) {
@@ -733,7 +770,7 @@ function Seat({ name, count, bot, turn, out }: { name: string; count: number; bo
   return (
     <View
       style={{ alignItems: 'center', opacity: out ? 0.5 : 1, width: 72 }}
-      accessibilityLabel={`${name}, ${count} cards${turn ? ', playing now' : ''}`}
+      accessibilityLabel={`${name}, ${count} cards${points != null ? `, ${points} points` : ''}${turn ? ', playing now' : ''}`}
     >
       <View style={{ width: 38, height: 38, borderRadius: 19, padding: 3, backgroundColor: '#0a1710', justifyContent: 'center' }}>
         {turn && (
@@ -747,7 +784,9 @@ function Seat({ name, count, bot, turn, out }: { name: string; count: number; bo
         </View>
       </View>
       <Text numberOfLines={1} style={{ color: '#fff', fontWeight: '700', fontSize: 11, marginTop: 2 }}>{name}</Text>
-      <Text style={{ color: '#e7f3ea', fontSize: 10 }}>{count} cards</Text>
+      <Text style={{ color: '#e7f3ea', fontSize: 10 }}>
+        {count} cards{points != null ? ` · ${points}` : ''}
+      </Text>
     </View>
   );
 }
