@@ -132,6 +132,26 @@ async function main() {
     process.exit(1);
   }
 
+  // The frozen backend contract (contract/endpoints.json + socket-events.json).
+  // It is a pure static check — no database, no server — and it exists to catch
+  // an endpoint or realtime event being dropped or renamed out from under the
+  // shipped app.
+  //
+  // Wired in here because it was not wired in ANYWHERE, and had duly drifted:
+  // three genuinely-new items were unfrozen, and the deriver had gone blind to
+  // every relayToPeer() event (all WebRTC signalling, all VaultBeam signalling)
+  // without anything noticing. A check nobody runs is not a check.
+  console.log('\n  backend contract (endpoints + socket events)');
+  const contract = require('child_process').spawnSync(
+    process.execPath, ['contract/inventory.js'],
+    { stdio: 'inherit', cwd: path.join(__dirname, '..', 'vaultchat-backend') },
+  );
+  if (contract.status !== 0) {
+    console.log('\n  FAILED: backend contract drifted — review, then regenerate with:');
+    console.log('    node vaultchat-backend/contract/inventory.js --write');
+    process.exit(1);
+  }
+
   console.log('\nALL SUITES PASSED ✓');
 }
 

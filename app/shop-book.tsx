@@ -3596,7 +3596,13 @@ function ShopSettings({ shop, me, onSaved, onCancel }: {
   // Capture the shop's GPS location. `silent` skips the success alert (used for
   // the frictionless auto-capture when a new shop form first opens). Returns the
   // captured coords (or null) so the caller can use them without waiting on state.
-  const useLocation = async (silent = false): Promise<{ lat: number; lng: number } | null> => {
+  //
+  // NOT named `useLocation`. It is an ordinary async function, but the `use`
+  // prefix is how both eslint and the React Compiler (app.json: reactCompiler
+  // true) identify a hook — and this is called conditionally inside an effect,
+  // inside `save()`, and inside an onPress. Under the compiler that is a
+  // component-wide bail-out at best, on a 3,800-line screen.
+  const captureLocation = async (silent = false): Promise<{ lat: number; lng: number } | null> => {
     setLocating(true);
     try {
       const { status: perm } = await Location.requestForegroundPermissionsAsync();
@@ -3623,7 +3629,7 @@ function ShopSettings({ shop, me, onSaved, onCancel }: {
   // Auto-capture location the first time a new shop is being created, so most
   // owners never have to think about it — location is required to save.
   useEffect(() => {
-    if (!shop && !coords) { useLocation(true); }
+    if (!shop && !coords) { captureLocation(true); }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -3632,7 +3638,7 @@ function ShopSettings({ shop, me, onSaved, onCancel }: {
     // Location is mandatory — it's what powers nearby discovery + distance.
     let loc = coords;
     if (!loc) {
-      loc = await useLocation();
+      loc = await captureLocation();
       if (!loc) {
         Alert.alert('Shop location required', 'Tap “Use current location” to set where your shop is, then save.');
         return;
@@ -3731,7 +3737,7 @@ function ShopSettings({ shop, me, onSaved, onCancel }: {
           )}
 
           <Text style={s.fieldLabel}>Shop location (required)</Text>
-          <TouchableOpacity style={[s.outlineBtn, locating && { opacity: 0.6 }]} disabled={locating} onPress={() => useLocation()}>
+          <TouchableOpacity style={[s.outlineBtn, locating && { opacity: 0.6 }]} disabled={locating} onPress={() => captureLocation()}>
             {locating
               ? <ActivityIndicator color={C.green} />
               : <Ionicons name={coords ? 'checkmark-circle' : 'location'} size={18} color={C.green} />}

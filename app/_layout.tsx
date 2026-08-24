@@ -24,7 +24,12 @@
 // feature module: any formatter that sorts imports would silently reintroduce
 // the crash there. Side-effect import, so it must not be merged with a named
 // one or a bundler may hoist it.
-// eslint-disable-next-line import/order, simple-import-sort/imports
+// `simple-import-sort/imports` was listed here too, but that plugin is not
+// installed — and eslint makes a disable-comment for an unknown rule a hard
+// ERROR, which failed `npm run prod:check` on a line whose whole purpose is to
+// stop this import being moved. If a sorter is ever added, put the rule back in
+// this comment at the same time.
+// eslint-disable-next-line import/order
 import '@livekit/react-native';
 
 import { BRAND_ACCENT } from '../constants/theme';

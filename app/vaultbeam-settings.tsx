@@ -40,7 +40,7 @@ export default function VaultBeamSettings() {
         {!VB_AUTODOWNLOAD && (
           <View style={[styles.notice, { backgroundColor: C.surface, borderColor: C.border }]}>
             <Ionicons name="information-circle-outline" size={16} color={C.textDim} />
-            <Text style={[styles.noticeTxt, { color: C.textDim }]}>Auto-download is disabled in this build. These preferences are saved and take effect when it's enabled.</Text>
+            <Text style={[styles.noticeTxt, { color: C.textDim }]}>Auto-download is disabled in this build. These preferences are saved and take effect when it’s enabled.</Text>
           </View>
         )}
 

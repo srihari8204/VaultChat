@@ -4,11 +4,11 @@
 // or garbling text here silently misrepresents the file, so the shapes that
 // actually appear in Office XML are asserted rather than eyeballed.
 
-import { zipSync, strToU8, zlibSync } from 'fflate';
+import { zipSync, strToU8, strFromU8, zlibSync } from 'fflate';
 import {
   decodeEntities, docKind, docxText, pptxSlideText, xlsxSheetText,
   orderedSheetPaths, orderedSlidePaths, extractDocText,
-  pdfLiteral, pdfStreamText, pdfText,
+  pdfLiteral, pdfStreamText, pdfText, ascii85Decode,
 } from './docText';
 
 let failures = 0;
@@ -114,6 +114,39 @@ function makePdf(text: string): Uint8Array {
   return out;
 }
 eq('a real Flate-compressed PDF extracts', pdfText(makePdf('Invoice total 42')), 'Invoice total 42');
+
+// ── /Filter is a LIST, and ReportLab always writes two ───────────────────
+//
+// `/Filter [ /ASCII85Decode /FlateDecode ]` means "un-ascii85, THEN inflate".
+// The extractor used to see FlateDecode and inflate the raw bytes, which throws
+// on ascii85 text — so the stream was skipped and the document came back with no
+// text at all. Every ReportLab PDF is built this way, which is most
+// server-generated invoices, statements and tickets.
+function a85encode(b: Uint8Array): string {
+  let out = '';
+  for (let i = 0; i < b.length; i += 4) {
+    const n = Math.min(4, b.length - i);
+    let v = 0;
+    for (let j = 0; j < 4; j++) v = v * 256 + (j < n ? b[i + j] : 0);
+    if (v === 0 && n === 4) { out += 'z'; continue; }
+    const g: string[] = [];
+    for (let j = 0; j < 5; j++) { g.unshift(String.fromCharCode(33 + (v % 85))); v = Math.floor(v / 85); }
+    out += g.join('').slice(0, n + 1);
+  }
+  return out + '~>';
+}
+function makeA85Pdf(text: string): Uint8Array {
+  const a85 = a85encode(zlibSync(strToU8(`BT /F1 12 Tf 72 700 Td (${text}) Tj ET`)));
+  return strToU8(
+    `%PDF-1.3\n1 0 obj\n<< /Filter [ /ASCII85Decode /FlateDecode ] /Length ${a85.length} >>\n` +
+    `stream\n${a85}\nendstream\nendobj\n%%EOF\n`);
+}
+eq('ASCII85 round-trips', strFromU8(ascii85Decode(a85encode(strToU8('hello world')))!), 'hello world');
+eq('a zero group encodes as z and decodes back',
+   Array.from(ascii85Decode('z~>')!).join(','), '0,0,0,0');
+check('malformed ascii85 is refused, not guessed', ascii85Decode('!~>') === null);
+eq('an ASCII85 + Flate chain extracts (ReportLab)',
+   pdfText(makeA85Pdf('Statement balance 1234')), 'Statement balance 1234');
 check('a PDF with no text stream yields nothing',
   pdfText(strToU8('%PDF-1.4\ntrailer<<>>\n%%EOF')) === '');
 const pdfOut = extractDocText(makePdf('Readable'), 'doc.pdf');

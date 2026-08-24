@@ -147,7 +147,7 @@ export default function SecurityHubScreen() {
         )}
 
         {/* Permanent honesty disclosure. */}
-        <Text style={S.sectionTitle}>WHAT THIS CAN &amp; CAN'T DETECT</Text>
+        <Text style={S.sectionTitle}>WHAT THIS CAN &amp; CAN’T DETECT</Text>
         <View style={[S.card, S.discCard]}>
           <Text style={S.discText}>
             This checks for indicators a phone app can see — root/jailbreak, instrumentation, debuggers,

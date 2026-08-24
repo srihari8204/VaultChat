@@ -25,6 +25,7 @@ const db        = require('../db');
 const vault     = require('../lib/vault');
 const { sendPushToTokens } = require('../push');
 const callFcm   = require('../lib/callFcm');
+const rateLimit = require('../rateLimit');
 
 // Decrypt a peer's display name from the cipher columns (Stage 4) with a plaintext
 // fallback. SQL can't decrypt, so joins select the cipher columns and we resolve
@@ -803,6 +804,19 @@ router.get('/:id', async (req, res) => {
 // POST /chats/:id/messages — send a message
 router.post('/:id/messages', async (req, res) => {
   try {
+    // Per-sender ceiling on the highest-volume write in the product. Set well
+    // above anything a person can type — this is not a UX throttle, it is the
+    // stop on a compromised or scripted account fanning out to every chat it can
+    // reach, which costs a push notification and a row per message.
+    //
+    // Deliberately keyed on the USER, not the chat: a per-chat key would let one
+    // account spray N chats at the limit each. Not keyed on IP either — a
+    // college or office NAT would share one bucket.
+    const rl = await rateLimit.consume(`msg:${req.user.id}`, 600, 60); // 600/min
+    if (!rl.allowed) {
+      return res.status(429).json({ error: 'Sending too fast. Try again shortly.', retryAfter: rl.resetInSec });
+    }
+
     const mem = await loadChatMembership(req, req.params.id);
     if (!mem || mem.left_at) return res.status(403).json({ error: 'Not a member of this chat' });
 

@@ -112,7 +112,7 @@ function ListView() {
         <View style={[S.center, { flex: 1, paddingHorizontal: 32 }]}>
           <Text style={S.emptyTitle}>No overrides set</Text>
           <Text style={S.emptySub}>
-            Open any chat → tap the ⋮ menu → "Ghost Mode" to hide live signals from that person.
+            Open any chat → tap the ⋮ menu → “Ghost Mode” to hide live signals from that person.
           </Text>
         </View>
       ) : (
@@ -241,7 +241,7 @@ function PerTargetEditor({ targetId, targetName }: { targetId: string; targetNam
       <View style={S.intro}>
         <Text style={S.introTxt}>
           Hide live signals from <Text style={{ color: colors.primary, fontWeight: '700' }}>{targetName || targetId.slice(0, 8)}</Text>.
-          They stay your contact — they just won't see the chosen indicators in real time.
+          They stay your contact — they just won’t see the chosen indicators in real time.
         </Text>
       </View>
 

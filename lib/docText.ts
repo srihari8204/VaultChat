@@ -178,7 +178,53 @@ export function pdfStreamText(content: string): string {
 }
 
 /** Extract readable text from a whole PDF, or '' when there is none to get. */
-export function pdfText(bytes: Uint8Array): string {
+/**
+ * ASCII85 (Adobe variant), as used in a PDF `/Filter` chain.
+ *
+ * Five printable characters encode four bytes, base 85 from '!'. 'z' is a
+ * shorthand for four zero bytes, whitespace is ignored, and a trailing partial
+ * group is padded with 'u' and yields one byte fewer than it holds characters.
+ *
+ * Returns null on anything malformed, so the caller can skip the stream rather
+ * than surface a decode error for one bad object in an otherwise fine document.
+ */
+export function ascii85Decode(s: string): Uint8Array | null {
+  let body = s.trim();
+  if (body.startsWith('<~')) body = body.slice(2);
+  const end = body.indexOf('~>');
+  if (end >= 0) body = body.slice(0, end);
+
+  const out: number[] = [];
+  let group = 0, n = 0;
+  for (let i = 0; i < body.length; i++) {
+    const c = body.charCodeAt(i);
+    if (c === 122 /* z */ && n === 0) { out.push(0, 0, 0, 0); continue; }
+    if (c <= 32 || c === 127) continue;                  // whitespace
+    if (c < 33 || c > 117) return null;                  // outside '!'..'u'
+    group = group * 85 + (c - 33);
+    if (++n === 5) {
+      out.push((group >>> 24) & 0xff, (group >>> 16) & 0xff, (group >>> 8) & 0xff, group & 0xff);
+      group = 0; n = 0;
+    }
+  }
+  if (n === 1) return null;                              // a lone char cannot end a group
+  if (n > 1) {
+    for (let i = n; i < 5; i++) group = group * 85 + 84; // pad with 'u'
+    const full = [(group >>> 24) & 0xff, (group >>> 16) & 0xff, (group >>> 8) & 0xff, group & 0xff];
+    out.push(...full.slice(0, n - 1));
+  }
+  return new Uint8Array(out);
+}
+
+/**
+ * Every decoded content stream that actually carries text operators, in file
+ * order — roughly one per page.
+ *
+ * Split out of pdfText so a structured reader (lib/docBlocks.ts) can work per
+ * page and per font size instead of on one concatenated blob, without owning a
+ * second copy of the stream-decoding rules.
+ */
+export function pdfPageStreams(bytes: Uint8Array): string[] {
   // Latin1 keeps byte values intact, so stream offsets stay byte-accurate.
   let raw = '';
   const CH = 0x8000;
@@ -186,7 +232,7 @@ export function pdfText(bytes: Uint8Array): string {
     raw += String.fromCharCode.apply(null, Array.from(bytes.subarray(i, i + CH)) as any);
   }
 
-  const parts: string[] = [];
+  const out: string[] = [];
   const re = /stream\r?\n?/g;
   for (let m = re.exec(raw); m; m = re.exec(raw)) {
     const start = m.index + m[0].length;
@@ -196,21 +242,53 @@ export function pdfText(bytes: Uint8Array): string {
     const body = bytes.subarray(start, end);
 
     let text = '';
+    // `/Filter` is a LIST, applied in order — `[ /ASCII85Decode /FlateDecode ]`
+    // means "un-ascii85, then inflate". Testing only for FlateDecode and
+    // inflating the raw bytes fails on every ReportLab PDF, which is most
+    // server-generated invoices and statements.
     if (/FlateDecode/.test(header)) {
-      try { text = strFromU8(unzlibSync(body)); }
+      let payload: Uint8Array | null = body;
+      if (/ASCII85Decode/.test(header)) payload = ascii85Decode(raw.slice(start, end));
+      if (!payload) continue;
+      try { text = strFromU8(unzlibSync(payload)); }
       catch {
-        try { text = strFromU8(inflateSync(body)); } catch { continue; }
+        try { text = strFromU8(inflateSync(payload)); } catch { continue; }
       }
+    } else if (/ASCII85Decode/.test(header)) {
+      const payload = ascii85Decode(raw.slice(start, end));
+      if (!payload) continue;
+      text = strFromU8(payload);
     } else if (!/\/Filter/.test(header)) {
       text = raw.slice(start, end);          // uncompressed content stream
     } else {
       continue;                              // DCT/CCITT/etc — an image, not text
     }
-    // Only content streams carry text operators; skip fonts, metadata, images.
-    if (/\bTJ\b|\bTj\b/.test(text)) parts.push(pdfStreamText(text));
+    if (/\bTJ\b|\bTj\b/.test(text)) out.push(text);
+    // Advance ONLY here, on the path that consumed the stream.
+    //
+    // Moving this above the `continue`s looks obviously right and measurably is
+    // not: tried three ways against 40 real PDFs, every variant recovered some
+    // documents (a bank statement went 0 → 26k chars) and lost others (five
+    // invoices and a 336k-char report went to zero). Net was worse each time, so
+    // the scanner keeps the behaviour that reads the most real documents.
+    // ponytail: the principled fix is to frame streams by /Length from the dict
+    // instead of searching for "endstream" — worth doing with a PDF corpus to
+    // measure against, not by reasoning.
     re.lastIndex = end;
   }
-  return parts.filter(Boolean).join('\n\n').trim();
+  return out;
+}
+
+export function pdfText(bytes: Uint8Array): string {
+  // One scanner, not two. This used to carry its own copy of the stream-decoding
+  // loop; when pdfPageStreams was added for the structured reader the two drifted
+  // within the hour — the copy kept a different lastIndex rule and silently
+  // dropped page two of every two-page document while this one read it fine.
+  return pdfPageStreams(bytes)
+    .map(pdfStreamText)
+    .filter(Boolean)
+    .join('\n\n')
+    .trim();
 }
 
 export interface ExtractResult {

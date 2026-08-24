@@ -26,6 +26,29 @@ const multer  = require('multer');
 const jwtUtil = require('../jwt');
 const objectStore = require('../lib/storage');
 const vault   = require('../lib/vault');
+const rateLimit = require('../rateLimit');
+
+/**
+ * Ceiling on the endpoints that MINT STORAGE — a direct upload, a presigned PUT,
+ * or a multipart session. Each one turns an authenticated request into object
+ * storage we pay for and bandwidth we pay for, and unlike a message there is no
+ * natural bound on how fast a client can ask for more.
+ *
+ * Applied only to the minting routes. The GETs below are cheap reads and
+ * throttling those would break legitimate media-heavy scroll-back.
+ *
+ * 120/min is roughly four times the fastest an album send has ever produced, so
+ * it should never be reached by a person using the app.
+ */
+async function limitUploads(req, res, next) {
+  try {
+    const rl = await rateLimit.consume(`upl:${req.user.id}`, 120, 60);
+    if (!rl.allowed) {
+      return res.status(429).json({ error: 'Too many uploads. Try again shortly.', retryAfter: rl.resetInSec });
+    }
+  } catch { /* limiter is best-effort, same fail-open contract as everywhere else */ }
+  next();
+}
 
 const router = express.Router();
 
@@ -84,7 +107,7 @@ const upload = multer({
 //   ?viewOnce=1  marks the attachment view-once (first non-owner GET
 //                triggers a one-way flip of viewed_at; subsequent GETs
 //                from non-owners get 410 Gone).
-router.post('/', jwtUtil.requireAuth, upload.single('file'), async (req, res) => {
+router.post('/', jwtUtil.requireAuth, limitUploads, upload.single('file'), async (req, res) => {
   try {
     if (!req.file) return res.status(400).json({ error: 'file (multipart) required' });
     const relPath = path.relative(UPLOAD_DIR, req.file.path);
@@ -131,7 +154,7 @@ router.post('/', jwtUtil.requireAuth, upload.single('file'), async (req, res) =>
 // bytes never pass through this process. Falls back to the multipart POST /
 // above when object storage isn't configured.
 //   Body: { filename, mime, size?, viewOnce? } → { id, uploadUrl, key }
-router.post('/presign', jwtUtil.requireAuth, async (req, res) => {
+router.post('/presign', jwtUtil.requireAuth, limitUploads, async (req, res) => {
   try {
     if (!objectStore.enabled()) {
       return res.status(503).json({ error: 'Object storage not configured' });
@@ -186,7 +209,7 @@ async function ownedAttachment(req, res, id) {
   return att;
 }
 
-router.post('/multipart/init', jwtUtil.requireAuth, async (req, res) => {
+router.post('/multipart/init', jwtUtil.requireAuth, limitUploads, async (req, res) => {
   try {
     if (!objectStore.enabled()) return res.status(503).json({ error: 'Object storage not configured' });
     const filename = (req.body?.filename || 'file').toString().slice(0, 255);
@@ -214,7 +237,7 @@ router.post('/multipart/init', jwtUtil.requireAuth, async (req, res) => {
   }
 });
 
-router.post('/multipart/part-urls', jwtUtil.requireAuth, async (req, res) => {
+router.post('/multipart/part-urls', jwtUtil.requireAuth, limitUploads, async (req, res) => {
   try {
     const att = await ownedAttachment(req, res, req.body?.id);
     if (!att) return;

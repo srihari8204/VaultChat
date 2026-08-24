@@ -107,7 +107,7 @@ export default function PerfDebugScreen() {
         </View>
 
         <Text style={S.note}>
-          "tap→enc" = E2EE encryption time (X3DH/ratchet). "enc→ack" = HTTP POST round-trip.
+          “tap→enc” = E2EE encryption time (X3DH/ratchet). “enc→ack” = HTTP POST round-trip.
           A large tap→enc means the peer key-bundle fetch is the bottleneck.
         </Text>
       </ScrollView>

@@ -413,7 +413,7 @@ export default function SettingsScreen() {
       <View style={S.section}>
         <Text style={S.label}>BLOCKED USERS</Text>
         {blocks.length === 0 ? (
-          <Text style={S.emptySub}>You haven't blocked anyone. To block someone, open their chat → menu → Block.</Text>
+          <Text style={S.emptySub}>You haven’t blocked anyone. To block someone, open their chat → menu → Block.</Text>
         ) : (
           blocks.map(u => (
             <View key={u.userId} style={S.blockRow}>

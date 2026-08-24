@@ -71,6 +71,17 @@ function deriveSocketEvents() {
   for (const m of sources.matchAll(/chatEvent\(\s*[^,]+,\s*'([^']+)'/g)) serverToClient.add(m[1]);
   for (const m of sources.matchAll(/broadcast\(\s*[^,]+,\s*'([^']+)'/g)) serverToClient.add(m[1]);
   serverToClient.add('new_message'); // via setBroadcasters({ newMessage }) in chats.js
+  // Peer relays: `relayToPeer('x')` returns a handler that calls
+  // emitToUid(to, event, …) with the event in a VARIABLE, so no literal ever
+  // appears in an emit position and the patterns above miss it entirely.
+  //
+  // This is not hypothetical tidying: when call_chat/call_emoji were moved off
+  // chat-room broadcasts onto relayToPeer (to stop a client-supplied `from`
+  // being echoed, and to stop in-call chat reaching every chat member), the
+  // derived surface silently LOST both events. The contract then read as though
+  // the server had stopped emitting them — and, worse, a future change that
+  // genuinely did remove them would have looked like no change at all.
+  for (const m of sources.matchAll(/relayToPeer\(\s*'([^']+)'\s*\)/g)) serverToClient.add(m[1]);
 
   return {
     clientToServer: [...clientToServer].sort(),

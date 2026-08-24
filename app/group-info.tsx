@@ -75,6 +75,16 @@ export default function GroupInfoScreen() {
   }, [chatId]);
 
   const load = useCallback(async () => {
+    // No id — a malformed deep link, or a push whose payload lost the chat id.
+    // Without this the screen called getChat('') → GET /chats/ , which matches
+    // no route and comes back as the Go gateway's catch-all: the user saw an
+    // alert reading "route not migrated to go backend". That is a message for
+    // whoever wired the proxy, not for the person holding the phone.
+    //
+    // The rest of this function already knows the id can be empty (it guards the
+    // cache read and write on `chatId`) — only the fetch between them did not.
+    if (!chatId) { setLoading(false); return; }
+
     // Cache key includes the chat id so different groups don't collide.
     const cacheKey = 'group-info:' + chatId;
     let painted = false;
@@ -227,6 +237,27 @@ export default function GroupInfoScreen() {
     });
   }, [chat, isAdmin, router]);
 
+  // No id at all — a malformed deep link or a push that lost its chat id.
+  // Falling through to the spinner below would leave a screen that spins
+  // forever with nothing to press: `loading` is false and `chat` is null, so it
+  // never resolves and there is no header to go back from. Say what happened and
+  // give a way out.
+  if (!chatId) {
+    return (
+      <View style={[S.screen, S.center]}>
+        <Text style={{ color: colors.text, fontSize: 16, fontWeight: '700', marginBottom: 6 }}>
+          Group not found
+        </Text>
+        <Text style={{ color: colors.textDim, fontSize: 13, textAlign: 'center', marginBottom: 16 }}>
+          This link did not say which group to open.
+        </Text>
+        <TouchableOpacity onPress={() => router.back()} activeOpacity={0.8}>
+          <Text style={{ color: colors.primary, fontSize: 15, fontWeight: '700' }}>Go back</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  }
+
   if (loading || !chat) {
     return <View style={[S.screen, S.center]}><ActivityIndicator color={colors.primary} size="large" /></View>;
   }
@@ -364,7 +395,7 @@ export default function GroupInfoScreen() {
           <Ionicons name="eye-outline" size={22} color={colors.text} style={S.navIcon} />
           <View style={{ flex: 1 }}>
             <Text style={S.navTitle}>Share my viewing status</Text>
-            <Text style={S.navSub}>Let members see when you're viewing this chat now</Text>
+            <Text style={S.navSub}>Let members see when you’re viewing this chat now</Text>
           </View>
           <Switch
             value={shareViewing}

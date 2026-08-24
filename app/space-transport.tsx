@@ -28,13 +28,14 @@
 
 import React, { useCallback, useMemo, useState } from 'react';
 import {
-  View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator, RefreshControl,
+  View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator, RefreshControl, Alert,
 } from 'react-native';
 import { Stack, useLocalSearchParams, useRouter, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useSpaceColors, spaceHeader } from '../lib/spaces/theme';
 import type { Palette } from '../constants/theme';
 import { getRuns, getRun } from '../lib/spaces/api';
+import { createDirectChat } from '../lib/chatService';
 import type { Run, RunStop, RunRider } from '../lib/spaces/runs';
 import { nextStop } from '../lib/spaces/runs';
 import { familyOf } from '../lib/spaces/layout';
@@ -86,6 +87,34 @@ export default function SpaceTransportScreen() {
   const colors = useSpaceColors(params.groupType);
   const spaceId = String(params.spaceId || '');
   const spaceName = String(params.name || 'This space');
+
+  // ── Calling the driver ────────────────────────────────────────────
+  //
+  // This button used to push `/call` with `{ userId, video }`. There is no
+  // `/call` route and never has been, and `/voicecall` takes
+  // `{ chatId, peerUid, peerName }` — so the button navigated nowhere and the
+  // params would have been wrong even if it had. The `as any` on the pathname
+  // is what let both mistakes through the compiler.
+  //
+  // A call needs a chat, so resolve (or create) the direct chat with the driver
+  // first. createDirectChat returns the existing one when there is one, so this
+  // does not litter the chat list.
+  const [callingDriver, setCallingDriver] = useState<string | null>(null);
+  const callDriver = useCallback(async (driverId: string) => {
+    if (callingDriver) return;
+    setCallingDriver(driverId);
+    try {
+      const chat = await createDirectChat({ userId: driverId });
+      router.push({
+        pathname: '/voicecall' as any,
+        params: { chatId: chat.id, peerUid: driverId, peerName: 'Driver' },
+      });
+    } catch (e: any) {
+      Alert.alert('Could not call the driver', e?.message ?? 'Check your connection and try again.');
+    } finally {
+      setCallingDriver(null);
+    }
+  }, [callingDriver, router]);
   const kindWord = familyOf(params.groupType) === 'school' ? 'bus' : 'vehicle';
 
   const [loaded, setLoaded] = useState<Loaded[] | null>(null);
@@ -256,8 +285,10 @@ export default function SpaceTransportScreen() {
                   when the server actually named a driver. */}
               {run.driverId && (
                 <TouchableOpacity
-                  onPress={() => router.push({ pathname: '/call' as any, params: { userId: run.driverId, video: '0' } })}
-                  style={[s.btn, { backgroundColor: colors.card, borderColor: colors.border, borderWidth: 1 }]}
+                  onPress={() => callDriver(run.driverId!)}
+                  disabled={callingDriver === run.driverId}
+                  style={[s.btn, { backgroundColor: colors.card, borderColor: colors.border, borderWidth: 1 },
+                          callingDriver === run.driverId && { opacity: 0.6 }]}
                 >
                   <Ionicons name="call-outline" size={16} color={colors.text} />
                   <Text style={[s.btnText, { color: colors.text }]}>Driver</Text>

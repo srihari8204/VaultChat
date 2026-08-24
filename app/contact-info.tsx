@@ -256,7 +256,7 @@ export default function ContactInfoScreen() {
           <View style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 8 }}>
             <View style={{ flex: 1, paddingRight: 12 }}>
               <Text style={{ color: colors.text, fontSize: 15, fontWeight: '600' }}>Share my viewing status</Text>
-              <Text style={{ color: colors.textDim, fontSize: 12, marginTop: 2 }}>Let {displayName} see when you're viewing this chat right now</Text>
+              <Text style={{ color: colors.textDim, fontSize: 12, marginTop: 2 }}>Let {displayName} see when you’re viewing this chat right now</Text>
             </View>
             <Switch value={shareViewing} onValueChange={toggleShareViewing} trackColor={{ true: colors.primary, false: colors.border }} thumbColor="#fff" />
           </View>

@@ -29,6 +29,9 @@ import * as IntentLauncher from 'expo-intent-launcher';
 import { getAccessToken } from '../lib/api';
 import { Buffer } from 'buffer';
 import { docKind } from '../lib/docText';
+import type { Block } from '../lib/docBlocks';
+import { DocView } from '../components/DocView';
+import type { Palette } from '../constants/theme';
 
 const { width: SW, height: SH } = Dimensions.get('window');
 
@@ -48,6 +51,33 @@ const C = {
   glass: 'rgba(2,11,24,0.72)',
   glassBorder: 'rgba(255,255,255,0.08)',
 };
+
+/**
+ * The document reader's palette: INK ON PAPER.
+ *
+ * The rest of this screen is a dark media surface, and the tokens above are all
+ * written for it — `text` is #FFFFFF, `textDim` is white at 55%. But `bgColor`
+ * below gives a document a WHITE page (only image and video get the black one),
+ * so every one of those tokens was near-white on near-white: the document text
+ * was there, correctly parsed, and effectively invisible. A photo of the phone is
+ * the only way that shows up — a dump reports the text either way.
+ *
+ * Paper is the right surface for the content (it is what a document looks like,
+ * and it is what reads well over pages of text) so the fix is dark ink, not a
+ * dark page. The chrome above and below stays dark, which is exactly how every
+ * document reader frames a page.
+ */
+const paperColors = {
+  primary: '#2563EB', accent: C.accent, purple: C.secondary,
+  danger: '#DC2626', success: '#16A34A', online: '#16A34A',
+  bg: '#FFFFFF', surface: '#F1F3F5', surfaceSolid: '#FFFFFF',
+  card: '#FFFFFF', border: '#D8DDE3', separator: '#E8ECEF',
+  text: '#111827', textDim: '#4B5563', textFaint: '#8A94A0',
+  chatBg: '#FFFFFF', bubbleIn: '#F1F3F5', bubbleOut: '#DCF8C6',
+  bubbleInText: '#111827', bubbleOutText: '#111827',
+  bubbleMetaIn: '#6B7280', bubbleMetaOut: '#6B7280',
+  tickRead: '#2563EB', headerBar: '#FFFFFF',
+} as Palette;
 
 // ── File type detection ──────────────────────────────────────────
 const EXT_MAP: Record<string, string> = {};
@@ -143,6 +173,37 @@ const FILE_ICONS: Record<string, string> = {
   office: '📊', text: '📝', unknown: '📎',
 };
 
+/**
+ * What the USER calls this file, and an icon that matches it.
+ *
+ * `fileType` above is an internal bucket for choosing a renderer — 'office'
+ * covers Word, Excel and PowerPoint alike. Printing it raw put "36.1 KB · OFFICE"
+ * under a Word document and gave all three the same bar-chart icon, so a report
+ * and a spreadsheet were indistinguishable at a glance. The bucket is right for
+ * picking code paths and wrong for showing a person.
+ *
+ * Keyed by extension because that is what actually determines the format; the
+ * bucket is the fallback for everything with no specific name.
+ */
+const FORMAT: Record<string, { label: string; icon: string }> = {
+  docx: { label: 'Word',       icon: '📘' },
+  doc:  { label: 'Word',       icon: '📘' },
+  xlsx: { label: 'Excel',      icon: '📗' },
+  xls:  { label: 'Excel',      icon: '📗' },
+  csv:  { label: 'CSV',        icon: '📗' },
+  pptx: { label: 'PowerPoint', icon: '📙' },
+  ppt:  { label: 'PowerPoint', icon: '📙' },
+  pdf:  { label: 'PDF',        icon: '📕' },
+};
+
+function formatOf(filename: string, fileType: string): { label: string; icon: string } {
+  const ext = (filename || '').split('.').pop()?.toLowerCase() || '';
+  return FORMAT[ext] ?? {
+    label: (ext || fileType).toUpperCase(),
+    icon: FILE_ICONS[fileType] ?? '📎',
+  };
+}
+
 // ── Skeleton shimmer component ───────────────────────────────────
 function SkeletonShimmer({ width: w, height: h, style }: any) {
   const shimmer = useRef(new Animated.Value(0)).current;
@@ -191,6 +252,7 @@ export default function FileViewerScreen() {
   const fileUri = (params.uri || '') + '';
   const fileName = (params.filename || 'file') + '';
   const fileType = detectType(fileName, params.mimeType as string | undefined);
+  const fmt = formatOf(fileName, fileType);
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -199,6 +261,10 @@ export default function FileViewerScreen() {
   // Office-document reading state. Kept separate from `textContent` so a failed
   // extraction can fall back to the hand-off card without blanking a text file.
   const [docText, setDocText] = useState('');
+  // The STRUCTURED read (headings, tables, sheets, slides, pages). Kept beside
+  // docText rather than replacing it: if the structured pass ever returns
+  // nothing useful, the flat text is still a working document view.
+  const [docBlocks, setDocBlocks] = useState<Block[] | null>(null);
   const [docEmpty, setDocEmpty] = useState(false);
   const [docError, setDocError] = useState<string | null>(null);
   const [docLoading, setDocLoading] = useState(true);
@@ -259,12 +325,37 @@ export default function FileViewerScreen() {
         const { text, empty } = extractDocText(bytes, fileName);
         setDocText(empty ? '' : text);
         setDocEmpty(empty);
+        // Structure is a bonus on top of the text, never a precondition for it:
+        // a document that reads fine flat must not become unreadable because the
+        // richer pass tripped over some XML shape.
+        try {
+          const { extractDocBlocks } = await import('../lib/docBlocks');
+          const r = extractDocBlocks(bytes, fileName);
+          setDocBlocks(r.empty ? null : r.blocks);
+        } catch (be: any) {
+          console.warn('[docBlocks] structured read failed, showing plain text —', be?.message ?? be);
+          setDocBlocks(null);
+        }
       } catch (e: any) {
         // Fall back to the hand-off card rather than a dead end — but say WHY.
         // Silently showing "open in another app" is indistinguishable from the
         // feature not existing, which is exactly how it was reported.
-        console.warn('[docText] could not read', fileName, '—', e?.message ?? e);
-        setDocError(e?.message ?? 'Could not read this document.');
+        //
+        // extractDocText's own messages are written FOR the user ("This file is
+        // not a readable document."). The filesystem's are not: a file the app
+        // cannot read put this on screen, verbatim —
+        //   Call to function 'ExponentFileSystem.readAsStringAsync' has been
+        //   rejected. → Caused by: java.io.IOException: Location
+        //   'file:///sdcard/...' isn't readable.
+        // — which tells the person holding the phone nothing and leaks an
+        // internal path. Anything that names a native module or a Java class is
+        // ours to explain, not theirs to read.
+        const raw = String(e?.message ?? '');
+        const internal = /ExponentFileSystem|java\.io\.|java\.lang\.|rejected|ENOENT|EACCES/i.test(raw);
+        console.warn('[docText] could not read', fileName, '—', raw || e);
+        setDocError(internal || !raw
+          ? 'This file could not be opened from where it is stored. Try opening it in another app.'
+          : raw);
       } finally {
         setDocLoading(false);
       }
@@ -511,6 +602,7 @@ export default function FileViewerScreen() {
     setError('');
     setLoading(true);
     setDocError(null);
+    setDocBlocks(null);
     setDocLoading(true);
     setReloadKey(k => k + 1);
   };
@@ -570,7 +662,7 @@ export default function FileViewerScreen() {
   // share-open sheet on iOS, and let whatever PDF app the user has render it.
   const renderDocument = (label: string, reason?: string) => (
     <View style={[s.centered, s.contentFill]}>
-      <Text style={s.fileIcon}>{FILE_ICONS[fileType] ?? '📄'}</Text>
+      <Text style={s.fileIcon}>{fmt.icon}</Text>
       <Text style={s.loadingText}>{fileName}</Text>
       <Text style={[s.loadingText, { fontSize: 12, opacity: 0.7, marginTop: 6, textAlign: 'center', paddingHorizontal: 32 }]}>
         {reason ? reason : `Opens in your ${label} app. The file stays on this device.`}
@@ -588,7 +680,7 @@ export default function FileViewerScreen() {
     </View>
   );
 
-  const renderPDF = () => renderDocument('PDF');
+  const renderPDF = () => renderDocument(fmt.label);
 
   // ══════════════════════════════════════════════════════════════
   // ██  RENDER: Office docs — same on-device path as PDF above
@@ -600,11 +692,11 @@ export default function FileViewerScreen() {
   // file) still falls back to the device hand-off rather than a dead end.
   const renderOffice = () => {
     if (docLoading) return renderLoading();
-    if (docError || docKind(fileName) === 'unsupported') return renderDocument('documents', docError ?? undefined);
+    if (docError || docKind(fileName) === 'unsupported') return renderDocument(fmt.label, docError ?? undefined);
     if (docEmpty) {
       return (
         <View style={[s.centered, s.contentFill]}>
-          <Text style={s.fileIcon}>📄</Text>
+          <Text style={s.fileIcon}>{fmt.icon}</Text>
           <Text style={s.loadingText}>{fileName}</Text>
           <Text style={[s.loadingText, { fontSize: 12, opacity: 0.7, marginTop: 6, textAlign: 'center', paddingHorizontal: 32 }]}>
             {fileType === 'pdf'
@@ -625,18 +717,26 @@ export default function FileViewerScreen() {
     // show (formatting, images, charts, a spreadsheet's real grid).
     return (
       <View style={s.contentFill}>
-        <ScrollView
-          style={{ flex: 1 }}
-          contentContainerStyle={{ padding: 18, paddingBottom: 24 }}
-          showsVerticalScrollIndicator
-          indicatorStyle="white"
-        >
-          <Text selectable style={{ color: '#E5E7EB', fontSize: 16, lineHeight: 24 }}>
-            {docText}
-          </Text>
-        </ScrollView>
+        {docBlocks ? (
+          <DocView blocks={docBlocks} colors={paperColors} />
+        ) : (
+          <ScrollView
+            style={{ flex: 1 }}
+            contentContainerStyle={{ padding: 18, paddingBottom: 24 }}
+            showsVerticalScrollIndicator
+            indicatorStyle="white"
+          >
+            {/* Ink, not near-white: this sits on the same white page as the
+                reader above, where #E5E7EB was invisible. */}
+            <Text selectable style={{ color: paperColors.text, fontSize: 16, lineHeight: 25 }}>
+              {docText}
+            </Text>
+          </ScrollView>
+        )}
         <View style={s.docActionBar}>
-          <Text style={s.docActionHint} numberOfLines={1}>Text only — no formatting</Text>
+          <Text style={s.docActionHint} numberOfLines={1}>
+            {docBlocks ? 'Reader view — no images or charts' : 'Text only — no formatting'}
+          </Text>
           <TouchableOpacity
             onPress={openInDeviceApp}
             disabled={openingExternally}
@@ -867,11 +967,11 @@ export default function FileViewerScreen() {
           {/* File info */}
           <View style={s.headerCenter}>
             <View style={s.headerFilenameRow}>
-              <Text style={s.headerIcon}>{FILE_ICONS[fileType] || '📎'}</Text>
+              <Text style={s.headerIcon}>{fmt.icon}</Text>
               <Text style={s.headerFilename} numberOfLines={1}>{fileName}</Text>
             </View>
             {fileSize > 0 && (
-              <Text style={s.headerSize}>{formatBytes(fileSize)} · {fileType.toUpperCase()}</Text>
+              <Text style={s.headerSize}>{formatBytes(fileSize)} · {fmt.label.toUpperCase()}</Text>
             )}
           </View>
 

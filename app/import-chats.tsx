@@ -530,6 +530,11 @@ async function verifyContact(
   return { level: 'unverified', because: 'Could not confirm this export belongs to this contact' };
 }
 
+/** The person on the other side of a direct chat, however the row spells it. */
+function peerLabel(c: ChatSummary): string {
+  return (c.peerName?.trim() || c.name?.trim() || 'Unnamed contact');
+}
+
 /** Case-, accent- and whitespace-insensitive comparison for human names. */
 function fold(s: string): string {
   return (s ?? '').normalize('NFKD').replace(/[̀-ͯ]/g, '')
@@ -583,16 +588,23 @@ function PickChat({ s, colors, chats, onPick }: {
       <Text style={s.h1}>Which conversation?</Text>
       <Text style={s.sub}>Pick the contact whose history you want to bring across. One at a time.</Text>
       <PrivacyNote s={s} colors={colors} />
-      {chats.map(c => (
-        <TouchableOpacity key={c.id} style={s.srcRow} activeOpacity={0.7}
-          onPress={() => onPick(c.id, c.name ?? 'this contact')}>
-          <View style={[s.srcIcon, { backgroundColor: brandAlpha(0.15) }]}>
-            <Ionicons name="person" size={20} color={colors.primary} />
-          </View>
-          <Text style={[s.srcLabel, s.flex]} numberOfLines={1}>{c.name ?? 'Unnamed'}</Text>
-          <Ionicons name="chevron-forward" size={18} color={colors.textFaint} />
-        </TouchableOpacity>
-      ))}
+      {chats.map(c => {
+        // A DIRECT chat carries the other person in `peerName`; `name` is for
+        // groups and is null here. Reading `name` first made every row in this
+        // picker read "Unnamed" on a real device — a contact list with no
+        // contacts in it. Verified on the Honor before and after.
+        const who = peerLabel(c);
+        return (
+          <TouchableOpacity key={c.id} style={s.srcRow} activeOpacity={0.7}
+            onPress={() => onPick(c.id, who)}>
+            <View style={[s.srcIcon, { backgroundColor: brandAlpha(0.15) }]}>
+              <Ionicons name="person" size={20} color={colors.primary} />
+            </View>
+            <Text style={[s.srcLabel, s.flex]} numberOfLines={1}>{who}</Text>
+            <Ionicons name="chevron-forward" size={18} color={colors.textFaint} />
+          </TouchableOpacity>
+        );
+      })}
     </>
   );
 }

@@ -105,7 +105,7 @@ export default function CallReliabilityScreen() {
               <Text style={S.btnTxt}>Open settings</Text>
             </TouchableOpacity>
             <TouchableOpacity style={[S.btn, S.btnGhost]} onPress={() => setAutoOk(true)}>
-              <Text style={[S.btnTxt, { color: colors.primary }]}>I've done this</Text>
+              <Text style={[S.btnTxt, { color: colors.primary }]}>I’ve done this</Text>
             </TouchableOpacity>
           </View>
         )}
@@ -113,7 +113,7 @@ export default function CallReliabilityScreen() {
         {Platform.OS === 'android' && battOk && autoOk && (
           <View style={S.okBar}>
             <Ionicons name="shield-checkmark" size={18} color={colors.online} />
-            <Text style={S.okTxt}>You're set — calls should ring even when VaultChat is closed.</Text>
+            <Text style={S.okTxt}>You’re set — calls should ring even when VaultChat is closed.</Text>
           </View>
         )}
 
