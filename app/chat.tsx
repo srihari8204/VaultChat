@@ -1381,9 +1381,24 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
   }, [otherMembers]);
   useEffect(() => {
     if (Platform.OS === 'web' || !chat) return;
-    const mode: ScreenshotMode = (chat.screenshotMode as ScreenshotMode) || 'block';
-    const allowsCapture = mode === 'allow' || mode === 'allow_notify';
-    const reportsCapture = mode === 'allow_notify' || mode === 'block';
+    // THE POLICY THIS DEVICE OBEYS IS THE **PEERS'**, NOT ITS OWN.
+    //
+    // This used to read `chat.screenshotMode`, which is the CALLER'S OWN row —
+    // so the setting actually meant "when I screenshot, tell them". Turning on
+    // "block screenshots and notify" changed nothing about the other person's
+    // phone, which is the only phone that can screenshot your chat. The one
+    // person it never protected was the person who switched it on.
+    //
+    // Now: my own screenshotMode is what I DEMAND OF OTHERS (it is sent to their
+    // devices via peerBlocksCapture / peerWantsCaptureNotice), and what I OBEY
+    // is what they demand of me.
+    //
+    // Defaults are protective — an older server that does not send these fields
+    // yields block + notify, the same posture as the previous default.
+    const peerBlocks = chat.peerBlocksCapture ?? true;
+    const peerNotify = chat.peerWantsCaptureNotice ?? true;
+    const allowsCapture = !peerBlocks;
+    const reportsCapture = peerNotify;
 
     if (allowsCapture) {
       ScreenCapture.allowScreenCaptureAsync().catch(() => {});
@@ -1400,7 +1415,7 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
           // surfaces in the Alerts tab (#41). Real local event — the inbound
           // "someone captured your content" alert is delivered separately (W7).
           recordScreenshotAttempt({ chatId, chatName: title }).catch(() => {});
-          if (mode === 'allow_notify') {
+          if (peerNotify) {
             Alert.alert('Screenshot captured', 'The other side has been notified.');
           }
         });
@@ -1412,7 +1427,7 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
       // Restore the global-block posture (matches _layout.tsx default)
       ScreenCapture.preventScreenCaptureAsync().catch(() => {});
     };
-  }, [chat?.screenshotMode, chatId]);
+  }, [chat?.peerBlocksCapture, chat?.peerWantsCaptureNotice, chatId]);
 
   // Auto-dismiss the inbound screenshot banner after 4 seconds.
   useEffect(() => {

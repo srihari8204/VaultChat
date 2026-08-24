@@ -50,7 +50,12 @@ export interface ChatSummary {
   // which expires individual messages and leaves the chat standing.
   expiresAt?: string | null;
   // Per-user screenshot policy for this chat. Backend defaults to 'block'.
+  /** MY setting: what I demand of everyone ELSE's device in this chat. */
   screenshotMode?: 'allow' | 'allow_notify' | 'block' | 'block_silent';
+  /** What the OTHER members demand of THIS device. Server-computed across all
+   *  other members, because in a group the requirements compose. */
+  peerBlocksCapture?: boolean;
+  peerWantsCaptureNotice?: boolean;
   // Per-user Vanish Mode: while ON, new messages I send are flagged for
   // hard-delete-on-all-read.
   vanishMode?: boolean;
