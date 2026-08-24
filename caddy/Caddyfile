@@ -66,34 +66,19 @@
 	#
 	# Android's verifier fetches this over https and compares the release signing
 	# cert against app.json's autoVerify intent filter. Without it the Private
-	# Live invitation link opens a browser tab that nothing serves — exactly the
-	# dead end this closes.
+	# Live invitation link opens a browser tab that nothing serves.
 	#
-	# Served inline rather than from a bind-mounted file: it is 200 bytes that
-	# must never 404, and a mounted file is one more thing to go stale.
-	#
-	# ⚠️ THE FINGERPRINT BELOW BREAKS THE MOMENT THE APP SHIPS VIA PLAY.
-	#
-	# 5F:C1:97:… is vaultchat-release.jks, which under Play App Signing is only
-	# the UPLOAD key — the one that authenticates our upload. Google re-signs
-	# with its own app-signing key before delivering to devices, so an installed
-	# Play build presents a DIFFERENT cert, the verifier finds no match, and
-	# every Private Live invitation link silently goes back to opening a browser.
-	# Nothing errors; the feature just stops working for exactly the users who
-	# installed it the normal way. Play App Signing is mandatory for new apps
-	# distributing an AAB, so this is a certainty, not a risk.
-	#
-	# FIX AFTER THE FIRST UPLOAD: Play Console → your app → Test and release →
-	# App integrity → App signing key certificate → copy the SHA-256. Add it to
-	# the array below ALONGSIDE the existing one — the field is a list, and
-	# keeping both means locally-signed test builds and Play builds both verify.
-	# Then re-run the verifier:
-	#   adb shell pm verify-app-links --re-verify com.vaultchat.app
-	#   adb shell pm get-app-links com.vaultchat.app     → expect "verified"
+	# SERVED FROM A FILE, NOT AN INLINE `respond`. The fingerprint list MUST gain
+	# Play's app-signing SHA-256 after the first upload or every invitation link
+	# silently breaks — see caddy/public/README.md for why and how. Keeping it in
+	# the bind mount means that fix is a one-line JSON edit that takes effect
+	# immediately, instead of a server-config change plus a Caddy restart.
 	@assetlinks path /.well-known/assetlinks.json
 	handle @assetlinks {
+		root * /srv/public
+		rewrite * /assetlinks.json
 		header Content-Type application/json
-		respond `[{"relation":["delegate_permission/common.handle_all_urls"],"target":{"namespace":"android_app","package_name":"com.vaultchat.app","sha256_cert_fingerprints":["5F:C1:97:FC:3F:09:F6:84:C6:86:1B:7E:58:76:BE:58:24:D4:AA:CB:BC:26:CC:30:9F:D6:4A:97:DC:79:1A:59"]}}]` 200
+		file_server
 	}
 
 	# ── Play-required legal pages ────────────────────────────────────

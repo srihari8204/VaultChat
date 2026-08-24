@@ -20,8 +20,27 @@
 services:
   caddy:
     ports: !override
-      - "80:80"
-      - "3000:80"            # compatibility: existing APKs point SERVER_URL at :3000
+      # 8095, NOT 80. A host nginx owns :80/:443 for api.corefinite.com and
+      # reverse-proxies to 127.0.0.1:8095 — see nginx/sites/vaultchat.conf.
+      #
+      # THIS FILE SAID "80:80" WHILE THE RUNNING CONTAINER HAD 8095. The stack
+      # served correctly right up until the first `up -d caddy`, which recreated
+      # caddy from this file, could not bind :80 against nginx, and took the site
+      # down. Setting this back to 80 does it again — on the next reboot if not
+      # sooner. Synced to the box 2026-08-24.
+      #
+      # Bound to LOOPBACK: nginx reaches it on 127.0.0.1, and nothing else has
+      # any business reaching Caddy directly. Published on 0.0.0.0 it served the
+      # entire API — auth included — over plaintext HTTP to the open internet.
+      - "127.0.0.1:8095:80"
+      # ⚠️ STILL PLAINTEXT AND STILL PUBLIC. Measured 1157 packets in 37h
+      # (nat DOCKER chain counter), so something is talking to it; a packet
+      # capture could not be read to identify what, so it has NOT been closed.
+      # Old APKs pinned SERVER_URL to :3000, and the current client uses
+      # https://api.corefinite.com — so this is probably vestigial, but
+      # "probably" is not grounds for cutting off installed users.
+      # Decide, then either bind it to 127.0.0.1 like 8095 above, or delete it.
+      - "3000:80"
       # - "443:443"          # enable together with a TLS site in the Caddyfile
   go-api:
     ports: !override
