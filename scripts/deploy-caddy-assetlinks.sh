@@ -68,10 +68,12 @@ w=$(curl -s -o /dev/null -w '%{http_code}' --http1.1 --max-time 8 \
      "$BASE/socket.io/?EIO=4&transport=websocket" || true)
 [ "$w" = 101 ] && ok "websocket 101" || { bad "websocket=$w"; fail=1; }
 
-# The whole point of the compose change: 8095 must stop answering from outside
-# while nginx keeps reaching it on loopback (proved by /health above).
+# The whole point of the compose change: neither cleartext port may answer from
+# outside, while nginx keeps reaching Caddy on loopback (proved by /health above).
 e=$(code "http://65.21.229.167:8095/health")
-[ "$e" = "000" ] && ok "8095 no longer reachable externally" || { bad "8095 still answering ($e)"; fail=1; }
+[ "$e" = "000" ] && ok "8095 not reachable externally" || { bad "8095 still answering ($e)"; fail=1; }
+t=$(code "http://65.21.229.167:3000/health")
+[ "$t" = "000" ] && ok "3000 not reachable externally" || { bad "3000 still answering ($t)"; fail=1; }
 
 [ "$fail" -eq 0 ] || { restore; die "verification failed - rolled back"; }
 
