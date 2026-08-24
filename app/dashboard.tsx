@@ -1,3 +1,4 @@
+import { HEADER_TOP } from '../constants/layout';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
@@ -198,7 +199,7 @@ export default function DashboardScreen() {
 const makeStyles = (c: Palette) => StyleSheet.create({
   container:{flex:1,backgroundColor:'#FFFFFF'},
   glowTop:{position:'absolute',top:-40,alignSelf:'center',width:300,height:300,borderRadius:150,backgroundColor:'rgba(74,159,255,0.06)'},
-  header:{flexDirection:'row',alignItems:'center',paddingHorizontal:18,paddingTop:50,paddingBottom:14,gap:10},
+  header:{flexDirection:'row',alignItems:'center',paddingHorizontal:18,paddingTop:HEADER_TOP,paddingBottom:14,gap:10},
   title:{color:'#fff',fontSize:20,fontWeight:'900'},
   backBtn:{width:36,height:36,borderRadius:18,backgroundColor:'rgba(10,22,40,0.8)',justifyContent:'center',alignItems:'center',borderWidth:1,borderColor:'rgba(255,255,255,0.06)'},
   scanBtn:{backgroundColor:'rgba(74,159,255,0.1)',borderRadius:14,paddingHorizontal:14,paddingVertical:8,borderWidth:1,borderColor:'rgba(74,159,255,0.3)'},

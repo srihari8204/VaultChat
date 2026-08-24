@@ -6,6 +6,7 @@
 // detected and shown in the integrity banner. "Scan device" runs a real
 // root/Frida/emulator scan and appends its result. Nothing here is mock data.
 
+import { HEADER_TOP } from '../../constants/layout';
 import { brandAlpha } from '../../constants/theme';
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from 'expo-router';
@@ -197,7 +198,7 @@ export default function AlertsScreen() {
 
 const makeStyles = (c: Palette) => StyleSheet.create({
   screen:   { flex: 1, backgroundColor: c.bg },
-  header:   { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 20, paddingTop: 56, paddingBottom: 12, gap: 12 },
+  header:   { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 20, paddingTop: HEADER_TOP, paddingBottom: 12, gap: 12 },
   title:    { color: c.text, fontSize: 28, fontWeight: '800' },
   subtitle: { color: c.textDim, fontSize: 13, marginTop: 2 },
   scanBtn:  { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: c.primary, paddingHorizontal: 14, paddingVertical: 9, borderRadius: 12 },

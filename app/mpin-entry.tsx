@@ -1,6 +1,7 @@
 // app/mpin-entry.tsx — existing user enters their 6-digit MPIN.
 // /auth/mpin/verify issues JWTs (server enforces 5-try / 15-min lockout) → Chats.
 
+import { HEADER_TOP } from '../constants/layout';
 import { Ionicons } from '@expo/vector-icons';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { useMemo, useRef, useState } from 'react';
@@ -66,7 +67,7 @@ export default function MpinEntry() {
 
 const makeStyles = (c: Palette) => StyleSheet.create({
   screen: { flex: 1, backgroundColor: c.bg },
-  back: { paddingTop: 56, paddingHorizontal: 20 },
+  back: { paddingTop: HEADER_TOP, paddingHorizontal: 20 },
   backTxt: { color: c.text, fontSize: 26 },
   body: { flex: 1, paddingHorizontal: 24, paddingTop: 40, alignItems: 'center' },
   lock: { fontSize: 44, marginBottom: 12 },

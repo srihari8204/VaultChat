@@ -4,6 +4,7 @@
 // Links look like https://vaultchat.app/join/CODE. Admins set an optional
 // expiry and revoke anytime. No Firestore.
 
+import { HEADER_TOP } from '../constants/layout';
 import { brandAlpha } from '../constants/theme';
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
@@ -191,7 +192,7 @@ export default function InviteLinkScreen() {
 
 const makeStyles = (c: Palette) => StyleSheet.create({
   container: { flex: 1, backgroundColor: c.bg },
-  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingTop: 54, paddingHorizontal: 16, paddingBottom: 12 },
+  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingTop: HEADER_TOP, paddingHorizontal: 16, paddingBottom: 12 },
   backBtn: { width: 40, height: 40, justifyContent: 'center', alignItems: 'center' },
   title: { color: c.text, fontSize: 18, fontWeight: '800' },
   body: { flex: 1, padding: 16 },

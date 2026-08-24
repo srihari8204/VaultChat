@@ -2,6 +2,7 @@
 // (≥3 must match) → recovery ticket. Phase 2: set + confirm a new 6-digit MPIN
 // (weak rejected) → logged in → Chats.
 
+import { HEADER_TOP } from '../constants/layout';
 import { Ionicons } from '@expo/vector-icons';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { useEffect, useMemo, useRef, useState } from 'react';
@@ -137,7 +138,7 @@ export default function MpinRecover() {
 
 const makeStyles = (c: Palette) => StyleSheet.create({
   screen: { flex: 1, backgroundColor: c.bg },
-  body: { padding: 24, paddingTop: 56, paddingBottom: 48 },
+  body: { padding: 24, paddingTop: HEADER_TOP, paddingBottom: 48 },
   back: { marginBottom: 8 },
   backTxt: { color: c.text, fontSize: 26 },
   title: { color: c.text, fontSize: 24, fontWeight: '900' },

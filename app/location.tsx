@@ -1,3 +1,4 @@
+import { HEADER_TOP } from '../constants/layout';
 import { Ionicons } from '@expo/vector-icons';
 // app/location.tsx — Location sharing (real, full-stack).
 //
@@ -276,7 +277,7 @@ export default function LocationScreen() {
 const makeStyles = (c: Palette) => StyleSheet.create({
   container: { flex: 1, backgroundColor: c.bg },
   center: { justifyContent: 'center', alignItems: 'center', padding: 32 },
-  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingTop: 54, paddingBottom: 12, paddingHorizontal: 16, borderBottomWidth: 1, borderBottomColor: c.border },
+  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingTop: HEADER_TOP, paddingBottom: 12, paddingHorizontal: 16, borderBottomWidth: 1, borderBottomColor: c.border },
   back: { color: c.text, fontSize: 32, fontWeight: '300', marginTop: -4 },
   title: { color: c.text, fontSize: 17, fontWeight: '800' },
 

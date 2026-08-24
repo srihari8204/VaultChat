@@ -3,6 +3,7 @@
 // A community is an umbrella over group chats with an auto-created Announcements
 // group. List your communities → open one → see its groups → tap to chat.
 
+import { HEADER_TOP } from '../constants/layout';
 import React, { useCallback, useMemo, useState } from 'react';
 import {
   View, Text, FlatList, TouchableOpacity, StyleSheet, Modal, TextInput, Alert, ActivityIndicator,
@@ -191,7 +192,7 @@ export default function CommunitiesScreen() {
 const makeStyles = (c: Palette) => StyleSheet.create({
   screen:  { flex: 1, backgroundColor: c.bg },
   center:  { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 10, paddingHorizontal: 40 },
-  header:  { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 12, paddingTop: 54, paddingBottom: 12, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.border },
+  header:  { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 12, paddingTop: HEADER_TOP, paddingBottom: 12, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.border },
   hBtn:    { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
   hTitle:  { flex: 1, color: c.text, fontSize: 18, fontWeight: '700' },
 

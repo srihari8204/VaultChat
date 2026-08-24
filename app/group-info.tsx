@@ -11,6 +11,7 @@
 // Backend: GET /chats/:id, PATCH /chats/:id, POST /chats/:id/members,
 // DELETE /chats/:id/members/:userId
 
+import { HEADER_TOP } from '../constants/layout';
 import * as ImagePicker from 'expo-image-picker';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useEffect, useState , useMemo} from 'react';
@@ -531,7 +532,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   screen:        { flex: 1, backgroundColor: c.bg },
   center:        { justifyContent: 'center', alignItems: 'center' },
 
-  header:        { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingTop: 56, paddingBottom: 8, gap: 8 },
+  header:        { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingTop: HEADER_TOP, paddingBottom: 8, gap: 8 },
   backBtn:       { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
   backTxt:       { color: c.text, fontSize: 26, fontWeight: '600' },
   titleBar:      { color: c.text, fontSize: 22, fontWeight: '800' },

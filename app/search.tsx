@@ -2,6 +2,7 @@
 // searches message CONTENT across all chats, entirely on-device against the
 // local plaintext cache (zero-knowledge — the server never sees the query).
 
+import { HEADER_TOP } from '../constants/layout';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { useEffect, useMemo, useRef, useState } from 'react';
@@ -150,7 +151,7 @@ export default function SearchScreen() {
 
 const makeStyles = (c: Palette) => StyleSheet.create({
   screen:     { flex: 1, backgroundColor: c.bg },
-  header:     { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingTop: 56, paddingBottom: 12, gap: 8, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.border },
+  header:     { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingTop: HEADER_TOP, paddingBottom: 12, gap: 8, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.border },
   backBtn:    { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
   input:      { flex: 1, color: c.text, backgroundColor: c.card, borderRadius: 22, paddingHorizontal: 16, paddingVertical: 10, fontSize: 15 },
   empty:      { alignItems: 'center', paddingTop: 64, paddingHorizontal: 32 },

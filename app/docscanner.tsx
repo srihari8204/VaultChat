@@ -5,6 +5,7 @@
 // it into a chat as a file attachment. Recent docs are the real PDFs produced on
 // this device. No fake OCR, no fabricated "AES-256" claim, no simulated progress.
 
+import { HEADER_TOP } from '../constants/layout';
 import { Ionicons } from '@expo/vector-icons';
 import { brandAlpha } from '../constants/theme';
 import * as ImagePicker from 'expo-image-picker';
@@ -485,7 +486,7 @@ export default function DocScannerScreen() {
 
 const makeStyles = (c: Palette) => StyleSheet.create({
   container: { flex: 1, backgroundColor: '#FFFFFF' },
-  header: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 18, paddingTop: 50, paddingBottom: 14, gap: 10 },
+  header: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 18, paddingTop: HEADER_TOP, paddingBottom: 14, gap: 10 },
   title: { color: '#fff', fontSize: 20, fontWeight: '900' },
   backBtn: { width: 36, height: 36, borderRadius: 18, backgroundColor: 'rgba(10,22,40,0.8)', justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: 'rgba(255,255,255,0.06)' },
   sectionLabel: { color: 'rgba(255,255,255,0.22)', fontSize: 9, fontWeight: '800', letterSpacing: 2, marginBottom: 8 },

@@ -1,3 +1,4 @@
+import { HEADER_TOP } from '../constants/layout';
 import { LinearGradient } from "expo-linear-gradient";
 import { Camera } from "expo-camera";
 import * as Contacts from "expo-contacts";
@@ -128,7 +129,7 @@ export default function PermissionsScreen() {
 }
 
 const S = StyleSheet.create({
-  container:{ flex:1,padding:24,paddingTop:60 },
+  container:{ flex:1,padding:24,paddingTop:HEADER_TOP },
   header:   { alignItems:"center",marginBottom:24,gap:10 },
   badge:    { width:80,height:80,borderRadius:40,backgroundColor:"rgba(74,159,255,0.12)",borderWidth:1.5,borderColor:"rgba(74,159,255,0.3)",justifyContent:"center",alignItems:"center" },
   title:    { color:"#fff",fontSize:24,fontWeight:"900" },

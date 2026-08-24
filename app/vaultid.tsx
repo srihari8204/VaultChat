@@ -1,3 +1,4 @@
+import { HEADER_TOP } from '../constants/layout';
 import { BRAND_ACCENT } from '../constants/theme';
 import { ErrorBoundary } from '../components/ErrorBoundary';
 import { Ionicons } from '@expo/vector-icons';
@@ -386,7 +387,7 @@ function VaultIDScreenContent() {
 }
 
 const S = StyleSheet.create({
-  container:{paddingHorizontal:20,paddingTop:50,paddingBottom:40},
+  container:{paddingHorizontal:20,paddingTop:HEADER_TOP,paddingBottom:40},
   header:{flexDirection:'row',alignItems:'center',marginBottom:20,gap:12},
   backBtn:{width:36,height:36,borderRadius:18,backgroundColor:'#F9FAFB',justifyContent:'center',alignItems:'center',borderWidth:1,borderColor:'#0D1E3A'},
   headerTitle:{color:'#fff',fontSize:20,fontWeight:'900'},

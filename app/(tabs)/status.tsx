@@ -17,6 +17,7 @@
 // Visibility / TTL / per-viewer tracking happens server-side. This screen
 // just renders + posts.
 
+import { HEADER_TOP } from '../../constants/layout';
 import * as ImagePicker from 'expo-image-picker';
 import { compressForStatus } from '../../lib/media/compressMedia';
 import GatePicker, { type GateDraft } from '../../components/status/GatePicker';
@@ -567,12 +568,12 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   screen:       { flex: 1, backgroundColor: c.bg },
   center:       { justifyContent: 'center', alignItems: 'center' },
 
-  header:       { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 20, paddingTop: 56, paddingBottom: 16, justifyContent: 'space-between' },
+  header:       { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 20, paddingTop: HEADER_TOP, paddingBottom: 16, justifyContent: 'space-between' },
   title:        { color: c.text, fontSize: 28, fontWeight: '800' },
   headerBtn:    { width: 40, height: 40, borderRadius: 20, backgroundColor: c.card, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: c.border },
   headerBtnTxt: { color: c.primary, fontSize: 22, fontWeight: '600', marginTop: -2 },
   // Text status composer
-  textCompose:      { flex: 1, paddingTop: 48 },
+  textCompose:      { flex: 1, paddingTop: HEADER_TOP },
   textComposeBar:   { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingBottom: 8 },
   bgSwatch:         { width: 22, height: 22, borderRadius: 11, borderWidth: 1, borderColor: 'rgba(255,255,255,0.4)' },
   bgSwatchOn:       { borderWidth: 3, borderColor: '#fff' },
@@ -582,7 +583,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   emojiGrid:        { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', paddingHorizontal: 8 },
   emojiSection:     { color: 'rgba(255,255,255,0.6)', fontSize: 11, fontWeight: '700', letterSpacing: 1, paddingHorizontal: 14, paddingTop: 8, paddingBottom: 2 },
 
-  previewScreen:    { flex: 1, backgroundColor: '#000', paddingTop: 48 },
+  previewScreen:    { flex: 1, backgroundColor: '#000', paddingTop: HEADER_TOP },
   previewBar:       { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingBottom: 8 },
   previewCount:     { color: '#fff', fontSize: 14, fontWeight: '700' },
   previewMain:      { flex: 1, alignItems: 'center', justifyContent: 'center' },

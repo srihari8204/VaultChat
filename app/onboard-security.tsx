@@ -2,6 +2,7 @@
 // Answers are held in the store and only sent (argon2-hashed server-side) after
 // the MPIN is set. Each row excludes questions chosen by the others.
 
+import { HEADER_TOP } from '../constants/layout';
 import { Ionicons } from '@expo/vector-icons';
 import { Stack, useRouter } from 'expo-router';
 import { useMemo, useState } from 'react';
@@ -68,7 +69,7 @@ export default function OnboardSecurity() {
 
 const makeStyles = (c: Palette) => StyleSheet.create({
   screen: { flex: 1, backgroundColor: c.bg },
-  body: { padding: 24, paddingTop: 56, paddingBottom: 48 },
+  body: { padding: 24, paddingTop: HEADER_TOP, paddingBottom: 48 },
   back: { marginBottom: 8 },
   backTxt: { color: c.text, fontSize: 26 },
   title: { color: c.text, fontSize: 24, fontWeight: '900' },

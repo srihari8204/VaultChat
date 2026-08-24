@@ -6,6 +6,7 @@
 // red), audio/video kind, time + duration. Tap = redial; long-press = menu;
 // the info button opens a call detail. A FAB starts a new call.
 
+import { HEADER_TOP } from '../../constants/layout';
 import { useCallback, useMemo, useState } from 'react';
 import { FlatList, StyleSheet, Text, TouchableOpacity, View, Alert, Modal, Pressable, ScrollView } from 'react-native';
 import { useFocusEffect, useRouter } from 'expo-router';
@@ -294,7 +295,7 @@ export default function CallsScreen() {
 
 const makeStyles = (c: Palette) => StyleSheet.create({
   screen:  { flex: 1, backgroundColor: c.bg },
-  header:  { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingTop: 56, paddingBottom: 12 },
+  header:  { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingTop: HEADER_TOP, paddingBottom: 12 },
   title:   { color: c.text, fontSize: 28, fontWeight: '800' },
   sectionLabel: { color: c.textDim, fontSize: 12, fontWeight: '700', letterSpacing: 1, marginHorizontal: 16, marginTop: 8, marginBottom: 4 },
 

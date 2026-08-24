@@ -14,6 +14,7 @@
 // over the wire, and the server only sees hashes for users who opted in to
 // `discoverable=TRUE`.
 
+import { HEADER_TOP } from '../constants/layout';
 import { Ionicons } from '@expo/vector-icons';
 import * as Contacts from 'expo-contacts';
 import { useRouter } from 'expo-router';
@@ -296,7 +297,7 @@ export default function ContactsScreen() {
 
 const makeStyles = (c: Palette) => StyleSheet.create({
   screen:        { flex: 1, backgroundColor: c.bg },
-  header:        { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingTop: 56, paddingBottom: 12, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.border, gap: 8 },
+  header:        { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingTop: HEADER_TOP, paddingBottom: 12, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.border, gap: 8 },
   backBtn:       { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
   backTxt:       { color: c.text, fontSize: 24 },
   title:         { color: c.text, fontSize: 18, fontWeight: '700', flex: 1 },

@@ -3,6 +3,7 @@
 // emoji allowed). "Next" → security questions. Nothing is sent yet — all held in
 // the in-memory onboarding store until /auth/profile/init at the end of the chain.
 
+import { HEADER_TOP } from '../constants/layout';
 import { Ionicons } from '@expo/vector-icons';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import * as ImagePicker from 'expo-image-picker';
@@ -153,7 +154,7 @@ export default function OnboardProfile() {
 
 const makeStyles = (c: Palette) => StyleSheet.create({
   screen: { flex: 1, backgroundColor: c.bg },
-  body: { padding: 24, paddingTop: 56, paddingBottom: 48 },
+  body: { padding: 24, paddingTop: HEADER_TOP, paddingBottom: 48 },
   back: { marginBottom: 8 },
   backTxt: { color: c.text, fontSize: 26 },
   title: { color: c.text, fontSize: 24, fontWeight: '900' },
