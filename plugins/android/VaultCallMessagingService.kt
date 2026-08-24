@@ -74,6 +74,7 @@ class VaultCallMessagingService : FirebaseMessagingService() {
             "incoming_call" -> showIncoming(data)
             "games_turn" -> showGameTurn(data)
             "call_cancelled" -> handleCancel(data["callId"])
+            "screenshot" -> showScreenshot(data)
             "message" -> {
                 // A notification alone left the sender on ONE TICK: nothing
                 // synced and nothing was acknowledged until the user opened the
@@ -166,6 +167,57 @@ class VaultCallMessagingService : FirebaseMessagingService() {
             .build()
         // Tag by chatId: one collapsed notification per chat (newest replaces).
         nm.notify(chatId, MSG_NOTIF_ID, n)
+    }
+
+    /**
+     * "Someone screenshotted your chat."
+     *
+     * The socket event this accompanies only reaches a device that has THAT
+     * chat open at that moment, which is the least likely state to be in when
+     * somebody screenshots you. This covers every other state.
+     *
+     * Content-free like the message doorbell: the push carries only
+     * { type:"screenshot", chatId }, so neither the chat name nor the
+     * capturer's name transits Google. The title is resolved locally from the
+     * chat directory JS keeps in SharedPreferences.
+     *
+     * Foreground is skipped for the same reason showMessage skips it: the
+     * in-app banner has already said this, and two alerts for one event reads
+     * like two screenshots.
+     *
+     * NOT tagged by chatId and NOT collapsed, unlike messages: three
+     * screenshots is materially different information from one, and a
+     * collapsing "3 new" counter would hide when they happened.
+     */
+    private fun showScreenshot(data: Map<String, String>) {
+        val chatId = data["chatId"] ?: return
+        if (isAppForeground()) return
+
+        val prefs = getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        val who = try {
+            org.json.JSONObject(prefs.getString(KEY_CHAT_DIR, "{}") ?: "{}").optString(chatId, "")
+        } catch (_: Throwable) { "" }
+
+        val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        ensureMessagesChannel()
+
+        val launch = packageManager.getLaunchIntentForPackage(packageName)?.apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP
+            putExtra("vc_action", "open_chat")
+            putExtra("vc_chat_id", chatId)
+        } ?: Intent()
+        val pi = PendingIntent.getActivity(this, ("ss" + chatId).hashCode(), launch, piFlags())
+
+        val n = NotificationCompat.Builder(this, MESSAGES_CHANNEL)
+            .setSmallIcon(applicationInfo.icon)
+            .setContentTitle(if (who.isBlank()) "Screenshot taken" else "Screenshot in $who")
+            .setContentText("Someone took a screenshot of this chat.")
+            .setCategory(NotificationCompat.CATEGORY_MESSAGE)
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setAutoCancel(true)
+            .setContentIntent(pi)
+            .build()
+        nm.notify("ss:" + chatId, MSG_NOTIF_ID, n)
     }
 
     /**
