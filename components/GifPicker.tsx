@@ -137,7 +137,12 @@ export default function GifPicker({ visible, onClose, onSelect, initialTab = 'gi
             placeholderTextColor={colors.textDim}
             value={query}
             onChangeText={q => { setQuery(q); queueSearch(q, tab); }}
-            autoFocus
+            // NO autoFocus. Tapping the sticker button opened this sheet AND
+            // raised the keyboard, which then covered the stickers you came to
+            // pick — you had to dismiss the keyboard before you could use the
+            // thing you just opened. The tab you land on already shows trending
+            // content without a query, so the search field is the exception, not
+            // the entry point. Tap it when you actually want to search.
           />
           {/* "Powered by KLIPY" belongs NEXT TO THE SEARCH BAR and must stay
               visible the whole time the selector is open — that is where their

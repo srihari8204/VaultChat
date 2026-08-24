@@ -2628,12 +2628,6 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
               </Text>
             </View>
           )}
-          {/* Live Chat Viewers (#58): who's viewing right now — tap for details */}
-          {chatViewers.length > 0 && (
-            <View style={{ marginTop: 3 }}>
-              <ViewerStack viewers={chatViewers} resolve={resolveViewer} />
-            </View>
-          )}
         </View>
         {chat?.type === 'direct' && meId && (() => {
           const peer = chat.members.find(m => m.userId !== meId);
@@ -2990,6 +2984,19 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
               <Text style={S.mentionName} numberOfLines={1}>{m.name || m.email}</Text>
             </TouchableOpacity>
           ))}
+        </View>
+      )}
+
+      {/* Live Chat Viewers (#58): who's viewing right now — tap for details.
+          MOVED OUT OF THE HEADER. It sat under the title, where it pushed the
+          header taller the moment anyone opened the chat — a header that grows
+          when a second person looks at it is the worst place for it on a small
+          screen. Down here it sits with the typing line, directly above the
+          composer: both answer "what is the other person doing right now", and
+          both belong next to where you are about to reply. */}
+      {chatViewers.length > 0 && (
+        <View style={S.typingBar}>
+          <ViewerStack viewers={chatViewers} resolve={resolveViewer} />
         </View>
       )}
 
