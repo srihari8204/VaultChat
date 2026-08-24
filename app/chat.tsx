@@ -258,6 +258,20 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
   useEffect(() => { preloadViewedOnce(); preloadRevoked(); }, []);
 
   const [meId,      setMeId]      = useState<string | null>(null);
+  // meId ALSO as a ref, because the socket handlers below must not depend on
+  // the closure they were created in. It loads asynchronously, so a handler
+  // subscribed before it resolves captures null forever — and `x === null` is
+  // false for every real id, so each self-check fails OPEN rather than closed:
+  // the device that took a screenshot banners ITSELF, your own typing comes
+  // back at you, your own messages count as incoming.
+  //
+  // Adding meId to the effect's deps looked like the fix and was not: it
+  // re-subscribes, and the observed result was the event arriving TWICE with
+  // the stale null handler still attached. A ref is read at call time, so there
+  // is one subscription and it always sees the current value.
+  // (app/(tabs)/chats.tsx already does exactly this for the same reason.)
+  const meIdRef = useRef<string | null>(null);
+  useEffect(() => { meIdRef.current = meId; }, [meId]);
   const [chat,      setChat]      = useState<ChatDetail | null>(null);
   const [messages,  setMessages]  = useState<DisplayMessage[]>([]);
   // Guaranteed-unique render list: dedupe by the SAME key the FlatList uses
@@ -774,6 +788,8 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
         if (cancelled) return;
 
         const onNew = (m: Message) => {
+
+          const me = meIdRef.current;
           if (m.chatId !== chatId) return;
           // Socket payloads deliver `id` as a STRING, but the HTTP ack / cache use
           // a NUMBER. Normalize so `x.id === m.id` dedup works — otherwise the
@@ -781,7 +797,7 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
           // row and both collide on the same React key.
           if (m.id != null) (m as any).id = Number(m.id);
           // Tone immediately; the DELIVERY ACK deliberately does not fire here.
-          if (m.senderId !== meId) {
+          if (m.senderId !== me) {
             playReceived();   // in-app "received" tone (respects sound prefs)
           }
           // Decrypt-on-arrival (WhatsApp-style): decrypt ONCE, then show + cache
@@ -824,13 +840,14 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
             // re-fetches the message on the next reconnect.
             try {
               await applyMessage(chatId, fin);   // persist plaintext to local cache
-              if (fin.senderId !== meId) markDeliveredDurable(chatId, fin.id).catch(() => {});
+              if (fin.senderId !== me) markDeliveredDurable(chatId, fin.id).catch(() => {});
             } catch { /* not on disk → do NOT ack; catch-up re-delivers it */ }
             // Bump the "↓ N new" counter when a message lands while scrolled up.
-            if (!atBottomRef.current && fin.senderId !== meId) setNewSinceUp(n => n + 1);
+            if (!atBottomRef.current && fin.senderId !== me) setNewSinceUp(n => n + 1);
           })();
         };
         const onMemberDelivered = (e: { userId: string; lastDeliveredMessageId: number }) => {
+          const me = meIdRef.current;
           if (!e?.userId) return;
           setChat(prev => prev ? {
             ...prev,
@@ -847,6 +864,7 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
           void queueNoteDelivered(chatId, Number(e.lastDeliveredMessageId));
         };
         const onMemberRead = (e: { userId: string; lastReadMessageId: number }) => {
+          const me = meIdRef.current;
           if (!e?.userId) return;
           setChat(prev => prev ? {
             ...prev,
@@ -856,30 +874,34 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
           } : prev);
         };
         const onEdit = (e: { id: number; content: string; editedAt: string }) => {
+          const me = meIdRef.current;
           const eid = Number(e.id); // socket delivers id as string; rows hold numbers
           setMessages(prev => prev.map(x =>
             x.id === eid ? { ...x, content: e.content, editedAt: e.editedAt } : x
           ));
         };
         const onDelete = (e: { id: number; deletedAt: string }) => {
+          const me = meIdRef.current;
           const eid = Number(e.id); // socket delivers id as string; rows hold numbers
           setMessages(prev => prev.map(x =>
             x.id === eid ? { ...x, content: null, deletedAt: e.deletedAt, type: 'system' } : x
           ));
         };
         const onTypingStart = (e: { uid: string; chatId?: string }) => {
+          const me = meIdRef.current;
           // Fail closed while our own id is unknown — see the same guard in
           // (tabs)/chats.tsx. `e.uid === null` is false for every real id, so
           // without this the self-check silently stops guarding and the banner
           // reads "… is typing" back at the person doing the typing.
-          if (!meId) return;
-          if (!e?.uid || e.uid === meId || (e.chatId && e.chatId !== chatId)) return;
+          if (!me) return;
+          if (!e?.uid || e.uid === me || (e.chatId && e.chatId !== chatId)) return;
           setTypingUids(prev => {
             if (prev.has(e.uid)) return prev;
             const next = new Set(prev); next.add(e.uid); return next;
           });
         };
         const onTypingStop = (e: { uid: string; chatId?: string }) => {
+          const me = meIdRef.current;
           if (!e?.uid || (e.chatId && e.chatId !== chatId)) return;
           setTypingUids(prev => {
             if (!prev.has(e.uid)) return prev;
@@ -888,6 +910,8 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
         };
 
         const onPresence = (e: { userId: string; online: boolean; lastSeenAt: string | null }) => {
+
+          const me = meIdRef.current;
           if (!e?.userId) return;
           setChat(prev => prev ? {
             ...prev,
@@ -900,9 +924,14 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
         // Reactions are now E2EE reference-messages in the ordered stream (F4) —
         // no separate reaction_added/removed socket events, no legacy fetch.
         const onScreenshotCaptured = (e: { chatId: string; capturedBy: string; capturedAt: string }) => {
+          const me = meIdRef.current;
           // Server already filters to chat members — but ignore the
           // echo of our own capture and any cross-chat noise.
-          if (!e || e.chatId !== chatId || e.capturedBy === meId) return;
+          // Fail closed while our own id is unknown: an unfiltered echo means
+          // the person who took the screenshot gets the "someone captured your
+          // content" banner, and the person it was taken from gets nothing.
+          if (!me) return;
+          if (!e || e.chatId !== chatId || e.capturedBy === me) return;
           setScreenshotBanner({ by: e.capturedBy, at: e.capturedAt });
         };
         // Poll-vote live updates. Server emits one event per (user, option)
@@ -911,12 +940,14 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
         // (new option). Each handler patches counts + the caller's `mine`
         // set in place — no refetch needed.
         const onPollVoted = (e: { messageId: number; userId: string; optionIndex: number }) => {
+          const me = meIdRef.current;
           if (!e?.messageId) return;
-          setPollVotes(prev => bumpPollVote(prev, e.messageId, e.optionIndex, +1, e.userId === meId));
+          setPollVotes(prev => bumpPollVote(prev, e.messageId, e.optionIndex, +1, e.userId === me));
         };
         const onPollUnvoted = (e: { messageId: number; userId: string; optionIndex: number }) => {
+          const me = meIdRef.current;
           if (!e?.messageId) return;
-          setPollVotes(prev => bumpPollVote(prev, e.messageId, e.optionIndex, -1, e.userId === meId));
+          setPollVotes(prev => bumpPollVote(prev, e.messageId, e.optionIndex, -1, e.userId === me));
         };
 
         // VaultView remote revoke. The sender destroyed the media server-side;
@@ -924,6 +955,7 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
         // repaints the bubble as a tombstone. Irreversible by design — see
         // lib/protectedMedia.
         const onMediaRevoked = (e: { chatId: string; messageId: number; attachmentId: string }) => {
+          const me = meIdRef.current;
           if (!e?.attachmentId || e.chatId !== chatId) return;
           wipeRevokedMedia(e.attachmentId).catch(() => {});
           setMessages(prev => prev.map(m =>
@@ -933,7 +965,9 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
         };
 
         const onLiveLocation = (e: any) => {
-          if (!e?.userId || e.userId === meId) return;
+
+          const me = meIdRef.current;
+          if (!e?.userId || e.userId === me) return;
           if (e.blob) {
             // E2E path: decrypt the relayed blob with the per-session key the peer
             // delivered in the initial 'location' message. No key yet → ignore
@@ -948,6 +982,7 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
           }
         };
         const onLiveLocationStop = (e: any) => {
+          const me = meIdRef.current;
           setLiveLoc(prev => (prev && e?.userId === prev.userId) ? null : prev);
           if (e?.userId) clearLiveKey(chatId, e.userId);
         };
@@ -1017,6 +1052,19 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
     }).catch(() => {});
     return () => { cancel = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
+    // meId IS A DEPENDENCY, and leaving it out was the bug behind several
+    // symptoms at once. It loads asynchronously, so without it every handler
+    // above closed over the INITIAL null for the life of the screen — and
+    // `x === null` is false for every real id, so each self-check did not fail
+    // cautious, it failed OPEN:
+    //   * screenshot_captured — the device that took the shot bannered ITSELF
+    //     instead of the other side ("I get it, they don't")
+    //   * typing_start        — your own typing shown back at you
+    //   * new_message         — own messages treated as incoming (delivery
+    //     receipts marked, unread counter bumped for things you sent)
+    //   * poll_voted          — your own vote not marked as yours
+    // With meId here the effect re-subscribes once the id resolves and every
+    // one of those comparisons starts working against a real value.
   }, [chatId, pollIdKey]);
 
   // ── Mark-as-read (debounced) ──────────────────────────────
@@ -1399,6 +1447,12 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
     const peerNotify = chat.peerWantsCaptureNotice ?? true;
     const allowsCapture = !peerBlocks;
     const reportsCapture = peerNotify;
+    // Observable, because this feature is invisible until it fails: nothing in
+    // the UI says whether the listener armed or what policy the peers set, so a
+    // silent no-op looked identical to a working one.
+    // One line, no ids: this feature is invisible until it fails, and a silent
+    // no-op looked identical to a working one for the whole of this bug.
+    console.log(`[screenshot] policy blocks=${peerBlocks} notify=${peerNotify}`);
 
     if (allowsCapture) {
       ScreenCapture.allowScreenCaptureAsync().catch(() => {});
@@ -1410,7 +1464,8 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
     if (reportsCapture) {
       try {
         sub = ScreenCapture.addScreenshotListener(() => {
-          reportScreenshotCaptured(chatId).catch(() => {});
+          reportScreenshotCaptured(chatId)
+            .catch((e) => console.warn('[screenshot] report failed:', e?.message));
           // Record the capture in the on-device tamper-evident audit chain so it
           // surfaces in the Alerts tab (#41). Real local event — the inbound
           // "someone captured your content" alert is delivered separately (W7).
