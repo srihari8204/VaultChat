@@ -7,7 +7,8 @@
 // import a module it otherwise has no business depending on.
 
 import { useMemo } from 'react';
-import { StyleSheet } from 'react-native';
+import { StyleSheet, useWindowDimensions } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '../../lib/theme';
 import { type Palette, ELEVATION, brandAlpha } from '../../constants/theme';
 import { type Message } from '../../lib/chatService';
@@ -33,9 +34,36 @@ export type DisplayMessage = Message & {
   _album?: DisplayMessage[];
 };
 
+/**
+ * Device metrics the chat stylesheet needs.
+ *
+ * WHY THIS EXISTS: the header used to hardcode `paddingTop: 56` to clear the
+ * status bar. 56 is roughly right on a tall modern phone and badly wrong
+ * everywhere else — on a short or small-density screen it ate a chunk of the
+ * conversation for nothing, which is what "the header occupies more space"
+ * reports. The status bar is a number the OS already knows; ask it.
+ *
+ * `narrow` drives the second half of the problem. The header packs an avatar,
+ * a title block and up to five 40pt icon buttons; below ~360dp those stop
+ * fitting and the trailing ones get pushed off-screen. Shrinking the touch
+ * targets to 36pt there keeps every control reachable — still above the 32pt
+ * floor where a target becomes genuinely hard to hit.
+ */
+export type ChatMetrics = { topInset: number; bottomInset: number; narrow: boolean };
+
 export function useS() {
   const { colors } = useTheme();
-  return useMemo(() => makeStyles(colors), [colors]);
+  const insets = useSafeAreaInsets();
+  const { width } = useWindowDimensions();
+  const m: ChatMetrics = {
+    topInset: insets.top,
+    bottomInset: insets.bottom,
+    narrow: width < 360,
+  };
+  return useMemo(
+    () => makeStyles(colors, m),
+    [colors, m.topInset, m.bottomInset, m.narrow],
+  );
 }
 
 // Pick black or white text for legibility on an arbitrary bubble color.
@@ -54,7 +82,14 @@ export const HL = StyleSheet.create({
   mention:   { color: '#34D399', fontWeight: '700' },
 });
 
-export const makeStyles = (c: Palette) => StyleSheet.create({
+// `m` is optional so the one other caller (MessageBubble's direct makeStyles
+// import) keeps working unchanged; it renders bubbles, not the header, so the
+// fallback never reaches a visible edge. The fallback mirrors a typical status
+// bar rather than the old 56 — an unmeasured guess should not be the tall one.
+export const makeStyles = (
+  c: Palette,
+  m: ChatMetrics = { topInset: 24, bottomInset: 0, narrow: false },
+) => StyleSheet.create({
   screen:        { flex: 1, backgroundColor: c.chatBg },
   lockGate:      { ...StyleSheet.absoluteFillObject, backgroundColor: c.bg, alignItems: 'center', justifyContent: 'center', padding: 32, zIndex: 50 },
   lockGateTitle: { color: c.text, fontSize: 20, fontWeight: '800', marginTop: 16 },
@@ -66,10 +101,13 @@ export const makeStyles = (c: Palette) => StyleSheet.create({
   lockGateBack:  { color: c.textDim, fontSize: 14, fontWeight: '600' },
   center:        { justifyContent: 'center', alignItems: 'center' },
 
-  header:        { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingTop: 56, paddingBottom: 12, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.border, gap: 8, backgroundColor: c.bg },
-  headerIconBtn: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
-  headerIcon:    { fontSize: 20 },
-  headerAvatarWrap:  { width: 36, height: 36 },
+  // paddingTop is the REAL status-bar height plus a small breathing gap, not a
+  // fixed 56. Vertical padding tightens on narrow devices, where the header was
+  // costing more of the conversation than the conversation could spare.
+  header:        { flexDirection: 'row', alignItems: 'center', paddingHorizontal: m.narrow ? 8 : 12, paddingTop: m.topInset + (m.narrow ? 4 : 6), paddingBottom: m.narrow ? 6 : 8, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.border, gap: m.narrow ? 4 : 8, backgroundColor: c.bg },
+  headerIconBtn: { width: m.narrow ? 36 : 40, height: m.narrow ? 36 : 40, alignItems: 'center', justifyContent: 'center' },
+  headerIcon:    { fontSize: m.narrow ? 18 : 20 },
+  headerAvatarWrap:  { width: m.narrow ? 32 : 36, height: m.narrow ? 32 : 36 },
   // Scroll-to-bottom FAB
   scrollDownBtn:     { position: 'absolute', right: 14, bottom: 92, width: 44, height: 44, borderRadius: 22, backgroundColor: c.surfaceSolid, borderWidth: StyleSheet.hairlineWidth, borderColor: c.border, alignItems: 'center', justifyContent: 'center', ...ELEVATION.md, shadowColor: '#000' },
   scrollDownBadge:   { position: 'absolute', top: -5, right: -5, minWidth: 20, height: 20, borderRadius: 10, backgroundColor: c.primary, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 5, borderWidth: 2, borderColor: c.bg },
@@ -96,7 +134,9 @@ export const makeStyles = (c: Palette) => StyleSheet.create({
   photoActions:      { flexDirection: 'row', justifyContent: 'space-around', paddingVertical: 12, backgroundColor: c.surfaceSolid },
   photoActionBtn:    { alignItems: 'center', gap: 4, paddingHorizontal: 6 },
   photoActionTxt:    { color: c.primary, fontSize: 12, fontWeight: '600' },
-  headerAvatar:      { width: 36, height: 36, borderRadius: 18, backgroundColor: c.primary, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
+  // Must track headerAvatarWrap exactly — a 36pt avatar inside a 32pt wrapper
+  // overflows into the title on the devices this change is for.
+  headerAvatar:      { width: m.narrow ? 32 : 36, height: m.narrow ? 32 : 36, borderRadius: m.narrow ? 16 : 18, backgroundColor: c.primary, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
   headerAvatarImg:   { width: '100%', height: '100%' },
   headerAvatarTxt:   { color: '#fff', fontWeight: '700', fontSize: 15 },
   headerPresenceDot: { position: 'absolute', right: -1, bottom: -1, width: 10, height: 10, borderRadius: 5, backgroundColor: '#22C55E', borderWidth: 2, borderColor: c.bg },

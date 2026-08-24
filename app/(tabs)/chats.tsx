@@ -258,6 +258,12 @@ export default function ChatsScreen() {
             ? { ...c, peerOnline: e.online, peerLastSeenAt: e.lastSeenAt ?? c.peerLastSeenAt } : c));
         };
         const onTyping = (e: { uid?: string; chatId?: string }) => {
+          // FAIL CLOSED WHEN WE DO NOT KNOW WHO WE ARE. `e.uid === null` is false
+          // for every real id, so without the first clause an event arriving
+          // before meId resolves skips the self-check entirely and the row shows
+          // "typing…" because YOU are typing. Dropping a typing event for the few
+          // ms before the id loads costs nothing — it is re-sent every keystroke.
+          if (!meIdRef.current) return;
           if (!e?.chatId || !e.uid || e.uid === meIdRef.current) return;
           setTypingChats(prev => { const n = new Set(prev); n.add(e.chatId!); return n; });
           clearTimeout(typingTimers.current[e.chatId]);

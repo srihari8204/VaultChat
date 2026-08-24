@@ -27,7 +27,12 @@ export function useChatViewers(opts: {
 
   // ── Listen for others (independent of whether I emit) ──────────────
   useEffect(() => {
-    if (!chatId) return;
+    // Also gated on meId, not just chatId. Every handler below decides "is this
+    // me?" with `id === meId`, and that comparison is FALSE for everyone while
+    // meId is still null — so subscribing early does not merely miss the filter,
+    // it adds US to the viewer list and renders our own "typing" back at us.
+    // The effect re-runs when meId arrives, so nothing is permanently lost.
+    if (!chatId || !meId) return;
     const mine = (id?: string) => id && id === meId;
 
     const onList = (d: any) => {

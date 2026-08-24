@@ -57,7 +57,7 @@ import {
   Text, TextInput, TouchableOpacity,
   View,
 } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
+import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { Swipeable } from 'react-native-gesture-handler';
 import * as Haptics from 'expo-haptics';
 import { Sheet, Avatar, type SheetAction as MenuAction } from '../components/ui';
@@ -67,6 +67,8 @@ import { getShareViewing } from '../lib/viewerPrefs';
 import type { ViewerActivity } from '../lib/socket';
 import LinkPreview, { extractUrl } from '../components/LinkPreview';
 import { extractFirstUrl, fetchPreviewFromDevice, type LinkPreviewData } from '../lib/linkPreview';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import MediaPicker from '../components/chat/MediaPicker';
 import GifPicker from '../components/GifPicker';
 import { LinearGradient } from 'expo-linear-gradient';
 import { getWallpaper, type WallpaperConfig } from './chat-wallpaper';
@@ -238,6 +240,19 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
     const h = Keyboard.addListener(hideEvt, () => setKbHeight(0));
     return () => { s.remove(); h.remove(); };
   }, []);
+  // THE COMPOSER'S BOTTOM GAP, and it is not just the keyboard.
+  //
+  // app.json sets edgeToEdgeEnabled, so this screen draws UNDER the system
+  // navigation bar. With the keyboard down the padding above was 0, which put
+  // the typing bar behind the nav bar / gesture pill — the "keyboard overlapping
+  // the typing bar" report, visible whenever the keyboard was closed.
+  //
+  // Not additive: an Android keyboard is measured from the physical bottom of
+  // the screen, so its height already spans the nav bar. Adding the inset on top
+  // would float the composer a nav-bar's height above the keyboard instead.
+  // Whichever is larger is the correct single gap in both states.
+  const insets = useSafeAreaInsets();
+  const composerGap = Math.max(kbHeight, insets.bottom);
 
   // Warm the "already viewed" set so view-once bubbles render as consumed
   // immediately (no flash of the shield) on first paint.
@@ -855,6 +870,11 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
           ));
         };
         const onTypingStart = (e: { uid: string; chatId?: string }) => {
+          // Fail closed while our own id is unknown — see the same guard in
+          // (tabs)/chats.tsx. `e.uid === null` is false for every real id, so
+          // without this the self-check silently stops guarding and the banner
+          // reads "… is typing" back at the person doing the typing.
+          if (!meId) return;
           if (!e?.uid || e.uid === meId || (e.chatId && e.chatId !== chatId)) return;
           setTypingUids(prev => {
             if (prev.has(e.uid)) return prev;
@@ -2123,6 +2143,7 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
   // ── Send a GIF (external Tenor URL — no upload; rendered from the URL) ──
   const sendGif = useCallback(async (url: string, preview: string) => {
     setGifOpen(false);
+    setEmojiOpen(false);   // the merged panel hosts the GIF tab — dismiss it too
     if (!url) return;
     try {
       // source marks WHERE this came from, so the bubble can show KLIPY's
@@ -2133,6 +2154,22 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
       setMessages(prev => prev.some(x => x.id === msg.id) ? prev : [msg, ...prev]);
     } catch (e: any) {
       Alert.alert('Could not send GIF', e?.message ?? 'Try again');
+    }
+  }, [chatId]);
+
+  // ── Send a sticker ────────────────────────────────────────
+  // Was app/stickers.tsx: a separate ROUTE that navigated away from the chat to
+  // send, then navigated back — losing scroll position and any draft on the way.
+  // Same send path as everything else (sendMessage → optimistic → E2EE → push),
+  // just without leaving the conversation.
+  const sendSticker = useCallback(async (glyph: string) => {
+    if (!glyph) return;
+    setEmojiOpen(false);
+    try {
+      const msg = await sendMessage(chatId, glyph, 'sticker');
+      setMessages(prev => prev.some(x => x.id === msg.id) ? prev : [msg, ...prev]);
+    } catch (e: any) {
+      Alert.alert('Could not send sticker', e?.message ?? 'Try again');
     }
   }, [chatId]);
 
@@ -2550,7 +2587,7 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
 
   return (
     <View
-      style={[S.screen, { paddingBottom: kbHeight }]}
+      style={[S.screen, { paddingBottom: composerGap }]}
       onLayout={e => setPaneH(e.nativeEvent.layout.height)}
     >
       {/* Per-chat wallpaper — painted behind the (transparent) message list */}
@@ -3066,7 +3103,13 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
 
       {/* Emoji panel (tap the 😊 icon) — inserts into the message input */}
       {emojiOpen && editingId == null && !recording && (
-        <EmojiPanel onPick={(e) => setInput(prev => (prev + e).slice(0, 4000))} />
+        <MediaPicker
+          initialTab="stickers"
+          onPickEmoji={(e) => setInput(prev => (prev + e).slice(0, 4000))}
+          onSendSticker={sendSticker}
+          onSendGif={sendGif}
+          onClose={() => setEmojiOpen(false)}
+        />
       )}
 
       {/* Composer — either normal or recording mode */}
@@ -3092,7 +3135,14 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
                 activeOpacity={0.7}
                 hitSlop={6}
               >
-                <Ionicons name={emojiOpen ? 'happy' : 'happy-outline'} size={24} color={emojiOpen ? colors.primary : colors.textDim} />
+                {/* Sticker, not a smiley: this one button now opens stickers,
+                    emoji and GIFs, and it opens ON stickers. Labelling it with a
+                    smiley would advertise the tab you land on second. */}
+                <MaterialCommunityIcons
+                  name={emojiOpen ? 'sticker' : 'sticker-emoji'}
+                  size={24}
+                  color={emojiOpen ? colors.primary : colors.textDim}
+                />
               </TouchableOpacity>
             )}
             <TextInput
@@ -3107,15 +3157,6 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
             />
             {editingId == null && (
               <>
-                <TouchableOpacity
-                  style={S.pillIconBtn}
-                  onPress={() => { setEmojiOpen(false); Keyboard.dismiss(); setGifOpen(true); }}
-                  disabled={sending}
-                  activeOpacity={0.7}
-                  hitSlop={6}
-                >
-                  <Ionicons name="film-outline" size={23} color={colors.textDim} />
-                </TouchableOpacity>
                 <TouchableOpacity
                   style={S.pillIconBtn}
                   onPress={onPressAttach}
