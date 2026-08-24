@@ -33,6 +33,13 @@
 set -euo pipefail
 DIR=/home/srihari/vaultchat-backups
 KEEP=14
+
+# Run from a directory this user can actually read. Every path below is
+# absolute, so the cwd is irrelevant to the work — but `find` restores its
+# initial working directory when it finishes, and if that directory is
+# unreadable (running as srihari from /root, say) it exits non-zero AFTER a
+# perfectly good backup and upload, making a successful run look like a failure.
+cd "$DIR"
 C=vaultchat-postgres-1
 U=$(docker exec "$C" printenv POSTGRES_USER)
 D=$(docker exec "$C" printenv POSTGRES_DB)

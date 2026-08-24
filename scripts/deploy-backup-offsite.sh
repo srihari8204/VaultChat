@@ -38,7 +38,11 @@ ssh "$HOST" "test -f $DIR/.offsite-key || (umask 077; openssl rand -base64 48 > 
 say "Test run (real backup + real upload)"
 # Runs as srihari, exactly as cron will. Anything that only works as root is a
 # bug that must surface now, not at 02:30 tomorrow.
-ssh "$HOST" "sudo -u srihari $LIVE" || die "test run failed — live script restored from /tmp/backup.sh.$STAMP.bak by hand if needed"
+#
+# `cd $DIR` first: sudo keeps root's cwd of /root, which srihari cannot read,
+# and find would then exit non-zero while restoring it — reporting failure after
+# a backup and upload that both succeeded.
+ssh "$HOST" "cd $DIR && sudo -u srihari $LIVE" || die "test run failed — restore with: cp /tmp/backup.sh.$STAMP.bak $LIVE"
 
 say "Confirming the object actually landed in R2"
 ssh "$HOST" '
