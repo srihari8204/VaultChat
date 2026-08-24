@@ -55,18 +55,17 @@ interface Props {
   onClose: () => void;
   onSelect: (url: string, previewUrl: string) => void;
   /**
-   * Render as a plain block instead of a dimmed bottom sheet, so the merged
-   * sticker/emoji/GIF panel can host this as one of its tabs. Same search, same
-   * Klipy integration, same attribution — only the chrome differs. Rewriting the
-   * grid for the panel would have meant two Klipy call sites to keep in step.
+   * Which collection to open on. The composer's single button is a STICKER, so
+   * it opens on stickers; anything else opening this sheet can still land on
+   * GIFs. All three tabs are the same Klipy code path, only `type` differs.
    */
-  embedded?: boolean;
+  initialTab?: TabType;
 }
 
-export default function GifPicker({ visible, onClose, onSelect, embedded }: Props) {
+export default function GifPicker({ visible, onClose, onSelect, initialTab = 'gifs' }: Props) {
   const { colors, scheme } = useTheme();
   const s = useMemo(() => makeStyles(colors), [colors]);
-  const [tab,     setTab]     = useState<TabType>('gifs');
+  const [tab,     setTab]     = useState<TabType>(initialTab);
   const [query,   setQuery]   = useState('');
   const [results, setResults] = useState<GifResult[]>([]);
   const [loading, setLoading] = useState(false);
@@ -126,17 +125,10 @@ export default function GifPicker({ visible, onClose, onSelect, embedded }: Prop
 
   if (!visible) return null;
 
-  // Embedded: no scrim (the panel is already inside the composer stack) and no
-  // drag handle (the panel's tab bar is the affordance). The body is identical.
-  const Outer: any = embedded ? View : Pressable;
-  const Inner: any = embedded ? View : Pressable;
-  const outerProps = embedded ? { style: s.embedded } : { style: s.overlay, onPress: onClose };
-  const innerProps = embedded ? { style: s.embeddedInner } : { style: s.sheet, onPress: () => {} };
-
   return (
-    <Outer {...outerProps}>
-      <Inner {...innerProps}>
-        {!embedded && <View style={s.handle} />}
+    <Pressable style={s.overlay} onPress={onClose}>
+      <Pressable style={s.sheet} onPress={() => {}}>
+        <View style={s.handle} />
 
         <View style={s.searchRow}>
           <TextInput
@@ -226,16 +218,13 @@ export default function GifPicker({ visible, onClose, onSelect, embedded }: Prop
             </Pressable>
           </Pressable>
         )}
-      </Inner>
-    </Outer>
+      </Pressable>
+    </Pressable>
   );
 }
 
 const makeStyles = (c: Palette) => StyleSheet.create({
   overlay:   { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.55)', justifyContent: 'flex-end' },
-  // Embedded variant: fills the panel the parent sized, paints nothing over it.
-  embedded:      { flex: 1 },
-  embeddedInner: { flex: 1, backgroundColor: 'transparent' },
   sheet:     { backgroundColor: c.surfaceSolid, borderTopLeftRadius: 22, borderTopRightRadius: 22, maxHeight: '75%' },
   handle:    { width: 40, height: 4, backgroundColor: c.border, borderRadius: 2, alignSelf: 'center', marginTop: 10, marginBottom: 8 },
   searchRow: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, gap: 10, marginBottom: 8 },

@@ -68,7 +68,6 @@ import type { ViewerActivity } from '../lib/socket';
 import LinkPreview, { extractUrl } from '../components/LinkPreview';
 import { extractFirstUrl, fetchPreviewFromDevice, type LinkPreviewData } from '../lib/linkPreview';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import MediaPicker from '../components/chat/MediaPicker';
 import GifPicker from '../components/GifPicker';
 import { LinearGradient } from 'expo-linear-gradient';
 import { getWallpaper, type WallpaperConfig } from './chat-wallpaper';
@@ -198,7 +197,7 @@ const EDIT_WINDOW_MS = 15 * 60 * 1000;
 import { useS, idealText, HL, makeStyles, type DisplayMessage } from '../components/chat/chatStyles';
 import { IMPORT_SOURCE } from '../constants/importSources';
 import {
-  MemoBubble, DateChip, UnreadDivider, ImportedDivider, SwipeToReply, EmojiPanel, FileBubble,
+  MemoBubble, DateChip, UnreadDivider, ImportedDivider, SwipeToReply, FileBubble,
   DISAPPEARING_PRESETS, bumpPollVote, formatDisappearing, formatLastSeen,
   formatRecDuration, formatScreenshotMode, isSameCalendarDay, renderWithHighlight,
 } from '../components/chat/MessageBubble';
@@ -362,7 +361,6 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
   }, [input]);
   const [attachOpen, setAttachOpen] = useState(false);
   const [gifOpen, setGifOpen] = useState(false);
-  const [emojiOpen, setEmojiOpen] = useState(false);
 
   // Media staged for sending, shown in a caption-preview before it goes out.
   // Every send path (gallery pick, camera, video note, edited photo) routes
@@ -2143,7 +2141,6 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
   // ── Send a GIF (external Tenor URL — no upload; rendered from the URL) ──
   const sendGif = useCallback(async (url: string, preview: string) => {
     setGifOpen(false);
-    setEmojiOpen(false);   // the merged panel hosts the GIF tab — dismiss it too
     if (!url) return;
     try {
       // source marks WHERE this came from, so the bubble can show KLIPY's
@@ -2154,22 +2151,6 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
       setMessages(prev => prev.some(x => x.id === msg.id) ? prev : [msg, ...prev]);
     } catch (e: any) {
       Alert.alert('Could not send GIF', e?.message ?? 'Try again');
-    }
-  }, [chatId]);
-
-  // ── Send a sticker ────────────────────────────────────────
-  // Was app/stickers.tsx: a separate ROUTE that navigated away from the chat to
-  // send, then navigated back — losing scroll position and any draft on the way.
-  // Same send path as everything else (sendMessage → optimistic → E2EE → push),
-  // just without leaving the conversation.
-  const sendSticker = useCallback(async (glyph: string) => {
-    if (!glyph) return;
-    setEmojiOpen(false);
-    try {
-      const msg = await sendMessage(chatId, glyph, 'sticker');
-      setMessages(prev => prev.some(x => x.id === msg.id) ? prev : [msg, ...prev]);
-    } catch (e: any) {
-      Alert.alert('Could not send sticker', e?.message ?? 'Try again');
     }
   }, [chatId]);
 
@@ -3102,15 +3083,7 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
       )}
 
       {/* Emoji panel (tap the 😊 icon) — inserts into the message input */}
-      {emojiOpen && editingId == null && !recording && (
-        <MediaPicker
-          initialTab="stickers"
-          onPickEmoji={(e) => setInput(prev => (prev + e).slice(0, 4000))}
-          onSendSticker={sendSticker}
-          onSendGif={sendGif}
-          onClose={() => setEmojiOpen(false)}
-        />
-      )}
+
 
       {/* Composer — either normal or recording mode */}
       {recording ? (
@@ -3131,17 +3104,18 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
             {editingId == null && (
               <TouchableOpacity
                 style={S.pillIconBtn}
-                onPress={() => { if (!emojiOpen) Keyboard.dismiss(); setEmojiOpen(o => !o); }}
+                onPress={() => { Keyboard.dismiss(); setGifOpen(true); }}
                 activeOpacity={0.7}
                 hitSlop={6}
               >
-                {/* Sticker, not a smiley: this one button now opens stickers,
-                    emoji and GIFs, and it opens ON stickers. Labelling it with a
-                    smiley would advertise the tab you land on second. */}
+                {/* ONE button for stickers, emojis and GIFs — they are three
+                    tabs of the same KLIPY sheet (/gif/search?type=…), so there
+                    is nothing to merge and nothing to duplicate. A sticker
+                    glyph rather than a smiley because it opens ON stickers. */}
                 <MaterialCommunityIcons
-                  name={emojiOpen ? 'sticker' : 'sticker-emoji'}
+                  name={gifOpen ? 'sticker' : 'sticker-emoji'}
                   size={24}
-                  color={emojiOpen ? colors.primary : colors.textDim}
+                  color={gifOpen ? colors.primary : colors.textDim}
                 />
               </TouchableOpacity>
             )}
@@ -3151,7 +3125,6 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
               placeholderTextColor={colors.textDim}
               value={input}
               onChangeText={onInputChange}
-              onFocus={() => setEmojiOpen(false)}
               multiline
               maxLength={4000}
             />
@@ -3373,7 +3346,7 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
       </Modal>
 
       {/* GIF picker (W15) */}
-      <GifPicker visible={gifOpen} onClose={() => setGifOpen(false)} onSelect={sendGif} />
+      <GifPicker visible={gifOpen} initialTab="stickers" onClose={() => setGifOpen(false)} onSelect={sendGif} />
 
       {/* Chat overflow menu — themed bottom sheet (replaces the 3-button Alert) */}
       <Sheet
