@@ -44,6 +44,7 @@ import { StatusBar } from 'expo-status-bar';
 import { View, ActivityIndicator, StyleSheet, Platform, AppState, InteractionManager } from 'react-native';
 import notifee, { EventType } from '@notifee/react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
+import { PdfThumbnailerHost } from '../components/PdfThumbnailer';
 import { enableFreeze } from 'react-native-screens';
 
 // Screens below the top of the stack stay MOUNTED by default, so every one of
@@ -598,7 +599,7 @@ function RootLayout() {
         <Stack.Screen name="decoy-chats" />
         <Stack.Screen name="decoy-chat" />
         <Stack.Screen name="hidden-chats" />
-        <Stack.Screen name="camera" options={{ headerShown: false }} />
+        <Stack.Screen name="camera" options={{ headerShown: false, presentation: 'modal' }} />
         {/* status, calls now in (tabs) */}
         <Stack.Screen name="vault" />
         <Stack.Screen name="vaultdrop" />
@@ -675,6 +676,9 @@ function RootLayout() {
         <Stack.Screen name="encrypted-notes" />
         <Stack.Screen name="current-location" />
       </Stack>
+      {/* Offscreen, 1x1, renders nothing the user sees: the only canvas on the
+          device, so a PDF can be turned into a bubble preview. */}
+      <PdfThumbnailerHost />
     </GestureHandlerRootView>
     </FontReadyContext.Provider>
     </ThemeProvider>

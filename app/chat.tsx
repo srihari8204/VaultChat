@@ -215,6 +215,7 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
   const routeParams = useLocalSearchParams<{
     id?: string; chatId?: string;
     capturedUri?: string; capturedType?: string; capturedViewOnce?: string;
+    capturedName?: string;
   }>();
   // An embedded pane must ignore the route's chat id entirely, or both panes
   // would render whatever chat the router happens to be on.
@@ -345,7 +346,7 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
   // Staged media awaiting send — supports WhatsApp-style multi-select. Each
   // item carries its own caption + view-once; currentIdx is the one on screen.
   const [pendingItems, setPendingItems] = useState<Array<{
-    uri: string; mediaType: 'image' | 'video'; filename: string; mime: string;
+    uri: string; mediaType: 'image' | 'video' | 'file'; filename: string; mime: string;
     viewOnce: boolean; metaExtra: Record<string, any>; caption: string;
   }>>([]);
   const [currentIdx, setCurrentIdx] = useState(0);
@@ -1901,18 +1902,23 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
     consumedCaptureRef.current = uri;
     const rawType = params.capturedType || 'image';
     const isVideo = rawType === 'video' || rawType === 'video-note';
-    const viewOnce = params.capturedViewOnce === '1';
+    // SCAN mode returns one assembled PDF, not an image.
+    const isFile = rawType === 'file';
+    // View-once marks image/video bytes on send — a document has none to mark.
+    const viewOnce = !isFile && params.capturedViewOnce === '1';
     // Clear immediately so navigating back into the chat doesn't re-stage.
-    router.setParams({ capturedUri: '', capturedType: '', capturedViewOnce: '' } as any);
-    const filename = isVideo
-      ? `${rawType === 'video-note' ? 'note' : 'video'}-${Date.now()}.mp4`
-      : `photo-${Date.now()}.jpg`;
-    const mime = isVideo ? 'video/mp4' : 'image/jpeg';
+    router.setParams({ capturedUri: '', capturedType: '', capturedViewOnce: '', capturedName: '' } as any);
+    const filename = isFile
+      ? (params.capturedName || `Scan-${Date.now()}.pdf`)
+      : isVideo
+        ? `${rawType === 'video-note' ? 'note' : 'video'}-${Date.now()}.mp4`
+        : `photo-${Date.now()}.jpg`;
+    const mime = isFile ? 'application/pdf' : isVideo ? 'video/mp4' : 'image/jpeg';
     const metaExtra: Record<string, any> = rawType === 'video-note' ? { videoNote: true } : {};
     // Stage in the caption preview (same as a gallery pick).
-    setPendingItems([{ uri, mediaType: isVideo ? 'video' : 'image', filename, mime, viewOnce, metaExtra, caption: '' }]);
+    setPendingItems([{ uri, mediaType: isFile ? 'file' : isVideo ? 'video' : 'image', filename, mime, viewOnce, metaExtra, caption: '' }]);
     setCurrentIdx(0);
-  }, [params.capturedUri, params.capturedType, params.capturedViewOnce, router]);
+  }, [params.capturedUri, params.capturedType, params.capturedViewOnce, params.capturedName, router]);
 
   // ── Composer camera button: tap = camera, slide up = video note ──────
   // (WhatsApp-style. startMode='note' makes /camera open in round-video mode.)
@@ -2086,7 +2092,7 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
       { label: 'File',          icon: 'document' as const,    color: '#42A5F5', onPress: onPickFile },
       // VaultBeam large-file transfer (up to 12 GB, R2 relay) — 1:1 only.
       ...(isDirect ? [{ label: 'Big File', icon: 'cube' as const, color: BRAND_ACCENT, onPress: onSendVaultBeam }] : []),
-      { label: 'Scan',          icon: 'scan' as const,        color: '#8D6E63', onPress: () => router.push({ pathname: '/docscanner' as any, params: { chatId } }) },
+      { label: 'Scan',          icon: 'scan' as const,        color: '#8D6E63', onPress: () => router.push({ pathname: '/camera' as any, params: { chatId, peerName, returnTo: '/chat', startMode: 'scan' } }) },
       { label: 'Location',      icon: 'location' as const,    color: '#66BB6A', onPress: () => router.push({ pathname: '/location' as any, params: { chatId, name: peerName } }) },
       { label: 'Navigate',      icon: 'navigate' as const,    color: '#4A9FFF', onPress: () => openNavigator() },
       { label: 'Poll',          icon: 'stats-chart' as const, color: '#FFA726', onPress: () => router.push({ pathname: '/create-poll' as any, params: { chatId, peerName } }) },
@@ -3223,7 +3229,15 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
                 )}
 
                 <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
-                  {cur.mediaType === 'image' ? (
+                  {cur.mediaType === 'file' ? (
+                    <View style={{ alignItems: 'center', gap: 12, paddingHorizontal: 32 }}>
+                      <View style={{ width: 96, height: 96, borderRadius: 24, backgroundColor: BRAND_ACCENT + '22', alignItems: 'center', justifyContent: 'center' }}>
+                        <Ionicons name="document-text" size={44} color={colors.primary} />
+                      </View>
+                      <Text style={{ color: '#fff', fontSize: 16, fontWeight: '700', textAlign: 'center' }} numberOfLines={2}>{cur.filename}</Text>
+                      <Text style={{ color: '#9CA3AF', fontSize: 13 }}>Scanned document</Text>
+                    </View>
+                  ) : cur.mediaType === 'image' ? (
                     <Image source={{ uri: cur.uri }} style={{ width: '100%', height: '100%' }} resizeMode="contain" />
                   ) : (
                     <Video
@@ -3249,7 +3263,11 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
                     {pendingItems.map((it, i) => (
                       <TouchableOpacity key={`${it.uri}-${i}`} activeOpacity={0.8} onPress={() => setCurrentIdx(i)}
                         style={{ width: 56, height: 56, borderRadius: 8, overflow: 'hidden', borderWidth: 2, borderColor: i === currentIdx ? colors.primary : 'transparent' }}>
-                        <Image source={{ uri: it.uri }} style={{ width: '100%', height: '100%' }} />
+                        {it.mediaType === 'file'
+                          ? <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: '#1F2937' }}>
+                              <Ionicons name="document-text" size={22} color="#fff" />
+                            </View>
+                          : <Image source={{ uri: it.uri }} style={{ width: '100%', height: '100%' }} />}
                         <TouchableOpacity onPress={() => removePendingAt(i)} hitSlop={6}
                           style={{ position: 'absolute', top: 1, right: 1, width: 18, height: 18, borderRadius: 9, backgroundColor: '#000000aa', alignItems: 'center', justifyContent: 'center' }}>
                           <Ionicons name="close" size={12} color="#fff" />
@@ -3266,7 +3284,8 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
                   {/* Per-item view-once toggle (WhatsApp "1-in-a-circle") */}
                   <TouchableOpacity
                     onPress={() => updateCurrentItem({ viewOnce: !cur.viewOnce })}
-                    style={{ width: 48, height: 48, borderRadius: 24, backgroundColor: cur.viewOnce ? colors.primary : '#1F2937', alignItems: 'center', justifyContent: 'center' }}
+                    disabled={cur.mediaType === 'file'}
+                    style={{ width: 48, height: 48, borderRadius: 24, backgroundColor: cur.viewOnce ? colors.primary : '#1F2937', alignItems: 'center', justifyContent: 'center', opacity: cur.mediaType === 'file' ? 0.4 : 1 }}
                     hitSlop={6}
                   >
                     <View style={{ width: 24, height: 24, borderRadius: 12, borderWidth: 2, borderColor: '#fff', alignItems: 'center', justifyContent: 'center' }}>

@@ -1,0 +1,63 @@
+<!doctype html>
+<!--
+  assets/pdfjs/thumb.html — renders page 1 of a PDF to a JPEG, and nothing else.
+
+  It exists because pdf.js draws to a <canvas> and React Native has none. This
+  page is loaded once into an offscreen WebView (components/PdfThumbnailer.tsx)
+  and then fed one document at a time over postMessage, so a chat that sends
+  several PDFs pays for pdf.js starting up exactly once.
+
+  It answers EVERY request, including failures. A silent drop would leave the
+  sender awaiting a promise that never settles, which would hang the send.
+-->
+<html>
+<head><meta charset="utf-8"></head>
+<body style="margin:0;background:#fff">
+<script src="pdf.min.js"></script>
+<script>
+(function () {
+  function post(m) { try { window.ReactNativeWebView.postMessage(JSON.stringify(m)); } catch (e) {} }
+
+  if (!window.pdfjsLib) { post({ id: 0, ok: false, e: 'pdfjsLib missing' }); return; }
+  pdfjsLib.GlobalWorkerOptions.workerSrc = 'pdf.worker.min.js';
+
+  var WIDTH = 480;   // the bubble preview is ~300px wide; 480 survives a 2x screen
+
+  function handle(req) {
+    var id = req.id;
+    try {
+      pdfjsLib.getDocument({ url: req.uri }).promise.then(function (pdf) {
+        var pages = pdf.numPages;
+        return pdf.getPage(1).then(function (page) {
+          var base = page.getViewport({ scale: 1 });
+          var vp = page.getViewport({ scale: WIDTH / base.width });
+          var c = document.createElement('canvas');
+          c.width = Math.round(vp.width); c.height = Math.round(vp.height);
+          var ctx = c.getContext('2d', { alpha: false });
+          // pdf.js paints no background of its own, and alpha:false starts the
+          // canvas black — a mostly-white invoice would come out mostly black.
+          ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, c.width, c.height);
+          return page.render({ canvasContext: ctx, viewport: vp }).promise.then(function () {
+            var d = c.toDataURL('image/jpeg', 0.6);
+            post({ id: id, ok: true, pages: pages, b64: d.slice(d.indexOf(',') + 1) });
+          });
+        });
+      }).catch(function (e) { post({ id: id, ok: false, e: String((e && e.message) || e) }); });
+    } catch (e) {
+      post({ id: id, ok: false, e: String((e && e.message) || e) });
+    }
+  }
+
+  function onMsg(ev) {
+    var req; try { req = JSON.parse(ev.data); } catch (e) { return; }
+    if (req && req.uri) handle(req);
+  }
+  // Android delivers injected messages on document, iOS on window — listen to both.
+  document.addEventListener('message', onMsg);
+  window.addEventListener('message', onMsg);
+
+  post({ id: 0, ok: true, ready: true });
+})();
+</script>
+</body>
+</html>

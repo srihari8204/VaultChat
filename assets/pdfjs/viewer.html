@@ -1,0 +1,101 @@
+<!doctype html>
+<!--
+  assets/pdfjs/viewer.html — the page components/PdfView.tsx loads.
+
+  It is copied into android/app/src/main/assets/pdfjs/ (see plugins/withPdfJs.js)
+  so that it, pdf.min.js and pdf.worker.min.js all sit in ONE file:// directory.
+  That matters: a Web Worker will not start from a different origin, and pdf.js
+  needs its worker. The PDF itself is the only file from elsewhere, handed in as
+  an absolute file:// URL on window.__DOC__ and read by XHR.
+
+  Pages render lazily and their canvases are freed once well off-screen: a page
+  at RENDER_SCALE is roughly 7MB of bitmap, so a long document would otherwise
+  run the WebView out of memory before the reader reached the end of it.
+-->
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, minimum-scale=1, maximum-scale=8, user-scalable=yes">
+<style>
+  html, body { margin:0; padding:0; background:#3A3A3E; }
+  #pages { padding:10px 0 24px; }
+  .pg { position:relative; margin:0 auto 10px; background:#fff;
+        box-shadow:0 1px 6px rgba(0,0,0,.45); width:calc(100% - 20px); }
+  .pg canvas { display:block; width:100%; height:auto; }
+  #err { color:#fff; padding:28px; text-align:center; line-height:1.5;
+         font:15px -apple-system, system-ui, Roboto, sans-serif; }
+</style>
+</head>
+<body>
+<div id="pages"></div>
+<div id="err"></div>
+<script src="pdf.min.js"></script>
+<script>
+(function () {
+  function post(m) { try { window.ReactNativeWebView.postMessage(JSON.stringify(m)); } catch (e) {} }
+  function fail(human, detail) {
+    document.getElementById('err').textContent = human;
+    post({ t: 'error', m: String(detail || human) });
+  }
+  if (!window.pdfjsLib) { fail('The PDF viewer could not start.', 'pdfjsLib missing'); return; }
+  if (!window.__DOC__) { fail('No document was given to the viewer.', '__DOC__ unset'); return; }
+  pdfjsLib.GlobalWorkerOptions.workerSrc = 'pdf.worker.min.js';
+
+  var RENDER_SCALE = 3;   // canvas pixels per CSS pixel — what keeps zoom sharp
+
+  pdfjsLib.getDocument({ url: window.__DOC__ }).promise.then(function (pdf) {
+    var host = document.getElementById('pages');
+    var cssW = Math.max(280, document.documentElement.clientWidth - 20);
+
+    function render(d) {
+      if (!d._page || d._busy || d.querySelector('canvas')) return;
+      d._busy = true;
+      var vp = d._page.getViewport({ scale: d._fit * RENDER_SCALE });
+      var c = document.createElement('canvas');
+      c.width = Math.round(vp.width); c.height = Math.round(vp.height);
+      var ctx = c.getContext('2d', { alpha: false });
+      // alpha:false starts the canvas BLACK, and pdf.js paints no background of
+      // its own — a page with white space would come out with black gaps.
+      ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, c.width, c.height);
+      d._page.render({ canvasContext: ctx, viewport: vp }).promise.then(function () {
+        d.appendChild(c); d._busy = false;
+      }).catch(function () { d._busy = false; });
+    }
+    function free(d) {
+      var c = d.querySelector('canvas');
+      // Zeroing the dimensions is what actually releases the bitmap; removing
+      // the element alone leaves it held until GC gets around to it.
+      if (c) { c.width = 0; c.height = 0; c.remove(); }
+    }
+
+    var io = new IntersectionObserver(function (entries) {
+      entries.forEach(function (e) { e.isIntersecting ? render(e.target) : free(e.target); });
+    }, { rootMargin: '600px 0px' });
+
+    var pending = pdf.numPages;
+    function done() { if (--pending === 0) post({ t: 'ready', pages: pdf.numPages }); }
+
+    for (var i = 1; i <= pdf.numPages; i++) {
+      (function (n) {
+        var d = document.createElement('div');
+        d.className = 'pg';
+        host.appendChild(d);
+        pdf.getPage(n).then(function (page) {
+          var vp = page.getViewport({ scale: 1 });
+          d._page = page;
+          d._fit = cssW / vp.width;
+          // Reserve the height up front so the scrollbar is honest and pages do
+          // not jump under the reader's thumb as they render in.
+          d.style.height = Math.round(vp.height * d._fit) + 'px';
+          io.observe(d);
+          done();
+        }).catch(done);
+      })(i);
+    }
+  }).catch(function (e) {
+    fail('This PDF could not be opened.', e && e.message);
+  });
+})();
+</script>
+</body>
+</html>

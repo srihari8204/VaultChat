@@ -353,12 +353,13 @@ function PollBubble({
 // (Sharing.shareAsync). The /uploads route is auth-gated so we pass
 // the Bearer header on the download request.
 export function FileBubble({
-  attachmentId, filename, mime, size, authHeader, resolvedUri, isMine, thumb, encrypted,
+  attachmentId, filename, mime, size, authHeader, resolvedUri, isMine, thumb, pages, encrypted,
 }: {
   attachmentId: string;
   filename:     string;
   mime:         string;
   size:         number;
+  pages?:       number;   // PDF page count, counted by the sender
   authHeader:   string | null;
   resolvedUri?: { uri: string; headers?: Record<string, string> } | null;
   isMine:       boolean;
@@ -368,6 +369,15 @@ export function FileBubble({
   const S = useS();
   const [busy, setBusy] = useState(false);
   const fileRouter = useRouter();
+
+  // "1 page · 66 KB · PDF". Each part is dropped when it is not known, so a
+  // non-PDF still reads exactly as it always did.
+  const isPdf = /pdf/i.test(mime) || /[.]pdf$/i.test(filename);
+  const subtitle = [
+    pages ? `${pages} page${pages === 1 ? '' : 's'}` : null,
+    formatBytes(size),
+    isPdf ? 'PDF' : null,
+  ].filter(Boolean).join(' · ');
 
   const onOpen = useCallback(async () => {
     if (busy) return;
@@ -452,7 +462,7 @@ export function FileBubble({
           </View>
           <View style={S.fileMeta}>
             <Text style={[S.fileName, isMine && S.fileNameMine]} numberOfLines={1}>{filename}</Text>
-            <Text style={[S.fileSize, isMine && S.fileSizeMine]}>{formatBytes(size)}</Text>
+            <Text style={[S.fileSize, isMine && S.fileSizeMine]}>{subtitle}</Text>
           </View>
         </View>
       </TouchableOpacity>
@@ -466,7 +476,7 @@ export function FileBubble({
       </View>
       <View style={S.fileMeta}>
         <Text style={[S.fileName, isMine && S.fileNameMine]} numberOfLines={1}>{filename}</Text>
-        <Text style={[S.fileSize, isMine && S.fileSizeMine]}>{formatBytes(size)}</Text>
+        <Text style={[S.fileSize, isMine && S.fileSizeMine]}>{subtitle}</Text>
       </View>
     </TouchableOpacity>
   );
@@ -1315,6 +1325,7 @@ function MessageBubble({
             resolvedUri={isEncMedia ? mediaSrc : undefined}
             isMine={isMine}
             thumb={typeof msg.meta?.thumb === 'string' ? msg.meta.thumb : undefined}
+            pages={Number(msg.meta?.pages) || undefined}
             encrypted={isEncMedia}
           />
         ) : isVaultbeam ? (

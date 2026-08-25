@@ -18,7 +18,7 @@ import {
 } from './chatService';
 import { uploadEncryptedAttachment, buildMediaContent } from './mediaAttachments';
 import { storeSentCopy, saveThumb } from './mediaStore';
-import { makeThumb, makePdfThumb } from './thumbnails';
+import { makeThumb, makePdfPreview } from './thumbnails';
 import { embedToken, newToken, recordToken, isTrackingAvailable } from './trackingId';
 
 export type MediaType = 'image' | 'video' | 'audio' | 'file';
@@ -129,6 +129,12 @@ export async function sendMediaMessage(
       if (type === 'image' || type === 'video') {
         const thumb = await makeThumb(file.uri, type).catch(() => null);
         if (thumb) { meta.thumb = thumb; saveThumb(attachmentId, thumb).catch(() => {}); }
+      } else if (type === 'file' && /pdf/i.test(file.mime)) {
+        const pv = await makePdfPreview(file.uri).catch(() => null);
+        if (pv) {
+          meta.thumb = pv.b64; meta.pages = pv.pages;
+          saveThumb(attachmentId, pv.b64).catch(() => {});
+        }
       }
     }
     return sendMessage(chatId, content, type, { meta, clientId: opts.clientId });
@@ -159,7 +165,10 @@ export async function sendMediaMessage(
     // PDF → first-page preview (WhatsApp-style document preview).
     let thumb: string | null = null;
     if (type === 'image' || type === 'video') thumb = await makeThumb(file.uri, type);
-    else if (type === 'file' && /pdf/i.test(file.mime)) thumb = await makePdfThumb(file.uri);
+    else if (type === 'file' && /pdf/i.test(file.mime)) {
+      const pv = await makePdfPreview(file.uri);
+      if (pv) { thumb = pv.b64; meta.pages = pv.pages; }
+    }
     if (thumb) { meta.thumb = thumb; saveThumb(up.id, thumb).catch(() => {}); }
   }
   return sendMessage(chatId, opts.caption || '', type, { meta, clientId: opts.clientId });

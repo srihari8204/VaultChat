@@ -144,6 +144,7 @@
       "./plugins/withCryptoCore.js",
       "./plugins/withVaultBeamRust.js",
       "./plugins/withVaultView.js",
+      "./plugins/withPdfJs.js",
       "./plugins/withVaultShield.js",
       "expo-sqlite",
       [

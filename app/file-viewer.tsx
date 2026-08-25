@@ -31,6 +31,7 @@ import { Buffer } from 'buffer';
 import { docKind } from '../lib/docText';
 import type { Block } from '../lib/docBlocks';
 import { DocView } from '../components/DocView';
+import { PdfView } from '../components/PdfView';
 import type { Palette } from '../constants/theme';
 
 const { width: SW, height: SH } = Dimensions.get('window');
@@ -268,6 +269,12 @@ export default function FileViewerScreen() {
   const [docEmpty, setDocEmpty] = useState(false);
   const [docError, setDocError] = useState<string | null>(null);
   const [docLoading, setDocLoading] = useState(true);
+  // Where the document actually landed on disk. The PDF page renderer needs the
+  // FILE — the extracted text is no use to it.
+  const [docLocalUri, setDocLocalUri] = useState<string | null>(null);
+  // Set when pdf.js cannot render this file, which drops it back to the text
+  // reader rather than leaving a blank grey screen.
+  const [pdfFailed, setPdfFailed] = useState(false);
   const [reloadKey, setReloadKey] = useState(0);
   const [openingExternally, setOpeningExternally] = useState(false);
 
@@ -319,6 +326,7 @@ export default function FileViewerScreen() {
           const dl = await FileSystem.downloadAsync(fileUri, FileSystem.cacheDirectory + 'temp_doc_' + Date.now());
           local = dl.uri;
         }
+        setDocLocalUri(local);
         const b64 = await FileSystem.readAsStringAsync(local, { encoding: 'base64' as any });
         const bytes = Uint8Array.from(Buffer.from(b64, 'base64'));
         const { extractDocText } = await import('../lib/docText');
@@ -680,7 +688,39 @@ export default function FileViewerScreen() {
     </View>
   );
 
-  const renderPDF = () => renderDocument(fmt.label);
+  // A PDF is PAGES. The text reader stays as the fallback for anything pdf.js
+  // cannot open, and the device hand-off stays under both of them.
+  const renderPDF = () => {
+    if (pdfFailed) return renderOffice();
+    if (!docLocalUri) return renderLoading();
+    return (
+      <View style={s.contentFill}>
+        <PdfView
+          uri={docLocalUri}
+          onFail={why => {
+            console.warn('[PdfView] falling back to the text reader —', why);
+            setPdfFailed(true);
+          }}
+        />
+        <View style={s.docActionBar}>
+          <Text style={s.docActionHint} numberOfLines={1}>Pinch to zoom</Text>
+          <TouchableOpacity
+            onPress={openInDeviceApp}
+            disabled={openingExternally}
+            style={s.docActionBtn}
+            activeOpacity={0.85}
+          >
+            {openingExternally
+              ? <ActivityIndicator color={C.primary} size="small" />
+              : <>
+                  <Ionicons name="open-outline" size={16} color={C.primary} />
+                  <Text style={s.docActionTxt}>Open in another app</Text>
+                </>}
+          </TouchableOpacity>
+        </View>
+      </View>
+    );
+  };
 
   // ══════════════════════════════════════════════════════════════
   // ██  RENDER: Office docs — same on-device path as PDF above
@@ -934,7 +974,7 @@ export default function FileViewerScreen() {
     switch (fileType) {
       case 'image': return renderImage();
       case 'video': return renderVideo();
-      case 'pdf': return renderOffice();   // same in-app text reader; falls back to the device app
+      case 'pdf': return renderPDF();
       case 'office': return renderOffice();
       case 'text': return renderText();
       case 'audio': return renderAudio();

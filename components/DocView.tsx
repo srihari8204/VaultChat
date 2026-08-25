@@ -9,10 +9,18 @@
 // Deliberately plain React Native: Views, Texts and two ScrollViews. No renderer,
 // no WebView, no native module. It is a READER, not an editor — fonts, colours,
 // images and charts stay the "open in another app" button's job.
+//
+// Pinch zooms by RESIZING THE TEXT rather than scaling the view, so the page
+// re-wraps to the screen and the glyphs stay sharp — see lib/docs/zoom.ts.
 
-import React, { useMemo } from 'react';
-import { View, Text, ScrollView, StyleSheet, useWindowDimensions } from 'react-native';
+import React, { useCallback, useMemo, useRef, useState } from 'react';
+import { View, Text, ScrollView, StyleSheet, Pressable, useWindowDimensions } from 'react-native';
+import {
+  Gesture, GestureDetector, ScrollView as GHScrollView,
+} from 'react-native-gesture-handler';
+import { runOnJS } from 'react-native-reanimated';
 import type { Block, Run } from '../lib/docBlocks';
+import { columnWidth, pinchZoom, zoomLabel } from '../lib/docs/zoom';
 import { type Palette } from '../constants/theme';
 
 // ─── Inline runs ─────────────────────────────────────────────────────
@@ -45,7 +53,7 @@ function Runs({ runs, style }: { runs: Run[]; style?: any }) {
  * tracks the longest cell, clamped so one enormous cell cannot push the rest off
  * the screen.
  */
-function columnWidths(rows: string[][], cols: number): number[] {
+function columnWidths(rows: string[][], cols: number, zoom: number): number[] {
   const w: number[] = new Array(cols).fill(0);
   for (const r of rows) {
     for (let c = 0; c < cols; c++) {
@@ -53,14 +61,14 @@ function columnWidths(rows: string[][], cols: number): number[] {
       if (len > w[c]) w[c] = len;
     }
   }
-  return w.map(len => Math.max(64, Math.min(220, 12 + len * 8)));
+  return w.map(len => columnWidth(len, zoom));
 }
 
 function Grid({
-  rows, header, s, colors, maxWidth,
-}: { rows: string[][]; header: boolean; s: any; colors: Palette; maxWidth: number }) {
+  rows, header, s, colors, maxWidth, zoom,
+}: { rows: string[][]; header: boolean; s: any; colors: Palette; maxWidth: number; zoom: number }) {
   const cols = rows.reduce((n, r) => Math.max(n, r.length), 0);
-  const widths = useMemo(() => columnWidths(rows, cols), [rows, cols]);
+  const widths = useMemo(() => columnWidths(rows, cols, zoom), [rows, cols, zoom]);
   const total = widths.reduce((a, b) => a + b, 0);
 
   // Only scroll horizontally when the grid genuinely does not fit. Wrapping every
@@ -113,12 +121,38 @@ function looksLikeHeader(rows: string[][]): boolean {
 // ─── Document ────────────────────────────────────────────────────────
 
 export function DocView({ blocks, colors }: { blocks: Block[]; colors: Palette }) {
-  const s = useMemo(() => makeStyles(colors), [colors]);
+  const [zoom, setZoom] = useState(1);
+  const s = useMemo(() => makeStyles(colors, zoom), [colors, zoom]);
   const { width } = useWindowDimensions();
   const maxWidth = width - 36;   // the page padding below, both sides
 
+  // A pinch reports a multiplier measured from where the fingers STARTED, so it
+  // must be applied to the zoom the gesture began at. Multiplying it against the
+  // live zoom compounds every frame and one slow pinch runs away to the maximum.
+  const zoomRef = useRef(1);
+  const baseRef = useRef(1);
+  const applyScale = useCallback((scale: number) => {
+    const next = pinchZoom(baseRef.current, scale);
+    if (next === zoomRef.current) return;   // quantised: skip the re-layout
+    zoomRef.current = next;
+    setZoom(next);
+  }, []);
+  const endPinch = useCallback(() => { baseRef.current = zoomRef.current; }, []);
+  const resetZoom = useCallback(() => {
+    baseRef.current = 1; zoomRef.current = 1; setZoom(1);
+  }, []);
+
+  const pinch = useMemo(
+    () => Gesture.Pinch()
+      .onUpdate(e => { runOnJS(applyScale)(e.scale); })
+      .onEnd(() => { runOnJS(endPinch)(); }),
+    [applyScale, endPinch],
+  );
+
   return (
-    <ScrollView
+    <View style={{ flex: 1 }}>
+    <GestureDetector gesture={pinch}>
+    <GHScrollView
       // Paint the page explicitly. Inheriting whatever surface the host happens
       // to have is how this shipped as near-white text on a white background —
       // present, correct, and unreadable.
@@ -145,7 +179,7 @@ export function DocView({ blocks, colors }: { blocks: Block[]; colors: Palette }
           case 'table':
             return (
               <View key={i} style={s.blockGap}>
-                <Grid rows={b.rows} header={looksLikeHeader(b.rows)} s={s} colors={colors} maxWidth={maxWidth} />
+                <Grid rows={b.rows} header={looksLikeHeader(b.rows)} s={s} colors={colors} maxWidth={maxWidth} zoom={zoom} />
               </View>
             );
 
@@ -158,7 +192,7 @@ export function DocView({ blocks, colors }: { blocks: Block[]; colors: Palette }
                     {b.rows.length} row{b.rows.length === 1 ? '' : 's'}
                   </Text>
                 </View>
-                <Grid rows={b.rows} header={looksLikeHeader(b.rows)} s={s} colors={colors} maxWidth={maxWidth} />
+                <Grid rows={b.rows} header={looksLikeHeader(b.rows)} s={s} colors={colors} maxWidth={maxWidth} zoom={zoom} />
               </View>
             );
 
@@ -192,21 +226,41 @@ export function DocView({ blocks, colors }: { blocks: Block[]; colors: Palette }
         }
       })}
       <View style={{ height: 28 }} />
-    </ScrollView>
+    </GHScrollView>
+    </GestureDetector>
+
+    {/* Only present once zoomed, and it is the way back to 100% — a pinch can
+        strand someone at 40% with no obvious undo. */}
+    {zoom !== 1 && (
+      <Pressable
+        onPress={resetZoom}
+        style={[s.zoomPill, { borderColor: colors.border, backgroundColor: colors.card }]}
+        accessibilityRole="button"
+        accessibilityLabel={`Zoom ${zoomLabel(zoom)}. Tap to reset.`}
+      >
+        <Text style={[s.zoomTxt, { color: colors.textDim }]}>{zoomLabel(zoom)}</Text>
+      </Pressable>
+    )}
+    </View>
   );
 }
 
-const makeStyles = (c: Palette) => StyleSheet.create({
+// Every type size runs through z(), so a pinch re-lays the page out at a bigger
+// size instead of scaling a bitmap of it. Paddings and rules stay put: zooming
+// the margins as well just wastes the screen someone zoomed in to use.
+const makeStyles = (c: Palette, zoom: number) => {
+  const z = (n: number) => Math.round(n * zoom);
+  return StyleSheet.create({
   page: { padding: 18, paddingBottom: 8 },
 
   h:   { color: c.text, fontWeight: '800', marginTop: 18, marginBottom: 6 },
-  h1:  { fontSize: 22, lineHeight: 29 },
-  h2:  { fontSize: 18, lineHeight: 25 },
-  h3:  { fontSize: 16, lineHeight: 22 },
-  p:   { color: c.text, fontSize: 15, lineHeight: 23, marginBottom: 9 },
+  h1:  { fontSize: z(22), lineHeight: z(29) },
+  h2:  { fontSize: z(18), lineHeight: z(25) },
+  h3:  { fontSize: z(16), lineHeight: z(22) },
+  p:   { color: c.text, fontSize: z(15), lineHeight: z(23), marginBottom: 9 },
 
   liRow:  { flexDirection: 'row', alignItems: 'flex-start', marginBottom: 5 },
-  bullet: { color: c.textDim, fontSize: 15, lineHeight: 23, width: 18 },
+  bullet: { color: c.textDim, fontSize: z(15), lineHeight: z(23), width: z(18) },
   liTxt:  { flex: 1, marginBottom: 0 },
 
   blockGap: { marginTop: 8, marginBottom: 16 },
@@ -218,25 +272,29 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   gridCell: { paddingHorizontal: 9, paddingVertical: 7,
               borderRightWidth: StyleSheet.hairlineWidth, borderRightColor: c.border,
               borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.border },
-  gridTxt:      { color: c.text, fontSize: 13, lineHeight: 18 },
+  gridTxt:      { color: c.text, fontSize: z(13), lineHeight: z(18) },
   gridHeadTxt:  { fontWeight: '800', color: c.text },
 
   sheetTab:  { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
                gap: 10, marginBottom: 7 },
-  sheetName: { color: c.text, fontSize: 14, fontWeight: '800', flexShrink: 1 },
-  sheetMeta: { color: c.textFaint, fontSize: 12 },
+  sheetName: { color: c.text, fontSize: z(14), fontWeight: '800', flexShrink: 1 },
+  sheetMeta: { color: c.textFaint, fontSize: z(12) },
 
   slide:      { borderWidth: 1, borderColor: c.border, borderRadius: 12,
                 padding: 14, marginBottom: 14, backgroundColor: c.card },
   slideHead:  { flexDirection: 'row', alignItems: 'flex-start', gap: 10, marginBottom: 8 },
-  slideNum:   { width: 24, height: 24, borderRadius: 12, backgroundColor: c.surface,
+  slideNum:   { width: z(24), height: z(24), borderRadius: z(12), backgroundColor: c.surface,
                 alignItems: 'center', justifyContent: 'center' },
-  slideNumTxt:{ color: c.textDim, fontSize: 12, fontWeight: '800' },
-  slideTitle: { color: c.text, fontSize: 17, fontWeight: '800', flex: 1, lineHeight: 23 },
+  slideNumTxt:{ color: c.textDim, fontSize: z(12), fontWeight: '800' },
+  slideTitle: { color: c.text, fontSize: z(17), fontWeight: '800', flex: 1, lineHeight: z(23) },
 
   pageBreak: { flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 20, marginBottom: 14 },
   pageRule:  { flex: 1, height: StyleSheet.hairlineWidth, backgroundColor: c.border },
-  pageTxt:   { color: c.textFaint, fontSize: 11, fontWeight: '700', letterSpacing: 0.6 },
-});
+  pageTxt:   { color: c.textFaint, fontSize: z(11), fontWeight: '700', letterSpacing: 0.6 },
 
-export default DocView;
+  // Fixed size — the zoom readout must not itself zoom.
+  zoomPill: { position: 'absolute', right: 14, bottom: 14, paddingHorizontal: 12,
+              paddingVertical: 7, borderRadius: 999, borderWidth: 1 },
+  zoomTxt:  { fontSize: 12, fontWeight: '800' },
+});
+};

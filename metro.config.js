@@ -28,6 +28,7 @@ config.transformer.babelTransformerPath = require.resolve(
   "react-native-svg-transformer/expo",
 );
 config.resolver.assetExts = config.resolver.assetExts.filter((e) => e !== "svg");
+
 config.resolver.sourceExts = [...config.resolver.sourceExts, "svg"];
 
 const shimDir = path.resolve(__dirname, "shims");
