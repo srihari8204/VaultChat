@@ -300,8 +300,28 @@ func broadcastComments(w http.ResponseWriter, r *http.Request) {
 	out := []broadcastMessage{}
 	_ = db.WithUser(ctx, uid, func(tx pgx.Tx) error {
 		rows, err := tx.Query(ctx,
-			`SELECT c.id, c.user_id::text, COALESCE(u.name, ''), c.body, c.created_at
-			   FROM broadcast_comments c JOIN users u ON u.id = c.user_id
+			// THE NAME THE AUDIENCE SEES, in the order the product means it.
+			//
+			// A private live asks each joiner what to be called and stores it on
+			// their invite row (display_name, migration 108). That answer is
+			// about THIS broadcast — someone joining a friend's private stream
+			// may not want their account name on it — so it wins here.
+			//
+			// A public live asks nobody: there is no invite row, the LEFT JOIN
+			// yields NULL, and the registered profile name is used. Which is the
+			// whole rule: entered name for private, registered name for public,
+			// one COALESCE rather than a branch in the client.
+			//
+			// The join is LEFT and on (broadcast, user) — the same key the invite
+			// table is unique on — so a public comment cannot pick up a name from
+			// some other broadcast the author was once invited to.
+			`SELECT c.id, c.user_id::text,
+			        COALESCE(NULLIF(i.display_name, ''), u.name, ''),
+			        c.body, c.created_at
+			   FROM broadcast_comments c
+			   JOIN users u ON u.id = c.user_id
+			   LEFT JOIN broadcast_invites i
+			          ON i.broadcast_id = c.broadcast_id AND i.invitee_id = c.user_id
 			  WHERE c.broadcast_id = $1 AND c.id > $2 AND c.deleted_at IS NULL
 			  ORDER BY c.id DESC LIMIT 100`, id, after)
 		if err != nil {

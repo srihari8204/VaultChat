@@ -61,6 +61,22 @@ export interface Broadcast {
   e2ee: boolean;
   viewerCount: number;
   peakViewers: number;
+  /**
+   * THE SHAPE OF THE SCREEN SHARE RUNNING RIGHT NOW — absent when none is
+   * (server migration 116, written from LiveKit's track_published).
+   *
+   * Absent is meaningful and must not be replaced with a default. A viewer on
+   * the low-latency path never needs these: they subscribe to the publisher's
+   * own track and the SFU hands them the same numbers directly. A viewer on HLS
+   * has nothing else — the composite they receive is a fixed LANDSCAPE canvas
+   * whatever the host is doing, so it cannot tell a shared landscape game from a
+   * shared portrait phone, and those want opposite treatment on a phone.
+   *
+   * This is what makes PUBG watchable on a public live: the client learns the
+   * content is landscape and turns the panel, instead of showing a strip.
+   */
+  shareWidth?: number;
+  shareHeight?: number;
   startedAt: string;
   endedAt?: string;
 }

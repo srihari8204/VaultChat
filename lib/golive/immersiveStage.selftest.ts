@@ -100,22 +100,113 @@ A(/mirror=\{!screenStream\}/.test(code),
   '15. a screen share is never mirrored');
 A(/zOrder=\{1\}/.test(code) && /zOrder=\{0\}/.test(code),
   '16. the corner preview is composited ABOVE the stage, not behind it');
-A(/pointerEvents="none"/.test(code),
-  '17. the corner preview does not eat the double tap it floats over');
+// ── the corner belongs to the VIEWER ───────────────────────────────
+//
+// It floats over the share, and where it floats is a guess — the one thing
+// worth sharing may be exactly under it. It used to be pointerEvents="none",
+// which made that guess final. Three things have to hold now:
+A(/\{\.\.\.pipPan\.panHandlers\}/.test(code),
+  '17. the corner preview can be DRAGGED out of the way');
+A(/clampPip\(/.test(code) && /left: pipAt\.x, top: pipAt\.y/.test(code),
+  '18. and is clamped onto the safe area every render, so a rotation cannot strand it off-panel');
+A(/pipStream && pipOn/.test(code) && /setPipOn\(v => !v\)/.test(code),
+  '19. it can be hidden outright, and the control that hid it is still there to bring it back');
+A(/Math\.abs\(g\.dx\) < 4 && Math\.abs\(g\.dy\) < 4\) d\.tap\(\)/.test(code),
+  '20. a tap on the corner still reaches the stage — the chrome toggles wherever the thumb lands');
+
+// ── it must not arrive TINY ────────────────────────────────────────
+//
+// HLS is composited onto a fixed landscape canvas, so a portrait publisher —
+// every publisher this product has — arrives pillarboxed. Containing that on a
+// portrait phone spends a quarter of the screen on a picture that is mostly
+// black bars, which is what "the screen share looks tiny" actually was.
+A(/pickFit\(stageFrame\?\.width, stageFrame\?\.height, win\.width, win\.height, stageIsScreen\)/.test(code),
+  '21a. the fit is DECIDED from the real frame against the real panel, by the tested helper');
+A(/const fill = fillPref \?\? \(autoFit !== null \? autoFit === 'cover' : !lowLatency\)/.test(code),
+  '21b. with no frame size to read — HLS — it still fills, because that canvas is landscape by construction');
+A(/setStageDims/.test(code) && /stageDims\[mainStream\]/.test(code)
+  && /onReadyForDisplay=\{\(e: any\) =>/.test(code),
+  '21c. the frame size is READ — off the publication on WebRTC, off the player on HLS — never guessed');
+// A HOST WHO TURNS THEIR PHONE. The publication's dimensions are captured once,
+// at subscribe; the renderer's keep coming. Measured on device 2026-08-25: a
+// share went 600x1332 -> 960x540 mid-stream while the subscription never moved,
+// and covering a landscape game against a stale portrait decision crops it to a
+// sliver — worse than the letterbox this whole change removes.
+A(/onDimensionsChange=\{\(e\) =>/.test(code),
+  '21d. and it is re-read LIVE from the renderer, so a host who rotates mid-share is followed');
+A(/resizeMode=\{fill \? ResizeMode\.COVER : ResizeMode\.CONTAIN\}/.test(code),
+  '22. the HLS player honours it');
+A(/objectFit=\{fill \? 'cover' : 'contain'\}/.test(code),
+  '23. so does the low-latency renderer');
+A(/setFillPref\(!fill\)/.test(code),
+  '24. and the viewer can override either — a landscape publisher would be cropped by the default');
+
+// ── pinch to zoom, on both renderers ───────────────────────────────
+//
+// "It fills the panel" and "I want to read that cell" are different questions.
+// Auto-fit answers the first; this answers the second, and it has to reach the
+// WebRTC surface and the HLS player alike or it works on private lives only.
+A(/onTouchStart=\{stageTouchStart\}/.test(code) && /onTouchMove=\{stageTouchMove\}/.test(code),
+  '24a. the stage layer takes raw touches, so a pinch is available at all');
+A((code.match(/style=\{\[S\.video, zoomStyle\]\}/g) || []).length >= 2,
+  '24b. the zoom transform wraps BOTH renderers — the share and the HLS player');
+A(/clampZoom\(/.test(code) && /clampZoomPan\(/.test(code),
+  '24c. and both the scale and the pan go through the tested clamps');
+A(/if \(!touch\.current\.moved\) tapStage\(\)/.test(code),
+  '24d. a pinch is not also a tap — the chrome does not toggle under a zoom');
+A(/zoomAt\.current = \{ scale: 1, x: 0, y: 0 \}/.test(code),
+  '24e. a new stream resets the zoom, so nobody inherits a magnified corner');
+
+// ── PUBG: the panel has to turn ────────────────────────────────────
+//
+// Nothing about fit or fill rescues a landscape game on a portrait phone — a
+// landscape picture does not go into a portrait hole. The app is portrait-locked
+// in app.json AND the manifest, so this screen unlocks it and turns the phone
+// for a landscape SHARE, then puts it back.
+A(/expo-screen-orientation/.test(code) && /OrientationLock\.LANDSCAPE/.test(code),
+  '24f. a landscape share turns the viewer’s phone');
+A(/O\.lockAsync\(O\.OrientationLock\.PORTRAIT_UP\)\)/.test(code),
+  '24g. and leaving always puts it back, whatever the stage was doing');
+A(/const frame = stageIsScreen \? stageFrame : undefined/.test(code),
+  '24h. only a SCREEN may turn the panel — a camera reports capture geometry and would spin it for a face');
+
+// ── public gets what private gets ──────────────────────────────────
+//
+// An HLS viewer receives a fixed landscape composite, so the player’s own
+// reading of it describes the CANVAS and not the publisher. The server is told
+// the real geometry by LiveKit (migration 116) and its answer wins.
+A(/b\?\.shareWidth && b\?\.shareHeight/.test(code) && /useMemo\(/.test(code),
+  '24i. the server’s share geometry is read, and memoised — a fresh object per render would re-issue lockAsync forever');
+A(/serverShare \?\? stageDims\[b\?\.hlsUrl \?\? ''\]/.test(code),
+  '24j. and preferred over the player’s reading of the canvas');
+A(/stage\.mainIsScreen \|\| \(!mainStream && !!serverShare\)/.test(code),
+  '24k. so a public viewer knows a share is on the stage at all');
+
+// ── chat goes to the RIGHT when the panel is wide ──────────────────
+//
+// A landscape stream is a game, and a chat strip across the bottom covers the
+// part people are watching. Portrait keeps the bottom sheet: a third of a 393dp
+// phone is 134dp, which is two words a line.
+A(/const landscape = win\.width > win\.height/.test(code),
+  '24l. orientation is read from the live window, not stored');
+A(/landscape && \{[\s\S]{0,120}?alignSelf: 'flex-end'/.test(code),
+  '24m. chat moves to the right-hand side in landscape');
+A(/win\.height \* \(landscape \? 0\.5 : 0\.28\)/.test(code),
+  '24n. and gets the height a column can use, instead of a strip’s share');
 
 // ── chat folds away ────────────────────────────────────────────────
 A(/const \[chatOpen, setChatOpen\]/.test(code) && /autoFocus/.test(code),
-  '18. chat folds away and opens focused — the keyboard arrives with the tap');
+  '25. chat folds away and opens focused — the keyboard arrives with the tap');
 A(/KeyboardAvoidingView/.test(code),
-  '19. and the composer lifts clear of that keyboard instead of under it');
+  '26. and the composer lifts clear of that keyboard instead of under it');
 A(/unread/.test(code) && /badge/i.test(code),
-  '20. a folded chat still says when someone spoke');
+  '27. a folded chat still says when someone spoke');
 A(/pinned\s*=\s*chatOpen \|\| inviteOpen \|\| pollDraft !== null/.test(code),
-  '21. the chrome does not retire out from under a half-typed message');
+  '28. the chrome does not retire out from under a half-typed message');
 
 // ── nothing was quietly dropped ────────────────────────────────────
 for (const kept of ['sendBroadcastChat', 'votePoll', 'createPoll', 'closePoll', 'makeInvite']) {
-  A(SRC.includes(kept), `19. ${kept} survived the rework`);
+  A(SRC.includes(kept), `29. ${kept} survived the rework`);
 }
 
 console.log(failures === 0

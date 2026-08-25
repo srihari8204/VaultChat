@@ -13,10 +13,15 @@
 // ---------------------------------------
 // Same reason Zoom does. The passcode is a SECOND CHANNEL: a link is one string
 // in a group chat, and once forwarded it carries its own authority. Requiring
-// something the host shared separately makes a leaked link inert. The name is
-// the joiner's call because a broadcast audience is not a contact list — it can
-// include people the host has never messaged, and you should decide what a room
-// of strangers sees. It is prefilled from the profile, so the default is free.
+// something the host shared separately makes a leaked link inert.
+//
+// THE NAME IS OPTIONAL, and only private asks at all. A broadcast audience is
+// not a contact list — it can include people the host has never messaged — so
+// the joiner gets to decide what a room of strangers sees. Leave it blank and
+// the registered VaultChat name is used, which is exactly what a PUBLIC live
+// shows and asks nobody about. Both answers resolve in one place server-side
+// (broadcast_social.go: COALESCE(NULLIF(display_name,''), users.name)), so the
+// two can never disagree.
 //
 // A redeemed link grants VIEWING, never a seat on the 20-person stage. Only the
 // host promoting someone puts their camera up.
@@ -34,6 +39,19 @@ import { redeemInviteLink, inviteCodeFrom } from '../../../lib/broadcast';
 import { getMyProfile } from '../../../lib/chatService';
 
 type Phase =
+  // ASK WHO IS JOINING, before anything is redeemed.
+  //
+  // A private live is somebody's living room: the host decides who is in it, and
+  // the audience is small enough that a name is a name rather than a row in a
+  // list. The account name is offered as the default because it is almost always
+  // right, and it is EDITABLE because it is almost always right rather than
+  // always — a work account joining a friend's stream is the case this exists
+  // for.
+  //
+  // A public live never reaches this screen. It has no invitation to redeem and
+  // asks nobody anything: the registered name is used, resolved server-side
+  // (broadcast_social.go), so there is no second place for the two to disagree.
+  | { kind: 'name' }
   // Trying with what we have. The FIRST attempt deliberately sends no passcode:
   // most private lives do not set one, and prompting for a passcode that is not
   // required would be a wall in front of every joiner to serve a minority.
@@ -52,7 +70,7 @@ export default function LiveJoinScreen() {
   // full link into the in-app box lands here with something usable either way.
   const code = inviteCodeFrom(String(params.code ?? ''));
 
-  const [phase, setPhase] = useState<Phase>({ kind: 'joining' });
+  const [phase, setPhase] = useState<Phase>({ kind: 'name' });
   const [name, setName] = useState('');
   const [passcode, setPasscode] = useState('');
   const [busy, setBusy] = useState(false);
@@ -65,7 +83,10 @@ export default function LiveJoinScreen() {
       try {
         const me: any = await getMyProfile();
         const n = (me?.name ?? me?.displayName ?? me?.username ?? '').trim();
-        if (alive && n) setName(n);
+        // Only into an UNTOUCHED field. This lands whenever the network feels
+        // like it, and dropping a name on top of one somebody is halfway
+        // through typing is how you get "SriPeter" in a room of strangers.
+        if (alive && n) setName(cur => (cur === '' ? n : cur));
       } catch { /* leave it blank */ }
     })();
     return () => { alive = false; };
@@ -89,9 +110,79 @@ export default function LiveJoinScreen() {
     }
   }, [code, name, router]);
 
-  // One silent attempt on mount. Runs once: `attempt` closes over `name`, and
-  // re-firing a redeem every time the prefill lands would double-post.
-  useEffect(() => { void attempt('', false); /* eslint-disable-next-line */ }, [code]);
+  // NOTHING IS REDEEMED ON MOUNT ANY MORE, and that fixes a bug as well as
+  // adding the step.
+  //
+  // The redeem used to fire from an effect the moment this screen appeared. It
+  // closed over `name`, which is filled by a SEPARATE async effect reading the
+  // profile — so it raced, and lost: the invite was almost always redeemed with
+  // an empty displayName, the server fell back to the account name, and the
+  // field below could not change what had already been written. The name step
+  // removes the race by construction: the redeem happens when a human presses
+  // Join, by which time there is a name to send.
+
+  // ── who is joining ───────────────────────────────────────────────
+  //
+  // The one screen a private joiner always sees. Held until the profile lookup
+  // has finished so the field does not start blank and fill in under the
+  // cursor — the prefill is the answer most people will accept unchanged, and
+  // watching it appear a beat after you started typing is how you end up with
+  // two names concatenated.
+  if (phase.kind === 'name') {
+    // NOT gated on the profile lookup. Found by smoke test 2026-08-25: the
+    // button was disabled until getMyProfile() returned, so a slow — or failed
+    // — profile call blocked joining outright. For a field that is OPTIONAL
+    // that is backwards: the whole point is that you can join without it. The
+    // lookup only supplies a default, so it may arrive late, or never.
+    const ready = !busy;
+    return (
+      <KeyboardAvoidingView
+        style={s.container}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      >
+        <Stack.Screen options={{ headerShown: false }} />
+        <StatusBar barStyle="light-content" />
+        <View style={s.body}>
+          <Ionicons name="person-circle-outline" size={48} color={colors.primary} />
+          <Text style={s.title}>Join the live</Text>
+          {/* OPTIONAL, AND IT HAS TO LOOK OPTIONAL.
+              Joining works with this box empty — the account name is used, the
+              same one a public live shows. A field that is actually optional but
+              reads as required is a field people stop and think about, which is
+              the cost this screen was supposed to avoid. */}
+          <Text style={s.sub}>
+            {name.trim()
+              ? 'This is the name other viewers will see.'
+              : 'Leave this blank to use your VaultChat name.'}
+          </Text>
+
+          <Text style={s.label}>Your name (optional)</Text>
+          <TextInput
+            style={s.input}
+            value={name}
+            onChangeText={setName}
+            placeholder="Your VaultChat name"
+            placeholderTextColor={colors.textDim}
+            maxLength={64}
+            autoCapitalize="words"
+            returnKeyType="go"
+            onSubmitEditing={() => { if (ready) { setPhase({ kind: 'joining' }); void attempt('', false); } }}
+          />
+
+          <TouchableOpacity
+            style={[s.cta, !ready && s.ctaOff]}
+            onPress={() => { if (ready) { setPhase({ kind: 'joining' }); void attempt('', false); } }}
+            activeOpacity={0.85}
+            accessibilityLabel="Join the live"
+          >
+            {busy
+              ? <ActivityIndicator color="#fff" />
+              : <Text style={s.ctaText}>Join</Text>}
+          </TouchableOpacity>
+        </View>
+      </KeyboardAvoidingView>
+    );
+  }
 
   if (phase.kind === 'joining') {
     return (
@@ -141,7 +232,7 @@ export default function LiveJoinScreen() {
         <Text style={s.title}>This live is protected</Text>
         <Text style={s.sub}>Enter the passcode the host gave you.</Text>
 
-        <Text style={s.label}>Your name</Text>
+        <Text style={s.label}>Your name (optional)</Text>
         <TextInput
           style={s.input}
           value={name}

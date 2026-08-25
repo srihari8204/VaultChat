@@ -27,9 +27,13 @@ package routes
 
 import (
 	"encoding/json"
+	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
+
+	"github.com/jackc/pgx/v5"
 
 	"vaultchat/backend-go/internal/db"
 	"vaultchat/backend-go/internal/golive"
@@ -86,6 +90,36 @@ type goliveEvent struct {
 		// back here unchanged.
 		Identity string `json:"identity"`
 	} `json:"participant,omitempty"`
+	// The published track, on track_published / track_unpublished.
+	//
+	// Carries the ONE fact an HLS viewer cannot obtain for itself: the shape of
+	// what is being shared. See migration 116.
+	Track *goliveTrack `json:"track,omitempty"`
+}
+
+// goliveTrack is the track payload LiveKit sends with track_published and
+// track_unpublished.
+//
+// Single-word field names throughout, so protojson's lowerCamelCase and the
+// proto names coincide and the double-declaration the egress payload needs
+// (see above) is not required here.
+type goliveTrack struct {
+	SID string `json:"sid"`
+	// "SCREEN_SHARE" | "CAMERA" | "MICROPHONE" | "SCREEN_SHARE_AUDIO".
+	Source string `json:"source"`
+	Type   string `json:"type"`
+	Width  int    `json:"width"`
+	Height int    `json:"height"`
+}
+
+// isScreenShare reports whether this track is the VIDEO of a screen share.
+//
+// The audio of a screen share carries the same-ish source name and no geometry
+// at all, so matching on the source alone would clear a perfectly good shape
+// the moment shared audio was published or dropped.
+func (t *goliveTrack) isScreenShare() bool {
+	return t != nil && strings.EqualFold(t.Source, "SCREEN_SHARE") &&
+		(t.Type == "" || strings.EqualFold(t.Type, "VIDEO"))
 }
 
 // egress returns the egress payload under whichever spelling LiveKit used, or
@@ -163,9 +197,87 @@ func goliveWebhook(w http.ResponseWriter, r *http.Request) {
 
 	case "participant_left":
 		goliveHostPresence(r, roomOf(ev), identityOf(ev), false)
+
+	// THE SHAPE OF A SCREEN SHARE, FOR THE VIEWERS WHO CANNOT SEE IT.
+	//
+	// Only HLS needs this — a low-latency viewer reads the same numbers off its
+	// own subscription — but it is recorded for every broadcast because the
+	// server cannot know which kind of viewer will arrive next, and a share that
+	// started before someone joined must still be describable to them.
+	case "track_published":
+		if ev.Track.isScreenShare() {
+			goliveShareGeometry(r, roomOf(ev), ev.Track.Width, ev.Track.Height)
+		}
+
+	case "track_unpublished":
+		// The share ended. The shape goes with it, or an HLS viewer keeps their
+		// phone turned for a game that stopped several minutes ago.
+		if ev.Track.isScreenShare() {
+			goliveShareGeometry(r, roomOf(ev), 0, 0)
+		}
 	}
 
 	httpx.JSON(w, 200, map[string]any{"ok": true})
+}
+
+// goliveShareGeometry records the shape of the screen share running in a room,
+// or clears it when the share stops (w and h both 0).
+//
+// WHAT IT IS FOR
+// --------------
+// An HLS viewer receives a fixed landscape composite whatever the publisher is
+// doing, so it cannot tell a shared landscape game from a shared portrait phone
+// — and those want opposite treatment on a phone: one wants the panel turned,
+// the other wants it left alone. A low-latency viewer reads these numbers off
+// its own subscription; this is how everyone else gets them. Migration 116
+// records why the alternative — making the composite match — is the dangerous
+// option rather than this one.
+//
+// AUTHORIZATION IS THE WHERE CLAUSE, exactly as in goliveHostPresence: matched
+// by ROOM NAME against a broadcast that is still running, so an event naming a
+// room this server did not create updates nothing. No user is acting here, so
+// there is no RLS identity to set — SysPool, like every other webhook write.
+//
+// Idempotent. LiveKit retries deliveries, and writing the same pair twice is a
+// no-op; the status guard keeps a late delivery from reviving geometry on a
+// broadcast that has already ended.
+func goliveShareGeometry(r *http.Request, room string, w, h int) {
+	if room == "" {
+		return
+	}
+	// Only Go Live rooms — the same belt-and-braces as host presence, behind the
+	// separate server that already cannot receive anyone else's events.
+	if !strings.HasPrefix(room, golive.ConfigFromEnv().RoomPrefix) {
+		return
+	}
+	// Nonsense geometry is treated as no geometry rather than stored: the column
+	// has a CHECK that would reject it anyway, and failing a whole webhook
+	// delivery over a malformed width would cost the retries that carry the
+	// events that matter.
+	var wp, hp any
+	if w > 0 && h > 0 {
+		wp, hp = w, h
+	}
+
+	ctx := r.Context()
+	if err := db.SysPool.QueryRow(ctx,
+		`UPDATE broadcast_sessions
+		    SET share_w = $2, share_h = $3
+		  WHERE room = $1 AND status IN ('starting', 'live')
+		    AND (share_w IS DISTINCT FROM $2 OR share_h IS DISTINCT FROM $3)
+	  RETURNING id::text`, room, wp, hp).Scan(new(string)); err != nil {
+		// pgx.ErrNoRows is the ordinary case: a retry, or a room whose broadcast
+		// has ended. Nothing to say about it.
+		if !errors.Is(err, pgx.ErrNoRows) {
+			goliveLog("SHARE_GEOMETRY_FAILED", "", room, "", "error="+err.Error())
+		}
+		return
+	}
+	if wp == nil {
+		goliveLog("SHARE_ENDED", "", room, "")
+	} else {
+		goliveLog("SHARE_GEOMETRY", "", room, "", fmt.Sprintf("size=%dx%d", w, h))
+	}
 }
 
 func roomOf(ev goliveEvent) string {

@@ -84,16 +84,33 @@ type broadcast struct {
 	PeakViewers int        `json:"peakViewers"`
 	StartedAt   time.Time  `json:"startedAt"`
 	EndedAt     *time.Time `json:"endedAt,omitempty"`
+	// THE SHAPE OF THE SCREEN SHARE RUNNING RIGHT NOW, if one is (migration 116).
+	//
+	// Absent when nothing is being shared, and absent is meaningful: the client
+	// has a correct behaviour for "unknown" and must not be handed a guess.
+	//
+	// Only an HLS viewer needs it — a low-latency viewer reads the same numbers
+	// off its own subscription — but it is served to everyone, because what a
+	// caller does with it depends on which transport it ended up on, and that is
+	// not decided here.
+	//
+	// It is what makes a shared landscape GAME watchable on a phone: the composite
+	// an HLS viewer receives is landscape whatever the publisher is doing, so
+	// without this the client cannot tell PUBG from a portrait selfie and cannot
+	// know whether to turn the panel.
+	ShareWidth  *int `json:"shareWidth,omitempty"`
+	ShareHeight *int `json:"shareHeight,omitempty"`
 }
 
 const broadcastCols = `id::text, host_id::text, chat_id::text, title, description, status, visibility,
-	                   hls_url, room, e2ee, viewer_count, peak_viewers, started_at, ended_at`
+	                   hls_url, room, e2ee, viewer_count, peak_viewers, started_at, ended_at,
+	                   share_w, share_h`
 
 func scanBroadcast(row pgx.Row) (*broadcast, error) {
 	var b broadcast
 	if err := row.Scan(&b.ID, &b.HostID, &b.ChatID, &b.Title, &b.Description, &b.Status, &b.Visibility,
 		&b.HLSURL, &b.Room, &b.E2EE, &b.ViewerCount, &b.PeakViewers,
-		&b.StartedAt, &b.EndedAt); err != nil {
+		&b.StartedAt, &b.EndedAt, &b.ShareWidth, &b.ShareHeight); err != nil {
 		return nil, err
 	}
 	// Hand out a TICKETED url, derived from the id, whenever a playlist exists.

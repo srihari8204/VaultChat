@@ -10,11 +10,11 @@
 // segment must never consume an API worker — at broadcast scale that is the
 // difference between a stream and an outage.
 
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   View, StyleSheet, TouchableOpacity, ActivityIndicator, Alert,
-  ScrollView, TextInput, Pressable, KeyboardAvoidingView, Platform,
-  useWindowDimensions, Share,
+  ScrollView, TextInput, KeyboardAvoidingView, Platform,
+  useWindowDimensions, Share, Animated, PanResponder,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
@@ -25,7 +25,9 @@ import { ResizeMode, Video } from 'expo-av';
 // and this screen holds a plain Room. A stream URL is all RTCView needs.
 import { RTCView } from '@livekit/react-native-webrtc';
 import * as Clipboard from 'expo-clipboard';
-import { pickStage, pipSize } from '../lib/golive/stageLayout';
+import {
+  clampPip, clampZoom, clampZoomPan, pickFit, pickStage, pipSize, ZOOM_MAX,
+} from '../lib/golive/stageLayout';
 import { useColors } from '../lib/theme';
 import { AppText } from '../components/ui/Text';
 import { SPACING, RADIUS } from '../constants/theme';
@@ -205,6 +207,16 @@ export default function LiveViewScreen() {
    * the host's face vanished the moment they shared their screen.
    */
   const [stageScreens, setStageScreens] = useState<Record<string, string>>({});
+  /**
+   * Stream URL -> the publisher's real frame size, as the SFU reports it.
+   *
+   * This is what makes the stage responsive rather than guessed: an Honor
+   * sharing 600x1332 and a desktop sharing 1920x1080 want opposite treatment on
+   * the same phone, and only the frame itself can say which. Absent for a
+   * publisher whose dimensions have not arrived — pickFit() has an answer for
+   * that, so nothing here invents one.
+   */
+  const [stageDims, setStageDims] = useState<Record<string, { width: number; height: number }>>({});
   // The publisher's video is read further down, where the stage is picked —
   // see pickStage(). On a private live the stage is the host and any co-hosts,
   // so the first tile is what this viewer came to watch.
@@ -296,12 +308,20 @@ export default function LiveViewScreen() {
           e2eeKey: null,
           // Other stage members' video. Audience members never appear here —
           // they are on HLS and never join the room at all.
-          onTrack: (uid, url, kind, screen) => {
+          onTrack: (uid, url, kind, screen, dims) => {
             if (kind !== 'video') return;
             const put = screen ? setStageScreens : setStagePeers;
             put(prev => {
               if (!url) { const { [uid]: _drop, ...rest } = prev; return rest; }
               return { ...prev, [uid]: url };
+            });
+            // The publisher's real frame size, kept per stream URL so the stage
+            // can size itself to what is actually arriving. Keyed by URL rather
+            // than by identity because one identity sends two video tracks.
+            setStageDims(prev => {
+              if (!url) return prev;
+              if (!dims) { const { [url]: _none, ...rest } = prev; return rest; }
+              return { ...prev, [url]: dims };
             });
           },
           onParticipant: (p, joined) => {
@@ -775,6 +795,14 @@ export default function LiveViewScreen() {
    * postage stamp on a small phone nor a second stage on a tablet.
    */
   const { width: pipW, height: pipH } = pipSize(win.width, win.height);
+  /**
+   * Which way the panel is round, right now.
+   *
+   * Read at render, never stored: a landscape share turns the phone under this
+   * screen (see the orientation effect), so anything cached would describe the
+   * panel the viewer used to be holding.
+   */
+  const landscape = win.width > win.height;
 
   /**
    * Chrome: shown, then out of the way.
@@ -821,6 +849,310 @@ export default function LiveViewScreen() {
   }, []);
 
   const openChat = useCallback(() => { setChatOpen(true); setChrome(true); }, []);
+
+  /**
+   * FIT OR FILL, DECIDED BY ITSELF — from the frame, the panel and the content.
+   *
+   * There is no single right answer to bake in, which is why this used to be
+   * wrong for somebody whichever way it was set:
+   *
+   *   * WebRTC, frame size KNOWN — pickFit() compares the publisher's real
+   *     aspect against this panel's. A phone sharing to a phone is within a few
+   *     percent, so it fills and the share stops looking small; a landscape
+   *     desktop is not, so it is contained and keeps its toolbar.
+   *   * WebRTC, frame size not reported yet — contained, the safe half of the
+   *     trade, and it re-decides the moment dimensions arrive.
+   *   * HLS — the transport cannot report a frame size, and it does not need
+   *     to: our egress composites onto a FIXED LANDSCAPE canvas
+   *     (livekit/egress.go, `layout: speaker`), so a portrait publisher — every
+   *     publisher this product has — arrives pillarboxed. Containing a 16:9
+   *     canvas on a 9:20 panel spends a quarter of the screen on a picture that
+   *     is itself mostly black bars, which IS the "it looks tiny" report.
+   *     Filling crops the compositor's black back off, not the content.
+   *
+   * Derived, never stored: it reruns on rotation, on a fold, on a split-screen
+   * resize and on a new publisher, because every input is read at render time.
+   * The button in the chrome overrides it and stays overridden.
+   */
+  /**
+   * WHAT SHAPE IS ON THE STAGE — and, on HLS, WHOSE ANSWER TO BELIEVE.
+   *
+   * A low-latency viewer subscribes to the publisher's own track, so stageDims
+   * holds the truth and `pickStage` already knows whether it is a screen.
+   *
+   * An HLS viewer receives a composite: a fixed landscape canvas with the
+   * publisher letterboxed inside it. The player will happily report that
+   * canvas — and the canvas is not the content, so believing it would make
+   * every public broadcast look landscape. The SERVER knows better, because
+   * LiveKit tells it the real geometry when the share is published
+   * (migration 116), so its answer wins whenever it has one.
+   *
+   * Note what this makes true: "cover the canvas" and "fit the content" become
+   * the same instruction, because the canvas's black is exactly the difference
+   * between the two aspect ratios. Cropping it back off is what the viewer
+   * wanted all along.
+   */
+  // MEMOISED ON THE NUMBERS, not rebuilt per render. stageFrame derives from
+  // this and the orientation effect depends on stageFrame — a fresh object each
+  // render would re-issue lockAsync forever, which is a system call per frame
+  // and a phone that fights the viewer's own rotation.
+  const serverShare = useMemo(
+    () => (b?.shareWidth && b?.shareHeight
+      ? { width: b.shareWidth, height: b.shareHeight }
+      : undefined),
+    [b?.shareWidth, b?.shareHeight],
+  );
+  /** True when what fills the stage is a SCREEN, by either transport's account. */
+  const stageIsScreen = stage.mainIsScreen || (!mainStream && !!serverShare);
+  const stageFrame = mainStream
+    ? stageDims[mainStream]
+    // The server first; the player's own reading of the canvas only as a
+    // fallback, and only ever as a description of the canvas.
+    : (serverShare ?? stageDims[b?.hlsUrl ?? '']);
+  const autoFit = pickFit(stageFrame?.width, stageFrame?.height, win.width, win.height, stageIsScreen);
+  const [fillPref, setFillPref] = useState<boolean | null>(null);
+  const fill = fillPref ?? (autoFit !== null ? autoFit === 'cover' : !lowLatency);
+
+  // WHY THIS IS LOGGED. Both answers render into the same full-screen box, so
+  // the view tree cannot tell them apart from outside the app and neither can a
+  // screenshot — FLAG_SECURE blanks those. Without this line, "why is it still
+  // letterboxed" is unanswerable on a device that is doing exactly the right
+  // thing, and a wrong frame size looks identical to a wrong decision.
+  useEffect(() => {
+    // NOT gated on mainStream. HLS has no stream URL at all — the player owns
+    // the frame — and HLS is the transport whose fit was the original complaint,
+    // so gating on it skipped the one case worth watching. Device-found.
+    if (!stageReady) return;
+    console.warn('[GOLIVE_STAGE]', JSON.stringify({
+      fit: fill ? 'cover' : 'contain',
+      why: fillPref !== null ? 'viewer' : autoFit !== null ? 'auto' : 'transport',
+      frame: stageFrame ? `${stageFrame.width}x${stageFrame.height}` : null,
+      panel: `${Math.round(win.width)}x${Math.round(win.height)}`,
+      screen: stageIsScreen,
+      src: mainStream ? 'sfu' : serverShare ? 'server' : 'player',
+    }));
+  }, [stageReady, mainStream, fill, fillPref, autoFit, stageFrame, win.width, win.height, stageIsScreen, serverShare]);
+
+  /**
+   * THE HOST'S FACE IS IN THE WAY — move it, or send it away.
+   *
+   * The corner preview sits over the share, and where it sits is a guess: the
+   * one thing being shared that matters might be exactly under it. It was also
+   * `pointerEvents="none"`, so a viewer could not do anything about it at all.
+   *
+   * Drag moves it, clamped onto the safe area so it cannot be thrown off the
+   * edge (clampPip, 8 checks). The chrome carries a toggle to hide it outright.
+   * A tap that did not travel is forwarded to the stage's own double-tap, so the
+   * chrome still toggles when the thumb lands on the corner instead of beside it.
+   */
+  const [pipOn, setPipOn] = useState(true);
+  const [pipXY, setPipXY] = useState<{ x: number; y: number } | null>(null);
+  const pipHome = { x: win.width - pipW - insets.right - SPACING.lg, y: insets.top + 56 };
+  const pipAt = clampPip(
+    (pipXY ?? pipHome).x, (pipXY ?? pipHome).y,
+    win.width, win.height, pipW, pipH, insets.top, insets.bottom, insets.left, insets.right,
+  );
+  /**
+   * PINCH TO ZOOM THE STAGE — the screen share and the face alike.
+   *
+   * Auto-fit decides how the frame meets the panel; this is the viewer looking
+   * CLOSER at part of it, which is a different question and the one a shared
+   * screen raises constantly — a phone screen scaled onto a phone screen is
+   * legible until someone shares a spreadsheet.
+   *
+   * Raw touches rather than a gesture library: app/video-player.tsx already
+   * pinches this way and ships, and the two now behave identically, which is
+   * worth more than either being individually nicer.
+   *
+   * The transform lives on a wrapper around the renderer, so it applies to the
+   * WebRTC surface and the HLS player without either knowing about it.
+   */
+  const zoom = useRef(new Animated.Value(1)).current;
+  const zoomPan = useRef(new Animated.ValueXY()).current;
+  /** What the gesture has settled on. The Animated values follow the fingers. */
+  const zoomAt = useRef({ scale: 1, x: 0, y: 0 });
+  const touch = useRef({ pinch: false, d0: 0, base: 1, x0: 0, y0: 0, moved: false });
+
+  // A new stream is a new picture: keeping a 3x zoom across it leaves the viewer
+  // staring at a magnified corner of something they have not seen whole yet.
+  useEffect(() => {
+    zoomAt.current = { scale: 1, x: 0, y: 0 };
+    zoom.setValue(1);
+    zoomPan.setValue({ x: 0, y: 0 });
+  }, [mainStream, zoom, zoomPan]);
+
+  const stageTouchStart = useCallback((e: any) => {
+    const t = e.nativeEvent.touches;
+    touch.current.moved = false;
+    if (t.length === 2) {
+      touch.current.pinch = true;
+      touch.current.d0 = Math.hypot(t[1].pageX - t[0].pageX, t[1].pageY - t[0].pageY);
+      touch.current.base = zoomAt.current.scale;
+    } else if (t.length === 1) {
+      touch.current.x0 = t[0].pageX;
+      touch.current.y0 = t[0].pageY;
+    }
+  }, []);
+
+  const stageTouchMove = useCallback((e: any) => {
+    const t = e.nativeEvent.touches;
+    if (touch.current.pinch && t.length === 2) {
+      const d = Math.hypot(t[1].pageX - t[0].pageX, t[1].pageY - t[0].pageY);
+      if (touch.current.d0 > 0) {
+        touch.current.moved = true;
+        // Tracked UNCLAMPED so the pinch feels continuous under the fingers;
+        // clampZoom is what it settles to on release.
+        zoom.setValue(Math.min((d / touch.current.d0) * touch.current.base, ZOOM_MAX));
+      }
+      return;
+    }
+    // One finger only pans once there is something to pan — at 1x the picture
+    // already covers the panel, and dragging it would just reveal black.
+    if (t.length === 1 && zoomAt.current.scale > 1) {
+      const dx = t[0].pageX - touch.current.x0;
+      const dy = t[0].pageY - touch.current.y0;
+      if (Math.abs(dx) > 4 || Math.abs(dy) > 4) touch.current.moved = true;
+      const p = clampZoomPan(
+        zoomAt.current.x + dx, zoomAt.current.y + dy,
+        zoomAt.current.scale, win.width, win.height,
+      );
+      zoomPan.setValue(p);
+    }
+  }, [zoom, zoomPan, win.width, win.height]);
+
+  const stageTouchEnd = useCallback(() => {
+    if (touch.current.pinch) {
+      touch.current.pinch = false;
+      const raw = (zoom as any).__getValue?.() ?? 1;
+      const scale = clampZoom(raw);
+      // The pan has to come back inside the SMALLER slack of the new scale, or
+      // zooming out strands the picture off-centre against its own black edge.
+      const p = clampZoomPan(zoomAt.current.x, zoomAt.current.y, scale, win.width, win.height);
+      zoomAt.current = { scale, x: p.x, y: p.y };
+      Animated.spring(zoom, { toValue: scale, useNativeDriver: true, bounciness: 0 }).start();
+      Animated.spring(zoomPan, { toValue: p, useNativeDriver: true, bounciness: 0 }).start();
+      return;
+    }
+    if (zoomAt.current.scale > 1) {
+      zoomAt.current = {
+        ...zoomAt.current,
+        ...clampZoomPan(
+          (zoomPan.x as any).__getValue?.() ?? 0,
+          (zoomPan.y as any).__getValue?.() ?? 0,
+          zoomAt.current.scale, win.width, win.height,
+        ),
+      };
+    }
+    // A touch that never travelled is a tap, and the tap on this layer is what
+    // reveals the chrome. Pinching or panning must not also toggle it.
+    if (!touch.current.moved) tapStage();
+  }, [zoom, zoomPan, win.width, win.height, tapStage]);
+
+  /**
+   * ORIENTATION FOLLOWS THE CONTENT — for PUBG and Free Fire, mostly.
+   *
+   * The app is portrait-locked in app.json AND in AndroidManifest, which is
+   * right for every other screen and ruinous here: a landscape mobile game
+   * shared onto a portrait phone is a strip across the middle with two thirds
+   * of the panel black, and no amount of fit or fill can rescue it. Nothing can
+   * — a landscape picture does not go into a portrait hole. The panel has to
+   * turn.
+   *
+   * So a landscape SHARE turns the viewer's phone, exactly as a fullscreen
+   * video player does, and turns it back on the way out. `lockAsync` overrides
+   * the manifest at runtime (app/video-player.tsx has relied on that for as
+   * long as it has existed) and it also overrides the viewer's own rotation
+   * lock, which unlocking would not.
+   *
+   * SCREEN SHARES ONLY, and that restriction is load-bearing. A camera track
+   * reports its CAPTURE geometry — the Honor's front camera arrives as
+   * 1280x720 while it draws 720x1280 — so keying on any video track would spin
+   * the phone sideways for an ordinary face. Screen capture carries no such
+   * rotation, measured at 1200x2664 on the same handset, so it can be trusted.
+   *
+   * HLS is left UNLOCKED rather than guessed at: the composite is a landscape
+   * canvas whatever the publisher was, so locking to it would turn the phone
+   * for a portrait broadcast. Unlocked, the viewer turns it themselves and
+   * everything downstream — the fit, the corner, the zoom pan — re-decides.
+   */
+  useEffect(() => {
+    if (onStage || !stageReady) return;
+    let dead = false;
+    (async () => {
+      const O = await import('expo-screen-orientation');
+      if (dead) return;
+      try {
+        // Only a screen share may speak for the panel. See above.
+        const frame = stageIsScreen ? stageFrame : undefined;
+        if (frame) {
+          await O.lockAsync(frame.width > frame.height
+            ? O.OrientationLock.LANDSCAPE
+            : O.OrientationLock.PORTRAIT_UP);
+        } else if (!mainStream) {
+          // HLS with no share reported: a camera broadcast, whose canvas is
+          // landscape by construction and says nothing about the publisher.
+          // Unlocked rather than guessed at — the viewer may still turn it.
+          await O.unlockAsync();
+        } else {
+          await O.lockAsync(O.OrientationLock.PORTRAIT_UP);
+        }
+      } catch {}
+    })();
+    return () => { dead = true; };
+  }, [onStage, stageReady, stageIsScreen, stageFrame, mainStream]);
+
+  /**
+   * AND ALWAYS BACK TO PORTRAIT ON THE WAY OUT.
+   *
+   * Separate from the effect above and deliberately dependency-free: leaving a
+   * landscape game share must restore the rest of the app whatever the stage
+   * was doing at the time, including when the screen unmounts mid-rotation.
+   */
+  useEffect(() => () => {
+    void import('expo-screen-orientation')
+      .then(O => O.lockAsync(O.OrientationLock.PORTRAIT_UP))
+      .catch(() => {});
+  }, []);
+
+  /** Applied to the renderer, not to the chrome — the controls never zoom. */
+  const zoomStyle = {
+    transform: [...zoomPan.getTranslateTransform(), { scale: zoom }],
+  };
+
+  /** Live translation during a drag. Committed to state on release. */
+  const pipDrag = useRef(new Animated.ValueXY()).current;
+  // The responder is created ONCE; everything it clamps against — the window,
+  // the insets, the current position, the tap handler — changes every render.
+  // It reads a ref for the same reason app/chat.tsx does: a captured closure
+  // here means clamping a drag against the geometry of some earlier frame.
+  const pipGeo = useRef({ at: pipAt, win, pipW, pipH, insets, tap: tapStage });
+  pipGeo.current = { at: pipAt, win, pipW, pipH, insets, tap: tapStage };
+  const pipPan = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => true,
+      onPanResponderMove: Animated.event(
+        [null, { dx: pipDrag.x, dy: pipDrag.y }],
+        // The corner is laid out with left/top, which the native driver cannot
+        // animate. It is one small view following a finger — the JS driver is
+        // what this costs.
+        { useNativeDriver: false },
+      ),
+      onPanResponderRelease: (_e, g) => {
+        const d = pipGeo.current;
+        // Under a few pixels this was a tap, not a drag: hand it to the stage so
+        // the double-tap that reveals the chrome works over the corner too.
+        if (Math.abs(g.dx) < 4 && Math.abs(g.dy) < 4) d.tap();
+        else setPipXY(clampPip(
+          d.at.x + g.dx, d.at.y + g.dy,
+          d.win.width, d.win.height, d.pipW, d.pipH, d.insets.top, d.insets.bottom, d.insets.left, d.insets.right,
+        ));
+        pipDrag.setValue({ x: 0, y: 0 });
+      },
+      // A drag the system takes away (a notification, a call) must not leave the
+      // preview translated off wherever the finger had reached.
+      onPanResponderTerminate: () => pipDrag.setValue({ x: 0, y: 0 }),
+    }),
+  ).current;
 
   return (
     <View style={S.root}>
@@ -927,7 +1259,38 @@ export default function LiveViewScreen() {
         //
         // Same stage rule as the host's own view: their screen share, if they
         // have one, is what this viewer came to look at.
-        <RTCView streamURL={mainStream} style={S.video} objectFit="contain" zOrder={0} />
+        <Animated.View style={[S.video, zoomStyle]}>
+          <RTCView
+            streamURL={mainStream}
+            style={S.video}
+            objectFit={fill ? 'cover' : 'contain'}
+            zOrder={0}
+            // THE FRAME SIZE, LIVE — and this is the one that survives a host
+            // who turns their phone.
+            //
+            // The publication's dimensions are captured once, when the track is
+            // subscribed, and that is exactly wrong for the case this product
+            // has: a host starts sharing in portrait, then opens PUBG and the
+            // capture becomes landscape. Measured on device 2026-08-25 — the
+            // viewer's renderer went from 600x1332 to 960x540 mid-share while
+            // the subscription's numbers never moved. Covering a landscape game
+            // against a stale portrait decision crops it to a sliver, which is
+            // worse than the letterbox this whole change set out to remove.
+            //
+            // The renderer knows, because it is decoding the frames. So it is
+            // asked, and its answer overwrites whatever the SFU said at
+            // subscribe time.
+            onDimensionsChange={(e) => {
+              const { width, height } = e.nativeEvent;
+              if (!(width > 0) || !(height > 0)) return;
+              setStageDims(prev => {
+                const cur = prev[mainStream];
+                if (cur && cur.width === width && cur.height === height) return prev;
+                return { ...prev, [mainStream]: { width, height } };
+              });
+            }}
+          />
+        </Animated.View>
       ) : !b?.hlsUrl ? (
         <View style={S.center}>
           <Ionicons name="cloud-offline-outline" size={40} color="#94A3B8" />
@@ -937,37 +1300,89 @@ export default function LiveViewScreen() {
           </TouchableOpacity>
         </View>
       ) : (
+        <Animated.View style={[S.video, zoomStyle]}>
         <Video
           ref={video}
           source={{ uri: b.hlsUrl }}
           style={S.video}
-          resizeMode={ResizeMode.CONTAIN}
+          // Defaults to COVER, and that is not a crop of the picture: it is a
+          // crop of the black the compositor added. See `fill` above.
+          resizeMode={fill ? ResizeMode.COVER : ResizeMode.CONTAIN}
           shouldPlay
           // NO NATIVE CONTROLS. They have no job on a live edge — there is
           // nothing to seek and nothing to resume — and they used to be the
           // only thing on screen, swallowing the taps that reveal our own
           // chrome and leaving a viewer with no way off the screen at all.
           useNativeControls={false}
+          // THE ONLY FRAME SIZE HLS CAN GIVE US.
+          //
+          // There is no track publication on this path — the player owns the
+          // decode — but expo-av reports the stream's natural size once the
+          // first frame is ready. Fed into the same map the SFU fills, so the
+          // fit, the diagnostics and the orientation rule all read one source
+          // whichever transport is playing.
+          //
+          // WORTH KNOWING WHAT THIS SIZE IS: today it describes our EGRESS
+          // CANVAS, not the publisher — a fixed landscape composite that a
+          // portrait phone is pillarboxed inside (livekit/egress.go). So it
+          // cannot yet tell a landscape game from a portrait camera, and the
+          // orientation rule deliberately ignores it. The day the composite is
+          // made to match the publisher, this line starts telling the truth and
+          // public behaves exactly like private with no further change.
+          onReadyForDisplay={(e: any) => {
+            const n = e?.naturalSize;
+            if (!n || !(n.width > 0) || !(n.height > 0) || !b?.hlsUrl) return;
+            // `orientation` is the player's own word for whether it had to
+            // transpose; trust it over the raw pair when it disagrees.
+            const flip = n.orientation === 'portrait' && n.width > n.height;
+            setStageDims(prev => ({
+              ...prev,
+              [b.hlsUrl as string]: flip
+                ? { width: n.height, height: n.width }
+                : { width: n.width, height: n.height },
+            }));
+          }}
           // Live HLS has no meaningful end; looping a live edge would restart
           // playback at the first cached segment instead of following the feed.
           isLooping={false}
         />
+        </Animated.View>
       )}
 
-      {/* DOUBLE-TAP CATCHER.
-          Full-bleed and BELOW the chrome, so it only ever sees taps that
-          landed on the stream itself — a tap on Leave stays a tap on Leave. */}
-      {stageReady && <Pressable style={StyleSheet.absoluteFill} onPress={tapStage} />}
+      {/* THE GESTURE LAYER — tap, pinch and pan, in that order of subtlety.
+          Full-bleed and BELOW the chrome, so it only ever sees gestures that
+          landed on the stream itself: a tap on Leave stays a tap on Leave.
+
+          Raw touch props rather than a Pressable and a PanResponder fighting
+          over the responder: one view, three handlers, and a tap is simply a
+          touch that never travelled. onStartShouldSetResponder claims the
+          touch so the move and end events are guaranteed to arrive. */}
+      {stageReady && (
+        <View
+          style={StyleSheet.absoluteFill}
+          onStartShouldSetResponder={() => true}
+          onMoveShouldSetResponder={() => true}
+          onTouchStart={stageTouchStart}
+          onTouchMove={stageTouchMove}
+          onTouchEnd={stageTouchEnd}
+          onTouchCancel={stageTouchEnd}
+        />
+      )}
 
       {/* CAMERA PICTURE-IN-PICTURE.
           Only while something else owns the stage, which today means a screen
           share. Sized from the window rather than fixed, and parked below the
-          top row so it never sits under the status pill on a notched phone.
-          pointerEvents="none": it must not eat the double tap it floats over. */}
-      {stageReady && pipStream && (
-        <View
-          style={[S.pip, { width: pipW, height: pipH, top: insets.top + 56, right: SPACING.lg }]}
-          pointerEvents="none"
+          top row so it never sits under the status pill on a notched phone —
+          until the viewer drags it somewhere else, or hides it from the chrome.
+          Its position is clamped on every render, so a rotation cannot strand
+          it off the panel. */}
+      {stageReady && pipStream && pipOn && (
+        <Animated.View
+          style={[S.pip, {
+            width: pipW, height: pipH, left: pipAt.x, top: pipAt.y,
+            transform: pipDrag.getTranslateTransform(),
+          }]}
+          {...pipPan.panHandlers}
         >
           <RTCView
             streamURL={pipStream}
@@ -979,7 +1394,7 @@ export default function LiveViewScreen() {
             // BEHIND the stream — present in the tree, invisible on the glass.
             zOrder={1}
           />
-        </View>
+        </Animated.View>
       )}
 
       {/* ── CHROME ──────────────────────────────────────────────────
@@ -989,7 +1404,17 @@ export default function LiveViewScreen() {
           everywhere the chrome has not actually drawn a control. */}
       {!ended && chromeShown && (
         <View
-          style={[S.chrome, { paddingTop: insets.top + SPACING.sm, paddingBottom: insets.bottom + SPACING.sm }]}
+          style={[S.chrome, {
+            paddingTop: insets.top + SPACING.sm,
+            paddingBottom: insets.bottom + SPACING.sm,
+            // LEFT AND RIGHT MATTER NOW. In portrait these insets are zero and
+            // the horizontal padding in S.chrome was enough. Turn the phone for
+            // a landscape game share and the notch swings to one side, straight
+            // over the LIVE pill or the exit — the one control that must never
+            // be unreachable.
+            paddingLeft: insets.left + SPACING.lg,
+            paddingRight: insets.right + SPACING.lg,
+          }]}
           pointerEvents="box-none"
         >
           {/* TOP ROW — status on the left, every action as a small icon on the
@@ -1020,6 +1445,34 @@ export default function LiveViewScreen() {
             )}
 
             <View style={S.grow} pointerEvents="none" />
+
+            {/* FILL vs FIT. A viewer's own override of the default above — the
+                only control that can rescue a landscape publisher from a crop,
+                and the one that answers "why is this so small" on a stream the
+                default guessed wrong about. */}
+            {stageReady && !onStage && (
+              <TouchableOpacity
+                onPress={() => setFillPref(!fill)}
+                style={[S.icon, fill && S.iconOn]}
+                accessibilityLabel={fill ? 'Fit the whole picture on screen' : 'Fill the screen'}
+                hitSlop={8}
+              >
+                <Ionicons name={fill ? 'contract' : 'expand'} size={18} color="#fff" />
+              </TouchableOpacity>
+            )}
+
+            {/* HIDE THE HOST'S CORNER. Shown only when there is a corner to
+                hide, and it stays after hiding — it is the only way back. */}
+            {stageReady && pipStream && (
+              <TouchableOpacity
+                onPress={() => setPipOn(v => !v)}
+                style={[S.icon, !pipOn && S.iconOn]}
+                accessibilityLabel={pipOn ? 'Hide the camera corner' : 'Show the camera corner'}
+                hitSlop={8}
+              >
+                <Ionicons name={pipOn ? 'person-circle' : 'eye-off-outline'} size={18} color="#fff" />
+              </TouchableOpacity>
+            )}
 
             {stageReady && (
               <TouchableOpacity
@@ -1288,7 +1741,28 @@ export default function LiveViewScreen() {
                   it and the composer takes focus immediately, because tapping a
                   chat icon has exactly one intention. */}
               {chatOpen && (
-                <View style={S.chatWrap} pointerEvents="box-none">
+                <View
+                  // CHAT MOVES TO THE RIGHT WHEN THE PANEL IS WIDE.
+                  //
+                  // A stream that has turned landscape is a game, and a game is
+                  // the case where a chat strip across the bottom covers the
+                  // part people are watching — the floor of the map, the
+                  // scoreboard, the health bar. Every live-streaming app puts
+                  // the chat in a right-hand column for exactly this, and the
+                  // room is only there in landscape.
+                  //
+                  // Portrait keeps the bottom sheet. A third of a 393dp phone is
+                  // 134dp, which fits about two words per line and turns a
+                  // conversation into a column of fragments.
+                  style={[
+                    S.chatWrap,
+                    landscape && {
+                      alignSelf: 'flex-end',
+                      width: Math.min(340, Math.round(win.width * 0.34)),
+                    },
+                  ]}
+                  pointerEvents="box-none"
+                >
                   <View style={S.chatHead}>
                     <AppText style={S.chatHeadText}>Live chat</AppText>
                     <TouchableOpacity onPress={() => setChatOpen(false)} hitSlop={10}>
@@ -1296,7 +1770,9 @@ export default function LiveViewScreen() {
                     </TouchableOpacity>
                   </View>
                   <ScrollView
-                    style={[S.chatList, { maxHeight: Math.round(win.height * 0.28) }]}
+                    // Taller in landscape, because a right-hand column has the
+                    // height to spare and 28% of a short edge is three messages.
+                    style={[S.chatList, { maxHeight: Math.round(win.height * (landscape ? 0.5 : 0.28)) }]}
                     contentContainerStyle={S.chatListInner}
                     showsVerticalScrollIndicator={false}
                   >
@@ -1388,7 +1864,8 @@ const S = StyleSheet.create({
   // fit a 5" phone and a 6.9" one without either being measured.
   chrome: {
     ...StyleSheet.absoluteFillObject,
-    paddingHorizontal: SPACING.lg,
+    // No paddingHorizontal here: the render supplies left and right from the
+    // real insets, and a static value would win over them on the notch side.
   },
   /** Eats the leftover space. Used both as a row spacer and a column spacer. */
   grow: { flex: 1 },

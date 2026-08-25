@@ -163,7 +163,21 @@ export interface JoinArgs {
    * instead of appearing beside it. Optional, so existing callers compile
    * unchanged and simply ignore the distinction.
    */
-  onTrack?: (uid: string, url: string | null, kind: 'audio' | 'video', screen?: boolean) => void;
+  onTrack?: (
+    uid: string,
+    url: string | null,
+    kind: 'audio' | 'video',
+    screen?: boolean,
+    /**
+     * The publisher's REAL frame size, straight off the track publication.
+     *
+     * Undefined until the server has it, and on transports that cannot say
+     * (HLS). The stage uses it to decide whether filling the panel would crop
+     * anything worth keeping — see pickFit() — so a guess here is worse than
+     * nothing, and "nothing" is what undefined means.
+     */
+    dims?: { width: number; height: number },
+  ) => void;
   onParticipant?: (p: RemoteParticipant, joined: boolean) => void;
   /**
    * The SDK LOST the transport and is recovering it.
@@ -355,8 +369,14 @@ export async function joinSfuRoom(a: JoinArgs): Promise<SfuSession> {
     // Logged because this is the event that decides whether a call is
     // "connected". Its absence was indistinguishable from a dead SFU.
     const screen = _pub?.source === Track.Source.ScreenShare;
-    console.warn('[call] sfu track subscribed —', kind, screen ? '(screen)' : '', 'from', p.identity, url ? 'with stream' : 'NO STREAM URL');
-    try { a.onTrack?.(p.identity, url, kind, screen); } catch (err) {
+    // TrackInfo carries width/height once the SFU knows them. Absent on an
+    // audio track and on a video one that has not reported yet — passed
+    // through as undefined rather than defaulted, because the stage's fit rule
+    // has a correct answer for "unknown" and none for "wrong".
+    const d = _pub?.dimensions;
+    const dims = d && d.width > 0 && d.height > 0 ? { width: d.width, height: d.height } : undefined;
+    console.warn('[call] sfu track subscribed —', kind, screen ? '(screen)' : '', 'from', p.identity, url ? 'with stream' : 'NO STREAM URL', dims ? `${dims.width}x${dims.height}` : '');
+    try { a.onTrack?.(p.identity, url, kind, screen, dims); } catch (err) {
       console.warn('[call] onTrack handler threw —', (err as any)?.message ?? err);
     }
   });
