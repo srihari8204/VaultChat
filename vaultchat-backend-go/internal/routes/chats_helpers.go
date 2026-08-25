@@ -167,8 +167,41 @@ func chatsGet(w http.ResponseWriter, r *http.Request) {
 		pubMembers = append(pubMembers, p)
 	}
 
+	// WHAT THE OTHER MEMBERS REQUIRE OF THIS DEVICE.
+	//
+	// screenshotMode below is the CALLER'S OWN row, and the client was using it
+	// to decide whether to block capture and whether to report its own captures.
+	// That made the setting mean "when I screenshot, tell them" — the exact
+	// inverse of how it reads. Setting "block screenshots and notify me" changed
+	// nothing about what the other person's phone did, so the person who asked
+	// for the protection was the only one it never protected.
+	//
+	// Two booleans rather than one "effective mode" because in a group the
+	// requirements COMPOSE and a single ordinal cannot express that: one member
+	// on block_silent (block, stay quiet) and another on allow_notify (allow,
+	// but tell me) together mean block AND notify, which is neither of them.
+	//
+	// COALESCE to 'block' matches the app-side default for an unset column, so a
+	// member who never touched the setting still gets the protective posture.
+	var peerBlocks, peerNotify bool
+	if e := chatsQRow(ctx, user.ID,
+		`SELECT
+		   COALESCE(bool_or(COALESCE(screenshot_mode,'block') IN ('block','block_silent')), FALSE),
+		   COALESCE(bool_or(COALESCE(screenshot_mode,'block') IN ('block','allow_notify')), FALSE)
+		 FROM chat_members
+		  WHERE chat_id = $1 AND user_id <> $2 AND left_at IS NULL`,
+		[]any{chatID, user.ID}, &peerBlocks, &peerNotify); e != nil {
+		// Fail PROTECTIVE, never permissive: a lookup failure must not silently
+		// turn someone's screenshot protection off.
+		log.Printf("[chats get] peer screenshot policy: %v", e)
+		peerBlocks, peerNotify = true, true
+	}
+
 	gm := chatsBuildGroupMeta(mem, cIcon, cColor, cPrivacy)
 	httpx.JSON(w, 200, map[string]any{
+		// What OTHERS require of me — drives this device's capture policy.
+		"peerBlocksCapture":      peerBlocks,
+		"peerWantsCaptureNotice": peerNotify,
 		"id":                  cID,
 		"type":                cType,
 		"name":                cName,
@@ -1842,7 +1875,86 @@ func chatsScreenshotCaptured(w http.ResponseWriter, r *http.Request) {
 		"capturedBy": user.ID,
 		"capturedAt": httpx.JSTime(time.Now()),
 	})
+	// The socket event above only reaches someone who has THIS chat open right
+	// now. Everyone else — app backgrounded, killed, or simply on another
+	// screen — learned nothing, which for a "your content was captured" notice
+	// is the case that matters most: you are least likely to be staring at the
+	// chat at the moment somebody screenshots it.
+	workx.Submit(func() { chatsSendScreenshotPush(chatID, user.ID) })
 	httpx.JSON(w, 200, map[string]any{"ok": true})
+}
+
+// chatsSendScreenshotPush wakes the members who asked to be told.
+//
+// Audience is NOT everyone in the chat: only members whose own screenshot_mode
+// requests a notice ('block' or 'allow_notify'). Someone who set 'allow' or
+// 'block_silent' deliberately opted out of being pinged, and a security notice
+// that ignores the setting meant to control it is just noise.
+//
+// Mute is deliberately NOT honoured. Muting a chat silences a CONVERSATION;
+// this is a notice that someone captured your content, and the person who
+// muted a chat is exactly the person not watching it. Flip the WHERE clause if
+// that ever proves too loud in practice.
+func chatsSendScreenshotPush(chatID, capturerID string) {
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	rows, err := db.SysPool.Query(ctx,
+		`SELECT d.push_token, d.fcm_token
+		   FROM chat_members cm
+		   JOIN devices d ON d.user_id = cm.user_id
+		  WHERE cm.chat_id = $1
+		    AND cm.user_id <> $2
+		    AND cm.left_at IS NULL
+		    AND COALESCE(cm.screenshot_mode,'block') IN ('block','allow_notify')
+		    AND NOT EXISTS (
+		      SELECT 1 FROM user_blocks ub
+		       WHERE ub.blocker_id = cm.user_id AND ub.blocked_id = $2
+		    )`, chatID, capturerID)
+	if err != nil {
+		log.Printf("[screenshot push] %v", err)
+		return
+	}
+	fcmTokens := map[string]bool{}
+	expoTokens := []string{}
+	for rows.Next() {
+		var pushToken, fcmToken *string
+		if err := rows.Scan(&pushToken, &fcmToken); err != nil {
+			rows.Close()
+			log.Printf("[screenshot push] %v", err)
+			return
+		}
+		if fcmToken != nil && *fcmToken != "" {
+			fcmTokens[*fcmToken] = true
+		} else if pushToken != nil && *pushToken != "" {
+			expoTokens = append(expoTokens, *pushToken)
+		}
+	}
+	rows.Close()
+
+	// Data-only for native devices, exactly like the message doorbell: the body
+	// carries no chat name and no capturer name, so nothing readable transits
+	// Google. The client resolves the title locally and suppresses the
+	// notification when that chat is already on screen.
+	if len(fcmTokens) > 0 {
+		list := make([]string, 0, len(fcmTokens))
+		for t := range fcmTokens {
+			list = append(list, t)
+		}
+		res := fcm.SendCallMessage(list,
+			map[string]string{"type": "screenshot", "chatId": chatID}, 60_000)
+		if len(res.Dead) > 0 {
+			if _, err := db.Pool.Exec(ctx,
+				`UPDATE devices SET fcm_token = NULL WHERE fcm_token = ANY($1::text[])`, res.Dead); err != nil {
+				log.Printf("[screenshot push] %v", err)
+			}
+		}
+	}
+	if len(expoTokens) > 0 {
+		chatsSendExpoPush(ctx, expoTokens, "VaultChat",
+			"Someone took a screenshot of your chat",
+			map[string]any{"chatId": chatID, "type": "screenshot"}, "default")
+	}
 }
 
 func chatsVanishMode(w http.ResponseWriter, r *http.Request) {
