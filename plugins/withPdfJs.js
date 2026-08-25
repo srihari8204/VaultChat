@@ -18,9 +18,12 @@
 // All three files land in ONE directory on purpose — pdf.js starts a Web Worker,
 // and a worker will not start from a different origin than the page.
 //
-// The copies are also committed under android/, so a plain `gradlew assembleRelease`
-// works without a prebuild. This plugin is what restores them after
-// `expo prebuild --clean` wipes the android directory.
+// android/ is GITIGNORED (.gitignore line 43), so the copies under it are local
+// build output, not committed files. On a machine that has already prebuilt, a
+// plain `gradlew assembleRelease` works because they are still sitting there;
+// on a fresh clone android/ does not exist at all. This plugin is what puts
+// them back — both on the first prebuild and after `expo prebuild --clean`
+// wipes the directory. assets/pdfjs/ is the committed source of truth.
 
 const { withDangerousMod } = require('@expo/config-plugins');
 const fs = require('fs');

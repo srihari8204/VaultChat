@@ -11,7 +11,15 @@
       "Bash(node --check routes/chats.js)",
       "Bash(node --check routes/user.js)",
       "Bash(npm run *)",
-      "Bash(node build.js)"
+      "Bash(node build.js)",
+      "Bash(ssh srihari@65.21.229.167:*)"
+    ]
+  },
+  "autoMode": {
+    "allow": [
+      "$defaults",
+      "READ-ONLY INSPECTION OF THE VAULTCHAT PRODUCTION BOX (srihari@65.21.229.167) over ssh is allowed. This covers `docker ps`, `docker inspect`, `docker logs`, `docker compose config`, reading files (cat/head/tail/ls/find/grep/md5sum/tr), and `docker exec <container> psql ... -c '<SQL>'` where the SQL is a read-only SELECT — for example `SELECT max(version) FROM schema_migrations` to verify the migration ledger. These observe state and change nothing.",
+      "STILL BLOCKED on that box regardless of the rule above: anything that mutates it. `docker compose up/build/restart/stop/down`, `docker run`, `docker rm/kill`, `docker cp`, writes or copies into /home/srihari/vaultchat, sudo, and any SQL that is not a SELECT (INSERT/UPDATE/DELETE/ALTER/DROP/CREATE or a migration apply). A production deploy stays explicitly approved each time."
     ]
   }
 }
