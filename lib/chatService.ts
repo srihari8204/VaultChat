@@ -10,7 +10,7 @@ import { Buffer } from 'buffer';   // not a RN global — see myUserId's token f
 import { unwrapPreview } from './linkPreview';
 import perf from './perf';
 import { SERVER_URL } from '../constants/server';
-import { E2EE_ENABLED, GROUP_E2EE, E2EE_STRICT } from '../constants/flags';
+import { E2EE_ENABLED, GROUP_E2EE, E2EE_STRICT, UPLOAD_PROGRESS } from '../constants/flags';
 // Group types and permissions are defined once, in lib/groups, and mirrored
 // server-side in internal/groups. Import rather than restate them.
 import type { GroupType } from './groups/catalog';
@@ -2510,7 +2510,11 @@ export async function uploadAttachment(
   uri: string,
   filename: string,
   mime: string,
-  opts: { viewOnce?: boolean; signal?: AbortSignal; purpose?: AttachmentPurpose } = {},
+  opts: {
+    viewOnce?: boolean; signal?: AbortSignal; purpose?: AttachmentPurpose;
+    /** 0→1 as the bytes go up. See postWithProgress for why this isn't fetch. */
+    onProgress?: (frac: number) => void;
+  } = {},
 ): Promise<UploadResult> {
   const token = await getAccessToken();
   if (!token) throw new Error('Not signed in');
@@ -2528,7 +2532,12 @@ export async function uploadAttachment(
   if (size >= 100 * 1024 * 1024) {   // > server-relay cap
     try {
       const { resumableUpload } = require('./resumableUpload');
-      return await resumableUpload(uri, filename, mime, size, { viewOnce: opts.viewOnce, signal: opts.signal });
+      // Multipart already computes an accurate fraction from parts landed
+      // (including ones a resume skipped) — just forward it.
+      return await resumableUpload(uri, filename, mime, size, {
+        viewOnce: opts.viewOnce, signal: opts.signal,
+        onProgress: UPLOAD_PROGRESS ? opts.onProgress : undefined,
+      });
     } catch (e: any) {
       if (opts.signal?.aborted) throw e;   // user cancelled — don't silently re-upload
       if (__DEV__) console.warn('[upload] resumable failed:', e?.message);
@@ -2558,9 +2567,18 @@ export async function uploadAttachment(
     ...(opts.purpose ? [`purpose=${encodeURIComponent(opts.purpose)}`] : []),
   ];
   const qs = params.length ? `?${params.join('&')}` : '';
-  const res = await fetch(`${SERVER_URL}/uploads${qs}`, {
+  const url = `${SERVER_URL}/uploads${qs}`;
+  const headers = { Authorization: `Bearer ${token}` };
+
+  // Progress wanted → XHR (same request, plus upload events). Otherwise the
+  // original fetch, byte-for-byte.
+  if (UPLOAD_PROGRESS && opts.onProgress) {
+    return postWithProgress(url, form, headers, opts.onProgress, opts.signal);
+  }
+
+  const res = await fetch(url, {
     method: 'POST',
-    headers: { Authorization: `Bearer ${token}` },
+    headers,
     body: form,
     signal: opts.signal,
   });
@@ -2570,6 +2588,80 @@ export async function uploadAttachment(
     throw new Error(msg);
   }
   return res.json() as Promise<UploadResult>;
+}
+
+/**
+ * POST a FormData with upload progress.
+ *
+ * WHY NOT fetch: React Native's fetch reports no upload progress at all — it is
+ * a polyfill over this very XMLHttpRequest, which does expose
+ * `upload.onprogress`. So this is the SAME networking module and the SAME
+ * multipart body, only with the progress events surfaced.
+ *
+ * WHY NOT FileSystem.createUploadTask: it derives the multipart filename from
+ * the file's basename on disk, and the server stores `part.FileName()` as the
+ * attachment's filename (uploads.go uploadsPost) and returns it — which the
+ * caller feeds to storeSentCopy. Uploading the encrypted temp
+ * (`enc_1712…_photo.jpg`) or the outbox copy (`m_<uuid>_photo.jpg`) would have
+ * silently renamed every attachment. RN's FormData sends the explicit `name`
+ * below, so the filename is unchanged.
+ *
+ * Preserved deliberately: the Authorization header, the ?purpose= / ?viewOnce=
+ * query string, the 'file' field name, and abort semantics.
+ */
+function postWithProgress(
+  url: string, form: FormData, headers: Record<string, string>,
+  onProgress: (frac: number) => void, signal?: AbortSignal,
+): Promise<UploadResult> {
+  return new Promise<UploadResult>((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', url);
+    for (const [k, v] of Object.entries(headers)) xhr.setRequestHeader(k, v);
+
+    // Mirrors AbortSignal → xhr.abort(). Registered before send so an
+    // already-aborted signal cancels immediately rather than uploading first.
+    const onAbort = () => xhr.abort();
+    if (signal) {
+      if (signal.aborted) { reject(new Error('aborted')); return; }
+      signal.addEventListener('abort', onAbort);
+    }
+    const done = () => signal?.removeEventListener('abort', onAbort);
+
+    if (xhr.upload) {
+      xhr.upload.onprogress = (e: any) => {
+        // RN's XMLHttpRequest hardcodes lengthComputable:true and subscribes to
+        // 'didSendNetworkData' unconditionally in send(), so this does fire.
+        // The total>0 guard is only there so a zero-byte total can never
+        // produce NaN and paint a broken ring.
+        if (e?.total > 0) onProgress(e.loaded / e.total);
+      };
+    }
+    xhr.onload = () => {
+      done();
+      let body: any = null;
+      try { body = JSON.parse(xhr.responseText); } catch {}
+      if (xhr.status >= 200 && xhr.status < 300) {
+        // A 2xx with no parseable body is not a success we can use: the caller
+        // reads .id off this and would fail later with a confusing TypeError,
+        // after the outbox had already deleted its durable copy. Fail here
+        // instead, where it is still a retryable send.
+        if (!body?.id) { reject(new Error('Upload succeeded but returned no attachment')); return; }
+        // The bytes are on the server; nothing is left to send.
+        onProgress(1);
+        resolve(body as UploadResult);
+      } else {
+        const err: any = new Error(body?.error || xhr.statusText || `HTTP ${xhr.status}`);
+        // mediaOutbox keys permanent-vs-transient off this (isPermanent), and
+        // fetch's path threw plain Errors with no status — supplying it here
+        // makes a 413 stop retrying instead of burning all 8 attempts.
+        err.status = xhr.status;
+        reject(err);
+      }
+    };
+    xhr.onerror = () => { done(); reject(new Error('Network request failed')); };
+    xhr.onabort = () => { done(); reject(new Error('aborted')); };
+    xhr.send(form as any);
+  });
 }
 
 // Mark a view-once attachment as consumed. Called by the recipient's

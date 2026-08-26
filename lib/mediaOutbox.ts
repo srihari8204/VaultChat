@@ -15,7 +15,8 @@
 import NetInfo from '@react-native-community/netinfo';
 import * as Crypto from 'expo-crypto';
 import * as FileSystem from 'expo-file-system/legacy';
-import { sendMediaMessage, type MediaType } from './sendMedia';
+import { UPLOAD_PROGRESS } from '../constants/flags';
+import { sendMediaMessage, type MediaType, type UploadPhase } from './sendMedia';
 import { type Message } from './chatService';
 import { queueList, queueReplace, queueMigrate } from './localDb';
 
@@ -57,7 +58,32 @@ export interface MediaOutboxItem {
 type Events = {
   sent:   { tempId: string; chatId: string; real: Message };
   failed: { tempId: string; chatId: string; error: string };
+  progress: { tempId: string; chatId: string; phase: UploadPhase; frac: number };
 };
+
+/**
+ * Rate-limit progress samples so a big upload can't drive a React re-render per
+ * network packet. Caps at ~100 renders per phase (1% granularity) plus the two
+ * phase transitions.
+ *
+ * `prev` is per-ATTEMPT, not per-item: a retry legitimately restarts from
+ * 'preparing' 0 (the encrypted path re-encrypts to a fresh temp), so the caller
+ * resets it when an attempt begins rather than this refusing to go backwards
+ * forever. The backwards guard below only suppresses out-of-order samples
+ * WITHIN one attempt — which is what stops a failed multipart part from
+ * yanking the ring back to 0 while earlier parts are still valid.
+ */
+export function shouldEmitProgress(
+  prev: { phase: UploadPhase; frac: number } | undefined,
+  next: { phase: UploadPhase; frac: number },
+): boolean {
+  if (!prev) return true;
+  if (prev.phase !== next.phase) return true;
+  if (next.frac < prev.frac) return false;
+  if (next.frac >= 1 && prev.frac < 1) return true;   // always land the final sample
+  return next.frac - prev.frac >= 0.01;
+}
+
 const listeners: { [K in keyof Events]?: Set<(d: Events[K]) => void> } = {};
 function emit<K extends keyof Events>(e: K, d: Events[K]) { listeners[e]?.forEach(fn => { try { fn(d); } catch {} }); }
 export function on<K extends keyof Events>(e: K, fn: (d: Events[K]) => void): () => void {
@@ -77,6 +103,37 @@ async function save(q: MediaOutboxItem[]): Promise<void> {
 
 const inFlight = new Set<string>();
 const aborters = new Map<string, AbortController>();
+
+// ── background transfer (Android foreground service) ──
+//
+// Without this, minimising the app suspends the JS thread and a photo/video/file
+// send just stops partway — only VaultBeam survived backgrounding, because only
+// it held the FGS. Each in-flight item counts as 100 units of work so the
+// notification can show a true aggregate percentage without stat-ing every file
+// for its size.
+const UNITS = 100;
+const fgsProgress = new Map<string, number>();   // tempId → 0..1 across BOTH phases
+
+function publishFgs(): void {
+  const count = fgsProgress.size;
+  try {
+    const { updateTransferForeground } = require('./transferForeground');
+    updateTransferForeground(
+      count ? {
+        count,
+        bytes: Math.round([...fgsProgress.values()].reduce((s, f) => s + f, 0) * UNITS),
+        totalBytes: count * UNITS,
+      } : null,
+      'media',
+    );
+  } catch {}
+}
+
+// Encryption then upload are sequential, so treat them as two halves of one
+// bar — otherwise the notification races to 100% and then restarts.
+function phaseFraction(phase: UploadPhase, frac: number): number {
+  return phase === 'preparing' ? frac * 0.5 : 0.5 + frac * 0.5;
+}
 
 async function ensureDir(): Promise<void> { try { await FileSystem.makeDirectoryAsync(OUTBOX_DIR, { intermediates: true }); } catch {} }
 
@@ -170,10 +227,35 @@ export async function flush(): Promise<void> {
       const ac = new AbortController();
       aborters.set(item.tempId, ac);
       try {
+        // Per-ATTEMPT progress tracker — see shouldEmitProgress. Declared
+        // inside the loop so a retry starts clean and its restart from
+        // 'preparing' 0 reaches the UI instead of being swallowed as backwards.
+        let lastProg: { phase: UploadPhase; frac: number } | undefined;
+        // Claim a slot in the FGS aggregate for the whole attempt, so the
+        // service is held from the first byte — not only once the first
+        // progress sample happens to arrive.
+        fgsProgress.set(item.tempId, 0);
+        publishFgs();
         const real = await sendMediaMessage(
           item.chatId, item.type,
           { uri: item.srcPath, filename: item.filename, mime: item.mime },
-          { caption: item.caption, viewOnce: item.viewOnce, metaExtra: item.metaExtra, signal: ac.signal, clientId: item.clientId },
+          {
+            caption: item.caption, viewOnce: item.viewOnce, metaExtra: item.metaExtra,
+            signal: ac.signal, clientId: item.clientId,
+            onProgress: (phase, frac) => {
+              const next = { phase, frac: Math.max(0, Math.min(1, frac)) };
+              if (!shouldEmitProgress(lastProg, next)) return;
+              lastProg = next;
+              // The FGS notification is fed even when the in-app readout is
+              // flagged off: keeping the app alive in the background is not
+              // part of the progress-display experiment.
+              fgsProgress.set(item.tempId, phaseFraction(next.phase, next.frac));
+              publishFgs();
+              if (UPLOAD_PROGRESS) {
+                emit('progress', { tempId: item.tempId, chatId: item.chatId, ...next });
+              }
+            },
+          },
         );
         // Success → drop it + delete the durable copy.
         await FileSystem.deleteAsync(item.srcPath, { idempotent: true }).catch(() => {});
@@ -209,7 +291,13 @@ export async function flush(): Promise<void> {
             }
           }
         }
-      } finally { inFlight.delete(item.tempId); aborters.delete(item.tempId); }
+      } finally {
+        inFlight.delete(item.tempId); aborters.delete(item.tempId);
+        // In `finally`, so an abort or a throw releases the foreground service
+        // too — a leaked slot would pin an ongoing notification (and the FGS
+        // hold) for the rest of the app's life.
+        fgsProgress.delete(item.tempId); publishFgs();
+      }
     }
     if (anyRetry) {
       const worst = Math.max(1, ...(await load()).filter(m => m.state !== 'failed').map(m => m.attempts));

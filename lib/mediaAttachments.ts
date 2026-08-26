@@ -19,6 +19,17 @@ import { putMediaKey, getMediaKey } from './mediaKeyStore';
 
 export interface EncryptedUpload { attachmentId: string; mediaKey: MediaKey }
 
+/**
+ * Which half of the send the sender is watching. Encryption completes BEFORE
+ * the upload starts (the ciphertext is staged to a temp file first), so these
+ * are sequential, never interleaved — 'preparing' 0→1, then 'uploading' 0→1.
+ *
+ * Declared here rather than in sendMedia.ts because sendMedia imports this
+ * module; the other direction would be a cycle.
+ */
+export type UploadPhase = 'preparing' | 'uploading';
+export type UploadProgressFn = (phase: UploadPhase, frac: number) => void;
+
 // Encrypt `uri`'s bytes, upload the ciphertext, stash the key by attachment id.
 //
 // P3.1: encryption STREAMS through the native cipher in 4 MB slices
@@ -28,13 +39,14 @@ export interface EncryptedUpload { attachmentId: string; mediaKey: MediaKey }
 // key+nonce), so recipients on any build decrypt it. The whole-file path
 // remains only as the Expo Go fallback (no native modules there).
 export async function uploadEncryptedAttachment(
-  uri: string, filename: string, _mime: string, opts: { viewOnce?: boolean; signal?: AbortSignal } = {},
+  uri: string, filename: string, _mime: string,
+  opts: { viewOnce?: boolean; signal?: AbortSignal; onProgress?: UploadProgressFn } = {},
 ): Promise<EncryptedUpload> {
   const mk = newMediaKey();
   const tmp = (FileSystem as any).cacheDirectory + `enc_${Date.now()}_${filename.replace(/[^\w.-]/g, '_')}`;
   let streamed = false;
   try {
-    streamed = await encryptMediaFile(uri, tmp, mk);
+    streamed = await encryptMediaFile(uri, tmp, mk, (f) => opts.onProgress?.('preparing', f));
   } catch (e) {
     await FileSystem.deleteAsync(tmp, { idempotent: true }).catch(() => {});
     throw e;
@@ -50,7 +62,12 @@ export async function uploadEncryptedAttachment(
     // Upload as opaque bytes so the server never treats it as an image/etc.
     // Encrypted media is a chat attachment unless the caller says otherwise —
     // this helper is only reached from the chat send path today.
-    res = await uploadAttachment(tmp, filename, 'application/octet-stream', { purpose: 'chat', ...opts });
+    // NOTE: opts is spread for viewOnce/signal, but onProgress must NOT ride
+    // along — ours is (phase, frac), uploadAttachment's is (frac). Map it.
+    res = await uploadAttachment(tmp, filename, 'application/octet-stream', {
+      ...opts, purpose: 'chat',
+      onProgress: opts.onProgress ? (f) => opts.onProgress!('uploading', f) : undefined,
+    });
   } finally {
     await FileSystem.deleteAsync(tmp, { idempotent: true }).catch(() => {});
   }

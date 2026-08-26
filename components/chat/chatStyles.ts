@@ -18,6 +18,14 @@ export type DisplayMessage = Message & {
   _state?: 'pending' | 'failed';
   _error?: string;
   /**
+   * Sender-side upload progress, 0→1 within `_phase`. In-memory only — never
+   * persisted, so a restart shows the plain pending state until the next
+   * sample arrives (the upload itself resumes from the parts already stored).
+   * Absent means "no sample yet", which renders as the original clock.
+   */
+  _phase?: 'preparing' | 'uploading';
+  _progress?: number;
+  /**
    * Every message in this album, oldest-first, when several media were picked
    * in one action. Present only on the row that stands in for the group; the
    * members remain independent messages with their own ids and delivery state.
@@ -301,6 +309,11 @@ export const makeStyles = (c: Palette) => StyleSheet.create({
   },
   dlOverlay:     { ...StyleSheet.absoluteFillObject, alignItems: 'center', justifyContent: 'center', gap: 4, backgroundColor: 'rgba(0,0,0,0.25)' },
   dlOverlayTxt:  { color: '#fff', fontSize: 12, fontWeight: '700' },
+  // Sender-side UPLOAD overlay (the download twin above is the receiver's).
+  // pointerEvents:'none' at the call site keeps long-press-to-cancel working
+  // through it — the bubble, not this scrim, owns the gesture.
+  upOverlay:     { ...StyleSheet.absoluteFillObject, alignItems: 'center', justifyContent: 'center', gap: 4, backgroundColor: 'rgba(0,0,0,0.35)', borderRadius: 14 },
+  upOverlayTxt:  { color: '#fff', fontSize: 11, fontWeight: '700' },
   imageError:    { width: 180, padding: 16, alignItems: 'center', gap: 4 },
   mediaUnavailableTxt: { color: c.textDim, fontSize: 12, textAlign: 'center' },
   imageErrorTxt: { color: c.textDim, fontSize: 12 },

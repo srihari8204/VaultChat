@@ -16,7 +16,10 @@ import { MEDIA_E2EE, E2EE_ENABLED } from '../constants/flags';
 import {
   sendMessage, uploadAttachment, ensureDirectChat, type Message,
 } from './chatService';
-import { uploadEncryptedAttachment, buildMediaContent } from './mediaAttachments';
+import {
+  uploadEncryptedAttachment, buildMediaContent,
+  type UploadPhase, type UploadProgressFn,
+} from './mediaAttachments';
 import { storeSentCopy, saveThumb } from './mediaStore';
 import { makeThumb, makePdfPreview } from './thumbnails';
 import { embedToken, newToken, recordToken, isTrackingAvailable } from './trackingId';
@@ -33,7 +36,11 @@ export interface SendMediaOpts {
   signal?: AbortSignal;
   /** Stable idempotency key so a durable-outbox re-drive can't duplicate the message. */
   clientId?: string;
+  /** Sender-side progress: 'preparing' (encrypting) then 'uploading', each 0→1. */
+  onProgress?: UploadProgressFn;
 }
+
+export type { UploadPhase, UploadProgressFn };
 
 /**
  * Stamp a VaultView tracking token into a protected image before upload.
@@ -104,7 +111,8 @@ export async function sendMediaMessage(
   try {
   if (encrypt) {
     const { attachmentId, mediaKey } = await uploadEncryptedAttachment(
-      file.uri, file.filename, file.mime, { viewOnce: opts.viewOnce, signal: opts.signal },
+      file.uri, file.filename, file.mime,
+      { viewOnce: opts.viewOnce, signal: opts.signal, onProgress: opts.onProgress },
     );
     // The key + caption ride inside the content the Double Ratchet encrypts.
     const content = buildMediaContent(opts.caption || '', mediaKey);
@@ -140,8 +148,13 @@ export async function sendMediaMessage(
     return sendMessage(chatId, content, type, { meta, clientId: opts.clientId });
   }
 
-  // Plaintext path — unchanged from the original send sites.
-  const up = await uploadAttachment(file.uri, file.filename, file.mime, { viewOnce: opts.viewOnce, signal: opts.signal, purpose: 'chat' });
+  // Plaintext path — unchanged from the original send sites. Nothing is
+  // encrypted here, so there is no 'preparing' phase to report: it goes
+  // straight to 'uploading'.
+  const up = await uploadAttachment(file.uri, file.filename, file.mime, {
+    viewOnce: opts.viewOnce, signal: opts.signal, purpose: 'chat',
+    onProgress: opts.onProgress ? (f) => opts.onProgress!('uploading', f) : undefined,
+  });
   const meta: Record<string, any> = {
     attachmentId: up.id,
     mime: up.mime,

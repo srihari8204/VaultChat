@@ -134,7 +134,7 @@ import { getDecryptedAttachmentUri, getAttachmentLocalUri, parseMediaContent } f
 import { shouldAutoDownloadNow } from '../lib/mediaPrefs';
 import { ProgressRing } from '../components/ProgressRing';
 import { getMedia, copyToCache } from '../lib/mediaStore';
-import { thumbDataUri } from '../lib/thumbnails';
+import { thumbDataUri, makeThumb } from '../lib/thumbnails';
 import {
   cancel as queueCancel,
   enqueueText,
@@ -723,10 +723,20 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
     });
     const offMFailed = onMediaOutbox('failed', ({ tempId, chatId: cid }) => {
       if (cid !== chatId) return;
+      // Drop the progress readout: a failed bubble shows "tap to retry", not a
+      // ring frozen at whatever fraction it died on.
       setMessages(prev => prev.map(x => x._tempId === tempId
-        ? { ...x, _state: 'failed' } as DisplayMessage : x));
+        ? { ...x, _state: 'failed', _phase: undefined, _progress: undefined } as DisplayMessage : x));
     });
-    return () => { offSent(); offFailed(); offMSent(); offMFailed(); };
+    // Encrypting → uploading progress for the sender's own pending bubble. The
+    // outbox already rate-limits these to ~1% steps, so this is at most a
+    // couple of hundred renders across an entire upload.
+    const offMProgress = onMediaOutbox('progress', ({ tempId, chatId: cid, phase, frac }) => {
+      if (cid !== chatId) return;
+      setMessages(prev => prev.map(x => x._tempId === tempId
+        ? { ...x, _phase: phase, _progress: frac } as DisplayMessage : x));
+    });
+    return () => { offSent(); offFailed(); offMSent(); offMFailed(); offMProgress(); };
   }, [chatId]);
 
   // ── Socket: join chat room + listen for live events ───────
@@ -1731,6 +1741,28 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
       createdAt: new Date().toISOString(), _tempId: item.tempId, _state: 'pending',
     };
     setMessages(prev => [optimistic, ...prev]);
+
+    // POSTER FOR A STILL-UPLOADING VIDEO.
+    //
+    // An image bubble renders meta.localUri directly, but a video cannot — RN's
+    // <Image> can't decode a video frame, so VideoBubble needs a real base64
+    // poster and falls back to a grey videocam icon without one. meta.thumb is
+    // only produced in sendMedia AFTER the upload finishes, so every video the
+    // sender sent showed as a grey box for the whole encrypt+upload — minutes,
+    // on a large file.
+    //
+    // Decoded AFTER the bubble is painted, never before: this costs a few
+    // hundred ms and the whole point of the optimistic bubble is that it is
+    // instant. Best-effort — a failure just leaves the icon, exactly as today.
+    if (type === 'video' && !opts.metaExtra?.thumb) {
+      makeThumb(file.uri, 'video')
+        .then((thumb) => {
+          if (!thumb) return;
+          setMessages(prev => prev.map(x => x._tempId === item.tempId
+            ? { ...x, meta: { ...(x.meta || {}), thumb } } as DisplayMessage : x));
+        })
+        .catch(() => {});
+    }
   }, [chatId, meId]);
 
   const stopAndSendRecording = useCallback(async () => {
@@ -2250,6 +2282,34 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
     const target = consumePendingJump(chatId);
     if (target) jumpToMessage(target);
   }, [chatId, jumpToMessage]));
+
+  // Adopt outbox media enqueued from ANOTHER screen while this chat stayed
+  // mounted — the document scanner is the live case. The initial load reads
+  // pendingForChat once on mount, so without this the scan's bubble would not
+  // appear until the upload finished, and its progress would be invisible.
+  // Keyed by tempId against what is already on screen, so re-focusing can never
+  // double-paint a bubble.
+  useFocusEffect(useCallback(() => {
+    let cancel = false;
+    (async () => {
+      const items = await mediaPendingForChat(chatId).catch(() => []);
+      if (cancel || !items.length) return;
+      setMessages(prev => {
+        const have = new Set(prev.map(x => x._tempId).filter(Boolean));
+        const add = items.filter(m => !have.has(m.tempId)).map(m => ({
+          id: 0, chatId: m.chatId, senderId: meId ?? '', type: m.type as any,
+          content: m.caption || '',
+          meta: { localUri: m.srcPath, mime: m.mime, filename: m.filename, ...(m.metaExtra || {}), ...(m.viewOnce ? { viewOnce: true } : {}) },
+          replyToId: null, editedAt: null, deletedAt: null,
+          createdAt: new Date(m.createdAt).toISOString(),
+          _tempId: m.tempId, _state: m.state === 'failed' ? 'failed' : 'pending',
+        })) as DisplayMessage[];
+        // Inverted list: newest first, so the oldest of the new batch goes last.
+        return add.length ? [...add.reverse(), ...prev] : prev;
+      });
+    })();
+    return () => { cancel = true; };
+  }, [chatId, meId]));
 
   // Per-chat appearance (wallpaper + bubble colors). Reloaded on focus so a
   // change made in the selector applies the moment we navigate back.

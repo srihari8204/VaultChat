@@ -103,7 +103,12 @@ async function fileSize(path: string): Promise<number> {
  * engines are missing (caller must use the whole-file path); throws on I/O or
  * crypto failure (dst is cleaned up).
  */
-export async function encryptMediaFile(srcUri: string, dstUri: string, mk: MediaKey): Promise<boolean> {
+export async function encryptMediaFile(
+  srcUri: string, dstUri: string, mk: MediaKey,
+  /** 0→1 as slices are consumed, for the sender's "Preparing…" state. Purely
+   *  observational — it cannot affect the ciphertext. */
+  onProgress?: (frac: number) => void,
+): Promise<boolean> {
   if (!canStreamMedia()) return false;
   const src = rnfsPath(srcUri), dst = rnfsPath(dstUri);
   const cipher = QC.createCipheriv('aes-256-gcm', Buffer.from(mk.k, 'base64'), Buffer.from(mk.n, 'base64'));
@@ -114,6 +119,7 @@ export async function encryptMediaFile(srcUri: string, dstUri: string, mk: Media
       const b64 = await RNFS.read(src, Math.min(SLICE, total - pos), pos, 'base64');
       const out = cipher.update(Buffer.from(b64, 'base64')) as Buffer;
       if (out.length) await RNFS.appendFile(dst, Buffer.from(out).toString('base64'), 'base64');
+      if (total > 0) onProgress?.(Math.min(1, (pos + SLICE) / total));
     }
     const tail = Buffer.concat([cipher.final(), cipher.getAuthTag()]);
     await RNFS.appendFile(dst, tail.toString('base64'), 'base64');

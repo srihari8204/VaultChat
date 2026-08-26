@@ -20,10 +20,35 @@ let lastPct = -1;
 
 export interface FgsAggregate { count: number; bytes: number; totalBytes: number }
 
+/**
+ * Live aggregate per SOURCE, merged below.
+ *
+ * There are two independent transfer engines — VaultBeam (vaultBeamController)
+ * and ordinary chat media (mediaOutbox) — and they finish at different times.
+ * With a single shared figure the second engine to report would overwrite the
+ * first's progress, and worse, whichever finished FIRST would call
+ * releaseFgs('transfer') and tear the service down under the one still
+ * running — killing a transfer in the background, the exact thing this file
+ * exists to prevent. Merging here keeps the hold alive until every source is
+ * genuinely idle.
+ */
+const sources = new Map<string, FgsAggregate>();
+
+function merged(): FgsAggregate | null {
+  let count = 0, bytes = 0, totalBytes = 0;
+  for (const a of sources.values()) { count += a.count; bytes += a.bytes; totalBytes += a.totalBytes; }
+  return count > 0 ? { count, bytes, totalBytes } : null;
+}
+
 /** Reflect the current set of active transfers into the FGS notification.
- * Pass null / count 0 when nothing is active. Fire-and-forget safe. */
-export async function updateTransferForeground(agg: FgsAggregate | null): Promise<void> {
+ * Pass null / count 0 when nothing is active. Fire-and-forget safe.
+ * `source` identifies the engine reporting; omit for the legacy VaultBeam caller. */
+export async function updateTransferForeground(
+  agg: FgsAggregate | null, source = 'vaultbeam',
+): Promise<void> {
   if (Platform.OS !== 'android') return;
+  if (!agg || agg.count === 0) sources.delete(source); else sources.set(source, agg);
+  agg = merged();
   let notifee: any, AndroidImportance: any, AndroidForegroundServiceType: any;
   try { ({ default: notifee, AndroidImportance, AndroidForegroundServiceType } = require('@notifee/react-native')); } catch { return; }
   const bg = require('./backgroundConnection');

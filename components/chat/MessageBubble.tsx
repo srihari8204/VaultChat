@@ -1110,6 +1110,17 @@ function MessageBubble({
       params.attachmentId = String(msg.meta.attachmentId);
       params.isMine = isMine ? '1' : '';
       params.mime = String(msg.meta?.mime || '');
+    } else if (msg.meta?.localUri) {
+      // STILL UPLOADING, and the sender already holds the bytes.
+      //
+      // Until the send finalises there is no attachmentId, so every branch
+      // above missed and this fell through to the bail-out below — the tap did
+      // nothing at all. On a big video that is minutes of a dead bubble, which
+      // reads as "the player only works for VaultBeam" (that bubble is a
+      // different component with its own player). Open the local file instead:
+      // it is the very same media, and it is already on disk.
+      params.mediaUrl = String(msg.meta.localUri);
+      params.mime = String(msg.meta?.mime || '');
     } else { openingRef.current = false; return; }
     bubbleRouter.push({ pathname: '/media-viewer' as any, params });
   }, [msg.meta?.attachmentId, msg.meta?.gifUrl, msg.meta?.filename, isEncMedia, mediaSrc?.uri, isMine, bubbleRouter, chatId]);
@@ -1479,6 +1490,15 @@ function MessageBubble({
           })()}
           {msg.editedAt ? ' · edited' : ''}
           {msg._state === 'failed'  ? ' · failed (tap to retry)' : ''}
+          {/* Sender-side send progress. Text (not just the ring) so a document
+              or voice bubble — where an overlay ring would be cramped — still
+              says what is happening. Absent _progress = no sample yet, which
+              keeps the original bare pending clock. */}
+          {msg._state === 'pending' && msg._progress != null
+            ? (msg._phase === 'preparing'
+                ? ' · Preparing…'
+                : ` · Uploading ${Math.round(msg._progress * 100)}%`)
+            : ''}
           {msg.expiresAt && (
             <Text style={S.ttlBadge}> · ⏱️ {formatTtlRemaining(msg.expiresAt)}</Text>
           )}
@@ -1494,6 +1514,19 @@ function MessageBubble({
             />
           )}
         </Text>
+
+        {/* Upload ring over visual media only — the WhatsApp read. File/voice
+            bubbles get the meta-row text above instead, where a scrim over a
+            40px row would just hide the filename. pointerEvents:'none' leaves
+            long-press-to-cancel with the bubble underneath. */}
+        {isMine && msg._state === 'pending' && msg._progress != null && (isImage || isVideo || isGif) && (
+          <View style={S.upOverlay} pointerEvents="none">
+            <ProgressRing progress={msg._progress} />
+            <Text style={S.upOverlayTxt}>
+              {msg._phase === 'preparing' ? 'Preparing…' : 'Uploading'}
+            </Text>
+          </View>
+        )}
       </TouchableOpacity>
 
       {/* Reaction chips — tap to toggle */}

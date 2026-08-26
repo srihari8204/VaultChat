@@ -95,6 +95,17 @@ export const GROUP_E2EE = true;   // enabled 2026-06-28 — needs migration 040;
 // TRUE = on-device queue, but best-effort timing on Android (Doze/OEM kills).
 export const SCHEDULED_LOCAL = false;
 
+// UPLOAD_PROGRESS gates sender-side upload progress reporting. The attachment
+// already appears instantly and already uploads in the background (mediaOutbox);
+// this only makes that upload VISIBLE — "Preparing…" while the file is
+// encrypted, then 0→100% while the ciphertext goes up.
+//
+// OFF → uploadAttachment takes the original `fetch` branch and mediaOutbox emits
+// no 'progress' events, so bubbles fall back to the static pending clock. There
+// is no data, message, encryption or R2 implication either way: progress is a
+// byte counter over bytes that were already being sent.
+export const UPLOAD_PROGRESS = true;
+
 // VB_AUTODOWNLOAD gates VaultBeam auto-download (UITE F2 Phase A): incoming
 // large-file transfers can be accepted automatically per the user's settings
 // (lib/vaultBeamSettings) instead of requiring a manual Accept tap.
@@ -225,4 +236,4 @@ export const FAMILY_MAP_3D = true;
 // deliberately. With no key the control is simply never added.
 export const STREETVIEW_API_KEY = '';
 
-export default { E2EE_ENABLED, VAULT_SESSION_SEALED, VAULT_CACHE_ENCRYPTED, MEDIA_E2EE, STORY_E2EE, GROUP_E2EE, SCHEDULED_LOCAL, VB_AUTODOWNLOAD, VB_AUTO_MAX_BYTES, VB_RELIABILITY_FIXES, VB_SEAMLESS_RESUME, CALL_ENGINE_V2, CALL_SESSIONS, LOCATION_LOCK, NAV_MAP_3D, FAMILY_MAP_3D };
+export default { E2EE_ENABLED, VAULT_SESSION_SEALED, VAULT_CACHE_ENCRYPTED, MEDIA_E2EE, STORY_E2EE, GROUP_E2EE, SCHEDULED_LOCAL, UPLOAD_PROGRESS, VB_AUTODOWNLOAD, VB_AUTO_MAX_BYTES, VB_RELIABILITY_FIXES, VB_SEAMLESS_RESUME, CALL_ENGINE_V2, CALL_SESSIONS, LOCATION_LOCK, NAV_MAP_3D, FAMILY_MAP_3D };

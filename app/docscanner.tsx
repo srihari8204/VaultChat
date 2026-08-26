@@ -20,7 +20,7 @@ import { Alert, Animated, Image, Platform, ScrollView, StyleSheet, Text, TextInp
 import { type Palette } from '../constants/theme';
 import { useTheme } from '../lib/theme';
 import { ErrorBoundary } from '../components/ErrorBoundary';
-import { sendMediaMessage } from '../lib/sendMedia';
+import { enqueueMedia } from '../lib/mediaOutbox';
 import DocumentScanner from 'react-native-document-scanner-plugin';
 
 const RECENT_KEY = 'vc_docscanner_recent';
@@ -158,12 +158,18 @@ function DocScannerContent() {
     catch { /* user dismissed */ }
   };
 
+  // Hand the scan to the DURABLE media outbox, exactly like every send site in
+  // app/chat.tsx. This used to await sendMediaMessage inline behind a spinner:
+  // scanning on a weak signal blocked the screen for the whole upload and threw
+  // the document away if it failed, with no retry and no restart recovery.
+  // enqueueMedia copies the PDF into its own storage first, so the send now
+  // survives going offline, navigating away, and force-quitting the app — and
+  // the chat bubble shows Preparing…/Uploading% like any other attachment.
   const sendToChat = async (doc: ScannedDoc) => {
     if (!chatId) { sharePdf(doc); return; }
     setBusy(true);
     try {
-      await sendMediaMessage(chatId, 'file', { uri: doc.pdfUri, filename: `${doc.title}.pdf`, mime: 'application/pdf' });
-      Alert.alert('Sent', 'Document sent to the chat.');
+      await enqueueMedia(chatId, 'file', { uri: doc.pdfUri, filename: `${doc.title}.pdf`, mime: 'application/pdf' });
       router.back();
     } catch (e: any) {
       Alert.alert('Could not send', e?.message ?? 'Try again');
