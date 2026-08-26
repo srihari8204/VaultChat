@@ -73,6 +73,39 @@ module.exports = function withBackupLockdown(config) {
     app.$['android:allowBackup'] = 'false';
     app.$['android:hasFragileUserData'] = 'false';
 
+    // WIN THE MERGE, do not just state a preference.
+    //
+    // A LIBRARY can re-open this. react-native-compressor pulls in
+    // TAndroidLame, whose manifest declares android:allowBackup="true", and the
+    // merger refuses to guess between the two:
+    //
+    //   Manifest merger failed : Attribute application@allowBackup
+    //   value=(false) from AndroidManifest.xml is also present at
+    //   [com.github.kaushik-naik:TAndroidLame] value=(true)
+    //
+    // That failure is the GOOD outcome — it is loud. The dangerous version is a
+    // merger that silently prefers the library and quietly restores backup of
+    // the message cache and every per-attachment media key. tools:replace says
+    // this app's value is deliberate and wins, so any future dependency that
+    // ships the permissive default is overridden rather than obeyed.
+    //
+    // hasFragileUserData is listed too: it defaults to false, but a library
+    // asserting true would keep app data across an uninstall — the same class
+    // of leak by a different door.
+    const tools = 'android:allowBackup,android:hasFragileUserData';
+    app.$['tools:replace'] = app.$['tools:replace']
+      ? Array.from(new Set([...String(app.$['tools:replace']).split(','), ...tools.split(',')]
+          .map((s) => s.trim()).filter(Boolean))).join(',')
+      : tools;
+
+    // tools: is only a namespace if it is declared on <manifest>. Without this
+    // the attribute above is an unknown attribute and the merge fails anyway.
+    const manifest = cfg.modResults.manifest;
+    manifest.$ = manifest.$ || {};
+    if (!manifest.$['xmlns:tools']) {
+      manifest.$['xmlns:tools'] = 'http://schemas.android.com/tools';
+    }
+
     // These only have meaning while backup is enabled, and leaving a stale
     // reference behind would point at a rules file we do not ship.
     delete app.$['android:fullBackupContent'];
