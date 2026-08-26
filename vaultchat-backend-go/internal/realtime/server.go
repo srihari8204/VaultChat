@@ -46,16 +46,16 @@ var bearerRe = regexp.MustCompile(`(?i)^Bearer\s+(.+)$`)
 
 // sockData is the per-socket user context (server.js socket.data). uid/email/
 // admin are written once in the auth middleware and read-only afterwards;
-// liveLocOk is mutated by handlers so it takes mu.
+// chatMemberOk is mutated by handlers so it takes mu.
 type sockData struct {
 	uid   string
 	email string
 	admin bool
 
 	mu        sync.Mutex
-	liveLocOk map[string]bool
+	chatMemberOk map[string]bool
 	// Spaces & Operations (S2.8): per-socket cache of run entitlement, keyed
-	// "view:<runId>" / "drive:<runId>". Separate from liveLocOk because a run is
+	// "view:<runId>" / "drive:<runId>". Separate from chatMemberOk because a run is
 	// visible to a SUBSET of a space — being in the chat is not enough.
 	runOk map[string]bool
 }
@@ -140,7 +140,7 @@ func New() *Hub {
 			next(socket.NewExtendedError(err.Error(), nil))
 			return
 		}
-		s.SetData(&sockData{uid: sub, email: email, liveLocOk: map[string]bool{}, runOk: map[string]bool{}})
+		s.SetData(&sockData{uid: sub, email: email, chatMemberOk: map[string]bool{}, runOk: map[string]bool{}})
 		next(nil)
 	})
 

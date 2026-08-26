@@ -1,6 +1,7 @@
 package realtime
 
 import (
+	"log"
 	"os"
 	"strconv"
 
@@ -51,10 +52,35 @@ func truthy(v any) bool {
 func (h *Hub) registerChatHandlers(s *socket.Socket) {
 	d := sd(s)
 
+	// AUTHORIZE THE ROOM, do not take the client's word for it.
+	//
+	// This used to join whatever chatId arrived. Room membership was therefore
+	// SELF-ASSERTED: any authenticated socket could join chat:<id> and receive
+	// that chat's fan-out — FanOutToChat emits unfiltered events straight to the
+	// room, and this file sends live_location_update, trip_update, trip_end,
+	// reaction_updated and message_delivered there too.
+	//
+	// Guessing a chat UUID is not the threat. A REMOVED MEMBER is: they already
+	// know the id, and nothing here re-checked whether they still belong, so a
+	// stale client could keep listening to a chat it had been removed from.
+	//
+	// chatMemberAllowed is the same cached `chat_members … left_at IS NULL`
+	// check the live-location and trip handlers already gate on — reused rather
+	// than reinvented, so there is one definition of "is a member".
 	s.On("join_chat", func(args ...any) {
-		if id := mstr(argMap(args), "chatId"); id != "" {
-			s.Join(socket.Room("chat:" + id))
+		id := mstr(argMap(args), "chatId")
+		if id == "" {
+			return
 		}
+		if !h.chatMemberAllowed(d, id) {
+			// Logged, not silent: a refusal here means a client believes it
+			// belongs to a chat the database disagrees about, and that is worth
+			// seeing rather than guessing at.
+			log.Printf("[join_chat] refused uid=%s chat=%s (not a current member)", d.uid, id)
+			metrics.Inc("socket_join_chat_refused")
+			return
+		}
+		s.Join(socket.Room("chat:" + id))
 	})
 	s.On("leave_chat", func(args ...any) {
 		if id := mstr(argMap(args), "chatId"); id != "" {
@@ -81,7 +107,7 @@ func (h *Hub) registerChatHandlers(s *socket.Socket) {
 		if chatID == "" {
 			return
 		}
-		if !h.liveLocAllowed(d, chatID) {
+		if !h.chatMemberAllowed(d, chatID) {
 			return
 		}
 		out := map[string]any{"userId": d.uid, "until": m["until"]}
@@ -125,7 +151,7 @@ func (h *Hub) registerChatHandlers(s *socket.Socket) {
 		if chatID == "" || (blob == "" && !hasPlain) {
 			return
 		}
-		if !h.liveLocAllowed(d, chatID) {
+		if !h.chatMemberAllowed(d, chatID) {
 			return
 		}
 		out := map[string]any{"userId": d.uid, "tripId": m["tripId"]}
@@ -143,7 +169,7 @@ func (h *Hub) registerChatHandlers(s *socket.Socket) {
 		if chatID == "" {
 			return
 		}
-		if !h.liveLocAllowed(d, chatID) {
+		if !h.chatMemberAllowed(d, chatID) {
 			return
 		}
 		s.To(socket.Room("chat:"+chatID)).Emit("trip_end", map[string]any{
@@ -228,7 +254,7 @@ func (h *Hub) registerRunRelay(s *socket.Socket, d *sockData) {
 	s.On("run_subscribe", func(args ...any) {
 		m := argMap(args)
 		chatID, runID := mstr(m, "chatId"), mstr(m, "runId")
-		if chatID == "" || runID == "" || !h.liveLocAllowed(d, chatID) {
+		if chatID == "" || runID == "" || !h.chatMemberAllowed(d, chatID) {
 			return
 		}
 		if !h.runAllowed(d, runID, false) {
@@ -246,7 +272,7 @@ func (h *Hub) registerRunRelay(s *socket.Socket, d *sockData) {
 	s.On("run_update", func(args ...any) {
 		m := argMap(args)
 		chatID, runID, blob := mstr(m, "chatId"), mstr(m, "runId"), mstr(m, "blob")
-		if chatID == "" || runID == "" || blob == "" || !h.liveLocAllowed(d, chatID) {
+		if chatID == "" || runID == "" || blob == "" || !h.chatMemberAllowed(d, chatID) {
 			return
 		}
 		// Only the assigned driver may claim to be the vehicle. Without this a
@@ -308,11 +334,11 @@ func (h *Hub) runAllowed(d *sockData, runID string, drive bool) bool {
 	return ok
 }
 
-// liveLocAllowed caches the chat-membership check per socket per chat (RLS,
+// chatMemberAllowed caches the chat-membership check per socket per chat (RLS,
 // server.js db.queryAs). One query per chat for the socket's lifetime.
-func (h *Hub) liveLocAllowed(d *sockData, chatID string) bool {
+func (h *Hub) chatMemberAllowed(d *sockData, chatID string) bool {
 	d.mu.Lock()
-	ok, cached := d.liveLocOk[chatID]
+	ok, cached := d.chatMemberOk[chatID]
 	d.mu.Unlock()
 	if cached {
 		return ok
@@ -328,7 +354,7 @@ func (h *Hub) liveLocAllowed(d *sockData, chatID string) bool {
 		return nil
 	})
 	d.mu.Lock()
-	d.liveLocOk[chatID] = ok
+	d.chatMemberOk[chatID] = ok
 	d.mu.Unlock()
 	return ok
 }
@@ -506,7 +532,7 @@ func (h *Hub) registerSignalHandlers(s *socket.Socket) {
 		// was announced to every participant as call_peer_joined, and then got
 		// every in-room event for the rest of the call.
 		//
-		// liveLocAllowed is the same cached chat_members check this file
+		// chatMemberAllowed is the same cached chat_members check this file
 		// already applies to live location and trips — strictly less sensitive
 		// data than the membership of a call in progress.
 		//
@@ -517,13 +543,13 @@ func (h *Hub) registerSignalHandlers(s *socket.Socket) {
 		// Only the group path reaches this. A 1:1 call never emits join_call —
 		// its signalling is addressed per-uid — so this cannot refuse one.
 		//
-		// ponytail: liveLocAllowed caches the NEGATIVE too, for the socket's
+		// ponytail: chatMemberAllowed caches the NEGATIVE too, for the socket's
 		// lifetime. Someone refused before being added to the chat stays
 		// refused until they reconnect. Narrow (it needs a join attempt made
 		// before joining the group) and self-healing, and it is the behaviour
 		// the three existing relays already have. Give the call path its own
 		// positive-only cache if that window ever shows up in call_join_denied.
-		if !h.liveLocAllowed(d, chatID) {
+		if !h.chatMemberAllowed(d, chatID) {
 			metrics.Inc("call_join_denied")
 			return
 		}
