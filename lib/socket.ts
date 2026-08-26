@@ -20,11 +20,14 @@ import { AppState } from 'react-native';
 import NetInfo from '@react-native-community/netinfo';
 import { SERVER_URL } from '../constants/server';
 import { getAccessToken } from './api';
-import { netKeyOf, reconnectReason, shouldKickOnForeground, SETTLE_MS } from './socketReconnect';
+import { netKeyOf, reconnectReason, shouldKickOnForeground, shouldAbandonPendingConnect, SETTLE_MS } from './socketReconnect';
 import perf from './perf';
 
 let socket: Socket | null = null;
 let connecting: Promise<Socket> | null = null;
+// When the in-flight connect started, so a hung handshake can be abandoned
+// rather than wedging every caller behind it forever.
+let connectingSince: number | null = null;
 
 // ── Task 2: "Can't connect" state ───────────────────────────────────
 // After 5 consecutive websocket failures we surface a persistent banner
@@ -172,9 +175,21 @@ let watching = false;
 
 /** Force a fresh transport NOW rather than waiting out a ping timeout. */
 function kickReconnect(why: string): void {
-  // A connect already in flight will succeed or fail on its own; stomping it
-  // would restart the very handshake we are trying to hurry.
-  if (connecting) return;
+  // A connect already in flight will normally succeed or fail on its own, and
+  // stomping it would restart the very handshake we are trying to hurry.
+  //
+  // But it can hang: connect() settles only on 'ready' or 'connect_error', and
+  // a transport that opens without completing the handshake fires neither. That
+  // promise then never resolves, `socket` stays null, and — because this guard
+  // used to be unconditional — every later kick became a no-op FOREVER. The app
+  // sat offline on a working link until it was force-stopped. Past the deadline
+  // there is nothing real left to protect, so abandon it and start over.
+  if (connecting && !shouldAbandonPendingConnect(connectingSince, Date.now())) return;
+  if (connecting) {
+    perf.mark('socket_connect_abandoned', { why });
+    connecting = null;
+    connectingSince = null;
+  }
   if (kickTimer) clearTimeout(kickTimer);
   kickTimer = setTimeout(() => {
     kickTimer = null;
@@ -217,10 +232,14 @@ function watchNetwork(): void {
 export async function getSocket(): Promise<Socket> {
   watchNetwork();
   if (socket && socket.connected) return socket;
-  if (connecting) return connecting;
+  // A pending attempt is shared rather than duplicated — UNLESS it has hung
+  // past the deadline, in which case handing it out again would wedge this
+  // caller too. See kickReconnect for how that happens.
+  if (connecting && !shouldAbandonPendingConnect(connectingSince, Date.now())) return connecting;
+  connectingSince = Date.now();
   connecting = connect()
-    .then((s) => { socket = s; connecting = null; return s; })
-    .catch((e) => { connecting = null; throw e; });
+    .then((s) => { socket = s; connecting = null; connectingSince = null; return s; })
+    .catch((e) => { connecting = null; connectingSince = null; throw e; });
   return connecting;
 }
 
@@ -234,6 +253,7 @@ export function disconnect(): void {
     socket = null;
   }
   connecting = null;
+  connectingSince = null;
   // Keep persistentListeners — they must re-arm on the next (re-login) socket.
   // Drop the room set: a different account must not inherit this one's rooms;
   // live screens re-join on mount.

@@ -62,6 +62,35 @@ export function shouldKickOnForeground(socketConnected: boolean): boolean {
 }
 
 /**
+ * How long a connect attempt may sit unsettled before it is presumed dead.
+ *
+ * connect() resolves only on the server's 'ready' and rejects only on
+ * 'connect_error'. A transport that opens but never completes the handshake
+ * fires NEITHER, so the promise hangs forever — and because getSocket() hands
+ * that same promise to every caller, the whole app is then wedged behind it
+ * with `socket` still null. Observed on device: the app sat on "Waiting for
+ * network…" with ZERO sockets open, on a link that answered HTTPS 200, and
+ * only a force-stop recovered it.
+ *
+ * Comfortably past the client's own 10s handshake timeout, so a merely slow
+ * connect on a poor link is never mistaken for a dead one.
+ */
+export const PENDING_CONNECT_STALE_MS = 15_000;
+
+/**
+ * May a reconnect abandon the in-flight attempt and start over?
+ *
+ * A pending connect normally MUST be left alone — stomping it would restart the
+ * very handshake we are trying to hurry. The exception is the hang above: past
+ * the deadline there is nothing real to protect, and refusing to act is what
+ * turns a stalled handshake into a permanently offline app.
+ */
+export function shouldAbandonPendingConnect(startedAt: number | null, now: number): boolean {
+  if (startedAt === null) return false;          // nothing in flight
+  return now - startedAt >= PENDING_CONNECT_STALE_MS;
+}
+
+/**
  * Settle delay before reconnecting, in ms.
  *
  * A newly-attached interface is not immediately usable — the route and DNS

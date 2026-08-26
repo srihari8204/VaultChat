@@ -5,7 +5,7 @@
  * taking ~15s. Every case below is one the naive version gets wrong.
  */
 import assert from 'node:assert/strict';
-import { netKeyOf, reconnectReason, shouldKickOnForeground, SETTLE_MS } from './socketReconnect';
+import { netKeyOf, reconnectReason, shouldKickOnForeground, shouldAbandonPendingConnect, PENDING_CONNECT_STALE_MS, SETTLE_MS } from './socketReconnect';
 
 const net = (type: string, isConnected: boolean | null = true, reach: boolean | null = true) =>
   ({ type, isConnected, isInternetReachable: reach });
@@ -65,5 +65,25 @@ for (const s of [net('cellular'), net('cellular'), net('wifi')]) {
 }
 assert.equal(fired, 2, 'a repeated identical state must not re-fire');
 console.log('  ✓ two switches, two rebuilds, no duplicate on the repeat');
+
+console.log('\nA hung connect is abandoned, a live one is protected:');
+assert.equal(shouldAbandonPendingConnect(null, 1_000_000), false);
+console.log('  ✓ nothing in flight -> nothing to abandon');
+assert.equal(shouldAbandonPendingConnect(1_000_000, 1_000_000 + 500), false);
+console.log('  ✓ a connect that just started is left alone');
+assert.equal(shouldAbandonPendingConnect(1_000_000, 1_000_000 + 9_000), false);
+console.log('  ✓ still protected at 9s — inside the 10s handshake timeout');
+
+// THE WEDGE this exists for. connect() settles only on 'ready' or
+// 'connect_error'; a transport that opens without completing the handshake
+// fires NEITHER, so the promise hangs and every caller queues behind it.
+// Observed on device: offline banner with ZERO sockets open, on a link that
+// answered HTTPS 200 — only a force-stop recovered it.
+assert.equal(shouldAbandonPendingConnect(1_000_000, 1_000_000 + PENDING_CONNECT_STALE_MS), true);
+console.log('  ✓ at the deadline the hung attempt is abandoned');
+assert.equal(shouldAbandonPendingConnect(1_000_000, 1_000_000 + 60_000), true);
+console.log('  ✓ and stays abandonable after — the wedge can never be permanent');
+assert.ok(PENDING_CONNECT_STALE_MS > 10_000, 'must outlast the 10s client handshake timeout');
+console.log(`  ✓ ${PENDING_CONNECT_STALE_MS}ms clears the 10s timeout, so a slow link is not read as a dead one`);
 
 console.log('\nAll socket reconnect checks passed.\n');
