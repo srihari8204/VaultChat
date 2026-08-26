@@ -60,18 +60,30 @@ type Config struct {
 
 // ConfigFromEnv reads GOLIVE_LIVEKIT_* ONLY.
 //
-// GOLIVE_LIVEKIT_URL is what the client dials (ws:// or wss://) and is also what
-// the egress RPCs are addressed to after scheme translation — see
-// livekit.twirp. GOLIVE_LIVEKIT_WS_URL / _HTTP_URL are accepted as explicit
-// aliases for deployments that publish the two on different names; the plain URL
-// wins when set, because one variable is one thing to get wrong.
+// GOLIVE_LIVEKIT_URL is what the CLIENT dials (ws:// or wss://).
+// GOLIVE_LIVEKIT_WS_URL is an alias for it; the plain URL wins when both are
+// set, because one variable is one thing to get wrong.
+//
+// GOLIVE_LIVEKIT_HTTP_URL is where THIS SERVER addresses the egress RPCs. It
+// still stands in for the client URL when nothing else is set — deployments
+// that only ever named one address keep working untouched — but when both are
+// present they are now allowed to DIFFER, which is the point.
+//
+// They differ because the requirements differ. A phone needs a publicly
+// reachable host. A twirp call from the API to a LiveKit on the same machine
+// does not, and routing it through the public name sent it out to Cloudflare
+// and back for a round trip that never had to leave the box — see
+// livekit.Config.RPCURL for the failure that produced on prod. Point this at
+// the internal address (the compose service, or the bridge gateway when
+// LiveKit runs with host networking) and the RPC stops depending on the edge.
 func ConfigFromEnv() Config {
+	rpc := env("GOLIVE_LIVEKIT_HTTP_URL")
 	url := env("GOLIVE_LIVEKIT_URL")
 	if url == "" {
 		url = env("GOLIVE_LIVEKIT_WS_URL")
 	}
 	if url == "" {
-		url = env("GOLIVE_LIVEKIT_HTTP_URL")
+		url = rpc
 	}
 	prefix := env("GOLIVE_ROOM_PREFIX")
 	if prefix == "" {
@@ -82,6 +94,7 @@ func ConfigFromEnv() Config {
 			APIKey:    env("GOLIVE_LIVEKIT_API_KEY"),
 			APISecret: env("GOLIVE_LIVEKIT_API_SECRET"),
 			URL:       url,
+			RPCURL:    rpc,
 		},
 		RoomPrefix: prefix,
 	}

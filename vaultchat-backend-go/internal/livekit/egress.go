@@ -183,9 +183,9 @@ func ensureRoom(ctx context.Context, cfg Config, room string) error {
 // ("livekit.Egress", "livekit.RoomService") — parameterised because creating a
 // room is a RoomService call while everything else here is Egress.
 func twirp(ctx context.Context, cfg Config, service, method string, tok string, body any, out any) error {
-	base := strings.TrimRight(cfg.URL, "/")
-	// The token is minted for ws://; the REST API is the same host over http(s).
-	base = strings.Replace(strings.Replace(base, "wss://", "https://", 1), "ws://", "http://", 1)
+	// RPCBase is the SERVER's address for LiveKit, which is not necessarily the
+	// one the client dials — see livekit.Config.RPCURL.
+	base := cfg.RPCBase()
 
 	raw, err := json.Marshal(body)
 	if err != nil {

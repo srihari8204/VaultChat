@@ -46,15 +46,53 @@ type Config struct {
 	APISecret string
 	// URL is handed to the client so it does not hardcode a host. Not signed.
 	URL string
+	// RPCURL is where THIS SERVER addresses LiveKit's twirp API. Empty means
+	// "derive it from URL", which is what every deployment did before this
+	// field existed.
+	//
+	// The two are different needs wearing one name. URL must be publicly
+	// reachable because a phone dials it; the twirp call is server-to-server
+	// inside one box and has no reason to leave it. On prod they were the same
+	// value, so every StartRoomCompositeEgress went out through Cloudflare, in
+	// through the host nginx, through caddy, and back to a port on the very
+	// machine it started from — three internet hops to reach localhost. That
+	// path is slower than the loopback it replaces and, worse, it makes an
+	// internal operation fail whenever the EDGE is slow: egress.go gives twirp
+	// 15s, and prod logged EGRESS_START_FAILED / EGRESS_RESTART_FAILED with
+	// "context deadline exceeded (Client.Timeout exceeded while awaiting
+	// headers)" — a failure with nothing wrong at either end.
+	//
+	// That is not a cosmetic cost. An egress that fails to start ends the
+	// broadcast ([[vaultchat-golive-egress-fragility]]), so a slow edge could
+	// kill a live stream that both LiveKit and the API were healthy enough to
+	// serve.
+	RPCURL string
 }
 
-// ConfigFromEnv reads LIVEKIT_API_KEY / LIVEKIT_API_SECRET / LIVEKIT_URL.
+// ConfigFromEnv reads LIVEKIT_API_KEY / LIVEKIT_API_SECRET / LIVEKIT_URL, plus
+// the optional LIVEKIT_HTTP_URL for the server-side RPC address (see RPCURL).
 func ConfigFromEnv() Config {
 	return Config{
 		APIKey:    strings.TrimSpace(os.Getenv("LIVEKIT_API_KEY")),
 		APISecret: strings.TrimSpace(os.Getenv("LIVEKIT_API_SECRET")),
 		URL:       strings.TrimSpace(os.Getenv("LIVEKIT_URL")),
+		RPCURL:    strings.TrimSpace(os.Getenv("LIVEKIT_HTTP_URL")),
 	}
+}
+
+// RPCBase is the http(s) origin twirp calls are addressed to, with no trailing
+// slash. Prefers RPCURL; otherwise translates URL's ws scheme, which is what
+// this package has always done.
+func (c Config) RPCBase() string {
+	base := c.RPCURL
+	if base == "" {
+		base = c.URL
+	}
+	base = strings.TrimRight(base, "/")
+	// The token is minted for ws://; the REST API is the same host over http(s).
+	base = strings.Replace(base, "wss://", "https://", 1)
+	base = strings.Replace(base, "ws://", "http://", 1)
+	return base
 }
 
 // Configured reports whether tokens can be minted at all.
