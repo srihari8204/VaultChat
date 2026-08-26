@@ -14,7 +14,6 @@ import (
 	"context"
 	"errors"
 	"net/http"
-	"strings"
 	"time"
 )
 
@@ -22,15 +21,20 @@ import (
 // seconds is itself an outage when a monitor polls it every ten.
 const pingTimeout = 3 * time.Second
 
-// HTTPBase is the Go Live LiveKit's REST origin — the same host as URL with the
-// websocket scheme translated. Mirrors what livekit.twirp does internally, and
-// is exported because the health endpoint needs it without making an RPC.
-func (c Config) HTTPBase() string {
-	base := strings.TrimRight(c.URL, "/")
-	base = strings.Replace(base, "wss://", "https://", 1)
-	base = strings.Replace(base, "ws://", "http://", 1)
-	return base
-}
+// HTTPBase is the Go Live LiveKit's REST origin AS THIS SERVER ADDRESSES IT —
+// exactly what livekit.twirp will use, which is the only address whose
+// reachability this process can act on.
+//
+// It must track RPCBase() and not URL. Once the two were allowed to differ
+// (livekit.Config.RPCURL), a probe of the client's public URL stopped saying
+// anything about whether egress could start: /golive/health could report a
+// healthy Go Live while every StartRoomCompositeEgress was failing on the
+// internal path, or — worse for an operator at 3am — go red over an edge
+// problem that broadcasting no longer depends on.
+//
+// Still a plain GET on the server root rather than a Twirp RPC, for the reason
+// at the top of this file: reachability without needing a credential.
+func (c Config) HTTPBase() string { return c.RPCBase() }
 
 // Ping reports whether the Go Live media server answers.
 func (c Config) Ping(ctx context.Context) error {

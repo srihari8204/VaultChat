@@ -88,3 +88,16 @@ func TestSplitURLsDoNotWeakenProjectIsolation(t *testing.T) {
 		t.Fatal("a shared API key must still make Go Live unusable")
 	}
 }
+
+// The health probe must follow the SERVER's address, not the client's.
+// Otherwise /golive/health reports on a path egress no longer uses.
+func TestHealthProbeFollowsRPCURL(t *testing.T) {
+	t.Setenv("GOLIVE_LIVEKIT_API_KEY", "k")
+	t.Setenv("GOLIVE_LIVEKIT_API_SECRET", "s")
+	t.Setenv("GOLIVE_LIVEKIT_URL", "wss://api.corefinite.com/golive-livekit")
+	t.Setenv("GOLIVE_LIVEKIT_HTTP_URL", "http://172.20.0.1:7890")
+
+	if got := ConfigFromEnv().HTTPBase(); got != "http://172.20.0.1:7890" {
+		t.Fatalf("health probe went to the client URL, not the RPC one: %q", got)
+	}
+}
