@@ -120,6 +120,20 @@ async function connect(): Promise<Socket> {
     perf.setConnState('connected');
     perf.mark('socket_connect', { transport: tname });
     noteConnectSuccess();   // clears any "can't connect" state
+    // RE-APPLY PERSISTENT LISTENERS, not just at construction.
+    //
+    // applyPersistent() also runs when the socket is built, but that is only
+    // sufficient while the FIRST getSocket() happens to come from
+    // addPersistentListener itself — which is how it worked by accident. A
+    // caller that opens the socket earlier (a boot warm-up) creates it with an
+    // EMPTY listener map, and a handler registered while the handshake is still
+    // in flight finds `socket` still null and attaches to nothing. The map
+    // would hold it and no live socket would carry it: calls stop ringing, with
+    // nothing in any log to say so.
+    //
+    // Re-applying here closes that window for good. applyPersistent off()s
+    // before it on()s, so running twice is idempotent.
+    applyPersistent(s);
     // RE-JOIN CHAT ROOMS. The server joins a fresh socket only to user:<uid>;
     // every chat-room membership dies with the old server-side session on
     // reconnect, and nothing else re-establishes it — so live location,

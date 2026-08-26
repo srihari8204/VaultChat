@@ -84,6 +84,26 @@ import { getLocalDb } from '../lib/localDb';
 import perf from '../lib/perf';
 global.Buffer = Buffer;
 
+// START THE SOCKET HANDSHAKE AT BOOT, not on mount.
+//
+// The connection used to begin only when the effect below armed its listeners —
+// i.e. after Hermes had evaluated the bundle AND React had mounted the tree. So
+// the TLS + WebSocket + auth round trips, the slowest part of coming online,
+// were serialised AFTER the UI work instead of running alongside it.
+//
+// Kicking it here overlaps the handshake with the render. Deliberately
+// fire-and-forget: getSocket() de-duplicates (a later caller joins this same
+// in-flight attempt rather than opening a second socket), it refuses cleanly
+// with "Not signed in" when there is no token yet, and addPersistentListener's
+// own retry ladder still owns recovery. Nothing here changes WHAT connects or
+// with which credentials — only when the attempt starts.
+//
+// Safe only because connect() now re-applies persistent listeners on the
+// 'connect' event: this warm-up builds the socket before any listener is
+// registered, and without that re-apply an incoming call would attach to
+// nothing. See lib/socket.ts.
+try { void getSocket().catch(() => {}); } catch { /* never block boot */ }
+
 
 
 // Keep the native splash up until the cold-start router (app/index.tsx) has made
