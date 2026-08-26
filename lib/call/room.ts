@@ -24,6 +24,7 @@
 import { Dimensions, PixelRatio } from 'react-native';
 import { AudioSession, registerGlobals, setLogLevel } from '@livekit/react-native';
 import { screenCaptureSize, screenCaptureBitrate } from './screenCapture';
+import { shouldRelax, relaxedEncoding } from './sharePolicy';
 import { Room, RoomEvent, Track, type RemoteParticipant, type RemoteTrackPublication } from 'livekit-client';
 
 // livekit-client is a browser library: registerGlobals installs the React Native
@@ -436,20 +437,72 @@ export async function joinCallRoom(a: JoinArgs): Promise<CallRoom> {
       // capture working exactly as designed.
       if (statsTimer) clearInterval(statsTimer);
       let ticks = 0;
+      // The same sampler now also DECIDES. It already reads
+      // qualityLimitationReason, so noticing CPU starvation costs nothing extra
+      // — and acting on measurement beats the alternative, which is picking a
+      // different fixed guess and hoping it suits both text and motion.
+      const reasons: string[] = [];
+      let relaxed = false;
       statsTimer = setInterval(async () => {
-        if (++ticks > 12) { if (statsTimer) clearInterval(statsTimer); statsTimer = null; return; }
+        ticks++;
+        // The 12-tick cap was a LOGGING budget — twelve samples is plenty to
+        // diagnose a share that never starts. It must not also cap the
+        // adaptation: CPU starvation begins when the CONTENT gets busy, and a
+        // user who shares a document first and opens a game two minutes later
+        // would hit it long after tick 12, with nothing left running to notice.
+        //
+        // So logging still stops at 36s; watching continues until it has either
+        // acted once or the share ends (no publication clears the timer below).
+        const logging = ticks <= 12;
         try {
           const pubNow = room.localParticipant.getTrackPublication(Track.Source.ScreenShare);
           if (!pubNow) { if (statsTimer) clearInterval(statsTimer); statsTimer = null; return; }
-          const stats = await (pubNow.track as any)?.sender?.getStats?.();
+          if (!logging && relaxed) { if (statsTimer) clearInterval(statsTimer); statsTimer = null; return; }
+          const senderNow = (pubNow.track as any)?.sender;
+          const stats = await senderNow?.getStats?.();
           stats?.forEach?.((r: any) => {
             if (r.type !== 'outbound-rtp' || r.kind !== 'video') return;
-            console.warn('[call] SCREEN_SHARE_STATS encoded=' + (r.framesEncoded ?? 0)
-              + ' sent=' + (r.framesSent ?? 0) + ' bytes=' + (r.bytesSent ?? 0)
-              + ' size=' + (r.frameWidth ?? 0) + 'x' + (r.frameHeight ?? 0)
-              + ' fps=' + (r.framesPerSecond ?? 0)
-              + ' limit=' + (r.qualityLimitationReason ?? 'none'));
+            const reason = r.qualityLimitationReason ?? 'none';
+            if (logging) {
+              console.warn('[call] SCREEN_SHARE_STATS encoded=' + (r.framesEncoded ?? 0)
+                + ' sent=' + (r.framesSent ?? 0) + ' bytes=' + (r.bytesSent ?? 0)
+                + ' size=' + (r.frameWidth ?? 0) + 'x' + (r.frameHeight ?? 0)
+                + ' fps=' + (r.framesPerSecond ?? 0)
+                + ' limit=' + reason);
+            }
+            reasons.push(reason);
+            // Only the last CPU_STRIKES matter; keep the array from growing for
+            // the whole life of a long share.
+            if (reasons.length > 8) reasons.shift();
           });
+
+          // RELAX ONLY ONCE, AND ONLY ON PROOF.
+          //
+          // Measured on a Redmi Note 8 Pro: fps=2-3 against an allowed 15, with
+          // limit=cpu — the encoder wanted more and could not. Holding every
+          // pixel there costs nearly every frame, because encoder load is
+          // pixels x frames. A static screen reports 'none' and a bandwidth dip
+          // reports 'bandwidth', so neither trips this: the text tuning stays
+          // exactly as it was for the cases it was designed for.
+          if (!relaxed && shouldRelax(reasons)) {
+            relaxed = true;
+            const { degradationPreference, scaleResolutionDownBy } = relaxedEncoding();
+            try {
+              const p = senderNow?.getParameters?.();
+              if (p?.encodings?.length) {
+                p.degradationPreference = degradationPreference;
+                p.encodings[0].scaleResolutionDownBy = scaleResolutionDownBy;
+                await senderNow.setParameters(p);
+                console.warn('[call] SCREEN_SHARE_RELAXED cpu-limited -> '
+                  + degradationPreference + ' scale=' + scaleResolutionDownBy);
+              }
+            } catch (err) {
+              // Best-effort, like the initial tuning: a share that stays sharp
+              // and slow is worse than one that adapts, but far better than one
+              // that dies trying.
+              console.warn('[call] screen share: could not relax —', (err as any)?.message ?? err);
+            }
+          }
         } catch { /* stats are diagnostics; never let them affect the share */ }
       }, 3000);
     },
