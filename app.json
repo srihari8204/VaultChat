@@ -145,6 +145,7 @@
       "./plugins/withVaultBeamRust.js",
       "./plugins/withVaultView.js",
       "./plugins/withPdfJs.js",
+      "react-native-compressor",
       "./plugins/withVaultShield.js",
       "expo-sqlite",
       [

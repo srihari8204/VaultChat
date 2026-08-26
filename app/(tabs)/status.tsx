@@ -18,6 +18,7 @@
 // just renders + posts.
 
 import * as ImagePicker from 'expo-image-picker';
+import { compressForStatus } from '../../lib/media/compressMedia';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
@@ -62,7 +63,7 @@ const FEED_CACHE = 'vc_stories_feed';
 const MUTED_KEY  = 'vc_muted_status';
 const RECENT_EMOJI_KEY = 'vc_recent_emojis';
 
-type PreviewAsset = { uri: string; type: 'image' | 'video'; filename: string; mime: string; caption: string };
+type PreviewAsset = { uri: string; type: 'image' | 'video'; filename: string; mime: string; caption: string; width?: number; height?: number };
 
 function useS() {
   const { colors } = useTheme();
@@ -191,6 +192,11 @@ export default function StatusScreen() {
         filename: a.fileName || `story-${Date.now()}-${i}.${isVideo ? 'mp4' : 'jpg'}`,
         mime: a.mimeType || (isVideo ? 'video/mp4' : 'image/jpeg'),
         caption: '',
+        // Carried so the compressor can bound the LONG edge without opening the
+        // file. Absent (some providers omit them) -> left uncompressed rather
+        // than resized on a guess.
+        width: a.width,
+        height: a.height,
       };
     });
     setPreviewIdx(0);
@@ -208,8 +214,21 @@ export default function StatusScreen() {
     try {
       for (const a of previewAssets) {
         const cap = a.caption.trim() || undefined;
+        // SHRINK BEFORE ANYTHING ELSE TOUCHES IT.
+        //
+        // Every byte here is paid for three times: uploaded, encrypted (the
+        // whole file streams through AES-GCM in lib/mediaCrypto), then
+        // downloaded by every viewer. The picker's `quality: 0.7` did none of
+        // this — it does not resize, and Android often ignores it — so a 12 MP
+        // photo went up at 4000x3000.
+        //
+        // compressForStatus returns the ORIGINAL uri whenever it should not or
+        // cannot act: an already-small image, missing dimensions, no video
+        // transcoder in this build, or any failure. So this line can only make
+        // the upload smaller, never make the post fail.
+        const uri = await compressForStatus(a);
         if (STORY_E2EE && E2EE_ENABLED) {
-          const { attachmentId, mediaKey } = await uploadEncryptedAttachment(a.uri, a.filename, a.mime);
+          const { attachmentId, mediaKey } = await uploadEncryptedAttachment(uri, a.filename, a.mime);
           // Store MY OWN copy of the content key locally so I can always view my
           // own story, independent of whether the server audience includes me
           // (otherwise the poster sees a blank story — no wrapped key for self).
@@ -220,7 +239,7 @@ export default function StatusScreen() {
         } else {
           // 'story' media lives until the STORY expires (24h), not on any
           // chat clock — see migration 100.
-          const up = await uploadAttachment(a.uri, a.filename, a.mime, { purpose: 'story' });
+          const up = await uploadAttachment(uri, a.filename, a.mime, { purpose: 'story' });
           await addStory(up.id, a.type, cap);
         }
       }
