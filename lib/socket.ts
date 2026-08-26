@@ -16,8 +16,11 @@
 
 import { io as ioClient, Socket } from 'socket.io-client';
 import { useSyncExternalStore } from 'react';
+import { AppState } from 'react-native';
+import NetInfo from '@react-native-community/netinfo';
 import { SERVER_URL } from '../constants/server';
 import { getAccessToken } from './api';
+import { netKeyOf, reconnectReason, shouldKickOnForeground, SETTLE_MS } from './socketReconnect';
 import perf from './perf';
 
 let socket: Socket | null = null;
@@ -150,7 +153,69 @@ async function connect(): Promise<Socket> {
   });
 }
 
+// ── Rebuild the transport the moment the platform says something changed ──
+//
+// Nothing here used to watch the network, so a Wi-Fi→cellular switch left a
+// socket whose TCP connection was ALREADY DEAD but which still reported
+// `connected === true` — so no retry began. socket.io only learned of it when
+// the server's ping went unanswered (pingInterval 10s + pingTimeout 5s in
+// realtime/server.go), meaning ~15s of "Connecting…" BEFORE the first attempt,
+// with reconnect backoff stacked on top. Foregrounding after Android killed
+// the socket in Doze had the same shape.
+//
+// Both are things the OS already knows and will tell us for free. The decision
+// of WHEN to act on that lives in ./socketReconnect (pure, selftested); this
+// owns the subscriptions and the teardown.
+let netKey: string | null = null;
+let kickTimer: ReturnType<typeof setTimeout> | null = null;
+let watching = false;
+
+/** Force a fresh transport NOW rather than waiting out a ping timeout. */
+function kickReconnect(why: string): void {
+  // A connect already in flight will succeed or fail on its own; stomping it
+  // would restart the very handshake we are trying to hurry.
+  if (connecting) return;
+  if (kickTimer) clearTimeout(kickTimer);
+  kickTimer = setTimeout(() => {
+    kickTimer = null;
+    perf.mark('socket_kick', { why });
+    setConn('CONNECTING');
+    const s = socket;
+    if (s) {
+      // disconnect() PARKS the client — socket.io will not auto-reconnect after
+      // an explicit disconnect — so connect() must follow it, in that order.
+      try { s.disconnect(); s.connect(); return; } catch { /* fall through */ }
+    }
+    getSocket().catch(() => { /* the retry ladder owns the next attempt */ });
+  }, SETTLE_MS);
+}
+
+/** Armed once, on first use. Idempotent. */
+function watchNetwork(): void {
+  if (watching) return;
+  watching = true;
+
+  try {
+    NetInfo.addEventListener((st) => {
+      const next = netKeyOf(st as any);
+      const why = reconnectReason(netKey, next);
+      netKey = next;
+      if (why) kickReconnect(why);
+      else if (next === null) setConn('OFFLINE');   // radio gone: say so, don't retry
+    });
+  } catch { /* NetInfo unavailable (Expo Go / web) — timeouts still recover */ }
+
+  try {
+    AppState.addEventListener('change', (state) => {
+      if (state !== 'active') return;
+      if (!shouldKickOnForeground(!!socket?.connected)) return;
+      kickReconnect('foreground');
+    });
+  } catch { /* AppState unavailable — same fallback */ }
+}
+
 export async function getSocket(): Promise<Socket> {
+  watchNetwork();
   if (socket && socket.connected) return socket;
   if (connecting) return connecting;
   connecting = connect()
@@ -160,6 +225,10 @@ export async function getSocket(): Promise<Socket> {
 }
 
 export function disconnect(): void {
+  // A kick scheduled a moment before logout would otherwise fire into an empty
+  // session and start dialling again — connect() would refuse it for lack of a
+  // token, but only after churning. Cancel it here, where the intent is known.
+  if (kickTimer) { clearTimeout(kickTimer); kickTimer = null; }
   if (socket) {
     try { socket.removeAllListeners(); socket.disconnect(); } catch {}
     socket = null;
@@ -184,10 +253,21 @@ export function addPersistentListener<T = any>(event: string, handler: (data: T)
   set.add(handler as any);
   if (socket) { try { socket.off(event, handler as any); socket.on(event, handler as any); } catch {} }
   // Kick off / keep retrying a connection until signed in, so it actually attaches.
+  //
+  // The delay RAMPS rather than sitting flat at 1500ms. The overwhelmingly
+  // common early failure is "Not signed in" — a local SecureStore read that
+  // resolves in milliseconds — and a flat poll meant the socket idled up to a
+  // full 1.5s AFTER the token landed, on every cold launch, three times over
+  // (_layout arms three persistent listeners). Ramping catches that moment in
+  // ~200ms while still reaching the same 1.5s ceiling for the case that
+  // actually deserves patience: a network that is genuinely down, where fast
+  // retries would just churn sockets and radio.
   let stop = false;
   (async () => {
     for (let i = 0; i < 30 && !stop; i++) {
-      try { await getSocket(); break; } catch { await new Promise(r => setTimeout(r, 1500)); }
+      try { await getSocket(); break; } catch {
+        await new Promise(r => setTimeout(r, Math.min(1500, 200 * (i + 1))));
+      }
     }
   })();
   return () => { stop = true; persistentListeners.get(event)?.delete(handler as any); try { socket?.off(event, handler as any); } catch {} };
