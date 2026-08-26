@@ -2,6 +2,7 @@
 // Images: zoom, pan | Videos: stream while loading | Audio: built-in player | Code: inline preview
 
 import { BRAND_ACCENT } from '../constants/theme';
+import { ErrorBoundary } from '../components/ErrorBoundary';
 import { Ionicons } from '@expo/vector-icons';
 import React, { useState, useEffect, useRef } from 'react';
 import {
@@ -43,7 +44,7 @@ const getFileType = (name) => {
 const formatSize = (b) => { if (!b) return ''; if (b<1024) return b+' B'; if (b<1048576) return (b/1024).toFixed(1)+' KB'; return (b/1048576).toFixed(1)+' MB'; };
 const formatDur = (ms) => { if (!ms) return '0:00'; const s=Math.floor(ms/1000); return Math.floor(s/60)+':'+(s%60<10?'0':'')+(s%60); };
 
-export default function MediaViewerScreen() {
+function MediaViewerScreen() {
   const router = useRouter();
   const { uri, mediaUrl, attachmentId, needsAuth, save, isMine, mime, filename, msgType, viewOnce, chatId } = useLocalSearchParams();
   const isViewOnce = viewOnce === '1';
@@ -458,3 +459,15 @@ const s = StyleSheet.create({
   audioCtrlRow:{flexDirection:'row',alignItems:'center',gap:24,marginTop:20},
   audioPlayBtn:{width:64,height:64,borderRadius:32,backgroundColor:C.accent,justifyContent:'center',alignItems:'center'},
 });
+
+// A render fault in a viewer used to take the WHOLE app down: these screens
+// render untrusted, arbitrary media (a truncated video, a malformed PDF, an
+// office file with a codec this device lacks) and none of them were wrapped.
+// The boundary turns that crash into a dismissable screen with the chat intact.
+export default function MediaViewerScreenBoundary() {
+  return (
+    <ErrorBoundary screen="MediaViewerScreen" fallbackTitle="Media Viewer Error" fallbackMessage="This photo or video could not be displayed.">
+      <MediaViewerScreen />
+    </ErrorBoundary>
+  );
+}

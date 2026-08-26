@@ -14,6 +14,7 @@
 // (server is idempotent + treats author-as-viewer as no-op).
 
 import { Ionicons } from '@expo/vector-icons';
+import { ErrorBoundary } from '../components/ErrorBoundary';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { ResizeMode, Video } from 'expo-av';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -54,7 +55,7 @@ function useS() {
   return useMemo(() => makeStyles(colors), [colors]);
 }
 
-export default function StoryViewerScreen() {
+function StoryViewerScreen() {
   const { colors } = useTheme();
   const S = useS();
   const router = useRouter();
@@ -450,3 +451,15 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   viewerName:       { color: c.text, fontSize: 14, flex: 1 },
   viewerWhen:       { color: c.textDim, fontSize: 11 },
 });
+
+// A render fault in a viewer used to take the WHOLE app down: these screens
+// render untrusted, arbitrary media (a truncated video, a malformed PDF, an
+// office file with a codec this device lacks) and none of them were wrapped.
+// The boundary turns that crash into a dismissable screen with the chat intact.
+export default function StoryViewerScreenBoundary() {
+  return (
+    <ErrorBoundary screen="StoryViewerScreen" fallbackTitle="Story Viewer Error" fallbackMessage="This story could not be displayed.">
+      <StoryViewerScreen />
+    </ErrorBoundary>
+  );
+}

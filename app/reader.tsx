@@ -10,6 +10,7 @@
 // story entirely.
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { ErrorBoundary } from '../components/ErrorBoundary';
 import {
   Modal, Platform, Pressable, ScrollView, StatusBar, StyleSheet, Text,
   TouchableOpacity, View, useWindowDimensions,
@@ -30,7 +31,7 @@ const FONT_FAMILY: Record<ReaderSettings['font'], string | undefined> = {
   mono: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
 };
 
-export default function ReaderScreen() {
+function ReaderScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { width } = useWindowDimensions();
@@ -243,3 +244,15 @@ const st = StyleSheet.create({
   sheetTitle: { fontSize: 17, fontWeight: '800' },
   sheetActions: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 28, marginBottom: 4 },
 });
+
+// A render fault in a viewer used to take the WHOLE app down: these screens
+// render untrusted, arbitrary media (a truncated video, a malformed PDF, an
+// office file with a codec this device lacks) and none of them were wrapped.
+// The boundary turns that crash into a dismissable screen with the chat intact.
+export default function ReaderScreenBoundary() {
+  return (
+    <ErrorBoundary screen="ReaderScreen" fallbackTitle="Reader Error" fallbackMessage="This document could not be read.">
+      <ReaderScreen />
+    </ErrorBoundary>
+  );
+}

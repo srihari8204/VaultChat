@@ -3,6 +3,7 @@
 // code/text files, audio — all rendered inline with premium UI.
 
 import { Ionicons } from '@expo/vector-icons';
+import { ErrorBoundary } from '../components/ErrorBoundary';
 import { BRAND_ACCENT } from '../constants/theme';
 import React, { useEffect, useRef, useState } from 'react';
 import {
@@ -247,7 +248,7 @@ function WaveformBars({ progress, barCount = 48 }: { progress: number; barCount?
 // ══════════════════════════════════════════════════════════════════
 // ██  MAIN SCREEN
 // ══════════════════════════════════════════════════════════════════
-export default function FileViewerScreen() {
+function FileViewerScreen() {
   const router = useRouter();
   const params = useLocalSearchParams<{ uri: string; filename: string; mimeType?: string }>();
   const fileUri = (params.uri || '') + '';
@@ -1207,3 +1208,15 @@ const s = StyleSheet.create({
   },
   bottomBtnText: { color: C.text, fontSize: 16, fontWeight: '700', letterSpacing: 0.3 },
 });
+
+// A render fault in a viewer used to take the WHOLE app down: these screens
+// render untrusted, arbitrary media (a truncated video, a malformed PDF, an
+// office file with a codec this device lacks) and none of them were wrapped.
+// The boundary turns that crash into a dismissable screen with the chat intact.
+export default function FileViewerScreenBoundary() {
+  return (
+    <ErrorBoundary screen="FileViewerScreen" fallbackTitle="File Viewer Error" fallbackMessage="This document could not be displayed.">
+      <FileViewerScreen />
+    </ErrorBoundary>
+  );
+}

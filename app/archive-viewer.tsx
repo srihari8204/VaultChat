@@ -12,6 +12,7 @@
 // entry that tries to escape the destination is refused rather than repaired.
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { ErrorBoundary } from '../components/ErrorBoundary';
 import {
   ActivityIndicator, FlatList, StyleSheet, Text, TouchableOpacity, View,
 } from 'react-native';
@@ -29,7 +30,7 @@ import {
 import { formatSize } from '../lib/shelf';
 import { getAccessToken } from '../lib/api';
 
-export default function ArchiveViewerScreen() {
+function ArchiveViewerScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { colors } = useTheme();
@@ -208,3 +209,15 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   empty: { alignItems: 'center', padding: 40, gap: 12 },
   emptyBody: { color: c.textDim, fontSize: 14, textAlign: 'center', lineHeight: 20 },
 });
+
+// A render fault in a viewer used to take the WHOLE app down: these screens
+// render untrusted, arbitrary media (a truncated video, a malformed PDF, an
+// office file with a codec this device lacks) and none of them were wrapped.
+// The boundary turns that crash into a dismissable screen with the chat intact.
+export default function ArchiveViewerScreenBoundary() {
+  return (
+    <ErrorBoundary screen="ArchiveViewerScreen" fallbackTitle="Archive Viewer Error" fallbackMessage="This archive could not be opened.">
+      <ArchiveViewerScreen />
+    </ErrorBoundary>
+  );
+}
