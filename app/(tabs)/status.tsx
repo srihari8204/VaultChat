@@ -20,6 +20,7 @@
 import * as ImagePicker from 'expo-image-picker';
 import { compressForStatus } from '../../lib/media/compressMedia';
 import GatePicker, { type GateDraft } from '../../components/status/GatePicker';
+import { putStoryFeed, FEED_CACHE_KEY } from '../../lib/storyFeedCache';
 import { lockKeyWithAnswer } from '../../lib/status/gateKey';
 import { wrapPayloadForViewers } from '../../lib/storyKeys';
 import { isAcceptableAnswer } from '../../lib/status/gate';
@@ -71,7 +72,7 @@ import { putMediaKey } from '../../lib/mediaKeyStore';
 
 const TEXT_BGS = ['#0B0B10', '#7E57C2', '#26A69A', '#EF5350', '#42A5F5', '#FFA726', '#5C6BC0'];
 const QUICK_EMOJIS = ['😀','😂','🥰','😍','😎','🤔','😅','😭','😡','👍','🙏','👏','🔥','✨','🎉','❤️','💔','💯','🙌','😴','🥳','😇','🤩','😱','😬','🤗','😉','😏','🤨','😌','💪','👀','🌟','⚡','🌈','☀️','🌙','⭐','💜','💙'];
-const FEED_CACHE = 'vc_stories_feed';
+const FEED_CACHE = FEED_CACHE_KEY;   // shared with the viewer; never re-declare the literal
 const MUTED_KEY  = 'vc_muted_status';
 const RECENT_EMOJI_KEY = 'vc_recent_emojis';
 
@@ -132,7 +133,7 @@ export default function StatusScreen() {
       setFeed(f);
       setAuthHeader(tok ? `Bearer ${tok}` : null);
       setError(null);
-      AsyncStorage.setItem(FEED_CACHE, JSON.stringify(f)).catch(() => {}); // offline cache
+      putStoryFeed(f);   // offline cache AND the viewer's warm start — see lib/storyFeedCache.ts
     } catch (e: any) {
       setError(e?.message ?? 'Failed to load stories');
     }

@@ -47,6 +47,7 @@ import { getDecryptedAttachmentUri, getAttachmentLocalUri } from '../lib/mediaAt
 import { putMediaKey, getMediaKey } from '../lib/mediaKeyStore';
 import { unwrapStoryKey, unwrapPayload } from '../lib/storyKeys';
 import GateChallenge from '../components/status/GateChallenge';
+import { peekStoryFeed, putStoryFeed } from '../lib/storyFeedCache';
 import { unlockKeyWithAnswer } from '../lib/status/gateKey';
 import { puzzleFrameUri } from '../lib/status/puzzleFrame';
 
@@ -78,22 +79,54 @@ function StoryViewerScreen() {
   useEffect(() => {
     let cancel = false;
     (async () => {
+      // PAINT FROM THE CACHE FIRST, THEN REVALIDATE.
+      //
+      // The list screen fetched this feed to draw the row that was just
+      // tapped. Re-fetching it here put a full round trip (~1s against prod)
+      // in front of every open, before the wrapped key or the media could even
+      // be requested — and those are two more round trips behind it.
+      //
+      // Safe because nothing here is an access decision: the media still needs
+      // its wrapped key from the server, and a gate is still enforced by that
+      // key. The worst a stale entry does is show a story that has since been
+      // deleted, which the revalidation below corrects.
+      const seed = await peekStoryFeed();
+      if (cancel) return;
+      const apply = (feed: StoryFeedEntry[], first: boolean) => {
+        const match = feed.find(e => e.userId === userId);
+        if (!match) {
+          // Only the authoritative answer may declare there is nothing here.
+          // A cache miss just means "wait for the network".
+          if (!first) setError('No active stories from this user');
+          return;
+        }
+        setEntry(prev => {
+          // Do not let the revalidation reshuffle a story someone is already
+          // looking at; only adopt it if the set actually changed.
+          if (prev && prev.stories.length === match.stories.length
+              && prev.stories.every((s, i) => s.id === match.stories[i].id)) return prev;
+          return match;
+        });
+        if (first) {
+          // Start at the first unseen story (matches Instagram/WhatsApp UX);
+          // if all seen, start at 0. Only on the FIRST apply — moving the
+          // index under a viewer mid-read would be worse than a stale one.
+          const firstUnseen = match.stories.findIndex(s => !s.seen);
+          setIndex(firstUnseen >= 0 ? firstUnseen : 0);
+        }
+      };
+      if (seed) apply(seed, true);
+
       try {
         const [feed, tok] = await Promise.all([listStoriesFeed(), getAccessToken()]);
         if (cancel) return;
-        const match = feed.find(e => e.userId === userId);
-        if (!match) {
-          setError('No active stories from this user');
-          return;
-        }
-        // Start at the first unseen story (matches Instagram/WhatsApp UX);
-        // if all seen, start at 0.
-        const firstUnseen = match.stories.findIndex(s => !s.seen);
-        setIndex(firstUnseen >= 0 ? firstUnseen : 0);
-        setEntry(match);
+        putStoryFeed(feed);
+        apply(feed, !seed);
         setAuthHeader(tok ? `Bearer ${tok}` : null);
       } catch (e: any) {
-        if (!cancel) setError(e?.message ?? 'Failed to load');
+        // With a cached entry already on screen there is something to look at,
+        // so a failed revalidation must not replace it with an error.
+        if (!cancel && !seed) setError(e?.message ?? 'Failed to load');
       }
     })();
     return () => { cancel = true; };
@@ -194,6 +227,46 @@ function StoryViewerScreen() {
     })();
     return () => { cancel = true; };
   }, [gated, current?.id, current?.gateKind, current?.mediaType, mediaSrc?.uri]);
+
+  // ── Prefetch ONE story ahead ────────────────────────────────────────
+  //
+  // Advancing costs the same two round trips the first open does — the
+  // wrapped key, then the media — and pays them only once the person has
+  // already tapped, so the wait is fully visible. Fetching the next story
+  // while the current one is on screen moves that cost into time that is
+  // already being spent looking at something.
+  //
+  // Deliberately ONE ahead, not all: a poster may have ten statuses and most
+  // viewers stop after the first few. Downloading all of them would spend a
+  // viewer's mobile data on media they will never open.
+  //
+  // Starts only once the CURRENT story has rendered (`loaded`), so the
+  // prefetch never competes for bandwidth with the thing being waited on.
+  useEffect(() => {
+    if (!entry || !loaded) return;
+    const next = entry.stories[index + 1];
+    if (!next || next.mediaType === 'text' || !next.attachmentId) return;
+    // A question gate's payload is the answer-locked envelope, not a usable
+    // key — there is nothing to warm, and fetching it would neither help nor
+    // weaken the lock.
+    if (next.gateKind === 'question') return;
+
+    let cancel = false;
+    (async () => {
+      try {
+        if (!(await getMediaKey(next.attachmentId).catch(() => null))) {
+          const wrapped = await getStoryKey(next.id);
+          if (cancel || !wrapped) return;
+          const mk = await unwrapStoryKey(entry.userId, wrapped);
+          if (cancel || !mk) return;
+          await putMediaKey(next.attachmentId, mk);
+        }
+        if (cancel) return;
+        await getAttachmentLocalUri(next.attachmentId);   // downloads + decrypts into the media cache
+      } catch { /* best effort: a failed prefetch just means the normal path pays for it */ }
+    })();
+    return () => { cancel = true; };
+  }, [entry?.userId, entry?.stories.length, index, loaded]);
 
   // Reset the "loaded" gate whenever the current story changes. Text stories
   // have no media to wait for, so they're ready immediately.
