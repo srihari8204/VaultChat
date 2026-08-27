@@ -119,6 +119,75 @@ type storyRow struct {
 	Encrypted    bool
 	CreatedAt    time.Time
 	ExpiresAt    time.Time
+	GateKind     *string
+	GateGrid     *int
+	GatePrompt   *string
+	GateSalt     *string
+}
+
+// ── Status gates (migration 117) ─────────────────────────────────────
+//
+// parseGate validates what the client asked for and returns the four column
+// values. Validated HERE and not only by the CHECK constraint: the constraint
+// is the backstop that stops a half-written row reaching disk, but a 400 with a
+// reason is what lets a client find out WHY, and row-level policies are bypassed
+// in production anyway (the API connects as a superuser), so handler-side
+// scoping is the rule in this codebase.
+//
+// The ANSWER never appears here. The client derives a key from it and wraps the
+// content key locally; the server sees only the salt, which is public.
+const (
+	gateGridMin = 3 // must match lib/status/gate.ts GRID_MIN
+	gateGridMax = 9 // must match lib/status/gate.ts GRID_MAX
+	gatePromptMax = 200
+)
+
+type gateInput struct {
+	Kind   any `json:"kind"`
+	Grid   any `json:"grid"`
+	Prompt any `json:"prompt"`
+	Salt   any `json:"salt"`
+}
+
+// Returns (kind, grid, prompt, salt, errMessage). All nil + "" means no gate,
+// which is the overwhelmingly common case and must stay cheap.
+func parseGate(g *gateInput) (*string, *int, *string, *string, string) {
+	if g == nil || g.Kind == nil {
+		return nil, nil, nil, nil, ""
+	}
+	kind := strings.TrimSpace(fmt.Sprintf("%v", g.Kind))
+	switch kind {
+	case "", "none":
+		return nil, nil, nil, nil, ""
+
+	case "puzzle":
+		// A float from JSON: every number arrives as float64, so 4.5 must be
+		// rejected rather than silently truncated into a valid-looking 4.
+		f, ok := g.Grid.(float64)
+		if !ok || f != float64(int(f)) {
+			return nil, nil, nil, nil, "gate.grid must be a whole number"
+		}
+		n := int(f)
+		if n < gateGridMin || n > gateGridMax {
+			return nil, nil, nil, nil, fmt.Sprintf("gate.grid must be %d..%d", gateGridMin, gateGridMax)
+		}
+		return &kind, &n, nil, nil, ""
+
+	case "question":
+		prompt := truncRunes(strings.TrimSpace(fmt.Sprintf("%v", orEmpty(g.Prompt))), gatePromptMax)
+		salt := strings.TrimSpace(fmt.Sprintf("%v", orEmpty(g.Salt)))
+		if prompt == "" {
+			return nil, nil, nil, nil, "gate.prompt required"
+		}
+		// A question gate with no salt is unopenable BY ANYONE, including its
+		// author, and looks perfectly healthy until someone answers correctly
+		// and still sees nothing. Refuse it loudly instead.
+		if salt == "" {
+			return nil, nil, nil, nil, "gate.salt required"
+		}
+		return &kind, nil, &prompt, &salt, ""
+	}
+	return nil, nil, nil, nil, "gate.kind must be puzzle or question"
 }
 
 type publicStory struct {
@@ -132,6 +201,14 @@ type publicStory struct {
 	Encrypted    bool         `json:"encrypted"`
 	CreatedAt    httpx.JSTime `json:"createdAt"`
 	ExpiresAt    httpx.JSTime `json:"expiresAt"`
+	// The gate the viewer must pass. Absent on an ordinary status, which is
+	// what every pre-existing row is. gateSalt is PUBLIC by design — it defeats
+	// precomputation and is useless without the answer. The answer itself is
+	// never stored anywhere, so there is nothing here to leak.
+	GateKind   *string `json:"gateKind,omitempty"`
+	GateGrid   *int    `json:"gateGrid,omitempty"`
+	GatePrompt *string `json:"gatePrompt,omitempty"`
+	GateSalt   *string `json:"gateSalt,omitempty"`
 }
 
 func (s storyRow) public() publicStory {
@@ -140,6 +217,8 @@ func (s storyRow) public() publicStory {
 		MediaType: s.MediaType, Caption: s.Caption, Text: s.TextContent,
 		BgColor: s.BgColor, Encrypted: s.Encrypted,
 		CreatedAt: httpx.JSTime(s.CreatedAt), ExpiresAt: httpx.JSTime(s.ExpiresAt),
+		GateKind: s.GateKind, GateGrid: s.GateGrid,
+		GatePrompt: s.GatePrompt, GateSalt: s.GateSalt,
 	}
 }
 
@@ -236,8 +315,14 @@ func storiesPost(w http.ResponseWriter, r *http.Request) {
 		Keys         []any `json:"keys"`
 		Text         any   `json:"text"`
 		BgColor      any   `json:"bgColor"`
+		Gate         *gateInput `json:"gate"`
 	}
 	_ = httpx.Body(r, &b)
+	gateKind, gateGrid, gatePrompt, gateSalt, gateErr := parseGate(b.Gate)
+	if gateErr != "" {
+		httpx.Err(w, 400, gateErr)
+		return
+	}
 	attachmentID := fmt.Sprintf("%v", orEmpty(b.AttachmentID))
 	mediaType := fmt.Sprintf("%v", orEmpty(b.MediaType))
 	var caption *string
@@ -260,11 +345,14 @@ func storiesPost(w http.ResponseWriter, r *http.Request) {
 		}
 		var s storyRow
 		err := db.Pool.QueryRow(ctx,
-			`INSERT INTO stories (user_id, media_type, text_content, bg_color, encrypted)
-			 VALUES ($1, 'text', $2, $3, FALSE)
-			 RETURNING id, user_id, attachment_id, media_type, caption, text_content, bg_color, encrypted, created_at, expires_at`,
-			user.ID, text, bg).Scan(&s.ID, &s.UserID, &s.AttachmentID, &s.MediaType,
-			&s.Caption, &s.TextContent, &s.BgColor, &s.Encrypted, &s.CreatedAt, &s.ExpiresAt)
+			`INSERT INTO stories (user_id, media_type, text_content, bg_color, encrypted,
+			                      gate_kind, gate_grid, gate_prompt, gate_salt)
+			 VALUES ($1, 'text', $2, $3, FALSE, $4, $5, $6, $7)
+			 RETURNING id, user_id, attachment_id, media_type, caption, text_content, bg_color, encrypted, created_at, expires_at,
+			           gate_kind, gate_grid, gate_prompt, gate_salt`,
+			user.ID, text, bg, gateKind, gateGrid, gatePrompt, gateSalt).Scan(&s.ID, &s.UserID, &s.AttachmentID, &s.MediaType,
+			&s.Caption, &s.TextContent, &s.BgColor, &s.Encrypted, &s.CreatedAt, &s.ExpiresAt,
+			&s.GateKind, &s.GateGrid, &s.GatePrompt, &s.GateSalt)
 		if err != nil {
 			httpx.Err(w, 500, "Failed to post story")
 			return
@@ -308,12 +396,16 @@ func storiesPost(w http.ResponseWriter, r *http.Request) {
 
 	var s storyRow
 	err = db.Pool.QueryRow(ctx,
-		`INSERT INTO stories (user_id, attachment_id, media_type, caption, encrypted)
-		 VALUES ($1, $2, $3, $4, $5)
-		 RETURNING id, user_id, attachment_id, media_type, caption, text_content, bg_color, encrypted, created_at, expires_at`,
-		user.ID, attachmentID, mediaType, caption, encrypted).Scan(&s.ID, &s.UserID,
+		`INSERT INTO stories (user_id, attachment_id, media_type, caption, encrypted,
+		                      gate_kind, gate_grid, gate_prompt, gate_salt)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+		 RETURNING id, user_id, attachment_id, media_type, caption, text_content, bg_color, encrypted, created_at, expires_at,
+		           gate_kind, gate_grid, gate_prompt, gate_salt`,
+		user.ID, attachmentID, mediaType, caption, encrypted,
+		gateKind, gateGrid, gatePrompt, gateSalt).Scan(&s.ID, &s.UserID,
 		&s.AttachmentID, &s.MediaType, &s.Caption, &s.TextContent, &s.BgColor,
-		&s.Encrypted, &s.CreatedAt, &s.ExpiresAt)
+		&s.Encrypted, &s.CreatedAt, &s.ExpiresAt,
+		&s.GateKind, &s.GateGrid, &s.GatePrompt, &s.GateSalt)
 	if err != nil {
 		httpx.Err(w, 500, "Failed to post story")
 		return
@@ -377,6 +469,7 @@ func storiesFeed(w http.ResponseWriter, r *http.Request) {
 	rows, err := db.Pool.Query(ctx,
 		`SELECT s.id, s.user_id, s.attachment_id, s.media_type, s.caption, s.text_content, s.bg_color, s.encrypted,
 		        s.created_at, s.expires_at,
+		        s.gate_kind, s.gate_grid, s.gate_prompt, s.gate_salt,
 		        u.name, u.email, u.first_name_cipher, u.last_name_cipher, u.email_cipher, u.photo_url,
 		        EXISTS (SELECT 1 FROM story_views sv
 		                 WHERE sv.story_id = s.id AND sv.viewer_id = $1) AS seen
@@ -414,6 +507,7 @@ func storiesFeed(w http.ResponseWriter, r *http.Request) {
 		var seen bool
 		if err := rows.Scan(&s.ID, &s.UserID, &s.AttachmentID, &s.MediaType, &s.Caption,
 			&s.TextContent, &s.BgColor, &s.Encrypted, &s.CreatedAt, &s.ExpiresAt,
+			&s.GateKind, &s.GateGrid, &s.GatePrompt, &s.GateSalt,
 			&name, &email, &firstC, &lastC, &emailC, &photoURL, &seen); err != nil {
 			httpx.Err(w, 500, "Failed to load story feed")
 			return
