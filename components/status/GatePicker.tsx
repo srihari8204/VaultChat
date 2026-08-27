@@ -14,7 +14,7 @@
 // screen could do.
 
 import React from 'react';
-import { View, Text, TextInput, TouchableOpacity, StyleSheet, ScrollView } from 'react-native';
+import { View, Text, TextInput, TouchableOpacity, StyleSheet } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { GRID_MIN, GRID_MAX, isAcceptableAnswer, ANSWER_MIN_LEN } from '../../lib/status/gate';
 
@@ -71,7 +71,11 @@ export default function GatePicker({ value, onChange, accent, text, dim, surface
       {value.kind === 'puzzle' && (
         <View style={[S.panel, { backgroundColor: surface }]}>
           <Text style={[S.label, { color: dim }]}>Pieces</Text>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={S.chips}>
+          {/* WRAPS, never scrolls. In a horizontal scroller 9x9 sat entirely
+              off-screen on a 1200px device and 8x8 was clipped, so the poster
+              could not see — let alone pick — the sizes they were promised.
+              A hidden option is the same as a missing one. */}
+          <View style={S.chips}>
             {GRIDS.map((g) => {
               const on = value.grid === g;
               return (
@@ -84,7 +88,7 @@ export default function GatePicker({ value, onChange, accent, text, dim, surface
                 </TouchableOpacity>
               );
             })}
-          </ScrollView>
+          </View>
           <Text style={[S.note, { color: dim }]}>
             {value.grid * value.grid} pieces
             {value.grid >= 7 ? ' — that is a lot on a phone screen' : ''}
@@ -141,8 +145,8 @@ const S = StyleSheet.create({
   optSub: { fontSize: 12, marginTop: 2, lineHeight: 16 },
   panel: { padding: 14, borderRadius: 14, marginTop: 2 },
   label: { fontSize: 11, letterSpacing: 1, textTransform: 'uppercase', fontWeight: '700' },
-  chips: { marginTop: 10 },
-  chip: { paddingHorizontal: 14, paddingVertical: 8, borderRadius: 999, borderWidth: 1.5, marginRight: 8 },
+  chips: { marginTop: 10, flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  chip: { paddingHorizontal: 14, paddingVertical: 8, borderRadius: 999, borderWidth: 1.5 },
   chipText: { fontSize: 14, fontWeight: '700' },
   input: { borderWidth: 1, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 10, marginTop: 6, fontSize: 15 },
   note: { fontSize: 12, marginTop: 8, lineHeight: 17 },

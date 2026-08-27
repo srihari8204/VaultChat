@@ -448,6 +448,14 @@ type feedStory struct {
 	CreatedAt    httpx.JSTime `json:"createdAt"`
 	ExpiresAt    httpx.JSTime `json:"expiresAt"`
 	Seen         bool         `json:"seen"`
+	// The gate MUST be repeated here. The feed is the ONLY story payload a
+	// viewer ever reads — publicStory (the POST response) goes back to the
+	// poster, who is never challenged. Omitting these four made every gated
+	// status open normally for everyone: no lock, no puzzle, silently.
+	GateKind   *string `json:"gateKind,omitempty"`
+	GateGrid   *int    `json:"gateGrid,omitempty"`
+	GatePrompt *string `json:"gatePrompt,omitempty"`
+	GateSalt   *string `json:"gateSalt,omitempty"`
 }
 
 type feedBucket struct {
@@ -461,6 +469,22 @@ type feedBucket struct {
 	LatestAt httpx.JSTime `json:"latestAt"`
 
 	latest time.Time
+}
+
+// feedStoryFrom is the row -> wire mapping for the story feed.
+//
+// It exists as a named function ONLY so it can be tested: as an inline literal
+// inside storiesFeed it needed a live database to reach, and it silently
+// dropped the four gate columns for an entire release. Every field the viewer
+// depends on is copied here.
+func feedStoryFrom(s storyRow, seen bool) feedStory {
+	return feedStory{
+		ID: fmt.Sprintf("%d", s.ID), AttachmentID: s.AttachmentID, MediaType: s.MediaType,
+		Caption: s.Caption, Text: s.TextContent, BgColor: s.BgColor, Encrypted: s.Encrypted,
+		CreatedAt: httpx.JSTime(s.CreatedAt), ExpiresAt: httpx.JSTime(s.ExpiresAt), Seen: seen,
+		GateKind: s.GateKind, GateGrid: s.GateGrid,
+		GatePrompt: s.GatePrompt, GateSalt: s.GateSalt,
+	}
 }
 
 func storiesFeed(w http.ResponseWriter, r *http.Request) {
@@ -523,11 +547,7 @@ func storiesFeed(w http.ResponseWriter, r *http.Request) {
 			byUser[s.UserID] = bucket
 			order = append(order, s.UserID)
 		}
-		bucket.Stories = append(bucket.Stories, feedStory{
-			ID: fmt.Sprintf("%d", s.ID), AttachmentID: s.AttachmentID, MediaType: s.MediaType,
-			Caption: s.Caption, Text: s.TextContent, BgColor: s.BgColor, Encrypted: s.Encrypted,
-			CreatedAt: httpx.JSTime(s.CreatedAt), ExpiresAt: httpx.JSTime(s.ExpiresAt), Seen: seen,
-		})
+		bucket.Stories = append(bucket.Stories, feedStoryFrom(s, seen))
 		if !seen {
 			bucket.SeenAll = false
 		}

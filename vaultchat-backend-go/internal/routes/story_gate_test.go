@@ -1,6 +1,10 @@
 package routes
 
-import "testing"
+import (
+	"encoding/json"
+	"strings"
+	"testing"
+)
 
 // parseGate is the handler-side guard for migration 117. The CHECK constraint
 // is the backstop that stops a half-written row reaching disk, but a constraint
@@ -130,5 +134,60 @@ func TestParseGateTruncatesLongPrompt(t *testing.T) {
 	}
 	if p == nil || len([]rune(*p)) > gatePromptMax {
 		t.Fatalf("prompt not truncated to %d", gatePromptMax)
+	}
+}
+
+// THE ONE THAT WOULD HAVE CAUGHT THE SHIPPED BUG.
+//
+// The feed query selected the gate columns and the scan read them, so the code
+// looked complete from either end — but feedStory carried no gate fields and
+// the mapping never copied them. Every gated status therefore reached every
+// viewer ungated: no puzzle, no question, opened straight away. Nothing
+// errored, which is why only a device test found it.
+//
+// This drives feedStoryFrom (the real mapping) rather than building a
+// feedStory by hand — a hand-built literal would still pass with the copy
+// missing, and the missing copy was half the bug.
+//
+// publicStory is the POST response and goes back to the POSTER, who is never
+// challenged. The feed is the only story payload a VIEWER ever reads, which is
+// why it — not publicStory — is what this asserts on.
+func TestFeedCarriesTheGate(t *testing.T) {
+	kind, grid, prompt, salt := "puzzle", 5, "Where did we meet?", "deadbeef"
+	blob, err := json.Marshal(feedStoryFrom(storyRow{
+		ID: 1, MediaType: "image",
+		GateKind: &kind, GateGrid: &grid, GatePrompt: &prompt, GateSalt: &salt,
+	}, false))
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var got map[string]any
+	if err := json.Unmarshal(blob, &got); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	// These key names are the contract with StoryItem in lib/chatService.ts.
+	// The client reads the API response verbatim with no field mapping, so a
+	// rename here ungates every status silently rather than failing loudly.
+	for _, k := range []string{"gateKind", "gateGrid", "gatePrompt", "gateSalt"} {
+		if _, ok := got[k]; !ok {
+			t.Fatalf("feed dropped %q — every gated status opens ungated for viewers", k)
+		}
+	}
+	if got["gateGrid"] != float64(5) {
+		t.Fatalf("poster chose a 5x5 board, viewer was told %v", got["gateGrid"])
+	}
+	if got["gateKind"] != "puzzle" {
+		t.Fatalf("kind not carried: %v", got["gateKind"])
+	}
+}
+
+// An ordinary status must stay exactly as it was: omitempty means no gate keys
+// at all, so an older client never sees a field it cannot interpret.
+func TestFeedWithoutGateStaysClean(t *testing.T) {
+	blob, _ := json.Marshal(feedStoryFrom(storyRow{ID: 1, MediaType: "image"}, false))
+	for _, k := range []string{"gateKind", "gateGrid", "gatePrompt", "gateSalt"} {
+		if strings.Contains(string(blob), k) {
+			t.Fatalf("ungated status leaked %q: %s", k, blob)
+		}
 	}
 }
