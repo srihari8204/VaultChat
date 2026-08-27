@@ -91,15 +91,47 @@ func TestRouteCutoffKeepsTheBatchInsideValhallasLimit(t *testing.T) {
 	}
 }
 
-func TestRouteCutoffAdmitsTheRealNearShopAndRejectsTheFarOne(t *testing.T) {
+func TestRouteCutoffSplitsTheRealShopsBetweenMatrixAndSingles(t *testing.T) {
 	const uLat, uLng = 16.0486, 80.9276
 	near := haversineKm(uLat, uLng, 16.5137022, 81.9369432) // Sri Lakshmi, ~119km
 	far := haversineKm(uLat, uLng, 12.9534688, 77.7180569)  // Test 1, ~487km
 	if near > sbRouteMaxStraightKm {
-		t.Fatalf("the nearest real shop (%.0fkm) must still get a road distance", near)
+		t.Fatalf("the nearest real shop (%.0fkm) belongs in the matrix batch", near)
 	}
+	// The far one must leave the matrix batch — but it is NOT abandoned to
+	// straight-line: it takes its own /route call, which allows 5000km. On prod
+	// that shop is 726.9km by road against 487.6km straight, so falling back
+	// would have understated the drive by 239km.
 	if far <= sbRouteMaxStraightKm {
-		t.Fatalf("the 487km shop (%.0fkm) must be excluded from the batch", far)
+		t.Fatalf("the 487km shop (%.0fkm) must be routed singly, not in the matrix", far)
+	}
+}
+
+// Every shop with coordinates must end up in exactly one bucket — a shop that
+// falls into neither silently keeps a crow-flies number on a screen where
+// every other row is a road distance, which is worse than showing neither.
+func TestEveryShopLandsInABucket(t *testing.T) {
+	const uLat, uLng = 16.0486, 80.9276
+	shops := [][2]float64{
+		{12.9534688, 77.7180569}, {12.9537525, 77.7181996},
+		{13.0578489, 80.262183}, {16.5137022, 81.9369432},
+	}
+	near, far := 0, 0
+	for _, s := range shops {
+		if haversineKm(uLat, uLng, s[0], s[1]) > sbRouteMaxStraightKm {
+			far++
+		} else {
+			near++
+		}
+	}
+	if near+far != len(shops) {
+		t.Fatalf("%d shops but %d bucketed", len(shops), near+far)
+	}
+	if near != 1 || far != 3 {
+		t.Fatalf("expected 1 near / 3 far from that position, got %d/%d", near, far)
+	}
+	if far > sbRouteMaxSingles {
+		t.Fatalf("%d far shops exceeds the %d single-route cap", far, sbRouteMaxSingles)
 	}
 }
 

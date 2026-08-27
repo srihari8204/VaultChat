@@ -21,6 +21,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -300,7 +301,11 @@ const sbRouteMaxTargets = 25
  *  approximate one. */
 const sbRouteTimeout = 5 * time.Second
 
-/** Straight-line cutoff for asking the router at all.
+/** How many far shops get their own /route call. Bounded so a sparse list full
+ *  of distant shops cannot turn one screen into an unbounded fan-out. */
+const sbRouteMaxSingles = 10
+
+/** Straight-line cutoff for the MATRIX call.
  *
  *  VALHALLA REFUSES THE WHOLE REQUEST, NOT THE OFFENDING PAIR. A single target
  *  beyond its 400km path limit answers
@@ -311,8 +316,14 @@ const sbRouteTimeout = 5 * time.Second
  *  asking for the 119km one alone returns 146.9km.
  *
  *  Roads run 1.2-1.4x the straight line, so 250km straight stays comfortably
- *  inside the 400km road limit. Beyond that "nearby shop" has stopped meaning
- *  anything anyway, and those keep their straight-line figure. */
+ *  inside the 400km road limit.
+ *
+ *  Shops PAST this cutoff are not abandoned to straight-line: the same engine
+ *  allows 5,000km on the single-route endpoint (service_limits.auto.max_distance
+ *  is 5000000 against a max_matrix_distance of 400000), so each gets its own
+ *  /route call instead. Measured on prod, one of those answers in ~65ms, and
+ *  the difference is not cosmetic — the shop showing 487.6km straight-line is
+ *  726.9km by road, over 8 hours of driving. */
 const sbRouteMaxStraightKm = 250.0
 
 // routeKmFor returns road distances in km keyed by the index of `targets`.
@@ -320,6 +331,66 @@ const sbRouteMaxStraightKm = 250.0
 type sbRoute struct {
 	km   float64
 	secs int
+}
+
+func valhallaBase() string {
+	if b := os.Getenv("VALHALLA_URL"); b != "" {
+		return b
+	}
+	return "http://valhalla:8002"
+}
+
+// routeKmOne asks for ONE road distance via /route, which permits far longer
+// paths than the matrix does. Returns ok=false on any failure so the caller
+// keeps whatever it already had.
+func routeKmOne(ctx context.Context, lat, lng, tlat, tlng float64) (sbRoute, bool) {
+	payload, err := json.Marshal(map[string]any{
+		"locations":          []map[string]any{{"lat": lat, "lon": lng}, {"lat": tlat, "lon": tlng}},
+		"costing":            "auto",
+		"directions_options": map[string]any{"units": "kilometers"},
+	})
+	if err != nil {
+		return sbRoute{}, false
+	}
+	rctx, cancel := context.WithTimeout(ctx, sbRouteTimeout)
+	defer cancel()
+	req, err := http.NewRequestWithContext(rctx, "POST", valhallaBase()+"/route", bytes.NewReader(payload))
+	if err != nil {
+		return sbRoute{}, false
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := (&http.Client{Timeout: sbRouteTimeout}).Do(req)
+	if err != nil {
+		return sbRoute{}, false
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode > 299 {
+		return sbRoute{}, false
+	}
+	data, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if err != nil {
+		return sbRoute{}, false
+	}
+	var vr struct {
+		Trip struct {
+			Summary struct {
+				Length *float64 `json:"length"` // km, per directions_options
+				Time   *float64 `json:"time"`   // seconds
+			} `json:"summary"`
+		} `json:"trip"`
+	}
+	if err := json.Unmarshal(data, &vr); err != nil {
+		return sbRoute{}, false
+	}
+	sm := vr.Trip.Summary
+	if sm.Length == nil || *sm.Length < 0 {
+		return sbRoute{}, false
+	}
+	out := sbRoute{km: math.Round(*sm.Length*100) / 100}
+	if sm.Time != nil && *sm.Time >= 0 {
+		out.secs = int(*sm.Time + 0.5)
+	}
+	return out, true
 }
 
 func routeKmFor(ctx context.Context, lat, lng float64, targets [][2]float64) map[int]sbRoute {
@@ -467,31 +538,71 @@ func sbNearbyShops(w http.ResponseWriter, r *http.Request) {
 	// sort — so the ordering reflects what the customer will actually travel,
 	// not what a bird would.
 	if okLat && okLng && len(out) > 0 {
-		idx := []int{}
-		tg := [][2]float64{}
+		apply := func(i int, rt sbRoute) {
+			out[i]["distanceKm"] = rt.km
+			out[i]["distanceIsRoute"] = true
+			if rt.secs > 0 {
+				out[i]["durationS"] = rt.secs
+			}
+		}
+
+		// Two routes to the same answer, split by what each endpoint allows.
+		// NEAR shops ride one matrix call — cheap for many. FAR ones exceed the
+		// matrix's 400km limit and would poison that whole batch, so each takes
+		// its own /route call, which permits 5,000km.
+		nearIdx, nearTg := []int{}, [][2]float64{}
+		farIdx, farTg := []int{}, [][2]float64{}
 		for i, m := range out {
 			slat, _ := m["lat"].(*float64)
 			slng, _ := m["lng"].(*float64)
-			if slat == nil || slng == nil || len(tg) >= sbRouteMaxTargets {
+			if slat == nil || slng == nil {
 				continue
 			}
-			// Keep the batch inside Valhalla's path limit — see the constant.
-			// One over-limit target would cost every shop here its road figure.
-			if d, ok := m["distanceKm"].(float64); ok && d > sbRouteMaxStraightKm {
-				continue
+			d, haveD := m["distanceKm"].(float64)
+			switch {
+			case haveD && d > sbRouteMaxStraightKm:
+				if len(farTg) < sbRouteMaxSingles {
+					farIdx = append(farIdx, i)
+					farTg = append(farTg, [2]float64{*slat, *slng})
+				}
+			case len(nearTg) < sbRouteMaxTargets:
+				nearIdx = append(nearIdx, i)
+				nearTg = append(nearTg, [2]float64{*slat, *slng})
 			}
-			idx = append(idx, i)
-			tg = append(tg, [2]float64{*slat, *slng})
 		}
-		for k, rt := range routeKmFor(ctx, lat, lng, tg) {
-			if k < len(idx) {
-				out[idx[k]]["distanceKm"] = rt.km
-				out[idx[k]]["distanceIsRoute"] = true
-				if rt.secs > 0 {
-					out[idx[k]]["durationS"] = rt.secs
+
+		var wg sync.WaitGroup
+		var mu sync.Mutex
+
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			res := routeKmFor(ctx, lat, lng, nearTg)
+			mu.Lock()
+			defer mu.Unlock()
+			for k, rt := range res {
+				if k < len(nearIdx) {
+					apply(nearIdx[k], rt)
 				}
 			}
+		}()
+
+		// Concurrent, because these are independent calls and the customer is
+		// waiting on the whole screen, not on any one of them.
+		for k := range farIdx {
+			wg.Add(1)
+			go func(k int) {
+				defer wg.Done()
+				rt, ok := routeKmOne(ctx, lat, lng, farTg[k][0], farTg[k][1])
+				if !ok {
+					return // keep the straight-line figure
+				}
+				mu.Lock()
+				defer mu.Unlock()
+				apply(farIdx[k], rt)
+			}(k)
 		}
+		wg.Wait()
 	}
 
 	// Nearest first when we have the customer's location; shops without a known
