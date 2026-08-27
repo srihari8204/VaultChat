@@ -696,8 +696,12 @@ function RootLayout() {
         <Stack.Screen name="encrypted-notes" />
         <Stack.Screen name="current-location" />
       </Stack>
-      {/* Offscreen, 1x1, renders nothing the user sees: the only canvas on the
-          device, so a PDF can be turned into a bubble preview. */}
+      {/* Offscreen, renders nothing the user sees: the only canvas on the
+          device, so a PDF can be turned into a bubble preview.
+          Mounted here but INERT until the first thumbnail is requested — it
+          used to build a WebView on every cold start, which meant every user
+          paid to instantiate Chromium and load pdf.js whether or not they ever
+          opened a document. See components/PdfThumbnailer.tsx. */}
       <PdfThumbnailerHost />
     </GestureHandlerRootView>
     </FontReadyContext.Provider>

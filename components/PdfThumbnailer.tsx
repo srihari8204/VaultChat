@@ -15,7 +15,7 @@
 // the files on Android — requests resolve to null rather than hanging, and the
 // bubble falls back to the plain icon row it has always shown.
 
-import React, { useCallback, useRef } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Platform, StyleSheet, View } from 'react-native';
 import { WebView } from 'react-native-webview';
 
@@ -33,6 +33,30 @@ const pending = new Map<number, Pending>();
 let send: ((json: string) => void) | null = null;
 const queued: string[] = [];
 let ready = false;
+
+// -- Mount on demand, not at boot ---------------------------------------
+//
+// The host used to render its WebView unconditionally from app/_layout.tsx, so
+// EVERY cold start paid to instantiate Chromium and load pdf.js — for every
+// user, whether or not they ever opened a PDF. A WebView is among the most
+// expensive views on Android, and this one sat on the startup path of a
+// messenger where most sessions never touch a document.
+//
+// It is created the first time a thumbnail is actually asked for. The queue
+// above already existed for exactly this shape — requests made before the page
+// reports ready are held and flushed — so a request that triggers the mount is
+// served by the same path as one arriving later, and no caller changes.
+//
+// Still mounted ONCE and kept for the app's lifetime after that: pdf.js
+// starting up per document is the thing this host exists to avoid.
+let wake: (() => void) | null = null;
+let wanted = false;
+
+function ensureHost(): void {
+  if (wanted) return;
+  wanted = true;
+  wake?.();
+}
 
 function settle(id: number, value: PdfThumb | null) {
   const p = pending.get(id);
@@ -53,6 +77,7 @@ export function requestPdfThumb(uri: string): Promise<PdfThumb | null> {
   const msg = JSON.stringify({ id, uri });
   return new Promise<PdfThumb | null>(resolve => {
     pending.set(id, { resolve, timer: setTimeout(() => settle(id, null), TIMEOUT_MS) });
+    ensureHost();            // the first request builds the renderer; later ones reuse it
     if (send && ready) send(msg);
     else queued.push(msg);   // flushed when the page reports ready
   });
@@ -63,6 +88,14 @@ export function requestPdfThumb(uri: string): Promise<PdfThumb | null> {
  */
 export function PdfThumbnailerHost() {
   const ref = useRef<WebView>(null);
+  // Renders nothing until requestPdfThumb asks for it. See ensureHost above.
+  const [live, setLive] = useState(wanted);
+
+  useEffect(() => {
+    if (wanted) { setLive(true); return; }
+    wake = () => setLive(true);
+    return () => { wake = null; };
+  }, []);
 
   const onMessage = useCallback((e: any) => {
     let m: any;
@@ -76,7 +109,7 @@ export function PdfThumbnailerHost() {
     settle(m.id, m.ok && m.b64 ? { b64: m.b64, pages: Number(m.pages) || 1 } : null);
   }, []);
 
-  if (Platform.OS !== 'android') return null;
+  if (Platform.OS !== 'android' || !live) return null;
 
   return (
     <View style={s.hidden} pointerEvents="none">
