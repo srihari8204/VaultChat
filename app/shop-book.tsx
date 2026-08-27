@@ -199,6 +199,23 @@ function CustomerApp({ me, initialShopId }: { me: { id: string; name: string } |
   );
 }
 
+/** Unwrap an expo-location result to a usable pair, or null.
+ *  Rejects (0,0): that is what a failed fix serialises to, not a place anyone
+ *  is, and sorting shops around null island would put every one of them
+ *  thousands of kilometres away. */
+async function positionOf(p: Promise<any>): Promise<{ lat: number; lng: number } | null> {
+  try {
+    const pos = await p;
+    const lat = pos?.coords?.latitude;
+    const lng = pos?.coords?.longitude;
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+    if (lat === 0 && lng === 0) return null;
+    return { lat, lng };
+  } catch {
+    return null;
+  }
+}
+
 function FindShops({ onOpen, favIds, onToggleFav, onProductSearch }: {
   onOpen: (s: SB.Shop) => void; favIds: Set<string>; onToggleFav: (id: string) => void;
   onProductSearch: () => void;
@@ -238,9 +255,22 @@ function FindShops({ onOpen, favIds, onToggleFav, onProductSearch }: {
     try {
       const { status } = await Location.getForegroundPermissionsAsync();
       if (status === 'granted') {
-        const pos = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
-        c = { lat: pos.coords.latitude, lng: pos.coords.longitude };
-        setCoords(c);
+        // LAST KNOWN FIRST, and it is not just an optimisation.
+        //
+        // getCurrentPositionAsync waits for a FRESH satellite fix, which
+        // indoors or on a weaker receiver takes tens of seconds or never
+        // arrives. Caught on the Redmi while the Honor beside it was fine: the
+        // shop list rendered with no distances at all, and in the wrong order,
+        // because the screen had loaded before any fix landed.
+        //
+        // The cached fix is good enough to sort shops by — metres to hundreds
+        // of metres stale, against distances measured in kilometres — and it
+        // returns instantly.
+        c = await positionOf(Location.getLastKnownPositionAsync());
+        if (!c) c = await positionOf(Location.getCurrentPositionAsync({
+          accuracy: Location.Accuracy.Balanced,
+        }));
+        if (c) setCoords(c);
       }
     } catch {}
     load('all', c);
@@ -252,8 +282,9 @@ function FindShops({ onOpen, favIds, onToggleFav, onProductSearch }: {
     try {
       const { status } = await Location.requestForegroundPermissionsAsync();
       if (status !== 'granted') return;   // refused: the screen already works without it
-      const pos = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
-      const c = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+      const c = await positionOf(Location.getLastKnownPositionAsync())
+        ?? await positionOf(Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced }));
+      if (!c) return;
       setCoords(c);
       load(cat, c);
     } catch { /* nothing to do: distances stay off, shops still list */ }
