@@ -1529,6 +1529,18 @@ export async function removeBookmark(id: string): Promise<void> {
 }
 
 // ─── Stories (24-hour ephemeral posts) ──────────────────────────────
+/** What a viewer must do before the media reveals (migration 117). */
+export interface StoryGate {
+  /** 'puzzle' is an engagement gate; 'question' actually withholds the key. */
+  kind: 'puzzle' | 'question';
+  /** puzzle only: 3..9, matching lib/status/gate.ts. */
+  grid?: number;
+  /** question only: shown to the viewer. */
+  prompt?: string;
+  /** question only: the scrypt salt. Public — useless without the answer. */
+  salt?: string;
+}
+
 export interface StoryItem {
   id:           string;
   attachmentId: string;
@@ -1540,6 +1552,11 @@ export interface StoryItem {
   createdAt:    string;
   expiresAt:    string;
   seen:         boolean;
+  // Absent on an ordinary status, which is what every pre-existing row is.
+  gateKind?:    'puzzle' | 'question' | null;
+  gateGrid?:    number | null;
+  gatePrompt?:  string | null;
+  gateSalt?:    string | null;
 }
 export interface StoryFeedEntry {
   userId:    string;
@@ -1563,8 +1580,9 @@ export async function addStory(
   attachmentId: string,
   mediaType: 'image' | 'video',
   caption?: string,
+  gate?: StoryGate,
 ): Promise<StoryItem> {
-  return api('/stories', { method: 'POST', json: { attachmentId, mediaType, caption } });
+  return api('/stories', { method: 'POST', json: { attachmentId, mediaType, caption, gate } });
 }
 
 /** Post a WhatsApp-style text status (no attachment — just text + a bg color). */
@@ -1594,8 +1612,9 @@ export async function addEncryptedStory(
   mediaType: 'image' | 'video',
   keys: { viewerId: string; wrappedKey: string }[],
   caption?: string,
+  gate?: StoryGate,
 ): Promise<StoryItem> {
-  return api('/stories', { method: 'POST', json: { attachmentId, mediaType, caption, encrypted: true, keys } });
+  return api('/stories', { method: 'POST', json: { attachmentId, mediaType, caption, encrypted: true, keys, gate } });
 }
 
 // W7: the caller's own wrapped content key for an encrypted story (404 if not in audience).

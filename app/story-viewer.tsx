@@ -45,7 +45,9 @@ import {
 } from '../lib/chatService';
 import { getDecryptedAttachmentUri, getAttachmentLocalUri } from '../lib/mediaAttachments';
 import { putMediaKey, getMediaKey } from '../lib/mediaKeyStore';
-import { unwrapStoryKey } from '../lib/storyKeys';
+import { unwrapStoryKey, unwrapPayload } from '../lib/storyKeys';
+import GateChallenge from '../components/status/GateChallenge';
+import { unlockKeyWithAnswer } from '../lib/status/gateKey';
 
 const IMAGE_DURATION_MS = 5_000;
 const VIDEO_DURATION_MS = 15_000;
@@ -98,6 +100,18 @@ function StoryViewerScreen() {
 
   const current = entry?.stories[index] ?? null;
 
+  // Which story ids this viewer has already cleared, for this session only.
+  // Deliberately NOT persisted: a puzzle re-solved on the next open costs a few
+  // taps, whereas a persisted "cleared" flag would be a second, weaker copy of
+  // an access decision that the key already makes correctly.
+  const [lockedEnvelope, setLockedEnvelope] = useState<string | null>(null);
+  const [passed, setPassed] = useState<Set<string>>(new Set());
+  const clear = useCallback((id: string) => setPassed(p => new Set(p).add(id)), []);
+
+  // The poster is never challenged: they hold the raw key locally from posting,
+  // so their own status opens straight away.
+  const gated = !!current && !!current.gateKind && !entry?.isMine && !passed.has(current.id);
+
   // W7: resolve the renderable media source for the active story. Encrypted
   // stories fetch this viewer's wrapped key, unwrap it to the content key, and
   // decrypt the media to a local file. Plaintext stories use the auth'd URL.
@@ -116,6 +130,15 @@ function StoryViewerScreen() {
           if (!haveKey) {
             const wrapped = await getStoryKey(current.id);
             if (!wrapped || !entry) return;                     // not in audience → leave blank
+            if (current.gateKind === 'question') {
+              // The wrapped payload here is the ANSWER-LOCKED envelope, not the
+              // key — so it cannot be turned into media until the viewer
+              // answers. Stash it and let GateChallenge do the unlocking.
+              const raw = await unwrapPayload(entry.userId, wrapped);
+              if (!raw) return;
+              if (!cancel) setLockedEnvelope(raw);
+              return;                                           // nothing to render yet
+            }
             const mk = await unwrapStoryKey(entry.userId, wrapped);
             if (!mk) return;
             await putMediaKey(current.attachmentId, mk);        // feed the standard media-decrypt path
@@ -135,7 +158,11 @@ function StoryViewerScreen() {
       }
     })();
     return () => { cancel = true; };
-  }, [current?.id, current?.encrypted, current?.attachmentId, entry?.userId, authHeader]);
+    // `gated` is a dependency because clearing the gate is what makes the media
+    // fetchable: a correct answer calls putMediaKey and this effect must run
+    // AGAIN to pick the key up. Without it the story unlocks and then shows
+    // nothing — the worst possible outcome for someone who answered correctly.
+  }, [current?.id, current?.encrypted, current?.attachmentId, entry?.userId, authHeader, gated]);
 
   // Reset the "loaded" gate whenever the current story changes. Text stories
   // have no media to wait for, so they're ready immediately.
@@ -261,6 +288,36 @@ function StoryViewerScreen() {
         <StatusBar barStyle="light-content" />
         <ActivityIndicator color="#fff" size="large" />
       </View>
+    );
+  }
+
+  // THE GATE PRE-EMPTS THE WHOLE VIEWER. Rendering it over the media would mean
+  // the media had already been decrypted and drawn underneath — for a question
+  // gate that is the exact thing the lock exists to prevent, and a screenshot
+  // during the transition would defeat it.
+  if (gated && current) {
+    return (
+      <GateChallenge
+        kind={current.gateKind as 'puzzle' | 'question'}
+        grid={current.gateGrid ?? undefined}
+        previewUri={mediaSrc?.uri}
+        prompt={current.gatePrompt ?? undefined}
+        accent={colors.primary}
+        onDismiss={() => router.back()}
+        onSolved={() => clear(current.id)}
+        onAnswer={async (ans) => {
+          if (!lockedEnvelope || !current.gateSalt) return false;
+          let locked: any;
+          try { locked = JSON.parse(lockedEnvelope); } catch { return false; }
+          const mk = await unlockKeyWithAnswer(
+            { salt: locked.salt ?? current.gateSalt, envelope: locked.envelope },
+            ans,
+          );
+          if (!mk) return false;   // wrong answer and a tampered envelope look identical, by design
+          await putMediaKey(current.attachmentId, mk);
+          return true;
+        }}
+      />
     );
   }
 

@@ -24,7 +24,23 @@ export async function wrapStoryKeyForViewers(
   viewerIds: string[],
   mediaKey: MediaKey,
 ): Promise<WrappedStoryKey[]> {
-  const payload = JSON.stringify(mediaKey);
+  return wrapPayloadForViewers(viewerIds, JSON.stringify(mediaKey));
+}
+
+/**
+ * Wrap an ARBITRARY payload for each viewer through the same per-peer session.
+ *
+ * Exists for the question gate (migration 117). There, what gets wrapped is NOT
+ * the content key but the ANSWER-LOCKED envelope around it — otherwise a viewer
+ * in the audience could unwrap their copy and decrypt without ever answering,
+ * and the "private" gate would be decoration. Wrapping the locked envelope
+ * makes the two locks compose: the audience decides who may TRY, the answer
+ * decides who succeeds.
+ */
+export async function wrapPayloadForViewers(
+  viewerIds: string[],
+  payload: string,
+): Promise<WrappedStoryKey[]> {
   const out: WrappedStoryKey[] = [];
   for (const viewerId of viewerIds) {
     try {
@@ -49,6 +65,25 @@ export async function unwrapStoryKey(
     if (mk && typeof mk.k === 'string' && typeof mk.n === 'string') return mk as MediaKey;
   } catch { /* fall through */ }
   return null;
+}
+
+/**
+ * Unwrap to the RAW payload, without assuming it is a MediaKey.
+ *
+ * unwrapStoryKey above validates the shape and returns null for anything else,
+ * which is right for an ordinary story and wrong for a question-gated one,
+ * where the payload is an answer-locked envelope and would be rejected as
+ * malformed.
+ */
+export async function unwrapPayload(
+  authorId: string,
+  wrappedKey: string,
+): Promise<string | null> {
+  try {
+    return await e2eeDecrypt('', authorId, 0, wrappedKey);
+  } catch {
+    return null;
+  }
 }
 
 // Required by expo-router to silence "no default export" route warnings.

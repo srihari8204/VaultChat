@@ -19,6 +19,18 @@
 
 import * as ImagePicker from 'expo-image-picker';
 import { compressForStatus } from '../../lib/media/compressMedia';
+import GatePicker, { type GateDraft } from '../../components/status/GatePicker';
+import { lockKeyWithAnswer } from '../../lib/status/gateKey';
+import { wrapPayloadForViewers } from '../../lib/storyKeys';
+import { isAcceptableAnswer } from '../../lib/status/gate';
+import { type StoryGate as StoryGateOut } from '../../lib/chatService';
+
+/** The gate for an UNENCRYPTED story. A question gate is impossible here — with
+ *  no content key to lock there is nothing for the answer to protect, so it
+ *  would be a prompt with no lock behind it. Only the puzzle survives. */
+function plainGate(g: GateDraft): StoryGateOut | undefined {
+  return g.kind === 'puzzle' ? { kind: 'puzzle', grid: g.grid } : undefined;
+}
 import { useFocusEffect, useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
@@ -88,6 +100,9 @@ export default function StatusScreen() {
   const [recentEmojis, setRecentEmojis] = useState<string[]>([]);
   const [previewAssets, setPreviewAssets] = useState<PreviewAsset[]>([]);   // picked media awaiting caption + post
   const [previewIdx, setPreviewIdx] = useState(0);
+  // ONE gate for the whole batch, not per asset. Ten photos each behind their
+  // own puzzle would be a chore, not a feature.
+  const [gate, setGate] = useState<GateDraft>({ kind: 'none' });
 
   useEffect(() => { AsyncStorage.getItem(RECENT_EMOJI_KEY).then(v => { try { if (v) setRecentEmojis(JSON.parse(v)); } catch {} }); }, []);
   const addEmoji = useCallback((e: string) => {
@@ -200,6 +215,7 @@ export default function StatusScreen() {
       };
     });
     setPreviewIdx(0);
+    setGate({ kind: 'none' });   // a previous batch's lock must never carry over
     setPreviewAssets(assets);   // opens the preview modal
   }, [posting]);
 
@@ -210,6 +226,20 @@ export default function StatusScreen() {
   // Upload + post every previewed asset (each with its own caption).
   const postPreview = useCallback(async () => {
     if (posting || !previewAssets.length) return;
+    // Refuse an unusable question BEFORE anything uploads. Posting first and
+    // failing after would leave orphaned attachments and a status the poster
+    // thinks went out.
+    if (gate.kind === 'question') {
+      if (!gate.prompt.trim()) { Alert.alert('Add a question', 'Viewers need something to answer.'); return; }
+      if (!isAcceptableAnswer(gate.answer)) { Alert.alert('Add an answer', 'Too short to be a secret.'); return; }
+      // With encryption off there is no content key to lock, so an answer would
+      // guard nothing — a prompt with no lock behind it. Say so rather than
+      // posting something that LOOKS private and is not.
+      if (!(STORY_E2EE && E2EE_ENABLED)) {
+        Alert.alert('Not available', 'A question lock needs encrypted status, which is off on this build. Use a puzzle, or post without a lock.');
+        return;
+      }
+    }
     setPosting(true);
     try {
       for (const a of previewAssets) {
@@ -229,18 +259,41 @@ export default function StatusScreen() {
         const uri = await compressForStatus(a);
         if (STORY_E2EE && E2EE_ENABLED) {
           const { attachmentId, mediaKey } = await uploadEncryptedAttachment(uri, a.filename, a.mime);
+          // A QUESTION GATE LOCKS THE KEY ITSELF, and does it HERE — the answer
+          // never leaves this function. The server stores the salt and the
+          // wrapped envelope; it never sees the answer, so it cannot tell a
+          // right guess from a wrong one, and neither can anyone reading the
+          // database. A puzzle gate does none of this: it is a UI gate over a
+          // key the viewer already receives.
+          let gateOut: StoryGateOut | undefined;
           // Store MY OWN copy of the content key locally so I can always view my
           // own story, independent of whether the server audience includes me
           // (otherwise the poster sees a blank story — no wrapped key for self).
+          // This is also why the poster is never asked their own question.
           await putMediaKey(attachmentId, mediaKey).catch(() => {});
           const viewerIds = await getStoryAudience();
-          const keys = await wrapStoryKeyForViewers(viewerIds, mediaKey);
-          await addEncryptedStory(attachmentId, a.type, keys, cap);
+
+          let keys;
+          if (gate.kind === 'question') {
+            // WRAP THE LOCKED ENVELOPE, NOT THE KEY. If the raw key were wrapped
+            // per viewer as usual, anyone in the audience could unwrap their own
+            // copy and decrypt WITHOUT ever answering — the "private" gate would
+            // be decoration. Wrapping the answer-locked envelope makes the two
+            // locks compose: the audience decides who may TRY, the answer
+            // decides who succeeds. The answer itself never leaves this device.
+            const locked = await lockKeyWithAnswer(mediaKey, gate.answer);
+            gateOut = { kind: 'question', prompt: gate.prompt.trim(), salt: locked.salt };
+            keys = await wrapPayloadForViewers(viewerIds, JSON.stringify(locked));
+          } else {
+            if (gate.kind === 'puzzle') gateOut = { kind: 'puzzle', grid: gate.grid };
+            keys = await wrapStoryKeyForViewers(viewerIds, mediaKey);
+          }
+          await addEncryptedStory(attachmentId, a.type, keys, cap, gateOut);
         } else {
           // 'story' media lives until the STORY expires (24h), not on any
           // chat clock — see migration 100.
           const up = await uploadAttachment(uri, a.filename, a.mime, { purpose: 'story' });
-          await addStory(up.id, a.type, cap);
+          await addStory(up.id, a.type, cap, plainGate(gate));
         }
       }
       setPreviewAssets([]); setPreviewIdx(0);
@@ -401,6 +454,17 @@ export default function StatusScreen() {
             </ScrollView>
           )}
 
+          <ScrollView style={S.gateArea} contentContainerStyle={{ padding: 12 }} keyboardShouldPersistTaps="handled">
+            <GatePicker
+              value={gate}
+              onChange={setGate}
+              accent={colors.primary}
+              text="#fff"
+              dim="rgba(255,255,255,0.6)"
+              surface="rgba(255,255,255,0.08)"
+            />
+          </ScrollView>
+
           <View style={S.captionRow}>
             <TextInput
               style={S.captionInput}
@@ -519,6 +583,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   thumb:            { width: 48, height: 48, borderRadius: 8, overflow: 'hidden', borderWidth: 2, borderColor: 'transparent' },
   thumbOn:          { borderColor: '#fff' },
   thumbImg:         { width: '100%', height: '100%' },
+  gateArea:         { maxHeight: 260, backgroundColor: 'rgba(0,0,0,0.35)' },
   captionRow:       { flexDirection: 'row', alignItems: 'flex-end', gap: 10, paddingHorizontal: 12, paddingBottom: 28, paddingTop: 8 },
   captionInput:     { flex: 1, color: '#fff', fontSize: 16, maxHeight: 120, paddingHorizontal: 16, paddingVertical: 12, borderRadius: 24, backgroundColor: 'rgba(255,255,255,0.12)' },
   sendFab:          { width: 50, height: 50, borderRadius: 25, backgroundColor: c.primary, alignItems: 'center', justifyContent: 'center' },
