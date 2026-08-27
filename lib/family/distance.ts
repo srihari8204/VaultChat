@@ -113,8 +113,12 @@ export function formatRoute(metres: number, seconds?: number): string {
 export interface MemberDistance {
   id: string;
   name: string;
-  /** Straight-line metres from ME. Null when either side has no usable fix. */
+  /** Metres from ME. Null when either side has no usable fix.
+   *  Straight-line as computed here; `byRoad` says whether a road figure has
+   *  since replaced it (see mergeRoadDistances). */
   fromMe: number | null;
+  /** True once `fromMe` carries a ROAD distance rather than a straight line. */
+  byRoad?: boolean;
   /** What THEY published: how far they are from their own chosen reference. */
   ref: RefDistance | null;
   /** Every reference they published, for the "Distance from ▾" picker. */
@@ -335,3 +339,50 @@ if (typeof require !== 'undefined' && require.main === module) {
 }
 
 export default {};
+
+
+/**
+ * Replace straight-line distances with ROAD distances where we have them.
+ *
+ * WHY THIS IS A SEPARATE LAYER, AND WHAT IT MUST NOT TOUCH
+ * -------------------------------------------------------
+ * "4 km away" meaning four kilometres of driving is a different, and more
+ * useful, claim than four kilometres of open air — a member across a river
+ * reads as close and is not. So the DISPLAYED distance becomes road distance
+ * when the router can answer.
+ *
+ * But two things deliberately keep the straight line, and converting them
+ * would be a bug, not an improvement:
+ *
+ *   GEOFENCES. A fence is {center, radiusM} — a circle. Someone standing 50m
+ *   from home whose road access loops 2km around a block is INSIDE the fence,
+ *   and must be, or arrival alerts fire late and leave alerts fire early.
+ *   lib/family/geofence.ts is untouched by this.
+ *
+ *   PUBLISHED REFERENCE DISTANCES (`ref`/`refs`, "1.2 km from Home"). Those
+ *   are computed on the OTHER member's device from places this device has
+ *   never seen, and only the derived number is transmitted — by owner
+ *   directive, place coordinates never leave the device that owns them. There
+ *   is no coordinate here to route from, and acquiring one would break that
+ *   design rather than improve it.
+ *
+ * A missing entry means the router had no answer for that member — engine
+ * down, unreachable, or simply not asked yet. Those keep their straight line
+ * rather than becoming null: a slightly wrong number beats a blank row.
+ */
+export function mergeRoadDistances(
+  rows: MemberDistance[],
+  roadM: Record<string, number>,
+): MemberDistance[] {
+  let changed = false;
+  const out = rows.map((r) => {
+    const m = roadM[r.id];
+    // Only upgrade a row that already had a usable straight line: if fromMe is
+    // null the member is unlocatable, and a road distance to a position we do
+    // not trust would invent a precision we never had.
+    if (r.fromMe == null || !Number.isFinite(m) || m < 0) return r;
+    changed = true;
+    return { ...r, fromMe: Math.round(m), byRoad: true };
+  });
+  return changed ? out : rows;   // preserve identity so memo consumers do not re-render for nothing
+}

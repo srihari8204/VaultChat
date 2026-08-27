@@ -68,7 +68,7 @@ import {
 } from '../lib/groups/trips';
 import { haversine } from '../lib/nav/geo';
 import {
-  memberDistances, summarize as summarizeDistances, sortMembers, defaultRef,
+  memberDistances, mergeRoadDistances, summarize as summarizeDistances, sortMembers, defaultRef,
   formatMetres, type SortMode,
 } from '../lib/family/distance';
 
@@ -794,7 +794,7 @@ export default function FamilySpaceScreen() {
    * unlocatable as "0 km away" would make the summary claim the family is
    * closer together than it is.
    */
-  const distanceRows = useMemo(() => {
+  const distanceInputs = useMemo(() => {
     const now = Date.now();
     const mineNow = me ? presences[me.id] : undefined;
     // The origin every distance is measured from: my own position by default,
@@ -804,7 +804,7 @@ export default function FamilySpaceScreen() {
     const origin = originName
       ? (places.find((p) => p.name === originName)?.center ?? mineNow?.pos ?? null)
       : (mineNow?.pos ?? null);
-    return memberDistances(members.map((m) => {
+    const rows = members.map((m) => {
       const p = presences[m.id];
       const usable = !!p && freshnessOf(p.ts, now) !== 'unavailable';
       return {
@@ -822,9 +822,71 @@ export default function FamilySpaceScreen() {
         self: m.id === me?.id && !originName,
         unavailable: !usable,
       };
-    }), origin);
+    });
+    return { rows: rows, origin };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [presences, members, me?.id, tick, originName, places, relations]);
+
+  const straightRows = useMemo(
+    () => memberDistances(distanceInputs.rows, distanceInputs.origin),
+    [distanceInputs]);
+
+  /**
+   * ROAD distance for the list, layered over the straight line.
+   *
+   * "4 km away" meaning four kilometres of driving is a more useful claim than
+   * four kilometres of open air — a member across a river reads as close and
+   * is not. /nav/matrix answers all members in ONE call (it is what Meet Here
+   * already runs on), so this costs one request per refresh, not one per
+   * member.
+   *
+   * Keyed on the ROUNDED positions, not on `presences`: a fix arrives every
+   * few seconds and jitters by metres, and re-routing the whole family for a
+   * 3-metre wobble would spend a request per tick to change nothing on screen.
+   *
+   * Geofences and published reference distances are deliberately NOT routed —
+   * see mergeRoadDistances for why converting either would be a bug.
+   */
+  const [roadM, setRoadM] = useState<Record<string, number>>({});
+  const roadKey = useMemo(() => {
+    const o = distanceInputs.origin;
+    if (!o) return '';
+    const q = (n: number) => n.toFixed(3);   // ~110m: below this nothing on screen moves
+    const parts = distanceInputs.rows
+      .filter((r) => r.pos && !r.self && !r.unavailable)
+      .map((r) => `${r.id}:${q(r.pos!.lat)},${q(r.pos!.lng)}`)
+      .sort();
+    return parts.length ? `${q(o.lat)},${q(o.lng)}|${parts.join('|')}` : '';
+  }, [distanceInputs]);
+
+  useEffect(() => {
+    if (!roadKey) { setRoadM({}); return; }
+    const origin = distanceInputs.origin;
+    if (!origin) return;
+    const targets = distanceInputs.rows.filter((r) => r.pos && !r.self && !r.unavailable);
+    if (!targets.length) return;
+    let cancel = false;
+    (async () => {
+      try {
+        const { fetchMatrix } = require('../lib/nav/routing');
+        const res = await fetchMatrix(targets.map((t: any) => t.pos), origin, 'auto');
+        if (cancel) return;
+        const next: Record<string, number> = {};
+        for (const r of res) {
+          const t = targets[r.index];
+          if (t) next[t.id] = r.distanceM;
+        }
+        setRoadM(next);
+      } catch {
+        // Router unavailable: the straight-line numbers already on screen stand.
+        if (!cancel) setRoadM({});
+      }
+    })();
+    return () => { cancel = true; };
+  }, [roadKey]);   // eslint-disable-line react-hooks/exhaustive-deps
+
+  const distanceRows = useMemo(
+    () => mergeRoadDistances(straightRows, roadM), [straightRows, roadM]);
 
   const distanceSummary = useMemo(() => summarizeDistances(distanceRows), [distanceRows]);
   /**
