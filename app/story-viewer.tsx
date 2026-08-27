@@ -48,6 +48,7 @@ import { putMediaKey, getMediaKey } from '../lib/mediaKeyStore';
 import { unwrapStoryKey, unwrapPayload } from '../lib/storyKeys';
 import GateChallenge from '../components/status/GateChallenge';
 import { unlockKeyWithAnswer } from '../lib/status/gateKey';
+import { puzzleFrameUri } from '../lib/status/puzzleFrame';
 
 const IMAGE_DURATION_MS = 5_000;
 const VIDEO_DURATION_MS = 15_000;
@@ -105,6 +106,9 @@ function StoryViewerScreen() {
   // taps, whereas a persisted "cleared" flag would be a second, weaker copy of
   // an access decision that the key already makes correctly.
   const [lockedEnvelope, setLockedEnvelope] = useState<string | null>(null);
+  // A still for the puzzle. For a video this is an extracted frame, so the
+  // board is not asked to cut up something that cannot be drawn.
+  const [puzzleUri, setPuzzleUri] = useState<string | null>(null);
   const [passed, setPassed] = useState<Set<string>>(new Set());
   const clear = useCallback((id: string) => setPassed(p => new Set(p).add(id)), []);
 
@@ -163,6 +167,19 @@ function StoryViewerScreen() {
     // AGAIN to pick the key up. Without it the story unlocks and then shows
     // nothing — the worst possible outcome for someone who answered correctly.
   }, [current?.id, current?.encrypted, current?.attachmentId, entry?.userId, authHeader, gated]);
+
+  // Extract the puzzle still only when a puzzle is actually pending. Doing it
+  // for every story would pay a decode on clips nobody is asked to solve.
+  useEffect(() => {
+    let cancel = false;
+    setPuzzleUri(null);
+    if (!gated || !current || current.gateKind !== 'puzzle' || !mediaSrc?.uri) return;
+    (async () => {
+      const uri = await puzzleFrameUri(mediaSrc.uri, current.mediaType);
+      if (!cancel) setPuzzleUri(uri);
+    })();
+    return () => { cancel = true; };
+  }, [gated, current?.id, current?.gateKind, current?.mediaType, mediaSrc?.uri]);
 
   // Reset the "loaded" gate whenever the current story changes. Text stories
   // have no media to wait for, so they're ready immediately.
@@ -300,7 +317,7 @@ function StoryViewerScreen() {
       <GateChallenge
         kind={current.gateKind as 'puzzle' | 'question'}
         grid={current.gateGrid ?? undefined}
-        previewUri={mediaSrc?.uri}
+        previewUri={puzzleUri ?? undefined}
         prompt={current.gatePrompt ?? undefined}
         accent={colors.primary}
         onDismiss={() => router.back()}
