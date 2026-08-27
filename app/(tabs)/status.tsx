@@ -303,7 +303,15 @@ export default function StatusScreen() {
     } finally {
       setPosting(false);
     }
-  }, [posting, previewAssets, load]);
+    // `gate` MUST be here. It is read twice above — the question validation and
+    // the gateOut that goes to the server — and it is the ONLY input that
+    // changes without also changing previewAssets: the poster picks the lock
+    // inside the preview modal, long after this callback was last rebuilt.
+    // Omitting it froze gate at the {kind:'none'} set when the batch was
+    // picked, so EVERY status posted ungated no matter what the poster chose,
+    // and the picker was pure decoration. Verified against prod: a status
+    // posted with the puzzle option visibly selected stored gate_kind NULL.
+  }, [posting, previewAssets, gate, load]);
 
   // Split feed: my own bucket (which may not yet exist) + others.
   const { mine, others, mutedOthers } = useMemo(() => {
