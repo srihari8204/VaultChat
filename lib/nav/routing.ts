@@ -226,6 +226,39 @@ export async function fetchMatrix(
     Number.isFinite(r?.index) && Number.isFinite(r?.distanceM) && Number.isFinite(r?.durationS));
 }
 
+/**
+ * The distance actually DRIVEN along a recorded GPS track (POST /nav/trace →
+ * Valhalla trace_route with map_snap).
+ *
+ * Summing straight lines between consecutive fixes UNDERSTATES the real
+ * distance, and by more the sparser the fixes are: every bend between two
+ * points becomes a chord. Map-matching snaps the track onto the road network
+ * and measures along it — the number a car odometer would show.
+ *
+ * Returns null on any failure, INCLUDING a track the roads cannot explain.
+ * Callers keep their own summed figure then: slightly short beats blank, and
+ * zero would read as "you did not move".
+ */
+export async function fetchTraceDistance(
+  shape: LatLng[],
+  costing: Costing = 'auto',
+): Promise<{ distanceM: number; durationS: number } | null> {
+  if (!Array.isArray(shape) || shape.length < 2) return null;
+  try {
+    const { api } = require('../api');
+    const r = await api('/nav/trace', {
+      method: 'POST',
+      json: { shape: shape.map((p) => ({ lat: p.lat, lng: p.lng })), costing },
+    });
+    const distanceM = Number(r?.distanceM);
+    const durationS = Number(r?.durationS);
+    if (!Number.isFinite(distanceM) || distanceM <= 0) return null;
+    return { distanceM, durationS: Number.isFinite(durationS) ? durationS : 0 };
+  } catch {
+    return null;
+  }
+}
+
 // ── self-check: `npx tsx lib/nav/routing.ts` ──
 function _selfCheck(): void {
   const A = (c: boolean, m: string) => { if (!c) throw new Error('routing: ' + m); };

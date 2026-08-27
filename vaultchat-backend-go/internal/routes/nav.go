@@ -4,7 +4,9 @@ package routes
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/url"
@@ -21,6 +23,175 @@ func RegisterNav(mux *http.ServeMux) {
 	mux.HandleFunc("POST /nav/route", httpx.RequireAuth(navRoute))
 	mux.HandleFunc("GET /nav/geocode", httpx.RequireAuth(navGeocode))
 	mux.HandleFunc("POST /nav/matrix", httpx.RequireAuth(navMatrix))
+	mux.HandleFunc("POST /nav/trace", httpx.RequireAuth(navTrace))
+}
+
+// ─── POST /nav/trace — a GPS track → the distance actually DRIVEN ─────
+//
+// A travelled distance summed as straight lines between consecutive fixes
+// UNDERSTATES the real one, and by more the sparser the fixes are: every bend
+// between two points is cut into a chord. Map-matching snaps the track onto
+// the road network and measures along it, which is the number a car odometer
+// would show.
+//
+// The track never persists. It is proxied to Valhalla and the response is a
+// length — nothing is written, and the shape is not logged, exactly like
+// /nav/matrix.
+
+/** Valhalla's own ceiling (service_limits.trace.max_shape). */
+const maxTraceShape = 16000
+
+/** Valhalla refuses a single trace longer than service_limits.trace.max_distance
+ *  (200km). A day of driving passes that easily, so an over-limit trace is SPLIT
+ *  and the halves summed rather than refused. */
+const maxTraceSplitDepth = 5
+
+type tracePoint struct {
+	Lat *float64 `json:"lat"`
+	Lng *float64 `json:"lng"`
+}
+
+func navTrace(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	user := httpx.UserFrom(r)
+	if rl := redisx.Consume(ctx, "navtrace:"+user.ID, 20, 60); !rl.Allowed {
+		httpx.Err(w, 429, "Too many map-matching requests")
+		return
+	}
+	var body struct {
+		Shape   []tracePoint `json:"shape"`
+		Costing string       `json:"costing"`
+	}
+	if err := json.NewDecoder(io.LimitReader(r.Body, 4<<20)).Decode(&body); err != nil {
+		httpx.Err(w, 400, "bad body")
+		return
+	}
+	pts := make([][2]float64, 0, len(body.Shape))
+	for _, p := range body.Shape {
+		if p.Lat == nil || p.Lng == nil || !validLatLng(*p.Lat, *p.Lng) {
+			continue // a dropped fix is a gap, not a reason to refuse the track
+		}
+		pts = append(pts, [2]float64{*p.Lat, *p.Lng})
+	}
+	if len(pts) < 2 {
+		httpx.JSON(w, 200, map[string]any{"distanceM": 0, "durationS": 0, "matched": false})
+		return
+	}
+	if len(pts) > maxTraceShape {
+		pts = decimate(pts, maxTraceShape)
+	}
+	costing := "auto"
+	if navCostings[body.Costing] {
+		costing = body.Costing
+	}
+
+	km, secs, ok := traceSum(ctx, pts, costing, 0)
+	if !ok {
+		// Map matching failed for the whole track. The CALLER keeps whatever it
+		// had — never answer 0, which reads as "you did not move".
+		httpx.Err(w, 503, "could not match this track to roads")
+		return
+	}
+	httpx.JSON(w, 200, map[string]any{
+		"distanceM": int(km*1000 + 0.5),
+		"durationS": int(secs + 0.5),
+		"matched":   true,
+	})
+}
+
+// Keep every Nth point so a very long track still fits Valhalla's shape limit.
+// Endpoints are always preserved: losing the last fix would shorten the day.
+func decimate(pts [][2]float64, max int) [][2]float64 {
+	if len(pts) <= max || max < 2 {
+		return pts
+	}
+	step := float64(len(pts)-1) / float64(max-1)
+	out := make([][2]float64, 0, max)
+	for i := 0; i < max-1; i++ {
+		out = append(out, pts[int(float64(i)*step)])
+	}
+	return append(out, pts[len(pts)-1])
+}
+
+// traceSum map-matches `pts`, splitting in half when Valhalla refuses the
+// distance, and returns kilometres + seconds.
+func traceSum(ctx context.Context, pts [][2]float64, costing string, depth int) (float64, float64, bool) {
+	if len(pts) < 2 {
+		return 0, 0, true
+	}
+	km, secs, err := traceOnce(ctx, pts, costing)
+	if err == nil {
+		return km, secs, true
+	}
+	// Too long, or unmatchable as one piece: halve it. The split point is shared
+	// by both halves so the join is not dropped.
+	if depth >= maxTraceSplitDepth || len(pts) < 4 {
+		return 0, 0, false
+	}
+	mid := len(pts) / 2
+	aKm, aS, aOk := traceSum(ctx, pts[:mid+1], costing, depth+1)
+	bKm, bS, bOk := traceSum(ctx, pts[mid:], costing, depth+1)
+	if !aOk && !bOk {
+		return 0, 0, false
+	}
+	// A half that cannot be matched contributes nothing rather than sinking the
+	// whole day — a slightly short total beats no total.
+	return aKm + bKm, aS + bS, true
+}
+
+func traceOnce(ctx context.Context, pts [][2]float64, costing string) (float64, float64, error) {
+	shape := make([]map[string]any, 0, len(pts))
+	for _, p := range pts {
+		shape = append(shape, map[string]any{"lat": p[0], "lon": p[1]})
+	}
+	payload, err := json.Marshal(map[string]any{
+		"shape":              shape,
+		"costing":            costing,
+		"shape_match":        "map_snap",
+		"directions_options": map[string]any{"units": "kilometers"},
+	})
+	if err != nil {
+		return 0, 0, err
+	}
+	base := os.Getenv("VALHALLA_URL")
+	if base == "" {
+		base = "http://valhalla:8002"
+	}
+	rctx, cancel := context.WithTimeout(ctx, 20*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(rctx, "POST", base+"/trace_route", bytes.NewReader(payload))
+	if err != nil {
+		return 0, 0, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := (&http.Client{Timeout: 20 * time.Second}).Do(req)
+	if err != nil {
+		return 0, 0, err
+	}
+	defer resp.Body.Close()
+	data, _ := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
+	if resp.StatusCode < 200 || resp.StatusCode > 299 {
+		return 0, 0, errors.New("valhalla refused the trace")
+	}
+	var vr struct {
+		Trip struct {
+			Summary struct {
+				Length *float64 `json:"length"`
+				Time   *float64 `json:"time"`
+			} `json:"summary"`
+		} `json:"trip"`
+	}
+	if err := json.Unmarshal(data, &vr); err != nil {
+		return 0, 0, err
+	}
+	if vr.Trip.Summary.Length == nil || *vr.Trip.Summary.Length < 0 {
+		return 0, 0, errors.New("no matched length")
+	}
+	t := 0.0
+	if vr.Trip.Summary.Time != nil && *vr.Trip.Summary.Time >= 0 {
+		t = *vr.Trip.Summary.Time
+	}
+	return *vr.Trip.Summary.Length, t, nil
 }
 
 // Most sources one matrix call may carry. Ten family members plus a little

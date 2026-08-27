@@ -8,7 +8,7 @@
 // Everything here is read from the device. There is no history endpoint and
 // nothing on this screen was ever uploaded.
 
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useMemo, useState, useEffect } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ScrollView, ActivityIndicator } from 'react-native';
 import { Stack, useLocalSearchParams, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -98,6 +98,28 @@ export default function FamilyHistoryScreen() {
   }, [circleId, userId, from]));
 
   const stats = useMemo(() => summarize(samples), [samples]);
+
+
+  /** TRAVELLED distance, map-matched to roads; the summed track is the
+   *  fallback. Summing straight lines between fixes cuts every bend into a
+   *  chord and understates the day. */
+  const [roadTravelledM, setRoadTravelledM] = useState<number | null>(null);
+  const trackKey = useMemo(
+    () => (samples.length < 2 ? '' : `${samples.length}:${samples[0]?.ts}:${samples[samples.length - 1]?.ts}`),
+    [samples]);
+  useEffect(() => {
+    if (!trackKey) { setRoadTravelledM(null); return; }
+    let cancel = false;
+    (async () => {
+      try {
+        const { fetchTraceDistance } = require('../lib/nav/routing');
+        const r = await fetchTraceDistance(samples.map((p: any) => ({ lat: p.lat, lng: p.lng })));
+        if (!cancel) setRoadTravelledM(r?.distanceM ?? null);
+      } catch { if (!cancel) setRoadTravelledM(null); }
+    })();
+    return () => { cancel = true; };
+  }, [trackKey]);   // eslint-disable-line react-hooks/exhaustive-deps
+
   // Trips are re-derived from the same samples on every load — computed on
   // read cannot be stale, and nothing is ever stored or uploaded for them.
   const trips = useMemo(() => segmentTrips(samples), [samples]);
@@ -172,7 +194,11 @@ export default function FamilyHistoryScreen() {
           {/* stats */}
           <View style={[st.statRow, { backgroundColor: colors.card, borderColor: colors.border }]}>
             <View style={st.stat}>
-              <Text style={[st.statVal, { color: colors.text }]}>{dist(stats.distanceM)}</Text>
+              {/* Map-matched onto the roads — see family-member.tsx. The summed
+                  straight lines survive as the fallback, never as the answer. */}
+              <Text style={[st.statVal, { color: colors.text }]}>
+                {dist(roadTravelledM ?? stats.distanceM)}
+              </Text>
               <Text style={[st.statLbl, { color: colors.textDim }]}>Distance</Text>
             </View>
             <View style={[st.statDiv, { backgroundColor: colors.border }]} />

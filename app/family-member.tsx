@@ -134,6 +134,80 @@ export default function FamilyMemberScreen() {
   const fresh = tier === 'live';
   const stats = useMemo(() => summarize(today), [today]);
 
+  /**
+   * TRAVELLED distance, map-matched onto the roads.
+   *
+   * `summarize` sums straight lines between consecutive fixes, which
+   * understates the real distance and by more the sparser the fixes are —
+   * every bend between two points becomes a chord. /nav/trace snaps the track
+   * to the road network and measures along it, which is what an odometer
+   * shows.
+   *
+   * Falls back to the summed figure whenever matching fails or the track is
+   * too short to match: a slightly short number beats a blank stat, and zero
+   * would read as "went nowhere".
+   */
+  const [roadTravelledM, setRoadTravelledM] = useState<number | null>(null);
+  const trackKey = useMemo(
+    () => (today.length < 2 ? '' : `${today.length}:${today[0]?.ts}:${today[today.length - 1]?.ts}`),
+    [today]);
+
+  useEffect(() => {
+    if (!trackKey) { setRoadTravelledM(null); return; }
+    let cancel = false;
+    (async () => {
+      try {
+        const { fetchTraceDistance } = require('../lib/nav/routing');
+        const r = await fetchTraceDistance(today.map((s2: any) => ({ lat: s2.lat, lng: s2.lng })));
+        if (!cancel) setRoadTravelledM(r?.distanceM ?? null);
+      } catch {
+        if (!cancel) setRoadTravelledM(null);
+      }
+    })();
+    return () => { cancel = true; };
+  }, [trackKey]);   // eslint-disable-line react-hooks/exhaustive-deps
+
+  /**
+   * Road distance from this member's last fix to each of MY places.
+   *
+   * One /nav/matrix call covers every place at once. Keyed on the position
+   * rounded to ~110m and the place ids, so the ordinary refresh tick does not
+   * re-route for a few metres of GPS jitter.
+   *
+   * This does NOT feed the zone badge — that still compares the straight line
+   * against the circle's radius, which is what a radius means.
+   */
+  const [roadToPlace, setRoadToPlace] = useState<Record<string, number>>({});
+  const roadKey = useMemo(() => {
+    if (!last || !places.length) return '';
+    return `${last.lat.toFixed(3)},${last.lng.toFixed(3)}|${places.map((p) => p.id).sort().join(',')}`;
+  }, [last, places]);
+
+  useEffect(() => {
+    if (!roadKey || !last || !places.length) { setRoadToPlace({}); return; }
+    let cancel = false;
+    (async () => {
+      try {
+        const { fetchMatrix } = require('../lib/nav/routing');
+        // Places are the ORIGINS and the member is the single target: the
+        // matrix endpoint takes many-to-one, and road distance is symmetric
+        // enough for a display figure.
+        const res = await fetchMatrix(
+          places.map((p) => p.center), { lat: last.lat, lng: last.lng }, 'auto');
+        if (cancel) return;
+        const next: Record<string, number> = {};
+        for (const r of res) {
+          const pl = places[r.index];
+          if (pl) next[pl.id] = r.distanceM;
+        }
+        setRoadToPlace(next);
+      } catch {
+        if (!cancel) setRoadToPlace({});   // the direct figure still shows
+      }
+    })();
+    return () => { cancel = true; };
+  }, [roadKey]);   // eslint-disable-line react-hooks/exhaustive-deps
+
   // Which place are they sitting in right now?
   const currentPlace = useMemo(() => {
     if (!last) return null;
@@ -294,7 +368,9 @@ export default function FamilyMemberScreen() {
         <Text style={[st.h, { color: colors.text }]}>Today</Text>
         <View style={[st.statRow, { backgroundColor: colors.card, borderColor: colors.border }]}>
           <View style={st.stat}>
-            <Text style={[st.statVal, { color: colors.text }]}>{dist(stats.distanceM)}</Text>
+            <Text style={[st.statVal, { color: colors.text }]}>
+              {dist(roadTravelledM ?? stats.distanceM)}
+            </Text>
             <Text style={[st.statLbl, { color: colors.textDim }]}>Travelled</Text>
           </View>
           <View style={[st.statDiv, { backgroundColor: colors.border }]} />
@@ -376,7 +452,18 @@ export default function FamilyMemberScreen() {
                 <Text style={{ color: colors.text, fontSize: 14, fontWeight: '600' }}>{p.name}</Text>
                 <Text style={{ color: colors.textDim, fontSize: 11.5 }}>
                   {p.enabled === false ? 'Alerts off' : `${p.radiusM} m radius`}
-                  {d != null ? ` · ${dist(d)} away` : ''}{tpTxt}
+                  {/* BOTH numbers, each labelled, because they answer different
+                      questions and one cannot replace the other. The radius
+                      figure is a straight line — it is the value compared
+                      against the circle to produce the INSIDE/OUTSIDE badge
+                      beside it, and swapping in a road distance would let the
+                      row read "500 m radius · 2.1 km away · INSIDE" and
+                      contradict itself. The road figure is what it actually
+                      takes to get there, which is the useful number and the
+                      one that was missing. */}
+                  {d != null ? ` · ${dist(d)} direct` : ''}
+                  {roadToPlace[p.id] != null ? ` · ${dist(roadToPlace[p.id])} by road` : ''}
+                  {tpTxt}
                 </Text>
               </View>
               {zoneLabel && (
