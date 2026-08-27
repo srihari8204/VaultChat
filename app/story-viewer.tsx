@@ -109,6 +109,11 @@ function StoryViewerScreen() {
   // A still for the puzzle. For a video this is an extracted frame, so the
   // board is not asked to cut up something that cannot be drawn.
   const [puzzleUri, setPuzzleUri] = useState<string | null>(null);
+  // Whether the frame attempt has FINISHED. Distinct from `puzzleUri === null`,
+  // which cannot tell "still decrypting" from "no frame possible" — and the
+  // gate falls back to a plain Open button on the latter. Without this the
+  // fallback is shown during every decrypt, so a fast tap skips the puzzle.
+  const [puzzleTried, setPuzzleTried] = useState(false);
   const [passed, setPassed] = useState<Set<string>>(new Set());
   const clear = useCallback((id: string) => setPassed(p => new Set(p).add(id)), []);
 
@@ -173,10 +178,19 @@ function StoryViewerScreen() {
   useEffect(() => {
     let cancel = false;
     setPuzzleUri(null);
-    if (!gated || !current || current.gateKind !== 'puzzle' || !mediaSrc?.uri) return;
+    setPuzzleTried(false);
+    if (!gated || !current || current.gateKind !== 'puzzle') return;
+    if (!mediaSrc?.uri) {
+      // Media is still decrypting. Stay PENDING rather than falling through to
+      // the Open button — but not forever: if the key never arrives (not in the
+      // audience) bound the wait, matching the 12s media-stall timer below, so
+      // the viewer gets a way out instead of an endless spinner.
+      const t = setTimeout(() => { if (!cancel) setPuzzleTried(true); }, 12000);
+      return () => { cancel = true; clearTimeout(t); };
+    }
     (async () => {
       const uri = await puzzleFrameUri(mediaSrc.uri, current.mediaType);
-      if (!cancel) setPuzzleUri(uri);
+      if (!cancel) { setPuzzleUri(uri); setPuzzleTried(true); }
     })();
     return () => { cancel = true; };
   }, [gated, current?.id, current?.gateKind, current?.mediaType, mediaSrc?.uri]);
@@ -318,6 +332,7 @@ function StoryViewerScreen() {
         kind={current.gateKind as 'puzzle' | 'question'}
         grid={current.gateGrid ?? undefined}
         previewUri={puzzleUri ?? undefined}
+        previewPending={current.gateKind === 'puzzle' && !puzzleUri && !puzzleTried}
         prompt={current.gatePrompt ?? undefined}
         accent={colors.primary}
         onDismiss={() => router.back()}

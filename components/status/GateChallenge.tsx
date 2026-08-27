@@ -35,6 +35,12 @@ interface Props {
    *  and would be required if a puzzle ever gated content the viewer could NOT
    *  otherwise decrypt. It cannot, and must not be changed to imply it can. */
   previewUri?: string;
+  /** puzzle: the preview is still being produced (media decrypting, or the
+   *  video frame being extracted). Kept SEPARATE from `previewUri` being
+   *  absent, because the two need opposite treatment: pending must wait, while
+   *  genuinely-absent must let the viewer through. Collapsing them showed the
+   *  Open button during every decrypt, which skipped the puzzle on a fast tap. */
+  previewPending?: boolean;
   /** question: what to ask. */
   prompt?: string;
   /** question: returns true when the answer unlocked the key. */
@@ -45,7 +51,7 @@ interface Props {
 }
 
 export default function GateChallenge({
-  kind, grid, previewUri, prompt, onAnswer, onSolved, onDismiss, accent,
+  kind, grid, previewUri, previewPending, prompt, onAnswer, onSolved, onDismiss, accent,
 }: Props) {
   const [answer, setAnswer] = useState('');
   const [busy, setBusy] = useState(false);
@@ -91,6 +97,13 @@ export default function GateChallenge({
                 accent={accent}
                 dim="rgba(255,255,255,0.55)"
               />
+            </View>
+          ) : previewPending ? (
+            // Still decrypting. Showing the Open fallback here would hand the
+            // viewer a one-tap skip past the puzzle every single time.
+            <View style={{ marginTop: 28, alignItems: 'center', gap: 12 }}>
+              <ActivityIndicator color={accent} size="large" />
+              <Text style={S.hint}>Getting the pieces ready…</Text>
             </View>
           ) : (
             // No preview means nothing to cut up. Letting the viewer through is
