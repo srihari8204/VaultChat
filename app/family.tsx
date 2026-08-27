@@ -1135,7 +1135,13 @@ export default function FamilySpaceScreen() {
     // the place's name, never its coordinate. Absent for members on older
     // builds, for anyone who has saved no places, and once they stop sharing.
     const ref = p && !p.sharingOff ? defaultRef(p.refs) : null;
-    const d = p && mine && !isMe ? dist(haversine(mine.pos, p.pos)) : null;
+    // BY ROAD when the router has answered for this member, straight line only
+    // until it does. Reads from the same roadM the distance list uses, so the
+    // row and the summary can never disagree about how far someone is.
+    const roadD = roadM[m.id];
+    const d = p && mine && !isMe
+      ? dist(Number.isFinite(roadD) && roadD >= 0 ? roadD : haversine(mine.pos, p.pos))
+      : null;
     // Freshness tier for the row's caption (spec: LIVE / RECENT / STALE /
     // UNAVAILABLE). A fix past the recent window is "Last known", never live.
     //
