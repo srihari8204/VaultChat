@@ -220,10 +220,23 @@ function FindShops({ onOpen, favIds, onToggleFav, onProductSearch }: {
     finally { setLoading(false); }
   }, []);
 
+  // DO NOT PROMPT ON MOUNT.
+  //
+  // This used to call requestForegroundPermissionsAsync() the instant the
+  // screen opened, so the very first thing a shopkeeper saw was a system
+  // location dialog with no explanation of why a ledger wanted their position.
+  // A prompt with no context gets refused reflexively, and on Android a refusal
+  // can be permanent — losing distance sorting for good, over a dialog the user
+  // never asked for.
+  //
+  // getForegroundPermissionsAsync only READS the current grant and never shows
+  // UI, so someone who has already allowed location still gets distances with
+  // no change. Everyone else gets the screen they came for, plus the hint
+  // below, which is now the thing that asks — at the point they want it.
   useEffect(() => { (async () => {
     let c: { lat: number; lng: number } | null = null;
     try {
-      const { status } = await Location.requestForegroundPermissionsAsync();
+      const { status } = await Location.getForegroundPermissionsAsync();
       if (status === 'granted') {
         const pos = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
         c = { lat: pos.coords.latitude, lng: pos.coords.longitude };
@@ -233,6 +246,18 @@ function FindShops({ onOpen, favIds, onToggleFav, onProductSearch }: {
     load('all', c);
     try { setFavShops(await SB.favorites()); } catch {}
   })(); }, [load]);
+
+  /** Ask for location because the user asked for it — from the hint below. */
+  const enableLocation = useCallback(async () => {
+    try {
+      const { status } = await Location.requestForegroundPermissionsAsync();
+      if (status !== 'granted') return;   // refused: the screen already works without it
+      const pos = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+      const c = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+      setCoords(c);
+      load(cat, c);
+    } catch { /* nothing to do: distances stay off, shops still list */ }
+  }, [cat, load]);
 
   const filtered = useMemo(
     () => shops.filter((sh) => !q.trim() || sh.name.toLowerCase().includes(q.trim().toLowerCase())),
@@ -253,7 +278,9 @@ function FindShops({ onOpen, favIds, onToggleFav, onProductSearch }: {
         <Ionicons name="chevron-forward" size={16} color={C.green} style={{ marginLeft: 'auto' }} />
       </TouchableOpacity>
       {!coords && !loading && (
-        <Text style={s.hint}>📍 Location off — showing recent shops. Enable location for distance.</Text>
+        <TouchableOpacity onPress={enableLocation} activeOpacity={0.7}>
+          <Text style={s.hint}>📍 Location off — showing recent shops. Tap to enable for distance.</Text>
+        </TouchableOpacity>
       )}
 
       {/* favorites strip */}
