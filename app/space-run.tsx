@@ -30,6 +30,7 @@ import type { Palette } from '../constants/theme';
 import { getRun, getRunEvents } from '../lib/spaces/api';
 import { subscribeRun, type RunPing } from '../lib/spaces/runSession';
 import { haversine, type LatLng } from '../lib/nav/geo';
+import { useRoadEta } from '../lib/nav/useRoadEta';
 import { getCurrentUserAsync } from './(constants)/authService';
 import {
   arrivalWindow, stopsBetween, foldReplay, canDrawPath, isDelayed,
@@ -281,12 +282,31 @@ function RiderCard({ rider, run, stops, reachedStopId, vehicle, colors }: {
   const between = stopsBetween(stops, reachedStopId, rider.stopId);
   const myStop = stops.find((x) => x.id === rider.stopId);
 
-  // Prefer the real thing: distance from where the vehicle actually is to the
-  // stop this rider waits at. Falls back to a per-stop constant only while no
-  // fix has arrived — and the window's width is what makes either honest.
+  // BY ROAD, because a bus is. Straight-line distance over an assumed speed is
+  // wrong in the direction that hurts: no road is ever shorter than the line
+  // between its ends, so the estimate always says the vehicle is nearer and
+  // sooner than it is, and a rider told "arriving now" walks out and waits. A
+  // bus 2km away across a railway line can be 5km of driving.
+  //
+  // The router's own duration is preferred over distance/speed even when both
+  // are available: it prices road classes and turns instead of assuming one
+  // speed for a whole city.
+  const road = useRoadEta(
+    vehicle ? { lat: vehicle.lat, lng: vehicle.lng } : null,
+    myStop?.lat != null && myStop?.lng != null ? { lat: myStop.lat, lng: myStop.lng } : null,
+  );
+
+  // Falls back to a per-stop constant only while no fix has arrived — and the
+  // window's width is what makes either honest.
   let etaSeconds = between * FALLBACK_SECONDS_PER_STOP;
-  if (vehicle && myStop?.lat != null && myStop?.lng != null) {
-    const metres = haversine({ lat: vehicle.lat, lng: vehicle.lng }, { lat: myStop.lat, lng: myStop.lng });
+  if (road && road.durationS > 0) {
+    etaSeconds = road.durationS;
+  } else if (vehicle && myStop?.lat != null && myStop?.lng != null) {
+    // No road answer yet (or the router is down): the straight line divided by
+    // a speed is still better than a per-stop constant, and it is what was
+    // shown before routing existed.
+    const metres = road?.distanceM
+      ?? haversine({ lat: vehicle.lat, lng: vehicle.lng }, { lat: myStop.lat, lng: myStop.lng });
     const speed = vehicle.speed && vehicle.speed > 1 ? vehicle.speed : ASSUMED_SPEED_MPS;
     etaSeconds = metres / speed;
   }
