@@ -296,25 +296,58 @@ func sbNearbyShops(w http.ResponseWriter, r *http.Request) {
 		where += " AND category=$" + strconv.Itoa(len(args)+1)
 		args = append(args, cat)
 	}
-	rows, err := db.Pool.Query(ctx, sql+where+" LIMIT 100", args...)
+	collect := func(q string, a []any) ([]map[string]any, error) {
+		rows, err := db.Pool.Query(ctx, q, a...)
+		if err != nil {
+			return nil, err
+		}
+		defer rows.Close()
+		acc := []map[string]any{}
+		for rows.Next() {
+			m, err := scanShop(rows)
+			if err != nil {
+				continue
+			}
+			slat, _ := m["lat"].(*float64)
+			slng, _ := m["lng"].(*float64)
+			if okLat && okLng && slat != nil && slng != nil {
+				m["distanceKm"] = math.Round(haversineKm(lat, lng, *slat, *slng)*100) / 100
+			}
+			acc = append(acc, m)
+		}
+		return acc, nil
+	}
+
+	out, err := collect(sql+where+" LIMIT 100", args)
 	if err != nil {
 		httpx.Err(w, http.StatusInternalServerError, "db error")
 		return
 	}
-	defer rows.Close()
 
-	out := []map[string]any{}
-	for rows.Next() {
-		m, err := scanShop(rows)
-		if err != nil {
-			continue
+	// LOCATION MUST NEVER SHOW YOU LESS THAN NO LOCATION DID.
+	//
+	// Without coordinates this handler returns a recent slice of every approved
+	// shop. With coordinates it applied a ~25km box — so switching location ON,
+	// the feature whose whole purpose is helping you find shops, could take you
+	// from "four shops" to "No shops found nearby yet". That is backwards, and
+	// it is what a real user hit: they had moved, and the nearest shop of the
+	// four that exist was 119km away, so the box emptied the list.
+	//
+	// An empty box now falls back to the unboxed set, still sorted nearest
+	// first and still carrying the true distanceKm — so the answer becomes
+	// "the closest one is 119km away" instead of silence. The box stays the
+	// PREFERRED result: where there are nearby shops, distant ones are never
+	// mixed in. This only changes the case that was previously empty.
+	if len(out) == 0 && okLat && okLng {
+		wide := ` WHERE approved=TRUE`
+		wideArgs := []any{}
+		if cat != "" && cat != "all" {
+			wide += " AND category=$1"
+			wideArgs = append(wideArgs, cat)
 		}
-		slat, _ := m["lat"].(*float64)
-		slng, _ := m["lng"].(*float64)
-		if okLat && okLng && slat != nil && slng != nil {
-			m["distanceKm"] = math.Round(haversineKm(lat, lng, *slat, *slng)*100) / 100
+		if o, err := collect(sql+wide+" LIMIT 100", wideArgs); err == nil {
+			out = o
 		}
-		out = append(out, m)
 	}
 
 	// Nearest first when we have the customer's location; shops without a known
