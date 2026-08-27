@@ -42,6 +42,7 @@
     "build:android:apk:arm64": "node scripts/gradlew.js assembleRelease -PreactNativeArchitectures=arm64-v8a",
     "test:reader": "tsx lib/reader.selftest.ts",
     "test:responsive": "tsx lib/responsive.selftest.ts",
+    "test:typescale": "tsx lib/typeScale.selftest.ts",
     "test:shelf": "tsx lib/shelf.selftest.ts",
     "test:archive": "tsx lib/archive.selftest.ts",
     "test:callmode": "tsx lib/call/mode.selftest.ts",
