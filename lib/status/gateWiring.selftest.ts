@@ -110,6 +110,41 @@ assert.equal(
   'media has already uploaded.',
 );
 
+// -- 4. A locked story must not decrypt-and-draw its media underneath --------
+// The gate used to be an early `return <GateChallenge/>` that replaced the
+// whole viewer. That was safe but hid every OTHER story: the progress segments
+// and the tap zones went with it, so one locked status made a poster with
+// three look like a poster with one.
+//
+// It is a LAYER now, which keeps the sequence navigable — but only stays safe
+// while the media is withheld. If any of these guards is dropped, the media
+// renders beneath the gate: decrypted, drawn, and catchable in a screenshot
+// during the transition. For a question gate that is precisely what the lock
+// exists to prevent.
+const viewerSrc = readFileSync(join(root, 'app', 'story-viewer.tsx'), 'utf8');
+
+// Whitespace-stripped compare, per this file's own rule about escapes.
+assert.ok(
+  !viewerSrc.replace(/\s+/g, '').includes('return(<GateChallenge'),
+  'the gate is an early return again — it hides every other story from the viewer',
+);
+for (const guard of [
+  "{!gated && current?.mediaType === 'text' &&",
+  "{!gated && mediaSrc && current?.mediaType !== 'text' &&",
+]) {
+  assert.ok(
+    viewerSrc.includes(guard),
+    `story-viewer renders media without the !gated guard (${guard.slice(0, 34)}...). ` +
+    'With the gate as a layer, the media would be decrypted and drawn UNDER it.',
+  );
+}
+// The clock must not run on an unsolved gate, or the 12s media-stall fallback
+// flips `loaded` and the viewer walks off a puzzle mid-solve.
+assert.ok(
+  viewerSrc.includes('!loaded || gated) return;'),
+  'the auto-advance timer runs while gated — a puzzle advances away as it is being solved',
+);
+
 console.log('gateWiring selftest: OK');
 console.log(`  postPreview deps: [${deps.join(', ')}]`);
 console.log(`  grid range ${min[1]}..${max[1]} agrees client <-> server`);

@@ -214,7 +214,10 @@ function StoryViewerScreen() {
   // The progress timer only starts once the media has actually loaded, so the
   // bar no longer empties out over a blank screen while the image/video loads.
   useEffect(() => {
-    if (!current || paused || !loaded) return;
+    // `gated` stops the clock. The media-stall safety timer sets `loaded` even
+    // though nothing rendered, so without this the progress bar runs down and
+    // advance(+1) walks off a puzzle the viewer is halfway through solving.
+    if (!current || paused || !loaded || gated) return;
 
     // Best-effort mark-viewed; server is idempotent. Do NOT mark a media story
     // viewed if its media never actually resolved (decrypt/download failed) —
@@ -236,7 +239,7 @@ function StoryViewerScreen() {
   // intentional: re-runs when *index* changes, on pause/resume, once loaded, or
   // when the media source resolves (so mark-viewed sees a non-null mediaSrc).
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [current?.id, paused, loaded, mediaSrc]);
+  }, [current?.id, paused, loaded, mediaSrc, gated]);
 
   const close = useCallback(() => router.back(), [router]);
 
@@ -322,50 +325,32 @@ function StoryViewerScreen() {
     );
   }
 
-  // THE GATE PRE-EMPTS THE WHOLE VIEWER. Rendering it over the media would mean
-  // the media had already been decrypted and drawn underneath — for a question
-  // gate that is the exact thing the lock exists to prevent, and a screenshot
-  // during the transition would defeat it.
-  if (gated && current) {
-    return (
-      <GateChallenge
-        kind={current.gateKind as 'puzzle' | 'question'}
-        grid={current.gateGrid ?? undefined}
-        previewUri={puzzleUri ?? undefined}
-        previewPending={current.gateKind === 'puzzle' && !puzzleUri && !puzzleTried}
-        prompt={current.gatePrompt ?? undefined}
-        accent={colors.primary}
-        onDismiss={() => router.back()}
-        onSolved={() => clear(current.id)}
-        onAnswer={async (ans) => {
-          if (!lockedEnvelope || !current.gateSalt) return false;
-          let locked: any;
-          try { locked = JSON.parse(lockedEnvelope); } catch { return false; }
-          const mk = await unlockKeyWithAnswer(
-            { salt: locked.salt ?? current.gateSalt, envelope: locked.envelope },
-            ans,
-          );
-          if (!mk) return false;   // wrong answer and a tampered envelope look identical, by design
-          await putMediaKey(current.attachmentId, mk);
-          return true;
-        }}
-      />
-    );
-  }
-
+  // THE GATE COVERS THE MEDIA, NOT THE WHOLE VIEWER.
+  //
+  // It used to be an early `return <GateChallenge/>`, which replaced
+  // everything — including the progress segments that say how many stories
+  // this person posted, and the taps that move between them. One gated story
+  // therefore hid every OTHER story behind it: a poster with three statuses
+  // looked like a poster with one, and there was no way through but to solve
+  // it or leave.
+  //
+  // The security property is unchanged and load-bearing: while `gated`, the
+  // media is NOT rendered at all (see the `!gated &&` guards below), so
+  // nothing is decrypted and drawn underneath for a screenshot to catch. Only
+  // the chrome — progress bars, author, close — is allowed above it.
   return (
     <View style={S.screen}>
       <StatusBar barStyle="light-content" />
 
       {/* Text status — full-bleed colored card with centered text (WhatsApp). */}
-      {current?.mediaType === 'text' && (
+      {!gated && current?.mediaType === 'text' && (
         <View style={[S.media, { backgroundColor: (current as any).bgColor || '#0B0B10', alignItems: 'center', justifyContent: 'center', padding: 32 }]}>
           <Text style={{ color: '#fff', fontSize: 28, fontWeight: '700', textAlign: 'center' }}>{(current as any).text || ''}</Text>
         </View>
       )}
 
       {/* Media — full-bleed. Plaintext: authed URL; encrypted: decrypted local file. */}
-      {mediaSrc && current?.mediaType !== 'text' && (
+      {!gated && mediaSrc && current?.mediaType !== 'text' && (
         current?.mediaType === 'video' ? (
           <Video
             source={mediaSrc as any}
@@ -389,31 +374,74 @@ function StoryViewerScreen() {
       )}
 
       {/* Spinner while the media (or its decrypt/download) is still loading. */}
-      {current?.mediaType !== 'text' && !loaded && (
+      {!gated && current?.mediaType !== 'text' && !loaded && (
         <View style={[S.media, { alignItems: 'center', justifyContent: 'center' }]} pointerEvents="none">
           <ActivityIndicator color="#fff" size="large" />
         </View>
       )}
 
-      {/* Tap zones (under everything visible) */}
-      <Pressable
-        style={[S.tapZone, S.tapLeft]}
-        onPress={() => onTapZone('left')}
-        onLongPress={() => setPaused(true)}
-        onPressOut={() => setPaused(false)}
-      />
-      <Pressable
-        style={[S.tapZone, S.tapRight]}
-        onPress={() => onTapZone('right')}
-        onLongPress={() => setPaused(true)}
-        onPressOut={() => setPaused(false)}
-      />
+      {/* The gate, in place of the media. Sits BELOW the top bar in z-order so
+          the progress segments and close button stay reachable. */}
+      {gated && current && (
+        <View style={S.gateLayer}>
+          <GateChallenge
+            kind={current.gateKind as 'puzzle' | 'question'}
+            grid={current.gateGrid ?? undefined}
+            previewUri={puzzleUri ?? undefined}
+            previewPending={current.gateKind === 'puzzle' && !puzzleUri && !puzzleTried}
+            prompt={current.gatePrompt ?? undefined}
+            accent={colors.primary}
+            onDismiss={close}
+            onSolved={() => clear(current.id)}
+            onAnswer={async (ans) => {
+              if (!lockedEnvelope || !current.gateSalt) return false;
+              let locked: any;
+              try { locked = JSON.parse(lockedEnvelope); } catch { return false; }
+              const mk = await unlockKeyWithAnswer(
+                { salt: locked.salt ?? current.gateSalt, envelope: locked.envelope },
+                ans,
+              );
+              if (!mk) return false;   // a wrong answer and a tampered envelope look identical, by design
+              await putMediaKey(current.attachmentId, mk);
+              return true;
+            }}
+          />
+        </View>
+      )}
+
+      {/* Tap zones (under everything visible). Withheld while gated: they would
+          swallow the taps the puzzle board needs to receive. */}
+      {!gated && (
+        <>
+          <Pressable
+            style={[S.tapZone, S.tapLeft]}
+            onPress={() => onTapZone('left')}
+            onLongPress={() => setPaused(true)}
+            onPressOut={() => setPaused(false)}
+          />
+          <Pressable
+            style={[S.tapZone, S.tapRight]}
+            onPress={() => onTapZone('right')}
+            onLongPress={() => setPaused(true)}
+            onPressOut={() => setPaused(false)}
+          />
+        </>
+      )}
 
       {/* Top: per-story progress bars + author + close */}
       <View style={S.topBar} pointerEvents="box-none">
-        <View style={S.progressRow} pointerEvents="none">
+        {/* One segment per story — this is what tells a viewer the person
+            posted more than one. The segments are TAPPABLE because while a
+            story is gated the tap zones are withheld, and without this a
+            locked story would be a dead end with no route to the others. */}
+        <View style={S.progressRow} pointerEvents="box-none">
           {entry.stories.map((s, i) => (
-            <View key={s.id} style={S.progressTrack}>
+            <Pressable
+              key={s.id}
+              style={S.progressTrack}
+              onPress={() => setIndex(i)}
+              hitSlop={{ top: 12, bottom: 12, left: 2, right: 2 }}
+            >
               <Animated.View
                 style={[
                   S.progressFill,
@@ -422,7 +450,7 @@ function StoryViewerScreen() {
                   i > index  && { width: '0%' },
                 ]}
               />
-            </View>
+            </Pressable>
           ))}
         </View>
         <View style={S.authorRow}>
@@ -512,6 +540,9 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   tapLeft:       { left: 0 },
   tapRight:      { right: 0, width: '60%' },
 
+  // Full-bleed, but BELOW topBar in z-order (declared earlier in the tree), so
+  // the progress segments and close button stay reachable over a locked story.
+  gateLayer:     { ...StyleSheet.absoluteFillObject, backgroundColor: '#000' },
   topBar:        { position: 'absolute', top: 56, left: 12, right: 12, gap: 8 },
   progressRow:   { flexDirection: 'row', gap: 3 },
   progressTrack: { flex: 1, height: 2, backgroundColor: 'rgba(255,255,255,0.25)', borderRadius: 1, overflow: 'hidden' },
