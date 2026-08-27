@@ -8,10 +8,12 @@
 package routes
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"math"
 	"net/http"
@@ -271,6 +273,117 @@ func shopPlan(ctx context.Context, shopID string) string {
 
 // ── customer: nearby shops ───────────────────────────────────────
 
+// ── road distance, not crow-flies ────────────────────────────────────
+//
+// Haversine says how far a bird flies. Nobody drives that. A shop across a
+// river or the far side of a one-way system reads as "close" and then takes
+// half an hour, and the sort puts it above one that is genuinely easier to
+// reach. Valhalla already runs for the family map and /nav/matrix, so the road
+// network is right there.
+//
+// ONE source (the customer) to MANY targets (the shops) — the inverse of what
+// /nav/matrix does, same endpoint, one job for the whole list rather than one
+// call per shop.
+//
+// IT MUST NEVER FAIL THE SHOP LIST. Every failure path — engine down, slow,
+// malformed answer, a shop the road network cannot reach — leaves that shop's
+// straight-line distance in place. A worse number beats an empty screen, which
+// is the same rule the media compressor follows: degrade, never block.
+
+/** Most shops worth asking the router about. The list is already sorted
+ *  nearest-first by straight line, and matrix cost grows with targets, so the
+ *  tail would be paying for rows nobody scrolls to. */
+const sbRouteMaxTargets = 25
+
+/** Shorter than /nav/matrix's 20s: this is a list someone is waiting on, not a
+ *  dedicated routing screen, and a slow answer is worth less than a fast
+ *  approximate one. */
+const sbRouteTimeout = 5 * time.Second
+
+/** Straight-line cutoff for asking the router at all.
+ *
+ *  VALHALLA REFUSES THE WHOLE REQUEST, NOT THE OFFENDING PAIR. A single target
+ *  beyond its 400km path limit answers
+ *  `{"error_code":154,"error":"Path distance exceeds the max distance limit"}`
+ *  with HTTP 400 — so one distant shop would strip road distance from every
+ *  other shop in the same batch. Verified against prod: asking for a 119km
+ *  shop and a 487km shop together returns that error and nothing usable;
+ *  asking for the 119km one alone returns 146.9km.
+ *
+ *  Roads run 1.2-1.4x the straight line, so 250km straight stays comfortably
+ *  inside the 400km road limit. Beyond that "nearby shop" has stopped meaning
+ *  anything anyway, and those keep their straight-line figure. */
+const sbRouteMaxStraightKm = 250.0
+
+// routeKmFor returns road distances in km keyed by the index of `targets`.
+// Missing keys mean "no road answer" — the caller keeps what it had.
+type sbRoute struct {
+	km   float64
+	secs int
+}
+
+func routeKmFor(ctx context.Context, lat, lng float64, targets [][2]float64) map[int]sbRoute {
+	out := map[int]sbRoute{}
+	if len(targets) == 0 {
+		return out
+	}
+	tg := make([]map[string]any, 0, len(targets))
+	for _, t := range targets {
+		tg = append(tg, map[string]any{"lat": t[0], "lon": t[1]})
+	}
+	payload, err := json.Marshal(map[string]any{
+		"sources":            []map[string]any{{"lat": lat, "lon": lng}},
+		"targets":            tg,
+		"costing":            "auto",
+		"directions_options": map[string]any{"units": "kilometers"},
+	})
+	if err != nil {
+		return out
+	}
+	base := os.Getenv("VALHALLA_URL")
+	if base == "" {
+		base = "http://valhalla:8002"
+	}
+	rctx, cancel := context.WithTimeout(ctx, sbRouteTimeout)
+	defer cancel()
+	req, err := http.NewRequestWithContext(rctx, "POST", base+"/sources_to_targets", bytes.NewReader(payload))
+	if err != nil {
+		return out
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := (&http.Client{Timeout: sbRouteTimeout}).Do(req)
+	if err != nil {
+		return out
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode > 299 {
+		return out
+	}
+	data, err := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
+	if err != nil {
+		return out
+	}
+	var vres valhallaMatrix
+	if err := json.Unmarshal(data, &vres); err != nil {
+		return out
+	}
+	// One source, so exactly one row; its cells line up with `targets`.
+	if len(vres.SourcesToTargets) == 0 {
+		return out
+	}
+	for i, c := range vres.SourcesToTargets[0] {
+		if i >= len(targets) || c.Distance == nil || *c.Distance < 0 {
+			continue // unreachable by road: keep the straight-line figure rather than drop the shop
+		}
+		e := sbRoute{km: math.Round(*c.Distance*100) / 100}
+		if c.Time != nil && *c.Time >= 0 {
+			e.secs = int(*c.Time + 0.5)
+		}
+		out[i] = e
+	}
+	return out
+}
+
 func sbNearbyShops(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	if !sbRateLimit(w, r, "nearby", sbRateNearby, 60) {
@@ -347,6 +460,37 @@ func sbNearbyShops(w http.ResponseWriter, r *http.Request) {
 		}
 		if o, err := collect(sql+wide+" LIMIT 100", wideArgs); err == nil {
 			out = o
+		}
+	}
+
+	// Upgrade straight-line to road distance where the router can answer, THEN
+	// sort — so the ordering reflects what the customer will actually travel,
+	// not what a bird would.
+	if okLat && okLng && len(out) > 0 {
+		idx := []int{}
+		tg := [][2]float64{}
+		for i, m := range out {
+			slat, _ := m["lat"].(*float64)
+			slng, _ := m["lng"].(*float64)
+			if slat == nil || slng == nil || len(tg) >= sbRouteMaxTargets {
+				continue
+			}
+			// Keep the batch inside Valhalla's path limit — see the constant.
+			// One over-limit target would cost every shop here its road figure.
+			if d, ok := m["distanceKm"].(float64); ok && d > sbRouteMaxStraightKm {
+				continue
+			}
+			idx = append(idx, i)
+			tg = append(tg, [2]float64{*slat, *slng})
+		}
+		for k, rt := range routeKmFor(ctx, lat, lng, tg) {
+			if k < len(idx) {
+				out[idx[k]]["distanceKm"] = rt.km
+				out[idx[k]]["distanceIsRoute"] = true
+				if rt.secs > 0 {
+					out[idx[k]]["durationS"] = rt.secs
+				}
+			}
 		}
 	}
 

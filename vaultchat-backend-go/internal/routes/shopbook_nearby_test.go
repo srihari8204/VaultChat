@@ -68,3 +68,48 @@ func TestHaversineIsSymmetricAndZeroAtSamePoint(t *testing.T) {
 		t.Fatalf("haversine must be symmetric: %v vs %v", a, b)
 	}
 }
+
+// ── road distance ────────────────────────────────────────────────────
+
+// THE TRAP THIS GUARDS. Valhalla rejects the WHOLE matrix request — HTTP 400,
+// error_code 154 — when any single pair exceeds its 400km path limit, rather
+// than nulling that one cell. Verified against prod: the 119km shop and the
+// 487km shop asked together return that error and nothing usable; the 119km
+// one alone returns 146.905km. So one distant shop in the batch would cost
+// EVERY shop its road distance, silently falling the whole list back to
+// straight-line with nothing in any log to say why.
+func TestRouteCutoffKeepsTheBatchInsideValhallasLimit(t *testing.T) {
+	// Roads run 1.2-1.4x the straight line; the cutoff must leave headroom
+	// under 400km even at the pessimistic ratio.
+	if sbRouteMaxStraightKm*1.4 >= 400 {
+		t.Fatalf("cutoff %.0fkm can produce a >400km road path and poison the batch",
+			sbRouteMaxStraightKm)
+	}
+	// And it must not be so timid that ordinary in-town shops lose routing.
+	if sbRouteMaxStraightKm < 50 {
+		t.Fatalf("cutoff %.0fkm is too small to be useful", sbRouteMaxStraightKm)
+	}
+}
+
+func TestRouteCutoffAdmitsTheRealNearShopAndRejectsTheFarOne(t *testing.T) {
+	const uLat, uLng = 16.0486, 80.9276
+	near := haversineKm(uLat, uLng, 16.5137022, 81.9369432) // Sri Lakshmi, ~119km
+	far := haversineKm(uLat, uLng, 12.9534688, 77.7180569)  // Test 1, ~487km
+	if near > sbRouteMaxStraightKm {
+		t.Fatalf("the nearest real shop (%.0fkm) must still get a road distance", near)
+	}
+	if far <= sbRouteMaxStraightKm {
+		t.Fatalf("the 487km shop (%.0fkm) must be excluded from the batch", far)
+	}
+}
+
+// The batch is capped so the tail of a long list does not pay for rows nobody
+// scrolls to, and so one request stays one cheap Valhalla job.
+func TestRouteTargetCapIsSane(t *testing.T) {
+	if sbRouteMaxTargets < 5 || sbRouteMaxTargets > 50 {
+		t.Fatalf("target cap %d is outside a sensible range", sbRouteMaxTargets)
+	}
+	if sbRouteTimeout <= 0 {
+		t.Fatal("a routing call with no timeout can hang the shop list")
+	}
+}
