@@ -145,6 +145,17 @@ assert.ok(
   'the auto-advance timer runs while gated — a puzzle advances away as it is being solved',
 );
 
+// -- 5. Frame extraction must be on a clock --------------------------------
+// A wedged native decoder returns a promise that NEVER SETTLES, so .catch()
+// cannot save it. The viewer would sit on "Getting the pieces ready…"
+// indefinitely with no way out but leaving the story. lib/thumbnails.ts
+// already learned this for the identical call.
+const frameSrc = readFileSync(join(root, 'lib', 'status', 'puzzleFrame.ts'), 'utf8');
+assert.ok(
+  frameSrc.includes('withTimeout(') && frameSrc.includes('THUMB_TIMEOUT_MS'),
+  'puzzleFrameUri has no timeout — a wedged decoder strands the viewer on the spinner forever',
+);
+
 console.log('gateWiring selftest: OK');
 console.log(`  postPreview deps: [${deps.join(', ')}]`);
 console.log(`  grid range ${min[1]}..${max[1]} agrees client <-> server`);
