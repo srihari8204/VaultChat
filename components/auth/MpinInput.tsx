@@ -29,8 +29,28 @@ export function MpinInput({
     if (digits.length === length) onComplete?.(digits);
   };
 
+  // BLUR THEN FOCUS, not focus() on its own.
+  //
+  // focus() on an ALREADY-FOCUSED input is a no-op — it never calls
+  // showSoftInput again. So when the keyboard fails to appear on mount (see the
+  // note on `hidden` below, and MIUI does exactly this), tapping the cells could
+  // never recover it: the input was already focused, so the one escape hatch on
+  // this screen did nothing however many times it was pressed. Verified on the
+  // Redmi Note 8 Pro, where dumpsys showed the input served but
+  // mShowRequested=false, permanently.
+  //
+  // Dropping focus first makes the re-focus a real request. requestAnimationFrame
+  // rather than a bare call because the blur must reach the native view before
+  // the focus does, or Android coalesces the pair back into a no-op.
+  const reveal = () => {
+    const i = inputRef.current;
+    if (!i) return;
+    i.blur();
+    requestAnimationFrame(() => i.focus());
+  };
+
   return (
-    <Pressable onPress={() => inputRef.current?.focus()}>
+    <Pressable onPress={reveal}>
       <Animated.View style={[s.row, shakeAnim ? { transform: [{ translateX: shakeAnim }] } : null]}>
         {Array.from({ length }).map((_, i) => {
           const filled = i < value.length;
@@ -66,5 +86,14 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   cellFilled: { borderColor: c.primary },
   cellActive: { borderColor: c.primary, backgroundColor: c.surfaceSolid },
   cellTxt: { color: c.text, fontSize: 26, fontWeight: '800' },
-  hidden: { position: 'absolute', width: 1, height: 1, opacity: 0 },
+  // NOT opacity 0. Android refuses showSoftInput() for a view it considers
+  // invisible, and MIUI enforces that strictly: with opacity 0 the input focused
+  // (dumpsys showed it as mServedView) but the keyboard was never requested —
+  // mShowRequested=false — so the six cells sat there with no way to type into
+  // them. That blocks signup, unlock and MPIN recovery, not just one screen.
+  //
+  // 0.01 is invisible to the eye and visible to the IME. The input is still 1x1
+  // and behind the cells, and caretHidden keeps it from showing a cursor, so
+  // nothing about the appearance changes. Do not "tidy" this back to 0.
+  hidden: { position: 'absolute', width: 1, height: 1, opacity: 0.01 },
 });
