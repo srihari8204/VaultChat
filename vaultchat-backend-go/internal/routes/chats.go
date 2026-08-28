@@ -803,6 +803,10 @@ type chatsListItem struct {
 	// somebody really can be called Guest, and a client that guessed would draw a
 	// ghost over a real person and offer to "save" someone already saved.
 	AnonMasked bool `json:"anonMasked"`
+	// Migration 120: when this WHOLE conversation deletes itself. The list needs
+	// it as well as the detail view — a chat about to vanish must be visible as
+	// such WITHOUT opening it, or you find out by it being gone.
+	ExpiresAt *httpx.JSTime `json:"expiresAt"`
 }
 
 func chatsList(w http.ResponseWriter, r *http.Request) {
@@ -821,7 +825,7 @@ func chatsList(w http.ResponseWriter, r *http.Request) {
 	err := chatsQueryU(ctx, user.ID,
 		`SELECT
 		   c.id, c.type, c.name, c.photo_url, c.created_by, c.created_at,
-		   c.last_message_id, c.last_message_at, c.updated_at,
+		   c.last_message_id, c.last_message_at, c.updated_at, c.expires_at,
 		   cm.role, cm.last_read_message_id, cm.muted, cm.joined_at,
 		   cm.pinned, cm.pinned_at, cm.archived, cm.hidden,
 		   cm.screenshot_mode, cm.vanish_mode,
@@ -880,7 +884,7 @@ func chatsList(w http.ResponseWriter, r *http.Request) {
 				name, photoURL, createdBy                   *string
 				createdAt, updatedAt, joinedAt              time.Time
 				lastMessageID, lastReadID                   *int64
-				lastMessageAt, pinnedAt                     *time.Time
+				lastMessageAt, pinnedAt, expiresAt           *time.Time
 				role                                        string
 				muted, pinned, archived, hidden, vanishMode bool
 				screenshotMode                              *string
@@ -892,7 +896,7 @@ func chatsList(w http.ResponseWriter, r *http.Request) {
 				unreadCount                                 int64
 			)
 			if err := rows.Scan(&id, &ctype, &name, &photoURL, &createdBy, &createdAt,
-				&lastMessageID, &lastMessageAt, &updatedAt,
+				&lastMessageID, &lastMessageAt, &updatedAt, &expiresAt,
 				&role, &lastReadID, &muted, &joinedAt,
 				&pinned, &pinnedAt, &archived, &hidden,
 				&screenshotMode, &vanishMode,
@@ -908,7 +912,7 @@ func chatsList(w http.ResponseWriter, r *http.Request) {
 				MyRole: role, MyLastReadID: userBigStr(lastReadID), Muted: muted,
 				Pinned: pinned, Archived: archived, Hidden: hidden,
 				ScreenshotMode: chatsStrDefault(screenshotMode, "block"), VanishMode: vanishMode,
-				UnreadCount: unreadCount,
+				UnreadCount: unreadCount, ExpiresAt: httpx.JST(expiresAt),
 				PeerUserID:  peerUserID, PeerPhotoURL: peerPhoto,
 				PeerLastSeenAt:        httpx.JST(peerLastSeen),
 				PeerLastReadMessageID: peerLastRead, PeerLastDeliveredMessageID: peerLastDelivered,

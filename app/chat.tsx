@@ -2455,6 +2455,36 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
     return 'Direct chat';
   }, [chat, peerPresence]);
 
+  // ── self-destruct countdown (migration 120) ────────────────
+  //
+  // A chat opened by a 1h/3h code DELETES ITSELF — every message, and the
+  // conversation with them. Until this existed the server knew the deadline and
+  // the person in the chat did not: it simply vanished mid-conversation, which
+  // reads as data loss rather than as the feature working.
+  //
+  // Ticks every 30s rather than every second. The number people act on is "how
+  // many minutes have I got", and a per-second re-render of this screen to
+  // animate a value that changes once a minute is the kind of cost that shows
+  // up on an old phone for nothing.
+  const [expiresIn, setExpiresIn] = useState<number | null>(null);
+  const expiresAt = chat?.expiresAt ?? null;
+  useEffect(() => {
+    if (!expiresAt) { setExpiresIn(null); return; }
+    const tick = () => setExpiresIn(Math.max(0, Math.round((new Date(expiresAt).getTime() - Date.now()) / 1000)));
+    tick();
+    const h = setInterval(tick, 30_000);
+    return () => clearInterval(h);
+  }, [expiresAt]);
+
+  // Minutes until about an hour out, then hours. "in 92 min" is a worse answer
+  // than "in 2h" for deciding whether to keep talking.
+  const expiryLabel = useMemo(() => {
+    if (expiresIn == null) return null;
+    if (expiresIn <= 600) return 'deleting now';
+    const m = Math.ceil(expiresIn / 60);
+    return m < 60 ? `deletes itself in ${m} min` : `deletes itself in ${Math.round(m / 60)}h`;
+  }, [expiresIn]);
+
   // ── Memory Bubble (Emotional AI spec item) ────────────────
   // Pick the longest-ago message in this chat whose calendar (month, day)
   // matches today's. Skip messages younger than 364 days so "yesterday"
@@ -2555,6 +2585,23 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
               </Text>
             )}
           </TouchableOpacity>
+          {/* Self-destruct countdown. Sits under the name because that is where
+              the eye already is when you open a chat, and because this is the
+              one fact about the conversation that changes what you do next.
+              Red under ten minutes — the point where "I'll reply later" stops
+              being an option. */}
+          {expiryLabel && (
+            <View style={S.expiryRow}>
+              <Ionicons
+                name="timer-outline"
+                size={12}
+                color={expiresIn != null && expiresIn <= 600 ? colors.danger : colors.textDim}
+              />
+              <Text style={[S.expiryTxt, expiresIn != null && expiresIn <= 600 && { color: colors.danger }]}>
+                {expiryLabel}
+              </Text>
+            </View>
+          )}
           {/* Live Chat Viewers (#58): who's viewing right now — tap for details */}
           {chatViewers.length > 0 && (
             <View style={{ marginTop: 3 }}>

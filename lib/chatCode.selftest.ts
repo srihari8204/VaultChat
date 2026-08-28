@@ -26,6 +26,7 @@
 import { readFileSync } from 'node:fs';
 
 const SCREEN  = readFileSync('app/chat-code.tsx', 'utf8');
+const SCREENCHAT = readFileSync('app/chat.tsx', 'utf8');
 const CHATS   = readFileSync('app/(tabs)/chats.tsx', 'utf8');
 const SERVICE = readFileSync('lib/chatService.ts', 'utf8');
 
@@ -120,6 +121,29 @@ check('both rows route to /chat-code with a mode',
 // use it later. Saying so on both tabs is the cheapest fix for that.
 check('both tabs say the code expires in two minutes',
   (SCREEN.match(/two minutes/g) ?? []).length >= 2);
+
+// ── the self-destruct has to be VISIBLE (migration 120) ───────────────
+// A 1h/3h code deletes the WHOLE conversation. The server has always known the
+// deadline; until the countdown existed the person in the chat did not, so it
+// simply vanished mid-sentence — which reads as data loss, not as the feature
+// working. These guard the only warning there is.
+const CHATSTYLES = readFileSync('components/chat/chatStyles.ts', 'utf8');
+
+check('the chat header counts down to the deletion',
+  /deletes itself in/.test(SCREENCHAT) && /expiryLabel/.test(SCREENCHAT),
+  'the server sends expiresAt; something has to render it');
+check('the countdown goes red near the end',
+  /expiresIn <= 600/.test(SCREENCHAT),
+  'ten minutes is where "I will reply later" stops being an option');
+check('the countdown interval is cleaned up',
+  /clearInterval\(h\)/.test(SCREENCHAT));
+check('the chat LIST flags an expiring chat without opening it',
+  /chat\.expiresAt &&/.test(CHATS) && /timer-outline/.test(CHATS),
+  'finding out by the chat being gone is finding out too late');
+check('the countdown styles exist',
+  /expiryRow:/.test(CHATSTYLES) && /expiryTxt:/.test(CHATSTYLES));
+check('the API type carries expiresAt',
+  /expiresAt\?:\s*string \| null;/.test(SERVICE));
 
 console.log(failures ? `\n  ${failures} FAILED\n` : '\n  all chat-code checks passed\n');
 process.exit(failures ? 1 : 0);

@@ -801,6 +801,18 @@ const ChatRow = memo(function ChatRow({
         <View style={S.rowBody}>
           <View style={S.rowTop}>
             <Text style={S.rowName} numberOfLines={1}>{title}</Text>
+            {/* This chat deletes itself (migration 120). A timer icon in the
+                list, not just inside the chat: the whole conversation is about
+                to go, and finding that out only by opening it is finding out
+                too late. Colour is the same danger/dim split the header uses. */}
+            {chat.expiresAt && (
+              <Ionicons
+                name="timer-outline"
+                size={14}
+                style={{ marginLeft: 3 }}
+                color={new Date(chat.expiresAt).getTime() - Date.now() <= 600_000 ? colors.danger : colors.textFaint}
+              />
+            )}
             {chat.muted && <Ionicons name="volume-mute" size={15} color={colors.textFaint} style={{ marginLeft: 2 }} />}
             {chat.pinned && <Ionicons name="pin" size={14} color={colors.textFaint} style={{ marginLeft: 2 }} />}
             <Text style={[S.rowTime, chat.unreadCount > 0 && { color: colors.primary, fontWeight: '700' }]}>{time}</Text>

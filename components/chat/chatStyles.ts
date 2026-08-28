@@ -110,6 +110,10 @@ export const makeStyles = (c: Palette) => StyleSheet.create({
   title:         { color: c.text, fontSize: 18, fontWeight: '700' },
   sub:           { color: c.textDim, fontSize: 12 },
   e2eBadge:      { color: '#22C55E', fontSize: 11, fontWeight: '600' },
+  // Self-destruct countdown for a chat opened by a 1h/3h code (migration 120).
+  // Sits directly under the header subtitle; goes red under ten minutes.
+  expiryRow:     { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 2 },
+  expiryTxt:     { color: c.textDim, fontSize: 11, fontWeight: '700' },
 
   errorBar:      { backgroundColor: 'rgba(239,68,68,0.12)', borderColor: 'rgba(239,68,68,0.4)', borderWidth: 1, marginHorizontal: 16, marginTop: 8, padding: 10, borderRadius: 10 },
   errorTxt:      { color: c.danger, fontSize: 12 },
