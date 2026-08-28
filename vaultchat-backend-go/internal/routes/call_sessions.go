@@ -139,6 +139,20 @@ func roster(ctx context.Context, uid, callID string) ([]callParticipant, error) 
 			if nm := vault.IdentityFromRow(fnc, lnc, ec, nil, nil, nil, legacyName, nil, nil, nil, nil).Name; nm != nil {
 				p.Name = *nm
 			}
+			// Anonymous code chat, not yet mutually saved (migration 119). The
+			// in-call roster is the fourth and last place a masked identity can
+			// escape; the other three are the chat list, the member list and the
+			// push notification that rings the phone.
+			//
+			// ponytail: one pair query per OTHER participant. That is a single
+			// query for the 1:1 calls this can actually apply to — an anonymous
+			// chat has exactly two people in it — and group rosters answer FALSE
+			// on the first EXISTS. If group calls ever grow anonymous members,
+			// batch this into one query keyed on uid.
+			if p.UserID != uid && chatsAnonMaskedPair(ctx, uid, p.UserID) {
+				p.Name = chatsAnonName
+				p.PhotoURL = nil
+			}
 			p.JoinedAt = httpx.JSTime(joined)
 			p.LeftAt = httpx.JST(left)
 			p.HandRaisedAt = httpx.JST(hand)

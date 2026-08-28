@@ -91,6 +91,7 @@ func RegisterChats(mux *http.ServeMux) {
 	id.HandleFunc("POST /chats/{id}/sender-keys", httpx.RequireAuth(chatsSenderKeysPost))
 	id.HandleFunc("GET /chats/{id}/sender-keys", httpx.RequireAuth(chatsSenderKeysGet))
 	RegisterChatInvitationsOnID(id) // Groups & Circles per-invitee invitations
+	RegisterChatsAnonOnID(id)       // code chats: "keep this person" (migration 119)
 	RegisterChatMembershipOnID(id)  // Groups & Circles in-app membership (v2)
 	RegisterChatCalendarOnID(id)    // Groups & Circles shared calendar
 	RegisterSpaceRosterOnID(id)     // Spaces & Operations roster + visibility links
@@ -795,6 +796,13 @@ type chatsListItem struct {
 	PeerLastSeenAt             *httpx.JSTime `json:"peerLastSeenAt"`
 	PeerLastReadMessageID      *int64        `json:"peerLastReadMessageId"`
 	PeerLastDeliveredMessageID *int64        `json:"peerLastDeliveredMessageId"`
+	// Migration 119: this chat was opened by code and the two people have not
+	// both saved each other, so peerName/peerPhotoURL above are a placeholder.
+	//
+	// The client needs to be TOLD rather than sniffing for the placeholder name:
+	// somebody really can be called Guest, and a client that guessed would draw a
+	// ghost over a real person and offer to "save" someone already saved.
+	AnonMasked bool `json:"anonMasked"`
 }
 
 func chatsList(w http.ResponseWriter, r *http.Request) {
@@ -802,6 +810,12 @@ func chatsList(w http.ResponseWriter, r *http.Request) {
 	user := httpx.UserFrom(r)
 	ih := r.URL.Query().Get("includeHidden")
 	wantHidden := ih == "1" || ih == "true"
+
+	// Which of this user's chats must hide their peer's identity. Resolved in
+	// ONE query up front rather than per row: the list returns up to 200 chats
+	// and anonymous ones are a small minority, so a per-row check would be 200
+	// round trips to hide a handful (migration 119).
+	maskedChats := chatsAnonMaskedSet(ctx, user.ID)
 
 	out := []chatsListItem{}
 	err := chatsQueryU(ctx, user.ID,
@@ -906,6 +920,16 @@ func chatsList(w http.ResponseWriter, r *http.Request) {
 				item.PeerName = vault.IdentityFromRow(peerFnc, peerLnc, peerEc,
 					nil, nil, nil, peerName, nil, nil, nil, nil).Name
 			}
+			// Anonymous chat, not yet mutually saved: the peer's real name and
+			// photo must not leave the server. Applied AFTER the identity is
+			// resolved rather than by skipping the resolve, so there is one place
+			// that decides what a masked peer looks like (migration 119).
+			if maskedChats[id] {
+				anon := chatsAnonName
+				item.PeerName = &anon
+				item.PeerPhotoURL = nil
+				item.AnonMasked = true
+			}
 			out = append(out, item)
 			return nil
 		})
@@ -997,6 +1021,25 @@ func chatsCreateDirect(w http.ResponseWriter, _ *http.Request, ctx context.Conte
 		return
 	}
 
+	chatID, existing, status, msg := directChatEnsure(ctx, user.ID, *otherID)
+	if status != 0 {
+		httpx.Err(w, status, msg)
+		return
+	}
+	httpx.JSON(w, 200, map[string]any{"id": chatID, "type": "direct", "existing": existing})
+}
+
+// directChatEnsure finds the direct chat between two people, or opens one.
+//
+// EVERY route that puts two people in a direct chat goes through here — the
+// ordinary POST /chats above and redeeming a chat code — because the block
+// check below is a permission boundary, not a formality. A second path that
+// created chat_members rows on its own would be a way to reach someone who has
+// blocked you, and it would drift the first time the block rule changed.
+//
+// Returns (chatID, alreadyExisted, 0, "") on success; otherwise the HTTP status
+// and message the caller should answer with.
+func directChatEnsure(ctx context.Context, uid, otherID string) (string, bool, int, string) {
 	// Block check — either side blocking the other prevents a new direct chat.
 	// System-level read (Node db.query → pool).
 	var one int
@@ -1004,41 +1047,36 @@ func chatsCreateDirect(w http.ResponseWriter, _ *http.Request, ctx context.Conte
 		`SELECT 1 FROM user_blocks
 		   WHERE (blocker_id = $1 AND blocked_id = $2)
 		      OR (blocker_id = $2 AND blocked_id = $1)
-		   LIMIT 1`, user.ID, *otherID).Scan(&one)
+		   LIMIT 1`, uid, otherID).Scan(&one)
 	if err == nil {
-		httpx.Err(w, 403, "Blocked")
-		return
+		return "", false, 403, "Blocked"
 	}
 	if !db.NoRows(err) {
-		log.Printf("[chats POST] %v", err)
-		httpx.Err(w, 500, "Failed to create chat")
-		return
+		log.Printf("[directChatEnsure] %v", err)
+		return "", false, 500, "Failed to create chat"
 	}
 
 	var existingID string
-	err = chatsQRow(ctx, user.ID,
+	err = chatsQRow(ctx, uid,
 		`SELECT c.id FROM chats c
 		 WHERE c.type = 'direct'
 		   AND EXISTS (SELECT 1 FROM chat_members WHERE chat_id = c.id AND user_id = $1 AND left_at IS NULL)
 		   AND EXISTS (SELECT 1 FROM chat_members WHERE chat_id = c.id AND user_id = $2 AND left_at IS NULL)
-		 LIMIT 1`, []any{user.ID, *otherID}, &existingID)
+		 LIMIT 1`, []any{uid, otherID}, &existingID)
 	if err == nil {
-		httpx.JSON(w, 200, map[string]any{"id": existingID, "type": "direct", "existing": true})
-		return
+		return existingID, true, 0, ""
 	}
 	if !db.NoRows(err) {
-		log.Printf("[chats POST] %v", err)
-		httpx.Err(w, 500, "Failed to create chat")
-		return
+		log.Printf("[directChatEnsure] %v", err)
+		return "", false, 500, "Failed to create chat"
 	}
 
 	var defDis int64
-	if err := chatsQRow(ctx, user.ID,
+	if err := chatsQRow(ctx, uid,
 		`SELECT default_disappearing_seconds FROM users WHERE id = $1`,
-		[]any{user.ID}, &defDis); err != nil && !db.NoRows(err) {
-		log.Printf("[chats POST] %v", err)
-		httpx.Err(w, 500, "Failed to create chat")
-		return
+		[]any{uid}, &defDis); err != nil && !db.NoRows(err) {
+		log.Printf("[directChatEnsure] %v", err)
+		return "", false, 500, "Failed to create chat"
 	}
 	var disParam *int64
 	if defDis > 0 {
@@ -1046,31 +1084,30 @@ func chatsCreateDirect(w http.ResponseWriter, _ *http.Request, ctx context.Conte
 	}
 
 	var chatID string
-	err = db.WithUser(ctx, user.ID, func(tx pgx.Tx) error {
+	err = db.WithUser(ctx, uid, func(tx pgx.Tx) error {
 		if e := tx.QueryRow(ctx,
 			`INSERT INTO chats (type, created_by, disappearing_seconds) VALUES ('direct', $1, $2) RETURNING id`,
-			user.ID, disParam).Scan(&chatID); e != nil {
+			uid, disParam).Scan(&chatID); e != nil {
 			return e
 		}
 		// Insert creator FIRST as 'owner' so the bootstrap RLS clause allows it;
 		// then the other party as 'member'.
 		if _, e := tx.Exec(ctx,
 			`INSERT INTO chat_members (chat_id, user_id, role) VALUES ($1, $2, 'owner')`,
-			chatID, user.ID); e != nil {
+			chatID, uid); e != nil {
 			return e
 		}
 		_, e := tx.Exec(ctx,
 			`INSERT INTO chat_members (chat_id, user_id, role) VALUES ($1, $2, 'member')`,
-			chatID, *otherID)
+			chatID, otherID)
 		return e
 	})
 	if err != nil {
-		log.Printf("[chats POST] %v", err)
-		httpx.Err(w, 500, "Failed to create chat")
-		return
+		log.Printf("[directChatEnsure] %v", err)
+		return "", false, 500, "Failed to create chat"
 	}
 	realtime.InvalidateChatMembers(ctx, chatID) // P2.2: fresh roster before any fan-out
-	httpx.JSON(w, 200, map[string]any{"id": chatID, "type": "direct", "existing": false})
+	return chatID, false, 0, ""
 }
 
 func chatsCreateGroup(w http.ResponseWriter, _ *http.Request, ctx context.Context, user httpx.User, b map[string]any) {

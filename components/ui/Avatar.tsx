@@ -7,6 +7,7 @@
 import React, { useEffect, useState } from 'react';
 import { View, StyleSheet, type ViewStyle, type StyleProp } from 'react-native';
 import { Image } from 'expo-image';
+import { Ionicons } from '@expo/vector-icons';
 import { avatarColor } from '../../constants/theme';
 import { useColors } from '../../lib/theme';
 import { AppText } from './Text';
@@ -21,9 +22,20 @@ export interface AvatarProps {
   /** Show a presence dot when 'online'. */
   presence?: 'online' | 'offline' | null;
   style?: StyleProp<ViewStyle>;
+  /**
+   * Anonymous peer — a chat opened by code where the two people have not both
+   * saved each other yet (migration 119). Draws a neutral silhouette instead of
+   * an initial.
+   *
+   * Without this the masked name "Guest" would render as a cheerful "G" in a
+   * colour derived from that word, so every anonymous chat would look like the
+   * same real person called Guest. A silhouette reads as "not disclosed", which
+   * is what is actually true.
+   */
+  anon?: boolean;
 }
 
-export function Avatar({ uri, headers, name, size = 48, presence, style }: AvatarProps) {
+export function Avatar({ uri, headers, name, size = 48, presence, style, anon }: AvatarProps) {
   const c = useColors();
   const [failed, setFailed] = useState(false);
   useEffect(() => { setFailed(false); }, [uri]);   // retry when the uri changes
@@ -32,7 +44,13 @@ export function Avatar({ uri, headers, name, size = 48, presence, style }: Avata
   const dotSize = Math.max(10, Math.round(size * 0.28));
   return (
     <View style={[dim, style]}>
-      {uri && !failed ? (
+      {anon ? (
+        // Ahead of the image branch on purpose: a masked chat must never render
+        // a photo even if a stale `uri` is still sitting in a cached list row.
+        <View style={[dim, styles.center, { backgroundColor: c.surfaceSolid }]}>
+          <Ionicons name="person" size={size * 0.55} color={c.textDim} />
+        </View>
+      ) : uri && !failed ? (
         <Image
           source={headers ? { uri, headers } : { uri }}
           style={[dim, { backgroundColor: c.surfaceSolid }]}

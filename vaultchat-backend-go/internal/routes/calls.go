@@ -144,6 +144,13 @@ func callInitiate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	name, dp := callerIdentity(ctx, user.ID)
+	// Anonymous code chat, not yet mutually saved (migration 119). The ring is
+	// the loudest place an identity can escape — it lights up a locked screen
+	// with a name and a photo, outside the app entirely, where none of the
+	// chat-payload masking reaches. Mask here or the whole feature is decorative.
+	if chatsAnonMaskedPair(ctx, user.ID, calleeID) {
+		name, dp = chatsAnonName, ""
+	}
 	video := "false"
 	if isVideo {
 		video = "true"

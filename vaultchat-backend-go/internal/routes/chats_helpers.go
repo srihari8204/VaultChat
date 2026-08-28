@@ -61,6 +61,8 @@ func chatsGet(w http.ResponseWriter, r *http.Request) {
 		cLastMessageID, cPinnedMessageID             *int64
 		cLastMessageAt                               *time.Time
 		cDisappearing                                *int64
+		// Migration 120: the whole chat self-destructs at this time. NULL = never.
+		cExpiresAt                                   *time.Time
 		cSlowMode                                    int64
 		cSendPolicy, cMediaPolicy, cAddMembersPolicy *string
 		cAntiSpamLinks, cApproveMembers              bool
@@ -71,12 +73,12 @@ func chatsGet(w http.ResponseWriter, r *http.Request) {
 		`SELECT id, type, name, description, photo_url, created_by, created_at, updated_at,
 		        last_message_id, last_message_at, pinned_message_id, disappearing_seconds,
 		        slow_mode_seconds, send_policy, media_policy, add_members_policy,
-		        anti_spam_links, approve_members, icon, color, privacy
+		        anti_spam_links, approve_members, icon, color, privacy, expires_at
 		   FROM chats WHERE id = $1`, []any{chatID},
 		&cID, &cType, &cName, &cDescription, &cPhotoURL, &cCreatedBy, &cCreatedAt, &cUpdatedAt,
 		&cLastMessageID, &cLastMessageAt, &cPinnedMessageID, &cDisappearing,
 		&cSlowMode, &cSendPolicy, &cMediaPolicy, &cAddMembersPolicy,
-		&cAntiSpamLinks, &cApproveMembers, &cIcon, &cColor, &cPrivacy)
+		&cAntiSpamLinks, &cApproveMembers, &cIcon, &cColor, &cPrivacy, &cExpiresAt)
 	if db.NoRows(err) {
 		httpx.Err(w, 404, "Chat not found")
 		return
@@ -86,6 +88,10 @@ func chatsGet(w http.ResponseWriter, r *http.Request) {
 		httpx.Err(w, 500, "Failed to fetch chat")
 		return
 	}
+
+	// Anonymous chat opened by code, not yet mutually saved (migration 119).
+	// Resolved once for the whole member list rather than per member.
+	anonMasked := chatsAnonMasked(ctx, chatID)
 
 	type memberRow struct {
 		pub          chatsPublicMember
@@ -128,6 +134,20 @@ func chatsGet(w http.ResponseWriter, r *http.Request) {
 				Muted:                  muted, LeftAt: httpx.JST(leftAt),
 				Email: ident.Email, Name: ident.Name, PhotoURL: photoURL,
 				Status: status,
+			}
+			// Anonymous chat, not yet mutually saved (migration 119). This member
+			// list is the WORST leak of the four: it carries the EMAIL as well as
+			// the name, so a masked chat that forgot this one would hand over more
+			// than the chat list ever showed. Status goes too — people put their
+			// name in it.
+			//
+			// The caller is masked along with everyone else. Their own identity is
+			// not a secret from themselves, but the client renders this list
+			// uniformly and a self-row that alone carried a real name would be a
+			// tell about which row is which.
+			if anonMasked {
+				anonName := chatsAnonName
+				m.Name, m.Email, m.PhotoURL, m.Status = &anonName, nil, nil, nil
 			}
 			if online != nil {
 				m.Online = *online
@@ -202,6 +222,11 @@ func chatsGet(w http.ResponseWriter, r *http.Request) {
 		// What OTHERS require of me — drives this device's capture policy.
 		"peerBlocksCapture":      peerBlocks,
 		"peerWantsCaptureNotice": peerNotify,
+		// Migration 119: opened by code, not yet mutually saved, so every name
+		// and photo in `members` below is a placeholder. The client shows a ghost
+		// and offers "Save contact" off this flag rather than by recognising the
+		// placeholder name, which somebody could genuinely be called.
+		"anonMasked": anonMasked,
 		"id":                  cID,
 		"type":                cType,
 		"name":                cName,
@@ -214,6 +239,9 @@ func chatsGet(w http.ResponseWriter, r *http.Request) {
 		"lastMessageAt":       httpx.JST(cLastMessageAt),
 		"pinnedMessageId":     userBigStr(cPinnedMessageID),
 		"disappearingSeconds": cDisappearing,
+		// Migration 120: when this whole conversation deletes itself. The client
+		// counts down against it; null means it never does.
+		"expiresAt":           httpx.JST(cExpiresAt),
 		"slowModeSeconds":     cSlowMode,
 		"sendPolicy":          chatsStrDefault(cSendPolicy, "everyone"),
 		"mediaPolicy":         chatsStrDefault(cMediaPolicy, "everyone"),

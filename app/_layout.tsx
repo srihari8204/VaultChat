@@ -668,6 +668,7 @@ function RootLayout() {
 
         {/* Security & Privacy */}
         <Stack.Screen name="ghost-mode" />
+        <Stack.Screen name="chat-code" />
         <Stack.Screen name="aiguardian" />
         <Stack.Screen name="backup-pin" />
         <Stack.Screen name="duresspin" />

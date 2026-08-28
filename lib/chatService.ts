@@ -41,6 +41,14 @@ export interface ChatSummary {
   peerLastSeenAt?: string | null;
   peerLastReadMessageId?:      number | null;
   peerLastDeliveredMessageId?: number | null;
+  // Opened by code, and the two have not both saved each other yet (migration
+  // 119), so peerName/peerPhotoURL above are a placeholder rather than a person.
+  // Trust this flag, never the placeholder name — somebody can be called Guest.
+  anonMasked?: boolean;
+  // Migration 120: when this WHOLE conversation deletes itself — messages,
+  // membership and thread. null means never. Distinct from disappearingSeconds,
+  // which expires individual messages and leaves the chat standing.
+  expiresAt?: string | null;
   // Per-user screenshot policy for this chat. Backend defaults to 'block'.
   screenshotMode?: 'allow' | 'allow_notify' | 'block' | 'block_silent';
   // Per-user Vanish Mode: while ON, new messages I send are flagged for
@@ -1796,6 +1804,64 @@ export async function updateChat(
 // Pass null/0 to turn off.
 export async function setDisappearing(chatId: string, seconds: number | null): Promise<void> {
   await updateChat(chatId, { disappearingSeconds: seconds });
+}
+
+// ─── Chat codes (start a chat without exchanging numbers) ───────────
+// Migration 118 + routes/chat_codes.go. Six digits, SINGLE USE, dead two
+// minutes after it is made. You hold one at a time; making a new one revokes
+// the old. The short life is deliberate and is what makes six digits safe —
+// see the migration before treating it as a UI knob.
+export interface ChatCode {
+  // The six digits. Readable back from the server for as long as the code is
+  // live, so leaving the screen and returning shows the same code rather than
+  // silently minting another.
+  code?:       string;
+  // Disappearing timer stamped on the chat this code opens; null = messages
+  // stay until somebody deletes them.
+  ttlSeconds:  number | null;
+  // "Save this contact" — the person who redeems is treated as an ordinary
+  // contact instead of a stranger, so the automatic Ghost Mode defaults
+  // (hidden online/typing/read/last-seen) are skipped.
+  keepContact: boolean;
+  expiresAt?:  string;
+  active:      boolean;
+}
+
+export async function createChatCode(
+  opts: { ttlSeconds: number | null; keepContact?: boolean },
+): Promise<ChatCode> {
+  return api<ChatCode>('/chat-codes', {
+    method: 'POST',
+    json: { ttlSeconds: opts.ttlSeconds ?? 0, keepContact: !!opts.keepContact },
+  });
+}
+
+export async function getChatCode(): Promise<ChatCode> {
+  return api<ChatCode>('/chat-codes');
+}
+
+/** "Stop" — anyone still holding the code gets nothing. */
+export async function revokeChatCode(): Promise<void> {
+  await api('/chat-codes', { method: 'DELETE' });
+}
+
+/**
+ * "I want to keep this person" on a chat opened by code.
+ *
+ * The reveal is MUTUAL: this call alone changes nothing visible unless the
+ * other side has already saved too. `revealed` says whether that just happened,
+ * so the screen can say "you can see each other now" rather than appearing to
+ * do nothing.
+ */
+export async function saveContact(chatId: string): Promise<{ saved: boolean; revealed: boolean }> {
+  return api(`/chats/${encodeURIComponent(chatId)}/save-contact`, { method: 'POST' });
+}
+
+/** Redeem someone else's code. Returns the direct chat it opened. */
+export async function joinChatCode(code: string): Promise<{
+  chatId: string; existing: boolean; ttlSeconds: number | null; keepContact: boolean;
+}> {
+  return api(`/chat-codes/${encodeURIComponent(code.trim())}/join`, { method: 'POST' });
 }
 
 export async function addChatMembers(

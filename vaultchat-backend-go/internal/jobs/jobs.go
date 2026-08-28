@@ -142,6 +142,8 @@ func StartAll(ctx context.Context) {
 	}
 
 	run("sweep-expired-messages", sweepInterval, sweepExpiredMessages)
+	// Code chats with a 1h/3h option delete themselves whole (migration 120).
+	run("sweep-expired-chats", sweepInterval, sweepExpiredChats)
 	run("media-retention", sweepInterval, sweepDeliveredAttachments)
 	run("sweep-expired-stories", sweepInterval, sweepExpiredStories)
 	run("sweep-games-notify-seen", sweepInterval, sweepGamesNotifySeen)
@@ -235,6 +237,45 @@ const expiredMessagesSQL = `DELETE FROM messages
 
 func sweepExpiredMessages(ctx context.Context) {
 	batchedSweep(ctx, "sweep", expiredMessagesSQL)
+}
+
+// ── self-destructing chats (migration 120) ─────────────────────────────
+
+// expiredChatsSQL deletes whole conversations whose deadline has passed.
+//
+// This is the most destructive statement in this package, so the predicate is
+// written ONCE, here, and every clause is load-bearing:
+//
+//	expires_at IS NOT NULL   Every ordinary chat on the box has NULL. Losing
+//	                         this clause would not delete "a few extra rows",
+//	                         it would delete EVERY CHAT ON PRODUCTION, because
+//	                         `NULL <= now()` is NULL, not TRUE... which is why
+//	                         the IS NOT NULL is belt to that braces: it makes
+//	                         the intent unmissable to the next reader, and it is
+//	                         what lets the partial index be used.
+//	expires_at <= now()      Not yet due means not touched.
+//	LIMIT via ctid           Batching, so one enormous backlog cannot hold a
+//	                         lock over the whole table in a single statement.
+//
+// 27 tables reference chats(id) ON DELETE CASCADE, so this one DELETE takes the
+// messages, the membership, the bodies, the receipts and the rest with it. That
+// is the point: "the whole chat, gone" should not be a list of deletes that a
+// future table can be forgotten from.
+const expiredChatsSQL = `
+DELETE FROM chats
+ WHERE ctid IN (
+   SELECT ctid FROM chats
+    WHERE expires_at IS NOT NULL
+      AND expires_at <= now()
+    LIMIT $1
+ )`
+
+// sweepExpiredChats runs the above. Named separately from the message sweep
+// because the two answer different promises: messages expiring is 013, the
+// conversation expiring is 120, and conflating them once already produced a
+// "temporary" chat that kept the thread alive forever.
+func sweepExpiredChats(ctx context.Context) {
+	batchedSweep(ctx, "sweep-expired-chats", expiredChatsSQL)
 }
 
 // ── delete-on-delivery (WhatsApp model; env-gated) ─────────────────────

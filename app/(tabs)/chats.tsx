@@ -331,6 +331,11 @@ export default function ChatsScreen() {
     router.push({ pathname: '/new-chat', params: { ttl: String(seconds) } } as any);
   }, [router]);
 
+  const openCode = useCallback((mode: 'share' | 'enter') => {
+    setTempSheet(false);
+    router.push({ pathname: '/chat-code', params: { mode } } as any);
+  }, [router]);
+
   // Avatar tap (WhatsApp): peer has a story → open it; else show photo popup.
   const [avatarView, setAvatarView] = useState<ChatSummary | null>(null);
   const onAvatarPress = useCallback(async (chat: ChatSummary) => {
@@ -641,6 +646,14 @@ export default function ChatsScreen() {
             <Text style={S.sheetTitle}>TEMPORARY CHAT — MESSAGES DELETE THEMSELVES</Text>
             <SheetItem icon="timer-outline" label="1 hour" onPress={() => startTemporary(3600)} />
             <SheetItem icon="timer-outline" label="3 hours" onPress={() => startTemporary(10800)} />
+            {/* The other half of the same question. Both rows above need someone
+                already reachable — a contact, or a number on VaultChat. These two
+                are for the person in front of you who is neither: a code opens
+                the chat, so no number changes hands. Same sheet because "talk to
+                someone without keeping it" is one intent, not two. */}
+            <View style={S.sheetDivider} />
+            <SheetItem icon="key-outline" label="Share a code" onPress={() => openCode('share')} />
+            <SheetItem icon="keypad-outline" label="Enter a code" onPress={() => openCode('enter')} />
           </Pressable>
         </Pressable>
       </Modal>
@@ -776,6 +789,7 @@ const ChatRow = memo(function ChatRow({
             name={title}
             size={50}
             presence={chat.type === 'direct' && chat.peerOnline ? 'online' : null}
+            anon={!!chat.anonMasked}
           />
           {selectMode && (
             <View style={[S.selBadge, isSelected ? S.selBadgeOn : S.selBadgeOff]}>
@@ -914,6 +928,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   sheet: { backgroundColor: c.surfaceSolid, borderTopLeftRadius: 20, borderTopRightRadius: 20, paddingBottom: 32, paddingTop: 10 },
   sheetHandle: { width: 40, height: 4, borderRadius: 2, backgroundColor: c.border, alignSelf: 'center', marginBottom: 8 },
   sheetTitle: { color: c.textDim, fontSize: 13, fontWeight: '700', paddingHorizontal: 20, paddingVertical: 10 },
+  sheetDivider: { height: StyleSheet.hairlineWidth, backgroundColor: c.border, marginVertical: 6, marginHorizontal: 20 },
   sheetItem: { flexDirection: 'row', alignItems: 'center', gap: 16, paddingHorizontal: 20, paddingVertical: 15 },
   sheetItemTxt: { color: c.text, fontSize: 16, fontWeight: '500' },
   draftLabel: { color: c.danger, fontWeight: '700' },

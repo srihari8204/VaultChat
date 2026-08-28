@@ -1747,7 +1747,17 @@ func userBookmarksGet(w http.ResponseWriter, r *http.Request) {
 	            m.chat_id, m.sender_id, m.type, m.content, m.meta,
 	            m.created_at AS message_created_at, m.deleted_at,
 	            c.type AS chat_type, c.name AS chat_name,
-	            su.name AS sender_name
+	            -- Anonymous code chat, not yet mutually saved (migration 119).
+	            -- Bookmarking a message from a masked peer must not be a way to
+	            -- read their name back. su.name is the LEGACY plaintext column
+	            -- and is NULL for every vault-onboarded account, so this only
+	            -- ever had teeth for older accounts — but the promise the
+	            -- feature makes does not have an exception for those.
+	            CASE WHEN c.anon
+	                  AND EXISTS (SELECT 1 FROM chat_members am
+	                               WHERE am.chat_id = c.id AND am.left_at IS NULL
+	                                 AND am.saved_peer = FALSE)
+	                 THEN NULL ELSE su.name END AS sender_name
 	       FROM bookmarks b
 	       LEFT JOIN messages m ON m.id = b.message_id
 	       LEFT JOIN chats    c ON c.id = m.chat_id

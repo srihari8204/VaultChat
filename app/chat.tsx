@@ -107,6 +107,7 @@ import {
   pinMessage,
   reportScreenshotCaptured,
   resetChatSession,
+  saveContact,
   revokeAttachment,
   setChatNotifSound,
   sendMessage,
@@ -1570,6 +1571,33 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
           params: { chatId, peerName: peer.name ?? peer.email ?? '' },
         }),
       });
+      // Chat opened by code, still anonymous (migration 119). This is the ONLY
+      // way out of the mask, so it goes first — without it the two people stay
+      // ghosts to each other forever and the feature looks broken rather than
+      // private.
+      //
+      // The alert is explicit that one save is not enough. Someone who taps it
+      // and sees nothing change would otherwise reasonably conclude it failed.
+      if (chat?.anonMasked) {
+        actions.push({
+          label: 'Save contact',
+          icon: 'person-add-outline',
+          onPress: async () => {
+            try {
+              const res = await saveContact(chatId);
+              Alert.alert(
+                res.revealed ? 'Saved — you can see each other now' : 'Saved',
+                res.revealed
+                  ? 'You both saved each other, so your names and photos are now visible.'
+                  : 'You will both stay hidden until they save you too.',
+              );
+              getChat(chatId).then(setChat).catch(() => {});
+            } catch (e: any) {
+              Alert.alert('Could not save', e?.message ?? 'Try again.');
+            }
+          },
+        });
+      }
       actions.push({
         label: 'Ghost Mode',
         icon: 'eye-off-outline',
@@ -2512,6 +2540,7 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
             name={title}
             size={40}
             presence={chat?.type === 'direct' && peerPresence?.online ? 'online' : null}
+            anon={!!chat?.anonMasked}
           />
         </TouchableOpacity>
         <View style={{ flex: 1 }}>

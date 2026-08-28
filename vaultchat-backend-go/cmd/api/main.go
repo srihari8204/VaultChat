@@ -107,6 +107,9 @@ func main() {
 	routes.RegisterAdmin(mux)
 	routes.RegisterChats(mux)
 	routes.RegisterChatInvitations(mux) // Groups & Circles: /invitations (invitee side)
+	// Chat codes: open a direct chat with someone whose number you do not have.
+	// Redeeming goes through directChatEnsure, the same path POST /chats uses.
+	routes.RegisterChatCodes(mux)
 	routes.RegisterChatMembership(mux)  // Groups & Circles: in-app accept (invitee side)
 	routes.RegisterShopBook(mux)
 	routes.RegisterShopBookStock(mux)
