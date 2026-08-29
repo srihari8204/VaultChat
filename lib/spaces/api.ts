@@ -94,7 +94,9 @@ export const getRuns = (spaceId: string, activeOnly = false) =>
   api<Run[]>(`/chats/${spaceId}/runs${activeOnly ? '?active=1' : ''}`);
 
 export const getRun = (spaceId: string, runId: string) =>
-  api<{ run: Run; stops: RunStop[]; riders: RunRider[] }>(`/chats/${spaceId}/runs/${runId}`);
+  api<{ run: Run; stops: RunStop[]; riders: RunRider[]; delayThresholdMinutes: number }>(
+    `/chats/${spaceId}/runs/${runId}`,
+  );
 
 export const createRun = (
   spaceId: string,
@@ -341,7 +343,14 @@ export const issueDeviceCommand = (
 );
 
 export const setShift = (
-  spaceId: string, body: { shiftStart?: string; shiftEnd?: string; shiftGraceMinutes?: number },
+  spaceId: string, body: {
+    shiftStart?: string; shiftEnd?: string; shiftGraceMinutes?: number;
+    /** Minutes past a stop's planned time before the SERVER pushes "running
+     *  late" to that stop's guardians (1–240; omitted keeps the current value).
+     *  The client's isDelayed() only informs a guardian who is looking —
+     *  matching default 10 on both sides. */
+    runDelayThresholdMinutes?: number;
+  },
 ) => api(`/chats/${spaceId}/shift`, { method: 'PATCH', json: body });
 
 // ✅ expo-router: this lives under lib/, but keep the convention consistent.

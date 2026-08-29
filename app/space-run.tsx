@@ -64,6 +64,11 @@ export default function SpaceRunScreen() {
   const runId = String(params.runId || '');
 
   const [run, setRun] = useState<Run | null>(null);
+  // Server's per-space setting; isDelayed's own default (10) is only a
+  // fallback for the instant before the first load answers — otherwise the
+  // on-screen badge could disagree with the server's own "running late" push,
+  // which fires on this same threshold (spaces_ops.go shiftSet).
+  const [delayThresholdMin, setDelayThresholdMin] = useState<number | undefined>(undefined);
   const [stops, setStops] = useState<RunStop[]>([]);
   const [riders, setRiders] = useState<RunRider[]>([]);
   const [events, setEvents] = useState<RunEvent[]>([]);
@@ -83,6 +88,7 @@ export default function SpaceRunScreen() {
       setRun(data.run);
       setStops(data.stops || []);
       setRiders(data.riders || []);
+      setDelayThresholdMin(data.delayThresholdMinutes);
     } catch (e: any) {
       Alert.alert('Could not load the run', e?.message ?? 'Try again.');
     } finally {
@@ -175,6 +181,7 @@ export default function SpaceRunScreen() {
           reachedStopId={reachedStopId}
           vehicle={vehicle}
           colors={colors}
+          delayThresholdMin={delayThresholdMin}
         />
       ))}
       {riders.length === 0 && (
@@ -273,9 +280,13 @@ export default function SpaceRunScreen() {
   );
 }
 
-function RiderCard({ rider, run, stops, reachedStopId, vehicle, colors }: {
+function RiderCard({ rider, run, stops, reachedStopId, vehicle, colors, delayThresholdMin }: {
   rider: RunRider; run: Run; stops: RunStop[]; reachedStopId: string | null;
   vehicle: RunPing | null; colors: Palette;
+  /** The space's server-side threshold, once loaded — undefined only for the
+   *  instant before the first getRun answers, when isDelayed's own default
+   *  (10) is the honest fallback. */
+  delayThresholdMin?: number;
 }) {
   const s = styles(colors);
   const now = Date.now();
@@ -312,7 +323,9 @@ function RiderCard({ rider, run, stops, reachedStopId, vehicle, colors }: {
   }
   const win = arrivalWindow(now, etaSeconds, between);
   const waiting = rider.state === 'pending' && run.status === 'started';
-  const late = waiting && isDelayed(myStop?.plannedAt ?? null, win.latest);
+  // delayThresholdMin undefined (first instant before load) → isDelayed's own
+  // default (10) applies, same as before this fix.
+  const late = waiting && isDelayed(myStop?.plannedAt ?? null, win.latest, delayThresholdMin);
 
   return (
     <View style={[s.card, s.hero]}>

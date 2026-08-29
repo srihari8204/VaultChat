@@ -27,6 +27,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -172,6 +173,12 @@ func runPing(w http.ResponseWriter, r *http.Request) {
 		httpx.Err(w, 500, "Failed to record ping")
 		return
 	}
+	// The heartbeat doubles as the delay clock. The client's isDelayed() can
+	// only tell a guardian who is looking at the screen; this evaluates the
+	// same threshold server-side and reaches the ones who are not. Dedup via
+	// run_events makes a ping every few seconds mean one push per stop, ever.
+	uid := user.ID
+	workx.Submit(func() { runCheckDelays(chatID, runID, uid) })
 	httpx.JSON(w, 200, map[string]any{"ok": true})
 }
 
@@ -311,7 +318,23 @@ func runGet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	httpx.JSON(w, 200, map[string]any{"run": run, "stops": stops, "riders": riders})
+	// The threshold this run's "running late" badge should agree with. Without
+	// this the client's isDelayed() only ever had the compile-time default
+	// (10), so an admin who set the space's threshold to 30 via shiftSet saw
+	// the on-screen badge fire at 10 while the server's own push fired at 30 —
+	// two guardian-facing surfaces disagreeing about the same fact. Found by
+	// review; thin-client violation (the client had no way to learn the truth).
+	var thresholdMin int
+	if err := chatsQRow(ctx, user.ID,
+		`SELECT run_delay_threshold_minutes FROM chats WHERE id = $1`,
+		[]any{chatID}, &thresholdMin); err != nil {
+		thresholdMin = 10 // matches the column's own DEFAULT and the client's fallback
+	}
+
+	httpx.JSON(w, 200, map[string]any{
+		"run": run, "stops": stops, "riders": riders,
+		"delayThresholdMinutes": thresholdMin,
+	})
 }
 
 func runCreate(w http.ResponseWriter, r *http.Request) {
@@ -473,6 +496,20 @@ func runPatch(w http.ResponseWriter, r *http.Request) {
 		})
 		chatsAudit(ctx, user.ID, chatID, "run_driver_changed", driverID, map[string]any{"runId": runID})
 		emitx.ChatEvent(chatID, "runs_changed", map[string]any{"runId": runID, "by": user.ID})
+		// The comment above always promised this fan-out; until now only the
+		// socket event delivered it. The push closes the closed-app hole for
+		// exactly the three parties the spec names: outgoing driver, incoming
+		// driver, and the riders' guardians (extraUsers reaches the drivers).
+		outgoing, incoming := "", ""
+		if curDriver != nil {
+			outgoing = *curDriver
+		}
+		if driverID != nil {
+			incoming = *driverID
+		}
+		workx.Submit(func() {
+			runNotifyRunWide(chatID, runID, "run_driver_changed", "The driver for this run has changed", outgoing, incoming)
+		})
 	}
 
 	// ── status ──
@@ -511,6 +548,17 @@ func runPatch(w http.ResponseWriter, r *http.Request) {
 		emitx.ChatEvent(chatID, "runs_changed", map[string]any{
 			"runId": runID, "status": status, "by": user.ID,
 		})
+		// The socket event above reaches open apps; the push reaches parents.
+		// Spec: guardians are notified on run started and on arrival at the
+		// destination — which for the run as a whole is completion.
+		if status == "started" {
+			workx.Submit(func() { runNotifyRunWide(chatID, runID, "run_started", "The run has started") })
+		} else if status == "completed" {
+			workx.Submit(func() { runNotifyRunWide(chatID, runID, "run_completed", "The run has been completed") })
+			// Bound the throttle map's lifetime to the run's: nothing else ever
+			// removes an entry, and a completed run will never be checked again.
+			runDelayCheckedAt.Delete(runID)
+		}
 	}
 
 	httpx.JSON(w, 200, map[string]any{"ok": true})
@@ -672,6 +720,10 @@ func runStopArrive(w http.ResponseWriter, r *http.Request) {
 		}
 		emitx.ChatEvent(chatID, "runs_changed", map[string]any{"runId": runID, "by": user.ID})
 		workx.Submit(func() { runNotifyStopArrival(chatID, runID, stopID, label) })
+		// Reaching stop N is what makes stop N+1 "approaching" — the only
+		// position-free way to warn the next stop, and the server holds no
+		// position by design.
+		workx.Submit(func() { runNotifyNextStop(chatID, runID, stopID) })
 	}
 
 	httpx.JSON(w, 200, map[string]any{"ok": true, "arrivedAt": httpx.JSTime(arrivedAt)})
@@ -1036,6 +1088,35 @@ func runDutySet(w http.ResponseWriter, r *http.Request) {
 //
 // This is the query that makes "a notification never names an unlinked rider"
 // true. It is not a filter applied to a broadcast; there is no broadcast.
+// pushTokensFor returns the push tokens for members of chatID among userIDs
+// who have not left and have not muted the chat. Identical query, previously
+// duplicated between runNotifyGuardians and runNotifyRunWide — the next
+// change to token-eligibility rules (a new opt-out, dead-token pruning) now
+// lands once instead of needing two synchronized edits.
+func pushTokensFor(ctx context.Context, chatID string, userIDs []string) ([]string, error) {
+	rows, err := db.SysPool.Query(ctx,
+		`SELECT d.push_token
+		   FROM devices d
+		   JOIN chat_members cm ON cm.user_id = d.user_id AND cm.chat_id = $2
+		  WHERE d.user_id = ANY($1::uuid[])
+		    AND cm.left_at IS NULL
+		    AND cm.muted = FALSE
+		    AND d.push_token IS NOT NULL`,
+		userIDs, chatID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	tokens := []string{}
+	for rows.Next() {
+		var t *string
+		if err := rows.Scan(&t); err == nil && t != nil {
+			tokens = append(tokens, *t)
+		}
+	}
+	return tokens, nil
+}
+
 func runNotifyGuardians(chatID, runID, riderID, state, vehicle string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -1080,27 +1161,11 @@ func runNotifyGuardians(chatID, runID, riderID, state, vehicle string) {
 		return // nobody is linked to this rider; there is no one to tell
 	}
 
-	tok, err := db.SysPool.Query(ctx,
-		`SELECT d.push_token
-		   FROM devices d
-		   JOIN chat_members cm ON cm.user_id = d.user_id AND cm.chat_id = $2
-		  WHERE d.user_id = ANY($1::uuid[])
-		    AND cm.left_at IS NULL
-		    AND cm.muted = FALSE
-		    AND d.push_token IS NOT NULL`,
-		recipients, chatID)
+	tokens, err := pushTokensFor(ctx, chatID, recipients)
 	if err != nil {
 		log.Printf("[run notify] tokens: %v", err)
 		return
 	}
-	tokens := []string{}
-	for tok.Next() {
-		var t *string
-		if err := tok.Scan(&t); err == nil && t != nil {
-			tokens = append(tokens, *t)
-		}
-	}
-	tok.Close()
 	if len(tokens) == 0 {
 		return
 	}
@@ -1125,8 +1190,284 @@ func runNotifyText(rider, state, vehicle string) string {
 		return rider + " was not at the stop"
 	case "no_show":
 		return rider + " did not travel today"
+	// The two run-progress states. `vehicle` carries the stop context here
+	// ("Bus 7 · next stop Market Road") because the sentence needs it and the
+	// caller already had to look it up.
+	case "approaching":
+		return rider + "'s stop is next — " + vehicle
+	case "delayed":
+		return rider + "'s ride is running late — " + vehicle
 	default:
 		return rider + ": " + state
+	}
+}
+
+// runNotifyRunWide pushes ONE message about the run as a whole — started,
+// completed, driver changed, emergency — to every guardian linked to any rider
+// on it, plus any extraUsers (the outgoing and incoming driver on a
+// reassignment). Guardians of two siblings on the same bus get one push, not
+// two: recipients are deduped at the user level.
+//
+// This closes the closed-app hole the spec audit found: these events used to
+// fan out only as emitx socket events, which reach nobody whose app is not
+// open — and "the bus started without my child" is precisely the message for a
+// parent who is not watching the screen.
+func runNotifyRunWide(chatID, runID, kind, body string, extraUsers ...string) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	var vehicle string
+	if err := db.SysPool.QueryRow(ctx,
+		`SELECT COALESCE(vehicle_label, name) FROM runs WHERE id = $1`, runID).Scan(&vehicle); err != nil {
+		vehicle = "Your run"
+	}
+
+	// Every guardian of every rider on the run — the same recursive link walk
+	// runNotifyGuardians does for one rider, widened to the manifest and
+	// deduped. Scoping property preserved: only people LINKED to a rider on
+	// this run are reached, never the whole space.
+	rows, err := db.SysPool.Query(ctx,
+		`WITH RECURSIVE up AS (
+		   SELECT l.subject_id, 1 AS depth
+		     FROM run_riders rr
+		     JOIN space_links l ON l.chat_id = $1 AND l.object_id = rr.rider_id
+		    WHERE rr.run_id = $2
+		   UNION
+		   SELECT l.subject_id, up.depth + 1
+		     FROM up
+		     JOIN space_links l ON l.chat_id = $1 AND l.object_id = up.subject_id
+		    WHERE up.depth < 6
+		 )
+		 SELECT DISTINCT r.user_id
+		   FROM up
+		   JOIN space_roster r ON r.id = up.subject_id
+		  WHERE r.user_id IS NOT NULL AND r.archived_at IS NULL`,
+		chatID, runID)
+	if err != nil {
+		log.Printf("[run-wide notify] recipients: %v", err)
+		return
+	}
+	seen := map[string]bool{}
+	recipients := []string{}
+	for rows.Next() {
+		var uid string
+		if err := rows.Scan(&uid); err == nil && !seen[uid] {
+			seen[uid] = true
+			recipients = append(recipients, uid)
+		}
+	}
+	rows.Close()
+	for _, uid := range extraUsers {
+		if uid != "" && !seen[uid] {
+			seen[uid] = true
+			recipients = append(recipients, uid)
+		}
+	}
+	if len(recipients) == 0 {
+		return
+	}
+
+	tokens, err := pushTokensFor(ctx, chatID, recipients)
+	if err != nil {
+		log.Printf("[run-wide notify] tokens: %v", err)
+		return
+	}
+	if len(tokens) == 0 {
+		return
+	}
+
+	// An emergency rides the sos channel like incidents do — a real separation
+	// with its own sound, not a louder string.
+	channel := "default"
+	if kind == "run_emergency" {
+		channel = "sos"
+	}
+	chatsSendExpoPush(ctx, tokens, vehicle, body,
+		map[string]any{"type": kind, "chatId": chatID, "runId": runID}, channel)
+}
+
+// runNotifyNextStop warns the NEXT stop's pending riders that the vehicle is
+// approaching, at the moment it arrives at the stop before theirs. The server
+// holds no position — by design — so "approaching" is derived from the stop
+// sequence, which it does hold: reaching stop N is the fact that makes stop
+// N+1 next.
+func runNotifyNextStop(chatID, runID, arrivedStopID string) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	var nextStopID, nextLabel string
+	err := db.SysPool.QueryRow(ctx,
+		`SELECT n.id, n.label
+		   FROM run_stops cur
+		   JOIN run_stops n ON n.run_id = cur.run_id AND n.seq > cur.seq
+		  WHERE cur.id = $1 AND n.arrived_at IS NULL
+		  ORDER BY n.seq
+		  LIMIT 1`, arrivedStopID).Scan(&nextStopID, &nextLabel)
+	if err != nil {
+		return // last stop, or nothing pending — no one to warn
+	}
+
+	rows, err := db.SysPool.Query(ctx,
+		`SELECT rider_id FROM run_riders
+		  WHERE run_id = $1 AND stop_id = $2 AND state = 'pending'`,
+		runID, nextStopID)
+	if err != nil {
+		log.Printf("[next stop notify] riders: %v", err)
+		return
+	}
+	riders := []string{}
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err == nil {
+			riders = append(riders, id)
+		}
+	}
+	rows.Close()
+	if len(riders) == 0 {
+		return // nobody pending at the next stop — nothing to warn, no vehicle lookup needed
+	}
+
+	var vehicle string
+	if err := db.SysPool.QueryRow(ctx,
+		`SELECT COALESCE(vehicle_label, name) FROM runs WHERE id = $1`, runID).Scan(&vehicle); err != nil {
+		vehicle = "Your run"
+	}
+	for _, riderID := range riders {
+		runNotifyGuardians(chatID, runID, riderID, "approaching", vehicle+" · next stop "+nextLabel)
+	}
+}
+
+// runCheckDelays is the server-side half of "run delayed beyond threshold".
+// The client's isDelayed() can only tell a guardian who is LOOKING; this runs
+// on the driver's heartbeat ping and reaches the ones who are not.
+//
+// No position is used — the server has none, by design. A stop is overdue when
+// its planned_at has passed by more than the space's threshold and the vehicle
+// has not arrived, which is derivable entirely from state the server holds.
+// run_events(kind='run_delayed', ref_id=stop) is the dedup ledger: the insert
+// is the claim, and only the heartbeat that wins the insert sends the push, so
+// a ping every few seconds still means one notification per stop, ever.
+// runDelayCheckedAt throttles runCheckDelays per run. This session's own
+// change made concurrent heartbeats routine — a 60s foreground timer AND a new
+// 15s background pingRun for the same driver — so a threshold measured in
+// MINUTES was being evaluated up to 5x/minute per active run, almost always
+// finding nothing. Purely a query-cost throttle, not a correctness mechanism:
+// the ON CONFLICT in the INSERT below is what actually prevents a duplicate
+// push, so a multi-replica deployment (each with its own copy of this map) is
+// still correct, just slightly less throttled — never incorrect.
+var runDelayCheckedAt sync.Map // runID -> time.Time of the last check
+
+const runDelayCheckMinInterval = 60 * time.Second
+
+func runCheckDelays(chatID, runID, actorID string) {
+	if last, ok := runDelayCheckedAt.Load(runID); ok {
+		if time.Since(last.(time.Time)) < runDelayCheckMinInterval {
+			return
+		}
+	}
+	runDelayCheckedAt.Store(runID, time.Now())
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	// Predicate mirrored verbatim in migrations/tests/121_run_delay_threshold_test.sql
+	// — if you change one, change both.
+	rows, err := db.SysPool.Query(ctx,
+		`SELECT st.id, st.label
+		   FROM run_stops st
+		   JOIN runs r ON r.id = st.run_id
+		  WHERE st.run_id = $1
+		    AND r.status = 'started'
+		    AND st.arrived_at IS NULL
+		    AND st.planned_at IS NOT NULL
+		    AND st.planned_at < NOW() - make_interval(
+		          mins => (SELECT run_delay_threshold_minutes FROM chats WHERE id = r.chat_id))
+		    AND NOT EXISTS (
+		          SELECT 1 FROM run_events e
+		           WHERE e.run_id = st.run_id AND e.kind = 'run_delayed' AND e.ref_id = st.id)`,
+		runID)
+	if err != nil {
+		log.Printf("[run delay] overdue: %v", err)
+		return
+	}
+	type overdue struct{ id, label string }
+	stops := []overdue{}
+	for rows.Next() {
+		var o overdue
+		if err := rows.Scan(&o.id, &o.label); err == nil {
+			stops = append(stops, o)
+		}
+	}
+	rows.Close()
+	if len(stops) == 0 {
+		return
+	}
+
+	// Hoisted out of the loop: runID is invariant across every overdue stop in
+	// this sweep, so re-querying it per stop (as this used to) was N identical
+	// queries for one delay-check pass.
+	var vehicle string
+	if err := db.SysPool.QueryRow(ctx,
+		`SELECT COALESCE(vehicle_label, name) FROM runs WHERE id = $1`, runID).Scan(&vehicle); err != nil {
+		vehicle = "Your run"
+	}
+
+	for _, st := range stops {
+		// The insert IS the lock — but "INSERT ... WHERE NOT EXISTS" is NOT
+		// atomic under READ COMMITTED: two concurrent heartbeats (the
+		// foreground driver screen pings every 60s, the background task pings
+		// every 15s — both can land in the same instant) can both evaluate
+		// NOT EXISTS as true before either commits, and both insert, and both
+		// notify. Found by review, after this file shipped both heartbeat
+		// sources in the same change.
+		//
+		// The actual lock is the existing partial unique index
+		// uq_run_events_transition ON (run_id, transition_id) — reused here
+		// with a synthesized, deterministic transition_id rather than a new
+		// migration. ON CONFLICT DO NOTHING is atomic: the database itself
+		// admits only one of the two concurrent inserts.
+		var eventID int64
+		err := db.SysPool.QueryRow(ctx,
+			`INSERT INTO run_events (run_id, kind, ref_id, actor_id, transition_id)
+			 VALUES ($1, 'run_delayed', $2, $3, $4)
+			 ON CONFLICT (run_id, transition_id) WHERE transition_id IS NOT NULL DO NOTHING
+			 RETURNING id`, runID, st.id, actorID, "delayed:"+st.id).Scan(&eventID)
+		if err != nil {
+			// ErrNoRows is the expected "another heartbeat already claimed this
+			// stop" outcome. ANY OTHER error is a real fault and must be logged,
+			// not silently swallowed: an earlier version of this statement
+			// omitted the partial index's WHERE predicate and failed with
+			// "no unique or exclusion constraint matching the ON CONFLICT
+			// specification" on every call — and because that was treated as a
+			// lost race, delay notifications were dead with zero trace.
+			if !db.NoRows(err) {
+				log.Printf("[run delay] claim stop %s: %v", st.id, err)
+			}
+			continue
+		}
+		emitx.ChatEvent(chatID, "runs_changed", map[string]any{"runId": runID})
+
+		// Affected guardians: this stop's own pending riders. As the delay
+		// swallows later stops they become overdue in turn, each with its own
+		// one-shot notification.
+		riders, err := db.SysPool.Query(ctx,
+			`SELECT rider_id FROM run_riders
+			  WHERE run_id = $1 AND stop_id = $2 AND state = 'pending'`, runID, st.id)
+		if err != nil {
+			continue
+		}
+		ids := []string{}
+		for riders.Next() {
+			var id string
+			if err := riders.Scan(&id); err == nil {
+				ids = append(ids, id)
+			}
+		}
+		riders.Close()
+
+		for _, riderID := range ids {
+			runNotifyGuardians(chatID, runID, riderID, "delayed", vehicle+" · "+st.label)
+		}
 	}
 }
 

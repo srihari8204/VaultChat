@@ -224,6 +224,16 @@ func incidentCreate(w http.ResponseWriter, r *http.Request) {
 	// Off the request path: a driver at the roadside waits for the write, never
 	// for Expo.
 	workx.Submit(func() { opsNotifyStaff(chatID, category, runID) })
+	// An SOS on a run also reaches the riders' guardians, on the sos channel —
+	// the spec's "any emergency" names them, and staff-only left a parent as
+	// the last to know. Scoped exactly like every run push: guardians linked to
+	// a rider on THAT run, never the whole space.
+	if category == "sos" && runID != nil {
+		rid := *runID
+		workx.Submit(func() {
+			runNotifyRunWide(chatID, rid, "run_emergency", "An emergency has been reported on this run")
+		})
+	}
 	// Category and run only. The note is ciphertext and does not belong in a
 	// socket payload any more than a message body does.
 	emitx.ChatEvent(chatID, "incident_filed", map[string]any{
@@ -588,6 +598,14 @@ func shiftSet(w http.ResponseWriter, r *http.Request) {
 		httpx.Err(w, 400, "shiftGraceMinutes must be between 0 and 240")
 		return
 	}
+	// The run-delay threshold rides the same settings write: both are "how much
+	// lateness this space tolerates", and this endpoint already carries the
+	// PermEditSettings gate. Omitted → keep the current value.
+	delay, hasDelay := chatsParseInt(b["runDelayThresholdMinutes"])
+	if hasDelay && (delay < 1 || delay > 240) {
+		httpx.Err(w, 400, "runDelayThresholdMinutes must be between 1 and 240")
+		return
+	}
 
 	// Postgres parses the TIME; passing NULL clears it. Times are LOCAL to the
 	// workplace by design — "09:00" every day, not an instant in UTC.
@@ -595,9 +613,10 @@ func shiftSet(w http.ResponseWriter, r *http.Request) {
 		`UPDATE chats
 		    SET shift_start = NULLIF($2, '')::time,
 		        shift_end   = NULLIF($3, '')::time,
-		        shift_grace_minutes = $4
+		        shift_grace_minutes = $4,
+		        run_delay_threshold_minutes = COALESCE(NULLIF($5, 0), run_delay_threshold_minutes)
 		  WHERE id = $1`,
-		chatID, start, end, grace); err != nil {
+		chatID, start, end, grace, delay); err != nil {
 		if strings.Contains(err.Error(), "invalid input syntax") {
 			httpx.Err(w, 400, "shiftStart and shiftEnd must be HH:MM times")
 			return
