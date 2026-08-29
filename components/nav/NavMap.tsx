@@ -3,8 +3,9 @@
 // renders on no-GMS devices). Driven either by the nav service's geo store
 // (active navigation) or by an explicit `data` prop (the setup preview): it draws
 // the Valhalla route line, the destination, and a moving "you" dot that recenters
-// on each GPS fix. Tiles are theme-aware CARTO raster (needs network; swap to
-// self-hosted PMTiles for true offline tiles later — that's infra, not app code).
+// on each GPS fix. Tiles are theme-aware OpenStreetMap VECTOR tiles from
+// OpenFreeMap — keyless (needs network; swap to self-hosted PMTiles for true
+// offline tiles later — that's infra, not app code, see lib/map/tileProvider).
 //
 // Location Lock additions (all optional props — navigate.tsx is unchanged):
 //  * lock            — the geofence circle, fill/stroke in the zone color
@@ -17,7 +18,7 @@
 //  * pin / onPinDrop — draggable selection pin + tap-to-drop for the lock
 //                      setup flow.
 
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { View, StyleSheet, TouchableOpacity } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { WebView } from 'react-native-webview';
@@ -27,14 +28,12 @@ import { type LatLng } from '../../lib/nav/geo';
 import { LEAFLET_JS_B64, LEAFLET_CSS_B64 } from './leafletAsset';
 import { MAPLIBRE_JS_B64, MAPLIBRE_CSS_B64 } from './maplibreAsset';
 import { NAV_MAP_3D } from '../../constants/flags';
-import { leafletTileUrl, maplibreTileUrls } from '../../lib/map/tileProvider';
+import { mapStyleUrl, buildings3DLayer, RASTER_FALLBACK_URL, ATTRIBUTION } from '../../lib/map/tileProvider';
 
-// Tiles come from lib/map/tileProvider — the ONE seam for the deferred vector
-// upgrade. Both engines' URL shapes live there because they disagree ({s}/{r}
-// tokens on Leaflet, explicit subdomains on MapLibre) and that is a provider
-// detail. Local aliases keep the call sites below unchanged.
-const TILES = { dark: leafletTileUrl('dark'), light: leafletTileUrl('light') };
-const mlTiles = (scheme: 'dark' | 'light') => maplibreTileUrls(scheme);
+// Tiles come from lib/map/tileProvider — the ONE place that names a provider.
+// MapLibre gets a vector STYLE URL; the Leaflet fallback below can only draw
+// raster, and today there is no raster source we may use, so it runs with no
+// basemap (route, lock and markers still draw). See tileProvider for why.
 
 /** Camera modes for the 3D map. follow = pitched chase-cam that rotates to your
  *  heading; north = flat, north-up follow; overview = fit the whole route. */
@@ -72,8 +71,12 @@ function html(tileUrl: string, bg: string, accent: string): string {
 <script src="data:text/javascript;base64,${LEAFLET_JS_B64}"></script>
 <script>
 var map=L.map('map',{zoomControl:false}).setView([20.6,78.9],4);
-L.tileLayer('${tileUrl}',{maxZoom:19,subdomains:'abcd',
-  attribution:'&copy; OpenStreetMap &copy; CARTO'}).addTo(map);
+// No raster provider configured → no basemap. The route, the lock circle and
+// the "you" dot still draw over the app background, which is the honest
+// degraded view; a watermarked or license-violating basemap is not.
+var TILE=${JSON.stringify(tileUrl)};
+if(TILE)L.tileLayer(TILE,{maxZoom:19,subdomains:'abcd',
+  attribution:${JSON.stringify(ATTRIBUTION)}}).addTo(map);
 var RN=window.ReactNativeWebView;
 var line=null,you=null,flag=null,fitted=false,lockC=null,accC=null,pinM=null,pinMode=0,hdg=0,scaleC=null,lastTouch=0;
 // Free-explore: a manual pan/zoom pauses follow; it auto-recenters after 10 s idle.
@@ -125,7 +128,7 @@ if(RN)RN.postMessage('ready');
 // ── MapLibre GL engine (NAV_MAP_3D) — real 3D pitch, heading-up basemap
 // rotation, and follow/north/overview camera modes. Exposes the SAME JS
 // function names as the Leaflet html() above, so the RN side is engine-agnostic.
-function mlHtml(tiles: string[], bg: string, accent: string): string {
+function mlHtml(styleUrl: string, bg: string, accent: string, buildings: Record<string, unknown>): string {
   return `<!DOCTYPE html><html><head>
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
 <link rel="stylesheet" href="data:text/css;base64,${MAPLIBRE_CSS_B64}"/>
@@ -147,11 +150,16 @@ function mlHtml(tiles: string[], bg: string, accent: string): string {
 <script src="data:text/javascript;base64,${MAPLIBRE_JS_B64}"></script>
 <script>
 var RN=window.ReactNativeWebView;
-var TILES=${JSON.stringify(tiles)};
+// No WebGL → say so ONCE, deterministically. Without this the constructor
+// throws, the rest of this script never runs, and the RN side sits waiting for
+// a 'ready' that can never arrive. It reads this message as "downgrade".
+function webglOK(){ try{ var c=document.createElement('canvas');
+  return !!(window.WebGLRenderingContext&&(c.getContext('webgl')||c.getContext('experimental-webgl'))); }catch(e){ return false; } }
+if(!webglOK()){ if(RN)RN.postMessage(JSON.stringify({type:'mlerror',msg:'webgl unsupported'})); throw new Error('no webgl'); }
+var STYLE=${JSON.stringify(styleUrl)};
+var BUILDINGS=${JSON.stringify(buildings)};
 var map=new maplibregl.Map({container:'map',center:[78.9,20.6],zoom:3,pitch:0,bearing:0,
-  attributionControl:{compact:true},
-  style:{version:8,sources:{carto:{type:'raster',tiles:TILES,tileSize:256,attribution:'© OpenStreetMap © CARTO'}},
-    layers:[{id:'bg',type:'background',paint:{'background-color':'${bg}'}},{id:'carto',type:'raster',source:'carto'}]}});
+  attributionControl:{compact:true},style:STYLE});
 var youEl=document.createElement('div');youEl.className='youwrap';
 youEl.innerHTML='<div class="youarrow"></div><div class="you"></div>';
 var you=null,dest=null,pin=null,fitted=false,pinMode=0,hdg=0,cam='follow',lastTouch=0;
@@ -230,8 +238,46 @@ map.on('click',function(e){ if(!pinMode)return; setPin(e.lngLat.lat,e.lngLat.lng
   if(RN)RN.postMessage(JSON.stringify({type:'pin',lat:e.lngLat.lat,lng:e.lngLat.lng})); });
 document.getElementById('compass').addEventListener('click',function(){
   map.easeTo({bearing:0,pitch:cam==='follow'?55:0,duration:400}); if(RN)RN.postMessage(JSON.stringify({type:'compass'})); });
-map.on('load',function(){ ready=true; if(RN)RN.postMessage('ready'); });
-map.on('error',function(e){ if(RN)RN.postMessage(JSON.stringify({type:'mlerror',msg:(e&&e.error&&e.error.message)||'map error'})); });
+// 3D buildings. The light style ships this layer already, the dark one does not
+// — adding it here on the same layer id means both themes agree about whether
+// buildings exist, and the add is skipped where the style got there first.
+// styledata, not load: it must survive the style retry below.
+function addBuildings(){
+  if(map.getLayer('building-3d')||!map.getSource('openmaptiles'))return;
+  try{ map.addLayer(BUILDINGS); }catch(e){}
+}
+map.on('styledata',addBuildings);
+// The styles choose POI icons from the tile data at runtime, so any icon the
+// sprite lacks warns once per missing NAME, unbounded as you travel — on a
+// phone, where babel keeps console.warn in release builds and logcat is
+// already the scarce resource. Register a blank: the label still draws.
+map.on('styleimagemissing',function(e){
+  try{ if(!map.hasImage(e.id)) map.addImage(e.id,{width:1,height:1,data:new Uint8Array(4)}); }catch(x){}
+});
+// The style is FETCHED now, so a flaky first minute is a network failure, not a
+// broken device — but the RN side reads any pre-ready error as "no WebGL" and
+// throws the 3D map away, PERMANENTLY: this engine choice never resets back to
+// MapLibre for the life of this screen. At the old 3 tries / ~7s total, a
+// driver entering a tunnel or a brief dead zone at the exact moment the map
+// first mounted got stuck on a blank Leaflet page (no raster fallback exists,
+// see tileProvider) for the REST of that navigation, even once signal
+// returned. 8 tries with the delay capped at 5s (~33s total) survives a
+// typical tunnel/dead-zone; MapLibre never retries a failed style on its own,
+// so retry here and only report upward once the network has really given up.
+var styleTries=0;
+var STYLE_RETRY_MAX=8, STYLE_RETRY_CAP_MS=5000;
+map.on('load',function(){ ready=true; addBuildings(); if(RN)RN.postMessage('ready');
+  // Which provider actually served this map. 'load' has fired, so the style at
+  // STYLE really did load — the host IS the basemap. You cannot tell this from
+  // outside otherwise, and it is the thing to check when tiles move to our own
+  // host. Same reasoning as FamilyMap's any-routing report.
+  if(RN)RN.postMessage(JSON.stringify({type:'basemap',host:STYLE.split('/')[2]||STYLE})); });
+map.on('error',function(e){
+  var msg=(e&&e.error&&e.error.message)||'map error';
+  if(!ready&&styleTries<STYLE_RETRY_MAX){ styleTries++;
+    setTimeout(function(){ try{map.setStyle(STYLE);}catch(x){} },Math.min(1200*styleTries,STYLE_RETRY_CAP_MS)); return; }
+  if(RN)RN.postMessage(JSON.stringify({type:'mlerror',msg:msg}));
+});
 </script></body></html>`;
 }
 
@@ -339,9 +385,16 @@ export default function NavMap({
     setCam(next);
   };
   const camIcon = cam === 'follow' ? 'cube' : cam === 'north' ? 'navigate' : 'scan';
-  const source = engine === 'maplibre'
-    ? { html: mlHtml(mlTiles(scheme === 'light' ? 'light' : 'dark'), colors.bg, colors.primary) }
-    : { html: html(TILES[scheme === 'light' ? 'light' : 'dark'], colors.bg, colors.primary) };
+  const mapScheme = scheme === 'light' ? 'light' : 'dark';
+  // Memoized — same reasoning as FamilyMap's identical fix: mlHtml
+  // concatenates the ~1.1MB embedded MapLibre bundle into a fresh string on
+  // every call, and this component re-renders on every GPS fix. The WebView
+  // never reloads on an unchanged source.html, so the allocation was pure
+  // per-render churn.
+  const source = useMemo(() => (engine === 'maplibre'
+    ? { html: mlHtml(mapStyleUrl(mapScheme), colors.bg, colors.primary, buildings3DLayer(mapScheme)) }
+    : { html: html(RASTER_FALLBACK_URL, colors.bg, colors.primary) }),
+    [engine, mapScheme, colors.bg, colors.primary]);
 
   return (
     <View style={[styles.wrap, style]}>
@@ -357,8 +410,14 @@ export default function NavMap({
           try {
             const m = JSON.parse(raw);
             if (m?.type === 'pin' && onPinRef.current) onPinRef.current({ lat: m.lat, lng: m.lng });
+            else if (m?.type === 'basemap') console.warn('[NavMap] basemap provider:', m.host);
             // WebGL/worker failed on this device before first paint → fall back to Leaflet.
             else if (m?.type === 'mlerror' && engine === 'maplibre' && !ready) {
+              // A downgrade now means NO BASEMAP — there is no raster provider we
+              // are allowed to use — so it must not be silent. console.WARN, not
+              // log: babel strips log from release builds, which are exactly the
+              // builds this happens on. Same reasoning as FamilyMap's routing report.
+              console.warn('[NavMap] MapLibre failed, falling back to Leaflet (no basemap):', m.msg);
               seen.current = { shape: null, dest: null };
               setEngine('leaflet');
             }

@@ -29,7 +29,23 @@ window.MaplibrePegman = MaplibrePegman;
  * family map already has its own styling language and a second, louder route
  * style would fight the connectors.
  */
-window.makeAnyRouting = (map, colour) => new window.AnyRouting({
+window.makeAnyRouting = (map, colour) => {
+  // @any-routing/maplibre-engine@0.2.0 registers its geojson source as
+  // `{ data: null, type: 'geojson' }` (projector.plugin.js onAdd). MapLibre's
+  // worker then reads `data.type` on that null and fires an ASYNC, STACKLESS
+  // "Cannot read properties of null (reading 'type')" error event on every
+  // single init — which the RN side logs, and which cried wolf over the map's
+  // real error channel. Found by method-proxy bisect: construct → clean,
+  // initialize() → the error, addSource being the only data write between.
+  // Shim addSource to hand the worker an empty collection instead; `data:null`
+  // is never valid input, so this rewrites nothing legitimate. Lives HERE and
+  // not in node_modules because npm install would silently undo it there.
+  const origAddSource = map.addSource.bind(map);
+  map.addSource = (id, spec) =>
+    origAddSource(id, (spec && spec.type === 'geojson' && spec.data == null)
+      ? Object.assign({}, spec, { data: { type: 'FeatureCollection', features: [] } })
+      : spec);
+  return new window.AnyRouting({
   dataProvider: window.makeValhallaProvider(),
   // 'none' because our waypoints are family members' live positions — snapping
   // them to the returned path would move a person's dot to the road, which is
@@ -50,7 +66,8 @@ window.makeAnyRouting = (map, colour) => new window.AnyRouting({
       },
     })],
   })],
-});
+  });
+};
 
 /**
  * Valhalla-backed data provider.

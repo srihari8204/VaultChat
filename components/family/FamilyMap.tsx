@@ -15,8 +15,10 @@
 //     downgrades to it AT RUNTIME before first paint, so the family map is
 //     never dead; flip the flag OFF to force it everywhere.
 //
-// Tiles come from lib/map/tileProvider — the single seam for the deferred
-// vector-tile upgrade. Nothing in this file names a tile provider.
+// Tiles come from lib/map/tileProvider — keyless OpenStreetMap vector tiles.
+// Nothing in this file names a tile provider. The Leaflet fallback can only
+// draw raster and there is no raster source we may use, so it runs with no
+// basemap: members, paths and routes over the app background.
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
@@ -29,7 +31,7 @@ import { ROUTING_JS_B64 } from '../nav/routingAsset';
 import { STREETVIEW_API_KEY } from '../../constants/flags';
 import { clusterForZoom } from '../../lib/groups/clustering';
 import { fetchRoute } from '../../lib/nav/routing';
-import { leafletTileUrl, mapStyle } from '../../lib/map/tileProvider';
+import { mapStyleUrl, buildings3DLayer, RASTER_FALLBACK_URL, ATTRIBUTION } from '../../lib/map/tileProvider';
 import { FAMILY_MAP_3D } from '../../constants/flags';
 
 export interface FamilyMarker {
@@ -78,7 +80,10 @@ ${MARKER_CSS(selfColor)}
 <script src="data:text/javascript;base64,${LEAFLET_JS_B64}"></script>
 <script>
 var map=L.map('map',{zoomControl:false}).setView([20.6,78.9],4);
-L.tileLayer('${tileUrl}',{maxZoom:19,subdomains:'abcd',attribution:'&copy; OpenStreetMap &copy; CARTO'}).addTo(map);
+// No raster provider configured → no basemap. Members, paths and routes still
+// draw over the app background: the honest degraded view. See tileProvider.
+var TILE=${JSON.stringify(tileUrl)};
+if(TILE)L.tileLayer(TILE,{maxZoom:19,subdomains:'abcd',attribution:${JSON.stringify(ATTRIBUTION)}}).addTo(map);
 var RN=window.ReactNativeWebView, markers={}, fitted=false;
 // Glide a marker to its new fix instead of teleporting: 15s pings then read as
 // movement. A jump past ~2 km snaps — gliding across a city would draw a road
@@ -221,7 +226,7 @@ reportZoom();
 // Family markers are HTML elements, so they always paint ABOVE the basemap —
 // §66's "family markers beat every label" is a property of the engine here,
 // not a z-index we have to maintain.
-function mlHtml(style: string, bg: string, selfColor: string, svKey: string): string {
+function mlHtml(styleUrl: string, bg: string, selfColor: string, svKey: string, buildings: Record<string, unknown>): string {
   return `<!DOCTYPE html><html><head>
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
 <link rel="stylesheet" href="data:text/css;base64,${MAPLIBRE_CSS_B64}"/>
@@ -236,8 +241,15 @@ ${MARKER_CSS(selfColor)}
 <script src="data:text/javascript;base64,${ROUTING_JS_B64}"></script>
 <script>
 var RN=window.ReactNativeWebView;
+// No WebGL → say so ONCE, deterministically, instead of letting the constructor
+// throw and leaving the RN side waiting for a 'ready' that can never arrive.
+function webglOK(){ try{ var c=document.createElement('canvas');
+  return !!(window.WebGLRenderingContext&&(c.getContext('webgl')||c.getContext('experimental-webgl'))); }catch(e){ return false; } }
+if(!webglOK()){ if(RN)RN.postMessage(JSON.stringify({type:'mlerror',msg:'webgl unsupported'})); throw new Error('no webgl'); }
+var STYLE=${JSON.stringify(styleUrl)};
+var BUILDINGS=${JSON.stringify(buildings)};
 var map=new maplibregl.Map({container:'map',center:[78.9,20.6],zoom:4,pitch:0,bearing:0,
-  attributionControl:{compact:true},style:${style}});
+  attributionControl:{compact:true},style:STYLE});
 var markers={},fitted=false,cam='north',hdg=0,tilt=55,lastTouch=0,pathIds=[];
 
 /** Build (or restyle) one member's marker element. */
@@ -495,6 +507,22 @@ function initPegman(){
     new window.MaplibrePegman({position:'top-right',theme:'leaflet-pegman-v3-default',apiKey:key}).addTo(map);
   }catch(e){}
 }
+// 3D buildings. The light style ships this layer, the dark one does not —
+// adding it on the SAME layer id means both themes agree about whether
+// buildings exist, and the add is skipped where the style got there first.
+// It goes on before any member layer, so paths and routes stay on top.
+function addBuildings(){
+  if(map.getLayer('building-3d')||!map.getSource('openmaptiles'))return;
+  try{ map.addLayer(BUILDINGS); }catch(e){}
+}
+map.on('styledata',addBuildings);
+// The styles choose POI icons from the tile data at runtime, so any icon the
+// sprite lacks warns once per missing NAME, unbounded as you travel — on a
+// phone, where babel keeps console.warn in release builds and logcat is
+// already the scarce resource. Register a blank: the label still draws.
+map.on('styleimagemissing',function(e){
+  try{ if(!map.hasImage(e.id)) map.addImage(e.id,{width:1,height:1,data:new Uint8Array(4)}); }catch(x){}
+});
 // ORDER IS LOAD-BEARING. 'ready' is posted BEFORE the optional extras start.
 // The RN side treats a MapLibre 'error' arriving while !ready as "WebGL failed
 // on this device" and downgrades the whole map to Leaflet — so initialising
@@ -502,14 +530,35 @@ function initPegman(){
 // away the 3D map entirely. Observed: the family map silently reverted to
 // Leaflet the moment @any-routing was added. The base map must be declared
 // working before anything optional is allowed to raise an error.
+var mlReady=false,styleTries=0;
 map.on('load',function(){
+  mlReady=true;
+  addBuildings();
   if(RN)RN.postMessage('ready');
+  // Which provider actually served this map. 'load' has fired, so the style at
+  // STYLE really did load — the host IS the basemap. Posted AFTER 'ready' so the
+  // load-bearing order above is untouched.
+  if(RN)RN.postMessage(JSON.stringify({type:'basemap',host:STYLE.split('/')[2]||STYLE}));
   reportZoom();
   initRouting();
   initPegman();
 });
+// The style is FETCHED now, so a flaky first minute is a network failure, not a
+// broken device — and the rule above still holds: a pre-ready error throws the
+// whole 3D map away, PERMANENTLY: this engine choice never resets back to
+// MapLibre for the life of this screen. At the old 3 tries / ~7s total, a
+// brief dead zone at the exact moment the map first mounted got stuck on a
+// blank Leaflet page (no raster fallback exists, see tileProvider) for the
+// REST of that screen visit. 8 tries with the delay capped at 5s (~33s total)
+// survives a typical dead-zone; MapLibre never retries a failed style on its
+// own, so retry here and only report upward once the network has really
+// given up.
+var STYLE_RETRY_MAX=8, STYLE_RETRY_CAP_MS=5000;
 map.on('error',function(e){
-  if(RN)RN.postMessage(JSON.stringify({type:'mlerror',msg:(e&&e.error&&e.error.message)||'map error'}));
+  var msg=(e&&e.error&&e.error.message)||'map error';
+  if(!mlReady&&styleTries<STYLE_RETRY_MAX){ styleTries++;
+    setTimeout(function(){ try{map.setStyle(STYLE);}catch(x){} },Math.min(1200*styleTries,STYLE_RETRY_CAP_MS)); return; }
+  if(RN)RN.postMessage(JSON.stringify({type:'mlerror',msg:msg}));
 });
 </script></body></html>`;
 }
@@ -718,9 +767,17 @@ export default function FamilyMap({
     ref.current.injectJavaScript(`setHeading(${Math.round(headingDeg)});true;`);
   }, [ready, engine, headingDeg]);
 
-  const source = engine === 'maplibre'
-    ? { html: mlHtml(JSON.stringify(mapStyle(scheme === 'light' ? 'light' : 'dark', colors.bg)), colors.bg, colors.primary, STREETVIEW_API_KEY) }
-    : { html: html(leafletTileUrl(scheme === 'light' ? 'light' : 'dark'), colors.bg, colors.primary) };
+  const mapScheme = scheme === 'light' ? 'light' : 'dark';
+  // Memoized: mlHtml concatenates the embedded MapLibre bundle (~1.1MB) into a
+  // fresh string on every call, and this component re-renders on every 15s
+  // presence ping and every marker selection — an unmemoized allocation here
+  // was ~1MB of churn on the JS thread per render for a STRING THE WEBVIEW
+  // NEVER RELOADS (react-native-webview does not re-navigate on an identical
+  // source.html). Deps are exactly what the string's content depends on.
+  const source = useMemo(() => (engine === 'maplibre'
+    ? { html: mlHtml(mapStyleUrl(mapScheme), colors.bg, colors.primary, STREETVIEW_API_KEY, buildings3DLayer(mapScheme)) }
+    : { html: html(RASTER_FALLBACK_URL, colors.bg, colors.primary) }),
+    [engine, mapScheme, colors.bg, colors.primary]);
 
   // Heading-up → north-up → overview, the three modes §46–48 name.
   const cycleCam = () => setCam(cam === 'follow' ? 'north' : cam === 'north' ? 'overview' : 'follow');
@@ -752,7 +809,12 @@ export default function FamilyMap({
           try {
             const m = JSON.parse(d);
             // WebGL/worker failed on this device before first paint → Leaflet.
-            if (m?.type === 'mlerror' && engine === 'maplibre' && !readyRef.current) { setEngine('leaflet'); return; }
+            if (m?.type === 'mlerror' && engine === 'maplibre' && !readyRef.current) {
+              // A downgrade now means NO BASEMAP, so say so — silent degradation
+              // is the thing the routing report below exists to prevent.
+              console.warn('[FamilyMap] MapLibre failed, falling back to Leaflet (no basemap):', m.msg);
+              setEngine('leaflet'); return;
+            }
             // Did the embedded @any-routing/pegman bundle actually come up?
             // A broken <script> tag does not stop the ones after it, so the map
             // would look perfectly fine while the routing engine was absent —
@@ -761,6 +823,7 @@ export default function FamilyMap({
             // release builds (keeping warn/error), so a log here is invisible
             // on exactly the builds that go on a phone — which made an absent
             // message look like a failed bundle when nothing was wrong.
+            if (m?.type === 'basemap') { console.warn('[FamilyMap] basemap provider:', m.host); return; }
             if (m?.type === 'routing-ready') { console.warn('[FamilyMap] any-routing ready'); return; }
             if (m?.type === 'routing-error') { console.warn('[FamilyMap] any-routing FAILED:', m.msg); return; }
             // @any-routing asking for a route. The page has no auth token by
