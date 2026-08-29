@@ -353,7 +353,7 @@ router.get('/:id', jwtUtil.requireAuth, async (req, res) => {
           // blocked the other — the exact GET /stories/feed visibility rule.
           // Stories reference attachments directly (not via messages.meta), so
           // without this clause every OTHER user's status media 403'd.
-          const asStory = await db.query(
+          const asStory = await req.dbQuery(
             `SELECT 1 FROM stories s
               WHERE s.attachment_id = $1
                 AND s.expires_at > NOW()

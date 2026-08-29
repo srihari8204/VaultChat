@@ -51,9 +51,9 @@ SHALL NOT confer space membership or any visibility beyond its own record.
 - **THEN** redemption is refused and the attempt is recorded
 
 ### Requirement: Attendance analytics stay on device
-Aggregate attendance figures — hours worked, late counts, occupancy over time —
-SHALL be computed on the viewing device from data it is already entitled to see,
-and SHALL NOT be uploaded.
+Aggregate attendance figures SHALL be computed on the viewing device — hours
+worked, late counts, occupancy over time — from data it is already entitled to
+see, and SHALL NOT be uploaded.
 
 #### Scenario: Weekly summary
 - **WHEN** a supervisor views a weekly attendance summary
