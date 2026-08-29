@@ -42,11 +42,23 @@ export interface Fix {
   accuracy?: number;   // GPS accuracy m of this fix
 }
 
+/** A family event leaving this device for the circle. Structured, not prose:
+ *  the announce implementations wrap it in a famEvent envelope that chat
+ *  surfaces hide and every receiver's alerts inbox ingests — chat carries
+ *  conversation, events live in the inbox (chat-map-separation D1). */
+export interface AnnounceEvent {
+  kind: 'enter' | 'leave' | 'overspeed';
+  actorId: string;
+  actorName: string;
+  text: string;
+  at: number;
+}
+
 export interface ProcessOpts {
   /** True when this is my own fix — only then do we evaluate geofences. */
   self: boolean;
-  /** Post the "arrived at / left" system message into the circle thread. */
-  announce?: (text: string) => void;
+  /** Deliver a family event to the circle (sealed famEvent system message). */
+  announce?: (event: AnnounceEvent) => void;
   /** Override the fence list (background task passes a preloaded set). */
   fences?: Geofence[];
 }
@@ -112,7 +124,7 @@ export async function processFix(circleId: string, fix: Fix, opts: ProcessOpts):
         await recordAlert({
           circleId, kind: 'overspeed', actorId: fix.userId, actorName: fix.name, text, at: fix.ts,
         });
-        opts.announce?.(text);
+        opts.announce?.({ kind: 'overspeed', actorId: fix.userId, actorName: fix.name, text, at: fix.ts });
       }
     }
   } catch { /* a failed speed check must never block the fix fold */ }
@@ -130,7 +142,7 @@ export async function processFix(circleId: string, fix: Fix, opts: ProcessOpts):
     await recordAlert({
       circleId, kind: ev.type, actorId: fix.userId, actorName: fix.name, text, at: fix.ts,
     });
-    opts.announce?.(text);
+    opts.announce?.({ kind: ev.type, actorId: fix.userId, actorName: fix.name, text, at: fix.ts });
   }
 }
 

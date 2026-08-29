@@ -22,15 +22,57 @@ import { getGroupPrivacy } from '../groups/store';
 import { applyPrivacy, isPublishing, type GroupPrivacy } from '../groups/privacy';
 import { readBattery } from './battery';
 import { processFix } from './fixPipeline';
+import { buildFamEvent } from './alerts';
 import { recordSample } from './history';
 import {
   startBackgroundPresence, stopBackgroundPresence, updateBackgroundKey,
-  hasBackgroundPermission, isBackgroundRunning,
+  hasBackgroundPermission, isBackgroundRunning, getPersistedKey,
 } from './background';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { type FamilyPing, type MemberPresence } from './types';
 import { type LatLng } from '../nav/geo';
 import { publishPoint, publishStart, publishStop, stopPublisher } from '../location/publisher';
 import { currentTrip, publishTripState } from '../groups/tripSession';
+
+// ── key-delivery ledger ────────────────────────────────────────────────
+// Which circles already hold WHICH key, and WHEN they were last told. The key
+// travels as a location-type chat message; before this ledger every re-arm
+// minted a fresh key and pushed a new "Location" bubble into every circle — a
+// chat full of plumbing by lunchtime (seen on a real device, seven in one
+// thread). One key per sharing session, but NOT "one delivery ever":
+// liveLocationCrypto.ts's receiver-side key store is explicitly IN-MEMORY
+// ONLY, and its own comment promises the key is "re-delivered E2E whenever a
+// new session starts" — a promise "deliver once, ever" quietly broke. A
+// receiver who restarts their app mid-session loses the key from memory, and
+// re-harvests only the last 60 (widened to 200 on a confirmed miss, see
+// subscribeCircle) messages — in a busy circle the one-time delivery can
+// scroll past even that, leaving the member PERMANENTLY invisible until the
+// sender happens to re-arm with a NEW key. REDELIVER_MS is the self-heal:
+// the same key resends on this cadence regardless, so any receiver back
+// online within it recovers on the sender's next natural re-arm.
+const K_SENT = (cid: string) => `vc_livekey_sent:${cid}`;
+const REDELIVER_MS = 6 * 3600 * 1000; // 6h — self-heal cadence, not a spam floor
+
+async function alreadyDelivered(cid: string, key: string): Promise<boolean> {
+  try {
+    const raw = await AsyncStorage.getItem(K_SENT(cid));
+    if (!raw) return false;
+    const [sentKey, atStr] = raw.split('|');
+    // A pre-existing ledger entry from before this format (no timestamp) has
+    // no separator: `atStr` is undefined, Number(undefined) is NaN, `at`
+    // becomes 0, and the age check below is trivially true — one harmless
+    // extra delivery upgrades that entry to the new format.
+    if (sentKey !== key) return false;
+    const at = Number(atStr) || 0;
+    return Date.now() - at < REDELIVER_MS;
+  } catch { return false; }
+}
+async function markDelivered(cid: string, key: string): Promise<void> {
+  try { await AsyncStorage.setItem(K_SENT(cid), `${key}|${Date.now()}`); } catch {}
+}
+async function clearDelivered(cids: string[]): Promise<void> {
+  try { await AsyncStorage.multiRemove(cids.map(K_SENT)); } catch {}
+}
 
 const LIVE_WINDOW_MS = 24 * 3600 * 1000;
 const until = () => Date.now() + LIVE_WINDOW_MS;
@@ -249,15 +291,58 @@ async function replanNow(): Promise<void> {
   else { plan = next; if (sharing) startKeepalive(next.keepaliveMs); }
 }
 
+/** Send the key message to ONE circle and mark it delivered on success only —
+ *  a dropped send must retry on the next call, or that circle can never open
+ *  this member's pings at all. Shared by deliverKeys' privacy-gated loop and
+ *  ensureKeyDeliveredForRun's privacy-bypassing single delivery. */
+async function deliverKeyTo(cid: string, lat: number, lng: number): Promise<void> {
+  if (!myKey) return;
+  // Once per (circle, key). The message is protocol, not conversation —
+  // location belongs on the maps, and the chat thread is not its home.
+  if (await alreadyDelivered(cid, myKey)) return;
+  // key delivered E2E, exactly like the chat live-location key exchange
+  const sent = sendMessage(cid, JSON.stringify({ lat, lng, live: true, lk: myKey, until: until(), family: true }), 'location');
+  sent.then(() => markDelivered(cid, myKey!)).catch(() => {});
+}
+
 async function deliverKeys() {
   if (!myKey) return;
   let seed: Location.LocationObject | null = null;
   try { seed = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced }); } catch {}
   const lat = seed?.coords.latitude ?? 0, lng = seed?.coords.longitude ?? 0;
+  const now = Date.now();
   for (const cid of circleIds) {
-    // key delivered E2E, exactly like the chat live-location key exchange
-    sendMessage(cid, JSON.stringify({ lat, lng, live: true, lk: myKey, until: until(), family: true }), 'location').catch(() => {});
+    // Only groups whose OWN privacy says we publish get the key. circleIds now
+    // carries every group (family circles AND spaces), and this message is a
+    // visible chat entry — delivering it to a group set to invisible/off would
+    // both announce sharing that will never happen and spam every space's
+    // thread on each toggle. A space with an active RUN is the deliberate
+    // exception — see ensureKeyDeliveredForRun, which bypasses this gate.
+    const priv = privacy.get(cid);
+    if (!priv || !isPublishing(priv, now)) continue;
+    await deliverKeyTo(cid, lat, lng);
   }
+}
+
+/**
+ * Deliver the key to ONE circle regardless of this member's personal privacy
+ * setting for it — for the moment a run starts broadcasting there.
+ *
+ * Run pings deliberately bypass presence privacy (runSession.ts decision #2:
+ * "a vehicle's position is the entire service"), and both publishRunPosition
+ * and the background run-broadcast path seal with this same presence key
+ * unconditionally. If deliverKeys had skipped this space (driver's personal
+ * privacy for it set to invisible/off — plausible: "don't show me off duty"),
+ * no member ever received the key, and every guardian's run-ping decrypt
+ * fails silently for the entire run. Found by review.
+ *
+ * No-op if this device is not sharing at all — there is no key to deliver.
+ */
+export async function ensureKeyDeliveredForRun(circleId: string): Promise<void> {
+  if (!myKey || !sharing) return;
+  let seed: Location.LocationObject | null = null;
+  try { seed = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced }); } catch {}
+  await deliverKeyTo(circleId, seed?.coords.latitude ?? 0, seed?.coords.longitude ?? 0);
 }
 
 async function onFix(loc: Location.LocationObject) {
@@ -321,7 +406,18 @@ async function onFix(loc: Location.LocationObject) {
       self: true,
       fences: places.get(cid) ?? [],
       // Only tell a group about a crossing if I am actually visible to it.
-      announce: announcing ? (text) => { sendMessage(cid, text, 'system').catch(() => {}); } : undefined,
+      // Sealed famEvent envelope, not prose: chat surfaces hide it, receivers'
+      // alert inboxes ingest it (chat-map-separation). The E2EE message is
+      // still the transport — it is the only one receivers have.
+      // meta.silent is LOAD-BEARING, not a nicety. The SERVER decides the FCM
+      // push (chatsSendMessagePush), and it filters only on meta.silent — never
+      // on message type — so without this a geofence crossing raises a "New
+      // message" banner on every Google-Play device no matter what the client
+      // does. The client-side suppression in app/_layout.tsx cannot reach that
+      // push at all. Found by review after the first fix.
+      announce: announcing
+        ? (ev) => { sendMessage(cid, buildFamEvent(ev), 'system', { meta: { silent: true } }).catch(() => {}); }
+        : undefined,
     });
   }
 
@@ -424,13 +520,32 @@ export async function startPresence(o: StartPresenceOpts): Promise<PresenceStart
   }
   if (stale()) return { watching: false, denied: false };
   if (sharing) {
-    myKey = newLiveKey();
+    // REUSE the session key. Minting here made every screen focus a new key,
+    // and every new key a fresh "Location" message in every circle — the
+    // delivery ledger in deliverKeys can only dedup a key that stays put.
+    //
+    // The persisted copy must be written HERE, unconditionally — not only when
+    // background permission is granted. getPersistedKey()/updateBackgroundKey()
+    // share storage with the background task, but "while using the app" is the
+    // common grant, and handOffToBackground() (below) silently no-ops without
+    // ALWAYS permission. Gating the persist on that too would mean reuse works
+    // only for users who already have the rarer permission — i.e. never fixes
+    // the key-spam bug for the majority. Found by review after the first fix.
+    const reusedKey = await getPersistedKey();
+    myKey = reusedKey || newLiveKey();
+    if (!reusedKey) await updateBackgroundKey(myKey);
     await deliverKeys();
     await handOffToBackground();
     // Clear any explicit server-side stop so the platform ingest admits
     // uploads again (the guard exists so a stale publisher cannot outlive a
-    // stop — re-enabling must therefore announce itself).
-    for (const cid of circleIds) publishStart(cid).catch(() => {});
+    // stop — re-enabling must therefore announce itself). Gated per group the
+    // same way the points are: a space whose privacy is off must not be told
+    // publishing resumed.
+    const nowStart = Date.now();
+    for (const cid of circleIds) {
+      const priv = privacy.get(cid);
+      if (priv && isPublishing(priv, nowStart)) publishStart(cid).catch(() => {});
+    }
   }
   // OPEN FAST, THEN STEP DOWN. The engine cannot know whether this device is
   // moving until a fix has told it, and its stationary guess (20 s / 25 m) is
@@ -500,7 +615,13 @@ export async function setSharing(share: boolean): Promise<boolean> {
   }
   sharing = share;
   if (share) {
-    myKey = newLiveKey();
+    // Same session-key reuse as startPresence — toggling the switch twice must
+    // not spray two keys into every thread. Persisted unconditionally, same
+    // reasoning as startPresence: background permission is not required for
+    // reuse to work, only for the background task itself.
+    const reusedShareKey = await getPersistedKey();
+    myKey = reusedShareKey || newLiveKey();
+    if (!reusedShareKey) await updateBackgroundKey(myKey);
     await deliverKeys();
     await handOffToBackground();
     // Sharing changes the plan (notSharing → a real tier), so re-arm rather
@@ -511,6 +632,9 @@ export async function setSharing(share: boolean): Promise<boolean> {
     myKey = null;
     stopKeepalive();
     await stopBackgroundPresence();
+    // Stop deletes the persisted key, so the next enable mints a fresh one —
+    // the ledger must forget too, or the fresh key would never be delivered.
+    await clearDelivered(circleIds);
     for (const cid of circleIds) {
       emit('live_location_stop', { chatId: cid }).catch(() => {});
       publishStop(cid).catch(() => {}); // platform mirror of the stop signal
@@ -618,11 +742,17 @@ export async function subscribeCircle(circleId: string, meId: string, onEvent: (
   // rather than returning early — its `.then(flushStash)` must not fire
   // before the keys are actually in.
   let harvesting: Promise<void> | null = null;
-  const captureFromHistory = (): Promise<void> => {
+  // `limit` widens on a KNOWN-FAILED retry (see onUpd below) — a shallow
+  // window is the common, cheap case, and only worth widening once a decode
+  // has actually failed with a key already in hand missing or stale for it.
+  // 200 is the server's own hard cap (chatsMaxPage, chats.go) — passing more
+  // would just be silently clamped, so this already asks for everything the
+  // endpoint can give.
+  const captureFromHistory = (limit = 60): Promise<void> => {
     if (harvesting) return harvesting;
     harvesting = (async () => {
       try {
-        const msgs = await getMessages(circleId, { limit: 60 });
+        const msgs = await getMessages(circleId, { limit });
         // THE NEWEST KEY PER SENDER WINS — explicitly, not by iteration order.
         // The server returns messages newest-first (ORDER BY m.id DESC), and
         // the old `for … putLiveKey(…)` overwrote on every hit, so the OLDEST
@@ -691,7 +821,15 @@ export async function subscribeCircle(circleId: string, meId: string, onEvent: (
     if (e.chatId != null && String(e.chatId) !== String(circleId)) return;
     if (!decode(e)) {
       stash.set(String(e.userId), e);                 // keep THIS blob, not just hope for a next one
-      captureFromHistory().then(flushStash);
+      // Widened harvest: this is a CONFIRMED miss (the key is absent or stale
+      // for this specific blob), so the key message — sent at most ONCE per
+      // sharing session since the delivery ledger — may simply have scrolled
+      // past the shallow window. A busy circle can pass 60 messages in one
+      // conversation; the receiver's key store is explicitly in-memory only
+      // (liveLocationCrypto.ts), so a restarted app with nothing to harvest
+      // would otherwise stay silently invisible for that member until the
+      // sender's next re-arm (see the periodic re-delivery in deliverKeyTo).
+      captureFromHistory(200).then(flushStash);
     }
   };
   const onStop = (e: any) => {

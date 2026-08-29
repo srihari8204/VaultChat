@@ -15,6 +15,7 @@ import {
 import * as Location from 'expo-location';
 import { Stack, useRouter, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
+import ChatDoorButton from '../components/spaces/ChatDoorButton';
 import { useTheme } from '../lib/theme';
 import { brandAlpha } from '../constants/theme';
 import FamilyMap, { type FamilyMarker } from '../components/family/FamilyMap';
@@ -423,8 +424,17 @@ export default function FamilySpaceScreen() {
       // true when sharing is already on — otherwise entering a space prompts
       // for a permission the screen does not use.
       try {
+        // EVERY group, not just the one on screen. The engine underneath
+        // (presence.ts + background.ts) was always multi-group — per-group
+        // privacy gates each publish — but this call site handed it a
+        // singleton, so a School or Employee space only ever received
+        // positions while its map was the active tab HERE. Locked phone,
+        // different tab, or a space-* screen: nothing published, which is
+        // "space location does not share when locked" from the outside.
+        // Active first so the visible group gets the first fix.
+        const allIds = [active.id, ...circles.map((c) => c.id).filter((id) => id !== active.id)];
         const res = await startPresence({
-          circleIds: [active.id], myId: me.id, myName: me.name, share,
+          circleIds: allIds, myId: me.id, myName: me.name, share,
           requestPermission: share,
           onSelf: (p) => setPresences((prev) => ({ ...prev, [p.userId]: p })),
         });
@@ -438,7 +448,11 @@ export default function FamilySpaceScreen() {
   // but startPresence never began BROADCASTING and never delivered keys.
   // Verified server-side: a whole session with the switch on produced zero
   // key messages. The eslint exhaustive-deps warning on this line was right.
-  }, [active?.id, me?.id, share, focusTick]);
+  // The joined id list re-arms presence when a space is adopted or leaves —
+  // an array literal here would re-run every render, a missing dep would keep
+  // sharing on yesterday's group list.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [active?.id, me?.id, share, focusTick, circles.map((c) => c.id).join(',')]);
 
   // stop broadcasting when the screen loses focus (map still resumes on return)
   /**
@@ -1284,6 +1298,13 @@ export default function FamilySpaceScreen() {
         ),
         headerRight: () => (
           <View style={{ flexDirection: 'row' }}>
+            {/* The door to this group's ONE thread — same history and unread
+                state as the chats tab (chat-map-separation D5). Shared with
+                every space header via ChatDoorButton, so this no longer
+                drifts from theirs (it briefly did: size 20 vs 21). */}
+            {active?.id && (
+              <ChatDoorButton colors={colors} chat={{ id: active.id, name: active.name }} />
+            )}
             {canInvite && <TouchableOpacity onPress={openAdd} style={{ paddingHorizontal: 6 }}><Ionicons name="person-add" size={20} color={colors.primary} /></TouchableOpacity>}
             <TouchableOpacity onPress={() => { setRenameTxt(''); setManage(true); }} style={{ paddingHorizontal: 6 }}><Ionicons name="ellipsis-vertical" size={20} color={colors.primary} /></TouchableOpacity>
           </View>

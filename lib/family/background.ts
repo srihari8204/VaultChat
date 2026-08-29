@@ -34,7 +34,9 @@ import { publishPoint, flushAll } from '../location/publisher';
 import { haversine } from '../nav/geo';
 import { readBattery } from './battery';
 import { processFix } from './fixPipeline';
+import { buildFamEvent } from './alerts';
 import { currentTrip, publishTripState } from '../groups/tripSession';
+import { pingRun } from '../spaces/api';
 import { type FamilyPing } from './types';
 
 export const BG_TASK = 'vc-family-bg-location';
@@ -42,6 +44,7 @@ export const BG_TASK = 'vc-family-bg-location';
 const K_CTX = 'vc_family_bg_ctx';        // AsyncStorage: {circleIds, myId, myName}
 const S_KEY = 'vc_family_bg_key';        // SecureStore: the live session key
 const K_LASTPUB = 'vc_family_bg_lastpub'; // AsyncStorage: epoch ms of the last publish
+const K_RUN = 'vc_run_bg_ctx';           // AsyncStorage: {spaceId, runId} while a run is out
 /** Last position we published from, for the adaptive distance gate. In-memory
  *  only: losing it on a cold start just means the next batch publishes, which
  *  is the safe direction to fail. */
@@ -172,7 +175,13 @@ TaskManager.defineTask(BG_TASK, async ({ data, error }: any) => {
     }, {
       self: true,
       fences,
-      announce: visible ? (text) => { sendMessage(cid, text, 'system').catch(() => {}); } : undefined,
+      // Same famEvent envelope as the foreground path — a crossing detected
+      // from a pocket must look identical to one detected on screen.
+      // meta.silent: the server's push path filters on this flag and nothing
+      // else — see the same note in presence.ts.
+      announce: visible
+        ? (ev) => { sendMessage(cid, buildFamEvent(ev), 'system', { meta: { silent: true } }).catch(() => {}); }
+        : undefined,
     });
   }
 
@@ -183,7 +192,53 @@ TaskManager.defineTask(BG_TASK, async ({ data, error }: any) => {
   if (trip && ctx.circleIds.includes(trip.groupId)) {
     publishTripState(pos, spd, ctx.myName).catch(() => {});
   }
+
+  // A started run keeps broadcasting from a pocket. The driver screen used to
+  // publish the vehicle with a FOREGROUND watcher torn down on blur — and its
+  // cleanup even sent run_end, so locking the phone told every parent the bus
+  // stopped reporting. The run context is persisted (survives a headless cold
+  // start) and cleared when the run completes.
+  //
+  // Deliberately NOT behind the adaptive publish gate above: a vehicle's
+  // position is the entire service (runSession decision #2), and the heartbeat
+  // must stay honest — a gap IS the ops signal for a dead run. Raw fix, no
+  // privacy reduction, sealed with the same presence key — exactly what the
+  // foreground path publishes.
+  try {
+    const rraw = await AsyncStorage.getItem(K_RUN);
+    const rctx = rraw ? JSON.parse(rraw) as { spaceId: string; runId: string } : null;
+    if (rctx?.spaceId && rctx?.runId) {
+      if (key) {
+        const blob = sealJSON(key, { runId: rctx.runId, lat: pos.lat, lng: pos.lng, speed: spd, acc, at: ts });
+        if (blob) emit('run_update', { chatId: rctx.spaceId, runId: rctx.runId, blob }).catch(() => {});
+      }
+      pingRun(rctx.spaceId, rctx.runId).catch(() => { /* the gap IS the signal */ });
+    }
+  } catch { /* a malformed ctx must never take the family publish down with it */ }
 });
+
+/** Keep a started run broadcasting while the screen is off. Set when the run
+ *  starts, cleared when it completes — never on screen blur. */
+export async function setBackgroundRun(
+  ctx: { spaceId: string; runId: string } | null,
+  clearingRunId?: string,
+): Promise<void> {
+  try {
+    if (ctx) { await AsyncStorage.setItem(K_RUN, JSON.stringify(ctx)); return; }
+    // K_RUN is a SINGLE slot. Opening a driver screen for a run that is not
+    // `started` (e.g. checking tomorrow's manifest while today's run is out)
+    // used to clear this slot unconditionally — silently killing an unrelated
+    // run's live broadcast. Clearing now requires the caller to name the run
+    // it believes it owns, and only removes the slot if that is still what is
+    // stored there.
+    if (clearingRunId) {
+      const raw = await AsyncStorage.getItem(K_RUN);
+      const cur = raw ? JSON.parse(raw) as { runId?: string } : null;
+      if (cur?.runId && cur.runId !== clearingRunId) return; // not this caller's run to clear
+    }
+    await AsyncStorage.removeItem(K_RUN);
+  } catch { /* worst case: the run resumes broadcasting with the app */ }
+}
 
 /** Did the user grant "Allow all the time"? */
 export async function hasBackgroundPermission(): Promise<boolean> {
@@ -305,4 +360,12 @@ export async function updateBackgroundKey(key: string | null): Promise<void> {
     if (key) await SecureStore.setItemAsync(S_KEY, key);
     else await SecureStore.deleteItemAsync(S_KEY);
   } catch {}
+}
+
+/** The persisted live-session key, if sharing is on. presence.ts REUSES this
+ *  across re-arms instead of minting a fresh key each time — a new key forces
+ *  a new key-delivery message into every circle's chat, and re-arms happen on
+ *  every screen focus. One key per sharing session = one delivery, ever. */
+export async function getPersistedKey(): Promise<string | null> {
+  return readKey();
 }

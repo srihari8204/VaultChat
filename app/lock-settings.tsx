@@ -213,9 +213,9 @@ export default function LockSettingsScreen() {
             you navigate back.
           </Text>
           <Text style={{ color: colors.text + '66', fontSize: 11.5, marginTop: 8, lineHeight: 16 }}>
-            Open-source components: OpenStreetMap data (ODbL) · Leaflet (BSD-2) ·
-            Valhalla routing (MIT) · CARTO basemap tiles. Alarm sounds are generated,
-            license-free.
+            Open-source components: OpenStreetMap data (ODbL) · MapLibre GL (BSD-3) ·
+            Leaflet (BSD-2) · Valhalla routing (MIT) · OpenFreeMap vector basemap
+            tiles (OpenMapTiles schema). Alarm sounds are generated, license-free.
           </Text>
         </View>
       </ScrollView>
