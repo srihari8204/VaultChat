@@ -171,7 +171,7 @@ export default function SpaceTasksScreen() {
 
   return (
     <View style={s.screen}>
-      <Stack.Screen options={spaceHeader(colors, `${spaceName} · Tasks`)} />
+      <Stack.Screen options={spaceHeader(colors, `${spaceName} · Tasks`, { id: spaceId, name: params.name })} />
 
       {/* Tabs (Business design: Tasks screen). No "In Progress": the model has
           no such state, and inventing one here would be a lie about the data. */}

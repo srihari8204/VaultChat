@@ -126,7 +126,7 @@ export default function SpaceAttendanceScreen() {
 
   return (
     <ScrollView style={s.screen} contentContainerStyle={s.body}>
-      <Stack.Screen options={spaceHeader(colors, params.name ? `${params.name} · Attendance` : 'Attendance')} />
+      <Stack.Screen options={spaceHeader(colors, params.name ? `${params.name} · Attendance` : 'Attendance', { id: spaceId, name: params.name })} />
 
       {!zoneName && (
         <View style={s.card}>

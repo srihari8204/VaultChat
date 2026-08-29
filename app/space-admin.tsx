@@ -115,7 +115,7 @@ export default function SpaceAdminScreen() {
 
   return (
     <ScrollView style={s.screen} contentContainerStyle={s.body}>
-      <Stack.Screen options={spaceHeader(colors, `${spaceName} · Admin`)} />
+      <Stack.Screen options={spaceHeader(colors, `${spaceName} · Admin`, { id: spaceId, name: params.name })} />
 
       {/* The scope statement. An administrator should be able to SEE the limit
           of their own authority rather than having to take it on trust — and a

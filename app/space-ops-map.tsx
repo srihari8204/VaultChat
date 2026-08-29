@@ -202,7 +202,7 @@ export default function SpaceOpsMapScreen() {
 
   return (
     <View style={s.screen}>
-      <Stack.Screen options={spaceHeader(colors, params.name ? `${params.name} · Operations` : 'Operations')} />
+      <Stack.Screen options={spaceHeader(colors, params.name ? `${params.name} · Operations` : 'Operations', { id: spaceId, name: params.name })} />
 
       <FamilyMap members={markers} focusId={focus} onSelect={setFocus} style={s.map} />
 

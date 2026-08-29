@@ -158,7 +158,7 @@ export default function SpacePeopleScreen() {
 
   return (
     <View style={s.screen}>
-      <Stack.Screen options={spaceHeader(colors, params.name ? `${params.name} · People` : 'People')} />
+      <Stack.Screen options={spaceHeader(colors, params.name ? `${params.name} · People` : 'People', { id: spaceId, name: params.name })} />
 
       <View style={s.head}>
         <View style={s.counts}>

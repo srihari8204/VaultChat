@@ -1323,8 +1323,14 @@ export async function sendMessage(
       method: 'POST',
       json: { content, type, replyToId: opts.replyToId ?? null, meta: opts.meta ?? null, clientId },
     });
-    // The POST ack returns `id` as a STRING; GET / socket deliver a NUMBER.
-    // Normalize so UI dedup and the local-cache upsert (number-id only) work.
+    // The server emits `id` as a STRING on EVERY path — chatsPublicMsg is
+    // `ID string` (fmt.Sprintf("%d")), used by the POST ack, GET and the
+    // socket alike. An earlier version of this comment claimed GET/socket
+    // delivered a number; they do not, and a caller that trusted that (the
+    // root new_message listener) silently passed `undefined` as a message id
+    // into the decrypt path. Normalize here so UI dedup and the local-cache
+    // upsert (number-id only) work; RAW SOCKET PAYLOADS ARE NOT NORMALIZED,
+    // so anything reading `m.id` straight off the wire must Number() it.
     if (msg && msg.id != null) (msg as any).id = Number(msg.id);
     const _tAck = Date.now();
     perf.mark('send_http_ack', { chatId, id: msg?.id, ms: _tAck - _tEnc });

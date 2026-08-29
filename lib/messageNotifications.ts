@@ -57,11 +57,19 @@ export function invalidateDirectory(): void { dir = null; }
  * is in the foreground (the in-app UI handles that), never for our own echo, and
  * never twice for the same (or older) message.
  */
-export async function notify(msg: { id: number | string; chatId: string; senderId?: string }): Promise<void> {
+export async function notify(msg: { id: number | string; chatId: string; senderId?: string; meta?: any }): Promise<void> {
   if (Platform.OS === 'web') return;
   if (pushAvailable) return;                              // server push covers it
   if (AppState.currentState === 'active') return;         // app is open → in-app UI shows it
   if (!msg?.chatId) return;
+  // Honour meta.silent exactly as the SERVER's push path does
+  // (chatsSendMessagePush). Two independent listeners call this — app/_layout
+  // and lib/backgroundConnection (armed only on no-GMS devices) — so gating
+  // anywhere but here leaves one of them uncovered: that is precisely how
+  // famEvent envelopes still buzzed no-GMS phones after being suppressed in
+  // _layout. Checking the flag here means client and server agree, and every
+  // present and future caller is covered by construction.
+  if (msg.meta && (msg.meta as any).silent) return;
   const id = Number(msg.id);
   if (!Number.isFinite(id)) return;
   if (meId && msg.senderId === meId) return;              // our own message echoed back

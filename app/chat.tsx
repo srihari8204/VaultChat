@@ -136,6 +136,7 @@ import { shouldAutoDownloadNow } from '../lib/mediaPrefs';
 import { ProgressRing } from '../components/ProgressRing';
 import { getMedia, copyToCache } from '../lib/mediaStore';
 import { thumbDataUri, makeThumb } from '../lib/thumbnails';
+import { isFamEvent } from '../lib/family/alerts';
 import {
   cancel as queueCancel,
   enqueueText,
@@ -276,6 +277,13 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
         && (m.content.includes('"family":true')
           || m.content.includes('"live":true')
           || looksEncrypted(m.content))) continue;
+      // famEvent envelopes (geofence crossings, overspeed) are protocol riding
+      // the message transport, not conversation — they render in the alerts
+      // inbox, never here. SOS stays a visible system message on purpose.
+      // This runs on DECRYPTED content (this screen's messages already are —
+      // see the family/live checks just above), so the plain marker check is
+      // correct here, unlike the raw socket listener in app/_layout.tsx.
+      if (isFamEvent(m.type, m.content)) continue;
       const k = m._tempId ?? String(m.id);
       if (seen.has(k)) continue;
       seen.add(k);

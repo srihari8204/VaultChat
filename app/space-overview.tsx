@@ -124,7 +124,7 @@ export default function SpaceOverviewScreen() {
       contentContainerStyle={s.body}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load(); }} tintColor={colors.primary} />}
     >
-      <Stack.Screen options={spaceHeader(colors, params.name ? `${params.name} · Overview` : 'Overview')} />
+      <Stack.Screen options={spaceHeader(colors, params.name ? `${params.name} · Overview` : 'Overview', { id: spaceId, name: params.name })} />
 
       {error && (
         <View style={[s.card, { borderColor: colors.danger, borderWidth: 1 }]}>

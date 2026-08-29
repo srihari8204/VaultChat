@@ -35,6 +35,7 @@ import { setUnreadTotal } from '../../lib/unreadStore';
 import { getDraftMap } from '../../lib/drafts';
 import { getLastMessagePerChat, getCachedChats, cacheChats } from '../../lib/localDb';
 import { getCurrentUserAsync } from '../(constants)/authService';
+import { isFamEvent } from '../../lib/family/alerts';
 
 type LastMsg = { content: string | null; type: string | null; senderId: string | null; id: number };
 
@@ -737,6 +738,19 @@ const ChatRow = memo(function ChatRow({
   // Real last-message preview from the local plaintext cache (WhatsApp-style).
   const previewBody = (() => {
     if (!lastMsg) return chat.lastMessageId ? 'Tap to open chat' : 'No messages yet';
+    // famEvent envelopes are hidden from the thread, so they must not become a
+    // row's "last message" TEXT either. This is a PREVIEW-ONLY fix: the row's
+    // sort position and unread badge come from the server's chat.lastMessageAt/
+    // unreadCount, which the server cannot correct for famEvent specifically —
+    // it never sees plaintext content (E2EE), so it cannot tell a famEvent
+    // system message apart from any other. A crossing can still bump a chat to
+    // the top and mark it unread; opening it then shows nothing new. Accepted
+    // trade-off, not silently swept: the alternative (client-side markRead up
+    // to the famEvent's id) would also retroactively mark any REAL unread
+    // message with a lower id as read, which is worse.
+    if (isFamEvent(lastMsg.type, lastMsg.content)) {
+      return 'Tap to open chat';
+    }
     const t = lastMsg.type;
     // content is null for a text message whose ciphertext couldn't be decrypted
     // (the cache layer withholds raw envelopes) — show a lock, never blank/JSON.

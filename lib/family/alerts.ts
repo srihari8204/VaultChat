@@ -228,6 +228,80 @@ export function useUnreadCount(circleId: string | null): number {
 }
 
 // ── test seam ──
+// ── the famEvent envelope (chat-map-separation) ────────────────────────
+// Family events travel between devices as `system` chat messages, because that
+// E2EE path is the ONLY transport receivers have — but they are protocol, not
+// conversation. The envelope is what lets every chat surface hide them and
+// every receiver fold them HERE instead. Build and parse live side by side so
+// they cannot drift.
+
+/** Envelope kinds — the events the owner moved out of chat. SOS is deliberately
+ *  absent: a human emergency IS conversation and stays a visible message. */
+export type FamEventKind = 'enter' | 'leave' | 'overspeed';
+
+export interface FamEvent {
+  v: 1;
+  kind: FamEventKind;
+  actorId: string;
+  actorName: string;
+  text: string;
+  at: number;
+}
+
+/** The message content an announce implementation sends. */
+export function buildFamEvent(e: Omit<FamEvent, 'v'>): string {
+  return JSON.stringify({ famEvent: { v: 1, ...e } });
+}
+
+/** Parse defensively: this runs on RECEIVED message content, which is data.
+ *  Anything that is not exactly a v1 envelope with sane fields is null. */
+/**
+ * Cheap pre-check: is this message a famEvent, without fully parsing it?
+ * `type` is a plaintext DB column (only `content` is E2EE), so this is safe to
+ * call on a message whose content may still be ciphertext — it is what lets
+ * every chat surface (thread, list, root listener) test BEFORE decrypting.
+ * The root listener still decrypts system messages to get the real verdict
+ * via parseFamEvent/ingestFamEvent; this only says "don't show ciphertext".
+ */
+export function isFamEvent(type: unknown, content: unknown): boolean {
+  return type === 'system' && typeof content === 'string' && content.includes('"famEvent"');
+}
+
+export function parseFamEvent(content: unknown): FamEvent | null {
+  if (typeof content !== 'string' || !content.includes('"famEvent"')) return null;
+  try {
+    const o = JSON.parse(content)?.famEvent;
+    if (!o || o.v !== 1) return null;
+    if (o.kind !== 'enter' && o.kind !== 'leave' && o.kind !== 'overspeed') return null;
+    if (typeof o.actorId !== 'string' || !o.actorId) return null;
+    if (typeof o.text !== 'string' || !o.text) return null;
+    return {
+      v: 1, kind: o.kind, actorId: o.actorId,
+      actorName: typeof o.actorName === 'string' && o.actorName ? o.actorName : 'A member',
+      text: o.text.slice(0, 300),
+      at: typeof o.at === 'number' && o.at > 0 ? o.at : Date.now(),
+    };
+  } catch { return null; }
+}
+
+/**
+ * Fold an incoming famEvent message into this device's inbox. Called from the
+ * app-wide new_message listener — NOT from a screen, because an inbox that
+ * only fills while some screen is open is not an inbox.
+ *
+ * Skips my own events: the emitting device already recorded them in
+ * processFix, and recordAlert's dedupe window backstops any race.
+ */
+export async function ingestFamEvent(chatId: string, content: unknown, myId: string): Promise<boolean> {
+  const ev = parseFamEvent(content);
+  if (!ev || ev.actorId === myId) return false;
+  const rec = await recordAlert({
+    circleId: chatId, kind: ev.kind, actorId: ev.actorId,
+    actorName: ev.actorName, text: ev.text, at: ev.at,
+  });
+  return rec != null;
+}
+
 /** Replace the in-memory mirror (self-check only — does not persist). */
 export function __setAlertsForTest(next: FamilyAlert[]): void {
   alerts = next; loaded = true; version++;
@@ -263,5 +337,30 @@ if (require.main === module) {
   if (s1 === snapshotFor('c1', 'all')) throw new Error('snapshot must change after a version bump');
 
   if (SEVERITY_OF.sos !== 'critical') throw new Error('SOS must be critical');
+
+  // ── famEvent envelope round trip ──
+  const sent = buildFamEvent({ kind: 'enter', actorId: 'u1', actorName: 'Rohan', text: 'Rohan arrived at Home', at: 5 });
+  const back = parseFamEvent(sent);
+  if (!back || back.kind !== 'enter' || back.text !== 'Rohan arrived at Home' || back.at !== 5) {
+    throw new Error('famEvent round trip lost data: ' + JSON.stringify(back));
+  }
+  // The chat filter keys on this literal substring — the round trip must keep it.
+  if (!sent.includes('"famEvent"')) throw new Error('envelope must carry the "famEvent" marker verbatim');
+  // Received content is DATA. None of these may parse.
+  const hostile: unknown[] = [
+    'Rohan arrived at Home',                          // plain text (old build)
+    '{"famEvent":{"v":2,"kind":"enter","actorId":"u","text":"x"}}',   // future version
+    '{"famEvent":{"v":1,"kind":"sos","actorId":"u","text":"x"}}',     // SOS stays in chat
+    '{"famEvent":{"v":1,"kind":"enter","actorId":"","text":"x"}}',    // empty actor
+    '{"famEvent":' + '{'.repeat(4) + '}',             // malformed JSON
+    42, null, undefined,                              // not even strings
+  ];
+  for (const h of hostile) {
+    if (parseFamEvent(h) !== null) throw new Error('hostile content parsed: ' + String(h).slice(0, 60));
+  }
+  // Missing name falls back rather than failing — the alert still renders.
+  const anon = parseFamEvent('{"famEvent":{"v":1,"kind":"leave","actorId":"u9","text":"left Work","at":9}}');
+  if (!anon || anon.actorName !== 'A member') throw new Error('missing actorName must fall back');
+
   console.log('family/alerts self-check OK');
 }

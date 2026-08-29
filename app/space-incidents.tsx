@@ -104,7 +104,7 @@ export default function SpaceIncidentsScreen() {
 
   return (
     <ScrollView style={s.screen} contentContainerStyle={s.body}>
-      <Stack.Screen options={spaceHeader(colors, params.name ? `${params.name} · Incidents` : 'Incidents')} />
+      <Stack.Screen options={spaceHeader(colors, params.name ? `${params.name} · Incidents` : 'Incidents', { id: spaceId, name: params.name })} />
 
       {ordered.length === 0 && (
         <View style={s.card}>

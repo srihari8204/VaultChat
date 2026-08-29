@@ -193,7 +193,7 @@ export default function SpaceLeaveScreen() {
 
   return (
     <View style={s.screen}>
-      <Stack.Screen options={spaceHeader(colors, `${spaceName} · Leave`)} />
+      <Stack.Screen options={spaceHeader(colors, `${spaceName} · Leave`, { id: spaceId, name: params.name })} />
 
       {/* Tabs (Business design: Leave screen). For a plain employee the server
           returns only their own requests, so Pending and History are simply

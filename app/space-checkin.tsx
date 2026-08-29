@@ -131,7 +131,7 @@ export default function SpaceCheckinScreen() {
 
   return (
     <ScrollView style={s.screen} contentContainerStyle={s.body}>
-      <Stack.Screen options={spaceHeader(colors, params.name ? `${params.name} · Attendance` : 'Attendance')} />
+      <Stack.Screen options={spaceHeader(colors, params.name ? `${params.name} · Attendance` : 'Attendance', { id: spaceId, name: params.name })} />
 
       {/* Design screen 9: the day's own state, big. */}
       <View style={[s.card, s.hero]}>

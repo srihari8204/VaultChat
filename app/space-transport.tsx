@@ -166,7 +166,7 @@ export default function SpaceTransportScreen() {
       contentContainerStyle={s.body}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} />}
     >
-      <Stack.Screen options={spaceHeader(colors, `${spaceName} · Transport`)} />
+      <Stack.Screen options={spaceHeader(colors, `${spaceName} · Transport`, { id: spaceId, name: params.name })} />
 
       {loaded === null && (
         <View style={s.centre}>
