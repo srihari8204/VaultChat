@@ -38,7 +38,9 @@
 </head>
 <body>
 <h1>🛍️ Shop Book · Admin</h1>
-<p class="sub">Approvals, country tax engine, categories &amp; starter catalogs. Every action is audit-logged server-side.</p>
+<p class="sub">Approvals, verification, location moves, entitlements, country tax engine, categories &amp; starter catalogs,
+and read-only windows onto orders, returns and the shop audit trail. Every action is audit-logged server-side.
+An admin can decide a shop's standing here; a shop's money has no endpoint and never will.</p>
 
 <div class="bar">
   <input id="base" placeholder="API base (e.g. https://api.example.com)" />
@@ -57,6 +59,29 @@
   </div>
   <div id="shops"></div>
 
+  <h2>Verification queue</h2>
+  <p class="muted">Documents open in a link that expires in fifteen minutes — the reviewer gets access, not a copy.</p>
+  <div class="bar">
+    <button class="ghost" onclick="loadVerifications('pending_review')">Pending review</button>
+    <button class="ghost" onclick="loadVerifications('verified')">Verified</button>
+    <button class="ghost" onclick="loadVerifications('all')">All</button>
+  </div>
+  <div id="verifications"></div>
+
+  <h2>Location changes</h2>
+  <p class="muted">A verified shop's pin is fixed because customers walk to it. Compare the two addresses before approving —
+    an approval moves the pin customers are given.</p>
+  <div class="bar">
+    <button class="ghost" onclick="loadLocations('pending')">Pending</button>
+    <button class="ghost" onclick="loadLocations('all')">All</button>
+  </div>
+  <div id="locations"></div>
+
+  <h2>Subscriptions</h2>
+  <p class="muted">The entitlement record is what gates features. The plan column is only what the app displays —
+    when the two disagree, the entitlement wins and the row below says so.</p>
+  <div id="subscriptions"></div>
+
   <h2>Country tax engine</h2>
   <p class="muted">Edit the JSON of a country and save — changes apply to shops with no app release. Tax fields are always optional for shops.</p>
   <div id="countries"></div>
@@ -64,6 +89,16 @@
 
   <h2>Categories &amp; starter catalogs</h2>
   <div id="categories"></div>
+
+  <h2>Support windows</h2>
+  <p class="muted">Read-only. Nothing here changes a shop's money.</p>
+  <div class="bar">
+    <input id="auditShop" placeholder="shop id (optional — blank = every shop)" />
+    <button class="ghost" onclick="loadOrders()">Orders</button>
+    <button class="ghost" onclick="loadReturns()">Returns</button>
+    <button class="ghost" onclick="loadAudit()">Shop audit trail</button>
+  </div>
+  <div id="support"></div>
 </div>
 
 <div id="msg"></div>
@@ -87,7 +122,10 @@ async function loadAll(){
   try {
     await loadStats();
     $('app').classList.remove('hide');
-    await Promise.all([loadShops('pending'), loadCountries(), loadCategories()]);
+    await Promise.all([
+      loadShops('pending'), loadCountries(), loadCategories(),
+      loadVerifications('pending_review'), loadLocations('pending'), loadSubscriptions(),
+    ]);
     localStorage.setItem('sb_admin_base', $('base').value);
     toast('Connected');
   } catch (e) { toast('❌ ' + e.message); }
@@ -184,6 +222,186 @@ async function saveCategory(i){
     await api('/api/admin/shopbook/categories', { method:'POST', body: JSON.stringify(body) });
     toast('Category saved'); loadCategories();
   } catch(e){ toast('❌ ' + e.message); }
+}
+
+// ── verification ────────────────────────────────────────────────
+const VERIFY_STATES = ['unverified','pending_review','verified','suspended','rejected'];
+
+async function loadVerifications(state){
+  const { shops } = await api('/api/admin/shopbook/verifications?state=' + state);
+  $('verifications').innerHTML = shops.length ? shops.map((sh) => `
+    <div class="card">
+      <div class="row">
+        <b>${esc(sh.name)}</b>
+        <span class="tag ${sh.verifyState === 'verified' ? 'ok':'pend'}">${esc(sh.verifyState).toUpperCase()}</span>
+        <span class="muted">${esc(sh.category)} · ${esc(sh.country)} · ${sh.documentCount} document(s)</span>
+      </div>
+      <div class="muted">${esc(sh.address)} · Owner: ${esc(sh.ownerName)} ${esc(sh.ownerPhone)}
+        ${sh.hasFrontPhoto ? '· shop-front photo ✓' : '· no shop-front photo'}</div>
+      ${sh.verifyNote ? `<div class="muted">Last note: ${esc(sh.verifyNote)}</div>` : ''}
+      <div class="row" style="margin-top:8px">
+        <button class="ghost" onclick="loadDocuments('${sh.id}')">Documents…</button>
+        ${VERIFY_STATES.filter((v) => v !== sh.verifyState).map((v) =>
+          `<button class="${v === 'verified' ? '' : 'ghost'}" onclick="setVerify('${sh.id}','${v}')">${v.replace('_',' ')}</button>`).join('')}
+      </div>
+      <div id="docs-${sh.id}"></div>
+    </div>`).join('') : '<p class="muted">Nothing here.</p>';
+}
+
+async function setVerify(id, state){
+  // Refusing or suspending a shop without saying why leaves the owner with
+  // nothing to fix, so the note is required for anything but a grant.
+  let note = '';
+  if (state !== 'verified') {
+    note = prompt(`Note for "${state}" (shown to the owner):`) || '';
+    if (!note) return;
+  }
+  try {
+    await api(`/api/admin/shopbook/shops/${id}/verify`, { method:'POST', body: JSON.stringify({ state, note }) });
+    toast('Saved'); loadVerifications('pending_review'); loadShops('pending');
+  } catch(e){ toast('❌ ' + e.message); }
+}
+
+async function loadDocuments(shopId){
+  try {
+    const { documents } = await api(`/api/admin/shopbook/shops/${shopId}/documents`);
+    $('docs-' + shopId).innerHTML = documents.length ? documents.map((d) => `
+      <div class="card" style="margin-top:8px">
+        <div class="row">
+          <b>${esc(d.kind)}</b>
+          <span class="tag ${d.status === 'accepted' ? 'ok':'pend'}">${esc(d.status).toUpperCase()}</span>
+          <span class="muted">${esc(d.filename)} · ${Math.round((d.sizeBytes||0)/1024)} KB · ${esc(d.uploadedAt)}</span>
+        </div>
+        ${d.reviewNote ? `<div class="muted">Note: ${esc(d.reviewNote)}</div>` : ''}
+        <div class="row" style="margin-top:8px">
+          ${d.viewUrl ? `<a href="${esc(d.viewUrl)}" target="_blank" rel="noopener"><button class="ghost">Open (15 min)</button></a>`
+                      : '<span class="muted">No view link — object storage is off</span>'}
+          <button onclick="reviewDoc('${d.id}','accepted','${shopId}')">Accept</button>
+          <button class="danger" onclick="reviewDoc('${d.id}','rejected','${shopId}')">Reject…</button>
+        </div>
+      </div>`).join('') : '<p class="muted">No documents uploaded.</p>';
+  } catch(e){ toast('❌ ' + e.message); }
+}
+
+async function reviewDoc(id, status, shopId){
+  let note = '';
+  if (status === 'rejected') {
+    note = prompt('Why is this document rejected? (shown to the owner)') || '';
+    if (!note) return;
+  }
+  try {
+    await api(`/api/admin/shopbook/documents/${id}/review`, { method:'POST', body: JSON.stringify({ status, note }) });
+    toast('Reviewed'); loadDocuments(shopId);
+  } catch(e){ toast('❌ ' + e.message); }
+}
+
+// ── location changes ────────────────────────────────────────────
+async function loadLocations(status){
+  const { requests } = await api('/api/admin/shopbook/location-requests?status=' + status);
+  $('locations').innerHTML = requests.length ? requests.map((q) => `
+    <div class="card">
+      <div class="row">
+        <b>${esc(q.shopName)}</b>
+        <span class="tag ${q.status === 'pending' ? 'pend':'ok'}">${esc(q.status).toUpperCase()}</span>
+        <span class="muted">${(q.distanceKm ?? 0).toFixed(2)} km · ${esc(q.requestedAt)}</span>
+      </div>
+      <div class="muted">From: ${esc(q.from.address) || '—'} (${q.from.lat ?? '—'}, ${q.from.lng ?? '—'})</div>
+      <div class="muted">To: ${esc(q.to.address) || '—'} (${q.to.lat}, ${q.to.lng})</div>
+      <div class="muted">Reason: ${esc(q.reason)}</div>
+      ${q.reviewNote ? `<div class="muted">Review: ${esc(q.reviewNote)}</div>` : ''}
+      ${q.status === 'pending' ? `<div class="row" style="margin-top:8px">
+        <button onclick="decideLocation('${q.id}', true)">Approve move</button>
+        <button class="danger" onclick="decideLocation('${q.id}', false)">Refuse…</button>
+      </div>` : ''}
+    </div>`).join('') : '<p class="muted">Nothing here.</p>';
+}
+
+async function decideLocation(id, approve){
+  // The server refuses a refusal with no note, so ask for it here rather than
+  // sending a request that is going to bounce.
+  let note = '';
+  if (!approve) {
+    note = prompt('Why is the move refused? (shown to the owner)') || '';
+    if (!note) return;
+  }
+  try {
+    await api(`/api/admin/shopbook/location-requests/${id}/decide`, { method:'POST', body: JSON.stringify({ approve, note }) });
+    toast(approve ? 'Moved' : 'Refused'); loadLocations('pending');
+  } catch(e){ toast('❌ ' + e.message); }
+}
+
+// ── subscriptions / entitlements ────────────────────────────────
+async function loadSubscriptions(){
+  const { subscriptions } = await api('/api/admin/shopbook/subscriptions');
+  $('subscriptions').innerHTML = subscriptions.length ? subscriptions.map((s) => {
+    const drift = s.displayPlan !== s.entitledPlan;
+    return `
+    <div class="card">
+      <div class="row">
+        <b>${esc(s.shopName)}</b>
+        <span class="tag ${s.entitledPlan === 'pro' ? 'ok':'pend'}">${esc(s.entitledPlan).toUpperCase()} · ${esc(s.state)}</span>
+        ${drift ? `<span class="tag pend">shows ${esc(s.displayPlan)}</span>` : ''}
+        <span class="muted">${s.customers} customer(s) · ${s.products} product(s)
+          ${s.expiresAt ? '· expires ' + esc(s.expiresAt) : '· no expiry'}
+          ${s.source ? '· ' + esc(s.source) : ''} ${s.reference ? '· ' + esc(s.reference) : ''}</span>
+      </div>
+      <div class="row" style="margin-top:8px">
+        <button onclick="setEntitlement('${s.shopId}','pro','active')">Grant Pro</button>
+        <button class="ghost" onclick="setEntitlement('${s.shopId}','pro','trial')">Pro trial</button>
+        <button class="ghost" onclick="setEntitlement('${s.shopId}','free','cancelled')">Back to Free</button>
+      </div>
+    </div>`; }).join('') : '<p class="muted">Nothing here.</p>';
+}
+
+async function setEntitlement(shopId, plan, state){
+  const expiresAt = plan === 'pro'
+    ? (prompt('Expires at (RFC3339, e.g. 2027-01-31T00:00:00Z) — blank for no expiry:') || '')
+    : '';
+  const reference = prompt('Reference (invoice or note, optional):') || '';
+  try {
+    await api(`/api/admin/shopbook/shops/${shopId}/entitlement`,
+      { method:'POST', body: JSON.stringify({ plan, state, expiresAt, reference }) });
+    toast('Entitlement saved'); loadSubscriptions();
+  } catch(e){ toast('❌ ' + e.message); }
+}
+
+// ── read-only support windows ───────────────────────────────────
+async function loadOrders(){
+  const shopId = $('auditShop').value.trim();
+  const { orders } = await api('/api/admin/shopbook/orders?shopId=' + encodeURIComponent(shopId));
+  $('support').innerHTML = orders.length ? orders.map((o) => `
+    <div class="card">
+      <div class="row"><b>${esc(o.shopName)}</b>
+        <span class="tag ${o.status === 'completed' ? 'ok':'pend'}">${esc(o.status).toUpperCase()}</span>
+        <span class="muted">${esc(o.customerName)} · ${esc(o.currency)}${o.total} paid ${esc(o.currency)}${o.paid} · ${esc(o.createdAt)}</span>
+      </div>
+      <div class="muted">${esc(o.id)}</div>
+    </div>`).join('') : '<p class="muted">No orders.</p>';
+}
+
+async function loadReturns(){
+  const { returns } = await api('/api/admin/shopbook/returns');
+  $('support').innerHTML = returns.length ? returns.map((r) => `
+    <div class="card">
+      <div class="row"><b>${esc(r.shopName)}</b>
+        <span class="tag ${r.status === 'approved' || r.status === 'completed' ? 'ok':'pend'}">${esc(r.status).toUpperCase()}</span>
+        <span class="muted">${esc(r.customerName)} · ${esc(r.currency)}${r.refundTotal} · ${esc(r.settlement)} · ${esc(r.requestedAt)}</span>
+      </div>
+      <div class="muted">Reason: ${esc(r.reason)}${r.decisionNote ? ' · Decision: ' + esc(r.decisionNote) : ''}</div>
+      ${r.creditNoteId ? `<div class="muted">Credit note ${esc(r.creditNoteId)}</div>` : ''}
+    </div>`).join('') : '<p class="muted">No returns.</p>';
+}
+
+async function loadAudit(){
+  const shopId = $('auditShop').value.trim();
+  const { entries } = await api('/api/admin/shopbook/audit?shopId=' + encodeURIComponent(shopId));
+  $('support').innerHTML = entries.length ? entries.map((e) => `
+    <div class="card">
+      <div class="row"><b>${esc(e.action)}</b>
+        <span class="muted">${esc(e.shopName)} · ${esc(e.actor) || esc(e.role)} · ${esc(e.at)}</span>
+      </div>
+      <div class="muted">${esc(e.entity)} ${esc(e.entityId)}${e.reason ? ' · ' + esc(e.reason) : ''}</div>
+    </div>`).join('') : '<p class="muted">Nothing recorded.</p>';
 }
 
 $('base').value = localStorage.getItem('sb_admin_base') || '';

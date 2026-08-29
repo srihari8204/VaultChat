@@ -32,12 +32,12 @@ import {
   canCustomerCollect, notCollectedGate, isTerminalFailure,
   couponDiscount, couponLabel, starText, loyaltyTier, parseBulkProducts,
   type CartItem, type OrderStatus, type ItemAvailability,
-  UNIT_PRESETS, normalizeUnit,
+  UNIT_PRESETS, normalizeUnit, isStalePrice, dateLocale,
 } from '../utils/shopbook';
 import * as SB from '../services/shopBookService';
 import { listShopLists, saveShopList, deleteShopList, type ShopList } from '../db/shopLists';
 import {
-  t, useShopBookLang, initShopBookLang, setShopBookLang, SB_LANGUAGES,
+  t, useShopBookLang, initShopBookLang, setShopBookLang, SB_LANGUAGES, speechLocale,
 } from '../lib/shopbookI18n';
 
 // ── palette (green + navy, from the SHOP BOOK poster) ──────────────
@@ -461,7 +461,8 @@ function ProductSearch({ onBack, onOpenShop }: { onBack: () => void; onOpenShop:
               </Text>
               <Text style={s.cardSub}>
                 {h.inStock ? '🟢 In stock' : '🔴 Out of stock'}
-                {h.updatedAt ? ` · updated ${new Date(h.updatedAt).toLocaleDateString('en-IN')}` : ''}
+                {h.updatedAt ? ` · updated ${new Date(h.updatedAt).toLocaleDateString(dateLocale())}` : ''}
+                {isStalePrice(h.updatedAt) ? ' · ⚠️ price may be out of date' : ''}
               </Text>
               <Text style={s.price}>{formatMoney(h.price, h.currency || '₹')}</Text>
             </View>
@@ -619,7 +620,10 @@ function Catalog({ shop, cart, setCart, onCart }: {
   const mic = async () => {
     try {
       if (listening) { await Voice.stop(); setListening(false); return; }
-      setListening(true); await Voice.start('en-IN');
+      // Listen in the language the app is being used in, not the one it was
+      // written in. A recogniser given the wrong language does not fail — it
+      // returns confident nonsense, which then goes into the cart as a product.
+      setListening(true); await Voice.start(speechLocale());
     } catch { setListening(false); Alert.alert('Voice unavailable', 'Speech input is not available on this device/build.'); }
   };
 
@@ -1081,6 +1085,21 @@ function OrderTrack({ orderId, onBack }: { orderId: string; onBack: () => void }
   const [cancelAsk, setCancelAsk] = useState(false);
   const [invoice, setInvoice] = useState(false);
   const [returning, setReturning] = useState(false);
+  // ── buying for a business ───────────────────────────────────────
+  //
+  // A buyer who gives a tax number is making a business purchase and can
+  // reclaim the tax — but only against a compliant tax invoice. The backend has
+  // issued both shapes since the addendum landed, and the endpoint has been
+  // live on production, with nothing in the app able to call it: the whole
+  // reclaimable-invoice feature was unreachable.
+  //
+  // It has to be asked BEFORE the invoice is issued, because the invoice is
+  // immutable afterwards — a template toggle at print time would leave a retail
+  // customer looking at blank statutory fields.
+  const [taxOpen, setTaxOpen] = useState(false);
+  const [bizName, setBizName] = useState('');
+  const [taxNo, setTaxNo] = useState('');
+  const [bizAddr, setBizAddr] = useState('');
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -1103,6 +1122,29 @@ function OrderTrack({ orderId, onBack }: { orderId: string; onBack: () => void }
     });
     return () => { alive = false; stop(); };
   }, [orderId, load]);
+
+  const openTaxForm = () => {
+    setBizName(order?.buyerTax?.businessName ?? '');
+    setTaxNo(order?.buyerTax?.taxNumber ?? '');
+    setBizAddr(order?.buyerTax?.address ?? '');
+    setTaxOpen(true);
+  };
+
+  const saveBuyerTax = async () => {
+    setBusy(true);
+    try {
+      const r = await SB.setBuyerTax(orderId, {
+        businessName: bizName.trim(), taxNumber: taxNo.trim(), address: bizAddr.trim(),
+      });
+      setTaxOpen(false);
+      Alert.alert(r.invoiceKind === 'tax' ? 'Tax invoice' : 'Retail bill',
+        r.invoiceKind === 'tax'
+          ? 'This order will be billed as a tax invoice you can claim against.'
+          : 'This order will be billed as a plain retail bill.');
+      load();
+    } catch (e: any) { Alert.alert('Could not save', e?.message ?? 'Try again'); }
+    finally { setBusy(false); }
+  };
 
   const decide = async (itemId: string, accept: boolean) => {
     try { await SB.decideAlternative(orderId, itemId, accept); load(); }
@@ -1223,7 +1265,7 @@ function OrderTrack({ orderId, onBack }: { orderId: string; onBack: () => void }
                       {orderStatusLabel(ev.status)}{ev.note ? ` · ${ev.note}` : ''}
                     </Text>
                     <Text style={[s.cardSub, { fontSize: 11 }]}>
-                      {new Date(ev.at).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}
+                      {new Date(ev.at).toLocaleTimeString(dateLocale(), { hour: '2-digit', minute: '2-digit' })}
                     </Text>
                   </View>
                 ))}
@@ -1292,6 +1334,48 @@ function OrderTrack({ orderId, onBack }: { orderId: string; onBack: () => void }
               <TouchableOpacity style={s.dangerBtn} disabled={busy} onPress={() => setCancelAsk(true)}>
                 <Text style={s.dangerBtnText}>{t('orders.cancel')}</Text>
               </TouchableOpacity>
+            )}
+
+            {/* Buying for a business? Offered only while the invoice can still
+                change — after it is issued the document is frozen and the
+                answer is "ask the shop for a revised bill". */}
+            {!order.hasInvoice && !['cancelled', 'rejected', 'not_collected'].includes(order.status) && (
+              taxOpen ? (
+                <View style={s.panel}>
+                  <Text style={s.panelTitle}>Buying for a business?</Text>
+                  <TextInput style={s.input} placeholder="Business name" placeholderTextColor={C.sub}
+                    value={bizName} onChangeText={setBizName} />
+                  <TextInput style={s.input} placeholder="Tax number (GSTIN / VAT / EIN)"
+                    placeholderTextColor={C.sub} value={taxNo} onChangeText={setTaxNo}
+                    autoCapitalize="characters" />
+                  <TextInput style={s.input} placeholder="Business address" placeholderTextColor={C.sub}
+                    value={bizAddr} onChangeText={setBizAddr} />
+                  <Text style={s.hint}>
+                    With a tax number this becomes a tax invoice you can claim the
+                    tax back against. Leave it blank for a normal bill. It has to
+                    be set before the shop issues the invoice.
+                  </Text>
+                  <View style={{ flexDirection: 'row', gap: 8, marginTop: 8 }}>
+                    <TouchableOpacity style={[s.primaryBtn, { flex: 1 }, busy && { opacity: 0.6 }]}
+                      disabled={busy} onPress={saveBuyerTax}>
+                      <Text style={s.primaryBtnText}>Save</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity style={[s.outlineBtn, { flex: 1 }]} disabled={busy}
+                      onPress={() => setTaxOpen(false)}>
+                      <Text style={s.outlineBtnText}>Cancel</Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              ) : (
+                <TouchableOpacity style={s.outlineBtn} onPress={openTaxForm}>
+                  <Ionicons name="business-outline" size={18} color={C.green} />
+                  <Text style={s.outlineBtnText}>
+                    {order.buyerTax?.taxNumber
+                      ? `  Tax invoice for ${order.buyerTax.businessName || order.buyerTax.taxNumber}`
+                      : '  Buying for a business? Add tax details'}
+                  </Text>
+                </TouchableOpacity>
+              )
             )}
 
             {/* Repeat + Share + Invoice */}
@@ -2811,7 +2895,7 @@ function AuditScreen({ onBack }: { onBack: () => void }) {
             <View style={{ flex: 1 }}>
               <Text style={s.cardTitle}>{describe(e)}</Text>
               <Text style={s.cardSub}>
-                {e.actor || 'Owner'} · {new Date(e.at).toLocaleString('en-IN')}
+                {e.actor || 'Owner'} · {new Date(e.at).toLocaleString(dateLocale())}
               </Text>
               {!!e.reason && <Text style={s.cardSub}>📝 {e.reason}</Text>}
             </View>
@@ -3275,6 +3359,7 @@ function OwnerKhata() {
   const [sel, setSel] = useState<SB.CustomerPending | null>(null);
   // Adding a walk-in: someone with no VaultChat account who buys on credit.
   const [adding, setAdding] = useState(false);
+  const [counter, setCounter] = useState(false);
   const [newName, setNewName] = useState('');
   const [newMobile, setNewMobile] = useState('');
   const [saving, setSaving] = useState(false);
@@ -3325,12 +3410,21 @@ function OwnerKhata() {
       {/* Walk-ins: the customer standing at the counter who has no VaultChat
           account. Without this the khata only ever listed people who already
           had one, so a shop could not start a tab for anybody new. */}
-      {!adding ? (
-        <TouchableOpacity style={s.outlineBtn} onPress={() => setAdding(true)}>
-          <Ionicons name="person-add-outline" size={16} color={C.green} />
-          <Text style={s.outlineBtnText}>  Add customer</Text>
-        </TouchableOpacity>
-      ) : (
+      {counter && <CounterSale onDone={() => setCounter(false)} />}
+      {!adding && !counter ? (
+        <View style={{ flexDirection: 'row', gap: 8 }}>
+          <TouchableOpacity style={[s.outlineBtn, { flex: 1 }]} onPress={() => setAdding(true)}>
+            <Ionicons name="person-add-outline" size={16} color={C.green} />
+            <Text style={s.outlineBtnText}>  Add customer</Text>
+          </TouchableOpacity>
+          {/* Cash sales belong beside the khata, not inside it: same counter,
+              same moment, opposite meaning — one is owed, the other is not. */}
+          <TouchableOpacity style={[s.outlineBtn, { flex: 1 }]} onPress={() => setCounter(true)}>
+            <Ionicons name="cash-outline" size={16} color={C.green} />
+            <Text style={s.outlineBtnText}>  Counter sale</Text>
+          </TouchableOpacity>
+        </View>
+      ) : adding ? (
         <View style={s.panel}>
           <TextInput style={s.input} placeholder="Customer name" placeholderTextColor={C.sub}
             value={newName} onChangeText={setNewName} autoFocus />
@@ -3352,7 +3446,7 @@ function OwnerKhata() {
             </TouchableOpacity>
           </View>
         </View>
-      )}
+      ) : null}
       {loading && <ActivityIndicator color={C.green} style={{ marginTop: 16 }} />}
       {!loading && customers.length === 0 && <Empty icon="people-outline" text="No customer ledgers yet." />}
 
@@ -3392,6 +3486,105 @@ function OwnerKhata() {
         </TouchableOpacity>
       ))}
     </ScrollView>
+  );
+}
+
+// ── counter sale ──────────────────────────────────────────────
+//
+// The cash customer at the counter: goods handed over, money taken, nothing
+// owed. Shipped server-side 2026-08-18 as one of migration 110's four document
+// sources and never had a screen, so the only way a shop could paper a cash
+// sale was to open a khata for someone who owes nothing — which then pollutes
+// the pending list and the reminder job.
+//
+// Deliberately NOT a ledger entry: no identity is created and no balance
+// exists. The name and phone go on the DOCUMENT only, because that is all a
+// stranger's details are for.
+function CounterSale({ onDone }: { onDone: () => void }) {
+  const [name, setName] = useState('');
+  const [phone, setPhone] = useState('');
+  const [items, setItems] = useState([{ name: '', qty: '1', price: '', unit: '' }]);
+  const [busy, setBusy] = useState(false);
+  const setItem = (i: number, patch: Partial<{ name: string; qty: string; price: string; unit: string }>) =>
+    setItems((prev) => prev.map((it, j) => (j === i ? { ...it, ...patch } : it)));
+  const total = items.reduce((n, it) => n + num(it.qty) * num(it.price), 0);
+
+  const sell = async () => {
+    const filled = items.filter((it) => it.name.trim() || it.price.trim());
+    if (!filled.length) { Alert.alert('Nothing to sell', 'Add at least one product.'); return; }
+    if (filled.some((it) => !it.name.trim() || num(it.qty) <= 0 || num(it.price) < 0)) {
+      Alert.alert('Check the products', 'Every product needs a name, a quantity above 0 and a price.');
+      return;
+    }
+    setBusy(true);
+    try {
+      const { id } = await SB.counterSale(name.trim(), phone.trim(), filled.map((it) => ({
+        name: it.name.trim(), brand: '', unit: normalizeUnit(it.unit),
+        qty: num(it.qty), price: num(it.price), taxPercent: 0,
+      })));
+      // The bill is the point of the sale, so print it here rather than making
+      // the owner hunt for the document afterwards. A failed share must not
+      // read as a failed sale — the document is already numbered and stored.
+      try {
+        const html = await SB.invoiceHtml(id);
+        const { uri } = await Print.printToFileAsync({ html });
+        if (await Sharing.isAvailableAsync()) {
+          await Sharing.shareAsync(uri, { mimeType: 'application/pdf', dialogTitle: 'Bill' });
+        }
+      } catch {
+        Alert.alert('Sale recorded', 'The bill could not be shared, but the sale is saved.');
+      }
+      onDone();
+    } catch (e: any) {
+      Alert.alert('Could not record the sale', e?.message ?? 'Try again');
+    } finally { setBusy(false); }
+  };
+
+  return (
+    <View style={s.panel}>
+      <Text style={s.panelTitle}>Counter sale</Text>
+      <Text style={s.hint}>
+        Cash over the counter. Nothing is owed afterwards, so this creates no
+        customer and no khata — just the bill.
+      </Text>
+      <TextInput style={s.input} placeholder="Customer name (optional)" placeholderTextColor={C.sub}
+        value={name} onChangeText={setName} />
+      <TextInput style={s.input} placeholder="Phone (optional)" placeholderTextColor={C.sub}
+        value={phone} onChangeText={setPhone} keyboardType="phone-pad" />
+      {items.map((it, i) => (
+        <View key={i} style={{ flexDirection: 'row', gap: 6, marginBottom: 8 }}>
+          <TextInput style={[s.input, { flex: 3, marginBottom: 0 }]} placeholder="Product"
+            placeholderTextColor={C.sub} value={it.name} onChangeText={(v) => setItem(i, { name: v })} />
+          <TextInput style={[s.input, { flex: 1, marginBottom: 0 }]} placeholder="Qty"
+            placeholderTextColor={C.sub} keyboardType="numeric" value={it.qty}
+            onChangeText={(v) => setItem(i, { qty: v })} />
+          <TextInput style={[s.input, { flex: 1.2, marginBottom: 0 }]} placeholder="Unit"
+            placeholderTextColor={C.sub} value={it.unit} onChangeText={(v) => setItem(i, { unit: v })} />
+          <TextInput style={[s.input, { flex: 1.4, marginBottom: 0 }]} placeholder="₹ each"
+            placeholderTextColor={C.sub} keyboardType="numeric" value={it.price}
+            onChangeText={(v) => setItem(i, { price: v })} />
+          <TouchableOpacity onPress={() => setItems(items.filter((_, j) => j !== i))}
+            hitSlop={8} style={{ justifyContent: 'center' }}>
+            <Ionicons name="close-circle" size={22} color={C.danger} />
+          </TouchableOpacity>
+        </View>
+      ))}
+      <TouchableOpacity style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 10 }}
+        onPress={() => setItems([...items, { name: '', qty: '1', price: '', unit: '' }])}>
+        <Ionicons name="add-circle-outline" size={18} color={C.green} />
+        <Text style={{ color: C.green, fontWeight: '700', fontSize: 13 }}>Add another product</Text>
+      </TouchableOpacity>
+      <Text style={s.price}>Total {formatINR(total)}</Text>
+      <View style={{ flexDirection: 'row', gap: 8, marginTop: 8 }}>
+        <TouchableOpacity style={[s.primaryBtn, { flex: 1 }, busy && { opacity: 0.6 }]}
+          disabled={busy} onPress={sell}>
+          <Text style={s.primaryBtnText}>{busy ? 'Saving...' : 'Sell & print bill'}</Text>
+        </TouchableOpacity>
+        <TouchableOpacity style={[s.outlineBtn, { flex: 1 }]} disabled={busy} onPress={onDone}>
+          <Text style={s.outlineBtnText}>Cancel</Text>
+        </TouchableOpacity>
+      </View>
+    </View>
   );
 }
 
@@ -3510,6 +3703,37 @@ function KhataDetail({ customer, onBack }: { customer: SB.CustomerPending; onBac
     } finally { setBusy(false); }
   };
 
+  // ── credit ceiling ──────────────────────────────────────────────
+  //
+  // Migration 112 added the column, sbCreditCheck has read it since, and the
+  // over-limit prompt above has always been able to fire — but nothing in the
+  // app could ever WRITE a limit, so every ceiling in production was the
+  // schema default of 0, which means unconstrained. The gate was documented as
+  // enforced and was in fact inert.
+  //
+  // Two tables, one meaning: a walk-in's ceiling lives on
+  // shopbook_khata_customer because shopbook_customer.customer_user_id is a
+  // users FK a walk-in can never satisfy.
+  const [limitOpen, setLimitOpen] = useState(false);
+  const [limitText, setLimitText] = useState(
+    customer.creditLimit != null && customer.creditLimit > 0 ? String(customer.creditLimit) : '');
+  const [limit, setLimit] = useState<number | undefined>(customer.creditLimit);
+
+  const saveLimit = async () => {
+    const v = num(limitText);
+    if (v < 0) { Alert.alert('Enter 0 or more', 'Use 0 for no limit.'); return; }
+    setBusy(true);
+    try {
+      if (customer.isKhata) await SB.setKhataCreditLimit(customer.customerId, v);
+      else await SB.setCreditLimit(customer.customerId, v);
+      setLimit(v); setLimitOpen(false);
+      Alert.alert('Credit limit saved',
+        v > 0 ? `${customer.customerName || 'This customer'} can owe up to ${formatINR(v)}.`
+              : 'No ceiling — entries will never be questioned.');
+    } catch (e: any) { Alert.alert('Could not save', e?.message ?? 'Try again'); }
+    finally { setBusy(false); }
+  };
+
   const remind = async () => {
     setBusy(true);
     try {
@@ -3536,6 +3760,42 @@ function KhataDetail({ customer, onBack }: { customer: SB.CustomerPending; onBac
             <Ionicons name="notifications-outline" size={18} color={C.green} />
             <Text style={s.outlineBtnText}>Send payment reminder</Text>
           </TouchableOpacity>
+        )}
+
+        {/* The ceiling this customer is held to. Shown before it can be
+            changed: an owner setting a limit blind is how a regular gets
+            refused at the counter. An older backend does not send the field at
+            all, and that reads as unknown rather than as zero. */}
+        {!limitOpen ? (
+          <TouchableOpacity style={[s.outlineBtn, busy && { opacity: 0.6 }]} disabled={busy}
+            onPress={() => setLimitOpen(true)}>
+            <Ionicons name="speedometer-outline" size={18} color={C.green} />
+            <Text style={s.outlineBtnText}>
+              {limit == null ? '  Credit limit'
+                : limit > 0 ? `  Credit limit ${formatINR(limit)}` : '  Credit limit — none set'}
+            </Text>
+          </TouchableOpacity>
+        ) : (
+          <View style={s.panel}>
+            <Text style={s.panelTitle}>Credit limit</Text>
+            <TextInput style={s.input} placeholder="0" placeholderTextColor={C.sub}
+              keyboardType="numeric" value={limitText} onChangeText={setLimitText} autoFocus />
+            <Text style={s.hint}>
+              The most this customer may owe at once. 0 means no limit. Going
+              past it does not block the entry — you are asked to confirm,
+              because you know the customer and the app does not.
+            </Text>
+            <View style={{ flexDirection: 'row', gap: 8, marginTop: 8 }}>
+              <TouchableOpacity style={[s.primaryBtn, { flex: 1 }, busy && { opacity: 0.6 }]}
+                disabled={busy} onPress={saveLimit}>
+                <Text style={s.primaryBtnText}>Save limit</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={[s.outlineBtn, { flex: 1 }]} disabled={busy}
+                onPress={() => { setLimitOpen(false); setLimitText(limit && limit > 0 ? String(limit) : ''); }}>
+                <Text style={s.outlineBtnText}>Cancel</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
         )}
         <View style={s.panel}>
           <Text style={s.panelTitle}>Add entry</Text>
@@ -3639,6 +3899,15 @@ function ShopSettings({ shop, me, onSaved, onCancel }: {
   const [lunchEnd, setLunchEnd] = useState(shop?.lunchEnd ?? '');
   const [coords, setCoords] = useState<{ lat: number; lng: number } | null>(
     shop?.lat != null && shop?.lng != null ? { lat: shop.lat, lng: shop.lng } : null);
+  // ── moving a verified shop ──────────────────────────────────────
+  //
+  // A verified badge was granted against an address customers now walk to, so
+  // the pin is fixed: past ~300m the save is refused with `location_locked` and
+  // the move has to be reviewed. The endpoints for that have been live since
+  // P1-D, and nothing in the app could create a request — so the refusal was a
+  // dead end and an owner who genuinely moved shop had no way forward at all.
+  const [moveAsk, setMoveAsk] = useState(false);
+  const [locReq, setLocReq] = useState<SB.LocationRequest | null>(null);
   const [busy, setBusy] = useState(false);
   const [locating, setLocating] = useState(false);
   // Country Tax Engine: selecting a country loads its currency + optional
@@ -3684,6 +3953,26 @@ function ShopSettings({ shop, me, onSaved, onCancel }: {
     } finally { setLocating(false); }
   };
 
+  // A decision the owner has not seen yet is the first thing they should see.
+  useEffect(() => {
+    if (!shop) return;
+    let alive = true;
+    SB.myLocationRequest().then((r) => { if (alive) setLocReq(r); }).catch(() => {});
+    return () => { alive = false; };
+  }, [shop]);
+
+  const submitMove = async (reason: string) => {
+    if (!coords) return;
+    setBusy(true);
+    try {
+      await SB.requestLocationChange(coords.lat, coords.lng, address.trim(), reason);
+      setLocReq(await SB.myLocationRequest());
+      Alert.alert('Sent for review',
+        'Your new location was sent for review. Customers keep seeing the current one until it is approved.');
+    } catch (e: any) { Alert.alert('Could not send', e?.message ?? 'Try again'); }
+    finally { setBusy(false); }
+  };
+
   // Auto-capture location the first time a new shop is being created, so most
   // owners never have to think about it — location is required to save.
   useEffect(() => {
@@ -3714,13 +4003,21 @@ function ShopSettings({ shop, me, onSaved, onCancel }: {
       });
       const fresh = await SB.myShop();
       if (fresh) onSaved(fresh);
-    } catch (e: any) { Alert.alert('Error', e?.message ?? 'Try again'); }
+    } catch (e: any) {
+      // Not an error the owner can fix by retrying — it is a request they have
+      // to make. Offer that instead of the refusal.
+      if (SB.locationLocked(e)) { setMoveAsk(true); return; }
+      Alert.alert('Error', e?.message ?? 'Try again');
+    }
     finally { setBusy(false); }
   };
 
   return (
     <>
       <SubHeader title={shop ? 'Shop Settings' : 'Create Your Shop'} onBack={onCancel} />
+      <ReasonModal visible={moveAsk} title="Why is the shop moving?"
+        placeholder="e.g. moved to the next street, corrected a wrong pin"
+        onSubmit={submitMove} onClose={() => setMoveAsk(false)} />
       <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
         <ScrollView contentContainerStyle={s.body} keyboardShouldPersistTaps="handled">
           {!shop && <Text style={s.hint}>Set up your shop once — customers nearby can then find you and order.</Text>}
@@ -3806,6 +4103,24 @@ function ShopSettings({ shop, me, onSaved, onCancel }: {
           {!coords && !locating && (
             <Text style={s.hint}>📍 Required so nearby customers can find your shop and see the distance.</Text>
           )}
+          {shop?.verified && (
+            <Text style={s.hint}>
+              This shop is verified, so its pin is fixed. Moving it more than a few
+              hundred metres is reviewed before customers see the new place.
+            </Text>
+          )}
+          {locReq && (
+            <View style={[s.panel, { borderColor: locReq.status === 'rejected' ? C.danger : C.amber }]}>
+              <Text style={{ color: locReq.status === 'rejected' ? C.danger : C.amber, fontWeight: '700' }}>
+                {locReq.status === 'pending'
+                  ? `Location change under review — ${locReq.distanceKm.toFixed(1)} km away`
+                  : locReq.status === 'approved' ? 'Location change approved'
+                  : 'Location change rejected'}
+              </Text>
+              {!!locReq.reason && <Text style={s.hint}>Your reason: {locReq.reason}</Text>}
+              {!!locReq.reviewNote && <Text style={s.hint}>Reviewer: {locReq.reviewNote}</Text>}
+            </View>
+          )}
           <TouchableOpacity style={[s.primaryBtn, busy && { opacity: 0.6 }]} disabled={busy} onPress={save}>
             {busy ? <ActivityIndicator color="#fff" /> : <Text style={s.primaryBtnText}>{shop ? 'Save Settings' : 'Create Shop'}</Text>}
           </TouchableOpacity>
@@ -3844,7 +4159,7 @@ function NotificationCenter({ onBack, onRead }: { onBack: () => void; onRead: ()
             <View style={{ flex: 1 }}>
               <Text style={s.cardTitle}>{n.title}</Text>
               {!!n.body && <Text style={s.cardSub}>{n.body}</Text>}
-              <Text style={[s.cardSub, { fontSize: 11 }]}>{new Date(n.createdAt).toLocaleString('en-IN')}</Text>
+              <Text style={[s.cardSub, { fontSize: 11 }]}>{new Date(n.createdAt).toLocaleString(dateLocale())}</Text>
             </View>
             {!n.read && <View style={[s.pillDot, { backgroundColor: C.green }]} />}
           </View>
@@ -3934,7 +4249,7 @@ function InvoiceView({ orderId, onBack }: { orderId: string; onBack: () => void 
         <h2 style="color:#0B7A3B;margin:0">${inv.business.name}</h2>
         <p style="color:#666;margin:4px 0">${inv.business.address}${inv.business.phone ? ` · ${inv.business.phone}` : ''}</p>
         ${taxIds ? `<p style="color:#666;margin:2px 0;font-size:13px">${taxIds}</p>` : ''}
-        <p style="margin:12px 0 4px"><b>${inv.invoiceNo}</b> · ${new Date(inv.createdAt).toLocaleDateString('en-IN')}</p>
+        <p style="margin:12px 0 4px"><b>${inv.invoiceNo}</b> · ${new Date(inv.createdAt).toLocaleDateString(dateLocale(inv.country))}</p>
         <p style="color:#666;margin:0 0 14px">Billed to: ${inv.customerName || 'Customer'}</p>
         <table style="width:100%;border-collapse:collapse;font-size:14px">
           <thead><tr style="border-bottom:1px solid #ddd"><th align="left">Item</th><th>Qty</th><th align="right">Amount</th></tr></thead>
@@ -3976,7 +4291,7 @@ function InvoiceView({ orderId, onBack }: { orderId: string; onBack: () => void 
                   <Text key={k} style={s.cardSub}>{k.toUpperCase()}: {String(v)}</Text>
                 ))}
               <Text style={s.cardSub}>
-                {inv.invoiceNo} · {new Date(inv.createdAt).toLocaleDateString('en-IN')}
+                {inv.invoiceNo} · {new Date(inv.createdAt).toLocaleDateString(dateLocale(inv.country))}
               </Text>
               {!!inv.customerName && <Text style={s.cardSub}>Billed to: {inv.customerName}</Text>}
               {/* A business buyer's own details — present only on a tax invoice,
@@ -4153,7 +4468,7 @@ function LedgerRow({ entry, onShare }: { entry: SB.LedgerEntry; onShare?: () => 
   const at = new Date(entry.createdAt);
   // Date AND time. "₹500 on 14 Aug" is not something either side can reconcile
   // against a day with several entries — which is the normal case on a khata.
-  const stamp = `${at.toLocaleDateString('en-IN')} · ${at.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
+  const stamp = `${at.toLocaleDateString(dateLocale())} · ${at.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
   const items = entry.items ?? [];
   return (
     <View style={[s.card, { alignItems: 'flex-start' }]}>

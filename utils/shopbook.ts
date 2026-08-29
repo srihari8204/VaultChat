@@ -316,4 +316,40 @@ export function formatQtyUnit(qty: number, unit?: string): string {
   return u ? `${q} x ${u}` : String(q);
 }
 
+// ── stale prices in comparison ────────────────────────────────────
+//
+// A comparison list is the reason a customer opens this app instead of phoning
+// the shop, so the prices in it have to be honest about their own age. Two
+// wrong answers were available and both were rejected: hiding an old price
+// makes a shop that stocks the item look like one that doesn't, and showing it
+// unmarked walks the customer to a price that expired a fortnight ago.
+//
+// 14 days rather than 7 because staple prices in a kirana shop genuinely do
+// not move weekly, and a marker that lands on half the catalog is a marker
+// customers learn to ignore.
+export const PRICE_STALE_DAYS = 14;
+
+/** True when a listed price is older than the freshness window. */
+export function isStalePrice(updatedAt?: string | null, now: Date = new Date()): boolean {
+  if (!updatedAt) return false; // unknown age is not a claim of staleness
+  const t = new Date(updatedAt).getTime();
+  if (!Number.isFinite(t)) return false;
+  return now.getTime() - t > PRICE_STALE_DAYS * 86400_000;
+}
+
+// ── dates follow the country, not the author ──────────────────────
+//
+// Every date in this screen used to be formatted 'en-IN' regardless of where
+// the shop trades, which quietly contradicts the localization spec: formats
+// come from the country config. A document (an invoice) follows ITS country;
+// everything else follows the device, which is what the reader actually set.
+const COUNTRY_LOCALE: Record<string, string> = {
+  IN: 'en-IN', US: 'en-US', GB: 'en-GB', AU: 'en-AU', CA: 'en-CA', SG: 'en-SG',
+};
+
+/** Locale for `toLocale*String`. `undefined` = the device's own locale. */
+export function dateLocale(country?: string): string | undefined {
+  return COUNTRY_LOCALE[(country ?? '').toUpperCase()];
+}
+
 export default {};

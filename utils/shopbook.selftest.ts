@@ -11,6 +11,7 @@ import {
   normalizeOrderStatus, canCustomerCancel, canOwnerCancel, REJECT_REASONS,
   formatMoney, shopOpenState, cartTotal,
   canCustomerCollect, notCollectedGate, NOT_COLLECTED_AFTER_HOURS,
+  isStalePrice, PRICE_STALE_DAYS, dateLocale,
   type OrderStatus, type TimelineEvent,
 } from './shopbook';
 
@@ -104,6 +105,22 @@ check('cart total ignores tax fields', cartTotal([
   { key: 'a', name: 'Atta', brand: '', qty: 2, price: 285, note: '', unit: '5kg', taxPercent: 5 },
   { key: 'b', name: 'Salt', brand: '', qty: 1, price: 20, note: '' },
 ]), 590);
+
+// ── stale prices (comparison freshness policy) ────────────────────
+const STALE_NOW = new Date(2026, 7, 30, 12, 0);
+const daysAgo = (d: number) => new Date(STALE_NOW.getTime() - d * 86400_000).toISOString();
+check('window is 14 days', PRICE_STALE_DAYS, 14);
+check('fresh price', isStalePrice(daysAgo(1), STALE_NOW), false);
+check('exactly at the boundary is not yet stale', isStalePrice(daysAgo(14), STALE_NOW), false);
+check('a day past the boundary is stale', isStalePrice(daysAgo(15), STALE_NOW), true);
+check('missing timestamp is not a staleness claim', isStalePrice(undefined, STALE_NOW), false);
+check('unparseable timestamp is not a staleness claim', isStalePrice('not a date', STALE_NOW), false);
+
+// ── dates follow the country, device locale otherwise ─────────────
+check('india', dateLocale('IN'), 'en-IN');
+check('lowercase country still resolves', dateLocale('sg'), 'en-SG');
+check('unknown country falls back to the device', dateLocale('ZZ'), undefined);
+check('no country falls back to the device', dateLocale(), undefined);
 
 if (failures) {
   console.error(`\n${failures} check(s) failed`);

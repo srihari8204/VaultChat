@@ -1100,6 +1100,10 @@ func orderWithItems(ctx context.Context, w http.ResponseWriter, orderID, userID 
 	// Shop identity for the bill header (spec: invoicing / shop profile).
 	var shopName, shopAddress, shopPhone, shopCountry, ownerName string
 	var shopTaxCfg []byte
+	// What the buyer declared they are buying FOR. Sent back so the customer can
+	// see and correct it — a tax number typed once and never shown again is a
+	// number nobody can check before the invoice freezes it.
+	var buyerTax []byte
 	var totalC, subtotalC, discountC, taxTotalC, roundOffC, deliveryFeeC int64
 	var delivery bool
 	var created time.Time
@@ -1109,7 +1113,7 @@ func orderWithItems(ctx context.Context, w http.ResponseWriter, orderID, userID 
 		        `+sbCents("o.subtotal")+`, `+sbCents("o.tax_total")+`, `+sbCents("o.round_off")+`,
 		        o.cancel_reason, o.cancelled_by, o.reject_reason, o.not_collected_reason,
 		        s.currency, s.name, s.address, s.phone, s.country, s.tax_config,
-		        COALESCE(u.name,'')
+		        COALESCE(u.name,''), o.buyer_tax
 		   FROM shopbook_order o
 		   JOIN shopbook_shop s ON s.id=o.shop_id
 		   LEFT JOIN users u ON u.id=s.owner_user_id
@@ -1117,7 +1121,7 @@ func orderWithItems(ctx context.Context, w http.ResponseWriter, orderID, userID 
 		&couponCode, &discountC, &delivery, &deliveryFeeC, &address,
 		&subtotalC, &taxTotalC, &roundOffC,
 		&cancelReason, &cancelledBy, &rejectReason, &notCollectedReason, &currency,
-		&shopName, &shopAddress, &shopPhone, &shopCountry, &shopTaxCfg, &ownerName)
+		&shopName, &shopAddress, &shopPhone, &shopCountry, &shopTaxCfg, &ownerName, &buyerTax)
 	if db.NoRows(err) {
 		httpx.Err(w, http.StatusNotFound, "Order not found")
 		return
@@ -1211,6 +1215,7 @@ func orderWithItems(ctx context.Context, w http.ResponseWriter, orderID, userID 
 			"taxConfig": json.RawMessage(sbJSON(shopTaxCfg)),
 		},
 		"timeline": timeline, "hasInvoice": hasInvoice,
+		"buyerTax": json.RawMessage(sbJSON(buyerTax)),
 	})
 }
 
@@ -2425,20 +2430,24 @@ func sbOwnerLedger(w http.ResponseWriter, r *http.Request) {
 		       '' AS mobile, false AS is_khata,
 		       SUM(CASE WHEN l.type='purchase' THEN l.amount ELSE -l.amount END) AS pending,
 		       MAX(l.created_at) FILTER (WHERE l.type='payment') AS last_paid,
-		       MIN(l.created_at) AS first_entry
+		       MIN(l.created_at) AS first_entry,
+		       COALESCE(c.credit_limit, 0) AS credit_limit
 		  FROM shopbook_ledger l LEFT JOIN users u ON u.id=l.customer_user_id
+		  LEFT JOIN shopbook_customer c
+		         ON c.shop_id = l.shop_id AND c.customer_user_id = l.customer_user_id
 		 WHERE l.shop_id=$1 AND l.customer_user_id IS NOT NULL
-		 GROUP BY l.customer_user_id, u.name
+		 GROUP BY l.customer_user_id, u.name, c.credit_limit
 		UNION ALL
 		SELECT k.id::text, k.name, COALESCE(k.mobile,''), true,
 		       COALESCE(SUM(CASE WHEN l.type='purchase' THEN l.amount ELSE -l.amount END), 0),
 		       MAX(l.created_at) FILTER (WHERE l.type='payment'),
-		       MIN(l.created_at)
+		       MIN(l.created_at),
+		       k.credit_limit
 		  FROM shopbook_khata_customer k
 		  LEFT JOIN shopbook_ledger l
 		         ON l.khata_customer_id = k.id AND l.shop_id = k.shop_id
 		 WHERE k.shop_id=$1
-		 GROUP BY k.id, k.name, k.mobile
+		 GROUP BY k.id, k.name, k.mobile, k.credit_limit
 		 ORDER BY pending DESC`, shopID)
 	if err != nil {
 		httpx.Err(w, http.StatusInternalServerError, "db error")
@@ -2449,9 +2458,9 @@ func sbOwnerLedger(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var id, name, mobile string
 		var isKhata bool
-		var pending float64
+		var pending, creditLimit float64
 		var lastPaid, firstEntry *time.Time
-		if err := rows.Scan(&id, &name, &mobile, &isKhata, &pending, &lastPaid, &firstEntry); err != nil {
+		if err := rows.Scan(&id, &name, &mobile, &isKhata, &pending, &lastPaid, &firstEntry, &creditLimit); err != nil {
 			continue
 		}
 		// Never paid at all → measure from the first entry, so a customer who
@@ -2474,6 +2483,11 @@ func sbOwnerLedger(w http.ResponseWriter, r *http.Request) {
 			// and `shopbook_ledger_party_ck` rejects anything that sets both.
 			"isKhata": isKhata,
 			"mobile":  mobile,
+			// The ceiling this party is held to, so the owner can SEE it before
+			// changing it. 0 is the schema default and means no ceiling — the
+			// two live in different tables because a walk-in can never satisfy
+			// shopbook_customer's users FK.
+			"creditLimit": math.Round(creditLimit*100) / 100,
 		})
 	}
 	httpx.JSON(w, 200, map[string]any{"customers": out})

@@ -406,6 +406,13 @@ export interface OrderDetail {
   rejectReason: string;
   notCollectedReason: string;   // '' unless the order expired or was written off
   hasInvoice: boolean;
+  /**
+   * The business this order is being bought FOR. A tax number here makes the
+   * document a reclaimable tax invoice; empty leaves it a retail bill. Frozen
+   * once the invoice is issued, which is why it is shown back to the customer
+   * rather than accepted and forgotten.
+   */
+  buyerTax: InvoiceBuyer;
   // Who issued the bill — shop identity travels with the order.
   shop: {
     name: string;
@@ -581,6 +588,13 @@ export interface CustomerPending {
    * against individual purchases. "No payment in 45 days", nothing more.
    */
   staleDays: number;
+  /**
+   * The party's credit ceiling; 0 means no ceiling. Optional because a client
+   * may be talking to a backend that predates the field — an unknown limit is
+   * shown as unknown rather than guessed at as 0, which would read as
+   * "no ceiling" when the truth might be the opposite.
+   */
+  creditLimit?: number;
 }
 
 // ── customer ──────────────────────────────────────────────────────

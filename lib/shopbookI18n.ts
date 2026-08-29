@@ -19,6 +19,23 @@ export const SB_LANGUAGES: { id: SBLang; label: string; native: string }[] = [
   { id: 'kn', label: 'Kannada', native: 'ಕನ್ನಡ' },
 ];
 
+// Speech-recognition locale per language. Separate from `SB_LANGUAGES` only
+// because a recogniser wants a REGION — a Telugu speaker dictating a product
+// name into an English recogniser gets nonsense back, and until this existed
+// that is exactly what every non-English user got.
+//
+// All six are -IN: these are the launch languages of one country, and the
+// regional variant is what the on-device recogniser actually ships. A language
+// added for another country brings its own tag here.
+const SPEECH_LOCALE: Record<SBLang, string> = {
+  en: 'en-IN', hi: 'hi-IN', te: 'te-IN', ta: 'ta-IN', gu: 'gu-IN', kn: 'kn-IN',
+};
+
+/** BCP-47 tag for speech input, following the chosen Shop Book language. */
+export function speechLocale(lang: SBLang = current): string {
+  return SPEECH_LOCALE[lang] ?? 'en-IN';
+}
+
 const STORE_KEY = 'shopbook.lang';
 
 type Catalog = Record<string, string>;
