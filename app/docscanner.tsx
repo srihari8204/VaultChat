@@ -16,12 +16,14 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useEffect, useRef, useState, useMemo } from 'react';
-import { Alert, Animated, Image, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, Animated, FlatList, Image, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { type Palette } from '../constants/theme';
 import { useTheme } from '../lib/theme';
 import { ErrorBoundary } from '../components/ErrorBoundary';
 import { enqueueMedia } from '../lib/mediaOutbox';
+import { listChats, chatTitle, type ChatSummary } from '../lib/chatService';
 import DocumentScanner from 'react-native-document-scanner-plugin';
+import { docFilename, DEFAULT_STYLE } from '../lib/docs/docStyle';
 
 const RECENT_KEY = 'vc_docscanner_recent';
 
@@ -42,6 +44,8 @@ interface ScannedDoc {
   pages: number;
   pdfUri: string;
   sizeKb: number;
+  /** The file's real name on disk. Absent on scans saved before it was kept. */
+  filename?: string;
 }
 
 function DocScannerContent() {
@@ -59,6 +63,12 @@ function DocScannerContent() {
   const [recentDocs, setRecentDocs] = useState<ScannedDoc[]>([]);
   const [currentDoc, setCurrentDoc] = useState<ScannedDoc | null>(null);
   const [busy, setBusy] = useState(false);
+  // Chat picker. The scanner is reachable only from Mini apps, which has no
+  // chat context, so "send this scan to someone" needs to ask WHICH chat —
+  // the same shape as Forward in app/chat.tsx.
+  const [pickerDoc, setPickerDoc] = useState<ScannedDoc | null>(null);
+  const [chats, setChats] = useState<ChatSummary[]>([]);
+  const [chatsLoading, setChatsLoading] = useState(false);
 
   const fadeIn = useRef(new Animated.Value(0)).current;
 
@@ -135,12 +145,40 @@ function DocScannerContent() {
       const html = `<html><head><meta name="viewport" content="width=device-width"/></head><body style="margin:0;padding:0;">${pages.join('')}</body></html>`;
       const { uri } = await Print.printToFileAsync({ html });
 
-      const info = await FileSystem.getInfoAsync(uri);
+      // Print writes into the CACHE directory, which Android is free to evict
+      // under storage pressure — and the uri is what "Recent documents" keeps
+      // for up to 20 scans. Left there, a recent row eventually points at a
+      // file that is gone, and the scan cannot be opened, shared or re-sent.
+      // Move it somewhere only the user's own delete removes. The send path
+      // already solved this by copying into the media outbox; this is the same
+      // fix for the list. Best-effort: if the move fails the cache copy still
+      // works today, which beats losing the scan outright.
+      // The title the user typed has to become the FILE's name, not just this
+      // list's label. expo-print names its output with a generated id, and that
+      // was the name the document carried everywhere it went — shared to another
+      // app, saved to Drive, sent on — so a scan carefully titled "Aadhaar card"
+      // arrived as 7f3a91c2-....pdf. docFilename is the same helper the camera's
+      // scan mode uses, so both scanners name a document identically.
+      const filename = docFilename(title, DEFAULT_STYLE, new Date());
+      let pdfUri = uri;
+      try {
+        const dir = `${FileSystem.documentDirectory}VaultScans/`;
+        await FileSystem.makeDirectoryAsync(dir, { intermediates: true });
+        let dest = `${dir}${filename}`;
+        // Two scans can honestly share a title; only the second needs a suffix.
+        if ((await FileSystem.getInfoAsync(dest)).exists) {
+          dest = `${dir}${filename.replace(/\.pdf$/i, '')}-${Date.now()}.pdf`;
+        }
+        await FileSystem.moveAsync({ from: uri, to: dest });
+        pdfUri = dest;
+      } catch { /* keep the cache copy */ }
+
+      const info = await FileSystem.getInfoAsync(pdfUri);
       const sizeKb = info.exists && (info as any).size ? Math.max(1, Math.round((info as any).size / 1024)) : 0;
 
       const doc: ScannedDoc = {
         id: Date.now().toString(), type: selectedType, title,
-        createdAt: Date.now(), pages: imageUris.length, pdfUri: uri, sizeKb,
+        createdAt: Date.now(), pages: imageUris.length, pdfUri, sizeKb, filename,
       };
       setCurrentDoc(doc);
       await persistRecent([doc, ...recentDocs]);
@@ -165,12 +203,44 @@ function DocScannerContent() {
   // enqueueMedia copies the PDF into its own storage first, so the send now
   // survives going offline, navigating away, and force-quitting the app — and
   // the chat bubble shows Preparing…/Uploading% like any other attachment.
-  const sendToChat = async (doc: ScannedDoc) => {
-    if (!chatId) { sharePdf(doc); return; }
+  // Opened FROM a chat (chatId in params) → send straight there. Opened from
+  // Mini apps → ask which chat. Before this, the second case silently fell back
+  // to the share sheet, so a scan could never reach a conversation at all and
+  // the button just read "Save".
+  const sendOrPick = (doc: ScannedDoc) => {
+    if (chatId) { sendToChat(doc, chatId); return; }
+    openChatPicker(doc);
+  };
+
+  const openChatPicker = async (doc: ScannedDoc) => {
+    setPickerDoc(doc);
+    setChatsLoading(true);
+    try {
+      setChats(await listChats());
+    } catch (e: any) {
+      // listChats is a network call; offline it throws. Say so and close,
+      // rather than leaving an empty sheet that looks like "you have no chats".
+      Alert.alert('Could not load chats', e?.message ?? 'Check your connection and try again.');
+      setPickerDoc(null);
+    } finally {
+      setChatsLoading(false);
+    }
+  };
+
+  const sendToChat = async (doc: ScannedDoc, targetChatId: string) => {
+    setPickerDoc(null);
     setBusy(true);
     try {
-      await enqueueMedia(chatId, 'file', { uri: doc.pdfUri, filename: `${doc.title}.pdf`, mime: 'application/pdf' });
-      router.back();
+      await enqueueMedia(targetChatId, 'file', {
+        uri: doc.pdfUri,
+        filename: doc.filename || `${doc.title}.pdf`,
+        mime: 'application/pdf',
+      });
+      // Open the chat rather than just going back: the send is durable but
+      // asynchronous, and "did it actually go?" is exactly the doubt this
+      // screen used to leave people with. chat.tsx adopts pending outbox items
+      // on focus, so the bubble is already there with its upload progress.
+      router.push({ pathname: '/chat' as any, params: { id: targetChatId } });
     } catch (e: any) {
       Alert.alert('Could not send', e?.message ?? 'Try again');
     } finally { setBusy(false); }
@@ -263,7 +333,14 @@ function DocScannerContent() {
                           <Text style={{ color: colors.textFaint, fontSize: 10 }}>{fmtSize(doc.sizeKb)}</Text>
                         </View>
                       </View>
-                      <Text style={{ color: colors.primary, fontSize: 11, fontWeight: '800' }}>Share</Text>
+                      <View style={{ flexDirection: 'row', gap: 14, alignItems: 'center' }}>
+                        <Pressable onPress={() => sendOrPick(doc)} hitSlop={8}>
+                          <Text style={{ color: colors.primary, fontSize: 11, fontWeight: '800' }}>Send</Text>
+                        </Pressable>
+                        <Pressable onPress={() => sharePdf(doc)} hitSlop={8}>
+                          <Text style={{ color: colors.textDim, fontSize: 11, fontWeight: '800' }}>Share</Text>
+                        </Pressable>
+                      </View>
                     </TouchableOpacity>
                   ))}
                   <Text style={{ color: colors.textFaint, fontSize: 10, textAlign: 'center' }}>Long-press a document to delete it</Text>
@@ -334,9 +411,9 @@ function DocScannerContent() {
                 <TouchableOpacity onPress={() => sharePdf(currentDoc)} style={{ flex: 1, backgroundColor: colors.accent + '18', borderRadius: 16, paddingVertical: 14, alignItems: 'center', borderWidth: 1, borderColor: colors.accent + '44' }}>
                   <Text style={{ color: colors.accent, fontWeight: '800', fontSize: 13 }}>📤 Share PDF</Text>
                 </TouchableOpacity>
-                <TouchableOpacity onPress={() => sendToChat(currentDoc)} disabled={busy} style={{ flex: 1 }}>
+                <TouchableOpacity onPress={() => sendOrPick(currentDoc)} disabled={busy} style={{ flex: 1 }}>
                   <LinearGradient colors={[colors.primary, colors.textDim]} style={{ borderRadius: 16, paddingVertical: 14, alignItems: 'center' }}>
-                    <Text style={{ color: '#fff', fontWeight: '800', fontSize: 13 }}>{chatId ? '📨 Send in Chat' : '💾 Save'}</Text>
+                    <Text style={{ color: '#fff', fontWeight: '800', fontSize: 13 }}>{chatId ? '📨 Send in Chat' : '📨 Send to chat'}</Text>
                   </LinearGradient>
                 </TouchableOpacity>
               </View>
@@ -348,6 +425,47 @@ function DocScannerContent() {
 
         </ScrollView>
       </Animated.View>
+
+      {/* Which chat? Same shape as Forward in app/chat.tsx, deliberately —
+          two pickers that behave differently is a worse outcome than a little
+          repeated markup. */}
+      <Modal
+        visible={pickerDoc != null}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setPickerDoc(null)}
+      >
+        <Pressable style={S.sheetBackdrop} onPress={() => setPickerDoc(null)}>
+          <Pressable style={S.sheet} onPress={e => e.stopPropagation()}>
+            <Text style={S.sheetTitle}>Send to…</Text>
+            {pickerDoc && (
+              <Text style={S.sheetSub} numberOfLines={1}>
+                📄 {pickerDoc.filename || `${pickerDoc.title}.pdf`}
+              </Text>
+            )}
+            {chatsLoading ? (
+              <ActivityIndicator color={colors.primary} style={{ marginTop: 24 }} />
+            ) : chats.length === 0 ? (
+              <Text style={S.sheetEmpty}>No chats yet</Text>
+            ) : (
+              <FlatList
+                data={chats}
+                keyExtractor={c => c.id}
+                renderItem={({ item }) => (
+                  <TouchableOpacity
+                    style={S.sheetRow}
+                    onPress={() => pickerDoc && sendToChat(pickerDoc, item.id)}
+                    activeOpacity={0.7}
+                  >
+                    <Text style={S.sheetRowTxt} numberOfLines={1}>{chatTitle(item)}</Text>
+                    <Text style={S.sheetRowSub}>{item.type}</Text>
+                  </TouchableOpacity>
+                )}
+              />
+            )}
+          </Pressable>
+        </Pressable>
+      </Modal>
     </View>
   );
 }
@@ -376,6 +494,21 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   docRow: { flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(10,22,40,0.8)', borderRadius: 14, padding: 14, gap: 12, borderWidth: 1, borderColor: 'rgba(255,255,255,0.06)' },
   typeCard: { width: '30%', flex: 1, minWidth: 100, backgroundColor: 'rgba(10,22,40,0.8)', borderRadius: 16, padding: 14, alignItems: 'center', borderWidth: 1.5, borderColor: 'rgba(255,255,255,0.06)' },
   input: { backgroundColor: 'rgba(6,14,34,0.9)', borderRadius: 14, padding: 15, color: '#fff', fontSize: 14, borderWidth: 1, borderColor: 'rgba(255,255,255,0.08)' },
+  sheetBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.55)', justifyContent: 'flex-end' },
+  sheet: {
+    maxHeight: '70%', backgroundColor: c.card, borderTopLeftRadius: 22, borderTopRightRadius: 22,
+    paddingTop: 18, paddingHorizontal: 18, paddingBottom: 28, gap: 4,
+    borderTopWidth: 1, borderColor: c.border,
+  },
+  sheetTitle: { color: c.text, fontSize: 17, fontWeight: '900' },
+  sheetSub: { color: c.textDim, fontSize: 12, marginBottom: 10 },
+  sheetEmpty: { color: c.textFaint, fontSize: 13, textAlign: 'center', paddingVertical: 28 },
+  sheetRow: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    paddingVertical: 15, borderBottomWidth: 1, borderBottomColor: c.separator, gap: 12,
+  },
+  sheetRowTxt: { color: c.text, fontSize: 15, fontWeight: '700', flex: 1 },
+  sheetRowSub: { color: c.textFaint, fontSize: 11, textTransform: 'uppercase' },
   successBanner: { flexDirection: 'row', alignItems: 'center', backgroundColor: brandAlpha(0.1), borderRadius: 16, padding: 16, gap: 14, borderWidth: 1, borderColor: brandAlpha(0.25) },
   docPreviewLarge: { height: 320, borderRadius: 16, borderWidth: 1, borderColor: 'rgba(74,159,255,0.2)', overflow: 'hidden', backgroundColor: 'rgba(2,11,24,0.9)' },
 });

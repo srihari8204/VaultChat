@@ -1088,6 +1088,20 @@ export async function hydrateOwnPreviews(
 
 // ─── REST ───────────────────────────────────────────────────────────
 
+/**
+ * What to call a chat in a list. A direct chat's `name` is often null — the
+ * peer's name is the thing a person recognises — and falling back to the raw
+ * id shows someone a hex string where a name belongs.
+ *
+ * Exported rather than written per screen: app/search.tsx had the only copy,
+ * and every new picker that needs it would otherwise grow its own.
+ */
+export function chatTitle(c: ChatSummary): string {
+  return c.type === 'direct'
+    ? (c.peerName || c.name || 'Direct chat')
+    : (c.name || 'Group chat');
+}
+
 export async function listChats(opts: { includeHidden?: boolean } = {}): Promise<ChatSummary[]> {
   const qs = opts.includeHidden ? '?includeHidden=1' : '';
   const rows = await api<ChatSummary[]>(`/chats${qs}`);

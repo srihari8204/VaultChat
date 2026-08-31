@@ -12,7 +12,7 @@ import { type Palette } from '../constants/theme';
 import { useTheme } from '../lib/theme';
 import { getAccessToken } from '../lib/api';
 import { Avatar } from '../components/ui';
-import { attachmentUrl, listChats, type ChatSummary } from '../lib/chatService';
+import { attachmentUrl, listChats, chatTitle as chatDisplayName, type ChatSummary } from '../lib/chatService';
 import { searchAllMessages } from '../lib/localDb';
 import { setPendingJump } from '../lib/chatJump';
 
@@ -21,8 +21,8 @@ function useS() {
   return useMemo(() => makeStyles(colors), [colors]);
 }
 
-const titleOf = (c: ChatSummary) =>
-  c.type === 'direct' ? (c.peerName || c.name || 'Direct chat') : (c.name || 'Group chat');
+// Aliased: this screen already has a local `chatTitle` (a Map of id -> chat).
+const titleOf = chatDisplayName;
 
 type MsgHit = { chatId: string; id: number; content: string; senderId: string | null; createdAt: string };
 
