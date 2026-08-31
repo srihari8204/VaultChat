@@ -1,22 +1,31 @@
 // app/encrypted-notes.tsx
-// Encrypted Notes Vault — 12 features matching PDF page 21
-// 1. Encrypted Notes (AES-256-GCM)   7. Per-Note Biometric Lock
+// Encrypted Notes Vault — 13 features (12 from PDF page 21, plus backup).
+// 1. Encrypted Notes (AES-256-GCM)   7. Per-Note PIN Lock
 // 2. 9 Categories                      8. Encrypted Search
 // 3. Rich Text Editor (Bold/Lists)     9. File Attachments in Notes
 // 4. Password Generator (Built-In)    10. Tags & Color Labels
 // 5. Show/Hide Sensitive Fields       11. Secure Trash (30-Day Recovery)
 // 6. Copy with Auto-Clear (30s)       12. Reminders on Notes
+//                                     13. E2EE Backup & Restore (lib/notesVault)
+//
+// THREE OF THESE USED TO BE DECORATION. #7 stored `isLocked`, drew a padlock and
+// gated nothing — a "locked" note opened on a plain tap. #12 declared
+// `reminder?: number` that no code ever read. #11 declared TRASH_DAYS = 30 that
+// no code ever read, so trashed notes and their encrypted attachments lived
+// forever. Each is wired now; see the comment at each site for what was wrong.
 
 import { Ionicons } from '@expo/vector-icons';
 import { BRAND_ACCENT } from '../constants/theme';
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, FlatList, TextInput,
-  Alert, Modal, Platform, ScrollView, Image, ActivityIndicator,
+  Alert, Modal, Platform, ScrollView, Image, ActivityIndicator, AppState,
 } from 'react-native';
+import * as FileSystem from 'expo-file-system/legacy';
 import * as ImagePicker from 'expo-image-picker';
 import * as DocumentPicker from 'expo-document-picker';
 import * as Sharing from 'expo-sharing';
+import { DateTimePickerAndroid } from '@react-native-community/datetimepicker';
 import Markdown from 'react-native-markdown-display';
 import {
   addAttachment, deleteAttachment, isImage, openAttachment, prettySize,
@@ -27,7 +36,13 @@ import { useTheme } from '../lib/theme';
 import { Stack, useRouter } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { copyAndAutoClear } from '../lib/clipboardSafe';
-import { decryptNotes, encryptNotes } from '../lib/notesCrypto';
+import { PinPad } from '../components/PinPad';
+import { clearNotesKeyCache, decryptNotes, encryptNotes } from '../lib/notesCrypto';
+import { armNoteReminder, cancelNoteReminder } from '../lib/notesReminders';
+import {
+  buildBundle, checkPassphrase, hasPassphrase, purgeExpired, restoreBundle,
+  restoreKeyFromWrap, setPassphrase,
+} from '../lib/notesVault';
 
 // The same PIN check hidden-chats uses: the server-verified sign-in MPIN.
 // services/security/pinStore is a LOCAL store that is empty on installs which
@@ -106,20 +121,43 @@ export default function EncryptedNotesScreen() {
   const [gate, setGate] = useState<'pin' | 'open'>('pin');
   const [pinTry, setPinTry] = useState('');
   const [pinErr, setPinErr] = useState<string | null>(null);
-  const pinRef = useRef<TextInput | null>(null);
 
-  // Deferred focus, never autoFocus — matches hidden-chats. Grabbing focus
-  // before this screen's window has drawn is what the ANR above was about.
+  // Per-note lock (feature #7). `isLocked` was stored, toggled and badged, but
+  // NOTHING ever read it to gate anything: a "locked" note opened on a plain
+  // tap like any other, and its preview text sat in the list unmasked. The
+  // padlock was decoration. A note held here is not opened until its own PIN
+  // challenge passes.
+  const [pendingLock, setPendingLock] = useState<Note | null>(null);
+  const [lockTry, setLockTry] = useState('');
+  const [lockErr, setLockErr] = useState<string | null>(null);
+
+  // Re-lock on background. clearNotesKeyCache() existed and was called from
+  // nowhere, so once the screen had been unlocked the DEK stayed in memory for
+  // the life of the process — the vault never actually re-locked, it only
+  // re-prompted. Dropping the key and the gate together makes the prompt real.
   useEffect(() => {
-    if (gate !== 'pin') return;
-    const t = setTimeout(() => pinRef.current?.focus(), 250);
-    return () => clearTimeout(t);
-  }, [gate]);
+    const sub = AppState.addEventListener('change', (st) => {
+      if (st !== 'active') {
+        clearNotesKeyCache();
+        setGate('pin');
+        setShowEditor(false);
+        setPendingLock(null);
+        setViewerImg(null);
+      }
+    });
+    return () => sub.remove();
+  }, []);
 
-  const submitPin = useCallback(async () => {
-    if (!/^\d{4,8}$/.test(pinTry)) { setPinErr('PIN must be 4–8 digits'); return; }
+  // No focus effect and no TextInput: this gate uses an in-app keypad, so
+  // there is no soft keyboard to raise and nothing for the OS to refuse.
+
+  // Takes the PIN as an argument: PinPad fires onComplete with the final digit
+  // included, which the `pinTry` state does not hold yet on that same tick.
+  const submitPin = useCallback(async (pin?: string) => {
+    const v = pin ?? pinTry;
+    if (!/^\d{4,8}$/.test(v)) { setPinErr('PIN must be 4–8 digits'); return; }
     try {
-      if (await verifyPin(pinTry)) { setGate('open'); setPinTry(''); setPinErr(null); }
+      if (await verifyPin(v)) { setGate('open'); setPinTry(''); setPinErr(null); }
       else { setPinTry(''); setPinErr('Incorrect PIN'); }
     } catch {
       // Server unreachable — stay locked rather than open on a network error.
@@ -141,6 +179,15 @@ export default function EncryptedNotesScreen() {
   const [viewerImg, setViewerImg] = useState<string | null>(null);
   const [edPreview, setEdPreview] = useState(false);
   const [edSel, setEdSel] = useState({ start: 0, end: 0 });
+  const [edReminder, setEdReminder] = useState<number | undefined>(undefined);
+
+  // Backup / restore (lib/notesVault) — passphrase-wrapped, ciphertext only.
+  const [showBackup, setShowBackup] = useState(false);
+  const [bkPass, setBkPass] = useState('');
+  const [bkPass2, setBkPass2] = useState('');
+  const [bkBusy, setBkBusy] = useState(false);
+  const [bkHasPass, setBkHasPass] = useState(false);
+  useEffect(() => { hasPassphrase().then(setBkHasPass).catch(() => {}); }, [showBackup]);
 
   useEffect(() => { loadNotes(); }, []);
 
@@ -151,10 +198,36 @@ export default function EncryptedNotesScreen() {
       const dec = await decryptNotes(raw);
       if (!dec) return; // sealed blob we can't open — don't clobber it
       const parsed: Note[] = JSON.parse(dec.text);
-      setNotes(parsed);
-      // Migrate legacy plaintext storage to an encrypted blob in place.
-      if (!dec.wasEncrypted) {
-        await AsyncStorage.setItem(STORAGE_KEY, await encryptNotes(JSON.stringify(parsed)));
+
+      // Honour the 30 days the trash promises. TRASH_DAYS was declared and
+      // never read, so "30-Day Recovery" recovered forever: trashed notes and
+      // their encrypted attachments stayed on disk for the life of the install.
+      const { kept, purgedAttachmentIds } = purgeExpired(parsed, Date.now(), TRASH_DAYS);
+      const expired = parsed.length - kept.length;
+      if (expired > 0) {
+        await Promise.all(purgedAttachmentIds.map(id => deleteAttachment(id)));
+        await Promise.all(
+          parsed.filter(n => !kept.includes(n)).map(n => cancelNoteReminder(n.id)),
+        );
+      }
+      setNotes(kept);
+
+      // Re-arm alarms for anything still in the future. Alarms are OS-level and
+      // notes are not: a restore (or a reinstall) brings back a note carrying a
+      // `reminder` timestamp with nothing behind it, and the reminder would
+      // simply never fire. armNoteReminder cancels before it schedules, so
+      // re-arming an alarm that already exists is a no-op.
+      // ponytail: runs on every screen open; fine for a handful of reminders,
+      // move to a one-shot on restore if a vault ever carries hundreds.
+      for (const n of kept) {
+        if (n.reminder && !n.isDeleted && n.reminder > Date.now()) {
+          await armNoteReminder(n.id, n.reminder, n.title, n.isSensitive, n.isLocked);
+        }
+      }
+
+      // Re-seal when the blob was legacy plaintext, or when the purge changed it.
+      if (!dec.wasEncrypted || expired > 0) {
+        await AsyncStorage.setItem(STORAGE_KEY, await encryptNotes(JSON.stringify(kept)));
       }
     } catch {}
   };
@@ -164,7 +237,31 @@ export default function EncryptedNotesScreen() {
     await AsyncStorage.setItem(STORAGE_KEY, await encryptNotes(JSON.stringify(updated)));
   };
 
-  const openEditor = (note?: Note) => {
+  // Challenge a locked note before anything of it is rendered. Same
+  // server-verified MPIN as the screen gate — one PIN, not a second secret to
+  // remember for the same vault.
+  const submitLockPin = useCallback(async (pin?: string) => {
+    const note = pendingLock;
+    if (!note) return;
+    const v = pin ?? lockTry;
+    if (!/^\d{4,8}$/.test(v)) { setLockErr('PIN must be 4–8 digits'); return; }
+    try {
+      if (await verifyPin(v)) {
+        setPendingLock(null); setLockTry(''); setLockErr(null);
+        openEditor(note, true);
+      } else { setLockTry(''); setLockErr('Incorrect PIN'); }
+    } catch {
+      setLockTry(''); setLockErr('Could not verify. Check your connection.');
+    }
+  }, [pendingLock, lockTry]);
+
+  const openEditor = (note?: Note, unlocked = false) => {
+    // A locked note goes to the challenge instead of the editor. Without this
+    // the padlock badge promised a protection that did not exist.
+    if (note?.isLocked && !unlocked) {
+      setLockTry(''); setLockErr(null); setPendingLock(note);
+      return;
+    }
     if (note) {
       setEditNote(note);
       setEdTitle(note.title);
@@ -175,6 +272,7 @@ export default function EncryptedNotesScreen() {
       setEdSensitive(note.isSensitive);
       setEdLocked(note.isLocked);
       setEdAttachments(note.attachments ?? []);
+      setEdReminder(note.reminder);
     } else {
       setEditNote(null);
       setEdTitle('');
@@ -185,6 +283,7 @@ export default function EncryptedNotesScreen() {
       setEdSensitive(false);
       setEdLocked(false);
       setEdAttachments([]);
+      setEdReminder(undefined);
     }
     setShowEditor(true);
   };
@@ -258,18 +357,22 @@ export default function EncryptedNotesScreen() {
   const saveNote = async () => {
     if (!edTitle.trim()) { Alert.alert('Error', 'Title required'); return; }
     const now = Date.now();
+    const id = editNote ? editNote.id : `note_${now}`;
     if (editNote) {
-      const updated = notes.map(n => n.id === editNote.id ? { ...n, title: edTitle.trim(), content: edContent, category: edCategory, tags: edTags, tagColor: edTagColor, isSensitive: edSensitive, isLocked: edLocked, attachments: edAttachments, updatedAt: now } : n);
+      const updated = notes.map(n => n.id === editNote.id ? { ...n, title: edTitle.trim(), content: edContent, category: edCategory, tags: edTags, tagColor: edTagColor, isSensitive: edSensitive, isLocked: edLocked, attachments: edAttachments, reminder: edReminder, updatedAt: now } : n);
       await saveNotes(updated);
     } else {
       const newNote: Note = {
-        id: `note_${now}`, title: edTitle.trim(), content: edContent,
+        id, title: edTitle.trim(), content: edContent,
         category: edCategory, tags: edTags, tagColor: edTagColor,
         isSensitive: edSensitive, isLocked: edLocked, attachments: edAttachments,
-        createdAt: now, updatedAt: now,
+        reminder: edReminder, createdAt: now, updatedAt: now,
       };
       await saveNotes([newNote, ...notes]);
     }
+    // Arm the OS alarm last, so a notifee failure never costs the user the save.
+    if (edReminder) await armNoteReminder(id, edReminder, edTitle.trim(), edSensitive, edLocked);
+    else await cancelNoteReminder(id);
     setShowEditor(false);
   };
 
@@ -279,6 +382,8 @@ export default function EncryptedNotesScreen() {
       { text: 'Trash', style: 'destructive', onPress: async () => {
         const updated = notes.map(n => n.id === id ? { ...n, isDeleted: true, deletedAt: Date.now() } : n);
         await saveNotes(updated);
+        // A trashed note must stop nagging, or its alarm outlives it by 30 days.
+        await cancelNoteReminder(id);
       }},
     ]);
   };
@@ -286,11 +391,15 @@ export default function EncryptedNotesScreen() {
   const restoreNote = async (id: string) => {
     const updated = notes.map(n => n.id === id ? { ...n, isDeleted: false, deletedAt: undefined } : n);
     await saveNotes(updated);
+    // Put back the alarm trashing cancelled, if its time is still ahead.
+    const n = updated.find(x => x.id === id);
+    if (n?.reminder) await armNoteReminder(n.id, n.reminder, n.title, n.isSensitive, n.isLocked);
   };
 
   const permanentDelete = async (id: string) => {
     const gone = notes.find(n => n.id === id);
     if (gone?.attachments?.length) await Promise.all(gone.attachments.map(a => deleteAttachment(a.id)));
+    await cancelNoteReminder(id);
     await saveNotes(notes.filter(n => n.id !== id));
   };
 
@@ -311,6 +420,143 @@ export default function EncryptedNotesScreen() {
     setShowPassGen(true);
   };
 
+  // Reminder picker — the same date-then-time chain app/finance/reminders.tsx
+  // uses, so the two reminder features in this app behave identically.
+  const pickReminder = () => {
+    const base = edReminder ?? Date.now() + 60 * 60 * 1000;
+    DateTimePickerAndroid.open({
+      value: new Date(base), mode: 'date', minimumDate: new Date(),
+      onChange: (_e, d) => {
+        if (!d) return;
+        const day = d.getTime();
+        DateTimePickerAndroid.open({
+          value: new Date(base), mode: 'time',
+          onChange: (_e2, t) => {
+            const at = new Date(day);
+            if (t) at.setHours(t.getHours(), t.getMinutes(), 0, 0);
+            if (at.getTime() <= Date.now()) { Alert.alert('Pick a future time', 'That moment has already passed.'); return; }
+            setEdReminder(at.getTime());
+          },
+        });
+      },
+    });
+  };
+
+  // ── Backup / restore (lib/notesVault) ─────────────────────────────────────
+  // The vault's DEK lives only in SecureStore, which nothing backs up — while
+  // the sealed notes blob IS swept into every cloud backup as a plain
+  // AsyncStorage key. A restore therefore produced ciphertext with no key: the
+  // backup looked fine and guaranteed total loss. A passphrase-wrapped copy of
+  // the DEK travels with it now, so only the passphrase — never stored, never
+  // sent — can open the vault, including from the server's side of a backup.
+
+  const savePassphrase = async () => {
+    if (bkPass !== bkPass2) { Alert.alert('Passphrases differ', 'The two entries must match.'); return; }
+    setBkBusy(true);
+    try {
+      await setPassphrase(bkPass);
+      setBkPass(''); setBkPass2(''); setBkHasPass(true);
+      Alert.alert(
+        'Backup passphrase set',
+        'Your notes key is now included in backups, sealed with this passphrase.\n\nWrite it down. It is never stored and never sent — if you forget it, nobody can recover these notes, including us.',
+      );
+    } catch (e: any) {
+      Alert.alert('Could not set passphrase', e?.message ?? 'Try again');
+    } finally { setBkBusy(false); }
+  };
+
+  // Write a self-contained encrypted file and hand it to the share sheet.
+  const exportBundle = async () => {
+    if (!bkPass) { Alert.alert('Passphrase needed', 'Enter the passphrase to seal this export.'); return; }
+    setBkBusy(true);
+    try {
+      if (bkHasPass && !(await checkPassphrase(bkPass))) {
+        Alert.alert('Wrong passphrase', 'That is not your backup passphrase.');
+        return;
+      }
+      const bundle = await buildBundle(bkPass);
+      const path = `${FileSystem.cacheDirectory}vaultchat-notes-${new Date().toISOString().slice(0, 10)}.vcnotes`;
+      await FileSystem.writeAsStringAsync(path, JSON.stringify(bundle), { encoding: FileSystem.EncodingType.UTF8 });
+      if (await Sharing.isAvailableAsync()) {
+        await Sharing.shareAsync(path, { mimeType: 'application/json', dialogTitle: 'Encrypted notes backup' });
+      } else {
+        Alert.alert('Saved', path);
+      }
+      setBkPass(''); setBkPass2('');
+    } catch (e: any) {
+      Alert.alert('Export failed', e?.message ?? 'Try again');
+    } finally { setBkBusy(false); }
+  };
+
+  const importBundleFile = async () => {
+    if (!bkPass) { Alert.alert('Passphrase needed', 'Enter the passphrase this backup was sealed with.'); return; }
+    const res = await DocumentPicker.getDocumentAsync({ copyToCacheDirectory: true });
+    if (res.canceled || !res.assets?.[0]) return;
+    setBkBusy(true);
+    try {
+      const raw = await FileSystem.readAsStringAsync(res.assets[0].uri, { encoding: FileSystem.EncodingType.UTF8 });
+      const r = await restoreBundle(bkPass, JSON.parse(raw));
+      if (r.status === 'invalid') { Alert.alert('Not a notes backup', 'That file is not a VaultChat notes export.'); return; }
+      if (r.status === 'wrong') { Alert.alert('Wrong passphrase', 'That passphrase does not open this backup.'); return; }
+      if (r.status === 'occupied') {
+        // Never silently swap the key: whatever this device already holds would
+        // become permanently unreadable.
+        Alert.alert(
+          'This device already has notes',
+          'Restoring replaces this device’s notes key. Any notes here that came from a different key will become unreadable. Continue?',
+          [
+            { text: 'Cancel', style: 'cancel' },
+            { text: 'Replace', style: 'destructive', onPress: async () => {
+              const f = await restoreBundle(bkPass, JSON.parse(raw), true);
+              if (f.status === 'ok') { clearNotesKeyCache(); await loadNotes(); setShowBackup(false); Alert.alert('Restored', `Notes and ${f.attachments} attachment(s) restored.`); }
+            }},
+          ],
+        );
+        return;
+      }
+      clearNotesKeyCache();
+      await loadNotes();
+      setShowBackup(false); setBkPass('');
+      Alert.alert('Restored', `Notes and ${r.attachments} attachment(s) restored.`);
+    } catch (e: any) {
+      Alert.alert('Restore failed', e?.message ?? 'Try again');
+    } finally { setBkBusy(false); }
+  };
+
+  // After a device restore the notes blob and the wrap both came back through
+  // the normal cloud/Drive backup — only the key is missing. This recovers it
+  // in place, with no file to pick.
+  const recoverKey = async () => {
+    if (!bkPass) { Alert.alert('Passphrase needed', 'Enter your backup passphrase.'); return; }
+    setBkBusy(true);
+    try {
+      const r = await restoreKeyFromWrap(bkPass);
+      if (r === 'none') { Alert.alert('Nothing to recover', 'No wrapped key travelled with this install.'); return; }
+      if (r === 'wrong') { Alert.alert('Wrong passphrase', 'That passphrase does not open the stored key.'); return; }
+      if (r === 'occupied') {
+        Alert.alert(
+          'This device already has a different key',
+          'Replacing it will make any notes written with the current key unreadable. Continue?',
+          [
+            { text: 'Cancel', style: 'cancel' },
+            { text: 'Replace', style: 'destructive', onPress: async () => {
+              await restoreKeyFromWrap(bkPass, true);
+              clearNotesKeyCache(); await loadNotes(); setShowBackup(false);
+              Alert.alert('Key recovered', 'Your notes should be readable again.');
+            }},
+          ],
+        );
+        return;
+      }
+      clearNotesKeyCache();
+      await loadNotes();
+      setShowBackup(false); setBkPass('');
+      Alert.alert('Key recovered', 'Your notes should be readable again.');
+    } catch (e: any) {
+      Alert.alert('Could not recover', e?.message ?? 'Try again');
+    } finally { setBkBusy(false); }
+  };
+
   // Copy with auto-clear (30s) — delegates to the shared clipboardSafe util
   const copyWithAutoClear = (text: string) => {
     copyAndAutoClear(text);
@@ -324,7 +570,11 @@ export default function EncryptedNotesScreen() {
     if (activeCategory && n.category !== activeCategory) return false;
     if (search) {
       const q = search.toLowerCase();
-      return n.title.toLowerCase().includes(q) || n.content.toLowerCase().includes(q) || n.tags.some(t => t.toLowerCase().includes(q));
+      // A locked note is searched by title and tags only. Matching its body
+      // would let anyone holding the phone confirm what is inside it — "does
+      // this note contain 'amex'?" — without ever passing the PIN.
+      const body = n.isLocked ? '' : n.content;
+      return n.title.toLowerCase().includes(q) || body.toLowerCase().includes(q) || n.tags.some(t => t.toLowerCase().includes(q));
     }
     return true;
   });
@@ -341,20 +591,19 @@ export default function EncryptedNotesScreen() {
         {gate === 'pin' && (
           <>
             <Text style={{ color: colors.text, fontSize: 16, marginBottom: 16 }}>Enter your PIN</Text>
-            <TextInput
+            {/* An in-app keypad, NOT a TextInput. Device-proven on the Redmi:
+                the soft keyboard never opened for this gate — the field held
+                focus while dumpsys reported mShowRequested=false and the IME
+                never bound to the app's window at all, so the gate could not
+                be passed. Android does not guarantee the IME on programmatic
+                focus (a real tap is the reliable trigger) and MIUI is strict
+                about it. components/PinPad has no IME dependency, so there is
+                nothing left to refuse. */}
+            <PinPad
               value={pinTry}
-              onChangeText={(v) => { setPinTry(v.replace(/\D/g, '').slice(0, 8)); setPinErr(null); }}
-              onSubmitEditing={submitPin}
-              placeholder="••••••"
-              placeholderTextColor={colors.textDim}
-              keyboardType="number-pad"
-              secureTextEntry
-              ref={pinRef}
-              style={{
-                color: colors.text, borderColor: colors.border, borderWidth: 1,
-                borderRadius: 10, paddingHorizontal: 16, paddingVertical: 10,
-                fontSize: 20, letterSpacing: 6, textAlign: 'center', minWidth: 180,
-              }}
+              onChange={(v) => { setPinTry(v); setPinErr(null); }}
+              onComplete={(v) => submitPin(v)}
+              error={!!pinErr}
             />
             {!!pinErr && <Text style={{ color: '#ff6b6b', marginTop: 12 }}>{pinErr}</Text>}
             <TouchableOpacity onPress={() => router.back()} style={{ marginTop: 20 }}>
@@ -377,8 +626,15 @@ export default function EncryptedNotesScreen() {
         </TouchableOpacity>
         <View style={{ flex: 1 }}>
           <Text style={s.headerTitle}>{'\uD83D\uDCDD'} Encrypted Notes</Text>
-          <Text style={s.headerSub}>AES-256-GCM {'\u2022'} Biometric locked {'\u2022'} On-device only</Text>
+          {/* Says what the screen actually does. The gate is the MPIN, not a
+              biometric, and notes now leave the device only as ciphertext the
+              user's own passphrase seals \u2014 "On-device only" stopped being true
+              the moment cloudBackup started sweeping this vault's blob. */}
+          <Text style={s.headerSub}>AES-256-GCM {'\u2022'} PIN locked {'\u2022'} End-to-end encrypted</Text>
         </View>
+        <TouchableOpacity onPress={() => setShowBackup(true)} style={s.trashBtn}>
+          <Ionicons name="shield-checkmark-outline" size={18} color={colors.text} />
+        </TouchableOpacity>
         <TouchableOpacity onPress={() => setShowTrash(true)} style={s.trashBtn}>
           <Ionicons name="trash-outline" size={18} color={colors.text} />
         </TouchableOpacity>
@@ -424,7 +680,9 @@ export default function EncryptedNotesScreen() {
                 {!!n.attachments?.length && <Text style={{ fontSize: 13 }}>{'\uD83D\uDCCE'}{n.attachments.length}</Text>}
               </View>
               <Text style={s.notePreview} numberOfLines={2}>
-                {n.isSensitive && hideSensitive ? '\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022' : n.content}
+                {n.isLocked
+                  ? 'Locked \u2014 tap to unlock'
+                  : n.isSensitive && hideSensitive ? '\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022' : n.content}
               </Text>
               <View style={s.noteFooter}>
                 <Text style={s.noteDate}>{new Date(n.updatedAt).toLocaleDateString()}</Text>
@@ -582,8 +840,26 @@ export default function EncryptedNotesScreen() {
               </TouchableOpacity>
               <TouchableOpacity style={s.edToggle} onPress={() => setEdLocked(l => !l)}>
                 <Text style={s.edToggleIcon}>{edLocked ? '\uD83D\uDD12' : '\uD83D\uDD13'}</Text>
-                <Text style={s.edToggleTxt}>Biometric Lock {edLocked ? '(ON)' : '(OFF)'}</Text>
+                <Text style={s.edToggleTxt}>PIN Lock {edLocked ? '(ON)' : '(OFF)'}</Text>
               </TouchableOpacity>
+
+              {/* Reminder (feature #12) \u2014 armed as an AlarmManager alarm on save. */}
+              <TouchableOpacity style={s.edToggle} onPress={pickReminder}>
+                <Text style={s.edToggleIcon}>{'\u23F0'}</Text>
+                <Text style={s.edToggleTxt}>
+                  {edReminder ? `Reminder ${new Date(edReminder).toLocaleString()}` : 'Reminder (none)'}
+                </Text>
+                {!!edReminder && (
+                  <TouchableOpacity onPress={() => setEdReminder(undefined)} hitSlop={10}>
+                    <Ionicons name="close" size={16} color="#EF4444" />
+                  </TouchableOpacity>
+                )}
+              </TouchableOpacity>
+              {!!edReminder && (edLocked || edSensitive) && (
+                <Text style={s.attachHint}>
+                  {'\uD83D\uDD12'} The alert will not show this note\u2019s title on your lock screen.
+                </Text>
+              )}
             </View>
 
             {/* Copy button for passwords */}
@@ -660,6 +936,112 @@ export default function EncryptedNotesScreen() {
             )}
             ListEmptyComponent={<Text style={{ color: colors.textDim, textAlign: 'center', marginTop: 40 }}>Trash is empty</Text>}
           />
+        </View>
+      </Modal>
+
+      {/* Per-note lock challenge — nothing of the note renders until it passes. */}
+      <Modal visible={!!pendingLock} transparent animationType="fade" onRequestClose={() => setPendingLock(null)}>
+        <View style={s.passModal}>
+          <View style={s.passCard}>
+            <Text style={s.passTitle}>{'🔒'} Locked note</Text>
+            <Text style={{ color: colors.textDim, textAlign: 'center', marginBottom: 12 }}>
+              Enter your PIN to open “{pendingLock?.title}”
+            </Text>
+            {/* Same keypad as the screen gate — see the note there. */}
+            <PinPad
+              value={lockTry}
+              onChange={(v) => { setLockTry(v); setLockErr(null); }}
+              onComplete={(v) => submitLockPin(v)}
+              error={!!lockErr}
+            />
+            {!!lockErr && <Text style={{ color: '#ff6b6b', textAlign: 'center', marginBottom: 8 }}>{lockErr}</Text>}
+            <View style={s.passActions}>
+              <TouchableOpacity style={s.passBtn} onPress={() => { setPendingLock(null); setLockTry(''); setLockErr(null); }}>
+                <Text style={s.passBtnTxt}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={[s.passBtn, { backgroundColor: colors.primary }]} onPress={() => submitLockPin()}>
+                <Text style={s.passBtnTxt}>Unlock</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Backup & restore — passphrase-wrapped key, ciphertext everywhere. */}
+      <Modal visible={showBackup} animationType="slide" onRequestClose={() => setShowBackup(false)}>
+        <View style={s.editorScreen}>
+          <View style={s.editorHeader}>
+            <TouchableOpacity onPress={() => setShowBackup(false)} style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+              <Ionicons name="arrow-back" size={16} color={colors.textDim} />
+              <Text style={s.editorCancel}>Back</Text>
+            </TouchableOpacity>
+            <Text style={s.editorTitle}>{'🛡️'} Backup</Text>
+            <View style={{ width: 50 }} />
+          </View>
+
+          <ScrollView style={s.editorBody} contentContainerStyle={{ paddingBottom: 40 }}>
+            <Text style={s.bkBody}>
+              Your notes are sealed with a key that lives only in this phone’s keystore. Nothing
+              copies it — so without a backup passphrase, losing this phone loses every note here
+              permanently.
+            </Text>
+            <Text style={s.bkBody}>
+              A passphrase seals a copy of that key so it can travel inside your normal backup.
+              The passphrase is never stored and never sent: not to us, not to the server, not
+              inside the backup. Only you can open it, and if you forget it nobody can help.
+            </Text>
+
+            <View style={s.edSection}>
+              <Text style={s.edLabel}>{bkHasPass ? 'Backup passphrase (set)' : 'Set a backup passphrase'}</Text>
+              <TextInput
+                style={s.tagInput} placeholder="Passphrase (8+ characters)" placeholderTextColor="#555"
+                value={bkPass} onChangeText={setBkPass} secureTextEntry autoCapitalize="none"
+              />
+              {!bkHasPass && (
+                <TextInput
+                  style={s.tagInput} placeholder="Repeat passphrase" placeholderTextColor="#555"
+                  value={bkPass2} onChangeText={setBkPass2} secureTextEntry autoCapitalize="none"
+                />
+              )}
+              {!bkHasPass && (
+                <TouchableOpacity style={s.bkBtn} onPress={savePassphrase} disabled={bkBusy || bkPass.length < 8}>
+                  <Text style={s.bkBtnTxt}>{bkBusy ? 'Working…' : 'Set passphrase'}</Text>
+                </TouchableOpacity>
+              )}
+              {bkHasPass && (
+                <TouchableOpacity style={[s.bkBtn, { backgroundColor: 'transparent', borderWidth: 1, borderColor: colors.border }]}
+                  onPress={() => { setBkHasPass(false); setBkPass(''); setBkPass2(''); }}>
+                  <Text style={[s.bkBtnTxt, { color: colors.textDim }]}>Change passphrase</Text>
+                </TouchableOpacity>
+              )}
+            </View>
+
+            <View style={s.edSection}>
+              <Text style={s.edLabel}>Export</Text>
+              <Text style={s.attachHint}>
+                One encrypted file holding your notes and every attachment, exactly as they are
+                sealed on disk. Nothing inside it is readable without the passphrase.
+              </Text>
+              <TouchableOpacity style={s.bkBtn} onPress={exportBundle} disabled={bkBusy}>
+                <Text style={s.bkBtnTxt}>{bkBusy ? 'Working…' : 'Export encrypted file'}</Text>
+              </TouchableOpacity>
+            </View>
+
+            <View style={s.edSection}>
+              <Text style={s.edLabel}>Restore</Text>
+              <Text style={s.attachHint}>
+                From an exported file, or — if your notes came back from a cloud backup unreadable —
+                recover just the key that was left behind.
+              </Text>
+              <TouchableOpacity style={s.bkBtn} onPress={importBundleFile} disabled={bkBusy}>
+                <Text style={s.bkBtnTxt}>Restore from file</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={[s.bkBtn, { backgroundColor: 'transparent', borderWidth: 1, borderColor: colors.border }]}
+                onPress={recoverKey} disabled={bkBusy}>
+                <Text style={[s.bkBtnTxt, { color: colors.textDim }]}>Recover key from backup</Text>
+              </TouchableOpacity>
+            </View>
+          </ScrollView>
         </View>
       </Modal>
     </View>
@@ -748,6 +1130,9 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   attachBtn: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 8, borderWidth: 1, borderColor: c.border, minWidth: 72, alignItems: 'center' },
   attachBtnTxt: { color: c.primary, fontSize: 13, fontWeight: '700' },
   attachHint: { color: c.textDim, fontSize: 11, marginBottom: 8 },
+  bkBody: { color: c.textDim, fontSize: 13, lineHeight: 19, marginBottom: 12 },
+  bkBtn: { backgroundColor: c.primary, borderRadius: 10, paddingVertical: 12, alignItems: 'center', marginTop: 8 },
+  bkBtnTxt: { color: '#fff', fontWeight: '700', fontSize: 14 },
   attachRow: { flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: c.card, borderRadius: 10, borderWidth: 1, borderColor: c.border, paddingHorizontal: 12, paddingVertical: 10, marginTop: 6 },
   attachName: { color: c.text, fontSize: 14, fontWeight: '600' },
   attachMeta: { color: c.textDim, fontSize: 11, marginTop: 2 },

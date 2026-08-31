@@ -100,3 +100,33 @@ export async function decryptStringToBytes(raw: string): Promise<Uint8Array | nu
 }
 
 export function clearNotesKeyCache(): void { dekCache = null; }
+
+// ── DEK custody (for lib/notesVault: passphrase-wrapped backup/restore) ──────
+// The DEK lives ONLY in SecureStore, which no backup path copies. Losing the
+// phone therefore lost every note permanently — including the Recovery Keys and
+// Bank/Cards categories this vault invites people to use. notesVault wraps the
+// DEK under a user passphrase so it can travel as ciphertext; these two
+// accessors are the only way in and out, and neither is called by UI code.
+
+/** The raw DEK as hex, creating it if this install has none. */
+export async function exportDEKHex(): Promise<string> {
+  return bytesToHex(await getDEK());
+}
+
+/**
+ * Adopt a DEK recovered from a backup. Refuses to overwrite an existing key
+ * unless `force` — a silent overwrite would strand whatever notes the current
+ * key already seals, with no way back.
+ */
+export async function importDEKHex(hex: string, force = false): Promise<boolean> {
+  if (!/^[0-9a-f]{64}$/i.test(hex)) throw new Error('Not a valid notes key.');
+  if (!force && await SecureStore.getItemAsync(DEK_KEY)) return false;
+  await SecureStore.setItemAsync(DEK_KEY, hex.toLowerCase());
+  dekCache = hexToBytes(hex.toLowerCase());
+  return true;
+}
+
+/** True when this install already holds a notes key. */
+export async function hasDEK(): Promise<boolean> {
+  return !!(await SecureStore.getItemAsync(DEK_KEY).catch(() => null));
+}

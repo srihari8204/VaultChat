@@ -63,6 +63,34 @@ export async function deleteAttachment(id: string): Promise<void> {
   try { await FileSystem.deleteAsync(DIR + id + '.enc', { idempotent: true }); } catch { /* ignore */ }
 }
 
+// ── Backup transfer (lib/notesVault) ────────────────────────────────────────
+// Attachments are already sealed on disk, so a backup moves the envelopes
+// verbatim. Decrypting to copy them would put every attachment in the clear in
+// the export path for no gain whatsoever.
+
+/** Every stored attachment as id -> sealed envelope. */
+export async function listAttachmentBlobs(): Promise<Record<string, string>> {
+  const out: Record<string, string> = {};
+  try {
+    const info = await FileSystem.getInfoAsync(DIR);
+    if (!info.exists) return out;
+    for (const name of await FileSystem.readDirectoryAsync(DIR)) {
+      if (!name.endsWith('.enc')) continue;
+      try {
+        out[name.slice(0, -4)] = await FileSystem.readAsStringAsync(DIR + name, { encoding: FileSystem.EncodingType.UTF8 });
+      } catch {}
+    }
+  } catch {}
+  return out;
+}
+
+/** Write a sealed envelope back under its original id (restore). */
+export async function writeAttachmentBlob(id: string, blob: string): Promise<void> {
+  if (!/^[A-Za-z0-9_]+$/.test(id)) throw new Error('Bad attachment id'); // no path traversal out of DIR
+  await ensureDir();
+  await FileSystem.writeAsStringAsync(DIR + id + '.enc', blob, { encoding: FileSystem.EncodingType.UTF8 });
+}
+
 export function isImage(att: NoteAttachment): boolean {
   return att.mime.startsWith('image/');
 }
