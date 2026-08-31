@@ -8,7 +8,7 @@ import { zipSync, strToU8, strFromU8, zlibSync } from 'fflate';
 import {
   decodeEntities, docKind, docxText, pptxSlideText, xlsxSheetText,
   orderedSheetPaths, orderedSlidePaths, extractDocText,
-  pdfLiteral, pdfStreamText, pdfText, ascii85Decode,
+  pdfLiteral, pdfStreamText, pdfText, ascii85Decode, colIndexFromRef,
 } from './docText';
 
 let failures = 0;
@@ -63,6 +63,19 @@ eq('shared strings resolve, numbers pass through',
   xlsxSheetText(sheet, shared), 'Name\tQty\nWidget\t42');
 eq('a fully empty row is dropped',
   xlsxSheetText('<sheetData><row><c/><c/></row></sheetData>', shared), '');
+
+// Excel OMITS an empty cell rather than writing a blank one, so the `r=`
+// reference is the ONLY thing that says which column a value belongs to.
+// Ignoring it shifted every later column one place left and a header stopped
+// lining up with its own data — on the sheets most likely to have a gap.
+eq('a gap in a row keeps later columns in their own column',
+  xlsxSheetText(
+    '<sheetData>' +
+    '<row r="1"><c r="A1" t="s"><v>0</v></c><c r="C1" t="s"><v>1</v></c></row>' +
+    '<row r="2"><c r="A2"><v>10</v></c><c r="B2"><v>20</v></c><c r="C2"><v>30</v></c></row>' +
+    '</sheetData>', ['Name', 'Total']),
+  'Name\t\tTotal\n10\t20\t30');
+eq('columns past Z resolve', colIndexFromRef('AA'), 27);
 
 // ── ordering: sheet10 must not sort before sheet2 ──────────────────────
 eq('sheets order numerically',
@@ -155,6 +168,44 @@ check('extractDocText handles .pdf', pdfOut.text === 'Readable' && !pdfOut.empty
 // the device's PDF app rather than showing a blank screen.
 check('an image-only PDF reports empty',
   extractDocText(strToU8('%PDF-1.4\n%%EOF'), 'scan.pdf').empty);
+
+// ── The two ways a PDF turned into pages of mojibake ─────────────────────
+//
+// Found by running the SHIPPED extractor over 32 real PDFs: 14 came back 60%+
+// binary. Both causes are pinned here, because nothing else stops them from
+// silently coming back.
+
+// 1. "stream" is six ordinary letters, and compressed bytes contain them by
+//    chance. Such a hit has no `/Filter` in its header, so it used to be read
+//    as an UNCOMPRESSED content stream and the raw deflate bytes were harvested
+//    as text, swamping the real page. A genuine stream always follows `>>`.
+function pdfWithBinaryDecoy(text: string): Uint8Array {
+  const real = makePdf(text);
+  // What a font program or image could plausibly hold: the keyword, a
+  // parenthesised run of control characters and a Tj — but no dictionary.
+  const decoy = strToU8(
+    '\x01\x02\x7fstream\n(\x01\x02\x03\x04\x05\x06\x07\x08\x0b\x0c\x0e\x0f\x10\x11\x12) Tj\nendstream\n');
+  const out = new Uint8Array(real.length + decoy.length);
+  out.set(real, 0); out.set(decoy, real.length);
+  return out;
+}
+eq('binary that merely CONTAINS "stream" is not read as one',
+   pdfText(pdfWithBinaryDecoy('Invoice total 42')), 'Invoice total 42');
+
+// 2. A CID-font page IS a real stream, but its glyph codes mean nothing without
+//    a /ToUnicode map — emitting them raw is how a bank statement rendered as
+//    control characters. Reporting no text layer sends the user to the device's
+//    PDF app, which beats showing noise.
+const cid = '\x00Q\x00E\x00\x14\x00Q\x00E\x00\x14\x00Q\x00E\x00\x14\x00Q\x00E';
+const cidPdf = strToU8(
+  `%PDF-1.4\n1 0 obj\n<< /Length 60 >>\nstream\nBT (${cid}) Tj ET\nendstream\nendobj\n%%EOF\n`);
+check('a CID stream with no /ToUnicode reports no text, not glyph codes',
+  extractDocText(cidPdf, 'statement.pdf').empty);
+
+// …and the gate must not swallow ordinary prose in a non-Latin script.
+const telugu = makePdf('హలో ప్రపంచం');
+check('non-Latin text is NOT mistaken for binary',
+  pdfText(telugu).includes('హలో'), JSON.stringify(pdfText(telugu)));
 
 console.log(failures ? `\n  ${failures} FAILED\n` : '\n  all docText checks passed\n');
 process.exit(failures ? 1 : 0);

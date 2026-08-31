@@ -29,6 +29,9 @@ import { WebView } from 'react-native-webview';
 /** viewer.html, pdf.min.js and pdf.worker.min.js, all in one origin. */
 const VIEWER = 'file:///android_asset/pdfjs/viewer.html';
 
+/** How long to wait for pdf.js's first page before falling back to the reader. */
+const RENDER_TIMEOUT_MS = 30_000;
+
 export function PdfView({ uri, onFail }: { uri: string; onFail?: (why: string) => void }) {
   const [shown, setShown] = useState(false);
   const failedRef = useRef(false);
@@ -48,6 +51,19 @@ export function PdfView({ uri, onFail }: { uri: string; onFail?: (why: string) =
   useEffect(() => {
     if (unsupported) fail('page rendering is Android-only so far');
   }, [unsupported, fail]);
+
+  // pdf.js posts 'ready' or 'error'. A worker that dies silently posts NEITHER,
+  // and the cover below then reads "Rendering pages..." forever with no way out
+  // but the back button — indistinguishable, to the person holding the phone,
+  // from the app hanging. The ceiling is deliberately generous: a large scan on
+  // a slow device is slow, not broken, and a premature fallback would replace
+  // real pages with recovered text.
+  useEffect(() => {
+    if (unsupported || shown) return;
+    const t = setTimeout(() => fail('The PDF took too long to render.'), RENDER_TIMEOUT_MS);
+    return () => clearTimeout(t);
+  }, [unsupported, shown, fail]);
+
   if (unsupported) return null;
 
   // The document is handed in as an absolute file:// URL rather than copied next

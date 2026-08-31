@@ -84,6 +84,22 @@ export function pptxSlideText(xml: string): string {
  * (t="s") or as an inline value in <v>. Rows become tab-separated lines, which
  * is enough to read a sheet without reimplementing a grid.
  */
+/**
+ * Excel column index (1-based) from a cell reference: A->1, B->2, AA->27.
+ *
+ * Shared with lib/docBlocks.ts rather than written twice. The flat reader below
+ * used to ignore `r=` entirely and just push cells in encounter order — but
+ * Excel OMITS an empty cell, so a sheet with a gap shifted every later column
+ * one place left and a header stopped lining up with its own data. The
+ * structured reader had it right; keeping the rule in ONE place is what stops
+ * the two from disagreeing again.
+ */
+export function colIndexFromRef(ref: string): number {
+  let col = 0;
+  for (let i = 0; i < ref.length; i++) col = col * 26 + (ref.charCodeAt(i) - 64);
+  return col;
+}
+
 export function xlsxSheetText(sheetXml: string, shared: string[]): string {
   const rows = sheetXml.match(/<row(?:\s[^>]*)?>[\s\S]*?<\/row>/g) ?? [];
   const lines: string[] = [];
@@ -91,6 +107,9 @@ export function xlsxSheetText(sheetXml: string, shared: string[]): string {
     const cells = row.match(/<c(?:\s[^>]*)?(?:\/>|>[\s\S]*?<\/c>)/g) ?? [];
     const vals: string[] = [];
     for (const c of cells) {
+      // Pad out any columns Excel left out, so the cell lands where it belongs.
+      const ref = /\br="([A-Z]+)\d+"/.exec(c)?.[1];
+      if (ref) { const col = colIndexFromRef(ref); while (vals.length < col - 1) vals.push(''); }
       const isShared = /\st="s"/.test(c);
       const inline = textOf(c, 'is');            // t="inlineStr"
       const v = textOf(c, 'v')[0] ?? '';
@@ -217,6 +236,24 @@ export function ascii85Decode(s: string): Uint8Array | null {
 }
 
 /**
+ * Is this harvested text real prose, or binary that merely parsed like text?
+ *
+ * Prose in ANY language -- Telugu, Hindi, emoji -- contains no C0/C1 control
+ * characters beyond tab/newline; binary harvested by mistake is 60%+ of them.
+ * Measured over 32 real PDFs the two populations do not overlap at all: every
+ * genuine document scored 0%, every mis-parse 62-65%.
+ */
+function isReadableText(s: string): boolean {
+  if (!s) return false;
+  let ctl = 0;
+  for (const ch of s) {
+    const n = ch.codePointAt(0)!;
+    if ((n < 32 && ch !== '\n' && ch !== '\t' && ch !== '\r') || (n >= 127 && n <= 159)) ctl++;
+  }
+  return ctl / s.length <= 0.05;
+}
+
+/**
  * Every decoded content stream that actually carries text operators, in file
  * order — roughly one per page.
  *
@@ -239,6 +276,17 @@ export function pdfPageStreams(bytes: Uint8Array): string[] {
     const end = raw.indexOf('endstream', start);
     if (end < 0) break;
     const header = raw.slice(Math.max(0, m.index - 400), m.index);
+
+    // A real stream is always preceded by its dictionary, so the bytes before
+    // the keyword end in `>>`. Without this the scanner also matched the six
+    // letters "stream" occurring BY CHANCE inside compressed binary; such a hit
+    // carries no `/Filter` in its header, so it fell through to the
+    // "uncompressed content stream" branch below and the raw compressed bytes
+    // were then harvested as text. That is why real-world PDFs opened as pages
+    // of mojibake -- 14 of 32 test documents, including every Hetzner invoice
+    // and a 2.4 MB reference doc that yielded 2,473,052 characters of noise.
+    if (!/>>\s*$/.test(header)) continue;
+
     const body = bytes.subarray(start, end);
 
     let text = '';
@@ -263,7 +311,13 @@ export function pdfPageStreams(bytes: Uint8Array): string[] {
     } else {
       continue;                              // DCT/CCITT/etc — an image, not text
     }
-    if (/\bTJ\b|\bTj\b/.test(text)) out.push(text);
+    // The two bytes "Tj" also appear by chance in binary, so carrying text
+    // OPERATORS is not proof this is a content stream -- what it YIELDS has to
+    // read as text. This also drops the CID-font streams whose glyph codes are
+    // meaningless without a /ToUnicode map (5 of 32 documents): the viewer's
+    // "no text layer" path then offers the device's PDF app, which beats
+    // showing the user mojibake.
+    if (/\bTJ\b|\bTj\b/.test(text) && isReadableText(pdfStreamText(text))) out.push(text);
     // Advance ONLY here, on the path that consumed the stream.
     //
     // Moving this above the `continue`s looks obviously right and measurably is

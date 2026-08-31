@@ -5,7 +5,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { ErrorBoundary } from '../components/ErrorBoundary';
 import { BRAND_ACCENT } from '../constants/theme';
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Animated,
@@ -36,6 +36,12 @@ import { PdfView } from '../components/PdfView';
 import type { Palette } from '../constants/theme';
 
 const { width: SW, height: SH } = Dimensions.get('window');
+
+/**
+ * Ceiling for the plain-text viewer. Generous — 5 MB of text is well over a
+ * hundred thousand lines — but finite, which is the point.
+ */
+const MAX_TEXT_BYTES = 5 * 1024 * 1024;
 
 // ── Design tokens ────────────────────────────────────────────────
 const C = {
@@ -281,6 +287,12 @@ function FileViewerScreen() {
 
   // Audio state
   const [sound, setSound] = useState<Audio.Sound | null>(null);
+  // The loader effect below unloads the previous sound on cleanup. It cannot
+  // read `sound` for that without listing it as a dependency, and listing it is
+  // an infinite loop: the effect CREATES a sound and calls setSound, which
+  // changes the dependency, which re-runs the effect, which creates another one.
+  // A ref carries the handle to the cleanup without feeding the dependency list.
+  const soundRef = useRef<Audio.Sound | null>(null);
   const [audioPlaying, setAudioPlaying] = useState(false);
   const [audioDuration, setAudioDuration] = useState(0);
   const [audioPosition, setAudioPosition] = useState(0);
@@ -298,6 +310,57 @@ function FileViewerScreen() {
   const fadeIn = useRef(new Animated.Value(0)).current;
   const slideUp = useRef(new Animated.Value(30)).current;
 
+  // Read the document's TEXT. Split out of the loader effect so a PDF can defer
+  // it: pdf.js renders from the FILE (components/PdfView), so extracting text up
+  // front was pure waste — it loaded the whole document into memory as base64
+  // (~2.3x its size, before the Buffer and the Uint8Array) and parsed it TWICE,
+  // on the JS thread, every single time a PDF was opened. For a 30 MB scan on a
+  // mid-range phone that is a visible freeze for a result nothing displays.
+  // Office formats still read eagerly: for them the text IS the renderer.
+  const readDoc = useCallback(async (local: string) => {
+    try {
+      const b64 = await FileSystem.readAsStringAsync(local, { encoding: 'base64' as any });
+      const bytes = Uint8Array.from(Buffer.from(b64, 'base64'));
+      const { extractDocText } = await import('../lib/docText');
+      const { text, empty } = extractDocText(bytes, fileName);
+      setDocText(empty ? '' : text);
+      setDocEmpty(empty);
+      // Structure is a bonus on top of the text, never a precondition for it:
+      // a document that reads fine flat must not become unreadable because the
+      // richer pass tripped over some XML shape.
+      try {
+        const { extractDocBlocks } = await import('../lib/docBlocks');
+        const r = extractDocBlocks(bytes, fileName);
+        setDocBlocks(r.empty ? null : r.blocks);
+      } catch (be: any) {
+        console.warn('[docBlocks] structured read failed, showing plain text —', be?.message ?? be);
+        setDocBlocks(null);
+      }
+    } catch (e: any) {
+      // Fall back to the hand-off card rather than a dead end — but say WHY.
+      // Silently showing "open in another app" is indistinguishable from the
+      // feature not existing, which is exactly how it was reported.
+      //
+      // extractDocText's own messages are written FOR the user ("This file is
+      // not a readable document."). The filesystem's are not: a file the app
+      // cannot read put this on screen, verbatim —
+      //   Call to function 'ExponentFileSystem.readAsStringAsync' has been
+      //   rejected. → Caused by: java.io.IOException: Location
+      //   'file:///sdcard/...' isn't readable.
+      // — which tells the person holding the phone nothing and leaks an
+      // internal path. Anything that names a native module or a Java class is
+      // ours to explain, not theirs to read.
+      const raw = String(e?.message ?? '');
+      const internal = /ExponentFileSystem|java\.io\.|java\.lang\.|rejected|ENOENT|EACCES/i.test(raw);
+      console.warn('[docText] could not read', fileName, '—', raw || e);
+      setDocError(internal || !raw
+        ? 'This file could not be opened from where it is stored. Try opening it in another app.'
+        : raw);
+    } finally {
+      setDocLoading(false);
+    }
+  }, [fileName]);
+
   useEffect(() => {
     Animated.parallel([
       Animated.timing(fadeIn, { toValue: 1, duration: 350, useNativeDriver: true }),
@@ -309,6 +372,16 @@ function FileViewerScreen() {
         if (fileUri.startsWith('http')) {
           const dl = await FileSystem.downloadAsync(fileUri, FileSystem.cacheDirectory + 'temp_view_' + Date.now());
           local = dl.uri;
+        }
+        // Documents are capped at MAX_DOC_BYTES; plain text had no ceiling at
+        // all, and readAsStringAsync materialises the WHOLE file as one JS
+        // string. A multi-hundred-MB .log — the exact thing someone opens from
+        // a chat "just to look" — takes the app down with it. Refuse it and
+        // point at the hand-off, which is what the device is better at anyway.
+        const info = await FileSystem.getInfoAsync(local);
+        if (info.exists && (info as any).size > MAX_TEXT_BYTES) {
+          setError('This file is too large to open here. Try opening it in another app.');
+          return;
         }
         setTextContent(await FileSystem.readAsStringAsync(local));
       } catch {
@@ -328,44 +401,13 @@ function FileViewerScreen() {
           local = dl.uri;
         }
         setDocLocalUri(local);
-        const b64 = await FileSystem.readAsStringAsync(local, { encoding: 'base64' as any });
-        const bytes = Uint8Array.from(Buffer.from(b64, 'base64'));
-        const { extractDocText } = await import('../lib/docText');
-        const { text, empty } = extractDocText(bytes, fileName);
-        setDocText(empty ? '' : text);
-        setDocEmpty(empty);
-        // Structure is a bonus on top of the text, never a precondition for it:
-        // a document that reads fine flat must not become unreadable because the
-        // richer pass tripped over some XML shape.
-        try {
-          const { extractDocBlocks } = await import('../lib/docBlocks');
-          const r = extractDocBlocks(bytes, fileName);
-          setDocBlocks(r.empty ? null : r.blocks);
-        } catch (be: any) {
-          console.warn('[docBlocks] structured read failed, showing plain text —', be?.message ?? be);
-          setDocBlocks(null);
-        }
+        // A PDF renders from this file; its text is only ever the fallback, so
+        // it is read when pdf.js actually gives up — see the effect below.
+        if (fileType === 'pdf') { setDocLoading(false); return; }
+        await readDoc(local);
       } catch (e: any) {
-        // Fall back to the hand-off card rather than a dead end — but say WHY.
-        // Silently showing "open in another app" is indistinguishable from the
-        // feature not existing, which is exactly how it was reported.
-        //
-        // extractDocText's own messages are written FOR the user ("This file is
-        // not a readable document."). The filesystem's are not: a file the app
-        // cannot read put this on screen, verbatim —
-        //   Call to function 'ExponentFileSystem.readAsStringAsync' has been
-        //   rejected. → Caused by: java.io.IOException: Location
-        //   'file:///sdcard/...' isn't readable.
-        // — which tells the person holding the phone nothing and leaks an
-        // internal path. Anything that names a native module or a Java class is
-        // ours to explain, not theirs to read.
-        const raw = String(e?.message ?? '');
-        const internal = /ExponentFileSystem|java\.io\.|java\.lang\.|rejected|ENOENT|EACCES/i.test(raw);
-        console.warn('[docText] could not read', fileName, '—', raw || e);
-        setDocError(internal || !raw
-          ? 'This file could not be opened from where it is stored. Try opening it in another app.'
-          : raw);
-      } finally {
+        console.warn('[docText] could not reach', fileName, '—', e?.message ?? e);
+        setDocError('This file could not be opened from where it is stored. Try opening it in another app.');
         setDocLoading(false);
       }
     };
@@ -383,6 +425,7 @@ function FileViewerScreen() {
             }
           }
         );
+        soundRef.current = snd;
         setSound(snd);
       } catch {
         setError('Could not load audio');
@@ -405,10 +448,18 @@ function FileViewerScreen() {
       }
     };
     loadFileMeta();
-    return () => { sound?.unloadAsync(); };
+    return () => { soundRef.current?.unloadAsync(); soundRef.current = null; };
     // reloadKey: Retry re-runs THIS loader (see handleRetry) instead of the
     // component-scope duplicate, so first load and retry share one code path.
-  }, [fadeIn, slideUp, fileUri, fileType, sound, reloadKey]);
+  }, [fadeIn, slideUp, fileUri, fileType, fileName, readDoc, reloadKey]);
+
+  // pdf.js could not render this file, so the text reader is about to be shown.
+  // NOW the extraction is worth doing — and only now.
+  useEffect(() => {
+    if (fileType !== 'pdf' || !pdfFailed || !docLocalUri) return;
+    setDocLoading(true);
+    readDoc(docLocalUri);
+  }, [fileType, pdfFailed, docLocalUri, reloadKey, readDoc]);
 
   // Redirect to dedicated video player when file type is video
   useEffect(() => {
@@ -417,58 +468,11 @@ function FileViewerScreen() {
     }
   }, [fileType, fileName, fileUri, router]);
 
-  // ── Load file metadata ─────────────────────────────────────────
-  const loadFileMeta = async () => {
-    try {
-      if (fileUri.startsWith('file://') || fileUri.startsWith(FileSystem.documentDirectory || '')) {
-        const info = await FileSystem.getInfoAsync(fileUri);
-        if (info.exists && info.size) setFileSize(info.size);
-      }
-      if (fileType === 'text') await loadTextContent();
-      if (fileType === 'audio') await loadAudio();
-      setLoading(false);
-    } catch (e: any) {
-      setError(e.message || 'Failed to load file');
-      setLoading(false);
-    }
-  };
-
-  // ── Text / code file loader ────────────────────────────────────
-  const loadTextContent = async () => {
-    try {
-      let content: string;
-      if (fileUri.startsWith('http')) {
-        const dl = await FileSystem.downloadAsync(fileUri, FileSystem.cacheDirectory + 'temp_view_' + Date.now());
-        content = await FileSystem.readAsStringAsync(dl.uri);
-      } else {
-        content = await FileSystem.readAsStringAsync(fileUri);
-      }
-      setTextContent(content);
-    } catch {
-      setError('Could not read file contents');
-    }
-  };
-
-  // ── Audio loader ───────────────────────────────────────────────
-  const loadAudio = async () => {
-    try {
-      await Audio.setAudioModeAsync({ allowsRecordingIOS: false, playsInSilentModeIOS: true, staysActiveInBackground: true });
-      const { sound: snd } = await Audio.Sound.createAsync(
-        { uri: fileUri },
-        { shouldPlay: false },
-        (status) => {
-          if (status.isLoaded) {
-            setAudioPosition(status.positionMillis || 0);
-            setAudioDuration(status.durationMillis || 0);
-            setAudioPlaying(status.isPlaying);
-          }
-        }
-      );
-      setSound(snd);
-    } catch {
-      setError('Could not load audio');
-    }
-  };
+  // The component-scope loadFileMeta/loadTextContent/loadAudio trio that used to
+  // sit here is GONE. It was an older duplicate of the loader inside the effect
+  // above, it knew nothing about documents, and nothing called it — handleRetry
+  // bumps reloadKey to re-run the real one. Two loaders that must agree is how
+  // "Retry did nothing on a .docx" happened; there is now exactly one.
 
   const toggleAudio = async () => {
     if (!sound) return;

@@ -16,7 +16,7 @@
 import { unzipSync, strFromU8 } from 'fflate';
 import {
   decodeEntities, docKind, orderedSheetPaths, orderedSlidePaths,
-  pdfPageStreams, MAX_DOC_BYTES,
+  pdfPageStreams, MAX_DOC_BYTES, colIndexFromRef,
 } from './docText';
 
 // ─── Model ───────────────────────────────────────────────────────────
@@ -173,11 +173,7 @@ export function xlsxRows(sheetXml: string, shared: string[]): string[][] {
     for (let cm = cRe.exec(rm[0]); cm; cm = cRe.exec(rm[0])) {
       const c = cm[0];
       const ref = /\br="([A-Z]+)\d+"/.exec(c)?.[1];
-      if (ref) {
-        let col = 0;
-        for (let i = 0; i < ref.length; i++) col = col * 26 + (ref.charCodeAt(i) - 64);
-        while (cells.length < col - 1) cells.push('');
-      }
+      if (ref) { const col = colIndexFromRef(ref); while (cells.length < col - 1) cells.push(''); }
       const inline = /<is>([\s\S]*?)<\/is>/.exec(c)?.[1];
       const v = /<v>([\s\S]*?)<\/v>/.exec(c)?.[1] ?? '';
       if (/\st="s"/.test(c)) {
