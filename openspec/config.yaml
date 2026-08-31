@@ -1,20 +1,35 @@
 schema: spec-driven
 
-# Project context (optional)
-# This is shown to AI when creating artifacts.
-# Add your tech stack, conventions, style guides, domain knowledge, etc.
-# Example:
-#   context: |
-#     Tech stack: TypeScript, React, Node.js
-#     We use conventional commits
-#     Domain: e-commerce platform
+context: |
+  VaultChat — private messaging + family location + shop commerce, one app. Target: millions of users.
 
-# Per-artifact rules (optional)
-# Add custom rules for specific artifacts.
-# Example:
-#   rules:
-#     proposal:
-#       - Keep proposals under 500 words
-#       - Always include a "Non-goals" section
-#     tasks:
-#       - Break tasks into chunks of max 2 hours
+  Stack
+  - App: React Native + Expo (TS), op-sqlite local store, socket.io, LiveKit for all calls, MapLibre (@any-routing) for maps.
+  - Backend: Go (vaultchat-backend-go, go 1.26) + Node (vaultchat-backend). Postgres, numbered SQL migrations in
+    vaultchat-backend/migrations/NNN_*.sql (122 is the latest applied on prod).
+  - Prod: Hetzner, docker compose, host nginx -> caddy. Self-hosted LiveKit, Valhalla (road distance), coturn, R2 for media.
+
+  Conventions that constrain every proposal
+  - Thin client: maximum logic on the backend; the app renders server-computed data.
+  - RLS is inert in prod (the API connects as superuser) — every handler MUST scope by user itself. Never rely on a policy.
+  - Deploys are FILE COPY, not git. A change is not shipped until the file is on prod and the ledger/migration number matches.
+  - Broadcasting (Go Live) has its own isolated LiveKit on 7890 with golive_ rooms. Never fall back to the main SFU.
+  - messages.id is both sort key and delta-sync cursor: local-only rows MUST use negative ids.
+  - Money goes through utils/money.ts. FLAG_SECURE is never lowered, for any feature.
+  - Every user-visible distance is by road (Valhalla); geofences stay straight-line circles.
+  - Non-trivial logic leaves one runnable check behind: an assert-based *.selftest.ts, never require('fs') in app code
+    (it breaks assembleRelease).
+
+  Spec conventions
+  - Capabilities are per-feature folders under openspec/specs/<capability>/spec.md.
+  - Requirements use SHALL; every requirement carries at least one #### Scenario with WHEN/THEN.
+  - Deltas in changes/<id>/specs/ use `## ADDED Requirements` / `## MODIFIED Requirements` and are synced to
+    openspec/specs only once the behaviour is deployed AND device-verified.
+
+rules:
+  proposal:
+    - State what is already built versus what is new — this codebase has many half-wired features.
+    - Include a "Not building" section.
+  tasks:
+    - Separate "written" from "deployed to prod" from "device-verified"; a task is not done until its stated level is reached.
+    - Name the migration number and the exact files that must be copied to prod.
