@@ -27,6 +27,7 @@ import {
 } from 'react-native';
 import { type Palette } from '../constants/theme';
 import { useTheme } from '../lib/theme';
+import { focusWithKeyboard, retryKeyboard } from '../lib/imeFocus';
 import { getAccessToken } from '../lib/api';
 import {
   attachmentUrl,
@@ -66,10 +67,12 @@ function PinGate({
   const [error,     setError]     = useState<string | null>(null);
   const inputRef = useRef<TextInput | null>(null);
 
-  useEffect(() => {
-    const t = setTimeout(() => inputRef.current?.focus(), 200);
-    return () => clearTimeout(t);
-  }, []);
+  // A single timed focus() is one IME request and no second chance: if Android
+  // refuses it (cold deep-link, window not focused yet) the input is left
+  // focused with no keyboard, and tapping cannot recover because focus() on an
+  // already-focused input is a no-op. Device-observed on the Redmi via the
+  // identical gate in encrypted-notes. See lib/imeFocus.
+  useEffect(() => focusWithKeyboard(inputRef, 200), []);
 
   const submit = useCallback(async () => {
     if (busy) return;
@@ -113,6 +116,7 @@ function PinGate({
 
       <TextInput
         ref={inputRef}
+        onPressIn={() => retryKeyboard(inputRef)}
         style={S.pinInput}
         value={pin}
         onChangeText={(v) => setPin(v.replace(/\D/g, '').slice(0, 8))}
