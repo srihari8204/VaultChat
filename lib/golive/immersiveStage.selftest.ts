@@ -165,8 +165,13 @@ A(/zoomAt\.current = \{ scale: 1, x: 0, y: 0 \}/.test(code),
 // for a landscape SHARE, then puts it back.
 A(/expo-screen-orientation/.test(code) && /OrientationLock\.LANDSCAPE/.test(code),
   '24f. a landscape share turns the viewer’s phone');
-A(/O\.lockAsync\(O\.OrientationLock\.PORTRAIT_UP\)\)/.test(code),
-  '24g. and leaving always puts it back, whatever the stage was doing');
+// Leaving RESTORES rotation; it does not re-lock portrait. Re-locking was
+// correct while the whole app was portrait-only — it put the app default back.
+// With rotation unlocked app-wide it would leave every screen after a broadcast
+// stuck in portrait until the app restarted, turning the stage into a global
+// setting. The unlock is the restore now.
+A(/\.then\(O => O\.unlockAsync\(\)\)/.test(code),
+  '24g. and leaving restores rotation, whatever the stage was doing');
 A(/const frame = stageIsScreen \? stageFrame : undefined/.test(code),
   '24h. only a SCREEN may turn the panel — a camera reports capture geometry and would spin it for a face');
 

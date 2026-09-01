@@ -101,9 +101,18 @@ const ICE_CODE = code(ICE);
   check('12b. Reconnected still re-attaches the frame cryptor',
     /RoomEvent\.Reconnected[\s\S]{0,80}crypto\?\.attach\(\)/.test(ROOM_CODE));
 
-  // 13. Scope: calls were explicitly out of scope for this phase.
-  check('13. lib/call/room.ts was NOT given rtcConfig (calls out of scope)',
-    !/rtcConfig/.test(code(CALL_ROOM)));
+  // 13. Calls WERE out of scope for the phase this check was written in, and
+  // this asserted their absence from lib/call/room.ts to keep the change
+  // contained. They are in scope now, and for a measured reason: connecting
+  // without rtcConfig left livekit-client using only the servers the LiveKit
+  // SERVER advertises, and livekit.yaml sets `turn: enabled: false` to reuse
+  // the host's coturn. On device that gathered 42 host, 19 srflx and ZERO
+  // relay candidates — fine on a friendly network, and unable to connect at
+  // all behind a symmetric NAT. So the check now pins the opposite: the
+  // calling path gets the same line golive has always had.
+  check('13. lib/call/room.ts passes rtcConfig with iceServers to connect()',
+    /rtcConfig:\s*\{\s*iceServers\s*\}/.test(code(CALL_ROOM)),
+    'no rtcConfig means no relay candidates, which is a call that cannot cross a symmetric NAT');
 
   // 14. The fetch must not sit in front of the join as a blocking round trip
   // before any other setup work — it is started early and awaited at connect.
