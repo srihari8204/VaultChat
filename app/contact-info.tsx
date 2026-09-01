@@ -10,8 +10,7 @@
 import { brandAlpha } from '../constants/theme';
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
-  View, Text, TouchableOpacity, StyleSheet, StatusBar, ScrollView, Dimensions, Alert, Image, ActivityIndicator, Linking, Switch,
-} from 'react-native';
+  View, Text, TouchableOpacity, StyleSheet, StatusBar, ScrollView, Dimensions, Alert, Image, ActivityIndicator, Linking, Switch, useWindowDimensions } from 'react-native';
 import { getShareViewing, setShareViewing } from '../lib/viewerPrefs';
 import LinkPreview from '../components/LinkPreview';
 import { useLocalSearchParams, Stack, useRouter } from 'expo-router';
@@ -46,6 +45,13 @@ interface ContactInfoCache {
 }
 
 function useS() {
+  // Reactive size. The module-level Dimensions.get above is captured ONCE at
+  // import and never updates, so it froze the layout at the size the app
+  // launched with. Shadowing it here makes every use in this component follow
+  // rotation; StyleSheet.create keeps the initial value, which is fine for
+  // static rules.
+  const {width: SW} = useWindowDimensions();
+
   const { colors } = useTheme();
   return useMemo(() => makeStyles(colors), [colors]);
 }

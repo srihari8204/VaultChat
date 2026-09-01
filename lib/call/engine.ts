@@ -24,7 +24,7 @@
 
 import { getCachedUser } from '../api';
 import { CALL_SESSIONS } from '../../constants/flags';
-import { leaveCallSession, openCallSession, setCallRole, setHandRaised, type CallRole } from '../callSession';
+import { leaveCallSession, openCallSession, ringCallGroup, setCallRole, setHandRaised, type CallRole } from '../callSession';
 import { addCallLog } from '../callLog';
 import { setSecure } from '../screenGuard';
 import { nativeCall } from './native';
@@ -36,6 +36,7 @@ import { durationSeconds, shouldCancelRing, wasMissed, type CallFlag } from './m
 import { dispatch, getSnapshot, begin, reset } from './store';
 import { RING_TIMEOUT_MS } from './types';
 import { callFail, callStage, offerTag } from './diag';
+import { chatRecipients } from './mode';
 import type { CallChatMessage, CallKind, EndReason } from './types';
 
 interface Session {
@@ -50,6 +51,16 @@ interface Session {
   serverCallId: string;
   /** The live SDK room, once joined. */
   room: CallRoom | null;
+  /**
+   * True when THIS device opened the call, false when it joined one already
+   * running. It is what decides whether anyone gets rung — see startGroup.
+   */
+  createdCall: boolean;
+  /**
+   * SFU credential handed back by POST /calls, when the server is new enough.
+   * Present means join() skips its own round trip to /sfu-token.
+   */
+  sfu: import('../callSession').SfuCredential | null;
   disposers: (() => void)[];
   logged: boolean;
   disposed: boolean;
@@ -92,6 +103,40 @@ function alreadyRunning(a: { chatId: string; peerUid: string }): boolean {
   return !!cur && !cur.disposed
     && cur.chatId === a.chatId && cur.peerUid === a.peerUid
     && getSnapshot().status !== 'ended';
+}
+
+/**
+ * A SYNCHRONOUS claim on "a call is being set up for this chat+peer".
+ *
+ * `alreadyRunning` reads `session`, and `session` is not assigned until
+ * bootstrap runs — which is THREE awaits deep in startOutgoing (a dynamic
+ * import, checkSessionHealth, and waitForSession, the last of which can take
+ * seconds while a ratchet repairs). Two invocations arriving inside that window
+ * BOTH saw no session, both proceeded, and the second one's bootstrap called
+ * hangUp('replaced') on the first — tearing down a live call and opening a
+ * second calls row.
+ *
+ * That is the "it makes too many calls" report: measured on device as two call
+ * ids seconds apart on one chat, each ringing the callee separately. The push
+ * paths make it easy to hit — routeToCall is reachable from the native answer
+ * intent AND three notifee handlers, with no de-duplication of its own.
+ *
+ * A promise claimed before the first await closes the window: the second caller
+ * awaits the first's setup instead of racing it. Cleared on completion and on
+ * failure, so a call that dies never blocks the next attempt.
+ */
+let setupClaim: { key: string; done: Promise<void> } | null = null;
+const claimKey = (a: { chatId: string; peerUid: string }) => `${a.chatId}|${a.peerUid}`;
+
+async function claimSetup(a: { chatId: string; peerUid: string }): Promise<boolean> {
+  const key = claimKey(a);
+  if (setupClaim && setupClaim.key === key) {
+    // Someone is already setting this exact call up. Wait for them and do
+    // nothing — returning false tells the caller to stand down.
+    try { await setupClaim.done; } catch {}
+    return false;
+  }
+  return true;
 }
 
 // ── lifecycle ─────────────────────────────────────────────────────────
@@ -195,7 +240,7 @@ async function bootstrap(a: StartArgs, direction: 'outgoing' | 'incoming') {
 
   begin({ ...a, direction });
   session = {
-    ...a, meId: '', meName: '', serverCallId: '', room: null,
+    ...a, meId: '', meName: '', serverCallId: '', room: null, createdCall: false, sfu: null,
     disposers: [], logged: false, disposed: false,
   };
   const s = session;
@@ -211,12 +256,23 @@ async function bootstrap(a: StartArgs, direction: 'outgoing' | 'incoming') {
   const res = await openCallSession(a.chatId, a.kind, 'meeting');
   if (!res?.call?.id) throw new Error('Could not start the call session');
   s.serverCallId = res.call.id;
+  // The server answers "did you open this call, or join one already running?"
+  // — the same question the unique partial index on calls(chat_id) settles when
+  // two people start at once. Nothing else can know it: the loser of that race
+  // asked to start and was given a join.
+  s.createdCall = !!res.created;
+  // One round trip instead of two — see SfuCredential in lib/callSession.ts.
+  s.sfu = res.sfu ?? null;
   dispatch({
     type: 'session', sessionId: res.call.id,
     myRole: res.participants?.find(p => p.userId === s.meId)?.role,
   });
   for (const p of res.participants ?? []) {
     if (p.userId === s.meId || p.leftAt) continue;
+    // The name too, not just role/hand. Without this participants[uid].name
+    // stays '' and every in-call chat line in a GROUP reads 'Participant'.
+    const pname = (p as { name?: string }).name;
+    if (pname) dispatch({ type: 'peer_name', uid: p.userId, name: pname });
     dispatch({ type: 'role', uid: p.userId, role: p.role });
     dispatch({ type: 'hand', uid: p.userId, at: p.handRaisedAt ? Date.parse(p.handRaisedAt) || 0 : 0 });
   }
@@ -233,7 +289,20 @@ async function bootstrap(a: StartArgs, direction: 'outgoing' | 'incoming') {
   startCallForegroundService(s);
 
   const detach = await signal.attachCallListeners({
-    accept: (from) => (s.peerUid ? from === s.peerUid : true),
+    // WHO IS ALLOWED TO SPEAK INTO THIS CALL.
+    //
+    // 1:1 has always been strict — only the peer. Group used to accept ANY
+    // sender, which was harmless while nothing group-shaped was ever received;
+    // now that in-call chat and reactions fan out to a group, it is the
+    // difference between a side channel among the people in the room and one
+    // any account that knows your uid can type into. The relay addresses by
+    // `to` and stamps `from`, so the sender cannot be forged — but nothing made
+    // them a PARTICIPANT.
+    //
+    // The live roster is the test. A message from someone who joins in the same
+    // instant can lose the race and be dropped; that is the right way to be
+    // wrong here.
+    accept: (from) => (s.peerUid ? from === s.peerUid : !!getSnapshot().participants[from]),
     currentCallId: () => s.serverCallId,
     // No SDP crosses the wire any more. These three exist on the listener
     // interface for the group-mesh era and are deliberately inert.
@@ -277,8 +346,13 @@ async function join(s: Session): Promise<void> {
   const screens = new Map<string, string>();
   let aloneTimer: ReturnType<typeof setTimeout> | null = null;
   onDispose(() => { if (aloneTimer) clearTimeout(aloneTimer); });
-  const { getSfuToken } = await import('./sfuToken');
-  const cred = await getSfuToken(s.serverCallId);
+  // PREFER THE CREDENTIAL THE JOIN ALREADY RETURNED.
+  //
+  // Falling back is not a rare path to be tidied away later: it is what makes
+  // this shippable independently of the server. An older binary sends no `sfu`,
+  // and this simply costs the round trip it always did.
+  const cred = s.sfu ?? await (await import('./sfuToken')).getSfuToken(s.serverCallId);
+  if (s.sfu) callStage(s.serverCallId.slice(0, 8) || '--------', 'token_inline', 'saved a round trip');
   if (s.disposed) return;
 
   const room = await joinCallRoom({
@@ -294,13 +368,24 @@ async function join(s: Session): Promise<void> {
       // dialling, costs nothing and changes nothing.
       onReconnecting: () => dispatch({ type: 'reconnecting' }),
       onReconnected: () => dispatch({ type: 'recovered' }),
+      // Stamped into the store, not acted on here. The grid reads the stamps
+      // and decides which tiles to show; a 1:1 screen ignores them entirely.
+      onActiveSpeakers: (uids) => { if (uids.length) dispatch({ type: 'speaking', uids }); },
       onParticipants: (count, joined, left) => {
         if (left) {
           dispatch({ type: 'peer_left', uid: left.identity });
           // 1:1: the other side leaving the room IS the end of the call.
           if (s.peerUid) { hangUp('remote_hangup', false); return; }
         }
-        if (joined) dispatch({ type: 'role', uid: joined.identity, role: 'speaker' });
+        if (joined) {
+          // Someone who joins AFTER us is not in the join response, so their
+          // name has to come from the SFU participant — the token carries it
+          // (mintSfuCredential sets Name). Without this they chat as
+          // 'Participant' while everyone present at join has a real name.
+          const jname = (joined as { name?: string }).name;
+          if (jname) dispatch({ type: 'peer_name', uid: joined.identity, name: jname });
+          dispatch({ type: 'role', uid: joined.identity, role: 'speaker' });
+        }
 
         // A GROUP CALL WITH NOBODY ELSE IN IT IS OVER.
         //
@@ -374,7 +459,13 @@ async function join(s: Session): Promise<void> {
 /** Place a call. Rejects only on setup failure; the call is torn down first. */
 export async function startOutgoing(a: StartArgs): Promise<void> {
   if (alreadyRunning(a)) return;
+  if (!(await claimSetup(a))) return;
+  let release!: () => void;
+  setupClaim = { key: claimKey(a), done: new Promise<void>(r => { release = r; }) };
   try {
+    // Re-check AFTER taking the claim: a call may have completed setup while we
+    // were awaiting a previous claim above.
+    if (alreadyRunning(a)) return;
     // Verify the secure session BEFORE dialling. The ring envelope is sealed
     // with this peer's ratchet; dial with a stale one and the callee cannot
     // open it, so it never learns the key and never joins — which to the user
@@ -436,6 +527,11 @@ export async function startOutgoing(a: StartArgs): Promise<void> {
     onDispose(() => clearTimeout(noAnswer));
   } catch (e: any) {
     failSetup(e);
+  } finally {
+    // ALWAYS release, on success and on failure alike. A claim left standing
+    // after a failed setup would silently swallow every retry for that peer.
+    release();
+    if (setupClaim && setupClaim.key === claimKey(a)) setupClaim = null;
   }
 }
 
@@ -452,7 +548,11 @@ export async function startOutgoing(a: StartArgs): Promise<void> {
  */
 export async function acceptIncoming(a: StartArgs & { offerWire?: any }): Promise<void> {
   if (alreadyRunning(a)) return;
+  if (!(await claimSetup(a))) return;
+  let release!: () => void;
+  setupClaim = { key: claimKey(a), done: new Promise<void>(r => { release = r; }) };
   try {
+    if (alreadyRunning(a)) return;
     const tag = offerTag(a.offerWire);
     const { s } = await bootstrap(a, 'incoming');
     callStage(tag, 'incoming', `${a.kind} call`);
@@ -471,6 +571,11 @@ export async function acceptIncoming(a: StartArgs & { offerWire?: any }): Promis
     await join(s);
   } catch (e: any) {
     failSetup(e);
+  } finally {
+    // ALWAYS release, on success and on failure alike. A claim left standing
+    // after a failed setup would silently swallow every retry for that peer.
+    release();
+    if (setupClaim && setupClaim.key === claimKey(a)) setupClaim = null;
   }
 }
 
@@ -498,8 +603,16 @@ export async function startGroup(a: StartGroupArgs): Promise<void> {
       { chatId: a.chatId, peerUid: '', peerName: a.groupName, kind: a.kind }, 'outgoing',
     );
     await join(s);
-    if (a.ring?.length) {
-      await signal.ringGroup(a.ring, s.meId, a.chatId, a.groupName, a.kind === 'video');
+    // RING ONLY IF WE OPENED THE CALL.
+    //
+    // The hub hands over the roster whenever it starts a call, and it cannot
+    // tell whether one is already running — the server settles that. Ringing
+    // unconditionally meant the 40th person to join a live call re-rang all 63
+    // members, waking every phone already in the room and every one that had
+    // already declined. At small sizes that was a nuisance; at 64 it is a
+    // notification storm on every join.
+    if (a.ring?.length && s.createdCall) {
+      await ringTheGroup(s, undefined, a.ring);
     }
   } catch (e: any) {
     failSetup(e);
@@ -551,23 +664,118 @@ function openFromPeer(from: string, sealed: any, use: (text: string) => void): v
   })();
 }
 
+/**
+ * Seal once PER RECIPIENT and send. N envelopes, not one broadcast.
+ *
+ * THIS IS THE E2EE DECISION, MADE EXPLICIT. In-call text rides the pairwise
+ * ratchet — the same channel the chat thread uses — so the server relays
+ * ciphertext it cannot read. A group of 64 therefore costs 63 ratchet wraps per
+ * message, and that is the price of the guarantee, deliberately paid: volume is
+ * a handful of messages per call, so the "never ratchet per frame" rule that
+ * governs MEDIA does not apply. The cheap alternative — one plaintext emit the
+ * server fans out — was rejected: media gave up end-to-end encryption for
+ * reasons that do not apply to text, and text is exactly the content that
+ * should not lose the guarantee because the video did.
+ *
+ * allSettled, not all: one peer with no E2EE session yet must not silence the
+ * message for the other 62. Each recipient succeeds or fails alone.
+ */
+async function sealAndFanOut(
+  s: Session, body: string, send: (to: string, sealed: any) => Promise<void>,
+): Promise<void> {
+  const targets = chatRecipients(s.peerUid, s.meId, Object.keys(getSnapshot().participants));
+  if (!targets.length) return;
+  await Promise.allSettled(targets.map(async to => {
+    const sealed = await sealForPeer(to, body);
+    await send(to, sealed);
+  }));
+}
+
 export function sendChat(text: string): void {
   const s = session;
   const body = String(text ?? '').trim().slice(0, 500);
-  if (!s || s.disposed || !body || !s.peerUid) return;
-  void sealForPeer(s.peerUid, body).then(sealed => signal.sendCallChat(s.peerUid, s.chatId, sealed)).catch(() => {});
+  // NO `!s.peerUid` GUARD. It used to be here, and because a group session's
+  // peerUid is empty by construction, it made in-call chat and reactions
+  // silently INERT in every group call — the UI accepted a message, echoed it
+  // locally, and sent it nowhere.
+  if (!s || s.disposed || !body) return;
+  void sealAndFanOut(s, body, (to, sealed) => signal.sendCallChat(to, s.chatId, sealed)).catch(() => {});
   dispatch({ type: 'chat', message: chatMessage(s.meId, s.meName, body, true) });
 }
 
 export function sendReaction(emoji: string): void {
   const s = session;
   const body = String(emoji ?? '').slice(0, 8);
-  if (!s || s.disposed || !body || !s.peerUid) return;
-  void sealForPeer(s.peerUid, body).then(sealed => signal.sendCallEmoji(s.peerUid, s.chatId, sealed)).catch(() => {});
+  if (!s || s.disposed || !body) return;
+  void sealAndFanOut(s, body, (to, sealed) => signal.sendCallEmoji(to, s.chatId, sealed)).catch(() => {});
   dispatch({ type: 'reaction', reaction: { id: nextId(), uid: s.meId, emoji: body, at: Date.now() } });
 }
 
 export function markChatRead(): void { dispatch({ type: 'chat_read' }); }
+
+/**
+ * Ring more people into the call that is already running — the invite.
+ *
+ * A group call rings once, when it opens. Everyone who was asleep, on another
+ * call, or not yet in the chat is then unreachable for the rest of it, and the
+ * only way back in was for someone to hang up and start again — which rings all
+ * 63 a second time. At 64 seats that gap is the difference between a call that
+ * can fill up and one that cannot.
+ *
+ * Rings ONLY the uids given, and only while a group call is live: an invite is
+ * a deliberate act aimed at named people, not a re-broadcast. Returns how many
+ * were rung so the caller can say so.
+ */
+export async function inviteToCall(uids: string[]): Promise<number> {
+  const s = session;
+  // 1:1 IS ALLOWED NOW. This used to return early on s.peerUid, which meant a
+  // two-person call had no way to become a three-person one — the "add person"
+  // every other messenger has simply did not exist here. The server grants an
+  // invite scoped to this one call (migration 123 call_invites), so the person
+  // added never joins the chat, only the call.
+  if (!s || s.disposed) return 0;
+  const live = getSnapshot().participants;
+  // Never ring someone already here. Their phone would ring while they are
+  // looking at the call it is ringing about.
+  const targets = uids.filter(u => u && u !== s.meId && !live[u]);
+  if (!targets.length) return 0;
+  await ringTheGroup(s, targets, targets);
+  return targets.length;
+}
+
+/**
+ * Ring, preferring the server fan-out and falling back to the socket loop.
+ *
+ * The server path is not an optimisation — it is the only one that sends a
+ * WAKE-UP PUSH, and without a push a group call reaches only the phones that
+ * are already awake. The loop is kept solely because deploys here are file copy:
+ * a build can reach a device before the binary reaches prod, and ringing badly
+ * beats not ringing at all.
+ *
+ * `fallback` is the uid list the loop needs; the server needs only the call id
+ * (and, for an invite, who to narrow to).
+ */
+async function ringTheGroup(s: Session, only: string[] | undefined, fallback: string[]): Promise<void> {
+  const rang = await ringCallGroup(s.serverCallId, only);
+  if (rang !== null) return;
+  await signal.ringPeers(fallback, s.meId, s.chatId, s.peerName || '', s.kind === 'video');
+}
+
+/**
+ * Declare whose video the screen is actually showing.
+ *
+ * `null` means everyone, which is the state a call starts in and the state
+ * every screen that never calls this leaves it in — so this is additive and no
+ * existing call path changes behaviour by its presence.
+ *
+ * Safe before the room exists: the grid mounts and pages before the SFU
+ * connection is up, and a dropped declaration would otherwise leave the call
+ * subscribed to everything until the next page turn. The room re-reads nothing
+ * on join, so the screen re-declares on connect (see group-call-active).
+ */
+export function setVisibleParticipants(ids: string[] | null): void {
+  try { session?.room?.setVisible(ids); } catch {}
+}
 
 // ── roles and hands ───────────────────────────────────────────────────
 

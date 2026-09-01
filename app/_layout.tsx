@@ -272,6 +272,20 @@ function RootLayout() {
     // ── Incoming-call listener (Socket.IO) ──────────────────────────────
     const onIncoming = (data: any) => {
       if (!data?.from || !data?.chatId) return;
+
+      // WARM THE ICE/TURN FETCH THE MOMENT THE RING ARRIVES.
+      //
+      // joinCallRoom needs ice servers before it can connect, and asking for
+      // them is a network round trip to a server in Germany. Starting it here
+      // — while the phone is still ringing and the user has not decided yet —
+      // means the answer does not pay for it. getIceServers caches, never
+      // throws, and degrades to STUN, so this is free if the user declines.
+      //
+      // Deliberately NOT a full pre-warm: opening the call session early would
+      // create the call_participants row before the user answered, and the
+      // CALLER would see them as joined while the phone was still ringing.
+      // Slow is better than lying about who is on the call.
+      void import('../lib/iceConfig').then(m => m.getIceServers()).catch(() => {});
       const active = getActiveCall();
       if (active && active.peerUid === data.from && !data.group) return;   // call-waiting same peer
       if (getRingingPeer() === data.from) return;                          // de-dupe repeated rings
@@ -459,11 +473,24 @@ function RootLayout() {
           // hub instead would make the player hunt for their own game.
           router.push({ pathname: '/games', params: { game: ci.game ?? '', room: ci.room ?? '' } } as any);
         } else if (ci?.callId && ci.action !== 'open_calls') {
+          // A GROUP ring answered from the lock screen must open the GROUP call.
+          //
+          // Every field here is shaped for 1:1 — peerUid is the caller, and the
+          // 1:1 screens would place a call to THAT PERSON rather than joining the
+          // group call the notification was about. `isGroup` rides the intent
+          // from VaultCallMessagingService and defaults false, so a 1:1 ring and
+          // any intent built by an older native build behave exactly as before.
           const to = ci.action === 'answer' ? routeToCall : routeToIncoming;
           to({
             // Blank, not the placeholder — see the note on the socket ring above.
-            chatId: ci.callId, peerUid: ci.callerId || '', peerName: ci.callerName || '',
+            // peerUid stays the CALLER even for a group: it is the de-dupe key
+            // both routers guard on, and an empty one would collide with "no
+            // ring on screen" and silently refuse to open the ring screen. The
+            // `group` flag is what decides the destination, not this.
+            chatId: ci.callId, peerUid: ci.callerId || '',
+            peerName: ci.callerName || '',
             type: ci.isVideo ? 'video' : 'audio', offer: '',
+            group: !!ci.isGroup, groupName: ci.callerName || '',
           });
         }
       } catch {}
@@ -482,7 +509,34 @@ function RootLayout() {
     //
     // Safe now because the call screen no longer needs the caller's envelope to
     // answer — the chat identifies the call (see engine.acceptIncoming).
+    // ONE CALL SCREEN PER ANSWER.
+    //
+    // routeToCall is reachable from FOUR places: the native answer intent
+    // (consumeNativeLaunchIntent) and three notifee handlers — the foreground
+    // event, the initial notification, and the background handler. More than one
+    // firing for a single answer is NORMAL, not exceptional, and each did its
+    // own router.push. Two pushes mount two call screens, and each screen's
+    // effect starts its own session — the second replacing the first via
+    // bootstrap's hangUp('replaced').
+    //
+    // That is the "it makes too many calls" report: two call ids seconds apart
+    // on one chat, ringing the callee twice. The engine now holds a setup claim
+    // too (lib/call/engine.ts); stopping it here means the duplicate screen is
+    // never mounted at all.
+    //
+    // Keyed by peer+kind and TIME-BOXED, so a genuine second call to the same
+    // person a minute later still opens a screen.
+    const routedCalls = new Map<string, number>();
+    // 2s, not 10s. The duplicate handlers fire within MILLISECONDS of each
+    // other (same answer event, several listeners), so a short window collapses
+    // them just as well. Ten seconds was over-aggressive: answer, hang up, and
+    // answer again inside that window and the second call screen would never
+    // open — a worse bug than the one being fixed.
+    const ROUTE_DEDUPE_MS = 2_000;
     const routeToCall = (p: { chatId?: string; peerUid: string; peerName: string; type: string; group?: boolean; groupName?: string }) => {
+      const dedupeKey = `${p.peerUid}|${p.type}|${p.group ? 'g' : 'd'}`;
+      if (Date.now() - (routedCalls.get(dedupeKey) ?? 0) < ROUTE_DEDUPE_MS) return;
+      routedCalls.set(dedupeKey, Date.now());
       cancelIncomingCall();
       // CLAIM the ring, do not release it.
       //

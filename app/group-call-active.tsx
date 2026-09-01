@@ -1,11 +1,17 @@
-// app/group-call-active.tsx — REAL mesh group call (no SFU).
+// app/group-call-active.tsx — the group call screen. TWO BODIES, one route.
 //
-// Each participant holds one RTCPeerConnection to every other participant
-// (full mesh — fine for small groups; an SFU is only needed for scale). The
-// call room + roster is signalled by the server (join_call/call_roster/
-// call_peer_joined/call_peer_left); per-pair offer/answer/ice flow through the
-// existing webrtc_* relay, tagged with `to`/`from`. Glare is avoided by the
-// deterministic rule "the smaller uid sends the offer".
+// GroupCallEngine (CALL_ENGINE_V2, the live path) draws a call that rides the
+// LiveKit SFU: one upstream per participant, the server forwards. It PAGES —
+// the grid shows a bounded set of tiles and tells the engine which cameras it
+// wants, because subscribing to everyone is what makes a large call
+// unaffordable however good the transport is.
+//
+// GroupCallLegacy (CALL_ENGINE_V2 off) is the original full mesh: one
+// RTCPeerConnection per pair, roster over join_call/call_roster/
+// call_peer_joined/call_peer_left, per-pair offer/answer/ice through the
+// webrtc_* relay, glare avoided by "the smaller uid sends the offer". It is
+// kept as the ROLLBACK — the server still caps it at MESH_MAX_PARTICIPANTS,
+// because a mesh cannot hold more, and it is not where new work goes.
 //
 // NOTE: WebRTC can only be fully validated on real devices/networks.
 
@@ -17,8 +23,13 @@ import { mediaDevices, RTCIceCandidate, RTCPeerConnection, RTCSessionDescription
 import InCallManager from 'react-native-incall-manager';
 import { type Palette } from '../constants/theme';
 import { CALL_ENGINE_V2 } from '../constants/flags';
+// The seat count comes from the same module the rest of the call rules live in,
+// so the UI and the policy cannot drift. The SERVER is the authority (it refuses
+// the join); this is only what the screen shows.
+import { SFU_MAX as CALL_MAX } from '../lib/call/mode';
 import { useTheme } from '../lib/theme';
 import { getIceServers } from '../lib/iceConfig';
+import { getChat, type ChatMember } from '../lib/chatService';
 import { getSocket } from '../lib/socket';
 import { newCallCipher, openCallOffer, plainCipher, type CallCipher } from '../lib/callCrypto';
 import { getCurrentUserAsync } from './(constants)/authService';
@@ -30,8 +41,15 @@ import { CallEncryptionBadge, protectionFor } from '../components/call/CallEncry
 import {
   useCallConnectedAt, useCallError, useCallFlag, useCallLocalUrl,
   useCallStatus, useCanModerate, useMyHandRaised, useParticipant,
-  useParticipantIds, useRaisedHands,
+  useParticipantIds, useRaisedHands, useVisibleParticipantIds,
 } from '../hooks/useCall';
+
+// How many people the Add sheet offers at once. 12 was the old value and it is
+// wrong for a 64-seat call: in a 40-person group you could see 12 of the
+// missing members and no way to reach the rest. The sheet scrolls, so this is
+// only a guard against rendering an unbounded contact list in one pass.
+const ADD_LIST_MAX = 50;
+
 
 type Peer = { pc: RTCPeerConnection; url: string | null; name: string };
 
@@ -110,6 +128,13 @@ function GroupCallEngine() {
   const hands       = useRaisedHands();
   const [sheet, setSheet] = useState<{ title: string; message?: string; actions: SheetAction[] } | null>(null);
 
+  // The COUNT is the whole call, never the visible page — "9 on call" in a room
+  // of 40 is a lie, and it is also what the encryption badge reads. Declared
+  // here, above the callbacks that close over it, because a useCallback
+  // dependency array is evaluated during render.
+  const tiles = peerIds.length + 1;
+  const seatsLeft = Math.max(0, CALL_MAX - tiles);
+
   // Moderation is a menu rather than inline buttons: the actions are rare,
   // mutually exclusive, and destructive-ish (demoting someone mid-sentence), so
   // they belong behind a deliberate tap rather than next to a video surface
@@ -129,6 +154,48 @@ function GroupCallEngine() {
     });
   }, []);
   const toggleHand = useCallback(() => engine.raiseHand(!handUp), [handUp]);
+
+  // ── invite: how a call actually fills up ────────────────────────────
+  //
+  // A group call rings once, when it opens. Anyone asleep, on another call, or
+  // added to the group afterwards was then shut out for the rest of it, and the
+  // only way back in was to hang up and start again — which rings everyone a
+  // second time. With 64 seats that gap is the difference between a call that
+  // can grow and one that cannot.
+  //
+  // The list is read WHEN THE SHEET OPENS, not held in state: it must reflect
+  // who is on the call right now, and members can be added to the group during
+  // a call. Anyone already here is filtered out by the engine — ringing someone
+  // whose phone is showing this call is the one obviously wrong outcome.
+  const invite = useCallback(async () => {
+    const id = String(chatId ?? '');
+    if (!id) return;
+    let roster: ChatMember[] = [];
+    try {
+      const chat = await getChat(id);
+      roster = (chat?.members ?? []).filter((m: ChatMember) => !m.leftAt);
+    } catch {
+      setSheet({ title: 'Add people', message: 'Could not load the group just now.', actions: [] });
+      return;
+    }
+    const here = new Set(peerIds);
+    const away = roster.filter(m => !here.has(m.userId));
+    if (!away.length) {
+      setSheet({ title: 'Add people', message: 'Everyone in this group is already on the call.', actions: [] });
+      return;
+    }
+    // Bounded to what the sheet can show at once. Ringing "everyone missing" in
+    // one tap is what the START of a call is for; this is for naming people.
+    setSheet({
+      title: 'Add people',
+      message: `${seatsLeft} of ${CALL_MAX} seats free`,
+      actions: away.slice(0, ADD_LIST_MAX).map(m => ({
+        label: m.name || m.email || m.userId.slice(0, 8),
+        icon: 'person-add-outline' as const,
+        onPress: () => { void engine.inviteToCall([m.userId]); },
+      })),
+    });
+  }, [chatId, peerIds, seatsLeft]);
 
   useEffect(() => {
     engine.startGroup({
@@ -154,8 +221,45 @@ function GroupCallEngine() {
     return () => clearTimeout(t);
   }, [status, router]);
 
-  const tiles = peerIds.length + 1;
-  const cols = tiles <= 1 ? 1 : tiles <= 4 ? 2 : 3;
+  // ── which faces are on screen, and which tracks that costs ──────────
+  //
+  // Rendering every participant is what makes a large call unaffordable: each
+  // tile is a subscribed video track and a decoder, so an unbounded grid is 63
+  // inbound decodes at 64 people — the same quadratic mesh was abandoned for,
+  // moved from the encoder to the decoder.
+  //
+  // So the grid PAGES rather than growing, and tells the engine which cameras it
+  // actually wants (lib/call/visibleSet.ts). Below the page size nothing changes
+  // at all: `null` means "everyone", which is exactly what a 3-person call did
+  // before any of this existed.
+  //
+  // Page 0 follows the conversation — active speakers first — so the person
+  // talking is on the page you are looking at. Later pages are plain roster
+  // order: once you have deliberately paged away, the grid must stop moving
+  // under you. Someone can therefore appear on both, which is correct: page 0
+  // is "who is talking", not a slice.
+  const PAGE = 9;
+  const [page, setPage] = useState(0);
+  const autoPage = useVisibleParticipantIds(PAGE);
+  const pages = Math.max(1, Math.ceil(peerIds.length / PAGE));
+  // People leave: a page that no longer exists would render empty forever.
+  useEffect(() => { if (page >= pages) setPage(0); }, [page, pages]);
+
+  const paged = peerIds.length > PAGE;
+  const shown = !paged ? peerIds
+    : page === 0 ? autoPage
+    : peerIds.slice(page * PAGE, page * PAGE + PAGE);
+  const shownKey = shown.join(' ');
+
+  useEffect(() => {
+    // Re-declared on `status` as well as on the page: the grid mounts and pages
+    // before the SFU connection exists, and a declaration made then is dropped.
+    // Without this the call would stay subscribed to everyone until the user
+    // happened to turn a page.
+    engine.setVisibleParticipants(paged ? shownKey.split(' ').filter(Boolean) : null);
+  }, [shownKey, paged, status]);
+
+  const cols = shown.length + 1 <= 1 ? 1 : shown.length + 1 <= 4 ? 2 : 3;
   const tileW = `${100 / cols - 2}%`;
 
   return (
@@ -171,6 +275,21 @@ function GroupCallEngine() {
           // happening; showing the participant count would imply everything is
           // fine while the transport is being rebuilt.
           : <Text style={S.sub}>{status === 'reconnecting' ? 'Reconnecting…' : `${tiles} on call`}</Text>}
+
+        {/* ADDING PEOPLE HAS TO BE FINDABLE.
+            The person-add control exists in the row below, but it is one
+            unlabelled icon among six, four screens deep — reported as "I can't
+            see the add user option", which is a fair reading of the UI rather
+            than a missing feature. The participant count is where someone
+            already looks to ask "who is on this call", so it is the natural
+            place to also answer "and how do I add someone". Same handler, same
+            capacity rule — this is a second door, not a second feature. */}
+        {status === 'connected' && seatsLeft > 0 && (
+          <TouchableOpacity onPress={invite} activeOpacity={0.7} style={S.addPeoplePill}>
+            <Ionicons name="person-add" size={13} color="#fff" />
+            <Text style={S.addPeopleTxt}>Add · {tiles}/{CALL_MAX}</Text>
+          </TouchableOpacity>
+        )}
         {/* D-1: derived from the live participant count, so a call that grows
             past the mesh cap stops claiming a guarantee it no longer has. */}
         <CallEncryptionBadge protection={protectionFor(tiles)} />
@@ -185,13 +304,35 @@ function GroupCallEngine() {
             : <View style={S.audioTile}><Ionicons name="person" size={34} color="#fff" /></View>}
           <Text style={S.tileName}>You{muted ? ' 🔇' : ''}</Text>
         </View>
-        {peerIds.map(uid => (
+        {shown.map(uid => (
           <ParticipantTile
             key={uid} uid={uid} width={tileW} isVideo={isVideo}
             onModerate={canModerate ? moderate : undefined}
           />
         ))}
       </ScrollView>
+
+      {/* Only when there is somewhere to page TO. A call of four must not grow
+          controls it can never use. */}
+      {paged && (
+        <View style={S.pager}>
+          <TouchableOpacity
+            style={S.pagerBtn} disabled={page === 0}
+            onPress={() => setPage(p => Math.max(0, p - 1))}
+          >
+            <Ionicons name="chevron-back" size={20} color={page === 0 ? '#555' : '#fff'} />
+          </TouchableOpacity>
+          <Text style={S.pagerLabel}>
+            {page === 0 ? 'Speaking' : `Page ${page + 1} of ${pages}`}
+          </Text>
+          <TouchableOpacity
+            style={S.pagerBtn} disabled={page >= pages - 1}
+            onPress={() => setPage(p => Math.min(pages - 1, p + 1))}
+          >
+            <Ionicons name="chevron-forward" size={20} color={page >= pages - 1 ? '#555' : '#fff'} />
+          </TouchableOpacity>
+        </View>
+      )}
 
       {/* The host's queue, in the order people asked. Only shown to someone who
           can actually act on it — to anyone else it would be a list of requests
@@ -210,6 +351,10 @@ function GroupCallEngine() {
         {isVideo && <CtrlBtn icon="camera-reverse" onPress={engine.flipCamera} colors={colors} />}
         <CtrlBtn icon={speaker ? 'volume-high' : 'volume-low'} active={speaker} onPress={engine.toggleSpeaker} colors={colors} />
         <CtrlBtn icon="hand-left" active={handUp} onPress={toggleHand} colors={colors} />
+        {/* Hidden at capacity rather than disabled: a button that does nothing
+            invites tapping it, and "the call is full" is the more useful thing
+            for the count in the header to be saying at that moment. */}
+        {seatsLeft > 0 && <CtrlBtn icon="person-add" onPress={invite} colors={colors} />}
         <CtrlBtn icon="call" danger onPress={endGroupCall} colors={colors} />
       </View>
 
@@ -466,5 +611,14 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   roleBadge: { position: 'absolute', top: 6, right: 6, width: 22, height: 22, borderRadius: 11,
                alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(0,0,0,0.55)' },
   handQueue: { color: '#FFD479', fontSize: 12, textAlign: 'center', paddingBottom: 6 },
+  addPeoplePill: {
+    flexDirection: 'row', alignItems: 'center', gap: 5, alignSelf: 'center',
+    marginTop: 6, paddingHorizontal: 12, paddingVertical: 5, borderRadius: 14,
+    backgroundColor: 'rgba(255,255,255,0.16)',
+  },
+  addPeopleTxt: { color: '#fff', fontSize: 12, fontWeight: '600' },
+  pager:      { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 18, paddingBottom: 4 },
+  pagerBtn:   { padding: 8 },
+  pagerLabel: { color: '#bbb', fontSize: 12, minWidth: 110, textAlign: 'center' },
   controls:  { flexDirection: 'row', justifyContent: 'center', gap: 22, paddingVertical: 24, paddingBottom: 36 },
 });

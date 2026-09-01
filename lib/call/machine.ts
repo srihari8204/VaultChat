@@ -53,6 +53,10 @@ export type CallEvent =
   /** A mesh peer left. In 1:1 this ends the call; the engine decides that. */
   | { type: 'peer_left'; uid: string }
   | { type: 'peer_muted'; uid: string; muted: boolean }
+  // Who the SFU says is speaking right now. A LIST, not one uid: LiveKit
+  // reports the whole active set, and a call with two people talking over each
+  // other must promote both rather than alternate between them.
+  | { type: 'speaking'; uids: string[] }
   | { type: 'flag'; key: CallFlag; value: boolean }
   /** One line of in-call chat, ours or a peer's. */
   | { type: 'chat'; message: CallChatMessage }
@@ -70,6 +74,7 @@ export type CallEvent =
   /** The server session opened (B2). Carries our own role. */
   | { type: 'session'; sessionId: string; myRole?: CallRole }
   /** A role changed — ours or someone else's. */
+  | { type: 'peer_name'; uid: string; name: string }
   | { type: 'role'; uid: string; role: CallRole }
   /** A hand went up or down. `at` is 0 for lowered. */
   | { type: 'hand'; uid: string; at: number }
@@ -117,11 +122,12 @@ function withParticipant(
     role: prev?.role ?? 'speaker',
     muted: prev?.muted ?? false,
     handRaisedAt: prev?.handRaisedAt ?? 0,
+    spokeAt: prev?.spokeAt ?? 0,
     ...patch,
   };
   if (prev && prev.name === next.name && prev.streamUrl === next.streamUrl
       && prev.role === next.role && prev.muted === next.muted
-      && prev.handRaisedAt === next.handRaisedAt) {
+      && prev.handRaisedAt === next.handRaisedAt && prev.spokeAt === next.spokeAt) {
     return s.participants;   // no-op: keep the reference
   }
   return { ...s.participants, [uid]: next };
@@ -196,6 +202,25 @@ export function reduce(s: CallSnapshot, e: CallEvent, now: number): CallSnapshot
       return participants === s.participants ? s : { ...s, participants };
     }
 
+    case 'speaking': {
+      // Only STAMPS the speakers; it never clears anyone. The grid decides how
+      // long a stamp still counts (SPEAKER_DWELL_MS in ./visibleSet), and
+      // clearing here instead would erase the "spoke a moment ago" state that
+      // the dwell window exists to read — the tile would drop the instant a
+      // person paused between words.
+      //
+      // Someone not in the call is ignored rather than created: this arrives
+      // from the SFU and would otherwise conjure a participant with no name and
+      // no track into the grid.
+      let participants = s.participants;
+      for (const uid of e.uids) {
+        if (uid === s.meId || !participants[uid]) continue;
+        const merged = withParticipant({ ...s, participants }, uid, { spokeAt: now });
+        participants = merged;
+      }
+      return participants === s.participants ? s : { ...s, participants };
+    }
+
     case 'flag':
       if (s[e.key] === e.value) return s;
       return { ...s, [e.key]: e.value };
@@ -236,6 +261,20 @@ export function reduce(s: CallSnapshot, e: CallEvent, now: number): CallSnapshot
         return s.myRole === e.role ? s : { ...s, myRole: e.role };
       }
       const participants = withParticipant(s, e.uid, { role: e.role });
+      return participants === s.participants ? s : { ...s, participants };
+    }
+
+    // WHO SENT THAT MESSAGE.
+    //
+    // The join response carries a name per participant and nothing ever put it
+    // in the snapshot: the join loop dispatched role and hand only. So
+    // participants[uid].name stayed '' and peerNameOf fell through to the
+    // literal 'Participant' for everyone in a GROUP call — in-call chat, and
+    // any tile label, showed no real name. A 1:1 was fine only because it has
+    // s.peerName to fall back on.
+    case 'peer_name': {
+      if (!e.uid || !e.name || e.uid === s.meId) return s;
+      const participants = withParticipant(s, e.uid, { name: e.name });
       return participants === s.participants ? s : { ...s, participants };
     }
 

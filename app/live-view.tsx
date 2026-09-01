@@ -1109,8 +1109,15 @@ export default function LiveViewScreen() {
    * was doing at the time, including when the screen unmounts mid-rotation.
    */
   useEffect(() => () => {
+    // UNLOCK, do not re-lock to portrait.
+    //
+    // This re-locked PORTRAIT_UP on the way out, which was correct while the
+    // whole app was portrait-only: it restored the app default. Now that
+    // rotation is unlocked app-wide, re-locking would leave every screen AFTER
+    // a broadcast stuck in portrait until the app restarted — the stage would
+    // quietly become a global setting. Unlocking restores the real default.
     void import('expo-screen-orientation')
-      .then(O => O.lockAsync(O.OrientationLock.PORTRAIT_UP))
+      .then(O => O.unlockAsync())
       .catch(() => {});
   }, []);
 

@@ -7,8 +7,7 @@
 import React, { useRef, useState, useEffect } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity,
-  Animated, Dimensions, Platform, StatusBar,
-} from 'react-native';
+  Animated, Dimensions, Platform, StatusBar, useWindowDimensions } from 'react-native';
 import Svg, { Circle, Line, Ellipse } from 'react-native-svg';
 import { router } from 'expo-router';
 
@@ -26,6 +25,13 @@ type P = typeof PHASE[keyof typeof PHASE];
 // ── 3D Mesh ───────────────────────────────────────────────────────────────────
 const MW = SW * 0.72, MH = MW * 1.24;
 function buildGrid() {
+  // Reactive size. The module-level Dimensions.get above is captured ONCE at
+  // import and never updates, so it froze the layout at the size the app
+  // launched with. Shadowing it here makes every use in this component follow
+  // rotation; StyleSheet.create keeps the initial value, which is fine for
+  // static rules.
+  const {width: SW} = useWindowDimensions();
+
   const g: { x: number; y: number }[][] = [];
   for (let r = 0; r <= 10; r++) {
     const t = r / 10, tp = t > 0.68 ? Math.max(1 - (t - 0.68) * 2.4, 0.04) : 1;

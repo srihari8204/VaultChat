@@ -67,6 +67,15 @@ export interface Participant {
    * quietly favours whoever joined earliest — the opposite of fair.
    */
   handRaisedAt: number;
+  /**
+   * Epoch ms this participant was last an active speaker, or 0.
+   *
+   * A timestamp for the same reason handRaisedAt is one: the grid orders by WHO
+   * SPOKE MOST RECENTLY, and a boolean would collapse that into "is talking
+   * right now" — which flickers off between words and cannot promote the person
+   * who just finished a sentence. See lib/call/visibleSet.ts.
+   */
+  spokeAt: number;
 }
 
 /**

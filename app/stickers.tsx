@@ -21,8 +21,7 @@ import {
   StyleSheet,
   Text,
   TouchableOpacity,
-  View,
-} from 'react-native';
+  View, useWindowDimensions } from 'react-native';
 import { type Palette } from '../constants/theme';
 import { useTheme } from '../lib/theme';
 import { sendMessage } from '../lib/chatService';
@@ -46,6 +45,13 @@ const PACKS: Pack[] = [
 ];
 
 function useS() {
+  // Reactive size. The module-level Dimensions.get above is captured ONCE at
+  // import and never updates, so it froze the layout at the size the app
+  // launched with. Shadowing it here makes every use in this component follow
+  // rotation; StyleSheet.create keeps the initial value, which is fine for
+  // static rules.
+  const {width: SW} = useWindowDimensions();
+
   const { colors } = useTheme();
   return useMemo(() => makeStyles(colors), [colors]);
 }

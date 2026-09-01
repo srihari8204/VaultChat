@@ -8,8 +8,7 @@
  */
 import { useEffect, useMemo, useRef } from 'react';
 import {
-  Animated, Dimensions, Modal, Pressable, StyleSheet, Text, TouchableOpacity, View,
-} from 'react-native';
+  Animated, Dimensions, Modal, Pressable, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { type Palette } from '../constants/theme';
 import { useTheme } from '../lib/theme';
@@ -26,6 +25,7 @@ const DEFAULT_REACTIONS = ['❤️', '😂', '😮', '😢', '🙏', '👍'];
 const { height: SCREEN_H } = Dimensions.get('window');
 
 export function MessageActionSheet({
+
   visible, onClose, actions, onReact, reactions = DEFAULT_REACTIONS,
 }: {
   visible: boolean;
@@ -34,6 +34,13 @@ export function MessageActionSheet({
   onReact?: (emoji: string) => void;
   reactions?: string[];
 }) {
+  // Reactive size. The module-level Dimensions.get above is captured ONCE at
+  // import and never updates, so it froze the layout at the size the app
+  // launched with. Shadowing it here makes every use in this component follow
+  // rotation; StyleSheet.create keeps the initial value, which is fine for
+  // static rules.
+  const { height: SCREEN_H } = useWindowDimensions();
+
   const { colors } = useTheme();
   const s = useMemo(() => makeStyles(colors), [colors]);
   const slide = useRef(new Animated.Value(SCREEN_H)).current;

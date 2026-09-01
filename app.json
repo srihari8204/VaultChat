@@ -3,7 +3,7 @@
     "name": "VaultChat",
     "slug": "VaultChat",
     "version": "1.2.7",
-    "orientation": "portrait",
+    "orientation": "default",
     "icon": "./assets/images/icon.png",
     "scheme": "vaultchat",
     "userInterfaceStyle": "automatic",

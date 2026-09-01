@@ -5,7 +5,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
-import { Alert, Animated, Dimensions, Easing, Modal, ScrollView, Share, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { Alert, Animated, Dimensions, Easing, Modal, ScrollView, Share, StyleSheet, Text, TextInput, TouchableOpacity, View, useWindowDimensions} from 'react-native';
 import { VaultID, destroyVaultID, generateIdentityCertificate, generateVaultID, loadVaultID, shortAddress, signMessage, updateTrustScore } from '../constants/vaultID';
 
 const { width } = Dimensions.get('window');
@@ -13,6 +13,13 @@ const { width } = Dimensions.get('window');
 const AVATARS = ['🧑','👩','👨','🧔','👧','👦','🧓','👴','👵','🦸','🦹','🧙','🧝','🧛','🤖','👾'];
 
 function VaultIDScreenContent() {
+  // Reactive size. The module-level Dimensions.get above is captured ONCE at
+  // import and never updates, so it froze the layout at the size the app
+  // launched with. Shadowing it here makes every use in this component follow
+  // rotation; StyleSheet.create keeps the initial value, which is fine for
+  // static rules.
+  const {width} = useWindowDimensions();
+
   const router = useRouter();
   const [vaultID, setVaultID] = useState<VaultID | null>(null);
   const [loading, setLoading] = useState(true);

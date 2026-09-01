@@ -11,6 +11,7 @@
 
 import { useMemo, useSyncExternalStore } from 'react';
 import { getSnapshot, subscribe } from '../lib/call/store';
+import { visibleOrder, type SpeakerTimes } from '../lib/call/visibleSet';
 import type {
   CallChatMessage, CallReaction, CallRole, CallSnapshot, CallStatus, Participant,
 } from '../lib/call/types';
@@ -131,3 +132,30 @@ export function useRaisedHands(): readonly string[] {
 }
 
 export default {};
+
+/**
+ * The uids that belong on screen, at most `size` of them.
+ *
+ * Active speakers first, then stable roster order — the rule itself is in
+ * lib/call/visibleSet.ts, so it can be asserted without React or a device.
+ *
+ * Selects a JOINED KEY STRING for the same reason useParticipantIds does: the
+ * participants object is replaced on any per-peer change, and this must
+ * re-render the grid only when the PAGE changes. In a 64-person call the
+ * speaker stamps churn constantly and almost never reorder the page; comparing
+ * the string is what stops that churn from reaching the tiles.
+ *
+ * Recomputed on every store change rather than on a timer: a dwell window
+ * lapsing with nobody speaking cannot reorder anything on its own (the fallback
+ * is roster order, which is what is already rendered), so there is nothing for
+ * a tick to discover.
+ */
+export function useVisibleParticipantIds(size: number): readonly string[] {
+  const joined = useSelect(s => {
+    const roster = Object.keys(s.participants);
+    if (roster.length <= size) return roster.join(' ');
+    const spoke: SpeakerTimes = new Map(roster.map(uid => [uid, s.participants[uid].spokeAt]));
+    return visibleOrder(roster, spoke, size, Date.now()).join(' ');
+  });
+  return useMemo(() => (joined ? joined.split(' ') : []), [joined]);
+}

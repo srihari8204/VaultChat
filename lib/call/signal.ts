@@ -277,19 +277,40 @@ export async function attachSessionListeners(handlers: {
   };
 }
 
-/** Ring every member of a group so their device shows the incoming call. */
-export async function ringGroup(
-  members: string[], from: string, chatId: string, groupName: string, isVideo: boolean,
+/**
+ * Ring a NAMED set of people over the socket — the LEGACY group ring.
+ *
+ * Kept as the fallback for one reason: deploys here are file copy, so a build
+ * can reach a phone before the Go binary reaches prod. On such a server
+ * `POST /calls/{id}/ring` is a 404 and nobody would ring at all.
+ *
+ * It is strictly worse than the endpoint and must not become the normal path:
+ * it costs one unit of the caller's ring budget PER MEMBER (120/min), and — the
+ * part that actually matters — it is socket-only, so it reaches ONLY devices
+ * that happen to be awake. There is no wake-up push on this path. For 63 people
+ * that is close to nobody, which is why a group call could never fill up.
+ *
+ * Delete once the binary is verified on prod — the change's task 6.2.
+ */
+export async function ringPeers(
+  uids: string[], from: string, chatId: string, groupName: string, isVideo: boolean,
 ): Promise<void> {
+  if (!uids.length) return;
   try {
     const s = await getSocket();
-    for (const to of members) {
-      s.emit('call_incoming', {
-        to, from, chatId, group: true, groupName,
-        video: isVideo ? '1' : '0', type: isVideo ? 'video' : 'audio',
-      });
-    }
+    emitRings(s, uids, {
+      chatId, from, groupName,
+      video: isVideo ? '1' : '0', type: isVideo ? 'video' : 'audio',
+    });
   } catch {}
+}
+
+/** One addressed call_incoming per recipient — the shape the server has always
+ *  relayed, and what an older binary understands. */
+function emitRings(s: any, uids: string[], payload: Record<string, unknown>): void {
+  for (const to of uids) {
+    s.emit('call_incoming', { ...payload, to, group: true });
+  }
 }
 
 /**

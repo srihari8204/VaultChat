@@ -14,9 +14,9 @@
 // who assumed it was saved would be wrong in a way that matters, so the empty
 // state says so outright.
 
-import { memo, useCallback, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useRef, useState } from 'react';
 import {
-  FlatList, KeyboardAvoidingView, Modal, Platform, Pressable, StyleSheet,
+  FlatList, Keyboard, Modal, Platform, Pressable, StyleSheet,
   Text, TextInput, TouchableOpacity, View,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
@@ -40,6 +40,31 @@ const Line = memo(function Line({ m }: { m: CallChatMessage }) {
 
 function CallChatSheetImpl({ visible, onClose, messages, onSend }: CallChatSheetProps) {
   const [draft, setDraft] = useState('');
+
+  // LIFT THE SHEET BY THE MEASURED KEYBOARD HEIGHT.
+  //
+  // This used to be a KeyboardAvoidingView with
+  // `behavior={Platform.OS === 'ios' ? 'padding' : undefined}` — and on
+  // Android an undefined behavior makes the component a plain View that does
+  // NOTHING. The usual Android fallback does not apply either: the manifest's
+  // windowSoftInputMode=adjustResize resizes the ACTIVITY, and a React Native
+  // <Modal> is its own window, which never gets resized. The sheet is pinned
+  // bottom:0, so the keyboard simply covered the composer and the message you
+  // were typing.
+  //
+  // Measuring the keyboard and offsetting `bottom` works the same way on both
+  // platforms and does not depend on any window flag. `Will` events on iOS
+  // move the sheet with the keyboard animation; Android only emits `Did`.
+  const [kb, setKb] = useState(0);
+  useEffect(() => {
+    const showEvt = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
+    const hideEvt = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
+    const show = Keyboard.addListener(showEvt, e => setKb(e.endCoordinates?.height ?? 0));
+    const hide = Keyboard.addListener(hideEvt, () => setKb(0));
+    return () => { show.remove(); hide.remove(); };
+  }, []);
+  // A sheet that closes while the keyboard is up must not reopen still lifted.
+  useEffect(() => { if (!visible) setKb(0); }, [visible]);
   const listRef = useRef<FlatList<CallChatMessage>>(null);
 
   const send = useCallback(() => {
@@ -52,10 +77,7 @@ function CallChatSheetImpl({ visible, onClose, messages, onSend }: CallChatSheet
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
       <Pressable style={S.backdrop} onPress={onClose} />
-      <KeyboardAvoidingView
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-        style={S.sheet}
-      >
+      <View style={[S.sheet, { bottom: kb }]}>
         <View style={S.grabber} />
         <View style={S.head}>
           <Text style={S.title}>In-call chat</Text>
@@ -94,7 +116,7 @@ function CallChatSheetImpl({ visible, onClose, messages, onSend }: CallChatSheet
             <Ionicons name="send" size={20} color={draft.trim() ? '#fff' : 'rgba(255,255,255,0.3)'} />
           </TouchableOpacity>
         </View>
-      </KeyboardAvoidingView>
+      </View>
     </Modal>
   );
 }

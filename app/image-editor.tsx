@@ -8,8 +8,7 @@ import React, { useState, useRef , useMemo} from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, Image, ScrollView,
   Dimensions, PanResponder, TextInput, Alert, ActivityIndicator,
-  Platform,
-} from 'react-native';
+  Platform, useWindowDimensions } from 'react-native';
 import { type Palette } from '../constants/theme';
 import { useTheme } from '../lib/theme';
 import { useRouter, useLocalSearchParams, Stack } from 'expo-router';
@@ -34,6 +33,13 @@ type TextOverlay = { id: string; text: string; x: number; y: number; color: stri
 type ToolMode = 'none' | 'crop' | 'rotate' | 'draw' | 'text' | 'filter' | 'adjust';
 
 function useS() {
+  // Reactive size. The module-level Dimensions.get above is captured ONCE at
+  // import and never updates, so it froze the layout at the size the app
+  // launched with. Shadowing it here makes every use in this component follow
+  // rotation; StyleSheet.create keeps the initial value, which is fine for
+  // static rules.
+  const {width: SW, height: SH} = useWindowDimensions();
+
   const { colors } = useTheme();
   return useMemo(() => makeStyles(colors), [colors]);
 }

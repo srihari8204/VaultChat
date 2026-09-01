@@ -21,8 +21,10 @@ import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import InCallManager from 'react-native-incall-manager';
 import { setActiveCall, clearActiveCall, type ActiveCall } from '../lib/callState';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { BackHandler, StatusBar, StyleSheet, Text, View } from 'react-native';
+import { BackHandler, StatusBar, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { Sheet, type SheetAction } from '../components/ui/Sheet';
+import { Ionicons } from '@expo/vector-icons';
 import { CALL } from '../constants/callTheme';
 import {
   mediaDevices,
@@ -50,6 +52,12 @@ import { useCallConnectedAt, useCallError, useCallFlag, useCallStatus } from '..
 type CallState = 'connecting' | 'ringing' | 'connected' | 'ended';
 
 // Call chrome is always dark (independent of app theme), so styles are static.
+// How many people the Add sheet offers at once. 12 was the old value and it is
+// wrong for a 64-seat call: in a 40-person group you could see 12 of the
+// missing members and no way to reach the rest. The sheet scrolls, so this is
+// only a guard against rendering an unbounded contact list in one pass.
+const ADD_LIST_MAX = 50;
+
 const S = makeStyles();
 
 /**
@@ -212,9 +220,73 @@ function VoiceCallEngine() {
     : 'Call ended';
   const initial = (displayName.trim()[0] ?? '?').toUpperCase();
 
+  // ── ADD PERSON TO THIS CALL ────────────────────────────────────────
+  //
+  // A 1:1 call had no way to become a three-person one — the button every other
+  // messenger has did not exist here, which is what "I can't see the add option"
+  // was about. The server issues an invite scoped to THIS call (migration 123),
+  // so the person added joins the CALL, never the chat.
+  //
+  // Contacts are loaded when the sheet opens, not held in state: the list must
+  // reflect who is reachable now, and this screen may sit open for a long time.
+  const [addSheet, setAddSheet] = useState<{ title: string; message?: string; actions: SheetAction[] } | null>(null);
+  const addPerson = useCallback(async () => {
+    try {
+      const { listChats } = await import('../lib/chatService');
+      const chats = await listChats();
+      // YOURSELF must be excluded here, not just downstream. You are a member
+      // of every direct chat, so without this your own name is offered in the
+      // list — and tapping it does nothing at all, because inviteToCall drops
+      // `u !== s.meId`. A row that silently no-ops is the same bug as a button
+      // that silently no-ops.
+      const { getSnapshot } = await import('../lib/call/store');
+      const seen = new Set<string>([String(peerUid ?? ''), getSnapshot().meId]);
+      const people: { id: string; name: string }[] = [];
+      for (const c of chats ?? []) {
+        // listChats returns ChatSummary, which has NO `members` — that lives on
+        // ChatDetail (getChat). Reading c.members here yielded undefined for
+        // every chat, so the list was ALWAYS empty and the sheet always said
+        // "No other contacts to add yet", on every device. A direct summary
+        // already carries the peer, so this needs no extra request either.
+        if (c.type !== 'direct') continue;
+        const uid = c.peerUserId;
+        if (!uid || seen.has(uid)) continue;
+        seen.add(uid);
+        people.push({ id: uid, name: c.peerName || c.name || uid.slice(0, 8) });
+      }
+      if (!people.length) {
+        setAddSheet({ title: 'Add to call', message: 'No other contacts to add yet.', actions: [] });
+        return;
+      }
+      setAddSheet({
+        title: 'Add to call',
+        message: 'They join this call only — not the chat.',
+        actions: people.slice(0, ADD_LIST_MAX).map(pp => ({
+          label: pp.name,
+          icon: 'person-add-outline' as const,
+          onPress: () => { void engine.inviteToCall([pp.id]); },
+        })),
+      });
+    } catch {
+      setAddSheet({ title: 'Add to call', message: 'Could not load contacts just now.', actions: [] });
+    }
+  }, [peerUid]);
+
+
   return (
     <View style={S.screen}>
       <StatusBar barStyle="light-content" />
+
+      {/* ADD PEOPLE, TOP-LEFT — same placement as the video screen so the
+          control is in one place whichever call you are on. */}
+      <TouchableOpacity
+        onPress={addPerson}
+        style={[S.addTopBtn, { top: insets.top + 8 }]}
+        hitSlop={10}
+        accessibilityLabel="Add people to this call"
+      >
+        <Ionicons name="person-add" size={20} color="#fff" />
+      </TouchableOpacity>
       <View style={S.body}>
         <View style={S.avatarWrap}>
           <View style={S.avatar}><Text style={S.avatarTxt}>{initial}</Text></View>
@@ -235,6 +307,17 @@ function VoiceCallEngine() {
         <CallControlButton icon={speaker ? 'volume-high' : 'volume-low'} label={speaker ? 'Speaker' : 'Earpiece'} active={speaker} onPress={engine.toggleSpeaker} />
         <CallControlButton icon="call" label="End" danger onPress={hangUpFromScreen} />
       </View>
+
+      {/* Without this the Add button is INERT: addPerson loads contacts and
+          calls setAddSheet, but nothing renders it, so the tap does nothing
+          visible. group-call-active.tsx always had its equivalent. */}
+      <Sheet
+        visible={!!addSheet}
+        title={addSheet?.title}
+        message={addSheet?.message}
+        actions={addSheet?.actions ?? []}
+        onClose={() => setAddSheet(null)}
+      />
     </View>
   );
 }
@@ -585,6 +668,8 @@ function VoiceCallLegacy() {
 
 function makeStyles() { return StyleSheet.create({
   screen:     { flex: 1, backgroundColor: CALL.bg },
+  addTopBtn:  { position: 'absolute', left: 16, zIndex: 5, width: 40, height: 40, borderRadius: 20,
+                alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(255,255,255,0.16)' },
   body:       { flex: 1, justifyContent: 'center', alignItems: 'center', paddingHorizontal: 24, gap: 16 },
   avatarWrap: { marginBottom: 16 },
   avatar:     { width: 140, height: 140, borderRadius: 70, backgroundColor: CALL.active, alignItems: 'center', justifyContent: 'center', shadowColor: CALL.active, shadowOpacity: 0.6, shadowRadius: 30 },

@@ -7,6 +7,7 @@
 import { Tabs } from 'expo-router';
 import React from 'react';
 import { Platform, StyleSheet, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { Aurora, SPACING } from '../../constants/theme';
 import { AppText } from '../../components/ui/Text';
@@ -57,11 +58,27 @@ function TabIcon({ tab, label, focused }: { tab: keyof typeof ICONS; label: stri
 }
 
 export default function TabLayout() {
+  // THE TAB BAR MUST CLEAR THE SYSTEM NAVIGATION BAR.
+  //
+  // The height and bottom padding were hardcoded (65 / SPACING.sm on Android),
+  // which assumed a device with no gesture bar. On a phone that reserves 24-48px
+  // at the bottom the tab bar rendered UNDERNEATH it and the icons were clipped
+  // — reported with a photo showing exactly that, and it is why the row looked
+  // half cut off. insets.bottom is 0 on hardware-button devices, so this changes
+  // nothing on those and only adds the space that is genuinely reserved.
+  const insets = useSafeAreaInsets();
+  const tabBar = [
+    styles.tabBar,
+    {
+      height: (Platform.OS === 'ios' ? 85 : 65) + insets.bottom,
+      paddingBottom: (Platform.OS === 'ios' ? 24 : SPACING.sm) + insets.bottom,
+    },
+  ];
   return (
     <Tabs
       screenOptions={{
         headerShown: false,
-        tabBarStyle: styles.tabBar,
+        tabBarStyle: tabBar,
         tabBarShowLabel: false,
         tabBarActiveTintColor: Aurora.primary,
         tabBarInactiveTintColor: Aurora.textDim,

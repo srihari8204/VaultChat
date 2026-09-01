@@ -190,6 +190,9 @@ export async function drainDeclinedCall(): Promise<string | null> {
 export type InitialCallIntent = {
   action: 'incoming_call' | 'answer' | 'open_chat' | 'open_game' | string;
   callId?: string; callerId?: string; callerName?: string; isVideo?: boolean;
+  /** True when the ring was for a GROUP call. Absent on older native builds,
+   *  which is why the router treats undefined as 1:1 — the behaviour it had. */
+  isGroup?: boolean;
   chatId?: string;   // set for action 'open_chat' (message-notification tap, F2)
   // set for action 'open_game' (VaultGames turn/invite tap) — the table to open
   game?: string; room?: string;

@@ -18,8 +18,7 @@ import {
   StyleSheet,
   Text,
   TouchableOpacity,
-  View,
-} from 'react-native';
+  View, useWindowDimensions } from 'react-native';
 import { Image } from 'expo-image';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { Audio } from 'expo-av';
@@ -213,7 +212,15 @@ function formatOf(filename: string, fileType: string): { label: string; icon: st
 }
 
 // ── Skeleton shimmer component ───────────────────────────────────
-function SkeletonShimmer({ width: w, height: h, style }: any) {
+function SkeletonShimmer({
+ width: w, height: h, style }: any) {
+  // Reactive size. The module-level Dimensions.get above is captured ONCE at
+  // import and never updates, so it froze the layout at the size the app
+  // launched with. Shadowing it here makes every use in this component follow
+  // rotation; StyleSheet.create keeps the initial value, which is fine for
+  // static rules.
+  const { width: SW, height: SH } = useWindowDimensions();
+
   const shimmer = useRef(new Animated.Value(0)).current;
   useEffect(() => {
     Animated.loop(

@@ -28,7 +28,9 @@ package routes
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -37,11 +39,13 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 
 	"vaultchat/backend-go/internal/db"
+	"vaultchat/backend-go/internal/fcm"
 	"vaultchat/backend-go/internal/emitx"
 	"vaultchat/backend-go/internal/httpx"
 	"vaultchat/backend-go/internal/livekit"
 	"vaultchat/backend-go/internal/metrics"
 	"vaultchat/backend-go/internal/redisx"
+	"vaultchat/backend-go/internal/workx"
 	"vaultchat/backend-go/internal/vault"
 )
 
@@ -59,6 +63,7 @@ func RegisterCallSessions(mux *http.ServeMux) {
 	mux.HandleFunc("POST /calls/{id}/role", httpx.RequireAuth(callSessionRole))
 	mux.HandleFunc("POST /calls/{id}/hand", httpx.RequireAuth(callSessionHand))
 	mux.HandleFunc("POST /calls/{id}/sfu-token", httpx.RequireAuth(callSessionSfuToken))
+	mux.HandleFunc("POST /calls/{id}/ring", httpx.RequireAuth(callSessionRing))
 }
 
 // ── shapes ────────────────────────────────────────────────────────────
@@ -231,6 +236,86 @@ const (
 	callStartWindowSec = 60
 )
 
+// errCallFull is returned from inside the join transaction so the seat check
+// shares the transaction that takes the seat, rather than racing beside it.
+var errCallFull = errors.New("call is full")
+
+// errNotAllowed is returned from inside the join transaction when the caller is
+// neither a member of the chat nor invited to this specific call.
+var errNotAllowed = errors.New("not allowed on this call")
+
+// mayJoinCall answers "is this person allowed on this call at all".
+//
+// THIS EXISTS BECAUSE RLS DOES NOT RUN IN PRODUCTION.
+//
+// The join used to rely entirely on the `calls_insert WITH CHECK
+// (vc_is_chat_member(chat_id))` policy from migration 066, and the comment here
+// said so. But the API connects as role `vaultchat`, which is
+// `superuser=true, bypassrls=true` — and a BYPASSRLS role ignores row-level
+// security completely, FORCE ROW LEVEL SECURITY included. Verified against
+// production. So that policy was enforcing NOTHING: any authenticated user who
+// could name a chat id could open or join its call, receive an SFU token, and
+// hear the conversation.
+//
+// Two ways in, and only two:
+//   MEMBER   in chat_members for this chat, not left.
+//   INVITED  someone already on the call vouched for them (call_invites).
+//            That is what lets a 1:1 call gain a third person without adding
+//            anyone to the chat — the invite is scoped to ONE call and dies
+//            with it.
+func mayJoinCall(ctx context.Context, tx pgx.Tx, uid, chatID, callID string) (bool, error) {
+	var one int
+	err := tx.QueryRow(ctx,
+		`SELECT 1 WHERE EXISTS (
+		     SELECT 1 FROM chat_members
+		      WHERE chat_id = $1 AND user_id = $2 AND left_at IS NULL)
+		   OR EXISTS (
+		     SELECT 1 FROM call_invites
+		      WHERE call_id = $3 AND invitee_id = $2)`, chatID, uid, callID).Scan(&one)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return false, nil
+	}
+	return err == nil, err
+}
+
+// The group ring shares the per-account ring budget with the per-`to`
+// call_incoming relay in internal/realtime/handlers.go, and must therefore use
+// the same key, limit and window. Restated here rather than exported from
+// realtime: routes already imports realtime, but these are its constants, and a
+// number this small is clearer duplicated with a note than reached across a
+// package boundary for. If one moves, move both — the shared Redis key is what
+// makes them one budget.
+const (
+	callRingLimit     = 120
+	callRingWindowSec = 60
+)
+
+// callMaxParticipants is the product ceiling on ONE group call.
+//
+// WHY IT IS ENFORCED HERE AND NOT BY THE ROOM
+//
+// livekit.yaml has a max_participants, and it is the wrong instrument twice
+// over. It counts every identity in the room, and it refuses by DISCONNECTING —
+// which reaches the client as a transport failure indistinguishable from a bad
+// network, so the user is told "call failed" when the truth is "the call is
+// full". goliveMaxStage (internal/routes/golive.go) moved Go Live's cap out of
+// livekit.yaml for the same reason; this is the calling half of that lesson.
+// The room cap stays as a backstop, set above this number.
+//
+// And it is enforced at JOIN rather than at sfu-token, because THIS is where a
+// seat is taken: call_participants gets the row here, and /sfu-token then
+// requires an existing live row (myRole). Refusing at mint would refuse someone
+// who is already occupying the seat they are being told they cannot have.
+//
+// 64 is the product target. CALL_MAX_PARTICIPANTS overrides it; values below 2
+// are ignored, because a call needs two people.
+func callMaxParticipants() int {
+	if v, err := strconv.Atoi(os.Getenv("CALL_MAX_PARTICIPANTS")); err == nil && v >= 2 {
+		return v
+	}
+	return 64
+}
+
 func callSessionStart(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	uid := httpx.UserFrom(r).ID
@@ -322,17 +407,56 @@ func callSessionStart(w http.ResponseWriter, r *http.Request) {
 		role = "audience"
 	}
 	err = db.WithUser(ctx, uid, func(tx pgx.Tx) error {
+		// THE SEAT CHECK, in the same transaction as the seat.
+		//
+		// Counted EXCLUDING this user, so a rejoin can never be refused: someone
+		// whose network dropped is already one of the 64 and must be able to
+		// come back to the call they are still nominally on. Excluding them also
+		// makes the check idempotent, which matters because clients retry.
+		// AUTHORISE FIRST. See mayJoinCall — RLS is inert in prod, so this is the
+		// only thing standing between an arbitrary account and someone's call.
+		ok, e := mayJoinCall(ctx, tx, uid, c.ChatID, c.ID)
+		if e != nil {
+			return e
+		}
+		if !ok {
+			return errNotAllowed
+		}
+		var live int
+		if e := tx.QueryRow(ctx,
+			`SELECT count(*) FROM call_participants
+			  WHERE call_id = $1 AND left_at IS NULL AND user_id <> $2`, c.ID, uid).Scan(&live); e != nil {
+			return e
+		}
+		if live >= callMaxParticipants() {
+			return errCallFull
+		}
 		// Rejoining updates the existing row rather than adding a second, so
 		// "was this user on this call, and for how long" keeps one answer.
 		// The role is deliberately NOT reset — a participant promoted to
 		// speaker who drops and comes back is still a speaker.
-		_, e := tx.Exec(ctx,
+		_, e = tx.Exec(ctx,
 			`INSERT INTO call_participants (call_id, user_id, role)
 			 VALUES ($1, $2, $3)
 			 ON CONFLICT (call_id, user_id)
 			 DO UPDATE SET left_at = NULL, joined_at = NOW()`, c.ID, uid, role)
 		return e
 	})
+	if errors.Is(err, errNotAllowed) {
+		metrics.Inc("call_join_refused")
+		httpx.Err(w, 403, "You are not on this chat")
+		return
+	}
+	if errors.Is(err, errCallFull) {
+		// Every increment is a real person refused entry to a call in progress —
+		// the same reason call_mesh_full is worth counting. A rising rate here is
+		// the evidence for raising the ceiling, or for a different product shape.
+		metrics.Inc("call_full")
+		// 409, not 403: the caller is allowed on this call, there is simply no
+		// room. The client tells them so instead of showing a permissions error.
+		httpx.Err(w, 409, "This call is full")
+		return
+	}
 	if err != nil {
 		metrics.Inc("call_join_refused")
 		httpx.Err(w, 403, "Cannot join this call")
@@ -352,7 +476,24 @@ func callSessionStart(w http.ResponseWriter, r *http.Request) {
 	emitx.ChatEvent(c.ChatID, "call_session_joined", map[string]any{
 		"callId": c.ID, "chatId": c.ChatID, "userId": uid, "role": role, "created": created,
 	})
-	httpx.JSON(w, 200, map[string]any{"call": c, "participants": people, "created": created})
+
+	// THE SFU CREDENTIAL RIDES THE JOIN RESPONSE — one round trip, not two.
+	//
+	// The client used to await POST /calls, then await POST /calls/{id}/sfu-token
+	// before it could even open the WebSocket. Measured on device (Hyderabad ->
+	// Hetzner), those two sequential round trips cost 615 ms + 313 ms of a 3.6 s
+	// tap-to-audio: ~26% of call setup spent waiting on HTTP, before any media
+	// work began. The token is derived from the role we just wrote, so the
+	// server already knows everything needed to mint it here.
+	//
+	// Additive and OPTIONAL: an older client ignores the field and still calls
+	// /sfu-token, which is unchanged. A newer client against an older server
+	// finds no field and falls back. Neither needs the other to ship first.
+	resp := map[string]any{"call": c, "participants": people, "created": created}
+	if cred := mintSfuCredential(ctx, uid, c.ID, role); cred != nil {
+		resp["sfu"] = cred
+	}
+	httpx.JSON(w, 200, resp)
 }
 
 // ── GET /calls/{id} ───────────────────────────────────────────────────
@@ -628,6 +769,44 @@ func callSessionHand(w http.ResponseWriter, r *http.Request) {
 //
 // Works with no cluster provisioned — minting is offline signing. Without keys
 // it answers 503 with a reason rather than a token nothing would accept.
+// mintSfuCredential builds the LiveKit join credential for one participant.
+//
+// SHARED BY /sfu-token AND THE JOIN RESPONSE, so a token issued at join is
+// identical to one minted a moment later — same role source, same room naming,
+// same bookkeeping. Two copies of this would be two places for the role rule to
+// drift, and the role IS the permission (an audience token has canPublish=false).
+//
+// Returns nil when the SFU is unconfigured or minting fails. Callers that can
+// still proceed (the join) simply omit the credential; /sfu-token turns it into
+// an error, because for that endpoint it IS the answer.
+func mintSfuCredential(ctx context.Context, uid, callID, role string) map[string]any {
+	cfg := livekit.ConfigFromEnv()
+	if !cfg.Configured() {
+		metrics.Inc("call_sfu_unconfigured")
+		return nil
+	}
+	name, _ := callerIdentity(ctx, uid)
+	token, err := livekit.Mint(cfg, livekit.MintArgs{
+		Identity: uid, Name: name,
+		Room: livekit.RoomName(callID), Role: livekit.Role(role),
+	})
+	if err != nil {
+		return nil
+	}
+	// calls.transport exists to record that this call actually became an SFU
+	// call. Best-effort: a failed bookkeeping write must not cost a token.
+	_ = db.WithUser(ctx, uid, func(tx pgx.Tx) error {
+		_, e := tx.Exec(ctx,
+			`UPDATE calls SET transport = 'sfu' WHERE id = $1 AND transport <> 'sfu'`, callID)
+		return e
+	})
+	metrics.Inc("call_sfu_token_" + role)
+	return map[string]any{
+		"token": token, "url": cfg.URL, "room": livekit.RoomName(callID),
+		"identity": uid, "role": role,
+	}
+}
+
 func callSessionSfuToken(w http.ResponseWriter, r *http.Request) {
 	c, uid, ok := callLoad(w, r)
 	if !ok {
@@ -648,49 +827,15 @@ func callSessionSfuToken(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	cfg := livekit.ConfigFromEnv()
-	if !cfg.Configured() {
-		// Worth counting: a non-zero rate here means clients are trying to use
-		// the SFU on a server that has no keys, which is a deployment gap rather
-		// than a user error.
-		metrics.Inc("call_sfu_unconfigured")
+	cred := mintSfuCredential(ctx, uid, c.ID, role)
+	if cred == nil {
+		// A non-zero rate here means clients are trying to use the SFU on a
+		// server that has no keys — a deployment gap, not a user error.
 		httpx.Err(w, 503, "Group calling at scale is not configured on this server")
 		return
 	}
 
-	name, _ := callerIdentity(ctx, uid)
-	token, err := livekit.Mint(cfg, livekit.MintArgs{
-		Identity: uid,
-		Name:     name,
-		Room:     livekit.RoomName(c.ID),
-		Role:     livekit.Role(role),
-	})
-	if err != nil {
-		httpx.Err(w, 500, "Failed to issue a call token")
-		return
-	}
-
-	// Record that this call actually became an SFU call. calls.transport exists
-	// for exactly this, and stamping it at the first mint means a mixed-fleet
-	// period stays legible afterwards instead of being guesswork. Best-effort:
-	// a failed bookkeeping write must not cost the caller their token.
-	_ = db.WithUser(ctx, uid, func(tx pgx.Tx) error {
-		_, e := tx.Exec(ctx,
-			`UPDATE calls SET transport = 'sfu' WHERE id = $1 AND transport <> 'sfu'`, c.ID)
-		return e
-	})
-
-	metrics.Inc("call_sfu_token_" + role)
-	httpx.JSON(w, 200, map[string]any{
-		"token": token,
-		"url":   cfg.URL,
-		"room":  livekit.RoomName(c.ID),
-		// Echoed so the client can render the right controls without re-deriving
-		// the role — and so a demotion that happened between joining and minting
-		// is visible immediately rather than at the next roster event.
-		"identity": uid,
-		"role":     role,
-	})
+	httpx.JSON(w, 200, cred)
 }
 
 // ── GET /calls/history ────────────────────────────────────────────────
@@ -761,4 +906,251 @@ func callSessionHistory(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httpx.JSON(w, 200, map[string]any{"calls": out})
+}
+
+// ── POST /calls/{id}/ring — ring a group into a call, socket AND push ──
+//
+// WHY THIS EXISTS AT ALL
+//
+// A group call used to ring by having the CLIENT loop and emit one
+// `call_incoming` per member. Three things break at 64, and every one of them
+// is silent:
+//
+//  1. NO WAKE-UP PUSH. `call_incoming` is a socket event, so it reaches only
+//     devices with a live socket. A 1:1 call also POSTs /call/initiate, which
+//     sends the high-priority FCM the native full-screen ringer listens for —
+//     the group path never did. So a group call rang only the phones that
+//     happened to be awake, which for 63 people is nearly none of them. This is
+//     the single reason a 64-person call could not fill up.
+//  2. THE RING BUDGET IS PER ACCOUNT. One unit per member meant a 63-member
+//     ring spent 63 of 120, and the second call inside a minute was refused
+//     member by member with nothing the caller could see.
+//  3. THE RECIPIENT LIST CAME FROM THE CLIENT and was checked nowhere.
+//
+// So the whole fan-out is one request: the server resolves the members, emits
+// the socket event, and pushes — for one unit of budget, whatever the size.
+//
+// `userIds` (optional) narrows it to named people, which is the in-call INVITE.
+// Anyone named who is not a current member of the chat is dropped, so the
+// invite cannot become a way to ring strangers.
+func callSessionRing(w http.ResponseWriter, r *http.Request) {
+	c, uid, ok := callLoad(w, r)
+	if !ok {
+		return
+	}
+	if c.EndedAt != nil {
+		httpx.Err(w, 409, "This call has ended")
+		return
+	}
+	ctx := r.Context()
+	// Only someone ON the call may ring for it. Without this any chat member
+	// could make everyone's phone ring for a call they are not part of.
+	if _, on := myRole(ctx, uid, c.ID); !on {
+		httpx.Err(w, 403, "You are not on this call")
+		return
+	}
+	// ONE unit for the whole group. Same key and window as the per-`to` ring in
+	// realtime/handlers.go, so the two paths cannot be combined to spend twice.
+	// Consume fails OPEN, so a Redis outage degrades to ringing rather than
+	// silence.
+	if rl := redisx.Consume(ctx, "call:ring:"+uid, callRingLimit, callRingWindowSec); !rl.Allowed {
+		metrics.Inc("call_ring_rate_limited")
+		w.Header().Set("Retry-After", strconv.FormatInt(rl.ResetInSec, 10))
+		httpx.Err(w, 429, "Ringing too fast. Wait a moment.")
+		return
+	}
+
+	var b struct {
+		UserIDs []string `json:"userIds"`
+	}
+	_ = httpx.Body(r, &b)
+
+	targets := ringTargets(ctx, uid, c, b.UserIDs)
+
+	// NAMED PEOPLE WHO ARE NOT IN THE CHAT: vouch for them, then ring them.
+	//
+	// This is what lets a 1:1 call gain a third participant. ringTargets only
+	// ever returns chat MEMBERS, so anyone explicitly named who is not one is
+	// missing from it — and without a grant they could not join even if rung,
+	// because mayJoinCall would refuse them.
+	//
+	// The grant is the narrowest that works: scoped to THIS call, issued only by
+	// someone already on it (we are past the myRole check above), and worth
+	// nothing once the call ends. It gives no access to the chat, its history,
+	// or any later call.
+	if len(b.UserIDs) > 0 {
+		known := map[string]bool{}
+		for _, t := range targets {
+			known[t] = true
+		}
+		var invited []string
+		for _, u := range b.UserIDs {
+			u = strings.TrimSpace(u)
+			if u == "" || u == uid || known[u] {
+				continue
+			}
+			invited = append(invited, u)
+		}
+		if len(invited) > 0 {
+			_ = db.WithUser(ctx, uid, func(tx pgx.Tx) error {
+				for _, inv := range invited {
+					if _, e := tx.Exec(ctx,
+						`INSERT INTO call_invites (call_id, invitee_id, invited_by)
+						 VALUES ($1, $2, $3) ON CONFLICT DO NOTHING`, c.ID, inv, uid); e != nil {
+						return e
+					}
+				}
+				return nil
+			})
+			metrics.Add("call_invite_granted", uint64(len(invited)))
+			targets = append(targets, invited...)
+		}
+	}
+
+	if len(targets) == 0 {
+		httpx.JSON(w, 200, map[string]any{"ok": true, "rang": 0})
+		return
+	}
+
+	// SOCKET FIRST, and synchronously: a phone that is awake should ring now,
+	// not after a round trip to Google.
+	emitx.ToUids(targets, "call_incoming", map[string]any{
+		"from": uid, "fromUid": uid, "chatId": c.ChatID,
+		"group": true, "groupName": groupNameFor(ctx, uid, c.ChatID),
+		"type": c.Kind, "video": map[bool]string{true: "1", false: "0"}[c.Kind == "video"],
+	})
+
+	// PUSH IN THE BACKGROUND. 63 FCM sends must not hold the caller's request
+	// open — they are already in the call by the time this runs, and a slow push
+	// tier would otherwise delay the UI that says the call started.
+	_, dp := callerIdentity(ctx, uid)
+	video := "false"
+	if c.Kind == "video" {
+		video = "true"
+	}
+	// THE GROUP IS THE HEADLINE, not the person who pressed call — the same
+	// choice every other messenger makes, and the useful one on a lock screen:
+	// "Family" tells you what to answer, "Ravi" does not say which of your
+	// conversations it is about.
+	title := groupNameFor(ctx, uid, c.ChatID)
+	// callId carries the CHAT id, matching /call/initiate. The JS launch-intent
+	// handler reads it as `chatId` (app/_layout.tsx), so sending the call
+	// session's own UUID here would route the answer to a chat that does not
+	// exist. The call is found from the chat — one live call per chat is a
+	// database constraint.
+	chatID := c.ChatID
+	workx.Submit(func() { ringGroupPush(targets, chatID, uid, title, dp, video) })
+
+	metrics.Add("call_ring_group_members", uint64(len(targets)))
+	httpx.JSON(w, 200, map[string]any{"ok": true, "rang": len(targets)})
+}
+
+// ringTargets resolves WHO to ring: the named people if given, otherwise the
+// chat's members. Either way the list comes from chat_members, never from the
+// request, and never includes the caller.
+func ringTargets(ctx context.Context, uid string, c *callSession, named []string) []string {
+	// THE NAMED FILTER BELONGS IN THE QUERY, NOT AFTER IT.
+	//
+	// It used to LIMIT to the seat count and then drop non-named rows in Go,
+	// which silently broke the invite in exactly the groups that need it: in a
+	// 200-member chat the LIMIT returned the 63 oldest members, so inviting
+	// anyone who joined after them matched nothing and rang NOBODY — while the
+	// endpoint still answered ok. Filtering in SQL means the LIMIT applies to
+	// the set we actually want.
+	var want []string
+	for _, u := range named {
+		if u = strings.TrimSpace(u); u != "" {
+			want = append(want, u)
+		}
+	}
+
+	// LIMIT is the seat count, not the group size.
+	//
+	// A chat may hold far more people than a call can. Ringing all of them for a
+	// 64-seat call wakes hundreds of phones — high-priority pushes that can
+	// bypass Do Not Disturb — so that all but 63 can be told the call is full
+	// when they answer. Ordered by joined_at so the set is STABLE: an unordered
+	// LIMIT gives a different 63 people on every redial, which reads as the app
+	// ringing at random. It still bounds a named invite, so an invite cannot be
+	// used to ring a whole 500-member chat either.
+	// AN EXPLICIT BOOLEAN, not a NULL test on the array.
+	//
+	// `$3::text[] IS NULL` would depend on the driver encoding a nil slice as
+	// SQL NULL rather than an empty array `{}`. If it ever encoded `{}`, the
+	// whole-group ring would match NOBODY and starting a call would silently
+	// ring no one — the worst possible failure, resting on a driver detail. The
+	// flag removes the question: `true OR <anything>` is true even when the
+	// right side is NULL, so the unnamed case always selects every member.
+	all := len(want) == 0
+	var out []string
+	_ = db.WithUser(ctx, uid, func(tx pgx.Tx) error {
+		rows, e := tx.Query(ctx,
+			`SELECT user_id::text FROM chat_members
+			  WHERE chat_id = $1 AND left_at IS NULL AND user_id <> $2
+			    AND ($3 OR user_id::text = ANY($4))
+			  ORDER BY joined_at
+			  LIMIT $5`, c.ChatID, uid, all, want, callMaxParticipants()-1)
+		if e != nil {
+			return e
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var m string
+			if rows.Scan(&m) != nil || m == "" {
+				continue
+			}
+			out = append(out, m)
+		}
+		return rows.Err()
+	})
+	return out
+}
+
+// groupNameFor is what the callee's screen shows while it rings. Best effort:
+// an unnamed group still rings, it just says "Group call".
+func groupNameFor(ctx context.Context, uid, chatID string) string {
+	var name *string
+	_ = db.WithUser(ctx, uid, func(tx pgx.Tx) error {
+		return tx.QueryRow(ctx, `SELECT name FROM chats WHERE id = $1`, chatID).Scan(&name)
+	})
+	if name != nil && strings.TrimSpace(*name) != "" {
+		return *name
+	}
+	return "Group call"
+}
+
+// ringGroupPush wakes every target that is not holding a live socket.
+//
+// type="incoming_call" is deliberate: it is the payload the native
+// VaultCallMessagingService already handles, and that service is the only thing
+// that can ring a killed app. Using any other type would fall through to the JS
+// notifee layer, which is what produced two notifications for one call before.
+//
+// One push per callee, not one per ring repeat — the push only has to WAKE the
+// device; once awake the socket delivers everything else.
+func ringGroupPush(targets []string, chatID, from, name, dp, video string) {
+	ctx := context.Background()
+	for _, to := range targets {
+		tokens := fcmTokensFor(ctx, to)
+		if len(tokens) == 0 {
+			continue
+		}
+		res := fcm.SendCallMessage(tokens, map[string]string{
+			"type":       "incoming_call",
+			"callId":     chatID,
+			"chatId":     chatID,
+			"callerId":   from,
+			"callerName": name,
+			// Read by VaultCallMessagingService: it is what stops the answer
+			// button opening a ONE-TO-ONE call with whoever started the group.
+			"isGroup":     "true",
+			"callerDpUrl": dp,
+			"isVideo":     video,
+			"ts":          fmt.Sprintf("%d", time.Now().UnixMilli()),
+		}, 30000)
+		if len(res.Dead) > 0 {
+			_, _ = db.Pool.Exec(ctx,
+				`UPDATE devices SET fcm_token = NULL WHERE fcm_token = ANY($1::text[])`, res.Dead)
+		}
+	}
 }

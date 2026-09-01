@@ -8,8 +8,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, StatusBar,
   ActivityIndicator, Dimensions, ScrollView, Animated,
-  PanResponder, Alert,
-} from 'react-native';
+  PanResponder, Alert, useWindowDimensions } from 'react-native';
 import { useLocalSearchParams, Stack, useRouter } from 'expo-router';
 import { Video, Audio, ResizeMode, type AVPlaybackStatusSuccess } from 'expo-av';
 import * as FileSystem from 'expo-file-system/legacy';
@@ -45,6 +44,13 @@ const formatSize = (b) => { if (!b) return ''; if (b<1024) return b+' B'; if (b<
 const formatDur = (ms) => { if (!ms) return '0:00'; const s=Math.floor(ms/1000); return Math.floor(s/60)+':'+(s%60<10?'0':'')+(s%60); };
 
 function MediaViewerScreen() {
+  // Reactive size. The module-level Dimensions.get above is captured ONCE at
+  // import and never updates, so it froze the layout at the size the app
+  // launched with. Shadowing it here makes every use in this component follow
+  // rotation; StyleSheet.create keeps the initial value, which is fine for
+  // static rules.
+  const {width: SW, height: SH} = useWindowDimensions();
+
   const router = useRouter();
   const { uri, mediaUrl, attachmentId, needsAuth, save, isMine, mime, filename, msgType, viewOnce, chatId } = useLocalSearchParams();
   const isViewOnce = viewOnce === '1';

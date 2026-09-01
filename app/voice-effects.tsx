@@ -6,8 +6,7 @@ import { BRAND_ACCENT } from '../constants/theme';
 import React, { useState, useRef, useEffect } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet,
-  StatusBar, Animated, Dimensions, Alert, ScrollView, Platform,
-} from 'react-native';
+  StatusBar, Animated, Dimensions, Alert, ScrollView, Platform, useWindowDimensions } from 'react-native';
 import { Stack } from 'expo-router';
 import { Audio } from 'expo-av';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -31,6 +30,13 @@ const EFFECTS = [
 const SETTINGS_KEY = 'vc_voice_effect';
 
 export default function VoiceEffectsScreen() {
+  // Reactive size. The module-level Dimensions.get above is captured ONCE at
+  // import and never updates, so it froze the layout at the size the app
+  // launched with. Shadowing it here makes every use in this component follow
+  // rotation; StyleSheet.create keeps the initial value, which is fine for
+  // static rules.
+  const {width: SW} = useWindowDimensions();
+
   const [selected, setSelected] = useState('none');
   const [recording, setRecording] = useState(null);
   const [recordedUri, setRecordedUri] = useState(null);

@@ -25,7 +25,10 @@ import { Dimensions, PixelRatio } from 'react-native';
 import { AudioSession, registerGlobals, setLogLevel } from '@livekit/react-native';
 import { screenCaptureSize, screenCaptureBitrate } from './screenCapture';
 import { shouldRelax, relaxedEncoding } from './sharePolicy';
-import { Room, RoomEvent, Track, type RemoteParticipant, type RemoteTrackPublication } from 'livekit-client';
+import { newVisibleState, setVisible as setVisibleState, wantsTrack } from './visibleSet';
+import { simulcastLayers } from './mode';
+import { getIceServers } from '../iceConfig';
+import { Room, RoomEvent, Track, VideoPresets, type RemoteParticipant, type RemoteTrackPublication } from 'livekit-client';
 
 // livekit-client is a browser library: registerGlobals installs the React Native
 // WebRTC implementations under the names it expects. Must run before a Room is
@@ -44,6 +47,29 @@ function ensureGlobals(): void {
   // per call, and only while a call exists.
   setLogLevel('debug');
   globalsReady = true;
+}
+
+/**
+ * Is this a phone that cannot afford a third simulcast encode?
+ *
+ * A PROXY, deliberately, and a crude one: total physical pixels. There is no
+ * CPU or thermal-headroom API in React Native, `navigator.hardwareConcurrency`
+ * is not reliably installed by registerGlobals, and a device-model allowlist is
+ * a maintenance burden with a long tail for what is a two-way decision. Panel
+ * resolution tracks device class closely enough — sub-1080p phones are budget
+ * phones — and the failure mode is mild in both directions: a misjudged capable
+ * phone publishes one fewer layer, a misjudged budget phone runs warmer.
+ *
+ * ponytail: pixel-count proxy for device tier. If thermal throttling shows up
+ * on devices this calls capable, take the tier from a measured encode instead
+ * (the screen-share path already reads qualityLimitationReason).
+ */
+function isLowEndDevice(): boolean {
+  try {
+    const px = PixelRatio.get();
+    const scr = Dimensions.get('screen');
+    return Math.round(scr.width * px) * Math.round(scr.height * px) < 1920 * 1080;
+  } catch { return true; }   // unknown device: assume the cheaper setting
 }
 
 export interface CallRoomEvents {
@@ -83,6 +109,12 @@ export interface CallRoomEvents {
   onReconnecting?(): void;
   /** The SDK rebuilt the transport. Pairs with onReconnecting. */
   onReconnected?(): void;
+  /**
+   * Who the SFU says is speaking, whenever that set changes. OPTIONAL, like the
+   * two above and for the same reason: a caller that ignores it behaves exactly
+   * as it did before this existed — which is what every 1:1 screen does.
+   */
+  onActiveSpeakers?(uids: string[]): void;
 }
 
 export interface CallRoom {
@@ -94,6 +126,16 @@ export interface CallRoom {
   setScreenShare(on: boolean): Promise<void>;
   /** Silence every remote participant (call-waiting hold). */
   setRemoteAudible(on: boolean): void;
+  /**
+   * Declare whose VIDEO this device wants — the tiles actually on screen.
+   *
+   * `null` (the default, and what a caller who never calls this gets) means
+   * "everyone", which is byte-identical to the behaviour before there was a
+   * visible set. A 1:1 or small group therefore behaves exactly as it did.
+   *
+   * Audio is NEVER affected: see the note in joinCallRoom.
+   */
+  setVisible(ids: string[] | null): void;
   leave(): Promise<void>;
 }
 
@@ -123,6 +165,11 @@ export async function joinCallRoom(a: JoinArgs): Promise<CallRoom> {
   // guarantee Zoom, Meet, Teams and Telegram group calls give, and the UI says
   // exactly that — CallEncryptionBadge renders "Encrypted in transit", not the
   // end-to-end claim. Nothing in the product may say otherwise.
+  // FETCH TURN BEFORE ANYTHING ELSE, so the network round trip overlaps the
+  // Room construction instead of adding to call setup time. Same pattern as
+  // lib/golive/room.ts, which has done this correctly all along.
+  const iceServersPromise = getIceServers();
+
   const room = new Room({
     // SINGLE PEER CONNECTION OFF. This is the fix for one-way audio.
     //
@@ -149,12 +196,46 @@ export async function joinCallRoom(a: JoinArgs): Promise<CallRoom> {
     // does not pre-allocate, so nothing is ever deferred. It costs one extra
     // peer connection per participant; a working call is worth more.
     singlePeerConnection: false,
-    // adaptiveStream OFF, deliberately. It pauses video whose view the SDK
-    // thinks is invisible, and in a native call UI that judgement is wrong
-    // often enough to show a frozen frame on a working call. dynacast still
-    // stops sending layers nobody subscribes to, which is where the saving is.
+    // adaptiveStream OFF, deliberately — and it STAYS off now that the app
+    // declares a visible set (see `wantsVideo` below).
+    //
+    // It pauses video whose view the SDK thinks is invisible, and it learns
+    // that by watching LiveKit's own <VideoTrack> components attach. This app
+    // renders remote video with RTCView over a stream URL, so the SDK sees NO
+    // attached views at all and would be entitled to pause EVERY tile — which
+    // is the frozen-frame-on-a-working-call bug, at full call scale.
+    //
+    // The visible set does the same job from the side that actually knows: the
+    // app says which tiles are on screen and the subscription follows. So this
+    // is not "the flag we could not turn on" — it is the wrong mechanism for a
+    // UI that does not use the SDK's renderer. dynacast still stops sending
+    // layers nobody subscribes to, which is where the upstream saving is.
     adaptiveStream: false,
     dynacast: true,
+    // ONE CAMERA STREAM, SEVERAL SIZES — the other half of what makes a large
+    // call work.
+    //
+    // The visible set stops this device DECODING sixty-four videos. Simulcast
+    // is what stops it being SENT the wrong one: with layers published, the SFU
+    // hands each subscriber a size that suits the tile they are drawing, and
+    // dynacast (above) stops sending any layer nobody asked for. Without it a
+    // phone drawing a 120px tile is still shipped a 720p stream.
+    //
+    // The layer COUNT is a thermal decision, not a quality one: encoding three
+    // streams at once is what a budget phone cannot sustain, so it publishes
+    // two. lib/call/mode.ts owns that rule (simulcastLayers) and this supplies
+    // the device half of it.
+    //
+    // Screen share is untouched — setScreenShare passes its own publish options
+    // with `simulcast: false`, which override these. That is deliberate and
+    // device-proven: odd panel geometry plus a hardware encoder that silently
+    // emits nothing means one encoder to satisfy, not three.
+    publishDefaults: {
+      simulcast: true,
+      // main layer + the extras listed = simulcastLayers() total.
+      videoSimulcastLayers: simulcastLayers('sfu', isLowEndDevice())
+        >= 3 ? [VideoPresets.h180, VideoPresets.h360] : [VideoPresets.h180],
+    },
   });
 
   const urlOf = (t: any): string | null => {
@@ -170,6 +251,8 @@ export async function joinCallRoom(a: JoinArgs): Promise<CallRoom> {
     safe('remote', () => a.events.onRemote(
       p.identity, urlOf(track), track?.kind === Track.Kind.Video ? 'video' : 'audio', screen));
 
+  // ── WHAT THIS DEVICE SUBSCRIBES TO ────────────────────────────────
+  //
   // ASK FOR THE TRACK, do not wait to be given it.
   //
   // autoSubscribe is on, and on device it was not enough: the participant who
@@ -179,11 +262,47 @@ export async function joinCallRoom(a: JoinArgs): Promise<CallRoom> {
   // being the deaf one because the caller joins first.
   //
   // setSubscribed(true) is idempotent and explicit: it tells the server we want
-  // this publication, whatever the room-level default did or did not do.
+  // this publication, whatever the room-level default did or did not do. That
+  // is why the `true` case below is UNCONDITIONAL and is not gated on
+  // pub.isSubscribed — the whole point is that isSubscribed was not to be
+  // trusted. Only the `false` case is gated, so we never spam unsubscribes.
+  //
+  // WHAT THE VISIBLE SET DOES AND DOES NOT COVER
+  //
+  //   audio         ALWAYS subscribed, for everyone, at every call size. A
+  //                 selectively-subscribed audio track is how "nobody could
+  //                 hear the person who spoke up" happens, and audio is not
+  //                 where the scaling problem is: 64 Opus streams is ~1.5 Mbps
+  //                 and the SFU already drops silent ones. The video decoders
+  //                 are the cost.
+  //   screen share  ALWAYS subscribed. It is the thing the person deliberately
+  //                 chose to show; dropping it because their tile scrolled off
+  //                 the grid page would be exactly backwards.
+  //   camera        follows the visible set.
+  //
+  // `visible === null` means everyone, and is what a caller who never calls
+  // setVisible gets — so 1:1 and small calls emit precisely the calls they
+  // emitted before this existed.
+
+  // The rule itself lives in ./visibleSet, which has no SDK in it and can be
+  // asserted without a device. This is only the part that touches the SDK.
+  const vis = newVisibleState();
+
+  /** Bring one publication in line with what this device wants. */
+  const applyWant = (pub: RemoteTrackPublication, uid: string) => {
+    const want = wantsTrack(vis, uid, {
+      kind: pub.kind === Track.Kind.Video ? 'video' : 'audio',
+      screenShare: pub.source === Track.Source.ScreenShare,
+    }, Date.now());
+    // No keyframe request on re-subscribe: the SFU sends one when a
+    // subscription starts, and livekit-client exposes no client-side PLI. The
+    // linger window in ./visibleSet is what covers the gap.
+    if (want) { try { pub.setSubscribed(true); } catch {} return; }
+    if (pub.isSubscribed) { try { pub.setSubscribed(false); } catch {} }
+  };
+
   const wantAll = (p: RemoteParticipant) => {
-    p.trackPublications.forEach(pub => {
-      try { (pub as RemoteTrackPublication).setSubscribed(true); } catch {}
-    });
+    p.trackPublications.forEach(pub => applyWant(pub as RemoteTrackPublication, p.identity));
   };
 
   room.on(RoomEvent.ParticipantConnected, p => {
@@ -192,10 +311,8 @@ export async function joinCallRoom(a: JoinArgs): Promise<CallRoom> {
     safe('participants', () => a.events.onParticipants(room.remoteParticipants.size + 1, p, null));
   });
   room.on(RoomEvent.TrackPublished, (pub, p) => {
-    console.warn('[call] room: remote published', pub.kind, 'by', p.identity, '— subscribing');
-    try { pub.setSubscribed(true); } catch (err) {
-      console.warn('[call] room: could not subscribe —', (err as any)?.message ?? err);
-    }
+    console.warn('[call] room: remote published', pub.kind, 'by', p.identity, '— reconciling');
+    applyWant(pub, p.identity);
   });
   room.on(RoomEvent.ParticipantDisconnected, p => {
     console.warn('[call] room: left', p.identity, '— now', room.remoteParticipants.size + 1);
@@ -244,13 +361,37 @@ export async function joinCallRoom(a: JoinArgs): Promise<CallRoom> {
     safe('reconnected', () => a.events.onReconnected?.());
   });
   room.on(RoomEvent.ConnectionStateChanged, st => console.warn('[call] room state →', st));
+  // Not logged: this fires several times a second in a busy call, and a log
+  // line per change would bury the ones that diagnose a broken call.
+  room.on(RoomEvent.ActiveSpeakersChanged, ps => safe('speakers', () =>
+    a.events.onActiveSpeakers?.(ps.map(p => p.identity))));
 
   // The OS audio session: routing, focus, and the in-call volume stream. The
   // SDK owns this too — mixing it with a second audio-session manager is what
   // produced calls that connected and played through the wrong output.
   await AudioSession.startAudioSession();
 
-  await room.connect(a.url, a.token, { autoSubscribe: true });
+  // TURN REACHES THE SFU PATH AT LAST.
+  //
+  // This connected with no rtcConfig, so livekit-client used only the ICE
+  // servers the LiveKit SERVER advertises — and livekit.yaml has
+  // `turn: enabled: false` (deliberately, to reuse the host's coturn). The
+  // result: clients gathered host and srflx candidates and ZERO relay ones.
+  // Measured on device: 42 host, 19 srflx, 0 relay. On this network STUN
+  // happened to be enough, so it worked and hid the hole — but behind a
+  // symmetric NAT, where relay is the ONLY thing that works, a call could
+  // never connect at all.
+  //
+  // lib/golive/room.ts has passed rtcConfig since it was written and has a
+  // selftest pinning it; the calling path simply never got the same line.
+  //
+  // ICE priority is untouched: host and srflx pairs are tried first by the
+  // protocol, relay is last resort, so a normal network behaves exactly as
+  // before. getIceServers() never throws and never returns empty — it degrades
+  // to the last good config, then to STUN only, which is what this was already
+  // working with.
+  const iceServers = await iceServersPromise;
+  await room.connect(a.url, a.token, { autoSubscribe: true, rtcConfig: { iceServers } });
 
   if (a.publish) {
     await room.localParticipant.setMicrophoneEnabled(true);
@@ -284,11 +425,13 @@ export async function joinCallRoom(a: JoinArgs): Promise<CallRoom> {
     room.remoteParticipants.forEach(p => {
       remotes++;
       p.trackPublications.forEach(pub => {
-        if (!pub.isSubscribed) {
-          try { (pub as RemoteTrackPublication).setSubscribed(true); } catch {}
-          return;
+        // Also where a lapsed linger window is collected: applyWant re-reads
+        // wantsVideo every tick, so a camera that dropped out of the visible
+        // set is unsubscribed on the next pass. No second timer.
+        applyWant(pub as RemoteTrackPublication, p.identity);
+        if (pub.isSubscribed && pub.track) {
+          remote(pub.track, p, pub.source === Track.Source.ScreenShare);
         }
-        if (pub.track) remote(pub.track, p, pub.source === Track.Source.ScreenShare);
       });
     });
     if (remotes > 0) safe('participants', () => a.events.onParticipants(remotes + 1, null, null));
@@ -300,6 +443,11 @@ export async function joinCallRoom(a: JoinArgs): Promise<CallRoom> {
   const ownCam = room.localParticipant.getTrackPublication(Track.Source.Camera);
   if (ownCam?.track) safe('local', () => a.events.onLocal(urlOf(ownCam.track)));
 
+  // Which way the camera currently points. Ours because the SDK's own copy is
+  // undefined for a LiveKit-created track — see flipCamera below. A call starts
+  // on the front camera, which is what setCameraEnabled gives us.
+  let facing: 'user' | 'environment' = 'user';
+
   return {
     room,
     async setMic(on) { await room.localParticipant.setMicrophoneEnabled(on); },
@@ -309,27 +457,50 @@ export async function joinCallRoom(a: JoinArgs): Promise<CallRoom> {
       const t: any = pub?.videoTrack;
       if (!t) return;
 
-      // _switchCamera FIRST. It flips the camera inside the SAME capture, so
-      // the MediaStream — and the URL the self-preview is rendering — stays
-      // valid, and the peer sees no interruption.
+      // WE TRACK FACING, THE SDK DOES NOT DO IT FOR US.
       //
-      // restartTrack is the fallback and it REPLACES the stream. That is what
-      // froze the sender's own preview after a flip: the remote side kept
-      // receiving fine (the publication is the same), while the local view went
-      // on rendering a URL whose stream had been thrown away. Whichever path
-      // runs, the fresh URL is re-emitted below.
+      // This used to call mediaStreamTrack._switchCamera(), which decides the
+      // new direction from its OWN state:
+      //
+      //   constraints.facingMode =
+      //     this._settings.facingMode === 'user' ? 'environment' : 'user';
+      //
+      // LiveKit creates the camera track without an explicit facingMode, so
+      // _settings.facingMode is UNDEFINED. `undefined === 'user'` is false, so
+      // every call asked for 'user' — the front camera, over and over. The
+      // button did nothing, forever, and the method is @deprecated besides.
+      //
+      // Worse, `switched` was set from the method merely EXISTING, so the
+      // restartTrack fallback below could never run to correct it.
+      //
+      // `facing` below is our own, so each press is an explicit request for the
+      // other direction and cannot desync from the SDK's private state.
+      const next: 'user' | 'environment' = facing === 'user' ? 'environment' : 'user';
       let switched = false;
+
+      // applyConstraints FIRST: it re-points the camera inside the SAME
+      // capture, so the MediaStream — and the URL the self-preview renders —
+      // stays valid and the peer sees no interruption.
+      const mst: any = t.mediaStreamTrack;
       try {
-        if (typeof t.mediaStreamTrack?._switchCamera === 'function') {
-          t.mediaStreamTrack._switchCamera();
+        if (typeof mst?.applyConstraints === 'function') {
+          const c = { ...(mst._settings ?? {}) };
+          delete c.deviceId;          // deviceId would pin the OLD camera and win
+          c.facingMode = next;
+          await mst.applyConstraints(c);
           switched = true;
         }
       } catch { /* fall through to a full restart */ }
 
+      // restartTrack REPLACES the stream. That is what froze the sender's own
+      // preview after a flip: the remote side kept receiving fine (same
+      // publication) while the local view rendered a URL whose stream had been
+      // thrown away. Whichever path runs, the fresh URL is re-emitted below.
       if (!switched && typeof t.restartTrack === 'function') {
-        const facing = (t.mediaStreamTrack as any)?._settings?.facingMode === 'environment' ? 'user' : 'environment';
-        await t.restartTrack({ facingMode: facing });
+        await t.restartTrack({ facingMode: next });
+        switched = true;
       }
+      if (switched) facing = next;
       safe('local', () => a.events.onLocal(urlOf(t)));
     },
     async setScreenShare(on) {
@@ -505,6 +676,10 @@ export async function joinCallRoom(a: JoinArgs): Promise<CallRoom> {
           }
         } catch { /* stats are diagnostics; never let them affect the share */ }
       }, 3000);
+    },
+    setVisible(ids) {
+      setVisibleState(vis, ids, Date.now());
+      room.remoteParticipants.forEach(p => wantAll(p));
     },
     setRemoteAudible(on) {
       try {

@@ -245,4 +245,26 @@ export function simulcastLayers(t: CallTopology, lowEndDevice: boolean): number 
   return lowEndDevice ? 2 : 3;
 }
 
+/**
+ * Who gets a sealed copy of an in-call chat message or reaction.
+ *
+ * 1:1 is the one peer. A GROUP is everyone ON THE CALL except us — the live
+ * roster, not the chat's membership, because a message belongs to the people in
+ * the room and someone who never joined must not receive it.
+ *
+ * IT LIVES HERE, in the cost module, because the count IS the cost. In-call
+ * text rides the pairwise ratchet, so a group of 64 pays 63 seals per message —
+ * the deliberate price of keeping text end-to-end encrypted after the MEDIA
+ * stopped being (owner decision 2026-08-16). Text is exactly the content that
+ * should not lose the guarantee just because it travels beside video.
+ *
+ * Pure, so the rule is testable without a device: returning [] for a group is
+ * what made in-call chat silently inert, and nothing could catch it while the
+ * rule lived inside the engine.
+ */
+export function chatRecipients(peerUid: string, meId: string, roster: string[]): string[] {
+  if (peerUid) return [peerUid];
+  return roster.filter(uid => uid && uid !== meId);
+}
+
 export default {};

@@ -5,8 +5,7 @@ import React, { useState, useEffect, useRef, useCallback , useMemo} from 'react'
 import {
   View, Text, TouchableOpacity, TouchableWithoutFeedback, StyleSheet,
   StatusBar, ActivityIndicator, Dimensions, Animated, PanResponder,
-  Platform, Share,
-} from 'react-native';
+  Platform, Share, useWindowDimensions } from 'react-native';
 import { useTheme } from '../lib/theme';
 import { type Palette } from '../constants/theme';
 import { useLocalSearchParams, Stack, useRouter } from 'expo-router';
@@ -30,6 +29,13 @@ const formatTime = (ms: number) => {
 };
 
 function useS() {
+  // Reactive size. The module-level Dimensions.get above is captured ONCE at
+  // import and never updates, so it froze the layout at the size the app
+  // launched with. Shadowing it here makes every use in this component follow
+  // rotation; StyleSheet.create keeps the initial value, which is fine for
+  // static rules.
+  const {width: SCREEN_W, height: SCREEN_H} = useWindowDimensions();
+
   const { colors } = useTheme();
   return useMemo(() => makeStyles(colors), [colors]);
 }

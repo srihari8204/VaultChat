@@ -14,9 +14,11 @@
 // produced looks exactly like a status that never happens.
 //
 // The other half of this file's job is to pin WHICH FILE is the live one.
-// lib/call/sfuRoom.ts is a dead copy — lib/golive/room.ts says so in its header
-// — and an earlier attempt at this fix patched that copy instead, changing
-// nothing. So the reducer/transport identity is asserted, not assumed.
+// lib/call/sfuRoom.ts WAS a dead copy — an earlier attempt at this fix patched
+// that copy instead, changing nothing. It has since been deleted (its surviving
+// descendant is lib/golive/room.ts), and check 12b is what keeps it deleted: a
+// re-added copy that anything imports fails here. So the reducer/transport
+// identity is asserted, not assumed.
 //
 //   npx tsx lib/call/reconnectWiring.selftest.ts
 
@@ -87,7 +89,7 @@ const ROOM_C = code(ROOM), ENGINE_C = code(ENGINE), MACHINE_C = code(MACHINE);
   // the assertion that would have caught the wrong-file fix.
   check('12. engine imports joinCallRoom from ./room (the LIVE transport)',
     /import\s*\{[^}]*joinCallRoom[^}]*\}\s*from\s*'\.\/room'/.test(ENGINE_C));
-  check('12b. and does NOT import the dead sfuRoom copy',
+  check('12b. and does NOT import a re-added sfuRoom copy',
     !/from\s*'\.\/sfuRoom'/.test(ENGINE_C));
 
   // 13-15. No second reconnect engine. livekit-client owns retry; these events

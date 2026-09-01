@@ -12,6 +12,7 @@ import { setActiveCall, clearActiveCall, type ActiveCall } from '../lib/callStat
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Alert, BackHandler, Platform, ScrollView, StatusBar, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { Sheet, type SheetAction } from '../components/ui/Sheet';
 import { CALL, CALL_TEXT_SHADOW } from '../constants/callTheme';
 import {
   mediaDevices,
@@ -152,6 +153,12 @@ function matrixToOverlay(m: number[] | null): { tint?: string; opacity?: number 
 }
 
 // Call chrome is always dark (independent of app theme), so styles are static.
+// How many people the Add sheet offers at once. 12 was the old value and it is
+// wrong for a 64-seat call: in a 40-person group you could see 12 of the
+// missing members and no way to reach the rest. The sheet scrolls, so this is
+// only a guard against rendering an unbounded contact list in one pass.
+const ADD_LIST_MAX = 50;
+
 const S = makeStyles();
 
 /**
@@ -325,6 +332,54 @@ function VideoCallEngine() {
   const f = FILTERS.find(x => x.id === filter) ?? FILTERS[0];
   const overlay = matrixToOverlay(f.matrix);
 
+  // ── ADD PERSON TO THIS CALL ────────────────────────────────────────
+  //
+  // A 1:1 call had no way to become a three-person one — the button every other
+  // messenger has did not exist here, which is what "I can't see the add option"
+  // was about. The server issues an invite scoped to THIS call (migration 123),
+  // so the person added joins the CALL, never the chat.
+  //
+  // Contacts are loaded when the sheet opens, not held in state: the list must
+  // reflect who is reachable now, and this screen may sit open for a long time.
+  const [addSheet, setAddSheet] = useState<{ title: string; message?: string; actions: SheetAction[] } | null>(null);
+  const addPerson = useCallback(async () => {
+    try {
+      const { listChats } = await import('../lib/chatService');
+      const chats = await listChats();
+      // YOURSELF must be excluded here, not just downstream — see voicecall.tsx.
+      // You are a member of every direct chat, and inviteToCall drops your own
+      // uid, so an un-excluded self row is offered and then silently no-ops.
+      const { getSnapshot } = await import('../lib/call/store');
+      const seen = new Set<string>([String(peerUid ?? ''), getSnapshot().meId]);
+      const people: { id: string; name: string }[] = [];
+      for (const c of chats ?? []) {
+        // ChatSummary has NO `members` — see voicecall.tsx. Reading it made the
+        // list always empty, so the sheet always said "No other contacts".
+        if (c.type !== 'direct') continue;
+        const uid = c.peerUserId;
+        if (!uid || seen.has(uid)) continue;
+        seen.add(uid);
+        people.push({ id: uid, name: c.peerName || c.name || uid.slice(0, 8) });
+      }
+      if (!people.length) {
+        setAddSheet({ title: 'Add to call', message: 'No other contacts to add yet.', actions: [] });
+        return;
+      }
+      setAddSheet({
+        title: 'Add to call',
+        message: 'They join this call only — not the chat.',
+        actions: people.slice(0, ADD_LIST_MAX).map(pp => ({
+          label: pp.name,
+          icon: 'person-add-outline' as const,
+          onPress: () => { void engine.inviteToCall([pp.id]); },
+        })),
+      });
+    } catch {
+      setAddSheet({ title: 'Add to call', message: 'Could not load contacts just now.', actions: [] });
+    }
+  }, [peerUid]);
+
+
   return (
     <View style={S.screen}>
       <StatusBar barStyle="light-content" />
@@ -351,6 +406,19 @@ function VideoCallEngine() {
         {/* D-1: 1:1 video is peer-to-peer. */}
         <CallEncryptionBadge protection="transport" />
       </View>
+
+      {/* ADD PEOPLE, TOP-LEFT. It sits outside topBar deliberately: topBar is
+          pointerEvents="none" so the name/timer never swallow a tap, which
+          also means a button inside it could never be pressed. The self-view
+          is pinned right, so the left corner is free. */}
+      <TouchableOpacity
+        onPress={addPerson}
+        style={[S.addTopBtn, { top: insets.top + 8 }]}
+        hitSlop={10}
+        accessibilityLabel="Add people to this call"
+      >
+        <Ionicons name="person-add" size={20} color="#fff" />
+      </TouchableOpacity>
 
       {(sharing || peerSharing) && (
         <View style={S.shareBanner} pointerEvents="none">
@@ -410,10 +478,20 @@ function VideoCallEngine() {
         {Platform.OS === 'android' && !sharing && (
           <CallControlButton variant="video" icon="phone-portrait" label="Share" onPress={toggleScreenShare} />
         )}
-        <CallControlButton variant="video" icon="sparkles" label={filter === 'none' ? 'Beauty' : f.label} active={showFilters || filter !== 'none'} onPress={toggleFilters} />
         <CallControlButton variant="video" icon={speaker ? 'volume-high' : 'volume-low'} label={speaker ? 'Speaker' : 'Earpiece'} active={speaker} onPress={engine.toggleSpeaker} />
         <CallControlButton variant="video" icon="call" label="End" danger onPress={hangUpFromVideoScreen} />
       </ScrollView>
+
+      {/* Sibling of the ScrollView, not inside it: the sheet must overlay the
+          whole screen, and a child of a horizontally-scrolling strip would be
+          clipped to that strip. Without this the Add button is INERT. */}
+      <Sheet
+        visible={!!addSheet}
+        title={addSheet?.title}
+        message={addSheet?.message}
+        actions={addSheet?.actions ?? []}
+        onClose={() => setAddSheet(null)}
+      />
     </View>
   );
 }
@@ -926,6 +1004,8 @@ function makeStyles() { return StyleSheet.create({
   placeholderInitial: { fontSize: 96, color: 'rgba(255,255,255,0.3)', fontWeight: '900' },
 
   topBar:     { position: 'absolute', left: 24, right: 24, alignItems: 'center', gap: 4 },
+  addTopBtn:  { position: 'absolute', left: 16, width: 40, height: 40, borderRadius: 20,
+                alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(255,255,255,0.16)' },
   shareBanner:{ position: 'absolute', top: 110, alignSelf: 'center', flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: 'rgba(157,111,208,0.92)', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 16 },
   shareBannerTxt: { color: '#fff', fontSize: 12, fontWeight: '700' },
   name:       { color: CALL.text, fontSize: 22, fontWeight: '700', ...CALL_TEXT_SHADOW },

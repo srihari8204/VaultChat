@@ -20,7 +20,7 @@
 // is deliberately worded to avoid implying otherwise.
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { View, Text, StyleSheet, Dimensions, AppState, type AppStateStatus, type ViewStyle } from 'react-native';
+import { View, Text, StyleSheet, Dimensions, AppState, type AppStateStatus, type ViewStyle, useWindowDimensions} from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { watch, capabilities, isSafeToRender, setSecure, type GuardState } from '../lib/screenGuard';
 
@@ -39,8 +39,16 @@ export interface ProtectedMediaViewProps {
 }
 
 export default function ProtectedMediaView({
+
   watermarkName, watermarkPhone, children, onBlocked, hideStatus,
 }: ProtectedMediaViewProps) {
+  // Reactive size. The module-level Dimensions.get above is captured ONCE at
+  // import and never updates, so it froze the layout at the size the app
+  // launched with. Shadowing it here makes every use in this component follow
+  // rotation; StyleSheet.create keeps the initial value, which is fine for
+  // static rules.
+  const { width: SW, height: SH } = useWindowDimensions();
+
   const [guard, setGuard] = useState<GuardState>({
     captured: false, external: false, blockingSupported: false, available: false,
   });

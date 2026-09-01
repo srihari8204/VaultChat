@@ -69,13 +69,71 @@ export interface ServerCallEntry {
  * One call for both, matching the server: which happens depends on a race the
  * client cannot see, so it does not have to choose. `created` says which it was.
  */
+/**
+ * The LiveKit join credential, when the server hands it back with the session.
+ *
+ * Saves a whole round trip: the client used to await this call and THEN await
+ * POST /calls/{id}/sfu-token before it could open the WebSocket. Measured on
+ * device (Hyderabad -> Hetzner) those two hops cost 615 ms + 313 ms of a 3.6 s
+ * tap-to-audio. Optional, because an older server does not send it.
+ */
+export interface SfuCredential {
+  token: string; url: string; room: string; identity: string; role: CallRole;
+}
+
 export async function openCallSession(
   chatId: string, kind: 'audio' | 'video', mode: CallMode = 'meeting',
-): Promise<{ call: CallSessionInfo; participants: CallSessionParticipant[]; created: boolean } | null> {
+): Promise<{ call: CallSessionInfo; participants: CallSessionParticipant[]; created: boolean; sfu?: SfuCredential } | null> {
   if (!CALL_SESSIONS || !chatId) return null;
   try {
     return await api('/calls', { method: 'POST', json: { chatId, kind, mode } });
-  } catch {
+  } catch (e: any) {
+    // ONE failure here is not like the others.
+    //
+    // Everything else this call can hit — a 404 on an unmigrated server, a
+    // timeout, an offline device — must cost the call nothing: it falls back to
+    // a call with no server-side id, which is the behaviour that predates call
+    // sessions. Swallowing is right for those.
+    //
+    // 409 is the server saying the call is FULL, and that is a fact about the
+    // world that the person needs to read. Swallowed, it became "Call failed"
+    // via the generic setup error — a message that invites them to retry
+    // forever against a call that has no seat. Rethrown, engine.failSetup
+    // dispatches the server's own words and the screen shows them.
+    if (e?.status === 409) throw e;
+    return null;
+  }
+}
+
+/**
+ * Ring a group into a call — the server does the fan-out, over the socket AND
+ * over FCM.
+ *
+ * The push is the point. `call_incoming` alone reaches only devices holding a
+ * live socket, so a group call rang the handful of people who happened to be
+ * awake; a 1:1 call has always also POSTed /call/initiate for the high-priority
+ * push the native full-screen ringer listens for. This is that, for a group.
+ *
+ * `userIds` narrows it to named people (the in-call invite). Omitted, it rings
+ * the chat's members up to the seat count.
+ *
+ * Returns how many were rung, or NULL when the server could not do it — an
+ * older binary with no such route, or a network failure. Null means "fall back
+ * and ring the old way", and the caller must, or nobody's phone rings at all.
+ */
+export async function ringCallGroup(callId: string, userIds?: string[]): Promise<number | null> {
+  if (!CALL_SESSIONS || !callId) return null;
+  try {
+    const res: any = await api(`/calls/${callId}/ring`, {
+      method: 'POST', json: userIds?.length ? { userIds } : {},
+    });
+    return typeof res?.rang === 'number' ? res.rang : 0;
+  } catch (e: any) {
+    // 429 is the server saying "you are ringing too fast", and it MUST NOT fall
+    // back to the socket loop — that would spend 63 more units of the very
+    // budget that just refused one, and ring everyone anyway. Every other
+    // failure is "this server cannot do it", which the loop can.
+    if (e?.status === 429) return 0;
     return null;
   }
 }
