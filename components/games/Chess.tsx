@@ -76,12 +76,33 @@ AsyncStorage.getItem(BOARD_KEY)
   .catch(() => {});
 
 const FILES = 'abcdefgh';
-const CHECK_TINT = 'rgba(225,90,90,.55)';
+// chess.css: `.sq.check { box-shadow: inset 0 0 0 60px rgba(225,90,90,.55) }`
+// with a 1s pulse to .3. OPAQUE here because the pulse below animates opacity —
+// a .55 colour at .55 opacity is .30 at rest, so the check marker was arriving
+// at half strength and reading as a faint blush rather than an alarm.
+const CHECK_RED = '#e15a5a';
 const DOT = 'rgba(40,35,28,.32)';
 
 /** Material value per piece letter, for the captured-material readout. */
 /** The four offsets that fake a text stroke; see PieceGlyph. */
 const OUTLINE: [number, number][] = [[-1, 0], [1, 0], [0, -1], [0, 1]];
+
+/** chess.css: `-webkit-text-stroke: 1.2px`, flat at every board size. */
+const PIECE_STROKE = 1.2;
+
+/**
+ * Fill and stroke per side, straight from chess.css:
+ *   .piece.w { color: #f4f0e6; -webkit-text-stroke: 1.2px #2b2620 }
+ *   .piece.b { color: #1d1a16; -webkit-text-stroke: 1.2px #000 }
+ *
+ * Black's stroke is BLACK — it thickens the glyph rather than outlining it. An
+ * earlier pass here gave black a light stroke, which is a different piece set:
+ * it turns a solid black knight into an engraved one.
+ */
+const PIECE_INK = {
+  w: { fill: '#f4f0e6', line: '#2b2620' },
+  b: { fill: '#1d1a16', line: '#000000' },
+} as const;
 
 const VALUE: Record<string, number> = { p: 1, n: 3, b: 3, r: 5, q: 9, k: 0 };
 /** A full starting army, by letter. Used only to derive what has been taken. */
@@ -229,7 +250,10 @@ export default function Chess({ roomId, auto, autoBot }: { roomId: string } & Au
     (state.lobby?.members ?? []).find(mem => mem.vaultId === id)?.name ?? id;
 
   const captured = takenBy(board);
-  const edge = Math.round(cell * 0.06);
+  // chess.css puts a FLAT `-webkit-text-stroke: 1.2px` on every piece at every
+  // board size. Scaling it off the cell (it was cell * 0.06) put a 3px stroke
+  // on a phone board — thick enough to close up the gaps inside a knight.
+  const stroke = PIECE_STROKE;
 
   return (
     <View style={{ flex: 1, backgroundColor: '#121212' }}>
@@ -270,10 +294,12 @@ export default function Chess({ roomId, auto, autoBot }: { roomId: string } & Au
                 bg={light ? th.light : th.dark}
                 tint={isSel ? th.sel : isLast ? th.hl : null}
                 check={inCheck}
-                coordFile={coords && (d >> 3 === 7 || d >> 3 === 0) ? FILES[flipped ? 7 - c : c] : null}
-                coordRank={coords && ((d & 7) === 0 || (d & 7) === 7) ? String(flipped ? r + 1 : 8 - r) : null}
-                coordFileTop={d >> 3 === 0}
-                coordRankRight={(d & 7) === 7}
+                /* One file row and one rank column, as `.coord.file`/`.coord.rank`
+                   place them: bottom-right of the last row, top-left of the first
+                   column. This port had been drawing all four edges; on a phone
+                   board that is sixteen extra labels crowding the pieces. */
+                coordFile={coords && (d >> 3) === 7 ? FILES[flipped ? 7 - c : c] : null}
+                coordRank={coords && (d & 7) === 0 ? String(flipped ? r + 1 : 8 - r) : null}
                 coordColor={light ? th.dark : th.light}
                 piece={p}
                 pieceSize={cell * 0.78}
@@ -287,7 +313,7 @@ export default function Chess({ roomId, auto, autoBot }: { roomId: string } & Au
                     : null
                 }
                 onPress={() => onSquare(idx)}
-                edge={edge}
+                stroke={stroke}
               />
             );
           })}
@@ -408,17 +434,13 @@ export default function Chess({ roomId, auto, autoBot }: { roomId: string } & Au
 
 function Square({
   d, cell, bg, tint, check, coordFile, coordRank, coordColor, piece, pieceSize,
-  target, capture, slideFrom, onPress, edge, coordFileTop, coordRankRight,
+  target, capture, slideFrom, onPress, stroke,
 }: {
   d: number; cell: number; bg: string; tint: string | null; check: boolean;
   coordFile: string | null; coordRank: string | null; coordColor: string;
   piece: Piece; pieceSize: number; target: boolean; capture: boolean;
   slideFrom: { dx: number; dy: number; key: string } | null;
-  onPress: () => void; edge: number;
-  /** Files repeat along the top edge and ranks down the right, as on a real
-      board — the printed reference has all four, and with only two the player
-      has to count squares from the far side. */
-  coordFileTop?: boolean; coordRankRight?: boolean;
+  onPress: () => void; stroke: number;
 }) {
   const pulse = useSharedValue(0);
   useEffect(() => {
@@ -445,22 +467,20 @@ function Square({
       }}
     >
       {tint ? <View pointerEvents="none" style={{ position: 'absolute', inset: 0, backgroundColor: tint }} /> : null}
-      <Animated.View pointerEvents="none" style={[{ position: 'absolute', inset: 0, backgroundColor: CHECK_TINT }, aCheck]} />
+      <Animated.View pointerEvents="none" style={[{ position: 'absolute', inset: 0, backgroundColor: CHECK_RED }, aCheck]} />
 
       {coordRank ? (
         <Text style={{
-          position: 'absolute', top: 2, fontSize: 10, fontWeight: '700',
+          position: 'absolute', top: 2, left: 4, fontSize: 10, fontWeight: '700',
           color: coordColor, opacity: 0.7,
-          ...(coordRankRight ? { right: 4 } : { left: 4 }),
         }}>
           {coordRank}
         </Text>
       ) : null}
       {coordFile ? (
         <Text style={{
-          position: 'absolute', right: 4, fontSize: 10, fontWeight: '700',
+          position: 'absolute', right: 4, bottom: 2, fontSize: 10, fontWeight: '700',
           color: coordColor, opacity: 0.7,
-          ...(coordFileTop ? { top: 2 } : { bottom: 2 }),
         }}>
           {coordFile}
         </Text>
@@ -474,7 +494,7 @@ function Square({
         }} />
       ) : null}
 
-      {piece ? <PieceGlyph piece={piece} size={pieceSize} slideFrom={slideFrom} edge={edge} /> : null}
+      {piece ? <PieceGlyph piece={piece} size={pieceSize} slideFrom={slideFrom} stroke={stroke} /> : null}
 
       {target && !capture ? (
         <View pointerEvents="none" style={{
@@ -494,8 +514,8 @@ function Square({
  * squares means a repeated shuffle still animates each time rather than once.
  */
 function PieceGlyph({
-  piece, size, slideFrom, edge,
-}: { piece: NonNullable<Piece>; size: number; slideFrom: { dx: number; dy: number; key: string } | null; edge: number }) {
+  piece, size, slideFrom, stroke,
+}: { piece: NonNullable<Piece>; size: number; slideFrom: { dx: number; dy: number; key: string } | null; stroke: number }) {
   const x = useSharedValue(0);
   const y = useSharedValue(0);
   const played = useRef<string | null>(null);
@@ -518,7 +538,7 @@ function PieceGlyph({
 
   return (
     <Animated.View style={a} pointerEvents="none">
-      <OutlinedGlyph t={piece.t} c={piece.c} size={size} edge={edge} />
+      <OutlinedGlyph t={piece.t} c={piece.c} size={size} stroke={stroke} />
     </Animated.View>
   );
 }
@@ -542,22 +562,30 @@ function PieceGlyph({
  * times the size — the place a mismatched piece style is most obvious.
  */
 function OutlinedGlyph({
-  t, c, size, edge,
-}: { t: string; c: 'w' | 'b'; size: number; edge: number }) {
-  const fill = c === 'w' ? '#f7f5ee' : '#22201c';
-  const line = c === 'w' ? '#22201c' : '#e8e4d8';
+  t, c, size, stroke,
+}: { t: string; c: 'w' | 'b'; size: number; stroke: number }) {
+  const { fill, line } = PIECE_INK[c];
   const font = { fontSize: size, lineHeight: size * 1.16 } as const;
   return (
     <View style={{ alignItems: 'center', justifyContent: 'center' }}>
       {OUTLINE.map(([ox, oy], i) => (
         <Text
           key={i}
-          style={{ ...font, position: 'absolute', left: ox * edge, top: oy * edge, color: line }}
+          style={{ ...font, position: 'absolute', left: ox * stroke, top: oy * stroke, color: line }}
         >
           {GLYPH[t]}
         </Text>
       ))}
-      <Text style={{ ...font, color: fill }}>{GLYPH[t]}</Text>
+      {/* `.piece { text-shadow: 0 1px 2px rgba(0,0,0,.35) }` — a soft seat under
+          the piece so it sits ON the square rather than floating over it. */}
+      <Text style={{
+        ...font, color: fill,
+        textShadowColor: 'rgba(0,0,0,.35)',
+        textShadowOffset: { width: 0, height: 1 },
+        textShadowRadius: 2,
+      }}>
+        {GLYPH[t]}
+      </Text>
     </View>
   );
 }
@@ -647,7 +675,7 @@ function PromoPicker({
       }}>
         {choices.map(m => (
           <Pressable key={m.promo} onPress={() => onPick(m)} accessibilityRole="button" accessibilityLabel={`Promote to ${m.promo}`}>
-            <OutlinedGlyph t={m.promo as string} c={color} size={46} edge={2} />
+            <OutlinedGlyph t={m.promo as string} c={color} size={46} stroke={PIECE_STROKE} />
           </Pressable>
         ))}
       </View>

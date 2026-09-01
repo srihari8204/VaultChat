@@ -230,8 +230,20 @@ check('...and remembers the one the player picks',
   'the web persists it; re-picking every launch is how a setting reads as broken');
 
 check('a piece is outlined, not haloed',
-  /OUTLINE\.map/.test(CHESS) && !/textShadowRadius/.test(stripComments(CHESS)),
+  /OUTLINE\.map/.test(CHESS) && /const PIECE_STROKE = 1\.2/.test(CHESS),
   'a blurred shadow stood in for the stroke the web gets from -webkit-text-stroke');
+
+check("...in chess.css's own ink",
+  /fill: '#f4f0e6', line: '#2b2620'/.test(CHESS) && /fill: '#1d1a16', line: '#000000'/.test(CHESS),
+  'a light stroke on black is a different piece set — it engraves a solid knight');
+
+check('the check marker is not dimmed by its own pulse',
+  /const CHECK_RED = '#e15a5a'/.test(CHESS),
+  'a .55 colour at .55 opacity lands at .30 — half the alarm the reference raises');
+
+check('coordinates ring two edges, not four',
+  /coordFile=\{coords && \(d >> 3\) === 7/.test(CHESS) && !/coordRankRight/.test(CHESS),
+  'chess.css places one file row and one rank column; four edges is sixteen extra labels');
 
 // ── talking at the table ──────────────────────────────────────────────
 // The voice mesh was already wired into chess, but only as a bar BELOW the
