@@ -15,7 +15,8 @@
  * classic cream/brown squares, and chess.com-style highlights.
  */
 
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Pressable, ScrollView, Text, View, useWindowDimensions, type ViewStyle } from 'react-native';
 import Animated, {
   useSharedValue, useAnimatedStyle, withTiming, withRepeat, withSequence,
@@ -26,7 +27,7 @@ import { useGameSocket, type GameState, type AutoStart } from '../../lib/games/u
 import { Btn, Panel, Banner, PlayerRow, Chip, useType, useBoardSize } from './ui';
 import { C, S, R, D3, E, mix, goldLine } from '../../lib/games/theme';
 import { playSfx, preloadSfx } from '../../lib/games/sfx';
-import { Toasts, Confetti, Sheet, SettingRow, VoiceBar } from './feedback';
+import { Toasts, Confetti, Sheet, SettingRow, VoiceBar, VoiceSheet } from './feedback';
 import { useTableVoice } from '../../lib/games/useTableVoice';
 import { inviteToTable, shareResult } from '../../lib/games/invite';
 import { soundEnabled, setSoundEnabled } from '../../lib/games/sfx';
@@ -51,14 +52,37 @@ const THEMES = {
   blue:       { light: '#dee3e6', dark: '#8ca2ad', hl: 'rgba(155,199,0,.41)',  sel: 'rgba(155,199,0,.55)' },
   brown:      { light: '#f0d9b5', dark: '#b58863', hl: 'rgba(205,210,106,.45)', sel: 'rgba(205,210,106,.55)' },
   midnight:   { light: '#b7c6d8', dark: '#3a4b66', hl: 'rgba(155,199,0,.41)',  sel: 'rgba(155,199,0,.55)' },
+  tournament: { light: '#e8e8e8', dark: '#7d8a99', hl: 'rgba(155,199,0,.41)',  sel: 'rgba(155,199,0,.55)' },
 } as const;
 type ThemeName = keyof typeof THEMES;
+
+/**
+ * The board the player last chose, remembered.
+ *
+ * The reference client defaults to GREEN and persists the choice to
+ * localStorage (chess.js: `if (!settings.board) settings.board = "green"`).
+ * This port defaulted to `classic` — a theme the web does not even have — so
+ * the board every VaultChat player saw was one no chess.com player would
+ * recognise, and re-picking green every time the screen opened was the only
+ * way to get it back. Same module-level read as the rummy sort preference, so
+ * the first paint is already correct rather than flipping a frame later.
+ */
+const BOARD_KEY = 'vc_chess_board';
+const isThemeName = (v: unknown): v is ThemeName =>
+  typeof v === 'string' && Object.prototype.hasOwnProperty.call(THEMES, v);
+let boardPref: ThemeName = 'green';
+AsyncStorage.getItem(BOARD_KEY)
+  .then(v => { if (isThemeName(v)) boardPref = v; })
+  .catch(() => {});
 
 const FILES = 'abcdefgh';
 const CHECK_TINT = 'rgba(225,90,90,.55)';
 const DOT = 'rgba(40,35,28,.32)';
 
 /** Material value per piece letter, for the captured-material readout. */
+/** The four offsets that fake a text stroke; see PieceGlyph. */
+const OUTLINE: [number, number][] = [[-1, 0], [1, 0], [0, -1], [0, 1]];
+
 const VALUE: Record<string, number> = { p: 1, n: 3, b: 3, r: 5, q: 9, k: 0 };
 /** A full starting army, by letter. Used only to derive what has been taken. */
 const ARMY: Record<string, number> = { p: 8, n: 2, b: 2, r: 2, q: 1, k: 1 };
@@ -67,8 +91,9 @@ export default function Chess({ roomId, auto, autoBot }: { roomId: string } & Au
   const { phase, error, state, events, send, subscribe, retry } = useGameSocket('chess', roomId, { auto, autoBot });
   const [sel, setSel] = useState<number | null>(null);
   const [promo, setPromo] = useState<{ from: number; to: number; opts: Move[] } | null>(null);
-  const [theme, setTheme] = useState<ThemeName>('classic');
+  const [theme, setTheme] = useState<ThemeName>(boardPref);
   const [showSettings, setShowSettings] = useState(false);
+  const [voiceOpen, setVoiceOpen] = useState(false);
   const [coords, setCoords] = useState(true);
   const [sound, setSound] = useState(soundEnabled());
   // A draw offer is a question that has to be answerable. The web shows a
@@ -112,6 +137,12 @@ export default function Chess({ roomId, auto, autoBot }: { roomId: string } & Au
     [sel, legal],
   );
   const targets = useMemo(() => new Set(movesFromSel.map(m => m.to)), [movesFromSel]);
+
+  const pickBoard = useCallback((n: ThemeName) => {
+    setTheme(n);
+    boardPref = n;
+    void AsyncStorage.setItem(BOARD_KEY, n).catch(() => {});
+  }, []);
 
   // Clear a stale selection whenever the position changes underneath it.
   useEffect(() => { setSel(null); }, [G?.history?.length, G?.turn]);
@@ -184,6 +215,18 @@ export default function Chess({ roomId, auto, autoBot }: { roomId: string } & Au
       />
     );
   }
+
+  // Voice lives behind a button in the action row, not only in the bar under
+  // the board: on a phone the bar is below the board, both seats and the status
+  // line, so a player looking for "how do I talk to them" has to scroll past
+  // the whole game to find out that they can. The label carries the live state
+  // so the row itself says whether anyone is in the channel.
+  const voiceLabel =
+    voice.phase === 'live' || voice.phase === 'waiting'
+      ? `🎤 ${voice.participants.length}`
+      : '🎤';
+  const nameOfPlayer = (id: string) =>
+    (state.lobby?.members ?? []).find(mem => mem.vaultId === id)?.name ?? id;
 
   const captured = takenBy(board);
   const edge = Math.round(cell * 0.06);
@@ -280,14 +323,23 @@ export default function Chess({ roomId, auto, autoBot }: { roomId: string } & Au
           <View style={{ flexDirection: 'row', gap: S[2], width: size }}>
             <Btn label="Rematch" kind="gold" icon="↻" style={{ flex: 1 }} onPress={() => send({ t: 'start' })} />
             <Btn label="Share" icon="📣" onPress={() => { void shareResult('chess', G.winner === state.you); }} />
+            <Btn label={voiceLabel} compact onPress={() => setVoiceOpen(true)} accessibilityLabel="Table voice" />
           </View>
         ) : (
           <View style={{ flexDirection: 'row', gap: S[2], width: size }}>
             <Btn label="Resign" kind="danger" compact style={{ flex: 1 }} onPress={() => send({ t: 'resign' })} />
             <Btn label="Offer draw" compact style={{ flex: 1 }} onPress={() => send({ t: 'draw-offer' })} />
+            <Btn label={voiceLabel} compact onPress={() => setVoiceOpen(true)} accessibilityLabel="Table voice" />
             <Btn label="⚙" compact onPress={() => setShowSettings(true)} accessibilityLabel="Board settings" />
           </View>
         )}
+
+        <VoiceSheet
+          visible={voiceOpen}
+          voice={voice}
+          nameOf={nameOfPlayer}
+          onClose={() => setVoiceOpen(false)}
+        />
 
         <VoiceBar
           width={size}
@@ -309,7 +361,7 @@ export default function Chess({ roomId, auto, autoBot }: { roomId: string } & Au
           disabled={!roomId}
         />
 
-        <Swatches value={theme} onChange={setTheme} width={size} />
+        <Swatches value={theme} onChange={pickBoard} width={size} />
 
         {Array.isArray(G.history) && G.history.length > 0 && (
           <Panel style={{ width: size, maxHeight: 190 }}>
@@ -466,19 +518,47 @@ function PieceGlyph({
 
   return (
     <Animated.View style={a} pointerEvents="none">
-      <Text
-        style={{
-          fontSize: size,
-          lineHeight: size * 1.16,
-          color: piece.c === 'w' ? '#f4f0e6' : '#1d1a16',
-          textShadowColor: piece.c === 'w' ? 'rgba(43,38,32,0.95)' : 'rgba(255,255,255,0.35)',
-          textShadowOffset: { width: 0, height: 0 },
-          textShadowRadius: Math.max(2, edge),
-        }}
-      >
-        {GLYPH[piece.t]}
-      </Text>
+      <OutlinedGlyph t={piece.t} c={piece.c} size={size} edge={edge} />
     </Animated.View>
+  );
+}
+
+/**
+ * A piece glyph with a REAL outline, not a glow.
+ *
+ * The reference client draws white with the hollow glyph set plus a CSS
+ * -webkit-text-stroke; RN has neither, and the soft textShadow that stood in
+ * for it read as a halo — on the green board a white piece blurred into the
+ * light squares instead of sitting on them.
+ *
+ * Four offset copies of the SAME glyph behind the fill give a crisp edge.
+ * Deliberately NOT the hollow set (♔ vs ♚): whether ♔ renders hollow is a
+ * font-fallback question, and on a device that answers it the other way the
+ * white king would come out solid black. A board where you cannot tell your own
+ * pieces apart is a worse bug than a soft edge; one glyph set always renders as
+ * one shape.
+ *
+ * Shared with the promotion picker, which shows the same four pieces at four
+ * times the size — the place a mismatched piece style is most obvious.
+ */
+function OutlinedGlyph({
+  t, c, size, edge,
+}: { t: string; c: 'w' | 'b'; size: number; edge: number }) {
+  const fill = c === 'w' ? '#f7f5ee' : '#22201c';
+  const line = c === 'w' ? '#22201c' : '#e8e4d8';
+  const font = { fontSize: size, lineHeight: size * 1.16 } as const;
+  return (
+    <View style={{ alignItems: 'center', justifyContent: 'center' }}>
+      {OUTLINE.map(([ox, oy], i) => (
+        <Text
+          key={i}
+          style={{ ...font, position: 'absolute', left: ox * edge, top: oy * edge, color: line }}
+        >
+          {GLYPH[t]}
+        </Text>
+      ))}
+      <Text style={{ ...font, color: fill }}>{GLYPH[t]}</Text>
+    </View>
   );
 }
 
@@ -567,11 +647,7 @@ function PromoPicker({
       }}>
         {choices.map(m => (
           <Pressable key={m.promo} onPress={() => onPick(m)} accessibilityRole="button" accessibilityLabel={`Promote to ${m.promo}`}>
-            <Text style={{ fontSize: 46, color: color === 'w' ? '#f4f0e6' : '#1d1a16',
-              textShadowColor: color === 'w' ? 'rgba(43,38,32,.9)' : 'rgba(255,255,255,.35)',
-              textShadowOffset: { width: 0, height: 0 }, textShadowRadius: 3 }}>
-              {GLYPH[m.promo as string]}
-            </Text>
+            <OutlinedGlyph t={m.promo as string} c={color} size={46} edge={2} />
           </Pressable>
         ))}
       </View>

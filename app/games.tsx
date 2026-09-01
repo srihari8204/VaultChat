@@ -14,8 +14,8 @@
 // notifications already in the wild point here with them (gamesNotifySlug in
 // the backend mints those slugs).
 
-import React from 'react';
-import { Pressable, ScrollView, Text, TextInput, View } from 'react-native';
+import React, { useState } from 'react';
+import { ActivityIndicator, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import Animated, {
   useSharedValue, useAnimatedStyle, withRepeat, withTiming, withSequence, Easing, cancelAnimation,
@@ -27,6 +27,9 @@ import { TableBackground, Panel, Btn, useType } from '../components/games/ui';
 import { C, S, R, D3, E, mix, goldLine } from '../lib/games/theme';
 import { playSfx, setSoundEnabled, soundEnabled } from '../lib/games/sfx';
 import { useWallet } from '../lib/games/useWallet';
+import { useLeaderboard } from '../lib/games/useLeaderboard';
+import { headline, medal, detail, type LeaderScope } from '../lib/games/leaderboard';
+import { Sheet } from '../components/games/feedback';
 
 import TicTacToe from '../components/games/TicTacToe';
 import Chess from '../components/games/Chess';
@@ -93,6 +96,7 @@ function Hub({ onOpen }: { onOpen: (g: GameKind, opts?: Record<string, string>) 
   const [code, setCode] = React.useState('');
   const qm = useQuickMatch();
   const wallet = useWallet();
+  const [boardOpen, setBoardOpen] = useState(false);
   const [seeking, setSeeking] = React.useState<Entry | null>(null);
 
   // A found room is opened once, then the searching sheet is dismissed.
@@ -133,6 +137,13 @@ function Hub({ onOpen }: { onOpen: (g: GameKind, opts?: Record<string, string>) 
           <GameCard key={g.kind} entry={g} onOpen={() => onOpen(g.kind)} onQuick={() => quick(g)} />
         ))}
 
+        <Btn
+          label="Leaderboard"
+          icon="🏆"
+          style={{ marginTop: S[2] }}
+          onPress={() => { void playSfx('select'); setBoardOpen(true); }}
+        />
+
         <Panel style={{ gap: S[3], marginTop: S[2] }}>
           <Text style={{ color: C.text, fontSize: t.md, fontWeight: '800' }}>Join a table by code</Text>
           <Text style={{ color: C.muted, fontSize: t.sm, lineHeight: 18 }}>
@@ -156,6 +167,8 @@ function Hub({ onOpen }: { onOpen: (g: GameKind, opts?: Record<string, string>) 
           </View>
         </Panel>
       </ScrollView>
+
+      <LeaderboardSheet visible={boardOpen} onClose={() => setBoardOpen(false)} />
 
       {seeking && (
         <Searching
@@ -312,5 +325,111 @@ function Searching({
       </Text>
       <Btn label="Cancel" onPress={onCancel} />
     </View>
+  );
+}
+
+/* ── leaderboard ────────────────────────────────────────────────────── */
+
+const SCOPES: { key: LeaderScope; label: string }[] = [
+  { key: 'all', label: 'Overall' },
+  { key: 'chess', label: 'Chess' },
+  { key: 'rummy', label: 'Rummy' },
+  { key: 'ludo', label: 'Ludo' },
+  { key: 'tictactoe', label: 'Tic-Tac-Toe' },
+];
+
+/**
+ * The server's standings, its ordering, its cut.
+ *
+ * `Overall` and a single game are different tables, not a filter over one:
+ * overall ranks by coins and sends no rating, a game ranks by Elo. `headline`
+ * is what keeps each tab printing the number it actually has — see
+ * lib/games/leaderboard.ts.
+ *
+ * Ten rows is the server's limit, not a page size; it ignores `?limit=`, so
+ * there is nothing to page through and no "show more" to offer.
+ */
+function LeaderboardSheet({ visible, onClose }: { visible: boolean; onClose: () => void }) {
+  const [scope, setScope] = React.useState<LeaderScope>('all');
+  const { rows, loading, error, refresh } = useLeaderboard(scope);
+  const t = useType();
+
+  return (
+    <Sheet visible={visible} title="Leaderboard" onClose={onClose}>
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        contentContainerStyle={{ gap: S[1], paddingBottom: S[1] }}
+      >
+        {SCOPES.map(sc => (
+          <Pressable
+            key={sc.key}
+            onPress={() => setScope(sc.key)}
+            accessibilityRole="button"
+            accessibilityState={{ selected: scope === sc.key }}
+            style={{
+              paddingHorizontal: S[3], paddingVertical: S[2], borderRadius: R[3],
+              borderWidth: 1,
+              borderColor: scope === sc.key ? goldLine[55] : 'rgba(255,255,255,.10)',
+              backgroundColor: scope === sc.key ? mix(C.panel2, 78, '#ffffff') : 'transparent',
+            }}
+          >
+            <Text style={{
+              color: scope === sc.key ? C.text : C.muted,
+              fontSize: t.sm, fontWeight: '700',
+            }}>
+              {sc.label}
+            </Text>
+          </Pressable>
+        ))}
+      </ScrollView>
+
+      {loading && rows.length === 0 ? (
+        <View style={{ paddingVertical: S[5], alignItems: 'center' }}>
+          <ActivityIndicator color={C.gold} />
+        </View>
+      ) : error ? (
+        <View style={{ gap: S[2], paddingVertical: S[2] }}>
+          <Text style={{ color: C.bad, fontSize: t.sm }}>{error}</Text>
+          <Btn label="Try again" compact onPress={refresh} />
+        </View>
+      ) : rows.length === 0 ? (
+        <Text style={{ color: C.muted, fontSize: t.sm, lineHeight: 19, paddingVertical: S[2] }}>
+          Nobody has finished a game here yet. Win one and this is where you show up.
+        </Text>
+      ) : (
+        <View style={{ gap: 2 }}>
+          {rows.map((r, i) => {
+            const h = headline(r, scope);
+            return (
+              <View
+                key={r.vaultId}
+                style={{
+                  flexDirection: 'row', alignItems: 'center', gap: S[2],
+                  paddingVertical: S[2], paddingHorizontal: S[2], borderRadius: R[1],
+                  backgroundColor: i < 3 ? mix(C.panel2, 88, '#ffffff') : 'transparent',
+                }}
+              >
+                <Text style={{ width: 26, textAlign: 'center', color: C.muted, fontSize: t.sm, fontWeight: '800' }}>
+                  {medal(i)}
+                </Text>
+                <View style={{ flex: 1 }}>
+                  <Text numberOfLines={1} style={{ color: C.text, fontSize: t.sm, fontWeight: '700' }}>{r.name}</Text>
+                  <Text numberOfLines={1} style={{ color: C.muted, fontSize: 11.5 }}>{detail(r)}</Text>
+                </View>
+                <View style={{ alignItems: 'flex-end' }}>
+                  <Text style={{ color: C.gold, fontSize: t.sm, fontWeight: '800' }}>{h.value}</Text>
+                  <Text style={{ color: C.muted, fontSize: 10.5 }}>{h.label}</Text>
+                </View>
+              </View>
+            );
+          })}
+        </View>
+      )}
+
+      <Text style={{ color: C.muted, fontSize: 11.5, lineHeight: 17 }}>
+        Top ten, ranked by the games server. Coins are demo coins — they are not money and cannot be cashed out.
+      </Text>
+    </Sheet>
   );
 }
