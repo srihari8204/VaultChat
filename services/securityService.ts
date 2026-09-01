@@ -169,8 +169,35 @@ async function checkFrida(): Promise<ThreatDetail[]> {
 // 3. Emulator Check
 // ─────────────────────────────────────────────────────────────
 
+// TEST BUILDS ONLY — the emulator threat, and ONLY that one, can be waived.
+//
+// WHY THIS EXISTS
+//
+// The app refuses to run on an emulator, which is correct for production and
+// which also makes the emulator useless as a test rig: there is no other way
+// to drive the UI when the physical test phones cannot take input (a broken
+// screen, or an OEM that refuses INJECT_EVENTS).
+//
+// WHAT IT DOES NOT DO
+//
+// It waives NOTHING else. Root, Magisk, su, test-keys, Frida, debugger, hook
+// frameworks, overlays and suspicious IMEs are all still detected and still
+// wipe keys. This is the weakest signal in the set — `detail` already says
+// "not permitted in production", not "device is compromised".
+//
+// WHY IT CANNOT SHIP BY ACCIDENT
+//
+// EXPO_PUBLIC_* is INLINED AT BUILD TIME. A build that does not set the
+// variable compiles this to `'' === '1'`, i.e. a constant false, and the check
+// runs exactly as before — there is no runtime switch, no stored setting and
+// no way to flip it on an installed app. Enabling it requires deliberately
+// setting the variable on the build command. securityEmulatorFlag.selftest.ts
+// asserts the default stays off.
+const ALLOW_EMULATOR_TEST_BUILD = process.env.EXPO_PUBLIC_ALLOW_EMULATOR === '1';
+
 async function checkEmulator(): Promise<ThreatDetail[]> {
   const threats: ThreatDetail[] = [];
+  if (ALLOW_EMULATOR_TEST_BUILD) return threats;
   try {
     const isEmulator = await DeviceInfo.isEmulator();
     if (isEmulator) {
