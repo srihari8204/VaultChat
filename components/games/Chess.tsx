@@ -64,7 +64,7 @@ const VALUE: Record<string, number> = { p: 1, n: 3, b: 3, r: 5, q: 9, k: 0 };
 const ARMY: Record<string, number> = { p: 8, n: 2, b: 2, r: 2, q: 1, k: 1 };
 
 export default function Chess({ roomId, auto, autoBot }: { roomId: string } & AutoStart) {
-  const { phase, error, state, events, send, retry } = useGameSocket('chess', roomId, { auto, autoBot });
+  const { phase, error, state, events, send, subscribe, retry } = useGameSocket('chess', roomId, { auto, autoBot });
   const [sel, setSel] = useState<number | null>(null);
   const [promo, setPromo] = useState<{ from: number; to: number; opts: Move[] } | null>(null);
   const [theme, setTheme] = useState<ThemeName>('classic');
@@ -76,7 +76,7 @@ export default function Chess({ roomId, auto, autoBot }: { roomId: string } & Au
   // away and the player has no way to say yes.
   const [drawOffer, setDrawOffer] = useState(false);
   const [botLevel, setBotLevel] = useState(2);
-  const voice = useTableVoice('chess', roomId);
+  const voice = useTableVoice('chess', roomId, { you: state.you, send, subscribe });
   const t = useType();
   const { width } = useWindowDimensions();
 

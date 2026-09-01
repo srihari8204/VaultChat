@@ -105,7 +105,10 @@ export class GamesSocket {
 
   constructor(
     private readonly game: GameKind,
-    private readonly roomId: string = "",
+    // Not readonly: rummy picks its table AFTER connecting (see join()), and
+    // the reconnect loop has to rejoin whatever table the player is sitting at,
+    // not the one the screen was opened with.
+    private roomId: string = "",
   ) {}
 
   // ── Public API ────────────────────────────────────────────────────────
@@ -123,6 +126,25 @@ export class GamesSocket {
     } catch (err) {
       this.handleError(err instanceof Error ? err.message : String(err));
     }
+  }
+
+  /**
+   * Take a seat at a specific table.
+   *
+   * Rummy is the one game where the table is chosen rather than defaulted: the
+   * server answers `{t:'lobby'}` with its table list and the player picks one.
+   * Storing the id here rather than passing it straight through is what makes
+   * a mid-hand reconnect rejoin THAT table instead of dumping the player back
+   * on the list with their cards gone.
+   */
+  join(roomId: string): void {
+    this.roomId = roomId;
+    this.sendJoin();
+  }
+
+  /** The table currently seated at, for a screen that needs to share its code. */
+  getRoomId(): string {
+    return this.roomId;
   }
 
   /** Send a JSON message to the games server. No-op if not connected. */
@@ -201,8 +223,7 @@ export class GamesSocket {
     this.ws.onopen = () => {
       this.reconnectAttempts = 0;
       this.setPhase("connected");
-      // Join the room immediately — the server expects {t:'join', roomId}.
-      this.send({ t: "join", roomId: this.roomId || defaultRoom(this.game) });
+      this.sendJoin();
     };
 
     this.ws.onmessage = (ev: MessageEvent) => {
@@ -258,6 +279,29 @@ export class GamesSocket {
     };
   }
 
+  /**
+   * Ask for a seat, in the shape the game in question actually expects.
+   *
+   * THE FIELD NAME DIFFERS. Three of the four games take `{t:'join', roomId}`;
+   * rummy takes `{t:'join', tableId}` (docs/GAMES_PROTOCOL.md, and
+   * games-web/rummy.js sends exactly that). Sending `roomId` to rummy is not an
+   * error the server reports — the field is simply not the one it reads, so
+   * every native player was seated wherever the server defaulted no matter
+   * which table they picked, and a shared invite code went nowhere.
+   *
+   * With no table chosen, rummy is asked for its LIST rather than guessing an
+   * id: `{t:'lobby'}` is answered with `{t:'tables'}`, which is where public
+   * tables, seat counts and stakes come from.
+   */
+  private sendJoin(): void {
+    if (this.game === "rummy") {
+      if (this.roomId) this.send({ t: "join", tableId: this.roomId });
+      else this.send({ t: "lobby" });
+      return;
+    }
+    this.send({ t: "join", roomId: this.roomId || defaultRoom(this.game) });
+  }
+
   private scheduleReconnect(): void {
     if (this.disposed) return;
     if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
@@ -299,8 +343,13 @@ export class GamesSocket {
   }
 }
 
-/** The default room id when no deep-link or push roomId was passed. */
-function defaultRoom(game: GameKind): string {
+/**
+ * The default room id when no deep-link or push roomId was passed.
+ *
+ * Rummy is excluded on purpose: its tables are server-defined and it is asked
+ * for the list instead (see sendJoin), so there is no id to invent here.
+ */
+function defaultRoom(game: Exclude<GameKind, "rummy">): string {
   switch (game) {
     case "tictactoe":
       return "tictactoe-main";
@@ -308,7 +357,5 @@ function defaultRoom(game: GameKind): string {
       return "ludo-main";
     case "chess":
       return "chess-main";
-    case "rummy":
-      return "practice"; // the rummy default table
   }
 }

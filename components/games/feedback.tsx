@@ -260,9 +260,14 @@ export function VoiceBar({
       borderRadius: R[2], borderWidth: 1, borderColor: goldLine[38],
       backgroundColor: mix(C.panel2, 86, '#ffffff'),
     }}>
-      <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: C.good }} />
+      {/* Amber while nobody else has joined: the player IS in voice, they just
+          have no one to talk to yet. Green would claim a connection that is not
+          there, and "reconnecting" would claim a fault that is not either. */}
+      <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: phase === 'waiting' ? C.gold : C.good }} />
       <Text style={{ flex: 1, color: C.text, fontSize: t.sm, fontWeight: '700' }}>
-        {canSpeak ? `Voice on · ${participants.length}` : `Listening · ${participants.length}`}
+        {phase === 'waiting'
+          ? 'In voice — waiting for others'
+          : canSpeak ? `Voice on · ${participants.length}` : `Listening · ${participants.length}`}
       </Text>
       {canSpeak && (
         <Btn

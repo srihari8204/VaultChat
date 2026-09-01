@@ -120,7 +120,7 @@ type LPlayer = { id?: string; vaultId?: string; name: string; seat: number; toke
 const pid = (p: LPlayer) => p.id ?? p.vaultId ?? '';
 
 export default function Ludo({ roomId = 'ludo-main', auto, autoBot }: { roomId?: string } & AutoStart) {
-  const { phase, error, state, events, send, retry } = useGameSocket('ludo', roomId, { auto, autoBot });
+  const { phase, error, state, events, send, subscribe, retry } = useGameSocket('ludo', roomId, { auto, autoBot });
   const t = useType();
   const { width } = useWindowDimensions();
 
@@ -131,7 +131,7 @@ export default function Ludo({ roomId = 'ludo-main', auto, autoBot }: { roomId?:
   const [sound, setSound] = useState(soundEnabled());
   const [stake, setStake] = useState(0);
   const wallet = useWallet();
-  const voice = useTableVoice('ludo', roomId);
+  const voice = useTableVoice('ludo', roomId, { you: state.you, send, subscribe });
   // The tumble is local and deliberate. The server answers in tens of
   // milliseconds, so without a held animation the number simply appears and the
   // player never sees a roll happen — which is the single thing that makes dice

@@ -6,8 +6,9 @@
 // and a card that falls out of every group vanishes from their hand entirely.
 
 import {
-  reconcile, groupUp, ungroup, sortLoose, sameGroups, moveCard,
-  autoArrange, DEFAULT_GROUPS, MAX_GROUPS, type Groups,
+  reconcile, groupUp, ungroup, sameGroups, moveCard,
+  autoArrange, sortHand, isSortMode, SORT_MODES,
+  DEFAULT_GROUPS, MAX_GROUPS, type Groups,
 } from './handGroups';
 
 let failures = 0;
@@ -63,21 +64,6 @@ g = ungroup(g, ['c1']);
 check('ungrouping one card dissolves its whole group',
   holds(g, hand13) && g.length === 2 && !g[0].includes('c0'));
 check('...and the freed cards go loose', ['c0', 'c1', 'c2'].every(id => g[g.length - 1].includes(id)));
-
-// ── sort ─────────────────────────────────────────────────────────────
-const deck: Record<string, { suit: string; rank: string }> = {
-  a: { suit: 'H', rank: 'K' }, b: { suit: 'S', rank: '2' },
-  c: { suit: 'H', rank: '3' }, d: { suit: 'S', rank: 'A' },
-};
-const sorted = sortLoose([['a', 'b', 'c', 'd']], id => deck[id]);
-check('sorting the loose pile orders by suit then rank',
-  sorted[0].join() === 'd,b,c,a',
-  'spades before hearts, ace before king');
-
-const withGroup = sortLoose([['a', 'b'], ['c', 'd']], id => deck[id]);
-check('...and never reorders a group the player built',
-  withGroup[0].join() === 'a,b',
-  'that arrangement is the whole point of the screen');
 
 // ── idempotence ──────────────────────────────────────────────────────
 const twice = reconcile(reconcile([], hand13), hand13);
@@ -152,6 +138,57 @@ check('never more than five groups',
 const manyIds = ['H2','H3','H4','S5','S6','S7','D8','D9','D10','CJ','CQ','CK','H9','S9','C9'];
 check('...and still holds every card after the merge',
   holds(autoArrange(manyIds.map(sc), isJk), manyIds));
+
+// -- the sort modes ---------------------------------------------------
+//
+// Every mode must still hold exactly the hand: a sort that loses a card takes
+// it off the player's screen while the server still deals them thirteen.
+{
+  const RANK_SEQ = ['A','2','3','4','5','6','7','8','9','10','J','Q','K'];
+  const rankOf = (id: string) => RANK_SEQ.indexOf(sc(id).rank);
+
+  const mixed = ['H2', 'S9', 'D5', 'C9', 'H7', 'S3', 'D10', 'CK', 'H9', 'SA', 'D2', 'C4', 'JK'];
+  const cards = mixed.map(sc);
+  const arrangement: Groups = [
+    ['H2', 'S9'],
+    ['D5', 'C9', 'H7'],
+    ['S3', 'D10', 'CK', 'H9', 'SA', 'D2', 'C4', 'JK'],
+  ];
+
+  for (const mode of SORT_MODES) {
+    const out = sortHand(mode, cards, isJk, arrangement);
+    check(`sort "${mode}" still holds every card exactly once`, holds(out, mixed));
+    check(`sort "${mode}" stays within five groups`, out.length <= MAX_GROUPS, `${out.length} groups`);
+  }
+
+  check('manual leaves the arrangement exactly as it was',
+    sameGroups(sortHand('manual', cards, isJk, arrangement), arrangement),
+    'the Sort button must not undo an arrangement the player is mid-way through');
+
+  const bySuit = sortHand('suit', cards, isJk, arrangement);
+  const suitOf = (id: string) => sc(id).suit;
+  check('by suit puts each suit in its own group',
+    bySuit.filter(g => g.length > 0 && !g.includes('JK'))
+      .every(g => g.every(id => suitOf(id) === suitOf(g[0]))));
+  check('...and orders each suit ascending',
+    bySuit.every(g => g.filter(id => id !== 'JK')
+      .every((id, i, a) => i === 0 || rankOf(a[i - 1]) <= rankOf(id))));
+  check('...and keeps the joker visible rather than buried in a suit',
+    bySuit.some(g => g.length === 1 && g[0] === 'JK'));
+
+  const byRank = sortHand('rank', cards, isJk, arrangement);
+  const run = byRank.find(g => g.length > 1 && !g.includes('JK')) ?? [];
+  check('by rank produces one ascending run of the naturals',
+    run.length === 12 && run.every((id, i, a) => i === 0 || rankOf(a[i - 1]) <= rankOf(id)),
+    `run of ${run.length}`);
+
+  check('an empty hand is left alone rather than blanked',
+    sortHand('smart', [], isJk, arrangement) === arrangement);
+
+  check('only the four modes are accepted back from storage',
+    isSortMode('smart') && isSortMode('manual') && !isSortMode('sideways')
+      && !isSortMode(null) && !isSortMode(7));
+}
 
 console.log(failures ? `\n  ${failures} FAILED\n` : '\n  all hand-grouping checks passed\n');
 process.exit(failures ? 1 : 0);

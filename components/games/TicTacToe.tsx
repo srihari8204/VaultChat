@@ -30,10 +30,10 @@ const WIN_GOLD = '#ffd479';
 const MARK = ['✕', '◯'];
 
 export default function TicTacToe({ roomId, auto, autoBot }: { roomId: string } & AutoStart) {
-  const { phase, error, state, events, send, retry } = useGameSocket('tictactoe', roomId, { auto, autoBot });
+  const { phase, error, state, events, send, subscribe, retry } = useGameSocket('tictactoe', roomId, { auto, autoBot });
   const t = useType();
   const { width } = useWindowDimensions();
-  const voice = useTableVoice('tictactoe', roomId);
+  const voice = useTableVoice('tictactoe', roomId, { you: state.you, send, subscribe });
 
   const G = state.game;
   const mine = isMyTurn(state);
