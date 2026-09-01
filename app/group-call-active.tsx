@@ -42,7 +42,7 @@ import { CallEncryptionBadge, protectionFor } from '../components/call/CallEncry
 import {
   useCallConnectedAt, useCallError, useCallFlag, useCallLocalUrl,
   useCallStatus, useCanModerate, useMyHandRaised, useParticipant,
-  useParticipantIds, useRaisedHands, useVisibleParticipantIds,
+  useParticipantIds, useRaisedHands, useSharingPeer, useVisibleParticipantIds,
 } from '../hooks/useCall';
 
 // How many people the Add sheet offers at once. 12 was the old value and it is
@@ -121,6 +121,7 @@ function GroupCallEngine() {
   const error       = useCallError();
   const muted       = useCallFlag('muted');
   const camOff      = useCallFlag('cameraOff');
+  const sharer      = useSharingPeer();
   const speaker     = useCallFlag('speaker');
   const localUrl    = useCallLocalUrl();
   const peerIds     = useParticipantIds();
@@ -295,6 +296,22 @@ function GroupCallEngine() {
             past the mesh cap stops claiming a guarantee it no longer has. */}
         <CallEncryptionBadge protection={protectionFor(tiles)} />
       </View>
+
+      {/* SOMEONE IS SHARING, AND THE GROUP HAD NO WAY TO KNOW.
+          The share itself always arrived — the tile URL prefers screens.get(uid)
+          over the camera — but the grid gave no sign it had happened, so a
+          share read as "screen share is not working". The 1:1 screen has had
+          this banner all along; the flag it uses (peerSharing) is dispatched
+          only for s.peerUid and is therefore always false in a group, which is
+          why participants carry their own `sharing`. */}
+      {sharer ? (
+        <View style={S.shareBanner} pointerEvents="none">
+          <Ionicons name="phone-portrait" size={13} color="#fff" />
+          <Text style={S.shareBannerTxt} numberOfLines={1}>
+            {sharer.name} is sharing their screen
+          </Text>
+        </View>
+      ) : null}
 
       {error ? <Text style={S.err}>{error}</Text> : null}
 
@@ -612,6 +629,12 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   roleBadge: { position: 'absolute', top: 6, right: 6, width: 22, height: 22, borderRadius: 11,
                alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(0,0,0,0.55)' },
   handQueue: { color: '#FFD479', fontSize: 12, textAlign: 'center', paddingBottom: 6 },
+  shareBanner: {
+    flexDirection: 'row', alignItems: 'center', gap: 6, alignSelf: 'center',
+    marginTop: 6, paddingHorizontal: 12, paddingVertical: 5, borderRadius: 14,
+    backgroundColor: 'rgba(157,110,255,0.30)',
+  },
+  shareBannerTxt: { color: '#fff', fontSize: 12, fontWeight: '700', maxWidth: 260 },
   addPeoplePill: {
     flexDirection: 'row', alignItems: 'center', gap: 5, alignSelf: 'center',
     marginTop: 6, paddingHorizontal: 12, paddingVertical: 5, borderRadius: 14,

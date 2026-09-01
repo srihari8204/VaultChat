@@ -117,6 +117,37 @@ console.log('\nIn-call controls\n');
     + 'so a child of it would be untappable');
 }
 
+// ── 5. GROUP SCREEN SHARE HAD NO INDICATION ──────────────────────────
+//
+// The share always arrived — the tile URL prefers screens.get(uid) over the
+// camera — but the group grid gave no sign it had happened, so a working share
+// read as "screen share is not working". The 1:1 flag cannot serve a group:
+// peerSharing is dispatched only when s.peerUid === uid, so it is permanently
+// false there. Participants carry their own `sharing` instead.
+{
+  const GROUP = uncomment(readFileSync(join(ROOT, 'app/group-call-active.tsx'), 'utf8'));
+  const HOOKS = uncomment(readFileSync(join(ROOT, 'hooks/useCall.ts'), 'utf8'));
+  const TYPES = uncomment(readFileSync(join(ROOT, 'lib/call/types.ts'), 'utf8'));
+
+  A(/sharing: boolean;/.test(TYPES), '5. Participant carries a per-uid sharing flag');
+  A(/\| \{ type: 'peer_sharing'; uid: string; sharing: boolean \}/.test(MACH),
+    '5a. a peer_sharing action exists');
+  A(/case 'peer_sharing'/.test(MACH), '5b. and the reducer handles it');
+  A(/prev\.sharing === next\.sharing/.test(MACH),
+    '5c. the no-op comparison includes sharing — without it the reducer returns '
+    + 'the OLD participants reference and the banner never appears');
+  A(/type: 'peer_sharing', uid, sharing: screens\.has\(uid\)/.test(ENGINE),
+    '5d. dispatched for EVERY uid, not just the 1:1 peer');
+  A(/key: 'peerSharing', value: screens\.has\(uid\)/.test(ENGINE),
+    '5e. and the 1:1 peerSharing flag is UNCHANGED — the video screen keeps '
+    + 'its existing banner behaviour');
+  A(/export function useSharingPeer/.test(HOOKS), '5f. useSharingPeer exists');
+  A(/key\.indexOf\('\|'\)/.test(HOOKS),
+    '5g. it splits on the FIRST separator — a display name may contain "|"');
+  A(/useSharingPeer\(\)/.test(GROUP) && /is sharing their screen/.test(GROUP),
+    '5h. the group screen renders a banner naming the sharer');
+}
+
 console.log(failed === 0
   ? '\ncallControls: all checks passed'
   : `\ncallControls: ${failed} FAILED`);

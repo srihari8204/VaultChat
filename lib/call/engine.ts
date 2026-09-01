@@ -432,8 +432,14 @@ async function join(s: Session): Promise<void> {
           url: best ?? null,
           name: s.peerUid === uid ? s.peerName : undefined,
         });
-        if (kind === 'video' && s.peerUid === uid) {
-          dispatch({ type: 'flag', key: 'peerSharing', value: screens.has(uid) });
+        if (kind === 'video') {
+          // Per-participant, for EVERY uid — this is what a group grid reads.
+          dispatch({ type: 'peer_sharing', uid, sharing: screens.has(uid) });
+          // The 1:1 flag is left exactly as it was, so the video screen's
+          // existing share banner keeps its behaviour unchanged.
+          if (s.peerUid === uid) {
+            dispatch({ type: 'flag', key: 'peerSharing', value: screens.has(uid) });
+          }
         }
       },
       onLocal: (url) => dispatch({ type: 'local_stream', url }),

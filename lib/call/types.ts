@@ -60,6 +60,16 @@ export interface Participant {
   role: CallRole;
   muted: boolean;
   /**
+   * This participant is sharing their SCREEN right now.
+   *
+   * Per-participant, not the single `peerSharing` flag, because that flag is
+   * only ever dispatched for the 1:1 peer (`s.peerUid === uid`) and is
+   * therefore always false in a group. A group had no way to know a share was
+   * happening at all: the tile silently swapped to the screen track and
+   * nothing said so.
+   */
+  sharing: boolean;
+  /**
    * Epoch ms this participant raised their hand, or 0.
    *
    * A timestamp, not a boolean, so a host's queue orders by who asked FIRST.

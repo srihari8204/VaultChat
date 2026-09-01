@@ -75,6 +75,7 @@ export type CallEvent =
   | { type: 'session'; sessionId: string; myRole?: CallRole }
   /** A role changed — ours or someone else's. */
   | { type: 'peer_name'; uid: string; name: string }
+  | { type: 'peer_sharing'; uid: string; sharing: boolean }
   | { type: 'role'; uid: string; role: CallRole }
   /** A hand went up or down. `at` is 0 for lowered. */
   | { type: 'hand'; uid: string; at: number }
@@ -121,12 +122,14 @@ function withParticipant(
     streamUrl: prev?.streamUrl ?? null,
     role: prev?.role ?? 'speaker',
     muted: prev?.muted ?? false,
+    sharing: prev?.sharing ?? false,
     handRaisedAt: prev?.handRaisedAt ?? 0,
     spokeAt: prev?.spokeAt ?? 0,
     ...patch,
   };
   if (prev && prev.name === next.name && prev.streamUrl === next.streamUrl
       && prev.role === next.role && prev.muted === next.muted
+      && prev.sharing === next.sharing
       && prev.handRaisedAt === next.handRaisedAt && prev.spokeAt === next.spokeAt) {
     return s.participants;   // no-op: keep the reference
   }
@@ -275,6 +278,16 @@ export function reduce(s: CallSnapshot, e: CallEvent, now: number): CallSnapshot
     case 'peer_name': {
       if (!e.uid || !e.name || e.uid === s.meId) return s;
       const participants = withParticipant(s, e.uid, { name: e.name });
+      return participants === s.participants ? s : { ...s, participants };
+    }
+
+    // Group screen share. The `peerSharing` FLAG is dispatched only when
+    // s.peerUid === uid, so it is always false in a group and no group screen
+    // could tell that anyone was sharing. This is per-participant and is set
+    // for every uid, so the grid can say who.
+    case 'peer_sharing': {
+      if (!e.uid || e.uid === s.meId) return s;
+      const participants = withParticipant(s, e.uid, { sharing: e.sharing });
       return participants === s.participants ? s : { ...s, participants };
     }
 

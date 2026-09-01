@@ -131,6 +131,34 @@ export function useRaisedHands(): readonly string[] {
   return useMemo(() => (joined ? joined.split(' ') : []), [joined]);
 }
 
+/**
+ * Who is sharing their screen, or null — name included, ready to render.
+ *
+ * A GROUP screen cannot use the `peerSharing` flag: that is dispatched only
+ * when `s.peerUid === uid`, so it is always false in a group. Participants
+ * carry a per-uid `sharing` flag instead.
+ *
+ * Selects a STRING for the same reason useParticipantIds does — the
+ * participants object is replaced on every mute and every speaker stamp, and a
+ * banner must re-render only when the SHARER changes, not 60 times a minute in
+ * a full call.
+ */
+export function useSharingPeer(): { uid: string; name: string } | null {
+  const key = useSelect(s => {
+    const p = Object.values(s.participants).find(x => x.sharing);
+    return p ? p.uid + '|' + (p.name || '') : '';
+  });
+  return useMemo(() => {
+    if (!key) return null;
+    // First separator only: a UUID never contains '|', but a display name can,
+    // and split() would silently truncate it.
+    const i = key.indexOf('|');
+    const uid = key.slice(0, i);
+    const name = key.slice(i + 1);
+    return { uid, name: name || 'Someone' };
+  }, [key]);
+}
+
 export default {};
 
 /**
