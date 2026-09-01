@@ -50,7 +50,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import { useGameSocket, type AutoStart } from '../../lib/games/useGameSocket';
 import { TableBackground, Panel, Btn, Banner, PlayerRow, useType } from './ui';
-import { Toasts, Confetti, Sheet, SettingRow } from './feedback';
+import { Toasts, Confetti, Sheet, SettingRow, VoiceSheet } from './feedback';
 import { useTableVoice, type TableVoice } from '../../lib/games/useTableVoice';
 import { playSfx, preloadSfx, soundEnabled, setSoundEnabled } from '../../lib/games/sfx';
 import {
@@ -1256,113 +1256,6 @@ function VoiceRow({ voice, onExpand }: { voice: TableVoice; onExpand: () => void
     );
   }
   return <Btn label="Talk at the table" icon="🎤" onPress={voice.join} />;
-}
-
-/**
- * The full voice panel.
- *
- * Joining, leaving and muting here are independent of the game: leaving voice
- * never leaves the table, and voice failing never stops the hand. The two live
- * on different sockets — the game on the games server, the audio on LiveKit —
- * which is what makes that separation real rather than a promise.
- */
-function VoiceSheet({
-  visible, voice, nameOf, onClose,
-}: { visible: boolean; voice: TableVoice; nameOf?: (id: string) => string; onClose: () => void }) {
-  const t = useType();
-  const secs = useElapsed(voice.since);
-
-  const status =
-    voice.phase === 'live' ? (voice.canSpeak ? 'Connected' : 'Listening only — you are a spectator here')
-    : voice.phase === 'waiting' ? 'You are in voice. Nobody else has joined yet.'
-    : voice.phase === 'connecting' ? 'Connecting…'
-    : voice.phase === 'asking' ? 'Waiting for microphone permission…'
-    : voice.phase === 'unavailable' ? (voice.error ?? 'Voice is not switched on for these tables yet.')
-    : voice.phase === 'error' ? (voice.error ?? 'Voice failed.')
-    : 'Not connected.';
-
-  const denied = voice.phase === 'error' && /permission/i.test(voice.error ?? '');
-
-  return (
-    <Sheet visible={visible} title="Table voice" onClose={onClose}>
-      <Text style={{ color: voice.phase === 'error' ? C.bad : C.muted, fontSize: t.sm, lineHeight: 19 }}>{status}</Text>
-
-      {denied && (
-        <Text style={{ color: C.muted, fontSize: 12, lineHeight: 18 }}>
-          The microphone is blocked for VaultChat. Turn it on in your phone’s app settings, then join again — you can keep playing without it.
-        </Text>
-      )}
-
-      {(voice.phase === 'live' || voice.phase === 'waiting') && (
-        <>
-          <Text style={{ color: C.muted, fontSize: 12 }}>
-            {`${voice.participants.length} in the channel · ${fmtDuration(secs)}`}
-          </Text>
-          <View style={{ gap: S[1] }}>
-            {voice.participants.map(id => (
-              <View key={id} style={{ flexDirection: 'row', alignItems: 'center', gap: S[2], paddingVertical: 4 }}>
-                <View style={{
-                  width: 8, height: 8, borderRadius: 4,
-                  backgroundColor: voice.speaking.has(id) ? C.good : 'rgba(255,255,255,0.22)',
-                }} />
-                <Text numberOfLines={1} style={{ flex: 1, color: C.text, fontSize: t.sm }}>{nameOf ? nameOf(id) : id}</Text>
-                {voice.speaking.has(id) && <Text style={{ color: C.good, fontSize: 11, fontWeight: '700' }}>speaking</Text>}
-              </View>
-            ))}
-          </View>
-        </>
-      )}
-
-      <View style={{ flexDirection: 'row', gap: S[2], flexWrap: 'wrap' }}>
-        {voice.phase === 'live' || voice.phase === 'waiting' ? (
-          <>
-            {voice.canSpeak && (
-              <Btn
-                label={voice.muted ? 'Unmute' : 'Mute'}
-                icon={voice.muted ? '🔇' : '🎙'}
-                compact
-                onPress={voice.toggleMute}
-                accessibilityLabel={voice.muted ? 'Unmute your microphone' : 'Mute your microphone'}
-              />
-            )}
-            <Btn
-              label={voice.speaker ? 'Speaker on' : 'Speaker off'}
-              icon={voice.speaker ? '🔊' : '🎧'}
-              compact
-              onPress={voice.toggleSpeaker}
-              accessibilityLabel={voice.speaker ? 'Loudspeaker on' : 'Following your headset'}
-            />
-            <Btn label="Leave voice" kind="danger" compact onPress={voice.leave} accessibilityLabel="Leave voice but stay at the table" />
-          </>
-        ) : voice.phase === 'unavailable' ? null : (
-          <Btn label="Join voice" icon="🎤" kind="gold" compact onPress={voice.join} />
-        )}
-      </View>
-
-      <Text style={{ color: C.muted, fontSize: 11.5, lineHeight: 17 }}>
-        Leaving voice keeps your seat. Audio goes straight between players’ phones — never through the games server — nothing is recorded, and the microphone is only requested when you join.
-      </Text>
-    </Sheet>
-  );
-}
-
-/** Seconds since a timestamp, ticking. Null timestamp costs no timer. */
-function useElapsed(since: number | null): number {
-  const [secs, setSecs] = useState(0);
-  useEffect(() => {
-    if (since == null) { setSecs(0); return; }
-    const tick = () => setSecs(Math.max(0, Math.floor((Date.now() - since) / 1000)));
-    tick();
-    const id = setInterval(tick, 1000);
-    return () => clearInterval(id);
-  }, [since]);
-  return secs;
-}
-
-function fmtDuration(s: number): string {
-  const mm = Math.floor(s / 60);
-  const ss = s % 60;
-  return `${mm}:${ss < 10 ? '0' : ''}${ss}`;
 }
 
 /* ── the felt ───────────────────────────────────────────────────────── */

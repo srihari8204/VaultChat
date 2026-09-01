@@ -18,6 +18,7 @@ const CHESS  = readFileSync('components/games/Chess.tsx', 'utf8');
 const LUDO   = readFileSync('components/games/Ludo.tsx', 'utf8');
 const RUMMY  = readFileSync('components/games/Rummy.tsx', 'utf8');
 const HOOK   = readFileSync('lib/games/useGameSocket.ts', 'utf8');
+const FEEDBACK = readFileSync('components/games/feedback.tsx', 'utf8');
 
 let failures = 0;
 const check = (name: string, ok: boolean, detail = '') => {
@@ -218,6 +219,37 @@ check('...and its tap handler is stable, or the memo is decoration',
 check('the turn clock re-renders once a second, not on every tick',
   /setSecs\(secondsLeft\(deadline, Date\.now\(\)\)\)/.test(RUMMY) && !/setNow\(Date\.now\(\)\)/.test(stripComments(RUMMY)),
   'holding the raw clock reading makes every tick a new value, so React can never bail out');
+
+// ── the board the reference client actually shows ─────────────────────
+check('chess opens on the green board, like the web',
+  /let boardPref: ThemeName = 'green'/.test(CHESS),
+  "chess.js does `if (!settings.board) settings.board = \"green\"`; this port opened on a theme the web does not have");
+
+check('...and remembers the one the player picks',
+  /AsyncStorage\.setItem\(BOARD_KEY/.test(CHESS),
+  'the web persists it; re-picking every launch is how a setting reads as broken');
+
+check('a piece is outlined, not haloed',
+  /OUTLINE\.map/.test(CHESS) && !/textShadowRadius/.test(stripComments(CHESS)),
+  'a blurred shadow stood in for the stroke the web gets from -webkit-text-stroke');
+
+// ── talking at the table ──────────────────────────────────────────────
+// The voice mesh was already wired into chess, but only as a bar BELOW the
+// board, both seats and the status line — past the fold on a phone, which is
+// indistinguishable from not having it.
+check('the table voice room is shared, not per-board',
+  /export function VoiceSheet\(/.test(FEEDBACK) && !/function VoiceSheet\(/.test(RUMMY),
+  'a second copy for chess is a second thing to fix when the mesh changes');
+
+check('...and chess can reach it without scrolling',
+  /<VoiceSheet/.test(CHESS) && /setVoiceOpen\(true\)/.test(CHESS),
+  'a voice control below the fold is one the player never finds');
+
+// ── standings ─────────────────────────────────────────────────────────
+const LB = readFileSync('lib/games/leaderboard.ts', 'utf8');
+check('the leaderboard does not re-rank the server',
+  !/\.sort\(/.test(LB),
+  'the server orders and cuts the table; sorting here would show a standing it does not agree with');
 
 console.log(failures ? `\n  ${failures} FAILED\n` : '\n  all native-games checks passed\n');
 process.exit(failures ? 1 : 0);
