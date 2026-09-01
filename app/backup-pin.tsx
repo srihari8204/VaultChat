@@ -1,3 +1,4 @@
+import { HEADER_TOP } from '../constants/layout';
 import { LinearGradient } from "expo-linear-gradient";
 import * as Haptics from "expo-haptics";
 import { router } from "expo-router";
@@ -58,7 +59,7 @@ export default function BackupPINScreen() {
 }
 
 const S = StyleSheet.create({
-  container:  { flex:1,alignItems:"center",paddingTop:60,paddingHorizontal:32 },
+  container:  { flex:1,alignItems:"center",paddingTop:HEADER_TOP,paddingHorizontal:32 },
   header:     { alignItems:"center",marginBottom:24,gap:10 },
   badge:      { width:80,height:80,borderRadius:40,backgroundColor:"rgba(74,159,255,0.12)",borderWidth:1.5,borderColor:"rgba(74,159,255,0.3)",justifyContent:"center",alignItems:"center" },
   title:      { color:"#fff",fontSize:24,fontWeight:"900" },

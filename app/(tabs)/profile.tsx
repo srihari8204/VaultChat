@@ -3,6 +3,7 @@
 // Backed by /user/profile (Postgres). Edit name + status, sign out.
 // Photo upload is deferred to Phase 4 (file storage).
 
+import { HEADER_TOP } from '../../constants/layout';
 import * as ImagePicker from 'expo-image-picker';
 import { useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useState, type ComponentProps } from 'react';
@@ -424,7 +425,7 @@ function InfoRow({ k, v, small }: { k: string; v: string; small?: boolean }) {
 const makeStyles = (c: Palette) => StyleSheet.create({
   screen:       { flex: 1, backgroundColor: c.bg },
   center:       { justifyContent: 'center', alignItems: 'center' },
-  header:       { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingTop: 56, paddingBottom: 8 },
+  header:       { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingTop: HEADER_TOP, paddingBottom: 8 },
   title:        { color: c.text, fontSize: 26, fontWeight: '800' },
 
   avatarWrap:   { alignItems: 'center', paddingTop: 16, paddingBottom: 20 },

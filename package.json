@@ -47,6 +47,7 @@
     "test:shelf": "tsx lib/shelf.selftest.ts",
     "test:archive": "tsx lib/archive.selftest.ts",
     "test:callmode": "tsx lib/call/mode.selftest.ts",
+    "test:games": "tsx lib/games/handGroups.selftest.ts && tsx lib/games/meldHint.selftest.ts && tsx lib/games/rummyTable.selftest.ts && tsx lib/games/voiceMesh.selftest.ts",
     "check:sdk": "node scripts/check-sdk-versions.js"
   },
   "dependencies": {

@@ -5,6 +5,7 @@
 // compared), there is no man-in-the-middle. The "verified" decision is the
 // user's own and is persisted (synced across their devices).
 
+import { HEADER_TOP } from '../constants/layout';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useCallback, useEffect, useState , useMemo} from 'react';
 import {
@@ -145,7 +146,7 @@ export default function VerifyContactScreen() {
 
 const makeStyles = (c: Palette) => StyleSheet.create({
   container: { flex: 1, backgroundColor: c.bg },
-  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingTop: 54, paddingBottom: 12, paddingHorizontal: 14, borderBottomWidth: 1, borderBottomColor: c.border },
+  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingTop: HEADER_TOP, paddingBottom: 12, paddingHorizontal: 14, borderBottomWidth: 1, borderBottomColor: c.border },
   title: { color: c.text, fontSize: 17, fontWeight: '800' },
   center: { paddingVertical: 60, alignItems: 'center' },
 

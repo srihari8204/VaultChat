@@ -21,6 +21,14 @@ export interface GameLobby {
   status: string;
   hostId?: string;
   members: { vaultId: string; name: string; isBot?: boolean; wins?: number }[];
+  /**
+   * Rummy seats a fixed number of players and says which table you are at.
+   * Both are sent by the server and both were being read through an `as any`
+   * on the board, which is a type lie that survives exactly until someone
+   * renames a field. Optional because the other three games do not send them.
+   */
+  maxPlayers?: number;
+  table?: { name?: string; stakes?: string; pointValue?: number };
 }
 
 /**
@@ -53,8 +61,37 @@ export interface UseGameSocket {
   /** Server-sent notices ({t:'event'}) — most recent last, capped. */
   events: string[];
   send: (msg: GamesMessage) => void;
-  /** Reconnect after a failure, for a retry button. */
-  retry: () => void;
+  /**
+   * Seat at a table chosen after connecting, without rebuilding the socket.
+   *
+   * Passing the id as `roomId` instead would re-run the effect and tear the
+   * connection down, which for rummy means losing the table list you picked
+   * from — and, mid-hand, the hand.
+   */
+  join: (roomId: string) => void;
+  /**
+   * Watch every raw server frame, for as long as the screen is mounted.
+   *
+   * Unlike the `onMessage` option this SURVIVES a socket rebuild (a retry, a
+   * table change), because the handler set lives in the hook rather than on the
+   * socket. Table voice depends on that: its signalling rides the game socket,
+   * and a mesh that silently stopped receiving offers after one reconnect would
+   * look exactly like a microphone problem.
+   */
+  subscribe: (handler: (msg: GamesMessage) => void) => () => void;
+  /**
+   * Rebuild the socket from scratch: new connection, state cleared.
+   *
+   * Serves both "retry after a failure" and "leave this room" — the games
+   * protocol has no leave intent, so a fresh socket is the only way out, and it
+   * is what the reference web clients do with `location.reload()`.
+   *
+   * `roomId` OVERRIDES the one this screen was opened with, and `''` means
+   * "join nothing". Without it, leaving a table that arrived as a deep link or
+   * a turn notification would reconnect straight back into it, and the Leave
+   * button would look broken.
+   */
+  retry: (roomId?: string) => void;
 }
 
 const EMPTY: GameState = { you: '', seat: null, spectator: false, lobby: null, game: null, raw: null };
@@ -70,6 +107,14 @@ const EMPTY: GameState = { you: '', seat: null, spectator: false, lobby: null, g
 export interface AutoStart {
   auto?: boolean;
   autoBot?: boolean;
+  /**
+   * Raw server frames, for the fields that arrive OUTSIDE `state`.
+   *
+   * Rummy's table list (`{t:'tables'}`) is the reason this exists: it is sent
+   * once on connect, before any lobby, so a board that only ever sees `state`
+   * can never show the player which tables are open.
+   */
+  onMessage?: (msg: GamesMessage) => void;
 }
 
 export function useGameSocket(game: GameKind, roomId = '', opts: AutoStart = {}): UseGameSocket {
@@ -79,6 +124,15 @@ export function useGameSocket(game: GameKind, roomId = '', opts: AutoStart = {})
   const [events, setEvents] = useState<string[]>([]);
 
   const sockRef = useRef<GamesSocket | null>(null);
+  // Set by retry(room); outlives the rebuild so the new socket opens where the
+  // caller asked rather than where the screen was originally pointed.
+  const roomOverride = useRef<string | null>(null);
+  // Stable across socket rebuilds — see `subscribe` on the interface above.
+  const subsRef = useRef(new Set<(m: GamesMessage) => void>());
+  // Latest-ref rather than an effect dependency: the callback is written inline
+  // at the call site, so depending on it would rebuild the socket every render.
+  const onMsgRef = useRef(opts.onMessage);
+  onMsgRef.current = opts.onMessage;
   // Frames can land between the socket closing and React unmounting; without
   // this they would setState on a dead component and, worse, resurrect state
   // for a game the user has already left.
@@ -87,7 +141,7 @@ export function useGameSocket(game: GameKind, roomId = '', opts: AutoStart = {})
 
   useEffect(() => {
     aliveRef.current = true;
-    const sock = new GamesSocket(game, roomId);
+    const sock = new GamesSocket(game, roomOverride.current ?? roomId);
     sockRef.current = sock;
 
     const offPhase = sock.onPhase((p, err) => {
@@ -117,6 +171,10 @@ export function useGameSocket(game: GameKind, roomId = '', opts: AutoStart = {})
         // game is broken".
         setEvents(prev => [...prev, `⚠ ${m.msg}`].slice(-20));
       }
+      // A subscriber that throws must not take the socket, nor the other
+      // subscribers, down with it.
+      try { onMsgRef.current?.(m); } catch { /* a board's handler must not kill the socket */ }
+      subsRef.current.forEach((h) => { try { h(m); } catch {} });
     });
 
     // The whole snapshot, every time. See the protocol doc: never a delta.
@@ -153,6 +211,16 @@ export function useGameSocket(game: GameKind, roomId = '', opts: AutoStart = {})
     sockRef.current?.send(msg);
   }, []);
 
+  const join = useCallback((roomId: string) => {
+    sockRef.current?.join(roomId);
+  }, []);
+
+  const subscribe = useCallback((handler: (m: GamesMessage) => void) => {
+    const set = subsRef.current;
+    set.add(handler);
+    return () => { set.delete(handler); };
+  }, []);
+
   // ── auto-start, for tables that came from matchmaking ────────────────
   //
   // Lives here rather than in each board because all four have the same lobby
@@ -185,13 +253,14 @@ export function useGameSocket(game: GameKind, roomId = '', opts: AutoStart = {})
     }
   }, [auto, autoBot, phase, state.lobby, state.you, state.game]);
 
-  const retry = useCallback(() => {
+  const retry = useCallback((room?: string) => {
+    roomOverride.current = typeof room === 'string' ? room : null;
     setError(null);
     setState(EMPTY);
     setAttempt(n => n + 1);     // re-runs the effect, which builds a fresh socket
   }, []);
 
-  return { phase, error, state, events, send, retry };
+  return { phase, error, state, events, send, join, subscribe, retry };
 }
 
 /** True when it is this player's turn — the one check every board needs. */

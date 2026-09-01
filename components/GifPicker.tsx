@@ -54,12 +54,18 @@ interface Props {
   visible: boolean;
   onClose: () => void;
   onSelect: (url: string, previewUrl: string) => void;
+  /**
+   * Which collection to open on. The composer's single button is a STICKER, so
+   * it opens on stickers; anything else opening this sheet can still land on
+   * GIFs. All three tabs are the same Klipy code path, only `type` differs.
+   */
+  initialTab?: TabType;
 }
 
-export default function GifPicker({ visible, onClose, onSelect }: Props) {
+export default function GifPicker({ visible, onClose, onSelect, initialTab = 'gifs' }: Props) {
   const { colors, scheme } = useTheme();
   const s = useMemo(() => makeStyles(colors), [colors]);
-  const [tab,     setTab]     = useState<TabType>('gifs');
+  const [tab,     setTab]     = useState<TabType>(initialTab);
   const [query,   setQuery]   = useState('');
   const [results, setResults] = useState<GifResult[]>([]);
   const [loading, setLoading] = useState(false);
@@ -131,7 +137,12 @@ export default function GifPicker({ visible, onClose, onSelect }: Props) {
             placeholderTextColor={colors.textDim}
             value={query}
             onChangeText={q => { setQuery(q); queueSearch(q, tab); }}
-            autoFocus
+            // NO autoFocus. Tapping the sticker button opened this sheet AND
+            // raised the keyboard, which then covered the stickers you came to
+            // pick — you had to dismiss the keyboard before you could use the
+            // thing you just opened. The tab you land on already shows trending
+            // content without a query, so the search field is the exception, not
+            // the entry point. Tap it when you actually want to search.
           />
           {/* "Powered by KLIPY" belongs NEXT TO THE SEARCH BAR and must stay
               visible the whole time the selector is open — that is where their

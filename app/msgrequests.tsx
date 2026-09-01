@@ -10,6 +10,7 @@
 // This uses 'request' context in getVisibleProfile()
 // which correctly shows photo + name for unsaved senders
 
+import { HEADER_TOP } from '../constants/layout';
 import { type Palette } from '../constants/theme';
 import { useTheme } from '../lib/theme';
 import { Ionicons } from '@expo/vector-icons';
@@ -219,7 +220,7 @@ export default function MsgRequests() {
 
 const makeStyles = (c: Palette) => StyleSheet.create({
   screen:  { flex:1, backgroundColor:c.bg },
-  header:  { paddingTop:52, paddingBottom:12, paddingHorizontal:18,
+  header:  { paddingTop:HEADER_TOP, paddingBottom:12, paddingHorizontal:18,
              flexDirection:'row', alignItems:'center', gap:12,
              borderBottomWidth:StyleSheet.hairlineWidth, borderBottomColor:c.separator },
   backBtn: { width:40, height:40, borderRadius:20,

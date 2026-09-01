@@ -9,6 +9,7 @@
 //
 // PIN session is screen-scoped: leaving the screen requires re-entering.
 
+import { HEADER_TOP } from '../constants/layout';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { useCallback, useEffect, useRef, useState , useMemo} from 'react';
@@ -291,7 +292,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   gateUnlockTxt: { color: '#fff', fontWeight: '700' },
 
   // List
-  header:       { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingTop: 56, paddingBottom: 12, gap: 8, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.border },
+  header:       { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingTop: HEADER_TOP, paddingBottom: 12, gap: 8, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.border },
   backBtn:      { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
   backTxt:      { color: c.text, fontSize: 26, fontWeight: '600' },
   title:        { color: c.text, fontSize: 22, fontWeight: '800' },

@@ -15,6 +15,7 @@
 //
 // NOTE: WebRTC can only be fully validated on real devices/networks.
 
+import { HEADER_TOP } from '../constants/layout';
 import { useLocalSearchParams, useRouter, Stack } from 'expo-router';
 import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, StatusBar, StyleSheet, Text, TouchableOpacity, View, ScrollView } from 'react-native';
@@ -596,7 +597,7 @@ function CtrlBtn({ icon, onPress, active, danger, colors }: any) {
 
 const makeStyles = (c: Palette) => StyleSheet.create({
   screen:    { flex: 1, backgroundColor: '#0B0B10' },
-  topBar:    { paddingTop: 52, paddingHorizontal: 20, paddingBottom: 8, alignItems: 'center' },
+  topBar:    { paddingTop: HEADER_TOP, paddingHorizontal: 20, paddingBottom: 8, alignItems: 'center' },
   title:     { color: '#fff', fontSize: 18, fontWeight: '800' },
   sub:       { color: 'rgba(255,255,255,0.6)', fontSize: 13, marginTop: 2 },
   err:       { color: '#FCA5A5', textAlign: 'center', fontSize: 13, paddingHorizontal: 20 },

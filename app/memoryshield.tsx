@@ -1,3 +1,4 @@
+import { HEADER_TOP } from '../constants/layout';
 import { ErrorBoundary } from '../components/ErrorBoundary';
 ﻿import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -291,7 +292,7 @@ function MemoryShieldScreenContent() {
 }
 
 const S = StyleSheet.create({
-  container: { paddingHorizontal: 18, paddingTop: 50, paddingBottom: 20 },
+  container: { paddingHorizontal: 18, paddingTop: HEADER_TOP, paddingBottom: 20 },
   header: { flexDirection: 'row', alignItems: 'center', marginBottom: 16, gap: 10 },
   backBtn: { width: 36, height: 36, borderRadius: 18, backgroundColor: '#F9FAFB', justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: '#0D1E3A' },
   title: { color: '#fff', fontSize: 20, fontWeight: '900' },

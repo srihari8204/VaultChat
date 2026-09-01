@@ -284,6 +284,19 @@ export async function api<T = any>(path: string, opts: ApiOptions = {}): Promise
       // so the user can sign in again instead of staring at a "token_expired"
       // alert with no way forward.
       await endSessionAndBounce();
+      // ...AND DO NOT REJECT. The bounce above was only half the fix: the throw
+      // below still ran, and roughly twenty call sites do
+      //   catch (e) { Alert.alert('… failed', e?.message ?? 'Try again') }
+      // so an expired session stacked a "token_expired" dialog ON TOP of the
+      // sign-in screen — exactly the dead end the redirect exists to prevent.
+      // The screen that made this call is being unmounted by the redirect, so
+      // there is nothing left to inform.
+      //
+      // ponytail: a deliberately never-settling promise. Correct while the only
+      // thing after a session end is the redirect; if a caller ever needs to run
+      // cleanup on session death, give it a rejected SessionEndedError and teach
+      // the alert sites to ignore that one.
+      return new Promise<T>(() => {});
     }
   }
 

@@ -111,11 +111,50 @@ is the set of token indices the current roll permits; anything else is refused.
 
 ### Rummy
 
-**Send:** `join{tableId}` · `addbot` · `draw{source: 'open' | 'closed'}` ·
-`discard{cardId}` · `arrange{groups}` · `declare{discardId, groups}` · `drop`
+13-card **Points** rummy. There is no pool (101/201) and no deals variant on
+this server: the wire protocol has no pool score, no elimination and no deal
+count, and the engine only ever settles a single deal at a time. Anything
+resembling those would have to be built server-side first.
+
+**Send:** `lobby` · `join{tableId}` · `addbot` ·
+`draw{source: 'open' | 'closed'}` · `discard{cardId}` · `arrange{groups}` ·
+`declare{discardId, groups}` · `drop` · `start`
+
+> **`join` takes `tableId`, NOT `roomId`.** Rummy is the only one of the four
+> that does. The server does not complain about the wrong key — it simply reads
+> a field that is not there and seats you at its default table, so a mistyped
+> join looks like it worked and a shared invite code silently goes nowhere.
+> This cost the native client every table it ever tried to pick.
+
+**`{t:'lobby'}` → `{t:'tables'}`.** Sent on connect when no table has been
+chosen. `tables[]` is `{ id, name, stakes, players, maxPlayers, status }` — the
+public tables, their seat counts and their 2–6 player limits. It arrives
+*before* any lobby, so it never appears inside a `state` frame and a client that
+only handles `state` can never show it.
+
+**Top-level, beside `game`** (all easy to miss, all sent every frame):
+
+| field | meaning |
+|---|---|
+| `hand` | THIS player's cards. Nobody else's are ever sent to a device. |
+| `deadline` | Server epoch-ms the current turn expires. The turn clock. |
+| `settlement` | `{ [playerId]: { delta } }` — coins won or lost, at the end. |
+| `wallet` | The player's coin balance, refreshed with the table. |
 
 **`game`:** `phase`, `players`, `turnPlayerId`, `winnerId`, `wildRank`,
-`wildJokerCard`, `openTop`, `closedCount`, `points`, `type`, `label`
+`wildJokerCard`, `openTop`, `closedCount`
+
+**`players[]`:** `{ id, name, handCount, points, status, isTurn }` where
+`status` is `'active' | 'won' | 'dropped' | 'lost'`. **`status` is the field that
+says whether a player is still in the hand** — there is no `dropped` boolean,
+and reading one that is not sent leaves a player who dropped still looking like
+they are holding cards.
+
+**`lobby`** additionally carries `maxPlayers` and
+`table: { name, stakes, pointValue }`. **`pointValue === 0` marks a practice
+table, and only a practice table accepts `addbot`** — a staked table seating a
+bot would be putting the house in the pot, so the server refuses, and an offer
+the server refuses reads to a player as a broken button.
 
 `arrange` is cosmetic hand grouping and is persisted per seat, so a
 reconnecting player gets their arrangement back. `declare` is the scoring

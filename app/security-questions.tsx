@@ -1,3 +1,4 @@
+import { HEADER_TOP } from '../constants/layout';
 import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
 import { router } from "expo-router";
@@ -66,7 +67,7 @@ export default function SecurityQuestionsScreen() {
 }
 
 const S = StyleSheet.create({
-  scroll:   { flexGrow:1,padding:24,paddingTop:60 },
+  scroll:   { flexGrow:1,padding:24,paddingTop:HEADER_TOP },
   header:   { alignItems:"center",marginBottom:24,gap:10 },
   badge:    { width:80,height:80,borderRadius:40,backgroundColor:"rgba(74,159,255,0.12)",borderWidth:1.5,borderColor:"rgba(74,159,255,0.3)",justifyContent:"center",alignItems:"center" },
   title:    { color:"#fff",fontSize:22,fontWeight:"900" },

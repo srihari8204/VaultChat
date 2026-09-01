@@ -9,6 +9,7 @@
 // like Whisper/Google Speech — that's a separate, key-gated integration. This
 // screen does real live dictation, which the on-device recognizer supports.)
 
+import { HEADER_TOP } from '../constants/layout';
 import { BRAND_ACCENT } from '../constants/theme';
 import React, { useState, useEffect, useRef, useCallback , useMemo} from 'react';
 import {
@@ -139,7 +140,7 @@ export default function VoiceTranscribeScreen() {
 
 const makeStyles = (c: Palette) => StyleSheet.create({
   container: { flex: 1, backgroundColor: c.bg },
-  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingTop: 54, paddingHorizontal: 16, paddingBottom: 8 },
+  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingTop: HEADER_TOP, paddingHorizontal: 16, paddingBottom: 8 },
   backBtn: { width: 40, height: 40, justifyContent: 'center', alignItems: 'center' },
   title: { color: c.text, fontSize: 18, fontWeight: '800' },
   body: { flex: 1, padding: 16 },

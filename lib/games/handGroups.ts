@@ -83,29 +83,6 @@ export function ungroup(groups: Groups, picked: string[]): Groups {
 }
 
 const SUIT_ORDER: Record<string, number> = { S: 0, H: 1, C: 2, D: 3, JOKER: 4 };
-const RANKS = ['A', '2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K'];
-
-/**
- * Sort the loose pile by suit then rank.
- *
- * Only the loose pile: re-sorting the player's own groups would undo the
- * arrangement they are in the middle of building, which is the one thing this
- * screen exists to preserve. This is presentation — it never decides what a
- * valid meld is.
- */
-export function sortLoose(groups: Groups, card: (id: string) => { suit: string; rank: string } | undefined): Groups {
-  if (groups.length === 0) return groups;
-  const out = groups.slice();
-  const loose = out[out.length - 1].slice();
-  loose.sort((a, b) => {
-    const ca = card(a), cb = card(b);
-    if (!ca || !cb) return 0;
-    const s = (SUIT_ORDER[ca.suit] ?? 9) - (SUIT_ORDER[cb.suit] ?? 9);
-    return s !== 0 ? s : RANKS.indexOf(ca.rank) - RANKS.indexOf(cb.rank);
-  });
-  out[out.length - 1] = loose;
-  return out;
-}
 
 /** True when the two arrangements are the same, so `arrange` is not resent. */
 export function sameGroups(a: Groups, b: Groups): boolean {
@@ -240,4 +217,75 @@ export function autoArrange(hand: SortCard[], isJoker: (c: SortCard) => boolean)
   const arr: Groups = melds.map(m => m.slice());
   if (leftover.length) arr.push(leftover);
   return capAndPad(arr.length ? arr : [[]]);
+}
+
+/* ── how the player likes their hand sorted ─────────────────────────── */
+
+/**
+ * The four ways to lay out thirteen cards.
+ *
+ * - `smart`  — melds first, leftovers after. What a rummy player actually wants
+ *              and the default, because arranging from scratch every deal is the
+ *              tedious part of the game rather than the interesting one.
+ * - `suit`   — a group per suit, ascending. The habit players bring from
+ *              card games that are not rummy.
+ * - `rank`   — one run of thirteen ordered by rank, for spotting sets.
+ * - `manual` — leave it alone. Some players arrange as they draw and an
+ *              auto-sort that undoes that mid-hand is actively hostile.
+ */
+export type SortMode = 'smart' | 'suit' | 'rank' | 'manual';
+
+export const SORT_MODES: SortMode[] = ['smart', 'suit', 'rank', 'manual'];
+
+export const SORT_LABEL: Record<SortMode, string> = {
+  smart: 'Smart',
+  suit: 'By suit',
+  rank: 'By rank',
+  manual: 'Manual',
+};
+
+/** True for a value that came back from storage as a sort mode. */
+export function isSortMode(v: unknown): v is SortMode {
+  return typeof v === 'string' && (SORT_MODES as string[]).includes(v);
+}
+
+/**
+ * Lay the whole hand out in the requested order.
+ *
+ * `manual` returns the arrangement untouched — it is the one mode that must not
+ * move a card, because the player is mid-way through an arrangement of their
+ * own and this is the function the Sort button calls.
+ *
+ * Display only. Nothing here decides what a valid meld is; the server judges the
+ * declaration and lib/games/meldHint.ts only advises.
+ */
+export function sortHand(
+  mode: SortMode,
+  hand: SortCard[],
+  isJoker: (c: SortCard) => boolean,
+  current: Groups,
+): Groups {
+  if (mode === 'manual' || hand.length === 0) return current;
+  if (mode === 'smart') return autoArrange(hand, isJoker);
+
+  const byRank = (a: SortCard, b: SortCard) =>
+    rankIndex(a.rank) - rankIndex(b.rank) || (SUIT_ORDER[a.suit] ?? 9) - (SUIT_ORDER[b.suit] ?? 9);
+
+  // Jokers go last in their own group either way: they are the cards the player
+  // is deciding what to do with, and burying them inside a suit hides them.
+  const jokers = hand.filter(isJoker).map(c => c.id);
+  const nats = hand.filter(c => !isJoker(c));
+
+  if (mode === 'rank') {
+    const all = nats.slice().sort(byRank).map(c => c.id);
+    return capAndPad(jokers.length ? [all, jokers] : [all]);
+  }
+
+  const suits: Groups = [];
+  for (const suit of ['S', 'H', 'C', 'D']) {
+    const g = nats.filter(c => c.suit === suit).sort(byRank).map(c => c.id);
+    if (g.length) suits.push(g);
+  }
+  if (jokers.length) suits.push(jokers);
+  return capAndPad(suits.length ? suits : [[]]);
 }

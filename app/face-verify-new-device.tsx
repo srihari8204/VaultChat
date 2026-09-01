@@ -1,3 +1,4 @@
+import { HEADER_TOP } from '../constants/layout';
 import { LinearGradient } from "expo-linear-gradient";
 import * as LocalAuthentication from "expo-local-authentication";
 import { router, useLocalSearchParams } from "expo-router";
@@ -213,7 +214,7 @@ export default function FaceVerifyNewDeviceScreen() {
 }
 
 const S = StyleSheet.create({
-  container:  { flex:1, padding:24, paddingTop:60 },
+  container:  { flex:1, padding:24, paddingTop:HEADER_TOP },
   header:     { alignItems:"center", marginBottom:20, gap:10 },
   badge:      { width:80,height:80,borderRadius:40,borderWidth:1.5,justifyContent:"center",alignItems:"center" },
   title:      { color:"#fff",fontSize:22,fontWeight:"900" },

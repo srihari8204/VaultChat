@@ -5,6 +5,7 @@
 // and "All Chats" sections. FAB → /new-chat. Data wiring (presence, folders,
 // pin/archive/mute/hidden, unread) is preserved from the previous version.
 
+import { HEADER_TOP } from '../../constants/layout';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
@@ -258,6 +259,12 @@ export default function ChatsScreen() {
             ? { ...c, peerOnline: e.online, peerLastSeenAt: e.lastSeenAt ?? c.peerLastSeenAt } : c));
         };
         const onTyping = (e: { uid?: string; chatId?: string }) => {
+          // FAIL CLOSED WHEN WE DO NOT KNOW WHO WE ARE. `e.uid === null` is false
+          // for every real id, so without the first clause an event arriving
+          // before meId resolves skips the self-check entirely and the row shows
+          // "typing…" because YOU are typing. Dropping a typing event for the few
+          // ms before the id loads costs nothing — it is re-sent every keystroke.
+          if (!meIdRef.current) return;
           if (!e?.chatId || !e.uid || e.uid === meIdRef.current) return;
           setTypingChats(prev => { const n = new Set(prev); n.add(e.chatId!); return n; });
           clearTimeout(typingTimers.current[e.chatId]);
@@ -884,7 +891,7 @@ function formatRelative(iso: string): string {
 const makeStyles = (c: Palette) => StyleSheet.create({
   screen: { flex: 1, backgroundColor: c.bg },
   center: { justifyContent: 'center', alignItems: 'center' },
-  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingTop: 56, paddingBottom: 12 },
+  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingTop: HEADER_TOP, paddingBottom: 12 },
   title: { color: c.text, fontSize: 28, fontWeight: '800' },
   headerBtn: { width: 36, height: 36, borderRadius: 18, backgroundColor: c.surface, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: c.border },
   // Avatar photo popup

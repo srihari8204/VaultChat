@@ -6,6 +6,7 @@
 // 1s tick while open. Purely a read-out of lib/perf's in-memory ring buffer —
 // no network, no persistence.
 
+import { HEADER_TOP } from '../constants/layout';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { useEffect, useMemo, useState } from 'react';
@@ -129,7 +130,7 @@ function slow(total?: number) { return total != null && total > 1500 ? { color: 
 
 const makeStyles = (c: Palette) => StyleSheet.create({
   screen:  { flex: 1, backgroundColor: c.bg },
-  header:  { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingTop: 56, paddingBottom: 12, gap: 8, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.border },
+  header:  { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingTop: HEADER_TOP, paddingBottom: 12, gap: 8, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.border },
   backBtn: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
   title:   { color: c.text, fontSize: 22, fontWeight: '800' },
 

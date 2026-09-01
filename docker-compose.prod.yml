@@ -33,14 +33,23 @@ services:
       # any business reaching Caddy directly. Published on 0.0.0.0 it served the
       # entire API — auth included — over plaintext HTTP to the open internet.
       - "127.0.0.1:8095:80"
-      # ⚠️ STILL PLAINTEXT AND STILL PUBLIC. Measured 1157 packets in 37h
-      # (nat DOCKER chain counter), so something is talking to it; a packet
-      # capture could not be read to identify what, so it has NOT been closed.
-      # Old APKs pinned SERVER_URL to :3000, and the current client uses
-      # https://api.corefinite.com — so this is probably vestigial, but
-      # "probably" is not grounds for cutting off installed users.
-      # Decide, then either bind it to 127.0.0.1 like 8095 above, or delete it.
-      - "3000:80"
+      # :3000 IS GONE. It used to be published here as "compatibility: existing
+      # APKs point SERVER_URL at :3000" — that claim was never true.
+      #
+      # Checked before removing it, because cutting off installed users would be
+      # the one unrecoverable mistake here:
+      #   * constants/server.ts has been https://api.corefinite.com in EVERY
+      #     commit since 2026-05-17; the only non-HTTPS value it has ever held
+      #     is a LAN dev address on :3002.
+      #   * SERVER_URL is a hardcoded const, NOT read from env — so no build
+      #     could have been pointed elsewhere at build time.
+      #   * All 14 branches carrying the file agree: api.corefinite.com.
+      #   * Zero occurrences of ":3000" anywhere in app/, lib/, constants/,
+      #     components/, app.json or eas.json.
+      #
+      # So the ~31 packets/hour the nat counter showed on this port was internet
+      # background scanning, not clients — and until now every one of those
+      # probes was answered by the full API, auth included, over plaintext HTTP.
       # - "443:443"          # enable together with a TLS site in the Caddyfile
   go-api:
     ports: !override

@@ -3,6 +3,7 @@
 // Prompts for battery-optimization exemption and deep-links to the OEM auto-start
 // page, with a per-manufacturer step list + an "I've done this" confirmation.
 
+import { HEADER_TOP } from '../constants/layout';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { View, Text, ScrollView, TouchableOpacity, StyleSheet, Platform, Switch } from 'react-native';
 import { useRouter, Stack, useFocusEffect } from 'expo-router';
@@ -144,7 +145,7 @@ export default function CallReliabilityScreen() {
 
 const makeStyles = (c: Palette) => StyleSheet.create({
   screen: { flex: 1, backgroundColor: c.bg },
-  header: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 12, paddingTop: 54, paddingBottom: 12, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.border },
+  header: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 12, paddingTop: HEADER_TOP, paddingBottom: 12, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.border },
   hBtn: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
   title: { color: c.text, fontSize: 18, fontWeight: '700' },
   intro: { color: c.textDim, fontSize: 14, lineHeight: 20, marginBottom: 16 },

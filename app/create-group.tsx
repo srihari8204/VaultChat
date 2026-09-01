@@ -6,6 +6,7 @@
 // The group is created on Postgres and opened in the shared /chat screen
 // (which renders groups), replacing the old Firebase + group-chat flow.
 
+import { HEADER_TOP } from '../constants/layout';
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   View, Text, TextInput, FlatList, ScrollView, TouchableOpacity,
@@ -196,7 +197,7 @@ export default function CreateGroupScreen() {
 
 const makeStyles = (c: Palette) => StyleSheet.create({
   screen: { flex: 1, backgroundColor: c.bg },
-  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingTop: 54, paddingHorizontal: 16, paddingBottom: 8 },
+  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingTop: HEADER_TOP, paddingHorizontal: 16, paddingBottom: 8 },
   backBtn: { width: 40, height: 40, justifyContent: 'center', alignItems: 'center' },
   headerTitle: { color: c.text, fontSize: 18, fontWeight: '700' },
   nameInput: {

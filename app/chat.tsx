@@ -57,7 +57,7 @@ import {
   Text, TextInput, TouchableOpacity,
   View,
 } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
+import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { Swipeable } from 'react-native-gesture-handler';
 import * as Haptics from 'expo-haptics';
 import { Sheet, Avatar, type SheetAction as MenuAction } from '../components/ui';
@@ -67,6 +67,7 @@ import { getShareViewing } from '../lib/viewerPrefs';
 import type { ViewerActivity } from '../lib/socket';
 import LinkPreview, { extractUrl } from '../components/LinkPreview';
 import { extractFirstUrl, fetchPreviewFromDevice, type LinkPreviewData } from '../lib/linkPreview';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import GifPicker from '../components/GifPicker';
 import { LinearGradient } from 'expo-linear-gradient';
 import { getWallpaper, type WallpaperConfig } from './chat-wallpaper';
@@ -196,7 +197,7 @@ const EDIT_WINDOW_MS = 15 * 60 * 1000;
 import { useS, idealText, HL, makeStyles, type DisplayMessage } from '../components/chat/chatStyles';
 import { IMPORT_SOURCE } from '../constants/importSources';
 import {
-  MemoBubble, DateChip, UnreadDivider, ImportedDivider, SwipeToReply, EmojiPanel, FileBubble,
+  MemoBubble, DateChip, UnreadDivider, ImportedDivider, SwipeToReply, FileBubble,
   DISAPPEARING_PRESETS, bumpPollVote, formatDisappearing, formatLastSeen,
   formatRecDuration, formatScreenshotMode, isSameCalendarDay, renderWithHighlight,
 } from '../components/chat/MessageBubble';
@@ -238,12 +239,39 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
     const h = Keyboard.addListener(hideEvt, () => setKbHeight(0));
     return () => { s.remove(); h.remove(); };
   }, []);
+  // THE COMPOSER'S BOTTOM GAP, and it is not just the keyboard.
+  //
+  // app.json sets edgeToEdgeEnabled, so this screen draws UNDER the system
+  // navigation bar. With the keyboard down the padding above was 0, which put
+  // the typing bar behind the nav bar / gesture pill — the "keyboard overlapping
+  // the typing bar" report, visible whenever the keyboard was closed.
+  //
+  // Not additive: an Android keyboard is measured from the physical bottom of
+  // the screen, so its height already spans the nav bar. Adding the inset on top
+  // would float the composer a nav-bar's height above the keyboard instead.
+  // Whichever is larger is the correct single gap in both states.
+  const insets = useSafeAreaInsets();
+  const composerGap = Math.max(kbHeight, insets.bottom);
 
   // Warm the "already viewed" set so view-once bubbles render as consumed
   // immediately (no flash of the shield) on first paint.
   useEffect(() => { preloadViewedOnce(); preloadRevoked(); }, []);
 
   const [meId,      setMeId]      = useState<string | null>(null);
+  // meId ALSO as a ref, because the socket handlers below must not depend on
+  // the closure they were created in. It loads asynchronously, so a handler
+  // subscribed before it resolves captures null forever — and `x === null` is
+  // false for every real id, so each self-check fails OPEN rather than closed:
+  // the device that took a screenshot banners ITSELF, your own typing comes
+  // back at you, your own messages count as incoming.
+  //
+  // Adding meId to the effect's deps looked like the fix and was not: it
+  // re-subscribes, and the observed result was the event arriving TWICE with
+  // the stale null handler still attached. A ref is read at call time, so there
+  // is one subscription and it always sees the current value.
+  // (app/(tabs)/chats.tsx already does exactly this for the same reason.)
+  const meIdRef = useRef<string | null>(null);
+  useEffect(() => { meIdRef.current = meId; }, [meId]);
   const [chat,      setChat]      = useState<ChatDetail | null>(null);
   const [messages,  setMessages]  = useState<DisplayMessage[]>([]);
   // Guaranteed-unique render list: dedupe by the SAME key the FlatList uses
@@ -347,7 +375,6 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
   }, [input]);
   const [attachOpen, setAttachOpen] = useState(false);
   const [gifOpen, setGifOpen] = useState(false);
-  const [emojiOpen, setEmojiOpen] = useState(false);
 
   // Media staged for sending, shown in a caption-preview before it goes out.
   // Every send path (gallery pick, camera, video note, edited photo) routes
@@ -761,6 +788,8 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
         if (cancelled) return;
 
         const onNew = (m: Message) => {
+
+          const me = meIdRef.current;
           if (m.chatId !== chatId) return;
           // Socket payloads deliver `id` as a STRING, but the HTTP ack / cache use
           // a NUMBER. Normalize so `x.id === m.id` dedup works — otherwise the
@@ -768,7 +797,7 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
           // row and both collide on the same React key.
           if (m.id != null) (m as any).id = Number(m.id);
           // Tone immediately; the DELIVERY ACK deliberately does not fire here.
-          if (m.senderId !== meId) {
+          if (m.senderId !== me) {
             playReceived();   // in-app "received" tone (respects sound prefs)
           }
           // Decrypt-on-arrival (WhatsApp-style): decrypt ONCE, then show + cache
@@ -811,13 +840,14 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
             // re-fetches the message on the next reconnect.
             try {
               await applyMessage(chatId, fin);   // persist plaintext to local cache
-              if (fin.senderId !== meId) markDeliveredDurable(chatId, fin.id).catch(() => {});
+              if (fin.senderId !== me) markDeliveredDurable(chatId, fin.id).catch(() => {});
             } catch { /* not on disk → do NOT ack; catch-up re-delivers it */ }
             // Bump the "↓ N new" counter when a message lands while scrolled up.
-            if (!atBottomRef.current && fin.senderId !== meId) setNewSinceUp(n => n + 1);
+            if (!atBottomRef.current && fin.senderId !== me) setNewSinceUp(n => n + 1);
           })();
         };
         const onMemberDelivered = (e: { userId: string; lastDeliveredMessageId: number }) => {
+          const me = meIdRef.current;
           if (!e?.userId) return;
           setChat(prev => prev ? {
             ...prev,
@@ -834,6 +864,7 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
           void queueNoteDelivered(chatId, Number(e.lastDeliveredMessageId));
         };
         const onMemberRead = (e: { userId: string; lastReadMessageId: number }) => {
+          const me = meIdRef.current;
           if (!e?.userId) return;
           setChat(prev => prev ? {
             ...prev,
@@ -843,25 +874,34 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
           } : prev);
         };
         const onEdit = (e: { id: number; content: string; editedAt: string }) => {
+          const me = meIdRef.current;
           const eid = Number(e.id); // socket delivers id as string; rows hold numbers
           setMessages(prev => prev.map(x =>
             x.id === eid ? { ...x, content: e.content, editedAt: e.editedAt } : x
           ));
         };
         const onDelete = (e: { id: number; deletedAt: string }) => {
+          const me = meIdRef.current;
           const eid = Number(e.id); // socket delivers id as string; rows hold numbers
           setMessages(prev => prev.map(x =>
             x.id === eid ? { ...x, content: null, deletedAt: e.deletedAt, type: 'system' } : x
           ));
         };
         const onTypingStart = (e: { uid: string; chatId?: string }) => {
-          if (!e?.uid || e.uid === meId || (e.chatId && e.chatId !== chatId)) return;
+          const me = meIdRef.current;
+          // Fail closed while our own id is unknown — see the same guard in
+          // (tabs)/chats.tsx. `e.uid === null` is false for every real id, so
+          // without this the self-check silently stops guarding and the banner
+          // reads "… is typing" back at the person doing the typing.
+          if (!me) return;
+          if (!e?.uid || e.uid === me || (e.chatId && e.chatId !== chatId)) return;
           setTypingUids(prev => {
             if (prev.has(e.uid)) return prev;
             const next = new Set(prev); next.add(e.uid); return next;
           });
         };
         const onTypingStop = (e: { uid: string; chatId?: string }) => {
+          const me = meIdRef.current;
           if (!e?.uid || (e.chatId && e.chatId !== chatId)) return;
           setTypingUids(prev => {
             if (!prev.has(e.uid)) return prev;
@@ -870,6 +910,8 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
         };
 
         const onPresence = (e: { userId: string; online: boolean; lastSeenAt: string | null }) => {
+
+          const me = meIdRef.current;
           if (!e?.userId) return;
           setChat(prev => prev ? {
             ...prev,
@@ -882,9 +924,14 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
         // Reactions are now E2EE reference-messages in the ordered stream (F4) —
         // no separate reaction_added/removed socket events, no legacy fetch.
         const onScreenshotCaptured = (e: { chatId: string; capturedBy: string; capturedAt: string }) => {
+          const me = meIdRef.current;
           // Server already filters to chat members — but ignore the
           // echo of our own capture and any cross-chat noise.
-          if (!e || e.chatId !== chatId || e.capturedBy === meId) return;
+          // Fail closed while our own id is unknown: an unfiltered echo means
+          // the person who took the screenshot gets the "someone captured your
+          // content" banner, and the person it was taken from gets nothing.
+          if (!me) return;
+          if (!e || e.chatId !== chatId || e.capturedBy === me) return;
           setScreenshotBanner({ by: e.capturedBy, at: e.capturedAt });
         };
         // Poll-vote live updates. Server emits one event per (user, option)
@@ -893,12 +940,14 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
         // (new option). Each handler patches counts + the caller's `mine`
         // set in place — no refetch needed.
         const onPollVoted = (e: { messageId: number; userId: string; optionIndex: number }) => {
+          const me = meIdRef.current;
           if (!e?.messageId) return;
-          setPollVotes(prev => bumpPollVote(prev, e.messageId, e.optionIndex, +1, e.userId === meId));
+          setPollVotes(prev => bumpPollVote(prev, e.messageId, e.optionIndex, +1, e.userId === me));
         };
         const onPollUnvoted = (e: { messageId: number; userId: string; optionIndex: number }) => {
+          const me = meIdRef.current;
           if (!e?.messageId) return;
-          setPollVotes(prev => bumpPollVote(prev, e.messageId, e.optionIndex, -1, e.userId === meId));
+          setPollVotes(prev => bumpPollVote(prev, e.messageId, e.optionIndex, -1, e.userId === me));
         };
 
         // VaultView remote revoke. The sender destroyed the media server-side;
@@ -906,6 +955,7 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
         // repaints the bubble as a tombstone. Irreversible by design — see
         // lib/protectedMedia.
         const onMediaRevoked = (e: { chatId: string; messageId: number; attachmentId: string }) => {
+          const me = meIdRef.current;
           if (!e?.attachmentId || e.chatId !== chatId) return;
           wipeRevokedMedia(e.attachmentId).catch(() => {});
           setMessages(prev => prev.map(m =>
@@ -915,7 +965,9 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
         };
 
         const onLiveLocation = (e: any) => {
-          if (!e?.userId || e.userId === meId) return;
+
+          const me = meIdRef.current;
+          if (!e?.userId || e.userId === me) return;
           if (e.blob) {
             // E2E path: decrypt the relayed blob with the per-session key the peer
             // delivered in the initial 'location' message. No key yet → ignore
@@ -930,6 +982,7 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
           }
         };
         const onLiveLocationStop = (e: any) => {
+          const me = meIdRef.current;
           setLiveLoc(prev => (prev && e?.userId === prev.userId) ? null : prev);
           if (e?.userId) clearLiveKey(chatId, e.userId);
         };
@@ -999,6 +1052,19 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
     }).catch(() => {});
     return () => { cancel = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
+    // meId IS A DEPENDENCY, and leaving it out was the bug behind several
+    // symptoms at once. It loads asynchronously, so without it every handler
+    // above closed over the INITIAL null for the life of the screen — and
+    // `x === null` is false for every real id, so each self-check did not fail
+    // cautious, it failed OPEN:
+    //   * screenshot_captured — the device that took the shot bannered ITSELF
+    //     instead of the other side ("I get it, they don't")
+    //   * typing_start        — your own typing shown back at you
+    //   * new_message         — own messages treated as incoming (delivery
+    //     receipts marked, unread counter bumped for things you sent)
+    //   * poll_voted          — your own vote not marked as yours
+    // With meId here the effect re-subscribes once the id resolves and every
+    // one of those comparisons starts working against a real value.
   }, [chatId, pollIdKey]);
 
   // ── Mark-as-read (debounced) ──────────────────────────────
@@ -1363,9 +1429,30 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
   }, [otherMembers]);
   useEffect(() => {
     if (Platform.OS === 'web' || !chat) return;
-    const mode: ScreenshotMode = (chat.screenshotMode as ScreenshotMode) || 'block';
-    const allowsCapture = mode === 'allow' || mode === 'allow_notify';
-    const reportsCapture = mode === 'allow_notify' || mode === 'block';
+    // THE POLICY THIS DEVICE OBEYS IS THE **PEERS'**, NOT ITS OWN.
+    //
+    // This used to read `chat.screenshotMode`, which is the CALLER'S OWN row —
+    // so the setting actually meant "when I screenshot, tell them". Turning on
+    // "block screenshots and notify" changed nothing about the other person's
+    // phone, which is the only phone that can screenshot your chat. The one
+    // person it never protected was the person who switched it on.
+    //
+    // Now: my own screenshotMode is what I DEMAND OF OTHERS (it is sent to their
+    // devices via peerBlocksCapture / peerWantsCaptureNotice), and what I OBEY
+    // is what they demand of me.
+    //
+    // Defaults are protective — an older server that does not send these fields
+    // yields block + notify, the same posture as the previous default.
+    const peerBlocks = chat.peerBlocksCapture ?? true;
+    const peerNotify = chat.peerWantsCaptureNotice ?? true;
+    const allowsCapture = !peerBlocks;
+    const reportsCapture = peerNotify;
+    // Observable, because this feature is invisible until it fails: nothing in
+    // the UI says whether the listener armed or what policy the peers set, so a
+    // silent no-op looked identical to a working one.
+    // One line, no ids: this feature is invisible until it fails, and a silent
+    // no-op looked identical to a working one for the whole of this bug.
+    console.log(`[screenshot] policy blocks=${peerBlocks} notify=${peerNotify}`);
 
     if (allowsCapture) {
       ScreenCapture.allowScreenCaptureAsync().catch(() => {});
@@ -1377,12 +1464,13 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
     if (reportsCapture) {
       try {
         sub = ScreenCapture.addScreenshotListener(() => {
-          reportScreenshotCaptured(chatId).catch(() => {});
+          reportScreenshotCaptured(chatId)
+            .catch((e) => console.warn('[screenshot] report failed:', e?.message));
           // Record the capture in the on-device tamper-evident audit chain so it
           // surfaces in the Alerts tab (#41). Real local event — the inbound
           // "someone captured your content" alert is delivered separately (W7).
           recordScreenshotAttempt({ chatId, chatName: title }).catch(() => {});
-          if (mode === 'allow_notify') {
+          if (peerNotify) {
             Alert.alert('Screenshot captured', 'The other side has been notified.');
           }
         });
@@ -1394,7 +1482,7 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
       // Restore the global-block posture (matches _layout.tsx default)
       ScreenCapture.preventScreenCaptureAsync().catch(() => {});
     };
-  }, [chat?.screenshotMode, chatId]);
+  }, [chat?.peerBlocksCapture, chat?.peerWantsCaptureNotice, chatId]);
 
   // Auto-dismiss the inbound screenshot banner after 4 seconds.
   useEffect(() => {
@@ -2550,7 +2638,7 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
 
   return (
     <View
-      style={[S.screen, { paddingBottom: kbHeight }]}
+      style={[S.screen, { paddingBottom: composerGap }]}
       onLayout={e => setPaneH(e.nativeEvent.layout.height)}
     >
       {/* Per-chat wallpaper — painted behind the (transparent) message list */}
@@ -2608,12 +2696,6 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
               <Text style={[S.expiryTxt, expiresIn != null && expiresIn <= 600 && { color: colors.danger }]}>
                 {expiryLabel}
               </Text>
-            </View>
-          )}
-          {/* Live Chat Viewers (#58): who's viewing right now — tap for details */}
-          {chatViewers.length > 0 && (
-            <View style={{ marginTop: 3 }}>
-              <ViewerStack viewers={chatViewers} resolve={resolveViewer} />
             </View>
           )}
         </View>
@@ -2975,6 +3057,19 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
         </View>
       )}
 
+      {/* Live Chat Viewers (#58): who's viewing right now — tap for details.
+          MOVED OUT OF THE HEADER. It sat under the title, where it pushed the
+          header taller the moment anyone opened the chat — a header that grows
+          when a second person looks at it is the worst place for it on a small
+          screen. Down here it sits with the typing line, directly above the
+          composer: both answer "what is the other person doing right now", and
+          both belong next to where you are about to reply. */}
+      {chatViewers.length > 0 && (
+        <View style={S.typingBar}>
+          <ViewerStack viewers={chatViewers} resolve={resolveViewer} />
+        </View>
+      )}
+
       {/* Typing indicator */}
       {typingUids.size > 0 && (
         <View style={S.typingBar}>
@@ -3065,9 +3160,7 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
       )}
 
       {/* Emoji panel (tap the 😊 icon) — inserts into the message input */}
-      {emojiOpen && editingId == null && !recording && (
-        <EmojiPanel onPick={(e) => setInput(prev => (prev + e).slice(0, 4000))} />
-      )}
+
 
       {/* Composer — either normal or recording mode */}
       {recording ? (
@@ -3088,11 +3181,19 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
             {editingId == null && (
               <TouchableOpacity
                 style={S.pillIconBtn}
-                onPress={() => { if (!emojiOpen) Keyboard.dismiss(); setEmojiOpen(o => !o); }}
+                onPress={() => { Keyboard.dismiss(); setGifOpen(true); }}
                 activeOpacity={0.7}
                 hitSlop={6}
               >
-                <Ionicons name={emojiOpen ? 'happy' : 'happy-outline'} size={24} color={emojiOpen ? colors.primary : colors.textDim} />
+                {/* ONE button for stickers, emojis and GIFs — they are three
+                    tabs of the same KLIPY sheet (/gif/search?type=…), so there
+                    is nothing to merge and nothing to duplicate. A sticker
+                    glyph rather than a smiley because it opens ON stickers. */}
+                <MaterialCommunityIcons
+                  name={gifOpen ? 'sticker' : 'sticker-emoji'}
+                  size={24}
+                  color={gifOpen ? colors.primary : colors.textDim}
+                />
               </TouchableOpacity>
             )}
             <TextInput
@@ -3101,21 +3202,11 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
               placeholderTextColor={colors.textDim}
               value={input}
               onChangeText={onInputChange}
-              onFocus={() => setEmojiOpen(false)}
               multiline
               maxLength={4000}
             />
             {editingId == null && (
               <>
-                <TouchableOpacity
-                  style={S.pillIconBtn}
-                  onPress={() => { setEmojiOpen(false); Keyboard.dismiss(); setGifOpen(true); }}
-                  disabled={sending}
-                  activeOpacity={0.7}
-                  hitSlop={6}
-                >
-                  <Ionicons name="film-outline" size={23} color={colors.textDim} />
-                </TouchableOpacity>
                 <TouchableOpacity
                   style={S.pillIconBtn}
                   onPress={onPressAttach}
@@ -3332,7 +3423,7 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
       </Modal>
 
       {/* GIF picker (W15) */}
-      <GifPicker visible={gifOpen} onClose={() => setGifOpen(false)} onSelect={sendGif} />
+      <GifPicker visible={gifOpen} initialTab="stickers" onClose={() => setGifOpen(false)} onSelect={sendGif} />
 
       {/* Chat overflow menu — themed bottom sheet (replaces the 3-button Alert) */}
       <Sheet

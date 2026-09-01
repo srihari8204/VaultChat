@@ -1,6 +1,7 @@
 // app/email-verify.tsx — new-user email OTP. Proves email ownership → emailTicket
 // (required by /auth/profile/init). 6 visible digits.
 
+import { HEADER_TOP } from '../constants/layout';
 import { Ionicons } from '@expo/vector-icons';
 import { Stack, useRouter } from 'expo-router';
 import { useEffect, useMemo, useState } from 'react';
@@ -70,7 +71,7 @@ export default function EmailVerify() {
 
 const makeStyles = (c: Palette) => StyleSheet.create({
   screen: { flex: 1, backgroundColor: c.bg },
-  back: { paddingTop: 56, paddingHorizontal: 20 },
+  back: { paddingTop: HEADER_TOP, paddingHorizontal: 20 },
   backTxt: { color: c.text, fontSize: 26 },
   body: { flex: 1, paddingHorizontal: 24, paddingTop: 24, alignItems: 'center' },
   title: { color: c.text, fontSize: 24, fontWeight: '900', textAlign: 'center' },

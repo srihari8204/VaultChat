@@ -37,7 +37,7 @@ type Entry = { kind: GameKind; name: string; icon: string; blurb: string; accent
 
 const GAMES: Entry[] = [
   { kind: 'chess',     name: 'Chess',       icon: '♛', accent: '#8ca2ad', blurb: 'Server-refereed. Your legal moves come from the table.' },
-  { kind: 'rummy',     name: 'Rummy',       icon: '🂡', accent: '#5fe08c', blurb: '13 cards, two decks. Your hand never leaves the server.' },
+  { kind: 'rummy',     name: 'Rummy',       icon: '🂡', accent: '#5fe08c', blurb: 'Points rummy, 2–6 players. Public tables or a private code.' },
   { kind: 'ludo',      name: 'Ludo',        icon: '🎲', accent: '#f3c245', blurb: 'Two to four players, provably fair dice.' },
   { kind: 'tictactoe', name: 'Tic-Tac-Toe', icon: '✕', accent: '#ff8080', blurb: 'Three in a row. Quick one.' },
 ];
