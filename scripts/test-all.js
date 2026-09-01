@@ -116,6 +116,21 @@ async function main() {
   console.log(`  passed: ${results.length - failed.length}/${results.length}`);
   if (failed.length) {
     console.log(`  FAILED: ${failed.sort(bySort).map((f) => f.rel).join(', ')}`);
+    // Say WHY, when the why is the runtime rather than the code.
+    //
+    // The sqlite-backed suites do not fail here, they SEGFAULT (exit 139) or
+    // die on an unknown builtin, and neither says anything about the cause.
+    // Both come from one thing: better-sqlite3@13 declares `"node": ">=22"`
+    // and node:sqlite only exists from 22.5, so on an older Node the prebuilt
+    // N-API binary loads happily and then crashes the process the moment a
+    // database is opened. Four suites reporting nothing is how that gets
+    // mistaken for four broken tests.
+    if (Number(process.versions.node.split('.')[0]) < 22) {
+      console.log(`
+  Node ${process.versions.node} is below the 22 this repo's tests need`);
+      console.log('  (better-sqlite3@13 engines: node >=22; node:sqlite lands in 22.5).');
+      console.log('  Any sqlite-backed suite above will crash rather than run until you upgrade.');
+    }
     process.exit(1);
   }
   // The migrations/tests/*.sql suite lives outside this runner's world: it needs
