@@ -159,20 +159,24 @@ for (const [name, src] of [['TicTacToe', TTT], ['Chess', CHESS], ['Ludo', LUDO],
 // ── voice ─────────────────────────────────────────────────────────────
 const VOICE = readFileSync('lib/games/useTableVoice.ts', 'utf8');
 
+// The SFU these used to check is gone: /api/voice/token answers 404 and the
+// deployment reports sfu:false, so voice is now a peer-to-peer mesh (see the
+// header of useTableVoice.ts). The GUARANTEES did not change — only where they
+// are enforced — so these assert the mesh's enforcement points, not LiveKit's.
 check('voice asks the SERVER whether this player may speak',
-  /canPublish/.test(VOICE) && /\/api\/voice\/token/.test(VOICE),
-  'a client deciding its own publish rights is the weakness that endpoint closes');
+  /setCanSpeak\(!m\.spectator\)/.test(VOICE),
+  'a client deciding its own publish rights is what the state frame closes');
 
-check('...and never requests a microphone for a spectator',
-  /if \(mayPublish && Platform\.OS === 'android'\)/.test(VOICE),
-  'a listen-only seat cannot be heard even if permission is granted');
+check('...and a spectator cannot be heard even once the mic is open',
+  /const startMuted = !canSpeak/.test(VOICE) && /if \(!s \|\| !canSpeak\) return/.test(VOICE),
+  'a mesh has no server-side publish gate, so the track must start disabled AND mute must refuse to lift');
 
 check('...and does not re-install the WebRTC globals',
   /typeof g\.RTCPeerConnection !== 'undefined'/.test(VOICE),
   'registering twice swaps the constructors under a running SDK');
 
 check('the microphone cannot outlive the table',
-  /alive\.current = false; void teardown\(\)/.test(VOICE),
+  /alive\.current = false; teardown\(\)/.test(VOICE),
   'a room left connected keeps publishing from a board nobody is looking at');
 
 // ── online ────────────────────────────────────────────────────────────
