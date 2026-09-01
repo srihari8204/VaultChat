@@ -2096,14 +2096,39 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
   const [camDragging, setCamDragging] = useState(false);
   const camDraggingRef = useRef(false);
   const ARM_DIST = 56; // px to slide up to "arm" the video note
+  // ~11s of hinting, then the screen is allowed to go quiet.
+  const CHEV_PULSES = 6;
 
-  // Gentle, looping up-chevron above the camera icon so users discover slide-up.
+  // Gentle up-chevron above the camera icon so users discover slide-up.
+  //
+  // BOUNDED, because this is DECORATION ON THE MOST-OPENED SCREEN IN THE APP.
+  //
+  // It used to be an unbounded Animated.loop: it pulsed for the entire life of
+  // the chat screen, forever, whether or not anyone was looking at the camera
+  // icon. Two costs, one of them invisible:
+  //
+  //   * the UI thread never goes idle while a chat is open. Every 950ms tick is
+  //     a wake-up and a frame the compositor has to produce, for a hint the
+  //     user has either taken or ignored within the first few seconds.
+  //   * it makes the screen untestable. `uiautomator dump` waits for an idle
+  //     window and NEVER gets one, so no automated check can read a chat screen
+  //     at all — which is how this was found.
+  //
+  // CHEV_PULSES is a discovery cue, not an indicator: after a handful of cycles
+  // it has done its job. Anything that reports live STATE (a recording dot, a
+  // transfer spinner) must keep looping — this is not that, and the rest of the
+  // app's loops are deliberately left alone.
   useEffect(() => {
-    const loop = Animated.loop(Animated.sequence([
-      Animated.timing(chevPulse, { toValue: 1, duration: 950, useNativeDriver: true }),
-      Animated.timing(chevPulse, { toValue: 0, duration: 950, useNativeDriver: true }),
-    ]));
+    const loop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(chevPulse, { toValue: 1, duration: 950, useNativeDriver: true }),
+        Animated.timing(chevPulse, { toValue: 0, duration: 950, useNativeDriver: true }),
+      ]),
+      { iterations: CHEV_PULSES },
+    );
     loop.start();
+    // Still stopped on unmount: leaving a running animation attached to a
+    // torn-down screen keeps its node alive.
     return () => loop.stop();
   }, [chevPulse]);
 
@@ -3441,7 +3466,7 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
         onRequestClose={() => setPendingItems([])}
       >
         <KeyboardAvoidingView
-          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          behavior={'padding'}
           style={{ flex: 1, backgroundColor: '#000' }}
         >
           {(() => {

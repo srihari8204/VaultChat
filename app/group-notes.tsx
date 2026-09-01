@@ -182,7 +182,7 @@ export default function GroupNotesScreen() {
       )}
 
       <Modal visible={creating} transparent animationType="slide" onRequestClose={() => setCreating(false)}>
-        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={st.backdrop}>
+        <KeyboardAvoidingView behavior={'padding'} style={st.backdrop}>
           <TouchableOpacity style={{ flex: 1 }} activeOpacity={1} onPress={() => setCreating(false)} />
           <View style={[st.sheet, { backgroundColor: colors.card, borderColor: colors.border }]}>
             <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 12 }}>

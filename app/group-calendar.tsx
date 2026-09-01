@@ -254,7 +254,7 @@ export default function GroupCalendarScreen() {
       )}
 
       <Modal visible={composing} transparent animationType="slide" onRequestClose={() => setComposing(false)}>
-        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={st.backdrop}>
+        <KeyboardAvoidingView behavior={'padding'} style={st.backdrop}>
           <TouchableOpacity style={{ flex: 1 }} activeOpacity={1} onPress={() => setComposing(false)} />
           <View style={[st.sheet, { backgroundColor: colors.card, borderColor: colors.border }]}>
             <Text style={{ color: colors.text, fontWeight: '800', fontSize: 16, marginBottom: 14 }}>New event</Text>

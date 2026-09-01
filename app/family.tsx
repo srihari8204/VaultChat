@@ -1947,7 +1947,7 @@ export default function FamilySpaceScreen() {
 
       {/* ── Check-in sheet ── */}
       <Modal visible={checkin} transparent animationType="slide" onRequestClose={() => setCheckin(false)}>
-        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={st.modalWrap}>
+        <KeyboardAvoidingView behavior={'padding'} style={st.modalWrap}>
           <Pressable style={{ flex: 1 }} onPress={() => setCheckin(false)} />
           <View style={[st.modal, { backgroundColor: colors.surfaceSolid, borderColor: colors.border }]}>
             {/* Design screen 20: choose a status, then send.
@@ -1993,7 +1993,7 @@ export default function FamilySpaceScreen() {
 
       {/* ── Announcement sheet ── */}
       <Modal visible={announcing} transparent animationType="slide" onRequestClose={() => setAnnouncing(false)}>
-        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={st.modalWrap}>
+        <KeyboardAvoidingView behavior={'padding'} style={st.modalWrap}>
           <Pressable style={{ flex: 1 }} onPress={() => setAnnouncing(false)} />
           <View style={[st.modal, { backgroundColor: colors.surfaceSolid, borderColor: colors.border }]}>
             <Text style={[st.modalTitle, { color: colors.text }]}>Announcement</Text>
@@ -2037,7 +2037,7 @@ export default function FamilySpaceScreen() {
 
       {/* ── Manage circle sheet ── */}
       <Modal visible={manage} transparent animationType="slide" onRequestClose={() => setManage(false)}>
-        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={st.modalWrap}>
+        <KeyboardAvoidingView behavior={'padding'} style={st.modalWrap}>
           <Pressable style={{ flex: 1 }} onPress={() => setManage(false)} />
           <View style={[st.modal, { backgroundColor: colors.surfaceSolid, borderColor: colors.border }]}>
             <Text style={[st.modalTitle, { color: colors.text }]}>{active?.name}</Text>
