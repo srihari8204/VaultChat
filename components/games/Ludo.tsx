@@ -450,8 +450,15 @@ export default function Ludo({ roomId = 'ludo-main', auto, autoBot }: { roomId?:
 /**
  * The whole static board in one SVG, drawn in grid units (0..15) so every
  * coordinate below reads as a cell reference rather than a pixel.
+ *
+ * MEMOISED, and it matters more than it looks: this is ~80 SVG nodes with
+ * gradient fills, and `size` is the only thing it reads — a number fixed for
+ * the life of the screen. Without the memo every dice roll, every token move
+ * and every turn change rebuilt the entire board underneath the pieces, which
+ * is the most expensive thing on the screen being redrawn to show exactly the
+ * same picture.
  */
-function BoardSvg({ size }: { size: number }) {
+const BoardSvg = React.memo(function BoardSvg({ size }: { size: number }) {
   const homeCells = useMemo(() => {
     const out: { rc: [number, number]; seat: number }[] = [];
     for (let s = 0; s < 4; s++) for (let i = 0; i < 5; i++) out.push({ rc: HOME_COORDS[s][i], seat: s });
@@ -547,7 +554,7 @@ function BoardSvg({ size }: { size: number }) {
       ))}
     </Svg>
   );
-}
+});
 
 /* ── a token ────────────────────────────────────────────────────────── */
 

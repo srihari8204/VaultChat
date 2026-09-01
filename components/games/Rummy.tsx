@@ -677,7 +677,7 @@ export default function Rummy({ tableId = '', auto, autoBot }: { tableId?: strin
                   card={c}
                   w={m.cardW}
                   selected={picked.includes(id)}
-                  onPress={() => toggle(id)}
+                  onPress={toggle}
                   onDrop={dropAt}
                 />
               ) : null;
@@ -773,16 +773,24 @@ export default function Rummy({ tableId = '', auto, autoBot }: { tableId?: strin
  * Ticks only while there is a live deadline, so a finished board and a lobby
  * cost no timer at all. `secondsLeft` refuses a number the device clock says is
  * nonsense, which is why this can return null on a running turn.
+ *
+ * It holds the SECOND, not the clock reading. `setNow(Date.now())` was a new
+ * value every time by construction, so every tick re-rendered this whole screen
+ * — and half of them redrew the identical digit, because the interval is finer
+ * than the thing it displays. Storing what is actually shown lets React bail
+ * out on the unchanged value, which is also why the interval can be fine enough
+ * to keep the tick honest without costing anything extra.
  */
 function useCountdown(deadline: unknown, live: boolean): number | null {
-  const [now, setNow] = useState(() => Date.now());
+  const [secs, setSecs] = useState<number | null>(() => secondsLeft(deadline, Date.now()));
   useEffect(() => {
-    if (!live || typeof deadline !== 'number') return;
-    setNow(Date.now());
-    const id = setInterval(() => setNow(Date.now()), 500);
+    if (!live || typeof deadline !== 'number') { setSecs(null); return; }
+    const tick = () => setSecs(secondsLeft(deadline, Date.now()));
+    tick();
+    const id = setInterval(tick, 250);
     return () => clearInterval(id);
   }, [deadline, live]);
-  return live ? secondsLeft(deadline, now) : null;
+  return live ? secs : null;
 }
 
 /**
@@ -1651,13 +1659,24 @@ function CardFace({ card, w, glow, wild }: { card: Card; w: number; glow?: boole
  * and it means an interrupted drag (a rotation, a backgrounded app) can never
  * strand a card off-screen.
  */
-function HandCard({
+/**
+ * MEMOISED. Each card owns four shared values, a Pan/Tap gesture pair and an
+ * animated style, and rebuilding those is what re-rendering one of these costs
+ * — thirteen times over, twice a second, because the turn clock sits at the top
+ * of this screen and every tick re-rendered the whole hand to change one digit.
+ *
+ * `onPress` takes the card id rather than closing over it, which is the whole
+ * reason the memo holds: `() => toggle(id)` would be a new function on every
+ * render and defeat it. `toggle` and `dropAt` are already stable callbacks, and
+ * `card` keeps its identity between server frames via the `byId` map.
+ */
+const HandCard = React.memo(function HandCard({
   card, w, selected, onPress, onDrop,
 }: {
   card: Card;
   w: number;
   selected: boolean;
-  onPress: () => void;
+  onPress: (cardId: string) => void;
   onDrop: (cardId: string, x: number, y: number) => void;
 }) {
   const dx = useSharedValue(0);
@@ -1687,7 +1706,7 @@ function HandCard({
       dy.value = withSpring(0, { damping: 18, stiffness: 260 });
     });
 
-  const tap = Gesture.Tap().onEnd((_e, ok) => { if (ok) runOnJS(onPress)(); });
+  const tap = Gesture.Tap().onEnd((_e, ok) => { if (ok) runOnJS(onPress)(card.id); });
   const composed = Gesture.Exclusive(pan, tap);
 
   const a = useAnimatedStyle(() => ({
@@ -1711,7 +1730,7 @@ function HandCard({
       </Animated.View>
     </GestureDetector>
   );
-}
+});
 
 /* ── seats ──────────────────────────────────────────────────────────── */
 

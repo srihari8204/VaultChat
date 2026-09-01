@@ -195,5 +195,29 @@ check('...and leaves the queue when the player walks away',
   /return \(\) => \{ aliveRef\.current = false; close\(\); \}/.test(QM),
   'a stale queue entry pairs someone against a socket that stopped listening');
 
+// ── what stays off the render path ────────────────────────────────────
+//
+// These three are the difference between a board that redraws when something
+// happened and one that redraws on a timer. They are all invisible: delete any
+// of them and the games still work, still pass every other check here, and just
+// get slower on exactly the devices least able to afford it — which is why they
+// are asserted rather than left to review.
+
+check('the ludo board is memoised',
+  /React\.memo\(function BoardSvg/.test(LUDO),
+  '~80 SVG nodes with gradient fills, redrawn on every roll and every move to show the same picture');
+
+check('a rummy hand card is memoised',
+  /React\.memo\(function HandCard/.test(RUMMY),
+  'thirteen cards each rebuilding four shared values and a gesture pair');
+
+check('...and its tap handler is stable, or the memo is decoration',
+  /onPress=\{toggle\}/.test(RUMMY) && /runOnJS\(onPress\)\(card\.id\)/.test(RUMMY),
+  'an inline () => toggle(id) is a new prop every render and defeats the memo entirely');
+
+check('the turn clock re-renders once a second, not on every tick',
+  /setSecs\(secondsLeft\(deadline, Date\.now\(\)\)\)/.test(RUMMY) && !/setNow\(Date\.now\(\)\)/.test(stripComments(RUMMY)),
+  'holding the raw clock reading makes every tick a new value, so React can never bail out');
+
 console.log(failures ? `\n  ${failures} FAILED\n` : '\n  all native-games checks passed\n');
 process.exit(failures ? 1 : 0);
