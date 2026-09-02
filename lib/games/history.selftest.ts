@@ -80,6 +80,12 @@ A(detailOf({ game: { result: 'Robo wins' } }, 'lost') === 'Robo wins', "5. the s
 A(detailOf({ settlement: { me: { delta: 40 } } }, 'won') === '+40 coins', '5a. a settlement reads as coins');
 A(detailOf({ settlement: { me: { delta: -25 } } }, 'lost') === '-25 coins', '5b. including a loss');
 A(detailOf({}, 'draw') === 'Draw', '5c. and a bare outcome still says something true');
+A(detailOf({ settlement: { me: { delta: 0 } } }, 'lost') === 'You lost',
+  '5d. a ZERO delta says nothing and must not displace the outcome — a rummy loss '
+  + 'read "+0 coins" on device');
+A(detailOf({ settlement: { them: { delta: 40 }, me: { delta: -40 } } }, 'lost', 'me') === '-40 coins',
+  '5e. MY delta, not whoever the server listed first — the first-value read '
+  + "showed another player's coins as mine");
 
 // ── moves ─────────────────────────────────────────────────────────────
 A(JSON.stringify(movesOf({ game: { history: ['e4', 'e5'] } })) === '["e4","e5"]', '6. plain SAN moves');

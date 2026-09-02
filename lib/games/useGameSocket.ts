@@ -208,7 +208,7 @@ export function useGameSocket(game: GameKind, roomId = '', opts: AutoStart = {})
           at: Date.now(),
           outcome: outcomeOf(s, you),
           opponents: opponentsOf(s, you),
-          detail: detailOf(s, outcomeOf(s, you)),
+          detail: detailOf(s, outcomeOf(s, you), you),
           moves: game === 'chess' ? movesOf(s) : undefined,
         });
       }

@@ -127,16 +127,22 @@ export function opponentsOf(raw: any, you: string): string[] {
 }
 
 /** A readable line about how it ended. Falls back to nothing, never to a guess. */
-export function detailOf(raw: any, outcome: GameOutcome): string {
+export function detailOf(raw: any, outcome: GameOutcome, me?: string): string {
   const g = raw?.game ?? {};
   // Only a TERMINAL result is a description of how it ended; "playing" is not.
   if (typeof g.result === 'string' && g.result && isFinishedSnapshot(raw)) return g.result;
   const st = raw?.settlement;
   if (st && typeof st === 'object') {
-    const d = Object.values(st as Record<string, any>)
+    // MY delta, not the first one in the object. A settlement is keyed by
+    // player, so `Object.values(...)[0]` reports whoever the server happened to
+    // list first — on device that showed another player's coins as mine.
+    const mine = me != null && (st as any)[me] != null ? [(st as any)[me]] : Object.values(st as Record<string, any>);
+    const d = mine
       .map(v => (typeof v?.delta === 'number' ? v.delta : null))
       .find(v => v != null);
-    if (typeof d === 'number') return d >= 0 ? `+${d} coins` : `${d} coins`;
+    // A zero delta says nothing and it displaced "You lost" on device, so it
+    // falls through to the outcome rather than rendering "+0 coins".
+    if (typeof d === 'number' && d !== 0) return d > 0 ? `+${d} coins` : `${d} coins`;
   }
   return outcome === 'won' ? 'You won' : outcome === 'lost' ? 'You lost' : outcome === 'draw' ? 'Draw' : 'Finished';
 }
