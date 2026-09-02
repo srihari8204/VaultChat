@@ -16,6 +16,7 @@ import * as SecureStore from 'expo-secure-store';
 import { api, getCachedUser } from '../../lib/api';
 import { chunkedKV } from './e2eeStorage';
 import { e2eeEncrypt, e2eeDecrypt, e2eeCachePlaintext, e2eeGetCached, E2EE_UNDECRYPTABLE } from './e2eeSession.rn';
+import { redactIds, shortId, warnOnce } from '../../lib/diagLog';
 import {
   createSenderKey, distributionMessage, processDistribution, groupEncrypt, groupDecrypt,
   type OwnSenderKey, type PeerSenderKey, type SenderKeyDistribution,
@@ -124,7 +125,16 @@ async function ingest(chatId: string): Promise<void> {
       // on device for the same peer whose 1:1 session was mid auto-reset loop.
       // It heals once that session re-keys and this runs again; logging it makes
       // the dependency visible instead of guesswork.
-      console.warn('[e2ee] group: could not open sender key from', senderId, '—', (err as any)?.message ?? err);
+      //
+      // ONCE PER PEER, NOT ONCE PER ATTEMPT. Measured on a cold boot: 9 of these
+      // in 3 seconds for a handful of peers, because ingest re-runs per chat and
+      // re-reports the same broken pairwise session every time. The FIRST one
+      // carries the whole diagnostic — the repeats only bury it. And console.warn
+      // is deliberately NOT stripped from release builds, so every repeat was a
+      // real line in production logcat carrying a full user id.
+      warnOnce(chatId + '|' + senderId,
+        '[e2ee] group: could not open sender key from ' + shortId(senderId)
+        + ' — ' + redactIds(String((err as any)?.message ?? err)));
     }
   }
 }

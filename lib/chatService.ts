@@ -15,6 +15,7 @@ import { E2EE_ENABLED, GROUP_E2EE, E2EE_STRICT, UPLOAD_PROGRESS } from '../const
 // server-side in internal/groups. Import rather than restate them.
 import type { GroupType } from './groups/catalog';
 import type { Permission, GroupRole } from './groups/permissions';
+import { redactIds, warnOnce } from './diagLog';
 
 export interface ChatSummary {
   id:            string;
@@ -331,7 +332,14 @@ export async function decryptFromChat(
     try {
       return await g.groupDecryptMessage(chatId, senderId, messageId ?? 0, ciphertext);
     } catch (err) {
-      console.warn('[e2ee] group decrypt failed:', (err as any)?.message);
+      // ONCE PER SENDER, NOT ONCE PER MESSAGE. This fires for every message that
+      // cannot be opened, so one broken sender key produced a warn per message —
+      // 12 of them in a 3-second cold boot, all saying the same thing. The
+      // message itself embeds the sender's full uuid, and console.warn ships in
+      // release, so each repeat printed a user id into production logcat.
+      // Behaviour is unchanged: the bubble still shows the same placeholder.
+      warnOnce('gdec|' + chatId + '|' + senderId,
+        '[e2ee] group decrypt failed: ' + redactIds(String((err as any)?.message ?? err)));
       return '🔒 unable to decrypt';
     }
   }
