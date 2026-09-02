@@ -82,7 +82,7 @@ the send is refused. Found while implementing; design.md decision 1 records it.
   - Honor: chess (private room 8JTC9F, voice, rules, bot strength), ludo (bot game, roll, fairness, reconnect), tic-tac-toe (bot game, played out, rematch), rummy (practice table, shared rules sheet, voice, 78-card deck). All four show the room code and "Talk at the table" in the lobby.
 - [x] 6.2 Android release build succeeds — no `require('fs')` anywhere in app code, source scans stay in `*.selftest.ts` (**written**)
   - `assembleRelease -PreactNativeArchitectures=arm64-v8a`, GRADLE_EXIT=0, 90.6 MB APK. The pre-existing `require('fs')` in `lib/vaultBeam/transportAdapter.ts` did not break the bundle.
-- [ ] 6.3 Sync `specs/mini-games/spec.md` into `openspec/specs/mini-games/` only once the behaviour is both deployed and device-verified (**device-verified**)
+- [x] 6.3 **Spec synced** to `openspec/specs/mini-games/spec.md` — 14 requirements, 39 scenarios, `openspec validate --specs` 15/15. The gate was met: the backend is live (ledger 125, `/games/tables` 401) and the behaviour is device-verified on two phones (**device-verified**)
 
 ## 7. Device notes, 2026-09-02
 
