@@ -6,7 +6,7 @@
 // of one edge. A layout bug here is not cosmetic — a Declare button under the
 // gesture bar is a hand the player cannot finish.
 
-import {
+import { fanFor,
   metrics, seatSpots, handWidthAt, secondsLeft, ranked, activeCount,
   allowsBots, newPrivateCode, normalizeCode, CARD_RATIO,
   type RummyPlayer,
@@ -153,6 +153,36 @@ console.log('\nRoom codes\n');
   check('an all-punctuation code comes back empty rather than as junk',
     normalizeCode('///???') === '');
   check('a hyphenated code survives', normalizeCode('room-7_x') === 'room-7_x');
+}
+
+/* -- the fan spreads when there is room ----------------------------- */
+//
+// FAN was a fixed 0.58 — 42% of every card hidden behind the next, on a wide
+// landscape table with space to spare on both sides. Reported from a device
+// photo of a Redmi in landscape.
+{
+  const wide = fanFor(48, 2340);
+  const tight = fanFor(48, 700);
+  check('a wide table stops overlapping the cards', wide === 1);
+  check('a narrow one still tucks them in', tight >= 0.58 && tight < 1);
+  check('and never tighter than the size was chosen for', fanFor(70, 320) === 0.58);
+  // The two real phones, at the card size the cap now allows: thirteen upright
+  // cards, none covering another, with table left over — the look of the
+  // reference mockup rather than a fanned pile.
+  for (const [cardW, width, dev] of [[175, 2664, 'Honor'], [148, 2340, 'Redmi']] as [number, number, string][]) {
+    const f = fanFor(cardW, width);
+    check(`${dev}: no overlap at the shipped card size`, f >= 1);
+    check(`${dev}: the hand fits inside the display`, handWidthAt(cardW, f) < width);
+  }
+  // The margin is PROPORTIONAL: a flat one was enough at 2340px and not at
+  // 2664px, where the row still reached the screen edge and the hand rendered
+  // as twelve cards with five overlapping pairs. Measured on two phones.
+  for (const [cardW, width] of [[202, 2664], [170, 2340], [120, 1600]] as [number, number][]) {
+    const slack = width - handWidthAt(cardW, fanFor(cardW, width));
+    check(`a ${width}px table keeps real slack (${Math.round(slack)}px)`, slack >= width * 0.05);
+  }
+  check('the hand still fits at the fan it chose',
+    handWidthAt(48, fanFor(48, 2340)) <= 2340 + 1);
 }
 
 console.log(failures ? `\n  ${failures} FAILED\n` : '\n  all rummy table checks passed\n');

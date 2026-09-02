@@ -96,6 +96,88 @@ func RegisterGames(mux *http.ServeMux) {
 	// registration that makes them deliverable. Both live in games_notify.go.
 	mux.HandleFunc("POST /games/notify", gamesNotify)
 	mux.HandleFunc("POST /games/device-token", httpx.RequireAuth(gamesDeviceToken))
+	// The tables this player is sitting at — the half of asynchronous play a
+	// push alone cannot provide. Written by games_notify.go (migration 125).
+	mux.HandleFunc("GET /games/tables", httpx.RequireAuth(gamesLiveTables))
+	mux.HandleFunc("DELETE /games/tables", httpx.RequireAuth(gamesForgetTable))
+}
+
+// gamesLiveTablesSQL reads ONE player's tables.
+//
+// The `user_id = $1` is the entire access control. RLS is inert in production —
+// the API connects as a superuser and bypasses every policy — so a handler that
+// leaves scoping to the database is a handler with no scoping at all. Kept as a
+// named constant so a test can assert the clause is still here.
+const gamesLiveTablesSQL = `
+	SELECT game, room, your_turn, COALESCE(title, ''), COALESCE(body, ''), updated_at
+	  FROM games_live_tables
+	 WHERE user_id = $1
+	 ORDER BY updated_at DESC
+	 LIMIT 50`
+
+// gamesLiveTables answers with the caller's live tables, newest first.
+//
+// A LAUNCHER, NOT A SOURCE OF TRUTH. Every row is derived from the last
+// notification the games server signed about that table; the games server owns
+// the game and is re-read the moment the board opens. There is no game-over
+// event in the notify contract, so a finished table leaves this list when the
+// app opens it and finds the game over (DELETE below), or when the sweep ages
+// it out — never because this handler worked anything out for itself.
+func gamesLiveTables(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	user := httpx.UserFrom(r)
+
+	rows, err := db.Pool.Query(ctx, gamesLiveTablesSQL, user.ID)
+	if err != nil {
+		httpx.Err(w, http.StatusInternalServerError, "Failed to load tables")
+		return
+	}
+	defer rows.Close()
+
+	out := make([]map[string]any, 0, 8)
+	for rows.Next() {
+		var game, room, title, body string
+		var yourTurn bool
+		var updated time.Time
+		if err := rows.Scan(&game, &room, &yourTurn, &title, &body, &updated); err != nil {
+			// One unreadable row must not blank the whole list.
+			continue
+		}
+		out = append(out, map[string]any{
+			"game": game, "room": room, "yourTurn": yourTurn,
+			"title": title, "body": body, "updatedAt": updated.UTC().Format(time.RFC3339),
+		})
+	}
+	httpx.JSON(w, 200, map[string]any{"ok": true, "tables": out})
+}
+
+// gamesForgetTable drops one row — the app calls this when it opens a table and
+// the server's snapshot says the game is finished.
+//
+// The client is the ONLY party that ever learns a game ended: the notify
+// contract has no game-over kind, and we cannot ask the games server. This is
+// not the client deciding game truth — it is relaying what the authoritative
+// snapshot said, to a list that was only ever a record of notifications.
+//
+// Scoped to the caller's own row. Knowing somebody else's room id is not a
+// capability to edit their list.
+func gamesForgetTable(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	user := httpx.UserFrom(r)
+
+	game := gamesNotifySlug(r.URL.Query().Get("game"))
+	room := gamesNotifySlug(r.URL.Query().Get("room"))
+	if game == "" || room == "" {
+		httpx.Err(w, http.StatusBadRequest, "game and room required")
+		return
+	}
+	if _, err := db.Pool.Exec(ctx,
+		`DELETE FROM games_live_tables WHERE user_id = $1 AND game = $2 AND room = $3`,
+		user.ID, game, room); err != nil {
+		httpx.Err(w, http.StatusInternalServerError, "Failed to remove the table")
+		return
+	}
+	httpx.JSON(w, 200, map[string]any{"ok": true})
 }
 
 // gamesLaunchToken mints a launch token for the already-authenticated caller.

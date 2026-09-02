@@ -161,7 +161,7 @@ export interface Message {
   id:        number;
   chatId:    string;
   senderId:  string;
-  type:      'text' | 'image' | 'video' | 'audio' | 'file' | 'location' | 'system' | 'sticker' | 'poll' | 'reaction' | 'vaultbeam' | 'group_ref';
+  type:      'text' | 'image' | 'video' | 'audio' | 'file' | 'location' | 'system' | 'sticker' | 'poll' | 'reaction' | 'vaultbeam' | 'group_ref' | 'game_invite';
   content:   string | null;        // opaque ciphertext (currently plaintext during Phase 3a)
   meta?:     any;
   replyToId: number | null;

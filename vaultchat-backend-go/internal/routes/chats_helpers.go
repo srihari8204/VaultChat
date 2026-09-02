@@ -281,9 +281,19 @@ func chatsGet(w http.ResponseWriter, r *http.Request) {
 var (
 	chatsMsgTypes = map[string]bool{"text": true, "image": true, "video": true, "audio": true,
 		"file": true, "location": true, "system": true, "sticker": true, "poll": true,
-		"reaction": true, "vaultbeam": true, "group_ref": true}
+		"reaction": true, "vaultbeam": true, "group_ref": true, "game_invite": true}
 	chatsGifURLRe = regexp.MustCompile(`^https://\S+$`)
 	chatsLinkRe   = regexp.MustCompile(`(?i)https?://`)
+
+	// The four games the app ships. The games server implements others; the app
+	// exposes exactly these, so a card naming anything else would open a screen
+	// that falls back to the menu — an invite that goes nowhere.
+	chatsGameKinds = map[string]bool{"chess": true, "rummy": true, "ludo": true, "tictactoe": true}
+	// A room id the games server would mint. It ends up inside a URL other
+	// people open, so a slash, a quote, a '?' or a '#' would REWRITE the link
+	// rather than fill it in. Same shape gamesNotifySlug enforces on the
+	// notification path — the two must not disagree about what an id is.
+	chatsGameRoomRe = regexp.MustCompile(`^[A-Za-z0-9_-]{1,64}$`)
 )
 
 // chatsBlockedDirect reports whether this is a DIRECT chat in which either side
@@ -490,6 +500,29 @@ func chatsMessagePost(w http.ResponseWriter, r *http.Request) {
 		// something the recipient is about to be shown anyway.
 		if meta == nil || strings.TrimSpace(chatsStrOr(meta["groupId"], "")) == "" {
 			httpx.Err(w, 400, "meta.groupId required for a group reference")
+			return
+		}
+	case msgType == "game_invite":
+		// A card pointing at a table on the games server (migration 124). Unlike
+		// group_ref there is nothing here to enrich: the rooms belong to a
+		// separate deployment this database has never heard of. So the server
+		// VALIDATES instead of rewriting, and both checks are the reason the
+		// card is not a link — a modified client must not be able to put
+		// anything in `room` that rewrites the URL the recipient opens.
+		//
+		// The `content` is the ordinary E2EE body and carries the readable
+		// fallback line for a client too old to know this type; the server
+		// neither reads it nor requires it.
+		if meta == nil {
+			httpx.Err(w, 400, "meta.game and meta.room required for a game invite")
+			return
+		}
+		if !chatsGameKinds[strings.TrimSpace(chatsStrOr(meta["game"], ""))] {
+			httpx.Err(w, 400, "meta.game must be one of chess, rummy, ludo, tictactoe")
+			return
+		}
+		if !chatsGameRoomRe.MatchString(strings.TrimSpace(chatsStrOr(meta["room"], ""))) {
+			httpx.Err(w, 400, "meta.room is not a room id")
 			return
 		}
 	case msgType == "reaction":

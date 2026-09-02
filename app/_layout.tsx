@@ -39,6 +39,7 @@ import { Stack, useRouter } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
 import * as ScreenCapture from 'expo-screen-capture';
 import * as SplashScreen from 'expo-splash-screen';
+import * as Linking from 'expo-linking';
 import * as Sentry from '@sentry/react-native';
 import { StatusBar } from 'expo-status-bar';
 import { View, ActivityIndicator, StyleSheet, Platform, AppState, InteractionManager } from 'react-native';
@@ -112,6 +113,31 @@ try { void getSocket().catch(() => {}); } catch { /* never block boot */ }
 // the splash once it has routed. preventAutoHide MUST run at module load, before
 // the splash would auto-hide when the JS bundle finishes loading.
 SplashScreen.preventAutoHideAsync().catch(() => {});
+
+/**
+ * ...AND HIDE IT WHEN A DEEP LINK MEANT app/index.tsx NEVER RUNS.
+ *
+ * hideAsync() lives in exactly one place: app/index.tsx, the cold-start router
+ * at route `/`. A cold start from a deep link — a turn notification, a game
+ * invite card, a vaultchat:// or /live/join link — routes STRAIGHT to that
+ * screen and never mounts index, so nothing ever hid the splash.
+ *
+ * The result is not a visible splash. It is worse: the activity window never
+ * becomes visible (`mHasSurface=false`), so it is never given an input channel
+ * (`dumpsys input` → `FocusedWindows: <none>`), and every touch is dropped
+ * until Android raises "isn't responding — Input dispatching timed out
+ * (Application does not have a focused window)". The UI renders and the sockets
+ * run, which is what makes it look like the app froze rather than failed to
+ * start. Reproduced from cold on both test phones, on two Android versions,
+ * with a plain VIEW intent, an explicit component, and BROWSABLE+NEW_TASK.
+ *
+ * Hiding here rather than moving index's call keeps the launcher path exactly
+ * as it was: index still covers its own auth read with the splash, so there is
+ * no spinner flash on a normal open.
+ */
+Linking.getInitialURL()
+  .then(url => { if (url) SplashScreen.hideAsync().catch(() => {}); })
+  .catch(() => { SplashScreen.hideAsync().catch(() => {}); });
 
 // ── Sentry frontend init (Day 16) ──────────────────────────────────
 // Reads EXPO_PUBLIC_SENTRY_DSN from EAS env. If unset (dev), Sentry is
@@ -616,6 +642,12 @@ function RootLayout() {
           } else {
             router.push('/group-invitations' as any);
           }
+        },
+        // A games turn push: land ON the table, not on the hub. An unknown game
+        // or a blank room opens the hub, which is what /games does with params
+        // it does not recognise anyway.
+        (game, room) => {
+          router.push({ pathname: '/games', params: game && room ? { game, room } : {} } as any);
         },
       );
     }

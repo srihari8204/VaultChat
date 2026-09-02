@@ -34,12 +34,16 @@ import Animated, {
 } from 'react-native-reanimated';
 import * as Haptics from 'expo-haptics';
 import { useGameSocket, type AutoStart } from '../../lib/games/useGameSocket';
-import { TableBackground, Panel, Btn, Banner, PlayerRow, useType, useBoardSize } from './ui';
+import { TableBackground, Panel, Btn, Banner, PlayerRow, Reconnecting, RematchBtn, TurnClock, useType, useBoardSize } from './ui';
+import { useRematch } from '../../lib/games/useRematch';
+import { RulesSheet, useFirstTimeRules } from './rules';
+import { rollSeed, receiptFrom, pushReceipt, type RollReceipt } from '../../lib/games/fairness';
+import { useCountdown } from '../../lib/games/useCountdown';
 import { C, S, R, D3, mix, goldLine } from '../../lib/games/theme';
 import { playSfx, preloadSfx, soundEnabled, setSoundEnabled } from '../../lib/games/sfx';
 import { Toasts, Confetti, Sheet, SettingRow, VoiceBar } from './feedback';
 import { useTableVoice } from '../../lib/games/useTableVoice';
-import { inviteToTable, shareResult } from '../../lib/games/invite';
+import { openInvite, shareResult } from '../../lib/games/invite';
 import { useWallet, STAKES, stakeLabel } from '../../lib/games/useWallet';
 
 /** 52-cell ring [row,col] on a 15x15 board, clockwise from red's start. */
@@ -124,6 +128,29 @@ export default function Ludo({ roomId = 'ludo-main', auto, autoBot }: { roomId?:
   const t = useType();
   const { width } = useWindowDimensions();
 
+  const rematch = useRematch('ludo', roomId, state, send);
+  const rules = useFirstTimeRules('ludo');
+
+  // How many seats we are waiting for before dealing. null = not waiting.
+  const [wantStart, setWantStart] = useState<number | null>(null);
+
+  // The server's own turn clock, when it sends one — no deadline, no clock.
+  //
+  // MUST LIVE UP HERE WITH THE OTHER HOOKS. It was written next to the board's
+  // `mine`, which sits AFTER the lobby's early return — so the hook ran only
+  // once a game existed, the hook count changed the instant the lobby became a
+  // board, and React threw "Rendered more hooks than during the previous
+  // render." That is a crash on the exact frame a game starts, which is the
+  // single worst place to put one.
+  const secs = useCountdown(state.raw?.deadline, !!state.game && state.game.phase !== 'finished');
+
+  // The dice have always been commit-reveal and it has always been invisible.
+  // Keep what this device sent alongside what the server published, so a player
+  // who suspects the dice can look instead of guessing. Nothing is recomputed
+  // here — this is a record, not a second referee.
+  const lastSeed = useRef<string | null>(null);
+  const [receipts, setReceipts] = useState<RollReceipt[]>([]);
+  const [showFair, setShowFair] = useState(false);
   const L = state.lobby;
   const G = state.game;
   const [showSettings, setShowSettings] = useState(false);
@@ -180,9 +207,33 @@ export default function Ludo({ roomId = 'ludo-main', auto, autoBot }: { roomId?:
   const prevDie = useRef<number | null>(null);
   useEffect(() => {
     const d = typeof G?.pendingDie === 'number' ? G.pendingDie : null;
-    if (d != null && d !== prevDie.current) playSfx(d === 6 ? 'six' : 'roll');
+    if (d != null && d !== prevDie.current) {
+      playSfx(d === 6 ? 'six' : 'roll');
+      // File the receipt for OUR roll only: a seed we did not send proves
+      // nothing about a number we did not ask for.
+      if (lastSeed.current) {
+        const cs = lastSeed.current;
+        lastSeed.current = null;
+        setReceipts(r => pushReceipt(r, receiptFrom(cs, state.raw)));
+      }
+    }
     prevDie.current = d;
-  }, [G?.pendingDie]);
+  }, [G?.pendingDie, state.raw]);
+
+  // Deal once the seats the player asked for have actually appeared.
+  //
+  // Guarded on `startedRef` because the server answers a second `start` with an
+  // error, which reads to a player as a broken table on a game that was fine.
+  const startedRef = useRef(false);
+  useEffect(() => {
+    if (wantStart == null || G) return;
+    if (!L || L.hostId !== state.you) return;
+    if ((L.members?.length ?? 0) < wantStart) return;
+    if (startedRef.current) return;
+    startedRef.current = true;
+    send({ t: 'start', mode: 'classic', stake });
+  }, [wantStart, L, G, state.you, send, stake]);
+  useEffect(() => { startedRef.current = false; }, [roomId]);
 
   const ended = useRef(false);
   useEffect(() => {
@@ -192,7 +243,9 @@ export default function Ludo({ roomId = 'ludo-main', auto, autoBot }: { roomId?:
     playSfx(G.winnerId === state.you ? 'win' : 'lose');
   }, [G?.phase, G?.winnerId, state.you]);
 
-  if (error && phase !== 'connected') {
+  // Mid-game the board stays up with a banner; this full-screen failure is for
+  // a table we never reached.
+  if (error && phase !== 'connected' && !state.game) {
     return (
       <Center>
         <Text style={{ fontSize: 46 }}>🎲</Text>
@@ -203,7 +256,8 @@ export default function Ludo({ roomId = 'ludo-main', auto, autoBot }: { roomId?:
     );
   }
 
-  if (phase !== 'connected' || !L) {
+  // Only take the screen back BEFORE there is a board.
+  if ((phase !== 'connected' && !G) || !L) {
     return (
       <Center>
         <Text style={{ fontSize: 46 }}>🎲</Text>
@@ -225,7 +279,13 @@ export default function Ludo({ roomId = 'ludo-main', auto, autoBot }: { roomId?:
   const fillAndStart = (n: number) => {
     const seated = L?.members?.length ?? 1;
     for (let i = seated; i < n + 1; i++) send({ t: 'addbot' });
-    setTimeout(() => send({ t: 'start', mode: 'classic', stake }), 400);
+    // Deal when the SEATS ARRIVE, not on a timer. A fixed 400ms was a race the
+    // table lost every time on a slow link: `start` reached the server while it
+    // still had one player, the server refused it, and the screen sat in the
+    // lobby with a bot in it and no way forward. That is what "the games don't
+    // work" looked like. The effect below fires once the snapshot shows enough
+    // seats — the same rule useGameSocket's auto-start already follows.
+    setWantStart(n + 1);
   };
 
   const finished = G?.phase === 'finished';
@@ -302,11 +362,34 @@ export default function Ludo({ roomId = 'ludo-main', auto, autoBot }: { roomId?:
             disabled={!host}
             onPress={() => { fillAndStart(3); }}
           />
+          {/* A private room is worth nothing if its code is not on screen: the
+              deep link covers people who have the app open, and this covers
+              everyone who is being read the code out loud. */}
+          {!!roomId && (
+            <Text style={{ color: C.muted, fontSize: t.sm }} selectable>
+              Room code: <Text style={{ color: C.gold, fontWeight: '800' }}>{roomId}</Text>
+            </Text>
+          )}
+          {/* Voice at the table. A private room is people you know waiting for
+              each other — the moment you most want to talk — and until now the
+              control only existed once the game was already running. */}
+          <VoiceBar
+            phase={voice.phase}
+            error={voice.error}
+            canSpeak={voice.canSpeak}
+            muted={voice.muted}
+            participants={voice.participants}
+            onJoin={voice.join}
+            onLeave={voice.leave}
+            onToggleMute={voice.toggleMute}
+          />
+          <Btn label="How to play" icon="📖" onPress={rules.open} />
           <Btn label="Add a bot" onPress={() => send({ t: 'addbot' })} disabled={!host} />
-          <Btn label="Invite a friend" icon="🔗" onPress={() => { void inviteToTable('ludo', roomId); }} disabled={!roomId} />
+          <Btn label="Invite a friend" icon="🔗" onPress={() => { void openInvite('ludo', roomId); }} disabled={!roomId} />
           <Btn label="Start now" kind="gold" onPress={() => send({ t: 'start', mode: 'classic', stake })} disabled={!host || members.length < 2} />
         </ScrollView>
         <Toasts events={events} />
+        <RulesSheet game="ludo" visible={rules.visible} onClose={rules.close} />
       </TableBackground>
     );
   }
@@ -314,7 +397,11 @@ export default function Ludo({ roomId = 'ludo-main', auto, autoBot }: { roomId?:
   // ── table ─────────────────────────────────────────────────────────
   const players: LPlayer[] = Array.isArray(G.players) ? G.players : [];
   const mySeat = players.find(p => pid(p) === state.you)?.seat ?? 0;
-  const mine = G.turnPlayerId === state.you;
+  // A tap while the socket is down goes nowhere: the intent is dropped and the
+  // next snapshot puts every token back where the table has it.
+  const connected = phase === 'connected';
+  const reconnecting = !connected && !!G;
+  const mine = G.turnPlayerId === state.you && connected;
   const movable: number[] = Array.isArray(G.movable) ? G.movable : [];
   const die: number | null = typeof G.pendingDie === 'number' ? G.pendingDie : null;
 
@@ -352,8 +439,11 @@ export default function Ludo({ roomId = 'ludo-main', auto, autoBot }: { roomId?:
           )}
         </View>
 
+        {reconnecting && <Reconnecting error={error} onRetry={retry} />}
+
         <View style={{ width: size, flexDirection: 'row', alignItems: 'center', gap: S[3] }}>
           <Die value={die} tumbling={tumbling} armed={canRoll} seat={mySeat} />
+          <TurnClock secs={secs} />
           <View style={{ flex: 1, gap: S[2] }}>
             {finished ? (
               <Banner
@@ -373,7 +463,9 @@ export default function Ludo({ roomId = 'ludo-main', auto, autoBot }: { roomId?:
                     setTumbling(true);
                     if (tumbleTimer.current) clearTimeout(tumbleTimer.current);
                     tumbleTimer.current = setTimeout(() => setTumbling(false), 850);
-                    send({ t: 'roll', clientSeed: seed() });
+                    const cs = rollSeed();
+                    lastSeed.current = cs;
+                    send({ t: 'roll', clientSeed: cs });
                   }}
                 />
                 <Text style={{ color: C.muted, fontSize: t.sm, textAlign: 'center' }}>
@@ -400,17 +492,52 @@ export default function Ludo({ roomId = 'ludo-main', auto, autoBot }: { roomId?:
 
         <View style={{ width: size, flexDirection: 'row', gap: S[2] }}>
           <Btn label="Emote" icon="💬" compact style={{ flex: 1 }} onPress={() => setShowEmotes(true)} />
-          <Btn label="Invite" icon="🔗" compact style={{ flex: 1 }} onPress={() => { void inviteToTable('ludo', roomId); }} disabled={!roomId} />
+          <Btn label="Invite" icon="🔗" compact style={{ flex: 1 }} onPress={() => { void openInvite('ludo', roomId); }} disabled={!roomId} />
           <Btn label="⚙" compact onPress={() => setShowSettings(true)} accessibilityLabel="Settings" />
         </View>
 
         {finished && (
           <View style={{ width: size, flexDirection: 'row', gap: S[2] }}>
-            <Btn label="Play again" kind="gold" icon="↻" style={{ flex: 1 }} onPress={() => send({ t: 'start' })} />
+            <RematchBtn rm={rematch} label="Play again" />
             <Btn label="Share" icon="📣" onPress={() => { void shareResult('ludo', G.winnerId === state.you); }} />
           </View>
         )}
+
+        {/* The dice are commit-reveal and have been from the start. Saying so
+            where the player can check is the whole feature — an invisible
+            guarantee reassures nobody. */}
+        <Btn label="Are these dice fair?" compact onPress={() => setShowFair(true)} />
       </ScrollView>
+
+      <Sheet visible={showFair} title="How the dice are rolled" onClose={() => setShowFair(false)}>
+        <Text style={{ color: C.muted, fontSize: t.sm, lineHeight: 20 }}>
+          Neither side decides a roll on its own. Your phone sends a random seed, the
+          table combines it with its own, and the number falls out of both. Change
+          either half and you get a different number.
+        </Text>
+        <Text style={{ color: C.muted, fontSize: t.sm, lineHeight: 20 }}>
+          Your recent rolls are below, exactly as they were sent and published. Nothing
+          here is recalculated on this phone: the table rolls, this only keeps the receipt.
+          Where it says “not published”, the table did not reveal that half — so the roll
+          cannot be checked independently, and we will not pretend otherwise.
+        </Text>
+        {receipts.length === 0 ? (
+          <Text style={{ color: C.muted, fontSize: t.sm }}>Roll the dice and your first receipt appears here.</Text>
+        ) : receipts.map(r => (
+          <View key={r.at} style={{ gap: 2, paddingVertical: S[2], borderTopWidth: 1, borderTopColor: goldLine[14] }}>
+            <Text style={{ color: C.text, fontSize: t.sm, fontWeight: '800' }}>
+              {r.value != null ? `Rolled ${r.value}` : 'Rolled'}
+            </Text>
+            <Text selectable style={{ color: C.muted, fontSize: 11 }}>your seed  {r.clientSeed}</Text>
+            <Text selectable style={{ color: C.muted, fontSize: 11 }}>
+              table commit  {r.commit ?? 'not published'}
+            </Text>
+            <Text selectable style={{ color: C.muted, fontSize: 11 }}>
+              table seed  {r.serverSeed ?? 'not published'}
+            </Text>
+          </View>
+        ))}
+      </Sheet>
 
       <Toasts events={events} />
       <Confetti show={!!finished && G.winnerId === state.you} />
@@ -761,15 +888,3 @@ function Center({ children }: { children: React.ReactNode }) {
   );
 }
 
-/**
- * This player's half of the commit-reveal die roll.
- *
- * The server combines it with its own secret and publishes a commit hash, so
- * neither side alone decides the number. Sending a constant would hand the
- * whole roll to the server and quietly void that.
- */
-function seed(): string {
-  let s = '';
-  for (let i = 0; i < 4; i++) s += Math.floor(Math.random() * 0xffffffff).toString(16).padStart(8, '0');
-  return s;
-}

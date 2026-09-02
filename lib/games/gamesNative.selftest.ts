@@ -19,6 +19,8 @@ const LUDO   = readFileSync('components/games/Ludo.tsx', 'utf8');
 const RUMMY  = readFileSync('components/games/Rummy.tsx', 'utf8');
 const HOOK   = readFileSync('lib/games/useGameSocket.ts', 'utf8');
 const FEEDBACK = readFileSync('components/games/feedback.tsx', 'utf8');
+const UI     = readFileSync('components/games/ui.tsx', 'utf8');
+const CLOCK  = readFileSync('lib/games/useCountdown.ts', 'utf8');
 
 let failures = 0;
 const check = (name: string, ok: boolean, detail = '') => {
@@ -153,7 +155,10 @@ check('the boards share one set of table furniture',
 for (const [name, src] of [['TicTacToe', TTT], ['Chess', CHESS], ['Ludo', LUDO], ['Rummy', RUMMY]] as [string, string][]) {
   check(`${name} shows server notices as toasts`, /<Toasts events=/.test(src));
   check(`${name} celebrates a win`, /<Confetti show=/.test(src));
-  check(`${name} can invite someone to the table`, /inviteToTable\(/.test(src));
+  // openInvite(), not inviteToTable(): the invite now opens a chat picker and
+  // posts a card into the thread, with the OS share sheet kept behind it as the
+  // way to reach someone who does not have VaultChat.
+  check(`${name} can invite someone to the table`, /openInvite\(/.test(src));
   check(`${name} offers a rematch and a share`, /shareResult\(/.test(src) && /(Rematch|Play again|Deal again)/.test(src));
 }
 
@@ -216,8 +221,10 @@ check('...and its tap handler is stable, or the memo is decoration',
   /onPress=\{toggle\}/.test(RUMMY) && /runOnJS\(onPress\)\(card\.id\)/.test(RUMMY),
   'an inline () => toggle(id) is a new prop every render and defeats the memo entirely');
 
+// Lifted out of Rummy into a hook every board can use — the property being
+// guarded did not change with the address.
 check('the turn clock re-renders once a second, not on every tick',
-  /setSecs\(secondsLeft\(deadline, Date\.now\(\)\)\)/.test(RUMMY) && !/setNow\(Date\.now\(\)\)/.test(stripComments(RUMMY)),
+  /setSecs\(secondsLeft\(deadline, Date\.now\(\)\)\)/.test(CLOCK) && !/setNow\(Date\.now\(\)\)/.test(stripComments(CLOCK)),
   'holding the raw clock reading makes every tick a new value, so React can never bail out');
 
 // ── the board the reference client actually shows ─────────────────────
@@ -262,6 +269,167 @@ const LB = readFileSync('lib/games/leaderboard.ts', 'utf8');
 check('the leaderboard does not re-rank the server',
   !/\.sort\(/.test(LB),
   'the server orders and cuts the table; sorting here would show a standing it does not agree with');
+
+// ── a dropped socket ──────────────────────────────────────────────────
+// A mid-game drop used to take the whole screen back to "Joining the table…",
+// which reads as if the game were gone. The board underneath is the last thing
+// the server said and is still the best thing to show; what must NOT survive is
+// input, because an intent sent into a closed socket is dropped in silence and
+// the player never learns their move did not happen.
+for (const [name, src] of [['tic-tac-toe', TTT], ['chess', CHESS], ['ludo', LUDO], ['rummy', RUMMY]] as [string, string][]) {
+  check(`${name} keeps the board up while reconnecting`,
+    /&& !G\)|&& !state\.game\)|&& !!G;/.test(stripComments(src)),
+    'a full-screen spinner mid-game throws away the position the player was looking at');
+  check(`...and ${name} disables input while the socket is down`,
+    /phase === 'connected'/.test(stripComments(src)),
+    'a tap that goes nowhere is worse than a disabled button');
+}
+
+check('the reconnect banner is shared, not copied into four boards',
+  /export function Reconnecting\(/.test(UI),
+  'four copies is four things to fix when the wording changes');
+
+// ── the turn clock ────────────────────────────────────────────────────
+// Rendered from the SERVER's deadline, and only when it sends one.
+check('the turn clock is one hook, shared by every board',
+  /export function useCountdown/.test(CLOCK) && !/function useCountdown/.test(stripComments(RUMMY)),
+  'it started as rummy-only; the other three had no clock at all');
+check('...built on the tested secondsLeft, not a second implementation',
+  /from '\.\/rummyTable'/.test(CLOCK),
+  'secondsLeft already refuses a deadline the device clock says is nonsense');
+check('...and no deadline shows no clock',
+  /if \(secs == null\) return null;/.test(UI),
+  'a frozen 0s is a claim about a game this client does not referee');
+
+// ── a bot is always a bot ─────────────────────────────────────────────
+for (const [name, src] of [['tic-tac-toe', TTT], ['chess', CHESS], ['ludo', LUDO], ['rummy', RUMMY]] as [string, string][]) {
+  check(`${name} labels a bot seat`,
+    /isBot/.test(stripComments(src)),
+    'filling an empty room with unlabelled bots is how these apps lose trust');
+}
+
+// ── the matchmaker does not lie ───────────────────────────────────────
+// `botoffer` means NOBODY WAS WAITING. Opening that room with bot:'1' seated a
+// player who asked for an opponent against the house without telling them —
+// and with ~19 players registered that is the common path, not an edge case.
+check('a bot offer is not opened as if it were a match',
+  /if \(withBot\) \{ setOffer/.test(HUB),
+  'the search must stop and let the player choose');
+check('...and the offer puts inviting someone beside the bot',
+  /<BotOffer/.test(HUB) && /openInvite\(/.test(HUB),
+  'an invite is the only thing that actually fixes an empty room');
+
+// ── the rematch ───────────────────────────────────────────────────────
+// `start` on the same table already WAS the rematch; what was missing is what
+// happens when it does not work. A player whose opponent had already left
+// tapped a button that fired into the socket and changed nothing on screen.
+const REMATCH = readFileSync('lib/games/useRematch.ts', 'utf8');
+for (const [name, src] of [['tic-tac-toe', TTT], ['chess', CHESS], ['ludo', LUDO], ['rummy', RUMMY]] as [string, string][]) {
+  check(`${name} rematches through the shared control`,
+    /<RematchBtn/.test(src) && /useRematch\(/.test(src),
+    'four boards must not disagree about what waiting for a rematch looks like');
+}
+check('the rematch is still `start` on the same table',
+  /send\(\{ t: 'start' \}\)/.test(REMATCH),
+  'a fresh room would throw away the seats the server already has');
+check('...the wait ENDS',
+  /setTimeout\(\(\) => \{ setWaiting\(false\); setTimedOut\(true\); \}, WAIT_MS\)/.test(REMATCH),
+  'an indefinite spinner is what this replaced');
+check('...it ends on the SERVER’s snapshot, not on the button firing',
+  /if \(!isFinished && waiting\)/.test(REMATCH),
+  'the tap is not evidence that anything happened');
+check('...and an empty seat becomes an invite, not a longer wait',
+  /openInvite\(game, room\)/.test(REMATCH),
+  'an invite is the only thing that reaches a player who has closed the app');
+
+// ── three ways in, and none of them is a dead end ─────────────────────
+// THE BUG THIS CLOSES: tapping a game opened it with NO room, which lands the
+// player in the server's default table — one somebody else already hosts. Only
+// a host may seat a bot or deal, so the two buttons on screen did nothing and
+// said nothing. A lobby you cannot start is what "the games don't work" was.
+check('a game card asks HOW you want to play',
+  /<ModeSheet/.test(HUB) && /function ModeSheet/.test(HUB),
+  'opening a game with no room drops the player in a table they cannot host');
+check('...and the private and bot rooms are ones the player HOSTS',
+  /onPrivate=\{\(\) => \{ const e = mode; setMode\(null\); onOpen\(e\.kind, \{ room: newPrivateCode\(\) \}\)/.test(HUB)
+  && /room: newPrivateCode\(\), auto: '1', bot: '1'/.test(HUB),
+  'a fresh code makes the player the host, which is what makes the buttons work');
+check('...with online play still going through the matchmaker',
+  /onOnline=\{\(\) => \{ const e = mode; setMode\(null\); quick\(e\); \}\}/.test(HUB));
+
+// ── dealing is not a race ─────────────────────────────────────────────
+// Ludo sent `start` on a 400ms timer after `addbot`. The bot was seated by a
+// LATER snapshot, so start reached the server while the table still had one
+// player, was refused, and the lobby sat there with a bot in it. Device-seen.
+check('ludo deals when the seats arrive, not on a timer',
+  !/setTimeout\(\(\) => send\(\{ t: 'start'/.test(LUDO) && /if \(\(L\.members\?\.length \?\? 0\) < wantStart\) return;/.test(LUDO),
+  'a fixed delay loses the race on any slow link, and the table never starts');
+check('...and it deals exactly once',
+  /if \(startedRef\.current\) return;/.test(LUDO),
+  'the server answers a second start with an error, which reads as a broken table');
+
+// ── a private room is people you know ─────────────────────────────────
+for (const [name, src] of [['tic-tac-toe', TTT], ['chess', CHESS], ['ludo', LUDO]] as [string, string][]) {
+  check(`${name} offers voice in the LOBBY, not only mid-game`,
+    /<VoiceBar/.test(src),
+    'waiting for the person you invited is exactly when you want to talk');
+  check(`...and ${name} shows the room code to share`,
+    /Room code:/.test(src),
+    'a private table nobody can be told the code of is a table for one');
+}
+check('rummy already had both',
+  /<VoiceSheet/.test(RUMMY) && /Code \$\{seated\}|Code \$\{code\}|`Code /.test(RUMMY));
+
+// ── a board cannot take the app down ──────────────────────────────────
+// Without a boundary a render error unmounts the tree and leaves a blank
+// screen with no way back — reported as "the app crashed while playing", and
+// invisible in the crash log because nothing native crashed. The boards render
+// fields from a reverse-engineered protocol, so an unexpected shape is a
+// question of when, not if.
+check('the games board is wrapped in an error boundary',
+  /<ErrorBoundary/.test(HUB) && /screen=\{`Game:\$\{kind\}`\}/.test(HUB),
+  'every other screen rendering untrusted shapes already does this');
+check('...and the boundary offers a way out, not just a message',
+  /Try Again/.test(readFileSync('components/ErrorBoundary.tsx', 'utf8')));
+
+// ── a deep link must not open a dead app ──────────────────────────────
+// hideAsync() lives only in app/index.tsx, the cold-start router at `/`. A cold
+// start from a deep link routes straight past it, so nothing hid the splash:
+// the window never became visible, never got an input channel, and every touch
+// was dropped until Android raised "isn't responding". Device-reproduced on two
+// phones. This is the guard for the whole notification/invite path.
+const LAYOUT = readFileSync('app/_layout.tsx', 'utf8');
+check('a deep-link cold start hides the splash',
+  /Linking\.getInitialURL\(\)[\s\S]{0,200}SplashScreen\.hideAsync/.test(LAYOUT),
+  'without this a turn push or an invite card opens an app that takes no input');
+check('...and the launcher path still hides it in index.tsx',
+  /SplashScreen\.hideAsync/.test(readFileSync('app/index.tsx', 'utf8')),
+  'index covers its own auth read with the splash — moving it would flash a spinner');
+
+// ── two devices, one truth ────────────────────────────────────────────
+// Found with two phones in one room: chess announced every square by its DRAWN
+// position, so the player with black — whose board is flipped — heard the
+// mirrored name for every square (the pawn on e4 read as "d5"). The VISIBLE
+// coordinates were always right, which is exactly why nobody saw it.
+check('chess names a square by the square, not by where it is drawn',
+  /squareLabel\(sq, piece/.test(CHESS) && /function squareLabel\(sq: number/.test(CHESS),
+  'on a flipped board the display index is a different square entirely');
+
+// The rummy server answers a join for a table it does not know by seating you
+// at one of its own and saying nothing. Two phones sharing a code both landed
+// on "Practice", each reading "1/6 seated", each waiting for someone who could
+// never arrive.
+check('rummy admits when the server substituted the table',
+  /const substituted =/.test(RUMMY) && /This is a public table/.test(RUMMY),
+  'a code nobody can join is worse than no code');
+check('...and stops offering a code to share in that case',
+  /\{substituted \? \(/.test(RUMMY));
+
+// The dice receipt says "not published" because this server never reveals its
+// half, so the hub must not promise a proof the player cannot perform.
+check('the hub does not claim provably fair dice',
+  !/provably fair/i.test(HUB),
+  'the receipt shows "table seed: not published" — the claim outran the server');
 
 console.log(failures ? `\n  ${failures} FAILED\n` : '\n  all native-games checks passed\n');
 process.exit(failures ? 1 : 0);

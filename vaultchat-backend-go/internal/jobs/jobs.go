@@ -147,6 +147,7 @@ func StartAll(ctx context.Context) {
 	run("media-retention", sweepInterval, sweepDeliveredAttachments)
 	run("sweep-expired-stories", sweepInterval, sweepExpiredStories)
 	run("sweep-games-notify-seen", sweepInterval, sweepGamesNotifySeen)
+	run("sweep-games-live-tables", sweepInterval, sweepGamesLiveTables)
 	// Broadcast recordings had no lifecycle at all — see sweepEndedBroadcasts.
 	run("broadcast-retention", sweepInterval, sweepEndedBroadcasts)
 	run("scheduled-messages", schedInterval, sweepScheduledMessages)
@@ -736,6 +737,25 @@ func sweepGamesNotifySeen(ctx context.Context) {
 		`DELETE FROM games_notify_seen
 		  WHERE ctid IN (SELECT ctid FROM games_notify_seen
 		                  WHERE expires_at <= NOW()
+		                  LIMIT $1)`)
+}
+
+// sweepGamesLiveTables ages out tables nobody has heard about in a fortnight.
+//
+// THIS IS THE ONLY THING THAT ENDS A ROW ON ITS OWN. The games server's notify
+// contract has kinds turn | invite | friend and NO game-over event, so nothing
+// tells us a game finished; the app deletes a row when it opens a table and
+// finds the game over, but a player who never opens it again would otherwise
+// keep that table in their list forever.
+//
+// A fortnight is deliberately far longer than a turn: asynchronous play means
+// days between moves, and dropping a live game out of the list is worse than
+// showing a stale one, which costs a tap to discover.
+func sweepGamesLiveTables(ctx context.Context) {
+	batchedSweep(ctx, "sweep games-live-tables",
+		`DELETE FROM games_live_tables
+		  WHERE ctid IN (SELECT ctid FROM games_live_tables
+		                  WHERE updated_at < NOW() - INTERVAL '14 days'
 		                  LIMIT $1)`)
 }
 

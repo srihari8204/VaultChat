@@ -68,6 +68,7 @@ import { couldBeLongRead, readStats } from '../../lib/reader';
 // ratio disagrees with a raster's — the failure that made this look absent.
 import KlipyWatermark from '../../assets/klipy/watermark-klipy-light.svg';
 import { groupRefOf, type GroupRef } from '../../lib/chatService';
+import { gameInviteOf, gameName, type GameInvite } from '../../lib/games/inviteLink';
 import { groupTypeInfo } from '../../lib/groups/catalog';
 
 function colorMentions(body: string): any {
@@ -409,6 +410,65 @@ export function GroupRefBubble({ gref, isMine }: { gref: GroupRef; isMine: boole
         </Text>
         <Text numberOfLines={1} style={{ color: colors.textDim, fontSize: 12, marginTop: 1 }}>
           {info?.label ? `${info.label} · Tap to join` : 'Tap to join'}
+        </Text>
+      </View>
+      <Ionicons name="chevron-forward" size={16} color={colors.textDim} />
+    </TouchableOpacity>
+  );
+}
+
+/**
+ * A game table invite — tap it to sit down at that exact table.
+ *
+ * The receiving half of sendGameInvite(). Before this existed, inviting someone
+ * meant leaving VaultChat through the OS share sheet and hoping the link came
+ * back into the app it had just left.
+ *
+ * The card carries a game and a room id and NO token: the games server does its
+ * own seating, exactly as it does for a shared link. Tapping opens /games with
+ * the params that screen already reads — the same route the `vaultchat://games`
+ * deep link and the turn notifications land on, so there is one way in, not
+ * three. Rummy joining by `tableId` while the other three use `roomId` is
+ * settled inside lib/gamesSocket.ts and is not this card's problem.
+ *
+ * gameInviteOf() returns null for anything but the four games this app ships
+ * and a plain-slug room, so a malformed card renders as its readable text body
+ * rather than a button that leads nowhere.
+ */
+export function GameInviteBubble({ inv, isMine }: { inv: GameInvite; isMine: boolean }) {
+  const { colors } = useTheme();
+  const gRouter = useRouter();
+  const name = gameName(inv.game);
+
+  return (
+    <TouchableOpacity
+      activeOpacity={0.75}
+      accessibilityRole="button"
+      accessibilityLabel={`Join the ${name} table`}
+      onPress={() => gRouter.push({
+        pathname: '/games' as any,
+        params: { game: inv.game, room: inv.room },
+      })}
+      style={{
+        flexDirection: 'row', alignItems: 'center', gap: 10,
+        paddingVertical: 10, paddingHorizontal: 12, borderRadius: 12,
+        borderWidth: 1, borderColor: colors.separator,
+        backgroundColor: isMine ? 'transparent' : colors.surface,
+        minWidth: 200,
+      }}
+    >
+      <View style={{
+        width: 38, height: 38, borderRadius: 10, alignItems: 'center',
+        justifyContent: 'center', backgroundColor: colors.separator,
+      }}>
+        <Ionicons name="game-controller" size={20} color={colors.primary} />
+      </View>
+      <View style={{ flex: 1 }}>
+        <Text numberOfLines={1} style={{ color: colors.text, fontSize: 15, fontWeight: '600' }}>
+          {name}
+        </Text>
+        <Text numberOfLines={1} style={{ color: colors.textDim, fontSize: 12, marginTop: 1 }}>
+          Tap to join · {inv.room}
         </Text>
       </View>
       <Ionicons name="chevron-forward" size={16} color={colors.textDim} />
@@ -1202,6 +1262,10 @@ function MessageBubble({
   //
   // groupRefOf returns exactly the params group-join reads.
   const groupRef = msg.type === 'group_ref' ? groupRefOf(msg.meta) : null;
+  // A game table invite (migration 124). A malformed one falls through to the
+  // text body deliberately: the E2EE content carries the same invite as a
+  // readable line, which is also what a client too old to know this type shows.
+  const gameInvite = msg.type === 'game_invite' ? gameInviteOf(msg.meta) : null;
 
   // ── View-once gate (WhatsApp-style) ──────────────────────
   // Photo/video only. The OWNER sees their own media inline. A recipient gets a
@@ -1418,6 +1482,8 @@ function MessageBubble({
           <VaultBeamBubble msg={msg} isMine={isMine} plain={plain} />
         ) : groupRef ? (
           <GroupRefBubble gref={groupRef} isMine={isMine} />
+        ) : gameInvite ? (
+          <GameInviteBubble inv={gameInvite} isMine={isMine} />
         ) : isSticker ? (
           <Text style={S.stickerEmoji}>{msg.content}</Text>
         ) : isPoll ? (

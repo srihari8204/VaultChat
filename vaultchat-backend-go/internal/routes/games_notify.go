@@ -226,6 +226,14 @@ func gamesNotify(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Remember the table BEFORE the push and regardless of whether it lands.
+	// "This player is sitting at this table" is true whether or not their phone
+	// has a live FCM token, and the list is the half of asynchronous play that
+	// works when the notification is missed, dismissed or never delivered —
+	// which is precisely the case a push-only design cannot serve.
+	gamesRememberTable(ctx, userID, claims.Kind, game, room,
+		gamesNotifyText(claims.Title), gamesNotifyText(claims.Body))
+
 	tokens := fcmTokensFor(ctx, userID)
 	if len(tokens) == 0 {
 		httpx.JSON(w, 200, map[string]any{"ok": true, "delivered": false, "reason": "no_device_token"})
@@ -270,6 +278,40 @@ func gamesNotify(w http.ResponseWriter, r *http.Request) {
 	}
 
 	httpx.JSON(w, 200, map[string]any{"ok": true, "delivered": true, "sent": res.Sent})
+}
+
+// gamesLiveKinds are the notification kinds that mean "you have a table".
+//
+// The contract's kinds are turn | invite | friend. A friend request is about a
+// person, not a table, and writing a row for one would put a game in the list
+// that the player is not sitting at. An unknown kind is treated the same way:
+// the games server can add kinds without telling us, and a list is a promise
+// about where the player can pick up a game.
+var gamesLiveKinds = map[string]bool{"turn": true, "invite": true}
+
+// gamesRememberTable records that this player has a live table here.
+//
+// Fail-soft on purpose: this is a convenience list derived from a notification
+// whose real job is the push. A database hiccup must not turn a deliverable
+// turn notification into a 500 that the games server then retries.
+func gamesRememberTable(ctx context.Context, userID, kind, game, room, title, body string) {
+	if game == "" || room == "" || !gamesLiveKinds[strings.ToLower(strings.TrimSpace(kind))] {
+		return
+	}
+	// your_turn is a record of what we were last told, not a claim about the
+	// board — the board itself is re-read from the games server on open.
+	yourTurn := strings.EqualFold(strings.TrimSpace(kind), "turn")
+	if _, err := db.Pool.Exec(ctx,
+		`INSERT INTO games_live_tables (user_id, game, room, your_turn, title, body, updated_at)
+		 VALUES ($1, $2, $3, $4, NULLIF($5, ''), NULLIF($6, ''), now())
+		 ON CONFLICT (user_id, game, room) DO UPDATE
+		    SET your_turn = EXCLUDED.your_turn,
+		        title      = EXCLUDED.title,
+		        body       = EXCLUDED.body,
+		        updated_at = now()`,
+		userID, game, room, yourTurn, title, body); err != nil {
+		log.Printf("[games-notify] live table upsert failed: %v", err)
+	}
 }
 
 // gamesNotifyClaimJTI records the event id, reporting whether it was new.

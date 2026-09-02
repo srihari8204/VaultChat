@@ -2903,7 +2903,8 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
           : pm.type === 'image' ? '📷 Photo' : pm.type === 'video' ? '🎥 Video'
           : pm.type === 'audio' ? '🎙️ Voice message' : pm.type === 'file' ? '📎 File'
           : pm.type === 'vaultbeam' ? '📦 File'
-          : pm.type === 'location' ? '📍 Location' : pm.type === 'poll' ? '📊 Poll' : 'Message';
+          : pm.type === 'location' ? '📍 Location' : pm.type === 'poll' ? '📊 Poll'
+          : pm.type === 'game_invite' ? '🎮 Game invite' : 'Message';
         return (
           <TouchableOpacity style={S.pinnedBar} activeOpacity={0.8} onPress={() => jumpToMessage(Number(pinnedId))}>
             <Ionicons name="pin" size={15} color={colors.primary} />

@@ -15,6 +15,8 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { GamesSocket, type GameKind, type GamesMessage, type Phase } from '../gamesSocket';
+import { forgetTable } from './useLiveTables';
+import { recordGame, outcomeOf, opponentsOf, detailOf, movesOf, isFinishedSnapshot } from './history';
 
 /** The lobby half of a `state` frame — identical across all four games. */
 export interface GameLobby {
@@ -180,6 +182,36 @@ export function useGameSocket(game: GameKind, roomId = '', opts: AutoStart = {})
     // The whole snapshot, every time. See the protocol doc: never a delta.
     const offState = sock.onState((s: any) => {
       if (!aliveRef.current || !s) return;
+      // A finished game leaves the "your games" list. THE CLIENT IS THE ONLY
+      // PARTY THAT EVER LEARNS THIS: the games server's notify contract has
+      // kinds turn | invite | friend and no game-over event, and we do not own
+      // that server. This is not the client deciding game truth — it is
+      // relaying what the authoritative snapshot just said, to a list that was
+      // only ever a record of notifications. Each game words it differently, so
+      // all three forms are checked and none of them is required.
+      // isFinishedSnapshot, not a truthiness test on `result`: chess sends
+      // `result: "playing"` every frame, which read as "finished" and both
+      // dropped a live table out of the games list and filed it into the
+      // history as a game that had ended. Seen on device.
+      if (isFinishedSnapshot(s)) {
+        const room = roomOverride.current ?? roomId;
+        void forgetTable(game, room);
+        // ...and write it into the history, from the same snapshot and for the
+        // same reason: this device is the only party that ever learns a game
+        // ended. Once per table — recordGame drops a repeat of the same
+        // finished snapshot, which arrives on every frame until the player
+        // leaves. Chess carries its move list; the others carry the result.
+        const you = typeof s.you === 'string' ? s.you : '';
+        void recordGame({
+          game,
+          room,
+          at: Date.now(),
+          outcome: outcomeOf(s, you),
+          opponents: opponentsOf(s, you),
+          detail: detailOf(s, outcomeOf(s, you)),
+          moves: game === 'chess' ? movesOf(s) : undefined,
+        });
+      }
       setState({
         you: typeof s.you === 'string' ? s.you : '',
         seat: typeof s.seat === 'number' ? s.seat : null,

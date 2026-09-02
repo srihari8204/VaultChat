@@ -24,12 +24,14 @@ import Animated, {
 } from 'react-native-reanimated';
 import * as Haptics from 'expo-haptics';
 import { useGameSocket, type GameState, type AutoStart } from '../../lib/games/useGameSocket';
-import { Btn, Panel, Banner, PlayerRow, Chip, useType, useBoardSize } from './ui';
+import { Btn, Panel, Banner, PlayerRow, Chip, Reconnecting, RematchBtn, useType, useBoardSize } from './ui';
+import { useRematch } from '../../lib/games/useRematch';
+import { RulesSheet, useFirstTimeRules } from './rules';
 import { C, S, R, D3, E, mix, goldLine } from '../../lib/games/theme';
 import { playSfx, preloadSfx } from '../../lib/games/sfx';
 import { Toasts, Confetti, Sheet, SettingRow, VoiceBar, VoiceSheet } from './feedback';
-import { useTableVoice } from '../../lib/games/useTableVoice';
-import { inviteToTable, shareResult } from '../../lib/games/invite';
+import { useTableVoice, type TableVoice } from '../../lib/games/useTableVoice';
+import { openInvite, shareResult } from '../../lib/games/invite';
 import { soundEnabled, setSoundEnabled } from '../../lib/games/sfx';
 
 type Piece = { t: 'p' | 'n' | 'b' | 'r' | 'q' | 'k'; c: 'w' | 'b' } | null;
@@ -141,7 +143,14 @@ export default function Chess({ roomId, auto, autoBot }: { roomId: string } & Au
    * against a numeric seat, so for chess it always returned false and NO SQUARE
    * WAS EVER TAPPABLE. The board rendered perfectly and could not be played.
    */
-  const mine = !state.spectator && myColor != null && G?.turn === myColor;
+  const mine = !state.spectator && myColor != null && G?.turn === myColor
+    // A tap while the socket is down goes nowhere: the intent is dropped and
+    // the board keeps the piece where the last snapshot put it.
+    && phase === 'connected';
+
+  // The rematch is `start` on this same table — plus a wait that ends and an
+  // invite for when the other seat is empty. See lib/games/useRematch.ts.
+  const rematch = useRematch('chess', roomId, state, send);
 
   const th = THEMES[theme];
   // Seats above and below, the status line and two button rows.
@@ -222,7 +231,10 @@ export default function Chess({ roomId, auto, autoBot }: { roomId: string } & Au
     setSel(can ? i : null);
   };
 
-  if (phase !== 'connected') return <Connecting phase={phase} error={error} onRetry={retry} />;
+  // Only take the screen back BEFORE there is a board. A mid-game drop keeps the
+  // position up with a banner over it — see Reconnecting in ui.tsx.
+  const reconnecting = phase !== 'connected' && !!G;
+  if (phase !== 'connected' && !G) return <Connecting phase={phase} error={error} onRetry={retry} />;
 
   if (!G) {
     return (
@@ -233,6 +245,8 @@ export default function Chess({ roomId, auto, autoBot }: { roomId: string } & Au
         onBotLevel={setBotLevel}
         onAddBot={() => send({ t: 'addbot', level: botLevel })}
         onStart={() => send({ t: 'start' })}
+        voice={voice}
+        code={roomId}
       />
     );
   }
@@ -258,6 +272,8 @@ export default function Chess({ roomId, auto, autoBot }: { roomId: string } & Au
   return (
     <View style={{ flex: 1, backgroundColor: '#121212' }}>
       <ScrollView contentContainerStyle={{ padding: S[4], gap: S[3], alignItems: 'center', paddingBottom: S[6] }}>
+
+        {reconnecting && <Reconnecting error={error} onRetry={retry} />}
 
         <Seat
           name={opponentName(state)}
@@ -291,6 +307,7 @@ export default function Chess({ roomId, auto, autoBot }: { roomId: string } & Au
                 key={d}
                 d={d}
                 cell={cell}
+                sq={idx}
                 bg={light ? th.light : th.dark}
                 tint={isSel ? th.sel : isLast ? th.hl : null}
                 check={inCheck}
@@ -347,7 +364,7 @@ export default function Chess({ roomId, auto, autoBot }: { roomId: string } & Au
 
         {G.result ? (
           <View style={{ flexDirection: 'row', gap: S[2], width: size }}>
-            <Btn label="Rematch" kind="gold" icon="↻" style={{ flex: 1 }} onPress={() => send({ t: 'start' })} />
+            <RematchBtn rm={rematch} />
             <Btn label="Share" icon="📣" onPress={() => { void shareResult('chess', G.winner === state.you); }} />
             <Btn label={voiceLabel} compact onPress={() => setVoiceOpen(true)} accessibilityLabel="Table voice" />
           </View>
@@ -383,7 +400,7 @@ export default function Chess({ roomId, auto, autoBot }: { roomId: string } & Au
           label="Invite a friend"
           icon="🔗"
           style={{ width: size }}
-          onPress={() => { void inviteToTable('chess', roomId); }}
+          onPress={() => { void openInvite('chess', roomId); }}
           disabled={!roomId}
         />
 
@@ -433,10 +450,14 @@ export default function Chess({ roomId, auto, autoBot }: { roomId: string } & Au
 /* ── one square ─────────────────────────────────────────────────────── */
 
 function Square({
-  d, cell, bg, tint, check, coordFile, coordRank, coordColor, piece, pieceSize,
+  d, sq, cell, bg, tint, check, coordFile, coordRank, coordColor, piece, pieceSize,
   target, capture, slideFrom, onPress, stroke,
 }: {
-  d: number; cell: number; bg: string; tint: string | null; check: boolean;
+  /** Where it is DRAWN (0 = top-left of the board as this player sees it). */
+  d: number;
+  /** Which square it actually IS (0 = a8). These differ when the board is flipped. */
+  sq: number;
+  cell: number; bg: string; tint: string | null; check: boolean;
   coordFile: string | null; coordRank: string | null; coordColor: string;
   piece: Piece; pieceSize: number; target: boolean; capture: boolean;
   slideFrom: { dx: number; dy: number; key: string } | null;
@@ -457,7 +478,7 @@ function Square({
   return (
     <Pressable
       onPress={onPress}
-      accessibilityLabel={squareLabel(d, piece, target, capture)}
+      accessibilityLabel={squareLabel(sq, piece, target, capture)}
       style={{
         position: 'absolute',
         left: (d & 7) * cell, top: (d >> 3) * cell,
@@ -684,14 +705,16 @@ function PromoPicker({
 }
 
 function Lobby({
-  state, events, onAddBot, onStart, botLevel, onBotLevel,
+  state, events, onAddBot, onStart, botLevel, onBotLevel, voice, code,
 }: {
   state: GameState; events: string[]; onAddBot: () => void; onStart: () => void;
-  botLevel: number; onBotLevel: (n: number) => void;
+  botLevel: number; onBotLevel: (n: number) => void; voice: TableVoice; code: string;
 }) {
   const t = useType();
   const members = state.lobby?.members ?? [];
   const host = state.lobby?.hostId === state.you;
+  // Offered once, in the lobby — before a move is ever required.
+  const rules = useFirstTimeRules('chess');
   return (
     <View style={{ flex: 1, backgroundColor: '#121212' }}>
       <ScrollView contentContainerStyle={{ padding: S[4], gap: S[3] }}>
@@ -724,10 +747,35 @@ function Lobby({
             />
           ))}
         </View>
+        {!!code && (
+          <Text style={{ color: '#8b95ad', fontSize: t.sm }} selectable>
+            Room code: <Text style={{ color: C.gold, fontWeight: '800' }}>{code}</Text>
+          </Text>
+        )}
+        {/* Voice while you WAIT, not only once the game is running. A private
+            room is two people arriving at the same table; that is the moment
+            they want to talk. */}
+        <VoiceBar
+          phase={voice.phase}
+          error={voice.error}
+          canSpeak={voice.canSpeak}
+          muted={voice.muted}
+          participants={voice.participants}
+          onJoin={voice.join}
+          onLeave={voice.leave}
+          onToggleMute={voice.toggleMute}
+        />
+        <Btn label="How to play" icon="📖" onPress={rules.open} />
+        {/* Inviting belongs HERE, not only on the board. Chess had its invite
+            behind the first move — you could only ask someone to join a game
+            that had already started, which is the wrong moment and the reason
+            an empty chess lobby had no way out except a bot. */}
+        <Btn label="Invite a friend" icon="🔗" onPress={() => { void openInvite('chess', code); }} disabled={!code} />
         <Btn label="Add a bot" icon="🤖" onPress={onAddBot} />
         <Btn label="Start game" kind="gold" onPress={onStart} disabled={!host || members.length < 2} />
       </ScrollView>
       <Toasts events={events} />
+      <RulesSheet game="chess" visible={rules.visible} onClose={rules.close} />
     </View>
   );
 }
@@ -790,8 +838,18 @@ function pairUp(history: string[]): string {
   return out.join('   ');
 }
 
-function squareLabel(d: number, piece: Piece, target: boolean, capture: boolean): string {
-  const name = `${FILES[d & 7]}${8 - (d >> 3)}`;
+/**
+ * What a screen reader says about a square.
+ *
+ * TAKES THE REAL SQUARE, NOT THE DRAWN POSITION. It used to take the display
+ * index, so on a flipped board — every game the player has black — each square
+ * was announced with its mirrored name: the pawn on e4 read as "d5", and a
+ * player using a screen reader was told a position that does not exist. The
+ * VISIBLE coordinates were always right (they undo the flip explicitly), which
+ * is why this survived: it is invisible to anyone looking at the board.
+ */
+function squareLabel(sq: number, piece: Piece, target: boolean, capture: boolean): string {
+  const name = `${FILES[sq & 7]}${8 - (sq >> 3)}`;
   const what = piece ? `${piece.c === 'w' ? 'white' : 'black'} ${piece.t}` : 'empty';
   const hint = capture ? ', can capture' : target ? ', can move here' : '';
   return `${name}, ${what}${hint}`;

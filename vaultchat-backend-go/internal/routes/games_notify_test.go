@@ -207,3 +207,37 @@ MCowBQYDK2VwAyEA7wrB2MUzhRVxDaSTi+H2sgFuhNyjIX/mzX+ZlZzh568=
 }
 
 var _ = rand.Reader
+
+// ── the live-tables list (migration 125) ──────────────────────────────
+
+// THE SCOPING IS THE WHOLE SECURITY MODEL of this list.
+//
+// RLS is inert in production — the API connects as a superuser and bypasses
+// every policy — so if the handler's own query stops filtering by user_id, the
+// endpoint serves every player's tables to whoever asks first. This asserts the
+// clause is still in the query the handler runs.
+func TestGamesLiveTablesQueryScopesToTheCaller(t *testing.T) {
+	if !strings.Contains(gamesLiveTablesSQL, "WHERE user_id = $1") {
+		t.Fatal("the live-tables query must filter by user_id — RLS will not do it in prod")
+	}
+	if !strings.Contains(gamesLiveTablesSQL, "FROM games_live_tables") {
+		t.Fatal("the live-tables query must read games_live_tables")
+	}
+}
+
+// A friend request is about a person, not a table. Writing a row for one would
+// put a game in the list that the player is not sitting at — and an unknown
+// kind is treated the same way, because the games server can add kinds without
+// telling us and this list is a promise about where a game can be picked up.
+func TestOnlyTableKindsBecomeALiveTable(t *testing.T) {
+	for _, kind := range []string{"turn", "invite"} {
+		if !gamesLiveKinds[kind] {
+			t.Errorf("kind %q means the player has a table and must be remembered", kind)
+		}
+	}
+	for _, kind := range []string{"friend", "", "achievement", "TURN "} {
+		if gamesLiveKinds[kind] {
+			t.Errorf("kind %q must not create a live table", kind)
+		}
+	}
+}

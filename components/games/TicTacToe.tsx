@@ -17,12 +17,15 @@ import Animated, {
 } from 'react-native-reanimated';
 import * as Haptics from 'expo-haptics';
 import { useGameSocket, isMyTurn, type AutoStart } from '../../lib/games/useGameSocket';
-import { TableBackground, Panel, Btn, Banner, PlayerRow, useType, useBoardSize } from './ui';
+import { TableBackground, Panel, Btn, Banner, PlayerRow, Reconnecting, RematchBtn, TurnClock, useType, useBoardSize } from './ui';
+import { useRematch } from '../../lib/games/useRematch';
+import { RulesSheet, useFirstTimeRules } from './rules';
+import { useCountdown } from '../../lib/games/useCountdown';
 import { C, S, R, D3, E, mix, goldLine, MOTION } from '../../lib/games/theme';
 import { playSfx, preloadSfx } from '../../lib/games/sfx';
 import { Toasts, Confetti, VoiceBar } from './feedback';
 import { useTableVoice } from '../../lib/games/useTableVoice';
-import { inviteToTable, shareResult } from '../../lib/games/invite';
+import { openInvite, shareResult } from '../../lib/games/invite';
 
 const TEAL = '#4be0c1';
 const PINK = '#ff6fb5';
@@ -36,7 +39,17 @@ export default function TicTacToe({ roomId, auto, autoBot }: { roomId: string } 
   const voice = useTableVoice('tictactoe', roomId, { you: state.you, send, subscribe });
 
   const G = state.game;
-  const mine = isMyTurn(state);
+  // A tap while the socket is down goes nowhere — the intent is dropped and the
+  // next snapshot puts the board back where the server has it.
+  const mine = isMyTurn(state) && phase === 'connected';
+  const reconnecting = phase !== 'connected' && !!state.game;
+  const rematch = useRematch('tictactoe', roomId, state, send);
+  // Offered once, in the lobby — before a move is ever required.
+  const rules = useFirstTimeRules('tictactoe');
+  // The server's own clock, when it sends one. No deadline shows no clock — a
+  // frozen zero would be this board inventing a fact about a game it does not
+  // referee.
+  const secs = useCountdown(state.raw?.deadline, !!state.game && state.game.phase !== 'finished');
   const board: number[] = Array.isArray(G?.board) ? G.board : [];
   const line: number[] = Array.isArray(G?.line) ? G.line : [];
   const finished = G?.phase === 'finished';
@@ -69,7 +82,9 @@ export default function TicTacToe({ roomId, auto, autoBot }: { roomId: string } 
     playSfx(!G.winnerId ? 'draw' : G.winnerId === state.you ? 'win' : 'lose');
   }, [G?.phase, G?.winnerId, state.you]);
 
-  if (error && phase !== 'connected') {
+  // Mid-game the board stays up with a banner; this full-screen failure is for
+  // a table we never reached.
+  if (error && phase !== 'connected' && !state.game) {
     return (
       <TableBackground>
         <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', padding: S[5], gap: S[3] }}>
@@ -82,7 +97,9 @@ export default function TicTacToe({ roomId, auto, autoBot }: { roomId: string } 
     );
   }
 
-  if (phase !== 'connected') {
+  // Only take the screen back BEFORE there is a board: a mid-game drop keeps the
+  // grid up with a banner over it.
+  if (phase !== 'connected' && !G) {
     return (
       <TableBackground>
         <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', gap: S[3] }}>
@@ -118,11 +135,34 @@ export default function TicTacToe({ roomId, auto, autoBot }: { roomId: string } 
               <Text style={{ color: C.muted, fontSize: t.sm }}>Two players minimum — add a bot to start now.</Text>
             )}
           </Panel>
+          {/* A private room is worth nothing if its code is not on screen: the
+              deep link covers people who have the app open, and this covers
+              everyone who is being read the code out loud. */}
+          {!!roomId && (
+            <Text style={{ color: C.muted, fontSize: t.sm }} selectable>
+              Room code: <Text style={{ color: C.gold, fontWeight: '800' }}>{roomId}</Text>
+            </Text>
+          )}
+          {/* Voice at the table. A private room is people you know waiting for
+              each other — the moment you most want to talk — and until now the
+              control only existed once the game was already running. */}
+          <VoiceBar
+            phase={voice.phase}
+            error={voice.error}
+            canSpeak={voice.canSpeak}
+            muted={voice.muted}
+            participants={voice.participants}
+            onJoin={voice.join}
+            onLeave={voice.leave}
+            onToggleMute={voice.toggleMute}
+          />
+          <Btn label="How to play" icon="📖" onPress={rules.open} />
           <Btn label="Add a bot" icon="🤖" onPress={() => send({ t: 'addbot' })} />
-          <Btn label="Invite a friend" icon="🔗" onPress={() => { void inviteToTable('tictactoe', roomId); }} disabled={!roomId} />
+          <Btn label="Invite a friend" icon="🔗" onPress={() => { void openInvite('tictactoe', roomId); }} disabled={!roomId} />
           <Btn label="Start game" kind="gold" onPress={() => send({ t: 'start' })} disabled={!host || members.length < 2} />
         </ScrollView>
         <Toasts events={events} />
+        <RulesSheet game="tictactoe" visible={rules.visible} onClose={rules.close} />
       </TableBackground>
     );
   }
@@ -135,10 +175,14 @@ export default function TicTacToe({ roomId, auto, autoBot }: { roomId: string } 
     <TableBackground>
       <ScrollView contentContainerStyle={{ padding: S[4], gap: S[4], alignItems: 'center', paddingBottom: S[6] }}>
 
+        {reconnecting && <Reconnecting error={error} onRetry={retry} />}
+
         <View style={{ width: size, flexDirection: 'row', gap: S[2] }}>
           <SeatChip name={them?.name ?? 'Opponent'} mark={them ? MARK[them.seat] : '◯'} active={!mine && !finished} />
           <SeatChip name={me ? `${me.name} (you)` : 'You'} mark={me ? MARK[me.seat] : '✕'} active={mine && !finished} />
         </View>
+
+        <TurnClock secs={secs} />
 
         <View style={{
           width: inner, height: inner, padding: pad, borderRadius: 24, gap,
@@ -194,11 +238,11 @@ export default function TicTacToe({ roomId, auto, autoBot }: { roomId: string } 
 
         {finished ? (
           <View style={{ width: size, flexDirection: 'row', gap: S[2] }}>
-            <Btn label="Rematch" kind="gold" icon="↻" style={{ flex: 1 }} onPress={() => send({ t: 'start' })} />
+            <RematchBtn rm={rematch} />
             <Btn label="Share" icon="📣" onPress={() => { void shareResult('tictactoe', G.winnerId === state.you); }} />
           </View>
         ) : (
-          <Btn label="Invite a friend" icon="🔗" style={{ width: size }} onPress={() => { void inviteToTable('tictactoe', roomId); }} disabled={!roomId} />
+          <Btn label="Invite a friend" icon="🔗" style={{ width: size }} onPress={() => { void openInvite('tictactoe', roomId); }} disabled={!roomId} />
         )}
       </ScrollView>
       <Toasts events={events} />

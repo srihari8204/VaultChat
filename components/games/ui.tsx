@@ -89,7 +89,16 @@ export function Panel({ children, style }: { children?: React.ReactNode; style?:
   return <View style={[glass, { padding: S[4] }, style]}>{children}</View>;
 }
 
-type BtnKind = 'gold' | 'secondary' | 'danger' | 'ghost';
+/**
+ * 'good' is the winning move — declare, accept, deal. It reads green because a
+ * table's two irreversible actions (declare and drop) must not look alike: one
+ * ends the hand in your favour, the other forfeits it, and both sit side by side.
+ */
+type BtnKind = 'gold' | 'secondary' | 'danger' | 'good' | 'ghost';
+
+/** Deep felt-green fill for `good`, matched to the table it sits on. */
+const GOOD_FILL = ['#2FA36A', '#15794A', '#0B5233'];
+const GOOD_STOPS = [0, 0.55, 1];
 
 /**
  * The one button.
@@ -141,10 +150,10 @@ export function Btn({
     onPress?.();
   };
 
-  const fill = kind === 'gold' ? GOLD_FILL : kind === 'danger' ? RED_FILL : PANEL_FILL;
-  const stops = kind === 'gold' ? GOLD_STOPS : kind === 'danger' ? RED_STOPS : [0, 1];
-  const fg = kind === 'gold' ? C.onGold : kind === 'danger' ? '#fff' : C.text;
-  const border = kind === 'gold' ? C.goldDeep : kind === 'danger' ? '#7d0f2a' : goldLine[18];
+  const fill = kind === 'gold' ? GOLD_FILL : kind === 'danger' ? RED_FILL : kind === 'good' ? GOOD_FILL : PANEL_FILL;
+  const stops = kind === 'gold' ? GOLD_STOPS : kind === 'danger' ? RED_STOPS : kind === 'good' ? GOOD_STOPS : [0, 1];
+  const fg = kind === 'gold' ? C.onGold : kind === 'danger' || kind === 'good' ? '#fff' : C.text;
+  const border = kind === 'gold' ? C.goldDeep : kind === 'danger' ? '#7d0f2a' : kind === 'good' ? '#0a4a2e' : goldLine[18];
 
   const shadow =
     kind === 'gold' ? '0 8px 24px rgba(243,194,69,0.35), ' + D3.rim
@@ -304,3 +313,76 @@ export function Chip({ label, tone = 'plain' }: { label: string; tone?: 'plain' 
 const styles = StyleSheet.create({
   sweep: { position: 'absolute', top: 0, bottom: 0, left: 0, width: '60%' },
 });
+
+/**
+ * The table is not reachable right now.
+ *
+ * Shown OVER a board that already exists, rather than replacing it. A mid-game
+ * drop used to take the whole screen back to "Joining the table…", which reads
+ * as if the game were gone and loses the position the player was looking at —
+ * every reference client leaves the board up and greys it out.
+ *
+ * It says nothing about whose turn it is or what the position is: the board
+ * underneath is the last thing the server said, and the next snapshot replaces
+ * it wholesale. Input is disabled by the caller while this is up, because a tap
+ * that goes nowhere is worse than a disabled button.
+ */
+export function Reconnecting({ error, onRetry }: { error?: string | null; onRetry?: () => void }) {
+  const t = useType();
+  return (
+    <View
+      accessibilityLiveRegion="polite"
+      style={{
+        flexDirection: 'row', alignItems: 'center', gap: S[3],
+        paddingVertical: S[2], paddingHorizontal: S[3],
+        borderRadius: R[2], borderWidth: 1, borderColor: mix(C.bad, 40, C.line),
+        backgroundColor: mix(C.panel2, 88, '#ffffff'),
+      }}
+    >
+      <ActivityIndicator size="small" color={C.gold} />
+      <Text style={{ flex: 1, color: C.text, fontSize: t.sm, fontWeight: '700' }} numberOfLines={2}>
+        {error ? `Lost the table — ${error}` : 'Reconnecting to the table…'}
+      </Text>
+      {onRetry ? <Btn label="Retry" compact onPress={onRetry} /> : null}
+    </View>
+  );
+}
+
+/** The server's turn clock. Nothing to show is shown as nothing. */
+export function TurnClock({ secs }: { secs: number | null }) {
+  if (secs == null) return null;
+  return <Chip label={`${secs}s`} tone={secs <= 5 ? 'gold' : 'plain'} />;
+}
+
+/**
+ * The rematch control, in whichever of its four states applies.
+ *
+ * One component because the states are the point and four boards must not
+ * disagree about them: asking, waiting (with a way out), they-did-not-come-back,
+ * and nobody-is-there. The last two both end in the same offer — invite them
+ * back to this table — because an invite is the only thing that brings a player
+ * who has closed the app.
+ */
+export function RematchBtn({ rm, label = 'Rematch' }: { rm: import('../../lib/games/useRematch').Rematch; label?: string }) {
+  if (rm.waiting) {
+    return (
+      <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', gap: S[2] }}>
+        <ActivityIndicator size="small" color={C.gold} />
+        <Text style={{ flex: 1, color: C.muted, fontSize: T.sm, fontWeight: '700' }}>Waiting for them…</Text>
+        <Btn label="Stop" compact onPress={rm.cancel} />
+      </View>
+    );
+  }
+  if (rm.alone || rm.timedOut) {
+    return (
+      <Btn
+        label={rm.timedOut ? 'They didn’t come back — invite' : 'Invite them back'}
+        icon="🔗"
+        kind="gold"
+        style={{ flex: 1 }}
+        onPress={rm.invite}
+      />
+    );
+  }
+  return <Btn label={label} kind="gold" icon="↻" style={{ flex: 1 }} onPress={rm.ask} />;
+}

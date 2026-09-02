@@ -52,14 +52,48 @@ export const CARD_RATIO = 1.4;
  * thirteen stops fitting on a phone at all.
  */
 const CARD_MIN = 32;
-const CARD_MAX = 70;
+/**
+ * Lowered 70 → 62 → 54 across two rounds of owner feedback on real phones.
+ *
+ * At 70 a hand filled a 2664px table edge to edge and STILL had to overlap; at
+ * 62 it fitted but only just, with the fan doing the work. At 54 the fan
+ * reaches 1 on both test phones — thirteen cards, none covering another, with
+ * roughly 230-260px of table left over. Bigger cards were never buying
+ * legibility, because the overlap they forced was taking it straight back.
+ */
+const CARD_MAX = 54;
 
-/** Cards inside a group overlap: each after the first costs this much width. */
+/**
+ * How much width each card after the first in a group costs.
+ *
+ * FAN of 1 means no overlap at all; 0.58 means 42% of every card is hidden
+ * behind the next. This used to be a CONSTANT 0.58, which made a wide landscape
+ * table look exactly as cramped as a small one — cards buried under each other
+ * with room to spare on both sides. Reported from a device photo.
+ *
+ * It is now the widest fan that actually fits, clamped to this range: spread
+ * out when there is room, tuck in when there is not. FAN stays exported as the
+ * tightest permitted value because the fitting check is written against it.
+ */
 export const FAN = 0.58;
+const FAN_MAX = 1;
 
 /** Padding inside a group tray, and the gap between two trays. */
 const TRAY_PAD = 16;
 const TRAY_GAP = 20;
+
+/**
+ * Breathing room at both ends of the hand, so the last card is never clipped.
+ *
+ * PROPORTIONAL, not a fixed 28px. A flat margin was enough on a 2340px table
+ * and not on a 2664px one: measured on the Honor, the row still ran to the
+ * screen edge and the hand rendered as twelve cards with five overlapping
+ * pairs. The layout carries chrome this model does not know about — tray
+ * borders, group margins — and that chrome grows with the table, so the
+ * allowance has to as well. 6% is what leaves visible slack on both devices.
+ */
+const EDGE_FRACTION = 0.06;
+const EDGE_MIN = 28;
 
 /** 13-card Indian rummy, laid out in at most five groups (handGroups.MAX_GROUPS). */
 const HAND_SIZE = 13;
@@ -110,9 +144,28 @@ const clamp = (lo: number, hi: number, v: number) => Math.max(lo, Math.min(hi, v
  * Exported because the self-check asserts the chosen size actually fits, which
  * is the whole point of choosing it.
  */
-export function handWidthAt(cardW: number): number {
-  const cards = GROUPS + (HAND_SIZE - GROUPS) * FAN;
+export function handWidthAt(cardW: number, fan: number = FAN): number {
+  const cards = GROUPS + (HAND_SIZE - GROUPS) * fan;
   return cardW * cards + TRAY_PAD * GROUPS + TRAY_GAP * (GROUPS - 1);
+}
+
+/**
+ * The widest fan a hand of this card size can use in this width.
+ *
+ * Solved from handWidthAt: everything except the fanned cards is fixed, so the
+ * spare width divides evenly among them. Clamped to [FAN, 1] — never tighter
+ * than the tuck the card size was chosen for, never wider than not overlapping.
+ */
+export function fanFor(cardW: number, width: number): number {
+  const fixed = cardW * GROUPS + TRAY_PAD * GROUPS + TRAY_GAP * (GROUPS - 1);
+  const fanned = cardW * (HAND_SIZE - GROUPS);
+  if (fanned <= 0) return FAN_MAX;
+  // EDGE_MARGIN, or the spread fills the width to the pixel and the last card
+  // lands exactly on the screen edge — measured on device at 2664px, where the
+  // thirteenth card was pushed off entirely and the hand rendered as twelve.
+  // Filling the width is not the same as fitting in it.
+  const margin = Math.max(EDGE_MIN, width * EDGE_FRACTION);
+  return clamp(FAN, FAN_MAX, (width - fixed - margin) / fanned);
 }
 
 /**
@@ -154,7 +207,9 @@ export function metrics(win: { width: number; height: number }, insets: Insets):
     compact,
     cardW,
     cardH,
-    overlap: Math.round(cardW * (1 - FAN)),
+    // Derived from the fan that fits, not from a fixed 0.58 — on a wide table
+    // this goes to zero and the cards stop covering each other.
+    overlap: Math.round(cardW * (1 - fanFor(cardW, width))),
     handH,
     tableW: width,
     tableH,

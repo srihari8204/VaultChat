@@ -208,6 +208,7 @@ export function attachTapHandler(
   onOpenChat: (chatId: string) => void,
   onCall?: (data: any, action: string) => void,
   onMembership?: (event: string, chatId: string) => void,
+  onGame?: (game: string, room: string) => void,
 ): () => void {
   const sub = Notifications.addNotificationResponseReceivedListener((response) => {
     const data: any = response.notification.request.content.data;
@@ -217,6 +218,15 @@ export function attachTapHandler(
     // opens a group they cannot read. Route it to the invitations flow.
     if (data?.type === 'membership') {
       onMembership?.(String(data.event ?? ''), String(data.chatId ?? ''));
+      return;
+    }
+    // A turn notification carries game+room and no chatId, so before this
+    // branch existed it fell through to the chat fallback, matched nothing and
+    // did nothing: the push that exists to bring a player back to their table
+    // opened the app and left them where they were. The backend already mints
+    // both fields through gamesNotifySlug.
+    if (data?.type === 'games_turn') {
+      onGame?.(String(data.game ?? ''), String(data.room ?? ''));
       return;
     }
     if (data?.chatId) onOpenChat(String(data.chatId));

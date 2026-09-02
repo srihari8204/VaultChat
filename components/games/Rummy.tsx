@@ -38,7 +38,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
-import Svg, { Defs, RadialGradient, Stop, Rect, Line, Ellipse } from 'react-native-svg';
+import Svg, { Defs, RadialGradient, Stop, Rect, Line, Ellipse, Text as SvgText } from 'react-native-svg';
 import Animated, {
   useSharedValue, useAnimatedStyle, withSpring, withTiming, withRepeat,
   Easing, cancelAnimation, runOnJS,
@@ -49,7 +49,10 @@ import * as ScreenOrientation from 'expo-screen-orientation';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import { useGameSocket, type AutoStart } from '../../lib/games/useGameSocket';
-import { TableBackground, Panel, Btn, Banner, PlayerRow, useType } from './ui';
+import { TableBackground, Panel, Btn, Banner, PlayerRow, RematchBtn, useType } from './ui';
+import { useCountdown } from '../../lib/games/useCountdown';
+import { useRematch, type Rematch } from '../../lib/games/useRematch';
+import { RulesSheet, useFirstTimeRules } from './rules';
 import { Toasts, Confetti, Sheet, SettingRow, VoiceSheet } from './feedback';
 import { useTableVoice, type TableVoice } from '../../lib/games/useTableVoice';
 import { playSfx, preloadSfx, soundEnabled, setSoundEnabled } from '../../lib/games/sfx';
@@ -58,7 +61,7 @@ import {
   isSortMode, SORT_MODES, SORT_LABEL, type Groups, type SortMode,
 } from '../../lib/games/handGroups';
 import { analyzeHand, type MeldType } from '../../lib/games/meldHint';
-import { inviteToTable, shareResult, tableLink } from '../../lib/games/invite';
+import { openInvite, shareResult, tableLink } from '../../lib/games/invite';
 import {
   metrics, seatSpots, secondsLeft, ranked, activeCount, pid, allowsBots,
   newPrivateCode, normalizeCode,
@@ -74,6 +77,15 @@ const RED = new Set(['H', 'D']);
 
 /** Thirteen-card Indian rummy: the hand a player holds between turns. */
 const HAND_SIZE = 13;
+
+/**
+ * How long a table with enough players waits before the host's client deals.
+ *
+ * A minute is long enough for a third or fourth person to sit down and short
+ * enough that two people are not left staring at a lobby — which is what
+ * happened when dealing needed a tap that nobody made.
+ */
+const AUTO_DEAL_SECS = 60;
 
 /** Baize, from rummy.css --felt / --felt-2 / --felt-3. */
 const FELT = ['#1c9257', '#0a4c2c', '#073a20'];
@@ -179,6 +191,30 @@ export default function Rummy({ tableId = '', auto, autoBot }: { tableId?: strin
   // Seated the moment a lobby comes back for us. Until then the timeout above
   // is what turns an unanswered join into something the player can act on.
   useEffect(() => { if (L) { setSeating(false); setSeatFailed(false); } }, [L]);
+
+  /**
+   * DID WE ACTUALLY GET THE TABLE WE ASKED FOR?
+   *
+   * The rummy server answers a join for a table it does not know by seating you
+   * at its own default table and saying nothing about the substitution. Two
+   * people who share a code therefore both land somewhere called "Practice",
+   * each alone, each shown a lobby that looks like success — device-proven on
+   * two phones with the same code, both reading "1/6 seated".
+   *
+   * The app cannot create a table the server will not create. What it can do is
+   * stop reporting success: if we asked for a specific code and the lobby that
+   * came back names one of the server's own public tables, say so, so the
+   * player stops waiting for a friend who can never arrive.
+   */
+  const askedFor = seated;
+  const servedName = (L?.table?.name ?? '').trim();
+  // Compare what we ASKED FOR with what the table calls itself, rather than
+  // against the public list: arriving by deep link or invite never loads that
+  // list, which is exactly the path this notice exists for. If the server ever
+  // does honour a code it will name the table after it, and the notice stops
+  // appearing on its own.
+  const substituted =
+    !!askedFor && !!servedName && servedName.toLowerCase() !== askedFor.toLowerCase();
   useEffect(() => {
     if (!seating) return;
     const id = setTimeout(() => { setSeating(false); setSeatFailed(true); }, SEAT_TIMEOUT_MS);
@@ -255,7 +291,14 @@ export default function Rummy({ tableId = '', auto, autoBot }: { tableId?: strin
 
   /* ── the turn, and its clock ─────────────────────────────────────── */
 
-  const mine = !!G && G.turnPlayerId === state.you;
+  // A tap while the socket is down goes nowhere: the intent is dropped and the
+  // next snapshot restores the table. Everything a player can DO hangs off this
+  // one flag, so gating it here disables draw, discard, declare and drop at
+  // once — and the reconnecting pill already explains why.
+  const mine = !!G && G.turnPlayerId === state.you && phase === 'connected';
+  // Dealing again is `start` on this same table. The hook adds the wait that
+  // ends and the invite for a table everyone else has left — see useRematch.ts.
+  const rematch = useRematch('rummy', seated, state, send);
 
   /**
    * A rummy turn is draw-then-discard, and the hand SIZE says which half you
@@ -383,6 +426,8 @@ export default function Rummy({ tableId = '', auto, autoBot }: { tableId?: strin
   const [confirmDeclare, setConfirmDeclare] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [showRules, setShowRules] = useState(false);
+  // Offered once, before the first hand a player ever sees.
+  const firstRules = useFirstTimeRules('rummy');
   const [showResult, setShowResult] = useState(false);
   const [sound, setSound] = useState(soundEnabled());
 
@@ -515,6 +560,7 @@ export default function Rummy({ tableId = '', auto, autoBot }: { tableId?: strin
         table={table}
         you={state.you}
         code={seated}
+        substituted={substituted}
         voice={voice}
         voiceOpen={voiceOpen}
         setVoiceOpen={setVoiceOpen}
@@ -597,7 +643,15 @@ export default function Rummy({ tableId = '', auto, autoBot }: { tableId?: strin
           position: 'absolute', left: 0, right: 0, bottom: 2,
           flexDirection: 'row', gap: m.compact ? S[3] : S[5], justifyContent: 'center', alignItems: 'flex-end',
         }}>
-          <Pile label={`${closedCount} left`} live={mustDraw && !pending} onPress={() => draw('closed')} back w={m.pileW} still={reduceMotion} />
+          <View style={{ alignItems: 'center', gap: 3 }}>
+            {/* Short form on a compact table rather than none: the plate is 12px
+                tall, and a player who cannot tell the two stacks apart is the
+                thing the label exists to prevent. */}
+            <DeckLabel text={m.compact ? 'CLOSED' : 'CLOSED DECK'} />
+            <Pile label={`${closedCount} left`} live={mustDraw && !pending} onPress={() => draw('closed')} back w={m.pileW} still={reduceMotion} />
+          </View>
+          <View style={{ alignItems: 'center', gap: 3 }}>
+            <DeckLabel text={m.compact ? 'OPEN' : 'OPEN DECK'} />
           <DiscardPile
             card={openTop}
             live={mustDraw && !pending}
@@ -607,6 +661,7 @@ export default function Rummy({ tableId = '', auto, autoBot }: { tableId?: strin
             onMeasure={z => { discardZone.current = z; }}
             still={reduceMotion}
           />
+          </View>
           {wild ? (
             <View style={{ alignItems: 'center', gap: 3 }}>
               <CardFace card={wild} w={m.pileW} wild />
@@ -704,8 +759,8 @@ export default function Rummy({ tableId = '', auto, autoBot }: { tableId?: strin
           <Text style={{ color: INK_ON_FELT, fontSize: 12, fontWeight: '700', marginRight: S[1] }}>{`Score ${me.points}`}</Text>
         )}
         <Btn label="Discard" compact onPress={() => discard(picked[0])} disabled={!mustDiscard || picked.length !== 1 || !!pending} />
-        <Btn label="Declare" kind="gold" compact onPress={() => setConfirmDeclare(true)} disabled={!mustDiscard || picked.length !== 1 || !!pending} />
-        <Btn label="Drop" kind="danger" compact onPress={() => act('drop', { t: 'drop' })} disabled={!mine || !!pending} />
+        <Btn label="✓ Declare" kind="good" compact onPress={() => setConfirmDeclare(true)} disabled={!mustDiscard || picked.length !== 1 || !!pending} />
+        <Btn label="✕ Drop" kind="danger" compact onPress={() => act('drop', { t: 'drop' })} disabled={!mine || !!pending} />
       </View>
 
       <Toasts events={feed} />
@@ -720,13 +775,13 @@ export default function Rummy({ tableId = '', auto, autoBot }: { tableId?: strin
         host={L.hostId === state.you}
         tableName={table?.name}
         onClose={() => setShowResult(false)}
-        onAgain={() => { setShowResult(false); send({ t: 'start' }); }}
+        rematch={rematch}
         onShare={() => { void shareResult('rummy', G.winnerId === state.you); }}
         onLobby={() => { setShowResult(false); leaveTable(); }}
       />
 
       <VoiceSheet visible={voiceOpen} voice={voice} nameOf={nameOf} onClose={() => setVoiceOpen(false)} />
-      <RulesSheet visible={showRules} onClose={() => setShowRules(false)} />
+      <RulesSheet game="rummy" visible={showRules || firstRules.visible} onClose={() => { setShowRules(false); firstRules.close(); }} />
 
       <Sheet visible={confirmDeclare} title="Declare?" onClose={() => setConfirmDeclare(false)}>
         <Text style={{ color: C.muted, fontSize: t.sm, lineHeight: 20 }}>
@@ -758,7 +813,7 @@ export default function Rummy({ tableId = '', auto, autoBot }: { tableId?: strin
         />
         <SettingRow label="Sound" value={sound ? 'On' : 'Off'} onPress={() => { const n = !sound; setSound(n); void setSoundEnabled(n); }} />
         <SettingRow label="Game rules" hint="How this table scores" value="Read" onPress={() => { setShowSettings(false); setShowRules(true); }} />
-        <SettingRow label="Invite a friend" hint={seated ? `Code ${seated}` : 'Share this table'} value="Share" onPress={() => { setShowSettings(false); void inviteToTable('rummy', seated); }} />
+        <SettingRow label="Invite a friend" hint={seated ? `Code ${seated}` : 'Share this table'} value="Share" onPress={() => { setShowSettings(false); void openInvite('rummy', seated); }} />
         <SettingRow label="Leave table" hint="Drops you from this hand" value="Leave" onPress={() => { setShowSettings(false); act('drop', { t: 'drop' }); }} />
       </Sheet>
     </View>
@@ -767,31 +822,6 @@ export default function Rummy({ tableId = '', auto, autoBot }: { tableId?: strin
 
 /* ── small hooks ────────────────────────────────────────────────────── */
 
-/**
- * The turn clock.
- *
- * Ticks only while there is a live deadline, so a finished board and a lobby
- * cost no timer at all. `secondsLeft` refuses a number the device clock says is
- * nonsense, which is why this can return null on a running turn.
- *
- * It holds the SECOND, not the clock reading. `setNow(Date.now())` was a new
- * value every time by construction, so every tick re-rendered this whole screen
- * — and half of them redrew the identical digit, because the interval is finer
- * than the thing it displays. Storing what is actually shown lets React bail
- * out on the unchanged value, which is also why the interval can be fine enough
- * to keep the tick honest without costing anything extra.
- */
-function useCountdown(deadline: unknown, live: boolean): number | null {
-  const [secs, setSecs] = useState<number | null>(() => secondsLeft(deadline, Date.now()));
-  useEffect(() => {
-    if (!live || typeof deadline !== 'number') { setSecs(null); return; }
-    const tick = () => setSecs(secondsLeft(deadline, Date.now()));
-    tick();
-    const id = setInterval(tick, 250);
-    return () => clearInterval(id);
-  }, [deadline, live]);
-  return live ? secs : null;
-}
 
 /**
  * Honour the system's "reduce motion" setting.
@@ -905,6 +935,12 @@ function TableSelect({
             tables.map(tb => <TableCard key={tb.id} table={tb} onJoin={() => onJoin(tb.id)} />)
           )}
 
+          {/* Every surface that shows a stake says what it is staking. A number
+              beside the word "stakes" reads as money unless it says otherwise. */}
+          <Text style={{ color: C.muted, fontSize: 11.5, lineHeight: 17 }}>
+            Stakes are in play coins. They are not money, cannot be bought, and cannot be cashed out.
+          </Text>
+
           <Panel style={{ gap: S[3], marginTop: S[2] }}>
             <Text style={{ color: C.text, fontSize: t.md, fontWeight: '800' }}>Play your friends</Text>
             <Text style={{ color: C.muted, fontSize: t.sm, lineHeight: 18 }}>
@@ -973,12 +1009,14 @@ function TableCard({ table, onJoin }: { table: TableInfo; onJoin: () => void }) 
  * offer the server refuses reads to a player as a broken button.
  */
 function Room({
-  lobby, table, you, code, voice, voiceOpen, setVoiceOpen, onSend, onLeave, feed, notify,
+  lobby, table, you, code, substituted, voice, voiceOpen, setVoiceOpen, onSend, onLeave, feed, notify,
 }: {
   lobby: { status: string; hostId?: string; members: { vaultId: string; name: string; isBot?: boolean }[]; maxPlayers?: number };
   table?: { name?: string; stakes?: string; pointValue?: number };
   you: string;
   code: string;
+  /** The server put us on one of ITS tables instead of the one we asked for. */
+  substituted: boolean;
   voice: TableVoice;
   voiceOpen: boolean;
   setVoiceOpen: (v: boolean) => void;
@@ -995,6 +1033,35 @@ function Room({
   const full = members.length >= max;
   const empties = Math.max(0, max - members.length);
   const link = tableLink('rummy', code);
+
+  /**
+   * DEAL ON A FULL-ENOUGH TABLE, NOT A FULL ONE.
+   *
+   * A rummy table only ever dealt when the HOST tapped Deal. Two people could
+   * sit at the same table indefinitely — which is exactly what "online rummy
+   * does not work" looked like: both seated, neither able to start, because
+   * seat one belonged to someone who had wandered off. Six players were never
+   * required by the game; they were required by the button.
+   *
+   * So once there are two, the host's client deals itself after a minute, with
+   * the count visible so nobody is surprised by it. Deal still works instantly
+   * for anyone who does not want to wait, and the timer stands down the moment
+   * the table drops back below two.
+   */
+  const canDeal = members.length >= 2;
+  const [dealIn, setDealIn] = useState<number | null>(null);
+  useEffect(() => {
+    if (!host || !canDeal) { setDealIn(null); return; }
+    setDealIn(AUTO_DEAL_SECS);
+    const id = setInterval(() => {
+      setDealIn(prev => {
+        if (prev == null) return null;
+        if (prev <= 1) { onSend({ t: 'start' }); return null; }
+        return prev - 1;
+      });
+    }, 1000);
+    return () => clearInterval(id);
+  }, [host, canDeal, members.length, onSend]);
 
   const copy = async () => {
     await Clipboard.setStringAsync(code).catch(() => {});
@@ -1025,13 +1092,26 @@ function Room({
           {full && <Text style={{ color: C.gold, fontSize: 12, fontWeight: '700' }}>Table full</Text>}
         </Panel>
 
-        {!!code && (
+        {/* A CODE NOBODY CAN JOIN IS WORSE THAN NO CODE.
+            The server answers a join for a table it does not know by seating
+            you at one of its own and saying nothing, so two people who share a
+            code both end up alone on "Practice" — proven on two phones. When we
+            can see that happened, say it, and do not offer a code to share. */}
+        {substituted ? (
+          <Panel style={{ gap: S[2] }}>
+            <Text style={{ color: C.gold, fontSize: t.md, fontWeight: '800' }}>This is a public table</Text>
+            <Text style={{ color: C.muted, fontSize: t.sm, lineHeight: 19 }}>
+              {`The table you asked for is not available on this server, so you are at ${table?.name || 'a public table'}. Anyone can join it from the table list — there is no private code to share for rummy.`}
+            </Text>
+            <Btn label="Back to tables" onPress={onLeave} />
+          </Panel>
+        ) : !!code && (
           <Panel style={{ gap: S[2] }}>
             <Text style={{ color: C.text, fontSize: t.md, fontWeight: '800' }}>Invite</Text>
             <Text selectable style={{ color: C.gold, fontSize: t.xl, fontWeight: '800', letterSpacing: 2 }}>{code}</Text>
             <View style={{ flexDirection: 'row', gap: S[2] }}>
               <Btn label="Copy code" icon="⧉" compact onPress={() => { void copy(); }} />
-              <Btn label="Share link" icon="🔗" compact onPress={() => { void inviteToTable('rummy', code); }} disabled={!link} />
+              <Btn label="Share link" icon="🔗" compact onPress={() => { void openInvite('rummy', code); }} disabled={!link} />
             </View>
           </Panel>
         )}
@@ -1043,7 +1123,12 @@ function Room({
             {allowsBots(table) && (
               <Btn label="Add a bot" icon="🤖" onPress={() => onSend({ t: 'addbot' })} disabled={full} />
             )}
-            <Btn label={`Deal (${members.length})`} kind="gold" onPress={() => onSend({ t: 'start' })} disabled={members.length < 2} />
+            <Btn
+              label={dealIn != null ? `Deal now — starting in ${dealIn}s` : `Deal (${members.length})`}
+              kind="gold"
+              onPress={() => { setDealIn(null); onSend({ t: 'start' }); }}
+              disabled={!canDeal}
+            />
           </>
         ) : (
           <Text style={{ color: C.muted, fontSize: t.sm }}>Waiting for the host to deal…</Text>
@@ -1072,7 +1157,7 @@ function Room({
  * ascending, because points rummy scores DOWN.
  */
 function ResultSheet({
-  visible, players, settlement, winnerId, you, host, tableName, onClose, onAgain, onShare, onLobby,
+  visible, players, settlement, winnerId, you, host, tableName, onClose, rematch, onShare, onLobby,
 }: {
   visible: boolean;
   players: RummyPlayer[];
@@ -1082,7 +1167,7 @@ function ResultSheet({
   host: boolean;
   tableName?: string;
   onClose: () => void;
-  onAgain: () => void;
+  rematch: Rematch;
   onShare: () => void;
   onLobby: () => void;
 }) {
@@ -1138,7 +1223,7 @@ function ResultSheet({
 
       <View style={{ flexDirection: 'row', gap: S[2] }}>
         {host
-          ? <Btn label="Deal again" kind="gold" icon="↻" style={{ flex: 1 }} onPress={onAgain} />
+          ? <RematchBtn rm={rematch} label="Deal again" />
           : <Text style={{ flex: 1, color: C.muted, fontSize: t.sm, alignSelf: 'center' }}>Waiting for the host to deal again…</Text>}
         <Btn label="Share" icon="📣" compact onPress={onShare} />
       </View>
@@ -1148,36 +1233,6 @@ function ResultSheet({
 }
 
 /* ── rules ──────────────────────────────────────────────────────────── */
-
-function RulesSheet({ visible, onClose }: { visible: boolean; onClose: () => void }) {
-  const t = useType();
-  const Line = ({ children }: { children: React.ReactNode }) => (
-    <Text style={{ color: C.muted, fontSize: t.sm, lineHeight: 20 }}>{children}</Text>
-  );
-  return (
-    <Sheet visible={visible} title="How this table plays" onClose={onClose}>
-      <ScrollView style={{ maxHeight: 380 }} contentContainerStyle={{ gap: S[2] }}>
-        <Text style={{ color: C.text, fontSize: t.md, fontWeight: '800' }}>Points rummy, 13 cards</Text>
-        <Line>Two decks and jokers. Each turn you take one card — from the closed deck or the open pile — and throw one away.</Line>
-
-        <Text style={{ color: C.text, fontSize: t.md, fontWeight: '800' }}>A winning hand</Text>
-        <Line>All thirteen cards melded into sequences and sets, with at least two sequences, and at least one of those PURE — a run in one suit with no joker in it.</Line>
-        <Line>Sequence: three or more cards in a row, one suit. Set: three or four of the same rank, no suit twice.</Line>
-
-        <Text style={{ color: C.text, fontSize: t.md, fontWeight: '800' }}>Jokers</Text>
-        <Line>The printed jokers and every card of the round’s wild rank stand in for any card. A meld using one is impure, and cannot be your pure sequence.</Line>
-
-        <Text style={{ color: C.text, fontSize: t.md, fontWeight: '800' }}>Scoring</Text>
-        <Line>The winner scores 0. Everyone else counts their unmelded cards: face cards and aces are 10, the rest are face value, jokers are free. Capped at 80.</Line>
-        <Line>Declare without a pure sequence and the whole hand counts against you. Drop before your first turn to lose fewer points than playing on.</Line>
-
-        <Text style={{ color: C.text, fontSize: t.md, fontWeight: '800' }}>The table decides</Text>
-        <Line>The server shuffles, deals, times every turn and judges every declaration. The ✓ and ✗ badges on your groups are only a hint — they never gate an action, and if they ever disagree with the table, the table is right.</Line>
-      </ScrollView>
-      <Btn label="Got it" kind="gold" onPress={onClose} />
-    </Sheet>
-  );
-}
 
 /* ── voice ──────────────────────────────────────────────────────────── */
 
@@ -1260,46 +1315,132 @@ function VoiceRow({ voice, onExpand }: { voice: TableVoice; onExpand: () => void
 
 /* ── the felt ───────────────────────────────────────────────────────── */
 
+/**
+ * The table.
+ *
+ * A real card-room table is not a green rectangle: it is cloth stretched INTO a
+ * frame, so the eye reads a recess — brass cap, wood under it, a bevel where
+ * the cloth drops away, and light falling from above the far seats. Everything
+ * here serves that one impression, because depth is what makes the piles look
+ * like objects lying ON something rather than stickers floating over a colour.
+ *
+ * Cheap by construction: one Svg, six shapes, no blur filters (React Native has
+ * no cheap gaussian) — the bevel and the vignette are gradients, not shadows.
+ */
 function TableTop({ width, height }: { width: number; height: number }) {
+  const cx = width / 2;
+  const cy = height / 2;
   const rx = Math.max(4, width / 2 - 2);
   const ry = Math.max(4, height / 2 - 2);
+  // The rail is proportional, not a fixed 9px: on a small table a thick rail
+  // eats the cloth, on a big one a thin one looks like a drawn line.
+  const rail = Math.max(6, Math.min(18, Math.round(Math.min(rx, ry) * 0.055)));
+  const irx = Math.max(2, rx - rail);
+  const iry = Math.max(2, ry - rail);
+
   return (
     <Svg width={width} height={height} style={{ position: 'absolute' }} pointerEvents="none">
       <Defs>
-        <RadialGradient id="cloth" cx="50%" cy="30%" rx="70%" ry="75%">
-          <Stop offset="0" stopColor="#1c9257" />
-          <Stop offset="0.65" stopColor="#0a4c2c" />
-          <Stop offset="1" stopColor="#073a20" />
+        {/* Brass, lit from above: a hot cap at the top edge falling to a dark
+            underside, which is what tells the eye the rail is round. */}
+        <RadialGradient id="rtRail" cx="50%" cy="-10%" rx="75%" ry="110%">
+          <Stop offset="0" stopColor="#FFE9A8" />
+          <Stop offset="0.38" stopColor="#D9A93C" />
+          <Stop offset="0.74" stopColor="#8A6416" />
+          <Stop offset="1" stopColor="#4A330B" />
         </RadialGradient>
-        <RadialGradient id="rail" cx="50%" cy="0%" rx="70%" ry="90%">
-          <Stop offset="0" stopColor="#ffe89a" />
-          <Stop offset="0.45" stopColor="#a9791b" />
-          <Stop offset="1" stopColor="#5f4110" />
+        {/* Walnut between brass and cloth — the part a player rests a hand on. */}
+        <RadialGradient id="rtWood" cx="50%" cy="0%" rx="75%" ry="105%">
+          <Stop offset="0" stopColor="#5C3A1E" />
+          <Stop offset="1" stopColor="#2B1A0C" />
+        </RadialGradient>
+        {/* Cloth. The light sits high and slightly back, so the near edge —
+            where the player's own hand is — falls into shadow and the middle of
+            the table, where the piles are, is the brightest thing on screen. */}
+        <RadialGradient id="rtCloth" cx="50%" cy="26%" rx="78%" ry="86%">
+          <Stop offset="0" stopColor="#1E7A52" />
+          <Stop offset="0.55" stopColor="#0C5236" />
+          <Stop offset="1" stopColor="#052A1B" />
+        </RadialGradient>
+        {/* The drop where cloth meets frame: dark at the rim, gone by 12%. */}
+        <RadialGradient id="rtBevel" cx="50%" cy="50%" rx="50%" ry="50%">
+          <Stop offset="0.86" stopColor="#000000" stopOpacity="0" />
+          <Stop offset="1" stopColor="#000000" stopOpacity="0.55" />
         </RadialGradient>
       </Defs>
-      <Ellipse cx={width / 2} cy={height / 2} rx={rx} ry={ry} fill="url(#rail)" />
-      <Ellipse cx={width / 2} cy={height / 2} rx={Math.max(2, rx - 9)} ry={Math.max(2, ry - 9)} fill="url(#cloth)" />
+
+      <Ellipse cx={cx} cy={cy} rx={rx} ry={ry} fill="url(#rtRail)" />
+      <Ellipse cx={cx} cy={cy} rx={rx - rail * 0.42} ry={ry - rail * 0.42} fill="url(#rtWood)" />
+      <Ellipse cx={cx} cy={cy} rx={irx} ry={iry} fill="url(#rtCloth)" />
+      <Ellipse cx={cx} cy={cy} rx={irx} ry={iry} fill="url(#rtBevel)" />
+
+      {/* A single bright hairline along the top of the cloth: the specular line
+          every stretched surface has, and the cheapest way to say "taut". */}
       <Ellipse
-        cx={width / 2} cy={height / 2} rx={Math.max(2, rx - 9)} ry={Math.max(2, ry - 9)}
-        fill="none" stroke="rgba(0,0,0,0.30)" strokeWidth="6"
+        cx={cx} cy={cy} rx={irx} ry={iry}
+        fill="none" stroke="#EAF3EC" strokeOpacity="0.16" strokeWidth="1.5"
       />
+
+      {/* The house mark, printed into the cloth. Every real card-room table
+          carries one and it is always nearly invisible — it sits UNDER the
+          cards and must never compete with a rank pip. Low opacity and wide
+          tracking do that; a logo you notice mid-hand is a logo in the way. */}
+      <SvgText
+        x={cx} y={cy - iry * 0.02}
+        textAnchor="middle"
+        fontSize={Math.max(14, Math.round(irx * 0.13))}
+        fontWeight="800"
+        fill="#EAF3EC"
+        fillOpacity={0.075}
+      >
+        VAULTCHAT
+      </SvgText>
+      <SvgText
+        x={cx} y={cy + Math.max(13, Math.round(irx * 0.105))}
+        textAnchor="middle"
+        fontSize={Math.max(9, Math.round(irx * 0.06))}
+        fontWeight="700"
+        fill="#D9A93C"
+        fillOpacity={0.16}
+      >
+        RUMMY
+      </SvgText>
     </Svg>
   );
 }
 
+/**
+ * The surround behind the table.
+ *
+ * Deliberately NOT more felt: it is the dark of the room, so the lit table is
+ * the only thing the eye lands on. A brass hairline at the very top keeps it
+ * tied to the rail rather than reading as a separate black band.
+ */
 function Baize({ width, height }: { width: number; height: number }) {
   return (
     <Svg width={width} height={height} style={{ position: 'absolute', top: 0, left: 0 }} pointerEvents="none">
       <Defs>
-        <RadialGradient id="rbaize" cx="50%" cy="18%" rx="80%" ry="85%">
-          <Stop offset="0" stopColor={FELT[0]} />
-          <Stop offset="0.62" stopColor={FELT[1]} />
-          <Stop offset="1" stopColor={FELT[2]} />
+        <RadialGradient id="rbaize" cx="50%" cy="14%" rx="88%" ry="92%">
+          <Stop offset="0" stopColor="#0E3A28" />
+          <Stop offset="0.58" stopColor="#08251A" />
+          <Stop offset="1" stopColor="#03110C" />
         </RadialGradient>
       </Defs>
       <Rect x="0" y="0" width={width} height={height} fill="url(#rbaize)" />
-      <Rect x="0" y="0" width={width} height="3" fill="#a9791b" opacity="0.8" />
+      <Rect x="0" y="0" width={width} height="2" fill="#D9A93C" opacity="0.55" />
     </Svg>
+  );
+}
+
+/** Names a stack the way a table does — small caps on a dark plate. */
+function DeckLabel({ text }: { text: string }) {
+  return (
+    <View style={{
+      paddingHorizontal: S[2], paddingVertical: 2, borderRadius: R.pill,
+      backgroundColor: 'rgba(3,17,12,0.72)', borderWidth: 1, borderColor: 'rgba(217,169,60,0.28)',
+    }}>
+      <Text style={{ color: '#EAF3EC', fontSize: 9.5, fontWeight: '800', letterSpacing: 0.8 }}>{text}</Text>
+    </View>
   );
 }
 
@@ -1693,8 +1834,10 @@ function Seat({
           <Text style={{ color: '#2a1c00', fontWeight: '800', fontSize: Math.round(av * 0.36) }}>{bot ? '🤖' : initials}</Text>
         </View>
       </View>
-      <Text numberOfLines={1} style={{ color: '#fff', fontWeight: '700', fontSize: 10.5, marginTop: 1, maxWidth: spot.w }}>{name}</Text>
-      <Text numberOfLines={1} style={{ color: INK_ON_FELT, fontSize: 9.5, maxWidth: spot.w }}>{detail}</Text>
+      {/* Names were 10.5px on a felt seen at arm's length — smaller than the
+          card pips and the first thing a player actually needs to read. */}
+      <Text numberOfLines={1} style={{ color: '#fff', fontWeight: '800', fontSize: 14, marginTop: 2, maxWidth: spot.w }}>{name}</Text>
+      <Text numberOfLines={1} style={{ color: INK_ON_FELT, fontSize: 12, maxWidth: spot.w }}>{detail}</Text>
     </View>
   );
 }
