@@ -67,6 +67,8 @@ import { couldBeLongRead, readStats } from '../../lib/reader';
 // Vector, so the mark stays crisp and cannot be mis-scaled by a style box whose
 // ratio disagrees with a raster's — the failure that made this look absent.
 import KlipyWatermark from '../../assets/klipy/watermark-klipy-light.svg';
+import { groupRefOf, type GroupRef } from '../../lib/chatService';
+import { groupTypeInfo } from '../../lib/groups/catalog';
 
 function colorMentions(body: string): any {
   if (!body || body.indexOf('@') === -1) return body;
@@ -352,6 +354,68 @@ function PollBubble({
 // Tap to download (FileSystem) and open with the OS share sheet
 // (Sharing.shareAsync). The /uploads route is auth-gated so we pass
 // the Bearer header on the download request.
+/**
+ * A shared group card — tap it to ask to join.
+ *
+ * This is the receiving half of shareGroup(). The sender is told "The card is
+ * in your chat with X"; before this existed the recipient saw an empty bubble,
+ * because no branch in this file matched type 'group_ref'. app/group-join.tsx
+ * was written to receive the tap and had no inbound navigation from anywhere.
+ *
+ * Deliberately a weak door, matching what group-join says about itself:
+ * arriving there admits nothing, it sends a request and an admin decides. So
+ * this card navigates and never joins.
+ */
+export function GroupRefBubble({ gref, isMine }: { gref: GroupRef; isMine: boolean }) {
+  const S = useS();
+  const { colors } = useTheme();
+  const gRouter = useRouter();
+  const info = gref.groupType ? groupTypeInfo(gref.groupType) : null;
+  const icon = (gref.icon || info?.icon || 'people') as any;
+  const tint = gref.color || info?.color || colors.primary;
+
+  return (
+    <TouchableOpacity
+      activeOpacity={0.75}
+      accessibilityRole="button"
+      accessibilityLabel={`Open ${gref.name || 'group'}`}
+      onPress={() => gRouter.push({
+        pathname: '/group-join' as any,
+        params: {
+          groupId: gref.groupId,
+          name: gref.name ?? '',
+          groupType: gref.groupType ?? '',
+          icon: gref.icon ?? '',
+          color: gref.color ?? '',
+        },
+      })}
+      style={{
+        flexDirection: 'row', alignItems: 'center', gap: 10,
+        paddingVertical: 10, paddingHorizontal: 12, borderRadius: 12,
+        borderWidth: 1, borderColor: colors.separator,
+        backgroundColor: isMine ? 'transparent' : colors.surface,
+        minWidth: 200,
+      }}
+    >
+      <View style={{
+        width: 38, height: 38, borderRadius: 10, alignItems: 'center',
+        justifyContent: 'center', backgroundColor: colors.separator,
+      }}>
+        <Ionicons name={icon} size={20} color={tint} />
+      </View>
+      <View style={{ flex: 1 }}>
+        <Text numberOfLines={1} style={{ color: colors.text, fontSize: 15, fontWeight: '600' }}>
+          {gref.name || 'Group'}
+        </Text>
+        <Text numberOfLines={1} style={{ color: colors.textDim, fontSize: 12, marginTop: 1 }}>
+          {info?.label ? `${info.label} · Tap to join` : 'Tap to join'}
+        </Text>
+      </View>
+      <Ionicons name="chevron-forward" size={16} color={colors.textDim} />
+    </TouchableOpacity>
+  );
+}
+
 export function FileBubble({
   attachmentId, filename, mime, size, authHeader, resolvedUri, isMine, thumb, pages, encrypted,
 }: {
@@ -1127,6 +1191,17 @@ function MessageBubble({
   const isSticker = msg.type === 'sticker' && !!msg.content;
   const isPoll  = msg.type === 'poll' && Array.isArray(msg.meta?.options);
   const isLocation = msg.type === 'location';
+  // A SHARED GROUP CARD, WHICH NOTHING USED TO DRAW.
+  //
+  // shareGroup() sends type 'group_ref' with an empty content and a server-
+  // enriched meta, and tells the sender "The card is in your chat with X". No
+  // branch here matched that type, so the recipient got an EMPTY bubble — and
+  // app/group-join.tsx, the screen the card is supposed to open, had zero
+  // inbound navigation anywhere in the codebase. The whole path was dead:
+  // server written, parser written, screen written, nothing wired.
+  //
+  // groupRefOf returns exactly the params group-join reads.
+  const groupRef = msg.type === 'group_ref' ? groupRefOf(msg.meta) : null;
 
   // ── View-once gate (WhatsApp-style) ──────────────────────
   // Photo/video only. The OWNER sees their own media inline. A recipient gets a
@@ -1341,6 +1416,8 @@ function MessageBubble({
           />
         ) : isVaultbeam ? (
           <VaultBeamBubble msg={msg} isMine={isMine} plain={plain} />
+        ) : groupRef ? (
+          <GroupRefBubble gref={groupRef} isMine={isMine} />
         ) : isSticker ? (
           <Text style={S.stickerEmoji}>{msg.content}</Text>
         ) : isPoll ? (
