@@ -115,3 +115,37 @@ and both are written up in `design.md`.
 - Implementation in `lib/games/theme.ts`, `components/games/*` or `app/games.tsx`
 - Any behaviour, rule, scoring, ranking, matchmaking, limit, room, permission,
   navigation or backend change
+
+## 7. Figma build — where it actually got to
+
+Built in `zomjMMcjw8sTXPpJh84lKi` (VaultChat Games):
+
+- [x] 7.1 Foundations page — cover, 15 swatches, 8-style type specimen, scale bars
+- [x] 7.2 55 variables — 19 primitives (scoped `[]`, hidden from pickers), 19
+      semantic aliased to them, 17 scale. Scopes and code syntax on every one.
+- [x] 7.3 10 styles — 8 text (Roboto verified against `listAvailableFontsAsync`,
+      Roboto Mono for clocks and move lists), 2 effect
+- [x] 7.4 5 component sets / 22 variants — Playing Card, Status Pill, Button,
+      Seat, Game Card. Every fill, stroke, radius and pad bound to a variable.
+- [ ] 7.5 **The five screens. BLOCKED, not unfinished.** The account is a
+      Starter plan with a View seat: **20 MCP tool calls per month**
+      (`whoami` and `create_new_file` are exempt; everything else counts).
+      The month's quota went on discovery and the components.
+
+      The work itself is done and written up in `figma-screens.md` — six
+      ready-to-run scripts against the real node IDs and property keys, plus
+      the layout rules that each cost a bug while building the components.
+      When the quota renews this is six calls, not a redesign.
+
+      A subscription is NOT required: the quota renews monthly. Upgrading only
+      makes sense if Figma becomes a regular workflow (Pro with a Full/Dev seat
+      is 200/day), because 20/month is about one short session.
+
+### Two platform limits worth remembering
+
+- **3 pages on Starter.** `createPage` throws on the 4th, so the one-page-per-
+  component default was impossible; sections inside three pages do the
+  separation instead.
+- **Instance subtrees are immutable.** A screen cannot append a Button into a
+  Game Card instance — the card must own its action. That is why
+  `figma-screens.md` script 0 runs first.
