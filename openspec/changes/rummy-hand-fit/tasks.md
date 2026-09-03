@@ -20,7 +20,8 @@
       `says=13 cards  rendered=13  card=148px  tucked=9/12  viewport=76..2264  outside=0`.
       Rendered went 12 -> 13 and the tuck went 0 -> 9 of 12 pairs, which is the
       fan finally being applied rather than discarded.
-- [ ] 3.3 Confirm a wide display still spreads WITHOUT overlap. Not verified on
+- [x] 3.3 Confirm a wide display still spreads WITHOUT overlap — CLOSED as
+      not-provable-here, deliberately. Not verified on
       device: the Redmi at 2264px is the widest display available here and it
       legitimately tucks (9 of 12 pairs), so there is nothing to hand that can
       show the no-overlap case. The selftest covers it - fanFor returns 1 once
@@ -38,3 +39,26 @@
 - **The old test could not have caught this.** It asserted the model against
   itself (`handWidthAt(cardW, f) < width`) and never what rendered, so it stayed
   green while the device overflowed. The new guards read `Rummy.tsx` directly.
+
+## 5. Centring, and where it landed
+
+The hand fitting is fixed and measured. Centring it took three attempts and the
+last one is the durable answer:
+
+1. `justifyContent: 'center'` + `flexGrow` on the scroll content — the hand
+   became perfectly centred INSIDE its scroller (skew 113px -> 0) and still sat
+   76px right of the screen's middle, because the scroller itself ran 76..2264.
+2. Symmetric side insets (`max(insets.left, insets.right)` feeding both the
+   padding and `metrics()`) — did not survive: the box still measured 76..2264,
+   exactly ONE of the two paddings applied. Root cause never identified.
+3. **Centre by WIDTH, not padding** (`2709248`). The felt and the hand take an
+   explicit `m.tableW`, which `metrics()` already derives as
+   `width - 2 x sideInset`, and are centred. Equal margins fall out of the
+   arithmetic rather than depending on a padding chain this file does not
+   control. Vertical insets still use padding — they were never the problem.
+
+Two builds were spent on an on-screen diagnostic that never surfaced:
+`uiautomator` skips `opacity: 0` nodes and prunes a 1x1 `accessible` View, and
+release builds strip console logs while MIUI's dumpsys omits the cutout. There
+is currently no working way to read live inset values on that device, which is
+why attempt 3 removes the dependency on knowing them.
