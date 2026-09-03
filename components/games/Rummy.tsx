@@ -267,7 +267,27 @@ export default function Rummy({ tableId = '', auto, autoBot }: { tableId?: strin
   // hand back a fresh object every render, so depending on them would recompute
   // the whole layout on every keystroke and defeat the memo entirely.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  const m = useMemo(() => metrics(win, insets), [win.width, win.height, insets.top, insets.bottom, insets.left, insets.right]);
+  /**
+   * SYMMETRIC side insets, so the table is centred on the SCREEN.
+   *
+   * In landscape — the orientation rummy plays in — the cutout sits on one side
+   * only. Padding each edge by its own inset is correct for avoiding it, but it
+   * makes the usable box asymmetric: measured on the Redmi at rotation 1, the
+   * hand's scroller ran 76..2264, so a hand centred inside it still sat 38px
+   * right of the middle of the screen. Padding both sides by the larger inset
+   * costs a little width and buys a table that is actually centred.
+   *
+   * The same value feeds `metrics` and the padded box below. That is the point:
+   * the last two bugs here were both a model describing a layout that did not
+   * render, so there is exactly one number and both sides read it.
+   */
+  const sideInset = Math.max(insets.left, insets.right);
+  const boxInsets = useMemo(
+    () => ({ top: insets.top, bottom: insets.bottom, left: sideInset, right: sideInset }),
+    [insets.top, insets.bottom, sideInset],
+  );
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const m = useMemo(() => metrics(win, boxInsets), [win.width, win.height, boxInsets]);
   const t = useType();
 
   const reduceMotion = useReduceMotion();
@@ -620,8 +640,8 @@ export default function Rummy({ tableId = '', auto, autoBot }: { tableId?: strin
 
       <View style={{
         flex: 1,
-        paddingTop: insets.top, paddingBottom: insets.bottom,
-        paddingLeft: insets.left, paddingRight: insets.right,
+        paddingTop: boxInsets.top, paddingBottom: boxInsets.bottom,
+        paddingLeft: boxInsets.left, paddingRight: boxInsets.right,
       }}>
       {/* The felt — an oval with a gold rail, so the piles read as sitting ON
           something and the other players have somewhere to be. */}
