@@ -34,7 +34,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   AccessibilityInfo, ActivityIndicator, KeyboardAvoidingView, Platform, Pressable,
-  Dimensions, ScrollView, Text, TextInput, View, useWindowDimensions,
+  ScrollView, Text, TextInput, View, useWindowDimensions,
   type LayoutChangeEvent, type ViewStyle,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
