@@ -24,7 +24,7 @@ import Animated, {
 } from 'react-native-reanimated';
 import * as Haptics from 'expo-haptics';
 import { useGameSocket, type GameState, type AutoStart } from '../../lib/games/useGameSocket';
-import { Btn, Panel, Banner, PlayerRow, Chip, Reconnecting, RematchBtn, useType, useBoardSize } from './ui';
+import { TableBackground, Btn, Panel, Banner, PlayerRow, Chip, Reconnecting, RematchBtn, useType, useBoardSize } from './ui';
 import { useRematch } from '../../lib/games/useRematch';
 import { RulesSheet, useFirstTimeRules } from './rules';
 import { C, S, R, D3, E, mix, goldLine } from '../../lib/games/theme';
@@ -270,7 +270,11 @@ export default function Chess({ roomId, auto, autoBot }: { roomId: string } & Au
   const stroke = PIECE_STROKE;
 
   return (
-    <View style={{ flex: 1, backgroundColor: '#121212' }}>
+    // Chess sat on a hardcoded '#121212' grey while Ludo and Tic-Tac-Toe both
+    // used TableBackground — so one of the four games rendered in a different
+    // world from the rest, and its ground was the only colour in the games UI
+    // outside the token set. Same shared surface as its siblings now.
+    <TableBackground>
       <ScrollView contentContainerStyle={{ padding: S[4], gap: S[3], alignItems: 'center', paddingBottom: S[6] }}>
 
         {reconnecting && <Reconnecting error={error} onRetry={retry} />}
@@ -443,7 +447,7 @@ export default function Chess({ roomId, auto, autoBot }: { roomId: string } & Au
           onCancel={() => setPromo(null)}
         />
       )}
-    </View>
+    </TableBackground>
   );
 }
 
