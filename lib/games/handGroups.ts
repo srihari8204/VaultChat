@@ -209,13 +209,36 @@ export function capAndPad(groups: Groups): Groups {
 }
 
 /**
- * The arrangement a freshly dealt hand starts in: melds first, everything else
- * (jokers included) in one group after them, padded to four.
+ * The arrangement a freshly dealt hand starts in: melds first, then the rest
+ * ORDERED, then jokers on their own, padded to four.
+ *
+ * THE LEFTOVER USED TO COME BACK IN DEAL ORDER, which is why Sort looked
+ * broken. findMelds returns `hand.filter(...)`, so anything it could not meld
+ * kept the order the server dealt it — and in a typical hand that is most of
+ * the thirteen cards. The player tapped Sort, two or three cards jumped into a
+ * meld at the front, and the remaining eight stayed shuffled. Every reference
+ * client (RummyCircle, Ace2Three) leaves the ungrouped cards suit-wise and
+ * ascending, because the point of sorting is to SEE the runs you are one card
+ * away from — which is exactly what deal order hides.
+ *
+ * Jokers move to their own trailing group for the same reason the `suit` and
+ * `rank` modes already do it: they are the cards you are deciding what to do
+ * with, and burying them mid-suit hides them.
  */
 export function autoArrange(hand: SortCard[], isJoker: (c: SortCard) => boolean): Groups {
   const { melds, leftover } = findMelds(hand, isJoker);
   const arr: Groups = melds.map(m => m.slice());
-  if (leftover.length) arr.push(leftover);
+
+  const byId = new Map(hand.map(c => [c.id, c]));
+  const rest = leftover.map(id => byId.get(id)).filter((c): c is SortCard => !!c);
+  const loose = rest.filter(c => !isJoker(c)).sort(
+    (a, b) => (SUIT_ORDER[a.suit] ?? 9) - (SUIT_ORDER[b.suit] ?? 9)
+           || rankIndex(a.rank) - rankIndex(b.rank),
+  );
+  const jokers = rest.filter(isJoker);
+
+  if (loose.length) arr.push(loose.map(c => c.id));
+  if (jokers.length) arr.push(jokers.map(c => c.id));
   return capAndPad(arr.length ? arr : [[]]);
 }
 

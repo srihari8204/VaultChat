@@ -127,6 +127,31 @@ check('a joker is left loose rather than spent for you',
   arranged.some(g => g.includes('JK') && !['H4', 'S7'].some(id => g.includes(id))),
   'auto-placing a joker into a meld the player did not want is worse than leaving it');
 
+// THE BUG THIS CAUGHT: the ungrouped remainder came back in DEAL ORDER.
+// findMelds returns `hand.filter(...)`, so everything it could not meld kept
+// the order the server dealt it — usually most of the hand. On device, Sort
+// pulled two cards into a meld and left the other eight shuffled, which is
+// what "sort is not working" meant. RummyCircle and Ace2Three both leave the
+// ungrouped cards suit-wise ascending.
+{
+  // Nothing here melds, so the whole hand is leftover: strays only, dealt in
+  // deliberately scrambled order.
+  const strays = ['D9', 'S3', 'H7', 'C2', 'SK', 'H2', 'JK'].map(sc);
+  const out = autoArrange(strays, isJk).filter(g => g.length);
+  const loose = out.find(g => !g.includes('JK')) ?? [];
+
+  check('the ungrouped remainder is SORTED, not left in deal order',
+    loose.join(',') === 'S3,SK,H2,H7,C2,D9',
+    `suit order S,H,C,D then ascending rank — got ${loose.join(',')}`);
+
+  check('...and the joker sits in its own group at the end',
+    out[out.length - 1].join(',') === 'JK',
+    'a joker buried mid-suit is a joker the player does not see');
+
+  check('...still holding every card exactly once',
+    holds(autoArrange(strays, isJk), strays.map(c => c.id)));
+}
+
 check('never more than five groups',
   autoArrange(
     ['H2','H3','H4','S5','S6','S7','D8','D9','D10','CJ','CQ','CK','H9','S9','C9'].map(sc),
