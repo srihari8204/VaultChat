@@ -129,6 +129,32 @@ Three defects behind "games is not working" and "crashing while playing", all fo
   - Two-way AUDIO is NOT verified: it needs a second participant to tap Talk, and MIUI refuses adb input on the Redmi while the emulator is signed out.
 - [x] 9.5 **Invite path proven up to the server** — bot offer → *Invite someone* → chat picker listed real chats (Zoho, Arunspace, RefTest) with Send; sending returned **"Could not send the invite — invalid type"**, which is the exact 400 from the undeployed migration 124. Client side is complete; only the deploy is missing (**device-verified**)
 
+## 9c. Drop penalties + a hand-overflow defect, 2026-09-03
+
+- [x] 9c.1 **Drop penalties are 20 / 40, device-proven on both ends.** First drop
+      measured on the Honor: dropped before taking a turn, result sheet showed
+      `Srihari B (you) 20`. Middle drop measured on the EMULATOR (now signed in
+      as "Leo B", so taps work there): drew, selected, discarded a card to
+      complete a turn, then dropped — result sheet showed `Leo B (you) 40`. The
+      rules-sheet wording ("lose 20 before your first turn, 40 later") is
+      therefore correct and no longer an unverified claim.
+- [ ] 9c.2 **DEFECT — a 13-card hand in five groups overflows the table and the
+      last card is lost.** Redmi Note 8 Pro, landscape (rummy locks landscape
+      while playing, `Rummy.tsx:272`), usable window `2264x1036`. The app reports
+      `13 cards`; only 12 render. The trailing group is clipped at the screen
+      edge and its card renders 34 px wide instead of 148 — in the measured hand
+      that card was the **joker**.
+
+      Five groups need ~2502 px of container: 4 x ~534 px (3 cards + 2x44 px tray
+      padding) + 1 x 385 px + 4 x 33 px gaps, against 2264 px available.
+      `handWidthAt()`/`fanFor()` in `lib/games/rummyTable.ts` budget for card
+      widths and tray padding, but the hand as laid out still exceeds the width
+      when the arrangement reaches MAX_GROUPS.
+
+      Unchanged by system font scale (card geometry is dp-based, not sp-based).
+      Not a regression from the sort fix — sorting only changes which cards sit
+      in which group, not how wide a group is.
+
 ## 9b. Two-device online + private play, 2026-09-03 (shipping APK a635e208 on BOTH phones)
 
 Honor = "Srihari B" (taps work), Redmi = "Testing" (MIUI blocks INJECT_EVENTS, so it is

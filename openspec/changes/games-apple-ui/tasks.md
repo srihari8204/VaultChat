@@ -61,12 +61,38 @@ system and its specification. Implementation, if approved, is a separate change.
 - [x] 5.2 Confirm nothing invented: no badge, rating, reward, streak or statistic
 - [x] 5.3 Contrast checked against composited grounds, not base colours
 - [x] 5.4 Answer all fifteen questions of the brief's final design test
-- [ ] 5.5 **Measure, do not eyeball.** On device, assert card count, card width,
-      true overlap, row extent against screen width and remaining slack. Current
-      baseline at 54 dp: Redmi 13 cards / 148x209 / 0 overlapping / 298 px slack;
-      Honor 13 cards / 176x247 / 0 overlapping / 214 px slack. Repeat for
-      landscape, split screen and enlarged system font — none of which has been
-      measured yet.
+- [x] 5.5 **Measured on device, and it found a defect.** Redmi Note 8 Pro,
+      shipping build, rummy vs bot. Two corrections and one real bug:
+
+      **Correction — rummy plays in LANDSCAPE.** `Rummy.tsx:272` locks the
+      orientation to landscape while playing and portrait in the lobby. Every
+      earlier card measurement was therefore already a landscape measurement.
+      Confirmed: lobby root `1080x2220`, playing root `2264x1036`.
+
+      **Correction — earlier slack figures were wrong.** They compared the hand
+      extent against the phone's *physical* long edge (2340) instead of the
+      *usable* window width (2264, after system bars). Real slack is far smaller
+      than the 176-298 px previously reported.
+
+      **DEFECT — the hand overflows and the last card is lost.** The app reports
+      `13 cards`, but only **12 render**, and the hand extends to exactly the
+      usable edge:
+
+      | | usable W | says | rendered | extent | last card |
+      |---|---|---|---|---|---|
+      | font scale 1.0 | 2264 | 13 cards | 12 | 112..2264 | `5 of spades, joker` at 2230..2264 — 34 px wide instead of 148 |
+      | font scale 1.3 | 2264 | 13 cards | 12 | 112..2264 | same |
+
+      With five groups the containers alone need ~2502 px: four groups of
+      ~534 px (3 cards + 2x44 px tray padding), one of 385 px, plus four 33 px
+      gaps. That is ~238 px more than the 2264 px available, so the trailing
+      group is clipped and its cards fall off the edge. In the measured hand the
+      lost card was the **joker** — the one card a rummy player most needs to see.
+
+      Enlarging the system font does not worsen it: card geometry is dp-based,
+      not sp-based.
+
+      Not yet measured: split screen / multi-window, and tablet.
 
 ## 6. Decisions the owner must make
 
