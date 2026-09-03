@@ -15,10 +15,17 @@
 
 ## 3. Device
 
-- [ ] 3.1 Build and install
-- [ ] 3.2 Measure on the Redmi in landscape: 13 card nodes, extent within the
-      scroller viewport
-- [ ] 3.3 Confirm a wide display still spreads without overlap
+- [x] 3.1 Build and install — APK 5152a428, on the Redmi and the emulator
+- [x] 3.2 Measured on the Redmi in landscape, and it holds:
+      `says=13 cards  rendered=13  card=148px  tucked=9/12  viewport=76..2264  outside=0`.
+      Rendered went 12 -> 13 and the tuck went 0 -> 9 of 12 pairs, which is the
+      fan finally being applied rather than discarded.
+- [ ] 3.3 Confirm a wide display still spreads WITHOUT overlap. Not verified on
+      device: the Redmi at 2264px is the widest display available here and it
+      legitimately tucks (9 of 12 pairs), so there is nothing to hand that can
+      show the no-overlap case. The selftest covers it - fanFor returns 1 once
+      there is room - but that is the model, and the model is exactly what was
+      wrong before.
 
 ## 4. Found while fixing
 

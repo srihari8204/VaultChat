@@ -138,8 +138,7 @@ Three defects behind "games is not working" and "crashing while playing", all fo
       complete a turn, then dropped — result sheet showed `Leo B (you) 40`. The
       rules-sheet wording ("lose 20 before your first turn, 40 later") is
       therefore correct and no longer an unverified claim.
-- [ ] 9c.2 **DEFECT — a 13-card hand in five groups overflows the table and the
-      last card is lost.** Redmi Note 8 Pro, landscape (rummy locks landscape
+- [x] 9c.2 **FIXED — a 13-card hand in five groups overflowed the table.** Redmi Note 8 Pro, landscape (rummy locks landscape
       while playing, `Rummy.tsx:272`), usable window `2264x1036`. The app reports
       `13 cards`; only 12 render. The trailing group is clipped at the screen
       edge and its card renders 34 px wide instead of 148 — in the measured hand
@@ -154,6 +153,12 @@ Three defects behind "games is not working" and "crashing while playing", all fo
       Unchanged by system font scale (card geometry is dp-based, not sp-based).
       Not a regression from the sort fix — sorting only changes which cards sit
       in which group, not how wide a group is.
+
+      **Root cause and fix (openspec/changes/rummy-hand-fit, commit d59bd0d):**
+      the tuck was applied as `gap: -overlap`, and a Yoga gap may not be
+      negative — the value is invalid and resolves to 0, so the fan was computed
+      and then discarded at render. Re-measured after the fix: 13 rendered, 9 of
+      12 pairs tucked, nothing outside the viewport.
 
 ## 9b. Two-device online + private play, 2026-09-03 (shipping APK a635e208 on BOTH phones)
 

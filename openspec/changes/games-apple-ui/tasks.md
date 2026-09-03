@@ -99,7 +99,10 @@ system and its specification. Implementation, if approved, is a separate change.
 These are not blocked on design work. They are choices only the owner can make,
 and both are written up in `design.md`.
 
-- [ ] 6.1 **Accept or reject the palette divergence.** `lib/games/theme.ts` is a
+- [x] 6.1 **ACCEPTED, 2026-09-03 (owner).** The tonal ground is implemented in
+      `lib/games/theme.ts` (commit 28573b1) and the two clients now differ until
+      the web one follows. Original wording:
+      **Accept or reject the palette divergence.** `lib/games/theme.ts` is a
       verbatim port of the web client's `theme.css`, kept so the two clients can
       be compared side by side. These tokens break that parity. Adopt them on
       native only, adopt them on both, or keep the current palette.
