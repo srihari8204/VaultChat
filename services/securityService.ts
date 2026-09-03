@@ -72,6 +72,8 @@ export const duressPin = createDuressPinTracker(_duressKV);
 
 async function checkRootJailbreak(): Promise<ThreatDetail[]> {
   const threats: ThreatDetail[] = [];
+  // su and adb are the emulator platform, not evidence against it.
+  if (await isEmulatorTestRig()) return threats;
 
   try {
     const rooted = await (DeviceInfo as any).isRooted();
@@ -194,6 +196,27 @@ async function checkFrida(): Promise<ThreatDetail[]> {
 // setting the variable on the build command. securityEmulatorFlag.selftest.ts
 // asserts the default stays off.
 const ALLOW_EMULATOR_TEST_BUILD = process.env.EXPO_PUBLIC_ALLOW_EMULATOR === '1';
+
+// AN EMULATOR'S OWN PROPERTIES ARE NOT AN ATTACK.
+//
+// Waiving checkEmulator() alone was not enough to make an emulator usable as a
+// test rig, and the reason only shows up on a real AVD: every stock image ships
+// /system/xbin/su and runs userdebug with adb on, so isRooted() returns true and
+// ROOT_DETECTED is `critical` — an instant wipeAllKeys() on every launch. That
+// is what emptied the emulator's keystore repeatedly.
+//
+// So the waiver also covers the root/adb signals, but ONLY where both halves
+// hold: the flag was compiled into this build AND the device really is an
+// emulator. On a phone the second half is false, so a rooted handset wipes
+// exactly as before; in a production build the first is a constant false and
+// none of this code is reachable at all. Frida, hooks and the duress PIN are
+// never waived — those are compromise signals on an emulator too.
+let emulatorRig: Promise<boolean> | null = null;
+function isEmulatorTestRig(): Promise<boolean> {
+  if (!ALLOW_EMULATOR_TEST_BUILD) return Promise.resolve(false);
+  if (!emulatorRig) emulatorRig = DeviceInfo.isEmulator().then(v => !!v).catch(() => false);
+  return emulatorRig;
+}
 
 async function checkEmulator(): Promise<ThreatDetail[]> {
   const threats: ThreatDetail[] = [];

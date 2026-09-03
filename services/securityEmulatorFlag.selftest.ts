@@ -14,8 +14,15 @@
 //
 // The threat model for the flag itself:
 //
-//   * it must waive ONLY the emulator signal. Root/Frida/debugger/hook/overlay
-//     are real compromise signals and must keep wiping keys.
+//   * it must waive only what the emulator ITSELF explains. Every stock AVD
+//     ships /system/xbin/su and runs userdebug with adb on, so isRooted() is
+//     true there and ROOT_DETECTED is `critical` — the emulator wiped its own
+//     keys on every launch even with the flag set. So root/adb are waived too,
+//     but ONLY behind isEmulatorTestRig(), which needs the compiled-in flag AND
+//     DeviceInfo.isEmulator(). On a phone the second half is false and a rooted
+//     handset wipes exactly as before.
+//   * Frida, hooks and the duress PIN are never waived — those are compromise
+//     signals on an emulator too.
 //   * it must be BUILD-TIME. EXPO_PUBLIC_* is inlined by Metro, so a build that
 //     does not set it compiles to a constant false — there is no runtime
 //     switch and nothing to flip on an installed app.
@@ -46,24 +53,43 @@ A(!/AsyncStorage|SecureStore\.getItem[^\n]*ALLOW_EMULATOR|setAllowEmulator/.test
   '1a. it is NOT readable from storage or settable at runtime — an installed '
   + 'app has no way to turn it on');
 
-// ── 2. it waives the emulator check ONLY ──────────────────────────────
+// ── 2. the waiver is narrow, and root is waived only ON AN EMULATOR ───
 {
   const i = code.indexOf('async function checkEmulator');
   const body = code.slice(i, i + 400);
   A(i >= 0 && /if \(ALLOW_EMULATOR_TEST_BUILD\) return threats;/.test(body),
     '2. the early return lives INSIDE checkEmulator');
 
-  // The flag must appear exactly once, so it cannot be silently reused to
-  // waive a second, more serious detector.
+  // The raw flag must never be tested anywhere else: every other waiver has to
+  // go through isEmulatorTestRig(), which also demands DeviceInfo.isEmulator().
   const uses = (code.match(/ALLOW_EMULATOR_TEST_BUILD/g) || []).length;
-  A(uses === 2, `2a. referenced exactly twice — one definition, one use (found ${uses})`);
+  A(uses === 3, '2a. the raw flag is referenced exactly three times — definition, '
+    + `checkEmulator, and the isEmulatorTestRig guard (found ${uses})`);
 
-  for (const fn of ['checkRoot', 'checkFrida']) {
-    const j = code.indexOf(fn);
-    if (j < 0) continue;
+  const r = code.indexOf('function isEmulatorTestRig');
+  const rig = code.slice(r, r + 400);
+  A(r >= 0 && /if \(!ALLOW_EMULATOR_TEST_BUILD\) return Promise\.resolve\(false\);/.test(rig),
+    '2b. the rig needs the BUILD FLAG — without it a real device can never take '
+    + 'this path');
+  A(/DeviceInfo\.isEmulator\(\)/.test(rig) && /catch\(\(\)=>false\)/.test(rig.replace(/\s/g, '')),
+    '2c. ...AND the device must really be an emulator, with a failed probe '
+    + 'counting as "not an emulator" — the safe direction');
+
+  {
+    const j = code.indexOf('async function checkRootJailbreak');
     const b = code.slice(j, j + 700);
+    A(j >= 0 && /if \(await isEmulatorTestRig\(\)\) return threats;/.test(b),
+      '2d. checkRootJailbreak is waived only through the RIG, never the bare flag');
     A(!/ALLOW_EMULATOR_TEST_BUILD/.test(b),
-      `2b. ${fn} is NOT waived — root and Frida are real compromise signals`);
+      '2e. ...so a build flag alone cannot switch root detection off on a phone');
+  }
+
+  {
+    const j = code.indexOf('async function checkFrida');
+    const b = code.slice(j, j + 900);
+    A(j >= 0 && !/ALLOW_EMULATOR_TEST_BUILD|isEmulatorTestRig/.test(b),
+      '2f. checkFrida is NOT waived at all — instrumentation is an attack on an '
+      + 'emulator too');
   }
 }
 
