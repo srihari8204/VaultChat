@@ -102,7 +102,47 @@ High-contrast serif for outcomes and game names; clean sans for all interface
 text; mono with tabular figures for room codes, clocks and scores. Few weights,
 large jumps between steps, no text below 11 px.
 
-## Decision 7 — Reach
+## Decision 7 — Auto-responsive: derive everything, hard-code nothing
+
+Every dimension in the games UI comes from the live window and the safe-area
+insets. There are no device branches and no fixed layouts anywhere.
+
+The machinery for this already exists and is the model to extend, not replace:
+
+- `lib/games/rummyTable.ts` — `metrics(win, insets)` computes card width from
+  `min(byWidth, byHeight, byBudget)` clamped between `CARD_MIN` 32 and
+  `CARD_MAX` 54; `fanFor(cardW, width)` and `handWidthAt()` decide the overlap
+  so thirteen cards fit the actual edge; `seatSpots(n, w, h)` places seats.
+  Its own header states the goal: "hard-coded sizes fit one device and clip on
+  every other, and a clipped Declare button is a lost hand."
+- `lib/games/theme.ts` — `typeScale(width)` resolves the three fluid type sizes
+  the way CSS `clamp(min, vw, max)` would.
+- All four boards already read `useWindowDimensions()`.
+
+**Two mechanisms, doing different jobs.**
+
+*Continuous* — sizes scale and clamp with the display. This is what guarantees
+the layout always fits, at any width, including sizes no one has tested.
+
+*Breakpoints* — change the COMPOSITION only: where the actions sit, how many
+tiles per row, whether seats move to the rails. A breakpoint may never be what
+makes the layout fit; if it is, the continuous rule underneath is wrong.
+
+**What gives way when space is short**, in order: decoration, then label
+length, then spacing, then — last, and never below 44 px — target size. A
+control is shortened before it is dropped, and dropped only if it does not
+exist on that surface at all.
+
+**Live re-derivation.** Rotation, split screen, multi-window, a fold opening,
+and a change in system font scale all re-derive the layout. None of them loses
+game state.
+
+**Verification is measurement, not inspection.** The existing device method
+stands: dump the view hierarchy and assert the real numbers — card count, card
+width, overlap, row extent against screen width, remaining slack. Both test
+phones currently pass at 54 dp with 298 px and 214 px of slack.
+
+## Decision 8 — Reach
 
 Every action taken during play sits in the lower 42 % of the screen. The top bar
 carries identity and settings only — nothing needed mid-turn. Minimum target

@@ -38,11 +38,22 @@ system and its specification. Implementation, if approved, is a separate change.
 - [x] 3.14 Recent games, with the chess move list preserved
 - [x] 3.15 All sixteen game states
 
-## 4. Layout
+## 4. Layout — auto-responsive on every display
 
 - [x] 4.1 Small phone, standard, large phone, tablet compositions
 - [x] 4.2 Landscape recomposed for the games that already support it
 - [x] 4.3 Thumb-reach map — every in-play action in the lower 42 %
+- [x] 4.4 State the derive-everything rule: no hard-coded size, no device branch,
+      every dimension from live window + safe-area insets
+- [x] 4.5 Separate the two mechanisms — continuous scaling makes it FIT,
+      breakpoints only change composition
+- [x] 4.6 Define the degradation order: decoration → label length → spacing →
+      target size last, never below 44 px
+- [x] 4.7 Cover live re-derivation: rotation, split screen, multi-window, fold,
+      system font scale — none losing game state
+- [x] 4.8 Safe areas on every edge, in both orientations
+- [x] 4.9 Extend the rule beyond rummy to home, sheets, lobby, the other three
+      boards, result, leaderboard, history and the state set
 
 ## 5. Verification
 
@@ -50,6 +61,12 @@ system and its specification. Implementation, if approved, is a separate change.
 - [x] 5.2 Confirm nothing invented: no badge, rating, reward, streak or statistic
 - [x] 5.3 Contrast checked against composited grounds, not base colours
 - [x] 5.4 Answer all fifteen questions of the brief's final design test
+- [ ] 5.5 **Measure, do not eyeball.** On device, assert card count, card width,
+      true overlap, row extent against screen width and remaining slack. Current
+      baseline at 54 dp: Redmi 13 cards / 148x209 / 0 overlapping / 298 px slack;
+      Honor 13 cards / 176x247 / 0 overlapping / 214 px slack. Repeat for
+      landscape, split screen and enlarged system font — none of which has been
+      measured yet.
 
 ## 6. Decisions the owner must make
 

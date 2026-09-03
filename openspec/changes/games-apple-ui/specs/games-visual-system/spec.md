@@ -139,12 +139,89 @@ path.
 - **WHEN** a screen carries copy that already exists
 - **THEN** the wording is unchanged, including the bot-offer text and the public-table notice
 
-### Requirement: Responsive composition
-Layouts SHALL be recomposed per class rather than scaled.
+### Requirement: Every surface is derived from the live display
+No games surface SHALL use a hard-coded size, a device-specific branch, or a
+constant that assumes one screen. Every dimension SHALL be computed from the
+current window size and safe-area insets.
+
+#### Scenario: Sizes are computed, not declared
+- **WHEN** any games surface lays out
+- **THEN** its dimensions derive from the live window width, height and safe-area insets
+- **AND** no layout branches on a device model, brand or hard-coded resolution
+
+#### Scenario: Sizes are clamped, not unbounded
+- **WHEN** a computed dimension would fall below its readable minimum or above its useful maximum
+- **THEN** it is clamped to that bound rather than allowed to shrink or grow without limit
+
+#### Scenario: Continuous adaptation
+- **WHEN** the available width changes by any amount
+- **THEN** sizes respond continuously
+- **AND** breakpoints change only the COMPOSITION, never whether the layout fits
+
+### Requirement: The layout re-derives when the display changes
+Layout SHALL re-derive from the display at runtime, not once at mount.
+
+#### Scenario: Rotation
+- **WHEN** the device rotates in a game that supports it
+- **THEN** the layout re-derives and no game state is lost
+
+#### Scenario: Multi-window, split screen and foldables
+- **WHEN** the window is resized by split screen, multi-window, or a fold opening
+- **THEN** the layout re-derives from the new window size
+
+#### Scenario: System font scale
+- **WHEN** the viewer has enlarged the system font
+- **THEN** text scales with it and no label is clipped or truncated mid-word
+
+#### Scenario: Safe areas in both orientations
+- **WHEN** a notch, cutout or gesture bar intrudes on any edge
+- **THEN** no interactive element or card sits underneath it, in either orientation
+
+### Requirement: Nothing is ever clipped or side-scrolled
+Content SHALL fit the display it is on.
+
+#### Scenario: The whole hand is visible
+- **WHEN** a rummy hand of thirteen cards is dealt on any supported display
+- **THEN** every card is within the screen bounds
+- **AND** no card is wholly hidden behind another
+
+#### Scenario: No horizontal scrolling
+- **WHEN** any games screen is rendered
+- **THEN** the screen does not scroll sideways
+
+#### Scenario: Boards stay square and whole
+- **WHEN** a chess, ludo or tic-tac-toe board is rendered
+- **THEN** it remains square, fits within the available area, and is never cropped
+
+#### Scenario: Controls survive the smallest supported display
+- **WHEN** the display is at the smallest supported size
+- **THEN** every control is still present and reachable
+- **AND** labels shorten before any control is removed
+
+### Requirement: Touch targets hold at every size
+Target size SHALL NOT be traded away to make a layout fit.
+
+#### Scenario: The 44 px floor is absolute
+- **WHEN** any control is rendered at any display size or font scale
+- **THEN** its touch target is at least 44 x 44 px
+
+#### Scenario: Density is what shrinks
+- **WHEN** space is short
+- **THEN** spacing, label length and decoration reduce first
+- **AND** target size is reduced last, and never below the floor
+
+### Requirement: Composition adapts per display class
+Each display class SHALL get a composition suited to it rather than a scaled
+copy of another.
 
 #### Scenario: Five classes
 - **WHEN** rendering on a small phone, standard phone, large phone, tablet, or a supported landscape orientation
 - **THEN** each has its own composition, and gameplay remains dominant in all of them
+
+#### Scenario: Extra space is given to the game
+- **WHEN** the display is larger than the standard phone
+- **THEN** the additional space goes to the board, table and hand
+- **AND** chrome does not grow to fill it
 
 #### Scenario: Landscape is composed, not rotated
 - **WHEN** a game that supports landscape is rotated
