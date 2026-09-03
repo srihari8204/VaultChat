@@ -184,3 +184,51 @@ carries no hard-coded 76.
 also now suspect: if the container really is display-width, the ORIGINAL
 asymmetric `paddingLeft: insets.left` may have been correct, with the dump's
 "flush right" reading being a clipping artefact rather than a bug.
+
+## 8. SOLVED — the inset was applied twice
+
+Runtime measurement (temporary visible probe, since removed) on the Redmi in
+landscape:
+
+```
+BOX 851x393    SCR 851    WIN 823    INS 28/0    TW 768
+```
+
+`BOX === SCR`, so the container is laid out EDGE-TO-EDGE at display width,
+while `useWindowDimensions()` reports the WINDOW — which has already had the
+28dp system bar removed (`823 = 851 - 28`). `metrics()` was handed that window
+width and subtracted the inset again on both sides: `823 - 56 = 767`. Centring
+a 768dp child inside the 851dp container puts it `(851-768)/2 = 41.5dp` from
+the edge instead of 28dp — the 114px offset, to the pixel.
+
+**The offset was never padding, never a wrapper, never the ScrollView.** It was
+one inset counted twice across two coordinate systems.
+
+### Fix
+
+`metrics()` now takes the MEASURED container size (`onLayout`, guarded by
+change detection so it cannot loop) and subtracts the inset once:
+
+```
+metrics({ width: box.w || win.width, height: box.h || win.height }, boxInsets)
+```
+
+One coordinate system, no hard-coded compensation, and it recomputes on any
+dimension change.
+
+### Verified on device — Redmi, landscape
+
+```
+                 BEFORE            AFTER
+table width      2112              2188
+left              114                76
+right             114 (of 2340)      76
+vs window right    38  (artefact)    76
+centring diff      38                 0   PASS
+cards rendered     13                13   PASS
+```
+
+Measured against the DISPLAY width from `wm size`, not uiautomator's screen
+width — uiautomator reports the window and clips bounds at its edge, which is
+what made the right-hand space read as 38 and sent three earlier attempts after
+the wrong cause.
