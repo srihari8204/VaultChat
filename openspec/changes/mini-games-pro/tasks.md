@@ -129,6 +129,35 @@ Three defects behind "games is not working" and "crashing while playing", all fo
   - Two-way AUDIO is NOT verified: it needs a second participant to tap Talk, and MIUI refuses adb input on the Redmi while the emulator is signed out.
 - [x] 9.5 **Invite path proven up to the server** — bot offer → *Invite someone* → chat picker listed real chats (Zoho, Arunspace, RefTest) with Send; sending returned **"Could not send the invite — invalid type"**, which is the exact 400 from the undeployed migration 124. Client side is complete; only the deploy is missing (**device-verified**)
 
+## 9b. Two-device online + private play, 2026-09-03 (shipping APK a635e208 on BOTH phones)
+
+Honor = "Srihari B" (taps work), Redmi = "Testing" (MIUI blocks INJECT_EVENTS, so it is
+deep-linked and read only). Every row below was watched on BOTH screens at once.
+
+- [x] 9b.1 **Private room, tic-tac-toe** — both phones deep-linked the same code: Honor
+  "Testing / Srihari B (you) / Your move", Redmi "Srihari B / Testing (you) / Waiting for
+  Srihari B". Honor tapped r1c1 → Honor shows `row 1, column 1, cross` and "Waiting for
+  Testing"; Redmi shows the SAME cross and flips to "Your move" (**device-verified**)
+- [x] 9b.2 **Public/online table, rummy** — both joined `practice`; Honor saw "Testing",
+  Redmi saw "Srihari B", deck `78 left` on both. Honor drew: deck `77 left` ON BOTH, Honor
+  14 cards, Redmi still 13 (private hands stay private). Honor selected a card → Discard
+  enabled → discarded: Honor back to 13 and turn=false, **Redmi turn=true**. Full
+  draw→discard→handoff across two devices (**device-verified**)
+- [x] 9b.3 **Private room, chess** — both joined the same code, each showing the other's
+  name and a 10:00 clock. Honor tapped e2 → the server marked e4 "can move here" → tapped
+  e4: BOTH phones show e2 empty and a white pawn on e4 (**device-verified**)
+- [x] 9b.4 **Private room, ludo** — both joined; Redmi listed "Srihari B 0/4 home" and
+  "Testing (you) 0/4 home" (**device-verified**)
+- [x] 9b.5 **Matchmaker re-confirmed on the shipping build** — Quick match at Chess queued
+  and returned "Nobody is waiting for Chess · No one else is queuing right now. Play the
+  house bot, or invite someone" with *Play the house bot* / *Invite someone* / *Not now*
+  (**device-verified**)
+
+**NOT verifiable here:** the matchmaker pairing two HUMANS. Both sides must tap ⚡ to enter
+the queue and the Redmi cannot be tapped, so the pairing path is proven only as far as
+queue→no-opponent→bot-offer. Human-vs-human play itself IS proven, by 9b.1–9b.4, through
+the room path rather than the queue.
+
 ### All three devices, same build
 
 | | Honor ELI-NX9 (arm64) | Redmi Note 8 Pro (arm64) | Emulator (x86_64) |
