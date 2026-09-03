@@ -97,18 +97,26 @@ const AUTO_DEAL_SECS = 60;
  * belongs to the same room, lit from above so the middle is where the eye goes
  * and the piles have somewhere to sit.
  *
+ * Now a deep TEAL rather than wine. Wine put the cloth in the same hue as the
+ * room, and a red table in a red room has nothing to push against — the felt
+ * stopped reading as a separate object. Teal is the complement: it separates
+ * from the maroon surround, cream cards and gold hardware both sit brighter on
+ * it, and it keeps the card-room register that a saturated blue would lose.
+ *
  * Three stops, brightest first: the lit centre, the body of the cloth, and the
- * shadow at the rail.
+ * shadow at the rail. ONE LINE TO CHANGE if you want a different table.
  */
-const FELT = ['#7A1E2B', '#4A1019', '#300A11'];
+const FELT = ['#1E5F74', '#123D4E', '#0B2733'];
 const CARD_FACE = '#fffdf6';
 const CARD_EDGE = '#caa44a';
 const CARD_RED = '#d8213f';
 const CARD_INK = '#16181f';
 const JOKER_PURPLE = '#7c3aed';
-// Warm ink. It was '#e7f3ea', a GREEN-tinted white chosen for the old green
-// cloth; on wine it read faintly cold and slightly dirty.
-const INK_ON_FELT = '#FFF8F1';
+// Ink on the cloth. It was '#e7f3ea' (green-tinted, for the old green felt),
+// then '#FFF8F1' (warm, for the wine). On teal a warm white turns faintly pink,
+// so this is a NEUTRAL white — bright against the cloth without picking up a
+// cast from either the teal below it or the maroon room around it.
+const INK_ON_FELT = '#F2F7F8';
 
 /** Under this many seconds the clock turns red and ticks audibly. */
 const CLOCK_URGENT = 10;
@@ -638,11 +646,21 @@ export default function Rummy({ tableId = '', auto, autoBot }: { tableId?: strin
           CONTROLS are inset — see the padded box below. */}
       <Baize width={win.width} height={win.height} />
 
+      {/* CENTRED BY WIDTH, NOT BY PADDING.
+          Symmetric horizontal padding did not survive: measured on the Redmi in
+          landscape the box came out 76..2264 — exactly ONE of the two paddings
+          applied — so anything inside it sat 76px right of the screen's middle
+          however carefully the padding was computed.
+          Children are now given an explicit width (m.tableW, which metrics()
+          already derived as width - 2 x sideInset) and centred. Equal margins
+          fall out of the arithmetic instead of depending on a padding chain
+          this file does not fully control. Vertical insets still use padding —
+          they were never the problem. */}
       <View style={{
-        flex: 1,
+        flex: 1, alignItems: 'center',
         paddingTop: boxInsets.top, paddingBottom: boxInsets.bottom,
-        paddingLeft: boxInsets.left, paddingRight: boxInsets.right,
       }}>
+
       {/* The felt — an oval with a gold rail, so the piles read as sitting ON
           something and the other players have somewhere to be. */}
       <View style={{ height: m.tableH, width: m.tableW }}>
@@ -761,7 +779,7 @@ export default function Rummy({ tableId = '', auto, autoBot }: { tableId?: strin
           gap: S[3], alignItems: 'flex-end', paddingHorizontal: S[1],
           flexGrow: 1, justifyContent: 'center',
         }}
-        style={{ height: m.handH, flexGrow: 0 }}
+        style={{ height: m.handH, flexGrow: 0, width: m.tableW, alignSelf: 'center' }}
       >
         {groups.map((g, gi) => (
           <GroupZone
@@ -1474,9 +1492,9 @@ function Baize({ width, height }: { width: number; height: number }) {
             surround was dark GREEN, which is why the table used to sit in a
             faintly different world from the rest of the games UI. */}
         <RadialGradient id="rbaize" cx="50%" cy="12%" rx="90%" ry="94%">
-          <Stop offset="0" stopColor="#2A0C0E" />
-          <Stop offset="0.55" stopColor="#1B0708" />
-          <Stop offset="1" stopColor="#120405" />
+          <Stop offset="0" stopColor="#241012" />
+          <Stop offset="0.55" stopColor="#180809" />
+          <Stop offset="1" stopColor="#110405" />
         </RadialGradient>
       </Defs>
       <Rect x="0" y="0" width={width} height={height} fill="url(#rbaize)" />
@@ -1913,9 +1931,11 @@ function Seat({
         </View>
       </View>
       {/* Names were 10.5px on a felt seen at arm's length — smaller than the
-          card pips and the first thing a player actually needs to read. */}
-      <Text numberOfLines={1} style={{ color: '#fff', fontWeight: '800', fontSize: 14, marginTop: 2, maxWidth: spot.w }}>{name}</Text>
-      <Text numberOfLines={1} style={{ color: INK_ON_FELT, fontSize: 12, maxWidth: spot.w }}>{detail}</Text>
+          card pips and the first thing a player actually needs to read. Raised
+          again to 17/13.5: at 14 they were legible but still the quietest thing
+          on a table whose whole point is WHO you are playing. */}
+      <Text numberOfLines={1} style={{ color: '#fff', fontWeight: '800', fontSize: 17, marginTop: 2, maxWidth: spot.w }}>{name}</Text>
+      <Text numberOfLines={1} style={{ color: INK_ON_FELT, fontSize: 13.5, fontWeight: '600', maxWidth: spot.w }}>{detail}</Text>
     </View>
   );
 }
