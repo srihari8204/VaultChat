@@ -87,14 +87,28 @@ const HAND_SIZE = 13;
  */
 const AUTO_DEAL_SECS = 60;
 
-/** Baize, from rummy.css --felt / --felt-2 / --felt-3. */
-const FELT = ['#1c9257', '#0a4c2c', '#073a20'];
+/**
+ * The cloth.
+ *
+ * It was green — a straight port of rummy.css. Green is what a card table is,
+ * but it was the ONLY green thing in the app: every other games surface is the
+ * maroon room, so the table read as a component borrowed from somewhere else
+ * rather than the centre of its own screen. The cloth is now a deep wine that
+ * belongs to the same room, lit from above so the middle is where the eye goes
+ * and the piles have somewhere to sit.
+ *
+ * Three stops, brightest first: the lit centre, the body of the cloth, and the
+ * shadow at the rail.
+ */
+const FELT = ['#7A1E2B', '#4A1019', '#300A11'];
 const CARD_FACE = '#fffdf6';
 const CARD_EDGE = '#caa44a';
 const CARD_RED = '#d8213f';
 const CARD_INK = '#16181f';
 const JOKER_PURPLE = '#7c3aed';
-const INK_ON_FELT = '#e7f3ea';
+// Warm ink. It was '#e7f3ea', a GREEN-tinted white chosen for the old green
+// cloth; on wine it read faintly cold and slightly dirty.
+const INK_ON_FELT = '#FFF8F1';
 
 /** Under this many seconds the clock turns red and ticks audibly. */
 const CLOCK_URGENT = 10;
@@ -718,7 +732,15 @@ export default function Rummy({ tableId = '', auto, autoBot }: { tableId?: strin
       <ScrollView
         horizontal
         showsHorizontalScrollIndicator={false}
-        contentContainerStyle={{ gap: S[3], alignItems: 'flex-end', paddingHorizontal: S[1] }}
+        // CENTRED. flexGrow lets the content container fill the scroller even
+        // when the hand is narrower than it, which is what justifyContent has
+        // to push against — without it the hand pins to the left edge and sits
+        // off-centre under a centred table. When the hand IS wider, flexGrow
+        // changes nothing and it scrolls as before.
+        contentContainerStyle={{
+          gap: S[3], alignItems: 'flex-end', paddingHorizontal: S[1],
+          flexGrow: 1, justifyContent: 'center',
+        }}
         style={{ height: m.handH, flexGrow: 0 }}
       >
         {groups.map((g, gi) => (
@@ -1386,7 +1408,7 @@ function TableTop({ width, height }: { width: number; height: number }) {
           every stretched surface has, and the cheapest way to say "taut". */}
       <Ellipse
         cx={cx} cy={cy} rx={irx} ry={iry}
-        fill="none" stroke="#EAF3EC" strokeOpacity="0.16" strokeWidth="1.5"
+        fill="none" stroke="#FFF8F1" strokeOpacity="0.16" strokeWidth="1.5"
       />
 
       {/* The house mark, printed into the cloth. Every real card-room table
@@ -1398,7 +1420,7 @@ function TableTop({ width, height }: { width: number; height: number }) {
         textAnchor="middle"
         fontSize={Math.max(14, Math.round(irx * 0.13))}
         fontWeight="800"
-        fill="#EAF3EC"
+        fill="#FFF8F1"
         fillOpacity={0.075}
       >
         VAULTCHAT
@@ -1428,14 +1450,20 @@ function Baize({ width, height }: { width: number; height: number }) {
   return (
     <Svg width={width} height={height} style={{ position: 'absolute', top: 0, left: 0 }} pointerEvents="none">
       <Defs>
-        <RadialGradient id="rbaize" cx="50%" cy="14%" rx="88%" ry="92%">
-          <Stop offset="0" stopColor="#0E3A28" />
-          <Stop offset="0.58" stopColor="#08251A" />
-          <Stop offset="1" stopColor="#03110C" />
+        {/* The room, matching C.bg — a near-black with maroon in it. The old
+            surround was dark GREEN, which is why the table used to sit in a
+            faintly different world from the rest of the games UI. */}
+        <RadialGradient id="rbaize" cx="50%" cy="12%" rx="90%" ry="94%">
+          <Stop offset="0" stopColor="#2A0C0E" />
+          <Stop offset="0.55" stopColor="#1B0708" />
+          <Stop offset="1" stopColor="#120405" />
         </RadialGradient>
       </Defs>
       <Rect x="0" y="0" width={width} height={height} fill="url(#rbaize)" />
-      <Rect x="0" y="0" width={width} height="2" fill="#D9A93C" opacity="0.55" />
+      {/* One gold hairline ties the surround to the rail. Kept thin and at low
+          opacity: this is trim, not an accent, and the accent budget belongs to
+          the primary action. */}
+      <Rect x="0" y="0" width={width} height="1.5" fill={C.gold} opacity="0.4" />
     </Svg>
   );
 }
@@ -1445,9 +1473,9 @@ function DeckLabel({ text }: { text: string }) {
   return (
     <View style={{
       paddingHorizontal: S[2], paddingVertical: 2, borderRadius: R.pill,
-      backgroundColor: 'rgba(3,17,12,0.72)', borderWidth: 1, borderColor: 'rgba(217,169,60,0.28)',
+      backgroundColor: 'rgba(18,4,5,0.75)', borderWidth: 1, borderColor: 'rgba(217,169,60,0.28)',
     }}>
-      <Text style={{ color: '#EAF3EC', fontSize: 9.5, fontWeight: '800', letterSpacing: 0.8 }}>{text}</Text>
+      <Text style={{ color: '#FFF8F1', fontSize: 9.5, fontWeight: '800', letterSpacing: 0.8 }}>{text}</Text>
     </View>
   );
 }

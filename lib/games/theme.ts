@@ -39,29 +39,44 @@ export function typeScale(width: number) {
 }
 
 /**
- * The palette, verbatim from theme.css / styles.css.
+ * The palette.
  *
  * This is intentionally NOT VaultChat's app palette and does not follow the
  * light/dark theme: a card table is a place, and it looks the same whichever
  * way the rest of the app is set. Mixing the two is what made the first native
  * boards look like a form.
+ *
+ * NO LONGER A VERBATIM PORT of games-web's theme.css. It used to be, so the two
+ * clients could be compared side by side, and the cost of this change is that
+ * they now differ until the web client follows. What changed and why:
+ *
+ * The old tokens painted every PANEL a solid maroon and edged it gold, so a
+ * screen was maroon on maroon on maroon with gold on all of it, and nothing
+ * could be primary because everything already was. Maroon is now the ROOM —
+ * a deep ground the eye reads as unlit space — and surfaces are lifted off it
+ * rather than coloured differently from it. Gold survives untouched but is
+ * spent once per screen.
+ *
+ * Tracked as openspec/changes/games-apple-ui.
  */
 export const C = {
-  bg: '#3d0808',
-  bg2: '#240606',
-  panel: '#2a0b0b',
-  panel2: '#1d0707',
-  card: '#2a0b0b',
-  line: '#4d1d1d',
-  text: '#fdeede',
-  muted: '#cfa0a0',
+  /** The room: near-black with maroon in it, not maroon with black in it. */
+  bg: '#160607',
+  bg2: '#22090A',
+  /** Surfaces sit ON the ground rather than being a different colour from it. */
+  panel: '#300D0E',
+  panel2: '#22090A',
+  card: '#300D0E',
+  line: '#4a2122',
+  text: '#FFF8F1',
+  muted: '#CDBBBB',
   gold: '#f3c245',
   gold2: '#ffdd72',
   goldDeep: '#a9791b',
-  good: '#5fe08c',
-  win: '#5fe08c',
-  bad: '#ff8080',
-  lose: '#ff8080',
+  good: '#63E6A0',
+  win: '#63E6A0',
+  bad: '#FF7D86',
+  lose: '#FF7D86',
   /** Ink for text sitting on gold — gold is a light surface. */
   onGold: '#1a1206',
 } as const;
