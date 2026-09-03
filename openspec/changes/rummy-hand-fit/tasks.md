@@ -62,3 +62,59 @@ Two builds were spent on an on-screen diagnostic that never surfaced:
 release builds strip console logs while MIUI's dumpsys omits the cutout. There
 is currently no working way to read live inset values on that device, which is
 why attempt 3 removes the dependency on knowing them.
+
+## 6. The 76px offset — measured ancestor chain (final state)
+
+Walked the FULL ancestor chain of the hand's `HorizontalScrollView` on the
+Redmi in landscape, on the shipping build `885f9fd2`. Every parent, with bounds:
+
+```
+screen width 2264
+#1..#12  FrameLayout / LinearLayout / ViewGroup / ScrollView   [0,0][2264,1036]   left 0  right 0
+#13      HorizontalScrollView                                  [114,569][2226,866] left 114 right 38
+```
+
+**Every one of the twelve ancestors is 0..2264 — perfectly symmetric.** The
+offset is not a window inset, not a navigator wrapper, and not a SafeAreaView:
+there is no SafeAreaProvider or SafeAreaView anywhere in the games shell, and
+`TableBackground` applies no padding.
+
+The offset appears at the scroller itself, inside its direct parent, and the
+arithmetic is exact:
+
+- scroller width 2112 = `m.tableW` (so the explicit-width fix IS applied)
+- parent 2264 wide; a centred 2112 child would sit at 76..2188
+- actual 114..2226 — right by 38, which is precisely what centring 2112 inside
+  a content box of **76..2264** produces
+
+So the direct parent behaves as though it has `paddingLeft: 76px` and
+`paddingRight: 0` — but `Rummy.tsx` no longer sets any horizontal padding on
+that View. Padding does not appear in uiautomator bounds, so it cannot be
+confirmed or refuted from a hierarchy dump.
+
+### Why this stops here
+
+Four attempts, each measured and each ruled out:
+
+1. centre the content in the scroller — worked (skew 113 -> 0), didn't move the
+   scroller
+2. symmetric side insets feeding both padding and `metrics()` — box still
+   measured 76..2264
+3. centre by explicit width instead of padding — scroller is now correctly
+   2112 wide and still lands at 114
+4. full ancestor-chain measurement — proves the chain is symmetric and the
+   cause is inside the direct parent's content box
+
+**A live inspector is now required** (React DevTools / Flipper layout
+inspector), to read the computed padding and `useSafeAreaInsets()` values on
+that specific View at runtime. A hierarchy dump cannot see either, and the
+on-screen diagnostic route is closed: uiautomator skips `opacity: 0` nodes and
+prunes 1x1 `accessible` views, release builds strip console logs, and MIUI's
+dumpsys omits the cutout.
+
+**No hard-coded compensation has been added**, deliberately. A `marginLeft: -76`
+would move this device and break any device whose inset differs, and the source
+of the 76 is still unproven.
+
+**Impact: cosmetic only.** All 13 cards render, nothing is clipped, every card
+is reachable, and the hand is correctly centred relative to its own scroller.
