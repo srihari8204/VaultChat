@@ -122,7 +122,14 @@ function spoken(c: Card): string {
 // Node-run self-check and must stay free of native modules.
 
 const SORT_KEY = 'vc_rummy_sort';
-let sortModePref: SortMode = 'smart';
+// SUIT, not 'smart'. Sorting in a rummy app means one cluster per suit, in rank
+// order, so a player can see at a glance which sequences they are one card
+// away from — that is the whole point of the button, and it is what every
+// reference client does. 'smart' pulls completed melds to the front and leaves
+// the rest in one mixed group, which reads as "it did something else". It is
+// still available in Table settings for players who prefer it, along with
+// by-rank and manual.
+let sortModePref: SortMode = 'suit';
 AsyncStorage.getItem(SORT_KEY)
   .then(v => { if (isSortMode(v)) sortModePref = v; })
   .catch(() => {});
@@ -732,6 +739,7 @@ export default function Rummy({ tableId = '', auto, autoBot }: { tableId?: strin
                   card={c}
                   w={m.cardW}
                   selected={picked.includes(id)}
+                  wild={isJoker(c)}
                   onPress={toggle}
                   onDrop={dropAt}
                 />
@@ -751,7 +759,7 @@ export default function Rummy({ tableId = '', auto, autoBot }: { tableId?: strin
           last button sliding off: Declare and Drop are the two that must always
           be reachable, so they are the two that never shrink. */}
       <View style={{ height: 46, flexDirection: 'row', gap: S[1], alignItems: 'center' }}>
-        <Btn label={tight ? '⚡' : 'Sort'} icon={tight ? undefined : '⚡'} compact accessibilityLabel="Sort your hand" onPress={() => sortNow(sortMode === 'manual' ? 'smart' : sortMode)} />
+        <Btn label={tight ? '⚡' : 'Sort'} icon={tight ? undefined : '⚡'} compact accessibilityLabel="Sort your hand" onPress={() => sortNow(sortMode === 'manual' ? 'suit' : sortMode)} />
         <Btn label={tight ? '⊞' : 'Group'} compact accessibilityLabel="Group the selected cards" onPress={() => { setGroups(g => groupUp(g, picked)); setPicked([]); playSfx('tick'); }} disabled={picked.length < 2} />
         <Btn label={tight ? '⊟' : 'Ungroup'} compact accessibilityLabel="Ungroup the selected cards" onPress={() => { setGroups(g => ungroup(g, picked)); setPicked([]); playSfx('tick'); }} disabled={picked.length === 0} />
         <View style={{ flex: 1 }} />
@@ -1519,10 +1527,22 @@ function GroupZone({
         gap: 2,
       }}
     >
-      {/* Cards overlap into a fan the way a held hand does. gap is NEGATIVE:
-          five groups of three at full width would not fit any phone. */}
-      <View style={{ flexDirection: 'row', gap: -overlap, alignItems: 'flex-end', minHeight: 10, paddingRight: overlap }}>
-        {children}
+      {/* Cards overlap into a fan the way a held hand does — five groups of
+          three at full width do not fit any phone.
+
+          THE TUCK IS A NEGATIVE MARGIN, NOT A NEGATIVE GAP. `gap` is a Yoga
+          gutter and, exactly as in CSS, may not be negative: the value is
+          invalid and resolves to 0. So a negative gutter silently discarded the
+          fan that fanFor() had computed and the hand laid out fully spread
+          whatever the maths chose. Measured on the Redmi in landscape: cards
+          stepped 149px against a 148px card — no overlap at all — where the
+          model believed it had tucked 30px per card, and the thirteenth card
+          sat outside the scroller. The model was right; the render threw it
+          away. marginLeft is honoured, so the fan now actually happens. */}
+      <View style={{ flexDirection: 'row', alignItems: 'flex-end', minHeight: 10 }}>
+        {React.Children.map(children, (child, i) =>
+          i === 0 ? child : <View style={{ marginLeft: -overlap }}>{child}</View>,
+        )}
       </View>
       <View style={{ height: 14, justifyContent: 'center' }}>
         <MeldBadge verdict={verdict} loose={loose} />
@@ -1705,11 +1725,13 @@ function CardFace({ card, w, glow, wild }: { card: Card; w: number; glow?: boole
  * `card` keeps its identity between server frames via the `byId` map.
  */
 const HandCard = React.memo(function HandCard({
-  card, w, selected, onPress, onDrop,
+  card, w, selected, wild, onPress, onDrop,
 }: {
   card: Card;
   w: number;
   selected: boolean;
+  /** A printed joker, or a card of this round's wild rank. */
+  wild: boolean;
   onPress: (cardId: string) => void;
   onDrop: (cardId: string, x: number, y: number) => void;
 }) {
@@ -1757,10 +1779,15 @@ const HandCard = React.memo(function HandCard({
       <Animated.View
         accessibilityRole="button"
         accessibilityState={{ selected }}
-        accessibilityLabel={`${spoken(card)}${selected ? ', selected' : ''}. Drag to move between groups, or onto the open pile to discard.`}
+        accessibilityLabel={`${spoken(card)}${wild ? ', joker' : ''}${selected ? ', selected' : ''}. Drag to move between groups, or onto the open pile to discard.`}
         style={[a, selected ? { borderRadius: 8, borderWidth: 2, borderColor: '#f3c245' } : null]}
       >
-        <CardFace card={card} w={w} glow={selected} />
+        {/* A joker is marked ON THE CARD, not only beside the deck. The wild
+            indicator by the closed pile says which RANK is wild this round; it
+            does not tell you which of your own thirteen cards are the wild
+            ones, and a player who cannot see that discards one. Every
+            reference client highlights them in the hand. */}
+        <CardFace card={card} w={w} glow={selected} wild={wild} />
       </Animated.View>
     </GestureDetector>
   );

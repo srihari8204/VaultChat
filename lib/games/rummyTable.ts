@@ -78,9 +78,19 @@ const CARD_MAX = 54;
 export const FAN = 0.58;
 const FAN_MAX = 1;
 
-/** Padding inside a group tray, and the gap between two trays. */
-const TRAY_PAD = 16;
-const TRAY_GAP = 20;
+/**
+ * The chrome around the cards, in the same units the layout uses.
+ *
+ * These MUST match components/games/Rummy.tsx. They did not: the gap between
+ * trays was modelled as 20 where the ScrollView uses S[3] = 12, the 1px tray
+ * border on each side was not counted at all, and neither was the scroll
+ * content's own S[1] padding at each end. A model that describes a layout other
+ * than the one that renders reports a fit that does not happen.
+ */
+const TRAY_PAD = 16;        // GroupZone paddingHorizontal: S[2] on both sides
+const TRAY_BORDER = 2;      // GroupZone borderWidth: 1 on both sides
+const TRAY_GAP = 12;        // hand ScrollView contentContainerStyle gap: S[3]
+const HAND_PAD = 8;         // ...and its paddingHorizontal: S[1] on both ends
 
 /**
  * Breathing room at both ends of the hand, so the last card is never clipped.
@@ -146,7 +156,12 @@ const clamp = (lo: number, hi: number, v: number) => Math.max(lo, Math.min(hi, v
  */
 export function handWidthAt(cardW: number, fan: number = FAN): number {
   const cards = GROUPS + (HAND_SIZE - GROUPS) * fan;
-  return cardW * cards + TRAY_PAD * GROUPS + TRAY_GAP * (GROUPS - 1);
+  return cardW * cards + handChromeWidth();
+}
+
+/** Everything in the hand strip that is not a card. */
+function handChromeWidth(): number {
+  return (TRAY_PAD + TRAY_BORDER) * GROUPS + TRAY_GAP * (GROUPS - 1) + HAND_PAD;
 }
 
 /**
@@ -157,7 +172,7 @@ export function handWidthAt(cardW: number, fan: number = FAN): number {
  * than the tuck the card size was chosen for, never wider than not overlapping.
  */
 export function fanFor(cardW: number, width: number): number {
-  const fixed = cardW * GROUPS + TRAY_PAD * GROUPS + TRAY_GAP * (GROUPS - 1);
+  const fixed = cardW * GROUPS + handChromeWidth();
   const fanned = cardW * (HAND_SIZE - GROUPS);
   if (fanned <= 0) return FAN_MAX;
   // EDGE_MARGIN, or the spread fills the width to the pixel and the last card
@@ -186,7 +201,7 @@ export function metrics(win: { width: number; height: number }, insets: Insets):
   // what the player is actually looking at.
   const handShare = landscape ? 0.42 : 0.30;
 
-  const byWidth = (width - TRAY_PAD * GROUPS - TRAY_GAP * (GROUPS - 1)) / (GROUPS + (HAND_SIZE - GROUPS) * FAN);
+  const byWidth = (width - handChromeWidth()) / (GROUPS + (HAND_SIZE - GROUPS) * FAN);
   const byHeight = (height * handShare - BADGE_H) / CARD_RATIO;
   // The third constraint, and the one that only bites on short screens: what is
   // left after the felt's floor, the action bar and the status pill have taken

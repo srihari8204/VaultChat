@@ -6,6 +6,8 @@
 // of one edge. A layout bug here is not cosmetic — a Declare button under the
 // gesture bar is a hand the player cannot finish.
 
+import { readFileSync } from 'fs';
+import { join } from 'path';
 import { fanFor,
   metrics, seatSpots, handWidthAt, secondsLeft, ranked, activeCount,
   allowsBots, newPrivateCode, normalizeCode, CARD_RATIO,
@@ -183,6 +185,49 @@ console.log('\nRoom codes\n');
   }
   check('the hand still fits at the fan it chose',
     handWidthAt(48, fanFor(48, 2340)) <= 2340 + 1);
+}
+
+// -- the tuck has to survive the render ------------------------------
+//
+// THE BUG THIS CATCHES. The fan was applied as `gap: -overlap`. Gap is a Yoga
+// gutter and, exactly as in CSS, may not be negative — the value is invalid and
+// resolves to 0, so the fan fanFor() computed was silently thrown away and the
+// hand laid out fully spread. Every check above passed the whole time, because
+// they test the MODEL against itself and never what renders. On the Redmi in
+// landscape that shipped as thirteen cards dealt and twelve on screen.
+{
+  const src = readFileSync(join(__dirname, '..', '..', 'components', 'games', 'Rummy.tsx'), 'utf8');
+  const code = src.split('\n').filter(l => !/^\s*(\/\/|\*|\/\*)/.test(l)).join('\n');
+
+  check('the hand never tucks with a NEGATIVE GAP — Yoga resolves it to 0',
+    !/gap:\s*-\s*overlap/.test(code));
+  check('...it tucks with a negative margin, which Yoga honours',
+    /marginLeft:\s*-overlap/.test(code));
+  check('...and the paddingRight that compensated for the gap is gone',
+    !/paddingRight:\s*overlap/.test(code));
+}
+
+// Fit has to hold at every width the hand actually renders at. Rummy locks
+// LANDSCAPE while playing (Rummy.tsx), so those are the sizes that matter, and
+// the overflow this change fixes only ever appeared there.
+for (const [w, h, name] of [
+  [2264, 1036, 'Redmi landscape'], [2588, 1180, 'Honor landscape'],
+  [960, 540, 'small landscape'], [640, 360, 'smallest landscape'],
+] as [number, number, string][]) {
+  const m = metrics({ width: w, height: h }, { top: 0, bottom: 0, left: 0, right: 0 });
+  check(`${name}: the hand fits`, handWidthAt(m.cardW, fanFor(m.cardW, m.width)) <= m.width);
+}
+
+// Below about 454dp there is no honest fit: thirteen cards at the smallest
+// readable size (CARD_MIN) and the tightest permitted tuck (FAN) still need
+// more room than that. The hand is a horizontal scroller, so it degrades to
+// scrolling rather than shrinking the cards past legibility — a deliberate
+// floor, not a bug. The lobby is the only place the hand is seen this narrow,
+// and it holds no cards.
+{
+  const narrow = metrics({ width: 360, height: 640 }, { top: 0, bottom: 0, left: 0, right: 0 });
+  check('a phone-portrait width cannot show thirteen cards, and pins the card size to its floor',
+    narrow.cardW === 32 && handWidthAt(narrow.cardW, fanFor(narrow.cardW, narrow.width)) > narrow.width);
 }
 
 console.log(failures ? `\n  ${failures} FAILED\n` : '\n  all rummy table checks passed\n');
