@@ -1476,6 +1476,9 @@ function IconBtn({ glyph, label, onPress }: { glyph: string; label: string; onPr
       onPress={onPress}
       accessibilityRole="button"
       accessibilityLabel={label}
+      // 28dp drawn, so 8dp of slop left the target at 44 only on the diagonal.
+      // The table header is deliberately small — it must not compete with the
+      // felt — so the touch area is what grows: 28 + 2x8 = 44 exactly.
       hitSlop={8}
       style={{
         width: 28, height: 28, borderRadius: 14, alignItems: 'center', justifyContent: 'center',

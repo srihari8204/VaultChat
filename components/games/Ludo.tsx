@@ -742,7 +742,13 @@ function TokenView({
       <Pressable
         onPress={movable ? onPress : undefined}
         disabled={!movable}
-        hitSlop={6}
+        // A ludo board is fifteen cells across, so on a phone a token is drawn
+        // at about 19dp however big the board gets — measured on the Redmi at
+        // 51px, which is 19dp, against a 44dp minimum target. The token cannot
+        // grow without the board lying about where pieces sit, so the TOUCH
+        // area grows instead: enough slop on each side to reach 44dp, and never
+        // less than the 6 it always had.
+        hitSlop={Math.max(6, Math.ceil((44 - d) / 2))}
         accessibilityRole="button"
         accessibilityLabel={`${COLOR_NAMES[seat]} token ${index + 1}${movable ? ', can move' : ''}`}
         style={{

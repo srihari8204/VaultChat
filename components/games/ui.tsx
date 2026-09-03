@@ -184,6 +184,10 @@ export function Btn({
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: S[2],
     paddingVertical: compact ? S[2] : S[3],
     paddingHorizontal: compact ? S[3] : S[4],
+    // 44dp is the floor for a touch target, and padding alone did not reach it:
+    // a compact button measured 37dp tall on the Redmi. Padding sizes a button
+    // to its TEXT, which is the wrong thing to size a finger against.
+    minHeight: 44,
     borderRadius: R[2],
     overflow: 'hidden',
   };
