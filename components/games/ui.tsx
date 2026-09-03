@@ -10,6 +10,7 @@ import {
   ActivityIndicator, Pressable, StyleSheet, Text, View,
   useWindowDimensions, type ViewStyle, type StyleProp,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import Svg, { Defs, RadialGradient, Stop, Rect, Pattern, Circle } from 'react-native-svg';
 import Animated, {
@@ -21,6 +22,7 @@ import {
   C, S, R, E, D3, T, glass, goldLine, mix, MOTION, AMBIENT, GRAIN,
   GOLD_FILL, GOLD_STOPS, PANEL_FILL, RED_FILL, RED_STOPS, typeScale,
 } from '../../lib/games/theme';
+import { boardFit } from '../../lib/games/boardFit';
 
 const AnimPressable = Animated.createAnimatedComponent(Pressable);
 
@@ -31,14 +33,23 @@ const AnimPressable = Animated.createAnimatedComponent(Pressable);
  * landscape, where the height is the binding constraint — the board then runs
  * off the bottom and the controls under it become unreachable. `chrome` is the
  * vertical space the seats, buttons and status line need around it.
+ *
+ * NO UPPER CAP. It used to stop at 460 (380 for tic-tac-toe), so every display
+ * bigger than a mid-size phone got the same board floating in empty space. The
+ * board now takes the room it is given. It also sizes against the SAFE area,
+ * so a cutout or a gesture bar eats into the margin rather than into the board.
+ *
+ * The arithmetic and its edge cases live in lib/games/boardFit.ts so they can
+ * be checked without a renderer — the rummy hand shipped a fit bug that every
+ * model-only test agreed was fine.
  */
-export function useBoardSize(chrome = 300, max = 460) {
+export function useBoardSize(chrome = 300): number {
   const { width, height } = useWindowDimensions();
-  const byWidth = width - S[4] * 2;
-  const byHeight = height - chrome;
-  // A floor keeps the board usable rather than letting it collapse to nothing
-  // on a very small screen; it may scroll instead.
-  return Math.max(200, Math.min(byWidth, byHeight, max));
+  const insets = useSafeAreaInsets();
+  return React.useMemo(
+    () => boardFit({ width, height }, insets, chrome).size,
+    [width, height, insets.top, insets.bottom, insets.left, insets.right, chrome],
+  );
 }
 
 /** Landscape when the screen is meaningfully wider than it is tall. */

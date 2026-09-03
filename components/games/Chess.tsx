@@ -154,7 +154,7 @@ export default function Chess({ roomId, auto, autoBot }: { roomId: string } & Au
 
   const th = THEMES[theme];
   // Seats above and below, the status line and two button rows.
-  const size = useBoardSize(360, 460);
+  const size = useBoardSize(360);
   const cell = size / 8;
 
   // Black plays from the far side, so the board is flipped for them.

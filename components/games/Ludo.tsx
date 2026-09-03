@@ -168,7 +168,7 @@ export default function Ludo({ roomId = 'ludo-main', auto, autoBot }: { roomId?:
   useEffect(() => () => { if (tumbleTimer.current) clearTimeout(tumbleTimer.current); }, []);
 
   // Up to four seat cards above, plus the die row and two button rows.
-  const size = useBoardSize(400, 460);
+  const size = useBoardSize(400);
   const cell = size / 15;
 
   useEffect(() => { void preloadSfx(['roll', 'move', 'capture', 'home', 'six', 'win', 'lose']); }, []);

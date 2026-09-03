@@ -58,7 +58,7 @@ export default function TicTacToe({ roomId, auto, autoBot }: { roomId: string } 
   // integer cells always fit inside the frame: flex-wrap with a fractional
   // width drops the third cell onto its own row, which is what put the grid
   // out of alignment.
-  const size = useBoardSize(330, 380);
+  const size = useBoardSize(330);
   const gap = 10;
   const pad = 10;
   const cell = Math.floor((size - pad * 2 - gap * 2) / 3);
