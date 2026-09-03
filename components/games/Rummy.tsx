@@ -681,16 +681,11 @@ export default function Rummy({ tableId = '', auto, autoBot }: { tableId?: strin
           CONTROLS are inset — see the padded box below. */}
       <Baize width={win.width} height={win.height} />
 
-      {/* CENTRED BY WIDTH, NOT BY PADDING.
-          Symmetric horizontal padding did not survive: measured on the Redmi in
-          landscape the box came out 76..2264 — exactly ONE of the two paddings
-          applied — so anything inside it sat 76px right of the screen's middle
-          however carefully the padding was computed.
-          Children are now given an explicit width (m.tableW, which metrics()
-          already derived as width - 2 x sideInset) and centred. Equal margins
-          fall out of the arithmetic instead of depending on a padding chain
-          this file does not fully control. Vertical insets still use padding —
-          they were never the problem. */}
+      {/* Children take an explicit width and are centred; the horizontal
+          inset is handled ONCE, in metrics(), from the measured container.
+          Vertical insets stay as padding here — they were never the problem.
+          See the note on `m` above for why the container width, not the window
+          width, is the input. */}
       <View
         onLayout={onBoxLayout}
         style={{
