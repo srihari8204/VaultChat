@@ -118,3 +118,69 @@ of the 76 is still unproven.
 
 **Impact: cosmetic only.** All 13 cards render, nothing is clipped, every card
 is reachable, and the hand is correctly centred relative to its own scroller.
+
+## 7. Root-cause investigation, measurement-first (per the 76px brief)
+
+### The padding hypothesis is DEAD
+
+Measured every child of the scroller's direct parent on build `885f9fd2`:
+
+```
+parent                     [0,0][2264,1036]
+  SvgView (Baize)          [0,0][2263,1034]      left 0      full bleed
+  SvgView (TableTop/felt)  [114,76][2223,486]    left 114    width 2109
+  HorizontalScrollView     [114,569][2226,866]   left 114    width 2112
+  Button "Sort your hand"  [0,866][218,992]      left 0
+  Button "Drop"            [2151,866][2264,992]  right 0
+```
+
+**A parent with `paddingLeft: 76` cannot have a child at x=0.** The Sort button
+starts at 0 and Drop ends at 2264. The parent's content box is the full width.
+That eliminates the padding explanation — mine, and the one the brief's §3/§15
+proposed.
+
+It also eliminates the ScrollView: the felt (`SvgView`, a plain View child) and
+the scroller both start at **114**. They agree with each other. Two different
+node types, same offset, so it is not a ScrollView quirk.
+
+### What the numbers actually fit
+
+Both offset children are ~2112px wide and both sit at 114. Centring is exact
+for one width and one width only:
+
+```
+(2340 - 2112) / 2 = 114   <- the Redmi's PHYSICAL display long edge
+(2264 - 2112) / 2 =  76   <- the app WINDOW's usable width
+```
+
+2340 - 2264 = 76 = the status bar, which sits on the left edge at rotation 1.
+
+**Hypothesis (fits to the pixel, not yet proven):** the container is laid out
+edge-to-edge at the full display width (2340px / 851dp), while `metrics()`
+sizes its children from `useWindowDimensions()` (2264px / 823dp). A child sized
+for the window, centred inside a parent laid out to the display, lands exactly
+38px right of the window's centre. uiautomator clips reported bounds at the
+screen edge, so a parent that really extends to 2340 is reported as ending at
+2264 — which is why the chain looked symmetric.
+
+`m.tableW = 2112px = 768dp` corroborates it: `823.27 - 2 x 27.6 = 768.07dp`, so
+metrics IS working from the 823dp window figure.
+
+### Why this stops here, per §21
+
+Confirming it needs runtime values a hierarchy dump cannot give:
+
+- `useWindowDimensions()` -> width/height as the component sees them
+- `Dimensions.get('window')` vs `Dimensions.get('screen')`
+- `useSafeAreaInsets()` -> left/right at rotation 1
+- the padded View's `onLayout` width — the decisive one: **2340 or 2264?**
+
+If `onLayout` reports 2340 while `useWindowDimensions()` reports 2264, the
+hypothesis is proven and the fix is to derive the table geometry from the
+measured container width rather than the window, which is responsive and
+carries no hard-coded 76.
+
+**No compensation has been added.** The previous "centre by width" change is
+also now suspect: if the container really is display-width, the ORIGINAL
+asymmetric `paddingLeft: insets.left` may have been correct, with the dump's
+"flush right" reading being a clipping artefact rather than a bug.
