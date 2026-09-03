@@ -37,7 +37,8 @@ const RULES: Record<GameKind, { title: string; sections: Section[] }> = {
       ] },
       { head: 'Scoring', lines: [
         'The winner scores 0. Everyone else counts their unmelded cards: face cards and aces are 10, the rest are face value, jokers are free. Capped at 80.',
-        'Declare without a pure sequence and the whole hand counts against you. Drop before your first turn to lose fewer points than playing on.',
+        'Declare without a pure sequence and the whole hand counts against you.',
+        'Drop before your first turn and you lose 20. Drop later and you lose 40 — still cheaper than carrying a hand that cannot make two sequences.',
       ] },
       { head: 'The table decides', lines: [
         'The server shuffles, deals, times every turn and judges every declaration. The ✓ and ✗ badges on your groups are only a hint — they never gate an action, and if they ever disagree with the table, the table is right.',
