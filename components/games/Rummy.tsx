@@ -34,7 +34,8 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   AccessibilityInfo, ActivityIndicator, KeyboardAvoidingView, Platform, Pressable,
-  ScrollView, Text, TextInput, View, useWindowDimensions, type ViewStyle,
+  Dimensions, ScrollView, Text, TextInput, View, useWindowDimensions,
+  type LayoutChangeEvent, type ViewStyle,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
@@ -289,13 +290,47 @@ export default function Rummy({ tableId = '', auto, autoBot }: { tableId?: strin
    * the last two bugs here were both a model describing a layout that did not
    * render, so there is exactly one number and both sides read it.
    */
+  // MEASURED CONTAINER (§3). The window and the container may be different
+  // coordinate systems: if this View is laid out edge-to-edge it is display-
+  // width, while useWindowDimensions() reports the usable window. Sizing
+  // children from one and centring them in the other is what produces a
+  // constant offset. Guarded so onLayout -> setState -> layout cannot loop.
+  const [box, setBox] = useState({ w: 0, h: 0 });
+  const onBoxLayout = useCallback((e: LayoutChangeEvent) => {
+    const { width, height } = e.nativeEvent.layout;
+    setBox(prev => (Math.abs(prev.w - width) < 0.5 && Math.abs(prev.h - height) < 0.5)
+      ? prev
+      : { w: width, h: height });
+  }, []);
+
   const sideInset = Math.max(insets.left, insets.right);
   const boxInsets = useMemo(
     () => ({ top: insets.top, bottom: insets.bottom, left: sideInset, right: sideInset }),
     [insets.top, insets.bottom, sideInset],
   );
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  const m = useMemo(() => metrics(win, boxInsets), [win.width, win.height, boxInsets]);
+  /**
+   * Geometry comes from the MEASURED CONTAINER, and the inset is applied ONCE.
+   *
+   * Measured at runtime on the Redmi in landscape:
+   *   BOX 851x393   SCR 851   WIN 823   INS 28/0
+   *
+   * BOX === SCR, so this container is laid out edge-to-edge at display width,
+   * while useWindowDimensions() reports the window — which has ALREADY had the
+   * 28dp system bar removed (823 = 851 - 28). Feeding that window width into
+   * metrics(), which subtracts the inset again on both sides, took the same
+   * inset off twice: 823 - 56 = 767. A 768dp child centred in an 851dp
+   * container then sits (851-768)/2 = 41.5dp from the edge instead of 28 —
+   * the 114px offset, exactly.
+   *
+   * Using the container width keeps one coordinate system: the inset is
+   * subtracted once, symmetrically, so the table clears the system bar AND
+   * lands with equal space either side on any display.
+   */
+  const m = useMemo(
+    () => metrics({ width: box.w || win.width, height: box.h || win.height }, boxInsets),
+    [box.w, box.h, win.width, win.height, boxInsets],
+  );
   const t = useType();
 
   const reduceMotion = useReduceMotion();
@@ -656,10 +691,13 @@ export default function Rummy({ tableId = '', auto, autoBot }: { tableId?: strin
           fall out of the arithmetic instead of depending on a padding chain
           this file does not fully control. Vertical insets still use padding —
           they were never the problem. */}
-      <View style={{
-        flex: 1, alignItems: 'center',
-        paddingTop: boxInsets.top, paddingBottom: boxInsets.bottom,
-      }}>
+      <View
+        onLayout={onBoxLayout}
+        style={{
+          flex: 1, alignItems: 'center',
+          paddingTop: boxInsets.top, paddingBottom: boxInsets.bottom,
+        }}>
+
 
       {/* The felt — an oval with a gold rail, so the piles read as sitting ON
           something and the other players have somewhere to be. */}
