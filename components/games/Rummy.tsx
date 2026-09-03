@@ -1047,7 +1047,7 @@ function TableSelect({
             <Text style={{ color: C.muted, fontSize: t.sm, lineHeight: 18 }}>
               Open a private table and send the code, or type one you were sent. Two to six players.
             </Text>
-            <Btn label="Open a private table" icon="🔒" kind="gold" onPress={() => onJoin(newPrivateCode())} />
+            <Btn label="Open a private table" icon="lock" kind="gold" onPress={() => onJoin(newPrivateCode())} />
             <View style={{ flexDirection: 'row', gap: S[2] }}>
               <TextInput
                 value={code}
@@ -1211,8 +1211,8 @@ function Room({
             <Text style={{ color: C.text, fontSize: t.md, fontWeight: '800' }}>Invite</Text>
             <Text selectable style={{ color: C.gold, fontSize: t.xl, fontWeight: '800', letterSpacing: 2 }}>{code}</Text>
             <View style={{ flexDirection: 'row', gap: S[2] }}>
-              <Btn label="Copy code" icon="⧉" compact onPress={() => { void copy(); }} />
-              <Btn label="Share link" icon="🔗" compact onPress={() => { void openInvite('rummy', code); }} disabled={!link} />
+              <Btn label="Copy code" icon="copy" compact onPress={() => { void copy(); }} />
+              <Btn label="Share link" icon="link" compact onPress={() => { void openInvite('rummy', code); }} disabled={!link} />
             </View>
           </Panel>
         )}
@@ -1222,7 +1222,7 @@ function Room({
         {host ? (
           <>
             {allowsBots(table) && (
-              <Btn label="Add a bot" icon="🤖" onPress={() => onSend({ t: 'addbot' })} disabled={full} />
+              <Btn label="Add a bot" icon="bot" onPress={() => onSend({ t: 'addbot' })} disabled={full} />
             )}
             <Btn
               label={dealIn != null ? `Deal now — starting in ${dealIn}s` : `Deal (${members.length})`}
@@ -1326,7 +1326,7 @@ function ResultSheet({
         {host
           ? <RematchBtn rm={rematch} label="Deal again" />
           : <Text style={{ flex: 1, color: C.muted, fontSize: t.sm, alignSelf: 'center' }}>Waiting for the host to deal again…</Text>}
-        <Btn label="Share" icon="📣" compact onPress={onShare} />
+        <Btn label="Share" icon="share" compact onPress={onShare} />
       </View>
       <Btn label="Back to tables" onPress={onLobby} />
     </Sheet>
@@ -1411,7 +1411,7 @@ function VoiceRow({ voice, onExpand }: { voice: TableVoice; onExpand: () => void
       </Panel>
     );
   }
-  return <Btn label="Talk at the table" icon="🎤" onPress={voice.join} />;
+  return <Btn label="Talk at the table" icon="mic" onPress={voice.join} />;
 }
 
 /* ── the felt ───────────────────────────────────────────────────────── */

@@ -369,7 +369,7 @@ export default function Chess({ roomId, auto, autoBot }: { roomId: string } & Au
         {G.result ? (
           <View style={{ flexDirection: 'row', gap: S[2], width: size }}>
             <RematchBtn rm={rematch} />
-            <Btn label="Share" icon="📣" onPress={() => { void shareResult('chess', G.winner === state.you); }} />
+            <Btn label="Share" icon="share" onPress={() => { void shareResult('chess', G.winner === state.you); }} />
             <Btn label={voiceLabel} compact onPress={() => setVoiceOpen(true)} accessibilityLabel="Table voice" />
           </View>
         ) : (
@@ -402,7 +402,7 @@ export default function Chess({ roomId, auto, autoBot }: { roomId: string } & Au
 
         <Btn
           label="Invite a friend"
-          icon="🔗"
+          icon="link"
           style={{ width: size }}
           onPress={() => { void openInvite('chess', roomId); }}
           disabled={!roomId}
@@ -769,13 +769,13 @@ function Lobby({
           onLeave={voice.leave}
           onToggleMute={voice.toggleMute}
         />
-        <Btn label="How to play" icon="📖" onPress={rules.open} />
+        <Btn label="How to play" icon="rules" onPress={rules.open} />
         {/* Inviting belongs HERE, not only on the board. Chess had its invite
             behind the first move — you could only ask someone to join a game
             that had already started, which is the wrong moment and the reason
             an empty chess lobby had no way out except a bot. */}
-        <Btn label="Invite a friend" icon="🔗" onPress={() => { void openInvite('chess', code); }} disabled={!code} />
-        <Btn label="Add a bot" icon="🤖" onPress={onAddBot} />
+        <Btn label="Invite a friend" icon="link" onPress={() => { void openInvite('chess', code); }} disabled={!code} />
+        <Btn label="Add a bot" icon="bot" onPress={onAddBot} />
         <Btn label="Start game" kind="gold" onPress={onStart} disabled={!host || members.length < 2} />
       </ScrollView>
       <Toasts events={events} />

@@ -18,6 +18,7 @@ import Animated, {
   withSequence, withDelay, Easing, cancelAnimation,
 } from 'react-native-reanimated';
 import * as Haptics from 'expo-haptics';
+import Ionicons from '@expo/vector-icons/Ionicons';
 import {
   C, S, R, E, D3, T, glass, goldLine, mix, MOTION, AMBIENT, GRAIN,
   GOLD_FILL, GOLD_STOPS, PANEL_FILL, RED_FILL, RED_STOPS, typeScale,
@@ -25,6 +26,34 @@ import {
 import { boardFit } from '../../lib/games/boardFit';
 
 const AnimPressable = Animated.createAnimatedComponent(Pressable);
+
+/**
+ * The boards' icon set.
+ *
+ * These used to be emoji, and so came from four different families at once:
+ * flat glyphs (↻, ⧉) sitting beside full-colour emoji (🎲, 🤖) that no theme
+ * colour can reach and that redraw themselves differently on every Android
+ * skin. The rest of VaultChat draws icons from Ionicons — 178 call sites — so
+ * the boards now do too, and an icon simply takes its button's foreground
+ * colour.
+ *
+ * `Btn` still renders an unrecognised string as text, so a one-off glyph is
+ * always possible without adding a name here.
+ */
+const ICONS = {
+  share: 'share-social-outline',
+  link: 'link-outline',
+  rules: 'book-outline',
+  bot: 'hardware-chip-outline',
+  dice: 'dice-outline',
+  emote: 'happy-outline',
+  lock: 'lock-closed-outline',
+  copy: 'copy-outline',
+  mic: 'mic-outline',
+  retry: 'refresh-outline',
+} as const;
+
+export type GameIconName = keyof typeof ICONS;
 
 /**
  * A board edge that fits THIS screen, not just its width.
@@ -173,7 +202,11 @@ export function Btn({
 
   const body = (
     <>
-      {icon ? <Text style={{ fontSize: t.md, color: fg }}>{icon}</Text> : null}
+      {icon ? (
+        ICONS[icon as GameIconName]
+          ? <Ionicons name={ICONS[icon as GameIconName]} size={Math.round(t.md * 1.15)} color={fg} />
+          : <Text style={{ fontSize: t.md, color: fg }}>{icon}</Text>
+      ) : null}
       {busy
         ? <ActivityIndicator size="small" color={fg} />
         : <Text numberOfLines={1} style={{ color: fg, fontSize: compact ? t.sm : t.md, fontWeight: '800', letterSpacing: 0.2 }}>{label}</Text>}
@@ -392,12 +425,12 @@ export function RematchBtn({ rm, label = 'Rematch' }: { rm: import('../../lib/ga
     return (
       <Btn
         label={rm.timedOut ? 'They didn’t come back — invite' : 'Invite them back'}
-        icon="🔗"
+        icon="link"
         kind="gold"
         style={{ flex: 1 }}
         onPress={rm.invite}
       />
     );
   }
-  return <Btn label={label} kind="gold" icon="↻" style={{ flex: 1 }} onPress={rm.ask} />;
+  return <Btn label={label} kind="gold" icon="retry" style={{ flex: 1 }} onPress={rm.ask} />;
 }

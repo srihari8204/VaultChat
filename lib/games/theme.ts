@@ -98,6 +98,14 @@ export function mix(a: string, pct: number, b: string): string {
   return `rgb(${ch(r1, r2)}, ${ch(g1, g2)}, ${ch(b1, b2)})`;
 }
 
+/** Same hex, with an alpha channel — RN takes rgba() but not #rrggbbaa reliably. */
+export function alpha(hex: string, a: number): string {
+  const h = hex.replace('#', '');
+  const n = h.length === 3 ? h.split('').map(c => c + c).join('') : h;
+  const [r, g, b] = [0, 2, 4].map(i => parseInt(n.slice(i, i + 2), 16));
+  return `rgba(${r}, ${g}, ${b}, ${a})`;
+}
+
 /** The gold-tinted border used by every panel, at the four strengths in use. */
 export const goldLine = {
   14: mix(C.gold, 14, C.line),
@@ -139,11 +147,18 @@ export const D3 = {
 
 /** The glass primitive: .glass/.panel/.lobby/.tablecard all share this. */
 export const glass = {
-  backgroundColor: C.panel,
+  // TRANSLUCENT, not solid. A solid fill cancelled the ambient wash and the
+  // grain underneath it, so every panel read as a flat rectangle pasted onto
+  // the room rather than a surface lifted off it — the depth was being drawn
+  // and then painted over. 0.78 is as far as it goes: the panels carry body
+  // text, and the ground behind them is near-black, so contrast is the limit
+  // rather than taste. The top rim does the rest of the work; at 0.06 it was
+  // below the threshold where an edge reads as lit at all.
+  backgroundColor: alpha(C.panel, 0.78),
   borderWidth: 1,
   borderColor: goldLine[28],
   borderRadius: R[3],
-  boxShadow: `${E[3]}, inset 0 1px 0 rgba(255, 255, 255, 0.06)`,
+  boxShadow: `${E[3]}, inset 0 1px 0 rgba(255, 255, 255, 0.10)`,
   ...Platform.select({ android: { elevation: 12 }, default: {} }),
 } as const;
 

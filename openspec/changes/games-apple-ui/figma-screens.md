@@ -1,6 +1,6 @@
 # Figma screens — ready to run
 
-The design system is built in Figma. The five screens are not, because the
+The design system is built in Figma. The seven screens are not, because the
 account hit its **Starter-plan limit of 20 MCP tool calls per month** (View seat;
 `whoami` and `create_new_file` are exempt, everything else counts). The quota
 renews monthly.
@@ -8,7 +8,7 @@ renews monthly.
 Nothing here needs re-deriving when it does — the scripts below are written
 against the real node IDs and property keys returned when the components were
 created. Run them in order, one `use_figma` call each, against
-`fileKey = zomjMMcjw8sTXPpJh84lKi`. Six calls total.
+`fileKey = zomjMMcjw8sTXPpJh84lKi`. Eight calls total.
 
 ## What already exists in the file
 
@@ -495,6 +495,235 @@ for (const l of ['Share', 'Back to tables']) {
   pair.appendChild(b); b.layoutSizingHorizontal = 'FILL';
 }
 s.appendChild(pair); pair.layoutSizingHorizontal = 'FILL';
+
+await s.screenshot();
+return { createdNodeIds: [s.id] };
+```
+
+---
+
+## Script 6 — Ludo  (x = 2300)
+
+Four seats, but they are not equal: the one whose turn it is carries the dice.
+The board is the focal point and stays square at every width, so the seats sit
+in rows above and below it rather than in a column beside it, which would
+squeeze the board on a narrow phone.
+
+Deliberately not childish — the home yards are recessed wells tinted with the
+player's colour, not four primary-colour blocks. Colour identifies a player; it
+is never the decoration.
+
+```js
+/* shared preamble */
+const seatCmp = await figma.getNodeByIdAsync('5:26');
+const btnCmp  = await figma.getNodeByIdAsync('4:53');
+const pillCmp = await figma.getNodeByIdAsync('4:42');
+const pick = (set, n) => set.children.find(c => c.name === n);
+const s = screenFrame('Ludo', 411, 915, 2300);
+
+s.appendChild(txt('T', 'Ludo', 'Games/Title', 'color/text'));
+
+const seatRow = (names, states) => {
+  const r = figma.createAutoLayout('HORIZONTAL', { name: 'Seats', itemSpacing: 8 });
+  r.fills = [];
+  names.forEach((n, i) => {
+    const inst = pick(seatCmp, states[i]).createInstance();
+    if (states[i] !== 'State=Empty') inst.setProperties({ 'Name#5:0': n });
+    r.appendChild(inst); inst.layoutSizingHorizontal = 'FILL';
+  });
+  return r;
+};
+const top = seatRow(['Robo 1', 'Testing'], ['State=Bot', 'State=Idle']);
+s.appendChild(top); top.layoutSizingHorizontal = 'FILL';
+
+const BOARD = 379, CELL = BOARD / 15;
+const board = figma.createFrame();
+board.name = 'Board';
+board.layoutMode = 'NONE';               // layoutMode BEFORE resize
+board.resize(BOARD, BOARD);
+board.clipsContent = true;
+board.fills = [paint('color/surface')];
+board.strokes = [paint('color/line')]; board.strokeWeight = 1;
+for (const k of ['topLeftRadius','topRightRadius','bottomLeftRadius','bottomRightRadius']) board.setBoundVariable(k, V['radius/3']);
+
+const YARDS = [
+  { c: { r: 0.373, g: 0.878, b: 0.549 }, x: 0,        y: 0        },
+  { c: { r: 0.953, g: 0.761, b: 0.271 }, x: CELL * 9, y: 0        },
+  { c: { r: 1.000, g: 0.490, b: 0.525 }, x: CELL * 9, y: CELL * 9 },
+  { c: { r: 0.549, g: 0.635, b: 0.678 }, x: 0,        y: CELL * 9 },
+];
+for (const y of YARDS) {
+  const yard = figma.createRectangle();
+  yard.resize(CELL * 6, CELL * 6);
+  yard.x = y.x; yard.y = y.y;
+  yard.fills = [{ type: 'SOLID', color: y.c, opacity: 0.14 }];
+  yard.strokes = [{ type: 'SOLID', color: y.c, opacity: 0.55 }];
+  yard.strokeWeight = 1.5;
+  yard.cornerRadius = 10;
+  board.appendChild(yard);
+  for (let i = 0; i < 4; i++) {
+    const sock = figma.createEllipse();
+    sock.resize(CELL * 1.1, CELL * 1.1);
+    sock.x = y.x + CELL * (1.4 + (i % 2) * 2.6);
+    sock.y = y.y + CELL * (1.4 + Math.floor(i / 2) * 2.6);
+    sock.fills = [{ type: 'SOLID', color: y.c, opacity: i === 0 ? 0.95 : 0.22 }];
+    board.appendChild(sock);
+  }
+}
+for (const [x, y, w, h] of [[CELL * 6, 0, CELL * 3, BOARD], [0, CELL * 6, BOARD, CELL * 3]]) {
+  const track = figma.createRectangle();
+  track.resize(w, h); track.x = x; track.y = y;
+  track.fills = [paint('color/bg-raised')];
+  board.appendChild(track);
+}
+for (const [cx, cy] of [[6, 2], [12, 6], [8, 12], [2, 8]]) {
+  const safe = figma.createEllipse();
+  safe.resize(CELL * 0.7, CELL * 0.7);
+  safe.x = cx * CELL + CELL * 0.15; safe.y = cy * CELL + CELL * 0.15;
+  safe.fills = [];
+  safe.strokes = [paint('color/text-muted')]; safe.strokeWeight = 1;
+  board.appendChild(safe);
+}
+const home = figma.createRectangle();
+home.resize(CELL * 3, CELL * 3); home.x = CELL * 6; home.y = CELL * 6;
+home.fills = [paint('color/surface')];
+home.strokes = [paint('color/accent')]; home.strokeWeight = 1.5;
+board.appendChild(home);
+s.appendChild(board);
+
+const bottom = seatRow(['Srihari B', 'Waiting'], ['State=Active', 'State=Empty']);
+s.appendChild(bottom); bottom.layoutSizingHorizontal = 'FILL';
+
+const turn = figma.createAutoLayout('HORIZONTAL', { name: 'Turn', itemSpacing: 10 });
+turn.fills = []; turn.counterAxisAlignItems = 'CENTER';
+const pill = pick(pillCmp, 'Tone=Turn').createInstance();
+pill.setProperties({ 'Label#4:12': 'Your roll' });
+turn.appendChild(pill);
+grow(turn);
+const die = figma.createFrame();
+die.name = 'Die';
+die.layoutMode = 'VERTICAL';
+die.primaryAxisAlignItems = 'CENTER'; die.counterAxisAlignItems = 'CENTER';
+die.resize(52, 52);
+die.fills = [paint('color/bg-raised')];
+die.strokes = [paint('color/accent')]; die.strokeWeight = 1.5;
+for (const k of ['topLeftRadius','topRightRadius','bottomLeftRadius','bottomRightRadius']) die.setBoundVariable(k, V['radius/2']);
+die.appendChild(txt('Pips', '5', 'Games/Numeric', 'color/text'));
+turn.appendChild(die);
+s.appendChild(turn); turn.layoutSizingHorizontal = 'FILL';
+
+const acts = figma.createAutoLayout('HORIZONTAL', { name: 'Actions', itemSpacing: 8 });
+acts.fills = [];
+for (const [k, l] of [['Kind=Primary', 'Roll'], ['Kind=Neutral', 'Emote'], ['Kind=Neutral', 'Invite']]) {
+  const b = pick(btnCmp, k).createInstance();
+  b.setProperties({ 'Label#4:18': l });
+  acts.appendChild(b); b.layoutSizingHorizontal = 'FILL';
+}
+s.appendChild(acts); acts.layoutSizingHorizontal = 'FILL';
+
+await s.screenshot();
+return { createdNodeIds: [s.id] };
+```
+
+---
+
+## Script 7 — Tic-Tac-Toe  (x = 2760)
+
+The shortest game in the set, so the screen carries the least. Two players, one
+board, one line of state. The win is a line drawn through the three squares it
+was won on — not a colour wash, which says nothing about *which* three.
+
+```js
+/* shared preamble */
+const seatCmp = await figma.getNodeByIdAsync('5:26');
+const btnCmp  = await figma.getNodeByIdAsync('4:53');
+const pillCmp = await figma.getNodeByIdAsync('4:42');
+const pick = (set, n) => set.children.find(c => c.name === n);
+const s = screenFrame('Tic-Tac-Toe', 411, 915, 2760);
+s.itemSpacing = 18;
+
+s.appendChild(txt('T', 'Tic-Tac-Toe', 'Games/Title', 'color/text'));
+
+const TEAL = { r: 0.294, g: 0.878, b: 0.757 }, PINK = { r: 1, g: 0.435, b: 0.710 };
+const mkId = (mark, name, colour, active) => {
+  const f = figma.createAutoLayout('HORIZONTAL', { name, itemSpacing: 8 });
+  f.counterAxisAlignItems = 'CENTER';
+  f.fills = active ? [paint('color/bg-raised')] : [];
+  f.strokes = [{ type: 'SOLID', color: colour, opacity: active ? 0.9 : 0.25 }];
+  f.strokeWeight = active ? 2 : 1;
+  for (const k of ['topLeftRadius','topRightRadius','bottomLeftRadius','bottomRightRadius']) f.setBoundVariable(k, V['radius/2']);
+  for (const k of ['paddingLeft','paddingRight','paddingTop','paddingBottom']) f.setBoundVariable(k, V['space/2']);
+  const g = figma.createText();
+  g.characters = mark; g.fontName = { family: 'Roboto', style: 'Black' };
+  g.fontSize = 22; g.fills = [{ type: 'SOLID', color: colour }];
+  f.appendChild(g);
+  f.appendChild(txt('N', name, 'Games/Label', 'color/text'));
+  return f;
+};
+const vs = figma.createAutoLayout('HORIZONTAL', { name: 'Players', itemSpacing: 10 });
+vs.fills = []; vs.counterAxisAlignItems = 'CENTER';
+const idA = mkId('X', 'Srihari B', TEAL, true);
+vs.appendChild(idA); idA.layoutSizingHorizontal = 'FILL';
+const idB = mkId('O', 'Robo 1', PINK, false);
+vs.appendChild(idB); idB.layoutSizingHorizontal = 'FILL';
+s.appendChild(vs); vs.layoutSizingHorizontal = 'FILL';
+
+const pill = pick(pillCmp, 'Tone=Turn').createInstance();
+pill.setProperties({ 'Label#4:12': 'Your turn' });
+s.appendChild(pill);
+
+const BOARD = 379, CELL = BOARD / 3;
+const board = figma.createFrame();
+board.name = 'Board';
+board.layoutMode = 'NONE';
+board.resize(BOARD, BOARD);
+board.clipsContent = true;
+board.fills = [paint('color/surface')];
+board.strokes = [paint('color/line')]; board.strokeWeight = 1;
+for (const k of ['topLeftRadius','topRightRadius','bottomLeftRadius','bottomRightRadius']) board.setBoundVariable(k, V['radius/3']);
+for (let i = 1; i < 3; i++) {
+  for (const vertical of [true, false]) {
+    const ln = figma.createRectangle();
+    ln.resize(vertical ? 1 : BOARD, vertical ? BOARD : 1);
+    ln.x = vertical ? i * CELL : 0;
+    ln.y = vertical ? 0 : i * CELL;
+    ln.fills = [paint('color/line')];
+    board.appendChild(ln);
+  }
+}
+const MARKS = [['X', 'O', 'X'], ['', 'X', ''], ['O', '', '']];
+for (let r = 0; r < 3; r++) for (let c = 0; c < 3; c++) {
+  const m = MARKS[r][c];
+  if (!m) continue;
+  const g = figma.createText();
+  g.characters = m; g.fontName = { family: 'Roboto', style: 'Black' };
+  g.fontSize = CELL * 0.52;
+  g.fills = [{ type: 'SOLID', color: m === 'X' ? TEAL : PINK }];
+  g.textAlignHorizontal = 'CENTER'; g.textAlignVertical = 'CENTER';
+  g.resize(CELL, CELL);
+  g.x = c * CELL; g.y = r * CELL;
+  board.appendChild(g);
+}
+const win = figma.createLine();
+win.resize(BOARD * 0.62, 0);
+win.x = CELL * 0.5; win.y = CELL * 0.5;
+win.rotation = -45;
+win.strokes = [paint('color/accent')];
+win.strokeWeight = 6; win.strokeCap = 'ROUND';
+board.appendChild(win);
+s.appendChild(board);
+
+const spacer = figma.createFrame(); spacer.fills = []; spacer.resize(1, 8);
+s.appendChild(spacer); spacer.layoutGrow = 1;
+
+const acts = figma.createAutoLayout('HORIZONTAL', { name: 'Actions', itemSpacing: 8 });
+acts.fills = [];
+for (const [k, l] of [['Kind=Primary', 'Rematch'], ['Kind=Neutral', 'Invite a friend']]) {
+  const btn = pick(btnCmp, k).createInstance();
+  btn.setProperties({ 'Label#4:18': l });
+  acts.appendChild(btn); btn.layoutSizingHorizontal = 'FILL';
+}
+s.appendChild(acts); acts.layoutSizingHorizontal = 'FILL';
 
 await s.screenshot();
 return { createdNodeIds: [s.id] };

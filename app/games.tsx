@@ -17,6 +17,7 @@
 import React, { useState } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
+import { useKeepAwake } from 'expo-keep-awake';
 import Animated, {
   useSharedValue, useAnimatedStyle, withRepeat, withTiming, withSequence, Easing, cancelAnimation,
 } from 'react-native-reanimated';
@@ -47,8 +48,8 @@ type Entry = { kind: GameKind; name: string; icon: string; blurb: string; accent
 
 const GAMES: Entry[] = [
   { kind: 'chess',     name: 'Chess',       icon: '♛', accent: '#8ca2ad', blurb: 'Server-refereed. Your legal moves come from the table.' },
-  { kind: 'rummy',     name: 'Rummy',       icon: '🂡', accent: '#5fe08c', blurb: 'Points rummy, 2–6 players. Public tables or a private code.' },
-  { kind: 'ludo',      name: 'Ludo',        icon: '🎲', accent: '#f3c245', blurb: 'Two to four players. Your phone helps roll the dice.' },
+  { kind: 'rummy',     name: 'Rummy',       icon: '♠', accent: '#5fe08c', blurb: 'Points rummy, 2–6 players. Public tables or a private code.' },
+  { kind: 'ludo',      name: 'Ludo',        icon: '⚄', accent: '#f3c245', blurb: 'Two to four players. Your phone helps roll the dice.' },
   { kind: 'tictactoe', name: 'Tic-Tac-Toe', icon: '✕', accent: '#ff8080', blurb: 'Three in a row. Quick one.' },
 ];
 
@@ -108,6 +109,14 @@ export default function GamesScreen() {
 }
 
 function Board({ kind, room, auto, autoBot }: { kind: GameKind; room: string; auto: boolean; autoBot: boolean }) {
+  // A TABLE IS NOT AN IDLE SCREEN.
+  //
+  // Waiting for three other players to move looks exactly like doing nothing
+  // to Android, so the display slept mid-game and the player came back to a
+  // locked phone and a turn they had already lost. Held only while a board is
+  // mounted - the hub, the sheets and the rest of the app sleep normally.
+  useKeepAwake();
+
   const a = { auto, autoBot };
   switch (kind) {
     case 'chess':     return <Chess roomId={room} {...a} />;

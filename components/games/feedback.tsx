@@ -244,7 +244,7 @@ export function VoiceBar({
   if (phase === 'off' || phase === 'error') {
     return (
       <View style={{ width, gap: S[1] }}>
-        <Btn label="Talk at the table" icon="🎤" compact onPress={onJoin} />
+        <Btn label="Talk at the table" icon="mic" compact onPress={onJoin} />
         {error ? <Text style={{ color: C.bad, fontSize: 11, textAlign: 'center' }}>{error}</Text> : null}
       </View>
     );
@@ -361,7 +361,7 @@ export function VoiceSheet({
             <Btn label="Leave voice" kind="danger" compact onPress={voice.leave} accessibilityLabel="Leave voice but stay at the table" />
           </>
         ) : voice.phase === 'unavailable' ? null : (
-          <Btn label="Join voice" icon="🎤" kind="gold" compact onPress={voice.join} />
+          <Btn label="Join voice" icon="mic" kind="gold" compact onPress={voice.join} />
         )}
       </View>
 

@@ -156,9 +156,9 @@ export default function TicTacToe({ roomId, auto, autoBot }: { roomId: string } 
             onLeave={voice.leave}
             onToggleMute={voice.toggleMute}
           />
-          <Btn label="How to play" icon="📖" onPress={rules.open} />
-          <Btn label="Add a bot" icon="🤖" onPress={() => send({ t: 'addbot' })} />
-          <Btn label="Invite a friend" icon="🔗" onPress={() => { void openInvite('tictactoe', roomId); }} disabled={!roomId} />
+          <Btn label="How to play" icon="rules" onPress={rules.open} />
+          <Btn label="Add a bot" icon="bot" onPress={() => send({ t: 'addbot' })} />
+          <Btn label="Invite a friend" icon="link" onPress={() => { void openInvite('tictactoe', roomId); }} disabled={!roomId} />
           <Btn label="Start game" kind="gold" onPress={() => send({ t: 'start' })} disabled={!host || members.length < 2} />
         </ScrollView>
         <Toasts events={events} />
@@ -239,10 +239,10 @@ export default function TicTacToe({ roomId, auto, autoBot }: { roomId: string } 
         {finished ? (
           <View style={{ width: size, flexDirection: 'row', gap: S[2] }}>
             <RematchBtn rm={rematch} />
-            <Btn label="Share" icon="📣" onPress={() => { void shareResult('tictactoe', G.winnerId === state.you); }} />
+            <Btn label="Share" icon="share" onPress={() => { void shareResult('tictactoe', G.winnerId === state.you); }} />
           </View>
         ) : (
-          <Btn label="Invite a friend" icon="🔗" style={{ width: size }} onPress={() => { void openInvite('tictactoe', roomId); }} disabled={!roomId} />
+          <Btn label="Invite a friend" icon="link" style={{ width: size }} onPress={() => { void openInvite('tictactoe', roomId); }} disabled={!roomId} />
         )}
       </ScrollView>
       <Toasts events={events} />

@@ -351,14 +351,14 @@ export default function Ludo({ roomId = 'ludo-main', auto, autoBot }: { roomId?:
               two taps that always go together. */}
           <Btn
             label="Quick game vs 1 bot"
-            icon="🤖"
+            icon="bot"
             kind="gold"
             disabled={!host}
             onPress={() => { fillAndStart(1); }}
           />
           <Btn
             label="Play 3 bots"
-            icon="🤖"
+            icon="bot"
             disabled={!host}
             onPress={() => { fillAndStart(3); }}
           />
@@ -383,9 +383,9 @@ export default function Ludo({ roomId = 'ludo-main', auto, autoBot }: { roomId?:
             onLeave={voice.leave}
             onToggleMute={voice.toggleMute}
           />
-          <Btn label="How to play" icon="📖" onPress={rules.open} />
+          <Btn label="How to play" icon="rules" onPress={rules.open} />
           <Btn label="Add a bot" onPress={() => send({ t: 'addbot' })} disabled={!host} />
-          <Btn label="Invite a friend" icon="🔗" onPress={() => { void openInvite('ludo', roomId); }} disabled={!roomId} />
+          <Btn label="Invite a friend" icon="link" onPress={() => { void openInvite('ludo', roomId); }} disabled={!roomId} />
           <Btn label="Start now" kind="gold" onPress={() => send({ t: 'start', mode: 'classic', stake })} disabled={!host || members.length < 2} />
         </ScrollView>
         <Toasts events={events} />
@@ -455,7 +455,7 @@ export default function Ludo({ roomId = 'ludo-main', auto, autoBot }: { roomId?:
                 <Btn
                   label={tumbling ? 'Rolling…' : canRoll ? 'Roll the dice' : die != null ? `Rolled ${die}` : 'Waiting…'}
                   kind="gold"
-                  icon="🎲"
+                  icon="dice"
                   disabled={!canRoll || tumbling}
                   onPress={() => {
                     // Start the tumble first, then ask. The result is held back
@@ -491,15 +491,15 @@ export default function Ludo({ roomId = 'ludo-main', auto, autoBot }: { roomId?:
         />
 
         <View style={{ width: size, flexDirection: 'row', gap: S[2] }}>
-          <Btn label="Emote" icon="💬" compact style={{ flex: 1 }} onPress={() => setShowEmotes(true)} />
-          <Btn label="Invite" icon="🔗" compact style={{ flex: 1 }} onPress={() => { void openInvite('ludo', roomId); }} disabled={!roomId} />
+          <Btn label="Emote" icon="emote" compact style={{ flex: 1 }} onPress={() => setShowEmotes(true)} />
+          <Btn label="Invite" icon="link" compact style={{ flex: 1 }} onPress={() => { void openInvite('ludo', roomId); }} disabled={!roomId} />
           <Btn label="⚙" compact onPress={() => setShowSettings(true)} accessibilityLabel="Settings" />
         </View>
 
         {finished && (
           <View style={{ width: size, flexDirection: 'row', gap: S[2] }}>
             <RematchBtn rm={rematch} label="Play again" />
-            <Btn label="Share" icon="📣" onPress={() => { void shareResult('ludo', G.winnerId === state.you); }} />
+            <Btn label="Share" icon="share" onPress={() => { void shareResult('ludo', G.winnerId === state.you); }} />
           </View>
         )}
 
