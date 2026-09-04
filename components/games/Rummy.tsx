@@ -64,11 +64,11 @@ import {
 import { analyzeHand, type MeldType } from '../../lib/games/meldHint';
 import { openInvite, shareResult, tableLink } from '../../lib/games/invite';
 import {
-  metrics, seatSpots, secondsLeft, ranked, activeCount, pid, allowsBots,
+  metrics, seatSpots, ranked, activeCount, pid, allowsBots,
   newPrivateCode, normalizeCode,
   type RummyPlayer, type Settlement, type TableInfo,
 } from '../../lib/games/rummyTable';
-import { C, S, R, mix, goldLine } from '../../lib/games/theme';
+import { C, S, R, T, mix, goldLine } from '../../lib/games/theme';
 
 type Card = { id: string; suit: string; rank: string };
 
@@ -272,10 +272,6 @@ export default function Rummy({ tableId = '', auto, autoBot }: { tableId?: strin
 
   const win = useWindowDimensions();
   const insets = useSafeAreaInsets();
-  // Depends on the MEASUREMENTS, not on the objects carrying them: both hooks
-  // hand back a fresh object every render, so depending on them would recompute
-  // the whole layout on every keystroke and defeat the memo entirely.
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   /**
    * SYMMETRIC side insets, so the table is centred on the SCREEN.
    *
@@ -308,7 +304,6 @@ export default function Rummy({ tableId = '', auto, autoBot }: { tableId?: strin
     () => ({ top: insets.top, bottom: insets.bottom, left: sideInset, right: sideInset }),
     [insets.top, insets.bottom, sideInset],
   );
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   /**
    * Geometry comes from the MEASURED CONTAINER, and the inset is applied ONCE.
    *
@@ -601,24 +596,24 @@ export default function Rummy({ tableId = '', auto, autoBot }: { tableId?: strin
 
   if (error && phase !== 'connected' && !G) {
     return (
-      <Center>
+      <TableBackground style={{ alignItems: 'center', justifyContent: 'center', padding: S[5], gap: S[3] }}>
         <Text style={{ fontSize: 46 }}>🂡</Text>
         <Text style={{ color: C.text, fontSize: t.lg, fontWeight: '800' }}>Can’t reach the table</Text>
         <Text style={{ color: C.muted, fontSize: t.sm, textAlign: 'center' }}>{error}</Text>
         <Btn label="Try again" kind="gold" onPress={retry} />
-      </Center>
+      </TableBackground>
     );
   }
 
   if (phase !== 'connected' && !G) {
     return (
-      <Center>
+      <TableBackground style={{ alignItems: 'center', justifyContent: 'center', padding: S[5], gap: S[3] }}>
         <Text style={{ fontSize: 46 }}>🂡</Text>
         <ActivityIndicator color={C.gold} />
         <Text style={{ color: C.muted, fontSize: t.md }}>
           {phase === 'minting' ? 'Taking your seat…' : 'Reaching the table…'}
         </Text>
-      </Center>
+      </TableBackground>
     );
   }
 
@@ -724,7 +719,7 @@ export default function Rummy({ tableId = '', auto, autoBot }: { tableId?: strin
         {(table?.name || table?.stakes) && (
           <Text
             numberOfLines={1}
-            style={{ position: 'absolute', top: 2, left: 0, maxWidth: m.tableW * 0.4, color: INK_ON_FELT, fontSize: 11, fontWeight: '700', opacity: 0.85 }}
+            style={{ position: 'absolute', top: 2, left: 0, maxWidth: m.tableW * 0.4, color: INK_ON_FELT, fontSize: T.xs, fontWeight: '700', opacity: 0.85 }}
           >
             {[table?.name, table?.stakes].filter(Boolean).join(' · ')}
           </Text>
@@ -767,14 +762,14 @@ export default function Rummy({ tableId = '', auto, autoBot }: { tableId?: strin
       <View style={{ height: 30, justifyContent: 'center', alignItems: 'center' }}>
         {reconnecting ? (
           <StatusPill tone="warn">
-            <ActivityIndicator size="small" color="#ffdd72" />
-            <Text style={{ color: '#ffdd72', fontSize: t.sm, fontWeight: '800' }}>
+            <ActivityIndicator size="small" color={C.gold2} />
+            <Text style={{ color: C.gold2, fontSize: t.sm, fontWeight: '800' }}>
               Reconnecting — your hand is safe
             </Text>
           </StatusPill>
         ) : (
           <StatusPill tone={mine ? 'you' : 'plain'}>
-            <Text numberOfLines={1} style={{ color: mine ? '#ffdd72' : '#cfe8d8', fontSize: t.sm, fontWeight: '800' }}>
+            <Text numberOfLines={1} style={{ color: mine ? C.gold2 : '#cfe8d8', fontSize: t.sm, fontWeight: '800' }}>
               {!mine
                 ? `${turnName} is playing`
                 : mustDraw
@@ -839,7 +834,7 @@ export default function Rummy({ tableId = '', auto, autoBot }: { tableId?: strin
               ) : null;
             })}
             {g.length === 0 && (
-              <Text style={{ color: 'rgba(255,255,255,0.55)', fontSize: 11, paddingHorizontal: S[2], paddingVertical: S[4] }}>
+              <Text style={{ color: 'rgba(255,255,255,0.55)', fontSize: T.xs, paddingHorizontal: S[2], paddingVertical: S[4] }}>
                 Drop here
               </Text>
             )}
@@ -852,16 +847,16 @@ export default function Rummy({ tableId = '', auto, autoBot }: { tableId?: strin
           last button sliding off: Declare and Drop are the two that must always
           be reachable, so they are the two that never shrink. */}
       <View style={{ height: 46, flexDirection: 'row', gap: S[1], alignItems: 'center' }}>
-        <Btn label={tight ? '⚡' : 'Sort'} icon={tight ? undefined : '⚡'} compact accessibilityLabel="Sort your hand" onPress={() => sortNow(sortMode === 'manual' ? 'suit' : sortMode)} />
-        <Btn label={tight ? '⊞' : 'Group'} compact accessibilityLabel="Group the selected cards" onPress={() => { setGroups(g => groupUp(g, picked)); setPicked([]); playSfx('tick'); }} disabled={picked.length < 2} />
-        <Btn label={tight ? '⊟' : 'Ungroup'} compact accessibilityLabel="Ungroup the selected cards" onPress={() => { setGroups(g => ungroup(g, picked)); setPicked([]); playSfx('tick'); }} disabled={picked.length === 0} />
+        <Btn label={tight ? '' : 'Sort'} icon="sort" compact accessibilityLabel="Sort your hand" onPress={() => sortNow(sortMode === 'manual' ? 'suit' : sortMode)} />
+        <Btn label={tight ? '' : 'Group'} icon="group" compact accessibilityLabel="Group the selected cards" onPress={() => { setGroups(g => groupUp(g, picked)); setPicked([]); playSfx('tick'); }} disabled={picked.length < 2} />
+        <Btn label={tight ? '' : 'Ungroup'} icon="ungroup" compact accessibilityLabel="Ungroup the selected cards" onPress={() => { setGroups(g => ungroup(g, picked)); setPicked([]); playSfx('tick'); }} disabled={picked.length === 0} />
         <View style={{ flex: 1 }} />
         {typeof me?.points === 'number' && !tight && (
           <Text style={{ color: INK_ON_FELT, fontSize: 12, fontWeight: '700', marginRight: S[1] }}>{`Score ${me.points}`}</Text>
         )}
         <Btn label="Discard" compact onPress={() => discard(picked[0])} disabled={!mustDiscard || picked.length !== 1 || !!pending} />
-        <Btn label="✓ Declare" kind="good" compact onPress={() => setConfirmDeclare(true)} disabled={!mustDiscard || picked.length !== 1 || !!pending} />
-        <Btn label="✕ Drop" kind="danger" compact onPress={() => act('drop', { t: 'drop' })} disabled={!mine || !!pending} />
+        <Btn label="Declare" icon="declare" kind="good" compact onPress={() => setConfirmDeclare(true)} disabled={!mustDiscard || picked.length !== 1 || !!pending} />
+        <Btn label="Drop" icon="drop" kind="danger" compact onPress={() => act('drop', { t: 'drop' })} disabled={!mine || !!pending} />
       </View>
 
       <Toasts events={feed} />
@@ -984,23 +979,23 @@ function TableSelect({
 
   if (seating) {
     return (
-      <Center>
+      <TableBackground style={{ alignItems: 'center', justifyContent: 'center', padding: S[5], gap: S[3] }}>
         <ActivityIndicator color={C.gold} />
         <Text style={{ color: C.muted, fontSize: t.md }}>Taking your seat at {seatedId}…</Text>
-      </Center>
+      </TableBackground>
     );
   }
 
   if (failed) {
     return (
-      <Center>
+      <TableBackground style={{ alignItems: 'center', justifyContent: 'center', padding: S[5], gap: S[3] }}>
         <Text style={{ fontSize: 40 }}>🪑</Text>
         <Text style={{ color: C.text, fontSize: t.lg, fontWeight: '800' }}>No seat at “{seatedId}”</Text>
         <Text style={{ color: C.muted, fontSize: t.sm, textAlign: 'center', lineHeight: 19 }}>
           The table did not answer. It may be full, finished, or the code may be wrong.
         </Text>
         <Btn label="Back to tables" kind="gold" onPress={onBack} />
-      </Center>
+      </TableBackground>
     );
   }
 
@@ -1090,7 +1085,7 @@ function TableCard({ table, onJoin }: { table: TableInfo; onJoin: () => void }) 
     >
       <View style={{ flex: 1, gap: 3 }}>
         <Text style={{ color: C.text, fontSize: t.md, fontWeight: '800' }}>{table.name}</Text>
-        <Text style={{ color: C.muted, fontSize: 12.5 }}>{table.stakes}</Text>
+        <Text style={{ color: C.muted, fontSize: T.sm }}>{table.stakes}</Text>
         <Text style={{ color: C.muted, fontSize: 12 }}>
           {`${table.players}/${table.maxPlayers} seated · ${table.status}`}
         </Text>
@@ -1286,10 +1281,10 @@ function ResultSheet({
 
       <View style={{ gap: S[1] }}>
         <View style={{ flexDirection: 'row', paddingHorizontal: S[2] }}>
-          <Text style={{ width: 26, color: C.muted, fontSize: 11, fontWeight: '700' }}>#</Text>
-          <Text style={{ flex: 1, color: C.muted, fontSize: 11, fontWeight: '700' }}>Player</Text>
-          <Text style={{ width: 54, textAlign: 'right', color: C.muted, fontSize: 11, fontWeight: '700' }}>Points</Text>
-          <Text style={{ width: 66, textAlign: 'right', color: C.muted, fontSize: 11, fontWeight: '700' }}>Coins</Text>
+          <Text style={{ width: 26, color: C.muted, fontSize: T.xs, fontWeight: '700' }}>#</Text>
+          <Text style={{ flex: 1, color: C.muted, fontSize: T.xs, fontWeight: '700' }}>Player</Text>
+          <Text style={{ width: 54, textAlign: 'right', color: C.muted, fontSize: T.xs, fontWeight: '700' }}>Points</Text>
+          <Text style={{ width: 66, textAlign: 'right', color: C.muted, fontSize: T.xs, fontWeight: '700' }}>Coins</Text>
         </View>
         {order.map((p, i) => {
           const isYou = pid(p) === you;
@@ -1310,8 +1305,11 @@ function ResultSheet({
                 {p.name}{isYou ? ' (you)' : ''}
               </Text>
               <Text style={{ width: 54, textAlign: 'right', color: C.text, fontSize: t.sm }}>{p.points ?? 0}</Text>
-              <Text style={{ width: 66, textAlign: 'right', fontSize: t.sm, fontWeight: '700', color: d == null ? C.muted : d >= 0 ? C.good : C.bad }}>
-                {d == null ? '—' : d >= 0 ? `+${d}` : `${d}`}
+              {/* A zero delta says nothing happened, not that something GOOD
+                  happened - `>= 0` put it in the same green "+0" branch as a
+                  real win. Ties to the history list's own detailOf fix. */}
+              <Text style={{ width: 66, textAlign: 'right', fontSize: t.sm, fontWeight: '700', color: d == null || d === 0 ? C.muted : d > 0 ? C.good : C.bad }}>
+                {d == null ? '—' : d === 0 ? '0' : d > 0 ? `+${d}` : `${d}`}
               </Text>
             </View>
           );
@@ -1385,9 +1383,9 @@ function VoicePill({ voice, onPress, still }: { voice: TableVoice; onPress: () =
       }}
     >
       {busy
-        ? <ActivityIndicator size="small" color="#ffdd72" />
+        ? <ActivityIndicator size="small" color={C.gold2} />
         : <Animated.Text style={[{ fontSize: 12 }, a]}>{live ? (voice.muted ? '🔇' : '🎙') : '🎤'}</Animated.Text>}
-      <Text style={{ color: live ? '#5fe08c' : INK_ON_FELT, fontSize: 11, fontWeight: '800' }}>
+      <Text style={{ color: live ? '#5fe08c' : INK_ON_FELT, fontSize: T.xs, fontWeight: '800' }}>
         {live ? `${voice.participants.length}` : VOICE_LABEL[voice.phase] ?? ''}
       </Text>
     </Pressable>
@@ -1457,11 +1455,14 @@ function TableTop({ width, height }: { width: number; height: number }) {
         </RadialGradient>
         {/* Cloth. The light sits high and slightly back, so the near edge —
             where the player's own hand is — falls into shadow and the middle of
-            the table, where the piles are, is the brightest thing on screen. */}
+            the table, where the piles are, is the brightest thing on screen.
+            Reads FELT (above) rather than repeating its three hexes here — this
+            was still the old GREEN, the documented "TEAL rather than wine" swap
+            had never actually reached the gradient that paints the table. */}
         <RadialGradient id="rtCloth" cx="50%" cy="26%" rx="78%" ry="86%">
-          <Stop offset="0" stopColor="#1E7A52" />
-          <Stop offset="0.55" stopColor="#0C5236" />
-          <Stop offset="1" stopColor="#052A1B" />
+          <Stop offset="0" stopColor={FELT[0]} />
+          <Stop offset="0.55" stopColor={FELT[1]} />
+          <Stop offset="1" stopColor={FELT[2]} />
         </RadialGradient>
         {/* The drop where cloth meets frame: dark at the rim, gone by 12%. */}
         <RadialGradient id="rtBevel" cx="50%" cy="50%" rx="50%" ry="50%">
@@ -1560,7 +1561,7 @@ function StatusPill({ tone, children }: { tone: 'plain' | 'you' | 'warn'; childr
         paddingHorizontal: S[3], paddingVertical: 3, borderRadius: R.pill,
         backgroundColor: 'rgba(4,26,14,0.62)',
         borderWidth: 1,
-        borderColor: tone === 'you' ? goldLine[38] : tone === 'warn' ? '#a9791b' : 'rgba(255,255,255,0.12)',
+        borderColor: tone === 'you' ? goldLine[38] : tone === 'warn' ? C.goldDeep : 'rgba(255,255,255,0.12)',
         maxWidth: '96%',
       }}
     >
@@ -1658,7 +1659,7 @@ function MeldBadge({ verdict, loose }: { verdict?: { type: MeldType; label: stri
   if (loose) return <Text style={{ color: 'rgba(255,255,255,0.5)', fontSize: 10, fontWeight: '700' }}>Ungrouped</Text>;
   if (!verdict || verdict.type === 'empty' || !verdict.label) return null;
   const good = verdict.type === 'pure' || verdict.type === 'impure' || verdict.type === 'set';
-  const color = verdict.type === 'pure' ? '#5fe08c' : good ? '#ffdd72' : '#ff8080';
+  const color = verdict.type === 'pure' ? '#5fe08c' : good ? C.gold2 : '#ff8080';
   return (
     <Text style={{ color, fontSize: 10, fontWeight: '800' }}>
       {good ? '✓' : '✗'} {verdict.label}
@@ -1727,7 +1728,7 @@ function DiscardPile({
         borderRadius: R[2], padding: 3,
         borderWidth: armed ? 2 : 1,
         borderStyle: armed ? 'dashed' : 'solid',
-        borderColor: armed ? '#f3c245' : 'transparent',
+        borderColor: armed ? C.gold : 'transparent',
       }}
     >
       <Pile
@@ -1749,7 +1750,7 @@ function CardBack({ live, w }: { live: boolean; w: number }) {
       width: w, height: h, borderRadius: 6, overflow: 'hidden',
       borderWidth: 1, borderColor: CARD_EDGE,
       boxShadow: live
-        ? '0 0 0 2px #f3c245, 0 0 16px rgba(232,194,95,0.55), 0 4px 10px rgba(0,0,0,0.5)'
+        ? `0 0 0 2px ${C.gold}, 0 0 16px rgba(232,194,95,0.55), 0 4px 10px rgba(0,0,0,0.5)`
         : '0 3px 9px rgba(0,0,0,0.55)',
     }}>
       <Svg width={w} height={h}>
@@ -1782,9 +1783,9 @@ function CardFace({ card, w, glow, wild }: { card: Card; w: number; glow?: boole
     <View style={{
       width: w, height: h, borderRadius: 6,
       backgroundColor: joker ? '#f6efff' : CARD_FACE,
-      borderWidth: 1, borderColor: wild ? '#f3c245' : CARD_EDGE,
+      borderWidth: 1, borderColor: wild ? C.gold : CARD_EDGE,
       boxShadow: glow || wild
-        ? '0 0 0 2px #f3c245, 0 3px 8px rgba(0,0,0,0.4)'
+        ? `0 0 0 2px ${C.gold}, 0 3px 8px rgba(0,0,0,0.4)`
         : '0 2px 6px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.8)',
       overflow: 'hidden',
     }}>
@@ -1882,7 +1883,7 @@ const HandCard = React.memo(function HandCard({
         accessibilityRole="button"
         accessibilityState={{ selected }}
         accessibilityLabel={`${spoken(card)}${wild ? ', joker' : ''}${selected ? ', selected' : ''}. Drag to move between groups, or onto the open pile to discard.`}
-        style={[a, selected ? { borderRadius: 8, borderWidth: 2, borderColor: '#f3c245' } : null]}
+        style={[a, selected ? { borderRadius: 8, borderWidth: 2, borderColor: C.gold } : null]}
       >
         {/* A joker is marked ON THE CARD, not only beside the deck. The wild
             indicator by the closed pile says which RANK is wild this round; it
@@ -1950,7 +1951,7 @@ function Seat({
         {turn && (
           <Animated.View style={[{
             position: 'absolute', inset: 0, borderRadius: av / 2,
-            borderWidth: 3, borderColor: '#f3c245', borderTopColor: '#ffdd72', borderBottomColor: '#a9791b',
+            borderWidth: 3, borderColor: C.gold, borderTopColor: C.gold2, borderBottomColor: C.goldDeep,
           }, a]} />
         )}
         {talking && (
@@ -1958,7 +1959,7 @@ function Seat({
         )}
         <View style={{
           flex: 1, borderRadius: av / 2 - 3, alignItems: 'center', justifyContent: 'center',
-          backgroundColor: bot ? '#6f9bff' : '#f3c245',
+          backgroundColor: bot ? '#6f9bff' : C.gold,
         }}>
           <Text style={{ color: '#2a1c00', fontWeight: '800', fontSize: Math.round(av * 0.36) }}>{bot ? '🤖' : initials}</Text>
         </View>
@@ -1973,12 +1974,3 @@ function Seat({
   );
 }
 
-function Center({ children }: { children: React.ReactNode }) {
-  return (
-    <TableBackground>
-      <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', padding: S[5], gap: S[3] }}>
-        {children}
-      </View>
-    </TableBackground>
-  );
-}

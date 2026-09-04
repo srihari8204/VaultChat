@@ -9,19 +9,19 @@
  * a pop as each mark lands, and the winning triple pulsing gold.
  */
 
-import React, { useEffect, useRef } from 'react';
-import { Pressable, ScrollView, Text, View, useWindowDimensions } from 'react-native';
+import { useEffect, useRef } from 'react';
+import { Pressable, ScrollView, Text, View } from 'react-native';
 import Animated, {
   useSharedValue, useAnimatedStyle, withTiming, withRepeat, withSpring,
   Easing, cancelAnimation,
 } from 'react-native-reanimated';
 import * as Haptics from 'expo-haptics';
 import { useGameSocket, isMyTurn, type AutoStart } from '../../lib/games/useGameSocket';
-import { TableBackground, Panel, Btn, Banner, PlayerRow, Reconnecting, RematchBtn, TurnClock, useType, useBoardSize } from './ui';
+import { TableBackground, Panel, Btn, Banner, PlayerRow, Reconnecting, RematchBtn, TurnClock, useType, useBoardBox } from './ui';
 import { useRematch } from '../../lib/games/useRematch';
 import { RulesSheet, useFirstTimeRules } from './rules';
 import { useCountdown } from '../../lib/games/useCountdown';
-import { C, S, R, D3, E, mix, goldLine, MOTION } from '../../lib/games/theme';
+import { C, S, R, D3, mix, goldLine, alpha } from '../../lib/games/theme';
 import { playSfx, preloadSfx } from '../../lib/games/sfx';
 import { Toasts, Confetti, VoiceBar } from './feedback';
 import { useTableVoice } from '../../lib/games/useTableVoice';
@@ -29,13 +29,11 @@ import { openInvite, shareResult } from '../../lib/games/invite';
 
 const TEAL = '#4be0c1';
 const PINK = '#ff6fb5';
-const WIN_GOLD = '#ffd479';
 const MARK = ['✕', '◯'];
 
 export default function TicTacToe({ roomId, auto, autoBot }: { roomId: string } & AutoStart) {
   const { phase, error, state, events, send, subscribe, retry } = useGameSocket('tictactoe', roomId, { auto, autoBot });
   const t = useType();
-  const { width } = useWindowDimensions();
   const voice = useTableVoice('tictactoe', roomId, { you: state.you, send, subscribe });
 
   const G = state.game;
@@ -58,7 +56,7 @@ export default function TicTacToe({ roomId, auto, autoBot }: { roomId: string } 
   // integer cells always fit inside the frame: flex-wrap with a fractional
   // width drops the third cell onto its own row, which is what put the grid
   // out of alignment.
-  const size = useBoardSize(330);
+  const { size, onLayout: onBoardBox } = useBoardBox(330);
   const gap = 10;
   const pad = 10;
   const cell = Math.floor((size - pad * 2 - gap * 2) / 3);
@@ -173,7 +171,7 @@ export default function TicTacToe({ roomId, auto, autoBot }: { roomId: string } 
 
   return (
     <TableBackground>
-      <ScrollView contentContainerStyle={{ padding: S[4], gap: S[4], alignItems: 'center', paddingBottom: S[6] }}>
+      <ScrollView onLayout={onBoardBox} contentContainerStyle={{ padding: S[4], gap: S[4], alignItems: 'center', paddingBottom: S[6] }}>
 
         {reconnecting && <Reconnecting error={error} onRetry={retry} />}
 
@@ -186,7 +184,10 @@ export default function TicTacToe({ roomId, auto, autoBot }: { roomId: string } 
 
         <View style={{
           width: inner, height: inner, padding: pad, borderRadius: 24, gap,
-          backgroundColor: 'rgba(6,10,24,0.5)',
+          // Was a hand-mixed navy (rgba(6,10,24)) - a blue-black plate on the
+          // maroon room. alpha(C.bg2, .5) is the same recessed-well darkness, in
+          // the room's own hue.
+          backgroundColor: alpha(C.bg2, 0.5),
           borderWidth: 1, borderColor: goldLine[18],
           boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.05), 0 30px 70px rgba(0,0,0,0.5)',
         }}>
@@ -288,10 +289,10 @@ function Cell({
   return (
     <Animated.View style={[{
       width: size, height: size, borderRadius: R[3],
-      borderWidth: 1, borderColor: won ? WIN_GOLD : goldLine[18],
+      borderWidth: 1, borderColor: won ? C.gold2 : goldLine[18],
       backgroundColor: won ? 'rgba(255,212,121,0.14)' : 'rgba(255,255,255,0.07)',
       alignItems: 'center', justifyContent: 'center',
-      shadowColor: WIN_GOLD, shadowRadius: 26, shadowOffset: { width: 0, height: 0 },
+      shadowColor: C.gold2, shadowRadius: 26, shadowOffset: { width: 0, height: 0 },
     }, aCell]}>
       <Pressable
         onPress={onPress}

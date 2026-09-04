@@ -14,7 +14,7 @@
 // itself. The games server keeps no results we can read.
 
 import React, { useCallback, useEffect, useState } from 'react';
-import { ActivityIndicator, Pressable, ScrollView, Text, View } from 'react-native';
+import { ActivityIndicator, Pressable, Text, View } from 'react-native';
 import { Sheet } from './feedback';
 import { Btn, useType } from './ui';
 import { C, S, R, mix, goldLine } from '../../lib/games/theme';
@@ -101,25 +101,26 @@ export default function HistorySheet({ visible, onClose }: { visible: boolean; o
           No games yet. Finish one and it appears here.
         </Text>
       ) : (
-        <ScrollView style={{ maxHeight: 420 }} contentContainerStyle={{ gap: S[2] }}>
+        // Sheet already scrolls its children in one ScrollView and already
+        // supplies its own Close button below them — nesting a second
+        // ScrollView here fought that one for the drag gesture, and a second
+        // "Close" sat right under the real one.
+        <View style={{ gap: S[2] }}>
           {rows.map(r => <Row key={`${r.game}:${r.room}:${r.at}`} rec={r} />)}
-        </ScrollView>
+        </View>
       )}
 
       <Text style={{ color: C.muted, fontSize: 11.5, lineHeight: 17 }}>
         {`Kept on this phone — the games server does not store results we can read. Chess keeps every move of its last ${MOVES_KEPT} games; tap one to see them.`}
       </Text>
-      <View style={{ flexDirection: 'row', gap: S[2] }}>
-        {rows && rows.length > 0 && (
-          <Btn
-            label="Clear"
-            kind="danger"
-            compact
-            onPress={() => { void clearHistory().then(load); }}
-          />
-        )}
-        <Btn label="Close" style={{ flex: 1 }} onPress={onClose} />
-      </View>
+      {rows && rows.length > 0 && (
+        <Btn
+          label="Clear"
+          kind="danger"
+          compact
+          onPress={() => { void clearHistory().then(load); }}
+        />
+      )}
     </Sheet>
   );
 }

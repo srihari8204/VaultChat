@@ -15,24 +15,23 @@
  * classic cream/brown squares, and chess.com-style highlights.
  */
 
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { Pressable, ScrollView, Text, View, useWindowDimensions, type ViewStyle } from 'react-native';
+import { Pressable, ScrollView, Text, View, type ViewStyle } from 'react-native';
 import Animated, {
-  useSharedValue, useAnimatedStyle, withTiming, withRepeat, withSequence,
-  Easing, cancelAnimation, type SharedValue,
+  useSharedValue, useAnimatedStyle, withTiming, withRepeat,
+  Easing, cancelAnimation,
 } from 'react-native-reanimated';
 import * as Haptics from 'expo-haptics';
 import { useGameSocket, type GameState, type AutoStart } from '../../lib/games/useGameSocket';
-import { TableBackground, Btn, Panel, Banner, PlayerRow, Chip, Reconnecting, RematchBtn, useType, useBoardSize } from './ui';
+import { TableBackground, Btn, Panel, Banner, PlayerRow, Reconnecting, RematchBtn, useType, useBoardBox } from './ui';
 import { useRematch } from '../../lib/games/useRematch';
 import { RulesSheet, useFirstTimeRules } from './rules';
-import { C, S, R, D3, E, mix, goldLine } from '../../lib/games/theme';
-import { playSfx, preloadSfx } from '../../lib/games/sfx';
+import { C, S, R, goldLine } from '../../lib/games/theme';
+import { playSfx, preloadSfx, soundEnabled, setSoundEnabled } from '../../lib/games/sfx';
 import { Toasts, Confetti, Sheet, SettingRow, VoiceBar, VoiceSheet } from './feedback';
 import { useTableVoice, type TableVoice } from '../../lib/games/useTableVoice';
 import { openInvite, shareResult } from '../../lib/games/invite';
-import { soundEnabled, setSoundEnabled } from '../../lib/games/sfx';
 
 type Piece = { t: 'p' | 'n' | 'b' | 'r' | 'q' | 'k'; c: 'w' | 'b' } | null;
 type Move = { from: number; to: number; promo?: string };
@@ -126,7 +125,6 @@ export default function Chess({ roomId, auto, autoBot }: { roomId: string } & Au
   const [botLevel, setBotLevel] = useState(2);
   const voice = useTableVoice('chess', roomId, { you: state.you, send, subscribe });
   const t = useType();
-  const { width } = useWindowDimensions();
 
   const G = state.game;
   // Chess seats by COLOUR, not seat index, and both `color` and `legal` ride at
@@ -154,7 +152,7 @@ export default function Chess({ roomId, auto, autoBot }: { roomId: string } & Au
 
   const th = THEMES[theme];
   // Seats above and below, the status line and two button rows.
-  const size = useBoardSize(360);
+  const { size, onLayout: onBoardBox } = useBoardBox(360);
   const cell = size / 8;
 
   // Black plays from the far side, so the board is flipped for them.
@@ -209,8 +207,8 @@ export default function Chess({ roomId, auto, autoBot }: { roomId: string } & Au
     if (!G?.result) { ended.current = false; return; }
     if (ended.current) return;
     ended.current = true;
-    playSfx(G.result === 'draw' || !G.winner ? 'draw' : G.winner === state.you ? 'win' : 'lose');
-  }, [G?.result, G?.winner, state.you]);
+    playSfx(G.result === 'draw' || !G.winner ? 'draw' : G.winner === myColor ? 'win' : 'lose');
+  }, [G?.result, G?.winner, myColor]);
 
   const onSquare = (i: number) => {
     if (!mine || state.spectator) return;
@@ -256,10 +254,12 @@ export default function Chess({ roomId, auto, autoBot }: { roomId: string } & Au
   // line, so a player looking for "how do I talk to them" has to scroll past
   // the whole game to find out that they can. The label carries the live state
   // so the row itself says whether anyone is in the channel.
+  // Count only - the microphone is now an icon on the button, not a character
+  // glued to the front of its label.
   const voiceLabel =
     voice.phase === 'live' || voice.phase === 'waiting'
-      ? `🎤 ${voice.participants.length}`
-      : '🎤';
+      ? `${voice.participants.length}`
+      : '';
   const nameOfPlayer = (id: string) =>
     (state.lobby?.members ?? []).find(mem => mem.vaultId === id)?.name ?? id;
 
@@ -275,7 +275,7 @@ export default function Chess({ roomId, auto, autoBot }: { roomId: string } & Au
     // world from the rest, and its ground was the only colour in the games UI
     // outside the token set. Same shared surface as its siblings now.
     <TableBackground>
-      <ScrollView contentContainerStyle={{ padding: S[4], gap: S[3], alignItems: 'center', paddingBottom: S[6] }}>
+      <ScrollView onLayout={onBoardBox} contentContainerStyle={{ padding: S[4], gap: S[3], alignItems: 'center', paddingBottom: S[6] }}>
 
         {reconnecting && <Reconnecting error={error} onRetry={retry} />}
 
@@ -350,7 +350,7 @@ export default function Chess({ roomId, auto, autoBot }: { roomId: string } & Au
           width={size}
         />
 
-        <StatusLine game={G} mine={mine} spectator={state.spectator} width={size} />
+        <StatusLine game={G} myColor={myColor} mine={mine} spectator={state.spectator} width={size} />
 
         {drawOffer && !G.result && (
           <View style={{
@@ -369,15 +369,15 @@ export default function Chess({ roomId, auto, autoBot }: { roomId: string } & Au
         {G.result ? (
           <View style={{ flexDirection: 'row', gap: S[2], width: size }}>
             <RematchBtn rm={rematch} />
-            <Btn label="Share" icon="share" onPress={() => { void shareResult('chess', G.winner === state.you); }} />
-            <Btn label={voiceLabel} compact onPress={() => setVoiceOpen(true)} accessibilityLabel="Table voice" />
+            <Btn label="Share" icon="share" onPress={() => { void shareResult('chess', G.winner === myColor); }} />
+            <Btn label={voiceLabel} icon="mic" compact onPress={() => setVoiceOpen(true)} accessibilityLabel="Table voice" />
           </View>
         ) : (
           <View style={{ flexDirection: 'row', gap: S[2], width: size }}>
             <Btn label="Resign" kind="danger" compact style={{ flex: 1 }} onPress={() => send({ t: 'resign' })} />
             <Btn label="Offer draw" compact style={{ flex: 1 }} onPress={() => send({ t: 'draw-offer' })} />
-            <Btn label={voiceLabel} compact onPress={() => setVoiceOpen(true)} accessibilityLabel="Table voice" />
-            <Btn label="⚙" compact onPress={() => setShowSettings(true)} accessibilityLabel="Board settings" />
+            <Btn label={voiceLabel} icon="mic" compact onPress={() => setVoiceOpen(true)} accessibilityLabel="Table voice" />
+            <Btn label="" icon="settings" compact onPress={() => setShowSettings(true)} accessibilityLabel="Board settings" />
           </View>
         )}
 
@@ -423,7 +423,7 @@ export default function Chess({ roomId, auto, autoBot }: { roomId: string } & Au
       </ScrollView>
 
       <Toasts events={events} />
-      <Confetti show={!!G.result && G.winner === state.you} />
+      <Confetti show={!!G.result && G.winner === myColor} />
 
       <Sheet visible={showSettings} title="Board" onClose={() => setShowSettings(false)}>
         <SettingRow
@@ -629,11 +629,11 @@ function Seat({
       borderColor: active ? 'rgba(245,196,81,.55)' : 'rgba(255,255,255,.09)',
       backgroundColor: 'rgba(255,255,255,.045)',
     }}>
-      <Text style={{ fontSize: t.lg, color: '#e9eefb' }}>{glyph}</Text>
+      <Text style={{ fontSize: t.lg, color: C.text }}>{glyph}</Text>
       <View style={{ flex: 1 }}>
-        <Text numberOfLines={1} style={{ color: '#e9eefb', fontSize: t.md, fontWeight: '800' }}>{name}</Text>
+        <Text numberOfLines={1} style={{ color: C.text, fontSize: t.md, fontWeight: '800' }}>{name}</Text>
         {taken.length > 0 || edge !== 0 ? (
-          <Text numberOfLines={1} style={{ color: '#8b95ad', fontSize: 12 }}>
+          <Text numberOfLines={1} style={{ color: C.muted, fontSize: 12 }}>
             {taken.join('')}{edge > 0 ? `  +${edge}` : ''}
           </Text>
         ) : null}
@@ -643,7 +643,7 @@ function Seat({
           paddingHorizontal: S[2], paddingVertical: S[1], borderRadius: R[1],
           backgroundColor: active ? 'rgba(245,196,81,.14)' : 'rgba(255,255,255,.07)',
         }}>
-          <Text style={{ color: active ? '#ffd97a' : '#8b95ad', fontSize: t.md, fontWeight: '800', fontFamily: 'monospace' }}>
+          <Text style={{ color: active ? C.gold2 : C.muted, fontSize: t.md, fontWeight: '800', fontFamily: 'monospace' }}>
             {clock}
           </Text>
         </View>
@@ -652,10 +652,14 @@ function Seat({
   );
 }
 
-function StatusLine({ game, mine, spectator, width }: { game: any; mine: boolean; spectator: boolean; width: number }) {
+function StatusLine({ game, myColor, mine, spectator, width }: { game: any; myColor: 'w' | 'b' | null; mine: boolean; spectator: boolean; width: number }) {
   if (game.result) {
-    const won = game.winner && game.winner === game.you;
-    return <View style={{ width }}><Banner text={resultText(game)} tone={won ? 'win' : game.winner ? 'lose' : 'info'} /></View>;
+    // Chess reports the winning COLOUR ('w'/'b'), never a player id - the same
+    // convention lib/games/history.ts already reads (see outcomeOf). `game.you`
+    // does not exist; `you` is a sibling of `game` on the socket frame, which is
+    // exactly why comparing it here always fell through to the losing branch.
+    const won = game.winner && game.winner === myColor;
+    return <View style={{ width }}><Banner text={resultText(game, myColor)} tone={won ? 'win' : game.winner ? 'lose' : 'info'} /></View>;
   }
   const text = spectator ? 'Watching' : mine ? (game.check ? 'Your move — you are in check' : 'Your move') : 'Waiting for your opponent';
   return <View style={{ width }}><Banner text={text} tone={mine ? 'turn' : 'info'} /></View>;
@@ -671,6 +675,12 @@ function Swatches({ value, onChange, width }: { value: ThemeName; onChange: (n: 
           accessibilityRole="button"
           accessibilityLabel={`${n} board`}
           accessibilityState={{ selected: value === n }}
+          // 34dp is 10dp short of the 44dp floor this file uses elsewhere
+          // (Ludo.tsx's tokens). The row's own gap is 8dp, so a symmetric
+          // hitSlop of 5 would overlap the neighbour by 2dp either side —
+          // asymmetric instead: 5 top/bottom reaches 44 vertically, 4
+          // left/right reaches 42 horizontally with the gap untouched.
+          hitSlop={{ top: 5, bottom: 5, left: 4, right: 4 }}
           style={{
             width: 34, height: 34, borderRadius: R[1], overflow: 'hidden', flexDirection: 'row',
             borderWidth: 2, borderColor: value === n ? '#3b82f6' : 'rgba(255,255,255,.16)',
@@ -690,19 +700,28 @@ function PromoPicker({
   const seen = new Set<string>();
   const choices = opts.filter(o => o.promo && !seen.has(o.promo) && seen.add(o.promo));
   return (
+    // `accessible={false}`: the default would make this backdrop swallow its
+    // whole subtree into one unlabelled node, same defect as Sheet — the four
+    // "Promote to Q/R/B/N" buttons below would announce as nothing. Tapping
+    // the backdrop to cancel is a sighted-only convenience either way, so an
+    // explicit Cancel button carries that action for accessibility instead.
     <Pressable
       onPress={onCancel}
+      accessible={false}
       style={{ position: 'absolute', inset: 0, backgroundColor: 'rgba(3,6,14,.72)', alignItems: 'center', justifyContent: 'center' }}
     >
       <View style={{
-        flexDirection: 'row', gap: S[3], padding: S[4], borderRadius: R[3],
-        backgroundColor: '#0b1020', borderWidth: 1, borderColor: 'rgba(255,255,255,.16)',
+        flexDirection: 'row', alignItems: 'center', gap: S[3], padding: S[4], borderRadius: R[3],
+        backgroundColor: C.panel, borderWidth: 1, borderColor: goldLine[28],
       }}>
         {choices.map(m => (
           <Pressable key={m.promo} onPress={() => onPick(m)} accessibilityRole="button" accessibilityLabel={`Promote to ${m.promo}`}>
             <OutlinedGlyph t={m.promo as string} c={color} size={46} stroke={PIECE_STROKE} />
           </Pressable>
         ))}
+        <Pressable onPress={onCancel} accessibilityRole="button" accessibilityLabel="Cancel">
+          <Text style={{ color: C.muted, fontSize: 13, fontWeight: '700' }}>Cancel</Text>
+        </Pressable>
       </View>
     </Pressable>
   );
@@ -720,7 +739,7 @@ function Lobby({
   // Offered once, in the lobby — before a move is ever required.
   const rules = useFirstTimeRules('chess');
   return (
-    <View style={{ flex: 1, backgroundColor: '#121212' }}>
+    <TableBackground>
       <ScrollView contentContainerStyle={{ padding: S[4], gap: S[3] }}>
         <Text style={{ color: '#e9eefb', fontSize: t.xl, fontWeight: '800' }}>Chess</Text>
         <Text style={{ color: '#8b95ad', fontSize: t.sm, lineHeight: 19 }}>
@@ -740,7 +759,7 @@ function Lobby({
           )}
         </Panel>
         <View style={{ flexDirection: 'row', gap: S[2], alignItems: 'center' }}>
-          <Text style={{ flex: 1, color: '#8b95ad', fontSize: t.sm }}>Bot strength</Text>
+          <Text style={{ flex: 1, color: C.muted, fontSize: t.sm }}>Bot strength</Text>
           {[1, 2, 3].map(n => (
             <Btn
               key={n}
@@ -752,7 +771,7 @@ function Lobby({
           ))}
         </View>
         {!!code && (
-          <Text style={{ color: '#8b95ad', fontSize: t.sm }} selectable>
+          <Text style={{ color: C.muted, fontSize: t.sm }} selectable>
             Room code: <Text style={{ color: C.gold, fontWeight: '800' }}>{code}</Text>
           </Text>
         )}
@@ -780,21 +799,21 @@ function Lobby({
       </ScrollView>
       <Toasts events={events} />
       <RulesSheet game="chess" visible={rules.visible} onClose={rules.close} />
-    </View>
+    </TableBackground>
   );
 }
 
 function Connecting({ phase, error, onRetry }: { phase: string; error: string | null; onRetry: () => void }) {
   const t = useType();
   return (
-    <View style={{ flex: 1, backgroundColor: '#121212', alignItems: 'center', justifyContent: 'center', padding: S[5], gap: S[3] }}>
+    <TableBackground style={{ alignItems: 'center', justifyContent: 'center', padding: S[5], gap: S[3] }}>
       <Text style={{ fontSize: 46 }}>♚</Text>
-      <Text style={{ color: '#e9eefb', fontSize: t.lg, fontWeight: '800' }}>
+      <Text style={{ color: C.text, fontSize: t.lg, fontWeight: '800' }}>
         {error ? 'Could not reach the table' : 'Connecting…'}
       </Text>
-      {error ? <Text style={{ color: '#8b95ad', fontSize: t.sm, textAlign: 'center' }}>{error}</Text> : null}
+      {error ? <Text style={{ color: C.muted, fontSize: t.sm, textAlign: 'center' }}>{error}</Text> : null}
       {error ? <Btn label="Try again" kind="gold" onPress={onRetry} /> : null}
-    </View>
+    </TableBackground>
   );
 }
 
@@ -828,9 +847,9 @@ function opponentName(state: GameState): string {
   return them?.name ?? 'Opponent';
 }
 
-function resultText(game: any): string {
+function resultText(game: any, myColor: 'w' | 'b' | null): string {
   if (game.result === 'draw') return 'Draw';
-  if (game.winner) return `${game.winner === game.you ? 'You win' : 'You lose'}`;
+  if (game.winner) return `${game.winner === myColor ? 'You win' : 'You lose'}`;
   return String(game.result ?? 'Game over');
 }
 

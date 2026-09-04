@@ -431,5 +431,25 @@ check('the hub does not claim provably fair dice',
   !/provably fair/i.test(HUB),
   'the receipt shows "table seed: not published" — the claim outran the server');
 
+// Chess reports the winner as a COLOUR ('w'/'b'), the same convention
+// lib/games/history.ts reads (see outcomeOf). `game.you` does not exist on the
+// game object — `you` sits beside `game` on the socket frame — so comparing
+// `game.winner === game.you` silently compared a colour to `undefined` and
+// every decisive game fell through to the LOSING branch: wrong banner tone,
+// wrong sfx, no confetti, wrong share text, regardless of who actually won.
+check('chess compares the winner against the colour you play, not game.you',
+  !/game\.winner === game\.you/.test(CHESS) && !/G\.winner === state\.you/.test(CHESS),
+  'the winner is a colour; game.you and state.you are not the same field');
+check('...and the pieces that decide win/lose read myColor',
+  /G\.winner === myColor/.test(CHESS) && /game\.winner === myColor/.test(CHESS),
+  'sfx, share, confetti and the status line all need the same fix or one of them still lies');
+
+// The same "+0 coins" defect the history list already had (lib/games/history.ts
+// detailOf) had a second, separate occurrence in Rummy's own live result table:
+// `d >= 0` put a zero settlement in the winning-green branch with a leading '+'.
+check('the rummy result table does not colour a zero settlement as a win',
+  !/d >= 0 \? C\.good/.test(RUMMY) && !/d >= 0 \? `\+\$\{d\}`/.test(RUMMY),
+  'a zero delta says nothing happened, not that something good happened');
+
 console.log(failures ? `\n  ${failures} FAILED\n` : '\n  all native-games checks passed\n');
 process.exit(failures ? 1 : 0);

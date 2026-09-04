@@ -8,7 +8,7 @@
 import React from 'react';
 import {
   ActivityIndicator, Pressable, StyleSheet, Text, View,
-  useWindowDimensions, type ViewStyle, type StyleProp,
+  useWindowDimensions, type LayoutChangeEvent, type ViewStyle, type StyleProp,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -51,6 +51,17 @@ const ICONS = {
   copy: 'copy-outline',
   mic: 'mic-outline',
   retry: 'refresh-outline',
+  // The icon-only controls. These were typographic glyphs - a gear, a bolt,
+  // and the box-drawing pair - which is a fourth family again, and the two
+  // box glyphs are the kind of character a font may simply not have.
+  settings: 'settings-outline',
+  sort: 'flash-outline',
+  group: 'layers-outline',
+  ungroup: 'remove-circle-outline',
+  trophy: 'trophy-outline',
+  history: 'time-outline',
+  declare: 'checkmark-circle-outline',
+  drop: 'exit-outline',
 } as const;
 
 export type GameIconName = keyof typeof ICONS;
@@ -72,13 +83,54 @@ export type GameIconName = keyof typeof ICONS;
  * be checked without a renderer — the rummy hand shipped a fit bug that every
  * model-only test agreed was fine.
  */
-export function useBoardSize(chrome = 300): number {
-  const { width, height } = useWindowDimensions();
-  const insets = useSafeAreaInsets();
-  return React.useMemo(
-    () => boardFit({ width, height }, insets, chrome).size,
-    [width, height, insets.top, insets.bottom, insets.left, insets.right, chrome],
+const NO_INSETS = { top: 0, bottom: 0, left: 0, right: 0 };
+
+/**
+ * The same board edge, but measured off the CONTAINER the board actually sits
+ * in rather than off the window.
+ *
+ * The window is not the box. A navigator header, a cutout and a gesture bar all
+ * sit between the two, and the difference is not a constant — which is how the
+ * rummy table ended up 76px off centre: geometry derived from the window, laid
+ * out inside a container that had already had the inset taken out of it.
+ *
+ * So when a real measurement exists it is used with NO INSETS SUBTRACTED. That
+ * is not an oversight: a measured layout box is already inside the safe area,
+ * and taking the inset off a second time is precisely the bug. The window path
+ * below is only the first frame, before onLayout has fired.
+ *
+ * `chrome` stays a declared per-game constant rather than a measured one. The
+ * status line, voice bar and action row are all laid out `width: size`, so
+ * their heights depend on the board — measuring them to compute the board
+ * would close a feedback loop, and a layout that oscillates is worse than one
+ * that estimates. The ScrollView absorbs any error in the estimate.
+ */
+export function useBoardBox(chrome = 300): { size: number; onLayout: (e: LayoutChangeEvent) => void } {
+  const win = useWindowDimensions();
+  // Destructured to four numbers on purpose: the inset OBJECT gets a new
+  // identity on every render, so depending on it re-runs the memo constantly,
+  // and depending on its fields while naming the object is what the linter
+  // rightly complains about.
+  const { top, bottom, left, right } = useSafeAreaInsets();
+  const [box, setBox] = React.useState({ w: 0, h: 0 });
+
+  // Identical measurements must return the SAME object, or every layout pass
+  // sets state and the pass repeats forever.
+  const onLayout = React.useCallback((e: LayoutChangeEvent) => {
+    const { width, height } = e.nativeEvent.layout;
+    setBox(prev => (Math.abs(prev.w - width) < 0.5 && Math.abs(prev.h - height) < 0.5)
+      ? prev
+      : { w: width, h: height });
+  }, []);
+
+  const size = React.useMemo(
+    () => (box.w > 0 && box.h > 0
+      ? boardFit({ width: box.w, height: box.h }, NO_INSETS, chrome).size
+      : boardFit({ width: win.width, height: win.height }, { top, bottom, left, right }, chrome).size),
+    [box.w, box.h, win.width, win.height, top, bottom, left, right, chrome],
   );
+
+  return { size, onLayout };
 }
 
 /** Landscape when the screen is meaningfully wider than it is tall. */
@@ -209,7 +261,9 @@ export function Btn({
       ) : null}
       {busy
         ? <ActivityIndicator size="small" color={fg} />
-        : <Text numberOfLines={1} style={{ color: fg, fontSize: compact ? t.sm : t.md, fontWeight: '800', letterSpacing: 0.2 }}>{label}</Text>}
+        : label
+          ? <Text numberOfLines={1} style={{ color: fg, fontSize: compact ? t.sm : t.md, fontWeight: '800', letterSpacing: 0.2 }}>{label}</Text>
+          : null}
     </>
   );
 
@@ -220,7 +274,12 @@ export function Btn({
     // 44dp is the floor for a touch target, and padding alone did not reach it:
     // a compact button measured 37dp tall on the Redmi. Padding sizes a button
     // to its TEXT, which is the wrong thing to size a finger against.
+    //
+    // minWidth matters for the same reason now that a button may carry an icon
+    // and NO label: 17dp of glyph plus 12dp either side is 41dp, and a control
+    // narrow enough to miss is not saved by being tall enough to hit.
     minHeight: 44,
+    minWidth: 44,
     borderRadius: R[2],
     overflow: 'hidden',
   };

@@ -8,12 +8,13 @@
 
 import React, { useEffect, useState } from 'react';
 import { Modal, Pressable, ScrollView, Text, View, useWindowDimensions } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Animated, {
   useSharedValue, useAnimatedStyle, withTiming, withSpring, withDelay,
   Easing, runOnJS, cancelAnimation,
 } from 'react-native-reanimated';
 import type { ViewStyle } from 'react-native';
-import { C, S, R, E, D3, mix, goldLine } from '../../lib/games/theme';
+import { C, S, R, E, mix, goldLine } from '../../lib/games/theme';
 import { Btn, useType } from './ui';
 import type { TableVoice } from '../../lib/games/useTableVoice';
 
@@ -29,6 +30,10 @@ import type { TableVoice } from '../../lib/games/useTableVoice';
  */
 export function Toasts({ events }: { events: string[] }) {
   const t = useType();
+  // A direct child of TableBackground on three of the four boards - nothing
+  // upstream accounts for the safe area, so a fixed 32dp sat under the home
+  // indicator/gesture bar on any device with one.
+  const insets = useSafeAreaInsets();
   const [msg, setMsg] = React.useState<string | null>(null);
   const shown = React.useRef(0);
   const y = useSharedValue(20);
@@ -59,7 +64,7 @@ export function Toasts({ events }: { events: string[] }) {
       pointerEvents="none"
       accessibilityLiveRegion="polite"
       style={[{
-        position: 'absolute', left: S[4], right: S[4], bottom: S[6],
+        position: 'absolute', left: S[4], right: S[4], bottom: S[6] + insets.bottom,
         paddingVertical: S[3], paddingHorizontal: S[4],
         borderRadius: R.pill, alignItems: 'center',
         backgroundColor: 'rgba(20,6,6,0.94)',
@@ -151,15 +156,32 @@ export function Sheet({
   visible, title, onClose, children,
 }: { visible: boolean; title: string; onClose: () => void; children: React.ReactNode }) {
   const t = useType();
+  // A fixed 420dp cap ignored the actual window: rummy locks landscape while
+  // playing, and Sheet's own scroller sat above the ENTIRE window on the
+  // Redmi (393dp tall in landscape) with the drag handle and Close button
+  // pushed off-screen below it. Bounded to the window instead, still capped
+  // at 420 so a tall phone keeps its current, unshrunk sheet.
+  const { height: winH } = useWindowDimensions();
+  const scrollCap = Math.min(420, Math.round(winH * 0.6));
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose} statusBarTranslucent>
+      {/* Both wrappers below exist purely to catch taps (dismiss on the
+          backdrop, swallow it on the sheet body) — neither is content. A
+          Pressable is `accessible` by default, and an accessible view
+          collapses its ENTIRE subtree into one node: with both left at the
+          default, the whole sheet — title, every row, the real Close button —
+          announced as a single button labelled "Close", so nothing inside was
+          reachable. `accessible={false}` on both stops that collapse.
+          Dismissal doesn't need the backdrop to be a11y-reachable: the visible
+          Close button and `Modal onRequestClose` (hardware back / swipe-down)
+          already cover it. */}
       <Pressable
         onPress={onClose}
-        accessibilityLabel="Close"
+        accessible={false}
         style={{ flex: 1, backgroundColor: 'rgba(8,2,2,0.72)', justifyContent: 'flex-end' }}
       >
         {/* Stop taps inside the sheet from dismissing it. */}
-        <Pressable onPress={() => {}} style={{
+        <Pressable onPress={() => {}} accessible={false} style={{
           backgroundColor: C.panel,
           borderTopLeftRadius: R[4], borderTopRightRadius: R[4],
           borderWidth: 1, borderColor: goldLine[28],
@@ -168,7 +190,7 @@ export function Sheet({
         }}>
           <View style={{ alignSelf: 'center', width: 40, height: 4, borderRadius: 2, backgroundColor: goldLine[38], marginBottom: S[2] }} />
           <Text style={{ color: C.text, fontSize: t.xl, fontWeight: '800' }}>{title}</Text>
-          <ScrollView style={{ maxHeight: 420 }} contentContainerStyle={{ gap: S[2] }}>
+          <ScrollView style={{ maxHeight: scrollCap }} contentContainerStyle={{ gap: S[2] }}>
             {children}
           </ScrollView>
           <Btn label="Close" onPress={onClose} />

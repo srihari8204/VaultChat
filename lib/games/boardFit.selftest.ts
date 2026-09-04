@@ -97,16 +97,26 @@ console.log('\nBoard fit\n');
 {
   const ROOT = join(__dirname, '..', '..');
   const ui = readFileSync(join(ROOT, 'components/games/ui.tsx'), 'utf8');
-  A(/boardFit\(/.test(ui), '6. useBoardSize is backed by boardFit');
+  A(/boardFit\(/.test(ui), '6. useBoardBox is backed by boardFit');
   A(!/Math\.min\(byWidth,\s*byHeight,\s*max\)/.test(ui),
     '6a. ...and the old capped expression is gone');
+
+  // A measured layout box is ALREADY inside the safe area. Taking the inset off
+  // it a second time is exactly what put the rummy table 76px off centre, so
+  // the measured branch is pinned to NO_INSETS here rather than trusted.
+  A(/boardFit\(\{ width: box\.w, height: box\.h \}, NO_INSETS/.test(ui),
+    '6d. the measured branch applies the safe-area inset exactly once');
+  A(/Math\.abs\(prev\.w - width\) < 0\.5/.test(ui),
+    '6e. an unchanged measurement returns the SAME object, so onLayout cannot loop');
 
   for (const f of ['Chess.tsx', 'Ludo.tsx', 'TicTacToe.tsx']) {
     const src = readFileSync(join(ROOT, 'components/games', f), 'utf8');
     const code = src.split('\n').filter(l => !/^\s*(\/\/|\*|\/\*)/.test(l)).join('\n');
-    A(/useBoardSize\(/.test(code), `6b. ${f} sizes its board through the shared hook`);
-    A(!/useBoardSize\(\s*\d+\s*,\s*\d+\s*\)/.test(code),
+    A(/useBoardBox\(/.test(code), `6b. ${f} sizes its board through the shared hook`);
+    A(!/useBoardBox\(\s*\d+\s*,\s*\d+\s*\)/.test(code),
       `6c. ${f} no longer passes a hard maximum`);
+    A(/onLayout=\{onBoardBox\}/.test(code),
+      `6f. ${f} measures the container it lays the board out in, not the window`);
   }
 }
 

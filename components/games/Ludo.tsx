@@ -23,7 +23,7 @@
  */
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Pressable, ScrollView, Text, View, useWindowDimensions, type ViewStyle } from 'react-native';
+import { Pressable, ScrollView, Text, View, type ViewStyle } from 'react-native';
 import Svg, {
   Defs, RadialGradient, LinearGradient as SvgLinear, Stop, Rect, G as SvgG, Polygon,
   Text as SvgText, Circle,
@@ -34,7 +34,7 @@ import Animated, {
 } from 'react-native-reanimated';
 import * as Haptics from 'expo-haptics';
 import { useGameSocket, type AutoStart } from '../../lib/games/useGameSocket';
-import { TableBackground, Panel, Btn, Banner, PlayerRow, Reconnecting, RematchBtn, TurnClock, useType, useBoardSize } from './ui';
+import { TableBackground, Panel, Btn, Banner, PlayerRow, Reconnecting, RematchBtn, TurnClock, useType, useBoardBox } from './ui';
 import { useRematch } from '../../lib/games/useRematch';
 import { RulesSheet, useFirstTimeRules } from './rules';
 import { rollSeed, receiptFrom, pushReceipt, type RollReceipt } from '../../lib/games/fairness';
@@ -126,7 +126,6 @@ const pid = (p: LPlayer) => p.id ?? p.vaultId ?? '';
 export default function Ludo({ roomId = 'ludo-main', auto, autoBot }: { roomId?: string } & AutoStart) {
   const { phase, error, state, events, send, subscribe, retry } = useGameSocket('ludo', roomId, { auto, autoBot });
   const t = useType();
-  const { width } = useWindowDimensions();
 
   const rematch = useRematch('ludo', roomId, state, send);
   const rules = useFirstTimeRules('ludo');
@@ -168,7 +167,7 @@ export default function Ludo({ roomId = 'ludo-main', auto, autoBot }: { roomId?:
   useEffect(() => () => { if (tumbleTimer.current) clearTimeout(tumbleTimer.current); }, []);
 
   // Up to four seat cards above, plus the die row and two button rows.
-  const size = useBoardSize(400);
+  const { size, onLayout: onBoardBox } = useBoardBox(400);
   const cell = size / 15;
 
   useEffect(() => { void preloadSfx(['roll', 'move', 'capture', 'home', 'six', 'win', 'lose']); }, []);
@@ -247,24 +246,24 @@ export default function Ludo({ roomId = 'ludo-main', auto, autoBot }: { roomId?:
   // a table we never reached.
   if (error && phase !== 'connected' && !state.game) {
     return (
-      <Center>
+      <TableBackground style={{ alignItems: 'center', justifyContent: 'center', padding: S[5], gap: S[3] }}>
         <Text style={{ fontSize: 46 }}>🎲</Text>
         <Text style={{ color: C.text, fontSize: t.lg, fontWeight: '800' }}>Can’t reach the table</Text>
         <Text style={{ color: C.muted, fontSize: t.sm, textAlign: 'center' }}>{error}</Text>
         <Btn label="Try again" kind="gold" onPress={retry} />
-      </Center>
+      </TableBackground>
     );
   }
 
   // Only take the screen back BEFORE there is a board.
   if ((phase !== 'connected' && !G) || !L) {
     return (
-      <Center>
+      <TableBackground style={{ alignItems: 'center', justifyContent: 'center', padding: S[5], gap: S[3] }}>
         <Text style={{ fontSize: 46 }}>🎲</Text>
         <Text style={{ color: C.muted, fontSize: t.md }}>
           {phase === 'minting' ? 'Taking your seat…' : 'Joining the table…'}
         </Text>
-      </Center>
+      </TableBackground>
     );
   }
 
@@ -411,7 +410,7 @@ export default function Ludo({ roomId = 'ludo-main', auto, autoBot }: { roomId?:
 
   return (
     <TableBackground>
-      <ScrollView contentContainerStyle={{ padding: S[4], gap: S[3], alignItems: 'center', paddingBottom: S[6] }}>
+      <ScrollView onLayout={onBoardBox} contentContainerStyle={{ padding: S[4], gap: S[3], alignItems: 'center', paddingBottom: S[6] }}>
 
         <View style={{ width: size, gap: S[2] }}>
           {players.map(p => (
@@ -493,7 +492,7 @@ export default function Ludo({ roomId = 'ludo-main', auto, autoBot }: { roomId?:
         <View style={{ width: size, flexDirection: 'row', gap: S[2] }}>
           <Btn label="Emote" icon="emote" compact style={{ flex: 1 }} onPress={() => setShowEmotes(true)} />
           <Btn label="Invite" icon="link" compact style={{ flex: 1 }} onPress={() => { void openInvite('ludo', roomId); }} disabled={!roomId} />
-          <Btn label="⚙" compact onPress={() => setShowSettings(true)} accessibilityLabel="Settings" />
+          <Btn label="" icon="settings" compact onPress={() => setShowSettings(true)} accessibilityLabel="Settings" />
         </View>
 
         {finished && (
@@ -884,13 +883,4 @@ function SeatCard({ player, you, active }: { player: LPlayer; you: boolean; acti
   );
 }
 
-function Center({ children }: { children: React.ReactNode }) {
-  return (
-    <TableBackground>
-      <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', padding: S[5], gap: S[3] }}>
-        {children}
-      </View>
-    </TableBackground>
-  );
-}
 

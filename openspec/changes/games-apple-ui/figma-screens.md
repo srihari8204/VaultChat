@@ -360,19 +360,51 @@ return { createdNodeIds: [s.id] };
 ## Script 4 — Chess  (x = 1380)
 
 The board dominates; legal moves are dots the table sent, not something the
-client worked out.
+client worked out. The hierarchy is player, then game state, then board, then
+what has been taken, then the actions.
+
+There is deliberately **no clock**. The chess table sends no deadline, so a
+timer drawn here would specify a control the server cannot feed - the status
+pill carries turn and check instead.
 
 ```js
 /* shared preamble */
 const seatCmp = await figma.getNodeByIdAsync('5:26');
 const btnCmp  = await figma.getNodeByIdAsync('4:53');
+const pillCmp = await figma.getNodeByIdAsync('4:42');
 const pick = (set, n) => set.children.find(c => c.name === n);
 const s = screenFrame('Chess', 411, 915, 1380);
+s.itemSpacing = 10;
 
 s.appendChild(txt('T', 'Chess', 'Games/Title', 'color/text'));
+
+// A seat and the material it has taken belong together - the readout is
+// meaningless without the player it belongs to.
+const captured = (glyphs, score) => {
+  const strip = figma.createAutoLayout('HORIZONTAL', { name: 'Captured', itemSpacing: 2 });
+  strip.fills = []; strip.counterAxisAlignItems = 'CENTER';
+  const g = figma.createText();
+  g.characters = glyphs || '—';
+  g.fontName = { family: 'Roboto', style: 'Regular' };
+  g.fontSize = 15;
+  g.fills = [paint('color/text-muted')];
+  strip.appendChild(g);
+  if (score) strip.appendChild(txt('Adv', score, 'Games/Caption', 'color/accent'));
+  return strip;
+};
+
 const top = pick(seatCmp, 'State=Idle').createInstance();
 top.setProperties({ 'Name#5:0': 'Testing' });
 s.appendChild(top);
+const topTaken = captured('♟♟♞', '');
+s.appendChild(topTaken); topTaken.layoutSizingHorizontal = 'FILL';
+
+// Game state. Chess has NO clock in this product - the table sends no
+// deadline - so the state line carries turn and check, and drawing a timer
+// here would specify something the server cannot feed.
+const state = pick(pillCmp, 'Tone=Warning').createInstance();
+state.setProperties({ 'Label#4:12': 'Check — your king is attacked' });
+s.appendChild(state);
 
 const board = figma.createFrame();
 board.name = 'Board';
@@ -411,13 +443,22 @@ for (const [r, c] of [[4, 4], [5, 4]]) {
 }
 s.appendChild(board);
 
+const meTaken = captured('♙♙♗♖', '+3');
+s.appendChild(meTaken); meTaken.layoutSizingHorizontal = 'FILL';
+
 const me = pick(seatCmp, 'State=Active').createInstance();
 me.setProperties({ 'Name#5:0': 'Srihari B' });
 s.appendChild(me);
 
+const spacer = figma.createFrame(); spacer.fills = []; spacer.resize(1, 8);
+s.appendChild(spacer); spacer.layoutGrow = 1;
+
+// In play the two irreversible actions are resign and draw, and they must not
+// look alike. Invite / Add a bot belong to the lobby state of this screen, not
+// to a game already running.
 const row = figma.createAutoLayout('HORIZONTAL', { name: 'Actions', itemSpacing: 8 });
 row.fills = [];
-for (const [k, l] of [['Kind=Neutral','Invite'], ['Kind=Neutral','Add a bot']]) {
+for (const [k, l] of [['Kind=Danger','Resign'], ['Kind=Neutral','Offer draw'], ['Kind=Neutral','Voice']]) {
   const b = pick(btnCmp, k).createInstance();
   b.setProperties({ 'Label#4:18': l });
   row.appendChild(b); b.layoutSizingHorizontal = 'FILL';
@@ -621,6 +662,12 @@ for (const [k, l] of [['Kind=Primary', 'Roll'], ['Kind=Neutral', 'Emote'], ['Kin
 }
 s.appendChild(acts); acts.layoutSizingHorizontal = 'FILL';
 
+// Finished state, in the server's own words - a table with four seats has to
+// say WHO won, not merely that the game ended.
+const done = pick(pillCmp, 'Tone=Waiting').createInstance();
+done.setProperties({ 'Label#4:12': 'Robo 1 got all four home' });
+s.appendChild(done);
+
 await s.screenshot();
 return { createdNodeIds: [s.id] };
 ```
@@ -725,11 +772,50 @@ for (const [k, l] of [['Kind=Primary', 'Rematch'], ['Kind=Neutral', 'Invite a fr
 }
 s.appendChild(acts); acts.layoutSizingHorizontal = 'FILL';
 
+// The board can only be in ONE outcome at a time, so the other two are drawn
+// here rather than left unspecified. A draw is not a lesser win - it gets its
+// own wording, not a greyed-out victory.
+const states = figma.createAutoLayout('VERTICAL', { name: 'States', itemSpacing: 6 });
+states.fills = [];
+states.appendChild(txt('K', 'STATES', 'Games/Caption', 'color/text-muted'));
+for (const [tone, label] of [['Tone=Turn', 'Your turn'],
+                             ['Tone=Neutral', 'Draw — nobody blinked'],
+                             ['Tone=Waiting', 'Robo 1 wins']]) {
+  const p = pick(pillCmp, tone).createInstance();
+  p.setProperties({ 'Label#4:12': label });
+  states.appendChild(p);
+}
+s.appendChild(states); states.layoutSizingHorizontal = 'FILL';
+
 await s.screenshot();
 return { createdNodeIds: [s.id] };
 ```
 
 ---
+
+## Verified without running them
+
+The Starter quota refuses every write, so these scripts have never executed.
+What HAS been checked, 2026-09-04, is everything that can be checked off the
+page — all eight parse under `node --check`, and all eight pass a static lint
+of the API rules that have already cost a bug here:
+
+| rule | why it is on the list |
+|---|---|
+| no `figma.notify` / `loadAllPagesAsync` / `setPluginData` / `createImageAsync` | unsupported in `use_figma`; throws |
+| no `figma.currentPage =` | the sync setter throws; only `setCurrentPageAsync` works |
+| at most one `setCurrentPageAsync` per script | more than one reloads the file per switch |
+| `layoutMode` assigned before `resize()` | assigning it resets sizing to hug and discards an earlier resize — this is what made the seat avatars ovals |
+| `FILL`/`HUG` only after `appendChild` | FILL is rejected on a node with no auto-layout parent |
+| every colour component ≤ 1 | the API is 0–1, not 0–255 |
+| a font loaded before any `.characters` write | otherwise `Cannot write to node with unloaded font` |
+| every `fontName` family among those loaded | a family loaded ≠ the style actually used |
+| a `return` carrying `createdNodeIds`/`mutatedNodeIds` | the caller has no other way to reference what was made |
+| every `setProperties` key carrying its `#id` | a bare name silently matches nothing |
+
+That is not a substitute for running them — it cannot catch a wrong node id, a
+variant name that does not exist, or a layout that composes badly. It does mean
+the first run will fail on design, if at all, rather than on syntax.
 
 ## After running
 

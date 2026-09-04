@@ -218,13 +218,13 @@ function Hub({ onOpen }: { onOpen: (g: GameKind, opts?: Record<string, string>) 
         <View style={{ flexDirection: 'row', gap: S[2], marginTop: S[2] }}>
           <Btn
             label="Leaderboard"
-            icon="🏆"
+            icon="trophy"
             style={{ flex: 1 }}
             onPress={() => { void playSfx('select'); setBoardOpen(true); }}
           />
           <Btn
             label="Recent games"
-            icon="🕘"
+            icon="history"
             style={{ flex: 1 }}
             onPress={() => { void playSfx('select'); setHistOpen(true); }}
           />
@@ -289,13 +289,6 @@ function Hub({ onOpen }: { onOpen: (g: GameKind, opts?: Record<string, string>) 
 }
 
 /**
- * Mute.
- *
- * Sound in a game is feedback, but a phone is often played somewhere it cannot
- * make noise. The preference is persisted, so this is not a per-session toggle
- * the player has to hunt for again every time.
- */
-/**
  * The coin balance.
  *
  * Labelled "play coins" wherever it appears. They are not money and cannot be
@@ -321,6 +314,13 @@ function CoinChip({ balance }: { balance: number | null }) {
   );
 }
 
+/**
+ * Mute.
+ *
+ * Sound in a game is feedback, but a phone is often played somewhere it cannot
+ * make noise. The preference is persisted, so this is not a per-session toggle
+ * the player has to hunt for again every time.
+ */
 function SoundToggle() {
   const [on, setOn] = React.useState(soundEnabled());
   return (
@@ -517,8 +517,8 @@ function BotOffer({
         No one else is queuing right now. Play the house bot, or invite someone — your
         table stays open and they can join it whenever they answer.
       </Text>
-      <Btn label={`Play the house bot`} icon="🤖" kind="gold" onPress={onBot} />
-      <Btn label="Invite someone" icon="🔗" onPress={onInvite} />
+      <Btn label={`Play the house bot`} icon="bot" kind="gold" onPress={onBot} />
+      <Btn label="Invite someone" icon="link" onPress={onInvite} />
       <Btn label="Not now" onPress={onCancel} />
     </View>
   );
@@ -578,7 +578,7 @@ function LeaderboardSheet({ visible, onClose }: { visible: boolean; onClose: () 
             style={{
               paddingHorizontal: S[3], paddingVertical: S[2], borderRadius: R[3],
               borderWidth: 1,
-              borderColor: scope === sc.key ? goldLine[55] : 'rgba(255,255,255,.10)',
+              borderColor: scope === sc.key ? goldLine[55] : goldLine[14],
               backgroundColor: scope === sc.key ? mix(C.panel2, 78, '#ffffff') : 'transparent',
             }}
           >

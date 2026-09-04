@@ -162,15 +162,6 @@ export const glass = {
   ...Platform.select({ android: { elevation: 12 }, default: {} }),
 } as const;
 
-/** Header/topbar. The web adds backdrop-filter; expo-blur is the RN stand-in. */
-export const topbar = {
-  backgroundColor: mix(C.panel, 92, '#ffffff'),
-  borderWidth: 1,
-  borderColor: goldLine[22],
-  boxShadow: '0 10px 30px rgba(0, 0, 0, 0.4)',
-  ...Platform.select({ android: { elevation: 8 }, default: {} }),
-} as const;
-
 /** Gold button fill, as a LinearGradient colour stop list. */
 export const GOLD_FILL = [C.gold2, C.gold, C.goldDeep] as const;
 export const GOLD_STOPS = [0, 0.55, 1] as const;
