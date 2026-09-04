@@ -22,16 +22,29 @@ const keyCache = new Map<string, Uint8Array>();
 let QC: any = null;
 try { QC = require('react-native-quick-crypto'); if (typeof QC?.pbkdf2Sync !== 'function') QC = null; } catch { QC = null; }
 
+/**
+ * PBKDF2-HMAC-SHA256 → 32 bytes, native when available.
+ *
+ * Extracted from keyFromPin so the encrypted-backup key (lib/backupCrypto) can
+ * derive with its OWN per-user salt and iteration count without duplicating the
+ * quick-crypto fast path — a second copy of this is a second place for the two
+ * to drift apart on a security boundary. PBKDF2-HMAC-SHA256 is fully specified,
+ * so both branches return identical bytes for identical inputs.
+ */
+export function pbkdf2Bytes(password: string, salt: Uint8Array, iterations: number): Uint8Array {
+  if (QC) {
+    try {
+      const dk = QC.pbkdf2Sync(Buffer.from(new TextEncoder().encode(password)), Buffer.from(salt), iterations, 32, 'sha256');
+      return new Uint8Array(dk.buffer ? dk : Buffer.from(dk));
+    } catch { /* fall through to JS */ }
+  }
+  return pbkdf2(sha256, new TextEncoder().encode(password), salt, { c: iterations, dkLen: 32 });
+}
+
 function keyFromPin(pin: string): Uint8Array {
   let k = keyCache.get(pin);
   if (!k) {
-    if (QC) {
-      try {
-        const dk = QC.pbkdf2Sync(Buffer.from(new TextEncoder().encode(pin)), Buffer.from(SALT), 100000, 32, 'sha256');
-        k = new Uint8Array(dk.buffer ? dk : Buffer.from(dk));
-      } catch { /* fall through to JS */ }
-    }
-    if (!k) k = pbkdf2(sha256, new TextEncoder().encode(pin), SALT, { c: 100000, dkLen: 32 });
+    k = pbkdf2Bytes(pin, SALT, 100000);
     keyCache.set(pin, k);
   }
   return k;
