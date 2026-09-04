@@ -34,7 +34,7 @@ import Animated, {
 } from 'react-native-reanimated';
 import * as Haptics from 'expo-haptics';
 import { useGameSocket, type AutoStart } from '../../lib/games/useGameSocket';
-import { TableBackground, Panel, Btn, Banner, PlayerRow, Reconnecting, RematchBtn, TurnClock, useType, useBoardBox } from './ui';
+import { TableBackground, Panel, Btn, Banner, PlayerRow, Reconnecting, RematchBtn, TurnClock, useType, useBoardBox, usePortraitLock } from './ui';
 import { useRematch } from '../../lib/games/useRematch';
 import { RulesSheet, useFirstTimeRules } from './rules';
 import { rollSeed, receiptFrom, pushReceipt, type RollReceipt } from '../../lib/games/fairness';
@@ -175,6 +175,8 @@ export default function Ludo({ roomId = 'ludo-main', auto, autoBot }: { roomId?:
   useEffect(() => () => { if (tumbleTimer.current) clearTimeout(tumbleTimer.current); }, []);
 
   // Up to four seat cards above, plus the die row and two button rows.
+  // Portrait only. See usePortraitLock.
+  usePortraitLock();
   const { size, onLayout: onBoardBox } = useBoardBox(400);
   const cell = size / 15;
 

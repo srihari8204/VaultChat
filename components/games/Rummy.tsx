@@ -674,7 +674,7 @@ export default function Rummy({ tableId = '', auto, autoBot }: { tableId?: strin
       {/* Full-bleed: the cloth reaches under the notch and the gesture bar,
           because a green screen with grey margins looks broken. Only the
           CONTROLS are inset — see the padded box below. */}
-      <Baize width={win.width} height={win.height} />
+      <Baize />
 
       {/* Children take an explicit width and are centred; the horizontal
           inset is handled ONCE, in metrics(), from the measured container.
@@ -1533,9 +1533,24 @@ function TableTop({ width, height }: { width: number; height: number }) {
  * the only thing the eye lands on. A brass hairline at the very top keeps it
  * tied to the rail rather than reading as a separate black band.
  */
-function Baize({ width, height }: { width: number; height: number }) {
+/**
+ * AUTO-FIT, not window-sized.
+ *
+ * This took `win.width`/`win.height` and painted itself at WINDOW size while
+ * everything else on the table measures its own container. Those two are not
+ * the same number — this file's own notes record a container of 851 against a
+ * window of 823 — so the cloth fell short of the box it is meant to fill and
+ * left an unpainted strip at one edge, which on a full-bleed surface reads as
+ * the table being broken.
+ *
+ * `absoluteFill` plus percentage rects means it is sized BY its parent instead
+ * of guessing at it: no window read, no orientation special case, and it stays
+ * correct through a rotation without recomputing anything. Same pattern
+ * TableBackground already uses in ui.tsx.
+ */
+function Baize() {
   return (
-    <Svg width={width} height={height} style={{ position: 'absolute', top: 0, left: 0 }} pointerEvents="none">
+    <Svg style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 }} pointerEvents="none">
       <Defs>
         {/* The room, matching C.bg — a near-black with maroon in it. The old
             surround was dark GREEN, which is why the table used to sit in a
@@ -1546,11 +1561,11 @@ function Baize({ width, height }: { width: number; height: number }) {
           <Stop offset="1" stopColor="#110405" />
         </RadialGradient>
       </Defs>
-      <Rect x="0" y="0" width={width} height={height} fill="url(#rbaize)" />
+      <Rect x="0" y="0" width="100%" height="100%" fill="url(#rbaize)" />
       {/* One gold hairline ties the surround to the rail. Kept thin and at low
           opacity: this is trim, not an accent, and the accent budget belongs to
           the primary action. */}
-      <Rect x="0" y="0" width={width} height="1.5" fill={C.gold} opacity="0.4" />
+      <Rect x="0" y="0" width="100%" height="1.5" fill={C.gold} opacity="0.4" />
     </Svg>
   );
 }
@@ -1955,6 +1970,11 @@ function Seat({
   if (!spot) return null;
   const out = status !== 'active' && status !== 'won';
   const av = Math.max(26, Math.min(40, Math.round(spot.w * 0.5)));
+  // Same shape as `av` above, which already sizes the avatar off the seat box —
+  // the labels under it were the only part of a seat still using constants.
+  // Floor is the old fixed size, so no table gets smaller names than before.
+  const nameSize = Math.max(17, Math.min(24, Math.round(spot.w * 0.20)));
+  const detailSize = Math.max(13.5, Math.round(nameSize * 0.78 * 2) / 2);
   const initials = name.split(/\s+/).map(x => x[0]).join('').slice(0, 2).toUpperCase();
 
   const detail =
@@ -1986,11 +2006,25 @@ function Seat({
         </View>
       </View>
       {/* Names were 10.5px on a felt seen at arm's length — smaller than the
-          card pips and the first thing a player actually needs to read. Raised
-          again to 17/13.5: at 14 they were legible but still the quietest thing
-          on a table whose whole point is WHO you are playing. */}
-      <Text numberOfLines={1} style={{ color: '#fff', fontWeight: '800', fontSize: 17, marginTop: 2, maxWidth: spot.w }}>{name}</Text>
-      <Text numberOfLines={1} style={{ color: INK_ON_FELT, fontSize: 13.5, fontWeight: '600', maxWidth: spot.w }}>{detail}</Text>
+          card pips and the first thing a player actually needs to read. They
+          then went to a fixed 17/13.5, which is bigger but still a CONSTANT on
+          the one screen whose table resizes with the window: the same 17px is
+          overbearing on a small phone and undersized on a tablet.
+
+          Derived from the seat's own measured width instead, so the name grows
+          with the table it labels. Clamped at both ends — a name must never
+          drop back to unreadable, and must not swamp the seat it sits under. */}
+      <Text
+        numberOfLines={1}
+        style={{
+          color: '#fff', fontWeight: '800', marginTop: 2, maxWidth: spot.w,
+          fontSize: nameSize,
+        }}
+      >{name}</Text>
+      <Text
+        numberOfLines={1}
+        style={{ color: INK_ON_FELT, fontWeight: '600', maxWidth: spot.w, fontSize: detailSize }}
+      >{detail}</Text>
     </View>
   );
 }

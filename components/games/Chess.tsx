@@ -24,7 +24,7 @@ import Animated, {
 } from 'react-native-reanimated';
 import * as Haptics from 'expo-haptics';
 import { useGameSocket, type GameState, type AutoStart } from '../../lib/games/useGameSocket';
-import { TableBackground, Btn, Panel, Banner, PlayerRow, Reconnecting, RematchBtn, useType, useBoardBox } from './ui';
+import { TableBackground, Btn, Panel, Banner, PlayerRow, Reconnecting, RematchBtn, useType, useBoardBox, usePortraitLock } from './ui';
 import { useRematch } from '../../lib/games/useRematch';
 import { RulesSheet, useFirstTimeRules } from './rules';
 import { C, S, R, white, ACCENT } from '../../lib/games/theme';
@@ -194,6 +194,9 @@ export default function Chess({ roomId, auto, autoBot }: { roomId: string } & Au
   // BoardTheme here is what makes those optional reads legal at the call site.
   const th: BoardTheme = THEMES[theme];
   // Seats above and below, the status line and two button rows.
+  // Portrait only. See usePortraitLock — this also stops a force-stopped
+  // rummy table from leaving the OS locked to landscape under this board.
+  usePortraitLock();
   const { size, onLayout: onBoardBox } = useBoardBox(360);
   const cell = size / 8;
 

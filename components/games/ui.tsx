@@ -18,6 +18,7 @@ import Animated, {
   withSequence, withDelay, Easing, cancelAnimation,
 } from 'react-native-reanimated';
 import * as Haptics from 'expo-haptics';
+import * as ScreenOrientation from 'expo-screen-orientation';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import {
   C, S, R, E, D3, T, glass, goldLine, mix, white, MOTION, AMBIENT, GRAIN,
@@ -185,6 +186,30 @@ export function useBoardBox(chrome = 300): { size: number; onLayout: (e: LayoutC
   );
 
   return { size, onLayout };
+}
+
+/**
+ * Hold this board upright.
+ *
+ * The three square boards are portrait games: they are one square plus a column
+ * of chrome, and in landscape that column has nowhere to go — boardFit correctly
+ * falls back to BOARD_MIN and lets the screen scroll, which is a survival mode,
+ * not a layout.
+ *
+ * THIS IS ALSO A REAL BUG FIX, not just a preference. Rummy locks LANDSCAPE
+ * while its table is up and restores PORTRAIT_UP on unmount — but an unmount
+ * never runs when the process is force-stopped or killed, so the OS-level lock
+ * SURVIVED into the next launch. A player whose rummy table died then opened
+ * chess and got a landscape board, measured 38px off centre on the Redmi:
+ * nothing owns the horizontal safe-area inset in that orientation, so the board
+ * centres inside the full window while 76px of it sits under the cutout.
+ * Asserting the lock on mount makes each board responsible for its own
+ * orientation rather than inheriting whatever the last screen left behind.
+ */
+export function usePortraitLock() {
+  React.useEffect(() => {
+    void ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP).catch(() => {});
+  }, []);
 }
 
 /** Fluid type sizes, resolved against the real screen width. */

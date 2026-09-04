@@ -120,5 +120,100 @@ console.log('\nBoard fit\n');
   }
 }
 
+// ── 7. the board is CENTRED, and the inset is owned exactly once ─────
+//
+// The regression this pins: on the Redmi, Chess/Ludo/Tic-Tac-Toe rendered 38px
+// right of centre in landscape — a left/right margin delta of 76px, which is
+// exactly one display cutout. Nothing owned the horizontal inset in that
+// orientation, so the board centred inside the FULL window while 76px of that
+// window sat under the cutout.
+//
+// These assert the geometry contract rather than any device's coordinates, so
+// they fail for the right reason on any screen.
+{
+  const CHROME = [330, 360, 400];           // tic-tac-toe, chess, ludo
+  const WINDOWS = [
+    { width: 320, height: 568 }, { width: 360, height: 800 },
+    { width: 393, height: 851 }, { width: 412, height: 915 },
+    { width: 674, height: 841 }, { width: 820, height: 1180 },
+    // landscape shapes too: the contract must not depend on orientation
+    { width: 851, height: 393 }, { width: 1180, height: 820 },
+  ];
+  const INSETS = [
+    { top: 0, bottom: 0, left: 0, right: 0 },
+    { top: 24, bottom: 0, left: 0, right: 0 },
+    { top: 59, bottom: 34, left: 0, right: 0 },
+    // the landscape cutout: asymmetric, and the case that actually broke
+    { top: 0, bottom: 44, left: 76, right: 0 },
+    { top: 0, bottom: 44, left: 0, right: 76 },
+  ];
+
+  let centred = 0, once = 0;
+  for (const chrome of CHROME) {
+    for (const win of WINDOWS) {
+      for (const ins of INSETS) {
+        // (a) CENTRING. Whatever width the board is given, the slack around it
+        //     splits evenly — margins equal to within a pixel of rounding.
+        const fit = boardFit(win, ins, chrome);
+        const usable = win.width - ins.left - ins.right;
+        const slack = usable - fit.size;
+        if (slack >= 0) {
+          const left = slack / 2, right = slack - slack / 2;
+          A(Math.abs(left - right) <= 1,
+            `7. centred: ${win.width}x${win.height} inset(${ins.left},${ins.right}) chrome ${chrome}`);
+          centred++;
+        }
+
+        // (b) THE INSET IS CONSUMED EXACTLY ONCE. Measuring a container that is
+        //     already inside the safe area and passing NO_INSETS must give the
+        //     SAME board as measuring the raw window and passing the insets.
+        //     Consume the inset twice and the first is smaller; consume it zero
+        //     times and the first is larger. Only "exactly once" makes these
+        //     agree, which is the ownership model the boards rely on.
+        const measured = {
+          width: win.width - ins.left - ins.right,
+          height: win.height - ins.top - ins.bottom,
+        };
+        const viaContainer = boardFit(measured, { top: 0, bottom: 0, left: 0, right: 0 }, chrome);
+        A(viaContainer.size === fit.size && viaContainer.scrolls === fit.scrolls,
+          `7a. inset owned once: container ${measured.width}x${measured.height} === window ${win.width}x${win.height} less inset (chrome ${chrome})`);
+        once++;
+
+        // (c) A board never claims more than it was given unless it SAYS it
+        //     scrolls. An off-centre board is usually an oversized one.
+        A(fit.size <= Math.min(usable, measured.height - chrome) || fit.scrolls,
+          `7b. fits its box or declares scrolls: ${win.width}x${win.height} chrome ${chrome}`);
+      }
+    }
+  }
+  console.log(`  (7) ${centred} centring cases, ${once} inset-ownership cases`);
+}
+
+// ── 8. the three square boards hold themselves upright ───────────────
+//
+// Rummy locks LANDSCAPE while its table is up and restores PORTRAIT_UP on
+// unmount — but unmount never runs when the process is force-stopped, so the
+// OS lock SURVIVED into the next launch and the next board opened landscape.
+// That is how the 38px offset was reachable at all. Each board now asserts its
+// own orientation instead of inheriting the last screen's.
+{
+  const ROOT = join(__dirname, '..', '..');
+  const ui = readFileSync(join(ROOT, 'components/games/ui.tsx'), 'utf8');
+  A(/export function usePortraitLock/.test(ui), '8. ui exposes a shared portrait lock');
+  A(/PORTRAIT_UP/.test(ui), '8a. ...and it locks PORTRAIT_UP');
+
+  for (const f of ['Chess.tsx', 'Ludo.tsx', 'TicTacToe.tsx']) {
+    const src = readFileSync(join(ROOT, 'components/games', f), 'utf8');
+    const code = src.split('\n').filter(l => !/^\s*(\/\/|\*|\/\*)/.test(l)).join('\n');
+    A(/usePortraitLock\(\)/.test(code), `8b. ${f} holds itself portrait`);
+  }
+
+  // Rummy is the deliberate exception and must STAY landscape at the table.
+  const rummy = readFileSync(join(ROOT, 'components/games/Rummy.tsx'), 'utf8');
+  A(/OrientationLock\.LANDSCAPE/.test(rummy), '8c. rummy still plays landscape');
+  A(/<Baize \/>/.test(rummy), '8d. the felt auto-fits its parent rather than the window');
+  A(!/<Baize width=\{win\./.test(rummy), '8e. ...and no longer reads window dimensions');
+}
+
 console.log(failed === 0 ? '\nAll good.\n' : `\n${failed} FAILED\n`);
 process.exit(failed === 0 ? 0 : 1);

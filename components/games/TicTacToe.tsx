@@ -18,7 +18,7 @@ import Animated, {
 } from 'react-native-reanimated';
 import * as Haptics from 'expo-haptics';
 import { useGameSocket, isMyTurn, type AutoStart } from '../../lib/games/useGameSocket';
-import { TableBackground, Panel, Btn, Banner, PlayerRow, Reconnecting, RematchBtn, TurnClock, useType, useBoardBox } from './ui';
+import { TableBackground, Panel, Btn, Banner, PlayerRow, Reconnecting, RematchBtn, TurnClock, useType, useBoardBox, usePortraitLock } from './ui';
 import { useRematch } from '../../lib/games/useRematch';
 import { RulesSheet, useFirstTimeRules } from './rules';
 import { useCountdown } from '../../lib/games/useCountdown';
@@ -66,6 +66,8 @@ export default function TicTacToe({ roomId, auto, autoBot }: { roomId: string } 
   // integer cells always fit inside the frame: flex-wrap with a fractional
   // width drops the third cell onto its own row, which is what put the grid
   // out of alignment.
+  // Portrait only. See usePortraitLock.
+  usePortraitLock();
   const { size, onLayout: onBoardBox } = useBoardBox(330);
   const gap = 10;
   const pad = 10;
