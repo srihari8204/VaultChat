@@ -5,8 +5,9 @@
  * turn, the winner and the winning line — `line` arrives with the result — so
  * there is no win check in this file.
  *
- * Visuals ported from games-web/tictactoe.css: teal ✕ and pink ◯ with a glow,
- * a pop as each mark lands, and the winning triple pulsing gold.
+ * Visuals ported from games-web/tictactoe.css: two glowing marks, a pop as each
+ * one lands, and the winning triple pulsing gold. The css teal and pink are now
+ * the shared accents — see TEAL/PINK below.
  */
 
 import { useEffect, useRef } from 'react';
@@ -21,14 +22,23 @@ import { TableBackground, Panel, Btn, Banner, PlayerRow, Reconnecting, RematchBt
 import { useRematch } from '../../lib/games/useRematch';
 import { RulesSheet, useFirstTimeRules } from './rules';
 import { useCountdown } from '../../lib/games/useCountdown';
-import { C, S, R, D3, mix, goldLine, alpha } from '../../lib/games/theme';
+import { C, S, R, D3, alpha, white, ACCENT } from '../../lib/games/theme';
 import { playSfx, preloadSfx } from '../../lib/games/sfx';
 import { Toasts, Confetti, VoiceBar } from './feedback';
 import { useTableVoice } from '../../lib/games/useTableVoice';
 import { openInvite, shareResult } from '../../lib/games/invite';
 
-const TEAL = '#4be0c1';
-const PINK = '#ff6fb5';
+/**
+ * The two marks' colours.
+ *
+ * Seat 1 is the game's OWN accent — the same rose the hub card and this board's
+ * banner use — rather than a pink invented here. Seat 0 borrows chess's ice so
+ * the two players are far apart in hue; a board with two players needs its two
+ * colours to be unmistakable at a glance more than it needs either of them to
+ * be "the tic-tac-toe colour".
+ */
+const TEAL = ACCENT.chess;
+const PINK = ACCENT.tictactoe;
 const MARK = ['✕', '◯'];
 
 export default function TicTacToe({ roomId, auto, autoBot }: { roomId: string } & AutoStart) {
@@ -183,13 +193,16 @@ export default function TicTacToe({ roomId, auto, autoBot }: { roomId: string } 
         <TurnClock secs={secs} />
 
         <View style={{
-          width: inner, height: inner, padding: pad, borderRadius: 24, gap,
+          width: inner, height: inner, padding: pad, borderRadius: 26, gap,
           // Was a hand-mixed navy (rgba(6,10,24)) - a blue-black plate on the
-          // maroon room. alpha(C.bg2, .5) is the same recessed-well darkness, in
-          // the room's own hue.
-          backgroundColor: alpha(C.bg2, 0.5),
-          borderWidth: 1, borderColor: goldLine[18],
-          boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.05), 0 30px 70px rgba(0,0,0,0.5)',
+          // maroon room, then alpha(C.bg2, .5), a darker well in the room's own
+          // hue. Now glass: the plate is LIGHTER than the room rather than
+          // darker, so the board reads as a pane laid over it instead of a hole
+          // cut into it — and the cells, which were already translucent white,
+          // finally sit on something of the same substance.
+          backgroundColor: white(0.07),
+          borderWidth: 1, borderColor: white(0.22),
+          boxShadow: `inset 0 1px 0 ${white(0.18)}, 0 30px 70px rgba(0,0,0,0.5)`,
         }}>
           {[0, 1, 2].map(row => (
             <View key={row} style={{ flexDirection: 'row', gap }}>
@@ -288,10 +301,14 @@ function Cell({
 
   return (
     <Animated.View style={[{
-      width: size, height: size, borderRadius: R[3],
-      borderWidth: 1, borderColor: won ? C.gold2 : goldLine[18],
-      backgroundColor: won ? 'rgba(255,212,121,0.14)' : 'rgba(255,255,255,0.07)',
+      width: size, height: size, borderRadius: 24,
+      borderWidth: won ? 1.6 : 1,
+      borderColor: won ? C.gold2 : white(0.13),
+      backgroundColor: won ? alpha(C.gold2, 0.16) : white(0.06),
       alignItems: 'center', justifyContent: 'center',
+      // The lit top edge is what separates a cell from the pane behind it now
+      // that both are made of the same translucent white.
+      boxShadow: `inset 0 1px 0 ${white(0.16)}`,
       shadowColor: C.gold2, shadowRadius: 26, shadowOffset: { width: 0, height: 0 },
     }, aCell]}>
       <Pressable
@@ -304,7 +321,10 @@ function Cell({
         {value >= 0 && (
           <Animated.Text style={[{
             fontSize: size * 0.55, fontWeight: '700', color,
-            textShadowColor: value === 0 ? 'rgba(75,224,193,0.55)' : 'rgba(255,111,181,0.5)',
+            // Derived from the mark's own colour — these were two hand-written
+            // rgba()s of the OLD teal and pink, so recolouring the marks left
+            // each one haloed in the colour it used to be.
+            textShadowColor: alpha(color, 0.55),
             textShadowOffset: { width: 0, height: 0 }, textShadowRadius: 22,
           }, aMark]}>
             {MARK[value]}
@@ -341,9 +361,15 @@ function SeatChip({ name, mark, active }: { name: string; mark: string; active: 
     <View style={{
       flex: 1, flexDirection: 'row', alignItems: 'center', gap: S[2],
       paddingVertical: S[2], paddingHorizontal: S[3], borderRadius: R[2],
-      borderWidth: 1, borderColor: active ? goldLine[55] : goldLine[14],
-      backgroundColor: mix(C.panel2, 86, '#ffffff'),
-      boxShadow: active ? '0 6px 18px rgba(0,0,0,0.35)' : D3.lift1,
+      // Matches ui.tsx PlayerRow: an active seat is LIT, in its own mark's
+      // colour. This block used to be a byte-for-byte copy of PlayerRow's, and
+      // the two drifting apart is exactly what this restyle has to avoid.
+      borderWidth: 1,
+      borderColor: active ? (mark === '✕' ? TEAL : PINK) : white(0.12),
+      backgroundColor: white(active ? 0.12 : 0.06),
+      boxShadow: active
+        ? `0 8px 22px rgba(0,0,0,0.38), inset 0 1px 0 ${white(0.20)}`
+        : `${D3.lift1}, inset 0 1px 0 ${white(0.12)}`,
     }}>
       <Text style={{ fontSize: t.md, color: mark === '✕' ? TEAL : PINK, fontWeight: '800' }}>{mark}</Text>
       <Text numberOfLines={1} style={{ flex: 1, color: C.text, fontSize: t.sm, fontWeight: '700' }}>{name}</Text>

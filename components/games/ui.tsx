@@ -12,7 +12,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
-import Svg, { Defs, RadialGradient, Stop, Rect, Pattern, Circle } from 'react-native-svg';
+import Svg, { Defs, RadialGradient, Stop, Rect, Pattern, Circle, Path } from 'react-native-svg';
 import Animated, {
   useSharedValue, useAnimatedStyle, withSpring, withTiming, withRepeat,
   withSequence, withDelay, Easing, cancelAnimation,
@@ -20,8 +20,8 @@ import Animated, {
 import * as Haptics from 'expo-haptics';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import {
-  C, S, R, E, D3, T, glass, goldLine, mix, MOTION, AMBIENT, GRAIN,
-  GOLD_FILL, GOLD_STOPS, PANEL_FILL, RED_FILL, RED_STOPS, typeScale,
+  C, S, R, E, D3, T, glass, goldLine, mix, white, MOTION, AMBIENT, GRAIN,
+  GOLD_FILL, GOLD_STOPS, RED_FILL, RED_STOPS, typeScale, ACCENT, type GameAccent,
 } from '../../lib/games/theme';
 import { boardFit } from '../../lib/games/boardFit';
 
@@ -50,6 +50,13 @@ const ICONS = {
   lock: 'lock-closed-outline',
   copy: 'copy-outline',
   mic: 'mic-outline',
+  // The voice controls passed 🔇 / 🎙 / 🔊 / 🎧 straight to `Btn`, which has no
+  // name for them and so fell through to the raw-text branch below — four
+  // full-colour emoji from a fifth family, on the one control row that already
+  // had `mic` sitting here unused.
+  micOff: 'mic-off-outline',
+  speaker: 'volume-high-outline',
+  headset: 'headset-outline',
   retry: 'refresh-outline',
   // The icon-only controls. These were typographic glyphs - a gear, a bolt,
   // and the box-drawing pair - which is a fourth family again, and the two
@@ -65,6 +72,53 @@ const ICONS = {
 } as const;
 
 export type GameIconName = keyof typeof ICONS;
+
+/**
+ * The four games' identity marks.
+ *
+ * These were TYPOGRAPHIC CHARACTERS — ♛ ♠ ⚄ ✕ — which is the same mistake the
+ * control icons made and were fixed for, one layer up. A glyph is drawn by
+ * whatever font the platform resolves it to: ⚄ is a die on one Android skin and
+ * a tofu box on another, ♛ arrives already black on several, and a character
+ * the font paints itself does not take `color` at all. So the one thing this
+ * change is FOR — giving each game a colour that carries from its card through
+ * to its board — was not reachable while these were text.
+ *
+ * They are drawn here rather than taken from Ionicons because Ionicons has no
+ * chess piece, and mixing a second icon family back in is precisely what the
+ * commit above spent its effort removing. Control icons stay Ionicons; a game's
+ * identity mark is artwork, and there are exactly four of them.
+ */
+export function GameGlyph({ game, size = 30, color }: { game: GameAccent; size?: number; color?: string }) {
+  const c = color ?? ACCENT[game];
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24">
+      {game === 'chess' && (
+        <>
+          <Path d="M5 17.5h14l1.2-9.2-4.4 3.3L12 4.6 8.2 11.6 3.8 8.3 5 17.5Z" fill={c} />
+          <Rect x={4.6} y={18.8} width={14.8} height={2.6} rx={1.3} fill={c} />
+        </>
+      )}
+      {game === 'rummy' && (
+        <>
+          <Path d="M12 2.8c3.1 4.2 7.2 6.2 7.2 9.8A4.7 4.7 0 0 1 12 16.2a4.7 4.7 0 0 1-7.2-3.6C4.8 9 8.9 7 12 2.8Z" fill={c} />
+          <Path d="M10.9 15.1c0 3.2-1 4.8-2.6 6h7.4c-1.6-1.2-2.6-2.8-2.6-6h-2.2Z" fill={c} />
+        </>
+      )}
+      {game === 'ludo' && (
+        <>
+          <Rect x={3} y={3} width={18} height={18} rx={4.5} stroke={c} strokeWidth={2} fill="none" />
+          {[[8.2, 8.2], [15.8, 8.2], [12, 12], [8.2, 15.8], [15.8, 15.8]].map(([cx, cy]) => (
+            <Circle key={`${cx}-${cy}`} cx={cx} cy={cy} r={1.7} fill={c} />
+          ))}
+        </>
+      )}
+      {game === 'tictactoe' && (
+        <Path d="M6.2 6.2 17.8 17.8M17.8 6.2 6.2 17.8" stroke={c} strokeWidth={3.2} strokeLinecap="round" />
+      )}
+    </Svg>
+  );
+}
 
 /**
  * A board edge that fits THIS screen, not just its width.
@@ -131,12 +185,6 @@ export function useBoardBox(chrome = 300): { size: number; onLayout: (e: LayoutC
   );
 
   return { size, onLayout };
-}
-
-/** Landscape when the screen is meaningfully wider than it is tall. */
-export function useLandscape(): boolean {
-  const { width, height } = useWindowDimensions();
-  return width > height * 1.2;
 }
 
 /** Fluid type sizes, resolved against the real screen width. */
@@ -242,8 +290,15 @@ export function Btn({
     onPress?.();
   };
 
-  const fill = kind === 'gold' ? GOLD_FILL : kind === 'danger' ? RED_FILL : kind === 'good' ? GOOD_FILL : PANEL_FILL;
-  const stops = kind === 'gold' ? GOLD_STOPS : kind === 'danger' ? RED_STOPS : kind === 'good' ? GOOD_STOPS : [0, 1];
+  // 'secondary' is GLASS rather than a painted gradient. It is the button that
+  // appears three and four to a row under a board, and a row of opaque panels
+  // read as a toolbar bolted onto the table rather than as part of it. The
+  // three coloured kinds stay painted: gold, danger and good are the buttons
+  // that must not be missed, and a surface you can see through is by definition
+  // one that recedes.
+  const isGlass = kind === 'secondary';
+  const fill = kind === 'gold' ? GOLD_FILL : kind === 'danger' ? RED_FILL : GOOD_FILL;
+  const stops = kind === 'gold' ? GOLD_STOPS : kind === 'danger' ? RED_STOPS : GOOD_STOPS;
   const fg = kind === 'gold' ? C.onGold : kind === 'danger' || kind === 'good' ? '#fff' : C.text;
   const border = kind === 'gold' ? C.goldDeep : kind === 'danger' ? '#7d0f2a' : kind === 'good' ? '#0a4a2e' : goldLine[18];
 
@@ -251,6 +306,16 @@ export function Btn({
     kind === 'gold' ? '0 8px 24px rgba(243,194,69,0.35), ' + D3.rim
     : kind === 'danger' ? '0 8px 24px rgba(225,29,72,0.35), inset 0 1px 0 rgba(255,255,255,0.25)'
     : '0 6px 18px rgba(0,0,0,0.35), inset 0 1px 0 rgba(255,255,255,0.05)';
+
+  // Not `glassy()` from the theme: that carries elevation 12, which is a PANEL's
+  // lift. A button lifted as far as the panel it sits on has nothing to sit on.
+  const glassFace: ViewStyle = {
+    backgroundColor: white(0.09),
+    borderWidth: 1,
+    borderColor: white(0.20),
+    borderRadius: R[2],
+    boxShadow: `0 6px 18px rgba(0,0,0,0.35), inset 0 1px 0 ${white(0.18)}`,
+  };
 
   const body = (
     <>
@@ -295,7 +360,12 @@ export function Btn({
     >
       {kind === 'ghost' ? (
         <View style={[inner, { borderWidth: 1, borderColor: 'transparent' }]}>{body}</View>
+      ) : isGlass ? (
+        <View style={[glassFace, inner]}>{body}</View>
       ) : (
+        // Only gold/danger/good reach this branch now, and all three are lit
+        // diagonally. The vertical gradient variant existed for `secondary`,
+        // which is glass and no longer painted at all.
         <View
           onLayout={e => setW(e.nativeEvent.layout.width)}
           style={{ borderRadius: R[2], borderWidth: 1, borderColor: border, boxShadow: shadow, overflow: 'hidden' }}
@@ -303,8 +373,8 @@ export function Btn({
           <LinearGradient
             colors={fill as unknown as [string, string, ...string[]]}
             locations={stops as unknown as [number, number, ...number[]]}
-            start={kind === 'secondary' ? { x: 0.5, y: 0 } : { x: 0, y: 0 }}
-            end={kind === 'secondary' ? { x: 0.5, y: 1 } : { x: 1, y: 1 }}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 1 }}
             style={inner}
           >
             {body}
@@ -352,8 +422,11 @@ export function Banner({ text, tone = 'info' }: { text: string; tone?: 'info' | 
       style={[{
         alignSelf: 'stretch', paddingVertical: S[3], paddingHorizontal: S[4],
         borderRadius: R[3], borderWidth: 1, borderColor: accent,
-        backgroundColor: mix(C.panel, 90, '#ffffff'),
-        boxShadow: E[2],
+        // Glass, tinted by its accent rather than filled with it. A banner is
+        // the one surface on a board that changes meaning mid-game, so it must
+        // stay legible as a state without becoming a coloured slab.
+        backgroundColor: white(0.10),
+        boxShadow: `${E[2]}, inset 0 1px 0 ${white(0.18)}`,
         shadowColor: accent, shadowRadius: 18, shadowOffset: { width: 0, height: 0 },
       }, aGlow]}
     >
@@ -376,14 +449,25 @@ export function PlayerRow({
         flexDirection: 'row', alignItems: 'center', gap: S[3],
         paddingVertical: S[3], paddingHorizontal: S[3],
         borderRadius: R[2], borderWidth: 1,
-        borderColor: active ? goldLine[55] : goldLine[14],
-        backgroundColor: mix(C.panel2, 86, '#ffffff'),
-        boxShadow: active ? '0 6px 18px rgba(0,0,0,0.35)' : D3.lift1,
+        // An active seat is LIT, not outlined. It borrows the player's own
+        // accent when it has one, so at a four-seat table whose turn it is
+        // reads from the colour rather than from a slightly brighter edge.
+        borderColor: active ? (accent ?? white(0.30)) : white(0.12),
+        backgroundColor: white(active ? 0.12 : 0.06),
+        boxShadow: active
+          ? `0 8px 22px rgba(0,0,0,0.38), inset 0 1px 0 ${white(0.20)}`
+          : `${D3.lift1}, inset 0 1px 0 ${white(0.12)}`,
       }}
     >
       {accent ? <View style={{ width: 12, height: 12, borderRadius: 6, backgroundColor: accent, boxShadow: D3.rim }} /> : null}
       <Text style={{ flex: 1, color: C.text, fontSize: t.md, fontWeight: '700' }} numberOfLines={1}>{name}</Text>
-      {subtitle ? <Text style={{ color: C.muted, fontSize: t.sm }}>{subtitle}</Text> : null}
+      {/* Shrinkable and capped at one line. The name beside it is `flex: 1`, so
+          an unbounded subtitle here wins the row and pushes the Tag off the
+          right edge — the subtitle is caller-supplied and short only by
+          convention (a colour name, "N wins"), never by contract. */}
+      {subtitle ? (
+        <Text numberOfLines={1} style={{ flexShrink: 1, color: C.muted, fontSize: t.sm }}>{subtitle}</Text>
+      ) : null}
       {tag ? <Tag label={tag} /> : null}
     </View>
   );
@@ -394,7 +478,9 @@ export function Tag({ label, tone = 'gold' }: { label: string; tone?: 'gold' | '
   return (
     <View style={{
       paddingHorizontal: S[2], paddingVertical: 2, borderRadius: R.pill,
-      backgroundColor: tone === 'gold' ? C.gold : mix(C.panel2, 80, '#ffffff'),
+      backgroundColor: tone === 'gold' ? C.gold : white(0.13),
+      borderWidth: tone === 'gold' ? 0 : 1,
+      borderColor: white(0.18),
       boxShadow: tone === 'gold' ? '0 4px 12px rgba(243,194,69,0.30)' : undefined,
     }}>
       <Text style={{ color: tone === 'gold' ? C.onGold : C.muted, fontSize: T.xs, fontWeight: '800', letterSpacing: 0.3 }}>
@@ -410,7 +496,8 @@ export function Chip({ label, tone = 'plain' }: { label: string; tone?: 'plain' 
   return (
     <View style={{
       paddingHorizontal: S[2], paddingVertical: S[1], borderRadius: R[1],
-      borderWidth: 1, borderColor: mix(color, 30, C.line), backgroundColor: C.panel2,
+      borderWidth: 1, borderColor: mix(color, 45, C.line),
+      backgroundColor: white(0.08),
     }}>
       <Text style={{ color, fontSize: T.xs, fontWeight: '700' }}>{label}</Text>
     </View>
@@ -442,8 +529,12 @@ export function Reconnecting({ error, onRetry }: { error?: string | null; onRetr
       style={{
         flexDirection: 'row', alignItems: 'center', gap: S[3],
         paddingVertical: S[2], paddingHorizontal: S[3],
-        borderRadius: R[2], borderWidth: 1, borderColor: mix(C.bad, 40, C.line),
-        backgroundColor: mix(C.panel2, 88, '#ffffff'),
+        // Renders OVER a live board, so it was the one shared component still
+        // painting an opaque maroon slab across four glass tables. Dark glass,
+        // because it must stay readable on top of whatever the board shows.
+        borderRadius: R[2], borderWidth: 1, borderColor: mix(C.bad, 55, C.line),
+        backgroundColor: 'rgba(0,0,0,0.55)',
+        boxShadow: `inset 0 1px 0 ${white(0.16)}`,
       }}
     >
       <ActivityIndicator size="small" color={C.gold} />

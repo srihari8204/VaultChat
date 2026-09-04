@@ -24,8 +24,9 @@ import Animated, {
 import * as Haptics from 'expo-haptics';
 import type { GameKind } from '../lib/gamesSocket';
 import { useQuickMatch } from '../lib/games/useQuickMatch';
-import { TableBackground, Panel, Btn, useType } from '../components/games/ui';
-import { C, S, R, D3, E, mix, goldLine } from '../lib/games/theme';
+import Ionicons from '@expo/vector-icons/Ionicons';
+import { TableBackground, Panel, Btn, useType, GameGlyph } from '../components/games/ui';
+import { C, S, R, E, white, alpha, ACCENT } from '../lib/games/theme';
 import { playSfx, setSoundEnabled, soundEnabled } from '../lib/games/sfx';
 import { useWallet } from '../lib/games/useWallet';
 import { useLiveTables, agoLabel } from '../lib/games/useLiveTables';
@@ -44,13 +45,19 @@ import Chess from '../components/games/Chess';
 import Ludo from '../components/games/Ludo';
 import Rummy from '../components/games/Rummy';
 
-type Entry = { kind: GameKind; name: string; icon: string; blurb: string; accent: string };
+// A game's ICON and ACCENT are no longer written here. Both were duplicated —
+// the hub said chess was #8ca2ad while the board drew its pieces from its own
+// constants, so the card and the table it opened disagreed about what colour
+// the game was. lib/games/theme.ts owns the accent, and the mark is drawn by
+// GameGlyph from the same `kind` that routes the tap; four entries cannot
+// drift from four keys that are the same four strings.
+type Entry = { kind: GameKind; name: string; blurb: string };
 
 const GAMES: Entry[] = [
-  { kind: 'chess',     name: 'Chess',       icon: '♛', accent: '#8ca2ad', blurb: 'Server-refereed. Your legal moves come from the table.' },
-  { kind: 'rummy',     name: 'Rummy',       icon: '♠', accent: '#5fe08c', blurb: 'Points rummy, 2–6 players. Public tables or a private code.' },
-  { kind: 'ludo',      name: 'Ludo',        icon: '⚄', accent: '#f3c245', blurb: 'Two to four players. Your phone helps roll the dice.' },
-  { kind: 'tictactoe', name: 'Tic-Tac-Toe', icon: '✕', accent: '#ff8080', blurb: 'Three in a row. Quick one.' },
+  { kind: 'chess',     name: 'Chess',       blurb: 'Server-refereed. Your legal moves come from the table.' },
+  { kind: 'rummy',     name: 'Rummy',       blurb: 'Points rummy, 2–6 players. Public tables or a private code.' },
+  { kind: 'ludo',      name: 'Ludo',        blurb: 'Two to four players. Your phone helps roll the dice.' },
+  { kind: 'tictactoe', name: 'Tic-Tac-Toe', blurb: 'Three in a row. Quick one.' },
 ];
 
 /** Only these four are exposed; anything else falls back to the menu. */
@@ -246,7 +253,10 @@ function Hub({ onOpen }: { onOpen: (g: GameKind, opts?: Record<string, string>) 
               accessibilityLabel="Room code"
               style={{
                 flex: 1, color: C.text, fontSize: t.md, paddingHorizontal: S[3], paddingVertical: S[3],
-                borderRadius: R[2], borderWidth: 1, borderColor: goldLine[18], backgroundColor: C.panel2,
+                borderRadius: R[2], borderWidth: 1, borderColor: white(0.14),
+                // A field is the one control that should read as RECESSED — a
+                // hole in the panel rather than another pane sitting on it.
+                backgroundColor: 'rgba(0, 0, 0, 0.22)',
               }}
             />
             <Btn label="Join" kind="gold" onPress={joinCode} disabled={!code.trim()} />
@@ -304,11 +314,15 @@ function CoinChip({ balance }: { balance: number | null }) {
       style={{
         flexDirection: 'row', alignItems: 'center', gap: 5,
         paddingHorizontal: S[3], paddingVertical: S[2], borderRadius: R.pill,
-        borderWidth: 1, borderColor: goldLine[38], backgroundColor: C.panel2,
+        borderWidth: 1, borderColor: white(0.22), backgroundColor: white(0.10),
+        boxShadow: `inset 0 1px 0 ${white(0.18)}`,
         marginRight: S[2],
       }}
     >
-      <Text style={{ fontSize: 13 }}>🪙</Text>
+      {/* Was a 🪙 emoji — full-colour, unreachable by any theme colour, and
+          redrawn differently on every Android skin, exactly like the game
+          glyphs were. A filled circle in gold is the same idea, ours. */}
+      <View style={{ width: 11, height: 11, borderRadius: 6, backgroundColor: C.gold }} />
       <Text style={{ color: C.gold, fontSize: 13, fontWeight: '800' }}>{balance}</Text>
     </View>
   );
@@ -337,16 +351,22 @@ function SoundToggle() {
       hitSlop={10}
       style={{
         width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center',
-        borderWidth: 1, borderColor: on ? goldLine[38] : goldLine[14], backgroundColor: C.panel2,
+        borderWidth: 1, borderColor: white(on ? 0.26 : 0.12), backgroundColor: white(on ? 0.10 : 0.05),
+        boxShadow: `inset 0 1px 0 ${white(0.18)}`,
       }}
     >
-      <Text style={{ fontSize: 17, opacity: on ? 1 : 0.45 }}>{on ? '🔊' : '🔇'}</Text>
+      <Ionicons
+        name={on ? 'volume-high' : 'volume-mute'}
+        size={18}
+        color={on ? C.text : C.muted}
+      />
     </Pressable>
   );
 }
 
 function GameCard({ entry, onOpen, onQuick }: { entry: Entry; onOpen: () => void; onQuick: () => void }) {
   const t = useType();
+  const accent = ACCENT[entry.kind];
   const scale = useSharedValue(1);
   const a = useAnimatedStyle(() => ({ transform: [{ scale: scale.value }] }));
 
@@ -361,17 +381,22 @@ function GameCard({ entry, onOpen, onQuick }: { entry: Entry; onOpen: () => void
         style={{
           flexDirection: 'row', alignItems: 'center', gap: S[3],
           padding: S[4], borderRadius: R[3],
-          backgroundColor: mix(C.panel, 92, '#ffffff'),
-          borderWidth: 1, borderColor: goldLine[22],
-          boxShadow: E[2],
+          backgroundColor: white(0.075),
+          borderWidth: 1, borderColor: white(0.16),
+          boxShadow: `${E[2]}, inset 0 1px 0 ${white(0.18)}`,
         }}
       >
+        {/* The tile is tinted with the game's own accent rather than filled
+            with panel grey: four identical grey wells is what made the hub read
+            as a settings list, and the tint is the first place the player meets
+            the colour they will then see on the board. */}
         <View style={{
-          width: 52, height: 52, borderRadius: R[2], alignItems: 'center', justifyContent: 'center',
-          backgroundColor: C.panel2, borderWidth: 1, borderColor: mix(entry.accent, 30, C.line),
-          boxShadow: D3.well,
+          width: 54, height: 54, borderRadius: 17, alignItems: 'center', justifyContent: 'center',
+          backgroundColor: alpha(accent, 0.14),
+          borderWidth: 1, borderColor: alpha(accent, 0.42),
+          boxShadow: `0 4px 14px ${alpha(accent, 0.30)}, inset 0 1px 0 ${white(0.18)}`,
         }}>
-          <Text style={{ fontSize: 26, color: entry.accent }}>{entry.icon}</Text>
+          <GameGlyph game={entry.kind} size={30} />
         </View>
 
         <View style={{ flex: 1, gap: 3 }}>
@@ -385,11 +410,13 @@ function GameCard({ entry, onOpen, onQuick }: { entry: Entry; onOpen: () => void
           accessibilityLabel={`Quick match at ${entry.name}`}
           hitSlop={8}
           style={{
-            paddingHorizontal: S[3], paddingVertical: S[2], borderRadius: R.pill,
-            borderWidth: 1, borderColor: goldLine[38], backgroundColor: C.panel2,
+            width: 40, height: 40, borderRadius: R.pill,
+            alignItems: 'center', justifyContent: 'center',
+            borderWidth: 1, borderColor: white(0.26), backgroundColor: white(0.10),
+            boxShadow: `inset 0 1px 0 ${white(0.18)}`,
           }}
         >
-          <Text style={{ color: C.gold, fontSize: 15 }}>⚡</Text>
+          <Ionicons name="flash" size={17} color={C.gold} />
         </Pressable>
       </Pressable>
     </Animated.View>
@@ -422,7 +449,9 @@ function Searching({
       position: 'absolute', inset: 0, backgroundColor: 'rgba(20,4,4,0.92)',
       alignItems: 'center', justifyContent: 'center', padding: S[5], gap: S[4],
     }}>
-      <Animated.Text style={[{ fontSize: 64 }, aBolt]}>⚡</Animated.Text>
+      <Animated.View style={aBolt}>
+        <Ionicons name="flash" size={64} color={C.gold} />
+      </Animated.View>
       <Text style={{ color: C.text, fontSize: t.xl, fontWeight: '800', textAlign: 'center' }}>
         {error ? 'No luck' : `Finding a ${entry.name} opponent…`}
       </Text>
@@ -509,7 +538,7 @@ function BotOffer({
       position: 'absolute', inset: 0, backgroundColor: 'rgba(20,4,4,0.92)',
       alignItems: 'center', justifyContent: 'center', padding: S[5], gap: S[3],
     }}>
-      <Text style={{ fontSize: 56 }}>{entry.icon}</Text>
+      <GameGlyph game={entry.kind} size={56} />
       <Text style={{ color: C.text, fontSize: t.xl, fontWeight: '800', textAlign: 'center' }}>
         Nobody is waiting for {entry.name}
       </Text>
@@ -575,11 +604,16 @@ function LeaderboardSheet({ visible, onClose }: { visible: boolean; onClose: () 
             onPress={() => setScope(sc.key)}
             accessibilityRole="button"
             accessibilityState={{ selected: scope === sc.key }}
+            // 8dp of padding either side of ~15dp of text is a 31dp target, and
+            // there are five of them in a row. minHeight takes it to the 44dp
+            // floor the rest of the games already hold (Btn's `inner`, the ludo
+            // token's computed hitSlop, rummy's IconBtn).
             style={{
               paddingHorizontal: S[3], paddingVertical: S[2], borderRadius: R[3],
+              minHeight: 44, justifyContent: 'center',
               borderWidth: 1,
-              borderColor: scope === sc.key ? goldLine[55] : goldLine[14],
-              backgroundColor: scope === sc.key ? mix(C.panel2, 78, '#ffffff') : 'transparent',
+              borderColor: white(scope === sc.key ? 0.30 : 0.12),
+              backgroundColor: scope === sc.key ? white(0.13) : 'transparent',
             }}
           >
             <Text style={{
@@ -615,9 +649,9 @@ function LeaderboardSheet({ visible, onClose }: { visible: boolean; onClose: () 
                 style={{
                   flexDirection: 'row', alignItems: 'center', gap: S[2],
                   paddingVertical: S[2], paddingHorizontal: S[2], borderRadius: R[1],
-                  backgroundColor: i === myIndex ? mix(C.gold, 14, C.panel2)
-                    : i < 3 ? mix(C.panel2, 88, '#ffffff') : 'transparent',
-                  borderWidth: i === myIndex ? 1 : 0, borderColor: goldLine[38],
+                  backgroundColor: i === myIndex ? alpha(C.gold, 0.16)
+                    : i < 3 ? white(0.07) : 'transparent',
+                  borderWidth: i === myIndex ? 1 : 0, borderColor: alpha(C.gold, 0.45),
                 }}
               >
                 <Text style={{ width: 26, textAlign: 'center', color: C.muted, fontSize: t.sm, fontWeight: '800' }}>

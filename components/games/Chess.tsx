@@ -27,7 +27,7 @@ import { useGameSocket, type GameState, type AutoStart } from '../../lib/games/u
 import { TableBackground, Btn, Panel, Banner, PlayerRow, Reconnecting, RematchBtn, useType, useBoardBox } from './ui';
 import { useRematch } from '../../lib/games/useRematch';
 import { RulesSheet, useFirstTimeRules } from './rules';
-import { C, S, R, goldLine } from '../../lib/games/theme';
+import { C, S, R, white, ACCENT } from '../../lib/games/theme';
 import { playSfx, preloadSfx, soundEnabled, setSoundEnabled } from '../../lib/games/sfx';
 import { Toasts, Confetti, Sheet, SettingRow, VoiceBar, VoiceSheet } from './feedback';
 import { useTableVoice, type TableVoice } from '../../lib/games/useTableVoice';
@@ -46,15 +46,48 @@ type Move = { from: number; to: number; promo?: string };
  */
 const GLYPH: Record<string, string> = { k: '♚', q: '♛', r: '♜', b: '♝', n: '♞', p: '♟' };
 
-/** chess.com board themes, from games-web/chess.js BOARD_THEMES. */
+/** Fill + fake-stroke per side. See OutlinedGlyph. */
+type Ink = { w: { fill: string; line: string }; b: { fill: string; line: string } };
+
+type BoardTheme = {
+  light: string; dark: string; hl: string; sel: string;
+  /** Board rim. Defaults to the dark wood edge every painted theme uses. */
+  edge?: string;
+  /** Legal-move dot. The default is INK — it is drawn for light squares. */
+  dot?: string;
+  /** Capture ring. Same reasoning as `dot`. */
+  ring?: string;
+  /** Piece ink. Defaults to black-on-cream; only `glass` needs its own. */
+  ink?: Ink;
+};
+
+/** chess.com board themes, from games-web/chess.js BOARD_THEMES — plus `glass`. */
 const THEMES = {
+  /**
+   * The glassmorphism board.
+   *
+   * Its squares are translucent white on the room, which means the BLACK pieces
+   * had to change with it: black on a dark translucent square is a silhouette
+   * on a shadow, and no stroke rescues it. So this theme carries its own ink and
+   * the dark side plays in the game's own ice accent — the same colour its hub
+   * card and turn banner use. That is a real chess convention break and it is
+   * confined to this one theme; every painted board below keeps black pieces
+   * black. The dot and capture ring flip to light for the same reason: both
+   * were mixed as dark ink for cream squares.
+   */
+  glass:      { light: 'rgba(255,255,255,.16)', dark: 'rgba(255,255,255,.045)',
+                hl: 'rgba(127,216,255,.30)', sel: 'rgba(127,216,255,.46)',
+                edge: 'rgba(255,255,255,.22)', dot: 'rgba(255,255,255,.45)',
+                ring: 'rgba(255,255,255,.42)',
+                ink: { w: { fill: '#FFF8F1', line: 'rgba(0,0,0,.5)' },
+                       b: { fill: ACCENT.chess, line: 'rgba(0,0,0,.5)' } } },
   classic:    { light: '#ece6d3', dark: '#6f6253', hl: 'rgba(214,175,99,.50)', sel: 'rgba(214,175,99,.68)' },
   green:      { light: '#ebecd0', dark: '#739552', hl: 'rgba(155,199,0,.45)',  sel: 'rgba(155,199,0,.55)' },
   blue:       { light: '#dee3e6', dark: '#8ca2ad', hl: 'rgba(155,199,0,.41)',  sel: 'rgba(155,199,0,.55)' },
   brown:      { light: '#f0d9b5', dark: '#b58863', hl: 'rgba(205,210,106,.45)', sel: 'rgba(205,210,106,.55)' },
   midnight:   { light: '#b7c6d8', dark: '#3a4b66', hl: 'rgba(155,199,0,.41)',  sel: 'rgba(155,199,0,.55)' },
   tournament: { light: '#e8e8e8', dark: '#7d8a99', hl: 'rgba(155,199,0,.41)',  sel: 'rgba(155,199,0,.55)' },
-} as const;
+} satisfies Record<string, BoardTheme>;
 type ThemeName = keyof typeof THEMES;
 
 /**
@@ -67,6 +100,12 @@ type ThemeName = keyof typeof THEMES;
  * recognise, and re-picking green every time the screen opened was the only
  * way to get it back. Same module-level read as the rummy sort preference, so
  * the first paint is already correct rather than flipping a frame later.
+ *
+ * The glassmorphism restyle added a `glass` board and did NOT make it the
+ * default, because that is this decision and it is guarded by a test ("chess
+ * opens on the green board, like the web"). Glass is the FIRST swatch instead —
+ * one tap, and the choice persists like any other. Flipping the default is a
+ * one-word change here plus that test; it is deliberately not made silently.
  */
 const BOARD_KEY = 'vc_chess_board';
 const isThemeName = (v: unknown): v is ThemeName =>
@@ -150,7 +189,10 @@ export default function Chess({ roomId, auto, autoBot }: { roomId: string } & Au
   // invite for when the other seat is empty. See lib/games/useRematch.ts.
   const rematch = useRematch('chess', roomId, state, send);
 
-  const th = THEMES[theme];
+  // Annotated: `satisfies` keeps the literal keys, so THEMES[theme] is a UNION
+  // of the entry shapes and only `glass` carries ink/dot/ring/edge. Widening to
+  // BoardTheme here is what makes those optional reads legal at the call site.
+  const th: BoardTheme = THEMES[theme];
   // Seats above and below, the status line and two button rows.
   const { size, onLayout: onBoardBox } = useBoardBox(360);
   const cell = size / 8;
@@ -293,7 +335,7 @@ export default function Chess({ roomId, auto, autoBot }: { roomId: string } & Au
           style={{
             width: size, height: size, borderRadius: R[1], overflow: 'hidden',
             boxShadow: '0 14px 44px rgba(0,0,0,.55)',
-            borderWidth: 2, borderColor: '#2b2620',
+            borderWidth: 2, borderColor: th.edge ?? '#2b2620',
           }}
         >
           {Array.from({ length: 64 }, (_, d) => {
@@ -333,6 +375,9 @@ export default function Chess({ roomId, auto, autoBot }: { roomId: string } & Au
                         key: `${G.history?.length ?? 0}:${lastMove.from}:${lastMove.to}` }
                     : null
                 }
+                ink={th.ink}
+                dot={th.dot}
+                ring={th.ring}
                 onPress={() => onSquare(idx)}
                 stroke={stroke}
               />
@@ -445,6 +490,7 @@ export default function Chess({ roomId, auto, autoBot }: { roomId: string } & Au
           color={myColor ?? 'w'}
           onPick={(m) => { playSfx('promote'); send({ t: 'move', from: m.from, to: m.to, promo: m.promo }); setPromo(null); setSel(null); }}
           onCancel={() => setPromo(null)}
+          ink={th.ink}
         />
       )}
     </TableBackground>
@@ -455,7 +501,7 @@ export default function Chess({ roomId, auto, autoBot }: { roomId: string } & Au
 
 function Square({
   d, sq, cell, bg, tint, check, coordFile, coordRank, coordColor, piece, pieceSize,
-  target, capture, slideFrom, onPress, stroke,
+  target, capture, slideFrom, onPress, stroke, ink, dot, ring,
 }: {
   /** Where it is DRAWN (0 = top-left of the board as this player sees it). */
   d: number;
@@ -466,6 +512,8 @@ function Square({
   piece: Piece; pieceSize: number; target: boolean; capture: boolean;
   slideFrom: { dx: number; dy: number; key: string } | null;
   onPress: () => void; stroke: number;
+  /** All three fall back to the painted-board defaults. See BoardTheme. */
+  ink?: Ink; dot?: string; ring?: string;
 }) {
   const pulse = useSharedValue(0);
   useEffect(() => {
@@ -515,16 +563,16 @@ function Square({
       {target && capture ? (
         <View pointerEvents="none" style={{
           position: 'absolute', width: cell * 0.78, height: cell * 0.78,
-          borderRadius: cell * 0.39, borderWidth: 4, borderColor: 'rgba(40,35,28,.3)',
+          borderRadius: cell * 0.39, borderWidth: 4, borderColor: ring ?? 'rgba(40,35,28,.3)',
         }} />
       ) : null}
 
-      {piece ? <PieceGlyph piece={piece} size={pieceSize} slideFrom={slideFrom} stroke={stroke} /> : null}
+      {piece ? <PieceGlyph piece={piece} size={pieceSize} slideFrom={slideFrom} stroke={stroke} ink={ink} /> : null}
 
       {target && !capture ? (
         <View pointerEvents="none" style={{
           position: 'absolute', width: cell * 0.3, height: cell * 0.3,
-          borderRadius: cell * 0.15, backgroundColor: DOT,
+          borderRadius: cell * 0.15, backgroundColor: dot ?? DOT,
         }} />
       ) : null}
     </Pressable>
@@ -539,8 +587,11 @@ function Square({
  * squares means a repeated shuffle still animates each time rather than once.
  */
 function PieceGlyph({
-  piece, size, slideFrom, stroke,
-}: { piece: NonNullable<Piece>; size: number; slideFrom: { dx: number; dy: number; key: string } | null; stroke: number }) {
+  piece, size, slideFrom, stroke, ink,
+}: {
+  piece: NonNullable<Piece>; size: number;
+  slideFrom: { dx: number; dy: number; key: string } | null; stroke: number; ink?: Ink;
+}) {
   const x = useSharedValue(0);
   const y = useSharedValue(0);
   const played = useRef<string | null>(null);
@@ -563,7 +614,7 @@ function PieceGlyph({
 
   return (
     <Animated.View style={a} pointerEvents="none">
-      <OutlinedGlyph t={piece.t} c={piece.c} size={size} stroke={stroke} />
+      <OutlinedGlyph t={piece.t} c={piece.c} size={size} stroke={stroke} ink={ink} />
     </Animated.View>
   );
 }
@@ -587,9 +638,9 @@ function PieceGlyph({
  * times the size — the place a mismatched piece style is most obvious.
  */
 function OutlinedGlyph({
-  t, c, size, stroke,
-}: { t: string; c: 'w' | 'b'; size: number; stroke: number }) {
-  const { fill, line } = PIECE_INK[c];
+  t, c, size, stroke, ink,
+}: { t: string; c: 'w' | 'b'; size: number; stroke: number; ink?: Ink }) {
+  const { fill, line } = (ink ?? PIECE_INK)[c];
   const font = { fontSize: size, lineHeight: size * 1.16 } as const;
   return (
     <View style={{ alignItems: 'center', justifyContent: 'center' }}>
@@ -626,8 +677,14 @@ function Seat({
       width, flexDirection: 'row', alignItems: 'center', gap: S[2],
       paddingVertical: S[2], paddingHorizontal: S[3],
       borderRadius: R[2], borderWidth: 1,
-      borderColor: active ? 'rgba(245,196,81,.55)' : 'rgba(255,255,255,.09)',
-      backgroundColor: 'rgba(255,255,255,.045)',
+      // Matches ui.tsx PlayerRow and TicTacToe's SeatChip: an active seat is
+      // LIT, in the game's own accent, rather than edged in gold. Gold is spent
+      // once per screen and the board is where it should go, not the seat.
+      borderColor: active ? ACCENT.chess : white(0.12),
+      backgroundColor: white(active ? 0.12 : 0.06),
+      boxShadow: active
+        ? `0 8px 22px rgba(0,0,0,0.38), inset 0 1px 0 ${white(0.20)}`
+        : `inset 0 1px 0 ${white(0.12)}`,
     }}>
       <Text style={{ fontSize: t.lg, color: C.text }}>{glyph}</Text>
       <View style={{ flex: 1 }}>
@@ -684,6 +741,12 @@ function Swatches({ value, onChange, width }: { value: ThemeName; onChange: (n: 
           style={{
             width: 34, height: 34, borderRadius: R[1], overflow: 'hidden', flexDirection: 'row',
             borderWidth: 2, borderColor: value === n ? '#3b82f6' : 'rgba(255,255,255,.16)',
+            // The glass swatch's two halves are translucent white, so without a
+            // ground of its own it would sample whatever panel it happened to
+            // sit on and show as two near-identical greys. Painting the ROOM
+            // behind every swatch is also the honest preview: it is what that
+            // board will actually be seen against.
+            backgroundColor: C.bg,
           }}
         >
           <View style={{ flex: 1, backgroundColor: THEMES[n].light }} />
@@ -695,8 +758,14 @@ function Swatches({ value, onChange, width }: { value: ThemeName; onChange: (n: 
 }
 
 function PromoPicker({
-  opts, color, onPick, onCancel,
-}: { opts: Move[]; color: 'w' | 'b'; onPick: (m: Move) => void; onCancel: () => void }) {
+  opts, color, onPick, onCancel, ink,
+}: {
+  opts: Move[]; color: 'w' | 'b'; onPick: (m: Move) => void; onCancel: () => void;
+  /** The board's ink. Without it the picker offers a BLACK queen while every
+   *  piece on the glass board behind it is ice — the exact mismatch
+   *  OutlinedGlyph's own comment warns is most obvious here. */
+  ink?: Ink;
+}) {
   const seen = new Set<string>();
   const choices = opts.filter(o => o.promo && !seen.has(o.promo) && seen.add(o.promo));
   return (
@@ -712,14 +781,23 @@ function PromoPicker({
     >
       <View style={{
         flexDirection: 'row', alignItems: 'center', gap: S[3], padding: S[4], borderRadius: R[3],
-        backgroundColor: C.panel, borderWidth: 1, borderColor: goldLine[28],
+        backgroundColor: white(0.10), borderWidth: 1, borderColor: white(0.22),
+        boxShadow: `0 20px 50px rgba(0,0,0,0.5), inset 0 1px 0 ${white(0.18)}`,
       }}>
         {choices.map(m => (
           <Pressable key={m.promo} onPress={() => onPick(m)} accessibilityRole="button" accessibilityLabel={`Promote to ${m.promo}`}>
-            <OutlinedGlyph t={m.promo as string} c={color} size={46} stroke={PIECE_STROKE} />
+            <OutlinedGlyph t={m.promo as string} c={color} size={46} stroke={PIECE_STROKE} ink={ink} />
           </Pressable>
         ))}
-        <Pressable onPress={onCancel} accessibilityRole="button" accessibilityLabel="Cancel">
+        {/* A bare Text in a Pressable is a ~16dp-tall target, and it is the only
+            AT-reachable way out of this picker — the backdrop tap is
+            sighted-only by design (see the comment above). */}
+        <Pressable
+          onPress={onCancel}
+          accessibilityRole="button"
+          accessibilityLabel="Cancel"
+          style={{ minHeight: 44, minWidth: 44, paddingHorizontal: S[2], alignItems: 'center', justifyContent: 'center' }}
+        >
           <Text style={{ color: C.muted, fontSize: 13, fontWeight: '700' }}>Cancel</Text>
         </Pressable>
       </View>

@@ -68,7 +68,7 @@ import {
   newPrivateCode, normalizeCode,
   type RummyPlayer, type Settlement, type TableInfo,
 } from '../../lib/games/rummyTable';
-import { C, S, R, T, mix, goldLine } from '../../lib/games/theme';
+import { C, S, R, T, mix, goldLine, white } from '../../lib/games/theme';
 
 type Card = { id: string; suit: string; rank: string };
 
@@ -769,7 +769,12 @@ export default function Rummy({ tableId = '', auto, autoBot }: { tableId?: strin
           </StatusPill>
         ) : (
           <StatusPill tone={mine ? 'you' : 'plain'}>
-            <Text numberOfLines={1} style={{ color: mine ? C.gold2 : '#cfe8d8', fontSize: t.sm, fontWeight: '800' }}>
+            {/* `flexShrink` matters as much as numberOfLines here: in a row,
+                numberOfLines alone only stops the text WRAPPING — it still
+                claims its full intrinsic width, so a long player name pushed
+                the clock and the validity hint out of the pill instead of
+                truncating itself. */}
+            <Text numberOfLines={1} style={{ flexShrink: 1, color: mine ? C.gold2 : '#cfe8d8', fontSize: t.sm, fontWeight: '800' }}>
               {!mine
                 ? `${turnName} is playing`
                 : mustDraw
@@ -1079,8 +1084,11 @@ function TableCard({ table, onJoin }: { table: TableInfo; onJoin: () => void }) 
       accessibilityLabel={`${table.name}, ${table.stakes}, ${table.players} of ${table.maxPlayers} seated${full ? ', full' : ''}`}
       style={{
         flexDirection: 'row', alignItems: 'center', gap: S[3], padding: S[4],
-        borderRadius: R[3], borderWidth: 1, borderColor: goldLine[22],
-        backgroundColor: mix(C.panel, 92, '#ffffff'), opacity: full ? 0.55 : 1,
+        borderRadius: R[3], borderWidth: 1, borderColor: white(0.16),
+        // The table list sits on the ROOM, so this is light glass — the same
+        // card the games hub uses. Only the pills that live on the felt go dark.
+        backgroundColor: white(0.075), opacity: full ? 0.55 : 1,
+        boxShadow: `inset 0 1px 0 ${white(0.18)}`,
       }}
     >
       <View style={{ flex: 1, gap: 3 }}>
@@ -1379,7 +1387,14 @@ function VoicePill({ voice, onPress, still }: { voice: TableVoice; onPress: () =
         flexDirection: 'row', alignItems: 'center', gap: 4,
         paddingHorizontal: S[2], paddingVertical: 5, borderRadius: R.pill,
         borderWidth: 1, borderColor: live ? goldLine[38] : 'rgba(255,255,255,0.22)',
-        backgroundColor: 'rgba(4,26,14,0.6)',
+        // Dark glass, not light. This pill sits on the FELT rather than on the
+        // room, and a mid-tone teal ground needs a surface that darkens to keep
+        // white text legible — frosting over a lit table works the other way
+        // round from frosting over an unlit one. The value it replaces was
+        // rgba(4,26,14) — a green-black mixed for a felt this table stopped
+        // using, which is why these pills read slightly swampy on the teal.
+        backgroundColor: 'rgba(0,0,0,0.34)',
+        boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.16)',
       }}
     >
       {busy
@@ -1545,7 +1560,8 @@ function DeckLabel({ text }: { text: string }) {
   return (
     <View style={{
       paddingHorizontal: S[2], paddingVertical: 2, borderRadius: R.pill,
-      backgroundColor: 'rgba(18,4,5,0.75)', borderWidth: 1, borderColor: 'rgba(217,169,60,0.28)',
+      backgroundColor: 'rgba(0,0,0,0.42)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.20)',
+      boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.16)',
     }}>
       <Text style={{ color: '#FFF8F1', fontSize: 9.5, fontWeight: '800', letterSpacing: 0.8 }}>{text}</Text>
     </View>
@@ -1559,7 +1575,9 @@ function StatusPill({ tone, children }: { tone: 'plain' | 'you' | 'warn'; childr
       style={{
         flexDirection: 'row', alignItems: 'center', gap: S[2],
         paddingHorizontal: S[3], paddingVertical: 3, borderRadius: R.pill,
-        backgroundColor: 'rgba(4,26,14,0.62)',
+        // Dark glass on the felt — see VoicePill. Same green-black origin.
+        backgroundColor: 'rgba(0,0,0,0.36)',
+        boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.16)',
         borderWidth: 1,
         borderColor: tone === 'you' ? goldLine[38] : tone === 'warn' ? C.goldDeep : 'rgba(255,255,255,0.12)',
         maxWidth: '96%',
@@ -1582,7 +1600,10 @@ function IconBtn({ glyph, label, onPress }: { glyph: string; label: string; onPr
       hitSlop={8}
       style={{
         width: 28, height: 28, borderRadius: 14, alignItems: 'center', justifyContent: 'center',
-        borderWidth: 1, borderColor: 'rgba(255,255,255,0.22)', backgroundColor: 'rgba(4,26,14,0.6)',
+        borderWidth: 1, borderColor: 'rgba(255,255,255,0.22)',
+        // Dark glass on the felt — see VoicePill. Same green-black origin.
+        backgroundColor: 'rgba(0,0,0,0.34)',
+        boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.16)',
       }}
     >
       <Text style={{ color: INK_ON_FELT, fontSize: 14, fontWeight: '800' }}>{glyph}</Text>

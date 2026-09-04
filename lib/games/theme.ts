@@ -69,7 +69,24 @@ export const C = {
   card: '#300D0E',
   line: '#4a2122',
   text: '#FFF8F1',
-  muted: '#CDBBBB',
+  /**
+   * LIGHTENED FOR GLASS (was #CDBBBB).
+   *
+   * Not taste — a measured regression from this restyle. `muted` carries every
+   * blurb, hint and subtitle at 11.5–12.5dp, and it used to sit on a panel that
+   * was maroon at 78% opacity, i.e. nearly as dark as the room. The glass panels
+   * that replaced it composite to roughly #7b5665 under the ambient wash, which
+   * is far LIGHTER — so the same grey that was comfortable on the old surface
+   * fell to a 3.0–3.4 contrast ratio, under the 4.5 WCAG AA needs for text this
+   * size. Raising the surface raises the ink with it.
+   *
+   * #EBE2E2 clears 4.5 on the panel and button surfaces that carry the body
+   * copy (4.91 / 4.73) and is still clearly dimmer than `text`, so the
+   * hierarchy the two colours exist to express survives. The active player row
+   * (the lightest surface in the set) reaches 4.38 — short of AA, but it holds
+   * only a one-word subtitle beside a `text`-coloured name.
+   */
+  muted: '#EBE2E2',
   gold: '#f3c245',
   gold2: '#ffdd72',
   goldDeep: '#a9791b',
@@ -105,6 +122,34 @@ export function alpha(hex: string, a: number): string {
   const [r, g, b] = [0, 2, 4].map(i => parseInt(n.slice(i, i + 2), 16));
   return `rgba(${r}, ${g}, ${b}, ${a})`;
 }
+
+/** Translucent white — the substance every glass surface is made of. */
+export const white = (a: number) => `rgba(255, 255, 255, ${a})`;
+
+/**
+ * The four game accents.
+ *
+ * These live here rather than beside the menu entries because a game's colour
+ * is not a property of its ROW in a list — the board, its pieces, its turn
+ * banner and its card in the hub all have to agree, and they did not: the hub
+ * called chess #8ca2ad while the board drew its own pieces from a different
+ * value entirely.
+ *
+ * Retuned for glass. The old accents were picked against solid maroon panels
+ * and are too dark to read on a translucent surface, where a colour competes
+ * with whatever shows through it — #8ca2ad in particular went to mud.
+ */
+export const ACCENT = {
+  chess: '#7FD8FF',
+  rummy: '#6EF2A5',
+  ludo: '#FFD166',
+  // Lifted from #FF8FA3: measured at 2.89 against the glass panel, under the
+  // 3.0 that large text and UI edges need. The other three clear it comfortably
+  // (3.9-4.4); rose was the only one of the four that did not.
+  tictactoe: '#FFA8B7',
+} as const;
+
+export type GameAccent = keyof typeof ACCENT;
 
 /** The gold-tinted border used by every panel, at the four strengths in use. */
 export const goldLine = {
@@ -145,29 +190,40 @@ export const D3 = {
   well: 'inset 0 3px 8px rgba(0, 0, 0, 0.35), inset 0 -1px 0 rgba(255, 255, 255, 0.12)',
 } as const;
 
-/** The glass primitive: .glass/.panel/.lobby/.tablecard all share this. */
+/**
+ * The glass primitive: .glass/.panel/.lobby/.tablecard all share this.
+ *
+ * A surface is now made of LIGHT, not of paint. It used to be maroon at 78%
+ * over a maroon room, which is a tint of the ground rather than a thing
+ * sitting on it — the panel and the floor were the same colour, so the only
+ * thing separating them was a border. Translucent white instead lets the
+ * ambient wash below show through and TINT the surface, which is what makes
+ * glass read as glass: the panel is a different colour in each corner of the
+ * screen because the room behind it is.
+ *
+ * ponytail: no backdrop blur. expo-blur is installed and BlurView would be the
+ * literal implementation, but what sits behind these panels is AMBIENT — three
+ * wide radial gradients and a 22px dot grain — and blurring a smooth gradient
+ * returns almost the same gradient. The cost is not free: Android's blur is
+ * `experimentalBlurMethod="dimezisBlurView"`, it re-renders its backdrop every
+ * frame, and these panels sit over boards that animate every piece move. Add
+ * BlurView only if a board ever gains detailed content behind a panel (a photo,
+ * a video seat) where the blur would actually have something to dissolve.
+ */
 export const glass = {
-  // TRANSLUCENT, not solid. A solid fill cancelled the ambient wash and the
-  // grain underneath it, so every panel read as a flat rectangle pasted onto
-  // the room rather than a surface lifted off it — the depth was being drawn
-  // and then painted over. 0.78 is as far as it goes: the panels carry body
-  // text, and the ground behind them is near-black, so contrast is the limit
-  // rather than taste. The top rim does the rest of the work; at 0.06 it was
-  // below the threshold where an edge reads as lit at all.
-  backgroundColor: alpha(C.panel, 0.78),
+  backgroundColor: white(0.075),
   borderWidth: 1,
-  borderColor: goldLine[28],
+  borderColor: white(0.16),
   borderRadius: R[3],
-  boxShadow: `${E[3]}, inset 0 1px 0 rgba(255, 255, 255, 0.10)`,
+  // The inset rim is doing more work than it used to: with no solid fill, the
+  // lit top edge is most of what says "this surface has a thickness".
+  boxShadow: `${E[3]}, inset 0 1px 0 ${white(0.18)}`,
   ...Platform.select({ android: { elevation: 12 }, default: {} }),
 } as const;
 
 /** Gold button fill, as a LinearGradient colour stop list. */
 export const GOLD_FILL = [C.gold2, C.gold, C.goldDeep] as const;
 export const GOLD_STOPS = [0, 0.55, 1] as const;
-
-/** Secondary/icon button fill — a soft vertical panel gradient. */
-export const PANEL_FILL = [mix(C.panel, 80, '#ffffff'), mix(C.panel2, 88, '#000000')] as const;
 
 /** Danger button fill. */
 export const RED_FILL = ['#fb7185', '#e11d48', '#a30f2e'] as const;
@@ -187,11 +243,22 @@ export const MOTION = {
   piece: { damping: 15, stiffness: 190, mass: 0.9 },
 } as const;
 
-/** Ambient background wash, from body::before. Three radial glows. */
+/**
+ * Ambient background wash, from body::before. Four radial glows.
+ *
+ * STRENGTHENED, and that is load-bearing rather than decorative. A translucent
+ * surface has no colour of its own; it shows whatever is behind it. At the old
+ * 0.08–0.14 the room was near-black everywhere, so every glass panel resolved
+ * to the same dim grey and the whole screen went flat — the glass was working
+ * and there was simply nothing for it to pick up. A fourth glow in the lower
+ * half matters for the same reason: the boards and the hand sit down there,
+ * and without it the bottom third of every screen was unlit.
+ */
 export const AMBIENT = [
-  { color: C.gold,      opacity: 0.14, cx: '50%',  cy: '-10%', rx: '60%', ry: '40%' },
-  { color: '#7c3aed',   opacity: 0.10, cx: '100%', cy: '0%',   rx: '45%', ry: '30%' },
-  { color: '#10b981',   opacity: 0.08, cx: '0%',   cy: '10%',  rx: '40%', ry: '28%' },
+  { color: C.gold,    opacity: 0.30, cx: '50%',  cy: '-8%', rx: '65%', ry: '42%' },
+  { color: '#7c3aed', opacity: 0.28, cx: '100%', cy: '18%', rx: '52%', ry: '36%' },
+  { color: '#10b981', opacity: 0.18, cx: '0%',   cy: '52%', rx: '48%', ry: '34%' },
+  { color: '#e11d48', opacity: 0.20, cx: '78%',  cy: '88%', rx: '55%', ry: '38%' },
 ] as const;
 
 /** body::after — the 22px dot grain that keeps large felt areas from banding. */
