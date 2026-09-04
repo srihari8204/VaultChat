@@ -14,7 +14,7 @@ import Animated, {
   Easing, runOnJS, cancelAnimation,
 } from 'react-native-reanimated';
 import type { ViewStyle } from 'react-native';
-import { C, S, R, E, mix, goldLine } from '../../lib/games/theme';
+import { C, S, R, E, white } from '../../lib/games/theme';
 import { Btn, useType } from './ui';
 import type { TableVoice } from '../../lib/games/useTableVoice';
 
@@ -54,6 +54,14 @@ export function Toasts({ events }: { events: string[] }) {
       if (done) runOnJS(setMsg)(null);
     }));
     y.value = withDelay(2600, withTiming(20, { duration: 260 }));
+
+    // CANCEL ON UNMOUNT. The fade above carries a 2600ms delay and a completion
+    // callback that calls setMsg through runOnJS — so a board torn down inside
+    // that window (leaving a rummy table, a rematch, or backing out mid-toast)
+    // had the callback land on an unmounted component. Every other repeating
+    // animation in this file already cancels; this one-shot did not, and a
+    // delayed one-shot outlives its component exactly as easily.
+    return () => { cancelAnimation(op); cancelAnimation(y); };
   }, [events, op, y]);
 
   const a = useAnimatedStyle(() => ({ opacity: op.value, transform: [{ translateY: y.value }] }));
@@ -67,9 +75,13 @@ export function Toasts({ events }: { events: string[] }) {
         position: 'absolute', left: S[4], right: S[4], bottom: S[6] + insets.bottom,
         paddingVertical: S[3], paddingHorizontal: S[4],
         borderRadius: R.pill, alignItems: 'center',
-        backgroundColor: 'rgba(20,6,6,0.94)',
-        borderWidth: 1, borderColor: goldLine[28],
-        boxShadow: E[2],
+        // A toast is READ, and it lands over a board mid-game — so it stays the
+        // most opaque surface in the set. It is glass only in its rim and its
+        // neutral tint: the maroon-and-gold version was the old painted palette
+        // sitting on four glass boards.
+        backgroundColor: 'rgba(0,0,0,0.80)',
+        borderWidth: 1, borderColor: white(0.22),
+        boxShadow: `${E[2]}, inset 0 1px 0 ${white(0.18)}`,
       }, a]}
     >
       <Text numberOfLines={2} style={{ color: C.text, fontSize: t.sm, fontWeight: '700', textAlign: 'center' }}>
@@ -181,14 +193,21 @@ export function Sheet({
         style={{ flex: 1, backgroundColor: 'rgba(8,2,2,0.72)', justifyContent: 'flex-end' }}
       >
         {/* Stop taps inside the sheet from dismissing it. */}
+        {/* A sheet is a LIFTED surface, so it is the most solid glass in the
+            set: a near-opaque dark ground under a light rim. Fully translucent
+            would let a busy board read straight through a panel carrying
+            settings and body copy. It was C.panel + goldLine — the old painted
+            palette, and this is the container every settings, rules, result,
+            invite and history sheet renders inside, so it was the single most
+            visible surface the restyle had missed. */}
         <Pressable onPress={() => {}} accessible={false} style={{
-          backgroundColor: C.panel,
+          backgroundColor: 'rgba(14,4,5,0.94)',
           borderTopLeftRadius: R[4], borderTopRightRadius: R[4],
-          borderWidth: 1, borderColor: goldLine[28],
+          borderWidth: 1, borderColor: white(0.16),
           padding: S[4], paddingBottom: S[6], gap: S[3],
-          boxShadow: E[3],
+          boxShadow: `${E[3]}, inset 0 1px 0 ${white(0.18)}`,
         }}>
-          <View style={{ alignSelf: 'center', width: 40, height: 4, borderRadius: 2, backgroundColor: goldLine[38], marginBottom: S[2] }} />
+          <View style={{ alignSelf: 'center', width: 40, height: 4, borderRadius: 2, backgroundColor: white(0.30), marginBottom: S[2] }} />
           <Text style={{ color: C.text, fontSize: t.xl, fontWeight: '800' }}>{title}</Text>
           <ScrollView style={{ maxHeight: scrollCap }} contentContainerStyle={{ gap: S[2] }}>
             {children}
@@ -213,8 +232,12 @@ export function SettingRow({
       style={{
         flexDirection: 'row', alignItems: 'center', gap: S[3],
         paddingVertical: S[3], paddingHorizontal: S[3],
-        borderRadius: R[2], borderWidth: 1, borderColor: goldLine[14],
-        backgroundColor: mix(C.panel2, 86, '#ffffff'),
+        // Matches ui.tsx PlayerRow's inactive state — a row inside a sheet is
+        // the same kind of surface as a row on a board, and these two had
+        // drifted onto different palettes.
+        borderRadius: R[2], borderWidth: 1, borderColor: white(0.12),
+        backgroundColor: white(0.06),
+        boxShadow: `inset 0 1px 0 ${white(0.12)}`,
       }}
     >
       <View style={{ flex: 1 }}>
@@ -223,7 +246,7 @@ export function SettingRow({
       </View>
       <View style={{
         paddingHorizontal: S[3], paddingVertical: S[1], borderRadius: R.pill,
-        borderWidth: 1, borderColor: goldLine[38], backgroundColor: C.panel2,
+        borderWidth: 1, borderColor: white(0.26), backgroundColor: white(0.10),
       }}>
         <Text style={{ color: C.gold, fontSize: t.sm, fontWeight: '800' }}>{value}</Text>
       </View>
@@ -280,8 +303,11 @@ export function VoiceBar({
     <View style={{
       width, flexDirection: 'row', alignItems: 'center', gap: S[2],
       paddingVertical: S[2], paddingHorizontal: S[3],
-      borderRadius: R[2], borderWidth: 1, borderColor: goldLine[38],
-      backgroundColor: mix(C.panel2, 86, '#ffffff'),
+      // Sits directly under a glass board on all four games — it was the last
+      // painted strip on those screens.
+      borderRadius: R[2], borderWidth: 1, borderColor: white(0.22),
+      backgroundColor: white(0.09),
+      boxShadow: `inset 0 1px 0 ${white(0.16)}`,
     }}>
       {/* Amber while nobody else has joined: the player IS in voice, they just
           have no one to talk to yet. Green would claim a connection that is not
@@ -295,7 +321,7 @@ export function VoiceBar({
       {canSpeak && (
         <Btn
           label={muted ? 'Unmute' : 'Mute'}
-          icon={muted ? '🔇' : '🎙'}
+          icon={muted ? 'micOff' : 'mic'}
           compact
           onPress={onToggleMute}
           accessibilityLabel={muted ? 'Unmute your microphone' : 'Mute your microphone'}
@@ -367,7 +393,7 @@ export function VoiceSheet({
             {voice.canSpeak && (
               <Btn
                 label={voice.muted ? 'Unmute' : 'Mute'}
-                icon={voice.muted ? '🔇' : '🎙'}
+                icon={voice.muted ? 'micOff' : 'mic'}
                 compact
                 onPress={voice.toggleMute}
                 accessibilityLabel={voice.muted ? 'Unmute your microphone' : 'Mute your microphone'}
@@ -375,7 +401,7 @@ export function VoiceSheet({
             )}
             <Btn
               label={voice.speaker ? 'Speaker on' : 'Speaker off'}
-              icon={voice.speaker ? '🔊' : '🎧'}
+              icon={voice.speaker ? 'speaker' : 'headset'}
               compact
               onPress={voice.toggleSpeaker}
               accessibilityLabel={voice.speaker ? 'Loudspeaker on' : 'Following your headset'}

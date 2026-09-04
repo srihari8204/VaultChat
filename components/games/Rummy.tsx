@@ -39,6 +39,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
+import Ionicons from '@expo/vector-icons/Ionicons';
 import Svg, { Defs, RadialGradient, Stop, Rect, Line, Ellipse, Text as SvgText } from 'react-native-svg';
 import Animated, {
   useSharedValue, useAnimatedStyle, withSpring, withTiming, withRepeat,
@@ -68,7 +69,7 @@ import {
   newPrivateCode, normalizeCode,
   type RummyPlayer, type Settlement, type TableInfo,
 } from '../../lib/games/rummyTable';
-import { C, S, R, T, mix, goldLine } from '../../lib/games/theme';
+import { C, S, R, T, mix, goldLine, white } from '../../lib/games/theme';
 
 type Card = { id: string; suit: string; rank: string };
 
@@ -674,7 +675,7 @@ export default function Rummy({ tableId = '', auto, autoBot }: { tableId?: strin
       {/* Full-bleed: the cloth reaches under the notch and the gesture bar,
           because a green screen with grey margins looks broken. Only the
           CONTROLS are inset — see the padded box below. */}
-      <Baize width={win.width} height={win.height} />
+      <Baize />
 
       {/* Children take an explicit width and are centred; the horizontal
           inset is handled ONCE, in metrics(), from the measured container.
@@ -769,7 +770,12 @@ export default function Rummy({ tableId = '', auto, autoBot }: { tableId?: strin
           </StatusPill>
         ) : (
           <StatusPill tone={mine ? 'you' : 'plain'}>
-            <Text numberOfLines={1} style={{ color: mine ? C.gold2 : '#cfe8d8', fontSize: t.sm, fontWeight: '800' }}>
+            {/* `flexShrink` matters as much as numberOfLines here: in a row,
+                numberOfLines alone only stops the text WRAPPING — it still
+                claims its full intrinsic width, so a long player name pushed
+                the clock and the validity hint out of the pill instead of
+                truncating itself. */}
+            <Text numberOfLines={1} style={{ flexShrink: 1, color: mine ? C.gold2 : '#cfe8d8', fontSize: t.sm, fontWeight: '800' }}>
               {!mine
                 ? `${turnName} is playing`
                 : mustDraw
@@ -1079,8 +1085,11 @@ function TableCard({ table, onJoin }: { table: TableInfo; onJoin: () => void }) 
       accessibilityLabel={`${table.name}, ${table.stakes}, ${table.players} of ${table.maxPlayers} seated${full ? ', full' : ''}`}
       style={{
         flexDirection: 'row', alignItems: 'center', gap: S[3], padding: S[4],
-        borderRadius: R[3], borderWidth: 1, borderColor: goldLine[22],
-        backgroundColor: mix(C.panel, 92, '#ffffff'), opacity: full ? 0.55 : 1,
+        borderRadius: R[3], borderWidth: 1, borderColor: white(0.16),
+        // The table list sits on the ROOM, so this is light glass — the same
+        // card the games hub uses. Only the pills that live on the felt go dark.
+        backgroundColor: white(0.075), opacity: full ? 0.55 : 1,
+        boxShadow: `inset 0 1px 0 ${white(0.18)}`,
       }}
     >
       <View style={{ flex: 1, gap: 3 }}>
@@ -1379,12 +1388,28 @@ function VoicePill({ voice, onPress, still }: { voice: TableVoice; onPress: () =
         flexDirection: 'row', alignItems: 'center', gap: 4,
         paddingHorizontal: S[2], paddingVertical: 5, borderRadius: R.pill,
         borderWidth: 1, borderColor: live ? goldLine[38] : 'rgba(255,255,255,0.22)',
-        backgroundColor: 'rgba(4,26,14,0.6)',
+        // Dark glass, not light. This pill sits on the FELT rather than on the
+        // room, and a mid-tone teal ground needs a surface that darkens to keep
+        // white text legible — frosting over a lit table works the other way
+        // round from frosting over an unlit one. The value it replaces was
+        // rgba(4,26,14) — a green-black mixed for a felt this table stopped
+        // using, which is why these pills read slightly swampy on the teal.
+        backgroundColor: 'rgba(0,0,0,0.34)',
+        boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.16)',
       }}
     >
       {busy
         ? <ActivityIndicator size="small" color={C.gold2} />
-        : <Animated.Text style={[{ fontSize: 12 }, a]}>{live ? (voice.muted ? '🔇' : '🎙') : '🎤'}</Animated.Text>}
+        : <Animated.View style={a}>
+            {/* Was three emoji in one expression. `mic-off` / `mic` / `mic-outline`
+                say the same three states in the family every other control uses,
+                and unlike an emoji they take the pill's own colour. */}
+            <Ionicons
+              name={live ? (voice.muted ? 'mic-off' : 'mic') : 'mic-outline'}
+              size={13}
+              color={live ? (voice.muted ? C.bad : C.good) : C.gold2}
+            />
+          </Animated.View>}
       <Text style={{ color: live ? '#5fe08c' : INK_ON_FELT, fontSize: T.xs, fontWeight: '800' }}>
         {live ? `${voice.participants.length}` : VOICE_LABEL[voice.phase] ?? ''}
       </Text>
@@ -1518,9 +1543,24 @@ function TableTop({ width, height }: { width: number; height: number }) {
  * the only thing the eye lands on. A brass hairline at the very top keeps it
  * tied to the rail rather than reading as a separate black band.
  */
-function Baize({ width, height }: { width: number; height: number }) {
+/**
+ * AUTO-FIT, not window-sized.
+ *
+ * This took `win.width`/`win.height` and painted itself at WINDOW size while
+ * everything else on the table measures its own container. Those two are not
+ * the same number — this file's own notes record a container of 851 against a
+ * window of 823 — so the cloth fell short of the box it is meant to fill and
+ * left an unpainted strip at one edge, which on a full-bleed surface reads as
+ * the table being broken.
+ *
+ * `absoluteFill` plus percentage rects means it is sized BY its parent instead
+ * of guessing at it: no window read, no orientation special case, and it stays
+ * correct through a rotation without recomputing anything. Same pattern
+ * TableBackground already uses in ui.tsx.
+ */
+function Baize() {
   return (
-    <Svg width={width} height={height} style={{ position: 'absolute', top: 0, left: 0 }} pointerEvents="none">
+    <Svg style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 }} pointerEvents="none">
       <Defs>
         {/* The room, matching C.bg — a near-black with maroon in it. The old
             surround was dark GREEN, which is why the table used to sit in a
@@ -1531,11 +1571,11 @@ function Baize({ width, height }: { width: number; height: number }) {
           <Stop offset="1" stopColor="#110405" />
         </RadialGradient>
       </Defs>
-      <Rect x="0" y="0" width={width} height={height} fill="url(#rbaize)" />
+      <Rect x="0" y="0" width="100%" height="100%" fill="url(#rbaize)" />
       {/* One gold hairline ties the surround to the rail. Kept thin and at low
           opacity: this is trim, not an accent, and the accent budget belongs to
           the primary action. */}
-      <Rect x="0" y="0" width={width} height="1.5" fill={C.gold} opacity="0.4" />
+      <Rect x="0" y="0" width="100%" height="1.5" fill={C.gold} opacity="0.4" />
     </Svg>
   );
 }
@@ -1545,7 +1585,8 @@ function DeckLabel({ text }: { text: string }) {
   return (
     <View style={{
       paddingHorizontal: S[2], paddingVertical: 2, borderRadius: R.pill,
-      backgroundColor: 'rgba(18,4,5,0.75)', borderWidth: 1, borderColor: 'rgba(217,169,60,0.28)',
+      backgroundColor: 'rgba(0,0,0,0.42)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.20)',
+      boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.16)',
     }}>
       <Text style={{ color: '#FFF8F1', fontSize: 9.5, fontWeight: '800', letterSpacing: 0.8 }}>{text}</Text>
     </View>
@@ -1559,7 +1600,9 @@ function StatusPill({ tone, children }: { tone: 'plain' | 'you' | 'warn'; childr
       style={{
         flexDirection: 'row', alignItems: 'center', gap: S[2],
         paddingHorizontal: S[3], paddingVertical: 3, borderRadius: R.pill,
-        backgroundColor: 'rgba(4,26,14,0.62)',
+        // Dark glass on the felt — see VoicePill. Same green-black origin.
+        backgroundColor: 'rgba(0,0,0,0.36)',
+        boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.16)',
         borderWidth: 1,
         borderColor: tone === 'you' ? goldLine[38] : tone === 'warn' ? C.goldDeep : 'rgba(255,255,255,0.12)',
         maxWidth: '96%',
@@ -1582,7 +1625,10 @@ function IconBtn({ glyph, label, onPress }: { glyph: string; label: string; onPr
       hitSlop={8}
       style={{
         width: 28, height: 28, borderRadius: 14, alignItems: 'center', justifyContent: 'center',
-        borderWidth: 1, borderColor: 'rgba(255,255,255,0.22)', backgroundColor: 'rgba(4,26,14,0.6)',
+        borderWidth: 1, borderColor: 'rgba(255,255,255,0.22)',
+        // Dark glass on the felt — see VoicePill. Same green-black origin.
+        backgroundColor: 'rgba(0,0,0,0.34)',
+        boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.16)',
       }}
     >
       <Text style={{ color: INK_ON_FELT, fontSize: 14, fontWeight: '800' }}>{glyph}</Text>
@@ -1934,6 +1980,11 @@ function Seat({
   if (!spot) return null;
   const out = status !== 'active' && status !== 'won';
   const av = Math.max(26, Math.min(40, Math.round(spot.w * 0.5)));
+  // Same shape as `av` above, which already sizes the avatar off the seat box —
+  // the labels under it were the only part of a seat still using constants.
+  // Floor is the old fixed size, so no table gets smaller names than before.
+  const nameSize = Math.max(17, Math.min(24, Math.round(spot.w * 0.20)));
+  const detailSize = Math.max(13.5, Math.round(nameSize * 0.78 * 2) / 2);
   const initials = name.split(/\s+/).map(x => x[0]).join('').slice(0, 2).toUpperCase();
 
   const detail =
@@ -1961,15 +2012,34 @@ function Seat({
           flex: 1, borderRadius: av / 2 - 3, alignItems: 'center', justifyContent: 'center',
           backgroundColor: bot ? '#6f9bff' : C.gold,
         }}>
-          <Text style={{ color: '#2a1c00', fontWeight: '800', fontSize: Math.round(av * 0.36) }}>{bot ? '🤖' : initials}</Text>
+          {/* A bot is an ICON, not an emoji: 'hardware-chip' is what ui.tsx's
+              ICONS.bot already resolves to, and it inherits the disc's ink
+              instead of arriving in whatever colour the platform font paints. */}
+          {bot
+            ? <Ionicons name="hardware-chip" size={Math.round(av * 0.44)} color="#2a1c00" />
+            : <Text style={{ color: '#2a1c00', fontWeight: '800', fontSize: Math.round(av * 0.36) }}>{initials}</Text>}
         </View>
       </View>
       {/* Names were 10.5px on a felt seen at arm's length — smaller than the
-          card pips and the first thing a player actually needs to read. Raised
-          again to 17/13.5: at 14 they were legible but still the quietest thing
-          on a table whose whole point is WHO you are playing. */}
-      <Text numberOfLines={1} style={{ color: '#fff', fontWeight: '800', fontSize: 17, marginTop: 2, maxWidth: spot.w }}>{name}</Text>
-      <Text numberOfLines={1} style={{ color: INK_ON_FELT, fontSize: 13.5, fontWeight: '600', maxWidth: spot.w }}>{detail}</Text>
+          card pips and the first thing a player actually needs to read. They
+          then went to a fixed 17/13.5, which is bigger but still a CONSTANT on
+          the one screen whose table resizes with the window: the same 17px is
+          overbearing on a small phone and undersized on a tablet.
+
+          Derived from the seat's own measured width instead, so the name grows
+          with the table it labels. Clamped at both ends — a name must never
+          drop back to unreadable, and must not swamp the seat it sits under. */}
+      <Text
+        numberOfLines={1}
+        style={{
+          color: '#fff', fontWeight: '800', marginTop: 2, maxWidth: spot.w,
+          fontSize: nameSize,
+        }}
+      >{name}</Text>
+      <Text
+        numberOfLines={1}
+        style={{ color: INK_ON_FELT, fontWeight: '600', maxWidth: spot.w, fontSize: detailSize }}
+      >{detail}</Text>
     </View>
   );
 }

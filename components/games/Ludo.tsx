@@ -18,8 +18,8 @@
  * 56 HOME (finished).
  *
  * The board is one SVG because a 15x15 grid is 225 views otherwise, and the
- * cream/gold surface needs gradients per cell. Tokens sit above it as animated
- * views so they can hop independently of a static board.
+ * glass surface needs gradients per cell. Tokens sit above it as animated views
+ * so they can hop independently of a static board.
  */
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
@@ -33,13 +33,14 @@ import Animated, {
   Easing, cancelAnimation,
 } from 'react-native-reanimated';
 import * as Haptics from 'expo-haptics';
+import Ionicons from '@expo/vector-icons/Ionicons';
 import { useGameSocket, type AutoStart } from '../../lib/games/useGameSocket';
-import { TableBackground, Panel, Btn, Banner, PlayerRow, Reconnecting, RematchBtn, TurnClock, useType, useBoardBox } from './ui';
+import { TableBackground, Panel, Btn, Banner, PlayerRow, Reconnecting, RematchBtn, TurnClock, useType, useBoardBox, usePortraitLock } from './ui';
 import { useRematch } from '../../lib/games/useRematch';
 import { RulesSheet, useFirstTimeRules } from './rules';
 import { rollSeed, receiptFrom, pushReceipt, type RollReceipt } from '../../lib/games/fairness';
 import { useCountdown } from '../../lib/games/useCountdown';
-import { C, S, R, D3, mix, goldLine } from '../../lib/games/theme';
+import { C, S, R, D3, goldLine, white } from '../../lib/games/theme';
 import { playSfx, preloadSfx, soundEnabled, setSoundEnabled } from '../../lib/games/sfx';
 import { Toasts, Confetti, Sheet, SettingRow, VoiceBar } from './feedback';
 import { useTableVoice } from '../../lib/games/useTableVoice';
@@ -68,12 +69,23 @@ const BASE_SPOTS: [number, number][][] = [
 ];
 
 /**
- * Jewel tones from ludo.css — a light, a base and a dark per seat so surfaces
- * can be shaded rather than filled flat.
+ * A light, a base and a dark per seat so surfaces can be shaded rather than
+ * filled flat.
+ *
+ * RETUNED off the jewel tones from ludo.css. Those were mixed for a CREAM
+ * board — dark, saturated colours that need a bright ground to read against —
+ * and the board they now sit on is translucent white over a near-black room,
+ * where #12a054 and #103f8f both go to a dark smudge. These are the same four
+ * hues lifted into the accent family the rest of the games use.
+ *
+ * The NAMES stay honest: each is still recognisably its colour, because the
+ * server and the seat labels both call them Red/Green/Yellow/Blue. And the
+ * shape markers below still carry the real accessibility load — a lighter red
+ * and a lighter green are still a red and a green.
  */
-const P  = ['#d8283f', '#12a054', '#eeb013', '#2168d6'];
-const PD = ['#8d1226', '#076536', '#a96f06', '#103f8f'];
-const PL = ['#ff6b78', '#58e08d', '#ffdb63', '#6fa9ff'];
+const P  = ['#FF6B7D', '#4FE08C', '#FFD166', '#7FD8FF'];
+const PD = ['#B22A3C', '#1E9A5C', '#B98A21', '#2E7FA8'];
+const PL = ['#FFA8B4', '#8BF0B6', '#FFE4A3', '#B4E9FF'];
 const COLOR_NAMES = ['Red', 'Green', 'Yellow', 'Blue'];
 
 /**
@@ -84,9 +96,6 @@ const COLOR_NAMES = ['Red', 'Green', 'Yellow', 'Blue'];
  * one man in twelve. Each seat carries a distinct shape as well.
  */
 const SHAPE = ['▲', '●', '■', '◆'];
-
-const CREAM = '#f6efdd';
-const CREAM_2 = '#e6dcc2';
 
 /** Safe ring cells — starts and star squares. Decorative; the server enforces. */
 const SAFE = new Set([0, 8, 13, 21, 26, 34, 39, 47]);
@@ -167,6 +176,8 @@ export default function Ludo({ roomId = 'ludo-main', auto, autoBot }: { roomId?:
   useEffect(() => () => { if (tumbleTimer.current) clearTimeout(tumbleTimer.current); }, []);
 
   // Up to four seat cards above, plus the die row and two button rows.
+  // Portrait only. See usePortraitLock.
+  usePortraitLock();
   const { size, onLayout: onBoardBox } = useBoardBox(400);
   const cell = size / 15;
 
@@ -322,8 +333,15 @@ export default function Ludo({ roomId = 'ludo-main', auto, autoBot }: { roomId?:
           <Panel style={{ gap: S[2] }}>
             <View style={{ flexDirection: 'row', alignItems: 'center' }}>
               <Text style={{ flex: 1, color: C.text, fontSize: t.md, fontWeight: '800' }}>Stake</Text>
+              {/* The same gold dot the hub's CoinChip uses. This was the 🪙
+                  emoji the hub replaced — one of the two call sites was missed,
+                  so the identical balance rendered two different ways one tap
+                  apart. */}
               {wallet.balance != null && (
-                <Text style={{ color: C.gold, fontSize: t.sm, fontWeight: '800' }}>{`🪙 ${wallet.balance}`}</Text>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
+                  <View style={{ width: 11, height: 11, borderRadius: 6, backgroundColor: C.gold }} />
+                  <Text style={{ color: C.gold, fontSize: t.sm, fontWeight: '800' }}>{wallet.balance}</Text>
+                </View>
               )}
             </View>
             <View style={{ flexDirection: 'row', gap: S[2] }}>
@@ -551,7 +569,8 @@ export default function Ludo({ roomId = 'ludo-main', auto, autoBot }: { roomId?:
               accessibilityLabel={`Send ${e}`}
               style={{
                 width: 56, height: 56, borderRadius: R[2], alignItems: 'center', justifyContent: 'center',
-                borderWidth: 1, borderColor: goldLine[22], backgroundColor: C.panel2,
+                borderWidth: 1, borderColor: white(0.18), backgroundColor: white(0.08),
+                boxShadow: `inset 0 1px 0 ${white(0.16)}`,
               }}
             >
               <Text style={{ fontSize: 26 }}>{e}</Text>
@@ -595,23 +614,29 @@ const BoardSvg = React.memo(function BoardSvg({ size }: { size: number }) {
   return (
     <Svg width={size} height={size} viewBox="0 0 15 15" style={{ position: 'absolute', borderRadius: 14 }}>
       <Defs>
+        {/* GLASS, not cream. Every stop below used to be an opaque board
+            colour; they are now opacities of white, so the room's ambient wash
+            comes through the board and the four corners of it are lit
+            differently — which is the whole difference between a pane and a
+            painted rectangle. The sheen is unchanged: a white highlight was
+            already the right idea, it simply had cream underneath it. */}
         <RadialGradient id="lfelt" cx="50%" cy="50%" rx="65%" ry="65%">
-          <Stop offset="0.42" stopColor={CREAM} />
-          <Stop offset="1" stopColor={CREAM_2} />
+          <Stop offset="0.42" stopColor="#ffffff" stopOpacity="0.10" />
+          <Stop offset="1" stopColor="#ffffff" stopOpacity="0.035" />
         </RadialGradient>
         <RadialGradient id="lsheen" cx="26%" cy="18%" rx="60%" ry="60%">
-          <Stop offset="0" stopColor="#ffffff" stopOpacity="0.55" />
+          <Stop offset="0" stopColor="#ffffff" stopOpacity="0.22" />
           <Stop offset="0.55" stopColor="#ffffff" stopOpacity="0" />
         </RadialGradient>
         <RadialGradient id="lyard" cx="50%" cy="28%" rx="60%" ry="60%">
-          <Stop offset="0" stopColor="#ffffff" />
-          <Stop offset="0.72" stopColor="#f2ecdc" />
-          <Stop offset="1" stopColor="#e2d9c2" />
+          <Stop offset="0" stopColor="#ffffff" stopOpacity="0.16" />
+          <Stop offset="0.72" stopColor="#ffffff" stopOpacity="0.08" />
+          <Stop offset="1" stopColor="#ffffff" stopOpacity="0.04" />
         </RadialGradient>
         <RadialGradient id="lsafe" cx="32%" cy="26%" rx="60%" ry="60%">
-          <Stop offset="0" stopColor="#fffdf4" />
-          <Stop offset="0.62" stopColor={CREAM} />
-          <Stop offset="1" stopColor="#e2d6b8" />
+          <Stop offset="0" stopColor="#ffffff" stopOpacity="0.26" />
+          <Stop offset="0.62" stopColor="#ffffff" stopOpacity="0.16" />
+          <Stop offset="1" stopColor="#ffffff" stopOpacity="0.10" />
         </RadialGradient>
         {P.map((_, i) => (
           <SvgLinear
@@ -633,13 +658,16 @@ const BoardSvg = React.memo(function BoardSvg({ size }: { size: number }) {
       {RING.map(([r, c], i) => (
         <Rect
           key={`r${i}`} x={c} y={r} width="1" height="1"
-          fill={SAFE.has(i) ? 'url(#lsafe)' : CREAM}
-          stroke="rgba(0,0,0,0.09)" strokeWidth="0.03"
+          fill={SAFE.has(i) ? 'url(#lsafe)' : 'rgba(255,255,255,0.07)'}
+          // Every stroke on this board was dark ink for a cream ground. On
+          // glass a black hairline is invisible against a near-black room —
+          // the cells would have merged into one sheet with no grid at all.
+          stroke="rgba(255,255,255,0.14)" strokeWidth="0.03"
         />
       ))}
 
       {homeCells.map(({ rc: [r, c], seat }, i) => (
-        <Rect key={`h${i}`} x={c} y={r} width="1" height="1" fill={`url(#lhome${seat})`} stroke="rgba(0,0,0,0.10)" strokeWidth="0.03" />
+        <Rect key={`h${i}`} x={c} y={r} width="1" height="1" fill={`url(#lhome${seat})`} stroke="rgba(255,255,255,0.18)" strokeWidth="0.03" />
       ))}
 
       {/* start squares — solid colour plus an arrow pointing into the track */}
@@ -647,7 +675,7 @@ const BoardSvg = React.memo(function BoardSvg({ size }: { size: number }) {
         const [r, c] = RING[off];
         return (
           <SvgG key={`s${seat}`}>
-            <Rect x={c} y={r} width="1" height="1" fill={P[seat]} stroke="rgba(0,0,0,0.12)" strokeWidth="0.03" />
+            <Rect x={c} y={r} width="1" height="1" fill={P[seat]} stroke="rgba(255,255,255,0.22)" strokeWidth="0.03" />
             <SvgText
               x={c + 0.5} y={r + 0.72} fontSize="0.62" fill="rgba(255,255,255,0.92)" textAnchor="middle"
               transform={`rotate(${seat * 90} ${c + 0.5} ${r + 0.5})`}
@@ -658,7 +686,9 @@ const BoardSvg = React.memo(function BoardSvg({ size }: { size: number }) {
 
       {stars.map(i => {
         const [r, c] = RING[i];
-        return <SvgText key={`st${i}`} x={c + 0.5} y={r + 0.78} fontSize="0.72" fill="#c2951f" textAnchor="middle">★</SvgText>;
+        // Was #c2951f — a dark ochre chosen to sit on cream. On glass it
+        // disappeared; the safe squares need a star that reads as lit.
+        return <SvgText key={`st${i}`} x={c + 0.5} y={r + 0.78} fontSize="0.72" fill={C.gold2} textAnchor="middle">★</SvgText>;
       })}
 
       {/* centre — four triangles meeting in the middle, one per seat */}
@@ -674,7 +704,10 @@ const BoardSvg = React.memo(function BoardSvg({ size }: { size: number }) {
         <SvgG key={`y${seat}`}>
           <Rect x={c + 0.2} y={r + 0.2} width="5.6" height="5.6" rx="0.8" fill="url(#lyard)" stroke={P[seat]} strokeWidth="0.3" />
           {BASE_SPOTS[seat].map(([br, bc], i) => (
-            <Circle key={i} cx={bc + 0.5} cy={br + 0.5} r="0.62" fill="#ece4d0" stroke={P[seat]} strokeWidth="0.09" />
+            // A base spot is a WELL a token sits in — it has to be darker than
+          // the yard around it, which on a cream board meant a darker cream and
+          // on glass means going the other way, to a hole in the pane.
+          <Circle key={i} cx={bc + 0.5} cy={br + 0.5} r="0.62" fill="rgba(0,0,0,0.28)" stroke={P[seat]} strokeWidth="0.09" />
           ))}
         </SvgG>
       ))}
@@ -867,16 +900,25 @@ function SeatCard({ player, you, active }: { player: LPlayer; you: boolean; acti
       flexDirection: 'row', alignItems: 'center', gap: S[2],
       paddingVertical: S[2], paddingHorizontal: S[3],
       borderRadius: R[2], borderWidth: 1,
-      borderColor: active ? P[player.seat] : goldLine[14],
-      backgroundColor: mix(C.panel2, 86, '#ffffff'),
-      boxShadow: active ? '0 6px 18px rgba(0,0,0,0.35)' : D3.lift1,
+      // Same seat treatment as ui.tsx PlayerRow, TicTacToe and Chess — this
+      // block was a byte-for-byte copy of PlayerRow's and would otherwise be
+      // the one seat row on the four boards still painted panel-grey.
+      borderColor: active ? P[player.seat] : white(0.12),
+      backgroundColor: white(active ? 0.12 : 0.06),
+      boxShadow: active
+        ? `0 8px 22px rgba(0,0,0,0.38), inset 0 1px 0 ${white(0.20)}`
+        : `${D3.lift1}, inset 0 1px 0 ${white(0.12)}`,
     }}>
       <Text style={{ fontSize: 14, color: P[player.seat] }}>{SHAPE[player.seat]}</Text>
       <Text numberOfLines={1} style={{ flex: 1, color: C.text, fontSize: t.sm, fontWeight: '700' }}>
-        {player.name}{you ? ' (you)' : ''}{player.isBot ? ' 🤖' : ''}
+        {player.name}{you ? ' (you)' : ''}
       </Text>
+      {/* The bot marker was a 🤖 appended to the NAME string, so it could not
+          take a colour and it counted against numberOfLines. An icon beside the
+          name is the same information in the family the rest of the board uses. */}
+      {player.isBot ? <Ionicons name="hardware-chip-outline" size={13} color={C.muted} /> : null}
       <Text style={{ color: C.muted, fontSize: 11 }}>{done}/{tokens.length || 4} home</Text>
-      <View style={{ width: 54, height: 5, borderRadius: 3, backgroundColor: C.panel2, overflow: 'hidden' }}>
+      <View style={{ width: 54, height: 5, borderRadius: 3, backgroundColor: 'rgba(0,0,0,0.28)', overflow: 'hidden' }}>
         <View style={{ width: `${pct}%`, height: '100%', backgroundColor: P[player.seat] }} />
       </View>
     </View>
