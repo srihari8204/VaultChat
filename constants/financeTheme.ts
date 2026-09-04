@@ -1,38 +1,118 @@
 // constants/financeTheme.ts — palette + tokens for the Vault Finance hub.
 //
-// Vault Finance uses a light, lavender-branded surface (matching the concept
-// mockups) built on the app's real BRAND_ACCENT so it stays on-brand. Kept as a
-// static palette (like the original calculator) so every finance screen renders
-// identically and never depends on the theme hook.
+// Ice-glass morphism: a cool arctic ground with translucent white panes on top.
+// Mirrors the Figma variable collection "Vault Finance / Color" in file
+// N5Y6KcMUPA3LgtWjfHPctz — that file is the source of truth, this is its
+// implementation. Changing a colour here without changing it there is drift.
+//
+// Kept as a STATIC palette (not the theme hook) so every finance screen renders
+// identically. That was a deliberate decision when the hub was built and it
+// still holds: the module is one coherent surface, not a themed shell.
+//
+// ── Two token names carry the whole restyle ──────────────────────────
+// Every finance screen writes `backgroundColor: FIN.bg` for its root and
+// `backgroundColor: FIN.card` for its cards. So:
+//
+//   FIN.bg   = transparent  → the ice gradient rendered once in
+//                             app/finance/_layout.tsx shows through every screen
+//   FIN.card = translucent  → every card on every screen becomes a glass pane
+//
+// That is why 18 screens changed appearance without 18 screens being edited.
+// If you need a genuinely opaque surface, use FIN.cardSolid.
 
 import { BRAND_ACCENT } from './theme';
 
 export const FIN = {
-  brand:      BRAND_ACCENT,   // #9D6FD0 lavender
+  // ── Brand. Deliberately still the lavender family: the Mini Apps hub tile
+  //    (app/(tabs)/mini.tsx) gradients into these exact colours and is outside
+  //    this module's scope, so drifting the hue would break that handshake.
+  brand:      BRAND_ACCENT,   // #9D6FD0
   brandDeep:  '#6D3FA8',
+  brandInk:   '#4C2A7A',      // text weight of the brand — for labels on brandSoft
   brandSoft:  '#EFE7FA',
   accent:     '#7C3AED',
 
-  good:       '#16A34A',      // lent / positive
-  goodSoft:   '#DCFCE7',
-  bad:        '#DC2626',      // borrowed / overdue
-  badSoft:    '#FEE2E2',
-  warn:       '#D97706',      // pending / due
-  warnSoft:   '#FEF3C7',
-  info:       '#2563EB',
-  infoSoft:   '#DBEAFE',
+  // ── Semantic finance state. Every one of these clears WCAG AA (4.5:1) as
+  //    text on white and on its own soft fill; pinned by grid.selftest.ts §8.
+  //    The previous values (#16A34A, #D97706) did not, at the 11-13pt sizes
+  //    these are actually used at.
+  good:       '#05603A',      // lent / positive
+  goodSoft:   '#DFF5EA',
+  bad:        '#B42318',      // borrowed / overdue
+  badSoft:    '#FDECEA',
+  warn:       '#B54708',      // pending / due
+  warnSoft:   '#FDF1E3',
+  info:       '#175CD3',
+  infoSoft:   '#E6EEFC',
 
-  bg:         '#F5F3FA',      // app surface (light plum)
-  card:       '#FFFFFF',
-  card2:      '#F4F0FA',
-  border:     '#E7E2EE',
-  line:       '#EFEAF5',
+  // ── The ice ground. Rendered once as a gradient in the finance _layout;
+  //    `bg` is transparent so it shows through every screen's root View.
+  bg:         'transparent',
+  bgTop:      '#F8FAFD',
+  bgMid:      '#EBEFF7',
+  bgBottom:   '#DCE3F0',
 
-  text:       '#171320',
-  sub:        '#6B6478',
-  faint:      '#9A93A8',
+  // ── Glass. Translucent white over the ground — NOT a backdrop blur.
+  //    expo-blur is installed but a live blur behind a scrolling list is the
+  //    single most expensive thing you can put on a mid-range Android GPU, and
+  //    on a ground this light it buys almost nothing visually. A translucent
+  //    fill plus a bright rim reads as frost for free.
+  card:       'rgba(255,255,255,0.62)',   // the default pane
+  cardStrong: 'rgba(255,255,255,0.80)',   // raised: sheets, selected chips
+  cardSolid:  '#FFFFFF',                  // when opacity is actually required
+  card2:      '#F1F4FA',
+  glassEdge:  'rgba(255,255,255,0.90)',   // the lit top rim
+  glassRim:   'rgba(16,24,40,0.06)',      // the cool outer hairline
+
+  border:     '#D8DFEC',
+  line:       '#E7ECF5',
+
+  // ── The capped reading column, including its gutters. Not a colour, but it
+  //    lives here because every finance screen already imports FIN and none of
+  //    them would otherwise need an import to stop stretching on a tablet.
+  //    = FIN_CONTENT_MAX_DP (600) + FIN_GUTTER (16) on each side.
+  contentMax: 632,
+
+  // ── Text
+  text:       '#101828',
+  sub:        '#475467',
+  // #98A2B3 was only 2.6:1 on white. `faint` is not decorative — it is the
+  // placeholder in every money field and the hint under every form label, so it
+  // has to be readable. #667085 clears AA and is still plainly tertiary.
+  faint:      '#667085',
   onBrand:    '#FFFFFF',
 } as const;
+
+/**
+ * Hero gradients. The hero is the ONE saturated surface in the module, so its
+ * variants are named here rather than assembled inline — a screen reaching for
+ * a one-off `['#0f7a38', ...]` is how a palette starts to rot.
+ *
+ * Each runs dark → light along the diagonal, matching the brand hero, and each
+ * dark stop is chosen so white body text clears AA across the whole sweep.
+ */
+export const FIN_HERO: Record<'good' | 'bad' | 'warn', [string, string]> = {
+  good: ['#05603A', '#0E9F6E'],
+  bad:  ['#912018', '#D92D20'],
+  warn: ['#93370D', '#DC6803'],
+};
+
+/** Corner radii. Matches "Vault Finance / Scale" in Figma. */
+export const FIN_RADIUS = { xs: 8, sm: 12, md: 16, lg: 20, xl: 28, pill: 999 } as const;
+
+/** Soft two-layer elevation for glass panes. Spread across two shadows so the
+ *  pane reads as floating rather than outlined; `elevation` is what Android
+ *  actually honours, the rest is iOS. */
+export const FIN_SHADOW = {
+  rest:   { shadowColor: '#101828', shadowOpacity: 0.08, shadowRadius: 12, shadowOffset: { width: 0, height: 4 }, elevation: 2 },
+  raised: { shadowColor: '#101828', shadowOpacity: 0.12, shadowRadius: 20, shadowOffset: { width: 0, height: 8 }, elevation: 5 },
+  brand:  { shadowColor: '#6D3FA8', shadowOpacity: 0.30, shadowRadius: 16, shadowOffset: { width: 0, height: 8 }, elevation: 6 },
+} as const;
+
+/** Money must align down a column, so every figure is rendered with tabular
+ *  figures. Without this the proportional digits make ₹1,111 visibly narrower
+ *  than ₹8,888 and a column of amounts looks ragged. */
+export const TABULAR = { fontVariant: ['tabular-nums' as const] };
 
 export type LedgerStatus = 'running' | 'overdue' | 'completed';
 

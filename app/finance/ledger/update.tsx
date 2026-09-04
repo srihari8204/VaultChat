@@ -77,7 +77,7 @@ export default function UpdateAmount() {
 
 const s = StyleSheet.create({
   screen: { flex: 1, backgroundColor: FIN.bg },
-  body: { padding: 16, paddingBottom: 40 },
+  body: { padding: 16, paddingBottom: 40, alignSelf: 'center', width: '100%', maxWidth: FIN.contentMax },
   who: { color: FIN.text, fontSize: 16, fontWeight: '800', marginBottom: 6 },
   hint: { color: FIN.faint, fontSize: 12, marginTop: 12, lineHeight: 17 },
 });

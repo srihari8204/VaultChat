@@ -5,7 +5,7 @@ import React, { useCallback, useMemo, useState } from 'react';
 import { View, Text, ScrollView, StyleSheet, TouchableOpacity, Alert } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter, useFocusEffect } from 'expo-router';
-import { FIN } from '../../../constants/financeTheme';
+import { FIN, TABULAR } from '../../../constants/financeTheme';
 import { FinHeader, HeroCard, Segment, StatTile, Field, Btn, Label, Card } from '../../../components/finance/ui';
 import { inrShort, fmtDate, fmtDateTime, num } from '../../../utils/financeFormat';
 import { formatINR } from '../../../utils/interest';
@@ -312,18 +312,18 @@ export default function ChittiDetail() {
 
 const s = StyleSheet.create({
   screen: { flex: 1, backgroundColor: FIN.bg },
-  body: { padding: 16 },
+  body: { padding: 16, alignSelf: 'center', width: '100%', maxWidth: FIN.contentMax },
   heroLabel: { color: 'rgba(255,255,255,0.85)', fontSize: 10.5, fontWeight: '700', letterSpacing: 0.8 },
-  heroVal: { color: '#fff', fontSize: 28, fontWeight: '800', marginTop: 6 },
+  heroVal: { color: '#fff', fontSize: 28, fontWeight: '800', marginTop: 6, ...TABULAR },
   heroFoot: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 12, paddingTop: 12, borderTopWidth: 1, borderTopColor: 'rgba(255,255,255,0.2)' },
   heroFootTxt: { color: 'rgba(255,255,255,0.9)', fontSize: 12, fontWeight: '600' },
   tileRow: { flexDirection: 'row', gap: 8, marginTop: 12 },
 
-  addRow: { flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 16, backgroundColor: FIN.card, borderRadius: 12, padding: 10, borderWidth: 1, borderColor: FIN.border },
+  addRow: { flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 16, backgroundColor: FIN.card, borderRadius: 12, padding: 10, borderWidth: 1, borderColor: FIN.glassEdge, shadowColor: '#101828', shadowOpacity: 0.08, shadowRadius: 12, shadowOffset: { width: 0, height: 4 }, elevation: 2 },
   addRowTxt: { color: FIN.brandDeep, fontSize: 14.5, fontWeight: '700' },
   addBtn: { width: 36, height: 36, borderRadius: 10, backgroundColor: FIN.brandDeep, alignItems: 'center', justifyContent: 'center' },
 
-  memRow: { flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: FIN.card, borderRadius: 12, padding: 13, marginTop: 10, borderWidth: 1, borderColor: FIN.border },
+  memRow: { flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: FIN.card, borderRadius: 12, padding: 13, marginTop: 10, borderWidth: 1, borderColor: FIN.glassEdge, shadowColor: '#101828', shadowOpacity: 0.08, shadowRadius: 12, shadowOffset: { width: 0, height: 4 }, elevation: 2 },
   memNum: { width: 26, height: 26, borderRadius: 13, backgroundColor: FIN.brandSoft, alignItems: 'center', justifyContent: 'center' },
   memNumTxt: { color: FIN.brandDeep, fontSize: 12, fontWeight: '800' },
   memName: { color: FIN.text, fontSize: 15, fontWeight: '600' },
@@ -340,7 +340,7 @@ const s = StyleSheet.create({
   empty: { color: FIN.sub, fontSize: 13, textAlign: 'center', paddingVertical: 24 },
   hint: { color: FIN.faint, fontSize: 11.5, textAlign: 'center', marginTop: 10 },
 
-  auctionForm: { backgroundColor: FIN.card, borderRadius: 14, padding: 14, marginTop: 14, borderWidth: 1, borderColor: FIN.border },
+  auctionForm: { backgroundColor: FIN.card, borderRadius: 14, padding: 14, marginTop: 14, borderWidth: 1, borderColor: FIN.glassEdge, shadowColor: '#101828', shadowOpacity: 0.08, shadowRadius: 12, shadowOffset: { width: 0, height: 4 }, elevation: 2 },
   formLabel: { color: FIN.text, fontSize: 13, fontWeight: '700', marginBottom: 6, marginTop: 4 },
   winnerWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 7 },
   winnerChip: { paddingHorizontal: 12, paddingVertical: 7, borderRadius: 999, borderWidth: 1, borderColor: FIN.border, backgroundColor: FIN.card2 },
@@ -349,14 +349,14 @@ const s = StyleSheet.create({
   dividendHint: { color: FIN.brandDeep, fontSize: 12.5, fontWeight: '700', marginTop: 10 },
   dividendNote: { color: FIN.sub, fontSize: 11.5, marginTop: 3 },
 
-  auctionRow: { flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: FIN.card, borderRadius: 12, padding: 13, marginTop: 10, borderWidth: 1, borderColor: FIN.border },
+  auctionRow: { flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: FIN.card, borderRadius: 12, padding: 13, marginTop: 10, borderWidth: 1, borderColor: FIN.glassEdge, shadowColor: '#101828', shadowOpacity: 0.08, shadowRadius: 12, shadowOffset: { width: 0, height: 4 }, elevation: 2 },
   aMonth: { width: 34, height: 34, borderRadius: 10, backgroundColor: FIN.brandSoft, alignItems: 'center', justifyContent: 'center' },
   aMonthTxt: { color: FIN.brandDeep, fontSize: 12, fontWeight: '800' },
   aWinner: { color: FIN.text, fontSize: 14.5, fontWeight: '700' },
   aSub: { color: FIN.sub, fontSize: 12, marginTop: 2 },
   aDiv: { color: FIN.good, fontSize: 12, fontWeight: '700', marginTop: 2 },
 
-  histRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 10, backgroundColor: FIN.card, borderRadius: 12, padding: 13, marginTop: 10, borderWidth: 1, borderColor: FIN.border },
+  histRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 10, backgroundColor: FIN.card, borderRadius: 12, padding: 13, marginTop: 10, borderWidth: 1, borderColor: FIN.glassEdge, shadowColor: '#101828', shadowOpacity: 0.08, shadowRadius: 12, shadowOffset: { width: 0, height: 4 }, elevation: 2 },
   histDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: FIN.brand, marginTop: 5 },
   histTxt: { color: FIN.text, fontSize: 13.5, fontWeight: '600' },
   histAt: { color: FIN.sub, fontSize: 11.5, marginTop: 3 },

@@ -3,7 +3,7 @@
 
 import React, { useMemo, useState } from 'react';
 import { View, Text, ScrollView, StyleSheet, Alert, KeyboardAvoidingView, Platform } from 'react-native';
-import { FIN } from '../../constants/financeTheme';
+import { FIN, TABULAR } from '../../constants/financeTheme';
 import { FinHeader, Label, Field, Segment, Btn, HeroCard, Card, RowLine } from '../../components/finance/ui';
 import { num } from '../../utils/financeFormat';
 import { formatINR } from '../../utils/interest';
@@ -72,9 +72,11 @@ export default function EmiCalc() {
           <Field value={rate} onChangeText={setRate} placeholder="e.g. 8.5" keyboardType="numeric" />
 
           <Label>Tenure</Label>
-          <View style={{ flexDirection: 'row', gap: 8 }}>
-            <Field style={{ flex: 1 }} value={tenure} onChangeText={setTenure} placeholder="Enter tenure" keyboardType="numeric" />
-            <View style={{ width: 130 }}>
+          {/* Wraps rather than crushing: on a narrow phone the unit selector
+              drops to its own line instead of squeezing the tenure field. */}
+          <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap' }}>
+            <Field style={{ flexGrow: 1, flexBasis: 140 }} value={tenure} onChangeText={setTenure} placeholder="Enter tenure" keyboardType="numeric" />
+            <View style={{ flexGrow: 1, flexBasis: 132 }}>
               <Segment<'yr' | 'mo'> options={[{ k: 'yr', label: 'Years' }, { k: 'mo', label: 'Months' }]} value={unit} onChange={setUnit} small />
             </View>
           </View>
@@ -140,12 +142,12 @@ function Chip({ label, active, onPress }: { label: string; active: boolean; onPr
 
 const s = StyleSheet.create({
   screen: { flex: 1, backgroundColor: FIN.bg },
-  body: { padding: 16, paddingBottom: 40 },
+  body: { padding: 16, paddingBottom: 40, alignSelf: 'center', width: '100%', maxWidth: FIN.contentMax },
   chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   chip: { paddingHorizontal: 14, paddingVertical: 8, borderRadius: 999, borderWidth: 1, borderColor: FIN.border, backgroundColor: FIN.card, color: FIN.sub, fontSize: 13, fontWeight: '700', overflow: 'hidden' },
   btnRow: { flexDirection: 'row', gap: 12, marginTop: 14 },
   heroLabel: { color: 'rgba(255,255,255,0.85)', fontSize: 10.5, fontWeight: '700', letterSpacing: 0.8 },
-  heroVal: { color: '#fff', fontSize: 30, fontWeight: '800', marginTop: 6 },
+  heroVal: { color: '#fff', fontSize: 30, fontWeight: '800', marginTop: 6, ...TABULAR },
 
   schRow: { flexDirection: 'row', paddingHorizontal: 12, paddingVertical: 9, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: FIN.line },
   schHead: { backgroundColor: FIN.card2 },

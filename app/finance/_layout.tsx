@@ -1,31 +1,53 @@
 // app/finance/_layout.tsx — Vault Finance hub navigation stack.
 // Each screen draws its own FinHeader, so the native header stays hidden.
+//
+// The ice ground lives HERE, once, behind the whole stack. Every screen's root
+// is `backgroundColor: FIN.bg` which is transparent, and the stack's own
+// contentStyle is transparent too, so this single gradient is the ground for
+// all 18 finance screens — and it does not repaint on navigation the way a
+// per-screen gradient would.
 
 import { Stack } from 'expo-router';
 import React from 'react';
+import { View, StyleSheet } from 'react-native';
+import { LinearGradient } from 'expo-linear-gradient';
 import { FIN } from '../../constants/financeTheme';
 
 export default function FinanceLayout() {
   return (
-    <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: FIN.bg } }}>
-      <Stack.Screen name="index" />
-      <Stack.Screen name="ledger/index" />
-      <Stack.Screen name="ledger/new" />
-      <Stack.Screen name="ledger/[id]" />
-      <Stack.Screen name="ledger/edit" />
-      <Stack.Screen name="ledger/update" />
-      <Stack.Screen name="chitti/index" />
-      <Stack.Screen name="chitti/new" />
-      <Stack.Screen name="chitti/[id]" />
-      <Stack.Screen name="interest" />
-      <Stack.Screen name="emi" />
-      <Stack.Screen name="reminders" />
-      <Stack.Screen name="calendar" />
-      <Stack.Screen name="reports" />
-      <Stack.Screen name="saved" />
-      <Stack.Screen name="io" />
-      <Stack.Screen name="customer" />
-      <Stack.Screen name="search" />
-    </Stack>
+    <View style={styles.root}>
+      <LinearGradient
+        colors={[FIN.bgTop, FIN.bgMid, FIN.bgBottom]}
+        locations={[0, 0.45, 1]}
+        style={StyleSheet.absoluteFill}
+        pointerEvents="none"
+      />
+      <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: FIN.bg } }}>
+        <Stack.Screen name="index" />
+        <Stack.Screen name="ledger/index" />
+        <Stack.Screen name="ledger/new" />
+        <Stack.Screen name="ledger/[id]" />
+        <Stack.Screen name="ledger/edit" />
+        <Stack.Screen name="ledger/update" />
+        <Stack.Screen name="chitti/index" />
+        <Stack.Screen name="chitti/new" />
+        <Stack.Screen name="chitti/[id]" />
+        <Stack.Screen name="interest" />
+        <Stack.Screen name="emi" />
+        <Stack.Screen name="reminders" />
+        <Stack.Screen name="calendar" />
+        <Stack.Screen name="reports" />
+        <Stack.Screen name="saved" />
+        <Stack.Screen name="io" />
+        <Stack.Screen name="customer" />
+        <Stack.Screen name="search" />
+      </Stack>
+    </View>
   );
 }
+
+const styles = StyleSheet.create({
+  // bgMid under the gradient: if the gradient ever fails to draw for a frame
+  // during a transition, the fallback is the mid ice tone, not black.
+  root: { flex: 1, backgroundColor: FIN.bgMid },
+});

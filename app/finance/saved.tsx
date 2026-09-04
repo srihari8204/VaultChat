@@ -4,8 +4,9 @@ import React, { useCallback, useMemo, useState } from 'react';
 import { View, Text, ScrollView, StyleSheet, TouchableOpacity } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter, useFocusEffect } from 'expo-router';
-import { FIN } from '../../constants/financeTheme';
-import { FinHeader, Segment, Pill, EmptyState } from '../../components/finance/ui';
+import { FIN, TABULAR } from '../../constants/financeTheme';
+import { FinHeader, Segment, Pill, EmptyState, LoadingState, ErrorState } from '../../components/finance/ui';
+import { useLoadStatus } from '../../components/finance/useLoad';
 import { useMe } from '../../components/finance/useMe';
 import { formatINR, fmtDate } from '../../utils/financeFormat';
 import { listLedger } from '../../db/ledger';
@@ -28,8 +29,10 @@ export default function Saved() {
   const [tab, setTab] = useState<Tab>('all');
   const [items, setItems] = useState<SavedItem[]>([]);
 
+  const { status, begin, done, fail } = useLoadStatus();
   const reload = useCallback(() => {
     if (!me) return;
+    begin();
     (async () => {
       const [ledgers, interest, groups] = await Promise.all([
         listLedger(me.id), listInterest(me.id), listGroups(me.id),
@@ -55,8 +58,9 @@ export default function Saved() {
         })),
       ].sort((a, b) => b.at - a.at);
       setItems(out);
-    })();
-  }, [me, router]);
+      done();
+    })().catch(fail);
+  }, [me, router, begin, done, fail]);
   useFocusEffect(reload);
 
   const shown = useMemo(() => (tab === 'all' ? items : items.filter(i => i.kind === tab)), [items, tab]);
@@ -71,7 +75,11 @@ export default function Saved() {
         />
       </View>
       <ScrollView contentContainerStyle={s.body} showsVerticalScrollIndicator={false}>
-        {shown.length === 0 ? (
+        {status === 'loading' ? (
+          <LoadingState label="Loading your history" />
+        ) : status === 'error' ? (
+          <ErrorState title="Could not load history" sub="Your saved items could not be read. Nothing has been lost." onRetry={reload} />
+        ) : shown.length === 0 ? (
           <EmptyState icon="bookmark-outline" title="Nothing saved yet" sub="Ledgers, interest calculations and Lucky Draw groups you create show up here." />
         ) : shown.map(item => {
           const m = KIND_META[item.kind];
@@ -97,10 +105,10 @@ export default function Saved() {
 
 const s = StyleSheet.create({
   screen: { flex: 1, backgroundColor: FIN.bg },
-  filterWrap: { paddingHorizontal: 16, paddingTop: 12 },
-  body: { padding: 16, paddingTop: 12 },
-  card: { flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: FIN.card, borderRadius: 14, padding: 14, marginBottom: 10, borderWidth: 1, borderColor: FIN.border },
+  filterWrap: { paddingHorizontal: 16, paddingTop: 12, alignSelf: 'center', width: '100%', maxWidth: FIN.contentMax },
+  body: { padding: 16, paddingTop: 12, alignSelf: 'center', width: '100%', maxWidth: FIN.contentMax },
+  card: { flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: FIN.card, borderRadius: 14, padding: 14, marginBottom: 10, borderWidth: 1, borderColor: FIN.glassEdge, shadowColor: '#101828', shadowOpacity: 0.08, shadowRadius: 12, shadowOffset: { width: 0, height: 4 }, elevation: 2 },
   title: { color: FIN.text, fontSize: 15, fontWeight: '700' },
   sub: { color: FIN.sub, fontSize: 12.5, marginTop: 2 },
-  amt: { color: FIN.text, fontSize: 14.5, fontWeight: '800' },
+  amt: { color: FIN.text, fontSize: 14.5, fontWeight: '800', ...TABULAR },
 });

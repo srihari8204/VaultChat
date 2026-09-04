@@ -5,7 +5,7 @@ import React, { useCallback, useMemo, useState } from 'react';
 import { View, Text, ScrollView, StyleSheet, TextInput, TouchableOpacity } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter, useFocusEffect } from 'expo-router';
-import { FIN, STATUS_COLORS } from '../../constants/financeTheme';
+import { FIN, STATUS_COLORS, TABULAR } from '../../constants/financeTheme';
 import { FinHeader, Pill, EmptyState } from '../../components/finance/ui';
 import { useMe } from '../../components/finance/useMe';
 import { formatINR, inrShort } from '../../utils/financeFormat';
@@ -107,11 +107,11 @@ const s = StyleSheet.create({
   screen: { flex: 1, backgroundColor: FIN.bg },
   searchWrap: { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: FIN.card, marginHorizontal: 16, marginTop: 10, borderRadius: 12, borderWidth: 1, borderColor: FIN.border, paddingHorizontal: 12 },
   input: { flex: 1, paddingVertical: 12, fontSize: 15, color: FIN.text },
-  body: { padding: 16, paddingTop: 8 },
+  body: { padding: 16, paddingTop: 8, alignSelf: 'center', width: '100%', maxWidth: FIN.contentMax },
   section: { color: FIN.text, fontSize: 14, fontWeight: '800', marginTop: 12, marginBottom: 10 },
-  card: { flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: FIN.card, borderRadius: 12, padding: 13, marginBottom: 9, borderWidth: 1, borderColor: FIN.border },
+  card: { flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: FIN.card, borderRadius: 12, padding: 13, marginBottom: 9, borderWidth: 1, borderColor: FIN.glassEdge, shadowColor: '#101828', shadowOpacity: 0.08, shadowRadius: 12, shadowOffset: { width: 0, height: 4 }, elevation: 2 },
   dot: { width: 9, height: 9, borderRadius: 5 },
   title: { color: FIN.text, fontSize: 14.5, fontWeight: '700' },
   sub: { color: FIN.sub, fontSize: 12, marginTop: 2 },
-  amt: { color: FIN.text, fontSize: 14, fontWeight: '800' },
+  amt: { color: FIN.text, fontSize: 14, fontWeight: '800', ...TABULAR },
 });

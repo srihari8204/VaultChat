@@ -4,7 +4,7 @@
 import React, { useState } from 'react';
 import { View, Text, ScrollView, StyleSheet, Alert, KeyboardAvoidingView, Platform } from 'react-native';
 import { DateTimePickerAndroid } from '@react-native-community/datetimepicker';
-import { FIN } from '../../constants/financeTheme';
+import { FIN, FIN_HERO, TABULAR } from '../../constants/financeTheme';
 import { FinHeader, Label, Field, Segment, Radio, Btn, DateField, HeroCard, Card, RowLine } from '../../components/finance/ui';
 import { useMe } from '../../components/finance/useMe';
 import { fmtDate, num } from '../../utils/financeFormat';
@@ -126,7 +126,7 @@ export default function InterestCalc() {
 
           {res && (
             <>
-              <HeroCard colors={[FIN.good, '#0f7a38']}>
+              <HeroCard colors={FIN_HERO.good}>
                 <Text style={s.heroLabel}>TOTAL (P + I)</Text>
                 <Text style={s.heroVal}>{formatINR(res.total)}</Text>
               </HeroCard>
@@ -150,10 +150,10 @@ export default function InterestCalc() {
 
 const s = StyleSheet.create({
   screen: { flex: 1, backgroundColor: FIN.bg },
-  body: { padding: 16, paddingBottom: 40 },
+  body: { padding: 16, paddingBottom: 40, alignSelf: 'center', width: '100%', maxWidth: FIN.contentMax },
   radioRow: { flexDirection: 'row', gap: 28, marginTop: 4 },
   durRow: { flexDirection: 'row', gap: 8 },
   btnRow: { flexDirection: 'row', gap: 12, marginTop: 20 },
   heroLabel: { color: 'rgba(255,255,255,0.85)', fontSize: 10.5, fontWeight: '700', letterSpacing: 0.8 },
-  heroVal: { color: '#fff', fontSize: 28, fontWeight: '800', marginTop: 6 },
+  heroVal: { color: '#fff', fontSize: 28, fontWeight: '800', marginTop: 6, ...TABULAR },
 });
