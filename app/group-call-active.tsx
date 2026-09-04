@@ -182,8 +182,35 @@ function GroupCallEngine() {
     }
     const here = new Set(peerIds);
     const away = roster.filter(m => !here.has(m.userId));
-    if (!away.length) {
-      setSheet({ title: 'Add people', message: 'Everyone in this group is already on the call.', actions: [] });
+
+    // GROUP MEMBERS ARE NOT THE ONLY PEOPLE YOU CAN ADD.
+    //
+    // This used to offer `away` and nothing else, so once everyone in the group
+    // had joined it said "Everyone in this group is already on the call" and
+    // there was no way to pull anybody else in — reported as "after 3 members I
+    // am unable to add users", which is exactly what happens in a 3-person
+    // group. The 1:1 screens have always offered every direct contact.
+    //
+    // The server has supported this the whole time: POST /calls/{id}/ring
+    // issues a call_invites grant for anyone named who is not a chat member,
+    // and mayJoinCall admits them on it (migration 123). The grant is scoped to
+    // THIS call — being added to a call gives no access to the group, its
+    // history, or any later call. Only the picker was missing.
+    const seen = new Set<string>([...here, ...away.map(m => m.userId)]);
+    const guests: { id: string; name: string }[] = [];
+    try {
+      const { listChats } = await import('../lib/chatService');
+      for (const c of (await listChats()) ?? []) {
+        if (c.type !== 'direct') continue;
+        const uid = c.peerUserId;
+        if (!uid || seen.has(uid)) continue;
+        seen.add(uid);
+        guests.push({ id: uid, name: c.peerName || c.name || uid.slice(0, 8) });
+      }
+    } catch { /* group members alone are still a usable list */ }
+
+    if (!away.length && !guests.length) {
+      setSheet({ title: 'Add people', message: 'Nobody left to add.', actions: [] });
       return;
     }
     // Bounded to what the sheet can show at once. Ringing "everyone missing" in
@@ -191,11 +218,20 @@ function GroupCallEngine() {
     setSheet({
       title: 'Add people',
       message: `${seatsLeft} of ${CALL_MAX} seats free`,
-      actions: away.slice(0, ADD_LIST_MAX).map(m => ({
-        label: m.name || m.email || m.userId.slice(0, 8),
-        icon: 'person-add-outline' as const,
-        onPress: () => { void engine.inviteToCall([m.userId]); },
-      })),
+      // Group members first — they are the expected candidates — then everyone
+      // else you already talk to. Both go through the same invite.
+      actions: [
+        ...away.map(m => ({
+          label: m.name || m.email || m.userId.slice(0, 8),
+          icon: 'person-add-outline' as const,
+          onPress: () => { void engine.inviteToCall([m.userId]); },
+        })),
+        ...guests.map(g => ({
+          label: g.name,
+          icon: 'person-add-outline' as const,
+          onPress: () => { void engine.inviteToCall([g.id]); },
+        })),
+      ].slice(0, ADD_LIST_MAX),
     });
   }, [chatId, peerIds, seatsLeft]);
 
