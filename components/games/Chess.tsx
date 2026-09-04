@@ -27,7 +27,7 @@ import { useGameSocket, type GameState, type AutoStart } from '../../lib/games/u
 import { TableBackground, Btn, Panel, Banner, PlayerRow, Reconnecting, RematchBtn, useType, useBoardBox, usePortraitLock } from './ui';
 import { useRematch } from '../../lib/games/useRematch';
 import { RulesSheet, useFirstTimeRules } from './rules';
-import { C, S, R, white, ACCENT } from '../../lib/games/theme';
+import { C, S, R, white, ACCENT, roomLit } from '../../lib/games/theme';
 import { playSfx, preloadSfx, soundEnabled, setSoundEnabled } from '../../lib/games/sfx';
 import { Toasts, Confetti, Sheet, SettingRow, VoiceBar, VoiceSheet } from './feedback';
 import { useTableVoice, type TableVoice } from '../../lib/games/useTableVoice';
@@ -776,13 +776,18 @@ function Swatches({ value, onChange, width }: { value: ThemeName; onChange: (n: 
           hitSlop={{ top: 5, bottom: 5, left: 4, right: 4 }}
           style={{
             width: 34, height: 34, borderRadius: R[1], overflow: 'hidden', flexDirection: 'row',
-            borderWidth: 2, borderColor: value === n ? '#3b82f6' : 'rgba(255,255,255,.16)',
-            // The glass swatch's two halves are translucent white, so without a
-            // ground of its own it would sample whatever panel it happened to
-            // sit on and show as two near-identical greys. Painting the ROOM
-            // behind every swatch is also the honest preview: it is what that
-            // board will actually be seen against.
-            backgroundColor: C.bg,
+            // Was #3b82f6 — a generic blue belonging to no palette in this app,
+            // and the only off-token colour left on the board screen.
+            borderWidth: 2, borderColor: value === n ? ACCENT.chess : 'rgba(255,255,255,.16)',
+            // The glass swatch's two halves are translucent white, so it has to
+            // be composited over something to be seen at all. That something is
+            // `roomLit`, NOT C.bg: C.bg is the ground before the ambient wash,
+            // a colour no real pixel is, and over it the glass board's two
+            // tones collapsed into near-black twins — the default board
+            // previewed as an empty slot. Every opaque theme covers this
+            // backdrop completely, so only glass is affected, and for glass it
+            // is the honest preview: the room it will actually be seen in.
+            backgroundColor: roomLit,
           }}
         >
           <View style={{ flex: 1, backgroundColor: THEMES[n].light }} />
