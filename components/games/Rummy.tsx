@@ -39,6 +39,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
+import Ionicons from '@expo/vector-icons/Ionicons';
 import Svg, { Defs, RadialGradient, Stop, Rect, Line, Ellipse, Text as SvgText } from 'react-native-svg';
 import Animated, {
   useSharedValue, useAnimatedStyle, withSpring, withTiming, withRepeat,
@@ -1399,7 +1400,16 @@ function VoicePill({ voice, onPress, still }: { voice: TableVoice; onPress: () =
     >
       {busy
         ? <ActivityIndicator size="small" color={C.gold2} />
-        : <Animated.Text style={[{ fontSize: 12 }, a]}>{live ? (voice.muted ? '🔇' : '🎙') : '🎤'}</Animated.Text>}
+        : <Animated.View style={a}>
+            {/* Was three emoji in one expression. `mic-off` / `mic` / `mic-outline`
+                say the same three states in the family every other control uses,
+                and unlike an emoji they take the pill's own colour. */}
+            <Ionicons
+              name={live ? (voice.muted ? 'mic-off' : 'mic') : 'mic-outline'}
+              size={13}
+              color={live ? (voice.muted ? C.bad : C.good) : C.gold2}
+            />
+          </Animated.View>}
       <Text style={{ color: live ? '#5fe08c' : INK_ON_FELT, fontSize: T.xs, fontWeight: '800' }}>
         {live ? `${voice.participants.length}` : VOICE_LABEL[voice.phase] ?? ''}
       </Text>
@@ -2002,7 +2012,12 @@ function Seat({
           flex: 1, borderRadius: av / 2 - 3, alignItems: 'center', justifyContent: 'center',
           backgroundColor: bot ? '#6f9bff' : C.gold,
         }}>
-          <Text style={{ color: '#2a1c00', fontWeight: '800', fontSize: Math.round(av * 0.36) }}>{bot ? '🤖' : initials}</Text>
+          {/* A bot is an ICON, not an emoji: 'hardware-chip' is what ui.tsx's
+              ICONS.bot already resolves to, and it inherits the disc's ink
+              instead of arriving in whatever colour the platform font paints. */}
+          {bot
+            ? <Ionicons name="hardware-chip" size={Math.round(av * 0.44)} color="#2a1c00" />
+            : <Text style={{ color: '#2a1c00', fontWeight: '800', fontSize: Math.round(av * 0.36) }}>{initials}</Text>}
         </View>
       </View>
       {/* Names were 10.5px on a felt seen at arm's length — smaller than the

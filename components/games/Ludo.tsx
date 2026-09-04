@@ -33,6 +33,7 @@ import Animated, {
   Easing, cancelAnimation,
 } from 'react-native-reanimated';
 import * as Haptics from 'expo-haptics';
+import Ionicons from '@expo/vector-icons/Ionicons';
 import { useGameSocket, type AutoStart } from '../../lib/games/useGameSocket';
 import { TableBackground, Panel, Btn, Banner, PlayerRow, Reconnecting, RematchBtn, TurnClock, useType, useBoardBox, usePortraitLock } from './ui';
 import { useRematch } from '../../lib/games/useRematch';
@@ -910,8 +911,12 @@ function SeatCard({ player, you, active }: { player: LPlayer; you: boolean; acti
     }}>
       <Text style={{ fontSize: 14, color: P[player.seat] }}>{SHAPE[player.seat]}</Text>
       <Text numberOfLines={1} style={{ flex: 1, color: C.text, fontSize: t.sm, fontWeight: '700' }}>
-        {player.name}{you ? ' (you)' : ''}{player.isBot ? ' 🤖' : ''}
+        {player.name}{you ? ' (you)' : ''}
       </Text>
+      {/* The bot marker was a 🤖 appended to the NAME string, so it could not
+          take a colour and it counted against numberOfLines. An icon beside the
+          name is the same information in the family the rest of the board uses. */}
+      {player.isBot ? <Ionicons name="hardware-chip-outline" size={13} color={C.muted} /> : null}
       <Text style={{ color: C.muted, fontSize: 11 }}>{done}/{tokens.length || 4} home</Text>
       <View style={{ width: 54, height: 5, borderRadius: 3, backgroundColor: 'rgba(0,0,0,0.28)', overflow: 'hidden' }}>
         <View style={{ width: `${pct}%`, height: '100%', backgroundColor: P[player.seat] }} />

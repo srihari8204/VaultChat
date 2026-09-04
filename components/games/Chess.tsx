@@ -15,7 +15,7 @@
  * classic cream/brown squares, and chess.com-style highlights.
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Pressable, ScrollView, Text, View, type ViewStyle } from 'react-native';
 import Animated, {
@@ -115,6 +115,10 @@ AsyncStorage.getItem(BOARD_KEY)
   .then(v => { if (isThemeName(v)) boardPref = v; })
   .catch(() => {});
 
+/** Stable empties, so an absent board does not churn every consumer. */
+const NO_MOVES: Move[] = [];
+const NO_BOARD: Piece[] = [];
+
 const FILES = 'abcdefgh';
 // chess.css: `.sq.check { box-shadow: inset 0 0 0 60px rgba(225,90,90,.55) }`
 // with a 1s pulse to .3. OPAQUE here because the pulse below animates opacity —
@@ -169,8 +173,16 @@ export default function Chess({ roomId, auto, autoBot }: { roomId: string } & Au
   // Chess seats by COLOUR, not seat index, and both `color` and `legal` ride at
   // the top level of the frame beside `game`.
   const myColor: 'w' | 'b' | null = state.raw?.color ?? null;
-  const legal: Move[] = Array.isArray(state.raw?.legal) ? state.raw.legal : [];
-  const board: Piece[] = Array.isArray(G?.board) ? G.board : [];
+  // The FALLBACKS are module constants, not fresh literals.
+  //
+  // `state.raw.legal` and `G.board` are already the same array between renders —
+  // they come straight off the last snapshot — but `: []` minted a new one every
+  // time, so on any frame without a board (and on every frame once one existed,
+  // through the memos below) the identity changed. That fed movesFromSel ->
+  // targets -> onSquare -> all 64 squares, which is why a one-second clock tick
+  // re-rendered the whole board.
+  const legal: Move[] = Array.isArray(state.raw?.legal) ? state.raw.legal : NO_MOVES;
+  const board: Piece[] = Array.isArray(G?.board) ? G.board : NO_BOARD;
   const lastMove: Move | null = G?.lastMove ?? null;
 
   /**
@@ -255,7 +267,10 @@ export default function Chess({ roomId, auto, autoBot }: { roomId: string } & Au
     playSfx(G.result === 'draw' || !G.winner ? 'draw' : G.winner === myColor ? 'win' : 'lose');
   }, [G?.result, G?.winner, myColor]);
 
-  const onSquare = (i: number) => {
+  // useCallback so a CLOCK TICK does not rebuild every square's handler. The
+  // deps are the things a tap actually depends on, so this still rebuilds on a
+  // real move — which is correct, the squares must re-render then.
+  const onSquare = useCallback((i: number) => {
     if (!mine || state.spectator) return;
     if (sel != null && targets.has(i)) {
       const opts = movesFromSel.filter(m => m.to === i);
@@ -272,7 +287,7 @@ export default function Chess({ roomId, auto, autoBot }: { roomId: string } & Au
     const can = legal.some(m => m.from === i);
     if (can) { Haptics.selectionAsync().catch(() => {}); playSfx('select'); }
     setSel(can ? i : null);
-  };
+  }, [mine, state.spectator, sel, targets, movesFromSel, legal, send]);
 
   // Only take the screen back BEFORE there is a board. A mid-game drop keeps the
   // position up with a banner over it — see Reconnecting in ui.tsx.
@@ -502,7 +517,21 @@ export default function Chess({ roomId, auto, autoBot }: { roomId: string } & Au
 
 /* ── one square ─────────────────────────────────────────────────────── */
 
-function Square({
+/**
+ * MEMOISED, and it takes `onPress(sq)` rather than a closure.
+ *
+ * 64 of these mount, each owning a shared value and an effect, and every one
+ * was rebuilt on every render of the screen — including the one-second clock
+ * tick, which is what put the 250ms frames in this board's p90. The two things
+ * that defeated memoisation were an `onPress={() => onSquare(idx)}` literal per
+ * square and the unstable `legal`/`board` fallbacks feeding it; both are fixed,
+ * so a tick now re-renders the clock and nothing else. A real move still
+ * re-renders the squares, which is the point.
+ *
+ * Ludo's BoardSvg and Rummy's HandCard are both already memoised for the same
+ * reason — chess was the board that missed it.
+ */
+const Square = React.memo(function Square({
   d, sq, cell, bg, tint, check, coordFile, coordRank, coordColor, piece, pieceSize,
   target, capture, slideFrom, onPress, stroke, ink, dot, ring,
 }: {
@@ -514,7 +543,7 @@ function Square({
   coordFile: string | null; coordRank: string | null; coordColor: string;
   piece: Piece; pieceSize: number; target: boolean; capture: boolean;
   slideFrom: { dx: number; dy: number; key: string } | null;
-  onPress: () => void; stroke: number;
+  onPress: (sq: number) => void; stroke: number;
   /** All three fall back to the painted-board defaults. See BoardTheme. */
   ink?: Ink; dot?: string; ring?: string;
 }) {
@@ -532,7 +561,7 @@ function Square({
 
   return (
     <Pressable
-      onPress={onPress}
+      onPress={() => onPress(sq)}
       accessibilityLabel={squareLabel(sq, piece, target, capture)}
       style={{
         position: 'absolute',
@@ -580,7 +609,7 @@ function Square({
       ) : null}
     </Pressable>
   );
-}
+});
 
 /**
  * The piece, with the last-move slide.
