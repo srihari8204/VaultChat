@@ -79,9 +79,19 @@ func TestPostDeliveryGraceIsNotClampedToTheFloor(t *testing.T) {
 Delivered bodies MAY be reclaimed after a short grace; only the paths that
 ignore delivery (the age purge, the staleness window) carry the floor.`, got)
 	}
+	// The DEFAULT is asserted by TestPostDeliveryGraceDefaultsToThePublishedThreeHours
+	// in delete_on_delivery_test.go, which is where the reasoning for the value
+	// lives. It was 120s — a number nothing documented and nothing enforced —
+	// and is now the three hours the retention policy actually promises.
+	//
+	// What matters HERE is only that the default, whatever it is, is still not
+	// dragged up to the 30-day floor: this path is delivery-bound by design.
 	t.Setenv("DELETE_ON_DELIVERY_GRACE_SEC", "")
-	if got := retentionGraceSec(); got != 120 {
-		t.Fatalf("the shipped 120s default changed to %ds", got)
+	if got := retentionGraceSec(); got >= MinRetentionDays*day {
+		t.Fatalf(`the default post-delivery grace (%ds) reached the retention floor.
+
+That makes post-delivery reclaim impossible and turns delete-on-delivery back
+into the age purge it exists to replace.`, got)
 	}
 }
 

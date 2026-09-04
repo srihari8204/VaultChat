@@ -95,7 +95,19 @@ func MinRetentionDaysEffective() int {
 // that every device has already received MAY be reclaimed after a short grace
 // (three hours, say). Clamping here bought no safety the predicate did not
 // already provide, and cost the storage reclaim the feature exists for.
-func retentionGraceSec() int { return envInt("DELETE_ON_DELIVERY_GRACE_SEC", 120) }
+//
+// THE DEFAULT IS THE PUBLISHED PROMISE, NOT THE MOST AGGRESSIVE VALUE.
+//
+// This defaulted to 120 seconds. Nothing enforced that number and nothing
+// documented it — it simply meant that whoever first set DELETE_ON_DELIVERY=true
+// would start reclaiming bodies two minutes after delivery, when the policy
+// this feature exists to implement says three hours. Two minutes is not safer
+// for being smaller: it is a shorter window in which a recipient device that
+// acked and then lost its storage (restore-from-backup, a crash mid-write, a
+// factory reset) can still be re-served, and it is not the number the product
+// tells users. Defaulting to the promise means the flag alone produces the
+// documented behaviour, and a shorter window has to be asked for explicitly.
+func retentionGraceSec() int { return envInt("DELETE_ON_DELIVERY_GRACE_SEC", 3*60*60) }
 
 // retentionStaleDays is how long a device may be silent before the delivery
 // predicate stops waiting for it — clamped to the floor, because this is the
@@ -281,29 +293,72 @@ func sweepExpiredChats(ctx context.Context) {
 
 // ── delete-on-delivery (WhatsApp model; env-gated) ─────────────────────
 
-func sweepDeliveredMessages(ctx context.Context) {
-	// Post-DELIVERY grace only. The predicate below is what protects an
-	// undelivered message — it refuses to touch a row while any active member
-	// or device is still behind it — so this may stay short, and reclaiming a
-	// body every device already holds is the point of the feature.
-	grace := retentionGraceSec()
-	maxDays := envInt("DELETE_ON_DELIVERY_MAX_AGE_DAYS", 0)
-	// The age purge is unconditional — it does not consult delivery at all — so
-	// it is the one knob that could silently undercut the floor. Clamp it up.
-	if maxDays > 0 && maxDays < MinRetentionDaysEffective() {
-		maxDays = MinRetentionDaysEffective()
-	}
-	// How long a device may be silent before the sweep stops waiting for it.
-	// Too low destroys messages for someone on holiday; too high lets one
-	// retired handset pin an account's history on the server indefinitely.
-	staleDays := retentionStaleDays() // clamped to the retention floor
-	// P4.1: batched like the other sweeps — the one-shot UPDATE rewrote every
-	// eligible row in a single statement (lock + WAL burst scaling with backlog).
-	var purged int64
-	for i := 0; i < sweepMaxIters; i++ {
-		tag, err := db.SysPool.Exec(ctx,
-			`UPDATE messages m
-			    SET content = NULL
+// deliveredMessagesSQL is the delete-on-delivery statement, kept as a const for
+// the same reason expiredMessagesSQL is: this is the most consequential
+// predicate in the package, and a test must be able to assert the statement the
+// server actually runs rather than a paraphrase of it.
+//
+// EVERY `NOT EXISTS` HERE IS LOAD-BEARING. Between them they are the only thing
+// standing between an undelivered message and permanent destruction — the clock
+// is not, because this path is deliberately exempt from MinRetentionDays:
+//
+//	EXISTS chat_members o          there is somebody other than the sender in
+//	                               this chat at all. Without it a solo/again-empty
+//	                               chat trivially satisfies "nobody is behind
+//	                               this message" and every message in it is
+//	                               reclaimed immediately.
+//	NOT EXISTS chat_members cm     no other member's ACCOUNT pointer is behind
+//	                               the message.
+//	NOT EXISTS ... user_sync_devices
+//	                               no active DEVICE of any other member is
+//	                               behind it. The account pointer is advanced by
+//	                               whichever device acks first, so this is what
+//	                               protects the second handset. Devices silent
+//	                               past the staleness window are ignored, or one
+//	                               retired phone pins an account forever.
+//
+// The grace interval is a comfort margin, NOT the protection. Deleting any of
+// the three clauses would still leave a statement that compiles, runs, and
+// quietly destroys messages that were never delivered.
+//
+// IT ALSO RECLAIMS meta, NOT JUST content.
+//
+// This nulled only `content` — which would have reclaimed the ciphertext and
+// left `meta` untouched on the durable spine. `meta` is plaintext JSONB holding
+// a base64 JPEG thumbnail of every photo and video, filenames, MIME types, poll
+// option TEXT and mention display names. Reclaiming the encrypted payload while
+// keeping a legible picture of it forever is not retention, and it is precisely
+// the failure the ephemeral body store was designed to prevent — a design that
+// never ran, because that store is refused at boot (jobs.bodyStoreRefused).
+//
+// So the split happens here instead, against jobs.MetaPublicKeys, which is the
+// SAME list the write side uses. Two derivations mirror chatsSplitMeta exactly,
+// and both are required rather than cosmetic:
+//
+//	optionCount     the poll vote handler validates optionIndex against it, and
+//	                falls back to len(options) when absent. Strip `options`
+//	                without deriving this and voting breaks on every existing
+//	                poll the moment its body is reclaimed.
+//	mentionUserIds  chatsSendMessagePush overrides a muted chat for mentioned
+//	                users, reading only userId — so the ids survive while the
+//	                display names go.
+const deliveredMessagesSQL = `UPDATE messages m
+			    SET content = NULL,
+			        meta = CASE WHEN m.meta IS NULL THEN NULL ELSE (
+			                 SELECT COALESCE(jsonb_object_agg(e.key, e.value), '{}'::jsonb)
+			                   FROM jsonb_each(m.meta) AS e
+			                  WHERE e.key = ANY($4::text[])
+			               )
+			               || CASE WHEN jsonb_typeof(m.meta->'options') = 'array'
+			                       THEN jsonb_build_object('optionCount', jsonb_array_length(m.meta->'options'))
+			                       ELSE '{}'::jsonb END
+			               || CASE WHEN jsonb_typeof(m.meta->'mentions') = 'array'
+			                       THEN jsonb_build_object('mentionUserIds', (
+			                              SELECT COALESCE(jsonb_agg(x->>'userId'), '[]'::jsonb)
+			                                FROM jsonb_array_elements(m.meta->'mentions') AS x
+			                               WHERE x->>'userId' IS NOT NULL))
+			                       ELSE '{}'::jsonb END
+			               END
 			  WHERE m.ctid IN (
 			    SELECT m2.ctid FROM messages m2
 			     WHERE m2.content IS NOT NULL
@@ -341,7 +396,30 @@ func sweepDeliveredMessages(ctx context.Context) {
 			            AND usd.last_sync_at > NOW() - ($3 || ' days')::interval
 			            AND (cdd.last_delivered_message_id IS NULL OR cdd.last_delivered_message_id < m2.id)
 			       )
-			     LIMIT $2)`, strconv.Itoa(grace), sweepBatch, strconv.Itoa(staleDays))
+			     LIMIT $2)`
+
+func sweepDeliveredMessages(ctx context.Context) {
+	// Post-DELIVERY grace only. The predicate below is what protects an
+	// undelivered message — it refuses to touch a row while any active member
+	// or device is still behind it — so this may stay short, and reclaiming a
+	// body every device already holds is the point of the feature.
+	grace := retentionGraceSec()
+	maxDays := envInt("DELETE_ON_DELIVERY_MAX_AGE_DAYS", 0)
+	// The age purge is unconditional — it does not consult delivery at all — so
+	// it is the one knob that could silently undercut the floor. Clamp it up.
+	if maxDays > 0 && maxDays < MinRetentionDaysEffective() {
+		maxDays = MinRetentionDaysEffective()
+	}
+	// How long a device may be silent before the sweep stops waiting for it.
+	// Too low destroys messages for someone on holiday; too high lets one
+	// retired handset pin an account's history on the server indefinitely.
+	staleDays := retentionStaleDays() // clamped to the retention floor
+	// P4.1: batched like the other sweeps — the one-shot UPDATE rewrote every
+	// eligible row in a single statement (lock + WAL burst scaling with backlog).
+	var purged int64
+	for i := 0; i < sweepMaxIters; i++ {
+		tag, err := db.SysPool.Exec(ctx,
+			deliveredMessagesSQL, strconv.Itoa(grace), sweepBatch, strconv.Itoa(staleDays), MetaPublicKeys)
 		if err != nil {
 			log.Printf("[delete-on-delivery] failed: %v", err)
 			return

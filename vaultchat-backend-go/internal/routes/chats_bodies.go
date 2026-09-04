@@ -72,13 +72,12 @@ func bodiesEnabled() bool { return jobs.BodyStoreEnabled() }
 //	optionCount    poll vote handler — see chatsSplitMeta
 //	mentionUserIds push override for muted chats — see chatsSplitMeta
 //	encrypted      render hint the client needs BEFORE it has the body
-var chatsMetaPublicKeys = map[string]bool{
-	"attachmentId": true, "viewOnce": true, "revoked": true,
-	"announcement": true, "audience": true, "silent": true,
-	"groupId": true, "gifUrl": true,
-	"allowMultiple": true, "optionCount": true,
-	"mentionUserIds": true, "encrypted": true,
-}
+// The list itself now lives in jobs.MetaPublicKeys — the delete-on-delivery
+// sweep applies the SAME split when it reclaims a delivered body, and a
+// security allow-list defined in two places is how the writer and the reclaimer
+// come to disagree about what is private. See that file for why each key is on
+// it. This alias keeps the write-side call sites unchanged.
+var chatsMetaPublicKeys = jobs.MetaPublicKeySet
 
 // chatsSplitMeta divides message metadata into what the server keeps forever and
 // what expires with the body.
