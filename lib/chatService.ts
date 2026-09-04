@@ -7,7 +7,7 @@ import * as Crypto from 'expo-crypto';
 import * as FileSystem from 'expo-file-system/legacy';
 import { api, getAccessToken } from './api';
 import { Buffer } from 'buffer';   // not a RN global — see myUserId's token fallback
-import { unwrapPreview } from './linkPreview';
+import { splitMeta, wrapEnvelope, unwrapEnvelope } from './msgEnvelope';
 import perf from './perf';
 import { SERVER_URL } from '../constants/server';
 import { E2EE_ENABLED, GROUP_E2EE, E2EE_STRICT, UPLOAD_PROGRESS } from '../constants/flags';
@@ -817,8 +817,14 @@ export async function hydrateMessages(
   const TOMBSTONE = '\u0000__e2ee_undecryptable__';
   const finish = (m: Message, plain: string): Message => {
     if (plain === TOMBSTONE) return m;   // leave the envelope → bubble shows its locked state
-    const { text, lp } = unwrapPreview(plain);
-    return lp ? { ...m, content: text, meta: { ...(m.meta ?? {}), linkPreview: lp } }
+    const { text, pm } = unwrapEnvelope(plain);
+    // The server's copy is the routing subset; the private half travelled
+    // inside the ciphertext. Merging here — the single funnel every render path
+    // goes through — is what makes the split invisible to the UI: bubbles read
+    // meta.thumb / meta.filename / meta.linkPreview exactly as they always did.
+    // Private wins on a key collision: it is the sender's original value, where
+    // the public copy may be a server-derived summary (optionCount).
+    return pm ? { ...m, content: text, meta: { ...(m.meta ?? {}), ...pm } }
               : { ...m, content: plain };
   };
   // Own messages sent BEFORE the plaintext cache existed have no local copy and
@@ -1093,7 +1099,7 @@ export async function hydrateOwnPreviews(
       if (row.senderId !== me) continue;
       if (row.content != null && !looksEncrypted(row.content)) continue;
       const pt = await readOwnPlaintext(chatId, row.id);   // no retry: a list row is not worth stalling on
-      if (pt != null) map.set(chatId, { ...row, content: unwrapPreview(pt).text });
+      if (pt != null) map.set(chatId, { ...row, content: unwrapEnvelope(pt).text });
     }
   } catch { /* previews are best-effort — never block the chat list */ }
   return map;
@@ -1342,13 +1348,21 @@ export async function sendMessage(
   // poll/sticker/GIF/location all route through here, so they're covered too.
   const clientId = opts.clientId ?? Crypto.randomUUID();
   const _t0 = Date.now();
-  const content = await encryptForChat(chatId, plaintext);
+  // Same split the outbox applies (lib/msgEnvelope): the server gets the
+  // routing subset of meta, everything else rides inside the ciphertext. This
+  // is the MEDIA send path — sendMediaMessage routes through here — so it is
+  // the one carrying meta.thumb, the base64 preview of the photo. Missing it
+  // here would have left the leak open for exactly the messages that leak most.
+  const { pub: serverMeta, priv } = splitMeta(opts.meta);
+  const wire = wrapEnvelope(plaintext, priv);
+  let content = await encryptForChat(chatId, wire);
+  if (content === wire && wire !== plaintext) content = plaintext;  // never ship the wrapper unencrypted
   const _tEnc = Date.now();
   perf.mark('send_encrypt_done', { chatId, ms: _tEnc - _t0, encrypted: content !== plaintext });
   try {
     const msg = await api<Message>(`/chats/${encodeURIComponent(chatId)}/messages`, {
       method: 'POST',
-      json: { content, type, replyToId: opts.replyToId ?? null, meta: opts.meta ?? null, clientId },
+      json: { content, type, replyToId: opts.replyToId ?? null, meta: serverMeta, clientId },
     });
     // The server emits `id` as a STRING on EVERY path — chatsPublicMsg is
     // `ID string` (fmt.Sprintf("%d")), used by the POST ack, GET and the
@@ -1369,7 +1383,14 @@ export async function sendMessage(
       transport: perf.snapshot().transport,
       at: _tAck,
     });
-    if (content !== plaintext) await cacheOwnPlaintext(chatId, msg?.id, plaintext);
+    // Cache the WRAPPED form, so re-reading the sender's own message recovers
+    // the private meta too — hydrateMessages unwraps it on the way out. Caching
+    // bare `plaintext` here would give the sender a photo bubble with no
+    // thumbnail after a restart, while every recipient still had one.
+    if (content !== plaintext) await cacheOwnPlaintext(chatId, msg?.id, wire);
+    // The ack echoes the routing subset we sent; the sender's own row keeps
+    // everything (same reason as the outbox path in messageQueue.postOnce).
+    if (msg && opts.meta) (msg as any).meta = opts.meta;
     return msg;
   } catch (err) {
     perf.recordSend({

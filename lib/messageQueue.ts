@@ -24,7 +24,7 @@ import * as Crypto from 'expo-crypto';
 import { api } from './api';
 import { queuePut, queueList, queueListByTag, queueGet, queueDelete, queueMigrate } from './localDb';
 import { encryptForChat, cacheOwnPlaintext, editMessage, deleteMessage, type Message } from './chatService';
-import { wrapWithPreview } from './linkPreview';
+import { splitMeta, wrapEnvelope } from './msgEnvelope';
 import { type MsgState } from './messageState';
 import perf from './perf';
 
@@ -320,6 +320,12 @@ async function reBodyAwaiting(): Promise<void> {
   // queue was still waiting on the first doomed PUT. Sending is the job;
   // recovery is the optimisation, and an optimisation must never block it.
   if (!online) return;
+  // The server told us it has no re-body endpoint (503). Under delivery-driven
+  // retention it does not need one: a message that has NOT reached every
+  // recipient keeps its body on the server indefinitely, so there is never a
+  // reclaimed body to restore. Without this latch we re-POST the same doomed
+  // PUTs on every flush, forever, for every accepted row.
+  if (reBodyUnsupported) return;
 
   let rows: QueuedMessage[];
   try { rows = await queueList<QueuedMessage>('msg', 100, 0); } catch { return; }
@@ -353,6 +359,14 @@ async function reBodyAwaiting(): Promise<void> {
       } else if (status === 404 || status === 403) {
         // Deleted, or no longer ours. Nothing to recover.
         await drop(m.tempId);
+      } else if (status === 503) {
+        // Re-body is switched off server-side. NOT a failure of this message:
+        // the row stays exactly where it is, still holding its ciphertext,
+        // still released by the delivery receipt. Only the recovery ATTEMPT is
+        // abandoned — permanently, because 503 here is a deployment property
+        // and not something the next flush could find changed.
+        reBodyUnsupported = true;
+        return;
       } else if (!status) {
         // No HTTP status = the request never reached the server (dropped
         // connection, DNS, radio gone). Stop the whole pass: every remaining
@@ -366,6 +380,10 @@ async function reBodyAwaiting(): Promise<void> {
 
 /** Recovery attempts per flush. Bounded so a pass can never become a stall. */
 const RE_BODY_PER_FLUSH = 3;
+
+/** Latched on the first 503 — see reBodyAwaiting. Process-lifetime, so a
+ *  server that gains the endpoint is picked up on the next app start. */
+let reBodyUnsupported = false;
 
 /**
  * How long to wait after acceptance before attempting recovery.
@@ -420,22 +438,29 @@ async function postOnce(item: QueuedMessage): Promise<PostResult> {
     return { real: await editMessage(item.chatId, item.targetId!, item.plaintext), wire: null };
   }
 
-  // F5 (E2EE link previews): the sender-resolved preview lives in LOCAL meta
-  // (meta.linkPreview) so the optimistic bubble can render it, but it must
-  // NEVER ride in the plaintext server meta. Fold it INSIDE the E2EE content
-  // (wrapWithPreview) and strip it from the POSTed meta. If encryption doesn't
-  // actually happen (rare graceful-plaintext fallback), send the bare text and
-  // drop the preview rather than leak it.
-  const { linkPreview, ...restMeta } = (item.meta ?? {}) as any;
-  const serverMeta = Object.keys(restMeta).length ? restMeta : null;
-  const wire = linkPreview ? wrapWithPreview(item.plaintext, linkPreview) : item.plaintext;
+  // The server receives ONLY the routing subset of meta; everything else is
+  // message content and rides inside the ciphertext (lib/msgEnvelope).
+  //
+  // This used to special-case meta.linkPreview alone, folding it into the body
+  // and posting the whole of the rest. That was the right idea applied to one
+  // field: `thumb` (a base64 JPEG of the photo), `filename`, `mime`, waveforms,
+  // poll option TEXT and mention display names all went to the server in the
+  // clear, beside the ciphertext that was carefully hiding the same content.
+  // linkPreview is now simply one private key among many, so the special case
+  // is gone rather than duplicated.
+  const { pub: serverMeta, priv } = splitMeta(item.meta);
+  const wire = wrapEnvelope(item.plaintext, priv);
 
   // Perf: split encrypt (X3DH/ratchet) vs POST round-trip — this is the REAL
   // text send path (the queue), so this is what drives the pending→sent tick.
   const _t0 = Date.now();
   let content = await encryptForChat(item.chatId, wire);
   const encrypted = content !== wire;
-  if (!encrypted && linkPreview) content = item.plaintext;   // plaintext fallback: never leak the wrapper
+  // Graceful-plaintext fallback (legacy, off under E2EE_STRICT): send the bare
+  // text. The wrapper exists to hide the private meta, so shipping it
+  // unencrypted would publish exactly what it was protecting — dropping the
+  // private meta is the only safe direction.
+  if (!encrypted && wire !== item.plaintext) content = item.plaintext;
   const _tEnc = Date.now();
   perf.mark('queue_encrypt_done', { chatId: item.chatId, ms: _tEnc - _t0, encrypted });
   const real = await api<Message>(`/chats/${encodeURIComponent(item.chatId)}/messages`, {
@@ -487,6 +512,11 @@ async function postOnce(item: QueuedMessage): Promise<PostResult> {
   // envelope, and never sees any of this.
   if (real && (item.op ?? 'send') === 'send' && item.plaintext) {
     (real as any).content = item.plaintext;
+    // ...and the FULL meta, not the subset that came back from the server.
+    // `real` is the POST response, so its meta is the routing subset we just
+    // sent; caching that would leave the sender's own row without the thumbnail
+    // and filename of the photo they just sent, while every recipient has both.
+    if (item.meta) (real as any).meta = item.meta;
     // AND COMMIT IT HERE, rather than trusting a caller to do it.
     //
     // This function is the only place that holds BOTH the plaintext and the

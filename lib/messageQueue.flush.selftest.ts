@@ -51,7 +51,6 @@ export default { addEventListener(cb) { H().netListeners.push(cb); return () => 
 let _n = 0;
 export function randomUUID() { return 'cid-' + (++_n); }
 export async function api(path, opts) { return H().api(path, opts); }
-export function wrapWithPreview(t) { return t; }
 export const perf = { mark() {}, recordSend() {}, snapshot() { return { transport: 'test' }; } };
 export async function encryptForChat(_c, t) { return 'CT:' + t; }
 export async function cacheOwnPlaintext() {}
@@ -94,7 +93,11 @@ const IMPORT_REWRITES: [RegExp, string][] = [
    `import { queuePut, queueList, queueListByTag, queueGet, queueDelete, queueMigrate } from './stubs.js';`],
   [/^import \{ encryptForChat, cacheOwnPlaintext, editMessage, deleteMessage, type Message \} from '\.\/chatService';$/m,
    `import { encryptForChat, cacheOwnPlaintext, editMessage, deleteMessage } from './stubs.js';`],
-  [/^import \{ wrapWithPreview \} from '\.\/linkPreview';$/m, `import { wrapWithPreview } from './stubs.js';`],
+  // msgEnvelope is NOT stubbed: it has no runtime imports, so the real module
+  // is copied in below and the flush path exercises the actual public/private
+  // meta split rather than a stand-in that always agrees with it.
+  [/^import \{ splitMeta, wrapEnvelope \} from '\.\/msgEnvelope';$/m,
+   `import { splitMeta, wrapEnvelope } from './msgEnvelope.ts';`],
   [/^import \{ type MsgState \} from '\.\/messageState';$/m, ``],
   [/^import perf from '\.\/perf';$/m, `import { perf } from './stubs.js';`],
 ];
@@ -110,7 +113,15 @@ for (const [re, to] of IMPORT_REWRITES) {
 // Type positions that referenced the removed type-only imports.
 src = src.replace(/\bMessage\['type'\]/g, 'any').replace(/\bMsgState\b/g, 'any');
 
-const stray = [...src.matchAll(/^import .*from '([^']+)';$/gm)].map(m => m[1]).filter(p => p !== './stubs.js');
+// The real msgEnvelope, minus its type-only import, so `./msgEnvelope.ts`
+// resolves inside WORK and the split under test is the shipping one.
+writeFileSync(join(WORK, 'msgEnvelope.ts'),
+  readFileSync(join(HERE, 'msgEnvelope.ts'), 'utf8')
+    .replace(/^import type .*$/m, ''));
+
+const stray = [...src.matchAll(/^import .*from '([^']+)';$/gm)]
+  .map(m => m[1])
+  .filter(p => p !== './stubs.js' && p !== './msgEnvelope.ts');
 check('every messageQueue import is accounted for', stray.length === 0, `unstubbed: ${stray.join(', ')}`);
 
 writeFileSync(join(WORK, 'mq.ts'), src);

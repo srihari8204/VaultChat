@@ -25,7 +25,6 @@ export interface LinkPreviewData {
   i?: string;         // thumbnail as a data URI (bytes travel E2E — receiver fetches nothing)
 }
 
-const WRAP_PREFIX = '\u0000' + 'lp1:';
 const FETCH_TIMEOUT_MS = 6000;
 const MAX_HTML_BYTES = 512 * 1024;    // parse at most 512KB of HTML
 const MAX_THUMB_B64 = 49_152;         // ~48KB base64 ≈ 36KB JPEG — keeps envelopes small
@@ -36,19 +35,15 @@ export function extractFirstUrl(text: string): string | null {
 }
 
 // ── E2EE plaintext envelope ─────────────────────────────────────────
-export function wrapWithPreview(text: string, lp: LinkPreviewData): string {
-  return WRAP_PREFIX + JSON.stringify({ t: text, lp });
-}
-
-export function unwrapPreview(plain: string | null | undefined): { text: string; lp: LinkPreviewData | null } {
-  const s = plain ?? '';
-  if (!s.startsWith(WRAP_PREFIX)) return { text: s, lp: null };
-  try {
-    const parsed = JSON.parse(s.slice(WRAP_PREFIX.length));
-    if (typeof parsed?.t === 'string') return { text: parsed.t, lp: parsed.lp ?? null };
-  } catch { /* corrupt wrapper — fall through to raw */ }
-  return { text: s, lp: null };
-}
+// The wrapper moved to lib/msgEnvelope. A link preview turned out to be one
+// instance of a general problem — sender-authored data that must ride inside
+// the ciphertext rather than in plaintext `meta` — and thumbnails, filenames,
+// poll option text and mention names all needed the same treatment. Keeping a
+// second, preview-only wrapper here would have meant two wire formats to
+// unwrap and two places to get the NUL-prefix handling right.
+//
+// msgEnvelope still READS this module's old '<NUL>lp1:' form, so previews
+// already cached on a device keep rendering.
 
 // ── Compose-time fetch (sender's device only) ───────────────────────
 function htmlDecode(s: string): string {
@@ -127,4 +122,4 @@ export async function fetchPreviewFromDevice(url: string): Promise<LinkPreviewDa
   } catch { return null; }
 }
 
-export default { extractFirstUrl, wrapWithPreview, unwrapPreview, fetchPreviewFromDevice };
+export default { extractFirstUrl, fetchPreviewFromDevice };

@@ -539,21 +539,40 @@ func chatsMessagePost(w http.ResponseWriter, r *http.Request) {
 			httpx.Err(w, 400, "content (poll question) required")
 			return
 		}
-		if len([]rune(contentRaw)) > 200 {
-			httpx.Err(w, 400, "poll question too long (max 200)")
+		// The question arrives ENCRYPTED, so its length here is the length of a
+		// Double Ratchet envelope and says nothing about the question. The old
+		// 200-rune limit was written when the question was plaintext; against
+		// ciphertext it is an arbitrary bound that rejects valid polls. The
+		// 200-character UX limit belongs to the composer; this stays only as a
+		// sanity ceiling on the payload.
+		if len([]rune(contentRaw)) > 8192 {
+			httpx.Err(w, 400, "poll question payload too large")
 			return
 		}
-		opts, ok := meta["options"].([]any)
-		if !ok || len(opts) < 2 || len(opts) > 10 {
-			httpx.Err(w, 400, "meta.options must be an array of 2-10 strings")
-			return
-		}
-		for _, o := range opts {
-			s, ok := o.(string)
-			if !ok || s == "" || len([]rune(s)) > 100 {
-				httpx.Err(w, 400, "each option must be a non-empty string ≤ 100 chars")
-				return
+		// OPTION TEXT IS CONTENT and no longer reaches the server: the client
+		// sends the COUNT and keeps the options inside the ciphertext (see
+		// lib/msgEnvelope). The count is all the server ever needed — it exists
+		// to bounds-check `optionIndex` on a vote.
+		//
+		// `options` is still accepted so an older client keeps working; when it
+		// is present the text is validated exactly as before and the count is
+		// derived from it.
+		optionCount := 0
+		if opts, ok := meta["options"].([]any); ok {
+			for _, o := range opts {
+				s, ok := o.(string)
+				if !ok || s == "" || len([]rune(s)) > 100 {
+					httpx.Err(w, 400, "each option must be a non-empty string ≤ 100 chars")
+					return
+				}
 			}
+			optionCount = len(opts)
+		} else if n, ok := chatsParseInt(meta["optionCount"]); ok {
+			optionCount = int(n)
+		}
+		if optionCount < 2 || optionCount > 10 {
+			httpx.Err(w, 400, "a poll needs between 2 and 10 options")
+			return
 		}
 	case isMedia:
 		// External GIFs carry a remote URL in meta.gifUrl — exempt from attachmentId.
