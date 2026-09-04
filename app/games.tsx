@@ -25,7 +25,7 @@ import * as Haptics from 'expo-haptics';
 import type { GameKind } from '../lib/gamesSocket';
 import { useQuickMatch } from '../lib/games/useQuickMatch';
 import Ionicons from '@expo/vector-icons/Ionicons';
-import { TableBackground, Panel, Btn, useType, GameGlyph } from '../components/games/ui';
+import { TableBackground, Panel, Btn, useType, GameGlyph, Coin } from '../components/games/ui';
 import { C, S, R, E, white, alpha, ACCENT } from '../lib/games/theme';
 import { playSfx, setSoundEnabled, soundEnabled } from '../lib/games/sfx';
 import { useWallet } from '../lib/games/useWallet';
@@ -319,10 +319,8 @@ function CoinChip({ balance }: { balance: number | null }) {
         marginRight: S[2],
       }}
     >
-      {/* Was a 🪙 emoji — full-colour, unreachable by any theme colour, and
-          redrawn differently on every Android skin, exactly like the game
-          glyphs were. A filled circle in gold is the same idea, ours. */}
-      <View style={{ width: 11, height: 11, borderRadius: 6, backgroundColor: C.gold }} />
+      {/* Was a 🪙 emoji, then a flat gold dot. See Coin in ui.tsx. */}
+      <Coin size={15} />
       <Text style={{ color: C.gold, fontSize: 13, fontWeight: '800' }}>{balance}</Text>
     </View>
   );

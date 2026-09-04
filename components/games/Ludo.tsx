@@ -35,7 +35,7 @@ import Animated, {
 import * as Haptics from 'expo-haptics';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { useGameSocket, type AutoStart } from '../../lib/games/useGameSocket';
-import { TableBackground, Panel, Btn, Banner, PlayerRow, Reconnecting, RematchBtn, TurnClock, useType, useBoardBox, usePortraitLock } from './ui';
+import { TableBackground, Panel, Btn, Banner, PlayerRow, Reconnecting, RematchBtn, TurnClock, useType, useBoardBox, usePortraitLock, Coin } from './ui';
 import { useRematch } from '../../lib/games/useRematch';
 import { RulesSheet, useFirstTimeRules } from './rules';
 import { rollSeed, receiptFrom, pushReceipt, type RollReceipt } from '../../lib/games/fairness';
@@ -339,7 +339,7 @@ export default function Ludo({ roomId = 'ludo-main', auto, autoBot }: { roomId?:
                   apart. */}
               {wallet.balance != null && (
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
-                  <View style={{ width: 11, height: 11, borderRadius: 6, backgroundColor: C.gold }} />
+                  <Coin size={15} />
                   <Text style={{ color: C.gold, fontSize: t.sm, fontWeight: '800' }}>{wallet.balance}</Text>
                 </View>
               )}

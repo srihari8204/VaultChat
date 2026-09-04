@@ -228,9 +228,12 @@ check('the turn clock re-renders once a second, not on every tick',
   'holding the raw clock reading makes every tick a new value, so React can never bail out');
 
 // ── the board the reference client actually shows ─────────────────────
-check('chess opens on the green board, like the web',
-  /let boardPref: ThemeName = 'green'/.test(CHESS),
-  "chess.js does `if (!settings.board) settings.board = \"green\"`; this port opened on a theme the web does not have");
+check('chess opens on the GLASS board, like the other three games',
+  /let boardPref: ThemeName = 'glass'/.test(CHESS),
+  "the four games share one look; this outranks matching chess.com's green default here (changed 2026-09-04)");
+check('...and green is still offered, since it is what the web uses',
+  /green:\s*\{ light:/.test(CHESS),
+  'dropping the reference client’s own board would be a different decision from changing the default');
 
 check('...and remembers the one the player picks',
   /AsyncStorage\.setItem\(BOARD_KEY/.test(CHESS),

@@ -101,16 +101,20 @@ type ThemeName = keyof typeof THEMES;
  * way to get it back. Same module-level read as the rummy sort preference, so
  * the first paint is already correct rather than flipping a frame later.
  *
- * The glassmorphism restyle added a `glass` board and did NOT make it the
- * default, because that is this decision and it is guarded by a test ("chess
- * opens on the green board, like the web"). Glass is the FIRST swatch instead —
- * one tap, and the choice persists like any other. Flipping the default is a
- * one-word change here plus that test; it is deliberately not made silently.
+ * THE DEFAULT IS NOW GLASS, by an explicit product decision (2026-09-04): the
+ * four games share one look, and that outranks matching chess.com here. It was
+ * green until then, and the swap was made deliberately rather than silently —
+ * the test below moved with it.
+ *
+ * Green is still one swatch away and is still exactly what the reference client
+ * uses, so nothing is lost for a player who wants it. And a player who has EVER
+ * picked a board keeps theirs: the stored value is read before this default is
+ * ever painted, so this changes nothing for anyone who already chose.
  */
 const BOARD_KEY = 'vc_chess_board';
 const isThemeName = (v: unknown): v is ThemeName =>
   typeof v === 'string' && Object.prototype.hasOwnProperty.call(THEMES, v);
-let boardPref: ThemeName = 'green';
+let boardPref: ThemeName = 'glass';
 AsyncStorage.getItem(BOARD_KEY)
   .then(v => { if (isThemeName(v)) boardPref = v; })
   .catch(() => {});

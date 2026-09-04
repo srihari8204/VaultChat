@@ -189,6 +189,41 @@ export function useBoardBox(chrome = 300): { size: number; onLayout: (e: LayoutC
 }
 
 /**
+ * A play coin.
+ *
+ * This was 🪙 — a full-colour emoji redrawn differently on every Android skin
+ * and unreachable by any theme colour — and the icon pass replaced it with a
+ * flat gold circle, which is honest but reads as a bullet point rather than as
+ * money. This is the same idea drawn properly: a struck disc with a rim, a lit
+ * top-left and a shadowed lower-right, so it catches the eye the way a coin
+ * does without becoming a cartoon.
+ *
+ * Vector, so it scales to any size and takes its colour from the theme — the
+ * whole reason the emoji had to go. Used by the hub's balance chip and by
+ * ludo's stake panel, which are the two places a balance appears.
+ */
+export function Coin({ size = 14 }: { size?: number }) {
+  const id = `coin${Math.round(size)}`;
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24">
+      <Defs>
+        {/* Lit from the top-left, like every other raised surface in the games. */}
+        <RadialGradient id={id} cx="34%" cy="28%" rx="78%" ry="78%">
+          <Stop offset="0" stopColor={C.gold2} />
+          <Stop offset="0.55" stopColor={C.gold} />
+          <Stop offset="1" stopColor={C.goldDeep} />
+        </RadialGradient>
+      </Defs>
+      <Circle cx="12" cy="12" r="10.5" fill={`url(#${id})`} stroke={C.goldDeep} strokeWidth="1.2" />
+      {/* The inner ring is what makes a disc read as STRUCK rather than drawn. */}
+      <Circle cx="12" cy="12" r="7.2" fill="none" stroke={C.gold2} strokeWidth="0.9" opacity="0.55" />
+      {/* A single specular highlight. Two would read as plastic. */}
+      <Circle cx="8.6" cy="8.2" r="2.5" fill="#FFFFFF" opacity="0.34" />
+    </Svg>
+  );
+}
+
+/**
  * Hold this board upright.
  *
  * The three square boards are portrait games: they are one square plus a column
