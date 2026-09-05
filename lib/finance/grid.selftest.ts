@@ -159,7 +159,14 @@ const SCREENS: [number, string][] = [
 // check runnable in the same `tsx` pass as everything else.
 {
   const ROOT = join(__dirname, '..', '..');
-  const src = readFileSync(join(ROOT, 'constants/financeTheme.ts'), 'utf8');
+  const whole = readFileSync(join(ROOT, 'constants/financeTheme.ts'), 'utf8');
+  // Scope to the FIN block. The file now also holds FIN_DARK, which repeats
+  // every key with a different value — an unscoped scan takes the LAST match
+  // and silently grades the light palette using dark-mode colours. That is how
+  // this check started reporting white-on-brandDeep at 3.74:1: it had picked up
+  // dark's #9D6FD0 instead of light's #6D3FA8.
+  const finStart = whole.indexOf('export const FIN = {');
+  const src = whole.slice(finStart, whole.indexOf('} as const;', finStart));
 
   const P: Record<string, string> = {};
   for (const m of src.matchAll(/^\s{2}(\w+):\s*'(#[0-9A-Fa-f]{6})'/gm)) P[m[1]] = m[2];
@@ -228,6 +235,100 @@ const SCREENS: [number, string][] = [
     A(/tileRow:\s*\{[^}]*flexDirection:\s*'row'/.test(src),
       `9b. ${f} still lays its tiles out in a row`);
   }
+}
+
+// ── 10. Shop Book is the second consumer of this contract ────────────
+// The grid lives under finance/ because that is where it was built, but Shop
+// Book's owner dashboard now derives its layout from the same functions. Its
+// two grids used to be a `minWidth: '46%'` tile wrap and a hand-split 6 + 2
+// link row — both of which stayed put on a tablet. Guard the swap.
+{
+  const ROOT = join(__dirname, '..', '..');
+  const src = readFileSync(join(ROOT, 'app/shop-book.tsx'), 'utf8');
+  // Strip JSX `{/* … */}` blocks as well as `//` lines. Without the first of
+  // these the scan reads the comment that DOCUMENTS the removed value and
+  // reports the value as still present — which it did, on the first run.
+  const code = src
+    .replace(/\{\/\*[\s\S]*?\*\/\}/g, '')
+    .split('\n').filter(l => !/^\s*(\/\/|\*|\/\*)/.test(l)).join('\n');
+
+  A(/<TileGrid>/.test(code), '10a. the dashboard totals use TileGrid');
+  A(/<ActionGrid>/.test(code), '10b. the dashboard quick links use ActionGrid');
+  A(!/minWidth:\s*'4\d%'/.test(code), '10c. no percentage tile width has come back');
+  A(!/flexBasis:\s*'30%'/.test(code), '10d. no percentage link-card width has come back');
+  A(!/paddingTop:\s*48/.test(code), '10e. the header no longer guesses the status bar height');
+  // C.bg transparent + C.card translucent is the whole restyle mechanism: undo
+  // either and 53 components quietly go back to being opaque on grey.
+  // These moved from `FIN.x` to the palette factory when Shop Book became
+  // theme-aware. The invariant is unchanged — transparent ground, translucent
+  // pane — so the check follows the spelling rather than being deleted.
+  A(/bg:\s*P\.bg\b/.test(code), '10f. the Shop Book ground is still the shared token');
+  A(/card:\s*P\.card\b/.test(code), '10g. Shop Book cards are still glass');
+
+  // The reading column. `body` is the content container for every Shop Book
+  // screen, so this single rule is what stops a khata list putting a customer
+  // name and their balance at opposite edges of a 1200dp window.
+  A(/maxWidth:\s*C\.contentMax/.test(code), '10h. the content column is still capped');
+  A(/alignSelf:\s*'center'/.test(code), '10i. the capped column still centres');
+
+  // One transaction row. Two callers hand-rolled it before and their money
+  // columns drifted apart; if either stops using it, that starts again.
+  A(/function TxnRow\(/.test(code), '10j. the shared transaction row exists');
+  A((code.match(/<TxnRow\b/g) ?? []).length >= 4, '10k. all four list callers use it');
+  // An alpha-washed foreground was invisible once the card underneath became
+  // translucent; status pills need a real fill.
+  A(!/backgroundColor:\s*color\s*\+\s*'20'/.test(code),
+    '10m. status pills use a solid soft fill, not an alpha wash');
+
+  // Currency. Shop Book is multi-country (Shop.currency is a display symbol
+  // from the country config), so a hardcoded ₹ mislabels real money. The sweep
+  // took 25 call sites down to one legitimate use: the cross-shop loyalty
+  // total, which has no single shop and therefore no single currency — the
+  // hint beside it says "every ₹100 spent" in so many words.
+  const inrCalls = (code.match(/formatINR\(/g) ?? []).length;
+  A(inrCalls <= 1, `10n. at most one hardcoded-₹ call remains (found ${inrCalls})`);
+  A(/formatINR\(loyalty\?\.totalSpent/.test(code),
+    '10o. the one that remains is still the cross-shop loyalty total');
+
+  // AUTO-RESPONSIVE ON EVERY DEVICE, not on a list of devices. The layout may
+  // only ever key off the MEASURED window, so a phone nobody owns yet is
+  // handled by the same code as the two on the desk.
+  A(!/\b(Redmi|Honor|Pixel|iPhone|Galaxy|isTablet|isPhone)\b\s*[=:?]/.test(code),
+    '10p. no per-model branching');
+  // Dimensions.get() is a SNAPSHOT — it does not re-run on rotation or on a
+  // fold opening, so a layout built from it silently keeps the old width.
+  // useWindowDimensions() is the subscribing hook and is what the grids use.
+  A(!/Dimensions\.get\(/.test(code),
+    '10q. no Dimensions.get snapshot (rotation would not re-layout)');
+
+  // ── theme wiring ──────────────────────────────────────────────────
+  // The whole mechanism: `C` and `s` are LET bindings re-pointed by
+  // applyScheme, and every component dereferences them at render. Turn either
+  // back into a const and dark mode silently stops working while still
+  // compiling.
+  A(/const makeC = \(P: Palette\)/.test(code), '10r. the palette is a factory over a scheme');
+  A(/const makeStyles = /.test(code), '10s. the stylesheet is a factory over the palette');
+  A(/^let C = /m.test(code), '10t. C is re-pointable (let, not const)');
+  A(/^let s = /m.test(code), '10u. s is re-pointable (let, not const)');
+  A(/function applyScheme\(/.test(code), '10v. applyScheme exists');
+  A(/applyScheme\(scheme === 'dark'/.test(code), '10w. the screen installs the active scheme');
+  // NOT keyed: a key remounts the subtree and device testing showed that drops
+  // the user back to the dashboard on a theme change (these phones auto-switch
+  // at 22:00). Nothing here is memoized, so a re-render suffices.
+  A(!/<IceGround key=/.test(code), '10x. the tree is NOT keyed on the scheme (remount loses the user’s place)');
+  A(!/React\.memo|memo\(/.test(code), '10x2. nothing is memoized, so children re-render with the parent');
+  // Both palettes must be built once at module load, not per render.
+  A(/const LIGHT_S = makeStyles\(/.test(code) && /const DARK_S = makeStyles\(/.test(code),
+    '10y. both stylesheets are built once at module load');
+  // No component may read the light palette directly, or it would stay light
+  // in dark mode. Only the type alias and a comment may mention FIN.
+  const finReads = (code.match(/\bFIN\.[a-z]/gi) ?? []);
+  A(finReads.length === 0, `10z. no component reads FIN.* directly (found ${finReads.length})`);
+  // A large header FILL cannot reuse the accent: in dark that is a glaring slab.
+  A(/backgroundColor: C\.headerBg/.test(code), '10aa. the header uses its own fill role');
+  A(/color: C\.headerFg/.test(code), '10ab. the header uses its own text role');
+  // Colour must never be the only thing distinguishing owed from settled.
+  A(/amountNote/.test(code), '10l. the money column still states what the figure means');
 }
 
 console.log(failed === 0 ? '\nAll good.\n' : `\n${failed} FAILED\n`);

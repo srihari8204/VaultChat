@@ -122,4 +122,61 @@ export const STATUS_COLORS: Record<LedgerStatus, { fg: string; bg: string; label
   completed: { fg: FIN.sub,  bg: FIN.card2,    label: 'Completed' },
 };
 
+/**
+ * The ice-glass palette after dark.
+ *
+ * Same STRUCTURE as FIN, key for key, so a screen can swap palettes without
+ * knowing which one it holds. Two things invert and nothing else has to:
+ *   bg*   — the ground becomes deep slate instead of pale ice
+ *   card  — a translucent WHITE pane over a dark ground reads as haze, so the
+ *           dark pane is a translucent LIGHT-SLATE lift instead.
+ *
+ * The semantic colours are NOT the light ones reused: #05603A on a dark ground
+ * is unreadable. Each is the lighter end of its ramp, chosen so it clears AA
+ * (4.5:1) against `bg` — pinned by financeTheme.selftest.ts, not by eye.
+ */
+export const FIN_DARK = {
+  brand:      '#C4A5E8',
+  brandDeep:  '#9D6FD0',
+  brandInk:   '#E9DDF7',
+  brandSoft:  '#2A1F3D',
+  accent:     '#B98CF0',
+
+  good:       '#6CE9A6',
+  goodSoft:   '#0B2E20',
+  bad:        '#FDA29B',
+  badSoft:    '#3B1613',
+  warn:       '#FEC84B',
+  warnSoft:   '#3A2A0C',
+  info:       '#84ADFF',
+  infoSoft:   '#111F3D',
+
+  bg:         'transparent',
+  bgTop:      '#151A24',
+  bgMid:      '#111621',
+  bgBottom:   '#0B0F17',
+
+  // A lift, not a wash: white at low alpha over near-black turns milky.
+  card:       'rgba(255,255,255,0.07)',
+  cardStrong: 'rgba(255,255,255,0.12)',
+  cardSolid:  '#161B26',
+  card2:      '#1B212E',
+  glassEdge:  'rgba(255,255,255,0.14)',
+  glassRim:   'rgba(0,0,0,0.40)',
+
+  border:     '#2A3242',
+  line:       '#222938',
+
+  contentMax: 632,
+
+  text:       '#F2F4F7',
+  sub:        '#B4BCCA',
+  faint:      '#98A2B3',
+  onBrand:    '#101828',
+} as const;
+
+/** Both palettes share a shape, so this is the only lookup a screen needs. */
+export const FIN_PALETTES = { light: FIN, dark: FIN_DARK } as const;
+export type FinScheme = keyof typeof FIN_PALETTES;
+
 export default FIN;
