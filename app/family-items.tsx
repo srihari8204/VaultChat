@@ -18,6 +18,8 @@ import { Stack, useLocalSearchParams } from 'expo-router';
 import * as Location from 'expo-location';
 import { useTheme } from '../lib/theme';
 import { brandAlpha } from '../constants/theme';
+import SpaceGround, { useSpaceGlass } from '../components/spaces/SpaceGround';
+import { SPACE_SHADOW } from '../constants/spaceTheme';
 import {
   smoothRssi, bandOf, rssiToMetres, trend, BAND_LABEL, type ProximityBand,
 } from '../lib/items/proximity';
@@ -51,6 +53,7 @@ const BAND_COLOR = (b: ProximityBand, c: any) =>
 
 export default function FamilyItemsScreen() {
   const { colors } = useTheme();
+  const G = useSpaceGlass();
   const params = useLocalSearchParams<{ circleId?: string }>();
   const circleId = String(params.circleId || '');
 
@@ -238,11 +241,12 @@ export default function FamilyItemsScreen() {
   };
 
   return (
-    <View style={{ flex: 1, backgroundColor: colors.bg }}>
+    <View style={{ flex: 1, backgroundColor: G.bgMid }}>
       <Stack.Screen options={{
         headerShown: true, title: 'Find my things', headerTitleAlign: 'center',
-        headerStyle: { backgroundColor: colors.bg }, headerTintColor: colors.text, headerShadowVisible: false,
+        headerStyle: { backgroundColor: G.bgTop }, headerTintColor: colors.text, headerShadowVisible: false,
       }} />
+      <SpaceGround />
 
       <ScrollView contentContainerStyle={{ padding: 14, paddingBottom: 40 }}>
         <TouchableOpacity
@@ -251,7 +255,7 @@ export default function FamilyItemsScreen() {
           style={[st.scanBtn, { backgroundColor: scanning ? colors.danger + '18' : brandAlpha(0.1), borderColor: scanning ? colors.danger : colors.primary }]}
         >
           {scanning ? <ActivityIndicator size="small" color={colors.danger} /> : <Ionicons name="bluetooth" size={18} color={colors.primary} />}
-          <Text style={{ color: scanning ? colors.danger : colors.primary, fontWeight: '800', fontSize: 14 }}>
+          <Text style={{ color: scanning ? G.dangerText : G.accentText, fontWeight: '800', fontSize: 14 }}>
             {scanning ? 'Stop searching' : 'Search for my things'}
           </Text>
         </TouchableOpacity>
@@ -265,14 +269,16 @@ export default function FamilyItemsScreen() {
           const metres = band === 'lost' ? null : rssiToMetres(r ?? -999);
           const dir = trend(prevRssiRef.current.get(it.id), r);
           return (
-            <View key={it.id} style={[st.card, { backgroundColor: colors.card, borderColor: band === 'immediate' ? colors.success : colors.border }]}>
+            <View key={it.id} style={[st.card, { backgroundColor: G.pane, borderColor: band === 'immediate' ? colors.success : G.edge }]}>
               <View style={[st.icon, { backgroundColor: BAND_COLOR(band, colors) + '22' }]}>
                 <Ionicons name={it.icon as any} size={20} color={BAND_COLOR(band, colors)} />
               </View>
               <View style={{ flex: 1, minWidth: 0 }}>
                 <Text style={{ color: colors.text, fontWeight: '700', fontSize: 15 }} numberOfLines={1}>{it.name}</Text>
                 {scanning ? (
-                  <Text style={{ color: BAND_COLOR(band, colors), fontSize: 12.5, fontWeight: '600' }}>
+                  // The band caption is small TEXT, so it takes the AA-deep
+                  // tints; the icon keeps the brighter raw band colour.
+                  <Text style={{ color: band === 'immediate' ? G.goodText : band === 'near' || band === 'far' ? G.accentText : colors.textDim, fontSize: 12.5, fontWeight: '600' }}>
                     {BAND_LABEL[band]}
                     {metres != null ? `  ·  ~${metres < 1 ? '<1' : metres} m` : ''}
                     {dir === 1 ? '  ↑ warmer' : dir === -1 ? '  ↓ colder' : ''}
@@ -316,6 +322,8 @@ export default function FamilyItemsScreen() {
                   } },
                 ])}
                 style={{ padding: 6 }}
+                hitSlop={{ top: 10, bottom: 10, left: 6, right: 6 }}
+                accessibilityRole="button" accessibilityLabel={`Options for ${it.name}`}
               >
                 <Ionicons name="ellipsis-vertical" size={17} color={colors.textDim} />
               </TouchableOpacity>
@@ -343,7 +351,7 @@ export default function FamilyItemsScreen() {
                 <TouchableOpacity
                   key={s.id}
                   onPress={() => { setPairing(s); setPairName(s.name ?? ''); }}
-                  style={[st.card, { backgroundColor: colors.card, borderColor: colors.border }]}
+                  style={[st.card, { backgroundColor: G.pane, borderColor: G.edge }]}
                 >
                   <View style={[st.icon, { backgroundColor: colors.primary + '18' }]}>
                     <Ionicons name="radio-outline" size={19} color={colors.primary} />
@@ -356,7 +364,7 @@ export default function FamilyItemsScreen() {
                       {BAND_LABEL[bandOf(r)]} · {s.id.slice(0, 17)}
                     </Text>
                   </View>
-                  <Text style={{ color: colors.primary, fontWeight: '800', fontSize: 12 }}>PAIR</Text>
+                  <Text style={{ color: G.accentText, fontWeight: '800', fontSize: 12 }}>PAIR</Text>
                 </TouchableOpacity>
               );
             })}
@@ -365,32 +373,33 @@ export default function FamilyItemsScreen() {
 
         {/* ── PAIRING SHEET ── */}
         {pairing && (
-          <View style={[st.pair, { backgroundColor: colors.card, borderColor: colors.primary }]}>
+          <View style={[st.pair, { backgroundColor: G.paneStrong, borderColor: colors.primary }]}>
             <Text style={{ color: colors.text, fontWeight: '800', fontSize: 15 }}>Name this item</Text>
             <TextInput
               value={pairName}
               onChangeText={setPairName}
               placeholder="Keys, wallet, bag…"
               placeholderTextColor={colors.textFaint}
-              style={[st.input, { color: colors.text, borderColor: colors.border, backgroundColor: colors.surface }]}
+              style={[st.input, { color: colors.text, borderColor: G.chipEdge, backgroundColor: G.paneFaint }]}
             />
             <View style={st.iconRow}>
               {ICONS.map((ic) => (
                 <TouchableOpacity
                   key={ic}
                   onPress={() => setPairIcon(ic)}
-                  style={[st.iconPick, { borderColor: pairIcon === ic ? colors.primary : colors.border, backgroundColor: pairIcon === ic ? brandAlpha(0.12) : 'transparent' }]}
+                  accessibilityRole="button" accessibilityState={{ selected: pairIcon === ic }} accessibilityLabel={`${ic} icon`}
+                  style={[st.iconPick, { borderColor: pairIcon === ic ? colors.primary : G.chipEdge, backgroundColor: pairIcon === ic ? brandAlpha(0.14) : G.paneFaint }]}
                 >
                   <Ionicons name={ic as any} size={18} color={pairIcon === ic ? colors.primary : colors.textDim} />
                 </TouchableOpacity>
               ))}
             </View>
             <View style={{ flexDirection: 'row', gap: 9 }}>
-              <TouchableOpacity onPress={() => setPairing(null)} style={[st.btn, { borderColor: colors.border, flex: 1 }]}>
+              <TouchableOpacity onPress={() => setPairing(null)} style={[st.btn, { borderColor: G.chipEdge, flex: 1 }]}>
                 <Text style={{ color: colors.textDim, fontWeight: '700' }}>Cancel</Text>
               </TouchableOpacity>
-              <TouchableOpacity onPress={doPair} style={[st.btn, { borderColor: colors.primary, backgroundColor: brandAlpha(0.12), flex: 1 }]}>
-                <Text style={{ color: colors.primary, fontWeight: '800' }}>Save</Text>
+              <TouchableOpacity onPress={doPair} style={[st.btn, { borderColor: colors.primary, backgroundColor: brandAlpha(0.14), flex: 1 }]}>
+                <Text style={{ color: G.accentText, fontWeight: '800' }}>Save</Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -398,7 +407,7 @@ export default function FamilyItemsScreen() {
 
         {/* ── LEFT-BEHIND TOGGLE ── */}
         {items.length > 0 && (
-          <View style={[st.card, { backgroundColor: colors.card, borderColor: colors.border, marginTop: 18 }]}>
+          <View style={[st.card, { backgroundColor: G.pane, borderColor: G.edge, marginTop: 18 }]}>
             <View style={[st.icon, { backgroundColor: colors.primary + '18' }]}>
               <Ionicons name="notifications-outline" size={19} color={colors.primary} />
             </View>
@@ -419,7 +428,7 @@ export default function FamilyItemsScreen() {
           </View>
         )}
 
-        <Text style={{ color: colors.textFaint, fontSize: 11.5, lineHeight: 16, marginTop: 16 }}>
+        <Text style={{ color: colors.textDim, fontSize: 11.5, lineHeight: 16, marginTop: 16 }}>
           Works with any Bluetooth tag — no brand lock-in, no subscription. Tags you pair, and
           where they were last heard, are shared with this space so any member&apos;s phone can help
           find them. The tag&apos;s maker is never involved.
@@ -430,19 +439,19 @@ export default function FamilyItemsScreen() {
 }
 
 const st = StyleSheet.create({
-  h: { fontSize: 11.5, fontWeight: '800', letterSpacing: 0.4, marginBottom: 8, marginTop: 6 },
+  h: { fontSize: 12, fontWeight: '800', letterSpacing: 0.7, marginBottom: 8, marginTop: 6 },
   scanBtn: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 9,
-    height: 50, borderRadius: 14, borderWidth: 1, marginBottom: 16,
+    minHeight: 50, borderRadius: 16, borderWidth: 1, marginBottom: 16,
   },
   card: {
     flexDirection: 'row', alignItems: 'center', gap: 11,
-    borderWidth: 1, borderRadius: 14, padding: 11, marginBottom: 8,
+    borderWidth: 1, borderRadius: 18, padding: 12, marginBottom: 10, ...SPACE_SHADOW.rest,
   },
   icon: { width: 40, height: 40, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
-  pair: { borderWidth: 1, borderRadius: 16, padding: 14, gap: 11, marginTop: 12 },
-  input: { borderWidth: 1, borderRadius: 11, paddingHorizontal: 12, height: 46, fontSize: 15 },
+  pair: { borderWidth: 1, borderRadius: 20, padding: 14, gap: 11, marginTop: 12, ...SPACE_SHADOW.raised },
+  input: { borderWidth: 1, borderRadius: 12, paddingHorizontal: 12, minHeight: 46, fontSize: 15 },
   iconRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  iconPick: { width: 42, height: 42, borderRadius: 11, borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
-  btn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', height: 46, borderRadius: 12, borderWidth: 1 },
+  iconPick: { width: 42, height: 42, borderRadius: 12, borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
+  btn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', minHeight: 46, borderRadius: 12, borderWidth: 1 },
 });

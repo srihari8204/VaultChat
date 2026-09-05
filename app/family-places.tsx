@@ -22,6 +22,7 @@ import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../lib/theme';
 import { brandAlpha } from '../constants/theme';
+import SpaceGround, { useSpaceGlass } from '../components/spaces/SpaceGround';
 import { getPlaces, setPlaces, getDefaultRef, setDefaultRef } from '../lib/family/store';
 import { reloadPlaces } from '../lib/family/presence';
 import { isZoneActive, type Geofence, type ZoneSchedule } from '../lib/family/geofence';
@@ -85,6 +86,7 @@ function iconFor(name: string): keyof typeof Ionicons.glyphMap {
 
 export default function FamilyPlacesScreen() {
   const { colors } = useTheme();
+  const G = useSpaceGlass();
   const { circleId, name: circleName } = useLocalSearchParams<{ circleId?: string; name?: string }>();
   const cid = String(circleId || '');
 
@@ -254,22 +256,23 @@ export default function FamilyPlacesScreen() {
   const activeCount = places.filter((p) => p.enabled !== false).length;
 
   return (
-    <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1, backgroundColor: colors.bg }}>
+    <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1, backgroundColor: G.bgMid }}>
       <Stack.Screen options={{
         headerShown: true, title: circleName ? `Safe Zones · ${circleName}` : 'Safe Zones', headerTitleAlign: 'center',
-        headerStyle: { backgroundColor: colors.bg }, headerTintColor: colors.text, headerShadowVisible: false,
+        headerStyle: { backgroundColor: G.bgTop }, headerTintColor: colors.text, headerShadowVisible: false,
       }} />
+      <SpaceGround />
       <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 40 }} keyboardShouldPersistTaps="handled">
 
-        <Text style={[st.h, { color: colors.text }]}>Add a safe zone</Text>
+        <Text style={[st.h, { color: colors.textDim }]}>Add a safe zone</Text>
 
-        <View style={[st.field, { borderColor: colors.border, backgroundColor: colors.surface }]}>
+        <View style={[st.field, { borderColor: G.chipEdge, backgroundColor: G.paneFaint }]}>
           <Ionicons name={iconFor(name)} size={18} color={colors.textDim} />
           <TextInput value={name} onChangeText={setName} placeholder="Name (Home, School, Work…)"
             placeholderTextColor={colors.textFaint} style={[st.input, { color: colors.text }]} returnKeyType="next" />
         </View>
 
-        <View style={[st.field, { borderColor: colors.border, backgroundColor: colors.surface, marginTop: 10 }]}>
+        <View style={[st.field, { borderColor: G.chipEdge, backgroundColor: G.paneFaint, marginTop: 10 }]}>
           <Ionicons name="search" size={18} color={colors.textDim} />
           <TextInput value={where} onChangeText={setWhere} placeholder="Address or lat, lng — blank = where I am now"
             placeholderTextColor={colors.textFaint} autoCapitalize="none" style={[st.input, { color: colors.text }]}
@@ -282,8 +285,8 @@ export default function FamilyPlacesScreen() {
         <View style={st.radii}>
           {RADII.map((r) => (
             <TouchableOpacity key={r} onPress={() => setRadius(r)}
-              style={[st.rchip, { borderColor: radius === r ? colors.primary : colors.border, backgroundColor: radius === r ? brandAlpha(0.1) : 'transparent' }]}>
-              <Text style={{ color: radius === r ? colors.primary : colors.text, fontWeight: radius === r ? '700' : '500', fontSize: 13 }}>{r} m</Text>
+              style={[st.rchip, { borderColor: radius === r ? colors.primary : G.chipEdge, backgroundColor: radius === r ? brandAlpha(0.14) : G.paneFaint }]}>
+              <Text style={{ color: radius === r ? G.accentText : colors.text, fontWeight: radius === r ? '700' : '500', fontSize: 13 }}>{r} m</Text>
             </TouchableOpacity>
           ))}
         </View>
@@ -296,7 +299,7 @@ export default function FamilyPlacesScreen() {
         </TouchableOpacity>
 
         <View style={st.secHead}>
-          <Text style={[st.h, { color: colors.text, marginBottom: 0 }]}>Places ({places.length})</Text>
+          <Text style={[st.h, { color: colors.textDim, marginBottom: 0 }]}>Places ({places.length})</Text>
           {places.length > 0 && (
             <Text style={{ color: colors.textDim, fontSize: 12 }}>{activeCount} active</Text>
           )}
@@ -329,9 +332,9 @@ export default function FamilyPlacesScreen() {
                     accessibilityRole="button"
                     accessibilityState={{ selected: on }}
                     accessibilityLabel={`Measure me from ${p.name}${on ? ', selected' : ''}`}
-                    style={[st.rchip, { borderColor: on ? colors.primary : colors.border, backgroundColor: on ? brandAlpha(0.1) : 'transparent' }]}
+                    style={[st.rchip, { borderColor: on ? colors.primary : G.chipEdge, backgroundColor: on ? brandAlpha(0.14) : G.paneFaint }]}
                   >
-                    <Text style={{ color: on ? colors.primary : colors.text, fontWeight: on ? '700' : '500', fontSize: 13 }}>
+                    <Text style={{ color: on ? G.accentText : colors.text, fontWeight: on ? '700' : '500', fontSize: 13 }}>
                       {p.name}
                     </Text>
                   </TouchableOpacity>
@@ -339,7 +342,7 @@ export default function FamilyPlacesScreen() {
               })}
             </View>
             {!refName && (
-              <Text style={{ color: colors.textFaint, fontSize: 11.5, marginTop: 7 }}>
+              <Text style={{ color: colors.textDim, fontSize: 11.5, marginTop: 7 }}>
                 None chosen — your first place leads.
               </Text>
             )}
@@ -353,8 +356,8 @@ export default function FamilyPlacesScreen() {
           const live = isZoneActive(p, new Date());
           return (
             <TouchableOpacity key={p.id} activeOpacity={0.7} onPress={() => openEdit(p)}
-              style={[st.row, { borderColor: colors.border }]}>
-              <View style={[st.rowIcon, { backgroundColor: live ? brandAlpha(0.12) : colors.surface }]}>
+              style={[st.row, { borderColor: G.line }]}>
+              <View style={[st.rowIcon, { backgroundColor: live ? brandAlpha(0.14) : G.paneFaint }]}>
                 <Ionicons name={(p.icon as keyof typeof Ionicons.glyphMap) ?? iconFor(p.name)} size={18}
                   color={live ? colors.primary : colors.textFaint} />
               </View>
@@ -385,16 +388,22 @@ export default function FamilyPlacesScreen() {
       <Modal visible={!!editing} transparent animationType="slide" onRequestClose={() => setEditing(null)}>
         <View style={st.backdrop}>
           <TouchableOpacity style={{ flex: 1 }} activeOpacity={1} onPress={() => setEditing(null)} />
-          <View style={[st.sheet, { backgroundColor: colors.card, borderColor: colors.border }]}>
-            <Text style={{ color: colors.text, fontWeight: '800', fontSize: 16, marginBottom: 14 }}>Edit place</Text>
+          {/* Height-capped with an inner scroll: radius + schedule + lifetime
+              + four buttons overflow a short phone, and the keyboard renders
+              over a native Modal with no KeyboardAvoidingView — scrolling is
+              what keeps Save reachable while typing. */}
+          <View style={[st.sheet, { backgroundColor: G.sheet, borderColor: G.edge, maxHeight: '88%' }]}>
+            <View style={[st.grab, { backgroundColor: colors.border }]} />
+            <Text style={{ color: colors.text, fontWeight: '800', fontSize: 18, marginBottom: 14, textAlign: 'center' }}>Edit place</Text>
+            <ScrollView bounces={false} keyboardShouldPersistTaps="handled">
 
-            <View style={[st.field, { borderColor: colors.border, backgroundColor: colors.surface }]}>
+            <View style={[st.field, { borderColor: G.chipEdge, backgroundColor: G.paneFaint }]}>
               <Ionicons name={iconFor(editName)} size={18} color={colors.textDim} />
               <TextInput value={editName} onChangeText={setEditName} placeholder="Name"
                 placeholderTextColor={colors.textFaint} style={[st.input, { color: colors.text }]} />
             </View>
 
-            <View style={[st.field, { borderColor: colors.border, backgroundColor: colors.surface, marginTop: 10 }]}>
+            <View style={[st.field, { borderColor: G.chipEdge, backgroundColor: G.paneFaint, marginTop: 10 }]}>
               <Ionicons name="resize" size={18} color={colors.textDim} />
               <TextInput value={editRadius} onChangeText={setEditRadius} keyboardType="number-pad"
                 placeholder={`Radius in metres (${MIN_RADIUS}–${MAX_RADIUS})`} placeholderTextColor={colors.textFaint}
@@ -404,13 +413,13 @@ export default function FamilyPlacesScreen() {
             <View style={st.radii}>
               {RADII.map((r) => (
                 <TouchableOpacity key={r} onPress={() => setEditRadius(String(r))}
-                  style={[st.rchip, { borderColor: Number(editRadius) === r ? colors.primary : colors.border, backgroundColor: Number(editRadius) === r ? brandAlpha(0.1) : 'transparent' }]}>
-                  <Text style={{ color: Number(editRadius) === r ? colors.primary : colors.text, fontSize: 13 }}>{r} m</Text>
+                  style={[st.rchip, { borderColor: Number(editRadius) === r ? colors.primary : G.chipEdge, backgroundColor: Number(editRadius) === r ? brandAlpha(0.14) : G.paneFaint }]}>
+                  <Text style={{ color: Number(editRadius) === r ? G.accentText : colors.text, fontSize: 13 }}>{r} m</Text>
                 </TouchableOpacity>
               ))}
             </View>
 
-            <Text style={[st.h, { color: colors.text, marginTop: 20, marginBottom: 8 }]}>When it&apos;s active</Text>
+            <Text style={[st.h, { color: colors.textDim, marginTop: 20, marginBottom: 8 }]}>When it&apos;s active</Text>
             <View style={st.radii}>
               {PRESETS.map((pr) => {
                 // "Always" is the one with no schedule; the rest match on window.
@@ -419,8 +428,8 @@ export default function FamilyPlacesScreen() {
                   : !!editSched && editSched.fromMin === pr.sched.fromMin && editSched.toMin === pr.sched.toMin;
                 return (
                   <TouchableOpacity key={pr.label} onPress={() => setEditSched(pr.sched ? { ...pr.sched } : null)}
-                    style={[st.rchip, { borderColor: on ? colors.primary : colors.border, backgroundColor: on ? brandAlpha(0.1) : 'transparent' }]}>
-                    <Text style={{ color: on ? colors.primary : colors.text, fontSize: 12.5, fontWeight: on ? '700' : '500' }}>{pr.label}</Text>
+                    style={[st.rchip, { borderColor: on ? colors.primary : G.chipEdge, backgroundColor: on ? brandAlpha(0.14) : G.paneFaint }]}>
+                    <Text style={{ color: on ? G.accentText : colors.text, fontSize: 12.5, fontWeight: on ? '700' : '500' }}>{pr.label}</Text>
                   </TouchableOpacity>
                 );
               })}
@@ -442,8 +451,8 @@ export default function FamilyPlacesScreen() {
                         // treat "none" as "every day" instead.
                         setEditSched({ ...editSched, days: next.length ? next : [] });
                       }}
-                        style={[st.day, { borderColor: on ? colors.primary : colors.border, backgroundColor: on ? brandAlpha(0.12) : 'transparent' }]}>
-                        <Text style={{ color: on ? colors.primary : colors.textDim, fontSize: 12, fontWeight: '700' }}>{d}</Text>
+                        style={[st.day, { borderColor: on ? colors.primary : G.chipEdge, backgroundColor: on ? brandAlpha(0.14) : G.paneFaint }]}>
+                        <Text style={{ color: on ? G.accentText : colors.textDim, fontSize: 12, fontWeight: '700' }}>{d}</Text>
                       </TouchableOpacity>
                     );
                   })}
@@ -455,15 +464,15 @@ export default function FamilyPlacesScreen() {
               </>
             )}
 
-            <Text style={[st.h, { color: colors.text, marginTop: 20, marginBottom: 8 }]}>How long it lasts</Text>
+            <Text style={[st.h, { color: colors.textDim, marginTop: 20, marginBottom: 8 }]}>How long it lasts</Text>
             <View style={st.radii}>
               {LIFETIMES.map((lt) => {
                 const on = lt.ms == null ? editExpiry == null : false;
                 return (
                   <TouchableOpacity key={lt.label}
                     onPress={() => setEditExpiry(lt.ms == null ? null : Date.now() + lt.ms)}
-                    style={[st.rchip, { borderColor: on ? colors.primary : colors.border, backgroundColor: on ? brandAlpha(0.1) : 'transparent' }]}>
-                    <Text style={{ color: on ? colors.primary : colors.text, fontSize: 12.5, fontWeight: on ? '700' : '500' }}>{lt.label}</Text>
+                    style={[st.rchip, { borderColor: on ? colors.primary : G.chipEdge, backgroundColor: on ? brandAlpha(0.14) : G.paneFaint }]}>
+                    <Text style={{ color: on ? G.accentText : colors.text, fontSize: 12.5, fontWeight: on ? '700' : '500' }}>{lt.label}</Text>
                   </TouchableOpacity>
                 );
               })}
@@ -479,28 +488,28 @@ export default function FamilyPlacesScreen() {
               <View style={{ flexDirection: 'row', gap: 8, marginTop: 14 }}>
                 <TouchableOpacity
                   onPress={() => { navigateTo(editing.center.lat, editing.center.lng, editing.name); setEditing(null); }}
-                  style={[st.btn, { flex: 1, marginTop: 0, backgroundColor: 'transparent', borderWidth: 1, borderColor: colors.border }]}>
+                  style={[st.btn, { flex: 1, marginTop: 0, backgroundColor: 'transparent', borderWidth: 1, borderColor: G.chipEdge }]}>
                   <Ionicons name="navigate" size={17} color={colors.primary} />
                   <Text style={[st.btnTxt, { color: colors.text }]}>Navigate</Text>
                 </TouchableOpacity>
                 {lockedHere(editing) ? (
                   <TouchableOpacity onPress={unlockPlace}
                     style={[st.btn, { flex: 1, marginTop: 0, backgroundColor: 'transparent', borderWidth: 1, borderColor: colors.danger }]}>
-                    <Ionicons name="lock-open" size={17} color={colors.danger} />
-                    <Text style={[st.btnTxt, { color: colors.danger }]}>Unlock</Text>
+                    <Ionicons name="lock-open" size={17} color={G.dangerText} />
+                    <Text style={[st.btnTxt, { color: G.dangerText }]}>Unlock</Text>
                   </TouchableOpacity>
                 ) : (
                   <TouchableOpacity onPress={() => lockPlace(editing)}
                     style={[st.btn, { flex: 1, marginTop: 0, backgroundColor: 'transparent', borderWidth: 1, borderColor: colors.primary }]}>
                     <Ionicons name="lock-closed" size={17} color={colors.primary} />
-                    <Text style={[st.btnTxt, { color: colors.primary }]}>Lock here</Text>
+                    <Text style={[st.btnTxt, { color: G.accentText }]}>Lock here</Text>
                   </TouchableOpacity>
                 )}
               </View>
             )}
             {editing && lockedHere(editing) && (
               <TouchableOpacity onPress={() => { setEditing(null); router.push('/location-lock' as any); }} style={{ alignSelf: 'center', marginTop: 10 }}>
-                <Text style={{ color: colors.primary, fontWeight: '600', fontSize: 13 }}>View live lock status</Text>
+                <Text style={{ color: G.accentText, fontWeight: '600', fontSize: 13 }}>View live lock status</Text>
               </TouchableOpacity>
             )}
 
@@ -508,9 +517,10 @@ export default function FamilyPlacesScreen() {
               <Ionicons name="checkmark" size={18} color="#fff" /><Text style={st.btnTxt}>Save</Text>
             </TouchableOpacity>
             <TouchableOpacity onPress={() => editing && remove(editing)} style={[st.btn, { backgroundColor: 'transparent', borderWidth: 1, borderColor: colors.danger, marginTop: 8 }]}>
-              <Ionicons name="trash" size={18} color={colors.danger} />
-              <Text style={[st.btnTxt, { color: colors.danger }]}>Delete place</Text>
+              <Ionicons name="trash" size={18} color={G.dangerText} />
+              <Text style={[st.btnTxt, { color: G.dangerText }]}>Delete place</Text>
             </TouchableOpacity>
+            </ScrollView>
           </View>
         </View>
       </Modal>
@@ -519,18 +529,19 @@ export default function FamilyPlacesScreen() {
 }
 
 const st = StyleSheet.create({
-  h: { fontSize: 13, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.3, marginBottom: 10 },
-  field: { flexDirection: 'row', alignItems: 'center', gap: 10, borderWidth: 1, borderRadius: 12, paddingHorizontal: 12, height: 50 },
+  h: { fontSize: 12, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 0.7, marginBottom: 10 },
+  field: { flexDirection: 'row', alignItems: 'center', gap: 10, borderWidth: 1, borderRadius: 16, paddingHorizontal: 12, minHeight: 50 },
   input: { flex: 1, fontSize: 15 },
   radii: { flexDirection: 'row', gap: 8, marginTop: 12, flexWrap: 'wrap' },
   days: { flexDirection: 'row', gap: 6 },
-  day: { flex: 1, height: 36, borderWidth: 1, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
+  day: { flex: 1, height: 36, borderWidth: 1, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
   rchip: { borderWidth: 1, borderRadius: 999, paddingHorizontal: 14, paddingVertical: 8 },
-  btn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, height: 50, borderRadius: 13, marginTop: 14 },
+  btn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, minHeight: 50, borderRadius: 16, marginTop: 14 },
   btnTxt: { color: '#fff', fontSize: 15, fontWeight: '800' },
   secHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 28, marginBottom: 10 },
   row: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 12, borderBottomWidth: StyleSheet.hairlineWidth },
   rowIcon: { width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center' },
-  backdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)' },
-  sheet: { borderTopLeftRadius: 20, borderTopRightRadius: 20, borderTopWidth: 1, padding: 18, paddingBottom: 34 },
+  backdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
+  grab: { alignSelf: 'center', width: 40, height: 4, borderRadius: 2, marginBottom: 10 },
+  sheet: { borderTopLeftRadius: 28, borderTopRightRadius: 28, borderTopWidth: 1, padding: 18, paddingBottom: 34 },
 });

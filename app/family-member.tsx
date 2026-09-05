@@ -16,6 +16,8 @@ import { Stack, useLocalSearchParams, useRouter, useFocusEffect } from 'expo-rou
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../lib/theme';
 import { brandAlpha } from '../constants/theme';
+import SpaceGround, { useSpaceGlass } from '../components/spaces/SpaceGround';
+import { SPACE_SHADOW } from '../constants/spaceTheme';
 import { getTrack, summarize, type TrackSample } from '../lib/family/history';
 import { useFamilyAlerts, loadAlerts, type FamilyAlert } from '../lib/family/alerts';
 import { getPlaces } from '../lib/family/store';
@@ -55,6 +57,7 @@ const ICON_FOR: Record<string, keyof typeof Ionicons.glyphMap> = {
 
 export default function FamilyMemberScreen() {
   const { colors } = useTheme();
+  const G = useSpaceGlass();
   const router = useRouter();
   const params = useLocalSearchParams<{
     circleId?: string; circleName?: string; userId?: string; name?: string; role?: string;
@@ -264,28 +267,34 @@ export default function FamilyMemberScreen() {
   };
 
   const action = (icon: keyof typeof Ionicons.glyphMap, label: string, onPress: () => void, tint?: string) => (
-    <TouchableOpacity onPress={onPress} style={[st.action, { backgroundColor: colors.card, borderColor: colors.border }]}>
+    <TouchableOpacity onPress={onPress} accessibilityRole="button" accessibilityLabel={label} style={[st.action, { backgroundColor: G.pane, borderColor: G.edge }]}>
       <Ionicons name={icon} size={20} color={tint ?? colors.primary} />
       <Text style={[st.actionTxt, { color: colors.text }]}>{label}</Text>
     </TouchableOpacity>
   );
 
   if (loading) {
-    return <View style={[st.center, { backgroundColor: colors.bg }]}><ActivityIndicator color={colors.primary} /></View>;
+    return (
+      <View style={[st.center, { backgroundColor: G.bgMid }]}>
+        <SpaceGround />
+        <ActivityIndicator color={colors.primary} />
+      </View>
+    );
   }
 
   return (
-    <View style={{ flex: 1, backgroundColor: colors.bg }}>
+    <View style={{ flex: 1, backgroundColor: G.bgMid }}>
       {/* Native header opted back in — owns the status-bar inset and gives the
           screen a back button; the root layout hides headers app-wide. */}
       <Stack.Screen options={{
         headerShown: true, title: name, headerTitleAlign: 'center',
-        headerStyle: { backgroundColor: colors.bg }, headerTintColor: colors.text, headerShadowVisible: false,
+        headerStyle: { backgroundColor: G.bgTop }, headerTintColor: colors.text, headerShadowVisible: false,
       }} />
+      <SpaceGround aura={colorFor(userId)} />
       <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 40 }}>
 
         {/* identity card */}
-        <View style={[st.card, { backgroundColor: colors.card, borderColor: colors.border }]}>
+        <View style={[st.card, { backgroundColor: G.paneStrong, borderColor: G.edge }]}>
           <View style={[st.avatar, { backgroundColor: colorFor(userId) }]}>
             <Text style={st.avatarTxt}>{name.trim()[0]?.toUpperCase() ?? '?'}</Text>
           </View>
@@ -294,7 +303,7 @@ export default function FamilyMemberScreen() {
               <Text style={{ color: colors.text, fontSize: 17, fontWeight: '800' }} numberOfLines={1}>{name}</Text>
               {isGuardian && <Ionicons name="star" size={13} color={colors.primary} />}
             </View>
-            <Text style={{ color: fresh ? colors.success : colors.textDim, fontSize: 12.5, marginTop: 2 }}>
+            <Text style={{ color: fresh ? G.goodText : colors.textDim, fontSize: 12.5, marginTop: 2 }}>
               {tier === 'live' ? 'Online'
                 : tier === 'recent' ? `Updated ${ago(last!.ts)}`
                   : tier === 'stale' ? `Last known · ${ago(last!.ts)}`
@@ -309,9 +318,9 @@ export default function FamilyMemberScreen() {
               <Ionicons
                 name={last.bat <= 20 ? 'battery-dead' : 'battery-half'}
                 size={20}
-                color={last.bat <= 20 ? colors.danger : colors.textDim}
+                color={last.bat <= 20 ? G.dangerText : colors.textDim}
               />
-              <Text style={{ color: last.bat <= 20 ? colors.danger : colors.textDim, fontSize: 11, fontWeight: '700' }}>
+              <Text style={{ color: last.bat <= 20 ? G.dangerText : colors.textDim, fontSize: 11, fontWeight: '700', fontVariant: ['tabular-nums'] }}>
                 {Math.round(last.bat)}%
               </Text>
             </View>
@@ -333,7 +342,7 @@ export default function FamilyMemberScreen() {
         {/* RELATIONSHIP. Stored per (space, viewer, member) on the server, so
             what I call someone is mine — the same person is "Mother" to me and
             "Wife" to someone else in this circle, both true at once. */}
-        <Text style={[st.h, { color: colors.text }]}>Relationship</Text>
+        <Text style={[st.h, { color: colors.textDim }]}>Relationship</Text>
         <View style={st.relWrap}>
           {RELATION_PRESETS.map((r) => {
             const on = relation === r;
@@ -346,39 +355,39 @@ export default function FamilyMemberScreen() {
                 accessibilityState={{ selected: on }}
                 accessibilityLabel={`${name} is my ${r}`}
                 style={[st.relChip, {
-                  borderColor: on ? colors.primary : colors.border,
-                  backgroundColor: on ? brandAlpha(0.12) : 'transparent',
+                  borderColor: on ? colors.primary : G.chipEdge,
+                  backgroundColor: on ? brandAlpha(0.14) : G.paneFaint,
                   opacity: savingRel ? 0.6 : 1,
                 }]}
               >
-                <Text style={{ color: on ? colors.primary : colors.textDim, fontSize: 12.5, fontWeight: on ? '800' : '600' }}>
+                <Text style={{ color: on ? G.accentText : colors.textDim, fontSize: 12.5, fontWeight: on ? '800' : '600' }}>
                   {r}
                 </Text>
               </TouchableOpacity>
             );
           })}
         </View>
-        <Text style={{ color: colors.textFaint, fontSize: 11.5, marginTop: 8 }}>
+        <Text style={{ color: colors.textDim, fontSize: 11.5, marginTop: 8 }}>
           {relation
             ? `Shown as “${relation} · ${name}” on your family map. Only you see this label.`
             : 'Tap one to show it beside their name on your family map.'}
         </Text>
 
         {/* today at a glance */}
-        <Text style={[st.h, { color: colors.text }]}>Today</Text>
-        <View style={[st.statRow, { backgroundColor: colors.card, borderColor: colors.border }]}>
+        <Text style={[st.h, { color: colors.textDim }]}>Today</Text>
+        <View style={[st.statRow, { backgroundColor: G.pane, borderColor: G.edge }]}>
           <View style={st.stat}>
             <Text style={[st.statVal, { color: colors.text }]}>
               {dist(roadTravelledM ?? stats.distanceM)}
             </Text>
             <Text style={[st.statLbl, { color: colors.textDim }]}>Travelled</Text>
           </View>
-          <View style={[st.statDiv, { backgroundColor: colors.border }]} />
+          <View style={[st.statDiv, { backgroundColor: G.line }]} />
           <View style={st.stat}>
             <Text style={[st.statVal, { color: colors.text }]}>{Math.round(stats.maxSpeed * 3.6)} km/h</Text>
             <Text style={[st.statLbl, { color: colors.textDim }]}>Top speed</Text>
           </View>
-          <View style={[st.statDiv, { backgroundColor: colors.border }]} />
+          <View style={[st.statDiv, { backgroundColor: G.line }]} />
           <View style={st.stat}>
             <Text style={[st.statVal, { color: colors.text }]}>{todaysActivity.length}</Text>
             <Text style={[st.statLbl, { color: colors.textDim }]}>Events</Text>
@@ -386,13 +395,13 @@ export default function FamilyMemberScreen() {
         </View>
 
         {/* activity timeline */}
-        <Text style={[st.h, { color: colors.text, marginTop: 22 }]}>Today&apos;s Activity</Text>
+        <Text style={[st.h, { color: colors.textDim, marginTop: 22 }]}>Today&apos;s Activity</Text>
         {todaysActivity.length === 0 ? (
           <Text style={{ color: colors.textDim, fontSize: 13.5 }}>
             Nothing yet today. Arrivals, departures and check-ins show up here.
           </Text>
         ) : todaysActivity.map((a) => (
-          <View key={a.id} style={[st.evt, { borderColor: colors.border }]}>
+          <View key={a.id} style={[st.evt, { borderColor: G.line }]}>
             <View style={[st.evtIcon, { backgroundColor: brandAlpha(0.1) }]}>
               <Ionicons
                 name={ICON_FOR[a.kind] ?? 'ellipse'}
@@ -407,7 +416,7 @@ export default function FamilyMemberScreen() {
 
         {/* location diagnostics (v3) — same data language as the lock engine */}
         {last && (
-          <View style={[st.evt, { borderColor: colors.border }]}>
+          <View style={[st.evt, { borderColor: G.line }]}>
             <View style={[st.evtIcon, { backgroundColor: brandAlpha(0.1) }]}>
               <Ionicons name="speedometer" size={15} color={colors.primary} />
             </View>
@@ -427,7 +436,7 @@ export default function FamilyMemberScreen() {
 
         {/* places — zone status per place from the SHARED classifier, so a
             member's chip means exactly what Navigate's lock states mean */}
-        <Text style={[st.h, { color: colors.text, marginTop: 22 }]}>Safe Zones</Text>
+        <Text style={[st.h, { color: colors.textDim, marginTop: 22 }]}>Safe Zones</Text>
         {places.length === 0 ? (
           <Text style={{ color: colors.textDim, fontSize: 13.5 }}>
             No places yet. Add one in Places to get arrive/leave alerts.
@@ -444,7 +453,7 @@ export default function FamilyMemberScreen() {
             ? ` · ${tp.timeMs >= 3_600_000 ? `${Math.floor(tp.timeMs / 3_600_000)}h ${Math.round((tp.timeMs % 3_600_000) / 60_000)}m` : `${Math.max(1, Math.round(tp.timeMs / 60_000))}m`} today${tp.firstArrival ? `, arrived ${clock(tp.firstArrival)}` : ''}`
             : '';
           return (
-            <View key={p.id} style={[st.evt, { borderColor: colors.border }]}>
+            <View key={p.id} style={[st.evt, { borderColor: G.line }]}>
               <View style={[st.evtIcon, { backgroundColor: (here ? colors.success : colors.textFaint) + '22' }]}>
                 <Ionicons name="location" size={15} color={here ? colors.success : colors.textDim} />
               </View>
@@ -481,16 +490,16 @@ export default function FamilyMemberScreen() {
 
 const st = StyleSheet.create({
   center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
-  card: { flexDirection: 'row', alignItems: 'center', gap: 12, borderWidth: 1, borderRadius: 16, padding: 14 },
+  card: { flexDirection: 'row', alignItems: 'center', gap: 12, borderWidth: 1, borderRadius: 22, padding: 16, ...SPACE_SHADOW.raised },
   avatar: { width: 50, height: 50, borderRadius: 25, alignItems: 'center', justifyContent: 'center' },
   avatarTxt: { color: '#fff', fontWeight: '800', fontSize: 20 },
-  actions: { flexDirection: 'row', gap: 8, marginTop: 14 },
-  action: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 5, height: 62, borderWidth: 1, borderRadius: 13 },
+  actions: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 12 },
+  action: { flex: 1, minWidth: 62, alignItems: 'center', justifyContent: 'center', gap: 5, minHeight: 62, borderWidth: 1, borderRadius: 18, ...SPACE_SHADOW.rest },
   actionTxt: { fontSize: 11.5, fontWeight: '600' },
-  h: { fontSize: 13, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.3, marginTop: 24, marginBottom: 10 },
-  statRow: { flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderRadius: 14, paddingVertical: 14 },
+  h: { fontSize: 12, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 0.7, marginTop: 24, marginBottom: 10 },
+  statRow: { flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderRadius: 20, paddingVertical: 14, ...SPACE_SHADOW.rest },
   stat: { flex: 1, alignItems: 'center', gap: 3 },
-  statVal: { fontSize: 15, fontWeight: '800' },
+  statVal: { fontSize: 16, fontWeight: '800', fontVariant: ['tabular-nums'] },
   statLbl: { fontSize: 11 },
   statDiv: { width: 1, height: 28 },
   evt: { flexDirection: 'row', alignItems: 'center', gap: 11, paddingVertical: 11, borderBottomWidth: StyleSheet.hairlineWidth },

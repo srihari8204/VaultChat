@@ -203,6 +203,8 @@ export default function SpaceLeaveScreen() {
           <TouchableOpacity
             key={t.key}
             onPress={() => setTab(t.key)}
+            accessibilityRole="button"
+            accessibilityState={{ selected: tab === t.key }}
             style={[s.tabBtn, tab === t.key && { backgroundColor: colors.primary }]}
           >
             <Text style={[s.tabText, tab === t.key && { color: '#fff' }]}>
@@ -338,7 +340,9 @@ const styles = (c: Palette) => StyleSheet.create({
     alignItems: 'center', justifyContent: 'center', elevation: 4,
   },
   sheetWrap: { flex: 1, backgroundColor: '#0008', justifyContent: 'flex-end' },
-  sheet: { backgroundColor: c.card, borderTopLeftRadius: 18, borderTopRightRadius: 18, padding: 18, gap: 12 },
+  // surfaceSolid, not card: card is a translucent glass pane in the dusk skin,
+  // and a see-through sheet over the scrim is unreadable in both schemes.
+  sheet: { backgroundColor: c.surfaceSolid, borderTopLeftRadius: 18, borderTopRightRadius: 18, padding: 18, gap: 12 },
   input: {
     backgroundColor: c.bg, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 11,
     color: c.text, fontSize: 14.5,

@@ -28,11 +28,10 @@ import { useTheme } from '../../lib/theme';
 import { LEAFLET_JS_B64, LEAFLET_CSS_B64 } from '../nav/leafletAsset';
 import { MAPLIBRE_JS_B64, MAPLIBRE_CSS_B64 } from '../nav/maplibreAsset';
 import { ROUTING_JS_B64 } from '../nav/routingAsset';
-import { STREETVIEW_API_KEY } from '../../constants/flags';
+import { STREETVIEW_API_KEY, FAMILY_MAP_3D } from '../../constants/flags';
 import { clusterForZoom } from '../../lib/groups/clustering';
 import { fetchRoute } from '../../lib/nav/routing';
 import { mapStyleUrl, buildings3DLayer, RASTER_FALLBACK_URL, ATTRIBUTION } from '../../lib/map/tileProvider';
-import { FAMILY_MAP_3D } from '../../constants/flags';
 
 export interface FamilyMarker {
   id: string;

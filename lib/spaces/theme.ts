@@ -6,19 +6,45 @@
 // decision that already picks the dashboard sections, so the skin and the
 // content can never disagree about what kind of space this is.
 
-import { createElement } from 'react';
+import { createElement, useMemo } from 'react';
 import { useTheme } from '../theme';
 import type { Palette } from '../../constants/theme';
 import { BIZ } from '../../constants/businessTheme';
+import { SPACE_GLASS } from '../../constants/spaceTheme';
 import { usesBusinessTheme } from './layout';
 import ChatDoorButton, { type ChatDoorTarget } from '../../components/spaces/ChatDoorButton';
 
-/** The palette for a space screen. Pass the route's groupType param. */
+/**
+ * The palette for a space screen. Pass the route's groupType param.
+ *
+ * Non-business spaces wear the DUSK-GLASS skin here, at the palette layer:
+ * every operational screen builds its styles from these six surface tokens,
+ * so mapping them onto SPACE_GLASS restyles the whole tier in one place —
+ * the same trick financeTheme used ("two token names carry the restyle").
+ * The ground is the flat bgMid tone (no gradient/aura): operational screens
+ * put scanability first, and pane-over-bgMid is exactly the composite the
+ * spaceTheme selftest pins for AA, so the contrast guarantees apply verbatim.
+ * Business/office/cab spaces keep the VaultChat Business system untouched —
+ * that split is pinned by layout.ts's self-check and check-space-identity.
+ */
 export function useSpaceColors(groupType?: string | null): Palette {
-  const { colors } = useTheme();
-  // The decision itself is pure and pinned by layout.ts's self-check plus
-  // scripts/check-space-identity.ts: family/school/generic NEVER get BIZ.
-  return usesBusinessTheme(groupType) ? BIZ : colors;
+  const { colors, scheme } = useTheme();
+  const biz = usesBusinessTheme(groupType);
+  return useMemo(() => {
+    if (biz) return BIZ;
+    const G = SPACE_GLASS[scheme];
+    return {
+      ...colors,
+      bg: G.bgMid,
+      card: G.pane,
+      // Ink hairline, not the lit rim: chips, inputs and card outlines all
+      // ride `border` here, and a white rim on the light ground is invisible.
+      border: G.chipEdge,
+      separator: G.line,
+      surface: G.paneFaint,
+      surfaceSolid: G.sheet,
+    };
+  }, [biz, colors, scheme]);
 }
 
 /**

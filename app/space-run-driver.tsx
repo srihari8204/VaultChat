@@ -608,7 +608,9 @@ const styles = (c: Palette) => StyleSheet.create({
   incidentBar: {
     position: 'absolute', left: 16, right: 16, bottom: 20,
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
-    paddingVertical: 14, borderRadius: 12, backgroundColor: c.card,
+    // surfaceSolid: this floats OVER the scrolling manifest, and the dusk
+    // skin's translucent card let rider rows bleed through the button.
+    paddingVertical: 14, borderRadius: 12, backgroundColor: c.surfaceSolid,
     borderWidth: 1, borderColor: '#EF444455',
   },
   incidentText: { color: '#EF4444', fontWeight: '600' },

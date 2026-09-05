@@ -17,6 +17,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../../lib/theme';
 import { brandAlpha } from '../../constants/theme';
+import { useSpaceGlass } from '../spaces/SpaceGround';
 import { geocodeSearch, type GeoHit } from '../../lib/nav/geocode';
 import { fetchMatrix, type MatrixResult } from '../../lib/nav/routing';
 import { type LatLng } from '../../lib/nav/geo';
@@ -48,6 +49,9 @@ export default function MeetHereSheet({ members, myPos, destination, onDestinati
   tripActive?: boolean;
 }) {
   const { colors } = useTheme();
+  // Solid sheet tones: this mounts over the live family map, where translucent
+  // glass costs readability (same rule as family-map's floating bars).
+  const G = useSpaceGlass();
   const [q, setQ] = useState('');
   const [hits, setHits] = useState<GeoHit[]>([]);
   const [searching, setSearching] = useState(false);
@@ -121,11 +125,12 @@ export default function MeetHereSheet({ members, myPos, destination, onDestinati
     setHits([]);
   };
 
+  // Status is a TEXT label (§69/§70), so it takes the AA-deep tints.
   const statusColor = (s: ArrivalStatus) =>
-    s === 'arrived' ? colors.success : s === 'nearby' ? colors.primary : s === 'onTheWay' ? colors.textDim : colors.textFaint;
+    s === 'arrived' ? G.goodText : s === 'nearby' ? G.accentText : colors.textDim;
 
   return (
-    <View style={[st.sheet, { backgroundColor: colors.card, borderColor: colors.border }]}>
+    <View style={[st.sheet, { backgroundColor: G.sheet, borderColor: G.edge }]}>
       <View style={st.head}>
         <Ionicons name="location" size={16} color={colors.primary} />
         <Text style={{ color: colors.text, fontWeight: '800', fontSize: 15, flex: 1 }} numberOfLines={1}>
@@ -138,7 +143,7 @@ export default function MeetHereSheet({ members, myPos, destination, onDestinati
 
       {!destination ? (
         <>
-          <View style={[st.field, { borderColor: colors.border, backgroundColor: colors.surface }]}>
+          <View style={[st.field, { borderColor: G.chipEdge, backgroundColor: G.paneFaint }]}>
             <Ionicons name="search" size={17} color={colors.textDim} />
             <TextInput
               value={q}
@@ -165,7 +170,7 @@ export default function MeetHereSheet({ members, myPos, destination, onDestinati
                     key={c}
                     onPress={() => setQ(c)}
                     accessibilityRole="button"
-                    style={[st.cat, { borderColor: colors.border }]}
+                    style={[st.cat, { borderColor: G.chipEdge, backgroundColor: G.paneFaint }]}
                   >
                     <Text style={{ color: colors.text, fontSize: 12.5 }}>{c}</Text>
                   </TouchableOpacity>
@@ -179,7 +184,7 @@ export default function MeetHereSheet({ members, myPos, destination, onDestinati
                 <TouchableOpacity
                   onPress={() => pick('Family centre', centre.center.lat, centre.center.lng)}
                   accessibilityRole="button"
-                  style={[st.centre, { borderColor: colors.border, backgroundColor: brandAlpha(0.08) }]}
+                  style={[st.centre, { borderColor: G.chipEdge, backgroundColor: brandAlpha(0.1) }]}
                 >
                   <Ionicons name="git-merge" size={17} color={colors.primary} />
                   <View style={{ flex: 1 }}>
@@ -199,7 +204,7 @@ export default function MeetHereSheet({ members, myPos, destination, onDestinati
               <TouchableOpacity
                 key={`${h.lat},${h.lng},${i}`}
                 onPress={() => pick(h.name || h.label, h.lat, h.lng)}
-                style={[st.hit, { borderTopColor: colors.border }]}
+                style={[st.hit, { borderTopColor: G.line }]}
               >
                 <Ionicons name="location-outline" size={16} color={colors.textDim} />
                 <View style={{ flex: 1 }}>
@@ -238,7 +243,7 @@ export default function MeetHereSheet({ members, myPos, destination, onDestinati
             {rows.map((r) => {
               const status = arrivalOf(r.straightM);
               return (
-                <View key={r.id} style={[st.row, { borderTopColor: colors.border }]}>
+                <View key={r.id} style={[st.row, { borderTopColor: G.line }]}>
                   <View style={{ flex: 1 }}>
                     <Text style={{ color: colors.text, fontSize: 14, fontWeight: '600' }} numberOfLines={1}>
                       {r.self ? 'You' : r.name}
@@ -262,7 +267,7 @@ export default function MeetHereSheet({ members, myPos, destination, onDestinati
             })}
           </ScrollView>
 
-          <View style={[st.sum, { borderTopColor: colors.border }]}>
+          <View style={[st.sum, { borderTopColor: G.line }]}>
             {summary.nearest && (
               <Text style={{ color: colors.textDim, fontSize: 12 }}>
                 Nearest <Text style={{ color: colors.text, fontWeight: '700' }}>{summary.nearest.name}</Text>
@@ -279,7 +284,7 @@ export default function MeetHereSheet({ members, myPos, destination, onDestinati
                 Everyone can be there in {formatEta(summary.familyArrivalS)}
               </Text>
             ) : summary.located > 0 ? (
-              <Text style={{ color: colors.textFaint, fontSize: 11.5 }}>
+              <Text style={{ color: colors.textDim, fontSize: 11.5 }}>
                 {summary.routed} of {summary.located} located members have a road ETA
               </Text>
             ) : null}
@@ -292,20 +297,20 @@ export default function MeetHereSheet({ members, myPos, destination, onDestinati
             <TouchableOpacity
               onPress={() => onStartTrip(destination)}
               accessibilityRole="button"
-              style={[st.btn, { borderColor: colors.primary, backgroundColor: brandAlpha(0.1), marginTop: 10 }]}
+              style={[st.btn, { borderColor: colors.primary, backgroundColor: brandAlpha(0.14), marginTop: 10 }]}
             >
               <Ionicons name="car" size={16} color={colors.primary} />
-              <Text style={{ color: colors.primary, fontWeight: '800', fontSize: 13 }}>Start family trip here</Text>
+              <Text style={{ color: G.accentText, fontWeight: '800', fontSize: 13 }}>Start family trip here</Text>
             </TouchableOpacity>
           )}
 
           <TouchableOpacity
             onPress={() => onDestination(null)}
             accessibilityRole="button"
-            style={[st.btn, { borderColor: colors.border, marginTop: onStartTrip && !tripActive ? 8 : 10 }]}
+            style={[st.btn, { borderColor: G.chipEdge, marginTop: onStartTrip && !tripActive ? 8 : 10 }]}
           >
             <Ionicons name="swap-horizontal" size={16} color={colors.primary} />
-            <Text style={{ color: colors.primary, fontWeight: '700', fontSize: 13 }}>Change destination</Text>
+            <Text style={{ color: G.accentText, fontWeight: '700', fontSize: 13 }}>Change destination</Text>
           </TouchableOpacity>
         </>
       )}
@@ -315,11 +320,11 @@ export default function MeetHereSheet({ members, myPos, destination, onDestinati
 
 const st = StyleSheet.create({
   sheet: {
-    borderTopLeftRadius: 20, borderTopRightRadius: 20, borderWidth: 1,
-    paddingHorizontal: 14, paddingTop: 12, paddingBottom: 14,
+    borderTopLeftRadius: 24, borderTopRightRadius: 24, borderWidth: 1,
+    paddingHorizontal: 16, paddingTop: 12, paddingBottom: 14,
   },
   head: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 10 },
-  field: { flexDirection: 'row', alignItems: 'center', gap: 8, borderWidth: 1, borderRadius: 12, paddingHorizontal: 11, height: 44 },
+  field: { flexDirection: 'row', alignItems: 'center', gap: 8, borderWidth: 1, borderRadius: 14, paddingHorizontal: 11, minHeight: 44 },
   input: { flex: 1, fontSize: 14.5, paddingVertical: 0 },
   cats: { gap: 7, paddingVertical: 11 },
   cat: { borderWidth: 1, borderRadius: 999, paddingHorizontal: 12, minHeight: 30, justifyContent: 'center' },
@@ -328,5 +333,5 @@ const st = StyleSheet.create({
   note: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingBottom: 8 },
   row: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 9, borderTopWidth: StyleSheet.hairlineWidth },
   sum: { borderTopWidth: StyleSheet.hairlineWidth, paddingTop: 9, gap: 3 },
-  btn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7, borderWidth: 1, borderRadius: 12, height: 42, marginTop: 10 },
+  btn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7, borderWidth: 1, borderRadius: 14, minHeight: 42, marginTop: 10 },
 });

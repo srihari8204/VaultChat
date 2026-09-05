@@ -15,6 +15,7 @@ import { Stack, useLocalSearchParams, useRouter, useFocusEffect } from 'expo-rou
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../lib/theme';
 import { brandAlpha } from '../constants/theme';
+import SpaceGround, { useSpaceGlass } from '../components/spaces/SpaceGround';
 import {
   useFamilyAlerts, loadAlerts, markAllRead, clearCircleAlerts,
   type AlertFilter, type AlertKind, type FamilyAlert,
@@ -58,6 +59,7 @@ const sectionOf = (ts: number): string => {
 
 export default function FamilyAlertsScreen() {
   const { colors } = useTheme();
+  const G = useSpaceGlass();
   const router = useRouter();
   const params = useLocalSearchParams<{ circleId?: string; circleName?: string }>();
   const circleId = params.circleId ? String(params.circleId) : null;
@@ -95,28 +97,30 @@ export default function FamilyAlertsScreen() {
     a.sev === 'critical' ? colors.danger : a.sev === 'important' ? colors.primary : colors.textDim;
 
   return (
-    <View style={{ flex: 1, backgroundColor: colors.bg }}>
+    <View style={{ flex: 1, backgroundColor: G.bgMid }}>
       {/* headerShown: the root hides headers app-wide, so without opting back
           in this screen had NO back button and its headerRight clear-button
           never rendered at all — and the filter tabs sat in the dead strip
           under the status bar. Same fix as the space module. */}
       <Stack.Screen options={{
         headerShown: true, title: 'Alerts', headerTitleAlign: 'center',
-        headerStyle: { backgroundColor: colors.bg }, headerTintColor: colors.text, headerShadowVisible: false,
+        headerStyle: { backgroundColor: G.bgTop }, headerTintColor: colors.text, headerShadowVisible: false,
         headerRight: () => (
-          <TouchableOpacity onPress={confirmClear} style={{ paddingHorizontal: 8 }}>
+          <TouchableOpacity onPress={confirmClear} style={{ paddingHorizontal: 8 }} hitSlop={{ top: 8, bottom: 8, left: 4, right: 4 }} accessibilityRole="button" accessibilityLabel="Clear alert history">
             <Ionicons name="trash-outline" size={19} color={colors.textDim} />
           </TouchableOpacity>
         ),
       }} />
+      <SpaceGround />
 
-      <View style={[st.tabs, { borderColor: colors.border }]}>
+      <View style={[st.tabs, { borderColor: G.line }]}>
         {FILTERS.map((f) => {
           const on = f.key === filter;
           return (
             <TouchableOpacity key={f.key} onPress={() => setFilter(f.key)}
-              style={[st.tab, { backgroundColor: on ? brandAlpha(0.14) : 'transparent', borderColor: on ? colors.primary : 'transparent' }]}>
-              <Text style={{ color: on ? colors.primary : colors.textDim, fontWeight: on ? '800' : '600', fontSize: 13 }}>{f.label}</Text>
+              accessibilityRole="button" accessibilityState={{ selected: on }}
+              style={[st.tab, { backgroundColor: on ? brandAlpha(0.14) : G.paneFaint, borderColor: on ? colors.primary : G.chipEdge }]}>
+              <Text style={{ color: on ? G.accentText : colors.textDim, fontWeight: on ? '800' : '600', fontSize: 13 }}>{f.label}</Text>
             </TouchableOpacity>
           );
         })}
@@ -137,7 +141,8 @@ export default function FamilyAlertsScreen() {
           </View>
         }
         renderSectionHeader={({ section }) => (
-          <Text style={[st.sec, { color: colors.textDim, backgroundColor: colors.bg }]}>{section.title}</Text>
+          // Transparent: a solid strip over the gradient ground reads as a bug.
+          <Text style={[st.sec, { color: colors.textDim }]}>{section.title}</Text>
         )}
         renderItem={({ item }) => (
           <TouchableOpacity
@@ -146,7 +151,7 @@ export default function FamilyAlertsScreen() {
               pathname: '/family-member' as any,
               params: { circleId, userId: item.actorId, name: item.actorName, circleName: params.circleName ?? '' },
             })}
-            style={[st.row, { borderColor: colors.border, backgroundColor: item.read ? 'transparent' : brandAlpha(0.05) }]}
+            style={[st.row, { borderColor: G.line, backgroundColor: item.read ? 'transparent' : brandAlpha(0.07) }]}
           >
             <View style={[st.icon, { backgroundColor: tint(item) + '22' }]}>
               <Ionicons name={ICON_FOR[item.kind] ?? 'notifications'} size={17} color={tint(item)} />
@@ -167,7 +172,7 @@ export default function FamilyAlertsScreen() {
 
 const st = StyleSheet.create({
   tabs: { flexDirection: 'row', gap: 8, padding: 12, borderBottomWidth: StyleSheet.hairlineWidth },
-  tab: { flex: 1, alignItems: 'center', paddingVertical: 9, borderRadius: 10, borderWidth: 1 },
+  tab: { flex: 1, alignItems: 'center', paddingVertical: 9, borderRadius: 999, borderWidth: 1 },
   sec: { fontSize: 11.5, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 0.4, paddingHorizontal: 16, paddingTop: 16, paddingBottom: 6 },
   row: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: StyleSheet.hairlineWidth },
   icon: { width: 34, height: 34, borderRadius: 17, alignItems: 'center', justifyContent: 'center' },
