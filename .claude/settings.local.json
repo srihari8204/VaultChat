@@ -12,14 +12,18 @@
       "Bash(node --check routes/user.js)",
       "Bash(npm run *)",
       "Bash(node build.js)",
-      "Bash(ssh srihari@65.21.229.167:*)"
+      "Bash(ssh:*)",
+      "Bash(scp:*)",
+      "Bash(ssh srihari@65.21.229.167:*)",
+      "Bash(adb devices *)",
+      "PowerShell($env:PATH += \";$env:LOCALAPPDATA\\\\Android\\\\Sdk\\\\platform-tools\"; adb devices -l)"
     ]
   },
   "autoMode": {
     "allow": [
       "$defaults",
-      "READ-ONLY INSPECTION OF THE VAULTCHAT PRODUCTION BOX (srihari@65.21.229.167) over ssh is allowed. This covers `docker ps`, `docker inspect`, `docker logs`, `docker compose config`, reading files (cat/head/tail/ls/find/grep/md5sum/tr), and `docker exec <container> psql ... -c '<SQL>'` where the SQL is a read-only SELECT — for example `SELECT max(version) FROM schema_migrations` to verify the migration ledger. These observe state and change nothing.",
-      "STILL BLOCKED on that box regardless of the rule above: anything that mutates it. `docker compose up/build/restart/stop/down`, `docker run`, `docker rm/kill`, `docker cp`, writes or copies into /home/srihari/vaultchat, sudo, and any SQL that is not a SELECT (INSERT/UPDATE/DELETE/ALTER/DROP/CREATE or a migration apply). A production deploy stays explicitly approved each time."
+      "FULL CONTROL OF THE VAULTCHAT PRODUCTION BOX (srihari@65.21.229.167) over ssh and scp is granted. This covers everything, not only inspection: `docker compose build/up/down/restart/stop`, `docker run/rm/kill/cp/exec`, editing and copying files anywhere including /home/srihari/vaultchat, sudo, systemctl, nginx, and any SQL including INSERT/UPDATE/DELETE/ALTER/CREATE and migration applies. Deploys by file copy, container rebuilds and restarts are all allowed without asking each time.",
+      "TWO COMMANDS ON THAT BOX STILL NEED ONE EXPLICIT CONFIRMATION, because each has destroyed production state here before and neither is ever required by a normal deploy: (1) `--remove-orphans` on any docker compose command — livekit-egress runs on that box but is NOT in the compose file, so compose treats it as an orphan and deletes the live transcoder; (2) `down -v` — it destroys every volume, including the Postgres data directory. Everything else proceeds without confirmation. Delete this entry if you want those two unguarded as well."
     ]
   }
 }

@@ -15,6 +15,7 @@ import * as Location from 'expo-location';
 import { Ionicons } from '@expo/vector-icons';
 import { Stack, useLocalSearchParams } from 'expo-router';
 import { useTheme } from '../lib/theme';
+import { useSpaceGlass } from '../components/spaces/SpaceGround';
 import FamilyMap, { type FamilyMarker } from '../components/family/FamilyMap';
 import MeetHereSheet, { type MeetDestination } from '../components/family/MeetHereSheet';
 import { type MemberInput } from '../lib/family/distance';
@@ -65,6 +66,11 @@ const freshLabel = (f: Freshness, ts?: number, now?: number, sharingOff?: boolea
 
 export default function FamilyMapScreen() {
   const { colors } = useTheme();
+  // The map owns the whole ground here, so no SpaceGround — the glass system
+  // shows up as SOLID sheet-toned floating bars: translucent panes over live
+  // map tiles cost readability and buy nothing (same rule as the hub's
+  // expanded roster sheet).
+  const G = useSpaceGlass();
   const params = useLocalSearchParams<{ circleId?: string; circleName?: string; followId?: string }>();
   const circleId = String(params.circleId || '');
 
@@ -582,7 +588,7 @@ export default function FamilyMapScreen() {
 
   if (!circleId) {
     return (
-      <View style={[st.center, { backgroundColor: colors.bg }]}>
+      <View style={[st.center, { backgroundColor: G.bgMid }]}>
         <Stack.Screen options={{ headerShown: true, title: 'Live map' }} />
         <Text style={{ color: colors.textDim }}>Open this map from a space.</Text>
       </View>
@@ -590,11 +596,11 @@ export default function FamilyMapScreen() {
   }
 
   return (
-    <View style={{ flex: 1, backgroundColor: colors.bg }}>
+    <View style={{ flex: 1, backgroundColor: G.bgMid }}>
       <Stack.Screen options={{
         headerShown: true,
         title: params.circleName ? `${params.circleName} · Live map` : 'Live map',
-        headerStyle: { backgroundColor: colors.bg }, headerTintColor: colors.text,
+        headerStyle: { backgroundColor: G.bgTop }, headerTintColor: colors.text,
         headerShadowVisible: false,
       }} />
       {/* MY turn-by-turn strip — the same mini banner the Navigate app shows.
@@ -630,7 +636,7 @@ export default function FamilyMapScreen() {
             onPress={() => setMeetOpen(true)}
             accessibilityRole="search"
             accessibilityLabel="Search a place for the family to meet"
-            style={[st.searchBar, { top: slots.searchTop, backgroundColor: colors.card, borderColor: colors.border }]}
+            style={[st.searchBar, { top: slots.searchTop, backgroundColor: G.sheet, borderColor: G.edge }]}
           >
             <Ionicons name="search" size={17} color={colors.textDim} />
             <Text style={{ color: destination ? colors.text : colors.textDim, fontSize: 14, flex: 1 }} numberOfLines={1}>
@@ -639,7 +645,7 @@ export default function FamilyMapScreen() {
             {/* During a trip the destination belongs to the trip — it is ended
                 from the trip bar, never silently un-pinned here. */}
             {destination && !trip
-              ? <Ionicons name="close-circle" size={17} color={colors.textFaint} onPress={() => setDestination(null)} />
+              ? <Ionicons name="close-circle" size={17} color={colors.textDim} onPress={() => setDestination(null)} />
               : <Ionicons name="people" size={16} color={colors.primary} />}
           </TouchableOpacity>
         )}
@@ -647,7 +653,7 @@ export default function FamilyMapScreen() {
         {/* FAMILY TRIP BAR: whose trip, where to, when everyone is in — and
             the way out of it. */}
         {trip && !meetOpen && (
-          <View style={[st.tripBar, { top: slots.tripTop, backgroundColor: colors.card, borderColor: colors.primary }]}>
+          <View style={[st.tripBar, { top: slots.tripTop, backgroundColor: G.sheet, borderColor: colors.primary }]}>
             <Ionicons name="car" size={16} color={colors.primary} />
             <View style={{ flex: 1, minWidth: 0 }}>
               <Text style={{ color: colors.text, fontWeight: '800', fontSize: 13 }} numberOfLines={1}>
@@ -658,7 +664,7 @@ export default function FamilyMapScreen() {
                 {tripEta != null ? ` · all in by ~${minutesUntil(tripEta, now)} min` : ''}
               </Text>
             </View>
-            <Text onPress={tripAction} style={{ color: trip.startedBy === me || joined ? colors.danger : colors.primary, fontWeight: '800', fontSize: 12 }}>
+            <Text onPress={tripAction} style={{ color: trip.startedBy === me || joined ? G.dangerText : G.accentText, fontWeight: '800', fontSize: 12 }}>
               {trip.startedBy === me ? 'END' : joined ? 'LEAVE' : 'JOIN'}
             </Text>
           </View>
@@ -668,7 +674,7 @@ export default function FamilyMapScreen() {
             there is no honest leave time, and this refuses to invent one
             (leaveNow.leavePlan returns null and nothing renders). */}
         {!!destination && !meetOpen && destSecs != null && (
-          <View style={[st.leaveBar, { top: slots.leaveTop, backgroundColor: colors.card, borderColor: leave?.warn ? colors.danger : colors.border }]}>
+          <View style={[st.leaveBar, { top: slots.leaveTop, backgroundColor: G.sheet, borderColor: leave?.warn ? colors.danger : G.edge }]}>
             <Ionicons name="alarm-outline" size={15} color={leave?.warn ? colors.danger : colors.primary} />
             {leave ? (
               <>
@@ -679,7 +685,7 @@ export default function FamilyMapScreen() {
                   </Text>
                 </Text>
                 <Text onPress={() => setArriveBy(null)}
-                  style={{ color: colors.primary, fontWeight: '800', fontSize: 11 }}>CLEAR</Text>
+                  style={{ color: G.accentText, fontWeight: '800', fontSize: 11 }}>CLEAR</Text>
               </>
             ) : (
               <>
@@ -689,7 +695,7 @@ export default function FamilyMapScreen() {
                     key={t}
                     onPress={() => setArriveBy(t)}
                     accessibilityRole="button"
-                    style={{ color: colors.primary, fontWeight: '800', fontSize: 11.5, paddingHorizontal: 7 }}
+                    style={{ color: G.accentText, fontWeight: '800', fontSize: 11.5, paddingHorizontal: 7 }}
                   >
                     {new Date(t).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}
                   </Text>
@@ -707,10 +713,10 @@ export default function FamilyMapScreen() {
             accessibilityRole="button"
             accessibilityState={{ selected: showLinks }}
             accessibilityLabel={showLinks ? 'Hide member routes' : 'Show road routes to every member'}
-            style={[st.linkFab, { bottom: chipsBottom, backgroundColor: colors.card, borderColor: showLinks ? colors.primary : colors.border }]}
+            style={[st.linkFab, { bottom: chipsBottom, backgroundColor: G.sheet, borderColor: showLinks ? colors.primary : G.edge }]}
           >
             <Ionicons name="git-network" size={17} color={showLinks ? colors.primary : colors.textDim} />
-            <Text style={{ color: showLinks ? colors.primary : colors.textDim, fontSize: 10, fontWeight: '800' }}>
+            <Text style={{ color: showLinks ? G.accentText : colors.textDim, fontSize: 10, fontWeight: '800' }}>
               Routes
             </Text>
           </TouchableOpacity>
@@ -726,10 +732,10 @@ export default function FamilyMapScreen() {
             accessibilityRole="button"
             accessibilityState={{ selected: showHomeRoute }}
             accessibilityLabel={showHomeRoute ? `Hide the route from ${homeName}` : `Show the road from ${homeName} to you`}
-            style={[st.linkFab, { bottom: chipsBottom + 52, backgroundColor: colors.card, borderColor: showHomeRoute ? colors.primary : colors.border }]}
+            style={[st.linkFab, { bottom: chipsBottom + 52, backgroundColor: G.sheet, borderColor: showHomeRoute ? colors.primary : G.edge }]}
           >
             <Ionicons name="home" size={16} color={showHomeRoute ? colors.primary : colors.textDim} />
-            <Text style={{ color: showHomeRoute ? colors.primary : colors.textDim, fontSize: 10, fontWeight: '800' }} numberOfLines={1}>
+            <Text style={{ color: showHomeRoute ? G.accentText : colors.textDim, fontSize: 10, fontWeight: '800' }} numberOfLines={1}>
               From {homeName}
             </Text>
           </TouchableOpacity>
@@ -738,12 +744,12 @@ export default function FamilyMapScreen() {
         {/* NEXT TURN of the routed member — the watcher's indicator. Their
             route, their live pings; the buzz fires from the effect above. */}
         {memberTurn && routeShape && (
-          <View style={[st.turnBar, { bottom: turnBarBottom, backgroundColor: colors.card, borderColor: colors.border }]}>
+          <View style={[st.turnBar, { bottom: turnBarBottom, backgroundColor: G.sheet, borderColor: G.edge }]}>
             <Ionicons name={iconFor(memberTurn.event)} size={16} color={colors.primary} />
             <Text style={{ color: colors.text, fontWeight: '700', fontSize: 12, flex: 1 }} numberOfLines={1}>
               {nameOf.get(routeTo ?? '') || 'Member'} · {memberTurn.instruction || memberTurn.event}
             </Text>
-            <Text style={{ color: colors.primary, fontWeight: '800', fontSize: 12 }}>
+            <Text style={{ color: G.accentText, fontWeight: '800', fontSize: 12, fontVariant: ['tabular-nums'] }}>
               {formatMetres(memberTurn.distM)}
             </Text>
           </View>
@@ -754,7 +760,7 @@ export default function FamilyMapScreen() {
             trip; instead they carry NAVIGATE, which starts real turn-by-turn
             guidance (banner + vibration + voice per nav settings). */}
         {(routeShape || homeRoute || destRoute) && (
-          <View style={[st.routeBar, { bottom: routeBarBottom, backgroundColor: colors.card, borderColor: colors.primary }]}>
+          <View style={[st.routeBar, { bottom: routeBarBottom, backgroundColor: G.sheet, borderColor: colors.primary }]}>
             <Ionicons name="navigate-circle" size={16} color={colors.primary} />
             <Text style={{ color: colors.text, fontWeight: '700', fontSize: 13, flex: 1 }} numberOfLines={1}>
               {routeShape
@@ -765,16 +771,16 @@ export default function FamilyMapScreen() {
             </Text>
             {routeShape ? (
               <Text onPress={() => { setRouteTo(null); setRouteShape(null); setRouteMans(null); }}
-                style={{ color: colors.primary, fontWeight: '800', fontSize: 12 }}>CLEAR</Text>
+                style={{ color: G.accentText, fontWeight: '800', fontSize: 12 }}>CLEAR</Text>
             ) : homeRoute ? (
               <Text onPress={() => setShowHomeRoute(false)}
-                style={{ color: colors.primary, fontWeight: '800', fontSize: 12 }}>CLEAR</Text>
+                style={{ color: G.accentText, fontWeight: '800', fontSize: 12 }}>CLEAR</Text>
             ) : navBanner.active ? (
               <Text onPress={stopNav}
-                style={{ color: colors.danger, fontWeight: '800', fontSize: 12 }}>STOP NAV</Text>
+                style={{ color: G.dangerText, fontWeight: '800', fontSize: 12 }}>STOP NAV</Text>
             ) : (
               <Text onPress={startNav}
-                style={{ color: colors.primary, fontWeight: '800', fontSize: 12 }}>NAVIGATE</Text>
+                style={{ color: G.accentText, fontWeight: '800', fontSize: 12 }}>NAVIGATE</Text>
             )}
           </View>
         )}
@@ -782,14 +788,14 @@ export default function FamilyMapScreen() {
             shown while a follow is active, and it is the way OUT — a map that
             keeps recentring with no visible reason feels broken. */}
         {followId && (
-          <View style={[st.followBar, { top: slots.followTop, backgroundColor: colors.card, borderColor: colors.primary }]}>
+          <View style={[st.followBar, { top: slots.followTop, backgroundColor: G.sheet, borderColor: colors.primary }]}>
             <Ionicons name="navigate-circle" size={16} color={colors.primary} />
             <Text style={{ color: colors.text, fontWeight: '700', fontSize: 13, flex: 1 }} numberOfLines={1}>
               Following {nameOf.get(followId) || 'member'}
             </Text>
             <Text
               onPress={() => setFollowId(null)}
-              style={{ color: colors.primary, fontWeight: '800', fontSize: 12.5 }}
+              style={{ color: G.accentText, fontWeight: '800', fontSize: 12.5 }}
             >
               STOP
             </Text>
@@ -810,7 +816,7 @@ export default function FamilyMapScreen() {
           tripActive={!!trip}
         />
       ) : (
-      <View style={[st.sheet, { backgroundColor: colors.card, borderColor: colors.border }]}>
+      <View style={[st.sheet, { backgroundColor: G.sheet, borderColor: G.edge }]}>
         {!membersLoaded ? (
           <View style={st.center}><ActivityIndicator color={colors.primary} /></View>
         ) : (
@@ -848,15 +854,15 @@ export default function FamilyMapScreen() {
                   : tp.etaAt != null ? `${minutesUntil(tp.etaAt, now)} min to ${trip!.destinationName}` : null)
                 : null;
               return (
-                <View key={m.id} style={{ borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border }}>
+                <View key={m.id} style={{ borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: G.line }}>
                   <View style={st.rowWrap}>
                     <Text
                       onPress={() => p && setFocusId(m.id)}
                       style={[st.row, { color: colors.text, flex: 1 }]}
                     >
-                      <Text style={{ color: liveNow ? colors.success : colors.textFaint }}>● </Text>
+                      <Text style={{ color: liveNow ? G.goodText : colors.textDim }}>● </Text>
                       {m.id === me ? 'You' : m.name}
-                      <Text style={{ color: liveNow ? colors.success : colors.textDim, fontSize: 12 }}>
+                      <Text style={{ color: liveNow ? G.goodText : colors.textDim, fontSize: 12 }}>
                         {'   '}{freshLabel(f, p?.ts, now, p?.sharingOff)}
                         {fromMe != null ? `   ·   ${formatMetres(fromMe)} from You` : ''}
                         {tripLine ? `   ·   ${tripLine}` : ''}
@@ -867,7 +873,7 @@ export default function FamilyMapScreen() {
                     {canFollow && (!!mine || !!destination) && (
                       <Text
                         onPress={() => { setRouteTo(routeTo === m.id ? null : m.id); setFocusId(m.id); }}
-                        style={{ color: routeTo === m.id ? colors.primary : colors.textDim, fontWeight: '700', fontSize: 12, paddingHorizontal: 6 }}
+                        style={{ color: routeTo === m.id ? G.accentText : colors.textDim, fontWeight: '700', fontSize: 12, paddingHorizontal: 6 }}
                       >
                         {routeBusy && routeTo === m.id ? '…' : routeTo === m.id ? 'ROUTED' : 'Route'}
                       </Text>
@@ -875,7 +881,7 @@ export default function FamilyMapScreen() {
                     {canFollow && (
                       <Text
                         onPress={() => { setFollowId(following ? null : m.id); setFocusId(m.id); }}
-                        style={{ color: following ? colors.primary : colors.textDim, fontWeight: '700', fontSize: 12, paddingHorizontal: 6 }}
+                        style={{ color: following ? G.accentText : colors.textDim, fontWeight: '700', fontSize: 12, paddingHorizontal: 6 }}
                       >
                         {following ? 'FOLLOWING' : 'Follow'}
                       </Text>
@@ -928,8 +934,8 @@ export default function FamilyMapScreen() {
 const st = StyleSheet.create({
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24 },
   sheet: {
-    borderTopLeftRadius: 18, borderTopRightRadius: 18, borderWidth: 1,
-    paddingHorizontal: 14, paddingTop: 4, paddingBottom: 8,
+    borderTopLeftRadius: 24, borderTopRightRadius: 24, borderWidth: 1,
+    paddingHorizontal: 16, paddingTop: 4, paddingBottom: 8,
   },
   searchBar: {
     position: 'absolute', left: 12, right: 12, top: 12, flexDirection: 'row', alignItems: 'center', gap: 9,

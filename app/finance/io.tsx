@@ -195,7 +195,7 @@ async function importLedgerCsv(userId: string, content: string): Promise<number>
 
 const s = StyleSheet.create({
   screen: { flex: 1, backgroundColor: FIN.bg },
-  body: { padding: 16 },
+  body: { padding: 16, alignSelf: 'center', width: '100%', maxWidth: FIN.contentMax },
   label: { color: FIN.text, fontSize: 14, fontWeight: '700', marginTop: 16, marginBottom: 8 },
   infoRow: { flexDirection: 'row', gap: 10, alignItems: 'flex-start' },
   infoTxt: { flex: 1, color: FIN.sub, fontSize: 13, lineHeight: 19 },

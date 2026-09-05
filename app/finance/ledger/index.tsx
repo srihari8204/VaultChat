@@ -5,8 +5,9 @@ import React, { useCallback, useMemo, useRef, useState } from 'react';
 import { View, Text, ScrollView, StyleSheet, TouchableOpacity, Animated } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter, useFocusEffect } from 'expo-router';
-import { FIN, STATUS_COLORS } from '../../../constants/financeTheme';
-import { FinHeader, Segment, Pill, EmptyState } from '../../../components/finance/ui';
+import { FIN, STATUS_COLORS, TABULAR } from '../../../constants/financeTheme';
+import { FinHeader, Segment, Pill, EmptyState, LoadingState, ErrorState } from '../../../components/finance/ui';
+import { useLoadStatus } from '../../../components/finance/useLoad';
 import { useMe } from '../../../components/finance/useMe';
 import { formatINR, PERIOD_LABEL } from '../../../utils/financeFormat';
 import { listLedger, deleteLedger, restoreLedger, type LedgerEntry } from '../../../db/ledger';
@@ -22,9 +23,12 @@ export default function LedgerList() {
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const snack = useRef(new Animated.Value(0)).current;
 
+  const { status, begin, done, fail } = useLoadStatus();
   const reload = useCallback(() => {
-    if (me) listLedger(me.id).then(setRows).catch(() => {});
-  }, [me]);
+    if (!me) return;
+    begin();
+    listLedger(me.id).then(r => { setRows(r); done(); }).catch(fail);
+  }, [me, begin, done, fail]);
   useFocusEffect(reload);
 
   const shown = useMemo(
@@ -69,7 +73,11 @@ export default function LedgerList() {
       </View>
 
       <ScrollView contentContainerStyle={s.body} showsVerticalScrollIndicator={false}>
-        {shown.length === 0 ? (
+        {status === 'loading' ? (
+          <LoadingState label="Loading your ledger book" />
+        ) : status === 'error' ? (
+          <ErrorState title="Could not load ledgers" sub="Your ledger book could not be read. Nothing has been lost." onRetry={reload} />
+        ) : shown.length === 0 ? (
           <EmptyState icon="book-outline" title="No ledgers yet" sub="Add your first lend or borrow entry to start tracking." />
         ) : shown.map(e => {
           const sc = STATUS_COLORS[e.status];
@@ -117,19 +125,19 @@ export default function LedgerList() {
 
 const s = StyleSheet.create({
   screen: { flex: 1, backgroundColor: FIN.bg },
-  filterWrap: { paddingHorizontal: 16, paddingTop: 12 },
-  body: { padding: 16, paddingTop: 12 },
-  card: { flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: FIN.card, borderRadius: 14, padding: 14, marginBottom: 10, borderWidth: 1, borderColor: FIN.border },
+  filterWrap: { paddingHorizontal: 16, paddingTop: 12, alignSelf: 'center', width: '100%', maxWidth: FIN.contentMax },
+  body: { padding: 16, paddingTop: 12, alignSelf: 'center', width: '100%', maxWidth: FIN.contentMax },
+  card: { flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: FIN.card, borderRadius: 14, padding: 14, marginBottom: 10, borderWidth: 1, borderColor: FIN.glassEdge, shadowColor: '#101828', shadowOpacity: 0.08, shadowRadius: 12, shadowOffset: { width: 0, height: 4 }, elevation: 2 },
   avatar: { width: 38, height: 38, borderRadius: 19, alignItems: 'center', justifyContent: 'center' },
   name: { color: FIN.text, fontSize: 15, fontWeight: '700' },
   sub: { color: FIN.sub, fontSize: 12.5, marginTop: 2 },
-  amt: { color: FIN.text, fontSize: 15, fontWeight: '800' },
+  amt: { color: FIN.text, fontSize: 15, fontWeight: '800', ...TABULAR },
   hint: { color: FIN.faint, fontSize: 11.5, textAlign: 'center', marginTop: 8 },
 
   fab: { position: 'absolute', left: 16, right: 16, bottom: 20, flexDirection: 'row', gap: 8, backgroundColor: FIN.brandDeep, borderRadius: 14, paddingVertical: 15, alignItems: 'center', justifyContent: 'center', shadowColor: FIN.brandDeep, shadowOpacity: 0.35, shadowRadius: 10, shadowOffset: { width: 0, height: 4 }, elevation: 6 },
   fabTxt: { color: '#fff', fontSize: 15, fontWeight: '800' },
 
-  snack: { position: 'absolute', left: 16, right: 16, bottom: 84, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: '#171320', borderRadius: 12, paddingVertical: 13, paddingHorizontal: 16 },
+  snack: { position: 'absolute', left: 16, right: 16, bottom: 84, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: FIN.text, borderRadius: 12, paddingVertical: 13, paddingHorizontal: 16 },
   snackTxt: { color: '#fff', fontSize: 14, fontWeight: '600' },
   snackBtn: { color: FIN.brand, fontSize: 14, fontWeight: '800', letterSpacing: 0.5 },
 });

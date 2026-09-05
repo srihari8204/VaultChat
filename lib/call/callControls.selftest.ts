@@ -148,6 +148,49 @@ console.log('\nIn-call controls\n');
     '5h. the group screen renders a banner naming the sharer');
 }
 
+// ── 6. FLIP MUST VERIFY, NOT ASSUME ──────────────────────────────────
+//
+// Reported still broken after the first fix, and the reason was the same shape
+// of mistake twice over:
+//
+//   original : switched = true because _switchCamera EXISTED
+//   first fix: switched = true because applyConstraints RESOLVED
+//
+// Neither asked whether the camera actually moved. applyConstraints resolves
+// perfectly happily having changed nothing when the native layer declines the
+// constraint, and `switched` then blocks the restartTrack fallback that would
+// have corrected it.
+{
+  A(/switched = facingOf\(mst\) === next/.test(ROOM),
+    '6. applyConstraints is VERIFIED against the resulting settings, not assumed');
+  A(/const facingOf =/.test(ROOM),
+    '6a. via a settings reader, so the check uses what the native layer reports');
+  A(/switched = facingOf\(t\.mediaStreamTrack\) === next \|\| facingOf\(t\) === next/.test(ROOM),
+    '6b. and restartTrack is verified too');
+  A(/if \(switched\) facing = next;/.test(ROOM),
+    '6c. `facing` advances ONLY on a verified switch — otherwise the next press '
+    + 'asks for the direction already pointing and Flip works every other tap');
+}
+
+// ── 7. A GROUP CALL CAN ADD SOMEONE WHO IS NOT IN THE GROUP ──────────
+//
+// Reported as "after 3 members I am unable to add users". The picker offered
+// only group members minus those already on the call, so a 3-person group with
+// everyone present offered nobody. The server has always allowed it: /ring
+// grants call_invites to a named non-member and mayJoinCall admits them.
+{
+  const GROUP = uncomment(readFileSync(join(ROOT, 'app/group-call-active.tsx'), 'utf8'));
+  A(/const guests: \{ id: string; name: string \}\[\]/.test(GROUP),
+    '7. the group picker builds a guest list beyond the roster');
+  A(/c\.type !== 'direct'/.test(GROUP) && /c\.peerUserId/.test(GROUP),
+    '7a. from direct chats, the same source the 1:1 screens use');
+  A(/!away\.length && !guests\.length/.test(GROUP),
+    '7b. and only reports nobody-to-add when BOTH lists are empty');
+  A(/\.\.\.guests\.map/.test(GROUP), '7c. guests appear in the sheet');
+  A(/inviteToCall\(\[g\.id\]\)/.test(GROUP),
+    '7d. and go through the same invite as members');
+}
+
 console.log(failed === 0
   ? '\ncallControls: all checks passed'
   : `\ncallControls: ${failed} FAILED`);

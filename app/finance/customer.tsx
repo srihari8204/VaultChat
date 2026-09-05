@@ -6,7 +6,7 @@ import React, { useCallback, useMemo, useState } from 'react';
 import { View, Text, ScrollView, StyleSheet, TouchableOpacity } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter, useFocusEffect } from 'expo-router';
-import { FIN, STATUS_COLORS } from '../../constants/financeTheme';
+import { FIN, STATUS_COLORS, TABULAR } from '../../constants/financeTheme';
 import { FinHeader, HeroCard, StatTile, Pill, EmptyState } from '../../components/finance/ui';
 import { useMe } from '../../components/finance/useMe';
 import { sumRupees } from '../../utils/money';
@@ -89,19 +89,19 @@ export default function CustomerProfile() {
 
 const s = StyleSheet.create({
   screen: { flex: 1, backgroundColor: FIN.bg },
-  body: { padding: 16 },
+  body: { padding: 16, alignSelf: 'center', width: '100%', maxWidth: FIN.contentMax },
   head: { flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 14 },
   avatar: { width: 52, height: 52, borderRadius: 26, backgroundColor: FIN.brandSoft, alignItems: 'center', justifyContent: 'center' },
   avatarTxt: { color: FIN.brandDeep, fontSize: 22, fontWeight: '800' },
   name: { color: FIN.text, fontSize: 20, fontWeight: '800' },
   mobile: { color: FIN.sub, fontSize: 13, marginTop: 2 },
   heroLabel: { color: 'rgba(255,255,255,0.85)', fontSize: 10.5, fontWeight: '700', letterSpacing: 0.8 },
-  heroVal: { color: '#fff', fontSize: 28, fontWeight: '800', marginTop: 6 },
+  heroVal: { color: '#fff', fontSize: 28, fontWeight: '800', marginTop: 6, ...TABULAR },
   heroFoot: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 12, paddingTop: 12, borderTopWidth: 1, borderTopColor: 'rgba(255,255,255,0.2)' },
   heroFootTxt: { color: 'rgba(255,255,255,0.9)', fontSize: 12, fontWeight: '600' },
   tileRow: { flexDirection: 'row', gap: 8, marginTop: 12 },
   section: { color: FIN.text, fontSize: 16, fontWeight: '800', marginTop: 20, marginBottom: 12 },
-  card: { flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: FIN.card, borderRadius: 12, padding: 13, marginBottom: 9, borderWidth: 1, borderColor: FIN.border },
+  card: { flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: FIN.card, borderRadius: 12, padding: 13, marginBottom: 9, borderWidth: 1, borderColor: FIN.glassEdge, shadowColor: '#101828', shadowOpacity: 0.08, shadowRadius: 12, shadowOffset: { width: 0, height: 4 }, elevation: 2 },
   dot: { width: 9, height: 9, borderRadius: 5 },
   cardTitle: { color: FIN.text, fontSize: 14.5, fontWeight: '700' },
   cardSub: { color: FIN.sub, fontSize: 12, marginTop: 2 },

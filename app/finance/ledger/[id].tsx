@@ -4,7 +4,7 @@ import React, { useCallback, useState } from 'react';
 import { View, Text, ScrollView, StyleSheet, TouchableOpacity, Alert } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter, useFocusEffect } from 'expo-router';
-import { FIN, STATUS_COLORS } from '../../../constants/financeTheme';
+import { FIN, STATUS_COLORS, FIN_HERO, TABULAR } from '../../../constants/financeTheme';
 import { FinHeader, Card, HeroCard, RowLine, Pill } from '../../../components/finance/ui';
 import { formatINR, fmtDate, fmtDateTime, PERIOD_LABEL } from '../../../utils/financeFormat';
 import { getLedger, deleteLedger, type LedgerEntry } from '../../../db/ledger';
@@ -84,7 +84,7 @@ export default function LedgerDetail() {
           <Pill label={sc.label} fg={sc.fg} bg={sc.bg} />
         </View>
 
-        <HeroCard colors={lent ? [FIN.good, '#0f7a38'] : [FIN.bad, '#991b1b']}>
+        <HeroCard colors={lent ? FIN_HERO.good : FIN_HERO.bad}>
           <Text style={s.heroLabel}>{lent ? 'LENT AMOUNT (P + I)' : 'BORROWED AMOUNT (P + I)'}</Text>
           <Text style={s.heroVal}>{formatINR(c.total)}</Text>
           <Text style={s.heroSub}>Principal {formatINR(e.principal)} · Interest {formatINR(c.interest)}</Text>
@@ -156,14 +156,14 @@ function Action({ icon, label, onPress, primary, danger }: { icon: keyof typeof 
 
 const s = StyleSheet.create({
   screen: { flex: 1, backgroundColor: FIN.bg },
-  body: { padding: 16 },
+  body: { padding: 16, alignSelf: 'center', width: '100%', maxWidth: FIN.contentMax },
   contactRow: { flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 14 },
   avatar: { width: 46, height: 46, borderRadius: 23, alignItems: 'center', justifyContent: 'center' },
   name: { color: FIN.text, fontSize: 18, fontWeight: '800' },
   mobile: { color: FIN.sub, fontSize: 13, marginTop: 1 },
 
   heroLabel: { color: 'rgba(255,255,255,0.85)', fontSize: 10.5, fontWeight: '700', letterSpacing: 0.8 },
-  heroVal: { color: '#fff', fontSize: 30, fontWeight: '800', marginTop: 6 },
+  heroVal: { color: '#fff', fontSize: 30, fontWeight: '800', marginTop: 6, ...TABULAR },
   heroSub: { color: 'rgba(255,255,255,0.9)', fontSize: 12.5, marginTop: 6 },
 
   notesLabel: { color: FIN.sub, fontSize: 12, fontWeight: '700', marginBottom: 4 },

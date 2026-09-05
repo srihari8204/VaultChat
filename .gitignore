@@ -84,6 +84,10 @@ keystore.properties
 .device.log
 *.device.log
 .shot.png
+# ...and the dated per-session capture dirs (logs-YYYY-MM-DD/<serial>-full.log).
+# One session was 14 MB across three devices, and a raw full logcat carries
+# tokens, phone numbers and chat metadata straight out of a real handset.
+logs-20*/
 
 # code-graph-rag local caches (machine-specific, never shared)
 .cgr-dir-mtimes.json

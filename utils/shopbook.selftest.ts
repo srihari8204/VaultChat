@@ -11,7 +11,7 @@ import {
   normalizeOrderStatus, canCustomerCancel, canOwnerCancel, REJECT_REASONS,
   formatMoney, shopOpenState, cartTotal,
   canCustomerCollect, notCollectedGate, NOT_COLLECTED_AFTER_HOURS,
-  isStalePrice, PRICE_STALE_DAYS, dateLocale,
+  isStalePrice, PRICE_STALE_DAYS, dateLocale, orderStamp,
   type OrderStatus, type TimelineEvent,
 } from './shopbook';
 
@@ -121,6 +121,29 @@ check('india', dateLocale('IN'), 'en-IN');
 check('lowercase country still resolves', dateLocale('sg'), 'en-SG');
 check('unknown country falls back to the device', dateLocale('ZZ'), undefined);
 check('no country falls back to the device', dateLocale(), undefined);
+
+// ── order list stamp (same-day time vs older date) ────────────────
+// The branch is the whole point: a list where every row reads the same thing
+// cannot be scanned, so today's orders must differ in shape from older ones.
+{
+  const now = new Date(2026, 8, 4, 15, 0, 0);            // 4 Sep 2026, 15:00
+  const sameDay = new Date(2026, 8, 4, 9, 41, 0).toISOString();
+  const yesterday = new Date(2026, 8, 3, 9, 41, 0).toISOString();
+  const lastYear = new Date(2025, 8, 4, 9, 41, 0).toISOString();
+
+  const a = orderStamp(sameDay, now);
+  const b = orderStamp(yesterday, now);
+  const c = orderStamp(lastYear, now);
+
+  check('today shows a time, not a date', /\d/.test(a) && a !== b, true);
+  check('yesterday is not shown as a time', b !== a, true);
+  // Same day-of-month and month, different YEAR — the bug a
+  // getDate()+getMonth()-only comparison would introduce.
+  check('same day and month a year ago is not "today"', c !== a, true);
+  check('an unparseable date yields nothing, never "Invalid Date"',
+    orderStamp('not-a-date', now), '');
+  check('an empty string yields nothing', orderStamp('', now), '');
+}
 
 if (failures) {
   console.error(`\n${failures} check(s) failed`);

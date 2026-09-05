@@ -48,6 +48,8 @@
     "test:typescale": "tsx lib/typeScale.selftest.ts",
     "test:roaddistance": "tsx lib/family/roadDistance.selftest.ts",
     "test:shelf": "tsx lib/shelf.selftest.ts",
+    "test:shopbook": "tsx utils/shopbook.selftest.ts && tsx utils/shopbookInvoice.selftest.ts && tsx utils/units.selftest.ts && tsx constants/financeTheme.selftest.ts",
+    "test:space": "eslint app/family.tsx app/family-setup.tsx app/family-alerts.tsx app/family-history.tsx app/family-items.tsx app/family-member.tsx app/family-places.tsx app/family-map.tsx \"app/space-*.tsx\" components/spaces/SpaceGround.tsx components/family/MeetHereSheet.tsx lib/spaces/theme.ts constants/spaceTheme.ts && tsx constants/spaceTheme.selftest.ts && tsx lib/family/presenceLifecycle.selftest.ts",
     "test:archive": "tsx lib/archive.selftest.ts",
     "test:backup": "tsx lib/backupScheduler.selftest.ts && tsx lib/backupCrypto.selftest.ts",
     "test:envelope": "tsx lib/msgEnvelope.selftest.ts",

@@ -482,23 +482,45 @@ export async function joinCallRoom(a: JoinArgs): Promise<CallRoom> {
       // capture, so the MediaStream — and the URL the self-preview renders —
       // stays valid and the peer sees no interruption.
       const mst: any = t.mediaStreamTrack;
+      const facingOf = (o: any): string | undefined =>
+        (typeof o?.getSettings === 'function' ? o.getSettings() : o?._settings)?.facingMode;
       try {
         if (typeof mst?.applyConstraints === 'function') {
           const c = { ...(mst._settings ?? {}) };
           delete c.deviceId;          // deviceId would pin the OLD camera and win
           c.facingMode = next;
           await mst.applyConstraints(c);
-          switched = true;
+          // VERIFY. DO NOT ASSUME.
+          //
+          // This is exactly the bug that was here before, in a new coat: the old
+          // code set `switched` because _switchCamera EXISTED; the first fix set
+          // it because applyConstraints RESOLVED. Neither asked whether the
+          // camera actually moved. applyConstraints returns the native layer's
+          // new settings, so the answer is available — and when the constraint
+          // is not honoured it resolves perfectly happily having changed
+          // nothing, which is precisely the "Flip does nothing" report.
+          switched = facingOf(mst) === next;
+          if (!switched) {
+            console.warn('[call] flip: applyConstraints did not take (settings say '
+              + String(facingOf(mst)) + ', wanted ' + next + ') — restarting track');
+          }
         }
-      } catch { /* fall through to a full restart */ }
+      } catch (e) {
+        console.warn('[call] flip: applyConstraints threw — restarting track');
+      }
 
       // restartTrack REPLACES the stream. That is what froze the sender's own
       // preview after a flip: the remote side kept receiving fine (same
       // publication) while the local view rendered a URL whose stream had been
       // thrown away. Whichever path runs, the fresh URL is re-emitted below.
       if (!switched && typeof t.restartTrack === 'function') {
+        // The heavier path: replaces the capture entirely. Verified too — if
+        // even this does not move the camera, `facing` must NOT advance, or the
+        // next press would ask for the direction we are already pointing and
+        // the button would appear to work every other tap.
         await t.restartTrack({ facingMode: next });
-        switched = true;
+        switched = facingOf(t.mediaStreamTrack) === next || facingOf(t) === next;
+        if (!switched) console.warn('[call] flip: restartTrack did not take either');
       }
       if (switched) facing = next;
       safe('local', () => a.events.onLocal(urlOf(t)));

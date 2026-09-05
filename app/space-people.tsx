@@ -391,7 +391,9 @@ const styles = (c: Palette) => StyleSheet.create({
   pill: { borderRadius: 999, paddingHorizontal: 9, paddingVertical: 4, flexDirection: 'row', alignItems: 'center', gap: 5 },
   pillDot: { width: 6, height: 6, borderRadius: 3 },
   sheetWrap: { flex: 1, backgroundColor: '#0008', justifyContent: 'flex-end' },
-  sheet: { backgroundColor: c.card, borderTopLeftRadius: 18, borderTopRightRadius: 18, padding: 18, gap: 12 },
+  // surfaceSolid, not card: card is a translucent glass pane in the dusk skin,
+  // and a see-through sheet over the scrim is unreadable in both schemes.
+  sheet: { backgroundColor: c.surfaceSolid, borderTopLeftRadius: 18, borderTopRightRadius: 18, padding: 18, gap: 12 },
   sheetTitle: { color: c.text, fontSize: 17, fontWeight: '800' },
   who: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   errBox: {

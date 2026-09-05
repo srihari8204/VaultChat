@@ -127,6 +127,20 @@ export function alpha(hex: string, a: number): string {
 export const white = (a: number) => `rgba(255, 255, 255, ${a})`;
 
 /**
+ * The room as it actually looks with the ambient wash on it.
+ *
+ * `C.bg` is the ground BEFORE the four AMBIENT glows are painted over it, so it
+ * is a colour no pixel on a real screen is. That matters wherever a translucent
+ * surface has to be previewed OUTSIDE the room it normally sits in — a swatch,
+ * a legend, a settings chip: composited over flat `C.bg` the glass board's two
+ * square tones resolve to near-black twins and the swatch reads as an empty
+ * slot, which is exactly what it did.
+ *
+ * This is that composite, so a preview is lit the way the board is.
+ */
+export const roomLit = '#704959';
+
+/**
  * The four game accents.
  *
  * These live here rather than beside the menu entries because a game's colour

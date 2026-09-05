@@ -16,8 +16,10 @@ import * as Location from 'expo-location';
 import { Stack, useRouter, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import ChatDoorButton from '../components/spaces/ChatDoorButton';
+import SpaceGround from '../components/spaces/SpaceGround';
 import { useTheme } from '../lib/theme';
 import { brandAlpha } from '../constants/theme';
+import { SPACE_GLASS, SPACE_SHADOW } from '../constants/spaceTheme';
 import FamilyMap, { type FamilyMarker } from '../components/family/FamilyMap';
 // removeCircle stays: hetzner-deploy added a path that forgets a circle locally
 // when the server starts 403/404ing it (kicked, or deleted). That is orthogonal
@@ -159,8 +161,13 @@ async function loadGroupsReconciled(): Promise<GroupRef[]> {
 
 interface Highlight { icon: string; text: string; at: number }
 
+// The dusk-glass ground (gradient + identity aura) is shared with every other
+// Space screen — see components/spaces/SpaceGround.tsx. Switching spaces
+// re-colours the room, nothing else moves.
+
 export default function FamilySpaceScreen() {
-  const { colors } = useTheme();
+  const { colors, scheme } = useTheme();
+  const G = SPACE_GLASS[scheme];
   const router = useRouter();
   // An explicit ?groupId= (membership push "You are in", deep link) selects
   // that space. This param was ALREADY being sent by the push-tap handler and
@@ -1112,7 +1119,30 @@ export default function FamilySpaceScreen() {
     ]);
   };
 
-  if (loading) return <View style={[st.center, { backgroundColor: colors.bg }]}><ActivityIndicator color={colors.primary} /></View>;
+  if (loading) return (
+    <View style={[st.screen, { backgroundColor: G.bgMid }]}>
+      <SpaceGround />
+      {/* Static glass skeleton in the dashboard's own shapes. Deliberately
+          unanimated — this gate is one local settings read, and a shimmer
+          loop spends GPU on a state that lasts under a second. The spinner
+          in the map slot is the only motion. */}
+      <View style={st.dash}>
+        <View style={[st.skel, { width: '55%', height: 30, borderRadius: 10, backgroundColor: G.paneFaint, borderColor: G.edge }]} />
+        <View style={[st.skel, { width: '35%', height: 14, borderRadius: 7, marginTop: 8, backgroundColor: G.paneFaint, borderColor: G.edge }]} />
+        <View style={[st.skel, { height: 76, borderRadius: 22, marginTop: 20, backgroundColor: G.pane, borderColor: G.edge }]} />
+        <View style={[st.skel, { height: 300, borderRadius: 24, marginTop: 12, backgroundColor: G.paneFaint, borderColor: G.edge, alignItems: 'center', justifyContent: 'center' }]}>
+          <ActivityIndicator color={colors.primary} />
+        </View>
+        {/* Same wrap metrics as the real quick-action grid, so the layout
+            does not jump when content arrives on a narrow screen. */}
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginTop: 12 }}>
+          {[0, 1, 2].map((k) => (
+            <View key={k} style={[st.skel, { flexBasis: '30%', flexGrow: 1, minWidth: 100, height: 92, borderRadius: 18, backgroundColor: G.paneFaint, borderColor: G.edge }]} />
+          ))}
+        </View>
+      </View>
+    </View>
+  );
 
   const mine = me ? presences[me.id] : undefined;
   // Only stand in for the roster once we KNOW it is empty.
@@ -1193,7 +1223,10 @@ export default function FamilySpaceScreen() {
           pathname: '/family-member' as any,
           params: { circleId: active.id, circleName: active.name, userId: m.id, name: isMe ? 'You' : m.name, role: m.role },
         })}
-        style={[st.row, { borderColor: colors.border }, i === 0 && { borderTopWidth: 0 }]}
+        // Pressable draws no feedback of its own; a faint glass tint says
+        // "this row is a door" without a ripple bleeding past the card corners.
+        style={({ pressed }) => [st.row, { borderColor: G.line }, i === 0 && { borderTopWidth: 0 },
+          pressed && { backgroundColor: G.press, borderRadius: 12 }]}
       >
         <View style={[st.dot, { backgroundColor: colorFor(m.id), opacity: p ? 1 : 0.5 }]}>
           <Text style={st.dotTxt}>{(m.name || '?').trim()[0]?.toUpperCase()}</Text>
@@ -1205,7 +1238,7 @@ export default function FamilySpaceScreen() {
             </Text>
             {m.role === 'guardian' && <Ionicons name="star" size={11} color={colors.primary} />}
           </View>
-          <Text style={{ color: fresh === 'live' ? colors.success : colors.textDim, fontSize: 12 }} numberOfLines={1}>
+          <Text style={{ color: fresh === 'live' ? G.goodText : colors.textDim, fontSize: 12 }} numberOfLines={1}>
             {rowCaption}
           </Text>
           {/* Their own reference distance, on its own line so the freshness
@@ -1221,15 +1254,23 @@ export default function FamilySpaceScreen() {
         {p?.battery != null && (
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 2 }}>
             <Ionicons name={p.charging ? 'battery-charging' : p.battery <= 20 ? 'battery-dead' : 'battery-half'} size={15}
-              color={p.battery <= 20 && !p.charging ? colors.danger : colors.textDim} />
-            <Text style={{ color: p.battery <= 20 && !p.charging ? colors.danger : colors.textDim, fontSize: 11 }}>{Math.round(p.battery)}%</Text>
+              color={p.battery <= 20 && !p.charging ? G.dangerText : colors.textDim} />
+            <Text style={{ color: p.battery <= 20 && !p.charging ? G.dangerText : colors.textDim, fontSize: 11, fontVariant: ['tabular-nums'] }}>{Math.round(p.battery)}%</Text>
           </View>
         )}
         {p && (
-          <TouchableOpacity onPress={() => { setFocusId(m.id); setExpanded(true); }} style={st.rowBtn}><Ionicons name="locate" size={18} color={colors.primary} /></TouchableOpacity>
+          <TouchableOpacity
+            onPress={() => { setFocusId(m.id); setExpanded(true); }} style={st.rowBtn}
+            hitSlop={{ top: 10, bottom: 10, left: 6, right: 6 }}
+            accessibilityRole="button" accessibilityLabel={`Show ${isMe ? 'yourself' : m.name} on the map`}
+          ><Ionicons name="locate" size={18} color={colors.primary} /></TouchableOpacity>
         )}
         {p && !isMe && (
-          <TouchableOpacity onPress={() => navigateTo(p.pos.lat, p.pos.lng, m.name)} style={st.rowBtn}><Ionicons name="navigate-circle" size={20} color={colors.primary} /></TouchableOpacity>
+          <TouchableOpacity
+            onPress={() => navigateTo(p.pos.lat, p.pos.lng, m.name)} style={st.rowBtn}
+            hitSlop={{ top: 10, bottom: 10, left: 6, right: 6 }}
+            accessibilityRole="button" accessibilityLabel={`Navigate to ${m.name}`}
+          ><Ionicons name="navigate-circle" size={20} color={colors.primary} /></TouchableOpacity>
         )}
       </Pressable>
     );
@@ -1238,9 +1279,11 @@ export default function FamilySpaceScreen() {
   const shareToggleRow = (
     <>
       <View style={st.shareRow}>
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+        {/* flex:1 + shrink so a scaled-up label wraps instead of pushing the
+            master sharing Switch past the card edge. */}
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flex: 1, minWidth: 0 }}>
           <Ionicons name={share ? 'navigate' : 'navigate-outline'} size={18} color={share ? colors.primary : colors.textDim} />
-          <Text style={{ color: colors.text, fontWeight: '600' }}>Share my location</Text>
+          <Text style={{ color: colors.text, fontWeight: '600', flexShrink: 1 }}>Share my location</Text>
         </View>
         <Switch value={share} onValueChange={toggleShare} trackColor={{ true: colors.primary }} />
       </View>
@@ -1261,7 +1304,7 @@ export default function FamilySpaceScreen() {
           and shows nothing for this app. It also tells a user why their dot
           updates slowly, which is the most common "it's broken" report. */}
       {share && !!currentPlan() && (
-        <Text style={{ color: colors.textFaint, fontSize: 11.5, marginTop: -4, marginBottom: 10 }} numberOfLines={2}>
+        <Text style={{ color: colors.textDim, fontSize: 11.5, marginTop: -4, marginBottom: 10 }} numberOfLines={2}>
           {currentPlan()!.reason} · every {Math.round(currentPlan()!.timeIntervalMs / 1000)}s
           {currentPlan()!.publish ? '' : ' · not publishing'}
         </Text>
@@ -1270,7 +1313,10 @@ export default function FamilySpaceScreen() {
   );
 
   return (
-    <View style={[st.screen, { backgroundColor: colors.bg }]}>
+    // bgMid under the gradient: if the ground ever misses a frame during a
+    // transition, the fallback is the mid dusk tone, not the theme's black.
+    <View style={[st.screen, { backgroundColor: G.bgMid }]}>
+      <SpaceGround aura={ident.color || colors.primary} />
       {/* The space's own name when there is one; otherwise the module's name.
           NOT "Family Space" — family is one type among sixteen, and a school
           transport space titled "Family Space" reads as a bug. */}
@@ -1282,7 +1328,9 @@ export default function FamilySpaceScreen() {
         // albums, privacy, leave/delete) was unreachable. Same fix as the
         // space module's spaceHeader().
         headerShown: true,
-        headerStyle: { backgroundColor: colors.bg }, headerTintColor: colors.text, headerShadowVisible: false,
+        // The header sits on the same dusk ground as the screen — bgTop keeps
+        // the seam invisible without the layout risk of a transparent header.
+        headerStyle: { backgroundColor: G.bgTop }, headerTintColor: colors.text, headerShadowVisible: false,
         title: active?.name || 'Spaces', headerTitleAlign: 'center',
         // A way OUT. This screen is a hub people land on and then cannot leave
         // except with the system back gesture — which is not obvious, and on a
@@ -1305,8 +1353,8 @@ export default function FamilySpaceScreen() {
             {active?.id && (
               <ChatDoorButton colors={colors} chat={{ id: active.id, name: active.name }} />
             )}
-            {canInvite && <TouchableOpacity onPress={openAdd} style={{ paddingHorizontal: 6 }}><Ionicons name="person-add" size={20} color={colors.primary} /></TouchableOpacity>}
-            <TouchableOpacity onPress={() => { setRenameTxt(''); setManage(true); }} style={{ paddingHorizontal: 6 }}><Ionicons name="ellipsis-vertical" size={20} color={colors.primary} /></TouchableOpacity>
+            {canInvite && <TouchableOpacity onPress={openAdd} style={{ paddingHorizontal: 6 }} hitSlop={{ top: 8, bottom: 8, left: 4, right: 4 }} accessibilityRole="button" accessibilityLabel="Invite member"><Ionicons name="person-add" size={20} color={colors.primary} /></TouchableOpacity>}
+            <TouchableOpacity onPress={() => { setRenameTxt(''); setManage(true); }} style={{ paddingHorizontal: 6 }} hitSlop={{ top: 8, bottom: 8, left: 4, right: 4 }} accessibilityRole="button" accessibilityLabel="Space options"><Ionicons name="ellipsis-vertical" size={20} color={colors.primary} /></TouchableOpacity>
           </View>
         ) }} />
 
@@ -1315,11 +1363,13 @@ export default function FamilySpaceScreen() {
         <>
           <View style={{ flex: 1 }}>
             <FamilyMap members={markers} focusId={focusId} onSelect={(id) => setFocusId(id)} style={{ flex: 1 }} />
-            <TouchableOpacity onPress={() => setExpanded(false)} style={[st.collapse, { backgroundColor: colors.card, borderColor: colors.border }]}>
+            <TouchableOpacity onPress={() => setExpanded(false)} accessibilityRole="button" accessibilityLabel="Close full-screen map" style={[st.collapse, { backgroundColor: G.paneStrong, borderColor: G.edge }]}>
               <Ionicons name="contract" size={18} color={colors.text} />
             </TouchableOpacity>
           </View>
-          <View style={[st.sheet, { backgroundColor: colors.card, borderColor: colors.border }]}>
+          {/* Solid, not glass: the roster floats over a live map, and glass
+              over that much detail costs readability and buys nothing. */}
+          <View style={[st.sheet, { backgroundColor: G.sheet, borderColor: G.edge }]}>
             {shareToggleRow}
             <ScrollView style={{ maxHeight: 190 }} contentContainerStyle={{ paddingBottom: 6 }}>
               {roster.map(memberRow)}
@@ -1334,17 +1384,21 @@ export default function FamilySpaceScreen() {
               dot, so a new alert is visible without opening a tile. */}
           <View style={st.greetRow}>
             <View style={{ flex: 1, minWidth: 0 }}>
-              <Text style={{ color: colors.text, fontSize: 20, fontWeight: '800' }}>{greeting()}, {firstName} 👋</Text>
-              <Text style={{ color: colors.textDim, fontSize: 12.5, marginTop: 2 }} numberOfLines={1}>
+              <Text style={{ color: colors.text, fontSize: 28, lineHeight: 34, fontWeight: '800', letterSpacing: -0.4 }}>
+                {greeting()}, {firstName} 👋
+              </Text>
+              <Text style={{ color: colors.textDim, fontSize: 13, marginTop: 3 }} numberOfLines={1}>
                 {active?.name}{active?.groupType && ident.label !== active.name ? ` · ${ident.label}` : ''}
               </Text>
             </View>
             <TouchableOpacity
               onPress={() => active && router.push({ pathname: '/family-alerts' as any, params: { circleId: active.id, circleName: active.name } })}
-              style={[st.greetBell, { backgroundColor: colors.card, borderColor: colors.border }]}
+              style={[st.greetBell, { backgroundColor: G.pane, borderColor: G.edge }]}
+              accessibilityRole="button"
+              accessibilityLabel={`Alerts${unread > 0 ? `, ${unread} unread` : ''}`}
             >
               <Ionicons name="notifications-outline" size={19} color={colors.text} />
-              {unread > 0 && <View style={[st.bellDot, { backgroundColor: colors.danger, borderColor: colors.card }]} />}
+              {unread > 0 && <View style={[st.bellDot, { backgroundColor: colors.danger, borderColor: G.sheet }]} />}
             </TouchableOpacity>
           </View>
 
@@ -1360,9 +1414,11 @@ export default function FamilySpaceScreen() {
                 const gi = groupIdentity(c);
                 return (
                   <TouchableOpacity key={c.id} onPress={() => setActive(c)}
+                    accessibilityRole="button" accessibilityState={{ selected: on }}
+                    hitSlop={{ top: 4, bottom: 4 }}
                     style={[st.chip, { flexDirection: 'row', alignItems: 'center', gap: 6,
-                      borderColor: on ? gi.color : colors.border,
-                      backgroundColor: on ? gi.color + '1a' : 'transparent' }]}>
+                      borderColor: on ? gi.color : G.chipEdge,
+                      backgroundColor: on ? gi.color + '26' : G.paneFaint }]}>
                     <Ionicons name={gi.icon} size={13} color={on ? gi.color : colors.textDim} />
                     <Text style={{ color: on ? colors.text : colors.textDim, fontWeight: on ? '700' : '500', fontSize: 13 }}>{c.name}</Text>
                   </TouchableOpacity>
@@ -1373,17 +1429,17 @@ export default function FamilySpaceScreen() {
                   never discover that other space types exist. */}
               <TouchableOpacity
                 onPress={() => router.push('/group-create' as any)}
-                style={[st.chip, { flexDirection: 'row', alignItems: 'center', gap: 6, borderColor: colors.primary }]}
+                style={[st.chip, { flexDirection: 'row', alignItems: 'center', gap: 6, borderColor: colors.primary, backgroundColor: G.paneFaint }]}
               >
                 <Ionicons name="add" size={14} color={colors.primary} />
-                <Text style={{ color: colors.primary, fontWeight: '700', fontSize: 13 }}>New space</Text>
+                <Text style={{ color: G.accentText, fontWeight: '700', fontSize: 13 }}>New space</Text>
               </TouchableOpacity>
             </ScrollView>
           )}
 
           {/* pinned announcement */}
           {!!announcement && (
-            <View style={[st.announce, { backgroundColor: brandAlpha(0.08), borderColor: colors.primary }]}>
+            <View style={[st.announce, { backgroundColor: G.pane, borderColor: G.edge, borderLeftWidth: 3, borderLeftColor: colors.primary }]}>
               <Ionicons name="megaphone" size={17} color={colors.primary} />
               <View style={{ flex: 1 }}>
                 <Text style={{ color: colors.text, fontSize: 13.5, fontWeight: '600' }} numberOfLines={3}>
@@ -1394,16 +1450,17 @@ export default function FamilySpaceScreen() {
             </View>
           )}
 
-          {/* status card */}
-          <View style={[st.status, { backgroundColor: colors.card, borderColor: colors.border }]}>
-            <View style={[st.statusIcon, { backgroundColor: (allGood ? colors.success : ident.color) + '22' }]}>
-              <Ionicons name={allGood ? 'shield-checkmark' : ident.icon} size={20} color={allGood ? colors.success : ident.color} />
+          {/* status card — the hero pane: the strongest glass on the screen,
+              with the identity aura bleeding through from the ground behind. */}
+          <View style={[st.status, { backgroundColor: G.paneStrong, borderColor: G.edge }]}>
+            <View style={[st.statusIcon, { backgroundColor: (allGood ? colors.success : ident.color) + '26' }]}>
+              <Ionicons name={allGood ? 'shield-checkmark' : ident.icon} size={21} color={allGood ? colors.success : ident.color} />
             </View>
             <View style={{ flex: 1 }}>
-              <Text style={{ color: colors.textDim, fontSize: 11.5, letterSpacing: 0.3 }}>
+              <Text style={{ color: colors.textDim, fontSize: 11, fontWeight: '800', letterSpacing: 0.7 }}>
                 {(ident.label || 'Family').toUpperCase()} STATUS
               </Text>
-              <Text style={{ color: colors.text, fontWeight: '800', fontSize: 15 }}>{allGood ? 'All good' : 'Nobody live yet'}</Text>
+              <Text style={{ color: colors.text, fontWeight: '800', fontSize: 16.5 }}>{allGood ? 'All good' : 'Nobody live yet'}</Text>
               <Text style={{ color: colors.textDim, fontSize: 12 }}>
                 {/* "Loading" is its own state. Counting against a roster that
                     has not arrived is how this line claimed "1 of 1" for a
@@ -1420,20 +1477,20 @@ export default function FamilySpaceScreen() {
             >
               <View style={st.avatarRow}>
                 {roster.slice(0, 4).map((m, i) => (
-                  <View key={m.id} style={[st.miniDot, { backgroundColor: colorFor(m.id), marginLeft: i ? -8 : 0, borderColor: colors.card, opacity: presences[m.id] ? 1 : 0.45 }]}>
+                  <View key={m.id} style={[st.miniDot, { backgroundColor: colorFor(m.id), marginLeft: i ? -8 : 0, borderColor: G.sheet, opacity: presences[m.id] ? 1 : 0.45 }]}>
                     <Text style={st.miniDotTxt}>{(m.name || '?').trim()[0]?.toUpperCase()}</Text>
                   </View>
                 ))}
-                {roster.length > 4 && <View style={[st.miniDot, { backgroundColor: colors.border, marginLeft: -8, borderColor: colors.card }]}><Text style={[st.miniDotTxt, { color: colors.text }]}>+{roster.length - 4}</Text></View>}
+                {roster.length > 4 && <View style={[st.miniDot, { backgroundColor: colors.border, marginLeft: -8, borderColor: G.sheet }]}><Text style={[st.miniDotTxt, { color: colors.text }]}>+{roster.length - 4}</Text></View>}
               </View>
-              <Text style={{ color: colors.primary, fontSize: 11.5, fontWeight: '700' }}>View All</Text>
+              <Text style={{ color: G.accentText, fontSize: 12.5, fontWeight: '700' }}>View All</Text>
             </TouchableOpacity>
           </View>
 
           {/* map preview */}
-          <TouchableOpacity activeOpacity={0.9} onPress={() => setExpanded(true)} style={[st.mapCard, { borderColor: colors.border }]}>
+          <TouchableOpacity activeOpacity={0.9} onPress={() => setExpanded(true)} style={[st.mapCard, { borderColor: G.edge }]}>
             <FamilyMap members={markers} focusId={focusId} onSelect={() => setExpanded(true)} style={{ flex: 1 }} />
-            <View style={[st.mapBadge, { backgroundColor: colors.card, borderColor: colors.border }]}>
+            <View style={[st.mapBadge, { backgroundColor: G.paneStrong, borderColor: G.edge }]}>
               <Ionicons name="expand" size={13} color={colors.text} /><Text style={{ color: colors.text, fontSize: 12, fontWeight: '700' }}>Live Map</Text>
             </View>
           </TouchableOpacity>
@@ -1443,7 +1500,7 @@ export default function FamilySpaceScreen() {
               does not make the other appear — and without this line an empty
               map looks like a fault rather than a setting. */}
           {notVisible.length > 0 && (
-            <View style={[st.card, { backgroundColor: colors.card, borderColor: colors.border, flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 12 }]}>
+            <View style={[st.card, st.quiet, { backgroundColor: G.paneFaint, borderColor: G.edge, flexDirection: 'row', alignItems: 'center', gap: 10 }]}>
               <Ionicons name="location-outline" size={17} color={colors.textDim} />
               <Text style={{ color: colors.textDim, fontSize: 12.5, flex: 1, lineHeight: 17 }}>
                 No location from {notVisible.slice(0, 3).join(', ')}
@@ -1489,27 +1546,27 @@ export default function FamilySpaceScreen() {
             ].filter((c) => c.n > 0);
             if (!chips.length) return null;
             return (
-              <View style={[st.card, { backgroundColor: colors.card, borderColor: colors.border, marginBottom: 12 }]}>
+              <View style={[st.card, { backgroundColor: G.pane, borderColor: G.edge }]}>
                 <Text style={[st.secTitle, { color: colors.textDim, marginBottom: 8 }]}>
                   {spaceFamily === 'family' ? 'FAMILY NOW' : 'RIGHT NOW'} · {b.total} {b.total === 1 ? 'MEMBER' : 'MEMBERS'}
                 </Text>
                 <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
                   {chips.map((c) => (
-                    <View key={c.label} style={[st.chip, { borderColor: colors.border, flexDirection: 'row', alignItems: 'center', gap: 5 }]}>
+                    <View key={c.label} style={[st.chip, { backgroundColor: G.paneFaint, borderColor: G.chipEdge, flexDirection: 'row', alignItems: 'center', gap: 5 }]}>
                       <Ionicons name={c.icon as any} size={13} color={colors.primary} />
                       <Text style={{ color: colors.text, fontSize: 12.5, fontWeight: '600' }}>{c.label}</Text>
-                      <Text style={{ color: colors.primary, fontSize: 12.5, fontWeight: '800' }}>{c.n}</Text>
+                      <Text style={{ color: G.accentText, fontSize: 12.5, fontWeight: '800' }}>{c.n}</Text>
                     </View>
                   ))}
                 </View>
                 {whereChips.length > 0 && (
                   <>
-                    <Text style={{ color: colors.textFaint, fontSize: 11, marginTop: 10, marginBottom: 6 }}>
+                    <Text style={{ color: colors.textDim, fontSize: 11, marginTop: 10, marginBottom: 6 }}>
                       Where they are
                     </Text>
                     <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
                       {whereChips.map((c) => (
-                        <View key={c.label} style={[st.chip, { borderColor: colors.border, flexDirection: 'row', alignItems: 'center', gap: 5 }]}>
+                        <View key={c.label} style={[st.chip, { backgroundColor: G.paneFaint, borderColor: G.chipEdge, flexDirection: 'row', alignItems: 'center', gap: 5 }]}>
                           <Ionicons name={c.icon as any} size={13} color={colors.textDim} />
                           <Text style={{ color: colors.textDim, fontSize: 12.5, fontWeight: '600' }}>{c.label}</Text>
                           <Text style={{ color: colors.text, fontSize: 12.5, fontWeight: '800' }}>{c.n}</Text>
@@ -1543,7 +1600,7 @@ export default function FamilySpaceScreen() {
                       perms: Array.from(perms).join(','),
                     },
                   })}
-                  style={[st.qa, { backgroundColor: colors.card, borderColor: colors.border }]}
+                  style={[st.qa, { backgroundColor: G.pane, borderColor: G.edge }]}
                 >
                   <View style={[st.qaIcon, { backgroundColor: colors.primary + '22' }]}>
                     <Ionicons name={s.icon as any} size={19} color={colors.primary} />
@@ -1562,7 +1619,7 @@ export default function FamilySpaceScreen() {
           <View style={st.qaGrid}>
             <TouchableOpacity
               onPress={() => setExpanded(true)}
-              style={[st.qa, { backgroundColor: colors.card, borderColor: colors.border }]}
+              style={[st.qa, { backgroundColor: G.pane, borderColor: G.edge }]}
             >
               <View style={[st.qaIcon, { backgroundColor: colors.primary + '22' }]}>
                 <Ionicons name="map" size={19} color={colors.primary} />
@@ -1585,7 +1642,7 @@ export default function FamilySpaceScreen() {
                 pathname: '/family-map' as any,
                 params: { circleId: active.id, circleName: active.name },
               })}
-              style={[st.qa, { backgroundColor: colors.card, borderColor: colors.border }]}
+              style={[st.qa, { backgroundColor: G.pane, borderColor: G.edge }]}
             >
               <View style={[st.qaIcon, { backgroundColor: colors.primary + '22' }]}>
                 <Ionicons name="search" size={19} color={colors.primary} />
@@ -1596,7 +1653,7 @@ export default function FamilySpaceScreen() {
 
             <TouchableOpacity
               onPress={() => router.push('/emergency-sos' as any)}
-              style={[st.qa, { backgroundColor: colors.card, borderColor: colors.border }]}
+              style={[st.qa, { backgroundColor: G.pane, borderColor: G.edge }]}
             >
               <View style={[st.qaIcon, { backgroundColor: colors.danger + '22' }]}>
                 <Ionicons name="medkit" size={19} color={colors.danger} />
@@ -1607,7 +1664,7 @@ export default function FamilySpaceScreen() {
 
             <TouchableOpacity
               onPress={() => setCheckin(true)}
-              style={[st.qa, { backgroundColor: colors.card, borderColor: colors.border }]}
+              style={[st.qa, { backgroundColor: G.pane, borderColor: G.edge }]}
             >
               <View style={[st.qaIcon, { backgroundColor: colors.success + '22' }]}>
                 <Ionicons name="checkmark-done-circle" size={19} color={colors.success} />
@@ -1619,7 +1676,7 @@ export default function FamilySpaceScreen() {
             {canZones && (
               <TouchableOpacity
                 onPress={() => active && router.push({ pathname: '/family-places' as any, params: { circleId: active.id, name: active.name } })}
-                style={[st.qa, { backgroundColor: colors.card, borderColor: colors.border }]}
+                style={[st.qa, { backgroundColor: G.pane, borderColor: G.edge }]}
               >
                 <View style={[st.qaIcon, { backgroundColor: colors.primary + '22' }]}>
                   <Ionicons name="location" size={19} color={colors.primary} />
@@ -1631,7 +1688,7 @@ export default function FamilySpaceScreen() {
 
             <TouchableOpacity
               onPress={() => active && router.push({ pathname: '/family-alerts' as any, params: { circleId: active.id, circleName: active.name } })}
-              style={[st.qa, { backgroundColor: colors.card, borderColor: colors.border }]}
+              style={[st.qa, { backgroundColor: G.pane, borderColor: G.edge }]}
             >
               <View style={[st.qaIcon, { backgroundColor: colors.primary + '22' }]}>
                 <Ionicons name="notifications" size={19} color={colors.primary} />
@@ -1641,7 +1698,7 @@ export default function FamilySpaceScreen() {
                 {unread > 0 ? `${unread > 99 ? '99+' : unread} unread` : 'All caught up'}
               </Text>
               {unread > 0 && (
-                <View style={[st.badge, { backgroundColor: colors.danger, borderColor: colors.card }]}>
+                <View style={[st.badge, { backgroundColor: colors.danger, borderColor: G.sheet }]}>
                   <Text style={st.badgeTxt}>{unread > 99 ? '99+' : unread}</Text>
                 </View>
               )}
@@ -1652,7 +1709,7 @@ export default function FamilySpaceScreen() {
                 permission the space grants. */}
             <TouchableOpacity
               onPress={() => active && router.push({ pathname: '/family-items' as any, params: { circleId: active.id } })}
-              style={[st.qa, { backgroundColor: colors.card, borderColor: colors.border }]}
+              style={[st.qa, { backgroundColor: G.pane, borderColor: G.edge }]}
             >
               <View style={[st.qaIcon, { backgroundColor: colors.primary + '22' }]}>
                 <Ionicons name="key" size={19} color={colors.primary} />
@@ -1664,7 +1721,7 @@ export default function FamilySpaceScreen() {
             {canHistory && (
               <TouchableOpacity
                 onPress={() => active && router.push({ pathname: '/family-history' as any, params: { circleId: active.id, circleName: active.name } })}
-                style={[st.qa, { backgroundColor: colors.card, borderColor: colors.border }]}
+                style={[st.qa, { backgroundColor: G.pane, borderColor: G.edge }]}
               >
                 <View style={[st.qaIcon, { backgroundColor: colors.primary + '22' }]}>
                   <Ionicons name="time" size={19} color={colors.primary} />
@@ -1679,18 +1736,31 @@ export default function FamilySpaceScreen() {
           {/* hold-to-SOS — a family/friends affordance. A school parent holding
               their phone down to raise an alarm to a whole school is not the
               same gesture, and a bus space has its own incident flow. */}
+          {/* The danger wash is deliberate: the one emergency control must not
+              wear the same glass as a settings row. Title in dangerText — raw
+              #EF4444 fails AA at this size on the glass ground (audit-found:
+              the plain-pane version regressed dark mode from 4.95:1 to 4.27). */}
           {(spaceFamily === 'family' || spaceFamily === 'generic') && (
-          <Pressable onPressIn={sosStart} onPressOut={sosEnd} style={[st.sosBig, { borderColor: colors.danger, backgroundColor: colors.danger + '14' }]}>
+          <Pressable
+            onPressIn={sosStart} onPressOut={sosEnd}
+            accessibilityLabel="Emergency SOS"
+            accessibilityHint="Press and hold for one and a half seconds to alert your circle and share your live location"
+            style={[st.sosBig, { borderColor: colors.danger, backgroundColor: colors.danger + (scheme === 'dark' ? '1F' : '14') }]}
+          >
             <Animated.View pointerEvents="none" style={[StyleSheet.absoluteFill, { backgroundColor: colors.danger + '55', transform: [{ scaleX: sosProg }] }]} />
             <View style={[st.sosIcon, { backgroundColor: colors.danger }]}><Text style={{ fontSize: 20 }}>🆘</Text></View>
             <View style={{ flex: 1 }}>
-              <Text style={{ color: colors.danger, fontWeight: '900', fontSize: 15 }}>HOLD FOR SOS</Text>
+              <Text style={{ color: G.dangerText, fontWeight: '900', fontSize: 15 }}>HOLD FOR SOS</Text>
               <Text style={{ color: colors.textDim, fontSize: 12 }}>Alerts your circle and shares your live location</Text>
             </View>
           </Pressable>
           )}
 
-          {shareToggleRow}
+          {/* Same row, its own pane on the dashboard (in the expanded sheet it
+              sits directly on the sheet surface). */}
+          <View style={[st.shareCard, { backgroundColor: G.pane, borderColor: G.edge }]}>
+            {shareToggleRow}
+          </View>
 
           {/* Operations (Spaces & Operations, S3.1 / S3.4).
               A driver's own run comes FIRST and is styled as the primary action:
@@ -1701,7 +1771,7 @@ export default function FamilySpaceScreen() {
             <TouchableOpacity
               key={r.id}
               onPress={() => router.push({ pathname: '/space-run-driver' as any, params: { spaceId: active!.id, runId: r.id, groupType: active!.groupType ?? '' } })}
-              style={[st.card, { backgroundColor: colors.card, borderColor: colors.primary, flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 14 }]}
+              style={[st.card, { backgroundColor: G.pane, borderColor: colors.primary, flexDirection: 'row', alignItems: 'center', gap: 12 }]}
             >
               <View style={{ width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.primary + '22' }}>
                 <Ionicons name="bus" size={20} color={colors.primary} />
@@ -1721,7 +1791,7 @@ export default function FamilySpaceScreen() {
           {/* Everything else the caller may see. For a guardian this is the bus
               their child is on; for ops it is the whole active timetable. */}
           {runs.filter((r) => !(canDrive && r.driverId === me?.id)).length > 0 && (
-            <View style={[st.card, { backgroundColor: colors.card, borderColor: colors.border, marginBottom: 14 }]}>
+            <View style={[st.card, { backgroundColor: G.pane, borderColor: G.edge }]}>
               <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 6 }}>
                 <Text style={{ color: colors.text, fontWeight: '700', fontSize: 14.5, flex: 1 }}>
                   {canOps ? 'Runs in progress' : 'Today’s run'}
@@ -1730,9 +1800,10 @@ export default function FamilySpaceScreen() {
                   <TouchableOpacity
                     onPress={() => active && router.push({ pathname: '/space-ops-map' as any, params: { spaceId: active.id, name: active.name, groupType: active.groupType ?? '' } })}
                     style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}
+                    hitSlop={{ top: 12, bottom: 12, left: 8, right: 8 }}
                   >
                     <Ionicons name="map-outline" size={15} color={colors.primary} />
-                    <Text style={{ color: colors.primary, fontSize: 12.5, fontWeight: '600' }}>Map</Text>
+                    <Text style={{ color: G.accentText, fontSize: 12.5, fontWeight: '700' }}>Map</Text>
                   </TouchableOpacity>
                 )}
               </View>
@@ -1753,7 +1824,7 @@ export default function FamilySpaceScreen() {
                   {/* A vehicle that has stopped reporting is called out here and
                       not left to look identical to one that is running fine. */}
                   {r.stale && r.status === 'started' && (
-                    <Text style={{ color: colors.danger, fontSize: 12 }}>not reporting</Text>
+                    <Text style={{ color: G.dangerText, fontSize: 12, fontWeight: '600' }}>not reporting</Text>
                   )}
                   <Ionicons name="chevron-forward" size={16} color={colors.textDim} />
                 </TouchableOpacity>
@@ -1773,7 +1844,7 @@ export default function FamilySpaceScreen() {
             return (
               <TouchableOpacity
                 onPress={() => router.push({ pathname: '/group-trip' as any, params: { groupId: active!.id, name: active!.name } })}
-                style={[st.card, { backgroundColor: colors.card, borderColor: done ? colors.success : colors.primary, flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 14 }]}
+                style={[st.card, { backgroundColor: G.pane, borderColor: done ? colors.success : colors.primary, flexDirection: 'row', alignItems: 'center', gap: 12 }]}
               >
                 <View style={{ width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center', backgroundColor: (done ? colors.success : colors.primary) + '22' }}>
                   <Ionicons name={done ? 'checkmark-done' : 'car'} size={20} color={done ? colors.success : colors.primary} />
@@ -1796,14 +1867,14 @@ export default function FamilySpaceScreen() {
 
           {/* members */}
           <View style={st.secHead}>
-            <Text style={[st.secTitle, { color: colors.text }]}>{memberHeading(active?.groupType)}</Text>
+            <Text style={[st.secTitle, { color: colors.textDim }]}>{memberHeading(active?.groupType)}</Text>
             {/* "+ Invite" opens the CONTACT PICKER (it used to open the sent-
                 invitations manager, which asks you to type a name/email/phone —
                 the person you want is almost always already a contact). The
                 manager is still one tap away in the ⋯ sheet. */}
             {canInvite && active && (
-              <TouchableOpacity onPress={openAdd}>
-                <Text style={{ color: colors.primary, fontWeight: '700', fontSize: 13 }}>+ Invite</Text>
+              <TouchableOpacity onPress={openAdd} hitSlop={{ top: 12, bottom: 12, left: 8, right: 8 }}>
+                <Text style={{ color: G.accentText, fontWeight: '700', fontSize: 12.5 }}>+ Invite</Text>
               </TouchableOpacity>
             )}
           </View>
@@ -1811,7 +1882,7 @@ export default function FamilySpaceScreen() {
               compare — a one-person circle has no nearest and no average, and
               printing "Nearest: —" would be noise, not information. */}
           {distanceSummary.available > 0 && (
-            <View style={[st.card, { backgroundColor: colors.card, borderColor: colors.border, marginBottom: 10 }]}>
+            <View style={[st.card, { backgroundColor: G.pane, borderColor: G.edge }]}>
               <View style={st.distRow}>
                 <View style={st.distCell}>
                   <Text style={[st.distVal, { color: colors.text }]} numberOfLines={1}>
@@ -1821,7 +1892,7 @@ export default function FamilySpaceScreen() {
                     Nearest · {distanceSummary.nearest!.name}
                   </Text>
                 </View>
-                <View style={[st.distDiv, { backgroundColor: colors.border }]} />
+                <View style={[st.distDiv, { backgroundColor: G.line }]} />
                 <View style={st.distCell}>
                   <Text style={[st.distVal, { color: colors.text }]} numberOfLines={1}>
                     {formatMetres(distanceSummary.farthest!.fromMe!)}
@@ -1830,7 +1901,7 @@ export default function FamilySpaceScreen() {
                     Farthest · {distanceSummary.farthest!.name}
                   </Text>
                 </View>
-                <View style={[st.distDiv, { backgroundColor: colors.border }]} />
+                <View style={[st.distDiv, { backgroundColor: G.line }]} />
                 <View style={st.distCell}>
                   <Text style={[st.distVal, { color: colors.text }]} numberOfLines={1}>
                     {formatMetres(distanceSummary.averageM!)}
@@ -1860,12 +1931,13 @@ export default function FamilySpaceScreen() {
                 onPress={() => setOriginName(null)}
                 accessibilityRole="button"
                 accessibilityState={{ selected: !originName }}
+                hitSlop={{ top: 7, bottom: 7 }}
                 style={[st.sortChip, {
-                  borderColor: !originName ? colors.primary : colors.border,
-                  backgroundColor: !originName ? brandAlpha(0.12) : 'transparent',
+                  borderColor: !originName ? colors.primary : G.chipEdge,
+                  backgroundColor: !originName ? brandAlpha(0.14) : G.paneFaint,
                 }]}
               >
-                <Text style={{ color: !originName ? colors.primary : colors.textDim, fontSize: 12, fontWeight: !originName ? '800' : '600' }}>
+                <Text style={{ color: !originName ? G.accentText : colors.textDim, fontSize: 12, fontWeight: !originName ? '800' : '600' }}>
                   Near me
                 </Text>
               </TouchableOpacity>
@@ -1878,12 +1950,13 @@ export default function FamilySpaceScreen() {
                     accessibilityRole="button"
                     accessibilityState={{ selected: on }}
                     accessibilityLabel={`Measure everyone from ${p.name}`}
+                    hitSlop={{ top: 7, bottom: 7 }}
                     style={[st.sortChip, {
-                      borderColor: on ? colors.primary : colors.border,
-                      backgroundColor: on ? brandAlpha(0.12) : 'transparent',
+                      borderColor: on ? colors.primary : G.chipEdge,
+                      backgroundColor: on ? brandAlpha(0.14) : G.paneFaint,
                     }]}
                   >
-                    <Text style={{ color: on ? colors.primary : colors.textDim, fontSize: 12, fontWeight: on ? '800' : '600' }}>
+                    <Text style={{ color: on ? G.accentText : colors.textDim, fontSize: 12, fontWeight: on ? '800' : '600' }}>
                       Near {p.name}
                     </Text>
                   </TouchableOpacity>
@@ -1901,13 +1974,14 @@ export default function FamilySpaceScreen() {
                   onPress={() => setSortMode(mode)}
                   accessibilityRole="button"
                   accessibilityState={{ selected: sortMode === mode }}
+                  hitSlop={{ top: 7, bottom: 7 }}
                   style={[st.sortChip, {
-                    borderColor: sortMode === mode ? colors.primary : colors.border,
-                    backgroundColor: sortMode === mode ? brandAlpha(0.12) : 'transparent',
+                    borderColor: sortMode === mode ? colors.primary : G.chipEdge,
+                    backgroundColor: sortMode === mode ? brandAlpha(0.14) : G.paneFaint,
                   }]}
                 >
                   <Text style={{
-                    color: sortMode === mode ? colors.primary : colors.textDim,
+                    color: sortMode === mode ? G.accentText : colors.textDim,
                     fontSize: 12, fontWeight: sortMode === mode ? '800' : '600',
                   }}>{label}</Text>
                 </TouchableOpacity>
@@ -1915,7 +1989,7 @@ export default function FamilySpaceScreen() {
             </View>
           )}
 
-          <View style={[st.card, { backgroundColor: colors.card, borderColor: colors.border }]}>
+          <View style={[st.card, { backgroundColor: G.pane, borderColor: G.edge }]}>
             {roster.map(memberRow)}
           </View>
 
@@ -1925,17 +1999,17 @@ export default function FamilySpaceScreen() {
               {/* design screen 5: section header carries a View All to the
                   alerts centre, which is where the full stream already lives. */}
               <View style={st.secHead}>
-                <Text style={[st.secTitle, { color: colors.text, flex: 1 }]}>Today&apos;s Highlights</Text>
-                <TouchableOpacity onPress={() => active && router.push({ pathname: '/family-alerts' as any, params: { circleId: active.id, circleName: active.name } })}>
-                  <Text style={{ color: colors.primary, fontSize: 12.5, fontWeight: '700' }}>View All</Text>
+                <Text style={[st.secTitle, { color: colors.textDim, flex: 1 }]}>Today&apos;s Highlights</Text>
+                <TouchableOpacity onPress={() => active && router.push({ pathname: '/family-alerts' as any, params: { circleId: active.id, circleName: active.name } })} hitSlop={{ top: 12, bottom: 12, left: 8, right: 8 }}>
+                  <Text style={{ color: G.accentText, fontSize: 12.5, fontWeight: '700' }}>View All</Text>
                 </TouchableOpacity>
               </View>
-              <View style={[st.card, { backgroundColor: colors.card, borderColor: colors.border }]}>
+              <View style={[st.card, { backgroundColor: G.pane, borderColor: G.edge }]}>
                 {highlights.map((h, i) => (
-                  <View key={i} style={[st.row, { borderColor: colors.border }, i === 0 && { borderTopWidth: 0 }]}>
+                  <View key={i} style={[st.row, { borderColor: G.line }, i === 0 && { borderTopWidth: 0 }]}>
                     <Text style={{ fontSize: 16 }}>{h.icon}</Text>
                     <Text style={{ flex: 1, color: colors.text, fontSize: 13.5 }} numberOfLines={2}>{h.text}</Text>
-                    <Text style={{ color: colors.textFaint, fontSize: 11 }}>{ago(h.at)}</Text>
+                    <Text style={{ color: colors.textDim, fontSize: 11 }}>{ago(h.at)}</Text>
                   </View>
                 ))}
               </View>
@@ -1949,13 +2023,15 @@ export default function FamilySpaceScreen() {
       <Modal visible={checkin} transparent animationType="slide" onRequestClose={() => setCheckin(false)}>
         <KeyboardAvoidingView behavior={'padding'} style={st.modalWrap}>
           <Pressable style={{ flex: 1 }} onPress={() => setCheckin(false)} />
-          <View style={[st.modal, { backgroundColor: colors.surfaceSolid, borderColor: colors.border }]}>
+          <View style={[st.modal, { backgroundColor: G.sheet, borderColor: G.edge }]}>
             {/* Design screen 20: choose a status, then send.
                 This also fixes a real trap in the previous flow — tapping a
                 status sent IMMEDIATELY while the note field sat below it, so
                 anyone who typed their note after choosing (the natural order,
                 since the note is underneath) had it silently dropped. */}
+            <View style={[st.grab, { backgroundColor: colors.border }]} />
             <Text style={[st.modalTitle, { color: colors.text }]}>Let your family know you&apos;re safe</Text>
+            <ScrollView bounces={false} keyboardShouldPersistTaps="handled">
             <View style={st.checkGrid}>
               {CHECKINS.map((c) => {
                 const on = picked?.label === c.label;
@@ -1987,6 +2063,7 @@ export default function FamilySpaceScreen() {
                 {picked ? `Send “${picked.label}”` : 'Choose a status'}
               </Text>
             </TouchableOpacity>
+            </ScrollView>
           </View>
         </KeyboardAvoidingView>
       </Modal>
@@ -1995,8 +2072,13 @@ export default function FamilySpaceScreen() {
       <Modal visible={announcing} transparent animationType="slide" onRequestClose={() => setAnnouncing(false)}>
         <KeyboardAvoidingView behavior={'padding'} style={st.modalWrap}>
           <Pressable style={{ flex: 1 }} onPress={() => setAnnouncing(false)} />
-          <View style={[st.modal, { backgroundColor: colors.surfaceSolid, borderColor: colors.border }]}>
+          {/* Height-capped with an inner scroll, same recipe as the manage
+              sheet: with the keyboard up at large font scales the fixed sheet
+              pushed its top rows off-screen (audit-found). */}
+          <View style={[st.modal, { backgroundColor: G.sheet, borderColor: G.edge, maxHeight: '86%' }]}>
+            <View style={[st.grab, { backgroundColor: colors.border }]} />
             <Text style={[st.modalTitle, { color: colors.text }]}>Announcement</Text>
+            <ScrollView bounces={false} keyboardShouldPersistTaps="handled">
             <Text style={{ color: colors.textDim, fontSize: 12.5, textAlign: 'center', marginBottom: 8 }}>
               Pinned to everyone&apos;s dashboard and raised as an alert.
             </Text>
@@ -2031,6 +2113,7 @@ export default function FamilySpaceScreen() {
               {busy ? <ActivityIndicator color="#fff" />
                 : <><Ionicons name="megaphone" size={17} color="#fff" /><Text style={{ color: '#fff', fontWeight: '800', fontSize: 15 }}>Post to group</Text></>}
             </TouchableOpacity>
+            </ScrollView>
           </View>
         </KeyboardAvoidingView>
       </Modal>
@@ -2039,8 +2122,15 @@ export default function FamilySpaceScreen() {
       <Modal visible={manage} transparent animationType="slide" onRequestClose={() => setManage(false)}>
         <KeyboardAvoidingView behavior={'padding'} style={st.modalWrap}>
           <Pressable style={{ flex: 1 }} onPress={() => setManage(false)} />
-          <View style={[st.modal, { backgroundColor: colors.surfaceSolid, borderColor: colors.border }]}>
+          {/* maxHeight + an inner scroll: this sheet holds 20+ actions, and on
+              a short phone the top rows were pushed clean off the screen.
+              Every action is unchanged — now they are all reachable. */}
+          <View style={[st.modal, { backgroundColor: G.sheet, borderColor: G.edge, maxHeight: '86%' }]}>
+            <View style={[st.grab, { backgroundColor: colors.border }]} />
             <Text style={[st.modalTitle, { color: colors.text }]}>{active?.name}</Text>
+            {/* Indicator stays visible: 20+ rows, and without it nothing says
+                the sheet scrolls at all. */}
+            <ScrollView bounces={false} keyboardShouldPersistTaps="handled">
 
             {canManage && (
               <View style={{ flexDirection: 'row', gap: 8, marginBottom: 4 }}>
@@ -2054,27 +2144,27 @@ export default function FamilySpaceScreen() {
               </View>
             )}
 
-            <TouchableOpacity onPress={() => { setManage(false); openAdd(); }} style={[st.mRow, { borderColor: colors.border }]}>
+            <TouchableOpacity onPress={() => { setManage(false); openAdd(); }} style={[st.mRow, { borderColor: G.line }]}>
               <Ionicons name="person-add" size={19} color={colors.primary} /><Text style={[st.mTxt, { color: colors.text }]}>Invite from contacts</Text>
             </TouchableOpacity>
-            {canInvite && <TouchableOpacity onPress={() => { setManage(false); active && router.push({ pathname: '/group-invites' as any, params: { chatId: active.id, name: active.name } }); }} style={[st.mRow, { borderColor: colors.border }]}>
+            {canInvite && <TouchableOpacity onPress={() => { setManage(false); active && router.push({ pathname: '/group-invites' as any, params: { chatId: active.id, name: active.name } }); }} style={[st.mRow, { borderColor: G.line }]}>
               <Ionicons name="mail-open-outline" size={19} color={colors.primary} /><Text style={[st.mTxt, { color: colors.text }]}>Sent invitations &amp; requests</Text>
             </TouchableOpacity>}
-            <TouchableOpacity onPress={() => { setManage(false); active && router.push({ pathname: '/group-members' as any, params: { groupId: active.id, name: active.name } }); }} style={[st.mRow, { borderColor: colors.border }]}>
+            <TouchableOpacity onPress={() => { setManage(false); active && router.push({ pathname: '/group-members' as any, params: { groupId: active.id, name: active.name } }); }} style={[st.mRow, { borderColor: G.line }]}>
               <Ionicons name="people-outline" size={19} color={colors.primary} /><Text style={[st.mTxt, { color: colors.text }]}>Members &amp; roles</Text>
             </TouchableOpacity>
-            <TouchableOpacity onPress={() => { setManage(false); router.push('/group-invitations' as any); }} style={[st.mRow, { borderColor: colors.border }]}>
+            <TouchableOpacity onPress={() => { setManage(false); router.push('/group-invitations' as any); }} style={[st.mRow, { borderColor: G.line }]}>
               <Ionicons name="mail-outline" size={19} color={colors.primary} /><Text style={[st.mTxt, { color: colors.text }]}>My invitations</Text>
             </TouchableOpacity>
-            <TouchableOpacity onPress={() => { setManage(false); router.push('/group-create' as any); }} style={[st.mRow, { borderColor: colors.border }]}>
+            <TouchableOpacity onPress={() => { setManage(false); router.push('/group-create' as any); }} style={[st.mRow, { borderColor: G.line }]}>
               <Ionicons name="add-circle-outline" size={19} color={colors.primary} /><Text style={[st.mTxt, { color: colors.text }]}>Create or join another group</Text>
             </TouchableOpacity>
             {canAnnounce && (
-              <TouchableOpacity onPress={() => { setManage(false); setAnnounceTxt(''); setAnnouncing(true); }} style={[st.mRow, { borderColor: colors.border }]}>
+              <TouchableOpacity onPress={() => { setManage(false); setAnnounceTxt(''); setAnnouncing(true); }} style={[st.mRow, { borderColor: G.line }]}>
                 <Ionicons name="megaphone-outline" size={19} color={colors.primary} /><Text style={[st.mTxt, { color: colors.text }]}>Post an announcement</Text>
               </TouchableOpacity>
             )}
-            <TouchableOpacity onPress={() => { setManage(false); active && router.push({ pathname: '/group-calendar' as any, params: { groupId: active.id, name: active.name } }); }} style={[st.mRow, { borderColor: colors.border }]}>
+            <TouchableOpacity onPress={() => { setManage(false); active && router.push({ pathname: '/group-calendar' as any, params: { groupId: active.id, name: active.name } }); }} style={[st.mRow, { borderColor: G.line }]}>
               <Ionicons name="calendar-outline" size={19} color={colors.primary} /><Text style={[st.mTxt, { color: colors.text }]}>Shared calendar</Text>
             </TouchableOpacity>
             {/* The admin console. Offered only to someone who actually runs this
@@ -2082,14 +2172,14 @@ export default function FamilySpaceScreen() {
                 console draws only what they can use — a tile that fails on tap
                 teaches people to distrust the whole screen. The permission list
                 is presentation; every endpoint behind it re-checks server-side. */}
-            {canOps && <TouchableOpacity onPress={() => { setManage(false); active && router.push({ pathname: '/space-admin' as any, params: { spaceId: active.id, name: active.name, groupType: active.groupType ?? '', perms: Array.from(perms).join(',') } }); }} style={[st.mRow, { borderColor: colors.border }]}>
+            {canOps && <TouchableOpacity onPress={() => { setManage(false); active && router.push({ pathname: '/space-admin' as any, params: { spaceId: active.id, name: active.name, groupType: active.groupType ?? '', perms: Array.from(perms).join(',') } }); }} style={[st.mRow, { borderColor: G.line }]}>
               <Ionicons name="shield-checkmark-outline" size={18} color={colors.primary} />
-              <Text style={[st.mTxt, { color: colors.primary, fontWeight: '700' }]}>Admin console</Text>
+              <Text style={[st.mTxt, { color: G.accentText, fontWeight: '700' }]}>Admin console</Text>
             </TouchableOpacity>}
             {/* Attendance is only meaningful where someone oversees others, so
                 it is offered on the same permission that shows the runs card
                 rather than to every member of every household. */}
-            {canOps && <TouchableOpacity onPress={() => { setManage(false); active && router.push({ pathname: '/space-attendance' as any, params: { spaceId: active.id, name: active.name } }); }} style={[st.mRow, { borderColor: colors.border }]}>
+            {canOps && <TouchableOpacity onPress={() => { setManage(false); active && router.push({ pathname: '/space-attendance' as any, params: { spaceId: active.id, name: active.name } }); }} style={[st.mRow, { borderColor: G.line }]}>
               <Ionicons name="calendar-number-outline" size={18} color={colors.text} />
               <Text style={[st.mTxt, { color: colors.text }]}>Attendance</Text>
             </TouchableOpacity>}
@@ -2097,63 +2187,64 @@ export default function FamilySpaceScreen() {
                 a parent's "roster" is their own child, and that is the screen
                 that tells them so. The server decides what is in it. */}
             {(canOps || hasPerm(perms, 'manage_roster') || !!active?.groupType?.includes('school') || !!active?.groupType?.includes('transport')) &&
-              <TouchableOpacity onPress={() => { setManage(false); active && router.push({ pathname: '/space-roster' as any, params: { spaceId: active.id, name: active.name, canManage: hasPerm(perms, 'manage_roster') ? '1' : '0' } }); }} style={[st.mRow, { borderColor: colors.border }]}>
+              <TouchableOpacity onPress={() => { setManage(false); active && router.push({ pathname: '/space-roster' as any, params: { spaceId: active.id, name: active.name, canManage: hasPerm(perms, 'manage_roster') ? '1' : '0' } }); }} style={[st.mRow, { borderColor: G.line }]}>
                 <Ionicons name="people-outline" size={18} color={colors.text} />
                 <Text style={[st.mTxt, { color: colors.text }]}>Roster</Text>
               </TouchableOpacity>}
-            <TouchableOpacity onPress={() => { setManage(false); active && router.push({ pathname: '/group-insights' as any, params: { groupId: active.id, name: active.name } }); }} style={[st.mRow, { borderColor: colors.border }]}>
+            <TouchableOpacity onPress={() => { setManage(false); active && router.push({ pathname: '/group-insights' as any, params: { groupId: active.id, name: active.name } }); }} style={[st.mRow, { borderColor: G.line }]}>
               <Ionicons name="stats-chart-outline" size={19} color={colors.primary} /><Text style={[st.mTxt, { color: colors.text }]}>Insights</Text>
             </TouchableOpacity>
             {canNavigate && (
-              <TouchableOpacity onPress={() => { setManage(false); active && router.push({ pathname: '/group-trip' as any, params: { groupId: active.id, name: active.name } }); }} style={[st.mRow, { borderColor: colors.border }]}>
+              <TouchableOpacity onPress={() => { setManage(false); active && router.push({ pathname: '/group-trip' as any, params: { groupId: active.id, name: active.name } }); }} style={[st.mRow, { borderColor: G.line }]}>
                 <Ionicons name="navigate-outline" size={19} color={colors.primary} /><Text style={[st.mTxt, { color: colors.text }]}>Start a group trip</Text>
               </TouchableOpacity>
             )}
-            <TouchableOpacity onPress={() => { setManage(false); active && router.push({ pathname: '/media-gallery' as any, params: { chatId: active.id, peerName: active.name } }); }} style={[st.mRow, { borderColor: colors.border }]}>
+            <TouchableOpacity onPress={() => { setManage(false); active && router.push({ pathname: '/media-gallery' as any, params: { chatId: active.id, peerName: active.name } }); }} style={[st.mRow, { borderColor: G.line }]}>
               <Ionicons name="images-outline" size={19} color={colors.primary} /><Text style={[st.mTxt, { color: colors.text }]}>Shared album</Text>
             </TouchableOpacity>
-            <TouchableOpacity onPress={() => { setManage(false); active && router.push({ pathname: '/group-notes' as any, params: { groupId: active.id, name: active.name } }); }} style={[st.mRow, { borderColor: colors.border }]}>
+            <TouchableOpacity onPress={() => { setManage(false); active && router.push({ pathname: '/group-notes' as any, params: { groupId: active.id, name: active.name } }); }} style={[st.mRow, { borderColor: G.line }]}>
               <Ionicons name="document-text-outline" size={19} color={colors.primary} /><Text style={[st.mTxt, { color: colors.text }]}>Shared notes</Text>
             </TouchableOpacity>
-            <TouchableOpacity onPress={() => { setManage(false); active && router.push({ pathname: '/group-tasks' as any, params: { groupId: active.id, name: active.name } }); }} style={[st.mRow, { borderColor: colors.border }]}>
+            <TouchableOpacity onPress={() => { setManage(false); active && router.push({ pathname: '/group-tasks' as any, params: { groupId: active.id, name: active.name } }); }} style={[st.mRow, { borderColor: G.line }]}>
               <Ionicons name="checkbox-outline" size={19} color={colors.primary} /><Text style={[st.mTxt, { color: colors.text }]}>Shared tasks</Text>
             </TouchableOpacity>
-            <TouchableOpacity onPress={() => { setManage(false); active && router.push({ pathname: '/group-privacy' as any, params: { groupId: active.id, name: active.name } }); }} style={[st.mRow, { borderColor: colors.border }]}>
+            <TouchableOpacity onPress={() => { setManage(false); active && router.push({ pathname: '/group-privacy' as any, params: { groupId: active.id, name: active.name } }); }} style={[st.mRow, { borderColor: G.line }]}>
               <Ionicons name="eye-off-outline" size={19} color={colors.primary} /><Text style={[st.mTxt, { color: colors.text }]}>What this group can see</Text>
             </TouchableOpacity>
             {/* High-speed alert for MY OWN device (spec: speed alerts). Tap the
                 threshold to cycle it. Off by default; detected on this phone —
                 the server never sees a speed. */}
-            <View style={[st.mRow, { borderColor: colors.border }]}>
+            <View style={[st.mRow, { borderColor: G.line }]}>
               <Ionicons name="speedometer-outline" size={19} color={colors.primary} />
               <Text style={[st.mTxt, { color: colors.text, flex: 1 }]}>High-speed alert</Text>
               {speedAlert.enabled && (
-                <TouchableOpacity onPress={cycleSpeedThreshold} style={{ paddingHorizontal: 8 }}>
-                  <Text style={{ color: colors.primary, fontWeight: '800', fontSize: 13 }}>{speedAlert.thresholdKmh} km/h</Text>
+                <TouchableOpacity onPress={cycleSpeedThreshold} style={{ paddingHorizontal: 8 }} hitSlop={{ top: 12, bottom: 12 }} accessibilityRole="button" accessibilityLabel={`High-speed alert threshold ${speedAlert.thresholdKmh} kilometres per hour, tap to change`}>
+                  <Text style={{ color: G.accentText, fontWeight: '800', fontSize: 13 }}>{speedAlert.thresholdKmh} km/h</Text>
                 </TouchableOpacity>
               )}
               <Switch value={speedAlert.enabled} onValueChange={toggleSpeedAlert} trackColor={{ true: colors.primary }} />
             </View>
-            <TouchableOpacity onPress={() => { setManage(false); active && router.push({ pathname: '/chat', params: { id: active.id } } as any); }} style={[st.mRow, { borderColor: colors.border }]}>
+            <TouchableOpacity onPress={() => { setManage(false); active && router.push({ pathname: '/chat', params: { id: active.id } } as any); }} style={[st.mRow, { borderColor: G.line }]}>
               <Ionicons name="chatbubbles" size={19} color={colors.primary} /><Text style={[st.mTxt, { color: colors.text }]}>Open circle chat</Text>
             </TouchableOpacity>
-            <TouchableOpacity onPress={() => { setManage(false); router.push('/family-setup' as any); }} style={[st.mRow, { borderColor: colors.border }]}>
+            <TouchableOpacity onPress={() => { setManage(false); router.push('/family-setup' as any); }} style={[st.mRow, { borderColor: G.line }]}>
               <Ionicons name="key" size={19} color={colors.primary} /><Text style={[st.mTxt, { color: colors.text }]}>Create or join another circle</Text>
             </TouchableOpacity>
-            <TouchableOpacity onPress={() => { setManage(false); router.push('/emergency-sos' as any); }} style={[st.mRow, { borderColor: colors.border }]}>
+            <TouchableOpacity onPress={() => { setManage(false); router.push('/emergency-sos' as any); }} style={[st.mRow, { borderColor: G.line }]}>
               <Ionicons name="medkit" size={19} color={colors.danger} /><Text style={[st.mTxt, { color: colors.text }]}>Emergency SOS (trusted contacts)</Text>
             </TouchableOpacity>
-            <Text style={{ color: colors.textFaint, fontSize: 12, paddingVertical: 8 }}>
+            <Text style={{ color: colors.textDim, fontSize: 12, paddingVertical: 8 }}>
               Tap a member for their details and history. Long-press to change their role or remove them.
             </Text>
-            <TouchableOpacity onPress={doLeave} style={[st.mRow, { borderColor: colors.border }]}>
-              <Ionicons name="exit-outline" size={19} color={colors.danger} /><Text style={[st.mTxt, { color: colors.danger }]}>Leave circle</Text>
+            <TouchableOpacity onPress={doLeave} style={[st.mRow, { borderColor: G.line }]}>
+              <Ionicons name="exit-outline" size={19} color={G.dangerText} /><Text style={[st.mTxt, { color: G.dangerText }]}>Leave circle</Text>
             </TouchableOpacity>
             {canManage && (
-              <TouchableOpacity onPress={doDelete} disabled={busy} style={[st.mRow, { borderColor: colors.border }]}>
-                <Ionicons name="trash" size={19} color={colors.danger} /><Text style={[st.mTxt, { color: colors.danger, fontWeight: '800' }]}>Delete circle</Text>
+              <TouchableOpacity onPress={doDelete} disabled={busy} style={[st.mRow, { borderColor: G.line }]}>
+                <Ionicons name="trash" size={19} color={G.dangerText} /><Text style={[st.mTxt, { color: G.dangerText, fontWeight: '800' }]}>Delete circle</Text>
               </TouchableOpacity>
             )}
+            </ScrollView>
           </View>
         </KeyboardAvoidingView>
       </Modal>
@@ -2162,25 +2253,34 @@ export default function FamilySpaceScreen() {
           help. Doing nothing sends the SOS; only "I'm OK" stops it. ── */}
       <Modal visible={crashAsk} transparent animationType="fade" onRequestClose={() => setCrashAsk(false)}>
         <View style={[st.crashWrap, { backgroundColor: 'rgba(0,0,0,0.82)' }]}>
-          <View style={[st.crashCard, { backgroundColor: colors.card, borderColor: colors.danger }]}>
-            <Text style={{ fontSize: 40 }}>🚨</Text>
-            <Text style={[st.crashTitle, { color: colors.text }]}>Possible crash detected</Text>
-            <Text style={{ color: colors.textDim, fontSize: 13.5, textAlign: 'center', lineHeight: 19 }}>
-              A hard impact was detected while driving. If you don’t respond,
-              your circle gets an SOS with your live location.
-            </Text>
-            <Text style={[st.crashCount, { color: colors.danger }]}>{crashLeft}</Text>
+          {/* maxHeight + inner scroll for the EXPLANATION only — the two
+              buttons stay pinned below it. At large font scales the old fixed
+              stack could push "I'm OK" off-screen, and an unreachable "I'm OK"
+              means the countdown fires a false SOS. Button fills are the deep
+              green/red (the light-scheme goodText/dangerText hues): white
+              15.5px labels on #22C55E were 2.3:1 — the one button that stops
+              a false alarm was the least readable thing on the screen. */}
+          <View style={[st.crashCard, { backgroundColor: G.sheet, borderColor: colors.danger }]}>
+            <ScrollView style={{ alignSelf: 'stretch', flexGrow: 0 }} bounces={false} contentContainerStyle={{ alignItems: 'center', gap: 10 }}>
+              <Text style={{ fontSize: 40 }}>🚨</Text>
+              <Text style={[st.crashTitle, { color: colors.text }]}>Possible crash detected</Text>
+              <Text style={{ color: colors.textDim, fontSize: 13.5, textAlign: 'center', lineHeight: 19 }}>
+                A hard impact was detected while driving. If you don’t respond,
+                your circle gets an SOS with your live location.
+              </Text>
+              <Text style={[st.crashCount, { color: colors.danger }]}>{crashLeft}</Text>
+            </ScrollView>
             <TouchableOpacity
               onPress={() => setCrashAsk(false)}
               accessibilityRole="button"
-              style={[st.crashBtn, { backgroundColor: colors.success }]}
+              style={[st.crashBtn, { backgroundColor: '#05603A' }]}
             >
               <Text style={st.crashBtnTxt}>I’m OK</Text>
             </TouchableOpacity>
             <TouchableOpacity
               onPress={() => { setCrashAsk(false); fireSos(); }}
               accessibilityRole="button"
-              style={[st.crashBtn, { backgroundColor: colors.danger }]}
+              style={[st.crashBtn, { backgroundColor: '#B42318' }]}
             >
               <Text style={st.crashBtnTxt}>Send SOS now</Text>
             </TouchableOpacity>
@@ -2191,81 +2291,98 @@ export default function FamilySpaceScreen() {
   );
 }
 
+// Spacing rides the 4/8/12/16 grid; radii step 18 → 20 → 24 → 28 with
+// importance (tiles → cards → map/sheets → modals); glass panes carry
+// SPACE_SHADOW so they float instead of reading as outlined boxes.
 const st = StyleSheet.create({
   screen: { flex: 1 },
-  center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
-  dash: { padding: 12 },
-  greetRow: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 8 },
-  chip: { borderWidth: 1, borderRadius: 999, paddingHorizontal: 14, paddingVertical: 7 },
-  status: { flexDirection: 'row', alignItems: 'center', gap: 10, padding: 10, borderWidth: 1, borderRadius: 14, marginBottom: 8 },
-  statusIcon: { width: 38, height: 38, borderRadius: 19, alignItems: 'center', justifyContent: 'center' },
+  // Loading placeholders — glass shapes, no shimmer (see the loading gate).
+  skel: { borderWidth: 1 },
+  dash: { padding: 16 },
+  greetRow: { flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 12 },
+  chip: { borderWidth: 1, borderRadius: 999, paddingHorizontal: 14, paddingVertical: 8 },
+  status: { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 16, borderWidth: 1, borderRadius: 22, marginBottom: 12, ...SPACE_SHADOW.raised },
+  statusIcon: { width: 42, height: 42, borderRadius: 21, alignItems: 'center', justifyContent: 'center' },
   avatarRow: { flexDirection: 'row', alignItems: 'center' },
-  miniDot: { width: 26, height: 26, borderRadius: 13, alignItems: 'center', justifyContent: 'center', borderWidth: 2 },
+  // minWidth, not width: the "+N" overflow chip grows into a pill for double
+  // digits instead of clipping; single initials stay a 26dp circle.
+  miniDot: { minWidth: 26, height: 26, borderRadius: 13, paddingHorizontal: 2, alignItems: 'center', justifyContent: 'center', borderWidth: 2 },
   miniDotTxt: { color: '#fff', fontWeight: '800', fontSize: 11 },
-  mapCard: { height: 300, borderRadius: 18, borderWidth: 1, overflow: 'hidden', marginBottom: 10 },
-  mapBadge: { position: 'absolute', top: 10, right: 10, flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 10, paddingVertical: 5, borderRadius: 999, borderWidth: 1 },
-  collapse: { position: 'absolute', top: 12, right: 12, width: 38, height: 38, borderRadius: 19, borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
-  // 5 tiles wrap onto two rows at ~3 per row (30% basis + the 10px gaps).
-  tiles: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginBottom: 10 },
-  tile: { flexBasis: '30%', flexGrow: 1, alignItems: 'center', justifyContent: 'center', gap: 5, height: 66, borderWidth: 1, borderRadius: 16 },
-  tileTxt: { fontSize: 12.5, fontWeight: '700' },
+  mapCard: { height: 300, borderRadius: 24, borderWidth: 1, overflow: 'hidden', marginBottom: 12, ...SPACE_SHADOW.raised },
+  mapBadge: { position: 'absolute', top: 12, right: 12, flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 12, paddingVertical: 6, borderRadius: 999, borderWidth: 1, ...SPACE_SHADOW.rest },
+  collapse: { position: 'absolute', top: 12, right: 12, width: 40, height: 40, borderRadius: 20, borderWidth: 1, alignItems: 'center', justifyContent: 'center', ...SPACE_SHADOW.rest },
   // ── design screen 5: greeting + quick-action cards ──
   greetBell: {
-    width: 40, height: 40, borderRadius: 20, borderWidth: 1,
-    alignItems: 'center', justifyContent: 'center',
+    width: 42, height: 42, borderRadius: 21, borderWidth: 1,
+    alignItems: 'center', justifyContent: 'center', ...SPACE_SHADOW.rest,
   },
   bellDot: {
     position: 'absolute', top: 8, right: 9, width: 9, height: 9,
     borderRadius: 5, borderWidth: 1.5,
   },
-  qaGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginBottom: 10 },
+  qaGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginBottom: 12 },
   // Three across on a normal phone; wraps to two on narrow screens rather than
-  // squeezing the subtitle out of existence.
+  // squeezing the subtitle out of existence. (minWidth tracks the 16px screen
+  // margin — at 104 the wider gutters pushed 360dp phones down to two-up.)
   qa: {
-    flexBasis: '30%', flexGrow: 1, minWidth: 104,
-    borderWidth: 1, borderRadius: 16, padding: 12, gap: 7,
+    flexBasis: '30%', flexGrow: 1, minWidth: 100,
+    borderWidth: 1, borderRadius: 18, padding: 12, gap: 8, ...SPACE_SHADOW.rest,
   },
-  qaIcon: { width: 36, height: 36, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
+  qaIcon: { width: 38, height: 38, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
   qaTitle: { fontSize: 13.5, fontWeight: '700' },
   qaSub: { fontSize: 11 },
   badge: { position: 'absolute', top: 6, right: 10, minWidth: 18, height: 18, borderRadius: 9, borderWidth: 1.5, paddingHorizontal: 4, alignItems: 'center', justifyContent: 'center' },
   badgeTxt: { color: '#fff', fontSize: 10, fontWeight: '800' },
-  announce: { flexDirection: 'row', alignItems: 'center', gap: 10, padding: 12, borderWidth: 1, borderRadius: 14, marginBottom: 10 },
-  sosBig: { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 12, borderWidth: 1.5, borderRadius: 18, overflow: 'hidden', marginBottom: 6 },
+  announce: { flexDirection: 'row', alignItems: 'center', gap: 10, padding: 12, borderWidth: 1, borderRadius: 18, marginBottom: 12, ...SPACE_SHADOW.rest },
+  sosBig: { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 16, borderWidth: 1.5, borderRadius: 20, overflow: 'hidden', marginBottom: 12, ...SPACE_SHADOW.rest },
   sosIcon: { width: 42, height: 42, borderRadius: 21, alignItems: 'center', justifyContent: 'center' },
-  shareRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 8 },
-  secHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 8, marginBottom: 8 },
-  secTitle: { fontSize: 13, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 0.4 },
-  card: { borderWidth: 1, borderRadius: 16, paddingHorizontal: 12, marginBottom: 4 },
-  distRow: { flexDirection: 'row', alignItems: 'flex-start', paddingTop: 14 },
+  // The share toggle's own pane on the dashboard.
+  shareCard: { borderWidth: 1, borderRadius: 18, paddingHorizontal: 16, paddingVertical: 2, marginBottom: 12, ...SPACE_SHADOW.rest },
+  shareRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 10 },
+  // marginTop 4: every card above a section head now carries marginBottom 12,
+  // so the total 16 lands on the grid without double-counting.
+  secHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 4, marginBottom: 8 },
+  secTitle: { fontSize: 12, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 0.7 },
+  // One vertical rhythm: every card in the scroll column sits 12 under its
+  // neighbour — the audit found 4/10/12/14 all in play, the classic tell.
+  card: { borderWidth: 1, borderRadius: 20, paddingHorizontal: 16, paddingVertical: 6, marginBottom: 12, ...SPACE_SHADOW.rest },
+  // Tertiary info rows: faint glass, no float — they explain, they don't lead.
+  quiet: { shadowOpacity: 0, elevation: 0 },
+  distRow: { flexDirection: 'row', alignItems: 'flex-start', paddingTop: 10 },
   distCell: { flex: 1, alignItems: 'center', gap: 3, paddingHorizontal: 4 },
-  distVal: { fontSize: 15, fontWeight: '800' },
+  distVal: { fontSize: 16, fontWeight: '800', fontVariant: ['tabular-nums'] },
   distLbl: { fontSize: 11, textAlign: 'center' },
   distDiv: { width: 1, height: 30 },
-  sortRow: { flexDirection: 'row', gap: 7, marginBottom: 9 },
-  // 30 px min height keeps these inside the accessible touch-target floor while
-  // still reading as chips rather than buttons.
+  sortRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 10 },
+  // 30dp visual height reads as a chip, not a button; the 7dp vertical hitSlop
+  // on every user of this style is what carries the target to the 44dp floor.
   sortChip: { borderWidth: 1, borderRadius: 999, paddingHorizontal: 12, minHeight: 30, justifyContent: 'center' },
-  sheet: { borderTopWidth: 1, borderTopLeftRadius: 18, borderTopRightRadius: 18, paddingHorizontal: 14, paddingTop: 12, paddingBottom: 14, gap: 6 },
-  row: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 9, borderTopWidth: StyleSheet.hairlineWidth },
+  sheet: { borderTopWidth: 1, borderTopLeftRadius: 24, borderTopRightRadius: 24, paddingHorizontal: 16, paddingTop: 12, paddingBottom: 16, gap: 6, ...SPACE_SHADOW.raised },
+  row: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 10, borderTopWidth: StyleSheet.hairlineWidth },
   dot: { width: 34, height: 34, borderRadius: 17, alignItems: 'center', justifyContent: 'center' },
   dotTxt: { color: '#fff', fontWeight: '800' },
   rowBtn: { padding: 6 },
-  modalWrap: { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.45)' },
-  modal: { borderTopLeftRadius: 20, borderTopRightRadius: 20, borderWidth: 1, padding: 16, paddingBottom: 28, gap: 8 },
-  modalTitle: { fontSize: 17, fontWeight: '800', marginBottom: 6, textAlign: 'center' },
+  modalWrap: { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.5)' },
+  modal: { borderTopLeftRadius: 28, borderTopRightRadius: 28, borderWidth: 1, padding: 18, paddingBottom: 28, gap: 8 },
+  grab: { alignSelf: 'center', width: 40, height: 4, borderRadius: 2, marginBottom: 10 },
+  modalTitle: { fontSize: 18, fontWeight: '800', marginBottom: 6, textAlign: 'center' },
   checkGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
-  checkBtn: { flexBasis: '47%', flexGrow: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, height: 52, borderRadius: 14, borderWidth: 1 },
-  noteInput: { borderWidth: 1, borderRadius: 12, paddingHorizontal: 12, height: 46, marginTop: 4, fontSize: 14.5 },
-  sendCheckin: { marginTop: 10, height: 50, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
-  btnWide: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, height: 50, borderRadius: 13, marginTop: 12 },
-  saveBtn: { width: 46, height: 46, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
-  mRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 13, borderTopWidth: StyleSheet.hairlineWidth },
+  // minHeight, not height, on anything that holds text: at the largest system
+  // font scales a fixed height clips the label, and a clipped emergency or
+  // send button is worse than a slightly taller one.
+  // paddingHorizontal 24 reserves the corner the selected-state checkmark
+  // occupies, so it never overprints the label on narrow tiles.
+  checkBtn: { flexBasis: '47%', flexGrow: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, minHeight: 54, paddingHorizontal: 24, borderRadius: 16, borderWidth: 1 },
+  noteInput: { borderWidth: 1, borderRadius: 16, paddingHorizontal: 12, minHeight: 48, marginTop: 4, fontSize: 14.5 },
+  sendCheckin: { marginTop: 10, minHeight: 52, borderRadius: 16, alignItems: 'center', justifyContent: 'center' },
+  btnWide: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, minHeight: 52, borderRadius: 16, marginTop: 12 },
+  saveBtn: { width: 48, height: 48, borderRadius: 16, alignItems: 'center', justifyContent: 'center' },
+  mRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 12, borderTopWidth: StyleSheet.hairlineWidth },
   mTxt: { fontSize: 15, fontWeight: '600' },
   crashWrap: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 26 },
-  crashCard: { width: '100%', maxWidth: 360, borderWidth: 2, borderRadius: 22, padding: 22, alignItems: 'center', gap: 10 },
+  crashCard: { width: '100%', maxWidth: 360, maxHeight: '90%', borderWidth: 2, borderRadius: 24, padding: 22, alignItems: 'center', gap: 10 },
   crashTitle: { fontSize: 19, fontWeight: '900', textAlign: 'center' },
   crashCount: { fontSize: 44, fontWeight: '900', fontVariant: ['tabular-nums'] },
-  crashBtn: { alignSelf: 'stretch', height: 52, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
+  crashBtn: { alignSelf: 'stretch', minHeight: 52, borderRadius: 16, alignItems: 'center', justifyContent: 'center' },
   crashBtnTxt: { color: '#fff', fontSize: 15.5, fontWeight: '800' },
 });

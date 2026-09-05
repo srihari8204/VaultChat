@@ -108,17 +108,22 @@ const AUTO_DEAL_SECS = 60;
  * Three stops, brightest first: the lit centre, the body of the cloth, and the
  * shadow at the rail. ONE LINE TO CHANGE if you want a different table.
  */
-const FELT = ['#1E5F74', '#123D4E', '#0B2733'];
+const FELT = ['#1D5E4A', '#123F33', '#0A2721'];
 const CARD_FACE = '#fffdf6';
 const CARD_EDGE = '#caa44a';
 const CARD_RED = '#d8213f';
 const CARD_INK = '#16181f';
 const JOKER_PURPLE = '#7c3aed';
-// Ink on the cloth. It was '#e7f3ea' (green-tinted, for the old green felt),
-// then '#FFF8F1' (warm, for the wine). On teal a warm white turns faintly pink,
-// so this is a NEUTRAL white — bright against the cloth without picking up a
-// cast from either the teal below it or the maroon room around it.
-const INK_ON_FELT = '#F2F7F8';
+// Ink on the cloth, and it has moved every time the cloth has. '#e7f3ea' for
+// the old green felt, '#FFF8F1' (warm) for the wine, '#F2F7F8' (neutral, very
+// slightly cool) for the teal.
+//
+// The teal's neutral white read faintly BLUE on emerald — a cool ink on a warm
+// green is the one combination that looks accidental rather than chosen. This
+// is the same brightness carried a hair warm, so it sits on the cloth and still
+// belongs to the gold hardware around it. Any future change to FELT above
+// should re-check this line: ink and cloth are one decision, not two.
+const INK_ON_FELT = '#F4F6F1';
 
 /** Under this many seconds the clock turns red and ticks audibly. */
 const CLOCK_URGENT = 10;

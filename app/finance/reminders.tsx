@@ -7,7 +7,8 @@ import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useFocusEffect } from 'expo-router';
 import { DateTimePickerAndroid } from '@react-native-community/datetimepicker';
 import { FIN } from '../../constants/financeTheme';
-import { FinHeader, Label, Field, Segment, Btn, Pill, EmptyState, Card } from '../../components/finance/ui';
+import { FinHeader, Label, Field, Segment, Btn, Pill, EmptyState, Card, LoadingState, ErrorState } from '../../components/finance/ui';
+import { useLoadStatus } from '../../components/finance/useLoad';
 import { useMe } from '../../components/finance/useMe';
 import { fmtDateTime } from '../../utils/financeFormat';
 import {
@@ -27,7 +28,13 @@ export default function Reminders() {
   const [freq, setFreq] = useState<ReminderFreq>('monthly');
   const [when, setWhen] = useState<number>(Date.now() + 86400000);
 
-  const reload = useCallback(() => { if (me) listReminders(me.id).then(setRows).catch(() => {}); }, [me]);
+  // aliased: this screen already has a `done` list of completed reminders
+  const { status, begin: beginLoad, done: loadOk, fail: loadFail } = useLoadStatus();
+  const reload = useCallback(() => {
+    if (!me) return;
+    beginLoad();
+    listReminders(me.id).then(r => { setRows(r); loadOk(); }).catch(loadFail);
+  }, [me, beginLoad, loadOk, loadFail]);
   useFocusEffect(reload);
 
   const pickWhen = () => {
@@ -99,7 +106,11 @@ export default function Reminders() {
           </Card>
         )}
 
-        {active.length === 0 && done.length === 0 && !showAdd && (
+        {status === 'loading' && <LoadingState label="Loading reminders" />}
+        {status === 'error' && (
+          <ErrorState title="Could not load reminders" sub="Your reminders could not be read. Nothing has been lost." onRetry={reload} />
+        )}
+        {status === 'ready' && active.length === 0 && done.length === 0 && !showAdd && (
           <EmptyState icon="notifications-outline" title="No reminders" sub="Add reminders for interest dues, collections and auctions." />
         )}
 
@@ -137,9 +148,9 @@ export default function Reminders() {
 
 const s = StyleSheet.create({
   screen: { flex: 1, backgroundColor: FIN.bg },
-  body: { padding: 16 },
+  body: { padding: 16, alignSelf: 'center', width: '100%', maxWidth: FIN.contentMax },
   section: { color: FIN.text, fontSize: 14, fontWeight: '800', marginTop: 16, marginBottom: 10 },
-  card: { flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: FIN.card, borderRadius: 12, padding: 13, marginBottom: 9, borderWidth: 1, borderColor: FIN.border },
+  card: { flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: FIN.card, borderRadius: 12, padding: 13, marginBottom: 9, borderWidth: 1, borderColor: FIN.glassEdge, shadowColor: '#101828', shadowOpacity: 0.08, shadowRadius: 12, shadowOffset: { width: 0, height: 4 }, elevation: 2 },
   dot: { width: 9, height: 9, borderRadius: 5, backgroundColor: FIN.good },
   title: { color: FIN.text, fontSize: 14.5, fontWeight: '700' },
   sub: { color: FIN.sub, fontSize: 12, marginTop: 2 },

@@ -1,12 +1,23 @@
 // app/finance/index.tsx — Vault Finance Dashboard (the hub's front door).
 // Overview totals + health tiles + quick-action grid into every module.
+//
+// Layout is derived from the measured window via lib/finance/grid — the tile
+// row and action grid used to be a hardcoded 4-across and a `width: '22%'`,
+// both of which are device assumptions. See the 320 / 390 / 744 artboards in
+// Figma N5Y6KcMUPA3LgtWjfHPctz.
+//
+// The data path below is unchanged: same queries, same paise-exact
+// accumulation via sumRupees, same totals.
 
 import React, { useCallback, useState } from 'react';
-import { View, Text, ScrollView, StyleSheet, TouchableOpacity, StatusBar } from 'react-native';
+import { View, Text, ScrollView, StyleSheet, StatusBar, Pressable } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { Stack, useRouter, useFocusEffect } from 'expo-router';
-import { FIN } from '../../constants/financeTheme';
-import { HeroCard, StatTile, QuickAction } from '../../components/finance/ui';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { FIN, TABULAR } from '../../constants/financeTheme';
+import {
+  HeroCard, HeroSplit, StatTile, QuickAction, TileGrid, ActionGrid, FinBody, IconBtn,
+} from '../../components/finance/ui';
 import { useMe } from '../../components/finance/useMe';
 import { inrShort } from '../../utils/financeFormat';
 import { listLedger } from '../../db/ledger';
@@ -27,6 +38,7 @@ const startOfDay = (ms: number) => { const d = new Date(ms); d.setHours(0, 0, 0,
 export default function FinanceDashboard() {
   const router = useRouter();
   const me = useMe();
+  const insets = useSafeAreaInsets();
   const [t, setT] = useState<Totals>(ZERO);
 
   const reload = useCallback(() => {
@@ -65,78 +77,97 @@ export default function FinanceDashboard() {
   return (
     <View style={s.screen}>
       <Stack.Screen options={{ headerShown: false }} />
-      <StatusBar barStyle="dark-content" backgroundColor={FIN.bg} />
-      <ScrollView contentContainerStyle={s.body} showsVerticalScrollIndicator={false}>
-        {/* Header */}
-        <View style={s.head}>
-          <TouchableOpacity onPress={() => router.back()} hitSlop={10} style={s.hBtn}>
-            <Ionicons name="arrow-back" size={22} color={FIN.text} />
-          </TouchableOpacity>
-          <View style={{ flex: 1 }}>
-            <Text style={s.brand}>Vault Finance</Text>
-            <Text style={s.brandSub}>All money tools in one place</Text>
-          </View>
-          <TouchableOpacity onPress={() => go('/finance/search')} hitSlop={10} style={s.hBtn}>
-            <Ionicons name="search" size={21} color={FIN.text} />
-          </TouchableOpacity>
-          <TouchableOpacity onPress={() => go('/finance/reminders')} hitSlop={10} style={s.hBtn}>
-            <Ionicons name="notifications-outline" size={22} color={FIN.text} />
-            {t.today > 0 && <View style={s.badge}><Text style={s.badgeTxt}>{t.today}</Text></View>}
-          </TouchableOpacity>
-        </View>
-
-        {/* Overview hero */}
-        <HeroCard>
-          <Text style={s.heroLabel}>TOTAL OVERVIEW · THIS MONTH</Text>
-          <View style={s.heroDuo}>
-            <View style={{ flex: 1 }}>
-              <Text style={s.heroKey}>Total Lent</Text>
-              <Text style={s.heroVal}>{inrShort(t.lent)}</Text>
+      <StatusBar barStyle="dark-content" backgroundColor="transparent" translucent />
+      <ScrollView
+        contentContainerStyle={[s.scroll, { paddingTop: insets.top + 12, paddingBottom: insets.bottom + 32 }]}
+        showsVerticalScrollIndicator={false}
+      >
+        <FinBody>
+          {/* Header */}
+          <View style={s.head}>
+            <IconBtn icon="arrow-back" label="Go back" onPress={() => router.back()} />
+            <View style={s.headTitle}>
+              <Text style={s.brand} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.85}>
+                Vault Finance
+              </Text>
+              <Text style={s.brandSub} numberOfLines={1}>All money tools in one place</Text>
             </View>
-            <View style={s.heroDivider} />
-            <View style={{ flex: 1 }}>
-              <Text style={s.heroKey}>Total Borrowed</Text>
-              <Text style={s.heroVal}>{inrShort(t.borrowed)}</Text>
+            <IconBtn icon="search" label="Search finance" onPress={() => go('/finance/search')} />
+            <View>
+              <IconBtn icon="notifications-outline" label={
+                t.today > 0 ? `Reminders, ${t.today} due today` : 'Reminders'
+              } onPress={() => go('/finance/reminders')} />
+              {t.today > 0 && (
+                <View style={s.badge} pointerEvents="none">
+                  <Text style={s.badgeTxt}>{t.today}</Text>
+                </View>
+              )}
             </View>
           </View>
-          <View style={s.heroFoot}>
-            <Text style={s.heroFootTxt}>Interest earned {inrShort(t.earned)}</Text>
-            <Text style={s.heroFootTxt}>Pending {inrShort(t.pending)}</Text>
+
+          {/* Overview hero */}
+          <HeroCard>
+            <Text style={s.heroLabel}>TOTAL OVERVIEW · THIS MONTH</Text>
+            <View style={{ marginTop: 12 }}>
+              <HeroSplit>
+                <View>
+                  <Text style={s.heroKey}>Total Lent</Text>
+                  <Text style={s.heroVal} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>
+                    {inrShort(t.lent)}
+                  </Text>
+                </View>
+                <View>
+                  <Text style={s.heroKey}>Total Borrowed</Text>
+                  <Text style={s.heroVal} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>
+                    {inrShort(t.borrowed)}
+                  </Text>
+                </View>
+              </HeroSplit>
+            </View>
+            <View style={s.heroFoot}>
+              <Text style={s.heroFootTxt} numberOfLines={1}>Interest earned {inrShort(t.earned)}</Text>
+              <Text style={s.heroFootTxt} numberOfLines={1}>Pending {inrShort(t.pending)}</Text>
+            </View>
+          </HeroCard>
+
+          {/* Health tiles */}
+          <View style={{ marginTop: 16 }}>
+            <TileGrid>
+              <StatTile value={String(t.active)} label="Active loans" tone="good" />
+              <StatTile value={String(t.overdue)} label="Overdue" tone="bad" />
+              <StatTile value={String(t.today)} label="Today's dues" tone="warn" />
+              <StatTile value={String(t.chitti)} label="Lucky Draw groups" tone="brand" />
+            </TileGrid>
           </View>
-        </HeroCard>
 
-        {/* Health tiles */}
-        <View style={s.tileRow}>
-          <StatTile value={String(t.active)} label="Active loans" tone="good" />
-          <StatTile value={String(t.overdue)} label="Overdue" tone="bad" />
-          <StatTile value={String(t.today)} label="Today's dues" tone="warn" />
-          <StatTile value={String(t.chitti)} label="Lucky Draw groups" tone="brand" />
-        </View>
+          {/* Quick actions */}
+          <Text style={s.section}>Quick Actions</Text>
+          <ActionGrid>
+            <QuickAction icon="book" label="Ledger Book" onPress={() => go('/finance/ledger')} />
+            <QuickAction icon="trending-up" label="Interest" onPress={() => go('/finance/interest')} />
+            <QuickAction icon="calculator" label="EMI Calc" onPress={() => go('/finance/emi')} />
+            <QuickAction icon="people" label="Lucky Draw" onPress={() => go('/finance/chitti')} />
+            <QuickAction icon="notifications" label="Reminders" onPress={() => go('/finance/reminders')} />
+            <QuickAction icon="calendar" label="Calendar" onPress={() => go('/finance/calendar')} />
+            <QuickAction icon="bar-chart" label="Reports" onPress={() => go('/finance/reports')} />
+            <QuickAction icon="bookmark" label="Saved" onPress={() => go('/finance/saved')} />
+          </ActionGrid>
 
-        {/* Quick actions */}
-        <Text style={s.section}>Quick Actions</Text>
-        <View style={s.qaGrid}>
-          <QuickAction icon="book" label="Ledger Book" onPress={() => go('/finance/ledger')} colors={[FIN.good, '#0f7a38']} />
-          <QuickAction icon="trending-up" label="Interest" onPress={() => go('/finance/interest')} colors={[FIN.brand, FIN.brandDeep]} />
-          <QuickAction icon="calculator" label="EMI Calc" onPress={() => go('/finance/emi')} colors={[FIN.info, '#1e40af']} />
-          <QuickAction icon="people" label="Lucky Draw" onPress={() => go('/finance/chitti')} colors={['#DB2777', '#9d174d']} />
-          <QuickAction icon="notifications" label="Reminders" onPress={() => go('/finance/reminders')} colors={[FIN.warn, '#92400e']} />
-          <QuickAction icon="calendar" label="Calendar" onPress={() => go('/finance/calendar')} colors={['#0891B2', '#155e75']} />
-          <QuickAction icon="bar-chart" label="Reports" onPress={() => go('/finance/reports')} colors={[FIN.accent, '#5b21b6']} />
-          <QuickAction icon="bookmark" label="Saved" onPress={() => go('/finance/saved')} colors={['#475569', '#1e293b']} />
-        </View>
-
-        {/* Import / Export */}
-        <TouchableOpacity style={s.ioRow} onPress={() => go('/finance/io')} activeOpacity={0.85}>
-          <View style={s.ioIcon}><Ionicons name="swap-vertical" size={18} color={FIN.brandDeep} /></View>
-          <View style={{ flex: 1 }}>
-            <Text style={s.ioTitle}>Import / Export</Text>
-            <Text style={s.ioSub}>Back up ledgers &amp; Lucky Draw to CSV or Excel</Text>
-          </View>
-          <Ionicons name="chevron-forward" size={18} color={FIN.faint} />
-        </TouchableOpacity>
-
-        <View style={{ height: 30 }} />
+          {/* Import / Export */}
+          <Pressable
+            style={({ pressed }) => [s.ioRow, pressed && { opacity: 0.75 }]}
+            onPress={() => go('/finance/io')}
+            accessibilityRole="button"
+            accessibilityLabel="Import and export. Back up ledgers and Lucky Draw to CSV or Excel"
+          >
+            <View style={s.ioIcon}><Ionicons name="swap-vertical" size={18} color={FIN.brandDeep} /></View>
+            <View style={{ flex: 1, minWidth: 0 }}>
+              <Text style={s.ioTitle} numberOfLines={1}>Import / Export</Text>
+              <Text style={s.ioSub} numberOfLines={1}>Back up ledgers &amp; Lucky Draw</Text>
+            </View>
+            <Ionicons name="chevron-forward" size={18} color={FIN.faint} />
+          </Pressable>
+        </FinBody>
       </ScrollView>
     </View>
   );
@@ -144,28 +175,38 @@ export default function FinanceDashboard() {
 
 const s = StyleSheet.create({
   screen: { flex: 1, backgroundColor: FIN.bg },
-  body: { padding: 16, paddingTop: 44 },
-  head: { flexDirection: 'row', alignItems: 'center', marginBottom: 16 },
-  hBtn: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
-  brand: { color: FIN.text, fontSize: 22, fontWeight: '800' },
+  scroll: { paddingHorizontal: 0 },
+
+  head: { flexDirection: 'row', alignItems: 'center', gap: 4, marginBottom: 18 },
+  headTitle: { flex: 1, minWidth: 0, paddingHorizontal: 8 },
+  brand: { color: FIN.text, fontSize: 22, fontWeight: '800', letterSpacing: -0.5 },
   brandSub: { color: FIN.sub, fontSize: 12.5, marginTop: 1 },
-  badge: { position: 'absolute', top: 4, right: 4, minWidth: 16, height: 16, borderRadius: 8, backgroundColor: FIN.bad, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 3 },
-  badgeTxt: { color: '#fff', fontSize: 9, fontWeight: '800' },
+  badge: {
+    position: 'absolute', top: 2, right: 2, minWidth: 17, height: 17, borderRadius: 9,
+    backgroundColor: FIN.bad, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 4,
+    borderWidth: 1.5, borderColor: FIN.bgTop,
+  },
+  badgeTxt: { color: '#fff', fontSize: 9.5, fontWeight: '800' },
 
-  heroLabel: { color: 'rgba(255,255,255,0.8)', fontSize: 10.5, fontWeight: '700', letterSpacing: 0.8 },
-  heroDuo: { flexDirection: 'row', alignItems: 'center', marginTop: 12 },
-  heroDivider: { width: 1, height: 40, backgroundColor: 'rgba(255,255,255,0.25)', marginHorizontal: 12 },
+  heroLabel: { color: 'rgba(255,255,255,0.8)', fontSize: 10.5, fontWeight: '700', letterSpacing: 0.9 },
   heroKey: { color: 'rgba(255,255,255,0.85)', fontSize: 12 },
-  heroVal: { color: '#fff', fontSize: 24, fontWeight: '800', marginTop: 2 },
-  heroFoot: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 14, paddingTop: 12, borderTopWidth: 1, borderTopColor: 'rgba(255,255,255,0.2)' },
-  heroFootTxt: { color: 'rgba(255,255,255,0.9)', fontSize: 12, fontWeight: '600' },
+  heroVal: { color: '#fff', fontSize: 25, fontWeight: '800', marginTop: 2, letterSpacing: -0.6, ...TABULAR },
+  heroFoot: {
+    flexDirection: 'row', justifyContent: 'space-between', gap: 12,
+    marginTop: 16, paddingTop: 12, borderTopWidth: 1, borderTopColor: 'rgba(255,255,255,0.22)',
+  },
+  heroFootTxt: { color: 'rgba(255,255,255,0.9)', fontSize: 12, fontWeight: '600', flexShrink: 1, ...TABULAR },
 
-  tileRow: { flexDirection: 'row', gap: 8, marginTop: 12 },
-  section: { color: FIN.text, fontSize: 16, fontWeight: '800', marginTop: 22, marginBottom: 12 },
-  qaGrid: { flexDirection: 'row', flexWrap: 'wrap', rowGap: 16, justifyContent: 'space-between' },
+  section: { color: FIN.text, fontSize: 16, fontWeight: '800', marginTop: 24, marginBottom: 14, letterSpacing: -0.2 },
 
-  ioRow: { flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: FIN.card, borderRadius: 14, padding: 14, borderWidth: 1, borderColor: FIN.border, marginTop: 22 },
-  ioIcon: { width: 38, height: 38, borderRadius: 12, backgroundColor: FIN.brandSoft, alignItems: 'center', justifyContent: 'center' },
+  ioRow: {
+    flexDirection: 'row', alignItems: 'center', gap: 12, marginTop: 24,
+    backgroundColor: FIN.card, borderRadius: 16, padding: 14,
+    borderWidth: 1, borderColor: FIN.glassEdge,
+    shadowColor: '#101828', shadowOpacity: 0.08, shadowRadius: 12, shadowOffset: { width: 0, height: 4 }, elevation: 2,
+    minHeight: 44,
+  },
+  ioIcon: { width: 40, height: 40, borderRadius: 12, backgroundColor: FIN.brandSoft, alignItems: 'center', justifyContent: 'center' },
   ioTitle: { color: FIN.text, fontSize: 14.5, fontWeight: '700' },
   ioSub: { color: FIN.sub, fontSize: 12, marginTop: 1 },
 });

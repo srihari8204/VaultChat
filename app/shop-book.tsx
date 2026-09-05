@@ -32,22 +32,102 @@ import {
   canCustomerCollect, notCollectedGate, isTerminalFailure,
   couponDiscount, couponLabel, starText, loyaltyTier, parseBulkProducts,
   type CartItem, type OrderStatus, type ItemAvailability,
-  UNIT_PRESETS, normalizeUnit, isStalePrice, dateLocale,
+  UNIT_PRESETS, normalizeUnit, isStalePrice, dateLocale, orderStamp,
 } from '../utils/shopbook';
 import * as SB from '../services/shopBookService';
+// ONE canonical document. Screen and PDF read the same model, so the two can
+// no longer disagree the way buildBillHtml and InvoiceView's inline template did.
+import { invoiceHtml, fromOrder, fromInvoice, taxIdentifiers } from '../utils/shopbookInvoice';
+// The shared ice-glass system. It lives under finance/ because Vault Finance is
+// where it was built; Shop Book is the second consumer, not a fork of it.
+// ponytail: left in place rather than renamed to shared/ — a third consumer is
+// when the move earns its churn (spec §23 "do not reorganize unnecessarily").
+import { FIN, FIN_DARK, FIN_RADIUS, TABULAR } from '../constants/financeTheme';
+// The app already owns theming — persisted 'light' | 'dark' | 'system'. Shop
+// Book joins it rather than inventing a second switch.
+import { useTheme } from '../lib/theme';
+import {
+  StatTile, TileGrid, ActionGrid, QuickAction, EmptyState, LoadingState,
+} from '../components/finance/ui';
+import { FIN_GUTTER } from '../lib/finance/grid';
+import { LinearGradient } from 'expo-linear-gradient';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { listShopLists, saveShopList, deleteShopList, type ShopList } from '../db/shopLists';
 import {
   t, useShopBookLang, initShopBookLang, setShopBookLang, SB_LANGUAGES, speechLocale,
 } from '../lib/shopbookI18n';
 import { Aurora } from '../constants/theme';
 
-// ── palette (green + navy, from the SHOP BOOK poster) ──────────────
-const C = {
-  green: '#0B7A3B', greenDark: '#075E54', greenSoft: '#DCFCE7',
-  navy: '#1E3A5F', bg: '#F3F4F6', card: '#FFFFFF', border: '#E5E7EB',
-  line: '#EEF0F3', text: '#111827', sub: '#6B7280', danger: '#DC2626',
-  amber: '#D97706', blue: '#1D4ED8',
-};
+// ── palette ────────────────────────────────────────────────────────
+//
+// Shop Book keeps its green+navy identity from the poster, but every neutral
+// and every semantic state now comes from the shared ice-glass tokens that
+// Vault Finance already runs on. There is ONE glass system in Mini Apps, not
+// two — see docs/shopbook-redesign-spec.md.
+//
+// The key names are unchanged on purpose: ~380 call sites keep working, and the
+// restyle happens because two of them now point somewhere else —
+//
+//   C.bg   = transparent  → the ice gradient in ShopBookScreen shows through
+//   C.card = translucent  → all 19 card surfaces become glass panes
+//
+// That is the whole mechanism. 53 components change appearance without 53
+// components being edited.
+//
+// Three semantic colours also move, and that is a contrast FIX, not taste:
+// #DC2626 danger and #D97706 amber do not clear WCAG AA at the 12-13px sizes
+// this screen actually uses them at. FIN.bad / FIN.warn do, and read the same.
+/** Either ice-glass palette. `typeof FIN` alone is literal-typed ("#05603A"),
+ *  so FIN_DARK's different literals would not satisfy it — widen each key to
+ *  its kind while keeping contentMax numeric. */
+type Palette = { readonly [K in keyof typeof FIN]: (typeof FIN)[K] extends number ? number : string };
+
+/**
+ * Shop Book's token map, derived from whichever ice-glass palette is active.
+ *
+ * Every colour the screen renders comes through here — no component reads FIN
+ * directly — so swapping the palette swaps the whole mini-app. The key names
+ * are the original green/navy vocabulary, which is why ~380 call sites did not
+ * have to change when this became theme-aware.
+ */
+const makeC = (P: Palette) => ({
+  // The poster identity. Fixed in light; in dark the accent has to lift OFF a
+  // dark ground instead of sitting on white, so it is not the same green.
+  green:      P === FIN ? '#0B7A3B' : '#5BD08B',
+  greenDark:  P === FIN ? '#075E54' : '#2E9E67',
+  greenSoft:  P === FIN ? '#DCFCE7' : '#0C2A1B',
+  navy:       P === FIN ? '#1E3A5F' : '#A9C2E0',
+
+  // The app header is a large FILL, not accent text. One token cannot be both:
+  // reusing the accent in dark gives a glaring slab, so the roles are split.
+  headerBg:   P === FIN ? '#0B7A3B' : '#0C2A1B',
+  headerFg:   P === FIN ? '#FFFFFF' : '#6EDBA0',
+
+  bg:         P.bg,          // transparent — the gradient is the ground
+  card:       P.card,        // translucent — the glass pane
+  cardSolid:  P.cardSolid,   // when opacity is genuinely required (QR, sheets)
+  chip:       P.card2,       // an unselected chip needs a real fill
+  border:     P.border,
+  line:       P.line,
+  text:       P.text,
+  sub:        P.sub,
+
+  danger:     P.bad,         // light was #DC2626 — failed AA at 12-13px
+  dangerSoft: P.badSoft,
+  amber:      P.warn,        // light was #D97706 — failed AA at 12-13px
+  warnSoft:   P.warnSoft,
+  blue:       P.info,
+  infoSoft:   P.infoSoft,
+  good:       P.good,
+  goodSoft:   P.goodSoft,
+
+  // The ice ground, drawn once by IceGround.
+  groundTop:    P.bgTop,
+  groundMid:    P.bgMid,
+  groundBottom: P.bgBottom,
+  contentMax:   P.contentMax,
+});
+
 
 type Mode = 'customer' | 'owner';
 type CustTab = 'shops' | 'orders' | 'profile';
@@ -63,6 +143,22 @@ export default function ShopBookScreen() {
   const [me, setMe] = useState<{ id: string; name: string } | null>(null);
   const [inbox, setInbox] = useState(false);
   const [unread, setUnread] = useState(0);
+  // Read from the device, never guessed. The header used to hardcode
+  // paddingTop: 48, which floats on a short status bar and tucks the title
+  // under the clock on a punch-hole phone.
+  const insets = useSafeAreaInsets();
+  // Install the palette BEFORE any child renders. Reading useTheme() here is
+  // what makes this screen re-render on a scheme change; nothing below is
+  // memoized, so every descendant re-renders with it and dereferences the
+  // freshly-pointed `s` / `C`.
+  //
+  // Deliberately NOT keyed on the scheme. A key remounts the subtree, which
+  // device testing showed drops the user back to the dashboard mid-task — and
+  // these phones schedule night mode at 22:00, so a shopkeeper entering a khata
+  // line at 10pm would simply lose their place. Re-render is enough; remount is
+  // destructive.
+  const { scheme } = useTheme();
+  applyScheme(scheme === 'dark' ? 'dark' : 'light');
   useShopBookLang(); // re-render on language change
 
   useEffect(() => { (async () => {
@@ -74,18 +170,18 @@ export default function ShopBookScreen() {
 
   if (inbox) {
     return (
-      <View style={s.screen}>
+      <IceGround>
         <Stack.Screen options={{ headerShown: false }} />
         <NotificationCenter onBack={() => setInbox(false)} onRead={() => setUnread(0)} />
-      </View>
+      </IceGround>
     );
   }
 
   return (
-    <View style={s.screen}>
+    <IceGround>
       <Stack.Screen options={{ headerShown: false }} />
       {/* Header + mode toggle */}
-      <View style={s.header}>
+      <View style={[s.header, { paddingTop: insets.top + 10 }]}>
         <TouchableOpacity onPress={() => router.back()} hitSlop={10} style={s.hBtn}>
           <Ionicons name="arrow-back" size={22} color="#fff" />
         </TouchableOpacity>
@@ -114,6 +210,29 @@ export default function ShopBookScreen() {
       {mode === 'customer'
         ? <CustomerApp me={me} initialShopId={initialShopId} />
         : <OwnerApp me={me} />}
+    </IceGround>
+  );
+}
+
+/**
+ * The ice ground, rendered ONCE for the whole mini-app.
+ *
+ * Shop Book is a flat route (app/shop-book.tsx), so there is no _layout to hang
+ * this on and adding one would mean turning the route into a directory —
+ * `vaultchat://shop-book?shop=` deep links must keep resolving, so we don't.
+ * Rendering the gradient here costs nothing extra: every screen below already
+ * draws on a transparent C.bg, so the gradient IS their background.
+ */
+function IceGround({ children }: { children: React.ReactNode }) {
+  return (
+    <View style={s.screen}>
+      <LinearGradient
+        colors={[C.groundTop, C.groundMid, C.groundBottom]}
+        start={{ x: 0, y: 0 }} end={{ x: 0, y: 1 }}
+        style={StyleSheet.absoluteFill}
+        pointerEvents="none"
+      />
+      {children}
     </View>
   );
 }
@@ -340,7 +459,7 @@ function FindShops({ onOpen, favIds, onToggleFav, onProductSearch }: {
         ))}
       </ScrollView>
 
-      {loading && <ActivityIndicator color={C.green} style={{ marginTop: 24 }} />}
+      {loading && <LoadingState />}
       {err && <Text style={s.error}>{err}</Text>}
       {!loading && !err && filtered.length === 0 && (
         <Empty icon="storefront-outline" text="No shops found nearby yet." />
@@ -448,7 +567,7 @@ function ProductSearch({ onBack, onOpenShop }: { onBack: () => void; onOpenShop:
           </View>
         )}
 
-        {loading && <ActivityIndicator color={C.green} style={{ marginTop: 20 }} />}
+        {loading && <LoadingState />}
         {searched && !loading && results.length === 0 && (
           <Empty icon="search-outline" text="No shop nearby lists that yet." />
         )}
@@ -582,9 +701,13 @@ function ShopFlow({ shop, cart, setCart, onBack, onPlaced, onLedger, isFav, onTo
   );
 }
 
+// Prices a customer reads must be in the SHOP's currency. These used to be
+// formatINR — a hardcoded ₹ — which mislabels every figure for a shop
+// configured anywhere else. Same class of bug as the owner order list.
 function Catalog({ shop, cart, setCart, onCart }: {
   shop: SB.Shop; cart: CartItem[]; setCart: (c: CartItem[]) => void; onCart: () => void;
 }) {
+  const money = (n: number) => formatMoney(n, shop.currency || '₹');
   const [loading, setLoading] = useState(true);
   const [products, setProducts] = useState<SB.Product[]>([]);
   const [q, setQ] = useState('');
@@ -682,14 +805,14 @@ function Catalog({ shop, cart, setCart, onCart }: {
       </View>
 
       <Text style={s.sectionLabel}>Catalog</Text>
-      {loading && <ActivityIndicator color={C.green} style={{ marginTop: 16 }} />}
+      {loading && <LoadingState />}
       {!loading && filtered.length === 0 && <Empty icon="pricetags-outline" text="No listed products. Use “Type any product” below." />}
       {filtered.map((p) => (
         <View key={p.id} style={s.card}>
           <View style={{ flex: 1 }}>
             <Text style={s.cardTitle}>{p.name}{p.unit ? ` · ${p.unit}` : ''}</Text>
             <Text style={s.cardSub}>{[p.brand, p.category].filter(Boolean).join(' · ')}</Text>
-            <Text style={s.price}>{formatINR(p.price)}{!p.inStock ? '  ·  Out of stock' : ''}</Text>
+            <Text style={s.price}>{money(p.price)}{!p.inStock ? '  ·  Out of stock' : ''}</Text>
           </View>
           {(() => {
             const line = lineFor(p.id);
@@ -775,7 +898,7 @@ function Catalog({ shop, cart, setCart, onCart }: {
       {cart.length > 0 && (
         <TouchableOpacity style={s.stickyCart} onPress={onCart}>
           <Text style={s.stickyCartText}>View Cart ({cart.length})</Text>
-          <Text style={s.stickyCartText}>{formatINR(cartTotal(cart))}</Text>
+          <Text style={s.stickyCartText}>{money(cartTotal(cart))}</Text>
         </TouchableOpacity>
       )}
     </ScrollView>
@@ -786,6 +909,7 @@ function CartView({ shop, cart, setCart, onPlaced, coupons }: {
   shop: SB.Shop; cart: CartItem[]; setCart: (c: CartItem[]) => void;
   onPlaced: (id: string) => void; coupons: SB.Coupon[];
 }) {
+  const money = (n: number) => formatMoney(n, shop.currency || '₹');
   const [note, setNote] = useState('');
   const [placing, setPlacing] = useState(false);
   const [couponInput, setCouponInput] = useState('');
@@ -804,7 +928,7 @@ function CartView({ shop, cart, setCart, onPlaced, coupons }: {
     const code = couponInput.trim().toUpperCase();
     const found = coupons.find((c2) => c2.code.toUpperCase() === code);
     if (!found) { setCouponMsg('Invalid code'); setApplied(null); return; }
-    if (subtotal < found.minOrder) { setCouponMsg(`Min order ${formatINR(found.minOrder)}`); setApplied(null); return; }
+    if (subtotal < found.minOrder) { setCouponMsg(`Min order ${money(found.minOrder)}`); setApplied(null); return; }
     setApplied(found); setCouponMsg(`Applied · ${couponLabel(found)}`);
   };
 
@@ -858,7 +982,7 @@ function CartView({ shop, cart, setCart, onPlaced, coupons }: {
           <View style={{ flex: 1 }}>
             <Text style={s.cardTitle}>{it.name}{it.brand ? ` (${it.brand})` : ''}{it.unit ? ` · ${it.unit}` : ''}</Text>
             {!!it.note && <Text style={s.cardSub}>📝 {it.note}</Text>}
-            <Text style={s.price}>{it.price > 0 ? formatINR(it.price) : 'Price on confirm'}</Text>
+            <Text style={s.price}>{it.price > 0 ? money(it.price) : 'Price on confirm'}</Text>
           </View>
           <View style={s.qtyRow}>
             <TouchableOpacity style={s.qtyBtn} onPress={() => setQty(it.key, -1)}><Text style={s.qtyBtnText}>−</Text></TouchableOpacity>
@@ -889,10 +1013,10 @@ function CartView({ shop, cart, setCart, onPlaced, coupons }: {
 
           {/* Totals */}
           <View style={s.panel}>
-            <Row label="Subtotal" value={formatINR(subtotal)} />
-            {discount > 0 && <Row label={`Discount (${applied?.code})`} value={`− ${formatINR(discount)}`} tone={C.green} />}
+            <Row label="Subtotal" value={money(subtotal)} />
+            {discount > 0 && <Row label={`Discount (${applied?.code})`} value={`− ${money(discount)}`} tone={C.green} />}
             <View style={{ height: 1, backgroundColor: C.border, marginVertical: 6 }} />
-            <Row label="Total" value={formatINR(total)} bold />
+            <Row label="Total" value={money(total)} bold />
           </View>
 
           <TouchableOpacity style={[s.primaryBtn, placing && { opacity: 0.6 }]} disabled={placing}
@@ -930,124 +1054,25 @@ function MyOrders({ onOpen }: { onOpen: (id: string) => void }) {
     <ScrollView contentContainerStyle={s.body}
       refreshControl={<RefreshControl refreshing={loading} onRefresh={load} tintColor={C.green} />}>
       <Text style={s.sectionLabel}>My Orders</Text>
-      {loading && <ActivityIndicator color={C.green} style={{ marginTop: 16 }} />}
+      {loading && <LoadingState />}
       {!loading && orders.length === 0 && <Empty icon="receipt-outline" text="No orders yet." />}
       {orders.map((o) => (
-        <TouchableOpacity key={o.id} style={s.card} onPress={() => onOpen(o.id)}>
-          <View style={{ flex: 1 }}>
-            <Text style={s.cardTitle}>{o.shopName}</Text>
-            <Text style={s.cardSub}>{o.id.slice(0, 8).toUpperCase()} · {formatMoney(o.total, o.currency || '₹')}</Text>
-            <StatusPill status={o.status} />
-          </View>
-          <Ionicons name="chevron-forward" size={20} color={C.sub} />
-        </TouchableOpacity>
+        <TxnRow
+          key={o.id}
+          icon="receipt-outline"
+          title={o.shopName || 'Shop'}
+          // The date was already fetched on OrderSummary and never shown. An
+          // order list you cannot scan by date is not a list, it is a pile.
+          sub={`${o.id.slice(0, 8).toUpperCase()} · ${orderStamp(o.createdAt)}`}
+          amount={formatMoney(o.total, o.currency || '₹')}
+          onPress={() => onOpen(o.id)}
+          right={<Ionicons name="chevron-forward" size={20} color={C.sub} />}
+        >
+          <StatusPill status={o.status} />
+        </TxnRow>
       ))}
     </ScrollView>
   );
-}
-
-// Shop names, addresses and product names are free text — escape before they
-// go anywhere near the bill markup, or one apostrophe-heavy shop name breaks
-// the layout.
-const esc = (s: string) =>
-  String(s ?? '').replace(/[&<>"']/g, (c) =>
-    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c] as string));
-
-// The printable bill. Carries the shop's identity (name, owner, address,
-// phone, tax id) — a receipt that cannot say who issued it is not a receipt —
-// and prices in the shop's own currency, not a hardcoded ₹.
-function buildBillHtml(order: SB.OrderDetail): string {
-  const shop = order.shop ?? { name: '', address: '', phone: '', ownerName: '', taxConfig: {} } as SB.OrderDetail['shop'];
-  const cur = order.currency || '₹';
-  const m = (n: number) => esc(formatMoney(n, cur));
-  const placed = new Date(order.createdAt);
-
-  // Tax identifiers are country-driven (GSTIN / VAT no. / EIN / ABN …), so
-  // render whatever the shop actually configured rather than assuming GST.
-  const taxLines = Object.entries(shop.taxConfig ?? {})
-    .filter(([, v]) => String(v ?? '').trim() !== '')
-    .map(([k, v]) => `<div>${esc(k.toUpperCase())}: <b>${esc(String(v))}</b></div>`)
-    .join('');
-
-  const rows = order.items.map((it) => {
-    const unavailable = it.availability === 'unavailable';
-    const name = `${esc(it.name)}${it.brand ? ` <span class="muted">(${esc(it.brand)})</span>` : ''}`
-      + `${it.unit ? ` <span class="muted">· ${esc(it.unit)}</span>` : ''}`;
-    return `<tr${unavailable ? ' class="struck"' : ''}>
-      <td>${name}${unavailable ? ' <span class="muted">— not available</span>' : ''}</td>
-      <td class="num">${esc(String(it.qty))}</td>
-      <td class="num">${it.price > 0 ? m(it.price) : '—'}</td>
-      <td class="num">${it.price > 0 ? m(it.price * it.qty) : '—'}</td>
-    </tr>`;
-  }).join('');
-
-  const subtotal = order.items.reduce((s, it) => s + (it.price || 0) * (it.qty || 0), 0);
-
-  return `<html><head><meta name="viewport" content="width=device-width,initial-scale=1">
-  <style>
-    *{box-sizing:border-box}
-    body{font-family:-apple-system,'Segoe UI',Roboto,sans-serif;color:#111;margin:0;padding:32px 28px;font-size:14px}
-    .head{display:flex;justify-content:space-between;align-items:flex-start;gap:16px;
-          border-bottom:2px solid #0B7A3B;padding-bottom:14px}
-    .shop{font-size:21px;font-weight:700;color:#0B7A3B;margin:0 0 4px}
-    .muted{color:#6B7280}
-    .meta{text-align:right;font-size:12px;color:#4B5563;line-height:1.7;white-space:nowrap}
-    .tag{display:inline-block;padding:3px 10px;border-radius:999px;font-size:11px;
-         font-weight:700;background:#E8F5EE;color:#0B7A3B;letter-spacing:.3px}
-    table{width:100%;border-collapse:collapse;margin-top:22px}
-    th{text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:.6px;
-       color:#4B5563;border-bottom:1px solid #D1D5DB;padding:0 0 8px}
-    td{padding:9px 0;border-bottom:1px solid #F3F4F6;vertical-align:top;line-height:1.5}
-    th.num,td.num{text-align:right}
-    .struck td{color:#9CA3AF;text-decoration:line-through}
-    .totals{margin-left:auto;margin-top:14px;width:62%}
-    .totals td{border:none;padding:5px 0}
-    .totals .lbl{color:#4B5563}
-    .grand td{border-top:2px solid #111;padding-top:11px;font-size:17px;font-weight:700}
-    .foot{margin-top:30px;padding-top:14px;border-top:1px solid #F3F4F6;
-          font-size:11px;color:#6B7280;line-height:1.7}
-  </style></head>
-  <body>
-    <div class="head">
-      <div>
-        <p class="shop">${esc(shop.name) || 'Shop Book'}</p>
-        ${shop.ownerName ? `<div class="muted">${esc(shop.ownerName)}</div>` : ''}
-        ${shop.address ? `<div class="muted">${esc(shop.address)}</div>` : ''}
-        ${shop.phone ? `<div class="muted">☎ ${esc(shop.phone)}</div>` : ''}
-        ${taxLines ? `<div style="margin-top:6px;font-size:12px">${taxLines}</div>` : ''}
-      </div>
-      <div class="meta">
-        <span class="tag">${esc(orderStatusLabel(order.status))}</span>
-        <div style="margin-top:8px">Order <b>${esc(order.id.slice(0, 8).toUpperCase())}</b></div>
-        <div>${esc(placed.toLocaleDateString())}</div>
-        <div>${esc(placed.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }))}</div>
-      </div>
-    </div>
-
-    <table>
-      <thead><tr>
-        <th>Item</th><th class="num">Qty</th><th class="num">Rate</th><th class="num">Amount</th>
-      </tr></thead>
-      <tbody>${rows}</tbody>
-    </table>
-
-    <table class="totals">
-      <tr><td class="lbl">Subtotal</td><td class="num">${m(subtotal)}</td></tr>
-      ${order.discount > 0
-        ? `<tr><td class="lbl">Discount${order.couponCode ? ` (${esc(order.couponCode)})` : ''}</td>
-             <td class="num" style="color:#0B7A3B">− ${m(order.discount)}</td></tr>` : ''}
-      ${order.delivery && order.deliveryFee > 0
-        ? `<tr><td class="lbl">Delivery</td><td class="num">${m(order.deliveryFee)}</td></tr>` : ''}
-      <tr class="grand"><td>Total</td><td class="num">${m(order.total)}</td></tr>
-    </table>
-
-    ${order.note ? `<div class="foot">Note: ${esc(order.note)}</div>` : ''}
-    <div class="foot">
-      This is a pickup order receipt${shop.name ? ` from ${esc(shop.name)}` : ''}.
-      ${taxLines ? '' : 'Not a tax invoice.'}
-      <div>Generated by Shop Book</div>
-    </div>
-  </body></html>`;
 }
 
 // A Shop Book realtime event. Payload carries identifiers only — never the new
@@ -1195,13 +1220,13 @@ function OrderTrack({ orderId, onBack }: { orderId: string; onBack: () => void }
     const lines = order.items.map((it) =>
       `• ${it.name}${it.brand ? ` (${it.brand})` : ''}${it.unit ? ` · ${it.unit}` : ''} × ${it.qty}`);
     await Share.share({
-      message: `🛍️ Shop Book order ${order.id.slice(0, 8).toUpperCase()}\n${lines.join('\n')}\nTotal: ${formatINR(order.total)}`,
+      message: `🛍️ Shop Book order ${order.id.slice(0, 8).toUpperCase()}\n${lines.join('\n')}\nTotal: ${formatMoney(order.total, order.currency || '₹')}`,
     }).catch(() => {});
   };
 
   const bill = async () => {
     if (!order) return;
-    const html = buildBillHtml(order);
+    const html = invoiceHtml(fromOrder(order, orderStatusLabel(order.status)));
     try {
       const { uri } = await Print.printToFileAsync({ html });
       if (await Sharing.isAvailableAsync()) await Sharing.shareAsync(uri, { mimeType: 'application/pdf', dialogTitle: 'Order receipt' });
@@ -1223,7 +1248,7 @@ function OrderTrack({ orderId, onBack }: { orderId: string; onBack: () => void }
         onSubmit={(reason) => cancelOrder(reason)} onClose={() => setCancelAsk(false)} />
       <ScrollView contentContainerStyle={s.body}
         refreshControl={<RefreshControl refreshing={loading} onRefresh={load} tintColor={C.green} />}>
-        {loading && !order && <ActivityIndicator color={C.green} style={{ marginTop: 24 }} />}
+        {loading && !order && <LoadingState />}
         {order && (
           <>
             <StatusPill status={order.status} big />
@@ -1432,6 +1457,7 @@ function OrderTrack({ orderId, onBack }: { orderId: string; onBack: () => void }
 }
 
 function CustomerLedgerView({ shop, onBack }: { shop: SB.Shop; onBack: () => void }) {
+  const money = (n: number) => formatMoney(n, shop.currency || '₹');
   const [loading, setLoading] = useState(true);
   const [ledger, setLedger] = useState<SB.Ledger | null>(null);
   useEffect(() => { (async () => {
@@ -1442,12 +1468,12 @@ function CustomerLedgerView({ shop, onBack }: { shop: SB.Shop; onBack: () => voi
     <>
       <SubHeader title={`Ledger · ${shop.name}`} onBack={onBack} />
       <ScrollView contentContainerStyle={s.body}>
-        {loading && <ActivityIndicator color={C.green} style={{ marginTop: 24 }} />}
+        {loading && <LoadingState />}
         {ledger && (
           <>
             <View style={{ flexDirection: 'row', gap: 10 }}>
-              <StatCard label="Total Pending" value={formatINR(ledger.pending)} tone="danger" />
-              <StatCard label="Total Paid" value={formatINR(ledger.totalPaid)} tone="green" />
+              <StatCard label="Total Pending" value={money(ledger.pending)} tone="danger" />
+              <StatCard label="Total Paid" value={money(ledger.totalPaid)} tone="green" />
             </View>
             <Text style={s.sectionLabel}>Transactions</Text>
             {ledger.entries.length === 0 && <Empty icon="book-outline" text="No transactions yet." />}
@@ -1597,7 +1623,7 @@ function OwnerApp({ me }: { me: { id: string; name: string } | null }) {
   }, []);
   useEffect(() => { load(); }, [load]);
 
-  if (loading) return <ActivityIndicator color={C.green} style={{ marginTop: 40 }} />;
+  if (loading) return <LoadingState />;
 
   // No shop yet → force settings/create.
   if (!shop || settings) {
@@ -1630,7 +1656,7 @@ function OwnerApp({ me }: { me: { id: string; name: string } | null }) {
         )}
         {tab === 'orders' && <OwnerOrders />}
         {tab === 'products' && <OwnerProducts shop={shop} />}
-        {tab === 'khata' && <OwnerKhata />}
+        {tab === 'khata' && <OwnerKhata currency={shop.currency} />}
       </KeyboardAvoidingView>
       <TabBar
         tabs={[
@@ -1649,7 +1675,6 @@ function OwnerApp({ me }: { me: { id: string; name: string } | null }) {
 // Every quick-link card opens a screen, so every one carries the same affordance.
 // Corner-pinned: the cards are centered columns, so a chevron in the flow stacks
 // under the label instead of reading as "forward".
-const LinkChevron = () => <Ionicons name="chevron-forward" size={14} color={C.sub} style={s.linkChevron} />;
 
 function OwnerDashboard({ shop, onSettings, onCoupons, onSuppliers, onPlans, onReports,
                          onPurchases, onReturns, onAudit, onVerify }: {
@@ -1689,9 +1714,7 @@ function OwnerDashboard({ shop, onSettings, onCoupons, onSuppliers, onPlans, onR
       </Modal>
 
       {!shop.approved && (
-        <View style={[s.panel, { borderColor: C.amber }]}>
-          <Text style={{ color: C.amber, fontWeight: '700' }}>⏳ {t('owner.pendingApproval')}</Text>
-        </View>
+        <Banner tone="warn" icon="hourglass-outline" text={t('owner.pendingApproval')} />
       )}
 
       <TouchableOpacity style={s.card} onPress={onSettings}>
@@ -1728,16 +1751,19 @@ function OwnerDashboard({ shop, onSettings, onCoupons, onSuppliers, onPlans, onR
         </TouchableOpacity>
       )}
 
-      <View style={s.statGrid}>
-        <StatCard label="Today's Orders" value={String(d?.todayOrders ?? 0)} tone="navy" />
-        <StatCard label="Today's Sales" value={formatMoney(d?.todaySales ?? 0, shop.currency)} tone="green" />
-        <StatCard label="Pending Orders" value={String(d?.pendingOrders ?? 0)} tone="amber" />
-        <StatCard label="Total Pending" value={formatMoney(d?.totalPending ?? 0, shop.currency)} tone="danger" />
-      </View>
+      {/* Was a `minWidth: '46%'` wrap — a two-up device assumption wearing
+          percentage clothing, which stayed two-up on an 800dp tablet. TileGrid
+          derives the column count from the measured window: 2 on a phone, 4
+          once there is room. Same four figures, same sources. */}
+      <TileGrid>
+        <StatTile label="Today's Orders" value={String(d?.todayOrders ?? 0)} tone="info" />
+        <StatTile label="Today's Sales" value={formatMoney(d?.todaySales ?? 0, shop.currency)} tone="good" />
+        <StatTile label="Pending Orders" value={String(d?.pendingOrders ?? 0)} tone="warn" />
+        <StatTile label="Total Pending" value={formatMoney(d?.totalPending ?? 0, shop.currency)} tone="bad" />
+      </TileGrid>
       {(d?.lowStock ?? 0) > 0 && (
-        <View style={[s.panel, { borderColor: C.amber }]}>
-          <Text style={{ color: C.amber, fontWeight: '700' }}>⚠️ {d?.lowStock} product(s) need restocking</Text>
-        </View>
+        <Banner tone="warn" icon="alert-circle-outline"
+          text={`${d?.lowStock} product(s) need restocking`} />
       )}
 
       {/* Margin (P1-A). Shown only when the server had a cost basis to compute
@@ -1771,52 +1797,36 @@ function OwnerDashboard({ shop, onSettings, onCoupons, onSuppliers, onPlans, onR
         </View>
       )}
 
-      {/* Phase 2 quick links */}
-      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginTop: 4 }}>
-        <TouchableOpacity style={s.linkCard} onPress={onCoupons}>
-          <Ionicons name="ticket-outline" size={20} color={C.green} />
-          <Text style={s.linkCardText}>Offers & Coupons</Text>
-          <LinkChevron />
-        </TouchableOpacity>
-        <TouchableOpacity style={s.linkCard} onPress={onPurchases}>
-          <Ionicons name="cart-outline" size={20} color={C.green} />
-          <Text style={s.linkCardText}>Purchases &amp; cost</Text>
-          <LinkChevron />
-        </TouchableOpacity>
-        <TouchableOpacity style={s.linkCard} onPress={onReturns}>
-          <Ionicons name="arrow-undo-outline" size={20} color={C.green} />
-          <Text style={s.linkCardText}>Returns</Text>
-          <LinkChevron />
-        </TouchableOpacity>
-        <TouchableOpacity style={s.linkCard} onPress={onVerify}>
-          <Ionicons name="shield-checkmark-outline" size={20} color={shop.verified ? C.blue : C.green} />
-          <Text style={s.linkCardText}>{shop.verified ? 'Verified shop' : 'Get verified'}</Text>
-          <LinkChevron />
-        </TouchableOpacity>
-        <TouchableOpacity style={s.linkCard} onPress={onAudit}>
-          <Ionicons name="document-text-outline" size={20} color={C.green} />
-          <Text style={s.linkCardText}>Activity log</Text>
-          <LinkChevron />
-        </TouchableOpacity>
-        <TouchableOpacity style={s.linkCard} onPress={onSuppliers}>
-          <Ionicons name="business-outline" size={20} color={C.green} />
-          <Text style={s.linkCardText}>Suppliers</Text>
-          <LinkChevron />
-        </TouchableOpacity>
-      </View>
-      <View style={{ flexDirection: 'row', gap: 10, marginTop: 10 }}>
-        <TouchableOpacity style={s.linkCard} onPress={onReports}>
-          <Ionicons name="bar-chart-outline" size={20} color={C.green} />
-          <Text style={s.linkCardText}>Daily Reports{shop.plan !== 'pro' ? ' 🔒' : ''}</Text>
-          <LinkChevron />
-        </TouchableOpacity>
-        <TouchableOpacity style={s.linkCard} onPress={onPlans}>
-          <Ionicons name={shop.plan === 'pro' ? 'star' : 'arrow-up-circle-outline'}
-            size={20} color={shop.plan === 'pro' ? C.amber : C.green} />
-          <Text style={s.linkCardText}>{shop.plan === 'pro' ? 'My Plan' : 'Upgrade to Pro'}</Text>
-          <LinkChevron />
-        </TouchableOpacity>
-      </View>
+      {/* Phase 2 quick links. Was two hand-split rows — a 6 + 2 that only
+          looked balanced on the phone it was written on. ActionGrid fits as
+          many columns as the window genuinely takes (3-6). Every destination
+          is unchanged. */}
+      <ActionGrid>
+        <QuickAction icon="ticket-outline" label="Offers & Coupons" onPress={onCoupons} />
+        <QuickAction icon="cart-outline" label="Purchases & cost" onPress={onPurchases} />
+        <QuickAction icon="arrow-undo-outline" label="Returns" onPress={onReturns} />
+        <QuickAction
+          icon="shield-checkmark-outline"
+          label={shop.verified ? 'Verified shop' : 'Get verified'}
+          onPress={onVerify}
+          colors={shop.verified ? [C.blue, C.blue] : undefined}
+        />
+        <QuickAction icon="document-text-outline" label="Activity log" onPress={onAudit} />
+        <QuickAction icon="business-outline" label="Suppliers" onPress={onSuppliers} />
+        {/* The padlock stays in the label: it is the only thing telling a free
+            shop why the screen it lands on will ask for money. */}
+        <QuickAction
+          icon="bar-chart-outline"
+          label={`Daily Reports${shop.plan !== 'pro' ? ' 🔒' : ''}`}
+          onPress={onReports}
+        />
+        <QuickAction
+          icon={shop.plan === 'pro' ? 'star' : 'arrow-up-circle-outline'}
+          label={shop.plan === 'pro' ? 'My Plan' : 'Upgrade to Pro'}
+          onPress={onPlans}
+          colors={shop.plan === 'pro' ? [C.amber, C.amber] : undefined}
+        />
+      </ActionGrid>
     </ScrollView>
   );
 }
@@ -1913,7 +1923,7 @@ function OwnerReports({ plan, currency, onBack, onUpgrade }: {
         </View>
       ) : (
         <ScrollView contentContainerStyle={s.body}>
-          {loading && <ActivityIndicator color={C.green} style={{ marginTop: 20 }} />}
+          {loading && <LoadingState />}
           {data && scope === 'basic' && (
             <>
               <View style={{ flexDirection: 'row', gap: 10 }}>
@@ -2035,7 +2045,7 @@ function OwnerCoupons({ onBack }: { onBack: () => void }) {
         </View>
 
         <Text style={s.sectionLabel}>Active coupons</Text>
-        {loading && <ActivityIndicator color={C.green} />}
+        {loading && <LoadingState />}
         {!loading && coupons.length === 0 && <Empty icon="pricetag-outline" text="No coupons yet." />}
         {coupons.map((c2) => (
           <View key={c2.id} style={s.card}>
@@ -2102,7 +2112,7 @@ function OwnerSuppliers({ onBack }: { onBack: () => void }) {
         </View>
 
         <Text style={s.sectionLabel}>My suppliers</Text>
-        {loading && <ActivityIndicator color={C.green} />}
+        {loading && <LoadingState />}
         {!loading && suppliers.length === 0 && <Empty icon="cube-outline" text="No suppliers yet." />}
         {suppliers.map((sup) => (
           <View key={sup.id} style={s.card}>
@@ -2161,17 +2171,24 @@ function OwnerOrders() {
       </ScrollView>
       <ScrollView contentContainerStyle={s.body}
         refreshControl={<RefreshControl refreshing={loading} onRefresh={() => load(filter)} tintColor={C.green} />}>
-        {loading && <ActivityIndicator color={C.green} style={{ marginTop: 16 }} />}
+        {loading && <LoadingState />}
         {!loading && orders.length === 0 && <Empty icon="receipt-outline" text={`No ${filter} orders.`} />}
         {orders.map((o) => (
-          <TouchableOpacity key={o.id} style={s.card} onPress={() => setOpen(o.id)}>
-            <View style={{ flex: 1 }}>
-              <Text style={s.cardTitle}>{o.customerName || 'Customer'}</Text>
-              <Text style={s.cardSub}>{o.id.slice(0, 8).toUpperCase()} · {formatINR(o.total)}</Text>
-              <StatusPill status={o.status} />
-            </View>
-            <Ionicons name="chevron-forward" size={20} color={C.sub} />
-          </TouchableOpacity>
+          <TxnRow
+            key={o.id}
+            icon="receipt-outline"
+            title={o.customerName || 'Customer'}
+            sub={`${o.id.slice(0, 8).toUpperCase()} · ${orderStamp(o.createdAt)}`}
+            // Was formatINR — a hardcoded ₹ on the OWNER's own list, while the
+            // customer's list beside it already honoured o.currency. A shop
+            // configured in any other currency was shown rupees for its own
+            // takings.
+            amount={formatMoney(o.total, o.currency || '₹')}
+            onPress={() => setOpen(o.id)}
+            right={<Ionicons name="chevron-forward" size={20} color={C.sub} />}
+          >
+            <StatusPill status={o.status} />
+          </TxnRow>
         ))}
       </ScrollView>
     </>
@@ -2404,7 +2421,7 @@ function OwnerProducts({ shop }: { shop: SB.Shop }) {
     finally { setSeeding(false); }
   };
 
-  if (edit === 'bulk') return <BulkAdd onDone={() => { setEdit(null); load(); }} />;
+  if (edit === 'bulk') return <BulkAdd currency={shop.currency} onDone={() => { setEdit(null); load(); }} />;
   if (edit === 'stock') return <StockScreen currency={shop.currency} onBack={() => { setEdit(null); load(); }} />;
   if (edit) return <ProductEditor product={edit === 'new' ? null : edit} currency={shop.currency} onDone={() => { setEdit(null); load(); }} />;
 
@@ -2431,7 +2448,7 @@ function OwnerProducts({ shop }: { shop: SB.Shop }) {
           <Text style={s.outlineBtnText}>Stock</Text>
         </TouchableOpacity>
       )}
-      {loading && <ActivityIndicator color={C.green} style={{ marginTop: 16 }} />}
+      {loading && <LoadingState />}
       {!loading && products.length === 0 && <Empty icon="pricetags-outline" text="No products yet." />}
       {products.map((p) => (
         <TouchableOpacity key={p.id} style={s.card} onPress={() => setEdit(p)}>
@@ -3051,7 +3068,7 @@ function BillScreen({ orderId, onBack }: { orderId: string; onBack: () => void }
     return (
       <>
         <SubHeader title="Bill" onBack={onBack} />
-        <ActivityIndicator color={C.green} style={{ marginTop: 24 }} />
+        <LoadingState />
       </>
     );
   }
@@ -3279,7 +3296,7 @@ function StockScreen({ currency, onBack }: { currency?: string; onBack: () => vo
             ⚠️ {lowCount} product(s) at or below their reorder level.
           </Text>
         )}
-        {loading && <ActivityIndicator color={C.green} style={{ marginTop: 16 }} />}
+        {loading && <LoadingState />}
         {!loading && rows.length === 0 && (
           <Empty icon="cube-outline" text="No counted products. Turn on “Count stock” on a product to start." />
         )}
@@ -3301,7 +3318,8 @@ function StockScreen({ currency, onBack }: { currency?: string; onBack: () => vo
   );
 }
 
-function BulkAdd({ onDone }: { onDone: () => void }) {
+function BulkAdd({ currency, onDone }: { currency?: string; onDone: () => void }) {
+  const money = (n: number) => formatMoney(n, currency || '₹');
   const [text, setText] = useState('');
   const [busy, setBusy] = useState(false);
   const parsed = useMemo(() => parseBulkProducts(text), [text]);
@@ -3339,7 +3357,7 @@ function BulkAdd({ onDone }: { onDone: () => void }) {
                   <View style={{ flex: 1 }}>
                     <Text style={s.cardTitle}>{p.name}{p.unit ? ` · ${p.unit}` : ''}{p.brand ? ` (${p.brand})` : ''}</Text>
                   </View>
-                  <Text style={s.price}>{formatINR(p.price)}</Text>
+                  <Text style={s.price}>{money(p.price)}</Text>
                 </View>
               ))}
               {parsed.length > 8 && <Text style={s.hint}>…and {parsed.length - 8} more</Text>}
@@ -3354,7 +3372,8 @@ function BulkAdd({ onDone }: { onDone: () => void }) {
   );
 }
 
-function OwnerKhata() {
+function OwnerKhata({ currency }: { currency?: string }) {
+  const money = (n: number) => formatMoney(n, currency || '₹');
   const [loading, setLoading] = useState(true);
   const [customers, setCustomers] = useState<SB.CustomerPending[]>([]);
   const [sel, setSel] = useState<SB.CustomerPending | null>(null);
@@ -3371,7 +3390,7 @@ function OwnerKhata() {
   }, []);
   useEffect(() => { load(); }, [load]);
 
-  if (sel) return <KhataDetail customer={sel} onBack={() => { setSel(null); load(); }} />;
+  if (sel) return <KhataDetail customer={sel} currency={currency} onBack={() => { setSel(null); load(); }} />;
 
   const saveCustomer = async () => {
     const name = newName.trim();
@@ -3411,7 +3430,7 @@ function OwnerKhata() {
       {/* Walk-ins: the customer standing at the counter who has no VaultChat
           account. Without this the khata only ever listed people who already
           had one, so a shop could not start a tab for anybody new. */}
-      {counter && <CounterSale onDone={() => setCounter(false)} />}
+      {counter && <CounterSale currency={currency} onDone={() => setCounter(false)} />}
       {!adding && !counter ? (
         <View style={{ flexDirection: 'row', gap: 8 }}>
           <TouchableOpacity style={[s.outlineBtn, { flex: 1 }]} onPress={() => setAdding(true)}>
@@ -3448,43 +3467,43 @@ function OwnerKhata() {
           </View>
         </View>
       ) : null}
-      {loading && <ActivityIndicator color={C.green} style={{ marginTop: 16 }} />}
+      {loading && <LoadingState />}
       {!loading && customers.length === 0 && <Empty icon="people-outline" text="No customer ledgers yet." />}
 
       {/* What the owner cannot see from a list sorted by amount: who has gone
           quiet. A ₹400 debt untouched for four months is a worse sign than a
           ₹4,000 one paid down last week. */}
       {owed.length > 0 && (
-        <View style={[s.panel, { borderColor: C.amber }]}>
-          <Text style={{ color: C.amber, fontWeight: '700' }}>
-            {owed.length} customer{owed.length > 1 ? 's owe' : ' owes'} you {formatINR(owedTotal)}
-          </Text>
-          {stale.length > 0 && (
-            <Text style={s.hint}>
-              {stale.length} {stale.length > 1 ? 'have' : 'has'} not paid in over 30 days
-              {' '}— longest {stale[0].staleDays} days.
-            </Text>
-          )}
-        </View>
+        <Banner
+          tone="warn" icon="wallet-outline"
+          text={`${owed.length} customer${owed.length > 1 ? 's owe' : ' owes'} you ${money(owedTotal)}`}
+          sub={stale.length > 0
+            ? `${stale.length} ${stale.length > 1 ? 'have' : 'has'} not paid in over 30 days — longest ${stale[0].staleDays} days.`
+            : undefined}
+        />
       )}
 
       {customers.map((c) => (
-        <TouchableOpacity key={c.customerId} style={s.card} onPress={() => setSel(c)}>
-          <View style={s.shopIcon}><Ionicons name="person" size={20} color={C.green} /></View>
-          <View style={{ flex: 1 }}>
-            <Text style={s.cardTitle}>{c.customerName || 'Customer'}</Text>
-            {!!c.mobile && <Text style={s.hint}>{c.mobile}</Text>}
-            <Text style={[s.price, { color: c.pending > 0 ? C.danger : C.green }]}>
-              {c.pending > 0 ? `Pending ${formatINR(c.pending)}` : 'Settled'}
+        <TxnRow
+          key={c.customerId}
+          icon="person"
+          iconTone={c.pending > 0 ? 'warn' : 'good'}
+          title={c.customerName || 'Customer'}
+          sub={c.mobile || undefined}
+          // The balance moves to the money column, where it aligns with every
+          // other figure on the screen instead of sitting inline under the name.
+          amount={c.pending > 0 ? money(c.pending) : 'Settled'}
+          amountTone={c.pending > 0 ? 'bad' : 'good'}
+          amountNote={c.pending > 0 ? 'Pending' : undefined}
+          onPress={() => setSel(c)}
+          right={<Ionicons name="chevron-forward" size={20} color={C.sub} />}
+        >
+          {c.pending > 0 && (c.staleDays ?? 0) > 30 && (
+            <Text style={s.staleWarn}>
+              {c.lastPaymentAt ? `No payment in ${c.staleDays} days` : `Never paid — ${c.staleDays} days`}
             </Text>
-            {c.pending > 0 && (c.staleDays ?? 0) > 30 && (
-              <Text style={s.staleWarn}>
-                {c.lastPaymentAt ? `No payment in ${c.staleDays} days` : `Never paid — ${c.staleDays} days`}
-              </Text>
-            )}
-          </View>
-          <Ionicons name="chevron-forward" size={20} color={C.sub} />
-        </TouchableOpacity>
+          )}
+        </TxnRow>
       ))}
     </ScrollView>
   );
@@ -3501,7 +3520,8 @@ function OwnerKhata() {
 // Deliberately NOT a ledger entry: no identity is created and no balance
 // exists. The name and phone go on the DOCUMENT only, because that is all a
 // stranger's details are for.
-function CounterSale({ onDone }: { onDone: () => void }) {
+function CounterSale({ currency, onDone }: { currency?: string; onDone: () => void }) {
+  const money = (n: number) => formatMoney(n, currency || '₹');
   const [name, setName] = useState('');
   const [phone, setPhone] = useState('');
   const [items, setItems] = useState([{ name: '', qty: '1', price: '', unit: '' }]);
@@ -3575,7 +3595,7 @@ function CounterSale({ onDone }: { onDone: () => void }) {
         <Ionicons name="add-circle-outline" size={18} color={C.green} />
         <Text style={{ color: C.green, fontWeight: '700', fontSize: 13 }}>Add another product</Text>
       </TouchableOpacity>
-      <Text style={s.price}>Total {formatINR(total)}</Text>
+      <Text style={s.price}>Total {money(total)}</Text>
       <View style={{ flexDirection: 'row', gap: 8, marginTop: 8 }}>
         <TouchableOpacity style={[s.primaryBtn, { flex: 1 }, busy && { opacity: 0.6 }]}
           disabled={busy} onPress={sell}>
@@ -3589,7 +3609,8 @@ function CounterSale({ onDone }: { onDone: () => void }) {
   );
 }
 
-function KhataDetail({ customer, onBack }: { customer: SB.CustomerPending; onBack: () => void }) {
+function KhataDetail({ customer, currency, onBack }: { customer: SB.CustomerPending; currency?: string; onBack: () => void }) {
+  const money = (n: number) => formatMoney(n, currency || '₹');
   const [loading, setLoading] = useState(true);
   const [ledger, setLedger] = useState<SB.Ledger | null>(null);
   const [amount, setAmount] = useState('');
@@ -3666,9 +3687,9 @@ function KhataDetail({ customer, onBack }: { customer: SB.CustomerPending; onBac
       if (breach) {
         Alert.alert(
           'Over credit limit',
-          `${customer.customerName || 'This customer'} owes ${formatINR(breach.pending)}. `
-          + `This entry takes them to ${formatINR(breach.afterEntry)}, past their `
-          + `${formatINR(breach.limit)} limit.`,
+          `${customer.customerName || 'This customer'} owes ${money(breach.pending)}. `
+          + `This entry takes them to ${money(breach.afterEntry)}, past their `
+          + `${money(breach.limit)} limit.`,
           [{ text: 'Cancel', style: 'cancel' },
            { text: 'Add anyway', style: 'destructive', onPress: () => add(type, true) }],
         );
@@ -3729,7 +3750,7 @@ function KhataDetail({ customer, onBack }: { customer: SB.CustomerPending; onBac
       else await SB.setCreditLimit(customer.customerId, v);
       setLimit(v); setLimitOpen(false);
       Alert.alert('Credit limit saved',
-        v > 0 ? `${customer.customerName || 'This customer'} can owe up to ${formatINR(v)}.`
+        v > 0 ? `${customer.customerName || 'This customer'} can owe up to ${money(v)}.`
               : 'No ceiling — entries will never be questioned.');
     } catch (e: any) { Alert.alert('Could not save', e?.message ?? 'Try again'); }
     finally { setBusy(false); }
@@ -3752,8 +3773,8 @@ function KhataDetail({ customer, onBack }: { customer: SB.CustomerPending; onBac
         refreshControl={<RefreshControl refreshing={loading} onRefresh={load} tintColor={C.green} />}>
         {ledger && (
           <View style={{ flexDirection: 'row', gap: 10 }}>
-            <StatCard label="Pending" value={formatINR(ledger.pending)} tone="danger" />
-            <StatCard label="Paid" value={formatINR(ledger.totalPaid)} tone="green" />
+            <StatCard label="Pending" value={money(ledger.pending)} tone="danger" />
+            <StatCard label="Paid" value={money(ledger.totalPaid)} tone="green" />
           </View>
         )}
         {(ledger?.pending ?? 0) > 0 && (
@@ -3773,7 +3794,7 @@ function KhataDetail({ customer, onBack }: { customer: SB.CustomerPending; onBac
             <Ionicons name="speedometer-outline" size={18} color={C.green} />
             <Text style={s.outlineBtnText}>
               {limit == null ? '  Credit limit'
-                : limit > 0 ? `  Credit limit ${formatINR(limit)}` : '  Credit limit — none set'}
+                : limit > 0 ? `  Credit limit ${money(limit)}` : '  Credit limit — none set'}
             </Text>
           </TouchableOpacity>
         ) : (
@@ -3840,7 +3861,7 @@ function KhataDetail({ customer, onBack }: { customer: SB.CustomerPending; onBac
           {items.length > 0 ? (
             <View style={[s.input, { justifyContent: 'center' }]}>
               <Text style={{ color: C.text, fontWeight: '700' }}>
-                Total {formatINR(itemsTotal)}
+                Total {money(itemsTotal)}
                 <Text style={{ color: C.sub, fontWeight: '400' }}> · from {items.length} item{items.length > 1 ? 's' : ''}</Text>
               </Text>
             </View>
@@ -4236,35 +4257,8 @@ function InvoiceView({ orderId, onBack }: { orderId: string; onBack: () => void 
 
   const sharePdf = async () => {
     if (!inv) return;
-    const money = (n: number) => formatMoney(n, inv.currency);
-    const taxRows = inv.taxBreakdown.map((b) =>
-      `<p style="text-align:right;margin:2px 0;color:#333">${b.label}: ${money(b.amount)}</p>`).join('');
-    const taxIds = Object.entries(inv.business.tax ?? {})
-      .filter(([, v]) => v && v !== true).map(([k, v]) => `${k.toUpperCase()}: ${v}`).join(' · ');
-    const rows = inv.items.map((it) =>
-      `<tr><td style="padding:6px 0">${it.name}${it.brand ? ` (${it.brand})` : ''}${it.unit ? ` · ${it.unit}` : ''}</td>
-       <td style="text-align:center">${it.qty}</td>
-       <td style="text-align:right">${money(it.price * it.qty)}</td></tr>`).join('');
-    const html = `<html><head><meta name="viewport" content="width=device-width,initial-scale=1"></head>
-      <body style="font-family:-apple-system,Roboto,sans-serif;color:#111;padding:28px">
-        <h2 style="color:#0B7A3B;margin:0">${inv.business.name}</h2>
-        <p style="color:#666;margin:4px 0">${inv.business.address}${inv.business.phone ? ` · ${inv.business.phone}` : ''}</p>
-        ${taxIds ? `<p style="color:#666;margin:2px 0;font-size:13px">${taxIds}</p>` : ''}
-        <p style="margin:12px 0 4px"><b>${inv.invoiceNo}</b> · ${new Date(inv.createdAt).toLocaleDateString(dateLocale(inv.country))}</p>
-        <p style="color:#666;margin:0 0 14px">Billed to: ${inv.customerName || 'Customer'}</p>
-        <table style="width:100%;border-collapse:collapse;font-size:14px">
-          <thead><tr style="border-bottom:1px solid #ddd"><th align="left">Item</th><th>Qty</th><th align="right">Amount</th></tr></thead>
-          <tbody>${rows}</tbody>
-        </table>
-        <hr style="margin:14px 0;border:none;border-top:1px solid #eee"/>
-        <p style="text-align:right;margin:2px 0">Subtotal: ${money(inv.subtotal)}</p>
-        ${inv.discount > 0 ? `<p style="text-align:right;margin:2px 0;color:#0B7A3B">Discount: − ${money(inv.discount)}</p>` : ''}
-        ${taxRows}
-        <h3 style="text-align:right;margin:8px 0">Total: ${money(inv.total)}</h3>
-        <p style="color:#888;font-size:12px;text-align:center;margin-top:22px">Thank you for shopping with us!</p>
-      </body></html>`;
     try {
-      const { uri } = await Print.printToFileAsync({ html });
+      const { uri } = await Print.printToFileAsync({ html: invoiceHtml(fromInvoice(inv)) });
       if (await Sharing.isAvailableAsync()) await Sharing.shareAsync(uri, { mimeType: 'application/pdf', dialogTitle: inv.invoiceNo });
     } catch (e: any) { Alert.alert('Error', e?.message ?? 'Could not create the invoice PDF'); }
   };
@@ -4275,7 +4269,7 @@ function InvoiceView({ orderId, onBack }: { orderId: string; onBack: () => void 
       <SubHeader title={t('orders.invoice')} onBack={onBack}
         right={inv ? { icon: 'share-social-outline', onPress: sharePdf } : undefined} />
       <ScrollView contentContainerStyle={s.body}>
-        {loading && <ActivityIndicator color={C.green} style={{ marginTop: 24 }} />}
+        {loading && <LoadingState />}
         {inv && (
           <>
             <View style={s.panel}>
@@ -4285,12 +4279,11 @@ function InvoiceView({ orderId, onBack }: { orderId: string; onBack: () => void 
               <Text style={s.panelTitle}>{inv.business.name}</Text>
               {!!inv.business.address && <Text style={s.cardSub}>{inv.business.address}</Text>}
               {/* Only the tax identifiers the shop actually filled in — a
-                  blank statutory field on a retail bill reads as an error. */}
-              {Object.entries(inv.business.tax ?? {})
-                .filter(([, v]) => v && v !== true)
-                .map(([k, v]) => (
-                  <Text key={k} style={s.cardSub}>{k.toUpperCase()}: {String(v)}</Text>
-                ))}
+                  blank statutory field on a retail bill reads as an error.
+                  Same helper the PDF uses, so the two cannot filter differently. */}
+              {taxIdentifiers(inv.business.tax).map(({ key, value }) => (
+                <Text key={key} style={s.cardSub}>{key}: {value}</Text>
+              ))}
               <Text style={s.cardSub}>
                 {inv.invoiceNo} · {new Date(inv.createdAt).toLocaleDateString(dateLocale(inv.country))}
               </Text>
@@ -4394,14 +4387,17 @@ function Chip({ label, icon, active, onPress }: { label: string; icon: string; a
   );
 }
 
+/**
+ * Kept as a name because four other screens call it, but it is now the shared
+ * glass StatTile underneath — so the dashboard's TileGrid and the ledger's
+ * stat row cannot drift into two different tile designs.
+ *
+ * The tone names are the Shop Book vocabulary mapped onto the shared semantic
+ * one; 'navy' has no semantic twin and reads as informational.
+ */
 function StatCard({ label, value, tone }: { label: string; value: string; tone: 'green' | 'navy' | 'amber' | 'danger' }) {
-  const color = tone === 'green' ? C.green : tone === 'navy' ? C.navy : tone === 'amber' ? C.amber : C.danger;
-  return (
-    <View style={[s.statCard, { flex: 1 }]}>
-      <Text style={[s.statValue, { color }]}>{value}</Text>
-      <Text style={s.statLabel}>{label}</Text>
-    </View>
-  );
+  const t = tone === 'green' ? 'good' : tone === 'navy' ? 'info' : tone === 'amber' ? 'warn' : 'bad';
+  return <StatTile label={label} value={value} tone={t} style={{ flex: 1 }} />;
 }
 
 // Directions to the shop via the app's own turn-by-turn (Valhalla) — the same
@@ -4446,9 +4442,20 @@ function ToggleRow({ label, value, onChange }: { label: string; value: boolean; 
 
 function StatusPill({ status, big }: { status: OrderStatus; big?: boolean }) {
   const done = status === 'completed' || status === 'collected';
-  const color = isTerminalFailure(status) ? C.danger : done ? C.green : C.blue;
+  const fail = isTerminalFailure(status);
+  const color = fail ? C.danger : done ? C.green : C.blue;
+  // Was `color + '20'` — a 12.5% alpha wash of the foreground. On an opaque
+  // white card that was merely weak; on a translucent glass pane the ground
+  // shows through it and the pill all but disappears. The soft tokens are
+  // solid fills chosen to clear AA against their own foreground.
+  const bg = fail ? C.dangerSoft : done ? C.greenSoft : C.infoSoft;
   return (
-    <View style={[s.pill, { backgroundColor: color + '20' }, big && { alignSelf: 'flex-start', marginBottom: 12 }]}>
+    <View
+      style={[s.pill, { backgroundColor: bg }, big && { alignSelf: 'flex-start', marginBottom: 12 }]}
+      accessible accessibilityLabel={`Status: ${orderStatusLabel(status)}`}
+    >
+      {/* The dot is not decorative: it is the second, non-colour cue that this
+          is a status and not a label. */}
       <View style={[s.pillDot, { backgroundColor: color }]} />
       <Text style={[s.pillText, { color }, big && { fontSize: 15 }]}>{orderStatusLabel(status)}</Text>
     </View>
@@ -4464,7 +4471,72 @@ function AvailabilityTag({ a, altName }: { a: ItemAvailability; altName: string 
 
 // onShare is owner-only: a customer may read their ledger but cannot issue the
 // shop's numbered documents, so the customer view simply omits the prop.
-function LedgerRow({ entry, onShare }: { entry: SB.LedgerEntry; onShare?: () => void }) {
+/**
+ * The transaction row. Khata customers and ledger entries were each hand-rolling
+ * this same shape — icon bubble, title, sub, right-aligned money — with the
+ * amount drifting between styles. One row, one money alignment.
+ *
+ * `children` carries whatever the caller needs under the sub line: ledger item
+ * lines, a staleness warning. That is the only variation the two callers had.
+ */
+function TxnRow({
+  icon, iconTone = 'brand', title, sub, amount, amountTone = 'plain', amountNote,
+  right, onPress, children,
+}: {
+  icon: keyof typeof Ionicons.glyphMap;
+  iconTone?: 'brand' | 'good' | 'bad' | 'warn';
+  title: string;
+  sub?: string;
+  amount?: string;
+  amountTone?: 'plain' | 'good' | 'bad';
+  /** What the figure MEANS, printed under it. Without this the colour is the
+   *  only thing saying "pending" rather than "paid", and colour alone is not
+   *  an accessible carrier of meaning. */
+  amountNote?: string;
+  right?: React.ReactNode;
+  onPress?: () => void;
+  children?: React.ReactNode;
+}) {
+  const fg = iconTone === 'good' ? C.good : iconTone === 'bad' ? C.danger
+    : iconTone === 'warn' ? C.amber : C.green;
+  const bg = iconTone === 'good' ? C.goodSoft : iconTone === 'bad' ? C.dangerSoft
+    : iconTone === 'warn' ? C.warnSoft : C.greenSoft;
+  const amtColor = amountTone === 'good' ? C.good : amountTone === 'bad' ? C.danger : C.text;
+  const Wrap: any = onPress ? TouchableOpacity : View;
+  return (
+    <Wrap
+      style={[s.card, { alignItems: 'flex-start' }]}
+      onPress={onPress}
+      accessibilityRole={onPress ? 'button' : undefined}
+      accessible
+      // The amount is part of the row's meaning, so it belongs in the label —
+      // a screen reader that reads the name and not the balance is useless on
+      // a khata.
+      accessibilityLabel={[title, sub, amountNote, amount].filter(Boolean).join(', ')}
+    >
+      <View style={[s.shopIcon, { backgroundColor: bg }]}>
+        <Ionicons name={icon} size={20} color={fg} />
+      </View>
+      <View style={{ flex: 1, minWidth: 0 }}>
+        <Text style={s.cardTitle} numberOfLines={1}>{title}</Text>
+        {sub ? <Text style={s.cardSub}>{sub}</Text> : null}
+        {children}
+      </View>
+      <View style={{ alignItems: 'flex-end', gap: 6 }}>
+        {amount ? (
+          <Text style={[s.price, { color: amtColor, marginTop: 0 }]} numberOfLines={1}>{amount}</Text>
+        ) : null}
+        {amountNote ? <Text style={s.amountNote}>{amountNote}</Text> : null}
+        {right}
+      </View>
+    </Wrap>
+  );
+}
+
+// LedgerEntry carries no currency of its own, so the shop's travels in from
+// the parent. Defaulting to ₹ keeps every existing caller correct.
+function LedgerRow({ entry, currency, onShare }: { entry: SB.LedgerEntry; currency?: string; onShare?: () => void }) {
+  const money = (n: number) => formatMoney(n, currency || '₹');
   const isPay = entry.type === 'payment';
   const at = new Date(entry.createdAt);
   // Date AND time. "₹500 on 14 Aug" is not something either side can reconcile
@@ -4472,52 +4544,87 @@ function LedgerRow({ entry, onShare }: { entry: SB.LedgerEntry; onShare?: () => 
   const stamp = `${at.toLocaleDateString(dateLocale())} · ${at.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
   const items = entry.items ?? [];
   return (
-    <View style={[s.card, { alignItems: 'flex-start' }]}>
-      <View style={{ flex: 1 }}>
-        <Text style={s.cardTitle}>{isPay ? 'Payment received' : 'Purchase'}</Text>
-        <Text style={s.cardSub}>{stamp}{entry.remark ? ` · ${entry.remark}` : ''}</Text>
-        {items.map((it, i) => (
-          <Text key={i} style={s.ledgerItemLine} numberOfLines={1}>
-            {it.name}{it.unit ? ` (${it.unit})` : ''} · {it.qty} × {formatINR(it.price)}
+    <TxnRow
+      icon={isPay ? 'arrow-down-circle-outline' : 'bag-handle-outline'}
+      iconTone={isPay ? 'good' : 'warn'}
+      title={isPay ? 'Payment received' : 'Purchase'}
+      sub={`${stamp}${entry.remark ? ` · ${entry.remark}` : ''}`}
+      // A payment reduces what is owed and a purchase increases it; the sign
+      // and the colour say the same thing twice on purpose, because colour
+      // alone is not an accessible carrier of meaning.
+      amount={`${isPay ? '−' : '+'}${money(entry.amount)}`}
+      amountTone={isPay ? 'good' : 'bad'}
+      right={onShare ? (
+        <TouchableOpacity onPress={onShare} hitSlop={8}
+          accessibilityRole="button"
+          accessibilityLabel={isPay ? 'Share receipt' : 'Share bill'}
+          style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+          <Ionicons name="share-outline" size={14} color={C.green} />
+          <Text style={{ color: C.green, fontSize: 12, fontWeight: '700' }}>
+            {isPay ? 'Receipt' : 'Bill'}
           </Text>
-        ))}
-      </View>
-      <View style={{ alignItems: 'flex-end', gap: 6 }}>
-        <Text style={[s.price, { color: isPay ? C.green : C.danger }]}>
-          {isPay ? '−' : '+'}{formatINR(entry.amount)}
+        </TouchableOpacity>
+      ) : undefined}
+    >
+      {items.map((it, i) => (
+        <Text key={i} style={s.ledgerItemLine} numberOfLines={1}>
+          {it.name}{it.unit ? ` (${it.unit})` : ''} · {it.qty} × {money(it.price)}
         </Text>
-        {onShare && (
-          <TouchableOpacity onPress={onShare} hitSlop={8}
-            style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-            <Ionicons name="share-outline" size={14} color={C.green} />
-            <Text style={{ color: C.green, fontSize: 12, fontWeight: '700' }}>
-              {isPay ? 'Receipt' : 'Bill'}
-            </Text>
-          </TouchableOpacity>
-        )}
-      </View>
-    </View>
+      ))}
+    </TxnRow>
   );
 }
 
 function Empty({ icon, text }: { icon: keyof typeof Ionicons.glyphMap; text: string }) {
+  return <EmptyState icon={icon} title={text} />;
+}
+
+/**
+ * The one advisory strip. Replaces four hand-rolled
+ * `[s.panel, { borderColor: C.amber }]` blocks that each re-stated the same
+ * layout slightly differently.
+ */
+function Banner({ tone, text, sub, icon, onPress }: {
+  tone: 'warn' | 'bad' | 'info';
+  text: string; sub?: string;
+  icon?: keyof typeof Ionicons.glyphMap;
+  onPress?: () => void;
+}) {
+  const fg = tone === 'warn' ? C.amber : tone === 'bad' ? C.danger : C.blue;
+  const bg = tone === 'warn' ? C.warnSoft : tone === 'bad' ? C.dangerSoft : C.infoSoft;
+  const Wrap: any = onPress ? TouchableOpacity : View;
   return (
-    <View style={s.empty}>
-      <Ionicons name={icon} size={40} color={C.border} />
-      <Text style={s.emptyText}>{text}</Text>
-    </View>
+    <Wrap
+      style={[s.banner, { backgroundColor: bg, borderColor: fg }]}
+      onPress={onPress}
+      accessibilityRole={onPress ? 'button' : undefined}
+      accessible
+      accessibilityLabel={sub ? `${text}. ${sub}` : text}
+    >
+      {icon ? <Ionicons name={icon} size={20} color={fg} /> : null}
+      <View style={{ flex: 1 }}>
+        <Text style={[s.bannerText, { color: fg }]}>{text}</Text>
+        {sub ? <Text style={s.bannerSub}>{sub}</Text> : null}
+      </View>
+      {onPress ? <Ionicons name="chevron-forward" size={18} color={fg} /> : null}
+    </Wrap>
   );
 }
 
 // ── styles ─────────────────────────────────────────────────────────
-const s = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: C.bg },
+/**
+ * The stylesheet, over a palette. Both variants are built ONCE at module load —
+ * StyleSheet.create is not something to run per render — and the active one is
+ * chosen by applyScheme() below.
+ */
+const makeStyles = (C: ReturnType<typeof makeC>) => StyleSheet.create({
+  screen: { flex: 1, backgroundColor: C.groundMid },
   header: {
-    flexDirection: 'row', alignItems: 'center', backgroundColor: C.green,
-    paddingTop: 48, paddingBottom: 14, paddingHorizontal: 14, gap: 6,
+    flexDirection: 'row', alignItems: 'center', backgroundColor: C.headerBg,
+    paddingBottom: 14, paddingHorizontal: 14, gap: 6,
   },
   hBtn: { width: 38, height: 38, borderRadius: 19, justifyContent: 'center', alignItems: 'center' },
-  headerTitle: { color: '#fff', fontSize: 20, fontWeight: '800' },
+  headerTitle: { color: C.headerFg, fontSize: 20, fontWeight: '800' },
   headerSub: { color: '#DCFCE7', fontSize: 12, marginTop: 1 },
   modeRow: { flexDirection: 'row', backgroundColor: C.greenDark, padding: 6, gap: 6 },
   modeBtn: {
@@ -4540,7 +4647,14 @@ const s = StyleSheet.create({
   },
   cartBadgeText: { color: '#fff', fontSize: 10, fontWeight: '800' },
 
-  body: { padding: 14, paddingBottom: 32 },
+  // Every screen's content container. The cap is the responsive change with
+  // the widest reach in the file: without it a khata list stretches a customer
+  // name and their balance to opposite edges of a 1200dp window, which is
+  // unreadable and looks broken. Same 632dp reading column Vault Finance uses.
+  body: {
+    padding: FIN_GUTTER, paddingBottom: 32,
+    width: '100%', maxWidth: C.contentMax, alignSelf: 'center',
+  },
 
   searchRow: {
     flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: C.card,
@@ -4568,7 +4682,7 @@ const s = StyleSheet.create({
   },
   cardTitle: { color: C.text, fontSize: 15, fontWeight: '700' },
   cardSub: { color: C.sub, fontSize: 12.5, marginTop: 2 },
-  price: { color: C.text, fontSize: 13.5, fontWeight: '700', marginTop: 4 },
+  price: { color: C.text, fontSize: 13.5, fontWeight: '700', marginTop: 4, ...TABULAR },
 
   badge: { alignSelf: 'flex-start', borderRadius: 6, paddingHorizontal: 8, paddingVertical: 2, marginTop: 6 },
   badgeDist: { backgroundColor: C.greenSoft, borderWidth: 1, borderColor: '#BBF7D0' },
@@ -4632,15 +4746,16 @@ const s = StyleSheet.create({
     backgroundColor: C.card, borderRadius: 12, padding: 14, marginTop: 8, borderWidth: 1, borderColor: C.border,
   },
   totalLabel: { color: C.sub, fontSize: 14, fontWeight: '600' },
-  totalValue: { color: C.text, fontSize: 18, fontWeight: '800' },
+  totalValue: { color: C.text, fontSize: 18, fontWeight: '800', ...TABULAR },
 
-  statGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginTop: 4 },
-  statCard: {
-    minWidth: '46%', backgroundColor: C.card, borderRadius: 14, padding: 14,
-    borderWidth: 1, borderColor: C.border,
+
+  banner: {
+    flexDirection: 'row', alignItems: 'center', gap: 10,
+    borderRadius: FIN_RADIUS.md, borderWidth: 1, borderLeftWidth: 3,
+    paddingVertical: 12, paddingHorizontal: 14, marginVertical: 8,
   },
-  statValue: { fontSize: 20, fontWeight: '800' },
-  statLabel: { color: C.sub, fontSize: 12, marginTop: 2 },
+  bannerText: { fontWeight: '700', fontSize: 13.5, lineHeight: 19 },
+  bannerSub: { color: C.sub, fontSize: 12, lineHeight: 17, marginTop: 3 },
 
   infoRow: {
     flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: C.card,
@@ -4660,7 +4775,7 @@ const s = StyleSheet.create({
   statusBtnText: { fontSize: 12.5, fontWeight: '700', color: C.text },
 
   filterBar: { backgroundColor: C.card, borderBottomWidth: 1, borderBottomColor: C.border, maxHeight: 50 },
-  filterChip: { paddingHorizontal: 14, paddingVertical: 8, marginVertical: 7, marginRight: 8, borderRadius: 18, backgroundColor: C.bg },
+  filterChip: { paddingHorizontal: 14, paddingVertical: 8, marginVertical: 7, marginRight: 8, borderRadius: 18, backgroundColor: C.chip },
   filterChipActive: { backgroundColor: C.green },
   filterChipText: { color: C.sub, fontWeight: '700', fontSize: 13 },
   filterChipTextActive: { color: '#fff' },
@@ -4675,8 +4790,6 @@ const s = StyleSheet.create({
   pillText: { fontSize: 12, fontWeight: '700' },
   availTag: { fontSize: 12.5, fontWeight: '600', marginTop: 4 },
 
-  empty: { alignItems: 'center', paddingVertical: 40, gap: 10 },
-  emptyText: { color: C.sub, fontSize: 13.5 },
 
   tabBar: {
     flexDirection: 'row', backgroundColor: C.card, borderTopWidth: 1, borderTopColor: C.border,
@@ -4718,15 +4831,8 @@ const s = StyleSheet.create({
   loyaltyTier: { color: '#93C5FD', fontSize: 13, fontWeight: '700', marginTop: 2 },
   loyaltySub: { color: '#CBD5E1', fontSize: 12, marginTop: 2 },
 
-  linkCard: {
-    // flexBasis 30% => 3 per row, then wrap. flex:1 crammed all six onto one
-    // row and each label wrapped one character per line.
-    flexGrow: 1, flexBasis: '30%', backgroundColor: C.card, borderRadius: 14,
-    padding: 16, alignItems: 'center', gap: 6, borderWidth: 1, borderColor: C.border,
-  },
-  linkCardText: { color: C.text, fontSize: 13, fontWeight: '700', textAlign: 'center' },
-  linkChevron: { position: 'absolute', top: 8, right: 8 },
   ledgerItemLine: { color: C.sub, fontSize: 12, marginTop: 2 },
+  amountNote: { color: C.sub, fontSize: 11, fontWeight: '600', marginTop: -3 },
   staleWarn: { color: C.amber, fontSize: 12, fontWeight: '600', marginTop: 2 },
 
   // ── Phase 2b ───────────────────────────────────────
@@ -4764,6 +4870,35 @@ const s = StyleSheet.create({
   },
   findProductText: { color: C.green, fontWeight: '700', fontSize: 13.5 },
   modalWrap: { flex: 1, backgroundColor: 'rgba(0,0,0,0.55)', justifyContent: 'center', padding: 26 },
-  modalCard: { backgroundColor: C.card, borderRadius: 18, padding: 20 },
+  // Solid, not glass: this sits over a 55% black scrim, where a translucent
+  // pane would let the dark through and drop the text under AA.
+  modalCard: { backgroundColor: C.cardSolid, borderRadius: 18, padding: 20 },
   modalTitle: { color: C.text, fontSize: 18, fontWeight: '800', textAlign: 'center' },
 });
+
+// ── theme wiring ──────────────────────────────────────────────────
+//
+// `C` and `s` are module-level LET bindings, not consts. Every one of the ~53
+// components dereferences them at RENDER time (`s.card`, `C.green`), never at
+// import time, so re-pointing them here re-themes the whole mini-app without
+// touching a single component. applyScheme is called during ShopBookScreen's
+// render and the tree is keyed on the scheme, so children always read the
+// palette that was just installed.
+//
+// ponytail: module-global, so two Shop Book instances could not show different
+// themes at once. There is exactly one, and it is a route — revisit only if
+// that stops being true.
+const LIGHT_C = makeC(FIN);
+const DARK_C = makeC(FIN_DARK);
+const LIGHT_S = makeStyles(LIGHT_C);
+const DARK_S = makeStyles(DARK_C);
+
+let C = LIGHT_C;
+let s = LIGHT_S;
+
+/** Point the palette + stylesheet at a scheme. Idempotent. */
+function applyScheme(scheme: 'light' | 'dark') {
+  const dark = scheme === 'dark';
+  C = dark ? DARK_C : LIGHT_C;
+  s = dark ? DARK_S : LIGHT_S;
+}

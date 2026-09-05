@@ -127,7 +127,7 @@ export default function Reports() {
 
 const s = StyleSheet.create({
   screen: { flex: 1, backgroundColor: FIN.bg },
-  body: { padding: 16 },
+  body: { padding: 16, alignSelf: 'center', width: '100%', maxWidth: FIN.contentMax },
   heading: { color: FIN.text, fontSize: 16, fontWeight: '800', marginTop: 18, marginBottom: 12 },
   tileRow: { flexDirection: 'row', gap: 8 },
   btnRow: { flexDirection: 'row', gap: 12, marginTop: 18 },

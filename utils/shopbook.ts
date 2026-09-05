@@ -352,4 +352,24 @@ export function dateLocale(country?: string): string | undefined {
   return COUNTRY_LOCALE[(country ?? '').toUpperCase()];
 }
 
+/**
+ * Short stamp for an order list row: today's orders show a time, older ones a
+ * date. A list where every row reads "9:41 am" is exactly as unscannable as one
+ * where every row reads the same date — which is what a fixed format gives you
+ * on the days that matter most.
+ *
+ * `now` is injectable so the same-day boundary is testable without waiting for
+ * midnight.
+ */
+export function orderStamp(iso: string, now: Date = new Date()): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '';
+  const sameDay = d.getFullYear() === now.getFullYear()
+    && d.getMonth() === now.getMonth()
+    && d.getDate() === now.getDate();
+  return sameDay
+    ? d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+    : d.toLocaleDateString(dateLocale(), { day: 'numeric', month: 'short' });
+}
+
 export default {};

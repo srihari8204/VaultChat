@@ -115,7 +115,7 @@ export default function FinanceCalendar() {
 
 const s = StyleSheet.create({
   screen: { flex: 1, backgroundColor: FIN.bg },
-  body: { padding: 16 },
+  body: { padding: 16, alignSelf: 'center', width: '100%', maxWidth: FIN.contentMax },
   monthHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 6 },
   monthTitle: { color: FIN.text, fontSize: 18, fontWeight: '800' },
   wdRow: { flexDirection: 'row', marginTop: 10 },
@@ -128,7 +128,7 @@ const s = StyleSheet.create({
   dayTxt: { color: FIN.text, fontSize: 14, fontWeight: '600' },
   evDot: { width: 5, height: 5, borderRadius: 3, marginTop: 2 },
   section: { color: FIN.text, fontSize: 15, fontWeight: '800', marginTop: 18, marginBottom: 12 },
-  evRow: { flexDirection: 'row', gap: 12, backgroundColor: FIN.card, borderRadius: 12, padding: 13, marginBottom: 9, borderWidth: 1, borderColor: FIN.border },
+  evRow: { flexDirection: 'row', gap: 12, backgroundColor: FIN.card, borderRadius: 12, padding: 13, marginBottom: 9, borderWidth: 1, borderColor: FIN.glassEdge, shadowColor: '#101828', shadowOpacity: 0.08, shadowRadius: 12, shadowOffset: { width: 0, height: 4 }, elevation: 2 },
   evBar: { width: 4, borderRadius: 2 },
   evLabel: { color: FIN.text, fontSize: 14, fontWeight: '700' },
   evTime: { color: FIN.sub, fontSize: 12, marginTop: 2 },
