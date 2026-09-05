@@ -29,6 +29,7 @@ import {
 } from '../lib/archive';
 import { formatSize } from '../lib/shelf';
 import { getAccessToken } from '../lib/api';
+import { AuroraBackground } from '../components/ui';
 
 function ArchiveViewerScreen() {
   const router = useRouter();
@@ -128,6 +129,7 @@ function ArchiveViewerScreen() {
 
   return (
     <View style={[S.screen, { paddingTop: insets.top }]}>
+      <AuroraBackground />
       <Stack.Screen options={{ headerShown: false }} />
 
       <View style={S.head}>
@@ -191,7 +193,7 @@ function ArchiveViewerScreen() {
 }
 
 const makeStyles = (c: Palette) => StyleSheet.create({
-  screen: { flex: 1, backgroundColor: c.bg },
+  screen: { flex: 1, backgroundColor: 'transparent' },
   head: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 16, paddingVertical: 12 },
   title: { color: c.text, fontSize: 17, fontWeight: '700' },
   subtitle: { color: c.textDim, fontSize: 12, marginTop: 2 },

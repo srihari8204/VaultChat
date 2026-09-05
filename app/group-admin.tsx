@@ -29,6 +29,7 @@ import {
   listJoinRequests, approveJoinRequest, rejectJoinRequest,
   type ChatMember, type JoinRequest,
 } from '../lib/chatService';
+import { AuroraBackground } from '../components/ui';
 
 type Policy = 'everyone' | 'admins';
 
@@ -222,6 +223,7 @@ export default function GroupAdminScreen() {
   if (loading) {
     return (
       <View style={[s.container, s.center]}>
+      <AuroraBackground />
         <Stack.Screen options={{ headerShown: false }} />
         <ActivityIndicator size="large" color={colors.primary} />
       </View>
@@ -411,7 +413,7 @@ export default function GroupAdminScreen() {
 }
 
 const makeStyles = (c: Palette) => StyleSheet.create({
-  container: { flex: 1, backgroundColor: c.bg },
+  container: { flex: 1, backgroundColor: 'transparent' },
   center: { justifyContent: 'center', alignItems: 'center' },
   header: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',

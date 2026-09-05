@@ -18,6 +18,7 @@ import { useTheme } from '../lib/theme';
 import { type Palette } from '../constants/theme';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Stack, useRouter } from 'expo-router';
+import { Aurora } from '../constants/theme';
 
 
 // ── Mock inbox data ────────────────────────────────────────────
@@ -369,7 +370,7 @@ export default function EmailBridgeScreen() {
 const makeStyles = (c: Palette) => StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: Aurora.card,
   },
   scroll: {
     flex: 1,
@@ -400,7 +401,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
     fontWeight: '700',
   },
   headerTitle: {
-    color: '#000000',
+    color: Aurora.text,
     fontSize: 22,
     fontWeight: '800',
     flex: 1,
@@ -449,7 +450,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
     marginTop: 8,
   },
   sectionTitle: {
-    color: '#000000',
+    color: Aurora.text,
     fontSize: 17,
     fontWeight: '700',
     flex: 1,
@@ -463,14 +464,14 @@ const makeStyles = (c: Palette) => StyleSheet.create({
     alignItems: 'center',
   },
   countBadgeText: {
-    color: '#000000',
+    color: Aurora.text,
     fontSize: 12,
     fontWeight: '700',
   },
 
   // Compose
   composeCard: {
-    backgroundColor: '#F9FAFB',
+    backgroundColor: Aurora.bg,
     borderRadius: 16,
     padding: 18,
     marginBottom: 24,
@@ -493,7 +494,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
     borderRadius: 12,
     paddingHorizontal: 14,
     paddingVertical: 12,
-    color: '#000000',
+    color: Aurora.text,
     fontSize: 15,
     borderWidth: 1,
     borderColor: c.border,
@@ -509,14 +510,14 @@ const makeStyles = (c: Palette) => StyleSheet.create({
     marginTop: 4,
   },
   sendBtnText: {
-    color: '#000000',
+    color: Aurora.text,
     fontSize: 16,
     fontWeight: '700',
   },
 
   // Email cards
   emailCard: {
-    backgroundColor: '#F9FAFB',
+    backgroundColor: Aurora.bg,
     borderRadius: 16,
     padding: 16,
     marginBottom: 12,
@@ -544,7 +545,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
     marginRight: 10,
   },
   emailAvatarText: {
-    color: '#000000',
+    color: Aurora.text,
     fontSize: 16,
     fontWeight: '700',
   },
@@ -552,7 +553,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
     flex: 1,
   },
   emailSender: {
-    color: '#000000',
+    color: Aurora.text,
     fontSize: 14,
     fontWeight: '600',
   },
@@ -592,7 +593,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
     alignItems: 'center',
   },
   decryptBtnText: {
-    color: '#000000',
+    color: Aurora.text,
     fontSize: 14,
     fontWeight: '700',
   },
@@ -604,7 +605,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
     justifyContent: 'flex-end',
   },
   modalContainer: {
-    backgroundColor: '#F9FAFB',
+    backgroundColor: Aurora.bg,
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,
     maxHeight: '85%',
@@ -624,7 +625,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
     borderBottomColor: c.border,
   },
   modalTitle: {
-    color: '#000000',
+    color: Aurora.text,
     fontSize: 18,
     fontWeight: '700',
   },
@@ -686,7 +687,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
     alignItems: 'center',
   },
   modalDecryptBtnText: {
-    color: '#000000',
+    color: Aurora.text,
     fontSize: 15,
     fontWeight: '700',
   },

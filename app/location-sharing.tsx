@@ -21,6 +21,7 @@ import { useTheme } from '../lib/theme';
 import { getSocket } from '../lib/socket';
 import { sendMessage } from '../lib/chatService';
 import { newLiveKey, encryptPosition } from '../lib/liveLocationCrypto';
+import { AuroraBackground } from '../components/ui';
 
 const DURATIONS = [
   { val: 15, label: '15 min' }, { val: 30, label: '30 min' }, { val: 60, label: '1 hr' },
@@ -140,6 +141,7 @@ export default function LocationSharingScreen() {
 
   if (loading) return (
     <SafeAreaView style={[s.root, s.center]}>
+      <AuroraBackground />
       <ActivityIndicator color={C.current} size="large" />
       <Text style={[s.sub, { marginTop: 12 }]}>Starting…</Text>
     </SafeAreaView>
@@ -249,7 +251,7 @@ export default function LocationSharingScreen() {
 }
 
 const makeStyles = (c: Palette) => StyleSheet.create({
-  root: { flex: 1, backgroundColor: c.bg },
+  root: { flex: 1, backgroundColor: 'transparent' },
   center: { justifyContent: 'center', alignItems: 'center' },
   heading: { fontSize: 22, fontWeight: '900', color: c.text, marginBottom: 6 },
   sub: { fontSize: 12, color: c.textDim, lineHeight: 18 },

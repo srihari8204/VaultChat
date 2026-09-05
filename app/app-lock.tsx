@@ -10,6 +10,7 @@ import { getCachedUser } from '../lib/api';
 import { MpinInput } from '../components/auth/MpinInput';
 import { promptBiometricUnlock } from '../lib/mfa';
 import { verifyMpinRemote, onboardingError } from '../lib/onboarding';
+import { AuroraBackground } from '../components/ui';
 
 export default function AppLock() {
   const { colors } = useTheme();
@@ -47,6 +48,7 @@ export default function AppLock() {
 
   return (
     <View style={s.screen}>
+      <AuroraBackground />
       <Stack.Screen options={{ headerShown: false, gestureEnabled: false }} />
       <View style={s.body}>
         <Text style={s.lock}>🔐</Text>
@@ -81,7 +83,7 @@ export default function AppLock() {
 }
 
 const makeStyles = (c: Palette) => StyleSheet.create({
-  screen: { flex: 1, backgroundColor: c.bg },
+  screen: { flex: 1, backgroundColor: 'transparent' },
   body: { flex: 1, paddingHorizontal: 24, paddingTop: 120, alignItems: 'center' },
   lock: { fontSize: 48, marginBottom: 16 },
   title: { color: c.text, fontSize: 24, fontWeight: '900' },

@@ -26,6 +26,7 @@ import { useSpaceColors, spaceHeader } from '../lib/spaces/theme';
 import type { Palette } from '../constants/theme';
 import { getIncidents, setIncidentStatus, getRuns, type Incident } from '../lib/spaces/api';
 import type { Run } from '../lib/spaces/runs';
+import { AuroraBackground } from '../components/ui';
 
 const CATEGORY: Record<string, { label: string; icon: keyof typeof Ionicons.glyphMap }> = {
   sos: { label: 'Emergency alert', icon: 'warning' },
@@ -96,6 +97,7 @@ export default function SpaceIncidentsScreen() {
   if (loading) {
     return (
       <View style={[s.screen, s.centre]}>
+      <AuroraBackground />
         <Stack.Screen options={spaceHeader(colors, 'Incidents')} />
         <ActivityIndicator color={colors.primary} />
       </View>
@@ -193,7 +195,7 @@ function when(iso: string): string {
 }
 
 const styles = (c: Palette) => StyleSheet.create({
-  screen: { flex: 1, backgroundColor: c.bg },
+  screen: { flex: 1, backgroundColor: 'transparent' },
   centre: { alignItems: 'center', justifyContent: 'center' },
   body: { padding: 16, gap: 10, paddingBottom: 40 },
   card: { backgroundColor: c.card, borderRadius: 14, padding: 14, gap: 8 },

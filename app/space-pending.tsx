@@ -18,6 +18,7 @@ import { Stack, useLocalSearchParams, useRouter, useFocusEffect } from 'expo-rou
 import { useSpaceColors, spaceHeader } from '../lib/spaces/theme';
 import type { Palette } from '../constants/theme';
 import { getPendingPickups, type PendingPickup } from '../lib/spaces/api';
+import { AuroraBackground } from '../components/ui';
 
 export default function SpacePendingScreen() {
   const router = useRouter();
@@ -58,6 +59,7 @@ export default function SpacePendingScreen() {
   if (loading) {
     return (
       <View style={[s.screen, s.centre]}>
+      <AuroraBackground />
         <Stack.Screen options={spaceHeader(colors, 'Pending pickups')} />
         <ActivityIndicator color={colors.primary} />
       </View>
@@ -133,7 +135,7 @@ export default function SpacePendingScreen() {
 const clock = (iso: string) => new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
 const styles = (c: Palette) => StyleSheet.create({
-  screen: { flex: 1, backgroundColor: c.bg },
+  screen: { flex: 1, backgroundColor: 'transparent' },
   centre: { alignItems: 'center', justifyContent: 'center' },
   body: { padding: 16, gap: 10, paddingBottom: 40 },
   card: { backgroundColor: c.card, borderRadius: 14, padding: 14, gap: 6 },

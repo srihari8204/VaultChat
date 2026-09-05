@@ -32,7 +32,7 @@ import { useRouter, Stack, useLocalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { type Palette } from '../constants/theme';
 import { useTheme } from '../lib/theme';
-import { Avatar } from '../components/ui';
+import { Avatar, AuroraBackground } from '../components/ui';
 import { listChats, createInvitation, attachmentUrl } from '../lib/chatService';
 import { getAccessToken } from '../lib/api';
 import { circleInviteCode, circleMembers } from '../lib/family/circle';
@@ -163,6 +163,7 @@ export default function FamilyAddScreen() {
         activeOpacity={isMember ? 1 : 0.7}
       >
         <Avatar
+          ring
           uri={item.photoURL && authHeader ? attachmentUrl(item.photoURL) : null}
           headers={authHeader ? { Authorization: authHeader } : undefined}
           name={item.name}
@@ -183,6 +184,7 @@ export default function FamilyAddScreen() {
 
   return (
     <View style={s.screen}>
+      <AuroraBackground />
       <Stack.Screen options={{
         headerShown: true, title: isFamily ? 'Invite to space' : 'Invite to group', headerTitleAlign: 'center',
         headerStyle: { backgroundColor: colors.bg }, headerTintColor: colors.text, headerShadowVisible: false,
@@ -254,7 +256,7 @@ export default function FamilyAddScreen() {
 }
 
 const makeStyles = (c: Palette) => StyleSheet.create({
-  screen: { flex: 1, backgroundColor: c.bg },
+  screen: { flex: 1, backgroundColor: 'transparent' },
   abRow: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 16, paddingVertical: 12 },
   abTxt: { flex: 1, fontSize: 14.5, fontWeight: '600' },
   search: {

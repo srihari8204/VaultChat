@@ -36,6 +36,7 @@ import {
   arrivalWindow, stopsBetween, foldReplay, canDrawPath, isDelayed,
   type Run, type RunStop, type RunRider, type RunEvent, type RiderState, type ReplayEntry,
 } from '../lib/spaces/runs';
+import { AuroraBackground } from '../components/ui';
 
 /**
  * Drive time per stop, used only when no live position has arrived yet.
@@ -151,6 +152,7 @@ export default function SpaceRunScreen() {
   if (loading) {
     return (
       <View style={[s.screen, s.centre]}>
+      <AuroraBackground />
         <Stack.Screen options={spaceHeader(colors, 'Run')} />
         <ActivityIndicator color={colors.primary} />
       </View>
@@ -403,7 +405,7 @@ const clockMs = (ms: number) =>
   new Date(ms).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
 const styles = (c: Palette) => StyleSheet.create({
-  screen: { flex: 1, backgroundColor: c.bg },
+  screen: { flex: 1, backgroundColor: 'transparent' },
   centre: { alignItems: 'center', justifyContent: 'center' },
   body: { padding: 16, gap: 12, paddingBottom: 40 },
   card: { backgroundColor: c.card, borderRadius: 14, padding: 16, gap: 8 },

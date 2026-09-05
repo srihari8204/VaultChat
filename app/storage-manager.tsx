@@ -26,6 +26,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { getAttachmentChatMap } from '../lib/localDb';
 import { listChats } from '../lib/chatService';
 import { measuredRoots, purgeMedia, toUri } from '../lib/storageRoots';
+import { AuroraBackground } from '../components/ui';
 
 type ChatStore = { id: string; name: string; size: number };
 
@@ -246,6 +247,7 @@ export default function StorageManagerScreen() {
 
   return (
     <View style={s.root}>
+      <AuroraBackground />
       <Stack.Screen options={{ headerShown: false }} />
       <StatusBar barStyle="light-content" backgroundColor={colors.bg} />
 
@@ -372,7 +374,7 @@ export default function StorageManagerScreen() {
 }
 
 const makeStyles = (c: Palette) => StyleSheet.create({
-  root: { flex: 1, backgroundColor: c.bg },
+  root: { flex: 1, backgroundColor: 'transparent' },
   loadingWrap: { flex: 1, backgroundColor: c.bg, justifyContent: 'center', alignItems: 'center' },
   header: { paddingBottom: 16, paddingHorizontal: 20 },
   headerRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },

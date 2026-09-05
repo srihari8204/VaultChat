@@ -27,6 +27,7 @@ import {
 } from '../lib/spaces/rolepicker';
 import type { RoleDef } from '../lib/groups/permissions';
 import PermissionMatrix from '../components/spaces/PermissionMatrix';
+import { AuroraBackground } from '../components/ui';
 
 const LABEL: Record<Person['status'], string> = {
   in: 'In',
@@ -150,6 +151,7 @@ export default function SpacePeopleScreen() {
   if (loading) {
     return (
       <View style={[s.screen, s.centre]}>
+      <AuroraBackground />
         <Stack.Screen options={spaceHeader(colors, 'People')} />
         <ActivityIndicator color={colors.primary} />
       </View>
@@ -370,7 +372,7 @@ function tone(st: Person['status'], c: Palette): string {
 const clock = (iso: string) => new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
 const styles = (c: Palette) => StyleSheet.create({
-  screen: { flex: 1, backgroundColor: c.bg },
+  screen: { flex: 1, backgroundColor: 'transparent' },
   centre: { alignItems: 'center', justifyContent: 'center' },
   head: { padding: 16, gap: 10, borderBottomWidth: 1, borderBottomColor: c.border },
   counts: { flexDirection: 'row', gap: 8 },

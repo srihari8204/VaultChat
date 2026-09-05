@@ -10,6 +10,7 @@ import { type Palette } from '../constants/theme';
 import { useTheme } from '../lib/theme';
 import { MpinInput } from '../components/auth/MpinInput';
 import { onboarding, sendEmailOtp, verifyEmailOtp, onboardingError } from '../lib/onboarding';
+import { AuroraBackground } from '../components/ui';
 
 export default function EmailVerify() {
   const { colors } = useTheme();
@@ -47,6 +48,7 @@ export default function EmailVerify() {
 
   return (
     <View style={s.screen}>
+      <AuroraBackground />
       <Stack.Screen options={{ headerShown: false }} />
       <TouchableOpacity onPress={() => router.back()} style={s.back}><Ionicons name="arrow-back" size={24} color={colors.text} /></TouchableOpacity>
       <View style={s.body}>
@@ -70,7 +72,7 @@ export default function EmailVerify() {
 }
 
 const makeStyles = (c: Palette) => StyleSheet.create({
-  screen: { flex: 1, backgroundColor: c.bg },
+  screen: { flex: 1, backgroundColor: 'transparent' },
   back: { paddingTop: HEADER_TOP, paddingHorizontal: 20 },
   backTxt: { color: c.text, fontSize: 26 },
   body: { flex: 1, paddingHorizontal: 24, paddingTop: 24, alignItems: 'center' },

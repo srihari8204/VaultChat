@@ -5,3 +5,5 @@ export { Button } from './Button';
 export { Card } from './Card';
 export { Header } from './Header';
 export { Sheet, type SheetAction } from './Sheet';
+export { GlassView } from './GlassView';
+export { AuroraBackground, type AuroraVariant } from './AuroraBackground';

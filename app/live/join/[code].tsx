@@ -37,6 +37,7 @@ import { type Palette } from '../../../constants/theme';
 import { useTheme } from '../../../lib/theme';
 import { redeemInviteLink, inviteCodeFrom } from '../../../lib/broadcast';
 import { getMyProfile } from '../../../lib/chatService';
+import { AuroraBackground } from '../../../components/ui';
 
 type Phase =
   // ASK WHO IS JOINING, before anything is redeemed.
@@ -140,6 +141,7 @@ export default function LiveJoinScreen() {
         style={s.container}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       >
+      <AuroraBackground />
         <Stack.Screen options={{ headerShown: false }} />
         <StatusBar barStyle="light-content" />
         <View style={s.body}>
@@ -281,7 +283,7 @@ export default function LiveJoinScreen() {
 
 function useS(colors: Palette) {
   return React.useMemo(() => StyleSheet.create({
-    container: { flex: 1, backgroundColor: colors.bg },
+    container: { flex: 1, backgroundColor: 'transparent' },
     body: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 28 },
     title: { color: colors.text, fontSize: 20, fontWeight: '700', marginTop: 18, textAlign: 'center' },
     sub: { color: colors.textDim, fontSize: 14, marginTop: 8, textAlign: 'center', lineHeight: 20 },

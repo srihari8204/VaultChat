@@ -13,6 +13,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Ionicons } from '@expo/vector-icons';
 import NetInfo from '@react-native-community/netinfo';
+import { AuroraBackground } from '../components/ui';
 
 const TOP = Platform.OS === 'android' ? (StatusBar.currentHeight ?? 0) : 44;
 
@@ -185,6 +186,7 @@ export default function OfflineModeScreen() {
 
   return (
     <View style={s.root}>
+      <AuroraBackground />
       <Stack.Screen options={{ headerShown: false }} />
       <StatusBar barStyle="light-content" backgroundColor={colors.bg} />
 
@@ -385,7 +387,7 @@ export default function OfflineModeScreen() {
 }
 
 const makeStyles = (c: Palette) => StyleSheet.create({
-  root: { flex: 1, backgroundColor: c.bg },
+  root: { flex: 1, backgroundColor: 'transparent' },
   header: { paddingBottom: 16, paddingHorizontal: 20 },
   headerRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   headerTitle: { color: c.text, fontSize: 20, fontWeight: '700' },

@@ -20,6 +20,7 @@ import {
   listChannels, createChannel, joinChannel, listChannelPosts, postToChannel,
   type Channel, type ChannelPost,
 } from '../lib/chatService';
+import { AuroraBackground } from '../components/ui';
 
 const CACHE_KEY = 'broadcasts';
 
@@ -136,6 +137,7 @@ export default function BroadcastScreen() {
   if (selected) {
     return (
       <View style={s.container}>
+      <AuroraBackground />
         <Stack.Screen options={{ headerShown: false }} />
         <View style={s.header}>
           <TouchableOpacity onPress={() => { setSelected(null); setPosts([]); }} style={s.backBtn} hitSlop={10}>
@@ -284,7 +286,7 @@ export default function BroadcastScreen() {
 }
 
 const makeStyles = (c: Palette) => StyleSheet.create({
-  container: { flex: 1, backgroundColor: c.bg },
+  container: { flex: 1, backgroundColor: 'transparent' },
   header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingTop: HEADER_TOP, paddingHorizontal: 16, paddingBottom: 12, gap: 12 },
   backBtn: { width: 40, height: 40, justifyContent: 'center', alignItems: 'center' },
   title: { color: c.text, fontSize: 18, fontWeight: '800', flex: 1 },

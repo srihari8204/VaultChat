@@ -24,6 +24,7 @@ import {
   classify, countsByKind, formatSize, queryShelf,
   type ShelfFile, type ShelfKind, type ShelfSort,
 } from '../lib/shelf';
+import { AuroraBackground } from '../components/ui';
 
 const PINS_KEY = 'vc_shelf_pins_v1';
 
@@ -108,6 +109,7 @@ export default function ShelfScreen() {
 
   return (
     <View style={[S.screen, { paddingTop: insets.top }]}>
+      <AuroraBackground />
       <Stack.Screen options={{ headerShown: false }} />
 
       <View style={S.head}>
@@ -209,7 +211,7 @@ export default function ShelfScreen() {
 }
 
 const makeStyles = (c: Palette) => StyleSheet.create({
-  screen: { flex: 1, backgroundColor: c.bg },
+  screen: { flex: 1, backgroundColor: 'transparent' },
   head: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 16, paddingVertical: 12 },
   title: { color: c.text, fontSize: 22, fontWeight: '800' },
   subtitle: { color: c.textDim, fontSize: 12, marginLeft: 'auto' },

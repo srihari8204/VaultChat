@@ -16,6 +16,7 @@ import { useTheme } from '../lib/theme';
 import { EmailAccountPicker } from '../components/auth/EmailAccountPicker';
 import { PhoneField, toE164 } from '../components/auth/PhoneField';
 import { lookupUser, onboarding, sendEmailOtp, onboardingError } from '../lib/onboarding';
+import { AuroraBackground } from '../components/ui';
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -59,6 +60,7 @@ export default function OnboardLanding() {
 
   return (
     <View style={s.screen}>
+      <AuroraBackground />
       <Stack.Screen options={{ headerShown: false }} />
       <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
         <ScrollView contentContainerStyle={s.body} keyboardShouldPersistTaps="handled">
@@ -95,7 +97,7 @@ export default function OnboardLanding() {
 }
 
 const makeStyles = (c: Palette) => StyleSheet.create({
-  screen: { flex: 1, backgroundColor: c.bg },
+  screen: { flex: 1, backgroundColor: 'transparent' },
   body: { flexGrow: 1, padding: 24, paddingTop: 72, justifyContent: 'center' },
   logoWrap: { alignItems: 'center', marginBottom: 40 },
   logo: { width: 72, height: 72, borderRadius: 18, marginBottom: 14 },

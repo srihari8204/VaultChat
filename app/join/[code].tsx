@@ -17,6 +17,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { type Palette } from '../../constants/theme';
 import { useTheme } from '../../lib/theme';
 import { joinViaInvite } from '../../lib/chatService';
+import { AuroraBackground } from '../../components/ui';
 
 type Phase =
   | { kind: 'joining' }
@@ -51,6 +52,7 @@ export default function JoinScreen() {
 
   return (
     <View style={s.container}>
+      <AuroraBackground />
       <Stack.Screen options={{ headerShown: false }} />
       <StatusBar barStyle="light-content" />
       <View style={s.body}>
@@ -97,7 +99,7 @@ function useS() {
 }
 
 const makeStyles = (c: Palette) => StyleSheet.create({
-  container: { flex: 1, backgroundColor: c.bg },
+  container: { flex: 1, backgroundColor: 'transparent' },
   body: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 32, gap: 12 },
   title: { color: c.text, fontSize: 20, fontWeight: '800', marginTop: 16 },
   sub: { color: c.textDim, fontSize: 14, textAlign: 'center', lineHeight: 20, maxWidth: 300 },

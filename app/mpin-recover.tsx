@@ -17,6 +17,7 @@ import { MpinInput } from '../components/auth/MpinInput';
 import {
   getRecoveryQuestions, verifyRecoveryAnswers, recoverMpin, onboarding, onboardingError,
 } from '../lib/onboarding';
+import { AuroraBackground } from '../components/ui';
 
 export default function MpinRecover() {
   const { colors } = useTheme();
@@ -85,6 +86,7 @@ export default function MpinRecover() {
 
   return (
     <View style={s.screen}>
+      <AuroraBackground />
       <Stack.Screen options={{ headerShown: false }} />
       <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
         <ScrollView contentContainerStyle={s.body} keyboardShouldPersistTaps="handled">
@@ -137,7 +139,7 @@ export default function MpinRecover() {
 }
 
 const makeStyles = (c: Palette) => StyleSheet.create({
-  screen: { flex: 1, backgroundColor: c.bg },
+  screen: { flex: 1, backgroundColor: 'transparent' },
   body: { padding: 24, paddingTop: HEADER_TOP, paddingBottom: 48 },
   back: { marginBottom: 8 },
   backTxt: { color: c.text, fontSize: 26 },

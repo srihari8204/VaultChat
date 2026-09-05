@@ -27,6 +27,7 @@ import { getSettings, updateSettings, listTrustedContacts } from '../lib/chatSer
 import { getSecurityOverview } from '../lib/security';
 import { hasPIN } from './(constants)/authService';
 import { E2EE_ENABLED } from '../constants/flags';
+import { AuroraBackground } from '../components/ui';
 
 
 const TOP = Platform.OS === 'android' ? (StatusBar.currentHeight ?? 0) : 44;
@@ -379,6 +380,7 @@ export default function PrivacyDashboardScreen() {
 
   return (
     <View style={s.container}>
+      <AuroraBackground />
       <Stack.Screen options={{ headerShown: false }} />
       <LinearGradient colors={[colors.bg, '#F9FAFB', colors.bg]} style={StyleSheet.absoluteFill} />
 
@@ -404,7 +406,7 @@ export default function PrivacyDashboardScreen() {
 }
 
 const makeStyles = (c: Palette) => StyleSheet.create({
-  container: { flex: 1, backgroundColor: c.bg },
+  container: { flex: 1, backgroundColor: 'transparent' },
 
   header: {
     flexDirection: 'row',

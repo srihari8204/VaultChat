@@ -14,6 +14,7 @@ import { ActivityIndicator, StyleSheet, Text, TouchableOpacity, View } from 'rea
 import { type Palette } from '../../constants/theme';
 import { useTheme } from '../../lib/theme';
 import { createDirectChat, getMyProfile, resolveVaultId } from '../../lib/chatService';
+import { AuroraBackground } from '../../components/ui';
 
 function useS() {
   const { colors } = useTheme();
@@ -64,6 +65,7 @@ export default function AddByVaultIdScreen() {
 
   return (
     <View style={[S.screen, S.center]}>
+      <AuroraBackground />
       {error ? (
         <>
           <Text style={S.icon}>🔗</Text>
@@ -84,7 +86,7 @@ export default function AddByVaultIdScreen() {
 }
 
 const makeStyles = (c: Palette) => StyleSheet.create({
-  screen: { flex: 1, backgroundColor: c.bg },
+  screen: { flex: 1, backgroundColor: 'transparent' },
   center: { justifyContent: 'center', alignItems: 'center', paddingHorizontal: 32, gap: 12 },
   icon:   { fontSize: 44, marginBottom: 4 },
   title:  { color: c.text, fontSize: 20, fontWeight: '800', textAlign: 'center' },

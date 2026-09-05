@@ -9,7 +9,7 @@ import { useRouter, Stack } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../lib/theme';
 import { type Palette } from '../constants/theme';
-import { Avatar } from '../components/ui';
+import { Avatar, AuroraBackground } from '../components/ui';
 import {
   getStatusPrivacy, setStatusPrivacy, listChats, attachmentUrl,
   type StatusPrivacyMode,
@@ -67,6 +67,7 @@ export default function StatusPrivacyScreen() {
 
   return (
     <View style={S.screen}>
+      <AuroraBackground />
       <Stack.Screen options={{ headerShown: false }} />
       <View style={S.header}>
         <TouchableOpacity onPress={() => router.back()} hitSlop={8} style={S.hBtn}><Ionicons name="arrow-back" size={24} color={colors.text} /></TouchableOpacity>
@@ -101,7 +102,7 @@ export default function StatusPrivacyScreen() {
             const on = selected.has(item.id);
             return (
               <TouchableOpacity style={S.contactRow} activeOpacity={0.7} onPress={() => toggle(item.id)}>
-                <Avatar uri={item.photoURL && authHeader ? attachmentUrl(item.photoURL) : null} headers={authHeader ? { Authorization: authHeader } : undefined} name={item.name} size={44} />
+                <Avatar uri={item.photoURL && authHeader ? attachmentUrl(item.photoURL) : null} headers={authHeader ? { Authorization: authHeader } : undefined} name={item.name} size={44} ring />
                 <Text style={S.contactName} numberOfLines={1}>{item.name}</Text>
                 <Ionicons name={on ? 'checkmark-circle' : 'ellipse-outline'} size={22} color={on ? colors.primary : colors.textDim} />
               </TouchableOpacity>
@@ -114,7 +115,7 @@ export default function StatusPrivacyScreen() {
 }
 
 const makeStyles = (c: Palette) => StyleSheet.create({
-  screen: { flex: 1, backgroundColor: c.bg },
+  screen: { flex: 1, backgroundColor: 'transparent' },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   header: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 12, paddingTop: HEADER_TOP, paddingBottom: 12, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.border },
   hBtn: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },

@@ -42,6 +42,16 @@ export const BIZ: Palette = {
   bubbleMetaOut: 'rgba(255,255,255,0.75)',
   tickRead:      '#FFFFFF',
   headerBar:     '#0B1B2A',
+
+  // Aurora Glass roles, in Business blue-on-navy. Business screens are dark-only
+  // and specify their surfaces exactly, so these stay navy rather than lavender.
+  glass:       'rgba(255,255,255,0.08)',
+  glassSoft:   'rgba(255,255,255,0.05)',
+  glassStroke: 'rgba(255,255,255,0.14)',
+  hairline:    'rgba(255,255,255,0.06)',
+  groundDisc:  '#0D2030',
+  accentLight: '#7DD3FC',
+  accentDeep:  '#1677FF',
 };
 
 // The design system's status colors that Palette has no slot for. Fixed by

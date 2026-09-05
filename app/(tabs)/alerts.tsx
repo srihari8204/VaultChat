@@ -6,7 +6,7 @@
 // detected and shown in the integrity banner. "Scan device" runs a real
 // root/Frida/emulator scan and appends its result. Nothing here is mock data.
 
-import { HEADER_TOP } from '../../constants/layout';
+import { HEADER_TOP, TAB_BAR_SPACE } from '../../constants/layout';
 import { brandAlpha } from '../../constants/theme';
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from 'expo-router';
@@ -22,6 +22,7 @@ import {
   type AuditSeverity, type ChainStatus, type SecurityEvent,
 } from '../../services/security/auditChain';
 import { scanDeviceAndRecord } from '../../services/securityService';
+import { AuroraBackground } from '../../components/ui';
 
 const SEV_COLOR: Record<AuditSeverity, string> = {
   critical: '#EF4444',
@@ -141,6 +142,7 @@ export default function AlertsScreen() {
 
   return (
     <View style={S.screen}>
+      <AuroraBackground />
       <View style={S.header}>
         <View style={{ flex: 1 }}>
           <Text style={S.title}>Alerts</Text>
@@ -176,7 +178,7 @@ export default function AlertsScreen() {
           data={events}
           keyExtractor={(e) => String(e.seq)}
           renderItem={renderItem}
-          contentContainerStyle={events.length === 0 ? S.emptyWrap : { paddingVertical: 8 }}
+          contentContainerStyle={events.length === 0 ? S.emptyWrap : { paddingVertical: 8, paddingBottom: TAB_BAR_SPACE + 16 }}
           refreshControl={
             <RefreshControl refreshing={false} onRefresh={load} tintColor={colors.primary} />
           }
@@ -197,7 +199,7 @@ export default function AlertsScreen() {
 }
 
 const makeStyles = (c: Palette) => StyleSheet.create({
-  screen:   { flex: 1, backgroundColor: c.bg },
+  screen: { flex: 1, backgroundColor: 'transparent' },
   header:   { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 20, paddingTop: HEADER_TOP, paddingBottom: 12, gap: 12 },
   title:    { color: c.text, fontSize: 28, fontWeight: '800' },
   subtitle: { color: c.textDim, fontSize: 13, marginTop: 2 },

@@ -24,6 +24,7 @@ import { driveBackupMeta, getDriveEmail, getDriveToken } from '../lib/googleDriv
 import {
   getBackupSettings, saveBackupSettings, markBackupDone, type BackupSettings,
 } from '../lib/backupScheduler';
+import { AuroraBackground } from '../components/ui';
 
 const FREQ = [
   { id: 'manual', label: 'Off' },
@@ -185,6 +186,7 @@ export default function ChatBackupScreen() {
 
   return (
     <View style={s.root}>
+      <AuroraBackground />
       <Stack.Screen options={{ headerShown: false }} />
       <View style={s.header}>
         <TouchableOpacity onPress={() => router.back()} style={s.iconBtn} hitSlop={8}>
@@ -342,7 +344,7 @@ export default function ChatBackupScreen() {
 }
 
 const makeStyles = (c: Palette) => StyleSheet.create({
-  root: { flex: 1, backgroundColor: c.bg },
+  root: { flex: 1, backgroundColor: 'transparent' },
   header: { flexDirection: 'row', alignItems: 'center', paddingTop: HEADER_TOP, paddingHorizontal: 12, paddingBottom: 12, backgroundColor: c.bg, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.border, gap: 8 },
   iconBtn: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
   headerTitle: { color: c.text, fontSize: 18, fontWeight: '700' },

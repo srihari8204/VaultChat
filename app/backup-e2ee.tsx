@@ -22,6 +22,7 @@ import { useTheme } from '../lib/theme';
 import { type Palette } from '../constants/theme';
 import { getBackupMode, enableE2EEBackup, disableE2EEBackup } from '../lib/cloudBackup';
 import { formatRecoveryKey, passwordProblem } from '../lib/backupCrypto';
+import { AuroraBackground } from '../components/ui';
 
 type Stage = 'loading' | 'off' | 'on' | 'password' | 'keyshown';
 
@@ -112,7 +113,8 @@ export default function BackupE2EEScreen() {
   );
 
   if (stage === 'loading') {
-    return <View style={s.root}><Stack.Screen options={{ headerShown: false }} />{header}</View>;
+    return <View style={s.root}>
+      <AuroraBackground /><Stack.Screen options={{ headerShown: false }} />{header}</View>;
   }
 
   // The key is shown ONCE. There is no "show it again" anywhere, because we do
@@ -253,7 +255,7 @@ export default function BackupE2EEScreen() {
 }
 
 const makeStyles = (c: Palette) => StyleSheet.create({
-  root: { flex: 1, backgroundColor: c.bg },
+  root: { flex: 1, backgroundColor: 'transparent' },
   header: { flexDirection: 'row', alignItems: 'center', paddingTop: HEADER_TOP, paddingHorizontal: 12, paddingBottom: 12, backgroundColor: c.bg, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.border, gap: 8 },
   iconBtn: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
   headerTitle: { color: c.text, fontSize: 18, fontWeight: '700', flexShrink: 1 },

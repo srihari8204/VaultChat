@@ -6,14 +6,14 @@
 // red), audio/video kind, time + duration. Tap = redial; long-press = menu;
 // the info button opens a call detail. A FAB starts a new call.
 
-import { HEADER_TOP } from '../../constants/layout';
+import { HEADER_TOP, TAB_BAR_SPACE } from '../../constants/layout';
 import { useCallback, useMemo, useState } from 'react';
 import { FlatList, StyleSheet, Text, TouchableOpacity, View, Alert, Modal, Pressable, ScrollView } from 'react-native';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { type Palette } from '../../constants/theme';
 import { useTheme } from '../../lib/theme';
-import { Avatar } from '../../components/ui';
+import { Avatar, AuroraBackground } from '../../components/ui';
 import { Sheet, type SheetAction } from '../../components/ui/Sheet';
 import { getCallLog, clearCallLog, removeCallLog, callLogKey, getHiddenServerCalls, hideServerCalls, type CallLogEntry } from '../../lib/callLog';
 import { listChats, attachmentUrl } from '../../lib/chatService';
@@ -189,7 +189,7 @@ export default function CallsScreen() {
       <TouchableOpacity style={S.row} activeOpacity={0.7}
         onPress={() => call({ chatId: latest.chatId, peerUid: g.peerUid, peerName: g.peerName, group: g.group }, latest.kind)}
         onLongPress={() => onLongPress(g)} delayLongPress={300}>
-        <Avatar uri={photo && authHeader ? attachmentUrl(photo) : null} headers={authHeader ? { Authorization: authHeader } : undefined} name={g.peerName} size={48} />
+        <Avatar uri={photo && authHeader ? attachmentUrl(photo) : null} headers={authHeader ? { Authorization: authHeader } : undefined} name={g.peerName} size={52} ring />
         <View style={{ flex: 1 }}>
           <Text style={[S.name, missed && { color: colors.danger }]} numberOfLines={1}>
             {g.peerName}{count > 1 ? `  (${count})` : ''}
@@ -215,6 +215,7 @@ export default function CallsScreen() {
 
   return (
     <View style={S.screen}>
+      <AuroraBackground variant="calls" />
       <View style={S.header}>
         <Text style={S.title}>Calls</Text>
         {log.length > 0 && (
@@ -235,7 +236,7 @@ export default function CallsScreen() {
           data={groups}
           keyExtractor={g => g.entries[0].id}
           renderItem={renderItem}
-          contentContainerStyle={{ paddingVertical: 6 }}
+          contentContainerStyle={{ paddingVertical: 6, paddingBottom: TAB_BAR_SPACE + 16 }}
           ListHeaderComponent={<Text style={S.sectionLabel}>RECENT</Text>}
           ItemSeparatorComponent={() => <View style={S.sep} />}
         />
@@ -253,7 +254,7 @@ export default function CallsScreen() {
             {infoGroup && (
               <>
                 <View style={S.infoHead}>
-                  <Avatar uri={(infoGroup.peerPhoto || photos.get(infoGroup.peerUid)) && authHeader ? attachmentUrl(infoGroup.peerPhoto || photos.get(infoGroup.peerUid)!) : null} headers={authHeader ? { Authorization: authHeader } : undefined} name={infoGroup.peerName} size={48} />
+                  <Avatar uri={(infoGroup.peerPhoto || photos.get(infoGroup.peerUid)) && authHeader ? attachmentUrl(infoGroup.peerPhoto || photos.get(infoGroup.peerUid)!) : null} headers={authHeader ? { Authorization: authHeader } : undefined} name={infoGroup.peerName} size={48} ring />
                   <Text style={S.infoName} numberOfLines={1}>{infoGroup.peerName}</Text>
                 </View>
                 <View style={S.infoActions}>
@@ -306,7 +307,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   callBtn: { width: 38, height: 40, alignItems: 'center', justifyContent: 'center' },
   sep:     { height: StyleSheet.hairlineWidth, backgroundColor: c.border, marginLeft: 78 },
 
-  body:    { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 10, paddingHorizontal: 40, paddingBottom: 80 },
+  body:    { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 10, paddingHorizontal: 40, paddingBottom: TAB_BAR_SPACE },
   heading: { color: c.text, fontSize: 18, fontWeight: '700' },
   sub2:    { color: c.textDim, fontSize: 14, textAlign: 'center', lineHeight: 20 },
 

@@ -18,6 +18,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { type Palette, brandAlpha } from '../constants/theme';
 import { useTheme } from '../lib/theme';
 import { listChats, listGhostMode, setGhostMode, type GhostMode } from '../lib/chatService';
+import { AuroraBackground } from '../components/ui';
 
 interface Contact { userId: string; name: string }
 type Field = 'read' | 'typing' | 'lastSeen';
@@ -110,6 +111,7 @@ export default function ReceiptControlScreen() {
 
   return (
     <View style={s.container}>
+      <AuroraBackground />
       <Stack.Screen options={{ headerShown: false }} />
 
       <View style={s.header}>
@@ -178,7 +180,7 @@ export default function ReceiptControlScreen() {
 }
 
 const makeStyles = (c: Palette) => StyleSheet.create({
-  container: { flex: 1, backgroundColor: c.bg },
+  container: { flex: 1, backgroundColor: 'transparent' },
   header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingTop: HEADER_TOP, paddingHorizontal: 16, paddingBottom: 8 },
   backBtn: { width: 40, height: 40, justifyContent: 'center', alignItems: 'center' },
   headerTitle: { color: c.text, fontSize: 18, fontWeight: '700' },

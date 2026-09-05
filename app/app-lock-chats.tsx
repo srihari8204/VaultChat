@@ -29,6 +29,7 @@ import {
   getAllLocks, setChatLock, removeChatLock, verifyBiometric, hasBiometric,
   type LockedChat, type LockMethod, type AutoLockTimer,
 } from '../lib/chatLock';
+import { AuroraBackground } from '../components/ui';
 
 
 const TOP = Platform.OS === 'android' ? (StatusBar.currentHeight ?? 0) : 44;
@@ -249,6 +250,7 @@ export default function AppLockChatsScreen() {
 
   return (
     <View style={s.container}>
+      <AuroraBackground />
       <Stack.Screen options={{ headerShown: false }} />
       <LinearGradient colors={[colors.bg, '#F9FAFB', colors.bg]} style={StyleSheet.absoluteFill} />
 
@@ -290,7 +292,7 @@ export default function AppLockChatsScreen() {
 }
 
 const makeStyles = (c: Palette) => StyleSheet.create({
-  container: { flex: 1, backgroundColor: c.bg },
+  container: { flex: 1, backgroundColor: 'transparent' },
 
   header: {
     flexDirection: 'row',

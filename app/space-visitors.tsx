@@ -25,6 +25,7 @@ import type { Palette } from '../constants/theme';
 import {
   getVisitorPasses, issueVisitorPass, redeemVisitorPass, type VisitorPass,
 } from '../lib/spaces/api';
+import { AuroraBackground } from '../components/ui';
 
 const HOURS = [2, 4, 8, 24];
 
@@ -111,6 +112,7 @@ export default function SpaceVisitorsScreen() {
   if (loading) {
     return (
       <View style={[s.screen, s.centre]}>
+      <AuroraBackground />
         <Stack.Screen options={spaceHeader(colors, 'Visitors')} />
         <ActivityIndicator color={colors.primary} />
       </View>
@@ -252,7 +254,7 @@ const clock = (iso: string) =>
   new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
 const styles = (c: Palette) => StyleSheet.create({
-  screen: { flex: 1, backgroundColor: c.bg },
+  screen: { flex: 1, backgroundColor: 'transparent' },
   centre: { alignItems: 'center', justifyContent: 'center' },
   body: { padding: 16, gap: 10, paddingBottom: 40 },
   scan: {

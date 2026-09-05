@@ -10,6 +10,7 @@ import { type Palette } from '../constants/theme';
 import { useTheme } from '../lib/theme';
 import { MpinInput } from '../components/auth/MpinInput';
 import { initProfile, onboarding, saveSecurityQuestions, setMpinRemote, onboardingError } from '../lib/onboarding';
+import { AuroraBackground } from '../components/ui';
 
 function isWeak(m: string, dobYear?: string): boolean {
   if (!/^\d{6}$/.test(m)) return true;
@@ -69,6 +70,7 @@ export default function OnboardMpin() {
   const setting = phase === 'set';
   return (
     <View style={s.screen}>
+      <AuroraBackground />
       <Stack.Screen options={{ headerShown: false }} />
       <View style={s.body}>
         <Text style={s.lock}>🔐</Text>
@@ -91,7 +93,7 @@ export default function OnboardMpin() {
 }
 
 const makeStyles = (c: Palette) => StyleSheet.create({
-  screen: { flex: 1, backgroundColor: c.bg },
+  screen: { flex: 1, backgroundColor: 'transparent' },
   body: { flex: 1, paddingHorizontal: 24, paddingTop: 96, alignItems: 'center' },
   lock: { fontSize: 44, marginBottom: 12 },
   title: { color: c.text, fontSize: 24, fontWeight: '900' },

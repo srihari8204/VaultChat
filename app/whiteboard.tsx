@@ -13,6 +13,7 @@ import { useTheme } from '../lib/theme';
 import { Stack } from 'expo-router';
 import { captureRef } from 'react-native-view-shot';
 import * as Sharing from 'expo-sharing';
+import { AuroraBackground } from '../components/ui';
 
 
 const COLORS = ['#FFFFFF', '#FF3C6E', '#4A9FFF', BRAND_ACCENT, '#F59E0B', '#A78BFA', BRAND_ACCENT, '#EC4899', '#8B5CF6'];
@@ -105,6 +106,7 @@ export default function WhiteboardScreen() {
         ),
       }} />
       <View style={s.container}>
+      <AuroraBackground />
         <StatusBar barStyle="light-content" />
 
         {/* Canvas */}
@@ -151,7 +153,7 @@ export default function WhiteboardScreen() {
 }
 
 const makeStyles = (c: Palette) => StyleSheet.create({
-  container: { flex: 1, backgroundColor: c.bg },
+  container: { flex: 1, backgroundColor: 'transparent' },
   canvas: { flex: 1, backgroundColor: c.bg },
   toolbar: { backgroundColor: '#161B22', padding: 12, paddingBottom: 28, borderTopWidth: 1, borderTopColor: '#21262D' },
   toolRow: { flexDirection: 'row', justifyContent: 'center', gap: 16, marginBottom: 12 },

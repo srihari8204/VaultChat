@@ -6,11 +6,13 @@
 
 import { Tabs } from 'expo-router';
 import React from 'react';
-import { Platform, StyleSheet, View } from 'react-native';
+import { StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
-import { Aurora, SPACING } from '../../constants/theme';
+import { Aurora } from '../../constants/theme';
 import { AppText } from '../../components/ui/Text';
+import { GlassView } from '../../components/ui/GlassView';
 import { useUnreadTotal } from '../../lib/unreadStore';
 
 type IoniconName = React.ComponentProps<typeof Ionicons>['name'];
@@ -29,17 +31,22 @@ const ICONS: Record<string, { on: IoniconName; off: IoniconName }> = {
 function MiniCenterIcon({ focused }: { focused: boolean }) {
   return (
     <View style={styles.centerWrap} pointerEvents="none">
-      <View style={[styles.centerBtn, focused && styles.centerBtnActive]}>
+      <LinearGradient
+        colors={[Aurora.accentLight, Aurora.accentDeep]}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 1 }}
+        style={[styles.centerBtn, focused && styles.centerBtnActive]}
+      >
         <Ionicons name="grid" size={24} color="#fff" />
-      </View>
-      <AppText variant="tiny" color={focused ? Aurora.primary : Aurora.textDim} style={styles.centerLabel}>Apps</AppText>
+      </LinearGradient>
+      <AppText variant="tiny" color={focused ? Aurora.accentLight : Aurora.textFaint} style={styles.centerLabel}>Apps</AppText>
     </View>
   );
 }
 
 function TabIcon({ tab, label, focused }: { tab: keyof typeof ICONS; label: string; focused: boolean }) {
   const g = ICONS[tab];
-  const color = focused ? Aurora.primary : Aurora.textDim;
+  const color = focused ? Aurora.accentLight : Aurora.textFaint;
   const unread = useUnreadTotal();
   const badge = tab === 'chats' && unread > 0;
   return (
@@ -69,10 +76,7 @@ export default function TabLayout() {
   const insets = useSafeAreaInsets();
   const tabBar = [
     styles.tabBar,
-    {
-      height: (Platform.OS === 'ios' ? 85 : 65) + insets.bottom,
-      paddingBottom: (Platform.OS === 'ios' ? 24 : SPACING.sm) + insets.bottom,
-    },
+    { bottom: Math.max(insets.bottom, 10) + 12 },
   ];
   return (
     <Tabs
@@ -80,8 +84,12 @@ export default function TabLayout() {
         headerShown: false,
         tabBarStyle: tabBar,
         tabBarShowLabel: false,
-        tabBarActiveTintColor: Aurora.primary,
-        tabBarInactiveTintColor: Aurora.textDim,
+        tabBarActiveTintColor: Aurora.accentLight,
+        tabBarInactiveTintColor: Aurora.textFaint,
+        tabBarItemStyle: styles.tabItem,
+        // Real translucency, and the only blur pass on the screen. Content
+        // scrolls underneath it, which is the entire point of the treatment.
+        tabBarBackground: () => <GlassView intensity={48} style={styles.tabBarGlass} />,
       }}
     >
       <Tabs.Screen name="chats"   options={{ title: 'Chats',   tabBarIcon: ({ focused }) => <TabIcon tab="chats"   label="Chats"   focused={focused} /> }} />
@@ -98,29 +106,37 @@ export default function TabLayout() {
 
 const styles = StyleSheet.create({
   tabBar: {
-    backgroundColor: Aurora.surfaceSolid,
-    borderTopWidth: 1,
-    borderTopColor: Aurora.border,
-    height: Platform.OS === 'ios' ? 85 : 65,
-    paddingTop: SPACING.sm,
-    paddingBottom: Platform.OS === 'ios' ? 24 : SPACING.sm,
-    elevation: 12,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: -4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
+    position: 'absolute',
+    left: 16,
+    right: 16,
+    height: 66,
+    paddingTop: 8,
+    paddingBottom: 8,
+    backgroundColor: 'transparent',
+    borderTopWidth: 0,
+    // Must stay visible so the raised Apps disc can break the bar's outline.
+    overflow: 'visible',
+    elevation: 0,
+    shadowColor: '#05030D',
+    shadowOffset: { width: 0, height: 12 },
+    shadowOpacity: 0.55,
+    shadowRadius: 28,
   },
+  tabBarGlass: {
+    ...StyleSheet.absoluteFillObject,
+    borderRadius: 30,
+  },
+  tabItem: { height: 50 },
   tabIconWrap: { alignItems: 'center', justifyContent: 'center', gap: 3, width: 64 },
   tabLabel: { marginTop: 1 },
   // Raised, glowing center button for Mini Apps.
   centerWrap: { alignItems: 'center', justifyContent: 'center', width: 64 },
   centerBtn: {
     width: 54, height: 54, borderRadius: 27,
-    backgroundColor: Aurora.primary,
     alignItems: 'center', justifyContent: 'center',
-    marginTop: -22,                       // pop above the bar
-    borderWidth: 4, borderColor: Aurora.surfaceSolid,
-    shadowColor: Aurora.primary, shadowOpacity: 0.55, shadowRadius: 10, shadowOffset: { width: 0, height: 4 },
+    marginTop: -24,                       // pop above the glass pill
+    borderWidth: 1, borderColor: Aurora.glassStroke,
+    shadowColor: Aurora.accentDeep, shadowOpacity: 0.6, shadowRadius: 18, shadowOffset: { width: 0, height: 6 },
     elevation: 10,
   },
   centerBtnActive: { transform: [{ scale: 1.06 }] },

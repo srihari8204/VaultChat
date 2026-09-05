@@ -12,7 +12,7 @@ import {
 import { type Palette } from '../constants/theme';
 import { useTheme } from '../lib/theme';
 import { getAccessToken } from '../lib/api';
-import { Avatar } from '../components/ui';
+import { Avatar, AuroraBackground } from '../components/ui';
 import { attachmentUrl, listChats, chatTitle as chatDisplayName, type ChatSummary } from '../lib/chatService';
 import { searchAllMessages } from '../lib/localDb';
 import { setPendingJump } from '../lib/chatJump';
@@ -87,6 +87,7 @@ export default function SearchScreen() {
 
   return (
     <View style={S.screen}>
+      <AuroraBackground />
       <View style={S.header}>
         <TouchableOpacity onPress={() => router.back()} hitSlop={10} style={S.backBtn} activeOpacity={0.7}>
           <Ionicons name="arrow-back" size={24} color={colors.text} />
@@ -122,7 +123,7 @@ export default function SearchScreen() {
               const photoId = c.type === 'direct' ? c.peerPhotoURL : c.photoURL;
               return (
                 <TouchableOpacity style={S.row} onPress={() => openChat(c.id)} activeOpacity={0.7}>
-                  <Avatar uri={photoId && authHeader ? attachmentUrl(photoId) : null} headers={authHeader ? { Authorization: authHeader } : undefined} name={titleOf(c)} size={44} presence={c.type === 'direct' && c.peerOnline ? 'online' : null} />
+                  <Avatar uri={photoId && authHeader ? attachmentUrl(photoId) : null} headers={authHeader ? { Authorization: authHeader } : undefined} name={titleOf(c)} size={44} presence={c.type === 'direct' && c.peerOnline ? 'online' : null} ring />
                   <View style={{ flex: 1 }}>
                     <Text style={S.rowTitle} numberOfLines={1}>{titleOf(c)}</Text>
                     <Text style={S.rowSub}>{c.type === 'group' ? 'Group' : 'Direct'}{c.unreadCount > 0 ? ` · ${c.unreadCount} unread` : ''}</Text>
@@ -135,7 +136,7 @@ export default function SearchScreen() {
             const photoId = c?.type === 'direct' ? c?.peerPhotoURL : c?.photoURL;
             return (
               <TouchableOpacity style={S.row} onPress={() => openChat(h.chatId, h.id)} activeOpacity={0.7}>
-                <Avatar uri={photoId && authHeader ? attachmentUrl(photoId) : null} headers={authHeader ? { Authorization: authHeader } : undefined} name={c ? titleOf(c) : 'Chat'} size={44} />
+                <Avatar uri={photoId && authHeader ? attachmentUrl(photoId) : null} headers={authHeader ? { Authorization: authHeader } : undefined} name={c ? titleOf(c) : 'Chat'} size={44} ring />
                 <View style={{ flex: 1 }}>
                   <Text style={S.rowTitle} numberOfLines={1}>{c ? titleOf(c) : 'Chat'}</Text>
                   <Text style={S.rowSub} numberOfLines={1}>{h.content}</Text>
@@ -150,7 +151,7 @@ export default function SearchScreen() {
 }
 
 const makeStyles = (c: Palette) => StyleSheet.create({
-  screen:     { flex: 1, backgroundColor: c.bg },
+  screen: { flex: 1, backgroundColor: 'transparent' },
   header:     { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingTop: HEADER_TOP, paddingBottom: 12, gap: 8, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.border },
   backBtn:    { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
   input:      { flex: 1, color: c.text, backgroundColor: c.card, borderRadius: 22, paddingHorizontal: 16, paddingVertical: 10, fontSize: 15 },

@@ -27,6 +27,7 @@ import { type Palette } from '../constants/theme';
 import { useTheme } from '../lib/theme';
 import { scheduleEncryptedMessage } from '../lib/chatService';
 import { putScheduledCopy } from '../lib/scheduledLocalCopy';
+import { AuroraBackground } from '../components/ui';
 
 const QUICK_TIMES: { label: string; mins: number }[] = [
   { label: 'In 30 min',      mins: 30 },
@@ -116,6 +117,7 @@ export default function ScheduleMessageScreen() {
 
   return (
     <View style={S.screen}>
+      <AuroraBackground />
       <StatusBar barStyle="light-content" />
       <View style={S.header}>
         <TouchableOpacity onPress={() => router.back()} hitSlop={10} style={S.backBtn}>
@@ -202,7 +204,7 @@ export default function ScheduleMessageScreen() {
 
 
 const makeStyles = (c: Palette) => StyleSheet.create({
-  screen:        { flex: 1, backgroundColor: c.bg },
+  screen: { flex: 1, backgroundColor: 'transparent' },
   header:        { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingTop: HEADER_TOP, paddingBottom: 12, gap: 8, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.border },
   backBtn:       { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
   backTxt:       { color: c.text, fontSize: 26, fontWeight: '600' },

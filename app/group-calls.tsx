@@ -22,6 +22,7 @@ import { getChat, attachmentUrl, type ChatMember } from '../lib/chatService';
 import { getAccessToken } from '../lib/api';
 import { getSocket } from '../lib/socket';
 import { getCurrentUserAsync } from './(constants)/authService';
+import { AuroraBackground } from '../components/ui';
 
 type CallMode = 'voice' | 'video';
 
@@ -97,6 +98,7 @@ export default function GroupCallsScreen() {
 
   return (
     <View style={s.container}>
+      <AuroraBackground />
       <Stack.Screen options={{ headerShown: false }} />
       <View style={s.header}>
         <TouchableOpacity onPress={() => router.back()} style={s.backBtn} hitSlop={10}>
@@ -154,7 +156,7 @@ export default function GroupCallsScreen() {
 }
 
 const makeStyles = (c: Palette) => StyleSheet.create({
-  container: { flex: 1, backgroundColor: c.bg },
+  container: { flex: 1, backgroundColor: 'transparent' },
   header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingTop: HEADER_TOP, paddingHorizontal: 16, paddingBottom: 8, gap: 12 },
   backBtn: { width: 40, height: 40, justifyContent: 'center', alignItems: 'center' },
   title: { color: c.text, fontSize: 18, fontWeight: '800', flex: 1 },

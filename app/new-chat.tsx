@@ -13,7 +13,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { type Palette } from '../constants/theme';
 import { useTheme } from '../lib/theme';
-import { Avatar } from '../components/ui';
+import { Avatar, AuroraBackground } from '../components/ui';
 import { PhoneField, toE164 } from '../components/auth/PhoneField';
 import { createDirectChat, listChats, attachmentUrl, setDisappearing, type ChatSummary } from '../lib/chatService';
 import { getAccessToken } from '../lib/api';
@@ -116,6 +116,7 @@ export default function NewChatScreen() {
 
   return (
     <KeyboardAvoidingView style={S.screen} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+      <AuroraBackground />
       <View style={S.header}>
         <TouchableOpacity onPress={() => router.back()} style={S.backBtn} activeOpacity={0.7}>
           <Ionicons name="arrow-back" size={24} color={colors.text} />
@@ -179,7 +180,7 @@ export default function NewChatScreen() {
         }
         renderItem={({ item }) => (
           <TouchableOpacity style={S.row} activeOpacity={0.7} onPress={() => openWithTtl(item.chatId)}>
-            <Avatar uri={item.photoURL && authHeader ? attachmentUrl(item.photoURL) : null} headers={authHeader ? { Authorization: authHeader } : undefined} name={item.name} size={46} presence={item.online ? 'online' : null} />
+            <Avatar uri={item.photoURL && authHeader ? attachmentUrl(item.photoURL) : null} headers={authHeader ? { Authorization: authHeader } : undefined} name={item.name} size={46} presence={item.online ? 'online' : null} ring />
             <View style={{ flex: 1 }}>
               <Text style={S.rowName} numberOfLines={1}>{item.name}</Text>
               {item.online && <Text style={S.rowSub}>online</Text>}
@@ -201,7 +202,7 @@ function useS() {
 }
 
 const makeStyles = (c: Palette) => StyleSheet.create({
-  screen: { flex: 1, backgroundColor: c.bg },
+  screen: { flex: 1, backgroundColor: 'transparent' },
   header: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingTop: HEADER_TOP, paddingBottom: 12, gap: 8 },
   backBtn: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
   title: { color: c.text, fontSize: 20, fontWeight: '800' },

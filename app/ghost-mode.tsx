@@ -41,6 +41,7 @@ import {
   setGhostMode,
   type GhostMode,
 } from '../lib/chatService';
+import { AuroraBackground } from '../components/ui';
 
 function useS() {
   const { colors } = useTheme();
@@ -90,7 +91,8 @@ function ListView() {
   }, []);
 
   if (loading) {
-    return <View style={[S.screen, S.center]}><ActivityIndicator color={colors.primary} size="large" /></View>;
+    return <View style={[S.screen, S.center]}>
+      <AuroraBackground /><ActivityIndicator color={colors.primary} size="large" /></View>;
   }
 
   return (
@@ -315,7 +317,7 @@ function ToggleRow({
 
 
 const makeStyles = (c: Palette) => StyleSheet.create({
-  screen:        { flex: 1, backgroundColor: c.bg },
+  screen: { flex: 1, backgroundColor: 'transparent' },
   center:        { justifyContent: 'center', alignItems: 'center' },
 
   header:        { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingTop: HEADER_TOP, paddingBottom: 12, gap: 8, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.border },

@@ -16,7 +16,7 @@ import { useRouter, Stack } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { type Palette } from '../constants/theme';
 import { useTheme } from '../lib/theme';
-import { Avatar } from '../components/ui';
+import { Avatar, AuroraBackground } from '../components/ui';
 import { listChats, createGroupChat, attachmentUrl } from '../lib/chatService';
 import { getAccessToken } from '../lib/api';
 
@@ -106,7 +106,7 @@ export default function CreateGroupScreen() {
     const sel = selected.has(item.userId);
     return (
       <TouchableOpacity style={s.row} onPress={() => toggle(item.userId)} activeOpacity={0.7}>
-        <Avatar uri={item.photoURL && authHeader ? attachmentUrl(item.photoURL) : null} headers={authHeader ? { Authorization: authHeader } : undefined} name={item.name} size={46} />
+        <Avatar uri={item.photoURL && authHeader ? attachmentUrl(item.photoURL) : null} headers={authHeader ? { Authorization: authHeader } : undefined} name={item.name} size={46} ring />
         <Text style={s.name} numberOfLines={1}>{item.name}</Text>
         <View style={[s.check, sel && s.checkSel]}>
           {sel && <Ionicons name="checkmark" size={15} color="#FFFFFF" />}
@@ -117,6 +117,7 @@ export default function CreateGroupScreen() {
 
   return (
     <View style={s.screen}>
+      <AuroraBackground />
       <Stack.Screen options={{ headerShown: false }} />
 
       <View style={s.header}>
@@ -196,7 +197,7 @@ export default function CreateGroupScreen() {
 }
 
 const makeStyles = (c: Palette) => StyleSheet.create({
-  screen: { flex: 1, backgroundColor: c.bg },
+  screen: { flex: 1, backgroundColor: 'transparent' },
   header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingTop: HEADER_TOP, paddingHorizontal: 16, paddingBottom: 8 },
   backBtn: { width: 40, height: 40, justifyContent: 'center', alignItems: 'center' },
   headerTitle: { color: c.text, fontSize: 18, fontWeight: '700' },

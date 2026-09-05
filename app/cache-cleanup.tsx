@@ -23,6 +23,7 @@ import {
   executeCleanup, getAutoCleanDays, getClearOnLogout,
   getLastCleanAt, measureCacheSizes, setAutoCleanDays, setClearOnLogout,
 } from '../services/cache/cacheManager';
+import { AuroraBackground } from '../components/ui';
 
 const AUTO_OPTIONS = [0, 7, 15, 30];
 
@@ -97,6 +98,7 @@ export default function CacheCleanupScreen() {
 
   return (
     <View style={S.container}>
+      <AuroraBackground />
       <View style={S.header}>
         <TouchableOpacity onPress={() => router.back()} style={S.backBtn} hitSlop={10}>
           <Ionicons name="chevron-back" size={26} color={colors.text} />
@@ -185,7 +187,7 @@ export default function CacheCleanupScreen() {
 }
 
 const makeStyles = (c: Palette) => StyleSheet.create({
-  container: { flex: 1, backgroundColor: c.bg },
+  container: { flex: 1, backgroundColor: 'transparent' },
   header: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingTop: HEADER_TOP, paddingBottom: 14, paddingHorizontal: 12, borderBottomWidth: 1, borderBottomColor: c.border },
   backBtn: { padding: 4 },
   headerTitle: { color: c.text, fontSize: 18, fontWeight: '800' },

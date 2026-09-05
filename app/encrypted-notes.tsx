@@ -50,6 +50,7 @@ import {
 import { verifyPin } from '../lib/chatService';
 import 'react-native-get-random-values';
 import { randomBytes } from '@noble/hashes/utils.js';
+import { AuroraBackground } from '../components/ui';
 
 
 // 9 Categories from PDF
@@ -586,6 +587,7 @@ export default function EncryptedNotesScreen() {
   if (gate !== 'open') {
     return (
       <View style={[s.screen, { alignItems: 'center', justifyContent: 'center', paddingHorizontal: 32 }]}>
+      <AuroraBackground />
         <Stack.Screen options={{ headerShown: false }} />
         <Text style={{ fontSize: 40, marginBottom: 16 }}>🔒</Text>
         {gate === 'pin' && (
@@ -1068,7 +1070,7 @@ const mdStyles = (c: Palette) => ({
 });
 
 const makeStyles = (c: Palette) => StyleSheet.create({
-  screen: { flex: 1, backgroundColor: c.bg },
+  screen: { flex: 1, backgroundColor: 'transparent' },
   header: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingTop: Platform.OS === 'ios' ? 56 : 44, paddingBottom: 14, paddingHorizontal: 16, backgroundColor: c.card, borderBottomWidth: 1, borderBottomColor: c.border },
   backBtn: { width: 36, height: 36, borderRadius: 18, backgroundColor: '#2A2D3A', alignItems: 'center', justifyContent: 'center' },
   backTxt: { fontSize: 18, color: c.text },

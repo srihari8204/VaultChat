@@ -41,6 +41,7 @@ import {
   nextStop, ridersAtStop, progress, newTransitionId,
   type Run, type RunStop, type RunRider, type RiderState,
 } from '../lib/spaces/runs';
+import { AuroraBackground } from '../components/ui';
 
 /** Heartbeat cadence. The server calls a run stale after 3 minutes, so a
  *  60s beat survives one lost request without raising a false GPS-offline. */
@@ -347,6 +348,7 @@ export default function SpaceRunDriverScreen() {
   if (loading) {
     return (
       <View style={[s.screen, s.centre]}>
+      <AuroraBackground />
         <Stack.Screen options={spaceHeader(colors, 'Run')} />
         <ActivityIndicator color={colors.primary} />
       </View>
@@ -566,7 +568,7 @@ function settledColour(s: RiderState, colors: Palette): string {
 }
 
 const styles = (c: Palette) => StyleSheet.create({
-  screen: { flex: 1, backgroundColor: c.bg },
+  screen: { flex: 1, backgroundColor: 'transparent' },
   centre: { alignItems: 'center', justifyContent: 'center' },
   header: { flexDirection: 'row', alignItems: 'center', padding: 16, gap: 12 },
   vehicle: { fontSize: 22, fontWeight: '700', color: c.text },

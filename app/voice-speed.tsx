@@ -12,6 +12,7 @@ import {
 } from 'react-native';
 import { useTheme } from '../lib/theme';
 import { type Palette } from '../constants/theme';
+import { Aurora } from '../constants/theme';
 
 const SPEEDS = [0.5, 1, 1.25, 1.5, 2];
 
@@ -96,7 +97,7 @@ export default function VoiceSpeedPlayer() {
     <>
       <Stack.Screen options={{
         title: 'Voice Message',
-        headerStyle: { backgroundColor: '#FFFFFF' },
+        headerStyle: { backgroundColor: Aurora.card },
         headerTintColor: '#1F2937',
       }} />
       <View style={st.screen}>
@@ -177,7 +178,7 @@ export default function VoiceSpeedPlayer() {
 }
 
 const makeStyles = (c: Palette) => StyleSheet.create({
-  screen: { flex: 1, backgroundColor: '#FFFFFF', justifyContent: 'center', padding: 20 },
+  screen: { flex: 1, backgroundColor: Aurora.card, justifyContent: 'center', padding: 20 },
   card: { backgroundColor: 'rgba(10,22,40,0.9)', borderRadius: 24, padding: 24, borderWidth: 1, borderColor: 'rgba(0,229,255,0.15)' },
   sender: { color: c.text, fontSize: 18, fontWeight: '800', textAlign: 'center', marginBottom: 20 },
   waveform: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', height: 60, gap: 2, marginBottom: 16 },
@@ -191,7 +192,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   skipTxt: { color: 'rgba(255,255,255,0.6)', fontSize: 12, fontWeight: '700' },
   playBtn: { width: 70, height: 70, borderRadius: 35, overflow: 'hidden' },
   playGrad: { flex: 1, justifyContent: 'center', alignItems: 'center' },
-  playIcon: { fontSize: 28, color: '#000' },
+  playIcon: { fontSize: 28, color: Aurora.text },
   speedRow: { flexDirection: 'row', justifyContent: 'center', gap: 8 },
   speedChip: { paddingHorizontal: 16, paddingVertical: 8, borderRadius: 20, backgroundColor: 'rgba(255,255,255,0.06)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)' },
   speedChipActive: { backgroundColor: '#4A9FFF22', borderColor: '#4A9FFF' },

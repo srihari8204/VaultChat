@@ -17,6 +17,7 @@ import {
   type Community, type CommunityDetail,
 } from '../lib/chatService';
 import { readCache, writeCache } from '../lib/localCache';
+import { AuroraBackground } from '../components/ui';
 
 export default function CommunitiesScreen() {
   const { colors } = useTheme();
@@ -83,6 +84,7 @@ export default function CommunitiesScreen() {
   if (detail) {
     return (
       <View style={S.screen}>
+      <AuroraBackground />
         <Stack.Screen options={{ headerShown: false }} />
         <View style={S.header}>
           <TouchableOpacity onPress={() => setDetail(null)} style={S.hBtn} hitSlop={8}><Ionicons name="arrow-back" size={24} color={colors.text} /></TouchableOpacity>
@@ -190,7 +192,7 @@ export default function CommunitiesScreen() {
 }
 
 const makeStyles = (c: Palette) => StyleSheet.create({
-  screen:  { flex: 1, backgroundColor: c.bg },
+  screen: { flex: 1, backgroundColor: 'transparent' },
   center:  { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 10, paddingHorizontal: 40 },
   header:  { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 12, paddingTop: HEADER_TOP, paddingBottom: 12, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.border },
   hBtn:    { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },

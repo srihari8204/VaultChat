@@ -24,6 +24,7 @@ import {
 import { type Palette } from '../constants/theme';
 import { useTheme } from '../lib/theme';
 import { createPoll } from '../lib/chatService';
+import { AuroraBackground } from '../components/ui';
 
 const MIN_OPTIONS = 2;
 const MAX_OPTIONS = 12;
@@ -81,6 +82,7 @@ export default function CreatePollScreen() {
 
   return (
     <View style={S.screen}>
+      <AuroraBackground />
       <StatusBar barStyle="light-content" />
       <View style={S.header}>
         <TouchableOpacity onPress={() => router.back()} hitSlop={10} style={S.backBtn}>
@@ -164,7 +166,7 @@ export default function CreatePollScreen() {
 
 
 const makeStyles = (c: Palette) => StyleSheet.create({
-  screen:        { flex: 1, backgroundColor: c.bg },
+  screen: { flex: 1, backgroundColor: 'transparent' },
 
   header:        { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingTop: HEADER_TOP, paddingBottom: 12, gap: 8, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.border },
   backBtn:       { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },

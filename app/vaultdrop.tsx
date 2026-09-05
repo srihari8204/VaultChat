@@ -12,6 +12,7 @@ import {
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as DocumentPicker from 'expo-document-picker';
+import { Aurora } from '../constants/theme';
 
 interface VaultFile {
   id:       string;
@@ -208,25 +209,25 @@ export default function VaultDropScreen() {
 }
 
 const styles = StyleSheet.create({
-  container:      { flex: 1, backgroundColor: '#FFFFFF' },
-  header:         { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: '#E5E7EB' },
+  container:      { flex: 1, backgroundColor: Aurora.card },
+  header:         { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: Aurora.border },
   backBtn:        { paddingRight: 12 },
   backText:       { color: BRAND_ACCENT, fontSize: 15 },
-  headerTitle:    { flex: 1, color: '#000000', fontWeight: 'bold', fontSize: 18, textAlign: 'center' },
+  headerTitle:    { flex: 1, color: Aurora.text, fontWeight: 'bold', fontSize: 18, textAlign: 'center' },
   headerRight:    { minWidth: 60, alignItems: 'flex-end' },
   d2deBadge:      { color: BRAND_ACCENT, fontSize: 11, fontWeight: 'bold', borderWidth: 1, borderColor: BRAND_ACCENT, borderRadius: 6, paddingHorizontal: 6, paddingVertical: 2 },
   infoBanner:     { flexDirection: 'row', alignItems: 'center', margin: 12, backgroundColor: '#001810', borderRadius: 10, padding: 12, borderWidth: 1, borderColor: BRAND_ACCENT + '33', gap: 10 },
   infoBannerIcon: { color: BRAND_ACCENT, fontSize: 11, fontWeight: 'bold' },
-  infoBannerText: { flex: 1, color: '#6B7280', fontSize: 12, lineHeight: 18 },
+  infoBannerText: { flex: 1, color: Aurora.textDim, fontSize: 12, lineHeight: 18 },
   pickBtn:        { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', margin: 12, backgroundColor: BRAND_ACCENT, borderRadius: 14, paddingVertical: 14, gap: 8 },
   pickBtnIcon:    { color: '#FFFFFF', fontSize: 22, fontWeight: 'bold' },
   pickBtnText:    { color: '#FFFFFF', fontWeight: 'bold', fontSize: 15 },
   fileList:       { padding: 12, gap: 10 },
-  fileCard:       { flexDirection: 'row', alignItems: 'center', backgroundColor: '#F9FAFB', borderRadius: 12, padding: 12, borderWidth: 1, borderColor: '#E5E7EB', gap: 10 },
+  fileCard:       { flexDirection: 'row', alignItems: 'center', backgroundColor: Aurora.bg, borderRadius: 12, padding: 12, borderWidth: 1, borderColor: Aurora.border, gap: 10 },
   fileIconBox:    { width: 46, height: 46, borderRadius: 10, borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
   fileIconText:   { fontSize: 11, fontWeight: 'bold' },
   fileInfo:       { flex: 1 },
-  fileName:       { color: '#000000', fontWeight: 'bold', fontSize: 14, marginBottom: 4 },
+  fileName:       { color: Aurora.text, fontWeight: 'bold', fontSize: 14, marginBottom: 4 },
   fileMeta:       { flexDirection: 'row', alignItems: 'center', gap: 8 },
   fileSize:       { color: '#4A5568', fontSize: 11 },
   d2deTag:        { color: BRAND_ACCENT, fontSize: 10, fontWeight: 'bold', borderWidth: 1, borderColor: BRAND_ACCENT + '44', borderRadius: 4, paddingHorizontal: 4 },
@@ -238,6 +239,6 @@ const styles = StyleSheet.create({
   removeBtn:      { width: 24, height: 24, borderRadius: 12, backgroundColor: '#FF4D6D22', alignItems: 'center', justifyContent: 'center' },
   removeBtnText:  { color: '#FF4D6D', fontSize: 11, fontWeight: 'bold' },
   emptyWrap:      { alignItems: 'center', paddingTop: 60, gap: 8 },
-  emptyTitle:     { color: '#000000', fontSize: 18, fontWeight: 'bold' },
+  emptyTitle:     { color: Aurora.text, fontSize: 18, fontWeight: 'bold' },
   emptySub:       { color: '#4A5568', fontSize: 13, textAlign: 'center' },
 });

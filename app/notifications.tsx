@@ -13,6 +13,7 @@ import {
   sendSOS, listSOSHistory, listTrustedContacts, getSettings, updateSettings,
   type SOSHistoryItem, type TrustedContact, type UserSettings,
 } from '../lib/chatService';
+import { Aurora } from '../constants/theme';
 
 const NAV = [{id:'chats',icon:'💬',label:'Chats',route:'/(tabs)/chats'},{id:'shield',icon:'🛡️',label:'Shield',route:'/dashboard'},{id:'community',icon:'🌐',label:'Community',route:'/communities'},{id:'vault',icon:'📦',label:'Vault',route:'/filevault'},{id:'alerts',icon:'🔔',label:'Alerts',route:'/notifications'}];
 
@@ -247,7 +248,7 @@ export default function NotificationsScreen() {
 }
 
 const makeStyles = (c: Palette) => StyleSheet.create({
-  container:{flex:1,backgroundColor:'#FFFFFF'},
+  container:{flex:1,backgroundColor: Aurora.card},
   header:{flexDirection:'row',alignItems:'center',paddingHorizontal:18,paddingTop:HEADER_TOP,paddingBottom:14,gap:10},
   title:{color:'#fff',fontSize:20,fontWeight:'900'},
   backBtn:{width:36,height:36,borderRadius:18,backgroundColor:'rgba(10,22,40,0.8)',justifyContent:'center',alignItems:'center',borderWidth:1,borderColor:'rgba(255,255,255,0.06)'},

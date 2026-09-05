@@ -10,6 +10,7 @@ import { readCache, writeCache } from '../lib/localCache';
 import { ErrorBoundary } from '../components/ErrorBoundary';
 import { getSecurityOverview, type SecurityOverview } from '../lib/security';
 import { E2EE_ENABLED } from '../constants/flags';
+import { Aurora } from '../constants/theme';
 
 
 const NAV = [
@@ -197,7 +198,7 @@ export default function DashboardScreen() {
 }
 
 const makeStyles = (c: Palette) => StyleSheet.create({
-  container:{flex:1,backgroundColor:'#FFFFFF'},
+  container:{flex:1,backgroundColor: Aurora.card},
   glowTop:{position:'absolute',top:-40,alignSelf:'center',width:300,height:300,borderRadius:150,backgroundColor:'rgba(74,159,255,0.06)'},
   header:{flexDirection:'row',alignItems:'center',paddingHorizontal:18,paddingTop:HEADER_TOP,paddingBottom:14,gap:10},
   title:{color:'#fff',fontSize:20,fontWeight:'900'},

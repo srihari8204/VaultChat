@@ -28,6 +28,7 @@ import {
 } from 'react-native';
 import { type Palette } from '../constants/theme';
 import { useTheme } from '../lib/theme';
+import { AuroraBackground } from '../components/ui';
 
 const STORAGE_KEY = 'vc_message_reminders_v1';
 
@@ -154,6 +155,7 @@ function Composer({
 
   return (
     <View style={S.screen}>
+      <AuroraBackground />
       <StatusBar barStyle="light-content" />
       <View style={S.header}>
         <TouchableOpacity onPress={() => router.back()} hitSlop={10} style={S.backBtn}>
@@ -279,7 +281,7 @@ function RemindersList({ router }: { router: any }) {
 
 
 const makeStyles = (c: Palette) => StyleSheet.create({
-  screen:       { flex: 1, backgroundColor: c.bg },
+  screen: { flex: 1, backgroundColor: 'transparent' },
   center:       { justifyContent: 'center', alignItems: 'center' },
 
   header:       { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingTop: HEADER_TOP, paddingBottom: 12, gap: 8, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.border },

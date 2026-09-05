@@ -34,6 +34,7 @@ import {
   getDevices, addDevice, getDeviceEvents, getDeviceCommands, issueDeviceCommand,
   type SpaceDevice, type DeviceEvent, type DeviceCommand,
 } from '../lib/spaces/api';
+import { AuroraBackground } from '../components/ui';
 
 const KINDS: { key: string; label: string; icon: keyof typeof Ionicons.glyphMap }[] = [
   { key: 'phone', label: 'Phone', icon: 'phone-portrait-outline' },
@@ -144,6 +145,7 @@ export default function SpaceDevicesScreen() {
   if (loading) {
     return (
       <View style={[s.screen, s.centre]}>
+      <AuroraBackground />
         <Stack.Screen options={spaceHeader(colors, 'Devices')} />
         <ActivityIndicator color={colors.primary} />
       </View>
@@ -405,7 +407,7 @@ function eventColour(kind: string, c: Palette): string {
 }
 
 const styles = (c: Palette) => StyleSheet.create({
-  screen: { flex: 1, backgroundColor: c.bg },
+  screen: { flex: 1, backgroundColor: 'transparent' },
   centre: { alignItems: 'center', justifyContent: 'center' },
   body: { padding: 16, gap: 10, paddingBottom: 40 },
   card: { backgroundColor: c.card, borderRadius: 14, padding: 14, gap: 8 },

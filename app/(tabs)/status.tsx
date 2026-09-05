@@ -17,7 +17,7 @@
 // Visibility / TTL / per-viewer tracking happens server-side. This screen
 // just renders + posts.
 
-import { HEADER_TOP } from '../../constants/layout';
+import { HEADER_TOP, TAB_BAR_SPACE } from '../../constants/layout';
 import * as ImagePicker from 'expo-image-picker';
 import { compressForStatus } from '../../lib/media/compressMedia';
 import GatePicker, { type GateDraft } from '../../components/status/GatePicker';
@@ -70,6 +70,7 @@ import { STORY_E2EE, E2EE_ENABLED } from '../../constants/flags';
 import { uploadEncryptedAttachment } from '../../lib/mediaAttachments';
 import { wrapStoryKeyForViewers } from '../../lib/storyKeys';
 import { putMediaKey } from '../../lib/mediaKeyStore';
+import { AuroraBackground } from '../../components/ui';
 
 const TEXT_BGS = ['#0B0B10', '#7E57C2', '#26A69A', '#EF5350', '#42A5F5', '#FFA726', '#5C6BC0'];
 const QUICK_EMOJIS = ['😀','😂','🥰','😍','😎','🤔','😅','😭','😡','👍','🙏','👏','🔥','✨','🎉','❤️','💔','💯','🙌','😴','🥳','😇','🤩','😱','😬','🤗','😉','😏','🤨','😌','💪','👀','🌟','⚡','🌈','☀️','🌙','⭐','💜','💙'];
@@ -353,6 +354,7 @@ export default function StatusScreen() {
 
   return (
     <View style={S.screen}>
+      <AuroraBackground variant="status" />
       <View style={S.header}>
         <Text style={S.title}>Status</Text>
         <View style={{ flexDirection: 'row', gap: 6 }}>
@@ -497,6 +499,7 @@ export default function StatusScreen() {
       <FlatList
         data={others}
         keyExtractor={(e) => e.userId}
+        contentContainerStyle={{ paddingBottom: TAB_BAR_SPACE + 16 }}
         refreshControl={<RefreshControl tintColor={colors.primary} refreshing={refreshing} onRefresh={onRefresh} />}
         ListHeaderComponent={
           <View>

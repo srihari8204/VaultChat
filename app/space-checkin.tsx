@@ -28,6 +28,7 @@ import {
   type AttendanceRecord, type LeaveRequest,
 } from '../lib/spaces/api';
 import { getCurrentUserAsync } from './(constants)/authService';
+import { AuroraBackground } from '../components/ui';
 
 const LEAVE_KINDS: { key: string; label: string }[] = [
   { key: 'casual', label: 'Casual' },
@@ -123,6 +124,7 @@ export default function SpaceCheckinScreen() {
   if (loading) {
     return (
       <View style={[s.screen, s.centre]}>
+      <AuroraBackground />
         <Stack.Screen options={spaceHeader(colors, 'Attendance')} />
         <ActivityIndicator color={colors.primary} />
       </View>
@@ -290,7 +292,7 @@ function statusColour(st: LeaveRequest['status'], c: Palette): string {
 }
 
 const styles = (c: Palette) => StyleSheet.create({
-  screen: { flex: 1, backgroundColor: c.bg },
+  screen: { flex: 1, backgroundColor: 'transparent' },
   centre: { alignItems: 'center', justifyContent: 'center' },
   body: { padding: 16, gap: 10, paddingBottom: 40 },
   card: { backgroundColor: c.card, borderRadius: 14, padding: 14, gap: 8 },

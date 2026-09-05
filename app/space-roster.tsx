@@ -25,6 +25,7 @@ import {
   getRoster, addRosterEntry, updateRosterEntry, getLinks,
   type RosterEntry, type SpaceLink,
 } from '../lib/spaces/api';
+import { AuroraBackground } from '../components/ui';
 
 export default function SpaceRosterScreen() {
   const params = useLocalSearchParams<{ spaceId?: string; name?: string; canManage?: string; groupType?: string }>();
@@ -110,6 +111,7 @@ export default function SpaceRosterScreen() {
   if (loading) {
     return (
       <View style={[s.screen, s.centre]}>
+      <AuroraBackground />
         <Stack.Screen options={spaceHeader(colors, 'Roster')} />
         <ActivityIndicator color={colors.primary} />
       </View>
@@ -226,7 +228,7 @@ export default function SpaceRosterScreen() {
 }
 
 const styles = (c: Palette) => StyleSheet.create({
-  screen: { flex: 1, backgroundColor: c.bg },
+  screen: { flex: 1, backgroundColor: 'transparent' },
   centre: { alignItems: 'center', justifyContent: 'center' },
   body: { padding: 16, gap: 10, paddingBottom: 40 },
   card: { backgroundColor: c.card, borderRadius: 14, padding: 14 },

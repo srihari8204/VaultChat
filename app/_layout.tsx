@@ -32,7 +32,7 @@
 // eslint-disable-next-line import/order
 import '@livekit/react-native';
 
-import { BRAND_ACCENT } from '../constants/theme';
+import { BRAND_ACCENT, AuroraDark } from '../constants/theme';
 import { Buffer } from 'buffer';
 
 import { Stack, useRouter } from 'expo-router';
@@ -714,7 +714,11 @@ function RootLayout() {
     <FontReadyContext.Provider value={fontsReady}>
     <GestureHandlerRootView style={{ flex: 1 }}>
       <StatusBar style="light" />
-      <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: '#0A0A0F' } }}>
+      {/* The navigator's own ground stays OPAQUE at the aurora base. A
+          transparent contentStyle would let the previous screen show through a
+          native-stack push, so the blooms are mounted per screen instead (each
+          screen root is transparent with an <AuroraBackground /> behind it). */}
+      <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: AuroraDark.bg } }}>
 
         {/* Security — gesture disabled so user can't swipe back */}
         <Stack.Screen name="blocked" options={{ gestureEnabled: false }} />

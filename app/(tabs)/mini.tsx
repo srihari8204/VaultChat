@@ -12,6 +12,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { encField, decField } from '../../lib/cacheCrypto';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Stack, useRouter } from 'expo-router';
+import { TAB_BAR_SPACE } from '../../constants/layout';
 import React, { useEffect, useState } from 'react';
 import {
   Alert,
@@ -22,6 +23,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+import { AuroraBackground } from '../../components/ui';
 
 // ── Mini Apps matching PDF (page 12) ─────────────────────────────
 // Row 1: Watch, Walkie, Screen
@@ -317,6 +319,7 @@ export default function MiniAppsScreen() {
   return (
     <View style={styles.container}>
       <Stack.Screen options={{ headerShown: false }} />
+      <AuroraBackground variant="mini" />
 
       <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
         {/* ── Header ────────────────────────────────── */}
@@ -399,11 +402,12 @@ export default function MiniAppsScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#0D0F14',
+    backgroundColor: '#0A0810',
   },
   scroll: {
     padding: 20,
     paddingTop: 56,
+    paddingBottom: TAB_BAR_SPACE + 16,
   },
   headerRow: {
     flexDirection: 'row',

@@ -18,6 +18,7 @@ import {
   createSyncCode, getSyncStatus, verifySyncCode, createDirectChat,
   type SyncInitiator,
 } from '../lib/chatService';
+import { AuroraBackground } from '../components/ui';
 
 type Tab = 'my-code' | 'enter-code';
 type Phase = 'idle' | 'generating' | 'waiting' | 'verifying' | 'done' | 'error';
@@ -111,6 +112,7 @@ export default function SyncContactScreen() {
   if (phase === 'done' && synced) {
     return (
       <SafeAreaView style={s.root}>
+      <AuroraBackground />
         <View style={{ flex: 1, padding: 24, alignItems: 'center', justifyContent: 'center' }}>
           <Text style={{ fontSize: 56, marginBottom: 16 }}>✅</Text>
           <Text style={[s.heading, { color: colors.purple, textAlign: 'center', marginBottom: 8 }]}>Contact Synced!</Text>
@@ -256,7 +258,7 @@ export default function SyncContactScreen() {
 }
 
 const makeStyles = (c: Palette) => StyleSheet.create({
-  root: { flex: 1, backgroundColor: c.bg },
+  root: { flex: 1, backgroundColor: 'transparent' },
   heading: { fontSize: 20, fontWeight: '900', color: c.text, marginBottom: 4 },
   sub: { fontSize: 12, color: c.textDim, lineHeight: 18 },
   label: { fontSize: 9, fontWeight: '700', color: c.textFaint, letterSpacing: 2, marginBottom: 4 },

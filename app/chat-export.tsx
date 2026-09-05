@@ -17,6 +17,7 @@ import { type Palette, BRAND_ACCENT } from '../constants/theme';
 import { useTheme } from '../lib/theme';
 import { getMessages, type Message } from '../lib/chatService';
 import { getCurrentUserAsync } from './(constants)/authService';
+import { AuroraBackground } from '../components/ui';
 
 const PAGE = 200;
 
@@ -147,6 +148,7 @@ export default function ChatExportScreen() {
 
   return (
     <View style={s.container}>
+      <AuroraBackground />
       <Stack.Screen options={{ headerShown: false }} />
       <StatusBar barStyle="light-content" />
 
@@ -201,7 +203,7 @@ export default function ChatExportScreen() {
 }
 
 const makeStyles = (c: Palette) => StyleSheet.create({
-  container: { flex: 1, backgroundColor: c.bg },
+  container: { flex: 1, backgroundColor: 'transparent' },
   header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingTop: HEADER_TOP, paddingHorizontal: 16, paddingBottom: 8 },
   backBtn: { width: 40, height: 40, justifyContent: 'center', alignItems: 'center' },
   headerTitle: { color: c.text, fontSize: 18, fontWeight: '700' },

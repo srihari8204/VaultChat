@@ -16,6 +16,7 @@ import { type Palette } from '../constants/theme';
 import { useTheme } from '../lib/theme';
 import { onboarding } from '../lib/onboarding';
 import { Sheet, type SheetAction } from '../components/ui/Sheet';
+import { AuroraBackground } from '../components/ui';
 
 function ageOf(d: Date): number {
   const n = new Date();
@@ -76,6 +77,7 @@ export default function OnboardProfile() {
 
   return (
     <View style={s.screen}>
+      <AuroraBackground />
       <Stack.Screen options={{ headerShown: false }} />
       <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
         <ScrollView contentContainerStyle={s.body} keyboardShouldPersistTaps="handled">
@@ -153,7 +155,7 @@ export default function OnboardProfile() {
 }
 
 const makeStyles = (c: Palette) => StyleSheet.create({
-  screen: { flex: 1, backgroundColor: c.bg },
+  screen: { flex: 1, backgroundColor: 'transparent' },
   body: { padding: 24, paddingTop: HEADER_TOP, paddingBottom: 48 },
   back: { marginBottom: 8 },
   backTxt: { color: c.text, fontSize: 26 },

@@ -39,6 +39,7 @@ import { listShopLists, saveShopList, deleteShopList, type ShopList } from '../d
 import {
   t, useShopBookLang, initShopBookLang, setShopBookLang, SB_LANGUAGES, speechLocale,
 } from '../lib/shopbookI18n';
+import { Aurora } from '../constants/theme';
 
 // ── palette (green + navy, from the SHOP BOOK poster) ──────────────
 const C = {
@@ -1675,7 +1676,7 @@ function OwnerDashboard({ shop, onSettings, onCoupons, onSuppliers, onPlans, onR
           <View style={s.modalCard}>
             <Text style={s.modalTitle}>{shop.name}</Text>
             <Text style={[s.hint, { textAlign: 'center' }]}>Customers scan this to open your shop</Text>
-            <View style={{ alignItems: 'center', marginVertical: 18, backgroundColor: '#fff', padding: 14, borderRadius: 14 }}>
+            <View style={{ alignItems: 'center', marginVertical: 18, backgroundColor: Aurora.card, padding: 14, borderRadius: 14 }}>
               <QRCode value={deepLink} size={190} color={C.navy} backgroundColor="#ffffff" />
             </View>
             <TouchableOpacity style={s.primaryBtn} onPress={() => Share.share({ message: `Order from ${shop.name} on Shop Book 🛍️\n${deepLink}` })}>
@@ -4521,7 +4522,7 @@ const s = StyleSheet.create({
   modeRow: { flexDirection: 'row', backgroundColor: C.greenDark, padding: 6, gap: 6 },
   modeBtn: {
     flex: 1, flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 6,
-    paddingVertical: 9, borderRadius: 10, backgroundColor: '#fff',
+    paddingVertical: 9, borderRadius: 10, backgroundColor: Aurora.card,
   },
   modeBtnActive: { backgroundColor: C.navy },
   modeText: { color: C.green, fontWeight: '700', fontSize: 13 },

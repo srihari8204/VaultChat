@@ -13,6 +13,7 @@ import { type Palette } from '../constants/theme';
 import { useTheme } from '../lib/theme';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { getDecoyChats, type DecoyChat } from '../lib/ghostProtocol';
+import { AuroraBackground } from '../components/ui';
 
 
 const GRADS = [
@@ -78,6 +79,7 @@ export default function DecoyChatList() {
 
   return (
     <SafeAreaView style={s.container}>
+      <AuroraBackground />
       <StatusBar barStyle="light-content" />
 
       {/* Header — identical to real chats */}
@@ -137,7 +139,7 @@ export default function DecoyChatList() {
 }
 
 const makeStyles = (c: Palette) => StyleSheet.create({
-  container: { flex: 1, backgroundColor: c.bg },
+  container: { flex: 1, backgroundColor: 'transparent' },
   header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 16, paddingTop: 12, paddingBottom: 8 },
   title: { color: '#fff', fontSize: 24, fontWeight: '900', letterSpacing: -0.5 },
   headerRight: { flexDirection: 'row', alignItems: 'center' },

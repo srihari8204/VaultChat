@@ -23,6 +23,7 @@ import { useTheme } from '../lib/theme';
 import { getCurrentSnapshot } from '../services/security/deviceSecurity/postureStore';
 import { runMonitoringScan } from '../services/security/deviceSecurity/monitorService';
 import { buildDashboardViewModel, type DashboardVM } from '../services/security/deviceSecurity/viewModel';
+import { AuroraBackground } from '../components/ui';
 
 const STATUS_ICON: Record<string, keyof typeof Ionicons.glyphMap> = {
   critical: 'close-circle', warning: 'alert-circle', clear: 'checkmark-circle',
@@ -74,6 +75,7 @@ export default function SecurityHubScreen() {
 
   return (
     <View style={S.container}>
+      <AuroraBackground />
       <View style={S.header}>
         <TouchableOpacity onPress={() => router.back()} style={S.backBtn} hitSlop={10}>
           <Ionicons name="chevron-back" size={26} color={colors.text} />
@@ -168,7 +170,7 @@ export default function SecurityHubScreen() {
 }
 
 const makeStyles = (c: Palette) => StyleSheet.create({
-  container: { flex: 1, backgroundColor: c.bg },
+  container: { flex: 1, backgroundColor: 'transparent' },
   header: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingTop: HEADER_TOP, paddingBottom: 14, paddingHorizontal: 12, borderBottomWidth: 1, borderBottomColor: c.border },
   backBtn: { padding: 4 },
   headerTitle: { color: c.text, fontSize: 18, fontWeight: '800' },

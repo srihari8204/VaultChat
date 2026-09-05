@@ -37,6 +37,7 @@ import {
   verifyPin,
   type ChatSummary,
 } from '../lib/chatService';
+import { AuroraBackground } from '../components/ui';
 
 const MAX_ATTEMPTS = 5;
 
@@ -110,6 +111,7 @@ function PinGate({
 
   return (
     <View style={[S.screen, S.center, { paddingHorizontal: 32 }]}>
+      <AuroraBackground />
       <StatusBar barStyle="light-content" />
       <Text style={S.gateIcon}>🔒</Text>
       <Text style={S.gateTitle}>Enter your PIN</Text>
@@ -275,7 +277,7 @@ function HiddenList({ router }: { router: any }) {
 
 
 const makeStyles = (c: Palette) => StyleSheet.create({
-  screen:       { flex: 1, backgroundColor: c.bg },
+  screen: { flex: 1, backgroundColor: 'transparent' },
   center:       { justifyContent: 'center', alignItems: 'center' },
 
   // PIN gate

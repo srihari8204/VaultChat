@@ -31,6 +31,7 @@ import {
   getLeave, requestLeave, decideLeave, getLeaveBalance,
   type LeaveRequest, type LeaveBalance,
 } from '../lib/spaces/api';
+import { AuroraBackground } from '../components/ui';
 
 const KINDS = ['casual', 'sick', 'privilege', 'unpaid', 'other'];
 
@@ -193,6 +194,7 @@ export default function SpaceLeaveScreen() {
 
   return (
     <View style={s.screen}>
+      <AuroraBackground />
       <Stack.Screen options={spaceHeader(colors, `${spaceName} · Leave`, { id: spaceId, name: params.name })} />
 
       {/* Tabs (Business design: Leave screen). For a plain employee the server
@@ -321,7 +323,7 @@ export default function SpaceLeaveScreen() {
 }
 
 const styles = (c: Palette) => StyleSheet.create({
-  screen: { flex: 1, backgroundColor: c.bg },
+  screen: { flex: 1, backgroundColor: 'transparent' },
   body: { padding: 16, gap: 10, paddingBottom: 90 },
   centre: { alignItems: 'center', gap: 10, paddingVertical: 40 },
   card: { backgroundColor: c.card, borderRadius: 14, padding: 14, gap: 8 },

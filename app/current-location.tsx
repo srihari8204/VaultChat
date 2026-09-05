@@ -12,6 +12,7 @@ import { useTheme } from '../lib/theme';
 import { Stack, useRouter, useLocalSearchParams } from 'expo-router';
 import * as Location from 'expo-location';
 import { sendMessage } from '../lib/chatService';
+import { AuroraBackground } from '../components/ui';
 
 // const RED = '#EF4444';
 
@@ -90,6 +91,7 @@ export default function CurrentLocationScreen() {
 
   return (
     <View style={s.screen}>
+      <AuroraBackground />
       <Stack.Screen options={{ headerShown: false }} />
 
       <View style={s.header}>
@@ -171,7 +173,7 @@ export default function CurrentLocationScreen() {
 }
 
 const makeStyles = (c: Palette) => StyleSheet.create({
-  screen: { flex: 1, backgroundColor: c.bg },
+  screen: { flex: 1, backgroundColor: 'transparent' },
   header: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingTop: Platform.OS === 'ios' ? 56 : 44, paddingBottom: 14, paddingHorizontal: 16, backgroundColor: c.card, borderBottomWidth: 1, borderBottomColor: c.border },
   backBtn: { width: 36, height: 36, borderRadius: 18, backgroundColor: '#2A2D3A', alignItems: 'center', justifyContent: 'center' },
   backTxt: { fontSize: 18, color: c.text },

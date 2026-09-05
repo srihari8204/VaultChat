@@ -60,6 +60,7 @@ import {
 } from '../lib/chatService';
 import { unregisterPushToken } from '../lib/push';
 import { disconnect as disconnectSocket } from '../lib/socket';
+import { AuroraBackground } from '../components/ui';
 
 export default function SettingsScreen() {
   const router = useRouter();
@@ -228,6 +229,7 @@ export default function SettingsScreen() {
   if (loading || !settings) {
     return (
       <View style={[S.screen, S.center]}>
+      <AuroraBackground />
         <ActivityIndicator color={colors.primary} size="large" />
       </View>
     );
@@ -545,7 +547,7 @@ function ToggleRow({
 }
 
 const makeStyles = (c: Palette) => StyleSheet.create({
-  screen:        { flex: 1, backgroundColor: c.bg },
+  screen: { flex: 1, backgroundColor: 'transparent' },
   center:        { justifyContent: 'center', alignItems: 'center' },
 
   header:        { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingTop: HEADER_TOP, paddingBottom: 12, gap: 8 },

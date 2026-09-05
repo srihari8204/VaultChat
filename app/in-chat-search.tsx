@@ -21,6 +21,7 @@ import { type Palette } from '../constants/theme';
 import { useTheme } from '../lib/theme';
 import { searchInChat, type InChatMessageHit } from '../lib/chatService';
 import { setPendingJump } from '../lib/chatJump';
+import { AuroraBackground } from '../components/ui';
 
 function useS() {
   const { colors } = useTheme();
@@ -119,6 +120,7 @@ export default function InChatSearchScreen() {
 
   return (
     <View style={s.root}>
+      <AuroraBackground />
       <StatusBar barStyle="light-content" backgroundColor={colors.bg} />
       <Stack.Screen options={{ headerShown: false }} />
 
@@ -196,7 +198,7 @@ export default function InChatSearchScreen() {
 }
 
 const makeStyles = (c: Palette) => StyleSheet.create({
-  root: { flex: 1, backgroundColor: c.bg },
+  root: { flex: 1, backgroundColor: 'transparent' },
   header: {
     flexDirection: 'row',
     alignItems: 'center',

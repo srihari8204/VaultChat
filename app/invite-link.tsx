@@ -17,6 +17,7 @@ import { type Palette } from '../constants/theme';
 import { useTheme } from '../lib/theme';
 import { copyAndAutoClear } from '../lib/clipboardSafe';
 import { listInviteLinks, createInviteLink, revokeInviteLink, type InviteLink } from '../lib/chatService';
+import { AuroraBackground } from '../components/ui';
 
 const JOIN_BASE = 'https://vaultchat.app/join/';
 const EXPIRY_OPTS = [
@@ -97,6 +98,7 @@ export default function InviteLinkScreen() {
 
   return (
     <View style={s.container}>
+      <AuroraBackground />
       <Stack.Screen options={{ headerShown: false }} />
       <StatusBar barStyle="light-content" />
 
@@ -191,7 +193,7 @@ export default function InviteLinkScreen() {
 }
 
 const makeStyles = (c: Palette) => StyleSheet.create({
-  container: { flex: 1, backgroundColor: c.bg },
+  container: { flex: 1, backgroundColor: 'transparent' },
   header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingTop: HEADER_TOP, paddingHorizontal: 16, paddingBottom: 12 },
   backBtn: { width: 40, height: 40, justifyContent: 'center', alignItems: 'center' },
   title: { color: c.text, fontSize: 18, fontWeight: '800' },

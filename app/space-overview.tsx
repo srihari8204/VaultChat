@@ -29,6 +29,7 @@ import { BIZ_WARN, BIZ_TEAL, BIZ_GRAY } from '../constants/businessTheme';
 import { useSpaceColors, spaceHeader } from '../lib/spaces/theme';
 import { getOpsSummary, type OpsSummary } from '../lib/spaces/api';
 import Donut from '../components/spaces/Donut';
+import { AuroraBackground } from '../components/ui';
 
 interface Tile {
   key: string;
@@ -106,6 +107,7 @@ export default function SpaceOverviewScreen() {
   if (loading) {
     return (
       <View style={[s.screen, s.centre]}>
+      <AuroraBackground />
         <Stack.Screen options={spaceHeader(colors, 'Overview')} />
         <ActivityIndicator color={colors.primary} />
       </View>
@@ -467,7 +469,7 @@ function Action({ c, icon, tint, label, onPress }: {
 }
 
 const styles = (c: Palette) => StyleSheet.create({
-  screen: { flex: 1, backgroundColor: c.bg },
+  screen: { flex: 1, backgroundColor: 'transparent' },
   centre: { alignItems: 'center', justifyContent: 'center' },
   body: { padding: 16, gap: 10, paddingBottom: 40 },
   sos: {

@@ -30,6 +30,7 @@ import { useTheme } from '../lib/theme';
 import {
   createChatCode, getChatCode, joinChatCode, revokeChatCode, type ChatCode,
 } from '../lib/chatService';
+import { AuroraBackground } from '../components/ui';
 
 // The four things a code can open.
 //
@@ -147,6 +148,7 @@ export default function ChatCodeScreen() {
 
   return (
     <KeyboardAvoidingView style={S.screen} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+      <AuroraBackground />
       <View style={S.header}>
         <TouchableOpacity onPress={() => router.back()} style={S.backBtn} activeOpacity={0.7}>
           <Ionicons name="arrow-back" size={24} color={colors.text} />
@@ -290,7 +292,7 @@ function useS() {
 }
 
 const makeStyles = (c: Palette) => StyleSheet.create({
-  screen: { flex: 1, backgroundColor: c.bg },
+  screen: { flex: 1, backgroundColor: 'transparent' },
   header: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingTop: 56, paddingBottom: 12, gap: 8 },
   backBtn: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
   title: { color: c.text, fontSize: 20, fontWeight: '800' },

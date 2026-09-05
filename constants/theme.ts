@@ -3,8 +3,6 @@
  * There are many other ways to style your app. For example, [Nativewind](https://www.nativewind.dev/), [Tamagui](https://tamagui.dev/), [unistyles](https://reactnativeunistyles.vercel.app), etc.
  */
 
-import { Platform } from 'react-native';
-
 const tintColorLight = '#0a7ea4';
 const tintColorDark = '#fff';
 
@@ -27,31 +25,6 @@ export const Colors = {
   },
 };
 
-export const Fonts = Platform.select({
-  ios: {
-    /** iOS `UIFontDescriptorSystemDesignDefault` */
-    sans: 'system-ui',
-    /** iOS `UIFontDescriptorSystemDesignSerif` */
-    serif: 'ui-serif',
-    /** iOS `UIFontDescriptorSystemDesignRounded` */
-    rounded: 'ui-rounded',
-    /** iOS `UIFontDescriptorSystemDesignMonospaced` */
-    mono: 'ui-monospace',
-  },
-  default: {
-    sans: 'normal',
-    serif: 'serif',
-    rounded: 'normal',
-    mono: 'monospace',
-  },
-  web: {
-    sans: "system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif",
-    serif: "Georgia, 'Times New Roman', serif",
-    rounded: "'SF Pro Rounded', 'Hiragino Maru Gothic ProN', Meiryo, 'MS PGothic', sans-serif",
-    mono: "SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace",
-  },
-});
-
 // ─── Obsidian Aurora design system ───────────────────────────────────
 // Two palettes (dark / light) sharing the brand accents (U3). `Aurora` is the
 // DARK palette and stays the static default so every existing `import { Aurora }`
@@ -73,6 +46,25 @@ export interface Palette {
   bubbleMetaIn: string; bubbleMetaOut: string;  // time/tick color inside the bubble
   tickRead: string;        // blue double-tick
   headerBar: string;       // chat top bar
+
+  // ─── Aurora Glass (U6) ───────────────────────────────────────────
+  // The design spends translucency ONLY on floating chrome (tab bar, chat
+  // header, composer, sheets) — never behind list content, where a blur per
+  // row costs a frame and buys nothing. List rows stay flat on `bg`, split by
+  // `hairline`; the personality comes from the aurora ground + gradient rings.
+  /** Translucent fill for floating chrome sat over scrolling content. */
+  glass: string;
+  /** Quieter translucent fill for inline surfaces (chips, field cards). */
+  glassSoft: string;
+  /** Hairline border drawn on a glass surface. */
+  glassStroke: string;
+  /** List separator — barely there. */
+  hairline: string;
+  /** Disc behind avatar initials, inside the gradient ring. */
+  groundDisc: string;
+  /** Accent gradient ends. Also the accent tint legible on glass. */
+  accentLight: string;
+  accentDeep: string;
 }
 
 // ─── Single source of truth for the brand ACCENT (lavender) ─────────
@@ -94,25 +86,33 @@ const BRAND = {
 
 export const AuroraDark: Palette = {
   ...BRAND,
-  bg:        '#0A0A0F', // near-black app background
-  surface:   'rgba(255,255,255,0.05)',
-  surfaceSolid: '#14141B',
-  card:      '#15161D',
-  border:    'rgba(255,255,255,0.08)',
+  bg:        '#0A0810', // deep aurora ground — the blooms are drawn on top of this
+  surface:   'rgba(255,255,255,0.06)',
+  surfaceSolid: '#1B1626',
+  card:      '#171320',
+  border:    'rgba(255,255,255,0.09)',
   separator: 'rgba(255,255,255,0.06)',
-  text:      '#FFFFFF',
-  textDim:   'rgba(255,255,255,0.5)',
-  textFaint: 'rgba(255,255,255,0.3)',
-  // Lavender-theme dark conversation palette (sent = accent, received = neutral)
-  chatBg:        '#0B0B10',
-  bubbleIn:      '#1E1F26',
+  text:      'rgba(255,255,255,0.96)',
+  textDim:   'rgba(255,255,255,0.48)',
+  textFaint: 'rgba(255,255,255,0.34)',
+  // Conversation: received sits on a raised ground tone, sent carries the accent.
+  chatBg:        '#0A0810',
+  bubbleIn:      '#1B1626',
   bubbleOut:     BRAND_ACCENT,
-  bubbleInText:  '#ECEDEE',
+  bubbleInText:  'rgba(255,255,255,0.96)',
   bubbleOutText: '#FFFFFF',
-  bubbleMetaIn:  '#8A8A93',
-  bubbleMetaOut: 'rgba(255,255,255,0.75)',
+  bubbleMetaIn:  'rgba(255,255,255,0.34)',
+  bubbleMetaOut: 'rgba(255,255,255,0.70)',
   tickRead:      '#FFFFFF',
-  headerBar:     '#15161D',
+  headerBar:     '#12101A',
+
+  glass:       'rgba(255,255,255,0.08)',
+  glassSoft:   'rgba(255,255,255,0.06)',
+  glassStroke: 'rgba(255,255,255,0.16)',
+  hairline:    'rgba(255,255,255,0.06)',
+  groundDisc:  '#171320',
+  accentLight: '#C9A6F5',
+  accentDeep:  '#7C3AED',
 };
 
 export const AuroraLight: Palette = {
@@ -136,6 +136,14 @@ export const AuroraLight: Palette = {
   bubbleMetaOut: 'rgba(255,255,255,0.85)',
   tickRead:      '#FFFFFF',
   headerBar:     '#FFFFFF',
+
+  glass:       'rgba(255,255,255,0.72)',
+  glassSoft:   'rgba(255,255,255,0.55)',
+  glassStroke: 'rgba(0,0,0,0.08)',
+  hairline:    'rgba(0,0,0,0.07)',
+  groundDisc:  '#FFFFFF',
+  accentLight: '#7C3AED',
+  accentDeep:  '#6D28D9',
 };
 
 /** The static default palette (dark). Existing screens import this directly. */
@@ -239,6 +247,30 @@ export const AVATAR_PALETTE = [
   BRAND_ACCENT, '#06B6D4', '#8B5CF6', '#F59E0B', '#EF4444',
   '#EC4899', '#3B82F6', '#14B8A6', '#F97316', '#6366F1',
 ] as const;
+
+/**
+ * Aurora Glass carries per-contact colour in the avatar's gradient RING, with a
+ * dark disc behind the initial — so identity is legible without giving every
+ * row a coloured block. Index-matched to AVATAR_PALETTE: [lighter, deeper].
+ */
+export const AVATAR_RING_PALETTE: readonly (readonly [string, string])[] = [
+  ['#C9A6F5', '#7C3AED'], ['#7DD3FC', '#0EA5E9'], ['#C4B5FD', '#6D28D9'],
+  ['#FCD34D', '#B45309'], ['#FDA4AF', '#B91C1C'], ['#F9A8D4', '#9D174D'],
+  ['#93C5FD', '#1E40AF'], ['#5EEAD4', '#0F766E'], ['#FDBA74', '#C2410C'],
+  ['#A5B4FC', '#4338CA'],
+] as const;
+
+function seedIndex(seed: string | null | undefined, len: number): number {
+  const s = seed || '?';
+  let h = 0;
+  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
+  return h % len;
+}
+
+/** Deterministic [light, deep] ring gradient for a contact. */
+export function avatarRing(seed: string | null | undefined): readonly [string, string] {
+  return AVATAR_RING_PALETTE[seedIndex(seed, AVATAR_RING_PALETTE.length)];
+}
 
 export function avatarColor(seed: string | null | undefined): string {
   const s = seed || '?';

@@ -10,6 +10,7 @@ import { type Palette } from '../constants/theme';
 import { useTheme } from '../lib/theme';
 import { onboarding, verifyMpinRemote, uploadAndSetProfilePhoto, onboardingError } from '../lib/onboarding';
 import { deviceSecurityAvailable, enableMfa } from '../lib/mfa';
+import { AuroraBackground } from '../components/ui';
 
 export default function OnboardSuccess() {
   const { colors } = useTheme();
@@ -54,6 +55,7 @@ export default function OnboardSuccess() {
 
   return (
     <View style={s.screen}>
+      <AuroraBackground />
       <Stack.Screen options={{ headerShown: false }} />
       <View style={s.body}>
         <View style={s.tick}><Text style={{ fontSize: 48 }}>✓</Text></View>
@@ -91,7 +93,7 @@ export default function OnboardSuccess() {
 }
 
 const makeStyles = (c: Palette) => StyleSheet.create({
-  screen: { flex: 1, backgroundColor: c.bg },
+  screen: { flex: 1, backgroundColor: 'transparent' },
   body: { flex: 1, paddingHorizontal: 24, paddingTop: 96, alignItems: 'center' },
   tick: { width: 96, height: 96, borderRadius: 48, backgroundColor: brandAlpha(0.15), borderWidth: 2, borderColor: c.primary, alignItems: 'center', justifyContent: 'center', marginBottom: 20 },
   title: { color: c.text, fontSize: 26, fontWeight: '900' },

@@ -12,6 +12,7 @@ import { useTheme } from '../lib/theme';
 import { SecurityQuestionRow } from '../components/auth/SecurityQuestionRow';
 import { REQUIRED_SECURITY_ANSWERS } from '../constants/securityQuestionPool';
 import { onboarding } from '../lib/onboarding';
+import { AuroraBackground } from '../components/ui';
 
 type Slot = { questionCode: string | null; answer: string };
 
@@ -39,6 +40,7 @@ export default function OnboardSecurity() {
 
   return (
     <View style={s.screen}>
+      <AuroraBackground />
       <Stack.Screen options={{ headerShown: false }} />
       <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
         <ScrollView contentContainerStyle={s.body} keyboardShouldPersistTaps="handled">
@@ -68,7 +70,7 @@ export default function OnboardSecurity() {
 }
 
 const makeStyles = (c: Palette) => StyleSheet.create({
-  screen: { flex: 1, backgroundColor: c.bg },
+  screen: { flex: 1, backgroundColor: 'transparent' },
   body: { padding: 24, paddingTop: HEADER_TOP, paddingBottom: 48 },
   back: { marginBottom: 8 },
   backTxt: { color: c.text, fontSize: 26 },

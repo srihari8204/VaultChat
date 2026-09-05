@@ -26,6 +26,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useSpaceColors, spaceHeader } from '../lib/spaces/theme';
 import type { Palette } from '../constants/theme';
 import { getWorkTasks, createWorkTask, setWorkTaskDone, type WorkTask } from '../lib/spaces/api';
+import { AuroraBackground } from '../components/ui';
 
 /** Priority always carries a WORD and its spec color, never color alone. */
 const PRIORITY_TONE: Record<WorkTask['priority'], string> = {
@@ -171,6 +172,7 @@ export default function SpaceTasksScreen() {
 
   return (
     <View style={s.screen}>
+      <AuroraBackground />
       <Stack.Screen options={spaceHeader(colors, `${spaceName} · Tasks`, { id: spaceId, name: params.name })} />
 
       {/* Tabs (Business design: Tasks screen). No "In Progress": the model has
@@ -275,7 +277,7 @@ export default function SpaceTasksScreen() {
 }
 
 const styles = (c: Palette) => StyleSheet.create({
-  screen: { flex: 1, backgroundColor: c.bg },
+  screen: { flex: 1, backgroundColor: 'transparent' },
   body: { padding: 16, gap: 8, paddingBottom: 90 },
   tabs: { flexDirection: 'row', gap: 8, paddingHorizontal: 16, paddingTop: 12 },
   tab: { flex: 1, alignItems: 'center', backgroundColor: c.card, borderRadius: 999, paddingVertical: 9 },

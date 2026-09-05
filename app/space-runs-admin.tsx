@@ -33,6 +33,7 @@ import {
 import type { Run, RunStop, RunRider } from '../lib/spaces/runs';
 import { circleMembers } from '../lib/family/circle';
 import type { CircleMember } from '../lib/family/types';
+import { AuroraBackground } from '../components/ui';
 
 const KINDS: { key: string; label: string }[] = [
   { key: 'school_pickup', label: 'Morning pickup' },
@@ -193,6 +194,7 @@ export default function SpaceRunsAdminScreen() {
   if (loading) {
     return (
       <View style={[s.screen, s.centre]}>
+      <AuroraBackground />
         <Stack.Screen options={spaceHeader(colors, 'Runs')} />
         <ActivityIndicator color={colors.primary} />
       </View>
@@ -390,7 +392,7 @@ function statusColour(r: Run, c: Palette): string {
 }
 
 const styles = (c: Palette) => StyleSheet.create({
-  screen: { flex: 1, backgroundColor: c.bg },
+  screen: { flex: 1, backgroundColor: 'transparent' },
   centre: { alignItems: 'center', justifyContent: 'center' },
   body: { padding: 16, gap: 10, paddingBottom: 40 },
   card: { backgroundColor: c.card, borderRadius: 14, padding: 14, gap: 8 },

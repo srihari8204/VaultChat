@@ -15,6 +15,7 @@ import {
 } from '../lib/batteryOptimization';
 import { getLowDataMode, setLowDataMode } from '../lib/callPrefs';
 import { canUseFullScreenIntent, openFullScreenIntentSettings } from '../lib/CallService';
+import { AuroraBackground } from '../components/ui';
 
 const DONE_KEY = 'vc_call_reliability_done';
 
@@ -46,6 +47,7 @@ export default function CallReliabilityScreen() {
 
   return (
     <View style={S.screen}>
+      <AuroraBackground />
       <Stack.Screen options={{ headerShown: false }} />
       <View style={S.header}>
         <TouchableOpacity onPress={() => router.back()} hitSlop={8} style={S.hBtn}><Ionicons name="arrow-back" size={24} color={colors.text} /></TouchableOpacity>
@@ -144,7 +146,7 @@ export default function CallReliabilityScreen() {
 }
 
 const makeStyles = (c: Palette) => StyleSheet.create({
-  screen: { flex: 1, backgroundColor: c.bg },
+  screen: { flex: 1, backgroundColor: 'transparent' },
   header: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 12, paddingTop: HEADER_TOP, paddingBottom: 12, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.border },
   hBtn: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
   title: { color: c.text, fontSize: 18, fontWeight: '700' },

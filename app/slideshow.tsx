@@ -12,6 +12,7 @@ import {
   Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
 import { useTheme } from '../lib/theme';
 import { type Palette } from '../constants/theme';
+import { AuroraBackground } from '../components/ui';
 
 const { width: SW, height: SH } = Dimensions.get('window');
 
@@ -99,6 +100,7 @@ export default function SlideshowScreen() {
   if (imageList.length === 0) {
     return (
       <View style={[st.screen, { justifyContent: 'center', alignItems: 'center' }]}>
+      <AuroraBackground />
         <Stack.Screen options={{ headerShown: false }} />
         <Text style={{ color: colors.text, fontSize: 18 }}>No images</Text>
         <TouchableOpacity onPress={() => router.back()} style={{ marginTop: 20 }}>
@@ -202,7 +204,7 @@ export default function SlideshowScreen() {
 }
 
 const makeStyles = (c: Palette) => StyleSheet.create({
-  screen: { flex: 1, backgroundColor: c.bg },
+  screen: { flex: 1, backgroundColor: 'transparent' },
   topBar: { position: 'absolute', top: 0, left: 0, right: 0, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingTop: HEADER_TOP, paddingHorizontal: 16, paddingBottom: 12, backgroundColor: 'rgba(0,0,0,0.6)' },
   topBtn: { width: 40, height: 40, borderRadius: 20, backgroundColor: 'rgba(255,255,255,0.1)', justifyContent: 'center', alignItems: 'center' },
   counter: { color: c.text, fontSize: 16, fontWeight: '700' },

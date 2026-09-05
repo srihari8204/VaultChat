@@ -22,6 +22,7 @@ import * as ImagePicker from 'expo-image-picker';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as Sharing from 'expo-sharing';
 import { vaultEncrypt, vaultDecrypt } from '../lib/vaultCrypto';
+import { Aurora } from '../constants/theme';
 
 // ─────────────────────────────────────────────────────────────────
 // Types
@@ -593,70 +594,70 @@ export default function VaultScreen() {
 
 const pinStyles = StyleSheet.create({
   container: {
-    flex: 1, backgroundColor: '#FFFFFF',
+    flex: 1, backgroundColor: Aurora.card,
     alignItems: 'center', justifyContent: 'center',
   },
   lockIcon:  { fontSize: 52, marginBottom: 12 },
-  title:     { fontSize: 26, fontWeight: 'bold', color: '#000000', marginBottom: 4 },
-  sub:       { fontSize: 13, color: '#6B7280', marginBottom: 32 },
+  title:     { fontSize: 26, fontWeight: 'bold', color: Aurora.text, marginBottom: 4 },
+  sub:       { fontSize: 13, color: Aurora.textDim, marginBottom: 32 },
   dotsRow:   { flexDirection: 'row', gap: 12, marginBottom: 10 },
   shake:     { transform: [{ translateX: 8 }] },
   dot: {
     width: 14, height: 14, borderRadius: 7,
-    backgroundColor: '#F3F4F6',
-    borderWidth: 1.5, borderColor: '#E5E7EB',
+    backgroundColor: Aurora.surfaceSolid,
+    borderWidth: 1.5, borderColor: Aurora.border,
   },
   dotFilled: { backgroundColor: BRAND_ACCENT, borderColor: BRAND_ACCENT },
   error:     { color: '#FF4D6D', fontSize: 13, marginBottom: 12 },
   keyRow:    { flexDirection: 'row', gap: 20, marginBottom: 14 },
   key: {
     width: 72, height: 72, borderRadius: 36,
-    backgroundColor: '#F9FAFB',
-    borderWidth: 1, borderColor: '#E5E7EB',
+    backgroundColor: Aurora.bg,
+    borderWidth: 1, borderColor: Aurora.border,
     justifyContent: 'center', alignItems: 'center',
   },
   keyEmpty:  { width: 72, height: 72 },
-  keyText:   { fontSize: 24, color: '#000000', fontWeight: '600' },
-  note:      { marginTop: 28, color: '#6B7280', fontSize: 11 },
+  keyText:   { fontSize: 24, color: Aurora.text, fontWeight: '600' },
+  note:      { marginTop: 28, color: Aurora.textDim, fontSize: 11 },
 });
 
 const styles = StyleSheet.create({
-  container:    { flex: 1, backgroundColor: '#FFFFFF' },
+  container:    { flex: 1, backgroundColor: Aurora.card },
 
   // Header
   header: {
     flexDirection: 'row', alignItems: 'center',
-    backgroundColor: '#F9FAFB',
+    backgroundColor: Aurora.bg,
     paddingTop: 48, paddingBottom: 12, paddingHorizontal: 16,
-    borderBottomWidth: 0.5, borderBottomColor: '#E5E7EB',
+    borderBottomWidth: 0.5, borderBottomColor: Aurora.border,
     gap: 12,
   },
   back:         { fontSize: 28, color: BRAND_ACCENT, fontWeight: 'bold' },
   headerCenter: { flex: 1 },
-  headerTitle:  { fontSize: 18, fontWeight: 'bold', color: '#000000' },
+  headerTitle:  { fontSize: 18, fontWeight: 'bold', color: Aurora.text },
   headerSub:    { fontSize: 9, color: BRAND_ACCENT, marginTop: 1 },
   backupBtn: {
-    width: 36, height: 36, backgroundColor: '#F3F4F6',
-    borderRadius: 9, borderWidth: 0.5, borderColor: '#E5E7EB',
+    width: 36, height: 36, backgroundColor: Aurora.surfaceSolid,
+    borderRadius: 9, borderWidth: 0.5, borderColor: Aurora.border,
     justifyContent: 'center', alignItems: 'center',
   },
   backupBtnText: { fontSize: 18 },
 
   // Stats
   statsBar: {
-    flexDirection: 'row', backgroundColor: '#F9FAFB',
+    flexDirection: 'row', backgroundColor: Aurora.bg,
     paddingVertical: 12, paddingHorizontal: 20,
-    borderBottomWidth: 0.5, borderBottomColor: '#E5E7EB',
+    borderBottomWidth: 0.5, borderBottomColor: Aurora.border,
   },
   statItem:    { flex: 1, alignItems: 'center' },
-  statNum:     { fontSize: 15, fontWeight: 'bold', color: '#000000' },
-  statLabel:   { fontSize: 10, color: '#6B7280', marginTop: 2 },
-  statDivider: { width: 0.5, backgroundColor: '#E5E7EB', marginVertical: 4 },
+  statNum:     { fontSize: 15, fontWeight: 'bold', color: Aurora.text },
+  statLabel:   { fontSize: 10, color: Aurora.textDim, marginTop: 2 },
+  statDivider: { width: 0.5, backgroundColor: Aurora.surfaceSolid, marginVertical: 4 },
 
   // Tabs
   tabs: {
     flexDirection: 'row',
-    borderBottomWidth: 0.5, borderBottomColor: '#E5E7EB',
+    borderBottomWidth: 0.5, borderBottomColor: Aurora.border,
   },
   tab: {
     flex: 1, alignItems: 'center', paddingVertical: 10, gap: 3,
@@ -665,7 +666,7 @@ const styles = StyleSheet.create({
     borderBottomWidth: 2, borderBottomColor: BRAND_ACCENT,
   },
   tabIcon:       { fontSize: 20 },
-  tabText:       { fontSize: 10, color: '#6B7280' },
+  tabText:       { fontSize: 10, color: Aurora.textDim },
   tabTextActive: { color: BRAND_ACCENT, fontWeight: 'bold' },
   tabCount: {
     borderRadius: 8, paddingHorizontal: 5, paddingVertical: 1,
@@ -676,7 +677,7 @@ const styles = StyleSheet.create({
   loadingWrap: {
     flex: 1, justifyContent: 'center', alignItems: 'center', gap: 12,
   },
-  loadingText: { fontSize: 13, color: '#6B7280' },
+  loadingText: { fontSize: 13, color: Aurora.textDim },
 
   // List
   listContent: { padding: 14, paddingBottom: 100, flexGrow: 1 },
@@ -686,15 +687,15 @@ const styles = StyleSheet.create({
     flex: 1, alignItems: 'center', paddingTop: 64, gap: 10,
   },
   emptyIcon:  { fontSize: 52 },
-  emptyTitle: { fontSize: 16, fontWeight: 'bold', color: '#6B7280' },
-  emptyHint:  { fontSize: 12, color: '#6B7280', textAlign: 'center' },
+  emptyTitle: { fontSize: 16, fontWeight: 'bold', color: Aurora.textDim },
+  emptyHint:  { fontSize: 12, color: Aurora.textDim, textAlign: 'center' },
 
   // File row
   fileRow: {
     flexDirection: 'row', alignItems: 'center',
-    backgroundColor: '#F9FAFB',
+    backgroundColor: Aurora.bg,
     borderRadius: 12, padding: 12, marginBottom: 8,
-    borderWidth: 0.5, borderColor: '#E5E7EB',
+    borderWidth: 0.5, borderColor: Aurora.border,
   },
   fileIcon: {
     width: 44, height: 44, borderRadius: 10,
@@ -702,8 +703,8 @@ const styles = StyleSheet.create({
   },
   fileIconText:  { fontSize: 22 },
   fileInfo:      { flex: 1 },
-  fileName:      { fontSize: 14, fontWeight: 'bold', color: '#000000', marginBottom: 3 },
-  fileMeta:      { fontSize: 11, color: '#6B7280' },
+  fileName:      { fontSize: 14, fontWeight: 'bold', color: Aurora.text, marginBottom: 3 },
+  fileMeta:      { fontSize: 11, color: Aurora.textDim },
   fileActions:   { flexDirection: 'row', alignItems: 'center', gap: 8 },
   encBadge: {
     backgroundColor: '#D1FAE5', borderRadius: 6,
@@ -729,41 +730,41 @@ const styles = StyleSheet.create({
     flex: 1, backgroundColor: '#00000088', justifyContent: 'flex-end',
   },
   backupPanel: {
-    backgroundColor: '#F9FAFB',
+    backgroundColor: Aurora.bg,
     borderTopLeftRadius: 20, borderTopRightRadius: 20,
     padding: 20, paddingBottom: 36,
   },
   backupHandle: {
-    width: 40, height: 4, backgroundColor: '#E5E7EB',
+    width: 40, height: 4, backgroundColor: Aurora.surfaceSolid,
     borderRadius: 2, alignSelf: 'center', marginBottom: 16,
   },
   backupTitle: {
-    fontSize: 17, fontWeight: 'bold', color: '#000000',
+    fontSize: 17, fontWeight: 'bold', color: Aurora.text,
     textAlign: 'center', marginBottom: 8,
   },
   backupDesc: {
-    fontSize: 13, color: '#6B7280', lineHeight: 20,
+    fontSize: 13, color: Aurora.textDim, lineHeight: 20,
     textAlign: 'center', marginBottom: 20,
   },
-  backupLabel:   { fontSize: 12, color: '#6B7280', marginBottom: 6 },
+  backupLabel:   { fontSize: 12, color: Aurora.textDim, marginBottom: 6 },
   backupInput: {
-    backgroundColor: '#F3F4F6', borderRadius: 10,
-    borderWidth: 0.5, borderColor: '#E5E7EB',
+    backgroundColor: Aurora.surfaceSolid, borderRadius: 10,
+    borderWidth: 0.5, borderColor: Aurora.border,
     paddingHorizontal: 14, paddingVertical: 11,
-    color: '#000000', fontSize: 15, marginBottom: 16,
+    color: Aurora.text, fontSize: 15, marginBottom: 16,
   },
   backupBtnRow:  { flexDirection: 'row', gap: 10, marginBottom: 12 },
   backupCancelBtn: {
-    flex: 1, backgroundColor: '#F3F4F6',
-    borderRadius: 10, borderWidth: 0.5, borderColor: '#E5E7EB',
+    flex: 1, backgroundColor: Aurora.surfaceSolid,
+    borderRadius: 10, borderWidth: 0.5, borderColor: Aurora.border,
     paddingVertical: 13, alignItems: 'center',
   },
-  backupCancelText:  { color: '#6B7280', fontWeight: 'bold' },
+  backupCancelText:  { color: Aurora.textDim, fontWeight: 'bold' },
   backupConfirmBtn: {
     flex: 1, backgroundColor: BRAND_ACCENT,
     borderRadius: 10, paddingVertical: 13, alignItems: 'center',
   },
   backupConfirmText: { color: '#FFFFFF', fontWeight: 'bold', fontSize: 15 },
-  backupLastText:    { fontSize: 11, color: '#6B7280', textAlign: 'center' },
+  backupLastText:    { fontSize: 11, color: Aurora.textDim, textAlign: 'center' },
   backupNote:        { fontSize: 10, color: '#E5E7EB', textAlign: 'center', marginTop: 6 },
 });

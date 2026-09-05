@@ -18,6 +18,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import * as Location from 'expo-location';
 import { Accelerometer } from 'expo-sensors';
 import { listTrustedContacts, sendSOS, listSOSHistory } from '../lib/chatService';
+import { AuroraBackground } from '../components/ui';
 
 
 const SOS_MESSAGE = (name: string, lat: number, lng: number) =>
@@ -229,6 +230,7 @@ export default function EmergencySOSScreen() {
 
   return (
     <View style={styles.container}>
+      <AuroraBackground />
       <Stack.Screen options={{ headerShown: false }} />
       <LinearGradient colors={['#FFFFFF', '#0D0A18', '#FFFFFF']} style={StyleSheet.absoluteFill} />
 
@@ -369,7 +371,7 @@ export default function EmergencySOSScreen() {
 
 const SOS_SIZE = 160;
 const makeStyles = (c: Palette) => StyleSheet.create({
-  container: { flex: 1, backgroundColor: c.bg },
+  container: { flex: 1, backgroundColor: 'transparent' },
   header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingTop: Platform.OS === 'ios' ? 56 : 40, paddingHorizontal: 16, paddingBottom: 14 },
   backBtn: { width: 40, height: 40, borderRadius: 12, backgroundColor: 'rgba(74,159,255,0.08)', justifyContent: 'center', alignItems: 'center' },
   backArrow: { color: c.accent, fontSize: 20 },

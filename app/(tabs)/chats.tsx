@@ -5,7 +5,7 @@
 // and "All Chats" sections. FAB → /new-chat. Data wiring (presence, folders,
 // pin/archive/mute/hidden, unread) is preserved from the previous version.
 
-import { HEADER_TOP } from '../../constants/layout';
+import { HEADER_TOP, TAB_BAR_SPACE } from '../../constants/layout';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
@@ -17,7 +17,7 @@ import { Swipeable } from 'react-native-gesture-handler';
 import { Ionicons } from '@expo/vector-icons';
 import { type Palette, brandAlpha } from '../../constants/theme';
 import { useTheme } from '../../lib/theme';
-import { Avatar } from '../../components/ui';
+import { Avatar, AuroraBackground } from '../../components/ui';
 import { canSplit } from '../../lib/responsive';
 import { getAccessToken } from '../../lib/api';
 import {
@@ -461,6 +461,7 @@ export default function ChatsScreen() {
 
   return (
     <View style={S.screen}>
+      <AuroraBackground variant="chats" />
       {selectMode ? (
         <View style={S.header}>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 14 }}>
@@ -612,7 +613,7 @@ export default function ChatsScreen() {
             />
           )}
           ItemSeparatorComponent={() => <View style={S.separator} />}
-          contentContainerStyle={{ paddingBottom: 110 }}
+          contentContainerStyle={{ paddingBottom: TAB_BAR_SPACE + 16 }}
           refreshControl={<RefreshControl tintColor={colors.primary} refreshing={refreshing} onRefresh={onRefresh} />}
           removeClippedSubviews
           maxToRenderPerBatch={12}
@@ -805,10 +806,11 @@ const ChatRow = memo(function ChatRow({
       <TouchableOpacity style={[S.row, isSelected && S.rowSelected]} onPress={onPress} onLongPress={onLongPress} delayLongPress={250} activeOpacity={0.7}>
         <TouchableOpacity style={S.avatarWrap} activeOpacity={0.7} onPress={onAvatarPress}>
           <Avatar
+            ring
             uri={showPhoto ? attachmentUrl(photoId!) : null}
             headers={authHeader ? { Authorization: authHeader } : undefined}
             name={title}
-            size={50}
+            size={52}
             presence={chat.type === 'direct' && chat.peerOnline ? 'online' : null}
             anon={!!chat.anonMasked}
           />
@@ -891,9 +893,9 @@ function formatRelative(iso: string): string {
 const makeStyles = (c: Palette) => StyleSheet.create({
   screen: { flex: 1, backgroundColor: c.bg },
   center: { justifyContent: 'center', alignItems: 'center' },
-  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingTop: HEADER_TOP, paddingBottom: 12 },
+  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 22, paddingTop: HEADER_TOP, paddingBottom: 14 },
   title: { color: c.text, fontSize: 28, fontWeight: '800' },
-  headerBtn: { width: 36, height: 36, borderRadius: 18, backgroundColor: c.surface, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: c.border },
+  headerBtn: { width: 40, height: 40, borderRadius: 20, backgroundColor: c.glassSoft, alignItems: 'center', justifyContent: 'center', borderWidth: StyleSheet.hairlineWidth, borderColor: c.glassStroke },
   // Avatar photo popup
   avBackdrop:   { flex: 1, backgroundColor: 'rgba(0,0,0,0.85)', alignItems: 'center', justifyContent: 'center', padding: 28 },
   avCard:       { width: '100%', maxWidth: 360, borderRadius: 16, overflow: 'hidden', backgroundColor: c.surfaceSolid },
@@ -924,20 +926,23 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   emptyBtnTxt: { color: '#FFFFFF', fontWeight: '800', fontSize: 14 },
 
   folderScroll: { flexGrow: 0, maxHeight: 50 },   // keep the chip row compact, never stretch vertically
-  folderRow: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 8, gap: 8 },
-  folderChip: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 14, paddingVertical: 7, borderRadius: 18, backgroundColor: c.surface, borderWidth: 1, borderColor: c.border },
+  folderRow: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 22, paddingVertical: 8, gap: 8 },
+  folderChip: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 15, paddingVertical: 8, borderRadius: 999, backgroundColor: c.glassSoft, borderWidth: StyleSheet.hairlineWidth, borderColor: c.glassStroke },
   folderChipActive: { backgroundColor: c.primary, borderColor: c.primary },
   folderTxt: { color: c.textDim, fontSize: 13, fontWeight: '600' },
   folderTxtActive: { color: '#FFFFFF' },
   folderCount: { color: c.textDim, fontSize: 11, fontWeight: '700', backgroundColor: c.surface, paddingHorizontal: 6, borderRadius: 8, overflow: 'hidden', minWidth: 18, textAlign: 'center' },
   folderCountActive: { color: c.primary, backgroundColor: '#FFFFFF' },
 
-  sectionHeader: { color: c.textDim, fontSize: 12, fontWeight: '700', letterSpacing: 0.5, textTransform: 'uppercase', paddingHorizontal: 20, paddingTop: 14, paddingBottom: 6, backgroundColor: c.bg },
-  separator: { height: 0.5, backgroundColor: c.separator, marginLeft: 82 },
+  sectionHeader: { color: c.textFaint, fontSize: 11, fontWeight: '700', letterSpacing: 0.6, textTransform: 'uppercase', paddingHorizontal: 22, paddingTop: 14, paddingBottom: 6, backgroundColor: 'transparent' },
+  separator: { height: StyleSheet.hairlineWidth, backgroundColor: c.hairline, marginLeft: 88 },
 
-  row: { flexDirection: 'row', height: 72, paddingHorizontal: 12, alignItems: 'center', gap: 12, backgroundColor: c.bg },
+  // Aurora Glass: rows are undecorated on purpose. No fill, no border, no
+  // shadow — the ground and the avatar ring carry the design, so the list stays
+  // legible at a glance and costs nothing to scroll.
+  row: { flexDirection: 'row', height: 76, paddingHorizontal: 22, alignItems: 'center', gap: 14, backgroundColor: 'transparent' },
   rowSelected: { backgroundColor: brandAlpha(0.14) },
-  avatarWrap: { width: 50, height: 50 },
+  avatarWrap: { width: 52, height: 52 },
   selBadge: { position: 'absolute', right: -2, bottom: -2, width: 20, height: 20, borderRadius: 10, alignItems: 'center', justifyContent: 'center', borderWidth: 2, borderColor: c.bg },
   selBadgeOn: { backgroundColor: c.primary },
   selBadgeOff: { backgroundColor: c.surfaceSolid, borderColor: c.textDim },
@@ -950,7 +955,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   rowBody: { flex: 1, gap: 4 },
   rowTop: { flexDirection: 'row', alignItems: 'center', gap: 5 },
   rowPin: { fontSize: 11 },
-  rowName: { color: c.text, fontSize: 16, fontWeight: '700', flexShrink: 1 },
+  rowName: { color: c.text, fontSize: 15.5, fontWeight: '600', flexShrink: 1 },
   rowMuted: { fontSize: 12 },
   rowTime: { color: c.textFaint, fontSize: 12, marginLeft: 'auto' },
   rowBottom: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
@@ -973,6 +978,6 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   actionIcon: { fontSize: 20 },
   actionLbl: { color: '#fff', fontSize: 11, fontWeight: '700' },
 
-  fab: { position: 'absolute', right: 20, bottom: 92, width: 58, height: 58, borderRadius: 29, backgroundColor: c.primary, alignItems: 'center', justifyContent: 'center', elevation: 8, shadowColor: c.primary, shadowOpacity: 0.4, shadowOffset: { width: 0, height: 4 }, shadowRadius: 10 },
+  fab: { position: 'absolute', right: 22, bottom: TAB_BAR_SPACE + 18, width: 60, height: 60, borderRadius: 30, backgroundColor: c.accentDeep, alignItems: 'center', justifyContent: 'center', borderWidth: StyleSheet.hairlineWidth, borderColor: c.glassStroke, elevation: 8, shadowColor: c.accentDeep, shadowOpacity: 0.55, shadowOffset: { width: 0, height: 10 }, shadowRadius: 24 },
   fabTxt: { fontSize: 22 },
 });

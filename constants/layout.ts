@@ -62,3 +62,15 @@ export const IS_NARROW = NARROW;
 export const IS_SHORT = SHORT;
 
 export default { HEADER_TOP, SCREEN_BOTTOM, IS_NARROW, IS_SHORT };
+
+/**
+ * Vertical space the FLOATING tab bar occupies (Aurora Glass, U6).
+ *
+ * The bar is `position: absolute` so content scrolls under its blur — that is
+ * the whole point of the treatment. The cost is that any scroll container on a
+ * tab screen must reserve this much bottom padding, or its last row can never
+ * be brought clear of the glass.
+ *
+ * 66 bar + 12 gap below it + the device's own bottom inset + 12 breathing room.
+ */
+export const TAB_BAR_SPACE: number = 66 + 12 + Math.max(BOTTOM_INSET, 10) + 12;

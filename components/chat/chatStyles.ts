@@ -104,7 +104,11 @@ export const makeStyles = (
   // paddingTop is the REAL status-bar height plus a small breathing gap, not a
   // fixed 56. Vertical padding tightens on narrow devices, where the header was
   // costing more of the conversation than the conversation could spare.
-  header:        { flexDirection: 'row', alignItems: 'center', paddingHorizontal: m.narrow ? 8 : 12, paddingTop: m.topInset + (m.narrow ? 4 : 6), paddingBottom: m.narrow ? 6 : 8, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.border, gap: m.narrow ? 4 : 8, backgroundColor: c.bg },
+  // Glass wrappers for the floating chrome. The inner header/composer stay
+  // transparent — these own the blur, the tint and the edge.
+  headerGlass:   { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.glassStroke },
+  composerGlass: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: c.glassStroke },
+  header:        { flexDirection: 'row', alignItems: 'center', paddingHorizontal: m.narrow ? 10 : 14, paddingTop: m.topInset + (m.narrow ? 4 : 6), paddingBottom: m.narrow ? 8 : 12, gap: m.narrow ? 6 : 10, backgroundColor: 'transparent' },
   headerIconBtn: { width: m.narrow ? 36 : 40, height: m.narrow ? 36 : 40, alignItems: 'center', justifyContent: 'center' },
   headerIcon:    { fontSize: m.narrow ? 18 : 20 },
   headerAvatarWrap:  { width: m.narrow ? 32 : 36, height: m.narrow ? 32 : 36 },
@@ -136,7 +140,7 @@ export const makeStyles = (
   photoActionTxt:    { color: c.primary, fontSize: 12, fontWeight: '600' },
   // Must track headerAvatarWrap exactly — a 36pt avatar inside a 32pt wrapper
   // overflows into the title on the devices this change is for.
-  headerAvatar:      { width: m.narrow ? 32 : 36, height: m.narrow ? 32 : 36, borderRadius: m.narrow ? 16 : 18, backgroundColor: c.primary, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
+  headerAvatar:      { width: m.narrow ? 32 : 36, height: m.narrow ? 32 : 36, borderRadius: m.narrow ? 16 : 18, backgroundColor: c.groundDisc, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
   headerAvatarImg:   { width: '100%', height: '100%' },
   headerAvatarTxt:   { color: '#fff', fontWeight: '700', fontSize: 15 },
   headerPresenceDot: { position: 'absolute', right: -1, bottom: -1, width: 10, height: 10, borderRadius: 5, backgroundColor: '#22C55E', borderWidth: 2, borderColor: c.bg },
@@ -148,7 +152,7 @@ export const makeStyles = (
   backBtn:       { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
   backTxt:       { color: c.text, fontSize: 24 },
   title:         { color: c.text, fontSize: 18, fontWeight: '700' },
-  sub:           { color: c.textDim, fontSize: 12 },
+  sub:           { color: c.accentLight, fontSize: 12 },
   e2eBadge:      { color: '#22C55E', fontSize: 11, fontWeight: '600' },
   // Self-destruct countdown for a chat opened by a 1h/3h code (migration 120).
   // Sits directly under the header subtitle; goes red under ten minutes.
@@ -203,9 +207,9 @@ export const makeStyles = (
   bubbleRowGrouped: { marginTop: 1 }, // tighter spacing for consecutive same-sender msgs
   bubbleRowMine: { justifyContent: 'flex-end' },
   bubbleRowTheirs:{ justifyContent: 'flex-start' },
-  bubble:        { maxWidth: '78%', paddingVertical: 8, paddingHorizontal: 12, borderRadius: 16, gap: 2 },
-  bubbleMine:    { backgroundColor: c.bubbleOut, borderTopRightRadius: 4 },   // WhatsApp "sent"
-  bubbleTheirs:  { backgroundColor: c.bubbleIn, borderTopLeftRadius: 4 },     // WhatsApp "received"
+  bubble:        { maxWidth: '78%', paddingVertical: 9, paddingHorizontal: 14, borderRadius: 20, gap: 3 },
+  bubbleMine:    { backgroundColor: c.bubbleOut, borderTopRightRadius: 6 },   // Aurora "sent"
+  bubbleTheirs:  { backgroundColor: c.bubbleIn, borderTopLeftRadius: 6 },     // Aurora "received"
   bubblePending: { opacity: 0.6 },
   bubbleFailed:  { borderWidth: 1, borderColor: c.danger, opacity: 0.85 },
   bubbleSystem:  { alignSelf: 'center', backgroundColor: 'transparent', paddingVertical: 4 },
@@ -244,15 +248,15 @@ export const makeStyles = (
   editTxt:       { color: c.primary, fontSize: 12, fontWeight: '600' },
   editCancelTxt: { color: c.textDim, fontSize: 12 },
 
-  composer:      { flexDirection: 'row', alignItems: 'flex-end', paddingHorizontal: 8, paddingVertical: 7, gap: 7, backgroundColor: c.bg },
-  inputPill:     { flex: 1, flexDirection: 'row', alignItems: 'flex-end', backgroundColor: c.surface, borderRadius: 24, minHeight: 48, paddingLeft: 16, paddingRight: 6, borderWidth: StyleSheet.hairlineWidth, borderColor: c.border },
+  composer:      { flexDirection: 'row', alignItems: 'flex-end', paddingHorizontal: 14, paddingVertical: 12, gap: 10, backgroundColor: 'transparent' },
+  inputPill:     { flex: 1, flexDirection: 'row', alignItems: 'flex-end', backgroundColor: c.glassSoft, borderRadius: 26, minHeight: 50, paddingLeft: 18, paddingRight: 8, borderWidth: StyleSheet.hairlineWidth, borderColor: c.glassStroke },
   pillIconBtn:   { width: 38, height: 46, alignItems: 'center', justifyContent: 'center' },
   camWrap:       { width: 38, height: 46, alignItems: 'center', justifyContent: 'center', position: 'relative' },
   camRing:       { position: 'absolute', width: 40, height: 40, borderRadius: 20, borderWidth: 2, borderColor: c.primary, backgroundColor: 'rgba(0,0,0,0)' },
   camDragHint:   { position: 'absolute', bottom: 50, alignSelf: 'center', flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: c.primary, paddingHorizontal: 10, paddingVertical: 6, borderRadius: 14, ...ELEVATION.sm, shadowColor: c.primary },
   camDragHintTxt:{ color: '#fff', fontSize: 12, fontWeight: '800' },
   camHintChevron:{ position: 'absolute', bottom: 42, alignSelf: 'center' },
-  sendFab:       { width: 48, height: 48, borderRadius: 24, backgroundColor: c.primary, alignItems: 'center', justifyContent: 'center', elevation: 3, shadowColor: '#000', shadowOpacity: 0.25, shadowOffset: { width: 0, height: 2 }, shadowRadius: 4 },
+  sendFab:       { width: 50, height: 50, borderRadius: 25, backgroundColor: c.accentDeep, alignItems: 'center', justifyContent: 'center', borderWidth: StyleSheet.hairlineWidth, borderColor: c.glassStroke, elevation: 6, shadowColor: c.accentDeep, shadowOpacity: 0.55, shadowOffset: { width: 0, height: 6 }, shadowRadius: 18 },
   attachBtn:     { width: 40, height: 40, borderRadius: 20, backgroundColor: c.surface, alignItems: 'center', justifyContent: 'center' },
   attachTxt:     { fontSize: 18 },
 

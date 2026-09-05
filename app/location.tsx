@@ -26,6 +26,7 @@ import { useTheme } from '../lib/theme';
 import { sendMessage } from '../lib/chatService';
 import { emit } from '../lib/socket';
 import { newLiveKey, encryptPosition } from '../lib/liveLocationCrypto';
+import { AuroraBackground } from '../components/ui';
 
 const DURATIONS = [
   { label: '15 minutes', seconds: 900 },
@@ -173,6 +174,7 @@ export default function LocationScreen() {
   if (permDenied) {
     return (
       <View style={[S.container, S.center]}>
+      <AuroraBackground />
         <Text style={S.permTitle}>Location permission needed</Text>
         <Text style={S.permSub}>Allow location access to share your position.</Text>
         <TouchableOpacity style={S.primaryBtn} onPress={() => Linking.openSettings()}>
@@ -275,7 +277,7 @@ export default function LocationScreen() {
 }
 
 const makeStyles = (c: Palette) => StyleSheet.create({
-  container: { flex: 1, backgroundColor: c.bg },
+  container: { flex: 1, backgroundColor: 'transparent' },
   center: { justifyContent: 'center', alignItems: 'center', padding: 32 },
   header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingTop: HEADER_TOP, paddingBottom: 12, paddingHorizontal: 16, borderBottomWidth: 1, borderBottomColor: c.border },
   back: { color: c.text, fontSize: 32, fontWeight: '300', marginTop: -4 },

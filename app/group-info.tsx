@@ -44,6 +44,7 @@ import {
   type ChatDetail,
   type ChatMember,
 } from '../lib/chatService';
+import { AuroraBackground } from '../components/ui';
 
 function useS() {
   const { colors } = useTheme();
@@ -246,6 +247,7 @@ export default function GroupInfoScreen() {
   if (!chatId) {
     return (
       <View style={[S.screen, S.center]}>
+      <AuroraBackground />
         <Text style={{ color: colors.text, fontSize: 16, fontWeight: '700', marginBottom: 6 }}>
           Group not found
         </Text>
@@ -529,7 +531,7 @@ function MemberRow({
 
 
 const makeStyles = (c: Palette) => StyleSheet.create({
-  screen:        { flex: 1, backgroundColor: c.bg },
+  screen: { flex: 1, backgroundColor: 'transparent' },
   center:        { justifyContent: 'center', alignItems: 'center' },
 
   header:        { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingTop: HEADER_TOP, paddingBottom: 8, gap: 8 },

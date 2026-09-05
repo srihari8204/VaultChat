@@ -7,8 +7,9 @@
 import React, { useEffect, useState } from 'react';
 import { View, StyleSheet, type ViewStyle, type StyleProp } from 'react-native';
 import { Image } from 'expo-image';
+import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
-import { avatarColor } from '../../constants/theme';
+import { avatarColor, avatarRing } from '../../constants/theme';
 import { useColors } from '../../lib/theme';
 import { AppText } from './Text';
 
@@ -33,17 +34,28 @@ export interface AvatarProps {
    * is what is actually true.
    */
   anon?: boolean;
+  /**
+   * Aurora Glass treatment (U6): a 2px per-contact gradient ring around a dark
+   * disc, instead of a filled coloured circle. Identity without giving every
+   * list row a solid block of colour to fight the text.
+   */
+  ring?: boolean;
 }
 
-export function Avatar({ uri, headers, name, size = 48, presence, style, anon }: AvatarProps) {
+export function Avatar({ uri, headers, name, size = 48, presence, style, anon, ring }: AvatarProps) {
   const c = useColors();
   const [failed, setFailed] = useState(false);
   useEffect(() => { setFailed(false); }, [uri]);   // retry when the uri changes
   const initial = (name || '?').trim()[0]?.toUpperCase() || '?';
-  const dim = { width: size, height: size, borderRadius: size / 2 };
+  // With a ring the artwork is inset by the ring width on each side.
+  const ringWidth = ring ? Math.max(2, Math.round(size * 0.045)) : 0;
+  const inner = size - ringWidth * 2;
+  const dim = { width: inner, height: inner, borderRadius: inner / 2 };
+  const outer = { width: size, height: size, borderRadius: size / 2 };
   const dotSize = Math.max(10, Math.round(size * 0.28));
-  return (
-    <View style={[dim, style]}>
+
+  const art = (
+    <>
       {anon ? (
         // Ahead of the image branch on purpose: a masked chat must never render
         // a photo even if a stale `uri` is still sitting in a cached list row.
@@ -61,13 +73,35 @@ export function Avatar({ uri, headers, name, size = 48, presence, style, anon }:
           onError={() => setFailed(true)}   // fall back to initials on a failed load
         />
       ) : (
-        <View style={[dim, styles.center, { backgroundColor: avatarColor(name || initial) }]}>
-          <AppText style={{ fontSize: size * 0.4, color: '#FFFFFF', fontWeight: '800' }}>{initial}</AppText>
+        // Ringed avatars put the colour in the ring, so the disc stays dark and
+        // the initial keeps full contrast against it.
+        <View style={[dim, styles.center, { backgroundColor: ring ? c.groundDisc : avatarColor(name || initial) }]}>
+          <AppText style={{ fontSize: inner * 0.4, color: '#FFFFFF', fontWeight: '800' }}>{initial}</AppText>
         </View>
       )}
-      {presence === 'online' && (
-        <View style={[styles.dot, { width: dotSize, height: dotSize, borderRadius: dotSize / 2, right: 0, bottom: 0, backgroundColor: c.online, borderColor: c.bg }]} />
-      )}
+    </>
+  );
+
+  const dot = presence === 'online' ? (
+    <View style={[styles.dot, { width: dotSize, height: dotSize, borderRadius: dotSize / 2, right: 0, bottom: 0, backgroundColor: c.online, borderColor: c.bg }]} />
+  ) : null;
+
+  if (!ring) {
+    return <View style={[outer, style]}>{art}{dot}</View>;
+  }
+
+  const [from, to] = avatarRing(name || initial);
+  return (
+    <View style={[outer, style]}>
+      <LinearGradient
+        colors={[from, to]}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 1 }}
+        style={[outer, styles.center, { padding: ringWidth }]}
+      >
+        <View style={[dim, { overflow: 'hidden' }]}>{art}</View>
+      </LinearGradient>
+      {dot}
     </View>
   );
 }

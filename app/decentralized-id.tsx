@@ -18,6 +18,7 @@ import { copyAndAutoClear } from '../lib/clipboardSafe';
 import {
   createDid, getDidRecord, proveControl, revokeDid, type DidRecord,
 } from '../lib/decentralizedId';
+import { Aurora } from '../constants/theme';
 
 const C = {
   bg: '#FFFFFF', primary: '#4A9FFF', secondary: '#7C3AED',
@@ -83,7 +84,7 @@ export default function DecentralizedIDScreen() {
     <>
       <Stack.Screen options={{
         title: 'Decentralised ID',
-        headerStyle: { backgroundColor: '#FFFFFF' },
+        headerStyle: { backgroundColor: Aurora.card },
         headerTintColor: '#1F2937',
       }} />
       <View style={st.screen}>

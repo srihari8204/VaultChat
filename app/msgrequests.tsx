@@ -25,6 +25,7 @@ import { VaultContact } from '../lib/contactSync';
 import {
   getVisibleProfile, isSavedContact, formatLastSeen,
 } from '../lib/contactPrivacy';
+import { AuroraBackground } from '../components/ui';
 
 function useS() {
   const { colors } = useTheme();
@@ -177,6 +178,7 @@ export default function MsgRequests() {
 
   return (
     <View style={s.screen}>
+      <AuroraBackground />
       <StatusBar barStyle="light-content" backgroundColor={colors.bg} />
 
       {/* Header */}
@@ -219,7 +221,7 @@ export default function MsgRequests() {
 }
 
 const makeStyles = (c: Palette) => StyleSheet.create({
-  screen:  { flex:1, backgroundColor:c.bg },
+  screen: { flex: 1, backgroundColor: 'transparent' },
   header:  { paddingTop:HEADER_TOP, paddingBottom:12, paddingHorizontal:18,
              flexDirection:'row', alignItems:'center', gap:12,
              borderBottomWidth:StyleSheet.hairlineWidth, borderBottomColor:c.separator },

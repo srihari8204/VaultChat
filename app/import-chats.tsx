@@ -27,7 +27,7 @@ import { Buffer } from 'buffer';
 import { type Palette, SPACING, RADIUS, brandAlpha } from '../constants/theme';
 import { IMPORT_SOURCES, IMPORT_SOURCE, type ImportOrigin } from '../constants/importSources';
 import { useTheme } from '../lib/theme';
-import { Header, Card, Button } from '../components/ui';
+import { Header, Card, Button, AuroraBackground } from '../components/ui';
 import {
   readExport, extractEntries, withDedupeKeys, parsedFail,
   type ArchiveSource, type WaMessage, type WaFormat, type WaFailure,
@@ -355,6 +355,7 @@ export default function ImportChatsScreen() {
 
   return (
     <View style={s.screen}>
+      <AuroraBackground />
       <Stack.Screen options={{ headerShown: false }} />
       <Header title={title} border />
       <ScrollView
@@ -750,7 +751,7 @@ function fmtMonth(ms: number): string {
 // primary action off a small display.
 
 const makeStyles = (c: Palette) => StyleSheet.create({
-  screen:   { flex: 1, backgroundColor: c.bg },
+  screen: { flex: 1, backgroundColor: 'transparent' },
   flex:     { flex: 1 },
   body:     { paddingHorizontal: SPACING.lg, paddingTop: SPACING.md },
   center:   { alignItems: 'center', paddingTop: SPACING.xl },

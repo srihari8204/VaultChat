@@ -3,7 +3,7 @@
 // Backed by /user/profile (Postgres). Edit name + status, sign out.
 // Photo upload is deferred to Phase 4 (file storage).
 
-import { HEADER_TOP } from '../../constants/layout';
+import { HEADER_TOP, TAB_BAR_SPACE } from '../../constants/layout';
 import * as ImagePicker from 'expo-image-picker';
 import { useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useState, type ComponentProps } from 'react';
@@ -26,6 +26,7 @@ import { attachmentUrl, uploadAttachment } from '../../lib/chatService';
 import { unregisterPushToken } from '../../lib/push';
 import { disconnect as disconnectSocket } from '../../lib/socket';
 import { readCache, writeCache } from '../../lib/localCache';
+import { AuroraBackground } from '../../components/ui';
 
 interface UserProfile {
   id: string;
@@ -243,7 +244,9 @@ export default function ProfileScreen() {
   const avatarLetter = (profile?.name?.trim()[0] ?? profile?.email?.[0] ?? '?').toUpperCase();
 
   return (
-    <ScrollView style={S.screen} contentContainerStyle={{ paddingBottom: 90 }}>
+    <View style={{ flex: 1 }}>
+      <AuroraBackground variant="profile" />
+    <ScrollView style={S.screen} contentContainerStyle={{ paddingBottom: TAB_BAR_SPACE + 16 }}>
       <View style={S.header}>
         <Text style={S.title}>Profile</Text>
         <TouchableOpacity onPress={() => router.push('/settings' as any)} hitSlop={8}>
@@ -371,6 +374,7 @@ export default function ProfileScreen() {
         <Text style={{ color: colors.textDim, fontSize: 12 }}>VaultChat 1.1.1</Text>
       </TouchableOpacity>
     </ScrollView>
+    </View>
   );
 }
 

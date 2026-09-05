@@ -25,7 +25,7 @@ import {
 } from '../lib/chatService';
 import { getDecryptedAttachmentUri, parseMediaContent } from '../lib/mediaAttachments';
 import { readCache, writeCache } from '../lib/localCache';
-import { Avatar } from '../components/ui';
+import { Avatar, AuroraBackground } from '../components/ui';
 
 const { width: SW } = Dimensions.get('window');
 const MEDIA_SIZE = (SW - 32 - 8) / 3;
@@ -224,6 +224,7 @@ export default function ContactInfoScreen() {
 
   return (
     <View style={s.root}>
+      <AuroraBackground />
       <StatusBar barStyle="light-content" backgroundColor={colors.bg} />
       <Stack.Screen options={{ headerShown: false }} />
 
@@ -239,8 +240,7 @@ export default function ContactInfoScreen() {
               headers={authHeader ? { Authorization: authHeader } : undefined}
               name={displayName}
               size={100}
-              presence={peer?.online ? 'online' : null}
-            />
+              presence={peer?.online ? 'online' : null} ring />
           </View>
 
           <Text style={s.heroName}>{displayName}</Text>
@@ -334,7 +334,7 @@ export default function ContactInfoScreen() {
             {commonGroups.map(g => (
               <TouchableOpacity key={g.id} style={s.fileRow} activeOpacity={0.7}
                 onPress={() => router.push({ pathname: '/group-info', params: { id: g.id } } as any)}>
-                <Avatar uri={g.photoURL && authHeader ? attachmentUrl(g.photoURL) : null} headers={authHeader ? { Authorization: authHeader } : undefined} name={g.name || 'Group'} size={40} />
+                <Avatar uri={g.photoURL && authHeader ? attachmentUrl(g.photoURL) : null} headers={authHeader ? { Authorization: authHeader } : undefined} name={g.name || 'Group'} size={40} ring />
                 <Text style={s.fileName} numberOfLines={1}>{g.name || 'Group'}</Text>
               </TouchableOpacity>
             ))}
@@ -428,7 +428,7 @@ function SharedMediaThumb({ m, chatId, authHeader }: {
 }
 
 const makeStyles = (c: Palette) => StyleSheet.create({
-  root: { flex: 1, backgroundColor: c.bg },
+  root: { flex: 1, backgroundColor: 'transparent' },
   hero: { alignItems: 'center', paddingTop: 54, paddingBottom: 24 },
   backBtn: { position: 'absolute', top: 54, left: 16, zIndex: 10 },
   avatar: { width: 100, height: 100, borderRadius: 50, marginTop: 12, backgroundColor: c.surfaceSolid, borderWidth: 1, borderColor: c.border, justifyContent: 'center', alignItems: 'center', overflow: 'visible' },

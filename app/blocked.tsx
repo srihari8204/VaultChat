@@ -15,6 +15,7 @@ import {
 } from 'react-native';
 import { useLocalSearchParams } from 'expo-router';
 import { ThreatDetail } from '../services/securityService';
+import { Aurora } from '../constants/theme';
 
 // Threat type to human-readable label mapping
 const THREAT_LABELS: Record<string, { label: string; icon: string; desc: string }> = {
@@ -190,7 +191,7 @@ export default function BlockedScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: Aurora.card,
   },
   topBar: {
     backgroundColor: '#FF4D6D',
@@ -201,7 +202,7 @@ const styles = StyleSheet.create({
   topBarText: {
     fontSize: 13,
     fontWeight: 'bold',
-    color: '#000000',
+    color: Aurora.text,
     letterSpacing: 2,
   },
   scroll: {
@@ -227,13 +228,13 @@ const styles = StyleSheet.create({
   title: {
     fontSize: 24,
     fontWeight: 'bold',
-    color: '#1F2937',
+    color: Aurora.text,
     marginBottom: 12,
     textAlign: 'center',
   },
   subtitle: {
     fontSize: 14,
-    color: '#64748B',
+    color: Aurora.textDim,
     textAlign: 'center',
     lineHeight: 22,
     marginBottom: 24,
@@ -275,30 +276,30 @@ const styles = StyleSheet.create({
   },
   threatDesc: {
     fontSize: 13,
-    color: '#94A3B8',
+    color: Aurora.textFaint,
     lineHeight: 20,
     marginBottom: 4,
   },
   threatRaw: {
     fontSize: 10,
-    color: '#374151',
+    color: Aurora.textDim,
     fontFamily: 'monospace',
   },
   infoBox: {
     width: '100%',
-    backgroundColor: '#F9FAFB',
+    backgroundColor: Aurora.bg,
     borderRadius: 12,
     borderWidth: 0.5,
-    borderColor: '#E5E7EB',
+    borderColor: Aurora.border,
     padding: 16,
     marginBottom: 16,
   },
   stepsBox: {
     width: '100%',
-    backgroundColor: '#F9FAFB',
+    backgroundColor: Aurora.bg,
     borderRadius: 12,
     borderWidth: 0.5,
-    borderColor: '#E5E7EB',
+    borderColor: Aurora.border,
     padding: 16,
     marginBottom: 24,
   },
@@ -312,7 +313,7 @@ const styles = StyleSheet.create({
   },
   infoText: {
     fontSize: 13,
-    color: '#64748B',
+    color: Aurora.textDim,
     lineHeight: 21,
     marginBottom: 10,
   },
@@ -341,26 +342,26 @@ const styles = StyleSheet.create({
   stepText: {
     flex: 1,
     fontSize: 13,
-    color: '#94A3B8',
+    color: Aurora.textFaint,
     lineHeight: 20,
   },
   supportBtn: {
-    backgroundColor: '#F3F4F6',
+    backgroundColor: Aurora.surfaceSolid,
     borderWidth: 1,
-    borderColor: '#E5E7EB',
+    borderColor: Aurora.border,
     borderRadius: 10,
     paddingVertical: 14,
     paddingHorizontal: 32,
     marginBottom: 24,
   },
   supportBtnText: {
-    color: '#6B7280',
+    color: Aurora.textDim,
     fontSize: 14,
     fontWeight: 'bold',
   },
   footer: {
     fontSize: 11,
-    color: '#D1D5DB',
+    color: Aurora.textFaint,
     textAlign: 'center',
   },
 });

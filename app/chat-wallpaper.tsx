@@ -17,6 +17,7 @@ import * as ImagePicker from 'expo-image-picker';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../lib/theme';
 import { type Palette } from '../constants/theme';
+import { AuroraBackground } from '../components/ui';
 
 const { width: SW } = Dimensions.get('window');
 const COLOR_SIZE = (SW - 32 - 4 * 12) / 5;
@@ -132,6 +133,7 @@ export default function ChatWallpaperScreen() {
 
   return (
     <View style={s.root}>
+      <AuroraBackground />
       <Stack.Screen options={{ headerShown: false }} />
 
       {/* Header */}
@@ -239,7 +241,7 @@ export default function ChatWallpaperScreen() {
 }
 
 const makeStyles = (c: Palette) => StyleSheet.create({
-  root: { flex: 1, backgroundColor: c.bg },
+  root: { flex: 1, backgroundColor: 'transparent' },
   header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingTop: HEADER_TOP, paddingHorizontal: 12, paddingBottom: 12, backgroundColor: c.bg, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.border, gap: 8 },
   iconBtn: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
   headerTitle: { flex: 1, color: c.text, fontSize: 18, fontWeight: '700' },

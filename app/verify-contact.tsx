@@ -17,6 +17,7 @@ import { useTheme } from '../lib/theme';
 import { getCachedUser } from '../lib/api';
 import { computeSafetyNumber, formatSafetyNumber } from '../services/security/safetyNumber';
 import { fetchIdentityKey, getVerifiedContacts, setContactVerified } from '../lib/verification';
+import { AuroraBackground } from '../components/ui';
 
 type State =
   | { kind: 'loading' }
@@ -82,6 +83,7 @@ export default function VerifyContactScreen() {
 
   return (
     <View style={S.container}>
+      <AuroraBackground />
       <View style={S.header}>
         <TouchableOpacity onPress={() => router.back()} hitSlop={10}>
           <Ionicons name="chevron-back" size={26} color={colors.text} />
@@ -145,7 +147,7 @@ export default function VerifyContactScreen() {
 }
 
 const makeStyles = (c: Palette) => StyleSheet.create({
-  container: { flex: 1, backgroundColor: c.bg },
+  container: { flex: 1, backgroundColor: 'transparent' },
   header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingTop: HEADER_TOP, paddingBottom: 12, paddingHorizontal: 14, borderBottomWidth: 1, borderBottomColor: c.border },
   title: { color: c.text, fontSize: 17, fontWeight: '800' },
   center: { paddingVertical: 60, alignItems: 'center' },

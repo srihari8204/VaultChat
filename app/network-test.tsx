@@ -13,6 +13,8 @@ import { useRouter, Stack } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import NetInfo from '@react-native-community/netinfo';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { AuroraBackground } from '../components/ui';
+import { Aurora } from '../constants/theme';
 
 const { width: SW } = Dimensions.get('window');
 
@@ -302,6 +304,7 @@ export default function NetworkTestScreen() {
 
   return (
     <View style={styles.container}>
+      <AuroraBackground />
       <Stack.Screen options={{ headerShown: false }} />
       <LinearGradient colors={['#FFFFFF', '#F9FAFB', '#FFFFFF']} style={StyleSheet.absoluteFill} />
 
@@ -420,7 +423,7 @@ export default function NetworkTestScreen() {
 }
 
 const makeStyles = (c: Palette) => StyleSheet.create({
-  container: { flex: 1, backgroundColor: c.bg },
+  container: { flex: 1, backgroundColor: 'transparent' },
   header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingTop: Platform.OS === 'ios' ? 56 : 40, paddingHorizontal: 16, paddingBottom: 14 },
   backBtn: { width: 40, height: 40, borderRadius: 12, backgroundColor: 'rgba(74,159,255,0.08)', justifyContent: 'center', alignItems: 'center' },
   backArrow: { color: c.accent, fontSize: 20 },
@@ -445,7 +448,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   gaugeTickLabel: { color: c.textDim, fontSize: 9 },
   gaugeNeedle: { position: 'absolute', bottom: 10, width: 3, height: GAUGE_SIZE / 2 - 20, backgroundColor: c.danger, borderRadius: 2, transformOrigin: 'bottom center' },
   needleLine: { width: 3, height: '100%', backgroundColor: c.accent, borderRadius: 2 },
-  gaugeCenterDot: { position: 'absolute', bottom: 4, width: 16, height: 16, borderRadius: 8, backgroundColor: '#FFF' },
+  gaugeCenterDot: { position: 'absolute', bottom: 4, width: 16, height: 16, borderRadius: 8, backgroundColor: Aurora.card },
   gaugeSpeed: { color: '#FFF', fontSize: 42, fontWeight: '800', marginTop: 8 },
   gaugeUnit: { color: c.textDim, fontSize: 14, marginTop: -2 },
   gaugePhase: { color: c.accent, fontSize: 13, fontWeight: '600', marginTop: 8 },

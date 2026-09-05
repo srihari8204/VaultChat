@@ -31,6 +31,7 @@ import { progress, type Run, type RunRider } from '../lib/spaces/runs';
 import { tilesForType, type RunSet } from '../lib/spaces/dashboard';
 import { sendMessage } from '../lib/chatService';
 import { getCurrentUserAsync } from './(constants)/authService';
+import { AuroraBackground } from '../components/ui';
 
 /** A fix older than this is drawn faded — the map must not imply freshness. */
 const STALE_MS = 90_000;
@@ -194,6 +195,7 @@ export default function SpaceOpsMapScreen() {
   if (loading) {
     return (
       <View style={[s.screen, s.centre]}>
+      <AuroraBackground />
         <Stack.Screen options={spaceHeader(colors, 'Operations')} />
         <ActivityIndicator color={colors.primary} />
       </View>
@@ -349,7 +351,7 @@ function ago(ms: number): string {
 }
 
 const styles = (c: Palette) => StyleSheet.create({
-  screen: { flex: 1, backgroundColor: c.bg },
+  screen: { flex: 1, backgroundColor: 'transparent' },
   centre: { alignItems: 'center', justifyContent: 'center' },
   map: { height: '46%', width: '100%' },
   banner: {

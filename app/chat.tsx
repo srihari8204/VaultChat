@@ -60,7 +60,7 @@ import {
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { Swipeable } from 'react-native-gesture-handler';
 import * as Haptics from 'expo-haptics';
-import { Sheet, Avatar, type SheetAction as MenuAction } from '../components/ui';
+import { Sheet, Avatar, GlassView, AuroraBackground, type SheetAction as MenuAction } from '../components/ui';
 import { useChatViewers } from '../hooks/useChatViewers';
 import { ViewerStack } from '../components/chat/ViewerStack';
 import { getShareViewing } from '../lib/viewerPrefs';
@@ -2666,6 +2666,9 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
       style={[S.screen, { paddingBottom: composerGap }]}
       onLayout={e => setPaneH(e.nativeEvent.layout.height)}
     >
+      {/* No custom wallpaper → the Aurora ground (U6) stands in for one. */}
+      {!wallpaper && <AuroraBackground variant="chat" />}
+
       {/* Per-chat wallpaper — painted behind the (transparent) message list */}
       {wallpaper && (
         <View style={StyleSheet.absoluteFill} pointerEvents="none">
@@ -2679,13 +2682,15 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
         </View>
       )}
 
-      {/* Header */}
+      {/* Header — glass, so the thread scrolls visibly beneath it */}
+      <GlassView intensity={48} bordered={false} style={S.headerGlass}>
       <View style={S.header}>
         <TouchableOpacity onPress={() => router.back()} style={S.backBtn} activeOpacity={0.7}>
           <Ionicons name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
         <TouchableOpacity style={S.headerAvatarWrap} activeOpacity={0.7} onPress={onAvatarTap}>
           <Avatar
+            ring
             uri={headerPhotoId && screenAuthHeader ? attachmentUrl(headerPhotoId) : null}
             headers={screenAuthHeader ? { Authorization: screenAuthHeader } : undefined}
             name={title}
@@ -2782,6 +2787,7 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
           <Ionicons name="ellipsis-vertical" size={20} color={colors.text} />
         </TouchableOpacity>
       </View>
+      </GlassView>
 
       {/* Connectivity strip (Connecting… / Waiting for network) — local-first:
           the message list below never changes when this appears. */}
@@ -3202,6 +3208,7 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
           </TouchableOpacity>
         </View>
       ) : (
+        <GlassView intensity={48} bordered={false} style={S.composerGlass}>
         <View style={S.composer}>
           <View style={S.inputPill}>
             {editingId == null && (
@@ -3311,6 +3318,7 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
             </TouchableOpacity>
           )}
         </View>
+        </GlassView>
       )}
 
       {/* Quick-react emoji picker */}
@@ -3360,7 +3368,7 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
               const sent = recips.filter(m => (m.lastDeliveredMessageId ?? 0) < mid);
               const Row = (m: ChatMember) => (
                 <View key={m.userId} style={S.infoRow}>
-                  <Avatar uri={m.photoURL && screenAuthHeader ? attachmentUrl(m.photoURL) : null} headers={screenAuthHeader ? { Authorization: screenAuthHeader } : undefined} name={m.name || m.email || '?'} size={36} />
+                  <Avatar uri={m.photoURL && screenAuthHeader ? attachmentUrl(m.photoURL) : null} headers={screenAuthHeader ? { Authorization: screenAuthHeader } : undefined} name={m.name || m.email || '?'} size={36} ring />
                   <Text style={S.infoName} numberOfLines={1}>{m.name || m.email || m.userId.slice(0, 8)}</Text>
                 </View>
               );

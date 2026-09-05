@@ -29,6 +29,7 @@ import {
   crossingsFromSamples, crossingsForDay, projectDay, summarise, makeShift,
   STATE_LABELS, type AttendanceState, type DayAttendance,
 } from '../lib/spaces/attendance';
+import { AuroraBackground } from '../components/ui';
 
 /** How many days back the weekly view folds. */
 const DAYS = 7;
@@ -118,6 +119,7 @@ export default function SpaceAttendanceScreen() {
   if (loading) {
     return (
       <View style={[s.screen, s.centre]}>
+      <AuroraBackground />
         <Stack.Screen options={spaceHeader(colors, 'Attendance')} />
         <ActivityIndicator color={colors.primary} />
       </View>
@@ -253,7 +255,7 @@ function stateColour(s: AttendanceState, c: Palette): string {
 }
 
 const styles = (c: Palette) => StyleSheet.create({
-  screen: { flex: 1, backgroundColor: c.bg },
+  screen: { flex: 1, backgroundColor: 'transparent' },
   centre: { alignItems: 'center', justifyContent: 'center' },
   body: { padding: 16, gap: 10, paddingBottom: 40 },
   card: { backgroundColor: c.card, borderRadius: 14, padding: 14, gap: 8 },
