@@ -127,6 +127,8 @@ let foreground = true;
 let lastRearmAt = 0;
 /** Pending recovery timer for a re-arm the platform refused. */
 let rearmRetry: ReturnType<typeof setTimeout> | null = null;
+/** True while armWatcher's remove/create sequence is in flight — see armWatcher. */
+let arming = false;
 /** Bumped by every startPresence; a call whose generation is stale aborts
  *  rather than overwriting a newer one's state. See startPresence. */
 let startGen = 0;
@@ -172,13 +174,39 @@ const ACCURACY: Record<LocationPlan['accuracy'], Location.Accuracy> = {
 function startKeepalive(ms: number) {
   stopKeepalive();
   if (!ms) return;
-  keepalive = setInterval(() => {
-    if (!sharing || !myKey || !lastLoc || !watcher) return;
-    // Re-asserting the LAST REAL FIX with a current timestamp. This is a true
-    // statement — the device is still reporting from that position — and is
-    // the opposite of fabricating one: no coordinate is invented, ever.
-    onFix({ ...lastLoc, timestamp: Date.now() });
-  }, ms);
+  keepalive = setInterval(() => { keepaliveTick().catch(() => {}); }, ms);
+}
+/**
+ * The keepalive is also the WATCHDOG — the one owner of the invariant
+ * "sharing is ON ⇒ the publisher stays active or recovers".
+ *
+ * It used to bail on `!watcher`, which turned any watcher death (a re-arm the
+ * platform refused, a fused-provider delivery loss after the first step-down —
+ * both measured on device) into PERMANENT silence: no fix would ever arrive to
+ * trigger recovery, and nothing else was listening. Two-phone test 2026-09-06:
+ * both phones LIVE at t+45s, then aging forever, with the process, service and
+ * permissions all healthy.
+ *
+ * So: re-assert the last REAL fix regardless of the watcher (a true statement —
+ * the device is still reporting from that position; no coordinate is ever
+ * invented), and if the watcher is gone, re-arm it through the existing
+ * armWatcher path. Permission is re-checked before either, so a mid-session
+ * revocation stops publishing rather than replaying the past (§security).
+ * Same cadence as before — this adds zero wakeups and zero requests in the
+ * healthy case.
+ */
+async function keepaliveTick(): Promise<void> {
+  if (!sharing || !myKey || !lastLoc) return;
+  if (!watcher) {
+    let status = 'denied';
+    try { status = (await Location.getForegroundPermissionsAsync()).status; } catch {}
+    if (status !== 'granted') return;   // revoked mid-session: go silent, never replay
+    if (!arming && !rearmRetry) {
+      armWatcher(armedPlan ?? plan ?? planFor({ foreground, locked: false, sharing, speedMs: OPENING_SPEED_MS }))
+        .catch(() => {});
+    }
+  }
+  onFix({ ...lastLoc, timestamp: Date.now() });
 }
 function stopKeepalive() { if (keepalive) { clearInterval(keepalive); keepalive = null; } }
 
@@ -204,6 +232,14 @@ function stopKeepalive() { if (keepalive) { clearInterval(keepalive); keepalive 
  * no watcher publishes nothing and has no fix coming to fix itself with.
  */
 async function armWatcher(next: LocationPlan): Promise<void> {
+  // SINGLE-FLIGHT. replan (from a fix), the keepalive watchdog and a fresh
+  // startPresence can all ask for a re-arm; two interleaved remove/create
+  // sequences are exactly how a fused-provider registration gets torn down
+  // under the survivor's feet. One at a time; a skipped request is re-asked
+  // by the next fix or the next watchdog tick.
+  if (arming) return;
+  arming = true;
+  try {
   const opts = {
     accuracy: ACCURACY[next.accuracy],
     timeInterval: next.timeIntervalMs,
@@ -233,6 +269,7 @@ async function armWatcher(next: LocationPlan): Promise<void> {
   armedPlan = next;      // the ONLY place the armed cadence is recorded
   lastRearmAt = Date.now();
   if (sharing) startKeepalive(next.keepaliveMs);
+  } finally { arming = false; }
 }
 
 /**
@@ -566,7 +603,19 @@ export async function startPresence(o: StartPresenceOpts): Promise<PresenceStart
  * survives leaving the screen. A refused always-on permission is not an error:
  * we simply stay foreground-only, which is the old behaviour.
  */
-async function handOffToBackground(): Promise<boolean> {
+/** Serialises handoffs: startBackgroundPresence STOPS the task before starting
+ *  it, and two interleaved handoffs (startPresence racing a blur, a toggle
+ *  racing a focus) could land stop/start out of order and finish STOPPED. */
+let bgHandoffChain: Promise<unknown> = Promise.resolve();
+
+function handOffToBackground(): Promise<boolean> {
+  const run = () => handOffToBackgroundNow();
+  const p = bgHandoffChain.then(run, run);
+  bgHandoffChain = p.catch(() => {});
+  return p;
+}
+
+async function handOffToBackgroundNow(): Promise<boolean> {
   if (!sharing || !circleIds.length) {
     console.warn('[family/bg] not handing off — sharing:', sharing, 'circles:', circleIds.length);
     return false;
@@ -661,12 +710,32 @@ export async function stopPresence(): Promise<void> {
   if (rearmRetry) { clearTimeout(rearmRetry); rearmRetry = null; }
   stopKeepalive();
 
-  if (sharing && await isBackgroundRunning()) {
-    await updateBackgroundKey(myKey);   // hand the live key over and let it run
-    return;
+  // FOREGROUND TEARDOWN ONLY — the session itself is untouchable here.
+  //
+  // This function used to end with a conditional FULL teardown: when
+  // isBackgroundRunning() happened to be false it set sharing=false, dropped
+  // the key and the circle list, and broadcast live_location_stop. But the
+  // background check is momentarily false in perfectly normal operation —
+  // startBackgroundPresence deliberately STOPS the task before restarting it
+  // on every handoff, and stopPresence races that window from every screen
+  // blur and every presence-effect re-run (cold start alone produces 2-3).
+  // Whichever teardown landed last silently killed the session while the
+  // switch on screen read ON — the exact owner-photographed "Not sharing
+  // location · not publishing" state, and the root cause of the 60-90s
+  // publish stall (openspec: fix-presence-publish-stall).
+  //
+  // The ONLY real stop is setSharing(false) — the user's explicit choice —
+  // which still tears everything down and announces live_location_stop.
+  // Here, if the background task is not running, the honest move is to TRY
+  // handing off, not to end a session the user never ended. Without the
+  // ALWAYS permission the handoff refuses and sharing simply pauses until
+  // the screen returns — narrower, but never a lie.
+  if (sharing) {
+    try {
+      await updateBackgroundKey(myKey);   // hand the live key over and let it run
+      if (!(await isBackgroundRunning())) await handOffToBackground();
+    } catch { /* best-effort: the next startPresence re-arms everything */ }
   }
-  if (sharing) for (const cid of circleIds) emit('live_location_stop', { chatId: cid }).catch(() => {});
-  sharing = false; myKey = null; circleIds = []; places.clear(); defaultRefs.clear(); privacy.clear();
 }
 
 export function isSharing(): boolean { return sharing; }
