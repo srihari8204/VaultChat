@@ -74,13 +74,28 @@ say "Checking prod has no local changes we would overwrite"
 #
 # Anything else really is someone having edited the file on the box: stop.
 remote=$(ssh "$HOST" "cat $DEST/vaultchat-backend-go/internal/routes/games.go" | tr -d '\r' | md5sum | cut -d' ' -f1)
-head=$(git show "HEAD:vaultchat-backend-go/internal/routes/games.go" | tr -d '\r' | md5sum | cut -d' ' -f1)
-prev=$(git show "HEAD~1:vaultchat-backend-go/internal/routes/games.go" 2>/dev/null | tr -d '\r' | md5sum | cut -d' ' -f1)
-case "$remote" in
-  "$head") echo "ok  games.go already matches HEAD — the routes may already be registered" ;;
-  "$prev") echo "ok  games.go matches HEAD~1 — clean, and this deploy adds the route registration" ;;
-  *) die "games.go on prod matches neither HEAD nor HEAD~1. Someone edited it there — diff it by hand before deploying." ;;
-esac
+
+# ANY VERSION THIS REPO HAS EVER SHIPPED IS FINE. What this guard is really
+# asking is "did someone hand-edit games.go on the box", and the honest test for
+# that is whether prod's bytes appear anywhere in our history — not whether they
+# match one particular ref.
+#
+# It has now rotted TWICE against a fixed ref. First it compared to HEAD, which
+# was right while the change was uncommitted and wrong the moment it was
+# committed. Then it accepted HEAD or HEAD~1 — and one more unrelated commit
+# (the fix itself) shifted HEAD~1 past the pre-change file, so it aborted on a
+# clean prod again. A relative ref is a moving target; the set of shipped
+# versions is not.
+match=""
+while read -r sha; do
+  h=$(git show "$sha:vaultchat-backend-go/internal/routes/games.go" 2>/dev/null | tr -d '\r' | md5sum | cut -d' ' -f1)
+  if [ "$h" = "$remote" ]; then match="$sha"; break; fi
+done <<EOF
+$(git log --format=%H -n 50 -- vaultchat-backend-go/internal/routes/games.go)
+EOF
+
+[ -n "$match" ] || die "games.go on prod ($remote) matches no commit in this repo's history. Someone edited it on the box — diff it by hand before deploying."
+echo "ok  games.go on prod is $(git log -1 --format='%h %s' "$match")"
 
 # ── 2. BACKUP ─────────────────────────────────────────────────────────
 say "Backing up the file we are about to replace"
