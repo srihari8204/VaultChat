@@ -174,7 +174,7 @@ export default function CurrentLocationScreen() {
 
 const makeStyles = (c: Palette) => StyleSheet.create({
   screen: { flex: 1, backgroundColor: 'transparent' },
-  header: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingTop: Platform.OS === 'ios' ? 56 : 44, paddingBottom: 14, paddingHorizontal: 16, backgroundColor: c.card, borderBottomWidth: 1, borderBottomColor: c.border },
+  header: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingTop: Platform.OS === 'ios' ? 56 : 44, paddingBottom: 14, paddingHorizontal: 16, backgroundColor: c.glassSoft, borderBottomWidth: 1, borderBottomColor: c.glassStroke },
   backBtn: { width: 36, height: 36, borderRadius: 18, backgroundColor: c.surfaceSolid, alignItems: 'center', justifyContent: 'center' },
   backTxt: { fontSize: 18, color: c.text },
   headerTitle: { fontSize: 16, fontWeight: '700', color: c.text },
@@ -192,7 +192,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   infoIcon: { fontSize: 18 },
   infoTxt: { flex: 1, color: c.textDim, fontSize: 12, lineHeight: 17 },
 
-  locCard: { backgroundColor: c.card, borderRadius: 18, padding: 20, width: '100%', marginBottom: 20, borderWidth: 1, borderColor: c.primary + '40', alignItems: 'center' },
+  locCard: { backgroundColor: c.glassSoft, borderRadius: 18, padding: 20, width: '100%', marginBottom: 20, borderWidth: 1, borderColor: c.primary + '40', alignItems: 'center' },
   locIcon: { fontSize: 36, marginBottom: 8 },
   locTitle: { color: c.primary, fontSize: 18, fontWeight: '700', marginBottom: 16 },
   coordRow: { flexDirection: 'row', gap: 20, marginBottom: 12 },
@@ -204,6 +204,6 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   shareBtn: { backgroundColor: c.primary, borderRadius: 16, paddingVertical: 16, width: '100%', flexDirection: 'row', justifyContent: 'center', alignItems: 'center', marginBottom: 12 },
   shareBtnTxt: { color: '#FFF', fontSize: 17, fontWeight: '700' },
   noChat: { color: c.textDim, fontSize: 13, marginBottom: 12 },
-  refreshBtn: { backgroundColor: c.card, borderRadius: 12, paddingVertical: 12, paddingHorizontal: 24, borderWidth: 1, borderColor: c.border, flexDirection: 'row', justifyContent: 'center', alignItems: 'center' },
+  refreshBtn: { backgroundColor: c.glassSoft, borderRadius: 12, paddingVertical: 12, paddingHorizontal: 24, borderWidth: 1, borderColor: c.glassStroke, flexDirection: 'row', justifyContent: 'center', alignItems: 'center' },
   refreshBtnTxt: { color: c.textDim, fontSize: 14, fontWeight: '600' },
 });

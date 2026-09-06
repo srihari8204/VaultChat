@@ -262,7 +262,7 @@ export default function LocationScreen() {
                 </TouchableOpacity>
               ))}
             </View>
-            <TouchableOpacity style={[S.primaryBtn, { backgroundColor: colors.surfaceSolid, borderWidth: 1, borderColor: colors.border }]} onPress={startLive} disabled={loading}>
+            <TouchableOpacity style={[S.primaryBtn, { backgroundColor: colors.surfaceSolid, borderWidth: 1, borderColor: colors.glassStroke }]} onPress={startLive} disabled={loading}>
               <Text style={[S.primaryBtnText, { color: colors.primary }]}>Start live location</Text>
             </TouchableOpacity>
             <Text style={S.note}>
@@ -279,11 +279,11 @@ export default function LocationScreen() {
 const makeStyles = (c: Palette) => StyleSheet.create({
   container: { flex: 1, backgroundColor: 'transparent' },
   center: { justifyContent: 'center', alignItems: 'center', padding: 32 },
-  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingTop: HEADER_TOP, paddingBottom: 12, paddingHorizontal: 16, borderBottomWidth: 1, borderBottomColor: c.border },
+  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingTop: HEADER_TOP, paddingBottom: 12, paddingHorizontal: 16, borderBottomWidth: 1, borderBottomColor: c.glassStroke },
   back: { color: c.text, fontSize: 32, fontWeight: '300', marginTop: -4 },
   title: { color: c.text, fontSize: 17, fontWeight: '800' },
 
-  mapCard: { backgroundColor: c.card, borderRadius: 18, borderWidth: 1, borderColor: c.border, alignItems: 'center', padding: 22, gap: 6 },
+  mapCard: { backgroundColor: c.glassSoft, borderRadius: 18, borderWidth: 1, borderColor: c.glassStroke, alignItems: 'center', padding: 22, gap: 6 },
   address: { color: c.text, fontSize: 15, fontWeight: '700', textAlign: 'center', marginTop: 6 },
   coords: { color: c.textDim, fontSize: 12.5 },
   mapsBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 10, paddingHorizontal: 16, paddingVertical: 9, borderRadius: 10, backgroundColor: brandAlpha(0.12) },
@@ -295,7 +295,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
 
   sectionTitle: { color: c.textFaint, fontSize: 11, fontWeight: '800', letterSpacing: 1, marginTop: 26, marginBottom: 10, marginLeft: 4 },
   durRow: { flexDirection: 'row', gap: 8 },
-  durBtn: { flex: 1, paddingVertical: 11, borderRadius: 12, backgroundColor: c.surface, borderWidth: 1, borderColor: c.border, alignItems: 'center' },
+  durBtn: { flex: 1, paddingVertical: 11, borderRadius: 12, backgroundColor: c.glassSoft, borderWidth: 1, borderColor: c.glassStroke, alignItems: 'center' },
   durBtnActive: { backgroundColor: brandAlpha(0.15), borderColor: c.primary },
   durText: { color: c.textDim, fontSize: 13, fontWeight: '600' },
   durTextActive: { color: c.primary, fontWeight: '800' },

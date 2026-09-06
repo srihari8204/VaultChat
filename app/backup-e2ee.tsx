@@ -256,7 +256,7 @@ export default function BackupE2EEScreen() {
 
 const makeStyles = (c: Palette) => StyleSheet.create({
   root: { flex: 1, backgroundColor: 'transparent' },
-  header: { flexDirection: 'row', alignItems: 'center', paddingTop: HEADER_TOP, paddingHorizontal: 12, paddingBottom: 12, backgroundColor: c.bg, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.border, gap: 8 },
+  header: { flexDirection: 'row', alignItems: 'center', paddingTop: HEADER_TOP, paddingHorizontal: 12, paddingBottom: 12, backgroundColor: c.bg, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.glassStroke, gap: 8 },
   iconBtn: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
   headerTitle: { color: c.text, fontSize: 18, fontWeight: '700', flexShrink: 1 },
 
@@ -266,12 +266,12 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   hint: { color: c.textFaint, fontSize: 12, marginBottom: 18 },
 
   input: {
-    color: c.text, fontSize: 16, borderWidth: StyleSheet.hairlineWidth, borderColor: c.border,
+    color: c.text, fontSize: 16, borderWidth: StyleSheet.hairlineWidth, borderColor: c.glassStroke,
     borderRadius: 10, paddingHorizontal: 14, paddingVertical: Platform.OS === 'ios' ? 14 : 10,
-    marginBottom: 12, backgroundColor: c.surface ?? 'transparent',
+    marginBottom: 12, backgroundColor: c.glassSoft ?? 'transparent',
   },
 
-  keyBox: { borderWidth: StyleSheet.hairlineWidth, borderColor: c.border, borderRadius: 10, padding: 16, marginBottom: 16, backgroundColor: c.surface ?? 'transparent' },
+  keyBox: { borderWidth: StyleSheet.hairlineWidth, borderColor: c.glassStroke, borderRadius: 10, padding: 16, marginBottom: 16, backgroundColor: c.glassSoft ?? 'transparent' },
   keyTxt: { color: c.text, fontSize: 16, lineHeight: 26, letterSpacing: 1, fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace' },
 
   primaryBtn: { backgroundColor: c.primary, borderRadius: 26, paddingVertical: 14, alignItems: 'center', marginTop: 8 },

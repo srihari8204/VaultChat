@@ -111,7 +111,7 @@ export default function LockHistoryScreen() {
         {RANGES.map((r) => <Chip key={r.key} on={range === r.key} label={r.label} onPress={() => setRange(r.key)} />)}
       </View>
       {stats && (
-        <View style={[st.statsCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
+        <View style={[st.statsCard, { backgroundColor: colors.glassSoft, borderColor: colors.glassStroke }]}>
           <StatCell label="Locks" value={String(stats.locks)} colors={colors} />
           <StatCell label="Exits" value={String(stats.exits)} colors={colors} />
           <StatCell label="Alarms" value={String(stats.alarms)} colors={colors} />
@@ -126,7 +126,7 @@ export default function LockHistoryScreen() {
 
       {/* 7-day distance trend (plain Views — no chart lib) */}
       {trend.some((t) => t.meters > 0) && (
-        <View style={[st.trendCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
+        <View style={[st.trendCard, { backgroundColor: colors.glassSoft, borderColor: colors.glassStroke }]}>
           <Text style={{ color: colors.text + '88', fontSize: 11.5, fontWeight: '700', marginBottom: 8 }}>
             DISTANCE WHILE LOCKED — LAST 7 DAYS
           </Text>
@@ -181,7 +181,7 @@ export default function LockHistoryScreen() {
         }
         renderItem={({ item: s }) => (
           <TouchableOpacity onPress={() => toggle(s.id)} onLongPress={() => removeOne(s.id)}
-            style={[st.session, { backgroundColor: colors.card, borderColor: colors.border }]}>
+            style={[st.session, { backgroundColor: colors.glassSoft, borderColor: colors.glassStroke }]}>
             <View style={st.rowBetween}>
               <Text style={{ color: colors.text, fontWeight: '800', fontSize: 14 }}>{fmtT(s.started_at)}</Text>
               <Text style={{ color: colors.text + '88', fontSize: 12.5 }}>
@@ -201,7 +201,7 @@ export default function LockHistoryScreen() {
             )}
 
             {open === s.id && (
-              <View style={[st.timeline, { borderColor: colors.border }]}>
+              <View style={[st.timeline, { borderColor: colors.glassStroke }]}>
                 {events.map((e) => {
                   const meta = EVENT_META[e.type] ?? EVENT_META.armed;
                   return (
@@ -221,7 +221,7 @@ export default function LockHistoryScreen() {
                     value={noteDraft} onChangeText={setNoteDraft}
                     placeholder="Add a note (e.g. “parked at north gate”)…"
                     placeholderTextColor={colors.text + '55'}
-                    style={{ flex: 1, borderWidth: 1, borderColor: colors.border, borderRadius: 8, paddingHorizontal: 8, paddingVertical: 5, color: colors.text, fontSize: 12 }}
+                    style={{ flex: 1, borderWidth: 1, borderColor: colors.glassStroke, borderRadius: 8, paddingHorizontal: 8, paddingVertical: 5, color: colors.text, fontSize: 12 }}
                   />
                   <TouchableOpacity
                     accessibilityRole="button" accessibilityLabel="Save note"

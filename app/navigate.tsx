@@ -161,7 +161,7 @@ export default function NavigateScreen() {
               }} />
             </View>
           )}
-          <View style={[st.sheet, { backgroundColor: colors.card, borderTopColor: colors.border }]}>
+          <View style={[st.sheet, { backgroundColor: colors.glassSoft, borderTopColor: colors.glassStroke }]}>
             <View style={{ flex: 1 }}>
               <Text numberOfLines={1} style={[st.sheetInstr, { color: colors.text }]}>
                 {banner.rerouting ? 'Rerouting…' : (banner.instruction || 'Continue')}
@@ -187,7 +187,7 @@ export default function NavigateScreen() {
           {/* Location Lock — geofence utility (openspec: location-lock) */}
           {LOCATION_LOCK && (
             <TouchableOpacity onPress={() => router.push('/location-lock')}
-              style={[st.lockEntry, { borderColor: lock.active ? '#22C55E' : colors.border, backgroundColor: colors.card }]}>
+              style={[st.lockEntry, { borderColor: lock.active ? '#22C55E' : colors.border, backgroundColor: colors.glassSoft }]}>
               <View style={[st.lockEntryIcon, { backgroundColor: (lock.active ? '#22C55E' : colors.primary) + '1a' }]}>
                 <Ionicons name={lock.active ? 'lock-closed' : 'radio-button-on'} size={20}
                   color={lock.active ? '#22C55E' : colors.primary} />
@@ -208,7 +208,7 @@ export default function NavigateScreen() {
 
           {/* destination */}
           <Text style={[st.h, { color: colors.text }]}>Destination</Text>
-          <View style={[st.searchRow, { borderColor: colors.border, backgroundColor: colors.surface }]}>
+          <View style={[st.searchRow, { borderColor: colors.glassStroke, backgroundColor: colors.glassSoft }]}>
             <Ionicons name="search" size={18} color={colors.text + '99'} />
             <TextInput
               value={query} onChangeText={setQuery} onSubmitEditing={search} returnKeyType="search"
@@ -219,10 +219,10 @@ export default function NavigateScreen() {
               : <TouchableOpacity onPress={search}><Text style={{ color: colors.primary, fontWeight: '700' }}>Find</Text></TouchableOpacity>}
           </View>
           {sugs.length > 0 && (
-            <View style={[st.sugBox, { borderColor: colors.border, backgroundColor: colors.card }]}>
+            <View style={[st.sugBox, { borderColor: colors.glassStroke, backgroundColor: colors.glassSoft }]}>
               {sugs.map((h, i) => (
                 <TouchableOpacity key={i} onPress={() => pickSug(h)}
-                  style={[st.sugRow, i > 0 && { borderTopWidth: StyleSheet.hairlineWidth, borderColor: colors.border }]}>
+                  style={[st.sugRow, i > 0 && { borderTopWidth: StyleSheet.hairlineWidth, borderColor: colors.glassStroke }]}>
                   <Ionicons name="location-outline" size={16} color={colors.primary} />
                   <Text numberOfLines={1} style={{ color: colors.text, flex: 1, fontSize: 14 }}>{h.label}</Text>
                 </TouchableOpacity>
@@ -240,7 +240,7 @@ export default function NavigateScreen() {
             <NavMap
               data={preview ?? { shape: [], pos: null, dest: dest.coords, heading: 0 }}
               follow={false}
-              style={[st.previewMap, { borderColor: colors.border }]}
+              style={[st.previewMap, { borderColor: colors.glassStroke }]}
             />
           )}
 

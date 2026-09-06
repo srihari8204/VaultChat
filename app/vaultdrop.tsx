@@ -212,8 +212,8 @@ export default function VaultDropScreen() {
 }
 
 const makeStyles = (c: Palette) => StyleSheet.create({
-  container:      { flex: 1, backgroundColor: c.card },
-  header:         { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: c.border },
+  container:      { flex: 1, backgroundColor: c.glassSoft },
+  header:         { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: c.glassStroke },
   backBtn:        { paddingRight: 12 },
   backText:       { color: BRAND_ACCENT, fontSize: 15 },
   headerTitle:    { flex: 1, color: c.text, fontWeight: 'bold', fontSize: 18, textAlign: 'center' },
@@ -226,7 +226,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   pickBtnIcon:    { color: '#FFFFFF', fontSize: 22, fontWeight: 'bold' },
   pickBtnText:    { color: '#FFFFFF', fontWeight: 'bold', fontSize: 15 },
   fileList:       { padding: 12, gap: 10 },
-  fileCard:       { flexDirection: 'row', alignItems: 'center', backgroundColor: c.bg, borderRadius: 12, padding: 12, borderWidth: 1, borderColor: c.border, gap: 10 },
+  fileCard:       { flexDirection: 'row', alignItems: 'center', backgroundColor: c.bg, borderRadius: 12, padding: 12, borderWidth: 1, borderColor: c.glassStroke, gap: 10 },
   fileIconBox:    { width: 46, height: 46, borderRadius: 10, borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
   fileIconText:   { fontSize: 11, fontWeight: 'bold' },
   fileInfo:       { flex: 1 },

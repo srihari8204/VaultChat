@@ -221,7 +221,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   screen: { flex: 1, backgroundColor: 'transparent' },
   center:        { justifyContent: 'center', alignItems: 'center' },
 
-  header:        { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingTop: HEADER_TOP, paddingBottom: 12, gap: 8, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.border },
+  header:        { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingTop: HEADER_TOP, paddingBottom: 12, gap: 8, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.glassStroke },
   backBtn:       { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
   backTxt:       { color: c.text, fontSize: 26, fontWeight: '600' },
   title:         { color: c.text, fontSize: 22, fontWeight: '800' },
@@ -231,7 +231,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   intro:         { paddingHorizontal: 20, paddingTop: 14, paddingBottom: 4 },
   introTxt:      { color: c.textDim, fontSize: 12, lineHeight: 16 },
 
-  row:           { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 20, paddingVertical: 14, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.border },
+  row:           { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 20, paddingVertical: 14, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.glassStroke },
   rowCurrent:    { backgroundColor: 'rgba(108,99,255,0.08)' },
   rowTop:        { flexDirection: 'row', alignItems: 'center', gap: 8 },
   rowDevice:     { color: c.text, fontSize: 15, fontWeight: '600', flex: 1 },
@@ -240,6 +240,6 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   rowSubSmall:   { color: c.textDim, fontSize: 11, marginTop: 2, opacity: 0.7 },
   revokeTxt:     { color: c.danger, fontSize: 12, fontWeight: '700' },
 
-  revokeAllBtn:  { marginHorizontal: 20, marginTop: 24, padding: 14, borderRadius: 12, borderWidth: 1, borderColor: c.danger, backgroundColor: c.card, alignItems: 'center' },
+  revokeAllBtn:  { marginHorizontal: 20, marginTop: 24, padding: 14, borderRadius: 12, borderWidth: 1, borderColor: c.danger, backgroundColor: c.glassSoft, alignItems: 'center' },
   revokeAllTxt:  { color: c.danger, fontWeight: '700' },
 });

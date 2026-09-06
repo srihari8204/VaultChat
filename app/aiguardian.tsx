@@ -171,7 +171,7 @@ export default function SecurityHubScreen() {
 
 const makeStyles = (c: Palette) => StyleSheet.create({
   container: { flex: 1, backgroundColor: 'transparent' },
-  header: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingTop: HEADER_TOP, paddingBottom: 14, paddingHorizontal: 12, borderBottomWidth: 1, borderBottomColor: c.border },
+  header: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingTop: HEADER_TOP, paddingBottom: 14, paddingHorizontal: 12, borderBottomWidth: 1, borderBottomColor: c.glassStroke },
   backBtn: { padding: 4 },
   headerTitle: { color: c.text, fontSize: 18, fontWeight: '800' },
   headerSub: { color: c.textDim, fontSize: 12, marginTop: 1 },
@@ -188,8 +188,8 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   scanBtnText: { color: '#fff', fontWeight: '800', fontSize: 15 },
 
   sectionTitle: { color: c.textFaint, fontSize: 11, fontWeight: '800', letterSpacing: 1, marginTop: 24, marginBottom: 8, marginLeft: 20 },
-  card: { marginHorizontal: 16, backgroundColor: c.card, borderRadius: 16, borderWidth: 1, borderColor: c.border, overflow: 'hidden' },
-  divider: { height: 1, backgroundColor: c.separator, marginLeft: 16 },
+  card: { marginHorizontal: 16, backgroundColor: c.glassSoft, borderRadius: 16, borderWidth: 1, borderColor: c.glassStroke, overflow: 'hidden' },
+  divider: { height: 1, backgroundColor: c.hairline, marginLeft: 16 },
 
   actionRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 12, padding: 14 },
   actionText: { color: c.text, fontSize: 13.5, flex: 1, lineHeight: 19 },

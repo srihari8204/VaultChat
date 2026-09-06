@@ -374,13 +374,13 @@ const clock = (iso: string) => new Date(iso).toLocaleTimeString([], { hour: '2-d
 const styles = (c: Palette) => StyleSheet.create({
   screen: { flex: 1, backgroundColor: 'transparent' },
   centre: { alignItems: 'center', justifyContent: 'center' },
-  head: { padding: 16, gap: 10, borderBottomWidth: 1, borderBottomColor: c.border },
+  head: { padding: 16, gap: 10, borderBottomWidth: 1, borderBottomColor: c.glassStroke },
   counts: { flexDirection: 'row', gap: 8 },
-  count: { flex: 1, backgroundColor: c.card, borderRadius: 12, paddingVertical: 10, alignItems: 'center' },
+  count: { flex: 1, backgroundColor: c.glassSoft, borderRadius: 12, paddingVertical: 10, alignItems: 'center' },
   countValue: { fontSize: 20, fontWeight: '800' },
   countLabel: { color: c.textDim, fontSize: 11 },
   search: {
-    borderWidth: 1, borderColor: c.border, borderRadius: 10,
+    borderWidth: 1, borderColor: c.glassStroke, borderRadius: 10,
     paddingHorizontal: 12, height: 42, color: c.text,
   },
   body: { padding: 16, gap: 4, paddingBottom: 40 },
@@ -401,7 +401,7 @@ const styles = (c: Palette) => StyleSheet.create({
     backgroundColor: c.danger + '14', borderRadius: 10, padding: 10,
   },
   roleCard: {
-    borderWidth: 1, borderColor: c.border, borderRadius: 12,
+    borderWidth: 1, borderColor: c.glassStroke, borderRadius: 12,
     padding: 12, gap: 4, marginBottom: 8,
   },
   currentTag: { color: c.textFaint, fontSize: 10, fontWeight: '800' },

@@ -168,7 +168,7 @@ export default function CreatePollScreen() {
 const makeStyles = (c: Palette) => StyleSheet.create({
   screen: { flex: 1, backgroundColor: 'transparent' },
 
-  header:        { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingTop: HEADER_TOP, paddingBottom: 12, gap: 8, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.border },
+  header:        { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingTop: HEADER_TOP, paddingBottom: 12, gap: 8, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.glassStroke },
   backBtn:       { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
   backTxt:       { color: c.text, fontSize: 26, fontWeight: '600' },
   title:         { color: c.text, fontSize: 22, fontWeight: '800' },
@@ -179,17 +179,17 @@ const makeStyles = (c: Palette) => StyleSheet.create({
 
   label:         { color: c.textDim, fontSize: 11, fontWeight: '700', letterSpacing: 1.2, marginBottom: 8 },
 
-  questionInput: { color: c.text, backgroundColor: c.card, borderColor: c.border, borderWidth: 1, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12, fontSize: 16, minHeight: 80, textAlignVertical: 'top' },
+  questionInput: { color: c.text, backgroundColor: c.glassSoft, borderColor: c.glassStroke, borderWidth: 1, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12, fontSize: 16, minHeight: 80, textAlignVertical: 'top' },
   counter:       { color: c.textDim, fontSize: 11, marginTop: 4, textAlign: 'right' },
 
   optionRow:     { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 8 },
-  optionInput:   { flex: 1, color: c.text, backgroundColor: c.card, borderColor: c.border, borderWidth: 1, borderRadius: 10, paddingHorizontal: 14, paddingVertical: 10, fontSize: 15 },
-  removeBtn:     { width: 36, height: 36, alignItems: 'center', justifyContent: 'center', borderRadius: 18, borderWidth: 1, borderColor: c.border, backgroundColor: c.card },
+  optionInput:   { flex: 1, color: c.text, backgroundColor: c.glassSoft, borderColor: c.glassStroke, borderWidth: 1, borderRadius: 10, paddingHorizontal: 14, paddingVertical: 10, fontSize: 15 },
+  removeBtn:     { width: 36, height: 36, alignItems: 'center', justifyContent: 'center', borderRadius: 18, borderWidth: 1, borderColor: c.glassStroke, backgroundColor: c.glassSoft },
   removeBtnTxt:  { color: c.danger, fontSize: 22, fontWeight: '700' },
-  addBtn:        { flexDirection: 'row', justifyContent: 'center', padding: 12, borderRadius: 12, backgroundColor: c.card, borderWidth: 1, borderColor: c.border, alignItems: 'center', marginTop: 4 },
+  addBtn:        { flexDirection: 'row', justifyContent: 'center', padding: 12, borderRadius: 12, backgroundColor: c.glassSoft, borderWidth: 1, borderColor: c.glassStroke, alignItems: 'center', marginTop: 4 },
   addBtnTxt:     { color: c.primary, fontWeight: '700' },
 
-  toggleRow:     { flexDirection: 'row', alignItems: 'center', gap: 12, marginTop: 24, paddingVertical: 12, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: c.border },
+  toggleRow:     { flexDirection: 'row', alignItems: 'center', gap: 12, marginTop: 24, paddingVertical: 12, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: c.glassStroke },
   toggleTitle:   { color: c.text, fontSize: 15, fontWeight: '600' },
   toggleSub:     { color: c.textDim, fontSize: 12, lineHeight: 16, marginTop: 2 },
 });

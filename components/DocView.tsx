@@ -234,7 +234,7 @@ export function DocView({ blocks, colors }: { blocks: Block[]; colors: Palette }
     {zoom !== 1 && (
       <Pressable
         onPress={resetZoom}
-        style={[s.zoomPill, { borderColor: colors.border, backgroundColor: colors.card }]}
+        style={[s.zoomPill, { borderColor: colors.glassStroke, backgroundColor: colors.glassSoft }]}
         accessibilityRole="button"
         accessibilityLabel={`Zoom ${zoomLabel(zoom)}. Tap to reset.`}
       >
@@ -265,13 +265,13 @@ const makeStyles = (c: Palette, zoom: number) => {
 
   blockGap: { marginTop: 8, marginBottom: 16 },
 
-  grid:     { borderWidth: 1, borderColor: c.border, borderRadius: 8, overflow: 'hidden' },
+  grid:     { borderWidth: 1, borderColor: c.glassStroke, borderRadius: 8, overflow: 'hidden' },
   gridRow:  { flexDirection: 'row' },
-  gridHead: { backgroundColor: c.surface },
-  gridAlt:  { backgroundColor: c.surface + '55' },
+  gridHead: { backgroundColor: c.glassSoft },
+  gridAlt:  { backgroundColor: c.glassSoft + '55' },
   gridCell: { paddingHorizontal: 9, paddingVertical: 7,
-              borderRightWidth: StyleSheet.hairlineWidth, borderRightColor: c.border,
-              borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.border },
+              borderRightWidth: StyleSheet.hairlineWidth, borderRightColor: c.glassStroke,
+              borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.glassStroke },
   gridTxt:      { color: c.text, fontSize: z(13), lineHeight: z(18) },
   gridHeadTxt:  { fontWeight: '800', color: c.text },
 
@@ -280,10 +280,10 @@ const makeStyles = (c: Palette, zoom: number) => {
   sheetName: { color: c.text, fontSize: z(14), fontWeight: '800', flexShrink: 1 },
   sheetMeta: { color: c.textFaint, fontSize: z(12) },
 
-  slide:      { borderWidth: 1, borderColor: c.border, borderRadius: 12,
-                padding: 14, marginBottom: 14, backgroundColor: c.card },
+  slide:      { borderWidth: 1, borderColor: c.glassStroke, borderRadius: 12,
+                padding: 14, marginBottom: 14, backgroundColor: c.glassSoft },
   slideHead:  { flexDirection: 'row', alignItems: 'flex-start', gap: 10, marginBottom: 8 },
-  slideNum:   { width: z(24), height: z(24), borderRadius: z(12), backgroundColor: c.surface,
+  slideNum:   { width: z(24), height: z(24), borderRadius: z(12), backgroundColor: c.glassSoft,
                 alignItems: 'center', justifyContent: 'center' },
   slideNumTxt:{ color: c.textDim, fontSize: z(12), fontWeight: '800' },
   slideTitle: { color: c.text, fontSize: z(17), fontWeight: '800', flex: 1, lineHeight: z(23) },

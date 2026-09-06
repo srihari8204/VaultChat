@@ -140,12 +140,12 @@ export async function getBubbleColors(chatId: string): Promise<{ mine: string; p
 
 const makeStyles = (c: Palette) => StyleSheet.create({
   root: { flex: 1, backgroundColor: 'transparent' },
-  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingTop: HEADER_TOP, paddingHorizontal: 12, paddingBottom: 12, backgroundColor: c.bg, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.border, gap: 8 },
+  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingTop: HEADER_TOP, paddingHorizontal: 12, paddingBottom: 12, backgroundColor: c.bg, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.glassStroke, gap: 8 },
   iconBtn: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
   headerTitle: { flex: 1, color: c.text, fontSize: 18, fontWeight: '700' },
   resetText: { color: c.primary, fontSize: 14, fontWeight: '700', paddingHorizontal: 8 },
 
-  preview: { borderRadius: 16, padding: 14, minHeight: 180, borderWidth: StyleSheet.hairlineWidth, borderColor: c.border, justifyContent: 'center', marginBottom: 20 },
+  preview: { borderRadius: 16, padding: 14, minHeight: 180, borderWidth: StyleSheet.hairlineWidth, borderColor: c.glassStroke, justifyContent: 'center', marginBottom: 20 },
   peerBubble: { alignSelf: 'flex-start', maxWidth: '78%', borderRadius: 14, borderTopLeftRadius: 4, paddingHorizontal: 12, paddingVertical: 8, marginBottom: 8 },
   myBubble: { alignSelf: 'flex-end', maxWidth: '78%', borderRadius: 14, borderTopRightRadius: 4, paddingHorizontal: 12, paddingVertical: 8, marginBottom: 8 },
   txt: { fontSize: 14, lineHeight: 19 },
@@ -154,7 +154,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   sectionTitle: { color: c.textDim, fontSize: 11, fontWeight: '800', letterSpacing: 1, marginBottom: 12 },
   grid: { flexDirection: 'row', flexWrap: 'wrap', gap: 12, justifyContent: 'space-between' },
   cell: { width: '22%', alignItems: 'center', gap: 6 },
-  swatch: { width: 56, height: 56, borderRadius: 28, alignItems: 'center', justifyContent: 'center', borderWidth: StyleSheet.hairlineWidth, borderColor: c.border },
+  swatch: { width: 56, height: 56, borderRadius: 28, alignItems: 'center', justifyContent: 'center', borderWidth: StyleSheet.hairlineWidth, borderColor: c.glassStroke },
   swatchOn: { borderWidth: 3, borderColor: c.primary },
   cellName: { color: c.textDim, fontSize: 11 },
 

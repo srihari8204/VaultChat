@@ -258,7 +258,7 @@ const styles = (c: Palette) => StyleSheet.create({
   screen: { flex: 1, backgroundColor: 'transparent' },
   centre: { alignItems: 'center', justifyContent: 'center' },
   body: { padding: 16, gap: 10, paddingBottom: 40 },
-  card: { backgroundColor: c.card, borderRadius: 14, padding: 14, gap: 8 },
+  card: { backgroundColor: c.glassSoft, borderRadius: 14, padding: 14, gap: 8 },
   cardTitle: { color: c.text, fontSize: 15.5, fontWeight: '700' },
   muted: { color: c.textDim, fontSize: 13, flexShrink: 1 },
   row: { flexDirection: 'row', alignItems: 'center', gap: 12 },
@@ -266,7 +266,7 @@ const styles = (c: Palette) => StyleSheet.create({
   name: { color: c.text, fontSize: 15.5, fontWeight: '600' },
   tiles: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   tile: {
-    backgroundColor: c.card, borderRadius: 12, paddingVertical: 10, paddingHorizontal: 12,
+    backgroundColor: c.glassSoft, borderRadius: 12, paddingVertical: 10, paddingHorizontal: 12,
     minWidth: 92, flexGrow: 1,
   },
   tileValue: { color: c.text, fontSize: 22, fontWeight: '700' },

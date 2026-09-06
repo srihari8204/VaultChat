@@ -369,7 +369,7 @@ export default function EmailBridgeScreen() {
 const makeStyles = (c: Palette) => StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: c.card,
+    backgroundColor: c.glassSoft,
   },
   scroll: {
     flex: 1,
@@ -389,7 +389,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
     width: 40,
     height: 40,
     borderRadius: 20,
-    backgroundColor: c.card,
+    backgroundColor: c.glassSoft,
     justifyContent: 'center',
     alignItems: 'center',
     marginRight: 12,
@@ -406,7 +406,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
     flex: 1,
   },
   encBadge: {
-    backgroundColor: c.card,
+    backgroundColor: c.glassSoft,
     borderRadius: 8,
     paddingHorizontal: 10,
     paddingVertical: 5,
@@ -428,7 +428,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
     alignItems: 'center',
     marginBottom: 20,
     borderWidth: 1,
-    borderColor: c.border,
+    borderColor: c.glassStroke,
   },
   infoIcon: {
     fontSize: 24,
@@ -475,7 +475,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
     padding: 18,
     marginBottom: 24,
     borderWidth: 1,
-    borderColor: c.border,
+    borderColor: c.glassStroke,
   },
   inputGroup: {
     marginBottom: 14,
@@ -489,14 +489,14 @@ const makeStyles = (c: Palette) => StyleSheet.create({
     letterSpacing: 0.8,
   },
   input: {
-    backgroundColor: c.card,
+    backgroundColor: c.glassSoft,
     borderRadius: 12,
     paddingHorizontal: 14,
     paddingVertical: 12,
     color: c.text,
     fontSize: 15,
     borderWidth: 1,
-    borderColor: c.border,
+    borderColor: c.glassStroke,
   },
   bodyInput: {
     minHeight: 100,
@@ -521,7 +521,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
     padding: 16,
     marginBottom: 12,
     borderWidth: 1,
-    borderColor: c.border,
+    borderColor: c.glassStroke,
   },
   emailHeader: {
     flexDirection: 'row',
@@ -610,7 +610,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
     maxHeight: '85%',
     paddingBottom: 30,
     borderWidth: 1,
-    borderColor: c.border,
+    borderColor: c.glassStroke,
     borderBottomWidth: 0,
   },
   modalHeader: {
@@ -621,7 +621,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
     paddingTop: 20,
     paddingBottom: 14,
     borderBottomWidth: 1,
-    borderBottomColor: c.border,
+    borderBottomColor: c.glassStroke,
   },
   modalTitle: {
     color: c.text,
@@ -655,18 +655,18 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   },
   modalDivider: {
     height: 1,
-    backgroundColor: c.card,
+    backgroundColor: c.glassSoft,
     marginVertical: 16,
   },
 
   // Encrypted block
   encryptedBlock: {
-    backgroundColor: c.card,
+    backgroundColor: c.glassSoft,
     borderRadius: 14,
     padding: 20,
     alignItems: 'center',
     borderWidth: 1,
-    borderColor: c.border,
+    borderColor: c.glassStroke,
   },
   encryptedBlockIcon: {
     fontSize: 36,
@@ -700,7 +700,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
     width: '80%',
     height: 4,
     borderRadius: 2,
-    backgroundColor: c.card,
+    backgroundColor: c.glassSoft,
     overflow: 'hidden',
   },
   progressFill: {

@@ -461,7 +461,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
     padding: 14,
     alignItems: 'center',
     borderWidth: 1,
-    borderColor: c.border,
+    borderColor: c.glassStroke,
   },
   appIconWrap: {
     width: 48,
@@ -551,7 +551,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
 
   // ── Calculator ────────────────────────────────────
   calcDisplay: {
-    backgroundColor: c.card,
+    backgroundColor: c.glassSoft,
     borderRadius: 16,
     padding: 20,
     marginBottom: 16,
@@ -627,7 +627,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   },
   todoInput: {
     flex: 1,
-    backgroundColor: c.card,
+    backgroundColor: c.glassSoft,
     borderRadius: 12,
     borderWidth: 1,
     borderColor: '#1A2744',
@@ -653,7 +653,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   todoItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: c.card,
+    backgroundColor: c.glassSoft,
     borderRadius: 12,
     padding: 14,
     marginBottom: 8,

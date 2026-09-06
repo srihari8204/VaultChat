@@ -96,7 +96,7 @@ export default function VoiceSpeedPlayer() {
     <>
       <Stack.Screen options={{
         title: 'Voice Message',
-        headerStyle: { backgroundColor: colors.card },
+        headerStyle: { backgroundColor: colors.glassSoft },
         headerTintColor: '#1F2937',
       }} />
       <View style={st.screen}>
@@ -177,7 +177,7 @@ export default function VoiceSpeedPlayer() {
 }
 
 const makeStyles = (c: Palette) => StyleSheet.create({
-  screen: { flex: 1, backgroundColor: c.card, justifyContent: 'center', padding: 20 },
+  screen: { flex: 1, backgroundColor: c.glassSoft, justifyContent: 'center', padding: 20 },
   card: { backgroundColor: 'rgba(10,22,40,0.9)', borderRadius: 24, padding: 24, borderWidth: 1, borderColor: 'rgba(0,229,255,0.15)' },
   sender: { color: c.text, fontSize: 18, fontWeight: '800', textAlign: 'center', marginBottom: 20 },
   waveform: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', height: 60, gap: 2, marginBottom: 16 },

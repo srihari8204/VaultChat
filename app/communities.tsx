@@ -194,7 +194,7 @@ export default function CommunitiesScreen() {
 const makeStyles = (c: Palette) => StyleSheet.create({
   screen: { flex: 1, backgroundColor: 'transparent' },
   center:  { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 10, paddingHorizontal: 40 },
-  header:  { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 12, paddingTop: HEADER_TOP, paddingBottom: 12, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.border },
+  header:  { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 12, paddingTop: HEADER_TOP, paddingBottom: 12, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.glassStroke },
   hBtn:    { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
   hTitle:  { flex: 1, color: c.text, fontSize: 18, fontWeight: '700' },
 
@@ -221,7 +221,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   modalBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', alignItems: 'center', justifyContent: 'center', padding: 28 },
   modalCard: { width: '100%', maxWidth: 360, backgroundColor: c.surfaceSolid, borderRadius: 18, padding: 18, gap: 12 },
   modalTitle: { color: c.text, fontSize: 17, fontWeight: '800' },
-  modalInput: { color: c.text, backgroundColor: c.surface, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12, fontSize: 15 },
+  modalInput: { color: c.text, backgroundColor: c.glassSoft, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12, fontSize: 15 },
   modalBtns: { flexDirection: 'row', justifyContent: 'flex-end', gap: 8, marginTop: 4 },
   modalBtn:  { paddingHorizontal: 16, paddingVertical: 10, borderRadius: 12 },
   modalBtnPrimary: { backgroundColor: c.primary, minWidth: 84, alignItems: 'center' },

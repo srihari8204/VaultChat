@@ -287,7 +287,7 @@ export default function SpaceTransportScreen() {
                 <TouchableOpacity
                   onPress={() => callDriver(run.driverId!)}
                   disabled={callingDriver === run.driverId}
-                  style={[s.btn, { backgroundColor: colors.card, borderColor: colors.border, borderWidth: 1 },
+                  style={[s.btn, { backgroundColor: colors.glassSoft, borderColor: colors.glassStroke, borderWidth: 1 },
                           callingDriver === run.driverId && { opacity: 0.6 }]}
                 >
                   <Ionicons name="call-outline" size={16} color={colors.text} />
@@ -314,7 +314,7 @@ const styles = (c: Palette) => StyleSheet.create({
   screen: { flex: 1, backgroundColor: c.bg },
   body: { padding: 16, gap: 12, paddingBottom: 40 },
   centre: { alignItems: 'center', gap: 10, paddingVertical: 40 },
-  card: { backgroundColor: c.card, borderRadius: 14, padding: 14, gap: 10 },
+  card: { backgroundColor: c.glassSoft, borderRadius: 14, padding: 14, gap: 10 },
   cardTitle: { color: c.text, fontSize: 15.5, fontWeight: '700' },
   muted: { color: c.textDim, fontSize: 12.5, lineHeight: 17, flexShrink: 1 },
   rowTop: { flexDirection: 'row', alignItems: 'center', gap: 10 },

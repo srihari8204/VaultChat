@@ -207,7 +207,7 @@ export default function GroupInvitesScreen() {
 
         <Text style={[st.h, { color: colors.text }]}>Add to {groupName}</Text>
 
-        <View style={[st.field, { borderColor: colors.border, backgroundColor: colors.surface }]}>
+        <View style={[st.field, { borderColor: colors.glassStroke, backgroundColor: colors.glassSoft }]}>
           <Ionicons name="search" size={17} color={colors.textDim} />
           <TextInput
             value={q} onChangeText={setQ}
@@ -230,7 +230,7 @@ export default function GroupInvitesScreen() {
         </Text>
 
         {searched && results.length === 0 && !searching && (
-          <View style={[st.empty, { borderColor: colors.border }]}>
+          <View style={[st.empty, { borderColor: colors.glassStroke }]}>
             <Ionicons name="person-outline" size={17} color={colors.textDim} />
             <Text style={{ color: colors.textDim, fontSize: 12.5, flex: 1, lineHeight: 17 }}>
               Nobody found. They need a VaultChat account before they can be added — there is
@@ -240,7 +240,7 @@ export default function GroupInvitesScreen() {
         )}
 
         {results.map((c) => (
-          <View key={c.id} style={[st.row, { borderColor: colors.border }]}>
+          <View key={c.id} style={[st.row, { borderColor: colors.glassStroke }]}>
             {avatar(c.name, c.photoURL)}
             <View style={{ flex: 1, minWidth: 0 }}>
               <Text style={{ color: colors.text, fontWeight: '600', fontSize: 14 }} numberOfLines={1}>
@@ -278,7 +278,7 @@ export default function GroupInvitesScreen() {
         )}
 
         {waiting.map((p) => (
-          <View key={p.id} style={[st.row, { borderColor: colors.border }]}>
+          <View key={p.id} style={[st.row, { borderColor: colors.glassStroke }]}>
             {avatar(p.name, p.photoURL)}
             <View style={{ flex: 1, minWidth: 0 }}>
               <Text style={{ color: colors.text, fontWeight: '600', fontSize: 14 }} numberOfLines={1}>
@@ -321,7 +321,7 @@ export default function GroupInvitesScreen() {
         {unanswered.map((inv) => {
           const t = tone(STATUS_TONE[inv.status]);
           return (
-            <View key={inv.id} style={[st.row, { borderColor: colors.border }]}>
+            <View key={inv.id} style={[st.row, { borderColor: colors.glassStroke }]}>
               <View style={[st.rowIcon, { backgroundColor: t + '22' }]}>
                 <Ionicons name={inv.status === 'expired' ? 'hourglass' : 'paper-plane'} size={16} color={t} />
               </View>
@@ -341,7 +341,7 @@ export default function GroupInvitesScreen() {
           );
         })}
 
-        <View style={[st.footer, { borderColor: colors.border }]}>
+        <View style={[st.footer, { borderColor: colors.glassStroke }]}>
           <Ionicons name="lock-closed-outline" size={15} color={colors.textDim} />
           <Text style={{ color: colors.textDim, fontSize: 11.5, flex: 1, lineHeight: 16 }}>
             Invitations stay inside VaultChat. There is no link or code to share, so an

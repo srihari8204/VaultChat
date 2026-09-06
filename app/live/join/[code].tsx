@@ -289,9 +289,9 @@ function useS(colors: Palette) {
     sub: { color: colors.textDim, fontSize: 14, marginTop: 8, textAlign: 'center', lineHeight: 20 },
     label: { color: colors.textDim, fontSize: 12, fontWeight: '600', alignSelf: 'flex-start', marginTop: 20, marginBottom: 6 },
     input: {
-      width: '100%', backgroundColor: colors.surface, color: colors.text,
+      width: '100%', backgroundColor: colors.glassSoft, color: colors.text,
       borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12, fontSize: 16,
-      borderWidth: 1, borderColor: colors.border,
+      borderWidth: 1, borderColor: colors.glassStroke,
     },
     inputBad: { borderColor: colors.danger },
     bad: { color: colors.danger, fontSize: 13, marginTop: 8, alignSelf: 'flex-start' },

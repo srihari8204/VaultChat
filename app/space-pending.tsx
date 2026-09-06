@@ -138,7 +138,7 @@ const styles = (c: Palette) => StyleSheet.create({
   screen: { flex: 1, backgroundColor: 'transparent' },
   centre: { alignItems: 'center', justifyContent: 'center' },
   body: { padding: 16, gap: 10, paddingBottom: 40 },
-  card: { backgroundColor: c.card, borderRadius: 14, padding: 14, gap: 6 },
+  card: { backgroundColor: c.glassSoft, borderRadius: 14, padding: 14, gap: 6 },
   cardTitle: { color: c.text, fontSize: 15.5, fontWeight: '700' },
   muted: { color: c.textDim, fontSize: 12.5, flexShrink: 1 },
   rowBetween: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },

@@ -148,11 +148,11 @@ export default function VerifyContactScreen() {
 
 const makeStyles = (c: Palette) => StyleSheet.create({
   container: { flex: 1, backgroundColor: 'transparent' },
-  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingTop: HEADER_TOP, paddingBottom: 12, paddingHorizontal: 14, borderBottomWidth: 1, borderBottomColor: c.border },
+  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingTop: HEADER_TOP, paddingBottom: 12, paddingHorizontal: 14, borderBottomWidth: 1, borderBottomColor: c.glassStroke },
   title: { color: c.text, fontSize: 17, fontWeight: '800' },
   center: { paddingVertical: 60, alignItems: 'center' },
 
-  card: { backgroundColor: c.card, borderRadius: 16, borderWidth: 1, borderColor: c.border, padding: 20, alignItems: 'center', gap: 10 },
+  card: { backgroundColor: c.glassSoft, borderRadius: 16, borderWidth: 1, borderColor: c.glassStroke, padding: 20, alignItems: 'center', gap: 10 },
   numberLabel: { color: c.textFaint, fontSize: 11, fontWeight: '800', letterSpacing: 1 },
   number: { color: c.text, fontSize: 22, fontWeight: '700', letterSpacing: 2, textAlign: 'center', lineHeight: 34, fontVariant: ['tabular-nums'] },
 

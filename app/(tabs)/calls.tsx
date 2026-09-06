@@ -319,7 +319,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   infoHead:     { flexDirection: 'row', alignItems: 'center', gap: 14, marginBottom: 14 },
   infoName:     { color: c.text, fontSize: 18, fontWeight: '700', flex: 1 },
   infoActions:  { flexDirection: 'row', gap: 10, marginBottom: 8 },
-  infoAction:   { flex: 1, flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 8, paddingVertical: 12, borderRadius: 14, backgroundColor: c.surface },
+  infoAction:   { flex: 1, flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 8, paddingVertical: 12, borderRadius: 14, backgroundColor: c.glassSoft },
   infoActionTxt:{ color: c.text, fontSize: 14, fontWeight: '700' },
   infoRow:      { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 9 },
   infoRowTitle: { color: c.text, fontSize: 15, fontWeight: '600' },

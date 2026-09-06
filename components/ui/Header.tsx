@@ -33,7 +33,7 @@ export function Header({ title, back = true, onBack, right, border, style }: Hea
       style={[
         styles.header,
         { paddingTop: insets.top + SPACING.xs, backgroundColor: c.bg },
-        border && { borderBottomWidth: 1, borderBottomColor: c.border },
+        border && { borderBottomWidth: 1, borderBottomColor: c.glassStroke },
         style,
       ]}
     >

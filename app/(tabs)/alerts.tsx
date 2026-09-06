@@ -220,7 +220,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   rowTitle: { color: c.text, fontSize: 15, fontWeight: '700', flex: 1 },
   rowTime:  { color: c.textFaint, fontSize: 11.5 },
   rowDetail:{ color: c.textDim, fontSize: 13, lineHeight: 18, marginTop: 2 },
-  metaBox:  { marginTop: 8, padding: 10, borderRadius: 10, backgroundColor: c.surface, gap: 3 },
+  metaBox:  { marginTop: 8, padding: 10, borderRadius: 10, backgroundColor: c.glassSoft, gap: 3 },
   metaLine: { color: c.textDim, fontSize: 12 },
   metaKey:  { color: c.textFaint, fontWeight: '700' },
 

@@ -442,7 +442,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   emailDisplay: { color: c.textDim, fontSize: 13, marginTop: 2 },
   removePhotoTxt: { color: c.danger, fontSize: 12, fontWeight: '600', marginTop: 8 },
 
-  card:         { backgroundColor: c.card, borderRadius: 16, marginHorizontal: 16, marginTop: 12, borderWidth: StyleSheet.hairlineWidth, borderColor: c.border, overflow: 'hidden' },
+  card:         { backgroundColor: c.glassSoft, borderRadius: 16, marginHorizontal: 16, marginTop: 12, borderWidth: StyleSheet.hairlineWidth, borderColor: c.glassStroke, overflow: 'hidden' },
   cardHint:     { color: c.textDim, fontSize: 12, lineHeight: 16, marginHorizontal: 22, marginTop: 8 },
 
   editRow:      { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 14, gap: 14 },
@@ -454,21 +454,21 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   rowSep:       { height: StyleSheet.hairlineWidth, backgroundColor: c.border, marginLeft: 54 },
 
   groupLabel:   { color: c.textDim, fontSize: 11, fontWeight: '700', letterSpacing: 1.2, marginHorizontal: 22, marginTop: 24, marginBottom: 2 },
-  infoRow:      { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.border },
+  infoRow:      { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.glassStroke },
   infoK:        { color: c.textDim, fontSize: 13 },
   infoV:        { color: c.text, fontSize: 13, fontWeight: '600', maxWidth: '60%' },
   infoVSmall:   { fontSize: 11, fontWeight: '500' },
 
-  input:        { color: c.text, backgroundColor: c.surface, borderColor: c.border, borderWidth: 1, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12, fontSize: 15 },
+  input:        { color: c.text, backgroundColor: c.glassSoft, borderColor: c.glassStroke, borderWidth: 1, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12, fontSize: 15 },
   subHint:      { color: c.textDim, fontSize: 12, lineHeight: 16 },
   verifyRow:    { flexDirection: 'row', alignItems: 'center', gap: 8, marginHorizontal: 22, marginTop: 12, paddingVertical: 6 },
   verifyLinkTxt:{ color: c.primary, fontWeight: '700', fontSize: 13 },
-  verifyBox:    { marginHorizontal: 16, marginTop: 10, gap: 8, backgroundColor: c.card, borderRadius: 14, borderWidth: StyleSheet.hairlineWidth, borderColor: c.border, padding: 14 },
+  verifyBox:    { marginHorizontal: 16, marginTop: 10, gap: 8, backgroundColor: c.glassSoft, borderRadius: 14, borderWidth: StyleSheet.hairlineWidth, borderColor: c.glassStroke, padding: 14 },
   btn:          { backgroundColor: c.primary, paddingVertical: 14, borderRadius: 16, alignItems: 'center' },
-  btnGhost:     { backgroundColor: c.surface },
+  btnGhost:     { backgroundColor: c.glassSoft },
   btnOff:       { opacity: 0.5 },
   btnTxt:       { color: '#fff', fontWeight: '800', fontSize: 14 },
 
-  actionRow:    { flexDirection: 'row', alignItems: 'center', gap: 14, marginHorizontal: 16, marginTop: 12, paddingHorizontal: 16, paddingVertical: 15, borderRadius: 16, borderWidth: StyleSheet.hairlineWidth, borderColor: c.border, backgroundColor: c.card },
+  actionRow:    { flexDirection: 'row', alignItems: 'center', gap: 14, marginHorizontal: 16, marginTop: 12, paddingHorizontal: 16, paddingVertical: 15, borderRadius: 16, borderWidth: StyleSheet.hairlineWidth, borderColor: c.glassStroke, backgroundColor: c.glassSoft },
   actionTxt:    { color: c.text, fontWeight: '700', fontSize: 15 },
 });

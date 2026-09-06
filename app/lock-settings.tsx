@@ -45,7 +45,7 @@ export default function LockSettingsScreen() {
   };
 
   const Row = ({ icon, label, keyName }: { icon: any; label: string; keyName: keyof LockAlertSettings }) => (
-    <View style={[st.row, { borderColor: colors.border }]}>
+    <View style={[st.row, { borderColor: colors.glassStroke }]}>
       <Ionicons name={icon} size={19} color={colors.primary} />
       <Text style={[st.rowTxt, { color: colors.text }]}>{label}</Text>
       <Switch
@@ -98,7 +98,7 @@ export default function LockSettingsScreen() {
         </Text>
 
         {/* ── Battery ── */}
-        <View style={[st.row, { borderColor: colors.border, marginTop: 24 }]}>
+        <View style={[st.row, { borderColor: colors.glassStroke, marginTop: 24 }]}>
           <Ionicons name="shield-half" size={19} color={colors.primary} />
           <Text style={[st.rowTxt, { color: colors.text }]}>
             Background tracking{lock.active ? '' : ' (arms with the next lock)'}
@@ -119,7 +119,7 @@ export default function LockSettingsScreen() {
                 else Alert.alert('All good', 'VaultChat is already exempt from battery optimization.');
               } catch {}
             }}
-            style={[st.row, { borderColor: colors.border }]}>
+            style={[st.row, { borderColor: colors.glassStroke }]}>
             <Ionicons name="battery-charging" size={19} color={colors.primary} />
             <Text style={[st.rowTxt, { color: colors.text }]}>Battery optimization exemption</Text>
             <Ionicons name="chevron-forward" size={16} color={colors.text + '66'} />
@@ -174,7 +174,7 @@ export default function LockSettingsScreen() {
           Returning inside the radius within this window cancels the alarm silently.
         </Text>
 
-        <View style={[st.row, { borderColor: colors.border, marginTop: 24 }]}>
+        <View style={[st.row, { borderColor: colors.glassStroke, marginTop: 24 }]}>
           <Ionicons name="repeat" size={19} color={colors.primary} />
           <Text style={[st.rowTxt, { color: colors.text }]}>Repeat alarm until back inside</Text>
           <Switch
@@ -205,7 +205,7 @@ export default function LockSettingsScreen() {
 
         {/* ── About ── */}
         <Text style={[st.h, { color: colors.text, marginTop: 28 }]}>About Location Lock</Text>
-        <View style={[st.about, { borderColor: colors.border, backgroundColor: colors.card }]}>
+        <View style={[st.about, { borderColor: colors.glassStroke, backgroundColor: colors.glassSoft }]}>
           <Text style={{ color: colors.text, fontSize: 13.5, fontWeight: '700' }}>Location Lock · Navigate mini-app</Text>
           <Text style={{ color: colors.text + '88', fontSize: 12.5, marginTop: 6, lineHeight: 18 }}>
             Geofencing runs entirely on this device. Your coordinates and history never

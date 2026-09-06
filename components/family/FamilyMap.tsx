@@ -849,7 +849,7 @@ export default function FamilyMap({
           onPress={cycleCam}
           accessibilityRole="button"
           accessibilityLabel={`Camera: ${camLabel}. Tap to change.`}
-          style={[styles.camFab, { bottom: controlsBottom + 54, backgroundColor: colors.card, borderColor: colors.border }]}
+          style={[styles.camFab, { bottom: controlsBottom + 54, backgroundColor: colors.glassSoft, borderColor: colors.glassStroke }]}
         >
           <Ionicons name={camIcon as any} size={17} color={colors.primary} />
           <Text style={{ color: colors.primary, fontSize: 10, fontWeight: '800' }}>{camLabel}</Text>
@@ -859,7 +859,7 @@ export default function FamilyMap({
         onPress={() => ref.current?.injectJavaScript('fitAll();true;')}
         accessibilityRole="button"
         accessibilityLabel="Fit all family members on screen"
-        style={[styles.fab, { bottom: controlsBottom, backgroundColor: colors.card, borderColor: colors.border }]}
+        style={[styles.fab, { bottom: controlsBottom, backgroundColor: colors.glassSoft, borderColor: colors.glassStroke }]}
       >
         <Ionicons name="scan" size={20} color={colors.primary} />
       </TouchableOpacity>

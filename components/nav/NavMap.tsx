@@ -427,7 +427,7 @@ export default function NavMap({
         androidLayerType="hardware"
       />
       {zoomControls && (
-        <View style={[styles.zoomBox, { backgroundColor: colors.card, borderColor: colors.border }]}>
+        <View style={[styles.zoomBox, { backgroundColor: colors.glassSoft, borderColor: colors.glassStroke }]}>
           <TouchableOpacity onPress={() => ref.current?.injectJavaScript('zoomBy(1);true;')} style={styles.zoomBtn}>
             <Ionicons name="add" size={20} color={colors.text} />
           </TouchableOpacity>
@@ -439,12 +439,12 @@ export default function NavMap({
       )}
       {/* 3D camera toggle — MapLibre only; uncontrolled (hidden when a parent drives cameraMode). */}
       {engine === 'maplibre' && !cameraMode && (
-        <TouchableOpacity onPress={cycleCam} style={[styles.fab, { bottom: zoomControls ? 120 : 66, backgroundColor: colors.card, borderColor: colors.border }]}>
+        <TouchableOpacity onPress={cycleCam} style={[styles.fab, { bottom: zoomControls ? 120 : 66, backgroundColor: colors.glassSoft, borderColor: colors.glassStroke }]}>
           <Ionicons name={camIcon as any} size={19} color={colors.primary} />
         </TouchableOpacity>
       )}
       {(geo.pos || geo.dest || lock) && (
-        <TouchableOpacity onPress={recenter} style={[styles.fab, { backgroundColor: colors.card, borderColor: colors.border }]}>
+        <TouchableOpacity onPress={recenter} style={[styles.fab, { backgroundColor: colors.glassSoft, borderColor: colors.glassStroke }]}>
           <Ionicons name="locate" size={20} color={colors.primary} />
         </TouchableOpacity>
       )}

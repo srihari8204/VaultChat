@@ -185,15 +185,15 @@ const makeStyles = (c: Palette) => StyleSheet.create({
 
   verdict: {
     alignItems: 'center', gap: 8, padding: 20, borderRadius: 18,
-    borderWidth: 2, backgroundColor: c.surface, marginBottom: 14,
+    borderWidth: 2, backgroundColor: c.glassSoft, marginBottom: 14,
   },
   verdictLabel: { fontSize: 13, fontWeight: '900', letterSpacing: 1 },
   verdictHeadline: { color: c.text, fontSize: 17, fontWeight: '800', textAlign: 'center' },
   verdictDetail: { color: c.textDim, fontSize: 13, lineHeight: 19, textAlign: 'center' },
 
   card: {
-    backgroundColor: c.surface, borderRadius: 14, padding: 14, marginBottom: 12,
-    borderWidth: StyleSheet.hairlineWidth, borderColor: c.border, gap: 6,
+    backgroundColor: c.glassSoft, borderRadius: 14, padding: 14, marginBottom: 12,
+    borderWidth: StyleSheet.hairlineWidth, borderColor: c.glassStroke, gap: 6,
   },
   cardMuted: { opacity: 0.85 },
   rowHead: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 4 },

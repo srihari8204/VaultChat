@@ -668,12 +668,12 @@ export default function VaultFeaturesScreen() {
 // ─────────────────────────────────────────────────────────────────
 
 const makeStyles = (c: Palette) => StyleSheet.create({
-  container:    { flex: 1, backgroundColor: c.card },
+  container:    { flex: 1, backgroundColor: c.glassSoft },
   header: {
     flexDirection: 'row', alignItems: 'center',
     backgroundColor: c.bg,
     paddingTop: 48, paddingBottom: 12, paddingHorizontal: 16,
-    borderBottomWidth: 0.5, borderBottomColor: c.border, gap: 12,
+    borderBottomWidth: 0.5, borderBottomColor: c.glassStroke, gap: 12,
   },
   back:          { fontSize: 28, color: BRAND_ACCENT, fontWeight: 'bold' },
   headerCenter:  { flex: 1 },
@@ -687,7 +687,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   // Section
   section: {
     backgroundColor: c.bg,
-    borderRadius: 14, borderWidth: 0.5, borderColor: c.border,
+    borderRadius: 14, borderWidth: 0.5, borderColor: c.glassStroke,
     padding: 16, marginBottom: 12,
   },
   sectionHeader: {
@@ -699,8 +699,8 @@ const makeStyles = (c: Palette) => StyleSheet.create({
 
   // Temp chat code
   codeCard: {
-    backgroundColor: c.card, borderRadius: 12,
-    borderWidth: 0.5, borderColor: c.border,
+    backgroundColor: c.glassSoft, borderRadius: 12,
+    borderWidth: 0.5, borderColor: c.glassStroke,
     padding: 14, alignItems: 'center', gap: 6,
   },
   codeValue: {
@@ -711,7 +711,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   codeActions:  { flexDirection: 'row', gap: 8, marginTop: 4 },
   codeBtn: {
     backgroundColor: c.surfaceSolid, borderRadius: 8,
-    borderWidth: 0.5, borderColor: c.border,
+    borderWidth: 0.5, borderColor: c.glassStroke,
     paddingHorizontal: 12, paddingVertical: 7,
   },
   codeBtnCopied:    { backgroundColor: 'rgba(34,197,94,0.14)', borderColor: BRAND_ACCENT },
@@ -730,7 +730,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   pickerRow: {
     flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
     backgroundColor: c.surfaceSolid, borderRadius: 10,
-    borderWidth: 0.5, borderColor: c.border,
+    borderWidth: 0.5, borderColor: c.glassStroke,
     paddingHorizontal: 14, paddingVertical: 12,
   },
   pickerLabel:      { fontSize: 14, color: c.text },
@@ -754,7 +754,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   toggleRow: {
     flexDirection: 'row', alignItems: 'center',
     paddingVertical: 10, gap: 12,
-    borderBottomWidth: 0.5, borderBottomColor: c.border,
+    borderBottomWidth: 0.5, borderBottomColor: c.glassStroke,
   },
   toggleIcon:   { fontSize: 20 },
   toggleInfo:   { flex: 1 },
@@ -765,7 +765,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   exportRow: {
     flexDirection: 'row', alignItems: 'center',
     paddingVertical: 12, gap: 12,
-    borderBottomWidth: 0.5, borderBottomColor: c.border,
+    borderBottomWidth: 0.5, borderBottomColor: c.glassStroke,
   },
   exportIcon:    { fontSize: 22 },
   exportInfo:    { flex: 1 },
@@ -797,7 +797,7 @@ const makeModalStyles = (c: Palette) => StyleSheet.create({
     flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
     paddingVertical: 14, paddingHorizontal: 16, borderRadius: 10,
     marginBottom: 6, backgroundColor: c.surfaceSolid,
-    borderWidth: 0.5, borderColor: c.border,
+    borderWidth: 0.5, borderColor: c.glassStroke,
   },
   optionActive:     { backgroundColor: 'rgba(34,197,94,0.14)', borderColor: BRAND_ACCENT },
   optionText:       { fontSize: 15, color: c.text },
@@ -806,7 +806,7 @@ const makeModalStyles = (c: Palette) => StyleSheet.create({
   inputLabel:       { fontSize: 11, color: c.textDim, marginBottom: 6, marginTop: 4 },
   pinInput: {
     backgroundColor: c.surfaceSolid, borderRadius: 10,
-    borderWidth: 0.5, borderColor: c.border,
+    borderWidth: 0.5, borderColor: c.glassStroke,
     paddingHorizontal: 14, paddingVertical: 11,
     color: c.text, fontSize: 20,
     letterSpacing: 4, textAlign: 'center', marginBottom: 12,
@@ -814,7 +814,7 @@ const makeModalStyles = (c: Palette) => StyleSheet.create({
   btnRow:       { flexDirection: 'row', gap: 10, marginTop: 8 },
   cancelBtn: {
     flex: 1, backgroundColor: c.surfaceSolid, borderRadius: 10,
-    borderWidth: 0.5, borderColor: c.border,
+    borderWidth: 0.5, borderColor: c.glassStroke,
     paddingVertical: 13, alignItems: 'center',
   },
   cancelText:   { color: c.textDim, fontWeight: 'bold' },

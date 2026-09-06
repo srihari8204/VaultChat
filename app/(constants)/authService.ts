@@ -396,7 +396,15 @@ export async function logoutUser() {
   // account that received them; the files they unlock are gone above.
   try {
     const keys = await AsyncStorage.getAllKeys();
-    const scoped = keys.filter(k => k.startsWith('vc_mk_') || k.startsWith('vc_cache_') || k === 'vc_revoked_media');
+    // vc_restore_prompted is the ONE-SHOT gate on the "Restore your chats?"
+    // offer. Logout wipes the local message cache, and E2EE means the server's
+    // ciphertext cannot be re-decrypted afterwards — the ratchet has already
+    // destroyed those message keys. So the backup restore is the only route
+    // back to that history, and leaving this flag set suppressed the offer at
+    // exactly the moment it mattered: the user logged in again to an empty app
+    // and was never asked.
+    const scoped = keys.filter(k => k.startsWith('vc_mk_') || k.startsWith('vc_cache_')
+      || k === 'vc_revoked_media' || k === 'vc_restore_prompted');
     if (scoped.length) await AsyncStorage.multiRemove(scoped);
   } catch {}
 }

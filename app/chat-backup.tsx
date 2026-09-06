@@ -345,7 +345,7 @@ export default function ChatBackupScreen() {
 
 const makeStyles = (c: Palette) => StyleSheet.create({
   root: { flex: 1, backgroundColor: 'transparent' },
-  header: { flexDirection: 'row', alignItems: 'center', paddingTop: HEADER_TOP, paddingHorizontal: 12, paddingBottom: 12, backgroundColor: c.bg, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.border, gap: 8 },
+  header: { flexDirection: 'row', alignItems: 'center', paddingTop: HEADER_TOP, paddingHorizontal: 12, paddingBottom: 12, backgroundColor: c.bg, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.glassStroke, gap: 8 },
   iconBtn: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
   headerTitle: { color: c.text, fontSize: 18, fontWeight: '700' },
 
@@ -359,7 +359,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   backupTxt: { color: '#fff', fontSize: 15, fontWeight: '800', letterSpacing: 0.5 },
   restoreLink: { color: c.primary, fontSize: 14, fontWeight: '700' },
 
-  divider: { height: StyleSheet.hairlineWidth, backgroundColor: c.separator, marginVertical: 12 },
+  divider: { height: StyleSheet.hairlineWidth, backgroundColor: c.hairline, marginVertical: 12 },
   section: { color: c.textDim, fontSize: 11, fontWeight: '800', letterSpacing: 1, paddingHorizontal: 18, paddingBottom: 6 },
   optRow: { flexDirection: 'row', alignItems: 'center', gap: 14, paddingHorizontal: 18, paddingVertical: 13 },
   optLabel: { color: c.text, fontSize: 15 },
@@ -371,7 +371,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   modalTitle: { color: c.text, fontSize: 17, fontWeight: '700', marginBottom: 8 },
   modalBody: { color: c.textDim, fontSize: 13, lineHeight: 19, marginBottom: 14 },
   modalInput: {
-    color: c.text, fontSize: 16, borderWidth: StyleSheet.hairlineWidth, borderColor: c.border,
+    color: c.text, fontSize: 16, borderWidth: StyleSheet.hairlineWidth, borderColor: c.glassStroke,
     borderRadius: 10, paddingHorizontal: 14, paddingVertical: Platform.OS === 'ios' ? 14 : 10,
   },
   modalInputMono: { minHeight: 92, textAlignVertical: 'top', letterSpacing: 1, fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace' },

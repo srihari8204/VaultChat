@@ -166,7 +166,7 @@ export default function GroupTripScreen() {
         {!trip ? (
           <>
             <Text style={[st.h, { color: colors.text }]}>Where are you all going?</Text>
-            <View style={[st.field, { borderColor: colors.border, backgroundColor: colors.surface }]}>
+            <View style={[st.field, { borderColor: colors.glassStroke, backgroundColor: colors.glassSoft }]}>
               <Ionicons name="flag" size={18} color={colors.textDim} />
               <TextInput value={where} onChangeText={setWhere} placeholder="Address, place, or lat, lng"
                 placeholderTextColor={colors.textFaint} style={[st.input, { color: colors.text }]}
@@ -196,7 +196,7 @@ export default function GroupTripScreen() {
           </>
         ) : (
           <>
-            <View style={[st.dest, { backgroundColor: colors.card, borderColor: done ? colors.success : colors.primary }]}>
+            <View style={[st.dest, { backgroundColor: colors.glassSoft, borderColor: done ? colors.success : colors.primary }]}>
               <View style={[st.destIcon, { backgroundColor: (done ? colors.success : colors.primary) + '22' }]}>
                 <Ionicons name={done ? 'checkmark-done' : 'flag'} size={20} color={done ? colors.success : colors.primary} />
               </View>
@@ -218,7 +218,7 @@ export default function GroupTripScreen() {
             </View>
 
             <View style={st.actions}>
-              <TouchableOpacity onPress={join} style={[st.action, { borderColor: colors.border, backgroundColor: colors.card }]}>
+              <TouchableOpacity onPress={join} style={[st.action, { borderColor: colors.glassStroke, backgroundColor: colors.glassSoft }]}>
                 <Ionicons name="navigate" size={18} color={colors.primary} />
                 <Text style={[st.actionTxt, { color: colors.text }]}>Navigate</Text>
               </TouchableOpacity>
@@ -247,7 +247,7 @@ export default function GroupTripScreen() {
             )}
 
             {participants.map((p) => (
-              <View key={p.userId} style={[st.row, { borderColor: colors.border }]}>
+              <View key={p.userId} style={[st.row, { borderColor: colors.glassStroke }]}>
                 <View style={[st.dot, { backgroundColor: tone(p.status) + '22' }]}>
                   <Ionicons
                     name={p.status === 'arrived' ? 'checkmark' : p.status === 'deviated' ? 'git-branch'

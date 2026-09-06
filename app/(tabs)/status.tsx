@@ -573,13 +573,13 @@ const makeStyles = (c: Palette) => StyleSheet.create({
 
   header:       { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 20, paddingTop: HEADER_TOP, paddingBottom: 16, justifyContent: 'space-between' },
   title:        { color: c.text, fontSize: 28, fontWeight: '800' },
-  headerBtn:    { width: 40, height: 40, borderRadius: 20, backgroundColor: c.card, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: c.border },
+  headerBtn:    { width: 40, height: 40, borderRadius: 20, backgroundColor: c.glassSoft, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: c.glassStroke },
   headerBtnTxt: { color: c.primary, fontSize: 22, fontWeight: '600', marginTop: -2 },
   // Text status composer
   textCompose:      { flex: 1, paddingTop: HEADER_TOP },
   textComposeBar:   { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingBottom: 8 },
   bgSwatch:         { width: 22, height: 22, borderRadius: 11, borderWidth: 1, borderColor: 'rgba(255,255,255,0.4)' },
-  bgSwatchOn:       { borderWidth: 3, borderColor: c.border },
+  bgSwatchOn:       { borderWidth: 3, borderColor: c.glassStroke },
   textComposeInput: { flex: 1, color: '#fff', fontSize: 26, fontWeight: '700', paddingHorizontal: 24, textAlignVertical: 'center' },
   textPostBtn:      { position: 'absolute', right: 20, bottom: 36, width: 56, height: 56, borderRadius: 28, backgroundColor: 'rgba(0,0,0,0.4)', alignItems: 'center', justifyContent: 'center' },
   emojiPanel:       { maxHeight: 200, backgroundColor: 'rgba(0,0,0,0.35)', paddingVertical: 8 },
@@ -594,7 +594,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   previewPlay:      { position: 'absolute', width: 64, height: 64, borderRadius: 32, backgroundColor: 'rgba(0,0,0,0.45)', alignItems: 'center', justifyContent: 'center' },
   filmstrip:        { maxHeight: 64, paddingVertical: 8 },
   thumb:            { width: 48, height: 48, borderRadius: 8, overflow: 'hidden', borderWidth: 2, borderColor: 'transparent' },
-  thumbOn:          { borderColor: c.border },
+  thumbOn:          { borderColor: c.glassStroke },
   thumbImg:         { width: '100%', height: '100%' },
   gateArea:         { maxHeight: 260, backgroundColor: 'rgba(0,0,0,0.35)' },
   captionRow:       { flexDirection: 'row', alignItems: 'flex-end', gap: 10, paddingHorizontal: 12, paddingBottom: 28, paddingTop: 8 },
@@ -615,7 +615,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   avatarRingUnseen:  { backgroundColor: c.primary },
   avatarRingSeen:    { backgroundColor: c.textDim },
   avatarImg:         { width: 54, height: 54, borderRadius: 27 },
-  avatarFallback:    { width: 54, height: 54, borderRadius: 27, backgroundColor: c.card, alignItems: 'center', justifyContent: 'center' },
+  avatarFallback:    { width: 54, height: 54, borderRadius: 27, backgroundColor: c.glassSoft, alignItems: 'center', justifyContent: 'center' },
   cameraBadge:       { position: 'absolute', right: -1, bottom: -1, width: 22, height: 22, borderRadius: 11, backgroundColor: c.primary, alignItems: 'center', justifyContent: 'center', borderWidth: 2, borderColor: c.bg },
   avatarFallbackTxt: { color: c.text, fontSize: 20, fontWeight: '700' },
 

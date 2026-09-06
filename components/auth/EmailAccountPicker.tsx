@@ -55,8 +55,8 @@ export function EmailAccountPicker({
 }
 
 const makeStyles = (c: Palette) => StyleSheet.create({
-  input: { minHeight: 52, borderRadius: 12, borderWidth: 1, borderColor: c.border, backgroundColor: c.card, paddingHorizontal: 14, color: c.text, fontSize: 16 },
-  pickBtn: { marginTop: 8, alignSelf: 'flex-start', paddingVertical: 8, paddingHorizontal: 12, borderRadius: 10, borderWidth: 1, borderColor: c.border },
+  input: { minHeight: 52, borderRadius: 12, borderWidth: 1, borderColor: c.glassStroke, backgroundColor: c.glassSoft, paddingHorizontal: 14, color: c.text, fontSize: 16 },
+  pickBtn: { marginTop: 8, alignSelf: 'flex-start', paddingVertical: 8, paddingHorizontal: 12, borderRadius: 10, borderWidth: 1, borderColor: c.glassStroke },
   pickTxt: { color: c.primary, fontSize: 13, fontWeight: '700' },
   err: { color: c.danger, fontSize: 12, marginTop: 6 },
 });

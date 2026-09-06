@@ -231,7 +231,7 @@ const styles = (c: Palette) => StyleSheet.create({
   screen: { flex: 1, backgroundColor: 'transparent' },
   centre: { alignItems: 'center', justifyContent: 'center' },
   body: { padding: 16, gap: 10, paddingBottom: 40 },
-  card: { backgroundColor: c.card, borderRadius: 14, padding: 14 },
+  card: { backgroundColor: c.glassSoft, borderRadius: 14, padding: 14 },
   row: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   avatar: { width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center' },
   name: { color: c.text, fontSize: 15.5, fontWeight: '600' },
@@ -246,7 +246,7 @@ const styles = (c: Palette) => StyleSheet.create({
   modal: { width: '100%', backgroundColor: c.bg, borderRadius: 16, padding: 20, gap: 10 },
   modalTitle: { color: c.text, fontSize: 18, fontWeight: '700' },
   input: {
-    borderWidth: 1, borderColor: c.border, borderRadius: 10, padding: 12,
+    borderWidth: 1, borderColor: c.glassStroke, borderRadius: 10, padding: 12,
     color: c.text, fontSize: 16,
   },
   modalRow: { flexDirection: 'row', justifyContent: 'flex-end', gap: 10, marginTop: 4 },

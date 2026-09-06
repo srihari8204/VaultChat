@@ -149,7 +149,7 @@ export default function VaultBeamBubble({
   return (
     <View style={styles.wrap}>
       <View style={styles.row}>
-        <View style={[styles.iconWrap, { backgroundColor: colors.surface }]}>
+        <View style={[styles.iconWrap, { backgroundColor: colors.glassSoft }]}>
           {active
             ? <ActivityIndicator size="small" color={BRAND_ACCENT} />
             : <Ionicons name="cube-outline" size={22} color={BRAND_ACCENT} />}

@@ -132,19 +132,19 @@ function slow(total?: number) { return total != null && total > 1500 ? { color: 
 
 const makeStyles = (c: Palette) => StyleSheet.create({
   screen: { flex: 1, backgroundColor: 'transparent' },
-  header:  { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingTop: HEADER_TOP, paddingBottom: 12, gap: 8, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.border },
+  header:  { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingTop: HEADER_TOP, paddingBottom: 12, gap: 8, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.glassStroke },
   backBtn: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
   title:   { color: c.text, fontSize: 22, fontWeight: '800' },
 
   section: { color: c.textDim, fontSize: 12, fontWeight: '700', textTransform: 'uppercase', marginTop: 20, marginBottom: 8, letterSpacing: 0.5 },
-  card:    { backgroundColor: c.card, borderRadius: 12, borderWidth: StyleSheet.hairlineWidth, borderColor: c.border, overflow: 'hidden' },
+  card:    { backgroundColor: c.glassSoft, borderRadius: 12, borderWidth: StyleSheet.hairlineWidth, borderColor: c.glassStroke, overflow: 'hidden' },
 
-  kv:   { flexDirection: 'row', justifyContent: 'space-between', paddingHorizontal: 14, paddingVertical: 12, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.border },
+  kv:   { flexDirection: 'row', justifyContent: 'space-between', paddingHorizontal: 14, paddingVertical: 12, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.glassStroke },
   k:    { color: c.textDim, fontSize: 14 },
   v:    { color: c.text, fontSize: 14, fontWeight: '600' },
   vBad: { color: c.danger },
 
-  trow:  { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingVertical: 9, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.border },
+  trow:  { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingVertical: 9, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.glassStroke },
   thead: { backgroundColor: c.bg },
   th:    { flex: 1, color: c.textDim, fontSize: 11, fontWeight: '700' },
   td:    { flex: 1, color: c.text, fontSize: 12, fontVariant: ['tabular-nums'] },

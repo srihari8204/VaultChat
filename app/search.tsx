@@ -152,9 +152,9 @@ export default function SearchScreen() {
 
 const makeStyles = (c: Palette) => StyleSheet.create({
   screen: { flex: 1, backgroundColor: 'transparent' },
-  header:     { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingTop: HEADER_TOP, paddingBottom: 12, gap: 8, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.border },
+  header:     { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingTop: HEADER_TOP, paddingBottom: 12, gap: 8, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.glassStroke },
   backBtn:    { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
-  input:      { flex: 1, color: c.text, backgroundColor: c.card, borderRadius: 22, paddingHorizontal: 16, paddingVertical: 10, fontSize: 15 },
+  input:      { flex: 1, color: c.text, backgroundColor: c.glassSoft, borderRadius: 22, paddingHorizontal: 16, paddingVertical: 10, fontSize: 15 },
   empty:      { alignItems: 'center', paddingTop: 64, paddingHorizontal: 32 },
   emptyTitle: { color: c.text, fontSize: 16, fontWeight: '700' },
   emptySub:   { color: c.textDim, fontSize: 13, marginTop: 6, textAlign: 'center' },

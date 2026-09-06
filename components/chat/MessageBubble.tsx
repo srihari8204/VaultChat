@@ -394,14 +394,14 @@ export function GroupRefBubble({ gref, isMine }: { gref: GroupRef; isMine: boole
       style={{
         flexDirection: 'row', alignItems: 'center', gap: 10,
         paddingVertical: 10, paddingHorizontal: 12, borderRadius: 12,
-        borderWidth: 1, borderColor: colors.separator,
+        borderWidth: 1, borderColor: colors.hairline,
         backgroundColor: isMine ? 'transparent' : colors.surface,
         minWidth: 200,
       }}
     >
       <View style={{
         width: 38, height: 38, borderRadius: 10, alignItems: 'center',
-        justifyContent: 'center', backgroundColor: colors.separator,
+        justifyContent: 'center', backgroundColor: colors.hairline,
       }}>
         <Ionicons name={icon} size={20} color={tint} />
       </View>
@@ -453,14 +453,14 @@ export function GameInviteBubble({ inv, isMine }: { inv: GameInvite; isMine: boo
       style={{
         flexDirection: 'row', alignItems: 'center', gap: 10,
         paddingVertical: 10, paddingHorizontal: 12, borderRadius: 12,
-        borderWidth: 1, borderColor: colors.separator,
+        borderWidth: 1, borderColor: colors.hairline,
         backgroundColor: isMine ? 'transparent' : colors.surface,
         minWidth: 200,
       }}
     >
       <View style={{
         width: 38, height: 38, borderRadius: 10, alignItems: 'center',
-        justifyContent: 'center', backgroundColor: colors.separator,
+        justifyContent: 'center', backgroundColor: colors.hairline,
       }}>
         <Ionicons name="game-controller" size={20} color={colors.primary} />
       </View>

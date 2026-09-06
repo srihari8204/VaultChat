@@ -299,7 +299,7 @@ export default function ContactsScreen() {
 
 const makeStyles = (c: Palette) => StyleSheet.create({
   screen: { flex: 1, backgroundColor: 'transparent' },
-  header:        { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingTop: HEADER_TOP, paddingBottom: 12, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.border, gap: 8 },
+  header:        { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingTop: HEADER_TOP, paddingBottom: 12, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.glassStroke, gap: 8 },
   backBtn:       { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
   backTxt:       { color: c.text, fontSize: 24 },
   title:         { color: c.text, fontSize: 18, fontWeight: '700', flex: 1 },
@@ -320,7 +320,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   row:           { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 20, paddingVertical: 12, gap: 12, backgroundColor: c.bg },
   avatar:        { width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center' },
   avatarOnApp:   { backgroundColor: c.primary },
-  avatarInvite:  { backgroundColor: c.card, borderWidth: 1, borderColor: c.border },
+  avatarInvite:  { backgroundColor: c.glassSoft, borderWidth: 1, borderColor: c.glassStroke },
   avatarTxt:     { color: '#fff', fontSize: 16, fontWeight: '700' },
   rowBody:       { flex: 1 },
   rowName:       { color: c.text, fontSize: 15, fontWeight: '600' },

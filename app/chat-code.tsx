@@ -298,7 +298,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   title: { color: c.text, fontSize: 20, fontWeight: '800' },
 
   tabs: { flexDirection: 'row', gap: 8, marginHorizontal: 16, marginBottom: 8 },
-  tab: { flex: 1, minHeight: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center', backgroundColor: c.card },
+  tab: { flex: 1, minHeight: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center', backgroundColor: c.glassSoft },
   tabOn: { backgroundColor: c.primary },
   tabTxt: { color: c.textDim, fontSize: 14, fontWeight: '700' },
   tabTxtOn: { color: '#fff' },
@@ -308,12 +308,12 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   strong: { color: c.text, fontWeight: '800' },
   sectionLabel: { color: c.textDim, fontSize: 12, fontWeight: '700', letterSpacing: 1, paddingTop: 22, paddingBottom: 8 },
 
-  opt: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 12, paddingHorizontal: 14, borderRadius: 14, marginBottom: 8, backgroundColor: c.card, borderWidth: 1, borderColor: 'transparent' },
+  opt: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 12, paddingHorizontal: 14, borderRadius: 14, marginBottom: 8, backgroundColor: c.glassSoft, borderWidth: 1, borderColor: 'transparent' },
   optOn: { borderColor: c.primary },
   optLabel: { color: c.text, fontSize: 15.5, fontWeight: '700' },
   optSub: { color: c.textDim, fontSize: 12, marginTop: 2, lineHeight: 16 },
 
-  codeBox: { marginTop: 22, padding: 20, borderRadius: 16, backgroundColor: c.surface, borderWidth: 1, borderColor: c.accent, alignItems: 'center' },
+  codeBox: { marginTop: 22, padding: 20, borderRadius: 16, backgroundColor: c.glassSoft, borderWidth: 1, borderColor: c.accent, alignItems: 'center' },
   code: { color: c.text, fontSize: 46, fontWeight: '800', letterSpacing: 8, fontVariant: ['tabular-nums'] },
   timerRow: { flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 8 },
   timer: { color: c.textDim, fontSize: 14, fontWeight: '700', fontVariant: ['tabular-nums'] },
@@ -323,7 +323,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   codeAction: { alignItems: 'center', gap: 4 },
   codeActionTxt: { color: c.primary, fontSize: 12.5, fontWeight: '700' },
 
-  input: { marginTop: 22, height: 66, borderRadius: 14, backgroundColor: c.card, color: c.text, fontSize: 34, fontWeight: '800', letterSpacing: 10, textAlign: 'center' },
+  input: { marginTop: 22, height: 66, borderRadius: 14, backgroundColor: c.glassSoft, color: c.text, fontSize: 34, fontWeight: '800', letterSpacing: 10, textAlign: 'center' },
 
   cta: { marginTop: 22, height: 50, borderRadius: 14, backgroundColor: c.primary, alignItems: 'center', justifyContent: 'center' },
   ctaOff: { opacity: 0.4 },

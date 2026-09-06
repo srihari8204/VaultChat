@@ -200,7 +200,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   row: {
     flexDirection: 'row', alignItems: 'center', gap: 12,
     paddingHorizontal: 16, paddingVertical: 12,
-    borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.border,
+    borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.glassStroke,
   },
   rowIcon: {
     width: 38, height: 38, borderRadius: 10, alignItems: 'center', justifyContent: 'center',

@@ -83,7 +83,7 @@ export default function GroupCreateScreen() {
       <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 44 }} keyboardShouldPersistTaps="handled">
 
         {/* live preview — the identity the group will actually have */}
-        <View style={[st.preview, { backgroundColor: colors.card, borderColor: colors.border }]}>
+        <View style={[st.preview, { backgroundColor: colors.glassSoft, borderColor: colors.glassStroke }]}>
           <View style={[st.previewIcon, { backgroundColor: shownColor + '22' }]}>
             <Ionicons name={shownIcon} size={28} color={shownColor} />
           </View>
@@ -113,7 +113,7 @@ export default function GroupCreateScreen() {
         </View>
 
         <Text style={[st.h, { color: colors.text }]}>Name</Text>
-        <View style={[st.field, { borderColor: colors.border, backgroundColor: colors.surface }]}>
+        <View style={[st.field, { borderColor: colors.glassStroke, backgroundColor: colors.glassSoft }]}>
           <Ionicons name={shownIcon} size={17} color={colors.textDim} />
           <TextInput
             value={name} onChangeText={setName} placeholder={`e.g. ${info.label}`}
@@ -122,7 +122,7 @@ export default function GroupCreateScreen() {
           />
         </View>
 
-        <View style={[st.field, { borderColor: colors.border, backgroundColor: colors.surface, marginTop: 10 }]}>
+        <View style={[st.field, { borderColor: colors.glassStroke, backgroundColor: colors.glassSoft, marginTop: 10 }]}>
           <Ionicons name="text" size={17} color={colors.textDim} />
           <TextInput
             value={description} onChangeText={setDescription} placeholder="Description (optional)"

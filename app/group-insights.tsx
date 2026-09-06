@@ -139,7 +139,7 @@ export default function GroupInsightsScreen() {
     <View style={{ flex: 1, backgroundColor: colors.bg }}>
       <Stack.Screen options={{ title: 'Insights', headerTitleAlign: 'center' }} />
 
-      <View style={[st.tabs, { borderColor: colors.border }]}>
+      <View style={[st.tabs, { borderColor: colors.glassStroke }]}>
         {(['week', 'month'] as Span[]).map((sp) => {
           const on = sp === span;
           return (
@@ -157,7 +157,7 @@ export default function GroupInsightsScreen() {
         <View style={st.center}><ActivityIndicator color={colors.primary} /></View>
       ) : (
         <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 40 }}>
-          <View style={[st.card, { backgroundColor: colors.card, borderColor: colors.border }]}>
+          <View style={[st.card, { backgroundColor: colors.glassSoft, borderColor: colors.glassStroke }]}>
             <View style={st.statRow}>
               {stat('Travelled', formatDistance(summary.distanceM))}
               <View style={[st.vr, { backgroundColor: colors.border }]} />
@@ -173,7 +173,7 @@ export default function GroupInsightsScreen() {
           </View>
 
           {!mayViewOthers && (
-            <View style={[st.notice, { borderColor: colors.border, backgroundColor: colors.surface }]}>
+            <View style={[st.notice, { borderColor: colors.glassStroke, backgroundColor: colors.glassSoft }]}>
               <Ionicons name="lock-closed-outline" size={15} color={colors.textDim} />
               <Text style={{ color: colors.textDim, fontSize: 12.5, flex: 1 }}>
                 Showing only your own activity — this group does not let your role view other
@@ -190,7 +190,7 @@ export default function GroupInsightsScreen() {
           )}
 
           {ranked.map((i) => (
-            <View key={i.userId} style={[st.row, { borderColor: colors.border }]}>
+            <View key={i.userId} style={[st.row, { borderColor: colors.glassStroke }]}>
               <View style={[st.avatar, { backgroundColor: colorFor(i.userId) }]}>
                 <Text style={st.avatarTxt}>{nameOf(i.userId).trim()[0]?.toUpperCase() ?? '?'}</Text>
               </View>
@@ -227,7 +227,7 @@ export default function GroupInsightsScreen() {
                 </Text>
               )}
               {trips.map((t) => (
-                <View key={t.id} style={[st.row, { borderColor: colors.border }]}>
+                <View key={t.id} style={[st.row, { borderColor: colors.glassStroke }]}>
                   <View style={[st.avatar, { backgroundColor: colors.primary + '22' }]}>
                     <Ionicons name="car" size={16} color={colors.primary} />
                   </View>
@@ -246,7 +246,7 @@ export default function GroupInsightsScreen() {
             </>
           )}
 
-          <View style={[st.footer, { borderColor: colors.border }]}>
+          <View style={[st.footer, { borderColor: colors.glassStroke }]}>
             <Ionicons name="phone-portrait-outline" size={15} color={colors.textDim} />
             <Text style={{ color: colors.textDim, fontSize: 11.5, flex: 1, lineHeight: 16 }}>
               Worked out on this phone from data it already holds. Nothing on this screen is sent

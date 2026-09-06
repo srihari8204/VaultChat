@@ -80,8 +80,8 @@ export function MpinInput({
 const makeStyles = (c: Palette) => StyleSheet.create({
   row: { flexDirection: 'row', gap: 10, justifyContent: 'center' },
   cell: {
-    width: 46, minHeight: 56, borderRadius: 12, borderWidth: 1.5, borderColor: c.border,
-    backgroundColor: c.card, alignItems: 'center', justifyContent: 'center',
+    width: 46, minHeight: 56, borderRadius: 12, borderWidth: 1.5, borderColor: c.glassStroke,
+    backgroundColor: c.glassSoft, alignItems: 'center', justifyContent: 'center',
   },
   cellFilled: { borderColor: c.primary },
   cellActive: { borderColor: c.primary, backgroundColor: c.surfaceSolid },

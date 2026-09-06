@@ -73,7 +73,7 @@ const makeS = (c: Palette) => StyleSheet.create({
     flexDirection: 'row',
     backgroundColor: c.bg,
     borderTopWidth: 1,
-    borderTopColor: c.border,
+    borderTopColor: c.glassStroke,
     paddingHorizontal: 8,
     paddingVertical: 6,
     gap: 4,

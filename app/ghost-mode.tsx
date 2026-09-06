@@ -320,7 +320,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   screen: { flex: 1, backgroundColor: 'transparent' },
   center:        { justifyContent: 'center', alignItems: 'center' },
 
-  header:        { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingTop: HEADER_TOP, paddingBottom: 12, gap: 8, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.border },
+  header:        { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingTop: HEADER_TOP, paddingBottom: 12, gap: 8, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.glassStroke },
   backBtn:       { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
   backTxt:       { color: c.text, fontSize: 26, fontWeight: '600' },
   title:         { color: c.text, fontSize: 22, fontWeight: '800' },
@@ -331,7 +331,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   emptyTitle:    { color: c.text, fontSize: 16, fontWeight: '700', marginBottom: 8, textAlign: 'center' },
   emptySub:      { color: c.textDim, fontSize: 13, lineHeight: 18, textAlign: 'center' },
 
-  row:           { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 20, paddingVertical: 14, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.border },
+  row:           { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 20, paddingVertical: 14, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.glassStroke },
   avatar:        { width: 44, height: 44, borderRadius: 22, backgroundColor: c.primary, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
   avatarImg:     { width: '100%', height: '100%' },
   avatarTxt:     { color: '#fff', fontWeight: '700' },
@@ -340,10 +340,10 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   rowChev:       { color: c.textDim, fontSize: 22, fontWeight: '600' },
 
   section:       { paddingHorizontal: 16, marginTop: 8 },
-  toggleRow:     { flexDirection: 'row', alignItems: 'center', paddingVertical: 14, gap: 12, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.border },
+  toggleRow:     { flexDirection: 'row', alignItems: 'center', paddingVertical: 14, gap: 12, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.glassStroke },
   toggleTitle:   { color: c.text, fontSize: 15, fontWeight: '600' },
   toggleSub:     { color: c.textDim, fontSize: 12, lineHeight: 16, marginTop: 2 },
 
-  clearBtn:      { marginHorizontal: 20, marginTop: 32, padding: 14, borderRadius: 12, borderWidth: 1, borderColor: c.danger, backgroundColor: c.card, alignItems: 'center' },
+  clearBtn:      { marginHorizontal: 20, marginTop: 32, padding: 14, borderRadius: 12, borderWidth: 1, borderColor: c.danger, backgroundColor: c.glassSoft, alignItems: 'center' },
   clearBtnTxt:   { color: c.danger, fontWeight: '700' },
 });

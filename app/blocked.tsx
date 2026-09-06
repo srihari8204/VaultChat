@@ -194,7 +194,7 @@ export default function BlockedScreen() {
 const makeStyles = (c: Palette) => StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: c.card,
+    backgroundColor: c.glassSoft,
   },
   topBar: {
     backgroundColor: '#FF4D6D',
@@ -293,7 +293,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
     backgroundColor: c.bg,
     borderRadius: 12,
     borderWidth: 0.5,
-    borderColor: c.border,
+    borderColor: c.glassStroke,
     padding: 16,
     marginBottom: 16,
   },
@@ -302,7 +302,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
     backgroundColor: c.bg,
     borderRadius: 12,
     borderWidth: 0.5,
-    borderColor: c.border,
+    borderColor: c.glassStroke,
     padding: 16,
     marginBottom: 24,
   },
@@ -351,7 +351,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   supportBtn: {
     backgroundColor: c.surfaceSolid,
     borderWidth: 1,
-    borderColor: c.border,
+    borderColor: c.glassStroke,
     borderRadius: 10,
     paddingVertical: 14,
     paddingHorizontal: 32,

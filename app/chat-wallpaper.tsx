@@ -242,26 +242,26 @@ export default function ChatWallpaperScreen() {
 
 const makeStyles = (c: Palette) => StyleSheet.create({
   root: { flex: 1, backgroundColor: 'transparent' },
-  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingTop: HEADER_TOP, paddingHorizontal: 12, paddingBottom: 12, backgroundColor: c.bg, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.border, gap: 8 },
+  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingTop: HEADER_TOP, paddingHorizontal: 12, paddingBottom: 12, backgroundColor: c.bg, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.glassStroke, gap: 8 },
   iconBtn: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
   headerTitle: { flex: 1, color: c.text, fontSize: 18, fontWeight: '700' },
   resetText: { color: c.primary, fontSize: 14, fontWeight: '700', paddingHorizontal: 8 },
 
-  previewBox: { height: 200, borderRadius: 16, overflow: 'hidden', borderWidth: StyleSheet.hairlineWidth, borderColor: c.border, justifyContent: 'flex-end', marginBottom: 18 },
+  previewBox: { height: 200, borderRadius: 16, overflow: 'hidden', borderWidth: StyleSheet.hairlineWidth, borderColor: c.glassStroke, justifyContent: 'flex-end', marginBottom: 18 },
   sampleBubbles: { padding: 12 },
   peerBubble: { alignSelf: 'flex-start', borderRadius: 14, borderTopLeftRadius: 4, paddingHorizontal: 12, paddingVertical: 8, marginBottom: 8, maxWidth: '78%' },
   myBubble: { alignSelf: 'flex-end', borderRadius: 14, borderTopRightRadius: 4, paddingHorizontal: 12, paddingVertical: 8, maxWidth: '78%' },
   bubbleText: { fontSize: 14, lineHeight: 19 },
   bubbleTime: { fontSize: 10, alignSelf: 'flex-end', marginTop: 2 },
 
-  tabs: { flexDirection: 'row', backgroundColor: c.surface, borderRadius: 12, padding: 4, marginBottom: 16 },
+  tabs: { flexDirection: 'row', backgroundColor: c.glassSoft, borderRadius: 12, padding: 4, marginBottom: 16 },
   tab: { flex: 1, paddingVertical: 10, alignItems: 'center', borderRadius: 9 },
   tabActive: { backgroundColor: c.primary },
   tabText: { color: c.textDim, fontSize: 14, fontWeight: '600' },
   tabTextActive: { color: '#fff' },
 
   colorGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 12 },
-  colorTile: { width: COLOR_SIZE, height: COLOR_SIZE, borderRadius: 12, borderWidth: StyleSheet.hairlineWidth, borderColor: c.border, justifyContent: 'center', alignItems: 'center' },
+  colorTile: { width: COLOR_SIZE, height: COLOR_SIZE, borderRadius: 12, borderWidth: StyleSheet.hairlineWidth, borderColor: c.glassStroke, justifyContent: 'center', alignItems: 'center' },
   tileSelected: { borderWidth: 2.5, borderColor: c.primary },
   defaultTileTxt: { fontSize: 9, fontWeight: '700' },
 
@@ -269,7 +269,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   gradientTile: { width: PRESET_W, height: PRESET_W * 1.25, borderRadius: 12, justifyContent: 'center', alignItems: 'center' },
   gradientLabel: { color: c.textDim, fontSize: 11, fontWeight: '600', marginTop: 4, textAlign: 'center', width: PRESET_W },
 
-  customPickBtn: { backgroundColor: c.surface, borderRadius: 14, borderWidth: 1, borderColor: c.border, borderStyle: 'dashed', padding: 24, alignItems: 'center', gap: 8 },
+  customPickBtn: { backgroundColor: c.glassSoft, borderRadius: 14, borderWidth: 1, borderColor: c.glassStroke, borderStyle: 'dashed', padding: 24, alignItems: 'center', gap: 8 },
   customPickText: { color: c.primary, fontSize: 16, fontWeight: '700' },
   customPickSub: { color: c.textDim, fontSize: 13, textAlign: 'center' },
   customImage: { width: '100%', height: 200, borderRadius: 12 },

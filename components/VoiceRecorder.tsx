@@ -89,7 +89,7 @@ export default function VoiceRecorder({ onSend, onCancel }: Props) {
 }
 
 const makeS = (c: Palette) => StyleSheet.create({
-  wrap: { flexDirection: 'row', alignItems: 'center', backgroundColor: c.bg, paddingHorizontal: 10, paddingVertical: 10, borderTopWidth: 1, borderTopColor: c.border },
+  wrap: { flexDirection: 'row', alignItems: 'center', backgroundColor: c.bg, paddingHorizontal: 10, paddingVertical: 10, borderTopWidth: 1, borderTopColor: c.glassStroke },
   cancelBtn: { padding: 8 },
   cancelTxt: { color: c.textDim, fontSize: 20 },
   center: { flex: 1, alignItems: 'center' },

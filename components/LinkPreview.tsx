@@ -66,7 +66,7 @@ export default function LinkPreview({ url, data }: Props) {
 }
 
 const makeStyles = (c: Palette) => StyleSheet.create({
-  card:  { backgroundColor: c.surfaceSolid, borderRadius: 10, overflow: 'hidden', marginTop: 6, maxWidth: 240, borderWidth: 1, borderColor: c.border },
+  card:  { backgroundColor: c.surfaceSolid, borderRadius: 10, overflow: 'hidden', marginTop: 6, maxWidth: 240, borderWidth: 1, borderColor: c.glassStroke },
   img:   { width: '100%', height: 120 },
   body:  { padding: 10 },
   title: { color: c.text, fontSize: 13, fontWeight: '700', marginBottom: 4 },

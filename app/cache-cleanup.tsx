@@ -188,7 +188,7 @@ export default function CacheCleanupScreen() {
 
 const makeStyles = (c: Palette) => StyleSheet.create({
   container: { flex: 1, backgroundColor: 'transparent' },
-  header: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingTop: HEADER_TOP, paddingBottom: 14, paddingHorizontal: 12, borderBottomWidth: 1, borderBottomColor: c.border },
+  header: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingTop: HEADER_TOP, paddingBottom: 14, paddingHorizontal: 12, borderBottomWidth: 1, borderBottomColor: c.glassStroke },
   backBtn: { padding: 4 },
   headerTitle: { color: c.text, fontSize: 18, fontWeight: '800' },
   headerSub: { color: c.textDim, fontSize: 12, marginTop: 1 },
@@ -201,12 +201,12 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   actBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, marginHorizontal: 16, paddingVertical: 14, borderRadius: 14, marginTop: 8 },
   actPrimary: { backgroundColor: c.primary, marginHorizontal: 0 },
   actPrimaryText: { color: '#fff', fontWeight: '800', fontSize: 15 },
-  actClear: { borderWidth: 1, borderColor: c.border, backgroundColor: c.card },
+  actClear: { borderWidth: 1, borderColor: c.glassStroke, backgroundColor: c.glassSoft },
   actClearText: { fontWeight: '800', fontSize: 14 },
 
   sectionTitle: { color: c.textFaint, fontSize: 11, fontWeight: '800', letterSpacing: 1, marginTop: 24, marginBottom: 8, marginLeft: 20 },
-  card: { marginHorizontal: 16, backgroundColor: c.card, borderRadius: 16, borderWidth: 1, borderColor: c.border, overflow: 'hidden' },
-  divider: { height: 1, backgroundColor: c.separator, marginLeft: 16 },
+  card: { marginHorizontal: 16, backgroundColor: c.glassSoft, borderRadius: 16, borderWidth: 1, borderColor: c.glassStroke, overflow: 'hidden' },
+  divider: { height: 1, backgroundColor: c.hairline, marginLeft: 16 },
   center: { paddingVertical: 30, alignItems: 'center' },
 
   row: { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 14 },
@@ -216,9 +216,9 @@ const makeStyles = (c: Palette) => StyleSheet.create({
 
   settingRow: { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 14 },
   chips: { flexDirection: 'row', gap: 6 },
-  chip: { borderWidth: 1, borderColor: c.border, borderRadius: 9, paddingHorizontal: 10, paddingVertical: 5 },
+  chip: { borderWidth: 1, borderColor: c.glassStroke, borderRadius: 9, paddingHorizontal: 10, paddingVertical: 5 },
   chipText: { color: c.textDim, fontSize: 12.5, fontWeight: '700' },
 
-  note: { marginHorizontal: 16, marginTop: 20, padding: 14, borderRadius: 12, borderWidth: 1, borderColor: c.border, backgroundColor: c.card },
+  note: { marginHorizontal: 16, marginTop: 20, padding: 14, borderRadius: 12, borderWidth: 1, borderColor: c.glassStroke, backgroundColor: c.glassSoft },
   noteText: { color: c.textDim, fontSize: 12.5, lineHeight: 18 },
 });

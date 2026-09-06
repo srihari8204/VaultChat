@@ -84,7 +84,7 @@ export default function LockAlertScreen() {
       </View>
 
       {lock.alarmPhase === 'alarming' ? (
-        <TouchableOpacity onPress={() => stopLockAlarm()} style={[st.btn, { backgroundColor: c.card }]}>
+        <TouchableOpacity onPress={() => stopLockAlarm()} style={[st.btn, { backgroundColor: c.glassSoft }]}>
           <Ionicons name="volume-mute" size={18} color="#DC2626" />
           <Text style={[st.btnTxt, { color: '#DC2626' }]}>Stop Alarm</Text>
         </TouchableOpacity>

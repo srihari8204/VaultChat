@@ -86,7 +86,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   count: { color: c.textDim, fontSize: 11, fontWeight: '600' },
 
   backdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', justifyContent: 'flex-end' },
-  sheet: { backgroundColor: c.card, borderTopLeftRadius: 18, borderTopRightRadius: 18, paddingHorizontal: 16, paddingTop: 8, paddingBottom: 28 },
+  sheet: { backgroundColor: c.glassSoft, borderTopLeftRadius: 18, borderTopRightRadius: 18, paddingHorizontal: 16, paddingTop: 8, paddingBottom: 28 },
   handle: { alignSelf: 'center', width: 40, height: 4, borderRadius: 2, backgroundColor: c.border, marginBottom: 12 },
   sheetTitle: { color: c.text, fontSize: 16, fontWeight: '700', marginBottom: 8 },
   row: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 8 },

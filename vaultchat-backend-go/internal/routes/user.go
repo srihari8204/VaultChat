@@ -1550,6 +1550,21 @@ func userExport(w http.ResponseWriter, r *http.Request) {
 func userAccountDelete(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	user := httpx.UserFrom(r)
+
+	// "Tell us why you're leaving" — optional, exactly like WhatsApp's. Logged
+	// and nothing more: it is product feedback, and writing it to a table keyed
+	// by the account we are erasing would defeat the point of erasing it.
+	var body struct {
+		Reason string `json:"reason"`
+	}
+	_ = httpx.Body(r, &body)
+	if body.Reason != "" {
+		if len(body.Reason) > 120 {
+			body.Reason = body.Reason[:120]
+		}
+		log.Printf("[account delete] reason=%q", body.Reason)
+	}
+
 	err := authTx(ctx, func(tx pgx.Tx) error {
 		// ERASE the identity, do not merely flag it.
 		//
@@ -1598,6 +1613,42 @@ func userAccountDelete(w http.ResponseWriter, r *http.Request) {
 			`DELETE FROM user_sync_devices       WHERE user_id = $1`,
 			`DELETE FROM trusted_contacts        WHERE owner_id = $1`,
 			`DELETE FROM refresh_tokens          WHERE user_id = $1`, // sign every session out, permanently
+
+			// Leave every group, the same way the Leave button does. WhatsApp
+			// removes a deleted account from all of its groups, and a tombstone
+			// sitting silently in a roster is worse than either alternative:
+			// members keep seeing a phantom, and admin counts still include it.
+			// left_at rather than DELETE because that is what the rest of the
+			// codebase means by "not a member" (idx_chat_members_user, every
+			// roster query) and it keeps the group's own history intact.
+			`UPDATE chat_members SET left_at = NOW() WHERE user_id = $1 AND left_at IS NULL`,
+
+			// Content and settings that are theirs alone. Rows where the user is
+			// the OBJECT rather than the subject — someone else's block, someone
+			// else's ghost-mode entry — are deliberately left: those belong to
+			// the other person and now point at a tombstone that says nothing.
+			`DELETE FROM stories              WHERE user_id     = $1`, // their status posts (cascades views/keys)
+			`DELETE FROM story_views          WHERE viewer_id   = $1`, // what they watched
+			`DELETE FROM story_keys           WHERE viewer_id   = $1`,
+			`DELETE FROM status_audience      WHERE owner_id    = $1`,
+			`DELETE FROM user_backups         WHERE user_id     = $1`, // server-side chat backup
+			`DELETE FROM vaultlens_face       WHERE user_id     = $1`, // face template — biometric, goes first-class
+			`DELETE FROM vaultlens_generation WHERE user_id     = $1`,
+			`DELETE FROM security_events      WHERE user_id     = $1`, // their encrypted audit chain
+			`DELETE FROM user_blocks          WHERE blocker_id  = $1`,
+			`DELETE FROM ghost_mode           WHERE owner_id    = $1`,
+			`DELETE FROM contact_verifications WHERE user_id    = $1`,
+			`DELETE FROM bookmarks            WHERE user_id     = $1`,
+			`DELETE FROM scheduled_messages   WHERE user_id     = $1`, // nothing may send after they are gone
+			`DELETE FROM breach_monitors      WHERE user_id     = $1`,
+			`DELETE FROM sos_events           WHERE user_id     = $1`,
+			`DELETE FROM chat_codes           WHERE owner_id    = $1`,
+			`DELETE FROM sync_codes           WHERE initiator_id = $1`,
+			`DELETE FROM group_sender_keys    WHERE sender_id   = $1 OR recipient_id = $1`,
+			`DELETE FROM channel_subscribers  WHERE user_id     = $1`,
+			`DELETE FROM message_reactions    WHERE user_id     = $1`,
+			`DELETE FROM poll_votes           WHERE user_id     = $1`,
+			`DELETE FROM family_relations     WHERE viewer_id   = $1`,
 		} {
 			if _, err := tx.Exec(ctx, q, user.ID); err != nil {
 				return err

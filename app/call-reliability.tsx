@@ -147,11 +147,11 @@ export default function CallReliabilityScreen() {
 
 const makeStyles = (c: Palette) => StyleSheet.create({
   screen: { flex: 1, backgroundColor: 'transparent' },
-  header: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 12, paddingTop: HEADER_TOP, paddingBottom: 12, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.border },
+  header: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 12, paddingTop: HEADER_TOP, paddingBottom: 12, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.glassStroke },
   hBtn: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
   title: { color: c.text, fontSize: 18, fontWeight: '700' },
   intro: { color: c.textDim, fontSize: 14, lineHeight: 20, marginBottom: 16 },
-  card: { backgroundColor: c.card, borderRadius: 14, padding: 14, marginBottom: 14, borderWidth: StyleSheet.hairlineWidth, borderColor: c.border },
+  card: { backgroundColor: c.glassSoft, borderRadius: 14, padding: 14, marginBottom: 14, borderWidth: StyleSheet.hairlineWidth, borderColor: c.glassStroke },
   cardHead: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 6 },
   cardTitle: { color: c.text, fontSize: 16, fontWeight: '700', flex: 1 },
   cardBody: { color: c.textDim, fontSize: 13, lineHeight: 18, marginBottom: 10 },

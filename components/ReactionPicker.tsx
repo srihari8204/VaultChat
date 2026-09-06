@@ -39,7 +39,7 @@ const makeS = (c: Palette) => StyleSheet.create({
     borderRadius: 30, paddingHorizontal: 8, paddingVertical: 6,
     shadowColor: '#000', shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.4, shadowRadius: 8, elevation: 10,
-    borderWidth: 1, borderColor: c.border,
+    borderWidth: 1, borderColor: c.glassStroke,
   },
   emojiBtn: { padding: 6 },
   emoji: { fontSize: 26 },

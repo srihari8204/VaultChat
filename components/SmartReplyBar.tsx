@@ -37,7 +37,7 @@ export default function SmartReplyBar({ lastMessage, onSelect, visible }: Props)
 }
 
 const makeS = (c: Palette) => StyleSheet.create({
-  wrap: { backgroundColor: c.bg, borderTopWidth: 1, borderTopColor: c.border, maxHeight: 44 },
+  wrap: { backgroundColor: c.bg, borderTopWidth: 1, borderTopColor: c.glassStroke, maxHeight: 44 },
   row: { paddingHorizontal: 10, gap: 8, alignItems: 'center', paddingVertical: 6 },
   chip: { backgroundColor: c.bg, borderRadius: 16, paddingHorizontal: 14, paddingVertical: 7, borderWidth: 1, borderColor: '#00E5FF33' },
   chipTxt: { color: '#00E5FF', fontSize: 13 },

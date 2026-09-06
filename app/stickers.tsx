@@ -126,7 +126,7 @@ export default function StickerPickerScreen() {
 
 const makeStyles = (c: Palette) => StyleSheet.create({
   screen: { flex: 1, backgroundColor: 'transparent' },
-  header:       { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingTop: HEADER_TOP, paddingBottom: 12, gap: 8, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.border },
+  header:       { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingTop: HEADER_TOP, paddingBottom: 12, gap: 8, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.glassStroke },
   backBtn:      { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
   backTxt:      { color: c.text, fontSize: 26, fontWeight: '600' },
   title:        { color: c.text, fontSize: 22, fontWeight: '800' },
@@ -135,6 +135,6 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   packBlock:    { marginBottom: 24 },
   packName:     { color: c.textDim, fontSize: 11, fontWeight: '700', letterSpacing: 1.2, marginBottom: 10 },
   grid:         { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
-  tile:         { backgroundColor: c.card, borderRadius: 10, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: c.border },
+  tile:         { backgroundColor: c.glassSoft, borderRadius: 10, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: c.glassStroke },
   tileEmoji:    { fontSize: 28 },
 });

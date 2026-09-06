@@ -112,17 +112,17 @@ const makeStyles = (c: Palette) => StyleSheet.create({
     position: 'absolute', left: 0, right: 0, bottom: 0,
     backgroundColor: c.surfaceSolid, borderTopLeftRadius: 26, borderTopRightRadius: 26,
     paddingHorizontal: 16, paddingTop: 10, paddingBottom: 34,
-    borderTopWidth: 1, borderColor: c.border,
+    borderTopWidth: 1, borderColor: c.glassStroke,
   },
   handle: { alignSelf: 'center', width: 40, height: 4, borderRadius: 2, backgroundColor: c.border, marginBottom: 16 },
 
-  reactionRow: { flexDirection: 'row', justifyContent: 'space-between', backgroundColor: c.surface, borderRadius: 18, paddingVertical: 10, paddingHorizontal: 10, marginBottom: 16 },
+  reactionRow: { flexDirection: 'row', justifyContent: 'space-between', backgroundColor: c.glassSoft, borderRadius: 18, paddingVertical: 10, paddingHorizontal: 10, marginBottom: 16 },
   reaction: { width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center' },
   reactionEmoji: { fontSize: 26 },
 
   grid: { gap: 12 },
   gridRow: { flexDirection: 'row', gap: 12 },
-  tile: { flex: 1, minHeight: 68, borderRadius: 16, backgroundColor: c.surface, alignItems: 'center', justifyContent: 'center', gap: 6 },
+  tile: { flex: 1, minHeight: 68, borderRadius: 16, backgroundColor: c.glassSoft, alignItems: 'center', justifyContent: 'center', gap: 6 },
   tileIcon: { fontSize: 22 },
   tileLabel: { color: c.text, fontSize: 11, fontWeight: '600' },
 });

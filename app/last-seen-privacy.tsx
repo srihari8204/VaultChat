@@ -124,10 +124,10 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   scroll: { flex: 1 },
   scrollContent: { padding: 16, paddingBottom: 40 },
 
-  infoCard: { flexDirection: 'row', alignItems: 'flex-start', backgroundColor: c.surface, borderRadius: 10, padding: 12, marginBottom: 16, gap: 8 },
+  infoCard: { flexDirection: 'row', alignItems: 'flex-start', backgroundColor: c.glassSoft, borderRadius: 10, padding: 12, marginBottom: 16, gap: 8 },
   infoText: { color: c.textDim, fontSize: 13, flex: 1, lineHeight: 18 },
 
-  card: { backgroundColor: c.card, borderRadius: 16, padding: 20, marginBottom: 16, borderWidth: 1, borderColor: c.border },
+  card: { backgroundColor: c.glassSoft, borderRadius: 16, padding: 20, marginBottom: 16, borderWidth: 1, borderColor: c.glassStroke },
   cardTitle: { color: c.text, fontSize: 17, fontWeight: '700', marginLeft: 10 },
   cardInfo: { color: c.textDim, fontSize: 13, lineHeight: 18, marginBottom: 12 },
   sectionHeader: { flexDirection: 'row', alignItems: 'center', marginBottom: 12 },

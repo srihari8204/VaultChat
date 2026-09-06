@@ -138,7 +138,7 @@ export default function SyncContactScreen() {
           <TouchableOpacity style={[s.btn, { backgroundColor: colors.purple, width: '100%', marginBottom: 10 }]} onPress={() => router.back()}>
             <Text style={s.btnTxt}>Done</Text>
           </TouchableOpacity>
-          <TouchableOpacity style={[s.btn, { backgroundColor: colors.surface, width: '100%' }]} onPress={reset}>
+          <TouchableOpacity style={[s.btn, { backgroundColor: colors.glassSoft, width: '100%' }]} onPress={reset}>
             <Text style={[s.btnTxt, { color: colors.textDim }]}>Sync Another</Text>
           </TouchableOpacity>
         </View>
@@ -247,7 +247,7 @@ export default function SyncContactScreen() {
           </View>
         )}
 
-        <View style={[s.card, { marginTop: 8, borderColor: colors.separator }]}>
+        <View style={[s.card, { marginTop: 8, borderColor: colors.hairline }]}>
           <Text style={[s.sub, { lineHeight: 20 }]}>
             <Text style={{ color: colors.textDim, fontWeight: '700' }}>Privacy-first:</Text> No contact is saved unless both users consent. Code expires in 5 min and is single-use.
           </Text>
@@ -262,20 +262,20 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   heading: { fontSize: 20, fontWeight: '900', color: c.text, marginBottom: 4 },
   sub: { fontSize: 12, color: c.textDim, lineHeight: 18 },
   label: { fontSize: 9, fontWeight: '700', color: c.textFaint, letterSpacing: 2, marginBottom: 4 },
-  card: { backgroundColor: c.card, borderRadius: 16, padding: 16, borderWidth: 1, borderColor: c.border, marginBottom: 12 },
+  card: { backgroundColor: c.glassSoft, borderRadius: 16, padding: 16, borderWidth: 1, borderColor: c.glassStroke, marginBottom: 12 },
   avatar: { width: 48, height: 48, borderRadius: 24, backgroundColor: 'rgba(139,92,246,0.13)', alignItems: 'center', justifyContent: 'center' },
   stepNum: { width: 20, height: 20, borderRadius: 10, backgroundColor: 'rgba(139,92,246,0.2)', color: c.purple, textAlign: 'center', fontSize: 12, fontWeight: '800', overflow: 'hidden' },
   tabRow: { flexDirection: 'row', gap: 8, marginBottom: 16 },
-  tabBtn: { flex: 1, padding: 11, borderRadius: 12, alignItems: 'center', backgroundColor: c.surface, borderWidth: 1, borderColor: c.border },
+  tabBtn: { flex: 1, padding: 11, borderRadius: 12, alignItems: 'center', backgroundColor: c.glassSoft, borderWidth: 1, borderColor: c.glassStroke },
   tabActive: { backgroundColor: 'rgba(139,92,246,0.13)', borderColor: 'rgba(139,92,246,0.4)' },
   tabTxt: { fontSize: 12, fontWeight: '700' },
   btn: { borderRadius: 14, padding: 14, alignItems: 'center', marginBottom: 8 },
   btnTxt: { fontSize: 14, fontWeight: '800', color: '#fff' },
-  smallBtn: { flex: 1, padding: 10, borderRadius: 10, alignItems: 'center', backgroundColor: c.surface, borderWidth: 1, borderColor: 'rgba(139,92,246,0.3)' },
+  smallBtn: { flex: 1, padding: 10, borderRadius: 10, alignItems: 'center', backgroundColor: c.glassSoft, borderWidth: 1, borderColor: 'rgba(139,92,246,0.3)' },
   smallBtnTxt: { fontSize: 12, fontWeight: '700', color: c.purple },
   codeBox: { backgroundColor: 'rgba(139,92,246,0.08)', borderRadius: 16, borderWidth: 1.5, borderColor: 'rgba(139,92,246,0.35)', padding: 20, alignItems: 'center', marginBottom: 12 },
   codeText: { fontSize: 38, fontWeight: '900', letterSpacing: 14, color: c.purple, fontFamily: Platform.OS === 'ios' ? 'Courier New' : 'monospace' },
-  codeInput: { backgroundColor: c.surface, borderRadius: 14, borderWidth: 1.5, color: c.text, fontSize: 32, fontWeight: '900', padding: 16, letterSpacing: 12, fontFamily: Platform.OS === 'ios' ? 'Courier New' : 'monospace', marginBottom: 12 },
+  codeInput: { backgroundColor: c.glassSoft, borderRadius: 14, borderWidth: 1.5, color: c.text, fontSize: 32, fontWeight: '900', padding: 16, letterSpacing: 12, fontFamily: Platform.OS === 'ios' ? 'Courier New' : 'monospace', marginBottom: 12 },
   dotRow: { flexDirection: 'row', justifyContent: 'center', gap: 8, marginBottom: 16 },
   dotIndicator: { width: 10, height: 10, borderRadius: 5 },
 });

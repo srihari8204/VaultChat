@@ -162,7 +162,7 @@ export default function GroupNotesScreen() {
         <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 40 }}>
           {ordered.map((n) => (
             <TouchableOpacity key={n.id} onPress={() => openEdit(n)} activeOpacity={0.75}
-              style={[st.card, { backgroundColor: colors.card, borderColor: n.pinned ? colors.primary : colors.border }]}>
+              style={[st.card, { backgroundColor: colors.glassSoft, borderColor: n.pinned ? colors.primary : colors.border }]}>
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
                 <Text style={{ color: colors.text, fontWeight: '700', fontSize: 15, flex: 1 }} numberOfLines={1}>
                   {n.title}
@@ -187,7 +187,7 @@ export default function GroupNotesScreen() {
       <Modal visible={creating} transparent animationType="slide" onRequestClose={() => setCreating(false)}>
         <KeyboardAvoidingView behavior={'padding'} style={st.backdrop}>
           <TouchableOpacity style={{ flex: 1 }} activeOpacity={1} onPress={() => setCreating(false)} />
-          <View style={[st.sheet, { backgroundColor: colors.card, borderColor: colors.border }]}>
+          <View style={[st.sheet, { backgroundColor: colors.glassSoft, borderColor: colors.glassStroke }]}>
             <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 12 }}>
               <Text style={{ color: colors.text, fontWeight: '800', fontSize: 16, flex: 1 }}>
                 {editing ? 'Edit note' : 'New note'}
@@ -199,11 +199,11 @@ export default function GroupNotesScreen() {
               )}
             </View>
 
-            <View style={[st.field, { borderColor: colors.border, backgroundColor: colors.surface }]}>
+            <View style={[st.field, { borderColor: colors.glassStroke, backgroundColor: colors.glassSoft }]}>
               <TextInput value={draftTitle} onChangeText={setDraftTitle} placeholder="Title"
                 placeholderTextColor={colors.textFaint} style={[st.input, { color: colors.text }]} maxLength={120} />
             </View>
-            <View style={[st.field, { borderColor: colors.border, backgroundColor: colors.surface, height: 150, alignItems: 'flex-start', paddingTop: 12, marginTop: 10 }]}>
+            <View style={[st.field, { borderColor: colors.glassStroke, backgroundColor: colors.glassSoft, height: 150, alignItems: 'flex-start', paddingTop: 12, marginTop: 10 }]}>
               <TextInput value={draftBody} onChangeText={setDraftBody} placeholder="Write something…" multiline
                 placeholderTextColor={colors.textFaint} style={[st.input, { color: colors.text, height: '100%' }]} />
             </View>

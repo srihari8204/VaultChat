@@ -431,11 +431,11 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   section: {
     marginHorizontal: 16,
     marginTop: 20,
-    backgroundColor: c.card,
+    backgroundColor: c.glassSoft,
     borderRadius: 16,
     padding: 16,
     borderWidth: 1,
-    borderColor: c.border,
+    borderColor: c.glassStroke,
   },
   sectionTitle: { fontSize: 16, fontWeight: '700', color: c.text, marginBottom: 12 },
 
@@ -481,7 +481,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
     borderRadius: 8,
     backgroundColor: c.surfaceSolid,
     borderWidth: 1,
-    borderColor: c.border,
+    borderColor: c.glassStroke,
   },
   pChipActive: { backgroundColor: 'rgba(74,159,255,0.15)', borderColor: c.accent },
   pChipText: { fontSize: 12, color: c.textDim, fontWeight: '600' },

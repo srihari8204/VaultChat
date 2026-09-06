@@ -78,7 +78,7 @@ export default function TransferProgress({ visible, progress, filename, type = '
 }
 
 const makeS = (c: Palette) => StyleSheet.create({
-  container: { backgroundColor: c.bg, borderRadius: 12, padding: 12, marginHorizontal: 12, marginVertical: 4, borderWidth: 1, borderColor: c.border },
+  container: { backgroundColor: c.bg, borderRadius: 12, padding: 12, marginHorizontal: 12, marginVertical: 4, borderWidth: 1, borderColor: c.glassStroke },
   header: { flexDirection: 'row', alignItems: 'center', marginBottom: 8 },
   icon: { color: '#00E5FF', fontSize: 16, fontWeight: '900', marginRight: 8 },
   label: { color: c.textDim, fontSize: 11, fontWeight: '700' },

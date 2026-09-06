@@ -86,15 +86,15 @@ export function PhoneField({
 
 const makeStyles = (c: Palette) => StyleSheet.create({
   row: { flexDirection: 'row', gap: 10 },
-  code: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 14, height: 52, borderRadius: 12, borderWidth: 1, borderColor: c.border, backgroundColor: c.card },
+  code: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 14, height: 52, borderRadius: 12, borderWidth: 1, borderColor: c.glassStroke, backgroundColor: c.glassSoft },
   flag: { fontSize: 18 },
   codeTxt: { color: c.text, fontSize: 16, fontWeight: '700' },
   chev: { color: c.textDim, fontSize: 12 },
-  input: { flex: 1, minHeight: 52, borderRadius: 12, borderWidth: 1, borderColor: c.border, backgroundColor: c.card, paddingHorizontal: 14, color: c.text, fontSize: 16 },
+  input: { flex: 1, minHeight: 52, borderRadius: 12, borderWidth: 1, borderColor: c.glassStroke, backgroundColor: c.glassSoft, paddingHorizontal: 14, color: c.text, fontSize: 16 },
   backdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'flex-end' },
   sheet: { backgroundColor: c.bg, borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 16, maxHeight: '70%' },
   sheetTitle: { color: c.text, fontSize: 16, fontWeight: '800', marginBottom: 12 },
-  countryRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 14, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.border },
-  countryActive: { backgroundColor: c.card },
+  countryRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 14, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.glassStroke },
+  countryActive: { backgroundColor: c.glassSoft },
   countryName: { color: c.text, fontSize: 15, flex: 1 },
 });

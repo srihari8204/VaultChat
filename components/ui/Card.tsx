@@ -17,7 +17,7 @@ export interface CardProps {
 export function Card({ children, onPress, padded = true, style }: CardProps) {
   const c = useColors();
   const content = (
-    <View style={[styles.card, { backgroundColor: c.card, borderColor: c.border }, padded && styles.padded, style]}>
+    <View style={[styles.card, { backgroundColor: c.glassSoft, borderColor: c.glassStroke }, padded && styles.padded, style]}>
       {children}
     </View>
   );

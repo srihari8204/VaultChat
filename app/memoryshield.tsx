@@ -298,7 +298,7 @@ function MemoryShieldScreenContent() {
 const makeS = (c: Palette) => StyleSheet.create({
   container: { paddingHorizontal: 18, paddingTop: HEADER_TOP, paddingBottom: 20 },
   header: { flexDirection: 'row', alignItems: 'center', marginBottom: 16, gap: 10 },
-  backBtn: { width: 36, height: 36, borderRadius: 18, backgroundColor: c.card, justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: '#0D1E3A' },
+  backBtn: { width: 36, height: 36, borderRadius: 18, backgroundColor: c.glassSoft, justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: '#0D1E3A' },
   title: { color: '#fff', fontSize: 20, fontWeight: '900' },
   shieldContainer: { marginBottom: 16, borderRadius: 24 },
   shieldCard: { borderRadius: 24, padding: 28, alignItems: 'center', borderWidth: 1.5, borderColor: 'rgba(239,68,68,0.18)', overflow: 'hidden' },
@@ -306,16 +306,16 @@ const makeS = (c: Palette) => StyleSheet.create({
   statusRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 12, backgroundColor: c.bg, borderRadius: 20, paddingHorizontal: 14, paddingVertical: 6 },
   statusDot: { width: 8, height: 8, borderRadius: 4 },
   nuclearBtn: { borderRadius: 18, padding: 18, flexDirection: 'row', alignItems: 'center' },
-  settingsCard: { backgroundColor: c.card, borderRadius: 18, padding: 16, marginBottom: 14, borderWidth: 1, borderColor: '#0D1E3A' },
+  settingsCard: { backgroundColor: c.glassSoft, borderRadius: 18, padding: 16, marginBottom: 14, borderWidth: 1, borderColor: '#0D1E3A' },
   settingsTitle: { color: '#fff', fontSize: 14, fontWeight: '800', marginBottom: 14 },
   settingRow: { flexDirection: 'row', alignItems: 'center' },
   settingLabel: { color: '#fff', fontSize: 13, fontWeight: '700' },
   settingDesc: { color: '#3D5A7A', fontSize: 11, marginTop: 2 },
   timerRow: { flexDirection: 'row', gap: 8, marginTop: 10, flexWrap: 'wrap' },
   timerChip: { borderRadius: 10, paddingHorizontal: 14, paddingVertical: 8, borderWidth: 1.5 },
-  destroyCard: { backgroundColor: c.card, borderRadius: 18, padding: 16, marginBottom: 14, borderWidth: 1, borderColor: 'rgba(239,68,68,0.18)' },
+  destroyCard: { backgroundColor: c.glassSoft, borderRadius: 18, padding: 16, marginBottom: 14, borderWidth: 1, borderColor: 'rgba(239,68,68,0.18)' },
   destroyRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: '#0D1E3A', gap: 8 },
-  logsCard: { backgroundColor: c.card, borderRadius: 18, padding: 16, marginBottom: 14, borderWidth: 1, borderColor: '#0D1E3A' },
+  logsCard: { backgroundColor: c.glassSoft, borderRadius: 18, padding: 16, marginBottom: 14, borderWidth: 1, borderColor: '#0D1E3A' },
   logRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: '#0D1E3A' },
 });
 

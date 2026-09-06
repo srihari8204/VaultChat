@@ -158,7 +158,7 @@ export default function GroupTasksScreen() {
       <Stack.Screen options={{ title: 'Tasks', headerTitleAlign: 'center' }} />
       <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 40 }} keyboardShouldPersistTaps="handled">
 
-        <View style={[st.field, { borderColor: colors.border, backgroundColor: colors.surface }]}>
+        <View style={[st.field, { borderColor: colors.glassStroke, backgroundColor: colors.glassSoft }]}>
           <Ionicons name="add-circle-outline" size={19} color={colors.textDim} />
           <TextInput
             value={title} onChangeText={setTitle} placeholder="Add a task…"
@@ -223,7 +223,7 @@ export default function GroupTasksScreen() {
           const late = isOverdue(t, now);
           const who = nameOf(t.assignee);
           return (
-            <View key={t.id} style={[st.row, { borderColor: colors.border }]}>
+            <View key={t.id} style={[st.row, { borderColor: colors.glassStroke }]}>
               <TouchableOpacity onPress={() => toggle(t)} style={st.check} hitSlop={8}>
                 <Ionicons
                   name={t.done ? 'checkmark-circle' : 'ellipse-outline'}

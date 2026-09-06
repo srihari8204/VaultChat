@@ -144,7 +144,7 @@ pathname: '/live-view' as any, params: {
         refreshControl={<RefreshControl refreshing={false} onRefresh={load} tintColor={colors.textDim} />}
       >
         {/* Said plainly, and BEFORE the go-live button. */}
-        <View style={[S.notice, { backgroundColor: colors.surface }]}>
+        <View style={[S.notice, { backgroundColor: colors.glassSoft }]}>
           <Ionicons name="eye-outline" size={18} color={colors.textDim} />
           <AppText style={[S.noticeText, { color: colors.textDim }]}>
             Broadcasts are public and <AppText style={{ color: colors.text, fontWeight: '700' }}>not
@@ -154,7 +154,7 @@ pathname: '/live-view' as any, params: {
         </View>
 
         {composing ? (
-          <View style={[S.card, { backgroundColor: colors.surface }]}>
+          <View style={[S.card, { backgroundColor: colors.glassSoft }]}>
             <TextInput
               value={title}
               onChangeText={setTitle}
@@ -302,7 +302,7 @@ pathname: '/live-view' as any, params: {
                 this asks for; the passcode and your name are then asked for on
                 the join screen itself. */}
             {joinOpen ? (
-              <View style={[S.card, { backgroundColor: colors.surface, marginTop: SPACING.md }]}>
+              <View style={[S.card, { backgroundColor: colors.glassSoft, marginTop: SPACING.md }]}>
                 <AppText style={[S.title, { color: colors.text }]}>Join a private live</AppText>
                 <AppText style={[S.segmentHint, { color: colors.textFaint }]}>
                   Paste the invitation link the host sent you. You will be asked for
@@ -321,7 +321,7 @@ pathname: '/live-view' as any, params: {
                 />
                 <View style={S.row}>
                   <TouchableOpacity
-                    style={[S.btn, { backgroundColor: colors.surface }]}
+                    style={[S.btn, { backgroundColor: colors.glassSoft }]}
                     onPress={() => { setJoinOpen(false); setJoinCode(''); }}
                     activeOpacity={0.85}
                   >
@@ -341,7 +341,7 @@ pathname: '/live-view' as any, params: {
               <TouchableOpacity
                 onPress={() => setJoinOpen(true)}
                 activeOpacity={0.85}
-                style={[S.joinBtn, { borderColor: colors.border }]}
+                style={[S.joinBtn, { borderColor: colors.glassStroke }]}
               >
                 <Ionicons name="lock-closed-outline" size={18} color={colors.textDim} />
                 <AppText style={{ color: colors.text, fontWeight: '600' }}>Join a private live</AppText>
@@ -369,7 +369,7 @@ pathname: '/live-view' as any, params: {
 // does not yet know a route added in the same change. Matches how the call
 // screens reference /group-call-active.
 pathname: '/live-view' as any, params: { id: b.id } })}
-              style={[S.card, { backgroundColor: colors.surface }]}
+              style={[S.card, { backgroundColor: colors.glassSoft }]}
               activeOpacity={0.85}
             >
               <View style={S.cardTop}>

@@ -59,7 +59,8 @@
     "test:aurora": "tsx lib/auroraGlass.selftest.ts",
     "test:theme": "tsx lib/themeCoverage.selftest.ts",
     "test:layout": "tsx lib/responsiveLayout.selftest.ts",
-    "test:history": "tsx lib/messageHistory.selftest.ts"
+    "test:history": "tsx lib/messageHistory.selftest.ts",
+    "test:delete": "tsx lib/confirmIdentity.selftest.ts"
   },
   "dependencies": {
     "@any-routing/annotation-plugin": "^0.0.1",

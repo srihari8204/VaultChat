@@ -363,7 +363,7 @@ const styles = (c: Palette) => StyleSheet.create({
   listBody: { padding: 14, gap: 8, paddingBottom: 30 },
   row: {
     flexDirection: 'row', alignItems: 'center', gap: 12,
-    backgroundColor: c.card, borderRadius: 12, padding: 14,
+    backgroundColor: c.glassSoft, borderRadius: 12, padding: 14,
     borderWidth: 1, borderColor: 'transparent',
   },
   rowFocus: { borderColor: c.primary },
@@ -374,7 +374,7 @@ const styles = (c: Palette) => StyleSheet.create({
   footnote: { color: c.textFaint, fontSize: 11.5, lineHeight: 16, marginTop: 6 },
   tiles: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 4 },
   tile: {
-    backgroundColor: c.card, borderRadius: 12, paddingVertical: 10, paddingHorizontal: 12,
+    backgroundColor: c.glassSoft, borderRadius: 12, paddingVertical: 10, paddingHorizontal: 12,
     minWidth: 96, flexGrow: 1, borderWidth: 1, borderColor: 'transparent',
   },
   tileAlert: { borderColor: c.danger },
@@ -387,10 +387,10 @@ const styles = (c: Palette) => StyleSheet.create({
   },
   emergencyOn: { backgroundColor: c.danger, borderColor: c.danger },
   emergencyText: { color: c.danger, fontSize: 13, fontWeight: '600', flex: 1 },
-  composer: { backgroundColor: c.card, borderRadius: 12, padding: 12, gap: 8 },
+  composer: { backgroundColor: c.glassSoft, borderRadius: 12, padding: 12, gap: 8 },
   composerRow: { flexDirection: 'row', alignItems: 'flex-end', gap: 8 },
   input: {
-    flex: 1, color: c.text, borderWidth: 1, borderColor: c.border, borderRadius: 10,
+    flex: 1, color: c.text, borderWidth: 1, borderColor: c.glassStroke, borderRadius: 10,
     paddingHorizontal: 12, paddingVertical: 10, maxHeight: 110,
   },
   send: {

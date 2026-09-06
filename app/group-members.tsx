@@ -214,7 +214,7 @@ export default function GroupMembersScreen() {
         key={m.userId}
         disabled={!actionable || busy === m.userId}
         onPress={() => setSheet(m)}
-        style={[st.row, { borderColor: colors.border }]}
+        style={[st.row, { borderColor: colors.glassStroke }]}
       >
         {avatar(m)}
         <View style={{ flex: 1, minWidth: 0 }}>
@@ -262,7 +262,7 @@ export default function GroupMembersScreen() {
           {hasPerm(perms, 'invite_members') && (
             <TouchableOpacity
               onPress={() => router.push({ pathname: '/group-invites' as any, params: { chatId: groupId, name: groupName } })}
-              style={[st.addBtn, { borderColor: colors.border }]}
+              style={[st.addBtn, { borderColor: colors.glassStroke }]}
             >
               <Ionicons name="person-add-outline" size={18} color={colors.primary} />
               <Text style={{ color: colors.primary, fontWeight: '700', fontSize: 14 }}>Add people</Text>
@@ -300,7 +300,7 @@ export default function GroupMembersScreen() {
               {mode === 'admin_approval' && (
                 <>
                   <TouchableOpacity onPress={openShare}
-                    style={[st.addBtn, { borderColor: colors.border, marginTop: 18 }]}>
+                    style={[st.addBtn, { borderColor: colors.glassStroke, marginTop: 18 }]}>
                     <Ionicons name="share-outline" size={18} color={colors.primary} />
                     <Text style={{ color: colors.primary, fontWeight: '700', fontSize: 14 }}>
                       Share this group in a chat
@@ -321,7 +321,7 @@ export default function GroupMembersScreen() {
       <Modal visible={sharing} transparent animationType="slide" onRequestClose={() => setSharing(false)}>
         <View style={st.backdrop}>
           <Pressable style={{ flex: 1 }} onPress={() => setSharing(false)} />
-          <View style={[st.sheet, { backgroundColor: colors.card, borderColor: colors.border, maxHeight: '70%' }]}>
+          <View style={[st.sheet, { backgroundColor: colors.glassSoft, borderColor: colors.glassStroke, maxHeight: '70%' }]}>
             <Text style={{ color: colors.text, fontWeight: '800', fontSize: 16, marginBottom: 4 }}>
               Share with
             </Text>
@@ -336,7 +336,7 @@ export default function GroupMembersScreen() {
               )}
               {chats.map((c) => (
                 <TouchableOpacity key={c.id} onPress={() => doShare(c)}
-                  style={[st.opt, { borderColor: colors.border }]}>
+                  style={[st.opt, { borderColor: colors.glassStroke }]}>
                   <Ionicons name={c.type === 'group' ? 'people' : 'person'} size={18} color={colors.primary} />
                   <Text style={{ color: colors.text, fontSize: 14, fontWeight: '600', flex: 1 }} numberOfLines={1}>
                     {c.name ?? c.peerName ?? 'Chat'}
@@ -345,7 +345,7 @@ export default function GroupMembersScreen() {
               ))}
             </ScrollView>
             <TouchableOpacity onPress={() => setSharing(false)}
-              style={[st.close, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+              style={[st.close, { backgroundColor: colors.glassSoft, borderColor: colors.glassStroke }]}>
               <Text style={{ color: colors.text, fontWeight: '700', fontSize: 14.5 }}>Close</Text>
             </TouchableOpacity>
           </View>
@@ -356,7 +356,7 @@ export default function GroupMembersScreen() {
       <Modal visible={!!sheet} transparent animationType="slide" onRequestClose={() => setSheet(null)}>
         <View style={st.backdrop}>
           <Pressable style={{ flex: 1 }} onPress={() => setSheet(null)} />
-          <View style={[st.sheet, { backgroundColor: colors.card, borderColor: colors.border }]}>
+          <View style={[st.sheet, { backgroundColor: colors.glassSoft, borderColor: colors.glassStroke }]}>
             {!!sheet && (() => {
               const role = sheet.role as GroupRole;
               const options = ASSIGNABLE.filter((r) => canManageRole(myRole, role, r));
@@ -379,7 +379,7 @@ export default function GroupMembersScreen() {
                       <Text style={[st.h, { color: colors.textDim, marginTop: 20 }]}>Change role</Text>
                       {options.map((r) => (
                         <TouchableOpacity key={r} onPress={() => changeRole(sheet, r)}
-                          style={[st.opt, { borderColor: colors.border }]}>
+                          style={[st.opt, { borderColor: colors.glassStroke }]}>
                           <View style={[st.dot, { backgroundColor: ROLE_TONE[r] }]} />
                           <View style={{ flex: 1 }}>
                             <Text style={{ color: colors.text, fontSize: 14, fontWeight: r === role ? '800' : '600' }}>
@@ -395,7 +395,7 @@ export default function GroupMembersScreen() {
 
                   {canTransferOwnership(myRole, role) && (
                     <TouchableOpacity onPress={() => handOver(sheet)}
-                      style={[st.opt, { borderColor: colors.border, marginTop: 14 }]}>
+                      style={[st.opt, { borderColor: colors.glassStroke, marginTop: 14 }]}>
                       <Ionicons name="key-outline" size={18} color="#F59E0B" />
                       <View style={{ flex: 1 }}>
                         <Text style={{ color: colors.text, fontSize: 14, fontWeight: '700' }}>Make owner</Text>
@@ -417,7 +417,7 @@ export default function GroupMembersScreen() {
                   )}
 
                   <TouchableOpacity onPress={() => setSheet(null)}
-                    style={[st.close, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+                    style={[st.close, { backgroundColor: colors.glassSoft, borderColor: colors.glassStroke }]}>
                     <Text style={{ color: colors.text, fontWeight: '700', fontSize: 14.5 }}>Close</Text>
                   </TouchableOpacity>
                 </>

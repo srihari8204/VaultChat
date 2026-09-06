@@ -191,7 +191,7 @@ export default function GroupCalendarScreen() {
         ),
       }} />
 
-      <View style={[st.monthBar, { borderColor: colors.border }]}>
+      <View style={[st.monthBar, { borderColor: colors.glassStroke }]}>
         <TouchableOpacity onPress={() => shiftMonth(-1)} hitSlop={10} style={{ padding: 6 }}>
           <Ionicons name="chevron-back" size={20} color={colors.primary} />
         </TouchableOpacity>
@@ -221,7 +221,7 @@ export default function GroupCalendarScreen() {
                   key={`${o.event.id}:${o.startsAt}:${i}`}
                   onLongPress={() => remove(o)}
                   activeOpacity={0.75}
-                  style={[st.row, { borderColor: colors.border }]}
+                  style={[st.row, { borderColor: colors.glassStroke }]}
                 >
                   <View style={[st.time, { backgroundColor: brandAlpha(0.1) }]}>
                     <Text style={{ color: colors.primary, fontSize: 11.5, fontWeight: '800' }}>
@@ -256,15 +256,15 @@ export default function GroupCalendarScreen() {
       <Modal visible={composing} transparent animationType="slide" onRequestClose={() => setComposing(false)}>
         <KeyboardAvoidingView behavior={'padding'} style={st.backdrop}>
           <TouchableOpacity style={{ flex: 1 }} activeOpacity={1} onPress={() => setComposing(false)} />
-          <View style={[st.sheet, { backgroundColor: colors.card, borderColor: colors.border }]}>
+          <View style={[st.sheet, { backgroundColor: colors.glassSoft, borderColor: colors.glassStroke }]}>
             <Text style={{ color: colors.text, fontWeight: '800', fontSize: 16, marginBottom: 14 }}>New event</Text>
 
-            <View style={[st.field, { borderColor: colors.border, backgroundColor: colors.surface }]}>
+            <View style={[st.field, { borderColor: colors.glassStroke, backgroundColor: colors.glassSoft }]}>
               <Ionicons name="calendar" size={17} color={colors.textDim} />
               <TextInput value={title} onChangeText={setTitle} placeholder="What is it?"
                 placeholderTextColor={colors.textFaint} style={[st.input, { color: colors.text }]} maxLength={140} />
             </View>
-            <View style={[st.field, { borderColor: colors.border, backgroundColor: colors.surface, marginTop: 10 }]}>
+            <View style={[st.field, { borderColor: colors.glassStroke, backgroundColor: colors.glassSoft, marginTop: 10 }]}>
               <Ionicons name="location-outline" size={17} color={colors.textDim} />
               <TextInput value={location} onChangeText={setLocation} placeholder="Where (optional)"
                 placeholderTextColor={colors.textFaint} style={[st.input, { color: colors.text }]} maxLength={140} />

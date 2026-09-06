@@ -107,7 +107,7 @@ export default function SplitScreen() {
       <Stack.Screen options={{ headerShown: false }} />
 
       {/* Split control bar — swap / close, per the design's pane header */}
-      <View style={[st.bar, { borderBottomColor: colors.border }]}>
+      <View style={[st.bar, { borderBottomColor: colors.glassStroke }]}>
         <Ionicons name={vertical ? 'tablet-landscape-outline' : 'phone-portrait-outline'} size={15} color={colors.textDim} />
         <Text style={[st.barTxt, { color: colors.textDim }]}>Split view</Text>
         <View style={{ flex: 1 }} />
@@ -160,7 +160,7 @@ function Refusal({ title, body, onBack, colors }: {
       <Ionicons name="git-compare-outline" size={44} color={colors.textDim} />
       <Text style={[st.refusalTitle, { color: colors.text }]}>{title}</Text>
       <Text style={[st.refusalBody, { color: colors.textDim }]}>{body}</Text>
-      <TouchableOpacity onPress={onBack} style={[st.refusalBtn, { borderColor: colors.border }]}>
+      <TouchableOpacity onPress={onBack} style={[st.refusalBtn, { borderColor: colors.glassStroke }]}>
         <Text style={{ color: colors.text, fontWeight: '700' }}>Go back</Text>
       </TouchableOpacity>
     </View>

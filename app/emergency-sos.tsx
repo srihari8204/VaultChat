@@ -406,7 +406,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   resetBtnText: { color: '#FFF', fontSize: 15, fontWeight: '700' },
 
   // Shake
-  shakeRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: c.card, borderRadius: 14, padding: 16, marginBottom: 16, borderWidth: 1, borderColor: 'rgba(74,159,255,0.08)' },
+  shakeRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: c.glassSoft, borderRadius: 14, padding: 16, marginBottom: 16, borderWidth: 1, borderColor: 'rgba(74,159,255,0.08)' },
   shakeTitle: { color: '#FFF', fontSize: 15, fontWeight: '600' },
   shakeSub: { color: c.textDim, fontSize: 12, marginTop: 2 },
   toggleBtn: { paddingHorizontal: 18, paddingVertical: 8, borderRadius: 8, borderWidth: 1, borderColor: 'rgba(255,255,255,0.15)' },
@@ -417,7 +417,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   // Contacts
   section: { marginTop: 20 },
   sectionTitle: { color: '#FFF', fontSize: 16, fontWeight: '700', marginBottom: 12 },
-  contactRow: { flexDirection: 'row', alignItems: 'center', backgroundColor: c.card, borderRadius: 12, padding: 14, marginBottom: 8, borderWidth: 1, borderColor: 'rgba(74,159,255,0.06)' },
+  contactRow: { flexDirection: 'row', alignItems: 'center', backgroundColor: c.glassSoft, borderRadius: 12, padding: 14, marginBottom: 8, borderWidth: 1, borderColor: 'rgba(74,159,255,0.06)' },
   contactSelected: { borderColor: 'rgba(0,229,255,0.3)', backgroundColor: 'rgba(0,229,255,0.04)' },
   contactCheck: { width: 24, height: 24, borderRadius: 12, borderWidth: 2, borderColor: 'rgba(255,255,255,0.15)', justifyContent: 'center', alignItems: 'center', marginRight: 12 },
   contactCheckActive: { borderColor: c.accent, backgroundColor: 'rgba(0,229,255,0.2)' },
@@ -425,14 +425,14 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   contactInfo: { flex: 1 },
   contactName: { color: '#FFF', fontSize: 15, fontWeight: '600' },
   contactId: { color: c.textDim, fontSize: 12, marginTop: 2 },
-  emptyCard: { alignItems: 'center', backgroundColor: c.card, borderRadius: 14, padding: 24, borderWidth: 1, borderColor: 'rgba(74,159,255,0.08)' },
+  emptyCard: { alignItems: 'center', backgroundColor: c.glassSoft, borderRadius: 14, padding: 24, borderWidth: 1, borderColor: 'rgba(74,159,255,0.08)' },
   emptyText: { color: c.textDim, fontSize: 14, marginBottom: 14 },
   setupBtn: { backgroundColor: c.accent, paddingHorizontal: 20, paddingVertical: 10, borderRadius: 8 },
   setupBtnText: { color: '#FFF', fontSize: 14, fontWeight: '700' },
 
   // History
   noHistory: { color: c.textDim, fontSize: 13, textAlign: 'center', marginTop: 8 },
-  historyRow: { flexDirection: 'row', alignItems: 'center', backgroundColor: c.card, borderRadius: 12, padding: 14, marginBottom: 8, borderWidth: 1, borderColor: 'rgba(74,159,255,0.06)' },
+  historyRow: { flexDirection: 'row', alignItems: 'center', backgroundColor: c.glassSoft, borderRadius: 12, padding: 14, marginBottom: 8, borderWidth: 1, borderColor: 'rgba(74,159,255,0.06)' },
   historyDot: { width: 10, height: 10, borderRadius: 5, marginRight: 12 },
   historyInfo: { flex: 1 },
   historyType: { color: '#FFF', fontSize: 14, fontWeight: '600' },

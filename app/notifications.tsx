@@ -247,7 +247,7 @@ export default function NotificationsScreen() {
 }
 
 const makeStyles = (c: Palette) => StyleSheet.create({
-  container:{flex:1,backgroundColor: c.card},
+  container:{flex:1,backgroundColor: c.glassSoft},
   header:{flexDirection:'row',alignItems:'center',paddingHorizontal:18,paddingTop:HEADER_TOP,paddingBottom:14,gap:10},
   title:{color:'#fff',fontSize:20,fontWeight:'900'},
   backBtn:{width:36,height:36,borderRadius:18,backgroundColor:'rgba(10,22,40,0.8)',justifyContent:'center',alignItems:'center',borderWidth:1,borderColor:'rgba(255,255,255,0.06)'},

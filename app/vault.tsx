@@ -599,7 +599,7 @@ export default function VaultScreen() {
 
 const makePinStyles = (c: Palette) => StyleSheet.create({
   container: {
-    flex: 1, backgroundColor: c.card,
+    flex: 1, backgroundColor: c.glassSoft,
     alignItems: 'center', justifyContent: 'center',
   },
   lockIcon:  { fontSize: 52, marginBottom: 12 },
@@ -610,7 +610,7 @@ const makePinStyles = (c: Palette) => StyleSheet.create({
   dot: {
     width: 14, height: 14, borderRadius: 7,
     backgroundColor: c.surfaceSolid,
-    borderWidth: 1.5, borderColor: c.border,
+    borderWidth: 1.5, borderColor: c.glassStroke,
   },
   dotFilled: { backgroundColor: BRAND_ACCENT, borderColor: BRAND_ACCENT },
   error:     { color: '#FF4D6D', fontSize: 13, marginBottom: 12 },
@@ -618,7 +618,7 @@ const makePinStyles = (c: Palette) => StyleSheet.create({
   key: {
     width: 72, height: 72, borderRadius: 36,
     backgroundColor: c.bg,
-    borderWidth: 1, borderColor: c.border,
+    borderWidth: 1, borderColor: c.glassStroke,
     justifyContent: 'center', alignItems: 'center',
   },
   keyEmpty:  { width: 72, height: 72 },
@@ -627,14 +627,14 @@ const makePinStyles = (c: Palette) => StyleSheet.create({
 });
 
 const makeStyles = (c: Palette) => StyleSheet.create({
-  container:    { flex: 1, backgroundColor: c.card },
+  container:    { flex: 1, backgroundColor: c.glassSoft },
 
   // Header
   header: {
     flexDirection: 'row', alignItems: 'center',
     backgroundColor: c.bg,
     paddingTop: 48, paddingBottom: 12, paddingHorizontal: 16,
-    borderBottomWidth: 0.5, borderBottomColor: c.border,
+    borderBottomWidth: 0.5, borderBottomColor: c.glassStroke,
     gap: 12,
   },
   back:         { fontSize: 28, color: BRAND_ACCENT, fontWeight: 'bold' },
@@ -643,7 +643,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   headerSub:    { fontSize: 9, color: BRAND_ACCENT, marginTop: 1 },
   backupBtn: {
     width: 36, height: 36, backgroundColor: c.surfaceSolid,
-    borderRadius: 9, borderWidth: 0.5, borderColor: c.border,
+    borderRadius: 9, borderWidth: 0.5, borderColor: c.glassStroke,
     justifyContent: 'center', alignItems: 'center',
   },
   backupBtnText: { fontSize: 18 },
@@ -652,7 +652,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   statsBar: {
     flexDirection: 'row', backgroundColor: c.bg,
     paddingVertical: 12, paddingHorizontal: 20,
-    borderBottomWidth: 0.5, borderBottomColor: c.border,
+    borderBottomWidth: 0.5, borderBottomColor: c.glassStroke,
   },
   statItem:    { flex: 1, alignItems: 'center' },
   statNum:     { fontSize: 15, fontWeight: 'bold', color: c.text },
@@ -662,7 +662,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   // Tabs
   tabs: {
     flexDirection: 'row',
-    borderBottomWidth: 0.5, borderBottomColor: c.border,
+    borderBottomWidth: 0.5, borderBottomColor: c.glassStroke,
   },
   tab: {
     flex: 1, alignItems: 'center', paddingVertical: 10, gap: 3,
@@ -700,7 +700,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
     flexDirection: 'row', alignItems: 'center',
     backgroundColor: c.bg,
     borderRadius: 12, padding: 12, marginBottom: 8,
-    borderWidth: 0.5, borderColor: c.border,
+    borderWidth: 0.5, borderColor: c.glassStroke,
   },
   fileIcon: {
     width: 44, height: 44, borderRadius: 10,
@@ -754,14 +754,14 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   backupLabel:   { fontSize: 12, color: c.textDim, marginBottom: 6 },
   backupInput: {
     backgroundColor: c.surfaceSolid, borderRadius: 10,
-    borderWidth: 0.5, borderColor: c.border,
+    borderWidth: 0.5, borderColor: c.glassStroke,
     paddingHorizontal: 14, paddingVertical: 11,
     color: c.text, fontSize: 15, marginBottom: 16,
   },
   backupBtnRow:  { flexDirection: 'row', gap: 10, marginBottom: 12 },
   backupCancelBtn: {
     flex: 1, backgroundColor: c.surfaceSolid,
-    borderRadius: 10, borderWidth: 0.5, borderColor: c.border,
+    borderRadius: 10, borderWidth: 0.5, borderColor: c.glassStroke,
     paddingVertical: 13, alignItems: 'center',
   },
   backupCancelText:  { color: c.textDim, fontWeight: 'bold' },

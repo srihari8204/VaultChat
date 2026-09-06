@@ -128,12 +128,12 @@ export default function GroupJoinScreen() {
 
         {(state === 'asked' || state === 'member') && (
           <TouchableOpacity onPress={() => router.back()}
-            style={[st.btn, { backgroundColor: 'transparent', borderWidth: 1, borderColor: colors.border }]}>
+            style={[st.btn, { backgroundColor: 'transparent', borderWidth: 1, borderColor: colors.glassStroke }]}>
             <Text style={[st.btnTxt, { color: colors.text }]}>Done</Text>
           </TouchableOpacity>
         )}
 
-        <View style={[st.footer, { borderColor: colors.border, backgroundColor: brandAlpha(0.05) }]}>
+        <View style={[st.footer, { borderColor: colors.glassStroke, backgroundColor: brandAlpha(0.05) }]}>
           <Ionicons name="lock-closed-outline" size={15} color={colors.textDim} />
           <Text style={{ color: colors.textDim, fontSize: 11.5, flex: 1, lineHeight: 16 }}>
             This card is not an invitation and does not let anyone in — it only says the group

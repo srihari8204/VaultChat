@@ -36,7 +36,7 @@ export default function NavBanner() {
   const remain = Math.max(4, Math.min(100, (1 - b.progress) * 100)); // line shrinks as we approach
 
   return (
-    <View style={[styles.wrap, { backgroundColor: colors.card, borderBottomColor: colors.border }]}>
+    <View style={[styles.wrap, { backgroundColor: colors.glassSoft, borderBottomColor: colors.glassStroke }]}>
       <View style={styles.row}>
         <View style={[styles.iconBox, { backgroundColor: colors.primary + '22' }]}>
           <Ionicons name={iconFor(b.event)} size={26} color={colors.primary} />

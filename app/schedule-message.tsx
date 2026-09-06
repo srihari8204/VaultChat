@@ -205,22 +205,22 @@ export default function ScheduleMessageScreen() {
 
 const makeStyles = (c: Palette) => StyleSheet.create({
   screen: { flex: 1, backgroundColor: 'transparent' },
-  header:        { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingTop: HEADER_TOP, paddingBottom: 12, gap: 8, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.border },
+  header:        { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingTop: HEADER_TOP, paddingBottom: 12, gap: 8, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.glassStroke },
   backBtn:       { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
   backTxt:       { color: c.text, fontSize: 26, fontWeight: '600' },
   title:         { color: c.text, fontSize: 22, fontWeight: '800' },
 
   label:         { color: c.textDim, fontSize: 11, fontWeight: '700', letterSpacing: 1.2, marginBottom: 8 },
   who:           { color: c.text, fontSize: 16, fontWeight: '600' },
-  input:         { color: c.text, backgroundColor: c.card, borderColor: c.border, borderWidth: 1, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12, fontSize: 15, minHeight: 100, textAlignVertical: 'top' },
+  input:         { color: c.text, backgroundColor: c.glassSoft, borderColor: c.glassStroke, borderWidth: 1, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12, fontSize: 15, minHeight: 100, textAlignVertical: 'top' },
 
   quickGrid:     { gap: 8 },
-  quickBtn:      { backgroundColor: c.card, borderColor: c.border, borderWidth: 1, borderRadius: 12, paddingVertical: 14, paddingHorizontal: 16 },
+  quickBtn:      { backgroundColor: c.glassSoft, borderColor: c.glassStroke, borderWidth: 1, borderRadius: 12, paddingVertical: 14, paddingHorizontal: 16 },
   quickBtnOff:   { opacity: 0.5 },
   quickLabel:    { color: c.text, fontSize: 15, fontWeight: '700' },
   quickSub:      { color: c.textDim, fontSize: 12, marginTop: 2 },
 
-  customBtn:     { flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: c.card, borderColor: c.border, borderWidth: 1, borderRadius: 12, paddingVertical: 14, paddingHorizontal: 16 },
+  customBtn:     { flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: c.glassSoft, borderColor: c.glassStroke, borderWidth: 1, borderRadius: 12, paddingVertical: 14, paddingHorizontal: 16 },
   customTxt:     { flex: 1, color: c.text, fontSize: 15, fontWeight: '600' },
   scheduleBtn:   { backgroundColor: c.primary, borderRadius: 12, paddingVertical: 14, alignItems: 'center', marginTop: 10 },
   scheduleBtnTxt:{ color: '#fff', fontSize: 15, fontWeight: '800' },

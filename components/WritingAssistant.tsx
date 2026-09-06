@@ -54,7 +54,7 @@ const makeS = (c: Palette) => StyleSheet.create({
   title: { color: c.text, fontSize: 16, fontWeight: 'bold', marginBottom: 8 },
   original: { color: c.textDim, fontSize: 13, marginBottom: 14, fontStyle: 'italic' },
   row: { gap: 10 },
-  modeCard: { backgroundColor: c.bg, borderRadius: 12, padding: 12, width: 150, borderWidth: 1, borderColor: c.border },
+  modeCard: { backgroundColor: c.bg, borderRadius: 12, padding: 12, width: 150, borderWidth: 1, borderColor: c.glassStroke },
   modeIcon: { fontSize: 22, marginBottom: 4 },
   modeLabel: { color: '#00E5FF', fontSize: 12, fontWeight: 'bold', marginBottom: 6 },
   preview: { color: c.textDim, fontSize: 12, lineHeight: 17 },

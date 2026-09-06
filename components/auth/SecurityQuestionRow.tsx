@@ -72,14 +72,14 @@ export function SecurityQuestionRow({
 const makeStyles = (c: Palette) => StyleSheet.create({
   block: { marginBottom: 16 },
   num: { color: c.primary, fontSize: 11, fontWeight: '800', letterSpacing: 1, marginBottom: 6 },
-  select: { flexDirection: 'row', alignItems: 'center', backgroundColor: c.card, borderRadius: 12, borderWidth: 1, borderColor: c.border, paddingHorizontal: 14, paddingVertical: 12 },
+  select: { flexDirection: 'row', alignItems: 'center', backgroundColor: c.glassSoft, borderRadius: 12, borderWidth: 1, borderColor: c.glassStroke, paddingHorizontal: 14, paddingVertical: 12 },
   selectTxt: { flex: 1, color: c.text, fontSize: 14, lineHeight: 19 },
   chev: { color: c.textDim, fontSize: 12, marginLeft: 8 },
-  answer: { marginTop: 8, backgroundColor: c.card, borderRadius: 12, borderWidth: 1, borderColor: c.border, paddingHorizontal: 14, paddingVertical: 12, color: c.text, fontSize: 15 },
+  answer: { marginTop: 8, backgroundColor: c.glassSoft, borderRadius: 12, borderWidth: 1, borderColor: c.glassStroke, paddingHorizontal: 14, paddingVertical: 12, color: c.text, fontSize: 15 },
   backdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'flex-end' },
   sheet: { backgroundColor: c.bg, borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 16, maxHeight: '70%' },
   sheetTitle: { color: c.text, fontSize: 16, fontWeight: '800', marginBottom: 12 },
-  qRow: { paddingVertical: 14, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.border },
-  qActive: { backgroundColor: c.card },
+  qRow: { paddingVertical: 14, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.glassStroke },
+  qActive: { backgroundColor: c.glassSoft },
   qTxt: { color: c.text, fontSize: 14, lineHeight: 19 },
 });

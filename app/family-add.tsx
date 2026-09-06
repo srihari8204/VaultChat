@@ -263,7 +263,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
     flexDirection: 'row', alignItems: 'center', gap: 8,
     margin: 14, paddingHorizontal: 12, height: 44,
     borderRadius: 12, borderWidth: StyleSheet.hairlineWidth,
-    borderColor: c.border, backgroundColor: c.surface,
+    borderColor: c.glassStroke, backgroundColor: c.glassSoft,
   },
   searchInput: { flex: 1, fontSize: 15, color: c.text },
   row: {
@@ -274,7 +274,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   already: { fontSize: 12, color: c.textDim, marginTop: 1 },
   check: {
     width: 24, height: 24, borderRadius: 12,
-    borderWidth: 2, borderColor: c.border,
+    borderWidth: 2, borderColor: c.glassStroke,
     alignItems: 'center', justifyContent: 'center',
   },
   checkSel: { backgroundColor: c.primary, borderColor: c.primary },
@@ -284,7 +284,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   errorTxt: { color: '#FF3C6E', fontSize: 12.5 },
   codeRow: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
-    paddingVertical: 14, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: c.border,
+    paddingVertical: 14, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: c.glassStroke,
   },
   codeTxt: { color: c.primary, fontSize: 13.5, fontWeight: '600' },
   cta: {

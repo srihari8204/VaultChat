@@ -27,7 +27,6 @@ import {
   View,
 } from 'react-native';
 import { SERVER_URL } from '../constants/server';
-import { logoutUser } from './(constants)/authService';
 import { api, getAccessToken } from '../lib/api';
 import { getAutoDownload, setAutoDownload, type AutoDownloadPolicy } from '../lib/mediaPrefs';
 import { getSaveToGallery, setSaveToGallery } from '../lib/galleryExport';
@@ -50,7 +49,6 @@ function useS() {
 }
 import {
   attachmentUrl,
-  deleteAccount,
   exportMyData,
   getSettings,
   listBlocks,
@@ -59,8 +57,6 @@ import {
   type BlockedUser,
   type UserSettings,
 } from '../lib/chatService';
-import { unregisterPushToken } from '../lib/push';
-import { disconnect as disconnectSocket } from '../lib/socket';
 import { AuroraBackground } from '../components/ui';
 
 export default function SettingsScreen() {
@@ -133,7 +129,6 @@ export default function SettingsScreen() {
   const timerLabel = (s?: number) => !s ? 'Off' : s >= 7776000 ? '90 days' : s >= 604800 ? '7 days' : s >= 86400 ? '24 hours' : `${Math.round(s / 60)} min`;
 
   const [exporting, setExporting] = useState(false);
-  const [deleting,  setDeleting]  = useState(false);
 
   // Device MFA (biometric / device PIN) — local + server mirror.
   const [mfaOn,   setMfaOn]   = useState(false);
@@ -174,45 +169,13 @@ export default function SettingsScreen() {
     }
   }, [exporting]);
 
-  // Delete account → confirm twice → server ERASES the identity → sign out.
-  // Not a disable flag any more: the server nulls the encrypted profile, the
-  // MPIN and security-answer hashes, and the published E2EE identity, then drops
-  // every device and session. Say so plainly here, because the copy used to
-  // promise "disable" for something that is now irreversible.
+  // Delete account lives on its own screen (app/delete-account.tsx), not in a
+  // pair of Alerts. Erasing an account is not something a native dialog should
+  // be able to do in two taps, and the consequences need more room than an
+  // alert body gives them — same reasoning as WhatsApp's dedicated screen.
   const onDeleteAccount = useCallback(() => {
-    if (deleting) return;
-    Alert.alert(
-      'Delete account?',
-      'Your profile, PIN, recovery answers and encryption keys are erased from our servers. Messages you already sent stay on the recipients’ devices — they are theirs — but you will no longer be reachable.',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        { text: 'Delete', style: 'destructive', onPress: () => {
-            Alert.alert(
-              'Are you absolutely sure?',
-              'This cannot be undone. Chats, media and local backups on this device are erased too.',
-              [
-                { text: 'Cancel', style: 'cancel' },
-                { text: 'Yes, delete', style: 'destructive', onPress: async () => {
-                    setDeleting(true);
-                    try {
-                      await deleteAccount();
-                      try { await unregisterPushToken(); } catch {}
-                      try { disconnectSocket(); } catch {}
-                      await logoutUser();
-                      router.replace('/onboard' as any);
-                    } catch (e: any) {
-                      setDeleting(false);
-                      Alert.alert('Delete failed', e?.message ?? 'Try again');
-                    }
-                  }
-                },
-              ],
-            );
-          }
-        },
-      ],
-    );
-  }, [deleting, router]);
+    router.push('/delete-account' as any);
+  }, [router]);
 
   const onUnblock = useCallback((u: BlockedUser) => {
     Alert.alert('Unblock?', `${u.name || u.email || 'This user'} will be able to message you again.`, [
@@ -423,12 +386,9 @@ export default function SettingsScreen() {
         <TouchableOpacity
           style={S.deleteBtn}
           onPress={onDeleteAccount}
-          disabled={deleting}
           activeOpacity={0.85}
         >
-          {deleting ? <ActivityIndicator color={colors.danger} /> : (
-            <Text style={S.deleteBtnTxt}>Delete my account</Text>
-          )}
+          <Text style={S.deleteBtnTxt}>Delete my account</Text>
         </TouchableOpacity>
       </View>
 
@@ -504,7 +464,7 @@ function AppearanceSection() {
   return (
     <View style={S.section}>
       <Text style={S.label}>APPEARANCE</Text>
-      <View style={[apS.row, { backgroundColor: colors.surfaceSolid, borderColor: colors.border }]}>
+      <View style={[apS.row, { backgroundColor: colors.surfaceSolid, borderColor: colors.glassStroke }]}>
         {opts.map(o => {
           const active = pref === o.key;
           return (
@@ -575,7 +535,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   title:         { color: c.text, fontSize: 22, fontWeight: '800' },
 
   // Profile card
-  profileCard:   { flexDirection: 'row', alignItems: 'center', gap: 14, marginHorizontal: 16, marginTop: 4, padding: 14, borderRadius: 16, backgroundColor: c.card, borderWidth: StyleSheet.hairlineWidth, borderColor: c.border },
+  profileCard:   { flexDirection: 'row', alignItems: 'center', gap: 14, marginHorizontal: 16, marginTop: 4, padding: 14, borderRadius: 16, backgroundColor: c.glassSoft, borderWidth: StyleSheet.hairlineWidth, borderColor: c.glassStroke },
   profileAvatar: { width: 56, height: 56, borderRadius: 28, backgroundColor: c.primary, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
   profileAvatarImg: { width: '100%', height: '100%' },
   profileAvatarTxt: { color: '#fff', fontSize: 22, fontWeight: '800' },
@@ -583,8 +543,8 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   profileSub:    { color: c.textDim, fontSize: 13, marginTop: 2 },
 
   // Icon-led link rows (grouped card)
-  linkCard:      { backgroundColor: c.card, borderRadius: 16, borderWidth: StyleSheet.hairlineWidth, borderColor: c.border, overflow: 'hidden' },
-  linkRow:       { flexDirection: 'row', alignItems: 'center', gap: 14, paddingHorizontal: 14, paddingVertical: 13, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.border },
+  linkCard:      { backgroundColor: c.glassSoft, borderRadius: 16, borderWidth: StyleSheet.hairlineWidth, borderColor: c.glassStroke, overflow: 'hidden' },
+  linkRow:       { flexDirection: 'row', alignItems: 'center', gap: 14, paddingHorizontal: 14, paddingVertical: 13, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.glassStroke },
   linkIconWrap:  { width: 30, alignItems: 'center', justifyContent: 'center' },
   linkTitle:     { color: c.text, fontSize: 15, fontWeight: '600' },
   linkSub:       { color: c.textDim, fontSize: 12, marginTop: 1 },
@@ -592,12 +552,12 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   section:       { paddingHorizontal: 16, marginTop: 16 },
   label:         { color: c.textDim, fontSize: 11, fontWeight: '700', letterSpacing: 1.2, marginBottom: 8 },
 
-  toggleRow:     { flexDirection: 'row', alignItems: 'center', paddingVertical: 14, gap: 12, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.border },
-  prefRow:       { flexDirection: 'row', alignItems: 'center', paddingVertical: 14, gap: 12, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.border },
+  toggleRow:     { flexDirection: 'row', alignItems: 'center', paddingVertical: 14, gap: 12, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.glassStroke },
+  prefRow:       { flexDirection: 'row', alignItems: 'center', paddingVertical: 14, gap: 12, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.glassStroke },
   toggleTitle:   { color: c.text, fontSize: 15, fontWeight: '600' },
   toggleSub:     { color: c.textDim, fontSize: 12, lineHeight: 16, marginTop: 2 },
 
-  blockRow:      { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 12, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.border },
+  blockRow:      { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 12, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.glassStroke },
   blockAvatar:   { width: 40, height: 40, borderRadius: 20, backgroundColor: c.primary, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
   blockAvatarImg:{ width: '100%', height: '100%' },
   blockAvatarTxt:{ color: '#fff', fontWeight: '700' },
@@ -609,7 +569,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   emptySub:      { color: c.textDim, fontSize: 13, lineHeight: 18, paddingVertical: 16 },
 
   // Data & account section
-  dataBtn:       { marginTop: 8, padding: 12, borderRadius: 12, backgroundColor: c.card, borderWidth: 1, borderColor: c.border, alignItems: 'center' },
+  dataBtn:       { marginTop: 8, padding: 12, borderRadius: 12, backgroundColor: c.glassSoft, borderWidth: 1, borderColor: c.glassStroke, alignItems: 'center' },
   dataBtnTxt:    { color: c.primary, fontWeight: '700' },
   dataHint:      { color: c.textDim, fontSize: 12, lineHeight: 16, marginTop: 6 },
   deleteBtn:     { marginTop: 16, padding: 14, borderRadius: 12, borderWidth: 1, borderColor: c.danger, alignItems: 'center' },

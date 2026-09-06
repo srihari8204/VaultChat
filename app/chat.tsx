@@ -3543,7 +3543,7 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
                         </TouchableOpacity>
                       </TouchableOpacity>
                     ))}
-                    <TouchableOpacity onPress={addMorePhotos} style={{ width: 56, height: 56, borderRadius: 8, borderWidth: 1, borderColor: colors.border, alignItems: 'center', justifyContent: 'center' }}>
+                    <TouchableOpacity onPress={addMorePhotos} style={{ width: 56, height: 56, borderRadius: 8, borderWidth: 1, borderColor: colors.glassStroke, alignItems: 'center', justifyContent: 'center' }}>
                       <Ionicons name="add" size={26} color="#fff" />
                     </TouchableOpacity>
                   </ScrollView>
@@ -3557,7 +3557,7 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
                     style={{ width: 48, height: 48, borderRadius: 24, backgroundColor: cur.viewOnce ? colors.primary : '#1F2937', alignItems: 'center', justifyContent: 'center', opacity: cur.mediaType === 'file' ? 0.4 : 1 }}
                     hitSlop={6}
                   >
-                    <View style={{ width: 24, height: 24, borderRadius: 12, borderWidth: 2, borderColor: colors.border, alignItems: 'center', justifyContent: 'center' }}>
+                    <View style={{ width: 24, height: 24, borderRadius: 12, borderWidth: 2, borderColor: colors.glassStroke, alignItems: 'center', justifyContent: 'center' }}>
                       <Text style={{ color: '#fff', fontSize: 12, fontWeight: '800' }}>1</Text>
                     </View>
                   </TouchableOpacity>
@@ -3576,7 +3576,7 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
                   >
                     {sending ? <ActivityIndicator color="#fff" /> : <Ionicons name="send" size={22} color="#fff" />}
                     {multi && !sending && (
-                      <View style={{ position: 'absolute', top: -4, right: -4, minWidth: 20, height: 20, borderRadius: 10, backgroundColor: colors.danger, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 4, borderWidth: 2, borderColor: colors.border }}>
+                      <View style={{ position: 'absolute', top: -4, right: -4, minWidth: 20, height: 20, borderRadius: 10, backgroundColor: colors.danger, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 4, borderWidth: 2, borderColor: colors.glassStroke }}>
                         <Text style={{ color: '#fff', fontSize: 11, fontWeight: '800' }}>{pendingItems.length}</Text>
                       </View>
                     )}

@@ -109,7 +109,7 @@ export default function GroupInvitationsScreen() {
     const busy = acting === inv.id;
 
     return (
-      <View key={inv.id} style={[st.card, { backgroundColor: colors.card, borderColor: waiting ? accent : colors.border }]}>
+      <View key={inv.id} style={[st.card, { backgroundColor: colors.glassSoft, borderColor: waiting ? accent : colors.border }]}>
         <View style={st.cardTop}>
           <View style={[st.icon, { backgroundColor: accent + '22' }]}>
             <Ionicons name={icon} size={22} color={accent} />
@@ -165,7 +165,7 @@ export default function GroupInvitationsScreen() {
               )}
               {inv.canDecline && (
                 <TouchableOpacity onPress={() => decline(inv)}
-                  style={[st.btn, { backgroundColor: 'transparent', borderWidth: 1, borderColor: colors.border, flex: 0.7 }]}>
+                  style={[st.btn, { backgroundColor: 'transparent', borderWidth: 1, borderColor: colors.glassStroke, flex: 0.7 }]}>
                   <Text style={[st.btnTxt, { color: colors.textDim }]}>
                     {inv.requested ? 'Withdraw' : 'Decline'}
                   </Text>
@@ -196,7 +196,7 @@ export default function GroupInvitationsScreen() {
           }
         >
           {items.length === 0 && (
-            <View style={[st.emptyWrap, { borderColor: colors.border, backgroundColor: brandAlpha(0.06) }]}>
+            <View style={[st.emptyWrap, { borderColor: colors.glassStroke, backgroundColor: brandAlpha(0.06) }]}>
               <Ionicons name="mail-open-outline" size={30} color={colors.primary} />
               <Text style={{ color: colors.text, fontWeight: '700', fontSize: 15, marginTop: 10 }}>
                 No invitations
@@ -210,7 +210,7 @@ export default function GroupInvitationsScreen() {
           {items.map(card)}
 
           {items.length > 0 && (
-            <View style={[st.footer, { borderColor: colors.border }]}>
+            <View style={[st.footer, { borderColor: colors.glassStroke }]}>
               <Ionicons name="lock-closed-outline" size={15} color={colors.textDim} />
               <Text style={{ color: colors.textDim, fontSize: 11.5, flex: 1, lineHeight: 16 }}>
                 Invitations are addressed to your account and cannot be opened by anyone else.

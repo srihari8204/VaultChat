@@ -234,7 +234,7 @@ export default function LocationLockScreen() {
           style={{ flex: 1 }}
         />
 
-        <View style={[st.card, { backgroundColor: colors.card, borderColor: zc }]}>
+        <View style={[st.card, { backgroundColor: colors.glassSoft, borderColor: zc }]}>
           <View style={st.row}>
             <View style={[st.stateDot, { backgroundColor: zc }]} />
             <Text style={[st.stateTxt, { color: zc }]}>{STATE_LABEL[lock.state ?? 'safe']}</Text>
@@ -257,7 +257,7 @@ export default function LocationLockScreen() {
           </Text>
 
           {!lock.killSafe && (
-            <TouchableOpacity onPress={() => enableKillSafe()} style={[st.bgBanner, { borderColor: colors.border }]}>
+            <TouchableOpacity onPress={() => enableKillSafe()} style={[st.bgBanner, { borderColor: colors.glassStroke }]}>
               <Ionicons name="shield-half" size={15} color={colors.primary} />
               <Text style={{ color: colors.text, fontSize: 12.5, flex: 1 }}>
                 Enable background protection (location “all the time”)
@@ -286,11 +286,11 @@ export default function LocationLockScreen() {
                 <Text style={[st.btnTxt, { color: '#fff' }]}>Stop alarm</Text>
               </TouchableOpacity>
             )}
-            <TouchableOpacity onPress={() => router.push('/lock-settings')} style={[st.btn, { borderColor: colors.border, borderWidth: 1 }]}>
+            <TouchableOpacity onPress={() => router.push('/lock-settings')} style={[st.btn, { borderColor: colors.glassStroke, borderWidth: 1 }]}>
               <Ionicons name="options" size={16} color={colors.text} />
               <Text style={[st.btnTxt, { color: colors.text }]}>Alerts</Text>
             </TouchableOpacity>
-            <TouchableOpacity onPress={() => router.push('/lock-history')} style={[st.btn, { borderColor: colors.border, borderWidth: 1 }]}>
+            <TouchableOpacity onPress={() => router.push('/lock-history')} style={[st.btn, { borderColor: colors.glassStroke, borderWidth: 1 }]}>
               <Ionicons name="time" size={16} color={colors.text} />
               <Text style={[st.btnTxt, { color: colors.text }]}>History</Text>
             </TouchableOpacity>
@@ -307,7 +307,7 @@ export default function LocationLockScreen() {
       <ScrollView contentContainerStyle={st.setup} keyboardShouldPersistTaps="handled">
         <Text style={[st.h, { color: colors.text }]}>Lock point</Text>
         <View style={[st.row, { gap: 8 }]}>
-          <TouchableOpacity onPress={useCurrent} style={[st.srcBtn, { borderColor: colors.border }]}>
+          <TouchableOpacity onPress={useCurrent} style={[st.srcBtn, { borderColor: colors.glassStroke }]}>
             <Ionicons name="locate" size={16} color={colors.primary} />
             <Text style={{ color: colors.text, fontSize: 13 }}>Current location</Text>
           </TouchableOpacity>
@@ -320,7 +320,7 @@ export default function LocationLockScreen() {
           </TouchableOpacity>
         </View>
 
-        <View style={[st.searchRow, { borderColor: colors.border, backgroundColor: colors.surface, marginTop: 10 }]}>
+        <View style={[st.searchRow, { borderColor: colors.glassStroke, backgroundColor: colors.glassSoft, marginTop: 10 }]}>
           <Ionicons name="search" size={18} color={colors.text + '99'} />
           <TextInput
             value={query} onChangeText={setQuery} onSubmitEditing={search} returnKeyType="search"
@@ -369,7 +369,7 @@ export default function LocationLockScreen() {
           onPinDrop={(p) => setPoint({ name: 'Dropped pin', coords: p })}
           zoomControls
           imperialScale={settings.units === 'imperial'}
-          style={[st.previewMap, { borderColor: colors.border }]}
+          style={[st.previewMap, { borderColor: colors.glassStroke }]}
         />
 
         <Text style={[st.h, { color: colors.text, marginTop: 22 }]}>Mode</Text>
@@ -405,7 +405,7 @@ export default function LocationLockScreen() {
             }}
             keyboardType="number-pad" placeholder="Custom (10–1000 m)"
             placeholderTextColor={colors.text + '66'}
-            style={[st.customInput, { color: colors.text, borderColor: colors.border, backgroundColor: colors.surface }]}
+            style={[st.customInput, { color: colors.text, borderColor: colors.glassStroke, backgroundColor: colors.glassSoft }]}
           />
           <Text style={{ color: colors.text + '88', fontSize: 13 }}>→ {clampRadius(radius)} m</Text>
         </View>
@@ -421,7 +421,7 @@ export default function LocationLockScreen() {
 
         <Text style={[st.h, { color: colors.text, marginTop: 22 }]}>Alerts</Text>
         <View style={[st.row, { gap: 8 }]}>
-          <TouchableOpacity onPress={() => router.push('/lock-settings')} style={[st.srcBtn, { borderColor: colors.border }]}>
+          <TouchableOpacity onPress={() => router.push('/lock-settings')} style={[st.srcBtn, { borderColor: colors.glassStroke }]}>
             <Ionicons name="options" size={16} color={colors.primary} />
             <Text style={{ color: colors.text, fontSize: 13 }}>
               {[settings.alerts.siren && 'Siren', settings.alerts.vibration && 'Vibration',
@@ -429,7 +429,7 @@ export default function LocationLockScreen() {
                 .filter(Boolean).join(' · ') || 'All off'} · {settings.alerts.graceS}s grace
             </Text>
           </TouchableOpacity>
-          <TouchableOpacity onPress={() => testAlarm()} style={[st.srcBtn, { borderColor: colors.border }]}>
+          <TouchableOpacity onPress={() => testAlarm()} style={[st.srcBtn, { borderColor: colors.glassStroke }]}>
             <Ionicons name="play" size={16} color={colors.primary} />
             <Text style={{ color: colors.text, fontSize: 13 }}>Test</Text>
           </TouchableOpacity>

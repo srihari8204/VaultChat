@@ -89,7 +89,7 @@ export default function GroupPrivacyScreen() {
       <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 40 }}>
 
         {/* live summary — what this group can see right now */}
-        <View style={[st.summary, { backgroundColor: colors.card, borderColor: muted ? colors.border : colors.primary }]}>
+        <View style={[st.summary, { backgroundColor: colors.glassSoft, borderColor: muted ? colors.border : colors.primary }]}>
           <View style={[st.summaryIcon, { backgroundColor: (muted ? colors.textFaint : colors.primary) + '22' }]}>
             <Ionicons name={muted ? 'eye-off' : 'eye'} size={22} color={muted ? colors.textDim : colors.primary} />
           </View>
@@ -126,7 +126,7 @@ export default function GroupPrivacyScreen() {
         })}
 
         <Text style={[st.h, { color: colors.text }]}>Details</Text>
-        <View style={[st.card, { backgroundColor: colors.card, borderColor: colors.border }]}>
+        <View style={[st.card, { backgroundColor: colors.glassSoft, borderColor: colors.glassStroke }]}>
           <View style={st.toggle}>
             <View style={{ flex: 1 }}>
               <Text style={{ color: colors.text, fontWeight: '600', fontSize: 14 }}>Hide my battery</Text>
@@ -134,7 +134,7 @@ export default function GroupPrivacyScreen() {
             </View>
             <Switch value={p.hideBattery} onValueChange={(v) => patch({ hideBattery: v })} trackColor={{ true: colors.primary }} />
           </View>
-          <View style={[st.toggle, { borderTopWidth: StyleSheet.hairlineWidth, borderColor: colors.border }]}>
+          <View style={[st.toggle, { borderTopWidth: StyleSheet.hairlineWidth, borderColor: colors.glassStroke }]}>
             <View style={{ flex: 1 }}>
               <Text style={{ color: colors.text, fontWeight: '600', fontSize: 14 }}>Hide my speed</Text>
               <Text style={{ color: colors.textDim, fontSize: 11.5 }}>
@@ -151,7 +151,7 @@ export default function GroupPrivacyScreen() {
         </View>
 
         <Text style={[st.h, { color: colors.text }]}>Invisible</Text>
-        <View style={[st.card, { backgroundColor: colors.card, borderColor: colors.border }]}>
+        <View style={[st.card, { backgroundColor: colors.glassSoft, borderColor: colors.glassStroke }]}>
           <View style={st.toggle}>
             <View style={{ flex: 1 }}>
               <Text style={{ color: colors.text, fontWeight: '600', fontSize: 14 }}>Go invisible in this group</Text>

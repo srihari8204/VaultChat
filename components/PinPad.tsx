@@ -60,14 +60,14 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   dots: { flexDirection: 'row', gap: 16, marginBottom: 40 },
   // A hairline border is invisible on light backgrounds, so empty dots get a
   // faint fill too — the user must be able to count how many digits landed.
-  dot: { width: 14, height: 14, borderRadius: 7, borderWidth: 1.5, borderColor: c.textDim, backgroundColor: c.surface },
+  dot: { width: 14, height: 14, borderRadius: 7, borderWidth: 1.5, borderColor: c.textDim, backgroundColor: c.glassSoft },
   dotFilled: { backgroundColor: c.primary, borderColor: c.primary },
   dotErr: { borderColor: c.danger },
   pad: { flexDirection: 'row', flexWrap: 'wrap', width: 280, justifyContent: 'center' },
   key: {
     width: 280 / 3 - 10, height: 68, margin: 5, borderRadius: 34,
     alignItems: 'center', justifyContent: 'center',
-    backgroundColor: c.surface, borderWidth: StyleSheet.hairlineWidth, borderColor: c.border,
+    backgroundColor: c.glassSoft, borderWidth: StyleSheet.hairlineWidth, borderColor: c.glassStroke,
   },
   keyTxt: { color: c.text, fontSize: 26, fontWeight: '600' },
 });

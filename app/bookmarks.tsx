@@ -202,7 +202,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   screen: { flex: 1, backgroundColor: 'transparent' },
   center:       { justifyContent: 'center', alignItems: 'center' },
 
-  header:       { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingTop: HEADER_TOP, paddingBottom: 12, gap: 8, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.border },
+  header:       { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingTop: HEADER_TOP, paddingBottom: 12, gap: 8, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.glassStroke },
   backBtn:      { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
   backTxt:      { color: c.text, fontSize: 26, fontWeight: '600' },
   title:        { color: c.text, fontSize: 22, fontWeight: '800' },
@@ -211,8 +211,8 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   emptyTitle:   { color: c.text, fontSize: 16, fontWeight: '700', marginBottom: 8, textAlign: 'center' },
   emptySub:     { color: c.textDim, fontSize: 13, lineHeight: 18, textAlign: 'center' },
 
-  row:          { flexDirection: 'row', alignItems: 'flex-start', gap: 12, paddingHorizontal: 20, paddingVertical: 14, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.border },
-  iconBox:      { width: 36, height: 36, borderRadius: 18, backgroundColor: c.card, alignItems: 'center', justifyContent: 'center' },
+  row:          { flexDirection: 'row', alignItems: 'flex-start', gap: 12, paddingHorizontal: 20, paddingVertical: 14, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.glassStroke },
+  iconBox:      { width: 36, height: 36, borderRadius: 18, backgroundColor: c.glassSoft, alignItems: 'center', justifyContent: 'center' },
   iconTxt:      { fontSize: 18 },
   rowChat:      { color: c.text, fontSize: 14, fontWeight: '700' },
   rowContent:   { color: c.text, fontSize: 13, marginTop: 4 },

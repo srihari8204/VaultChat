@@ -2053,7 +2053,7 @@ export default function FamilySpaceScreen() {
               })}
             </View>
             <TextInput value={note} onChangeText={setNote} placeholder="Add a note (optional)" placeholderTextColor={colors.textFaint}
-              style={[st.noteInput, { color: colors.text, borderColor: colors.border, backgroundColor: colors.surface }]} />
+              style={[st.noteInput, { color: colors.text, borderColor: colors.glassStroke, backgroundColor: colors.glassSoft }]} />
             <TouchableOpacity
               onPress={() => picked && sendCheckin(picked)}
               disabled={!picked}
@@ -2085,7 +2085,7 @@ export default function FamilySpaceScreen() {
             <TextInput
               value={announceTxt} onChangeText={setAnnounceTxt} multiline
               placeholder="What should everyone know?" placeholderTextColor={colors.textFaint}
-              style={[st.noteInput, { color: colors.text, borderColor: colors.border, backgroundColor: colors.surface, height: 96, paddingTop: 12 }]}
+              style={[st.noteInput, { color: colors.text, borderColor: colors.glassStroke, backgroundColor: colors.glassSoft, height: 96, paddingTop: 12 }]}
               maxLength={500}
             />
             <TouchableOpacity
@@ -2135,7 +2135,7 @@ export default function FamilySpaceScreen() {
             {canManage && (
               <View style={{ flexDirection: 'row', gap: 8, marginBottom: 4 }}>
                 <TextInput value={renameTxt} onChangeText={setRenameTxt} placeholder="Rename circle" placeholderTextColor={colors.textFaint}
-                  style={[st.noteInput, { flex: 1, marginTop: 0, color: colors.text, borderColor: colors.border, backgroundColor: colors.surface }]}
+                  style={[st.noteInput, { flex: 1, marginTop: 0, color: colors.text, borderColor: colors.glassStroke, backgroundColor: colors.glassSoft }]}
                   returnKeyType="done" onSubmitEditing={doRename} />
                 <TouchableOpacity onPress={doRename} disabled={!renameTxt.trim() || busy}
                   style={[st.saveBtn, { backgroundColor: renameTxt.trim() ? colors.primary : colors.border }]}>

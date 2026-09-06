@@ -1818,8 +1818,11 @@ export async function revokeAllOtherSessions(): Promise<{ revoked: number }> {
 }
 
 // ─── GDPR export / account delete (Day 15) ──────────────────────────
-export async function deleteAccount(): Promise<void> {
-  await api('/user/account', { method: 'DELETE' });
+// `reason` is the optional "why are you leaving" answer, same as WhatsApp's.
+// The server logs it as product feedback and stores nothing keyed to the
+// account it is about to erase.
+export async function deleteAccount(reason?: string): Promise<void> {
+  await api('/user/account', { method: 'DELETE', json: reason ? { reason } : undefined });
 }
 
 // Returns the export as a raw JSON string (consumer can write it to disk

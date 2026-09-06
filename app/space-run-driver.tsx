@@ -580,14 +580,14 @@ const styles = (c: Palette) => StyleSheet.create({
   progressTrack: { height: 4, backgroundColor: c.border, marginHorizontal: 16, borderRadius: 2 },
   progressFill: { height: 4, backgroundColor: c.primary, borderRadius: 2 },
   body: { padding: 16, paddingBottom: 90, gap: 10 },
-  notice: { flexDirection: 'row', gap: 8, alignItems: 'center', padding: 12, borderRadius: 10, backgroundColor: c.card },
+  notice: { flexDirection: 'row', gap: 8, alignItems: 'center', padding: 12, borderRadius: 10, backgroundColor: c.glassSoft },
   noticeText: { color: c.text, flex: 1 },
   stopLabel: { color: c.textDim, fontSize: 12, letterSpacing: 1, marginTop: 4 },
   stopName: { color: c.text, fontSize: 26, fontWeight: '700', marginBottom: 8 },
   // Rows are tall on purpose: this is tapped one-handed, at a kerb.
   rider: {
     flexDirection: 'row', alignItems: 'center', gap: 10,
-    backgroundColor: c.card, borderRadius: 12, padding: 14, minHeight: 68,
+    backgroundColor: c.glassSoft, borderRadius: 12, padding: 14, minHeight: 68,
   },
   riderDone: { opacity: 0.6 },
   riderName: { color: c.text, fontSize: 18, fontWeight: '600' },
@@ -620,7 +620,7 @@ const styles = (c: Palette) => StyleSheet.create({
   modal: { width: '100%', backgroundColor: c.bg, borderRadius: 16, padding: 20, gap: 10 },
   modalTitle: { color: c.text, fontSize: 18, fontWeight: '700' },
   codeInput: {
-    borderWidth: 1, borderColor: c.border, borderRadius: 10, padding: 14,
+    borderWidth: 1, borderColor: c.glassStroke, borderRadius: 10, padding: 14,
     fontSize: 24, letterSpacing: 6, textAlign: 'center', color: c.text,
   },
   modalRow: { flexDirection: 'row', justifyContent: 'flex-end', gap: 10, marginTop: 4 },

@@ -146,7 +146,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   title: { color: c.text, fontSize: 24, fontWeight: '900' },
   sub: { color: c.textDim, fontSize: 14, marginTop: 8, textAlign: 'center' },
   qLabel: { color: c.textDim, fontSize: 13, fontWeight: '600', marginBottom: 6, lineHeight: 18 },
-  input: { minHeight: 50, borderRadius: 12, borderWidth: 1, borderColor: c.border, backgroundColor: c.card, paddingHorizontal: 14, paddingVertical: 12, color: c.text, fontSize: 15 },
+  input: { minHeight: 50, borderRadius: 12, borderWidth: 1, borderColor: c.glassStroke, backgroundColor: c.glassSoft, paddingHorizontal: 14, paddingVertical: 12, color: c.text, fontSize: 15 },
   error: { color: c.danger, fontSize: 13, marginTop: 6, textAlign: 'center', fontWeight: '600' },
   cta: { marginTop: 12, height: 56, borderRadius: 16, backgroundColor: c.primary, alignItems: 'center', justifyContent: 'center' },
   ctaOff: { opacity: 0.4 },

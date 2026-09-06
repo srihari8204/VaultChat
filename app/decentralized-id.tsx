@@ -87,7 +87,7 @@ export default function DecentralizedIDScreen() {
     <>
       <Stack.Screen options={{
         title: 'Decentralised ID',
-        headerStyle: { backgroundColor: c.card },
+        headerStyle: { backgroundColor: c.glassSoft },
         headerTintColor: '#1F2937',
       }} />
       <View style={st.screen}>

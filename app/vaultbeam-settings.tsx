@@ -23,13 +23,13 @@ export default function VaultBeamSettings() {
   const auto = s.mode === 'auto';
 
   const C = colors as any;
-  const card = { backgroundColor: C.surfaceSolid ?? C.surface, borderColor: C.border };
+  const card = { backgroundColor: C.surfaceSolid ?? C.surface, borderColor: C.glassStroke };
 
   return (
     <View style={[styles.screen, { backgroundColor: C.bg }]}>
       <Stack.Screen options={{ headerShown: false }} />
       <StatusBar barStyle={C.text === '#FFFFFF' ? 'light-content' : 'dark-content'} />
-      <View style={[styles.header, { borderBottomColor: C.border }]}>
+      <View style={[styles.header, { borderBottomColor: C.glassStroke }]}>
         <TouchableOpacity onPress={() => router.back()} hitSlop={10} style={styles.hBtn}>
           <Ionicons name="arrow-back" size={22} color={C.text} />
         </TouchableOpacity>
@@ -38,7 +38,7 @@ export default function VaultBeamSettings() {
 
       <ScrollView contentContainerStyle={styles.body} showsVerticalScrollIndicator={false}>
         {!VB_AUTODOWNLOAD && (
-          <View style={[styles.notice, { backgroundColor: C.surface, borderColor: C.border }]}>
+          <View style={[styles.notice, { backgroundColor: C.glassSoft, borderColor: C.glassStroke }]}>
             <Ionicons name="information-circle-outline" size={16} color={C.textDim} />
             <Text style={[styles.noticeTxt, { color: C.textDim }]}>Auto-download is disabled in this build. These preferences are saved and take effect when it’s enabled.</Text>
           </View>

@@ -218,13 +218,13 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   searchWrap: {
     flexDirection: 'row', alignItems: 'center', gap: 8, marginHorizontal: 16,
     paddingHorizontal: 12, height: 40, borderRadius: 12,
-    backgroundColor: c.card, borderWidth: StyleSheet.hairlineWidth, borderColor: c.border,
+    backgroundColor: c.glassSoft, borderWidth: StyleSheet.hairlineWidth, borderColor: c.glassStroke,
   },
   searchInput: { flex: 1, color: c.text, fontSize: 14, padding: 0 },
   chipRow: { gap: 8, paddingHorizontal: 16, paddingVertical: 12 },
   chip: {
     flexDirection: 'row', alignItems: 'center', gap: 6, minHeight: 30, paddingHorizontal: 12,
-    borderRadius: 15, borderWidth: StyleSheet.hairlineWidth, borderColor: c.border,
+    borderRadius: 15, borderWidth: StyleSheet.hairlineWidth, borderColor: c.glassStroke,
   },
   chipOn: { backgroundColor: brandAlpha(0.16), borderColor: brandAlpha(0.5) },
   chipTxt: { color: c.textDim, fontSize: 13, fontWeight: '600' },
@@ -236,7 +236,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   row: {
     flexDirection: 'row', alignItems: 'center', gap: 12,
     paddingHorizontal: 16, paddingVertical: 12,
-    borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.border,
+    borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.glassStroke,
   },
   rowIcon: {
     width: 40, height: 40, borderRadius: 10, alignItems: 'center', justifyContent: 'center',
