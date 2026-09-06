@@ -1500,28 +1500,14 @@ func userExport(w http.ResponseWriter, r *http.Request) {
 	}
 	rows.Close()
 
+	// Reactions are no longer a table. Migration 056 dropped message_reactions
+	// when reactions became E2EE reference-messages ({reactsTo, op, emoji}
+	// sealed inside an ordinary message), so this query had been failing with
+	// 42P01 and taking the WHOLE export down with it — "Export my data" was a
+	// 500 against any migrated database. The reactions are not missing from the
+	// export: they are in `messages`, sealed, like every other message. The key
+	// stays, empty, for schemaVersion 1 consumers.
 	reactions := []map[string]any{}
-	rows, err = db.Pool.Query(ctx,
-		`SELECT message_id, emoji, created_at
-	       FROM message_reactions WHERE user_id = $1`, user.ID)
-	if err != nil {
-		fail()
-		return
-	}
-	for rows.Next() {
-		var messageID int64
-		var emoji string
-		var createdAt time.Time
-		if err := rows.Scan(&messageID, &emoji, &createdAt); err != nil {
-			rows.Close()
-			fail()
-			return
-		}
-		reactions = append(reactions, map[string]any{
-			"messageId": strconv.FormatInt(messageID, 10), "emoji": emoji, "createdAt": httpx.JSTime(createdAt),
-		})
-	}
-	rows.Close()
 
 	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="vaultchat-export-%s.json"`, user.ID))
 	httpx.JSON(w, 200, map[string]any{
@@ -1632,8 +1618,6 @@ func userAccountDelete(w http.ResponseWriter, r *http.Request) {
 			`DELETE FROM story_keys           WHERE viewer_id   = $1`,
 			`DELETE FROM status_audience      WHERE owner_id    = $1`,
 			`DELETE FROM user_backups         WHERE user_id     = $1`, // server-side chat backup
-			`DELETE FROM vaultlens_face       WHERE user_id     = $1`, // face template — biometric, goes first-class
-			`DELETE FROM vaultlens_generation WHERE user_id     = $1`,
 			`DELETE FROM security_events      WHERE user_id     = $1`, // their encrypted audit chain
 			`DELETE FROM user_blocks          WHERE blocker_id  = $1`,
 			`DELETE FROM ghost_mode           WHERE owner_id    = $1`,
@@ -1646,7 +1630,6 @@ func userAccountDelete(w http.ResponseWriter, r *http.Request) {
 			`DELETE FROM sync_codes           WHERE initiator_id = $1`,
 			`DELETE FROM group_sender_keys    WHERE sender_id   = $1 OR recipient_id = $1`,
 			`DELETE FROM channel_subscribers  WHERE user_id     = $1`,
-			`DELETE FROM message_reactions    WHERE user_id     = $1`,
 			`DELETE FROM poll_votes           WHERE user_id     = $1`,
 			`DELETE FROM family_relations     WHERE viewer_id   = $1`,
 		} {
