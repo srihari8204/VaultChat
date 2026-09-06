@@ -3,7 +3,7 @@
 // User CANNOT dismiss this — the app is completely locked.
 // All keys have already been wiped before this screen appears.
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useMemo } from 'react';
 import {
   View,
   Text,
@@ -15,7 +15,8 @@ import {
 } from 'react-native';
 import { useLocalSearchParams } from 'expo-router';
 import { ThreatDetail } from '../services/securityService';
-import { Aurora } from '../constants/theme';
+import type { Palette } from '../constants/theme';
+import { useColors } from '../lib/theme';
 
 // Threat type to human-readable label mapping
 const THREAT_LABELS: Record<string, { label: string; icon: string; desc: string }> = {
@@ -62,6 +63,8 @@ const THREAT_LABELS: Record<string, { label: string; icon: string; desc: string 
 };
 
 export default function BlockedScreen() {
+  const c = useColors();
+  const styles = useMemo(() => makeStyles(c), [c]);
   const params = useLocalSearchParams<{ threats: string }>();
   const [threats, setThreats] = useState<ThreatDetail[]>([]);
 
@@ -188,10 +191,10 @@ export default function BlockedScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (c: Palette) => StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: Aurora.card,
+    backgroundColor: c.card,
   },
   topBar: {
     backgroundColor: '#FF4D6D',
@@ -202,7 +205,7 @@ const styles = StyleSheet.create({
   topBarText: {
     fontSize: 13,
     fontWeight: 'bold',
-    color: Aurora.text,
+    color: c.text,
     letterSpacing: 2,
   },
   scroll: {
@@ -214,7 +217,7 @@ const styles = StyleSheet.create({
     width: 88,
     height: 88,
     borderRadius: 44,
-    backgroundColor: '#FEE2E2',
+    backgroundColor: 'rgba(239,68,68,0.13)',
     borderWidth: 2,
     borderColor: '#FF4D6D',
     justifyContent: 'center',
@@ -228,13 +231,13 @@ const styles = StyleSheet.create({
   title: {
     fontSize: 24,
     fontWeight: 'bold',
-    color: Aurora.text,
+    color: c.text,
     marginBottom: 12,
     textAlign: 'center',
   },
   subtitle: {
     fontSize: 14,
-    color: Aurora.textDim,
+    color: c.textDim,
     textAlign: 'center',
     lineHeight: 22,
     marginBottom: 24,
@@ -253,7 +256,7 @@ const styles = StyleSheet.create({
     letterSpacing: 1,
   },
   threatCard: {
-    backgroundColor: '#FEF2F2',
+    backgroundColor: 'rgba(239,68,68,0.10)',
     borderWidth: 0.5,
     borderColor: '#FF4D6D44',
     borderRadius: 10,
@@ -276,30 +279,30 @@ const styles = StyleSheet.create({
   },
   threatDesc: {
     fontSize: 13,
-    color: Aurora.textFaint,
+    color: c.textFaint,
     lineHeight: 20,
     marginBottom: 4,
   },
   threatRaw: {
     fontSize: 10,
-    color: Aurora.textDim,
+    color: c.textDim,
     fontFamily: 'monospace',
   },
   infoBox: {
     width: '100%',
-    backgroundColor: Aurora.bg,
+    backgroundColor: c.bg,
     borderRadius: 12,
     borderWidth: 0.5,
-    borderColor: Aurora.border,
+    borderColor: c.border,
     padding: 16,
     marginBottom: 16,
   },
   stepsBox: {
     width: '100%',
-    backgroundColor: Aurora.bg,
+    backgroundColor: c.bg,
     borderRadius: 12,
     borderWidth: 0.5,
-    borderColor: Aurora.border,
+    borderColor: c.border,
     padding: 16,
     marginBottom: 24,
   },
@@ -313,7 +316,7 @@ const styles = StyleSheet.create({
   },
   infoText: {
     fontSize: 13,
-    color: Aurora.textDim,
+    color: c.textDim,
     lineHeight: 21,
     marginBottom: 10,
   },
@@ -327,7 +330,7 @@ const styles = StyleSheet.create({
     width: 22,
     height: 22,
     borderRadius: 11,
-    backgroundColor: '#D1FAE5',
+    backgroundColor: 'rgba(34,197,94,0.14)',
     borderWidth: 1,
     borderColor: '#00D4AA',
     justifyContent: 'center',
@@ -342,26 +345,26 @@ const styles = StyleSheet.create({
   stepText: {
     flex: 1,
     fontSize: 13,
-    color: Aurora.textFaint,
+    color: c.textFaint,
     lineHeight: 20,
   },
   supportBtn: {
-    backgroundColor: Aurora.surfaceSolid,
+    backgroundColor: c.surfaceSolid,
     borderWidth: 1,
-    borderColor: Aurora.border,
+    borderColor: c.border,
     borderRadius: 10,
     paddingVertical: 14,
     paddingHorizontal: 32,
     marginBottom: 24,
   },
   supportBtnText: {
-    color: Aurora.textDim,
+    color: c.textDim,
     fontSize: 14,
     fontWeight: 'bold',
   },
   footer: {
     fontSize: 11,
-    color: Aurora.textFaint,
+    color: c.textFaint,
     textAlign: 'center',
   },
 });

@@ -1,9 +1,11 @@
 // components/WritingAssistant.tsx
 // Rephrase, shorten, make formal/casual/emoji
 
-import React from 'react';
+import React, { useMemo } from 'react';
 import { Text, TouchableOpacity, StyleSheet, ScrollView, Pressable } from 'react-native';
 import { rewriteMessage, WriteMode } from '../services/aiService';
+import type { Palette } from '../constants/theme';
+import { useColors } from '../lib/theme';
 
 const MODES: { label: string; mode: WriteMode; icon: string }[] = [
   { label: 'Formal',  mode: 'formal',  icon: '👔' },
@@ -21,6 +23,8 @@ interface Props {
 }
 
 export default function WritingAssistant({ text, visible, onClose, onApply }: Props) {
+  const c = useColors();
+  const s = useMemo(() => makeS(c), [c]);
   if (!visible || !text.trim()) return null;
   return (
     <Pressable style={s.overlay} onPress={onClose}>
@@ -44,14 +48,14 @@ export default function WritingAssistant({ text, visible, onClose, onApply }: Pr
   );
 }
 
-const s = StyleSheet.create({
+const makeS = (c: Palette) => StyleSheet.create({
   overlay: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: '#00000088', justifyContent: 'flex-end' },
-  sheet:   { backgroundColor: '#0E0E20', borderTopLeftRadius: 22, borderTopRightRadius: 22, padding: 18, paddingBottom: 36 },
-  title:   { color: '#E0E0F0', fontSize: 16, fontWeight: 'bold', marginBottom: 8 },
-  original:{ color: '#555', fontSize: 13, marginBottom: 14, fontStyle: 'italic' },
-  row:     { gap: 10 },
-  modeCard:{ backgroundColor: '#111127', borderRadius: 12, padding: 12, width: 150, borderWidth: 1, borderColor: '#222' },
-  modeIcon:{ fontSize: 22, marginBottom: 4 },
-  modeLabel:{ color: '#00E5FF', fontSize: 12, fontWeight: 'bold', marginBottom: 6 },
-  preview: { color: '#A0A0C0', fontSize: 12, lineHeight: 17 },
+  sheet: { backgroundColor: c.bg, borderTopLeftRadius: 22, borderTopRightRadius: 22, padding: 18, paddingBottom: 36 },
+  title: { color: c.text, fontSize: 16, fontWeight: 'bold', marginBottom: 8 },
+  original: { color: c.textDim, fontSize: 13, marginBottom: 14, fontStyle: 'italic' },
+  row: { gap: 10 },
+  modeCard: { backgroundColor: c.bg, borderRadius: 12, padding: 12, width: 150, borderWidth: 1, borderColor: c.border },
+  modeIcon: { fontSize: 22, marginBottom: 4 },
+  modeLabel: { color: '#00E5FF', fontSize: 12, fontWeight: 'bold', marginBottom: 6 },
+  preview: { color: c.textDim, fontSize: 12, lineHeight: 17 },
 });

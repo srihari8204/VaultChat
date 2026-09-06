@@ -2,8 +2,10 @@
 // Message formatting toolbar — Bold, Italic, Strikethrough, Code, Monospace
 // Wraps selected text or inserts markers at cursor position
 
-import React from 'react';
+import React, { useMemo } from 'react';
 import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import type { Palette } from '../constants/theme';
+import { useColors } from '../lib/theme';
 
 interface Props {
   inputText: string;
@@ -20,6 +22,8 @@ const FORMATS = [
 ];
 
 export default function FormattingToolbar({ inputText, onChangeText, visible }: Props) {
+  const c = useColors();
+  const s = useMemo(() => makeS(c), [c]);
   if (!visible) return null;
 
   const applyFormat = (symbol: string) => {
@@ -64,12 +68,12 @@ export default function FormattingToolbar({ inputText, onChangeText, visible }: 
   );
 }
 
-const s = StyleSheet.create({
+const makeS = (c: Palette) => StyleSheet.create({
   container: {
     flexDirection: 'row',
-    backgroundColor: '#0A0E1A',
+    backgroundColor: c.bg,
     borderTopWidth: 1,
-    borderTopColor: '#1A1A30',
+    borderTopColor: c.border,
     paddingHorizontal: 8,
     paddingVertical: 6,
     gap: 4,
@@ -86,7 +90,7 @@ const s = StyleSheet.create({
     borderColor: 'rgba(255,255,255,0.08)',
   },
   label: {
-    color: '#E0E0F0',
+    color: c.text,
     fontSize: 14,
     fontWeight: '700',
   },

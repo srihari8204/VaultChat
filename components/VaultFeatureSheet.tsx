@@ -1,9 +1,11 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, Modal,
   Pressable, ScrollView
 } from 'react-native';
 import { useRouter } from 'expo-router';
+import type { Palette } from '../constants/theme';
+import { useColors } from '../lib/theme';
 
 interface Props {
   visible: boolean;
@@ -45,6 +47,8 @@ const OPTIONS = [
 ];
 
 export default function VaultFeatureSheet({ visible, onClose, chatId }: Props) {
+  const c = useColors();
+  const s = useMemo(() => makeS(c), [c]);
   const router = useRouter();
 
   const open = (route: string) => {
@@ -117,31 +121,31 @@ export default function VaultFeatureSheet({ visible, onClose, chatId }: Props) {
   );
 }
 
-const s = StyleSheet.create({
-  backdrop:    { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.65)' },
-  sheet:       { position: 'absolute', bottom: 0, left: 0, right: 0,
-                 backgroundColor: '#0D1B2E', borderTopLeftRadius: 24, borderTopRightRadius: 24,
+const makeS = (c: Palette) => StyleSheet.create({
+  backdrop: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.65)' },
+  sheet: { position: 'absolute', bottom: 0, left: 0, right: 0,
+                 backgroundColor: c.bg, borderTopLeftRadius: 24, borderTopRightRadius: 24,
                  borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)', maxHeight: '78%' },
-  handle:      { width: 40, height: 4, borderRadius: 2, backgroundColor: 'rgba(255,255,255,0.2)',
+  handle: { width: 40, height: 4, borderRadius: 2, backgroundColor: 'rgba(255,255,255,0.2)',
                  alignSelf: 'center', marginTop: 10, marginBottom: 6 },
-  header:      { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 18, paddingBottom: 14 },
-  headerIcon:  { width: 34, height: 34, borderRadius: 10, backgroundColor: 'rgba(74,159,255,0.15)',
+  header: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 18, paddingBottom: 14 },
+  headerIcon: { width: 34, height: 34, borderRadius: 10, backgroundColor: 'rgba(74,159,255,0.15)',
                  alignItems: 'center', justifyContent: 'center' },
   headerTitle: { fontSize: 16, fontWeight: '900', color: '#fff' },
-  headerSub:   { fontSize: 9, color: 'rgba(255,255,255,0.35)', marginTop: 1 },
-  closeBtn:    { width: 28, height: 28, borderRadius: 14,
+  headerSub: { fontSize: 9, color: 'rgba(255,255,255,0.35)', marginTop: 1 },
+  closeBtn: { width: 28, height: 28, borderRadius: 14,
                  backgroundColor: 'rgba(255,255,255,0.07)', alignItems: 'center', justifyContent: 'center' },
-  optCard:     { flexDirection: 'row', alignItems: 'flex-start', gap: 12, padding: 14,
+  optCard: { flexDirection: 'row', alignItems: 'flex-start', gap: 12, padding: 14,
                  borderRadius: 16, backgroundColor: 'rgba(255,255,255,0.03)',
                  borderWidth: 1, marginBottom: 10 },
-  optIcon:     { width: 48, height: 48, borderRadius: 13, alignItems: 'center',
+  optIcon: { width: 48, height: 48, borderRadius: 13, alignItems: 'center',
                  justifyContent: 'center', borderWidth: 1, flexShrink: 0 },
   optTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 7, marginBottom: 3 },
-  optTitle:    { fontSize: 14, fontWeight: '800', color: '#fff' },
-  badge:       { paddingHorizontal: 6, paddingVertical: 2, borderRadius: 5, borderWidth: 1 },
-  badgeTxt:    { fontSize: 8, fontWeight: '700' },
-  optDesc:     { fontSize: 11, color: 'rgba(255,255,255,0.4)', lineHeight: 16, marginBottom: 8 },
-  tagRow:      { flexDirection: 'row', flexWrap: 'wrap', gap: 5 },
-  tag:         { paddingHorizontal: 7, paddingVertical: 3, borderRadius: 5, borderWidth: 1 },
-  tagTxt:      { fontSize: 9, fontWeight: '600' },
+  optTitle: { fontSize: 14, fontWeight: '800', color: '#fff' },
+  badge: { paddingHorizontal: 6, paddingVertical: 2, borderRadius: 5, borderWidth: 1 },
+  badgeTxt: { fontSize: 8, fontWeight: '700' },
+  optDesc: { fontSize: 11, color: 'rgba(255,255,255,0.4)', lineHeight: 16, marginBottom: 8 },
+  tagRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 5 },
+  tag: { paddingHorizontal: 7, paddingVertical: 3, borderRadius: 5, borderWidth: 1 },
+  tagTxt: { fontSize: 9, fontWeight: '600' },
 });

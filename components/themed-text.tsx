@@ -1,6 +1,7 @@
 import { StyleSheet, Text, type TextProps } from 'react-native';
 
 import { useThemeColor } from '@/hooks/use-theme-color';
+import { BRAND_ACCENT } from '../constants/theme';
 
 export type ThemedTextProps = TextProps & {
   lightColor?: string;
@@ -55,6 +56,7 @@ const styles = StyleSheet.create({
   link: {
     lineHeight: 30,
     fontSize: 16,
-    color: '#0a7ea4',
+    // Brand accent, not the Expo template's teal.
+    color: BRAND_ACCENT,
   },
 });

@@ -1072,11 +1072,11 @@ const mdStyles = (c: Palette) => ({
 const makeStyles = (c: Palette) => StyleSheet.create({
   screen: { flex: 1, backgroundColor: 'transparent' },
   header: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingTop: Platform.OS === 'ios' ? 56 : 44, paddingBottom: 14, paddingHorizontal: 16, backgroundColor: c.card, borderBottomWidth: 1, borderBottomColor: c.border },
-  backBtn: { width: 36, height: 36, borderRadius: 18, backgroundColor: '#2A2D3A', alignItems: 'center', justifyContent: 'center' },
+  backBtn: { width: 36, height: 36, borderRadius: 18, backgroundColor: c.surfaceSolid, alignItems: 'center', justifyContent: 'center' },
   backTxt: { fontSize: 18, color: c.text },
   headerTitle: { fontSize: 16, fontWeight: '700', color: c.text },
   headerSub: { fontSize: 10, color: c.textDim, marginTop: 1 },
-  trashBtn: { width: 36, height: 36, borderRadius: 18, backgroundColor: '#2A2D3A', alignItems: 'center', justifyContent: 'center' },
+  trashBtn: { width: 36, height: 36, borderRadius: 18, backgroundColor: c.surfaceSolid, alignItems: 'center', justifyContent: 'center' },
 
   searchBar: { flexDirection: 'row', alignItems: 'center', gap: 8, margin: 12, backgroundColor: c.card, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 8, borderWidth: 1, borderColor: c.border },
   searchIcon: { fontSize: 16 },
@@ -1098,7 +1098,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   noteTitle: { flex: 1, fontSize: 15, fontWeight: '700', color: c.text },
   notePreview: { fontSize: 13, color: c.textDim, lineHeight: 18, marginBottom: 8 },
   noteFooter: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  noteDate: { fontSize: 11, color: '#4B5563' },
+  noteDate: { fontSize: 11, color: c.textDim },
   tagRow: { flexDirection: 'row', gap: 4 },
   tag: { borderRadius: 6, paddingHorizontal: 8, paddingVertical: 2 },
   tagTxt: { fontSize: 10, fontWeight: '600' },
@@ -1146,7 +1146,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   imgViewerImg: { width: '100%', height: '80%' },
   imgViewerClose: { position: 'absolute', bottom: 50, paddingHorizontal: 28, paddingVertical: 12, backgroundColor: 'rgba(255,255,255,0.15)', borderRadius: 24 },
   colorDot: { width: 28, height: 28, borderRadius: 14 },
-  colorDotActive: { borderWidth: 3, borderColor: '#FFF' },
+  colorDotActive: { borderWidth: 3, borderColor: c.border },
   tagInput: { backgroundColor: c.card, borderRadius: 10, padding: 10, color: c.text, fontSize: 13, marginTop: 8, borderWidth: 1, borderColor: c.border },
 
   edToggle: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: c.border },

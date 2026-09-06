@@ -5,12 +5,13 @@
 // U5: vector icons (Ionicons) instead of emoji + Aurora design tokens.
 
 import { Tabs } from 'expo-router';
-import React from 'react';
+import React, { useMemo } from 'react';
 import { StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
-import { Aurora } from '../../constants/theme';
+import type { Palette } from '../../constants/theme';
+import { useColors } from '../../lib/theme';
 import { AppText } from '../../components/ui/Text';
 import { GlassView } from '../../components/ui/GlassView';
 import { useUnreadTotal } from '../../lib/unreadStore';
@@ -29,24 +30,28 @@ const ICONS: Record<string, { on: IoniconName; off: IoniconName }> = {
 
 // Prominent raised center button for Mini Apps (the eye-catcher).
 function MiniCenterIcon({ focused }: { focused: boolean }) {
+  const c = useColors();
+  const styles = useStyles(c);
   return (
     <View style={styles.centerWrap} pointerEvents="none">
       <LinearGradient
-        colors={[Aurora.accentLight, Aurora.accentDeep]}
+        colors={[c.accentLight, c.accentDeep]}
         start={{ x: 0, y: 0 }}
         end={{ x: 1, y: 1 }}
         style={[styles.centerBtn, focused && styles.centerBtnActive]}
       >
         <Ionicons name="grid" size={24} color="#fff" />
       </LinearGradient>
-      <AppText variant="tiny" color={focused ? Aurora.accentLight : Aurora.textFaint} style={styles.centerLabel}>Apps</AppText>
+      <AppText variant="tiny" color={focused ? c.accentOn : c.textFaint} style={styles.centerLabel}>Apps</AppText>
     </View>
   );
 }
 
 function TabIcon({ tab, label, focused }: { tab: keyof typeof ICONS; label: string; focused: boolean }) {
+  const c = useColors();
+  const styles = useStyles(c);
   const g = ICONS[tab];
-  const color = focused ? Aurora.accentLight : Aurora.textFaint;
+  const color = focused ? c.accentOn : c.textFaint;
   const unread = useUnreadTotal();
   const badge = tab === 'chats' && unread > 0;
   return (
@@ -73,6 +78,8 @@ export default function TabLayout() {
   // — reported with a photo showing exactly that, and it is why the row looked
   // half cut off. insets.bottom is 0 on hardware-button devices, so this changes
   // nothing on those and only adds the space that is genuinely reserved.
+  const c = useColors();
+  const styles = useStyles(c);
   const insets = useSafeAreaInsets();
   const tabBar = [
     styles.tabBar,
@@ -84,8 +91,8 @@ export default function TabLayout() {
         headerShown: false,
         tabBarStyle: tabBar,
         tabBarShowLabel: false,
-        tabBarActiveTintColor: Aurora.accentLight,
-        tabBarInactiveTintColor: Aurora.textFaint,
+        tabBarActiveTintColor: c.accentOn,
+        tabBarInactiveTintColor: c.textFaint,
         tabBarItemStyle: styles.tabItem,
         // Real translucency, and the only blur pass on the screen. Content
         // scrolls underneath it, which is the entire point of the treatment.
@@ -104,7 +111,9 @@ export default function TabLayout() {
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = (c: Palette) => useMemo(() => makeStyles(c), [c]);
+
+const makeStyles = (c: Palette) => StyleSheet.create({
   tabBar: {
     position: 'absolute',
     left: 16,
@@ -135,15 +144,15 @@ const styles = StyleSheet.create({
     width: 54, height: 54, borderRadius: 27,
     alignItems: 'center', justifyContent: 'center',
     marginTop: -24,                       // pop above the glass pill
-    borderWidth: 1, borderColor: Aurora.glassStroke,
-    shadowColor: Aurora.accentDeep, shadowOpacity: 0.6, shadowRadius: 18, shadowOffset: { width: 0, height: 6 },
+    borderWidth: StyleSheet.hairlineWidth, borderColor: c.glassStroke,
+    shadowColor: c.accentDeep, shadowOpacity: 0.6, shadowRadius: 18, shadowOffset: { width: 0, height: 6 },
     elevation: 10,
   },
   centerBtnActive: { transform: [{ scale: 1.06 }] },
   centerLabel: { marginTop: 3, fontWeight: '700' },
   badge: {
     position: 'absolute', top: -5, right: -10, minWidth: 18, height: 18, borderRadius: 9,
-    backgroundColor: Aurora.danger, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 4,
+    backgroundColor: c.danger, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 4,
   },
   badgeTxt: { fontSize: 10, fontWeight: '800', lineHeight: 14 },
 });

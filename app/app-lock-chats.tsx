@@ -342,7 +342,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
     width: 44,
     height: 44,
     borderRadius: 22,
-    backgroundColor: '#111D32',
+    backgroundColor: c.surfaceSolid,
     justifyContent: 'center',
     alignItems: 'center',
     marginRight: 12,
@@ -391,7 +391,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
     paddingHorizontal: 14,
     paddingVertical: 8,
     borderRadius: 8,
-    backgroundColor: '#111D32',
+    backgroundColor: c.surfaceSolid,
     borderWidth: 1,
     borderColor: c.border,
     flexDirection: 'row',
@@ -403,7 +403,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   chipTextActive: { color: c.accent },
 
   pinInput: {
-    backgroundColor: '#111D32',
+    backgroundColor: c.surfaceSolid,
     borderRadius: 10,
     paddingHorizontal: 14,
     paddingVertical: 10,

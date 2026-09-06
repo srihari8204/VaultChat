@@ -3,9 +3,11 @@
 // Uses device accelerometer to detect tilt angle
 // PDF spec: "Tilt phone to 45° to reveal message"
 
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useEffect, useState, useRef, useMemo } from 'react';
 import { View, Text, StyleSheet, Animated, Platform } from 'react-native';
 import { Accelerometer } from 'expo-sensors';
+import type { Palette } from '../constants/theme';
+import { useColors } from '../lib/theme';
 
 interface InvisibleInkProps {
   text: string;
@@ -16,6 +18,8 @@ const TILT_THRESHOLD = 0.55; // ~45° tilt (accelerometer z value)
 const REVEAL_DURATION = 300;
 
 export default function InvisibleInk({ text, isMe }: InvisibleInkProps) {
+  const c = useColors();
+  const s = useMemo(() => makeS(c), [c]);
   const [revealed, setRevealed] = useState(false);
   const opacity = useRef(new Animated.Value(0)).current;
   const shimmer = useRef(new Animated.Value(0)).current;
@@ -96,7 +100,7 @@ export default function InvisibleInk({ text, isMe }: InvisibleInkProps) {
   );
 }
 
-const s = StyleSheet.create({
+const makeS = (c: Palette) => StyleSheet.create({
   container: {
     borderRadius: 16,
     padding: 12,
@@ -108,7 +112,7 @@ const s = StyleSheet.create({
     backgroundColor: '#6C63FF',
   },
   containerPeer: {
-    backgroundColor: '#1A1D27',
+    backgroundColor: c.bg,
   },
   text: {
     fontSize: 15,
@@ -118,11 +122,11 @@ const s = StyleSheet.create({
     color: '#FFFFFF',
   },
   textPeer: {
-    color: '#E8E8E8',
+    color: c.text,
   },
   overlay: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: '#2A2D3A',
+    backgroundColor: c.surfaceSolid,
     borderRadius: 16,
     padding: 12,
     justifyContent: 'center',
@@ -146,7 +150,7 @@ const s = StyleSheet.create({
   },
   fakeLine: {
     height: 8,
-    backgroundColor: '#3A3D4A',
+    backgroundColor: c.surfaceSolid,
     borderRadius: 4,
   },
   revealedTag: {

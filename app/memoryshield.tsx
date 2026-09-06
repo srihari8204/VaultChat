@@ -3,11 +3,15 @@ import { ErrorBoundary } from '../components/ErrorBoundary';
 ﻿import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useMemo } from 'react';
 import { Alert, Animated, Easing, Modal, ScrollView, StyleSheet, Switch, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { DestructionLog, ShieldStatus, executeMemoryShield, loadDestructionLogs, loadShieldStatus, reasonLabels, saveShieldStatus } from '../constants/memoryShield';
+import type { Palette } from '../constants/theme';
+import { useColors } from '../lib/theme';
 
 function MemoryShieldScreenContent() {
+  const c = useColors();
+  const S = useMemo(() => makeS(c), [c]);
   const router = useRouter();
   const [status, setStatus] = useState<ShieldStatus | null>(null);
   const [logs, setLogs] = useState<DestructionLog[]>([]);
@@ -83,7 +87,7 @@ function MemoryShieldScreenContent() {
     <LinearGradient colors={['#FFFFFF', '#060F24']} style={{ flex: 1, justifyContent: 'center', alignItems: 'center', padding: 30 }}>
       <Text style={{ fontSize: 80, marginBottom: 20 }}>💀</Text>
       <Text style={{ color: '#EF4444', fontSize: 26, fontWeight: '900', textAlign: 'center', marginBottom: 20 }}>MEMORY SHIELD EXECUTED</Text>
-      <View style={{ backgroundColor: '#3B0A0A', borderRadius: 16, padding: 20, width: '100%', borderWidth: 1, borderColor: '#7F1D1D', marginBottom: 20 }}>
+      <View style={{ backgroundColor: 'rgba(239,68,68,0.16)', borderRadius: 16, padding: 20, width: '100%', borderWidth: 1, borderColor: 'rgba(239,68,68,0.18)', marginBottom: 20 }}>
         {lastLog && (
           <View>
             <Text style={{ color: '#fff', fontSize: 13, marginBottom: 4 }}>Time: {new Date(lastLog.timestamp).toLocaleString()}</Text>
@@ -177,7 +181,7 @@ function MemoryShieldScreenContent() {
                 <Switch value={status.panicWordEnabled} onValueChange={v => { updateStatus({ panicWordEnabled: v }); if (v) setShowPanicSetup(true); }} trackColor={{ false: '#1D2D44', true: '#EF4444' }} thumbColor={status.panicWordEnabled ? '#fff' : '#3D5A7A'} />
               </View>
               {status.panicWordEnabled && status.panicWord && (
-                <View style={{ backgroundColor: '#060E22', borderRadius: 10, padding: 10, marginTop: 8 }}>
+                <View style={{ backgroundColor: c.bg, borderRadius: 10, padding: 10, marginTop: 8 }}>
                   <Text style={{ color: '#EF4444', fontSize: 14, fontWeight: '700' }}>{'*'.repeat(status.panicWord.length)}</Text>
                 </View>
               )}
@@ -211,7 +215,7 @@ function MemoryShieldScreenContent() {
               <View key={i} style={S.destroyRow}>
                 <Text style={{ fontSize: 16, width: 28 }}>{d.icon}</Text>
                 <Text style={{ color: '#fff', fontSize: 13, flex: 1 }}>{d.item}</Text>
-                {d.critical && <View style={{ backgroundColor: '#3B0A0A', borderRadius: 6, paddingHorizontal: 6, paddingVertical: 2 }}><Text style={{ color: '#EF4444', fontSize: 9, fontWeight: '800' }}>CRITICAL</Text></View>}
+                {d.critical && <View style={{ backgroundColor: 'rgba(239,68,68,0.16)', borderRadius: 6, paddingHorizontal: 6, paddingVertical: 2 }}><Text style={{ color: '#EF4444', fontSize: 9, fontWeight: '800' }}>CRITICAL</Text></View>}
               </View>
             ))}
           </View>
@@ -247,7 +251,7 @@ function MemoryShieldScreenContent() {
             {!countingDown ? (
               <View>
                 <Text style={{ color: '#3D5A7A', fontSize: 11, letterSpacing: 1, marginBottom: 8 }}>TYPE DESTROY TO CONFIRM</Text>
-                <TextInput value={confirmText} onChangeText={setConfirmText} placeholder="Type DESTROY..." placeholderTextColor="#3D5A7A" style={{ backgroundColor: '#060E22', borderRadius: 12, padding: 14, color: '#EF4444', fontSize: 16, fontWeight: '900', borderWidth: 1.5, borderColor: '#7F1D1D', marginBottom: 16, textAlign: 'center', letterSpacing: 2 }} autoCapitalize="characters" />
+                <TextInput value={confirmText} onChangeText={setConfirmText} placeholder="Type DESTROY..." placeholderTextColor="#3D5A7A" style={{ backgroundColor: c.bg, borderRadius: 12, padding: 14, color: '#EF4444', fontSize: 16, fontWeight: '900', borderWidth: 1.5, borderColor: 'rgba(239,68,68,0.18)', marginBottom: 16, textAlign: 'center', letterSpacing: 2 }} autoCapitalize="characters" />
                 <TouchableOpacity disabled={confirmText !== 'DESTROY'} style={{ opacity: confirmText === 'DESTROY' ? 1 : 0.4 }} onPress={startCountdown}>
                   <LinearGradient colors={['#7F1D1D', '#EF4444']} style={{ borderRadius: 16, paddingVertical: 16, alignItems: 'center', marginBottom: 12 }}>
                     <Text style={{ color: '#fff', fontSize: 15, fontWeight: '900' }}>EXECUTE MEMORYSHIELD</Text>
@@ -261,7 +265,7 @@ function MemoryShieldScreenContent() {
               <View style={{ alignItems: 'center' }}>
                 <Text style={{ color: '#EF4444', fontSize: 60, fontWeight: '900' }}>{countdown}</Text>
                 <Text style={{ color: '#FCA5A5', fontSize: 14, marginBottom: 20 }}>Destroying in {countdown} seconds...</Text>
-                <TouchableOpacity onPress={cancelCountdown} style={{ backgroundColor: '#052E16', borderRadius: 14, paddingVertical: 14, paddingHorizontal: 30, borderWidth: 1, borderColor: '#166534' }}>
+                <TouchableOpacity onPress={cancelCountdown} style={{ backgroundColor: 'rgba(34,197,94,0.16)', borderRadius: 14, paddingVertical: 14, paddingHorizontal: 30, borderWidth: 1, borderColor: '#166534' }}>
                   <Text style={{ color: '#4ADE80', fontSize: 15, fontWeight: '800' }}>CANCEL DESTRUCTION</Text>
                 </TouchableOpacity>
               </View>
@@ -275,7 +279,7 @@ function MemoryShieldScreenContent() {
           <LinearGradient colors={['#F9FAFB', '#0D1E3A']} style={{ borderTopLeftRadius: 28, borderTopRightRadius: 28, padding: 24, paddingBottom: 44 }}>
             <Text style={{ color: '#fff', fontSize: 20, fontWeight: '900', marginBottom: 4 }}>Set Panic Word</Text>
             <Text style={{ color: '#3D5A7A', fontSize: 13, marginBottom: 20, lineHeight: 20 }}>Choose a secret word. Typing it anywhere will trigger MemoryShield instantly.</Text>
-            <TextInput value={panicInput} onChangeText={setPanicInput} placeholder="e.g. DANGER, HELP, SHIELD" placeholderTextColor="#1D2D44" style={{ backgroundColor: '#060E22', borderRadius: 12, padding: 14, color: '#EF4444', fontSize: 16, fontWeight: '900', borderWidth: 1.5, borderColor: '#7F1D1D', marginBottom: 20, textAlign: 'center', letterSpacing: 2 }} autoCapitalize="characters" />
+            <TextInput value={panicInput} onChangeText={setPanicInput} placeholder="e.g. DANGER, HELP, SHIELD" placeholderTextColor="#1D2D44" style={{ backgroundColor: c.bg, borderRadius: 12, padding: 14, color: '#EF4444', fontSize: 16, fontWeight: '900', borderWidth: 1.5, borderColor: 'rgba(239,68,68,0.18)', marginBottom: 20, textAlign: 'center', letterSpacing: 2 }} autoCapitalize="characters" />
             <TouchableOpacity disabled={panicInput.length < 3} style={{ opacity: panicInput.length >= 3 ? 1 : 0.4 }} onPress={async () => { await updateStatus({ panicWord: panicInput, panicWordEnabled: true }); setShowPanicSetup(false); setPanicInput(''); Alert.alert('Panic Word Set', panicInput + ' will now trigger MemoryShield instantly.'); }}>
               <LinearGradient colors={['#7F1D1D', '#EF4444']} style={{ borderRadius: 16, paddingVertical: 14, alignItems: 'center', marginBottom: 12 }}>
                 <Text style={{ color: '#fff', fontSize: 15, fontWeight: '900' }}>Set Panic Word</Text>
@@ -291,27 +295,27 @@ function MemoryShieldScreenContent() {
   );
 }
 
-const S = StyleSheet.create({
+const makeS = (c: Palette) => StyleSheet.create({
   container: { paddingHorizontal: 18, paddingTop: HEADER_TOP, paddingBottom: 20 },
   header: { flexDirection: 'row', alignItems: 'center', marginBottom: 16, gap: 10 },
-  backBtn: { width: 36, height: 36, borderRadius: 18, backgroundColor: '#F9FAFB', justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: '#0D1E3A' },
+  backBtn: { width: 36, height: 36, borderRadius: 18, backgroundColor: c.card, justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: '#0D1E3A' },
   title: { color: '#fff', fontSize: 20, fontWeight: '900' },
   shieldContainer: { marginBottom: 16, borderRadius: 24 },
-  shieldCard: { borderRadius: 24, padding: 28, alignItems: 'center', borderWidth: 1.5, borderColor: '#7F1D1D', overflow: 'hidden' },
+  shieldCard: { borderRadius: 24, padding: 28, alignItems: 'center', borderWidth: 1.5, borderColor: 'rgba(239,68,68,0.18)', overflow: 'hidden' },
   shieldRing: { position: 'absolute', width: 260, height: 260, borderRadius: 130, borderWidth: 1, borderColor: 'rgba(239,68,68,0.2)', borderStyle: 'dashed' },
-  statusRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 12, backgroundColor: '#052E16', borderRadius: 20, paddingHorizontal: 14, paddingVertical: 6 },
+  statusRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 12, backgroundColor: c.bg, borderRadius: 20, paddingHorizontal: 14, paddingVertical: 6 },
   statusDot: { width: 8, height: 8, borderRadius: 4 },
   nuclearBtn: { borderRadius: 18, padding: 18, flexDirection: 'row', alignItems: 'center' },
-  settingsCard: { backgroundColor: '#F9FAFB', borderRadius: 18, padding: 16, marginBottom: 14, borderWidth: 1, borderColor: '#0D1E3A' },
+  settingsCard: { backgroundColor: c.card, borderRadius: 18, padding: 16, marginBottom: 14, borderWidth: 1, borderColor: '#0D1E3A' },
   settingsTitle: { color: '#fff', fontSize: 14, fontWeight: '800', marginBottom: 14 },
   settingRow: { flexDirection: 'row', alignItems: 'center' },
   settingLabel: { color: '#fff', fontSize: 13, fontWeight: '700' },
   settingDesc: { color: '#3D5A7A', fontSize: 11, marginTop: 2 },
   timerRow: { flexDirection: 'row', gap: 8, marginTop: 10, flexWrap: 'wrap' },
   timerChip: { borderRadius: 10, paddingHorizontal: 14, paddingVertical: 8, borderWidth: 1.5 },
-  destroyCard: { backgroundColor: '#F9FAFB', borderRadius: 18, padding: 16, marginBottom: 14, borderWidth: 1, borderColor: '#7F1D1D' },
+  destroyCard: { backgroundColor: c.card, borderRadius: 18, padding: 16, marginBottom: 14, borderWidth: 1, borderColor: 'rgba(239,68,68,0.18)' },
   destroyRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: '#0D1E3A', gap: 8 },
-  logsCard: { backgroundColor: '#F9FAFB', borderRadius: 18, padding: 16, marginBottom: 14, borderWidth: 1, borderColor: '#0D1E3A' },
+  logsCard: { backgroundColor: c.card, borderRadius: 18, padding: 16, marginBottom: 14, borderWidth: 1, borderColor: '#0D1E3A' },
   logRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: '#0D1E3A' },
 });
 

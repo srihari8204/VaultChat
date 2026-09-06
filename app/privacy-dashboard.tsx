@@ -479,7 +479,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 6,
     borderRadius: 8,
-    backgroundColor: '#111D32',
+    backgroundColor: c.surfaceSolid,
     borderWidth: 1,
     borderColor: c.border,
   },

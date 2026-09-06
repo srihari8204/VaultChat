@@ -9,7 +9,7 @@
 import { BRAND_ACCENT } from '../constants/theme';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Stack } from 'expo-router';
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useMemo } from 'react';
 import {
   Alert, ScrollView, StyleSheet, Text, TextInput,
   TouchableOpacity, View,
@@ -18,7 +18,8 @@ import { copyAndAutoClear } from '../lib/clipboardSafe';
 import {
   createDid, getDidRecord, proveControl, revokeDid, type DidRecord,
 } from '../lib/decentralizedId';
-import { Aurora } from '../constants/theme';
+import type { Palette } from '../constants/theme';
+import { useColors } from '../lib/theme';
 
 const C = {
   bg: '#FFFFFF', primary: '#4A9FFF', secondary: '#7C3AED',
@@ -35,6 +36,8 @@ const BENEFITS = [
 ];
 
 export default function DecentralizedIDScreen() {
+  const c = useColors();
+  const st = useMemo(() => makeStyles(c), [c]);
   const [did, setDid] = useState<DidRecord | null>(null);
   const [displayName, setDisplayName] = useState('');
   const [creating, setCreating] = useState(false);
@@ -84,7 +87,7 @@ export default function DecentralizedIDScreen() {
     <>
       <Stack.Screen options={{
         title: 'Decentralised ID',
-        headerStyle: { backgroundColor: Aurora.card },
+        headerStyle: { backgroundColor: c.card },
         headerTintColor: '#1F2937',
       }} />
       <View style={st.screen}>
@@ -112,7 +115,7 @@ export default function DecentralizedIDScreen() {
               </View>
 
               <Text style={{ color: C.faint, fontSize: 9, letterSpacing: 2, marginBottom: 4 }}>YOUR DID</Text>
-              <TouchableOpacity onPress={copyDid} style={{ backgroundColor: '#060E1E', borderRadius: 10, padding: 12, marginBottom: 12 }}>
+              <TouchableOpacity onPress={copyDid} style={{ backgroundColor: c.surfaceSolid, borderRadius: 10, padding: 12, marginBottom: 12 }}>
                 <Text style={{ color: C.primary, fontSize: 11, fontFamily: 'monospace' }} selectable>{did.did}</Text>
                 <Text style={{ color: C.faint, fontSize: 9, marginTop: 4 }}>Tap to copy</Text>
               </TouchableOpacity>
@@ -209,7 +212,7 @@ export default function DecentralizedIDScreen() {
   );
 }
 
-const st = StyleSheet.create({
+const makeStyles = (c: Palette) => StyleSheet.create({
   screen: { flex: 1, backgroundColor: C.bg },
   hero: { borderRadius: 20, padding: 24, alignItems: 'center', marginBottom: 20, gap: 10 },
   heroTitle: { color: '#fff', fontSize: 22, fontWeight: '900', textAlign: 'center' },
@@ -218,9 +221,9 @@ const st = StyleSheet.create({
   cardTitle: { color: C.text, fontSize: 18, fontWeight: '900', marginBottom: 4 },
   sectionLabel: { color: C.faint, fontSize: 10, fontWeight: '800', letterSpacing: 2, marginBottom: 10, marginTop: 8 },
   label: { color: C.dim, fontSize: 10, fontWeight: '800', letterSpacing: 1.5, marginBottom: 6 },
-  input: { backgroundColor: '#060E1E', borderRadius: 12, padding: 14, color: C.text, fontSize: 14, borderWidth: 1, borderColor: C.border, marginBottom: 14 },
+  input: { backgroundColor: c.bg, borderRadius: 12, padding: 14, color: C.text, fontSize: 14, borderWidth: 1, borderColor: C.border, marginBottom: 14 },
   createBtn: { borderRadius: 16, paddingVertical: 18, alignItems: 'center' },
-  metaBox: { flex: 1, backgroundColor: '#060E1E', borderRadius: 10, padding: 10 },
+  metaBox: { flex: 1, backgroundColor: c.bg, borderRadius: 10, padding: 10 },
   benefitCard: { flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: C.card, borderRadius: 14, padding: 14, borderWidth: 1, borderColor: C.border },
   compRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 10, gap: 8 },
 });

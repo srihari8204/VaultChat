@@ -335,7 +335,7 @@ export const makeStyles = (
   pollBarFillMine:        { backgroundColor: c.bubbleOutText },
   pollFooter:             { color: c.textDim, fontSize: 11, marginTop: 6 },
   pollFooterMine:         { color: c.bubbleMetaOut },
-  attachedImage: { width: 220, height: 220, borderRadius: 8, backgroundColor: '#0F1217' },
+  attachedImage: { width: 220, height: 220, borderRadius: 8, backgroundColor: '#0F1217' },   // theme-exempt: neutral plate behind media
   // KLIPY watermark on a sent GIF/sticker/emoji card. Bottom-left and
   // semi-transparent, per their brand guideline: visible enough to attribute,
   // faint enough not to compete with the content it sits on.
@@ -367,13 +367,13 @@ export const makeStyles = (
   imageErrorTxt: { color: c.textDim, fontSize: 12 },
 
   // Video bubble — inline player with native controls + duration pill
-  videoWrap:     { width: 240, height: 240, borderRadius: 8, overflow: 'hidden', backgroundColor: '#000', position: 'relative' },
+  videoWrap:     { width: 240, height: 240, borderRadius: 8, overflow: 'hidden', backgroundColor: '#000', position: 'relative' },   // theme-exempt: neutral plate behind media
   videoView:     { width: '100%', height: '100%' },
   videoDuration: { position: 'absolute', right: 8, bottom: 8, color: '#fff', fontSize: 11, fontWeight: '700', backgroundColor: 'rgba(0,0,0,0.55)', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6, overflow: 'hidden' },
-  videoLoading:  { width: 240, height: 240, borderRadius: 8, backgroundColor: '#0F1217', alignItems: 'center', justifyContent: 'center' },
-  videoPlaceholder: { alignItems: 'center', justifyContent: 'center', backgroundColor: '#10141B' },
+  videoLoading:  { width: 240, height: 240, borderRadius: 8, backgroundColor: '#0F1217', alignItems: 'center', justifyContent: 'center' },   // theme-exempt: neutral plate behind media
+  videoPlaceholder: { alignItems: 'center', justifyContent: 'center', backgroundColor: '#10141B' },   // theme-exempt: neutral plate behind media
   // Round "video note" (Telegram/WhatsApp style) — distinct from a rectangular video.
-  videoNoteWrap: { width: 200, height: 200, borderRadius: 100, overflow: 'hidden', backgroundColor: '#000', position: 'relative', alignSelf: 'center', borderWidth: 2, borderColor: 'rgba(255,255,255,0.18)' },
+  videoNoteWrap: { width: 200, height: 200, borderRadius: 100, overflow: 'hidden', backgroundColor: '#000', position: 'relative', alignSelf: 'center', borderWidth: 2, borderColor: 'rgba(255,255,255,0.18)' },   // theme-exempt: neutral plate behind media
   videoNoteView: { width: '100%', height: '100%' },
   videoNoteDuration: { right: undefined, bottom: 10, alignSelf: 'center', left: 0, textAlign: 'center', width: '100%', backgroundColor: 'transparent' },
   videoPlayOverlay: { ...StyleSheet.absoluteFillObject, alignItems: 'center', justifyContent: 'center' },
@@ -385,7 +385,7 @@ export const makeStyles = (
   viewOnceShieldIcon:    { fontSize: 28 },
   viewOnceShieldTxt:     { color: c.text, fontSize: 14, fontWeight: '700' },
   viewOnceShieldHint:    { color: c.textDim, fontSize: 11, textAlign: 'center' },
-  viewOnceTombstone:     { width: 220, padding: 16, borderRadius: 12, alignItems: 'center', backgroundColor: '#0F1217', borderWidth: StyleSheet.hairlineWidth, borderColor: c.border },
+  viewOnceTombstone:     { width: 220, padding: 16, borderRadius: 12, alignItems: 'center', backgroundColor: c.surfaceSolid, borderWidth: StyleSheet.hairlineWidth, borderColor: c.border },
   viewOnceTombstoneTxt:  { color: c.textDim, fontSize: 12, fontStyle: 'italic' },
 
   // Day 9 — file bubble (documents)
@@ -426,7 +426,7 @@ export const makeStyles = (
   reactionRow:         { flexDirection: 'row', flexWrap: 'wrap', gap: 4, marginTop: -6, marginBottom: 6, paddingHorizontal: 4 },
   reactionRowMine:     { justifyContent: 'flex-end' },
   reactionRowTheirs:   { justifyContent: 'flex-start' },
-  reactionChip:        { flexDirection: 'row', alignItems: 'center', gap: 3, paddingHorizontal: 8, paddingVertical: 3, borderRadius: 12, backgroundColor: '#1F2937', borderWidth: StyleSheet.hairlineWidth, borderColor: c.border },
+  reactionChip:        { flexDirection: 'row', alignItems: 'center', gap: 3, paddingHorizontal: 8, paddingVertical: 3, borderRadius: 12, backgroundColor: c.surfaceSolid, borderWidth: StyleSheet.hairlineWidth, borderColor: c.border },
   reactionChipMine:    { backgroundColor: 'rgba(108,99,255,0.25)', borderColor: c.primary },
   reactionChipEmoji:   { fontSize: 14 },
   reactionChipCount:   { color: c.textDim, fontSize: 11, fontWeight: '600' },
@@ -434,12 +434,12 @@ export const makeStyles = (
 
   // Day 8 — quick-react picker
   modalBackdrop:       { flex: 1, backgroundColor: 'rgba(0,0,0,0.55)', justifyContent: 'center', alignItems: 'center', padding: 20 },
-  reactSheet:          { flexDirection: 'row', gap: 4, padding: 8, backgroundColor: '#1F2937', borderRadius: 32 },
+  reactSheet:          { flexDirection: 'row', gap: 4, padding: 8, backgroundColor: c.surfaceSolid, borderRadius: 32 },
   reactSheetBtn:       { width: 48, height: 48, borderRadius: 24, alignItems: 'center', justifyContent: 'center' },
   reactSheetEmoji:     { fontSize: 26 },
 
   // Day 8 — forward chat picker
-  forwardSheet:        { width: '100%', maxHeight: '70%', backgroundColor: '#0F1217', borderRadius: 16, padding: 16, gap: 8 },
+  forwardSheet:        { width: '100%', maxHeight: '70%', backgroundColor: c.card, borderRadius: 16, padding: 16, gap: 8 },
   forwardTitle:        { color: c.text, fontSize: 16, fontWeight: '700', marginBottom: 8 },
   forwardPreview:      { flexDirection: 'row', gap: 8, backgroundColor: c.card, borderRadius: 10, padding: 10, marginBottom: 8 },
   forwardPreviewWho:   { color: c.primary, fontSize: 13, fontWeight: '700' },

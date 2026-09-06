@@ -290,7 +290,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   gateCancel:   { flex: 1, padding: 14, borderRadius: 12, borderWidth: 1, borderColor: c.border, alignItems: 'center' },
   gateCancelTxt: { color: c.text, fontWeight: '700' },
   gateUnlock:    { flex: 1, padding: 14, borderRadius: 12, backgroundColor: c.primary, alignItems: 'center' },
-  gateUnlockOff: { backgroundColor: '#374151' },
+  gateUnlockOff: { backgroundColor: c.surfaceSolid },
   gateUnlockTxt: { color: '#fff', fontWeight: '700' },
 
   // List

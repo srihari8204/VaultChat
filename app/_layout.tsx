@@ -32,7 +32,7 @@
 // eslint-disable-next-line import/order
 import '@livekit/react-native';
 
-import { BRAND_ACCENT, AuroraDark } from '../constants/theme';
+import { BRAND_ACCENT } from '../constants/theme';
 import { Buffer } from 'buffer';
 
 import { Stack, useRouter } from 'expo-router';
@@ -57,7 +57,7 @@ enableFreeze(true);
 import { useFonts, Sora_700Bold, Sora_800ExtraBold } from '@expo-google-fonts/sora';
 import { NunitoSans_400Regular, NunitoSans_600SemiBold, NunitoSans_700Bold } from '@expo-google-fonts/nunito-sans';
 import { FontReadyContext } from '../components/ui/Text';
-import { ThemeProvider } from '../lib/theme';
+import { ThemeProvider, useTheme } from '../lib/theme';
 
 import { runSecurityCheck } from '../services/securityService';
 import { attachTapHandler } from '../lib/push';
@@ -156,7 +156,8 @@ if (SENTRY_DSN) {
   });
 }
 
-function RootLayout() {
+function RootLayoutInner() {
+  const { colors, scheme } = useTheme();
   /** My user id, for the famEvent ingest below — a ref because the persistent
    *  listener closure outlives any render. */
   const selfIdRef = useRef<string | null>(null);
@@ -702,23 +703,22 @@ function RootLayout() {
   // Prevents any screen flashing before check completes
   if (!securityChecked) {
     return (
-      <GestureHandlerRootView style={styles.loading}>
-        <StatusBar style="light" />
+      <GestureHandlerRootView style={[styles.loading, { backgroundColor: colors.bg }]}>
+        <StatusBar style={scheme === 'light' ? 'dark' : 'light'} />
         <ActivityIndicator size="large" color={BRAND_ACCENT} />
       </GestureHandlerRootView>
     );
   }
 
   return (
-    <ThemeProvider>
     <FontReadyContext.Provider value={fontsReady}>
-    <GestureHandlerRootView style={{ flex: 1 }}>
-      <StatusBar style="light" />
+    <GestureHandlerRootView style={{ flex: 1, backgroundColor: colors.bg }}>
+      <StatusBar style={scheme === 'light' ? 'dark' : 'light'} />
       {/* The navigator's own ground stays OPAQUE at the aurora base. A
           transparent contentStyle would let the previous screen show through a
           native-stack push, so the blooms are mounted per screen instead (each
           screen root is transparent with an <AuroraBackground /> behind it). */}
-      <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: AuroraDark.bg } }}>
+      <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: colors.bg } }}>
 
         {/* Security — gesture disabled so user can't swipe back */}
         <Stack.Screen name="blocked" options={{ gestureEnabled: false }} />
@@ -852,14 +852,15 @@ function RootLayout() {
       <PdfThumbnailerHost />
     </GestureHandlerRootView>
     </FontReadyContext.Provider>
-    </ThemeProvider>
   );
 }
 
 const styles = StyleSheet.create({
   loading: {
     flex: 1,
-    backgroundColor: '#0A0A0F',
+    // Ground colour is applied inline from the active palette; this is only the
+    // pre-theme fallback for the split second before the provider resolves.
+    backgroundColor: '#0A0810',   // theme-exempt: pre-provider fallback, overridden inline
     justifyContent: 'center',
     alignItems: 'center',
   },
@@ -867,4 +868,12 @@ const styles = StyleSheet.create({
 
 // Sentry.wrap forwards refs + injects a top-level error boundary that
 // reports to Sentry before re-throwing. No-op when Sentry isn't init'd.
+function RootLayout() {
+  return (
+    <ThemeProvider>
+      <RootLayoutInner />
+    </ThemeProvider>
+  );
+}
+
 export default SENTRY_DSN ? Sentry.wrap(RootLayout) : RootLayout;

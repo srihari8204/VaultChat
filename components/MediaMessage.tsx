@@ -1,9 +1,11 @@
 // components/MediaMessage.tsx
 // Renders image, video thumbnail, audio player, GIF, file attachment
 
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { View, Text, Image, TouchableOpacity, StyleSheet, ActivityIndicator, Alert } from 'react-native';
 import { Audio, AVPlaybackStatus } from 'expo-av';
+import type { Palette } from '../constants/theme';
+import { useColors } from '../lib/theme';
 
 interface Props {
   url: string;
@@ -14,6 +16,8 @@ interface Props {
 
 // ── Image / GIF ────────────────────────────────────────────
 function ImageMsg({ url }: { url: string }) {
+  const c = useColors();
+  const s = useMemo(() => makeS(c), [c]);
   const [loading, setLoading] = useState(true);
   return (
     <View style={s.imgWrap}>
@@ -31,6 +35,8 @@ function ImageMsg({ url }: { url: string }) {
 
 // ── Audio player ───────────────────────────────────────────
 function AudioMsg({ url, duration }: { url: string; duration?: number }) {
+  const c = useColors();
+  const s = useMemo(() => makeS(c), [c]);
   const [sound,   setSound]   = useState<Audio.Sound | null>(null);
   const [playing, setPlaying] = useState(false);
   const [pos,     setPos]     = useState(0);
@@ -89,6 +95,8 @@ function AudioMsg({ url, duration }: { url: string; duration?: number }) {
 
 // ── File ───────────────────────────────────────────────────
 function FileMsg({ filename, url }: { filename?: string; url: string }) {
+  const c = useColors();
+  const s = useMemo(() => makeS(c), [c]);
   return (
     <View style={s.fileRow}>
       <Text style={{ fontSize: 28 }}>📄</Text>
@@ -102,6 +110,8 @@ function FileMsg({ filename, url }: { filename?: string; url: string }) {
 
 // ── Main ───────────────────────────────────────────────────
 export default function MediaMessage({ url, msgType, filename, duration }: Props) {
+  const c = useColors();
+  const s = useMemo(() => makeS(c), [c]);
   if (msgType === 'image' || msgType === 'gif') return <ImageMsg url={url} />;
   if (msgType === 'audio')  return <AudioMsg url={url} duration={duration} />;
   if (msgType === 'file')   return <FileMsg filename={filename} url={url} />;
@@ -114,18 +124,18 @@ export default function MediaMessage({ url, msgType, filename, duration }: Props
   return null;
 }
 
-const s = StyleSheet.create({
-  imgWrap:     { width: 220, height: 180, borderRadius: 10, overflow: 'hidden', backgroundColor: '#111' },
-  img:         { width: '100%', height: '100%' },
-  loader:      { position: 'absolute', top: '50%', left: '50%' },
-  videoPlay:   { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, alignItems: 'center', justifyContent: 'center', backgroundColor: '#00000055' },
-  audioRow:    { flexDirection: 'row', alignItems: 'center', gap: 10, minWidth: 180, maxWidth: 240 },
-  playBtn:     { width: 40, height: 40, borderRadius: 20, backgroundColor: '#00E5FF22', alignItems: 'center', justifyContent: 'center' },
-  audioRight:  { flex: 1 },
-  progressBg:  { height: 3, backgroundColor: '#333', borderRadius: 2, overflow: 'hidden', marginBottom: 4 },
-  progressFill:{ height: '100%', backgroundColor: '#00E5FF', borderRadius: 2 },
-  audioTime:   { color: '#666', fontSize: 11 },
-  fileRow:     { flexDirection: 'row', alignItems: 'center', gap: 10, minWidth: 160, maxWidth: 240 },
-  fileName:    { color: '#E0E0F0', fontSize: 14, fontWeight: '600' },
-  fileOpen:    { color: '#555', fontSize: 11, marginTop: 2 },
+const makeS = (c: Palette) => StyleSheet.create({
+  imgWrap: { width: 220, height: 180, borderRadius: 10, overflow: 'hidden', backgroundColor: c.bg },
+  img: { width: '100%', height: '100%' },
+  loader: { position: 'absolute', top: '50%', left: '50%' },
+  videoPlay: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, alignItems: 'center', justifyContent: 'center', backgroundColor: '#00000055' },
+  audioRow: { flexDirection: 'row', alignItems: 'center', gap: 10, minWidth: 180, maxWidth: 240 },
+  playBtn: { width: 40, height: 40, borderRadius: 20, backgroundColor: '#00E5FF22', alignItems: 'center', justifyContent: 'center' },
+  audioRight: { flex: 1 },
+  progressBg: { height: 3, backgroundColor: c.surfaceSolid, borderRadius: 2, overflow: 'hidden', marginBottom: 4 },
+  progressFill: { height: '100%', backgroundColor: '#00E5FF', borderRadius: 2 },
+  audioTime: { color: c.textDim, fontSize: 11 },
+  fileRow: { flexDirection: 'row', alignItems: 'center', gap: 10, minWidth: 160, maxWidth: 240 },
+  fileName: { color: c.text, fontSize: 14, fontWeight: '600' },
+  fileOpen: { color: c.textDim, fontSize: 11, marginTop: 2 },
 });

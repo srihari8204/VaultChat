@@ -792,7 +792,7 @@ const ChatRow = memo(function ChatRow({
   );
   const rightActions = () => (
     <View style={S.actionsRow}>
-      <TouchableOpacity style={[S.action, { backgroundColor: '#475569' }]} onPress={() => act(onArchive)}>
+      <TouchableOpacity style={[S.action, { backgroundColor: colors.surfaceSolid }]} onPress={() => act(onArchive)}>
         <Ionicons name={chat.archived ? 'archive' : 'archive-outline'} size={20} color="#fff" /><Text style={S.actionLbl}>{chat.archived ? 'Unarchive' : 'Archive'}</Text>
       </TouchableOpacity>
       <TouchableOpacity style={[S.action, { backgroundColor: colors.danger }]} onPress={() => act(onDelete)}>
@@ -932,7 +932,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   folderTxt: { color: c.textDim, fontSize: 13, fontWeight: '600' },
   folderTxtActive: { color: '#FFFFFF' },
   folderCount: { color: c.textDim, fontSize: 11, fontWeight: '700', backgroundColor: c.surface, paddingHorizontal: 6, borderRadius: 8, overflow: 'hidden', minWidth: 18, textAlign: 'center' },
-  folderCountActive: { color: c.primary, backgroundColor: '#FFFFFF' },
+  folderCountActive: { color: c.primary, backgroundColor: c.card },
 
   sectionHeader: { color: c.textFaint, fontSize: 11, fontWeight: '700', letterSpacing: 0.6, textTransform: 'uppercase', paddingHorizontal: 22, paddingTop: 14, paddingBottom: 6, backgroundColor: 'transparent' },
   separator: { height: StyleSheet.hairlineWidth, backgroundColor: c.hairline, marginLeft: 88 },

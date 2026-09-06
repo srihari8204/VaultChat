@@ -394,7 +394,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   catInfo: { flexDirection: 'row', alignItems: 'center', marginBottom: 6 },
   catLabel: { color: c.text, fontSize: 14, marginLeft: 8, flex: 1 },
   catSize: { color: c.textDim, fontSize: 13 },
-  barBg: { height: 8, borderRadius: 4, backgroundColor: '#1A2A44', overflow: 'hidden' },
+  barBg: { height: 8, borderRadius: 4, backgroundColor: c.surfaceSolid, overflow: 'hidden' },
   barFill: { height: 8, borderRadius: 4 },
 
   actionBtn: { flexDirection: 'row', alignItems: 'center', paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: '#112240' },
@@ -403,6 +403,6 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   cardNote:     { color: c.textDim, fontSize: 12, lineHeight: 17, marginTop: 8 },
   sectionLabel: { color: c.textDim, fontSize: 12, fontWeight: '600', textTransform: 'uppercase', letterSpacing: 1, marginTop: 14, marginBottom: 10 },
   daysRow: { flexDirection: 'row', gap: 10 },
-  dayBtn: { flex: 1, paddingVertical: 10, borderRadius: 10, backgroundColor: '#1A2A44', alignItems: 'center' },
+  dayBtn: { flex: 1, paddingVertical: 10, borderRadius: 10, backgroundColor: c.surfaceSolid, alignItems: 'center' },
   dayBtnText: { color: c.textDim, fontSize: 13, fontWeight: '600' },
 });

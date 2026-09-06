@@ -3,20 +3,23 @@
 // Record preview with effect applied before sending
 
 import { BRAND_ACCENT } from '../constants/theme';
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet,
   StatusBar, Animated, Dimensions, Alert, ScrollView, Platform, useWindowDimensions } from 'react-native';
 import { Stack } from 'expo-router';
 import { Audio } from 'expo-av';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { Aurora } from '../constants/theme';
+import type { Palette } from '../constants/theme';
+import { useColors } from '../lib/theme';
 
 const { width: SW } = Dimensions.get('window');
 const C = { bg: '#FFFFFF', accent: '#A78BFA', card: '#F9FAFB', green: BRAND_ACCENT };
 
 const EFFECTS = [
-  { id: 'none', name: 'Normal', icon: '\uD83C\uDFA4', desc: 'Your natural voice', pitch: 1.0, rate: 1.0, color: Aurora.textDim },
+  { id: 'none', name: 'Normal', icon: '\uD83C\uDFA4', desc: 'Your natural voice', pitch: 1.0, rate: 1.0, color: '#8A8394' },   // EFFECTS is module-level data and cannot read the
+    // live palette; the "no effect" swatch takes a fixed mid-neutral that holds
+    // contrast on both grounds. Every other entry is already a fixed hue.
   { id: 'deep', name: 'Deep Voice', icon: '\uD83D\uDC3B', desc: 'Lower pitch for a deeper tone', pitch: 0.7, rate: 0.95, color: BRAND_ACCENT },
   { id: 'high', name: 'High Voice', icon: '\uD83D\uDC3F\uFE0F', desc: 'Higher pitch, chipmunk style', pitch: 1.5, rate: 1.05, color: '#F59E0B' },
   { id: 'robot', name: 'Robot', icon: '\uD83E\uDD16', desc: 'Robotic metallic voice', pitch: 0.85, rate: 0.8, color: '#4A9FFF' },
@@ -31,6 +34,8 @@ const EFFECTS = [
 const SETTINGS_KEY = 'vc_voice_effect';
 
 export default function VoiceEffectsScreen() {
+  const c = useColors();
+  const s = useMemo(() => makeStyles(c), [c]);
   // Reactive size. The module-level Dimensions.get above is captured ONCE at
   // import and never updates, so it froze the layout at the size the app
   // launched with. Shadowing it here makes every use in this component follow
@@ -111,7 +116,7 @@ export default function VoiceEffectsScreen() {
 
   return (
     <>
-      <Stack.Screen options={{ title: 'Voice Effects', headerStyle: { backgroundColor: Aurora.card }, headerTintColor: '#1F2937' }} />
+      <Stack.Screen options={{ title: 'Voice Effects', headerStyle: { backgroundColor: c.card }, headerTintColor: '#1F2937' }} />
       <ScrollView style={s.container}>
         <StatusBar barStyle="light-content" />
 
@@ -180,26 +185,26 @@ export default function VoiceEffectsScreen() {
   );
 }
 
-const s = StyleSheet.create({
+const makeStyles = (c: Palette) => StyleSheet.create({
   container: { flex: 1, backgroundColor: C.bg, padding: 16 },
-  previewCard: { backgroundColor: C.card, borderRadius: 20, padding: 24, alignItems: 'center', marginBottom: 16, borderWidth: 1, borderColor: Aurora.border },
+  previewCard: { backgroundColor: C.card, borderRadius: 20, padding: 24, alignItems: 'center', marginBottom: 16, borderWidth: 1, borderColor: c.border },
   effectName: { fontSize: 22, fontWeight: '900', marginTop: 8 },
-  effectDesc: { color: Aurora.textDim, fontSize: 13, marginTop: 4 },
+  effectDesc: { color: c.textDim, fontSize: 13, marginTop: 4 },
   recordRow: { marginTop: 20 },
   recordBtn: { backgroundColor: '#A78BFA', borderRadius: 30, paddingVertical: 14, paddingHorizontal: 32 },
-  recordTxt: { color: Aurora.text, fontSize: 14, fontWeight: '800' },
+  recordTxt: { color: c.text, fontSize: 14, fontWeight: '800' },
   playRow: { flexDirection: 'row', gap: 10, marginTop: 12 },
   playBtn: { backgroundColor: BRAND_ACCENT, borderRadius: 12, paddingVertical: 10, paddingHorizontal: 16 },
-  playTxt: { color: Aurora.text, fontSize: 12, fontWeight: '700' },
+  playTxt: { color: c.text, fontSize: 12, fontWeight: '700' },
   useCallBtn: { backgroundColor: '#4A9FFF22', borderRadius: 12, paddingVertical: 10, paddingHorizontal: 16, borderWidth: 1, borderColor: '#4A9FFF44' },
   useCallTxt: { color: '#4A9FFF', fontSize: 12, fontWeight: '700' },
   activeEffect: { marginTop: 12, backgroundColor: BRAND_ACCENT + '15', borderRadius: 8, paddingHorizontal: 12, paddingVertical: 6 },
   activeTxt: { color: BRAND_ACCENT, fontSize: 11, fontWeight: '600' },
-  sectionTitle: { color: Aurora.textDim, fontSize: 11, fontWeight: '800', letterSpacing: 1, marginBottom: 8 },
+  sectionTitle: { color: c.textDim, fontSize: 11, fontWeight: '800', letterSpacing: 1, marginBottom: 8 },
   grid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  effectCard: { width: (SW - 48) / 2, backgroundColor: C.card, borderRadius: 14, padding: 14, borderWidth: 1, borderColor: Aurora.border, alignItems: 'center' },
-  gridName: { color: Aurora.text, fontSize: 13, fontWeight: '700', marginTop: 6 },
-  gridDesc: { color: Aurora.textDim, fontSize: 10, marginTop: 2, textAlign: 'center' },
+  effectCard: { width: (SW - 48) / 2, backgroundColor: C.card, borderRadius: 14, padding: 14, borderWidth: 1, borderColor: c.border, alignItems: 'center' },
+  gridName: { color: c.text, fontSize: 13, fontWeight: '700', marginTop: 6 },
+  gridDesc: { color: c.textDim, fontSize: 10, marginTop: 2, textAlign: 'center' },
   paramRow: { flexDirection: 'row', gap: 8, marginTop: 6 },
-  paramTxt: { color: Aurora.textFaint, fontSize: 9, fontWeight: '700' },
+  paramTxt: { color: c.textFaint, fontSize: 9, fontWeight: '700' },
 });

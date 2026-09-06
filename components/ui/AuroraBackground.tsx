@@ -21,7 +21,7 @@
 import React from 'react';
 import { StyleSheet, View } from 'react-native';
 import Svg, { Defs, Ellipse, RadialGradient, Stop } from 'react-native-svg';
-import { useColors } from '../../lib/theme';
+import { useColors, useTheme } from '../../lib/theme';
 
 /** One bloom: colour, size, centre, and peak opacity at the centre. */
 type Bloom = { c: string; rx: number; ry: number; cx: number; cy: number; o: number };
@@ -66,24 +66,34 @@ const COMPOSITIONS = {
 
 export type AuroraVariant = keyof typeof COMPOSITIONS;
 
+/**
+ * On a light ground the same opacities read as garish stains rather than light,
+ * because the blooms are ADDING colour to something already bright instead of
+ * lifting something dark. Scaling them back is what keeps the composition
+ * recognisably the same picture in both themes.
+ */
+const LIGHT_OPACITY_SCALE = 0.42;
+
 export function AuroraBackground({ variant = 'chats' }: { variant?: AuroraVariant }) {
   const c = useColors();
+  const { scheme } = useTheme();
+  const scale = scheme === 'light' ? LIGHT_OPACITY_SCALE : 1;
   const blooms = COMPOSITIONS[variant] ?? COMPOSITIONS.chats;
   return (
     <View style={[StyleSheet.absoluteFill, { backgroundColor: c.bg }]} pointerEvents="none">
       <Svg width="100%" height="100%" viewBox="0 0 390 844" preserveAspectRatio="xMidYMid slice">
         <Defs>
           {blooms.map((b, i) => (
-            <RadialGradient key={i} id={`bloom${i}`} cx="50%" cy="50%" r="50%">
-              <Stop offset="0%" stopColor={b.c} stopOpacity={b.o} />
+            <RadialGradient key={i} id={`bloom-${scheme}-${i}`} cx="50%" cy="50%" r="50%">
+              <Stop offset="0%" stopColor={b.c} stopOpacity={b.o * scale} />
               {/* Mid stop keeps the falloff soft; a straight 0→1 ramp reads as a hard disc. */}
-              <Stop offset="55%" stopColor={b.c} stopOpacity={b.o * 0.45} />
+              <Stop offset="55%" stopColor={b.c} stopOpacity={b.o * scale * 0.45} />
               <Stop offset="100%" stopColor={b.c} stopOpacity={0} />
             </RadialGradient>
           ))}
         </Defs>
         {blooms.map((b, i) => (
-          <Ellipse key={i} cx={b.cx} cy={b.cy} rx={b.rx} ry={b.ry} fill={`url(#bloom${i})`} />
+          <Ellipse key={i} cx={b.cx} cy={b.cy} rx={b.rx} ry={b.ry} fill={`url(#bloom-${scheme}-${i})`} />
         ))}
       </Svg>
     </View>

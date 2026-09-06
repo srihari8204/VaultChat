@@ -56,7 +56,6 @@ import { listShopLists, saveShopList, deleteShopList, type ShopList } from '../d
 import {
   t, useShopBookLang, initShopBookLang, setShopBookLang, SB_LANGUAGES, speechLocale,
 } from '../lib/shopbookI18n';
-import { Aurora } from '../constants/theme';
 
 // ── palette ────────────────────────────────────────────────────────
 //
@@ -1701,7 +1700,7 @@ function OwnerDashboard({ shop, onSettings, onCoupons, onSuppliers, onPlans, onR
           <View style={s.modalCard}>
             <Text style={s.modalTitle}>{shop.name}</Text>
             <Text style={[s.hint, { textAlign: 'center' }]}>Customers scan this to open your shop</Text>
-            <View style={{ alignItems: 'center', marginVertical: 18, backgroundColor: Aurora.card, padding: 14, borderRadius: 14 }}>
+            <View style={{ alignItems: 'center', marginVertical: 18, backgroundColor: '#FFFFFF', padding: 14, borderRadius: 14 }}>   {/* theme-exempt: a QR needs a real white quiet zone */}
               <QRCode value={deepLink} size={190} color={C.navy} backgroundColor="#ffffff" />
             </View>
             <TouchableOpacity style={s.primaryBtn} onPress={() => Share.share({ message: `Order from ${shop.name} on Shop Book 🛍️\n${deepLink}` })}>
@@ -4625,11 +4624,11 @@ const makeStyles = (C: ReturnType<typeof makeC>) => StyleSheet.create({
   },
   hBtn: { width: 38, height: 38, borderRadius: 19, justifyContent: 'center', alignItems: 'center' },
   headerTitle: { color: C.headerFg, fontSize: 20, fontWeight: '800' },
-  headerSub: { color: '#DCFCE7', fontSize: 12, marginTop: 1 },
+  headerSub: { color: '#DCFCE7', fontSize: 12, marginTop: 1 },   // theme-exempt: pale green ON the green header bar, a fixed pair in both themes
   modeRow: { flexDirection: 'row', backgroundColor: C.greenDark, padding: 6, gap: 6 },
   modeBtn: {
     flex: 1, flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 6,
-    paddingVertical: 9, borderRadius: 10, backgroundColor: Aurora.card,
+    paddingVertical: 9, borderRadius: 10, backgroundColor: C.cardSolid,
   },
   modeBtnActive: { backgroundColor: C.navy },
   modeText: { color: C.green, fontWeight: '700', fontSize: 13 },
@@ -4685,13 +4684,13 @@ const makeStyles = (C: ReturnType<typeof makeC>) => StyleSheet.create({
   price: { color: C.text, fontSize: 13.5, fontWeight: '700', marginTop: 4, ...TABULAR },
 
   badge: { alignSelf: 'flex-start', borderRadius: 6, paddingHorizontal: 8, paddingVertical: 2, marginTop: 6 },
-  badgeDist: { backgroundColor: C.greenSoft, borderWidth: 1, borderColor: '#BBF7D0' },
-  locBanner: { flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: '#FEF3C7', borderWidth: 1, borderColor: '#FCD34D', borderRadius: 12, padding: 12, marginBottom: 12 },
+  badgeDist: { backgroundColor: C.greenSoft, borderWidth: 1, borderColor: 'rgba(34,197,94,0.16)' },
+  locBanner: { flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: 'rgba(245,158,11,0.14)', borderWidth: 1, borderColor: '#FCD34D', borderRadius: 12, padding: 12, marginBottom: 12 },
   locBannerTitle: { fontSize: 14, fontWeight: '700', color: '#92400E' },
   locBannerSub: { fontSize: 12, color: '#92400E', marginTop: 2, lineHeight: 16 },
   badgeOpen: { backgroundColor: C.greenSoft },
-  badgeSoon: { backgroundColor: '#FEF3C7' },
-  badgeClosed: { backgroundColor: '#FEE2E2' },
+  badgeSoon: { backgroundColor: 'rgba(245,158,11,0.14)' },
+  badgeClosed: { backgroundColor: 'rgba(239,68,68,0.13)' },
   badgeText: { fontSize: 11, fontWeight: '700', color: C.green },
 
   addBtn: { backgroundColor: C.green, borderRadius: 10, paddingHorizontal: 16, paddingVertical: 9 },
@@ -4806,12 +4805,12 @@ const makeStyles = (C: ReturnType<typeof makeC>) => StyleSheet.create({
   favName: { color: C.text, fontSize: 12.5, fontWeight: '700', textAlign: 'center' },
   favRating: { color: C.amber, fontSize: 11 },
 
-  deliveryBadge: { backgroundColor: '#E0F2FE', borderRadius: 6, paddingHorizontal: 8, paddingVertical: 2 },
+  deliveryBadge: { backgroundColor: 'rgba(59,130,246,0.13)', borderRadius: 6, paddingHorizontal: 8, paddingVertical: 2 },
   deliveryBadgeText: { color: C.blue, fontSize: 11, fontWeight: '700' },
 
   offerCard: {
     flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: C.greenSoft,
-    borderRadius: 12, padding: 12, marginBottom: 8, borderWidth: 1, borderColor: '#BBF7D0',
+    borderRadius: 12, padding: 12, marginBottom: 8, borderWidth: 1, borderColor: 'rgba(34,197,94,0.16)',
   },
   offerText: { color: C.green, fontSize: 13.5, fontWeight: '700' },
   couponCode: {
@@ -4829,7 +4828,7 @@ const makeStyles = (C: ReturnType<typeof makeC>) => StyleSheet.create({
   },
   loyaltyPoints: { color: '#fff', fontSize: 28, fontWeight: '800' },
   loyaltyTier: { color: '#93C5FD', fontSize: 13, fontWeight: '700', marginTop: 2 },
-  loyaltySub: { color: '#CBD5E1', fontSize: 12, marginTop: 2 },
+  loyaltySub: { color: C.sub, fontSize: 12, marginTop: 2 },
 
   ledgerItemLine: { color: C.sub, fontSize: 12, marginTop: 2 },
   amountNote: { color: C.sub, fontSize: 11, fontWeight: '600', marginTop: -3 },
@@ -4866,7 +4865,7 @@ const makeStyles = (C: ReturnType<typeof makeC>) => StyleSheet.create({
   findProductBtn: {
     flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: C.greenSoft,
     borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12, marginTop: 8,
-    borderWidth: 1, borderColor: '#BBF7D0',
+    borderWidth: 1, borderColor: 'rgba(34,197,94,0.16)',
   },
   findProductText: { color: C.green, fontWeight: '700', fontSize: 13.5 },
   modalWrap: { flex: 1, backgroundColor: 'rgba(0,0,0,0.55)', justifyContent: 'center', padding: 26 },

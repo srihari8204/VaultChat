@@ -15,12 +15,14 @@
 // The poster never sees their own gate: they hold the raw key locally
 // (putMediaKey at post time), so their own status opens straight away.
 
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useState, useMemo } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, StyleSheet, ActivityIndicator, Dimensions,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import PuzzleBoard from './PuzzleBoard';
+import type { Palette } from '../../constants/theme';
+import { useColors } from '../../lib/theme';
 
 interface Props {
   kind: 'puzzle' | 'question';
@@ -53,6 +55,8 @@ interface Props {
 export default function GateChallenge({
   kind, grid, previewUri, previewPending, prompt, onAnswer, onSolved, onDismiss, accent,
 }: Props) {
+  const c = useColors();
+  const S = useMemo(() => makeS(c), [c]);
   const [answer, setAnswer] = useState('');
   const [busy, setBusy] = useState(false);
   const [wrong, setWrong] = useState(false);
@@ -145,8 +149,8 @@ export default function GateChallenge({
   );
 }
 
-const S = StyleSheet.create({
-  wrap: { flex: 1, backgroundColor: '#000', alignItems: 'center', justifyContent: 'center', padding: 24 },
+const makeS = (c: Palette) => StyleSheet.create({
+  wrap: { flex: 1, backgroundColor: c.bg, alignItems: 'center', justifyContent: 'center', padding: 24 },
   close: { position: 'absolute', top: 48, left: 20, zIndex: 2 },
   title: { color: '#fff', fontSize: 19, fontWeight: '600', marginTop: 14, textAlign: 'center', lineHeight: 26 },
   input: {

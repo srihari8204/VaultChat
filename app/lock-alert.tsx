@@ -4,7 +4,7 @@
 // (the "flash" alert channel), live distance outside the radius, Stop Alarm,
 // and one-tap navigate-back. Auto-resolves to a green "safe" state on return.
 
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useMemo } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, Animated } from 'react-native';
 import { Stack, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -14,8 +14,12 @@ import { fmtDistance } from '../lib/lock/format';
 import {
   useLockView, stopLockAlarm, navigateBackToLock, restoreLock,
 } from '../lib/lock/lockService';
+import type { Palette } from '../constants/theme';
+import { useColors } from '../lib/theme';
 
 export default function LockAlertScreen() {
+  const c = useColors();
+  const st = useMemo(() => makeSt(c), [c]);
   const router = useRouter();
   const lock = useLockView();
   const settings = useLockSettings();
@@ -49,7 +53,7 @@ export default function LockAlertScreen() {
   // Safe again (or lock gone) → green confirmation instead of red panic.
   if (!lock.active || back) {
     return (
-      <View style={[st.screen, { backgroundColor: '#14532D' }]}>
+      <View style={[st.screen, { backgroundColor: 'rgba(34,197,94,0.18)' }]}>
         <Stack.Screen options={{ headerShown: false }} />
         <Ionicons name="checkmark-circle" size={92} color="#4ADE80" />
         <Text style={st.bigSafe}>You are safe</Text>
@@ -80,7 +84,7 @@ export default function LockAlertScreen() {
       </View>
 
       {lock.alarmPhase === 'alarming' ? (
-        <TouchableOpacity onPress={() => stopLockAlarm()} style={[st.btn, { backgroundColor: '#fff' }]}>
+        <TouchableOpacity onPress={() => stopLockAlarm()} style={[st.btn, { backgroundColor: c.card }]}>
           <Ionicons name="volume-mute" size={18} color="#DC2626" />
           <Text style={[st.btnTxt, { color: '#DC2626' }]}>Stop Alarm</Text>
         </TouchableOpacity>
@@ -103,6 +107,8 @@ export default function LockAlertScreen() {
 }
 
 function NavBtn({ icon, label, onPress }: { icon: any; label: string; onPress: () => void }) {
+  const c = useColors();
+  const st = useMemo(() => makeSt(c), [c]);
   return (
     <TouchableOpacity onPress={onPress} style={st.navBtn}>
       <Ionicons name={icon} size={22} color="#fff" />
@@ -111,7 +117,7 @@ function NavBtn({ icon, label, onPress }: { icon: any; label: string; onPress: (
   );
 }
 
-const st = StyleSheet.create({
+const makeSt = (c: Palette) => StyleSheet.create({
   screen: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24 },
   big: { color: '#fff', fontSize: 40, fontWeight: '900', letterSpacing: 2, marginTop: 8 },
   bigSafe: { color: '#fff', fontSize: 30, fontWeight: '900', marginTop: 12 },

@@ -5,11 +5,15 @@
 // bar under the header, hidden while ONLINE. Purely presentational — the store
 // is the single source of truth.
 
-import React from 'react';
+import React, { useMemo } from 'react';
 import { View, Text, ActivityIndicator, StyleSheet } from 'react-native';
 import { useConnectionState } from '../lib/socket';
+import type { Palette } from '../constants/theme';
+import { useColors } from '../lib/theme';
 
 export default function ConnectionBanner() {
+  const c = useColors();
+  const styles = useMemo(() => makeStyles(c), [c]);
   const state = useConnectionState();
   if (state === 'ONLINE') return null;
 
@@ -22,9 +26,9 @@ export default function ConnectionBanner() {
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (c: Palette) => StyleSheet.create({
   bar: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 6, paddingHorizontal: 12 },
-  connecting: { backgroundColor: '#8A8D91' },
+  connecting: { backgroundColor: c.surfaceSolid },
   offline: { backgroundColor: '#B00020' },
   spinner: { marginRight: 8 },
   txt: { color: '#fff', fontSize: 13, fontWeight: '600' },

@@ -12,7 +12,7 @@ import { Ionicons } from '@expo/vector-icons';
 // 6. Chat Backup — export encrypted backup to email
 
 import { BRAND_ACCENT } from '../constants/theme';
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet,
   ScrollView, Switch, Alert, ActivityIndicator,
@@ -23,7 +23,8 @@ import * as SecureStore from 'expo-secure-store';
 import * as pinStore from '../services/security/pinStore';
 import { copyAndAutoClear } from '../lib/clipboardSafe';
 import { createSyncCode } from '../lib/chatService';
-import { Aurora } from '../constants/theme';
+import type { Palette } from '../constants/theme';
+import { useColors } from '../lib/theme';
 
 // ─────────────────────────────────────────────────────────────────
 // Types
@@ -93,6 +94,9 @@ function generateCode(): string {
 // ─────────────────────────────────────────────────────────────────
 
 export default function VaultFeaturesScreen() {
+  const c = useColors();
+  const styles = useMemo(() => makeStyles(c), [c]);
+  const modalStyles = useMemo(() => makeModalStyles(c), [c]);
   const router = useRouter();
 
   const [settings,      setSettings]      = useState<VaultSettings>(DEFAULT_SETTINGS);
@@ -663,17 +667,17 @@ export default function VaultFeaturesScreen() {
 // Styles
 // ─────────────────────────────────────────────────────────────────
 
-const styles = StyleSheet.create({
-  container:    { flex: 1, backgroundColor: Aurora.card },
+const makeStyles = (c: Palette) => StyleSheet.create({
+  container:    { flex: 1, backgroundColor: c.card },
   header: {
     flexDirection: 'row', alignItems: 'center',
-    backgroundColor: Aurora.bg,
+    backgroundColor: c.bg,
     paddingTop: 48, paddingBottom: 12, paddingHorizontal: 16,
-    borderBottomWidth: 0.5, borderBottomColor: Aurora.border, gap: 12,
+    borderBottomWidth: 0.5, borderBottomColor: c.border, gap: 12,
   },
   back:          { fontSize: 28, color: BRAND_ACCENT, fontWeight: 'bold' },
   headerCenter:  { flex: 1 },
-  headerTitle:   { fontSize: 18, fontWeight: 'bold', color: Aurora.text },
+  headerTitle:   { fontSize: 18, fontWeight: 'bold', color: c.text },
   headerSub:     { fontSize: 9, color: BRAND_ACCENT, marginTop: 1, fontWeight: 'bold' },
   headerBadge:   { fontSize: 22 },
 
@@ -682,57 +686,57 @@ const styles = StyleSheet.create({
 
   // Section
   section: {
-    backgroundColor: Aurora.bg,
-    borderRadius: 14, borderWidth: 0.5, borderColor: Aurora.border,
+    backgroundColor: c.bg,
+    borderRadius: 14, borderWidth: 0.5, borderColor: c.border,
     padding: 16, marginBottom: 12,
   },
   sectionHeader: {
     flexDirection: 'row', alignItems: 'flex-start', gap: 12, marginBottom: 14,
   },
   sectionIcon:   { fontSize: 26, marginTop: 2 },
-  sectionTitle:  { fontSize: 15, fontWeight: 'bold', color: Aurora.text, marginBottom: 3 },
-  sectionDesc:   { fontSize: 12, color: Aurora.textDim, lineHeight: 17 },
+  sectionTitle:  { fontSize: 15, fontWeight: 'bold', color: c.text, marginBottom: 3 },
+  sectionDesc:   { fontSize: 12, color: c.textDim, lineHeight: 17 },
 
   // Temp chat code
   codeCard: {
-    backgroundColor: Aurora.card, borderRadius: 12,
-    borderWidth: 0.5, borderColor: Aurora.border,
+    backgroundColor: c.card, borderRadius: 12,
+    borderWidth: 0.5, borderColor: c.border,
     padding: 14, alignItems: 'center', gap: 6,
   },
   codeValue: {
     fontSize: 28, fontWeight: 'bold', color: BRAND_ACCENT,
     letterSpacing: 3, fontFamily: 'monospace',
   },
-  codeExpiry:   { fontSize: 11, color: Aurora.textDim, marginBottom: 4 },
+  codeExpiry:   { fontSize: 11, color: c.textDim, marginBottom: 4 },
   codeActions:  { flexDirection: 'row', gap: 8, marginTop: 4 },
   codeBtn: {
-    backgroundColor: Aurora.surfaceSolid, borderRadius: 8,
-    borderWidth: 0.5, borderColor: Aurora.border,
+    backgroundColor: c.surfaceSolid, borderRadius: 8,
+    borderWidth: 0.5, borderColor: c.border,
     paddingHorizontal: 12, paddingVertical: 7,
   },
-  codeBtnCopied:    { backgroundColor: '#D1FAE5', borderColor: BRAND_ACCENT },
+  codeBtnCopied:    { backgroundColor: 'rgba(34,197,94,0.14)', borderColor: BRAND_ACCENT },
   codeBtnRevoke:    { borderColor: '#FF4D6D44' },
-  codeBtnText:      { fontSize: 12, color: Aurora.text },
+  codeBtnText:      { fontSize: 12, color: c.text },
   codeBtnTextRevoke:{ color: '#FF4D6D' },
 
   actionBtn: {
     backgroundColor: BRAND_ACCENT, borderRadius: 10,
     paddingVertical: 12, alignItems: 'center',
   },
-  actionBtnDim:   { backgroundColor: '#D1FAE5' },
+  actionBtnDim:   { backgroundColor: 'rgba(34,197,94,0.14)' },
   actionBtnText:  { color: '#FFFFFF', fontWeight: 'bold', fontSize: 14 },
 
   // Picker row
   pickerRow: {
     flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
-    backgroundColor: Aurora.surfaceSolid, borderRadius: 10,
-    borderWidth: 0.5, borderColor: Aurora.border,
+    backgroundColor: c.surfaceSolid, borderRadius: 10,
+    borderWidth: 0.5, borderColor: c.border,
     paddingHorizontal: 14, paddingVertical: 12,
   },
-  pickerLabel:      { fontSize: 14, color: Aurora.text },
+  pickerLabel:      { fontSize: 14, color: c.text },
   pickerValue:      { flexDirection: 'row', alignItems: 'center', gap: 6 },
   pickerValueText:  { fontSize: 14, color: BRAND_ACCENT, fontWeight: 'bold' },
-  pickerChevron:    { fontSize: 18, color: Aurora.textDim },
+  pickerChevron:    { fontSize: 18, color: c.textDim },
 
   // Info banner
   infoBanner: {
@@ -744,80 +748,80 @@ const styles = StyleSheet.create({
 
   // Toggle section
   toggleSectionLabel: {
-    fontSize: 10, fontWeight: 'bold', color: Aurora.textDim,
+    fontSize: 10, fontWeight: 'bold', color: c.textDim,
     letterSpacing: 0.8, marginBottom: 10,
   },
   toggleRow: {
     flexDirection: 'row', alignItems: 'center',
     paddingVertical: 10, gap: 12,
-    borderBottomWidth: 0.5, borderBottomColor: Aurora.border,
+    borderBottomWidth: 0.5, borderBottomColor: c.border,
   },
   toggleIcon:   { fontSize: 20 },
   toggleInfo:   { flex: 1 },
-  toggleTitle:  { fontSize: 13, fontWeight: 'bold', color: Aurora.text, marginBottom: 2 },
-  toggleDesc:   { fontSize: 11, color: Aurora.textDim, lineHeight: 15 },
+  toggleTitle:  { fontSize: 13, fontWeight: 'bold', color: c.text, marginBottom: 2 },
+  toggleDesc:   { fontSize: 11, color: c.textDim, lineHeight: 15 },
 
   // Export rows
   exportRow: {
     flexDirection: 'row', alignItems: 'center',
     paddingVertical: 12, gap: 12,
-    borderBottomWidth: 0.5, borderBottomColor: Aurora.border,
+    borderBottomWidth: 0.5, borderBottomColor: c.border,
   },
   exportIcon:    { fontSize: 22 },
   exportInfo:    { flex: 1 },
-  exportTitle:   { fontSize: 13, fontWeight: 'bold', color: Aurora.text, marginBottom: 2 },
-  exportDesc:    { fontSize: 11, color: Aurora.textDim },
-  exportChevron: { fontSize: 18, color: Aurora.textDim },
+  exportTitle:   { fontSize: 13, fontWeight: 'bold', color: c.text, marginBottom: 2 },
+  exportDesc:    { fontSize: 11, color: c.textDim },
+  exportChevron: { fontSize: 18, color: c.textDim },
 });
 
-const modalStyles = StyleSheet.create({
+const makeModalStyles = (c: Palette) => StyleSheet.create({
   overlay:  { flex: 1, backgroundColor: '#00000088', justifyContent: 'flex-end' },
   panel: {
-    backgroundColor: Aurora.bg,
+    backgroundColor: c.bg,
     borderTopLeftRadius: 20, borderTopRightRadius: 20,
     padding: 20, paddingBottom: 36,
   },
   handle: {
-    width: 40, height: 4, backgroundColor: Aurora.surfaceSolid,
+    width: 40, height: 4, backgroundColor: c.surfaceSolid,
     borderRadius: 2, alignSelf: 'center', marginBottom: 16,
   },
   title: {
-    fontSize: 17, fontWeight: 'bold', color: Aurora.text,
+    fontSize: 17, fontWeight: 'bold', color: c.text,
     textAlign: 'center', marginBottom: 8,
   },
   subtitle: {
-    fontSize: 13, color: Aurora.textDim, textAlign: 'center',
+    fontSize: 13, color: c.textDim, textAlign: 'center',
     lineHeight: 19, marginBottom: 16,
   },
   option: {
     flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
     paddingVertical: 14, paddingHorizontal: 16, borderRadius: 10,
-    marginBottom: 6, backgroundColor: Aurora.surfaceSolid,
-    borderWidth: 0.5, borderColor: Aurora.border,
+    marginBottom: 6, backgroundColor: c.surfaceSolid,
+    borderWidth: 0.5, borderColor: c.border,
   },
-  optionActive:     { backgroundColor: '#D1FAE5', borderColor: BRAND_ACCENT },
-  optionText:       { fontSize: 15, color: Aurora.text },
+  optionActive:     { backgroundColor: 'rgba(34,197,94,0.14)', borderColor: BRAND_ACCENT },
+  optionText:       { fontSize: 15, color: c.text },
   optionTextActive: { color: BRAND_ACCENT, fontWeight: 'bold' },
   checkmark:        { fontSize: 16, color: BRAND_ACCENT, fontWeight: 'bold' },
-  inputLabel:       { fontSize: 11, color: Aurora.textDim, marginBottom: 6, marginTop: 4 },
+  inputLabel:       { fontSize: 11, color: c.textDim, marginBottom: 6, marginTop: 4 },
   pinInput: {
-    backgroundColor: Aurora.surfaceSolid, borderRadius: 10,
-    borderWidth: 0.5, borderColor: Aurora.border,
+    backgroundColor: c.surfaceSolid, borderRadius: 10,
+    borderWidth: 0.5, borderColor: c.border,
     paddingHorizontal: 14, paddingVertical: 11,
-    color: Aurora.text, fontSize: 20,
+    color: c.text, fontSize: 20,
     letterSpacing: 4, textAlign: 'center', marginBottom: 12,
   },
   btnRow:       { flexDirection: 'row', gap: 10, marginTop: 8 },
   cancelBtn: {
-    flex: 1, backgroundColor: Aurora.surfaceSolid, borderRadius: 10,
-    borderWidth: 0.5, borderColor: Aurora.border,
+    flex: 1, backgroundColor: c.surfaceSolid, borderRadius: 10,
+    borderWidth: 0.5, borderColor: c.border,
     paddingVertical: 13, alignItems: 'center',
   },
-  cancelText:   { color: Aurora.textDim, fontWeight: 'bold' },
+  cancelText:   { color: c.textDim, fontWeight: 'bold' },
   confirmBtn: {
     flex: 1, backgroundColor: BRAND_ACCENT,
     borderRadius: 10, paddingVertical: 13, alignItems: 'center',
   },
-  confirmBtnDim:  { backgroundColor: '#D1FAE5' },
+  confirmBtnDim:  { backgroundColor: 'rgba(34,197,94,0.14)' },
   confirmText:    { color: '#FFFFFF', fontWeight: 'bold', fontSize: 15 },
 });

@@ -18,7 +18,6 @@ import { useTheme } from '../lib/theme';
 import { type Palette } from '../constants/theme';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Stack, useRouter } from 'expo-router';
-import { Aurora } from '../constants/theme';
 
 
 // ── Mock inbox data ────────────────────────────────────────────
@@ -370,7 +369,7 @@ export default function EmailBridgeScreen() {
 const makeStyles = (c: Palette) => StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: Aurora.card,
+    backgroundColor: c.card,
   },
   scroll: {
     flex: 1,
@@ -401,7 +400,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
     fontWeight: '700',
   },
   headerTitle: {
-    color: Aurora.text,
+    color: c.text,
     fontSize: 22,
     fontWeight: '800',
     flex: 1,
@@ -450,7 +449,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
     marginTop: 8,
   },
   sectionTitle: {
-    color: Aurora.text,
+    color: c.text,
     fontSize: 17,
     fontWeight: '700',
     flex: 1,
@@ -464,14 +463,14 @@ const makeStyles = (c: Palette) => StyleSheet.create({
     alignItems: 'center',
   },
   countBadgeText: {
-    color: Aurora.text,
+    color: c.text,
     fontSize: 12,
     fontWeight: '700',
   },
 
   // Compose
   composeCard: {
-    backgroundColor: Aurora.bg,
+    backgroundColor: c.bg,
     borderRadius: 16,
     padding: 18,
     marginBottom: 24,
@@ -494,7 +493,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
     borderRadius: 12,
     paddingHorizontal: 14,
     paddingVertical: 12,
-    color: Aurora.text,
+    color: c.text,
     fontSize: 15,
     borderWidth: 1,
     borderColor: c.border,
@@ -510,14 +509,14 @@ const makeStyles = (c: Palette) => StyleSheet.create({
     marginTop: 4,
   },
   sendBtnText: {
-    color: Aurora.text,
+    color: c.text,
     fontSize: 16,
     fontWeight: '700',
   },
 
   // Email cards
   emailCard: {
-    backgroundColor: Aurora.bg,
+    backgroundColor: c.bg,
     borderRadius: 16,
     padding: 16,
     marginBottom: 12,
@@ -545,7 +544,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
     marginRight: 10,
   },
   emailAvatarText: {
-    color: Aurora.text,
+    color: c.text,
     fontSize: 16,
     fontWeight: '700',
   },
@@ -553,7 +552,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
     flex: 1,
   },
   emailSender: {
-    color: Aurora.text,
+    color: c.text,
     fontSize: 14,
     fontWeight: '600',
   },
@@ -576,13 +575,13 @@ const makeStyles = (c: Palette) => StyleSheet.create({
     fontWeight: '700',
   },
   emailSubject: {
-    color: '#E0E8F5',
+    color: c.text,
     fontSize: 15,
     fontWeight: '600',
     marginBottom: 6,
   },
   emailPreview: {
-    color: '#3A4A6B',
+    color: c.textDim,
     fontSize: 13,
     lineHeight: 18,
     marginBottom: 12,
@@ -593,7 +592,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
     alignItems: 'center',
   },
   decryptBtnText: {
-    color: Aurora.text,
+    color: c.text,
     fontSize: 14,
     fontWeight: '700',
   },
@@ -605,7 +604,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
     justifyContent: 'flex-end',
   },
   modalContainer: {
-    backgroundColor: Aurora.bg,
+    backgroundColor: c.bg,
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,
     maxHeight: '85%',
@@ -625,7 +624,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
     borderBottomColor: c.border,
   },
   modalTitle: {
-    color: Aurora.text,
+    color: c.text,
     fontSize: 18,
     fontWeight: '700',
   },
@@ -651,7 +650,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
     marginBottom: 3,
   },
   modalValue: {
-    color: '#E0E8F5',
+    color: c.text,
     fontSize: 15,
   },
   modalDivider: {
@@ -687,7 +686,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
     alignItems: 'center',
   },
   modalDecryptBtnText: {
-    color: Aurora.text,
+    color: c.text,
     fontSize: 15,
     fontWeight: '700',
   },
@@ -730,7 +729,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
     fontWeight: '600',
   },
   decryptedBody: {
-    color: '#E0E8F5',
+    color: c.text,
     fontSize: 15,
     lineHeight: 23,
     marginBottom: 20,

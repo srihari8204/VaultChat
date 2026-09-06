@@ -3,8 +3,10 @@
 // Use: <TransferProgress visible={uploading} progress={0.65} filename="photo.jpg" type="upload" />
 
 import { BRAND_ACCENT } from '../constants/theme';
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useMemo } from 'react';
 import { View, Text, StyleSheet, Animated, TouchableOpacity } from 'react-native';
+import type { Palette } from '../constants/theme';
+import { useColors } from '../lib/theme';
 
 interface Props {
   visible: boolean;
@@ -16,6 +18,8 @@ interface Props {
 }
 
 export default function TransferProgress({ visible, progress, filename, type = 'upload', onCancel, size }: Props) {
+  const c = useColors();
+  const s = useMemo(() => makeS(c), [c]);
   const widthAnim = useRef(new Animated.Value(0)).current;
   const pulseAnim = useRef(new Animated.Value(1)).current;
 
@@ -73,16 +77,16 @@ export default function TransferProgress({ visible, progress, filename, type = '
   );
 }
 
-const s = StyleSheet.create({
-  container: { backgroundColor: '#0C0C1A', borderRadius: 12, padding: 12, marginHorizontal: 12, marginVertical: 4, borderWidth: 1, borderColor: '#111' },
+const makeS = (c: Palette) => StyleSheet.create({
+  container: { backgroundColor: c.bg, borderRadius: 12, padding: 12, marginHorizontal: 12, marginVertical: 4, borderWidth: 1, borderColor: c.border },
   header: { flexDirection: 'row', alignItems: 'center', marginBottom: 8 },
   icon: { color: '#00E5FF', fontSize: 16, fontWeight: '900', marginRight: 8 },
-  label: { color: '#888', fontSize: 11, fontWeight: '700' },
-  filename: { color: '#E0E0F0', fontSize: 12, marginTop: 1 },
+  label: { color: c.textDim, fontSize: 11, fontWeight: '700' },
+  filename: { color: c.text, fontSize: 12, marginTop: 1 },
   pct: { color: '#00E5FF', fontSize: 14, fontWeight: '900', marginLeft: 8 },
   cancelBtn: { marginLeft: 8, width: 24, height: 24, borderRadius: 12, backgroundColor: '#FF3C6E22', justifyContent: 'center', alignItems: 'center' },
   cancelTxt: { color: '#FF3C6E', fontSize: 12 },
-  barBg: { height: 4, backgroundColor: '#111', borderRadius: 2, overflow: 'hidden' },
+  barBg: { height: 4, backgroundColor: c.bg, borderRadius: 2, overflow: 'hidden' },
   barFill: { height: '100%', borderRadius: 2 },
-  size: { color: '#555', fontSize: 10, marginTop: 4, textAlign: 'right' },
+  size: { color: c.textDim, fontSize: 10, marginTop: 4, textAlign: 'right' },
 });

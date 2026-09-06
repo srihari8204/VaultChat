@@ -214,7 +214,7 @@ export default function LocationLockScreen() {
           </View>
         )}
         {lock.gpsDegraded && (
-          <View style={[st.alarmBar, { backgroundColor: '#374151' }]}>
+          <View style={[st.alarmBar, { backgroundColor: colors.surfaceSolid }]}>
             <Ionicons name="cellular" size={15} color="#F97316" />
             <Text style={[st.alarmBarTxt, { fontWeight: '600' }]}>
               Weak GPS — possibly indoors. Monitoring continues with drift protection.

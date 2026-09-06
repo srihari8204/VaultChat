@@ -175,7 +175,7 @@ export default function CurrentLocationScreen() {
 const makeStyles = (c: Palette) => StyleSheet.create({
   screen: { flex: 1, backgroundColor: 'transparent' },
   header: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingTop: Platform.OS === 'ios' ? 56 : 44, paddingBottom: 14, paddingHorizontal: 16, backgroundColor: c.card, borderBottomWidth: 1, borderBottomColor: c.border },
-  backBtn: { width: 36, height: 36, borderRadius: 18, backgroundColor: '#2A2D3A', alignItems: 'center', justifyContent: 'center' },
+  backBtn: { width: 36, height: 36, borderRadius: 18, backgroundColor: c.surfaceSolid, alignItems: 'center', justifyContent: 'center' },
   backTxt: { fontSize: 18, color: c.text },
   headerTitle: { fontSize: 16, fontWeight: '700', color: c.text },
   headerSub: { fontSize: 11, color: c.textDim, marginTop: 1 },

@@ -9,6 +9,9 @@ interface Props {
 }
 interface State { hasError: boolean; }
 
+// THEMING: deliberately NOT theme-aware. This renders after the tree has
+// thrown — possibly ThemeProvider itself — so reading the palette from context
+// here risks the crash screen crashing. Its colours stay fixed and dark.
 export class ErrorBoundary extends React.Component<Props, State> {
   constructor(props: Props) { super(props); this.state = { hasError: false }; }
 

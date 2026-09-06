@@ -5,15 +5,19 @@ import { Ionicons } from '@expo/vector-icons';
 
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useMemo } from 'react';
 import { Alert, Animated, Dimensions, Easing, Modal, ScrollView, Share, StyleSheet, Text, TextInput, TouchableOpacity, View, useWindowDimensions} from 'react-native';
 import { VaultID, destroyVaultID, generateIdentityCertificate, generateVaultID, loadVaultID, shortAddress, signMessage, updateTrustScore } from '../constants/vaultID';
+import type { Palette } from '../constants/theme';
+import { useColors } from '../lib/theme';
 
 const { width } = Dimensions.get('window');
 
 const AVATARS = ['🧑','👩','👨','🧔','👧','👦','🧓','👴','👵','🦸','🦹','🧙','🧝','🧛','🤖','👾'];
 
 function VaultIDScreenContent() {
+  const c = useColors();
+  const S = useMemo(() => makeS(c), [c]);
   // Reactive size. The module-level Dimensions.get above is captured ONCE at
   // import and never updates, so it froze the layout at the size the app
   // launched with. Shadowing it here makes every use in this component follow
@@ -243,10 +247,10 @@ function VaultIDScreenContent() {
           <View style={S.trustActions}>
             <Text style={{color:'#3D5A7A',fontSize:11,letterSpacing:1,marginBottom:10}}>TRUST SCORE ACTIONS</Text>
             <View style={{flexDirection:'row',gap:10}}>
-              <TouchableOpacity onPress={async()=>{const s=await updateTrustScore(5);setVaultID(v=>v?{...v,trustScore:s}:v);}} style={{flex:1,backgroundColor:'#052E16',borderRadius:12,padding:12,alignItems:'center',borderWidth:1,borderColor:'#166534'}}>
+              <TouchableOpacity onPress={async()=>{const s=await updateTrustScore(5);setVaultID(v=>v?{...v,trustScore:s}:v);}} style={{flex:1,backgroundColor:'rgba(34,197,94,0.16)',borderRadius:12,padding:12,alignItems:'center',borderWidth:1,borderColor:'#166534'}}>
                 <Text style={{color:'#4ADE80',fontSize:13,fontWeight:'700'}}>+5 Verified Contact</Text>
               </TouchableOpacity>
-              <TouchableOpacity onPress={async()=>{const s=await updateTrustScore(-10);setVaultID(v=>v?{...v,trustScore:s}:v);}} style={{flex:1,backgroundColor:'#3B0A0A',borderRadius:12,padding:12,alignItems:'center',borderWidth:1,borderColor:'#7F1D1D'}}>
+              <TouchableOpacity onPress={async()=>{const s=await updateTrustScore(-10);setVaultID(v=>v?{...v,trustScore:s}:v);}} style={{flex:1,backgroundColor:'rgba(239,68,68,0.16)',borderRadius:12,padding:12,alignItems:'center',borderWidth:1,borderColor:'rgba(239,68,68,0.18)'}}>
                 <Text style={{color:'#FCA5A5',fontSize:13,fontWeight:'700'}}>-10 Report Spam</Text>
               </TouchableOpacity>
             </View>
@@ -312,14 +316,14 @@ function VaultIDScreenContent() {
             <TextInput
               value={displayName} onChangeText={setDisplayName}
               placeholder="Enter your name..." placeholderTextColor="#1D2D44"
-              style={{backgroundColor:'#060E22',borderRadius:12,padding:14,color:'#fff',fontSize:15,borderWidth:1.5,borderColor:'#0D1E3A',marginBottom:14}}
+              style={{backgroundColor: c.bg,borderRadius:12,padding:14,color:'#fff',fontSize:15,borderWidth:1.5,borderColor:'#0D1E3A',marginBottom:14}}
             />
 
             <Text style={{color:'#4A9FFF',fontSize:11,fontWeight:'700',marginBottom:8,letterSpacing:1}}>BIO (OPTIONAL)</Text>
             <TextInput
               value={bio} onChangeText={setBio}
               placeholder="Short bio..." placeholderTextColor="#1D2D44"
-              style={{backgroundColor:'#060E22',borderRadius:12,padding:14,color:'#fff',fontSize:15,borderWidth:1.5,borderColor:'#0D1E3A',marginBottom:20}}
+              style={{backgroundColor: c.bg,borderRadius:12,padding:14,color:'#fff',fontSize:15,borderWidth:1.5,borderColor:'#0D1E3A',marginBottom:20}}
             />
 
             <TouchableOpacity disabled={creating||!displayName.trim()} style={{opacity:creating||!displayName.trim()?0.5:1}} onPress={handleCreate}>
@@ -353,12 +357,12 @@ function VaultIDScreenContent() {
               ].map((item,i)=>(
                 <View key={i} style={{marginBottom:14}}>
                   <Text style={{color:'#3D5A7A',fontSize:10,letterSpacing:1,marginBottom:4}}>{item.label.toUpperCase()}</Text>
-                  <Text style={{color:'#fff',fontSize:13,fontFamily:'monospace',backgroundColor:'#060E22',padding:10,borderRadius:8}}>{item.value}</Text>
+                  <Text style={{color:'#fff',fontSize:13,fontFamily:'monospace',backgroundColor: c.bg,padding:10,borderRadius:8}}>{item.value}</Text>
                 </View>
               ))}
               {signedMsg?<View style={{marginBottom:14}}>
                 <Text style={{color:'#3D5A7A',fontSize:10,letterSpacing:1,marginBottom:4}}>LAST SIGNATURE</Text>
-                <Text style={{color:BRAND_ACCENT,fontSize:12,fontFamily:'monospace',backgroundColor:'#060E22',padding:10,borderRadius:8}}>{signedMsg}</Text>
+                <Text style={{color:BRAND_ACCENT,fontSize:12,fontFamily:'monospace',backgroundColor: c.bg,padding:10,borderRadius:8}}>{signedMsg}</Text>
               </View>:null}
               <TouchableOpacity onPress={()=>setShowDetails(false)} style={{alignItems:'center',paddingVertical:14,marginTop:8}}>
                 <Text style={{color:'#4A9FFF',fontSize:14,fontWeight:'700'}}>Close</Text>
@@ -374,7 +378,7 @@ function VaultIDScreenContent() {
           <LinearGradient colors={['#F9FAFB','#0D1E3A']} style={{borderTopLeftRadius:28,borderTopRightRadius:28,padding:24,paddingBottom:44}}>
             <Text style={{color:'#fff',fontSize:20,fontWeight:'900',marginBottom:4}}>📜 Identity Certificate</Text>
             <Text style={{color:'#3D5A7A',fontSize:12,marginBottom:16}}>Cryptographic proof of your VaultID ownership</Text>
-            <ScrollView style={{backgroundColor:'#060E22',borderRadius:12,padding:14,maxHeight:200,marginBottom:16}}>
+            <ScrollView style={{backgroundColor: c.bg,borderRadius:12,padding:14,maxHeight:200,marginBottom:16}}>
               <Text style={{color:BRAND_ACCENT,fontSize:10,fontFamily:'monospace',lineHeight:16}}>{certificate}</Text>
             </ScrollView>
             <TouchableOpacity onPress={async()=>{ await Share.share({message:'My VaultChat Identity Certificate:\n\n'+certificate}); }}>
@@ -393,45 +397,45 @@ function VaultIDScreenContent() {
   );
 }
 
-const S = StyleSheet.create({
-  container:{paddingHorizontal:20,paddingTop:HEADER_TOP,paddingBottom:40},
-  header:{flexDirection:'row',alignItems:'center',marginBottom:20,gap:12},
-  backBtn:{width:36,height:36,borderRadius:18,backgroundColor:'#F9FAFB',justifyContent:'center',alignItems:'center',borderWidth:1,borderColor:'#0D1E3A'},
-  headerTitle:{color:'#fff',fontSize:20,fontWeight:'900'},
-  shareBtn:{backgroundColor:'#0D1E3A',borderRadius:10,paddingHorizontal:14,paddingVertical:7,borderWidth:1,borderColor:'#1D4ED8'},
-  idCard:{borderRadius:24,marginBottom:16,elevation:20,shadowColor:'#7C3AED',shadowOffset:{width:0,height:0},shadowOpacity:0.8,shadowRadius:20},
-  idCardInner:{borderRadius:24,padding:24,alignItems:'center',borderWidth:1,borderColor:'#0D1E3A',overflow:'hidden'},
-  chainRing:{position:'absolute',width:280,height:280,borderRadius:140,borderWidth:1,borderColor:'rgba(124,58,237,0.2)',borderStyle:'dashed'},
-  avatarContainer:{marginBottom:12,position:'relative'},
-  avatarGrad:{width:90,height:90,borderRadius:45,justifyContent:'center',alignItems:'center'},
-  verifiedBadge:{position:'absolute',bottom:0,right:0,backgroundColor:'#052E16',borderRadius:12,padding:2},
-  displayName:{color:'#fff',fontSize:22,fontWeight:'900',marginBottom:8},
-  vaultTagRow:{marginBottom:10},
-  vaultTagBadge:{borderRadius:20,paddingHorizontal:16,paddingVertical:6},
-  vaultTagText:{color:'#fff',fontSize:13,fontWeight:'800',letterSpacing:1},
-  bioText:{color:'#3D5A7A',fontSize:13,textAlign:'center',marginBottom:10,paddingHorizontal:20},
-  walletRow:{flexDirection:'row',alignItems:'center',gap:8,marginBottom:14,backgroundColor:'#060E22',borderRadius:10,paddingHorizontal:14,paddingVertical:8},
-  walletAddr:{color:'#4A9FFF',fontSize:12,fontFamily:'monospace',fontWeight:'700',flex:1},
-  blockchainDot:{width:8,height:8,borderRadius:4,backgroundColor:BRAND_ACCENT},
-  trustRow:{width:'100%',gap:6,marginBottom:12},
-  trustBar:{height:6,backgroundColor:'#F9FAFB',borderRadius:3,flex:1,overflow:'hidden'},
-  trustFill:{height:6,borderRadius:3},
-  trustScore:{fontSize:14,fontWeight:'900'},
-  chainBlocks:{flexDirection:'row',gap:4,marginBottom:8},
-  nophone:{backgroundColor:'#052E16',borderRadius:8,paddingHorizontal:12,paddingVertical:4,borderWidth:1,borderColor:'#166534'},
-  statsRow:{flexDirection:'row',gap:10,marginBottom:16},
-  statCard:{flex:1,backgroundColor:'#F9FAFB',borderRadius:14,padding:12,alignItems:'center',borderWidth:1,borderColor:'#0D1E3A'},
-  statValue:{color:'#fff',fontSize:13,fontWeight:'800',marginBottom:2},
-  statLabel:{color:'#3D5A7A',fontSize:9,letterSpacing:1},
-  actions:{flexDirection:'row',gap:10,marginBottom:16},
-  actionBtn:{flex:1},
-  actionGrad:{borderRadius:16,padding:14,alignItems:'center'},
-  actionText:{color:'#fff',fontSize:11,fontWeight:'800',marginTop:4},
-  actionSub:{color:'rgba(255,255,255,0.5)',fontSize:9,marginTop:2},
-  trustActions:{backgroundColor:'#F9FAFB',borderRadius:16,padding:16,marginBottom:16,borderWidth:1,borderColor:'#0D1E3A'},
-  featuresGrid:{flexDirection:'row',flexWrap:'wrap',gap:10,marginBottom:16},
-  featureCard:{width:(width-50)/3,backgroundColor:'#F9FAFB',borderRadius:14,padding:12,alignItems:'center',borderWidth:1,borderColor:'#0D1E3A'},
-  destroyBtn:{backgroundColor:'#3B0A0A',borderRadius:14,padding:16,alignItems:'center',borderWidth:1,borderColor:'#7F1D1D',marginBottom:20},
+const makeS = (c: Palette) => StyleSheet.create({
+  container: {paddingHorizontal:20,paddingTop:HEADER_TOP,paddingBottom:40},
+  header: {flexDirection:'row',alignItems:'center',marginBottom:20,gap:12},
+  backBtn: {width:36,height:36,borderRadius:18,backgroundColor: c.card,justifyContent:'center',alignItems:'center',borderWidth:1,borderColor:'#0D1E3A'},
+  headerTitle: {color:'#fff',fontSize:20,fontWeight:'900'},
+  shareBtn: {backgroundColor:'#0D1E3A',borderRadius:10,paddingHorizontal:14,paddingVertical:7,borderWidth:1,borderColor:'#1D4ED8'},
+  idCard:{borderRadius:24,marginBottom:16,elevation:20,shadowColor:'#7C3AED',shadowOffset: {width:0,height:0},shadowOpacity:0.8,shadowRadius:20},
+  idCardInner: {borderRadius:24,padding:24,alignItems:'center',borderWidth:1,borderColor:'#0D1E3A',overflow:'hidden'},
+  chainRing: {position:'absolute',width:280,height:280,borderRadius:140,borderWidth:1,borderColor:'rgba(124,58,237,0.2)',borderStyle:'dashed'},
+  avatarContainer: {marginBottom:12,position:'relative'},
+  avatarGrad: {width:90,height:90,borderRadius:45,justifyContent:'center',alignItems:'center'},
+  verifiedBadge: {position:'absolute',bottom:0,right:0,backgroundColor: c.bg,borderRadius:12,padding:2},
+  displayName: {color:'#fff',fontSize:22,fontWeight:'900',marginBottom:8},
+  vaultTagRow: {marginBottom:10},
+  vaultTagBadge: {borderRadius:20,paddingHorizontal:16,paddingVertical:6},
+  vaultTagText: {color:'#fff',fontSize:13,fontWeight:'800',letterSpacing:1},
+  bioText: {color:'#3D5A7A',fontSize:13,textAlign:'center',marginBottom:10,paddingHorizontal:20},
+  walletRow: {flexDirection:'row',alignItems:'center',gap:8,marginBottom:14,backgroundColor: c.bg,borderRadius:10,paddingHorizontal:14,paddingVertical:8},
+  walletAddr: {color:'#4A9FFF',fontSize:12,fontFamily:'monospace',fontWeight:'700',flex:1},
+  blockchainDot: {width:8,height:8,borderRadius:4,backgroundColor:BRAND_ACCENT},
+  trustRow: {width:'100%',gap:6,marginBottom:12},
+  trustBar: {height:6,backgroundColor: c.card,borderRadius:3,flex:1,overflow:'hidden'},
+  trustFill: {height:6,borderRadius:3},
+  trustScore: {fontSize:14,fontWeight:'900'},
+  chainBlocks: {flexDirection:'row',gap:4,marginBottom:8},
+  nophone: {backgroundColor: c.bg,borderRadius:8,paddingHorizontal:12,paddingVertical:4,borderWidth:1,borderColor:'#166534'},
+  statsRow: {flexDirection:'row',gap:10,marginBottom:16},
+  statCard: {flex:1,backgroundColor: c.card,borderRadius:14,padding:12,alignItems:'center',borderWidth:1,borderColor:'#0D1E3A'},
+  statValue: {color:'#fff',fontSize:13,fontWeight:'800',marginBottom:2},
+  statLabel: {color:'#3D5A7A',fontSize:9,letterSpacing:1},
+  actions: {flexDirection:'row',gap:10,marginBottom:16},
+  actionBtn: {flex:1},
+  actionGrad: {borderRadius:16,padding:14,alignItems:'center'},
+  actionText: {color:'#fff',fontSize:11,fontWeight:'800',marginTop:4},
+  actionSub: {color:'rgba(255,255,255,0.5)',fontSize:9,marginTop:2},
+  trustActions: {backgroundColor: c.card,borderRadius:16,padding:16,marginBottom:16,borderWidth:1,borderColor:'#0D1E3A'},
+  featuresGrid: {flexDirection:'row',flexWrap:'wrap',gap:10,marginBottom:16},
+  featureCard: {width:(width-50)/3,backgroundColor: c.card,borderRadius:14,padding:12,alignItems:'center',borderWidth:1,borderColor:'#0D1E3A'},
+  destroyBtn: {backgroundColor:'rgba(239,68,68,0.16)',borderRadius:14,padding:16,alignItems:'center',borderWidth:1,borderColor:'rgba(239,68,68,0.18)',marginBottom:20},
 });
 
 export default function VaultIDScreen() {

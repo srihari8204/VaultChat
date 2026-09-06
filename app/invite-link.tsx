@@ -217,7 +217,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   qrBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.8)', alignItems: 'center', justifyContent: 'center', padding: 24 },
   qrCard: { backgroundColor: c.card, borderRadius: 24, padding: 24, alignItems: 'center', width: '100%', maxWidth: 320, borderWidth: 1, borderColor: c.border },
   qrTitle: { color: c.text, fontSize: 16, fontWeight: '800', marginBottom: 16, textAlign: 'center' },
-  qrBox: { backgroundColor: '#FFFFFF', padding: 16, borderRadius: 16 },
+  qrBox: { backgroundColor: c.card, padding: 16, borderRadius: 16 },
   qrCode: { color: c.textDim, fontSize: 12, fontFamily: 'monospace', marginTop: 16 },
   qrClose: { marginTop: 20, paddingVertical: 12, paddingHorizontal: 40, borderRadius: 14, backgroundColor: c.primary },
   qrCloseTxt: { color: '#fff', fontSize: 15, fontWeight: '800' },

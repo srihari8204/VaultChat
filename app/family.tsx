@@ -2273,7 +2273,7 @@ export default function FamilySpaceScreen() {
             <TouchableOpacity
               onPress={() => setCrashAsk(false)}
               accessibilityRole="button"
-              style={[st.crashBtn, { backgroundColor: '#05603A' }]}
+              style={[st.crashBtn, { backgroundColor: 'rgba(34,197,94,0.20)' }]}
             >
               <Text style={st.crashBtnTxt}>I’m OK</Text>
             </TouchableOpacity>

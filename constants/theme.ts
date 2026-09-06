@@ -62,9 +62,16 @@ export interface Palette {
   hairline: string;
   /** Disc behind avatar initials, inside the gradient ring. */
   groundDisc: string;
-  /** Accent gradient ends. Also the accent tint legible on glass. */
+  /** The two ends of the accent gradient (rings, FABs, the Apps disc). */
   accentLight: string;
   accentDeep: string;
+  /**
+   * The accent as TEXT/ICON colour on this theme's ground. Not a gradient end:
+   * on dark it is the pale lavender, on light it must be the deep violet, or
+   * active tabs and links wash out. Keeping this separate is what lets the
+   * gradient stay a gradient in both themes.
+   */
+  accentOn: string;
 }
 
 // ─── Single source of truth for the brand ACCENT (lavender) ─────────
@@ -93,12 +100,13 @@ export const AuroraDark: Palette = {
   border:    'rgba(255,255,255,0.09)',
   separator: 'rgba(255,255,255,0.06)',
   text:      'rgba(255,255,255,0.96)',
-  textDim:   'rgba(255,255,255,0.48)',
+  textDim:   'rgba(255,255,255,0.56)',
   textFaint: 'rgba(255,255,255,0.34)',
   // Conversation: received sits on a raised ground tone, sent carries the accent.
   chatBg:        '#0A0810',
   bubbleIn:      '#1B1626',
-  bubbleOut:     BRAND_ACCENT,
+  bubbleOut:     '#7C3AED',   // deep end of the accent ramp: white body text needs 4.5:1
+
   bubbleInText:  'rgba(255,255,255,0.96)',
   bubbleOutText: '#FFFFFF',
   bubbleMetaIn:  'rgba(255,255,255,0.34)',
@@ -113,37 +121,40 @@ export const AuroraDark: Palette = {
   groundDisc:  '#171320',
   accentLight: '#C9A6F5',
   accentDeep:  '#7C3AED',
+  accentOn:    '#C9A6F5',
 };
 
 export const AuroraLight: Palette = {
   ...BRAND,
-  bg:        '#F6F7F9',
-  surface:   'rgba(0,0,0,0.04)',
-  surfaceSolid: '#EDEFF3',
+  bg:        '#F4F1FA', // lavender-tinted, NOT pure white — the blooms need a ground with hue
+  surface:   'rgba(24,16,40,0.045)',
+  surfaceSolid: '#EBE6F5',
   card:      '#FFFFFF',
-  border:    'rgba(0,0,0,0.10)',
-  separator: 'rgba(0,0,0,0.07)',
-  text:      '#0A0A0F',
-  textDim:   'rgba(0,0,0,0.55)',
-  textFaint: 'rgba(0,0,0,0.35)',
-  // Lavender-theme light conversation palette (sent = accent, received = neutral)
-  chatBg:        '#F4F4F7',
+  border:    'rgba(24,16,40,0.11)',
+  separator: 'rgba(24,16,40,0.07)',
+  text:      '#1B1526',
+  textDim:   'rgba(27,21,38,0.60)',
+  textFaint: 'rgba(27,21,38,0.40)',
+  // Conversation: received on white, sent on the brand accent.
+  chatBg:        '#F4F1FA',
   bubbleIn:      '#FFFFFF',
-  bubbleOut:     BRAND_ACCENT,
-  bubbleInText:  '#11181C',
+  bubbleOut:     '#6D28D9',   // deep end of the accent ramp: white body text needs 4.5:1
+
+  bubbleInText:  '#1B1526',
   bubbleOutText: '#FFFFFF',
-  bubbleMetaIn:  '#667781',
+  bubbleMetaIn:  'rgba(27,21,38,0.45)',
   bubbleMetaOut: 'rgba(255,255,255,0.85)',
   tickRead:      '#FFFFFF',
   headerBar:     '#FFFFFF',
 
-  glass:       'rgba(255,255,255,0.72)',
+  glass:       'rgba(255,255,255,0.70)',
   glassSoft:   'rgba(255,255,255,0.55)',
-  glassStroke: 'rgba(0,0,0,0.08)',
-  hairline:    'rgba(0,0,0,0.07)',
+  glassStroke: 'rgba(24,16,40,0.10)',
+  hairline:    'rgba(24,16,40,0.08)',
   groundDisc:  '#FFFFFF',
-  accentLight: '#7C3AED',
+  accentLight: '#A78BFA',
   accentDeep:  '#6D28D9',
+  accentOn:    '#6D28D9',
 };
 
 /** The static default palette (dark). Existing screens import this directly. */

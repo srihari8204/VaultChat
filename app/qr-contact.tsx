@@ -134,7 +134,7 @@ export default function QRContactScreen() {
                 <View style={s.qrBox}>
                   {myVaultId
                     ? <QRCode value={qrData} size={200} backgroundColor="#FFFFFF" color="#0A0A0F" />
-                    : <Text style={{ color: '#888' }}>No VaultID yet</Text>}
+                    : <Text style={{ color: colors.textDim }}>No VaultID yet</Text>}
                 </View>
                 <Text style={s.qrHint}>Show this to add you on VaultChat</Text>
               </View>
@@ -195,7 +195,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   qrCard: { backgroundColor: c.card, borderRadius: 24, padding: 32, alignItems: 'center', width: '100%', maxWidth: 320, borderWidth: 1, borderColor: c.border },
   qrName: { color: c.text, fontSize: 20, fontWeight: '900', marginBottom: 4 },
   qrId: { color: c.accent, fontSize: 14, marginBottom: 20, fontWeight: '700' },
-  qrBox: { padding: 12, backgroundColor: '#FFFFFF', borderRadius: 12, minWidth: 224, minHeight: 224, alignItems: 'center', justifyContent: 'center' },
+  qrBox: { padding: 12, backgroundColor: c.card, borderRadius: 12, minWidth: 224, minHeight: 224, alignItems: 'center', justifyContent: 'center' },
   qrHint: { color: c.textDim, fontSize: 12, marginTop: 16, textAlign: 'center' },
   shareBtn: { marginTop: 24, backgroundColor: brandAlpha(0.13), borderRadius: 14, paddingVertical: 14, paddingHorizontal: 28, borderWidth: 1, borderColor: brandAlpha(0.3) },
   shareTxt: { color: c.primary, fontSize: 14, fontWeight: '700' },

@@ -13,10 +13,12 @@
 // weaker option look equally strong would be the most damaging thing this
 // screen could do.
 
-import React from 'react';
+import React, { useMemo } from 'react';
 import { View, Text, TextInput, TouchableOpacity, StyleSheet } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { GRID_MIN, GRID_MAX, isAcceptableAnswer, ANSWER_MIN_LEN } from '../../lib/status/gate';
+import type { Palette } from '../../constants/theme';
+import { useColors } from '../../lib/theme';
 
 export type GateDraft =
   | { kind: 'none' }
@@ -35,6 +37,8 @@ interface Props {
 const GRIDS = Array.from({ length: GRID_MAX - GRID_MIN + 1 }, (_, i) => GRID_MIN + i);
 
 export default function GatePicker({ value, onChange, accent, text, dim, surface }: Props) {
+  const c = useColors();
+  const S = useMemo(() => makeS(c), [c]);
   const Opt = ({ kind, icon, title, sub }: {
     kind: GateDraft['kind']; icon: any; title: string; sub: string;
   }) => {
@@ -137,7 +141,7 @@ export default function GatePicker({ value, onChange, accent, text, dim, surface
   );
 }
 
-const S = StyleSheet.create({
+const makeS = (c: Palette) => StyleSheet.create({
   wrap: { gap: 8 },
   opt: { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 14, borderRadius: 14, borderWidth: 1.5 },
   optText: { flex: 1 },

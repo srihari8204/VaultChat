@@ -430,7 +430,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   retryBtnDisabled: { opacity: 0.4 },
   retryBtnText: { color: c.text, fontSize: 16, fontWeight: '700' },
 
-  syncBarBg: { height: 8, borderRadius: 4, backgroundColor: '#1A2A44', overflow: 'hidden', marginBottom: 8 },
+  syncBarBg: { height: 8, borderRadius: 4, backgroundColor: c.surfaceSolid, overflow: 'hidden', marginBottom: 8 },
   syncBarFill: { height: 8, borderRadius: 4, backgroundColor: c.accent },
   syncPct: { color: c.accent, fontSize: 14, fontWeight: '700', textAlign: 'center' },
 

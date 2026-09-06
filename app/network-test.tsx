@@ -14,7 +14,6 @@ import { LinearGradient } from 'expo-linear-gradient';
 import NetInfo from '@react-native-community/netinfo';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { AuroraBackground } from '../components/ui';
-import { Aurora } from '../constants/theme';
 
 const { width: SW } = Dimensions.get('window');
 
@@ -448,7 +447,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   gaugeTickLabel: { color: c.textDim, fontSize: 9 },
   gaugeNeedle: { position: 'absolute', bottom: 10, width: 3, height: GAUGE_SIZE / 2 - 20, backgroundColor: c.danger, borderRadius: 2, transformOrigin: 'bottom center' },
   needleLine: { width: 3, height: '100%', backgroundColor: c.accent, borderRadius: 2 },
-  gaugeCenterDot: { position: 'absolute', bottom: 4, width: 16, height: 16, borderRadius: 8, backgroundColor: Aurora.card },
+  gaugeCenterDot: { position: 'absolute', bottom: 4, width: 16, height: 16, borderRadius: 8, backgroundColor: c.card },
   gaugeSpeed: { color: '#FFF', fontSize: 42, fontWeight: '800', marginTop: 8 },
   gaugeUnit: { color: c.textDim, fontSize: 14, marginTop: -2 },
   gaugePhase: { color: c.accent, fontSize: 13, fontWeight: '600', marginTop: 8 },

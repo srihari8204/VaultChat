@@ -62,4 +62,68 @@ const names = ['Anitha', 'Family Space', 'Kiran Kumar', 'Office Group', 'Priya',
 const distinct = new Set(names.map(x => avatarRing(x).join('/')));
 ok('a realistic chat list gets varied rings', distinct.size >= 4);
 
-console.log(`auroraGlass.selftest: ${n} assertions passed`);
+
+// ── Both themes have to be READABLE, not merely complete ─────────────
+// The failure this catches is specific and was live before this pass: the
+// accent is a pale lavender chosen against a near-black ground. Copy it into
+// the light palette and every active tab, link and timestamp turns into
+// low-contrast haze that still "works" — nothing crashes, nothing is
+// undefined, it is just unreadable. Contrast is the only assertion that sees it.
+
+/** Parse '#RGB' | '#RRGGBB' | 'rgba(r,g,b,a)' into linear-ish [r,g,b,a] 0-255. */
+function parse(v: string): [number, number, number, number] {
+  const rgba = v.match(/^rgba?\(\s*([\d.]+)\s*,\s*([\d.]+)\s*,\s*([\d.]+)\s*(?:,\s*([\d.]+)\s*)?\)$/i);
+  if (rgba) return [ +rgba[1], +rgba[2], +rgba[3], rgba[4] === undefined ? 1 : +rgba[4] ];
+  let h = v.replace('#', '');
+  if (h.length === 3) h = h.split('').map(ch => ch + ch).join('');
+  return [parseInt(h.slice(0, 2), 16), parseInt(h.slice(2, 4), 16), parseInt(h.slice(4, 6), 16), 1];
+}
+
+/** Composite a possibly-translucent foreground over an opaque background. */
+function over(fg: string, bg: string): [number, number, number] {
+  const [fr, fg2, fb, fa] = parse(fg);
+  const [br, bg2, bb] = parse(bg);
+  return [fr * fa + br * (1 - fa), fg2 * fa + bg2 * (1 - fa), fb * fa + bb * (1 - fa)];
+}
+
+function luminance(rgb: [number, number, number]): number {
+  const [r, g, b] = rgb.map(v => {
+    const s = v / 255;
+    return s <= 0.03928 ? s / 12.92 : Math.pow((s + 0.055) / 1.055, 2.4);
+  });
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+}
+
+function contrast(fg: string, bg: string): number {
+  const a = luminance(over(fg, bg));
+  const b = luminance(over(bg, bg));
+  const [hi, lo] = a > b ? [a, b] : [b, a];
+  return (hi + 0.05) / (lo + 0.05);
+}
+
+for (const [name, p] of [['dark', AuroraDark], ['light', AuroraLight]] as [string, Palette][]) {
+  const bodyText = contrast(p.text, p.bg);
+  ok(`${name}: body text on ground is at least 4.5:1 (got ${bodyText.toFixed(2)})`, bodyText >= 4.5);
+
+  const muted = contrast(p.textDim, p.bg);
+  ok(`${name}: muted text on ground is at least 3:1 (got ${muted.toFixed(2)})`, muted >= 3);
+
+  // accentOn is the tab label, the link, the "online" line — UI text, so 3:1.
+  const accent = contrast(p.accentOn, p.bg);
+  ok(`${name}: accentOn on ground is at least 3:1 (got ${accent.toFixed(2)})`, accent >= 3);
+
+  const onBubble = contrast(p.bubbleOutText, p.bubbleOut);
+  ok(`${name}: sent-bubble text on the accent fill is at least 4:1 (got ${onBubble.toFixed(2)})`, onBubble >= 4);
+}
+
+// ── The two palettes must actually differ where it matters ───────────
+// Guards against a lazy "fill light in with the dark values" regression.
+for (const role of ['bg', 'text', 'card', 'accentOn', 'groundDisc'] as (keyof Palette)[]) {
+  ok(`light and dark disagree on ${role}`, AuroraDark[role] !== AuroraLight[role]);
+}
+
+// ── And neither is inverted ──────────────────────────────────────────
+ok('the dark ground is genuinely dark', luminance(over(AuroraDark.bg, AuroraDark.bg)) < 0.08);
+ok('the light ground is genuinely light', luminance(over(AuroraLight.bg, AuroraLight.bg)) > 0.6);
+
+console.log(`auroraGlass.selftest: ${n} assertions passed (incl. contrast in both themes)`);

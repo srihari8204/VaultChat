@@ -1,8 +1,10 @@
 // components/ReactionPicker.tsx
 // Emoji reaction picker shown on long-press
 
-import React from 'react';
+import React, { useMemo } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, Pressable } from 'react-native';
+import type { Palette } from '../constants/theme';
+import { useColors } from '../lib/theme';
 
 const EMOJIS = ['❤️', '😂', '👍', '😮', '😢', '🔥', '👏', '🙏'];
 
@@ -13,6 +15,8 @@ interface Props {
 }
 
 export default function ReactionPicker({ visible, onSelect, onClose }: Props) {
+  const c = useColors();
+  const s = useMemo(() => makeS(c), [c]);
   if (!visible) return null;
   return (
     <Pressable style={s.overlay} onPress={onClose}>
@@ -27,16 +31,16 @@ export default function ReactionPicker({ visible, onSelect, onClose }: Props) {
   );
 }
 
-const s = StyleSheet.create({
-  overlay:  { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 },
+const makeS = (c: Palette) => StyleSheet.create({
+  overlay: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 },
   bubble:   {
     position: 'absolute', bottom: 120, alignSelf: 'center',
-    flexDirection: 'row', backgroundColor: '#1A1A32',
+    flexDirection: 'row', backgroundColor: c.bg,
     borderRadius: 30, paddingHorizontal: 8, paddingVertical: 6,
     shadowColor: '#000', shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.4, shadowRadius: 8, elevation: 10,
-    borderWidth: 1, borderColor: '#333',
+    borderWidth: 1, borderColor: c.border,
   },
   emojiBtn: { padding: 6 },
-  emoji:    { fontSize: 26 },
+  emoji: { fontSize: 26 },
 });

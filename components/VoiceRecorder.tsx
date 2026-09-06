@@ -1,9 +1,11 @@
 // components/VoiceRecorder.tsx
 // Hold to record voice message
 
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useMemo } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, ActivityIndicator, Alert } from 'react-native';
 import { Audio } from 'expo-av';
+import type { Palette } from '../constants/theme';
+import { useColors } from '../lib/theme';
 
 interface Props {
   onSend: (uri: string, duration: number) => void;
@@ -11,6 +13,8 @@ interface Props {
 }
 
 export default function VoiceRecorder({ onSend, onCancel }: Props) {
+  const c = useColors();
+  const s = useMemo(() => makeS(c), [c]);
   const [recording, setRecording]   = useState<Audio.Recording | null>(null);
   const [seconds,   setSeconds]     = useState(0);
   const [uploading, setUploading]   = useState(false);
@@ -84,16 +88,16 @@ export default function VoiceRecorder({ onSend, onCancel }: Props) {
   );
 }
 
-const s = StyleSheet.create({
-  wrap:      { flexDirection: 'row', alignItems: 'center', backgroundColor: '#0C0C1A', paddingHorizontal: 10, paddingVertical: 10, borderTopWidth: 1, borderTopColor: '#111' },
+const makeS = (c: Palette) => StyleSheet.create({
+  wrap: { flexDirection: 'row', alignItems: 'center', backgroundColor: c.bg, paddingHorizontal: 10, paddingVertical: 10, borderTopWidth: 1, borderTopColor: c.border },
   cancelBtn: { padding: 8 },
-  cancelTxt: { color: '#555', fontSize: 20 },
-  center:    { flex: 1, alignItems: 'center' },
-  recRow:    { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  dot:       { width: 10, height: 10, borderRadius: 5, backgroundColor: '#FF3C6E' },
-  timer:     { color: '#E0E0F0', fontSize: 16, fontVariant: ['tabular-nums'] },
-  hint:      { color: '#555', fontSize: 13 },
-  micBtn:    { width: 48, height: 48, borderRadius: 24, backgroundColor: '#00E5FF', alignItems: 'center', justifyContent: 'center' },
-  micStop:   { backgroundColor: '#FF3C6E' },
-  micIco:    { fontSize: 22 },
+  cancelTxt: { color: c.textDim, fontSize: 20 },
+  center: { flex: 1, alignItems: 'center' },
+  recRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  dot: { width: 10, height: 10, borderRadius: 5, backgroundColor: '#FF3C6E' },
+  timer: { color: c.text, fontSize: 16, fontVariant: ['tabular-nums'] },
+  hint: { color: c.textDim, fontSize: 13 },
+  micBtn: { width: 48, height: 48, borderRadius: 24, backgroundColor: '#00E5FF', alignItems: 'center', justifyContent: 'center' },
+  micStop: { backgroundColor: '#FF3C6E' },
+  micIco: { fontSize: 22 },
 });

@@ -13,7 +13,7 @@ import { encField, decField } from '../../lib/cacheCrypto';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Stack, useRouter } from 'expo-router';
 import { TAB_BAR_SPACE } from '../../constants/layout';
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useMemo } from 'react';
 import {
   Alert,
   ScrollView,
@@ -24,6 +24,8 @@ import {
   View,
 } from 'react-native';
 import { AuroraBackground } from '../../components/ui';
+import type { Palette } from '../../constants/theme';
+import { useColors } from '../../lib/theme';
 
 // ── Mini Apps matching PDF (page 12) ─────────────────────────────
 // Row 1: Watch, Walkie, Screen
@@ -67,6 +69,8 @@ interface TodoItem {
 }
 
 export default function MiniAppsScreen() {
+  const c = useColors();
+  const styles = useMemo(() => makeStyles(c), [c]);
   const router = useRouter();
   const [activeApp, setActiveApp] = useState<string | null>(null);
 
@@ -399,10 +403,10 @@ export default function MiniAppsScreen() {
 }
 
 // ── Styles ───────────────────────────────────────────────────────
-const styles = StyleSheet.create({
+const makeStyles = (c: Palette) => StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#0A0810',
+    backgroundColor: c.bg,
   },
   scroll: {
     padding: 20,
@@ -418,27 +422,27 @@ const styles = StyleSheet.create({
     width: 40,
     height: 40,
     borderRadius: 20,
-    backgroundColor: '#1A1D27',
+    backgroundColor: c.surfaceSolid,
     justifyContent: 'center',
     alignItems: 'center',
     marginRight: 12,
   },
   backArrow: {
-    color: '#E8E8E8',
+    color: c.text,
     fontSize: 20,
   },
   headerTitle: {
-    color: '#E8E8E8',
+    color: c.text,
     fontSize: 26,
     fontWeight: '700',
   },
   headerSub: {
-    color: '#6B7280',
+    color: c.textDim,
     fontSize: 13,
     marginTop: 2,
   },
   sectionTitle: {
-    color: '#E8E8E8',
+    color: c.text,
     fontSize: 18,
     fontWeight: '700',
     marginBottom: 14,
@@ -452,12 +456,12 @@ const styles = StyleSheet.create({
   },
   appCard: {
     width: '30%',
-    backgroundColor: '#1A1D27',
+    backgroundColor: c.surfaceSolid,
     borderRadius: 14,
     padding: 14,
     alignItems: 'center',
     borderWidth: 1,
-    borderColor: '#2A2D3A',
+    borderColor: c.border,
   },
   appIconWrap: {
     width: 48,
@@ -471,13 +475,13 @@ const styles = StyleSheet.create({
     fontSize: 24,
   },
   appName: {
-    color: '#E8E8E8',
+    color: c.text,
     fontSize: 11,
     fontWeight: '600',
     textAlign: 'center',
   },
   comingSoon: {
-    color: '#6B7280',
+    color: c.textDim,
     fontSize: 9,
     marginTop: 2,
     fontStyle: 'italic',
@@ -495,7 +499,7 @@ const styles = StyleSheet.create({
     width: 60,
     height: 60,
     borderRadius: 18,
-    backgroundColor: '#1A2744',
+    backgroundColor: c.surfaceSolid,
     justifyContent: 'center',
     alignItems: 'center',
     marginBottom: 14,
@@ -507,7 +511,7 @@ const styles = StyleSheet.create({
     marginBottom: 6,
   },
   devDesc: {
-    color: '#8899AA',
+    color: c.textDim,
     fontSize: 13,
     lineHeight: 19,
     textAlign: 'center',
@@ -547,7 +551,7 @@ const styles = StyleSheet.create({
 
   // ── Calculator ────────────────────────────────────
   calcDisplay: {
-    backgroundColor: '#F9FAFB',
+    backgroundColor: c.card,
     borderRadius: 16,
     padding: 20,
     marginBottom: 16,
@@ -578,7 +582,7 @@ const styles = StyleSheet.create({
     width: 72,
     height: 72,
     borderRadius: 36,
-    backgroundColor: '#1A2744',
+    backgroundColor: c.surfaceSolid,
     justifyContent: 'center',
     alignItems: 'center',
   },
@@ -586,7 +590,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#4A9FFF',
   },
   calcBtnFunc: {
-    backgroundColor: '#2D3748',
+    backgroundColor: c.surfaceSolid,
   },
   calcBtnZero: {
     width: 152,
@@ -613,7 +617,7 @@ const styles = StyleSheet.create({
     marginBottom: 4,
   },
   todoSubtitle: {
-    color: '#8899AA',
+    color: c.textDim,
     fontSize: 13,
     marginBottom: 18,
   },
@@ -623,7 +627,7 @@ const styles = StyleSheet.create({
   },
   todoInput: {
     flex: 1,
-    backgroundColor: '#F9FAFB',
+    backgroundColor: c.card,
     borderRadius: 12,
     borderWidth: 1,
     borderColor: '#1A2744',
@@ -649,7 +653,7 @@ const styles = StyleSheet.create({
   todoItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#F9FAFB',
+    backgroundColor: c.card,
     borderRadius: 12,
     padding: 14,
     marginBottom: 8,
@@ -681,7 +685,7 @@ const styles = StyleSheet.create({
     fontSize: 14,
   },
   todoTextDone: {
-    color: '#4A5568',
+    color: c.textDim,
     textDecorationLine: 'line-through',
   },
   todoDelBtn: {

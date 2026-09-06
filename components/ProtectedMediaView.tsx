@@ -23,6 +23,8 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { View, Text, StyleSheet, Dimensions, AppState, type AppStateStatus, type ViewStyle, useWindowDimensions} from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { watch, capabilities, isSafeToRender, setSecure, type GuardState } from '../lib/screenGuard';
+import type { Palette } from '../constants/theme';
+import { useColors } from '../lib/theme';
 
 const { width: SW, height: SH } = Dimensions.get('window');
 
@@ -42,6 +44,8 @@ export default function ProtectedMediaView({
 
   watermarkName, watermarkPhone, children, onBlocked, hideStatus,
 }: ProtectedMediaViewProps) {
+  const c = useColors();
+  const S = useMemo(() => makeS(c), [c]);
   // Reactive size. The module-level Dimensions.get above is captured ONCE at
   // import and never updates, so it froze the layout at the size the app
   // launched with. Shadowing it here makes every use in this component follow
@@ -182,7 +186,7 @@ export default function ProtectedMediaView({
 // TS collapse EVERY key in the sheet to a style union (11 downstream errors).
 const wmTransform: ViewStyle = { transform: [{ rotate: '-24deg' }, { scale: 1.4 }] };
 
-const S = StyleSheet.create({
+const makeS = (c: Palette) => StyleSheet.create({
   wrap: { flex: 1 },
   overlay: {
     ...StyleSheet.absoluteFillObject,
@@ -202,11 +206,11 @@ const S = StyleSheet.create({
     paddingVertical: 10, paddingHorizontal: 16,
     backgroundColor: 'rgba(0,0,0,0.72)',
   },
-  statusTxt: { color: '#D1D5DB', fontSize: 11, flexShrink: 1 },
+  statusTxt: { color: c.text, fontSize: 11, flexShrink: 1 },
   blocked: {
     flex: 1, alignItems: 'center', justifyContent: 'center',
-    backgroundColor: '#000', padding: 32, gap: 10,
+    backgroundColor: c.bg, padding: 32, gap: 10,
   },
   blockedTitle: { color: '#fff', fontSize: 16, fontWeight: '800', textAlign: 'center' },
-  blockedBody: { color: '#9CA3AF', fontSize: 13, textAlign: 'center', lineHeight: 19 },
+  blockedBody: { color: c.textDim, fontSize: 13, textAlign: 'center', lineHeight: 19 },
 });

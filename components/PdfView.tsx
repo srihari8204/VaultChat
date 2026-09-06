@@ -22,9 +22,11 @@
 // The viewer is loaded from android_asset rather than from a Metro asset, for a
 // reason that only shows up on device — see plugins/withPdfJs.js.
 
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState, useMemo } from 'react';
 import { ActivityIndicator, Platform, StyleSheet, Text, View } from 'react-native';
 import { WebView } from 'react-native-webview';
+import type { Palette } from '../constants/theme';
+import { useColors } from '../lib/theme';
 
 /** viewer.html, pdf.min.js and pdf.worker.min.js, all in one origin. */
 const VIEWER = 'file:///android_asset/pdfjs/viewer.html';
@@ -33,6 +35,8 @@ const VIEWER = 'file:///android_asset/pdfjs/viewer.html';
 const RENDER_TIMEOUT_MS = 30_000;
 
 export function PdfView({ uri, onFail }: { uri: string; onFail?: (why: string) => void }) {
+  const c = useColors();
+  const s = useMemo(() => makeS(c), [c]);
   const [shown, setShown] = useState(false);
   const failedRef = useRef(false);
 
@@ -105,12 +109,12 @@ export function PdfView({ uri, onFail }: { uri: string; onFail?: (why: string) =
   );
 }
 
-const s = StyleSheet.create({
-  fill: { flex: 1, backgroundColor: '#3A3A3E' },
-  web: { flex: 1, backgroundColor: '#3A3A3E' },
+const makeS = (c: Palette) => StyleSheet.create({
+  fill: { flex: 1, backgroundColor: c.surfaceSolid },
+  web: { flex: 1, backgroundColor: c.surfaceSolid },
   cover: {
     ...StyleSheet.absoluteFillObject, alignItems: 'center', justifyContent: 'center',
-    backgroundColor: '#3A3A3E', gap: 12,
+    backgroundColor: c.surfaceSolid, gap: 12,
   },
   coverTxt: { color: 'rgba(255,255,255,0.65)', fontSize: 13 },
 });

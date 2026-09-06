@@ -52,6 +52,7 @@ export const BIZ: Palette = {
   groundDisc:  '#0D2030',
   accentLight: '#7DD3FC',
   accentDeep:  '#1677FF',
+  accentOn:    '#7DD3FC',
 };
 
 // The design system's status colors that Palette has no slot for. Fixed by
