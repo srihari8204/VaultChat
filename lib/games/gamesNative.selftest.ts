@@ -354,11 +354,35 @@ check('a game card asks HOW you want to play',
   /<ModeSheet/.test(HUB) && /function ModeSheet/.test(HUB),
   'opening a game with no room drops the player in a table they cannot host');
 check('...and the private and bot rooms are ones the player HOSTS',
-  /onPrivate=\{\(\) => \{ const e = mode; setMode\(null\); onOpen\(e\.kind, \{ room: newPrivateCode\(\) \}\)/.test(HUB)
+  /onOpen\(e\.kind, \{ room: newPrivateCode\(\) \}\)/.test(HUB)
   && /room: newPrivateCode\(\), auto: '1', bot: '1'/.test(HUB),
   'a fresh code makes the player the host, which is what makes the buttons work');
-check('...with online play still going through the matchmaker',
-  /onOnline=\{\(\) => \{ const e = mode; setMode\(null\); quick\(e\); \}\}/.test(HUB));
+check('...with online play going through the matchmaker',
+  /quick\(e\);/.test(HUB));
+
+// ── RUMMY TAKES NO INVENTED ID ────────────────────────────────────────
+// THE BUG THIS CLOSES: rummy tables belong to the SERVER, and it silently seats
+// you at one of its own when it does not recognise the id you sent. So "Play
+// online" (which passed the matchmaker's roomId) and "Private room" (a freshly
+// minted code) both substituted two players onto different tables, each reading
+// "1/6 seated" — "online and private rummy both do not connect". Device-proven
+// cure: joining a REAL table id seats both phones together at "2/6 seated".
+//
+// Structural, because it is a WIRING bug: every piece worked and none of them
+// was joined to a real table.
+check('rummy asks for a seat INTENT rather than minting a table id',
+  /if \(e\.kind === 'rummy'\) \{ onOpen\('rummy', \{ seat: 'auto' \}\); return; \}/.test(HUB),
+  'a minted rummy code is substituted by the server and the player sits alone');
+check('...for the bot mode too, at a practice table',
+  /if \(e\.kind === 'rummy'\) \{ onOpen\('rummy', \{ seat: 'bot', auto: '1', bot: '1' \}\); return; \}/.test(HUB));
+check('...and rummy never reaches the matchmaker, whose room is not a table',
+  /if \(e\.kind === 'rummy'\) \{ onOpen\('rummy', \{ seat: 'auto' \}\); return; \}[\s\S]{0,40}?quick\(e\);/.test(HUB),
+  'the rummy branch must return BEFORE quick(e), or online rummy is dead again');
+check('the board picks its table from the list the server sent',
+  /pickTable\(tables, seat\)/.test(RUMMY) && /import \{[\s\S]*?pickTable/.test(RUMMY),
+  'choosing from the tables frame is what makes the id real');
+check('...exactly once, so a filling table cannot bounce the player',
+  /asked\.current = true;/.test(RUMMY));
 
 // ── dealing is not a race ─────────────────────────────────────────────
 // Ludo sent `start` on a 400ms timer after `addbot`. The bot was seated by a
@@ -453,6 +477,132 @@ check('...and the pieces that decide win/lose read myColor',
 check('the rummy result table does not colour a zero settlement as a win',
   !/d >= 0 \? C\.good/.test(RUMMY) && !/d >= 0 \? `\+\$\{d\}`/.test(RUMMY),
   'a zero delta says nothing happened, not that something good happened');
+
+/* ── design tokens that do not exist ────────────────────────────────── */
+//
+// TWO BUGS OF THE SAME SHAPE, and the compiler can see NEITHER: tsconfig sets
+// `noImplicitAny: false`, so indexing a plain object with a key it does not
+// have is silently `any` rather than an error, and it reaches the device as
+// `undefined`.
+//
+//   goldLine[40] / goldLine[12]  — the SELECTED chip in rummy's table filter.
+//     goldLine defines 14/18/22/28/38/55. Both resolved to undefined, so the
+//     selected chip rendered with no border colour and no fill and the only
+//     mark of selection was the text weight.
+//
+//   icon="crown" on Btn — ICONS has no such key, so the button falls through
+//     to Btn's raw-text branch and draws the literal string. ui.tsx already
+//     carries a comment about exactly this happening with four emoji.
+//
+// Neither is a typo a reviewer catches, and neither throws. They are only
+// visible on a screen nobody can currently reach, so they are asserted here.
+{
+  // Comments stripped first — the same treatment rummyTable.selftest gives its
+  // own source scans. Without it this check fails on the note in Rummy.tsx that
+  // NAMES the two bad indexes, which is the one place they should still appear.
+  const code = (src: string) =>
+    src.split('\n').filter(l => !/^\s*(\/\/|\*|\/\*)/.test(l)).join('\n');
+
+  const SOURCES: [string, string][] = ([
+    ['app/games.tsx', HUB], ['TicTacToe.tsx', TTT], ['Chess.tsx', CHESS],
+    ['Ludo.tsx', LUDO], ['Rummy.tsx', RUMMY], ['ui.tsx', UI], ['feedback.tsx', FEEDBACK],
+  ] as [string, string][]).map(([n, src]) => [n, code(src)] as [string, string]);
+
+  // EVERY numeric token ramp, not just goldLine. `S`, `R`, `E` and `goldLine`
+  // are all plain objects indexed by a literal, so they all carry the same
+  // failure — `S[7]` or `R[5]` would be exactly as invisible as `goldLine[40]`
+  // was. Discovering the ramps from theme.ts rather than listing them means a
+  // ramp added later is covered without anyone remembering to come back here.
+  const themeSrc = readFileSync('lib/games/theme.ts', 'utf8');
+  const ramps = new Map<string, Set<string>>();
+  for (const m of themeSrc.matchAll(/export const (\w+)\s*=\s*\{/g)) {
+    const body = themeSrc.slice(m.index! + m[0].length);
+    const keys = new Set(
+      // NOT line-anchored. `S` and `R` are written on ONE line, so an anchored
+      // pattern reads a single key off each and silently passes every index
+      // above it — the first draft of this very check did that.
+      Array.from(body.slice(0, body.indexOf('}')).matchAll(/(?:^|[{,])\s*(\d+)\s*:/g), x => x[1]),
+    );
+    if (keys.size >= 3) ramps.set(m[1], keys);
+  }
+  check('the numeric token ramps are discovered from theme.ts',
+    ramps.has('goldLine') && ramps.has('S') && ramps.has('R'),
+    `found ${[...ramps.keys()].join()}`);
+  check('...and each is read whole, not truncated at its first key',
+    (ramps.get('S')?.size ?? 0) >= 6 && (ramps.get('goldLine')?.size ?? 0) >= 5,
+    `S=${ramps.get('S')?.size} goldLine=${ramps.get('goldLine')?.size}`);
+
+  let badToken = '';
+  for (const [name, src] of SOURCES) {
+    for (const [ramp, keys] of ramps) {
+      for (const m of src.matchAll(new RegExp('\\b' + ramp + '\\[(\\d+)\\]', 'g'))) {
+        if (!keys.has(m[1])) badToken = `${name}: ${ramp}[${m[1]}] is not defined (has ${[...keys].join('/')})`;
+      }
+    }
+  }
+  check('every token ramp index used is one that exists', !badToken, badToken);
+
+  const iconBlock = UI.slice(UI.indexOf('const ICONS = {'));
+  const iconKeys = new Set(
+    Array.from(iconBlock.slice(0, iconBlock.indexOf('};')).matchAll(/^\s*([A-Za-z][\w]*):/gm), m => m[1]),
+  );
+  check('the icon set parses', iconKeys.size >= 10, `${iconKeys.size} icons`);
+
+  let badIcon = '';
+  for (const [name, src] of SOURCES) {
+    for (const m of src.matchAll(/\bicon="([A-Za-z][\w]*)"/g)) {
+      if (!iconKeys.has(m[1])) badIcon = `${name}: icon="${m[1]}" is not in ICONS`;
+    }
+  }
+  check('every Btn icon name is one the icon set defines', !badIcon, badIcon);
+}
+
+/* ── the two controls the owner asked to be made real ───────────────── */
+//
+// Both were deliberately not built the first time round because neither had a
+// handler, and a dead control reads to a player as a broken one. They are wired
+// now, so what is asserted is that they stayed wired to REAL data rather than
+// drifting back into decoration.
+check('the table list filters by kind as well as by seat count',
+  /filterByKind\(/.test(RUMMY) && /KIND_FILTERS/.test(RUMMY),
+  'Practice / Free / Bots has to filter the server list, not just look like tabs');
+
+check('...and the Bots tab actually seats a bot when you join',
+  /onJoin\(tb\.id, kind === 'bots'\)/.test(RUMMY) && /autoBot: autoBot \|\| wantBot/.test(RUMMY),
+  'the tab lists the same tables as Practice; the difference IS the join');
+
+check('...through the hook that already owns auto-start, not a second copy',
+  !/t: 'addbot'/.test(RUMMY.slice(0, RUMMY.indexOf('function Room'))),
+  'a board-side addbot would race the hook and double-seat');
+
+check('the score strip caps deadwood at what the hand can actually lose',
+  /Math\.min\(MAX_LOSS, hint\.deadwood\)/.test(RUMMY),
+  'raw deadwood reads 90 on a fresh deal; a misdeclare never costs more than 80');
+
+check('Score opens the standings from server data',
+  /StandingsSheet/.test(RUMMY) && /setShowStandings\(true\)/.test(RUMMY));
+
+// THREE layouts, and Standings must be reachable in all of them: the score
+// PANEL beside the hand on a wide screen, the compact trio in the action bar
+// when the panel does not fit, and a button of its own when even the trio is
+// dropped. Counting the entry points is what keeps a later layout change from
+// quietly stranding the control on one breakpoint.
+// FOUR ways in, and the last one is the guarantee. The action bar gives up its
+// optional controls as it narrows — the deadwood toggle, then the trio degrades
+// to one button, then that goes too — which was found by sweeping the Honor,
+// where at 666dp the bar overflowed and pushed DROP off the screen entirely.
+// So the SHEET carries Standings unconditionally: a readout must not be gated
+// on how wide the action row happens to be.
+check('...and stays reachable at every width',
+  /scoreW > 0[\s\S]{0,400}ScorePanel/.test(RUMMY)
+    && /m\.barTrio &&[\s\S]{0,300}setShowStandings\(true\)/.test(RUMMY)
+    && /m\.barStandings &&[\s\S]{0,220}setShowStandings\(true\)/.test(RUMMY)
+    && /label="Standings"[\s\S]{0,220}setShowStandings\(true\)/.test(RUMMY),
+  'band panel, then trio, then one button, and the settings sheet always');
+
+check('the action bar budgets its width instead of overflowing',
+  /m\.barBtnW/.test(RUMMY) && /m\.barToggle &&/.test(RUMMY),
+  'at 666dp on the Honor the row ran 680dp of controls and DROP fell off the edge');
 
 console.log(failures ? `\n  ${failures} FAILED\n` : '\n  all native-games checks passed\n');
 process.exit(failures ? 1 : 0);

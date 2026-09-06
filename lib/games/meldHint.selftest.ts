@@ -4,7 +4,7 @@
 // exact 80-point misdeclare it exists to prevent. So the classifier is pinned
 // against the rules of 13-card Indian rummy here.
 
-import { classifyGroup, analyzeHand, type HintCard } from './meldHint';
+import { classifyGroup, analyzeHand, MAX_LOSS, type HintCard } from './meldHint';
 
 let failures = 0;
 const check = (name: string, ok: boolean, detail = '') => {
@@ -104,7 +104,54 @@ check('two sequences are required, not one',
   'H4-H5-H6 and D2-D3-D4 are both sequences');
 
 check('the misdeclare cost is capped at 80',
-  analyzeHand([['HK','HK','HK','HK','HK','HK','HK','HK','HK']], id => c('HK')).fullCount === 80);
+  analyzeHand([['HK','HK','HK','HK','HK','HK','HK','HK','HK']], id => c('HK')).fullCount === MAX_LOSS);
+
+// DEADWOOD IS NOT CAPPED, AND THE SCORE STRIP MUST CAP IT.
+//
+// A fresh deal on the Honor read `deadwood 90` while a wrong declaration can
+// never cost more than 80 — the strip was telling the player they risked ten
+// points the game cannot take. The raw figure stays raw here because it is the
+// true unmelded value; the DISPLAY caps it (Rummy.tsx), and both now read the
+// same exported constant instead of two literal 80s drifting apart.
+{
+  const heavy = analyzeHand([['HK','HK','HK','HK','HK','HK','HK','HK','HK']], id => c('HK'));
+  check('deadwood itself is the true unmelded value, uncapped',
+    heavy.deadwood === 90, `${heavy.deadwood}`);
+  check('...and it can exceed what the hand can actually lose',
+    heavy.deadwood > MAX_LOSS, 'the case the score strip has to clamp');
+  check('...so the capped display never exceeds MAX_LOSS',
+    Math.min(MAX_LOSS, heavy.deadwood) === MAX_LOSS);
+}
+
+// ── melded: the number that goes UP ──────────────────────────────────
+//
+// Points rummy scores DOWN, so every figure on the table was a penalty and none
+// of them moved when a player got something right. `melded` is the counterpart
+// to `deadwood`, and the score strip shows the two side by side.
+{
+  // H4-H5-H6 = 15, S9-S10-SJ = 29, D2-D3-D4 = 9, C8-S8-D8 = 24. All four meld.
+  const all = analyzeHand([['H4','H5','H6'], ['S9','S10','SJ'], ['D2','D3','D4'], ['C8','S8','D8']], card);
+  check('melded counts the face value sitting in real melds',
+    all.melded === 15 + 29 + 9 + 24, `${all.melded}`);
+  check('...and a fully melded hand carries no deadwood', all.deadwood === 0, `${all.deadwood}`);
+
+  // The same cards, one group broken: C8-S8 is two cards, so it melds nothing
+  // and its 16 points move to deadwood.
+  const broken = analyzeHand([['H4','H5','H6'], ['S9','S10','SJ'], ['D2','D3','D4'], ['C8','S8']], card);
+  check('a group that stops being a meld stops counting toward melded',
+    broken.melded === 15 + 29 + 9, `${broken.melded}`);
+  check('...and its points turn into deadwood instead',
+    broken.deadwood === 16, `${broken.deadwood}`);
+
+  // A joker is worth nothing, so a meld carried by one scores less than the
+  // same meld made of naturals — which is the truth about how much is done.
+  const wild = analyzeHand([['H4','H5','H6']], card, '5');
+  check('a wild card contributes nothing to melded',
+    wild.melded === 4 + 6, `${wild.melded}`);
+
+  check('an empty hand melds nothing rather than throwing',
+    analyzeHand([[]], card).melded === 0);
+}
 
 console.log(failures ? `\n  ${failures} FAILED\n` : '\n  all meld-hint checks passed\n');
 process.exit(failures ? 1 : 0);

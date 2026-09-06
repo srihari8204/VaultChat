@@ -243,7 +243,20 @@ export function useGameSocket(game: GameKind, roomId = '', opts: AutoStart = {})
     sockRef.current?.send(msg);
   }, []);
 
+  // The auto-start latches, declared above `join` because join RESETS them.
+  //
+  // They make each intent once-only for the life of the socket, which was right
+  // when a board got its table at mount and never moved. Rummy moves: its table
+  // list calls join() repeatedly on ONE socket, and join() does not touch the
+  // hook's roomId, so the reset below (keyed on roomId) never fired and a
+  // second table never got its bot or its deal. Sitting down at a new table is
+  // a new auto-start opportunity by definition.
+  const botSent = useRef(false);
+  const startSent = useRef(false);
+
   const join = useCallback((roomId: string) => {
+    botSent.current = false;
+    startSent.current = false;
     sockRef.current?.join(roomId);
   }, []);
 
@@ -260,8 +273,6 @@ export function useGameSocket(game: GameKind, roomId = '', opts: AutoStart = {})
   // refs make each intent once-only for the life of the socket: the server
   // answers a second `start` with an error, which would surface to the player
   // as a broken table on an otherwise fine game.
-  const botSent = useRef(false);
-  const startSent = useRef(false);
   const { auto, autoBot } = opts;
 
   useEffect(() => { botSent.current = false; startSent.current = false; }, [game, roomId, attempt]);

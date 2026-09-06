@@ -107,15 +107,29 @@ export function Confetti({ show }: { show: boolean }) {
   const { width, height } = useWindowDimensions();
   const [alive, setAlive] = React.useState(false);
 
+  /**
+   * The pieces are made WHEN THE CONFETTI STARTS, not memoised against it.
+   *
+   * They used to come from a `useMemo` keyed on `[width, alive]`, where `alive`
+   * appears nowhere inside the factory — it was there purely as a cache-buster,
+   * so a second win would not replay the first win's exact pattern. That works,
+   * but it is load-bearing behaviour hidden in a dependency array, and it read
+   * to the linter (correctly) as an unnecessary dependency: the next person to
+   * "clean up" the warning by deleting `alive` would have frozen the confetti
+   * into one fixed pattern for the life of the screen, with nothing failing.
+   *
+   * Generating them in the effect that starts the run says the same thing out
+   * loud — new run, new pieces — and the warning goes away because the reason
+   * is now expressed in code rather than in a dependency.
+   */
+  const [pieces, setPieces] = React.useState<{
+    key: number; x: number; delay: number; dur: number;
+    color: string; spin: number; drift: number;
+  }[]>([]);
+
   React.useEffect(() => {
     if (!show) { setAlive(false); return; }
-    setAlive(true);
-    const id = setTimeout(() => setAlive(false), 3200);
-    return () => clearTimeout(id);
-  }, [show]);
-
-  const pieces = React.useMemo(
-    () => Array.from({ length: 40 }, (_, i) => ({
+    setPieces(Array.from({ length: 40 }, (_, i) => ({
       key: i,
       x: Math.random() * width,
       delay: Math.random() * 700,
@@ -123,9 +137,11 @@ export function Confetti({ show }: { show: boolean }) {
       color: CONFETTI_COLORS[i % CONFETTI_COLORS.length],
       spin: 360 + Math.random() * 400,
       drift: (Math.random() - 0.5) * 90,
-    })),
-    [width, alive],
-  );
+    })));
+    setAlive(true);
+    const id = setTimeout(() => setAlive(false), 3200);
+    return () => clearTimeout(id);
+  }, [show, width]);
 
   if (!alive) return null;
   return (

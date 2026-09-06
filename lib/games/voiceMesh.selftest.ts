@@ -114,5 +114,72 @@ console.log('\nSpeaking levels\n');
   check('normal speech is above it', 0.2 > SPEAKING_LEVEL);
 }
 
+// A FULL TABLE, NOT JUST A PAIR.
+//
+// Rummy seats 6 and ludo seats 4, and the mesh is full — so a rummy table is 5
+// peer connections per phone and 15 across the table. Everything below is
+// already true of `shouldInitiate` (it is a total order on the ids, so every
+// pair has exactly one initiator at any size); what was missing was the
+// assertion. Voice for a full table was asked about directly, and "it should
+// scale" is not an answer anyone can check.
+console.log('\nA full table meshes every seat\n');
+{
+  /** Every unordered pair gets exactly one initiator, and nobody dials themselves. */
+  const meshes = (ids: string[]) => {
+    let dialled = 0;
+    for (const a of ids) {
+      if (shouldInitiate(a, a)) return { ok: false, why: `${a} dials itself` };
+      for (const b of ids) {
+        if (a >= b) continue;                       // consider each pair once
+        const one = shouldInitiate(a, b);
+        const other = shouldInitiate(b, a);
+        if (one === other) return { ok: false, why: `${a}/${b} both ${one ? 'dial' : 'wait'}` };
+        dialled++;
+      }
+    }
+    return { ok: true, dialled };
+  };
+
+  // Deliberately unsorted and mixed-case: seat order is arrival order, and the
+  // ids are server-issued, so a rule that only works on tidy input is no rule.
+  const rummy6 = ['v9', 'v2', 'aa', 'Zz', 'v10', 'b7'];
+  const r = meshes(rummy6);
+  check('rummy: 6 seats, every pair has exactly one initiator', r.ok, (r as any).why);
+  check('rummy: that is 15 connections across the table', (r as any).dialled === 15,
+    `${(r as any).dialled}`);
+  check('rummy: each player holds 5 of them',
+    rummy6.every(me => rummy6.filter(o => o !== me).length === 5));
+
+  const ludo4 = ['p3', 'p1', 'p4', 'p2'];
+  const l = meshes(ludo4);
+  check('ludo: 4 seats, every pair has exactly one initiator', l.ok, (l as any).why);
+  check('ludo: that is 6 connections across the table', (l as any).dialled === 6,
+    `${(l as any).dialled}`);
+
+  // Nobody may be left out: every seat is either dialling or being dialled by
+  // each other seat. A player with no leg at all is silent to everyone and the
+  // symmetry check above would not notice on its own.
+  check('no seat is left undialled at 6',
+    rummy6.every(me => rummy6.filter(o => o !== me)
+      .every(o => shouldInitiate(me, o) || shouldInitiate(o, me))));
+
+  // Bots have no microphone, and offering to yourself never completes.
+  const table = {
+    lobby: { members: [
+      { vaultId: 'v1', name: 'You' },
+      { vaultId: 'v2', name: 'Asha' },
+      { vaultId: 'b1', name: 'Robo 1', isBot: true },
+      { vaultId: 'v3', name: 'Ravi' },
+      { vaultId: 'b2', name: 'Robo 2', isBot: true },
+      { vaultId: 'v4', name: 'Meera' },
+    ] },
+  };
+  const seats = rosterFrom(table, 'v1');
+  check('a mixed 6-seat table meshes only the humans', !!seats && Object.keys(seats!).length === 3,
+    `${seats ? Object.keys(seats!).join(',') : 'null'}`);
+  check('...and never the bots', !!seats && !('b1' in seats!) && !('b2' in seats!));
+  check('...and never yourself', !!seats && !('v1' in seats!));
+}
+
 console.log(failures ? `\n  ${failures} FAILED\n` : '\n  all voice-mesh checks passed\n');
 process.exit(failures ? 1 : 0);

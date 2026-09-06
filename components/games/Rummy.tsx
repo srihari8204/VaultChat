@@ -40,7 +40,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Ionicons from '@expo/vector-icons/Ionicons';
-import Svg, { Defs, RadialGradient, Stop, Rect, Line, Ellipse, Text as SvgText } from 'react-native-svg';
+import Svg, { Defs, RadialGradient, Stop, Rect, Ellipse, Text as SvgText } from 'react-native-svg';
 import Animated, {
   useSharedValue, useAnimatedStyle, withSpring, withTiming, withRepeat,
   Easing, cancelAnimation, runOnJS,
@@ -62,14 +62,20 @@ import {
   reconcile, groupUp, ungroup, sameGroups, moveCard, sortHand,
   isSortMode, SORT_MODES, SORT_LABEL, type Groups, type SortMode,
 } from '../../lib/games/handGroups';
-import { analyzeHand, type MeldType } from '../../lib/games/meldHint';
+import { analyzeHand, MAX_LOSS, type MeldType } from '../../lib/games/meldHint';
 import { openInvite, shareResult, tableLink } from '../../lib/games/invite';
+import { useRummyMatch, type RummyMatch } from '../../lib/games/useRummyMatch';
+import { VARIANTS, variantLabel, standings, progressLabel } from '../../lib/games/match';
 import {
-  metrics, seatSpots, ranked, activeCount, pid, allowsBots,
-  newPrivateCode, normalizeCode,
-  type RummyPlayer, type Settlement, type TableInfo,
+  metrics, seatSpots, pileTop, SEAT_ROW3_MIN, ranked, activeCount, pid, allowsBots,
+  newPrivateCode, normalizeCode, filterBySeats, filterByKind, pickTable,
+  type RummyPlayer, type Settlement, type TableInfo, type SeatFilter, type KindFilter, type SeatIntent,
 } from '../../lib/games/rummyTable';
-import { C, S, R, T, mix, goldLine, white } from '../../lib/games/theme';
+import { C, S, R, T, mix, alpha, goldLine, white } from '../../lib/games/theme';
+import {
+  FELT, RAIL, WOOD, CARD, CARD_SHADOW, STAT, CYAN,
+  INK as INK_ON_FELT, INK_DIM, onFelt, ROOM, ROOM_GLOW,
+} from '../../lib/games/rummyGlass';
 
 type Card = { id: string; suit: string; rank: string };
 
@@ -90,40 +96,13 @@ const HAND_SIZE = 13;
 const AUTO_DEAL_SECS = 60;
 
 /**
- * The cloth.
- *
- * It was green — a straight port of rummy.css. Green is what a card table is,
- * but it was the ONLY green thing in the app: every other games surface is the
- * maroon room, so the table read as a component borrowed from somewhere else
- * rather than the centre of its own screen. The cloth is now a deep wine that
- * belongs to the same room, lit from above so the middle is where the eye goes
- * and the piles have somewhere to sit.
- *
- * Now a deep TEAL rather than wine. Wine put the cloth in the same hue as the
- * room, and a red table in a red room has nothing to push against — the felt
- * stopped reading as a separate object. Teal is the complement: it separates
- * from the maroon surround, cream cards and gold hardware both sit brighter on
- * it, and it keeps the card-room register that a saturated blue would lose.
- *
- * Three stops, brightest first: the lit centre, the body of the cloth, and the
- * shadow at the rail. ONE LINE TO CHANGE if you want a different table.
+ * The cloth, the card stock and the ink on both now live in ONE place —
+ * lib/games/rummyGlass.ts. They used to live here, and the cost of that is on
+ * the record: a documented green -> teal swap never reached the gradient that
+ * actually paints the table, because the gradient repeated the hexes instead of
+ * reading them. The history of why the felt is the colour it is moved with the
+ * values.
  */
-const FELT = ['#1D5E4A', '#123F33', '#0A2721'];
-const CARD_FACE = '#fffdf6';
-const CARD_EDGE = '#caa44a';
-const CARD_RED = '#d8213f';
-const CARD_INK = '#16181f';
-const JOKER_PURPLE = '#7c3aed';
-// Ink on the cloth, and it has moved every time the cloth has. '#e7f3ea' for
-// the old green felt, '#FFF8F1' (warm) for the wine, '#F2F7F8' (neutral, very
-// slightly cool) for the teal.
-//
-// The teal's neutral white read faintly BLUE on emerald — a cool ink on a warm
-// green is the one combination that looks accidental rather than chosen. This
-// is the same brightness carried a hair warm, so it sits on the cloth and still
-// belongs to the gold hardware around it. Any future change to FELT above
-// should re-check this line: ink and cloth are one decision, not two.
-const INK_ON_FELT = '#F4F6F1';
 
 /** Under this many seconds the clock turns red and ticks audibly. */
 const CLOCK_URGENT = 10;
@@ -163,13 +142,21 @@ AsyncStorage.getItem(SORT_KEY)
   .then(v => { if (isSortMode(v)) sortModePref = v; })
   .catch(() => {});
 
+/**
+ * Clearance between the top of the oval and the first seat capsule.
+ *
+ * Small, because the header is its own band now — the seats no longer have to
+ * dodge it, they only have to stay off the brass.
+ */
+const OVAL_SEAT_TOP = 6;
+
 /** Shared empty hand: a fresh [] each render would re-run every memo below it. */
 const NO_CARDS: Card[] = [];
 
 /** A measured drop target, in window coordinates. */
 type Zone = { x: number; y: number; w: number; h: number };
 
-export default function Rummy({ tableId = '', auto, autoBot }: { tableId?: string } & AutoStart) {
+export default function Rummy({ tableId = '', auto, autoBot, seat }: { tableId?: string; seat?: SeatIntent } & AutoStart) {
   /* ── connection ──────────────────────────────────────────────────── */
 
   const [tables, setTables] = useState<TableInfo[] | null>(null);
@@ -179,8 +166,23 @@ export default function Rummy({ tableId = '', auto, autoBot }: { tableId?: strin
     if (m?.t === 'tables' && Array.isArray(m.tables)) setTables(m.tables as TableInfo[]);
   }, []);
 
+  /**
+   * The player chose "Bots" from the table list.
+   *
+   * Not a second implementation of anything: it feeds the SAME `auto`/`autoBot`
+   * the hub already passes when it opens rummy against a bot, so seating,
+   * asking for the bot and dealing all stay in useGameSocket where the
+   * once-only latches live. All this flag does is turn that path on for a table
+   * the player picked themselves instead of one the hub picked for them.
+   */
+  const [wantBot, setWantBot] = useState(false);
+
   const { phase, error, state, events, send, join, subscribe, retry } =
-    useGameSocket('rummy', tableId, { auto, autoBot, onMessage: onServerMessage });
+    useGameSocket('rummy', tableId, {
+      auto: auto || wantBot,
+      autoBot: autoBot || wantBot,
+      onMessage: onServerMessage,
+    });
 
   // Held in a ref so leaveTable, declared before the voice hook runs, can hang
   // up without either one having to move.
@@ -208,6 +210,7 @@ export default function Rummy({ tableId = '', auto, autoBot }: { tableId?: strin
    */
   const leaveTable = useCallback(() => {
     voiceLeaveRef.current?.();
+    setWantBot(false);
     setSeated('');
     setTables(null);
     setSeating(false);
@@ -215,9 +218,10 @@ export default function Rummy({ tableId = '', auto, autoBot }: { tableId?: strin
     retry('');            // '' = join nothing, so we land back on the table list
   }, [retry]);
 
-  const takeSeat = useCallback((id: string) => {
+  const takeSeat = useCallback((id: string, withBot = false) => {
     const code = normalizeCode(id);
     if (!code) return;
+    setWantBot(withBot);
     setSeated(code);
     setSeating(true);
     setSeatFailed(false);
@@ -227,6 +231,37 @@ export default function Rummy({ tableId = '', auto, autoBot }: { tableId?: strin
   // Seated the moment a lobby comes back for us. Until then the timeout above
   // is what turns an unanswered join into something the player can act on.
   useEffect(() => { if (L) { setSeating(false); setSeatFailed(false); } }, [L]);
+
+  /**
+   * SEAT AT A TABLE THE SERVER ACTUALLY OWNS.
+   *
+   * This is the fix for "online and private rummy both do not connect".
+   *
+   * Rummy tables belong to the server. The other three games create a room from
+   * whatever id you send; rummy only knows the tables it published in
+   * `{t:'tables'}`, and it does NOT reject an id it does not know — it silently
+   * seats you at one of its own. So both ways of playing a human were dead:
+   * "Play online" handed rummy the MATCHMAKER's roomId (a /live/ws room, never a
+   * table) and "Private room" handed it a freshly minted code. Two people
+   * sharing either were substituted independently and each sat alone at
+   * "1/6 seated".
+   *
+   * So the hub no longer invents an id for rummy — it asks for an INTENT, and
+   * the table is chosen here from the list the server just sent. Proven on two
+   * phones: joining a real table id seats both players together, "2/6 seated".
+   *
+   * Runs once: `asked` latches so a table filling up mid-connect cannot bounce
+   * the player between tables.
+   */
+  const asked = useRef(false);
+  useEffect(() => {
+    if (!seat || asked.current || seated || !tables) return;
+    asked.current = true;
+    const t = pickTable(tables, seat);
+    // No open table is a real answer, not a failure: the list stays on screen
+    // with its "no tables" message rather than joining something that is full.
+    if (t) takeSeat(t.id);
+  }, [seat, seated, tables, takeSeat]);
 
   /**
    * DID WE ACTUALLY GET THE TABLE WE ASKED FOR?
@@ -335,24 +370,33 @@ export default function Rummy({ tableId = '', auto, autoBot }: { tableId?: strin
   const t = useType();
 
   const reduceMotion = useReduceMotion();
-  const playing = !!G;
 
   /**
-   * Landscape for the table, portrait for everything else.
+   * RUMMY IS LANDSCAPE. ALL OF IT.
    *
-   * Restoring is the part that matters: the app is portrait-locked, and leaving
-   * it unlocked would let every other screen rotate. Rotating does NOT remount
-   * anything — the hand, the turn and the arrangement live in state above this,
-   * and the server owns the clock — so a rotation mid-hand costs a relayout and
-   * nothing else.
+   * It used to be landscape only while a hand was in play and portrait for the
+   * table list and the lobby, which meant the device physically rotated twice
+   * per game — once when the host dealt and once when the round ended — and
+   * again for every rematch. A rotation is a full relayout and, on the Redmi,
+   * about a second of black screen; doing it at the exact moment the cards
+   * arrive is the worst possible time for it.
+   *
+   * So the lock is asserted ONCE on mount and held for as long as Rummy is on
+   * screen. The lobby and the table list are laid out as a centred column
+   * (see LandscapeScroll) rather than being allowed to rotate.
+   *
+   * Restoring on unmount is the part that matters, and it is not belt-and-
+   * braces: the app is portrait-locked everywhere else, and an OS orientation
+   * lock OUTLIVES the component — a force-stop skips this cleanup entirely and
+   * leaks landscape into the next launch. That is the documented root cause of
+   * the three other boards measuring 38px off-centre, which is why they each
+   * assert usePortraitLock() on mount rather than trusting this line.
    */
   useEffect(() => {
-    void ScreenOrientation.lockAsync(
-      playing ? ScreenOrientation.OrientationLock.LANDSCAPE : ScreenOrientation.OrientationLock.PORTRAIT_UP,
-    ).catch(() => {});
-  }, [playing]);
-  useEffect(() => () => {
-    void ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP).catch(() => {});
+    void ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.LANDSCAPE).catch(() => {});
+    return () => {
+      void ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP).catch(() => {});
+    };
   }, []);
 
   useEffect(() => { void preloadSfx(['deal', 'discard', 'select', 'tick', 'win', 'lose', 'error']); }, []);
@@ -384,6 +428,11 @@ export default function Rummy({ tableId = '', auto, autoBot }: { tableId?: strin
   // Dealing again is `start` on this same table. The hook adds the wait that
   // ends and the invite for a table everyone else has left — see useRematch.ts.
   const rematch = useRematch('rummy', seated, state, send);
+
+  // Pool (101/201) and Deals (best-of-2/6): a score ACROSS deals, which the
+  // games server's single-deal engine cannot keep. Null — and completely inert —
+  // when no match is running or the backend has not shipped it.
+  const rmatch = useRummyMatch(seated, raw, state.you);
 
   /**
    * A rummy turn is draw-then-discard, and the hand SIZE says which half you
@@ -514,6 +563,14 @@ export default function Rummy({ tableId = '', auto, autoBot }: { tableId?: strin
   // Offered once, before the first hand a player ever sees.
   const firstRules = useFirstTimeRules('rummy');
   const [showResult, setShowResult] = useState(false);
+  const [showStandings, setShowStandings] = useState(false);
+  const [showEmotes, setShowEmotes] = useState(false);
+  /** Dim the cards that already meld, so the ones that do not are all you see. */
+  const [showDeadwood, setShowDeadwood] = useState(false);
+  /** Which kind of table the header tabs will ask the list for on the way out. */
+  const [listKind, setListKind] = useState<KindFilter>('all');
+  /** The kind the player picked in the header, pending "leave this table?". */
+  const [confirmLeave, setConfirmLeave] = useState<KindFilter | null>(null);
   const [sound, setSound] = useState(soundEnabled());
 
   const discard = useCallback((cardId: string) => {
@@ -634,6 +691,8 @@ export default function Rummy({ tableId = '', auto, autoBot }: { tableId?: strin
         onJoin={takeSeat}
         onBack={() => { setSeatFailed(false); setSeated(''); send({ t: 'lobby' }); }}
         feed={feed}
+        kind={listKind}
+        onKind={setListKind}
       />
     );
   }
@@ -653,6 +712,7 @@ export default function Rummy({ tableId = '', auto, autoBot }: { tableId?: strin
         onLeave={leaveTable}
         feed={feed}
         notify={notify}
+        rmatch={rmatch}
       />
     );
   }
@@ -666,27 +726,37 @@ export default function Rummy({ tableId = '', auto, autoBot }: { tableId?: strin
   const wild: Card | null = G.wildJokerCard ?? null;
   const me = players.find(p => pid(p) === state.you);
   const settlement: Settlement = (raw?.settlement ?? {}) as Settlement;
-  const spots = seatSpots(others.length, m.tableW, m.tableH);
-  // Seven controls at full width need roughly this much room.
-  const tight = m.width < 560;
+  // The seat ring rides the drawn OVAL, not the felt frame. With side panels the
+  // two differ by a third of the width, and seating against the frame would put
+  // the outer capsules underneath the table panel and the emote feed.
+  const spots = seatSpots(others.length, m.ovalW, m.ovalH, OVAL_SEAT_TOP);
+  // The pile stack, measured the same way the felt places it: label plate, the
+  // card, and the caption under it.
+  const stackH = 14 + 3 + Math.round(m.pileW * 1.4) + 2 + 13;
+  const pilesY = pileTop(m.ovalH, OVAL_SEAT_TOP, spots[0]?.h ?? 0, stackH);
   const turnName = players.find(p => pid(p) === G.turnPlayerId)?.name ?? 'Someone';
   const nameOf = (id: string) =>
     players.find(p => pid(p) === id)?.name
     ?? (L.members ?? []).find(mem => mem.vaultId === id)?.name
     ?? id;
 
+  // Which of the header tabs is the table you are actually sitting at. `bots`
+  // is never "current" — it is not a kind of table, it is a way of joining one.
+  const kindNow: KindFilter = allowsBots(table) ? 'practice' : 'stakes';
+
+  const statusText = !mine
+    ? `${turnName} is playing`
+    : mustDraw
+      ? 'Your turn — take a card'
+      : hint.valid ? 'Pick a card and declare' : 'Group, then discard one';
+
   return (
     <View style={{ flex: 1 }}>
-      {/* Full-bleed: the cloth reaches under the notch and the gesture bar,
+      {/* Full-bleed: the room reaches under the notch and the gesture bar,
           because a green screen with grey margins looks broken. Only the
           CONTROLS are inset — see the padded box below. */}
       <Baize />
 
-      {/* Children take an explicit width and are centred; the horizontal
-          inset is handled ONCE, in metrics(), from the measured container.
-          Vertical insets stay as padding here — they were never the problem.
-          See the note on `m` above for why the container width, not the window
-          width, is the input. */}
       <View
         onLayout={onBoxLayout}
         style={{
@@ -694,181 +764,250 @@ export default function Rummy({ tableId = '', auto, autoBot }: { tableId?: strin
           paddingTop: boxInsets.top, paddingBottom: boxInsets.bottom,
         }}>
 
-
-      {/* The felt — an oval with a gold rail, so the piles read as sitting ON
-          something and the other players have somewhere to be. */}
-      <View style={{ height: m.tableH, width: m.tableW }}>
-        <TableTop width={m.tableW} height={m.tableH} />
-
-        {others.map((p, i) => (
-          <Seat
-            key={pid(p)}
-            spot={spots[i]}
-            name={p.name}
-            count={p.handCount ?? 0}
-            points={typeof p.points === 'number' ? p.points : null}
-            status={p.status}
-            bot={!!(L.members ?? []).find(mem => mem.vaultId === pid(p))?.isBot}
-            turn={G.turnPlayerId === pid(p)}
-            talking={voice.speaking.has(pid(p))}
-            still={reduceMotion}
-          />
-        ))}
-
-        {/* Table chrome — never over a card, and inside the safe box. */}
-        <View style={{ position: 'absolute', top: 0, right: 0, flexDirection: 'row', gap: S[1], alignItems: 'center' }}>
-          <VoicePill voice={voice} onPress={() => setVoiceOpen(true)} still={reduceMotion} />
-          <IconBtn glyph="?" label="Game rules" onPress={() => setShowRules(true)} />
-          <IconBtn glyph="⚙" label="Table settings" onPress={() => setShowSettings(true)} />
-        </View>
-
-        {(table?.name || table?.stakes) && (
-          <Text
-            numberOfLines={1}
-            style={{ position: 'absolute', top: 2, left: 0, maxWidth: m.tableW * 0.4, color: INK_ON_FELT, fontSize: T.xs, fontWeight: '700', opacity: 0.85 }}
-          >
-            {[table?.name, table?.stakes].filter(Boolean).join(' · ')}
-          </Text>
-        )}
-
-        {/* piles, in the middle of the cloth */}
-        <View style={{
-          position: 'absolute', left: 0, right: 0, bottom: 2,
-          flexDirection: 'row', gap: m.compact ? S[3] : S[5], justifyContent: 'center', alignItems: 'flex-end',
-        }}>
-          <View style={{ alignItems: 'center', gap: 3 }}>
-            {/* Short form on a compact table rather than none: the plate is 12px
-                tall, and a player who cannot tell the two stacks apart is the
-                thing the label exists to prevent. */}
-            <DeckLabel text={m.compact ? 'CLOSED' : 'CLOSED DECK'} />
-            <Pile label={`${closedCount} left`} live={mustDraw && !pending} onPress={() => draw('closed')} back w={m.pileW} still={reduceMotion} />
-          </View>
-          <View style={{ alignItems: 'center', gap: 3 }}>
-            <DeckLabel text={m.compact ? 'OPEN' : 'OPEN DECK'} />
-          <DiscardPile
-            card={openTop}
-            live={mustDraw && !pending}
-            armed={mustDiscard}
-            w={m.pileW}
-            onPress={() => draw('open')}
-            onMeasure={z => { discardZone.current = z; }}
-            still={reduceMotion}
-          />
-          </View>
-          {wild ? (
-            <View style={{ alignItems: 'center', gap: 3 }}>
-              <CardFace card={wild} w={m.pileW} wild />
-              <Text style={{ color: INK_ON_FELT, fontSize: 10, fontWeight: '700' }}>Wild</Text>
-            </View>
-          ) : null}
-        </View>
-      </View>
-
-      {/* status strip — whose turn, the clock, and the hint's opinion */}
-      <View style={{ height: 30, justifyContent: 'center', alignItems: 'center' }}>
-        {reconnecting ? (
-          <StatusPill tone="warn">
-            <ActivityIndicator size="small" color={C.gold2} />
-            <Text style={{ color: C.gold2, fontSize: t.sm, fontWeight: '800' }}>
-              Reconnecting — your hand is safe
-            </Text>
-          </StatusPill>
-        ) : (
-          <StatusPill tone={mine ? 'you' : 'plain'}>
-            {/* `flexShrink` matters as much as numberOfLines here: in a row,
-                numberOfLines alone only stops the text WRAPPING — it still
-                claims its full intrinsic width, so a long player name pushed
-                the clock and the validity hint out of the pill instead of
-                truncating itself. */}
-            <Text numberOfLines={1} style={{ flexShrink: 1, color: mine ? C.gold2 : '#cfe8d8', fontSize: t.sm, fontWeight: '800' }}>
-              {!mine
-                ? `${turnName} is playing`
-                : mustDraw
-                  ? 'Your turn — take a card'
-                  : hint.valid ? 'Pick a card and declare' : 'Group, then discard one'}
-            </Text>
-            {secs != null && (
-              <Text
-                accessibilityLabel={`${secs} seconds left on this turn`}
-                style={{ color: urgent ? '#ff8080' : INK_ON_FELT, fontSize: t.sm, fontWeight: '800' }}
-              >
-                {`⏱ ${secs}s`}
-              </Text>
-            )}
-            <Text style={{ color: hint.valid ? '#5fe08c' : '#cfa0a0', fontSize: 11.5, fontWeight: '700' }}>
-              {hint.valid ? '✓ valid'
-                : !hint.hasPure ? 'no pure seq'
-                : !hint.hasTwoSeq ? 'needs 2nd seq'
-                : `${hint.fullCount} pts`}
-            </Text>
-          </StatusPill>
-        )}
-      </View>
-
-      {/* the hand — each group is a drop target */}
-      <ScrollView
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        // CENTRED. flexGrow lets the content container fill the scroller even
-        // when the hand is narrower than it, which is what justifyContent has
-        // to push against — without it the hand pins to the left edge and sits
-        // off-centre under a centred table. When the hand IS wider, flexGrow
-        // changes nothing and it scrolls as before.
-        contentContainerStyle={{
-          gap: S[3], alignItems: 'flex-end', paddingHorizontal: S[1],
-          flexGrow: 1, justifyContent: 'center',
-        }}
-        style={{ height: m.handH, flexGrow: 0, width: m.tableW, alignSelf: 'center' }}
-      >
-        {groups.map((g, gi) => (
-          <GroupZone
-            key={gi}
-            index={gi}
-            loose={gi === groups.length - 1}
-            verdict={hint.groups[gi]}
-            onMeasure={setZone}
-            minW={m.cardW * 1.5}
-            overlap={m.overlap}
-          >
-            {g.map(id => {
-              const c = byId.get(id);
-              return c ? (
-                <HandCard
-                  key={id}
-                  card={c}
-                  w={m.cardW}
-                  selected={picked.includes(id)}
-                  wild={isJoker(c)}
-                  onPress={toggle}
-                  onDrop={dropAt}
-                />
-              ) : null;
-            })}
-            {g.length === 0 && (
-              <Text style={{ color: 'rgba(255,255,255,0.55)', fontSize: T.xs, paddingHorizontal: S[2], paddingVertical: S[4] }}>
-                Drop here
-              </Text>
-            )}
-          </GroupZone>
-        ))}
-      </ScrollView>
-
-      {/* actions — one row, comfortable targets, never over the cards.
-          Below `TIGHT` the labels shorten rather than the row wrapping or the
-          last button sliding off: Declare and Drop are the two that must always
-          be reachable, so they are the two that never shrink. */}
-      <View style={{ height: 46, flexDirection: 'row', gap: S[1], alignItems: 'center' }}>
-        <Btn label={tight ? '' : 'Sort'} icon="sort" compact accessibilityLabel="Sort your hand" onPress={() => sortNow(sortMode === 'manual' ? 'suit' : sortMode)} />
-        <Btn label={tight ? '' : 'Group'} icon="group" compact accessibilityLabel="Group the selected cards" onPress={() => { setGroups(g => groupUp(g, picked)); setPicked([]); playSfx('tick'); }} disabled={picked.length < 2} />
-        <Btn label={tight ? '' : 'Ungroup'} icon="ungroup" compact accessibilityLabel="Ungroup the selected cards" onPress={() => { setGroups(g => ungroup(g, picked)); setPicked([]); playSfx('tick'); }} disabled={picked.length === 0} />
+      {/* ── the header bar ─────────────────────────────────────────── */}
+      <View style={{
+        height: m.headerH, width: m.tableW, flexDirection: 'row',
+        alignItems: 'center', gap: S[2], paddingHorizontal: S[1],
+      }}>
+        <Wordmark />
+        <KindTabs
+          current={kindNow}
+          onPick={k => {
+            // Changing the kind of game means changing TABLE, and you cannot do
+            // that from a seat — so this asks rather than silently forfeiting
+            // the hand. The chosen kind is carried into the list so the player
+            // lands on what they asked for.
+            if (k === kindNow) return;
+            setListKind(k);
+            setConfirmLeave(k);
+          }}
+        />
         <View style={{ flex: 1 }} />
-        {typeof me?.points === 'number' && !tight && (
-          <Text style={{ color: INK_ON_FELT, fontSize: 12, fontWeight: '700', marginRight: S[1] }}>{`Score ${me.points}`}</Text>
-        )}
-        <Btn label="Discard" compact onPress={() => discard(picked[0])} disabled={!mustDiscard || picked.length !== 1 || !!pending} />
-        <Btn label="Declare" icon="declare" kind="good" compact onPress={() => setConfirmDeclare(true)} disabled={!mustDiscard || picked.length !== 1 || !!pending} />
-        <Btn label="Drop" icon="drop" kind="danger" compact onPress={() => act('drop', { t: 'drop' })} disabled={!mine || !!pending} />
+        <VoicePill voice={voice} onPress={() => setVoiceOpen(true)} still={reduceMotion} />
+        <IconBtn glyph="?" label="Game rules" onPress={() => setShowRules(true)} />
+        <IconBtn glyph="⚙" label="Table settings" onPress={() => setShowSettings(true)} />
       </View>
+
+      {/* ── the felt ───────────────────────────────────────────────── */}
+      <View style={{ height: m.tableH, width: m.tableW }}>
+        {/* The oval is narrower than the band when there are side gutters. */}
+        <View style={{ position: 'absolute', left: m.ovalX, top: m.ovalY, width: m.ovalW, height: m.ovalH }}>
+          <TableTop width={m.ovalW} height={m.ovalH} />
+
+          {others.map((p, i) => (
+            <Seat
+              key={pid(p)}
+              spot={spots[i]}
+              name={p.name}
+              count={p.handCount ?? 0}
+              points={typeof p.points === 'number' ? p.points : null}
+              status={p.status}
+              bot={!!(L.members ?? []).find(mem => mem.vaultId === pid(p))?.isBot}
+              host={L.hostId === pid(p)}
+              turn={G.turnPlayerId === pid(p)}
+              secs={G.turnPlayerId === pid(p) ? secs : null}
+              talking={voice.speaking.has(pid(p))}
+              still={reduceMotion}
+            />
+          ))}
+
+          {/* piles, on the cloth */}
+          <View style={{
+            position: 'absolute', left: 0, right: 0, top: pilesY,
+            flexDirection: 'row', gap: m.compact ? S[3] : S[4],
+            justifyContent: 'center', alignItems: 'flex-start',
+          }}>
+            <View style={{ alignItems: 'center', gap: 3 }}>
+              <DeckLabel text={m.compact ? 'CLOSED' : 'CLOSED DECK'} />
+              <Pile label={`${closedCount} left`} live={mustDraw && !pending} onPress={() => draw('closed')} back w={m.pileW} still={reduceMotion} />
+            </View>
+            <View style={{ alignItems: 'center', gap: 3 }}>
+              <DeckLabel text={m.compact ? 'OPEN' : 'OPEN DECK'} />
+              <DiscardPile
+                card={openTop}
+                live={mustDraw && !pending}
+                armed={mustDiscard}
+                w={m.pileW}
+                onPress={() => draw('open')}
+                onMeasure={z => { discardZone.current = z; }}
+                still={reduceMotion}
+              />
+            </View>
+            {wild ? (
+              <View style={{ alignItems: 'center', gap: 3 }}>
+                <DeckLabel text="WILD" />
+                <CardFace card={wild} w={m.pileW} wild />
+                <Text style={{ color: C.gold2, fontSize: 10, fontWeight: '800' }}>
+                  {wild.suit === 'JOKER' ? 'joker' : `${wild.rank} is wild`}
+                </Text>
+              </View>
+            ) : null}
+          </View>
+
+          {/* Whose turn it is, floating at the foot of the cloth. It used to own
+              a 30dp band of its own; the score panel now carries the numbers it
+              was repeating, so it costs nothing but the pixels it covers. */}
+          <View style={{ position: 'absolute', left: 0, right: 0, bottom: 4, alignItems: 'center' }}>
+            {reconnecting ? (
+              <StatusPill tone="warn">
+                <ActivityIndicator size="small" color={C.gold2} />
+                <Text style={{ color: C.gold2, fontSize: 11, fontWeight: '800' }}>
+                  Reconnecting — your hand is safe
+                </Text>
+              </StatusPill>
+            ) : (
+              <StatusPill tone={mine ? 'you' : 'plain'}>
+                <Text numberOfLines={1} style={{ flexShrink: 1, color: mine ? C.gold2 : '#cfe8d8', fontSize: 11, fontWeight: '800' }}>
+                  {statusText}
+                </Text>
+                {secs != null && (
+                  <Text
+                    accessibilityLabel={`${secs} seconds left on this turn`}
+                    style={{ color: urgent ? C.bad : INK_ON_FELT, fontSize: 11, fontWeight: '800' }}
+                  >
+                    {`⏱ ${secs}s`}
+                  </Text>
+                )}
+              </StatusPill>
+            )}
+          </View>
+        </View>
+
+        {/* The two gutter panels. They exist only where there is room for them —
+            below SIDE_PANEL_MIN_W the oval takes the whole width and the table's
+            identity falls back to the header. */}
+        {m.sidePanels && (
+          <TablePanel
+            name={table?.name}
+            stakes={table?.stakes}
+            seated={players.length}
+            max={L.maxPlayers ?? 6}
+            width={m.ovalX - S[2]}
+          />
+        )}
+        {m.sidePanels && (
+          <EmoteFeed
+            feed={feed}
+            width={m.ovalX - S[2]}
+            left={m.ovalX + m.ovalW + S[1]}
+            onOpen={() => setShowEmotes(true)}
+          />
+        )}
+      </View>
+
+      {/* ── the hand, and the score beside it ──────────────────────── */}
+      <View style={{ height: m.handH, width: m.tableW, flexDirection: 'row', gap: S[3] }}>
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={{
+            gap: S[3], alignItems: 'stretch', paddingHorizontal: S[1],
+            flexGrow: 1, justifyContent: 'center',
+          }}
+          style={{ width: m.scoreW ? m.trayW : m.tableW, flexGrow: 0 }}
+        >
+          {groups.map((g, gi) => (
+            <GroupZone
+              key={gi}
+              index={gi}
+              loose={gi === groups.length - 1}
+              verdict={hint.groups[gi]}
+              onMeasure={setZone}
+              minW={m.cardW * 1.5}
+              overlap={m.overlap}
+              height={m.handH}
+            >
+              {g.map(id => {
+                const c = byId.get(id);
+                if (!c) return null;
+                // SHOW DEADWOOD dims what already melds so what does NOT is the
+                // only thing lit. Purely local, over the hint's own verdict —
+                // no server call, and it never gates an action.
+                const melded = hint.groups[gi]?.type === 'pure'
+                  || hint.groups[gi]?.type === 'impure'
+                  || hint.groups[gi]?.type === 'set';
+                return (
+                  <HandCard
+                    key={id}
+                    card={c}
+                    w={m.cardW}
+                    selected={picked.includes(id)}
+                    wild={isJoker(c)}
+                    dimmed={showDeadwood && melded}
+                    onPress={toggle}
+                    onDrop={dropAt}
+                  />
+                );
+              })}
+              {g.length === 0 && (
+                <Text style={{ color: white(0.55), fontSize: T.xs, paddingHorizontal: S[2], paddingVertical: S[4] }}>
+                  Drop here
+                </Text>
+              )}
+            </GroupZone>
+          ))}
+        </ScrollView>
+
+        {m.scoreW > 0 && (
+          <ScorePanel
+            width={m.scoreW}
+            meld={hint.melded}
+            deadwood={Math.min(MAX_LOSS, hint.deadwood)}
+            score={typeof me?.points === 'number' ? me.points : 0}
+            onPress={() => { void playSfx('select'); setShowStandings(true); }}
+          />
+        )}
+      </View>
+
+      {/* ── actions ────────────────────────────────────────────────── */}
+      <View style={{ height: 46, width: m.tableW, flexDirection: 'row', gap: S[1], alignItems: 'center', paddingHorizontal: S[1] }}>
+        <ActionBtn w={m.barBtnW} glyph="↕" label="SORT" accessibilityLabel="Sort your hand" onPress={() => sortNow(sortMode === 'manual' ? 'suit' : sortMode)} />
+        <ActionBtn w={m.barBtnW} glyph="▣" label="GROUP" accessibilityLabel="Group the selected cards" disabled={picked.length < 2} onPress={() => { setGroups(g => groupUp(g, picked)); setPicked([]); playSfx('tick'); }} />
+        <ActionBtn w={m.barBtnW} glyph="⊖" label="UNGROUP" accessibilityLabel="Ungroup the selected cards" disabled={picked.length === 0} onPress={() => { setGroups(g => ungroup(g, picked)); setPicked([]); playSfx('tick'); }} />
+
+        <View style={{ flex: 1 }} />
+
+        {/* The score trio only comes back to the bar when the panel could not
+            fit in the band — otherwise this row would say it twice — AND when
+            the bar can afford it. Sweeping the Honor at 666dp found the bar
+            running 680dp of controls into a 666dp screen with DROP pushed off
+            the edge; `barTrio`/`barStandings`/`barToggle` are that budget. */}
+        {m.barTrio && (
+          <Pressable
+            onPress={() => { void playSfx('select'); setShowStandings(true); }}
+            accessibilityRole="button"
+            accessibilityLabel="Standings — see every player's points"
+            hitSlop={6}
+            style={{ flexDirection: 'row', marginRight: S[1] }}
+          >
+            <Stat glyph="★" value={hint.melded} label="MELD" tone={STAT.meld} />
+            <Stat glyph="♠" value={Math.min(MAX_LOSS, hint.deadwood)} label="DEADWOOD" tone={STAT.deadwood} rule />
+            {typeof me?.points === 'number' && (
+              <Stat glyph="◎" value={me.points} label="SCORE" tone={STAT.score} rule />
+            )}
+          </Pressable>
+        )}
+        {m.barStandings && (
+          <ActionBtn w={m.barBtnW} glyph="★" label="SCORE" accessibilityLabel="Standings — see every player's points" onPress={() => { void playSfx('select'); setShowStandings(true); }} />
+        )}
+
+        {m.barToggle && (
+          <ActionBtn
+            glyph="◉"
+            label={showDeadwood ? 'ALL CARDS' : 'SHOW DEADWOOD'}
+            wide
+            active={showDeadwood}
+            accessibilityLabel={showDeadwood ? 'Show every card normally' : 'Highlight the cards that do not meld'}
+            onPress={() => { setShowDeadwood(v => !v); playSfx('tick'); }}
+          />
+        )}
+
+        <View style={{ width: S[2] }} />
+        <ActionBtn w={m.barBtnW} glyph="🗑" label="DISCARD" tone="blue" disabled={!mustDiscard || picked.length !== 1 || !!pending} onPress={() => discard(picked[0])} />
+        <ActionBtn w={m.barBtnW} glyph="✓" label="DECLARE" tone="good" disabled={!mustDiscard || picked.length !== 1 || !!pending} onPress={() => setConfirmDeclare(true)} />
+        <ActionBtn w={m.barBtnW} glyph="⏻" label="DROP" tone="danger" disabled={!mine || !!pending} onPress={() => act('drop', { t: 'drop' })} />
+      </View>
+
 
       <Toasts events={feed} />
       <Confetti show={!!finished && G.winnerId === state.you && !reduceMotion} />
@@ -886,6 +1025,50 @@ export default function Rummy({ tableId = '', auto, autoBot }: { tableId?: strin
         onShare={() => { void shareResult('rummy', G.winnerId === state.you); }}
         onLobby={() => { setShowResult(false); leaveTable(); }}
       />
+
+      <StandingsSheet
+        visible={showStandings}
+        players={players}
+        you={state.you}
+        turnPlayerId={G.turnPlayerId}
+        closedCount={closedCount}
+        wildRank={G.wildRank}
+        rmatch={rmatch}
+        onClose={() => setShowStandings(false)}
+      />
+
+      <Sheet visible={!!confirmLeave} title="Leave this table?" onClose={() => setConfirmLeave(null)}>
+        <Text style={{ color: C.muted, fontSize: t.sm, lineHeight: 20 }}>
+          {`You are seated at a hand in progress. Leaving drops you from it, and the round is scored against you. The table list will show ${confirmLeave === 'bots' ? 'tables you can play a bot at' : confirmLeave === 'practice' ? 'practice tables' : 'tables played for coins'}.`}
+        </Text>
+        <Btn
+          label="Leave and find another table"
+          kind="danger"
+          onPress={() => { setConfirmLeave(null); leaveTable(); }}
+        />
+        <Btn label="Stay at this table" onPress={() => setConfirmLeave(null)} />
+      </Sheet>
+
+      {/* `emote{emoji}` is in the protocol and Ludo already ships it, so this is
+          the same real intent, not a second chat system. */}
+      <Sheet visible={showEmotes} title="Say something" onClose={() => setShowEmotes(false)}>
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: S[2] }}>
+          {['👍', '😂', '😮', '😢', '🔥', '👏', '🍀', '😎', '💀', '🤝'].map(e => (
+            <Pressable
+              key={e}
+              onPress={() => { send({ t: 'emote', emoji: e }); playSfx('tick'); setShowEmotes(false); }}
+              accessibilityRole="button"
+              accessibilityLabel={`Send ${e}`}
+              style={{
+                width: 52, height: 52, borderRadius: R[2], alignItems: 'center', justifyContent: 'center',
+                borderWidth: 1, borderColor: white(0.18), backgroundColor: white(0.08),
+              }}
+            >
+              <Text style={{ fontSize: 24 }}>{e}</Text>
+            </Pressable>
+          ))}
+        </View>
+      </Sheet>
 
       <VoiceSheet visible={voiceOpen} voice={voice} nameOf={nameOf} onClose={() => setVoiceOpen(false)} />
       <RulesSheet game="rummy" visible={showRules || firstRules.visible} onClose={() => { setShowRules(false); firstRules.close(); }} />
@@ -918,6 +1101,16 @@ export default function Rummy({ tableId = '', auto, autoBot }: { tableId?: strin
             applySort(next);
           }}
         />
+        {/* ALWAYS REACHABLE. The bar shows the standings as a three-cell
+            readout, or one button, or — on a bar too narrow for a seventh
+            control — not at all. A readout must not be gated on how wide the
+            action row happens to be, so the sheet carries it unconditionally. */}
+        <SettingRow
+          label="Standings"
+          hint="Every player's points, this deal"
+          value="Show"
+          onPress={() => { setShowSettings(false); setShowStandings(true); }}
+        />
         <SettingRow label="Sound" value={sound ? 'On' : 'Off'} onPress={() => { const n = !sound; setSound(n); void setSoundEnabled(n); }} />
         <SettingRow label="Game rules" hint="How this table scores" value="Read" onPress={() => { setShowSettings(false); setShowRules(true); }} />
         <SettingRow label="Invite a friend" hint={seated ? `Code ${seated}` : 'Share this table'} value="Share" onPress={() => { setShowSettings(false); void openInvite('rummy', seated); }} />
@@ -929,6 +1122,37 @@ export default function Rummy({ tableId = '', auto, autoBot }: { tableId?: strin
 
 /* ── small hooks ────────────────────────────────────────────────────── */
 
+
+/**
+ * The lobby and the table list, laid out for the landscape screen they now
+ * always sit on.
+ *
+ * Rummy locks landscape for its whole lifetime (see the lock on mount), so
+ * these two scrollers no longer get a 390dp-wide portrait window — they get
+ * 844, or 2264 on the Redmi. A list of table cards run edge to edge at that
+ * width is a line of text a foot long, which is the reason the screens used to
+ * rotate at all.
+ *
+ * So the content becomes a centred column with a real maximum measure. Nothing
+ * about the layout inside it changes; it simply stops being as wide as the
+ * device. The side padding takes the LARGER of the two insets on both edges —
+ * in landscape the cutout is on one side only, and padding each edge by its own
+ * inset centres the column 38px off the middle of the screen, which is the
+ * defect this file already carries a long note about for the felt.
+ */
+const COLUMN_MAX = 680;
+
+function useColumn() {
+  const insets = useSafeAreaInsets();
+  return useMemo(() => ({
+    paddingHorizontal: Math.max(insets.left, insets.right, S[4]),
+    paddingTop: insets.top + S[3],
+    paddingBottom: insets.bottom + S[5],
+    maxWidth: COLUMN_MAX,
+    width: '100%' as const,
+    alignSelf: 'center' as const,
+  }), [insets.left, insets.right, insets.top, insets.bottom]);
+}
 
 /**
  * Honour the system's "reduce motion" setting.
@@ -951,6 +1175,209 @@ function useReduceMotion(): boolean {
 /* ── choosing a table ───────────────────────────────────────────────── */
 
 /**
+ * The table-size filter.
+ *
+ * "Multi-player" is every table above two seats, NOT exactly six: the server
+ * publishes a 2–6 range, so a filter pinned to 6 would hide 3-, 4- and 5-seat
+ * tables and look like there were none open. The rule lives in
+ * lib/games/rummyTable.ts; this is only its labelling.
+ */
+/**
+ * The one rummy format this server plays.
+ *
+ * `docs/GAMES_PROTOCOL.md`: "There is no pool (101/201) and no deals variant on
+ * this server: the wire protocol has no pool score, no elimination and no deal
+ * count, and the engine only ever settles a single deal at a time." Pool and
+ * Deals would be a VaultChat-side match layer over repeated deals — see
+ * openspec/changes/rummy-variants. Until then, say which one this is.
+ */
+const VARIANT = 'Points rummy';
+
+const SEAT_FILTERS: { mode: SeatFilter; label: string; a11y: string }[] = [
+  { mode: 'all',      label: 'All tables',  a11y: 'Show all tables' },
+  { mode: 'heads-up', label: '2 players',   a11y: 'Show head-to-head tables only' },
+  { mode: 'multi',    label: 'Multiplayer', a11y: 'Show tables for three or more players' },
+];
+
+/**
+ * Practice · Free · Bots — what kind of game the player is after.
+ *
+ * "Free" is the staked tab under its honest name: this server's stakes are PLAY
+ * COINS, which cannot be bought and cannot be cashed out (the table list says
+ * so in as many words), so calling the other tab "Cash" would be the one piece
+ * of wording on this screen that is not true.
+ *
+ * Bots lists the same tables as Practice, and that is not a duplicate: only a
+ * practice table accepts `addbot`, so the SET cannot differ. What differs is
+ * what joining does — from Bots the client seats you and asks for a bot in the
+ * same breath, so it is one tap from the list to a game against the computer.
+ */
+const KIND_FILTERS: { mode: KindFilter; label: string; a11y: string }[] = [
+  { mode: 'all',      label: 'All',      a11y: 'Show every kind of table' },
+  { mode: 'practice', label: 'Practice', a11y: 'Show practice tables, which cost no coins' },
+  { mode: 'stakes',   label: 'Free',     a11y: 'Show tables played for play coins' },
+  { mode: 'bots',     label: 'Bots',     a11y: 'Show tables you can play against a bot, and seat a bot when you join' },
+];
+
+/**
+ * One segment of a filter row.
+ *
+ * Extracted because there are now two rows of these, and the copy that existed
+ * carried a bug worth not duplicating: the SELECTED chip asked for
+ * `goldLine[40]` and `goldLine[12]`, and goldLine only defines 14/18/22/28/38/55.
+ * Both resolved to `undefined`, so the selected chip rendered with no border
+ * colour and no fill and the only thing marking the selection was the text
+ * weight. `noImplicitAny: false` in tsconfig is why the compiler never said so —
+ * an out-of-range index on a plain object is silently `any`.
+ */
+function FilterChip({
+  label, a11y, selected, onPress,
+}: { label: string; a11y: string; selected: boolean; onPress: () => void }) {
+  return (
+    <Pressable
+      onPress={() => { void playSfx('select'); onPress(); }}
+      accessibilityRole="button"
+      accessibilityState={{ selected }}
+      accessibilityLabel={a11y}
+      hitSlop={8}
+      style={{
+        paddingVertical: S[2], paddingHorizontal: S[3], borderRadius: R[2],
+        borderWidth: 1,
+        borderColor: selected ? goldLine[38] : white(0.16),
+        backgroundColor: selected ? alpha(C.gold, 0.12) : white(0.06),
+      }}
+    >
+      <Text style={{
+        color: selected ? C.gold : C.muted,
+        fontSize: 12.5, fontWeight: selected ? '800' : '600',
+      }}>
+        {label}
+      </Text>
+    </Pressable>
+  );
+}
+
+/**
+ * Pool and Deals: the score across deals.
+ *
+ * The games server plays one deal and knows nothing about a match around it, so
+ * this panel is VaultChat's half — the running scoreboard, and the way to start
+ * a match in the first place. It renders NOTHING at all when there is no match
+ * and the table cannot host one, which is also exactly what happens while the
+ * backend for it is undeployed.
+ *
+ * PRACTICE TABLES ONLY, and the reason is money, not preference: a staked table
+ * settles coins on EVERY deal, but a pool's stake moves once at the end — so a
+ * pool over a staked table charges a player per deal by the games server and
+ * again per match. `allowsBots` already tests the same `pointValue === 0`
+ * condition for a closely related reason.
+ */
+function MatchPanel({
+  rmatch, table, you, host,
+}: {
+  rmatch: RummyMatch;
+  table?: { name?: string; stakes?: string; pointValue?: number };
+  you: string;
+  host: boolean;
+}) {
+  const t = useType();
+  const [picking, setPicking] = useState(false);
+  const m = rmatch.match;
+  const practice = allowsBots(table);
+
+  // Nothing to show and nothing to offer.
+  if (!m && (!practice || !host)) return null;
+
+  if (!m) {
+    return (
+      <Panel style={{ gap: S[2] }}>
+        <Text style={{ color: C.text, fontSize: t.md, fontWeight: '800' }}>Pool & Deals</Text>
+        {picking ? (
+          <>
+            {VARIANTS.map(v => (
+              <Btn
+                key={v.id}
+                label={v.label}
+                onPress={() => { void playSfx('select'); setPicking(false); rmatch.open(v.id, practice); }}
+              />
+            ))}
+            <Text style={{ color: C.muted, fontSize: 11.5, lineHeight: 17 }}>
+              {VARIANTS.map(v => `${v.label}: ${v.blurb}`).join('\n')}
+            </Text>
+            <Btn label="Not now" compact onPress={() => setPicking(false)} />
+          </>
+        ) : (
+          <>
+            <Text style={{ color: C.muted, fontSize: t.sm, lineHeight: 19 }}>
+              Play several deals as one match — knocked out at 101 or 201, or the
+              best of 2 or 6 deals.
+            </Text>
+            <Btn label="Start a match" icon="bot" kind="gold" onPress={() => setPicking(true)} />
+          </>
+        )}
+      </Panel>
+    );
+  }
+
+  const rows = standings(m);
+  const done = m.status === 'finished';
+  const leader = rows[0];
+
+  return (
+    <Panel style={{ gap: S[2] }}>
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: S[2] }}>
+        <Text style={{ color: C.text, fontSize: t.md, fontWeight: '800', flex: 1 }}>
+          {variantLabel(m.variant)}
+        </Text>
+        <Text style={{ color: C.muted, fontSize: 12 }}>{progressLabel(m)}</Text>
+      </View>
+
+      {rows.map(r => {
+        const out = r.status === 'out';
+        // A pool shows the total against the limit it is racing; a deals match
+        // shows chips, which can be negative. Showing one as the other is how a
+        // scoreboard reads as nonsense.
+        const value = m.poolLimit > 0 ? `${r.points} / ${m.poolLimit}` : `${r.chips >= 0 ? '+' : ''}${r.chips}`;
+        return (
+          <View
+            key={r.vaultId}
+            accessibilityLabel={`${r.name}, ${value}${out ? ', out' : ''}`}
+            style={{
+              flexDirection: 'row', alignItems: 'center', gap: S[2],
+              paddingVertical: S[2], paddingHorizontal: S[3], borderRadius: R[2],
+              backgroundColor: r.vaultId === you ? C.panel2 : 'transparent',
+              opacity: out ? 0.5 : 1,
+            }}
+          >
+            <Text style={{ color: C.text, fontSize: t.sm, fontWeight: '700', flex: 1 }} numberOfLines={1}>
+              {r.name}{r.vaultId === you ? ' (you)' : ''}
+            </Text>
+            {out && (
+              <Text style={{ color: C.muted, fontSize: 11, fontWeight: '800' }}>OUT</Text>
+            )}
+            <Text style={{ color: out ? C.muted : C.gold, fontSize: t.sm, fontWeight: '800' }}>
+              {value}
+            </Text>
+          </View>
+        );
+      })}
+
+      {done ? (
+        <Text style={{ color: C.gold, fontSize: t.sm, fontWeight: '800' }}>
+          {leader ? `${leader.name} wins the match.` : 'Match over.'}
+        </Text>
+      ) : (
+        <Text style={{ color: C.muted, fontSize: 11.5, lineHeight: 17 }}>
+          {m.poolLimit > 0
+            ? `Deal again to play the next round. Out at ${m.poolLimit}.`
+            : 'Deal again to play the next round.'}
+        </Text>
+      )}
+    </Panel>
+  );
+}
+
+/**
  * The seat list.
  *
  * Public tables come from the server (`{t:'lobby'}` → `{t:'tables'}`) with their
@@ -959,18 +1386,29 @@ function useReduceMotion(): boolean {
  * table with a fresh code, or type the code a friend sent.
  */
 function TableSelect({
-  tables, seating, failed, seatedId, onJoin, onBack, feed,
+  tables, seating, failed, seatedId, onJoin, onBack, feed, kind, onKind,
 }: {
   tables: TableInfo[] | null;
   seating: boolean;
   failed: boolean;
   seatedId: string;
-  onJoin: (id: string) => void;
+  onJoin: (id: string, withBot?: boolean) => void;
   onBack: () => void;
   feed: string[];
+  /** Lifted, so the table header's Practice/Free/Bots tabs can pre-set it. */
+  kind: KindFilter;
+  onKind: (k: KindFilter) => void;
 }) {
   const t = useType();
+  const column = useColumn();
   const [code, setCode] = useState('');
+  const [seats, setSeats] = useState<SeatFilter>('all');
+  const setKind = onKind;
+  // Both filters compose; neither is allowed to be the only one that applies.
+  const shown = useMemo(
+    () => filterBySeats(filterByKind(tables ?? [], kind), seats),
+    [tables, kind, seats],
+  );
   const [record, setRecord] = useState<{ gamesPlayed: number; totalWon: number } | null>(null);
 
   // The only record the server exposes. There is no per-match history endpoint,
@@ -1014,7 +1452,7 @@ function TableSelect({
     <TableBackground>
       <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
         <ScrollView
-          contentContainerStyle={{ padding: S[4], gap: S[3], paddingBottom: S[6] }}
+          contentContainerStyle={[column, { gap: S[3] }]}
           keyboardShouldPersistTaps="handled"
         >
           <Text style={{ color: C.text, fontSize: t.xl, fontWeight: '800' }}>Rummy</Text>
@@ -1029,6 +1467,41 @@ function TableSelect({
           )}
 
           <Text style={{ color: C.text, fontSize: t.md, fontWeight: '800', marginTop: S[2] }}>Open tables</Text>
+
+          {/* HEAD-TO-HEAD OR A FULL TABLE IS A CHOICE, NOT A SEARCH.
+              The server has always sent maxPlayers per table and the list has
+              always rendered it as text — so wanting a 2-player game meant
+              reading every card looking for one. */}
+          {!!tables?.length && (
+            <View style={{ gap: S[2] }}>
+              {/* WHAT KIND OF GAME, then HOW MANY SEATS. Two rows rather than
+                  one: they are independent questions and a single row of seven
+                  chips reads as one list where picking two looks contradictory. */}
+              <View style={{ flexDirection: 'row', gap: S[2], flexWrap: 'wrap' }}>
+                {KIND_FILTERS.map(f => (
+                  <FilterChip
+                    key={f.mode}
+                    label={f.label}
+                    a11y={f.a11y}
+                    selected={kind === f.mode}
+                    onPress={() => setKind(f.mode)}
+                  />
+                ))}
+              </View>
+              <View style={{ flexDirection: 'row', gap: S[2], flexWrap: 'wrap' }}>
+                {SEAT_FILTERS.map(f => (
+                  <FilterChip
+                    key={f.mode}
+                    label={f.label}
+                    a11y={f.a11y}
+                    selected={seats === f.mode}
+                    onPress={() => setSeats(f.mode)}
+                  />
+                ))}
+              </View>
+            </View>
+          )}
+
           {tables == null ? (
             <Panel style={{ alignItems: 'center', gap: S[2] }}>
               <ActivityIndicator color={C.gold} />
@@ -1038,8 +1511,37 @@ function TableSelect({
             <Panel>
               <Text style={{ color: C.muted, fontSize: t.sm }}>No public tables are open right now. Start a private one below.</Text>
             </Panel>
+          ) : shown.length === 0 ? (
+            /* A FILTER THAT EMPTIES THE LIST MUST SAY SO. Rendering nothing here
+               is indistinguishable from "the server has no tables", and the way
+               out — clearing the filter — would be invisible. */
+            <Panel style={{ gap: S[2] }}>
+              <Text style={{ color: C.muted, fontSize: t.sm, lineHeight: 19 }}>
+                {/* Name the filter that emptied the list. Saying "no
+                    head-to-head tables" while the KIND filter is what hid them
+                    sends the player to fix the wrong control. */}
+                {kind !== 'all'
+                  ? kind === 'bots'
+                    ? 'No table that accepts a bot is open right now.'
+                    : kind === 'practice'
+                      ? 'No practice tables are open right now.'
+                      : 'No coin tables are open right now.'
+                  : seats === 'heads-up'
+                    ? 'No head-to-head tables are open right now.'
+                    : 'No multi-player tables are open right now.'}
+              </Text>
+              <Btn label="Show every table" compact onPress={() => { setKind('all'); setSeats('all'); }} />
+            </Panel>
           ) : (
-            tables.map(tb => <TableCard key={tb.id} table={tb} onJoin={() => onJoin(tb.id)} />)
+            shown.map(tb => (
+              <TableCard
+                key={tb.id}
+                table={tb}
+                // From the Bots tab, joining seats you AND asks for a bot — the
+                // whole point of the tab, since the table set is the same.
+                onJoin={() => onJoin(tb.id, kind === 'bots')}
+              />
+            ))
           )}
 
           {/* Every surface that shows a stake says what it is staking. A number
@@ -1100,8 +1602,14 @@ function TableCard({ table, onJoin }: { table: TableInfo; onJoin: () => void }) 
       <View style={{ flex: 1, gap: 3 }}>
         <Text style={{ color: C.text, fontSize: t.md, fontWeight: '800' }}>{table.name}</Text>
         <Text style={{ color: C.muted, fontSize: T.sm }}>{table.stakes}</Text>
+        {/* NAME THE VARIANT, even though there is only one.
+            Rummy has three well-known formats (Points, Pool 101/201, Deals),
+            and this server plays only Points — the wire protocol carries no
+            pool score, no elimination and no deal count. A player arriving from
+            another rummy app assumes a format unless told, and finding out from
+            the scoreboard reads as the app getting the rules wrong. */}
         <Text style={{ color: C.muted, fontSize: 12 }}>
-          {`${table.players}/${table.maxPlayers} seated · ${table.status}`}
+          {`${VARIANT} · ${table.players}/${table.maxPlayers} seated · ${table.status}`}
         </Text>
       </View>
       <Btn label={full ? 'Full' : 'Join'} kind={full ? 'secondary' : 'gold'} compact disabled={full} onPress={onJoin} />
@@ -1119,8 +1627,9 @@ function TableCard({ table, onJoin }: { table: TableInfo; onJoin: () => void }) 
  * offer the server refuses reads to a player as a broken button.
  */
 function Room({
-  lobby, table, you, code, substituted, voice, voiceOpen, setVoiceOpen, onSend, onLeave, feed, notify,
+  lobby, table, you, code, substituted, voice, voiceOpen, setVoiceOpen, onSend, onLeave, feed, notify, rmatch,
 }: {
+  rmatch: RummyMatch;
   lobby: { status: string; hostId?: string; members: { vaultId: string; name: string; isBot?: boolean }[]; maxPlayers?: number };
   table?: { name?: string; stakes?: string; pointValue?: number };
   you: string;
@@ -1136,7 +1645,7 @@ function Room({
   notify: (m: string) => void;
 }) {
   const t = useType();
-  const insets = useSafeAreaInsets();
+  const column = useColumn();
   const members = lobby.members ?? [];
   const host = lobby.hostId === you;
   const max = lobby.maxPlayers ?? 6;
@@ -1180,10 +1689,10 @@ function Room({
 
   return (
     <TableBackground>
-      <ScrollView contentContainerStyle={{ padding: S[4], gap: S[3], paddingBottom: insets.bottom + S[5] }}>
+      <ScrollView contentContainerStyle={[column, { gap: S[3] }]}>
         <Text style={{ color: C.text, fontSize: t.xl, fontWeight: '800' }}>{table?.name || 'Rummy table'}</Text>
         <Text style={{ color: C.muted, fontSize: t.sm }}>
-          {[table?.stakes, `${members.length}/${max} seated`].filter(Boolean).join(' · ')}
+          {[VARIANT, table?.stakes, `${members.length}/${max} seated`].filter(Boolean).join(' · ')}
         </Text>
 
         <Panel style={{ gap: S[2] }}>
@@ -1225,6 +1734,8 @@ function Room({
             </View>
           </Panel>
         )}
+
+        <MatchPanel rmatch={rmatch} table={table} you={you} host={host} />
 
         <VoiceRow voice={voice} onExpand={() => setVoiceOpen(true)} />
 
@@ -1388,20 +1899,20 @@ function VoicePill({ voice, onPress, still }: { voice: TableVoice; onPress: () =
           ? `Table voice, ${voice.participants.length} in the channel, ${voice.muted ? 'you are muted' : 'microphone live'}`
           : `Table voice, ${VOICE_LABEL[voice.phase] ?? voice.phase}`
       }
-      hitSlop={6}
-      style={{
-        flexDirection: 'row', alignItems: 'center', gap: 4,
-        paddingHorizontal: S[2], paddingVertical: 5, borderRadius: R.pill,
-        borderWidth: 1, borderColor: live ? goldLine[38] : 'rgba(255,255,255,0.22)',
-        // Dark glass, not light. This pill sits on the FELT rather than on the
-        // room, and a mid-tone teal ground needs a surface that darkens to keep
-        // white text legible — frosting over a lit table works the other way
-        // round from frosting over an unlit one. The value it replaces was
-        // rgba(4,26,14) — a green-black mixed for a felt this table stopped
-        // using, which is why these pills read slightly swampy on the teal.
-        backgroundColor: 'rgba(0,0,0,0.34)',
-        boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.16)',
-      }}
+      hitSlop={9}
+      style={[
+        // Teal glass when the channel is live, navy when it is not — the same
+        // two-family rule as every other surface on the felt, from
+        // lib/games/rummyGlass.ts rather than written out here. This pill used
+        // to carry its own rgba(4,26,14): a green-black mixed for a felt the
+        // table stopped using two restyles ago, which is exactly the drift one
+        // source of colour exists to stop.
+        onFelt(live ? 'teal' : 'navy', { radius: R.pill, active: live }),
+        {
+          flexDirection: 'row', alignItems: 'center', gap: 4,
+          paddingHorizontal: S[2], paddingVertical: 4,
+        },
+      ]}
     >
       {busy
         ? <ActivityIndicator size="small" color={C.gold2} />
@@ -1415,7 +1926,7 @@ function VoicePill({ voice, onPress, still }: { voice: TableVoice; onPress: () =
               color={live ? (voice.muted ? C.bad : C.good) : C.gold2}
             />
           </Animated.View>}
-      <Text style={{ color: live ? '#5fe08c' : INK_ON_FELT, fontSize: T.xs, fontWeight: '800' }}>
+      <Text style={{ color: live ? CYAN : INK_ON_FELT, fontSize: T.xs, fontWeight: '800' }}>
         {live ? `${voice.participants.length}` : VOICE_LABEL[voice.phase] ?? ''}
       </Text>
     </Pressable>
@@ -1473,15 +1984,15 @@ function TableTop({ width, height }: { width: number; height: number }) {
         {/* Brass, lit from above: a hot cap at the top edge falling to a dark
             underside, which is what tells the eye the rail is round. */}
         <RadialGradient id="rtRail" cx="50%" cy="-10%" rx="75%" ry="110%">
-          <Stop offset="0" stopColor="#FFE9A8" />
-          <Stop offset="0.38" stopColor="#D9A93C" />
-          <Stop offset="0.74" stopColor="#8A6416" />
-          <Stop offset="1" stopColor="#4A330B" />
+          <Stop offset="0" stopColor={RAIL[0]} />
+          <Stop offset="0.38" stopColor={RAIL[1]} />
+          <Stop offset="0.74" stopColor={RAIL[2]} />
+          <Stop offset="1" stopColor={RAIL[3]} />
         </RadialGradient>
         {/* Walnut between brass and cloth — the part a player rests a hand on. */}
         <RadialGradient id="rtWood" cx="50%" cy="0%" rx="75%" ry="105%">
-          <Stop offset="0" stopColor="#5C3A1E" />
-          <Stop offset="1" stopColor="#2B1A0C" />
+          <Stop offset="0" stopColor={WOOD[0]} />
+          <Stop offset="1" stopColor={WOOD[1]} />
         </RadialGradient>
         {/* Cloth. The light sits high and slightly back, so the near edge —
             where the player's own hand is — falls into shadow and the middle of
@@ -1510,7 +2021,7 @@ function TableTop({ width, height }: { width: number; height: number }) {
           every stretched surface has, and the cheapest way to say "taut". */}
       <Ellipse
         cx={cx} cy={cy} rx={irx} ry={iry}
-        fill="none" stroke="#FFF8F1" strokeOpacity="0.16" strokeWidth="1.5"
+        fill="none" stroke={CYAN} strokeOpacity="0.22" strokeWidth="1.5"
       />
 
       {/* The house mark, printed into the cloth. Every real card-room table
@@ -1567,16 +2078,25 @@ function Baize() {
   return (
     <Svg style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 }} pointerEvents="none">
       <Defs>
-        {/* The room, matching C.bg — a near-black with maroon in it. The old
-            surround was dark GREEN, which is why the table used to sit in a
-            faintly different world from the rest of the games UI. */}
-        <RadialGradient id="rbaize" cx="50%" cy="12%" rx="90%" ry="94%">
-          <Stop offset="0" stopColor="#241012" />
-          <Stop offset="0.55" stopColor="#180809" />
-          <Stop offset="1" stopColor="#110405" />
+        {/* The room. Warm, and lit from two sides — see ROOM/ROOM_GLOW. It was a
+            flat maroon near-black, which left the cloth as the only lit thing on
+            screen and the brass rail with nothing to catch. */}
+        <RadialGradient id="rbaize" cx="50%" cy="18%" rx="95%" ry="100%">
+          <Stop offset="0" stopColor={ROOM[0]} />
+          <Stop offset="0.5" stopColor={ROOM[1]} />
+          <Stop offset="1" stopColor={ROOM[2]} />
         </RadialGradient>
+        {ROOM_GLOW.map((g, i) => (
+          <RadialGradient key={i} id={`rglow${i}`} cx={g.cx} cy={g.cy} rx={g.rx} ry={g.ry}>
+            <Stop offset="0" stopColor={g.color} stopOpacity={g.opacity} />
+            <Stop offset="1" stopColor={g.color} stopOpacity={0} />
+          </RadialGradient>
+        ))}
       </Defs>
       <Rect x="0" y="0" width="100%" height="100%" fill="url(#rbaize)" />
+      {ROOM_GLOW.map((_, i) => (
+        <Rect key={i} x="0" y="0" width="100%" height="100%" fill={`url(#rglow${i})`} />
+      ))}
       {/* One gold hairline ties the surround to the rail. Kept thin and at low
           opacity: this is trim, not an accent, and the accent budget belongs to
           the primary action. */}
@@ -1588,12 +2108,342 @@ function Baize() {
 /** Names a stack the way a table does — small caps on a dark plate. */
 function DeckLabel({ text }: { text: string }) {
   return (
-    <View style={{
-      paddingHorizontal: S[2], paddingVertical: 2, borderRadius: R.pill,
-      backgroundColor: 'rgba(0,0,0,0.42)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.20)',
-      boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.16)',
-    }}>
-      <Text style={{ color: '#FFF8F1', fontSize: 9.5, fontWeight: '800', letterSpacing: 0.8 }}>{text}</Text>
+    <View style={[onFelt('navy', { radius: R.pill, lift: 0 }), { paddingHorizontal: S[2], paddingVertical: 2 }]}>
+      <Text style={{ color: INK_ON_FELT, fontSize: 9.5, fontWeight: '800', letterSpacing: 0.8 }}>{text}</Text>
+    </View>
+  );
+}
+
+/**
+ * SCORE — the standings, mid-hand.
+ *
+ * Every number here is the server's and is already on the wire every frame:
+ * `players[].points`, `.handCount`, `.status`, plus `closedCount` and the
+ * round's wild rank. Nothing is computed, nothing is remembered between frames.
+ *
+ * It exists because the table could only ever be read at the END of a round.
+ * `ResultSheet` shows the settlement once the hand is over and `MatchPanel`
+ * lives in the lobby, so a player halfway through a deal had no way to answer
+ * "who is winning" — the one question the whole game is about. In points rummy
+ * that matters more than in most: the score runs DOWN, and whether to drop is a
+ * decision you make against everyone else's totals.
+ *
+ * Ordered by `ranked`, the same function the result sheet uses, so the standing
+ * a player watches during the hand is the standing they see at the end of it.
+ */
+function StandingsSheet({
+  visible, players, you, turnPlayerId, closedCount, wildRank, rmatch, onClose,
+}: {
+  visible: boolean;
+  players: RummyPlayer[];
+  you: string;
+  turnPlayerId?: string | null;
+  closedCount: number;
+  wildRank?: string | null;
+  rmatch: RummyMatch;
+  onClose: () => void;
+}) {
+  const ty = useType();
+  const order = ranked(players, null);
+  const match = rmatch.match;
+  const rows = match ? standings(match) : [];
+
+  return (
+    <Sheet visible={visible} title="Standings" onClose={onClose}>
+      <View style={{ flexDirection: 'row', paddingHorizontal: S[2] }}>
+        <Text style={{ flex: 1, color: C.muted, fontSize: T.xs, fontWeight: '700' }}>Player</Text>
+        <Text style={{ width: 58, textAlign: 'right', color: C.muted, fontSize: T.xs, fontWeight: '700' }}>Cards</Text>
+        <Text style={{ width: 58, textAlign: 'right', color: C.muted, fontSize: T.xs, fontWeight: '700' }}>Points</Text>
+      </View>
+
+      {order.map(p => {
+        const isYou = pid(p) === you;
+        const out = p.status !== 'active' && p.status !== 'won';
+        return (
+          <View
+            key={pid(p)}
+            accessibilityLabel={`${p.name}${isYou ? ', you' : ''}, ${p.handCount ?? 0} cards, ${p.points ?? 0} points${out ? `, ${p.status}` : ''}`}
+            style={{
+              flexDirection: 'row', alignItems: 'center', gap: S[2],
+              paddingVertical: S[2], paddingHorizontal: S[2], borderRadius: R[2],
+              backgroundColor: isYou ? C.panel2 : 'transparent',
+              borderWidth: isYou ? 1 : 0, borderColor: goldLine[22],
+              opacity: out ? 0.55 : 1,
+            }}
+          >
+            <Text numberOfLines={1} style={{ flex: 1, color: C.text, fontSize: ty.sm, fontWeight: isYou ? '800' : '600' }}>
+              {p.name}{isYou ? ' (you)' : ''}
+              {pid(p) === turnPlayerId ? ' ·' : ''}
+            </Text>
+            {out
+              ? <Text style={{ width: 58, textAlign: 'right', color: C.muted, fontSize: 11, fontWeight: '800' }}>{p.status}</Text>
+              : <Text style={{ width: 58, textAlign: 'right', color: C.text, fontSize: ty.sm }}>{p.handCount ?? 0}</Text>}
+            <Text style={{ width: 58, textAlign: 'right', color: C.gold, fontSize: ty.sm, fontWeight: '800' }}>{p.points ?? 0}</Text>
+          </View>
+        );
+      })}
+
+      <Text style={{ color: C.muted, fontSize: 11.5, lineHeight: 17 }}>
+        {`Points rummy scores down — the winner takes 0 and everyone else carries their deadwood. ${closedCount} cards left in the deck${wildRank ? ` · ${wildRank} is wild` : ''}.`}
+      </Text>
+
+      {/* The match across deals, when one is running. Same rows the lobby's
+          panel shows — a pool score is not visible anywhere else mid-hand. */}
+      {match && rows.length > 0 && (
+        <>
+          <Text style={{ color: C.text, fontSize: ty.md, fontWeight: '800', marginTop: S[2] }}>
+            {variantLabel(match.variant)}
+          </Text>
+          {rows.map(r => (
+            <View
+              key={r.vaultId}
+              style={{
+                flexDirection: 'row', alignItems: 'center', gap: S[2],
+                paddingVertical: S[2], paddingHorizontal: S[3], borderRadius: R[2],
+                backgroundColor: r.vaultId === you ? C.panel2 : 'transparent',
+                opacity: r.status === 'out' ? 0.5 : 1,
+              }}
+            >
+              <Text numberOfLines={1} style={{ flex: 1, color: C.text, fontSize: ty.sm, fontWeight: '700' }}>
+                {r.name}{r.vaultId === you ? ' (you)' : ''}
+              </Text>
+              {r.status === 'out' && <Text style={{ color: C.muted, fontSize: 11, fontWeight: '800' }}>OUT</Text>}
+              <Text style={{ color: C.gold, fontSize: ty.sm, fontWeight: '800' }}>
+                {match.poolLimit > 0 ? `${r.points} / ${match.poolLimit}` : `${r.chips >= 0 ? '+' : ''}${r.chips}`}
+              </Text>
+            </View>
+          ))}
+          <Text style={{ color: C.muted, fontSize: 11.5 }}>{progressLabel(match)}</Text>
+        </>
+      )}
+    </Sheet>
+  );
+}
+
+/** The house mark. Small, and the only branding on the screen. */
+function Wordmark() {
+  return (
+    <View style={[onFelt('navy', { radius: 9 }), { paddingHorizontal: S[2], paddingVertical: 2, alignItems: 'center' }]}>
+      <Text style={{ color: C.gold2, fontSize: 8, lineHeight: 9 }}>♛</Text>
+      <Text style={{ color: INK_ON_FELT, fontSize: 10, fontWeight: '800', letterSpacing: 1 }}>RUMMY</Text>
+      <Text style={{ color: C.gold, opacity: 0.8, fontSize: 5.5, fontWeight: '800', letterSpacing: 0.9 }}>PLAY SMART</Text>
+    </View>
+  );
+}
+
+/**
+ * Practice · Free · Bots, at the table.
+ *
+ * These CANNOT switch table by themselves — you are sitting at a hand, and the
+ * protocol has no way to move a seated player. So the tab that is not current
+ * asks to leave, and carries the choice into the table list. A tab that
+ * silently forfeited the round would be worse than no tab at all.
+ */
+function KindTabs({ current, onPick }: { current: KindFilter; onPick: (k: KindFilter) => void }) {
+  const tabs: { k: KindFilter; label: string }[] = [
+    { k: 'practice', label: 'Practice' },
+    { k: 'stakes', label: 'Free' },
+    { k: 'bots', label: 'Bots' },
+  ];
+  return (
+    <View style={[onFelt('navy', { radius: R.pill, lift: 0 }), { flexDirection: 'row', padding: 2 }]}>
+      {tabs.map(t => {
+        const on = t.k === current;
+        return (
+          <Pressable
+            key={t.k}
+            onPress={() => { void playSfx('select'); onPick(t.k); }}
+            accessibilityRole="button"
+            accessibilityState={{ selected: on }}
+            accessibilityLabel={on ? `${t.label} table — you are here` : `Leave and find a ${t.label} table`}
+            hitSlop={6}
+            style={{
+              paddingHorizontal: S[3], paddingVertical: 3, borderRadius: R.pill,
+              borderWidth: 1, borderColor: on ? goldLine[38] : 'transparent',
+              backgroundColor: on ? alpha(C.gold, 0.14) : 'transparent',
+            }}
+          >
+            <Text style={{ color: on ? C.gold2 : INK_DIM, fontSize: 10.5, fontWeight: on ? '800' : '600' }}>
+              {t.label}
+            </Text>
+          </Pressable>
+        );
+      })}
+    </View>
+  );
+}
+
+/**
+ * The table, in the three facts a player actually asks for.
+ *
+ * Every one is the server's: the table's own name and stakes string, and the
+ * seat count from `players`. Nothing here is computed or guessed.
+ */
+function TablePanel({
+  name, stakes, seated, max, width,
+}: { name?: string; stakes?: string; seated: number; max: number; width: number }) {
+  const rows: [string, string][] = [
+    ['Table:', name || 'Rummy'],
+    ['Players:', `${seated} / ${max}`],
+    ['Stakes:', stakes || '—'],
+  ];
+  return (
+    <View style={[
+      onFelt('navy', { radius: 14, lift: 2 }),
+      { position: 'absolute', left: S[1], top: '28%', width: Math.max(88, width), padding: S[2], gap: 5 },
+    ]}>
+      {rows.map(([k, v]) => (
+        <View key={k}>
+          <Text style={{ color: INK_DIM, fontSize: 7.5, fontWeight: '800', letterSpacing: 0.4 }}>{k}</Text>
+          <Text numberOfLines={1} style={{ color: INK_ON_FELT, fontSize: 11, fontWeight: '800' }}>{v}</Text>
+        </View>
+      ))}
+    </View>
+  );
+}
+
+/**
+ * The last thing anyone said, and the way to say something back.
+ *
+ * The bubbles are the tail of the SAME feed the toasts render — server events
+ * and this screen's own refusals — so nothing is stored twice and nothing is
+ * invented. The button opens the emote sheet, which sends `emote{emoji}`.
+ */
+function EmoteFeed({
+  feed, width, left, onOpen,
+}: { feed: string[]; width: number; left: number; onOpen: () => void }) {
+  const last = feed.slice(-2);
+  return (
+    <View style={[
+      onFelt('navy', { radius: 14, lift: 2 }),
+      { position: 'absolute', left, top: '34%', width: Math.max(88, width), padding: S[2], gap: 4 },
+    ]}>
+      {last.length === 0 ? (
+        <Text style={{ color: INK_DIM, fontSize: 9.5 }}>Say hello</Text>
+      ) : last.map((msg, i) => (
+        <View key={i} style={{ borderRadius: 10, paddingHorizontal: S[2], paddingVertical: 3, backgroundColor: white(0.10) }}>
+          <Text numberOfLines={2} style={{ color: INK_ON_FELT, fontSize: 9 }}>{msg}</Text>
+        </View>
+      ))}
+      <Pressable
+        onPress={onOpen}
+        accessibilityRole="button"
+        accessibilityLabel="Say something"
+        hitSlop={8}
+        style={{ alignSelf: 'flex-end', paddingHorizontal: S[2], paddingVertical: 2, borderRadius: R.pill, backgroundColor: white(0.12) }}
+      >
+        <Text style={{ color: INK_ON_FELT, fontSize: 9, fontWeight: '800' }}>•••</Text>
+      </Pressable>
+    </View>
+  );
+}
+
+/**
+ * MELD · DEADWOOD · SCORE, at full size beside the hand.
+ *
+ * This is what let the turn/status strip give up its 30dp band: the numbers it
+ * used to repeat are permanently on screen here instead. Pressing it opens the
+ * standings, so the readout and the control are the same object.
+ */
+function ScorePanel({
+  width, meld, deadwood, score, onPress,
+}: { width: number; meld: number; deadwood: number; score: number; onPress: () => void }) {
+  const cells: [string, number, string, string][] = [
+    ['★', meld, 'MELD POINTS', STAT.meld],
+    ['♠', deadwood, 'DEADWOOD', STAT.deadwood],
+    ['◎', score, 'SCORE', STAT.score],
+  ];
+  return (
+    <Pressable
+      onPress={onPress}
+      accessibilityRole="button"
+      accessibilityLabel={`Standings. Meld ${meld}, deadwood ${deadwood}, score ${score}`}
+      // A COLUMN of three rows, not a row of three columns — see SCORE_MIN_W.
+      style={[
+        onFelt('navy', { radius: 13 }),
+        { width, flexDirection: 'column' },
+      ]}
+    >
+      {cells.map(([glyph, value, label, tone], i) => (
+        <View key={label} style={{
+          flex: 1, flexDirection: 'row', alignItems: 'center', paddingHorizontal: S[2], gap: S[1],
+          borderTopWidth: i ? 1 : 0, borderTopColor: white(0.10),
+        }}>
+          <Text style={{ color: tone, fontSize: 12 }}>{glyph}</Text>
+          <Text style={{ color: tone, fontSize: 17, fontWeight: '800' }}>{value}</Text>
+          <View style={{ flex: 1 }} />
+          <Text numberOfLines={1} style={{ color: tone, opacity: 0.8, fontSize: 6.5, fontWeight: '800', letterSpacing: 0.4 }}>{label}</Text>
+        </View>
+      ))}
+    </Pressable>
+  );
+}
+
+/**
+ * One action: a glyph over its name.
+ *
+ * The three decisions are coloured and the utilities are not, because Declare
+ * and Drop sit inches apart and one wins the hand while the other forfeits it.
+ */
+function ActionBtn({
+  glyph, label, onPress, disabled, tone, wide, active, w, accessibilityLabel,
+}: {
+  glyph: string;
+  label: string;
+  /** Mandatory controls take a computed width so the row can never overflow. */
+  w?: number;
+  onPress: () => void;
+  disabled?: boolean;
+  tone?: 'blue' | 'good' | 'danger';
+  wide?: boolean;
+  active?: boolean;
+  accessibilityLabel?: string;
+}) {
+  const ink = tone === 'good' ? '#F2FFF7' : tone === 'danger' ? '#FFF1F2' : tone === 'blue' ? '#F0F8FF' : INK_ON_FELT;
+  const surface = tone === 'good' ? onFelt('emerald', { radius: 11, active: true })
+    : tone === 'danger' ? onFelt('danger', { radius: 11, active: true })
+    : tone === 'blue' ? onFelt('blue', { radius: 11, active: true })
+    : onFelt('navy', { radius: 11, active: !!active });
+  return (
+    <Pressable
+      onPress={disabled ? undefined : onPress}
+      disabled={disabled}
+      accessibilityRole="button"
+      accessibilityState={{ disabled: !!disabled, selected: !!active }}
+      accessibilityLabel={accessibilityLabel ?? label}
+      style={[surface, {
+        height: 36, width: wide ? undefined : w, minWidth: wide ? 118 : (w ?? 62),
+        paddingHorizontal: w && w < 56 ? 2 : S[2],
+        alignItems: 'center', justifyContent: 'center', opacity: disabled ? 0.45 : 1,
+      }]}
+    >
+      <Text style={{ color: ink, fontSize: 11 }}>{glyph}</Text>
+      <Text numberOfLines={1} style={{ color: ink, fontSize: 7.5, fontWeight: '800', letterSpacing: 0.5 }}>{label}</Text>
+    </Pressable>
+  );
+}
+
+/**
+ * One cell of the score readout.
+ *
+ * Colour carries the meaning before the label does — gold is what you have
+ * built, red is what it will cost you, cyan is the server's score — so the
+ * three are never interchangeable and the values live in rummyGlass.STAT
+ * rather than being written at each call site.
+ */
+function Stat({
+  glyph, value, label, tone, rule,
+}: { glyph: string; value: number; label: string; tone: string; rule?: boolean }) {
+  return (
+    <View
+      accessibilityLabel={`${label.toLowerCase()} ${value}`}
+      style={{
+        paddingHorizontal: S[2], alignItems: 'center', justifyContent: 'center',
+        borderLeftWidth: rule ? 1 : 0, borderLeftColor: white(0.14),
+      }}
+    >
+      <Text style={{ color: tone, fontSize: 12.5, fontWeight: '800' }}>{`${glyph} ${value}`}</Text>
+      <Text style={{ color: tone, opacity: 0.7, fontSize: 6.5, fontWeight: '800', letterSpacing: 0.5 }}>{label}</Text>
     </View>
   );
 }
@@ -1602,16 +2452,16 @@ function StatusPill({ tone, children }: { tone: 'plain' | 'you' | 'warn'; childr
   return (
     <View
       accessibilityLiveRegion="polite"
-      style={{
-        flexDirection: 'row', alignItems: 'center', gap: S[2],
-        paddingHorizontal: S[3], paddingVertical: 3, borderRadius: R.pill,
-        // Dark glass on the felt — see VoicePill. Same green-black origin.
-        backgroundColor: 'rgba(0,0,0,0.36)',
-        boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.16)',
-        borderWidth: 1,
-        borderColor: tone === 'you' ? goldLine[38] : tone === 'warn' ? C.goldDeep : 'rgba(255,255,255,0.12)',
-        maxWidth: '96%',
-      }}
+      style={[
+        // Gold glass when it is YOUR turn, plain navy when it is not: the pill
+        // is the one place the table says whether it is waiting on you, so the
+        // surface itself carries that rather than only the words on it.
+        onFelt(tone === 'plain' ? 'navy' : 'gold', { radius: R.pill, lift: 2, active: tone !== 'plain' }),
+        {
+          flexDirection: 'row', alignItems: 'center', gap: S[2],
+          paddingHorizontal: S[3], paddingVertical: 3, maxWidth: '96%',
+        },
+      ]}
     >
       {children}
     </View>
@@ -1624,19 +2474,16 @@ function IconBtn({ glyph, label, onPress }: { glyph: string; label: string; onPr
       onPress={onPress}
       accessibilityRole="button"
       accessibilityLabel={label}
-      // 28dp drawn, so 8dp of slop left the target at 44 only on the diagonal.
+      // 26dp drawn, so 9dp of slop left the target at 44 only on the diagonal.
       // The table header is deliberately small — it must not compete with the
-      // felt — so the touch area is what grows: 28 + 2x8 = 44 exactly.
-      hitSlop={8}
-      style={{
-        width: 28, height: 28, borderRadius: 14, alignItems: 'center', justifyContent: 'center',
-        borderWidth: 1, borderColor: 'rgba(255,255,255,0.22)',
-        // Dark glass on the felt — see VoicePill. Same green-black origin.
-        backgroundColor: 'rgba(0,0,0,0.34)',
-        boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.16)',
-      }}
+      // felt — so the touch area is what grows: 26 + 2x9 = 44 exactly.
+      hitSlop={9}
+      style={[
+        onFelt('navy', { radius: 13 }),
+        { width: 26, height: 26, alignItems: 'center', justifyContent: 'center' },
+      ]}
     >
-      <Text style={{ color: INK_ON_FELT, fontSize: 14, fontWeight: '800' }}>{glyph}</Text>
+      <Text style={{ color: INK_ON_FELT, fontSize: 13, fontWeight: '800' }}>{glyph}</Text>
     </Pressable>
   );
 }
@@ -1644,7 +2491,7 @@ function IconBtn({ glyph, label, onPress }: { glyph: string; label: string; onPr
 /* ── a drop zone ────────────────────────────────────────────────────── */
 
 function GroupZone({
-  index, loose, verdict, onMeasure, minW, overlap, children,
+  index, loose, verdict, onMeasure, minW, overlap, height, children,
 }: {
   index: number;
   loose: boolean;
@@ -1652,8 +2499,21 @@ function GroupZone({
   onMeasure: (i: number, z: Zone) => void;
   minW: number;
   overlap: number;
+  /** The band's full height, so every tray is the same height as its siblings. */
+  height: number;
   children: React.ReactNode;
 }) {
+  // NAME ON TOP. The verdict used to be a badge under the cards and nothing
+  // else, so reading the hand meant decoding thirteen ranks — the one thing a
+  // glance should not have to do. "SEQUENCE" over the cards is what a player
+  // actually scans for; the points underneath are the consequence.
+  const good = verdict && (verdict.type === 'pure' || verdict.type === 'impure' || verdict.type === 'set');
+  const tone = loose ? white(0.75) : verdict?.type === 'pure' ? C.good : good ? C.gold2 : C.bad;
+  const title = loose ? 'UNGROUPED'
+    : verdict?.type === 'pure' ? 'SEQUENCE'
+    : verdict?.type === 'impure' ? 'SEQUENCE'
+    : verdict?.type === 'set' ? 'SET'
+    : verdict?.type === 'invalid' ? 'GROUP' : '';
   const ref = useRef<View>(null);
   return (
     <View
@@ -1669,18 +2529,32 @@ function GroupZone({
       accessibilityLabel={loose ? 'Ungrouped cards' : `Group ${index + 1}${verdict?.label ? `, ${verdict.label}` : ''}`}
       style={{
         minWidth: minW,
+        height,
+        justifyContent: 'space-between',
         borderRadius: R[2],
         borderWidth: 1,
         borderStyle: loose ? 'dashed' : 'solid',
-        // Light trays, not dark ones. Cards are cream; a dark holder behind
-        // them muddies the edges and the group stops reading as a unit — which
-        // is the whole job of the tray.
-        borderColor: loose ? 'rgba(255,255,255,0.35)' : 'rgba(255,255,255,0.55)',
-        backgroundColor: loose ? 'rgba(255,255,255,0.06)' : 'rgba(255,255,255,0.16)',
+        // LIGHT trays, not dark ones, and this is the one place on the felt
+        // that breaks the dark-glass rule on purpose: cards are cream, and a
+        // dark holder behind cream muddies their edges until the group stops
+        // reading as a unit — which is the whole job of the tray. A valid meld
+        // takes a green edge, so the badge under it is a confirmation rather
+        // than the only signal.
+        borderColor: loose ? white(0.35)
+          : verdict && (verdict.type === 'pure' || verdict.type === 'impure' || verdict.type === 'set')
+            ? 'rgba(99,230,160,0.55)'
+            : white(0.55),
+        backgroundColor: loose ? white(0.06) : white(0.16),
+        boxShadow: `inset 0 1px 0 ${white(0.22)}`,
         paddingHorizontal: S[2], paddingTop: S[1], paddingBottom: 2,
         gap: 2,
       }}
     >
+      <Text
+        numberOfLines={1}
+        style={{ color: tone, fontSize: 7.5, fontWeight: '800', letterSpacing: 1, textAlign: 'center' }}
+      >{title}</Text>
+
       {/* Cards overlap into a fan the way a held hand does — five groups of
           three at full width do not fit any phone.
 
@@ -1799,17 +2673,29 @@ function CardBack({ live, w }: { live: boolean; w: number }) {
   return (
     <View style={{
       width: w, height: h, borderRadius: 6, overflow: 'hidden',
-      borderWidth: 1, borderColor: CARD_EDGE,
+      borderWidth: 1, borderColor: CARD.edge,
       boxShadow: live
         ? `0 0 0 2px ${C.gold}, 0 0 16px rgba(232,194,95,0.55), 0 4px 10px rgba(0,0,0,0.5)`
         : '0 3px 9px rgba(0,0,0,0.55)',
     }}>
       <Svg width={w} height={h}>
-        <Rect x="0" y="0" width={w} height={h} fill="#a3163f" />
-        {Array.from({ length: 18 }, (_, i) => (
-          <Line key={i} x1={-h + i * 10} y1={h} x2={-h + i * 10 + h} y2={0} stroke="#86112f" strokeWidth="5" />
-        ))}
-        <Rect x="3" y="3" width={Math.max(1, w - 6)} height={Math.max(1, h - 6)} rx="4" fill="none" stroke="rgba(247,244,234,0.14)" strokeWidth="3" />
+        <Defs>
+          <RadialGradient id="cardback" cx="50%" cy="30%" rx="80%" ry="80%">
+            <Stop offset="0" stopColor={CARD.back[0]} />
+            <Stop offset="1" stopColor={CARD.back[1]} />
+          </RadialGradient>
+        </Defs>
+        <Rect x="0" y="0" width={w} height={h} fill="url(#cardback)" />
+        {/* A crown, not eighteen diagonal lines. The stripes were a texture at
+            any size; the mark reads at pile size AND at the 8dp the seat
+            capsules draw a held hand at, which is where most backs appear. */}
+        <SvgText
+          x={w / 2} y={h / 2 + w * 0.16}
+          textAnchor="middle" fontSize={Math.round(w * 0.42)} fill={CARD.edge} fillOpacity={0.9}
+        >
+          ♛
+        </SvgText>
+        <Rect x="3" y="3" width={Math.max(1, w - 6)} height={Math.max(1, h - 6)} rx="4" fill="none" stroke={CARD.backLine} strokeWidth="1.5" />
       </Svg>
     </View>
   );
@@ -1827,22 +2713,43 @@ function EmptySlot({ w }: { w: number }) {
 function CardFace({ card, w, glow, wild }: { card: Card; w: number; glow?: boolean; wild?: boolean }) {
   const h = Math.round(w * 1.4);
   const joker = card.suit === 'JOKER';
-  const color = joker ? JOKER_PURPLE : RED.has(card.suit) ? CARD_RED : CARD_INK;
+  const color = joker ? CARD.joker : RED.has(card.suit) ? CARD.red : CARD.ink;
   const idx = Math.round(w * 0.3);
 
   return (
     <View style={{
       width: w, height: h, borderRadius: 6,
-      backgroundColor: joker ? '#f6efff' : CARD_FACE,
-      borderWidth: 1, borderColor: wild ? C.gold : CARD_EDGE,
-      boxShadow: glow || wild
-        ? `0 0 0 2px ${C.gold}, 0 3px 8px rgba(0,0,0,0.4)`
-        : '0 2px 6px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.8)',
+      // Warm ivory, not white. A pure-white card on lit emerald reads as a
+      // cut-out; card stock is warm and slightly absorbent, and that difference
+      // is most of what makes a hand look like objects rather than rectangles.
+      backgroundColor: joker ? CARD.jokerFace : CARD.face,
+      borderWidth: 1, borderColor: wild ? C.gold : CARD.edge,
+      boxShadow: (glow || wild) ? CARD_SHADOW.wild(C.gold)
+        : glow ? CARD_SHADOW.raised : CARD_SHADOW.rest,
       overflow: 'hidden',
     }}>
+      {/* The shaded lower half of the paper — one flat overlay rather than a
+          gradient library. It is what stops a card reading as a plain swatch,
+          and it costs one View. */}
+      <View pointerEvents="none" style={{
+        position: 'absolute', left: 0, right: 0, bottom: 0, height: h * 0.55,
+        backgroundColor: CARD.faceLow, opacity: 0.55,
+      }} />
       <Text style={{ position: 'absolute', top: 1, left: 3, fontSize: idx, lineHeight: idx * 1.1, fontWeight: '800', color }}>
         {joker ? '★' : card.rank}
       </Text>
+      {/* The suit UNDER the rank, the way a real index reads. Without it a
+          glance at a fanned hand shows a column of ranks and no suits at all —
+          the tuck hides the centre pip, which is the only other place the suit
+          appears. */}
+      {!joker && w >= 40 && (
+        <Text style={{
+          position: 'absolute', top: idx * 1.05, left: 3,
+          fontSize: Math.round(w * 0.2), lineHeight: Math.round(w * 0.22), color,
+        }}>
+          {SUIT_GLYPH[card.suit]}
+        </Text>
+      )}
       <Text style={{
         position: 'absolute', left: 0, right: 0, top: h / 2 - w * 0.3,
         textAlign: 'center', fontSize: w * 0.46, lineHeight: w * 0.6, color, opacity: 0.9,
@@ -1879,13 +2786,15 @@ function CardFace({ card, w, glow, wild }: { card: Card; w: number; glow?: boole
  * `card` keeps its identity between server frames via the `byId` map.
  */
 const HandCard = React.memo(function HandCard({
-  card, w, selected, wild, onPress, onDrop,
+  card, w, selected, wild, dimmed, onPress, onDrop,
 }: {
   card: Card;
   w: number;
   selected: boolean;
   /** A printed joker, or a card of this round's wild rank. */
   wild: boolean;
+  /** SHOW DEADWOOD is on and this card already melds, so it steps back. */
+  dimmed?: boolean;
   onPress: (cardId: string) => void;
   onDrop: (cardId: string, x: number, y: number) => void;
 }) {
@@ -1934,7 +2843,8 @@ const HandCard = React.memo(function HandCard({
         accessibilityRole="button"
         accessibilityState={{ selected }}
         accessibilityLabel={`${spoken(card)}${wild ? ', joker' : ''}${selected ? ', selected' : ''}. Drag to move between groups, or onto the open pile to discard.`}
-        style={[a, selected ? { borderRadius: 8, borderWidth: 2, borderColor: C.gold } : null]}
+        style={[a, selected ? { borderRadius: 8, borderWidth: 2, borderColor: C.gold } : null,
+          dimmed ? { opacity: 0.34 } : null]}
       >
         {/* A joker is marked ON THE CARD, not only beside the deck. The wild
             indicator by the closed pile says which RANK is wild this round; it
@@ -1958,38 +2868,46 @@ const HandCard = React.memo(function HandCard({
  * dropped goes on looking like they are still holding cards.
  */
 function Seat({
-  spot, name, count, points, status, bot, turn, talking, still,
+  spot, name, count, points, status, bot, host, turn, talking, still, secs,
 }: {
-  spot?: { x: number; y: number; w: number };
+  spot?: { x: number; y: number; w: number; h: number };
   name: string;
   count: number;
   points?: number | null;
   status: string;
   bot: boolean;
+  /** Whoever deals. The server sends no dealer, so this is the lobby's host. */
+  host: boolean;
   turn: boolean;
   talking: boolean;
   still: boolean;
+  /** Seconds left on THIS player's turn. Only ever passed to the one playing. */
+  secs: number | null;
 }) {
-  const spin = useSharedValue(0);
+  const pulse = useSharedValue(0);
   useEffect(() => {
     if (turn && !still) {
-      spin.value = withRepeat(withTiming(1, { duration: 3400, easing: Easing.linear }), -1, false);
+      pulse.value = withRepeat(withTiming(1, { duration: 1400, easing: Easing.inOut(Easing.ease) }), -1, true);
     } else {
-      cancelAnimation(spin);
-      spin.value = 0;
+      cancelAnimation(pulse);
+      pulse.value = withTiming(0, { duration: 160 });
     }
-    return () => cancelAnimation(spin);
-  }, [turn, still, spin]);
-  const a = useAnimatedStyle(() => ({ transform: [{ rotate: `${spin.value * 360}deg` }] }));
+    return () => cancelAnimation(pulse);
+  }, [turn, still, pulse]);
+  // The whole capsule breathes rather than a ring spinning around the avatar.
+  // A 3.4s rotation on five seats was five continuously-animating views on a
+  // screen that also animates thirteen cards; opacity on one border is one
+  // interpolation and reads as "live" just as clearly.
+  const ring = useAnimatedStyle(() => ({ opacity: 0.55 + pulse.value * 0.45 }));
 
   if (!spot) return null;
   const out = status !== 'active' && status !== 'won';
-  const av = Math.max(26, Math.min(40, Math.round(spot.w * 0.5)));
-  // Same shape as `av` above, which already sizes the avatar off the seat box —
-  // the labels under it were the only part of a seat still using constants.
-  // Floor is the old fixed size, so no table gets smaller names than before.
-  const nameSize = Math.max(17, Math.min(24, Math.round(spot.w * 0.20)));
-  const detailSize = Math.max(13.5, Math.round(nameSize * 0.78 * 2) / 2);
+  // THREE ROWS ONLY IF THERE IS ROOM FOR THREE ROWS. Below SEAT_ROW3_MIN the
+  // card backs and the detail line were drawn on top of each other — measured
+  // in Figma at 640x360, where the capsule is 48dp and the two rows need 53.
+  const three = spot.h >= SEAT_ROW3_MIN;
+  const av = Math.min(28, spot.h - 20);
+  const tx = 8 + av + 6;
   const initials = name.split(/\s+/).map(x => x[0]).join('').slice(0, 2).toUpperCase();
 
   const detail =
@@ -1998,54 +2916,83 @@ function Seat({
     : status === 'lost' ? `${points ?? 0} pts`
     : `${count} cards${points != null ? ` · ${points}` : ''}`;
 
-  return (
-    <View
-      style={{ position: 'absolute', left: spot.x, top: spot.y, width: spot.w, alignItems: 'center', opacity: out ? 0.5 : 1 }}
-      accessibilityLabel={`${name}, ${detail}${turn ? ', playing now' : ''}${talking ? ', talking' : ''}`}
-    >
-      <View style={{ width: av, height: av, borderRadius: av / 2, padding: 3, backgroundColor: '#0a1710', justifyContent: 'center' }}>
-        {turn && (
-          <Animated.View style={[{
-            position: 'absolute', inset: 0, borderRadius: av / 2,
-            borderWidth: 3, borderColor: C.gold, borderTopColor: C.gold2, borderBottomColor: C.goldDeep,
-          }, a]} />
-        )}
-        {talking && (
-          <View style={{ position: 'absolute', inset: -3, borderRadius: av / 2 + 3, borderWidth: 2, borderColor: '#5fe08c' }} />
-        )}
-        <View style={{
-          flex: 1, borderRadius: av / 2 - 3, alignItems: 'center', justifyContent: 'center',
-          backgroundColor: bot ? '#6f9bff' : C.gold,
-        }}>
-          {/* A bot is an ICON, not an emoji: 'hardware-chip' is what ui.tsx's
-              ICONS.bot already resolves to, and it inherits the disc's ink
-              instead of arriving in whatever colour the platform font paints. */}
-          {bot
-            ? <Ionicons name="hardware-chip" size={Math.round(av * 0.44)} color="#2a1c00" />
-            : <Text style={{ color: '#2a1c00', fontWeight: '800', fontSize: Math.round(av * 0.36) }}>{initials}</Text>}
-        </View>
-      </View>
-      {/* Names were 10.5px on a felt seen at arm's length — smaller than the
-          card pips and the first thing a player actually needs to read. They
-          then went to a fixed 17/13.5, which is bigger but still a CONSTANT on
-          the one screen whose table resizes with the window: the same 17px is
-          overbearing on a small phone and undersized on a tablet.
-
-          Derived from the seat's own measured width instead, so the name grows
-          with the table it labels. Clamped at both ends — a name must never
-          drop back to unreadable, and must not swamp the seat it sits under. */}
-      <Text
-        numberOfLines={1}
-        style={{
-          color: '#fff', fontWeight: '800', marginTop: 2, maxWidth: spot.w,
-          fontSize: nameSize,
-        }}
-      >{name}</Text>
-      <Text
-        numberOfLines={1}
-        style={{ color: INK_ON_FELT, fontWeight: '600', maxWidth: spot.w, fontSize: detailSize }}
-      >{detail}</Text>
+  // The clock owns ROW TWO, not the space beside the name. Sharing row one with
+  // a countdown chip leaves 16dp for a name on a 102dp capsule, and the name is
+  // what gets clipped — "Arjun" rendered as "Arju" at 640x360.
+  const backs = Math.min(5, count);
+  const showBacks = count > 0 && (three || (!turn && status === 'active'));
+  const backsRow = (
+    <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+      {Array.from({ length: backs }, (_, i) => (
+        <View
+          key={i}
+          style={{
+            width: 8, height: 12, borderRadius: 2, marginLeft: i ? -3 : 0,
+            backgroundColor: CARD.back[0], borderWidth: 0.5, borderColor: alpha(CARD.edge, 0.55),
+          }}
+        />
+      ))}
+      <Text style={{ color: INK_DIM, fontSize: 9, fontWeight: '600', marginLeft: 5 }}>{count}</Text>
     </View>
   );
-}
 
+  return (
+    <Animated.View
+      accessibilityLabel={`${name}, ${detail}${turn ? `, playing now${secs != null ? `, ${secs} seconds left` : ''}` : ''}${talking ? ', talking' : ''}${host ? ', host' : ''}`}
+      style={[
+        onFelt(turn ? 'gold' : 'navy', { radius: 14, active: turn }),
+        {
+          position: 'absolute', left: spot.x, top: spot.y, width: spot.w, height: spot.h,
+          paddingHorizontal: 8, paddingVertical: 8, opacity: out ? 0.5 : 1,
+        },
+      ]}
+    >
+      {turn && (
+        <Animated.View
+          pointerEvents="none"
+          style={[{ position: 'absolute', inset: -1, borderRadius: 15, borderWidth: 1.5, borderColor: C.gold }, ring]}
+        />
+      )}
+
+      {/* row 1 — who, and whether they are still here */}
+      <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+        <View style={{
+          width: av, height: av, borderRadius: av / 2, alignItems: 'center', justifyContent: 'center',
+          backgroundColor: bot ? '#6F9BFF' : C.gold,
+          // One ring, three meanings, in priority order: talking beats host,
+          // because who is speaking changes second by second and who deals does
+          // not. A seat with neither has no ring at all — five glowing avatars
+          // is the same as none.
+          borderWidth: (talking || host) ? 2 : 0,
+          borderColor: talking ? C.good : C.gold2,
+        }}>
+          {bot
+            ? <Ionicons name="hardware-chip" size={Math.round(av * 0.44)} color={C.onGold} />
+            : <Text style={{ color: C.onGold, fontWeight: '800', fontSize: Math.round(av * 0.38) }}>{initials}</Text>}
+        </View>
+        <Text
+          numberOfLines={1}
+          style={{ flex: 1, marginLeft: 6, color: '#fff', fontWeight: '800', fontSize: 11.5 }}
+        >{name}</Text>
+        <View style={{
+          width: 7, height: 7, borderRadius: 3.5,
+          backgroundColor: out ? '#9A8F8F' : status === 'won' ? C.gold : C.good,
+        }} />
+      </View>
+
+      {/* row 2 — the clock while they are playing, otherwise the server's line */}
+      <View style={{ marginLeft: tx - 8, marginTop: 3 }}>
+        {turn && secs != null ? (
+          <Text style={{ color: C.gold2, fontSize: 9.5, fontWeight: '800' }}>{`${secs}s left`}</Text>
+        ) : three || !showBacks ? (
+          <Text numberOfLines={1} style={{ color: INK_DIM, fontSize: 9, fontWeight: '600' }}>{detail}</Text>
+        ) : backsRow}
+      </View>
+
+      {/* row 3 — the cards they are holding, when the capsule is tall enough */}
+      {three && showBacks && (
+        <View style={{ marginLeft: tx - 8, marginTop: 2 }}>{backsRow}</View>
+      )}
+    </Animated.View>
+  );
+}

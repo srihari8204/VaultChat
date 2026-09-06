@@ -31,7 +31,7 @@ import { playSfx, setSoundEnabled, soundEnabled } from '../lib/games/sfx';
 import { useWallet } from '../lib/games/useWallet';
 import { useLiveTables, agoLabel } from '../lib/games/useLiveTables';
 import { openInvite } from '../lib/games/invite';
-import { newPrivateCode } from '../lib/games/rummyTable';
+import { newPrivateCode, type SeatIntent } from '../lib/games/rummyTable';
 import { getMyProfile } from '../lib/chatService';
 import { useLeaderboard } from '../lib/games/useLeaderboard';
 import { headline, medal, detail, type LeaderScope } from '../lib/games/leaderboard';
@@ -65,7 +65,7 @@ const KINDS = new Set(GAMES.map(g => g.kind));
 
 export default function GamesScreen() {
   const router = useRouter();
-  const params = useLocalSearchParams<{ game?: string; room?: string; auto?: string; bot?: string }>();
+  const params = useLocalSearchParams<{ game?: string; room?: string; auto?: string; bot?: string; seat?: string }>();
 
   const kind = typeof params.game === 'string' && KINDS.has(params.game as GameKind)
     ? (params.game as GameKind)
@@ -73,6 +73,10 @@ export default function GamesScreen() {
   const room = typeof params.room === 'string' ? params.room : '';
   const auto = params.auto === '1';
   const autoBot = params.bot === '1';
+  // Rummy only: an INTENT instead of an id, because rummy tables are the
+  // server's and any id we invent is silently substituted. See Rummy.tsx.
+  const seat: SeatIntent | undefined =
+    params.seat === 'auto' || params.seat === 'bot' ? params.seat : undefined;
 
   const title = kind ? (GAMES.find(g => g.kind === kind)?.name ?? 'Games') : 'Games';
 
@@ -105,7 +109,7 @@ export default function GamesScreen() {
             fallbackTitle="That table had a problem"
             fallbackMessage="The game is still running on the server — try again, or go back and rejoin the table."
           >
-            <Board kind={kind} room={room} auto={auto} autoBot={autoBot} />
+            <Board kind={kind} room={room} auto={auto} autoBot={autoBot} seat={seat} />
           </ErrorBoundary>
         )
         : <Hub onOpen={(g, opts) => router.push({ pathname: '/games', params: { game: g, ...opts } } as any)} />}
@@ -115,7 +119,7 @@ export default function GamesScreen() {
   );
 }
 
-function Board({ kind, room, auto, autoBot }: { kind: GameKind; room: string; auto: boolean; autoBot: boolean }) {
+function Board({ kind, room, auto, autoBot, seat }: { kind: GameKind; room: string; auto: boolean; autoBot: boolean; seat?: SeatIntent }) {
   // A TABLE IS NOT AN IDLE SCREEN.
   //
   // Waiting for three other players to move looks exactly like doing nothing
@@ -128,7 +132,7 @@ function Board({ kind, room, auto, autoBot }: { kind: GameKind; room: string; au
   switch (kind) {
     case 'chess':     return <Chess roomId={room} {...a} />;
     case 'ludo':      return <Ludo roomId={room || 'ludo-main'} {...a} />;
-    case 'rummy':     return <Rummy tableId={room} {...a} />;
+    case 'rummy':     return <Rummy tableId={room} seat={seat} {...a} />;
     case 'tictactoe': return <TicTacToe roomId={room} {...a} />;
   }
 }
@@ -279,9 +283,31 @@ function Hub({ onOpen }: { onOpen: (g: GameKind, opts?: Record<string, string>) 
       {mode && (
         <ModeSheet
           entry={mode}
-          onOnline={() => { const e = mode; setMode(null); quick(e); }}
-          onPrivate={() => { const e = mode; setMode(null); onOpen(e.kind, { room: newPrivateCode() }); }}
-          onBot={() => { const e = mode; setMode(null); onOpen(e.kind, { room: newPrivateCode(), auto: '1', bot: '1' }); }}
+          /* RUMMY DOES NOT GET AN INVENTED ID.
+             Its tables belong to the server, which silently substitutes any id
+             it does not know — so the matchmaker's roomId and a minted private
+             code both left two players sitting alone at separate tables. Rummy
+             is handed an INTENT and picks a real table from the server's own
+             list; the other three create a room from whatever id they are given
+             and are unchanged. */
+          onOnline={() => {
+            const e = mode; setMode(null);
+            if (e.kind === 'rummy') { onOpen('rummy', { seat: 'auto' }); return; }
+            quick(e);
+          }}
+          onPrivate={() => {
+            const e = mode; setMode(null);
+            // There is no private rummy on this server: no client-minted table
+            // can be joined. Seat them where people actually are instead of
+            // handing out a code nobody can use.
+            if (e.kind === 'rummy') { onOpen('rummy', { seat: 'auto' }); return; }
+            onOpen(e.kind, { room: newPrivateCode() });
+          }}
+          onBot={() => {
+            const e = mode; setMode(null);
+            if (e.kind === 'rummy') { onOpen('rummy', { seat: 'bot', auto: '1', bot: '1' }); return; }
+            onOpen(e.kind, { room: newPrivateCode(), auto: '1', bot: '1' });
+          }}
           onClose={() => setMode(null)}
         />
       )}
@@ -489,19 +515,28 @@ function ModeSheet({
   entry, onOnline, onPrivate, onBot, onClose,
 }: { entry: Entry; onOnline: () => void; onPrivate: () => void; onBot: () => void; onClose: () => void }) {
   const t = useType();
+  const rummy = entry.kind === 'rummy';
   return (
     <Sheet visible title={entry.name} onClose={onClose}>
       <Text style={{ color: C.muted, fontSize: t.sm, lineHeight: 19 }}>{entry.blurb}</Text>
 
       <SettingRow
         label="Play online"
-        hint="Find someone who is looking for a game right now"
+        hint={rummy
+          ? 'Sit at a public table — you will be seated where people already are'
+          : 'Find someone who is looking for a game right now'}
         value="Find"
         onPress={() => { void playSfx('select'); onOnline(); }}
       />
+      {/* RUMMY HAS NO PRIVATE TABLES, so it must not offer one.
+          Its tables are the server's own and a code we mint is silently
+          substituted — the player got a code, shared it, and both ended up at
+          different tables. Say so, and send them where the people are. */}
       <SettingRow
-        label="Private room"
-        hint="Your own table with a code to share — and voice chat at it"
+        label={rummy ? 'Open tables' : 'Private room'}
+        hint={rummy
+          ? 'Rummy tables are the server’s own — pick one with a seat free'
+          : 'Your own table with a code to share — and voice chat at it'}
         value="Open"
         onPress={() => { void playSfx('select'); onPrivate(); }}
       />

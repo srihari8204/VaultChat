@@ -20,6 +20,11 @@
 
 import { readFileSync } from 'fs';
 import { join } from 'path';
+// The link builder and the card parser, imported for real: these two decide
+// what a recipient actually opens. Declared here with the other imports rather
+// than beside the checks that use them — an import is hoisted whatever line it
+// is written on, so a mid-file one only makes the reading order a fiction.
+import { tableLink, gameInviteOf, inviteText } from './inviteLink';
 
 const ROOT = join(__dirname, '..', '..');
 const read = (p: string) => readFileSync(join(ROOT, p), 'utf8');
@@ -44,8 +49,6 @@ function A(ok: boolean, what: string): void {
 console.log('\nGame invite → table\n');
 
 // ── 1. the link and the parser ────────────────────────────────────────
-// Imported for real: these two decide what a recipient opens.
-import { tableLink, gameInviteOf, inviteText } from './inviteLink';
 
 A(tableLink('rummy', 'abc-123') === 'vaultchat://games?game=rummy&room=abc-123',
   '1. tableLink builds the deep link app.json registers');

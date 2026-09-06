@@ -38,6 +38,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Platform, PermissionsAndroid } from 'react-native';
 import { AudioSession, registerGlobals } from '@livekit/react-native';
 import type { GameKind } from '../gamesSocket';
+import { getIceServers } from '../iceConfig';
 // Reused, not re-derived. These wrap InCallManager with the null-vs-false rule
 // that Go Live and calling both learned the hard way: "speaker off" must RELEASE
 // the route so a Bluetooth headset is followed, never pin the earpiece.
@@ -159,21 +160,50 @@ export function useTableVoice(game: GameKind, roomId: string, wire: VoiceWire): 
 
   /* ── ICE servers ─────────────────────────────────────────────────── */
   //
-  // The server publishes them at /config.js, TURN included where one is
-  // configured. Fetched once, best-effort: public STUN is a working fallback
-  // for everything except symmetric NAT, and failing to fetch must not stop a
-  // player from talking.
+  // TWO sources, merged — and the second one is the whole point.
+  //
+  // The games deployment publishes its list at /config.js, but it currently
+  // serves public STUN and NOTHING ELSE ("iceServers":[{"urls":"stun:..."}],
+  // "sfu":false). STUN cannot traverse symmetric NAT or carrier CGNAT, which is
+  // the normal case for two phones on mobile data, so a table negotiated from
+  // that list alone has no relay to fall back on and the connection simply
+  // never completes — the voice bar sits on "waiting" with no error.
+  //
+  // VaultChat owns a TURN server and lib/iceConfig already mints credentials
+  // for it; calls and Go Live both use it, and game voice was the only WebRTC
+  // path in the app that did not. getIceServers() suits a mesh exactly: it
+  // never throws, never returns empty, and shares ONE in-flight request across
+  // the several peer connections a table brings up at once.
+  //
+  // Both sources are best-effort and independent — whichever resolves
+  // contributes, neither blocks joining voice, and the ref already holds a
+  // usable DEFAULT_ICE from the first frame. The games server's entries are
+  // kept rather than replaced: it is the authority on its own deployment, so
+  // if a relay is ever configured there we use that too.
   useEffect(() => {
     let ok = true;
+
+    /** Union, deduped on the urls — both lists start with the same public STUN. */
+    const add = (list: any[]) => {
+      if (!ok || !Array.isArray(list) || !list.length) return;
+      const by = new Map<string, any>();
+      for (const s of [...iceServers.current, ...list]) {
+        if (s?.urls) by.set(JSON.stringify(s.urls), s);
+      }
+      iceServers.current = [...by.values()];
+    };
+
+    getIceServers().then(add).catch(() => {});
+
     fetch(`${GAMES_HTTP}/config.js`)
       .then(r => r.text())
       .then(txt => {
         const m = txt.match(/window\.GAMES_CONFIG\s*=\s*(\{[\s\S]*?\});?\s*$/);
-        if (!m || !ok) return;
-        const cfg = JSON.parse(m[1]);
-        if (Array.isArray(cfg?.iceServers) && cfg.iceServers.length) iceServers.current = cfg.iceServers;
+        if (!m) return;
+        add(JSON.parse(m[1])?.iceServers);
       })
       .catch(() => {});
+
     return () => { ok = false; };
   }, []);
 
