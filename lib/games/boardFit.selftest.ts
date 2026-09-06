@@ -211,6 +211,22 @@ console.log('\nBoard fit\n');
   // Rummy is the deliberate exception and must STAY landscape at the table.
   const rummy = readFileSync(join(ROOT, 'components/games/Rummy.tsx'), 'utf8');
   A(/OrientationLock\.LANDSCAPE/.test(rummy), '8c. rummy still plays landscape');
+
+  // ...AND FOR THE WHOLE SCREEN, not only while a hand is up.
+  //
+  // The lock used to be `playing ? LANDSCAPE : PORTRAIT_UP`, which rotated the
+  // device twice per game — once when the host dealt and once when the round
+  // ended — and again on every rematch. Rummy is landscape-only by design; the
+  // lobby and the table list are laid out as a centred column instead.
+  const rummyCode = rummy.split('\n').filter(l => !/^\s*(\/\/|\*|\/\*)/.test(l)).join('\n');
+  A(!/\?\s*ScreenOrientation\.OrientationLock\.LANDSCAPE/.test(rummyCode),
+    '8f. rummy does not switch orientation on game state');
+  A(/useColumn\(\)/.test(rummyCode),
+    '8g. ...so its lobby and table list are a landscape column');
+  // The restore is what stops the OS lock leaking into the next launch, which
+  // is the documented root cause of the 38px offset on the other three boards.
+  A(/OrientationLock\.PORTRAIT_UP/.test(rummyCode),
+    '8h. ...and it still restores portrait on the way out');
   A(/<Baize \/>/.test(rummy), '8d. the felt auto-fits its parent rather than the window');
   A(!/<Baize width=\{win\./.test(rummy), '8e. ...and no longer reads window dimensions');
 }

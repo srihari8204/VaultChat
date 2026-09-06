@@ -37,11 +37,36 @@ export interface HandVerdict {
   /** The hint's opinion. NOT permission — the server still decides. */
   valid: boolean;
   deadwood: number;
-  /** What declaring right now would score against you, capped at 80. */
+  /** What declaring right now would score against you, capped at MAX_LOSS. */
   fullCount: number;
+  /**
+   * Face value of the cards sitting in groups that currently READ as melds.
+   *
+   * The counterpart to `deadwood`, and the reason it exists is that deadwood
+   * alone only ever tells a player how badly they are doing. Points rummy
+   * scores DOWN, so every number on the screen was a penalty and none of them
+   * moved when a player got something right — melding three tens changed the
+   * deadwood by the same amount as discarding them. This is the number that
+   * goes UP as the hand comes together.
+   *
+   * Advisory like everything else here: it is what the badges say, not what
+   * the server will rule.
+   */
+  melded: number;
 }
 
 export interface HintCard { id: string; suit: string; rank: string }
+
+/**
+ * The most a hand can ever score against you.
+ *
+ * Indian rummy caps a wrong declaration at 80 no matter what you are holding —
+ * thirteen face cards would otherwise be 130. Exported because the score strip
+ * needs the SAME number: it was a bare `80` here, and the strip showed the
+ * uncapped deadwood beside it, so a player at 90 was told they stood to lose
+ * ten points more than the game can actually take. Caught on the Honor.
+ */
+export const MAX_LOSS = 80;
 
 const RANKS = ['A', '2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K'];
 const rankNum = (r: string) => RANKS.indexOf(r) + 1;
@@ -124,6 +149,15 @@ export function analyzeHand(
     (a, g) => a + g.reduce((b, id) => b + cardPoints(card(id), wildRank), 0),
     0,
   );
+  // Face value held in groups that classify as a run or a set. A joker is worth
+  // nothing (cardPoints says so), so a meld carried by jokers scores less than
+  // one made of naturals — which is the truth about how much of the hand is
+  // really done.
+  const melded = groups.reduce((a, g, i) => {
+    const t = verdicts[i].type;
+    if (t !== 'pure' && t !== 'impure' && t !== 'set') return a;
+    return a + g.reduce((b, id) => b + cardPoints(card(id), wildRank), 0);
+  }, 0);
 
   return {
     groups: verdicts,
@@ -132,6 +166,7 @@ export function analyzeHand(
     allArranged,
     valid: hasPure && hasTwoSeq && allArranged,
     deadwood,
-    fullCount: Math.min(80, full),
+    fullCount: Math.min(MAX_LOSS, full),
+    melded,
   };
 }

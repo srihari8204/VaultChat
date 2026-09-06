@@ -9,9 +9,10 @@
 import { readFileSync } from 'fs';
 import { join } from 'path';
 import { fanFor,
-  metrics, seatSpots, handWidthAt, secondsLeft, ranked, activeCount,
-  allowsBots, newPrivateCode, normalizeCode, CARD_RATIO,
-  type RummyPlayer,
+  metrics, seatSpots, pileTop, actionBarWidth, SEAT_ROW3_MIN, handWidthAt, secondsLeft, ranked, activeCount,
+  allowsBots, newPrivateCode, normalizeCode, CARD_RATIO, CARD_MIN, CARD_COMFORT, filterBySeats, pickTable,
+  tableKind, filterByKind,
+  type RummyPlayer, type TableInfo,
 } from './rummyTable';
 
 let failures = 0;
@@ -53,13 +54,16 @@ for (const d of DEVICES) {
 
     // The hand may scroll, but it must not need to on anything but the
     // smallest screens — and it must never be sized wider than the box.
-    if (handWidthAt(m.cardW) > m.width + 0.5 && m.cardW > 32) {
-      overflowed = `${d.name} ${land ? 'landscape' : 'portrait'}: needs ${Math.round(handWidthAt(m.cardW))} in ${m.width}`;
+    // Against trayW, not width: the score panel sits in the band and takes its
+    // share first, so a hand sized against the FULL width lands under it.
+    if (handWidthAt(m.cardW) > m.trayW + 0.5 && m.cardW > 32) {
+      overflowed = `${d.name} ${land ? 'landscape' : 'portrait'}: needs ${Math.round(handWidthAt(m.cardW))} in ${m.trayW}`;
     }
 
     // Everything must add up to no more than the usable height, or something
-    // is under the system bars.
-    const used = m.tableH + m.handH + 46 + 30;
+    // is under the system bars. The header is a real band now and the status
+    // strip is gone — the score panel says what it used to say.
+    const used = m.headerH + m.tableH + m.handH + 46;
     if (used > m.height + 1) {
       squashed = `${d.name} ${land ? 'landscape' : 'portrait'}: ${used} used of ${m.height}`;
     }
@@ -67,6 +71,100 @@ for (const d of DEVICES) {
 }
 
 check('the hand never needs more width than the screen has', !overflowed, overflowed);
+
+// -- the wide layout may never cost a readable card ------------------
+//
+// The score panel and the side gutters take width from the hand, so "is this
+// screen wide enough for the full layout" is really "does the full layout still
+// leave a card worth reading". It used to be a WIDTH — 700dp — and sweeping the
+// real device found what that hid: 699dp gave a 53dp card, 700dp gave 39dp. A
+// one-pixel change in viewport dropping the cards by a quarter.
+//
+// Adding a panel always costs SOME width, so the step is inherent and this does
+// not assert monotonicity. What it asserts is the floor: wherever the wide
+// layout switches on, the card it leaves is still one you can read.
+{
+  let tooSmall = '';
+  let halfDressed = '';
+  for (let w = 480; w <= 1600; w += 7) {
+    for (const h of [320, 360, 390, 480, 768]) {
+      const m = metrics({ width: w, height: h }, { top: 0, bottom: 0, left: 0, right: 0 });
+      // Read from the module, never re-typed here — a check pinned to a copy
+      // of a constant passes for the wrong reason the moment the real one moves,
+      // which is exactly what a hardcoded 40 did when CARD_COMFORT became 34.
+      if (m.sidePanels && m.cardW < CARD_COMFORT && m.cardW > CARD_MIN) tooSmall = `${w}x${h}: wide layout left a ${m.cardW}dp card`;
+      // One decision, so there is no width that gets half the design.
+      if (m.sidePanels !== (m.scoreW > 0)) halfDressed = `${w}x${h}: panels ${m.sidePanels} but score ${m.scoreW}`;
+    }
+  }
+  check('the wide layout never leaves a card under the comfort floor', !tooSmall, tooSmall);
+
+  // THE ACTION BAR MUST FIT. Found by sweeping the Honor, not by any model
+  // check here: at 666dp the bar wanted 680dp and DROP was pushed off the
+  // right-hand edge. A decision the player cannot reach is a hand they cannot
+  // finish, which is the one failure this whole file exists to prevent.
+  let barOver = '';
+  let noStandings = '';
+  for (let w = 400; w <= 1600; w += 3) {
+    for (const h of [300, 320, 360, 390, 480, 768]) {
+      const m = metrics({ width: w, height: h }, { top: 0, bottom: 0, left: 0, right: 0 });
+      if (actionBarWidth(m) > m.width + 0.5) barOver = `${w}x${h}: bar needs ${actionBarWidth(m)} of ${m.width}`;
+      // The bar gives up its optional controls in ONE order, cheapest first:
+      // the deadwood toggle, then the trio degrades to a single button, then
+      // that goes too. What must never happen is the trio and the button at
+      // once (the row would say it twice) or the readout appearing in the bar
+      // while the panel already carries it in the band.
+      if (m.barTrio && m.barStandings) noStandings = `${w}x${h}: trio AND button`;
+      if (m.scoreW > 0 && (m.barTrio || m.barStandings)) noStandings = `${w}x${h}: readout twice`;
+    }
+  }
+  check('the action bar always fits, so DROP is never pushed off screen', !barOver, barOver);
+
+  // THE HAND MUST FIT ITS TRAY REGION, AND IT MUST NOT BURY THE CARDS.
+  //
+  // Two bugs in one place, both reported off a screenshot rather than found
+  // here. `overlap` was computed from fanFor(cardW, WIDTH) while the cards live
+  // in trayW — so once the score panel moved into the band the hand thought it
+  // had the whole viewport, chose a fan of ~1, and ran 135-177dp past the trays
+  // on EVERY size that showed the panel. And sizing cards as large as the width
+  // allowed then collapsed the fan to its 0.58 floor: 42% of every card buried.
+  //
+  // Asserted against the RENDERED arithmetic — thirteen cards, eight tucks,
+  // plus the chrome — not against the model's own fan, which is what let both
+  // through.
+  let handOver = '';
+  let buried = '';
+  for (let w = 480; w <= 1600; w += 7) {
+    for (const h of [300, 320, 360, 369, 390, 480, 768]) {
+      const m = metrics({ width: w, height: h }, { top: 0, bottom: 0, left: 0, right: 0 });
+      const rendered = 13 * m.cardW - 8 * m.overlap + (16 + 2) * 5 + 12 * 4 + 8;
+      if (rendered > m.trayW + 0.5) handOver = `${w}x${h}: hand ${rendered} in tray ${m.trayW}`;
+      // Above the card floor the comfort fan had room to work, so a heavy tuck
+      // means something stopped honouring it.
+      if (m.cardW > CARD_MIN && m.overlap / m.cardW > 0.25) {
+        buried = `${w}x${h}: ${Math.round(100 * m.overlap / m.cardW)}% of a ${m.cardW}dp card hidden`;
+      }
+    }
+  }
+  check('the hand always fits the tray region it is actually drawn in', !handOver, handOver);
+  check('...and the cards are never buried under each other', !buried, buried);
+  check('...and the bar never shows the score readout twice', !noStandings, noStandings);
+  // Below the width that fits a seventh control the bar has no standings entry
+  // at all, so the SHEET carries it — asserted against the source, because the
+  // guarantee is "always reachable", not "always in the bar".
+  {
+    const src = readFileSync(join(__dirname, '..', '..', 'components/games/Rummy.tsx'), 'utf8');
+    check('...and the settings sheet always offers Standings, whatever the width',
+      /label="Standings"[\s\S]{0,220}setShowStandings\(true\)/.test(src),
+      'the bar drops it on a narrow screen; the sheet must not');
+  }
+  check('the gutters and the score panel are one decision', !halfDressed, halfDressed);
+
+  // The case that actually shipped broken, pinned by name.
+  const honor = metrics({ width: 732, height: 369 }, { top: 0, bottom: 0, left: 0, right: 0 });
+  check('the Honor at its real 732dp viewport gets the full layout',
+    honor.sidePanels && honor.scoreW > 0, `card ${honor.cardW}, score ${honor.scoreW}`);
+}
 check('table + hand + actions + status never exceed the safe height', !squashed, squashed);
 check('cards stay legible on the smallest screen', worstCard >= 32, `smallest card ${worstCard}px`);
 
@@ -78,30 +176,96 @@ check('cards stay legible on the smallest screen', worstCard >= 32, `smallest ca
 }
 
 // -- seats, two- to six-handed ---------------------------------------
+//
+// Seats now ride an ELLIPSE around the felt rather than a shallow arc along the
+// top of it, so "do they overlap" is a two-dimensional question: two capsules
+// at different points on the arc may share a range of x and still not touch.
+// Testing x alone (which is all the arc version needed) would now report a
+// collision for every table.
 {
+  // The seat ring rides the drawn OVAL, not the felt frame: with side panels the
+  // two differ by a third of the width, and seating against the frame puts the
+  // outer capsules under the table panel and the emote feed.
+  const HEADER = 6;
   let collided = '';
   let offEdge = '';
-  // 1..5 opponents = a 2..6 player table, across the narrowest and widest felts.
-  for (const tableW of [232, 320, 393, 673, 1024]) {
-    for (let n = 1; n <= 5; n++) {
-      const spots = seatSpots(n, tableW, 200);
-      for (let i = 1; i < spots.length; i++) {
-        if (spots[i].x < spots[i - 1].x + spots[i - 1].w) {
-          collided = `${n} seats in ${tableW}px overlap`;
+  let underHeader = '';
+  // 1..5 opponents = a 2..6 player table. LANDSCAPE widths: rummy locks
+  // landscape for the whole screen, and the ring is only collision-free above
+  // tableW 372 — below that the width clamp pins capsules to their 72dp floor
+  // faster than the spacing shrinks. The narrowest real landscape viewport is
+  // about 480dp, so the floor is never reached in practice; it is documented on
+  // seatSpots rather than defended here.
+  for (const tableW of [420, 568, 640, 844, 1024, 1540]) {
+    for (const tableH of [120, 155, 189, 543]) {
+      for (let n = 1; n <= 5; n++) {
+        const spots = seatSpots(n, tableW, tableH, HEADER);
+        for (let i = 0; i < spots.length; i++) {
+          for (let j = i + 1; j < spots.length; j++) {
+            const a = spots[i], b = spots[j];
+            const hit = a.x < b.x + b.w && b.x < a.x + a.w
+                     && a.y < b.y + b.h && b.y < a.y + a.h;
+            if (hit) collided = `${n} seats in ${tableW}x${tableH}: ${i} and ${j} overlap`;
+          }
         }
-      }
-      for (const s of spots) {
-        if (s.x < 0 || s.x + s.w > tableW + 0.5) offEdge = `${n} seats in ${tableW}px: seat at ${s.x}+${s.w}`;
+        for (const s of spots) {
+          if (s.x < 0 || s.x + s.w > tableW + 0.5) offEdge = `${n} in ${tableW}: x ${s.x}+${s.w}`;
+          if (s.y + s.h > tableH + 0.5) offEdge = `${n} in ${tableW}x${tableH}: y ${s.y}+${s.h}`;
+          // A capsule under the header band sits beneath the settings button.
+          if (s.y < HEADER - 0.5) underHeader = `${n} in ${tableW}x${tableH}: y ${s.y}`;
+        }
       }
     }
   }
   check('seats never overlap, two- to six-handed', !collided, collided);
-  check('no seat hangs off the edge of the felt', !offEdge, offEdge);
+  check('no seat hangs off the felt, in either axis', !offEdge, offEdge);
+  check('no seat is drawn under the header band', !underHeader, underHeader);
 
-  const five = seatSpots(5, 800, 200);
+  const five = seatSpots(5, 574, 189, HEADER);
   check('the middle seat sits furthest back', five[2].y < five[0].y && five[2].y < five[4].y);
-  check('a lone opponent sits centred', Math.abs(seatSpots(1, 800, 200)[0].x + seatSpots(1, 800, 200)[0].w / 2 - 400) < 1);
-  check('no seats when nobody is opposite', seatSpots(0, 800, 200).length === 0);
+  check('the outermost pair sits furthest round the sides',
+    five[0].y > five[1].y && five[4].y > five[3].y);
+  check('the ring is symmetric about the player',
+    five[0].y === five[4].y && five[1].y === five[3].y
+    && Math.abs((five[0].x + five[4].x + five[0].w) - 574) < 1.5);
+  check('a lone opponent sits opposite, centred',
+    Math.abs(seatSpots(1, 574, 189, HEADER)[0].x + seatSpots(1, 574, 189, HEADER)[0].w / 2 - 287) < 1);
+  check('no seats when nobody is opposite', seatSpots(0, 574, 189, HEADER).length === 0);
+
+  // A capsule holds three rows only when it is tall enough for three: below
+  // this the card backs were drawn over the detail line. Proven in Figma at
+  // 640x360, where the capsule resolves to 48dp and three rows need 53.
+  const short = seatSpots(5, 640, 155, HEADER)[0];
+  const tall = seatSpots(5, 696, 543, HEADER)[0];
+  check('a short felt gets two-row capsules', short.h < SEAT_ROW3_MIN, `h=${short.h}`);
+  check('a tall felt gets three-row capsules', tall.h >= SEAT_ROW3_MIN, `h=${tall.h}`);
+}
+
+// -- the piles sit on the cloth, not in the near rail -----------------
+//
+// Pinned to the bottom of the felt (which is what they were) they land in the
+// near rail of a tablet with 240dp of empty cloth above them.
+{
+  let clash = '';
+  let offFelt = '';
+  // Real viewports, and everything measured against the OVAL — the piles sit on
+  // the cloth, which is narrower than the felt frame wherever the side panels
+  // fit. The seat top inside the oval is a small clearance, not the header.
+  const SEAT_TOP = 6;
+  for (const [w, h] of [[640, 360], [820, 369], [844, 390], [1024, 768], [2264, 1080]] as [number, number][]) {
+    const m = metrics({ width: w, height: h }, { top: 0, bottom: 0, left: 0, right: 0 });
+    const spots = seatSpots(5, m.ovalW, m.ovalH, SEAT_TOP);
+    const stackH = 14 + 3 + Math.round(m.pileW * 1.4) + 2 + 13;
+    const y = pileTop(m.ovalH, SEAT_TOP, spots[0].h, stackH);
+    if (y < SEAT_TOP + spots[0].h + 8 - 0.5) clash = `${w}x${h}: piles at ${y} run into the seat ring`;
+    if (y + stackH > m.ovalH + 0.5) offFelt = `${w}x${h}: piles end at ${y + stackH} of ${m.ovalH}`;
+  }
+  check('the piles never run into the seat ring', !clash, clash);
+  check('the piles never hang off the bottom of the felt', !offFelt, offFelt);
+  check('a tall felt centres the piles rather than dropping them in the rail',
+    pileTop(543, 6, 58, 102) > 200, `${pileTop(543, 6, 58, 102)}`);
+  check('a short felt keeps them clear of the seats',
+    pileTop(189, 6, 58, 102) === 72, `${pileTop(189, 6, 58, 102)}`);
 }
 
 // -- the turn clock --------------------------------------------------
@@ -216,6 +380,19 @@ for (const [w, h, name] of [
 ] as [number, number, string][]) {
   const m = metrics({ width: w, height: h }, { top: 0, bottom: 0, left: 0, right: 0 });
   check(`${name}: the hand fits`, handWidthAt(m.cardW, fanFor(m.cardW, m.width)) <= m.width);
+
+  // ...AND IT FITS AT THE OVERLAP THAT ACTUALLY RENDERS.
+  //
+  // handWidthAt takes the real-valued fan; the layout tucks by `m.overlap`,
+  // which is a whole number of pixels. Every assertion above was written
+  // against the fan, so a rounding that made the real tuck LOOSER than the
+  // model passed while the hand overflowed — at 640x360 the model said 637.6
+  // of 640 and the render measured 641, found by building the layout in Figma
+  // rather than by any check here. The layout is five trays holding thirteen
+  // cards: thirteen card widths, less the eight tucks, plus the chrome.
+  const rendered = 13 * m.cardW - 8 * m.overlap + (16 + 2) * 5 + 12 * 4 + 8;
+  check(`${name}: ...and at the whole-pixel overlap it renders with`,
+    rendered <= m.width, `${rendered} in ${m.width}, overlap ${m.overlap}`);
 }
 
 // Below about 454dp there is no honest fit: thirteen cards at the smallest
@@ -228,6 +405,124 @@ for (const [w, h, name] of [
   const narrow = metrics({ width: 360, height: 640 }, { top: 0, bottom: 0, left: 0, right: 0 });
   check('a phone-portrait width cannot show thirteen cards, and pins the card size to its floor',
     narrow.cardW === 32 && handWidthAt(narrow.cardW, fanFor(narrow.cardW, narrow.width)) > narrow.width);
+}
+
+// FILTERING BY TABLE SIZE.
+//
+// RummyCircle offers 2-player and 6-player tables as a first-class choice. The
+// server has always published `maxPlayers` per table; the app just never let
+// anyone filter on it.
+console.log('\nTable size filter\n');
+{
+  const T = (id: string, maxPlayers: number): TableInfo =>
+    ({ id, name: id, stakes: '0.05/pt', players: 0, maxPlayers, status: 'open' });
+
+  // Deliberately includes a 4-seat table: the protocol documents a 2–6 range,
+  // so anything that tests only 2 and 6 misses the bug this guards against.
+  const tables = [T('a', 2), T('b', 6), T('c', 4), T('d', 2), T('e', 5)];
+
+  // -- and by KIND: practice, staked, or bot-friendly ------------------
+  //
+  // `pointValue` is documented on `lobby.table`, NOT on the `{t:'tables'}` rows.
+  // The server does seem to send it there too, but a filter built on an
+  // undocumented field has to degrade rather than lie — so a row without one is
+  // `unknown` and shows under every tab. Hiding a real, joinable table on
+  // evidence we do not have reads to a player as "there are no tables".
+  {
+    const K = (id: string, pointValue?: number): TableInfo =>
+      ({ id, name: id, stakes: '—', players: 0, maxPlayers: 6, status: 'open', ...(pointValue == null ? {} : { pointValue }) });
+
+    const mixed = [K('free', 0), K('cash', 0.05), K('mystery'), K('free2', 0), K('rich', 1)];
+
+    check('a zero point value is a practice table', tableKind(K('a', 0)) === 'practice');
+    check('anything above zero is staked', tableKind(K('a', 0.05)) === 'stakes');
+    check('a missing point value is UNKNOWN, not practice',
+      tableKind(K('a')) === 'unknown',
+      'defaulting to practice would offer a bot the server refuses');
+    check('NaN is unknown too', tableKind({ pointValue: NaN }) === 'unknown');
+    check('a null table is unknown, not a throw', tableKind(null) === 'unknown');
+
+    check('kind all: every table survives', filterByKind(mixed, 'all').length === 5);
+    check('practice: the free tables', filterByKind(mixed, 'practice').map(t => t.id).join() === 'free,mystery,free2');
+    check('stakes: the paid tables', filterByKind(mixed, 'stakes').map(t => t.id).join() === 'cash,mystery,rich');
+    check('an unknown table is never hidden by a kind filter',
+      filterByKind(mixed, 'practice').some(t => t.id === 'mystery')
+      && filterByKind(mixed, 'stakes').some(t => t.id === 'mystery'));
+    check('bots lists exactly what practice lists',
+      filterByKind(mixed, 'bots').map(t => t.id).join() === filterByKind(mixed, 'practice').map(t => t.id).join(),
+      'only a practice table accepts addbot; the tab differs in what JOINING does');
+    check('kind filters keep the order the server sent',
+      filterByKind(mixed, 'all').map(t => t.id).join() === 'free,cash,mystery,free2,rich');
+    check('kind: an empty list is empty, not a throw', filterByKind([], 'practice').length === 0);
+    check('kind: the input is not mutated',
+      (() => { const before = mixed.map(t => t.id).join(); filterByKind(mixed, 'stakes'); return mixed.map(t => t.id).join() === before; })());
+
+    // The two filters have to compose: the screen applies both at once.
+    const both = filterBySeats(filterByKind(mixed, 'practice'), 'multi');
+    check('kind and seat filters compose', both.length === 3, `${both.length}`);
+  }
+
+  check('all: every table survives', filterBySeats(tables, 'all').length === 5);
+  check('all: in the order the server sent them',
+    filterBySeats(tables, 'all').map(t => t.id).join('') === 'abcde',
+    're-sorting fights the order the server chose');
+
+  const heads = filterBySeats(tables, 'heads-up');
+  check('heads-up: only the 2-seat tables', heads.map(t => t.id).join('') === 'ad');
+
+  const multi = filterBySeats(tables, 'multi');
+  check('multi: every table above 2 seats', multi.map(t => t.id).join('') === 'bce');
+  check('multi: a 4-seat table is NOT hidden', multi.some(t => t.maxPlayers === 4),
+    'a hardcoded ===6 would drop 3-, 4- and 5-seat tables and read as "no tables open"');
+  check('multi: a 5-seat table is NOT hidden', multi.some(t => t.maxPlayers === 5));
+
+  check('the two filters partition the list',
+    heads.length + multi.length === tables.length,
+    'a table that matches neither would be unreachable from the list');
+
+  check('an empty list is empty, not a throw', filterBySeats([], 'heads-up').length === 0);
+  check('no table of that size returns empty so the UI can say so',
+    filterBySeats([T('x', 6)], 'heads-up').length === 0);
+  check('the input is not mutated',
+    (() => { const src = [T('a', 2), T('b', 6)]; filterBySeats(src, 'multi'); return src.length === 2; })());
+}
+
+// SEATING AT A REAL TABLE.
+//
+// The bug: rummy tables are server-owned, so every id the app invented ("private
+// room") or imported from the matchmaker ("play online") was substituted
+// silently and two players each landed alone at "1/6 seated". These checks pin
+// the cure — choose from the list the server actually sent.
+console.log('\nPicking a real table\n');
+{
+  const T = (id: string, players: number, maxPlayers = 6, pointValue = 1): TableInfo =>
+    ({ id, name: id, stakes: 's', players, maxPlayers, status: 'open', pointValue });
+
+  const practice = T('practice', 0, 6, 0);
+  const casual = T('casual', 2);
+  const pro = T('pro', 1);
+
+  check('bot: seats at the practice table, the only one that accepts a bot',
+    pickTable([casual, practice, pro], 'bot')?.id === 'practice');
+  check('bot: no practice table means no seat, not a staked one',
+    pickTable([casual, pro], 'bot') === null,
+    'a staked table refuses addbot — offering it is a button that does nothing');
+
+  check('auto: goes where the humans already are',
+    pickTable([practice, casual, pro], 'auto')?.id === 'casual',
+    'casual has 2 players, pro 1, practice 0');
+  check('auto: skips a FULL table',
+    pickTable([T('full', 6), casual], 'auto')?.id === 'casual');
+  check('auto: an all-empty list still seats somewhere',
+    !!pickTable([practice, T('casual', 0)], 'auto'),
+    'returning null would drop the player back on the list they just left');
+  check('auto: the choice is deterministic across devices',
+    pickTable([T('b', 0), T('a', 0)], 'auto')?.id === pickTable([T('a', 0), T('b', 0)], 'auto')?.id,
+    'two players picking differently is the whole bug being fixed');
+
+  check('no tables at all is null, not a throw', pickTable([], 'auto') === null);
+  check('null is null, not a throw', pickTable(null, 'auto') === null);
+  check('every table full is null', pickTable([T('f', 6)], 'auto') === null);
 }
 
 console.log(failures ? `\n  ${failures} FAILED\n` : '\n  all rummy table checks passed\n');

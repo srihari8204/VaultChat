@@ -100,6 +100,10 @@ func RegisterGames(mux *http.ServeMux) {
 	// push alone cannot provide. Written by games_notify.go (migration 125).
 	mux.HandleFunc("GET /games/tables", httpx.RequireAuth(gamesLiveTables))
 	mux.HandleFunc("DELETE /games/tables", httpx.RequireAuth(gamesForgetTable))
+	// Pool (101/201) and Deals (best-of-2/6) rummy — a score across deals that
+	// the games server's single-deal engine cannot keep (games_matches.go,
+	// migration 126).
+	RegisterGamesMatches(mux)
 }
 
 // gamesLiveTablesSQL reads ONE player's tables.

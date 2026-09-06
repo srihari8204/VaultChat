@@ -95,8 +95,20 @@ A(/Add customer/.test(UI), '18. there is an Add customer affordance');
 A(/createKhataCustomer/.test(UI) && /createKhataCustomer/.test(SVC),
   '19. wired to the deployed endpoint');
 A(/keyboardType="phone-pad"/.test(UI), '20. the mobile field uses a phone keypad');
-A(/\{!!c\.mobile && <Text style=\{s\.hint\}>\{c\.mobile\}<\/Text>\}/.test(UI),
-  '21. the number is shown on the row, so a household khata is identifiable');
+// ASSERT THE BEHAVIOUR, NOT THE MARKUP. This pinned the exact inline JSX
+// `{!!c.mobile && <Text style={s.hint}>{c.mobile}</Text>}`, so the glassmorphism
+// pass (7c55bb7) broke it by moving the row onto the shared TxnRow — the number
+// is still rendered, via `sub`, and the check failed anyway. A test that fails
+// when a feature is REFACTORED rather than when it BREAKS trains people to
+// delete it.
+//
+// Two halves, because either alone can pass while the number is invisible: the
+// row must be handed the mobile, and TxnRow must actually draw what it is handed.
+A(/sub=\{c\.mobile/.test(UI),
+  '21. the customer row is given the mobile number');
+A(/\{sub \? <Text[^>]*>\{sub\}<\/Text> : null\}/.test(UI)
+  && /accessibilityLabel=\{\[title, sub,/.test(UI),
+  '21a. ...and the row renders it, and reads it out, so a household khata is identifiable');
 
 // ── 7. NOTHING ELSE MOVED ──────────────────────────────────────────
 A(!/DROP |ALTER TABLE|CREATE TABLE/.test(GO),

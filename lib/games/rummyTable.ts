@@ -51,7 +51,7 @@ export const CARD_RATIO = 1.4;
  * Below this a rank pip is unreadable at arm's length; above it a hand of
  * thirteen stops fitting on a phone at all.
  */
-const CARD_MIN = 32;
+export const CARD_MIN = 32;
 /**
  * Lowered 70 → 62 → 54 across two rounds of owner feedback on real phones.
  *
@@ -62,6 +62,22 @@ const CARD_MIN = 32;
  * legibility, because the overlap they forced was taking it straight back.
  */
 const CARD_MAX = 54;
+/**
+ * A tablet gets bigger cards, and the reason is not "there is room".
+ *
+ * 54 was chosen against a PHONE held at arm's length. A tablet in landscape is
+ * held further away and is physically larger, so the same 54dp card subtends a
+ * smaller angle at the eye — the card that was comfortable on a Redmi is the
+ * smallest thing on an iPad. Designed in Figma at 1024x768 before it was
+ * written: the fan absorbs the extra width (0.79 rather than 1.0), so the hand
+ * still fits with room to spare.
+ *
+ * Stepped rather than continuous ON PURPOSE. A `width * 0.07` ramp would change
+ * the card size on every phone too, invalidating the two devices this layout is
+ * actually proven on, to buy nothing — no phone is 900dp wide in landscape.
+ */
+const CARD_MAX_LARGE = 72;
+const LARGE_SCREEN = 900;
 
 /**
  * How much width each card after the first in a group costs.
@@ -77,6 +93,30 @@ const CARD_MAX = 54;
  */
 export const FAN = 0.58;
 const FAN_MAX = 1;
+
+/**
+ * The fan we SIZE the cards to reach, rather than the tightest one we tolerate.
+ *
+ * This file already argues for it, in the note above CARD_MAX: "bigger cards
+ * were never buying legibility, because the overlap they forced was taking it
+ * straight back." Sizing the cards as large as the width allows and letting the
+ * fan collapse to FAN does exactly that — once the score panel moved into the
+ * band, every viewport that showed it sat at the 0.58 floor with 42% of every
+ * card buried, which is the most crowded the hand has ever been.
+ *
+ * So the card is sized to leave room for a 15% tuck instead. It is the same
+ * width spent differently, and it is a better trade on the number that actually
+ * matters — the strip of each card you can SEE. At the 844dp reference:
+ *
+ *     50dp card at 0.58 fan -> 29.0dp visible per tucked card
+ *     37dp card at 0.88 fan -> 32.5dp visible per tucked card
+ *
+ * ...and the top-left index, which is the whole of what you read a fanned hand
+ * by, sits in that strip. CARD_MIN still wins if honouring this would push the
+ * cards under it: an unreadable card spread out is worse than a readable one
+ * tucked in.
+ */
+const FAN_COMFORT = 0.85;
 
 /**
  * The chrome around the cards, in the same units the layout uses.
@@ -109,12 +149,33 @@ const EDGE_MIN = 28;
 const HAND_SIZE = 13;
 const GROUPS = 5;
 
-/** Tray padding above/below the cards plus the meld badge line under them. */
-const BADGE_H = 32;
 /** One row of action buttons, at the compact size. */
 const ACTIONS_H = 46;
-/** The turn/status pill. */
-const STATUS_H = 30;
+
+/**
+ * What the action bar can afford, in priority order.
+ *
+ * FOUND ON THE DEVICE, not in the model: sweeping the Honor at 666dp the bar
+ * ran 680dp of controls into a 666dp screen and pushed DROP clean off the
+ * right-hand edge. That is the exact failure this file's own header warns
+ * about — a decision the player cannot reach is a hand they cannot finish —
+ * and no height budget catches it, because the bar overflows sideways.
+ *
+ * So the bar is now budgeted. Six controls NEVER drop: Sort, Group, Ungroup,
+ * Discard, Declare, Drop. Everything else earns its place only if the width is
+ * there, cheapest-to-lose first: the deadwood toggle is a convenience and goes
+ * before the score readout, and the readout itself degrades to a single button
+ * before it disappears — Standings must stay reachable at every width.
+ */
+const BAR_BTN = 62;
+const BAR_GAP = 4;
+const BAR_PAD = 16;
+/** Narrowest a mandatory control may shrink to before the row would overflow. */
+const BAR_BTN_MIN = 40;
+/** The compact Standings button, and the full three-cell readout. */
+const BAR_TRIO = 190 + BAR_GAP;
+/** The SHOW DEADWOOD toggle. */
+const BAR_TOGGLE = 118 + BAR_GAP;
 /**
  * The least felt worth drawing: two piles, the wild card and a row of seats.
  *
@@ -123,6 +184,81 @@ const STATUS_H = 30;
  * respect it rather than the felt pushing the action bar off the bottom.
  */
 const MIN_TABLE_H = 80;
+
+/**
+ * The header band. It DOES come out of the height budget now.
+ *
+ * It used to be drawn over the felt to cost nothing, which is the right trade
+ * when the header is three small buttons. It is no longer: the wordmark, the
+ * Practice/Free/Bots tabs and the Talk/rules/settings controls are a real bar,
+ * and overlapping the cloth with them made the top of the oval unusable for
+ * seats anyway. Paying 34dp buys back the whole top arc.
+ */
+const HEADER_H = 34;
+
+/**
+ * The hand band is a TRAY, not a row of cards.
+ *
+ * Each group carries its name above the cards ("SEQUENCE", "SET") and what it
+ * scores below, so the band is taller than the cards by a fixed amount. Naming
+ * the group above it is what lets a player scan the hand without decoding the
+ * cards — the badge underneath alone never did that.
+ */
+const TRAY_LABEL_H = 12;
+const TRAY_PTS_H = 16;
+const TRAY_PAD_V = 10;
+const BAND_EXTRA = TRAY_LABEL_H + TRAY_PTS_H + TRAY_PAD_V;
+
+/**
+ * The score panel sits INSIDE the hand band, beside the trays.
+ *
+ * That is where a landscape screen has room for it, and it is why the status
+ * strip could be given up: with meld, deadwood and score always visible at
+ * full size, the one-line pill was repeating what the panel already said.
+ *
+ * It leaves the band on a narrow screen and returns to the action bar as the
+ * compact trio, because the width it takes comes straight out of the cards —
+ * measured, a 640dp screen drops from a 51dp card to 33dp if the panel stays.
+ * Legible cards outrank a big score readout.
+ */
+// STACKED, so it is narrow. Three side-by-side cells wanted ~200dp of an 819dp
+// screen, and that width came straight out of the hand: the cards ended up at
+// the 0.58 fan floor with 42% of every one buried. Three ROWS say the same
+// three numbers in 130dp and give the difference back to the fan.
+const SCORE_MIN_W = 110;
+const SCORE_MAX_W = 190;
+// 0.26 -> 0.24. The panel's width comes straight out of the cards, and at 0.26
+// the Honor's real 732dp viewport left a 39dp card — barely over the CARD_MIN
+// floor, on the one device this layout can actually be checked on. 0.24 buys
+// back 3dp there and 3dp at the reference size, and costs the panel nothing it
+// needs: at every width it still clears SCORE_MIN_W comfortably.
+const SCORE_SHARE = 0.16;
+
+/**
+ * The smallest card the wide layout is allowed to leave behind.
+ *
+ * THE LAYOUT SWITCH IS NOT A WIDTH. It was: first 700 for the score panel and
+ * 760 for the gutters (whose gap the Honor fell straight into), then a single
+ * 700 — and a width threshold cannot see what it costs. Sweeping the real
+ * device showed the bill: at 699dp the hand gets a 53dp card, at 700dp the
+ * panel takes its share and the same hand gets 39dp. A one-pixel change in
+ * viewport dropping the cards by a quarter is not a responsive layout, it is a
+ * cliff, and no number written here would have found it — the sweep did.
+ *
+ * So the panel appears only when it leaves a card at least this big. The rule
+ * states the thing actually being protected (cards you can read) instead of
+ * encoding a guess about which devices are wide enough, and it re-decides
+ * itself on any screen rather than needing a new constant per device.
+ */
+export const CARD_COMFORT = 34;
+
+/**
+ * How much width the oval gives up so the side panels have somewhere to live.
+ * Below WIDE_LAYOUT_MIN_W it gives up nothing and takes the whole width.
+ */
+const OVAL_SHARE = 0.68;
+/** Clearance between the oval and the top/bottom of its band. */
+const OVAL_INSET = 8;
 
 export interface Insets { top: number; bottom: number; left: number; right: number }
 
@@ -144,6 +280,25 @@ export interface Metrics {
   tableH: number;
   /** Piles are drawn a touch smaller than held cards so the hand stays the focus. */
   pileW: number;
+  /** The header bar. Costs height — see HEADER_H. */
+  headerH: number;
+  /** Score panel width inside the band; 0 when it falls back to the action bar. */
+  scoreW: number;
+  /** Width the group trays may use, after the score panel has taken its share. */
+  trayW: number;
+  /** The drawn oval, which is narrower than the felt when side panels fit. */
+  ovalW: number;
+  ovalX: number;
+  ovalY: number;
+  ovalH: number;
+  /** Whether the table panel and the emote feed have gutters to live in. */
+  sidePanels: boolean;
+  /** The action bar's optional controls, in the order they are given up. */
+  barTrio: boolean;
+  barStandings: boolean;
+  barToggle: boolean;
+  /** Width of one mandatory control; shrinks before the row may overflow. */
+  barBtnW: number;
 }
 
 const clamp = (lo: number, hi: number, v: number) => Math.max(lo, Math.min(hi, v));
@@ -201,19 +356,60 @@ export function metrics(win: { width: number; height: number }, insets: Insets):
   // what the player is actually looking at.
   const handShare = landscape ? 0.42 : 0.30;
 
-  const byWidth = (width - handChromeWidth()) / (GROUPS + (HAND_SIZE - GROUPS) * FAN);
-  const byHeight = (height * handShare - BADGE_H) / CARD_RATIO;
+  const byHeight = (height * handShare - BAND_EXTRA) / CARD_RATIO;
   // The third constraint, and the one that only bites on short screens: what is
-  // left after the felt's floor, the action bar and the status pill have taken
-  // their share. Without it the sum overflows the safe box and the action bar
-  // ends up under the system navigation, where it cannot be tapped at all.
-  const byBudget = (height - MIN_TABLE_H - ACTIONS_H - STATUS_H - BADGE_H) / CARD_RATIO;
-  const cardW = Math.floor(clamp(CARD_MIN, CARD_MAX, Math.min(byWidth, byHeight, byBudget)));
+  // left after the felt's floor, the header and the action bar have taken their
+  // share. Without it the sum overflows the safe box and the action bar ends up
+  // under the system navigation, where it cannot be tapped at all.
+  const byBudget = (height - MIN_TABLE_H - HEADER_H - ACTIONS_H - BAND_EXTRA) / CARD_RATIO;
+  const cardMax = width >= LARGE_SCREEN ? CARD_MAX_LARGE : CARD_MAX;
+
+  // Price the wide layout before choosing it. The score panel takes its width
+  // off the top, so the cards are sized against what is LEFT — and if what is
+  // left is not a card worth reading, the panel does not get to be there.
+  const fit = (avail: number) => {
+    // Sized so the hand can spread to FAN_COMFORT, not so it merely fits at the
+    // tightest tuck the layout tolerates. The edge margin is the same one
+    // fanFor keeps, so the two agree about how much room there really is.
+    const margin = Math.max(EDGE_MIN, avail * EDGE_FRACTION);
+    const byComfort = (avail - margin - handChromeWidth())
+      / (GROUPS + (HAND_SIZE - GROUPS) * FAN_COMFORT);
+    // ...but never below the floor: a card you cannot read, spread out, is
+    // worse than one you can read with a corner covered.
+    const byFit = (avail - handChromeWidth()) / (GROUPS + (HAND_SIZE - GROUPS) * FAN);
+    return Math.floor(clamp(CARD_MIN, cardMax,
+      Math.min(Math.max(byComfort, CARD_MIN), byFit, byHeight, byBudget)));
+  };
+
+  const scoreTry = Math.round(clamp(SCORE_MIN_W, SCORE_MAX_W, width * SCORE_SHARE));
+  const wide = fit(width - scoreTry - TRAY_GAP) >= CARD_COMFORT;
+
+  const scoreW = wide ? scoreTry : 0;
+  const trayW = width - (scoreW ? scoreW + TRAY_GAP : 0);
+  const cardW = fit(trayW);
   const cardH = Math.round(cardW * CARD_RATIO);
 
-  const handH = cardH + BADGE_H;
-  const tableH = Math.max(MIN_TABLE_H, height - handH - ACTIONS_H - STATUS_H);
+  const handH = cardH + BAND_EXTRA;
+  const tableH = Math.max(MIN_TABLE_H, height - HEADER_H - handH - ACTIONS_H);
   const compact = tableH < 190;
+
+  // The gutters and the score panel are ONE decision, so there is no width at
+  // which you get half the design.
+  const sidePanels = wide;
+  const ovalW = sidePanels ? Math.round(width * OVAL_SHARE) : width;
+  const ovalH = Math.max(40, tableH - OVAL_INSET * 2);
+
+  // The bar's budget. The six mandatory controls SHRINK before anything is
+  // allowed to overflow — a narrow bar gets narrow buttons, never a missing
+  // Drop. Everything optional is then bought out of what is left.
+  const barBtnW = Math.floor(clamp(BAR_BTN_MIN, BAR_BTN, (width - BAR_PAD - 5 * BAR_GAP) / 6));
+  const barMust = 6 * barBtnW + 5 * BAR_GAP + BAR_PAD;
+  // `scoreW > 0` means the readout already lives in the band, so the bar
+  // neither needs nor shows it.
+  const barTrio = scoreW === 0 && width >= barMust + BAR_TRIO;
+  const barStandings = scoreW === 0 && !barTrio && width >= barMust + barBtnW + BAR_GAP;
+  const readout = barTrio ? BAR_TRIO : barStandings ? barBtnW + BAR_GAP : 0;
+  const barToggle = width >= barMust + readout + BAR_TOGGLE;
 
   return {
     width,
@@ -224,58 +420,148 @@ export function metrics(win: { width: number; height: number }, insets: Insets):
     cardH,
     // Derived from the fan that fits, not from a fixed 0.58 — on a wide table
     // this goes to zero and the cards stop covering each other.
-    overlap: Math.round(cardW * (1 - fanFor(cardW, width))),
+    //
+    // CEIL, NOT ROUND, and it is a fit bug rather than a taste one. The overlap
+    // that RENDERS is a whole number of pixels; rounding DOWN makes the real
+    // tuck looser than the fan the fit was calculated from, so the hand comes
+    // out wider than handWidthAt() promised. Found by building the layout at
+    // 640x360 in Figma: the model said 637.6 of 640 and the render measured
+    // 641 — a hand that scrolls by one pixel on the smallest supported screen,
+    // which no assertion written against the unrounded fan could ever catch.
+    // Ceil can only ever tuck tighter than the model, never looser.
+    // AGAINST trayW, NOT width. The fan is "how far can these cards spread in
+    // the room they have", and once the score panel moved into the band the
+    // room stopped being the screen. Measured against `width` the hand thought
+    // it had the whole viewport, chose a fan of ~1 — cards barely touching —
+    // and ran 135-177dp past the trays on EVERY size that shows the panel.
+    //
+    // The cards were already SIZED off trayW (`fit(trayW)` above); only the fan
+    // was still reading the old number, which is exactly the shape of bug this
+    // file keeps catching: two places that must agree, and one of them moved.
+    overlap: Math.ceil(cardW * (1 - fanFor(cardW, trayW))),
     handH,
     tableW: width,
     tableH,
     pileW: Math.max(CARD_MIN, Math.round(cardW * (compact ? 0.82 : 0.95))),
+    headerH: HEADER_H,
+    scoreW,
+    trayW,
+    ovalW,
+    ovalX: Math.round((width - ovalW) / 2),
+    ovalY: OVAL_INSET,
+    ovalH,
+    sidePanels,
+    barTrio,
+    barStandings,
+    barToggle,
+    barBtnW,
   };
 }
 
-export interface Spot { x: number; y: number; w: number }
+/**
+ * Width the action bar actually needs, for the check that it fits.
+ *
+ * Exported so the self-check can assert the thing that broke rather than
+ * re-deriving it: six mandatory controls, plus whatever the budget allowed.
+ */
+export function actionBarWidth(m: Metrics): number {
+  return 6 * m.barBtnW + 5 * BAR_GAP + BAR_PAD
+    + (m.barTrio ? BAR_TRIO : m.barStandings ? m.barBtnW + BAR_GAP : 0)
+    + (m.barToggle ? BAR_TOGGLE : 0);
+}
+
+export interface Spot { x: number; y: number; w: number; h: number }
+
+/** A capsule this short holds two rows; taller ones also get the card backs. */
+export const SEAT_ROW3_MIN = 54;
+
+const SEAT_W_MIN = 72, SEAT_W_MAX = 168;
+const SEAT_H_MIN = 40, SEAT_H_MAX = 58;
+/** Least gap between two capsules when width, not the arc, is the constraint. */
+const SEAT_GAP = 8;
+/** Keeps the outermost capsules off the brass rail. */
+const SEAT_EDGE = 6;
 
 /**
- * Place `n` opponents around the far edge of the table.
+ * Seat `n` opponents AROUND the oval — not in a row along the top of it.
  *
- * An arc, not a row: the players nearest the middle sit further back, which is
- * what makes an oval read as an oval and — more usefully — is what stops five
- * seats colliding on a narrow screen, because the arc spends vertical space
- * where horizontal space has run out.
+ * This used to be a shallow arc across the far edge: every opponent lived in
+ * the top strip of the felt and the sides of the table were empty. That reads
+ * as a scoreboard above a table rather than as people sitting at one, and it
+ * wasted the only space a landscape screen has to spare.
  *
- * The span (12%-88% of the width) is the reference client's, so a native table
- * seats people where a player who has seen the web one expects them.
+ * A capsule's CENTRE now rides an ellipse inscribed in the felt, with the local
+ * player holding the bottom of it (their hand is the near edge of the table),
+ * so opponents fill the remaining arc: one at the far side, the rest fanning
+ * down the left and right. Six-handed that is the layout every rummy client
+ * uses, and the shape is the reason it survives a tablet — on a 584dp-tall felt
+ * the seats spread down the sides instead of huddling along one edge.
  *
- * Seat width is DERIVED from the spacing rather than fixed: six-handed on a
- * small phone has to shrink the avatars, and overlapping names are worse than
- * small ones.
+ * DISTRIBUTED BY X, NOT BY ANGLE, and that is load-bearing. Equal angular steps
+ * bunch points near the left and right extremes of a wide, short ellipse, which
+ * is exactly the shape a landscape felt is: five seats at equal angles on an
+ * 844x176 band put two capsules 60dp apart and overlapping. Equal steps in x
+ * with y read off the ellipse gives the same visual arc and makes separation a
+ * property of the arithmetic — adjacent centres are always `2·rx/(n-1)` apart.
+ *
+ * `top` is the header band. A capsule that starts at y=0 sits under the
+ * settings button; passing `metrics().headerH` is what keeps the two apart.
+ *
+ * FLOOR: the ring is collision-free for `tableW >= 372`. Below that the width
+ * clamp pins capsules to SEAT_W_MIN faster than the spacing shrinks and they
+ * begin to touch — a portrait-phone width, and rummy plays landscape-only.
  */
-export function seatSpots(n: number, tableW: number, tableH: number): Spot[] {
+export function seatSpots(n: number, tableW: number, tableH: number, top = 0): Spot[] {
   if (n <= 0) return [];
 
-  const spanL = 0.12, spanR = 0.88;
-  const span = (spanR - spanL) * tableW;
+  // Never wider than a share of the felt, and never so wide that n of them
+  // could not stand side by side with a gap between.
+  const w = Math.floor(clamp(
+    SEAT_W_MIN, SEAT_W_MAX,
+    Math.min(tableW * 0.16, (tableW - SEAT_GAP * (n - 1)) / n),
+  ));
+  const band = Math.max(1, tableH - top);
+  const h = Math.round(clamp(SEAT_H_MIN, SEAT_H_MAX, band * 0.32));
 
-  // Two constraints, and the second is the one that is easy to miss: a seat is
-  // CENTRED on its point, so the outermost pair can only be as wide as twice
-  // the margin outside them. Sizing off the spacing alone made the end seats
-  // overhang, and clamping them back inside the felt then pushed them into
-  // their neighbours — three-handed on a folded phone had two names on top of
-  // each other. The 4px is breathing room between adjacent seats.
-  const bySpacing = n === 1 ? tableW * 0.22 : span / (n - 1) - 4;
-  const byEdge = 2 * spanL * tableW;
-  const w = Math.floor(clamp(34, 92, Math.min(bySpacing, byEdge)));
-  const lift = Math.min(22, tableH * 0.11);
+  // The ellipse the CENTRES ride. Both radii are shrunk by half a capsule so a
+  // seat placed at an extreme lands flush inside the felt rather than centred
+  // on its edge with half of itself outside.
+  const rx = Math.max(0, (tableW - w) / 2 - SEAT_EDGE);
+  const ry = Math.max(0, (band - h) / 2);
 
   return Array.from({ length: n }, (_, i) => {
-    const frac = n === 1 ? 0.5 : i / (n - 1);
-    const cx = (spanL + frac * (spanR - spanL)) * tableW;
+    // -1 at the player's left hand, +1 at their right, 0 straight across.
+    const u = n === 1 ? 0 : -1 + (2 * i) / (n - 1);
     return {
-      // Clamped so an end seat cannot hang off the edge on a narrow screen.
-      x: clamp(0, Math.max(0, tableW - w), cx - w / 2),
-      y: Math.round(lift - Math.sin(frac * Math.PI) * lift),
-      w: Math.round(w),
+      x: Math.round(tableW / 2 + u * rx - w / 2),
+      // The ellipse's top arc: 0 at the far side, ry at the extremes.
+      y: Math.round(top + ry * (1 - Math.sqrt(Math.max(0, 1 - u * u)))),
+      w,
+      h,
     };
   });
+}
+
+/**
+ * Where the closed deck, the open pile and the wild card sit on the felt.
+ *
+ * Pinned to the BOTTOM of the table for as long as that has been a landscape
+ * phone, where the felt is 206dp tall and the bottom is the only place the
+ * piles are not under a seat. On a tablet the same rule drops them into the
+ * near rail with 240dp of empty cloth above — designed at 1024x768 and visible
+ * immediately.
+ *
+ * So: centre them, but never above the seat ring, and never off the bottom.
+ * On a phone the seat clearance wins and they sit low exactly as before; on a
+ * tablet the centring wins and they land in the middle of the oval.
+ */
+export function pileTop(tableH: number, headerH: number, seatH: number, stackH: number): number {
+  const lo = headerH + seatH + 8;
+  const hi = tableH - 2 - stackH;
+  // No room under the seats at all: the bottom is the least bad answer, and a
+  // negative top would push the piles off the felt entirely.
+  if (hi <= lo) return Math.max(0, hi);
+  return Math.round(clamp(lo, hi, (tableH - stackH) / 2));
 }
 
 /* -- the turn clock ------------------------------------------------- */
@@ -345,6 +631,125 @@ export function pid(p: { id?: string; vaultId?: string }): string {
  */
 export function allowsBots(table: { pointValue?: number } | null | undefined): boolean {
   return !!table && table.pointValue === 0;
+}
+
+/** How the hub asked us to be seated, when it did not name a table. */
+export type SeatIntent = 'auto' | 'bot';
+
+/**
+ * Pick a REAL table to sit at.
+ *
+ * WHY THIS EXISTS — the bug it fixes, stated plainly.
+ *
+ * Rummy tables are OWNED BY THE SERVER. Unlike the other three games, whose
+ * rooms are created on demand from whatever id you send, rummy only knows the
+ * tables it published in `{t:'tables'}` (ids like `practice`). Sending any other
+ * id is not an error: the server silently seats you at one of its own instead.
+ *
+ * So every id the app invented or imported was a dead end, and it broke BOTH
+ * ways of playing a human:
+ *   - "Play online" passed the MATCHMAKER's roomId, which is a /live/ws room id
+ *     and never a rummy table.
+ *   - "Private room" passed a freshly minted code like `2YR7QG`.
+ * Two players sharing either one were substituted independently and each landed
+ * alone reading "1/6 seated" — which is exactly "online and private both do not
+ * connect". Proven on two phones: joining `practice` from the real table card
+ * seats BOTH at one table, "2/6 seated".
+ *
+ * The cure is to stop inventing ids and choose from the list the server sent.
+ *
+ * `bot`  — the practice table: `pointValue === 0` is the only kind that accepts
+ *          `addbot` (a staked table seating a bot would put the house in the pot).
+ * `auto` — where the humans already are: the fullest table that is not full.
+ *          Falling back to any open table, then to the practice table, so this
+ *          never returns null while a single seat exists anywhere.
+ */
+export function pickTable(
+  tables: readonly TableInfo[] | null | undefined, intent: SeatIntent,
+): TableInfo | null {
+  const open = (tables ?? []).filter(t => t && t.players < t.maxPlayers);
+  if (!open.length) return null;
+
+  const practice = open.find(t => t.pointValue === 0) ?? null;
+  if (intent === 'bot') return practice;
+
+  // Most-seated first so two people choosing "online" a minute apart land
+  // together instead of opening two empty tables side by side. A stable
+  // tiebreak keeps the choice deterministic across devices.
+  const seatedFirst = [...open].sort((a, b) =>
+    b.players - a.players || a.id.localeCompare(b.id));
+  return seatedFirst.find(t => t.players > 0) ?? seatedFirst[0] ?? practice;
+}
+
+/* -- what KIND of table this is ------------------------------------- */
+
+/**
+ * Practice or staked — and `unknown`, which is the whole reason this is a
+ * function rather than a comparison at each call site.
+ *
+ * `pointValue` is documented on `lobby.table` (GAMES_PROTOCOL.md), NOT on the
+ * `{t:'tables'}` rows, which the doc lists as `{id,name,stakes,players,
+ * maxPlayers,status}`. The server does appear to send it on the list too —
+ * `pickTable` has relied on it for the bot path since it was written, and that
+ * path works on two phones — but "appears to" is not a promise, and a filter
+ * built on an undocumented field must degrade rather than lie.
+ *
+ * So a table whose point value is missing is `unknown`, and an unknown table
+ * appears under EVERY filter. Excluding it would hide a real, joinable table on
+ * evidence we do not have, which reads to a player as "there are no tables".
+ */
+export type TableKind = 'practice' | 'stakes' | 'unknown';
+
+export function tableKind(t: { pointValue?: number } | null | undefined): TableKind {
+  if (!t || typeof t.pointValue !== 'number' || !Number.isFinite(t.pointValue)) return 'unknown';
+  return t.pointValue === 0 ? 'practice' : 'stakes';
+}
+
+/**
+ * Which kind of game a player is looking for.
+ *
+ * `bots` lists the SAME tables as `practice` and that is correct rather than a
+ * duplicate: only a practice table accepts `addbot` (a staked table seating a
+ * bot would put the house in the pot, so the server refuses). The two differ in
+ * what JOINING does — from the bots tab the client seats you and asks for a bot
+ * straight away, so the difference is behaviour, not the list.
+ */
+export type KindFilter = 'all' | 'practice' | 'stakes' | 'bots';
+
+export function filterByKind(tables: readonly TableInfo[], mode: KindFilter): TableInfo[] {
+  const list = tables ?? [];
+  if (mode === 'all') return [...list];
+  return list.filter(t => {
+    const k = tableKind(t);
+    // Unknown survives every filter — see tableKind.
+    if (k === 'unknown') return true;
+    return mode === 'stakes' ? k === 'stakes' : k === 'practice';
+  });
+}
+
+/** Which table sizes a player wants to see. */
+export type SeatFilter = 'all' | 'heads-up' | 'multi';
+
+/**
+ * Narrow the table list to head-to-head or multi-player tables.
+ *
+ * The server has always sent `maxPlayers` on every entry of `{t:'tables'}` and
+ * the app has always rendered it as text ("2/6 seated") with no way to filter
+ * on it — so a player who wants a head-to-head game reads every card looking
+ * for one. This is the whole of that feature: the data was already in hand.
+ *
+ * MULTI IS `> 2`, NOT `=== 6`. The protocol documents a 2–6 seat range, so
+ * pinning it to 6 would silently hide every 3-, 4- and 5-seat table and look
+ * exactly like "there are no tables open".
+ *
+ * Order is the server's and is preserved — it lists tables in the order it
+ * wants them shown, and re-sorting here would fight that for no reason.
+ */
+export function filterBySeats(tables: readonly TableInfo[], mode: SeatFilter): TableInfo[] {
+  const list = tables ?? [];
+  if (mode === 'all') return [...list];
+  return list.filter(t =>
+    mode === 'heads-up' ? t.maxPlayers === 2 : t.maxPlayers > 2);
 }
 
 /** A shareable code for a table nobody has to be told about in person. */
