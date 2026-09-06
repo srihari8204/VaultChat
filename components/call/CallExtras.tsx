@@ -84,7 +84,7 @@ export const CallExtras = memo(CallExtrasImpl);
 const S = StyleSheet.create({
   wrap:      { position: 'absolute', left: 0, right: 0, alignItems: 'center' },
   row:       { flexDirection: 'row', gap: 10 },
-  btn:       { width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center',
+  btn:       { width: 40, minHeight: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center',
                backgroundColor: 'rgba(255,255,255,0.14)' },
   btnActive: { backgroundColor: 'rgba(255,255,255,0.30)' },
   badge:     { position: 'absolute', top: -2, right: -2, minWidth: 18, height: 18, borderRadius: 9,

@@ -90,7 +90,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   flag: { fontSize: 18 },
   codeTxt: { color: c.text, fontSize: 16, fontWeight: '700' },
   chev: { color: c.textDim, fontSize: 12 },
-  input: { flex: 1, height: 52, borderRadius: 12, borderWidth: 1, borderColor: c.border, backgroundColor: c.card, paddingHorizontal: 14, color: c.text, fontSize: 16 },
+  input: { flex: 1, minHeight: 52, borderRadius: 12, borderWidth: 1, borderColor: c.border, backgroundColor: c.card, paddingHorizontal: 14, color: c.text, fontSize: 16 },
   backdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'flex-end' },
   sheet: { backgroundColor: c.bg, borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 16, maxHeight: '70%' },
   sheetTitle: { color: c.text, fontSize: 16, fontWeight: '800', marginBottom: 12 },

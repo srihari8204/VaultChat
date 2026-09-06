@@ -37,6 +37,7 @@ import { Swipeable } from 'react-native-gesture-handler';
 import * as Haptics from 'expo-haptics';
 import LinkPreview, { extractUrl } from '../../components/LinkPreview';
 import { isViewedOnce, isViewedOnceSync, markViewedOnce } from '../../lib/viewOnceStore';
+import { exportToGalleryInBackground } from '../../lib/galleryExport';
 import { isRevokedSync } from '../../lib/protectedMedia';
 
 import { useTheme } from '../../lib/theme';
@@ -748,13 +749,15 @@ function useRetryOnReconnect(eligible: boolean, retry: () => void) {
   }, [conn, eligible, retry]);
 }
 
-function ImageAttachment({ attachmentId, resolvedUri, isMine, mime, thumb, encrypted, onError }: {
+function ImageAttachment({ attachmentId, resolvedUri, isMine, mime, thumb, encrypted, viewOnce, onError }: {
   attachmentId: string;
   resolvedUri?: { uri: string; headers?: Record<string, string> } | null;
   isMine?: boolean;
   mime?: string;
   thumb?: string;   // base64 JPEG shown instantly while the full image loads
   encrypted?: boolean;  // meta.encrypted — lets a missing key be reported as such
+  /** Passed explicitly so a view-once photo can never reach the camera roll. */
+  viewOnce?: boolean;
   onError?: () => void;
 }) {
   const { colors } = useTheme();
@@ -766,6 +769,14 @@ function ImageAttachment({ attachmentId, resolvedUri, isMine, mime, thumb, encry
   // predates a reinstall, which destroys both the per-file keys and the E2EE
   // identity). Distinct from a failed download — retrying can never fix it.
   const [keyMissing, setKeyMissing] = useState(false);
+  // Publish to the device gallery once the bytes are a real local file. Only
+  // file:// — a remote URL is not ours to copy, and the export itself refuses
+  // view-once media and honours the user's setting.
+  useEffect(() => {
+    if (uri && uri.startsWith('file://')) {
+      exportToGalleryInBackground(uri, { kind: 'image', viewOnce, attachmentId });
+    }
+  }, [uri, viewOnce, attachmentId]);
   const download = useCallback(() => {
     setNeedTap(false);
     setProgress(0);
@@ -843,7 +854,7 @@ function ImageAttachment({ attachmentId, resolvedUri, isMine, mime, thumb, encry
 // MessageBubble can flip to a "Viewed" tombstone without an extra
 // HEAD round-trip.
 function VideoBubble({
-  attachmentId, durationMs, authHeader, resolvedUri, onErrorOnce, isNote, onOpen, isMine, mime, thumb, encrypted,
+  attachmentId, durationMs, authHeader, resolvedUri, onErrorOnce, isNote, onOpen, isMine, mime, thumb, encrypted, viewOnce,
 }: {
   attachmentId:  string;
   durationMs:    number;
@@ -856,6 +867,8 @@ function VideoBubble({
   mime?:         string;
   thumb?:        string;    // base64 JPEG poster (instant, no download)
   encrypted?:    boolean;   // meta.encrypted — see mediaStore.MediaKeyMissingError
+  /** Passed explicitly so a view-once video can never reach the camera roll. */
+  viewOnce?:     boolean;
 }) {
   const S = useS();
   // WhatsApp-style: do NOT mount a <Video> (ExoPlayer) at rest — each instance
@@ -865,6 +878,13 @@ function VideoBubble({
   // inline in the round bubble — so at most ONE <Video> is ever alive.
   const [playing, setPlaying] = useState(false);
   const [noteUri, setNoteUri] = useState<string | null>(resolvedUri?.uri ?? null);
+  // Same rule as the image bubble: publish only real local files, never a
+  // view-once video, and only when the user's setting allows it.
+  useEffect(() => {
+    if (noteUri && noteUri.startsWith('file://')) {
+      exportToGalleryInBackground(noteUri, { kind: 'video', viewOnce, attachmentId });
+    }
+  }, [noteUri, viewOnce, attachmentId]);
   const [busy, setBusy] = useState(false);
 
   const onTap = useCallback(async () => {
@@ -1438,6 +1458,7 @@ function MessageBubble({
             mime={String(msg.meta?.mime || '')}
             thumb={typeof msg.meta?.thumb === 'string' ? msg.meta.thumb : undefined}
             encrypted={isEncMedia}
+            viewOnce={isViewOnceMedia}
             onError={() => { if (isViewOnceMedia && !isMine) setTombstoned(true); }}
           />
         ) : isVideo ? (
@@ -1453,6 +1474,7 @@ function MessageBubble({
             mime={String(msg.meta?.mime || '')}
             thumb={typeof msg.meta?.thumb === 'string' ? msg.meta.thumb : undefined}
             encrypted={isEncMedia}
+            viewOnce={isViewOnceMedia}
           />
         ) : isAudio ? (
           <AudioBubble

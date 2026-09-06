@@ -26,7 +26,6 @@ import { onScreenshot } from '../lib/screenGuard';
 // are absent until the first status callback lands.
 type PlaybackState = Partial<AVPlaybackStatusSuccess>;
 
-const { width: SW, height: SH } = Dimensions.get('window');
 const C = { bg: '#000', accent: '#4A9FFF', green: BRAND_ACCENT };
 
 const getFileType = (name) => {

@@ -298,7 +298,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   title: { color: c.text, fontSize: 20, fontWeight: '800' },
 
   tabs: { flexDirection: 'row', gap: 8, marginHorizontal: 16, marginBottom: 8 },
-  tab: { flex: 1, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center', backgroundColor: c.card },
+  tab: { flex: 1, minHeight: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center', backgroundColor: c.card },
   tabOn: { backgroundColor: c.primary },
   tabTxt: { color: c.textDim, fontSize: 14, fontWeight: '700' },
   tabTxtOn: { color: '#fff' },

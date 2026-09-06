@@ -30,6 +30,7 @@ import { SERVER_URL } from '../constants/server';
 import { logoutUser } from './(constants)/authService';
 import { api, getAccessToken } from '../lib/api';
 import { getAutoDownload, setAutoDownload, type AutoDownloadPolicy } from '../lib/mediaPrefs';
+import { getSaveToGallery, setSaveToGallery } from '../lib/galleryExport';
 import { useTheme, type ThemePref } from '../lib/theme';
 import { type Palette, brandAlpha } from '../constants/theme';
 import { Ionicons } from '@expo/vector-icons';
@@ -75,7 +76,9 @@ export default function SettingsScreen() {
   const [profile, setProfile] = useState<{ name?: string; email?: string; status?: string; photoURL?: string } | null>(null);
   const [autoDl, setAutoDl] = useState<AutoDownloadPolicy>('always');
   const [picker, setPicker] = useState<Picker>(null);
+  const [toGallery, setToGallery] = useState(true);
   useEffect(() => { getAutoDownload().then(setAutoDl); }, []);
+  useEffect(() => { getSaveToGallery().then(setToGallery); }, []);
   const autoDlLabel = (p: AutoDownloadPolicy) => p === 'never' ? 'Never' : p === 'wifi' ? 'Wi-Fi only' : 'Wi-Fi & mobile data';
 
   // Initial fetch — settings + blocks in parallel + auth header + profile
@@ -285,6 +288,22 @@ export default function SettingsScreen() {
             </View>
             <Ionicons name="chevron-forward" size={18} color={colors.textDim} />
           </TouchableOpacity>
+          <View style={[S.linkRow, { borderBottomWidth: 0 }]}>
+            <View style={S.linkIconWrap}><Ionicons name="images-outline" size={22} color={colors.text} /></View>
+            <View style={{ flex: 1 }}>
+              <Text style={S.linkTitle}>Save to gallery</Text>
+              <Text style={S.linkSub}>
+                Show received photos and videos in your phone&apos;s gallery. Anything saved
+                leaves this app&apos;s protection — view-once media is never saved.
+              </Text>
+            </View>
+            <Switch
+              value={toGallery}
+              onValueChange={(v) => { setToGallery(v); setSaveToGallery(v); }}
+              trackColor={{ false: colors.border, true: colors.accentDeep }}
+              thumbColor="#FFFFFF"
+            />
+          </View>
         </View>
       </View>
 

@@ -14,7 +14,6 @@ import * as ScreenOrientation from 'expo-screen-orientation';
 import * as Sharing from 'expo-sharing';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get('window');
 const ACCENT = '#4A9FFF';
 const BG = '#000000';
 const OVERLAY = 'rgba(0,0,0,0.55)';
@@ -41,6 +40,7 @@ function useS() {
 }
 
 export default function VideoPlayerScreen() {
+  const { width: SCREEN_W, height: SCREEN_H } = useWindowDimensions();
   const { colors } = useTheme();
   const styles = useS();
   const router = useRouter();

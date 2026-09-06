@@ -26,8 +26,6 @@ import { watch, capabilities, isSafeToRender, setSecure, type GuardState } from 
 import type { Palette } from '../constants/theme';
 import { useColors } from '../lib/theme';
 
-const { width: SW, height: SH } = Dimensions.get('window');
-
 export interface ProtectedMediaViewProps {
   /** Identity stamped into the overlay — the VIEWER, not the sender. */
   watermarkName?: string;
@@ -206,11 +204,11 @@ const makeS = (c: Palette) => StyleSheet.create({
     paddingVertical: 10, paddingHorizontal: 16,
     backgroundColor: 'rgba(0,0,0,0.72)',
   },
-  statusTxt: { color: c.text, fontSize: 11, flexShrink: 1 },
+  statusTxt: { color: '#D1D5DB', fontSize: 11, flexShrink: 1 },   // theme-exempt: sits on the fixed rgba(0,0,0,0.72) bar below
   blocked: {
     flex: 1, alignItems: 'center', justifyContent: 'center',
     backgroundColor: c.bg, padding: 32, gap: 10,
   },
-  blockedTitle: { color: '#fff', fontSize: 16, fontWeight: '800', textAlign: 'center' },
+  blockedTitle: { color: c.text, fontSize: 16, fontWeight: '800', textAlign: 'center' },
   blockedBody: { color: c.textDim, fontSize: 13, textAlign: 'center', lineHeight: 19 },
 });

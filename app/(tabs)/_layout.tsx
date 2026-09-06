@@ -5,8 +5,8 @@
 // U5: vector icons (Ionicons) instead of emoji + Aurora design tokens.
 
 import { Tabs } from 'expo-router';
-import React, { useMemo } from 'react';
-import { StyleSheet, View } from 'react-native';
+import React, { useEffect, useMemo, useRef } from 'react';
+import { Animated, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
@@ -15,6 +15,8 @@ import { useColors } from '../../lib/theme';
 import { AppText } from '../../components/ui/Text';
 import { GlassView } from '../../components/ui/GlassView';
 import { useUnreadTotal } from '../../lib/unreadStore';
+import { useReducedMotion } from '../../lib/useReducedMotion';
+import { MOTION } from '../../constants/theme';
 
 type IoniconName = React.ComponentProps<typeof Ionicons>['name'];
 
@@ -42,7 +44,7 @@ function MiniCenterIcon({ focused }: { focused: boolean }) {
       >
         <Ionicons name="grid" size={24} color="#fff" />
       </LinearGradient>
-      <AppText variant="tiny" color={focused ? c.accentOn : c.textFaint} style={styles.centerLabel}>Apps</AppText>
+      <AppText variant="tiny" color={focused ? c.accentOn : c.textFaint} style={styles.centerLabel} numberOfLines={1} maxFontSizeMultiplier={1.2}>Apps</AppText>
     </View>
   );
 }
@@ -50,21 +52,35 @@ function MiniCenterIcon({ focused }: { focused: boolean }) {
 function TabIcon({ tab, label, focused }: { tab: keyof typeof ICONS; label: string; focused: boolean }) {
   const c = useColors();
   const styles = useStyles(c);
+  const reduced = useReducedMotion();
+  const lift = useRef(new Animated.Value(focused ? 1 : 0)).current;
+  useEffect(() => {
+    Animated.spring(lift, {
+      toValue: focused ? 1 : 0,
+      useNativeDriver: true,          // transform only — stays on the UI thread
+      ...MOTION.springSnappy,
+    }).start();
+  }, [focused, lift]);
+  // One transform, not two: a mixed translate+scale array does not narrow in TS
+  // without a cast, and the scale alone already reads as a lift.
+  const anim = reduced
+    ? undefined
+    : { transform: [{ scale: lift.interpolate({ inputRange: [0, 1], outputRange: [1, 1.09] }) }] };
   const g = ICONS[tab];
   const color = focused ? c.accentOn : c.textFaint;
   const unread = useUnreadTotal();
   const badge = tab === 'chats' && unread > 0;
   return (
     <View style={styles.tabIconWrap}>
-      <View>
+      <Animated.View style={anim}>
         <Ionicons name={focused ? g.on : g.off} size={22} color={color} />
         {badge && (
           <View style={styles.badge}>
-            <AppText variant="tiny" color="#fff" style={styles.badgeTxt}>{unread > 99 ? '99+' : unread}</AppText>
+            <AppText variant="tiny" color="#fff" style={styles.badgeTxt} numberOfLines={1} maxFontSizeMultiplier={1.1}>{unread > 99 ? '99+' : unread}</AppText>
           </View>
         )}
-      </View>
-      <AppText variant="tiny" color={color} style={styles.tabLabel}>{label}</AppText>
+      </Animated.View>
+      <AppText variant="tiny" color={color} style={styles.tabLabel} numberOfLines={1} maxFontSizeMultiplier={1.2}>{label}</AppText>
     </View>
   );
 }

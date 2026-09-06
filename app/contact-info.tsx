@@ -25,6 +25,7 @@ import {
 } from '../lib/chatService';
 import { getDecryptedAttachmentUri, parseMediaContent } from '../lib/mediaAttachments';
 import { readCache, writeCache } from '../lib/localCache';
+import { unionWithLocalHistory } from '../lib/messageHistory';
 import { Avatar, AuroraBackground } from '../components/ui';
 
 const { width: SW } = Dimensions.get('window');
@@ -122,7 +123,12 @@ export default function ContactInfoScreen() {
             ?? chat.members.find((m: ChatMember) => m.userId === peerUid);
           if (p) { nextPeer = p; setPeer(p); }
         }
-        const buckets = msgs ? classify(msgs as Message[]) : { media, files, links };
+        // Union with the local cache before classifying. delete-on-delivery
+        // nulls a delivered body and the media sweep purges its bytes, so the
+        // server list alone drops shared media the device can still render —
+        // and writing that back to the cache erased it for good.
+        const unioned = await unionWithLocalHistory(chatId, (msgs as Message[]) ?? [], 400);
+        const buckets = unioned.length ? classify(unioned) : { media, files, links };
 
         if (chatId || peerUid) {
           writeCache<ContactInfoCache>(cacheKey, {

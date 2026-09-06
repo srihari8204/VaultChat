@@ -22,8 +22,6 @@ export interface SheetAction {
 }
 
 const DEFAULT_REACTIONS = ['❤️', '😂', '😮', '😢', '🙏', '👍'];
-const { height: SCREEN_H } = Dimensions.get('window');
-
 export function MessageActionSheet({
 
   visible, onClose, actions, onReact, reactions = DEFAULT_REACTIONS,
@@ -124,7 +122,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
 
   grid: { gap: 12 },
   gridRow: { flexDirection: 'row', gap: 12 },
-  tile: { flex: 1, height: 68, borderRadius: 16, backgroundColor: c.surface, alignItems: 'center', justifyContent: 'center', gap: 6 },
+  tile: { flex: 1, minHeight: 68, borderRadius: 16, backgroundColor: c.surface, alignItems: 'center', justifyContent: 'center', gap: 6 },
   tileIcon: { fontSize: 22 },
   tileLabel: { color: c.text, fontSize: 11, fontWeight: '600' },
 });

@@ -27,6 +27,7 @@ import {
   type MemberInsight, type Range, type TripRecord, type TripAnnounce,
 } from '../lib/groups/analytics';
 import { announceFromMessage } from '../lib/groups/tripSession';
+import { unionWithLocalHistoryAsc } from '../lib/messageHistory';
 import { getMessages } from '../lib/chatService';
 import { type CircleMember } from '../lib/family/types';
 
@@ -97,7 +98,8 @@ export default function GroupInsightsScreen() {
       // the local alert inbox — nothing new is stored and nothing is fetched
       // for it beyond messages this device already syncs.
       try {
-        const msgs = await getMessages(groupId, { limit: 300 });
+        const msgs = await unionWithLocalHistoryAsc(
+          groupId, await getMessages(groupId, { limit: 300 }), 1200);
         const announces: TripAnnounce[] = [];
         for (const m of msgs) {
           const a = announceFromMessage(m);

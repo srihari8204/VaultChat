@@ -19,6 +19,7 @@ import { getAccessToken } from '../lib/api';
 import { getMessages, getChat, decryptFromChat, attachmentUrl, type Message } from '../lib/chatService';
 import { getDecryptedAttachmentUri, parseMediaContent } from '../lib/mediaAttachments';
 import { readCache, writeCache } from '../lib/localCache';
+import { unionWithLocalHistory } from '../lib/messageHistory';
 import { AuroraBackground } from '../components/ui';
 
 const { width: SW } = Dimensions.get('window');
@@ -26,6 +27,22 @@ const TILE = (SW - 40) / 3;
 const PAGE = 200;
 
 type ThumbSrc = { uri: string; headers?: Record<string, string> } | null;
+
+/** Split a message list into the gallery's four buckets. */
+function bucket(msgs: Message[]) {
+  const photos: Message[] = [], videos: Message[] = [], files: Message[] = [], links: LinkItem[] = [];
+  for (const m of msgs) {
+    if (m.deletedAt) continue;
+    if (m.type === 'image' && m.meta?.attachmentId) photos.push(m);
+    else if (m.type === 'video' && m.meta?.attachmentId) videos.push(m);
+    else if (m.type === 'file' && m.meta?.attachmentId) files.push(m);
+    else if (m.type === 'text' && m.content) {
+      const found = m.content.match(/https?:\/\/[^\s]+/gi);
+      if (found) for (const u of found) links.push({ id: m.id, url: u, createdAt: m.createdAt });
+    }
+  }
+  return { photos, videos, files, links };
+}
 
 /**
  * Lazy thumbnail: resolves (and decrypts if needed) only when the tile mounts.
@@ -158,17 +175,20 @@ export default function MediaGalleryScreen() {
           before = page[page.length - 1].id;
         }
         if (!active) return;
-        const ph: Message[] = [], vd: Message[] = [], fl: Message[] = [], lk: LinkItem[] = [];
-        for (const m of all) {
-          if (m.deletedAt) continue;
-          if (m.type === 'image' && m.meta?.attachmentId) ph.push(m);
-          else if (m.type === 'video' && m.meta?.attachmentId) vd.push(m);
-          else if (m.type === 'file' && m.meta?.attachmentId) fl.push(m);
-          else if (m.type === 'text' && m.content) {
-            const found = m.content.match(/https?:\/\/[^\s]+/gi);
-            if (found) for (const u of found) lk.push({ id: m.id, url: u, createdAt: m.createdAt });
-          }
-        }
+
+        // UNION with the local cache, never replace it.
+        //
+        // The server is not the whole truth here. delete-on-delivery sets
+        // `content = NULL` once every recipient has acked, and the media
+        // retention sweep purges the attachment bytes — so an older photo can
+        // be perfectly visible in the chat (served from the device's own
+        // media/ dir) while the server row that described it is gone. Taking
+        // the network result as the answer therefore ERASED a good gallery the
+        // moment the retention window passed: the chat still showed the media,
+        // the gallery went empty, and the cache was overwritten with nothing.
+        const merged = await unionWithLocalHistory(cid, all, 1000);
+
+        const { photos: ph, videos: vd, files: fl, links: lk } = bucket(merged);
         setPhotos(ph); setVideos(vd); setFiles(fl); setLinks(lk);
         writeCache<GalleryCache>(cacheKey, { photos: ph, videos: vd, files: fl, links: lk });
       } catch {

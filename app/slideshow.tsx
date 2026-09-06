@@ -14,8 +14,6 @@ import { useTheme } from '../lib/theme';
 import { type Palette } from '../constants/theme';
 import { AuroraBackground } from '../components/ui';
 
-const { width: SW, height: SH } = Dimensions.get('window');
-
 function useS() {
   // Reactive size. The module-level Dimensions.get above is captured ONCE at
   // import and never updates, so it froze the layout at the size the app
@@ -29,6 +27,7 @@ function useS() {
 }
 
 export default function SlideshowScreen() {
+  const { width: SW, height: SH } = useWindowDimensions();
   const { colors } = useTheme();
   const st = useS();
   const router = useRouter();

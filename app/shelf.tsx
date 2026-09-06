@@ -223,7 +223,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   searchInput: { flex: 1, color: c.text, fontSize: 14, padding: 0 },
   chipRow: { gap: 8, paddingHorizontal: 16, paddingVertical: 12 },
   chip: {
-    flexDirection: 'row', alignItems: 'center', gap: 6, height: 30, paddingHorizontal: 12,
+    flexDirection: 'row', alignItems: 'center', gap: 6, minHeight: 30, paddingHorizontal: 12,
     borderRadius: 15, borderWidth: StyleSheet.hairlineWidth, borderColor: c.border,
   },
   chipOn: { backgroundColor: brandAlpha(0.16), borderColor: brandAlpha(0.5) },

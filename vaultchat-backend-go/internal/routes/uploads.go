@@ -4,6 +4,7 @@
 package routes
 
 import (
+	"log"
 	"context"
 	"crypto/rand"
 	"fmt"
@@ -211,6 +212,12 @@ func uploadsPost(w http.ResponseWriter, r *http.Request) {
 		id := upUUID()
 		key := "att/" + id + upSafeExt(origName)
 		if err := storage.PutObject(ctx, key, data, mimeType); err != nil {
+			// SAY WHY. The client can only report "Storage upload failed"; the
+			// object store's own reason (AccessDenied, NoSuchBucket, a signature
+			// mismatch) was discarded here, so a credential expiry looked
+			// identical to a network blip and could only be found by probing R2
+			// by hand. One line turns that into a grep.
+			log.Printf("[storage] putObject %s: %v", key, err)
 			httpx.Err(w, 502, "Storage upload failed")
 			return
 		}

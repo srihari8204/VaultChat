@@ -16,6 +16,7 @@ import * as Sharing from 'expo-sharing';
 import { type Palette, BRAND_ACCENT } from '../constants/theme';
 import { useTheme } from '../lib/theme';
 import { getMessages, type Message } from '../lib/chatService';
+import { unionWithLocalHistoryAsc } from '../lib/messageHistory';
 import { getCurrentUserAsync } from './(constants)/authService';
 import { AuroraBackground } from '../components/ui';
 
@@ -38,7 +39,14 @@ export default function ChatExportScreen() {
   const [progress, setProgress] = useState('');
   const [msgCount, setMsgCount] = useState(0);
 
-  // Fetch every message (oldest→newest) by walking the keyset cursor.
+  // Fetch every message (oldest→newest) by walking the keyset cursor, then
+  // UNION the device's own cache.
+  //
+  // The server is not the whole history. delete-on-delivery sets content = NULL
+  // once every recipient acks, so an export built from /chats/:id/messages
+  // alone silently omits everything past the retention window — and an export
+  // is exactly where a silent omission is worst, because the user believes
+  // they now hold a complete archive. The local cache still has those bodies.
   const fetchAll = async (): Promise<Message[]> => {
     const all: Message[] = [];
     let before: number | undefined;
@@ -49,8 +57,9 @@ export default function ChatExportScreen() {
       if (page.length < PAGE) break;
       before = page[page.length - 1].id; // oldest id in this (desc) page
     }
-    all.sort((a, b) => a.id - b.id);
-    return all;
+    const merged = await unionWithLocalHistoryAsc(chatId, all);
+    setMsgCount(merged.length);
+    return merged;
   };
 
   const fmtTime = (iso: string) => { try { return new Date(iso).toLocaleString(); } catch { return ''; } };

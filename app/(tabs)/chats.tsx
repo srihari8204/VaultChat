@@ -940,7 +940,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   // Aurora Glass: rows are undecorated on purpose. No fill, no border, no
   // shadow — the ground and the avatar ring carry the design, so the list stays
   // legible at a glance and costs nothing to scroll.
-  row: { flexDirection: 'row', height: 76, paddingHorizontal: 22, alignItems: 'center', gap: 14, backgroundColor: 'transparent' },
+  row: { flexDirection: 'row', minHeight: 76, paddingHorizontal: 22, alignItems: 'center', gap: 14, backgroundColor: 'transparent' },
   rowSelected: { backgroundColor: brandAlpha(0.14) },
   avatarWrap: { width: 52, height: 52 },
   selBadge: { position: 'absolute', right: -2, bottom: -2, width: 20, height: 20, borderRadius: 10, alignItems: 'center', justifyContent: 'center', borderWidth: 2, borderColor: c.bg },

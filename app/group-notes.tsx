@@ -18,6 +18,7 @@ import { Stack, useLocalSearchParams, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../lib/theme';
 import { sendMessage, getMessages, decryptFromChat } from '../lib/chatService';
+import { unionWithLocalHistoryAsc } from '../lib/messageHistory';
 import { getCurrentUserAsync } from './(constants)/authService';
 import {
   encodeNoteOp, decodeNoteOp, foldNotes, sortNotes, preview, newNoteId,
@@ -50,7 +51,9 @@ export default function GroupNotesScreen() {
   const rebuild = useCallback(async () => {
     if (!groupId) { setLoading(false); return; }
     try {
-      const msgs = await getMessages(groupId, { limit: SCAN_LIMIT });
+      // Ops older than the retention window survive only on this device.
+      const msgs = await unionWithLocalHistoryAsc(
+        groupId, await getMessages(groupId, { limit: SCAN_LIMIT }), SCAN_LIMIT * 4);
       const ops: NoteOp[] = [];
       for (const m of msgs) {
         if (m.deletedAt || !m.content) continue;
@@ -227,8 +230,8 @@ const st = StyleSheet.create({
   card: { borderWidth: 1, borderRadius: 14, padding: 14, marginBottom: 10 },
   backdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' },
   sheet: { borderTopLeftRadius: 22, borderTopRightRadius: 22, borderTopWidth: 1, padding: 18, paddingBottom: 32 },
-  field: { flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderRadius: 12, paddingHorizontal: 12, height: 48 },
+  field: { flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderRadius: 12, paddingHorizontal: 12, minHeight: 48 },
   input: { flex: 1, fontSize: 15 },
-  btn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, height: 50, borderRadius: 13, marginTop: 16 },
+  btn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, minHeight: 50, borderRadius: 13, marginTop: 16 },
   btnTxt: { color: '#fff', fontSize: 15, fontWeight: '800' },
 });

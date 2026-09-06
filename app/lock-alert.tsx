@@ -127,7 +127,7 @@ const makeSt = (c: Palette) => StyleSheet.create({
   distLabel: { color: '#FECACA', fontSize: 11.5, fontWeight: '800', letterSpacing: 1.2 },
   dist: { color: '#fff', fontSize: 44, fontWeight: '900', marginTop: 2 },
   distSub: { color: '#FECACA', fontSize: 12.5, marginTop: 4 },
-  btn: { flexDirection: 'row', alignItems: 'center', gap: 8, borderRadius: 14, paddingHorizontal: 26, height: 52, justifyContent: 'center' },
+  btn: { flexDirection: 'row', alignItems: 'center', gap: 8, borderRadius: 14, paddingHorizontal: 26, minHeight: 52, justifyContent: 'center' },
   btnTxt: { fontSize: 16.5, fontWeight: '800', color: '#fff' },
   navRow: { flexDirection: 'row', gap: 12, marginTop: 10 },
   navBtn: { alignItems: 'center', justifyContent: 'center', width: 86, height: 68, borderRadius: 14, backgroundColor: 'rgba(255,255,255,.14)', borderWidth: 1, borderColor: 'rgba(255,255,255,.35)' },

@@ -28,8 +28,8 @@ import { useTheme } from '../lib/theme';
 import { sendMessage } from '../lib/chatService';
 import { AuroraBackground } from '../components/ui';
 
-const { width: SW } = Dimensions.get('window');
 // 8 stickers per row, with padding/gaps factored in
+const { width: SW } = Dimensions.get('window');
 const TILE = Math.floor((SW - 32 - 8 * 6) / 8);
 
 interface Pack {

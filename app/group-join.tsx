@@ -149,7 +149,7 @@ const st = StyleSheet.create({
   hero: { alignItems: 'center' },
   icon: { width: 76, height: 76, borderRadius: 38, alignItems: 'center', justifyContent: 'center', borderWidth: 1 },
   note: { flexDirection: 'row', alignItems: 'flex-start', gap: 11, padding: 15, borderWidth: 1, borderRadius: 14, marginTop: 30 },
-  btn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, height: 52, borderRadius: 14, marginTop: 20 },
+  btn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, minHeight: 52, borderRadius: 14, marginTop: 20 },
   btnTxt: { color: '#fff', fontSize: 15.5, fontWeight: '800' },
   footer: { flexDirection: 'row', gap: 9, alignItems: 'flex-start', marginTop: 30, padding: 13, borderWidth: 1, borderRadius: 12 },
 });

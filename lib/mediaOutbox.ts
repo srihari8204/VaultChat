@@ -19,6 +19,7 @@ import { UPLOAD_PROGRESS } from '../constants/flags';
 import { sendMediaMessage, type MediaType, type UploadPhase } from './sendMedia';
 import { type Message } from './chatService';
 import { queueList, queueReplace, queueMigrate } from './localDb';
+import { warnOnce, redactIds } from './diagLog';
 
 const LEGACY_KEY = 'vc_media_outbox_v1';   // pre-SQLite AsyncStorage array
 // Whole-queue reads: the cap must stay far above any real backlog, because
@@ -265,6 +266,16 @@ export async function flush(): Promise<void> {
         if (ac.signal.aborted) { /* cancelMedia already removed it */ }
         else if (isPermanent(err?.status)) {
           // "Not sent" — mark failed (tap-to-retry), keep the copy for the retry.
+          //
+          // SAY WHY. The bubble can only render "failed (tap to retry)"; the
+          // reason lived in `lastError` and was never printed, so a media send
+          // that stopped working was undiagnosable on a device — which is
+          // exactly the situation console.warn is kept in release builds for.
+          warnOnce(
+            'media-send-permanent:' + (err?.status ?? 'none'),
+            `[mediaOutbox] send failed permanently (status ${err?.status ?? 'none'}): `
+              + redactIds(String(err?.message ?? 'unknown')),
+          );
           const cur = await load(); const it = cur.find(m => m.tempId === item.tempId);
           if (it) { it.state = 'failed'; it.lastError = err?.message ?? 'failed'; await save(cur); }
           emit('failed', { tempId: item.tempId, chatId: item.chatId, error: err?.message ?? 'failed' });
@@ -279,6 +290,11 @@ export async function flush(): Promise<void> {
           // A transient error that survives this many attempts is not
           // transient; it degrades to the failed state, where the bubble's
           // tap-to-retry (attempts reset to 0) remains the human escape hatch.
+          warnOnce(
+            'media-send-transient:' + String(err?.message ?? 'unknown').slice(0, 60),
+            `[mediaOutbox] send attempt failed (transient, status ${err?.status ?? 'none'}): `
+              + redactIds(String(err?.message ?? 'unknown')),
+          );
           const cur = await load(); const it = cur.find(m => m.tempId === item.tempId);
           if (it) {
             it.attempts++; it.lastError = err?.message ?? null;

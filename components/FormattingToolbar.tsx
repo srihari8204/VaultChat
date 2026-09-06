@@ -81,7 +81,7 @@ const makeS = (c: Palette) => StyleSheet.create({
   },
   btn: {
     width: 38,
-    height: 32,
+    minHeight: 32,
     borderRadius: 8,
     backgroundColor: 'rgba(255,255,255,0.06)',
     justifyContent: 'center',

@@ -355,7 +355,7 @@ export default function GroupInvitesScreen() {
 
 const st = StyleSheet.create({
   h: { fontSize: 13, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.3, marginBottom: 10 },
-  field: { flexDirection: 'row', alignItems: 'center', gap: 10, borderWidth: 1, borderRadius: 12, paddingHorizontal: 12, height: 50 },
+  field: { flexDirection: 'row', alignItems: 'center', gap: 10, borderWidth: 1, borderRadius: 12, paddingHorizontal: 12, minHeight: 50 },
   input: { flex: 1, fontSize: 15 },
   empty: { flexDirection: 'row', alignItems: 'center', gap: 9, padding: 12, borderWidth: 1, borderRadius: 12, marginTop: 14 },
   sechead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 30, marginBottom: 10 },
@@ -363,7 +363,7 @@ const st = StyleSheet.create({
   rowIcon: { width: 32, height: 32, borderRadius: 16, alignItems: 'center', justifyContent: 'center' },
   rowBtn: { padding: 6 },
   avatar: { alignItems: 'center', justifyContent: 'center' },
-  pill: { paddingHorizontal: 14, height: 32, borderRadius: 16, alignItems: 'center', justifyContent: 'center', minWidth: 74 },
+  pill: { paddingHorizontal: 14, minHeight: 32, borderRadius: 16, alignItems: 'center', justifyContent: 'center', minWidth: 74 },
   pillTxt: { color: '#fff', fontSize: 12.5, fontWeight: '800' },
   footer: { flexDirection: 'row', gap: 9, alignItems: 'flex-start', marginTop: 28, paddingTop: 14, borderTopWidth: StyleSheet.hairlineWidth },
 });

@@ -76,7 +76,10 @@ export function Avatar({ uri, headers, name, size = 48, presence, style, anon, r
         // Ringed avatars put the colour in the ring, so the disc stays dark and
         // the initial keeps full contrast against it.
         <View style={[dim, styles.center, { backgroundColor: ring ? c.groundDisc : avatarColor(name || initial) }]}>
-          <AppText style={{ fontSize: inner * 0.4, color: '#FFFFFF', fontWeight: '800' }}>{initial}</AppText>
+          {/* A ringed avatar's disc is `groundDisc`, which is WHITE in the light
+              palette — a hardcoded white initial vanished on it. Unringed, the
+              disc is a saturated avatarColor where white is still correct. */}
+          <AppText style={{ fontSize: inner * 0.4, color: ring ? c.text : '#FFFFFF', fontWeight: '800' }}>{initial}</AppText>
         </View>
       )}
     </>

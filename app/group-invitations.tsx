@@ -230,7 +230,7 @@ const st = StyleSheet.create({
   cardTop: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   icon: { width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center' },
   actions: { flexDirection: 'row', gap: 9, marginTop: 14 },
-  btn: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7, height: 44, borderRadius: 12 },
+  btn: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7, minHeight: 44, borderRadius: 12 },
   btnTxt: { color: '#fff', fontSize: 14, fontWeight: '800' },
   emptyWrap: { alignItems: 'center', padding: 26, borderWidth: 1, borderRadius: 18, marginTop: 30 },
   footer: { flexDirection: 'row', gap: 9, alignItems: 'flex-start', marginTop: 20, paddingTop: 14, borderTopWidth: StyleSheet.hairlineWidth },

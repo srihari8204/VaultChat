@@ -481,6 +481,6 @@ const st = StyleSheet.create({
   stateDot: { width: 10, height: 10, borderRadius: 5, marginRight: 8 },
   stateTxt: { fontWeight: '900', fontSize: 15, letterSpacing: 0.4 },
   bgBanner: { flexDirection: 'row', alignItems: 'center', gap: 8, borderWidth: 1, borderRadius: 10, padding: 9, marginTop: 12 },
-  btn: { flexDirection: 'row', alignItems: 'center', gap: 6, borderRadius: 10, paddingHorizontal: 12, height: 40 },
+  btn: { flexDirection: 'row', alignItems: 'center', gap: 6, borderRadius: 10, paddingHorizontal: 12, minHeight: 40 },
   btnTxt: { fontWeight: '700', fontSize: 13.5 },
 });

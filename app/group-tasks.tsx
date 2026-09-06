@@ -16,6 +16,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../lib/theme';
 import { brandAlpha } from '../constants/theme';
 import { sendMessage, getMessages, decryptFromChat } from '../lib/chatService';
+import { unionWithLocalHistoryAsc } from '../lib/messageHistory';
 import { circleMembers } from '../lib/family/circle';
 import { getCurrentUserAsync } from './(constants)/authService';
 import { syncTaskReminders } from '../lib/groups/taskReminders';
@@ -62,7 +63,9 @@ export default function GroupTasksScreen() {
   const rebuild = useCallback(async () => {
     if (!groupId) { setLoading(false); return; }
     try {
-      const msgs = await getMessages(groupId, { limit: SCAN_LIMIT });
+      // Ops older than the retention window survive only on this device.
+      const msgs = await unionWithLocalHistoryAsc(
+        groupId, await getMessages(groupId, { limit: SCAN_LIMIT }), SCAN_LIMIT * 4);
       const ops: TaskOp[] = [];
       for (const m of msgs) {
         if (m.deletedAt || !m.content) continue;
@@ -257,7 +260,7 @@ export default function GroupTasksScreen() {
 }
 
 const st = StyleSheet.create({
-  field: { flexDirection: 'row', alignItems: 'center', gap: 10, borderWidth: 1, borderRadius: 12, paddingHorizontal: 12, height: 52 },
+  field: { flexDirection: 'row', alignItems: 'center', gap: 10, borderWidth: 1, borderRadius: 12, paddingHorizontal: 12, minHeight: 52 },
   input: { flex: 1, fontSize: 15 },
   chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 7, marginTop: 10 },
   chip: { borderWidth: 1, borderRadius: 999, paddingHorizontal: 12, paddingVertical: 7 },

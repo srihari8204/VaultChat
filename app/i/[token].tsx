@@ -78,7 +78,7 @@ const st = StyleSheet.create({
   badge: { width: 74, height: 74, borderRadius: 37, alignItems: 'center', justifyContent: 'center' },
   title: { fontSize: 19, fontWeight: '800' },
   msg: { fontSize: 14, textAlign: 'center', lineHeight: 20 },
-  btn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, height: 48, borderRadius: 13, paddingHorizontal: 28, marginTop: 10 },
+  btn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, minHeight: 48, borderRadius: 13, paddingHorizontal: 28, marginTop: 10 },
   btnTxt: { color: '#fff', fontSize: 15, fontWeight: '800' },
   link: { padding: 10 },
 });
