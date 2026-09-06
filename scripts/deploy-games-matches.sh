@@ -63,10 +63,24 @@ echo "compose: $COMPOSE_ARGS"
 # difference that is not one. games_matches.go is new, so it has nothing to
 # clobber; only games.go is being replaced.
 say "Checking prod has no local changes we would overwrite"
+# TWO acceptable answers, because this script outlived the commit it was
+# written against. When it was written games.go was UNCOMMITTED, so prod
+# matching HEAD meant "nobody has touched it". The change is committed now
+# (71d4493), so a clean box legitimately matches HEAD~1 before the deploy and
+# HEAD after it. Comparing only against HEAD made the guard abort on a
+# perfectly clean prod — verified 2026-09-06, prod md5 766d7cbf… equals
+# HEAD~1 exactly. A check that fails on the expected state is worse than no
+# check, because the next person deletes it rather than reading it.
+#
+# Anything else really is someone having edited the file on the box: stop.
 remote=$(ssh "$HOST" "cat $DEST/vaultchat-backend-go/internal/routes/games.go" | tr -d '\r' | md5sum | cut -d' ' -f1)
 head=$(git show "HEAD:vaultchat-backend-go/internal/routes/games.go" | tr -d '\r' | md5sum | cut -d' ' -f1)
-[ "$remote" = "$head" ] || die "games.go on prod differs from repo HEAD. Someone edited it there — diff it by hand before deploying."
-echo "ok  games.go matches HEAD"
+prev=$(git show "HEAD~1:vaultchat-backend-go/internal/routes/games.go" 2>/dev/null | tr -d '\r' | md5sum | cut -d' ' -f1)
+case "$remote" in
+  "$head") echo "ok  games.go already matches HEAD — the routes may already be registered" ;;
+  "$prev") echo "ok  games.go matches HEAD~1 — clean, and this deploy adds the route registration" ;;
+  *) die "games.go on prod matches neither HEAD nor HEAD~1. Someone edited it there — diff it by hand before deploying." ;;
+esac
 
 # ── 2. BACKUP ─────────────────────────────────────────────────────────
 say "Backing up the file we are about to replace"
