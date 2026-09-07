@@ -23,10 +23,10 @@
  */
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Pressable, ScrollView, Text, View, type ViewStyle } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Text, View, type StyleProp, type ViewStyle } from 'react-native';
 import Svg, {
   Defs, RadialGradient, LinearGradient as SvgLinear, Stop, Rect, G as SvgG, Polygon,
-  Text as SvgText, Circle,
+  Text as SvgText, Circle, Ellipse, Path,
 } from 'react-native-svg';
 import Animated, {
   useSharedValue, useAnimatedStyle, withSpring, withTiming, withRepeat, withSequence,
@@ -35,17 +35,24 @@ import Animated, {
 import * as Haptics from 'expo-haptics';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { useGameSocket, type AutoStart } from '../../lib/games/useGameSocket';
-import { TableBackground, Panel, Btn, Banner, PlayerRow, Reconnecting, RematchBtn, TurnClock, useType, useBoardBox, usePortraitLock, Coin } from './ui';
+import { Panel, Btn, Banner, PlayerRow, Reconnecting, RematchBtn, TurnClock, useType, useBoardBox, usePortraitLock, Coin } from './ui';
 import { useRematch } from '../../lib/games/useRematch';
 import { RulesSheet, useFirstTimeRules } from './rules';
 import { rollSeed, receiptFrom, pushReceipt, type RollReceipt } from '../../lib/games/fairness';
 import { useCountdown } from '../../lib/games/useCountdown';
-import { C, S, R, D3, goldLine, white } from '../../lib/games/theme';
+// Spacing, radii and elevation stay SHARED — ludo lays out on the same grid as
+// its siblings. Only the light in the room is local, and that is ludoGlass.
+import { S, R, D3, white } from '../../lib/games/theme';
+import {
+  LR, LR_AMBIENT, LR_STAGE, SEAT, P, PL, PD, COLOR_NAMES, SHAPE,
+  LG, WELL, TRAY, YARD, PAWN, PAWN_BODY, PAWN_BASE, w, seatA,
+} from '../../lib/games/ludoGlass';
 import { playSfx, preloadSfx, soundEnabled, setSoundEnabled } from '../../lib/games/sfx';
-import { Toasts, Confetti, Sheet, SettingRow, VoiceBar } from './feedback';
+import { Toasts, Confetti, Sheet, SettingRow, VoiceBar, VoiceSheet } from './feedback';
 import { useTableVoice } from '../../lib/games/useTableVoice';
 import { openInvite, shareResult } from '../../lib/games/invite';
 import { useWallet, STAKES, stakeLabel } from '../../lib/games/useWallet';
+import { useAddBot, ADD_BOT_STALLED } from '../../lib/games/useAddBot';
 
 /** 52-cell ring [row,col] on a 15x15 board, clockwise from red's start. */
 const RING: [number, number][] = [
@@ -69,33 +76,14 @@ const BASE_SPOTS: [number, number][][] = [
 ];
 
 /**
- * A light, a base and a dark per seat so surfaces can be shaded rather than
- * filled flat.
+ * The seat palette, the shape markers and the room now live in
+ * lib/games/ludoGlass.ts.
  *
- * RETUNED off the jewel tones from ludo.css. Those were mixed for a CREAM
- * board — dark, saturated colours that need a bright ground to read against —
- * and the board they now sit on is translucent white over a near-black room,
- * where #12a054 and #103f8f both go to a dark smudge. These are the same four
- * hues lifted into the accent family the rest of the games use.
- *
- * The NAMES stay honest: each is still recognisably its colour, because the
- * server and the seat labels both call them Red/Green/Yellow/Blue. And the
- * shape markers below still carry the real accessibility load — a lighter red
- * and a lighter green are still a red and a green.
+ * They were declared here, which meant a game's colour was written in this file
+ * AND in app/games.tsx — the drift the ACCENT change exists to prevent. SEAT[2]
+ * IS ACCENT.ludo now rather than a near-miss of it, and ludoGlass.selftest
+ * asserts that they stay equal.
  */
-const P  = ['#FF6B7D', '#4FE08C', '#FFD166', '#7FD8FF'];
-const PD = ['#B22A3C', '#1E9A5C', '#B98A21', '#2E7FA8'];
-const PL = ['#FFA8B4', '#8BF0B6', '#FFE4A3', '#B4E9FF'];
-const COLOR_NAMES = ['Red', 'Green', 'Yellow', 'Blue'];
-
-/**
- * SHAPE MARKERS — accessibility, not decoration.
- *
- * Red and green are the classic deuteranopia pair, and identifying seats by
- * colour alone makes the game unplayable rather than merely harder for roughly
- * one man in twelve. Each seat carries a distinct shape as well.
- */
-const SHAPE = ['▲', '●', '■', '◆'];
 
 /** Safe ring cells — starts and star squares. Decorative; the server enforces. */
 const SAFE = new Set([0, 8, 13, 21, 26, 34, 39, 47]);
@@ -163,10 +151,16 @@ export default function Ludo({ roomId = 'ludo-main', auto, autoBot }: { roomId?:
   const G = state.game;
   const [showSettings, setShowSettings] = useState(false);
   const [showEmotes, setShowEmotes] = useState(false);
+  const [showVoice, setShowVoice] = useState(false);
   const [sound, setSound] = useState(soundEnabled());
   const [stake, setStake] = useState(0);
   const wallet = useWallet();
   const voice = useTableVoice('ludo', roomId, { you: state.you, send, subscribe });
+  // MUST live with the other hooks, above the lobby's early return — a hook
+  // added below it changes the hook count the frame a game starts.
+  const bot = useAddBot(send, state.lobby?.members?.length ?? 0);
+  /** In the channel — the two phases VoiceBar shows its live row for. */
+  const voiceLive = voice.phase === 'live' || voice.phase === 'waiting';
   // The tumble is local and deliberate. The server answers in tens of
   // milliseconds, so without a held animation the number simply appears and the
   // player never sees a roll happen — which is the single thing that makes dice
@@ -257,24 +251,24 @@ export default function Ludo({ roomId = 'ludo-main', auto, autoBot }: { roomId?:
   // a table we never reached.
   if (error && phase !== 'connected' && !state.game) {
     return (
-      <TableBackground style={{ alignItems: 'center', justifyContent: 'center', padding: S[5], gap: S[3] }}>
+      <LudoRoom style={{ alignItems: 'center', justifyContent: 'center', padding: S[5], gap: S[3] }}>
         <Text style={{ fontSize: 46 }}>🎲</Text>
-        <Text style={{ color: C.text, fontSize: t.lg, fontWeight: '800' }}>Can’t reach the table</Text>
-        <Text style={{ color: C.muted, fontSize: t.sm, textAlign: 'center' }}>{error}</Text>
+        <Text style={{ color: LR.text, fontSize: t.lg, fontWeight: '800' }}>Can’t reach the table</Text>
+        <Text style={{ color: LR.muted, fontSize: t.sm, textAlign: 'center' }}>{error}</Text>
         <Btn label="Try again" kind="gold" onPress={retry} />
-      </TableBackground>
+      </LudoRoom>
     );
   }
 
   // Only take the screen back BEFORE there is a board.
   if ((phase !== 'connected' && !G) || !L) {
     return (
-      <TableBackground style={{ alignItems: 'center', justifyContent: 'center', padding: S[5], gap: S[3] }}>
+      <LudoRoom style={{ alignItems: 'center', justifyContent: 'center', padding: S[5], gap: S[3] }}>
         <Text style={{ fontSize: 46 }}>🎲</Text>
-        <Text style={{ color: C.muted, fontSize: t.md }}>
+        <Text style={{ color: LR.muted, fontSize: t.md }}>
           {phase === 'minting' ? 'Taking your seat…' : 'Joining the table…'}
         </Text>
-      </TableBackground>
+      </LudoRoom>
     );
   }
 
@@ -305,10 +299,10 @@ export default function Ludo({ roomId = 'ludo-main', auto, autoBot }: { roomId?:
     const members = L.members ?? [];
     const host = L.hostId === state.you;
     return (
-      <TableBackground>
+      <LudoRoom>
         <ScrollView contentContainerStyle={{ padding: S[4], gap: S[3] }}>
-          <Text style={{ color: C.text, fontSize: t.xl, fontWeight: '800' }}>Ludo</Text>
-          <Text style={{ color: C.muted, fontSize: t.sm, lineHeight: 19 }}>
+          <Text style={{ color: LR.text, fontSize: t.xl, fontWeight: '800' }}>Ludo</Text>
+          <Text style={{ color: LR.muted, fontSize: t.sm, lineHeight: 19 }}>
             Two to four players. The table rolls the dice and settles every capture — neither phone decides anything.
           </Text>
           <Panel style={{ gap: S[2] }}>
@@ -321,9 +315,9 @@ export default function Ludo({ roomId = 'ludo-main', auto, autoBot }: { roomId?:
                 tag={m.vaultId === state.you ? 'you' : m.isBot ? 'bot' : undefined}
               />
             ))}
-            <Text style={{ color: C.muted, fontSize: t.sm }}>{members.length} seated · up to 4</Text>
+            <Text style={{ color: LR.muted, fontSize: t.sm }}>{members.length} seated · up to 4</Text>
             {members.length < 2 && (
-              <Text style={{ color: C.muted, fontSize: t.sm }}>Two players minimum — add a bot to start now.</Text>
+              <Text style={{ color: LR.muted, fontSize: t.sm }}>Two players minimum — add a bot to start now.</Text>
             )}
           </Panel>
           {/* Stake. Free is first and the default: a table that quietly costs
@@ -332,7 +326,7 @@ export default function Ludo({ roomId = 'ludo-main', auto, autoBot }: { roomId?:
               nothing outside these tables. */}
           <Panel style={{ gap: S[2] }}>
             <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-              <Text style={{ flex: 1, color: C.text, fontSize: t.md, fontWeight: '800' }}>Stake</Text>
+              <Text style={{ flex: 1, color: LR.text, fontSize: t.md, fontWeight: '800' }}>Stake</Text>
               {/* The same gold dot the hub's CoinChip uses. This was the 🪙
                   emoji the hub replaced — one of the two call sites was missed,
                   so the identical balance rendered two different ways one tap
@@ -340,7 +334,7 @@ export default function Ludo({ roomId = 'ludo-main', auto, autoBot }: { roomId?:
               {wallet.balance != null && (
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
                   <Coin size={15} />
-                  <Text style={{ color: C.gold, fontSize: t.sm, fontWeight: '800' }}>{wallet.balance}</Text>
+                  <Text style={{ color: SEAT[2].base, fontSize: t.sm, fontWeight: '800' }}>{wallet.balance}</Text>
                 </View>
               )}
             </View>
@@ -358,7 +352,7 @@ export default function Ludo({ roomId = 'ludo-main', auto, autoBot }: { roomId?:
                 />
               ))}
             </View>
-            <Text style={{ color: C.muted, fontSize: 11 }}>
+            <Text style={{ color: LR.muted, fontSize: 11 }}>
               Play coins. They are not money and cannot be cashed out.
             </Text>
           </Panel>
@@ -383,8 +377,8 @@ export default function Ludo({ roomId = 'ludo-main', auto, autoBot }: { roomId?:
               deep link covers people who have the app open, and this covers
               everyone who is being read the code out loud. */}
           {!!roomId && (
-            <Text style={{ color: C.muted, fontSize: t.sm }} selectable>
-              Room code: <Text style={{ color: C.gold, fontWeight: '800' }}>{roomId}</Text>
+            <Text style={{ color: LR.muted, fontSize: t.sm }} selectable>
+              Room code: <Text style={{ color: SEAT[2].base, fontWeight: '800' }}>{roomId}</Text>
             </Text>
           )}
           {/* Voice at the table. A private room is people you know waiting for
@@ -401,13 +395,23 @@ export default function Ludo({ roomId = 'ludo-main', auto, autoBot }: { roomId?:
             onToggleMute={voice.toggleMute}
           />
           <Btn label="How to play" icon="rules" onPress={rules.open} />
-          <Btn label="Add a bot" onPress={() => send({ t: 'addbot' })} disabled={!host} />
+          {/* The payload is written HERE, not left to the hook's default, so
+              the wire message stays auditable at the call site — it must remain
+              byte-identical to the `send({ t: 'addbot' })` this replaced. */}
+          <Btn label="Add a bot" onPress={() => bot.addBot({ t: 'addbot' })} disabled={!host} />
+          {/* The server can accept `addbot` and never seat one — seen on a
+              device in a room with stale state. There is no error frame for it,
+              so absence is the only evidence, and saying nothing leaves the
+              player tapping a dead button. */}
+          {bot.stalled && (
+            <Text style={{ color: LR.bad, fontSize: t.sm, lineHeight: 18 }}>{ADD_BOT_STALLED}</Text>
+          )}
           <Btn label="Invite a friend" icon="link" onPress={() => { void openInvite('ludo', roomId); }} disabled={!roomId} />
           <Btn label="Start now" kind="gold" onPress={() => send({ t: 'start', mode: 'classic', stake })} disabled={!host || members.length < 2} />
         </ScrollView>
         <Toasts events={events} />
         <RulesSheet game="ludo" visible={rules.visible} onClose={rules.close} />
-      </TableBackground>
+      </LudoRoom>
     );
   }
 
@@ -426,17 +430,68 @@ export default function Ludo({ roomId = 'ludo-main', auto, autoBot }: { roomId?:
   const canMove = mine && die != null && movable.length > 0;
   const turnName = players.find(p => pid(p) === G.turnPlayerId)?.name ?? 'Someone';
 
+  /**
+   * What a seat is doing right now, as a word.
+   *
+   * Derived from the SAME `turnPlayerId` and `phase` the board renders — this
+   * reads state, it does not hold any. A seat card must never say "your turn"
+   * one frame after the server moved on.
+   */
+  const seatStatus = (p: LPlayer): string => {
+    if (finished) return pid(p) === G.winnerId ? 'Winner' : 'Finished';
+    if (G.turnPlayerId !== pid(p)) return 'Waiting…';
+    if (pid(p) !== state.you) return 'Playing…';
+    // WHOSE turn it is comes from the server; whether we may ACT on it depends
+    // on our socket. Conflating the two is what put "Tap a token" on the seat
+    // card while the turn line said "<your own name> is playing" — the screen
+    // telling the player to wait for themselves. Found on a device, mid-drop.
+    if (!connected) return 'Your turn';
+    return die != null ? (movable.length > 0 ? 'Tap a token' : 'No legal move') : 'Your turn';
+  };
+
+  /**
+   * Whose turn the TABLE says it is — a server fact, independent of whether
+   * this phone's socket happens to be up.
+   *
+   * `mine` is that AND `connected`, because it also gates interaction. The
+   * wording below must use this one: a dropped socket does not hand your turn
+   * to somebody else, and saying it does is worse than saying nothing.
+   */
+  const yourTurn = G.turnPlayerId === state.you;
+
   return (
-    <TableBackground>
+    <LudoRoom>
       <ScrollView onLayout={onBoardBox} contentContainerStyle={{ padding: S[4], gap: S[3], alignItems: 'center', paddingBottom: S[6] }}>
 
+        {/* Seats, two to a row. Four stacked rows cost ~100dp of the board's
+            height for two words of information each; the grid gives that back
+            to the board, which is what the screen is for. Two players make one
+            row and three make a row plus a full-width card — no empty slot is
+            ever reserved. */}
         <View style={{ width: size, gap: S[2] }}>
-          {players.map(p => (
-            <SeatCard key={p.seat} player={p} you={pid(p) === state.you} active={G.turnPlayerId === pid(p)} />
-          ))}
+          {[0, 2].map(i => {
+            const row = players.slice(i, i + 2);
+            if (!row.length) return null;
+            return (
+              <View key={i} style={{ flexDirection: 'row', gap: S[2] }}>
+                {row.map(p => (
+                  <SeatCard
+                    key={p.seat}
+                    player={p}
+                    you={pid(p) === state.you}
+                    active={G.turnPlayerId === pid(p)}
+                    status={seatStatus(p)}
+                  />
+                ))}
+              </View>
+            );
+          })}
         </View>
 
         <View style={{ width: size, height: size }}>
+          {/* Behind the board, and only as wide as the board. Every surface on
+              the pane is translucent, so this is what they are lit BY. */}
+          <StageLight size={size} />
           <BoardSvg size={size} />
           {players.map(p =>
             (p.tokens ?? []).map((step, i) => (
@@ -458,60 +513,113 @@ export default function Ludo({ roomId = 'ludo-main', auto, autoBot }: { roomId?:
 
         {reconnecting && <Reconnecting error={error} onRetry={retry} />}
 
-        <View style={{ width: size, flexDirection: 'row', alignItems: 'center', gap: S[3] }}>
-          <Die value={die} tumbling={tumbling} armed={canRoll} seat={mySeat} />
-          <TurnClock secs={secs} />
-          <View style={{ flex: 1, gap: S[2] }}>
-            {finished ? (
-              <Banner
-                text={G.winnerId === state.you ? 'You win!' : `${players.find(p => pid(p) === G.winnerId)?.name ?? 'Someone'} wins`}
-                tone={G.winnerId === state.you ? 'win' : 'lose'}
-              />
-            ) : (
-              <>
-                <Btn
-                  label={tumbling ? 'Rolling…' : canRoll ? 'Roll the dice' : die != null ? `Rolled ${die}` : 'Waiting…'}
-                  kind="gold"
-                  icon="dice"
-                  disabled={!canRoll || tumbling}
-                  onPress={() => {
-                    // Start the tumble first, then ask. The result is held back
-                    // until the animation has run its course.
-                    setTumbling(true);
-                    if (tumbleTimer.current) clearTimeout(tumbleTimer.current);
-                    tumbleTimer.current = setTimeout(() => setTumbling(false), 850);
-                    const cs = rollSeed();
-                    lastSeed.current = cs;
-                    send({ t: 'roll', clientSeed: cs });
-                  }}
-                />
-                <Text style={{ color: C.muted, fontSize: t.sm, textAlign: 'center' }}>
-                  {!mine ? `${turnName} is playing`
-                    : canMove ? 'Tap a token to move'
-                    : die != null ? 'No legal move — passing' : 'Your turn'}
-                </Text>
-              </>
-            )}
+        {finished ? (
+          <View style={{ width: size }}>
+            <Banner
+              text={G.winnerId === state.you ? 'You win!' : `${players.find(p => pid(p) === G.winnerId)?.name ?? 'Someone'} wins`}
+              tone={G.winnerId === state.you ? 'win' : 'lose'}
+            />
           </View>
-        </View>
+        ) : (
+          <View style={{ width: size, flexDirection: 'row', alignItems: 'stretch', gap: S[3] }}>
+            <DiceTray>
+              <Die value={die} tumbling={tumbling} armed={canRoll} seat={mySeat} />
+              {/* Renders nothing when the snapshot carries no deadline, so the
+                  tray simply centres the die instead of holding a gap. */}
+              <TurnClock secs={secs} />
+            </DiceTray>
+            <Btn
+              label={tumbling ? 'Rolling…' : canRoll ? 'Roll the Dice' : die != null ? `Rolled ${die}` : 'Waiting…'}
+              kind="gold"
+              icon="dice"
+              style={{ flex: 1 }}
+              disabled={!canRoll || tumbling}
+              onPress={() => {
+                // Start the tumble first, then ask. The result is held back
+                // until the animation has run its course.
+                setTumbling(true);
+                if (tumbleTimer.current) clearTimeout(tumbleTimer.current);
+                tumbleTimer.current = setTimeout(() => setTumbling(false), 850);
+                const cs = rollSeed();
+                lastSeed.current = cs;
+                send({ t: 'roll', clientSeed: cs });
+              }}
+            />
+          </View>
+        )}
 
-        <VoiceBar
-          width={size}
-          phase={voice.phase}
-          error={voice.error}
-          canSpeak={voice.canSpeak}
-          muted={voice.muted}
-          participants={voice.participants}
-          onJoin={voice.join}
-          onLeave={voice.leave}
-          onToggleMute={voice.toggleMute}
-        />
+        {!finished && (
+          <View style={{ width: size }}>
+            <TurnIndicator
+              // `yourTurn`, not `mine` — see above. While the socket is down it
+              // is still your turn, and the Reconnecting banner directly above
+              // already says why you cannot act on it.
+              title={
+                !yourTurn ? `${turnName} is playing`
+                  : !connected ? 'Your turn'
+                  : canMove ? 'Tap a token'
+                  : die != null ? 'No legal move'
+                  : 'Your turn'
+              }
+              sub={
+                !yourTurn ? 'Waiting for their move'
+                  : !connected ? 'Held until the table is back'
+                  : canMove ? 'Any token with a glowing rim can move'
+                  : die != null ? 'Passing to the next player'
+                  : 'Roll the dice to move'
+              }
+              // Never `act` while disconnected: a tap would go nowhere, and the
+              // gold "go" tone is a promise this screen could not keep.
+              tone={!yourTurn || !connected ? 'wait' : canMove ? 'act' : die != null ? 'wait' : 'you'}
+            />
+          </View>
+        )}
 
+        {/* One action bar, four controls — the shape the design asks for.
+            "Talk at the table" is a compact control that opens VoiceSheet
+            rather than the full-width VoiceBar, which is the pattern Chess
+            already uses: the bar's join/live/mute/leave row is three controls
+            wide on its own and cannot share a line with anything.
+            NO VOICE LOGIC LIVES HERE — the sheet drives the same `voice`
+            object, so joining, muting and leaving behave exactly as before.
+            The lobby keeps the full VoiceBar, where there is room for it. */}
         <View style={{ width: size, flexDirection: 'row', gap: S[2] }}>
+          <Btn
+            label="Talk at the table"
+            icon={voiceLive ? (voice.muted ? 'micOff' : 'mic') : 'mic'}
+            compact
+            style={{ flex: 1.6 }}
+            disabled={voice.phase === 'unavailable'}
+            onPress={() => setShowVoice(true)}
+            accessibilityLabel={
+              voice.phase === 'unavailable' ? 'Table voice unavailable'
+                : voiceLive ? `Table voice, ${voice.muted ? 'muted' : 'live'}, ${voice.participants.length} in the channel`
+                : 'Talk at the table'
+            }
+          />
           <Btn label="Emote" icon="emote" compact style={{ flex: 1 }} onPress={() => setShowEmotes(true)} />
           <Btn label="Invite" icon="link" compact style={{ flex: 1 }} onPress={() => { void openInvite('ludo', roomId); }} disabled={!roomId} />
           <Btn label="" icon="settings" compact onPress={() => setShowSettings(true)} accessibilityLabel="Settings" />
         </View>
+
+        {/* Voice is LIVE and the bar is now a button, so the state that the
+            full bar used to show has to be visible somewhere on the board. A
+            dot and a count, not a second control. */}
+        {voiceLive && (
+          <View style={{ width: size, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: S[2] }}>
+            <View style={{
+              width: 7, height: 7, borderRadius: 4,
+              // Amber while nobody else has joined: you ARE in voice, you just
+              // have no one to talk to yet. Same rule as VoiceBar's own dot.
+              backgroundColor: voice.phase === 'waiting' ? SEAT[2].base : LR.ok,
+            }} />
+            <Text style={{ color: LR.muted, fontSize: 11.5 }}>
+              {voice.phase === 'waiting'
+                ? 'In voice — waiting for others'
+                : `${voice.muted ? 'Muted' : voice.canSpeak ? 'Voice on' : 'Listening'} · ${voice.participants.length}`}
+            </Text>
+          </View>
+        )}
 
         {finished && (
           <View style={{ width: size, flexDirection: 'row', gap: S[2] }}>
@@ -523,33 +631,49 @@ export default function Ludo({ roomId = 'ludo-main', auto, autoBot }: { roomId?:
         {/* The dice are commit-reveal and have been from the start. Saying so
             where the player can check is the whole feature — an invisible
             guarantee reassures nobody. */}
-        <Btn label="Are these dice fair?" compact onPress={() => setShowFair(true)} />
+        {/* Secondary by construction: quieter glass than every other control,
+            no glow, no fill weight. It must not compete with Roll. */}
+        <Pressable
+          onPress={() => setShowFair(true)}
+          accessibilityRole="button"
+          accessibilityLabel="Are these dice fair?"
+          style={{
+            width: size, minHeight: 44, flexDirection: 'row', alignItems: 'center', gap: S[3],
+            paddingHorizontal: S[4],
+            borderRadius: R.pill, borderWidth: 1, borderColor: white(0.12),
+            backgroundColor: white(LG.ctaQuiet),
+          }}
+        >
+          <Ionicons name="chatbubble-ellipses-outline" size={17} color={LR.muted} />
+          <Text style={{ flex: 1, color: LR.muted, fontSize: t.sm, fontWeight: '600' }}>Are these dice fair?</Text>
+          <Ionicons name="chevron-forward" size={16} color={LR.muted} />
+        </Pressable>
       </ScrollView>
 
       <Sheet visible={showFair} title="How the dice are rolled" onClose={() => setShowFair(false)}>
-        <Text style={{ color: C.muted, fontSize: t.sm, lineHeight: 20 }}>
+        <Text style={{ color: LR.muted, fontSize: t.sm, lineHeight: 20 }}>
           Neither side decides a roll on its own. Your phone sends a random seed, the
           table combines it with its own, and the number falls out of both. Change
           either half and you get a different number.
         </Text>
-        <Text style={{ color: C.muted, fontSize: t.sm, lineHeight: 20 }}>
+        <Text style={{ color: LR.muted, fontSize: t.sm, lineHeight: 20 }}>
           Your recent rolls are below, exactly as they were sent and published. Nothing
           here is recalculated on this phone: the table rolls, this only keeps the receipt.
           Where it says “not published”, the table did not reveal that half — so the roll
           cannot be checked independently, and we will not pretend otherwise.
         </Text>
         {receipts.length === 0 ? (
-          <Text style={{ color: C.muted, fontSize: t.sm }}>Roll the dice and your first receipt appears here.</Text>
+          <Text style={{ color: LR.muted, fontSize: t.sm }}>Roll the dice and your first receipt appears here.</Text>
         ) : receipts.map(r => (
-          <View key={r.at} style={{ gap: 2, paddingVertical: S[2], borderTopWidth: 1, borderTopColor: goldLine[14] }}>
-            <Text style={{ color: C.text, fontSize: t.sm, fontWeight: '800' }}>
+          <View key={r.at} style={{ gap: 2, paddingVertical: S[2], borderTopWidth: 1, borderTopColor: white(0.12) }}>
+            <Text style={{ color: LR.text, fontSize: t.sm, fontWeight: '800' }}>
               {r.value != null ? `Rolled ${r.value}` : 'Rolled'}
             </Text>
-            <Text selectable style={{ color: C.muted, fontSize: 11 }}>your seed  {r.clientSeed}</Text>
-            <Text selectable style={{ color: C.muted, fontSize: 11 }}>
+            <Text selectable style={{ color: LR.muted, fontSize: 11 }}>your seed  {r.clientSeed}</Text>
+            <Text selectable style={{ color: LR.muted, fontSize: 11 }}>
               table commit  {r.commit ?? 'not published'}
             </Text>
-            <Text selectable style={{ color: C.muted, fontSize: 11 }}>
+            <Text selectable style={{ color: LR.muted, fontSize: 11 }}>
               table seed  {r.serverSeed ?? 'not published'}
             </Text>
           </View>
@@ -579,6 +703,16 @@ export default function Ludo({ roomId = 'ludo-main', auto, autoBot }: { roomId?:
         </View>
       </Sheet>
 
+      {/* The full voice panel the action bar's control opens. Joining, leaving
+          and muting here are the same calls the bar made — leaving voice never
+          leaves the table. */}
+      <VoiceSheet
+        visible={showVoice}
+        voice={voice}
+        nameOf={id => players.find(p => pid(p) === id)?.name ?? id}
+        onClose={() => setShowVoice(false)}
+      />
+
       <Sheet visible={showSettings} title="Table" onClose={() => setShowSettings(false)}>
         <SettingRow
           label="Sound"
@@ -586,9 +720,83 @@ export default function Ludo({ roomId = 'ludo-main', auto, autoBot }: { roomId?:
           onPress={() => { const n = !sound; setSound(n); void setSoundEnabled(n); }}
         />
       </Sheet>
-    </TableBackground>
+    </LudoRoom>
   );
 }
+
+/* ── the room ───────────────────────────────────────────────────────── */
+
+/**
+ * The room this board plays in.
+ *
+ * Local rather than the shared TableBackground for the same reason ChessRoom
+ * is: that surface is a maroon card table and other games sit on it. Ludo was
+ * redesigned to a midnight room (2026-09-06) and changing the shared ground
+ * would have taken Rummy and Tic-Tac-Toe with it.
+ *
+ * One SVG for all four glows, so the whole room costs a single view rather than
+ * a stack of gradient wrappers. No dot grain: the shared table needs one because
+ * a large expanse of flat maroon bands on cheap panels, and there is never an
+ * area of flat colour that large on this screen.
+ */
+function LudoRoom({ children, style }: { children?: React.ReactNode; style?: StyleProp<ViewStyle> }) {
+  return (
+    <View style={[{ flex: 1, backgroundColor: LR.bg }, style]}>
+      <Svg style={StyleSheet.absoluteFill} pointerEvents="none">
+        <Defs>
+          {LR_AMBIENT.map((g, i) => (
+            <RadialGradient key={i} id={'lr' + i} cx={g.cx} cy={g.cy} rx={g.rx} ry={g.ry}>
+              {/* Four stops, not two. A two-stop falloff left a visible hard
+                  ring where the mid stop sat, and a gradient that ends abruptly
+                  reads as a drawn circle rather than as light. */}
+              <Stop offset="0"    stopColor={g.color} stopOpacity={g.opacity} />
+              <Stop offset="0.35" stopColor={g.color} stopOpacity={g.opacity * 0.55} />
+              <Stop offset="0.68" stopColor={g.color} stopOpacity={g.opacity * 0.18} />
+              <Stop offset="1"    stopColor={g.color} stopOpacity={0} />
+            </RadialGradient>
+          ))}
+        </Defs>
+        {LR_AMBIENT.map((_, i) => (
+          <Rect key={i} x="0" y="0" width="100%" height="100%" fill={'url(#lr' + i + ')'} />
+        ))}
+      </Svg>
+      {children}
+    </View>
+  );
+}
+
+/**
+ * The light the board sits on.
+ *
+ * Not decoration, and the single highest-leverage thing in this restyle: every
+ * surface ON the board is translucent white, so without a lit ground beneath
+ * them the whole board composites toward the room's near-black and no amount of
+ * tinting the cells recovers it. The first pass of this design was a grey smudge
+ * for exactly this reason.
+ *
+ * Sized against the BOARD, not the screen. At screen scale it lit the chrome
+ * instead and the room stopped being midnight.
+ *
+ * Memoised on `size` alone, like BoardSvg — it must not re-render per move.
+ */
+const StageLight = React.memo(function StageLight({ size }: { size: number }) {
+  const d = size * LR_STAGE.scale;
+  return (
+    <Svg
+      width={d} height={d} pointerEvents="none"
+      style={{ position: 'absolute', left: (size - d) / 2, top: (size - d) / 2 }}
+    >
+      <Defs>
+        <RadialGradient id="lstage" cx="50%" cy="50%" rx="50%" ry="50%">
+          {LR_STAGE.stops.map(s => (
+            <Stop key={s.offset} offset={s.offset} stopColor={s.color} stopOpacity={s.opacity} />
+          ))}
+        </RadialGradient>
+      </Defs>
+      <Ellipse cx={d / 2} cy={d / 2} rx={d / 2} ry={d / 2} fill="url(#lstage)" />
+    </Svg>
+  );
+});
 
 /* ── the board ──────────────────────────────────────────────────────── */
 
@@ -621,23 +829,31 @@ const BoardSvg = React.memo(function BoardSvg({ size }: { size: number }) {
             painted rectangle. The sheen is unchanged: a white highlight was
             already the right idea, it simply had cream underneath it. */}
         <RadialGradient id="lfelt" cx="50%" cy="50%" rx="65%" ry="65%">
-          <Stop offset="0.42" stopColor="#ffffff" stopOpacity="0.10" />
-          <Stop offset="1" stopColor="#ffffff" stopOpacity="0.035" />
+          <Stop offset="0.42" stopColor="#ffffff" stopOpacity={LG.pane} />
+          <Stop offset="1" stopColor="#ffffff" stopOpacity={LG.pane * 0.42} />
         </RadialGradient>
         <RadialGradient id="lsheen" cx="26%" cy="18%" rx="60%" ry="60%">
-          <Stop offset="0" stopColor="#ffffff" stopOpacity="0.22" />
+          <Stop offset="0" stopColor="#ffffff" stopOpacity={LG.sheen} />
           <Stop offset="0.55" stopColor="#ffffff" stopOpacity="0" />
         </RadialGradient>
-        <RadialGradient id="lyard" cx="50%" cy="28%" rx="60%" ry="60%">
-          <Stop offset="0" stopColor="#ffffff" stopOpacity="0.16" />
-          <Stop offset="0.72" stopColor="#ffffff" stopOpacity="0.08" />
-          <Stop offset="1" stopColor="#ffffff" stopOpacity="0.04" />
-        </RadialGradient>
         <RadialGradient id="lsafe" cx="32%" cy="26%" rx="60%" ry="60%">
-          <Stop offset="0" stopColor="#ffffff" stopOpacity="0.26" />
-          <Stop offset="0.62" stopColor="#ffffff" stopOpacity="0.16" />
-          <Stop offset="1" stopColor="#ffffff" stopOpacity="0.10" />
+          <Stop offset="0" stopColor="#ffffff" stopOpacity={LG.safe} />
+          <Stop offset="0.62" stopColor="#ffffff" stopOpacity={LG.safe * 0.62} />
+          <Stop offset="1" stopColor="#ffffff" stopOpacity={LG.safe * 0.4} />
         </RadialGradient>
+        {/* THE YARDS ARE NOW SEAT-COLOURED, and this is the change that makes
+            the board read as four players' territory rather than one grey
+            sheet. They were `lyard` — a single white gradient shared by all
+            four corners, so the only thing telling red's home from blue's was a
+            2px rim. Near-opaque on purpose: a low-alpha tint over a near-black
+            room composites to mud however carefully it is mixed. */}
+        {SEAT.map((s, i) => (
+          <SvgLinear key={i} id={`lyard${i}`} x1="0" y1="0" x2="0" y2="1">
+            <Stop offset="0" stopColor={s.light} stopOpacity={YARD.fillTop} />
+            <Stop offset="0.55" stopColor={s.base} stopOpacity={YARD.fillMid} />
+            <Stop offset="1" stopColor={s.deep} stopOpacity={YARD.fillBottom} />
+          </SvgLinear>
+        ))}
         {P.map((_, i) => (
           <SvgLinear
             key={i} id={`lhome${i}`}
@@ -657,17 +873,17 @@ const BoardSvg = React.memo(function BoardSvg({ size }: { size: number }) {
 
       {RING.map(([r, c], i) => (
         <Rect
-          key={`r${i}`} x={c} y={r} width="1" height="1"
-          fill={SAFE.has(i) ? 'url(#lsafe)' : 'rgba(255,255,255,0.07)'}
+          key={`r${i}`} x={c} y={r} width="1" height="1" rx="0.1"
+          fill={SAFE.has(i) ? 'url(#lsafe)' : w(LG.cell)}
           // Every stroke on this board was dark ink for a cream ground. On
           // glass a black hairline is invisible against a near-black room —
           // the cells would have merged into one sheet with no grid at all.
-          stroke="rgba(255,255,255,0.14)" strokeWidth="0.03"
+          stroke={w(LG.cellEdge)} strokeWidth="0.03"
         />
       ))}
 
       {homeCells.map(({ rc: [r, c], seat }, i) => (
-        <Rect key={`h${i}`} x={c} y={r} width="1" height="1" fill={`url(#lhome${seat})`} stroke="rgba(255,255,255,0.18)" strokeWidth="0.03" />
+        <Rect key={`h${i}`} x={c} y={r} width="1" height="1" rx="0.1" fill={`url(#lhome${seat})`} stroke={w(0.22)} strokeWidth="0.03" />
       ))}
 
       {/* start squares — solid colour plus an arrow pointing into the track */}
@@ -675,7 +891,7 @@ const BoardSvg = React.memo(function BoardSvg({ size }: { size: number }) {
         const [r, c] = RING[off];
         return (
           <SvgG key={`s${seat}`}>
-            <Rect x={c} y={r} width="1" height="1" fill={P[seat]} stroke="rgba(255,255,255,0.22)" strokeWidth="0.03" />
+            <Rect x={c} y={r} width="1" height="1" rx="0.1" fill={seatA(seat, 'base', 0.92)} stroke={w(0.32)} strokeWidth="0.04" />
             <SvgText
               x={c + 0.5} y={r + 0.72} fontSize="0.62" fill="rgba(255,255,255,0.92)" textAnchor="middle"
               transform={`rotate(${seat * 90} ${c + 0.5} ${r + 0.5})`}
@@ -688,26 +904,34 @@ const BoardSvg = React.memo(function BoardSvg({ size }: { size: number }) {
         const [r, c] = RING[i];
         // Was #c2951f — a dark ochre chosen to sit on cream. On glass it
         // disappeared; the safe squares need a star that reads as lit.
-        return <SvgText key={`st${i}`} x={c + 0.5} y={r + 0.78} fontSize="0.72" fill={C.gold2} textAnchor="middle">★</SvgText>;
+        return <SvgText key={`st${i}`} x={c + 0.5} y={r + 0.78} fontSize="0.72" fill={SEAT[2].light} textAnchor="middle">★</SvgText>;
       })}
 
       {/* centre — four triangles meeting in the middle, one per seat */}
-      <Polygon points="6,6 9,6 7.5,7.5" fill={P[1]} />
-      <Polygon points="9,6 9,9 7.5,7.5" fill={P[2]} />
-      <Polygon points="9,9 6,9 7.5,7.5" fill={P[3]} />
-      <Polygon points="6,9 6,6 7.5,7.5" fill={P[0]} />
-      <Rect x="6" y="6" width="3" height="3" fill="none" stroke="rgba(255,255,255,0.55)" strokeWidth="0.08" />
-      <SvgText x="7.5" y="7.85" fontSize="0.9" fill="#ffdd72" textAnchor="middle">★</SvgText>
+      <Polygon points="6,6 9,6 7.5,7.5" fill={seatA(1, 'base', 0.88)} />
+      <Polygon points="9,6 9,9 7.5,7.5" fill={seatA(2, 'base', 0.88)} />
+      <Polygon points="9,9 6,9 7.5,7.5" fill={seatA(3, 'base', 0.88)} />
+      <Polygon points="6,9 6,6 7.5,7.5" fill={seatA(0, 'base', 0.88)} />
+      <Rect x="6" y="6" width="3" height="3" rx="0.14" fill="none" stroke={w(0.55)} strokeWidth="0.08" />
+      <SvgText x="7.5" y="7.85" fontSize="0.9" fill="#FFF6DA" textAnchor="middle">★</SvgText>
 
       {/* the four yards */}
       {YARD_RC.map(([r, c], seat) => (
         <SvgG key={`y${seat}`}>
-          <Rect x={c + 0.2} y={r + 0.2} width="5.6" height="5.6" rx="0.8" fill="url(#lyard)" stroke={P[seat]} strokeWidth="0.3" />
+          <Rect
+            x={c + 0.2} y={r + 0.2} width="5.6" height="5.6" rx="0.8"
+            fill={`url(#lyard${seat})`}
+            // The rim is the seat's LIGHT tone, not its base: on a quadrant now
+            // filled with that same base, a base-coloured edge disappeared into
+            // it and the yard lost its shape.
+            stroke={seatA(seat, 'light', YARD.rim)} strokeWidth="0.07"
+          />
           {BASE_SPOTS[seat].map(([br, bc], i) => (
             // A base spot is a WELL a token sits in — it has to be darker than
-          // the yard around it, which on a cream board meant a darker cream and
-          // on glass means going the other way, to a hole in the pane.
-          <Circle key={i} cx={bc + 0.5} cy={br + 0.5} r="0.62" fill="rgba(0,0,0,0.28)" stroke={P[seat]} strokeWidth="0.09" />
+            // the yard around it, which on a cream board meant a darker cream
+            // and on glass means going the other way, to a hole in the pane.
+            // Darker again now that the yard above it is lit rather than white.
+            <Circle key={i} cx={bc + 0.5} cy={br + 0.5} r="0.62" fill={WELL} stroke={seatA(seat, 'light', 0.55)} strokeWidth="0.05" />
           ))}
         </SvgG>
       ))}
@@ -784,17 +1008,59 @@ function TokenView({
         accessibilityRole="button"
         accessibilityLabel={`${COLOR_NAMES[seat]} token ${index + 1}${movable ? ', can move' : ''}`}
         style={{
-          width: '100%', height: '100%', borderRadius: d / 2,
-          backgroundColor: P[seat],
-          borderWidth: movable ? 2 : 1,
-          borderColor: movable ? '#ffffff' : 'rgba(0,0,0,0.45)',
+          width: '100%', height: '100%',
           alignItems: 'center', justifyContent: 'center',
-          boxShadow: '0 5px 10px rgba(0,0,0,0.5), 0 1px 2px rgba(0,0,0,0.42), inset 0 -3px 6px rgba(0,0,0,0.4), inset 0 2px 3px rgba(255,255,255,0.55)',
+          // The glow is a shadow on the WRAPPER, not on the vector — a coloured
+          // drop shadow around an SVG path is far more expensive than one
+          // around a plain view, and at this size the halo is a soft disc
+          // either way.
+          boxShadow:
+            `0 3px 6px rgba(0,0,0,0.5), `
+            + `0 0 ${movable ? 10 : 5}px ${seatA(seat, 'base', movable ? PAWN.glowMovable : PAWN.glowRest)}`,
         }}
       >
-        <Text style={{ fontSize: d * 0.5, lineHeight: d * 0.62, color: 'rgba(0,0,0,0.66)', fontWeight: '700' }}>
-          {SHAPE[seat]}
-        </Text>
+        {/* A TOKEN, not a disc. Head, waist, flared skirt, plinth — the
+            silhouette is what makes a piece readable at 18.5dp, which is the
+            only size it is ever drawn at. Geometry lives in ludoGlass so it can
+            be checked without a renderer. */}
+        <Svg width={d} height={d} viewBox="0 0 100 100">
+          <Defs>
+            <SvgLinear id={`pw${seat}`} x1="0.15" y1="0" x2="0.85" y2="1">
+              <Stop offset="0" stopColor={PL[seat]} />
+              <Stop offset="0.45" stopColor={P[seat]} />
+              <Stop offset="1" stopColor={PD[seat]} />
+            </SvgLinear>
+            <SvgLinear id={`pb${seat}`} x1="0" y1="0" x2="0" y2="1">
+              <Stop offset="0" stopColor={P[seat]} />
+              <Stop offset="1" stopColor={PD[seat]} />
+            </SvgLinear>
+            {/* Reads PAWN.specular rather than restating it. Hardcoding the
+                stop here is how the token module and the pixels drift apart —
+                ludoGlass.selftest §11 fails if any PAWN token goes unused. */}
+            <RadialGradient id={`ps${seat}`} cx="50%" cy="50%" rx="50%" ry="50%">
+              <Stop offset="0" stopColor="#ffffff" stopOpacity={PAWN.specular} />
+              <Stop offset="1" stopColor="#ffffff" stopOpacity="0" />
+            </RadialGradient>
+          </Defs>
+          {/* plinth first — it sits under the body */}
+          <Path d={PAWN_BASE} fill={`url(#pb${seat})`} stroke={seatA(seat, 'light', 0.6)} strokeWidth="2.8" />
+          <Path
+            d={PAWN_BODY}
+            fill={`url(#pw${seat})`}
+            // White only when the roll permits it, so "can move" is a change of
+            // material rather than merely a thicker edge.
+            stroke={movable ? white(PAWN.rimMovable) : seatA(seat, 'light', PAWN.rimRest)}
+            strokeWidth={movable ? 5 : 3.4}
+          />
+          {/* one specular on the head. Two would read as plastic. */}
+          <Ellipse cx="44" cy="22.5" rx="6.5" ry="4.5" fill={`url(#ps${seat})`} transform="rotate(28 44 22.5)" />
+          {/* the colourblind marker rides the SKIRT, the widest part — in the
+              head it would be ~3dp on a real phone and simply gone. */}
+          <SvgText
+            x="50" y="70" fontSize="26" fontWeight="bold"
+            fill={PAWN.markerInk} textAnchor="middle"
+          >{SHAPE[seat]}</SvgText>
+        </Svg>
       </Pressable>
     </Animated.View>
   );
@@ -862,20 +1128,46 @@ function Die({ value, tumbling, armed, seat }: { value: number | null; tumbling:
     <Animated.View
       accessibilityLabel={tumbling ? 'Rolling the dice' : value == null ? 'Dice, not rolled' : `Dice showing ${value}`}
       style={[{
-        width: 62, height: 62, borderRadius: 12, padding: 7,
-        backgroundColor: '#fdf8ec',
-        borderWidth: 1, borderColor: 'rgba(0,0,0,0.25)',
-        boxShadow: '0 8px 18px rgba(0,0,0,0.45), inset 0 2px 3px rgba(255,255,255,0.9), inset 0 -3px 6px rgba(120,90,40,0.28)',
+        width: 62, height: 62, borderRadius: 14, padding: 7,
+        // Frosted glass rather than cream ivory. The cream was mixed for the
+        // maroon table; against the midnight room it read as a yellow tile.
+        backgroundColor: 'rgba(244,245,255,0.94)',
+        borderWidth: 1.2, borderColor: white(0.9),
+        // CLIPPED, so the sheen below stays inside the cube. Shadows are drawn
+        // outside a clipped view either way, so the halo survives.
+        overflow: 'hidden',
+        boxShadow:
+          '0 7px 14px rgba(0,0,0,0.5), '
+          // The gold halo is what makes it float over the tray rather than sit
+          // on it. It is spent here and on the CTA, nowhere else on the board.
+          + `0 0 16px ${seatA(2, 'base', armed || tumbling ? 0.4 : 0.16)}, `
+          + 'inset 0 2px 2px rgba(255,255,255,0.95), inset 0 -3px 6px rgba(90,80,140,0.22)',
         opacity: value == null && !tumbling && !armed ? 0.55 : 1,
       }, a]}
     >
+      {/* The corner sheen — one band of light across the top-left. It is what
+          reads as a glass CUBE rather than a rounded square, and it is static,
+          so it costs one SVG that never re-renders while the die spins. */}
+      <Svg width={62} height={62} pointerEvents="none" style={StyleSheet.absoluteFill}>
+        <Defs>
+          <RadialGradient id="dsheen" cx="50%" cy="50%" rx="50%" ry="50%">
+            <Stop offset="0" stopColor="#ffffff" stopOpacity="0.55" />
+            <Stop offset="1" stopColor="#ffffff" stopOpacity="0" />
+          </RadialGradient>
+        </Defs>
+        <Ellipse cx="20" cy="12" rx="26" ry="14" fill="url(#dsheen)" transform="rotate(18 20 12)" />
+      </Svg>
       <View style={{ flex: 1, flexDirection: 'row', flexWrap: 'wrap' }}>
         {Array.from({ length: 9 }, (_, i) => (
           <View key={i} style={{ width: '33.33%', height: '33.33%', alignItems: 'center', justifyContent: 'center' }}>
             {on.has(i) && (
               <View style={{
                 width: 9, height: 9, borderRadius: 5,
-                backgroundColor: tumbling ? '#8d7f66' : value == null ? '#b0a48c' : P[seat],
+                backgroundColor: tumbling ? '#8B86A8' : value == null ? '#A9A4C4' : P[seat],
+                // A pip only glows once it is a real published result — while
+                // the cube is tumbling the face means nothing and must not be
+                // dressed up as an answer.
+                boxShadow: !tumbling && value != null ? `0 0 4px ${seatA(seat, 'base', 0.55)}` : undefined,
               }} />
             )}
           </View>
@@ -885,41 +1177,165 @@ function Die({ value, tumbling, armed, seat }: { value: number | null; tumbling:
   );
 }
 
+/**
+ * The tray the die is thrown into.
+ *
+ * A recessed well plus one warm pool of light under the cube. Purely a surface:
+ * it holds the die and the server's clock and decides nothing.
+ */
+function DiceTray({ children }: { children?: React.ReactNode }) {
+  return (
+    <View style={{
+      width: 112, minHeight: 88, borderRadius: R[4],
+      alignItems: 'center', justifyContent: 'center', gap: S[1], paddingVertical: S[2],
+      backgroundColor: TRAY,
+      borderWidth: 1, borderColor: white(0.13),
+      boxShadow: 'inset 0 3px 8px rgba(0,0,0,0.5)',
+    }}>
+      {/* The pool of warm light the cube sits in. Static and behind the die, so
+          it costs one SVG that never re-renders — the die animating above it
+          does not touch this. */}
+      <Svg width={96} height={44} pointerEvents="none" style={{ position: 'absolute', top: 30 }}>
+        <Defs>
+          <RadialGradient id="ltray" cx="50%" cy="50%" rx="50%" ry="50%">
+            <Stop offset="0"   stopColor={SEAT[2].base} stopOpacity="0.45" />
+            <Stop offset="0.5" stopColor="#FF8A3D"      stopOpacity="0.18" />
+            <Stop offset="1"   stopColor={SEAT[2].base} stopOpacity="0" />
+          </RadialGradient>
+        </Defs>
+        <Ellipse cx={48} cy={22} rx={48} ry={22} fill="url(#ltray)" />
+      </Svg>
+      {children}
+    </View>
+  );
+}
+
 /* ── chrome ─────────────────────────────────────────────────────────── */
 
-function SeatCard({ player, you, active }: { player: LPlayer; you: boolean; active: boolean }) {
+/**
+ * A seat: who, what they are doing, and how close they are to finishing.
+ *
+ * Laid out two to a row rather than four stacked, because four full-width rows
+ * cost about 100dp of the board's height to carry information that is two words
+ * wide — and the board is the thing this screen is for.
+ *
+ * THE AVATAR IS A MONOGRAM, NOT A PHOTO, and that is a protocol fact rather
+ * than a style choice: `GameLobby.members` is `{vaultId, name, isBot, wins}`
+ * and `G.players` carries no image anywhere, so a photo would need a server
+ * change. A lit ring in the seat's own colour identifies the player just as
+ * well and costs nothing.
+ *
+ * Every field is live. `status` is derived from the same `turnPlayerId` the
+ * board reads; `done` counts tokens at HOME_STEP. Nothing here is placeholder.
+ */
+function SeatCard({ player, you, active, status }: { player: LPlayer; you: boolean; active: boolean; status: string }) {
   const t = useType();
   const tokens = player.tokens ?? [];
   const done = tokens.filter(s => s >= HOME_STEP).length;
+  const total = tokens.length || 4;
   const pct = tokens.length
     ? Math.round((tokens.reduce((n, s) => n + Math.max(0, Math.min(s, HOME_STEP)), 0) / (tokens.length * HOME_STEP)) * 100)
     : 0;
+  const seat = SEAT[player.seat] ?? SEAT[0];
 
   return (
-    <View style={{
-      flexDirection: 'row', alignItems: 'center', gap: S[2],
-      paddingVertical: S[2], paddingHorizontal: S[3],
-      borderRadius: R[2], borderWidth: 1,
-      // Same seat treatment as ui.tsx PlayerRow, TicTacToe and Chess — this
-      // block was a byte-for-byte copy of PlayerRow's and would otherwise be
-      // the one seat row on the four boards still painted panel-grey.
-      borderColor: active ? P[player.seat] : white(0.12),
-      backgroundColor: white(active ? 0.12 : 0.06),
-      boxShadow: active
-        ? `0 8px 22px rgba(0,0,0,0.38), inset 0 1px 0 ${white(0.20)}`
-        : `${D3.lift1}, inset 0 1px 0 ${white(0.12)}`,
-    }}>
-      <Text style={{ fontSize: 14, color: P[player.seat] }}>{SHAPE[player.seat]}</Text>
-      <Text numberOfLines={1} style={{ flex: 1, color: C.text, fontSize: t.sm, fontWeight: '700' }}>
-        {player.name}{you ? ' (you)' : ''}
-      </Text>
-      {/* The bot marker was a 🤖 appended to the NAME string, so it could not
-          take a colour and it counted against numberOfLines. An icon beside the
-          name is the same information in the family the rest of the board uses. */}
-      {player.isBot ? <Ionicons name="hardware-chip-outline" size={13} color={C.muted} /> : null}
-      <Text style={{ color: C.muted, fontSize: 11 }}>{done}/{tokens.length || 4} home</Text>
-      <View style={{ width: 54, height: 5, borderRadius: 3, backgroundColor: 'rgba(0,0,0,0.28)', overflow: 'hidden' }}>
-        <View style={{ width: `${pct}%`, height: '100%', backgroundColor: P[player.seat] }} />
+    <View
+      accessibilityLabel={`${player.name}${you ? ', you' : ''}${player.isBot ? ', bot' : ''}, ${COLOR_NAMES[player.seat] ?? ''}, ${status}, ${done} of ${total} home`}
+      style={{
+        flex: 1, flexDirection: 'row', alignItems: 'center', gap: S[2],
+        paddingVertical: S[2], paddingHorizontal: S[2],
+        borderRadius: R[3], borderWidth: 1,
+        borderColor: active ? seatA(player.seat, 'base', 0.85) : white(0.14),
+        backgroundColor: white(active ? LG.cardActive : LG.card),
+        boxShadow: active
+          ? `0 0 16px ${seatA(player.seat, 'base', 0.45)}, inset 0 1px 0 ${white(0.22)}`
+          : `${D3.lift1}, inset 0 1px 0 ${white(0.14)}`,
+      }}
+    >
+      {/* avatar: monogram over a seat-tinted disc, ringed and lit when active */}
+      <View style={{
+        width: 32, height: 32, borderRadius: 16,
+        alignItems: 'center', justifyContent: 'center',
+        backgroundColor: seatA(player.seat, 'deep', 0.55),
+        borderWidth: 1.5, borderColor: seatA(player.seat, 'light', active ? 0.95 : 0.6),
+        boxShadow: active ? `0 0 10px ${seatA(player.seat, 'base', 0.7)}` : undefined,
+      }}>
+        {player.isBot
+          ? <Ionicons name="hardware-chip-outline" size={16} color={LR.text} />
+          : <Text style={{ color: LR.text, fontSize: 14, fontWeight: '800' }}>
+              {(player.name || '?').trim().charAt(0).toUpperCase()}
+            </Text>}
+        {/* The shape marker rides the avatar. The colourblind fallback has to be
+            on the CARD as well as on the pawn, or a red/green pair is
+            distinguishable on the board and not in the roster. */}
+        <Text style={{
+          position: 'absolute', right: -3, bottom: -4, fontSize: 9,
+          color: seat.light, textShadowColor: LR.bg, textShadowRadius: 2,
+        }}>{SHAPE[player.seat]}</Text>
+      </View>
+
+      <View style={{ flex: 1, gap: 1 }}>
+        <Text numberOfLines={1} style={{ color: LR.text, fontSize: t.sm, fontWeight: '700' }}>
+          {player.name}{you ? ' (you)' : ''}
+        </Text>
+        <Text numberOfLines={1} style={{ color: active ? LR.ok : LR.muted, fontSize: 10.5, fontWeight: active ? '700' : '400' }}>
+          {status}
+        </Text>
+      </View>
+
+      {/* Home counter. The house keeps the number from being a bare figure, and
+          the bar underneath is the same `pct` the old row showed. */}
+      <View style={{ alignItems: 'flex-end', gap: 3 }}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 3 }}>
+          <Ionicons name="home" size={11} color={LR.muted} />
+          <Text style={{ color: done > 0 ? seat.light : LR.text, fontSize: 12, fontWeight: '800' }}>
+            {done}/{total}
+          </Text>
+        </View>
+        <View style={{ width: 38, height: 4, borderRadius: 2, backgroundColor: 'rgba(0,0,0,0.34)', overflow: 'hidden' }}>
+          <View style={{ width: `${pct}%`, height: '100%', backgroundColor: seat.base }} />
+        </View>
+      </View>
+    </View>
+  );
+}
+
+/**
+ * The turn indicator.
+ *
+ * This is the status line that already lived under the die, given a surface. It
+ * says exactly what `mine` / `canMove` / `die` already decide and never implies
+ * a tap that is not allowed — `tone` only chooses the colour of a state the
+ * caller has already worked out.
+ */
+function TurnIndicator({ title, sub, tone }: { title: string; sub?: string; tone: 'you' | 'wait' | 'act' }) {
+  const t = useType();
+  const edge = tone === 'you' ? LR.ok : tone === 'act' ? SEAT[2].base : white(0.14);
+  return (
+    <View
+      accessibilityLiveRegion="polite"
+      accessibilityLabel={sub ? `${title}. ${sub}` : title}
+      style={{
+        alignSelf: 'stretch', flexDirection: 'row', alignItems: 'center', gap: S[3],
+        paddingVertical: S[2], paddingHorizontal: S[3],
+        borderRadius: R[3], borderWidth: 1,
+        borderColor: tone === 'wait' ? white(0.14) : edge,
+        backgroundColor: white(0.08),
+        boxShadow: tone === 'wait'
+          ? `inset 0 1px 0 ${white(0.16)}`
+          : `0 0 18px ${tone === 'you' ? 'rgba(62,232,155,0.22)' : seatA(2, 'base', 0.22)}, inset 0 1px 0 ${white(0.20)}`,
+      }}
+    >
+      <View style={{
+        width: 34, height: 34, borderRadius: R[2],
+        alignItems: 'center', justifyContent: 'center',
+        backgroundColor: white(0.12), borderWidth: 1, borderColor: white(0.2),
+      }}>
+        <Ionicons name="dice-outline" size={19} color={tone === 'wait' ? LR.muted : LR.text} />
+      </View>
+      <View style={{ flex: 1 }}>
+        <Text numberOfLines={1} style={{ color: LR.text, fontSize: t.md, fontWeight: '800' }}>{title}</Text>
+        {sub ? <Text numberOfLines={1} style={{ color: LR.muted, fontSize: 11.5 }}>{sub}</Text> : null}
       </View>
     </View>
   );

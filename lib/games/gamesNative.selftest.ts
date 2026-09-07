@@ -239,9 +239,27 @@ check('...and remembers the one the player picks',
   /AsyncStorage\.setItem\(BOARD_KEY/.test(CHESS),
   'the web persists it; re-picking every launch is how a setting reads as broken');
 
-check('a piece is outlined, not haloed',
-  /OUTLINE\.map/.test(CHESS) && /const PIECE_STROKE = 1\.2/.test(CHESS),
-  'a blurred shadow stood in for the stroke the web gets from -webkit-text-stroke');
+// THE PIECES ARE VECTORS NOW (2026-09-07). They were Unicode glyphs, and that
+// was a device risk rather than a style: a glyph is drawn by whatever font the
+// platform resolves it to, every Android skin ships its own symbol fonts, and
+// on one that renders the outline set solid the white king comes out black —
+// a board where you cannot tell your own pieces apart. A path is one shape
+// everywhere, and it takes a real stroke instead of four offset copies.
+check('a piece is a VECTOR, outlined not haloed',
+  /const PIECE_PATH: Record<string, string>/.test(CHESS)
+    && /const PIECE_STROKE = 2\.2/.test(CHESS)
+    && !/OUTLINE\.map/.test(stripComments(CHESS)),
+  'four offset copies of a text glyph were faking the stroke a path simply has');
+check('...and every piece letter has a path',
+  (() => {
+    const from = CHESS.slice(CHESS.indexOf('const PIECE_PATH'));
+    const body = from.slice(0, from.indexOf('};'));
+    // No backslash escapes here on purpose: this file is generated as a plain
+    // string, and `\s` collapses to a literal `s` on the way in — which reads
+    // as a failing board rather than a failing regex.
+    return ['p', 'r', 'b', 'n', 'q', 'k'].every(k => new RegExp('^[ ]+' + k + ':', 'm').test(body));
+  })(),
+  'a letter with no path draws nothing, and an empty chess square reads as captured');
 
 check("...in chess.css's own ink",
   /fill: '#f4f0e6', line: '#2b2620'/.test(CHESS) && /fill: '#1d1a16', line: '#000000'/.test(CHESS),
@@ -251,9 +269,19 @@ check('the check marker is not dimmed by its own pulse',
   /const CHECK_RED = '#e15a5a'/.test(CHESS),
   'a .55 colour at .55 opacity lands at .30 — half the alarm the reference raises');
 
-check('coordinates ring two edges, not four',
-  /coordFile=\{coords && \(d >> 3\) === 7/.test(CHESS) && !/coordRankRight/.test(CHESS),
-  'chess.css places one file row and one rank column; four edges is sixteen extra labels');
+// MOVED OFF THE SQUARES (2026-09-06). chess.css draws the labels inside the
+// first column and last row, which means eight squares carry a mark a piece
+// then stands on top of — and on a phone the label and the piece are fighting
+// over the same 40dp. They sit on the felt rail now, the way a real board does.
+// What did NOT change is how MANY: one rank column, one file row.
+check('coordinates sit on the rail, not on the squares',
+  /position: 'absolute', left: 0, width: rail/.test(CHESS)
+    && /left: rail \+ i \* cell, width: cell/.test(CHESS)
+    && !/coordFile=/.test(CHESS),
+  'a label inside a square is a label a piece then stands on');
+check('...and it is still one rank column and one file row',
+  /key=\{`rk\$\{i\}`\}/.test(CHESS) && /key=\{`fl\$\{i\}`\}/.test(CHESS),
+  'four edges is sixteen extra labels crowding the board');
 
 // ── talking at the table ──────────────────────────────────────────────
 // The voice mesh was already wired into chess, but only as a bar BELOW the
@@ -268,6 +296,33 @@ check('...and chess can reach it without scrolling',
   'a voice control below the fold is one the player never finds');
 
 // ── standings ─────────────────────────────────────────────────────────
+// The sheet was hub-local until chess grew a Stats control of its own
+// (2026-09-06). Copying it into the board would have been the same defect the
+// VoiceSheet check above exists to stop: two surfaces reading one server, and
+// two places to fix when it changes what it ranks by.
+const LBS = readFileSync('components/games/LeaderboardSheet.tsx', 'utf8');
+check('the standings sheet is shared, not one per screen',
+  /export default function LeaderboardSheet\(/.test(LBS)
+    && !/function LeaderboardSheet\(/.test(HUB)
+    && !/function LeaderboardSheet\(/.test(CHESS),
+  'a second copy drifts the moment the server changes its ordering');
+check('...and chess opens it on the chess table',
+  /<LeaderboardSheet[\s\S]{0,200}initialScope="chess"/.test(CHESS),
+  'a player standing at the chess board is asking about chess, not about Overall');
+check('...on every open, not only the first',
+  /if \(visible\) setScope\(initialScope\)/.test(LBS),
+  'a sheet that never unmounts keeps whichever tab was last looked at');
+
+// Chess's player list is the LOBBY ROSTER, not a list of its own — and it
+// refuses to name a side it cannot derive. The frame carries `color` for this
+// client only, so with three seats the other side is a guess.
+check('the chess roster reads the lobby the server sent',
+  /const members = state\.lobby\?\.members \?\? \[\];/.test(CHESS),
+  'a second roster is a second thing to go stale');
+check('...and never names a side it cannot know',
+  /members\.length === 2 && myColor != null/.test(CHESS),
+  '`color` is sent for this client alone; the other seat is an inference that holds for two');
+
 const LB = readFileSync('lib/games/leaderboard.ts', 'utf8');
 check('the leaderboard does not re-rank the server',
   !/\.sort\(/.test(LB),

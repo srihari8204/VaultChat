@@ -231,5 +231,81 @@ console.log('\nBoard fit\n');
   A(!/<Baize width=\{win\./.test(rummy), '8e. ...and no longer reads window dimensions');
 }
 
+
+// ── 9. the chess board's FRAME comes out of the board, not out of the page ──
+//
+// The 2026-09-06 chess redesign wraps the board in a 3dp bronze rim. boardFit
+// returns the largest square that fits inside a 16dp gutter and the ScrollView
+// pads by exactly that 16, so a frame drawn AROUND `size` is 6dp wider than the
+// column it sits in: a clipped right edge, or a page that scrolls sideways.
+// Both are things §13 of the brief forbids and both are invisible on a
+// simulator wide enough to absorb them.
+//
+// The fix is arithmetic — the eight cells divide `size - 2*RIM` — so it is
+// pinned as arithmetic, and the source is checked for the shape that would undo
+// it (an inner board sized `width: size`).
+{
+  const ROOT = join(__dirname, '..', '..');
+  const src = readFileSync(join(ROOT, 'components/games/Chess.tsx'), 'utf8');
+  const code = src.split('\n').filter(l => !/^\s*(\/\/|\*|\/\*)/.test(l)).join('\n');
+
+  const rim = Number((code.match(/const RIM = (\d+)/) ?? [])[1]);
+  A(Number.isFinite(rim) && rim > 0, '9. chess declares a board rim');
+  A(/const boardEdge = size - RIM \* 2;/.test(code),
+    '9a. ...and what is left after it is the felt board');
+  // The felt carries a RAIL, and the coordinates sit on it. Three bands now
+  // share `size`: frame, rail, grid — and they have to sum back to it exactly.
+  A(/const rail = Math\.max\(RAIL_MIN, Math\.min\(RAIL_MAX, Math\.round\(boardEdge \* RAIL_RATIO\)\)\);/.test(code),
+    '9b. the rail is a ratio of the board, clamped at both ends');
+  A(/const grid = boardEdge - rail \* 2;/.test(code),
+    '9c. ...the grid is what the rail leaves');
+  A(/const cell = grid \/ 8;/.test(code),
+    '9d. ...and a cell is grid/8, never size/8');
+  A(/width: boardEdge, height: boardEdge/.test(code) && /width: grid, height: grid/.test(code),
+    '9e. the felt is boardEdge and the squares container is grid');
+
+  // No `\d` here: this is a plain string, so the escape collapses to a literal
+  // `d` and the match silently returns NaN — which reads as a failing board, not
+  // a failing regex.
+  const num = (k: string) => Number((code.match(new RegExp('const ' + k + ' = ([0-9.]+)')) ?? [])[1]);
+  const RATIO = num('RAIL_RATIO'), RMIN = num('RAIL_MIN'), RMAX = num('RAIL_MAX');
+  A(RATIO > 0 && RMIN > 0 && RMAX > RMIN, '9f. the rail constants parse');
+
+  // Frame + rail + grid must sum back to `size` on every screen, and a square
+  // must stay big enough to hit. Swept, not asserted once — the rail is the
+  // thing that shrinks squares, so it is the thing that needs a floor.
+  for (const w of [320, 360, 390, 412, 430, 480, 600, 768, 1024]) {
+    for (const h of [640, 720, 780, 844, 932, 1180]) {
+      const fit = boardFit({ width: w, height: h }, { top: 0, bottom: 0, left: 0, right: 0 }, 300);
+      const boardEdge = fit.size - rim * 2;
+      const rail = Math.max(RMIN, Math.min(RMAX, Math.round(boardEdge * RATIO)));
+      const grid = boardEdge - rail * 2;
+      const column = w - BOARD_GUTTER * 2;
+      A(rim * 2 + rail * 2 + grid === fit.size,
+        `9g. frame + rail + grid === size at ${w}x${h}`);
+      A(fit.scrolls || fit.size <= column,
+        `9h. the whole assembly fits the column at ${w}x${h}: ${fit.size} <= ${column}`);
+      // 28dp is the floor a chess square may not go under. It is below the 44dp
+      // control guideline on purpose — eight columns have to divide the screen,
+      // and every chess client lands here — but a rail that pushed it lower
+      // would be a visual flourish paid for with playability.
+      A(grid / 8 >= 28,
+        `9i. a square stays tappable at ${w}x${h}: ${(grid / 8).toFixed(1)}dp`);
+    }
+  }
+
+  // The action dock divides the board's own width with flex, so four slots or
+  // five, on any screen, it cannot overflow the way rummy's budgeted bar did.
+  // It LIVES IN ui.tsx now — chess and ludo share one dock rather than two
+  // copies — so the property is asserted where the property is.
+  const dock = readFileSync(join(ROOT, 'components/games/ui.tsx'), 'utf8');
+  A(/style=\{\[aStyle, \{ flex: 1, opacity: a\.disabled/.test(dock),
+    '9j. a dock slot is flex:1, not a computed width');
+  A(!/const slot = /.test(dock),
+    '9k. ...so there is no slot arithmetic left to get wrong');
+  A(/<ActionDock/.test(code), '9l. chess uses the shared dock');
+  A(!/function DockBtn\(/.test(code), '9m. ...and no longer carries its own');
+}
+
 console.log(failed === 0 ? '\nAll good.\n' : `\n${failed} FAILED\n`);
 process.exit(failed === 0 ? 0 : 1);

@@ -98,3 +98,6 @@ logs-20*/
 p2p-device-tests/
 # generated audit reports
 docs/audit/
+
+# Rust spike build output (rust/vaultcore) — never committed
+rust/**/target/

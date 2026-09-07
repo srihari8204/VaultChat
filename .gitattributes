@@ -1,0 +1,5 @@
+
+# Shell/python deployed to Linux must stay LF — a CRLF heredoc terminator
+# makes bash report "unexpected end of file" only once it is on the server.
+scripts/*.sh text eol=lf
+scripts/*.py text eol=lf

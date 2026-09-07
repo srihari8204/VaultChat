@@ -7,7 +7,7 @@
 
 import React from 'react';
 import {
-  ActivityIndicator, Pressable, StyleSheet, Text, View,
+  AccessibilityInfo, ActivityIndicator, Pressable, StyleSheet, Text, View,
   useWindowDimensions, type LayoutChangeEvent, type ViewStyle, type StyleProp,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -21,7 +21,7 @@ import * as Haptics from 'expo-haptics';
 import * as ScreenOrientation from 'expo-screen-orientation';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import {
-  C, S, R, E, D3, T, glass, goldLine, mix, white, MOTION, AMBIENT, GRAIN,
+  C, S, R, E, D3, T, glass, goldLine, mix, alpha, white, MOTION, AMBIENT, GRAIN,
   GOLD_FILL, GOLD_STOPS, RED_FILL, RED_STOPS, typeScale, ACCENT, type GameAccent,
 } from '../../lib/games/theme';
 import { boardFit } from '../../lib/games/boardFit';
@@ -261,23 +261,82 @@ export function useType() {
  * break it up. Both layers are a single SVG so this costs one view, not a
  * stack of gradient wrappers.
  */
-export function TableBackground({ children, style }: { children?: React.ReactNode; style?: StyleProp<ViewStyle> }) {
+export type Glow = { color: string; opacity: number; cx: string; cy: string; rx: string; ry: string };
+
+/** A defocused highlight. Percentages, so it holds its place on any screen. */
+export type Bokeh = { cx: string; cy: string; r: string; color: string; opacity: number };
+
+/**
+ * `bg`, `ambient` and `grain` exist so a board can bring its OWN room without
+ * a second copy of this component.
+ *
+ * Chess plays in an emerald club and Ludo in a midnight one; both were first
+ * written as a private `ChessRoom`/`LudoRoom` doing exactly what this does with
+ * different constants, which is the duplication this file exists to prevent.
+ * The defaults are the shared maroon card table, so every existing caller is
+ * unchanged — Rummy and Tic-Tac-Toe still get what they always got.
+ *
+ * `grain` is off for a board that covers its own middle: the 22px dot pattern
+ * is there to stop a large flat expanse banding on cheap panels, and a board
+ * across the centre of the screen leaves nothing large enough to band.
+ */
+export function TableBackground({
+  children, style, bg = C.bg, ambient = AMBIENT as readonly Glow[], grain = true,
+  bokeh, vignette = 0,
+}: {
+  children?: React.ReactNode;
+  style?: StyleProp<ViewStyle>;
+  bg?: string;
+  ambient?: readonly Glow[];
+  grain?: boolean;
+  /** Defocused highlights over the wash. Off unless a room asks for them. */
+  bokeh?: readonly Bokeh[];
+  /** Edge darkness, 0..1. 0 is off, which is what every existing caller gets. */
+  vignette?: number;
+}) {
   return (
-    <View style={[{ flex: 1, backgroundColor: C.bg }, style]}>
+    <View style={[{ flex: 1, backgroundColor: bg }, style]}>
       <Svg style={StyleSheet.absoluteFill} pointerEvents="none">
         <Defs>
-          {AMBIENT.map((g, i) => (
+          {ambient.map((g, i) => (
             <RadialGradient key={i} id={'amb' + i} cx={g.cx} cy={g.cy} rx={g.rx} ry={g.ry}>
               <Stop offset="0" stopColor={g.color} stopOpacity={g.opacity} />
+              {/* A mid stop, so a wide glow reads as light in the room rather
+                  than as a ring. Linear falloff from full to zero across a 60%
+                  radius is what made the first pass look like a vignette. */}
+              <Stop offset="0.55" stopColor={g.color} stopOpacity={g.opacity * 0.42} />
               <Stop offset="1" stopColor={g.color} stopOpacity={0} />
             </RadialGradient>
           ))}
+          {(bokeh ?? []).map((b, i) => (
+            <RadialGradient key={'bk' + i} id={'bok' + i} cx="50%" cy="50%" rx="50%" ry="50%">
+              <Stop offset="0" stopColor={b.color} stopOpacity={b.opacity} />
+              <Stop offset="0.55" stopColor={b.color} stopOpacity={b.opacity * 0.75} />
+              {/* Brightest at the RIM. A defocused point of light is a ring,
+                  not a dot — draw it as a dot and it reads as lens dirt. */}
+              <Stop offset="0.88" stopColor={b.color} stopOpacity={b.opacity * 1.15} />
+              <Stop offset="1" stopColor={b.color} stopOpacity={0} />
+            </RadialGradient>
+          ))}
+          {vignette > 0 ? (
+            <RadialGradient id="vig" cx="50%" cy="46%" rx="70%" ry="62%">
+              <Stop offset="0" stopColor="#000000" stopOpacity={0} />
+              <Stop offset="0.55" stopColor="#000000" stopOpacity={vignette * 0.24} />
+              <Stop offset="1" stopColor="#000000" stopOpacity={vignette} />
+            </RadialGradient>
+          ) : null}
           <Pattern id="grain" width={GRAIN.size} height={GRAIN.size} patternUnits="userSpaceOnUse">
             <Circle cx={GRAIN.dot} cy={GRAIN.dot} r={GRAIN.dot} fill={GRAIN.color} />
           </Pattern>
         </Defs>
-        {AMBIENT.map((_, i) => <Rect key={i} x="0" y="0" width="100%" height="100%" fill={'url(#amb' + i + ')'} />)}
-        <Rect x="0" y="0" width="100%" height="100%" fill="url(#grain)" opacity={GRAIN.opacity} />
+        {ambient.map((_, i) => <Rect key={i} x="0" y="0" width="100%" height="100%" fill={'url(#amb' + i + ')'} />)}
+        {(bokeh ?? []).map((b, i) => (
+          <Circle key={'bc' + i} cx={b.cx} cy={b.cy} r={b.r} fill={'url(#bok' + i + ')'} />
+        ))}
+        {/* Vignette over the light, grain over everything: the grain is there to
+            break up banding, and a gradient laid on top of it would band again. */}
+        {vignette > 0 ? <Rect x="0" y="0" width="100%" height="100%" fill="url(#vig)" /> : null}
+        {grain ? <Rect x="0" y="0" width="100%" height="100%" fill="url(#grain)" opacity={GRAIN.opacity} /> : null}
       </Svg>
       {children}
     </View>
@@ -567,6 +626,158 @@ export function Chip({ label, tone = 'plain' }: { label: string; tone?: 'plain' 
 const styles = StyleSheet.create({
   sweep: { position: 'absolute', top: 0, bottom: 0, left: 0, width: '60%' },
 });
+
+
+/**
+ * Whether the player has asked the system for less motion.
+ *
+ * Shared because it is a system setting, not a board's opinion: chess uses it
+ * for the check pulse, the status breath and the piece slide; ludo for the dice
+ * tumble, which is the longest self-running animation in the games.
+ */
+export function useReduceMotion(): boolean {
+  const [on, setOn] = React.useState(false);
+  React.useEffect(() => {
+    let alive = true;
+    AccessibilityInfo.isReduceMotionEnabled().then(v => { if (alive) setOn(!!v); }).catch(() => {});
+    const sub = AccessibilityInfo.addEventListener('reduceMotionChanged', v => setOn(!!v));
+    return () => { alive = false; sub.remove(); };
+  }, []);
+  return on;
+}
+
+/** One dock slot. `ion` is an Ionicons name, not a `Btn` icon key. */
+export type DockAction = {
+  key: string;
+  ion: React.ComponentProps<typeof Ionicons>['name'];
+  label: string;
+  onPress: () => void;
+  tone?: 'glass' | 'accent' | 'danger';
+  disabled?: boolean;
+  /** Live text appended to the label — a voice count, a stake. Never a constant. */
+  badge?: string;
+};
+
+/**
+ * The action row under a board.
+ *
+ * Each slot is `flex: 1` rather than a computed width, and that is the whole of
+ * its responsive story: four actions or five, on a 320dp phone or a tablet, the
+ * row divides the width it is given and every slot matches its neighbours. The
+ * rummy action bar budgets its width by hand and still pushed a control off the
+ * edge at 666dp; this cannot, because there is no width in it to get wrong.
+ *
+ * `accent` is the lit tone — gold on the chess table, electric blue on the ludo
+ * one. It is a prop rather than a token so one dock can serve both rooms.
+ */
+export function ActionDock({
+  width, actions, accent,
+}: { width: number; actions: DockAction[]; accent: string }) {
+  return (
+    <View style={{ width, flexDirection: 'row', gap: S[2] }}>
+      {actions.map(a => <DockBtn key={a.key} a={a} accent={accent} />)}
+    </View>
+  );
+}
+
+function DockBtn({ a, accent }: { a: DockAction; accent: string }) {
+  const scale = useSharedValue(1);
+  const aStyle = useAnimatedStyle(() => ({ transform: [{ scale: scale.value }] }));
+  const lit = a.tone === 'accent';
+  const danger = a.tone === 'danger';
+  const fg = lit ? accent : danger ? '#FFB3B8' : C.text;
+
+  const press = () => {
+    if (a.disabled) return;
+    scale.value = withSequence(withTiming(0.96, { duration: 90 }), withTiming(1, { duration: 150 }));
+    Haptics.impactAsync(
+      danger ? Haptics.ImpactFeedbackStyle.Medium : Haptics.ImpactFeedbackStyle.Light,
+    ).catch(() => {});
+    a.onPress();
+  };
+
+  return (
+    <AnimPressable
+      onPress={press}
+      disabled={a.disabled}
+      accessibilityRole="button"
+      accessibilityState={{ disabled: !!a.disabled }}
+      accessibilityLabel={a.badge ? `${a.label}, ${a.badge} at the table` : a.label}
+      style={[aStyle, { flex: 1, opacity: a.disabled ? 0.45 : 1 }]}
+    >
+      <View style={{
+        // 62 is the FLOOR, not the height: at a large system font scale the
+        // label grows and the tile grows with it rather than clipping.
+        minHeight: 62,
+        alignItems: 'center', justifyContent: 'center', gap: S[1],
+        paddingVertical: S[2], paddingHorizontal: S[1],
+        borderRadius: R[3], borderWidth: 1,
+        borderColor: lit ? alpha(accent, 0.85) : danger ? 'rgba(255,125,134,.50)' : white(0.18),
+        backgroundColor: lit ? alpha(accent, 0.20) : danger ? 'rgba(255,125,134,.12)' : white(0.08),
+        // The bottom inset is the half that was missing. A lit top edge alone
+        // reads as a sticker; a lit top AND a shaded bottom read as a pane with
+        // thickness, which is the whole illusion.
+        boxShadow: lit
+          ? `0 8px 20px ${alpha(accent, 0.26)}, inset 0 1px 0 ${white(0.26)}, inset 0 -1px 0 rgba(0,0,0,0.30)`
+          : `0 6px 16px rgba(0,0,0,0.34), inset 0 1px 0 ${white(0.18)}, inset 0 -1px 0 rgba(0,0,0,0.30)`,
+      }}>
+        {/* The sheen. Kept gentle on purpose: it sits under the label, and a
+            brighter surface needs brighter ink — see the contrast note on
+            CR.muted, which had to be raised once already for exactly this. */}
+        <LinearGradient
+          pointerEvents="none"
+          colors={[white(0.09), white(0.02), 'transparent']}
+          locations={[0, 0.5, 1]}
+          start={{ x: 0.1, y: 0 }}
+          end={{ x: 0.9, y: 1 }}
+          style={[StyleSheet.absoluteFillObject, { borderRadius: R[3] }]}
+        />
+        <Ionicons name={a.ion} size={19} color={fg} />
+        <Text numberOfLines={1} style={{ color: fg, fontSize: 10.5, fontWeight: '800' }}>
+          {a.badge ? `${a.label} ${a.badge}` : a.label}
+        </Text>
+      </View>
+    </AnimPressable>
+  );
+}
+
+/**
+ * A round glass control — the small ones that sit in a top strip.
+ *
+ * 36dp of surface plus 4dp of slop is exactly the 44dp floor the boards hold
+ * everywhere else, and it is why uiautomator reports these as undersized when
+ * they are not: it cannot see hitSlop.
+ */
+export function RoundBtn({
+  ion, label, onPress,
+}: {
+  ion: React.ComponentProps<typeof Ionicons>['name'];
+  label: string;
+  onPress: () => void;
+}) {
+  const scale = useSharedValue(1);
+  const a = useAnimatedStyle(() => ({ transform: [{ scale: scale.value }] }));
+  return (
+    <AnimPressable
+      onPress={() => {
+        scale.value = withSequence(withTiming(0.94, { duration: 90 }), withTiming(1, { duration: 150 }));
+        Haptics.selectionAsync().catch(() => {});
+        onPress();
+      }}
+      accessibilityRole="button"
+      accessibilityLabel={label}
+      hitSlop={4}
+      style={[a, {
+        width: 36, height: 36, borderRadius: 18,
+        alignItems: 'center', justifyContent: 'center',
+        borderWidth: 1, borderColor: white(0.20), backgroundColor: white(0.08),
+        boxShadow: `0 4px 12px rgba(0,0,0,0.30), inset 0 1px 0 ${white(0.16)}`,
+      }]}
+    >
+      <Ionicons name={ion} size={17} color={C.text} />
+    </AnimPressable>
+  );
+}
 
 /**
  * The table is not reachable right now.
