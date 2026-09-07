@@ -1,0 +1,36 @@
+[package]
+name = "vaultcore"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.97"
+publish = false
+
+# cdylib is what Android/iOS load; rlib is what `cargo test` links.
+[lib]
+crate-type = ["cdylib", "lib"]
+name = "vaultcore"
+
+[dependencies]
+uniffi = { version = "0.28", features = ["cli"] }
+sha2 = "0.10"
+hex = "0.4"
+
+# --- safety configuration ---
+#
+# OVERFLOW CHECKS STAY ON IN RELEASE. This crate does money. A silent i64
+# wraparound is the one failure mode worse than a crash, and the cost is a
+# branch per add - unmeasurable next to a JNI hop.
+#
+# `panic = "unwind"`, NOT "abort". UniFFI wraps every exported call in
+# catch_unwind and turns a panic into an error the host language can handle;
+# under "abort" a bug in here would take the whole app down with it, and a
+# money rounding bug must never be able to kill a chat client.
+[profile.release]
+overflow-checks = true
+panic = "unwind"
+lto = true
+codegen-units = 1
+strip = "debuginfo"
+
+[profile.dev]
+overflow-checks = true

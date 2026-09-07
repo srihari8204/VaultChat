@@ -1,0 +1,6 @@
+# Pinned on purpose. A money core that compiles differently on two machines is
+# not a money core, and an FFI ABI that shifts under the app is worse. Bump
+# deliberately, never implicitly.
+[toolchain]
+channel = "1.97.1"
+components = ["rustfmt", "clippy"]
