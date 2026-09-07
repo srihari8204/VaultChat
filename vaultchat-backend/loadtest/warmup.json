@@ -1,0 +1,32 @@
+{
+  "base": "http://127.0.0.1:14000",
+  "path": "/health",
+  "secsPerTier": 5,
+  "tiers": [
+    {
+      "conc": 50,
+      "seconds": 5,
+      "requests": 9847,
+      "rps": 1952,
+      "errors": 0,
+      "errPct": 0,
+      "p50": 20.5,
+      "p95": 55.8,
+      "p99": 85.4,
+      "max": 251
+    },
+    {
+      "conc": 200,
+      "seconds": 5,
+      "requests": 12516,
+      "rps": 2490,
+      "errors": 0,
+      "errPct": 0,
+      "p50": 73.5,
+      "p95": 130.7,
+      "p99": 191,
+      "max": 288.8
+    }
+  ],
+  "at": "2026-09-07T04:38:13.528Z"
+}

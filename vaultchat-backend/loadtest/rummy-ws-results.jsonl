@@ -1,0 +1,4 @@
+{"target":2000,"opened":2000,"live":2000,"failed":0,"helloOK":2000,"helloP50":327.8,"helloP95":662.4,"helloP99":1274.1,"at":"2026-09-07T04:56:54.626Z"}
+{"target":6000,"opened":6000,"live":6000,"failed":0,"helloOK":6000,"helloP50":184.6,"helloP95":361.8,"helloP99":414.1,"at":"2026-09-07T04:59:41.666Z"}
+{"target":10000,"opened":10000,"live":10000,"failed":0,"helloOK":10000,"helloP50":233.1,"helloP95":506,"helloP99":919.7,"at":"2026-09-07T05:01:49.259Z"}
+{"target":14000,"opened":12461,"live":12461,"failed":1539,"helloOK":12461,"helloP50":218.7,"helloP95":504.4,"helloP99":638.8,"at":"2026-09-07T05:04:57.983Z"}
