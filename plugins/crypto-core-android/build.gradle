@@ -62,6 +62,10 @@ def abiTargets = [
     "x86_64"     : "x86_64-linux-android",
 ]
 
+// nav-core is built by the SAME task family and linked into the same .so —
+// see CMakeLists.txt for why it does not get a module of its own.
+def navRustDir = new File(projectDir, "../../services/nav/rust").canonicalFile
+
 tasks.register("cargoBuildCryptoCore") {
     description = "Builds the crypto-core Rust staticlib for all requested ABIs (cargo-ndk)"
     doLast {
@@ -77,4 +81,22 @@ tasks.register("cargoBuildCryptoCore") {
         }
     }
 }
+
+tasks.register("cargoBuildNavCore") {
+    description = "Builds the nav-core Rust staticlib for all requested ABIs (cargo-ndk)"
+    doLast {
+        reactNativeArchitectures().each { abi ->
+            if (abiTargets[abi] == null) {
+                throw new GradleException("nav-core: unsupported ABI ${abi}")
+            }
+            exec {
+                workingDir navRustDir
+                environment "ANDROID_NDK_HOME", android.ndkDirectory.absolutePath
+                commandLine "cargo", "ndk", "-t", abi, "build", "--release", "--lib"
+            }
+        }
+    }
+}
+
 preBuild.dependsOn("cargoBuildCryptoCore")
+preBuild.dependsOn("cargoBuildNavCore")

@@ -467,9 +467,10 @@ function setMemberRoutes(list){
 }
 function reportZoom(){ if(RN)RN.postMessage('zoom:'+Math.round(map.getZoom())); }
 map.on('zoomend',reportZoom);
-map.on('dragstart',function(){lastTouch=Date.now();});
-map.on('rotatestart',function(){lastTouch=Date.now();});
-map.on('zoomstart',function(e){ if(e.originalEvent) lastTouch=Date.now(); });
+function userMoved(){ lastTouch=Date.now(); if(RN)RN.postMessage('usermove'); }
+map.on('dragstart',userMoved);
+map.on('rotatestart',userMoved);
+map.on('zoomstart',function(e){ if(e.originalEvent) userMoved(); });
 // ── @any-routing, driven by OUR Valhalla ──────────────────────────────
 // The engine owns waypoints, dragging and rendering; every actual route still
 // comes from the deployed Valhalla, bridged through React Native so the auth
@@ -572,11 +573,19 @@ export interface MemberRoute {
 }
 
 export default function FamilyMap({
-  members, onSelect, focusId, followId, followZoom, path, destination, linkFrom, route, memberRoutes, style,
+  members, onSelect, onUserMove, focusId, followId, followZoom, path, destination, linkFrom, route, memberRoutes, style,
   headingDeg, cameraMode, camera3D = FAMILY_MAP_3D, controlsBottom = 12,
 }: {
   members: FamilyMarker[];
   onSelect?: (id: string) => void;
+  /**
+   * The user panned, rotated or pinched the map themselves. Lets a caller drop
+   * out of auto-follow and offer an explicit "Follow" control, rather than the
+   * camera silently resuming after the internal 10 s lastTouch timeout — which
+   * is correct behaviour but invisible, so it reads as the map ignoring you.
+   * MapLibre only; the Leaflet fallback has no camera to fight over.
+   */
+  onUserMove?: () => void;
   focusId?: string | null;
   /**
    * Keep the map centred on this member as they MOVE (spec: Follow member).
@@ -805,6 +814,7 @@ export default function FamilyMap({
             return;
           }
           if (d.startsWith('sel:')) { onSelect?.(d.slice(4)); return; }
+          if (d === 'usermove') { onUserMove?.(); return; }
           try {
             const m = JSON.parse(d);
             // WebGL/worker failed on this device before first paint → Leaflet.

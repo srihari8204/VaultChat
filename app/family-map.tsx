@@ -13,7 +13,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { View, Text, ScrollView, ActivityIndicator, StyleSheet, TouchableOpacity, Alert } from 'react-native';
 import * as Location from 'expo-location';
 import { Ionicons } from '@expo/vector-icons';
-import { Stack, useLocalSearchParams } from 'expo-router';
+import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { useTheme } from '../lib/theme';
 import { useSpaceGlass } from '../components/spaces/SpaceGround';
 import FamilyMap, { type FamilyMarker } from '../components/family/FamilyMap';
@@ -32,10 +32,14 @@ import { getPlaces, getDefaultRef } from '../lib/family/store';
 import { type Geofence } from '../lib/family/geofence';
 import { fetchRoute, nextTurnAlong, type Maneuver } from '../lib/nav/routing';
 import { haversine } from '../lib/nav/geo';
-import { startNavigation, stopNavigation, useNavBanner } from '../lib/nav/navigationService';
+import { startNavigation, stopNavigation, forceReroute, useNavBanner } from '../lib/nav/navigationService';
 import { loadNavSettings, getNavSettings } from '../lib/nav/navSettings';
 import { playHaptic } from '../lib/nav/hapticPlayer';
-import NavBanner, { iconFor } from '../components/nav/NavBanner';
+import { iconFor } from '../components/nav/NavBanner';
+import NavigationLayer from '../components/family/NavigationLayer';
+import SelectedMemberSheet from '../components/family/SelectedMemberSheet';
+import { createDirectChat } from '../lib/chatService';
+import { cameraForManeuver, type CameraPlan } from '../lib/nav/navPresentation';
 import {
   startTrip, joinTrip, endTrip, leaveTrip, subscribeTrip, currentTrip, setTripRoute,
 } from '../lib/groups/tripSession';
@@ -71,6 +75,7 @@ export default function FamilyMapScreen() {
   // map tiles cost readability and buy nothing (same rule as the hub's
   // expanded roster sheet).
   const G = useSpaceGlass();
+  const router = useRouter();
   const params = useLocalSearchParams<{ circleId?: string; circleName?: string; followId?: string }>();
   const circleId = String(params.circleId || '');
 
@@ -251,6 +256,17 @@ export default function FamilyMapScreen() {
    * my road to them.
    */
   const [routeTo, setRouteTo] = useState<string | null>(null);
+  /**
+   * The member whose sheet is open. Tapping a marker used to only centre the
+   * camera; every action lived as a 12px link on a roster row far below.
+   * Independent of focusId on purpose: closing the sheet must not un-centre
+   * the map the user just tapped on.
+   */
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [chatBusy, setChatBusy] = useState(false);
+  /** What the navigation dock calls the place we are going. A member route
+   *  has no `destination` object, so the name has to travel separately. */
+  const [navTargetName, setNavTargetName] = useState<string | null>(null);
   const [routeShape, setRouteShape] = useState<{ lat: number; lng: number }[] | null>(null);
   /** The tapped route's maneuvers — they feed the member turn indicator. */
   const [routeMans, setRouteMans] = useState<Maneuver[] | null>(null);
@@ -404,19 +420,88 @@ export default function FamilyMapScreen() {
    * purpose; STOP (or the trip ending) ends it.
    */
   const navBanner = useNavBanner();
-  const startNav = async () => {
-    if (!destination) return;
+  /**
+   * AUTO-FOLLOW. On by default while guiding; the map reports the user's own
+   * pan/rotate/pinch (FamilyMap onUserMove) and we step out of the way rather
+   * than fighting the gesture. The Follow control puts it back — an explicit
+   * way in, instead of waiting out the map's silent 10 s timeout.
+   */
+  const [following, setFollowing] = useState(true);
+  /** A reroute that came back empty, so the UI can offer a manual retry
+   *  instead of looping. Cleared the moment a fresh route arrives. */
+  const [rerouteFailed, setRerouteFailed] = useState(false);
+  /**
+   * The camera band from the previous frame. Passing it back into
+   * cameraForManeuver is what applies the hysteresis — without it the zoom
+   * oscillates every time the distance wobbles across a band edge.
+   */
+  const camRef = useRef<CameraPlan | null>(null);
+  const camera = useMemo(() => {
+    if (!navBanner.active) { camRef.current = null; return null; }
+    const next = cameraForManeuver(navBanner.distanceToManeuver, navBanner.remainingM, camRef.current);
+    camRef.current = next;
+    return next;
+  }, [navBanner.active, navBanner.distanceToManeuver, navBanner.remainingM]);
+  // A new route (or the session ending) clears a stale failure.
+  useEffect(() => { if (!navBanner.rerouting) setRerouteFailed(false); }, [navBanner.rerouting]);
+  // Re-arm follow whenever a session starts, so a previous journey's manual
+  // pan does not leave the next one un-followed.
+  useEffect(() => { if (navBanner.active) setFollowing(true); }, [navBanner.active]);
+  /**
+   * PUT THE CAMERA BACK WHEN THE JOURNEY ENDS.
+   *
+   * Found on the Honor: navigation leaves the map in the pitched, heading-up
+   * chase camera, and ending the session used to leave it there — the map
+   * stayed rotated with no journey to justify it, which reads as broken. The
+   * cameraMode prop is declarative, so simply dropping to `undefined` changes
+   * nothing (FamilyMap keeps its last mode); it has to be told 'north' once.
+   *
+   * One-shot, and only after a session we actually ran: passing 'north'
+   * permanently would override the camera the user chose themselves on a map
+   * they never navigated from.
+   */
+  const wasNavigating = useRef(false);
+  const [resetCam, setResetCam] = useState(false);
+  useEffect(() => {
+    if (wasNavigating.current && !navBanner.active) {
+      setResetCam(true);
+      const t = setTimeout(() => setResetCam(false), 900);
+      wasNavigating.current = false;
+      return () => clearTimeout(t);
+    }
+    wasNavigating.current = navBanner.active;
+  }, [navBanner.active]);
+  /** Start real turn-by-turn to any point. `startNav` below is the Meet-Here
+   *  destination form of this and is unchanged; member routes use it directly
+   *  with the member's CURRENT position, which is the honest target — a person
+   *  is not a fixed point, and a reroute picks up their newer fix. */
+  const startNavTo = async (name: string, lat: number, lng: number) => {
     try {
       const s = await loadNavSettings();
       await startNavigation({
-        to: { lat: destination.lat, lng: destination.lng },
+        to: { lat, lng },
         profile: s.profile, mode: s.mode, timing: s.timing,
         costing: s.costing, custom: s.custom, routeOpts: s.routeOpts,
       });
       navHere.current = true;
+      setNavTargetName(name);
     } catch (e: any) { Alert.alert('Navigation', e?.message ?? 'Could not start navigation.'); }
   };
-  const stopNav = () => { stopNavigation(); navHere.current = false; };
+  const startNav = async () => {
+    if (!destination) return;
+    await startNavTo(destination.name, destination.lat, destination.lng);
+  };
+  const stopNav = () => { stopNavigation(); navHere.current = false; setNavTargetName(null); };
+  /** Chat with a member — the same createDirectChat path family-member.tsx uses. */
+  const openChat = async (userId: string) => {
+    if (chatBusy) return;
+    setChatBusy(true);
+    try {
+      const chat = await createDirectChat({ userId });
+      router.push({ pathname: '/chat' as any, params: { id: chat.id } });
+    } catch (e: any) { Alert.alert('Message', e?.message ?? 'Could not open a direct chat.'); }
+    finally { setChatBusy(false); }
+  };
 
   /**
    * LEAVE NOW (§ Life360 parity). The trip knows where; the road route knows
@@ -428,18 +513,19 @@ export default function FamilyMapScreen() {
    * is not a reminder.
    */
   const [arriveBy, setArriveBy] = useState<number | null>(null);
-  const leave = useMemo(
-    () => leavePlan(arriveBy, destSecs, now),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [arriveBy, destSecs, now],
-  );
+  const leave = useMemo(() => leavePlan(arriveBy, destSecs, now), [arriveBy, destSecs, now]);
+  const destName = destination?.name;
+  const destLat = destination?.lat;
+  const destLng = destination?.lng;
   useEffect(() => {
     if (!circleId) return;
-    if (!destination || arriveBy == null || destSecs == null) { cancelLeaveNow(circleId); return; }
-    armLeaveNow(circleId, destination.name, arriveBy, destSecs).catch(() => {});
+    if (!destName || arriveBy == null || destSecs == null) { cancelLeaveNow(circleId); return; }
+    armLeaveNow(circleId, destName, arriveBy, destSecs).catch(() => {});
     // Re-armed whenever the ROUTE or the deadline changes: a re-route that
     // adds twenty minutes must move the alarm, not leave it on the old road.
-  }, [circleId, destination?.name, destination?.lat, destination?.lng, arriveBy, destSecs]);
+    // destLat/destLng are dependencies on purpose — two different places can
+    // share a name, and the alarm must follow the COORDINATE, not the label.
+  }, [circleId, destName, destLat, destLng, arriveBy, destSecs]);
   // The destination going away (trip ended, pin cleared) takes the alarm with it.
   useEffect(() => { if (!destination) setArriveBy(null); }, [destination]);
 
@@ -603,9 +689,11 @@ export default function FamilyMapScreen() {
         headerStyle: { backgroundColor: G.bgTop }, headerTintColor: colors.text,
         headerShadowVisible: false,
       }} />
-      {/* MY turn-by-turn strip — the same mini banner the Navigate app shows.
-          Renders nothing unless a navigation session is running. */}
-      <NavBanner />
+      {/* The turn-by-turn strip used to be <NavBanner /> here, above the map.
+          NavigationLayer replaces it INSIDE the map below: same engine, same
+          numbers, but floating over the map instead of stealing a band of it,
+          plus the follow / off-route / arrival states the strip never had.
+          NavBanner itself is untouched and still serves app/navigate.tsx. */}
       <View style={{ flex: 1 }}>
         <FamilyMap
           members={markers} focusId={focusId} followId={followId}
@@ -626,7 +714,81 @@ export default function FamilyMapScreen() {
           // Lift the map's own camera/fit controls above whatever bars are
           // currently occupying the bottom of the screen.
           controlsBottom={chipsBottom}
-          onSelect={(id) => setFocusId(id)} style={{ flex: 1 }}
+          onSelect={(id) => { setFocusId(id); if (id !== me) setSelectedId(id); }} style={{ flex: 1 }}
+          // Stepping out of the way of a real gesture (spec: never fight the user).
+          onUserMove={() => setFollowing(false)}
+          // Only take the camera while actually guiding AND still following;
+          // outside navigation the map keeps whatever camera the user chose.
+          cameraMode={navBanner.active && following ? 'follow' : (resetCam ? 'north' : undefined)}
+        />
+
+        {/* Premium navigation chrome — floats over the map, never over the
+            middle of it. Driven entirely by the existing navigationService
+            session; it starts and stops with that session and renders nothing
+            when one is not running, so every non-navigating behaviour on this
+            screen is exactly as it was. */}
+        {/* SELECTED MEMBER SHEET (spec section 2). The roster's Route/Follow
+            links still exist and still work; this is the same three actions at
+            the point of selection. Hidden while navigating — the dock owns the
+            bottom of the screen then — and while Meet Here is open. */}
+        {selectedId && !navBanner.active && !meetOpen && (() => {
+          const m = members.find((x) => x.id === selectedId);
+          if (!m) return null;
+          const p = presences[m.id];
+          const f = freshnessOf(p?.ts, now);
+          const liveNow = f === 'live' && !p?.sharingOff;
+          const locatable = !!p && !p.sharingOff && f !== 'unavailable';
+          const fromMe = p && mine && f !== 'unavailable' ? haversine(mine.pos, p.pos) : null;
+          const routed = routeTo === m.id && !!routeShape;
+          const distanceLine = routed && routeInfo
+            ? `${routeInfo} by road`
+            : fromMe != null ? `${formatMetres(fromMe)} from You` : null;
+          return (
+            <SelectedMemberSheet
+              name={m.name}
+              distanceLine={distanceLine}
+              statusLine={freshLabel(f, p?.ts, now, p?.sharingOff)}
+              live={liveNow}
+              locatable={locatable}
+              routed={routeTo === m.id}
+              routeBusy={routeBusy && routeTo === m.id}
+              following={followId === m.id}
+              chatBusy={chatBusy}
+              onRoute={() => { setRouteTo(routeTo === m.id ? null : m.id); setFocusId(m.id); }}
+              onFollow={() => { setFollowId(followId === m.id ? null : m.id); setFocusId(m.id); }}
+              onChat={() => openChat(m.id)}
+              onNavigate={routed && !destination && p
+                ? () => { setSelectedId(null); startNavTo(m.name, p.pos.lat, p.pos.lng); }
+                : undefined}
+              onClose={() => setSelectedId(null)}
+              bottomInset={chipsBottom}
+            />
+          );
+        })()}
+
+        <NavigationLayer
+          active={navBanner.active}
+          event={navBanner.event}
+          instruction={navBanner.instruction}
+          roadName={navBanner.roadName}
+          distanceToManeuverM={navBanner.distanceToManeuver}
+          remainingM={navBanner.remainingM}
+          etaSeconds={Math.max(0, (navBanner.etaEpochMs - Date.now()) / 1000)}
+          destinationName={navTargetName ?? destination?.name ?? 'Destination'}
+          verdict={navBanner.verdict}
+          rerouting={navBanner.rerouting}
+          rerouteFailed={rerouteFailed}
+          arrived={navBanner.arrived}
+          camera={camera}
+          following={following}
+          onFollow={() => setFollowing(true)}
+          onReroute={() => {
+            setRerouteFailed(false);
+            forceReroute().catch(() => setRerouteFailed(true));
+          }}
+          onStop={stopNav}
+          onDone={stopNav}
+          bottomInset={chipsBottom}
         />
 
         {/* SEARCH BAR, not a button. Meet Here is a search — it belongs at the
@@ -648,6 +810,55 @@ export default function FamilyMapScreen() {
               ? <Ionicons name="close-circle" size={17} color={colors.textDim} onPress={() => setDestination(null)} />
               : <Ionicons name="people" size={16} color={colors.primary} />}
           </TouchableOpacity>
+        )}
+
+        {/* SAVED PLACES — one tap to a destination, instead of typing a name
+            the phone already knows (spec §11).
+            ONLY REAL PLACES. There are no fixed Home / School / Office chips:
+            a chip for a place nobody saved is a button that cannot work, and
+            these coordinates are device-local by doctrine (lib/family/store),
+            so this row can only ever offer MY OWN places — never another
+            member's, whose coordinates this device does not have and must not
+            display. Hidden entirely while navigating: the destination is
+            settled by then and the map belongs to the guidance. */}
+        {!meetOpen && !trip && !navBanner.active && myPlaces.length > 0 && (
+          <View style={[st.placeRow, { top: slots.searchTop + 52 }]}>
+            {myPlaces.slice(0, 4).map((pl) => {
+              const on = destination?.name === pl.name;
+              return (
+                <TouchableOpacity
+                  key={pl.id}
+                  onPress={() => setDestination(on
+                    ? null
+                    : { name: pl.name, lat: pl.center.lat, lng: pl.center.lng })}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: on }}
+                  accessibilityLabel={on ? `Clear ${pl.name} as the destination` : `Route to ${pl.name}`}
+                  hitSlop={{ top: 8, bottom: 8 }}
+                  style={[st.placeChip, {
+                    backgroundColor: G.sheet,
+                    borderColor: on ? colors.primary : G.chipEdge,
+                    borderWidth: on ? 1.5 : 1,
+                  }]}
+                >
+                  <Ionicons
+                    name={on ? 'location' : 'location-outline'}
+                    size={13}
+                    color={on ? colors.primary : colors.textDim}
+                  />
+                  <Text
+                    style={{
+                      color: on ? G.accentText : colors.textDim,
+                      fontSize: 12.5, fontWeight: on ? '800' : '600',
+                    }}
+                    numberOfLines={1}
+                  >
+                    {pl.name}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
         )}
 
         {/* FAMILY TRIP BAR: whose trip, where to, when everyone is in — and
@@ -770,8 +981,20 @@ export default function FamilyMapScreen() {
                   : `You → ${destination?.name ?? 'destination'}${destInfo ? ` · ${destInfo}` : ''}`}
             </Text>
             {routeShape ? (
-              <Text onPress={() => { setRouteTo(null); setRouteShape(null); setRouteMans(null); }}
-                style={{ color: G.accentText, fontWeight: '800', fontSize: 12 }}>CLEAR</Text>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 14 }}>
+                {/* Me -> member: this route can be DRIVEN, so offer it. A member ->
+                    place route is THEIR road, not mine, and stays clear-only. */}
+                {!destination && routeTo && presences[routeTo] && !navBanner.active && (
+                  <Text
+                    onPress={() => startNavTo(nameOf.get(routeTo) || 'Member', presences[routeTo].pos.lat, presences[routeTo].pos.lng)}
+                    style={{ color: G.accentText, fontWeight: '800', fontSize: 12 }}>NAVIGATE</Text>
+                )}
+                {!destination && navBanner.active && (
+                  <Text onPress={stopNav} style={{ color: G.dangerText, fontWeight: '800', fontSize: 12 }}>STOP NAV</Text>
+                )}
+                <Text onPress={() => { setRouteTo(null); setRouteShape(null); setRouteMans(null); }}
+                  style={{ color: G.accentText, fontWeight: '800', fontSize: 12 }}>CLEAR</Text>
+              </View>
             ) : homeRoute ? (
               <Text onPress={() => setShowHomeRoute(false)}
                 style={{ color: G.accentText, fontWeight: '800', fontSize: 12 }}>CLEAR</Text>
@@ -936,6 +1159,17 @@ const st = StyleSheet.create({
   sheet: {
     borderTopLeftRadius: 24, borderTopRightRadius: 24, borderWidth: 1,
     paddingHorizontal: 16, paddingTop: 4, paddingBottom: 8,
+  },
+  // Sits just under the search bar; horizontal, wraps rather than scrolls
+  // because four chips always fit and a scroll view here would swallow the
+  // map's own pan gesture at the top of the screen.
+  placeRow: {
+    position: 'absolute', left: 12, right: 12,
+    flexDirection: 'row', flexWrap: 'wrap', gap: 8,
+  },
+  placeChip: {
+    flexDirection: 'row', alignItems: 'center', gap: 5,
+    paddingHorizontal: 12, minHeight: 32, borderRadius: 999,
   },
   searchBar: {
     position: 'absolute', left: 12, right: 12, top: 12, flexDirection: 'row', alignItems: 'center', gap: 9,
