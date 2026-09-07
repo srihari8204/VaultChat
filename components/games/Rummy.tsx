@@ -1600,7 +1600,7 @@ function TableCard({ table, onJoin }: { table: TableInfo; onJoin: () => void }) 
       }}
     >
       <View style={{ flex: 1, gap: 3 }}>
-        <Text style={{ color: C.text, fontSize: t.md, fontWeight: '800' }}>{table.name}</Text>
+        <Text numberOfLines={1} style={{ color: C.text, fontSize: t.md, fontWeight: '800' }}>{table.name}</Text>
         <Text style={{ color: C.muted, fontSize: T.sm }}>{table.stakes}</Text>
         {/* NAME THE VARIANT, even though there is only one.
             Rummy has three well-known formats (Points, Pool 101/201, Deals),
@@ -1690,7 +1690,7 @@ function Room({
   return (
     <TableBackground>
       <ScrollView contentContainerStyle={[column, { gap: S[3] }]}>
-        <Text style={{ color: C.text, fontSize: t.xl, fontWeight: '800' }}>{table?.name || 'Rummy table'}</Text>
+        <Text numberOfLines={1} style={{ color: C.text, fontSize: t.xl, fontWeight: '800' }}>{table?.name || 'Rummy table'}</Text>
         <Text style={{ color: C.muted, fontSize: t.sm }}>
           {[VARIANT, table?.stakes, `${members.length}/${max} seated`].filter(Boolean).join(' · ')}
         </Text>

@@ -1420,7 +1420,7 @@ export default function FamilySpaceScreen() {
                       borderColor: on ? gi.color : G.chipEdge,
                       backgroundColor: on ? gi.color + '26' : G.paneFaint }]}>
                     <Ionicons name={gi.icon} size={13} color={on ? gi.color : colors.textDim} />
-                    <Text style={{ color: on ? colors.text : colors.textDim, fontWeight: on ? '700' : '500', fontSize: 13 }}>{c.name}</Text>
+                    <Text numberOfLines={1} style={{ color: on ? colors.text : colors.textDim, fontWeight: on ? '700' : '500', fontSize: 13 }}>{c.name}</Text>
                   </TouchableOpacity>
                 );
               })}
@@ -2127,7 +2127,7 @@ export default function FamilySpaceScreen() {
               Every action is unchanged — now they are all reachable. */}
           <View style={[st.modal, { backgroundColor: G.sheet, borderColor: G.edge, maxHeight: '86%' }]}>
             <View style={[st.grab, { backgroundColor: colors.border }]} />
-            <Text style={[st.modalTitle, { color: colors.text }]}>{active?.name}</Text>
+            <Text numberOfLines={1} style={[st.modalTitle, { color: colors.text }]}>{active?.name}</Text>
             {/* Indicator stays visible: 20+ rows, and without it nothing says
                 the sheet scrolls at all. */}
             <ScrollView bounces={false} keyboardShouldPersistTaps="handled">

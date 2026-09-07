@@ -128,7 +128,7 @@ export default function ScheduleMessageScreen() {
 
       <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 60 }}>
         <Text style={S.label}>TO</Text>
-        <Text style={S.who}>{peerName || 'Chat'}</Text>
+        <Text numberOfLines={1} style={S.who}>{peerName || 'Chat'}</Text>
 
         <Text style={[S.label, { marginTop: 16 }]}>MESSAGE</Text>
         <TextInput

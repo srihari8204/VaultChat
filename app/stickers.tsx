@@ -102,7 +102,7 @@ export default function StickerPickerScreen() {
       <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 60 }}>
         {PACKS.map(pack => (
           <View key={pack.id} style={S.packBlock}>
-            <Text style={S.packName}>{pack.name}</Text>
+            <Text numberOfLines={1} style={S.packName}>{pack.name}</Text>
             <View style={S.grid}>
               {pack.stickers.map(s => (
                 <TouchableOpacity

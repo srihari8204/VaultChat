@@ -37,11 +37,12 @@ import { Buffer } from 'buffer';
 
 import { Stack, useRouter } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
-import * as ScreenCapture from 'expo-screen-capture';
+import { setSecure } from '../lib/screenGuard';
 import * as SplashScreen from 'expo-splash-screen';
 import * as Linking from 'expo-linking';
 import * as Sentry from '@sentry/react-native';
 import { StatusBar } from 'expo-status-bar';
+import { HEADER_TOP, SCREEN_BOTTOM } from '../constants/layout';
 import { View, ActivityIndicator, StyleSheet, Platform, AppState, InteractionManager } from 'react-native';
 import notifee, { EventType } from '@notifee/react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
@@ -156,6 +157,60 @@ if (SENTRY_DSN) {
   });
 }
 
+/**
+ * Screens that draw their OWN header and never accounted for the status bar.
+ *
+ * app.json sets edgeToEdgeEnabled, so a screen with no native header and no
+ * inset of its own starts its first row UNDER the clock and the notch — the
+ * group-create preview card and the network-test back button were both sitting
+ * behind the status icons on a real handset.
+ *
+ * Listed here rather than patched into twenty-nine screen files because it is
+ * one fact about the navigator, not twenty-nine independent layout decisions,
+ * and a screen added to this list tomorrow needs no edit of its own.
+ *
+ * DELIBERATELY ABSENT: screens that already handle the inset (HEADER_TOP,
+ * SafeAreaView, or a native header) — they would be padded twice — and the
+ * full-bleed ones (media viewer, story viewer, scanner, lock, image editor),
+ * which are supposed to run under the status bar.
+ *
+ * ponytail: contentStyle padding also insets an absolutely-positioned
+ * background child, so a screen whose backdrop is <AuroraBackground/> shows
+ * colors.bg in that top strip — invisible on the dark ground. A light-gradient
+ * screen joining this list wants a real root padding instead.
+ */
+const INSET_SCREENS = [
+  'creator-channels',
+  'current-location',
+  'd2de-status',
+  'decentralized-id',
+  'duresspin',
+  'emergency-sos',
+  'filevault',
+  'games',
+  'group-calendar',
+  'group-chat',
+  'group-create',
+  'group-insights',
+  'group-notes',
+  'group-tasks',
+  'group-trip',
+  'interest-calculator',
+  'location-lock',
+  'lock-alert',
+  'lock-history',
+  'lock-settings',
+  'navigate',
+  'network-test',
+  'onboard-mpin',
+  'onboard-success',
+  'setup-complete',
+  'vaultbeam-settings',
+  'vaultcheck',
+  'voice-effects',
+  'voice-speed',
+] as const;
+
 function RootLayoutInner() {
   const { colors, scheme } = useTheme();
   /** My user id, for the famEvent ingest below — a ref because the persistent
@@ -191,8 +246,12 @@ function RootLayoutInner() {
     }
 
     // ── 1. Block screenshots app-wide (native only) ──────────
+    // Through screenGuard.setSecure, not expo-screen-capture directly: that is
+    // the one function that knows a dev build must never set FLAG_SECURE (it
+    // would blank every screenshot and screen recording of our own UI), and it
+    // also drives the native VaultView module when the build has it.
     if (Platform.OS !== 'web') {
-      ScreenCapture.preventScreenCaptureAsync().catch(() => {});
+      setSecure(true).catch(() => {});
     }
 
     // ── 2. Configure Google Sign-In ────────────────────────────
@@ -655,7 +714,7 @@ function RootLayoutInner() {
 
     return () => {
       if (Platform.OS !== 'web') {
-        ScreenCapture.allowScreenCaptureAsync().catch(() => {});
+        setSecure(false).catch(() => {});
       }
       deferred.cancel();   // don't run deferred boot work after unmount
       launchIntentSub.remove();
@@ -720,6 +779,22 @@ function RootLayoutInner() {
           screen root is transparent with an <AuroraBackground /> behind it). */}
       <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: colors.bg } }}>
 
+        {/* Status-bar inset for the screens that draw their own header. */}
+        {INSET_SCREENS.map(name => (
+          <Stack.Screen
+            key={name}
+            name={name}
+            options={{ contentStyle: {
+              backgroundColor: colors.bg,
+              paddingTop: HEADER_TOP,
+              // Edge-to-edge cuts the bottom too: group-create's last icon row
+              // sat under the gesture bar. Padding the screen container shrinks
+              // the scroll viewport, so the final row can be scrolled clear.
+              paddingBottom: SCREEN_BOTTOM,
+            } }}
+          />
+        ))}
+
         {/* Security — gesture disabled so user can't swipe back */}
         <Stack.Screen name="blocked" options={{ gestureEnabled: false }} />
 
@@ -741,13 +816,11 @@ function RootLayoutInner() {
         <Stack.Screen name="add/[...segments]" options={{ headerShown: false }} />
         <Stack.Screen name="file-preview" />
         <Stack.Screen name="voice-transcribe" />
-        <Stack.Screen name="group-chat" />
         <Stack.Screen name="lock" />
         <Stack.Screen name="media-viewer" />
         <Stack.Screen name="whiteboard" />
         <Stack.Screen name="bookmarks" />
         <Stack.Screen name="receipt-control" />
-        <Stack.Screen name="voice-effects" />
         <Stack.Screen name="chat-themes" />
         <Stack.Screen name="chat-wallpaper" />
         <Stack.Screen name="chat-export" />
@@ -772,7 +845,6 @@ function RootLayoutInner() {
         {/* alerts, profile now in (tabs) */}
 
         {/* Features */}
-        <Stack.Screen name="d2de-status" />
         <Stack.Screen name="contacts" />
         <Stack.Screen name="location-sharing" />
         <Stack.Screen name="vault-features" />
@@ -780,36 +852,28 @@ function RootLayoutInner() {
         <Stack.Screen name="settings" />
         <Stack.Screen name="story-viewer" />
         <Stack.Screen name="meeting-scheduler" />
-        <Stack.Screen name="decentralized-id" />
         <Stack.Screen name="finance" options={{ headerShown: false }} />
         <Stack.Screen name="email-bridge" />
-        <Stack.Screen name="creator-channels" />
         <Stack.Screen name="group-admin" />
         <Stack.Screen name="call-recording" />
         <Stack.Screen name="app-lock-chats" />
         <Stack.Screen name="privacy-dashboard" />
         <Stack.Screen name="storage-manager" />
-        <Stack.Screen name="vaultbeam-settings" />
         <Stack.Screen name="chat-backup" />
         <Stack.Screen name="last-seen-privacy" />
         <Stack.Screen name="offline-mode" />
         <Stack.Screen name="image-editor" />
-        <Stack.Screen name="emergency-sos" />
-        <Stack.Screen name="network-test" />
         <Stack.Screen name="file-viewer" />
         <Stack.Screen name="reader" options={{ presentation: 'modal' }} />
         <Stack.Screen name="split" />
         <Stack.Screen name="shelf" />
-        <Stack.Screen name="games" />
         <Stack.Screen name="archive-viewer" />
         <Stack.Screen name="video-player" />
-        <Stack.Screen name="voice-speed" />
         <Stack.Screen name="slideshow" />
         <Stack.Screen name="group-calls" />
         <Stack.Screen name="group-info" />
 
         {/* Auth extras */}
-        <Stack.Screen name="setup-complete" />
         <Stack.Screen name="face-verify-new-device" />
 
         {/* Security & Privacy */}
@@ -818,7 +882,6 @@ function RootLayoutInner() {
         <Stack.Screen name="delete-account" />
         <Stack.Screen name="aiguardian" />
         <Stack.Screen name="backup-pin" />
-        <Stack.Screen name="duresspin" />
         <Stack.Screen name="permissions" />
         <Stack.Screen name="memoryshield" />
 
@@ -837,12 +900,10 @@ function RootLayoutInner() {
         <Stack.Screen name="docscanner" />
         <Stack.Screen name="notifications" />
         <Stack.Screen name="location" />
-        <Stack.Screen name="filevault" />
         <Stack.Screen name="vaultid" />
 
         {/* Mini Apps destinations */}
         <Stack.Screen name="encrypted-notes" />
-        <Stack.Screen name="current-location" />
       </Stack>
       {/* Offscreen, renders nothing the user sees: the only canvas on the
           device, so a PDF can be turned into a bubble preview.

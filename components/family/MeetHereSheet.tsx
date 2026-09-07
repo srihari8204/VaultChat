@@ -270,9 +270,9 @@ export default function MeetHereSheet({ members, myPos, destination, onDestinati
           <View style={[st.sum, { borderTopColor: G.line }]}>
             {summary.nearest && (
               <Text style={{ color: colors.textDim, fontSize: 12 }}>
-                Nearest <Text style={{ color: colors.text, fontWeight: '700' }}>{summary.nearest.name}</Text>
+                Nearest <Text numberOfLines={1} style={{ color: colors.text, fontWeight: '700' }}>{summary.nearest.name}</Text>
                 {summary.farthest && summary.farthest.id !== summary.nearest.id
-                  ? <> · Farthest <Text style={{ color: colors.text, fontWeight: '700' }}>{summary.farthest.name}</Text></>
+                  ? <> · Farthest <Text numberOfLines={1} style={{ color: colors.text, fontWeight: '700' }}>{summary.farthest.name}</Text></>
                   : null}
               </Text>
             )}

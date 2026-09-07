@@ -459,7 +459,7 @@ export default function VaultFeaturesScreen() {
             <View key={key} style={styles.toggleRow}>
               <Text style={styles.toggleIcon}>{icon}</Text>
               <View style={styles.toggleInfo}>
-                <Text style={styles.toggleTitle}>{title}</Text>
+                <Text numberOfLines={1} style={styles.toggleTitle}>{title}</Text>
                 <Text style={styles.toggleDesc}>{desc}</Text>
               </View>
               <Switch

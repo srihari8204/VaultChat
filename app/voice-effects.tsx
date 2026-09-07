@@ -123,7 +123,7 @@ export default function VoiceEffectsScreen() {
         {/* Preview area */}
         <View style={s.previewCard}>
           <Text style={{ fontSize: 40 }}>{currentEffect?.icon}</Text>
-          <Text style={[s.effectName, { color: currentEffect?.color }]}>{currentEffect?.name}</Text>
+          <Text numberOfLines={1} style={[s.effectName, { color: currentEffect?.color }]}>{currentEffect?.name}</Text>
           <Text style={s.effectDesc}>{currentEffect?.desc}</Text>
 
           {/* Record button */}
@@ -167,7 +167,7 @@ export default function VoiceEffectsScreen() {
               style={[s.effectCard, selected === e.id && { borderColor: e.color, backgroundColor: e.color + '15' }]}
               onPress={() => setSelected(e.id)}>
               <Text style={{ fontSize: 28 }}>{e.icon}</Text>
-              <Text style={[s.gridName, selected === e.id && { color: e.color }]}>{e.name}</Text>
+              <Text numberOfLines={1} style={[s.gridName, selected === e.id && { color: e.color }]}>{e.name}</Text>
               <Text style={s.gridDesc}>{e.desc}</Text>
               {e.id !== 'none' && (
                 <View style={s.paramRow}>

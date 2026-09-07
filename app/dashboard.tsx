@@ -156,7 +156,7 @@ function DashboardContent() {
                 </View>
                 <View style={{flex:1}}>
                   <View style={{flexDirection:'row',alignItems:'center',gap:8,marginBottom:4}}>
-                    <Text style={{color:colors.text,fontSize:12,fontWeight:'700'}}>{c.name}</Text>
+                    <Text numberOfLines={1} style={{color:colors.text,fontSize:12,fontWeight:'700'}}>{c.name}</Text>
                     <View style={{backgroundColor:col+'18',borderRadius:5,paddingHorizontal:5,paddingVertical:2,borderWidth:1,borderColor:col}}>
                       <Text style={{color:col,fontSize:7,fontWeight:'800',letterSpacing:1}}>{c.ok?'OK':'REVIEW'}</Text>
                     </View>

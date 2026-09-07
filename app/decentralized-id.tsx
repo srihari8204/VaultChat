@@ -123,7 +123,7 @@ export default function DecentralizedIDScreen() {
               <View style={{ flexDirection: 'row', gap: 10, marginBottom: 12 }}>
                 <View style={st.metaBox}>
                   <Text style={{ color: C.dim, fontSize: 9 }}>NAME</Text>
-                  <Text style={{ color: C.text, fontSize: 13, fontWeight: '700' }}>{did.displayName}</Text>
+                  <Text numberOfLines={1} style={{ color: C.text, fontSize: 13, fontWeight: '700' }}>{did.displayName}</Text>
                 </View>
                 <View style={st.metaBox}>
                   <Text style={{ color: C.dim, fontSize: 9 }}>KEY FINGERPRINT</Text>
@@ -180,7 +180,7 @@ export default function DecentralizedIDScreen() {
               <View key={i} style={st.benefitCard}>
                 <Text style={{ fontSize: 24 }}>{b.icon}</Text>
                 <View style={{ flex: 1 }}>
-                  <Text style={{ color: C.text, fontSize: 13, fontWeight: '700' }}>{b.title}</Text>
+                  <Text numberOfLines={1} style={{ color: C.text, fontSize: 13, fontWeight: '700' }}>{b.title}</Text>
                   <Text style={{ color: C.dim, fontSize: 11, marginTop: 2 }}>{b.desc}</Text>
                 </View>
               </View>

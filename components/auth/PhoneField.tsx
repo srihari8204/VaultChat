@@ -72,7 +72,7 @@ export function PhoneField({
                   onPress={() => { onChange(c.code, national); setPick(false); }}
                 >
                   <Text style={s.flag}>{c.flag}</Text>
-                  <Text style={s.countryName}>{c.name}</Text>
+                  <Text numberOfLines={1} style={s.countryName}>{c.name}</Text>
                   <Text style={s.codeTxt}>{c.code}</Text>
                 </TouchableOpacity>
               ))}

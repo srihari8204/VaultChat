@@ -249,7 +249,7 @@ export default function ContactInfoScreen() {
               presence={peer?.online ? 'online' : null} ring />
           </View>
 
-          <Text style={s.heroName}>{displayName}</Text>
+          <Text numberOfLines={1} style={s.heroName}>{displayName}</Text>
           <Text style={[s.heroStatus, peer?.online && { color: colors.online }]}>{lastSeenText()}</Text>
           {!!peer?.email && <Text style={s.heroPhone}>{peer.email}</Text>}
         </View>

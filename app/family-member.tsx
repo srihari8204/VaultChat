@@ -458,7 +458,7 @@ export default function FamilyMemberScreen() {
                 <Ionicons name="location" size={15} color={here ? colors.success : colors.textDim} />
               </View>
               <View style={{ flex: 1 }}>
-                <Text style={{ color: colors.text, fontSize: 14, fontWeight: '600' }}>{p.name}</Text>
+                <Text numberOfLines={1} style={{ color: colors.text, fontSize: 14, fontWeight: '600' }}>{p.name}</Text>
                 <Text style={{ color: colors.textDim, fontSize: 11.5 }}>
                   {p.enabled === false ? 'Alerts off' : `${p.radiusM} m radius`}
                   {/* BOTH numbers, each labelled, because they answer different

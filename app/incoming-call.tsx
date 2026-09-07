@@ -209,7 +209,7 @@ export default function IncomingCallScreen() {
       <View style={S.body}>
         <Text style={S.label}>{isWaiting ? 'On another call' : type === 'video' ? 'Incoming video call' : 'Incoming voice call'}</Text>
         <View style={S.avatar}><Text style={S.avatarTxt}>{initial}</Text></View>
-        <Text style={S.name}>{displayName}</Text>
+        <Text numberOfLines={1} style={S.name}>{displayName}</Text>
         {isWaiting && <Text style={S.label}>{type === 'video' ? 'Video call' : 'Voice call'} waiting…</Text>}
       </View>
 

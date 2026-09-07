@@ -78,7 +78,7 @@ export default function LedgerDetail() {
           </View>
           <TouchableOpacity style={{ flex: 1 }} activeOpacity={0.7}
             onPress={() => router.push({ pathname: '/finance/customer', params: { name: e.name } })}>
-            <Text style={s.name}>{e.name}</Text>
+            <Text numberOfLines={1} style={s.name}>{e.name}</Text>
             <Text style={s.mobile}>{e.mobile ? `${e.mobile} · ` : ''}View profile ›</Text>
           </TouchableOpacity>
           <Pill label={sc.label} fg={sc.fg} bg={sc.bg} />

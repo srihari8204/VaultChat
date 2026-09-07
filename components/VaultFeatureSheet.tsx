@@ -97,7 +97,7 @@ export default function VaultFeatureSheet({ visible, onClose, chatId }: Props) {
 
               <View style={{ flex: 1 }}>
                 <View style={s.optTitleRow}>
-                  <Text style={s.optTitle}>{opt.title}</Text>
+                  <Text numberOfLines={1} style={s.optTitle}>{opt.title}</Text>
                   <View style={[s.badge, { backgroundColor: `${opt.color}15`, borderColor: `${opt.color}30` }]}>
                     <Text style={[s.badgeTxt, { color: opt.color }]}>{opt.badge}</Text>
                   </View>

@@ -334,7 +334,7 @@ export default function FamilyPlacesScreen() {
                     accessibilityLabel={`Measure me from ${p.name}${on ? ', selected' : ''}`}
                     style={[st.rchip, { borderColor: on ? colors.primary : G.chipEdge, backgroundColor: on ? brandAlpha(0.14) : G.paneFaint }]}
                   >
-                    <Text style={{ color: on ? G.accentText : colors.text, fontWeight: on ? '700' : '500', fontSize: 13 }}>
+                    <Text numberOfLines={1} style={{ color: on ? G.accentText : colors.text, fontWeight: on ? '700' : '500', fontSize: 13 }}>
                       {p.name}
                     </Text>
                   </TouchableOpacity>

@@ -592,7 +592,7 @@ export default function ChatsScreen() {
           stickySectionHeadersEnabled
           renderSectionHeader={({ section }) =>
             sections.length > 1 || section.title !== 'All Chats'
-              ? <Text style={S.sectionHeader}>{section.title}</Text> : <View style={{ height: 4 }} />}
+              ? <Text numberOfLines={1} style={S.sectionHeader}>{section.title}</Text> : <View style={{ height: 4 }} />}
           renderItem={({ item }) => (
             <ChatRow
               chat={item}

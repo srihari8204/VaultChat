@@ -158,7 +158,7 @@ function Refusal({ title, body, onBack, colors }: {
     <View style={[st.refusal, { backgroundColor: colors.bg }]}>
       <Stack.Screen options={{ headerShown: false }} />
       <Ionicons name="git-compare-outline" size={44} color={colors.textDim} />
-      <Text style={[st.refusalTitle, { color: colors.text }]}>{title}</Text>
+      <Text numberOfLines={1} style={[st.refusalTitle, { color: colors.text }]}>{title}</Text>
       <Text style={[st.refusalBody, { color: colors.textDim }]}>{body}</Text>
       <TouchableOpacity onPress={onBack} style={[st.refusalBtn, { borderColor: colors.glassStroke }]}>
         <Text style={{ color: colors.text, fontWeight: '700' }}>Go back</Text>

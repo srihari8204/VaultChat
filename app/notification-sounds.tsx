@@ -85,7 +85,7 @@ export default function NotificationSoundsScreen() {
             <TouchableOpacity key={rt.id} style={s.row} onPress={() => pickRingtone(rt.id)} activeOpacity={0.7}>
               <Ionicons name={on ? 'radio-button-on' : 'radio-button-off'} size={22} color={on ? colors.primary : colors.textDim} />
               <View style={s.rowBody}>
-                <Text style={s.rowTitle}>{rt.name}</Text>
+                <Text numberOfLines={1} style={s.rowTitle}>{rt.name}</Text>
               </View>
               <Ionicons name="play-circle-outline" size={24} color={colors.textDim} />
             </TouchableOpacity>

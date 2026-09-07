@@ -119,7 +119,7 @@ export default function TrustedContactsScreen() {
                   <Text style={s.contactAvatarTxt}>{(item.name || '?')[0].toUpperCase()}</Text>
                 </View>
                 <View style={{ flex: 1 }}>
-                  <Text style={s.contactName}>{item.name || 'Contact'}</Text>
+                  <Text numberOfLines={1} style={s.contactName}>{item.name || 'Contact'}</Text>
                   <Text style={s.contactId}>@{item.vaultId || '—'}</Text>
                 </View>
                 <View style={[s.statusDot, { backgroundColor: item.online ? colors.online : colors.textFaint }]} />

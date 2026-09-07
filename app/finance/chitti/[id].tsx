@@ -250,7 +250,7 @@ export default function ChittiDetail() {
                 <View style={s.winnerWrap}>
                   {members.map(m => (
                     <TouchableOpacity key={m.id} style={[s.winnerChip, winnerId === m.id && s.winnerChipOn]} onPress={() => setWinnerId(m.id)}>
-                      <Text style={[s.winnerTxt, winnerId === m.id && { color: '#fff' }]}>{m.name}</Text>
+                      <Text numberOfLines={1} style={[s.winnerTxt, winnerId === m.id && { color: '#fff' }]}>{m.name}</Text>
                     </TouchableOpacity>
                   ))}
                 </View>

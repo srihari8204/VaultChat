@@ -43,7 +43,7 @@ export default function CustomerProfile() {
         <View style={s.head}>
           <View style={s.avatar}><Text style={s.avatarTxt}>{String(name ?? '?').charAt(0).toUpperCase()}</Text></View>
           <View style={{ flex: 1 }}>
-            <Text style={s.name}>{name}</Text>
+            <Text numberOfLines={1} style={s.name}>{name}</Text>
             {mobile ? <Text style={s.mobile}>{mobile}</Text> : null}
           </View>
         </View>

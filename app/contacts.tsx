@@ -288,7 +288,7 @@ export default function ContactsScreen() {
           data={flat}
           keyExtractor={(it, idx) => it._header ? it.key : `${it._section}-${it.id ?? it.contactId}-${idx}`}
           renderItem={({ item }) => item._header
-            ? <Text style={S.sectionHeader}>{item.title}</Text>
+            ? <Text numberOfLines={1} style={S.sectionHeader}>{item.title}</Text>
             : renderItem({ item, section: item._section })}
         />
       )}

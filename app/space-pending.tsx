@@ -89,7 +89,7 @@ export default function SpacePendingScreen() {
             style={s.rowBetween}
             onPress={() => router.push({ pathname: '/space-run' as any, params: { spaceId, runId: g.runId, groupType: params.groupType ?? '' } })}
           >
-            <Text style={s.cardTitle}>{g.name}</Text>
+            <Text numberOfLines={1} style={s.cardTitle}>{g.name}</Text>
             <Text style={s.link}>{g.items.length} waiting</Text>
           </TouchableOpacity>
 

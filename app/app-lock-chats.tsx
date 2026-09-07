@@ -216,7 +216,7 @@ export default function AppLockChatsScreen() {
         </View>
 
         <View style={s.chatInfo}>
-          <Text style={s.chatName}>{item.name}</Text>
+          <Text numberOfLines={1} style={s.chatName}>{item.name}</Text>
           <Text style={s.chatPreview}>
             {isLocked ? '\uD83D\uDD12 Chat locked' : item.lastMessage || 'No messages'}
           </Text>

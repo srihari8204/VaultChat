@@ -239,7 +239,7 @@ export default function LocationSharingScreen() {
           <TouchableOpacity key={opt.mode} style={s.modeCard} onPress={opt.onPress} disabled={!chatId}>
             <View style={s.modeIcon}><Ionicons name={opt.icon} size={24} color={colors.text} /></View>
             <View style={{ flex: 1 }}>
-              <Text style={s.optTitle}>{opt.title}</Text>
+              <Text numberOfLines={1} style={s.optTitle}>{opt.title}</Text>
               <Text style={s.sub}>{opt.desc}</Text>
             </View>
             <Ionicons name="chevron-forward" size={18} color={colors.textFaint} />

@@ -116,7 +116,7 @@ export default function SearchScreen() {
           sections={sections}
           keyExtractor={(item, i) => (item.id ?? '') + ':' + i}
           contentContainerStyle={{ paddingBottom: 40 }}
-          renderSectionHeader={({ section }) => <Text style={S.sectionLabel}>{section.title.toUpperCase()}</Text>}
+          renderSectionHeader={({ section }) => <Text numberOfLines={1} style={S.sectionLabel}>{section.title.toUpperCase()}</Text>}
           renderItem={({ item, section }) => {
             if (section.kind === 'chat') {
               const c = item as ChatSummary;

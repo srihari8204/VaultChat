@@ -97,6 +97,43 @@ Reverse both edits (`13000`→`8095`, `dc stop api`) to return to Go.
 
 ## Gotchas learned in production
 
+- **`sudo -u postgres psql` on the box is NOT production.** The host cluster
+  (`postgresql@16-main`, `127.0.0.1:5432`) still holds a `vaultchat` database
+  left over from before the July 2026 cutover — migration **060**, 6 users,
+  newest row 2026-07-22. Production is the **container**: `go-api` →
+  `DB_HOST=pgbouncer` → `vaultchat-pgbouncer-1` → `vaultchat-postgres-1`, at
+  migration **126**. Reading the host copy makes prod look ~66 migrations behind
+  and has already misled one deploy. Always:
+
+  ```bash
+  dc exec postgres psql -U vaultchat -d vaultchat -tAc 'SELECT max(version) FROM schema_migrations'
+  ```
+
+  **Defused 2026-09-07**, so the command above now fails loudly instead of
+  lying: the stale database was renamed to `vaultchat_stale_20260722`, and the
+  host `pgbouncer.service` (`0.0.0.0:6432`, which proxied *only* to it and had
+  logged 0 logins in 7 days) was stopped and disabled. `sudo -u postgres psql -d
+  vaultchat` now answers `FATAL: database "vaultchat" does not exist`. Prod was
+  untouched — go-api never restarted, and the container `pgbouncer`/`postgres`
+  pair is a different thing entirely, despite the shared names.
+
+  A `pg_dump -Fc` of the stale database is in
+  `/root/stale-host-pg/vaultchat-hoststale-20260907.dump`. The renamed database
+  still exists and still holds 6 users' PII; drop it once the dump is somewhere
+  you trust.
+
+- **The migration files are not the schema.** Later migrations drop tables that
+  earlier ones create, so grepping `CREATE TABLE` over
+  `vaultchat-backend/migrations/*.sql` yields tables that do not exist —
+  `message_reactions` (dropped in 056), `vaultlens_face` and
+  `vaultlens_generation` (098). One `DELETE FROM` against a dropped table aborts
+  the whole transaction with 42P01. Check the live catalog before writing
+  multi-table SQL:
+
+  ```sql
+  SELECT t FROM unnest(ARRAY['a','b','c']) t WHERE to_regclass('public.'||t) IS NULL;
+  ```
+
 - **Never drop the `-f` flags** — a bare `docker compose up` recreates
   postgres/redis with public bench ports (`0.0.0.0:15432/16379`) and starts
   kafka. Always use `dc`.

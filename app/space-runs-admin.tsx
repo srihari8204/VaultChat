@@ -311,7 +311,7 @@ export default function SpaceRunsAdminScreen() {
                       name={on ? 'radio-button-on' : 'radio-button-off'}
                       size={19} color={on ? colors.primary : colors.textDim}
                     />
-                    <Text style={[s.pickText, on && { color: colors.text, fontWeight: '600' }]}>{m.name}</Text>
+                    <Text numberOfLines={1} style={[s.pickText, on && { color: colors.text, fontWeight: '600' }]}>{m.name}</Text>
                   </TouchableOpacity>
                 );
               })}
@@ -359,7 +359,7 @@ export default function SpaceRunsAdminScreen() {
                       name={on ? 'checkbox' : 'square-outline'}
                       size={19} color={on ? colors.primary : colors.textDim}
                     />
-                    <Text style={[s.pickText, on && { color: colors.text }]}>{entry.displayName}</Text>
+                    <Text numberOfLines={1} style={[s.pickText, on && { color: colors.text }]}>{entry.displayName}</Text>
                   </TouchableOpacity>
                 );
               })}

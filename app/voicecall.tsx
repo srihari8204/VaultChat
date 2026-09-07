@@ -291,7 +291,7 @@ function VoiceCallEngine() {
         <View style={S.avatarWrap}>
           <View style={S.avatar}><Text style={S.avatarTxt}>{initial}</Text></View>
         </View>
-        <Text style={S.name}>{displayName}</Text>
+        <Text numberOfLines={1} style={S.name}>{displayName}</Text>
         {status === 'connected'
           ? <CallTimer style={S.status} startedAt={connectedAt} />
           : <Text style={S.status}>{statusText}</Text>}
@@ -650,7 +650,7 @@ function VoiceCallLegacy() {
         <View style={S.avatarWrap}>
           <View style={S.avatar}><Text style={S.avatarTxt}>{initial}</Text></View>
         </View>
-        <Text style={S.name}>{peerName || 'VaultChat user'}</Text>
+        <Text numberOfLines={1} style={S.name}>{peerName || 'VaultChat user'}</Text>
         {state === 'connected'
           ? <CallTimer style={S.status} startedAt={connectedAtRef.current} />
           : <Text style={S.status}>{statusText}</Text>}

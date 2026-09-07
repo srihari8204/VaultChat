@@ -369,7 +369,7 @@ export default function SpaceRunDriverScreen() {
 
       <View style={s.header}>
         <View style={{ flex: 1 }}>
-          <Text style={s.vehicle}>{run.vehicleLabel || run.name}</Text>
+          <Text numberOfLines={1} style={s.vehicle}>{run.vehicleLabel || run.name}</Text>
           <Text style={s.muted}>
             {prog.total - prog.pending} of {prog.total} done
             {prog.absent > 0 ? ` · ${prog.absent} not travelling` : ''}
@@ -432,7 +432,7 @@ export default function SpaceRunDriverScreen() {
             {here.map((r) => (
               <View key={r.riderId} style={[s.rider, r.state !== 'pending' && s.riderDone]}>
                 <View style={{ flex: 1 }}>
-                  <Text style={s.riderName}>{r.displayName}</Text>
+                  <Text numberOfLines={1} style={s.riderName}>{r.displayName}</Text>
                   {r.state !== 'pending' && <Text style={s.riderState}>{stateLabel(r.state)}</Text>}
                 </View>
 

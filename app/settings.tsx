@@ -508,7 +508,7 @@ function ToggleRow({
   return (
     <View style={S.toggleRow}>
       <View style={{ flex: 1 }}>
-        <Text style={S.toggleTitle}>{title}</Text>
+        <Text numberOfLines={1} style={S.toggleTitle}>{title}</Text>
         <Text style={S.toggleSub}>{sub}</Text>
       </View>
       {busy ? (

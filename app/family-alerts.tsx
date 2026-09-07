@@ -142,7 +142,7 @@ export default function FamilyAlertsScreen() {
         }
         renderSectionHeader={({ section }) => (
           // Transparent: a solid strip over the gradient ground reads as a bug.
-          <Text style={[st.sec, { color: colors.textDim }]}>{section.title}</Text>
+          <Text numberOfLines={1} style={[st.sec, { color: colors.textDim }]}>{section.title}</Text>
         )}
         renderItem={({ item }) => (
           <TouchableOpacity

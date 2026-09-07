@@ -92,7 +92,7 @@ export default function LastSeenPrivacyScreen() {
             <View key={row.key} style={s.card}>
               <View style={s.sectionHeader}>
                 <Ionicons name={row.icon} size={20} color={colors.textDim} />
-                <Text style={s.cardTitle}>{row.title}</Text>
+                <Text numberOfLines={1} style={s.cardTitle}>{row.title}</Text>
                 {busy === row.key && <ActivityIndicator color={colors.primary} style={{ marginLeft: 'auto' }} />}
               </View>
               <Text style={s.cardInfo}>{row.info}</Text>

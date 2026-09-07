@@ -181,7 +181,7 @@ function NotificationsContent() {
                 <View key={d.key} style={S.settingRow}>
                   <View style={{width:40,height:40,borderRadius:20,backgroundColor:'rgba(6,14,34,0.9)',justifyContent:'center',alignItems:'center',borderWidth:1,borderColor:'rgba(255,255,255,0.06)'}}><Text style={{fontSize:20}}>{d.icon}</Text></View>
                   <View style={{flex:1}}>
-                    <Text style={{color:colors.text,fontSize:13,fontWeight:'700'}}>{d.title}</Text>
+                    <Text numberOfLines={1} style={{color:colors.text,fontSize:13,fontWeight:'700'}}>{d.title}</Text>
                     <Text style={{color:colors.textFaint,fontSize:10,marginTop:2}}>{d.desc}</Text>
                   </View>
                   <Switch value={!!settings[d.key]} onValueChange={()=>toggleSetting(d.key)} trackColor={{false:'rgba(255,255,255,0.06)',true:colors.primary+'66'}} thumbColor={settings[d.key]?colors.primary:'rgba(255,255,255,0.3)'}/>
@@ -212,7 +212,7 @@ function NotificationsContent() {
                     <View key={c.userId} style={[S.settingRow,{borderColor:'rgba(239,68,68,0.15)'}]}>
                       <Text style={{fontSize:28}}>🛟</Text>
                       <View style={{flex:1}}>
-                        <Text style={{color:colors.text,fontSize:13,fontWeight:'700'}}>{c.name || c.vaultId || 'Contact'}</Text>
+                        <Text numberOfLines={1} style={{color:colors.text,fontSize:13,fontWeight:'700'}}>{c.name || c.vaultId || 'Contact'}</Text>
                         {c.vaultId && <Text style={{color:colors.textFaint,fontSize:11,marginTop:2}}>@{c.vaultId}</Text>}
                       </View>
                       <View style={{backgroundColor:(c.online?colors.accent:colors.textFaint)+'18',borderRadius:8,paddingHorizontal:8,paddingVertical:4,borderWidth:1,borderColor:c.online?colors.accent:colors.textFaint}}><Text style={{color:c.online?colors.accent:colors.textFaint,fontSize:9,fontWeight:'700'}}>{c.online?'ONLINE':'OFFLINE'}</Text></View>

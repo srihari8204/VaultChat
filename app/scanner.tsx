@@ -97,7 +97,7 @@ const AppChip = ({ app, active, onPress }: any) => (
     active && { backgroundColor:`${app.color}20`, borderColor:`${app.color}60` }
   ]}>
     <Text style={s.appIcon}>{app.icon}</Text>
-    <Text style={[s.appName, active && { color: app.color }]}>{app.name}</Text>
+    <Text numberOfLines={1} style={[s.appName, active && { color: app.color }]}>{app.name}</Text>
   </TouchableOpacity>
 );
 
@@ -320,7 +320,7 @@ export default function ScannerScreen() {
               {FILTERS.map((f,i) => (
                 <TouchableOpacity key={i} onPress={() => setActiveFilter(i)}
                   style={[s.filterBtn, activeFilter===i && s.filterBtnActive]}>
-                  <Text style={[s.filterBtnText, activeFilter===i && { color:"#fff" }]}>{f.name}</Text>
+                  <Text numberOfLines={1} style={[s.filterBtnText, activeFilter===i && { color:"#fff" }]}>{f.name}</Text>
                 </TouchableOpacity>
               ))}
             </View>
@@ -425,7 +425,7 @@ export default function ScannerScreen() {
                   selectedApp===i && { borderColor:`${a.color}60`, backgroundColor:`${a.color}15` }
                 ]}>
                   <Text style={{ fontSize:22 }}>{a.icon}</Text>
-                  <Text style={[s.shareGridName, selectedApp===i && { color:a.color }]}>{a.name}</Text>
+                  <Text numberOfLines={1} style={[s.shareGridName, selectedApp===i && { color:a.color }]}>{a.name}</Text>
                 </TouchableOpacity>
               ))}
             </View>

@@ -1356,7 +1356,7 @@ function MessageBubble({
         activeOpacity={0.85}
       >
         {!isMine && member && !isSticker && !grouped && (
-          <Text style={S.senderTag}>{member.name || member.email || msg.senderId.slice(0, 8)}</Text>
+          <Text numberOfLines={1} style={S.senderTag}>{member.name || member.email || msg.senderId.slice(0, 8)}</Text>
         )}
 
         {/* Forwarded label */}

@@ -102,7 +102,7 @@ export function RulesSheet({
   return (
     <Sheet visible={visible} title="How this game plays" onClose={onClose}>
       <ScrollView style={{ maxHeight: 380 }} contentContainerStyle={{ gap: S[2] }}>
-        <Text style={{ color: C.text, fontSize: t.md, fontWeight: '800' }}>{r.title}</Text>
+        <Text numberOfLines={1} style={{ color: C.text, fontSize: t.md, fontWeight: '800' }}>{r.title}</Text>
         {r.sections.map(sec => (
           <React.Fragment key={sec.head}>
             <Text style={{ color: C.text, fontSize: t.md, fontWeight: '800' }}>{sec.head}</Text>

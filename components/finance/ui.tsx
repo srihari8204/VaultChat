@@ -380,7 +380,7 @@ export function EmptyState({ icon, title, sub }: { icon: IconName; title: string
   return (
     <View style={s.empty} accessible accessibilityLabel={sub ? `${title}. ${sub}` : title}>
       <View style={s.emptyIcon}><Ionicons name={icon} size={26} color={FIN.faint} /></View>
-      <Text style={s.emptyTitle}>{title}</Text>
+      <Text numberOfLines={1} style={s.emptyTitle}>{title}</Text>
       {sub ? <Text style={s.emptySub}>{sub}</Text> : null}
     </View>
   );
@@ -403,7 +403,7 @@ export function ErrorState({ title = 'Something went wrong', sub, onRetry }: {
       <View style={[s.emptyIcon, { backgroundColor: FIN.badSoft }]}>
         <Ionicons name="alert-circle-outline" size={26} color={FIN.bad} />
       </View>
-      <Text style={s.emptyTitle}>{title}</Text>
+      <Text numberOfLines={1} style={s.emptyTitle}>{title}</Text>
       {sub ? <Text style={s.emptySub}>{sub}</Text> : null}
       {onRetry ? <Btn label="Try again" kind="ghost" onPress={onRetry} style={{ marginTop: 12 }} /> : null}
     </View>

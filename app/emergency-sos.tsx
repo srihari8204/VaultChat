@@ -334,7 +334,7 @@ export default function EmergencySOSScreen() {
                   {selectedContacts.includes(contact.uid) && <Ionicons name="checkmark" size={14} color={colors.accent} />}
                 </View>
                 <View style={styles.contactInfo}>
-                  <Text style={styles.contactName}>{contact.name}</Text>
+                  <Text numberOfLines={1} style={styles.contactName}>{contact.name}</Text>
                   <Text style={styles.contactId}>@{contact.vaultId}</Text>
                 </View>
               </TouchableOpacity>

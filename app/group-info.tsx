@@ -316,7 +316,7 @@ export default function GroupInfoScreen() {
           </View>
         ) : (
           <TouchableOpacity disabled={!isAdmin} onPress={() => setRenaming(true)} activeOpacity={isAdmin ? 0.7 : 1}>
-            <Text style={S.groupName}>{chat.name || 'Untitled group'}</Text>
+            <Text numberOfLines={1} style={S.groupName}>{chat.name || 'Untitled group'}</Text>
           </TouchableOpacity>
         )}
         <Text style={S.subInfo}>{activeMembers.length} members</Text>

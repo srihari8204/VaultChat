@@ -152,7 +152,7 @@ export default function LiveJoinScreen() {
               same one a public live shows. A field that is actually optional but
               reads as required is a field people stop and think about, which is
               the cost this screen was supposed to avoid. */}
-          <Text style={s.sub}>
+          <Text numberOfLines={1} style={s.sub}>
             {name.trim()
               ? 'This is the name other viewers will see.'
               : 'Leave this blank to use your VaultChat name.'}

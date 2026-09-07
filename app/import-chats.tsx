@@ -482,7 +482,7 @@ export default function ImportChatsScreen() {
         {stage === 'failed' && failure && (
           <View style={s.center}>
             <View style={s.failIcon}><Ionicons name="alert-circle-outline" size={34} color={colors.danger} /></View>
-            <Text style={s.h1}>{FAIL_COPY[failure.reason].title}</Text>
+            <Text numberOfLines={1} style={s.h1}>{FAIL_COPY[failure.reason].title}</Text>
             <Text style={s.sub}>{FAIL_COPY[failure.reason].body}</Text>
             {!!failure.detail && <Text style={s.detail} numberOfLines={3}>{failure.detail}</Text>}
             <Text style={s.reassure}>Nothing was imported and nothing was uploaded.</Text>
@@ -663,7 +663,7 @@ function Preview({
           <Text style={s.ackTxt}>
             Yes — this WhatsApp conversation with{' '}
             <Text style={s.strong}>{parsed.counterpart || 'this person'}</Text> belongs in my
-            VaultChat chat with <Text style={s.strong}>{peerName}</Text>.
+            VaultChat chat with <Text numberOfLines={1} style={s.strong}>{peerName}</Text>.
           </Text>
         </TouchableOpacity>
       )}

@@ -345,7 +345,7 @@ export default function MiniAppsScreen() {
               <LinearGradient colors={app.gradient} style={styles.appIconWrap}>
                 <Text style={styles.appEmoji}>{app.icon}</Text>
               </LinearGradient>
-              <Text style={styles.appName}>{app.name}</Text>
+              <Text numberOfLines={1} style={styles.appName}>{app.name}</Text>
               {!app.route && <Text style={styles.comingSoon}>Soon</Text>}
             </TouchableOpacity>
           ))}
@@ -361,7 +361,7 @@ export default function MiniAppsScreen() {
               <LinearGradient colors={app.gradient} style={styles.appIconWrap}>
                 <Text style={styles.appEmoji}>{app.icon}</Text>
               </LinearGradient>
-              <Text style={styles.appName}>{app.name}</Text>
+              <Text numberOfLines={1} style={styles.appName}>{app.name}</Text>
             </TouchableOpacity>
           ))}
         </View>

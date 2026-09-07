@@ -206,7 +206,7 @@ export default function ChatWallpaperScreen() {
                   <LinearGradient colors={g.colors as [string, string, ...string[]]} style={[s.gradientTile, on && s.tileSelected]}>
                     {on && <Ionicons name="checkmark-circle" size={22} color={colors.primary} />}
                   </LinearGradient>
-                  <Text style={s.gradientLabel}>{g.name}</Text>
+                  <Text numberOfLines={1} style={s.gradientLabel}>{g.name}</Text>
                 </TouchableOpacity>
               );
             })}

@@ -331,7 +331,7 @@ function RiderCard({ rider, run, stops, reachedStopId, vehicle, colors, delayThr
 
   return (
     <View style={[s.card, s.hero]}>
-      <Text style={s.heroName}>{rider.displayName}</Text>
+      <Text numberOfLines={1} style={s.heroName}>{rider.displayName}</Text>
       <Text style={s.heroState}>{riderHeadline(rider.state, run)}</Text>
 
       {waiting && (

@@ -123,7 +123,7 @@ export default function SyncContactScreen() {
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
               <View style={s.avatar}><Text style={{ fontSize: 22 }}>👤</Text></View>
               <View style={{ flex: 1 }}>
-                <Text style={s.heading}>{synced.displayName || 'Contact'}</Text>
+                <Text numberOfLines={1} style={s.heading}>{synced.displayName || 'Contact'}</Text>
                 {!!synced.email && <Text style={s.sub}>{synced.email}</Text>}
                 {!!synced.phoneNumber && <Text style={s.sub}>{synced.phoneNumber}</Text>}
               </View>

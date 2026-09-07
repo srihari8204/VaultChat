@@ -48,7 +48,7 @@ export default function UpdateAmount() {
       <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
         <ScrollView contentContainerStyle={s.body} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
           <Card>
-            <Text style={s.who}>{e.name}</Text>
+            <Text numberOfLines={1} style={s.who}>{e.name}</Text>
             <RowLine k="Principal" v={formatINR(e.principal)} />
             <RowLine k="Current remaining" v={formatINR(e.remaining)} bold tone={e.remaining > 0 ? 'warn' : 'good'} />
             <RowLine k="Last updated" v={fmtDateTime(e.last_updated)} />

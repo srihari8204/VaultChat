@@ -98,7 +98,7 @@ export default function CommunitiesScreen() {
             <View>
               <View style={S.commHero}>
                 <View style={S.commIcon}><Ionicons name="people" size={32} color="#fff" /></View>
-                <Text style={S.commName}>{detail.name}</Text>
+                <Text numberOfLines={1} style={S.commName}>{detail.name}</Text>
                 {!!detail.description && <Text style={S.commDesc}>{detail.description}</Text>}
               </View>
               <Text style={S.sectionLabel}>GROUPS</Text>

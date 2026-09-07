@@ -87,7 +87,7 @@ export default function GroupJoinScreen() {
           <View style={[st.icon, { backgroundColor: accent + '22', borderColor: accent }]}>
             <Ionicons name={icon} size={34} color={accent} />
           </View>
-          <Text style={{ color: colors.text, fontWeight: '800', fontSize: 21, marginTop: 14, textAlign: 'center' }}>
+          <Text numberOfLines={1} style={{ color: colors.text, fontWeight: '800', fontSize: 21, marginTop: 14, textAlign: 'center' }}>
             {name}
           </Text>
           <Text style={{ color: colors.textDim, fontSize: 13.5, marginTop: 4 }}>{type.label}</Text>

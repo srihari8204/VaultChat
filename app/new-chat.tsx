@@ -108,7 +108,7 @@ export default function NewChatScreen() {
   const ActionRow = ({ icon, title, onPress }: { icon: any; title: string; onPress: () => void }) => (
     <TouchableOpacity style={S.action} onPress={onPress} activeOpacity={0.7}>
       <View style={S.actionIcon}><Ionicons name={icon} size={22} color="#fff" /></View>
-      <Text style={S.actionTitle}>{title}</Text>
+      <Text numberOfLines={1} style={S.actionTitle}>{title}</Text>
     </TouchableOpacity>
   );
 

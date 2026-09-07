@@ -342,7 +342,7 @@ export default function LocationLockScreen() {
                   onPress={() => { setPoint({ name: p.name, coords: p.coords }); setRadius(clampRadius(p.radiusM)); setCustomR(''); setPinMode(false); }}
                   style={[st.chip, { borderColor: point?.name === p.name ? colors.primary : colors.border, flexDirection: 'row', alignItems: 'center', gap: 5 }]}>
                   <Ionicons name="bookmark" size={12} color={colors.primary} />
-                  <Text style={{ color: colors.text, fontSize: 12.5 }}>{p.name}</Text>
+                  <Text numberOfLines={1} style={{ color: colors.text, fontSize: 12.5 }}>{p.name}</Text>
                 </TouchableOpacity>
               ))}
             </View>

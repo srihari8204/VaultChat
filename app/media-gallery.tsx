@@ -332,7 +332,7 @@ export default function MediaGalleryScreen() {
           keyExtractor={(row, i) => `${row.map(m => m.id).join('-')}-${i}`}
           stickySectionHeadersEnabled={false}
           contentContainerStyle={{ padding: 8 }}
-          renderSectionHeader={({ section }) => <Text style={s.sectionHdr}>{section.title}</Text>}
+          renderSectionHeader={({ section }) => <Text numberOfLines={1} style={s.sectionHdr}>{section.title}</Text>}
           renderItem={({ item: row }) => (
             <View style={{ flexDirection: 'row' }}>
               {row.map(m => (

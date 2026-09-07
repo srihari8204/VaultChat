@@ -480,7 +480,7 @@ function ShopCard({ shop, onOpen, isFav, onToggleFav }: {
     <TouchableOpacity style={s.card} onPress={onOpen} activeOpacity={0.8}>
       <View style={s.shopIcon}><Text style={{ fontSize: 22 }}>{categoryIcon(shop.category)}</Text></View>
       <View style={{ flex: 1 }}>
-        <Text style={s.cardTitle}>{shop.name}</Text>
+        <Text numberOfLines={1} style={s.cardTitle}>{shop.name}</Text>
         <Text style={s.cardSub}>
           {categoryLabel(shop.category)}
           {shop.ratingCount > 0 ? `  ·  ⭐ ${shop.rating} (${shop.ratingCount})` : ''}
@@ -620,7 +620,7 @@ function ShopFlow({ shop, cart, setCart, onBack, onPlaced, onLedger, isFav, onTo
           <View style={s.card}>
             <View style={s.shopIcon}><Text style={{ fontSize: 26 }}>{categoryIcon(shop.category)}</Text></View>
             <View style={{ flex: 1 }}>
-              <Text style={s.cardTitle}>{shop.name}</Text>
+              <Text numberOfLines={1} style={s.cardTitle}>{shop.name}</Text>
               <Text style={s.cardSub}>
                 {categoryLabel(shop.category)}{shop.distanceKm != null ? ` · ${formatDistance(shop.distanceKm)}` : ''}
                 {shop.ratingCount > 0 ? `  ·  ⭐ ${shop.rating} (${shop.ratingCount})` : ''}
@@ -1300,7 +1300,7 @@ function OrderTrack({ orderId, onBack }: { orderId: string; onBack: () => void }
             {/* who the order is with — previously the tracking screen never said */}
             {!!order.shop?.name && (
               <View style={s.panel}>
-                <Text style={s.panelTitle}>{order.shop.name}</Text>
+                <Text numberOfLines={1} style={s.panelTitle}>{order.shop.name}</Text>
                 {!!order.shop.ownerName && <Text style={s.cardSub}>{order.shop.ownerName}</Text>}
                 {!!order.shop.address && <Text style={s.cardSub}>📍 {order.shop.address}</Text>}
                 {!!order.shop.phone && (
@@ -1523,7 +1523,7 @@ function CustomerProfile({ me }: { me: { id: string; name: string } | null }) {
       <View style={s.card}>
         <View style={s.shopIcon}><Ionicons name="person" size={22} color={C.green} /></View>
         <View style={{ flex: 1 }}>
-          <Text style={s.cardTitle}>{me?.name ?? 'You'}</Text>
+          <Text numberOfLines={1} style={s.cardTitle}>{me?.name ?? 'You'}</Text>
           <Text style={s.cardSub}>Customer · Always free</Text>
         </View>
       </View>
@@ -1589,7 +1589,7 @@ function CustomerProfile({ me }: { me: { id: string; name: string } | null }) {
       {lists.map((l) => (
         <View key={l.id} style={s.card}>
           <View style={{ flex: 1 }}>
-            <Text style={s.cardTitle}>{l.name}</Text>
+            <Text numberOfLines={1} style={s.cardTitle}>{l.name}</Text>
             <Text style={s.cardSub} numberOfLines={2}>{l.items.split('\n').filter(Boolean).join(' · ') || 'Empty'}</Text>
           </View>
           <TouchableOpacity onPress={() => shareList(l)} hitSlop={8} style={{ padding: 4 }}>
@@ -1698,7 +1698,7 @@ function OwnerDashboard({ shop, onSettings, onCoupons, onSuppliers, onPlans, onR
       <Modal visible={qr} transparent animationType="fade" onRequestClose={() => setQr(false)}>
         <View style={s.modalWrap}>
           <View style={s.modalCard}>
-            <Text style={s.modalTitle}>{shop.name}</Text>
+            <Text numberOfLines={1} style={s.modalTitle}>{shop.name}</Text>
             <Text style={[s.hint, { textAlign: 'center' }]}>Customers scan this to open your shop</Text>
             <View style={{ alignItems: 'center', marginVertical: 18, backgroundColor: '#FFFFFF', padding: 14, borderRadius: 14 }}>   {/* theme-exempt: a QR needs a real white quiet zone */}
               <QRCode value={deepLink} size={190} color={C.navy} backgroundColor="#ffffff" />
@@ -1720,7 +1720,7 @@ function OwnerDashboard({ shop, onSettings, onCoupons, onSuppliers, onPlans, onR
         <View style={s.shopIcon}><Text style={{ fontSize: 22 }}>{categoryIcon(shop.category)}</Text></View>
         <View style={{ flex: 1 }}>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-            <Text style={s.cardTitle}>{shop.name}</Text>
+            <Text numberOfLines={1} style={s.cardTitle}>{shop.name}</Text>
             {shop.verified && <Ionicons name="checkmark-circle" size={16} color={C.blue} />}
             <View style={[s.planTag, shop.plan === 'pro' ? s.planPro : s.planFree]}>
               <Text style={[s.planTagText, shop.plan === 'pro' && { color: '#fff' }]}>{shop.plan === 'pro' ? '★ PRO' : 'FREE'}</Text>
@@ -1887,7 +1887,7 @@ function OwnerReports({ plan, currency, onBack, onUpgrade }: {
     const max = Math.max(1, ...rows.map((d) => d.sales));
     return (
       <>
-        <Text style={s.sectionLabel}>{title}</Text>
+        <Text numberOfLines={1} style={s.sectionLabel}>{title}</Text>
         {rows.length === 0 && <Empty icon="bar-chart-outline" text="No completed orders yet." />}
         {rows.map((d) => (
           <View key={d.date} style={{ marginBottom: 10 }}>
@@ -1952,7 +1952,7 @@ function OwnerReports({ plan, currency, onBack, onUpgrade }: {
               {(data.topProducts ?? []).map((p, i) => (
                 <View key={p.name} style={s.card}>
                   <View style={s.rankDot}><Text style={s.rankDotText}>{i + 1}</Text></View>
-                  <Text style={[s.cardTitle, { flex: 1 }]}>{p.name}</Text>
+                  <Text numberOfLines={1} style={[s.cardTitle, { flex: 1 }]}>{p.name}</Text>
                   <View style={{ alignItems: 'flex-end' }}>
                     <Text style={s.price}>{p.qty} sold</Text>
                     {p.revenue != null && <Text style={s.cardSub}>{money(p.revenue)}</Text>}
@@ -1973,7 +1973,7 @@ function OwnerReports({ plan, currency, onBack, onUpgrade }: {
               <Text style={s.sectionLabel}>Product performance · 30 days</Text>
               {(data.productPerformance ?? []).map((p) => (
                 <View key={p.name} style={s.card}>
-                  <Text style={[s.cardTitle, { flex: 1 }]}>{p.name}</Text>
+                  <Text numberOfLines={1} style={[s.cardTitle, { flex: 1 }]}>{p.name}</Text>
                   <View style={{ alignItems: 'flex-end' }}>
                     <Text style={s.price}>{p.revenue != null ? money(p.revenue) : ''}</Text>
                     <Text style={s.cardSub}>{p.qty} sold</Text>
@@ -2117,7 +2117,7 @@ function OwnerSuppliers({ onBack }: { onBack: () => void }) {
           <View key={sup.id} style={s.card}>
             <View style={s.shopIcon}><Ionicons name="cube" size={20} color={C.green} /></View>
             <View style={{ flex: 1 }}>
-              <Text style={s.cardTitle}>{sup.name}</Text>
+              <Text numberOfLines={1} style={s.cardTitle}>{sup.name}</Text>
               {!!sup.phone && <Text style={s.cardSub}>📞 {sup.phone}</Text>}
               {!!sup.items && <Text style={s.cardSub}>{sup.items}</Text>}
             </View>
@@ -4178,7 +4178,7 @@ function NotificationCenter({ onBack, onRead }: { onBack: () => void; onRead: ()
         {items.map((n) => (
           <View key={n.id} style={[s.card, !n.read && { borderColor: C.green }]}>
             <View style={{ flex: 1 }}>
-              <Text style={s.cardTitle}>{n.title}</Text>
+              <Text numberOfLines={1} style={s.cardTitle}>{n.title}</Text>
               {!!n.body && <Text style={s.cardSub}>{n.body}</Text>}
               <Text style={[s.cardSub, { fontSize: 11 }]}>{new Date(n.createdAt).toLocaleString(dateLocale())}</Text>
             </View>
@@ -4216,7 +4216,7 @@ function ReasonModal({ visible, title, codes, placeholder, onSubmit, onClose }: 
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
       <View style={s.modalWrap}>
         <View style={s.modalCard}>
-          <Text style={s.modalTitle}>{title}</Text>
+          <Text numberOfLines={1} style={s.modalTitle}>{title}</Text>
           {codes && (
             <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginVertical: 10 }}>
               {codes.map((rc) => (
@@ -4275,7 +4275,7 @@ function InvoiceView({ orderId, onBack }: { orderId: string; onBack: () => void 
               <Text style={[s.cardSub, { textTransform: 'uppercase', letterSpacing: 1 }]}>
                 {inv.kind === 'tax' ? 'Tax Invoice' : 'Invoice'}
               </Text>
-              <Text style={s.panelTitle}>{inv.business.name}</Text>
+              <Text numberOfLines={1} style={s.panelTitle}>{inv.business.name}</Text>
               {!!inv.business.address && <Text style={s.cardSub}>{inv.business.address}</Text>}
               {/* Only the tax identifiers the shop actually filled in — a
                   blank statutory field on a retail bill reads as an error.

@@ -659,7 +659,7 @@ export default function EncryptedNotesScreen() {
         {CATEGORIES.map(cat => (
           <TouchableOpacity key={cat.key} style={[s.catChip, activeCategory === cat.key && { backgroundColor: cat.color + '20', borderColor: cat.color }]} onPress={() => setActiveCategory(activeCategory === cat.key ? null : cat.key)}>
             <Text style={s.catIcon}>{cat.icon}</Text>
-            <Text style={[s.catTxt, activeCategory === cat.key && { color: cat.color }]}>{cat.name}</Text>
+            <Text numberOfLines={1} style={[s.catTxt, activeCategory === cat.key && { color: cat.color }]}>{cat.name}</Text>
             {(catCounts[cat.key] ?? 0) > 0 && <Text style={[s.catCount, { color: cat.color }]}>{catCounts[cat.key]}</Text>}
           </TouchableOpacity>
         ))}
@@ -746,7 +746,7 @@ export default function EncryptedNotesScreen() {
               {CATEGORIES.map(cat => (
                 <TouchableOpacity key={cat.key} style={[s.edCatChip, edCategory === cat.key && { backgroundColor: cat.color + '20', borderColor: cat.color }]} onPress={() => setEdCategory(cat.key)}>
                   <Text style={{ fontSize: 14 }}>{cat.icon}</Text>
-                  <Text style={[s.edCatTxt, edCategory === cat.key && { color: cat.color }]}>{cat.name}</Text>
+                  <Text numberOfLines={1} style={[s.edCatTxt, edCategory === cat.key && { color: cat.color }]}>{cat.name}</Text>
                 </TouchableOpacity>
               ))}
             </ScrollView>
@@ -924,7 +924,7 @@ export default function EncryptedNotesScreen() {
             contentContainerStyle={{ padding: 16 }}
             renderItem={({ item: n }) => (
               <View style={s.trashCard}>
-                <Text style={s.trashTitle}>{n.title}</Text>
+                <Text numberOfLines={1} style={s.trashTitle}>{n.title}</Text>
                 <Text style={s.trashDate}>Deleted {n.deletedAt ? new Date(n.deletedAt).toLocaleDateString() : ''}</Text>
                 <View style={{ flexDirection: 'row', gap: 8, marginTop: 8 }}>
                   <TouchableOpacity style={s.trashRestore} onPress={() => restoreNote(n.id)}>

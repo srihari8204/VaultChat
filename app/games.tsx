@@ -434,7 +434,7 @@ function GameCard({ entry, onOpen, onQuick }: { entry: Entry; onOpen: () => void
         </View>
 
         <View style={{ flex: 1, gap: 3 }}>
-          <Text style={{ color: C.text, fontSize: t.lg, fontWeight: '800' }}>{entry.name}</Text>
+          <Text numberOfLines={1} style={{ color: C.text, fontSize: t.lg, fontWeight: '800' }}>{entry.name}</Text>
           <Text style={{ color: C.muted, fontSize: 12.5, lineHeight: 17 }}>{entry.blurb}</Text>
         </View>
 

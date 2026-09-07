@@ -86,7 +86,7 @@ export default function VaultBeamSettings() {
 function Section({ title, children, colors }: { title: string; children: React.ReactNode; colors: any }) {
   return (
     <View style={{ marginTop: 20 }}>
-      <Text style={[styles.section, { color: colors.textDim }]}>{title.toUpperCase()}</Text>
+      <Text numberOfLines={1} style={[styles.section, { color: colors.textDim }]}>{title.toUpperCase()}</Text>
       <View style={{ gap: 8 }}>{children}</View>
     </View>
   );

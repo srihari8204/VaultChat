@@ -163,7 +163,7 @@ function VaultIDScreenContent() {
               </View>
 
               {/* Name & VaultTag */}
-              <Text style={S.displayName}>{vaultID.displayName}</Text>
+              <Text numberOfLines={1} style={S.displayName}>{vaultID.displayName}</Text>
               <View style={S.vaultTagRow}>
                 <LinearGradient colors={['#1D4ED8','#7C3AED']} style={S.vaultTagBadge} start={{x:0,y:0}} end={{x:1,y:0}}>
                   <Text style={S.vaultTagText}>{vaultID.vaultTag}</Text>
@@ -268,7 +268,7 @@ function VaultIDScreenContent() {
             ].map((f,i)=>(
               <View key={i} style={S.featureCard}>
                 <Text style={{fontSize:22,marginBottom:4}}>{f.icon}</Text>
-                <Text style={{color:'#fff',fontSize:11,fontWeight:'700',textAlign:'center'}}>{f.title}</Text>
+                <Text numberOfLines={1} style={{color:'#fff',fontSize:11,fontWeight:'700',textAlign:'center'}}>{f.title}</Text>
                 <Text style={{color:'#3D5A7A',fontSize:9,textAlign:'center',marginTop:2}}>{f.sub}</Text>
               </View>
             ))}

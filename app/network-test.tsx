@@ -305,7 +305,12 @@ export default function NetworkTestScreen() {
     <View style={styles.container}>
       <AuroraBackground />
       <Stack.Screen options={{ headerShown: false }} />
-      <LinearGradient colors={['#FFFFFF', '#F9FAFB', '#FFFFFF']} style={StyleSheet.absoluteFill} />
+      {/* A hardcoded WHITE absoluteFill gradient used to sit here, painted over
+          the Aurora ground. Every text style on this screen is #FFF — built for
+          the dark ground — so the whole screen rendered white-on-white: the
+          speed readout, "History", and the empty-state line were all invisible
+          on a real device. The ground is <AuroraBackground/> above; nothing
+          should cover it. */}
 
       {/* Header */}
       <View style={styles.header}>

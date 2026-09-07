@@ -224,7 +224,7 @@ export function Sheet({
           boxShadow: `${E[3]}, inset 0 1px 0 ${white(0.18)}`,
         }}>
           <View style={{ alignSelf: 'center', width: 40, height: 4, borderRadius: 2, backgroundColor: white(0.30), marginBottom: S[2] }} />
-          <Text style={{ color: C.text, fontSize: t.xl, fontWeight: '800' }}>{title}</Text>
+          <Text numberOfLines={1} style={{ color: C.text, fontSize: t.xl, fontWeight: '800' }}>{title}</Text>
           <ScrollView style={{ maxHeight: scrollCap }} contentContainerStyle={{ gap: S[2] }}>
             {children}
           </ScrollView>

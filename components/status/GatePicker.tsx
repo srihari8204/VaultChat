@@ -55,7 +55,7 @@ export default function GatePicker({ value, onChange, accent, text, dim, surface
       >
         <Ionicons name={icon} size={20} color={on ? accent : dim} />
         <View style={S.optText}>
-          <Text style={[S.optTitle, { color: text }]}>{title}</Text>
+          <Text numberOfLines={1} style={[S.optTitle, { color: text }]}>{title}</Text>
           <Text style={[S.optSub, { color: dim }]}>{sub}</Text>
         </View>
         {on ? <Ionicons name="checkmark-circle" size={20} color={accent} /> : null}

@@ -105,6 +105,19 @@ export async function getState(): Promise<GuardState> {
  * Resolves to whether blocking is actually in force — false on iOS, always.
  */
 export async function setSecure(enabled: boolean): Promise<boolean> {
+  // A DEV BUILD NEVER BLOCKS CAPTURE.
+  //
+  // FLAG_SECURE blanks `adb screencap`, screen recording and the recents
+  // thumbnail, so with it on nobody can capture the screen they are working on
+  // — every screenshot of a layout bug comes back solid black. Gating it at the
+  // one call site in the root layout was not enough: the chat screen re-arms it
+  // per conversation from the screenshot policy, and once ANY caller sets the
+  // window flag it stays set for the whole activity. So the guard lives here,
+  // in the one function every caller already routes through.
+  //
+  // __DEV__ is false in every release build, so shipped builds are unchanged.
+  if (__DEV__) return false;
+
   let native = false;
   if (Native?.setSecure) {
     try { native = !!(await Native.setSecure(enabled)); } catch { native = false; }

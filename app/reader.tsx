@@ -114,7 +114,7 @@ function ReaderScreen() {
         contentContainerStyle={{ paddingHorizontal: pad, paddingBottom: insets.bottom + 48 }}
         showsVerticalScrollIndicator={false}
       >
-        <Text style={{ color: theme.text, fontFamily, fontSize: cfg.size + 12, fontWeight: '800', marginTop: 24, lineHeight: (cfg.size + 12) * 1.2 }}>
+        <Text numberOfLines={1} style={{ color: theme.text, fontFamily, fontSize: cfg.size + 12, fontWeight: '800', marginTop: 24, lineHeight: (cfg.size + 12) * 1.2 }}>
           {title || 'Long message'}
         </Text>
         <Text style={{ color: theme.dim, fontSize: 13, marginTop: 10 }}>
