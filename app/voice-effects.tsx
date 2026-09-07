@@ -14,7 +14,11 @@ import type { Palette } from '../constants/theme';
 import { useColors } from '../lib/theme';
 
 const { width: SW } = Dimensions.get('window');
-const C = { bg: '#FFFFFF', accent: '#A78BFA', card: '#F9FAFB', green: BRAND_ACCENT };
+// bg/card were '#FFFFFF'/'#F9FAFB' while the text comes from the live theme —
+// white-on-white in dark mode, which is the default. This factory already
+// receives the real palette as `c`, so the ground comes from there now and the
+// screen follows Light/Dark like every other one.
+const C = { accent: '#A78BFA', green: BRAND_ACCENT };
 
 const EFFECTS = [
   { id: 'none', name: 'Normal', icon: '\uD83C\uDFA4', desc: 'Your natural voice', pitch: 1.0, rate: 1.0, color: '#8A8394' },   // EFFECTS is module-level data and cannot read the
@@ -186,8 +190,8 @@ export default function VoiceEffectsScreen() {
 }
 
 const makeStyles = (c: Palette) => StyleSheet.create({
-  container: { flex: 1, backgroundColor: C.bg, padding: 16 },
-  previewCard: { backgroundColor: C.card, borderRadius: 20, padding: 24, alignItems: 'center', marginBottom: 16, borderWidth: 1, borderColor: c.border },
+  container: { flex: 1, backgroundColor: c.bg, padding: 16 },
+  previewCard: { backgroundColor: c.card, borderRadius: 20, padding: 24, alignItems: 'center', marginBottom: 16, borderWidth: 1, borderColor: c.border },
   effectName: { fontSize: 22, fontWeight: '900', marginTop: 8 },
   effectDesc: { color: c.textDim, fontSize: 13, marginTop: 4 },
   recordRow: { marginTop: 20 },
@@ -202,7 +206,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   activeTxt: { color: BRAND_ACCENT, fontSize: 11, fontWeight: '600' },
   sectionTitle: { color: c.textDim, fontSize: 11, fontWeight: '800', letterSpacing: 1, marginBottom: 8 },
   grid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  effectCard: { width: (SW - 48) / 2, backgroundColor: C.card, borderRadius: 14, padding: 14, borderWidth: 1, borderColor: c.border, alignItems: 'center' },
+  effectCard: { width: (SW - 48) / 2, backgroundColor: c.card, borderRadius: 14, padding: 14, borderWidth: 1, borderColor: c.border, alignItems: 'center' },
   gridName: { color: c.text, fontSize: 13, fontWeight: '700', marginTop: 6 },
   gridDesc: { color: c.textDim, fontSize: 10, marginTop: 2, textAlign: 'center' },
   paramRow: { flexDirection: 'row', gap: 8, marginTop: 6 },

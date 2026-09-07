@@ -22,8 +22,18 @@ import { stealthMode } from '../lib/stealthMode';
 import { isVaultSetup, setupVaults, unlockWithPin } from '../services/security/duressVault';
 import { activateGhost, deactivateGhost, seedDecoyAccount } from '../lib/ghostProtocol';
 
+// A LOCK SCREEN IS ALWAYS DARK — and every foreground on it is white.
+//
+// `bg` was '#FFFFFF' while the title, the keypad digits and the PIN dots are
+// all #fff / white-alpha, so the entire screen rendered white-on-white: on a
+// real handset you saw a blank page with a padlock emoji and nothing to tap.
+// The duress PIN is the one screen that must never be unusable.
+//
+// Hardcoded rather than themed, deliberately, and consistent with the rest of
+// the lock/call surfaces (constants/callTheme.ts): this screen must look
+// identical whatever the app theme is, because it is what an attacker sees.
 const C = {
-  bg:'#FFFFFF', primary:'#4A9FFF',
+  bg:'#0A0A0F', primary:'#4A9FFF',
   dim:'rgba(255,255,255,0.4)', faint:'rgba(255,255,255,0.15)',
 };
 
@@ -132,7 +142,7 @@ export default function DuressPin() {
 
   return (
     <View style={{flex:1,backgroundColor:C.bg}}>
-      <LinearGradient colors={['#FFFFFF','#FFFFFF']} style={StyleSheet.absoluteFillObject}/>
+      <LinearGradient colors={[C.bg, C.bg]} style={StyleSheet.absoluteFillObject}/>
       <View style={Ss.root}>
 
         {/* Icon */}

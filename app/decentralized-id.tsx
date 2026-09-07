@@ -22,7 +22,12 @@ import type { Palette } from '../constants/theme';
 import { useColors } from '../lib/theme';
 
 const C = {
-  bg: '#FFFFFF', primary: '#4A9FFF', secondary: '#7C3AED',
+  // bg WAS '#FFFFFF' while every foreground here is white (text, dims, the
+  // card fills) — the screen rendered white-on-white and was unusable on a
+  // device. The rest of this palette is unmistakably a dark navy design
+  // (white text, rgba(255,255,255,..) dims, near-black glass), so the
+  // background is what was wrong, not the foregrounds.
+  bg: '#0A1628', primary: '#4A9FFF', secondary: '#7C3AED',
   accent: BRAND_ACCENT, gold: '#F59E0B', text: '#fff',
   dim: 'rgba(255,255,255,0.5)', faint: 'rgba(255,255,255,0.2)',
   card: 'rgba(10,22,40,0.8)', border: 'rgba(255,255,255,0.06)',

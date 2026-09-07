@@ -44,7 +44,12 @@ const MAX_TEXT_BYTES = 5 * 1024 * 1024;
 
 // ── Design tokens ────────────────────────────────────────────────
 const C = {
-  bg: '#FFFFFF',
+  // bg WAS '#FFFFFF' while every foreground here is white (text, dims, the
+  // card fills) — the screen rendered white-on-white and was unusable on a
+  // device. The rest of this palette is unmistakably a dark navy design
+  // (white text, rgba(255,255,255,..) dims, near-black glass), so the
+  // background is what was wrong, not the foregrounds.
+  bg: '#020B18',
   bgPure: '#000000',
   primary: '#4A9FFF',
   secondary: '#7C3AED',

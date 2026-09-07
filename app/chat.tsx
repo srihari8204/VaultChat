@@ -25,6 +25,7 @@ import * as FileSystem from 'expo-file-system/legacy';
 import * as IntentLauncher from 'expo-intent-launcher';
 import * as ImagePicker from 'expo-image-picker';
 import * as ScreenCapture from 'expo-screen-capture';
+import { setSecure } from '../lib/screenGuard';
 import { DeviceMotion } from 'expo-sensors';
 import * as Sharing from 'expo-sharing';
 import { recordScreenshotAttempt } from '../services/security/auditChain';
@@ -1454,11 +1455,11 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
     // no-op looked identical to a working one for the whole of this bug.
     console.log(`[screenshot] policy blocks=${peerBlocks} notify=${peerNotify}`);
 
-    if (allowsCapture) {
-      ScreenCapture.allowScreenCaptureAsync().catch(() => {});
-    } else {
-      ScreenCapture.preventScreenCaptureAsync().catch(() => {});
-    }
+    // setSecure, not expo-screen-capture directly: it is the one function that
+    // refuses to set FLAG_SECURE in a dev build. Calling the module here was
+    // what re-armed the flag for the whole activity the moment a chat opened,
+    // so gating only the root layout still left every screenshot black.
+    setSecure(!allowsCapture).catch(() => {});
 
     let sub: { remove: () => void } | null = null;
     if (reportsCapture) {
@@ -1480,7 +1481,7 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
     return () => {
       sub?.remove();
       // Restore the global-block posture (matches _layout.tsx default)
-      ScreenCapture.preventScreenCaptureAsync().catch(() => {});
+      setSecure(true).catch(() => {});
     };
   }, [chat?.peerBlocksCapture, chat?.peerWantsCaptureNotice, chatId]);
 

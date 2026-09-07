@@ -6,9 +6,13 @@
 
 import React, { useState, useEffect, useRef , useMemo} from 'react';
 import {
-  View, Text, StyleSheet, TouchableOpacity, TextInput, Alert, SafeAreaView,
-  ScrollView, Share, Platform, ActivityIndicator,
+  View, Text, StyleSheet, TouchableOpacity, TextInput, Alert, ScrollView, Share, Platform, ActivityIndicator,
 } from 'react-native';
+// SafeAreaView from 'react-native' is iOS-ONLY — on Android it renders a plain
+// View and applies no inset at all, so this screen drew under the status bar on
+// every Android handset (and logged the deprecation warning at runtime). The
+// safe-area-context one is the cross-platform implementation.
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { copyAndAutoClear } from '../lib/clipboardSafe';

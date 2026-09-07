@@ -14,8 +14,13 @@ import * as Location from 'expo-location';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useCallback, useEffect, useRef, useState , useMemo} from 'react';
 import {
-  ActivityIndicator, Alert, Platform, SafeAreaView, ScrollView, StyleSheet, Text, TouchableOpacity, View,
+  ActivityIndicator, Alert, Platform, ScrollView, StyleSheet, Text, TouchableOpacity, View,
 } from 'react-native';
+// SafeAreaView from 'react-native' is iOS-ONLY — on Android it renders a plain
+// View and applies no inset at all, so this screen drew under the status bar on
+// every Android handset (and logged the deprecation warning at runtime). The
+// safe-area-context one is the cross-platform implementation.
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { type Palette } from '../constants/theme';
 import { useTheme } from '../lib/theme';
 import { getSocket } from '../lib/socket';

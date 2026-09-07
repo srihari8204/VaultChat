@@ -7,8 +7,12 @@ import { BRAND_ACCENT } from '../constants/theme';
 import React, { useCallback, useState , useMemo} from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, FlatList,
-  StatusBar, TextInput, SafeAreaView,
-} from 'react-native';
+  StatusBar, TextInput, } from 'react-native';
+// SafeAreaView from 'react-native' is iOS-ONLY — on Android it renders a plain
+// View and applies no inset at all, so this screen drew under the status bar on
+// every Android handset (and logged the deprecation warning at runtime). The
+// safe-area-context one is the cross-platform implementation.
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { type Palette } from '../constants/theme';
 import { useTheme } from '../lib/theme';
 import { useFocusEffect, useRouter } from 'expo-router';

@@ -83,7 +83,10 @@ A(/pathname: '\/video-player'/.test(BUBBLE),
   '10c. reusing the existing player screen, not a new one');
 A(BUBBLE.indexOf('isVideo(') < BUBBLE.indexOf('openSaved(st.savedPath'),
   '10d. the in-app branch is taken BEFORE the external handoff');
-A(/preventScreenCaptureAsync/.test(read('app', '_layout.tsx')),
+// The root layout no longer calls expo-screen-capture directly — every caller
+// goes through screenGuard.setSecure, which is where the "never in a dev build"
+// rule lives. Assert the wiring, not the old call site.
+A(/setSecure\(true\)/.test(read('app', '_layout.tsx')),
   '10e. the root layout holds FLAG_SECURE, which is what makes in-app safer');
 
 // ── 4c. A PICKED content:// URI IS USED DIRECTLY ───────────────────

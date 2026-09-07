@@ -15,8 +15,13 @@ import { Ionicons } from '@expo/vector-icons';
 
 // ── Theme ────────────────────────────────────────────────────────
 const C = {
-  bg: '#FFFFFF',
-  card: '#F9FAFB',
+  // bg WAS '#FFFFFF' while every foreground here is white (text, dims, the
+  // card fills) — the screen rendered white-on-white and was unusable on a
+  // device. The rest of this palette is unmistakably a dark navy design
+  // (white text, rgba(255,255,255,..) dims, near-black glass), so the
+  // background is what was wrong, not the foregrounds.
+  bg: '#0A1628',
+  card: '#0F1F35',
   cardBorder: '#1A2744',
   accent: '#4A9FFF',
   purple: '#7C3AED',
