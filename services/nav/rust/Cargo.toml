@@ -1,0 +1,39 @@
+[package]
+name = "nav-core"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Per-GPS-fix route mathematics for VaultChat navigation. Mirrors lib/nav/routeProgress.ts, which stays the reference implementation and the fallback; proven equal by tests/parity.rs against the vectors that file emits."
+
+[lib]
+name = "nav_core"
+# staticlib is what CMake links into libvaultnav.so; lib is what `cargo test` uses.
+# Deliberately NOT cdylib: this crate reaches JS through the Nitro/JSI C++
+# wrapper that already ships for crypto-core, not through a second loader.
+crate-type = ["lib", "staticlib"]
+
+[dependencies]
+# The ONLY dependency. The boundary format is JSON because that is what the
+# existing Nitro wrapper (vc_crypto_call) already speaks — one bridge idiom in
+# this app, not two. Everything else here is std maths.
+serde_json = "1"
+
+[profile.release]
+# opt-level 3, not "z": this crate is ~600 lines of f64 trigonometry on the
+# GPS path, and the size saved by "z" is worth less than the trig it costs.
+# crypto-core uses "z" because it is dominated by large constant tables.
+opt-level = 3
+lto = true
+codegen-units = 1
+strip = true
+# Overflow checks stay on: an index arithmetic bug here would silently read the
+# wrong part of the route and report a confident wrong distance, which is worse
+# on a navigation screen than a caught panic the JS side falls back from.
+overflow-checks = true
+# unwind, not abort — ffi.rs wraps every call in catch_unwind and turns a panic
+# into an error the TS wrapper handles by falling back to routeProgress.ts. A
+# bug in here must never take the chat app down with it.
+panic = "unwind"
+
+[profile.dev]
+overflow-checks = true

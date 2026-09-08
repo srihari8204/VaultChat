@@ -101,3 +101,6 @@ docs/audit/
 
 # Rust spike build output (rust/vaultcore) — never committed
 rust/**/target/
+
+# nav-core Rust build output (same as the crypto/vaultbeam crates)
+services/nav/rust/target/

@@ -31,11 +31,25 @@ add_library(crypto_core_rust STATIC IMPORTED)
 set_target_properties(crypto_core_rust PROPERTIES
   IMPORTED_LOCATION ${RUST_TARGET_DIR}/${RUST_TRIPLE}/release/libcrypto_core.a)
 
+# nav-core rides in the SAME .so rather than getting a module of its own.
+#
+# It could have had one: a second gradle module, a second CMakeLists, a second
+# expo plugin, a second System.loadLibrary and a second JNI_OnLoad. That is five
+# files of build machinery duplicated so two Rust staticlibs can sit in separate
+# shared objects for no benefit — both are pure computation, both are loaded at
+# the same moment, and both die together if cargo-ndk is missing. One .so, two
+# HybridObjects.
+set(NAV_TARGET_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../../services/nav/rust/target)
+add_library(nav_core_rust STATIC IMPORTED)
+set_target_properties(nav_core_rust PROPERTIES
+  IMPORTED_LOCATION ${NAV_TARGET_DIR}/${RUST_TRIPLE}/release/libnav_core.a)
+
 target_link_libraries(vaultcrypto
   react-native-nitro-modules::NitroModules
   ReactAndroid::jsi
   ReactAndroid::reactnative
   crypto_core_rust
+  nav_core_rust
   ${LOG_LIB}
   android
 )

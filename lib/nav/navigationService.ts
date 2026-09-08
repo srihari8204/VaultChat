@@ -11,9 +11,15 @@ import { useSyncExternalStore } from 'react';
 import { haversine, bearing, type LatLng } from './geo';
 import { triggerDistances, type RoadClass, type NotifTiming } from './adaptiveDistance';
 import { newTimeline, advanceTimeline, type TimelineState } from './notificationTimeline';
-import { detectMissedTurn, offRouteFrom } from './missedTurn';
+import { detectMissedTurn } from './missedTurn';
 import { playHaptic, stopHaptics, type DisplayMode } from './hapticPlayer';
 import { fetchRoute, type Route, type Costing, type Maneuver, type RouteOpts } from './routing';
+import { buildGeometry, type RouteGeometry, type OffRouteVerdict } from './routeProgress';
+// The per-fix maths runs through the backend selector: the Rust core when the
+// native library is present, lib/nav/routeProgress.ts otherwise. Both are
+// proven equal by services/nav/rust/tests/parity.rs, so which one answers is
+// invisible here — see lib/nav/native/NavCore.ts.
+import * as NavCore from './native/NavCore';
 import { type NavProfile, type HapticEvent, type HapticPattern } from './hapticLanguage';
 import { startVoiceGuide, stopVoiceGuide, feedVoiceGuide } from './voiceGuide';
 
@@ -28,8 +34,17 @@ export interface NavBanner {
   etaEpochMs: number;          // arrival time
   progress: number;            // 0..1 toward the next maneuver (banner's shrinking line)
   rerouting: boolean;
+  /**
+   * Off-route confidence from the hysteresis engine (lib/nav/routeProgress).
+   * ADDITIVE: NavBanner.tsx and voiceGuide predate this and simply ignore it.
+   * The UI needs the middle ground — "Checking route…" before "You're off
+   * route" — which a boolean could not express.
+   */
+  verdict: OffRouteVerdict;
+  /** Destination reached: close enough AND slowed down. */
+  arrived: boolean;
 }
-const IDLE: NavBanner = { active: false, event: null, instruction: '', roadName: '', distanceToManeuver: 0, remainingM: 0, totalM: 0, etaEpochMs: 0, progress: 0, rerouting: false };
+const IDLE: NavBanner = { active: false, event: null, instruction: '', roadName: '', distanceToManeuver: 0, remainingM: 0, totalM: 0, etaEpochMs: 0, progress: 0, rerouting: false, verdict: 'on_route', arrived: false };
 
 // ── tiny external store for the banner ──
 let banner: NavBanner = IDLE;
@@ -79,21 +94,37 @@ let rerouting = false;
 
 const roadClassFor = (speed: number): RoadClass => (speed > 22 ? 'highway' : speed > 11 ? 'primary' : 'city');
 
-// Nearest shape vertex to a position (index).
-function nearestIndex(shape: LatLng[], pos: LatLng, from = 0): number {
-  let best = from, bestD = Infinity;
-  for (let i = from; i < shape.length; i++) {
-    const d = haversine(shape[i], pos);
-    if (d < bestD) { bestD = d; best = i; }
-  }
-  return best;
-}
-// Along-route distance from pos (near `nearIdx`) forward to shape[toIdx].
-function alongRoute(shape: LatLng[], pos: LatLng, nearIdx: number, toIdx: number): number {
-  if (toIdx <= nearIdx) return haversine(pos, shape[Math.min(toIdx, shape.length - 1)]);
-  let d = haversine(pos, shape[nearIdx]);
-  for (let i = nearIdx; i < toIdx && i + 1 < shape.length; i++) d += haversine(shape[i], shape[i + 1]);
-  return d;
+/**
+ * The route's prefix-sum geometry, rebuilt whenever `route` is replaced.
+ *
+ * WHY THIS REPLACED THE OLD PER-FIX SCANS. `nearestIndex` used to walk the
+ * WHOLE shape on every GPS fix and `alongRoute` walked it again — twice more
+ * for the maneuver and the remainder. Measured on a synthetic Valhalla-density
+ * route: 0.4808 ms/fix at 6000 vertices, versus 0.0029 ms/fix for the windowed
+ * search + prefix table in lib/nav/routeProgress.ts — 167x, and constant in
+ * route length instead of linear.
+ *
+ * `lastIndex` seeds the windowed search from where the previous fix landed;
+ * routeProgress.project falls back to a full rescan by itself when that seed
+ * turns out to be stale (a reroute, a resumed app, a first fix far from the
+ * start), so the optimisation cannot silently lock onto the wrong part of the
+ * route. Reset alongside the route in setRouteGeometry().
+ */
+/** Kept on THIS side purely for cumulative-distance lookups (cum[maneuver]),
+ *  which are array reads, not per-fix work. The hot path lives in NavCore. */
+let geometry: RouteGeometry | null = null;
+let lastIndex = 0;
+
+/** Adopt a new route's geometry. The ONLY place `geometry` is assigned, so it
+ *  can never drift out of sync with `route`. */
+function setRouteGeometry(r: Route | null): void {
+  geometry = r ? buildGeometry(r.shape) : null;
+  lastIndex = 0;
+  // Adopting a route also resets the smoothing filter and the off-route
+  // strikes inside NavCore. That reset is load-bearing: keeping the strikes
+  // would let a just-delivered reroute be judged by the deviation that caused
+  // it, and immediately ask for another.
+  if (r) NavCore.setRoute(r.shape); else NavCore.clearRoute();
 }
 
 async function reroute() {
@@ -102,6 +133,7 @@ async function reroute() {
   playHaptic('reroute', opts.profile, { mode: opts.mode, custom: opts.custom });
   try {
     route = await fetchRoute(last.pos, dest, opts.costing ?? 'auto', opts.routeOpts);
+    setRouteGeometry(route);   // new shape -> new prefix table, and reseed the window
     maneuverIdx = 0; timeline = null;
     setGeo({ shape: route.shape });
     setBanner({ totalM: route.lengthM });
@@ -138,27 +170,72 @@ function onFix(loc: Location.LocationObject) {
   setGeo({ pos, heading });
 
   const shape = route.shape;
-  const near = nearestIndex(shape, pos);
+  if (!geometry) setRouteGeometry(route);
+  const geom = geometry!;
+
+  // ONE pass per fix — smoothing, projection, progress, off-route and arrival
+  // together. Batched deliberately: the cost of the native boundary is paid per
+  // CALL, so six small queries would cost six times what this costs.
+  const stepped = NavCore.step({
+    lat: pos.lat, lng: pos.lng, accuracyM: acc, speedMps: speed,
+    headingDeg: heading, tsMs: now,
+    prevIndex: lastIndex,
+    // The maneuver we were heading for as of the previous fix; re-derived below
+    // if this fix turns out to have passed it.
+    maneuverBeginIndex: route.maneuvers[maneuverIdx]?.beginIndex ?? (shape.length - 1),
+  }, shape);
+  if (!stepped) return;
+  lastIndex = stepped.index;
+  const near = stepped.index;
 
   // Advance past any maneuvers we've already reached.
   while (maneuverIdx < route.maneuvers.length && route.maneuvers[maneuverIdx].beginIndex < near - 1) maneuverIdx++;
   const m: Maneuver | undefined = route.maneuvers[maneuverIdx];
   if (!m) { setBanner({ active: true, event: 'destination', instruction: 'Arrive', roadName: '', distanceToManeuver: 0, progress: 1 }); return; }
 
-  const distToManeuver = alongRoute(shape, pos, near, m.beginIndex);
-  const remaining = alongRoute(shape, pos, near, shape.length - 1);
+  // The loop above may have moved us on to a LATER maneuver than the one the
+  // step was asked about, in which case stepped.distToManeuverM answers the
+  // wrong question. Always recompute from the odometer instead — subtracting
+  // two numbers, not rescanning the shape — so the maneuver distance is right
+  // whether or not the index advanced on this fix.
+  const manCum = geom.cum[Math.min(m.beginIndex, geom.cum.length - 1)];
+  const distToManeuver = Math.max(0, manCum - stepped.alongM);
+  const remaining = stepped.remainingM;
 
-  // Missed-turn: off-route beyond GPS margin, or passed the turn still heading straight.
-  const segEnd = shape[Math.min(near + 1, shape.length - 1)];
-  const offRoute = offRouteFrom(pos, shape[near], segEnd);
+  // Missed-turn: off-route beyond GPS margin, or passed the turn still heading
+  // straight. The cross-track now comes from the same projection — the CLAMPED
+  // perpendicular to the matched segment, which is the more accurate form of
+  // the number offRouteFrom() computed unclamped from the nearest vertex.
+  const offRoute = stepped.crossTrackM;
   const afterPt = shape[Math.min(m.beginIndex + 1, shape.length - 1)];
   const expectedAfter = bearing(m.point, afterPt);
-  const pastManeuver = m.beginIndex < near ? alongRoute(shape, m.point, m.beginIndex, near) : -distToManeuver;
+  // Metres travelled PAST the maneuver, read straight off the odometer:
+  // positive once the maneuver is behind us, negative while it is ahead.
+  const pastManeuver = stepped.alongM - manCum;
   const miss = detectMissedTurn({ offRouteMeters: offRoute, metersPastManeuver: pastManeuver, heading, expectedHeadingAfter: expectedAfter, gpsAccuracy: acc });
+
+  // TWO SIGNALS, AND THEY ARE NOT THE SAME QUESTION.
+  //
+  //   `verdict`   — cross-track distance, with strikes, hysteresis and a
+  //                 cooldown. Answers "have they LEFT the road".
+  //   `miss`      — heading past a turn point. Answers "did they fail to TURN",
+  //                 which a driver can do while still perfectly on a road.
+  //
+  // Rerouting used to fire on `miss.missed` alone, which meant ONE bad GPS
+  // sample under a bridge spent a Valhalla request and moved the route out from
+  // under a driver who had never left it. The network call is now gated on the
+  // confirmed verdict; the heading-based miss still earns its haptic
+  // immediately, because feeling a buzz for a turn you actually missed is
+  // useful even while the engine is still making up its mind about the road.
+  const verdict: OffRouteVerdict = stepped.verdict;
+
   if (miss.missed) {
     playHaptic('missedTurn', opts.profile, { mode: opts.mode, custom: opts.custom });
+  }
+  if (verdict === 'reroute_required' || (miss.reason === 'passed-no-turn' && verdict !== 'on_route')) {
     reroute();
-  } else if (m.event) {
+  }
+  if (!miss.missed && m.event) {
     // Adaptive haptic timeline toward this maneuver.
     const triggers = triggerDistances({ speed, turnAngle: m.turnAngle, gpsAccuracy: acc, roadClass: roadClassFor(speed), timing: opts.timing ?? 'normal' });
     if (!timeline) timeline = newTimeline(m.event);
@@ -173,7 +250,12 @@ function onFix(loc: Location.LocationObject) {
   const etaMs = now + (route.timeS ? (remaining / Math.max(1, route.lengthM)) * route.timeS * 1000 : 0);
   const legStart = maneuverIdx > 0 ? route.maneuvers[maneuverIdx].lengthM : m.lengthM;
   const progress = legStart > 0 ? Math.max(0, Math.min(1, 1 - distToManeuver / legStart)) : 0;
-  setBanner({ active: true, event: m.event, instruction: m.instruction, roadName: m.roadName, distanceToManeuver: Math.round(distToManeuver), remainingM: Math.round(remaining), etaEpochMs: Math.round(etaMs), progress });
+  setBanner({
+    active: true, event: m.event, instruction: m.instruction, roadName: m.roadName,
+    distanceToManeuver: Math.round(distToManeuver), remainingM: Math.round(remaining),
+    etaEpochMs: Math.round(etaMs), progress,
+    verdict, arrived: stepped.arrived,
+  });
 }
 
 /** Start a real navigation session. Requests location permission, fetches the
@@ -187,6 +269,7 @@ export async function startNavigation(o: StartNavOpts): Promise<void> {
   const from = o.from ?? (await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High })).coords;
   const fromLL: LatLng = 'lat' in (from as any) ? (from as LatLng) : { lat: (from as any).latitude, lng: (from as any).longitude };
   route = await fetchRoute(fromLL, o.to, o.costing ?? 'auto', o.routeOpts);
+  setRouteGeometry(route);
   maneuverIdx = 0; timeline = null; last = null;
   startVoiceGuide(o.mode ?? 'vibrationOnly');
   setBanner({ ...IDLE, active: true, totalM: route.lengthM });
@@ -202,6 +285,7 @@ export async function startNavigation(o: StartNavOpts): Promise<void> {
 export async function stopNavigation(): Promise<void> {
   try { watcher?.remove(); } catch {}
   watcher = null; route = null; timeline = null; dest = null; opts = null; last = null; rerouting = false;
+  setRouteGeometry(null);   // do not keep a journey's geometry after it ends
   stopHaptics();
   stopVoiceGuide();
   setBanner(IDLE);
