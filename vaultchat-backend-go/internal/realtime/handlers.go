@@ -4,6 +4,7 @@ import (
 	"log"
 	"os"
 	"strconv"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/zishang520/socket.io/v2/socket"
@@ -232,7 +233,7 @@ func (h *Hub) registerChatHandlers(s *socket.Socket) {
 // with the space's live-location key and this server forwards bytes it cannot
 // read.
 //
-// WHY A RUN GETS ITS OWN ROOM, WHEN TRIPS BROADCAST TO THE CHAT
+// # WHY A RUN GETS ITS OWN ROOM, WHEN TRIPS BROADCAST TO THE CHAT
 //
 // A trip belongs to everyone in the group. A run does not: a guardian may
 // follow the bus their child is on and no other, which is the same rule the
@@ -310,13 +311,17 @@ func (h *Hub) runAllowed(d *sockData, runID string, drive bool) bool {
 	if drive {
 		key = "drive:" + runID
 	}
+	// Run entitlement follows the same generation as the run's space chat: being
+	// dropped from a run is the same class of change as being dropped from a
+	// group, and had the same lifetime bug (audit F02).
+	gen := permGenerationOf(runID)
 	d.mu.Lock()
-	ok, cached := d.runOk[key]
+	entry, cached := d.runOk[key]
 	d.mu.Unlock()
-	if cached {
-		return ok
+	if cached && entry.fresh(gen) {
+		return entry.ok
 	}
-	ok = false
+	ok := false
 	_ = db.WithUser(bg, d.uid, func(tx pgx.Tx) error {
 		var one bool
 		q := `SELECT vc_run_visible($1)`
@@ -329,7 +334,7 @@ func (h *Hub) runAllowed(d *sockData, runID string, drive bool) bool {
 		return nil
 	})
 	d.mu.Lock()
-	d.runOk[key] = ok
+	d.runOk[key] = cachedPerm{ok: ok, gen: gen, at: time.Now()}
 	d.mu.Unlock()
 	return ok
 }
@@ -337,13 +342,16 @@ func (h *Hub) runAllowed(d *sockData, runID string, drive bool) bool {
 // chatMemberAllowed caches the chat-membership check per socket per chat (RLS,
 // server.js db.queryAs). One query per chat for the socket's lifetime.
 func (h *Hub) chatMemberAllowed(d *sockData, chatID string) bool {
+	gen := permGenerationOf(chatID)
 	d.mu.Lock()
-	ok, cached := d.chatMemberOk[chatID]
+	entry, cached := d.chatMemberOk[chatID]
 	d.mu.Unlock()
-	if cached {
-		return ok
+	// Only a decision made at the current generation, recently, may be reused —
+	// otherwise a member removed mid-connection keeps publishing (audit F02).
+	if cached && entry.fresh(gen) {
+		return entry.ok
 	}
-	ok = false
+	ok := false
 	_ = db.WithUser(bg, d.uid, func(tx pgx.Tx) error {
 		var one int
 		if tx.QueryRow(bg,
@@ -354,7 +362,7 @@ func (h *Hub) chatMemberAllowed(d *sockData, chatID string) bool {
 		return nil
 	})
 	d.mu.Lock()
-	d.chatMemberOk[chatID] = ok
+	d.chatMemberOk[chatID] = cachedPerm{ok: ok, gen: gen, at: time.Now()}
 	d.mu.Unlock()
 	return ok
 }

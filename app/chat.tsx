@@ -1574,6 +1574,19 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
     const isMuted = chat.muted;
 
     const actions: MenuAction[] = [
+      // Search lives here, not in the header.
+      //
+      // The header had FOUR trailing actions where WhatsApp has three (spec
+      // 6.7: video, call, overflow). Four 44pt targets plus the back arrow and
+      // the avatar left roughly 160dp for the name on a 411dp screen — about
+      // thirteen characters at 18pt — so ordinary names were arriving
+      // ellipsised. Search is the one of the four that is not a per-message
+      // action, and the one WhatsApp also files under the menu.
+      {
+        label: 'Search in chat',
+        icon: 'search-outline',
+        onPress: () => setSearchOpen(true),
+      },
       {
         label: isMuted ? 'Unmute notifications' : 'Mute notifications',
         icon: isMuted ? 'notifications-outline' : 'notifications-off-outline',
@@ -2776,13 +2789,6 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
             </>
           );
         })()}
-        <TouchableOpacity
-          style={S.headerIconBtn}
-          onPress={() => { setSearchOpen(o => !o); if (searchOpen) setSearchQ(''); }}
-          activeOpacity={0.7}
-        >
-          <Ionicons name={searchOpen ? 'close' : 'search'} size={22} color={colors.text} />
-        </TouchableOpacity>
         <TouchableOpacity style={S.headerIconBtn} onPress={onPressMenu} activeOpacity={0.7}>
           <Ionicons name="ellipsis-vertical" size={20} color={colors.text} />
         </TouchableOpacity>
@@ -2806,10 +2812,21 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
             maxLength={200}
           />
           {searchQ.length > 0 && (
-            <Text style={S.inChatSearchCount}>
+            <Text style={S.inChatSearchCount} numberOfLines={1}>
               {messages.filter(m => !m.deletedAt && (m.content || '').toLowerCase().includes(searchQ.toLowerCase())).length} matches
             </Text>
           )}
+          {/* The dismiss lives on the bar now that the header toggle is gone.
+              It belongs here anyway — you close a search field from the field,
+              not from a button three positions away in the app bar. */}
+          <TouchableOpacity
+            onPress={() => { setSearchOpen(false); setSearchQ(''); }}
+            hitSlop={10}
+            accessibilityRole="button"
+            accessibilityLabel="Close search"
+          >
+            <Ionicons name="close" size={20} color={colors.textDim} />
+          </TouchableOpacity>
         </View>
       )}
 

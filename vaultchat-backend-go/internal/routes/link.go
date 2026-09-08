@@ -6,6 +6,7 @@ package routes
 
 import (
 	"context"
+	"fmt"
 	"html"
 	"io"
 	"net"
@@ -106,6 +107,93 @@ func pickMeta(page, prop string) string {
 	return ""
 }
 
+// ── the only client this file may use ──────────────────────────────────
+//
+// http.DefaultClient FOLLOWS REDIRECTS BEFORE ANYTHING CHECKS THEM. The old
+// code validated the hostname, issued the request with the default client, and
+// re-validated `resp.Request.URL` afterwards — by which point a 302 to
+// http://127.0.0.1:9200/ had already been connected to, sent, and answered.
+// Rejecting the response after the fact is not a control; the request IS the
+// vulnerability (OWASP SSRF Prevention: validate every hop, before following).
+//
+// Two things close it, and both are needed:
+//
+//  1. CheckRedirect validates EVERY hop — scheme, port and host — and refuses
+//     rather than following. A redirect chain cannot walk out of the policy.
+//  2. DialContext validates the address actually being connected to, at the
+//     moment of connection. Checking the hostname and then letting the
+//     transport resolve it again leaves a DNS-rebinding window where the
+//     second lookup returns 127.0.0.1. Dialling the address we just checked
+//     removes the second lookup entirely.
+//
+// Redirects are capped at 5: the default 10 is a lot of outbound requests for
+// a preview, and each one is a fetch we make on a user's say-so.
+const linkMaxRedirects = 5
+
+var linkClient = &http.Client{
+	Timeout: linkTimeout,
+	CheckRedirect: func(req *http.Request, via []*http.Request) error {
+		if len(via) >= linkMaxRedirects {
+			return fmt.Errorf("link: too many redirects")
+		}
+		if err := assertFetchable(req.Context(), req.URL); err != nil {
+			return fmt.Errorf("link: blocked redirect: %w", err)
+		}
+		return nil
+	},
+	Transport: &http.Transport{
+		Proxy: http.ProxyFromEnvironment,
+		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+			host, port, err := net.SplitHostPort(addr)
+			if err != nil {
+				return nil, err
+			}
+			// The transport hands us the hostname it is about to resolve. Resolve
+			// it ONCE here, keep the addresses we vetted, and dial those — so the
+			// name cannot resolve to something else between check and connect.
+			ips, err := net.DefaultResolver.LookupIPAddr(ctx, host)
+			if err != nil || len(ips) == 0 {
+				return nil, fmt.Errorf("link: cannot resolve %s", host)
+			}
+			var d net.Dialer
+			for _, a := range ips {
+				if isBlockedIP(a.IP.String()) {
+					return nil, fmt.Errorf("link: blocked address %s", a.IP)
+				}
+			}
+			// Every address vetted; dial the first that connects.
+			var lastErr error
+			for _, a := range ips {
+				conn, err := d.DialContext(ctx, network, net.JoinHostPort(a.IP.String(), port))
+				if err == nil {
+					return conn, nil
+				}
+				lastErr = err
+			}
+			return nil, lastErr
+		},
+		TLSHandshakeTimeout:   linkTimeout,
+		ResponseHeaderTimeout: linkTimeout,
+		MaxIdleConnsPerHost:   2,
+	},
+}
+
+// assertFetchable is the whole policy for a URL this server may fetch: http(s)
+// only, no odd ports, and a host that resolves entirely to public addresses.
+// Used for the first request AND for every redirect hop.
+func assertFetchable(ctx context.Context, u *url.URL) error {
+	if u.Scheme != "http" && u.Scheme != "https" {
+		return fmt.Errorf("unsupported scheme %q", u.Scheme)
+	}
+	if p := u.Port(); p != "" && p != "80" && p != "443" {
+		return fmt.Errorf("blocked port %q", p)
+	}
+	if !assertPublicHost(ctx, u.Hostname()) {
+		return fmt.Errorf("non-public host %q", u.Hostname())
+	}
+	return nil
+}
+
 var titleRe = regexp.MustCompile(`(?i)<title[^>]*>([^<]*)</title>`)
 
 func linkPreviewHandler(w http.ResponseWriter, r *http.Request) {
@@ -139,7 +227,7 @@ func linkPreviewHandler(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), linkTimeout)
 	defer cancel()
 
-	if !assertPublicHost(ctx, u.Hostname()) {
+	if err := assertFetchable(ctx, u); err != nil {
 		httpx.Err(w, 502, "preview unavailable")
 		return
 	}
@@ -147,16 +235,19 @@ func linkPreviewHandler(w http.ResponseWriter, r *http.Request) {
 	req, _ := http.NewRequestWithContext(ctx, "GET", key, nil)
 	req.Header.Set("User-Agent", "VaultChatBot/1.0 (+link-preview)")
 	req.Header.Set("Accept", "text/html")
-	resp, err := http.DefaultClient.Do(req)
+	// linkClient, never http.DefaultClient: it refuses redirects that leave the
+	// policy and dials only addresses it has just vetted. See its definition.
+	resp, err := linkClient.Do(req)
 	if err != nil {
 		httpx.Err(w, 502, "preview unavailable")
 		return
 	}
 	defer resp.Body.Close()
 
-	// Re-validate the FINAL url after redirects.
-	finalURL := resp.Request.URL
-	if !assertPublicHost(ctx, finalURL.Hostname()) {
+	// Belt and braces. CheckRedirect already refused any hop that failed the
+	// policy, so reaching here with a non-public final URL should be impossible
+	// — but a preview is not worth trusting "should be" on.
+	if err := assertFetchable(ctx, resp.Request.URL); err != nil {
 		httpx.Err(w, 400, "blocked redirect")
 		return
 	}

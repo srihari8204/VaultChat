@@ -17,7 +17,7 @@
 
 import React, { useCallback, useState, useMemo } from 'react';
 import {
-  View, Text, TextInput, TouchableOpacity, StyleSheet, ActivityIndicator, Dimensions,
+  View, Text, TextInput, TouchableOpacity, StyleSheet, ActivityIndicator, useWindowDimensions,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import PuzzleBoard from './PuzzleBoard';
@@ -79,7 +79,12 @@ export default function GateChallenge({
     }
   }, [answer, busy, onAnswer, onSolved]);
 
-  const board = Math.min(Dimensions.get('window').width - 48, 340);
+  // Live window, not a static read: this challenge can be on screen when the
+  // device rotates, and a board sized for portrait either overflows the
+  // landscape width or leaves the puzzle tiny. useWindowDimensions
+  // re-renders on the change; Dimensions.get does not subscribe.
+  const { width: winW } = useWindowDimensions();
+  const board = Math.min(winW - 48, 340);
 
   return (
     <View style={S.wrap}>

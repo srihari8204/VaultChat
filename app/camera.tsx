@@ -382,7 +382,18 @@ export default function CameraScreen() {
             {captureModes.map(m => (
               <Pressable key={m} onPress={() => selectMode(m)} style={s.tab}
                 accessibilityRole="tab" accessibilityState={{ selected: m === mode }}>
-                <Text variant="callout" color={m === mode ? BRAND_ACCENT : AuroraDark.textDim}>
+                {/* Capped, like the tab bar's labels and for the same reason:
+                    s.tabs is a fixed 260×32 pill that physically cannot grow,
+                    so at a large system font scale these mode labels clip
+                    instead of reflowing. Capping is only ever right for chrome
+                    with a hard height — everywhere the container CAN grow, the
+                    container grows and the user keeps their font size. */}
+                <Text
+                  variant="callout"
+                  color={m === mode ? BRAND_ACCENT : AuroraDark.textDim}
+                  maxFontSizeMultiplier={1.2}
+                  numberOfLines={1}
+                >
                   {m}
                 </Text>
               </Pressable>
@@ -564,7 +575,14 @@ const s = StyleSheet.create({
     position: 'absolute', left: 0, right: 0, bottom: 0, backgroundColor: AuroraDark.bg,
     paddingTop: SPACING.md, gap: SPACING.md,
   },
-  tabs: { flexDirection: 'row', alignSelf: 'center', width: 260, height: 32 },
+  tabs: {
+    // layout-exempt: a sliding indicator animates across this pill by
+    // interpolating a fixed slot width, so the pill must be a known size — it
+    // cannot grow with the font. The labels inside are capped and single-line
+    // instead (see the mode Pressable), which is the right trade for chrome
+    // with a hard height, and the same one the tab bar makes.
+    flexDirection: 'row', alignSelf: 'center', width: 260, height: 32,
+  },
   tabPill: {
     position: 'absolute', top: 0, bottom: 0, borderRadius: RADIUS.pill,
     backgroundColor: brandAlpha(0.16),

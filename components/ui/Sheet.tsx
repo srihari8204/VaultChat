@@ -6,7 +6,8 @@
 
 import React, { useEffect } from 'react';
 import {
-  Modal, View, TouchableOpacity, Pressable, StyleSheet, Animated, Platform, ScrollView, Dimensions,
+  Modal, View, TouchableOpacity, Pressable, StyleSheet, Animated, Platform, ScrollView,
+  useWindowDimensions,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Haptics from 'expo-haptics';
@@ -33,6 +34,7 @@ export interface SheetProps {
 export function Sheet({ visible, title, message, actions, onClose }: SheetProps) {
   const Aurora = useColors();
   const insets = useSafeAreaInsets();
+  const { height: winH } = useWindowDimensions();
   const slide = React.useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
@@ -63,7 +65,14 @@ export function Sheet({ visible, title, message, actions, onClose }: SheetProps)
             {message ? <AppText variant="caption" color={Aurora.textDim} style={styles.center}>{message}</AppText> : null}
           </View>
         )}
-        <ScrollView style={{ maxHeight: Dimensions.get('window').height * 0.6 }} bounces={false} showsVerticalScrollIndicator={false}>
+        {/* 60% of the LIVE window, not a static Dimensions.get.
+            Dimensions.get returns the current size when it runs, but nothing
+            subscribes to it, so a sheet already open when the device rotates
+            keeps the height it was built with — in landscape that is taller
+            than the screen, and the Cancel row goes off the bottom with no way
+            to scroll to it. useWindowDimensions re-renders on the change.
+            This is a shared primitive, so the bug was every sheet in the app. */}
+        <ScrollView style={{ maxHeight: winH * 0.6 }} bounces={false} showsVerticalScrollIndicator={false}>
           {actions.map((a, i) => (
             <TouchableOpacity key={i} style={styles.row} onPress={() => pick(a)} activeOpacity={0.7}>
               {a.icon && <Ionicons name={a.icon} size={20} color={a.destructive ? Aurora.danger : Aurora.text} />}

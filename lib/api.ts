@@ -225,30 +225,67 @@ const REQUEST_TIMEOUT_MS = 30_000;
 // token expired), they must NOT each fire their own /auth/refresh — the first
 // rotates the token and the rest would present the now-revoked one and get logged
 // out. All concurrent callers therefore share ONE in-flight refresh.
-let refreshInFlight: Promise<boolean> | null = null;
-function tryRefresh(): Promise<boolean> {
+/**
+ * WHY REFRESH HAS THREE ANSWERS, NOT TWO.
+ *
+ * AUDIT F08: this returned a plain boolean, so a dropped connection, a 503
+ * during a deploy and a genuinely revoked token were all `false` — and the
+ * caller responded to `false` by DELETING the user's credentials and bouncing
+ * them to onboarding. A tunnel, a failed network resume or one bad minute on
+ * the server logged people out and made them sign in again.
+ *
+ * Only the server saying "this token is not valid" means the session is over.
+ * Everything else means "ask again later", and the credentials must survive it.
+ *
+ *   'ok'        — refreshed, tokens rotated.
+ *   'terminal'  — the server rejected the refresh token itself. Session over.
+ *   'transient' — no answer, or one we cannot act on. Keep the credentials.
+ */
+export type RefreshOutcome = 'ok' | 'terminal' | 'transient';
+
+/** Refresh is not allowed to hang forever — see F09. */
+const REFRESH_TIMEOUT_MS = 15_000;
+
+let refreshInFlight: Promise<RefreshOutcome> | null = null;
+function tryRefresh(): Promise<RefreshOutcome> {
   if (!refreshInFlight) {
     refreshInFlight = doRefresh().finally(() => { refreshInFlight = null; });
   }
   return refreshInFlight;
 }
 
-async function doRefresh(): Promise<boolean> {
+async function doRefresh(): Promise<RefreshOutcome> {
   const refresh = await getRefreshToken();
-  if (!refresh) return false;
+  // No refresh token at all is genuinely terminal: there is nothing to retry.
+  if (!refresh) return 'terminal';
+
+  // Bounded on purpose. This fetch used to run with no signal and no deadline,
+  // outside the normal request timeout, so a black-hole connection could leave
+  // refreshInFlight pending forever — and every request that joined it with it.
+  const ctl = new AbortController();
+  const timer = setTimeout(() => ctl.abort(), REFRESH_TIMEOUT_MS);
   try {
     const res = await fetch(`${SERVER_URL}/auth/refresh`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
       body: JSON.stringify({ refreshToken: refresh }),
+      signal: ctl.signal,
     });
-    if (!res.ok) return false;
-    const data = await res.json();
-    if (!data?.accessToken || !data?.refreshToken) return false;
+    // 401/403 is the server telling us this token is dead. A 5xx is the server
+    // having a bad time and says nothing about the token; 429 likewise.
+    if (res.status === 401 || res.status === 403) return 'terminal';
+    if (!res.ok) return 'transient';
+
+    const data = await res.json().catch(() => null);
+    // A 200 we cannot parse is a broken response, not a revoked session —
+    // a captive-portal login page answers 200 with HTML.
+    if (!data?.accessToken || !data?.refreshToken) return 'transient';
     await setTokens(data.accessToken, data.refreshToken);
-    return true;
+    return 'ok';
   } catch {
-    return false;
+    return 'transient';   // offline, DNS, TLS, abort — all retryable
+  } finally {
+    clearTimeout(timer);
   }
 }
 
@@ -272,14 +309,32 @@ async function endSessionAndBounce(): Promise<void> {
   }
 }
 
+/**
+ * Refresh the access token on demand, for callers outside the HTTP path.
+ *
+ * The socket layer needs this: its handshake credential is separate from any
+ * request, so when the access token expires while the app is idle there is no
+ * 401 to trigger the usual refresh — see lib/socket.ts (audit F13). De-duped
+ * through the same in-flight promise as the HTTP path, so a socket reconnect
+ * storm cannot start a second refresh and rotate the token out from under one.
+ */
+export function refreshAccessToken(): Promise<RefreshOutcome> {
+  return tryRefresh();
+}
+
 export async function api<T = any>(path: string, opts: ApiOptions = {}): Promise<T> {
   let res = await rawFetch(path, opts);
 
   // Auto-refresh once on 401
   if (res.status === 401 && opts.auth !== false) {
-    const ok = await tryRefresh();
-    if (ok) res = await rawFetch(path, opts);
-    else {
+    const outcome = await tryRefresh();
+    if (outcome === 'ok') res = await rawFetch(path, opts);
+    else if (outcome === 'transient') {
+      // AUDIT F08: the session is probably fine — we just could not reach the
+      // server to prove it. Surface an ordinary failure the caller can retry
+      // and the offline queue can hold, and leave the credentials alone.
+      throw new Error('Network unavailable — check your connection and try again.');
+    } else {
       // Refresh failed → session is dead. Clear tokens and bounce to /welcome
       // so the user can sign in again instead of staring at a "token_expired"
       // alert with no way forward.

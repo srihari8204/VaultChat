@@ -19,7 +19,7 @@ import { useSyncExternalStore } from 'react';
 import { AppState } from 'react-native';
 import NetInfo from '@react-native-community/netinfo';
 import { SERVER_URL } from '../constants/server';
-import { getAccessToken } from './api';
+import { getAccessToken, refreshAccessToken } from './api';
 import { netKeyOf, reconnectReason, shouldKickOnForeground, shouldAbandonPendingConnect, SETTLE_MS } from './socketReconnect';
 import perf from './perf';
 
@@ -96,14 +96,31 @@ function applyPersistent(s: Socket) {
 }
 
 async function connect(): Promise<Socket> {
-  const token = await getAccessToken();
-  if (!token) throw new Error('Not signed in');
+  // Fail fast when there is no session at all. The token itself is NOT captured
+  // here any more — the auth callback below reads it fresh per handshake.
+  if (!(await getAccessToken())) throw new Error('Not signed in');
 
   const s = ioClient(SERVER_URL, {
     // Task 2: websocket-only (no polling fallback — intentional launch
     // decision), aggressive-but-jittered reconnect for fast network recovery.
     transports: ['websocket'],
-    auth: { token },
+    // AUDIT F13: a FUNCTION, not the object literal it used to be.
+    //
+    // `auth: { token }` captures one token at construction and presents that
+    // same string on every reconnect for the life of the socket. Access tokens
+    // last 15 minutes, so after the app sat idle and the connection dropped,
+    // every reconnect attempt handed the server a token it had already expired
+    // — and the middleware rejects rather than retries, so HTTP kept working
+    // while messaging and calls stayed dark until something happened to build
+    // a brand new socket.
+    //
+    // The callback form is invoked before EACH connection attempt, so a
+    // reconnect always carries whatever the HTTP layer last stored.
+    auth: (cb: (data: Record<string, unknown>) => void) => {
+      getAccessToken()
+        .then((t) => cb({ token: t ?? '' }))
+        .catch(() => cb({ token: '' }));
+    },
     reconnection: true,
     reconnectionDelay: 500,
     reconnectionDelayMax: 5000,
@@ -154,6 +171,31 @@ async function connect(): Promise<Socket> {
   s.io.on('reconnect_error', () => noteConnectFailure());
   s.io.on('error', () => noteConnectFailure());
   s.on('connect_error', () => noteConnectFailure());
+
+  // ...and if the token is simply dead, renew it and let reconnection continue.
+  //
+  // The callback above covers the case where something else already refreshed.
+  // This covers the case where nothing has: the app has been idle, the socket
+  // is the first thing to notice, and there is no 401 anywhere to trigger the
+  // usual path. Without it the socket retries the same expired token until the
+  // user navigates somewhere that happens to make an HTTP call.
+  //
+  // Guarded so a rejecting server cannot become a refresh loop: one attempt per
+  // socket, and only for an auth-shaped failure.
+  let renewed = false;
+  s.on('connect_error', (err: any) => {
+    const why = String(err?.message ?? '').toLowerCase();
+    const isAuth = why.includes('token') || why.includes('auth') || why.includes('unauthorized');
+    if (!isAuth || renewed) return;
+    renewed = true;
+    refreshAccessToken()
+      .then((outcome) => {
+        // 'terminal' means the session is genuinely over — the HTTP path owns
+        // signing the user out; the socket must not race it.
+        if (outcome === 'ok') { try { s.connect(); } catch {} }
+      })
+      .catch(() => {});
+  });
 
   return new Promise<Socket>((resolve, reject) => {
     const onReady = () => {

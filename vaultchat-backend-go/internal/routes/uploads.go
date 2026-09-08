@@ -798,6 +798,67 @@ func upDecryptAvatar(ctx context.Context, backend *string, storagePath, keyCiphe
 	return vault.DecryptWithKey(cipherBytes, dekHex)
 }
 
+// uploadsIsRecipient reports whether `userID` is in the audience of attachment
+// `attID` — a member of a chat carrying it, or in the audience of an unexpired
+// story that references it.
+//
+// AUDIT F03: POST /uploads/{id}/viewed had no audience check at all. It looked
+// the attachment up by id, confirmed it was view-once and not the caller's own,
+// and burned it. Any authenticated user who learned an attachment id could
+// consume somebody else's view-once media, and the intended recipient would
+// then be told it had already been viewed. Note db.WithUser does not save this:
+// production connects as a superuser and bypasses RLS, so the row is readable
+// regardless.
+//
+// The rule itself is lifted verbatim from the download path so there is ONE
+// definition of "may see this attachment" rather than two that can drift —
+// which is how the consume endpoint came to have none.
+func uploadsIsRecipient(ctx context.Context, userID, attID string) (bool, error) {
+	var one int
+	e := db.WithUser(ctx, userID, func(tx pgx.Tx) error {
+		return tx.QueryRow(ctx,
+			`SELECT 1
+			   FROM messages m
+			   JOIN chat_members cm ON cm.chat_id = m.chat_id
+			  WHERE cm.user_id = $2
+			    AND cm.left_at IS NULL
+			    AND m.meta->>'attachmentId' = $1
+			  LIMIT 1`, attID, userID).Scan(&one)
+	})
+	if e == nil {
+		return true, nil
+	}
+	if !db.NoRows(e) {
+		return false, e
+	}
+
+	// Story media: same visibility rule as GET /stories/feed. Plain pool,
+	// like storiesFeed — stories carries no RLS policy.
+	e = db.SysPool.QueryRow(ctx,
+		`SELECT 1 FROM stories s
+		  WHERE s.attachment_id = $1
+		    AND s.expires_at > NOW()
+		    AND EXISTS (
+		      SELECT 1 FROM chat_members cm_me
+		       JOIN chat_members cm_them ON cm_them.chat_id = cm_me.chat_id
+		       WHERE cm_me.user_id   = $2 AND cm_me.left_at   IS NULL
+		         AND cm_them.user_id = s.user_id AND cm_them.left_at IS NULL
+		    )
+		    AND NOT EXISTS (
+		      SELECT 1 FROM user_blocks ub
+		       WHERE (ub.blocker_id = s.user_id AND ub.blocked_id = $2)
+		          OR (ub.blocker_id = $2        AND ub.blocked_id = s.user_id)
+		    )
+		  LIMIT 1`, attID, userID).Scan(&one)
+	if e == nil {
+		return true, nil
+	}
+	if db.NoRows(e) {
+		return false, nil
+	}
+	return false, e
+}
+
 // ── POST /uploads/{id}/viewed ──────────────────────────────────────────
 
 func uploadsViewed(w http.ResponseWriter, r *http.Request) {
@@ -833,6 +894,20 @@ func uploadsViewed(w http.ResponseWriter, r *http.Request) {
 	}
 	if ownerID == user.ID {
 		httpx.JSON(w, 200, map[string]any{"ok": true, "noop": true})
+		return
+	}
+	// AUDIT F03: prove the caller is actually in this attachment's audience
+	// before burning it. Without this, knowing an id was enough to destroy
+	// another person's view-once media — a denial of THEIR content, by a
+	// stranger. 404 rather than 403 on purpose: someone with no business here
+	// learns nothing about whether the id exists.
+	allowed, aErr := uploadsIsRecipient(ctx, user.ID, id)
+	if aErr != nil {
+		httpx.Err(w, 500, "Failed to mark viewed")
+		return
+	}
+	if !allowed {
+		httpx.Err(w, 404, "Not found")
 		return
 	}
 	if viewedAt != nil {

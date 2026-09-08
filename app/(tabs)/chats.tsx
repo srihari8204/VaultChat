@@ -824,21 +824,43 @@ const ChatRow = memo(function ChatRow({
         <View style={S.rowBody}>
           <View style={S.rowTop}>
             <Text style={S.rowName} numberOfLines={1}>{title}</Text>
-            {/* This chat deletes itself (migration 120). A timer icon in the
-                list, not just inside the chat: the whole conversation is about
-                to go, and finding that out only by opening it is finding out
-                too late. Colour is the same danger/dim split the header uses. */}
-            {chat.expiresAt && (
-              <Ionicons
-                name="timer-outline"
-                size={14}
-                style={{ marginLeft: 3 }}
-                color={new Date(chat.expiresAt).getTime() - Date.now() <= 600_000 ? colors.danger : colors.textFaint}
-              />
+            {/* THE FLAGS SHARE ONE BOX, and it is not decoration.
+                rowTop has `gap`, which applies between EVERY child — so three
+                loose icons cost four gaps plus their own marginLefts, ~31dp of
+                spacing in the row where the name is competing for width. The
+                name is the only flexible child, so every one of those pixels
+                came out of it and turned readable names into ellipses.
+                Grouped, the outer row has three children and two gaps, and the
+                cluster spaces itself tightly. flexShrink: 0 because status must
+                not be squeezed away — the NAME is what may truncate. */}
+            {(chat.expiresAt || chat.muted || chat.pinned) && (
+              <View style={S.rowFlags}>
+                {/* This chat deletes itself (migration 120). A timer icon in the
+                    list, not just inside the chat: the whole conversation is
+                    about to go, and finding that out only by opening it is
+                    finding out too late. */}
+                {chat.expiresAt && (
+                  <Ionicons
+                    name="timer-outline"
+                    size={14}
+                    color={new Date(chat.expiresAt).getTime() - Date.now() <= 600_000 ? colors.danger : colors.textFaint}
+                  />
+                )}
+                {chat.muted && <Ionicons name="volume-mute" size={15} color={colors.textFaint} />}
+                {chat.pinned && <Ionicons name="pin" size={14} color={colors.textFaint} />}
+              </View>
             )}
-            {chat.muted && <Ionicons name="volume-mute" size={15} color={colors.textFaint} style={{ marginLeft: 2 }} />}
-            {chat.pinned && <Ionicons name="pin" size={14} color={colors.textFaint} style={{ marginLeft: 2 }} />}
-            <Text style={[S.rowTime, chat.unreadCount > 0 && { color: colors.primary, fontWeight: '700' }]}>{time}</Text>
+            {/* Capped and unshrinkable. A timestamp is a fixed-width fact, but
+                at a 130% system font scale it grew ~25% wider and took that
+                width straight off the name. 1.15 keeps it legible without
+                letting it eat the thing people actually read. */}
+            <Text
+              style={[S.rowTime, chat.unreadCount > 0 && { color: colors.primary, fontWeight: '700' }]}
+              numberOfLines={1}
+              maxFontSizeMultiplier={1.15}
+            >
+              {time}
+            </Text>
           </View>
           <View style={S.rowBottom}>
             {isTyping ? (
@@ -967,7 +989,14 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   rowPin: { fontSize: 11 },
   rowName: { color: c.text, fontSize: 17, lineHeight: 22, fontWeight: '600', flex: 1, minWidth: 0 },
   rowMuted: { fontSize: 12 },
-  rowTime: { color: c.textFaint, fontSize: 12.5, lineHeight: 16, marginLeft: 'auto' },
+  // flexShrink: 0 — the name is the flexible child and the only thing that may
+  // truncate. marginLeft:'auto' is gone: it dates from when the name took its
+  // natural width, and with the name at flex:1 there is no free space left for
+  // an auto margin to absorb.
+  rowTime: { color: c.textFaint, fontSize: 12.5, lineHeight: 16, flexShrink: 0 },
+  // One box for the timer/mute/pin glyphs, tightly spaced among themselves, so
+  // rowTop's gap is paid twice instead of four times.
+  rowFlags: { flexDirection: 'row', alignItems: 'center', gap: 3, flexShrink: 0 },
   rowBottom: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: 8 },
   rowPreview: { color: c.textDim, fontSize: 14, lineHeight: 19, flex: 1, minWidth: 0 },
   rowPreviewUnread: { color: c.text, fontWeight: '600' },

@@ -100,6 +100,10 @@ func InvalidateChatMembers(ctx context.Context, chatID string) {
 	if c := redisx.Client; c != nil {
 		c.Del(ctx, "vc:members:"+chatID)
 	}
+	// AUDIT F02: dropping the roster stops fan-out REACHING a removed member,
+	// but their live socket was still holding its own "yes, a member" decision
+	// and could keep publishing into the chat. Same call site, both caches.
+	BumpChatPermissions(chatID)
 }
 
 // FanOutToChat is the exact port of server.js fanOutToChat.

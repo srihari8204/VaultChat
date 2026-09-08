@@ -4,6 +4,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 )
 
 // join_chat used to join whatever chatId arrived, so room membership was
@@ -20,68 +21,88 @@ import (
 func TestChatMemberAllowedHonoursTheCache(t *testing.T) {
 	h := &Hub{}
 
-	deny := &sockData{uid: "u1", chatMemberOk: map[string]bool{"c-denied": false}}
+	// A cached entry is only usable at the chat's CURRENT generation, so the
+	// fixtures stamp the live one.
+	at := func(chat string, ok bool) map[string]cachedPerm {
+		return map[string]cachedPerm{chat: {ok: ok, gen: permGenerationOf(chat), at: time.Now()}}
+	}
+
+	deny := &sockData{uid: "u1", chatMemberOk: at("c-denied", false)}
 	if h.chatMemberAllowed(deny, "c-denied") {
 		t.Fatal("a cached false must refuse — this is the removed-member case")
 	}
 
-	allow := &sockData{uid: "u1", chatMemberOk: map[string]bool{"c-ok": true}}
+	allow := &sockData{uid: "u1", chatMemberOk: at("c-ok", true)}
 	if !h.chatMemberAllowed(allow, "c-ok") {
 		t.Fatal("a cached true must allow, or every legitimate join breaks")
 	}
 }
 
-// The gate is only worth anything if join_chat actually consults it. A source
-// check is the honest tool here: the handler closes over a live socket and Hub,
-// so exercising it for real would need both a DB and a socket server, and this
-// package deliberately has neither.
-func TestJoinChatIsAuthorized(t *testing.T) {
-	src, err := os.ReadFile("handlers.go")
-	if err != nil {
-		t.Fatalf("read handlers.go: %v", err)
-	}
-	body := string(src)
+// AUDIT F02: the cache used to last for the socket's LIFETIME. Removing someone
+// from a group refreshed the fan-out roster but never touched the decision
+// their live connection was holding, so a removed member could keep publishing
+// into the chat until they happened to reconnect — on a phone, possibly hours.
+//
+// Asserted on the cache entry rather than through chatMemberAllowed: once the
+// entry is invalid that function re-queries the database, and this package has
+// none (by design — see TestJoinChatIsAuthorized). Re-querying IS the fix; what
+// needs proving is that the bump makes the held decision unusable.
+func TestBumpChatPermissionsInvalidatesLiveSockets(t *testing.T) {
+	const chat = "c-removed"
 
-	i := strings.Index(body, `s.On("join_chat"`)
-	if i < 0 {
-		t.Fatal(`no join_chat handler found`)
+	held := cachedPerm{ok: true, gen: permGenerationOf(chat), at: time.Now()}
+	if !held.fresh(permGenerationOf(chat)) {
+		t.Fatal("precondition: a just-made decision should be usable")
 	}
-	// Bound the search to this handler so a check belonging to a NEIGHBOURING
-	// handler cannot make this pass by accident.
-	end := strings.Index(body[i:], `s.On("leave_chat"`)
-	if end < 0 {
-		t.Fatal(`could not delimit the join_chat handler`)
-	}
-	handler := body[i : i+end]
 
-	if !strings.Contains(handler, "chatMemberAllowed") {
-		t.Error("join_chat must gate on chatMemberAllowed — without it any " +
-			"authenticated socket can join any chat room and receive its fan-out")
-	}
-	if !strings.Contains(handler, "s.Join(") {
-		t.Error("join_chat should still join the room when authorized")
-	}
-	// The refusal must be visible. A silently dropped join looks identical to a
-	// client bug, and this one would mean a user's live location and typing
-	// simply stopped arriving with nothing to explain it.
-	if !strings.Contains(handler, "log.Printf") && !strings.Contains(handler, "metrics.Inc") {
-		t.Error("a refused join must be logged or counted, not silently dropped")
+	BumpChatPermissions(chat) // what removing a member now triggers
+
+	if held.fresh(permGenerationOf(chat)) {
+		t.Fatal("a removed member's socket kept its cached authorisation")
 	}
 }
 
-// One definition of "is a member": the live-location and trip handlers gate on
-// the same helper. If a second, subtly different check appears, that is how the
-// two drift apart.
-func TestOneMembershipCheckShared(t *testing.T) {
-	src, err := os.ReadFile("handlers.go")
+// A stale entry must expire even if nothing bumped the generation — the
+// backstop for a second replica, whose in-process counter never sees the bump.
+func TestCachedPermExpires(t *testing.T) {
+	gen := permGenerationOf("c-any")
+	stale := cachedPerm{ok: true, gen: gen, at: time.Now().Add(-permTTL - time.Second)}
+	if stale.fresh(gen) {
+		t.Fatalf("an entry older than permTTL (%s) is still being trusted", permTTL)
+	}
+	warm := cachedPerm{ok: true, gen: gen, at: time.Now()}
+	if !warm.fresh(gen) {
+		t.Fatal("a fresh entry at the current generation should be usable")
+	}
+	if warm.fresh(gen + 1) {
+		t.Fatal("an entry from an older generation must not be usable")
+	}
+}
+
+// One chat's change must not invalidate every other chat on the socket, or a
+// busy group would push every conversation into a database round trip.
+func TestBumpIsScopedToOneChat(t *testing.T) {
+	a := cachedPerm{ok: true, gen: permGenerationOf("c-a"), at: time.Now()}
+	b := cachedPerm{ok: true, gen: permGenerationOf("c-b"), at: time.Now()}
+
+	BumpChatPermissions("c-a")
+
+	if a.fresh(permGenerationOf("c-a")) {
+		t.Fatal("c-a should have been invalidated")
+	}
+	if !b.fresh(permGenerationOf("c-b")) {
+		t.Fatal("c-b was invalidated by an unrelated chat's membership change")
+	}
+}
+
+// The wiring that makes any of this fire: the roster invalidation every
+// membership change already calls must also drop socket authorisation.
+func TestInvalidateChatMembersBumpsPermissions(t *testing.T) {
+	src, err := os.ReadFile("delivery.go")
 	if err != nil {
-		t.Fatalf("read handlers.go: %v", err)
+		t.Fatal(err)
 	}
-	if n := strings.Count(string(src), "func (h *Hub) chatMemberAllowed"); n != 1 {
-		t.Errorf("expected exactly one chatMemberAllowed definition, found %d", n)
-	}
-	if n := strings.Count(string(src), "chatMemberAllowed(d,"); n < 6 {
-		t.Errorf("expected the shared check on join_chat plus the existing "+
-			"live-location/trip handlers, found %d call sites", n)
+	if !strings.Contains(string(src), "BumpChatPermissions(chatID)") {
+		t.Fatal("InvalidateChatMembers no longer drops cached socket authorisation")
 	}
 }

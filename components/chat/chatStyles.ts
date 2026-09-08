@@ -151,8 +151,14 @@ export const makeStyles = (
   inChatSearchCount:  { color: c.textDim, fontSize: 11, fontWeight: '600' },
   backBtn:       { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
   backTxt:       { color: c.text, fontSize: 24 },
-  title:         { color: c.text, fontSize: 18, fontWeight: '700' },
-  sub:           { color: c.accentLight, fontSize: 12 },
+  // 17/20, not 18/700. The WhatsApp spec puts the chat-header name at 17/20
+  // (§2.2) and the Figma header matches; 18 at weight 700 was both larger and
+  // heavier than anything else in the app calls a name — the chat LIST row is
+  // 17 — and every extra point came straight off the width available before the
+  // name ellipsises. lineHeight pinned so the two-line title block does not
+  // shift when the presence line changes.
+  title:         { color: c.text, fontSize: 17, lineHeight: 20, fontWeight: '600' },
+  sub:           { color: c.accentLight, fontSize: 12, lineHeight: 16 },
   e2eBadge:      { color: '#22C55E', fontSize: 11, fontWeight: '600' },
   // Self-destruct countdown for a chat opened by a 1h/3h code (migration 120).
   // Sits directly under the header subtitle; goes red under ten minutes.

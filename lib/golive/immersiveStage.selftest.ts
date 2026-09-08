@@ -202,7 +202,11 @@ A(/win\.height \* \(landscape \? 0\.5 : 0\.28\)/.test(code),
 // ── chat folds away ────────────────────────────────────────────────
 A(/const \[chatOpen, setChatOpen\]/.test(code) && /autoFocus/.test(code),
   '25. chat folds away and opens focused — the keyboard arrives with the tap');
-A(/KeyboardAvoidingView/.test(code),
+// KeyboardAvoidingView was replaced by <KeyboardSafe> (audit F10-adjacent):
+// `behavior={Platform.OS === 'ios' ? 'padding' : undefined}` is no avoidance at
+// all on Android, and edge-to-edge defeats the manifest's adjustResize, so the
+// composer sat UNDER the keyboard on exactly the platform this ships on.
+A(/KeyboardSafe/.test(code),
   '26. and the composer lifts clear of that keyboard instead of under it');
 A(/unread/.test(code) && /badge/i.test(code),
   '27. a folded chat still says when someone spoke');

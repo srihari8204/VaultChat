@@ -97,13 +97,86 @@ func authStrIfTruthy(v any) *string {
 	return &s
 }
 
-// authClientIP — Express req.ip without 'trust proxy' = the socket peer.
-func authClientIP(r *http.Request) string {
-	host, _, err := net.SplitHostPort(r.RemoteAddr)
-	if err != nil {
-		return r.RemoteAddr
+// ── client IP, behind two proxies ──────────────────────────────────────
+//
+// AUDIT F10: this returned the socket peer, full stop. The deployed path is
+// nginx → Caddy → go-api, so the socket peer is ALWAYS the proxy, and every
+// per-IP limit keyed on it was shared by every user on the internet: OTP
+// issuance at 10/hour and account lookup at 20/minute, pooled. A trickle of
+// traffic from one person locked everybody else out of signing in.
+//
+// The forwarding header cannot simply be trusted either — it is caller-supplied
+// and would let anyone mint a fresh identity per request, which is worse than
+// pooling. So: trust it ONLY when the request actually arrived from a proxy we
+// recognise, and then take the right-most entry that is not itself a trusted
+// proxy. Right-most matters: X-Forwarded-For is append-only, so a client can
+// prepend whatever it likes on the left, and only the entries our own hops
+// added at the end are trustworthy.
+//
+// Default trust covers the checked-in topology — loopback plus the docker
+// networks the compose files pin. TRUSTED_PROXIES overrides it with a
+// comma-separated CIDR list for a different deployment.
+var trustedProxyNets = func() []*net.IPNet {
+	spec := os.Getenv("TRUSTED_PROXIES")
+	if spec == "" {
+		spec = "127.0.0.0/8,::1/128,172.28.0.0/16,172.17.0.0/16"
 	}
-	return host
+	var out []*net.IPNet
+	for _, part := range strings.Split(spec, ",") {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		if _, n, err := net.ParseCIDR(part); err == nil {
+			out = append(out, n)
+		}
+	}
+	return out
+}()
+
+func authIsTrustedProxy(ip string) bool {
+	parsed := net.ParseIP(strings.TrimSpace(ip))
+	if parsed == nil {
+		return false
+	}
+	for _, n := range trustedProxyNets {
+		if n.Contains(parsed) {
+			return true
+		}
+	}
+	return false
+}
+
+// authClientIP is the address rate limits are keyed on.
+func authClientIP(r *http.Request) string {
+	peer := r.RemoteAddr
+	if host, _, err := net.SplitHostPort(r.RemoteAddr); err == nil {
+		peer = host
+	}
+	// Direct connection from something we do not recognise: its headers are
+	// worth nothing, and spoofing must not be possible.
+	if !authIsTrustedProxy(peer) {
+		return peer
+	}
+	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+		parts := strings.Split(xff, ",")
+		for i := len(parts) - 1; i >= 0; i-- {
+			candidate := strings.TrimSpace(parts[i])
+			if candidate == "" || authIsTrustedProxy(candidate) {
+				continue // one of our own hops — keep walking left
+			}
+			if net.ParseIP(candidate) != nil {
+				return candidate
+			}
+			break // garbage in the header; fall through
+		}
+	}
+	// nginx sets this to its own immediate peer, which is the real client on
+	// the first hop. Only reachable when the request came from a trusted proxy.
+	if xr := strings.TrimSpace(r.Header.Get("X-Real-IP")); xr != "" && net.ParseIP(xr) != nil {
+		return xr
+	}
+	return peer
 }
 
 var authEmailRe = regexp.MustCompile(`^[^\s@]+@[^\s@]+\.[^\s@]+$`)
@@ -227,6 +300,25 @@ func authGenRefreshToken() (string, error) {
 	return base64.RawURLEncoding.EncodeToString(b), nil
 }
 
+// authRefreshLookup is a refresh token's SEARCHABLE identity: a keyed digest,
+// so one indexed equality finds the single row instead of bcrypt-comparing
+// against a page of candidates (audit F05). Reuses the existing lookup pepper
+// rather than introducing a second one — same primitive as email/phone lookup.
+//
+// Returns "" when the pepper is unset, and every caller treats that as "fall
+// back to the legacy scan" rather than failing: a misconfigured environment
+// must not lock every user out of refreshing.
+func authRefreshLookup(token string) string {
+	if token == "" {
+		return ""
+	}
+	h, err := vault.LookupHash("refresh:" + token)
+	if err != nil {
+		return ""
+	}
+	return h
+}
+
 func authCompareRefresh(token, hash string) bool {
 	if token == "" || hash == "" {
 		return false
@@ -252,12 +344,18 @@ func authIssueTokens(ctx context.Context, r *http.Request, userID string, email 
 	if ip := authClientIP(r); ip != "" {
 		ipPtr = &ip
 	}
+	// token_lookup makes the row findable in one indexed hit (migration 127).
+	// NULL when the pepper is unset, which keeps the legacy scan working.
+	var lookupPtr *string
+	if lk := authRefreshLookup(refresh); lk != "" {
+		lookupPtr = &lk
+	}
 	_, err = db.Pool.Exec(ctx,
-		`INSERT INTO refresh_tokens (user_id, token_hash, expires_at, user_agent, ip)
-	     VALUES ($1, $2, NOW() + ($3 || ' seconds')::INTERVAL, $4, $5)`,
+		`INSERT INTO refresh_tokens (user_id, token_hash, expires_at, user_agent, ip, token_lookup)
+	     VALUES ($1, $2, NOW() + ($3 || ' seconds')::INTERVAL, $4, $5, $6)`,
 		userID, string(refreshHash),
 		strconv.FormatInt(authEnvTTL("JWT_REFRESH_TTL", 30*24*60*60), 10),
-		truncRunes(r.Header.Get("User-Agent"), 500), ipPtr)
+		truncRunes(r.Header.Get("User-Agent"), 500), ipPtr, lookupPtr)
 	if err != nil {
 		return "", "", err
 	}
@@ -716,50 +814,91 @@ func authRefresh(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Same candidate scan + 30s grace window as Node (see auth.js for why).
+	// AUDIT F05/F07. The grace window exists so a retried refresh does not lose
+	// the race with the one that already rotated. It applies ONLY to a row
+	// revoked BY rotation: a device revoked from the sessions screen used to be
+	// handed the same 30 seconds and could mint fresh credentials after being
+	// kicked off.
 	const graceSec = 30
-	rows, err := db.Pool.Query(ctx,
-		`SELECT id, user_id, token_hash, revoked_at FROM refresh_tokens
-	     WHERE expires_at > NOW()
-	       AND (revoked_at IS NULL OR revoked_at > NOW() - ($1 || ' seconds')::INTERVAL)
-	     ORDER BY id DESC
-	     LIMIT 500`, strconv.Itoa(graceSec))
-	if err != nil {
-		httpx.Err(w, 500, "Refresh failed")
-		return
-	}
+
 	type cand struct {
 		id        int64
 		userID    string
 		tokenHash string
 		revokedAt *time.Time
 	}
-	cands := []cand{}
-	for rows.Next() {
+	var match *cand
+
+	// One indexed equality on the keyed digest — no page of candidates, no
+	// bcrypt storm on an invalid token, and no 500-row horizon past which a
+	// perfectly valid session stops being found.
+	if lk := authRefreshLookup(presented); lk != "" {
 		var c cand
-		if err := rows.Scan(&c.id, &c.userID, &c.tokenHash, &c.revokedAt); err != nil {
-			rows.Close()
+		err := db.Pool.QueryRow(ctx,
+			`SELECT id, user_id, token_hash, revoked_at FROM refresh_tokens
+		      WHERE token_lookup = $1
+		        AND expires_at > NOW()
+		        AND (revoked_at IS NULL
+		             OR (revoked_reason = 'rotated'
+		                 AND revoked_at > NOW() - ($2 || ' seconds')::INTERVAL))
+		      LIMIT 1`, lk, strconv.Itoa(graceSec)).Scan(&c.id, &c.userID, &c.tokenHash, &c.revokedAt)
+		if err == nil {
+			// Still bcrypt-verified. The digest finds the row; it does not
+			// authorise it, so a leaked database plus the pepper is not a
+			// forged session.
+			if authCompareRefresh(presented, c.tokenHash) {
+				match = &c
+			}
+		} else if !db.NoRows(err) {
 			httpx.Err(w, 500, "Refresh failed")
 			return
 		}
-		cands = append(cands, c)
 	}
-	rows.Close()
 
-	var match *cand
-	for i := range cands {
-		if authCompareRefresh(presented, cands[i].tokenHash) {
-			match = &cands[i]
-			break
+	// LEGACY FALLBACK — rows written before migration 127 have no lookup value,
+	// and the plaintext was never stored so they cannot be backfilled. Without
+	// this, deploying the migration would sign out everyone currently signed in.
+	// Delete once every pre-127 token has expired (JWT_REFRESH_TTL, 30d).
+	if match == nil {
+		rows, err := db.Pool.Query(ctx,
+			`SELECT id, user_id, token_hash, revoked_at FROM refresh_tokens
+		     WHERE token_lookup IS NULL
+		       AND expires_at > NOW()
+		       AND (revoked_at IS NULL
+		            OR (revoked_reason IS DISTINCT FROM 'revoked'
+		                AND revoked_at > NOW() - ($1 || ' seconds')::INTERVAL))
+		     ORDER BY id DESC
+		     LIMIT 500`, strconv.Itoa(graceSec))
+		if err != nil {
+			httpx.Err(w, 500, "Refresh failed")
+			return
+		}
+		cands := []cand{}
+		for rows.Next() {
+			var c cand
+			if err := rows.Scan(&c.id, &c.userID, &c.tokenHash, &c.revokedAt); err != nil {
+				rows.Close()
+				httpx.Err(w, 500, "Refresh failed")
+				return
+			}
+			cands = append(cands, c)
+		}
+		rows.Close()
+		for i := range cands {
+			if authCompareRefresh(presented, cands[i].tokenHash) {
+				match = &cands[i]
+				break
+			}
 		}
 	}
+
 	if match == nil {
 		httpx.Err(w, 401, "Invalid refresh token")
 		return
 	}
 
 	user := &authUserRow{}
-	err = db.Pool.QueryRow(ctx,
+	err := db.Pool.QueryRow(ctx,
 		`SELECT `+authUserCols+` FROM users WHERE id = $1 AND is_deleted = FALSE LIMIT 1`,
 		match.userID).Scan(user.fields()...)
 	if err != nil {
@@ -777,8 +916,10 @@ func authRefresh(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if match.revokedAt == nil {
+		// 'rotated' is what earns the grace window on the NEXT request. An
+		// explicit revocation writes 'revoked' and gets none (F07).
 		_, err = db.Pool.Exec(ctx,
-			`UPDATE refresh_tokens SET revoked_at = NOW(), last_used_at = NOW() WHERE id = $1`, match.id)
+			`UPDATE refresh_tokens SET revoked_at = NOW(), revoked_reason = 'rotated', last_used_at = NOW() WHERE id = $1`, match.id)
 	} else {
 		_, err = db.Pool.Exec(ctx,
 			`UPDATE refresh_tokens SET last_used_at = NOW() WHERE id = $1`, match.id)
@@ -1618,7 +1759,9 @@ func authMpinVerify(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	gate := redisx.Consume(ctx, "mpin:"+userID, 5, 900)
+	// ConsumeSecure, not Consume: a Redis outage must not remove the
+	// five-attempt limit on a six-digit PIN (audit F11).
+	gate := redisx.ConsumeSecure(ctx, "mpin:"+userID, 5, 900)
 	if !gate.Allowed {
 		reset := gate.ResetInSec
 		if reset == 0 {
@@ -1696,7 +1839,8 @@ func authSecurityQuestionsVerify(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	gate := redisx.Consume(ctx, "recover:"+userID, 5, 900)
+	// Same reasoning as the MPIN gate: recovery answers are a credential.
+	gate := redisx.ConsumeSecure(ctx, "recover:"+userID, 5, 900)
 	if !gate.Allowed {
 		reset := gate.ResetInSec
 		if reset == 0 {

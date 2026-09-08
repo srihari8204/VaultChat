@@ -24,14 +24,17 @@ type P = typeof PHASE[keyof typeof PHASE];
 
 // ── 3D Mesh ───────────────────────────────────────────────────────────────────
 const MW = SW * 0.72, MH = MW * 1.24;
+// Pure: the same grid every time, so it is built once at import.
+//
+// AUDIT F12: this called useWindowDimensions(), and `const GRID = buildGrid()`
+// below runs at MODULE SCOPE — a hook outside a component, which is an
+// invalid-hook error waiting for the first person to open this route, and the
+// one lint ERROR in the repo. The call was also pointless: it destructured a
+// `SW` that shadowed the module-level one and then never used it, because the
+// mesh maths reads MW/MH, which are computed from the module-level value. So
+// it bought no reactivity and cost a crash. Removed rather than lifted into a
+// component: nothing here needs the live window size.
 function buildGrid() {
-  // Reactive size. The module-level Dimensions.get above is captured ONCE at
-  // import and never updates, so it froze the layout at the size the app
-  // launched with. Shadowing it here makes every use in this component follow
-  // rotation; StyleSheet.create keeps the initial value, which is fine for
-  // static rules.
-  const {width: SW} = useWindowDimensions();
-
   const g: { x: number; y: number }[][] = [];
   for (let r = 0; r <= 10; r++) {
     const t = r / 10, tp = t > 0.68 ? Math.max(1 - (t - 0.68) * 2.4, 0.04) : 1;

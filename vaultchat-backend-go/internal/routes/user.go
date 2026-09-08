@@ -1955,20 +1955,56 @@ func userBookmarksDelete(w http.ResponseWriter, r *http.Request) {
 
 // ── Sessions ───────────────────────────────────────────────────────────
 
-// userHashCurrentRefresh mirrors user.js hashCurrentRefresh: bcrypt with a
-// FRESH salt (jwt.hashRefresh), so it deliberately matches nothing stored —
-// Node's is_current / keep-current comparisons behave identically.
-func userHashCurrentRefresh(rawHeader string) *string {
+// userCurrentSessionID resolves WHICH refresh_tokens row the caller is holding.
+//
+// AUDIT F06: this used to be userHashCurrentRefresh — bcrypt with a FRESH salt,
+// then compared against stored hashes with SQL equality. Two bcrypt hashes of
+// the same token never match; that is what a salt is for. So the current
+// session was never identified: it showed as not-current in the sessions list,
+// and "sign out other devices" failed to exclude it and signed the caller out
+// along with everyone else. The port was faithful to Node, including the bug.
+//
+// Two paths, because one of them has to survive the migration:
+//   - token_lookup (migration 127): one indexed equality, the normal case.
+//   - rows predating it have no lookup value and cannot be backfilled, so fall
+//     back to bcrypt — but only over THIS USER'S live tokens, a handful of
+//     devices, never the global 500-row page that caused F05.
+//
+// Returns nil when the token cannot be placed. Callers must read that as "do
+// not touch anything", never as "revoke everything".
+func userCurrentSessionID(ctx context.Context, userID, rawHeader string) *int64 {
 	tok := strings.TrimSpace(rawHeader)
 	if tok == "" {
 		return nil
 	}
-	h, err := bcrypt.GenerateFromPassword([]byte(tok), authBcryptRounds)
+	if lk := authRefreshLookup(tok); lk != "" {
+		var id int64
+		if db.Pool.QueryRow(ctx,
+			`SELECT id FROM refresh_tokens
+		      WHERE user_id = $1 AND token_lookup = $2 AND revoked_at IS NULL AND expires_at > NOW()
+		      LIMIT 1`, userID, lk).Scan(&id) == nil {
+			return &id
+		}
+	}
+	rows, err := db.Pool.Query(ctx,
+		`SELECT id, token_hash FROM refresh_tokens
+	      WHERE user_id = $1 AND token_lookup IS NULL
+	        AND revoked_at IS NULL AND expires_at > NOW()`, userID)
 	if err != nil {
 		return nil
 	}
-	s := string(h)
-	return &s
+	defer rows.Close()
+	for rows.Next() {
+		var id int64
+		var hash string
+		if rows.Scan(&id, &hash) != nil {
+			return nil
+		}
+		if authCompareRefresh(tok, hash) {
+			return &id
+		}
+	}
+	return nil
 }
 
 // userInetStr renders a nullable INET like node-pg (pg text form).
@@ -1988,17 +2024,19 @@ func userInetStr(p *netip.Prefix) *string {
 func userSessionsGet(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	user := httpx.UserFrom(r)
-	currentHash := ""
-	if h := userHashCurrentRefresh(r.Header.Get("X-Current-Refresh")); h != nil {
-		currentHash = *h
+	// -1 is "no such row", so nothing is flagged current when the token cannot
+	// be placed — better than flagging the wrong device.
+	currentID := int64(-1)
+	if id := userCurrentSessionID(ctx, user.ID, r.Header.Get("X-Current-Refresh")); id != nil {
+		currentID = *id
 	}
 	rows, err := db.Pool.Query(ctx,
 		`SELECT id, user_agent, ip, created_at, last_used_at, expires_at,
-	            token_hash = $2 AS is_current
+	            id = $2 AS is_current
 	       FROM refresh_tokens
 	      WHERE user_id = $1 AND revoked_at IS NULL AND expires_at > NOW()
 	      ORDER BY COALESCE(last_used_at, created_at) DESC`,
-		user.ID, currentHash)
+		user.ID, currentID)
 	if err != nil {
 		httpx.Err(w, 500, "Failed to list sessions")
 		return
@@ -2038,8 +2076,10 @@ func userSessionsDeleteOne(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var retID int64
+	// 'revoked', not 'rotated' — revoking one device from the sessions screen
+	// must not hand that device a 30-second refresh grace window (F07).
 	err := db.Pool.QueryRow(ctx,
-		`UPDATE refresh_tokens SET revoked_at = NOW()
+		`UPDATE refresh_tokens SET revoked_at = NOW(), revoked_reason = 'revoked'
 	      WHERE id = $1 AND user_id = $2 AND revoked_at IS NULL
 	      RETURNING id`,
 		id, user.ID).Scan(&retID)
@@ -2057,15 +2097,20 @@ func userSessionsDeleteOne(w http.ResponseWriter, r *http.Request) {
 func userSessionsDeleteAll(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	user := httpx.UserFrom(r)
-	currentHash := userHashCurrentRefresh(r.Header.Get("X-Current-Refresh"))
-	if currentHash == nil {
+	currentID := userCurrentSessionID(ctx, user.ID, r.Header.Get("X-Current-Refresh"))
+	if currentID == nil {
+		// Refuse rather than guess. Revoking everything would sign the caller
+		// out of the very device they are asking from — which is exactly what
+		// this endpoint used to do (F06).
 		httpx.Err(w, 400, "X-Current-Refresh header required so we don't lock you out")
 		return
 	}
+	// 'revoked', not 'rotated': an explicit sign-out earns no refresh grace
+	// window, so a kicked device cannot mint fresh credentials (F07).
 	tag, err := db.Pool.Exec(ctx,
-		`UPDATE refresh_tokens SET revoked_at = NOW()
-	      WHERE user_id = $1 AND revoked_at IS NULL AND token_hash <> $2`,
-		user.ID, *currentHash)
+		`UPDATE refresh_tokens SET revoked_at = NOW(), revoked_reason = 'revoked'
+	      WHERE user_id = $1 AND revoked_at IS NULL AND id <> $2`,
+		user.ID, *currentID)
 	if err != nil {
 		httpx.Err(w, 500, "Failed to revoke other sessions")
 		return

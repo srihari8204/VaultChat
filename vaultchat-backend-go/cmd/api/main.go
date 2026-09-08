@@ -54,11 +54,29 @@ func main() {
 	// Node-less prod keeps its monitoring probe. /go-health kept as an alias
 	// for the strangler period.
 	start := time.Now()
+
+	// AUDIT F14: the probes are bounded. They used to inherit the request
+	// context, so a database wedged rather than down left the health handler
+	// hanging as long as the client would wait — the one request that must
+	// always answer.
+	const probeTimeout = 2 * time.Second
+	probe := func(r *http.Request) (dbOK, redisOK bool) {
+		ctx, cancel := context.WithTimeout(r.Context(), probeTimeout)
+		defer cancel()
+		dbOK = db.Pool.Ping(ctx) == nil
+		redisOK = redisx.Client != nil && redisx.Client.Ping(ctx).Err() == nil
+		return
+	}
+
+	// LIVENESS — "this process is running". Always 200, because a restart does
+	// not fix a database outage and an orchestrator must not loop on one.
+	// Node's exact shape (status/db/redis/uptime) is preserved for the existing
+	// monitoring probe; `status` now tells the truth about Redis, which it did
+	// not before — a Redis outage still reported "ok".
 	health := func(w http.ResponseWriter, r *http.Request) {
-		dbOK := db.Pool.Ping(r.Context()) == nil
-		redisOK := redisx.Client != nil && redisx.Client.Ping(r.Context()).Err() == nil
+		dbOK, redisOK := probe(r)
 		status := "ok"
-		if !dbOK {
+		if !dbOK || !redisOK {
 			status = "degraded"
 		}
 		httpx.JSON(w, 200, map[string]any{
@@ -68,6 +86,28 @@ func main() {
 	}
 	mux.HandleFunc("GET /health", health)
 	mux.HandleFunc("GET /go-health", health)
+
+	// READINESS — "this process can serve requests". 503 when it cannot, so
+	// status-code monitoring stops going green through an outage, which is the
+	// actual F14 complaint.
+	//
+	// The database is required: without it nothing works. Redis is NOT, and
+	// that is a deliberate call — the limiter falls back in-process
+	// (redisx.ConsumeSecure, F11) and the socket layer fails open to local
+	// maps, so a Redis outage is a degradation, not an outage. It is reported
+	// either way so an alert can fire on the body without taking the service
+	// out of the load balancer.
+	mux.HandleFunc("GET /ready", func(w http.ResponseWriter, r *http.Request) {
+		dbOK, redisOK := probe(r)
+		code := 200
+		if !dbOK {
+			code = http.StatusServiceUnavailable
+		}
+		httpx.JSON(w, code, map[string]any{
+			"ready": dbOK, "db": dbOK, "redis": redisOK,
+			"uptime": time.Since(start).Seconds(),
+		})
+	})
 
 	routes.RegisterContacts(mux)
 	routes.RegisterLink(mux)
@@ -110,7 +150,7 @@ func main() {
 	// Chat codes: open a direct chat with someone whose number you do not have.
 	// Redeeming goes through directChatEnsure, the same path POST /chats uses.
 	routes.RegisterChatCodes(mux)
-	routes.RegisterChatMembership(mux)  // Groups & Circles: in-app accept (invitee side)
+	routes.RegisterChatMembership(mux) // Groups & Circles: in-app accept (invitee side)
 	routes.RegisterShopBook(mux)
 	routes.RegisterShopBookStock(mux)
 	routes.RegisterShopBookBilling(mux)

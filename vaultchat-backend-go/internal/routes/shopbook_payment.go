@@ -18,6 +18,7 @@ package routes
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math"
 	"net/http"
@@ -29,6 +30,8 @@ import (
 	"vaultchat/backend-go/internal/db"
 	"vaultchat/backend-go/internal/httpx"
 )
+
+var errSBOrderNotYours = errors.New("order does not belong to this customer/shop")
 
 func RegisterShopBookPayments(mux *http.ServeMux) {
 	mux.HandleFunc("POST /shopbook/my-shop/payments", httpx.RequireAuth(sbRecordPayment))
@@ -126,16 +129,40 @@ func sbRecordPayment(w http.ResponseWriter, r *http.Request) {
 
 	var paymentID, invoiceID string
 	err := db.WithUser(ctx, user.ID, func(tx pgx.Tx) error {
-		// Attach to the order's invoice when one is named, so the invoice can
-		// report its own paid/due without guessing which payments were for it.
+		// AUDIT F04: THE ORDER MUST BELONG TO THIS CUSTOMER, AND THIS SHOP.
+		//
+		// The invoice used to be looked up on (order_id, shop_id) alone, with
+		// the customer never brought into it — and a failed lookup was ignored
+		// while the supplied order id was still written to the ledger and the
+		// payment row. So a payment recorded for customer A quoting customer
+		// B's order credited A's khata AND settled B's invoice: money moving
+		// between two people's books from one request. The schema cannot catch
+		// it either; the foreign keys are separate and nothing ties the pair.
+		//
+		// Resolved inside the transaction, against the order itself, so the
+		// relationship that is written is the relationship that was checked.
 		var invID *string
 		if b.OrderID != "" {
+			var orderCustomer string
+			switch err := tx.QueryRow(ctx,
+				`SELECT customer_user_id::text FROM shopbook_order
+				  WHERE id=$1 AND shop_id=$2`, b.OrderID, shopID).Scan(&orderCustomer); {
+			case err != nil && db.NoRows(err):
+				return errSBOrderNotYours
+			case err != nil:
+				return err
+			case orderCustomer != b.CustomerID:
+				return errSBOrderNotYours
+			}
+			// Only now is it safe to settle against that order's invoice.
 			var found string
 			if err := tx.QueryRow(ctx,
 				`SELECT i.id::text FROM shopbook_invoice i
 				  WHERE i.order_id=$1 AND i.shop_id=$2`, b.OrderID, shopID).Scan(&found); err == nil {
 				invID = &found
 				invoiceID = found
+			} else if !db.NoRows(err) {
+				return err
 			}
 		}
 		// The khata entry and the payment are one fact recorded twice; they
@@ -158,6 +185,11 @@ func sbRecordPayment(w http.ResponseWriter, r *http.Request) {
 			b.Reference, b.Note, user.ID, ledgerID, idem).Scan(&paymentID)
 	})
 	if err != nil {
+		if errors.Is(err, errSBOrderNotYours) {
+			httpx.Err(w, http.StatusBadRequest,
+				"That order belongs to a different customer or shop")
+			return
+		}
 		if idem != "" && sbIsUniqueViolation(err, "idx_shopbook_payment_idem") {
 			var id string
 			if db.Pool.QueryRow(ctx,

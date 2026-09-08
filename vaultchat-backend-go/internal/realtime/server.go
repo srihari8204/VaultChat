@@ -52,12 +52,65 @@ type sockData struct {
 	email string
 	admin bool
 
-	mu        sync.Mutex
-	chatMemberOk map[string]bool
+	mu           sync.Mutex
+	chatMemberOk map[string]cachedPerm
 	// Spaces & Operations (S2.8): per-socket cache of run entitlement, keyed
 	// "view:<runId>" / "drive:<runId>". Separate from chatMemberOk because a run is
 	// visible to a SUBSET of a space — being in the chat is not enough.
-	runOk map[string]bool
+	runOk map[string]cachedPerm
+}
+
+// ── permission caching, and why it needs a generation ──────────────────
+//
+// AUDIT F02: chatMemberOk was a plain bool cached for the SOCKET'S LIFETIME.
+// Removing someone from a group invalidated the Redis roster (which stops
+// fan-out reaching them) but nothing touched the decision their live socket
+// was already holding, so a removed member's connection stayed authorised to
+// publish into the chat — live-location updates, call signalling — until they
+// happened to reconnect. On a phone that can be hours.
+//
+// Rather than hunt down every connected socket on every membership change,
+// each chat carries a generation counter. An entry is only usable if it was
+// decided at the CURRENT generation, so one bump invalidates every socket's
+// copy at once, in O(1), with no registry walk and no lock ordering to get
+// wrong.
+//
+// ponytail: the counter is per-process. A second replica would not see the
+// bump, which is what permTTL is for — a bounded worst case instead of an
+// unbounded one. Scale-out needs this published over the same Redis channel
+// the adapter already uses.
+const permTTL = 30 * time.Second
+
+type cachedPerm struct {
+	ok  bool
+	gen uint64
+	at  time.Time
+}
+
+var (
+	permGenMu sync.Mutex
+	permGen   = map[string]uint64{}
+)
+
+// permGenerationOf reads a chat's current permission generation.
+func permGenerationOf(chatID string) uint64 {
+	permGenMu.Lock()
+	defer permGenMu.Unlock()
+	return permGen[chatID]
+}
+
+// BumpChatPermissions invalidates every socket's cached decision for this chat.
+// Called from InvalidateChatMembers, so any code path that already knew to
+// refresh the roster now also drops stale authorisation.
+func BumpChatPermissions(chatID string) {
+	permGenMu.Lock()
+	permGen[chatID]++
+	permGenMu.Unlock()
+}
+
+// fresh reports whether a cached decision may still be used.
+func (c cachedPerm) fresh(gen uint64) bool {
+	return c.gen == gen && time.Since(c.at) < permTTL
 }
 
 func sd(s *socket.Socket) *sockData {
@@ -140,7 +193,7 @@ func New() *Hub {
 			next(socket.NewExtendedError(err.Error(), nil))
 			return
 		}
-		s.SetData(&sockData{uid: sub, email: email, chatMemberOk: map[string]bool{}, runOk: map[string]bool{}})
+		s.SetData(&sockData{uid: sub, email: email, chatMemberOk: map[string]cachedPerm{}, runOk: map[string]cachedPerm{}})
 		next(nil)
 	})
 

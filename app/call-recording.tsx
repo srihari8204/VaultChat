@@ -21,6 +21,7 @@ import {
   StyleSheet,
   Text,
   TouchableOpacity,
+  useWindowDimensions,
   View,
 } from 'react-native';
 import { type Palette } from '../constants/theme';
@@ -28,7 +29,6 @@ import { useTheme } from '../lib/theme';
 import { AuroraBackground } from '../components/ui';
 
 
-const SW = Dimensions.get('window').width;
 const TOP = Platform.OS === 'android' ? (StatusBar.currentHeight ?? 0) : 44;
 const STORAGE_KEY = 'vc_call_recordings';
 
@@ -45,7 +45,14 @@ type ScreenState = 'idle' | 'recording' | 'paused' | 'finished' | 'list';
 
 function useS() {
   const { colors } = useTheme();
-  return useMemo(() => makeStyles(colors), [colors]);
+  // The progress bar is sized off the window width. Reading it from the LIVE
+  // window rather than the module-scope Dimensions.get means it follows a
+  // rotation — app.json is orientation:"default" with supportsTablet, so this
+  // screen really does change width under a running component. The module read
+  // froze it at whatever the app launched in, leaving the bar the wrong length
+  // (and, from portrait to landscape, far too short) until the screen remounted.
+  const { width } = useWindowDimensions();
+  return useMemo(() => makeStyles(colors, width), [colors, width]);
 }
 
 export default function CallRecordingScreen() {
@@ -483,7 +490,7 @@ export default function CallRecordingScreen() {
   );
 }
 
-const makeStyles = (c: Palette) => StyleSheet.create({
+const makeStyles = (c: Palette, winW: number) => StyleSheet.create({
   container: { flex: 1, backgroundColor: 'transparent' },
 
   header: {
@@ -548,7 +555,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   finishedTitle: { fontSize: 22, fontWeight: '700', color: c.text, marginTop: 12 },
   finishedDuration: { fontSize: 14, color: c.textDim, marginTop: 4 },
   progressBarBg: {
-    width: SW - 80,
+    width: winW - 80,
     height: 4,
     backgroundColor: 'rgba(255,255,255,0.1)',
     borderRadius: 2,

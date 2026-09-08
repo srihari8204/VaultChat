@@ -36,7 +36,10 @@ function walk(dir: string, out: string[] = []): string[] {
 }
 
 // ── 1. No fixed height on a text-bearing layout container ────────────
-const ROWISH = /\b(row|item|cell|header|bar|chip|btn|button|tab|card|entry|field|input|option|pill|tile)\b/i;
+// Plurals count. camera.tsx's `tabs: { flexDirection:'row', width:260, height:32 }`
+// holds two text labels and sailed through this check, because \btab\b does not
+// match "tabs" — the trailing s is a word character, so there is no boundary.
+const ROWISH = /\b(row|item|cell|header|bar|chip|btn|button|tab|card|entry|entries|field|input|option|pill|tile)s?\b/i;
 const clipped: string[] = [];
 
 for (const file of [...walk('app'), ...walk('components')]) {
@@ -95,5 +98,41 @@ for (const [label, needle] of [
 const ts = fs.readFileSync('lib/typeScale.ts', 'utf8');
 ok('typeScale still declares a narrow-phone floor', /NARROW_DP\s*=\s*360/.test(ts));
 ok('typeScale keeps its scale clamps', /MIN_SCALE\s*=\s*0\.9\d/.test(ts) && /MAX_SCALE\s*=\s*1\.\d+/.test(ts));
+
+// ── 5. A component that measures the window must FOLLOW the window ───
+//
+// app.json is orientation:"default" with supportsTablet, so a screen really can
+// change size under a running component. Dimensions.get() returns the current
+// size when it runs but subscribes to nothing, so a component that sizes itself
+// from it keeps whatever it was built with until it remounts. Found this way:
+// the shared bottom Sheet capped its list at 60% of the LAUNCH height (in
+// landscape that is taller than the screen, and Cancel goes off the bottom),
+// the status GateChallenge sized its puzzle board the same way, and
+// call-recording froze its progress bar at a module-scope width.
+//
+// The rule: any file that reads Dimensions.get must also hold a live
+// useWindowDimensions(). The established pattern here is a module read used
+// ONLY for static constants paired with the hook for anything rendered — that
+// combination passes, a lone Dimensions.get does not.
+//
+// Opt out in place with `layout-exempt:` and the reason, like the checks above.
+const dimFiles: string[] = [];
+for (const dir of ['app', 'components']) {
+  for (const f of walk(dir)) {
+    if (!f.endsWith('.tsx')) continue;
+    const src = fs.readFileSync(f, 'utf8');
+    if (!src.includes('Dimensions.get(')) continue;
+    if (src.includes('useWindowDimensions')) continue;
+    if (/layout-exempt:/.test(src)) continue;
+    dimFiles.push(f);
+  }
+}
+ok(
+  dimFiles.length === 0
+    ? 'every file that measures the window also subscribes to it'
+    : 'files frozen at their launch size (add useWindowDimensions, or a layout-exempt: note):\n      ' +
+        dimFiles.join('\n      '),
+  dimFiles.length === 0,
+);
 
 console.log(`responsiveLayout.selftest: ${n} assertions passed`);
