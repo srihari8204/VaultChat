@@ -24,6 +24,13 @@ indexmap = { version = "2", features = ["serde"] }
 base64 = "0.22"
 hex = "0.4"
 getrandom = "0.2"
+# The UniFFI money core. Depended on as a `lib` so its exact-paise
+# arithmetic reaches Android through the bridge that ALREADY ships,
+# instead of standing up a second native module, a second .so, a second
+# config plugin and a JNA dependency for four arithmetic functions.
+# vaultcore keeps its `#[uniffi::export]` surface untouched — that is what
+# an iOS/Swift consumer binds to, and what tests/parity.rs proves.
+vaultcore = { path = "../../../rust/vaultcore" }
 
 [dev-dependencies]
 serde_json = "1"

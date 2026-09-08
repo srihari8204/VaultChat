@@ -11,9 +11,10 @@
 // difference between a stream and an outage.
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { KeyboardSafe } from '../components/ui';
 import {
   View, StyleSheet, TouchableOpacity, ActivityIndicator, Alert,
-  ScrollView, TextInput, KeyboardAvoidingView, Platform,
+  ScrollView, TextInput, Platform,
   useWindowDimensions, Share, Animated, PanResponder,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -1577,13 +1578,13 @@ export default function LiveViewScreen() {
               offset, which is what used to let the poll card, the invite sheet
               and the chat draw on top of each other on a short screen. */}
           {stageReady && (
-            <KeyboardAvoidingView
+            <KeyboardSafe
               // The whole point of the chat icon: tapping it must lift the
               // composer clear of the keyboard rather than bury it under one.
-              behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+
               style={S.bottom}
               pointerEvents="box-none"
-            >
+>
               {/* POLLS — above the chat, because a poll is a call to action and
                   chat is ambient. Only the newest OPEN poll is shown: stacking
                   several would bury the stream this is drawn on top of. Closed
@@ -1846,7 +1847,7 @@ export default function LiveViewScreen() {
                   ))}
                 </View>
               )}
-            </KeyboardAvoidingView>
+            </KeyboardSafe>
           )}
         </View>
       )}

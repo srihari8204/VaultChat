@@ -1,7 +1,8 @@
 // app/finance/ledger/edit.tsx — edit an existing ledger's terms (not balance).
 
 import React, { useCallback, useEffect, useState } from 'react';
-import { View, ScrollView, StyleSheet, Alert, KeyboardAvoidingView, Platform } from 'react-native';
+import { KeyboardSafe } from '../../../components/ui';
+import { View, ScrollView, StyleSheet, Alert, Platform } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { DateTimePickerAndroid } from '@react-native-community/datetimepicker';
 import { FIN } from '../../../constants/financeTheme';
@@ -61,7 +62,7 @@ export default function EditLedger() {
   return (
     <View style={s.screen}>
       <FinHeader title="Edit Ledger" />
-      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+      <KeyboardSafe style={{ flex: 1 }} >
         <ScrollView contentContainerStyle={s.body} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
           <Label>Name</Label>
           <Field value={name} onChangeText={setName} placeholder="Enter name" />
@@ -88,7 +89,7 @@ export default function EditLedger() {
           </View>
           <View style={{ height: 30 }} />
         </ScrollView>
-      </KeyboardAvoidingView>
+      </KeyboardSafe>
     </View>
   );
 }

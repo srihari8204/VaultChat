@@ -10,9 +10,10 @@
 //              Products (add/edit/stock), Khata (per-customer ledger), Settings.
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { KeyboardSafe } from '../components/ui';
 import {
   View, Text, TextInput, TouchableOpacity, ScrollView, StyleSheet,
-  Alert, ActivityIndicator, RefreshControl, Switch, Platform, KeyboardAvoidingView, Share, Modal,
+  Alert, ActivityIndicator, RefreshControl, Switch, Platform, Share, Modal,
   Linking,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
@@ -271,7 +272,7 @@ function CustomerApp({ me, initialShopId }: { me: { id: string; name: string } |
 
   return (
     <>
-      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+      <KeyboardSafe style={{ flex: 1 }} >
         {tab === 'shops' && !selShop && !ledgerShop && !productSearch && (
           <FindShops onOpen={(sh) => { setSelShop(sh); }} favIds={favIds} onToggleFav={toggleFav}
             onProductSearch={() => setProductSearch(true)} />
@@ -303,7 +304,7 @@ function CustomerApp({ me, initialShopId }: { me: { id: string; name: string } |
         )}
 
         {tab === 'profile' && <CustomerProfile me={me} />}
-      </KeyboardAvoidingView>
+      </KeyboardSafe>
 
       <TabBar
         tabs={[
@@ -1645,7 +1646,7 @@ function OwnerApp({ me }: { me: { id: string; name: string } | null }) {
 
   return (
     <>
-      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+      <KeyboardSafe style={{ flex: 1 }} >
         {tab === 'dashboard' && (
           <OwnerDashboard shop={shop} onSettings={() => setSettings(true)}
             onCoupons={() => setSub('coupons')} onSuppliers={() => setSub('suppliers')}
@@ -1656,7 +1657,7 @@ function OwnerApp({ me }: { me: { id: string; name: string } | null }) {
         {tab === 'orders' && <OwnerOrders />}
         {tab === 'products' && <OwnerProducts shop={shop} />}
         {tab === 'khata' && <OwnerKhata currency={shop.currency} />}
-      </KeyboardAvoidingView>
+      </KeyboardSafe>
       <TabBar
         tabs={[
           { id: 'dashboard', label: t('tab.dashboard'), icon: 'grid' },
@@ -3337,7 +3338,7 @@ function BulkAdd({ currency, onDone }: { currency?: string; onDone: () => void }
   return (
     <>
       <SubHeader title="Bulk add products" onBack={onDone} />
-      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+      <KeyboardSafe style={{ flex: 1 }} >
         <ScrollView contentContainerStyle={s.body} keyboardShouldPersistTaps="handled">
           <Text style={s.hint}>
             Paste one product per line. Formats accepted:{'\n'}
@@ -3366,7 +3367,7 @@ function BulkAdd({ currency, onDone }: { currency?: string; onDone: () => void }
             {busy ? <ActivityIndicator color="#fff" /> : <Text style={s.primaryBtnText}>Add {parsed.length || ''} product(s)</Text>}
           </TouchableOpacity>
         </ScrollView>
-      </KeyboardAvoidingView>
+      </KeyboardSafe>
     </>
   );
 }
@@ -4039,7 +4040,7 @@ function ShopSettings({ shop, me, onSaved, onCancel }: {
       <ReasonModal visible={moveAsk} title="Why is the shop moving?"
         placeholder="e.g. moved to the next street, corrected a wrong pin"
         onSubmit={submitMove} onClose={() => setMoveAsk(false)} />
-      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+      <KeyboardSafe style={{ flex: 1 }} >
         <ScrollView contentContainerStyle={s.body} keyboardShouldPersistTaps="handled">
           {!shop && <Text style={s.hint}>Set up your shop once — customers nearby can then find you and order.</Text>}
           <Field label="Shop name" value={name} onChange={setName} placeholder="Sri Lakshmi Kirana" />
@@ -4146,7 +4147,7 @@ function ShopSettings({ shop, me, onSaved, onCancel }: {
             {busy ? <ActivityIndicator color="#fff" /> : <Text style={s.primaryBtnText}>{shop ? 'Save Settings' : 'Create Shop'}</Text>}
           </TouchableOpacity>
         </ScrollView>
-      </KeyboardAvoidingView>
+      </KeyboardSafe>
     </>
   );
 }

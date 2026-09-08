@@ -10,9 +10,10 @@
 // through the admin approval queue that already exists.
 
 import React, { useMemo, useState } from 'react';
+import { KeyboardSafe } from '../components/ui';
 import {
   View, Text, StyleSheet, TouchableOpacity, ScrollView, TextInput, Alert,
-  ActivityIndicator, KeyboardAvoidingView, Platform,
+  ActivityIndicator, Platform,
 } from 'react-native';
 import { Stack, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -78,7 +79,7 @@ export default function GroupCreateScreen() {
   };
 
   return (
-    <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1, backgroundColor: colors.bg }}>
+    <KeyboardSafe style={{ flex: 1, backgroundColor: colors.bg }}>
       <Stack.Screen options={{ title: 'New group', headerTitleAlign: 'center' }} />
       <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 44 }} keyboardShouldPersistTaps="handled">
 
@@ -179,7 +180,7 @@ export default function GroupCreateScreen() {
           You can invite people on the next screen.
         </Text>
       </ScrollView>
-    </KeyboardAvoidingView>
+    </KeyboardSafe>
   );
 }
 

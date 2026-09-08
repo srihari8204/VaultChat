@@ -2,7 +2,8 @@
 // and PDF export. Uses the existing emi()/amortization() math in utils/finance.
 
 import React, { useMemo, useState } from 'react';
-import { View, Text, ScrollView, StyleSheet, Alert, KeyboardAvoidingView, Platform } from 'react-native';
+import { KeyboardSafe } from '../../components/ui';
+import { View, Text, ScrollView, StyleSheet, Alert, Platform } from 'react-native';
 import { FIN, TABULAR } from '../../constants/financeTheme';
 import { FinHeader, Label, Field, Segment, Btn, HeroCard, Card, RowLine } from '../../components/finance/ui';
 import { num } from '../../utils/financeFormat';
@@ -56,7 +57,7 @@ export default function EmiCalc() {
   return (
     <View style={s.screen}>
       <FinHeader title="EMI Calculator" />
-      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+      <KeyboardSafe style={{ flex: 1 }} >
         <ScrollView contentContainerStyle={s.body} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
           <Label>Loan Type</Label>
           <View style={s.chipRow}>
@@ -126,7 +127,7 @@ export default function EmiCalc() {
           )}
           <View style={{ height: 30 }} />
         </ScrollView>
-      </KeyboardAvoidingView>
+      </KeyboardSafe>
     </View>
   );
 }

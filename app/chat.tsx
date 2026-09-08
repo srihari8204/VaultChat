@@ -18,6 +18,7 @@
 //   POST /chats/:id/read with the latest visible message id, debounced.
 
 import { BRAND_ACCENT, brandAlpha } from '../constants/theme';
+import { useKeyboardInset } from '../lib/useKeyboardInset';
 import { Audio, ResizeMode, Video } from 'expo-av';
 import { copyAndAutoClear } from '../lib/clipboardSafe';
 import * as DocumentPicker from 'expo-document-picker';
@@ -47,6 +48,7 @@ import {
   FlatList,
   Image,
   Keyboard,
+  Dimensions,
   KeyboardAvoidingView,
   Linking,
   Modal,
@@ -232,14 +234,11 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
   // Keyboard avoidance, driven manually. edge-to-edge breaks adjustResize, and
   // KeyboardAvoidingView's "padding" left residual space after the keyboard
   // closed. Tracking the height ourselves resets cleanly to 0 on hide.
-  const [kbHeight, setKbHeight] = useState(0);
-  useEffect(() => {
-    const showEvt = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
-    const hideEvt = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
-    const s = Keyboard.addListener(showEvt, (e) => setKbHeight(e.endCoordinates?.height ?? 0));
-    const h = Keyboard.addListener(hideEvt, () => setKbHeight(0));
-    return () => { s.remove(); h.remove(); };
-  }, []);
+  // The keyboard inset, from lib/keyboardInset — the same hook every other
+  // screen uses through <KeyboardSafe>. This screen measures it itself rather
+  // than wrapping, because the composer, the message list and the scroll-to-
+  // bottom FAB each need the number, not just a padded container.
+  const kbHeight = useKeyboardInset();
   // THE COMPOSER'S BOTTOM GAP, and it is not just the keyboard.
   //
   // app.json sets edgeToEdgeEnabled, so this screen draws UNDER the system

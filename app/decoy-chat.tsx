@@ -3,10 +3,11 @@
 // Even allows "typing" fake messages that disappear on reload
 
 import { Ionicons } from '@expo/vector-icons';
+import { KeyboardSafe } from '../components/ui';
 import React, { useState, useRef, useEffect , useMemo} from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, FlatList,
-  TextInput, KeyboardAvoidingView, Platform,
+  TextInput, Platform,
 } from 'react-native';
 import { useTheme } from '../lib/theme';
 import { type Palette } from '../constants/theme';
@@ -73,7 +74,7 @@ export default function DecoyChatScreen() {
           </View>
         ),
       }} />
-      <KeyboardAvoidingView style={s.screen} behavior={Platform.OS === 'ios' ? 'padding' : undefined} keyboardVerticalOffset={90}>
+      <KeyboardSafe style={s.screen}>
         <FlatList
           ref={flatRef}
           data={messages}
@@ -96,7 +97,7 @@ export default function DecoyChatScreen() {
             <Ionicons name="arrow-up" size={18} color="#000" />
           </TouchableOpacity>
         </View>
-      </KeyboardAvoidingView>
+      </KeyboardSafe>
     </>
   );
 }

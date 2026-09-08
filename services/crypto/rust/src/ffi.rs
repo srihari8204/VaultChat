@@ -51,6 +51,14 @@ fn want_u32(args: &Value, key: &str) -> Res<u32> {
         .and_then(|n| u32::try_from(n).ok())
         .ok_or_else(|| CryptoError(format!("crypto-core: arg '{key}' must be a u32")))
 }
+/// A required numeric argument. Rejects a missing key, a string and a null —
+/// money must not be computed from a value the caller did not actually send.
+fn want_f64(args: &Value, key: &str) -> Res<f64> {
+    want(args, key)?
+        .as_f64()
+        .ok_or_else(|| CryptoError(format!("crypto-core: '{key}' must be a number")))
+}
+
 fn opt<'a>(args: &'a Value, key: &str) -> Option<&'a Value> {
     args.get(key).filter(|v| !v.is_null())
 }
@@ -212,6 +220,44 @@ pub fn dispatch(op: &str, args: &Value) -> Res<Value> {
         }
         "shareThreshold" => Ok(json!(shamir::share_threshold(want_str(args, "share")?)?)),
 
+        // ── money (rust/vaultcore, the UniFFI core) ────────────────────
+        //
+        // Exact-paise arithmetic, shared with utils/money.ts through
+        // utils/native/MoneyCore.ts. Rides this dispatcher rather than a native
+        // module of its own: the op string is the whole ABI, so four pure
+        // functions cost four match arms instead of a second .so.
+        //
+        // f64 in, f64 out, matching the TS signatures exactly — a missing or
+        // non-numeric arg is an ERROR, never a silent 0, because a money call
+        // that quietly returns zero is worse than one that fails loudly.
+        "toPaise" => Ok(json!(vaultcore::money::to_paise(want_f64(args, "rupees")?))),
+        "fromPaise" => Ok(json!(vaultcore::money::from_paise(
+            want_f64(args, "paise")? as i64
+        ))),
+        "splitEvenly" => {
+            let split = vaultcore::money::split_evenly(
+                want_f64(args, "totalRupees")?,
+                want_f64(args, "parts")? as i64,
+            );
+            Ok(json!({
+                "each": split.each,
+                "remainder": split.remainder,
+                "remainderPaise": split.remainder_paise,
+            }))
+        }
+        "sumRupees" => {
+            let raw = want(args, "values")?
+                .as_array()
+                .ok_or_else(|| CryptoError("crypto-core: 'values' must be an array".into()))?;
+            let mut values = Vec::with_capacity(raw.len());
+            for (i, v) in raw.iter().enumerate() {
+                values.push(v.as_f64().ok_or_else(|| {
+                    CryptoError(format!("crypto-core: values[{i}] is not a number"))
+                })?);
+            }
+            Ok(json!(vaultcore::money::sum_rupees(values)))
+        }
+
         // facade init probe: quick end-to-end sanity across all three modules
         "selfCheck" => self_check(),
 
@@ -327,6 +373,40 @@ mod tests {
                 .unwrap();
         assert_eq!(resp["ok"], json!(true), "op {op} failed: {resp}");
         resp["result"].clone()
+    }
+
+    /// The money ops, ACROSS the JSON boundary — which is the only place the
+    /// UniFFI core and utils/money.ts can disagree once it is switched on.
+    /// The ₹1000/7 vector is the one that carried the original bug: rounding
+    /// each share paid out ₹1000.02 from a ₹1000 pot.
+    #[test]
+    fn money_ops_over_the_boundary() {
+        assert_eq!(call("toPaise", json!({ "rupees": 142.86 })), json!(14286));
+        assert_eq!(call("fromPaise", json!({ "paise": 14285 })), json!(142.85));
+        assert_eq!(call("sumRupees", json!({ "values": [0.1, 0.2] })), json!(0.3));
+
+        let split = call("splitEvenly", json!({ "totalRupees": 1000.0, "parts": 7 }));
+        assert_eq!(split["each"], json!(142.85));
+        assert_eq!(split["remainderPaise"], json!(5));
+        // The invariant the whole money core exists for.
+        let each_paise = (split["each"].as_f64().unwrap() * 100.0).round() as i64;
+        assert_eq!(each_paise * 7 + split["remainderPaise"].as_i64().unwrap(), 100_000);
+    }
+
+    /// A money call with a missing or non-numeric argument must FAIL, not
+    /// quietly compute with zero — a silent 0 in an organizer's book is the
+    /// failure mode this core exists to prevent.
+    #[test]
+    fn money_rejects_bad_arguments() {
+        for bad in [
+            json!({ "op": "toPaise", "args": {} }),
+            json!({ "op": "toPaise", "args": { "rupees": "100" } }),
+            json!({ "op": "sumRupees", "args": { "values": [1, "2"] } }),
+            json!({ "op": "sumRupees", "args": { "values": 5 } }),
+        ] {
+            let resp: Value = serde_json::from_str(&handle_line(&bad.to_string())).unwrap();
+            assert_eq!(resp["ok"], json!(false), "should have been rejected: {bad}");
+        }
     }
 
     #[test]

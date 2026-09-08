@@ -11,7 +11,12 @@ crate-type = ["cdylib", "lib"]
 name = "vaultcore"
 
 [dependencies]
-uniffi = { version = "0.28", features = ["cli"] }
+# NO "cli" feature. It exists for building a `uniffi-bindgen` BINARY, and
+# this crate has no [[bin]] target — but enabling it pulls clap into the
+# dependency graph, which then links into libvaultcrypto.so and ships a
+# command-line argument parser inside the APK. Generate bindings with the
+# standalone uniffi-bindgen tool instead.
+uniffi = { version = "0.28" }
 sha2 = "0.10"
 hex = "0.4"
 

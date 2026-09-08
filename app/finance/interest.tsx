@@ -2,7 +2,8 @@
 // dates or duration). Saves to on-device history; result exports to PDF.
 
 import React, { useState } from 'react';
-import { View, Text, ScrollView, StyleSheet, Alert, KeyboardAvoidingView, Platform } from 'react-native';
+import { KeyboardSafe } from '../../components/ui';
+import { View, Text, ScrollView, StyleSheet, Alert, Platform } from 'react-native';
 import { DateTimePickerAndroid } from '@react-native-community/datetimepicker';
 import { FIN, FIN_HERO, TABULAR } from '../../constants/financeTheme';
 import { FinHeader, Label, Field, Segment, Radio, Btn, DateField, HeroCard, Card, RowLine } from '../../components/finance/ui';
@@ -76,7 +77,7 @@ export default function InterestCalc() {
   return (
     <View style={s.screen}>
       <FinHeader title="Interest Calculator" />
-      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+      <KeyboardSafe style={{ flex: 1 }} >
         <ScrollView contentContainerStyle={s.body} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
           <Label>Interest Type</Label>
           <View style={s.radioRow}>
@@ -143,7 +144,7 @@ export default function InterestCalc() {
           )}
           <View style={{ height: 30 }} />
         </ScrollView>
-      </KeyboardAvoidingView>
+      </KeyboardSafe>
     </View>
   );
 }

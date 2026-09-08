@@ -13,9 +13,10 @@
 //   * any radius, not just the three hardcoded presets.
 
 import React, { useEffect, useState } from 'react';
+import { KeyboardSafe } from '../components/ui';
 import {
   View, Text, TextInput, TouchableOpacity, StyleSheet, Alert, ActivityIndicator,
-  ScrollView, Switch, Modal, KeyboardAvoidingView, Platform,
+  ScrollView, Switch, Modal, Platform,
 } from 'react-native';
 import * as Location from 'expo-location';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
@@ -256,7 +257,7 @@ export default function FamilyPlacesScreen() {
   const activeCount = places.filter((p) => p.enabled !== false).length;
 
   return (
-    <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1, backgroundColor: G.bgMid }}>
+    <KeyboardSafe style={{ flex: 1, backgroundColor: G.bgMid }}>
       <Stack.Screen options={{
         headerShown: true, title: circleName ? `Safe Zones · ${circleName}` : 'Safe Zones', headerTitleAlign: 'center',
         headerStyle: { backgroundColor: G.bgTop }, headerTintColor: colors.text, headerShadowVisible: false,
@@ -524,7 +525,7 @@ export default function FamilyPlacesScreen() {
           </View>
         </View>
       </Modal>
-    </KeyboardAvoidingView>
+    </KeyboardSafe>
   );
 }
 

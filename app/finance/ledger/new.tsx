@@ -1,7 +1,8 @@
 // app/finance/ledger/new.tsx — Add a Lend / Borrow ledger entry.
 
 import React, { useState } from 'react';
-import { View, ScrollView, StyleSheet, Alert, KeyboardAvoidingView, Platform } from 'react-native';
+import { KeyboardSafe } from '../../../components/ui';
+import { View, ScrollView, StyleSheet, Alert, Platform } from 'react-native';
 import { useRouter } from 'expo-router';
 import { DateTimePickerAndroid } from '@react-native-community/datetimepicker';
 import { FIN } from '../../../constants/financeTheme';
@@ -56,7 +57,7 @@ export default function NewLedger() {
   return (
     <View style={s.screen}>
       <FinHeader title="Add Ledger" />
-      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+      <KeyboardSafe style={{ flex: 1 }} >
         <ScrollView contentContainerStyle={s.body} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
           <View style={s.radioRow}>
             <Radio label="Lend" active={direction === 'lend'} onPress={() => setDirection('lend')} />
@@ -100,7 +101,7 @@ export default function NewLedger() {
           </View>
           <View style={{ height: 30 }} />
         </ScrollView>
-      </KeyboardAvoidingView>
+      </KeyboardSafe>
     </View>
   );
 }

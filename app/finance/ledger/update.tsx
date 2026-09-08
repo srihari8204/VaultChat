@@ -2,7 +2,8 @@
 // User enters what they received; remaining auto-computes but stays editable.
 
 import React, { useCallback, useEffect, useState } from 'react';
-import { View, Text, ScrollView, StyleSheet, Alert, KeyboardAvoidingView, Platform } from 'react-native';
+import { KeyboardSafe } from '../../../components/ui';
+import { View, Text, ScrollView, StyleSheet, Alert, Platform } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { FIN } from '../../../constants/financeTheme';
 import { FinHeader, Label, Field, Btn, Card, RowLine } from '../../../components/finance/ui';
@@ -45,7 +46,7 @@ export default function UpdateAmount() {
   return (
     <View style={s.screen}>
       <FinHeader title="Update Amount" />
-      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+      <KeyboardSafe style={{ flex: 1 }} >
         <ScrollView contentContainerStyle={s.body} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
           <Card>
             <Text numberOfLines={1} style={s.who}>{e.name}</Text>
@@ -70,7 +71,7 @@ export default function UpdateAmount() {
           </View>
           <View style={{ height: 30 }} />
         </ScrollView>
-      </KeyboardAvoidingView>
+      </KeyboardSafe>
     </View>
   );
 }

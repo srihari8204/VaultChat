@@ -16,7 +16,7 @@
 import { useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  ActivityIndicator, Alert, KeyboardAvoidingView, Platform, ScrollView,
+  ActivityIndicator, Alert, Platform, ScrollView,
   StyleSheet, Text, TextInput, TouchableOpacity, View,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
@@ -29,7 +29,7 @@ import { deleteAccount } from '../lib/chatService';
 import { unregisterPushToken } from '../lib/push';
 import { disconnect as disconnectSocket } from '../lib/socket';
 import { logoutUser } from './(constants)/authService';
-import { AuroraBackground } from '../components/ui';
+import { AuroraBackground, KeyboardSafe } from '../components/ui';
 
 // What actually happens, in the order a person cares about. Every line here is
 // backed by DELETE /user/account — do not add a promise the server does not keep.
@@ -108,7 +108,7 @@ export default function DeleteAccountScreen() {
   }, [armed, busy, run]);
 
   return (
-    <KeyboardAvoidingView style={S.screen} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+    <KeyboardSafe style={S.screen} >
       <AuroraBackground />
       <View style={S.header}>
         <TouchableOpacity onPress={() => router.back()} style={S.backBtn} activeOpacity={0.7}>
@@ -191,7 +191,7 @@ export default function DeleteAccountScreen() {
           </>
         )}
       </ScrollView>
-    </KeyboardAvoidingView>
+    </KeyboardSafe>
   );
 }
 

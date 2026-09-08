@@ -2,7 +2,8 @@
 // A Circle is a private group; invite links are the existing group-invite system.
 
 import React, { useState } from 'react';
-import { View, Text, TextInput, TouchableOpacity, StyleSheet, Alert, ActivityIndicator, ScrollView, KeyboardAvoidingView, Platform } from 'react-native';
+import { KeyboardSafe } from '../components/ui';
+import { View, Text, TextInput, TouchableOpacity, StyleSheet, Alert, ActivityIndicator, ScrollView, Platform } from 'react-native';
 import { Stack, useRouter, useLocalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../lib/theme';
@@ -39,7 +40,7 @@ export default function FamilySetupScreen() {
   };
 
   return (
-    <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1, backgroundColor: G.bgMid }}>
+    <KeyboardSafe style={{ flex: 1, backgroundColor: G.bgMid }}>
       <Stack.Screen options={{
         headerShown: true, title: 'Family Circle', headerTitleAlign: 'center',
         headerStyle: { backgroundColor: G.bgTop }, headerTintColor: colors.text, headerShadowVisible: false,
@@ -84,7 +85,7 @@ export default function FamilySetupScreen() {
           {busy === 'join' ? <ActivityIndicator color="#fff" /> : <><Ionicons name="enter" size={18} color="#fff" /><Text style={st.btnTxt}>Join circle</Text></>}
         </TouchableOpacity>
       </ScrollView>
-    </KeyboardAvoidingView>
+    </KeyboardSafe>
   );
 }
 

@@ -10,13 +10,13 @@ import * as ImagePicker from 'expo-image-picker';
 import { Stack, useRouter } from 'expo-router';
 import { useMemo, useState } from 'react';
 import {
-  Alert, Image, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View,
+  Alert, Image, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View,
 } from 'react-native';
 import { type Palette } from '../constants/theme';
 import { useTheme } from '../lib/theme';
 import { onboarding } from '../lib/onboarding';
 import { Sheet, type SheetAction } from '../components/ui/Sheet';
-import { AuroraBackground } from '../components/ui';
+import { AuroraBackground, KeyboardSafe } from '../components/ui';
 
 function ageOf(d: Date): number {
   const n = new Date();
@@ -79,7 +79,7 @@ export default function OnboardProfile() {
     <View style={s.screen}>
       <AuroraBackground />
       <Stack.Screen options={{ headerShown: false }} />
-      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+      <KeyboardSafe style={{ flex: 1 }} >
         <ScrollView contentContainerStyle={s.body} keyboardShouldPersistTaps="handled">
           <TouchableOpacity onPress={() => router.back()} style={s.back}><Ionicons name="arrow-back" size={24} color={colors.text} /></TouchableOpacity>
           <Text style={s.title}>Set up your profile</Text>
@@ -141,7 +141,7 @@ export default function OnboardProfile() {
             <Text style={s.ctaTxt}>Next</Text>
           </TouchableOpacity>
         </ScrollView>
-      </KeyboardAvoidingView>
+      </KeyboardSafe>
 
       <Sheet
         visible={!!sheet}

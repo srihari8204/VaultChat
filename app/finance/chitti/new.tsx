@@ -1,7 +1,8 @@
 // app/finance/chitti/new.tsx — Create a Lucky Draw group.
 
 import React, { useState } from 'react';
-import { View, ScrollView, StyleSheet, Alert, KeyboardAvoidingView, Platform } from 'react-native';
+import { KeyboardSafe } from '../../../components/ui';
+import { View, ScrollView, StyleSheet, Alert, Platform } from 'react-native';
 import { useRouter } from 'expo-router';
 import { DateTimePickerAndroid } from '@react-native-community/datetimepicker';
 import { FIN } from '../../../constants/financeTheme';
@@ -43,7 +44,7 @@ export default function NewChitti() {
   return (
     <View style={s.screen}>
       <FinHeader title="New Lucky Draw Group" />
-      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+      <KeyboardSafe style={{ flex: 1 }} >
         <ScrollView contentContainerStyle={s.body} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
           <Label>Group Name</Label>
           <Field value={name} onChangeText={setName} placeholder="e.g. Sundar Group" />
@@ -79,7 +80,7 @@ export default function NewChitti() {
           </View>
           <View style={{ height: 30 }} />
         </ScrollView>
-      </KeyboardAvoidingView>
+      </KeyboardSafe>
     </View>
   );
 }

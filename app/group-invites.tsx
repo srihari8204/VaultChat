@@ -16,9 +16,10 @@
 // so without a queue to see them in, everyone who says yes simply vanishes.
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { KeyboardSafe } from '../components/ui';
 import {
   View, Text, StyleSheet, TouchableOpacity, ScrollView, TextInput, Alert,
-  ActivityIndicator, Platform, KeyboardAvoidingView, Image,
+  ActivityIndicator, Platform, Image,
 } from 'react-native';
 import { Stack, useLocalSearchParams, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -198,7 +199,7 @@ export default function GroupInvitesScreen() {
   );
 
   return (
-    <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1, backgroundColor: colors.bg }}>
+    <KeyboardSafe style={{ flex: 1, backgroundColor: colors.bg }}>
       <Stack.Screen options={{
         headerShown: true, title: 'Add people', headerTitleAlign: 'center',
         headerStyle: { backgroundColor: colors.bg }, headerTintColor: colors.text, headerShadowVisible: false,
@@ -349,7 +350,7 @@ export default function GroupInvitesScreen() {
           </Text>
         </View>
       </ScrollView>
-    </KeyboardAvoidingView>
+    </KeyboardSafe>
   );
 }
 

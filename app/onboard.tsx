@@ -8,7 +8,7 @@
 import { Stack, useRouter } from 'expo-router';
 import { useMemo, useState } from 'react';
 import {
-  ActivityIndicator, Alert, Image, KeyboardAvoidingView, Platform,
+  ActivityIndicator, Alert, Image, Platform,
   ScrollView, StyleSheet, Text, TouchableOpacity, View,
 } from 'react-native';
 import { type Palette } from '../constants/theme';
@@ -16,7 +16,7 @@ import { useTheme } from '../lib/theme';
 import { EmailAccountPicker } from '../components/auth/EmailAccountPicker';
 import { PhoneField, toE164 } from '../components/auth/PhoneField';
 import { lookupUser, onboarding, sendEmailOtp, onboardingError } from '../lib/onboarding';
-import { AuroraBackground } from '../components/ui';
+import { AuroraBackground, KeyboardSafe } from '../components/ui';
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -62,7 +62,7 @@ export default function OnboardLanding() {
     <View style={s.screen}>
       <AuroraBackground />
       <Stack.Screen options={{ headerShown: false }} />
-      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+      <KeyboardSafe style={{ flex: 1 }} >
         <ScrollView contentContainerStyle={s.body} keyboardShouldPersistTaps="handled">
           <View style={s.logoWrap}>
             <Image source={require('../assets/images/icon.png')} style={s.logo} />
@@ -91,7 +91,7 @@ export default function OnboardLanding() {
 
           <Text style={s.note}>We’ll text nothing — a one-time code goes to your email to confirm it’s you.</Text>
         </ScrollView>
-      </KeyboardAvoidingView>
+      </KeyboardSafe>
     </View>
   );
 }

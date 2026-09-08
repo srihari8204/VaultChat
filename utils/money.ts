@@ -11,13 +11,13 @@
 // hold integers exactly up to 2^53 — about ₹90 trillion, far past any chit).
 
 /** Rupees → integer paise. Rounds half-up at the paise boundary. */
-export function toPaise(rupees: number): number {
+function tsToPaise(rupees: number): number {
   if (!Number.isFinite(rupees)) return 0;
   return Math.round(rupees * 100);
 }
 
 /** Integer paise → rupees, exact to 2 decimals. */
-export function fromPaise(paise: number): number {
+function tsFromPaise(paise: number): number {
   return Math.round(paise) / 100;
 }
 
@@ -38,17 +38,73 @@ export interface Split {
  * returned as `remainder` instead of being silently absorbed, so the books
  * still balance: each × parts + remainder === total, exactly.
  */
-export function splitEvenly(totalRupees: number, parts: number): Split {
+function tsSplitEvenly(totalRupees: number, parts: number): Split {
   const n = Math.max(1, Math.floor(parts) || 1);
-  const total = Math.max(0, toPaise(totalRupees));
+  const total = Math.max(0, tsToPaise(totalRupees));
   const each = Math.floor(total / n);
   const remainderPaise = total - each * n;
-  return { each: fromPaise(each), remainder: fromPaise(remainderPaise), remainderPaise };
+  return { each: tsFromPaise(each), remainder: tsFromPaise(remainderPaise), remainderPaise };
 }
 
 /** Sum rupee amounts without float drift. */
-export function sumRupees(values: number[]): number {
-  return fromPaise(values.reduce((acc, v) => acc + toPaise(v), 0));
+function tsSumRupees(values: number[]): number {
+  return tsFromPaise(values.reduce((acc, v) => acc + tsToPaise(v), 0));
 }
 
-export default { toPaise, fromPaise, splitEvenly, sumRupees };
+// ─── backend seam: TypeScript, or the Rust core (rust/vaultcore, UniFFI) ────
+//
+// The switch lives HERE, in the module every consumer already imports, rather
+// than at the six call sites. app/finance/{index,customer,reports}.tsx,
+// app/finance/chitti/[id].tsx and db/* import { splitEvenly, sumRupees, ... }
+// from this file and none of them change: flipping the flag moves every screen
+// that shows money at once, and a screen added tomorrow is switched already.
+// Same shape as services/crypto/index.ts, deliberately — one facade idiom in
+// this codebase, not two.
+//
+// Chosen at module load from EXPO_PUBLIC_MONEY_BACKEND ('ts' | 'rust',
+// default 'ts'):
+//
+//   'ts'   → the implementations above. Default, and the permanent fallback.
+//   'rust' → rust/vaultcore's money module, IF the native binding loads. Any
+//            failure falls back to TS — money must never be blocked by a
+//            missing .so.
+//
+// Safe to flip because the two are at PROVEN parity: rust/vaultcore/tests/
+// parity.rs replays this file's own selftest vectors plus its exhaustive
+// property (every pot ₹0–₹2000 in 1-paise steps × 11 member counts).
+//
+// ponytail: the native module is not built yet — the require below throws and
+// every session runs TS today. That is the seam doing its job, not a stub: the
+// day the binding lands, one env var moves all of it, with no diff here.
+interface MoneyCore {
+  toPaise(rupees: number): number;
+  fromPaise(paise: number): number;
+  splitEvenly(totalRupees: number, parts: number): Split;
+  sumRupees(values: number[]): number;
+}
+
+let native: MoneyCore | null = null;
+
+(function selectBackend(): void {
+  if (String(process.env.EXPO_PUBLIC_MONEY_BACKEND || 'ts').toLowerCase() !== 'rust') return;
+  try {
+    // Lazy require so 'ts' sessions and Node test runs never touch native.
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    native = require('./native/MoneyCore').initNativeMoney() ? require('./native/MoneyCore') : null;
+  } catch {
+    native = null;   // no binding in this build — TS stays live, silently
+  }
+})();
+
+/** Which backend is live — for diagnostics and the selftest. */
+export function moneyBackend(): 'ts' | 'rust' {
+  return native ? 'rust' : 'ts';
+}
+
+export const toPaise = native ? native.toPaise : tsToPaise;
+export const fromPaise = native ? native.fromPaise : tsFromPaise;
+export const splitEvenly = native ? native.splitEvenly : tsSplitEvenly;
+export const sumRupees = native ? native.sumRupees : tsSumRupees;
+
+export default { toPaise, fromPaise, splitEvenly, sumRupees, moneyBackend };
+

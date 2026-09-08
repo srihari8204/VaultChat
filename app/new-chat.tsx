@@ -7,13 +7,13 @@ import { HEADER_TOP } from '../constants/layout';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useEffect, useMemo, useState } from 'react';
 import {
-  ActivityIndicator, Alert, FlatList, KeyboardAvoidingView, Platform,
+  ActivityIndicator, Alert, FlatList, Platform,
   StyleSheet, Text, TextInput, TouchableOpacity, View,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { type Palette } from '../constants/theme';
 import { useTheme } from '../lib/theme';
-import { Avatar, AuroraBackground } from '../components/ui';
+import { Avatar, AuroraBackground, KeyboardSafe } from '../components/ui';
 import { PhoneField, toE164 } from '../components/auth/PhoneField';
 import { createDirectChat, listChats, attachmentUrl, setDisappearing, type ChatSummary } from '../lib/chatService';
 import { getAccessToken } from '../lib/api';
@@ -115,7 +115,7 @@ export default function NewChatScreen() {
   const searching = query.trim().length > 0;
 
   return (
-    <KeyboardAvoidingView style={S.screen} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+    <KeyboardSafe style={S.screen} >
       <AuroraBackground />
       <View style={S.header}>
         <TouchableOpacity onPress={() => router.back()} style={S.backBtn} activeOpacity={0.7}>
@@ -192,7 +192,7 @@ export default function NewChatScreen() {
           : <Text style={S.empty}>{searching ? 'No contacts found' : 'No contacts yet — add one above or find from your address book.'}</Text>
         }
       />
-    </KeyboardAvoidingView>
+    </KeyboardSafe>
   );
 }
 

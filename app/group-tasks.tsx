@@ -7,9 +7,10 @@
 // independent, so devices converge without anything here having to coordinate.
 
 import React, { useCallback, useMemo, useState } from 'react';
+import { KeyboardSafe } from '../components/ui';
 import {
   View, Text, StyleSheet, TouchableOpacity, ScrollView, TextInput, Alert,
-  ActivityIndicator, KeyboardAvoidingView, Platform,
+  ActivityIndicator, Platform,
 } from 'react-native';
 import { Stack, useLocalSearchParams, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -154,7 +155,7 @@ export default function GroupTasksScreen() {
   const open = ordered.filter((t) => !t.done).length;
 
   return (
-    <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1, backgroundColor: colors.bg }}>
+    <KeyboardSafe style={{ flex: 1, backgroundColor: colors.bg }}>
       <Stack.Screen options={{ title: 'Tasks', headerTitleAlign: 'center' }} />
       <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 40 }} keyboardShouldPersistTaps="handled">
 
@@ -255,7 +256,7 @@ export default function GroupTasksScreen() {
           );
         })}
       </ScrollView>
-    </KeyboardAvoidingView>
+    </KeyboardSafe>
   );
 }
 

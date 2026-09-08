@@ -7,9 +7,10 @@
 // would bypass a member's per-group privacy setting.
 
 import React, { useCallback, useMemo, useState } from 'react';
+import { KeyboardSafe } from '../components/ui';
 import {
   View, Text, StyleSheet, TouchableOpacity, ScrollView, TextInput, Alert,
-  ActivityIndicator, KeyboardAvoidingView, Platform,
+  ActivityIndicator, Platform,
 } from 'react-native';
 import * as Location from 'expo-location';
 import { Stack, useLocalSearchParams, useFocusEffect } from 'expo-router';
@@ -159,7 +160,7 @@ export default function GroupTripScreen() {
   };
 
   return (
-    <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1, backgroundColor: colors.bg }}>
+    <KeyboardSafe style={{ flex: 1, backgroundColor: colors.bg }}>
       <Stack.Screen options={{ title: trip ? 'Trip' : 'Start a trip', headerTitleAlign: 'center' }} />
       <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 40 }} keyboardShouldPersistTaps="handled">
 
@@ -274,7 +275,7 @@ export default function GroupTripScreen() {
           </>
         )}
       </ScrollView>
-    </KeyboardAvoidingView>
+    </KeyboardSafe>
   );
 }
 

@@ -20,7 +20,7 @@
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  ActivityIndicator, Alert, KeyboardAvoidingView, Platform, ScrollView, Share,
+  ActivityIndicator, Alert, Platform, ScrollView, Share,
   StyleSheet, Text, TextInput, TouchableOpacity, View,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
@@ -30,7 +30,7 @@ import { useTheme } from '../lib/theme';
 import {
   createChatCode, getChatCode, joinChatCode, revokeChatCode, type ChatCode,
 } from '../lib/chatService';
-import { AuroraBackground } from '../components/ui';
+import { AuroraBackground, KeyboardSafe } from '../components/ui';
 
 // The four things a code can open.
 //
@@ -147,7 +147,7 @@ export default function ChatCodeScreen() {
   };
 
   return (
-    <KeyboardAvoidingView style={S.screen} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+    <KeyboardSafe style={S.screen} >
       <AuroraBackground />
       <View style={S.header}>
         <TouchableOpacity onPress={() => router.back()} style={S.backBtn} activeOpacity={0.7}>
@@ -282,7 +282,7 @@ export default function ChatCodeScreen() {
           </>
         )}
       </ScrollView>
-    </KeyboardAvoidingView>
+    </KeyboardSafe>
   );
 }
 

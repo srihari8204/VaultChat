@@ -6,13 +6,13 @@ import { HEADER_TOP } from '../constants/layout';
 import { Ionicons } from '@expo/vector-icons';
 import { Stack, useRouter } from 'expo-router';
 import { useMemo, useState } from 'react';
-import { KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { Platform, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { type Palette } from '../constants/theme';
 import { useTheme } from '../lib/theme';
 import { SecurityQuestionRow } from '../components/auth/SecurityQuestionRow';
 import { REQUIRED_SECURITY_ANSWERS } from '../constants/securityQuestionPool';
 import { onboarding } from '../lib/onboarding';
-import { AuroraBackground } from '../components/ui';
+import { AuroraBackground, KeyboardSafe } from '../components/ui';
 
 type Slot = { questionCode: string | null; answer: string };
 
@@ -42,7 +42,7 @@ export default function OnboardSecurity() {
     <View style={s.screen}>
       <AuroraBackground />
       <Stack.Screen options={{ headerShown: false }} />
-      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+      <KeyboardSafe style={{ flex: 1 }} >
         <ScrollView contentContainerStyle={s.body} keyboardShouldPersistTaps="handled">
           <TouchableOpacity onPress={() => router.back()} style={s.back}><Ionicons name="arrow-back" size={24} color={colors.text} /></TouchableOpacity>
           <Text style={s.title}>Security questions</Text>
@@ -64,7 +64,7 @@ export default function OnboardSecurity() {
             <Text style={s.ctaTxt}>Next</Text>
           </TouchableOpacity>
         </ScrollView>
-      </KeyboardAvoidingView>
+      </KeyboardSafe>
     </View>
   );
 }

@@ -29,7 +29,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import {
   View, Text, StyleSheet, ActivityIndicator, TouchableOpacity, StatusBar,
-  TextInput, KeyboardAvoidingView, Platform,
+  TextInput, Platform,
 } from 'react-native';
 import { useLocalSearchParams, useRouter, Stack } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -37,7 +37,7 @@ import { type Palette } from '../../../constants/theme';
 import { useTheme } from '../../../lib/theme';
 import { redeemInviteLink, inviteCodeFrom } from '../../../lib/broadcast';
 import { getMyProfile } from '../../../lib/chatService';
-import { AuroraBackground } from '../../../components/ui';
+import { AuroraBackground, KeyboardSafe } from '../../../components/ui';
 
 type Phase =
   // ASK WHO IS JOINING, before anything is redeemed.
@@ -137,10 +137,10 @@ export default function LiveJoinScreen() {
     // lookup only supplies a default, so it may arrive late, or never.
     const ready = !busy;
     return (
-      <KeyboardAvoidingView
+      <KeyboardSafe
         style={s.container}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-      >
+
+>
       <AuroraBackground />
         <Stack.Screen options={{ headerShown: false }} />
         <StatusBar barStyle="light-content" />
@@ -182,7 +182,7 @@ export default function LiveJoinScreen() {
               : <Text style={s.ctaText}>Join</Text>}
           </TouchableOpacity>
         </View>
-      </KeyboardAvoidingView>
+      </KeyboardSafe>
     );
   }
 
@@ -223,10 +223,10 @@ export default function LiveJoinScreen() {
   // Passcode gate.
   const canSubmit = passcode.trim().length > 0 && !busy;
   return (
-    <KeyboardAvoidingView
+    <KeyboardSafe
       style={s.container}
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-    >
+
+>
       <Stack.Screen options={{ headerShown: false }} />
       <StatusBar barStyle="light-content" />
       <View style={s.body}>
@@ -277,7 +277,7 @@ export default function LiveJoinScreen() {
           <Text style={s.cancel}>Cancel</Text>
         </TouchableOpacity>
       </View>
-    </KeyboardAvoidingView>
+    </KeyboardSafe>
   );
 }
 

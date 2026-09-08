@@ -7,7 +7,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  ActivityIndicator, Alert, Animated, KeyboardAvoidingView, Platform,
+  ActivityIndicator, Alert, Animated, Platform,
   ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View,
 } from 'react-native';
 import { type Palette } from '../constants/theme';
@@ -17,7 +17,7 @@ import { MpinInput } from '../components/auth/MpinInput';
 import {
   getRecoveryQuestions, verifyRecoveryAnswers, recoverMpin, onboarding, onboardingError,
 } from '../lib/onboarding';
-import { AuroraBackground } from '../components/ui';
+import { AuroraBackground, KeyboardSafe } from '../components/ui';
 
 export default function MpinRecover() {
   const { colors } = useTheme();
@@ -88,7 +88,7 @@ export default function MpinRecover() {
     <View style={s.screen}>
       <AuroraBackground />
       <Stack.Screen options={{ headerShown: false }} />
-      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+      <KeyboardSafe style={{ flex: 1 }} >
         <ScrollView contentContainerStyle={s.body} keyboardShouldPersistTaps="handled">
           <TouchableOpacity onPress={() => router.back()} style={s.back}><Ionicons name="arrow-back" size={24} color={colors.text} /></TouchableOpacity>
 
@@ -133,7 +133,7 @@ export default function MpinRecover() {
             </View>
           )}
         </ScrollView>
-      </KeyboardAvoidingView>
+      </KeyboardSafe>
     </View>
   );
 }

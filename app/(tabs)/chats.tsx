@@ -810,7 +810,7 @@ const ChatRow = memo(function ChatRow({
             uri={showPhoto ? attachmentUrl(photoId!) : null}
             headers={authHeader ? { Authorization: authHeader } : undefined}
             name={title}
-            size={52}
+            size={50}
             presence={chat.type === 'direct' && chat.peerOnline ? 'online' : null}
             anon={!!chat.anonMasked}
           />
@@ -935,14 +935,24 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   folderCountActive: { color: c.primary, backgroundColor: c.glassSoft },
 
   sectionHeader: { color: c.textFaint, fontSize: 11, fontWeight: '700', letterSpacing: 0.6, textTransform: 'uppercase', paddingHorizontal: 22, paddingTop: 14, paddingBottom: 6, backgroundColor: 'transparent' },
-  separator: { height: StyleSheet.hairlineWidth, backgroundColor: c.hairline, marginLeft: 88 },
+  // Inset = paddingLeft 12 + avatar 50 + gap 12, so the rule starts under the
+  // text exactly like spec §6.4's 79. Was 88, left over from the 22pt padding.
+  separator: { height: StyleSheet.hairlineWidth, backgroundColor: c.hairline, marginLeft: 74 },
 
   // Aurora Glass: rows are undecorated on purpose. No fill, no border, no
   // shadow — the ground and the avatar ring carry the design, so the list stays
   // legible at a glance and costs nothing to scroll.
-  row: { flexDirection: 'row', minHeight: 76, paddingHorizontal: 22, alignItems: 'center', gap: 14, backgroundColor: 'transparent' },
+  // Geometry from Figma `ChatRow` (node 5:2) = WhatsApp spec §6.4: a FIXED
+  // 72pt row, 12 padding, 12 gap. Was 76/22/14 — drift, not a decision.
+  // minHeight, NOT height. The design says 72 and lib/responsiveLayout's
+  // guard says never pin a row that holds text: at 130% OS font scale a
+  // fixed 72 clips the name and the preview, which spec §10 forbids and
+  // which this repo already has a failing test for. 72 is the resting
+  // height — the rhythm the design wants — and the row grows only for a
+  // reader who needs it.
+  row: { flexDirection: 'row', minHeight: 72, paddingHorizontal: 12, alignItems: 'center', gap: 12, backgroundColor: 'transparent' },
   rowSelected: { backgroundColor: brandAlpha(0.14) },
-  avatarWrap: { width: 52, height: 52 },
+  avatarWrap: { width: 50, height: 50 },
   selBadge: { position: 'absolute', right: -2, bottom: -2, width: 20, height: 20, borderRadius: 10, alignItems: 'center', justifyContent: 'center', borderWidth: 2, borderColor: c.bg },
   selBadgeOn: { backgroundColor: c.primary },
   selBadgeOff: { backgroundColor: c.surfaceSolid, borderColor: c.textDim },
@@ -952,14 +962,14 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   avatarTxt: { color: '#FFFFFF', fontSize: 20, fontWeight: '800' },
   presenceDot: { position: 'absolute', right: 0, bottom: 0, width: 14, height: 14, borderRadius: 7, backgroundColor: c.online, borderWidth: 2.5, borderColor: c.bg },
 
-  rowBody: { flex: 1, gap: 4 },
-  rowTop: { flexDirection: 'row', alignItems: 'center', gap: 5 },
+  rowBody: { flex: 1, minWidth: 0, gap: 3 },
+  rowTop: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   rowPin: { fontSize: 11 },
-  rowName: { color: c.text, fontSize: 15.5, fontWeight: '600', flexShrink: 1 },
+  rowName: { color: c.text, fontSize: 17, lineHeight: 22, fontWeight: '600', flex: 1, minWidth: 0 },
   rowMuted: { fontSize: 12 },
-  rowTime: { color: c.textFaint, fontSize: 12, marginLeft: 'auto' },
-  rowBottom: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  rowPreview: { color: c.textDim, fontSize: 14, flex: 1 },
+  rowTime: { color: c.textFaint, fontSize: 12.5, lineHeight: 16, marginLeft: 'auto' },
+  rowBottom: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: 8 },
+  rowPreview: { color: c.textDim, fontSize: 14, lineHeight: 19, flex: 1, minWidth: 0 },
   rowPreviewUnread: { color: c.text, fontWeight: '600' },
   // Long-press action sheet
   sheetBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
@@ -971,7 +981,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   sheetItemTxt: { color: c.text, fontSize: 16, fontWeight: '500' },
   draftLabel: { color: c.danger, fontWeight: '700' },
   unreadBadge: { backgroundColor: c.primary, borderRadius: 11, minWidth: 22, height: 22, paddingHorizontal: 7, alignItems: 'center', justifyContent: 'center' },
-  unreadTxt: { color: '#FFFFFF', fontSize: 12, fontWeight: '800' },
+  unreadTxt: { color: '#FFFFFF', fontSize: 11, lineHeight: 14, fontWeight: '600' },
 
   actionsRow: { flexDirection: 'row' },
   action: { width: 76, alignItems: 'center', justifyContent: 'center', gap: 4 },
