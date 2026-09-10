@@ -886,18 +886,33 @@ io.on('connection', (socket) => {
         `SELECT user_id FROM chat_members WHERE chat_id = $1 AND left_at IS NULL AND user_id <> $2`,
         [chatId, socket.data.uid],
       );
-      // Only wake devices with no live socket: a running app already got the
-      // relay above and raises its own alarm, and double-alarming an emergency
-      // is worse than it sounds — two sirens, one of which nobody can silence.
-      const offline = [];
-      for (const row of mem.rows) {
-        const live = await io.in(`user:${row.user_id}`).fetchSockets();
-        if (live.length === 0) offline.push(row.user_id);
-      }
+      // Who is ALREADY covered by the relay above? Exactly the sockets in the
+      // circle room — that is where the client both joins and registers its
+      // family_emergency listener (lib/family/presence.ts subscribeCircle).
+      //
+      // Gating on "has any live socket" was WRONG: `user:<uid>` is joined
+      // unconditionally on connect (see socket.join above), so a guardian with
+      // the app open on any other screen — the commonest running state — was
+      // skipped by the push AND missed by the room relay, and got nothing at
+      // all. Room membership is the only gate that matches the relay.
+      //
+      // One fetchSockets for the room, not one per member.
+      const inRoom = await io.in(`chat:${chatId}`).fetchSockets();
+      const covered = new Set(
+        inRoom.map((sk) => String(sk.data?.uid ?? '')).filter(Boolean),
+      );
+      const offline = mem.rows
+        .map((row) => row.user_id)
+        .filter((uid) => !covered.has(String(uid)));
       if (!offline.length) return;
 
+      // devices.user_id is UUID (migrations/005_devices.sql) — casting the
+      // parameter to text[] makes Postgres resolve `uuid = text`, which has no
+      // operator and no implicit cast, so the statement throws and the
+      // best-effort catch below swallows it. Every other batch lookup in this
+      // repo uses ::uuid[] for exactly this reason.
       const t = await db.query(
-        `SELECT push_token FROM devices WHERE user_id = ANY($1::text[]) AND push_token IS NOT NULL`,
+        `SELECT push_token FROM devices WHERE user_id = ANY($1::uuid[]) AND push_token IS NOT NULL`,
         [offline],
       );
       const tokens = t.rows.map((x) => x.push_token).filter(Boolean);

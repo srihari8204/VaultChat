@@ -107,6 +107,10 @@
 
       Channel id `family-critical` is asserted identical in all three places (client, Node, Go). Channel creation is lazy, matching `ensureCallChannel` — the proven-in-production path — rather than a new boot-time hook.
 
+      **The push gate is room membership, not socket liveness**, and the distinction is the whole feature. A socket joins `user:<uid>` on connect but `chat:<circleId>` only while the Family screen is open — and the circle room is also where the client registers its `family_emergency` listener. Gating the push on "has a live socket" therefore left a guardian with the app open on any other screen missed by the relay *and* skipped by the push: nothing at all, in the commonest running state. Both backends now gate on presence in the circle room, which is exactly the set the relay reaches. Where the roster could be incomplete (multi-node, `FetchSockets` seeing one node), a member counts as uncovered and gets a push — a duplicate alert is a far better failure than a silent one.
+
+      *Caught by a pre-deploy adversarial review, along with a `::text[]` cast against the UUID `devices.user_id` that made the Node push throw and be swallowed. Neither was reachable by compiling.*
+
       *ponytail: the client handler is a lazy `require` in `callBackground.ts`, matching the two already there. A top-level import would pull notifee and the whole family graph into every headless cold start, which is exactly what that file exists to avoid.*
 
 - [x] 7.2 Android: optional auto-answer video + sealed location burst (confirm UX/OS constraints) — **resolved as tap-to-answer**, which `design.md` §40 lists as the acceptable outcome ("…or make it tap-to-answer").

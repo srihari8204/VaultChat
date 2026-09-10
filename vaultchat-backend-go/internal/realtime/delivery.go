@@ -346,9 +346,22 @@ func (h *Hub) sendWakePush(ctx context.Context, userID, title, body, channelID, 
 }
 
 // familyEmergencyWake pushes the Emergency Connect alert to every circle member
-// EXCEPT the sender who has no live socket. A member whose app is running got
-// the socket relay and raises its own alarm; pushing them too would produce two
-// sirens, only one of which the user can silence.
+// the socket relay did NOT already reach.
+//
+// "Did not reach" means: not present in the circle's socket room. That room is
+// exactly where the client joins AND registers its family_emergency listener
+// (lib/family/presence.ts subscribeCircle), so room membership is the only gate
+// that matches the relay.
+//
+// Gating on hasLiveSocket() instead was WRONG: a socket joins `user:<uid>` on
+// connect but `chat:<id>` only while the Family screen is open, so a guardian
+// with the app running on any other screen — the commonest state — was missed
+// by the relay AND skipped by the push, receiving nothing at all.
+//
+// Failure direction is deliberate: if the roster is incomplete (e.g. a
+// multi-node deployment where FetchSockets sees only this node), the member is
+// treated as uncovered and gets a push. A duplicate alert is a far better
+// failure than a silent one.
 func (h *Hub) familyEmergencyWake(ctx context.Context, chatID, senderID string) {
 	rows, err := db.SysPool.Query(ctx,
 		`SELECT user_id FROM chat_members WHERE chat_id = $1 AND left_at IS NULL AND user_id <> $2`,
@@ -365,10 +378,17 @@ func (h *Hub) familyEmergencyWake(ctx context.Context, chatID, senderID string) 
 	}
 	rows.Close()
 
+	// callRoster is generic over any socket room despite its name — it returns
+	// the distinct uids present, excluding the caller.
+	covered := map[string]bool{}
+	for _, uid := range h.callRoster(socket.Room("chat:"+chatID), senderID) {
+		covered[uid] = true
+	}
+
 	data := map[string]any{"type": "family-emergency", "circleId": chatID}
 	for _, uid := range members {
-		if h.hasLiveSocket(uid) {
-			continue
+		if covered[uid] {
+			continue // already alerted by the socket relay
 		}
 		// channelId must match FAMILY_CRITICAL_CHANNEL_ID in lib/family/notify.ts.
 		h.sendWakePush(ctx, uid, "Family Space", "Emergency alert - open VaultChat",
