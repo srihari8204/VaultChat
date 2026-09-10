@@ -15,7 +15,7 @@ import { emit, getSocket, joinChatRoom, leaveChatRoom } from '../socket';
 import { newLiveKey, sealJSON, openJSON, putLiveKey, getLiveKey, clearLiveKey } from '../liveLocationCrypto';
 import { sendMessage, getMessages, type Message } from '../chatService';
 import { type Geofence } from './geofence';
-import { getPlaces } from './store';
+import { getPlaces, getSettings } from './store';
 import { readBattery } from './battery';
 import { processFix } from './fixPipeline';
 import { recordSample } from './history';
@@ -23,7 +23,8 @@ import {
   startBackgroundPresence, stopBackgroundPresence, updateBackgroundKey,
   hasBackgroundPermission, isBackgroundRunning,
 } from './background';
-import { type FamilyPing, type MemberPresence } from './types';
+import { nextMotion, shouldPublish, type MotionState } from './cadence';
+import { DEFAULT_FAMILY_SETTINGS, type FamilyPing, type MemberPresence } from './types';
 import { type LatLng } from '../nav/geo';
 
 const LIVE_WINDOW_MS = 24 * 3600 * 1000;
@@ -41,6 +42,19 @@ const places = new Map<string, Geofence[]>();
 // every restart re-announced wherever you already were. It is now persisted by
 // fixPipeline.ts, which is also what lets the background task continue the run.
 let selfCb: ((p: MemberPresence) => void) | null = null;
+
+// ── publish cadence (F1.4 / F2.3) ────────────────────────────────────────────
+// The watcher still fires every 8 s / 15 m and every fix is still fed to the
+// geofence engine and the history store — only the network emit is rate-limited,
+// by motion state. `lastPublishAt = 0` means "publish the next fix immediately",
+// which is what makes toggling sharing on (and an SOS) feel instant.
+//
+// The BACKGROUND publisher is deliberately left alone: it already runs at
+// timeInterval 60 s / distanceInterval 75 m with pausesUpdatesAutomatically, so
+// it is coarser than anything this throttle would impose.
+let motion: MotionState = 'stationary';
+let lastPublishAt = 0;
+let baseIntervalMs = DEFAULT_FAMILY_SETTINGS.intervalMs;
 
 async function deliverKeys() {
   if (!myKey) return;
@@ -62,9 +76,14 @@ async function onFix(loc: Location.LocationObject) {
   // always show myself, now with the battery the roster chip was already drawing
   selfCb?.({ userId: myId, pos, speed: spd, ts, battery: bat.level, charging: bat.charging });
 
-  const blob = sharing && myKey
+  motion = nextMotion(motion, spd);
+  const now = Date.now();
+  const due = shouldPublish(lastPublishAt, now, motion, baseIntervalMs);
+
+  const blob = sharing && myKey && due
     ? sealJSON(myKey, { lat: pos.lat, lng: pos.lng, spd, ts, bat: bat.level, chg: bat.charging } as FamilyPing)
     : null;
+  if (blob) lastPublishAt = now;   // stamped once per fix, not once per circle
   const u = until();
 
   for (const cid of circleIds) {
@@ -90,6 +109,11 @@ export async function startPresence(o: StartPresenceOpts): Promise<void> {
   const perm = await Location.requestForegroundPermissionsAsync();
   if (perm.status !== 'granted') throw new Error('Location permission is required for Family Circle.');
   circleIds = o.circleIds; myId = o.myId; myName = o.myName || 'A member'; selfCb = o.onSelf; sharing = o.share;
+  // Fresh session: publish the very first fix, and honour the user's configured
+  // moving cadence as the floor. A bad/missing setting falls back in cadence.ts.
+  motion = 'stationary';
+  lastPublishAt = 0;
+  baseIntervalMs = (await getSettings().catch(() => DEFAULT_FAMILY_SETTINGS)).intervalMs;
   for (const cid of circleIds) places.set(cid, await getPlaces(cid));
   if (sharing) { myKey = newLiveKey(); await deliverKeys(); await handOffToBackground(); }
   watcher = await Location.watchPositionAsync(
@@ -119,6 +143,7 @@ export async function setSharing(share: boolean): Promise<void> {
   sharing = share;
   if (share) {
     myKey = newLiveKey();
+    lastPublishAt = 0;   // turning sharing on (incl. via SOS) publishes the next fix at once
     await deliverKeys();
     await handOffToBackground();
   } else {
