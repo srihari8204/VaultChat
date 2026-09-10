@@ -332,12 +332,26 @@ export async function subscribeCircle(circleId: string, meId: string, onEvent: (
     if (e.type === 'location' || e.type === 'system' || e.type === 'text') scheduleRefresh();
   };
 
+  // Emergency Connect relayed while the app is up. Faster than waiting for the
+  // audit message to be fetched and decrypted, and notifyEmergencyConnect uses
+  // a fixed id, so if ingestion also fires it refreshes the same alert rather
+  // than stacking a second siren.
+  const onEmergency = (e: any) => {
+    if (disposed || !e || String(e.chatId) !== String(circleId)) return;
+    if (String(e.userId ?? '') === String(meId)) return;   // our own escalation
+    notifyEmergencyConnect('Emergency alert in this circle - open to see details', circleId)
+      .catch(() => {});
+    scheduleRefresh();   // pull the audit line in for the inbox
+  };
+
   s.on('live_location_update', onUpd);
   s.on('live_location_stop', onStop);
   s.on('new_message', onNewMsg);
+  s.on('family_emergency', onEmergency);
   return () => {
     disposed = true;
     if (refreshT) { clearTimeout(refreshT); refreshT = null; }
+    s.off('family_emergency', onEmergency);
     s.off('live_location_update', onUpd);
     s.off('live_location_stop', onStop);
     s.off('new_message', onNewMsg);

@@ -93,12 +93,21 @@
 > change, an Apple entitlement grant, a Play Console submission, and two
 > physical phones. Each box below says which.
 
-- [ ] 7.1 Full-screen critical alert via existing Notifee FGS + native FCM path (kill-safe delivery) — **client half done, server half open.**
-      `notify.notifyEmergencyConnect` raises the full-screen alarm (ALARM category, `fullScreenAction`, `loopSound`, `lightUpScreen`, ongoing, Acknowledge action). Both routes are wired: the requesting guardian gets it when their own ladder runs out, other guardians get it by ingesting the 🚨 audit line. The age gate from 4.2 keeps a stale backlog from sounding a siren on first open.
+- [x] 7.1 Full-screen critical alert via existing Notifee FGS + native FCM path (kill-safe delivery) — **all three legs wired.**
 
-      Every option is copied verbatim from `lib/lock/lockNotifications.ts:showLockAlarm` — the one alarm surface in this repo already proven on device. Inventing a shape would be a bad trade here: notifee cannot be typechecked in this environment and a rejected payload fails **silently**, which for this notification means the emergency is simply never shown.
+      | Guardian's state | Path |
+      |---|---|
+      | Ran the ladder themselves | `escalationService` raises the alarm directly when their ladder escalates |
+      | App up, someone else's ladder | socket relay `family_emergency` → alarm immediately, then the audit line is pulled in for the inbox |
+      | **App killed** | server wake-up push → `callBackground` Expo task → alarm |
 
-      **Still open: kill-safe delivery.** Nothing above runs if the guardian's process is gone, and the requirement is explicitly "even when the guardian's app is killed". That needs the backend to send a high-priority FCM when an Emergency Connect audit message is posted — a change in `vaultchat-backend/server.js` *and* `vaultchat-backend-go`, plus a client data-message handler. It is server work, deliberately not attempted here.
+      The kill-safe leg mirrors `call_incoming` exactly, in **both** backends (`vaultchat-backend/server.js` and `vaultchat-backend-go/internal/realtime/handlers.go` + `delivery.go`): membership-gate the emitter, relay into the circle room, then push **only** to members with no live socket. A running app already got the relay and raises its own alarm; pushing it too would give two sirens, only one of which the user can silence. Go's `sendCallWakePush` was generalised into `sendWakePush(…, channelID, categoryID, …)` so this routes to its own channel instead of ringing like a call — the call path now delegates to it unchanged.
+
+      **The push is content-free**, by necessity and by policy: the alert text lives in the E2EE audit message, which the server cannot read, and the client rule (`messageNotifications.ts`) is never to put plaintext in a notification. The wake says only "open the app"; the real line is decrypted and inboxed on arrival. `notifyEmergencyConnect` uses a fixed notification id, so whichever legs land first, later ones refresh the same alert rather than stacking sirens.
+
+      Channel id `family-critical` is asserted identical in all three places (client, Node, Go). Channel creation is lazy, matching `ensureCallChannel` — the proven-in-production path — rather than a new boot-time hook.
+
+      *ponytail: the client handler is a lazy `require` in `callBackground.ts`, matching the two already there. A top-level import would pull notifee and the whole family graph into every headless cold start, which is exactly what that file exists to avoid.*
 
 - [x] 7.2 Android: optional auto-answer video + sealed location burst (confirm UX/OS constraints) — **resolved as tap-to-answer**, which `design.md` §40 lists as the acceptable outcome ("…or make it tap-to-answer").
       Auto-answer was rejected on two grounds. Technically, Android 10+ blocks background activity starts; the sanctioned replacement is exactly the full-screen intent 7.1 now uses, so a killed app cannot reliably force a call to answer anyway. And on consent: silently opening a camera and microphone on someone's phone is not a thing to ship because a state machine decided a member was late. The full-screen alarm hands the guardian a one-tap route in instead.

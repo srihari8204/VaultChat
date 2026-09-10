@@ -282,8 +282,16 @@ func (h *Hub) startViewerSweep() {
 var expoHTTP = &http.Client{Timeout: 15 * time.Second}
 
 func (h *Hub) sendCallWakePush(ctx context.Context, calleeID, title, body string, data map[string]any) {
+	h.sendWakePush(ctx, calleeID, title, body, "calls", "incoming_call", data)
+}
+
+// sendWakePush is the same transport with the Android channel (and optional
+// iOS/Android category) left to the caller, so a non-call wake — Family Space
+// Emergency Connect — can route to its own channel instead of ringing like a
+// call. Pass an empty categoryID to omit it.
+func (h *Hub) sendWakePush(ctx context.Context, userID, title, body, channelID, categoryID string, data map[string]any) {
 	rows, err := db.SysPool.Query(ctx,
-		`SELECT push_token FROM devices WHERE user_id = $1 AND push_token IS NOT NULL`, calleeID)
+		`SELECT push_token FROM devices WHERE user_id = $1 AND push_token IS NOT NULL`, userID)
 	if err != nil {
 		return
 	}
@@ -301,8 +309,11 @@ func (h *Hub) sendCallWakePush(ctx context.Context, calleeID, title, body string
 
 	base := map[string]any{
 		"sound": "default", "title": title, "body": body, "data": data,
-		"priority": "high", "channelId": "calls", "categoryId": "incoming_call",
+		"priority": "high", "channelId": channelID,
 		"_displayInForeground": true,
+	}
+	if categoryID != "" {
+		base["categoryId"] = categoryID
 	}
 	var dead []string
 	for i := 0; i < len(tokens); i += 100 {
@@ -331,6 +342,37 @@ func (h *Hub) sendCallWakePush(ctx context.Context, calleeID, title, body string
 	}
 	if len(dead) > 0 {
 		_, _ = db.SysPool.Exec(ctx, `DELETE FROM devices WHERE push_token = ANY($1::text[])`, dead)
+	}
+}
+
+// familyEmergencyWake pushes the Emergency Connect alert to every circle member
+// EXCEPT the sender who has no live socket. A member whose app is running got
+// the socket relay and raises its own alarm; pushing them too would produce two
+// sirens, only one of which the user can silence.
+func (h *Hub) familyEmergencyWake(ctx context.Context, chatID, senderID string) {
+	rows, err := db.SysPool.Query(ctx,
+		`SELECT user_id FROM chat_members WHERE chat_id = $1 AND left_at IS NULL AND user_id <> $2`,
+		chatID, senderID)
+	if err != nil {
+		return
+	}
+	var members []string
+	for rows.Next() {
+		var uid string
+		if rows.Scan(&uid) == nil && uid != "" {
+			members = append(members, uid)
+		}
+	}
+	rows.Close()
+
+	data := map[string]any{"type": "family-emergency", "circleId": chatID}
+	for _, uid := range members {
+		if h.hasLiveSocket(uid) {
+			continue
+		}
+		// channelId must match FAMILY_CRITICAL_CHANNEL_ID in lib/family/notify.ts.
+		h.sendWakePush(ctx, uid, "Family Space", "Emergency alert - open VaultChat",
+			"family-critical", "", data)
 	}
 }
 

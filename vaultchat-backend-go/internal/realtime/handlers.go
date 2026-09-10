@@ -100,6 +100,22 @@ func (h *Hub) registerChatHandlers(s *socket.Socket) {
 		}
 	})
 
+	// Family Space Emergency Connect — the kill-safe leg (F7.1). Mirrors
+	// server.js: relay into the circle room, then wake only the members with NO
+	// live socket, exactly like call_incoming. The payload is CONTENT-FREE — the
+	// alert text lives in the E2EE audit message, which this server cannot read.
+	s.On("family_emergency", func(args ...any) {
+		chatID := mstr(argMap(args), "chatId")
+		if chatID == "" || !h.liveLocAllowed(d, chatID) {
+			return
+		}
+		s.To(socket.Room("chat:"+chatID)).Emit("family_emergency",
+			map[string]any{"chatId": chatID, "userId": d.uid})
+
+		uid := d.uid
+		workx.Submit(func() { h.familyEmergencyWake(bg, chatID, uid) }) // bounded, not raw-spawned
+	})
+
 	// Typing — routed via fanOutToChat so it reaches every member's user-room
 	// and honours hide_typing ghost-mode. uid comes from the CLIENT payload.
 	s.On("typing_start", func(args ...any) {

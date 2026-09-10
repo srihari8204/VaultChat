@@ -23,6 +23,7 @@
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { sendMessage } from '../chatService';
+import { emit } from '../socket';
 import { recordAlert } from './alerts';
 import { notifyFamilyAlert, notifyEmergencyConnect } from './notify';
 import {
@@ -176,9 +177,14 @@ export async function tickCircle(circleId: string, meId: string): Promise<number
       const text = auditEmergency(r.ladder);
       await audit(circleId, text, r.ladder.subjectId, r.ladder.subjectName, 'sos', meId);
       // The requesting guardian is watching THEIR ladder run out, so they get
-      // the full-screen alarm here. Other guardians get it through ingestion
-      // of the audit message (presence.ingestFamilyEvents).
+      // the full-screen alarm here. Other guardians get it two ways: the socket
+      // relay below if their app is up, and a wake-up push from the server if
+      // it is not (F7.1). Ingestion of the audit message is the third, slowest
+      // path and the one that carries the actual text.
       await notifyEmergencyConnect(text, circleId);
+      // Content-free by design: the server cannot read the audit line, and the
+      // client rule is never to put plaintext in a notification.
+      emit('family_emergency', { chatId: circleId }).catch(() => {});
     }
   }
 
