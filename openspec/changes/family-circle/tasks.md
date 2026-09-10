@@ -1,38 +1,53 @@
 # Tasks
 
+> **Reconciled against shipped code (2026-09-10).** Family Space shipped ahead of
+> this checklist — `app/family*.tsx`, `components/family/FamilyMap.tsx` and
+> `lib/family/*` (10 modules) implement F1–F5. Each box below now carries the
+> evidence that closed it, or the reason it is still open. Two boxes are closed
+> as **resolved differently** and one as **N/A**; those are decisions, not work.
+> F6 and F7 are genuinely unbuilt — no code exists for either.
+
 ## F1 — Circle foundation (client + relay)
-- [ ] 1.1 Circle create/join on top of groups (`type='family'`), roles (member/guardian), invite-link reuse
-- [ ] 1.2 `family-setup.tsx` (create/join + consent prompt) and mini-app registry entry (flagged off)
-- [ ] 1.3 Membership/roles migration IFF groups schema doesn't cover `type='family'` + per-member role
-- [ ] 1.4 Presence publisher: extend `liveLocationCrypto` sealed payload with battery/motion/speed; publish on the existing socket at an adaptive interval; default sharing OFF
-- [ ] 1.5 Relay verification: confirm server forwards ciphertext only and writes no plaintext coordinate/log
+- [x] 1.1 Circle create/join on top of groups, roles (member/guardian), invite-link reuse — `lib/family/circle.ts`. **Deviation:** a Circle rides an ordinary group (`createGroupChat`), not a `type='family'` discriminator; its id *is* the chat id. Roles map onto group roles (owner/admin → guardian, member → member), so no new server surface exists at all. `circleInviteCode()` reuses `createInviteLink` with `expiresInHours: 0, maxUses: 0`.
+- [x] 1.2 `family-setup.tsx` (create/join + consent prompt) and mini-app registry entry — screen shipped; registry entry is `familyspace` in `app/(tabs)/mini.tsx`. Consent is threefold: the setup hero states the server never sees a location, `DEFAULT_FAMILY_SETTINGS.sharing` is `false`, and always-on location is a separate explicit prompt. **Deviation:** ships unflagged, not "flagged off".
+- [x] 1.3 Membership/roles migration **N/A** — the task is conditional ("IFF groups schema doesn't cover it"). It does: `chat_members` already carries per-member `role` and `left_at`. No migration was written and none is needed.
+- [ ] 1.4 Presence publisher — sealed payload **done** (`FamilyPing` carries `bat`/`chg`/`spd`/`ts` via `sealJSON`, published on the existing `live_location_update` socket event; sharing defaults OFF). **Open: the interval is not adaptive** — `watchPositionAsync` is pinned to `timeInterval: 8000, distanceInterval: 15` regardless of motion state. See 2.3.
+- [x] 1.5 Relay verification — **verified this pass.** `vaultchat-backend-go/internal/realtime/handlers.go:78-101` and `vaultchat-backend/server.js:832-855` both (a) persist nothing, (b) log nothing (`grep live_location | grep -i log` is empty in both), (c) gate on cached `chat_members` membership before relaying, (d) pass `blob` through opaque and stamp only the server-known `userId`. *ponytail: both relays still tolerate a legacy plaintext `latitude`/`longitude` path for cross-version rollout. No family client can reach it — `presence.ts` only ever emits `blob` — but the relay is not structurally ciphertext-only until that branch is dropped.*
 
 ## F2 — Presence + roster (no map yet)
-- [ ] 2.1 Decrypt incoming pings on-device; roster list with last-seen, battery, staleness
-- [ ] 2.2 "Location off" state for members who haven't opted in
-- [ ] 2.3 Adaptive interval tied to motion state; hard stop when sharing toggled off
+- [x] 2.1 Decrypt incoming pings on-device; roster with last-seen, battery, staleness — `presence.subscribeCircle` → `openJSON`; roster rows in `app/family.tsx` render `ago(ts)`, distance, "moving", battery chip; `STALE_MS = 90_000` drives dimming.
+- [x] 2.2 "Location off" state for members who haven't opted in — roster row falls back to `'Location off'` when no presence exists for that member.
+- [ ] 2.3 Adaptive interval tied to motion state; hard stop when sharing toggled off — **half done.** Hard stop ships (`setSharing(false)` clears the key, stops the background task, emits `live_location_stop`). The adaptive half does not exist; cadence is fixed. Same gap as 1.4 — these two close together.
 
 ## F3 — Map surface
-- [ ] 3.1 Spike + pick renderer: MapLibre GL (+ PMTiles/self-host, no-GMS) vs `react-native-maps`
-- [ ] 3.2 Add the native dependency; `expo prebuild`; update store listings for the new SDK
-- [ ] 3.3 `family.tsx` map: member markers from decrypted pings, freshness dimming, tap→in-app `navigateTo`
+- [x] 3.1 Spike + pick renderer — **resolved differently.** Neither option was taken: `components/family/FamilyMap.tsx` runs **bundled Leaflet inside a WebView** (base64-inlined JS+CSS from `components/nav/leafletAsset`, no CDN). It satisfies the no-GMS requirement that motivated the MapLibre/PMTiles column while adding zero native dependencies.
+- [x] 3.2 Add the native dependency; `expo prebuild`; update store listings — **N/A, and that is the payoff of 3.1.** The Leaflet-in-WebView choice means there is no new native module, no prebuild, and no store-listing SDK change to make.
+- [x] 3.3 `family.tsx` map: markers from decrypted pings, freshness dimming, tap→`navigateTo` — markers with initials + stable colour, self halo, `stale` at 55% opacity, marker tap posts `sel:<id>` back to RN; roster navigate button calls `navigateTo(lat, lng, name)`.
 
 ## F4 — Geofences (on-device only)
-- [ ] 4.1 On-device geofence engine (define/edit/delete places), evaluation never leaves device
-- [ ] 4.2 Arrive/leave → E2EE system message into the Circle thread; local guardian notification
+- [x] 4.1 On-device geofence engine (define/edit/delete places), evaluation never leaves device — `lib/family/geofence.ts` (pure, self-checked, 40 m exit hysteresis) + `app/family-places.tsx` (add by GPS / address / `lat,lng`, per-place on-off, edit, delete, 50–5000 m). Definitions live in AsyncStorage under `vc_family_places_*`; nothing is uploaded.
+- [ ] 4.2 Arrive/leave → E2EE system message into the Circle thread; local guardian notification — **half done.** The system message ships (`fixPipeline.processFix` → `announce` → `sendMessage(cid, text, 'system')`) and a typed local alert is recorded. **Open: there is no notification.** `recordAlert` writes to the in-app inbox and tab badge only, so a crossing that happens while the app is backgrounded surfaces nothing until the user next opens Family Space. Needs the Notifee local-notification path, and shares that plumbing with F7.1.
 
 ## F5 — SOS burst
-- [ ] 5.1 Reuse SOS capture; send sealed high-priority ping + critical E2EE system message to guardians
-- [ ] 5.2 Guardian tap → in-app navigation to sender (verify no-GMS path)
+- [ ] 5.1 Reuse SOS capture; sealed high-priority ping + critical E2EE system message to guardians — **half done.** Hold-to-SOS (`app/family.tsx`) forces sharing on, takes a high-accuracy fix, posts `🆘 …` as an E2EE system message and records a `critical` alert. **Open on two counts:** the burst is not a distinct high-priority ping (it just flips normal sharing on, so the first position still waits for the next 8 s tick), and it is addressed to the whole circle rather than to guardians specifically.
+- [x] 5.2 Guardian tap → in-app navigation to sender (verify no-GMS path) — `navigateTo()` from the roster row and from the member screen's Route action. The no-GMS path is verified by construction: the renderer is Leaflet-in-WebView (3.1) and routing is our own Valhalla proxy, so neither depends on Play Services.
 
 ## F6 — Guardian escalation ladder
+> **Not started.** Verified absent: no ladder, timer, or check-in scheduler exists
+> in `lib/` or `app/`. (`grep escalat|checkinLadder|requestCheckin` matches only
+> `services/security/*`, which is the duress/threat engine — unrelated.)
+> The check-in *presets* in `app/family.tsx` are one-shot messages with no
+> follow-up state, so F6 starts from the state machine, not from the UI.
 - [ ] 6.1 On-device state machine: missed check-in / unanswered call → retry +5min → +15min → Emergency Connect after N misses
 - [ ] 6.2 "I'm OK" cancels ladder; every action logged as an E2EE system message (audit)
 - [ ] 6.3 Guardian-initiated "request check-in" (v1 scheduling model)
 
 ## F7 — Emergency Connect + compliance
-- [ ] 7.1 Full-screen critical alert via existing Notifee FGS + native FCM path (kill-safe delivery)
+> **Not started**, except the two manifest declarations noted in 7.4. Family
+> alerts are device-local and in-app only today (see 4.2), so nothing in this
+> section has kill-safe delivery.
+- [ ] 7.1 Full-screen critical alert via existing Notifee FGS + native FCM path (kill-safe delivery) — the plumbing exists for **calls** (`plugins/withVaultChatCalls.js`) but is not wired to any family event.
 - [ ] 7.2 Android: optional auto-answer video + sealed location burst (confirm UX/OS constraints)
 - [ ] 7.3 iOS: repeating critical alarm; graceful degrade when Critical Alerts entitlement absent
-- [ ] 7.4 Compliance: Play background-location declaration, `USE_FULL_SCREEN_INTENT`, iOS Critical Alerts entitlement request
-- [ ] 7.5 Battery + kill-safety field test; flip the feature flag on after two-device verification
+- [ ] 7.4 Compliance — **partially satisfied already:** `ACCESS_BACKGROUND_LOCATION` (`app.json:68`) and `USE_FULL_SCREEN_INTENT` (`app.json:56`) are both declared. Still open: the Play Console background-location declaration form, and the iOS Critical Alerts entitlement request (no entitlement found in `app.json`).
+- [ ] 7.5 Battery + kill-safety field test; flip the feature flag on after two-device verification *(requires physical devices)*

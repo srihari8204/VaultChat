@@ -43,5 +43,5 @@
 
 ## 7. Optional — self-hosted geocoding (separable)
 
-- [ ] 7.1 Photon container in docker-compose + authenticated `GET /nav/geocode` backend proxy (rate-limited, no query logging)
-- [ ] 7.2 Client search tries the proxy when flagged on; falls back to `lat,lng` parse / device geocoder as today
+- [x] 7.1 Photon container in docker-compose + authenticated `GET /nav/geocode` backend proxy (rate-limited, no query logging) — proxy is `routes/nav.go:navGeocode` (30 req/60s per user via `redisx.Consume`, query never logged, upstream switchable with `GEOCODE_UPSTREAM`); container added as the profile-gated `photon` service (`dc --profile geocode up -d photon`), off by default because it needs an OSM index this repo does not ship — same reasoning as `valhalla`
+- [x] 7.2 Client search tries the proxy when flagged on; falls back to `lat,lng` parse / device geocoder as today — `lib/nav/geocode.ts` + proxy-first/device-second order in `app/navigate.tsx`, `app/location-lock.tsx` and (newly) `app/family-places.tsx`. Shipped unflagged: the proxy already degrades to the device geocoder on any error, so a flag would only add a second failure mode
