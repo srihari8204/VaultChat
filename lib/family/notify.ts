@@ -25,7 +25,8 @@
 
 import { Platform } from 'react-native';
 import notifee, { AndroidImportance, AndroidCategory, AndroidVisibility } from '@notifee/react-native';
-import { type FamilyAlert } from './alerts';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { recordAlert, type FamilyAlert } from './alerts';
 
 export const FAMILY_CHANNEL_ID = 'family-alerts';
 export const FAMILY_CRITICAL_CHANNEL_ID = 'family-critical';
@@ -100,6 +101,79 @@ export async function notifyFamilyAlert(alert: FamilyAlert, meId: string | null)
   }
 }
 
+// ── iOS Critical Alerts capability (F7.3) ───────────────────────────────────
+//
+// A repeating critical alarm — one that sounds through silent mode and Focus —
+// needs Apple's `com.apple.developer.usernotifications.critical-alerts`
+// entitlement, which has to be granted by Apple before it can even appear in
+// the app's entitlements. Until then iOS must degrade, and the spec is explicit
+// that the degrade has to be RECORDED, not silent.
+//
+// SAFETY RULE for this whole section: the notification payload changes ONLY when
+// the probe explicitly reports `enabled`. On every device today that is false,
+// so the payload is byte-identical to what shipped before this code existed.
+// A probe that throws, or returns something unexpected, degrades — it can never
+// upgrade. That is what makes adding an unverifiable iOS option safe here.
+
+export type CriticalAlertStatus = 'enabled' | 'disabled' | 'unsupported' | 'unknown';
+
+const K_CRITICAL_STATUS = 'vc_family_critical_status';
+
+let criticalCache: CriticalAlertStatus | null = null;
+/** One degrade record per app session — the fact is worth logging, not spamming. */
+let degradeRecorded = false;
+
+/**
+ * Read (never request) whether critical alerts are available.
+ *
+ * `getNotificationSettings` is read-only, so this cannot pop a permission
+ * dialog in the middle of an emergency — which `requestPermission` would.
+ */
+export async function criticalAlertStatus(): Promise<CriticalAlertStatus> {
+  if (criticalCache) return criticalCache;
+  if (Platform.OS !== 'ios') { criticalCache = 'unsupported'; return criticalCache; }
+  let next: CriticalAlertStatus = 'unknown';
+  try {
+    const settings: any = await notifee.getNotificationSettings();
+    // notifee IOSNotificationSetting: 0 NOT_SUPPORTED, 1 DISABLED, 2 ENABLED.
+    const v = settings?.ios?.criticalAlert;
+    next = v === 2 ? 'enabled' : v === 1 ? 'disabled' : v === 0 ? 'unsupported' : 'unknown';
+  } catch { next = 'unknown'; }
+  criticalCache = next;
+  try { await AsyncStorage.setItem(K_CRITICAL_STATUS, next); } catch {}
+  return next;
+}
+
+/** Last known status without probing — for a settings/diagnostics surface. */
+export async function lastCriticalAlertStatus(): Promise<CriticalAlertStatus> {
+  if (criticalCache) return criticalCache;
+  try {
+    const raw = await AsyncStorage.getItem(K_CRITICAL_STATUS);
+    return (raw as CriticalAlertStatus) || 'unknown';
+  } catch { return 'unknown'; }
+}
+
+/** Test seam — the cache is process-lifetime, so tests and a re-check need this. */
+export function resetCriticalAlertCache(): void { criticalCache = null; degradeRecorded = false; }
+
+/**
+ * Record, once per session, that an emergency was delivered WITHOUT the critical
+ * channel. This is the spec's "records that the critical channel was
+ * unavailable" — on Android it never fires, because the alarm channel there is
+ * real (bypassDnd + ALARM category) rather than entitlement-gated.
+ */
+async function recordCriticalDegrade(circleId: string, status: CriticalAlertStatus): Promise<void> {
+  if (degradeRecorded || Platform.OS !== 'ios') return;
+  degradeRecorded = true;
+  const why = status === 'disabled'
+    ? 'the user has turned critical alerts off'
+    : 'this build has no critical-alerts entitlement';
+  await recordAlert({
+    circleId, kind: 'sharing', actorId: 'system', actorName: 'VaultChat',
+    text: `Emergency alerts are using the standard notification channel — ${why}. They will not sound through silent mode.`,
+  }).catch(() => {});
+}
+
 /**
  * Emergency Connect (F7.1, client half) — the loud, full-screen alert raised
  * when an escalation ladder runs out of reminders.
@@ -121,12 +195,20 @@ export async function notifyFamilyAlert(alert: FamilyAlert, meId: string | null)
 export async function notifyEmergencyConnect(body: string, circleId: string): Promise<boolean> {
   if (Platform.OS === 'web') return false;
   await ensureFamilyChannels();
+  const critical = await criticalAlertStatus();
+  if (critical !== 'enabled') await recordCriticalDegrade(circleId, critical);
   try {
     await notifee.displayNotification({
       id: EMERGENCY_CONNECT_ID,
       title: '\u{1F6A8} Emergency Connect',
       body,
       data: { type: 'family-emergency', circleId },
+      // Only ever ADDED when Apple has granted the entitlement — see SAFETY RULE.
+      // Without it the object is absent entirely, exactly as before, so this
+      // cannot change how the alert behaves on any device shipping today.
+      ...(critical === 'enabled'
+        ? { ios: { critical: true, criticalVolume: 1.0, sound: 'default' } }
+        : {}),
       android: {
         channelId: FAMILY_CRITICAL_CHANNEL_ID,
         category: AndroidCategory.ALARM,

@@ -113,7 +113,15 @@
       Auto-answer was rejected on two grounds. Technically, Android 10+ blocks background activity starts; the sanctioned replacement is exactly the full-screen intent 7.1 now uses, so a killed app cannot reliably force a call to answer anyway. And on consent: silently opening a camera and microphone on someone's phone is not a thing to ship because a state machine decided a member was late. The full-screen alarm hands the guardian a one-tap route in instead.
       The **sealed location burst** half ships: an SOS forces sharing on and the publish clock reset (2.3) puts the position out on the very next fix.
 
-- [ ] 7.3 iOS: repeating critical alarm; graceful degrade when Critical Alerts entitlement absent — **blocked on the entitlement, not on code.** A repeating critical alarm requires `critical: true` in notifee's iOS options, which is inert without `com.apple.developer.usernotifications.critical-alerts`. Today iOS takes default notification treatment, which IS the graceful-degrade branch the spec asks for — but "records that the critical channel was unavailable" is not implemented, and no iOS-specific notifee option is set anywhere in this repo, so there is no proven shape to copy (see 7.1). Do this together with 7.4's entitlement, on a machine that can build for iOS.
+- [x] 7.3 iOS: repeating critical alarm; graceful degrade when Critical Alerts entitlement absent — **both halves coded; the alarm half is inert until Apple grants the entitlement.**
+
+      `notify.criticalAlertStatus()` reads (never requests) whether critical alerts are available, via `getNotificationSettings` — read-only, so it cannot pop a permission dialog in the middle of an emergency, which `requestPermission` would. `notifyEmergencyConnect` adds `ios: { critical, criticalVolume, sound }` **only** when the probe reports `enabled`.
+
+      **The safety rule that makes this shippable without an iOS build to test on:** the payload changes only on an explicit `enabled`. Every other outcome — `disabled`, `unsupported`, `unknown`, or the probe throwing — degrades, never upgrades. On every device shipping today the probe cannot say `enabled`, so the notification object is byte-identical to what shipped before this code existed. An unverifiable iOS option can therefore be added with zero regression risk; it simply lies dormant until the entitlement lands.
+
+      Degrade is **recorded**, per the spec scenario: one info alert per session in the family inbox, naming whether the cause is a missing entitlement or the user having turned critical alerts off. It never fires on Android, where the alarm channel is real (`bypassDnd` + ALARM category) rather than entitlement-gated. The last known status is persisted for a settings/diagnostics surface.
+
+      *Still gated on 7.4: the `critical-alerts` entitlement itself. The code path is ready; nothing here should be touched when the grant arrives — only `app.json`.*
 
 - [ ] 7.4 Compliance: Play background-location declaration, `USE_FULL_SCREEN_INTENT`, iOS Critical Alerts entitlement request — **partly satisfied; the rest is not a code task.**
       Already declared: `ACCESS_BACKGROUND_LOCATION` (`app.json:68`) and `USE_FULL_SCREEN_INTENT` (`app.json:56`, via `plugins/withVaultChatCalls.js`).
