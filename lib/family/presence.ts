@@ -13,9 +13,9 @@
 import * as Location from 'expo-location';
 import { emit, getSocket, joinChatRoom, leaveChatRoom } from '../socket';
 import { newLiveKey, sealJSON, openJSON, putLiveKey, getLiveKey, clearLiveKey } from '../liveLocationCrypto';
-import { sendMessage, getMessages, type Message } from '../chatService';
+import { sendMessage, getMessages, decryptFromChat, type Message } from '../chatService';
 import { type Geofence } from './geofence';
-import { getPlaces, getSettings } from './store';
+import { getPlaces, getSettings, getIngested, addIngested } from './store';
 import { readBattery } from './battery';
 import { processFix } from './fixPipeline';
 import { recordSample } from './history';
@@ -24,6 +24,9 @@ import {
   hasBackgroundPermission, isBackgroundRunning,
 } from './background';
 import { nextMotion, shouldPublish, type MotionState } from './cadence';
+import { parseCrossing, ingestAction } from './events';
+import { recordAlert } from './alerts';
+import { notifyFamilyAlert } from './notify';
 import { DEFAULT_FAMILY_SETTINGS, type FamilyPing, type MemberPresence } from './types';
 import { type LatLng } from '../nav/geo';
 
@@ -189,6 +192,52 @@ function lkFromMessage(m: Message): string | null {
   try { const c = JSON.parse(m.content); return (c.live && typeof c.lk === 'string') ? c.lk : null; } catch { return null; }
 }
 
+/**
+ * Turn OTHER members' crossing announcements into local alerts + notifications.
+ *
+ * A crossing is evaluated on the subject's own phone; every other device only
+ * ever saw it as a system message in the thread, so the guardian's inbox stayed
+ * empty (F4.2). This closes that half, reusing the message list the key-capture
+ * pass already fetched — no extra round trip.
+ *
+ * Every message examined is marked ingested, INCLUDING ones that turn out not
+ * to be crossings, so a chatty circle isn't re-decrypted on every refresh.
+ */
+async function ingestCrossings(circleId: string, meId: string, msgs: Message[]): Promise<void> {
+  const already = new Set(await getIngested(circleId));
+  const seen: string[] = [];
+  const now = Date.now();
+
+  for (const m of msgs) {
+    const id = String(m?.id ?? '');
+    if (!id || already.has(id)) continue;
+    seen.push(id);
+
+    if (m.type !== 'system' || !m.content || m.deletedAt) continue;
+    // My own crossings are already in my inbox from fixPipeline, and notifying
+    // someone about their own walk to the shops is noise.
+    if (!m.senderId || String(m.senderId) === String(meId)) continue;
+
+    let text = '';
+    try { text = await decryptFromChat(circleId, m.senderId, m.content, m.id); } catch { continue; }
+    const ev = parseCrossing(text);
+    if (!ev) continue;
+
+    const at = new Date(m.createdAt).getTime();
+    const action = ingestAction(now - at);
+    if (action === 'skip') continue;               // stale backlog — marked seen, dropped
+
+    const alert = await recordAlert({
+      circleId, kind: ev.kind, actorId: String(m.senderId), actorName: ev.actorName,
+      text: ev.text, at: Number.isFinite(at) ? at : now,
+    });
+    // recordAlert returns null when deduped — don't notify for a duplicate.
+    if (alert && action === 'notify') await notifyFamilyAlert(alert, meId);
+  }
+
+  await addIngested(circleId, seen);
+}
+
 /** Subscribe to a circle's live member positions. Captures E2E keys from history + live 'location' messages. */
 export async function subscribeCircle(circleId: string, meId: string, onEvent: (e: PresenceEvent) => void): Promise<() => void> {
   await joinChatRoom(circleId);
@@ -199,6 +248,8 @@ export async function subscribeCircle(circleId: string, meId: string, onEvent: (
     try {
       const msgs = await getMessages(circleId, { limit: 60 });
       for (const m of msgs) { const lk = lkFromMessage(m); if (lk && m.senderId) putLiveKey(circleId, String(m.senderId), lk); }
+      // Same fetch feeds the family-alert ingestion — never fail key capture over it.
+      await ingestCrossings(circleId, meId, msgs).catch(() => {});
     } catch {} finally { refreshing = false; }
   };
   await captureFromHistory();
@@ -228,7 +279,11 @@ export async function subscribeCircle(circleId: string, meId: string, onEvent: (
     clearLiveKey(circleId, String(e.userId));
     onEvent({ userId: String(e.userId), presence: null });
   };
-  const onNewMsg = (e: any) => { if (!disposed && e && String(e.chatId) === String(circleId) && e.type === 'location') captureFromHistory(); };
+  // 'location' re-captures a rotated live key; 'system' is how a crossing arrives.
+  const onNewMsg = (e: any) => {
+    if (disposed || !e || String(e.chatId) !== String(circleId)) return;
+    if (e.type === 'location' || e.type === 'system') captureFromHistory();
+  };
 
   s.on('live_location_update', onUpd);
   s.on('live_location_stop', onStop);

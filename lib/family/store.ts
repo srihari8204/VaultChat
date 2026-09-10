@@ -10,6 +10,12 @@ import { type FamilySettings, DEFAULT_FAMILY_SETTINGS } from './types';
 const K_CIRCLES = 'vc_family_circles_v1';
 const K_SETTINGS = 'vc_family_settings_v1';
 const kPlaces = (cid: string) => `vc_family_places_${cid}`;
+// Message ids whose family event this device has already turned into an alert.
+// Without it, every re-fetch of the circle's recent messages would re-raise the
+// same crossing — recordAlert's 60 s dedupe window is far too short to cover a
+// screen the user reopens an hour later.
+const kIngested = (cid: string) => `vc_family_ingested_${cid}`;
+const MAX_INGESTED = 200;
 
 export interface CircleRef { id: string; name: string }
 
@@ -29,6 +35,21 @@ export async function removeCircle(id: string): Promise<void> {
   const all = await listCircles();
   await AsyncStorage.setItem(K_CIRCLES, JSON.stringify(all.filter((x) => x.id !== id)));
   await AsyncStorage.removeItem(kPlaces(id));
+  await AsyncStorage.removeItem(kIngested(id));
+}
+
+/** Ids of circle messages already ingested as family alerts (newest last). */
+export async function getIngested(circleId: string): Promise<string[]> {
+  return readJSON<string[]>(kIngested(circleId), []);
+}
+
+/** Remember `ids` as ingested, keeping only the newest MAX_INGESTED. */
+export async function addIngested(circleId: string, ids: string[]): Promise<void> {
+  if (!ids.length) return;
+  const have = await getIngested(circleId);
+  const merged = [...have.filter((id) => !ids.includes(id)), ...ids];
+  const next = merged.length > MAX_INGESTED ? merged.slice(merged.length - MAX_INGESTED) : merged;
+  try { await AsyncStorage.setItem(kIngested(circleId), JSON.stringify(next)); } catch {}
 }
 
 export async function getPlaces(circleId: string): Promise<Geofence[]> { return readJSON<Geofence[]>(kPlaces(circleId), []); }
