@@ -57,6 +57,7 @@
     "test:games": "eslint components/games app/games.tsx lib/games && tsx lib/games/history.selftest.ts && tsx lib/games/gamesNative.selftest.ts && tsx lib/games/fairness.selftest.ts && tsx lib/games/invite.selftest.ts && tsx lib/games/liveTables.selftest.ts && tsx lib/games/handGroups.selftest.ts && tsx lib/games/meldHint.selftest.ts && tsx lib/games/rummyTable.selftest.ts && tsx lib/games/ludoGlass.selftest.ts && tsx lib/games/useAddBot.selftest.ts && tsx lib/games/boardFit.selftest.ts && tsx lib/games/voiceMesh.selftest.ts && tsx lib/games/turnWiring.selftest.ts && tsx lib/games/match.selftest.ts && tsx lib/games/leaderboard.selftest.ts",
     "check:sdk": "node scripts/check-sdk-versions.js",
     "test:aurora": "tsx lib/auroraGlass.selftest.ts",
+    "test:glass": "tsx constants/glass.selftest.ts",
     "test:theme": "tsx lib/themeCoverage.selftest.ts",
     "test:layout": "tsx lib/responsiveLayout.selftest.ts",
     "test:history": "tsx lib/messageHistory.selftest.ts",

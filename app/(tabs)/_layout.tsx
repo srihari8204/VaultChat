@@ -112,7 +112,7 @@ export default function TabLayout() {
         tabBarItemStyle: styles.tabItem,
         // Real translucency, and the only blur pass on the screen. Content
         // scrolls underneath it, which is the entire point of the treatment.
-        tabBarBackground: () => <GlassView intensity={48} style={styles.tabBarGlass} />,
+        tabBarBackground: () => <GlassView kind="chrome" highlight style={styles.tabBarGlass} />,
       }}
     >
       <Tabs.Screen name="chats"   options={{ title: 'Chats',   tabBarIcon: ({ focused }) => <TabIcon tab="chats"   label="Chats"   focused={focused} /> }} />

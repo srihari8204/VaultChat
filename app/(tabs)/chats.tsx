@@ -17,7 +17,7 @@ import { Swipeable } from 'react-native-gesture-handler';
 import { Ionicons } from '@expo/vector-icons';
 import { type Palette, brandAlpha } from '../../constants/theme';
 import { useTheme } from '../../lib/theme';
-import { Avatar, AuroraBackground } from '../../components/ui';
+import { Avatar, AuroraBackground, GlassChip } from '../../components/ui';
 import { canSplit } from '../../lib/responsive';
 import { getAccessToken } from '../../lib/api';
 import {
@@ -564,12 +564,13 @@ export default function ChatsScreen() {
             : f.id === 'archive' ? chats.filter(c => c.archived).length : 0;
           const active = folder === f.id;
           return (
-            <TouchableOpacity key={f.id} onPress={() => setFolder(f.id)} activeOpacity={0.7} style={[S.folderChip, active && S.folderChipActive]}>
-              <Text style={[S.folderTxt, active && S.folderTxtActive]}>{f.label}</Text>
-              {count > 0 && f.id !== 'all' && f.id !== 'groups' && (
-                <Text style={[S.folderCount, active && S.folderCountActive]}>{count}</Text>
-              )}
-            </TouchableOpacity>
+            <GlassChip
+              key={f.id}
+              label={f.label}
+              count={f.id === 'all' || f.id === 'groups' ? undefined : count}
+              active={active}
+              onPress={() => setFolder(f.id)}
+            />
           );
         })}
       </ScrollView>
@@ -949,12 +950,6 @@ const makeStyles = (c: Palette) => StyleSheet.create({
 
   folderScroll: { flexGrow: 0, maxHeight: 50 },   // keep the chip row compact, never stretch vertically
   folderRow: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 22, paddingVertical: 8, gap: 8 },
-  folderChip: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 15, paddingVertical: 8, borderRadius: 999, backgroundColor: c.glassSoft, borderWidth: StyleSheet.hairlineWidth, borderColor: c.glassStroke },
-  folderChipActive: { backgroundColor: c.primary, borderColor: c.primary },
-  folderTxt: { color: c.textDim, fontSize: 13, fontWeight: '600' },
-  folderTxtActive: { color: '#FFFFFF' },
-  folderCount: { color: c.textDim, fontSize: 11, fontWeight: '700', backgroundColor: c.glassSoft, paddingHorizontal: 6, borderRadius: 8, overflow: 'hidden', minWidth: 18, textAlign: 'center' },
-  folderCountActive: { color: c.primary, backgroundColor: c.glassSoft },
 
   sectionHeader: { color: c.textFaint, fontSize: 11, fontWeight: '700', letterSpacing: 0.6, textTransform: 'uppercase', paddingHorizontal: 22, paddingTop: 14, paddingBottom: 6, backgroundColor: 'transparent' },
   // Inset = paddingLeft 12 + avatar 50 + gap 12, so the rule starts under the

@@ -2696,7 +2696,7 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
       )}
 
       {/* Header — glass, so the thread scrolls visibly beneath it */}
-      <GlassView intensity={48} bordered={false} style={S.headerGlass}>
+      <GlassView kind="chrome" bordered={false} style={S.headerGlass}>
       <View style={S.header}>
         <TouchableOpacity onPress={() => router.back()} style={S.backBtn} activeOpacity={0.7}>
           <Ionicons name="arrow-back" size={24} color={colors.text} />
@@ -3225,7 +3225,7 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
           </TouchableOpacity>
         </View>
       ) : (
-        <GlassView intensity={48} bordered={false} style={S.composerGlass}>
+        <GlassView kind="chrome" bordered={false} highlight style={S.composerGlass}>
         <View style={S.composer}>
           <View style={S.inputPill}>
             {editingId == null && (

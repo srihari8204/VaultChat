@@ -1,0 +1,444 @@
+<title>Aurora Glass</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Sora:wght@600;700;800&family=Nunito+Sans:wght@400;500;600;700&display=swap">
+<style>
+/* ═══════════ AURORA GLASS — VaultChat UI reference ═══════════
+   One renderer, two palettes. App tokens mirror constants/theme.ts
+   (AuroraDark / AuroraLight); glass recipes mirror constants/glass.ts.
+   The workbench chrome around the phone follows the VIEWER's theme;
+   the phone's own theme is the "Dark / Light" switch. */
+:root{
+  --wb-bg:#EFEBF6; --wb-panel:#FFFFFF; --wb-line:#DCD6E8; --wb-tx:#1B1526; --wb-tx2:#6B6480; --wb-acc:#6D28D9; --wb-soft:#F6F3FB;
+  --fd:"Sora",ui-rounded,"SF Pro Rounded",system-ui,sans-serif;
+  --f:"Nunito Sans",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  --fm:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--wb-bg:#0F0C17;--wb-panel:#171320;--wb-line:#2A2338;--wb-tx:#F2EFF8;--wb-tx2:#9C95B0;--wb-acc:#C9A6F5;--wb-soft:#1C1727;}}
+:root[data-theme="dark"]{--wb-bg:#0F0C17;--wb-panel:#171320;--wb-line:#2A2338;--wb-tx:#F2EFF8;--wb-tx2:#9C95B0;--wb-acc:#C9A6F5;--wb-soft:#1C1727;}
+
+/* ── app palette: AuroraDark ── */
+.app{
+  --bg:#0A0810; --surface-solid:#1B1626; --card:#171320;
+  --glass:rgba(255,255,255,.08); --glass-soft:rgba(255,255,255,.06); --stroke:rgba(255,255,255,.16); --lip:rgba(255,255,255,.28); --hair:rgba(255,255,255,.06);
+  --tx:rgba(255,255,255,.96); --tx2:rgba(255,255,255,.56); --tx3:rgba(255,255,255,.34); --on-acc:#FFFFFF;
+  --acc:#9D6FD0; --acc-l:#C9A6F5; --acc-d:#7C3AED; --acc-on:#C9A6F5;
+  --in:#1B1626; --out:#7C3AED; --meta-in:rgba(255,255,255,.34); --meta-out:rgba(255,255,255,.70);
+  --ok:#22C55E; --bad:#EF4444; --disc:#171320; --bloom:1; --shadow:5,3,13;
+}
+/* ── app palette: AuroraLight ── */
+body[data-app="light"] .app{
+  --bg:#F4F1FA; --surface-solid:#EBE6F5; --card:#FFFFFF;
+  --glass:rgba(255,255,255,.70); --glass-soft:rgba(255,255,255,.55); --stroke:rgba(24,16,40,.10); --lip:rgba(255,255,255,.95); --hair:rgba(24,16,40,.08);
+  --tx:#1B1526; --tx2:rgba(27,21,38,.60); --tx3:rgba(27,21,38,.40);
+  --acc-l:#A78BFA; --acc-d:#6D28D9; --acc-on:#6D28D9;
+  --in:#FFFFFF; --out:#6D28D9; --meta-in:rgba(27,21,38,.45); --meta-out:rgba(255,255,255,.85);
+  --disc:#FFFFFF; --bloom:.42; --shadow:24,16,40;
+}
+
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+body{margin:0;background:var(--wb-bg);color:var(--wb-tx);font-family:var(--f);font-size:14px;line-height:1.5;-webkit-font-smoothing:antialiased}
+button{font:inherit;color:inherit;background:none;border:0;cursor:pointer;padding:0;text-align:left}
+:focus-visible{outline:2px solid var(--wb-acc);outline-offset:2px;border-radius:8px}
+svg.ic{width:22px;height:22px;flex:none;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+
+/* ═══════════ workbench ═══════════ */
+.wb{min-height:100vh;display:grid;grid-template-columns:1fr;padding-block:0 32px;padding-inline:16px}
+@media(min-width:1180px){.wb{grid-template-columns:1fr 300px;column-gap:24px;padding-inline:24px}}
+.bar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:14px 0 10px;grid-column:1/-1}
+.bar h1{font-family:var(--fd);font-size:17px;font-weight:800;letter-spacing:-.02em;margin:0 8px 0 0}
+.bar .sub{font-family:var(--fm);font-size:11px;color:var(--wb-tx2)}
+.bar .sp{margin-left:auto}
+.bar button,.tok button{border:1px solid var(--wb-line);border-radius:999px;padding:5px 12px;font-size:12px;font-family:var(--fm);color:var(--wb-tx2);background:var(--wb-panel)}
+.bar button[aria-pressed="true"]{border-color:var(--wb-acc);color:var(--wb-acc);background:color-mix(in srgb,var(--wb-acc) 12%,transparent)}
+.pit{display:grid;place-items:start center;padding-top:8px}
+.dev{width:390px;max-width:100%;height:844px;max-height:calc(100vh - 90px);min-height:560px;border-radius:46px;padding:9px;background:linear-gradient(160deg,#4b4857,#181620);box-shadow:0 30px 70px rgba(0,0,0,.34)}
+@media(max-width:480px){.dev{border-radius:0;padding:0;height:calc(100vh - 70px);max-height:none;box-shadow:none;background:none}.vp{border-radius:0!important}}
+.vp{width:100%;height:100%;border-radius:38px;overflow:hidden;position:relative;background:var(--bg);color:var(--tx);font-family:var(--f);font-size:15px;line-height:1.4}
+
+/* ═══════════ tokens panel ═══════════ */
+.tok{display:none;background:var(--wb-panel);border:1px solid var(--wb-line);border-radius:18px;padding:18px;align-self:start;position:sticky;top:16px}
+@media(min-width:1180px){.tok{display:block}}
+.tok h2{font-family:var(--fd);font-size:13px;font-weight:700;letter-spacing:-.01em;margin:0 0 4px}
+.tok p{margin:0 0 12px;font-size:12px;color:var(--wb-tx2)}
+.tok table{width:100%;border-collapse:collapse;font-size:11.5px;font-variant-numeric:tabular-nums}
+.tok th{font-family:var(--fm);font-size:9.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--wb-tx2);text-align:left;padding:8px 0 4px;font-weight:600}
+.tok td{padding:5px 0;border-top:1px solid var(--wb-line)}
+.tok td+td{text-align:right;font-family:var(--fm);color:var(--wb-tx2)}
+.tok .sw{display:inline-block;width:12px;height:12px;border-radius:4px;vertical-align:-2px;margin-right:6px;border:1px solid var(--wb-line)}
+.tok .note{font-size:11px;color:var(--wb-tx2);margin-top:12px;line-height:1.45}
+
+/* ═══════════ aurora ground ═══════════ */
+.aurora{position:absolute;inset:0;overflow:hidden;pointer-events:none}
+.bloom{position:absolute;border-radius:50%;opacity:var(--bloom);filter:blur(2px);will-change:transform}
+.bloom.b1{width:420px;height:380px;left:-130px;top:-140px;background:radial-gradient(closest-side,rgba(157,111,208,.55),rgba(157,111,208,.25) 55%,transparent);animation:drift1 26s ease-in-out infinite alternate}
+.bloom.b2{width:360px;height:340px;left:190px;top:60px;background:radial-gradient(closest-side,rgba(124,58,237,.40),rgba(124,58,237,.18) 55%,transparent);animation:drift2 30s ease-in-out infinite alternate}
+.bloom.b3{width:340px;height:300px;left:-110px;top:470px;background:radial-gradient(closest-side,rgba(59,130,246,.22),rgba(59,130,246,.10) 55%,transparent);animation:drift3 24s ease-in-out infinite alternate}
+.bloom.b4{width:260px;height:240px;left:210px;top:620px;background:radial-gradient(closest-side,rgba(192,132,252,.18),rgba(192,132,252,.08) 55%,transparent);animation:drift1 34s ease-in-out infinite alternate-reverse}
+@keyframes drift1{to{transform:translate(40px,30px) scale(1.08)}}
+@keyframes drift2{to{transform:translate(-50px,40px) scale(1.05)}}
+@keyframes drift3{to{transform:translate(30px,-40px)}}
+@media(prefers-reduced-motion:reduce){.bloom{animation:none}}
+body[data-motion="off"] .bloom{animation:none}
+
+/* ═══════════ glass recipes (constants/glass.ts) ═══════════ */
+.glass{position:relative;background:var(--glass);border:1px solid var(--stroke)}
+.glass::before{content:"";position:absolute;top:0;left:var(--lip-inset,28px);right:var(--lip-inset,28px);height:1px;background:linear-gradient(90deg,transparent,var(--lip),transparent);pointer-events:none}
+.g-chrome{-webkit-backdrop-filter:blur(24px) saturate(160%);backdrop-filter:blur(24px) saturate(160%);box-shadow:0 12px 28px rgba(var(--shadow),.55)}
+.g-card{border-radius:24px;--lip-inset:24px;box-shadow:0 8px 16px rgba(var(--shadow),.32)}
+.g-chip{border-radius:999px;--lip-inset:16px;background:var(--glass-soft);box-shadow:0 2px 6px rgba(var(--shadow),.18)}
+.g-sheet{-webkit-backdrop-filter:blur(28px) saturate(160%);backdrop-filter:blur(28px) saturate(160%);box-shadow:0 -6px 40px rgba(var(--shadow),.6)}
+.grad{background:linear-gradient(135deg,var(--acc-l),var(--acc-d));color:var(--on-acc)}
+.glow{box-shadow:0 6px 18px rgba(124,58,237,.6),0 0 40px rgba(124,58,237,.25)}
+
+/* ═══════════ app shell ═══════════ */
+.scr{display:none;position:absolute;inset:0}
+.scr.on{display:block}
+.scr .body{position:absolute;inset:0;overflow-y:auto;overflow-x:hidden;padding:var(--top,218px) 0 132px;scrollbar-width:none}
+.scr .body::-webkit-scrollbar{width:0}
+.chrome{position:absolute;left:0;right:0;top:0;z-index:5;border-radius:0 0 28px 28px;border-top:0}
+.sb{display:flex;justify-content:space-between;align-items:center;height:44px;padding:0 24px;font-weight:700;font-size:15px;font-variant-numeric:tabular-nums}
+.sb .r{display:flex;gap:6px;align-items:center}.sb .r svg{width:16px;height:16px;stroke-width:2.2}
+.hd{display:flex;align-items:center;justify-content:space-between;padding:8px 16px 12px 22px}
+.hd .tg{display:flex;align-items:center;gap:10px}
+.hd .ttl{font-family:var(--fd);font-size:24px;font-weight:800;letter-spacing:-.02em;line-height:30px}
+.e2ee{display:inline-flex;align-items:center;gap:4px;padding:3px 8px;border-radius:999px;background:var(--glass-soft);border:1px solid var(--stroke);font-size:11px;font-weight:600;color:var(--acc-on)}
+.e2ee svg{width:11px;height:11px;stroke-width:2.4}
+.acts{display:flex;gap:8px}
+.ib{width:40px;height:40px;border-radius:50%;display:grid;place-items:center;background:var(--glass-soft);border:1px solid var(--stroke);color:var(--tx);transition:transform .15s}
+.ib:active{transform:scale(.94)}.ib svg{width:20px;height:20px}
+.search{display:flex;align-items:center;gap:10px;margin:2px 16px 0;height:44px;padding:0 14px;border-radius:22px;background:var(--glass-soft);border:1px solid var(--stroke);color:var(--tx3);font-size:15px}
+.search svg{width:18px;height:18px;opacity:.6}
+.chips{display:flex;gap:8px;padding:12px 16px 14px;overflow-x:auto;scrollbar-width:none}
+.chips::-webkit-scrollbar{display:none}
+.chip{flex:none;display:inline-flex;align-items:center;gap:6px;padding:8px 15px;border-radius:999px;background:var(--glass-soft);border:1px solid var(--stroke);font-size:14px;font-weight:500;color:var(--tx2);white-space:nowrap;transition:transform .15s}
+.chip:active{transform:scale(.96)}
+.chip.on{background:linear-gradient(135deg,var(--acc-l),var(--acc-d));color:var(--on-acc);border-color:transparent;box-shadow:0 6px 18px rgba(124,58,237,.45)}
+.chip .n{font-size:11px;font-weight:600;padding:1px 6px;border-radius:8px;background:rgba(255,255,255,.08)}
+.chip.on .n{background:rgba(255,255,255,.22)}
+.eyebrow{font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--tx3);padding:14px 22px 6px}
+
+/* rows — flat, no glass (the rule) */
+.row{display:flex;align-items:center;gap:12px;min-height:72px;padding:0 12px;position:relative;width:100%;color:inherit}
+.row::after{content:"";position:absolute;left:74px;right:12px;bottom:0;height:1px;background:var(--hair)}
+.row:active{background:var(--glass-soft)}
+.av{position:relative;width:50px;height:50px;border-radius:50%;flex:none;padding:2px;background:linear-gradient(135deg,var(--r0),var(--r1))}
+.av i{display:grid;place-items:center;width:100%;height:100%;border-radius:50%;background:var(--disc);font-family:var(--fd);font-weight:700;font-size:17px;font-style:normal;color:var(--tx)}
+.av b{position:absolute;right:0;bottom:0;width:14px;height:14px;border-radius:50%;background:var(--ok);border:2.5px solid var(--bg)}
+.rb{flex:1;min-width:0;display:grid;gap:3px}
+.rt,.rbot{display:flex;align-items:center;gap:8px;min-width:0}
+.rb>*{min-width:0}
+.nm{flex:1;min-width:0;font-family:var(--fd);font-size:17px;font-weight:700;letter-spacing:-.01em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tm{font-size:12.5px;color:var(--tx3);flex:none;font-variant-numeric:tabular-nums}.tm.u{color:var(--acc-on);font-weight:600}
+.pv{flex:1;min-width:0;font-size:14px;color:var(--tx2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.pv.typing{color:var(--acc-on)}
+.badge{flex:none;min-width:22px;height:22px;padding:0 7px;border-radius:11px;background:var(--acc);color:#fff;font-size:11px;font-weight:600;display:grid;place-items:center}
+
+/* fab + tab bar */
+.fab{position:absolute;right:22px;bottom:130px;width:60px;height:60px;border-radius:50%;display:grid;place-items:center;border:1px solid var(--stroke);box-shadow:0 10px 24px rgba(124,58,237,.55);z-index:6;transition:transform .15s}
+.fab:active{transform:scale(.94)}.fab svg{width:24px;height:24px;stroke-width:2}
+.tabbar{position:absolute;left:16px;right:16px;bottom:46px;height:66px;border-radius:33px;display:grid;grid-template-columns:repeat(5,1fr);z-index:7;--lip-inset:30px}
+.tab{display:grid;justify-items:center;align-content:center;gap:3px;color:var(--tx3);font-size:11px;font-weight:600;position:relative;height:66px}
+.tab svg{transition:transform .25s cubic-bezier(.34,1.56,.64,1),color .2s}
+.tab.on{color:var(--acc-on)}.tab.on svg{transform:translateY(-1px) scale(1.09);stroke-width:2.1}
+.tab .dot{position:absolute;top:8px;left:calc(50% + 4px);min-width:18px;height:18px;padding:0 5px;border-radius:9px;background:var(--bad);color:#fff;font-size:11px;display:grid;place-items:center}
+.tab.center .disc{width:54px;height:54px;border-radius:50%;display:grid;place-items:center;margin-top:-46px;border:1px solid var(--stroke)}
+.tab.center .disc svg{width:24px;height:24px;stroke-width:2;color:#fff;transform:none}
+.home{position:absolute;left:50%;bottom:8px;width:134px;height:5px;margin-left:-67px;border-radius:3px;background:var(--tx);opacity:.9;z-index:8}
+
+/* conversation */
+.msgs{display:flex;flex-direction:column;gap:6px;padding:0 16px}
+.date{align-self:center;padding:5px 12px;border-radius:999px;font-size:11px;font-weight:600;color:var(--tx2);--lip-inset:12px}
+.bub{max-width:260px;padding:8px 12px 6px;border-radius:16px;position:relative;animation:pop .28s cubic-bezier(.34,1.4,.64,1) both}
+.bub.in{align-self:flex-start;background:var(--in);border:1px solid var(--stroke);border-bottom-left-radius:4px;color:var(--tx)}
+.bub.out{align-self:flex-end;background:var(--out);color:#fff;border-bottom-right-radius:4px}
+.bub.gap{margin-top:4px}
+.bub .m{font-size:15px;line-height:21px}
+.bub .meta{display:flex;justify-content:flex-end;align-items:center;gap:4px;font-size:11px;font-weight:600;margin-top:2px;color:var(--meta-in)}
+.bub.out .meta{color:var(--meta-out)}.bub .meta svg{width:14px;height:14px;stroke-width:2.2}
+.bub .photo{width:220px;height:100px;border-radius:12px;background:linear-gradient(180deg,#FCD34D,#EC4899 50%,#4C1D95);position:relative;margin:-2px 0 6px}
+.bub .photo::after{content:"";position:absolute;width:40px;height:40px;border-radius:50%;background:rgba(255,247,237,.9);right:28px;top:22px}
+.voice{display:flex;align-items:center;gap:10px;min-width:220px}
+.voice .play{width:36px;height:36px;border-radius:50%;background:rgba(255,255,255,.22);display:grid;place-items:center;flex:none}
+.voice .play svg{width:14px;height:14px;fill:#fff;stroke:none}
+.wave{display:flex;align-items:center;gap:3px;height:28px}.wave i{width:3px;border-radius:2px;background:rgba(255,255,255,.95)}.wave i:nth-child(n+15){opacity:.45}
+.react{align-self:flex-start;margin:-14px 0 0 8px;padding:3px 8px;border-radius:12px;font-size:11px;font-weight:600;--lip-inset:10px;z-index:1}
+.typing{display:flex;gap:5px;padding:14px 13px}.typing i{width:8px;height:8px;border-radius:50%;background:var(--tx);animation:blink 1.2s infinite}
+.typing i:nth-child(2){animation-delay:.2s}.typing i:nth-child(3){animation-delay:.4s}
+@keyframes blink{0%,80%,100%{opacity:.35}40%{opacity:1}}
+@keyframes pop{from{opacity:0;transform:translateY(8px) scale(.97)}}
+@media(prefers-reduced-motion:reduce){.bub,.typing i{animation:none}.tab svg{transition:none}}
+body[data-motion="off"] .bub,body[data-motion="off"] .typing i{animation:none}
+.composer{position:absolute;left:12px;right:12px;bottom:56px;height:56px;border-radius:28px;display:flex;align-items:center;gap:8px;padding:8px;z-index:7;--lip-inset:28px}
+.composer .ib{flex:none}
+.composer .field{flex:1;display:flex;align-items:center;height:40px;padding:0 10px 0 14px;border-radius:20px;background:var(--glass-soft);color:var(--tx3);font-size:15px}
+.composer .field svg{margin-left:auto;width:20px;height:20px;opacity:.5}
+.composer .send{width:40px;height:40px;border-radius:50%;display:grid;place-items:center;flex:none}
+.composer .send svg{width:18px;height:18px;stroke-width:2;color:#fff}
+.chd{display:flex;align-items:center;gap:10px;padding:6px 12px 10px 8px}
+.chd .av{width:38px;height:38px}.chd .av i{font-size:15px}
+.chd .who{flex:1;min-width:0}.chd .who .nm{font-size:17px}
+.chd .who .st{display:flex;align-items:center;gap:4px;font-size:12.5px;color:var(--tx2)}
+.chd .who .st svg{width:11px;height:11px;color:var(--ok);stroke-width:2.4}
+.back{width:40px;height:40px;display:grid;place-items:center;color:var(--tx)}.back svg{stroke-width:2;width:24px;height:24px}
+
+/* calls */
+.seg{display:flex;margin:6px 16px 14px;height:40px;padding:4px;border-radius:20px;--lip-inset:20px}
+.seg button{flex:1;border-radius:16px;font-weight:600;font-size:15px;color:var(--tx2);text-align:center}
+.seg button[aria-selected="true"]{background:linear-gradient(135deg,var(--acc-l),var(--acc-d));color:var(--on-acc);box-shadow:0 6px 18px rgba(124,58,237,.45)}
+.dir{display:inline-flex;align-items:center;gap:4px;font-size:12.5px;color:var(--tx2)}
+.dir svg{width:14px;height:14px;stroke-width:2.6}.dir.out svg,.dir.in svg{color:var(--ok)}.dir.missed svg{color:var(--bad)}
+.nm.missed{color:var(--bad)}
+
+/* apps */
+.grid{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;padding:4px 16px 0}
+.tile{display:grid;justify-items:center;gap:8px;padding:18px 8px 16px;color:var(--tx);font-size:14px;font-weight:500;transition:transform .15s}
+.tile:active{transform:scale(.97)}
+.tile .d{width:44px;height:44px;border-radius:14px;display:grid;place-items:center;color:#fff}.tile .d svg{width:22px;height:22px;stroke-width:2}
+.list{margin:0 16px}
+.lr{display:flex;align-items:center;gap:12px;min-height:60px;padding:0 14px;position:relative}
+.lr+.lr::before{content:"";position:absolute;left:62px;right:14px;top:0;height:1px;background:var(--hair)}
+.lr .d{width:36px;height:36px;border-radius:11px;display:grid;place-items:center;color:#fff;flex:none}.lr .d svg{width:18px;height:18px;stroke-width:2}
+.lr .t{flex:1;min-width:0}.lr .t b{display:block;font-weight:600;font-size:15px}.lr .t small{display:block;font-size:12.5px;color:var(--tx2)}
+.lr .chev{width:18px;height:18px;opacity:.4;stroke-width:2}
+.lr .tog{width:44px;height:26px;border-radius:13px;position:relative;flex:none}
+.lr .tog::after{content:"";position:absolute;width:20px;height:20px;border-radius:50%;background:#fff;top:3px;right:3px}
+
+/* profile */
+.hero{display:grid;justify-items:center;gap:8px;padding:12px 16px 0}
+.hero .av{width:96px;height:96px;padding:4px}.hero .av i{font-size:24px;font-family:var(--fd);font-weight:800}
+.hero .name{font-family:var(--fd);font-size:24px;font-weight:800;letter-spacing:-.02em;margin-top:6px}
+.hero .vid{display:inline-flex;align-items:center;gap:6px;padding:5px 12px;border-radius:999px;background:var(--glass-soft);border:1px solid var(--stroke);font-size:12.5px;color:var(--tx2)}
+.hero .vid svg{width:13px;height:13px;color:var(--ok);stroke-width:2.4}
+.score{display:flex;align-items:center;gap:16px;margin:18px 16px 0;padding:18px;color:var(--tx)}
+.score svg.ring{width:68px;height:68px;flex:none}
+.score .h{font-family:var(--fd);font-size:17px;font-weight:700}
+.score .s{font-size:12.5px;color:var(--tx2);margin-top:4px}
+.score .chev{margin-left:auto;width:18px;height:18px;opacity:.4;stroke-width:2}
+</style>
+
+<div class="wb">
+  <div class="bar">
+    <h1>Aurora Glass</h1><span class="sub">VaultChat · design/aurora-glass · mirrors constants/theme.ts + constants/glass.ts</span>
+    <span class="sp"></span>
+    <button id="btn-dark" aria-pressed="true" data-app="dark">App: dark</button>
+    <button id="btn-light" aria-pressed="false" data-app="light">App: light</button>
+    <button id="btn-motion" aria-pressed="false">Reduce motion</button>
+  </div>
+
+  <div class="pit">
+    <div class="dev"><div class="vp app" id="app">
+      <div class="aurora" aria-hidden="true"><div class="bloom b1"></div><div class="bloom b2"></div><div class="bloom b3"></div><div class="bloom b4"></div></div>
+
+      <!-- ─── Chats ─── -->
+      <section class="scr on" id="s-chats" style="--top:220px">
+        <div class="chrome glass g-chrome">
+          <div class="sb"><span>9:41</span><span class="r"><svg class="ic" viewBox="0 0 24 24"><path d="M7 20v-4M12 20v-8M17 20V8M22 4v16"/></svg><svg class="ic" viewBox="0 0 24 24"><path d="M5 12.55a11 11 0 0 1 14.08 0M1.42 9a16 16 0 0 1 21.16 0M8.53 16.11a6 6 0 0 1 6.95 0M12 20h.01"/></svg><svg class="ic" viewBox="0 0 24 24"><rect x="1" y="6" width="18" height="12" rx="2"/><path d="M23 13v-2"/><rect x="3" y="8" width="12" height="8" rx="1" fill="currentColor" stroke="none"/></svg></span></div>
+          <div class="hd"><div class="tg"><span class="ttl">Chats</span><span class="e2ee"><svg class="ic" viewBox="0 0 24 24"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>E2EE</span></div>
+            <div class="acts"><button class="ib" aria-label="Camera"><svg class="ic" viewBox="0 0 24 24"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg></button><button class="ib" aria-label="Search"><svg class="ic" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.35-4.35"/></svg></button><button class="ib" aria-label="Alerts"><svg class="ic" viewBox="0 0 24 24"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9M13.73 21a2 2 0 0 1-3.46 0"/></svg></button></div></div>
+          <div class="search"><svg class="ic" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.35-4.35"/></svg>Search chats, people, files</div>
+          <div class="chips" id="chips"></div>
+        </div>
+        <div class="body" id="chat-list"></div>
+        <button class="fab grad" aria-label="New chat"><svg class="ic" viewBox="0 0 24 24"><path d="M12 20h9M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg></button>
+      </section>
+
+      <!-- ─── Conversation ─── -->
+      <section class="scr" id="s-chat" style="--top:128px">
+        <div class="chrome glass g-chrome" style="border-radius:0 0 24px 24px">
+          <div class="sb"><span>9:41</span><span class="r"><svg class="ic" viewBox="0 0 24 24"><path d="M7 20v-4M12 20v-8M17 20V8M22 4v16"/></svg><svg class="ic" viewBox="0 0 24 24"><rect x="1" y="6" width="18" height="12" rx="2"/><path d="M23 13v-2"/><rect x="3" y="8" width="12" height="8" rx="1" fill="currentColor" stroke="none"/></svg></span></div>
+          <div class="chd"><button class="back" data-go="chats" aria-label="Back"><svg class="ic" viewBox="0 0 24 24"><path d="M15 18l-6-6 6-6"/></svg></button>
+            <span class="av" style="--r0:#7DD3FC;--r1:#0EA5E9"><i>A</i></span>
+            <div class="who"><div class="nm">Anitha Reddy</div><div class="st"><svg class="ic" viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>End-to-end encrypted · online</div></div>
+            <div class="acts"><button class="ib" aria-label="Video call"><svg class="ic" viewBox="0 0 24 24"><path d="M23 7l-7 5 7 5V7z"/><rect x="1" y="5" width="15" height="14" rx="2"/></svg></button><button class="ib" aria-label="Voice call"><svg class="ic" viewBox="0 0 24 24"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"/></svg></button></div></div>
+        </div>
+        <div class="body"><div class="msgs" id="msgs"></div></div>
+        <div class="composer glass g-chrome"><button class="ib" aria-label="Attach"><svg class="ic" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg></button><div class="field">Message<svg class="ic" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M8 14s1.5 2 4 2 4-2 4-2M9 9h.01M15 9h.01"/></svg></div><button class="ib" aria-label="Voice note"><svg class="ic" viewBox="0 0 24 24"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3zM19 10v2a7 7 0 0 1-14 0v-2M12 19v4"/></svg></button><button class="send grad glow" aria-label="Send"><svg class="ic" viewBox="0 0 24 24"><path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z"/></svg></button></div>
+      </section>
+
+      <!-- ─── Status ─── -->
+      <section class="scr" id="s-status" style="--top:120px">
+        <div class="chrome glass g-chrome"><div class="sb"><span>9:41</span><span class="r"><svg class="ic" viewBox="0 0 24 24"><path d="M7 20v-4M12 20v-8M17 20V8M22 4v16"/></svg><svg class="ic" viewBox="0 0 24 24"><rect x="1" y="6" width="18" height="12" rx="2"/><path d="M23 13v-2"/><rect x="3" y="8" width="12" height="8" rx="1" fill="currentColor" stroke="none"/></svg></span></div>
+          <div class="hd"><div class="tg"><span class="ttl">Status</span><span class="e2ee"><svg class="ic" viewBox="0 0 24 24"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>E2EE</span></div><div class="acts"><button class="ib" aria-label="Camera"><svg class="ic" viewBox="0 0 24 24"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg></button></div></div></div>
+        <div class="body"><div class="eyebrow">My status</div><div class="list glass g-card" id="my-status"></div><div class="eyebrow">Recent updates</div><div id="status-list"></div></div>
+      </section>
+
+      <!-- ─── Apps ─── -->
+      <section class="scr" id="s-apps" style="--top:124px">
+        <div class="chrome glass g-chrome"><div class="sb"><span>9:41</span><span class="r"><svg class="ic" viewBox="0 0 24 24"><path d="M7 20v-4M12 20v-8M17 20V8M22 4v16"/></svg><svg class="ic" viewBox="0 0 24 24"><rect x="1" y="6" width="18" height="12" rx="2"/><path d="M23 13v-2"/><rect x="3" y="8" width="12" height="8" rx="1" fill="currentColor" stroke="none"/></svg></span></div>
+          <div class="hd"><div class="tg"><span class="ttl">Apps</span><span class="e2ee"><svg class="ic" viewBox="0 0 24 24"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>E2EE</span></div><div class="acts"><button class="ib" aria-label="Search"><svg class="ic" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.35-4.35"/></svg></button></div></div></div>
+        <div class="body"><div class="grid" id="tiles"></div><div class="eyebrow" style="padding-top:22px">Recently used</div><div class="list glass g-card" id="recent"></div></div>
+      </section>
+
+      <!-- ─── Calls ─── -->
+      <section class="scr" id="s-calls" style="--top:176px">
+        <div class="chrome glass g-chrome"><div class="sb"><span>9:41</span><span class="r"><svg class="ic" viewBox="0 0 24 24"><path d="M7 20v-4M12 20v-8M17 20V8M22 4v16"/></svg><svg class="ic" viewBox="0 0 24 24"><rect x="1" y="6" width="18" height="12" rx="2"/><path d="M23 13v-2"/><rect x="3" y="8" width="12" height="8" rx="1" fill="currentColor" stroke="none"/></svg></span></div>
+          <div class="hd"><div class="tg"><span class="ttl">Calls</span><span class="e2ee"><svg class="ic" viewBox="0 0 24 24"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>E2EE</span></div><div class="acts"><button class="ib" aria-label="Search"><svg class="ic" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.35-4.35"/></svg></button></div></div>
+          <div class="seg glass g-chip" role="tablist"><button role="tab" aria-selected="true" id="seg-all">All</button><button role="tab" aria-selected="false" id="seg-missed">Missed</button></div></div>
+        <div class="body"><div class="eyebrow">Recent</div><div id="call-list"></div></div>
+        <button class="fab grad" aria-label="New secure call"><svg class="ic" viewBox="0 0 24 24"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"/></svg></button>
+      </section>
+
+      <!-- ─── Profile ─── -->
+      <section class="scr" id="s-profile" style="--top:112px">
+        <div class="chrome glass g-chrome"><div class="sb"><span>9:41</span><span class="r"><svg class="ic" viewBox="0 0 24 24"><path d="M7 20v-4M12 20v-8M17 20V8M22 4v16"/></svg><svg class="ic" viewBox="0 0 24 24"><rect x="1" y="6" width="18" height="12" rx="2"/><path d="M23 13v-2"/><rect x="3" y="8" width="12" height="8" rx="1" fill="currentColor" stroke="none"/></svg></span></div>
+          <div class="hd"><div class="tg"><span class="ttl">Profile</span></div><div class="acts"><button class="ib" aria-label="Edit"><svg class="ic" viewBox="0 0 24 24"><path d="M12 20h9M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg></button></div></div></div>
+        <div class="body">
+          <div class="hero"><span class="av glow" style="--r0:#C9A6F5;--r1:#7C3AED"><i>S</i></span><div class="name">Srihari Balla</div><span class="vid"><svg class="ic" viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>@srihari · VaultID verified</span></div>
+          <div class="score glass g-card">
+            <svg class="ring" viewBox="0 0 68 68" aria-label="Security score 92 of 100"><defs><linearGradient id="rg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#C9A6F5"/><stop offset="1" stop-color="#7C3AED"/></linearGradient></defs><circle cx="34" cy="34" r="29" fill="none" stroke="currentColor" stroke-opacity=".12" stroke-width="6"/><circle cx="34" cy="34" r="29" fill="none" stroke="url(#rg)" stroke-width="6" stroke-linecap="round" stroke-dasharray="182.2" stroke-dashoffset="14.6" transform="rotate(-90 34 34)"/><text x="34" y="40" text-anchor="middle" font-family="Sora,sans-serif" font-weight="700" font-size="20" fill="currentColor">92</text></svg>
+            <div><div class="h">Security score</div><div class="s">Face lock · encrypted backup · 2 devices verified</div></div>
+            <svg class="ic chev" viewBox="0 0 24 24"><path d="M9 18l6-6-6-6"/></svg>
+          </div>
+          <div id="groups"></div>
+        </div>
+      </section>
+
+      <nav class="tabbar glass g-chrome" id="tabbar" aria-label="Main"></nav>
+      <div class="home" aria-hidden="true"></div>
+    </div></div>
+  </div>
+
+  <aside class="tok" aria-label="Design tokens">
+    <h2>Glass recipes</h2><p>constants/glass.ts ↔ Figma effect styles</p>
+    <table><tr><th>class</th><th>blur</th><th>lip</th><th>radius</th></tr>
+      <tr><td>chrome</td><td>48 · 24px</td><td>.28</td><td>30</td></tr>
+      <tr><td>card</td><td>off</td><td>.22</td><td>24</td></tr>
+      <tr><td>chip</td><td>off</td><td>.18</td><td>pill</td></tr>
+      <tr><td>sheet</td><td>56 · 28px</td><td>.30</td><td>28</td></tr></table>
+    <h2 style="margin-top:16px">Palette · <span id="tok-mode">dark</span></h2>
+    <table id="tok-colors"><tr><th>token</th><th>value</th></tr></table>
+    <div class="note">Blur is spent only on floating chrome: tab bar, headers, composer, sheets. Rows and cards are flat translucent surfaces with a hairline and a lip, so the list never pays a backdrop pass per row.</div>
+  </aside>
+</div>
+
+<script>
+(function(){
+  const I = {
+    chats:'<path d="M21 11.5a8.4 8.4 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.4 8.4 0 0 1-3.8-.9L3 21l1.9-5.7a8.4 8.4 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.4 8.4 0 0 1 3.8-.9h.5a8.5 8.5 0 0 1 8 8v.5z"/>',
+    status:'<circle cx="12" cy="12" r="10"/><path d="M14.31 8l5.74 9.94M9.69 8h11.48M7.38 12l5.74-9.94M9.69 16L3.95 6.06M14.31 16H2.83M16.62 12l-5.74 9.94"/>',
+    grid:'<rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/>',
+    calls:'<path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"/>',
+    profile:'<path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/>',
+    video:'<path d="M23 7l-7 5 7 5V7z"/><rect x="1" y="5" width="15" height="14" rx="2"/>',
+    out:'<path d="M7 17L17 7M7 7h10v10"/>', in:'<path d="M17 7L7 17M17 17H7V7"/>',
+    check:'<path d="M18 7L8 17l-4-4M22 7L12 17"/>', chev:'<path d="M9 18l6-6-6-6"/>', play:'<path d="M6 3l14 9-14 9V3z"/>',
+    lock:'<rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>',
+    file:'<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8zM14 2v6h6"/>',
+    notes:'<path d="M14 3v4a1 1 0 0 0 1 1h4M17 21H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h7l5 5v11a2 2 0 0 1-2 2zM9 13h6M9 17h6"/>',
+    wallet:'<rect x="2" y="6" width="20" height="14" rx="3"/><path d="M2 10h20"/><circle cx="17" cy="15" r="1"/>',
+    users:'<path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/>',
+    game:'<path d="M6 12h4M8 10v4M15 13h.01M18 11h.01"/><rect x="2" y="6" width="20" height="12" rx="6"/>',
+    edit:'<path d="M12 20h9M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/>',
+    mega:'<path d="M3 11l18-5v12L3 14v-3zM11.6 16.8a3 3 0 1 1-5.8-1.6"/>',
+    map:'<path d="M1 6v16l7-4 8 4 7-4V2l-7 4-8-4-7 4zM8 2v16M16 6v16"/>',
+    key:'<path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"/>',
+    shield:'<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>',
+    cloud:'<path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"/>', moon:'<path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>',
+    image:'<rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/>',
+    plus:'<path d="M12 5v14M5 12h14"/>',
+  };
+  const ic = (n, cls='ic') => `<svg class="${cls}" viewBox="0 0 24 24" aria-hidden="true">${I[n]}</svg>`;
+  const RINGS = [['#C9A6F5','#7C3AED'],['#7DD3FC','#0EA5E9'],['#C4B5FD','#6D28D9'],['#FCD34D','#B45309'],['#FDA4AF','#B91C1C'],['#F9A8D4','#9D174D'],['#93C5FD','#1E40AF'],['#5EEAD4','#0F766E'],['#FDBA74','#C2410C'],['#A5B4FC','#4338CA']];
+  const ring = (seed) => { let h = 0; for (const ch of seed) h = (h * 31 + ch.charCodeAt(0)) >>> 0; return RINGS[h % RINGS.length]; };
+  const av = (name, online, cls='') => { const [a,b] = ring(name); return `<span class="av ${cls}" style="--r0:${a};--r1:${b}"><i>${name[0]}</i>${online?'<b></b>':''}</span>`; };
+  const esc = (s) => s.replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+
+  // ── data (example content) ──
+  const CHATS = [
+    ['PINNED'],
+    ['Anitha Reddy','Sent the safety number — verify when you\'re free','21:14',3,true],
+    ['Family Circle','Kiran: Reached home 🏠','20:52',0,false],
+    ['ALL CHATS'],
+    ['Kiran Kumar','🎤 Voice note · 0:42','19:30',1,true],
+    ['Design Guild','Priya: Aurora glass is live on hetzner ✨','18:05',12,false],
+    ['Ravi Teja','📷 Photo','Yesterday',0,false],
+    ['Vault Support','Your encrypted backup completed','Yesterday',0,false],
+    ['Meera','typing…','Mon',0,true],
+    ['Shop Book','Invoice #1042 paid · ₹4,800','Sun',0,false],
+    ['Priya Sharma','Can you resend the VaultBeam link?','Sun',0,false],
+    ['Ops · Hetzner','Deploy 1.2.7 green · 3 nodes healthy','Sat',0,false],
+  ];
+  const MSGS = [
+    ['date','Today'],
+    ['in','Hey! Did the safety number match on your side?','21:12'],
+    ['out','Yes — verified. We\'re fully end-to-end encrypted now 🔐','21:14'],
+    ['photo','Sunset from the terrace 🌇','21:15'],
+    ['out','Beautiful. Sending the docs over VaultBeam ⚡','21:16'],
+    ['voice','0:42','21:18'],
+    ['in','Got them. Calling you in 5?','21:20','👍 2'],
+    ['typing'],
+  ];
+  const CALLS = [
+    ['Anitha Reddy','out','Today, 20:41 · 12 min','video'],['Kiran Kumar','in','Today, 18:02 · 4 min','calls'],['Design Guild','missed','Today, 16:30 · group','calls'],
+    ['Ravi Teja','in','Yesterday, 22:15 · 26 min','video'],['Meera','out','Yesterday, 09:48 · 1 min','calls'],['Vault Support','missed','Mon, 11:20','calls'],['Family Circle','out','Sun, 19:05 · 41 min','video'],
+  ];
+  const TILES = [['lock','Vault'],['file','Files'],['notes','Notes'],['wallet','Finance'],['users','Family'],['game','Games'],['edit','Docs'],['mega','Broadcast'],['map','Map']];
+  const RECENT = [['wallet','Shop Book','Invoice #1042 paid · 2 min ago'],['users','Family Circle','Kiran reached home · 1 h ago'],['game','Rummy table','You won 240 pts · 3 h ago']];
+  const GROUPS = [
+    ['Account',[['profile','Profile & status'],['key','VaultID & devices']]],
+    ['Privacy & security',[['lock','App lock & biometrics'],['shield','Safety numbers'],['users','Decoy chats']]],
+    ['Backups',[['cloud','Encrypted cloud backup'],['file','Export chats']]],
+    ['Appearance',[['moon','Theme · Aurora',true],['image','Chat wallpaper']]],
+  ];
+  const STATUS = [['Anitha Reddy','Just now',true],['Design Guild','12 min ago',false],['Ravi Teja','1 h ago',false],['Meera','3 h ago',false],['Priya Sharma','Yesterday',false]];
+
+  // ── render ──
+  const $ = (s) => document.querySelector(s);
+  $('#chips').innerHTML = [['All',0,true],['Unread',4],['Groups',0],['Pinned',2],['Archive',0]].map(([l,n,on]) =>
+    `<button class="chip${on?' on':''}" aria-pressed="${!!on}">${l}${n?`<span class="n">${n}</span>`:''}</button>`).join('');
+  $('#chat-list').innerHTML = CHATS.map(r => r.length === 1 ? `<div class="eyebrow">${r[0]}</div>` :
+    `<button class="row" data-go="chat" aria-label="${esc(r[0])}, ${esc(r[1])}, ${r[2]}${r[3]?', '+r[3]+' unread':''}">${av(r[0], r[4])}<span class="rb"><span class="rt"><span class="nm">${esc(r[0])}</span><span class="tm${r[3]?' u':''}">${r[2]}</span></span><span class="rbot"><span class="pv${r[1]==='typing…'?' typing':''}">${esc(r[1])}</span>${r[3]?`<span class="badge">${r[3]}</span>`:''}</span></span></button>`).join('');
+  const wave = [6,10,16,22,14,8,18,24,20,12,6,14,22,18,10,16,24,14,8,12,18,10,6,8].map(h => `<i style="height:${h}px"></i>`).join('');
+  $('#msgs').innerHTML = MSGS.map((m, i) => {
+    const gap = i > 0 && MSGS[i-1][0] !== m[0] ? ' gap' : '';
+    if (m[0] === 'date') return `<div class="date glass g-chip">${m[1]}</div>`;
+    if (m[0] === 'typing') return `<div class="bub in typing gap" aria-label="Anitha is typing"><i></i><i></i><i></i></div>`;
+    if (m[0] === 'photo') return `<div class="bub in${gap}"><div class="photo" role="img" aria-label="Sunset photo"></div><div class="m">${esc(m[1])}</div><div class="meta">${m[2]}</div></div>`;
+    if (m[0] === 'voice') return `<div class="bub out${gap}"><div class="voice"><span class="play">${ic('play')}</span><span class="wave">${wave}</span></div><div class="meta" style="justify-content:space-between;padding-left:46px">${m[1]}<span>${m[2]} ${ic('check')}</span></div></div>`;
+    const react = m[3] ? `<div class="react glass g-chip">${m[3]}</div>` : '';
+    return `<div class="bub ${m[0]}${gap}"><div class="m">${esc(m[1])}</div><div class="meta">${m[2]}${m[0]==='out'?ic('check'):''}</div></div>${react}`;
+  }).join('');
+  const renderCalls = (missedOnly) => { $('#call-list').innerHTML = CALLS.filter(c => !missedOnly || c[1] === 'missed').map(c =>
+    `<button class="row" data-go="call">${av(c[0], false)}<span class="rb"><span class="rt"><span class="nm${c[1]==='missed'?' missed':''}">${esc(c[0])}</span></span><span class="rbot"><span class="dir ${c[1]}">${ic(c[1]==='out'?'out':'in')}${c[1][0].toUpperCase()+c[1].slice(1)} · ${c[2]}</span></span></span><span class="ib" aria-hidden="true">${ic(c[3])}</span></button>`).join(''); };
+  renderCalls(false);
+  $('#seg-all').onclick = () => { $('#seg-all').setAttribute('aria-selected','true'); $('#seg-missed').setAttribute('aria-selected','false'); renderCalls(false); };
+  $('#seg-missed').onclick = () => { $('#seg-missed').setAttribute('aria-selected','true'); $('#seg-all').setAttribute('aria-selected','false'); renderCalls(true); };
+  $('#tiles').innerHTML = TILES.map(([i,l]) => { const [a,b] = ring(l); return `<button class="tile glass g-card"><span class="d" style="background:linear-gradient(135deg,${a},${b})">${ic(i)}</span>${l}</button>`; }).join('');
+  $('#recent').innerHTML = RECENT.map(([i,t,s]) => { const [a,b] = ring(t); return `<button class="lr" style="width:100%"><span class="d" style="background:linear-gradient(135deg,${a},${b})">${ic(i)}</span><span class="t"><b>${t}</b><small>${s}</small></span>${ic('chev','ic chev')}</button>`; }).join('');
+  $('#groups').innerHTML = GROUPS.map(([g, rows]) => `<div class="eyebrow" style="padding-top:18px">${g}</div><div class="list glass g-card">${rows.map(([i,l,tog]) => { const [a,b] = ring(l); return `<button class="lr" style="width:100%"><span class="d" style="background:linear-gradient(135deg,${a},${b})">${ic(i)}</span><span class="t"><b>${l}</b></span>${tog?'<span class="tog grad" role="switch" aria-checked="true" aria-label="Aurora theme"></span>':ic('chev','ic chev')}</button>`; }).join('')}</div>`).join('');
+  $('#my-status').innerHTML = `<button class="lr" style="width:100%">${av('Srihari Balla', false)}<span class="t"><b>My status</b><small>Tap to add a status update</small></span><span class="ib grad" aria-hidden="true">${ic('plus')}</span></button>`;
+  $('#status-list').innerHTML = STATUS.map(([n,t,seen]) => `<button class="row">${av(n, false)}<span class="rb"><span class="rt"><span class="nm">${n}</span></span><span class="rbot"><span class="pv">${t}</span></span></span></button>`).join('');
+
+  // ── tab bar + navigation ──
+  const TABS = [['chats','Chats',3],['status','Status'],['grid','Apps'],['calls','Calls'],['profile','Profile']];
+  const bar = $('#tabbar');
+  bar.innerHTML = TABS.map(([i,l,n]) => i === 'grid'
+    ? `<button class="tab center" data-tab="apps" aria-label="Apps"><span class="disc grad glow">${ic('grid')}</span><span>Apps</span></button>`
+    : `<button class="tab" data-tab="${l.toLowerCase()}" aria-label="${l}">${ic(i)}<span>${l}</span>${n?`<span class="dot">${n}</span>`:''}</button>`).join('');
+  const go = (id) => {
+    document.querySelectorAll('.scr').forEach(s => s.classList.toggle('on', s.id === 's-' + id));
+    const tab = id === 'chat' ? 'chats' : id;
+    bar.querySelectorAll('.tab').forEach(t => { const on = t.dataset.tab === tab; t.classList.toggle('on', on); t.setAttribute('aria-current', on ? 'page' : 'false'); });
+    bar.hidden = id === 'chat';
+  };
+  bar.addEventListener('click', e => { const t = e.target.closest('.tab'); if (t) go(t.dataset.tab); });
+  document.addEventListener('click', e => { const b = e.target.closest('[data-go]'); if (b && b.dataset.go !== 'call') go(b.dataset.go); });
+  go('chats');
+
+  // ── workbench: app theme, motion, token readout ──
+  const tokens = (mode) => mode === 'dark'
+    ? [['bg','#0A0810'],['glass','#FFF 8%'],['glassStroke','#FFF 16%'],['text','#FFF 96%'],['accent','#9D6FD0'],['accentDeep','#7C3AED'],['bubbleOut','#7C3AED']]
+    : [['bg','#F4F1FA'],['glass','#FFF 70%'],['glassStroke','#181028 10%'],['text','#1B1526'],['accent','#9D6FD0'],['accentDeep','#6D28D9'],['bubbleOut','#6D28D9']];
+  const setApp = (mode) => {
+    document.body.dataset.app = mode;
+    $('#btn-dark').setAttribute('aria-pressed', mode === 'dark'); $('#btn-light').setAttribute('aria-pressed', mode === 'light');
+    $('#tok-mode').textContent = mode;
+    $('#tok-colors').innerHTML = '<tr><th>token</th><th>value</th></tr>' + tokens(mode).map(([k,v]) => `<tr><td><span class="sw" style="background:${v.split(' ')[0]}"></span>${k}</td><td>${v}</td></tr>`).join('');
+    try { localStorage.setItem('aurora-app', mode); } catch (e) {}
+  };
+  $('#btn-dark').onclick = () => setApp('dark'); $('#btn-light').onclick = () => setApp('light');
+  $('#btn-motion').onclick = () => { const off = document.body.dataset.motion !== 'off'; document.body.dataset.motion = off ? 'off' : 'on'; $('#btn-motion').setAttribute('aria-pressed', off); };
+  let saved = 'dark'; try { saved = localStorage.getItem('aurora-app') || 'dark'; } catch (e) {}
+  setApp(saved === 'light' ? 'light' : 'dark');
+})();
+</script>
