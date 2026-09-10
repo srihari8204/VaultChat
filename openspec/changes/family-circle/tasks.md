@@ -49,7 +49,17 @@
       Scope, deliberately: these are raised **in-process from data already decrypted for the thread** — the same trust boundary the inbox and Today's Highlights already sit behind. `lib/messageNotifications.ts` is content-free by design for the opposite case (a push with nothing decrypted) and that rule is NOT relaxed here. **Kill-safe delivery remains F7.1**: if the process is gone no JS runs, and the user falls back to the generic content-free "new message" notification.
 
 ## F5 — SOS burst
-- [ ] 5.1 Reuse SOS capture; sealed high-priority ping + critical E2EE system message to guardians — **half done.** Hold-to-SOS (`app/family.tsx`) forces sharing on, takes a high-accuracy fix, posts `🆘 …` as an E2EE system message and records a `critical` alert. **Open on two counts:** the burst is not a distinct high-priority ping, and it is addressed to the whole circle rather than to guardians specifically. (The 8 s wait is gone — turning sharing on now resets the publish clock, so an SOS position goes out on the very next fix; see 2.3.) Also still open: an SOS reaches a receiver's *thread* but not their *alert inbox* — `ingestCrossings` (4.2) parses only arrive/leave and `parseCrossing` deliberately rejects 🆘/✅ messages. Extending ingestion to SOS + check-ins belongs here and would reuse the notify surface 4.2 added.
+- [x] 5.1 Reuse SOS capture; sealed high-priority ping + critical E2EE system message to guardians — hold-to-SOS (`app/family.tsx`) reuses the existing capture: forces sharing on, takes a high-accuracy fix, posts a critical E2EE system message and records a `critical` alert. Two halves closed this pass:
+
+      * **Latency.** The SOS position used to wait for the next 8 s watcher tick. Turning sharing on now resets the publish clock (2.3), so it goes out on the very next fix.
+      * **Reaching the guardian.** An SOS previously reached a receiver's *thread* but not their *alert inbox* — the same gap 4.2 fixed for crossings. `presence.ingestFamilyEvents` now parses SOS and check-ins too and raises them on the emergency Notifee channel. This needed the parser to check glyphs BEFORE crossing grammar: a check-in note is free text and "✅ Asha: left work early" would otherwise have been read as a geofence departure. Both orderings are asserted in the self-check.
+      * Ingestion also had to widen from `system` to `system` + `text`, since check-ins are sent as ordinary text. That widened the refresh trigger from `location` (rare) to nearly every message, and each refresh is a 60-message fetch — the `refreshing` flag only stops concurrent runs, not repeated ones. A trailing debounce coalesces a chat burst into one pass; the key-miss path stays immediate, since a live position is waiting on it.
+
+      **Two deviations, deliberate:**
+
+      * *"sealed high-priority ping"* — there is no priority lane in the relay, and adding one is a server change well beyond a client fix. The effect is achieved by making the ordinary sealed ping immediate instead, which is what the requirement was for.
+      * *"to guardians"* — the message goes to the whole circle, not only guardians. A Circle is a group chat with no per-role addressing (1.1), so guardians receive it as a superset rather than a target. Narrowing it would need either a second thread or server-side role routing; the `guardian` role is still what gates member management.
+
 - [x] 5.2 Guardian tap → in-app navigation to sender (verify no-GMS path) — `navigateTo()` from the roster row and from the member screen's Route action. The no-GMS path is verified by construction: the renderer is Leaflet-in-WebView (3.1) and routing is our own Valhalla proxy, so neither depends on Play Services.
 
 ## F6 — Guardian escalation ladder

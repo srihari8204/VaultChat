@@ -28,6 +28,18 @@ export const CROSSING_VERB: Record<CrossingKind, string> = {
   leave: 'left',
 };
 
+/**
+ * The emoji that front a person-event announcement. SOS and the "Need Help"
+ * check-in share 🆘 and both mean the same thing to a reader, so both map to
+ * `sos` (critical) rather than being told apart.
+ */
+export const GLYPH_KIND: Record<string, 'sos' | 'checkin'> = {
+  '\u{1F198}': 'sos',       // 🆘  SOS / Need Help
+  '\u2705': 'checkin',      // ✅  I'm Safe
+  '\u{1F697}': 'checkin',   // 🚗  On My Way
+  '\u23F3': 'checkin',      // ⏳  Running Late
+};
+
 export interface ParsedCrossing {
   kind: CrossingKind;
   actorName: string;
@@ -55,6 +67,9 @@ export function parseCrossing(raw: string): ParsedCrossing | null {
   if (!s) return null;
   if (s.startsWith(FAMILY_EVENT_PREFIX)) s = s.slice(FAMILY_EVENT_PREFIX.length).trim();
   if (!s) return null;
+  // A check-in note is free text and may well contain "left" ("✅ Asha: left
+  // work early"). Anything already claimed by a glyph is never a crossing.
+  for (const g of Object.keys(GLYPH_KIND)) if (s.startsWith(g)) return null;
 
   for (const kind of ['enter', 'leave'] as CrossingKind[]) {
     const verb = ` ${CROSSING_VERB[kind]} `;
@@ -66,6 +81,46 @@ export function parseCrossing(raw: string): ParsedCrossing | null {
     return { kind, actorName, place, text: s };
   }
   return null;
+}
+
+export type FamilyEventKind = CrossingKind | 'sos' | 'checkin';
+
+export interface ParsedFamilyEvent {
+  kind: FamilyEventKind;
+  actorName: string;
+  text: string;
+}
+
+/** Best-effort sender name out of an announcement body (already glyph-stripped). */
+function actorFrom(body: string): string {
+  const colon = body.indexOf(':');
+  if (colon > 0) return body.slice(0, colon).trim();
+  const sos = body.match(/^(.+?)\s+triggered an SOS/);
+  if (sos) return sos[1].trim();
+  return body.split(/\s+/)[0] ?? '';
+}
+
+/**
+ * Parse any Family Space announcement — a crossing, an SOS, or a check-in.
+ *
+ * Glyphs are checked FIRST because they are unambiguous markers, whereas a
+ * crossing is recognised from English that a free-text check-in note could
+ * imitate.
+ */
+export function parseFamilyEvent(raw: string): ParsedFamilyEvent | null {
+  if (typeof raw !== 'string') return null;
+  const s = raw.trim();
+  if (!s) return null;
+
+  for (const [glyph, kind] of Object.entries(GLYPH_KIND)) {
+    if (!s.startsWith(glyph)) continue;
+    const body = s.slice(glyph.length).trim();
+    if (!body) return null;
+    return { kind, actorName: actorFrom(body), text: s };
+  }
+
+  const crossing = parseCrossing(s);
+  return crossing ? { kind: crossing.kind, actorName: crossing.actorName, text: crossing.text } : null;
 }
 
 /**
@@ -126,6 +181,33 @@ function _selfCheck(): void {
   // check-in / SOS messages are NOT crossings (they have their own path)
   A(parseCrossing('🆘 Rohan triggered an SOS — please respond') === null, 'SOS is not a crossing');
   A(parseCrossing('✅ Rohan: I am Safe') === null, 'check-in is not a crossing');
+
+  // combined parser: person-events
+  const sos = parseFamilyEvent('\u{1F198} Rohan triggered an SOS \u2014 please respond (12.97, 77.59)');
+  A(!!sos && sos.kind === 'sos', 'SOS parses as sos');
+  A(sos!.actorName === 'Rohan', 'SOS actor extracted');
+  const safe = parseFamilyEvent("\u2705 Asha Kumar: I'm Safe");
+  A(!!safe && safe.kind === 'checkin' && safe.actorName === 'Asha Kumar', 'check-in parses');
+  const help = parseFamilyEvent('\u{1F198} Rohan: Need Help');
+  A(!!help && help.kind === 'sos', 'Need Help is critical, like an SOS');
+  for (const g of ['\u{1F697}', '\u23F3']) {
+    A(parseFamilyEvent(g + ' Asha: on it')!.kind === 'checkin', 'glyph ' + g + ' is a check-in');
+  }
+
+  // THE ordering bug this guards: a check-in note containing a crossing verb
+  const trap = parseFamilyEvent('\u2705 Asha: left work early');
+  A(!!trap && trap.kind === 'checkin', 'check-in mentioning "left" is NOT a crossing');
+  A(parseCrossing('\u2705 Asha: left work early') === null, 'parseCrossing refuses glyph-claimed text');
+
+  // crossings still route through the combined parser
+  const cross = parseFamilyEvent(formatCrossing('Rohan', 'leave', 'School'));
+  A(!!cross && cross.kind === 'leave' && cross.actorName === 'Rohan', 'crossing via combined parser');
+
+  // junk stays junk
+  for (const junk of ['', '   ', 'just a normal message', '\u{1F198}', '\u2705   ']) {
+    A(parseFamilyEvent(junk) === null, `combined must reject: ${JSON.stringify(junk)}`);
+  }
+  A(parseFamilyEvent(undefined as any) === null, 'undefined is not an event');
 
   // age policy — the guard against a first-open notification storm
   A(ingestAction(0) === 'notify', 'a just-now crossing notifies');

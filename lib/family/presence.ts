@@ -24,13 +24,15 @@ import {
   hasBackgroundPermission, isBackgroundRunning,
 } from './background';
 import { nextMotion, shouldPublish, type MotionState } from './cadence';
-import { parseCrossing, ingestAction } from './events';
+import { parseFamilyEvent, ingestAction } from './events';
 import { recordAlert } from './alerts';
 import { notifyFamilyAlert } from './notify';
 import { DEFAULT_FAMILY_SETTINGS, type FamilyPing, type MemberPresence } from './types';
 import { type LatLng } from '../nav/geo';
 
 const LIVE_WINDOW_MS = 24 * 3600 * 1000;
+/** Coalesce message-driven history refreshes (see scheduleRefresh). */
+const REFRESH_DEBOUNCE_MS = 1_500;
 const until = () => Date.now() + LIVE_WINDOW_MS;
 
 // ── broadcast state (my location → my circles) ──
@@ -193,17 +195,21 @@ function lkFromMessage(m: Message): string | null {
 }
 
 /**
- * Turn OTHER members' crossing announcements into local alerts + notifications.
+ * Turn OTHER members' announcements — crossings, SOS, check-ins — into local
+ * alerts + notifications.
  *
- * A crossing is evaluated on the subject's own phone; every other device only
- * ever saw it as a system message in the thread, so the guardian's inbox stayed
- * empty (F4.2). This closes that half, reusing the message list the key-capture
- * pass already fetched — no extra round trip.
+ * These are all evaluated or composed on the sender's phone; every other
+ * device only ever saw them as messages in the thread, so the guardian's inbox
+ * stayed empty (F4.2 for crossings, F5.1 for SOS/check-ins). This closes that
+ * half, reusing the message list the key-capture pass already fetched — no
+ * extra round trip.
  *
- * Every message examined is marked ingested, INCLUDING ones that turn out not
- * to be crossings, so a chatty circle isn't re-decrypted on every refresh.
+ * Both `system` (crossings, SOS) and `text` (check-ins) are examined, because
+ * app/family.tsx sends check-ins as ordinary text. Every message looked at is
+ * marked ingested — INCLUDING ones that turn out not to be family events — so a
+ * chatty circle is decrypted at most once per message, not on every refresh.
  */
-async function ingestCrossings(circleId: string, meId: string, msgs: Message[]): Promise<void> {
+async function ingestFamilyEvents(circleId: string, meId: string, msgs: Message[]): Promise<void> {
   const already = new Set(await getIngested(circleId));
   const seen: string[] = [];
   const now = Date.now();
@@ -213,14 +219,15 @@ async function ingestCrossings(circleId: string, meId: string, msgs: Message[]):
     if (!id || already.has(id)) continue;
     seen.push(id);
 
-    if (m.type !== 'system' || !m.content || m.deletedAt) continue;
-    // My own crossings are already in my inbox from fixPipeline, and notifying
-    // someone about their own walk to the shops is noise.
+    if ((m.type !== 'system' && m.type !== 'text') || !m.content || m.deletedAt) continue;
+    // My own events are already in my inbox (fixPipeline for a crossing, the
+    // SOS/check-in handlers for the rest), and notifying someone about their
+    // own walk to the shops is noise.
     if (!m.senderId || String(m.senderId) === String(meId)) continue;
 
     let text = '';
     try { text = await decryptFromChat(circleId, m.senderId, m.content, m.id); } catch { continue; }
-    const ev = parseCrossing(text);
+    const ev = parseFamilyEvent(text);
     if (!ev) continue;
 
     const at = new Date(m.createdAt).getTime();
@@ -242,6 +249,7 @@ async function ingestCrossings(circleId: string, meId: string, msgs: Message[]):
 export async function subscribeCircle(circleId: string, meId: string, onEvent: (e: PresenceEvent) => void): Promise<() => void> {
   await joinChatRoom(circleId);
   let disposed = false, refreshing = false;
+  let refreshT: ReturnType<typeof setTimeout> | null = null;
 
   const captureFromHistory = async () => {
     if (refreshing) return; refreshing = true;
@@ -249,10 +257,28 @@ export async function subscribeCircle(circleId: string, meId: string, onEvent: (
       const msgs = await getMessages(circleId, { limit: 60 });
       for (const m of msgs) { const lk = lkFromMessage(m); if (lk && m.senderId) putLiveKey(circleId, String(m.senderId), lk); }
       // Same fetch feeds the family-alert ingestion — never fail key capture over it.
-      await ingestCrossings(circleId, meId, msgs).catch(() => {});
+      await ingestFamilyEvents(circleId, meId, msgs).catch(() => {});
     } catch {} finally { refreshing = false; }
   };
   await captureFromHistory();
+
+  /**
+   * Trailing-debounced refresh for message-driven triggers.
+   *
+   * Ingestion widened the trigger from 'location' (rare) to every 'system' and
+   * 'text' message, and each refresh is a 60-message fetch. The `refreshing`
+   * flag only stops CONCURRENT runs, not repeated ones, so an active circle
+   * chat would otherwise fire one fetch per message. Coalescing a burst into a
+   * single pass costs at most a second and a half of latency on an event the
+   * user is about to be notified of anyway.
+   *
+   * The key-miss path in onUpd stays IMMEDIATE — a live position is waiting on
+   * that key.
+   */
+  const scheduleRefresh = () => {
+    if (disposed || refreshT) return;
+    refreshT = setTimeout(() => { refreshT = null; if (!disposed) captureFromHistory(); }, REFRESH_DEBOUNCE_MS);
+  };
 
   const s = await getSocket();
   const onUpd = (e: any) => {
@@ -279,10 +305,11 @@ export async function subscribeCircle(circleId: string, meId: string, onEvent: (
     clearLiveKey(circleId, String(e.userId));
     onEvent({ userId: String(e.userId), presence: null });
   };
-  // 'location' re-captures a rotated live key; 'system' is how a crossing arrives.
+  // 'location' re-captures a rotated live key; a crossing/SOS arrives as
+  // 'system' and a check-in as 'text' (see ingestFamilyEvents).
   const onNewMsg = (e: any) => {
     if (disposed || !e || String(e.chatId) !== String(circleId)) return;
-    if (e.type === 'location' || e.type === 'system') captureFromHistory();
+    if (e.type === 'location' || e.type === 'system' || e.type === 'text') scheduleRefresh();
   };
 
   s.on('live_location_update', onUpd);
@@ -290,6 +317,7 @@ export async function subscribeCircle(circleId: string, meId: string, onEvent: (
   s.on('new_message', onNewMsg);
   return () => {
     disposed = true;
+    if (refreshT) { clearTimeout(refreshT); refreshT = null; }
     s.off('live_location_update', onUpd);
     s.off('live_location_stop', onStop);
     s.off('new_message', onNewMsg);
