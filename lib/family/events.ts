@@ -38,6 +38,13 @@ export const GLYPH_KIND: Record<string, 'sos' | 'checkin'> = {
   '\u2705': 'checkin',      // ✅  I'm Safe
   '\u{1F697}': 'checkin',   // 🚗  On My Way
   '\u23F3': 'checkin',      // ⏳  Running Late
+  // Escalation-ladder audit lines (lib/family/escalation.ts). They ride the
+  // same ingestion path so a guardian's request, its reminders and the member's
+  // "I'm OK" all land in the receiver's inbox instead of looking like chat.
+  '\u{1F514}': 'checkin',   // 🔔  check-in requested
+  '\u{1F501}': 'checkin',   // 🔁  reminder
+  '\u{1F44D}': 'checkin',   // 👍  member confirmed OK
+  '\u{1F6A8}': 'sos',       // 🚨  Emergency Connect — critical, like an SOS
 };
 
 export interface ParsedCrossing {
@@ -208,6 +215,13 @@ function _selfCheck(): void {
     A(parseFamilyEvent(junk) === null, `combined must reject: ${JSON.stringify(junk)}`);
   }
   A(parseFamilyEvent(undefined as any) === null, 'undefined is not an event');
+
+  // escalation audit lines ingest like any other family event
+  A(parseFamilyEvent('\u{1F514} Asha asked Rohan to check in')!.kind === 'checkin', 'request ingests');
+  A(parseFamilyEvent('\u{1F501} Reminder 1/2: Rohan, please check in')!.kind === 'checkin', 'reminder ingests');
+  A(parseFamilyEvent('\u{1F44D} Rohan confirmed they are OK')!.kind === 'checkin', 'OK ingests');
+  const emg = parseFamilyEvent('\u{1F6A8} Emergency Connect: Rohan did not respond');
+  A(!!emg && emg.kind === 'sos', 'Emergency Connect is critical');
 
   // age policy — the guard against a first-open notification storm
   A(ingestAction(0) === 'notify', 'a just-now crossing notifies');

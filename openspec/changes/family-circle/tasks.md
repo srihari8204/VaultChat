@@ -63,14 +63,29 @@
 - [x] 5.2 Guardian tap → in-app navigation to sender (verify no-GMS path) — `navigateTo()` from the roster row and from the member screen's Route action. The no-GMS path is verified by construction: the renderer is Leaflet-in-WebView (3.1) and routing is our own Valhalla proxy, so neither depends on Play Services.
 
 ## F6 — Guardian escalation ladder
-> **Not started.** Verified absent: no ladder, timer, or check-in scheduler exists
-> in `lib/` or `app/`. (`grep escalat|checkinLadder|requestCheckin` matches only
-> `services/security/*`, which is the duress/threat engine — unrelated.)
-> The check-in *presets* in `app/family.tsx` are one-shot messages with no
-> follow-up state, so F6 starts from the state machine, not from the UI.
-- [ ] 6.1 On-device state machine: missed check-in / unanswered call → retry +5min → +15min → Emergency Connect after N misses
-- [ ] 6.2 "I'm OK" cancels ladder; every action logged as an E2EE system message (audit)
-- [ ] 6.3 Guardian-initiated "request check-in" (v1 scheduling model)
+> Built this pass. Timing lives in `lib/family/escalation.ts` — pure and
+> self-checked, because the ladder's whole job is to be right about time on a
+> phone that sleeps, is killed, and cold-starts hours later. `escalationService.ts`
+> holds the IO: persistence, the ticker, and the audit messages.
+>
+> **Ownership** is the rule that makes it safe: a ladder runs ONLY on the device
+> of the guardian who started it. Both parties see the audit messages, so if both
+> ran it every reminder would post twice and two Emergency Connects would fire.
+> The member's device holds no ladder at all.
+
+- [x] 6.1 On-device state machine: missed check-in / unanswered call → retry +5min → +15min → Emergency Connect after N misses — `LADDER_STEPS` is the spec's ladder verbatim (+5 retry, +15 retry, +30 emergency); `MISSES_BEFORE_EMERGENCY` derives from it. `nextDueAt` drives the timer, `advance` folds time forward, and both are immutable so the caller persists the returned copy.
+
+      **The collapse rule is the one to preserve.** A device asleep across several steps fires only the FURTHEST one, reporting the rest as `skipped`. Replaying each step on wake would spam stale reminders and — much worse — could raise an Emergency Connect the member had already answered before the ladder was rehydrated. The self-check pins this from both directions (asleep past everything ⇒ one emergency; asleep across both retries ⇒ one retry, `skipped: 1`).
+
+      Also pinned: a backwards clock or `NaN` never fires (an emergency raised by an NTP correction is worse than a late one), a step never double-fires, and an escalated or cancelled ladder never fires again.
+
+- [x] 6.2 "I'm OK" cancels ladder; every action logged as an E2EE system message (audit) — every action (request, retry, cancel, Emergency Connect) is posted with `sendMessage(..., 'system')` **and** recorded as a local alert, so the audit survives even if the thread is cleared. The circle thread is the durable record; the local store is only a resume cursor and keeps just active ladders.
+
+      "I'm OK" is a **message, not a local call**. The member posts the confirmation; the guardian's device cancels its own ladder when it ingests that line (`presence.ingestFamilyEvents` → `onMemberConfirmedOk`). That falls out of ownership — the member's device has no ladder to cancel — and it means the answer works from whichever device the member is holding. The cancel runs *before* the age gate, so a stale confirmation still stops a ladder even when it is too old to announce.
+
+- [x] 6.3 Guardian-initiated "request check-in" (v1 scheduling model) — v1 ships the guardian-initiated request only, which `design.md` §41 lists as the acceptable v1 answer to the open scheduling question. It is on the member long-press sheet, guardian-only, with a confirmation naming what will happen. `requestCheckin` is **idempotent per subject**: asking twice while a ladder is running returns the existing one rather than stacking a second set of reminders on the same person. The member answers from the check-in sheet.
+
+      *ponytail: the timer half only runs while the guardian's app runs. A ladder resumes correctly after a cold start (advance collapses whatever came due), but a guardian whose app stays killed across the whole window sees the escalation late, on next launch. Kill-safe delivery is F7.1 — the spec anticipates exactly this, calling server-side high-priority push the backstop for the on-device timer.*
 
 ## F7 — Emergency Connect + compliance
 > **Not started**, except the two manifest declarations noted in 7.4. Family

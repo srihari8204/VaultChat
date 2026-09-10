@@ -27,6 +27,8 @@ import { nextMotion, shouldPublish, type MotionState } from './cadence';
 import { parseFamilyEvent, ingestAction } from './events';
 import { recordAlert } from './alerts';
 import { notifyFamilyAlert } from './notify';
+import { ESCALATION_GLYPH } from './escalation';
+import { onMemberConfirmedOk } from './escalationService';
 import { DEFAULT_FAMILY_SETTINGS, type FamilyPing, type MemberPresence } from './types';
 import { type LatLng } from '../nav/geo';
 
@@ -229,6 +231,15 @@ async function ingestFamilyEvents(circleId: string, meId: string, msgs: Message[
     try { text = await decryptFromChat(circleId, m.senderId, m.content, m.id); } catch { continue; }
     const ev = parseFamilyEvent(text);
     if (!ev) continue;
+
+    // A member's "I'm OK" cancels the ladder this device is running for them.
+    // The ladder lives only on the requesting guardian's device, so ingesting
+    // the confirmation IS the cancel path (see escalationService OWNERSHIP).
+    // Done before the age gate: a stale confirmation should still stop a
+    // ladder, even when it is too old to be worth announcing.
+    if (ev.text.startsWith(ESCALATION_GLYPH.ok)) {
+      await onMemberConfirmedOk(circleId, String(m.senderId)).catch(() => {});
+    }
 
     const at = new Date(m.createdAt).getTime();
     const action = ingestAction(now - at);
