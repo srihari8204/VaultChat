@@ -26,7 +26,7 @@ import {
 import { nextMotion, shouldPublish, type MotionState } from './cadence';
 import { parseFamilyEvent, ingestAction } from './events';
 import { recordAlert } from './alerts';
-import { notifyFamilyAlert } from './notify';
+import { notifyFamilyAlert, notifyEmergencyConnect } from './notify';
 import { ESCALATION_GLYPH } from './escalation';
 import { onMemberConfirmedOk } from './escalationService';
 import { DEFAULT_FAMILY_SETTINGS, type FamilyPing, type MemberPresence } from './types';
@@ -250,7 +250,16 @@ async function ingestFamilyEvents(circleId: string, meId: string, msgs: Message[
       text: ev.text, at: Number.isFinite(at) ? at : now,
     });
     // recordAlert returns null when deduped — don't notify for a duplicate.
-    if (alert && action === 'notify') await notifyFamilyAlert(alert, meId);
+    if (!alert || action !== 'notify') continue;
+
+    if (ev.text.startsWith(ESCALATION_GLYPH.emergency)) {
+      // Emergency Connect gets the full-screen alarm, not the ordinary tray
+      // notification. The age gate above already kept a stale backlog from
+      // sounding a siren on first open.
+      await notifyEmergencyConnect(ev.text, circleId);
+    } else {
+      await notifyFamilyAlert(alert, meId);
+    }
   }
 
   await addIngested(circleId, seen);

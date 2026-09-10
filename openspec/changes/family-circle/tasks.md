@@ -88,11 +88,26 @@
       *ponytail: the timer half only runs while the guardian's app runs. A ladder resumes correctly after a cold start (advance collapses whatever came due), but a guardian whose app stays killed across the whole window sees the escalation late, on next launch. Kill-safe delivery is F7.1 — the spec anticipates exactly this, calling server-side high-priority push the backstop for the on-device timer.*
 
 ## F7 — Emergency Connect + compliance
-> **Not started**, except the two manifest declarations noted in 7.4. Family
-> alerts are device-local and in-app only today (see 4.2), so nothing in this
-> section has kill-safe delivery.
-- [ ] 7.1 Full-screen critical alert via existing Notifee FGS + native FCM path (kill-safe delivery) — the plumbing exists for **calls** (`plugins/withVaultChatCalls.js`) but is not wired to any family event.
-- [ ] 7.2 Android: optional auto-answer video + sealed location burst (confirm UX/OS constraints)
-- [ ] 7.3 iOS: repeating critical alarm; graceful degrade when Critical Alerts entitlement absent
-- [ ] 7.4 Compliance — **partially satisfied already:** `ACCESS_BACKGROUND_LOCATION` (`app.json:68`) and `USE_FULL_SCREEN_INTENT` (`app.json:56`) are both declared. Still open: the Play Console background-location declaration form, and the iOS Critical Alerts entitlement request (no entitlement found in `app.json`).
-- [ ] 7.5 Battery + kill-safety field test; flip the feature flag on after two-device verification *(requires physical devices)*
+> The client half of the alert is built; the rest of F7 is **not client work**
+> and cannot be closed from a repo alone. What remains needs a server push
+> change, an Apple entitlement grant, a Play Console submission, and two
+> physical phones. Each box below says which.
+
+- [ ] 7.1 Full-screen critical alert via existing Notifee FGS + native FCM path (kill-safe delivery) — **client half done, server half open.**
+      `notify.notifyEmergencyConnect` raises the full-screen alarm (ALARM category, `fullScreenAction`, `loopSound`, `lightUpScreen`, ongoing, Acknowledge action). Both routes are wired: the requesting guardian gets it when their own ladder runs out, other guardians get it by ingesting the 🚨 audit line. The age gate from 4.2 keeps a stale backlog from sounding a siren on first open.
+
+      Every option is copied verbatim from `lib/lock/lockNotifications.ts:showLockAlarm` — the one alarm surface in this repo already proven on device. Inventing a shape would be a bad trade here: notifee cannot be typechecked in this environment and a rejected payload fails **silently**, which for this notification means the emergency is simply never shown.
+
+      **Still open: kill-safe delivery.** Nothing above runs if the guardian's process is gone, and the requirement is explicitly "even when the guardian's app is killed". That needs the backend to send a high-priority FCM when an Emergency Connect audit message is posted — a change in `vaultchat-backend/server.js` *and* `vaultchat-backend-go`, plus a client data-message handler. It is server work, deliberately not attempted here.
+
+- [x] 7.2 Android: optional auto-answer video + sealed location burst (confirm UX/OS constraints) — **resolved as tap-to-answer**, which `design.md` §40 lists as the acceptable outcome ("…or make it tap-to-answer").
+      Auto-answer was rejected on two grounds. Technically, Android 10+ blocks background activity starts; the sanctioned replacement is exactly the full-screen intent 7.1 now uses, so a killed app cannot reliably force a call to answer anyway. And on consent: silently opening a camera and microphone on someone's phone is not a thing to ship because a state machine decided a member was late. The full-screen alarm hands the guardian a one-tap route in instead.
+      The **sealed location burst** half ships: an SOS forces sharing on and the publish clock reset (2.3) puts the position out on the very next fix.
+
+- [ ] 7.3 iOS: repeating critical alarm; graceful degrade when Critical Alerts entitlement absent — **blocked on the entitlement, not on code.** A repeating critical alarm requires `critical: true` in notifee's iOS options, which is inert without `com.apple.developer.usernotifications.critical-alerts`. Today iOS takes default notification treatment, which IS the graceful-degrade branch the spec asks for — but "records that the critical channel was unavailable" is not implemented, and no iOS-specific notifee option is set anywhere in this repo, so there is no proven shape to copy (see 7.1). Do this together with 7.4's entitlement, on a machine that can build for iOS.
+
+- [ ] 7.4 Compliance: Play background-location declaration, `USE_FULL_SCREEN_INTENT`, iOS Critical Alerts entitlement request — **partly satisfied; the rest is not a code task.**
+      Already declared: `ACCESS_BACKGROUND_LOCATION` (`app.json:68`) and `USE_FULL_SCREEN_INTENT` (`app.json:56`, via `plugins/withVaultChatCalls.js`).
+      Open, and deliberately NOT done here: the Play Console background-location declaration is a submission form, not a manifest entry. And the iOS Critical Alerts entitlement **must not be added to `app.json` before Apple grants it** — an unapproved entitlement fails provisioning and gets the build rejected, so adding it speculatively would break the iOS build rather than advance the task.
+
+- [ ] 7.5 Battery + kill-safety field test; flip the feature flag on after two-device verification *(requires physical devices)* — cannot be run in this environment. Note that the escalation ladder's collapse behaviour and the 4.2 age gate are the two things this test should probe hardest, since both only show themselves across a real sleep/kill cycle.

@@ -24,11 +24,12 @@
 //    notify the very person who just walked through it.
 
 import { Platform } from 'react-native';
-import notifee, { AndroidImportance, AndroidVisibility } from '@notifee/react-native';
+import notifee, { AndroidImportance, AndroidCategory, AndroidVisibility } from '@notifee/react-native';
 import { type FamilyAlert } from './alerts';
 
 export const FAMILY_CHANNEL_ID = 'family-alerts';
 export const FAMILY_CRITICAL_CHANNEL_ID = 'family-critical';
+export const EMERGENCY_CONNECT_ID = 'family-emergency-connect';
 
 /** Emoji per alert kind — the tray has no room for an icon set. */
 const GLYPH: Record<FamilyAlert['kind'], string> = {
@@ -97,6 +98,57 @@ export async function notifyFamilyAlert(alert: FamilyAlert, meId: string | null)
   } catch {
     return false;
   }
+}
+
+/**
+ * Emergency Connect (F7.1, client half) — the loud, full-screen alert raised
+ * when an escalation ladder runs out of reminders.
+ *
+ * Every option here is copied from `lib/lock/lockNotifications.ts:showLockAlarm`,
+ * which is the one alarm surface in this repo already proven on device.
+ * Inventing an option shape would be a poor trade: notifee cannot be
+ * typechecked in this environment, and a rejected payload fails silently —
+ * which for THIS notification means the emergency is simply never shown.
+ *
+ * WHAT THIS IS NOT: kill-safe delivery. Nothing here runs if the guardian's app
+ * process is gone. The spec requires the alert to survive an app kill via the
+ * native FCM path, and that needs the server to send a high-priority push when
+ * an Emergency Connect is posted — server work, still open on 7.1.
+ *
+ * Fixed id: a repeat refreshes the same alert instead of stacking a second
+ * siren on top of the first.
+ */
+export async function notifyEmergencyConnect(body: string, circleId: string): Promise<boolean> {
+  if (Platform.OS === 'web') return false;
+  await ensureFamilyChannels();
+  try {
+    await notifee.displayNotification({
+      id: EMERGENCY_CONNECT_ID,
+      title: '\u{1F6A8} Emergency Connect',
+      body,
+      data: { type: 'family-emergency', circleId },
+      android: {
+        channelId: FAMILY_CRITICAL_CHANNEL_ID,
+        category: AndroidCategory.ALARM,
+        importance: AndroidImportance.HIGH,
+        visibility: AndroidVisibility.PUBLIC,
+        ongoing: true,
+        autoCancel: false,
+        loopSound: true,
+        lightUpScreen: true,
+        fullScreenAction: { id: 'default', launchActivity: 'default' },
+        pressAction: { id: 'open-family-emergency', launchActivity: 'default' },
+        actions: [{ title: 'Acknowledge', pressAction: { id: 'family-emergency-ack' } }],
+      },
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export async function cancelEmergencyConnect(): Promise<void> {
+  try { await notifee.cancelNotification(EMERGENCY_CONNECT_ID); } catch {}
 }
 
 export default {};

@@ -24,7 +24,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { sendMessage } from '../chatService';
 import { recordAlert } from './alerts';
-import { notifyFamilyAlert } from './notify';
+import { notifyFamilyAlert, notifyEmergencyConnect } from './notify';
 import {
   createLadder, advance, cancel, isActive, nextDueAt,
   auditRequest, auditRetry, auditCancelled, auditEmergency,
@@ -173,8 +173,12 @@ export async function tickCircle(circleId: string, meId: string): Promise<number
       await audit(circleId, auditRetry(r.ladder, r.skipped),
                   r.ladder.subjectId, r.ladder.subjectName, 'checkin', meId);
     } else {
-      await audit(circleId, auditEmergency(r.ladder),
-                  r.ladder.subjectId, r.ladder.subjectName, 'sos', meId);
+      const text = auditEmergency(r.ladder);
+      await audit(circleId, text, r.ladder.subjectId, r.ladder.subjectName, 'sos', meId);
+      // The requesting guardian is watching THEIR ladder run out, so they get
+      // the full-screen alarm here. Other guardians get it through ingestion
+      // of the audit message (presence.ingestFamilyEvents).
+      await notifyEmergencyConnect(text, circleId);
     }
   }
 
