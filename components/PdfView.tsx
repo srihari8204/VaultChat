@@ -25,6 +25,7 @@
 import React, { useCallback, useEffect, useRef, useState, useMemo } from 'react';
 import { ActivityIndicator, Platform, StyleSheet, Text, View } from 'react-native';
 import { WebView } from 'react-native-webview';
+import * as FileSystem from 'expo-file-system/legacy';
 import type { Palette } from '../constants/theme';
 import { useColors } from '../lib/theme';
 
@@ -103,7 +104,33 @@ export function PdfView({ uri, onFail, onReady }: { uri: string; onFail?: (why: 
               // The RUNNING version, read off pdfjsLib at render time — not a
               // string in a README. This is what proves which bundle actually
               // shipped, and it is how the pdf.js upgrade was verified on device.
-              if (__DEV__) console.log('[pdfjs] rendering with', m.v, '·', m.pages, 'pages');
+              // Observability for RELEASE verification, not a dev convenience.
+              //
+              // The point of reporting the version is to prove WHICH pdf.js
+              // actually rendered on a device. A __DEV__-gated console.log
+              // cannot do that: release builds strip it, this app sets
+              // FLAG_SECURE so the accessibility tree and screenshots are both
+              // unavailable inside the viewer, and the test handsets suppress
+              // app logcat. So the one fact worth asserting was unobservable
+              // exactly where it mattered.
+              //
+              // A marker file in the app's EXTERNAL files dir is readable over
+              // adb without run-as and without a debuggable build. It carries
+              // the renderer version and a page COUNT — never a filename, a
+              // path, or any document content.
+              console.log('[pdfjs] rendering with', m.v, 'pages', m.pages);
+              try {
+                const dir = (FileSystem as any).documentDirectory;
+                if (dir) {
+                  FileSystem.writeAsStringAsync(
+                    `${dir}pdfjs-runtime.txt`,
+                    `version=${m.v}
+pages=${m.pages}
+at=${new Date().toISOString()}
+`,
+                  ).catch(() => {});
+                }
+              } catch {}
               onReady?.({ version: String(m.v ?? '?'), pages: Number(m.pages) || 0 });
             }
             else if (m.t === 'error') fail(m.m || 'The PDF could not be rendered.');
