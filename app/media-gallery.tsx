@@ -28,8 +28,15 @@ import { readCache, writeCache } from '../lib/localCache';
 import { unionWithLocalHistory } from '../lib/messageHistory';
 import { AuroraBackground } from '../components/ui';
 
-const { width: SW } = Dimensions.get('window');
-const TILE = (SW - 40) / 3;
+// No module-level Dimensions.get: it is read ONCE at import, so the 3-up grid
+// kept its launch-time tile size through every rotation, fold and split-screen
+// resize — tiles overflowed the row in one direction and left a dead gutter in
+// the other. The size is computed per render from useWindowDimensions instead.
+const GRID_GUTTER = 40;
+const GRID_COLS = 3;
+export function gridTileSize(windowWidth: number): number {
+  return Math.max(48, (windowWidth - GRID_GUTTER) / GRID_COLS);
+}
 const PAGE = 200;
 
 type ThumbSrc = { uri: string; headers?: Record<string, string> } | null;
@@ -134,6 +141,10 @@ export default function MediaGalleryScreen() {
   // One open at a time. Repeated taps on a row otherwise start a second
   // download of the same attachment and push a second viewer on top.
   const openingRef = useRef<string | null>(null);
+  // Recomputed on every window change (rotate, fold, split-screen), which is
+  // the whole point — see gridTileSize.
+  const { width: winW } = useWindowDimensions();
+  const tileSize = gridTileSize(winW);
   const [photos, setPhotos] = useState<Message[]>([]);
   const [videos, setVideos] = useState<Message[]>([]);
   const [files, setFiles] = useState<Message[]>([]);
@@ -301,13 +312,13 @@ export default function MediaGalleryScreen() {
   }, [cid, meId, router]);
 
   const renderPhoto = ({ item }: { item: Message }) => (
-    <TouchableOpacity style={s.tile} onPress={() => setViewer(item)} activeOpacity={0.8}>
+    <TouchableOpacity style={[s.tile, { width: tileSize, height: tileSize }]} onPress={() => setViewer(item)} activeOpacity={0.8}>
       <MediaThumb m={item} style={s.tileImg} resolveSrc={resolveSrc} placeholder={colors.surfaceSolid} />
     </TouchableOpacity>
   );
 
   const renderVideo = ({ item }: { item: Message }) => (
-    <TouchableOpacity style={s.tile} onPress={() => setViewer(item)} activeOpacity={0.8}>
+    <TouchableOpacity style={[s.tile, { width: tileSize, height: tileSize }]} onPress={() => setViewer(item)} activeOpacity={0.8}>
       <MediaThumb m={item} style={s.tileImg} resolveSrc={resolveSrc} placeholder={colors.surfaceSolid} />
       <View style={s.playBadge}><Ionicons name="play" size={16} color="#fff" /></View>
     </TouchableOpacity>
@@ -467,7 +478,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   groupChip: { paddingHorizontal: 13, paddingVertical: 7, borderRadius: 999, borderWidth: 1, borderColor: c.glassStroke },
   groupTxt: { color: c.textDim, fontSize: 12 },
   sectionHdr: { color: c.text, fontSize: 12.5, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 0.4, paddingHorizontal: 4, paddingTop: 16, paddingBottom: 6 },
-  tile: { width: TILE, height: TILE, margin: 4, borderRadius: 8, overflow: 'hidden', backgroundColor: c.surfaceSolid },
+  tile: { margin: 4, borderRadius: 8, overflow: 'hidden', backgroundColor: c.surfaceSolid },
   tileImg: { width: '100%', height: '100%' },
   playBadge: { position: 'absolute', top: '50%', left: '50%', marginLeft: -16, marginTop: -16, width: 32, height: 32, borderRadius: 16, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center' },
   fileRow: { flexDirection: 'row', alignItems: 'center', backgroundColor: c.glassSoft, borderRadius: 12, padding: 12, marginBottom: 6, borderWidth: 1, borderColor: c.glassStroke, gap: 12 },

@@ -300,6 +300,8 @@ function FileViewerScreen() {
   const [pdfFailed, setPdfFailed] = useState(false);
   const [reloadKey, setReloadKey] = useState(0);
   const [openingExternally, setOpeningExternally] = useState(false);
+  // Live width of the audio seek bar, from onLayout — see the seek handler.
+  const [seekW, setSeekW] = useState(0);
 
   // Audio state
   const [sound, setSound] = useState<Audio.Sound | null>(null);
@@ -933,9 +935,16 @@ function FileViewerScreen() {
           <TouchableOpacity
             activeOpacity={1}
             style={s.seekTouchArea}
+            onLayout={(e) => setSeekW(e.nativeEvent.layout.width)}
             onPress={(e) => {
+              // Measured width, not (SW - 48). SW came from a module-level
+              // Dimensions.get captured ONCE at import, so after a rotation or
+              // a split-screen resize the divisor was the old screen width and
+              // every tap on the seek bar jumped to the wrong position — worse
+              // the further from the start you tapped. locationX is relative to
+              // this view, so the view's own width is the only correct divisor.
               const x = e.nativeEvent.locationX;
-              const ratio = x / (SW - 48);
+              const ratio = x / (seekW || 1);
               seekAudio(Math.max(0, Math.min(1, ratio)));
             }}
           />
