@@ -1213,12 +1213,26 @@ router.post('/:id/read', async (req, res) => {
       //
       // The NOT EXISTS subquery is the load-bearing clause: "no non-sender
       // active member has last_read_message_id less than this message id".
+      //
+      // The EXISTS guard above it is equally load-bearing: NOT EXISTS over an
+      // EMPTY set is vacuously TRUE. Without it, a chat with no other active
+      // member — a self/saved-messages chat, or one whose only peer has left_at
+      // set — satisfies "everyone has read it" trivially, and the sender's own
+      // message is hard-deleted the moment they mark the chat read. The user
+      // sees "I sent a message and it vanished immediately", with nobody having
+      // read anything. Kept in sync with the Go backend, which serves prod.
       await req.dbQuery(
         `UPDATE messages m SET expires_at = NOW()
           WHERE m.chat_id = $1
             AND m.vanish_after_read = TRUE
             AND m.expires_at IS NULL
             AND m.id <= $2
+            AND EXISTS (
+              SELECT 1 FROM chat_members cm3
+               WHERE cm3.chat_id = m.chat_id
+                 AND cm3.user_id <> m.sender_id
+                 AND cm3.left_at IS NULL
+            )
             AND NOT EXISTS (
               SELECT 1 FROM chat_members cm2
                WHERE cm2.chat_id = m.chat_id

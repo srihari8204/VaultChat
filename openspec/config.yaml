@@ -26,10 +26,17 @@ context: |
   - Deltas in changes/<id>/specs/ use `## ADDED Requirements` / `## MODIFIED Requirements` and are synced to
     openspec/specs only once the behaviour is deployed AND device-verified.
 
+  OpenSpec + Ponytail workflow
+  - OpenSpec defines required behavior; Ponytail guides the smallest correct implementation.
+  - Reuse existing code, standard-library or native features, and installed dependencies first.
+    Simplification must preserve explicit requirements, security, data-loss protection, and accessibility.
+
 rules:
   proposal:
     - State what is already built versus what is new — this codebase has many half-wired features.
     - Include a "Not building" section.
+    - Identify existing code or platform features to reuse before proposing new abstractions or dependencies.
   tasks:
     - Separate "written" from "deployed to prod" from "device-verified"; a task is not done until its stated level is reached.
     - Name the migration number and the exact files that must be copied to prod.
+    - Include a Ponytail review of the affected diff and focused validation; keep unrelated optimization out of scope.

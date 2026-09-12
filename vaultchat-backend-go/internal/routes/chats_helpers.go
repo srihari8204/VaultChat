@@ -1249,12 +1249,27 @@ func chatsRead(w http.ResponseWriter, r *http.Request) {
 			})
 		}
 		// Vanish-Mode trigger — unconditional, independent of receipt visibility.
+		//
+		// The EXISTS guard is load-bearing: NOT EXISTS over an EMPTY set is
+		// vacuously TRUE. Without it, a chat with no other active member — a
+		// self/saved-messages chat, or one whose only peer has left_at set —
+		// satisfies "every non-sender member has read it" trivially, so the
+		// sender's own message is hard-deleted the instant they mark the chat
+		// read. "I sent a message and it vanished immediately", with no one
+		// having read anything. Require at least one non-sender member to exist
+		// before the all-read test can retire a message.
 		if err := chatsExecU(ctx, user.ID,
 			`UPDATE messages m SET expires_at = NOW()
 			  WHERE m.chat_id = $1
 			    AND m.vanish_after_read = TRUE
 			    AND m.expires_at IS NULL
 			    AND m.id <= $2
+			    AND EXISTS (
+			      SELECT 1 FROM chat_members cm3
+			       WHERE cm3.chat_id = m.chat_id
+			         AND cm3.user_id <> m.sender_id
+			         AND cm3.left_at IS NULL
+			    )
 			    AND NOT EXISTS (
 			      SELECT 1 FROM chat_members cm2
 			       WHERE cm2.chat_id = m.chat_id

@@ -8,7 +8,8 @@
 import { HEADER_TOP, TAB_BAR_SPACE } from '../../constants/layout';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, AppState, Image, Modal, Pressable, RefreshControl, ScrollView, SectionList, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
+import { ActivityIndicator, Alert, AppState, Modal, Pressable, RefreshControl, ScrollView, SectionList, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
+import { Image } from 'expo-image';
 import { Swipeable } from 'react-native-gesture-handler';
 import { Ionicons } from '@expo/vector-icons';
 import { type Palette, brandAlpha } from '../../constants/theme';
@@ -678,7 +679,7 @@ export default function ChatsScreen() {
               <Pressable style={S.avCard} onPress={() => {}}>
                 <View style={S.avImgWrap}>
                   {avPhoto && authHeader ? (
-                    <Image source={{ uri: attachmentUrl(avPhoto), headers: { Authorization: authHeader } }} style={S.avImg} resizeMode="cover" />
+                    <Image source={{ uri: attachmentUrl(avPhoto), headers: { Authorization: authHeader } }} style={S.avImg} contentFit="cover" cachePolicy="memory-disk" />
                   ) : (
                     <View style={[S.avImg, S.avInitials]}><Text style={S.avInitialsTxt}>{(avTitle.trim()[0] ?? '?').toUpperCase()}</Text></View>
                   )}

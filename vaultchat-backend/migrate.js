@@ -134,6 +134,51 @@ async function cmdStatus() {
     }
     const pending = files.filter((f) => !applied.has(versionOf(f)));
     console.log(`\n  ${pending.length} pending`);
+
+    // GAP CHECK — the applied set must be contiguous.
+    //
+    // "0 pending" only means "no file on THIS disk is unapplied". It says
+    // nothing about a version that is missing from the ledger and whose file is
+    // also absent here. That combination is not hypothetical: migration 121 sat
+    // unapplied on production for weeks while this command printed `0 pending`,
+    // because the box's migrations directory was 20 files behind the repo and
+    // the runner cannot see a file that is not there.
+    //
+    // Nothing else catches it either. `SELECT max(version)` reads 127 and looks
+    // healthy, because `version` is TEXT and '127' > '120' lexically — a hole at
+    // 121 is invisible to any max()/ORDER BY check. Meanwhile the Go backend was
+    // querying the column that migration added, and failing with 42703 on every
+    // request that touched it.
+    //
+    // So: compare against the CONTIGUOUS RANGE, not against the file list.
+    const nums = [...applied].map(Number).filter(Number.isInteger).sort((a, b) => a - b);
+    if (nums.length) {
+      const gaps = [];
+      for (let v = nums[0]; v < nums[nums.length - 1]; v++) {
+        if (!applied.has(String(v).padStart(3, '0')) && !applied.has(String(v))) gaps.push(v);
+      }
+      // 053 was never authored — a numbering skip, not a skipped migration.
+      // Listed here so the check stays quiet about a known-benign hole instead
+      // of crying wolf every run, which is how a real gap gets ignored.
+      const KNOWN_UNUSED = new Set([53]);
+      const real = gaps.filter((v) => !KNOWN_UNUSED.has(v));
+
+      if (real.length) {
+        console.log(
+          `\n  ⚠ LEDGER GAP: ${real.length} version(s) absent from the ledger between ` +
+          `${nums[0]} and ${nums[nums.length - 1]}: ${real.join(', ')}\n` +
+          `    These are NOT reported as pending, because no file for them exists in\n` +
+          `    this directory. Two possible causes, and they need different fixes:\n` +
+          `      a) the version was never authored (a numbering skip) — harmless;\n` +
+          `         add it to KNOWN_UNUSED here so this stops re-reporting it.\n` +
+          `      b) the migration EXISTS in the repo but is missing from this\n` +
+          `         checkout and was never applied — fetch the file and run \`up\`.\n` +
+          `    Check each against the repo's migrations/ before dismissing it.\n`
+        );
+      } else {
+        console.log(`  ledger gaps:   none (${nums[0]}–${nums[nums.length - 1]} contiguous)`);
+      }
+    }
     const drift = await verifyChecksums(client);
     console.log(drift.length ? '' : '  checksums:     all applied migrations match their files\n');
     if (drift.length) reportDrift(drift);

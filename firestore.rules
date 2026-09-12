@@ -73,9 +73,24 @@ service cloud.firestore {
         && request.auth.uid == resource.data.ownerUid;
     }
 
-    // Public user lookup (for VaultID search, contacts)
-    match /users/{userId} {
-      allow read: if request.auth != null;
-    }
+    // REMOVED: a second `match /users/{userId}` granting
+    //   allow read: if request.auth != null;
+    //
+    // Firestore ORs match blocks — it does not take the most specific, and a
+    // later block does not "refine" an earlier one. So this block silently
+    // overrode the owner-only rule at the top of this file and made EVERY user
+    // document readable by ANY signed-in user: profile, phone, email, whatever
+    // the document holds. The intent ("public lookup for VaultID search") was
+    // reasonable; the mechanism granted far more than it needed.
+    //
+    // If public lookup is genuinely required, it must NOT be done by re-matching
+    // the private collection. Publish a deliberate projection — e.g.
+    // /publicProfiles/{userId} holding only the fields meant to be searchable —
+    // and grant read on that. Then "public" is a decision about which fields to
+    // copy, not a rule that exposes the whole document.
+    //
+    // Nothing in this app reads it today: there are no Firebase client packages
+    // in package.json and no `firebase/firestore` imports anywhere in the source
+    // tree. The Go backend uses Firebase for FCM only, never Firestore.
   }
 }

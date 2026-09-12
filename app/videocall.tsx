@@ -478,6 +478,20 @@ function VideoCallEngine() {
         {Platform.OS === 'android' && !sharing && (
           <CallControlButton variant="video" icon="phone-portrait" label="Share" onPress={toggleScreenShare} />
         )}
+        {/* The ONLY way into the filter strip. Without this button the whole
+            beautify path on this renderer is unreachable: the strip, the
+            ColorMatrix overlay and `toggleFilters` are all still here and all
+            still correct, but nothing can flip `showFilters`, so the feature
+            simply does not exist on the CALL_ENGINE_V2 screen — while the
+            legacy body below has always carried the button. Lint caught it as
+            "toggleFilters is assigned a value but never used". */}
+        <CallControlButton
+          variant="video"
+          icon="sparkles"
+          label={filter === 'none' ? 'Beauty' : f.label}
+          active={showFilters || filter !== 'none'}
+          onPress={toggleFilters}
+        />
         <CallControlButton variant="video" icon={speaker ? 'volume-high' : 'volume-low'} label={speaker ? 'Speaker' : 'Earpiece'} active={speaker} onPress={engine.toggleSpeaker} />
         <CallControlButton variant="video" icon="call" label="End" danger onPress={hangUpFromVideoScreen} />
       </ScrollView>

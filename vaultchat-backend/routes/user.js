@@ -718,11 +718,18 @@ router.get('/export', async (req, res) => {
       [req.user.id]
     );
 
-    const reactionsR = await db.query(
-      `SELECT message_id, emoji, created_at
-         FROM message_reactions WHERE user_id = $1`,
-      [req.user.id]
-    );
+    // Reactions are no longer a table. Migration 056 dropped message_reactions
+    // when reactions became E2EE reference-messages ({reactsTo, op, emoji}
+    // sealed inside an ordinary message), so this query had been failing with
+    // 42P01 and taking the WHOLE export down with it — "Export my data" was a
+    // 500 against any migrated database. The reactions are not missing from the
+    // export: they are in `messages`, sealed, like every other message. The key
+    // stays, empty, for schemaVersion 1 consumers.
+    //
+    // Same fix as internal/routes/user.go:1503 in go-api, which is what serves
+    // this route today; this copy is the emergency rollback target and had been
+    // left carrying the bug.
+    const reactions = [];
 
     res.setHeader('Content-Type', 'application/json; charset=utf-8');
     res.setHeader('Content-Disposition', `attachment; filename="vaultchat-export-${req.user.id}.json"`);
@@ -757,9 +764,7 @@ router.get('/export', async (req, res) => {
         id: r.id, filename: r.filename, mime: r.mime_type, size: r.size_bytes,
         createdAt: r.created_at,
       })),
-      reactions: reactionsR.rows.map(r => ({
-        messageId: r.message_id, emoji: r.emoji, createdAt: r.created_at,
-      })),
+      reactions,
     });
   } catch (err) {
     console.error('[user/export]', err.message);

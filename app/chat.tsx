@@ -653,7 +653,22 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
           if (cachedMsgs !== null && !cachedMsgs.length) {
             const msgsRaw = await getMessages(chatId, { limit: PAGE_SIZE });
             const msgs = await hydrateMessages(chatId, msgsRaw, knownPlain);
-            setMessages([...pendingNewestFirst, ...msgs]);
+            // MERGE, don't replace. `pendingNewestFirst` was captured BEFORE the
+            // getMessages round trip above, and the composer is already live by
+            // then (loading was cleared once the cache came back empty). Anything
+            // sent during that trip is in `prev` but not in the snapshot, so a
+            // flat replace wiped it — and the queue's 'sent' handler then found
+            // no _tempId to swap, so the message never came back on this screen.
+            setMessages(prev => {
+              const seen = new Set(msgs.map(m => String(m.id)));
+              const stillPending = [...pendingNewestFirst, ...prev].filter(x => {
+                const k = x._tempId ?? String(x.id);
+                if (seen.has(k)) return false;
+                seen.add(k);
+                return true;
+              });
+              return [...stillPending, ...msgs];
+            });
             setHasMore(msgs.length === PAGE_SIZE);
             cacheMessages(chatId, msgs).catch(() => {});   // persist for next instant open
           } else {
@@ -717,9 +732,15 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
       // a delete resolves with real=null; nothing to swap or cache here.
       if (!real) return;
       setMessages(prev => {
-        // If real already arrived via Socket.IO, just drop the temp.
+        // If real already arrived via Socket.IO, drop the temp — but OVERWRITE
+        // the row that arrived with `real` rather than trusting it. The echo can
+        // be a degraded copy (own message, plaintext not cached yet → content
+        // null); keeping it and deleting the temp is what blanked sent messages.
+        // `real` comes from the ack and always carries the plaintext.
         if (prev.some(x => x.id === real.id)) {
-          return prev.filter(x => x._tempId !== tempId);
+          return prev
+            .filter(x => x._tempId !== tempId)
+            .map(x => x.id === real.id ? ({ ...x, ...real } as DisplayMessage) : x);
         }
         return prev.map(x => x._tempId === tempId
           ? ({ ...real, _tempId: undefined, _state: undefined, _error: undefined } as DisplayMessage)
@@ -748,7 +769,16 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
     const offMSent = onMediaOutbox('sent', ({ tempId, chatId: cid, real }) => {
       if (cid !== chatId) return;
       setMessages(prev => {
-        if (prev.some(x => x.id === real.id)) return prev.filter(x => x._tempId !== tempId);
+        // Same overwrite rule as the text branch above — the echo may be the
+        // degraded own-message copy, and `real` from the ack is authoritative.
+        if (prev.some(x => x.id === real.id)) {
+          const uri = prev.find(x => x._tempId === tempId)?.meta?.localUri;
+          return prev
+            .filter(x => x._tempId !== tempId)
+            .map(x => x.id === real.id
+              ? ({ ...x, ...real, meta: { ...(real as any).meta, ...(uri ? { localUri: uri } : {}) } } as DisplayMessage)
+              : x);
+        }
         const localUri = prev.find(x => x._tempId === tempId)?.meta?.localUri;
         return prev.map(x => x._tempId === tempId
           ? ({ ...real, meta: { ...(real as any).meta, ...(localUri ? { localUri } : {}) }, _tempId: undefined, _state: undefined } as DisplayMessage)
@@ -823,7 +853,27 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
               try { fin = (await hydrateMessages(chatId, [m], undefined, { live: true }))[0] ?? m; }
               catch { fin = m; }
             }
-            setMessages(prev => prev.some(x => x.id === fin.id) ? prev : [fin, ...prev]);
+            // OUR OWN ECHO WITH NO PLAINTEXT YET — do not insert it.
+            //
+            // The server echoes our own send back to us. hydrateMessages takes the
+            // own-message path and looks up readOwnPlaintext, but that row is only
+            // written by postOnce AFTER the HTTP POST resolves — and a push on an
+            // already-open socket routinely beats the round trip. The lookup misses
+            // and we get a row with the real id and content === null.
+            //
+            // Inserting it is what breaks the send: the queue's 'sent' handler
+            // below then sees `prev.some(x => x.id === real.id)`, concludes the
+            // real row is already on screen, and DELETES the optimistic bubble that
+            // is holding the only plaintext. The survivor renders as "Message not
+            // available on this device" — the message appears, then goes blank.
+            //
+            // The sender already has a strictly better bubble, so the degraded echo
+            // has nothing to add. Guard only the insert: the persist + ack below
+            // must still run, because the ack means "this device HAS the message".
+            const ownBlankEcho = fin.senderId === me && fin.content == null;
+            if (!ownBlankEcho) {
+              setMessages(prev => prev.some(x => x.id === fin.id) ? prev : [fin, ...prev]);
+            }
             // ORDERING IS THE CONTRACT — same rule as lib/syncBackground.ts.
             //
             // The ack must mean "this device HAS the message", never "this device
@@ -1069,7 +1119,14 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
   // ── Mark-as-read (debounced) ──────────────────────────────
   useEffect(() => {
     if (!chatId || messages.length === 0) return;
-    const latestId = messages[0]?.id; // inverted list — index 0 is newest
+    // Newest REAL message, not messages[0]. The list is newest-first, but index 0
+    // is an optimistic outbox bubble whenever a send is pending — and those carry
+    // `id: 0`. A FAILED upload sits in the outbox indefinitely and is re-prepended
+    // on every focus, so `messages[0].id === 0` permanently, the guard on the next
+    // line returned early, and POST /read never fired for that chat again: its
+    // unread badge and the tab badge stayed lit forever.
+    // `.find` also skips Exit-Kit imported history, which carries negative ids.
+    const latestId = messages.find(m => m.id > 0)?.id;
     if (!latestId || latestId <= lastReadSent.current) return;
     if (readDebounce.current) clearTimeout(readDebounce.current);
     readDebounce.current = setTimeout(() => {
@@ -1093,7 +1150,23 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
     if (!chat || !meId || messages.length === 0) return;
     unreadCapturedRef.current = true;
     const myMember = chat.members.find(m => m.userId === meId);
-    const boundaryId = myMember?.lastReadMessageId ?? 0;
+    // FALL BACK TO THE SUMMARY'S OWN POINTER when there is no member row.
+    //
+    // On a warm cache this screen paints from getCachedChat first, and that row
+    // has no `members` (see the `members: cc.members ?? []` above): cacheChats
+    // and cacheChatDetail share ONE row keyed by chat id in lib/localDb.ts, and
+    // the Chats-tab focus effect writes a members-less ChatSummary last, so the
+    // detail is clobbered every time the user backs out to the list.
+    //
+    // boundaryId then fell to 0, which counts EVERY incoming message in the page
+    // as unread — the divider reappeared identically on every open, forever. The
+    // server's real answer does arrive (getChat below), but unreadCapturedRef has
+    // already latched by then, so it was ignored.
+    //
+    // myLastReadId IS on the summary, so it survives that clobber.
+    const boundaryId = myMember?.lastReadMessageId
+      ?? (chat as { myLastReadId?: number }).myLastReadId
+      ?? 0;
     const count = messages.filter(m => m.id > 0 && m.id > boundaryId && m.senderId !== meId).length;
     if (count > 0) setUnreadInfo({ boundaryId, count });
   }, [chat, messages, meId]);
@@ -2965,6 +3038,9 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
           // Unread separator above the first message newer than the read boundary.
           const showUnread = !!unreadInfo && item.id > unreadInfo.boundaryId &&
             (!older || older.id <= unreadInfo.boundaryId);
+          // Resolve once per row — this used to run twice (once for the target,
+          // once inside an IIFE for its member), doubling the lookup per bubble.
+          const replyTarget = resolveReply(item.replyToId);
           // Exit Kit: imported history carries negative ids, so the seam between
           // it and real VaultChat messages is exactly where the sign flips. Two
           // cases — the transition, and the top of a chat that is ALL imported
@@ -3034,11 +3110,8 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
               onJumpTo={jumpToMessage}
               reactionsForMsg={mergedReactions[item.id]}
               onToggleReaction={(emoji) => toggleReaction(item, emoji)}
-              replyTarget={resolveReply(item.replyToId)}
-              replyTargetMember={(() => {
-                const t = resolveReply(item.replyToId);
-                return t ? membersById.get(t.senderId) : undefined;
-              })()}
+              replyTarget={replyTarget}
+              replyTargetMember={replyTarget ? membersById.get(replyTarget.senderId) : undefined}
               highlight={searchOpen && searchQ.trim().length > 0 ? searchQ.trim() : null}
               tiltRevealed={tiltRevealed}
               grouped={grouped}

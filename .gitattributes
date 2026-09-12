@@ -1,5 +1,12 @@
 
 # Shell/python deployed to Linux must stay LF — a CRLF heredoc terminator
 # makes bash report "unexpected end of file" only once it is on the server.
-scripts/*.sh text eol=lf
-scripts/*.py text eol=lf
+#
+# ALL of them, not just scripts/. The pin was scripts/-only while the scripts
+# that actually run on the box live elsewhere too — vaultchat-backend/deploy.sh
+# and smoke-test.sh had no eol attribute at all, and the root apply*.sh none
+# either. They survive today only because this checkout happens to have
+# core.autocrlf=true, which is per-machine config, not a property of the repo —
+# exactly the thing an attribute is for.
+*.sh text eol=lf
+*.py text eol=lf

@@ -10,7 +10,9 @@ import { HEADER_TOP } from '../constants/layout';
 import React, { useState, useEffect, useCallback , useMemo} from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, FlatList, SectionList, Dimensions, StatusBar,
-  ActivityIndicator, Linking, Image, Modal, useWindowDimensions } from 'react-native';
+  ActivityIndicator, Linking, Modal, useWindowDimensions } from 'react-native';
+// expo-image: the 3-up grid recycles tiles, so cache + recyclingKey matter here.
+import { Image } from 'expo-image';
 import { useLocalSearchParams, Stack, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { type Palette } from '../constants/theme';
@@ -67,7 +69,7 @@ function MediaThumb({ m, style, resizeMode = 'cover', resolveSrc, placeholder }:
     return () => { cancel = true; };
   }, [m, resolveSrc]);
   if (!src) return <View style={[style, { backgroundColor: placeholder }]} />;
-  return <Image source={src} style={style} resizeMode={resizeMode} />;
+  return <Image source={src} style={style} contentFit={resizeMode} cachePolicy="memory-disk" recyclingKey={String(m.id)} />;
 }
 
 type TabId = 'photos' | 'videos' | 'files' | 'links';

@@ -2,6 +2,33 @@
 
 This is an [Expo](https://expo.dev) project created with [`create-expo-app`](https://www.npmjs.com/package/create-expo-app).
 
+## Coding with OpenSpec and Ponytail
+
+[OpenSpec](https://github.com/Fission-AI/OpenSpec) manages proposals, specs, and
+implementation tasks. [Ponytail](https://github.com/DietrichGebert/ponytail) guides
+small, correct implementations and reviews unnecessary complexity. The shared
+workflow is in [AGENTS.md](AGENTS.md), with project constraints in
+[openspec/config.yaml](openspec/config.yaml).
+
+For a new developer machine with Node.js and Codex installed:
+
+```sh
+npm install -g @fission-ai/openspec@1.4.1
+openspec init --tools codex
+codex plugin marketplace add DietrichGebert/ponytail
+codex plugin add ponytail@ponytail
+```
+
+Restart Codex after installation. In Codex CLI, use `/hooks` to review and trust
+Ponytail's lifecycle hooks if you want automatic plugin activation. The project
+rules in `AGENTS.md` provide the implementation guidance without those hooks.
+On Windows, ensure the npm global bin directory (`npm prefix -g`) is on PATH.
+
+Start with `openspec list --json` to find existing work. In a Codex prompt, use
+`$openspec-propose <feature>` to plan or `$openspec-apply-change <change>` to
+implement, and ask Ponytail to review the resulting diff. Validate artifacts
+with `openspec validate <change> --strict` and run the relevant project checks.
+
 ## Get started
 
 1. Install dependencies

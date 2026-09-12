@@ -31,6 +31,10 @@ import * as Sharing from 'expo-sharing';
 import { useRouter } from 'expo-router';
 import { memo, useCallback, useEffect, useRef, useState, useMemo } from 'react';
 import { ActivityIndicator, Alert, Image, Linking, Platform, ScrollView, Text, TouchableOpacity, View } from 'react-native';
+// expo-image for every bubble thumbnail: memory+disk cache and recyclingKey, so
+// an inverted virtualized list stops re-decoding on each mount and recycled rows
+// don't flash the previous row's image.
+import { Image as ExpoImage } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
 import { IMPORT_SOURCE } from '../../constants/importSources';
 import { Swipeable } from 'react-native-gesture-handler';
@@ -492,6 +496,9 @@ export function FileBubble({
   const S = useS();
   const [busy, setBusy] = useState(false);
   const fileRouter = useRouter();
+  // The data URI is a ~KB string built from base64; build it once per thumb,
+  // not once per render.
+  const thumbUri = useMemo(() => (thumb ? thumbDataUri(thumb) : null), [thumb]);
 
   // "1 page · 66 KB · PDF". Each part is dropped when it is not known, so a
   // non-PDF still reads exactly as it always did.
@@ -575,10 +582,11 @@ export function FileBubble({
 
   // PDF with a page-1 preview → WhatsApp-style document card (preview on top,
   // filename row below). Other files → the plain icon + name row.
-  if (thumb) {
+  if (thumbUri) {
     return (
       <TouchableOpacity style={S.fileCard} onPress={onOpen} activeOpacity={0.85} disabled={busy}>
-        <Image source={{ uri: thumbDataUri(thumb) }} style={S.filePreview} resizeMode="cover" />
+        {/* data: URI — already in memory, nothing to fetch, so memory cache only. */}
+        <ExpoImage source={{ uri: thumbUri }} style={S.filePreview} contentFit="cover" cachePolicy="memory" recyclingKey={attachmentId} />
         <View style={S.fileCardRow}>
           <View style={[S.fileIcon, isMine ? S.fileIconMine : S.fileIconTheirs]}>
             {busy ? <ActivityIndicator size="small" color="#fff" /> : <Ionicons name="document-text" size={20} color="#fff" />}
@@ -767,6 +775,8 @@ function ImageAttachment({ attachmentId, resolvedUri, isMine, mime, thumb, encry
   // predates a reinstall, which destroys both the per-file keys and the E2EE
   // identity). Distinct from a failed download — retrying can never fix it.
   const [keyMissing, setKeyMissing] = useState(false);
+  // Built once per thumb instead of once per render (it is a ~KB base64 string).
+  const thumbUri = useMemo(() => (thumb ? thumbDataUri(thumb) : null), [thumb]);
   // Publish to the device gallery once the bytes are a real local file. Only
   // file:// — a remote URL is not ours to copy, and the export itself refuses
   // view-once media and honours the user's setting.
@@ -820,7 +830,7 @@ function ImageAttachment({ attachmentId, resolvedUri, isMine, mime, thumb, encry
     if (progress != null) {
       return (
         <View style={S.attachedImage}>
-          {thumb ? <Image source={{ uri: thumbDataUri(thumb) }} style={S.attachedImage} resizeMode="cover" blurRadius={2} /> : <View style={[S.attachedImage, S.imageError]} />}
+          {thumbUri ? <ExpoImage source={{ uri: thumbUri }} style={S.attachedImage} contentFit="cover" blurRadius={2} cachePolicy="memory" recyclingKey={attachmentId} /> : <View style={[S.attachedImage, S.imageError]} />}
           <View style={S.dlOverlay}><ProgressRing progress={progress} /></View>
         </View>
       );
@@ -829,7 +839,7 @@ function ImageAttachment({ attachmentId, resolvedUri, isMine, mime, thumb, encry
     if (needTap) {
       return (
         <TouchableOpacity activeOpacity={0.85} onPress={download} style={S.attachedImage}>
-          {thumb ? <Image source={{ uri: thumbDataUri(thumb) }} style={S.attachedImage} resizeMode="cover" blurRadius={3} /> : <View style={[S.attachedImage, S.imageError]} />}
+          {thumbUri ? <ExpoImage source={{ uri: thumbUri }} style={S.attachedImage} contentFit="cover" blurRadius={3} cachePolicy="memory" recyclingKey={attachmentId} /> : <View style={[S.attachedImage, S.imageError]} />}
           <View style={S.dlOverlay}>
             <Ionicons name="arrow-down-circle" size={40} color="#fff" />
             <Text style={S.dlOverlayTxt}>Download</Text>
@@ -839,10 +849,10 @@ function ImageAttachment({ attachmentId, resolvedUri, isMine, mime, thumb, encry
     }
     // Instant low-res preview from the embedded thumbnail while the full image
     // downloads (WhatsApp-style progressive load).
-    if (thumb) return <Image source={{ uri: thumbDataUri(thumb) }} style={S.attachedImage} resizeMode="cover" />;
+    if (thumbUri) return <ExpoImage source={{ uri: thumbUri }} style={S.attachedImage} contentFit="cover" cachePolicy="memory" recyclingKey={attachmentId} />;
     return <View style={[S.attachedImage, S.imageError]}><ActivityIndicator color={colors.primary} /></View>;
   }
-  return <Image source={{ uri }} style={S.attachedImage} resizeMode="cover" onError={onError} />;
+  return <ExpoImage source={{ uri }} style={S.attachedImage} contentFit="cover" cachePolicy="memory-disk" recyclingKey={attachmentId} onError={onError} />;
 }
 
 // ─── Video bubble ────────────────────────────────────────────
@@ -884,6 +894,8 @@ function VideoBubble({
     }
   }, [noteUri, viewOnce, attachmentId]);
   const [busy, setBusy] = useState(false);
+  // Built once per thumb instead of once per render (it is a ~KB base64 string).
+  const thumbUri = useMemo(() => (thumb ? thumbDataUri(thumb) : null), [thumb]);
 
   const onTap = useCallback(async () => {
     if (!isNote) { onOpen?.(); return; }
@@ -916,8 +928,8 @@ function VideoBubble({
           onPlaybackStatusUpdate={(st: any) => { if (st?.didJustFinish) setPlaying(false); }}
           onError={() => { setPlaying(false); onErrorOnce?.(); }}
         />
-      ) : thumb ? (
-        <Image source={{ uri: thumbDataUri(thumb) }} style={isNote ? S.videoNoteView : S.videoView} resizeMode="cover" />
+      ) : thumbUri ? (
+        <ExpoImage source={{ uri: thumbUri }} style={isNote ? S.videoNoteView : S.videoView} contentFit="cover" cachePolicy="memory" recyclingKey={attachmentId} />
       ) : (
         <View style={[isNote ? S.videoNoteView : S.videoView, S.videoPlaceholder]}>
           <Ionicons name="videocam" size={34} color="#5B6470" />

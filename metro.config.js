@@ -58,4 +58,21 @@ config.resolver.resolveRequest = (context, moduleName, platform) => {
   return context.resolveRequest(context, moduleName, platform);
 };
 
+// ─── Inline requires (cold start) ────────────────────────────────
+// @expo/metro-config ships `inlineRequires: false` (ExpoMetroConfig.js), so
+// every top-level import in a module is evaluated the moment that module is
+// first required. app/_layout.tsx imports ~12 services at module scope, which
+// means all of them parse and run before the first frame. With inlining, a
+// require moves to its first USE site, so a service that is only touched on a
+// later screen no longer costs anything at boot.
+//
+// `experimentalImportSupport` must stay true — it is Expo's default and the
+// two are set together; dropping it here would silently change ESM semantics.
+config.transformer.getTransformOptions = async () => ({
+  transform: {
+    experimentalImportSupport: true,
+    inlineRequires: true,
+  },
+});
+
 module.exports = config;

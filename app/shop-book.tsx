@@ -12,7 +12,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { KeyboardSafe } from '../components/ui';
 import {
-  View, Text, TextInput, TouchableOpacity, ScrollView, StyleSheet,
+  View, Text, TextInput, TouchableOpacity, ScrollView, FlatList, StyleSheet,
   Alert, ActivityIndicator, RefreshControl, Switch, Platform, Share, Modal,
   Linking,
 } from 'react-native';
@@ -415,9 +415,14 @@ function FindShops({ onOpen, favIds, onToggleFav, onProductSearch }: {
     [shops, q],
   );
 
-  return (
-    <ScrollView contentContainerStyle={s.body}
-      refreshControl={<RefreshControl refreshing={loading} onRefresh={() => load(cat, coords)} tintColor={C.green} />}>
+  // The shop list IS this screen's scroller now. A FlatList nested inside a
+  // vertical ScrollView virtualizes nothing, so everything that used to sit
+  // above the rows travels along as the list header instead.
+  // Held as an element and not a component function: a fresh function identity
+  // on every render remounts the header, and the search box would drop the
+  // keyboard on each keystroke.
+  const header = (
+    <>
       <View style={s.searchRow}>
         <Ionicons name="search" size={18} color={C.sub} />
         <TextInput style={s.searchInput} placeholder="Search shops nearby" placeholderTextColor={C.sub}
@@ -465,11 +470,23 @@ function FindShops({ onOpen, favIds, onToggleFav, onProductSearch }: {
         <Empty icon="storefront-outline" text="No shops found nearby yet." />
       )}
 
-      {filtered.map((sh) => (
-        <ShopCard key={sh.id} shop={sh} onOpen={() => onOpen(sh)}
-          isFav={favIds.has(sh.id)} onToggleFav={() => onToggleFav(sh.id)} />
-      ))}
-    </ScrollView>
+    </>
+  );
+
+  const renderShop = useCallback(({ item: sh }: { item: SB.Shop }) => (
+    <ShopCard shop={sh} onOpen={() => onOpen(sh)}
+      isFav={favIds.has(sh.id)} onToggleFav={() => onToggleFav(sh.id)} />
+  ), [onOpen, favIds, onToggleFav]);
+
+  return (
+    <FlatList
+      data={filtered}
+      keyExtractor={(sh) => sh.id}
+      renderItem={renderShop}
+      ListHeaderComponent={header}
+      contentContainerStyle={s.body}
+      refreshControl={<RefreshControl refreshing={loading} onRefresh={() => load(cat, coords)} tintColor={C.green} />}
+    />
   );
 }
 
@@ -545,10 +562,12 @@ function ProductSearch({ onBack, onOpenShop }: { onBack: () => void; onOpenShop:
     return [...results].sort((a, b) => openRank(a) - openRank(b) || (a.distanceKm ?? 1e9) - (b.distanceKm ?? 1e9));
   }, [results, sort]);
 
-  return (
+  // Everything above the results becomes the list header — the results ARE the
+  // scroller now, and a FlatList inside a ScrollView virtualizes nothing.
+  // Element, not component function: remounting the header on every render
+  // would take the keyboard away from the search box mid-word.
+  const header = (
     <>
-      <SubHeader title={t('shops.compare')} onBack={onBack} />
-      <ScrollView contentContainerStyle={s.body} keyboardShouldPersistTaps="handled">
         <View style={s.searchRow}>
           <Ionicons name="search" size={18} color={C.sub} />
           <TextInput style={s.searchInput} placeholder="e.g. Maggi, Atta, Paracetamol"
@@ -571,8 +590,11 @@ function ProductSearch({ onBack, onOpenShop }: { onBack: () => void; onOpenShop:
         {searched && !loading && results.length === 0 && (
           <Empty icon="search-outline" text="No shop nearby lists that yet." />
         )}
-        {shown.map((h, i) => (
-          <TouchableOpacity key={`${h.shopId}-${i}`} style={s.card} onPress={() => onOpenShop(h.shopId)}>
+    </>
+  );
+
+  const renderHit = useCallback(({ item: h }: { item: SB.ProductHit }) => (
+          <TouchableOpacity style={s.card} onPress={() => onOpenShop(h.shopId)}>
             <View style={{ flex: 1 }}>
               <Text style={s.cardTitle}>{h.productName}{h.unit ? ` · ${h.unit}` : ''}{h.productBrand ? ` (${h.productBrand})` : ''}</Text>
               <Text style={s.cardSub}>
@@ -588,8 +610,22 @@ function ProductSearch({ onBack, onOpenShop }: { onBack: () => void; onOpenShop:
             </View>
             <Ionicons name="chevron-forward" size={20} color={C.sub} />
           </TouchableOpacity>
-        ))}
-      </ScrollView>
+  ), [onOpenShop]);
+
+  return (
+    <>
+      <SubHeader title={t('shops.compare')} onBack={onBack} />
+      <FlatList
+        data={shown}
+        // A ProductHit carries no id of its own and one shop can appear twice,
+        // so the key names the row's product. The index would have done until
+        // "Open now" started re-sorting the same results in place.
+        keyExtractor={(h) => `${h.shopId}-${h.productName}-${h.productBrand}-${h.unit}`}
+        renderItem={renderHit}
+        ListHeaderComponent={header}
+        contentContainerStyle={s.body}
+        keyboardShouldPersistTaps="handled"
+      />
     </>
   );
 }
@@ -796,8 +832,13 @@ function Catalog({ shop, cart, setCart, onCart }: {
     (p) => !q.trim() || p.name.toLowerCase().includes(q.trim().toLowerCase()) || p.brand.toLowerCase().includes(q.trim().toLowerCase()),
   );
 
-  return (
-    <ScrollView contentContainerStyle={s.body} keyboardShouldPersistTaps="handled">
+  // The catalog IS the scroller. A shop with a real catalog mounted every row at
+  // once here; search rides in the list header and the type-any-product
+  // fallback in the footer. Both are elements rather than component functions —
+  // a new function identity each render remounts them and the text inputs would
+  // lose the keyboard mid-word.
+  const header = (
+    <>
       <View style={s.searchRow}>
         <Ionicons name="search" size={18} color={C.sub} />
         <TextInput style={s.searchInput} placeholder="Search products" placeholderTextColor={C.sub}
@@ -807,8 +848,11 @@ function Catalog({ shop, cart, setCart, onCart }: {
       <Text style={s.sectionLabel}>Catalog</Text>
       {loading && <LoadingState />}
       {!loading && filtered.length === 0 && <Empty icon="pricetags-outline" text="No listed products. Use “Type any product” below." />}
-      {filtered.map((p) => (
-        <View key={p.id} style={s.card}>
+    </>
+  );
+
+  const renderProduct = ({ item: p }: { item: SB.Product }) => (
+        <View style={s.card}>
           <View style={{ flex: 1 }}>
             <Text style={s.cardTitle}>{p.name}{p.unit ? ` · ${p.unit}` : ''}</Text>
             <Text style={s.cardSub}>{[p.brand, p.category].filter(Boolean).join(' · ')}</Text>
@@ -841,8 +885,10 @@ function Catalog({ shop, cart, setCart, onCart }: {
             );
           })()}
         </View>
-      ))}
+  );
 
+  const footer = (
+    <>
       {/* The FALLBACK path, so it lives below the catalog and starts closed. */}
       <TouchableOpacity style={s.outlineBtn} onPress={() => setTypeOpen(!typeOpen)}>
         <Ionicons name={typeOpen ? 'chevron-up' : 'chevron-down'} size={16} color={C.green} />
@@ -901,7 +947,19 @@ function Catalog({ shop, cart, setCart, onCart }: {
           <Text style={s.stickyCartText}>{money(cartTotal(cart))}</Text>
         </TouchableOpacity>
       )}
-    </ScrollView>
+    </>
+  );
+
+  return (
+    <FlatList
+      data={filtered}
+      keyExtractor={(p) => p.id}
+      renderItem={renderProduct}
+      ListHeaderComponent={header}
+      ListFooterComponent={footer}
+      contentContainerStyle={s.body}
+      keyboardShouldPersistTaps="handled"
+    />
   );
 }
 
@@ -1050,15 +1108,10 @@ function MyOrders({ onOpen }: { onOpen: (id: string) => void }) {
   }, []);
   useEffect(() => { load(); }, [load]);
 
-  return (
-    <ScrollView contentContainerStyle={s.body}
-      refreshControl={<RefreshControl refreshing={loading} onRefresh={load} tintColor={C.green} />}>
-      <Text style={s.sectionLabel}>My Orders</Text>
-      {loading && <LoadingState />}
-      {!loading && orders.length === 0 && <Empty icon="receipt-outline" text="No orders yet." />}
-      {orders.map((o) => (
+  // An order history only grows, so the list itself is the scroller and the
+  // label + loading/empty states ride above it as the header.
+  const renderOrder = useCallback(({ item: o }: { item: SB.OrderSummary }) => (
         <TxnRow
-          key={o.id}
           icon="receipt-outline"
           title={o.shopName || 'Shop'}
           // The date was already fetched on OrderSummary and never shown. An
@@ -1070,8 +1123,23 @@ function MyOrders({ onOpen }: { onOpen: (id: string) => void }) {
         >
           <StatusPill status={o.status} />
         </TxnRow>
-      ))}
-    </ScrollView>
+  ), [onOpen]);
+
+  return (
+    <FlatList
+      data={orders}
+      keyExtractor={(o) => o.id}
+      renderItem={renderOrder}
+      ListHeaderComponent={(
+        <>
+          <Text style={s.sectionLabel}>My Orders</Text>
+          {loading && <LoadingState />}
+          {!loading && orders.length === 0 && <Empty icon="receipt-outline" text="No orders yet." />}
+        </>
+      )}
+      contentContainerStyle={s.body}
+      refreshControl={<RefreshControl refreshing={loading} onRefresh={load} tintColor={C.green} />}
+    />
   );
 }
 
@@ -1464,25 +1532,34 @@ function CustomerLedgerView({ shop, onBack }: { shop: SB.Shop; onBack: () => voi
     try { setLedger(await SB.customerLedger(shop.id)); } catch {} finally { setLoading(false); }
   })(); }, [shop.id]);
 
+  const renderEntry = ({ item: e }: { item: SB.LedgerEntry }) => <LedgerRow entry={e} />;
+
   return (
     <>
       <SubHeader title={`Ledger · ${shop.name}`} onBack={onBack} />
-      <ScrollView contentContainerStyle={s.body}>
-        {loading && <LoadingState />}
-        {ledger && (
+      {/* A ledger only ever grows — years of a shop's purchases end up here —
+          so the transactions are the scroller and the totals ride above them. */}
+      <FlatList
+        data={ledger?.entries ?? []}
+        keyExtractor={(e) => e.id}
+        renderItem={renderEntry}
+        ListHeaderComponent={(
           <>
-            <View style={{ flexDirection: 'row', gap: 10 }}>
-              <StatCard label="Total Pending" value={money(ledger.pending)} tone="danger" />
-              <StatCard label="Total Paid" value={money(ledger.totalPaid)} tone="green" />
-            </View>
-            <Text style={s.sectionLabel}>Transactions</Text>
-            {ledger.entries.length === 0 && <Empty icon="book-outline" text="No transactions yet." />}
-            {ledger.entries.map((e) => (
-              <LedgerRow key={e.id} entry={e} />
-            ))}
+            {loading && <LoadingState />}
+            {ledger && (
+              <>
+                <View style={{ flexDirection: 'row', gap: 10 }}>
+                  <StatCard label="Total Pending" value={money(ledger.pending)} tone="danger" />
+                  <StatCard label="Total Paid" value={money(ledger.totalPaid)} tone="green" />
+                </View>
+                <Text style={s.sectionLabel}>Transactions</Text>
+                {ledger.entries.length === 0 && <Empty icon="book-outline" text="No transactions yet." />}
+              </>
+            )}
           </>
         )}
-      </ScrollView>
+        contentContainerStyle={s.body}
+      />
     </>
   );
 }
@@ -2158,24 +2235,11 @@ function OwnerOrders() {
     return stop;
   }, [filter, load]);
 
-  if (open) return <OwnerOrderDetail orderId={open} onBack={() => { setOpen(null); load(filter); }} />;
-
-  return (
-    <>
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={s.filterBar} contentContainerStyle={{ paddingHorizontal: 12 }}>
-        {OWNER_ORDER_TABS.map((t) => (
-          <TouchableOpacity key={t.id} style={[s.filterChip, filter === t.id && s.filterChipActive]} onPress={() => setFilter(t.id)}>
-            <Text style={[s.filterChipText, filter === t.id && s.filterChipTextActive]}>{t.label}</Text>
-          </TouchableOpacity>
-        ))}
-      </ScrollView>
-      <ScrollView contentContainerStyle={s.body}
-        refreshControl={<RefreshControl refreshing={loading} onRefresh={() => load(filter)} tintColor={C.green} />}>
-        {loading && <LoadingState />}
-        {!loading && orders.length === 0 && <Empty icon="receipt-outline" text={`No ${filter} orders.`} />}
-        {orders.map((o) => (
+  // A busy shop's order list is unbounded, so it is the scroller rather than a
+  // block of rows inside one. Declared above the early return below so the hook
+  // order never depends on whether an order is open.
+  const renderOrder = useCallback(({ item: o }: { item: SB.OrderSummary }) => (
           <TxnRow
-            key={o.id}
             icon="receipt-outline"
             title={o.customerName || 'Customer'}
             sub={`${o.id.slice(0, 8).toUpperCase()} · ${orderStamp(o.createdAt)}`}
@@ -2189,8 +2253,32 @@ function OwnerOrders() {
           >
             <StatusPill status={o.status} />
           </TxnRow>
+  ), []);
+
+  if (open) return <OwnerOrderDetail orderId={open} onBack={() => { setOpen(null); load(filter); }} />;
+
+  return (
+    <>
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={s.filterBar} contentContainerStyle={{ paddingHorizontal: 12 }}>
+        {OWNER_ORDER_TABS.map((t) => (
+          <TouchableOpacity key={t.id} style={[s.filterChip, filter === t.id && s.filterChipActive]} onPress={() => setFilter(t.id)}>
+            <Text style={[s.filterChipText, filter === t.id && s.filterChipTextActive]}>{t.label}</Text>
+          </TouchableOpacity>
         ))}
       </ScrollView>
+      <FlatList
+        data={orders}
+        keyExtractor={(o) => o.id}
+        renderItem={renderOrder}
+        ListHeaderComponent={(
+          <>
+            {loading && <LoadingState />}
+            {!loading && orders.length === 0 && <Empty icon="receipt-outline" text={`No ${filter} orders.`} />}
+          </>
+        )}
+        contentContainerStyle={s.body}
+        refreshControl={<RefreshControl refreshing={loading} onRefresh={() => load(filter)} tintColor={C.green} />}
+      />
     </>
   );
 }
@@ -2421,13 +2509,26 @@ function OwnerProducts({ shop }: { shop: SB.Shop }) {
     finally { setSeeding(false); }
   };
 
+  // A catalog grows without limit, so it is the scroller and the buttons above
+  // it become the list header. Declared before the early returns below so the
+  // hook order does not change with which editor is open.
+  const renderProduct = useCallback(({ item: p }: { item: SB.Product }) => (
+        <TouchableOpacity style={s.card} onPress={() => setEdit(p)}>
+          <View style={{ flex: 1 }}>
+            <Text style={[s.cardTitle, !p.enabled && { color: C.sub }]}>{p.name}{p.unit ? ` · ${p.unit}` : ''}</Text>
+            <Text style={s.cardSub}>{[p.brand, p.category].filter(Boolean).join(' · ')}</Text>
+            <Text style={s.price}>{formatMoney(p.price, shop.currency)} · {p.inStock ? 'In stock' : 'Out of stock'}{!p.enabled ? ' · Disabled' : ''}</Text>
+          </View>
+          <Ionicons name="create-outline" size={20} color={C.sub} />
+        </TouchableOpacity>
+  ), [shop.currency]);
+
   if (edit === 'bulk') return <BulkAdd currency={shop.currency} onDone={() => { setEdit(null); load(); }} />;
   if (edit === 'stock') return <StockScreen currency={shop.currency} onBack={() => { setEdit(null); load(); }} />;
   if (edit) return <ProductEditor product={edit === 'new' ? null : edit} currency={shop.currency} onDone={() => { setEdit(null); load(); }} />;
 
-  return (
-    <ScrollView contentContainerStyle={s.body}
-      refreshControl={<RefreshControl refreshing={loading} onRefresh={load} tintColor={C.green} />}>
+  const header = (
+    <>
       <View style={{ flexDirection: 'row', gap: 8 }}>
         <TouchableOpacity style={[s.primaryBtn, { flex: 1, marginTop: 0 }]} onPress={() => setEdit('new')}>
           <Ionicons name="add" size={18} color="#fff" />
@@ -2450,17 +2551,18 @@ function OwnerProducts({ shop }: { shop: SB.Shop }) {
       )}
       {loading && <LoadingState />}
       {!loading && products.length === 0 && <Empty icon="pricetags-outline" text="No products yet." />}
-      {products.map((p) => (
-        <TouchableOpacity key={p.id} style={s.card} onPress={() => setEdit(p)}>
-          <View style={{ flex: 1 }}>
-            <Text style={[s.cardTitle, !p.enabled && { color: C.sub }]}>{p.name}{p.unit ? ` · ${p.unit}` : ''}</Text>
-            <Text style={s.cardSub}>{[p.brand, p.category].filter(Boolean).join(' · ')}</Text>
-            <Text style={s.price}>{formatMoney(p.price, shop.currency)} · {p.inStock ? 'In stock' : 'Out of stock'}{!p.enabled ? ' · Disabled' : ''}</Text>
-          </View>
-          <Ionicons name="create-outline" size={20} color={C.sub} />
-        </TouchableOpacity>
-      ))}
-    </ScrollView>
+    </>
+  );
+
+  return (
+    <FlatList
+      data={products}
+      keyExtractor={(p) => p.id}
+      renderItem={renderProduct}
+      ListHeaderComponent={header}
+      contentContainerStyle={s.body}
+      refreshControl={<RefreshControl refreshing={loading} onRefresh={load} tintColor={C.green} />}
+    />
   );
 }
 
@@ -2650,6 +2752,20 @@ function PurchasesScreen({ currency, onBack }: { currency?: string; onBack: () =
 
   const money = (n: number) => formatMoney(n, currency);
 
+  // Purchase history is append-only, so the rows are the scroller. Declared
+  // ahead of the "record a purchase" early return to keep the hook order fixed.
+  const renderPurchase = useCallback(({ item: p }: { item: SB.PurchaseSummary }) => (
+          <View style={s.card}>
+            <View style={{ flex: 1 }}>
+              <Text style={s.cardTitle}>{p.supplierName || 'Supplier'}</Text>
+              <Text style={s.cardSub}>
+                {p.purchasedOn}{p.invoiceNumber ? ` · ${p.invoiceNumber}` : ''} · {p.itemCount} item(s)
+              </Text>
+            </View>
+            <Text style={s.price}>{formatMoney(p.total, currency)}</Text>
+          </View>
+  ), [currency]);
+
   const addLine = () => {
     if (!pick || num(qty) <= 0) { Alert.alert('Pick a product and a quantity'); return; }
     setItems([...items, {
@@ -2745,32 +2861,29 @@ function PurchasesScreen({ currency, onBack }: { currency?: string; onBack: () =
   return (
     <>
       <SubHeader title="Purchases" onBack={onBack} />
-      <ScrollView contentContainerStyle={s.body}
-        refreshControl={<RefreshControl refreshing={loading} onRefresh={load} tintColor={C.green} />}>
-        <TouchableOpacity style={[s.primaryBtn, { marginTop: 0 }]} onPress={() => setAdding(true)}>
-          <Ionicons name="add" size={18} color="#fff" />
-          <Text style={s.primaryBtnText}>Record a purchase</Text>
-        </TouchableOpacity>
-        {rows.length > 0 && (
-          <View style={s.panel}>
-            <Row label="Total spend" value={money(spend)} bold />
-          </View>
+      <FlatList
+        data={rows}
+        keyExtractor={(p) => p.id}
+        renderItem={renderPurchase}
+        ListHeaderComponent={(
+          <>
+            <TouchableOpacity style={[s.primaryBtn, { marginTop: 0 }]} onPress={() => setAdding(true)}>
+              <Ionicons name="add" size={18} color="#fff" />
+              <Text style={s.primaryBtnText}>Record a purchase</Text>
+            </TouchableOpacity>
+            {rows.length > 0 && (
+              <View style={s.panel}>
+                <Row label="Total spend" value={money(spend)} bold />
+              </View>
+            )}
+            {!loading && rows.length === 0 && (
+              <Empty icon="cart-outline" text="No purchases yet. Recording what stock costs is what makes profit reporting possible." />
+            )}
+          </>
         )}
-        {!loading && rows.length === 0 && (
-          <Empty icon="cart-outline" text="No purchases yet. Recording what stock costs is what makes profit reporting possible." />
-        )}
-        {rows.map((p) => (
-          <View key={p.id} style={s.card}>
-            <View style={{ flex: 1 }}>
-              <Text style={s.cardTitle}>{p.supplierName || 'Supplier'}</Text>
-              <Text style={s.cardSub}>
-                {p.purchasedOn}{p.invoiceNumber ? ` · ${p.invoiceNumber}` : ''} · {p.itemCount} item(s)
-              </Text>
-            </View>
-            <Text style={s.price}>{money(p.total)}</Text>
-          </View>
-        ))}
-      </ScrollView>
+        contentContainerStyle={s.body}
+        refreshControl={<RefreshControl refreshing={loading} onRefresh={load} tintColor={C.green} />}
+      />
     </>
   );
 }
@@ -2817,32 +2930,11 @@ function ReturnsScreen({ currency, onBack }: { currency?: string; onBack: () => 
     finally { setBusy(false); }
   };
 
-  return (
-    <>
-      <SubHeader title="Returns" onBack={onBack} />
-      <Modal visible={!!refuse} transparent animationType="fade" onRequestClose={() => setRefuse(null)}>
-        <View style={s.modalWrap}>
-          <View style={s.modalCard}>
-            <Text style={s.modalTitle}>Why are you declining?</Text>
-            <Text style={s.hint}>The customer sees this. A refusal with no reason is the most complained-about outcome of any returns process.</Text>
-            <TextInput style={s.input} placeholder="e.g. Item shows use beyond inspection"
-              placeholderTextColor={C.sub} value={note} onChangeText={setNote} autoFocus multiline />
-            <TouchableOpacity style={s.dangerBtn}
-              onPress={() => { if (note.trim() && refuse) void decide(refuse, false, true, note.trim()); }}>
-              <Text style={s.dangerBtnText}>Decline return</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={s.outlineBtn} onPress={() => setRefuse(null)}>
-              <Text style={s.outlineBtnText}>Cancel</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      </Modal>
-
-      <ScrollView contentContainerStyle={s.body}
-        refreshControl={<RefreshControl refreshing={loading} onRefresh={load} tintColor={C.green} />}>
-        {!loading && rows.length === 0 && <Empty icon="arrow-undo-outline" text="No returns." />}
-        {rows.map((rt) => (
-          <View key={rt.id} style={s.card}>
+  // Left a plain function rather than useCallback: it closes over `approve`,
+  // which is rebuilt on every render anyway, so memoising here would only risk
+  // handing a row a stale one.
+  const renderReturn = ({ item: rt }: { item: SB.ShopReturn }) => (
+          <View style={s.card}>
             <View style={{ flex: 1 }}>
               <Text style={s.cardTitle}>{rt.customerName || 'Customer'} · {money(rt.refundTotal)}</Text>
               <Text style={s.cardSub}>📝 {rt.reason}</Text>
@@ -2866,8 +2958,39 @@ function ReturnsScreen({ currency, onBack }: { currency?: string; onBack: () => 
               )}
             </View>
           </View>
-        ))}
-      </ScrollView>
+  );
+
+  return (
+    <>
+      <SubHeader title="Returns" onBack={onBack} />
+      <Modal visible={!!refuse} transparent animationType="fade" onRequestClose={() => setRefuse(null)}>
+        <View style={s.modalWrap}>
+          <View style={s.modalCard}>
+            <Text style={s.modalTitle}>Why are you declining?</Text>
+            <Text style={s.hint}>The customer sees this. A refusal with no reason is the most complained-about outcome of any returns process.</Text>
+            <TextInput style={s.input} placeholder="e.g. Item shows use beyond inspection"
+              placeholderTextColor={C.sub} value={note} onChangeText={setNote} autoFocus multiline />
+            <TouchableOpacity style={s.dangerBtn}
+              onPress={() => { if (note.trim() && refuse) void decide(refuse, false, true, note.trim()); }}>
+              <Text style={s.dangerBtnText}>Decline return</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={s.outlineBtn} onPress={() => setRefuse(null)}>
+              <Text style={s.outlineBtnText}>Cancel</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
+      <FlatList
+        data={rows}
+        keyExtractor={(rt) => rt.id}
+        renderItem={renderReturn}
+        ListHeaderComponent={
+          !loading && rows.length === 0 ? <Empty icon="arrow-undo-outline" text="No returns." /> : null
+        }
+        contentContainerStyle={s.body}
+        refreshControl={<RefreshControl refreshing={loading} onRefresh={load} tintColor={C.green} />}
+      />
     </>
   );
 }
@@ -2899,17 +3022,8 @@ function AuditScreen({ onBack }: { onBack: () => void }) {
     }
   };
 
-  return (
-    <>
-      <SubHeader title="Activity log" onBack={onBack} />
-      <ScrollView contentContainerStyle={s.body}
-        refreshControl={<RefreshControl refreshing={loading} onRefresh={load} tintColor={C.green} />}>
-        <Text style={s.hint}>
-          Every price change, stock correction, purchase and refund. This record cannot be edited or deleted — including by you.
-        </Text>
-        {!loading && rows.length === 0 && <Empty icon="document-text-outline" text="Nothing recorded yet." />}
-        {rows.map((e) => (
-          <View key={e.id} style={s.card}>
+  const renderAudit = ({ item: e }: { item: SB.AuditEntry }) => (
+          <View style={s.card}>
             <View style={{ flex: 1 }}>
               <Text style={s.cardTitle}>{describe(e)}</Text>
               <Text style={s.cardSub}>
@@ -2918,8 +3032,28 @@ function AuditScreen({ onBack }: { onBack: () => void }) {
               {!!e.reason && <Text style={s.cardSub}>📝 {e.reason}</Text>}
             </View>
           </View>
-        ))}
-      </ScrollView>
+  );
+
+  return (
+    <>
+      <SubHeader title="Activity log" onBack={onBack} />
+      {/* An append-only log is the one list guaranteed to grow forever, so it
+          is the scroller and the notice above it is the list header. */}
+      <FlatList
+        data={rows}
+        keyExtractor={(e) => String(e.id)}
+        renderItem={renderAudit}
+        ListHeaderComponent={(
+          <>
+            <Text style={s.hint}>
+              Every price change, stock correction, purchase and refund. This record cannot be edited or deleted — including by you.
+            </Text>
+            {!loading && rows.length === 0 && <Empty icon="document-text-outline" text="Nothing recorded yet." />}
+          </>
+        )}
+        contentContainerStyle={s.body}
+        refreshControl={<RefreshControl refreshing={loading} onRefresh={load} tintColor={C.green} />}
+      />
     </>
   );
 }
@@ -3237,11 +3371,52 @@ function StockScreen({ currency, onBack }: { currency?: string; onBack: () => vo
     { k: 'adjustment', label: 'Correction' },
   ];
 
+  const renderMovement = ({ item: m }: { item: SB.StockMovement }) => {
+    const d = m.onHandDelta || m.reservedDelta;
+    return (
+              <View style={s.card}>
+                <View style={{ flex: 1 }}>
+                  <Text style={s.cardTitle}>{m.kind.replace(/_/g, ' ')}</Text>
+                  <Text style={s.cardSub}>
+                    {[m.reason, m.actor].filter(Boolean).join(' · ')}
+                  </Text>
+                </View>
+                <Text style={[s.price, { color: d < 0 ? C.danger : C.green }]}>
+                  {d > 0 ? '+' : ''}{d}{m.reservedDelta && !m.onHandDelta ? ' held' : ''}
+                </Text>
+              </View>
+    );
+  };
+
+  const renderStockRow = ({ item: row }: { item: SB.StockRow }) => (
+          <TouchableOpacity style={s.card} onPress={() => openItem(row)}>
+            <View style={{ flex: 1 }}>
+              <Text style={s.cardTitle}>{row.name}{row.unit ? ` · ${row.unit}` : ''}</Text>
+              <Text style={s.cardSub}>
+                {row.available} available{row.reserved > 0 ? ` · ${row.reserved} reserved` : ''}
+                {row.costPrice > 0 ? ` · cost ${formatMoney(row.costPrice, currency)}` : ''}
+              </Text>
+            </View>
+            {row.low && <Text style={[s.price, { color: C.danger }]}>LOW</Text>}
+            <Ionicons name="chevron-forward" size={18} color={C.sub} />
+          </TouchableOpacity>
+  );
+
   if (sel) {
     return (
       <>
         <SubHeader title={sel.name} onBack={() => setSel(null)} />
-        <ScrollView contentContainerStyle={s.body} keyboardShouldPersistTaps="handled">
+        <FlatList
+          // Movements are append-only, so the history is the scroller and the
+          // position + record form ride above it. An element, not a component
+          // function, or the quantity box remounts as it is typed into.
+          data={history}
+          keyExtractor={(m) => String(m.id)}
+          renderItem={renderMovement}
+          contentContainerStyle={s.body}
+          keyboardShouldPersistTaps="handled"
+          ListHeaderComponent={(
+          <>
           <View style={{ flexDirection: 'row', gap: 10 }}>
             <StatCard label="On hand" value={String(sel.onHand)} tone="navy" />
             <StatCard label="Reserved" value={String(sel.reserved)} tone="amber" />
@@ -3265,23 +3440,9 @@ function StockScreen({ currency, onBack }: { currency?: string; onBack: () => vo
           </View>
           <Text style={s.sectionLabel}>History</Text>
           {history.length === 0 && <Empty icon="time-outline" text="No movements yet." />}
-          {history.map((m) => {
-            const d = m.onHandDelta || m.reservedDelta;
-            return (
-              <View key={m.id} style={s.card}>
-                <View style={{ flex: 1 }}>
-                  <Text style={s.cardTitle}>{m.kind.replace(/_/g, ' ')}</Text>
-                  <Text style={s.cardSub}>
-                    {[m.reason, m.actor].filter(Boolean).join(' · ')}
-                  </Text>
-                </View>
-                <Text style={[s.price, { color: d < 0 ? C.danger : C.green }]}>
-                  {d > 0 ? '+' : ''}{d}{m.reservedDelta && !m.onHandDelta ? ' held' : ''}
-                </Text>
-              </View>
-            );
-          })}
-        </ScrollView>
+          </>
+          )}
+        />
       </>
     );
   }
@@ -3289,31 +3450,26 @@ function StockScreen({ currency, onBack }: { currency?: string; onBack: () => vo
   return (
     <>
       <SubHeader title="Stock" onBack={onBack} />
-      <ScrollView contentContainerStyle={s.body}
-        refreshControl={<RefreshControl refreshing={loading} onRefresh={load} tintColor={C.green} />}>
-        {lowCount > 0 && (
-          <Text style={[s.hint, { color: C.danger }]}>
-            ⚠️ {lowCount} product(s) at or below their reorder level.
-          </Text>
-        )}
-        {loading && <LoadingState />}
-        {!loading && rows.length === 0 && (
-          <Empty icon="cube-outline" text="No counted products. Turn on “Count stock” on a product to start." />
-        )}
-        {rows.map((row) => (
-          <TouchableOpacity key={row.productId} style={s.card} onPress={() => openItem(row)}>
-            <View style={{ flex: 1 }}>
-              <Text style={s.cardTitle}>{row.name}{row.unit ? ` · ${row.unit}` : ''}</Text>
-              <Text style={s.cardSub}>
-                {row.available} available{row.reserved > 0 ? ` · ${row.reserved} reserved` : ''}
-                {row.costPrice > 0 ? ` · cost ${formatMoney(row.costPrice, currency)}` : ''}
+      <FlatList
+        data={rows}
+        keyExtractor={(row) => row.productId}
+        renderItem={renderStockRow}
+        ListHeaderComponent={(
+          <>
+            {lowCount > 0 && (
+              <Text style={[s.hint, { color: C.danger }]}>
+                ⚠️ {lowCount} product(s) at or below their reorder level.
               </Text>
-            </View>
-            {row.low && <Text style={[s.price, { color: C.danger }]}>LOW</Text>}
-            <Ionicons name="chevron-forward" size={18} color={C.sub} />
-          </TouchableOpacity>
-        ))}
-      </ScrollView>
+            )}
+            {loading && <LoadingState />}
+            {!loading && rows.length === 0 && (
+              <Empty icon="cube-outline" text="No counted products. Turn on “Count stock” on a product to start." />
+            )}
+          </>
+        )}
+        contentContainerStyle={s.body}
+        refreshControl={<RefreshControl refreshing={loading} onRefresh={load} tintColor={C.green} />}
+      />
     </>
   );
 }
@@ -3422,9 +3578,11 @@ function OwnerKhata({ currency }: { currency?: string }) {
   const stale = owed.filter((c) => (c.staleDays ?? 0) > 30)
     .sort((a, b) => (b.staleDays ?? 0) - (a.staleDays ?? 0));
 
-  return (
-    <ScrollView contentContainerStyle={s.body}
-      refreshControl={<RefreshControl refreshing={loading} onRefresh={load} tintColor={C.green} />}>
+  // The customer list is the scroller: a shop's khata only ever gains names.
+  // Everything above it becomes the header, kept as an element so the
+  // add-customer inputs are reconciled in place instead of remounting.
+  const header = (
+    <>
       <Text style={s.sectionLabel}>Customer Khata</Text>
 
       {/* Walk-ins: the customer standing at the counter who has no VaultChat
@@ -3483,9 +3641,11 @@ function OwnerKhata({ currency }: { currency?: string }) {
         />
       )}
 
-      {customers.map((c) => (
+    </>
+  );
+
+  const renderCustomer = ({ item: c }: { item: SB.CustomerPending }) => (
         <TxnRow
-          key={c.customerId}
           icon="person"
           iconTone={c.pending > 0 ? 'warn' : 'good'}
           title={c.customerName || 'Customer'}
@@ -3504,8 +3664,17 @@ function OwnerKhata({ currency }: { currency?: string }) {
             </Text>
           )}
         </TxnRow>
-      ))}
-    </ScrollView>
+  );
+
+  return (
+    <FlatList
+      data={customers}
+      keyExtractor={(c) => c.customerId}
+      renderItem={renderCustomer}
+      ListHeaderComponent={header}
+      contentContainerStyle={s.body}
+      refreshControl={<RefreshControl refreshing={loading} onRefresh={load} tintColor={C.green} />}
+    />
   );
 }
 
@@ -3766,11 +3935,26 @@ function KhataDetail({ customer, currency, onBack }: { customer: SB.CustomerPend
     finally { setBusy(false); }
   };
 
+  const renderEntry = ({ item: e }: { item: SB.LedgerEntry }) => (
+          <LedgerRow entry={e} onShare={busy ? undefined : () => shareDoc(e)} />
+  );
+
   return (
     <>
       <SubHeader title={customer.customerName || 'Customer'} onBack={onBack} />
-      <ScrollView contentContainerStyle={s.body} keyboardShouldPersistTaps="handled"
-        refreshControl={<RefreshControl refreshing={loading} onRefresh={load} tintColor={C.green} />}>
+      {/* The khata history is the scroller — a regular customer accumulates
+          years of lines — so the whole add-entry form rides above it as the
+          header. An element, not a component function, or every input in that
+          form remounts and the keyboard drops mid-word. */}
+      <FlatList
+        data={ledger?.entries ?? []}
+        keyExtractor={(e) => e.id}
+        renderItem={renderEntry}
+        contentContainerStyle={s.body}
+        keyboardShouldPersistTaps="handled"
+        refreshControl={<RefreshControl refreshing={loading} onRefresh={load} tintColor={C.green} />}
+        ListHeaderComponent={(
+        <>
         {ledger && (
           <View style={{ flexDirection: 'row', gap: 10 }}>
             <StatCard label="Pending" value={money(ledger.pending)} tone="danger" />
@@ -3895,10 +4079,9 @@ function KhataDetail({ customer, currency, onBack }: { customer: SB.CustomerPend
         </View>
         <Text style={s.sectionLabel}>History</Text>
         {ledger?.entries.length === 0 && <Empty icon="book-outline" text="No transactions yet." />}
-        {ledger?.entries.map((e) => (
-          <LedgerRow key={e.id} entry={e} onShare={busy ? undefined : () => shareDoc(e)} />
-        ))}
-      </ScrollView>
+        </>
+        )}
+      />
     </>
   );
 }

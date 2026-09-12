@@ -32,6 +32,18 @@ import * as pinStore from '../../services/security/pinStore';
 const WEB_CLIENT_ID = '553821750020-2v6ul3cu0tr4o76uvtabjubgnbk2m40u.apps.googleusercontent.com';
 
 // ─── Google Sign-In configuration ─────────────────────────────
+//
+// CALLED BY EVERY ENTRY POINT THAT TOUCHES THE SDK, not once at boot.
+//
+// app/_layout.tsx used to call this inside the root mount effect, which put
+// @react-native-google-signin on the cold-start path for every user including
+// the ones who never sign in with Google. Configure is a cheap synchronous
+// native call, so each caller asserting it costs nothing and removes the
+// ordering assumption entirely.
+//
+// Repeating it is also the CORRECT thing here: lib/googleDrive.ts configures
+// the same global client with the Drive appdata scope, so after a Drive backup
+// a single boot-time configuration had already been overwritten.
 export function configureGoogleSignIn() {
   GoogleSignin.configure({
     webClientId: WEB_CLIENT_ID,
@@ -52,6 +64,7 @@ export async function signInWithGoogle(): Promise<{
   email: string;
   photoURL: string | null;
 }> {
+  configureGoogleSignIn();
   await GoogleSignin.hasPlayServices({ showPlayServicesUpdateDialog: true });
 
   let signInResult: any;
@@ -83,6 +96,10 @@ export async function signInWithGoogle(): Promise<{
 }
 
 export async function signOutGoogle(): Promise<void> {
+  // signOut() needs a configured client too — on Android it resolves the
+  // GoogleSignInClient that configure() built. This is reached from logoutUser,
+  // which can run on a session that never opened a sign-in screen.
+  try { configureGoogleSignIn(); } catch {}
   try { await GoogleSignin.signOut(); } catch {}
 }
 

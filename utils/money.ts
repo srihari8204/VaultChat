@@ -73,9 +73,11 @@ function tsSumRupees(values: number[]): number {
 // parity.rs replays this file's own selftest vectors plus its exhaustive
 // property (every pot ₹0–₹2000 in 1-paise steps × 11 member counts).
 //
-// ponytail: the native module is not built yet — the require below throws and
-// every session runs TS today. That is the seam doing its job, not a stub: the
-// day the binding lands, one env var moves all of it, with no diff here.
+// The binding has since landed: vaultcore's four money ops are forwarded by
+// services/crypto/rust/src/ffi.rs, so they ride libvaultcrypto.so — the .so the
+// crypto core already puts in the APK. No second module, no second .so.
+// EXPO_PUBLIC_MONEY_BACKEND=rust is set in .env as of the 1.2.8 build; this
+// seam is what let that be one env var and no diff here.
 interface MoneyCore {
   toPaise(rupees: number): number;
   fromPaise(paise: number): number;

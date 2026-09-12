@@ -13,6 +13,7 @@ import { randomBytes, bytesToHex } from '@noble/hashes/utils.js';
 import { Buffer } from 'buffer';
 import { api, setTokens, setCachedUser } from './api';
 import { uploadAttachment } from './chatService';
+import { configureGoogleSignIn } from '../app/(constants)/authService';
 
 // ── In-memory onboarding store ──────────────────────────────────────────────
 export interface OnboardingState {
@@ -52,6 +53,11 @@ export const onboarding = {
 export interface GoogleAccount { email: string; firstName: string; lastName: string; photoURL: string | null }
 
 export async function pickGoogleAccount(): Promise<GoogleAccount> {
+  // This used to work only because app/_layout.tsx configured the SDK at boot.
+  // That call is gone (it put google-signin on every cold start), so configure
+  // here — the one authority on the web client id is authService; a second copy
+  // of it is how a DEVELOPER_ERROR gets shipped.
+  configureGoogleSignIn();
   await GoogleSignin.hasPlayServices({ showPlayServicesUpdateDialog: true });
   try { await GoogleSignin.signOut(); } catch { /* force the chooser to show */ }
   let res: any;

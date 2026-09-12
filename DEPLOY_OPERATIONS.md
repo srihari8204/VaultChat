@@ -13,9 +13,23 @@ Cloudflare (proxy, WebSockets on, SSL Full)
 ```
 
 Supporting containers (Docker Compose project `vaultchat`, default profile):
-`postgres` · `redis` · `minio` · `valhalla` · `coturn` · `vaultlens-worker` (Node, BullMQ).
-Behind `--profile legacy` (NOT started): `api` (Node), `kafka`, `fanout-worker` —
-kept only for emergency rollback.
+`pgbouncer` · `postgres` · `redis` · `minio` · `valhalla` · `coturn`.
+
+Everything else is behind a profile and does NOT start with a bare `dc up -d`
+(verified with `dc config`, which omits non-default-profile services):
+
+| profile | services | note |
+|---|---|---|
+| `sfu` | `livekit`, `egress` | calling SFU — needed for group calls |
+| `golive` | `golive-livekit`, `golive-egress` | broadcasting SFU |
+| `monitoring` | `prometheus`, `grafana` | scrapes `go-api:4000/internal/metrics` direct, not via Caddy |
+| `legacy` | `api` (Node), `kafka`, `fanout-worker` | emergency rollback only |
+
+**No Node process runs in the default profile.** `vaultlens-worker` was the last
+one and it was removed with the VaultLens feature (compose service deleted, see
+`docker-compose.yml:629`; schema dropped by migration `098_drop_vaultlens.sql`).
+`dc logs vaultlens-worker` / `dc up -d vaultlens-worker` now fail with "no such
+service".
 
 ## The `dc` alias — ALWAYS use it
 
@@ -45,7 +59,6 @@ source ~/.bashrc
 ```bash
 dc ps                                   # what's running
 dc logs go-api -f                       # live tail (Ctrl+C to stop)
-dc logs vaultlens-worker --tail 20
 dc restart <service>                    # bounce one service
 curl -s http://127.0.0.1:8095/health ; echo    # Go health via Caddy
 curl -s https://api.corefinite.com/health ; echo  # public (through CF+nginx)
@@ -73,6 +86,20 @@ dc --profile legacy run --rm api node migrate.js up     # applies pending; 'noth
 dc exec postgres psql -U vaultchat -d vaultchat -c '\dt' | head
 ```
 
+> **Migrate BEFORE `dc up -d --build go-api`, not after.** These migrations are
+> additive, so the running old binary tolerates a schema that has run ahead of
+> it; a new binary against a schema that has NOT caught up does not.
+>
+> `127_refresh_token_lookup.sql` is the live example and is **still pending**
+> (ledger last checked at 126). `internal/routes/auth.go` and `user.go` name
+> `refresh_tokens.token_lookup` and `revoked_reason` in ordinary SQL with no
+> feature flag and no capability probe, so a go-api built from current `main`
+> and started against a pre-127 schema answers **every sign-in, token refresh
+> and session-list request with 42P01** — a total auth outage, not a degraded
+> feature. It also needs `VAULTCHAT_LOOKUP_PEPPER` set (see
+> `vaultchat-backend/.env.example`); unset, the column stays NULL and every
+> refresh silently falls back to the 500-row legacy scan.
+
 ## Rollback to Node (emergency)
 
 The Node image is still in the `legacy` profile; the DB is shared, so no data
@@ -92,8 +119,9 @@ Reverse both edits (`13000`→`8095`, `dc stop api`) to return to Go.
   present. Drop `<region>.osm.pbf` into `valhalla/custom_files/`, then
   `dc up -d valhalla` (first boot builds tiles; minutes). Chat/calls/media are
   unaffected.
-- **VaultLens AI avatars** — set `MODELSLAB_API_KEY` in
-  `vaultchat-backend/.env`, then `dc up -d vaultlens-worker`.
+- **VaultLens AI avatars** — feature REMOVED. The compose service, the worker
+  code and the `vaultlens_*` tables are all gone (migration 098). Nothing to
+  start; `MODELSLAB_API_KEY` is read by nothing.
 
 ## Gotchas learned in production
 
@@ -138,7 +166,7 @@ Reverse both edits (`13000`→`8095`, `dc stop api`) to return to Go.
   postgres/redis with public bench ports (`0.0.0.0:15432/16379`) and starts
   kafka. Always use `dc`.
 - **Recreated infra → stale IPs.** If a worker logs `ECONNREFUSED <ip>:6379`
-  after Redis was recreated, `dc up -d --force-recreate redis vaultlens-worker`.
+  after Redis was recreated, `dc up -d --force-recreate redis go-api`.
 - **`nginx -t` after any vhost edit**, and keep backups OUT of
   `sites-enabled/` (nginx loads every file there, incl. `*.bak`).
 - **Socket.IO is websocket-only by design** (`internal/realtime/server.go`

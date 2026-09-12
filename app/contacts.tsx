@@ -290,6 +290,14 @@ export default function ContactsScreen() {
           renderItem={({ item }) => item._header
             ? <Text numberOfLines={1} style={S.sectionHeader}>{item.title}</Text>
             : renderItem({ item, section: item._section })}
+          // Device contact books run to thousands of rows; without these the
+          // list mounts far more than it needs on first paint. No getItemLayout
+          // here — header and contact rows have different heights.
+          removeClippedSubviews
+          initialNumToRender={14}
+          maxToRenderPerBatch={12}
+          updateCellsBatchingPeriod={60}
+          windowSize={11}
         />
       )}
     </View>

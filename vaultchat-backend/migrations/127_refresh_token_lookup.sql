@@ -21,8 +21,10 @@
 --        screen sets the same column, so it was granted the same grace and
 --        could mint fresh credentials for 30 seconds after being kicked off.
 --
--- token_lookup is a KEYED digest — HMAC-SHA256(REFRESH_LOOKUP_PEPPER, token),
--- hex. Deterministic, so one indexed equality selects the single candidate;
+-- token_lookup is a KEYED digest — HMAC-SHA256(VAULTCHAT_LOOKUP_PEPPER,
+-- "refresh:"||token), hex; see vault.LookupHash / authRefreshLookup in
+-- internal/routes/auth.go. Deterministic, so one indexed equality selects the
+-- single candidate;
 -- keyed, so a stolen database alone cannot be scanned against a dictionary of
 -- guessed tokens the way a bare SHA-256 could. bcrypt in token_hash remains the
 -- verifier, so this column widens nothing: it finds the row, it does not
@@ -50,6 +52,6 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_refresh_lookup
 ALTER TABLE refresh_tokens ADD COLUMN IF NOT EXISTS revoked_reason TEXT;
 
 COMMENT ON COLUMN refresh_tokens.token_lookup IS
-  'HMAC-SHA256(REFRESH_LOOKUP_PEPPER, token) hex. Finds the row; token_hash still authorises it. NULL on rows predating migration 127.';
+  'HMAC-SHA256(VAULTCHAT_LOOKUP_PEPPER, ''refresh:''||token) hex. Finds the row; token_hash still authorises it. NULL on rows predating migration 127.';
 COMMENT ON COLUMN refresh_tokens.revoked_reason IS
   'Why revoked_at is set. Only ''rotated'' gets the refresh grace window; explicit revocation is immediate.';
