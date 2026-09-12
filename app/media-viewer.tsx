@@ -15,6 +15,7 @@ import * as FileSystem from 'expo-file-system/legacy';
 import * as Sharing from 'expo-sharing';
 import * as MediaLibrary from 'expo-media-library';
 import { getMedia } from '../lib/mediaStore';
+import { viewerRouteFor } from '../lib/docOpen';
 import { getAccessToken } from '../lib/api';
 import { attachmentUrl, markAttachmentViewed, reportScreenshotCaptured } from '../lib/chatService';
 import { getCurrentUserAsync } from './(constants)/authService';
@@ -51,7 +52,7 @@ function MediaViewerScreen() {
   const {width: SW, height: SH} = useWindowDimensions();
 
   const router = useRouter();
-  const { uri, mediaUrl, attachmentId, needsAuth, save, isMine, mime, filename, msgType, viewOnce, chatId } = useLocalSearchParams();
+  const { uri, mediaUrl, attachmentId, needsAuth, save, isMine, mime, filename, msgType, viewOnce, chatId, encrypted } = useLocalSearchParams();
   const isViewOnce = viewOnce === '1';
 
   // ── VaultView watermark identity ─────────────────────────
@@ -156,11 +157,30 @@ function MediaViewerScreen() {
       })();
       return () => { cancel = true; };
     }
+    // KIND MUST MATCH THE FILE, not just "video or not".
+    //
+    // Every non-video attachment was fetched as kind:'image'. The Shelf opens
+    // documents through this screen, so a PDF was stored as
+    // "VaultChat Images/IMG-<id>.pdf" — and, worse, the sender's own Sent/
+    // lookup in getMedia is keyed on the same path, so a file the sender
+    // already had on disk missed and was DOWNLOADED BACK from the server.
+    //
+    // `encrypted` is passed for the same reason it exists: without it getMedia
+    // cannot tell "plaintext" from "encrypted but this device has no key", and
+    // the no-key branch writes raw CIPHERTEXT into a file named .pdf (audit
+    // F-8). With it, callers get MediaKeyMissingError and can say so.
     getMedia(String(attachmentId), {
-      kind: msgType === 'video' ? 'video' : 'image',
+      kind: msgType === 'video' ? 'video'
+          : msgType === 'audio' ? 'audio'
+          : msgType === 'image' ? 'image'
+          : fileType === 'image' ? 'image'
+          : fileType === 'video' ? 'video'
+          : fileType === 'audio' ? 'audio'
+          : 'file',
       isMine: isMine === '1',
       mime: mime ? String(mime) : undefined,
       filename: filename ? String(filename) : undefined,
+      encrypted: encrypted === '1',
     })
       .then(u => { if (!cancel) setFileUri(u); })
       .catch(onErr);
@@ -170,6 +190,24 @@ function MediaViewerScreen() {
   useEffect(() => {
     if (fileUri.startsWith('http')) fetch(fileUri, { method: 'HEAD' }).then(r => setFileSize(parseInt(r.headers.get('content-length') || '0'))).catch(() => {});
   }, [fileUri]);
+
+  // Documents READ here, they do not sit behind a download button.
+  //
+  // A PDF opened from the Shelf landed on GenericViewer, whose primary action is
+  // "Download & Open" — it saves a copy to shared storage and hands the file to
+  // another app. The in-app renderer (components/PdfView, pdf.js) was reachable
+  // only through the secondary "Open without saving" link, so the default path
+  // for reading a document was OUT of VaultChat. file-viewer is the screen that
+  // renders PDF pages, Word/Excel/PowerPoint structure and text, so send the
+  // resolved local file straight there, exactly as video already redirects.
+  const docRoute = viewerRouteFor(fileName, mime ? String(mime) : undefined);
+  useEffect(() => {
+    if (!fileUri || docRoute !== '/file-viewer') return;
+    router.replace({
+      pathname: '/file-viewer',
+      params: { uri: fileUri, filename: fileName, mimeType: (mime || '') + '' },
+    } as any);
+  }, [fileUri, docRoute, fileName, mime, router]);
 
   // Share the FILE, not a string.
   //

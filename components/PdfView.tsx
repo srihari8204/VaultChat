@@ -1,108 +1,225 @@
-// components/PdfView.tsx — render a PDF as PAGES, not as recovered text.
+// components/PdfView.tsx — render a PDF as PAGES, natively.
 //
-// WHY THIS EXISTS
-// ---------------
-// lib/docText.ts reads PDFs by pulling text-showing operators straight out of
-// the content streams. That is genuinely useful for a text document, and it is
-// why the reader needs no native module — but it recovers WORDS and nothing
-// else. Hand it an engineering drawing and it returns the dimension labels with
-// every line, arc and hatch discarded: the reader shows a page of stray numbers
-// and the drawing itself is simply absent.
+// WHAT THIS REPLACED, AND WHY
+// ---------------------------
+// This used to be Mozilla's pdf.js inside a WebView loaded from
+// file:///android_asset/pdfjs/viewer.html. pdf.js does its parsing and
+// rasterising in a Web Worker — and Chrome will NOT start a Worker from a
+// file:// origin. pdf.js does not fail loudly when that happens: it falls back
+// to its "fake worker", which runs the identical work ON THE MAIN THREAD.
 //
-// Rendering real pages needs a real renderer. This is Mozilla's pdf.js, vendored
-// into assets/pdfjs (see the README there), running inside a WebView. The
-// WebView earns its place twice over: pinch-zoom is the browser's own, and —
-// unlike scaling a bitmap — the page is re-rasterised at three times its CSS
-// size, so zooming into a drawing stays sharp.
+// So every PDF was parsed and rasterised on the UI thread. A small one merely
+// felt slow; a large one froze the app until Android killed it. That was the
+// reported bug — "not opening", "no thumbnail", "takes too much time", "app
+// closes when I try to stop it" — all one ANR, confirmed on device as
+// data_app_anr with libwebviewchromium.so on the blocked main thread. It
+// predated the pdf.js 3->4 upgrade, which neither caused nor fixed it.
 //
-// Everything is local. The viewer, pdf.js, its worker and the PDF are all read
-// over file://; nothing is fetched, so this works offline and the document never
-// leaves the device.
+// lib/pdfNative talks to android.graphics.pdf.PdfRenderer (the platform's own
+// pdfium). React Native runs those calls on its native executor, so the work is
+// off the UI thread BY CONSTRUCTION rather than by hoping a Worker starts.
 //
-// The viewer is loaded from android_asset rather than from a Metro asset, for a
-// reason that only shows up on device — see plugins/withPdfJs.js.
+// Pages are rendered one at a time, on demand, to JPEGs on disk, and shown with
+// expo-image. Only what is near the viewport is ever rendered, so a 400-page
+// document costs the same as a 4-page one — the old viewer's whole-document
+// bitmap pressure is gone with it.
 
-import React, { useCallback, useEffect, useRef, useState, useMemo } from 'react';
-import { ActivityIndicator, Platform, StyleSheet, Text, View } from 'react-native';
-import { WebView } from 'react-native-webview';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  ActivityIndicator, FlatList, Platform, StyleSheet, Text, View, useWindowDimensions,
+} from 'react-native';
+import { Image as ExpoImage } from 'expo-image';
+import * as FileSystem from 'expo-file-system/legacy';
 import type { Palette } from '../constants/theme';
 import { useColors } from '../lib/theme';
+import { pdfInfo, pdfNativeAvailable, renderPdfPage, type PdfInfo } from '../lib/pdfNative';
 
-/** viewer.html, pdf.min.js and pdf.worker.min.js, all in one origin. */
-const VIEWER = 'file:///android_asset/pdfjs/viewer.html';
+/** Render scale over the layout width — keeps text crisp without a zoom re-render. */
+const OVERSAMPLE = 2;
 
-/** How long to wait for pdf.js's first page before falling back to the reader. */
-const RENDER_TIMEOUT_MS = 30_000;
+/** Hard ceiling per page, in pixels. Above this the JPEG costs more than it shows. */
+const MAX_PAGE_PX = 2400;
 
-export function PdfView({ uri, onFail }: { uri: string; onFail?: (why: string) => void }) {
+function pageKeyFor(uri: string): string {
+  // A stable, filesystem-safe key per document. The path already identifies the
+  // attachment (mediaStore names it by attachment id), so hashing is unnecessary
+  // — but it must not contain separators.
+  return uri.replace(/^file:\/\//, '').replace(/[^A-Za-z0-9]/g, '_').slice(-60);
+}
+
+function Page({
+  uri, index, width, aspect, docKey, cacheDir, s,
+}: {
+  uri: string; index: number; width: number; aspect: number;
+  docKey: string; cacheDir: string; s: any;
+}) {
+  const [img, setImg] = useState<string | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  const height = Math.round(width * aspect);
+
+  useEffect(() => {
+    let dead = false;
+    // STEP DOWN ON OutOfMemory INSTEAD OF GIVING UP.
+    //
+    // A page is ARGB_8888 (PdfRenderer accepts nothing else), so at 2400px wide
+    // one page is roughly 2400 x 3400 x 4 = ~32 MB. A big document — a scanned
+    // textbook, a CAD drawing — can exceed the per-app heap at full width while
+    // rendering perfectly well at half of it.
+    //
+    // The native module already reports that case distinctly as TOO_LARGE
+    // precisely so the caller can retry smaller, and this is the caller that
+    // never did: it showed "could not be rendered" and stopped, which is what a
+    // large PDF looked like from the outside — a file that simply would not open.
+    //
+    // Halving is the right step because cost is quadratic in width: one halving
+    // cuts the bitmap to a quarter. FLOOR stops it degrading into an unreadable
+    // smudge — below that, refusing honestly is better than pretending.
+    const FLOOR = 320;
+    const attempt = (px: number) => {
+      renderPdfPage(uri, index, px, cacheDir, docKey)
+        .then(r => { if (!dead) { setImg(r.uri); setErr(null); } })
+        .catch((e: any) => {
+          if (dead) return;
+          if (e?.code === 'TOO_LARGE' && px > FLOOR) { attempt(Math.max(FLOOR, Math.round(px / 2))); return; }
+          setErr(e?.code === 'TOO_LARGE'
+            ? 'Page too large to display on this device'
+            : `Page ${index + 1} could not be rendered`);
+        });
+    };
+    attempt(Math.min(Math.round(width * OVERSAMPLE), MAX_PAGE_PX));
+    return () => { dead = true; };
+  }, [uri, index, width, docKey, cacheDir]);
+
+  return (
+    <View style={[s.page, { width, height }]}>
+      {img ? (
+        // recyclingKey: FlatList reuses rows, and without it a recycled row
+        // briefly shows the PREVIOUS page's bitmap while the new one decodes.
+        <ExpoImage
+          source={{ uri: img }} style={{ width, height }}
+          contentFit="contain" cachePolicy="disk" recyclingKey={`${docKey}_${index}`}
+        />
+      ) : (
+        <View style={s.pagePending}>
+          {err ? <Text style={s.pageErr}>{err}</Text>
+               : <ActivityIndicator color="rgba(0,0,0,0.35)" />}
+        </View>
+      )}
+    </View>
+  );
+}
+
+export function PdfView({ uri, onFail, onReady }: {
+  uri: string;
+  onFail?: (why: string) => void;
+  onReady?: (info: { version: string; pages: number }) => void;
+}) {
   const c = useColors();
   const s = useMemo(() => makeS(c), [c]);
-  const [shown, setShown] = useState(false);
+  const { width: winW } = useWindowDimensions();
+  const [info, setInfo] = useState<PdfInfo | null>(null);
+  const [page, setPage] = useState(1);
   const failedRef = useRef(false);
 
   const fail = useCallback((why: string) => {
-    if (failedRef.current) return;   // the WebView can report more than once
+    if (failedRef.current) return;
     failedRef.current = true;
     onFail?.(why);
   }, [onFail]);
 
-  // iOS would need the same three files copied into the app bundle; only the
-  // Android side of plugins/withPdfJs.js exists today. Say so plainly instead of
-  // showing an empty grey page — the caller drops back to the text reader.
-  // In an effect, not in render: onFail sets state on the PARENT, and doing that
-  // mid-render is the "cannot update a component while rendering another" warning.
-  const unsupported = Platform.OS !== 'android';
+  // Hoisted above the early return below: hooks must run in the same order on
+  // every render. FlatList additionally refuses a changing onViewableItemsChanged
+  // identity at runtime, so both are refs rather than inline callbacks.
+  const onViewable = useRef(({ viewableItems }: any) => {
+    const first = viewableItems?.[0]?.index;
+    if (typeof first === 'number') setPage(first + 1);
+  }).current;
+  const viewabilityConfig = useRef({ itemVisiblePercentThreshold: 50 }).current;
+
+  const docKey = useMemo(() => pageKeyFor(uri), [uri]);
+  // Rendered pages are plaintext of an attachment, so they live under the same
+  // dc_ prefix the rest of the document cache uses and are swept by the same
+  // purge (lib/mediaCacheGC.purgeDocumentCache) on revoke, view-once and logout.
+  const cacheDir = useMemo(
+    () => `${(FileSystem as any).cacheDirectory}dc_pdfpages`, [],
+  );
+
+  // iOS has no native module yet; say so plainly rather than showing a grey
+  // page. In an effect, not in render — onFail sets state on the PARENT.
   useEffect(() => {
-    if (unsupported) fail('page rendering is Android-only so far');
-  }, [unsupported, fail]);
+    if (!pdfNativeAvailable) {
+      fail(Platform.OS === 'android'
+        ? 'This build has no PDF renderer.'
+        : 'Page rendering is Android-only so far.');
+    }
+  }, [fail]);
 
-  // pdf.js posts 'ready' or 'error'. A worker that dies silently posts NEITHER,
-  // and the cover below then reads "Rendering pages..." forever with no way out
-  // but the back button — indistinguishable, to the person holding the phone,
-  // from the app hanging. The ceiling is deliberately generous: a large scan on
-  // a slow device is slow, not broken, and a premature fallback would replace
-  // real pages with recovered text.
   useEffect(() => {
-    if (unsupported || shown) return;
-    const t = setTimeout(() => fail('The PDF took too long to render.'), RENDER_TIMEOUT_MS);
-    return () => clearTimeout(t);
-  }, [unsupported, shown, fail]);
+    if (!pdfNativeAvailable) return;
+    let dead = false;
+    (async () => {
+      try {
+        await FileSystem.makeDirectoryAsync(cacheDir, { intermediates: true }).catch(() => {});
+        const i = await pdfInfo(uri);
+        if (dead) return;
+        if (!i.pageCount) { fail('This PDF has no pages.'); return; }
+        setInfo(i);
+        onReady?.({ version: 'native/PdfRenderer', pages: i.pageCount });
+      } catch (e: any) {
+        if (dead) return;
+        // Each of these is a different thing to tell the user. The old viewer
+        // collapsed them all into "no text layer (it may be a scan)", which was
+        // the wrong diagnosis for an encrypted file.
+        fail(
+          e?.code === 'PASSWORD_REQUIRED' ? 'This PDF is password protected.'
+          : e?.code === 'CORRUPT' ? 'This PDF is damaged or incomplete.'
+          : e?.message || 'This PDF could not be opened.',
+        );
+      }
+    })();
+    return () => { dead = true; };
+  }, [uri, cacheDir, fail, onReady]);
 
-  if (unsupported) return null;
+  if (!pdfNativeAvailable || !info) {
+    return (
+      <View style={s.fill}>
+        {!failedRef.current && (
+          <View style={s.cover}>
+            <ActivityIndicator color="#FFFFFF" />
+            <Text style={s.coverTxt}>Opening document…</Text>
+          </View>
+        )}
+      </View>
+    );
+  }
 
-  // The document is handed in as an absolute file:// URL rather than copied next
-  // to the viewer: allowUniversalAccessFromFileURLs lets the page read it where
-  // it already is, and a copy of every opened PDF is pure waste.
-  const docUrl = uri.startsWith('file://') || uri.startsWith('content://') ? uri : `file://${uri}`;
+  const pageW = Math.max(120, winW - 20);
+  const aspect = info.height / info.width;
+  const itemH = Math.round(pageW * aspect) + 10;
 
   return (
     <View style={s.fill}>
-      <WebView
-        source={{ uri: VIEWER }}
-        originWhitelist={['*']}
-        allowFileAccess
-        allowFileAccessFromFileURLs
-        allowUniversalAccessFromFileURLs
-        javaScriptEnabled
-        domStorageEnabled={false}
-        // Pinch-to-zoom, without Android's floating +/- buttons over the page.
-        setBuiltInZoomControls
-        setDisplayZoomControls={false}
-        injectedJavaScriptBeforeContentLoaded={`window.__DOC__=${JSON.stringify(docUrl)};true;`}
-        onMessage={e => {
-          try {
-            const m = JSON.parse(e.nativeEvent.data);
-            if (m.t === 'ready') setShown(true);
-            else if (m.t === 'error') fail(m.m || 'The PDF could not be rendered.');
-          } catch {}
-        }}
-        onError={() => fail('The PDF viewer failed to load.')}
-        style={s.web}
+      <FlatList
+        data={Array.from({ length: info.pageCount }, (_, i) => i)}
+        keyExtractor={i => String(i)}
+        renderItem={({ item }) => (
+          <Page uri={uri} index={item} width={pageW} aspect={aspect}
+                docKey={docKey} cacheDir={cacheDir} s={s} />
+        )}
+        // Bounded rendering: only pages near the viewport exist as bitmaps, which
+        // is what keeps a 400-page document the same cost as a 4-page one.
+        initialNumToRender={2}
+        maxToRenderPerBatch={2}
+        windowSize={3}
+        removeClippedSubviews
+        getItemLayout={(_, i) => ({ length: itemH, offset: itemH * i, index: i })}
+        onViewableItemsChanged={onViewable}
+        viewabilityConfig={viewabilityConfig}
+        contentContainerStyle={s.list}
       />
-      {!shown && (
-        <View style={s.cover} pointerEvents="none">
-          <ActivityIndicator color="#FFFFFF" />
-          <Text style={s.coverTxt}>Rendering pages…</Text>
+      {info.pageCount > 1 && (
+        <View style={s.pill} pointerEvents="none">
+          <Text style={s.pillTxt}>{page} / {info.pageCount}</Text>
         </View>
       )}
     </View>
@@ -110,13 +227,22 @@ export function PdfView({ uri, onFail }: { uri: string; onFail?: (why: string) =
 }
 
 const makeS = (c: Palette) => StyleSheet.create({
-  fill: { flex: 1, backgroundColor: c.surfaceSolid },
-  web: { flex: 1, backgroundColor: c.surfaceSolid },
+  fill: { flex: 1, backgroundColor: '#3A3A3E' },
+  list: { paddingVertical: 10 },
+  page: { alignSelf: 'center', marginBottom: 10, backgroundColor: '#FFFFFF' },
+  pagePending: { ...StyleSheet.absoluteFillObject, alignItems: 'center', justifyContent: 'center' },
+  pageErr: { color: 'rgba(0,0,0,0.45)', fontSize: 12 },
   cover: {
     ...StyleSheet.absoluteFillObject, alignItems: 'center', justifyContent: 'center',
     backgroundColor: c.surfaceSolid, gap: 12,
   },
   coverTxt: { color: 'rgba(255,255,255,0.65)', fontSize: 13 },
+  pill: {
+    position: 'absolute', bottom: 16, alignSelf: 'center',
+    paddingHorizontal: 12, paddingVertical: 6, borderRadius: 999,
+    backgroundColor: 'rgba(0,0,0,0.6)',
+  },
+  pillTxt: { color: '#FFFFFF', fontSize: 12, fontWeight: '700' },
 });
 
 export default PdfView;
