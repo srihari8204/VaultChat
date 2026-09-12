@@ -1,0 +1,138 @@
+# CI — run the checks that already exist.
+#
+# This repository had none. 240 client selftests, 70 Go test files, a layout
+# guard, a theme guard and a frozen API contract — all of it excellent, and all
+# of it opt-in, so a change could break every one of them and only be found in
+# production. That was the highest-leverage gap in the September review, and
+# this file is the whole fix.
+#
+# THE POINT IS THAT IT RUNS WHAT IS ALREADY THERE. No new test framework, no
+# coverage gate, no new vocabulary — the guards in this repo are good, they just
+# needed something to run them on every push.
+#
+# Jobs are split by runtime so a Go failure does not hide a client failure and
+# vice versa: on a red build you want to know which half broke without reading
+# a log.
+
+name: CI
+
+on:
+  push:
+    branches: [hetzner-deploy, master]
+  pull_request:
+  workflow_dispatch:
+
+# A second push to the same branch makes the first run irrelevant. Cancel it
+# rather than queue behind it.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  client:
+    name: Client — typecheck, selftests, lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      # --legacy-peer-deps is REQUIRED, not a shortcut: @any-routing's
+      # annotation plugin wants @any-routing/core ^0.0.1 while the project pins
+      # ^0.1.0, so a plain `npm ci` ERESOLVEs and the build never starts.
+      - name: Install
+        run: npm ci --legacy-peer-deps
+
+      - name: Typecheck
+        run: npx tsc --noEmit -p tsconfig.json
+
+      # Includes the layout guard, the theme guard, the crypto parity vectors
+      # and the frozen endpoint/socket-event contract.
+      - name: Selftests
+        run: npm test
+
+      # Warnings are informational here; the build fails on errors only. The
+      # repo carries ~300 warnings and gating on them would mean this job is
+      # red from day one, which trains people to ignore it.
+      - name: Lint (errors only)
+        run: npx eslint . --max-warnings=-1
+
+  go:
+    name: Go — build, vet, test
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: vaultchat-backend-go
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: vaultchat-backend-go/go.mod
+          cache-dependency-path: vaultchat-backend-go/go.sum
+
+      - run: go build ./...
+      - run: go vet ./...
+      - run: go test ./...
+
+  migrations:
+    name: Migrations — no gaps, no duplicates
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # A real Postgres, so the migrations are APPLIED rather than read. Migration
+    # 121 went missing from production and was found by a human noticing; the
+    # whole point of this job is that a machine notices instead.
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: vaultchat
+          POSTGRES_PASSWORD: vaultchat_ci
+          POSTGRES_DB: vaultchat
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U vaultchat"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci --legacy-peer-deps
+
+      # Two steps, and the order is the test. APPLY every migration to an empty
+      # database — which catches a migration that does not run at all — then
+      # COUNT what landed, which catches the silent failure: a runner with a
+      # stale migrations directory prints "nothing to apply" and exits 0.
+      - name: Apply every migration to an empty database
+        env: &db
+          DB_HOST: localhost
+          DB_PORT: '5432'
+          DB_USER: vaultchat
+          DB_PASS: vaultchat_ci
+          DB_NAME: vaultchat
+        run: node vaultchat-backend/migrate.js up
+
+      - name: Assert nothing is missing
+        env: *db
+        run: npm run check:migrations
+
+  rust:
+    name: Rust — money core parity
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust/vaultcore
+      # The parity suite is what allows the money backend to be switched by an
+      # env var at all. If it stops passing, that switch stops being safe.
+      - run: cargo test --locked --manifest-path rust/vaultcore/Cargo.toml

@@ -62,7 +62,8 @@
     "test:layout": "tsx lib/responsiveLayout.selftest.ts",
     "test:history": "tsx lib/messageHistory.selftest.ts",
     "test:delete": "tsx lib/confirmIdentity.selftest.ts",
-    "test:rust": "cargo test --manifest-path rust/vaultcore/Cargo.toml && cargo clippy --manifest-path rust/vaultcore/Cargo.toml --all-targets -- -D warnings"
+    "test:rust": "cargo test --manifest-path rust/vaultcore/Cargo.toml && cargo clippy --manifest-path rust/vaultcore/Cargo.toml --all-targets -- -D warnings",
+    "check:migrations": "node ./scripts/check-migration-drift.js"
   },
   "dependencies": {
     "@any-routing/core": "^0.1.0",
