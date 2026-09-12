@@ -147,13 +147,21 @@ func TestCallMetricsReachTheScrape(t *testing.T) {
 
 	// The unconfigured-SFU counter fires on a server with no LiveKit keys, which
 	// is exactly this one.
-	u0 := base("call_sfu_unconfigured")
 	code, _ = call(t, mux, mtA, "POST", "/calls", body) // reopen; the last one ended
 	if code != 200 {
 		t.Fatalf("reopen: %d", code)
 	}
 	code, res = call(t, mux, mtA, "POST", "/calls", body)
 	callID = res["call"].(map[string]any)["id"].(string)
+	// Read the counter HERE, not from the scrape taken at the top of the test.
+	// Opening a call already probes the SFU, so a baseline from before those
+	// two POSTs measures them as well and the delta is whatever this test
+	// happened to do first — it asserted 1 and saw 5 the first time this ran
+	// against a fresh database.
+	u0 := counterValue(scrapeMetrics(t), "call_sfu_unconfigured")
+	if u0 < 0 {
+		u0 = 0
+	}
 	if code, _ = call(t, mux, mtA, "POST", "/calls/"+callID+"/sfu-token", ""); code != 503 {
 		t.Skipf("LiveKit is configured in this environment (%d) — skipping the unconfigured counter", code)
 	}

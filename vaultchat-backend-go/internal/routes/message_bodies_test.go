@@ -163,3 +163,63 @@ func TestPartitionNameIsDerivedFromUTCHour(t *testing.T) {
 		t.Fatalf("partition name = %q, want message_bodies_2026081220 (UTC hour, not session tz)", name)
 	}
 }
+
+// Migration 128 moved partition DDL into SECURITY DEFINER functions so a
+// NON-SUPERUSER app role can manage partitions without owning the table. A
+// definer function that drops a table named by its caller is only safe if it
+// refuses everything it was not meant to touch, so that refusal is the part
+// worth pinning.
+func TestDropPartitionRefusesAnythingItDoesNotOwnTheRulesFor(t *testing.T) {
+	mbSkip(t)
+	ctx := context.Background()
+	if err := db.Connect(ctx); err != nil {
+		t.Fatalf("db: %v", err)
+	}
+
+	var dropped bool
+
+	// Not a partition of message_bodies at all. `users` is the worst case: it
+	// exists, it is full, and a function that trusted its argument would drop
+	// every account in the system.
+	if err := db.SysPool.QueryRow(ctx,
+		`SELECT vc_message_bodies_drop_partition('users')`).Scan(&dropped); err != nil {
+		t.Fatalf("drop(users): %v", err)
+	}
+	if dropped {
+		t.Fatal("the drop function accepted a table that is not a partition of message_bodies")
+	}
+	var stillThere bool
+	if err := db.SysPool.QueryRow(ctx,
+		`SELECT to_regclass('public.users') IS NOT NULL`).Scan(&stillThere); err != nil {
+		t.Fatalf("check users: %v", err)
+	}
+	if !stillThere {
+		t.Fatal("users was dropped — the definer function is a privilege escalation")
+	}
+
+	// A name that matches nothing is a no-op, not an error: the retention job
+	// races other replicas and must tolerate a partition another one just took.
+	if err := db.SysPool.QueryRow(ctx,
+		`SELECT vc_message_bodies_drop_partition('message_bodies_1999010100')`).Scan(&dropped); err != nil {
+		t.Fatalf("drop(absent): %v", err)
+	}
+	if dropped {
+		t.Fatal("the drop function claimed to drop a partition that does not exist")
+	}
+
+	// A partition that is still inside its window must survive, even though it
+	// is empty and its name is well-formed — the current hour is exactly the
+	// one an in-flight message is about to write into.
+	var current string
+	if err := db.SysPool.QueryRow(ctx,
+		`SELECT vc_message_bodies_ensure_partition(NOW())`).Scan(&current); err != nil {
+		t.Fatalf("ensure current: %v", err)
+	}
+	if err := db.SysPool.QueryRow(ctx,
+		`SELECT vc_message_bodies_drop_partition($1)`, current).Scan(&dropped); err != nil {
+		t.Fatalf("drop(current): %v", err)
+	}
+	if dropped {
+		t.Fatalf("%s was dropped while still inside its window", current)
+	}
+}

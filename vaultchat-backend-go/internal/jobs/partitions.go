@@ -302,10 +302,28 @@ func DropExpiredPartitions(ctx context.Context) {
 			log.Printf("[partitions] %s is past its window but NOT EMPTY — expiry sweep may be failing; not dropping", p.name)
 			continue
 		}
-		if _, err := tx.Exec(ctx, `DROP TABLE IF EXISTS `+pgQuoteIdent(p.name)); err != nil {
+		// The DDL runs inside a SECURITY DEFINER function (migration 128)
+		// rather than as `DROP TABLE` here. Dropping a partition requires
+		// OWNERSHIP of the parent table, which is precisely the privilege the
+		// API must stop having — production still connects as a superuser that
+		// owns every table, so every RLS policy in this database is bypassed.
+		// This is the half of that change that has to land first.
+		//
+		// The function re-checks all three preconditions itself instead of
+		// trusting this caller, so FALSE here means one of them stopped
+		// holding between the probe above and the drop — in practice, rows
+		// arriving in a partition we had just found empty.
+		var didDrop bool
+		if err := tx.QueryRow(ctx,
+			`SELECT vc_message_bodies_drop_partition($1)`, p.name).Scan(&didDrop); err != nil {
 			metrics.Inc("partition_operation_failures_total")
 			log.Printf("[partitions] drop %s: %v", p.name, err)
 			return
+		}
+		if !didDrop {
+			stuck++
+			log.Printf("[partitions] %s was not dropped — it stopped being empty or expired since the probe", p.name)
+			continue
 		}
 		dropped++
 	}

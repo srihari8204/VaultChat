@@ -123,6 +123,117 @@ jobs:
         env: *db
         run: npm run check:migrations
 
+  authorization:
+    name: Authorization — two users, a real database, an unprivileged role
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    # THE TESTS FOR THIS ALREADY EXISTED AND NEVER RAN.
+    #
+    # call_sessions_test.go, bookmarks_rls_test.go, message_bodies_test.go,
+    # vaultbeam_routes_test.go and the rest drive the real mux with two users —
+    # one inside a chat, one outside — against a real Postgres. Every one of
+    # them is gated on CALL_TEST_DB=1, so on a machine without a database they
+    # SKIP, and `go test ./...` reported success while proving nothing about
+    # who can read whose messages. That is the audit's "no test proves user A
+    # cannot read user B's data": the tests were written, they just had nowhere
+    # to run.
+    #
+    # THE ROLES MATTER AS MUCH AS THE DATABASE. Postgres exempts a table's
+    # OWNER from its own policies and a superuser from all of them, so running
+    # these as the owner would pass while asserting nothing. Two roles, neither
+    # owning anything, mirroring what production must become:
+    #
+    #   vaultchat_app  NOSUPERUSER NOBYPASSRLS — the request path (db.Pool)
+    #   vaultchat_sys  NOSUPERUSER BYPASSRLS   — sweeps and fan-out (db.SysPool)
+    #
+    # Rehearsed against a scratch database before being written. As an
+    # unprivileged role the suite failed on partition DDL (must be owner of
+    # table message_bodies — fixed by migration 128, which moves that DDL into
+    # SECURITY DEFINER functions), on a VaultBeam fixture that assumed users
+    # another test had created, and on a metrics baseline read too early. All
+    # three were real, and none was findable while the tests skipped.
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: vaultchat
+          POSTGRES_PASSWORD: vaultchat_ci
+          POSTGRES_DB: vaultchat
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U vaultchat"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: vaultchat-backend-go/go.mod
+          cache-dependency-path: vaultchat-backend-go/go.sum
+
+      - run: npm ci --legacy-peer-deps
+
+      # Migrations run as the OWNER, exactly as they do in production.
+      - name: Build the schema
+        env:
+          DB_HOST: localhost
+          DB_PORT: '5432'
+          DB_USER: vaultchat
+          DB_PASS: vaultchat_ci
+          DB_NAME: vaultchat
+        run: node vaultchat-backend/migrate.js up
+
+      - name: Create the app and system roles
+        env:
+          PGPASSWORD: vaultchat_ci
+        run: |
+          psql -h localhost -U vaultchat -d vaultchat -v ON_ERROR_STOP=1 <<'SQL'
+          CREATE ROLE vaultchat_app LOGIN PASSWORD 'ci_app' NOSUPERUSER NOBYPASSRLS;
+          CREATE ROLE vaultchat_sys LOGIN PASSWORD 'ci_sys' NOSUPERUSER BYPASSRLS;
+          GRANT USAGE ON SCHEMA public TO vaultchat_app, vaultchat_sys;
+          GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO vaultchat_app, vaultchat_sys;
+          GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO vaultchat_app, vaultchat_sys;
+          GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA public TO vaultchat_app, vaultchat_sys;
+          SQL
+
+      # If the app role came out privileged, every assertion in the next step
+      # becomes a no-op that still reports success. Fail here instead.
+      - name: Prove the app role is actually unprivileged
+        env:
+          PGPASSWORD: vaultchat_ci
+        run: |
+          psql -h localhost -U vaultchat -d vaultchat -v ON_ERROR_STOP=1 -tAc "
+            SELECT CASE
+              WHEN rolsuper OR rolbypassrls
+              THEN 1/0        -- aborts the step
+              ELSE 0 END
+              FROM pg_roles WHERE rolname = 'vaultchat_app'"
+          psql -h localhost -U vaultchat -d vaultchat -v ON_ERROR_STOP=1 -tAc "
+            SELECT CASE
+              WHEN count(*) > 0
+              THEN 1/0        -- the app role owns a table, so policies would not apply to it
+              ELSE 0 END
+              FROM pg_tables WHERE schemaname = 'public' AND tableowner = 'vaultchat_app'"
+
+      - name: Route and job tests as those roles
+        working-directory: vaultchat-backend-go
+        env:
+          CALL_TEST_DB: '1'
+          DB_HOST: localhost
+          DB_PORT: '5432'
+          DB_NAME: vaultchat
+          DB_USER: vaultchat_app
+          DB_PASS: ci_app
+          DB_SYSTEM_USER: vaultchat_sys
+          DB_SYSTEM_PASS: ci_sys
+          DB_QUERY_EXEC_MODE: exec
+          JWT_SECRET: ci_jwt_secret_at_least_thirty_two_chars
+          CALL_TEST_ADMIN_DSN: postgres://vaultchat:vaultchat_ci@localhost:5432/vaultchat
+        run: go test ./internal/routes/ ./internal/jobs/
+
   rust:
     name: Rust — money core parity
     runs-on: ubuntu-latest

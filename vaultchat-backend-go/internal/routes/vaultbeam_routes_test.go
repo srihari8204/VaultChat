@@ -48,6 +48,19 @@ func vbSkip(t *testing.T) {
 func vbSeed(t *testing.T, transferID string, chunkCount, blockCount int, state string) {
 	t.Helper()
 	ctx := context.Background()
+	// Create the users this transfer references. The test used to assume they
+	// were already there — true on a scratch database that another test had
+	// seeded, false on a fresh one, where every VaultBeam test failed on
+	// vb_transfer_sender_id_fkey. A fixture that depends on rows it does not
+	// create cannot run in CI.
+	for _, u := range []string{vbSender, vbRecv, vbEve} {
+		if _, err := db.Pool.Exec(ctx,
+			`INSERT INTO users (id, email, name) VALUES ($1, $2, 'VaultBeam Fixture')
+			 ON CONFLICT (id) DO NOTHING`, u, u+"@vb.test"); err != nil {
+			t.Fatalf("seed user %s: %v", u, err)
+		}
+	}
+
 	mask := make([]byte, vbMaskWidth(blockCount))
 	_, err := db.Pool.Exec(ctx, `DELETE FROM vb_transfer WHERE transfer_id = $1`, transferID)
 	if err != nil {
