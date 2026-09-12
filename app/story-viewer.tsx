@@ -533,16 +533,16 @@ function StoryViewerScreen() {
           <Text style={S.authorTime}>{formatAgo(current.createdAt)}</Text>
           <View style={{ flex: 1 }} />
           {isMyStory && (
-            <TouchableOpacity onPress={openViewers} hitSlop={8} style={S.iconBtn}>
+            <TouchableOpacity onPress={openViewers} hitSlop={8} style={S.iconBtn} accessibilityLabel="Who has seen this">
               <Ionicons name="eye-outline" size={20} color={colors.text} />
             </TouchableOpacity>
           )}
           {isMyStory && (
-            <TouchableOpacity onPress={onDelete} hitSlop={8} style={S.iconBtn}>
+            <TouchableOpacity onPress={onDelete} hitSlop={8} style={S.iconBtn} accessibilityLabel="Delete status">
               <Ionicons name="trash-outline" size={20} color="#FCA5A5" />
             </TouchableOpacity>
           )}
-          <TouchableOpacity onPress={close} hitSlop={8} style={S.iconBtn}>
+          <TouchableOpacity onPress={close} hitSlop={8} style={S.iconBtn} accessibilityLabel="Close">
             <Ionicons name="close" size={22} color={colors.text} />
           </TouchableOpacity>
         </View>

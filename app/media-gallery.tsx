@@ -318,7 +318,7 @@ export default function MediaGalleryScreen() {
   );
 
   const renderVideo = ({ item }: { item: Message }) => (
-    <TouchableOpacity style={[s.tile, { width: tileSize, height: tileSize }]} onPress={() => setViewer(item)} activeOpacity={0.8}>
+    <TouchableOpacity style={[s.tile, { width: tileSize, height: tileSize }]} onPress={() => setViewer(item)} activeOpacity={0.8} accessibilityLabel="Open video">
       <MediaThumb m={item} style={s.tileImg} resolveSrc={resolveSrc} placeholder={colors.surfaceSolid} />
       <View style={s.playBadge}><Ionicons name="play" size={16} color="#fff" /></View>
     </TouchableOpacity>
@@ -380,7 +380,7 @@ export default function MediaGalleryScreen() {
       <StatusBar barStyle="light-content" />
 
       <View style={s.header}>
-        <TouchableOpacity onPress={() => router.back()} style={s.backBtn} hitSlop={10}>
+        <TouchableOpacity onPress={() => router.back()} style={s.backBtn} hitSlop={10} accessibilityLabel="Back">
           <Ionicons name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
         <Text style={s.title} numberOfLines={1}>{(peerName as string) || 'Shared'} Media</Text>
@@ -444,7 +444,7 @@ export default function MediaGalleryScreen() {
       {/* Self-contained full-screen photo viewer */}
       <Modal visible={!!viewer} transparent animationType="fade" onRequestClose={() => setViewer(null)}>
         <View style={s.viewerBg}>
-          <TouchableOpacity style={s.viewerClose} onPress={() => setViewer(null)} hitSlop={12}>
+          <TouchableOpacity style={s.viewerClose} onPress={() => setViewer(null)} accessibilityLabel="Close" hitSlop={12}>
             <Ionicons name="close" size={28} color="#fff" />
           </TouchableOpacity>
           {viewer && <MediaThumb m={viewer} style={s.viewerImg} resizeMode="contain" resolveSrc={resolveSrc} placeholder={colors.surfaceSolid} />}

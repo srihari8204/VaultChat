@@ -353,10 +353,10 @@ export default function StatusScreen() {
           ])} activeOpacity={0.7} style={S.headerBtn}>
             <Ionicons name="ellipsis-vertical" size={20} color={colors.text} />
           </TouchableOpacity>
-          <TouchableOpacity onPress={() => setTextOpen(true)} disabled={posting} activeOpacity={0.7} style={S.headerBtn}>
+          <TouchableOpacity onPress={() => setTextOpen(true)} disabled={posting} activeOpacity={0.7} style={S.headerBtn} accessibilityLabel="Write a text status">
             <Ionicons name="create-outline" size={22} color={colors.text} />
           </TouchableOpacity>
-          <TouchableOpacity onPress={onAddStory} disabled={posting} activeOpacity={0.7} style={S.headerBtn}>
+          <TouchableOpacity onPress={onAddStory} disabled={posting} activeOpacity={0.7} style={S.headerBtn} accessibilityLabel="Add a photo or video status">
             {posting && !textOpen ? <ActivityIndicator color={colors.primary} /> : <Ionicons name="camera-outline" size={22} color={colors.text} />}
           </TouchableOpacity>
         </View>
@@ -366,9 +366,9 @@ export default function StatusScreen() {
       <Modal visible={textOpen} transparent={false} animationType="slide" onRequestClose={() => setTextOpen(false)}>
         <View style={[S.textCompose, { backgroundColor: storyBg }]}>
           <View style={S.textComposeBar}>
-            <TouchableOpacity onPress={() => setTextOpen(false)} hitSlop={10}><Ionicons name="close" size={26} color="#fff" /></TouchableOpacity>
+            <TouchableOpacity onPress={() => setTextOpen(false)} hitSlop={10} accessibilityLabel="Cancel"><Ionicons name="close" size={26} color="#fff" /></TouchableOpacity>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
-              <TouchableOpacity onPress={() => setEmojiOpen(o => !o)} hitSlop={8}>
+              <TouchableOpacity onPress={() => setEmojiOpen(o => !o)} hitSlop={8} accessibilityLabel="Emoji">
                 <Ionicons name={emojiOpen ? 'happy' : 'happy-outline'} size={24} color="#fff" />
               </TouchableOpacity>
               <View style={{ flexDirection: 'row', gap: 8 }}>
@@ -418,7 +418,7 @@ export default function StatusScreen() {
             </View>
           )}
 
-          <TouchableOpacity style={[S.textPostBtn, (!storyText.trim() || posting) && { opacity: 0.5 }]} onPress={onPostText} disabled={!storyText.trim() || posting}>
+          <TouchableOpacity style={[S.textPostBtn, (!storyText.trim() || posting) && { opacity: 0.5 }]} onPress={onPostText} disabled={!storyText.trim() || posting} accessibilityLabel="Post status">
             {posting ? <ActivityIndicator color="#fff" /> : <Ionicons name="send" size={24} color="#fff" />}
           </TouchableOpacity>
         </View>
@@ -428,7 +428,7 @@ export default function StatusScreen() {
       <Modal visible={previewAssets.length > 0} transparent={false} animationType="slide" onRequestClose={() => !posting && setPreviewAssets([])}>
         <View style={S.previewScreen}>
           <View style={S.previewBar}>
-            <TouchableOpacity onPress={() => !posting && setPreviewAssets([])} hitSlop={10}>
+            <TouchableOpacity onPress={() => !posting && setPreviewAssets([])} hitSlop={10} accessibilityLabel="Discard">
               <Ionicons name="close" size={26} color="#fff" />
             </TouchableOpacity>
             {previewAssets.length > 1 && <Text style={S.previewCount}>{previewIdx + 1}/{previewAssets.length}</Text>}
@@ -476,7 +476,7 @@ export default function StatusScreen() {
               multiline
               maxLength={200}
             />
-            <TouchableOpacity style={[S.sendFab, posting && { opacity: 0.6 }]} onPress={postPreview} disabled={posting}>
+            <TouchableOpacity style={[S.sendFab, posting && { opacity: 0.6 }]} onPress={postPreview} disabled={posting} accessibilityLabel="Post status">
               {posting ? <ActivityIndicator color="#fff" /> : <Ionicons name="send" size={22} color="#fff" />}
             </TouchableOpacity>
           </View>

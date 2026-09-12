@@ -462,7 +462,7 @@ export default function ChatsScreen() {
       {selectMode ? (
         <View style={S.header}>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 14 }}>
-            <TouchableOpacity onPress={exitSelect} hitSlop={8}><Ionicons name="close" size={24} color={colors.text} /></TouchableOpacity>
+            <TouchableOpacity onPress={exitSelect} hitSlop={8} accessibilityLabel="Cancel selection"><Ionicons name="close" size={24} color={colors.text} /></TouchableOpacity>
             <Text style={S.title}>{selected.size}</Text>
           </View>
           <View style={{ flexDirection: 'row', gap: 4 }}>
@@ -493,10 +493,10 @@ export default function ChatsScreen() {
                 </Text>
               </TouchableOpacity>
             )}
-            <TouchableOpacity onPress={bulkPin} style={S.headerBtn}><Ionicons name="pin" size={20} color={colors.text} /></TouchableOpacity>
-            <TouchableOpacity onPress={bulkMute} style={S.headerBtn}><Ionicons name="notifications-off-outline" size={20} color={colors.text} /></TouchableOpacity>
-            <TouchableOpacity onPress={bulkArchive} style={S.headerBtn}><Ionicons name="archive-outline" size={20} color={colors.text} /></TouchableOpacity>
-            <TouchableOpacity onPress={bulkDelete} style={S.headerBtn}><Ionicons name="trash-outline" size={20} color={colors.danger} /></TouchableOpacity>
+            <TouchableOpacity onPress={bulkPin} style={S.headerBtn} accessibilityLabel="Pin selected chats"><Ionicons name="pin" size={20} color={colors.text} /></TouchableOpacity>
+            <TouchableOpacity onPress={bulkMute} style={S.headerBtn} accessibilityLabel="Mute selected chats"><Ionicons name="notifications-off-outline" size={20} color={colors.text} /></TouchableOpacity>
+            <TouchableOpacity onPress={bulkArchive} style={S.headerBtn} accessibilityLabel="Archive selected chats"><Ionicons name="archive-outline" size={20} color={colors.text} /></TouchableOpacity>
+            <TouchableOpacity onPress={bulkDelete} style={S.headerBtn} accessibilityLabel="Delete selected chats"><Ionicons name="trash-outline" size={20} color={colors.danger} /></TouchableOpacity>
           </View>
         </View>
       ) : (
@@ -518,15 +518,15 @@ export default function ChatsScreen() {
                 <Ionicons name="git-compare-outline" size={22} color={colors.text} />
               </TouchableOpacity>
             )}
-            <TouchableOpacity onPress={() => router.push('/search' as any)} style={S.headerBtn}><Ionicons name="search" size={22} color={colors.text} /></TouchableOpacity>
-            <TouchableOpacity onPress={() => router.push('/alerts' as any)} style={S.headerBtn}><Ionicons name="notifications-outline" size={22} color={colors.text} /></TouchableOpacity>
+            <TouchableOpacity onPress={() => router.push('/search' as any)} style={S.headerBtn} accessibilityLabel="Search"><Ionicons name="search" size={22} color={colors.text} /></TouchableOpacity>
+            <TouchableOpacity onPress={() => router.push('/alerts' as any)} style={S.headerBtn} accessibilityLabel="Alerts"><Ionicons name="notifications-outline" size={22} color={colors.text} /></TouchableOpacity>
             {/* Was the Mini Apps shortcut. Dropped, not lost — /mini is the
                 centre tab ("Apps"), so it already had a permanent home and this
                 was a second door to the same room. The header slot buys more as
                 a temporary chat, which has no entry point at all otherwise. */}
             <TouchableOpacity onPress={() => setTempSheet(true)} style={S.headerBtn} accessibilityLabel="Start a temporary chat"><Ionicons name="timer-outline" size={22} color={colors.text} /></TouchableOpacity>
-            <TouchableOpacity onPress={() => router.push('/contacts' as any)} style={S.headerBtn}><Ionicons name="people-outline" size={22} color={colors.text} /></TouchableOpacity>
-            <TouchableOpacity onPress={() => router.push('/broadcast' as any)} style={S.headerBtn}><Ionicons name="megaphone-outline" size={22} color={colors.text} /></TouchableOpacity>
+            <TouchableOpacity onPress={() => router.push('/contacts' as any)} style={S.headerBtn} accessibilityLabel="Contacts"><Ionicons name="people-outline" size={22} color={colors.text} /></TouchableOpacity>
+            <TouchableOpacity onPress={() => router.push('/broadcast' as any)} style={S.headerBtn} accessibilityLabel="New broadcast"><Ionicons name="megaphone-outline" size={22} color={colors.text} /></TouchableOpacity>
           </View>
         </View>
       )}
@@ -620,7 +620,7 @@ export default function ChatsScreen() {
         />
       )}
 
-      <TouchableOpacity style={S.fab} onPress={onNewChat} activeOpacity={0.85}>
+      <TouchableOpacity style={S.fab} onPress={onNewChat} activeOpacity={0.85} accessibilityLabel="New chat">
         <Ionicons name="create-outline" size={26} color="#fff" />
       </TouchableOpacity>
 
@@ -802,7 +802,7 @@ const ChatRow = memo(function ChatRow({
   return (
     <Swipeable ref={swipeRef} enabled={!selectMode} renderLeftActions={leftActions} renderRightActions={rightActions} overshootLeft={false} overshootRight={false} friction={2}>
       <TouchableOpacity style={[S.row, isSelected && S.rowSelected]} onPress={onPress} onLongPress={onLongPress} delayLongPress={250} activeOpacity={0.7}>
-        <TouchableOpacity style={S.avatarWrap} activeOpacity={0.7} onPress={onAvatarPress}>
+        <TouchableOpacity style={S.avatarWrap} activeOpacity={0.7} onPress={onAvatarPress} accessibilityLabel="Open profile photo">
           <Avatar
             ring
             uri={showPhoto ? attachmentUrl(photoId!) : null}

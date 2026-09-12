@@ -249,7 +249,7 @@ export default function ProfileScreen() {
     <ScrollView style={S.screen} contentContainerStyle={{ paddingBottom: TAB_BAR_SPACE + 16 }}>
       <View style={S.header}>
         <Text style={S.title}>Profile</Text>
-        <TouchableOpacity onPress={() => router.push('/settings' as any)} hitSlop={8}>
+        <TouchableOpacity onPress={() => router.push('/settings' as any)} hitSlop={8} accessibilityLabel="Settings">
           <Ionicons name="settings-outline" size={22} color={colors.text} />
         </TouchableOpacity>
       </View>
@@ -285,10 +285,10 @@ export default function ProfileScreen() {
             <Text style={{ color: colors.text, fontSize: 15, fontWeight: '700' }}>@{profile.vaultId}</Text>
           </View>
           <TouchableOpacity hitSlop={10} style={{ padding: 6 }}
-            onPress={async () => { await Clipboard.setStringAsync('@' + (profile?.vaultId ?? '')); Alert.alert('Copied', `@${profile?.vaultId} copied to clipboard.`); }}>
+            onPress={async () => { await Clipboard.setStringAsync('@' + (profile?.vaultId ?? '')); Alert.alert('Copied', `@${profile?.vaultId} copied to clipboard.`); }} accessibilityLabel="Copy your VaultID">
             <Ionicons name="copy-outline" size={20} color={colors.primary} />
           </TouchableOpacity>
-          <TouchableOpacity hitSlop={10} style={{ padding: 6 }} onPress={() => router.push('/qr-contact' as any)}>
+          <TouchableOpacity hitSlop={10} style={{ padding: 6 }} onPress={() => router.push('/qr-contact' as any)} accessibilityLabel="Show your QR code">
             <Ionicons name="qr-code-outline" size={20} color={colors.primary} />
           </TouchableOpacity>
         </View>
@@ -420,7 +420,7 @@ function EditRow({ icon, label, value, placeholder, editing, onEdit, onChangeTex
           </View>
         )}
       </View>
-      <TouchableOpacity onPress={editing ? onSave : onEdit} hitSlop={10} style={S.editPencil} disabled={saving}>
+      <TouchableOpacity onPress={editing ? onSave : onEdit} hitSlop={10} style={S.editPencil} disabled={saving} accessibilityLabel="Edit profile">
         {editing && saving ? <ActivityIndicator size="small" color={colors.primary} /> : (
           <Ionicons name={editing ? 'checkmark' : 'pencil'} size={20} color={editing ? colors.primary : colors.textDim} />
         )}

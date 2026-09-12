@@ -257,7 +257,7 @@ export default function MiniAppsScreen() {
             onSubmitEditing={addTodo}
             returnKeyType="done"
           />
-          <TouchableOpacity style={styles.todoAddBtn} onPress={addTodo}>
+          <TouchableOpacity style={styles.todoAddBtn} onPress={addTodo} accessibilityLabel="Add to-do">
             <Ionicons name="add" size={24} color="#000000" />
           </TouchableOpacity>
         </View>
@@ -266,14 +266,14 @@ export default function MiniAppsScreen() {
             <View key={item.id} style={styles.todoItem}>
               <TouchableOpacity
                 style={[styles.todoCheck, item.done && styles.todoCheckDone]}
-                onPress={() => toggleTodo(item.id)}
+                onPress={() => toggleTodo(item.id)} accessibilityLabel="Mark to-do done"
               >
                 {item.done && <Ionicons name="checkmark" size={14} color="#000000" />}
               </TouchableOpacity>
               <Text style={[styles.todoText, item.done && styles.todoTextDone]}>
                 {item.text}
               </Text>
-              <TouchableOpacity onPress={() => deleteTodo(item.id)} style={styles.todoDelBtn}>
+              <TouchableOpacity onPress={() => deleteTodo(item.id)} style={styles.todoDelBtn} accessibilityLabel="Delete to-do">
                 <Ionicons name="close" size={14} color="#DC2626" />
               </TouchableOpacity>
             </View>
@@ -335,7 +335,7 @@ export default function MiniAppsScreen() {
       <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
         {/* ── Header ────────────────────────────────── */}
         <View style={styles.headerRow}>
-          <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
+          <TouchableOpacity onPress={() => router.back()} style={styles.backBtn} accessibilityLabel="Back">
             <Ionicons name="arrow-back" size={20} color="#E8E8E8" />
           </TouchableOpacity>
           <View style={{ flex: 1 }}>

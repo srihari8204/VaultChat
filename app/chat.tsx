@@ -2771,7 +2771,7 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
       {/* Header — glass, so the thread scrolls visibly beneath it */}
       <GlassView kind="chrome" bordered={false} style={S.headerGlass}>
       <View style={S.header}>
-        <TouchableOpacity onPress={() => router.back()} style={S.backBtn} activeOpacity={0.7}>
+        <TouchableOpacity onPress={() => router.back()} style={S.backBtn} activeOpacity={0.7} accessibilityLabel="Back">
           <Ionicons name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
         <TouchableOpacity style={S.headerAvatarWrap} activeOpacity={0.7} onPress={onAvatarTap}>
@@ -2823,14 +2823,14 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
             <>
               <TouchableOpacity
                 style={S.headerIconBtn}
-                onPress={() => router.push({ pathname: '/videocall' as any, params })}
+                onPress={() => router.push({ pathname: '/videocall' as any, params })} accessibilityLabel="Video call"
                 activeOpacity={0.7}
               >
                 <Ionicons name="videocam" size={23} color={colors.text} />
               </TouchableOpacity>
               <TouchableOpacity
                 style={S.headerIconBtn}
-                onPress={() => router.push({ pathname: '/voicecall' as any, params })}
+                onPress={() => router.push({ pathname: '/voicecall' as any, params })} accessibilityLabel="Voice call"
                 activeOpacity={0.7}
               >
                 <Ionicons name="call" size={20} color={colors.text} />
@@ -2847,14 +2847,14 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
             <>
               <TouchableOpacity
                 style={S.headerIconBtn}
-                onPress={() => router.push({ pathname: '/group-calls' as any, params: { ...params, mode: 'video' } })}
+                onPress={() => router.push({ pathname: '/group-calls' as any, params: { ...params, mode: 'video' } })} accessibilityLabel="Group video call"
                 activeOpacity={0.7}
               >
                 <Ionicons name="videocam" size={23} color={colors.text} />
               </TouchableOpacity>
               <TouchableOpacity
                 style={S.headerIconBtn}
-                onPress={() => router.push({ pathname: '/group-calls' as any, params: { ...params, mode: 'voice' } })}
+                onPress={() => router.push({ pathname: '/group-calls' as any, params: { ...params, mode: 'voice' } })} accessibilityLabel="Group voice call"
                 activeOpacity={0.7}
               >
                 <Ionicons name="call" size={20} color={colors.text} />
@@ -2862,7 +2862,7 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
             </>
           );
         })()}
-        <TouchableOpacity style={S.headerIconBtn} onPress={onPressMenu} activeOpacity={0.7}>
+        <TouchableOpacity style={S.headerIconBtn} onPress={onPressMenu} activeOpacity={0.7} accessibilityLabel="More options">
           <Ionicons name="ellipsis-vertical" size={20} color={colors.text} />
         </TouchableOpacity>
       </View>
@@ -3008,7 +3008,7 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
               <Text style={S.pinnedBarTitle}>Pinned message</Text>
               <Text style={S.pinnedBarSub} numberOfLines={1}>{label}</Text>
             </View>
-            <TouchableOpacity hitSlop={10} onPress={async () => { setPinnedId(null); try { await pinMessage(chatId, null); } catch {} }}>
+            <TouchableOpacity hitSlop={10} onPress={async () => { setPinnedId(null); try { await pinMessage(chatId, null); } catch {} }} accessibilityLabel="Unpin message">
               <Ionicons name="close" size={16} color={colors.textDim} />
             </TouchableOpacity>
           </TouchableOpacity>
@@ -3245,7 +3245,7 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
             <Text style={S.lpBarTitle} numberOfLines={1}>{composerLp.data.t}</Text>
             {composerLp.data.d ? <Text style={S.lpBarDesc} numberOfLines={1}>{composerLp.data.d}</Text> : null}
           </View>
-          <TouchableOpacity hitSlop={10} onPress={() => { lpDismissedRef.current = composerLp.url; setComposerLp(null); }}>
+          <TouchableOpacity hitSlop={10} onPress={() => { lpDismissedRef.current = composerLp.url; setComposerLp(null); }} accessibilityLabel="Remove link preview">
             <Ionicons name="close" size={18} color={colors.textDim} />
           </TouchableOpacity>
         </View>
@@ -3275,7 +3275,7 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
               </Text>
             </View>
           </View>
-          <TouchableOpacity onPress={() => setReplyTo(null)} hitSlop={8}>
+          <TouchableOpacity onPress={() => setReplyTo(null)} hitSlop={8} accessibilityLabel="Cancel reply">
             <Ionicons name="close" size={20} color={colors.textDim} />
           </TouchableOpacity>
         </View>
@@ -3290,10 +3290,10 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
           <View style={S.recordingDot} />
           <Text style={S.recordingTimer}>{formatRecDuration(recElapsedMs)}</Text>
           <Text style={S.recordingHint}>Slide to cancel · tap send</Text>
-          <TouchableOpacity style={S.recCancelBtn} onPress={cancelRecording} activeOpacity={0.8}>
+          <TouchableOpacity style={S.recCancelBtn} onPress={cancelRecording} activeOpacity={0.8} accessibilityLabel="Discard voice message">
             <Ionicons name="trash-outline" size={22} color={colors.danger} />
           </TouchableOpacity>
-          <TouchableOpacity style={S.sendFab} onPress={stopAndSendRecording} activeOpacity={0.85}>
+          <TouchableOpacity style={S.sendFab} onPress={stopAndSendRecording} activeOpacity={0.85} accessibilityLabel="Send voice message">
             <Ionicons name="send" size={20} color="#fff" style={{ marginLeft: 2 }} />
           </TouchableOpacity>
         </View>
@@ -3304,7 +3304,7 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
             {editingId == null && (
               <TouchableOpacity
                 style={S.pillIconBtn}
-                onPress={() => { Keyboard.dismiss(); setGifOpen(true); }}
+                onPress={() => { Keyboard.dismiss(); setGifOpen(true); }} accessibilityLabel="Stickers, emoji and GIFs"
                 activeOpacity={0.7}
                 hitSlop={6}
               >
@@ -3332,7 +3332,7 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
               <>
                 <TouchableOpacity
                   style={S.pillIconBtn}
-                  onPress={onPressAttach}
+                  onPress={onPressAttach} accessibilityLabel="Attach"
                   disabled={sending}
                   activeOpacity={0.7}
                   hitSlop={6}
@@ -3387,7 +3387,7 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
           {editingId == null && input.trim().length === 0 ? (
             <TouchableOpacity
               style={S.sendFab}
-              onPress={startRecording}
+              onPress={startRecording} accessibilityLabel="Record a voice message"
               disabled={sending}
               activeOpacity={0.85}
             >
@@ -3396,7 +3396,7 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
           ) : (
             <TouchableOpacity
               style={[S.sendFab, (!input.trim() || sending) && S.sendBtnOff]}
-              onPress={() => onSend(false)}
+              onPress={() => onSend(false)} accessibilityLabel="Send"
               onLongPress={() => { if (input.trim() && !sending && editingId == null) onSend(true); }}
               delayLongPress={300}
               disabled={!input.trim() || sending}
@@ -3575,7 +3575,7 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
             return (
               <>
                 <TouchableOpacity
-                  onPress={() => setPendingItems([])}
+                  onPress={() => setPendingItems([])} accessibilityLabel="Discard all attachments"
                   hitSlop={12}
                   style={{ position: 'absolute', top: 48, left: 16, zIndex: 2, width: 40, height: 40, borderRadius: 20, backgroundColor: '#00000088', alignItems: 'center', justifyContent: 'center' }}
                 >
@@ -3627,13 +3627,13 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
                               <Ionicons name="document-text" size={22} color="#fff" />
                             </View>
                           : <Image source={{ uri: it.uri }} style={{ width: '100%', height: '100%' }} />}
-                        <TouchableOpacity onPress={() => removePendingAt(i)} hitSlop={6}
+                        <TouchableOpacity onPress={() => removePendingAt(i)} hitSlop={6} accessibilityLabel="Remove this attachment"
                           style={{ position: 'absolute', top: 1, right: 1, width: 18, height: 18, borderRadius: 9, backgroundColor: '#000000aa', alignItems: 'center', justifyContent: 'center' }}>
                           <Ionicons name="close" size={12} color="#fff" />
                         </TouchableOpacity>
                       </TouchableOpacity>
                     ))}
-                    <TouchableOpacity onPress={addMorePhotos} style={{ width: 56, height: 56, borderRadius: 8, borderWidth: 1, borderColor: colors.glassStroke, alignItems: 'center', justifyContent: 'center' }}>
+                    <TouchableOpacity onPress={addMorePhotos} accessibilityLabel="Add more photos" style={{ width: 56, height: 56, borderRadius: 8, borderWidth: 1, borderColor: colors.glassStroke, alignItems: 'center', justifyContent: 'center' }}>
                       <Ionicons name="add" size={26} color="#fff" />
                     </TouchableOpacity>
                   </ScrollView>

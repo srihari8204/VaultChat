@@ -622,7 +622,7 @@ export default function EncryptedNotesScreen() {
 
       {/* Header */}
       <View style={s.header}>
-        <TouchableOpacity onPress={() => router.back()} style={s.backBtn}>
+        <TouchableOpacity onPress={() => router.back()} style={s.backBtn} accessibilityLabel="Back">
           <Ionicons name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
         <View style={{ flex: 1 }}>
@@ -633,10 +633,10 @@ export default function EncryptedNotesScreen() {
               the moment cloudBackup started sweeping this vault's blob. */}
           <Text style={s.headerSub}>AES-256-GCM {'\u2022'} PIN locked {'\u2022'} End-to-end encrypted</Text>
         </View>
-        <TouchableOpacity onPress={() => setShowBackup(true)} style={s.trashBtn}>
+        <TouchableOpacity onPress={() => setShowBackup(true)} style={s.trashBtn} accessibilityLabel="Backup notes">
           <Ionicons name="shield-checkmark-outline" size={18} color={colors.text} />
         </TouchableOpacity>
-        <TouchableOpacity onPress={() => setShowTrash(true)} style={s.trashBtn}>
+        <TouchableOpacity onPress={() => setShowTrash(true)} style={s.trashBtn} accessibilityLabel="Deleted notes">
           <Ionicons name="trash-outline" size={18} color={colors.text} />
         </TouchableOpacity>
       </View>
@@ -715,7 +715,7 @@ export default function EncryptedNotesScreen() {
       </TouchableOpacity>
 
       {/* FAB */}
-      <TouchableOpacity style={s.fab} onPress={() => openEditor()} activeOpacity={0.8}>
+      <TouchableOpacity style={s.fab} onPress={() => openEditor()} accessibilityLabel="New note" activeOpacity={0.8}>
         <Ionicons name="add" size={28} color="#FFF" />
       </TouchableOpacity>
 
@@ -805,7 +805,7 @@ export default function EncryptedNotesScreen() {
                       <Text style={s.attachMeta}>{prettySize(att.size)} · tap to open</Text>
                     </View>
                   </TouchableOpacity>
-                  <TouchableOpacity onPress={() => removeAttachment(att)} hitSlop={8}>
+                  <TouchableOpacity onPress={() => removeAttachment(att)} hitSlop={8} accessibilityLabel="Remove attachment">
                     <Ionicons name="close" size={16} color="#EF4444" />
                   </TouchableOpacity>
                 </View>
@@ -851,7 +851,7 @@ export default function EncryptedNotesScreen() {
                   {edReminder ? `Reminder ${new Date(edReminder).toLocaleString()}` : 'Reminder (none)'}
                 </Text>
                 {!!edReminder && (
-                  <TouchableOpacity onPress={() => setEdReminder(undefined)} hitSlop={10}>
+                  <TouchableOpacity onPress={() => setEdReminder(undefined)} hitSlop={10} accessibilityLabel="Clear reminder">
                     <Ionicons name="close" size={16} color="#EF4444" />
                   </TouchableOpacity>
                 )}

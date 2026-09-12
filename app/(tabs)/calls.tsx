@@ -202,10 +202,10 @@ export default function CallsScreen() {
           </View>
         </View>
         <View style={{ flexDirection: 'row', gap: 2 }}>
-          <TouchableOpacity onPress={() => setInfoGroup(g)} hitSlop={8} style={S.callBtn}>
+          <TouchableOpacity onPress={() => setInfoGroup(g)} hitSlop={8} style={S.callBtn} accessibilityLabel="Call details">
             <Ionicons name="information-circle-outline" size={22} color={colors.textDim} />
           </TouchableOpacity>
-          <TouchableOpacity onPress={() => call({ chatId: latest.chatId, peerUid: g.peerUid, peerName: g.peerName, group: g.group }, latest.kind)} hitSlop={8} style={S.callBtn}>
+          <TouchableOpacity onPress={() => call({ chatId: latest.chatId, peerUid: g.peerUid, peerName: g.peerName, group: g.group }, latest.kind)} hitSlop={8} style={S.callBtn} accessibilityLabel="Call back">
             <Ionicons name={latest.kind === 'video' ? 'videocam' : 'call'} size={22} color={colors.primary} />
           </TouchableOpacity>
         </View>
@@ -219,7 +219,7 @@ export default function CallsScreen() {
       <View style={S.header}>
         <Text style={S.title}>Calls</Text>
         {log.length > 0 && (
-          <TouchableOpacity onPress={confirmClear} hitSlop={8}>
+          <TouchableOpacity onPress={confirmClear} hitSlop={8} accessibilityLabel="Clear call history">
             <Ionicons name="trash-outline" size={22} color={colors.textDim} />
           </TouchableOpacity>
         )}
@@ -242,7 +242,7 @@ export default function CallsScreen() {
         />
       )}
 
-      <TouchableOpacity style={S.fab} activeOpacity={0.85} onPress={() => router.push('/contacts' as any)}>
+      <TouchableOpacity style={S.fab} activeOpacity={0.85} onPress={() => router.push('/contacts' as any)} accessibilityLabel="New call">
         <Ionicons name="call" size={24} color="#fff" />
       </TouchableOpacity>
 

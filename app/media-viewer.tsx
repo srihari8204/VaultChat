@@ -301,7 +301,7 @@ function MediaViewerScreen() {
         {st.isBuffering && !st.isPlaying && <View style={s.bufOverlay}><ActivityIndicator color={C.accent} size="large" /><Text style={s.bufTxt}>Streaming...</Text></View>}
         {ctrl && (
           <View style={s.vidCtrl}>
-            <TouchableOpacity style={s.playBtn} onPress={async () => {
+            <TouchableOpacity style={s.playBtn} accessibilityLabel="Play or pause video" onPress={async () => {
               const v = videoRef.current; if (!v) return;
               if (st.isPlaying) { await v.pauseAsync(); setShouldPlay(false); }
               else {
@@ -354,11 +354,11 @@ function MediaViewerScreen() {
           <View style={s.waveform}>{Array.from({length:40}).map((_,i) => <View key={i} style={[s.waveBar,{height:8+Math.random()*28,backgroundColor:i/40<prog?C.accent:'#D1D5DB'}]}/>)}</View>
           <View style={s.audioTimeRow}><Text style={s.audioTime}>{formatDur(ast.positionMillis)}</Text><Text style={s.audioTime}>{formatDur(ast.durationMillis)}</Text></View>
           <View style={s.audioCtrlRow}>
-            <TouchableOpacity onPress={async()=>{if(!soundRef.current)return;const p=Math.max(0,prog-0.1);await soundRef.current.setPositionAsync(p*(ast.durationMillis||0));}}><Ionicons name="play-back" size={26} color="#1F2937" /></TouchableOpacity>
-            <TouchableOpacity style={s.audioPlayBtn} onPress={async()=>{if(!soundRef.current)return;if(ast.isPlaying){await soundRef.current.pauseAsync();}else{await soundRef.current.playAsync();}}}>
+            <TouchableOpacity onPress={async()=>{if(!soundRef.current)return;const p=Math.max(0,prog-0.1);await soundRef.current.setPositionAsync(p*(ast.durationMillis||0));}} accessibilityLabel="Back ten per cent"><Ionicons name="play-back" size={26} color="#1F2937" /></TouchableOpacity>
+            <TouchableOpacity style={s.audioPlayBtn} onPress={async()=>{if(!soundRef.current)return;if(ast.isPlaying){await soundRef.current.pauseAsync();}else{await soundRef.current.playAsync();}}} accessibilityLabel="Play or pause audio">
               <Ionicons name={ast.isPlaying?'pause':'play'} size={30} color="#000" />
             </TouchableOpacity>
-            <TouchableOpacity onPress={async()=>{if(!soundRef.current)return;const p=Math.min(1,prog+0.1);await soundRef.current.setPositionAsync(p*(ast.durationMillis||0));}}><Ionicons name="play-forward" size={26} color="#1F2937" /></TouchableOpacity>
+            <TouchableOpacity onPress={async()=>{if(!soundRef.current)return;const p=Math.min(1,prog+0.1);await soundRef.current.setPositionAsync(p*(ast.durationMillis||0));}} accessibilityLabel="Forward ten per cent"><Ionicons name="play-forward" size={26} color="#1F2937" /></TouchableOpacity>
           </View>
         </View>
       </View>
@@ -438,8 +438,8 @@ function MediaViewerScreen() {
         // recipient a permanent copy through the app's own UI — the protection
         // has to hold in the viewer, not only on the server.
         headerRight: () => isViewOnce ? null : <View style={{flexDirection:'row',gap:20,marginRight:8}}>
-          <TouchableOpacity onPress={shareFile} hitSlop={8}><Ionicons name="share-social-outline" size={22} color="#fff" /></TouchableOpacity>
-          <TouchableOpacity onPress={saveToDevice} hitSlop={8}><Ionicons name="download-outline" size={22} color="#fff" /></TouchableOpacity>
+          <TouchableOpacity onPress={shareFile} hitSlop={8} accessibilityLabel="Share"><Ionicons name="share-social-outline" size={22} color="#fff" /></TouchableOpacity>
+          <TouchableOpacity onPress={saveToDevice} hitSlop={8} accessibilityLabel="Save to device"><Ionicons name="download-outline" size={22} color="#fff" /></TouchableOpacity>
         </View>,
       }} />
       <View style={s.container}>
