@@ -41,6 +41,7 @@ import { setSecure } from '../lib/screenGuard';
 import { installAlertGuard } from '../lib/alertGuard';
 import { loadRemoteFlags } from '../lib/remoteFlags';
 import { registerMessageActions } from '../lib/notificationActions';
+import { initLang } from '../lib/i18n';
 import { isSessionEnded } from '../lib/sessionEnded';
 import * as SplashScreen from 'expo-splash-screen';
 import * as Linking from 'expo-linking';
@@ -175,6 +176,13 @@ loadRemoteFlags().catch(() => {});
 // device that refuses it simply shows the notification without buttons — the
 // behaviour before this existed.
 registerMessageActions().catch(() => {});
+
+// AUDIT F8 — load the saved language (or the device's) before the first screen.
+//
+// Not awaited: t() answers in English until this resolves, which is the correct
+// default at every instant and takes one AsyncStorage read to correct. Gating
+// render on it would trade a correct first paint for a blank one.
+initLang().catch(() => {});
 
 /**
  * Screens that draw their OWN header and never accounted for the status bar.

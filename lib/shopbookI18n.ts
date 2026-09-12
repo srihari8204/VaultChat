@@ -1,12 +1,21 @@
-// lib/shopbookI18n.ts — dependency-free i18n for the SHOP BOOK mini-app
-// (openspec: shop-book-upgrade / localization). Six launch languages,
-// device-locale default, persisted override, English fallback for any
-// missing key. Money/date formatting is NOT here — that comes from the
-// shop's country config (tax engine), which always wins on invoices.
+// lib/shopbookI18n.ts — the SHOP BOOK catalog (openspec: shop-book-upgrade /
+// localization). Six launch languages, device-locale default, persisted
+// override, English fallback for any missing key. Money/date formatting is NOT
+// here — that comes from the shop's country config (tax engine), which always
+// wins on invoices.
+//
+// THE ENGINE MOVED OUT (audit F8). This file used to carry its own copy of the
+// store/persist/fallback machinery. That machinery was the only working i18n in
+// the app, so rather than add a framework beside it, it was extracted to
+// lib/i18n/engine.ts and the app-wide catalog (lib/i18n) was built on the same
+// one. Two catalogs, one implementation — a shop's "Khata" and a messenger's
+// "Forwarded" have nothing to say to each other, and merging the vocabularies
+// would produce one catalog nobody can review.
+//
+// The exported API is unchanged on purpose: every Shop Book call site keeps
+// working without an edit.
 
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import { NativeModules, Platform } from 'react-native';
-import { useSyncExternalStore } from 'react';
+import { createI18n, type Catalog } from './i18n/engine';
 
 export type SBLang = 'en' | 'hi' | 'te' | 'ta' | 'gu' | 'kn';
 
@@ -31,14 +40,19 @@ const SPEECH_LOCALE: Record<SBLang, string> = {
   en: 'en-IN', hi: 'hi-IN', te: 'te-IN', ta: 'ta-IN', gu: 'gu-IN', kn: 'kn-IN',
 };
 
-/** BCP-47 tag for speech input, following the chosen Shop Book language. */
-export function speechLocale(lang: SBLang = current): string {
-  return SPEECH_LOCALE[lang] ?? 'en-IN';
+/**
+ * BCP-47 tag for speech input, following the chosen Shop Book language.
+ *
+ * The default argument reads the CURRENT language at call time. It used to
+ * default to a module-level `current` that the engine now owns — so it is
+ * resolved inside the body, where `sb` is in scope, rather than in the
+ * signature, where it would capture whatever the language was at import.
+ */
+export function speechLocale(lang?: SBLang): string {
+  return SPEECH_LOCALE[lang ?? sb.getLang()] ?? 'en-IN';
 }
 
 const STORE_KEY = 'shopbook.lang';
-
-type Catalog = Record<string, string>;
 
 // English is the reference catalog — every key exists here; other languages
 // fall back to it per-key, so a partial translation never renders blanks.
@@ -344,64 +358,19 @@ const kn: Catalog = {
 
 const CATALOGS: Record<SBLang, Catalog> = { en, hi, te, ta, gu, kn };
 
-// ── state + subscription (tiny external store, no context needed) ──
-let current: SBLang = 'en';
-const listeners = new Set<() => void>();
+// ── engine (shared with the app-wide catalog — see lib/i18n/engine.ts) ──
+const sb = createI18n<SBLang>({
+  catalogs: CATALOGS,
+  fallback: 'en',
+  storeKey: STORE_KEY,
+  languages: SB_LANGUAGES.map((l) => ({ ...l, dir: 'ltr' as const })),
+});
 
-function deviceLang(): SBLang {
-  try {
-    const tag: string =
-      Platform.OS === 'ios'
-        ? NativeModules.SettingsManager?.settings?.AppleLocale ??
-          NativeModules.SettingsManager?.settings?.AppleLanguages?.[0] ?? 'en'
-        : NativeModules.I18nManager?.localeIdentifier ?? 'en';
-    const code = tag.slice(0, 2).toLowerCase();
-    return (CATALOGS as Record<string, Catalog>)[code] ? (code as SBLang) : 'en';
-  } catch {
-    return 'en';
-  }
-}
-
-// Load the persisted choice (or device default) once at import time.
-let loaded = false;
-export async function initShopBookLang(): Promise<SBLang> {
-  if (loaded) return current;
-  loaded = true;
-  try {
-    const saved = await AsyncStorage.getItem(STORE_KEY);
-    current = saved && (CATALOGS as Record<string, Catalog>)[saved] ? (saved as SBLang) : deviceLang();
-  } catch {
-    current = deviceLang();
-  }
-  listeners.forEach((l) => l());
-  return current;
-}
-
-export function getShopBookLang(): SBLang {
-  return current;
-}
-
-export async function setShopBookLang(lang: SBLang) {
-  current = lang;
-  listeners.forEach((l) => l());
-  try {
-    await AsyncStorage.setItem(STORE_KEY, lang);
-  } catch {
-    // persistence is best-effort; the in-memory choice still applies
-  }
-}
-
-export function t(key: string): string {
-  return CATALOGS[current][key] ?? en[key] ?? key;
-}
-
-// Re-renders the component whenever the language changes.
-export function useShopBookLang(): SBLang {
-  return useSyncExternalStore(
-    (cb) => {
-      listeners.add(cb);
-      return () => listeners.delete(cb);
-    },
-    () => current,
-  );
-}
+/** Load the persisted choice (or the device default) once. */
+export const initShopBookLang = sb.init;
+export const getShopBookLang = sb.getLang;
+export const setShopBookLang = sb.setLang;
+/** Translate a Shop Book key. An unknown key returns the key, never a blank. */
+export const t = sb.t;
+/** Re-renders the component whenever the Shop Book language changes. */
+export const useShopBookLang = sb.useLang;

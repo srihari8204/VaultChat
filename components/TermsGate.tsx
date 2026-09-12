@@ -21,9 +21,13 @@ import { ActivityIndicator, Linking, StyleSheet, Text, TouchableOpacity, View } 
 import { Ionicons } from '@expo/vector-icons';
 
 import { SERVER_URL } from '../constants/server';
+// AUDIT F8. The first screen a new user sees is the worst place to be speaking
+// the wrong language, so the gates are the first consumers of the app catalog.
+import { t, useLang } from '../lib/i18n';
 import { acceptTerms, fetchTermsState, termsAreAnUpdate, termsOutstanding, type TermsState } from '../lib/terms';
 
 export function TermsGate({ children }: { children: React.ReactNode }) {
+  useLang();   // re-render if the language changes while this is on screen
   const [state, setState] = useState<TermsState | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -51,7 +55,7 @@ export function TermsGate({ children }: { children: React.ReactNode }) {
       // Stay on the screen and say so. Silently continuing would leave the app
       // believing an acceptance was recorded when it was not, which defeats the
       // only purpose this screen has.
-      setError(e?.message ?? 'Could not record your acceptance. Check your connection and try again.');
+      setError(e?.message ?? t('terms.error'));
     } finally {
       setBusy(false);
     }
@@ -70,24 +74,22 @@ export function TermsGate({ children }: { children: React.ReactNode }) {
       </View>
 
       <Text style={styles.title}>
-        {isUpdate ? 'Our terms have changed' : 'Before you start'}
+        {t(isUpdate ? 'terms.update.title' : 'terms.first.title')}
       </Text>
 
       <Text style={styles.body}>
-        {isUpdate
-          ? 'We have published an updated version of our Terms of Service. Please read them and accept to carry on using VaultChat.'
-          : 'VaultChat is covered by our Terms of Service and Privacy Policy. Please read them before you continue.'}
+        {t(isUpdate ? 'terms.update.body' : 'terms.first.body')}
       </Text>
 
       <TouchableOpacity style={styles.link} onPress={() => open(termsHref)} accessibilityRole="link">
         <Ionicons name="document-text-outline" size={18} color="#B48CE8" />
-        <Text style={styles.linkTxt}>Read the Terms of Service</Text>
+        <Text style={styles.linkTxt}>{t('terms.read.terms')}</Text>
         <Ionicons name="open-outline" size={15} color="#8A879B" />
       </TouchableOpacity>
 
       <TouchableOpacity style={styles.link} onPress={() => open(`${SERVER_URL}/privacy`)} accessibilityRole="link">
         <Ionicons name="lock-closed-outline" size={18} color="#B48CE8" />
-        <Text style={styles.linkTxt}>Read the Privacy Policy</Text>
+        <Text style={styles.linkTxt}>{t('terms.read.privacy')}</Text>
         <Ionicons name="open-outline" size={15} color="#8A879B" />
       </TouchableOpacity>
 
@@ -102,14 +104,12 @@ export function TermsGate({ children }: { children: React.ReactNode }) {
       >
         {busy
           ? <ActivityIndicator color="#fff" />
-          : <Text style={styles.buttonTxt}>I agree</Text>}
+          : <Text style={styles.buttonTxt}>{t('terms.agree')}</Text>}
       </TouchableOpacity>
 
       {/* Says what the button means, in the one place where saying it matters.
           "I agree" on its own is a claim the user has to take on trust. */}
-      <Text style={styles.foot}>
-        Tapping “I agree” records that you accepted these terms.
-      </Text>
+      <Text style={styles.foot}>{t('terms.agree.foot')}</Text>
     </View>
   );
 }
