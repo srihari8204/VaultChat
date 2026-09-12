@@ -104,3 +104,4 @@ rust/**/target/
 
 # nav-core Rust build output (same as the crypto/vaultbeam crates)
 services/nav/rust/target/
+vaultchat-backend-go/api.exe

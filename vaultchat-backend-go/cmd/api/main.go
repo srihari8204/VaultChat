@@ -22,6 +22,39 @@ import (
 	"vaultchat/backend-go/internal/routes"
 )
 
+// Build provenance, set by the linker (-ldflags -X) in the Dockerfile.
+//
+// "What is running in production?" had no answer. The box builds from a working
+// tree hundreds of commits behind its own git HEAD with hundreds of modified
+// files copied over it, so a commit SHA baked in here would name a commit that
+// is NOT what compiled — a confident lie is worse than no answer.
+//
+// So buildSource is a fingerprint of the source that was actually compiled
+// (see the Dockerfile, and scripts/fingerprint-go.sh to recompute it from any
+// checkout). Comparing one string against GET /build answers the question.
+//
+// Empty means someone built without the Dockerfile; /build says so rather than
+// pretending.
+var (
+	buildSource = ""
+	buildTime   = ""
+)
+
+// buildInfo reports provenance, saying "unknown" rather than guessing. An empty
+// value means the binary was NOT built by the Dockerfile, and during an
+// incident that distinction is the whole point: "I don't know what this is" is
+// actionable, a blank field looks like a display bug.
+func buildInfo() map[string]any {
+	source, built := buildSource, buildTime
+	if source == "" {
+		source = "unknown — built outside the Dockerfile, provenance unavailable"
+	}
+	if built == "" {
+		built = "unknown"
+	}
+	return map[string]any{"source": source, "builtAt": built}
+}
+
 func main() {
 	// JWT_SECRET is read lazily, per request, by httpx.VerifyAccess and by the
 	// HLS ticket HMAC. Go's os.Getenv returns "" for an unset variable rather
@@ -107,6 +140,16 @@ func main() {
 			"ready": dbOK, "db": dbOK, "redis": redisOK,
 			"uptime": time.Since(start).Seconds(),
 		})
+	})
+
+	// PROVENANCE — "which source is this binary?" Unauthenticated on purpose:
+	// it is the first thing you need during an incident, when you may not have
+	// a token, and it discloses nothing an attacker can use — a hash of source
+	// they cannot invert and a timestamp.
+	mux.HandleFunc("GET /build", func(w http.ResponseWriter, r *http.Request) {
+		info := buildInfo()
+		info["uptime"] = time.Since(start).Seconds()
+		httpx.JSON(w, 200, info)
 	})
 
 	routes.RegisterContacts(mux)
