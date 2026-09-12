@@ -10,6 +10,7 @@ import { BRAND_ACCENT } from '../../constants/theme';
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { encField, decField } from '../../lib/cacheCrypto';
+import { flagEnabled } from '../../lib/remoteFlags';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Stack, useRouter } from 'expo-router';
 import { TAB_BAR_SPACE } from '../../constants/layout';
@@ -289,6 +290,12 @@ export default function MiniAppsScreen() {
       return;
     }
     // Main mini apps — navigate to their routes
+    //
+    // A tile hidden by a kill switch must not be reachable by a stale deep link
+    // or a remembered "recent app" entry either — hiding the button while the
+    // route still opens is a half-disabled feature, which is the failure mode a
+    // kill switch exists to avoid.
+    if (!flagEnabled(`mini.${appId}`)) return;
     const mainApp = MINI_APPS_MAIN.find(a => a.id === appId);
     if (mainApp?.route) {
       router.push(mainApp.route as any);
@@ -340,7 +347,15 @@ export default function MiniAppsScreen() {
         {/* ── Mini Apps 3x3 Grid (matching PDF page 12) ─── */}
         <Text style={styles.sectionTitle}>{'\uD83E\uDDE9'} Mini Apps</Text>
         <View style={styles.grid}>
-          {MINI_APPS_MAIN.map(app => (
+          {/* AUDIT F11. Each tile is behind a kill switch keyed on its id, so a
+              mini-app that starts misbehaving — a broken WebView, a dependency
+              outage, a partner endpoint down — can be taken off every device by
+              setting VAULTCHAT_REMOTE_FLAGS={"mini.<id>":false} and restarting
+              the API, instead of shipping a build that only reaches the people
+              who update. The server can only DISABLE; see lib/remoteFlagPolicy.
+              Until the flags load, and whenever they cannot, every tile shows —
+              the app behaves as built. */}
+          {MINI_APPS_MAIN.filter(app => flagEnabled(`mini.${app.id}`)).map(app => (
             <TouchableOpacity key={app.id} style={styles.appCard} onPress={() => handleOpenApp(app.id)} activeOpacity={0.7}>
               <LinearGradient colors={app.gradient} style={styles.appIconWrap}>
                 <Text style={styles.appEmoji}>{app.icon}</Text>

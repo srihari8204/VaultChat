@@ -39,6 +39,7 @@ import { Stack, useRouter } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
 import { setSecure } from '../lib/screenGuard';
 import { installAlertGuard } from '../lib/alertGuard';
+import { loadRemoteFlags } from '../lib/remoteFlags';
 import { isSessionEnded } from '../lib/sessionEnded';
 import * as SplashScreen from 'expo-splash-screen';
 import * as Linking from 'expo-linking';
@@ -155,6 +156,16 @@ if (SENTRY_DSN) {
 //
 // Module scope, not an effect: a request can fail before the first render.
 installAlertGuard();
+
+// AUDIT F11 — pull the kill switches at boot.
+//
+// Not awaited, and nothing waits on it: until it resolves, every flag reads as
+// whatever the build intends, which is the correct behaviour at every instant.
+// It applies the persisted answer within milliseconds, so a feature switched
+// off yesterday stays off through a cold start with no network — the case that
+// matters most, since a feature bad enough to disable is usually bad on a bad
+// connection too.
+loadRemoteFlags().catch(() => {});
 
 /**
  * Screens that draw their OWN header and never accounted for the status bar.
