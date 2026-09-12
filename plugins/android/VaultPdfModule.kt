@@ -125,8 +125,12 @@ class VaultPdfModule(reactContext: ReactApplicationContext) :
      * throw inside createBitmap, and an unbounded value is how a "zoom to 10×"
      * turns into an OutOfMemoryError.
      *
-     * RGB_565 is deliberate for thumbnails: half the bytes of ARGB_8888, and a
-     * PDF page composited onto opaque white has no alpha to preserve anyway.
+     * ARGB_8888 is NOT a choice — PdfRenderer.render() rejects every other
+     * Bitmap.Config. RGB_565 would halve the bytes and a page composited onto
+     * opaque white has no alpha worth keeping, but the platform throws
+     * IllegalArgumentException on it, which is exactly how the first build of
+     * this module produced "Page 1 could not be rendered" while info() worked
+     * fine. The width clamp above is what bounds memory instead.
      */
     @ReactMethod
     fun renderPage(path: String, pageIndex: Int, targetWidth: Int, outPath: String, promise: Promise) {
@@ -144,7 +148,7 @@ class VaultPdfModule(reactContext: ReactApplicationContext) :
                 val w = targetWidth.coerceIn(64, 4096)
                 renderer.openPage(pageIndex).use { page ->
                     val h = ((w.toLong() * page.height) / page.width).toInt().coerceIn(64, 8192)
-                    bmp = Bitmap.createBitmap(w, h, Bitmap.Config.RGB_565)
+                    bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
                     // A PDF page is transparent where nothing is drawn. Without
                     // this the page renders as black-on-black in a dark theme —
                     // present, correct, and unreadable.
