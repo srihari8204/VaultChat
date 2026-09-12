@@ -156,6 +156,7 @@ func main() {
 	routes.RegisterAppVersion(mux) // GET /app/version — the minimum-build gate
 	routes.RegisterTerms(mux)      // GET/POST /user/terms — recorded acceptance (F10)
 	routes.RegisterAppFlags(mux)   // GET /app/flags — the kill switch (F11)
+	routes.RegisterUsage(mux)      // POST /app/usage — aggregate screen counts (F9)
 	routes.RegisterLink(mux)
 	routes.RegisterGif(mux)
 	routes.RegisterStories(mux)

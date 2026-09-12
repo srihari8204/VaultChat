@@ -42,6 +42,8 @@ import { installAlertGuard } from '../lib/alertGuard';
 import { loadRemoteFlags } from '../lib/remoteFlags';
 import { registerMessageActions } from '../lib/notificationActions';
 import { initLang } from '../lib/i18n';
+import { attachUsageFlush, initUsageCounter } from '../lib/usageCounter';
+import { UsageCounter } from '../components/UsageCounter';
 import { isSessionEnded } from '../lib/sessionEnded';
 import * as SplashScreen from 'expo-splash-screen';
 import * as Linking from 'expo-linking';
@@ -183,6 +185,15 @@ registerMessageActions().catch(() => {});
 // default at every instant and takes one AsyncStorage read to correct. Gating
 // render on it would trade a correct first paint for a blank one.
 initLang().catch(() => {});
+
+// AUDIT F9 — read the usage-counter preference before anything can be counted.
+//
+// Order matters: countScreen() checks the flag, and the flag defaults to ON, so
+// a preference read that landed AFTER the first navigation would have counted a
+// screen for someone who had switched counting off. One AsyncStorage read at
+// module scope closes that window.
+initUsageCounter().catch(() => {});
+attachUsageFlush();
 
 /**
  * Screens that draw their OWN header and never accounted for the status bar.
@@ -840,6 +851,9 @@ function RootLayoutInner() {
           no configured version, not signed in — so it costs a normal launch
           nothing and can never strand anyone (audit F10). */}
       <TermsGate>
+      {/* Renders nothing. One observer for every screen, instead of a call at
+          the top of 195 of them (audit F9). */}
+      <UsageCounter />
       {/* ABOVE the navigator, so it survives every screen change. A call used
           to take the whole app hostage: the engine owned the call outside
           React, but the call screen's unmount said "hang up", so navigating

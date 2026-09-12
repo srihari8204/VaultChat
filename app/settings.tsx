@@ -27,6 +27,7 @@ import {
   View,
 } from 'react-native';
 import { SERVER_URL } from '../constants/server';
+import { initUsageCounter, setUsageCounterEnabled, usageCounterEnabled } from '../lib/usageCounter';
 import { api, getAccessToken } from '../lib/api';
 import { getAutoDownload, setAutoDownload, type AutoDownloadPolicy } from '../lib/mediaPrefs';
 import { getSaveToGallery, setSaveToGallery } from '../lib/galleryExport';
@@ -132,6 +133,14 @@ export default function SettingsScreen() {
 
   // Device MFA (biometric / device PIN) — local + server mirror.
   const [mfaOn,   setMfaOn]   = useState(false);
+  // AUDIT F9 — the usage counter's switch. Read once; the module holds the
+  // live value, and this mirrors it for the control.
+  const [usageOn, setUsageOn] = useState(usageCounterEnabled());
+  useEffect(() => { initUsageCounter().then(setUsageOn).catch(() => {}); }, []);
+  const toggleUsage = useCallback(async (on: boolean) => {
+    setUsageOn(on);
+    await setUsageCounterEnabled(on);
+  }, []);
   const [mfaBusy, setMfaBusy] = useState(false);
   useEffect(() => { isMfaEnabled().then(setMfaOn); }, []);
   const toggleMfa = useCallback(async () => {
@@ -356,8 +365,19 @@ export default function SettingsScreen() {
               document a person should be able to see is served from the real
               domain, with the padlock their own browser drew. Play also expects
               this link to exist in-app, not only on the store listing. */}
-          <LinkRow icon="document-text-outline" title="Privacy Policy" sub="What we collect, and what we cannot read" onPress={() => Linking.openURL(`${SERVER_URL}/privacy`)} last />
+          <LinkRow icon="document-text-outline" title="Privacy Policy" sub="What we collect, and what we cannot read" onPress={() => Linking.openURL(`${SERVER_URL}/privacy`)} />
+          <LinkRow icon="reader-outline" title="Terms of Service" sub="The agreement you accepted" onPress={() => Linking.openURL(`${SERVER_URL}/terms`)} last />
         </View>
+        {/* AUDIT F9. Stated in the sub-line rather than behind a help link,
+            because the only reason a privacy product is allowed to count
+            anything is that it says exactly what it counts. The sentence is the
+            whole disclosure: a screen name and a day, no identity. */}
+        <ToggleRow
+          title="Help improve VaultChat"
+          sub="Sends which screens get opened — a screen name and a day, with no account, device or message information. Never the content of anything."
+          value={usageOn}
+          onValueChange={toggleUsage}
+        />
       </View>
 
       <View style={S.section}>
@@ -500,8 +520,13 @@ function ToggleRow({
   title:         string;
   sub:           string;
   value:         boolean;
-  busy:          boolean;
-  onValueChange: () => void;
+  // Optional: most toggles are instant. A row that has no async work to do
+  // should not have to pass `busy={false}` to say so.
+  busy?:         boolean;
+  // Takes the NEW value. A `() => void` handler is still assignable, so every
+  // existing caller keeps working; the ones that need the value can now read it
+  // instead of inferring it from the state they are about to change.
+  onValueChange: (value: boolean) => void;
 }) {
   const { colors } = useTheme();
   const S = useS();
