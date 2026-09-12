@@ -55,6 +55,13 @@ export class MediaKeyMissingError extends Error {
   }
 }
 
+/**
+ * Cache subdirectory prefix for document plaintext handed to a viewer or to
+ * another app. Shared with lib/mediaCacheGC.ts, which sweeps it — keep the two
+ * in step; that coupling is the whole point of exporting it.
+ */
+export const DOC_CACHE_PREFIX = 'dc_';
+
 const BASE = MEDIA_ROOT;
 
 const FOLDER: Record<MediaKind, string> = {
@@ -144,7 +151,7 @@ export async function getThumbUri(attachmentId: string): Promise<string | null> 
  * needed to hand a file to another app via an intent, since the FileProvider
  * is configured over the cache dir. Returns the cache file:// uri.
  */
-export async function copyToCache(sourceUri: string, filename: string): Promise<string> {
+export async function copyToCache(sourceUri: string, filename: string, scopeId?: string): Promise<string> {
   // A remote URL is not a path. Passing one here used to reach RNFS.copyFile
   // and surface as "ENOENT ... https://api…", which reads like a missing file
   // rather than the type error it is. Fail with something that names the cause.
@@ -152,9 +159,24 @@ export async function copyToCache(sourceUri: string, filename: string): Promise<
     throw new Error('copyToCache needs a local file — download the attachment first (getMedia)');
   }
   const safe = (filename || 'file').replace(/[/\\:*?"<>|]/g, '_');
-  const dest = `${APP_CACHE}/${safe}`;
+  // S2: every opened document used to land at APP_CACHE/<original filename>.
+  //
+  // Two consequences, both bad. It matched none of mediaCacheGC's prefixes, so
+  // it was NEVER swept — a document survived revoke, view-once burn and logout,
+  // which are precisely the guarantees those features sell. And two attachments
+  // that happened to share a filename shared one path, so "invoice.pdf" from one
+  // chat could be handed to an app that had been given the other.
+  //
+  // A DIRECTORY carries the identity instead of the file. `dc_` is a sweepable
+  // prefix (shared with mediaCacheGC) and the attachment id makes it
+  // collision-free, while the file inside keeps its real name — which is what
+  // the receiving app shows the user, so an opaque filename is not an option.
+  const scope = (scopeId || safe).replace(/[^A-Za-z0-9_.-]/g, '_');
+  const dir = `${APP_CACHE}/${DOC_CACHE_PREFIX}${scope}`;
+  const dest = `${dir}/${safe}`;
   const src = sourceUri.replace('file://', '');
   if (src !== dest) {
+    await ensureDir(dir);
     try { if (await RNFS.exists(dest)) await RNFS.unlink(dest); } catch {}
     await RNFS.copyFile(src, dest);
   }

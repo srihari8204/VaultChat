@@ -19,12 +19,48 @@ const PREFIXES = ['dec_', 'enc_', 'mp_'];
 // size-capped sweep below.
 const EPHEMERAL_PREFIXES = ['vo_', 'vv_'];
 
+/** Mirrors mediaStore.DOC_CACHE_PREFIX; duplicated to keep this module import-free of it. */
+const DOC_DIR_PREFIX = 'dc_';
+
 /**
  * Delete every ephemeral protected-media plaintext left in the cache.
  * Unconditional (not size-capped) — see EPHEMERAL_PREFIXES. Safe to call any
  * time no protected viewer is on screen; media-viewer also cleans up its own
  * file on unmount, so this is the crash-recovery path.
  */
+/**
+ * Delete document plaintext staged for a viewer or an external hand-off.
+ *
+ * These live in `dc_<attachmentId>/` subdirectories of the cache (see
+ * mediaStore.copyToCache). Before that prefix existed they were written to the
+ * cache ROOT under their original filename, where they matched no sweep at all
+ * and so survived revoke, view-once and logout — S2 in DOCUMENT_SURFACE_AUDIT.md.
+ *
+ * Pass an attachmentId to drop just that document (revocation, view-once
+ * completion); pass nothing to drop all of them (logout, account switch, boot).
+ *
+ * Deletes only `dc_` entries. The cache also holds other apps' business and the
+ * user's own library lives outside the cache entirely, so a blanket wipe is
+ * exactly what this must not do.
+ */
+export async function purgeDocumentCache(attachmentId?: string): Promise<number> {
+  let n = 0;
+  try {
+    const dir = (FileSystem as any).cacheDirectory;
+    if (!dir) return 0;
+    const want = attachmentId
+      ? DOC_DIR_PREFIX + attachmentId.replace(/[^A-Za-z0-9_.-]/g, '_')
+      : null;
+    for (const name of await FileSystem.readDirectoryAsync(dir)) {
+      if (!name.startsWith(DOC_DIR_PREFIX)) continue;
+      if (want && name !== want) continue;
+      await FileSystem.deleteAsync(dir + name, { idempotent: true }).catch(() => {});
+      n++;
+    }
+  } catch {}
+  return n;
+}
+
 export async function purgeEphemeralMedia(): Promise<number> {
   let n = 0;
   try {

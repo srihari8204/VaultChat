@@ -134,7 +134,7 @@ export async function resolveAttachmentFile(
   // The OS FileProvider is configured over the cache directory, so a hand-off
   // (and Android's own PDF/Office apps) can only be given a file that lives
   // there. Harmless for the in-app viewers, which read either path.
-  return copyToCache(local, a.filename || `file-${a.attachmentId}`);
+  return copyToCache(local, a.filename || `file-${a.attachmentId}`, a.attachmentId);
 }
 
 export default { viewerRouteFor, resolveAttachmentFile, extOf };

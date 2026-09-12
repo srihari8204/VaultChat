@@ -325,6 +325,48 @@ func chatsBlockedDirect(ctx context.Context, chatID, senderID string) bool {
 	return false
 }
 
+// chatsValidateAttachmentRef reports why `userID` may not attach the attachment
+// named in meta, or "" when they may.
+//
+// "May reference" is deliberately the SAME question as "may download", so the
+// two cannot drift: uploadsIsRecipient is the one definition of that (it covers
+// chat membership and story visibility), and ownership is the other half —
+// the uploader of a brand-new attachment has no message referencing it yet, so
+// the recipient test alone would reject every first send.
+func chatsValidateAttachmentRef(ctx context.Context, userID string, meta map[string]any) string {
+	attID := strings.TrimSpace(chatsStrOr(meta["attachmentId"], ""))
+	if attID == "" {
+		return ""
+	}
+
+	var owner string
+	err := db.WithUser(ctx, userID, func(tx pgx.Tx) error {
+		return tx.QueryRow(ctx,
+			`SELECT owner_user_id FROM attachments WHERE id = $1 LIMIT 1`, attID).Scan(&owner)
+	})
+	if err != nil && !db.NoRows(err) {
+		// Fail CLOSED. A database error here must not become an open door.
+		return "Could not verify this attachment."
+	}
+	if db.NoRows(err) {
+		// No such attachment. Refusing is also what stops a message being bound
+		// to an id that is created later.
+		return "That attachment does not exist."
+	}
+	if owner == userID {
+		return ""
+	}
+
+	ok, e := uploadsIsRecipient(ctx, userID, attID)
+	if e != nil {
+		return "Could not verify this attachment."
+	}
+	if !ok {
+		return "You do not have access to that attachment."
+	}
+	return ""
+}
+
 func chatsMessagePost(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	user := httpx.UserFrom(r)
@@ -582,6 +624,31 @@ func chatsMessagePost(w http.ResponseWriter, r *http.Request) {
 		if !isExternalGif && (meta == nil || !chatsTruthy(meta["attachmentId"])) {
 			httpx.Err(w, 400, "meta.attachmentId required for media messages")
 			return
+		}
+		// S4: meta.attachmentId is CLIENT-SUPPLIED, and until now the only test
+		// applied to it was "is it truthy".
+		//
+		// Download authorization (uploadsGet) answers "may this user see this
+		// attachment?" with: are they the owner, or is there a message carrying
+		// this attachmentId in a chat they are still a member of. That predicate
+		// is satisfiable BY SENDING — so an authenticated user who merely learned
+		// an attachment UUID could POST it as meta.attachmentId into a chat of
+		// their own, and the row they just created became their own proof of
+		// access. The realistic acquirer is someone removed from a group:
+		// left_at IS NULL had revoked their access, and this handed it back
+		// permanently. The stories path already refuses this (stories.go checks
+		// ownerID != user.ID); the media path did not.
+		//
+		// Checked BEFORE the insert, which is what closes it: at this point the
+		// forged reference does not exist yet, so the recipient predicate can
+		// only be true for someone who could already see the attachment.
+		// Legitimate flows are untouched — the uploader owns the row, and a
+		// forwarder is still a member of a chat that carries the original.
+		if !isExternalGif {
+			if msg := chatsValidateAttachmentRef(ctx, user.ID, meta); msg != "" {
+				httpx.Err(w, 403, msg)
+				return
+			}
 		}
 		if content != nil && !contentIsStr {
 			httpx.Err(w, 400, "content must be a string if provided")

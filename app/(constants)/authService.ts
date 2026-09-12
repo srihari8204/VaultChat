@@ -408,6 +408,17 @@ export async function logoutUser() {
   // note attachments, completed VaultBeam transfers. Enumerated from the single
   // storage-roots authority so a newly added root can't be missed here.
   try { await require('../../lib/storageRoots').purgeUserContent(); } catch {}
+  // S2: purgeUserContent deliberately skips the CACHE dir (storageRoots.ts says
+  // so in its own comment), and document plaintext staged for a viewer or an
+  // external hand-off lives exactly there. So signing out left every document
+  // this account had opened readable on disk for whoever signs in next.
+  // Sweeps only dc_ document staging plus the vo_/vv_ protected-media temps —
+  // never the cache at large, which is not ours to clear.
+  try {
+    const gc = require('../../lib/mediaCacheGC');
+    await gc.purgeDocumentCache();
+    await gc.purgeEphemeralMedia();
+  } catch {}
 
   // Per-attachment media keys and the local revoke list are scoped to the
   // account that received them; the files they unlock are gone above.
