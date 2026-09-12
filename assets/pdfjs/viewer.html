@@ -92,7 +92,7 @@
     }, { rootMargin: '600px 0px' });
 
     var pending = pdf.numPages;
-    function done() { if (--pending === 0) post({ t: 'ready', pages: pdf.numPages }); }
+    function done() { if (--pending === 0) post({ t: 'ready', pages: pdf.numPages, v: (pdfjsLib.version || '?') }); }
 
     for (var i = 1; i <= pdf.numPages; i++) {
       (function (n) {

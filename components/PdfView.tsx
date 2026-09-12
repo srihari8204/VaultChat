@@ -34,7 +34,7 @@ const VIEWER = 'file:///android_asset/pdfjs/viewer.html';
 /** How long to wait for pdf.js's first page before falling back to the reader. */
 const RENDER_TIMEOUT_MS = 30_000;
 
-export function PdfView({ uri, onFail }: { uri: string; onFail?: (why: string) => void }) {
+export function PdfView({ uri, onFail, onReady }: { uri: string; onFail?: (why: string) => void; onReady?: (info: { version: string; pages: number }) => void }) {
   const c = useColors();
   const s = useMemo(() => makeS(c), [c]);
   const [shown, setShown] = useState(false);
@@ -82,7 +82,13 @@ export function PdfView({ uri, onFail }: { uri: string; onFail?: (why: string) =
         originWhitelist={['*']}
         allowFileAccess
         allowFileAccessFromFileURLs
-        allowUniversalAccessFromFileURLs
+        // allowUniversalAccessFromFileURLs is GONE.
+        //
+        // It let this file:// page reach ANY origin — including https — so a
+        // renderer escape could not merely read local files, it could POST them
+        // out. allowFileAccessFromFileURLs alone still lets the viewer XHR the
+        // PDF sitting elsewhere on disk (which is the only reason the flag pair
+        // was here), while a compromised page now has no network egress.
         javaScriptEnabled
         domStorageEnabled={false}
         // Pinch-to-zoom, without Android's floating +/- buttons over the page.
@@ -92,7 +98,14 @@ export function PdfView({ uri, onFail }: { uri: string; onFail?: (why: string) =
         onMessage={e => {
           try {
             const m = JSON.parse(e.nativeEvent.data);
-            if (m.t === 'ready') setShown(true);
+            if (m.t === 'ready') {
+              setShown(true);
+              // The RUNNING version, read off pdfjsLib at render time — not a
+              // string in a README. This is what proves which bundle actually
+              // shipped, and it is how the pdf.js upgrade was verified on device.
+              if (__DEV__) console.log('[pdfjs] rendering with', m.v, '·', m.pages, 'pages');
+              onReady?.({ version: String(m.v ?? '?'), pages: Number(m.pages) || 0 });
+            }
             else if (m.t === 'error') fail(m.m || 'The PDF could not be rendered.');
           } catch {}
         }}

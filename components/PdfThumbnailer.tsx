@@ -119,7 +119,7 @@ export function PdfThumbnailerHost() {
         originWhitelist={['*']}
         allowFileAccess
         allowFileAccessFromFileURLs
-        allowUniversalAccessFromFileURLs
+        // allowUniversalAccessFromFileURLs removed — see components/PdfView.tsx.
         javaScriptEnabled
         domStorageEnabled={false}
         onMessage={onMessage}
