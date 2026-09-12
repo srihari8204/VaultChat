@@ -7,6 +7,8 @@
 
 import * as Sentry from '@sentry/react-native';
 import { router } from 'expo-router';
+
+import { SessionEndedError } from './sessionEnded';
 import * as SecureStore from 'expo-secure-store';
 import { SERVER_URL } from '../constants/server';
 import { VAULT_SESSION_SEALED } from '../constants/flags';
@@ -339,19 +341,19 @@ export async function api<T = any>(path: string, opts: ApiOptions = {}): Promise
       // so the user can sign in again instead of staring at a "token_expired"
       // alert with no way forward.
       await endSessionAndBounce();
-      // ...AND DO NOT REJECT. The bounce above was only half the fix: the throw
-      // below still ran, and roughly twenty call sites do
+      // AUDIT F09, completed. This used to return a promise that never settled,
+      // which suppressed the "token_expired" dialog that the ~20 sites doing
       //   catch (e) { Alert.alert('… failed', e?.message ?? 'Try again') }
-      // so an expired session stacked a "token_expired" dialog ON TOP of the
-      // sign-in screen — exactly the dead end the redirect exists to prevent.
-      // The screen that made this call is being unmounted by the redirect, so
-      // there is nothing left to inform.
+      // would otherwise have stacked on top of the sign-in screen. It worked,
+      // and it cost more than it should have: `finally` never ran either, so
+      // spinners, disabled buttons and "sending…" states stayed frozen on any
+      // screen that outlived the redirect, and no caller could clean up.
       //
-      // ponytail: a deliberately never-settling promise. Correct while the only
-      // thing after a session end is the redirect; if a caller ever needs to run
-      // cleanup on session death, give it a rejected SessionEndedError and teach
-      // the alert sites to ignore that one.
-      return new Promise<T>(() => {});
+      // Now it rejects with a TYPED error and the dialog is suppressed at the
+      // alert boundary instead (lib/alertGuard.ts, installed in app/_layout).
+      // Callers unwind normally; the user gets the sign-in screen with nothing
+      // in front of it.
+      throw new SessionEndedError();
     }
   }
 

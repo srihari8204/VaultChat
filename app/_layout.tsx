@@ -38,6 +38,8 @@ import { Buffer } from 'buffer';
 import { Stack, useRouter } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
 import { setSecure } from '../lib/screenGuard';
+import { installAlertGuard } from '../lib/alertGuard';
+import { isSessionEnded } from '../lib/sessionEnded';
 import * as SplashScreen from 'expo-splash-screen';
 import * as Linking from 'expo-linking';
 import * as Sentry from '@sentry/react-native';
@@ -134,8 +136,24 @@ if (SENTRY_DSN) {
     // Sentry captures Hermes JS errors; native crashes via React Native's
     // own native bridge — no extra config needed.
     environment:        process.env.EXPO_PUBLIC_ENV || 'production',
+    // A session ending is a normal event, not a crash: api() rejects with it so
+    // callers can unwind, and the app is already showing the sign-in screen.
+    // Without this filter every expired token becomes an issue in Sentry, and a
+    // report full of routine events is a report nobody reads.
+    beforeSend: (event, hint) => (isSessionEnded(hint?.originalException) ? null : event),
   });
 }
+
+// AUDIT F09 — install the alert boundary before any screen can render.
+//
+// api() rejects a dead session with a typed SessionEndedError. Roughly twenty
+// call sites turn a caught error straight into Alert.alert, which would stack a
+// dialog on top of the sign-in screen the redirect just opened. The boundary
+// drops that one message and nothing else; see lib/alertGuard.ts for why it
+// wraps Alert rather than asking 694 call sites to import a helper.
+//
+// Module scope, not an effect: a request can fail before the first render.
+installAlertGuard();
 
 /**
  * Screens that draw their OWN header and never accounted for the status bar.
