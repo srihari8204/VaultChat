@@ -2,11 +2,10 @@
 // fingerprint / face) via expo-local-authentication. "Continue to Chats" logs in
 // (mpin/verify → JWT), optionally enrolls MFA, clears the onboarding store.
 
-import { brandAlpha } from '../constants/theme';
+import { brandAlpha, type Palette } from '../constants/theme';
 import { Stack, useRouter } from 'expo-router';
 import { useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Alert, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
-import { type Palette } from '../constants/theme';
 import { useTheme } from '../lib/theme';
 import { onboarding, verifyMpinRemote, uploadAndSetProfilePhoto, onboardingError } from '../lib/onboarding';
 import { deviceSecurityAvailable, enableMfa } from '../lib/mfa';

@@ -8,11 +8,7 @@
 import { HEADER_TOP, TAB_BAR_SPACE } from '../../constants/layout';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import {
-  ActivityIndicator, Alert, AppState, Image, Modal, Pressable, RefreshControl, ScrollView, SectionList,
-  StyleSheet, Text, TouchableOpacity, View,
-} from 'react-native';
-import { useWindowDimensions } from 'react-native';
+import { ActivityIndicator, Alert, AppState, Image, Modal, Pressable, RefreshControl, ScrollView, SectionList, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
 import { Swipeable } from 'react-native-gesture-handler';
 import { Ionicons } from '@expo/vector-icons';
 import { type Palette, brandAlpha } from '../../constants/theme';

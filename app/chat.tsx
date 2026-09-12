@@ -17,7 +17,7 @@
 // Read receipts:
 //   POST /chats/:id/read with the latest visible message id, debounced.
 
-import { BRAND_ACCENT, brandAlpha } from '../constants/theme';
+import { BRAND_ACCENT, brandAlpha, type Palette, ELEVATION } from '../constants/theme';
 import { useKeyboardInset } from '../lib/useKeyboardInset';
 import { Audio, ResizeMode, Video } from 'expo-av';
 import { copyAndAutoClear } from '../lib/clipboardSafe';
@@ -80,7 +80,6 @@ import { preloadViewedOnce, isViewedOnce, isViewedOnceSync, markViewedOnce } fro
 import { preloadRevoked, isRevokedSync, wipeRevokedMedia } from '../lib/protectedMedia';
 
 import { useTheme } from '../lib/theme';
-import { type Palette, ELEVATION } from '../constants/theme';
 import { getCurrentUserAsync } from './(constants)/authService';
 
 // Fire-and-forget haptic (no-op on web / if unavailable).

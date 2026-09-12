@@ -9,7 +9,7 @@
 // so an old match may not be in memory) — tracked as a follow-up rather than
 // faked here.
 
-import { brandAlpha } from '../constants/theme';
+import { brandAlpha, type Palette } from '../constants/theme';
 import React, { useState, useEffect, useRef, useCallback , useMemo} from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, StyleSheet,
@@ -17,7 +17,6 @@ import {
 } from 'react-native';
 import { useLocalSearchParams, Stack, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import { type Palette } from '../constants/theme';
 import { useTheme } from '../lib/theme';
 import { searchInChat, type InChatMessageHit } from '../lib/chatService';
 import { setPendingJump } from '../lib/chatJump';

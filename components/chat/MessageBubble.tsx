@@ -29,7 +29,7 @@ import * as FileSystem from 'expo-file-system/legacy';
 import * as IntentLauncher from 'expo-intent-launcher';
 import * as Sharing from 'expo-sharing';
 import { useRouter } from 'expo-router';
-import { memo, useCallback, useEffect, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useRef, useState, useMemo } from 'react';
 import { ActivityIndicator, Alert, Image, Linking, Platform, ScrollView, Text, TouchableOpacity, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { IMPORT_SOURCE } from '../../constants/importSources';
@@ -45,7 +45,7 @@ import { useTheme } from '../../lib/theme';
 import { getAccessToken } from '../../lib/api';
 import { putLiveKey } from '../../lib/liveLocationCrypto';
 import { navigateTo, navigateFromUrl } from '../../lib/nav/openNavigation';
-import { type PollVoteSummary, unvotePoll, voteOnPoll, decryptFromChat, looksEncrypted, type ScreenshotMode, type ChatMember, type ReactionSummary } from '../../lib/chatService';
+import { type PollVoteSummary, unvotePoll, voteOnPoll, decryptFromChat, looksEncrypted, type ScreenshotMode, type ChatMember, type ReactionSummary, groupRefOf, type GroupRef } from '../../lib/chatService';
 import VaultBeamBubble from '../../components/VaultBeamBubble';
 import { getDecryptedAttachmentUri, parseMediaContent } from '../../lib/mediaAttachments';
 import { shouldAutoDownloadNow } from '../../lib/mediaPrefs';
@@ -62,13 +62,11 @@ import { useConnectionState } from '../../lib/socket';
 
 
 import { useS, idealText, HL, type DisplayMessage } from './chatStyles';
-import { useMemo } from 'react';
 import { BRAND_ACCENT } from '../../constants/theme';
 import { couldBeLongRead, readStats } from '../../lib/reader';
 // Vector, so the mark stays crisp and cannot be mis-scaled by a style box whose
 // ratio disagrees with a raster's — the failure that made this look absent.
 import KlipyWatermark from '../../assets/klipy/watermark-klipy-light.svg';
-import { groupRefOf, type GroupRef } from '../../lib/chatService';
 import { gameInviteOf, gameName, type GameInvite } from '../../lib/games/inviteLink';
 import { groupTypeInfo } from '../../lib/groups/catalog';
 

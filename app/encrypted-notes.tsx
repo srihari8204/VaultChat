@@ -15,7 +15,7 @@
 // forever. Each is wired now; see the comment at each site for what was wrong.
 
 import { Ionicons } from '@expo/vector-icons';
-import { BRAND_ACCENT } from '../constants/theme';
+import { BRAND_ACCENT, type Palette } from '../constants/theme';
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, FlatList, TextInput,
@@ -31,7 +31,6 @@ import {
   addAttachment, deleteAttachment, isImage, openAttachment, prettySize,
   type NoteAttachment,
 } from '../lib/notesAttachments';
-import { type Palette } from '../constants/theme';
 import { useTheme } from '../lib/theme';
 import { Stack, useRouter } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';

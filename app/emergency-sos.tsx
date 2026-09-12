@@ -4,14 +4,13 @@
 // Uses expo-location, expo-sensors (Accelerometer)
 
 import { Ionicons } from '@expo/vector-icons';
-import { brandAlpha } from '../constants/theme';
+import { brandAlpha, type Palette } from '../constants/theme';
 import React, { useState, useEffect, useRef , useMemo} from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, ScrollView,
   Alert, ActivityIndicator, Vibration, Platform,
   Animated, Easing,
 } from 'react-native';
-import { type Palette } from '../constants/theme';
 import { useTheme } from '../lib/theme';
 import { useRouter, Stack } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';

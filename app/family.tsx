@@ -29,7 +29,7 @@ import { getSettings, setSettings, removeCircle, getPlaces } from '../lib/family
 import { freshnessOf, speedBand, statusBoard, markSharingOff } from '../lib/family/status';
 import { subscribeSpaceLocations, mergePresence, fetchSpaceSnapshot } from '../lib/location/live';
 import { startRefreshController } from '../lib/family/refresh';
-import { setPresenceForeground, currentPlan } from '../lib/family/presence';
+import { setPresenceForeground, currentPlan, startPresence, stopPresence, setSharing, subscribeCircle, canShareInBackground, type PresenceEvent } from '../lib/family/presence';
 import { getRelations, memberLabel, type RelationMap } from '../lib/family/relations';
 import { useVisibleTick } from '../lib/family/useVisibleTick';
 import { type Geofence } from '../lib/family/geofence';
@@ -46,10 +46,6 @@ import {
   circleMembers, renameCircle, leaveCircle, deleteCircle,
   removeCircleMember, setGuardian,
 } from '../lib/family/circle';
-import {
-  startPresence, stopPresence, setSharing, subscribeCircle,
-  canShareInBackground, type PresenceEvent,
-} from '../lib/family/presence';
 import { requestBackgroundPermission } from '../lib/family/background';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {

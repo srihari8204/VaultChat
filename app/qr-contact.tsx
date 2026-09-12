@@ -5,7 +5,7 @@
 // and opens/creates a direct chat (POST /chats). No Firestore.
 
 import { HEADER_TOP } from '../constants/layout';
-import { brandAlpha } from '../constants/theme';
+import { brandAlpha, type Palette } from '../constants/theme';
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, Alert, StatusBar, ActivityIndicator, Share,
@@ -14,7 +14,6 @@ import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import QRCode from 'react-native-qrcode-svg';
 import { CameraView, useCameraPermissions } from 'expo-camera';
-import { type Palette } from '../constants/theme';
 import { useTheme } from '../lib/theme';
 import { getMyProfile, resolveVaultId, createDirectChat } from '../lib/chatService';
 import { AuroraBackground } from '../components/ui';

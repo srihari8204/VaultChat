@@ -12,7 +12,7 @@ import { Ionicons } from '@expo/vector-icons';
 //     open chat shows a live banner. Stops automatically after the chosen time.
 // Honest copy only — no fabricated guarantees.
 
-import { brandAlpha } from '../constants/theme';
+import { brandAlpha, type Palette } from '../constants/theme';
 import { navigateTo } from '../lib/nav/openNavigation';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import * as Location from 'expo-location';
@@ -21,7 +21,6 @@ import {
   ActivityIndicator, Alert, Linking, Platform, ScrollView,
   StyleSheet, Text, TouchableOpacity, View,
 } from 'react-native';
-import { type Palette } from '../constants/theme';
 import { useTheme } from '../lib/theme';
 import { sendMessage } from '../lib/chatService';
 import { emit } from '../lib/socket';

@@ -3,7 +3,7 @@
 // No visual indicator of duress mode — pixel-perfect clone
 
 import { Ionicons } from '@expo/vector-icons';
-import { BRAND_ACCENT } from '../constants/theme';
+import { BRAND_ACCENT, type Palette } from '../constants/theme';
 import React, { useCallback, useState , useMemo} from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, FlatList,
@@ -13,7 +13,6 @@ import {
 // every Android handset (and logged the deprecation warning at runtime). The
 // safe-area-context one is the cross-platform implementation.
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { type Palette } from '../constants/theme';
 import { useTheme } from '../lib/theme';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { getDecoyChats, type DecoyChat } from '../lib/ghostProtocol';

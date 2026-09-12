@@ -1,9 +1,8 @@
 // app/d2de-status.tsx
 // Live D2DE encryption status screen — unique to VaultChat
 
-import React from 'react';
+import React, { useMemo } from 'react';
 import { View, Text, ScrollView, StyleSheet } from 'react-native';
-import { useMemo } from 'react';
 import { useTheme } from '../lib/theme';
 import { type Palette } from '../constants/theme';
 import { Stack } from 'expo-router';

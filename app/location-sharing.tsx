@@ -9,7 +9,7 @@ import { Ionicons } from '@expo/vector-icons';
 // Real GPS via expo-location. Removed the fake "D2DE" stubs + false crypto
 // claims (the flag is off; coordinates are sent like any other message).
 
-import { brandAlpha } from '../constants/theme';
+import { brandAlpha, type Palette } from '../constants/theme';
 import * as Location from 'expo-location';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useCallback, useEffect, useRef, useState , useMemo} from 'react';
@@ -21,7 +21,6 @@ import {
 // every Android handset (and logged the deprecation warning at runtime). The
 // safe-area-context one is the cross-platform implementation.
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { type Palette } from '../constants/theme';
 import { useTheme } from '../lib/theme';
 import { getSocket } from '../lib/socket';
 import { sendMessage } from '../lib/chatService';

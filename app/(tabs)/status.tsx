@@ -23,9 +23,9 @@ import { compressForStatus } from '../../lib/media/compressMedia';
 import GatePicker, { type GateDraft } from '../../components/status/GatePicker';
 import { putStoryFeed, FEED_CACHE_KEY } from '../../lib/storyFeedCache';
 import { lockKeyWithAnswer } from '../../lib/status/gateKey';
-import { wrapPayloadForViewers } from '../../lib/storyKeys';
+import { wrapPayloadForViewers, wrapStoryKeyForViewers } from '../../lib/storyKeys';
 import { isAcceptableAnswer } from '../../lib/status/gate';
-import { type StoryGate as StoryGateOut } from '../../lib/chatService';
+import { type StoryGate as StoryGateOut, addStory, addEncryptedStory, getStoryAudience, attachmentUrl, listStoriesFeed, postTextStory, uploadAttachment, type StoryFeedEntry } from '../../lib/chatService';
 
 /** The gate for an UNENCRYPTED story. A question gate is impossible here — with
  *  no content key to lock there is nothing for the answer to protect, so it
@@ -56,19 +56,8 @@ import { type Palette } from '../../constants/theme';
 import { useTheme } from '../../lib/theme';
 import { getAccessToken } from '../../lib/api';
 import { getSocket } from '../../lib/socket';
-import {
-  addStory,
-  addEncryptedStory,
-  getStoryAudience,
-  attachmentUrl,
-  listStoriesFeed,
-  postTextStory,
-  uploadAttachment,
-  type StoryFeedEntry,
-} from '../../lib/chatService';
 import { STORY_E2EE, E2EE_ENABLED } from '../../constants/flags';
 import { uploadEncryptedAttachment } from '../../lib/mediaAttachments';
-import { wrapStoryKeyForViewers } from '../../lib/storyKeys';
 import { putMediaKey } from '../../lib/mediaKeyStore';
 import { AuroraBackground } from '../../components/ui';
 

@@ -2,14 +2,13 @@
 // Crop, Rotate, Draw, Text overlay, Filters, Brightness/Contrast
 // Uses expo-image-manipulator for transforms, react-native-view-shot to capture
 
-import { BRAND_ACCENT } from '../constants/theme';
+import { BRAND_ACCENT, type Palette } from '../constants/theme';
 import { Ionicons } from '@expo/vector-icons';
 import React, { useState, useRef , useMemo} from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, Image, ScrollView,
   Dimensions, PanResponder, TextInput, Alert, ActivityIndicator,
   Platform, useWindowDimensions } from 'react-native';
-import { type Palette } from '../constants/theme';
 import { useTheme } from '../lib/theme';
 import { useRouter, useLocalSearchParams, Stack } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';

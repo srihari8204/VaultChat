@@ -7,7 +7,7 @@
 // root/Frida/emulator scan and appends its result. Nothing here is mock data.
 
 import { HEADER_TOP, TAB_BAR_SPACE } from '../../constants/layout';
-import { brandAlpha } from '../../constants/theme';
+import { brandAlpha, type Palette } from '../../constants/theme';
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from 'expo-router';
 import React, { useCallback, useState , useMemo} from 'react';
@@ -15,7 +15,6 @@ import {
   ActivityIndicator, FlatList, RefreshControl, StyleSheet, Text,
   TouchableOpacity, View,
 } from 'react-native';
-import { type Palette } from '../../constants/theme';
 import { useTheme } from '../../lib/theme';
 import {
   listSecurityEvents, markAllSeen, syncAuditChain, verifyAuditChain,

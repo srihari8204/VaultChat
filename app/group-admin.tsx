@@ -13,7 +13,7 @@
  * backend grows the tables to support them.
  */
 
-import { brandAlpha } from '../constants/theme';
+import { brandAlpha, type Palette } from '../constants/theme';
 import { Ionicons } from '@expo/vector-icons';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useCallback, useEffect, useState , useMemo} from 'react';
@@ -21,7 +21,6 @@ import {
   ActivityIndicator, Alert, Platform, ScrollView, StatusBar, Switch,
   StyleSheet, Text, TextInput, TouchableOpacity, View,
 } from 'react-native';
-import { type Palette } from '../constants/theme';
 import { useTheme } from '../lib/theme';
 import { getCurrentUserAsync } from './(constants)/authService';
 import {

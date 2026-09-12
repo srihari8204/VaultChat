@@ -2,13 +2,12 @@
 // Draw sketches, annotate, share in chat
 // Touch-based drawing with color picker, brush sizes, undo, clear
 
-import { BRAND_ACCENT } from '../constants/theme';
+import { BRAND_ACCENT, type Palette } from '../constants/theme';
 import React, { useState, useRef , useMemo} from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, PanResponder,
   StatusBar, Alert,
 } from 'react-native';
-import { type Palette } from '../constants/theme';
 import { useTheme } from '../lib/theme';
 import { Stack } from 'expo-router';
 import { captureRef } from 'react-native-view-shot';

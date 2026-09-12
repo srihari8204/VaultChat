@@ -7,7 +7,7 @@
 // encryption card now reflects the real E2EE_ENABLED flag so we don't claim a
 // guarantee the build doesn't yet provide.
 
-import { brandAlpha } from '../constants/theme';
+import { brandAlpha, type Palette } from '../constants/theme';
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, StatusBar, ScrollView, Dimensions, Alert, Image, ActivityIndicator, Linking, Switch, useWindowDimensions } from 'react-native';
@@ -15,7 +15,6 @@ import { getShareViewing, setShareViewing } from '../lib/viewerPrefs';
 import LinkPreview from '../components/LinkPreview';
 import { useLocalSearchParams, Stack, useRouter } from 'expo-router';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
-import { type Palette } from '../constants/theme';
 import { useTheme } from '../lib/theme';
 import { E2EE_ENABLED } from '../constants/flags';
 import { getAccessToken } from '../lib/api';

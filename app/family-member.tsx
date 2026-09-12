@@ -18,7 +18,7 @@ import { useTheme } from '../lib/theme';
 import { brandAlpha } from '../constants/theme';
 import SpaceGround, { useSpaceGlass } from '../components/spaces/SpaceGround';
 import { SPACE_SHADOW } from '../constants/spaceTheme';
-import { getTrack, summarize, type TrackSample } from '../lib/family/history';
+import { getTrack, summarize, type TrackSample, timeAtPlace } from '../lib/family/history';
 import { useFamilyAlerts, loadAlerts, type FamilyAlert } from '../lib/family/alerts';
 import { getPlaces } from '../lib/family/store';
 import { getGroup } from '../lib/groups/store';
@@ -32,7 +32,6 @@ import { getRelations, setRelation, RELATION_PRESETS } from '../lib/family/relat
 // v3 — shared Location Lock engine classifiers/formatters (same bands as Navigate)
 import { classifyDistance, zoneColor } from '../lib/lock/zoneMachine';
 import { fmtSpeed, gpsQuality, QUALITY_LABEL, QUALITY_COLOR } from '../lib/lock/format';
-import { timeAtPlace } from '../lib/family/history';
 
 const REFRESH_MS = 15_000;
 const AVATAR_COLORS = ['#4A9FFF', '#EC4899', '#22C55E', '#F59E0B', '#A855F7', '#EF4444', '#14B8A6', '#F97316'];

@@ -5,7 +5,7 @@
 // expiry and revoke anytime. No Firestore.
 
 import { HEADER_TOP } from '../constants/layout';
-import { brandAlpha } from '../constants/theme';
+import { brandAlpha, type Palette } from '../constants/theme';
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, FlatList, Alert, Share, StatusBar, ActivityIndicator, Modal,
@@ -13,7 +13,6 @@ import {
 import { useLocalSearchParams, Stack, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import QRCode from 'react-native-qrcode-svg';
-import { type Palette } from '../constants/theme';
 import { useTheme } from '../lib/theme';
 import { copyAndAutoClear } from '../lib/clipboardSafe';
 import { listInviteLinks, createInviteLink, revokeInviteLink, type InviteLink } from '../lib/chatService';

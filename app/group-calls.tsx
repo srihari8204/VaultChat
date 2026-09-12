@@ -10,12 +10,11 @@
 // The old screen simulated participants joining; nothing here is simulated.
 
 import { HEADER_TOP } from '../constants/layout';
-import { brandAlpha } from '../constants/theme';
+import { brandAlpha, type Palette } from '../constants/theme';
 import { useLocalSearchParams, useRouter, Stack } from 'expo-router';
 import React, { useCallback, useEffect, useState , useMemo} from 'react';
 import { FlatList, StyleSheet, Text, TouchableOpacity, View, ActivityIndicator, Image } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { type Palette } from '../constants/theme';
 import { CALL_ENGINE_V2 } from '../constants/flags';
 import { useTheme } from '../lib/theme';
 import { getChat, attachmentUrl, type ChatMember } from '../lib/chatService';

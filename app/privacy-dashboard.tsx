@@ -3,7 +3,7 @@
  * Privacy Dashboard — security score, feature checklist, privacy controls.
  */
 
-import { brandAlpha } from '../constants/theme';
+import { brandAlpha, type Palette } from '../constants/theme';
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -20,7 +20,6 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import { type Palette } from '../constants/theme';
 import { useTheme } from '../lib/theme';
 import Svg, { Circle } from 'react-native-svg';
 import { getSettings, updateSettings, listTrustedContacts } from '../lib/chatService';

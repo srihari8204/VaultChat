@@ -10,7 +10,7 @@
 // screen does real live dictation, which the on-device recognizer supports.)
 
 import { HEADER_TOP } from '../constants/layout';
-import { BRAND_ACCENT } from '../constants/theme';
+import { BRAND_ACCENT, type Palette } from '../constants/theme';
 import React, { useState, useEffect, useRef, useCallback , useMemo} from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, StatusBar, Alert, TextInput, ScrollView,
@@ -18,7 +18,6 @@ import {
 import { useLocalSearchParams, Stack, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import Voice, { type SpeechResultsEvent, type SpeechErrorEvent } from '@react-native-voice/voice';
-import { type Palette } from '../constants/theme';
 import { useTheme } from '../lib/theme';
 import { sendMessage } from '../lib/chatService';
 import { AuroraBackground } from '../components/ui';
