@@ -1219,6 +1219,38 @@ func authVerifyOtpPhone(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// ── REGISTRATION LOCK (F7) ──────────────────────────────────────────
+	//
+	// An SMS code proves control of a NUMBER. It does not prove you are the
+	// person whose account that number belongs to — and the gap between those
+	// two is exactly a SIM swap, which is the threat model that matters most
+	// for a product whose pitch is privacy.
+	//
+	// Until now this issued full session tokens to whoever received the code,
+	// so anyone who took over a number — carrier fraud, a port-out, a recycled
+	// number — got the account, its chats and its history.
+	//
+	// So: an EXISTING account that has an MPIN set must supply it too. The
+	// caller is handed the user id and sent to /auth/mpin/verify, which already
+	// exists and is already limited to five attempts per fifteen minutes
+	// through ConsumeSecure — a limit a Redis outage cannot lift (F11).
+	//
+	// Deliberately NOT applied when there is no MPIN. An account that never
+	// finished onboarding has no second factor to offer, and demanding one it
+	// does not have would lock its owner out permanently rather than protect
+	// anyone; those accounts hold nothing yet, which is what makes that safe.
+	//
+	// The user id reveals nothing new: the caller has already proved control of
+	// the number, and /auth/mpin/verify takes the id in its body regardless.
+	if !isNewUser && user.MpinHash != nil && *user.MpinHash != "" {
+		authAudit(ctx, &user.ID, authClientIP(r), "registration_lock", false)
+		httpx.JSON(w, 200, map[string]any{
+			"registrationLock": true,
+			"userId":           user.ID,
+			"message":          "This number is protected. Enter your VaultChat PIN to continue.",
+		})
+		return
+	}
 	access, refresh, err := authIssueTokens(ctx, r, user.ID, user.Email)
 	if err != nil {
 		httpx.Err(w, 500, "Verification failed")
