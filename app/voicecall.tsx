@@ -80,11 +80,10 @@ export default function VoiceCallScreen() {
 function VoiceCallEngine() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const { chatId, peerUid, peerName, isIncoming, initialOffer } =
+  const { chatId, peerUid, peerName, isIncoming, initialOffer, resume: resumeParam } =
     useLocalSearchParams<{
       chatId: string; peerUid: string; peerName: string;
-      isIncoming?: string; initialOffer?: string;
-    }>();
+      isIncoming?: string; initialOffer?: string; resume?: string }>();
 
   // Who we are talking to.
   //
@@ -118,6 +117,7 @@ function VoiceCallEngine() {
   // Start exactly once per mount, on the params this screen was opened with.
   useEffect(() => {
     const incoming = isIncoming === 'true' || isIncoming === '1';
+    const resuming = String(resumeParam ?? '') === '1';
     const args = {
       chatId: String(chatId ?? ''), peerUid: String(peerUid ?? ''),
       peerName: String(peerName ?? ''), kind: 'audio' as const,
@@ -145,7 +145,16 @@ function VoiceCallEngine() {
     // back to the ring and let it arrive.
     let wire: any = null;
     if (incoming && initialOffer) { try { wire = JSON.parse(String(initialOffer)); } catch {} }
-    if (incoming) {
+    // RE-ENTERING A CALL THAT IS ALREADY RUNNING.
+    //
+    // <CallBar/> routes back here with resume=1 while the engine still holds a
+    // live session. Without this branch the screen would call startOutgoing or
+    // acceptIncoming against its own live call — re-dialling the peer, or
+    // re-keying a healthy session. Attaching means rendering the snapshot the
+    // engine already has, which is what every other frame on this screen does.
+    if (resuming && engine.hasLiveSession()) {
+      console.log('[call] re-attached to the live session');
+    } else if (incoming) {
       // No offer required. The call is identified by the chat, so an answer
       // that beat the ring — every notification answer — joins the same room
       // instead of waiting for an envelope or, worse, dialling back.
@@ -186,7 +195,14 @@ function VoiceCallEngine() {
       // recents. A gesture that can strand someone in a broken call is worse
       // than the problem it was added to solve.
       if (status !== 'connected') { engine.hangUp('local_hangup', true); return false; }
-      enterPipMode();
+      // MINIMISE INTO THE APP, not into the OS.
+      //
+      // enterPipMode() is Android's system picture-in-picture: it shrinks the
+      // whole activity into a floating window, which lets you use OTHER apps
+      // and still leaves VaultChat itself unusable. Minimising in-app leaves
+      // the call running behind <CallBar/> and hands the app back.
+      engine.minimizeScreen();
+      if (router.canGoBack()) router.back(); else router.replace('/(tabs)/chats' as any);
       return true;
     });
     return () => sub.remove();

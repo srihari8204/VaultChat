@@ -201,6 +201,41 @@ export function hangUp(
 export function release(): void { reset(); }
 
 /**
+ * MINIMISE: leave the call screen without ending the call.
+ *
+ * The engine has always owned the call outside React — media is the SDK's, the
+ * session and state machine live here — but the call screen's unmount effect
+ * said "hang up", so navigating anywhere killed the call. That is why a call
+ * took the whole app hostage: the only way off the screen was Android's system
+ * picture-in-picture, which shrinks the entire activity and still does not let
+ * you open a chat.
+ *
+ * Setting this flag makes the NEXT leaveScreen() a no-op, so the screen can
+ * unmount while the call keeps running and <CallBar/> offers the way back.
+ *
+ * One-shot on purpose. A stuck flag would mean a call that can never be ended
+ * by closing its screen, so leaveScreen consumes it and the default — unmount
+ * ends the call — is restored immediately.
+ */
+let detachRequested = false;
+
+export function minimizeScreen(): void {
+  if (!session) return;
+  detachRequested = true;
+}
+
+/** Is a call live and running behind the UI? Drives the CallBar's visibility. */
+export function hasLiveSession(): boolean {
+  return !!session;
+}
+
+/** The live call's identity, so the bar can route back into the right screen. */
+export function liveSessionRef(): { chatId: string; peerUid: string; peerName: string; kind: CallKind } | null {
+  const s = session;
+  return s ? { chatId: s.chatId, peerUid: s.peerUid, peerName: s.peerName, kind: s.kind } : null;
+}
+
+/**
  * The screen-unmount path: end and clear, but ONLY if this screen still owns
  * the engine.
  *
@@ -214,6 +249,13 @@ export function leaveScreen(only: { chatId: string; peerUid: string }): void {
   const s = session;
   if (s && !(s.chatId === only.chatId && s.peerUid === only.peerUid)) {
     console.warn('[call] stale unmount for', only.peerUid?.slice(0, 8), '— live call is', s.peerUid?.slice(0, 8), '— leaving it alone');
+    return;
+  }
+  // Minimised: the screen is going away, the call is not. Consume the flag so
+  // the next unmount behaves normally.
+  if (detachRequested) {
+    detachRequested = false;
+    console.log('[call] screen minimised — call stays live');
     return;
   }
   hangUp('local_hangup', true, only);

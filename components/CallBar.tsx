@@ -1,0 +1,153 @@
+// components/CallBar.tsx — the "you are on a call" bar.
+//
+// WHY THIS EXISTS
+// ---------------
+// A call used to take the whole app hostage. The engine has always owned the
+// call outside React, but the call screen's unmount handler said "hang up", so
+// the only way off that screen was Android's system picture-in-picture — which
+// shrinks the entire activity and still does not let you open a chat. On a call
+// about something IN the app ("send me that file", "what did she say?") you had
+// to hang up to answer.
+//
+// Every mainstream messenger solves this the same way: a persistent bar at the
+// top, the call still running behind it, tap to go back. That is this.
+//
+// It renders directly under the status bar, above the navigator, so it survives
+// every screen change — and it hides itself on the call screens themselves,
+// where it would be pointing at the screen you are already looking at.
+
+import React, { useEffect, useState, useSyncExternalStore } from 'react';
+import { View, Text, TouchableOpacity, StyleSheet, Platform } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
+import { useRouter, usePathname } from 'expo-router';
+import { HEADER_TOP } from '../constants/layout';
+import { getSnapshot, subscribe } from '../lib/call/store';
+import { hasLiveSession, liveSessionRef, hangUp } from '../lib/call/engine';
+
+/** mm:ss, and h:mm:ss once a call runs past the hour. */
+function elapsed(connectedAt: number, now: number): string {
+  if (!connectedAt) return 'Connecting…';
+  const t = Math.max(0, Math.floor((now - connectedAt) / 1000));
+  const s = t % 60, m = Math.floor(t / 60) % 60, h = Math.floor(t / 3600);
+  const mm = String(m).padStart(2, '0');
+  const ss = String(s).padStart(2, '0');
+  return h > 0 ? `${h}:${mm}:${ss}` : `${mm}:${ss}`;
+}
+
+/** The routes that ARE the call — the bar would be redundant there. */
+const CALL_ROUTES = ['/videocall', '/voicecall', '/group-call-active', '/incoming-call'];
+
+export function CallBar() {
+  const router = useRouter();
+  const pathname = usePathname();
+  const snap = useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
+
+  // Ticks only while the bar is actually on screen — see the effect's guard.
+  const [now, setNow] = useState(() => Date.now());
+
+  const live = hasLiveSession() && snap.status !== 'ended';
+  const onCallScreen = CALL_ROUTES.some(r => (pathname || '').startsWith(r));
+  const show = live && !onCallScreen;
+
+  useEffect(() => {
+    if (!show || !snap.connectedAt) return;
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, [show, snap.connectedAt]);
+
+  if (!show) return null;
+
+  const ref = liveSessionRef();
+  const name = snap.peerName || ref?.peerName || 'VaultChat user';
+  const kind = snap.kind || ref?.kind || 'audio';
+
+  const back = () => {
+    const r = ref;
+    if (!r) return;
+    router.push({
+      pathname: (kind === 'video' ? '/videocall' : '/voicecall') as any,
+      params: {
+        chatId: r.chatId,
+        peerUid: r.peerUid,
+        peerName: r.peerName,
+        // NOT incoming: the call is already answered and running. Passing
+        // incoming here would send the screen down the acceptIncoming path
+        // against a live session.
+        resume: '1',
+      },
+    });
+  };
+
+  return (
+    <View style={styles.wrap} accessibilityRole="toolbar">
+      <TouchableOpacity
+        style={styles.tap}
+        onPress={back}
+        activeOpacity={0.85}
+        accessibilityRole="button"
+        accessibilityLabel={`Return to ${kind} call with ${name}, ${elapsed(snap.connectedAt, now)}`}
+      >
+        <Ionicons name={kind === 'video' ? 'videocam' : 'call'} size={16} color="#fff" />
+        <Text style={styles.name} numberOfLines={1}>{name}</Text>
+        <Text style={styles.timer} numberOfLines={1} maxFontSizeMultiplier={1.2}>
+          {elapsed(snap.connectedAt, now)}
+        </Text>
+        <Text style={styles.cta} numberOfLines={1} maxFontSizeMultiplier={1.2}>Tap to return</Text>
+      </TouchableOpacity>
+
+      {/* Ending from here matters: without it, leaving the call screen would
+          mean the only way to hang up is to navigate back into it first. */}
+      <TouchableOpacity
+        style={styles.end}
+        onPress={() => hangUp('local_hangup', true)}
+        accessibilityRole="button"
+        accessibilityLabel="End call"
+        hitSlop={8}
+      >
+        <Ionicons name="call" size={15} color="#fff" style={{ transform: [{ rotate: '135deg' }] }} />
+      </TouchableOpacity>
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  // Fixed colour, not the app palette: this is an alert surface and must read
+  // the same in Light and Dark, exactly like the call screens (callTheme.ts).
+  wrap: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#1F9D55',
+    paddingTop: HEADER_TOP,
+    paddingBottom: 8,
+    paddingHorizontal: 14,
+    gap: 10,
+  },
+  tap: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 8, minWidth: 0 },
+  name: { color: '#fff', fontSize: 14, fontWeight: '700', flexShrink: 1, minWidth: 0 },
+  timer: {
+    color: 'rgba(255,255,255,0.95)',
+    fontSize: 13,
+    fontWeight: '600',
+    fontVariant: ['tabular-nums'],
+    flexShrink: 0,
+  },
+  cta: {
+    color: 'rgba(255,255,255,0.75)',
+    fontSize: 12,
+    marginLeft: 'auto',
+    flexShrink: 0,
+    // Hidden on narrow screens rather than squeezing the name.
+    display: Platform.OS === 'web' ? 'flex' : 'flex',
+  },
+  end: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    backgroundColor: 'rgba(0,0,0,0.28)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0,
+  },
+});
+
+export default CallBar;

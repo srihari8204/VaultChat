@@ -1,0 +1,1186 @@
+<title>VaultChat API Reference</title>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Sora:wght@600;700;800&family=Nunito+Sans:ital,wght@0,400;0,600;0,700;1,400&family=JetBrains+Mono:wght@400;500;700&display=swap">
+<style>
+  :root {
+    --ground:#F6F4F9; --surface:#FFFFFF; --surface-2:#EFEBF4;
+    --line:#DED7E8; --line-soft:#E9E4F0;
+    --ink:#1B1622; --ink-2:#4A4257; --ink-3:#756C84;
+    --accent:#6D3FA8; --accent-soft:#EDE4F7; --accent-line:#C9B2E4;
+    --get:#1C5FA8;    --get-bg:#DDE9F7;
+    --post:#146B3F;   --post-bg:#DCF0E4;
+    --put:#8A5A0B;    --put-bg:#F8EBD3;
+    --del:#A32B2B;    --del-bg:#F8DEDE;
+    --open:#8A5A0B;   --open-bg:#F8EBD3;
+    --dim:#6B6478;    --dim-bg:#E7E4EC;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ground:#121017; --surface:#1A1722; --surface-2:#221E2D;
+      --line:#332C42; --line-soft:#292335;
+      --ink:#EFEAF6; --ink-2:#BDB3CD; --ink-3:#8B8299;
+      --accent:#B48BE0; --accent-soft:#2A2039; --accent-line:#4C3A66;
+      --get:#7FB3E8;  --get-bg:#152436;
+      --post:#5FCB92; --post-bg:#16301F;
+      --put:#E0B061;  --put-bg:#33260F;
+      --del:#EE8888;  --del-bg:#361818;
+      --open:#E0B061; --open-bg:#33260F;
+      --dim:#8B8299;  --dim-bg:#252130;
+    }
+  }
+  :root[data-theme="dark"] {
+    --ground:#121017; --surface:#1A1722; --surface-2:#221E2D;
+    --line:#332C42; --line-soft:#292335;
+    --ink:#EFEAF6; --ink-2:#BDB3CD; --ink-3:#8B8299;
+    --accent:#B48BE0; --accent-soft:#2A2039; --accent-line:#4C3A66;
+    --get:#7FB3E8;  --get-bg:#152436;
+    --post:#5FCB92; --post-bg:#16301F;
+    --put:#E0B061;  --put-bg:#33260F;
+    --del:#EE8888;  --del-bg:#361818;
+    --open:#E0B061; --open-bg:#33260F;
+    --dim:#8B8299;  --dim-bg:#252130;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    background: var(--ground); color: var(--ink);
+    font-family: "Nunito Sans", -apple-system, "Segoe UI", sans-serif;
+    font-size: 15px; line-height: 1.6; -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 1160px; margin: 0 auto; padding: 0 28px 100px; }
+
+  h1,h2,h3,h4 { font-family: Sora, "Nunito Sans", sans-serif; text-wrap: balance; margin: 0; }
+  h1 { font-size: clamp(30px,4.2vw,44px); font-weight: 800; letter-spacing: -.02em; line-height: 1.08; }
+  h2 { font-size: clamp(20px,2.3vw,26px); font-weight: 700; letter-spacing: -.015em; }
+  h3 { font-size: 16px; font-weight: 700; }
+  h4 { font-size: 11.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .1em; color: var(--ink-3); }
+  p { margin: 0; max-width: 70ch; color: var(--ink-2); }
+  code { font-family: "JetBrains Mono", ui-monospace, Menlo, monospace; font-size: .86em;
+         background: var(--surface-2); border: 1px solid var(--line-soft); border-radius: 4px;
+         padding: .08em .34em; color: var(--ink); }
+  a { color: var(--accent); }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 3px; }
+
+  header.top { border-bottom: 1px solid var(--line); background: var(--surface); margin-bottom: 40px; }
+  header.top .wrap { padding-top: 44px; padding-bottom: 32px; display: flex; flex-direction: column; gap: 18px; }
+  .eyebrow { font-family: "JetBrains Mono", monospace; font-size: 11.5px; letter-spacing: .16em; text-transform: uppercase; color: var(--accent); }
+  .lede { font-size: 17px; max-width: 76ch; }
+  .facts { display: grid; grid-template-columns: repeat(auto-fit,minmax(132px,1fr)); gap: 1px; background: var(--line); border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+  .fact { background: var(--surface); padding: 12px 14px; }
+  .fact b { display: block; font-family: Sora, sans-serif; font-size: 20px; font-weight: 700; letter-spacing: -.02em; font-variant-numeric: tabular-nums; }
+  .fact span { font-size: 11.5px; color: var(--ink-3); text-transform: uppercase; letter-spacing: .07em; }
+
+  section { margin-top: 56px; scroll-margin-top: 20px; }
+  .shead { display: flex; align-items: baseline; gap: 14px; border-bottom: 1px solid var(--line); padding-bottom: 10px; margin-bottom: 20px; }
+  .shead .num { font-family: "JetBrains Mono", monospace; font-size: 12px; color: var(--accent); letter-spacing: .1em; }
+  .shead .sub { margin-left: auto; font-size: 12.5px; color: var(--ink-3); font-family: "JetBrains Mono", monospace; }
+
+  /* toc */
+  nav.toc { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 8px; }
+  nav.toc a { font-family: "JetBrains Mono", monospace; font-size: 12px; text-decoration: none;
+              border: 1px solid var(--line); border-radius: 20px; padding: 4px 12px;
+              background: var(--surface); color: var(--ink-2); }
+  nav.toc a:hover { border-color: var(--accent-line); color: var(--accent); }
+
+  /* endpoint card */
+  .ep { border: 1px solid var(--line); border-radius: 9px; background: var(--surface); overflow: hidden; margin-top: 16px; }
+  .ep > .sig { display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+               padding: 11px 16px; background: var(--surface-2); border-bottom: 1px solid var(--line); }
+  .ep > .sig .path { font-family: "JetBrains Mono", monospace; font-size: 13.5px; font-weight: 500; color: var(--ink); }
+  .ep > .sig .path b { color: var(--accent); font-weight: 500; }
+  .ep > .sig .tag { margin-left: auto; font-size: 12px; color: var(--ink-3); }
+  .ep > .bd { padding: 14px 16px 16px; display: flex; flex-direction: column; gap: 12px; }
+  .ep > .bd p { font-size: 13.5px; }
+
+  .m { font-family: "JetBrains Mono", monospace; font-size: 10.5px; font-weight: 700; letter-spacing: .06em;
+       padding: 3px 8px; border-radius: 4px; white-space: nowrap; }
+  .m-GET    { color: var(--get);  background: var(--get-bg); }
+  .m-POST   { color: var(--post); background: var(--post-bg); }
+  .m-PUT    { color: var(--put);  background: var(--put-bg); }
+  .m-PATCH  { color: var(--put);  background: var(--put-bg); }
+  .m-DELETE { color: var(--del);  background: var(--del-bg); }
+
+  .pill { display: inline-block; font-family: "JetBrains Mono", monospace; font-size: 10px; font-weight: 700;
+          letter-spacing: .06em; text-transform: uppercase; padding: 2px 7px; border-radius: 20px; white-space: nowrap; }
+  .pill.jwt  { color: var(--post); background: var(--post-bg); }
+  .pill.adm  { color: var(--del);  background: var(--del-bg); }
+  .pill.open { color: var(--open); background: var(--open-bg); }
+  .pill.sig  { color: var(--get);  background: var(--get-bg); }
+  .pill.acc  { color: var(--accent); background: var(--accent-soft); }
+  .pill.dim  { color: var(--dim); background: var(--dim-bg); }
+
+  .tbl-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 9px; background: var(--surface); }
+  .ep .tbl-wrap { border-radius: 6px; }
+  table { border-collapse: collapse; width: 100%; font-size: 13.5px; }
+  th, td { text-align: left; padding: 8px 13px; border-bottom: 1px solid var(--line-soft); vertical-align: top; }
+  thead th { font-family: Sora, sans-serif; font-size: 10.5px; text-transform: uppercase; letter-spacing: .09em;
+             color: var(--ink-3); background: var(--surface-2); border-bottom: 1px solid var(--line); }
+  tbody tr:last-child td { border-bottom: none; }
+  td.k, td.p, td.src { font-family: "JetBrains Mono", monospace; font-size: 12.5px; }
+  td.k { color: var(--accent); white-space: nowrap; }
+  td.src { color: var(--ink-3); font-size: 11.5px; white-space: nowrap; }
+  td.mcell { white-space: nowrap; width: 1%; }
+  table.idx td { padding: 6px 13px; }
+  table.idx td.p b { color: var(--accent); font-weight: 500; }
+  .req { font-size: 10px; font-family: "JetBrains Mono", monospace; color: var(--del); letter-spacing: .05em; }
+
+  pre { margin: 0; overflow-x: auto; background: var(--surface-2); border: 1px solid var(--line);
+        border-radius: 7px; padding: 12px 14px; font-family: "JetBrains Mono", monospace;
+        font-size: 12.5px; line-height: 1.6; color: var(--ink); }
+  pre .c { color: var(--ink-3); }
+  pre .s { color: var(--post); }
+  pre .kk { color: var(--accent); }
+
+  .note { border-left: 2px solid var(--accent-line); padding: 2px 0 2px 16px; margin-top: 16px; }
+  .note strong { color: var(--ink); }
+  .warn { border-left-color: var(--del); }
+  .grid2 { display: grid; grid-template-columns: repeat(auto-fit,minmax(320px,1fr)); gap: 18px; }
+  ul.tight { margin: 6px 0 0; padding-left: 18px; color: var(--ink-2); font-size: 13.5px; }
+  ul.tight li { margin-bottom: 4px; }
+  ul.tight li::marker { color: var(--accent-line); }
+
+  h3.grp { margin-top: 34px; display: flex; align-items: center; gap: 10px; }
+  h3.grp .cnt { font-family: "JetBrains Mono", monospace; font-size: 11px; font-weight: 700;
+                color: var(--accent); background: var(--accent-soft); border-radius: 20px; padding: 2px 9px; }
+  p.grp-blurb { font-size: 13px; margin: 4px 0 10px; }
+
+  footer { margin-top: 64px; padding-top: 20px; border-top: 1px solid var(--line); font-size: 12.5px; color: var(--ink-3); }
+</style>
+
+<header class="top">
+  <div class="wrap">
+    <div class="eyebrow">API reference · go-api · read from source 2026-09-12</div>
+    <h1>VaultChat API Reference</h1>
+    <p class="lede">One unversioned JSON API and one Socket.IO namespace, both served by a single Go process at <code>https://api.corefinite.com</code>. Every route below was extracted from the <code>Register…(mux)</code> calls in <code>vaultchat-backend-go/internal/routes/</code> — if a path is not here, it is not served, and the catch-all answers <em>“route not migrated to go backend”</em>.</p>
+    <div class="facts">
+      <div class="fact"><b>404</b><span>Endpoints</span></div>
+      <div class="fact"><b>351</b><span>Bearer JWT</span></div>
+      <div class="fact"><b>25</b><span>Admin key</span></div>
+      <div class="fact"><b>17</b><span>Public</span></div>
+      <div class="fact"><b>11</b><span>Other schemes</span></div>
+      <div class="fact"><b>~60</b><span>Socket events</span></div>
+      <div class="fact"><b>2 MB</b><span>Max JSON body</span></div>
+    </div>
+    <nav class="toc">
+      <a href="#conventions">01 Conventions</a>
+      <a href="#auth">02 Auth &amp; session</a>
+      <a href="#messaging">03 Messaging</a>
+      <a href="#media">04 Media</a>
+      <a href="#keys">05 Keys</a>
+      <a href="#realtime">06 Realtime</a>
+      <a href="#index">07 Endpoint index</a>
+      <a href="#errors">08 Errors</a>
+    </nav>
+  </div>
+</header>
+
+<div class="wrap">
+
+<!-- ═══════════════ 01 ═══════════════ -->
+<section id="conventions">
+  <div class="shead"><span class="num">01</span><h2>Conventions</h2><span class="sub">httpx.go is the contract</span></div>
+
+  <div class="grid2">
+    <div>
+      <h3>Transport</h3>
+      <ul class="tight">
+        <li><b>Base URL</b> — <code>https://api.corefinite.com</code>. No version prefix; the API is versioned by deploy, not by path.</li>
+        <li><b>Content type</b> — <code>application/json; charset=utf-8</code> both ways, except attachment bytes (presigned <code>PUT</code> straight to S3) and HLS segments.</li>
+        <li><b>Request body cap</b> — 2 MB, enforced by a <code>LimitReader</code>. An empty body decodes as <code>{}</code> rather than erroring.</li>
+        <li><b>Client timeout</b> — 30 s per request, 15 s for <code>/auth/refresh</code>. Uploads (<code>FormData</code>) and caller-supplied <code>AbortSignal</code>s are exempt.</li>
+        <li><b>Trailing paths</b> — Go 1.22 <code>ServeMux</code> patterns. <code>{id}</code> is a single segment; <code>{file...}</code> is a wildcard tail.</li>
+      </ul>
+    </div>
+    <div>
+      <h3>Standard headers</h3>
+      <div class="tbl-wrap" style="margin-top:10px">
+        <table>
+          <thead><tr><th>Header</th><th>Direction</th><th>Meaning</th></tr></thead>
+          <tbody>
+            <tr><td class="k">Authorization</td><td>→</td><td><code>Bearer &lt;accessToken&gt;</code>. HS256, claims <code>{sub, email}</code>.</td></tr>
+            <tr><td class="k">X-Device-Id</td><td>→</td><td>Stable per-install id from the OS keystore. Lets the server tell a resumed client from a cold start — it drives the cold-sync cap. Optional; a client without one syncs uncapped.</td></tr>
+            <tr><td class="k">x-admin-key</td><td>→</td><td>Admin console only. Constant-time compared against <code>ADMIN_KEY</code>.</td></tr>
+            <tr><td class="k">X-Internal-Key</td><td>→</td><td><code>/internal/emit</code> and <code>/internal/chat-event</code>. Caddy 404s these paths from outside regardless.</td></tr>
+            <tr><td class="k">Accept</td><td>→</td><td><code>application/json</code>.</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <h3 style="margin-top:30px">Authentication schemes</h3>
+  <p style="margin-top:6px">Five, and they do not overlap. A route accepts exactly one.</p>
+  <div class="tbl-wrap" style="margin-top:12px">
+    <table>
+      <thead><tr><th>Scheme</th><th>Applies to</th><th>Mechanism</th><th>Failure</th></tr></thead>
+      <tbody>
+        <tr>
+          <td><span class="pill jwt">bearer</span></td><td>351 routes — everything user-facing</td>
+          <td>HS256 access token in <code>Authorization</code>. Verified per request; <code>JWT_SECRET</code> is read lazily but the process refuses to boot if it is empty.</td>
+          <td><code>401 Missing Bearer token</code> · <code>401 token_expired</code> · <code>401 invalid_token</code></td>
+        </tr>
+        <tr>
+          <td><span class="pill adm">admin key</span></td><td>25 routes under <code>/api/admin</code></td>
+          <td>Shared secret in <code>x-admin-key</code>, constant-time compared. Client IP resolved from <code>cf-connecting-ip</code> → <code>x-real-ip</code> → <code>x-forwarded-for</code> for the audit row.</td>
+          <td><code>401 Invalid admin key</code> · <code>503</code> if <code>ADMIN_KEY</code> is unset</td>
+        </tr>
+        <tr>
+          <td><span class="pill sig">LiveKit JWT</span></td><td>2 egress webhooks under <code>/internal/</code></td>
+          <td>LiveKit signs the request with the API secret and includes a body SHA-256 in the token; both the signature <em>and</em> the body hash are checked.</td>
+          <td><code>401</code>, body discarded</td>
+        </tr>
+        <tr>
+          <td><span class="pill sig">HMAC ticket</span></td><td><code>GET /broadcasts/{id}/hls/{file...}</code></td>
+          <td>Per-broadcast HMAC-SHA256 ticket in the query string, bucketed by time window. The playlist is rewritten so each segment carries a fresh ticket. Deliberately outlives an access token — a player cannot refresh one mid-stream.</td>
+          <td><code>403</code></td>
+        </tr>
+        <tr>
+          <td><span class="pill sig">Ed25519</span></td><td><code>POST /games/notify</code></td>
+          <td>Signature verified against <code>GAMES_NOTIFY_PUBLIC_KEY_PEM</code> (or <code>…_FILE</code>). The games deployment holds the private half; VaultChat never does.</td>
+          <td><code>401</code></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="grid2" style="margin-top:30px">
+    <div>
+      <h3>Error envelope</h3>
+      <p style="margin-top:6px">Two shapes exist, and which one you get is decided by the module, not the status code.</p>
+      <pre style="margin-top:10px"><span class="c">// httpx.Err — everything except the auth module</span>
+{ <span class="kk">"error"</span>: <span class="s">"Not a member of this chat"</span> }
+
+<span class="c">// with extra fields merged in at the top level</span>
+{ <span class="kk">"error"</span>: <span class="s">"Slow mode is on"</span>, <span class="kk">"retryAfter"</span>: 12 }
+
+<span class="c">// authEnvErr — /auth/* only, machine-readable code</span>
+{ <span class="kk">"error"</span>: { <span class="kk">"code"</span>: <span class="s">"rate_limited"</span>,
+            <span class="kk">"message"</span>: <span class="s">"Too many requests. Try again later."</span> } }</pre>
+      <div class="note"><strong>Do not branch on message text outside <code>/auth</code>.</strong> Only the auth envelope carries a stable <code>code</code>; the flat shape's string is prose and has changed before.</div>
+    </div>
+    <div>
+      <h3>Timestamps &amp; numbers</h3>
+      <ul class="tight">
+        <li>Every timestamp marshals as <code>"2026-09-12T08:41:03.000Z"</code> — UTC, always three millisecond digits. This matches what node-pg emitted, so clients written against the Node backend parse Go responses unchanged.</li>
+        <li>Nullable timestamps are <code>null</code>, never omitted.</li>
+        <li><code>bigint</code> ids (messages) are serialised as <b>strings</b>, not numbers — they outgrow IEEE-754 safe integers.</li>
+        <li>Query integers parse like JS <code>parseInt</code>: leading sign and digits, trailing junk ignored. <code>"20abc"</code> is 20.</li>
+      </ul>
+      <h3 style="margin-top:20px">Pagination &amp; idempotency</h3>
+      <ul class="tight">
+        <li>Message listing is cursor-based on message id: <code>before</code> / <code>after</code> + <code>limit</code>, capped server-side.</li>
+        <li>Delta sync uses a monotonic <code>since</code> cursor with a <code>nextSince</code> in every response — never a page number.</li>
+        <li>Sends carry a client-generated <code>clientId</code>. A partial unique index on <code>(chat_id, sender_id, client_id)</code> makes the retry idempotent, which is what lets the offline outbox re-flush without duplicating.</li>
+      </ul>
+    </div>
+  </div>
+
+  <h3 style="margin-top:30px">Status codes in use</h3>
+  <div class="tbl-wrap" style="margin-top:12px">
+    <table>
+      <thead><tr><th>Code</th><th>When</th></tr></thead>
+      <tbody>
+        <tr><td class="k">200</td><td>Success, including creates — the API does not use 201.</td></tr>
+        <tr><td class="k">400</td><td>Malformed or missing required field.</td></tr>
+        <tr><td class="k">401</td><td>Missing/expired/invalid credential. Three distinct strings; the client only treats these as terminal on <code>/auth/refresh</code>.</td></tr>
+        <tr><td class="k">403</td><td>Authenticated but not permitted — not a member, blocked, group policy, missing group permission.</td></tr>
+        <tr><td class="k">404</td><td>Not found, <em>and</em> the unregistered-route catch-all.</td></tr>
+        <tr><td class="k">409</td><td>Conflict — duplicate join, already-active broadcast.</td></tr>
+        <tr><td class="k">413</td><td>Upload above <code>UPLOAD_MAX_BYTES</code>.</td></tr>
+        <tr><td class="k">423</td><td>Locked. MPIN and OTP lockouts, with the remaining seconds in the message.</td></tr>
+        <tr><td class="k">429</td><td>Rate limited. Group slow-mode adds <code>retryAfter</code> seconds.</td></tr>
+        <tr><td class="k">500</td><td>Unhandled. Logged with the route tag; the body is a generic per-route message.</td></tr>
+        <tr><td class="k">503</td><td>A dependency is unconfigured or down — object storage missing, <code>ADMIN_KEY</code> unset, or <code>/ready</code> with Postgres unreachable.</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- ═══════════════ 02 ═══════════════ -->
+<section id="auth">
+  <div class="shead"><span class="num">02</span><h2>Auth &amp; session</h2><span class="sub">20 endpoints · 17 unauthenticated by necessity</span></div>
+
+  <p>Two entry paths — email OTP and Google — both ending in the same token pair. Phone OTP and the onboarding variant exist alongside them for the encrypted-PII signup flow. After that, everything is the refresh dance.</p>
+
+  <div class="ep">
+    <div class="sig"><span class="m m-POST">POST</span><span class="path">/auth/send-otp</span><span class="pill open">public</span><span class="tag">throttled per identifier <em>and</em> per IP</span></div>
+    <div class="bd">
+      <p>Issues a one-time code to an email address. Two independent rate limits apply; both answer <code>429</code> with the auth envelope, and a burned code answers <code>429 Too many attempts. Request a new code.</code> rather than silently accepting retries.</p>
+      <div class="tbl-wrap"><table>
+        <thead><tr><th>Field</th><th>Type</th><th>Notes</th></tr></thead>
+        <tbody><tr><td class="k">email</td><td>string <span class="req">required</span></td><td>Normalised before hashing into the attempt bucket.</td></tr></tbody>
+      </table></div>
+    </div>
+  </div>
+
+  <div class="ep">
+    <div class="sig"><span class="m m-POST">POST</span><span class="path">/auth/verify-otp</span><span class="pill open">public</span><span class="tag">issues the token pair</span></div>
+    <div class="bd">
+      <p>Exchanges a valid code for a session. Records the attempt in <code>auth_attempts</code> with the resolved client IP whether it succeeded or not.</p>
+      <pre><span class="c">// 200</span>
+{
+  <span class="kk">"accessToken"</span>:  <span class="s">"eyJhbGciOiJIUzI1NiIs…"</span>,   <span class="c">// HS256, {sub, email}</span>
+  <span class="kk">"refreshToken"</span>: <span class="s">"…"</span>,                       <span class="c">// single-use, rotates</span>
+  <span class="kk">"user"</span>: { <span class="kk">"id"</span>, <span class="kk">"email"</span>, <span class="kk">"name"</span>, <span class="kk">"phone"</span>, <span class="kk">"photoUrl"</span>,
+             <span class="kk">"vaultId"</span>, <span class="kk">"status"</span>, <span class="kk">"createdAt"</span> }
+}</pre>
+    </div>
+  </div>
+
+  <div class="ep">
+    <div class="sig"><span class="m m-POST">POST</span><span class="path">/auth/refresh</span><span class="pill open">public</span><span class="tag">single-use · rotates</span></div>
+    <div class="bd">
+      <p>Takes <code>{ refreshToken }</code>, revokes it, and returns a fresh pair. Because rotation is single-use, a client must serialise refreshes — a dozen requests 401'ing at once on app resume must share one in-flight call, or the first rotation invalidates the token the rest are about to present.</p>
+      <div class="note warn"><strong>Only 401 and 403 mean the session is over.</strong> The client distinguishes three outcomes — <code>ok</code>, <code>terminal</code>, <code>transient</code> — because treating a 503 during a deploy, a captive portal's HTML 200, or a dropped connection as "revoked" logs real users out and sends them back through onboarding. Anything that is not an explicit rejection keeps the credentials.</div>
+      <p style="margin-top:6px">Migration <code>127</code> adds <code>refresh_tokens.token_lookup</code>; without <code>VAULTCHAT_LOOKUP_PEPPER</code> set, the column stays NULL and every refresh silently degrades to a 500-row scan.</p>
+    </div>
+  </div>
+
+  <div class="grid2" style="margin-top:22px">
+    <div>
+      <h4>Phone &amp; onboarding</h4>
+      <div class="tbl-wrap" style="margin-top:8px"><table>
+        <tbody>
+          <tr><td class="mcell"><span class="m m-POST">POST</span></td><td class="p">/auth/send-otp-phone</td><td>SMS code to a phone number.</td></tr>
+          <tr><td class="mcell"><span class="m m-POST">POST</span></td><td class="p">/auth/verify-otp-phone</td><td>Verify and bind the number.</td></tr>
+          <tr><td class="mcell"><span class="m m-POST">POST</span></td><td class="p">/auth/onboard/send-otp</td><td>Signup-flow variant issuing a setup ticket.</td></tr>
+          <tr><td class="mcell"><span class="m m-POST">POST</span></td><td class="p">/auth/onboard/verify-otp</td><td>Redeems the ticket.</td></tr>
+          <tr><td class="mcell"><span class="m m-POST">POST</span></td><td class="p">/auth/lookup</td><td>Does this identifier already have an account?</td></tr>
+          <tr><td class="mcell"><span class="m m-POST">POST</span></td><td class="p">/auth/profile/init</td><td>Writes the first encrypted-PII profile row.</td></tr>
+          <tr><td class="mcell"><span class="m m-POST">POST</span></td><td class="p">/auth/google</td><td>Google Sign-In exchange.</td></tr>
+          <tr><td class="mcell"><span class="m m-POST">POST</span></td><td class="p">/auth/logout</td><td>Revokes the presented refresh token.</td></tr>
+        </tbody>
+      </table></div>
+    </div>
+    <div>
+      <h4>MPIN &amp; recovery</h4>
+      <div class="tbl-wrap" style="margin-top:8px"><table>
+        <tbody>
+          <tr><td class="mcell"><span class="m m-POST">POST</span></td><td class="p">/auth/mpin/set</td><td>Sets the device unlock PIN.</td></tr>
+          <tr><td class="mcell"><span class="m m-POST">POST</span></td><td class="p">/auth/mpin/verify</td><td>5 attempts per 15 min, per user.</td></tr>
+          <tr><td class="mcell"><span class="m m-POST">POST</span></td><td class="p">/auth/mpin/recover</td><td>Same 5/15 min budget.</td></tr>
+          <tr><td class="mcell"><span class="m m-POST">POST</span></td><td class="p">/auth/security-questions/save</td><td>Stores answers for recovery.</td></tr>
+          <tr><td class="mcell"><span class="m m-GET">GET</span></td><td class="p">/auth/security-questions/{userId}</td><td>Returns the questions only.</td></tr>
+          <tr><td class="mcell"><span class="m m-POST">POST</span></td><td class="p">/auth/security-questions/verify</td><td>Checks answers.</td></tr>
+          <tr><td class="mcell"><span class="m m-POST">POST</span></td><td class="p">/auth/mfa/configure</td><td><span class="pill jwt">bearer</span></td></tr>
+          <tr><td class="mcell"><span class="m m-GET">GET</span></td><td class="p">/auth/profile</td><td><span class="pill jwt">bearer</span></td></tr>
+        </tbody>
+      </table></div>
+      <p style="margin-top:10px; font-size:13px">These three use <code>ConsumeSecure</code>, not the ordinary limiter: a Redis outage must <em>not</em> remove the lockout, so the budget falls back in-process rather than failing open.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════════ 03 ═══════════════ -->
+<section id="messaging">
+  <div class="shead"><span class="num">03</span><h2>Messaging</h2><span class="sub">45 endpoints · the largest surface</span></div>
+
+  <p>The server stores ciphertext and metadata. It never sees message text for a direct chat, cannot decrypt a group message, and does not keep history long enough to be a backup — the client's SQLite replica is the durable copy.</p>
+
+  <div class="ep">
+    <div class="sig"><span class="m m-POST">POST</span><span class="path">/chats/<b>{id}</b>/messages</span><span class="pill jwt">bearer</span><span class="tag">idempotent on clientId</span></div>
+    <div class="bd">
+      <div class="tbl-wrap"><table>
+        <thead><tr><th>Field</th><th>Type</th><th>Notes</th></tr></thead>
+        <tbody>
+          <tr><td class="k">content</td><td>string</td><td>Ciphertext, base64. Plaintext only when E2EE is off for that chat kind.</td></tr>
+          <tr><td class="k">type</td><td>string</td><td>Defaults to <code>text</code>. Also <code>image</code>, <code>video</code>, <code>file</code>, <code>group_ref</code> and others; media types are checked against the group media policy.</td></tr>
+          <tr><td class="k">meta</td><td>object | array</td><td><b>Deliberately PII-free</b> and readable by the server — which is what makes <code>announcement</code> a real permission rather than a UI decoration. Marshalled to a JSON string before binding (pgx cannot infer a type for a bare map under PgBouncer's exec mode).</td></tr>
+          <tr><td class="k">replyToId</td><td>string</td><td>Parent message id.</td></tr>
+          <tr><td class="k">clientId</td><td>string</td><td>Dedup key. Omit it and a retried send creates a second message.</td></tr>
+        </tbody>
+      </table></div>
+      <h4 style="margin-top:4px">Rejections specific to this route</h4>
+      <div class="tbl-wrap"><table>
+        <tbody>
+          <tr><td class="k">403</td><td>Not a member of this chat</td></tr>
+          <tr><td class="k">403</td><td><code>Blocked</code> — enforced at the INSERT, not only in fan-out. Suppressing a blocked sender downstream still left the row, and the row dragged a deleted chat back into the recipient's list.</td></tr>
+          <tr><td class="k">403</td><td>Only admins can send messages / send media in this group</td></tr>
+          <tr><td class="k">403</td><td>New members can't post links yet (anti-spam) — first 24 h only</td></tr>
+          <tr><td class="k">403</td><td>Missing the <code>send_announcement</code> permission, or addressing an audience you may not address</td></tr>
+          <tr><td class="k">429</td><td>Slow mode is on, with <code>retryAfter</code></td></tr>
+        </tbody>
+      </table></div>
+      <pre><span class="c">// 200 — the message object, returned by every read path too</span>
+{
+  <span class="kk">"id"</span>: <span class="s">"84213"</span>,            <span class="c">// bigint as a STRING</span>
+  <span class="kk">"chatId"</span>: <span class="s">"…"</span>, <span class="kk">"senderId"</span>: <span class="s">"…"</span>, <span class="kk">"type"</span>: <span class="s">"text"</span>,
+  <span class="kk">"content"</span>: <span class="s">"…"</span> | null,  <span class="c">// null once the body is reclaimed</span>
+  <span class="kk">"meta"</span>: {…} | null,
+  <span class="kk">"replyToId"</span>: <span class="s">"…"</span> | null,
+  <span class="kk">"editedAt"</span>: null, <span class="kk">"deletedAt"</span>: null,
+  <span class="kk">"createdAt"</span>: <span class="s">"2026-09-12T08:41:03.000Z"</span>,
+  <span class="kk">"expiresAt"</span>: <span class="s">"…"</span> | null,
+  <span class="kk">"vanishAfterRead"</span>: false
+}</pre>
+    </div>
+  </div>
+
+  <div class="ep">
+    <div class="sig"><span class="m m-GET">GET</span><span class="path">/chats/<b>{id}</b>/messages</span><span class="pill jwt">bearer</span><span class="tag">cursor paging</span></div>
+    <div class="bd">
+      <div class="tbl-wrap"><table>
+        <thead><tr><th>Query</th><th>Default</th><th>Notes</th></tr></thead>
+        <tbody>
+          <tr><td class="k">before</td><td>—</td><td>Message id; returns older messages.</td></tr>
+          <tr><td class="k">after</td><td>—</td><td>Message id; returns newer messages.</td></tr>
+          <tr><td class="k">limit</td><td>server default</td><td>Clamped to the module maximum.</td></tr>
+        </tbody>
+      </table></div>
+      <div class="note"><strong>This is not the full history.</strong> With delete-on-delivery enabled, bodies are reclaimed on ACK and dropped outright at the three-hour ceiling. Any surface that shows the past — gallery, contact info, export — must union this with the local database.</div>
+    </div>
+  </div>
+
+  <div class="ep">
+    <div class="sig"><span class="m m-GET">GET</span><span class="path">/chats/delta</span><span class="pill jwt">bearer</span><span class="tag">catch-up after offline</span></div>
+    <div class="bd">
+      <div class="tbl-wrap"><table>
+        <thead><tr><th>Query</th><th>Default</th><th>Max</th><th>Notes</th></tr></thead>
+        <tbody>
+          <tr><td class="k">since</td><td>0</td><td>—</td><td>Cursor from the previous response. <code>0</code> is a cold start and is floored to recent history rather than replaying everything.</td></tr>
+          <tr><td class="k">limit</td><td>200</td><td>500</td><td>Values above the cap are clamped, not rejected.</td></tr>
+        </tbody>
+      </table></div>
+      <pre>{
+  <span class="kk">"messages"</span>:   [ …message objects… ],
+  <span class="kk">"mutations"</span>:  [ …edits, deletes, reactions, receipts… ],
+  <span class="kk">"nextSince"</span>:  123456,
+  <span class="kk">"more"</span>:       true,        <span class="c">// page was full — call again immediately</span>
+  <span class="kk">"serverTime"</span>: <span class="s">"2026-09-12T08:41:03.000Z"</span>
+}</pre>
+      <p><code>serverTime</code> exists so the client can correct its own clock drift before deciding what is expired — device time is not trustworthy for a retention deadline.</p>
+    </div>
+  </div>
+
+  <div class="grid2" style="margin-top:22px">
+    <div>
+      <h4>Per-chat modes</h4>
+      <div class="tbl-wrap" style="margin-top:8px"><table>
+        <tbody>
+          <tr><td class="mcell"><span class="m m-PATCH">PATCH</span></td><td class="p">/chats/{id}/vanish-mode</td><td>Disappearing messages.</td></tr>
+          <tr><td class="mcell"><span class="m m-PATCH">PATCH</span></td><td class="p">/chats/{id}/screenshot-mode</td><td>Screenshot policy for the chat.</td></tr>
+          <tr><td class="mcell"><span class="m m-PATCH">PATCH</span></td><td class="p">/chats/{id}/hidden</td><td>Hide from the list without leaving.</td></tr>
+          <tr><td class="mcell"><span class="m m-PATCH">PATCH</span></td><td class="p">/chats/{id}/notif-sound</td><td>Per-chat tone.</td></tr>
+          <tr><td class="mcell"><span class="m m-POST">POST</span></td><td class="p">/chats/{id}/mute</td><td rowspan="1">Mute, pin, archive.</td></tr>
+          <tr><td class="mcell"><span class="m m-POST">POST</span></td><td class="p">/chats/{id}/pin</td><td>—</td></tr>
+          <tr><td class="mcell"><span class="m m-POST">POST</span></td><td class="p">/chats/{id}/archive</td><td>—</td></tr>
+        </tbody>
+      </table></div>
+    </div>
+    <div>
+      <h4>Receipts, polls &amp; bodies</h4>
+      <div class="tbl-wrap" style="margin-top:8px"><table>
+        <tbody>
+          <tr><td class="mcell"><span class="m m-POST">POST</span></td><td class="p">/chats/{id}/delivered</td><td>Delivery ACK — also what releases the body early.</td></tr>
+          <tr><td class="mcell"><span class="m m-POST">POST</span></td><td class="p">/chats/{id}/read</td><td>Read receipt up to a message id.</td></tr>
+          <tr><td class="mcell"><span class="m m-PUT">PUT</span></td><td class="p">/chats/{id}/messages/{msgId}/body</td><td>Writes ciphertext into the partitioned body store.</td></tr>
+          <tr><td class="mcell"><span class="m m-POST">POST</span></td><td class="p">/chats/{id}/messages/{msgId}/vote</td><td>Poll vote.</td></tr>
+          <tr><td class="mcell"><span class="m m-GET">GET</span></td><td class="p">/chats/{id}/sender-keys</td><td>Group sender-key distribution.</td></tr>
+          <tr><td class="mcell"><span class="m m-POST">POST</span></td><td class="p">/chats/{id}/screenshot-captured</td><td>Client reports a capture; peers are notified.</td></tr>
+        </tbody>
+      </table></div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════════ 04 ═══════════════ -->
+<section id="media">
+  <div class="shead"><span class="num">04</span><h2>Media &amp; uploads</h2><span class="sub">bytes never transit go-api</span></div>
+
+  <p>Two paths, chosen by size. Both hand the client a presigned URL and keep the service out of the byte stream; the attachment row is created first so an abandoned upload is still attributable and sweepable.</p>
+
+  <div class="grid2" style="margin-top:20px">
+    <div class="ep" style="margin-top:0">
+      <div class="sig"><span class="m m-POST">POST</span><span class="path">/uploads/presign</span><span class="pill jwt">bearer</span></div>
+      <div class="bd">
+        <p>Single-shot. Returns a 15-minute <code>PUT</code> URL bound to the declared MIME type.</p>
+        <pre><span class="c">// request</span>
+{ <span class="kk">"filename"</span>, <span class="kk">"mime"</span>, <span class="kk">"size"</span>, <span class="kk">"viewOnce"</span>, <span class="kk">"purpose"</span> }
+
+<span class="c">// 200</span>
+{ <span class="kk">"id"</span>: <span class="s">"…"</span>, <span class="kk">"uploadUrl"</span>: <span class="s">"https://…"</span>, <span class="kk">"key"</span>: <span class="s">"…"</span> }</pre>
+        <p><code>413 File too large (max N bytes)</code> above <code>UPLOAD_MAX_BYTES</code>; <code>503 Object storage not configured</code> if the S3 credentials are absent.</p>
+      </div>
+    </div>
+    <div class="ep" style="margin-top:0">
+      <div class="sig"><span class="m m-POST">POST</span><span class="path">/uploads/multipart/*</span><span class="pill jwt">bearer</span></div>
+      <div class="bd">
+        <p>Resumable, for large files on a network that drops.</p>
+        <div class="tbl-wrap"><table><tbody>
+          <tr><td class="p">init</td><td>Opens the multipart upload, returns the id.</td></tr>
+          <tr><td class="p">part-urls</td><td>Presigns a batch of part URLs.</td></tr>
+          <tr><td class="p">{id}/parts</td><td><span class="m m-GET">GET</span> — which parts the store already has. This is what makes resume work after a restart.</td></tr>
+          <tr><td class="p">complete</td><td>Assembles the object.</td></tr>
+          <tr><td class="p">abort</td><td>Cancels and deletes the parts.</td></tr>
+        </tbody></table></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="grid2" style="margin-top:18px">
+    <div>
+      <h4>Lifecycle</h4>
+      <div class="tbl-wrap" style="margin-top:8px"><table><tbody>
+        <tr><td class="mcell"><span class="m m-GET">GET</span></td><td class="p">/uploads/{id}</td><td>Presigned read URL. Owner-asserted: <code>403 Forbidden</code> if the row belongs to someone else, <code>404 Not found</code> if it does not exist.</td></tr>
+        <tr><td class="mcell"><span class="m m-POST">POST</span></td><td class="p">/uploads/{id}/viewed</td><td>Marks a view-once item consumed.</td></tr>
+        <tr><td class="mcell"><span class="m m-POST">POST</span></td><td class="p">/uploads/{id}/revoke</td><td>Revokes access to an already-sent attachment.</td></tr>
+        <tr><td class="mcell"><span class="m m-POST">POST</span></td><td class="p">/uploads</td><td>Legacy direct-body upload, still served.</td></tr>
+      </tbody></table></div>
+    </div>
+    <div>
+      <h4>Retention</h4>
+      <p style="margin-top:8px; font-size:13.5px">Attachments are swept by <code>media-retention</code> on the same tick as messages, scoped by delivery state and <code>MEDIA_TTL_DAYS</code>/<code>MEDIA_TTL_HOURS</code>. Objects whose purpose the server cannot classify are <b>never</b> deleted by design — instead a Prometheus gauge counts them, because "safe to retain" without observability becomes unbounded storage nobody is looking at.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════════ 05 ═══════════════ -->
+<section id="keys">
+  <div class="shead"><span class="num">05</span><h2>Key distribution</h2><span class="sub">X3DH prekeys</span></div>
+
+  <p>The only server role in the end-to-end path: hold public prekey bundles and hand out one one-time prekey per fetch. Private halves never leave the device.</p>
+
+  <div class="grid2" style="margin-top:20px">
+    <div class="ep" style="margin-top:0">
+      <div class="sig"><span class="m m-POST">POST</span><span class="path">/user/keybundle</span><span class="pill jwt">bearer</span></div>
+      <div class="bd">
+        <pre>{
+  <span class="kk">"identityKey"</span>:  <span class="s">"&lt;packed b64&gt;"</span>,
+  <span class="kk">"signedPreKey"</span>: { <span class="kk">"keyId"</span>: 1,
+                     <span class="kk">"publicKey"</span>: <span class="s">"…"</span>,
+                     <span class="kk">"signature"</span>: <span class="s">"…"</span> },
+  <span class="kk">"oneTimePreKeys"</span>: [ { <span class="kk">"keyId"</span>: 7, <span class="kk">"publicKey"</span>: <span class="s">"…"</span> }, … ]
+}</pre>
+      </div>
+    </div>
+    <div class="ep" style="margin-top:0">
+      <div class="sig"><span class="m m-GET">GET</span><span class="path">/user/<b>{id}</b>/keybundle</span><span class="pill jwt">bearer</span></div>
+      <div class="bd">
+        <pre>{
+  <span class="kk">"identityKey"</span>:  <span class="s">"…"</span>,
+  <span class="kk">"signedPreKey"</span>: { <span class="kk">"keyId"</span>, <span class="kk">"publicKey"</span>, <span class="kk">"signature"</span> },
+  <span class="kk">"oneTimePreKey"</span>: { <span class="kk">"keyId"</span>, <span class="kk">"publicKey"</span> } | null
+}</pre>
+        <p>One OTPK is consumed per fetch and never returned again. <code>null</code> means the peer's supply is exhausted — the session still forms, with reduced forward secrecy for that first message.</p>
+      </div>
+    </div>
+  </div>
+
+  <p style="margin-top:16px"><code>GET /user/{id}/keybundle</code> and <code>GET /user/{id}/identity</code> are dispatched through a <code>GET /user/</code> subtree handler rather than registered as patterns — they collide with <code>/user/by-vault/{vaultId}</code> in <code>ServeMux</code> precedence, which panics at registration. Their behaviour is identical; only the registration differs.</p>
+
+  <div class="note"><strong>A changed identity key is surfaced, never silently accepted.</strong> A peer who reinstalls gets a new identity key — and so does an attacker substituting their own. The protocol cannot tell them apart, so the client records <code>peerIkHex</code> per session and raises the change to the user. Without it a key substitution is invisible: the padlock still shows, and the ratchet still works, against the wrong person.</div>
+</section>
+
+<!-- ═══════════════ 06 ═══════════════ -->
+<section id="realtime">
+  <div class="shead"><span class="num">06</span><h2>Realtime</h2><span class="sub">Socket.IO · /socket.io/</span></div>
+
+  <div class="grid2">
+    <div>
+      <h3>Handshake</h3>
+      <pre style="margin-top:10px">io(SERVER_URL, {
+  transports: [<span class="s">'websocket'</span>],
+  <span class="c">// a FUNCTION, not an object: an object captures one</span>
+  <span class="c">// token at construction and re-presents it forever</span>
+  auth: cb =&gt; cb({ token: <span class="s">'&lt;accessToken&gt;'</span> })
+})</pre>
+      <ul class="tight" style="margin-top:12px">
+        <li>The JWT middleware runs before <code>connection</code>. A missing token is <code>auth_required</code>; an invalid one returns the same <code>token_expired</code> / <code>invalid_token</code> strings as the REST path, so the client can reuse one refresh decision for both.</li>
+        <li>The admin console authenticates with <code>{ adminKey }</code> instead and joins the <code>admin</code> room.</li>
+        <li>A <code>Bearer</code> header is accepted as a fallback when the handshake auth object is absent.</li>
+        <li>Authorisation is re-checked on roster changes — a removed member's <em>existing</em> connection loses access rather than keeping what it held at connect time.</li>
+      </ul>
+    </div>
+    <div>
+      <h3>Rooms</h3>
+      <div class="tbl-wrap" style="margin-top:10px"><table>
+        <thead><tr><th>Room</th><th>Contents</th></tr></thead>
+        <tbody>
+          <tr><td class="k">chat:&lt;chatId&gt;</td><td>Joined via <code>join_chat</code>, membership-checked. Fan-out filters blocked senders and ghost mode.</td></tr>
+          <tr><td class="k">&lt;userId&gt;</td><td>Per-user room; every device of that account.</td></tr>
+          <tr><td class="k">call:&lt;chatId&gt;</td><td>Call roster, mirrored into Redis so peers on another node are visible.</td></tr>
+          <tr><td class="k">view:… · run:… · drive:…</td><td>Broadcast viewers, Spaces runs, live driving sessions.</td></tr>
+          <tr><td class="k">admin</td><td>Metadata firehose — event name, chat id, type, timestamp. Never content.</td></tr>
+        </tbody>
+      </table></div>
+    </div>
+  </div>
+
+  <h3 style="margin-top:28px">Event catalogue</h3>
+  <div class="tbl-wrap" style="margin-top:12px">
+    <table>
+      <thead><tr><th>Domain</th><th>Client → server</th><th>Server → client</th></tr></thead>
+      <tbody>
+        <tr>
+          <td><b>Messaging</b></td>
+          <td class="k">join_chat · leave_chat · typing_start · typing_stop · message_read</td>
+          <td class="k">new_message · message_delivered · reaction_updated · resync · chat_view</td>
+        </tr>
+        <tr>
+          <td><b>Calls</b></td>
+          <td class="k">join_call · leave_call · call_chat · call_emoji · screen_share_start · screen_share_stop</td>
+          <td class="k">incoming_call · call_incoming · call_roster · call_peer_joined · call_peer_left · call_media_key · call_full · call_mesh_full · call_join_denied · call_ring_rate_limited</td>
+        </tr>
+        <tr>
+          <td><b>VaultBeam</b></td>
+          <td class="k">vaultbeam_offer · vaultbeam_answer · vaultbeam_ice · vaultbeam_have · vaultbeam_pull · vaultbeam_ready · vaultbeam_tier · vaultbeam_end</td>
+          <td class="k">same set, relayed to the peer</td>
+        </tr>
+        <tr>
+          <td><b>Spaces</b></td>
+          <td class="k">run_subscribe · run_unsubscribe · live_location_update · live_location_stop</td>
+          <td class="k">run_update · run_end · trip_update · trip_end</td>
+        </tr>
+        <tr>
+          <td><b>Presence &amp; live</b></td>
+          <td class="k">hide_online · channel_join · channel_leave</td>
+          <td class="k">viewer_joined · viewer_activity · mesh_capacity · socket_join_chat_refused</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="note"><strong>Presence is cluster state, not process state.</strong> <code>vc:pres:&lt;uid&gt;</code> counts sockets per node and <code>vc:node:hb:&lt;node&gt;</code> expires, so a crashed node's users stop counting as online within the TTL. This matters beyond a green dot: presence gates call wake-push suppression, and a stale "online" is a silently missed call.</div>
+</section>
+
+<!-- ═══════════════ 07 ═══════════════ -->
+<section id="index">
+  <div class="shead"><span class="num">07</span><h2>Endpoint index</h2><span class="sub">404 handlers · complete</span></div>
+  <p>Every registered route, grouped by domain. The <b>Source</b> column names the file the registration lives in — a path that is missing here does not exist in production, whatever an older document or a Node route file says.</p>
+
+  <h3 class="grp">Auth & session <span class="cnt">20</span></h3>
+  <p class="grp-blurb">Registration, OTP, JWT issue and rotation, MPIN, security questions.</p>
+  <div class="tbl-wrap"><table class="idx">
+    <thead><tr><th>Method</th><th>Path</th><th>Auth</th><th>Source</th></tr></thead><tbody>
+      <tr><td class="mcell"><span class="m m-POST">POST</span></td><td class="p">/auth/google</td><td><span class="pill open">public</span></td><td class="src">auth.go</td></tr>
+      <tr><td class="mcell"><span class="m m-POST">POST</span></td><td class="p">/auth/logout</td><td><span class="pill open">public</span></td><td class="src">auth.go</td></tr>
+      <tr><td class="mcell"><span class="m m-POST">POST</span></td><td class="p">/auth/lookup</td><td><span class="pill open">public</span></td><td class="src">auth.go</td></tr>
+      <tr><td class="mcell"><span class="m m-POST">POST</span></td><td class="p">/auth/mfa/configure</td><td><span class="pill jwt">bearer</span></td><td class="src">auth.go</td></tr>
+      <tr><td class="mcell"><span class="m m-POST">POST</span></td><td class="p">/auth/mpin/recover</td><td><span class="pill open">public</span></td><td class="src">auth.go</td></tr>
+      <tr><td class="mcell"><span class="m m-POST">POST</span></td><td class="p">/auth/mpin/set</td><td><span class="pill open">public</span></td><td class="src">auth.go</td></tr>
+      <tr><td class="mcell"><span class="m m-POST">POST</span></td><td class="p">/auth/mpin/verify</td><td><span class="pill open">public</span></td><td class="src">auth.go</td></tr>
+      <tr><td class="mcell"><span class="m m-POST">POST</span></td><td class="p">/auth/onboard/send-otp</td><td><span class="pill open">public</span></td><td class="src">auth.go</td></tr>
+      <tr><td class="mcell"><span class="m m-POST">POST</span></td><td class="p">/auth/onboard/verify-otp</td><td><span class="pill open">public</span></td><td class="src">auth.go</td></tr>
+      <tr><td class="mcell"><span class="m m-GET">GET</span></td><td class="p">/auth/profile</td><td><span class="pill jwt">bearer</span></td><td class="src">auth.go</td></tr>
+      <tr><td class="mcell"><span class="m m-POST">POST</span></td><td class="p">/auth/profile/init</td><td><span class="pill open">public</span></td><td class="src">auth.go</td></tr>
+      <tr><td class="mcell"><span class="m m-POST">POST</span></td><td class="p">/auth/profile/photo</td><td><span class="pill jwt">bearer</span></td><td class="src">auth.go</td></tr>
+      <tr><td class="mcell"><span class="m m-POST">POST</span></td><td class="p">/auth/refresh</td><td><span class="pill open">public</span></td><td class="src">auth.go</td></tr>
+      <tr><td class="mcell"><span class="m m-GET">GET</span></td><td class="p">/auth/security-questions/<b>{userId}</b></td><td><span class="pill open">public</span></td><td class="src">auth.go</td></tr>
+      <tr><td class="mcell"><span class="m m-POST">POST</span></td><td class="p">/auth/security-questions/save</td><td><span class="pill open">public</span></td><td class="src">auth.go</td></tr>
+      <tr><td class="mcell"><span class="m m-POST">POST</span></td><td class="p">/auth/security-questions/verify</td><td><span class="pill open">public</span></td><td class="src">auth.go</td></tr>
+      <tr><td class="mcell"><span class="m m-POST">POST</span></td><td class="p">/auth/send-otp</td><td><span class="pill open">public</span></td><td class="src">auth.go</td></tr>
+      <tr><td class="mcell"><span class="m m-POST">POST</span></td><td class="p">/auth/send-otp-phone</td><td><span class="pill open">public</span></td><td class="src">auth.go</td></tr>
+      <tr><td class="mcell"><span class="m m-POST">POST</span></td><td class="p">/auth/verify-otp</td><td><span class="pill open">public</span></td><td class="src">auth.go</td></tr>
+      <tr><td class="mcell"><span class="m m-POST">POST</span></td><td class="p">/auth/verify-otp-phone</td><td><span class="pill open">public</span></td><td class="src">auth.go</td></tr>
+    </tbody></table></div>
+
+  <h3 class="grp">Identity & account <span class="cnt">49</span></h3>
+  <p class="grp-blurb">Profile, devices, sessions, key bundles, blocks, bookmarks, backups, SOS, security events.</p>
+  <div class="tbl-wrap"><table class="idx">
+    <thead><tr><th>Method</th><th>Path</th><th>Auth</th><th>Source</th></tr></thead><tbody>
+      <tr><td class="mcell"><span class="m m-GET">GET</span></td><td class="p">/user/</td><td><span class="pill jwt">bearer</span></td><td class="src">user.go</td></tr>
+      <tr><td class="mcell"><span class="m m-DELETE">DELETE</span></td><td class="p">/user/account</td><td><span class="pill jwt">bearer</span></td><td class="src">user.go</td></tr>
+      <tr><td class="mcell"><span class="m m-DELETE">DELETE</span></td><td class="p">/user/backup</td><td><span class="pill jwt">bearer</span></td><td class="src">user.go</td></tr>
+      <tr><td class="mcell"><span class="m m-GET">GET</span></td><td class="p">/user/backup</td><td><span class="pill jwt">bearer</span></td><td class="src">user.go</td></tr>
+      <tr><td class="mcell"><span class="m m-PUT">PUT</span></td><td class="p">/user/backup</td><td><span class="pill jwt">bearer</span></td><td class="src">user.go</td></tr>
+      <tr><td class="mcell"><span class="m m-POST">POST</span></td><td class="p">/user/backup/commit</td><td><span class="pill jwt">bearer</span></td><td class="src">user.go</td></tr>
+      <tr><td class="mcell"><span class="m m-GET">GET</span></td><td class="p">/user/backup/key</td><td><span class="pill jwt">bearer</span></td><td class="src">user.go</td></tr>
+      <tr><td class="mcell"><span class="m m-GET">GET</span></td><td class="p">/user/backup/meta</td><td><span class="pill jwt">bearer</span></td><td class="src">user.go</td></tr>
+      <tr><td class="mcell"><span class="m m-POST">POST</span></td><td class="p">/user/backup/presign</td><td><span class="pill jwt">bearer</span></td><td class="src">user.go</td></tr>
+      <tr><td class="mcell"><span class="m m-GET">GET</span></td><td class="p">/user/blocks</td><td><span class="pill jwt">bearer</span></td><td class="src">user.go</td></tr>
+      <tr><td class="mcell"><span class="m m-POST">POST</span></td><td class="p">/user/blocks</td><td><span class="pill jwt">bearer</span></td><td class="src">user.go</td></tr>
+      <tr><td class="mcell"><span class="m m-DELETE">DELETE</span></td><td class="p">/user/blocks/<b>{userId}</b></td><td><span class="pill jwt">bearer</span></td><td class="src">user.go</td></tr>
+      <tr><td class="mcell"><span class="m m-GET">GET</span></td><td class="p">/user/bookmarks</td><td><span class="pill jwt">bearer</span></td><td class="src">user.go</td></tr>
+      <tr><td class="mcell"><span class="m m-POST">POST</span></td><td class="p">/user/bookmarks</td><td><span class="pill jwt">bearer</span></td><td class="src">user.go</td></tr>
+      <tr><td class="mcell"><span class="m m-DELETE">DELETE</span></td><td class="p">/user/bookmarks/<b>{id}</b></td><td><span class="pill jwt">bearer</span></td><td class="src">user.go</td></tr>
+      <tr><td class="mcell"><span class="m m-GET">GET</span></td><td class="p">/user/breach-monitors</td><td><span class="pill jwt">bearer</span></td><td class="src">user.go</td></tr>
+      <tr><td class="mcell"><span class="m m-POST">POST</span></td><td class="p">/user/breach-monitors</td><td><span class="pill jwt">bearer</span></td><td class="src">user.go</td></tr>
+      <tr><td class="mcell"><span class="m m-DELETE">DELETE</span></td><td class="p">/user/breach-monitors/<b>{id}</b></td><td><span class="pill jwt">bearer</span></td><td class="src">user.go</td></tr>
+      <tr><td class="mcell"><span class="m m-PATCH">PATCH</span></td><td class="p">/user/breach-monitors/<b>{id}</b></td><td><span class="pill jwt">bearer</span></td><td class="src">user.go</td></tr>
+      <tr><td class="mcell"><span class="m m-GET">GET</span></td><td class="p">/user/by-vault/<b>{vaultId}</b></td><td><span class="pill jwt">bearer</span></td><td class="src">user.go</td></tr>
+      <tr><td class="mcell"><span class="m m-GET">GET</span></td><td class="p">/user/contact-verifications</td><td><span class="pill jwt">bearer</span></td><td class="src">user.go</td></tr>
+      <tr><td class="mcell"><span class="m m-POST">POST</span></td><td class="p">/user/contact-verifications</td><td><span class="pill jwt">bearer</span></td><td class="src">user.go</td></tr>
+      <tr><td class="mcell"><span class="m m-DELETE">DELETE</span></td><td class="p">/user/devices</td><td><span class="pill jwt">bearer</span></td><td class="src">user.go</td></tr>
+      <tr><td class="mcell"><span class="m m-POST">POST</span></td><td class="p">/user/devices</td><td><span class="pill jwt">bearer</span></td><td class="src">user.go</td></tr>
+      <tr><td class="mcell"><span class="m m-GET">GET</span></td><td class="p">/user/export</td><td><span class="pill jwt">bearer</span></td><td class="src">user.go</td></tr>
+      <tr><td class="mcell"><span class="m m-GET">GET</span></td><td class="p">/user/ghost-mode</td><td><span class="pill jwt">bearer</span></td><td class="src">user.go</td></tr>
+      <tr><td class="mcell"><span class="m m-DELETE">DELETE</span></td><td class="p">/user/ghost-mode/<b>{targetId}</b></td><td><span class="pill jwt">bearer</span></td><td class="src">user.go</td></tr>
+      <tr><td class="mcell"><span class="m m-GET">GET</span></td><td class="p">/user/ghost-mode/<b>{targetId}</b></td><td><span class="pill jwt">bearer</span></td><td class="src">user.go</td></tr>
+      <tr><td class="mcell"><span class="m m-PUT">PUT</span></td><td class="p">/user/ghost-mode/<b>{targetId}</b></td><td><span class="pill jwt">bearer</span></td><td class="src">user.go</td></tr>
+      <tr><td class="mcell"><span class="m m-POST">POST</span></td><td class="p">/user/keybundle</td><td><span class="pill jwt">bearer</span></td><td class="src">user.go</td></tr>
+      <tr><td class="mcell"><span class="m m-POST">POST</span></td><td class="p">/user/pin</td><td><span class="pill jwt">bearer</span></td><td class="src">user.go</td></tr>
+      <tr><td class="mcell"><span class="m m-POST">POST</span></td><td class="p">/user/pin/verify</td><td><span class="pill jwt">bearer</span></td><td class="src">user.go</td></tr>
+      <tr><td class="mcell"><span class="m m-GET">GET</span></td><td class="p">/user/profile</td><td><span class="pill jwt">bearer</span></td><td class="src">user.go</td></tr>
+      <tr><td class="mcell"><span class="m m-PUT">PUT</span></td><td class="p">/user/profile</td><td><span class="pill jwt">bearer</span></td><td class="src">user.go</td></tr>
+      <tr><td class="mcell"><span class="m m-POST">POST</span></td><td class="p">/user/reports</td><td><span class="pill jwt">bearer</span></td><td class="src">user.go</td></tr>
+      <tr><td class="mcell"><span class="m m-GET">GET</span></td><td class="p">/user/scheduled-messages</td><td><span class="pill jwt">bearer</span></td><td class="src">user.go</td></tr>
+      <tr><td class="mcell"><span class="m m-POST">POST</span></td><td class="p">/user/scheduled-messages</td><td><span class="pill jwt">bearer</span></td><td class="src">user.go</td></tr>
+      <tr><td class="mcell"><span class="m m-DELETE">DELETE</span></td><td class="p">/user/scheduled-messages/<b>{id}</b></td><td><span class="pill jwt">bearer</span></td><td class="src">user.go</td></tr>
+      <tr><td class="mcell"><span class="m m-GET">GET</span></td><td class="p">/user/security-events</td><td><span class="pill jwt">bearer</span></td><td class="src">user.go</td></tr>
+      <tr><td class="mcell"><span class="m m-POST">POST</span></td><td class="p">/user/security-events</td><td><span class="pill jwt">bearer</span></td><td class="src">user.go</td></tr>
+      <tr><td class="mcell"><span class="m m-GET">GET</span></td><td class="p">/user/security-overview</td><td><span class="pill jwt">bearer</span></td><td class="src">user.go</td></tr>
+      <tr><td class="mcell"><span class="m m-DELETE">DELETE</span></td><td class="p">/user/sessions</td><td><span class="pill jwt">bearer</span></td><td class="src">user.go</td></tr>
+      <tr><td class="mcell"><span class="m m-GET">GET</span></td><td class="p">/user/sessions</td><td><span class="pill jwt">bearer</span></td><td class="src">user.go</td></tr>
+      <tr><td class="mcell"><span class="m m-DELETE">DELETE</span></td><td class="p">/user/sessions/<b>{id}</b></td><td><span class="pill jwt">bearer</span></td><td class="src">user.go</td></tr>
+      <tr><td class="mcell"><span class="m m-GET">GET</span></td><td class="p">/user/settings</td><td><span class="pill jwt">bearer</span></td><td class="src">user.go</td></tr>
+      <tr><td class="mcell"><span class="m m-PUT">PUT</span></td><td class="p">/user/settings</td><td><span class="pill jwt">bearer</span></td><td class="src">user.go</td></tr>
+      <tr><td class="mcell"><span class="m m-GET">GET</span></td><td class="p">/user/sos</td><td><span class="pill jwt">bearer</span></td><td class="src">user.go</td></tr>
+      <tr><td class="mcell"><span class="m m-POST">POST</span></td><td class="p">/user/sos</td><td><span class="pill jwt">bearer</span></td><td class="src">user.go</td></tr>
+      <tr><td class="mcell"><span class="m m-GET">GET</span></td><td class="p">/user/turn</td><td><span class="pill jwt">bearer</span></td><td class="src">user.go</td></tr>
+    </tbody></table></div>
+
+  <h3 class="grp">Messaging <span class="cnt">45</span></h3>
+  <p class="grp-blurb">Chats, messages, receipts, polls, events, per-chat modes.</p>
+  <div class="tbl-wrap"><table class="idx">
+    <thead><tr><th>Method</th><th>Path</th><th>Auth</th><th>Source</th></tr></thead><tbody>
+      <tr><td class="mcell"><span class="m m-GET">GET</span></td><td class="p">/chats</td><td><span class="pill jwt">bearer</span></td><td class="src">chats.go</td></tr>
+      <tr><td class="mcell"><span class="m m-POST">POST</span></td><td class="p">/chats</td><td><span class="pill jwt">bearer</span></td><td class="src">chats.go</td></tr>
+      <tr><td class="mcell"><span class="m m-GET">GET</span></td><td class="p">/chats/<b>{id}</b></td><td><span class="pill jwt">bearer</span></td><td class="src">chats.go</td></tr>
+      <tr><td class="mcell"><span class="m m-PATCH">PATCH</span></td><td class="p">/chats/<b>{id}</b></td><td><span class="pill jwt">bearer</span></td><td class="src">chats.go</td></tr>
+      <tr><td class="mcell"><span class="m m-POST">POST</span></td><td class="p">/chats/<b>{id}</b>/archive</td><td><span class="pill jwt">bearer</span></td><td class="src">chats.go</td></tr>
+      <tr><td class="mcell"><span class="m m-POST">POST</span></td><td class="p">/chats/<b>{id}</b>/delivered</td><td><span class="pill jwt">bearer</span></td><td class="src">chats.go</td></tr>
+      <tr><td class="mcell"><span class="m m-GET">GET</span></td><td class="p">/chats/<b>{id}</b>/events</td><td><span class="pill jwt">bearer</span></td><td class="src">chats_calendar.go</td></tr>
+      <tr><td class="mcell"><span class="m m-POST">POST</span></td><td class="p">/chats/<b>{id}</b>/events</td><td><span class="pill jwt">bearer</span></td><td class="src">chats_calendar.go</td></tr>
+      <tr><td class="mcell"><span class="m m-DELETE">DELETE</span></td><td class="p">/chats/<b>{id}</b>/events/<b>{eventId}</b></td><td><span class="pill jwt">bearer</span></td><td class="src">chats_calendar.go</td></tr>
+      <tr><td class="mcell"><span class="m m-PATCH">PATCH</span></td><td class="p">/chats/<b>{id}</b>/events/<b>{eventId}</b></td><td><span class="pill jwt">bearer</span></td><td class="src">chats_calendar.go</td></tr>
+      <tr><td class="mcell"><span class="m m-PATCH">PATCH</span></td><td class="p">/chats/<b>{id}</b>/hidden</td><td><span class="pill jwt">bearer</span></td><td class="src">chats.go</td></tr>
+      <tr><td class="mcell"><span class="m m-GET">GET</span></td><td class="p">/chats/<b>{id}</b>/invite-links</td><td><span class="pill jwt">bearer</span></td><td class="src">chats.go</td></tr>
+      <tr><td class="mcell"><span class="m m-POST">POST</span></td><td class="p">/chats/<b>{id}</b>/invite-links</td><td><span class="pill jwt">bearer</span></td><td class="src">chats.go</td></tr>
+      <tr><td class="mcell"><span class="m m-DELETE">DELETE</span></td><td class="p">/chats/<b>{id}</b>/invite-links/<b>{linkId}</b></td><td><span class="pill jwt">bearer</span></td><td class="src">chats.go</td></tr>
+      <tr><td class="mcell"><span class="m m-GET">GET</span></td><td class="p">/chats/<b>{id}</b>/join-requests</td><td><span class="pill jwt">bearer</span></td><td class="src">chats.go</td></tr>
+      <tr><td class="mcell"><span class="m m-DELETE">DELETE</span></td><td class="p">/chats/<b>{id}</b>/join-requests/<b>{userId}</b></td><td><span class="pill jwt">bearer</span></td><td class="src">chats.go</td></tr>
+      <tr><td class="mcell"><span class="m m-POST">POST</span></td><td class="p">/chats/<b>{id}</b>/join-requests/<b>{userId}</b>/approve</td><td><span class="pill jwt">bearer</span></td><td class="src">chats.go</td></tr>
+      <tr><td class="mcell"><span class="m m-POST">POST</span></td><td class="p">/chats/<b>{id}</b>/members</td><td><span class="pill jwt">bearer</span></td><td class="src">chats.go</td></tr>
+      <tr><td class="mcell"><span class="m m-DELETE">DELETE</span></td><td class="p">/chats/<b>{id}</b>/members/<b>{userId}</b></td><td><span class="pill jwt">bearer</span></td><td class="src">chats.go</td></tr>
+      <tr><td class="mcell"><span class="m m-PATCH">PATCH</span></td><td class="p">/chats/<b>{id}</b>/members/<b>{userId}</b>/role</td><td><span class="pill jwt">bearer</span></td><td class="src">chats.go</td></tr>
+      <tr><td class="mcell"><span class="m m-GET">GET</span></td><td class="p">/chats/<b>{id}</b>/messages</td><td><span class="pill jwt">bearer</span></td><td class="src">chats.go</td></tr>
+      <tr><td class="mcell"><span class="m m-POST">POST</span></td><td class="p">/chats/<b>{id}</b>/messages</td><td><span class="pill jwt">bearer</span></td><td class="src">chats.go</td></tr>
+      <tr><td class="mcell"><span class="m m-DELETE">DELETE</span></td><td class="p">/chats/<b>{id}</b>/messages/<b>{msgId}</b></td><td><span class="pill jwt">bearer</span></td><td class="src">chats.go</td></tr>
+      <tr><td class="mcell"><span class="m m-PATCH">PATCH</span></td><td class="p">/chats/<b>{id}</b>/messages/<b>{msgId}</b></td><td><span class="pill jwt">bearer</span></td><td class="src">chats.go</td></tr>
+      <tr><td class="mcell"><span class="m m-PUT">PUT</span></td><td class="p">/chats/<b>{id}</b>/messages/<b>{msgId}</b>/body</td><td><span class="pill jwt">bearer</span></td><td class="src">chats.go</td></tr>
+      <tr><td class="mcell"><span class="m m-POST">POST</span></td><td class="p">/chats/<b>{id}</b>/messages/<b>{msgId}</b>/vote</td><td><span class="pill jwt">bearer</span></td><td class="src">chats.go</td></tr>
+      <tr><td class="mcell"><span class="m m-DELETE">DELETE</span></td><td class="p">/chats/<b>{id}</b>/messages/<b>{msgId}</b>/vote/<b>{optionIndex}</b></td><td><span class="pill jwt">bearer</span></td><td class="src">chats.go</td></tr>
+      <tr><td class="mcell"><span class="m m-GET">GET</span></td><td class="p">/chats/<b>{id}</b>/messages/<b>{msgId}</b>/votes</td><td><span class="pill jwt">bearer</span></td><td class="src">chats.go</td></tr>
+      <tr><td class="mcell"><span class="m m-GET">GET</span></td><td class="p">/chats/<b>{id}</b>/messages/search</td><td><span class="pill jwt">bearer</span></td><td class="src">chats.go</td></tr>
+      <tr><td class="mcell"><span class="m m-POST">POST</span></td><td class="p">/chats/<b>{id}</b>/mute</td><td><span class="pill jwt">bearer</span></td><td class="src">chats.go</td></tr>
+      <tr><td class="mcell"><span class="m m-PATCH">PATCH</span></td><td class="p">/chats/<b>{id}</b>/notif-sound</td><td><span class="pill jwt">bearer</span></td><td class="src">chats.go</td></tr>
+      <tr><td class="mcell"><span class="m m-POST">POST</span></td><td class="p">/chats/<b>{id}</b>/pin</td><td><span class="pill jwt">bearer</span></td><td class="src">chats.go</td></tr>
+      <tr><td class="mcell"><span class="m m-POST">POST</span></td><td class="p">/chats/<b>{id}</b>/pin-message</td><td><span class="pill jwt">bearer</span></td><td class="src">chats.go</td></tr>
+      <tr><td class="mcell"><span class="m m-GET">GET</span></td><td class="p">/chats/<b>{id}</b>/poll-votes</td><td><span class="pill jwt">bearer</span></td><td class="src">chats.go</td></tr>
+      <tr><td class="mcell"><span class="m m-POST">POST</span></td><td class="p">/chats/<b>{id}</b>/read</td><td><span class="pill jwt">bearer</span></td><td class="src">chats.go</td></tr>
+      <tr><td class="mcell"><span class="m m-POST">POST</span></td><td class="p">/chats/<b>{id}</b>/save-contact</td><td><span class="pill jwt">bearer</span></td><td class="src">chats_anon.go</td></tr>
+      <tr><td class="mcell"><span class="m m-POST">POST</span></td><td class="p">/chats/<b>{id}</b>/screenshot-captured</td><td><span class="pill jwt">bearer</span></td><td class="src">chats.go</td></tr>
+      <tr><td class="mcell"><span class="m m-PATCH">PATCH</span></td><td class="p">/chats/<b>{id}</b>/screenshot-mode</td><td><span class="pill jwt">bearer</span></td><td class="src">chats.go</td></tr>
+      <tr><td class="mcell"><span class="m m-GET">GET</span></td><td class="p">/chats/<b>{id}</b>/sender-keys</td><td><span class="pill jwt">bearer</span></td><td class="src">chats.go</td></tr>
+      <tr><td class="mcell"><span class="m m-POST">POST</span></td><td class="p">/chats/<b>{id}</b>/sender-keys</td><td><span class="pill jwt">bearer</span></td><td class="src">chats.go</td></tr>
+      <tr><td class="mcell"><span class="m m-PATCH">PATCH</span></td><td class="p">/chats/<b>{id}</b>/vanish-mode</td><td><span class="pill jwt">bearer</span></td><td class="src">chats.go</td></tr>
+      <tr><td class="mcell"><span class="m m-GET">GET</span></td><td class="p">/chats/common/<b>{userId}</b></td><td><span class="pill jwt">bearer</span></td><td class="src">chats.go</td></tr>
+      <tr><td class="mcell"><span class="m m-GET">GET</span></td><td class="p">/chats/delta</td><td><span class="pill jwt">bearer</span></td><td class="src">chats.go</td></tr>
+      <tr><td class="mcell"><span class="m m-POST">POST</span></td><td class="p">/chats/join/<b>{code}</b></td><td><span class="pill jwt">bearer</span></td><td class="src">chats.go</td></tr>
+      <tr><td class="mcell"><span class="m m-GET">GET</span></td><td class="p">/chats/search</td><td><span class="pill jwt">bearer</span></td><td class="src">chats.go</td></tr>
+    </tbody></table></div>
+
+  <h3 class="grp">Groups & membership <span class="cnt">24</span></h3>
+  <p class="grp-blurb">Invitations, join requests, roles, invite links, join codes, communities.</p>
+  <div class="tbl-wrap"><table class="idx">
+    <thead><tr><th>Method</th><th>Path</th><th>Auth</th><th>Source</th></tr></thead><tbody>
+      <tr><td class="mcell"><span class="m m-DELETE">DELETE</span></td><td class="p">/chat-codes</td><td><span class="pill jwt">bearer</span></td><td class="src">chat_codes.go</td></tr>
+      <tr><td class="mcell"><span class="m m-GET">GET</span></td><td class="p">/chat-codes</td><td><span class="pill jwt">bearer</span></td><td class="src">chat_codes.go</td></tr>
+      <tr><td class="mcell"><span class="m m-POST">POST</span></td><td class="p">/chat-codes</td><td><span class="pill jwt">bearer</span></td><td class="src">chat_codes.go</td></tr>
+      <tr><td class="mcell"><span class="m m-POST">POST</span></td><td class="p">/chat-codes/<b>{code}</b>/join</td><td><span class="pill jwt">bearer</span></td><td class="src">chat_codes.go</td></tr>
+      <tr><td class="mcell"><span class="m m-GET">GET</span></td><td class="p">/chats/<b>{id}</b>/invitations</td><td><span class="pill jwt">bearer</span></td><td class="src">chats_invitations.go</td></tr>
+      <tr><td class="mcell"><span class="m m-POST">POST</span></td><td class="p">/chats/<b>{id}</b>/invitations</td><td><span class="pill jwt">bearer</span></td><td class="src">chats_invitations.go</td></tr>
+      <tr><td class="mcell"><span class="m m-DELETE">DELETE</span></td><td class="p">/chats/<b>{id}</b>/invitations/<b>{invId}</b></td><td><span class="pill jwt">bearer</span></td><td class="src">chats_invitations.go</td></tr>
+      <tr><td class="mcell"><span class="m m-POST">POST</span></td><td class="p">/chats/<b>{id}</b>/invitations/<b>{invId}</b>/approve</td><td><span class="pill jwt">bearer</span></td><td class="src">chats_membership.go</td></tr>
+      <tr><td class="mcell"><span class="m m-POST">POST</span></td><td class="p">/chats/<b>{id}</b>/invitations/<b>{invId}</b>/cancel</td><td><span class="pill jwt">bearer</span></td><td class="src">chats_membership.go</td></tr>
+      <tr><td class="mcell"><span class="m m-POST">POST</span></td><td class="p">/chats/<b>{id}</b>/invitations/<b>{invId}</b>/reject</td><td><span class="pill jwt">bearer</span></td><td class="src">chats_membership.go</td></tr>
+      <tr><td class="mcell"><span class="m m-POST">POST</span></td><td class="p">/chats/<b>{id}</b>/invitations/<b>{invId}</b>/resend</td><td><span class="pill jwt">bearer</span></td><td class="src">chats_invitations.go</td></tr>
+      <tr><td class="mcell"><span class="m m-PATCH">PATCH</span></td><td class="p">/chats/<b>{id}</b>/membership/approval-mode</td><td><span class="pill jwt">bearer</span></td><td class="src">chats_membership.go</td></tr>
+      <tr><td class="mcell"><span class="m m-GET">GET</span></td><td class="p">/chats/<b>{id}</b>/membership/candidates</td><td><span class="pill jwt">bearer</span></td><td class="src">chats_membership.go</td></tr>
+      <tr><td class="mcell"><span class="m m-GET">GET</span></td><td class="p">/chats/<b>{id}</b>/membership/pending</td><td><span class="pill jwt">bearer</span></td><td class="src">chats_membership.go</td></tr>
+      <tr><td class="mcell"><span class="m m-POST">POST</span></td><td class="p">/chats/<b>{id}</b>/membership/request</td><td><span class="pill jwt">bearer</span></td><td class="src">chats_membership.go</td></tr>
+      <tr><td class="mcell"><span class="m m-POST">POST</span></td><td class="p">/chats/<b>{id}</b>/membership/transfer</td><td><span class="pill jwt">bearer</span></td><td class="src">chats_membership.go</td></tr>
+      <tr><td class="mcell"><span class="m m-GET">GET</span></td><td class="p">/communities</td><td><span class="pill jwt">bearer</span></td><td class="src">communities.go</td></tr>
+      <tr><td class="mcell"><span class="m m-POST">POST</span></td><td class="p">/communities</td><td><span class="pill jwt">bearer</span></td><td class="src">communities.go</td></tr>
+      <tr><td class="mcell"><span class="m m-GET">GET</span></td><td class="p">/communities/<b>{id}</b></td><td><span class="pill jwt">bearer</span></td><td class="src">communities.go</td></tr>
+      <tr><td class="mcell"><span class="m m-POST">POST</span></td><td class="p">/communities/<b>{id}</b>/groups</td><td><span class="pill jwt">bearer</span></td><td class="src">communities.go</td></tr>
+      <tr><td class="mcell"><span class="m m-GET">GET</span></td><td class="p">/invitations</td><td><span class="pill jwt">bearer</span></td><td class="src">chats_invitations.go</td></tr>
+      <tr><td class="mcell"><span class="m m-POST">POST</span></td><td class="p">/invitations/<b>{invId}</b>/accept</td><td><span class="pill jwt">bearer</span></td><td class="src">chats_membership.go</td></tr>
+      <tr><td class="mcell"><span class="m m-POST">POST</span></td><td class="p">/invitations/<b>{invId}</b>/reject</td><td><span class="pill jwt">bearer</span></td><td class="src">chats_invitations.go</td></tr>
+      <tr><td class="mcell"><span class="m m-POST">POST</span></td><td class="p">/invitations/redeem</td><td><span class="pill jwt">bearer</span></td><td class="src">chats_invitations.go</td></tr>
+    </tbody></table></div>
+
+  <h3 class="grp">Spaces & operations <span class="cnt">62</span></h3>
+  <p class="grp-blurb">Rosters, runs, trips, tracked devices, attendance and relations — all nested under a chat.</p>
+  <div class="tbl-wrap"><table class="idx">
+    <thead><tr><th>Method</th><th>Path</th><th>Auth</th><th>Source</th></tr></thead><tbody>
+      <tr><td class="mcell"><span class="m m-GET">GET</span></td><td class="p">/chats/<b>{id}</b>/attendance</td><td><span class="pill jwt">bearer</span></td><td class="src">spaces_workforce.go</td></tr>
+      <tr><td class="mcell"><span class="m m-POST">POST</span></td><td class="p">/chats/<b>{id}</b>/attendance/check-in</td><td><span class="pill jwt">bearer</span></td><td class="src">spaces_workforce.go</td></tr>
+      <tr><td class="mcell"><span class="m m-POST">POST</span></td><td class="p">/chats/<b>{id}</b>/attendance/check-out</td><td><span class="pill jwt">bearer</span></td><td class="src">spaces_workforce.go</td></tr>
+      <tr><td class="mcell"><span class="m m-GET">GET</span></td><td class="p">/chats/<b>{id}</b>/devices</td><td><span class="pill jwt">bearer</span></td><td class="src">spaces_devices.go</td></tr>
+      <tr><td class="mcell"><span class="m m-POST">POST</span></td><td class="p">/chats/<b>{id}</b>/devices</td><td><span class="pill jwt">bearer</span></td><td class="src">spaces_devices.go</td></tr>
+      <tr><td class="mcell"><span class="m m-PATCH">PATCH</span></td><td class="p">/chats/<b>{id}</b>/devices/<b>{deviceId}</b></td><td><span class="pill jwt">bearer</span></td><td class="src">spaces_devices.go</td></tr>
+      <tr><td class="mcell"><span class="m m-GET">GET</span></td><td class="p">/chats/<b>{id}</b>/devices/<b>{deviceId}</b>/commands</td><td><span class="pill jwt">bearer</span></td><td class="src">spaces_devices.go</td></tr>
+      <tr><td class="mcell"><span class="m m-POST">POST</span></td><td class="p">/chats/<b>{id}</b>/devices/<b>{deviceId}</b>/commands</td><td><span class="pill jwt">bearer</span></td><td class="src">spaces_devices.go</td></tr>
+      <tr><td class="mcell"><span class="m m-PATCH">PATCH</span></td><td class="p">/chats/<b>{id}</b>/devices/<b>{deviceId}</b>/commands/<b>{cmdId}</b></td><td><span class="pill jwt">bearer</span></td><td class="src">spaces_devices.go</td></tr>
+      <tr><td class="mcell"><span class="m m-GET">GET</span></td><td class="p">/chats/<b>{id}</b>/devices/<b>{deviceId}</b>/events</td><td><span class="pill jwt">bearer</span></td><td class="src">spaces_devices.go</td></tr>
+      <tr><td class="mcell"><span class="m m-POST">POST</span></td><td class="p">/chats/<b>{id}</b>/devices/<b>{deviceId}</b>/events</td><td><span class="pill jwt">bearer</span></td><td class="src">spaces_devices.go</td></tr>
+      <tr><td class="mcell"><span class="m m-POST">POST</span></td><td class="p">/chats/<b>{id}</b>/devices/<b>{deviceId}</b>/heartbeat</td><td><span class="pill jwt">bearer</span></td><td class="src">spaces_devices.go</td></tr>
+      <tr><td class="mcell"><span class="m m-PATCH">PATCH</span></td><td class="p">/chats/<b>{id}</b>/duty</td><td><span class="pill jwt">bearer</span></td><td class="src">spaces_runs.go</td></tr>
+      <tr><td class="mcell"><span class="m m-GET">GET</span></td><td class="p">/chats/<b>{id}</b>/incidents</td><td><span class="pill jwt">bearer</span></td><td class="src">spaces_ops.go</td></tr>
+      <tr><td class="mcell"><span class="m m-POST">POST</span></td><td class="p">/chats/<b>{id}</b>/incidents</td><td><span class="pill jwt">bearer</span></td><td class="src">spaces_ops.go</td></tr>
+      <tr><td class="mcell"><span class="m m-PATCH">PATCH</span></td><td class="p">/chats/<b>{id}</b>/incidents/<b>{incidentId}</b></td><td><span class="pill jwt">bearer</span></td><td class="src">spaces_ops.go</td></tr>
+      <tr><td class="mcell"><span class="m m-GET">GET</span></td><td class="p">/chats/<b>{id}</b>/items</td><td><span class="pill jwt">bearer</span></td><td class="src">space_items.go</td></tr>
+      <tr><td class="mcell"><span class="m m-POST">POST</span></td><td class="p">/chats/<b>{id}</b>/items</td><td><span class="pill jwt">bearer</span></td><td class="src">space_items.go</td></tr>
+      <tr><td class="mcell"><span class="m m-POST">POST</span></td><td class="p">/chats/<b>{id}</b>/items/forget</td><td><span class="pill jwt">bearer</span></td><td class="src">space_items.go</td></tr>
+      <tr><td class="mcell"><span class="m m-POST">POST</span></td><td class="p">/chats/<b>{id}</b>/items/sighting</td><td><span class="pill jwt">bearer</span></td><td class="src">space_items.go</td></tr>
+      <tr><td class="mcell"><span class="m m-GET">GET</span></td><td class="p">/chats/<b>{id}</b>/leave</td><td><span class="pill jwt">bearer</span></td><td class="src">spaces_workforce.go</td></tr>
+      <tr><td class="mcell"><span class="m m-POST">POST</span></td><td class="p">/chats/<b>{id}</b>/leave</td><td><span class="pill jwt">bearer</span></td><td class="src">spaces_workforce.go</td></tr>
+      <tr><td class="mcell"><span class="m m-PATCH">PATCH</span></td><td class="p">/chats/<b>{id}</b>/leave/<b>{leaveId}</b></td><td><span class="pill jwt">bearer</span></td><td class="src">spaces_workforce.go</td></tr>
+      <tr><td class="mcell"><span class="m m-PATCH">PATCH</span></td><td class="p">/chats/<b>{id}</b>/leave/allowance</td><td><span class="pill jwt">bearer</span></td><td class="src">spaces_workforce.go</td></tr>
+      <tr><td class="mcell"><span class="m m-GET">GET</span></td><td class="p">/chats/<b>{id}</b>/leave/balance</td><td><span class="pill jwt">bearer</span></td><td class="src">spaces_workforce.go</td></tr>
+      <tr><td class="mcell"><span class="m m-DELETE">DELETE</span></td><td class="p">/chats/<b>{id}</b>/links</td><td><span class="pill jwt">bearer</span></td><td class="src">spaces_roster.go</td></tr>
+      <tr><td class="mcell"><span class="m m-GET">GET</span></td><td class="p">/chats/<b>{id}</b>/links</td><td><span class="pill jwt">bearer</span></td><td class="src">spaces_roster.go</td></tr>
+      <tr><td class="mcell"><span class="m m-POST">POST</span></td><td class="p">/chats/<b>{id}</b>/links</td><td><span class="pill jwt">bearer</span></td><td class="src">spaces_roster.go</td></tr>
+      <tr><td class="mcell"><span class="m m-POST">POST</span></td><td class="p">/chats/<b>{id}</b>/locations</td><td><span class="pill jwt">bearer</span></td><td class="src">spaces_locations.go</td></tr>
+      <tr><td class="mcell"><span class="m m-GET">GET</span></td><td class="p">/chats/<b>{id}</b>/locations/history</td><td><span class="pill jwt">bearer</span></td><td class="src">spaces_locations.go</td></tr>
+      <tr><td class="mcell"><span class="m m-GET">GET</span></td><td class="p">/chats/<b>{id}</b>/locations/latest</td><td><span class="pill jwt">bearer</span></td><td class="src">spaces_locations.go</td></tr>
+      <tr><td class="mcell"><span class="m m-POST">POST</span></td><td class="p">/chats/<b>{id}</b>/locations/start</td><td><span class="pill jwt">bearer</span></td><td class="src">spaces_locations.go</td></tr>
+      <tr><td class="mcell"><span class="m m-POST">POST</span></td><td class="p">/chats/<b>{id}</b>/locations/stop</td><td><span class="pill jwt">bearer</span></td><td class="src">spaces_locations.go</td></tr>
+      <tr><td class="mcell"><span class="m m-PATCH">PATCH</span></td><td class="p">/chats/<b>{id}</b>/members/<b>{userId}</b>/role-key</td><td><span class="pill jwt">bearer</span></td><td class="src">spaces_roster.go</td></tr>
+      <tr><td class="mcell"><span class="m m-GET">GET</span></td><td class="p">/chats/<b>{id}</b>/ops/pending</td><td><span class="pill jwt">bearer</span></td><td class="src">spaces_workforce.go</td></tr>
+      <tr><td class="mcell"><span class="m m-GET">GET</span></td><td class="p">/chats/<b>{id}</b>/ops/people</td><td><span class="pill jwt">bearer</span></td><td class="src">spaces_workforce.go</td></tr>
+      <tr><td class="mcell"><span class="m m-GET">GET</span></td><td class="p">/chats/<b>{id}</b>/ops/summary</td><td><span class="pill jwt">bearer</span></td><td class="src">spaces_workforce.go</td></tr>
+      <tr><td class="mcell"><span class="m m-GET">GET</span></td><td class="p">/chats/<b>{id}</b>/relations</td><td><span class="pill jwt">bearer</span></td><td class="src">family_relations.go</td></tr>
+      <tr><td class="mcell"><span class="m m-PUT">PUT</span></td><td class="p">/chats/<b>{id}</b>/relations/<b>{memberId}</b></td><td><span class="pill jwt">bearer</span></td><td class="src">family_relations.go</td></tr>
+      <tr><td class="mcell"><span class="m m-GET">GET</span></td><td class="p">/chats/<b>{id}</b>/roster</td><td><span class="pill jwt">bearer</span></td><td class="src">spaces_roster.go</td></tr>
+      <tr><td class="mcell"><span class="m m-POST">POST</span></td><td class="p">/chats/<b>{id}</b>/roster</td><td><span class="pill jwt">bearer</span></td><td class="src">spaces_roster.go</td></tr>
+      <tr><td class="mcell"><span class="m m-PATCH">PATCH</span></td><td class="p">/chats/<b>{id}</b>/roster/<b>{rosterId}</b></td><td><span class="pill jwt">bearer</span></td><td class="src">spaces_roster.go</td></tr>
+      <tr><td class="mcell"><span class="m m-GET">GET</span></td><td class="p">/chats/<b>{id}</b>/runs</td><td><span class="pill jwt">bearer</span></td><td class="src">spaces_runs.go</td></tr>
+      <tr><td class="mcell"><span class="m m-POST">POST</span></td><td class="p">/chats/<b>{id}</b>/runs</td><td><span class="pill jwt">bearer</span></td><td class="src">spaces_runs.go</td></tr>
+      <tr><td class="mcell"><span class="m m-GET">GET</span></td><td class="p">/chats/<b>{id}</b>/runs/<b>{runId}</b></td><td><span class="pill jwt">bearer</span></td><td class="src">spaces_runs.go</td></tr>
+      <tr><td class="mcell"><span class="m m-PATCH">PATCH</span></td><td class="p">/chats/<b>{id}</b>/runs/<b>{runId}</b></td><td><span class="pill jwt">bearer</span></td><td class="src">spaces_runs.go</td></tr>
+      <tr><td class="mcell"><span class="m m-GET">GET</span></td><td class="p">/chats/<b>{id}</b>/runs/<b>{runId}</b>/events</td><td><span class="pill jwt">bearer</span></td><td class="src">spaces_runs.go</td></tr>
+      <tr><td class="mcell"><span class="m m-POST">POST</span></td><td class="p">/chats/<b>{id}</b>/runs/<b>{runId}</b>/ping</td><td><span class="pill jwt">bearer</span></td><td class="src">spaces_runs.go</td></tr>
+      <tr><td class="mcell"><span class="m m-PUT">PUT</span></td><td class="p">/chats/<b>{id}</b>/runs/<b>{runId}</b>/riders</td><td><span class="pill jwt">bearer</span></td><td class="src">spaces_runs.go</td></tr>
+      <tr><td class="mcell"><span class="m m-POST">POST</span></td><td class="p">/chats/<b>{id}</b>/runs/<b>{runId}</b>/riders/<b>{riderId}</b>/state</td><td><span class="pill jwt">bearer</span></td><td class="src">spaces_runs.go</td></tr>
+      <tr><td class="mcell"><span class="m m-PUT">PUT</span></td><td class="p">/chats/<b>{id}</b>/runs/<b>{runId}</b>/stops</td><td><span class="pill jwt">bearer</span></td><td class="src">spaces_runs.go</td></tr>
+      <tr><td class="mcell"><span class="m m-POST">POST</span></td><td class="p">/chats/<b>{id}</b>/runs/<b>{runId}</b>/stops/<b>{stopId}</b>/arrive</td><td><span class="pill jwt">bearer</span></td><td class="src">spaces_runs.go</td></tr>
+      <tr><td class="mcell"><span class="m m-PATCH">PATCH</span></td><td class="p">/chats/<b>{id}</b>/shift</td><td><span class="pill jwt">bearer</span></td><td class="src">spaces_ops.go</td></tr>
+      <tr><td class="mcell"><span class="m m-GET">GET</span></td><td class="p">/chats/<b>{id}</b>/tasks</td><td><span class="pill jwt">bearer</span></td><td class="src">spaces_workforce.go</td></tr>
+      <tr><td class="mcell"><span class="m m-POST">POST</span></td><td class="p">/chats/<b>{id}</b>/tasks</td><td><span class="pill jwt">bearer</span></td><td class="src">spaces_workforce.go</td></tr>
+      <tr><td class="mcell"><span class="m m-PATCH">PATCH</span></td><td class="p">/chats/<b>{id}</b>/tasks/<b>{taskId}</b></td><td><span class="pill jwt">bearer</span></td><td class="src">spaces_workforce.go</td></tr>
+      <tr><td class="mcell"><span class="m m-GET">GET</span></td><td class="p">/chats/<b>{id}</b>/trip</td><td><span class="pill jwt">bearer</span></td><td class="src">space_trips.go</td></tr>
+      <tr><td class="mcell"><span class="m m-POST">POST</span></td><td class="p">/chats/<b>{id}</b>/trip</td><td><span class="pill jwt">bearer</span></td><td class="src">space_trips.go</td></tr>
+      <tr><td class="mcell"><span class="m m-POST">POST</span></td><td class="p">/chats/<b>{id}</b>/trip/end</td><td><span class="pill jwt">bearer</span></td><td class="src">space_trips.go</td></tr>
+      <tr><td class="mcell"><span class="m m-GET">GET</span></td><td class="p">/chats/<b>{id}</b>/visitor-passes</td><td><span class="pill jwt">bearer</span></td><td class="src">spaces_ops.go</td></tr>
+      <tr><td class="mcell"><span class="m m-POST">POST</span></td><td class="p">/chats/<b>{id}</b>/visitor-passes</td><td><span class="pill jwt">bearer</span></td><td class="src">spaces_ops.go</td></tr>
+      <tr><td class="mcell"><span class="m m-POST">POST</span></td><td class="p">/chats/<b>{id}</b>/visitor-passes/redeem</td><td><span class="pill jwt">bearer</span></td><td class="src">spaces_ops.go</td></tr>
+    </tbody></table></div>
+
+  <h3 class="grp">Media & uploads <span class="cnt">10</span></h3>
+  <p class="grp-blurb">Direct presign, resumable multipart, view-once lifecycle.</p>
+  <div class="tbl-wrap"><table class="idx">
+    <thead><tr><th>Method</th><th>Path</th><th>Auth</th><th>Source</th></tr></thead><tbody>
+      <tr><td class="mcell"><span class="m m-POST">POST</span></td><td class="p">/uploads</td><td><span class="pill jwt">bearer</span></td><td class="src">uploads.go</td></tr>
+      <tr><td class="mcell"><span class="m m-GET">GET</span></td><td class="p">/uploads/<b>{id}</b></td><td><span class="pill jwt">bearer</span></td><td class="src">uploads.go</td></tr>
+      <tr><td class="mcell"><span class="m m-POST">POST</span></td><td class="p">/uploads/<b>{id}</b>/revoke</td><td><span class="pill jwt">bearer</span></td><td class="src">uploads.go</td></tr>
+      <tr><td class="mcell"><span class="m m-POST">POST</span></td><td class="p">/uploads/<b>{id}</b>/viewed</td><td><span class="pill jwt">bearer</span></td><td class="src">uploads.go</td></tr>
+      <tr><td class="mcell"><span class="m m-GET">GET</span></td><td class="p">/uploads/multipart/<b>{id}</b>/parts</td><td><span class="pill jwt">bearer</span></td><td class="src">uploads.go</td></tr>
+      <tr><td class="mcell"><span class="m m-POST">POST</span></td><td class="p">/uploads/multipart/abort</td><td><span class="pill jwt">bearer</span></td><td class="src">uploads.go</td></tr>
+      <tr><td class="mcell"><span class="m m-POST">POST</span></td><td class="p">/uploads/multipart/complete</td><td><span class="pill jwt">bearer</span></td><td class="src">uploads.go</td></tr>
+      <tr><td class="mcell"><span class="m m-POST">POST</span></td><td class="p">/uploads/multipart/init</td><td><span class="pill jwt">bearer</span></td><td class="src">uploads.go</td></tr>
+      <tr><td class="mcell"><span class="m m-POST">POST</span></td><td class="p">/uploads/multipart/part-urls</td><td><span class="pill jwt">bearer</span></td><td class="src">uploads.go</td></tr>
+      <tr><td class="mcell"><span class="m m-POST">POST</span></td><td class="p">/uploads/presign</td><td><span class="pill jwt">bearer</span></td><td class="src">uploads.go</td></tr>
+    </tbody></table></div>
+
+  <h3 class="grp">VaultBeam <span class="cnt">8</span></h3>
+  <p class="grp-blurb">Device-to-device transfer with a relay fallback.</p>
+  <div class="tbl-wrap"><table class="idx">
+    <thead><tr><th>Method</th><th>Path</th><th>Auth</th><th>Source</th></tr></thead><tbody>
+      <tr><td class="mcell"><span class="m m-GET">GET</span></td><td class="p">/vaultbeam/relay/<b>{transferId}</b></td><td><span class="pill jwt">bearer</span></td><td class="src">vaultbeam.go</td></tr>
+      <tr><td class="mcell"><span class="m m-POST">POST</span></td><td class="p">/vaultbeam/relay/abort</td><td><span class="pill jwt">bearer</span></td><td class="src">vaultbeam.go</td></tr>
+      <tr><td class="mcell"><span class="m m-POST">POST</span></td><td class="p">/vaultbeam/relay/block-url</td><td><span class="pill jwt">bearer</span></td><td class="src">vaultbeam.go</td></tr>
+      <tr><td class="mcell"><span class="m m-POST">POST</span></td><td class="p">/vaultbeam/relay/complete</td><td><span class="pill jwt">bearer</span></td><td class="src">vaultbeam.go</td></tr>
+      <tr><td class="mcell"><span class="m m-POST">POST</span></td><td class="p">/vaultbeam/relay/grow</td><td><span class="pill jwt">bearer</span></td><td class="src">vaultbeam.go</td></tr>
+      <tr><td class="mcell"><span class="m m-POST">POST</span></td><td class="p">/vaultbeam/relay/init</td><td><span class="pill jwt">bearer</span></td><td class="src">vaultbeam.go</td></tr>
+      <tr><td class="mcell"><span class="m m-POST">POST</span></td><td class="p">/vaultbeam/relay/received</td><td><span class="pill jwt">bearer</span></td><td class="src">vaultbeam.go</td></tr>
+      <tr><td class="mcell"><span class="m m-POST">POST</span></td><td class="p">/vaultbeam/relay/uploaded</td><td><span class="pill jwt">bearer</span></td><td class="src">vaultbeam.go</td></tr>
+    </tbody></table></div>
+
+  <h3 class="grp">Stories & channels <span class="cnt">14</span></h3>
+  <p class="grp-blurb">Stories with per-viewer keys, audience control, creator channels.</p>
+  <div class="tbl-wrap"><table class="idx">
+    <thead><tr><th>Method</th><th>Path</th><th>Auth</th><th>Source</th></tr></thead><tbody>
+      <tr><td class="mcell"><span class="m m-GET">GET</span></td><td class="p">/channels</td><td><span class="pill jwt">bearer</span></td><td class="src">channels.go</td></tr>
+      <tr><td class="mcell"><span class="m m-POST">POST</span></td><td class="p">/channels</td><td><span class="pill jwt">bearer</span></td><td class="src">channels.go</td></tr>
+      <tr><td class="mcell"><span class="m m-GET">GET</span></td><td class="p">/channels/<b>{id}</b>/posts</td><td><span class="pill jwt">bearer</span></td><td class="src">channels.go</td></tr>
+      <tr><td class="mcell"><span class="m m-POST">POST</span></td><td class="p">/channels/<b>{id}</b>/posts</td><td><span class="pill jwt">bearer</span></td><td class="src">channels.go</td></tr>
+      <tr><td class="mcell"><span class="m m-POST">POST</span></td><td class="p">/channels/join</td><td><span class="pill jwt">bearer</span></td><td class="src">channels.go</td></tr>
+      <tr><td class="mcell"><span class="m m-POST">POST</span></td><td class="p">/stories</td><td><span class="pill jwt">bearer</span></td><td class="src">stories.go</td></tr>
+      <tr><td class="mcell"><span class="m m-DELETE">DELETE</span></td><td class="p">/stories/<b>{id}</b></td><td><span class="pill jwt">bearer</span></td><td class="src">stories.go</td></tr>
+      <tr><td class="mcell"><span class="m m-GET">GET</span></td><td class="p">/stories/<b>{id}</b>/key</td><td><span class="pill jwt">bearer</span></td><td class="src">stories.go</td></tr>
+      <tr><td class="mcell"><span class="m m-POST">POST</span></td><td class="p">/stories/<b>{id}</b>/viewed</td><td><span class="pill jwt">bearer</span></td><td class="src">stories.go</td></tr>
+      <tr><td class="mcell"><span class="m m-GET">GET</span></td><td class="p">/stories/<b>{id}</b>/views</td><td><span class="pill jwt">bearer</span></td><td class="src">stories.go</td></tr>
+      <tr><td class="mcell"><span class="m m-GET">GET</span></td><td class="p">/stories/audience</td><td><span class="pill jwt">bearer</span></td><td class="src">stories.go</td></tr>
+      <tr><td class="mcell"><span class="m m-GET">GET</span></td><td class="p">/stories/feed</td><td><span class="pill jwt">bearer</span></td><td class="src">stories.go</td></tr>
+      <tr><td class="mcell"><span class="m m-GET">GET</span></td><td class="p">/stories/privacy</td><td><span class="pill jwt">bearer</span></td><td class="src">stories.go</td></tr>
+      <tr><td class="mcell"><span class="m m-PUT">PUT</span></td><td class="p">/stories/privacy</td><td><span class="pill jwt">bearer</span></td><td class="src">stories.go</td></tr>
+    </tbody></table></div>
+
+  <h3 class="grp">Calls <span class="cnt">12</span></h3>
+  <p class="grp-blurb">Wake push, signalling tokens, session roster, SFU tokens.</p>
+  <div class="tbl-wrap"><table class="idx">
+    <thead><tr><th>Method</th><th>Path</th><th>Auth</th><th>Source</th></tr></thead><tbody>
+      <tr><td class="mcell"><span class="m m-POST">POST</span></td><td class="p">/call/cancel</td><td><span class="pill jwt">bearer</span></td><td class="src">calls.go</td></tr>
+      <tr><td class="mcell"><span class="m m-POST">POST</span></td><td class="p">/call/initiate</td><td><span class="pill jwt">bearer</span></td><td class="src">calls.go</td></tr>
+      <tr><td class="mcell"><span class="m m-POST">POST</span></td><td class="p">/call/token</td><td><span class="pill jwt">bearer</span></td><td class="src">calls.go</td></tr>
+      <tr><td class="mcell"><span class="m m-POST">POST</span></td><td class="p">/calls</td><td><span class="pill jwt">bearer</span></td><td class="src">call_sessions.go</td></tr>
+      <tr><td class="mcell"><span class="m m-GET">GET</span></td><td class="p">/calls/<b>{id}</b></td><td><span class="pill jwt">bearer</span></td><td class="src">call_sessions.go</td></tr>
+      <tr><td class="mcell"><span class="m m-POST">POST</span></td><td class="p">/calls/<b>{id}</b>/end</td><td><span class="pill jwt">bearer</span></td><td class="src">call_sessions.go</td></tr>
+      <tr><td class="mcell"><span class="m m-POST">POST</span></td><td class="p">/calls/<b>{id}</b>/hand</td><td><span class="pill jwt">bearer</span></td><td class="src">call_sessions.go</td></tr>
+      <tr><td class="mcell"><span class="m m-POST">POST</span></td><td class="p">/calls/<b>{id}</b>/leave</td><td><span class="pill jwt">bearer</span></td><td class="src">call_sessions.go</td></tr>
+      <tr><td class="mcell"><span class="m m-POST">POST</span></td><td class="p">/calls/<b>{id}</b>/ring</td><td><span class="pill jwt">bearer</span></td><td class="src">call_sessions.go</td></tr>
+      <tr><td class="mcell"><span class="m m-POST">POST</span></td><td class="p">/calls/<b>{id}</b>/role</td><td><span class="pill jwt">bearer</span></td><td class="src">call_sessions.go</td></tr>
+      <tr><td class="mcell"><span class="m m-POST">POST</span></td><td class="p">/calls/<b>{id}</b>/sfu-token</td><td><span class="pill jwt">bearer</span></td><td class="src">call_sessions.go</td></tr>
+      <tr><td class="mcell"><span class="m m-GET">GET</span></td><td class="p">/calls/history</td><td><span class="pill jwt">bearer</span></td><td class="src">call_sessions.go</td></tr>
+    </tbody></table></div>
+
+  <h3 class="grp">Broadcast / Go Live <span class="cnt">30</span></h3>
+  <p class="grp-blurb">Live sessions, viewers, comments, polls, invite links, HLS playback, egress webhooks.</p>
+  <div class="tbl-wrap"><table class="idx">
+    <thead><tr><th>Method</th><th>Path</th><th>Auth</th><th>Source</th></tr></thead><tbody>
+      <tr><td class="mcell"><span class="m m-POST">POST</span></td><td class="p">/broadcasts</td><td><span class="pill jwt">bearer</span></td><td class="src">broadcasts.go</td></tr>
+      <tr><td class="mcell"><span class="m m-GET">GET</span></td><td class="p">/broadcasts/<b>{id}</b></td><td><span class="pill jwt">bearer</span></td><td class="src">broadcasts.go</td></tr>
+      <tr><td class="mcell"><span class="m m-GET">GET</span></td><td class="p">/broadcasts/<b>{id}</b>/chat</td><td><span class="pill jwt">bearer</span></td><td class="src">broadcasts.go</td></tr>
+      <tr><td class="mcell"><span class="m m-POST">POST</span></td><td class="p">/broadcasts/<b>{id}</b>/chat</td><td><span class="pill jwt">bearer</span></td><td class="src">broadcasts.go</td></tr>
+      <tr><td class="mcell"><span class="m m-GET">GET</span></td><td class="p">/broadcasts/<b>{id}</b>/comments</td><td><span class="pill jwt">bearer</span></td><td class="src">broadcast_social.go</td></tr>
+      <tr><td class="mcell"><span class="m m-POST">POST</span></td><td class="p">/broadcasts/<b>{id}</b>/comments</td><td><span class="pill jwt">bearer</span></td><td class="src">broadcast_social.go</td></tr>
+      <tr><td class="mcell"><span class="m m-DELETE">DELETE</span></td><td class="p">/broadcasts/<b>{id}</b>/comments/<b>{cid}</b></td><td><span class="pill jwt">bearer</span></td><td class="src">broadcast_social.go</td></tr>
+      <tr><td class="mcell"><span class="m m-POST">POST</span></td><td class="p">/broadcasts/<b>{id}</b>/end</td><td><span class="pill jwt">bearer</span></td><td class="src">broadcasts.go</td></tr>
+      <tr><td class="mcell"><span class="m m-POST">POST</span></td><td class="p">/broadcasts/<b>{id}</b>/hls</td><td><span class="pill jwt">bearer</span></td><td class="src">broadcasts.go</td></tr>
+      <tr><td class="mcell"><span class="m m-GET">GET</span></td><td class="p">/broadcasts/<b>{id}</b>/hls/<b>{file...}</b></td><td><span class="pill sig">HMAC ticket</span></td><td class="src">broadcasts.go</td></tr>
+      <tr><td class="mcell"><span class="m m-POST">POST</span></td><td class="p">/broadcasts/<b>{id}</b>/invite</td><td><span class="pill jwt">bearer</span></td><td class="src">broadcast_social.go</td></tr>
+      <tr><td class="mcell"><span class="m m-DELETE">DELETE</span></td><td class="p">/broadcasts/<b>{id}</b>/invite-link</td><td><span class="pill jwt">bearer</span></td><td class="src">golive_invites.go</td></tr>
+      <tr><td class="mcell"><span class="m m-GET">GET</span></td><td class="p">/broadcasts/<b>{id}</b>/invite-link</td><td><span class="pill jwt">bearer</span></td><td class="src">golive_invites.go</td></tr>
+      <tr><td class="mcell"><span class="m m-POST">POST</span></td><td class="p">/broadcasts/<b>{id}</b>/invite-link</td><td><span class="pill jwt">bearer</span></td><td class="src">golive_invites.go</td></tr>
+      <tr><td class="mcell"><span class="m m-POST">POST</span></td><td class="p">/broadcasts/<b>{id}</b>/invite/accept</td><td><span class="pill jwt">bearer</span></td><td class="src">broadcast_social.go</td></tr>
+      <tr><td class="mcell"><span class="m m-DELETE">DELETE</span></td><td class="p">/broadcasts/<b>{id}</b>/like</td><td><span class="pill jwt">bearer</span></td><td class="src">broadcast_social.go</td></tr>
+      <tr><td class="mcell"><span class="m m-POST">POST</span></td><td class="p">/broadcasts/<b>{id}</b>/like</td><td><span class="pill jwt">bearer</span></td><td class="src">broadcast_social.go</td></tr>
+      <tr><td class="mcell"><span class="m m-GET">GET</span></td><td class="p">/broadcasts/<b>{id}</b>/polls</td><td><span class="pill jwt">bearer</span></td><td class="src">golive_polls.go</td></tr>
+      <tr><td class="mcell"><span class="m m-POST">POST</span></td><td class="p">/broadcasts/<b>{id}</b>/polls</td><td><span class="pill jwt">bearer</span></td><td class="src">golive_polls.go</td></tr>
+      <tr><td class="mcell"><span class="m m-POST">POST</span></td><td class="p">/broadcasts/<b>{id}</b>/polls/<b>{pid}</b>/close</td><td><span class="pill jwt">bearer</span></td><td class="src">golive_polls.go</td></tr>
+      <tr><td class="mcell"><span class="m m-POST">POST</span></td><td class="p">/broadcasts/<b>{id}</b>/polls/<b>{pid}</b>/vote</td><td><span class="pill jwt">bearer</span></td><td class="src">golive_polls.go</td></tr>
+      <tr><td class="mcell"><span class="m m-POST">POST</span></td><td class="p">/broadcasts/<b>{id}</b>/token</td><td><span class="pill jwt">bearer</span></td><td class="src">broadcasts.go</td></tr>
+      <tr><td class="mcell"><span class="m m-POST">POST</span></td><td class="p">/broadcasts/<b>{id}</b>/unwatch</td><td><span class="pill jwt">bearer</span></td><td class="src">broadcasts.go</td></tr>
+      <tr><td class="mcell"><span class="m m-POST">POST</span></td><td class="p">/broadcasts/<b>{id}</b>/watch</td><td><span class="pill jwt">bearer</span></td><td class="src">broadcasts.go</td></tr>
+      <tr><td class="mcell"><span class="m m-GET">GET</span></td><td class="p">/broadcasts/invites</td><td><span class="pill jwt">bearer</span></td><td class="src">broadcast_social.go</td></tr>
+      <tr><td class="mcell"><span class="m m-GET">GET</span></td><td class="p">/broadcasts/live</td><td><span class="pill jwt">bearer</span></td><td class="src">broadcasts.go</td></tr>
+      <tr><td class="mcell"><span class="m m-GET">GET</span></td><td class="p">/golive/health</td><td><span class="pill open">public</span></td><td class="src">golive.go</td></tr>
+      <tr><td class="mcell"><span class="m m-POST">POST</span></td><td class="p">/golive/invite/<b>{code}</b></td><td><span class="pill jwt">bearer</span></td><td class="src">golive_invites.go</td></tr>
+      <tr><td class="mcell"><span class="m m-POST">POST</span></td><td class="p">/internal/golive/webhook</td><td><span class="pill sig">LiveKit JWT</span></td><td class="src">golive_webhook.go</td></tr>
+      <tr><td class="mcell"><span class="m m-POST">POST</span></td><td class="p">/internal/livekit/webhook</td><td><span class="pill sig">LiveKit JWT</span></td><td class="src">broadcast_webhook.go</td></tr>
+    </tbody></table></div>
+
+  <h3 class="grp">Games <span class="cnt">8</span></h3>
+  <p class="grp-blurb">Launch tokens and match records for the external games deployment.</p>
+  <div class="tbl-wrap"><table class="idx">
+    <thead><tr><th>Method</th><th>Path</th><th>Auth</th><th>Source</th></tr></thead><tbody>
+      <tr><td class="mcell"><span class="m m-POST">POST</span></td><td class="p">/games/device-token</td><td><span class="pill jwt">bearer</span></td><td class="src">games.go</td></tr>
+      <tr><td class="mcell"><span class="m m-POST">POST</span></td><td class="p">/games/launch-token</td><td><span class="pill jwt">bearer</span></td><td class="src">games.go</td></tr>
+      <tr><td class="mcell"><span class="m m-GET">GET</span></td><td class="p">/games/matches</td><td><span class="pill jwt">bearer</span></td><td class="src">games_matches.go</td></tr>
+      <tr><td class="mcell"><span class="m m-POST">POST</span></td><td class="p">/games/matches</td><td><span class="pill jwt">bearer</span></td><td class="src">games_matches.go</td></tr>
+      <tr><td class="mcell"><span class="m m-POST">POST</span></td><td class="p">/games/matches/deal</td><td><span class="pill jwt">bearer</span></td><td class="src">games_matches.go</td></tr>
+      <tr><td class="mcell"><span class="m m-POST">POST</span></td><td class="p">/games/notify</td><td><span class="pill sig">Ed25519</span></td><td class="src">games.go</td></tr>
+      <tr><td class="mcell"><span class="m m-DELETE">DELETE</span></td><td class="p">/games/tables</td><td><span class="pill jwt">bearer</span></td><td class="src">games.go</td></tr>
+      <tr><td class="mcell"><span class="m m-GET">GET</span></td><td class="p">/games/tables</td><td><span class="pill jwt">bearer</span></td><td class="src">games.go</td></tr>
+    </tbody></table></div>
+
+  <h3 class="grp">ShopBook <span class="cnt">96</span></h3>
+  <p class="grp-blurb">Retail mini-app: catalogue, stock, billing, credit ledger, documents, admin.</p>
+  <div class="tbl-wrap"><table class="idx">
+    <thead><tr><th>Method</th><th>Path</th><th>Auth</th><th>Source</th></tr></thead><tbody>
+      <tr><td class="mcell"><span class="m m-GET">GET</span></td><td class="p">/api/admin/shopbook/audit</td><td><span class="pill adm">admin key</span></td><td class="src">shopbook_admin2.go</td></tr>
+      <tr><td class="mcell"><span class="m m-GET">GET</span></td><td class="p">/api/admin/shopbook/categories</td><td><span class="pill adm">admin key</span></td><td class="src">shopbook_admin.go</td></tr>
+      <tr><td class="mcell"><span class="m m-POST">POST</span></td><td class="p">/api/admin/shopbook/categories</td><td><span class="pill adm">admin key</span></td><td class="src">shopbook_admin.go</td></tr>
+      <tr><td class="mcell"><span class="m m-GET">GET</span></td><td class="p">/api/admin/shopbook/countries</td><td><span class="pill adm">admin key</span></td><td class="src">shopbook_admin.go</td></tr>
+      <tr><td class="mcell"><span class="m m-POST">POST</span></td><td class="p">/api/admin/shopbook/countries</td><td><span class="pill adm">admin key</span></td><td class="src">shopbook_admin.go</td></tr>
+      <tr><td class="mcell"><span class="m m-POST">POST</span></td><td class="p">/api/admin/shopbook/documents/<b>{id}</b>/review</td><td><span class="pill adm">admin key</span></td><td class="src">shopbook_admin2.go</td></tr>
+      <tr><td class="mcell"><span class="m m-GET">GET</span></td><td class="p">/api/admin/shopbook/location-requests</td><td><span class="pill adm">admin key</span></td><td class="src">shopbook_admin2.go</td></tr>
+      <tr><td class="mcell"><span class="m m-POST">POST</span></td><td class="p">/api/admin/shopbook/location-requests/<b>{id}</b>/decide</td><td><span class="pill adm">admin key</span></td><td class="src">shopbook_admin2.go</td></tr>
+      <tr><td class="mcell"><span class="m m-GET">GET</span></td><td class="p">/api/admin/shopbook/orders</td><td><span class="pill adm">admin key</span></td><td class="src">shopbook_admin2.go</td></tr>
+      <tr><td class="mcell"><span class="m m-GET">GET</span></td><td class="p">/api/admin/shopbook/returns</td><td><span class="pill adm">admin key</span></td><td class="src">shopbook_admin2.go</td></tr>
+      <tr><td class="mcell"><span class="m m-GET">GET</span></td><td class="p">/api/admin/shopbook/shops</td><td><span class="pill adm">admin key</span></td><td class="src">shopbook_admin.go</td></tr>
+      <tr><td class="mcell"><span class="m m-POST">POST</span></td><td class="p">/api/admin/shopbook/shops/<b>{id}</b>/approve</td><td><span class="pill adm">admin key</span></td><td class="src">shopbook_admin.go</td></tr>
+      <tr><td class="mcell"><span class="m m-GET">GET</span></td><td class="p">/api/admin/shopbook/shops/<b>{id}</b>/documents</td><td><span class="pill adm">admin key</span></td><td class="src">shopbook_admin2.go</td></tr>
+      <tr><td class="mcell"><span class="m m-POST">POST</span></td><td class="p">/api/admin/shopbook/shops/<b>{id}</b>/entitlement</td><td><span class="pill adm">admin key</span></td><td class="src">shopbook_admin2.go</td></tr>
+      <tr><td class="mcell"><span class="m m-POST">POST</span></td><td class="p">/api/admin/shopbook/shops/<b>{id}</b>/verify</td><td><span class="pill adm">admin key</span></td><td class="src">shopbook_admin2.go</td></tr>
+      <tr><td class="mcell"><span class="m m-GET">GET</span></td><td class="p">/api/admin/shopbook/stats</td><td><span class="pill adm">admin key</span></td><td class="src">shopbook_admin.go</td></tr>
+      <tr><td class="mcell"><span class="m m-GET">GET</span></td><td class="p">/api/admin/shopbook/subscriptions</td><td><span class="pill adm">admin key</span></td><td class="src">shopbook_admin2.go</td></tr>
+      <tr><td class="mcell"><span class="m m-GET">GET</span></td><td class="p">/api/admin/shopbook/verifications</td><td><span class="pill adm">admin key</span></td><td class="src">shopbook_admin2.go</td></tr>
+      <tr><td class="mcell"><span class="m m-GET">GET</span></td><td class="p">/shopbook/countries</td><td><span class="pill jwt">bearer</span></td><td class="src">shopbook.go</td></tr>
+      <tr><td class="mcell"><span class="m m-GET">GET</span></td><td class="p">/shopbook/credit-notes/<b>{id}</b></td><td><span class="pill jwt">bearer</span></td><td class="src">shopbook_return.go</td></tr>
+      <tr><td class="mcell"><span class="m m-GET">GET</span></td><td class="p">/shopbook/favorites</td><td><span class="pill jwt">bearer</span></td><td class="src">shopbook.go</td></tr>
+      <tr><td class="mcell"><span class="m m-POST">POST</span></td><td class="p">/shopbook/favorites</td><td><span class="pill jwt">bearer</span></td><td class="src">shopbook.go</td></tr>
+      <tr><td class="mcell"><span class="m m-GET">GET</span></td><td class="p">/shopbook/invoices/<b>{id}</b></td><td><span class="pill jwt">bearer</span></td><td class="src">shopbook_documents.go</td></tr>
+      <tr><td class="mcell"><span class="m m-GET">GET</span></td><td class="p">/shopbook/invoices/<b>{id}</b>/render</td><td><span class="pill jwt">bearer</span></td><td class="src">shopbook_documents.go</td></tr>
+      <tr><td class="mcell"><span class="m m-GET">GET</span></td><td class="p">/shopbook/ledger/<b>{shopId}</b></td><td><span class="pill jwt">bearer</span></td><td class="src">shopbook.go</td></tr>
+      <tr><td class="mcell"><span class="m m-GET">GET</span></td><td class="p">/shopbook/loyalty</td><td><span class="pill jwt">bearer</span></td><td class="src">shopbook.go</td></tr>
+      <tr><td class="mcell"><span class="m m-GET">GET</span></td><td class="p">/shopbook/my-ledgers</td><td><span class="pill jwt">bearer</span></td><td class="src">shopbook.go</td></tr>
+      <tr><td class="mcell"><span class="m m-GET">GET</span></td><td class="p">/shopbook/my-shop</td><td><span class="pill jwt">bearer</span></td><td class="src">shopbook.go</td></tr>
+      <tr><td class="mcell"><span class="m m-POST">POST</span></td><td class="p">/shopbook/my-shop</td><td><span class="pill jwt">bearer</span></td><td class="src">shopbook.go</td></tr>
+      <tr><td class="mcell"><span class="m m-GET">GET</span></td><td class="p">/shopbook/my-shop/audit</td><td><span class="pill jwt">bearer</span></td><td class="src">shopbook_purchase.go</td></tr>
+      <tr><td class="mcell"><span class="m m-POST">POST</span></td><td class="p">/shopbook/my-shop/counter-sale</td><td><span class="pill jwt">bearer</span></td><td class="src">shopbook_documents.go</td></tr>
+      <tr><td class="mcell"><span class="m m-GET">GET</span></td><td class="p">/shopbook/my-shop/coupons</td><td><span class="pill jwt">bearer</span></td><td class="src">shopbook.go</td></tr>
+      <tr><td class="mcell"><span class="m m-POST">POST</span></td><td class="p">/shopbook/my-shop/coupons</td><td><span class="pill jwt">bearer</span></td><td class="src">shopbook.go</td></tr>
+      <tr><td class="mcell"><span class="m m-DELETE">DELETE</span></td><td class="p">/shopbook/my-shop/coupons/<b>{id}</b></td><td><span class="pill jwt">bearer</span></td><td class="src">shopbook.go</td></tr>
+      <tr><td class="mcell"><span class="m m-POST">POST</span></td><td class="p">/shopbook/my-shop/customers/<b>{id}</b>/credit-limit</td><td><span class="pill jwt">bearer</span></td><td class="src">shopbook_payment.go</td></tr>
+      <tr><td class="mcell"><span class="m m-GET">GET</span></td><td class="p">/shopbook/my-shop/dashboard</td><td><span class="pill jwt">bearer</span></td><td class="src">shopbook.go</td></tr>
+      <tr><td class="mcell"><span class="m m-GET">GET</span></td><td class="p">/shopbook/my-shop/documents</td><td><span class="pill jwt">bearer</span></td><td class="src">shopbook_verify.go</td></tr>
+      <tr><td class="mcell"><span class="m m-POST">POST</span></td><td class="p">/shopbook/my-shop/documents</td><td><span class="pill jwt">bearer</span></td><td class="src">shopbook_verify.go</td></tr>
+      <tr><td class="mcell"><span class="m m-DELETE">DELETE</span></td><td class="p">/shopbook/my-shop/documents/<b>{id}</b></td><td><span class="pill jwt">bearer</span></td><td class="src">shopbook_verify.go</td></tr>
+      <tr><td class="mcell"><span class="m m-GET">GET</span></td><td class="p">/shopbook/my-shop/documents/<b>{id}</b>/url</td><td><span class="pill jwt">bearer</span></td><td class="src">shopbook_verify.go</td></tr>
+      <tr><td class="mcell"><span class="m m-POST">POST</span></td><td class="p">/shopbook/my-shop/documents/presign</td><td><span class="pill jwt">bearer</span></td><td class="src">shopbook_verify.go</td></tr>
+      <tr><td class="mcell"><span class="m m-POST">POST</span></td><td class="p">/shopbook/my-shop/khata-customers</td><td><span class="pill jwt">bearer</span></td><td class="src">shopbook_khata.go</td></tr>
+      <tr><td class="mcell"><span class="m m-POST">POST</span></td><td class="p">/shopbook/my-shop/khata-customers/<b>{id}</b>/credit-limit</td><td><span class="pill jwt">bearer</span></td><td class="src">shopbook_khata.go</td></tr>
+      <tr><td class="mcell"><span class="m m-GET">GET</span></td><td class="p">/shopbook/my-shop/ledger</td><td><span class="pill jwt">bearer</span></td><td class="src">shopbook.go</td></tr>
+      <tr><td class="mcell"><span class="m m-POST">POST</span></td><td class="p">/shopbook/my-shop/ledger</td><td><span class="pill jwt">bearer</span></td><td class="src">shopbook.go</td></tr>
+      <tr><td class="mcell"><span class="m m-POST">POST</span></td><td class="p">/shopbook/my-shop/ledger/<b>{id}</b>/invoice</td><td><span class="pill jwt">bearer</span></td><td class="src">shopbook_documents.go</td></tr>
+      <tr><td class="mcell"><span class="m m-POST">POST</span></td><td class="p">/shopbook/my-shop/ledger/<b>{id}</b>/receipt</td><td><span class="pill jwt">bearer</span></td><td class="src">shopbook_documents.go</td></tr>
+      <tr><td class="mcell"><span class="m m-POST">POST</span></td><td class="p">/shopbook/my-shop/ledger/remind</td><td><span class="pill jwt">bearer</span></td><td class="src">shopbook.go</td></tr>
+      <tr><td class="mcell"><span class="m m-GET">GET</span></td><td class="p">/shopbook/my-shop/location-request</td><td><span class="pill jwt">bearer</span></td><td class="src">shopbook_verify.go</td></tr>
+      <tr><td class="mcell"><span class="m m-POST">POST</span></td><td class="p">/shopbook/my-shop/location-request</td><td><span class="pill jwt">bearer</span></td><td class="src">shopbook_verify.go</td></tr>
+      <tr><td class="mcell"><span class="m m-GET">GET</span></td><td class="p">/shopbook/my-shop/orders</td><td><span class="pill jwt">bearer</span></td><td class="src">shopbook.go</td></tr>
+      <tr><td class="mcell"><span class="m m-GET">GET</span></td><td class="p">/shopbook/my-shop/orders/<b>{id}</b>/bill</td><td><span class="pill jwt">bearer</span></td><td class="src">shopbook_bill.go</td></tr>
+      <tr><td class="mcell"><span class="m m-POST">POST</span></td><td class="p">/shopbook/my-shop/orders/<b>{id}</b>/bill</td><td><span class="pill jwt">bearer</span></td><td class="src">shopbook_bill.go</td></tr>
+      <tr><td class="mcell"><span class="m m-POST">POST</span></td><td class="p">/shopbook/my-shop/orders/<b>{id}</b>/item/<b>{itemId}</b></td><td><span class="pill jwt">bearer</span></td><td class="src">shopbook.go</td></tr>
+      <tr><td class="mcell"><span class="m m-POST">POST</span></td><td class="p">/shopbook/my-shop/orders/<b>{id}</b>/status</td><td><span class="pill jwt">bearer</span></td><td class="src">shopbook.go</td></tr>
+      <tr><td class="mcell"><span class="m m-GET">GET</span></td><td class="p">/shopbook/my-shop/payments</td><td><span class="pill jwt">bearer</span></td><td class="src">shopbook_payment.go</td></tr>
+      <tr><td class="mcell"><span class="m m-POST">POST</span></td><td class="p">/shopbook/my-shop/payments</td><td><span class="pill jwt">bearer</span></td><td class="src">shopbook_payment.go</td></tr>
+      <tr><td class="mcell"><span class="m m-POST">POST</span></td><td class="p">/shopbook/my-shop/plan</td><td><span class="pill jwt">bearer</span></td><td class="src">shopbook.go</td></tr>
+      <tr><td class="mcell"><span class="m m-GET">GET</span></td><td class="p">/shopbook/my-shop/products</td><td><span class="pill jwt">bearer</span></td><td class="src">shopbook.go</td></tr>
+      <tr><td class="mcell"><span class="m m-POST">POST</span></td><td class="p">/shopbook/my-shop/products</td><td><span class="pill jwt">bearer</span></td><td class="src">shopbook.go</td></tr>
+      <tr><td class="mcell"><span class="m m-DELETE">DELETE</span></td><td class="p">/shopbook/my-shop/products/<b>{id}</b></td><td><span class="pill jwt">bearer</span></td><td class="src">shopbook.go</td></tr>
+      <tr><td class="mcell"><span class="m m-POST">POST</span></td><td class="p">/shopbook/my-shop/products/bulk</td><td><span class="pill jwt">bearer</span></td><td class="src">shopbook.go</td></tr>
+      <tr><td class="mcell"><span class="m m-GET">GET</span></td><td class="p">/shopbook/my-shop/purchases</td><td><span class="pill jwt">bearer</span></td><td class="src">shopbook_purchase.go</td></tr>
+      <tr><td class="mcell"><span class="m m-POST">POST</span></td><td class="p">/shopbook/my-shop/purchases</td><td><span class="pill jwt">bearer</span></td><td class="src">shopbook_purchase.go</td></tr>
+      <tr><td class="mcell"><span class="m m-GET">GET</span></td><td class="p">/shopbook/my-shop/purchases/<b>{id}</b></td><td><span class="pill jwt">bearer</span></td><td class="src">shopbook_purchase.go</td></tr>
+      <tr><td class="mcell"><span class="m m-GET">GET</span></td><td class="p">/shopbook/my-shop/reports</td><td><span class="pill jwt">bearer</span></td><td class="src">shopbook.go</td></tr>
+      <tr><td class="mcell"><span class="m m-GET">GET</span></td><td class="p">/shopbook/my-shop/returns</td><td><span class="pill jwt">bearer</span></td><td class="src">shopbook_return.go</td></tr>
+      <tr><td class="mcell"><span class="m m-POST">POST</span></td><td class="p">/shopbook/my-shop/returns/<b>{id}</b>/decide</td><td><span class="pill jwt">bearer</span></td><td class="src">shopbook_return.go</td></tr>
+      <tr><td class="mcell"><span class="m m-GET">GET</span></td><td class="p">/shopbook/my-shop/stock</td><td><span class="pill jwt">bearer</span></td><td class="src">shopbook_stock.go</td></tr>
+      <tr><td class="mcell"><span class="m m-POST">POST</span></td><td class="p">/shopbook/my-shop/stock/adjust</td><td><span class="pill jwt">bearer</span></td><td class="src">shopbook_stock.go</td></tr>
+      <tr><td class="mcell"><span class="m m-GET">GET</span></td><td class="p">/shopbook/my-shop/stock/movements</td><td><span class="pill jwt">bearer</span></td><td class="src">shopbook_stock.go</td></tr>
+      <tr><td class="mcell"><span class="m m-POST">POST</span></td><td class="p">/shopbook/my-shop/submit-verification</td><td><span class="pill jwt">bearer</span></td><td class="src">shopbook_verify.go</td></tr>
+      <tr><td class="mcell"><span class="m m-GET">GET</span></td><td class="p">/shopbook/my-shop/suppliers</td><td><span class="pill jwt">bearer</span></td><td class="src">shopbook.go</td></tr>
+      <tr><td class="mcell"><span class="m m-POST">POST</span></td><td class="p">/shopbook/my-shop/suppliers</td><td><span class="pill jwt">bearer</span></td><td class="src">shopbook.go</td></tr>
+      <tr><td class="mcell"><span class="m m-DELETE">DELETE</span></td><td class="p">/shopbook/my-shop/suppliers/<b>{id}</b></td><td><span class="pill jwt">bearer</span></td><td class="src">shopbook.go</td></tr>
+      <tr><td class="mcell"><span class="m m-GET">GET</span></td><td class="p">/shopbook/notifications</td><td><span class="pill jwt">bearer</span></td><td class="src">shopbook.go</td></tr>
+      <tr><td class="mcell"><span class="m m-POST">POST</span></td><td class="p">/shopbook/notifications/read</td><td><span class="pill jwt">bearer</span></td><td class="src">shopbook.go</td></tr>
+      <tr><td class="mcell"><span class="m m-GET">GET</span></td><td class="p">/shopbook/orders</td><td><span class="pill jwt">bearer</span></td><td class="src">shopbook.go</td></tr>
+      <tr><td class="mcell"><span class="m m-POST">POST</span></td><td class="p">/shopbook/orders</td><td><span class="pill jwt">bearer</span></td><td class="src">shopbook.go</td></tr>
+      <tr><td class="mcell"><span class="m m-GET">GET</span></td><td class="p">/shopbook/orders/<b>{id}</b></td><td><span class="pill jwt">bearer</span></td><td class="src">shopbook.go</td></tr>
+      <tr><td class="mcell"><span class="m m-POST">POST</span></td><td class="p">/shopbook/orders/<b>{id}</b>/buyer-tax</td><td><span class="pill jwt">bearer</span></td><td class="src">shopbook_bill.go</td></tr>
+      <tr><td class="mcell"><span class="m m-POST">POST</span></td><td class="p">/shopbook/orders/<b>{id}</b>/cancel</td><td><span class="pill jwt">bearer</span></td><td class="src">shopbook.go</td></tr>
+      <tr><td class="mcell"><span class="m m-POST">POST</span></td><td class="p">/shopbook/orders/<b>{id}</b>/collected</td><td><span class="pill jwt">bearer</span></td><td class="src">shopbook.go</td></tr>
+      <tr><td class="mcell"><span class="m m-GET">GET</span></td><td class="p">/shopbook/orders/<b>{id}</b>/invoice</td><td><span class="pill jwt">bearer</span></td><td class="src">shopbook.go</td></tr>
+      <tr><td class="mcell"><span class="m m-POST">POST</span></td><td class="p">/shopbook/orders/<b>{id}</b>/item/<b>{itemId}</b>/decision</td><td><span class="pill jwt">bearer</span></td><td class="src">shopbook.go</td></tr>
+      <tr><td class="mcell"><span class="m m-POST">POST</span></td><td class="p">/shopbook/orders/<b>{id}</b>/rate</td><td><span class="pill jwt">bearer</span></td><td class="src">shopbook.go</td></tr>
+      <tr><td class="mcell"><span class="m m-POST">POST</span></td><td class="p">/shopbook/orders/<b>{id}</b>/return</td><td><span class="pill jwt">bearer</span></td><td class="src">shopbook_return.go</td></tr>
+      <tr><td class="mcell"><span class="m m-GET">GET</span></td><td class="p">/shopbook/payments</td><td><span class="pill jwt">bearer</span></td><td class="src">shopbook_payment.go</td></tr>
+      <tr><td class="mcell"><span class="m m-GET">GET</span></td><td class="p">/shopbook/returns</td><td><span class="pill jwt">bearer</span></td><td class="src">shopbook_return.go</td></tr>
+      <tr><td class="mcell"><span class="m m-GET">GET</span></td><td class="p">/shopbook/search-products</td><td><span class="pill jwt">bearer</span></td><td class="src">shopbook.go</td></tr>
+      <tr><td class="mcell"><span class="m m-GET">GET</span></td><td class="p">/shopbook/shops</td><td><span class="pill jwt">bearer</span></td><td class="src">shopbook.go</td></tr>
+      <tr><td class="mcell"><span class="m m-GET">GET</span></td><td class="p">/shopbook/shops/<b>{id}</b></td><td><span class="pill jwt">bearer</span></td><td class="src">shopbook.go</td></tr>
+      <tr><td class="mcell"><span class="m m-GET">GET</span></td><td class="p">/shopbook/shops/<b>{id}</b>/coupons</td><td><span class="pill jwt">bearer</span></td><td class="src">shopbook.go</td></tr>
+      <tr><td class="mcell"><span class="m m-GET">GET</span></td><td class="p">/shopbook/shops/<b>{id}</b>/products</td><td><span class="pill jwt">bearer</span></td><td class="src">shopbook.go</td></tr>
+      <tr><td class="mcell"><span class="m m-GET">GET</span></td><td class="p">/shopbook/shops/<b>{id}</b>/ratings</td><td><span class="pill jwt">bearer</span></td><td class="src">shopbook.go</td></tr>
+      <tr><td class="mcell"><span class="m m-GET">GET</span></td><td class="p">/shopbook/starter-catalog</td><td><span class="pill jwt">bearer</span></td><td class="src">shopbook.go</td></tr>
+    </tbody></table></div>
+
+  <h3 class="grp">Utilities <span class="cnt">13</span></h3>
+  <p class="grp-blurb">Routing, link preview, GIF search, contact discovery.</p>
+  <div class="tbl-wrap"><table class="idx">
+    <thead><tr><th>Method</th><th>Path</th><th>Auth</th><th>Source</th></tr></thead><tbody>
+      <tr><td class="mcell"><span class="m m-POST">POST</span></td><td class="p">/contacts/match</td><td><span class="pill jwt">bearer</span></td><td class="src">contacts.go</td></tr>
+      <tr><td class="mcell"><span class="m m-GET">GET</span></td><td class="p">/contacts/sync/<b>{code}</b></td><td><span class="pill jwt">bearer</span></td><td class="src">contacts.go</td></tr>
+      <tr><td class="mcell"><span class="m m-POST">POST</span></td><td class="p">/contacts/sync/create</td><td><span class="pill jwt">bearer</span></td><td class="src">contacts.go</td></tr>
+      <tr><td class="mcell"><span class="m m-POST">POST</span></td><td class="p">/contacts/sync/verify</td><td><span class="pill jwt">bearer</span></td><td class="src">contacts.go</td></tr>
+      <tr><td class="mcell"><span class="m m-GET">GET</span></td><td class="p">/contacts/trusted</td><td><span class="pill jwt">bearer</span></td><td class="src">contacts.go</td></tr>
+      <tr><td class="mcell"><span class="m m-POST">POST</span></td><td class="p">/contacts/trusted</td><td><span class="pill jwt">bearer</span></td><td class="src">contacts.go</td></tr>
+      <tr><td class="mcell"><span class="m m-DELETE">DELETE</span></td><td class="p">/contacts/trusted/<b>{userId}</b></td><td><span class="pill jwt">bearer</span></td><td class="src">contacts.go</td></tr>
+      <tr><td class="mcell"><span class="m m-GET">GET</span></td><td class="p">/gif/search</td><td><span class="pill jwt">bearer</span></td><td class="src">gif.go</td></tr>
+      <tr><td class="mcell"><span class="m m-GET">GET</span></td><td class="p">/link/preview</td><td><span class="pill jwt">bearer</span></td><td class="src">link.go</td></tr>
+      <tr><td class="mcell"><span class="m m-GET">GET</span></td><td class="p">/nav/geocode</td><td><span class="pill jwt">bearer</span></td><td class="src">nav.go</td></tr>
+      <tr><td class="mcell"><span class="m m-POST">POST</span></td><td class="p">/nav/matrix</td><td><span class="pill jwt">bearer</span></td><td class="src">nav.go</td></tr>
+      <tr><td class="mcell"><span class="m m-POST">POST</span></td><td class="p">/nav/route</td><td><span class="pill jwt">bearer</span></td><td class="src">nav.go</td></tr>
+      <tr><td class="mcell"><span class="m m-POST">POST</span></td><td class="p">/nav/trace</td><td><span class="pill jwt">bearer</span></td><td class="src">nav.go</td></tr>
+    </tbody></table></div>
+
+  <h3 class="grp">Admin & internal <span class="cnt">13</span></h3>
+  <p class="grp-blurb">Admin console API, health probes, metrics, internal emit bridge.</p>
+  <div class="tbl-wrap"><table class="idx">
+    <thead><tr><th>Method</th><th>Path</th><th>Auth</th><th>Source</th></tr></thead><tbody>
+      <tr><td class="mcell"><span class="m m-POST">POST</span></td><td class="p">/api/admin/broadcast</td><td><span class="pill adm">admin key</span></td><td class="src">admin.go</td></tr>
+      <tr><td class="mcell"><span class="m m-GET">GET</span></td><td class="p">/api/admin/health-detail</td><td><span class="pill adm">admin key</span></td><td class="src">admin.go</td></tr>
+      <tr><td class="mcell"><span class="m m-GET">GET</span></td><td class="p">/api/admin/messages</td><td><span class="pill adm">admin key</span></td><td class="src">admin.go</td></tr>
+      <tr><td class="mcell"><span class="m m-GET">GET</span></td><td class="p">/api/admin/sessions</td><td><span class="pill adm">admin key</span></td><td class="src">admin.go</td></tr>
+      <tr><td class="mcell"><span class="m m-DELETE">DELETE</span></td><td class="p">/api/admin/sessions/<b>{id}</b></td><td><span class="pill adm">admin key</span></td><td class="src">admin.go</td></tr>
+      <tr><td class="mcell"><span class="m m-GET">GET</span></td><td class="p">/api/admin/stats</td><td><span class="pill adm">admin key</span></td><td class="src">admin.go</td></tr>
+      <tr><td class="mcell"><span class="m m-GET">GET</span></td><td class="p">/api/admin/users</td><td><span class="pill adm">admin key</span></td><td class="src">admin.go</td></tr>
+      <tr><td class="mcell"><span class="m m-GET">GET</span></td><td class="p">/go-health</td><td><span class="pill open">public</span></td><td class="src">main.go</td></tr>
+      <tr><td class="mcell"><span class="m m-GET">GET</span></td><td class="p">/health</td><td><span class="pill open">public</span></td><td class="src">main.go</td></tr>
+      <tr><td class="mcell"><span class="m m-POST">POST</span></td><td class="p">/internal/chat-event</td><td><span class="pill open">public</span></td><td class="src">main.go</td></tr>
+      <tr><td class="mcell"><span class="m m-POST">POST</span></td><td class="p">/internal/emit</td><td><span class="pill open">public</span></td><td class="src">main.go</td></tr>
+      <tr><td class="mcell"><span class="m m-GET">GET</span></td><td class="p">/internal/metrics</td><td><span class="pill open">in-network</span></td><td class="src">main.go</td></tr>
+      <tr><td class="mcell"><span class="m m-GET">GET</span></td><td class="p">/ready</td><td><span class="pill open">public</span></td><td class="src">main.go</td></tr>
+    </tbody></table></div>
+
+</section>
+
+<!-- ═══════════════ 08 ═══════════════ -->
+<section id="errors">
+  <div class="shead"><span class="num">08</span><h2>Error reference</h2><span class="sub">exact strings, matched to the Node contract</span></div>
+
+  <div class="tbl-wrap">
+    <table>
+      <thead><tr><th>Status</th><th>Body</th><th>Raised by</th></tr></thead>
+      <tbody>
+        <tr><td class="k">401</td><td class="p">{"error":"Missing Bearer token"}</td><td>No <code>Authorization</code> header, or one that is not <code>Bearer …</code>.</td></tr>
+        <tr><td class="k">401</td><td class="p">{"error":"token_expired"}</td><td>Valid signature, past <code>exp</code>. The client refreshes and retries once.</td></tr>
+        <tr><td class="k">401</td><td class="p">{"error":"invalid_token"}</td><td>Bad signature, wrong algorithm, or a missing <code>sub</code> claim. Only HS256 is accepted — an <code>alg</code> swap is rejected before verification.</td></tr>
+        <tr><td class="k">401</td><td class="p">{"error":"Invalid admin key"}</td><td><code>/api/admin/*</code> with a wrong <code>x-admin-key</code>.</td></tr>
+        <tr><td class="k">403</td><td class="p">{"error":"Blocked"}</td><td>Sending into a chat with a block in either direction.</td></tr>
+        <tr><td class="k">403</td><td class="p">{"error":"Forbidden"}</td><td>Attachment owned by another user.</td></tr>
+        <tr><td class="k">404</td><td class="p">{"error":"Not found"}</td><td>Row absent.</td></tr>
+        <tr><td class="k">404</td><td class="p">{"error":"route not migrated to go backend"}</td><td><b>The catch-all.</b> Means the path is registered in Caddy but not in <code>cmd/api/main.go</code> — a deploy problem, not a client one.</td></tr>
+        <tr><td class="k">413</td><td class="p">{"error":"File too large (max N bytes)"}</td><td>Presign above the cap.</td></tr>
+        <tr><td class="k">423</td><td class="p">{"error":{"code":"locked","message":"Too many attempts. Try again in Ns"}}</td><td>MPIN or OTP lockout.</td></tr>
+        <tr><td class="k">429</td><td class="p">{"error":"Slow mode is on","retryAfter":N}</td><td>Group slow mode.</td></tr>
+        <tr><td class="k">429</td><td class="p">{"error":{"code":"rate_limited","message":"…"}}</td><td>Auth throttling.</td></tr>
+        <tr><td class="k">503</td><td class="p">{"error":"Object storage not configured"}</td><td>S3/R2 credentials missing.</td></tr>
+        <tr><td class="k">503</td><td class="p">{"error":"ADMIN_KEY not configured on server"}</td><td>Admin routes with no key set — fails closed, not open.</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3 style="margin-top:30px">Health probes</h3>
+  <div class="tbl-wrap" style="margin-top:12px">
+    <table>
+      <thead><tr><th>Endpoint</th><th>Always</th><th>Body</th></tr></thead>
+      <tbody>
+        <tr><td class="p">GET /health</td><td>200</td><td><code>{status, db, redis, uptime}</code> — <code>status</code> is <code>degraded</code> when either dependency is down. Never 503: a restart does not fix a database outage, and an orchestrator must not loop on one.</td></tr>
+        <tr><td class="p">GET /go-health</td><td>200</td><td>Alias kept from the strangler period.</td></tr>
+        <tr><td class="p">GET /ready</td><td>200 / 503</td><td><code>{ready, db, redis, uptime}</code>. Postgres unreachable → 503. <b>Redis down does not fail readiness</b> — the limiter falls back in-process and the socket layer to local maps, so it is a degradation reported in the body, not an outage.</td></tr>
+        <tr><td class="p">GET /internal/metrics</td><td>200</td><td>Prometheus text. In-network only; Caddy 404s <code>/internal/*</code> from outside.</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p style="margin-top:14px">Both probes bound their checks at 2 seconds. They used to inherit the request context, so a database that was <em>wedged</em> rather than down left the one request that must always answer hanging as long as the client would wait.</p>
+</section>
+
+<footer>
+  Extracted from branch <code>hetzner-deploy</code> at <code>459aea1</code>. Route table generated from the <code>mux.HandleFunc</code> registrations in <code>vaultchat-backend-go/internal/routes/*.go</code> and <code>cmd/api/main.go</code>; conventions from <code>internal/httpx/httpx.go</code>; client behaviour from <code>lib/api.ts</code> and <code>lib/socket.ts</code>. Companion document: <b>VaultChat System Map</b>.
+</footer>
+
+</div>

@@ -1,0 +1,658 @@
+<title>VaultChat System Map</title>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Sora:wght@600;700;800&family=Nunito+Sans:ital,wght@0,400;0,600;0,700;1,400&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+  /* ── tokens: light is the base, both dark paths redefine only these ── */
+  :root {
+    --ground:      #F6F4F9;
+    --surface:     #FFFFFF;
+    --surface-2:   #EFEBF4;
+    --line:        #DED7E8;
+    --line-soft:   #E9E4F0;
+    --ink:         #1B1622;
+    --ink-2:       #4A4257;
+    --ink-3:       #756C84;
+    --accent:      #6D3FA8;
+    --accent-soft: #EDE4F7;
+    --accent-line: #C9B2E4;
+    --live:        #146B3F;
+    --live-soft:   #DCF0E4;
+    --gated:       #8A5A0B;
+    --gated-soft:  #F8EBD3;
+    --dormant:     #6B6478;
+    --dormant-soft:#E7E4EC;
+    --shadow:      0 1px 2px rgba(27,22,34,.06), 0 8px 24px -12px rgba(27,22,34,.18);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ground:      #121017;
+      --surface:     #1A1722;
+      --surface-2:   #221E2D;
+      --line:        #332C42;
+      --line-soft:   #292335;
+      --ink:         #EFEAF6;
+      --ink-2:       #BDB3CD;
+      --ink-3:       #8B8299;
+      --accent:      #B48BE0;
+      --accent-soft: #2A2039;
+      --accent-line: #4C3A66;
+      --live:        #5FCB92;
+      --live-soft:   #16301F;
+      --gated:       #E0B061;
+      --gated-soft:  #33260F;
+      --dormant:     #8B8299;
+      --dormant-soft:#252130;
+      --shadow:      0 1px 2px rgba(0,0,0,.4), 0 10px 30px -14px rgba(0,0,0,.7);
+    }
+  }
+  :root[data-theme="dark"] {
+    --ground:      #121017;
+    --surface:     #1A1722;
+    --surface-2:   #221E2D;
+    --line:        #332C42;
+    --line-soft:   #292335;
+    --ink:         #EFEAF6;
+    --ink-2:       #BDB3CD;
+    --ink-3:       #8B8299;
+    --accent:      #B48BE0;
+    --accent-soft: #2A2039;
+    --accent-line: #4C3A66;
+    --live:        #5FCB92;
+    --live-soft:   #16301F;
+    --gated:       #E0B061;
+    --gated-soft:  #33260F;
+    --dormant:     #8B8299;
+    --dormant-soft:#252130;
+    --shadow:      0 1px 2px rgba(0,0,0,.4), 0 10px 30px -14px rgba(0,0,0,.7);
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    background: var(--ground);
+    color: var(--ink);
+    font-family: "Nunito Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    font-size: 15px;
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 1180px; margin: 0 auto; padding: 0 28px 96px; }
+
+  h1, h2, h3, h4 { font-family: Sora, "Nunito Sans", sans-serif; text-wrap: balance; margin: 0; }
+  h1 { font-size: clamp(30px, 4.4vw, 46px); font-weight: 800; letter-spacing: -.02em; line-height: 1.08; }
+  h2 { font-size: clamp(21px, 2.4vw, 27px); font-weight: 700; letter-spacing: -.015em; }
+  h3 { font-size: 16px; font-weight: 700; letter-spacing: -.005em; }
+  h4 { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .1em; color: var(--ink-3); }
+  p  { margin: 0; max-width: 68ch; color: var(--ink-2); }
+  code, .mono { font-family: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace; font-size: .86em; }
+  code { background: var(--surface-2); border: 1px solid var(--line-soft); border-radius: 4px; padding: .08em .34em; color: var(--ink); }
+  a { color: var(--accent); }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 3px; }
+
+  /* ── masthead ── */
+  header.top {
+    border-bottom: 1px solid var(--line);
+    background: var(--surface);
+    margin-bottom: 44px;
+  }
+  header.top .wrap { padding-top: 44px; padding-bottom: 34px; display: flex; flex-direction: column; gap: 20px; }
+  .eyebrow { font-family: "JetBrains Mono", monospace; font-size: 11.5px; letter-spacing: .16em; text-transform: uppercase; color: var(--accent); }
+  .lede { font-size: 17px; max-width: 74ch; }
+
+  .facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(128px, 1fr)); gap: 1px; background: var(--line); border: 1px solid var(--line); border-radius: 8px; overflow: hidden; margin-top: 6px; }
+  .fact { background: var(--surface); padding: 12px 14px; }
+  .fact b { display: block; font-family: Sora, sans-serif; font-size: 21px; font-weight: 700; letter-spacing: -.02em; font-variant-numeric: tabular-nums; }
+  .fact span { font-size: 11.5px; color: var(--ink-3); text-transform: uppercase; letter-spacing: .07em; }
+
+  /* ── sections ── */
+  section { margin-top: 60px; }
+  .shead { display: flex; align-items: baseline; gap: 14px; border-bottom: 1px solid var(--line); padding-bottom: 10px; margin-bottom: 22px; }
+  .shead .num { font-family: "JetBrains Mono", monospace; font-size: 12px; color: var(--accent); letter-spacing: .1em; }
+  .shead .sub { margin-left: auto; font-size: 12.5px; color: var(--ink-3); font-family: "JetBrains Mono", monospace; }
+
+  /* ── node / diagram primitives ── */
+  .band { border: 1px solid var(--line); border-radius: 10px; background: var(--surface); padding: 16px 18px 18px; margin-bottom: 10px; }
+  .band > h4 { margin-bottom: 12px; }
+  .row { display: flex; flex-wrap: wrap; gap: 10px; }
+  .nodes { display: grid; grid-template-columns: repeat(auto-fit, minmax(158px, 1fr)); gap: 10px; }
+  .node {
+    border: 1px solid var(--line); border-radius: 7px; background: var(--ground);
+    padding: 10px 12px; display: flex; flex-direction: column; gap: 3px;
+  }
+  .node .n { font-family: "JetBrains Mono", monospace; font-size: 12.5px; font-weight: 600; color: var(--ink); }
+  .node .d { font-size: 12px; color: var(--ink-3); line-height: 1.42; }
+  .node.key { border-color: var(--accent-line); background: var(--accent-soft); }
+  .node.key .n { color: var(--accent); }
+  .node.off { opacity: .72; border-style: dashed; }
+
+  .rail { display: flex; align-items: center; justify-content: center; gap: 8px; color: var(--ink-3); font-size: 11px; font-family: "JetBrains Mono", monospace; letter-spacing: .08em; margin: 2px 0 8px; }
+  .rail::before, .rail::after { content: ""; height: 1px; flex: 1; background: linear-gradient(90deg, transparent, var(--line), transparent); }
+
+  /* ── status pills ── */
+  .pill { display: inline-flex; align-items: center; gap: 5px; font-family: "JetBrains Mono", monospace; font-size: 10.5px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; padding: 2px 7px; border-radius: 20px; white-space: nowrap; }
+  .pill.live    { color: var(--live);    background: var(--live-soft); }
+  .pill.gated   { color: var(--gated);   background: var(--gated-soft); }
+  .pill.dormant { color: var(--dormant); background: var(--dormant-soft); }
+  .pill.acc     { color: var(--accent);  background: var(--accent-soft); }
+
+  /* ── tables ── */
+  .tbl-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 9px; background: var(--surface); }
+  table { border-collapse: collapse; width: 100%; font-size: 13.5px; }
+  th, td { text-align: left; padding: 9px 14px; border-bottom: 1px solid var(--line-soft); vertical-align: top; }
+  thead th { font-family: Sora, sans-serif; font-size: 11px; text-transform: uppercase; letter-spacing: .09em; color: var(--ink-3); background: var(--surface-2); border-bottom: 1px solid var(--line); position: sticky; top: 0; }
+  tbody tr:last-child td { border-bottom: none; }
+  td.mono, th.num { font-family: "JetBrains Mono", monospace; }
+  td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; font-family: "JetBrains Mono", monospace; }
+
+  /* ── prose blocks ── */
+  .note { border-left: 2px solid var(--accent-line); padding: 2px 0 2px 16px; margin-top: 18px; }
+  .note strong { color: var(--ink); }
+  .grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(310px, 1fr)); gap: 18px; }
+  ul.tight { margin: 8px 0 0; padding-left: 18px; color: var(--ink-2); font-size: 13.5px; }
+  ul.tight li { margin-bottom: 4px; }
+  ul.tight li::marker { color: var(--accent-line); }
+
+  figure { margin: 0; }
+  figcaption { font-size: 12.5px; color: var(--ink-3); margin-top: 10px; max-width: 72ch; }
+  svg { display: block; max-width: 100%; height: auto; }
+  .svg-scroll { overflow-x: auto; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); padding: 18px; }
+
+  footer { margin-top: 70px; padding-top: 20px; border-top: 1px solid var(--line); font-size: 12.5px; color: var(--ink-3); }
+</style>
+
+<header class="top">
+  <div class="wrap">
+    <div class="eyebrow">System architecture · reconciled from source 2026-09-12</div>
+    <h1>VaultChat System Map</h1>
+    <p class="lede">A security-first encrypted messenger that grew a mini-app platform. One Expo/React&nbsp;Native client, one Go service behind Caddy on a single Hetzner box, one Postgres. Everything below was read out of the tree — route registrations, compose profiles, migration files, flag defaults — not from the older prose docs, two of which are stale.</p>
+    <div class="facts">
+      <div class="fact"><b>1.2.7</b><span>App version</span></div>
+      <div class="fact"><b>195</b><span>Client screens</span></div>
+      <div class="fact"><b>184k</b><span>TS/TSX lines</span></div>
+      <div class="fact"><b>46k</b><span>Go lines</span></div>
+      <div class="fact"><b>39</b><span>Route modules</span></div>
+      <div class="fact"><b>126</b><span>Live migration</span></div>
+      <div class="fact"><b>117</b><span>Postgres tables</span></div>
+      <div class="fact"><b>8</b><span>On-device tables</span></div>
+    </div>
+  </div>
+</header>
+
+<div class="wrap">
+
+<!-- ══════════════════ 1. TOPOLOGY ══════════════════ -->
+<section>
+  <div class="shead">
+    <span class="num">01</span><h2>Production topology</h2>
+    <span class="sub">vaultchatprod01 · 65.21.229.167 · api.corefinite.com</span>
+  </div>
+
+  <p>Four hops from the phone to the process. The two reverse proxies are not redundancy: host <code>nginx</code> owns 80/443 and terminates Let's Encrypt, so Caddy binds a loopback port and acts as the per-route switch — the place a single route can be flipped back to the legacy Node build without touching TLS.</p>
+
+  <div class="svg-scroll" style="margin-top:20px">
+    <svg viewBox="0 0 1060 224" role="img" aria-label="Serving chain: phone to Cloudflare to nginx to Caddy to go-api, with Caddy side-routes to LiveKit and static files">
+      <defs>
+        <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M0 0 L10 5 L0 10 z" fill="var(--ink-3)"/>
+        </marker>
+      </defs>
+      <g font-family="JetBrains Mono, monospace" font-size="12">
+        <!-- chain -->
+        <g>
+          <rect x="8" y="56" width="140" height="54" rx="7" fill="var(--accent-soft)" stroke="var(--accent-line)"/>
+          <text x="78" y="78" text-anchor="middle" fill="var(--accent)" font-weight="600">VaultChat app</text>
+          <text x="78" y="95" text-anchor="middle" fill="var(--ink-3)" font-size="11">Android · Expo</text>
+        </g>
+        <line x1="152" y1="83" x2="188" y2="83" stroke="var(--ink-3)" marker-end="url(#ar)"/>
+        <g>
+          <rect x="192" y="56" width="150" height="54" rx="7" fill="var(--ground)" stroke="var(--line)"/>
+          <text x="267" y="78" text-anchor="middle" fill="var(--ink)" font-weight="600">Cloudflare</text>
+          <text x="267" y="95" text-anchor="middle" fill="var(--ink-3)" font-size="11">proxy · WS on · SSL Full</text>
+        </g>
+        <line x1="346" y1="83" x2="382" y2="83" stroke="var(--ink-3)" marker-end="url(#ar)"/>
+        <g>
+          <rect x="386" y="56" width="150" height="54" rx="7" fill="var(--ground)" stroke="var(--line)"/>
+          <text x="461" y="78" text-anchor="middle" fill="var(--ink)" font-weight="600">host nginx :443</text>
+          <text x="461" y="95" text-anchor="middle" fill="var(--ink-3)" font-size="11">Let's Encrypt TLS</text>
+        </g>
+        <line x1="540" y1="83" x2="576" y2="83" stroke="var(--ink-3)" marker-end="url(#ar)"/>
+        <g>
+          <rect x="580" y="56" width="176" height="54" rx="7" fill="var(--ground)" stroke="var(--accent-line)"/>
+          <text x="668" y="78" text-anchor="middle" fill="var(--ink)" font-weight="600">Caddy 127.0.0.1:8095</text>
+          <text x="668" y="95" text-anchor="middle" fill="var(--ink-3)" font-size="11">ingress + route switch</text>
+        </g>
+        <line x1="760" y1="83" x2="796" y2="83" stroke="var(--ink-3)" marker-end="url(#ar)"/>
+        <g>
+          <rect x="800" y="48" width="250" height="70" rx="7" fill="var(--accent-soft)" stroke="var(--accent-line)"/>
+          <text x="925" y="72" text-anchor="middle" fill="var(--accent)" font-weight="600">go-api :4000</text>
+          <text x="925" y="90" text-anchor="middle" fill="var(--ink-3)" font-size="11">REST + Socket.IO, one process</text>
+          <text x="925" y="106" text-anchor="middle" fill="var(--ink-3)" font-size="11">in-process fan-out</text>
+        </g>
+
+        <!-- caddy side routes -->
+        <path d="M668 114 V152 H452" fill="none" stroke="var(--ink-3)" stroke-dasharray="3 3" marker-end="url(#ar)"/>
+        <path d="M668 114 V186 H452" fill="none" stroke="var(--ink-3)" stroke-dasharray="3 3" marker-end="url(#ar)"/>
+        <path d="M668 114 V152 H884" fill="none" stroke="var(--ink-3)" stroke-dasharray="3 3" marker-end="url(#ar)"/>
+        <text x="456" y="149" fill="var(--ink-2)" font-size="11">/livekit → host:7880 · /golive-livekit → host:7890</text>
+        <text x="456" y="183" fill="var(--ink-2)" font-size="11">/privacy · /delete-account · /.well-known/assetlinks.json (static)</text>
+        <text x="888" y="149" fill="var(--ink-2)" font-size="11">/internal/* → 404</text>
+        <text x="888" y="165" fill="var(--ink-3)" font-size="10.5">outside can never reach it</text>
+      </g>
+    </svg>
+  </div>
+  <figcaption>Caddy's catch-all is <code>reverse_proxy go-api:4000</code>. A path that is not registered in <code>cmd/api/main.go</code> answers <em>“route not migrated to go backend”</em> — that 404 text is the tell for a missing <code>Register…(mux)</code> line, not a client bug.</figcaption>
+
+  <h3 style="margin-top:32px">What actually runs</h3>
+  <p style="margin-top:6px">Docker Compose project <code>vaultchat</code>, three stacked files. The default profile is Go-only; everything else is opt-in, which is why <code>dc ps</code> is shorter than the compose file suggests.</p>
+
+  <div class="band" style="margin-top:16px">
+    <h4>Default profile — always up</h4>
+    <div class="nodes">
+      <div class="node key"><span class="n">go-api</span><span class="d">Go 1.26 → alpine. All REST + the Socket.IO hub.</span></div>
+      <div class="node"><span class="n">caddy</span><span class="d">2-alpine. Ingress, static legal pages, SFU proxy.</span></div>
+      <div class="node"><span class="n">pgbouncer</span><span class="d">1.23. Pool in front of Postgres; go-api never dials PG direct.</span></div>
+      <div class="node"><span class="n">postgres</span><span class="d">16. Ports unpublished — in-network only.</span></div>
+      <div class="node"><span class="n">redis</span><span class="d">7. Presence, rate limits, socket adapter, cache.</span></div>
+      <div class="node"><span class="n">minio</span><span class="d">S3 API. Cloudflare R2 in prod via S3_PUBLIC_ENDPOINT.</span></div>
+      <div class="node"><span class="n">coturn</span><span class="d">4.6.2. TURN/STUN for 1:1 and mesh WebRTC.</span></div>
+      <div class="node"><span class="n">valhalla</span><span class="d">Turn-by-turn routing. <span class="pill gated">needs OSM extract</span></span></div>
+    </div>
+  </div>
+
+  <div class="rail">profile-gated · not started by a bare <code>dc up -d</code></div>
+
+  <div class="row">
+    <div class="band" style="flex:1 1 260px; margin:0">
+      <h4><span class="pill acc">sfu</span></h4>
+      <div class="nodes" style="grid-template-columns:1fr">
+        <div class="node"><span class="n">livekit + egress</span><span class="d">Group-call SFU. <code>network_mode: host</code> — RTC needs the host's real address, so it posts webhooks back to go-api on loopback :14000.</span></div>
+      </div>
+    </div>
+    <div class="band" style="flex:1 1 260px; margin:0">
+      <h4><span class="pill acc">golive</span></h4>
+      <div class="nodes" style="grid-template-columns:1fr">
+        <div class="node"><span class="n">golive-livekit + egress</span><span class="d">A second, separate SFU for broadcasting on :7890. Egress renders in headless Chrome.</span></div>
+      </div>
+    </div>
+    <div class="band" style="flex:1 1 260px; margin:0">
+      <h4><span class="pill acc">monitoring</span></h4>
+      <div class="nodes" style="grid-template-columns:1fr">
+        <div class="node"><span class="n">prometheus + grafana</span><span class="d">Scrapes <code>go-api:4000/internal/metrics</code> directly, bypassing Caddy (which 404s that path).</span></div>
+      </div>
+    </div>
+    <div class="band" style="flex:1 1 260px; margin:0">
+      <h4><span class="pill dormant">legacy</span></h4>
+      <div class="nodes" style="grid-template-columns:1fr">
+        <div class="node off"><span class="n">api (Node) · kafka · fanout-worker</span><span class="d">Emergency rollback only. Shares the same database, so no data migration either way. <strong>No Node process runs in prod.</strong></span></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="note">
+    <strong>The Node→Go strangler is finished.</strong> The last running Node process was the VaultLens render worker, removed with the feature itself (compose service deleted, tables dropped by migration <code>098</code>). Kafka survives only as the <code>EVENT_BUS=kafka</code> path that the legacy profile would need — the live shape fans out in-process inside go-api.
+  </div>
+</section>
+
+<!-- ══════════════════ 2. LAYER MAP ══════════════════ -->
+<section>
+  <div class="shead">
+    <span class="num">02</span><h2>Layer map</h2>
+    <span class="sub">device → edge → service → state</span>
+  </div>
+
+  <p>Read top to bottom. Each band is a trust boundary: the client holds the plaintext and the keys, the service holds ciphertext and metadata, the datastores hold only what the retention jobs have not yet reclaimed.</p>
+
+  <div class="band" style="margin-top:22px; border-color:var(--accent-line)">
+    <h4>Device — Expo / React Native 0.81 · Hermes · 96 runtime deps</h4>
+    <div class="nodes">
+      <div class="node key"><span class="n">app/ · expo-router</span><span class="d">6 tabs, 165 root screens, plus finance (19) and deep-link groups <code>i</code>, <code>join</code>, <code>live</code>, <code>add</code>.</span></div>
+      <div class="node"><span class="n">services/crypto</span><span class="d">X3DH + Double Ratchet on @noble. Sender keys, message store, Shamir, parity vectors.</span></div>
+      <div class="node"><span class="n">services/security</span><span class="d">vaultKeys, sessionSeal, duressPin/duressVault, threatEngine, auditChain, safetyNumber.</span></div>
+      <div class="node"><span class="n">lib/ transport</span><span class="d">api.ts (JWT + refresh), socket.ts, chatService.ts (2 840 lines — the E2EE seam).</span></div>
+      <div class="node"><span class="n">lib/ offline</span><span class="d">localDb (op-sqlite), syncEngine, messageQueue, mediaOutbox, receipts, localCache.</span></div>
+      <div class="node"><span class="n">lib/ feature cores</span><span class="d">call, family, spaces, golive, nav, finance, games, media, vaultBeam, docs, lock, map.</span></div>
+      <div class="node"><span class="n">Kotlin native</span><span class="d">6 modules: calls (FCM + full-screen ring), golive, headless sync, vaultbeam stream, vaultshield, vaultview.</span></div>
+      <div class="node"><span class="n">rust/vaultcore</span><span class="d">UniFFI cdylib. Overflow-checked money math + commit verification — the paths where a wraparound is worse than a crash.</span></div>
+    </div>
+  </div>
+
+  <div class="rail">HTTPS + JWT · Socket.IO · WebRTC</div>
+
+  <div class="band">
+    <h4>Edge</h4>
+    <div class="nodes">
+      <div class="node"><span class="n">Cloudflare</span><span class="d">Proxy, WebSockets enabled, SSL Full.</span></div>
+      <div class="node"><span class="n">nginx :443</span><span class="d">TLS termination on the host.</span></div>
+      <div class="node"><span class="n">Caddy :8095</span><span class="d">Route switch · <code>/internal/*</code> sealed.</span></div>
+      <div class="node"><span class="n">coturn / LiveKit</span><span class="d">Media path — never passes through go-api.</span></div>
+    </div>
+  </div>
+
+  <div class="rail">single process</div>
+
+  <div class="band" style="border-color:var(--accent-line)">
+    <h4>go-api — 46 395 lines, 39 route registrations, one binary</h4>
+    <div class="nodes">
+      <div class="node key"><span class="n">internal/routes</span><span class="d">Every REST surface. <code>chats</code> alone is 119 endpoints across 10 files.</span></div>
+      <div class="node key"><span class="n">internal/realtime</span><span class="d">Socket.IO hub + Redis-backed cluster state: presence, online count, call roster.</span></div>
+      <div class="node"><span class="n">internal/httpx</span><span class="d">CORS, JSON, JWT verify, rate limit, body gauges.</span></div>
+      <div class="node"><span class="n">internal/jobs</span><span class="d">9 sweepers + partition maintenance + scheduled messages.</span></div>
+      <div class="node"><span class="n">internal/storage</span><span class="d">S3/R2 presign and stream.</span></div>
+      <div class="node"><span class="n">internal/vault</span><span class="d">Envelope crypto for PII at rest (Node interop-tested).</span></div>
+      <div class="node"><span class="n">internal/livekit</span><span class="d">Room tokens + egress control for both SFUs.</span></div>
+      <div class="node"><span class="n">internal/fcm</span><span class="d">Call wake-push; credentials warmed at boot, not first send.</span></div>
+      <div class="node"><span class="n">internal/emitx</span><span class="d">Fan-out port — bound to the local hub, or to the reverse bridge.</span></div>
+      <div class="node"><span class="n">internal/metrics</span><span class="d">Prometheus, exposed only on <code>/internal/metrics</code>.</span></div>
+    </div>
+  </div>
+
+  <div class="rail">state</div>
+
+  <div class="band">
+    <h4>Datastores &amp; external</h4>
+    <div class="nodes">
+      <div class="node"><span class="n">Postgres 16</span><span class="d">117 live tables, 126 migrations applied. Reached only through pgbouncer.</span></div>
+      <div class="node"><span class="n">Redis 7</span><span class="d">Socket adapter, presence hashes, node heartbeats, rate-limit buckets.</span></div>
+      <div class="node"><span class="n">R2 / MinIO</span><span class="d">Attachments, VaultBeam relay objects, broadcast recordings.</span></div>
+      <div class="node"><span class="n">FCM</span><span class="d">Native SDK only — the JS Firebase packages were removed.</span></div>
+      <div class="node"><span class="n">Klipy</span><span class="d">GIF search, with attribution requirements baked into the picker.</span></div>
+      <div class="node"><span class="n">Valhalla</span><span class="d">Self-hosted routing. No Google Maps anywhere; works without Play Services.</span></div>
+      <div class="node off"><span class="n">games.corefinite.com</span><span class="d">Separate WebView deployment; go-api only mints the launch token.</span></div>
+      <div class="node off"><span class="n">Kafka</span><span class="d">Legacy profile only. In-process fan-out replaced it.</span></div>
+    </div>
+  </div>
+</section>
+
+<!-- ══════════════════ 3. ROUTES ══════════════════ -->
+<section>
+  <div class="shead">
+    <span class="num">03</span><h2>Service surface</h2>
+    <span class="sub">counts are registered handlers, not files</span>
+  </div>
+
+  <p>Chat is the spine, and almost everything grew <em>inside</em> it. Spaces, runs, trips, rosters and family relations all mount under <code>/chats/{id}/…</code> because a Space <em>is</em> a group chat with extra tables — no second membership model, no second permission check.</p>
+
+  <div class="tbl-wrap" style="margin-top:20px">
+    <table>
+      <thead>
+        <tr><th>Mount</th><th class="num">Endpoints</th><th>Owns</th><th>Largest file</th></tr>
+      </thead>
+      <tbody>
+        <tr><td class="mono">/chats</td><td class="num">119</td><td>Messaging core, groups, membership, invitations, calendar, anon chats, polls, reactions, receipts — plus Spaces: roster, runs, stops, trips, items, locations, workforce, devices, incidents.</td><td class="mono">chats_helpers.go · 2 595</td></tr>
+        <tr><td class="mono">/shopbook</td><td class="num">78</td><td>Retail mini-app: stock, billing, khata, purchases, returns, payments, documents, tax, coupons, verification, admin.</td><td class="mono">shopbook.go · 3 491</td></tr>
+        <tr><td class="mono">/user</td><td class="num">49</td><td>Profile, devices, privacy, backup keys, sessions, security events, TURN credentials.</td><td class="mono">user.go · 3 029</td></tr>
+        <tr><td class="mono">/broadcasts</td><td class="num">28</td><td>Go Live sessions, viewers, comments, likes, polls, invites, HLS tickets, egress webhooks.</td><td class="mono">broadcasts.go · 895</td></tr>
+        <tr><td class="mono">/auth</td><td class="num">20</td><td>Register/login, JWT issue + refresh, phone OTP, onboarding tickets, prekey publication.</td><td class="mono">auth.go · 2 080</td></tr>
+        <tr><td class="mono">/uploads</td><td class="num">10</td><td>Presign, multipart resumable upload, attachment lifecycle, retention scoping.</td><td class="mono">uploads.go · 1 024</td></tr>
+        <tr><td class="mono">/stories · /channels</td><td class="num">14</td><td>Stories with per-viewer wrapped keys and audience gates; creator channels.</td><td class="mono">stories.go · 733</td></tr>
+        <tr><td class="mono">/calls · /call</td><td class="num">12</td><td>Call sessions, invites, wake push, metrics, LiveKit tokens.</td><td class="mono">call_sessions.go · 1 156</td></tr>
+        <tr><td class="mono">/vaultbeam</td><td class="num">8</td><td>Device-to-device transfer: signalling, relay fallback, expiry sweep.</td><td class="mono">vaultbeam.go · 1 219</td></tr>
+        <tr><td class="mono">/games</td><td class="num">8</td><td>Launch token, match records, live tables, invite notifications for the external games site.</td><td class="mono">games.go</td></tr>
+        <tr><td class="mono">/contacts · /chat-codes · /invitations</td><td class="num">15</td><td>Peppered phone-hash contact sync, discoverability, code-joined and invite-link chats.</td><td class="mono">contacts.go</td></tr>
+        <tr><td class="mono">/nav · /link · /gif</td><td class="num">6</td><td>Valhalla routing proxy, SSRF-guarded link preview, Klipy GIF search.</td><td class="mono">link.go</td></tr>
+        <tr><td class="mono">/api/admin</td><td class="num">25</td><td>Dashboard API behind <code>admin/index.html</code> + the socket firehose room.</td><td class="mono">admin.go</td></tr>
+        <tr><td class="mono">/internal/*</td><td class="num">3</td><td>Reverse emit bridge + metrics. Key-guarded <em>and</em> 404'd by Caddy — defence in depth for the same door.</td><td class="mono">main.go</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="grid2" style="margin-top:26px">
+    <div>
+      <h3>Realtime</h3>
+      <p style="margin-top:6px">One hub, ~60 event names. Rooms are per-chat, per-user, per-call, plus an <code>admin</code> firehose that carries metadata only — event, chat, type, timestamp, never content.</p>
+      <ul class="tight">
+        <li><b>Messaging</b> — <code>join_chat</code>, <code>new_message</code>, <code>message_delivered</code>, <code>message_read</code>, <code>typing_start/stop</code>, <code>reaction_updated</code>, <code>resync</code></li>
+        <li><b>Calls</b> — <code>incoming_call</code>, <code>join_call</code>, <code>call_roster</code>, <code>call_peer_joined/left</code>, <code>call_media_key</code>, <code>call_mesh_full</code>, <code>screen_share_start/stop</code></li>
+        <li><b>VaultBeam</b> — <code>vaultbeam_offer/answer/ice/have/pull/ready/tier/end</code> (a full transfer protocol over the socket)</li>
+        <li><b>Spaces</b> — <code>run_subscribe</code>, <code>run_update</code>, <code>run_end</code>, <code>trip_update</code>, <code>live_location_update</code></li>
+        <li><b>Broadcast</b> — <code>viewer_joined</code>, <code>viewer_activity</code>, <code>channel_join/leave</code></li>
+      </ul>
+      <p style="margin-top:12px; font-size:13.5px">Cross-node correctness lives in Redis, not in process memory: <code>vc:pres:&lt;uid&gt;</code> hashes count sockets per node, <code>vc:node:hb:&lt;node&gt;</code> heartbeats expire, and a dead node's users stop counting as online before the janitor even runs. That matters because presence gates call wake-push suppression — a stale “online” means a silent missed call.</p>
+    </div>
+    <div>
+      <h3>Background jobs</h3>
+      <p style="margin-top:6px">All in-process goroutines on tickers, each kicked once at boot so a restart-happy container still sweeps.</p>
+      <ul class="tight">
+        <li><code>sweep-expired-messages</code> · <code>sweep-expired-chats</code> (code chats with a 1h/3h life)</li>
+        <li><code>media-retention</code> · <code>sweep-expired-stories</code> · <code>broadcast-retention</code></li>
+        <li><code>delete-on-delivery</code> + its body-store twin, both under one flag</li>
+        <li><code>expire-bodies</code> — the hard 3-hour ceiling, deliberately <em>not</em> gated on that flag</li>
+        <li><code>scheduled-messages</code> · partition maintenance · ShopBook jobs</li>
+        <li><code>broadcast-reaper</code> — frees a host wedged by an egress that died without a terminal webhook</li>
+        <li><code>golive-host-sweep</code> — 90-second disconnect grace, safe only because <code>host_left_at</code> exists</li>
+        <li><code>vaultbeam sweep</code> — hourly, plus one immediate run at startup</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<!-- ══════════════════ 4. DATA ══════════════════ -->
+<section>
+  <div class="shead">
+    <span class="num">04</span><h2>Data layer</h2>
+    <span class="sub">126 migrations applied · 127 pending</span>
+  </div>
+
+  <div class="grid2">
+    <div>
+      <h3>Postgres domains</h3>
+      <p style="margin-top:6px">117 live tables. The migration files are <em>not</em> the schema — later ones drop what earlier ones create (<code>message_reactions</code> in 056, the two <code>vaultlens_*</code> tables in 098), so a <code>CREATE TABLE</code> grep over-counts by three.</p>
+      <div class="tbl-wrap" style="margin-top:14px">
+        <table>
+          <thead><tr><th>Domain</th><th>Representative tables</th></tr></thead>
+          <tbody>
+            <tr><td><b>Identity</b></td><td class="mono">users · devices · refresh_tokens · otp_codes · auth_attempts · sync_codes</td></tr>
+            <tr><td><b>E2EE keys</b></td><td class="mono">identity_keys · signed_prekeys · one_time_prekeys · group_sender_keys · story_keys</td></tr>
+            <tr><td><b>Messaging</b></td><td class="mono">chats · messages · message_bodies · chat_members · chat_device_delivery · scheduled_messages · poll_votes · bookmarks</td></tr>
+            <tr><td><b>Groups</b></td><td class="mono">chat_invitations · chat_join_requests · invite_links · chat_codes · group_events · group_audit_log · group_removals · group_type_config</td></tr>
+            <tr><td><b>Spaces</b></td><td class="mono">space_roster · space_locations · space_devices · space_runs-era run_* · space_trips · space_items · space_incidents · visitor_passes · family_relations</td></tr>
+            <tr><td><b>Calls &amp; live</b></td><td class="mono">calls · call_participants · call_invites · broadcast_sessions · broadcast_viewers · broadcast_polls</td></tr>
+            <tr><td><b>ShopBook</b></td><td class="mono">30 tables — shop, product, stock, invoice, ledger, khata, purchase, return, payment, audit</td></tr>
+            <tr><td><b>Safety</b></td><td class="mono">user_blocks · user_reports · security_events · trusted_contacts · sos_events · ghost_mode · breach_monitors</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div>
+      <h3>On-device SQLite</h3>
+      <p style="margin-top:6px">op-sqlite over JSI, warmed before the first frame in <code>_layout.tsx</code>. Eight tables — the client is a real replica, not a cache.</p>
+      <div class="tbl-wrap" style="margin-top:14px">
+        <table>
+          <thead><tr><th>Table</th><th>Role</th></tr></thead>
+          <tbody>
+            <tr><td class="mono">messages</td><td>The durable history. The server does not keep one.</td></tr>
+            <tr><td class="mono">chats</td><td>List paint on cold start, before any network.</td></tr>
+            <tr><td class="mono">sync_cursor</td><td>Delta position for <code>/chats/delta</code> catch-up.</td></tr>
+            <tr><td class="mono">queues</td><td>Outbox: sends, receipts, reactions, edits, deletes.</td></tr>
+            <tr><td class="mono">vb_transfers</td><td>VaultBeam transfer records.</td></tr>
+            <tr><td class="mono">vb_chunk_state</td><td>Per-chunk resume bitmap for interrupted transfers.</td></tr>
+            <tr><td class="mono">kv</td><td>Misc device state.</td></tr>
+            <tr><td class="mono">fts_meta</td><td>Full-text search index metadata.</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="note" style="margin-top:18px">
+        <strong>The server is not the source of truth for history.</strong> With delete-on-delivery on, <code>getMessages()</code> alone loses the past — any surface that reads history has to union with <code>localDb</code>. Gallery and contact-info already do; chat export is the remaining exposure.
+      </div>
+    </div>
+  </div>
+
+  <h3 style="margin-top:34px">Why ciphertext lives in a second table</h3>
+  <p style="margin-top:6px">Migration <code>099</code> split the message body out of <code>messages</code> rather than partitioning <code>messages</code> itself. Three constraints forced it, and the reasoning is worth keeping visible because it looks like duplication otherwise:</p>
+  <div class="row" style="margin-top:14px">
+    <div class="node" style="flex:1 1 280px"><span class="n">1 · six foreign keys</span><span class="d">Partitioning would force <code>messages_pkey</code> to become <code>(id, created_at)</code> and drag four other tables into composite FKs.</span></div>
+    <div class="node" style="flex:1 1 280px"><span class="n">2 · partial unique indexes</span><span class="d">Unsupported on partitioned tables — and <code>ux_messages_client_dedup</code> <em>is</em> the send-idempotency guarantee. Partitioning would delete it.</span></div>
+    <div class="node" style="flex:1 1 280px"><span class="n">3 · DROP PARTITION skips FK actions</span><span class="d">The CASCADEs on bookmarks and poll votes would be silently bypassed by the exact mechanism retention relies on.</span></div>
+  </div>
+  <p style="margin-top:14px"><code>message_bodies</code> has <em>no</em> inbound foreign keys — which is precisely what makes <code>DROP PARTITION</code> legal — and is partitioned hourly. That is a security improvement, not just a schema one: <code>UPDATE … SET content = NULL</code> leaves the old heap tuple, ciphertext and all, until autovacuum arrives. Dropping a partition removes the bytes.</p>
+</section>
+
+<!-- ══════════════════ 5. FLOW ══════════════════ -->
+<section>
+  <div class="shead">
+    <span class="num">05</span><h2>Send path</h2>
+    <span class="sub">1:1 direct chat · E2EE_STRICT on</span>
+  </div>
+
+  <div class="svg-scroll" style="margin-top:18px">
+    <svg viewBox="0 0 1040 404" role="img" aria-label="Sequence: sender encrypts, queues locally, posts to go-api, which persists metadata and ciphertext separately, fans out over the socket, and reclaims the body after delivery">
+      <g font-family="JetBrains Mono, monospace" font-size="11.5">
+        <!-- lifelines -->
+        <g stroke="var(--line)" stroke-dasharray="2 4">
+          <line x1="96"  y1="52" x2="96"  y2="382"/>
+          <line x1="300" y1="52" x2="300" y2="382"/>
+          <line x1="520" y1="52" x2="520" y2="382"/>
+          <line x1="740" y1="52" x2="740" y2="382"/>
+          <line x1="948" y1="52" x2="948" y2="382"/>
+        </g>
+        <!-- headers -->
+        <g text-anchor="middle" font-weight="600" font-size="12">
+          <rect x="24"  y="20" width="144" height="30" rx="6" fill="var(--accent-soft)" stroke="var(--accent-line)"/>
+          <text x="96"  y="40" fill="var(--accent)">sender app</text>
+          <rect x="232" y="20" width="136" height="30" rx="6" fill="var(--ground)" stroke="var(--line)"/>
+          <text x="300" y="40" fill="var(--ink)">localDb queue</text>
+          <rect x="446" y="20" width="148" height="30" rx="6" fill="var(--accent-soft)" stroke="var(--accent-line)"/>
+          <text x="520" y="40" fill="var(--accent)">go-api</text>
+          <rect x="668" y="20" width="144" height="30" rx="6" fill="var(--ground)" stroke="var(--line)"/>
+          <text x="740" y="40" fill="var(--ink)">postgres</text>
+          <rect x="876" y="20" width="144" height="30" rx="6" fill="var(--accent-soft)" stroke="var(--accent-line)"/>
+          <text x="948" y="40" fill="var(--accent)">recipient app</text>
+        </g>
+
+        <g stroke="var(--ink-3)" fill="var(--ink-2)">
+          <!-- 1 fetch bundle -->
+          <line x1="96" y1="80" x2="514" y2="80" marker-end="url(#ar)"/>
+          <text x="104" y="74" stroke="none">1 · GET peer key bundle (IK / SPK / OPK)</text>
+
+          <!-- 2 encrypt (self) -->
+          <path d="M96 104 h56 v26 h-50" fill="none" marker-end="url(#ar)"/>
+          <text x="162" y="112" stroke="none">2 · X3DH → Double Ratchet envelope, in Hermes</text>
+          <text x="162" y="127" stroke="none" fill="var(--ink-3)">no bundle + E2EE_STRICT → fail and retry, never plaintext</text>
+
+          <!-- 3 enqueue -->
+          <line x1="96" y1="156" x2="294" y2="156" marker-end="url(#ar)"/>
+          <text x="104" y="150" stroke="none">3 · enqueue + optimistic paint</text>
+
+          <!-- 4 post -->
+          <line x1="300" y1="184" x2="514" y2="184" marker-end="url(#ar)"/>
+          <text x="308" y="178" stroke="none">4 · POST /chats/:id/messages + clientId</text>
+
+          <!-- 5 persist -->
+          <line x1="520" y1="212" x2="734" y2="212" marker-end="url(#ar)"/>
+          <text x="528" y="206" stroke="none">5 · metadata → messages · ciphertext → message_bodies</text>
+          <text x="528" y="221" stroke="none" fill="var(--ink-3)">clientId unique index makes the retry idempotent</text>
+
+          <!-- 6 fanout -->
+          <line x1="520" y1="252" x2="942" y2="252" marker-end="url(#ar)"/>
+          <text x="528" y="246" stroke="none">6 · new_message over Socket.IO (block-list + ghost filtered)</text>
+
+          <!-- 6b push -->
+          <path d="M520 268 h300" fill="none" stroke-dasharray="3 3" marker-end="url(#ar)"/>
+          <text x="528" y="282" stroke="none" fill="var(--ink-3)">no live socket → FCM wake push (presence read from Redis)</text>
+
+          <!-- 7 decrypt + receipts -->
+          <line x1="948" y1="308" x2="526" y2="308" marker-end="url(#ar)"/>
+          <text x="600" y="302" stroke="none">7 · decrypt on device · delivered + read receipts</text>
+
+          <!-- 8 reclaim -->
+          <line x1="520" y1="344" x2="734" y2="344" marker-end="url(#ar)"/>
+          <text x="528" y="338" stroke="none">8 · delivery ACK → body reclaimed early</text>
+          <text x="528" y="368" stroke="none" fill="var(--ink-3)">and regardless: DROP PARTITION at the 3-hour ceiling</text>
+        </g>
+      </g>
+    </svg>
+  </div>
+  <figcaption>Steps 8 and the line under it are two different mechanisms on purpose. ACK-deletion is an optimisation that reclaims early; the hourly partition drop is the <em>guarantee</em>, and it must hold even if nothing is ever acknowledged — which is why it is not gated on <code>DELETE_ON_DELIVERY</code>.</figcaption>
+</section>
+
+<!-- ══════════════════ 6. SECURITY ══════════════════ -->
+<section>
+  <div class="shead">
+    <span class="num">06</span><h2>Crypto &amp; flags</h2>
+    <span class="sub">constants/flags.ts is the source of truth</span>
+  </div>
+
+  <div class="grid2">
+    <div>
+      <h3>What protects what</h3>
+      <ul class="tight" style="margin-top:8px">
+        <li><b>1:1 messages</b> — X3DH + Double Ratchet, <code>@noble/curves · hashes · ciphers</code>, the same code running under Node and Hermes with shared test vectors.</li>
+        <li><b>Groups</b> — Signal-style sender keys distributed over the pairwise ratchet.</li>
+        <li><b>Media</b> — per-file AES-256-GCM; the key rides the encrypted message, the bytes ride S3.</li>
+        <li><b>Stories</b> — per-viewer wrapped content key, so the audience list is enforced by cryptography and not only by a query.</li>
+        <li><b>Live location</b> — its own crypto path (<code>liveLocationCrypto</code>), shared by Spaces and family maps.</li>
+        <li><b>Calls</b> — <code>callCrypto</code> media keys exchanged over the socket; media itself never touches go-api.</li>
+        <li><b>Server-side PII</b> — envelope-encrypted through <code>internal/vault</code>; contact sync only ever sees peppered phone hashes.</li>
+        <li><b>Broadcast</b> — <span class="pill gated">not E2EE</span> and the one mode that says so on screen before you publish.</li>
+      </ul>
+    </div>
+    <div>
+      <h3>Boot-time refusals</h3>
+      <p style="margin-top:6px">Two guards that turn silent catastrophes into loud ones:</p>
+      <ul class="tight">
+        <li><code>JWT_SECRET</code> empty → <b>refuse to start</b>. An unset value would verify forged tokens against every authenticated route while presenting as a healthy deploy. Under 32 chars is a warning, not a fatal — a length rule would turn hardening into an outage for a short-but-real production secret.</li>
+        <li><code>/ready</code> returns 503 when Postgres is unreachable, 200 when only Redis is. Redis loss degrades (in-process rate limiting, local socket maps); Postgres loss is an outage. <code>/health</code> always answers 200 so an orchestrator never restart-loops through a database problem.</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="tbl-wrap" style="margin-top:26px">
+    <table>
+      <thead><tr><th>Flag</th><th>Default</th><th>Gates</th></tr></thead>
+      <tbody>
+        <tr><td class="mono">E2EE_ENABLED</td><td><span class="pill live">on</span></td><td>1:1 X3DH + Double Ratchet</td></tr>
+        <tr><td class="mono">E2EE_STRICT</td><td><span class="pill live">on</span></td><td>Never silently downgrades to plaintext — fail and retry instead</td></tr>
+        <tr><td class="mono">MEDIA_E2EE</td><td><span class="pill live">on</span></td><td>Per-file AES-256-GCM attachments</td></tr>
+        <tr><td class="mono">GROUP_E2EE</td><td><span class="pill live">on</span></td><td>Sender-key group encryption</td></tr>
+        <tr><td class="mono">STORY_E2EE</td><td><span class="pill live">on</span></td><td>Per-viewer wrapped story key</td></tr>
+        <tr><td class="mono">CALL_ENGINE_V2</td><td><span class="pill live">on</span></td><td>Consolidated call engine under <code>lib/call/</code></td></tr>
+        <tr><td class="mono">CALL_SESSIONS</td><td><span class="pill live">on</span></td><td>Server-tracked call sessions + invites</td></tr>
+        <tr><td class="mono">LOCATION_LOCK</td><td><span class="pill live">on</span></td><td>Geofenced app lock</td></tr>
+        <tr><td class="mono">NAV_MAP_3D · FAMILY_MAP_3D</td><td><span class="pill live">on</span></td><td>MapLibre 3D rendering on nav and family surfaces</td></tr>
+        <tr><td class="mono">VB_RELIABILITY_FIXES</td><td><span class="pill live">on</span></td><td>VaultBeam relay watchdog + on-disk resume</td></tr>
+        <tr><td class="mono">UPLOAD_PROGRESS</td><td><span class="pill live">on</span></td><td>Real byte progress on uploads</td></tr>
+        <tr><td class="mono">VAULT_SESSION_SEALED</td><td><span class="pill dormant">off</span></td><td>Session tokens sealed under the unlock PIN — built, awaiting a two-device test</td></tr>
+        <tr><td class="mono">VAULT_CACHE_ENCRYPTED</td><td><span class="pill dormant">off</span></td><td>At-rest encryption of the local SQLite cache — same gate</td></tr>
+        <tr><td class="mono">SCHEDULED_LOCAL</td><td><span class="pill dormant">off</span></td><td>On-device scheduled queue instead of server-side delivery</td></tr>
+        <tr><td class="mono">VB_AUTODOWNLOAD · VB_SEAMLESS_RESUME</td><td><span class="pill dormant">off</span></td><td>VaultBeam auto-accept policy and seamless resume</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- ══════════════════ 7. OPERATIONAL ══════════════════ -->
+<section>
+  <div class="shead">
+    <span class="num">07</span><h2>Where this bites</h2>
+    <span class="sub">failure modes with a history</span>
+  </div>
+
+  <div class="grid2">
+    <div class="band" style="margin:0">
+      <h4>Migration 127 is pending</h4>
+      <p style="margin-top:8px; font-size:13.5px"><code>auth.go</code> and <code>user.go</code> name <code>refresh_tokens.token_lookup</code> and <code>revoked_reason</code> in plain SQL — no flag, no capability probe. A go-api built from current <code>main</code> against a pre-127 schema answers every sign-in, refresh and session-list with <code>42P01</code>: a total auth outage, not a degraded feature. Migrate <em>before</em> rebuilding, never after, and set <code>VAULTCHAT_LOOKUP_PEPPER</code> or the column stays NULL and every refresh falls back to a 500-row scan.</p>
+    </div>
+    <div class="band" style="margin:0">
+      <h4>Two databases share one name</h4>
+      <p style="margin-top:8px; font-size:13.5px">The host cluster held a <code>vaultchat</code> database left over from the July 2026 cutover, stuck at migration 060, and reading it made prod look 66 migrations behind — which already misled one deploy. Defused 2026-09-07 by renaming it to <code>vaultchat_stale_20260722</code> and disabling the host pgbouncer. Production is the <em>container</em> pair: <code>go-api → pgbouncer → postgres</code>.</p>
+    </div>
+    <div class="band" style="margin:0">
+      <h4>Two proxies must agree</h4>
+      <p style="margin-top:8px; font-size:13.5px">A path has to exist in both the Caddyfile and <code>cmd/api/main.go</code> to be live. This has bitten before — VaultView's revoke endpoint 404'd until <code>uploads.go</code> caught up. The generic catch-all message <em>“route not migrated to go backend”</em> is the symptom.</p>
+    </div>
+    <div class="band" style="margin:0">
+      <h4>Routing is dark until fed</h4>
+      <p style="margin-top:8px; font-size:13.5px"><code>POST /nav/route</code> stays down until an OSM extract is dropped into <code>valhalla/custom_files/</code>; first boot then builds tiles for several minutes. Chat, calls and media are unaffected — navigation is the only surface that fails.</p>
+    </div>
+  </div>
+
+  <div class="note" style="margin-top:24px">
+    <strong>Mobile toolchains never run on the server.</strong> Rust and Kotlin compile only into the APK; Docker builds Go inside the image. There is no host Go, no host Rust, and no reason for either to appear on the box.
+  </div>
+</section>
+
+<footer>
+  Derived from the working tree on branch <code>hetzner-deploy</code> at <code>459aea1</code> · counts from <code>internal/routes/*.go</code>, <code>vaultchat-backend/migrations/*.sql</code>, <code>docker-compose*.yml</code>, <code>caddy/Caddyfile</code>, <code>constants/flags.ts</code> and <code>lib/localDb.ts</code>.
+</footer>
+
+</div>

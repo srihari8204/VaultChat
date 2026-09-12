@@ -110,6 +110,7 @@ func main() {
 	})
 
 	routes.RegisterContacts(mux)
+	routes.RegisterAppVersion(mux) // GET /app/version — the minimum-build gate
 	routes.RegisterLink(mux)
 	routes.RegisterGif(mux)
 	routes.RegisterStories(mux)

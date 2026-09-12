@@ -47,6 +47,8 @@ import { View, ActivityIndicator, StyleSheet, Platform, AppState, InteractionMan
 import notifee, { EventType } from '@notifee/react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { PdfThumbnailerHost } from '../components/PdfThumbnailer';
+import { CallBar } from '../components/CallBar';
+import { UpdateGate } from '../components/UpdateGate';
 import { enableFreeze } from 'react-native-screens';
 
 // Screens below the top of the stack stay MOUNTED by default, so every one of
@@ -777,6 +779,20 @@ function RootLayoutInner() {
     <FontReadyContext.Provider value={fontsReady}>
     <GestureHandlerRootView style={{ flex: 1, backgroundColor: colors.bg }}>
       <StatusBar style={scheme === 'light' ? 'dark' : 'light'} />
+      {/* The version floor wraps EVERYTHING below it. A build under the
+          server's minimum cannot be allowed to reach the navigator at all:
+          this app's formats are versioned (envelopes, sender keys, backups)
+          and an out-of-date client misreads rather than failing loudly. It
+          renders its children untouched in the normal case, so this costs a
+          passing build nothing. */}
+      <UpdateGate>
+      {/* ABOVE the navigator, so it survives every screen change. A call used
+          to take the whole app hostage: the engine owned the call outside
+          React, but the call screen's unmount said "hang up", so navigating
+          anywhere ended it. The bar is the way back — and the only way to end
+          a call you have stepped away from. It renders nothing when no call is
+          live, and hides itself on the call screens. */}
+      <CallBar />
       {/* The navigator's own ground stays OPAQUE at the aurora base. A
           transparent contentStyle would let the previous screen show through a
           native-stack push, so the blooms are mounted per screen instead (each
@@ -909,6 +925,7 @@ function RootLayoutInner() {
         {/* Mini Apps destinations */}
         <Stack.Screen name="encrypted-notes" />
       </Stack>
+    </UpdateGate>
       {/* Offscreen, renders nothing the user sees: the only canvas on the
           device, so a PDF can be turned into a bubble preview.
           Mounted here but INERT until the first thumbnail is requested — it
