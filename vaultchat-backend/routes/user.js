@@ -1038,23 +1038,71 @@ router.delete('/bookmarks/:id', async (req, res) => {
 // "Session" = a non-revoked, non-expired row in refresh_tokens.
 // `created_at` of the latest rotation is the freshest activity signal.
 
-async function hashCurrentRefresh(rawHeader) {
+/**
+ * Which refresh_tokens ROW is the caller's current session?
+ *
+ * AUDIT F06. This used to hash the presented token afresh and compare with SQL
+ * equality — `token_hash = $2`. bcrypt salts every hash, so two hashes of the
+ * same token never match. The consequences were not symmetric:
+ *
+ *   GET  /user/sessions   every row came back isCurrent:false. Cosmetic.
+ *   DELETE /user/sessions `token_hash <> $2` therefore matched EVERY row,
+ *                         including the caller's, so "sign out other devices"
+ *                         signed the user out of this device too.
+ *
+ * The fix is to identify the row by ID, via the deterministic token_lookup
+ * column (migration 127). Two paths, because one has to survive the migration:
+ *
+ *   - token_lookup: one indexed equality, the normal case;
+ *   - rows predating it have no lookup value and cannot be backfilled, so fall
+ *     back to bcrypt — but only over THIS USER'S live tokens, a handful of
+ *     devices, never the global 500-row page that caused F05.
+ *
+ * Returns null when the token cannot be placed. Callers MUST read that as "do
+ * not touch anything", never as "revoke everything" — which is the bug above.
+ */
+async function currentSessionId(userId, rawHeader) {
   const tok = (rawHeader || '').toString().trim();
   if (!tok) return null;
-  try { return await jwtUtil.hashRefresh(tok); }
-  catch { return null; }
+
+  let lookup = null;
+  try { lookup = vault.lookupHash('refresh:' + tok); } catch { lookup = null; }
+
+  if (lookup) {
+    const hit = await db.query(
+      `SELECT id FROM refresh_tokens
+        WHERE user_id = $1 AND token_lookup = $2
+          AND revoked_at IS NULL AND expires_at > NOW()
+        LIMIT 1`,
+      [userId, lookup]
+    );
+    if (hit.rows[0]) return hit.rows[0].id;
+  }
+
+  const legacy = await db.query(
+    `SELECT id, token_hash FROM refresh_tokens
+      WHERE user_id = $1 AND token_lookup IS NULL
+        AND revoked_at IS NULL AND expires_at > NOW()`,
+    [userId]
+  );
+  for (const row of legacy.rows) {
+    try {
+      if (await jwtUtil.compareRefresh(tok, row.token_hash)) return row.id;
+    } catch { return null; }
+  }
+  return null;
 }
 
 router.get('/sessions', async (req, res) => {
   try {
-    const currentHash = await hashCurrentRefresh(req.headers['x-current-refresh']);
+    const currentId = await currentSessionId(req.user.id, req.headers['x-current-refresh']);
     const r = await db.query(
       `SELECT id, user_agent, ip, created_at, last_used_at, expires_at,
-              token_hash = $2 AS is_current
+              id = $2 AS is_current
          FROM refresh_tokens
         WHERE user_id = $1 AND revoked_at IS NULL AND expires_at > NOW()
         ORDER BY COALESCE(last_used_at, created_at) DESC`,
-      [req.user.id, currentHash || '']
+      [req.user.id, currentId]
     );
     res.json(r.rows.map(row => ({
       id:         String(row.id),
@@ -1076,7 +1124,9 @@ router.delete('/sessions/:id', async (req, res) => {
     const id = parseInt(req.params.id, 10);
     if (!Number.isFinite(id)) return res.status(400).json({ error: 'Invalid session id' });
     const r = await db.query(
-      `UPDATE refresh_tokens SET revoked_at = NOW()
+      // revoked_reason is NOT 'rotated', so this device loses the refresh grace
+      // window immediately (audit F07) instead of keeping it for 30 seconds.
+      `UPDATE refresh_tokens SET revoked_at = NOW(), revoked_reason = 'revoked_by_user'
         WHERE id = $1 AND user_id = $2 AND revoked_at IS NULL
         RETURNING id`,
       [id, req.user.id]
@@ -1091,15 +1141,19 @@ router.delete('/sessions/:id', async (req, res) => {
 
 router.delete('/sessions', async (req, res) => {
   try {
-    const currentHash = await hashCurrentRefresh(req.headers['x-current-refresh']);
-    if (!currentHash) {
+    const currentId = await currentSessionId(req.user.id, req.headers['x-current-refresh']);
+    // Refuse rather than guess. An unplaceable token used to mean "exclude
+    // nothing", which revoked the caller's own session along with the others —
+    // the user asked to sign out their other devices and was signed out of the
+    // one in their hand.
+    if (!currentId) {
       return res.status(400).json({ error: 'X-Current-Refresh header required so we don\'t lock you out' });
     }
     const r = await db.query(
-      `UPDATE refresh_tokens SET revoked_at = NOW()
-        WHERE user_id = $1 AND revoked_at IS NULL AND token_hash <> $2
+      `UPDATE refresh_tokens SET revoked_at = NOW(), revoked_reason = 'signed_out_other_devices'
+        WHERE user_id = $1 AND revoked_at IS NULL AND id <> $2
         RETURNING id`,
-      [req.user.id, currentHash]
+      [req.user.id, currentId]
     );
     res.json({ ok: true, revoked: r.rowCount });
   } catch (err) {

@@ -84,19 +84,44 @@ async function findOrCreateUser({ email, name, googleSub, authProvider }) {
   return { user: ins.rows[0], isNewUser: true };
 }
 
+/**
+ * A refresh token's SEARCHABLE identity (migration 127, audit F05/F06).
+ *
+ * HMAC-SHA256(VAULTCHAT_LOOKUP_PEPPER, 'refresh:'||token), hex — the same
+ * primitive and the same pepper the Go backend uses, so a row written by
+ * either side is found by the other. That matters precisely because this
+ * backend is the ROLLBACK target: tokens issued here must keep working if
+ * traffic moves back to Go, and vice versa.
+ *
+ * Deterministic, so one indexed equality finds the row; keyed, so a stolen
+ * database cannot be scanned against a dictionary of guessed tokens. bcrypt in
+ * token_hash is still the verifier — this finds the row, it does not authorise
+ * it.
+ *
+ * Returns null when the pepper is unset, and every caller treats that as "use
+ * the legacy scan" rather than failing: a misconfigured environment must not
+ * lock every user out of refreshing.
+ */
+function refreshLookup(token) {
+  if (!token) return null;
+  try { return vault.lookupHash('refresh:' + token); }
+  catch { return null; }
+}
+
 async function issueTokens(user, req) {
   const accessToken  = jwtUtil.signAccess({ sub: user.id, email: user.email });
   const refreshToken = jwtUtil.generateRefreshToken();
   const refreshHash  = await jwtUtil.hashRefresh(refreshToken);
   await db.query(
-    `INSERT INTO refresh_tokens (user_id, token_hash, expires_at, user_agent, ip)
-     VALUES ($1, $2, NOW() + ($3 || ' seconds')::INTERVAL, $4, $5)`,
+    `INSERT INTO refresh_tokens (user_id, token_hash, expires_at, user_agent, ip, token_lookup)
+     VALUES ($1, $2, NOW() + ($3 || ' seconds')::INTERVAL, $4, $5, $6)`,
     [
       user.id,
       refreshHash,
       jwtUtil.REFRESH_TTL_SEC.toString(),
       (req.headers['user-agent'] || '').slice(0, 500),
       req.ip || null,
+      refreshLookup(refreshToken),
     ]
   );
   return { accessToken, refreshToken };
@@ -247,29 +272,58 @@ router.post('/refresh', async (req, res) => {
     const presented = (req.body?.refreshToken || '').toString();
     if (!presented) return res.status(400).json({ error: 'refreshToken required' });
 
-    // We don't know the user id from the token; we have to scan candidates.
-    // To bound the scan, we only look at non-revoked, non-expired tokens.
-    // For typical traffic this set is tiny per user, but here we don't know
-    // the user. Mitigation: keep refresh tokens short (90 days max) and add
-    // a candidate prefix lookup later if scale demands.
     // Grace window: also accept a token revoked in the last 30s. Refresh tokens
     // rotate (single-use), so a burst of concurrent requests on app-resume can
     // race — the client dedupes, but this is belt-and-suspenders so a slightly-
     // late retry still succeeds instead of logging the user out.
+    //
+    // AUDIT F07: the grace is for ROTATION ONLY. It used to key off revoked_at
+    // alone, and an explicit revocation sets the same column — so a device
+    // kicked from the sessions screen kept minting fresh credentials for 30
+    // seconds after being signed out. revoked_reason separates the two.
     const GRACE_SEC = 30;
-    const rows = await db.query(
-      `SELECT id, user_id, token_hash, revoked_at FROM refresh_tokens
-       WHERE expires_at > NOW()
-         AND (revoked_at IS NULL OR revoked_at > NOW() - ($1 || ' seconds')::INTERVAL)
-       ORDER BY id DESC
-       LIMIT 500`,
-      [GRACE_SEC.toString()],
-    );
+    const GRACE = `(revoked_at IS NULL
+                    OR (revoked_reason = 'rotated'
+                        AND revoked_at > NOW() - ($1 || ' seconds')::INTERVAL))`;
+
+    // AUDIT F05: this used to select the newest 500 eligible rows ACROSS ALL
+    // USERS and bcrypt-compare each. Past 500 live rows a perfectly valid older
+    // token stopped being found and the user was signed out — a ROW limit, not
+    // a user limit, and rotation across several devices reaches it quickly. An
+    // invalid token also burned up to 500 bcrypt comparisons, which is a free
+    // CPU-exhaustion lever.
+    //
+    // Now: one indexed equality on token_lookup. The scan survives only for
+    // rows written before migration 127, which cannot be backfilled (the
+    // plaintext was never stored) and which expire on their own within
+    // JWT_REFRESH_TTL. Restricting it to token_lookup IS NULL means it shrinks
+    // to nothing instead of growing.
     let match = null;
-    for (const row of rows.rows) {
-      if (await jwtUtil.compareRefresh(presented, row.token_hash)) {
-        match = row;
-        break;
+    const lookup = refreshLookup(presented);
+    if (lookup) {
+      const hit = await db.query(
+        `SELECT id, user_id, token_hash, revoked_at FROM refresh_tokens
+          WHERE token_lookup = $2 AND expires_at > NOW() AND ${GRACE}
+          LIMIT 1`,
+        [GRACE_SEC.toString(), lookup],
+      );
+      if (hit.rows[0] && await jwtUtil.compareRefresh(presented, hit.rows[0].token_hash)) {
+        match = hit.rows[0];
+      }
+    }
+    if (!match) {
+      const rows = await db.query(
+        `SELECT id, user_id, token_hash, revoked_at FROM refresh_tokens
+          WHERE token_lookup IS NULL AND expires_at > NOW() AND ${GRACE}
+          ORDER BY id DESC
+          LIMIT 500`,
+        [GRACE_SEC.toString()],
+      );
+      for (const row of rows.rows) {
+        if (await jwtUtil.compareRefresh(presented, row.token_hash)) {
+          match = row;
+          break;
+        }
       }
     }
     if (!match) return res.status(401).json({ error: 'Invalid refresh token' });
@@ -288,7 +342,11 @@ router.post('/refresh', async (req, res) => {
     // Rotate: revoke old (unless it's a grace re-use of an already-revoked token,
     // in which case don't double-revoke), issue new.
     if (!match.revoked_at) {
-      await db.query(`UPDATE refresh_tokens SET revoked_at = NOW(), last_used_at = NOW() WHERE id = $1`, [match.id]);
+      // revoked_reason = 'rotated' is what earns the 30s grace above. Anything
+      // that revokes for another reason must NOT write this value.
+      await db.query(
+        `UPDATE refresh_tokens SET revoked_at = NOW(), revoked_reason = 'rotated', last_used_at = NOW()
+          WHERE id = $1`, [match.id]);
     } else {
       await db.query(`UPDATE refresh_tokens SET last_used_at = NOW() WHERE id = $1`, [match.id]);
     }
