@@ -899,6 +899,7 @@ function RootLayoutInner() {
         {/* Security & Privacy */}
         <Stack.Screen name="ghost-mode" />
         <Stack.Screen name="chat-code" />
+        <Stack.Screen name="restore-backup" options={{ gestureEnabled: false }} />
         <Stack.Screen name="delete-account" />
         <Stack.Screen name="aiguardian" />
         <Stack.Screen name="backup-pin" />

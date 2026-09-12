@@ -1130,10 +1130,16 @@ func authVerifyOtpPhone(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if actingUserID != "" {
+		// The conflict check has to cover BOTH identities, or a number that is
+		// already somebody's login (phone_lookup) but predates the discovery
+		// hash would pass and produce two accounts answering to one number.
+		takenLookup, _ := vault.PhoneLookup("+" + norm)
 		var conflictID string
 		err := db.Pool.QueryRow(ctx,
-			`SELECT id FROM users WHERE phone_hash = $1 AND id <> $2 AND is_deleted = FALSE LIMIT 1`,
-			ph, actingUserID).Scan(&conflictID)
+			`SELECT id FROM users
+			  WHERE (phone_hash = $1 OR ($3 <> '' AND phone_lookup = $3))
+			    AND id <> $2 AND is_deleted = FALSE LIMIT 1`,
+			ph, actingUserID, takenLookup).Scan(&conflictID)
 		if err == nil {
 			httpx.Err(w, http.StatusConflict, "Phone already linked to another account")
 			return
@@ -1142,9 +1148,38 @@ func authVerifyOtpPhone(w http.ResponseWriter, r *http.Request) {
 			httpx.Err(w, 500, "Verification failed")
 			return
 		}
+		// THE WHOLE IDENTITY MOVES, OR NONE OF IT DOES.
+		//
+		// This used to write `phone` and `phone_hash` only — and those are not
+		// where a phone number actually lives since migration 042. The real
+		// identity is:
+		//
+		//   phone_cipher  what the profile DISPLAYS
+		//   phone_lookup  what resolves an account at login (auth.go), what
+		//                 invitations match on (chats_invitations.go) and what
+		//                 membership-by-lookup uses (chats_membership.go)
+		//   phone_hash    contact discovery
+		//
+		// So changing your number moved the discovery hash and left login,
+		// invitations, group membership and your own displayed number pointing
+		// at the OLD one. A number change that half-applies is worse than one
+		// that is refused: the account answers to two numbers, inconsistently.
+		//
+		// All four in ONE statement, so there is no window where they disagree.
+		newLookup, lerr := vault.PhoneLookup("+" + norm)
+		newCipher, cerr := vault.Encrypt("+" + norm)
+		if lerr != nil || cerr != nil {
+			// Without the pepper or the master key this cannot be done
+			// consistently, and a partial write is the failure mode above.
+			httpx.Err(w, 500, "Verification failed")
+			return
+		}
 		if _, err := db.Pool.Exec(ctx,
-			`UPDATE users SET phone = $1, phone_hash = $2 WHERE id = $3`,
-			"+"+norm, ph, actingUserID); err != nil {
+			`UPDATE users
+			    SET phone = $1, phone_hash = $2, phone_lookup = $3, phone_cipher = $4,
+			        updated_at = NOW()
+			  WHERE id = $5`,
+			"+"+norm, ph, newLookup, newCipher, actingUserID); err != nil {
 			httpx.Err(w, 500, "Verification failed")
 			return
 		}

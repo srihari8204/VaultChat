@@ -1,0 +1,82 @@
+// lib/restoreGate.ts — should this device be offered its backup?
+//
+// The restore prompt has to fire on a NEW PHONE and nowhere else. Getting that
+// wrong in either direction is bad in a different way:
+//
+//   never shown   → the history is lost on every handset upgrade, silently,
+//                   which is the bug this exists to fix
+//   shown wrongly → an older backup is offered to a device that already has
+//                   newer messages, and restoring would overwrite them
+//
+// So the answer is the conjunction of three facts, and all three are cheap:
+//
+//   1. signed in            — the backup is account-scoped; there is nothing
+//                             to look up before auth
+//   2. no local history     — this device has never held messages. The local
+//                             store is the source of truth for "is this a
+//                             fresh install", not a flag we set ourselves
+//   3. not already asked    — once per install, so declining is respected
+//
+// Condition 2 is what makes this safe. A device with messages is not a new
+// phone, whatever any flag says.
+
+import AsyncStorage from '@react-native-async-storage/async-storage';
+
+const SEEN_KEY = 'vc_restore_prompt_seen';
+
+/** Remember that we asked, so a decline is not re-asked on the next launch. */
+export async function markRestorePromptSeen(): Promise<void> {
+  try { await AsyncStorage.setItem(SEEN_KEY, '1'); } catch {}
+}
+
+/** For tests and for "restore again" from Settings. */
+export async function clearRestorePromptSeen(): Promise<void> {
+  try { await AsyncStorage.removeItem(SEEN_KEY); } catch {}
+}
+
+async function alreadyAsked(): Promise<boolean> {
+  try { return (await AsyncStorage.getItem(SEEN_KEY)) === '1'; } catch { return true; }
+}
+
+/**
+ * Does this device hold any messages of its own?
+ *
+ * Deliberately tolerant: a local store that cannot be read yet counts as
+ * NON-empty, so a slow or failed open can never cause a restore offer over
+ * history we simply could not see. Wrongly skipping the prompt costs a trip to
+ * Settings; wrongly showing it risks overwriting messages.
+ */
+async function deviceHasHistory(): Promise<boolean> {
+  try {
+    const { getCachedChats } = require('./localDb');
+    const chats = await getCachedChats();
+    return Array.isArray(chats) ? chats.length > 0 : true;
+  } catch {
+    return true;
+  }
+}
+
+/**
+ * True when the restore screen should be shown before the chat list.
+ *
+ * Never throws, and every failure path answers `false` — the prompt is a
+ * convenience, and it must not be able to block someone from reaching their
+ * app.
+ */
+export async function shouldOfferRestore(): Promise<boolean> {
+  try {
+    if (await alreadyAsked()) return false;
+    if (await deviceHasHistory()) return false;
+
+    // Only now is a network call worth making. Doing it first would put a
+    // request in front of every cold start for a question that is usually
+    // answered "no" locally.
+    const { cloudBackupMeta } = require('./cloudBackup');
+    const meta = await cloudBackupMeta();
+    return !!meta?.exists;
+  } catch {
+    return false;
+  }
+}
+
+export default { shouldOfferRestore, markRestorePromptSeen, clearRestorePromptSeen };

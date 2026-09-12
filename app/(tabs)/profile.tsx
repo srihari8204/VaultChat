@@ -317,6 +317,19 @@ export default function ProfileScreen() {
       </View>
       <Text style={S.cardHint}>Your phone lets others start a direct chat with you. Leave blank to stay email-only.</Text>
 
+      {/* CHANGING A NUMBER MOVES THE ACCOUNT — say so before they do it.
+          Verifying a different number here is the change-number flow: the
+          account, its chats and its history move to the new number and the old
+          one stops signing in. That is what people want, but only if they know
+          it is what is happening — silently reassigning an identity is how you
+          get a support ticket instead of a happy user. */}
+      {!!phone.trim() && !!profile?.phone && phone.trim() !== String(profile.phone).trim() && (
+        <Text style={[S.cardHint, { color: colors.danger }]}>
+          Verifying this will move your account to {phone.trim()} — your chats and history come
+          with you, and {String(profile.phone).trim()} will no longer sign in.
+        </Text>
+      )}
+
       {/* Phone verification (kept) */}
       {!!phone.trim() && verifyStep !== 'done' && (verifyStep === 'idle' ? (
         <TouchableOpacity onPress={onSendPhoneOtp} disabled={verifying || !phone.trim()} style={[S.verifyRow, (verifying || !phone.trim()) && { opacity: 0.5 }]} activeOpacity={0.7}>

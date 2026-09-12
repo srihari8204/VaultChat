@@ -13,6 +13,7 @@ import { ActivityIndicator, StyleSheet, View } from "react-native";
 import * as SplashScreen from "expo-splash-screen";
 import { getAccessToken } from "../lib/api";
 import { isMfaEnabled } from "../lib/mfa";
+import { shouldOfferRestore } from "../lib/restoreGate";
 
 export default function IndexScreen() {
   useEffect(() => {
@@ -23,7 +24,21 @@ export default function IndexScreen() {
         const [token, mfaOn] = await Promise.all([getAccessToken(), isMfaEnabled()]);
         if (!token) { router.replace("/onboard" as any); return; }
         // Logged in → if device MFA is on, gate the launch (biometric or MPIN).
-        router.replace((mfaOn ? "/app-lock" : "/(tabs)/chats") as any);
+        if (mfaOn) { router.replace("/app-lock" as any); return; }
+
+        // NEW PHONE? OFFER THE BACKUP BEFORE THE EMPTY CHAT LIST.
+        //
+        // Everything needed to restore already existed — this was the missing
+        // moment. Without it, replacing a handset meant landing on an empty
+        // chat list and either knowing about a settings screen in advance or
+        // losing the history for good.
+        //
+        // Fires only when signed in AND this device holds no messages AND a
+        // server backup exists AND we have not asked before (lib/restoreGate).
+        // Any failure answers false, so this can never block the launch path.
+        if (await shouldOfferRestore()) { router.replace("/restore-backup" as any); return; }
+
+        router.replace("/(tabs)/chats" as any);
       } catch {
         router.replace("/onboard" as any);
       } finally {
