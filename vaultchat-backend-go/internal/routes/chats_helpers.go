@@ -901,7 +901,8 @@ func chatsSendMessagePush(chatID, senderID string, msg chatsPublicMsg) {
 			list = append(list, t)
 		}
 		res := fcm.SendCallMessage(list,
-			map[string]string{"type": "message", "chatId": chatID, "channelId": channelID}, 60_000)
+			map[string]string{"type": "message", "chatId": chatID, "channelId": channelID,
+				"messageId": msg.ID}, 60_000)
 		if len(res.Dead) > 0 {
 			if _, err := db.Pool.Exec(ctx,
 				`UPDATE devices SET fcm_token = NULL WHERE fcm_token = ANY($1::text[])`, res.Dead); err != nil {
@@ -910,7 +911,13 @@ func chatsSendMessagePush(chatID, senderID string, msg chatsPublicMsg) {
 		}
 	}
 	// Legacy Expo devices: generic title/body, per-chat sound channel.
-	data := map[string]any{"chatId": chatID, "type": "message"}
+	//
+	// AUDIT F6. messageId rides along so the notification's "Mark as read"
+	// action knows what "read" means — without it the action could only dismiss
+	// the notification, which is not the same thing and tells the sender
+	// nothing. Still no message CONTENT: the body stays "New message" because
+	// the server cannot read it and would not put it here if it could.
+	data := map[string]any{"chatId": chatID, "type": "message", "messageId": msg.ID}
 	for channelID, tokens := range expoByChannel {
 		chatsSendExpoPush(ctx, tokens, "VaultChat", "New message", data, channelID)
 	}
@@ -936,11 +943,20 @@ func chatsSendExpoPush(ctx context.Context, tokens []string, title, body string,
 		slice := valid[i:min(i+100, len(valid))]
 		chunk := make([]map[string]any, 0, len(slice))
 		for _, token := range slice {
-			chunk = append(chunk, map[string]any{
+			msg := map[string]any{
 				"to": token, "sound": "default", "title": title, "body": body,
 				"data": data, "priority": "high", "channelId": channelID,
 				"_displayInForeground": true,
-			})
+			}
+			// AUDIT F6. The category is what attaches Reply and Mark as read on
+			// the device (lib/notificationActions registers it at boot). Set
+			// only for a message push: a category the client did not register is
+			// ignored, but naming the wrong one on another kind of push would
+			// put a reply box on something that cannot be replied to.
+			if t, _ := data["type"].(string); t == "message" {
+				msg["categoryId"] = "message"
+			}
+			chunk = append(chunk, msg)
 		}
 		tickets := channelPostExpoBatch(ctx, chunk)
 		// EVERY error status is acted on or REPORTED — none are read and dropped.

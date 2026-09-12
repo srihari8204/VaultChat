@@ -40,6 +40,7 @@ import { useEffect, useRef, useState } from 'react';
 import { setSecure } from '../lib/screenGuard';
 import { installAlertGuard } from '../lib/alertGuard';
 import { loadRemoteFlags } from '../lib/remoteFlags';
+import { registerMessageActions } from '../lib/notificationActions';
 import { isSessionEnded } from '../lib/sessionEnded';
 import * as SplashScreen from 'expo-splash-screen';
 import * as Linking from 'expo-linking';
@@ -166,6 +167,14 @@ installAlertGuard();
 // matters most, since a feature bad enough to disable is usually bad on a bad
 // connection too.
 loadRemoteFlags().catch(() => {});
+
+// AUDIT F6 — attach Reply and Mark as read to message notifications.
+//
+// Module scope and not awaited: the category must exist before the first
+// notification arrives, which can be before any screen has mounted, and a
+// device that refuses it simply shows the notification without buttons — the
+// behaviour before this existed.
+registerMessageActions().catch(() => {});
 
 /**
  * Screens that draw their OWN header and never accounted for the status bar.

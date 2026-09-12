@@ -14,6 +14,8 @@
 
 import Constants from 'expo-constants';
 import * as Notifications from 'expo-notifications';
+
+import { handleMessageAction } from './notificationActions';
 import { AppState, Platform } from 'react-native';
 import { api } from './api';
 import { setPushAvailable } from './messageNotifications';
@@ -212,6 +214,29 @@ export function attachTapHandler(
 ): () => void {
   const sub = Notifications.addNotificationResponseReceivedListener((response) => {
     const data: any = response.notification.request.content.data;
+    // AUDIT F6. An ACTION is handled before any tap routing, and consumes the
+    // response. Reply and mark-as-read exist precisely so the app does NOT
+    // open — routing to the chat afterwards would defeat the affordance.
+    // Fire-and-forget: the listener is synchronous, and the work behind it
+    // (enqueue, mark read) is durable on its own.
+    void handleMessageAction(response).then((handled) => {
+      if (handled) return;
+      routeNotificationTap(response, data, onOpenChat, onCall, onMembership, onGame);
+    });
+  });
+  return () => sub.remove();
+}
+
+/** Tap routing, unchanged — split out so an action can short-circuit it. */
+function routeNotificationTap(
+  response: Notifications.NotificationResponse,
+  data: any,
+  onOpenChat: (chatId: string) => void,
+  onCall?: (data: any, action: string) => void,
+  onMembership?: (event: string, chatId: string) => void,
+  onGame?: (game: string, room: string) => void,
+): void {
+  {
     if (data?.type === 'call') { onCall?.(data, response.actionIdentifier); return; }
     // A membership push ("Group invitation", "You are in") must NOT fall into
     // the chat fallback below: the invitee is not a member yet, so /chat?id=
@@ -230,8 +255,7 @@ export function attachTapHandler(
       return;
     }
     if (data?.chatId) onOpenChat(String(data.chatId));
-  });
-  return () => sub.remove();
+  }
 }
 
 // Required by expo-router file-routing convention for default exports;

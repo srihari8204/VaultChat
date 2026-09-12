@@ -18,6 +18,8 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { AppState, Platform } from 'react-native';
 import * as Notifications from 'expo-notifications';
 
+import { MESSAGE_CATEGORY } from './notificationActions';
+
 const SEEN_KEY = 'vc_notif_seen_v1';  // chatId → highest already-notified message id
 const DIR_KEY  = 'vc_chat_dir_v1';    // chatId → display name (written by chatService)
 
@@ -78,7 +80,16 @@ export async function notify(msg: { id: number | string; chatId: string; senderI
   s[msg.chatId] = id; persistSeen();
   try {
     await Notifications.scheduleNotificationAsync({
-      content: { title: await chatName(msg.chatId), body: 'New message', data: { chatId: msg.chatId }, sound: 'default' },
+      content: {
+        title: await chatName(msg.chatId), body: 'New message',
+        // AUDIT F6. The category attaches Reply and Mark as read (see
+        // lib/notificationActions). messageId rides in the data because
+        // mark-as-read needs to know what "read" means — without it the action
+        // could only dismiss the notification, which is not the same thing.
+        data: { chatId: msg.chatId, messageId: id },
+        categoryIdentifier: MESSAGE_CATEGORY,
+        sound: 'default',
+      },
       trigger: null,   // present immediately
     });
   } catch {}
