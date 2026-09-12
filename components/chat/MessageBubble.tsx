@@ -37,6 +37,7 @@ import { ActivityIndicator, Alert, Image, Linking, Platform, ScrollView, Text, T
 import { Image as ExpoImage } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
 import { IMPORT_SOURCE } from '../../constants/importSources';
+import { viewerRouteFor } from '../../lib/docOpen';
 import { Swipeable } from 'react-native-gesture-handler';
 import * as Haptics from 'expo-haptics';
 import LinkPreview, { extractUrl } from '../../components/LinkPreview';
@@ -537,14 +538,17 @@ export function FileBubble({
       // browsed from the Shelf, and text/code could only be read in another
       // app. Route by type instead, and let those screens hand off to the OS
       // when the device really is the better renderer (PDF, Office).
-      const ext = (filename || '').split('.').pop()?.toLowerCase() || '';
-      if (['zip', 'rar', '7z', 'tar', 'gz', 'bz2', 'xz'].includes(ext)) {
+      // The two extension lists that used to sit here were one of THREE copies
+      // of the same routing table (the others were in app/media-gallery.tsx and
+      // app/media-viewer.tsx, and neither agreed with this one — .tsv and .ini
+      // were missing here, and the gallery had no table at all). lib/docOpen.ts
+      // is now the single copy, asserted by docOpen.selftest.ts.
+      const route = viewerRouteFor(filename, mime);
+      if (route === '/archive-viewer') {
         fileRouter.push({ pathname: '/archive-viewer', params: { uri: openUri, filename } } as any);
         return;
       }
-      if (['pdf', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx',
-           'txt', 'json', 'csv', 'md', 'log', 'xml', 'yaml', 'yml',
-           'js', 'ts', 'tsx', 'py', 'java', 'go', 'rs', 'sql', 'html', 'css'].includes(ext)) {
+      if (route === '/file-viewer') {
         fileRouter.push({
           pathname: '/file-viewer',
           params: { uri: openUri, filename, mimeType: mime || '' },

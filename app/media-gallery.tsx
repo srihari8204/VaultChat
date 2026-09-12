@@ -7,10 +7,11 @@
 // screens). Links open externally. No Firestore.
 
 import { HEADER_TOP } from '../constants/layout';
-import React, { useState, useEffect, useCallback , useMemo} from 'react';
+import React, { useState, useEffect, useCallback , useMemo, useRef } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, FlatList, SectionList, Dimensions, StatusBar,
-  ActivityIndicator, Linking, Modal, useWindowDimensions } from 'react-native';
+  ActivityIndicator, Alert, Linking, Modal, useWindowDimensions } from 'react-native';
+import * as Sharing from 'expo-sharing';
 // expo-image: the 3-up grid recycles tiles, so cache + recyclingKey matter here.
 import { Image } from 'expo-image';
 import { useLocalSearchParams, Stack, useRouter } from 'expo-router';
@@ -20,6 +21,9 @@ import { useTheme } from '../lib/theme';
 import { getAccessToken } from '../lib/api';
 import { getMessages, getChat, decryptFromChat, attachmentUrl, type Message } from '../lib/chatService';
 import { getDecryptedAttachmentUri, parseMediaContent } from '../lib/mediaAttachments';
+import { resolveAttachmentFile, viewerRouteFor } from '../lib/docOpen';
+import { MediaKeyMissingError } from '../lib/mediaStore';
+import { getCurrentUserAsync } from './(constants)/authService';
 import { readCache, writeCache } from '../lib/localCache';
 import { unionWithLocalHistory } from '../lib/messageHistory';
 import { AuroraBackground } from '../components/ui';
@@ -124,6 +128,12 @@ export default function MediaGalleryScreen() {
 
   const [tab, setTab] = useState<TabId>('photos');
   const [authHeader, setAuthHeader] = useState<string | null>(null);
+  // Who we are, so a file WE sent resolves to the Sent/ copy already on disk
+  // instead of being downloaded back from the server.
+  const [meId, setMeId] = useState<string | null>(null);
+  // One open at a time. Repeated taps on a row otherwise start a second
+  // download of the same attachment and push a second viewer on top.
+  const openingRef = useRef<string | null>(null);
   const [photos, setPhotos] = useState<Message[]>([]);
   const [videos, setVideos] = useState<Message[]>([]);
   const [files, setFiles] = useState<Message[]>([]);
@@ -202,6 +212,12 @@ export default function MediaGalleryScreen() {
     return () => { active = false; };
   }, [cid]);
 
+  useEffect(() => {
+    getCurrentUserAsync()
+      .then((u: any) => setMeId(u?.id != null ? String(u.id) : null))
+      .catch(() => {});
+  }, []);
+
   const fmtDate = useCallback((iso: string) => { try { return new Date(iso).toLocaleDateString(); } catch { return ''; } }, []);
 
   // Resolve a renderable source for a media message: for encrypted attachments,
@@ -224,11 +240,65 @@ export default function MediaGalleryScreen() {
 
 
   const openFile = useCallback(async (m: Message) => {
-    const r = await resolveSrc(m);
-    if (!r) return;
-    // Decrypted local file → open directly; plaintext → open the auth'd URL.
-    Linking.openURL(r.uri).catch(() => {});
-  }, [resolveSrc]);
+    // This used to be Linking.openURL(r.uri), and it could not work either way
+    // round. For a plaintext attachment `r.uri` is the /uploads URL and the
+    // headers were dropped, so the file opened in the SYSTEM BROWSER — which
+    // holds no bearer token and so rendered a 401, after taking a VaultChat
+    // attachment URL out of the app. For an encrypted one `r.uri` is a file://
+    // path, and handing that to another app is what Android's StrictMode kills
+    // with FileUriExposedException. The Files tab was broken in both branches.
+    //
+    // Route through the same resolver the chat bubble uses instead: download
+    // once with the Authorization header into the persistent media store,
+    // decrypt if we hold a key, then open one of the in-app viewers.
+    const aid = m.meta?.attachmentId;
+    if (!aid || openingRef.current) return;
+    openingRef.current = String(aid);
+    const filename = m.meta?.fileName || m.meta?.name || m.meta?.filename || 'File';
+    try {
+      // Encrypted attachments keep their per-file key inside the message body,
+      // so the body has to be decrypted before the store can find it. Same two
+      // calls resolveSrc makes, and the reason they cannot be skipped here.
+      if (m.meta?.encrypted) {
+        const plain = await decryptFromChat(cid, m.senderId, m.content, m.id);
+        await parseMediaContent(String(aid), plain);
+      }
+      const uri = await resolveAttachmentFile({
+        attachmentId: String(aid),
+        filename,
+        mime: m.meta?.mime ?? null,
+        isMine: !!meId && String(m.senderId) === meId,
+        encrypted: !!m.meta?.encrypted,
+      });
+      const route = viewerRouteFor(filename, m.meta?.mime);
+      if (route === 'handoff') {
+        // Nothing in-app renders this type. The OS is the better renderer, and
+        // expo-sharing does the FileProvider work that a raw file:// cannot.
+        if (await Sharing.isAvailableAsync()) {
+          await Sharing.shareAsync(uri, { mimeType: m.meta?.mime || undefined, dialogTitle: filename });
+        } else {
+          Alert.alert('Can’t open file', 'No app on this device can open this file type.');
+        }
+        return;
+      }
+      router.push({
+        pathname: route,
+        params: { uri, filename, mimeType: m.meta?.mime || '', msgType: 'file' },
+      } as any);
+    } catch (e: any) {
+      // A missing key is a STATE, not a crash: it is the normal situation after
+      // a reinstall, and saying so is the difference between an explicable
+      // screen and "nothing happens when I tap".
+      Alert.alert(
+        'Can’t open file',
+        e instanceof MediaKeyMissingError
+          ? 'This file is end-to-end encrypted and this device no longer holds its key.'
+          : e?.message ?? 'Try again',
+      );
+    } finally {
+      openingRef.current = null;
+    }
+  }, [cid, meId, router]);
 
   const renderPhoto = ({ item }: { item: Message }) => (
     <TouchableOpacity style={s.tile} onPress={() => setViewer(item)} activeOpacity={0.8}>

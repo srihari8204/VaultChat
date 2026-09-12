@@ -17,7 +17,7 @@ import {
   Linking,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { Stack, useRouter, useLocalSearchParams } from 'expo-router';
+import { Stack, useRouter, useLocalSearchParams, router as navRouter } from 'expo-router';
 import * as Location from 'expo-location';
 import Voice, { type SpeechResultsEvent } from '@react-native-voice/voice';
 import QRCode from 'react-native-qrcode-svg';
@@ -80,6 +80,29 @@ import {
 /** Either ice-glass palette. `typeof FIN` alone is literal-typed ("#05603A"),
  *  so FIN_DARK's different literals would not satisfy it — widen each key to
  *  its kind while keeping contentMax numeric. */
+
+/**
+ * Show a generated Shop Book document INSIDE VaultChat.
+ *
+ * Every bill, receipt and invoice here went straight from Print.printToFileAsync
+ * to Sharing.shareAsync — the OS share sheet was the only thing that ever
+ * displayed them. A shopkeeper could not read the bill they had just issued
+ * without exporting it to another app first, and on a device with no share
+ * target (`isAvailableAsync()` false) the document silently went nowhere at all.
+ *
+ * app/file-viewer.tsx renders PDF pages in-app (components/PdfView → pdf.js) and
+ * still offers Share and Open-with from its own header, so routing here adds the
+ * preview WITHOUT removing the export. Nothing about the document changes: the
+ * file is the one printToFileAsync produced, already numbered and stored
+ * server-side, and this only decides what is shown next.
+ */
+function previewDoc(uri: string, filename: string): void {
+  navRouter.push({
+    pathname: '/file-viewer',
+    params: { uri, filename, mimeType: 'application/pdf' },
+  } as any);
+}
+
 type Palette = { readonly [K in keyof typeof FIN]: (typeof FIN)[K] extends number ? number : string };
 
 /**
@@ -1297,7 +1320,7 @@ function OrderTrack({ orderId, onBack }: { orderId: string; onBack: () => void }
     const html = invoiceHtml(fromOrder(order, orderStatusLabel(order.status)));
     try {
       const { uri } = await Print.printToFileAsync({ html });
-      if (await Sharing.isAvailableAsync()) await Sharing.shareAsync(uri, { mimeType: 'application/pdf', dialogTitle: 'Order receipt' });
+      previewDoc(uri, `receipt-${order.id}.pdf`);
     } catch (e: any) { Alert.alert('Error', e?.message ?? 'Could not create the bill'); }
   };
 
@@ -3724,6 +3747,10 @@ function CounterSale({ currency, onDone }: { currency?: string; onDone: () => vo
       } catch {
         Alert.alert('Sale recorded', 'The bill could not be shared, but the sale is saved.');
       }
+      // ponytail: this one still goes straight to the share sheet rather than
+      // previewDoc(). onDone() closes the panel on the next line, so pushing a
+      // viewer here would race that navigation. Move it over when this flow is
+      // next opened — the bill stays re-openable from the khata list meanwhile.
       onDone();
     } catch (e: any) {
       Alert.alert('Could not record the sale', e?.message ?? 'Try again');
@@ -3882,12 +3909,7 @@ function KhataDetail({ customer, currency, onBack }: { customer: SB.CustomerPend
         : await SB.issueKhataInvoice(entry.id);
       const html = await SB.invoiceHtml(id);
       const { uri } = await Print.printToFileAsync({ html });
-      if (await Sharing.isAvailableAsync()) {
-        await Sharing.shareAsync(uri, {
-          mimeType: 'application/pdf',
-          dialogTitle: isPay ? 'Payment receipt' : 'Bill',
-        });
-      }
+      previewDoc(uri, `${isPay ? 'receipt' : 'bill'}-${id}.pdf`);
     } catch (e: any) {
       Alert.alert(isPay ? 'Could not create the receipt' : 'Could not create the bill',
         e?.message ?? 'Try again');
@@ -4442,7 +4464,7 @@ function InvoiceView({ orderId, onBack }: { orderId: string; onBack: () => void 
     if (!inv) return;
     try {
       const { uri } = await Print.printToFileAsync({ html: invoiceHtml(fromInvoice(inv)) });
-      if (await Sharing.isAvailableAsync()) await Sharing.shareAsync(uri, { mimeType: 'application/pdf', dialogTitle: inv.invoiceNo });
+      previewDoc(uri, `${String(inv.invoiceNo).replace(/[/\:*?"<>|]/g, '-')}.pdf`);
     } catch (e: any) { Alert.alert('Error', e?.message ?? 'Could not create the invoice PDF'); }
   };
 

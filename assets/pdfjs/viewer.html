@@ -43,7 +43,26 @@
 
   var RENDER_SCALE = 3;   // canvas pixels per CSS pixel — what keeps zoom sharp
 
-  pdfjsLib.getDocument({ url: window.__DOC__ }).promise.then(function (pdf) {
+  // isEvalSupported: false — CVE-2024-4367.
+  //
+  // The vendored bundle is pdfjs-dist 3.11.174 (assets/pdfjs/README.md);
+  // the fix for that CVE landed in 4.2.67, and `grep "Invalid fontMatrix"`
+  // over pdf.min.pdfjs returns nothing, so this copy is unpatched. The bug
+  // is that a font's `fontMatrix` is interpolated into `new Function(...)`
+  // inside FontFaceObject.getPathGenerator, which turns a crafted font in an
+  // attacker's PDF into arbitrary JS in THIS page's origin.
+  //
+  // That origin is file:///android_asset, and the WebView hosting it is
+  // opened with allowUniversalAccessFromFileURLs (components/PdfView.tsx),
+  // so script running here can read any file the app can — including the
+  // AsyncStorage database that holds every per-attachment media key — and
+  // POST it anywhere. One received PDF, opened normally, is the whole chain.
+  //
+  // isEvalSupported: false makes pdf.js use its interpreter instead of
+  // `new Function`, which is the documented mitigation and costs only some
+  // Type1 font rendering speed. It is a STOPGAP: upgrading the vendored
+  // bundle is the actual fix.
+  pdfjsLib.getDocument({ url: window.__DOC__, isEvalSupported: false }).promise.then(function (pdf) {
     var host = document.getElementById('pages');
     var cssW = Math.max(280, document.documentElement.clientWidth - 20);
 

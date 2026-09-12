@@ -28,7 +28,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import * as IntentLauncher from 'expo-intent-launcher';
 import { getAccessToken } from '../lib/api';
 import { Buffer } from 'buffer';
-import { docKind } from '../lib/docText';
+import { docKind, MAX_DOC_BYTES } from '../lib/docText';
 import type { Block } from '../lib/docBlocks';
 import { DocView } from '../components/DocView';
 import { PdfView } from '../components/PdfView';
@@ -98,7 +98,11 @@ const EXT_MAP: Record<string, string> = {};
 ['mp3', 'wav', 'm4a', 'aac', 'ogg', 'flac', 'wma'].forEach(e => (EXT_MAP[e] = 'audio'));
 ['pdf'].forEach(e => (EXT_MAP[e] = 'pdf'));
 ['ppt', 'pptx', 'doc', 'docx', 'xls', 'xlsx'].forEach(e => (EXT_MAP[e] = 'office'));
-['txt', 'json', 'js', 'jsx', 'ts', 'tsx', 'py', 'md', 'csv', 'xml', 'html', 'css', 'sql', 'sh', 'yaml', 'yml', 'toml', 'ini', 'log', 'rb', 'go', 'rs', 'java', 'c', 'cpp', 'swift', 'kt', 'dart', 'php'].forEach(e => (EXT_MAP[e] = 'text'));
+// tsv and conf are in lib/docOpen.ts's DOCUMENT list, which routes them HERE.
+// They were missing from this map, so detectType returned 'unknown' and a file
+// the router had just promised to render showed the hand-off card instead —
+// exactly the mismatch docOpen's "extend BOTH or neither" note warns about.
+['txt', 'json', 'js', 'jsx', 'ts', 'tsx', 'py', 'md', 'csv', 'tsv', 'xml', 'html', 'css', 'sql', 'sh', 'yaml', 'yml', 'toml', 'ini', 'conf', 'log', 'rb', 'go', 'rs', 'java', 'c', 'cpp', 'swift', 'kt', 'dart', 'php'].forEach(e => (EXT_MAP[e] = 'text'));
 
 /**
  * MIME for the Android VIEW intent, derived from the extension.
@@ -322,6 +326,27 @@ function FileViewerScreen() {
   const fadeIn = useRef(new Animated.Value(0)).current;
   const slideUp = useRef(new Animated.Value(30)).current;
 
+  // Fetch a remote file to a local path WITH the bearer token.
+  //
+  // /uploads/{id} is RequireAuth on the server. The three loaders below each
+  // called FileSystem.downloadAsync with no headers, so for any http source
+  // they wrote the 401 JSON body to disk and then parsed it — "this file is not
+  // a readable document" for a document that was perfectly fine. Only
+  // openInDeviceApp sent the token, which is why handing the file to another
+  // app worked while reading it in-app did not.
+  const downloadAuthed = useCallback(async (url: string, dest: string): Promise<string> => {
+    const token = await getAccessToken();
+    const dl = await FileSystem.downloadAsync(
+      url, dest, token ? { headers: { Authorization: `Bearer ${token}` } } : undefined,
+    );
+    if (dl.status >= 400) {
+      throw new Error(dl.status === 401 || dl.status === 403
+        ? 'You do not have access to this file.'
+        : `Could not download this file (${dl.status}).`);
+    }
+    return dl.uri;
+  }, []);
+
   // Read the document's TEXT. Split out of the loader effect so a PDF can defer
   // it: pdf.js renders from the FILE (components/PdfView), so extracting text up
   // front was pure waste — it loaded the whole document into memory as base64
@@ -382,8 +407,7 @@ function FileViewerScreen() {
       try {
         let local = fileUri;
         if (fileUri.startsWith('http')) {
-          const dl = await FileSystem.downloadAsync(fileUri, FileSystem.cacheDirectory + 'temp_view_' + Date.now());
-          local = dl.uri;
+          local = await downloadAuthed(fileUri, FileSystem.cacheDirectory + 'temp_view_' + Date.now());
         }
         // Documents are capped at MAX_DOC_BYTES; plain text had no ceiling at
         // all, and readAsStringAsync materialises the WHOLE file as one JS
@@ -409,10 +433,24 @@ function FileViewerScreen() {
       try {
         let local = fileUri;
         if (fileUri.startsWith('http')) {
-          const dl = await FileSystem.downloadAsync(fileUri, FileSystem.cacheDirectory + 'temp_doc_' + Date.now());
-          local = dl.uri;
+          local = await downloadAuthed(fileUri, FileSystem.cacheDirectory + 'temp_doc_' + Date.now());
         }
         setDocLocalUri(local);
+        // SIZE CHECK BEFORE READING, not after.
+        //
+        // readDoc materialises the document about three times over — a base64
+        // JS string (~1.33x), the Buffer it decodes to, and the Uint8Array
+        // copied out of that — and only THEN does extractDocText compare
+        // byteLength against MAX_DOC_BYTES. So that 32 MB guard could never
+        // actually stop anything: a 400 MB .docx runs out of memory at the
+        // readAsStringAsync, long before reaching the check meant to refuse it.
+        // The plain-text path already probes getInfoAsync first; this one did not.
+        const dinfo = await FileSystem.getInfoAsync(local);
+        if (dinfo.exists && (dinfo as any).size > MAX_DOC_BYTES) {
+          setDocError('This document is too large to open here. Try opening it in another app.');
+          setDocLoading(false);
+          return;
+        }
         // A PDF renders from this file; its text is only ever the fallback, so
         // it is read when pdf.js actually gives up — see the effect below.
         if (fileType === 'pdf') { setDocLoading(false); return; }
@@ -463,7 +501,7 @@ function FileViewerScreen() {
     return () => { soundRef.current?.unloadAsync(); soundRef.current = null; };
     // reloadKey: Retry re-runs THIS loader (see handleRetry) instead of the
     // component-scope duplicate, so first load and retry share one code path.
-  }, [fadeIn, slideUp, fileUri, fileType, fileName, readDoc, reloadKey]);
+  }, [fadeIn, slideUp, fileUri, fileType, fileName, readDoc, reloadKey, downloadAuthed]);
 
   // pdf.js could not render this file, so the text reader is about to be shown.
   // NOW the extraction is worth doing — and only now.
@@ -564,8 +602,8 @@ function FileViewerScreen() {
     try {
       let localUri = fileUri;
       if (fileUri.startsWith('http')) {
-        const dl = await FileSystem.downloadAsync(fileUri, FileSystem.cacheDirectory + fileName);
-        localUri = dl.uri;
+        const safeName = (fileName || 'file').replace(/[/\:*?"<>|]/g, '_');
+        localUri = await downloadAuthed(fileUri, (FileSystem.cacheDirectory || '') + safeName);
       }
       const available = await Sharing.isAvailableAsync();
       if (available) {
@@ -816,7 +854,12 @@ function FileViewerScreen() {
   // ██  RENDER: Text / Code viewer
   // ══════════════════════════════════════════════════════════════
   const renderText = () => {
-    const lines = textContent.split('\n');
+    // split on a bare \n left a trailing CR on every line of a CRLF file — a
+    // Windows .csv or .log rendered with an invisible stray character at each
+    // line end, which shifts the last column and corrupts any copy-paste out of
+    // it. A BOM does the same at the start: U+FEFF printed as a stray glyph
+    // before the first character of line 1.
+    const lines = textContent.replace(/^\uFEFF/, '').split(/\r?\n/);
     const ext = fileName.split('.').pop()?.toLowerCase() || '';
     return (
       <View style={s.contentFill}>
