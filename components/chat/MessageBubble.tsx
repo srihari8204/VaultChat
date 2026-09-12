@@ -38,6 +38,7 @@ import { Image as ExpoImage } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
 import { IMPORT_SOURCE } from '../../constants/importSources';
 import { viewerRouteFor } from '../../lib/docOpen';
+import { forwardLabel, isForwarded, isForwardedManyTimes } from '../../lib/forwardPolicy';
 import { Swipeable } from 'react-native-gesture-handler';
 import * as Haptics from 'expo-haptics';
 import LinkPreview, { extractUrl } from '../../components/LinkPreview';
@@ -1373,15 +1374,19 @@ function MessageBubble({
           <Text numberOfLines={1} style={S.senderTag}>{member.name || member.email || msg.senderId.slice(0, 8)}</Text>
         )}
 
-        {/* Forwarded label */}
-        {msg.meta?.forwardedFrom && (
-          <Text style={S.forwardedTag}>↪ Forwarded</Text>
+        {/* Forwarded label — two tiers (audit F10). The text comes from
+            forwardPolicy so the bubble and the forward sheet can never disagree
+            about what counts as "many times". */}
+        {forwardLabel(msg.meta) && (
+          <Text style={[S.forwardedTag, isForwardedManyTimes(msg.meta) && S.forwardedTagMany]}>
+            {forwardLabel(msg.meta)}
+          </Text>
         )}
 
         {/* Inline reply preview (above the body) — tap to jump to the original.
             Suppressed on forwarded messages: a forward carries no reply context
             (it shows "↪ Forwarded"), so we must never render a reply quote. */}
-        {(msg.replyToId ?? 0) > 0 && !msg.meta?.forwardedFrom && (
+        {(msg.replyToId ?? 0) > 0 && !isForwarded(msg.meta) && (
           <TouchableOpacity
             style={S.replyPreview}
             activeOpacity={0.6}

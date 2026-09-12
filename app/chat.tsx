@@ -126,6 +126,7 @@ import {
   type ReactionSummary,
   groupRefOf,
 } from '../lib/chatService';
+import { forwardNotice } from '../lib/forwardPolicy';
 import { groupTypeInfo } from '../lib/groups/catalog';
 import { markReadDurable, markDeliveredDurable } from '../lib/receipts';
 import { type MediaType } from '../lib/sendMedia';
@@ -3687,6 +3688,14 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
         <Pressable style={S.modalBackdrop} onPress={() => setForwardMsg(null)}>
           <Pressable style={S.forwardSheet} onPress={(e) => e.stopPropagation()}>
             <Text style={S.forwardTitle}>Forward to…</Text>
+            {/* AUDIT F10. Shown only for a message that has already travelled
+                far — a warning on every forward is noise that trains people to
+                dismiss it unread. The picker is single-select, so the "one chat
+                at a time" rule it states is already true; saying it out loud is
+                what makes the next hop deliberate rather than reflexive. */}
+            {forwardMsg && forwardNotice(forwardMsg.meta) && (
+              <Text style={S.forwardManyNotice}>{forwardNotice(forwardMsg.meta)}</Text>
+            )}
             {/* Preview of the message being forwarded (which msg) */}
             {forwardMsg && (
               <View style={S.forwardPreview}>

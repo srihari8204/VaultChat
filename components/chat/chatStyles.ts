@@ -427,6 +427,10 @@ export const makeStyles = (
 
   // Day 8 — "↪ Forwarded" tag at top of bubble
   forwardedTag:        { color: c.textDim, fontSize: 11, fontStyle: 'italic', marginBottom: 2 },
+  // Audit F10, second tier. Weight rather than colour: this is a caution, not
+  // an error, and a red label on a friend's message reads as an accusation
+  // against the friend rather than information about the message.
+  forwardedTagMany:    { fontStyle: 'italic', fontWeight: '700' },
 
   // Day 8 — reaction chips under a bubble
   reactionRow:         { flexDirection: 'row', flexWrap: 'wrap', gap: 4, marginTop: -6, marginBottom: 6, paddingHorizontal: 4 },
@@ -447,6 +451,9 @@ export const makeStyles = (
   // Day 8 — forward chat picker
   forwardSheet:        { width: '100%', maxHeight: '70%', backgroundColor: c.card, borderRadius: 16, padding: 16, gap: 8 },
   forwardTitle:        { color: c.text, fontSize: 16, fontWeight: '700', marginBottom: 8 },
+  // Audit F10. minHeight, not height: this string grows with the system font
+  // scale and a fixed height would clip it (see the test:layout guard).
+  forwardManyNotice:   { color: c.textDim, fontSize: 12.5, lineHeight: 18, minHeight: 18, marginBottom: 10 },
   forwardPreview:      { flexDirection: 'row', gap: 8, backgroundColor: c.card, borderRadius: 10, padding: 10, marginBottom: 8 },
   forwardPreviewWho:   { color: c.primary, fontSize: 13, fontWeight: '700' },
   forwardPreviewBody:  { color: c.textDim, fontSize: 13, marginTop: 2 },

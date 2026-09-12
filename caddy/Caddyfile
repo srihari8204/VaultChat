@@ -93,10 +93,16 @@
 	# above): these are documents that will be edited by a human, and a policy
 	# escaped into a Caddyfile string is a policy nobody will keep accurate.
 	# Extensionless paths so the printed URLs stay clean.
-	@legal path /privacy /privacy.html /delete-account /delete-account.html
+	#
+	# /terms is the third: an app with accounts needs a recorded terms
+	# acceptance, and a recorded acceptance is worthless if the thing accepted
+	# is not reachable at a stable URL. The app records WHICH version a user
+	# accepted (VAULTCHAT_TERMS_VERSION); this page is what that version names.
+	@legal path /privacy /privacy.html /terms /terms.html /delete-account /delete-account.html
 	handle @legal {
 		root * /srv/public
 		rewrite /privacy /privacy.html
+		rewrite /terms /terms.html
 		rewrite /delete-account /delete-account.html
 		header Content-Type "text/html; charset=utf-8"
 		file_server

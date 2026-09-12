@@ -154,6 +154,7 @@ func main() {
 
 	routes.RegisterContacts(mux)
 	routes.RegisterAppVersion(mux) // GET /app/version — the minimum-build gate
+	routes.RegisterTerms(mux)      // GET/POST /user/terms — recorded acceptance (F10)
 	routes.RegisterLink(mux)
 	routes.RegisterGif(mux)
 	routes.RegisterStories(mux)

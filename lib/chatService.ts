@@ -2542,6 +2542,8 @@ export interface Reactor          { emoji: string; userId: string; name: string 
 // counts themselves — one reaction per user per message.
 
 
+import { nextForwardScore } from './forwardPolicy';
+
 // ─── Forward (Day 8) ────────────────────────────────────────────────
 // Server-side it's still a normal POST /messages — we just preserve the
 // original sender/chat in meta.forwardedFrom so the receiving bubble can
@@ -2554,6 +2556,12 @@ export async function forwardMessage(
     meta: {
       ...(source.meta ?? {}),
       forwardedFrom: { messageId: source.id, chatId: source.chatId, senderId: source.senderId },
+      // AUDIT F10. How many hops this has made. Read from the SOURCE message's
+      // meta, so a chain keeps counting instead of resetting to 1 at every
+      // relay — which is the only thing that separates "a friend sent me this"
+      // from a message on its fiftieth pass. See lib/forwardPolicy.ts for why
+      // this is signalling and not a control.
+      forwardScore: nextForwardScore(source.meta),
     },
   });
 }

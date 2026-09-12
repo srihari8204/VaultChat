@@ -51,6 +51,7 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { PdfThumbnailerHost } from '../components/PdfThumbnailer';
 import { CallBar } from '../components/CallBar';
 import { UpdateGate } from '../components/UpdateGate';
+import { TermsGate } from '../components/TermsGate';
 import { enableFreeze } from 'react-native-screens';
 
 // Screens below the top of the stack stay MOUNTED by default, so every one of
@@ -804,6 +805,13 @@ function RootLayoutInner() {
           renders its children untouched in the normal case, so this costs a
           passing build nothing. */}
       <UpdateGate>
+      {/* INSIDE the version gate, not outside: a client below the minimum build
+          must be told to update before it is asked to accept anything, because
+          what it would be accepting is whatever an out-of-date build knows how
+          to display. Fails open on every uncertain path — offline, an outage,
+          no configured version, not signed in — so it costs a normal launch
+          nothing and can never strand anyone (audit F10). */}
+      <TermsGate>
       {/* ABOVE the navigator, so it survives every screen change. A call used
           to take the whole app hostage: the engine owned the call outside
           React, but the call screen's unmount said "hang up", so navigating
@@ -944,6 +952,7 @@ function RootLayoutInner() {
         {/* Mini Apps destinations */}
         <Stack.Screen name="encrypted-notes" />
       </Stack>
+    </TermsGate>
     </UpdateGate>
       {/* Offscreen, renders nothing the user sees: the only canvas on the
           device, so a PDF can be turned into a bubble preview.
