@@ -1,6 +1,21 @@
 # Deploy: migration 121 + vanish-mode fix
 
-## 🔴 MIGRATION 121 IS MISSING FROM PRODUCTION — verified, not inferred
+> ## ✅ BOTH SHIPPED — verified on prod 2026-09-12
+> | Item | Evidence |
+> |---|---|
+> | Migration 121 | `schema_migrations` row `121 / 121_run_delay_threshold.sql` applied `2026-09-12 07:35:20 UTC`; `chats.run_delay_threshold_minutes` present (`integer NOT NULL DEFAULT 10`); versions 100–127 = 28 rows, no gap |
+> | Vanish fix | `vaultchat-go-api` image built 13:06 IST 2026-09-12 (source patched 11:22); running `/bin/api` binary contains the `cm3` guard; container up on that image |
+> | Health | `https://api.corefinite.com/health` → 200 |
+>
+> Nothing below needs running again. The SQL and the compose rebuild are both
+> idempotent, but re-running the rebuild is a pointless prod restart. Kept as
+> the record of what was wrong and how it was fixed.
+>
+> `vaultchat-backend` (Node) does **not** run in prod — only `vaultchat-go-api-1`
+> serves the API — so the `routes/chats.js` / `routes/user.js` fixes listed at the
+> bottom are reference/rollback only, not a pending deploy.
+
+## ~~🔴 MIGRATION 121 IS MISSING FROM PRODUCTION~~ — fixed, see banner above
 
 ```
 prod schema_migrations : 100…120, [121 ABSENT], 122…127   (125 rows)
@@ -135,7 +150,7 @@ A patch script is already uploaded to the box at **`/tmp/patch_vanish.py`**. It 
 unless the anchor matches exactly once, refuses if already patched (`cm3` present), and writes a
 `.bak` beside the file.
 
-**STATUS: the patch is ALREADY APPLIED on the box** (verified — 4 `cm3` references present,
+**STATUS: patch applied AND rebuilt — nothing remains.** The patch was applied on the box (verified — 4 `cm3` references present,
 `chats_helpers.go.bak` written). Only the container rebuild remains.
 
 ### All THREE compose files are mandatory
@@ -159,7 +174,7 @@ MESSAGE_BODIES  TURN_HOST6  PATH
 with **no S3 configuration at all** — media upload/download, broadcasts and VaultBeam transfers
 break. That is much worse than the bug being fixed.
 
-### The one remaining command
+### The rebuild command (already run 2026-09-12 13:06 IST — do not re-run)
 
 ```bash
 ssh srihari@65.21.229.167
