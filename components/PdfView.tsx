@@ -227,9 +227,9 @@ export function PdfView({ uri, onFail, onReady }: {
 }
 
 const makeS = (c: Palette) => StyleSheet.create({
-  fill: { flex: 1, backgroundColor: '#3A3A3E' },
+  fill: { flex: 1, backgroundColor: '#3A3A3E' },   // theme-exempt: the mat behind the pages. Every PDF reader uses a fixed neutral here — theming it would tint the paper's surround against the paper.
   list: { paddingVertical: 10 },
-  page: { alignSelf: 'center', marginBottom: 10, backgroundColor: '#FFFFFF' },
+  page: { alignSelf: 'center', marginBottom: 10, backgroundColor: '#FFFFFF' },   // theme-exempt: a PDF page IS white paper, and the rendered bitmap assumes it. A dark page would show as white content on a dark card.
   pagePending: { ...StyleSheet.absoluteFillObject, alignItems: 'center', justifyContent: 'center' },
   pageErr: { color: 'rgba(0,0,0,0.45)', fontSize: 12 },
   cover: {
