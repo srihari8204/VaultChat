@@ -54,15 +54,39 @@ function Page({
   docKey: string; cacheDir: string; s: any;
 }) {
   const [img, setImg] = useState<string | null>(null);
-  const [err, setErr] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
   const height = Math.round(width * aspect);
 
   useEffect(() => {
     let dead = false;
-    const px = Math.min(Math.round(width * OVERSAMPLE), MAX_PAGE_PX);
-    renderPdfPage(uri, index, px, cacheDir, docKey)
-      .then(r => { if (!dead) setImg(r.uri); })
-      .catch(() => { if (!dead) setErr(true); });
+    // STEP DOWN ON OutOfMemory INSTEAD OF GIVING UP.
+    //
+    // A page is ARGB_8888 (PdfRenderer accepts nothing else), so at 2400px wide
+    // one page is roughly 2400 x 3400 x 4 = ~32 MB. A big document — a scanned
+    // textbook, a CAD drawing — can exceed the per-app heap at full width while
+    // rendering perfectly well at half of it.
+    //
+    // The native module already reports that case distinctly as TOO_LARGE
+    // precisely so the caller can retry smaller, and this is the caller that
+    // never did: it showed "could not be rendered" and stopped, which is what a
+    // large PDF looked like from the outside — a file that simply would not open.
+    //
+    // Halving is the right step because cost is quadratic in width: one halving
+    // cuts the bitmap to a quarter. FLOOR stops it degrading into an unreadable
+    // smudge — below that, refusing honestly is better than pretending.
+    const FLOOR = 320;
+    const attempt = (px: number) => {
+      renderPdfPage(uri, index, px, cacheDir, docKey)
+        .then(r => { if (!dead) { setImg(r.uri); setErr(null); } })
+        .catch((e: any) => {
+          if (dead) return;
+          if (e?.code === 'TOO_LARGE' && px > FLOOR) { attempt(Math.max(FLOOR, Math.round(px / 2))); return; }
+          setErr(e?.code === 'TOO_LARGE'
+            ? 'Page too large to display on this device'
+            : `Page ${index + 1} could not be rendered`);
+        });
+    };
+    attempt(Math.min(Math.round(width * OVERSAMPLE), MAX_PAGE_PX));
     return () => { dead = true; };
   }, [uri, index, width, docKey, cacheDir]);
 
@@ -77,7 +101,7 @@ function Page({
         />
       ) : (
         <View style={s.pagePending}>
-          {err ? <Text style={s.pageErr}>Page {index + 1} could not be rendered</Text>
+          {err ? <Text style={s.pageErr}>{err}</Text>
                : <ActivityIndicator color="rgba(0,0,0,0.35)" />}
         </View>
       )}
