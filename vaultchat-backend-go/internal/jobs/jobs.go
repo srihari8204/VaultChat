@@ -159,6 +159,7 @@ func StartAll(ctx context.Context) {
 	run("media-retention", sweepInterval, sweepDeliveredAttachments)
 	run("sweep-expired-stories", sweepInterval, sweepExpiredStories)
 	run("sweep-games-notify-seen", sweepInterval, sweepGamesNotifySeen)
+	run("sweep-screen-usage", sweepInterval, sweepScreenUsage)
 	run("sweep-games-live-tables", sweepInterval, sweepGamesLiveTables)
 	// Broadcast recordings had no lifecycle at all — see sweepEndedBroadcasts.
 	run("broadcast-retention", sweepInterval, sweepEndedBroadcasts)
@@ -810,6 +811,28 @@ func sweepExpiredStories(ctx context.Context) {
 // ever consulted, so the row protects nothing and is pure growth — small growth
 // (one row per turn taken), but growth with no ceiling, which is how a table
 // nobody is looking at becomes the thing that fills a disk.
+// sweepScreenUsage ages out the aggregate screen counters (audit F9).
+//
+// Migration 130 states a two-year policy and says "the sweep lives with the
+// other retention jobs" — and it did not. Nothing deleted from screen_usage,
+// so a statement in a committed migration described behaviour that did not
+// exist. Found by measuring production rather than by reading the file.
+//
+// The table is tiny — one row per (screen, day), so a few tens of thousands of
+// rows a year — and that is exactly why this is worth having rather than
+// arguing about: nobody will ever notice it growing, which is how a table
+// nobody sweeps becomes a table nobody can explain. Two years is enough to see
+// a feature die, and older rows answer nothing a decision needs.
+//
+// Same batched shape as the sweeps above so one tick cannot take a long lock.
+func sweepScreenUsage(ctx context.Context) {
+	batchedSweep(ctx, "sweep screen-usage",
+		`DELETE FROM screen_usage
+		  WHERE ctid IN (SELECT ctid FROM screen_usage
+		                  WHERE day < CURRENT_DATE - INTERVAL '2 years'
+		                  LIMIT $1)`)
+}
+
 func sweepGamesNotifySeen(ctx context.Context) {
 	batchedSweep(ctx, "sweep games-notify-seen",
 		`DELETE FROM games_notify_seen

@@ -36,8 +36,34 @@ import { api, hasSession } from './api';
 const PREF_KEY = 'vaultchat.usageCounter.enabled';
 const DEFAULT_ENABLED = true;
 
-/** Flush at most this often. Counting is not urgent and never worth a wakeup. */
-const FLUSH_INTERVAL_MS = 5 * 60 * 1000;
+/**
+ * Flush at most this often. Counting is not urgent and never worth a wakeup.
+ *
+ * FIFTEEN, not five. The server allows 12 batches per user per hour
+ * (ConsumeSecure in routes/usage.go), and a five-minute interval produces
+ * exactly 12 — the limit, with zero headroom, before a single
+ * background-triggered flush is counted. Over the limit the server answers 204
+ * and drops the batch: no error, no log, no metric, and the client cannot tell
+ * a dropped batch from an accepted one. A long session would simply stop being
+ * counted and nothing anywhere would say so. Measured during a device
+ * walkthrough: 7 of 12 consumed with 34 minutes of the window left.
+ *
+ * Fifteen minutes is 4/hour, which leaves room for the forced flushes below
+ * and costs at most fifteen minutes of counts if the app is killed — a trade
+ * that is obviously right for a feature whose entire output is "roughly how
+ * often is this screen opened".
+ */
+const FLUSH_INTERVAL_MS = 15 * 60 * 1000;
+
+/**
+ * Even a FORCED flush will not fire more often than this.
+ *
+ * Backgrounding forces a flush so a session's counts are not lost, but a user
+ * switching apps repeatedly would otherwise force one per switch and burn the
+ * hourly allowance in a couple of minutes — the same silent drop, arrived at
+ * from the other direction.
+ */
+const MIN_FORCED_SPACING_MS = 2 * 60 * 1000;
 
 let enabled = DEFAULT_ENABLED;
 let prefLoaded = false;
@@ -88,7 +114,8 @@ export function countScreen(screen: string): void {
 async function maybeFlush(force = false): Promise<void> {
   if (!enabled) return;
   const now = Date.now();
-  if (!force && now - lastFlush < FLUSH_INTERVAL_MS) return;
+  const since = now - lastFlush;
+  if (force ? since < MIN_FORCED_SPACING_MS : since < FLUSH_INTERVAL_MS) return;
   if (Object.keys(pending).length === 0) return;
   lastFlush = now;
 
