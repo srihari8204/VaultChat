@@ -297,11 +297,11 @@ export default function CallRecordingScreen() {
 
   const renderHeader = () => (
     <View style={s.header}>
-      <TouchableOpacity onPress={() => router.back()} style={s.backBtn}>
+      <TouchableOpacity onPress={() => router.back()} accessibilityLabel="Go back" style={s.backBtn}>
         <Ionicons name="arrow-back" size={24} color={colors.text} />
       </TouchableOpacity>
       <Text style={s.headerTitle}>Call Recording</Text>
-      <TouchableOpacity onPress={() => setState('list')} style={s.backBtn}>
+      <TouchableOpacity onPress={() => setState('list')} accessibilityLabel="Past recordings" style={s.backBtn}>
         <Ionicons name="list" size={22} color={colors.accent} />
       </TouchableOpacity>
     </View>
@@ -414,7 +414,7 @@ export default function CallRecordingScreen() {
   const renderIdle = () => (
     <View style={s.idleContainer}>
       <View style={s.idleCircleOuter}>
-        <TouchableOpacity style={s.idleCircleInner} onPress={startRecording}>
+        <TouchableOpacity accessibilityLabel="Start recording" style={s.idleCircleInner} onPress={startRecording}>
           <Ionicons name="mic" size={40} color="#FFF" />
         </TouchableOpacity>
       </View>
@@ -447,10 +447,10 @@ export default function CallRecordingScreen() {
               {item.savedToVault && (
                 <Ionicons name="lock-closed" size={14} color={colors.primary} style={{ marginRight: 8 }} />
               )}
-              <TouchableOpacity onPress={() => playRecording(item.uri)}>
+              <TouchableOpacity accessibilityLabel={`Play the recording of ${item.callerName}`} onPress={() => playRecording(item.uri)}>
                 <Ionicons name="play-circle" size={28} color={colors.accent} />
               </TouchableOpacity>
-              <TouchableOpacity onPress={() => deleteRecording(item.id)} style={{ marginLeft: 10 }}>
+              <TouchableOpacity accessibilityLabel={`Delete the recording of ${item.callerName}`} onPress={() => deleteRecording(item.id)} style={{ marginLeft: 10 }}>
                 <Ionicons name="trash-outline" size={20} color={colors.danger} />
               </TouchableOpacity>
             </View>

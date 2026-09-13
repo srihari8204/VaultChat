@@ -48,7 +48,12 @@ restore() {
 }
 
 say "Rebuilding go-api (compiles inside the container — a Go error fails HERE, before restart)"
-ssh -t "$HOST" "cd $DEST && docker compose $COMPOSE_ARGS build go-api" \
+# --pull is not optional. The Dockerfile builds from the FLOATING tag
+# golang:1.26-alpine, so without it the build silently reuses whichever base
+# layer this box cached — production was three patch releases behind on
+# go1.26.5, with standard-library fixes in 1.26.6/.7/.8, and nothing said so.
+# GET /build now reports the toolchain; this is what keeps it current.
+ssh -t "$HOST" "cd $DEST && docker compose $COMPOSE_ARGS build --pull go-api" \
   || { restore; die "container build failed — source restored, running container untouched"; }
 
 say "Restarting go-api"
@@ -71,7 +76,8 @@ ssh "$HOST" "docker logs --tail 30 vaultchat-go-api-1 2>&1 | grep -iE 'panic|fat
 # Grep INSIDE the container and return only a COUNT. Piping `strings` of a Go
 # binary back over ssh ships tens of megabytes and gets truncated, which failed
 # this check twice while the deploy underneath it was perfectly fine.
-hits=$(ssh "$HOST" "docker exec vaultchat-go-api-1 sh -c 'strings /bin/api | grep -c peerWantsCaptureNotice'" | tr -d '' | tail -1)
+hits=$(ssh "$HOST" "docker exec vaultchat-go-api-1 sh -c 'strings /bin/api | grep -c peerWantsCaptureNotice'" | tr -d '
+' | tail -1)
 [ "${hits:-0}" -ge 1 ] 2>/dev/null \
   && ok "new fields present in the RUNNING binary (${hits} hit)" \
   || { bad "new fields NOT in the running binary (got '${hits}')"; fail=1; }

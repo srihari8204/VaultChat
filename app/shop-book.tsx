@@ -205,7 +205,7 @@ export default function ShopBookScreen() {
       <Stack.Screen options={{ headerShown: false }} />
       {/* Header + mode toggle */}
       <View style={[s.header, { paddingTop: insets.top + 10 }]}>
-        <TouchableOpacity onPress={() => router.back()} hitSlop={10} style={s.hBtn}>
+        <TouchableOpacity onPress={() => router.back()} accessibilityLabel="Go back" hitSlop={10} style={s.hBtn}>
           <Ionicons name="arrow-back" size={22} color="#fff" />
         </TouchableOpacity>
         <View style={{ flex: 1 }}>
@@ -538,7 +538,7 @@ function ShopCard({ shop, onOpen, isFav, onToggleFav }: {
           </View>
         </View>
       </View>
-      <TouchableOpacity onPress={onToggleFav} hitSlop={10} style={{ padding: 4 }}>
+      <TouchableOpacity accessibilityLabel={isFav ? `Remove ${shop.name} from favourites` : `Add ${shop.name} to favourites`} onPress={onToggleFav} hitSlop={10} style={{ padding: 4 }}>
         <Ionicons name={isFav ? 'heart' : 'heart-outline'} size={22} color={isFav ? C.danger : C.sub} />
       </TouchableOpacity>
     </TouchableOpacity>
@@ -691,7 +691,7 @@ function ShopFlow({ shop, cart, setCart, onBack, onPlaced, onLedger, isFav, onTo
                 </View>
               </View>
             </View>
-            <TouchableOpacity onPress={onToggleFav} hitSlop={10} style={{ padding: 4 }}>
+            <TouchableOpacity accessibilityLabel={isFav ? `Remove ${shop.name} from favourites` : `Add ${shop.name} to favourites`} onPress={onToggleFav} hitSlop={10} style={{ padding: 4 }}>
               <Ionicons name={isFav ? 'heart' : 'heart-outline'} size={24} color={isFav ? C.danger : C.sub} />
             </TouchableOpacity>
           </View>
@@ -922,7 +922,7 @@ function Catalog({ shop, cart, setCart, onCart }: {
         <View style={{ flexDirection: 'row', gap: 8 }}>
           <TextInput style={[s.input, { flex: 1, marginBottom: 0 }]} placeholder="Product name (e.g. Maggi)" placeholderTextColor={C.sub}
             value={tName} onChangeText={setTName} />
-          <TouchableOpacity style={[s.micBtn, listening && s.micBtnOn]} onPress={mic}>
+          <TouchableOpacity accessibilityLabel={listening ? "Stop listening" : "Say the product name instead of typing"} style={[s.micBtn, listening && s.micBtnOn]} onPress={mic}>
             <Ionicons name={listening ? 'stop' : 'mic'} size={20} color={listening ? '#fff' : C.green} />
           </TouchableOpacity>
         </View>
@@ -1069,7 +1069,7 @@ function CartView({ shop, cart, setCart, onPlaced, coupons }: {
             <TouchableOpacity style={s.qtyBtn} onPress={() => setQty(it.key, -1)}><Text style={s.qtyBtnText}>−</Text></TouchableOpacity>
             <Text style={s.qtyText}>{it.qty}</Text>
             <TouchableOpacity style={s.qtyBtn} onPress={() => setQty(it.key, 1)}><Text style={s.qtyBtnText}>+</Text></TouchableOpacity>
-            <TouchableOpacity onPress={() => remove(it.key)} style={{ marginLeft: 8 }}>
+            <TouchableOpacity accessibilityLabel={`Remove ${it.name} from the cart`} onPress={() => remove(it.key)} style={{ marginLeft: 8 }}>
               <Ionicons name="trash-outline" size={18} color={C.danger} />
             </TouchableOpacity>
           </View>
@@ -1527,7 +1527,7 @@ function OrderTrack({ orderId, onBack }: { orderId: string; onBack: () => void }
                   <Text style={s.panelTitle}>Rate this order</Text>
                   <View style={{ flexDirection: 'row', gap: 6, marginVertical: 8 }}>
                     {[1, 2, 3, 4, 5].map((n) => (
-                      <TouchableOpacity key={n} onPress={() => setStars(n)}>
+                      <TouchableOpacity accessibilityLabel={`Rate ${n} out of 5`} key={n} onPress={() => setStars(n)}>
                         <Ionicons name={n <= stars ? 'star' : 'star-outline'} size={30} color={C.amber} />
                       </TouchableOpacity>
                     ))}
@@ -1672,7 +1672,7 @@ function CustomerProfile({ me }: { me: { id: string; name: string } | null }) {
       {/* Shopping lists */}
       <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 10 }}>
         <Text style={s.sectionLabel}>🛒 Shopping Lists</Text>
-        <TouchableOpacity onPress={() => setAdding((v) => !v)}>
+        <TouchableOpacity accessibilityLabel={adding ? "Close the new list form" : "New shopping list"} onPress={() => setAdding((v) => !v)}>
           <Ionicons name={adding ? 'close' : 'add-circle'} size={26} color={C.green} />
         </TouchableOpacity>
       </View>
@@ -1693,10 +1693,10 @@ function CustomerProfile({ me }: { me: { id: string; name: string } | null }) {
             <Text numberOfLines={1} style={s.cardTitle}>{l.name}</Text>
             <Text style={s.cardSub} numberOfLines={2}>{l.items.split('\n').filter(Boolean).join(' · ') || 'Empty'}</Text>
           </View>
-          <TouchableOpacity onPress={() => shareList(l)} hitSlop={8} style={{ padding: 4 }}>
+          <TouchableOpacity accessibilityLabel={`Share the list ${l.name}`} onPress={() => shareList(l)} hitSlop={8} style={{ padding: 4 }}>
             <Ionicons name="share-social-outline" size={20} color={C.green} />
           </TouchableOpacity>
-          <TouchableOpacity onPress={() => removeList(l.id)} hitSlop={8} style={{ padding: 4 }}>
+          <TouchableOpacity accessibilityLabel={`Delete the list ${l.name}`} onPress={() => removeList(l.id)} hitSlop={8} style={{ padding: 4 }}>
             <Ionicons name="trash-outline" size={20} color={C.danger} />
           </TouchableOpacity>
         </View>
@@ -1834,7 +1834,7 @@ function OwnerDashboard({ shop, onSettings, onCoupons, onSuppliers, onPlans, onR
             <Text style={[s.badgeText, st.tone === 'closed' && { color: C.danger }]}>{st.label}</Text>
           </View>
         </View>
-        <TouchableOpacity onPress={() => setQr(true)} hitSlop={8} style={{ padding: 4 }}>
+        <TouchableOpacity onPress={() => setQr(true)} accessibilityLabel="Show this shop’s QR code" hitSlop={8} style={{ padding: 4 }}>
           <Ionicons name="qr-code-outline" size={22} color={C.green} />
         </TouchableOpacity>
         <Ionicons name="settings-outline" size={20} color={C.sub} />
@@ -2154,7 +2154,7 @@ function OwnerCoupons({ onBack }: { onBack: () => void }) {
               <Text style={s.cardTitle}>{couponLabel(c2)}</Text>
               <Text style={s.cardSub}>{c2.active ? 'Active' : 'Inactive'}</Text>
             </View>
-            <TouchableOpacity onPress={() => remove(c2.id)} hitSlop={8} style={{ padding: 4 }}>
+            <TouchableOpacity accessibilityLabel={`Delete the coupon ${c2.code}`} onPress={() => remove(c2.id)} hitSlop={8} style={{ padding: 4 }}>
               <Ionicons name="trash-outline" size={20} color={C.danger} />
             </TouchableOpacity>
           </View>
@@ -2222,7 +2222,7 @@ function OwnerSuppliers({ onBack }: { onBack: () => void }) {
               {!!sup.phone && <Text style={s.cardSub}>📞 {sup.phone}</Text>}
               {!!sup.items && <Text style={s.cardSub}>{sup.items}</Text>}
             </View>
-            <TouchableOpacity onPress={() => remove(sup.id)} hitSlop={8} style={{ padding: 4 }}>
+            <TouchableOpacity accessibilityLabel={`Delete the supplier ${sup.name}`} onPress={() => remove(sup.id)} hitSlop={8} style={{ padding: 4 }}>
               <Ionicons name="trash-outline" size={20} color={C.danger} />
             </TouchableOpacity>
           </View>
@@ -2836,7 +2836,7 @@ function PurchasesScreen({ currency, onBack }: { currency?: string; onBack: () =
                 <Text style={s.cardTitle}>{it.name}{it.unit ? ` · ${it.unit}` : ''}</Text>
                 <Text style={s.cardSub}>{it.qty} × {money(it.costPrice)}</Text>
               </View>
-              <TouchableOpacity onPress={() => setItems(items.filter((_, j) => j !== i))}>
+              <TouchableOpacity accessibilityLabel={`Remove ${it.name} from this delivery`} onPress={() => setItems(items.filter((_, j) => j !== i))}>
                 <Ionicons name="trash-outline" size={18} color={C.danger} />
               </TouchableOpacity>
             </View>
@@ -3161,7 +3161,7 @@ function VerificationScreen({ onBack }: { onBack: () => void }) {
                 {!!have?.reviewNote && <Text style={[s.cardSub, { color: C.danger }]}>{have.reviewNote}</Text>}
               </View>
               {have && (
-                <TouchableOpacity onPress={() => view(have)}>
+                <TouchableOpacity accessibilityLabel={`View the uploaded ${kind}`} onPress={() => view(have)}>
                   <Ionicons name="eye-outline" size={20} color={C.green} />
                 </TouchableOpacity>
               )}
@@ -3291,7 +3291,7 @@ function BillScreen({ orderId, onBack }: { orderId: string; onBack: () => void }
                       setQtyDraft({ ...qtyDraft, [l.id]: undefined as any });
                     }}
                   />
-                  <TouchableOpacity onPress={() => patch({ lines: [{ id: l.id, removed: true }] })}>
+                  <TouchableOpacity accessibilityLabel={`Remove ${l.name} from the bill`} onPress={() => patch({ lines: [{ id: l.id, removed: true }] })}>
                     <Ionicons name="trash-outline" size={18} color={C.danger} />
                   </TouchableOpacity>
                 </View>
@@ -3780,7 +3780,7 @@ function CounterSale({ currency, onDone }: { currency?: string; onDone: () => vo
           <TextInput style={[s.input, { flex: 1.4, marginBottom: 0 }]} placeholder="₹ each"
             placeholderTextColor={C.sub} keyboardType="numeric" value={it.price}
             onChangeText={(v) => setItem(i, { price: v })} />
-          <TouchableOpacity onPress={() => setItems(items.filter((_, j) => j !== i))}
+          <TouchableOpacity accessibilityLabel="Remove this item row" onPress={() => setItems(items.filter((_, j) => j !== i))}
             hitSlop={8} style={{ justifyContent: 'center' }}>
             <Ionicons name="close-circle" size={22} color={C.danger} />
           </TouchableOpacity>
@@ -4050,7 +4050,7 @@ function KhataDetail({ customer, currency, onBack }: { customer: SB.CustomerPend
               <TextInput style={[s.input, { flex: 1.4, marginBottom: 0 }]} placeholder="₹ each"
                 placeholderTextColor={C.sub} keyboardType="numeric" value={it.price}
                 onChangeText={(v) => setItem(i, { price: v })} />
-              <TouchableOpacity onPress={() => setItems(items.filter((_, j) => j !== i))}
+              <TouchableOpacity accessibilityLabel="Remove this item row" onPress={() => setItems(items.filter((_, j) => j !== i))}
                 hitSlop={8} style={{ justifyContent: 'center' }}>
                 <Ionicons name="close-circle" size={22} color={C.danger} />
               </TouchableOpacity>
@@ -4568,7 +4568,7 @@ function SubHeader({ title, onBack, right }: {
   return (
     <View style={s.subHeader}>
       {onBack ? (
-        <TouchableOpacity onPress={onBack} hitSlop={10} style={s.hBtn}>
+        <TouchableOpacity onPress={onBack} accessibilityLabel="Go back" hitSlop={10} style={s.hBtn}>
           <Ionicons name="arrow-back" size={22} color={C.text} />
         </TouchableOpacity>
       ) : <View style={{ width: 38 }} />}

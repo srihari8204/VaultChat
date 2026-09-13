@@ -219,7 +219,7 @@ export default function GroupInvitesScreen() {
           />
           {searching && <ActivityIndicator size="small" color={colors.primary} />}
           {!searching && q.length > 0 && (
-            <TouchableOpacity onPress={() => setQ('')} hitSlop={8}>
+            <TouchableOpacity onPress={() => setQ('')} accessibilityLabel="Clear the search" hitSlop={8}>
               <Ionicons name="close-circle" size={17} color={colors.textFaint} />
             </TouchableOpacity>
           )}
@@ -299,7 +299,7 @@ export default function GroupInvitesScreen() {
                   </TouchableOpacity>
                 )}
                 {p.canReject && (
-                  <TouchableOpacity onPress={() => decline(p)} style={st.rowBtn}>
+                  <TouchableOpacity accessibilityLabel={`Decline ${p.name ?? "VaultChat user"}`} onPress={() => decline(p)} style={st.rowBtn}>
                     <Ionicons name="close-circle" size={19} color={colors.danger} />
                   </TouchableOpacity>
                 )}
@@ -332,10 +332,10 @@ export default function GroupInvitesScreen() {
                 </Text>
                 <Text style={{ color: t, fontSize: 11.5 }}>{STATUS_LABEL[inv.status]}</Text>
               </View>
-              <TouchableOpacity onPress={() => doResend(inv)} style={st.rowBtn}>
+              <TouchableOpacity accessibilityLabel={`Resend the invitation to ${inv.name ?? inv.ref ?? "VaultChat user"}`} onPress={() => doResend(inv)} style={st.rowBtn}>
                 <Ionicons name="refresh" size={17} color={colors.primary} />
               </TouchableOpacity>
-              <TouchableOpacity onPress={() => doWithdraw(inv)} style={st.rowBtn}>
+              <TouchableOpacity accessibilityLabel={`Withdraw the invitation to ${inv.name ?? inv.ref ?? "VaultChat user"}`} onPress={() => doWithdraw(inv)} style={st.rowBtn}>
                 <Ionicons name="close-circle" size={17} color={colors.danger} />
               </TouchableOpacity>
             </View>

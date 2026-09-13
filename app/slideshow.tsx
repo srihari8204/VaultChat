@@ -132,15 +132,15 @@ export default function SlideshowScreen() {
       {/* Top bar */}
       {showControls && (
         <View style={st.topBar}>
-          <TouchableOpacity onPress={() => { clearInterval(autoplayTimer.current); router.back(); }} style={st.topBtn}>
+          <TouchableOpacity accessibilityLabel="Close the slideshow" onPress={() => { clearInterval(autoplayTimer.current); router.back(); }} style={st.topBtn}>
             <Ionicons name="close" size={22} color={colors.text} />
           </TouchableOpacity>
           <Text style={st.counter}>{currentIndex + 1} / {imageList.length}</Text>
           <View style={{ flexDirection: 'row', gap: 12 }}>
-            <TouchableOpacity onPress={shareImage} style={st.topBtn}>
+            <TouchableOpacity onPress={shareImage} accessibilityLabel="Share this photo" style={st.topBtn}>
               <Ionicons name="share-outline" size={20} color={colors.text} />
             </TouchableOpacity>
-            <TouchableOpacity onPress={saveToGallery} style={st.topBtn}>
+            <TouchableOpacity onPress={saveToGallery} accessibilityLabel="Save this photo to your gallery" style={st.topBtn}>
               <Ionicons name="download-outline" size={20} color={colors.text} />
             </TouchableOpacity>
           </View>

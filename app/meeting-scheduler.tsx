@@ -238,11 +238,11 @@ function MiniCalendar({ selected, onSelect }: {
     <View style={s.calendarWrap}>
       {/* Month header */}
       <View style={s.calHeader}>
-        <TouchableOpacity onPress={prevMonth} style={s.calNavBtn}>
+        <TouchableOpacity onPress={prevMonth} accessibilityLabel="Previous month" style={s.calNavBtn}>
           <Ionicons name="chevron-back" size={20} color={C.accent} />
         </TouchableOpacity>
         <Text style={s.calMonthLabel}>{MONTH_NAMES[month]} {year}</Text>
-        <TouchableOpacity onPress={nextMonth} style={s.calNavBtn}>
+        <TouchableOpacity onPress={nextMonth} accessibilityLabel="Next month" style={s.calNavBtn}>
           <Ionicons name="chevron-forward" size={20} color={C.accent} />
         </TouchableOpacity>
       </View>
@@ -314,11 +314,11 @@ function TimePicker({ date, onChange }: { date: Date; onChange: (d: Date) => voi
       <View style={s.timeControls}>
         {/* Hour */}
         <View style={s.timeUnit}>
-          <TouchableOpacity onPress={() => adjust('h', 1)} style={s.timeArrow}>
+          <TouchableOpacity onPress={() => adjust('h', 1)} accessibilityLabel="Hour up" style={s.timeArrow}>
             <Ionicons name="chevron-up" size={18} color={C.accent} />
           </TouchableOpacity>
           <Text style={s.timeValue}>{displayHour.toString().padStart(2, '0')}</Text>
-          <TouchableOpacity onPress={() => adjust('h', -1)} style={s.timeArrow}>
+          <TouchableOpacity onPress={() => adjust('h', -1)} accessibilityLabel="Hour down" style={s.timeArrow}>
             <Ionicons name="chevron-down" size={18} color={C.accent} />
           </TouchableOpacity>
         </View>
@@ -327,11 +327,11 @@ function TimePicker({ date, onChange }: { date: Date; onChange: (d: Date) => voi
 
         {/* Minute */}
         <View style={s.timeUnit}>
-          <TouchableOpacity onPress={() => adjust('m', 5)} style={s.timeArrow}>
+          <TouchableOpacity onPress={() => adjust('m', 5)} accessibilityLabel="Minutes up five" style={s.timeArrow}>
             <Ionicons name="chevron-up" size={18} color={C.accent} />
           </TouchableOpacity>
           <Text style={s.timeValue}>{mins.toString().padStart(2, '0')}</Text>
-          <TouchableOpacity onPress={() => adjust('m', -5)} style={s.timeArrow}>
+          <TouchableOpacity onPress={() => adjust('m', -5)} accessibilityLabel="Minutes down five" style={s.timeArrow}>
             <Ionicons name="chevron-down" size={18} color={C.accent} />
           </TouchableOpacity>
         </View>
@@ -485,7 +485,7 @@ export default function MeetingSchedulerScreen() {
         headerTintColor: C.text,
         title: 'Meeting Scheduler',
         headerLeft: () => (
-          <TouchableOpacity onPress={() => router.back()} style={{ paddingRight: 12 }}>
+          <TouchableOpacity onPress={() => router.back()} accessibilityLabel="Go back" style={{ paddingRight: 12 }}>
             <Ionicons name="arrow-back" size={24} color={C.text} />
           </TouchableOpacity>
         ),
@@ -532,7 +532,7 @@ export default function MeetingSchedulerScreen() {
               value={dateInput}
               onChangeText={setDateInput}
             />
-            <TouchableOpacity
+            <TouchableOpacity accessibilityLabel={showCalendar ? "Hide the calendar" : "Pick a date from the calendar"}
               style={s.calendarToggle}
               onPress={() => setShowCalendar(!showCalendar)}
             >

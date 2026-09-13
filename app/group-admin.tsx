@@ -236,7 +236,7 @@ export default function GroupAdminScreen() {
       <Stack.Screen options={{ headerShown: false }} />
 
       <View style={s.header}>
-        <TouchableOpacity onPress={() => router.back()} style={s.backBtn} hitSlop={10}>
+        <TouchableOpacity onPress={() => router.back()} accessibilityLabel="Go back" style={s.backBtn} hitSlop={10}>
           <Ionicons name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
         <Text style={s.headerTitle}>Group Admin</Text>
@@ -344,7 +344,7 @@ export default function GroupAdminScreen() {
                 <View style={s.avatar}><Text style={s.avatarText}>{(r.name || '?').charAt(0).toUpperCase()}</Text></View>
                 <Text style={[s.memberName, { flex: 1 }]} numberOfLines={1}>{r.name || r.userId.slice(0, 8)}</Text>
                 <TouchableOpacity style={s.reqApprove} onPress={() => approveReq(r.userId)}><Text style={s.reqApproveTxt}>Approve</Text></TouchableOpacity>
-                <TouchableOpacity style={s.reqReject} onPress={() => rejectReq(r.userId)} hitSlop={6}><Ionicons name="close" size={18} color={colors.danger} /></TouchableOpacity>
+                <TouchableOpacity accessibilityLabel={`Reject the join request from ${r.name || r.userId.slice(0, 8)}`} style={s.reqReject} onPress={() => rejectReq(r.userId)} hitSlop={6}><Ionicons name="close" size={18} color={colors.danger} /></TouchableOpacity>
               </View>
             ))}
           </View>
@@ -375,7 +375,7 @@ export default function GroupAdminScreen() {
                     <Text style={s.roleBadgeText}>{ROLE_LABELS[role]}</Text>
                   </View>
                   {canManage && (
-                    <TouchableOpacity onPress={() => removeMember(m)} style={s.removeBtn} hitSlop={8}>
+                    <TouchableOpacity accessibilityLabel={`Remove ${label} from the group`} onPress={() => removeMember(m)} style={s.removeBtn} hitSlop={8}>
                       <Ionicons name="close-circle" size={22} color={colors.danger} />
                     </TouchableOpacity>
                   )}

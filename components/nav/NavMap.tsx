@@ -428,23 +428,23 @@ export default function NavMap({
       />
       {zoomControls && (
         <View style={[styles.zoomBox, { backgroundColor: colors.glassSoft, borderColor: colors.glassStroke }]}>
-          <TouchableOpacity onPress={() => ref.current?.injectJavaScript('zoomBy(1);true;')} style={styles.zoomBtn}>
+          <TouchableOpacity onPress={() => ref.current?.injectJavaScript('zoomBy(1);true;')} accessibilityLabel="Zoom in" style={styles.zoomBtn}>
             <Ionicons name="add" size={20} color={colors.text} />
           </TouchableOpacity>
           <View style={[styles.zoomSep, { backgroundColor: colors.border }]} />
-          <TouchableOpacity onPress={() => ref.current?.injectJavaScript('zoomBy(-1);true;')} style={styles.zoomBtn}>
+          <TouchableOpacity onPress={() => ref.current?.injectJavaScript('zoomBy(-1);true;')} accessibilityLabel="Zoom out" style={styles.zoomBtn}>
             <Ionicons name="remove" size={20} color={colors.text} />
           </TouchableOpacity>
         </View>
       )}
       {/* 3D camera toggle — MapLibre only; uncontrolled (hidden when a parent drives cameraMode). */}
       {engine === 'maplibre' && !cameraMode && (
-        <TouchableOpacity onPress={cycleCam} style={[styles.fab, { bottom: zoomControls ? 120 : 66, backgroundColor: colors.glassSoft, borderColor: colors.glassStroke }]}>
+        <TouchableOpacity onPress={cycleCam} accessibilityLabel="Change map view" style={[styles.fab, { bottom: zoomControls ? 120 : 66, backgroundColor: colors.glassSoft, borderColor: colors.glassStroke }]}>
           <Ionicons name={camIcon as any} size={19} color={colors.primary} />
         </TouchableOpacity>
       )}
       {(geo.pos || geo.dest || lock) && (
-        <TouchableOpacity onPress={recenter} style={[styles.fab, { backgroundColor: colors.glassSoft, borderColor: colors.glassStroke }]}>
+        <TouchableOpacity onPress={recenter} accessibilityLabel="Recentre the map on your location" style={[styles.fab, { backgroundColor: colors.glassSoft, borderColor: colors.glassStroke }]}>
           <Ionicons name="locate" size={20} color={colors.primary} />
         </TouchableOpacity>
       )}

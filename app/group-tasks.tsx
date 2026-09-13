@@ -167,7 +167,7 @@ export default function GroupTasksScreen() {
             returnKeyType="done" onSubmitEditing={addTask} maxLength={200}
           />
           {!!title.trim() && (
-            <TouchableOpacity onPress={addTask} disabled={busy}>
+            <TouchableOpacity accessibilityLabel="Add this task" onPress={addTask} disabled={busy}>
               {busy ? <ActivityIndicator size="small" color={colors.primary} />
                 : <Ionicons name="arrow-forward-circle" size={26} color={colors.primary} />}
             </TouchableOpacity>
@@ -225,7 +225,7 @@ export default function GroupTasksScreen() {
           const who = nameOf(t.assignee);
           return (
             <View key={t.id} style={[st.row, { borderColor: colors.glassStroke }]}>
-              <TouchableOpacity onPress={() => toggle(t)} style={st.check} hitSlop={8}>
+              <TouchableOpacity accessibilityLabel={t.done ? `Mark ${t.title} not done` : `Mark ${t.title} done`} onPress={() => toggle(t)} style={st.check} hitSlop={8}>
                 <Ionicons
                   name={t.done ? 'checkmark-circle' : 'ellipse-outline'}
                   size={23}
@@ -249,7 +249,7 @@ export default function GroupTasksScreen() {
                   </Text>
                 )}
               </View>
-              <TouchableOpacity onPress={() => remove(t)} style={{ padding: 6 }} hitSlop={6}>
+              <TouchableOpacity accessibilityLabel={`Delete the task ${t.title}`} onPress={() => remove(t)} style={{ padding: 6 }} hitSlop={6}>
                 <Ionicons name="trash-outline" size={17} color={colors.textFaint} />
               </TouchableOpacity>
             </View>

@@ -1681,7 +1681,7 @@ export default function LiveViewScreen() {
                   <View style={S.inviteHead}>
                     <Ionicons name="lock-closed" size={14} color="#FCD34D" />
                     <AppText style={S.inviteTitle}>Private live — invite people</AppText>
-                    <TouchableOpacity onPress={() => setInviteOpen(false)} hitSlop={8}>
+                    <TouchableOpacity onPress={() => setInviteOpen(false)} accessibilityLabel="Close the invite panel" hitSlop={8}>
                       <Ionicons name="close" size={18} color="#94A3B8" />
                     </TouchableOpacity>
                   </View>
@@ -1705,7 +1705,7 @@ export default function LiveViewScreen() {
                         <AppText style={S.pcLabel}>Passcode</AppText>
                         <AppText style={S.pcValue} selectable>{pc}</AppText>
                       </View>
-                      <TouchableOpacity
+                      <TouchableOpacity accessibilityLabel="Copy the passcode"
                         style={S.inviteBtn}
                         onPress={async () => {
                           await Clipboard.setStringAsync(pc);
@@ -1718,7 +1718,7 @@ export default function LiveViewScreen() {
                     </View>
                   )}
                   <View style={S.inviteRow}>
-                    <TouchableOpacity
+                    <TouchableOpacity accessibilityLabel="Copy the invite link"
                       style={S.inviteBtn}
                       onPress={async () => {
                         await Clipboard.setStringAsync(inviteUrl);
@@ -1728,14 +1728,14 @@ export default function LiveViewScreen() {
                       <Ionicons name="copy-outline" size={15} color="#fff" />
                       <AppText style={S.inviteBtnText}>Copy</AppText>
                     </TouchableOpacity>
-                    <TouchableOpacity
+                    <TouchableOpacity accessibilityLabel="Share the invite link"
                       style={S.inviteBtn}
                       onPress={() => Share.share({ message: 'Join my private live on VaultChat\n' + inviteUrl })}
                     >
                       <Ionicons name="share-social-outline" size={15} color="#fff" />
                       <AppText style={S.inviteBtnText}>Share</AppText>
                     </TouchableOpacity>
-                    <TouchableOpacity style={S.inviteBtn} onPress={makeInvite} disabled={inviteBusy}>
+                    <TouchableOpacity accessibilityLabel="Make a new invite link" style={S.inviteBtn} onPress={makeInvite} disabled={inviteBusy}>
                       <Ionicons name="refresh-outline" size={15} color="#fff" />
                       <AppText style={S.inviteBtnText}>New link</AppText>
                     </TouchableOpacity>
@@ -1773,7 +1773,7 @@ export default function LiveViewScreen() {
                 >
                   <View style={S.chatHead}>
                     <AppText style={S.chatHeadText}>Live chat</AppText>
-                    <TouchableOpacity onPress={() => setChatOpen(false)} hitSlop={10}>
+                    <TouchableOpacity onPress={() => setChatOpen(false)} accessibilityLabel="Close the live chat" hitSlop={10}>
                       <Ionicons name="chevron-down" size={18} color="#94A3B8" />
                     </TouchableOpacity>
                   </View>
@@ -1803,7 +1803,7 @@ export default function LiveViewScreen() {
                       returnKeyType="send"
                       autoFocus
                     />
-                    <TouchableOpacity onPress={send} style={S.chatSend}>
+                    <TouchableOpacity onPress={send} accessibilityLabel="Send" style={S.chatSend}>
                       <Ionicons name="send" size={18} color="#fff" />
                     </TouchableOpacity>
                   </View>

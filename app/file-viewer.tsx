@@ -968,7 +968,7 @@ function FileViewerScreen() {
             </View>
           </TouchableOpacity>
 
-          <TouchableOpacity onPress={toggleAudio} style={s.audioPlayBtn}>
+          <TouchableOpacity onPress={toggleAudio} accessibilityLabel={audioPlaying ? "Pause" : "Play"} style={s.audioPlayBtn}>
             <LinearGradient
               colors={[C.primary, '#3B82F6']}
               style={s.audioPlayGradient}
@@ -1069,7 +1069,7 @@ function FileViewerScreen() {
         )}
         <View style={s.headerInner}>
           {/* Back button */}
-          <TouchableOpacity onPress={() => router.back()} style={s.headerBtn}>
+          <TouchableOpacity onPress={() => router.back()} accessibilityLabel="Go back" style={s.headerBtn}>
             <Ionicons name="arrow-back" size={20} color={C.text} />
           </TouchableOpacity>
 
@@ -1085,7 +1085,7 @@ function FileViewerScreen() {
           </View>
 
           {/* Action buttons */}
-          <TouchableOpacity onPress={handleShare} style={s.headerBtn}>
+          <TouchableOpacity onPress={handleShare} accessibilityLabel="Share this file" style={s.headerBtn}>
             <Ionicons name="share-outline" size={20} color={C.text} />
           </TouchableOpacity>
         </View>

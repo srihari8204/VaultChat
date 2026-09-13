@@ -131,7 +131,12 @@ done
 
 # ── 5. REBUILD ────────────────────────────────────────────────────────
 say "Rebuilding go-api"
-ssh -t "$HOST" "cd $DEST && sudo docker compose $COMPOSE_ARGS build go-api && \
+# --pull is not optional. The Dockerfile builds from the FLOATING tag
+# golang:1.26-alpine, so without it the build silently reuses whichever base
+# layer this box cached — production was three patch releases behind on
+# go1.26.5, with standard-library fixes in 1.26.6/.7/.8, and nothing said so.
+# GET /build now reports the toolchain; this is what keeps it current.
+ssh -t "$HOST" "cd $DEST && sudo docker compose $COMPOSE_ARGS build --pull go-api && \
                 sudo docker compose $COMPOSE_ARGS up -d go-api"
 
 # ── 6. VERIFY — THE PROBE THAT ACTUALLY PROVES IT ─────────────────────

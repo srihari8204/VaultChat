@@ -152,7 +152,12 @@ ssh "$HOST" "docker exec -i $PG psql -U vaultchat -d vaultchat -v ON_ERROR_STOP=
 
 # ── 5. REBUILD ────────────────────────────────────────────────────────
 say "Rebuilding go-api"
-ssh "$HOST" "cd $DEST && docker compose $COMPOSE_ARGS build go-api && \
+# --pull is not optional. The Dockerfile builds from the FLOATING tag
+# golang:1.26-alpine, so without it the build silently reuses whichever base
+# layer this box cached — production was three patch releases behind on
+# go1.26.5, with standard-library fixes in 1.26.6/.7/.8, and nothing said so.
+# GET /build now reports the toolchain; this is what keeps it current.
+ssh "$HOST" "cd $DEST && docker compose $COMPOSE_ARGS build --pull go-api && \
              docker compose $COMPOSE_ARGS up -d go-api"
 
 # ── 6. VERIFY — THE PROBE THAT ACTUALLY PROVES IT ─────────────────────

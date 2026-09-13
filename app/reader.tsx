@@ -98,13 +98,13 @@ function ReaderScreen() {
 
       {/* Header */}
       <View style={[st.head, { paddingTop: insets.top + 8, borderBottomColor: theme.dim + '22' }]}>
-        <TouchableOpacity onPress={() => router.back()} hitSlop={12}>
+        <TouchableOpacity onPress={() => router.back()} accessibilityLabel="Close the reader" hitSlop={12}>
           <Ionicons name="chevron-down" size={26} color={theme.text} />
         </TouchableOpacity>
         <Text style={[st.headTitle, { color: theme.dim }]} numberOfLines={1}>
           {title || 'Reader'}
         </Text>
-        <TouchableOpacity onPress={() => setShowSettings(true)} hitSlop={12}>
+        <TouchableOpacity onPress={() => setShowSettings(true)} accessibilityLabel="Reading settings" hitSlop={12}>
           <Ionicons name="text" size={22} color={theme.text} />
         </TouchableOpacity>
       </View>
@@ -127,11 +127,11 @@ function ReaderScreen() {
 
         {cfg.layout === 'pages' && pages.length > 1 && (
           <View style={st.pager}>
-            <TouchableOpacity disabled={page === 0} onPress={() => setPage(p => p - 1)} hitSlop={10}>
+            <TouchableOpacity disabled={page === 0} onPress={() => setPage(p => p - 1)} accessibilityLabel="Previous page" hitSlop={10}>
               <Ionicons name="chevron-back" size={22} color={page === 0 ? theme.dim + '55' : theme.text} />
             </TouchableOpacity>
             <Text style={{ color: theme.dim, fontSize: 13 }}>{page + 1} / {pages.length}</Text>
-            <TouchableOpacity disabled={page >= pages.length - 1} onPress={() => setPage(p => p + 1)} hitSlop={10}>
+            <TouchableOpacity disabled={page >= pages.length - 1} onPress={() => setPage(p => p + 1)} accessibilityLabel="Next page" hitSlop={10}>
               <Ionicons name="chevron-forward" size={22} color={page >= pages.length - 1 ? theme.dim + '55' : theme.text} />
             </TouchableOpacity>
           </View>
@@ -221,9 +221,9 @@ function Stepper({ label, value, onDec, onInc, theme }: {
       <Text style={{ color: theme.dim, fontSize: 12, fontWeight: '700', letterSpacing: 1, flex: 1 }}>
         {label.toUpperCase()}
       </Text>
-      <TouchableOpacity onPress={onDec} hitSlop={10}><Ionicons name="remove-circle-outline" size={26} color={theme.text} /></TouchableOpacity>
+      <TouchableOpacity onPress={onDec} accessibilityLabel={`Decrease ${label.toLowerCase()}`} hitSlop={10}><Ionicons name="remove-circle-outline" size={26} color={theme.text} /></TouchableOpacity>
       <Text style={{ color: theme.text, fontSize: 15, fontWeight: '600', minWidth: 56, textAlign: 'center' }}>{value}</Text>
-      <TouchableOpacity onPress={onInc} hitSlop={10}><Ionicons name="add-circle-outline" size={26} color={theme.text} /></TouchableOpacity>
+      <TouchableOpacity onPress={onInc} accessibilityLabel={`Increase ${label.toLowerCase()}`} hitSlop={10}><Ionicons name="add-circle-outline" size={26} color={theme.text} /></TouchableOpacity>
     </View>
   );
 }

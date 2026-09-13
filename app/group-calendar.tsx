@@ -185,18 +185,18 @@ export default function GroupCalendarScreen() {
       <Stack.Screen options={{
         title: 'Calendar', headerTitleAlign: 'center',
         headerRight: () => (
-          <TouchableOpacity onPress={() => setComposing(true)} style={{ paddingHorizontal: 8 }}>
+          <TouchableOpacity onPress={() => setComposing(true)} accessibilityLabel="New event" style={{ paddingHorizontal: 8 }}>
             <Ionicons name="add" size={24} color={colors.primary} />
           </TouchableOpacity>
         ),
       }} />
 
       <View style={[st.monthBar, { borderColor: colors.glassStroke }]}>
-        <TouchableOpacity onPress={() => shiftMonth(-1)} hitSlop={10} style={{ padding: 6 }}>
+        <TouchableOpacity onPress={() => shiftMonth(-1)} accessibilityLabel="Previous month" hitSlop={10} style={{ padding: 6 }}>
           <Ionicons name="chevron-back" size={20} color={colors.primary} />
         </TouchableOpacity>
         <Text style={{ color: colors.text, fontWeight: '800', fontSize: 15 }}>{monthLabel(cursor)}</Text>
-        <TouchableOpacity onPress={() => shiftMonth(1)} hitSlop={10} style={{ padding: 6 }}>
+        <TouchableOpacity onPress={() => shiftMonth(1)} accessibilityLabel="Next month" hitSlop={10} style={{ padding: 6 }}>
           <Ionicons name="chevron-forward" size={20} color={colors.primary} />
         </TouchableOpacity>
       </View>

@@ -35,7 +35,22 @@ import path from 'node:path';
 // the story viewer, and encrypted notes — 67 buttons, each label written from
 // the handler and the icon rather than generated. A wrong label is worse than
 // none: a screen reader states it confidently and the user has no way to tell.
-const BUDGET = 215;
+//
+// 13 September, later the same day: 215 → 137. Fifteen more screens swept —
+// shop book, the group tools (tasks, notes, calendar, admin, invites), the
+// reader and shelf, the file viewer and slideshow, live view, the meeting
+// scheduler, finance reminders, call recording and the nav map — 78 buttons,
+// same rule: every label read off its own handler and icon, and where the
+// button acts on a row the label names the row (“Delete the list Monthly
+// groceries”, not “Delete”).
+//
+// 137 → 132 with no further labelling: that sweep found a hole in this very
+// scanner. It only knew react-native's <Text>, so every button using the app's
+// own AppText or ThemedText wrapper was reported as icon-only — eleven false
+// positives that a sweep then spends real attention on. The hole was found by
+// the first sweep to use the guard, which is the right way to find it and the
+// wrong way to keep it.
+const BUDGET = 132;
 
 const ROOTS = ['app', 'components'];
 const SKIP_DIR = /node_modules|\.expo|android|ios|dist|build/;
@@ -120,7 +135,15 @@ for (const root of ROOTS) {
       // something for a screen reader to read, whether or not it is ideal.
       const hasIcon = /<(Ionicons|MaterialIcons|MaterialCommunityIcons|FontAwesome\w*|Feather|AntDesign|Entypo|Octicons|SimpleLineIcons)\b/.test(body);
       if (!hasIcon) continue;
-      const hasText = /<Text\b/.test(body) || /\btitle=/.test(body) || /\blabel=/.test(body);
+      // Every component in this project that RENDERS TEXT, not just
+      // react-native's <Text>. AppText (components/ui/Text.tsx) and ThemedText
+      // (components/themed-text.tsx) are the app's own wrappers, and a scanner
+      // that knew only the built-in one reported AppText buttons as
+      // "icon-only" — false positives that a sweep then spends real attention
+      // labelling. Found by the first sweep to use this guard, which is the
+      // right way to find it and the wrong way to keep it.
+      const hasText = /<(Text|AppText|ThemedText|Label|Heading|Title)\b/.test(body)
+        || /\btitle=/.test(body) || /\blabel=/.test(body);
       if (hasText) continue;
 
       iconOnly++;

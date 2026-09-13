@@ -83,7 +83,7 @@ export default function Reminders() {
   return (
     <View style={s.screen}>
       <FinHeader title="Reminders" right={
-        <TouchableOpacity onPress={() => setShowAdd(v => !v)} hitSlop={8}>
+        <TouchableOpacity accessibilityLabel={showAdd ? "Close the new reminder form" : "Add a reminder"} onPress={() => setShowAdd(v => !v)} hitSlop={8}>
           <Ionicons name={showAdd ? 'close' : 'add-circle'} size={26} color={FIN.brandDeep} />
         </TouchableOpacity>
       } />
@@ -123,9 +123,9 @@ export default function Reminders() {
               <Text style={s.sub}>{fmtDateTime(r.next_at)}</Text>
             </View>
             <Pill label={FREQ_LABEL[r.freq]} fg={FIN.brandDeep} bg={FIN.brandSoft} />
-            <TouchableOpacity onPress={() => onSnooze(r)} hitSlop={6} style={s.iconBtn}><Ionicons name="alarm-outline" size={18} color={FIN.warn} /></TouchableOpacity>
-            <TouchableOpacity onPress={() => onDone(r)} hitSlop={6} style={s.iconBtn}><Ionicons name="checkmark-done" size={18} color={FIN.good} /></TouchableOpacity>
-            <TouchableOpacity onPress={() => onDelete(r)} hitSlop={6} style={s.iconBtn}><Ionicons name="trash-outline" size={17} color={FIN.faint} /></TouchableOpacity>
+            <TouchableOpacity accessibilityLabel={`Snooze ${r.title} for a day`} onPress={() => onSnooze(r)} hitSlop={6} style={s.iconBtn}><Ionicons name="alarm-outline" size={18} color={FIN.warn} /></TouchableOpacity>
+            <TouchableOpacity accessibilityLabel={`Mark ${r.title} done`} onPress={() => onDone(r)} hitSlop={6} style={s.iconBtn}><Ionicons name="checkmark-done" size={18} color={FIN.good} /></TouchableOpacity>
+            <TouchableOpacity accessibilityLabel={`Delete ${r.title}`} onPress={() => onDelete(r)} hitSlop={6} style={s.iconBtn}><Ionicons name="trash-outline" size={17} color={FIN.faint} /></TouchableOpacity>
           </View>
         ))}
 
@@ -137,7 +137,7 @@ export default function Reminders() {
               <Text style={[s.title, { textDecorationLine: 'line-through' }]} numberOfLines={1}>{r.title}</Text>
               <Text style={s.sub}>{fmtDateTime(r.next_at)}</Text>
             </View>
-            <TouchableOpacity onPress={() => onDelete(r)} hitSlop={6} style={s.iconBtn}><Ionicons name="trash-outline" size={17} color={FIN.faint} /></TouchableOpacity>
+            <TouchableOpacity accessibilityLabel={`Delete ${r.title}`} onPress={() => onDelete(r)} hitSlop={6} style={s.iconBtn}><Ionicons name="trash-outline" size={17} color={FIN.faint} /></TouchableOpacity>
           </View>
         ))}
         <View style={{ height: 30 }} />

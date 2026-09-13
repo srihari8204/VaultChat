@@ -70,8 +70,18 @@ rollback() {
   exit 1
 }
 
-say "4/6 build go-api"
-$DC build go-api || rollback
+# --pull is not optional. The Dockerfile builds from the FLOATING tag
+
+# golang:1.26-alpine, so without it the build silently reuses whichever base
+
+# layer this box cached — production was three patch releases behind on
+
+# go1.26.5, with standard-library fixes in 1.26.6/.7/.8, and nothing said so.
+
+# GET /build now reports the toolchain; this is what keeps it current.
+
+say "4/6 build --pull go-api"
+$DC build --pull go-api || rollback
 
 say "5/6 restart go-api only"
 $DC up -d --no-deps go-api || rollback

@@ -113,7 +113,7 @@ export default function ShelfScreen() {
       <Stack.Screen options={{ headerShown: false }} />
 
       <View style={S.head}>
-        <TouchableOpacity onPress={() => router.back()} hitSlop={12}>
+        <TouchableOpacity onPress={() => router.back()} accessibilityLabel="Go back" hitSlop={12}>
           <Ionicons name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
         <Text style={S.title}>Shelf</Text>
@@ -131,7 +131,7 @@ export default function ShelfScreen() {
           autoCorrect={false}
         />
         {search.length > 0 && (
-          <TouchableOpacity onPress={() => setSearch('')} hitSlop={10}>
+          <TouchableOpacity onPress={() => setSearch('')} accessibilityLabel="Clear the filter" hitSlop={10}>
             <Ionicons name="close-circle" size={16} color={colors.textDim} />
           </TouchableOpacity>
         )}
@@ -195,7 +195,7 @@ export default function ShelfScreen() {
                     .filter(Boolean).join(' · ')}
                 </Text>
               </View>
-              <TouchableOpacity onPress={() => togglePin(item.attachmentId)} hitSlop={12}>
+              <TouchableOpacity accessibilityLabel={item.pinned ? `Unpin ${item.filename}` : `Pin ${item.filename}`} onPress={() => togglePin(item.attachmentId)} hitSlop={12}>
                 <Ionicons
                   name={item.pinned ? 'pin' : 'pin-outline'}
                   size={18}

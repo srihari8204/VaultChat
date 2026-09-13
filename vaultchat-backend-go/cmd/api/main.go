@@ -10,6 +10,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"runtime"
 	"time"
 
 	"vaultchat/backend-go/internal/db"
@@ -52,7 +53,13 @@ func buildInfo() map[string]any {
 	if built == "" {
 		built = "unknown"
 	}
-	return map[string]any{"source": source, "builtAt": built}
+	// The Go toolchain that compiled this, because it is a patching question
+	// nobody could answer without running `strings` on the binary. The
+	// Dockerfile builds from the floating `golang:1.26-alpine` tag and the
+	// deploy does not pass --pull, so production silently stays on whichever
+	// base layer the box cached — 1.26.5 was live while 1.26.6 carried
+	// standard-library fixes, and nothing anywhere said so.
+	return map[string]any{"source": source, "builtAt": built, "go": runtime.Version()}
 }
 
 func main() {

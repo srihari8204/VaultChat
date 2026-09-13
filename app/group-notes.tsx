@@ -142,7 +142,7 @@ export default function GroupNotesScreen() {
       <Stack.Screen options={{
         title: 'Notes', headerTitleAlign: 'center',
         headerRight: () => (
-          <TouchableOpacity onPress={openNew} style={{ paddingHorizontal: 8 }}>
+          <TouchableOpacity onPress={openNew} accessibilityLabel="New note" style={{ paddingHorizontal: 8 }}>
             <Ionicons name="add" size={24} color={colors.primary} />
           </TouchableOpacity>
         ),
@@ -167,7 +167,7 @@ export default function GroupNotesScreen() {
                 <Text style={{ color: colors.text, fontWeight: '700', fontSize: 15, flex: 1 }} numberOfLines={1}>
                   {n.title}
                 </Text>
-                <TouchableOpacity onPress={() => togglePin(n)} hitSlop={8}>
+                <TouchableOpacity accessibilityLabel={n.pinned ? `Unpin ${n.title}` : `Pin ${n.title}`} onPress={() => togglePin(n)} hitSlop={8}>
                   <Ionicons name={n.pinned ? 'pin' : 'pin-outline'} size={17} color={n.pinned ? colors.primary : colors.textFaint} />
                 </TouchableOpacity>
               </View>
@@ -193,7 +193,7 @@ export default function GroupNotesScreen() {
                 {editing ? 'Edit note' : 'New note'}
               </Text>
               {!!editing && (
-                <TouchableOpacity onPress={() => remove(editing)} hitSlop={8}>
+                <TouchableOpacity accessibilityLabel="Delete this note" onPress={() => remove(editing)} hitSlop={8}>
                   <Ionicons name="trash-outline" size={19} color={colors.danger} />
                 </TouchableOpacity>
               )}
