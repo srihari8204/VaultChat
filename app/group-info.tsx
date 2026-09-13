@@ -27,6 +27,7 @@ import {
   TextInput,
   TouchableOpacity,
   View,
+  useWindowDimensions,
 } from 'react-native';
 import { getShareViewing, setShareViewing } from '../lib/viewerPrefs';
 import { Ionicons } from '@expo/vector-icons';
@@ -41,9 +42,13 @@ import {
   removeChatMember,
   updateChat,
   uploadAttachment,
+  getMessages,
   type ChatDetail,
   type ChatMember,
+  type Message,
 } from '../lib/chatService';
+import { unionWithLocalHistory } from '../lib/messageHistory';
+import SharedMediaThumb from '../components/chat/SharedMediaThumb';
 import { AuroraBackground } from '../components/ui';
 
 function useS() {
@@ -58,7 +63,11 @@ export default function GroupInfoScreen() {
   const router = useRouter();
   const chatId = (id ?? '').toString();
 
+  const { width: SW } = useWindowDimensions();
+  const mediaSize = (SW - 32 - 8) / 3;   // section padding 16*2, two 4px gaps
+
   const [chat, setChat]   = useState<ChatDetail | null>(null);
+  const [media, setMedia] = useState<Message[]>([]);
   const [meId, setMeId]   = useState<string | null>(null);
   const [authHeader, setAuthHeader] = useState<string | null>(null);
 
@@ -119,6 +128,23 @@ export default function GroupInfoScreen() {
   }, [chatId]);
 
   useEffect(() => { load(); }, [load]);
+
+  // Shared-media strip. Unioned with the device's own history because
+  // delete-on-delivery nulls a delivered body server-side, so the server list
+  // alone drops media this phone can still render. Best-effort: a failure here
+  // just leaves the "Media, links and docs" row without its preview.
+  useEffect(() => {
+    if (!chatId) return;
+    let active = true;
+    (async () => {
+      const server = await getMessages(chatId, { limit: 200 }).catch(() => [] as Message[]);
+      const all = await unionWithLocalHistory(chatId, server, 400).catch(() => [] as Message[]);
+      if (active) {
+        setMedia(all.filter(m => !m.deletedAt && (m.type === 'image' || m.type === 'video')).slice(0, 9));
+      }
+    })();
+    return () => { active = false; };
+  }, [chatId]);
 
   // Apply an optimistic update to `chat` AND persist it so re-opens stay accurate.
   const patchChat = useCallback((fn: (prev: ChatDetail) => ChatDetail) => {
@@ -389,6 +415,20 @@ export default function GroupInfoScreen() {
           </View>
           <Ionicons name="chevron-forward" size={18} color={colors.textDim} />
         </TouchableOpacity>
+        {media.length > 0 && (
+          <View style={S.mediaGrid}>
+            {media.map(m => (
+              <SharedMediaThumb
+                key={m.id}
+                m={m}
+                chatId={chat.id}
+                authHeader={authHeader}
+                size={mediaSize}
+                onPress={() => router.push({ pathname: '/media-gallery', params: { chatId: chat.id } } as any)}
+              />
+            ))}
+          </View>
+        )}
       </View>
 
       {/* Live Chat Viewers (#58) — share whether you're currently viewing this chat */}
@@ -564,6 +604,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   navTitle:      { color: c.text, fontSize: 15, fontWeight: '600' },
   navSub:        { color: c.textDim, fontSize: 12, marginTop: 2 },
   navChevron:    { color: c.textDim, fontSize: 22, fontWeight: '300' },
+  mediaGrid:     { flexDirection: 'row', flexWrap: 'wrap', gap: 4, marginTop: 12 },
 
   descText:      { color: c.text, fontSize: 15, lineHeight: 21, marginTop: 4 },
   descPlaceholder: { color: c.textDim, fontSize: 15, marginTop: 4 },

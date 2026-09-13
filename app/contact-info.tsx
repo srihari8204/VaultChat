@@ -10,7 +10,7 @@
 import { brandAlpha, type Palette } from '../constants/theme';
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
-  View, Text, TouchableOpacity, StyleSheet, StatusBar, ScrollView, Dimensions, Alert, Image, ActivityIndicator, Linking, Switch, useWindowDimensions } from 'react-native';
+  View, Text, TouchableOpacity, StyleSheet, StatusBar, ScrollView, Dimensions, Alert, ActivityIndicator, Linking, Switch, useWindowDimensions } from 'react-native';
 import { getShareViewing, setShareViewing } from '../lib/viewerPrefs';
 import LinkPreview from '../components/LinkPreview';
 import { useLocalSearchParams, Stack, useRouter } from 'expo-router';
@@ -20,9 +20,9 @@ import { E2EE_ENABLED } from '../constants/flags';
 import { getAccessToken } from '../lib/api';
 import {
   getChat, getMessages, muteChat, listBlocks, blockUser, unblockUser, reportUser,
-  decryptFromChat, attachmentUrl, getCommonGroups, type Message, type ChatMember,
+  attachmentUrl, getCommonGroups, type Message, type ChatMember,
 } from '../lib/chatService';
-import { getDecryptedAttachmentUri, parseMediaContent } from '../lib/mediaAttachments';
+import SharedMediaThumb from '../components/chat/SharedMediaThumb';
 import { readCache, writeCache } from '../lib/localCache';
 import { unionWithLocalHistory } from '../lib/messageHistory';
 import { Avatar, AuroraBackground } from '../components/ui';
@@ -294,10 +294,7 @@ export default function ContactInfoScreen() {
             </View>
             <View style={s.mediaGrid}>
               {media.map(m => (
-                <View key={m.id} style={s.mediaTile}>
-                  <SharedMediaThumb m={m} chatId={chatId} authHeader={authHeader} />
-                  {m.type === 'video' && <View style={s.videoBadge}><Ionicons name="play" size={12} color="#fff" /></View>}
-                </View>
+                <SharedMediaThumb key={m.id} m={m} chatId={chatId} authHeader={authHeader} size={MEDIA_SIZE} />
               ))}
             </View>
           </View>
@@ -401,37 +398,6 @@ export default function ContactInfoScreen() {
   );
 }
 
-// Shared-media thumbnail. Decrypts encrypted attachments (recovering the per-file
-// key from the message content) to a local file; renders plaintext via the auth'd
-// /uploads URL. Falls back to a placeholder icon while resolving / on failure.
-function SharedMediaThumb({ m, chatId, authHeader }: {
-  m: Message; chatId?: string; authHeader: string | null;
-}) {
-  const { colors } = useTheme();
-  const s = useS();
-  const [src, setSrc] = useState<{ uri: string; headers?: Record<string, string> } | null>(null);
-  useEffect(() => {
-    let cancel = false;
-    (async () => {
-      const aid = m.meta?.attachmentId;
-      if (!aid) return;
-      if (m.meta?.encrypted) {
-        try {
-          const plain = await decryptFromChat(String(chatId || ''), m.senderId, m.content, m.id);
-          await parseMediaContent(aid, plain);
-          const r = await getDecryptedAttachmentUri(aid);
-          if (!cancel) setSrc(r);
-        } catch { /* leave placeholder */ }
-      } else if (authHeader) {
-        if (!cancel) setSrc({ uri: attachmentUrl(aid), headers: { Authorization: authHeader } });
-      }
-    })();
-    return () => { cancel = true; };
-  }, [m, chatId, authHeader]);
-  if (!src) return <Ionicons name={m.type === 'video' ? 'videocam' : 'image'} size={24} color={colors.textFaint} />;
-  return <Image source={src} style={s.mediaImg} />;
-}
-
 const makeStyles = (c: Palette) => StyleSheet.create({
   root: { flex: 1, backgroundColor: 'transparent' },
   hero: { alignItems: 'center', paddingTop: 54, paddingBottom: 24 },
@@ -453,9 +419,6 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   aboutText: { color: c.text, fontSize: 15, lineHeight: 21 },
   seeAll: { color: c.accent, fontSize: 13, fontWeight: '600', marginBottom: 12 },
   mediaGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 4 },
-  mediaTile: { width: MEDIA_SIZE, height: MEDIA_SIZE, borderRadius: 8, backgroundColor: c.surfaceSolid, justifyContent: 'center', alignItems: 'center', overflow: 'hidden' },
-  mediaImg: { width: '100%', height: '100%' },
-  videoBadge: { position: 'absolute', width: 26, height: 26, borderRadius: 13, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center' },
   fileRow: { flexDirection: 'row', alignItems: 'center', backgroundColor: c.glassSoft, borderRadius: 12, borderWidth: 1, borderColor: c.glassStroke, padding: 12, marginBottom: 6, gap: 12 },
   fileIcon: { width: 38, height: 38, borderRadius: 10, backgroundColor: 'rgba(6,182,212,0.12)', justifyContent: 'center', alignItems: 'center' },
   fileName: { flex: 1, color: c.text, fontSize: 14, fontWeight: '500' },

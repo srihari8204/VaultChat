@@ -5,7 +5,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import React, { useState , useMemo} from 'react';
 import {
-  View, Text, StyleSheet, TouchableOpacity, Alert, Platform, ActivityIndicator,
+  View, Text, StyleSheet, TouchableOpacity, Alert, Platform, ActivityIndicator, ScrollView,
 } from 'react-native';
 import { type Palette } from '../constants/theme';
 import { useTheme } from '../lib/theme';
@@ -13,6 +13,7 @@ import { Stack, useRouter, useLocalSearchParams } from 'expo-router';
 import * as Location from 'expo-location';
 import { sendMessage } from '../lib/chatService';
 import { AuroraBackground } from '../components/ui';
+import LocationMap from '../components/LocationMap';
 
 // const RED = '#EF4444';
 
@@ -31,16 +32,21 @@ export default function CurrentLocationScreen() {
   const [loading, setLoading] = useState(false);
   const [, setShared] = useState(false);
   const [address, setAddress] = useState('');
+  // So the map can say WHY it is blank. Only the call that asked knows the
+  // difference between "refused" and "not asked yet".
+  const [denied, setDenied] = useState(false);
 
   const getLocation = async () => {
     setLoading(true);
     try {
       const { status } = await Location.requestForegroundPermissionsAsync();
       if (status !== 'granted') {
+        setDenied(true);
         Alert.alert('Permission Denied', 'Location permission is required');
         setLoading(false);
         return;
       }
+      setDenied(false);
 
       const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
       setLocation(loc);
@@ -104,10 +110,16 @@ export default function CurrentLocationScreen() {
         </View>
       </View>
 
-      <View style={s.body}>
+      <ScrollView style={{ flex: 1 }} contentContainerStyle={s.body}>
         {!location ? (
           <>
-            <Text style={s.bigIcon}>{'\uD83D\uDCCC'}</Text>
+            {/* Refused, not merely un-asked: say which, rather than leaving a
+                blank space where the map would be. */}
+            {denied ? (
+              <LocationMap coord={null} status="denied" height={140} style={{ width: '100%', marginBottom: 16 }} />
+            ) : (
+              <Text style={s.bigIcon}>{'\uD83D\uDCCC'}</Text>
+            )}
             <Text style={s.title}>Share Current Location</Text>
             <Text style={s.sub}>
               Get your precise GPS coordinates and share them as a snapshot. The location is a one-time pin — not live tracking.
@@ -129,6 +141,13 @@ export default function CurrentLocationScreen() {
           </>
         ) : (
           <>
+            {/* The pin, on a real map — the coordinates below are the detail,
+                not the answer to "where am I". */}
+            <LocationMap
+              coord={{ lat: location.coords.latitude, lng: location.coords.longitude }}
+              height={190}
+              style={{ width: '100%', marginBottom: 14 }}
+            />
             <View style={s.locCard}>
               <Text style={s.locIcon}>{'\uD83D\uDCCD'}</Text>
               <Text style={s.locTitle}>Location Found</Text>
@@ -167,7 +186,7 @@ export default function CurrentLocationScreen() {
             </TouchableOpacity>
           </>
         )}
-      </View>
+      </ScrollView>
     </View>
   );
 }
@@ -180,7 +199,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   headerTitle: { fontSize: 16, fontWeight: '700', color: c.text },
   headerSub: { fontSize: 11, color: c.textDim, marginTop: 1 },
 
-  body: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24 },
+  body: { flexGrow: 1, alignItems: 'center', justifyContent: 'center', padding: 24 },
   bigIcon: { fontSize: 56, marginBottom: 16 },
   title: { fontSize: 22, fontWeight: '700', color: c.text, marginBottom: 8 },
   sub: { fontSize: 14, color: c.textDim, textAlign: 'center', lineHeight: 20, marginBottom: 28 },

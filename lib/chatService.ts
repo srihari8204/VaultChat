@@ -31,6 +31,7 @@ export interface ChatSummary {
   myLastReadId:  number | null;
   muted:         boolean;
   pinned:        boolean;
+  favourite:     boolean;
   archived:      boolean;
   hidden:        boolean;
   unreadCount:   number;
@@ -2425,6 +2426,12 @@ export async function pinChat(chatId: string, pinned: boolean): Promise<void> {
   await api(`/chats/${encodeURIComponent(chatId)}/pin`, {
     method: 'POST',
     json: { pinned },
+  });
+}
+export async function setFavourite(chatId: string, favourite: boolean): Promise<void> {
+  await api(`/chats/${encodeURIComponent(chatId)}/favourite`, {
+    method: 'POST',
+    json: { favourite },
   });
 }
 export async function archiveChat(chatId: string, archived: boolean): Promise<void> {

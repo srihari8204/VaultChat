@@ -26,6 +26,7 @@ import { getSocket } from '../lib/socket';
 import { sendMessage } from '../lib/chatService';
 import { newLiveKey, encryptPosition } from '../lib/liveLocationCrypto';
 import { AuroraBackground } from '../components/ui';
+import LocationMap, { type MapPoint } from '../components/LocationMap';
 
 const DURATIONS = [
   { val: 15, label: '15 min' }, { val: 30, label: '30 min' }, { val: 60, label: '1 hr' },
@@ -57,6 +58,12 @@ export default function LocationSharingScreen() {
   const [loading, setLoading] = useState(false);
   const [coords, setCoords] = useState<{ lat: number; lng: number } | null>(null);
   const [address, setAddress] = useState('Getting your location…');
+  // Render-only. `denied` lets the map say WHY it is blank instead of showing
+  // an endless spinner; `trail` is the path drawn while live sharing runs,
+  // built from the fixes the watcher already delivers — nothing extra is
+  // collected, stored or sent.
+  const [denied, setDenied] = useState(false);
+  const [trail, setTrail] = useState<MapPoint[]>([]);
 
   const watchRef = useRef<Location.LocationSubscription | null>(null);
   const socketRef = useRef<any>(null);
@@ -66,7 +73,11 @@ export default function LocationSharingScreen() {
     let mounted = true;
     (async () => {
       const { status } = await Location.requestForegroundPermissionsAsync();
-      if (status !== 'granted') { Alert.alert('Permission needed', 'Location access is required.'); return; }
+      if (status !== 'granted') {
+        if (mounted) setDenied(true);
+        Alert.alert('Permission needed', 'Location access is required.');
+        return;
+      }
       const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
       if (!mounted) return;
       setCoords({ lat: loc.coords.latitude, lng: loc.coords.longitude });
@@ -118,12 +129,14 @@ export default function LocationSharingScreen() {
       }), 'location');
 
       if (isLive) {
+        setTrail([coords]);
         socketRef.current = await getSocket();
         await Location.requestBackgroundPermissionsAsync().catch(() => {});
         watchRef.current = await Location.watchPositionAsync(
           { accuracy: Location.Accuracy.BestForNavigation, timeInterval: 8000, distanceInterval: 8 },
           (loc) => {
             setCoords({ lat: loc.coords.latitude, lng: loc.coords.longitude });
+            setTrail((t) => [...t, { lat: loc.coords.latitude, lng: loc.coords.longitude }]);
             // Encrypt each position with the session key → relay opaque blob.
             const blob = liveKey && encryptPosition(liveKey, { lat: loc.coords.latitude, lng: loc.coords.longitude, address });
             if (blob) socketRef.current?.emit('live_location_update', { chatId, blob, until: untilRef.current });
@@ -156,11 +169,16 @@ export default function LocationSharingScreen() {
     return (
       <SafeAreaView style={s.root}>
         <View style={[s.center, { flex: 1, padding: 20 }]}>
-          <View style={[s.pulseOuter, { borderColor: `${col}40` }]}>
-            <View style={[s.pulseInner, { backgroundColor: `${col}15`, borderColor: `${col}55` }]}>
-              <View style={[s.pin, { backgroundColor: col }]}><Ionicons name="location" size={26} color="#fff" /></View>
-            </View>
-          </View>
+          {/* The decorative pulse rings said "sharing" without ever saying
+              WHERE. This is the actual position, and in live mode the path
+              travelled since sharing started. */}
+          <LocationMap
+            coord={coords}
+            trail={mode === 'current' ? null : trail}
+            status={denied ? 'denied' : undefined}
+            height={240}
+            style={{ width: '100%', marginBottom: 18 }}
+          />
           <View style={[s.badge, { backgroundColor: `${col}15`, borderColor: `${col}33`, marginBottom: 10 }]}>
             <View style={[s.dot, { backgroundColor: col }]} />
             <Text style={[s.badgeText, { color: col }]}>{mode === 'current' ? 'SNAPSHOT SHARED' : 'LIVE'}</Text>
@@ -233,6 +251,13 @@ export default function LocationSharingScreen() {
           <Ionicons name="location-outline" size={13} color={colors.textDim} />
           <Text style={s.sub}>{address}</Text>
         </View>
+        {/* Preview: what the other side will see a pin on, before you pick a mode. */}
+        <LocationMap
+          coord={coords}
+          status={denied ? 'denied' : undefined}
+          height={170}
+          style={{ marginBottom: 16 }}
+        />
         {!chatId && <Text style={[s.sub, { color: C.live, marginBottom: 12 }]}>Open this from a chat to share.</Text>}
 
         {([
@@ -271,7 +296,4 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   durLabel: { fontSize: 12, fontWeight: '800' },
   btn: { borderRadius: 14, padding: 14, alignItems: 'center', marginBottom: 10 },
   btnTxt: { fontSize: 14, fontWeight: '800', color: '#fff' },
-  pulseOuter: { width: 180, height: 180, borderRadius: 90, borderWidth: 1, alignItems: 'center', justifyContent: 'center', marginBottom: 24 },
-  pulseInner: { width: 120, height: 120, borderRadius: 60, borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
-  pin: { width: 64, height: 64, borderRadius: 32, alignItems: 'center', justifyContent: 'center' },
 });

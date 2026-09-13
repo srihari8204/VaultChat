@@ -26,6 +26,7 @@ import { sendMessage } from '../lib/chatService';
 import { emit } from '../lib/socket';
 import { newLiveKey, encryptPosition } from '../lib/liveLocationCrypto';
 import { AuroraBackground } from '../components/ui';
+import LocationMap, { type MapPoint } from '../components/LocationMap';
 
 const DURATIONS = [
   { label: '15 minutes', seconds: 900 },
@@ -61,6 +62,10 @@ export default function LocationScreen() {
   const [selDuration, setSelDuration] = useState(0);
   const [live, setLive] = useState(false);
   const [timeLeft, setTimeLeft] = useState(0);
+  // Render-only: the path drawn on the map while live sharing is running. It is
+  // built from the fixes the watcher already delivers — nothing extra is
+  // collected, stored or sent.
+  const [trail, setTrail] = useState<MapPoint[]>([]);
 
   const watchRef = useRef<Location.LocationSubscription | null>(null);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -117,6 +122,7 @@ export default function LocationScreen() {
     if (chatId) emit('live_location_stop', { chatId }).catch(() => {});
     setLive(false);
     setTimeLeft(0);
+    setTrail([]);
   }, [chatId]);
 
   const startLive = useCallback(async () => {
@@ -140,6 +146,7 @@ export default function LocationScreen() {
 
     setLive(true);
     setTimeLeft(dur.seconds);
+    setTrail([{ lat: loc.coords.latitude, lng: loc.coords.longitude }]);
 
     // Encrypt each position with the session key and relay the opaque blob.
     const pushUpdate = (latitude: number, longitude: number) => {
@@ -153,6 +160,7 @@ export default function LocationScreen() {
         { accuracy: Location.Accuracy.Balanced, timeInterval: 5000, distanceInterval: 10 },
         (newPos) => {
           setLoc(newPos);
+          setTrail((t) => [...t, { lat: newPos.coords.latitude, lng: newPos.coords.longitude }]);
           pushUpdate(newPos.coords.latitude, newPos.coords.longitude);
         },
       );
@@ -200,9 +208,17 @@ export default function LocationScreen() {
       </View>
 
       <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 40 }}>
-        {/* Map / coordinates */}
+        {/* The real map. While live sharing runs it also draws the path
+            travelled so far, from the fixes the watcher already delivers. */}
+        <LocationMap
+          coord={lat != null && lng != null ? { lat, lng } : null}
+          trail={live ? trail : null}
+          height={220}
+          style={{ marginBottom: 12 }}
+        />
+
+        {/* Address / coordinates */}
         <View style={S.mapCard}>
-          <Ionicons name="location" size={40} color={colors.primary} />
           {loading ? (
             <ActivityIndicator color={colors.primary} style={{ marginTop: 8 }} />
           ) : (

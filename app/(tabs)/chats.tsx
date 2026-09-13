@@ -18,7 +18,7 @@ import { Avatar, AuroraBackground, GlassChip } from '../../components/ui';
 import { canSplit } from '../../lib/responsive';
 import { getAccessToken } from '../../lib/api';
 import {
-  archiveChat, attachmentUrl, listChats, listStoriesFeed, muteChat, pinChat, setHidden,
+  archiveChat, attachmentUrl, listChats, listStoriesFeed, muteChat, pinChat, setFavourite, setHidden,
   hydrateOwnPreviews,
   myInvitations,
   type ChatSummary,
@@ -37,10 +37,11 @@ import { isFamEvent } from '../../lib/family/alerts';
 
 type LastMsg = { content: string | null; type: string | null; senderId: string | null; id: number };
 
-type FolderId = 'all' | 'unread' | 'groups' | 'pinned' | 'archive';
+type FolderId = 'all' | 'unread' | 'favourites' | 'groups' | 'pinned' | 'archive';
 const FOLDERS: { id: FolderId; label: string }[] = [
   { id: 'all', label: 'All' },
   { id: 'unread', label: 'Unread' },
+  { id: 'favourites', label: 'Favourites' },
   { id: 'groups', label: 'Groups' },
   { id: 'pinned', label: 'Pinned' },
   { id: 'archive', label: 'Archive' },
@@ -366,6 +367,12 @@ export default function ChatsScreen() {
     try { await pinChat(chat.id, next); await fetchList(); }
     catch (e: any) { patch(chat.id, { pinned: !next }); setError(e?.message ?? 'Pin failed'); }
   };
+  const doFavourite = async (chat: ChatSummary) => {
+    const next = !chat.favourite;
+    patch(chat.id, { favourite: next });
+    try { await setFavourite(chat.id, next); await fetchList(); }
+    catch (e: any) { patch(chat.id, { favourite: !next }); setError(e?.message ?? 'Favourite failed'); }
+  };
   const doMute = async (chat: ChatSummary) => {
     const next = !chat.muted;
     patch(chat.id, { muted: next });
@@ -413,6 +420,7 @@ export default function ChatsScreen() {
     fetchList();
   };
   const bulkPin     = () => bulkRun(id => { patch(id, { pinned: true });   return pinChat(id, true); });
+  const bulkFav     = () => bulkRun(id => { patch(id, { favourite: true }); return setFavourite(id, true); });
   const bulkMute    = () => bulkRun(id => { patch(id, { muted: true });    return muteChat(id, true); });
   const bulkArchive = () => bulkRun(id => { patch(id, { archived: true }); return archiveChat(id, true); });
   const bulkDelete  = () => {
@@ -433,6 +441,7 @@ export default function ChatsScreen() {
     const base = chats.filter(c => !c.archived);
     switch (folder) {
       case 'unread': return base.filter(c => c.unreadCount > 0);
+      case 'favourites': return base.filter(c => c.favourite);
       case 'groups': return base.filter(c => c.type === 'group');
       case 'pinned': return base.filter(c => c.pinned);
       default: return base;
@@ -494,6 +503,7 @@ export default function ChatsScreen() {
               </TouchableOpacity>
             )}
             <TouchableOpacity onPress={bulkPin} style={S.headerBtn} accessibilityLabel="Pin selected chats"><Ionicons name="pin" size={20} color={colors.text} /></TouchableOpacity>
+            <TouchableOpacity onPress={bulkFav} style={S.headerBtn} accessibilityLabel="Add selected chats to favourites"><Ionicons name="heart-outline" size={20} color={colors.text} /></TouchableOpacity>
             <TouchableOpacity onPress={bulkMute} style={S.headerBtn} accessibilityLabel="Mute selected chats"><Ionicons name="notifications-off-outline" size={20} color={colors.text} /></TouchableOpacity>
             <TouchableOpacity onPress={bulkArchive} style={S.headerBtn} accessibilityLabel="Archive selected chats"><Ionicons name="archive-outline" size={20} color={colors.text} /></TouchableOpacity>
             <TouchableOpacity onPress={bulkDelete} style={S.headerBtn} accessibilityLabel="Delete selected chats"><Ionicons name="trash-outline" size={20} color={colors.danger} /></TouchableOpacity>
@@ -557,6 +567,7 @@ export default function ChatsScreen() {
       <ScrollView horizontal showsHorizontalScrollIndicator={false} style={S.folderScroll} contentContainerStyle={S.folderRow}>
         {FOLDERS.map(f => {
           const count = f.id === 'unread' ? chats.filter(c => !c.archived && c.unreadCount > 0).length
+            : f.id === 'favourites' ? chats.filter(c => !c.archived && c.favourite).length
             : f.id === 'pinned' ? chats.filter(c => !c.archived && c.pinned).length
             : f.id === 'archive' ? chats.filter(c => c.archived).length : 0;
           const active = folder === f.id;
@@ -633,6 +644,7 @@ export default function ChatsScreen() {
               {menuChat ? (menuChat.type === 'direct' ? (menuChat.peerName || menuChat.name || 'Direct chat') : (menuChat.name || 'Group chat')) : ''}
             </Text>
             <SheetItem icon={menuChat?.pinned ? 'pin' : 'pin-outline'} label={menuChat?.pinned ? 'Unpin' : 'Pin'} onPress={() => { const c = menuChat!; setMenuChat(null); doPin(c); }} />
+            <SheetItem icon={menuChat?.favourite ? 'heart' : 'heart-outline'} label={menuChat?.favourite ? 'Remove from favourites' : 'Add to favourites'} onPress={() => { const c = menuChat!; setMenuChat(null); doFavourite(c); }} />
             <SheetItem icon={menuChat?.muted ? 'notifications-outline' : 'notifications-off-outline'} label={menuChat?.muted ? 'Unmute' : 'Mute'} onPress={() => { const c = menuChat!; setMenuChat(null); doMute(c); }} />
             <SheetItem icon={menuChat?.archived ? 'archive' : 'archive-outline'} label={menuChat?.archived ? 'Unarchive' : 'Archive'} onPress={() => { const c = menuChat!; setMenuChat(null); doArchive(c); }} />
             <SheetItem icon="trash-outline" label="Delete chat" danger onPress={() => { const c = menuChat!; setMenuChat(null); doDelete(c); }} />

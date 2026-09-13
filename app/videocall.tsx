@@ -69,10 +69,31 @@ type CallState = 'connecting' | 'ringing' | 'connected' | 'ended';
 // Matrix layout: [Rr Rg Rb Ra Roff,  Gr Gg Gb Ga Goff,  Br Bg Bb Ba Boff,  Ar Ag Ab Aa Aoff]
 // Each output channel = sum(input * coef) + offset/255.
 //
-// `react-native-color-matrix-image-filters` is installed but not imported
-// here — it would only apply to <Image> children, and the call screen
-// renders <RTCView> + <Text> initials, no raster Image. Import it in
-// path-2 wherever an Image preview gets wrapped.
+// WHAT THESE MATRICES ACTUALLY DO TODAY, and what they could do.
+//
+// Today: nothing pixel-level. `matrixToOverlay` derives a flat tint+opacity
+// from each matrix and paints it over the LOCAL PREVIEW only. It is a
+// cosmetic approximation of the matrix, not the matrix.
+//
+// The old note here said `react-native-color-matrix-image-filters` was
+// installed and merely unimported. It is NOT installed — it was removed in
+// 6e3e586 (the Windows MAX_PATH fix) — and it would not have helped anyway:
+// it operates on <Image>, and this screen renders <RTCView>, which is a
+// SurfaceView. Do not re-add it; there is no raster surface to apply it to.
+//
+// The real path is already in the installed stack, and it is NOT the
+// VisionCamera + Skia route the backlog describes (that route cannot work:
+// VisionCamera holds the camera through CameraX while WebRTC holds it through
+// Camera2, and they cannot both have it during a call).
+// `@livekit/react-native-webrtc` exposes
+// `MediaStreamTrack._setVideoEffects(names)` — verified present in
+// lib/typescript/MediaStreamTrack.d.ts — which reaches
+// GetUserMediaImpl.setVideoProcessor via
+// android/.../videoEffects/ProcessorProvider.java. That sits UPSTREAM of the
+// encoder, so a processor registered there changes what the far side receives,
+// not just what you see. ProcessorProvider's registry is simply empty; it
+// wants a native VideoFrameProcessor, and these 4x5 matrices carry over into
+// a fragment shader unchanged. Android only, and it needs Kotlin.
 
 type FilterId = 'none' | 'soft' | 'warm' | 'glow' | 'cool' | 'mono' | 'vivid';
 interface FilterDef {
@@ -408,9 +429,12 @@ function VideoCallEngine() {
             <Text style={S.placeholderInitial}>{(displayName.trim()[0] ?? '?').toUpperCase()}</Text>
           </View>
         )}
-        {overlay.tint && (
-          <View pointerEvents="none" style={[StyleSheet.absoluteFillObject, { backgroundColor: overlay.tint, opacity: overlay.opacity }]} />
-        )}
+        {/* NO beautify overlay here. This view is the OTHER PERSON's video.
+            The tint used to be painted over it as well as over the local
+            preview, so turning on "Glow" or "Warm" recoloured their face on
+            your screen — a filter you chose for yourself, silently applied to
+            them. Beautify is a self-view effect; it belongs on the local
+            preview below and nowhere else. */}
       </View>
 
       <View style={[S.topBar, { top: insets.top + 8 }]} pointerEvents="none">
@@ -928,13 +952,8 @@ function VideoCallLegacy() {
             <Text style={S.placeholderInitial}>{(peerName?.trim()[0] ?? '?').toUpperCase()}</Text>
           </View>
         )}
-        {/* Beautify overlay — derived from filter's ColorMatrix */}
-        {overlay.tint && (
-          <View
-            pointerEvents="none"
-            style={[StyleSheet.absoluteFillObject, { backgroundColor: overlay.tint, opacity: overlay.opacity }]}
-          />
-        )}
+        {/* NO beautify overlay here — see the note on the other remote view.
+            This is the person you are talking to; your filter is not theirs. */}
       </View>
 
       {/* Top bar: name + status (offset below the notch / status bar) */}

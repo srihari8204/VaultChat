@@ -55,12 +55,12 @@ func chatsGet(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var (
-		cID, cType                                   string
-		cName, cDescription, cPhotoURL, cCreatedBy   *string
-		cCreatedAt, cUpdatedAt                       time.Time
-		cLastMessageID, cPinnedMessageID             *int64
-		cLastMessageAt                               *time.Time
-		cDisappearing                                *int64
+		cID, cType                                 string
+		cName, cDescription, cPhotoURL, cCreatedBy *string
+		cCreatedAt, cUpdatedAt                     time.Time
+		cLastMessageID, cPinnedMessageID           *int64
+		cLastMessageAt                             *time.Time
+		cDisappearing                              *int64
 		// Migration 120: the whole chat self-destructs at this time. NULL = never.
 		cExpiresAt                                   *time.Time
 		cSlowMode                                    int64
@@ -226,7 +226,7 @@ func chatsGet(w http.ResponseWriter, r *http.Request) {
 		// and photo in `members` below is a placeholder. The client shows a ghost
 		// and offers "Save contact" off this flag rather than by recognising the
 		// placeholder name, which somebody could genuinely be called.
-		"anonMasked": anonMasked,
+		"anonMasked":          anonMasked,
 		"id":                  cID,
 		"type":                cType,
 		"name":                cName,
@@ -241,14 +241,14 @@ func chatsGet(w http.ResponseWriter, r *http.Request) {
 		"disappearingSeconds": cDisappearing,
 		// Migration 120: when this whole conversation deletes itself. The client
 		// counts down against it; null means it never does.
-		"expiresAt":           httpx.JST(cExpiresAt),
-		"slowModeSeconds":     cSlowMode,
-		"sendPolicy":          chatsStrDefault(cSendPolicy, "everyone"),
-		"mediaPolicy":         chatsStrDefault(cMediaPolicy, "everyone"),
-		"addMembersPolicy":    chatsStrDefault(cAddMembersPolicy, "admins"),
-		"antiSpamLinks":       cAntiSpamLinks,
-		"approveMembers":      cApproveMembers,
-		"members":             pubMembers,
+		"expiresAt":        httpx.JST(cExpiresAt),
+		"slowModeSeconds":  cSlowMode,
+		"sendPolicy":       chatsStrDefault(cSendPolicy, "everyone"),
+		"mediaPolicy":      chatsStrDefault(cMediaPolicy, "everyone"),
+		"addMembersPolicy": chatsStrDefault(cAddMembersPolicy, "admins"),
+		"antiSpamLinks":    cAntiSpamLinks,
+		"approveMembers":   cApproveMembers,
+		"members":          pubMembers,
 		// Groups & Circles: the group's identity plus THIS CALLER's resolved
 		// permission set, so the client can gate its own UI. Advisory only —
 		// every mutating endpoint re-resolves server-side.
@@ -1965,6 +1965,31 @@ func chatsPin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httpx.JSON(w, 200, map[string]any{"ok": true, "pinned": pinned})
+}
+
+// Favourite is a filter, not a sort key — see migration 131 for why it is its
+// own column rather than a second meaning for `pinned`. Nothing to stamp and
+// nothing to emit: this is one person's view of the list, so the other members
+// of the chat are not told and have nothing to redraw.
+func chatsFavourite(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	user := httpx.UserFrom(r)
+	mem := chatsRequireMem(w, r, 403, "Not a member", "Failed to favourite chat")
+	if mem == nil {
+		return
+	}
+	var b map[string]any
+	_ = httpx.Body(r, &b)
+	favourite := chatsTruthy(b["favourite"])
+	if err := chatsExecU(ctx, user.ID,
+		`UPDATE chat_members SET favourite = $1
+		  WHERE chat_id = $2 AND user_id = $3`,
+		favourite, r.PathValue("id"), user.ID); err != nil {
+		log.Printf("[chats favourite] %v", err)
+		httpx.Err(w, 500, "Failed to favourite chat")
+		return
+	}
+	httpx.JSON(w, 200, map[string]any{"ok": true, "favourite": favourite})
 }
 
 func chatsArchive(w http.ResponseWriter, r *http.Request) {

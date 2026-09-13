@@ -75,6 +75,7 @@ func RegisterChats(mux *http.ServeMux) {
 	id.HandleFunc("GET /chats/{id}/invite-links", httpx.RequireAuth(chatsInviteList))
 	id.HandleFunc("DELETE /chats/{id}/invite-links/{linkId}", httpx.RequireAuth(chatsInviteRevoke))
 	id.HandleFunc("POST /chats/{id}/pin", httpx.RequireAuth(chatsPin))
+	id.HandleFunc("POST /chats/{id}/favourite", httpx.RequireAuth(chatsFavourite))
 	id.HandleFunc("POST /chats/{id}/archive", httpx.RequireAuth(chatsArchive))
 	id.HandleFunc("PATCH /chats/{id}/hidden", httpx.RequireAuth(chatsHidden))
 	id.HandleFunc("PATCH /chats/{id}/screenshot-mode", httpx.RequireAuth(chatsScreenshotMode))
@@ -784,6 +785,7 @@ type chatsListItem struct {
 	MyLastReadID               *string       `json:"myLastReadId"`
 	Muted                      bool          `json:"muted"`
 	Pinned                     bool          `json:"pinned"`
+	Favourite                  bool          `json:"favourite"`
 	Archived                   bool          `json:"archived"`
 	Hidden                     bool          `json:"hidden"`
 	ScreenshotMode             string        `json:"screenshotMode"`
@@ -827,7 +829,7 @@ func chatsList(w http.ResponseWriter, r *http.Request) {
 		   c.id, c.type, c.name, c.photo_url, c.created_by, c.created_at,
 		   c.last_message_id, c.last_message_at, c.updated_at, c.expires_at,
 		   cm.role, cm.last_read_message_id, cm.muted, cm.joined_at,
-		   cm.pinned, cm.pinned_at, cm.archived, cm.hidden,
+		   cm.pinned, cm.pinned_at, cm.archived, cm.hidden, cm.favourite,
 		   cm.screenshot_mode, cm.vanish_mode,
 		   peer.user_id   AS peer_user_id,
 		   peer.peer_name AS peer_name,
@@ -884,9 +886,10 @@ func chatsList(w http.ResponseWriter, r *http.Request) {
 				name, photoURL, createdBy                   *string
 				createdAt, updatedAt, joinedAt              time.Time
 				lastMessageID, lastReadID                   *int64
-				lastMessageAt, pinnedAt, expiresAt           *time.Time
+				lastMessageAt, pinnedAt, expiresAt          *time.Time
 				role                                        string
 				muted, pinned, archived, hidden, vanishMode bool
+				favourite                                   bool
 				screenshotMode                              *string
 				peerUserID, peerName, peerFnc, peerLnc      *string
 				peerEc, peerPhoto                           *string
@@ -898,7 +901,7 @@ func chatsList(w http.ResponseWriter, r *http.Request) {
 			if err := rows.Scan(&id, &ctype, &name, &photoURL, &createdBy, &createdAt,
 				&lastMessageID, &lastMessageAt, &updatedAt, &expiresAt,
 				&role, &lastReadID, &muted, &joinedAt,
-				&pinned, &pinnedAt, &archived, &hidden,
+				&pinned, &pinnedAt, &archived, &hidden, &favourite,
 				&screenshotMode, &vanishMode,
 				&peerUserID, &peerName, &peerFnc, &peerLnc, &peerEc, &peerPhoto,
 				&peerOnline, &peerLastSeen, &peerLastRead, &peerLastDelivered,
@@ -910,10 +913,10 @@ func chatsList(w http.ResponseWriter, r *http.Request) {
 				CreatedAt: httpx.JSTime(createdAt), UpdatedAt: httpx.JSTime(updatedAt),
 				LastMessageID: userBigStr(lastMessageID), LastMessageAt: httpx.JST(lastMessageAt),
 				MyRole: role, MyLastReadID: userBigStr(lastReadID), Muted: muted,
-				Pinned: pinned, Archived: archived, Hidden: hidden,
+				Pinned: pinned, Favourite: favourite, Archived: archived, Hidden: hidden,
 				ScreenshotMode: chatsStrDefault(screenshotMode, "block"), VanishMode: vanishMode,
 				UnreadCount: unreadCount, ExpiresAt: httpx.JST(expiresAt),
-				PeerUserID:  peerUserID, PeerPhotoURL: peerPhoto,
+				PeerUserID: peerUserID, PeerPhotoURL: peerPhoto,
 				PeerLastSeenAt:        httpx.JST(peerLastSeen),
 				PeerLastReadMessageID: peerLastRead, PeerLastDeliveredMessageID: peerLastDelivered,
 			}
