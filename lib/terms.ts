@@ -27,7 +27,13 @@ export async function fetchTermsState(force = false): Promise<TermsState | null>
   if (!force && cached !== undefined) return cached;
   try {
     if (!(await hasSession())) {
-      cached = null;
+      // NOT cached. "Nobody is signed in yet" is not an answer to "has this
+      // user accepted", it is the absence of a user — and caching it as an
+      // answer is what made the gate never fire at all: TermsGate mounts at app
+      // start, which is BEFORE sign-in, so the first call always landed here,
+      // stored null, and every later call returned that stored null through the
+      // early return at the top. Every new user skipped the screen. Found on a
+      // device, because nothing else could have found it.
       return null;
     }
     cached = await api<TermsState>('/user/terms');

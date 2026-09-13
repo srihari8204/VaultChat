@@ -17,7 +17,7 @@
 // caddy/public/terms.html is served at a stable URL.
 
 import React, { useCallback, useEffect, useState } from 'react';
-import { ActivityIndicator, Linking, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, AppState, Linking, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 
 import { SERVER_URL } from '../constants/server';
@@ -34,14 +34,51 @@ export function TermsGate({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     let alive = true;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+
     // Deliberately NOT awaited before the first paint, for the same reason the
     // version check is not: gating render on a network round trip turns every
     // cold start on a slow connection into a blank screen, for a check that
     // says "nothing outstanding" essentially always.
-    fetchTermsState()
-      .then((s) => { if (alive) setState(s); })
-      .catch(() => {});
-    return () => { alive = false; };
+    //
+    // IT HAS TO ASK MORE THAN ONCE. This component mounts at app start, which
+    // is before anybody has signed in, so the first ask has no session to ask
+    // about and comes back with no answer. A single attempt meant the gate
+    // never fired for a new user — they signed up seconds later and nothing
+    // looked again. Found on a device; no amount of typechecking would have
+    // shown it.
+    //
+    // So: keep asking while there is no answer, backing off, and stop the
+    // moment there is one. An answer includes "nothing outstanding" — this
+    // stops as soon as the server says anything at all.
+    let delay = 1500;
+    const ask = () => {
+      fetchTermsState()
+        .then((s) => {
+          if (!alive) return;
+          if (s) { setState(s); return; }   // an answer, of either kind — done
+          // No answer yet: not signed in, offline, or a server without the
+          // endpoint. Ask again, but give up climbing past half a minute so an
+          // app that is simply signed out is not polling forever.
+          delay = Math.min(delay * 2, 30_000);
+          timer = setTimeout(ask, delay);
+        })
+        .catch(() => {});
+    };
+    ask();
+
+    // Coming back to the foreground is the other moment the answer can change —
+    // a session established in another tab, a token refreshed, terms republished.
+    const sub = AppState.addEventListener('change', (st) => {
+      if (st === 'active' && alive && !termsOutstanding(state)) ask();
+    });
+
+    return () => {
+      alive = false;
+      if (timer) clearTimeout(timer);
+      sub.remove();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const onAccept = useCallback(async () => {
