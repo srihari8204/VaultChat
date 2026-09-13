@@ -1,0 +1,35 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1480 340" width="1480" height="340" role="img" aria-label="CrazzyChat">
+  <defs>
+    <linearGradient id="lavc" x1="0.1" y1="0" x2="0.9" y2="1">
+      <stop offset="0" stop-color="#C9A6F5"/>
+      <stop offset="0.52" stop-color="#9D6FD0"/>
+      <stop offset="1" stop-color="#7C3AED"/>
+    </linearGradient>
+    <radialGradient id="bloomc" cx="0.5" cy="0.3" r="0.72">
+      <stop offset="0" stop-color="#7C3AED" stop-opacity="0.5"/>
+      <stop offset="1" stop-color="#7C3AED" stop-opacity="0"/>
+    </radialGradient>
+    <mask id="m-c">
+      <rect width="1024" height="1024" fill="#000"/>
+      <path d="M374 402 V318 C374 242 436 180 512 180 C588 180 650 242 650 318 V402"
+            fill="none" stroke="#fff" stroke-width="66" stroke-linecap="round"/>
+      <g fill="#fff" stroke="#fff" stroke-width="44" stroke-linejoin="round">
+        <polygon points="322,706 440,706 258,872"/>
+      </g>
+      <rect x="222" y="392" width="580" height="340" rx="118" fill="#fff"/>
+      <g fill="#000">
+        <circle cx="512" cy="530" r="52"/>
+        <polygon points="488 566 536 566 552 660 472 660"/>
+      </g>
+    </mask>
+  </defs>
+  <g transform="translate(0,18) scale(0.297)">
+    <rect width="1024" height="1024" fill="url(#lavc)" mask="url(#m-c)"/>
+  </g>
+  <text x="352" y="222" font-family="Inter, 'SF Pro Display', 'Segoe UI', system-ui, sans-serif"
+        font-size="176" letter-spacing="-4" fill="#EDE7F6">
+    <tspan font-weight="400">Crazzy</tspan><tspan font-weight="800" fill="#C9A6F5">Chat</tspan>
+  </text>
+  <text x="358" y="286" font-family="Inter, 'SF Pro Display', 'Segoe UI', system-ui, sans-serif"
+        font-size="42" letter-spacing="7" font-weight="500" fill="#8d83a0">END-TO-END ENCRYPTED</text>
+</svg>
