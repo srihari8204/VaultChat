@@ -1,0 +1,7 @@
+# Copy to terraform.tfvars (gitignored) or supply via TF_VAR_* / CI secrets.
+do_token          = ""
+spaces_access_id  = ""
+spaces_secret_key = ""
+
+region          = "blr1"
+cluster_version = "1.33.1-do.0"

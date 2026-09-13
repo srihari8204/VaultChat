@@ -1,0 +1,10 @@
+# State and credentials never belong in git. State lives in Spaces (see
+# versions.tf); a local copy here would be a second source of truth holding
+# every database password in plaintext.
+.terraform/
+.terraform.lock.hcl
+*.tfstate
+*.tfstate.*
+*.tfvars
+!*.tfvars.example
+crash.log

@@ -1,0 +1,120 @@
+# ── image ───────────────────────────────────────────────────────────────
+image:
+  repository: registry.digitalocean.com/crazzychat/go-api
+  # Deploy by SHA, never by a floating tag. An immutable tag is what makes
+  # rollback "revert the commit" instead of "hope the registry still has it".
+  tag: ""
+  pullPolicy: IfNotPresent
+
+migrator:
+  repository: registry.digitalocean.com/crazzychat/migrator
+  tag: ""
+
+# ── go-api ──────────────────────────────────────────────────────────────
+goApi:
+  replicas: 6
+
+  resources:
+    requests: { cpu: "500m", memory: "768Mi" }
+    limits:   { cpu: "2",    memory: "2Gi" }
+
+  autoscaling:
+    enabled: true
+    minReplicas: 6
+    maxReplicas: 30
+    # Sockets per pod, NOT users and NOT CPU. See the ScaledObject template for
+    # why sockets_online cannot be used here.
+    targetSocketsPerPod: 1500
+    targetCPUUtilization: 70
+
+  # 90s is generous for the shutdown sequence and deliberately NOT sized to let
+  # WebSockets end naturally — these connections last hours, so waiting for a
+  # natural drain means a rolling update that never finishes. The strategy is a
+  # fast, deliberate, jittered disconnect.
+  terminationGracePeriodSeconds: 90
+  preStopSleepSeconds: 20
+
+  # A 30-pod rollout at maxSurge 2 / minReadySeconds 60 takes ~15 minutes. That
+  # is the feature: it spreads the reconnect load instead of concentrating it.
+  minReadySeconds: 60
+
+# ── ingress ─────────────────────────────────────────────────────────────
+ingress:
+  className: nginx
+  hosts:
+    # NEVER remove this one. constants/server.ts hardcodes it as a compile-time
+    # constant and app.json pins an App Links filter to it, so every APK in the
+    # field reaches the backend only by this name. It has no expiry.
+    legacy: api.corefinite.com
+    stream: stream.corefinite.com
+    primary: api.crazzychat.com
+  # ingress-nginx defaults to 1 MB. Today's nginx allows 100M and
+  # UPLOAD_MAX_BYTES matches — leave this unset and every relayed attachment
+  # upload 413s the moment traffic cuts over.
+  bodySize: 100m
+  # Socket.IO connections are long-lived by definition.
+  readTimeout: 86400
+
+certificate:
+  issuer: letsencrypt-prod
+  # DNS-01, not HTTP-01: HTTP-01 cannot issue behind a Cloudflare-proxied record
+  # and cannot do wildcards.
+  solver: cloudflare
+
+# ── config ──────────────────────────────────────────────────────────────
+config:
+  publicBaseURL: https://api.crazzychat.com
+  broadcastCDNBase: ""
+
+  # The DOKS pod CIDR. This is not cosmetic: authClientIP walks
+  # X-Forwarded-For from the right and trusts only hops inside these networks.
+  # The built-in default covers the Docker bridges from compose
+  # (172.28.0.0/16, 172.17.0.0/16) and does NOT include a Kubernetes pod
+  # network, so leaving it unset makes every request appear to come from the
+  # ingress pod — and the per-IP limits on OTP issuance and account lookup
+  # become a single global bucket that one user can exhaust for everybody.
+  trustedProxies: "10.244.0.0/16,10.110.0.0/16,127.0.0.0/8,::1/128"
+
+  db:
+    host: ""
+    port: "25061"
+    # The POOL name, not the database name — DigitalOcean addresses a
+    # connection pool by putting its name in the database slot.
+    name: vaultchat-txn
+    user: vaultchat
+    sslmode: require
+    # 30 pods x 30 connections would be 900 clients against a pool whose
+    # MAX_CLIENT_CONN cannot be raised.
+    poolMax: "8"
+
+  redis:
+    # rediss:// — Managed Valkey refuses plaintext.
+    adapter: "1"
+
+  s3:
+    # Chat media stays on Cloudflare R2 (free egress, already live, already
+    # correct). region MUST be "auto" for R2.
+    endpoint: ""
+    publicEndpoint: ""
+    bucket: vaultchat-media
+    region: auto
+  broadcastS3:
+    # HLS on Spaces. region MUST be the datacenter slug here — Spaces validates
+    # the SigV4 scope and rejects "auto".
+    endpoint: https://blr1.digitaloceanspaces.com
+    region: blr1
+    bucket: crazzychat-broadcast
+
+livekit:
+  callingURL: wss://api.crazzychat.com/livekit
+  goliveURL: wss://api.crazzychat.com/golive-livekit
+  callingHTTPURL: http://livekit-calling.media-calls.svc.cluster.local:7880
+  goliveHTTPURL: http://livekit-golive.media-golive.svc.cluster.local:7890
+
+nodeSelector:
+  pool: app
+tolerations:
+  - key: workload
+    operator: Equal
+    value: app
+    effect: NoSchedule

@@ -1,0 +1,33 @@
+# Two Certificates because the hostnames live in two different zones.
+#
+# DNS-01, not HTTP-01: an HTTP-01 challenge cannot complete behind a
+# Cloudflare-proxied record, and cannot issue wildcards.
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: tls-corefinite
+spec:
+  secretName: tls-corefinite
+  issuerRef:
+    name: {{ .Values.certificate.issuer }}
+    kind: ClusterIssuer
+  # THIS CERTIFICATE MUST NEVER LAPSE, and not for the usual reason. Every APK
+  # in the field reaches the backend at api.corefinite.com — it is a hardcoded
+  # constant in constants/server.ts with no environment override and no
+  # force-upgrade mechanism. An expired cert here bricks every installed app,
+  # including for users who will never update.
+  dnsNames:
+    - {{ .Values.ingress.hosts.legacy }}
+    - {{ .Values.ingress.hosts.stream }}
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: tls-crazzychat
+spec:
+  secretName: tls-crazzychat
+  issuerRef:
+    name: {{ .Values.certificate.issuer }}
+    kind: ClusterIssuer
+  dnsNames:
+    - {{ .Values.ingress.hosts.primary }}

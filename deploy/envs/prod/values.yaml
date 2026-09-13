@@ -1,0 +1,50 @@
+# Production overrides. Non-secret values only — every credential comes from a
+# SealedSecret, never from here.
+#
+# The endpoints below are filled from `terraform output` after the cluster is
+# created; they are left blank rather than guessed so a half-configured deploy
+# fails at boot instead of connecting somewhere unintended.
+
+goApi:
+  autoscaling:
+    enabled: true
+    minReplicas: 6
+    maxReplicas: 30
+    targetSocketsPerPod: 1500
+
+config:
+  publicBaseURL: https://api.crazzychat.com
+
+  # DOKS pod CIDR + the VPC range from terraform. Without these, authClientIP
+  # attributes every request to the ingress pod and the per-IP limits on OTP
+  # issuance and account lookup collapse into one global bucket.
+  trustedProxies: "10.244.0.0/16,10.110.0.0/16,127.0.0.0/8,::1/128"
+
+  db:
+    host: ""              # terraform output pg_private_host
+    port: "25061"         # pooled. 25060 is direct and is for migrations only.
+    name: vaultchat-txn   # the POOL name, not the database name
+    sslmode: require
+    poolMax: "8"
+
+  s3:
+    # Chat media stays on Cloudflare R2. region MUST be "auto" — R2 requires it,
+    # and MinIO ignores region entirely, so this value is safe in both.
+    endpoint: https://<account>.r2.cloudflarestorage.com
+    publicEndpoint: https://<account>.r2.cloudflarestorage.com
+    bucket: vaultchat-media
+    region: auto
+
+  broadcastS3:
+    # HLS on Spaces. region MUST be the datacenter slug — Spaces validates the
+    # SigV4 credential scope and rejects "auto" with SignatureDoesNotMatch on
+    # every request.
+    endpoint: https://blr1.digitaloceanspaces.com
+    region: blr1
+    bucket: crazzychat-broadcast
+
+ingress:
+  hosts:
+    legacy: api.corefinite.com
+    stream: stream.corefinite.com
+    primary: api.crazzychat.com

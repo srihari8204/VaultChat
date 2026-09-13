@@ -1,0 +1,6 @@
+name: livekit-calling
+pool: media-calls
+redisDB: 0
+secretName: cc-livekit-calling
+ports: { signal: 7880, rtcTCP: 7881, rtcUDP: 7882, prometheus: 6789 }
+webhookURL: http://go-api.crazzychat.svc.cluster.local:4000/internal/livekit/webhook

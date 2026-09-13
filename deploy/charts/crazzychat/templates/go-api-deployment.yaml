@@ -1,0 +1,211 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: go-api
+  labels:
+    {{- include "crazzychat.labels" . | nindent 4 }}
+    app.kubernetes.io/component: go-api
+spec:
+  {{- if not .Values.goApi.autoscaling.enabled }}
+  replicas: {{ .Values.goApi.replicas }}
+  {{- end }}
+  minReadySeconds: {{ .Values.goApi.minReadySeconds }}
+  revisionHistoryLimit: 5
+  selector:
+    matchLabels:
+      {{- include "crazzychat.goApiSelector" . | nindent 6 }}
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      # maxUnavailable 0: never take capacity away during a rollout. Each new
+      # pod must be Ready (and stay Ready for minReadySeconds) before an old one
+      # goes, so the fleet can always absorb the reconnect wave it is about to
+      # cause.
+      maxUnavailable: 0
+      maxSurge: 2
+  template:
+    metadata:
+      labels:
+        {{- include "crazzychat.goApiSelector" . | nindent 8 }}
+    spec:
+      terminationGracePeriodSeconds: {{ .Values.goApi.terminationGracePeriodSeconds }}
+      nodeSelector:
+        {{- toYaml .Values.nodeSelector | nindent 8 }}
+      tolerations:
+        {{- toYaml .Values.tolerations | nindent 8 }}
+      # Spread across nodes so losing one node does not take a disproportionate
+      # share of the sockets. ScheduleAnyway, not DoNotSchedule: during a scale
+      # event an unschedulable pod is worse than an unevenly placed one.
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              {{- include "crazzychat.goApiSelector" . | nindent 14 }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: go-api
+          image: {{ include "crazzychat.imageRef" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: 4000
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          env:
+            - name: PORT
+              value: "4000"
+
+            # Go reads the NODE's CPU count, not the cgroup quota. Without this
+            # the runtime creates 4 Ps against a 2-core limit and gets
+            # CFS-throttled, which shows up as GC pauses and tail latency.
+            # internal/workx sizes its pool as NumCPU()*4, so the error is
+            # multiplied there.
+            - name: GOMAXPROCS
+              valueFrom:
+                resourceFieldRef:
+                  resource: limits.cpu
+                  divisor: "1"
+            # A Go process holding many WebSocket buffers can be OOMKilled by
+            # the kernel before GC decides it is worth running. GOMEMLIMIT makes
+            # GC aggressive as the cap approaches instead.
+            - name: GOMEMLIMIT
+              value: "1600MiB"
+
+            - name: TRUSTED_PROXIES
+              value: {{ .Values.config.trustedProxies | quote }}
+            - name: PUBLIC_BASE_URL
+              value: {{ .Values.config.publicBaseURL | quote }}
+            - name: BROADCAST_CDN_BASE
+              value: {{ .Values.config.broadcastCDNBase | quote }}
+
+            # Refuse to start rather than fall back to per-pod local disk.
+            - name: REQUIRE_OBJECT_STORE
+              value: "1"
+
+            - name: DB_HOST
+              value: {{ .Values.config.db.host | quote }}
+            - name: DB_PORT
+              value: {{ .Values.config.db.port | quote }}
+            - name: DB_NAME
+              value: {{ .Values.config.db.name | quote }}
+            - name: DB_USER
+              value: {{ .Values.config.db.user | quote }}
+            - name: DB_SSLMODE
+              value: {{ .Values.config.db.sslmode | quote }}
+            - name: DB_POOL_MAX
+              value: {{ .Values.config.db.poolMax | quote }}
+            - name: DB_PASS
+              valueFrom:
+                secretKeyRef: { name: cc-db, key: DB_PASS }
+
+            - name: REDIS_ADAPTER
+              value: {{ .Values.config.redis.adapter | quote }}
+            - name: REDIS_URL
+              valueFrom:
+                secretKeyRef: { name: cc-redis, key: REDIS_URL }
+
+            - name: S3_ENDPOINT
+              value: {{ .Values.config.s3.endpoint | quote }}
+            - name: S3_PUBLIC_ENDPOINT
+              value: {{ .Values.config.s3.publicEndpoint | quote }}
+            - name: S3_BUCKET
+              value: {{ .Values.config.s3.bucket | quote }}
+            - name: S3_REGION
+              value: {{ .Values.config.s3.region | quote }}
+            - name: BROADCAST_S3_ENDPOINT
+              value: {{ .Values.config.broadcastS3.endpoint | quote }}
+            - name: BROADCAST_BUCKET
+              value: {{ .Values.config.broadcastS3.bucket | quote }}
+
+            - name: LIVEKIT_URL
+              value: {{ .Values.livekit.callingURL | quote }}
+            - name: LIVEKIT_HTTP_URL
+              value: {{ .Values.livekit.callingHTTPURL | quote }}
+            - name: GOLIVE_LIVEKIT_URL
+              value: {{ .Values.livekit.goliveURL | quote }}
+
+            # Shutdown tunables. The drain delay must exceed the readiness probe
+            # interval so the 503 has time to reach the endpoints controller and
+            # ingress-nginx before the listener stops.
+            - name: SHUTDOWN_DRAIN_DELAY
+              value: "15s"
+            - name: SHUTDOWN_TIMEOUT
+              value: "45s"
+
+            # File-mounted credentials keep the values out of the process
+            # environment, and the *_FILE variables already exist in the code.
+            - name: FIREBASE_SERVICE_ACCOUNT_FILE
+              value: /run/secrets/firebase-sa.json
+            - name: GAMES_SIGNING_PRIVATE_KEY_FILE
+              value: /run/secrets/games-signing.key
+            - name: GAMES_NOTIFY_PUBLIC_KEY_FILE
+              value: /run/secrets/games-notify.pub
+          envFrom:
+            - secretRef: { name: cc-core }
+            - secretRef: { name: cc-storage }
+            - secretRef: { name: cc-livekit }
+            - secretRef: { name: cc-turn }
+            - secretRef: { name: cc-thirdparty }
+          volumeMounts:
+            - name: secret-files
+              mountPath: /run/secrets
+              readOnly: true
+            - name: tmp
+              mountPath: /tmp
+            # Only reached if the object store is misconfigured, which the boot
+            # guard prevents. emptyDir so a stray write cannot fill a node.
+            - name: uploads
+              mountPath: /data/uploads
+
+          # LIVENESS — /livez, not /health. /health is safe (always 200) but
+          # pings Postgres and Redis on every call; at 30 pods that is pure
+          # waste forever, and under a slow database the probe timeout starts
+          # restarting healthy pods.
+          livenessProbe:
+            httpGet: { path: /livez, port: http }
+            periodSeconds: 10
+            timeoutSeconds: 2
+            failureThreshold: 6
+
+          # READINESS — /ready, which 503s on DB loss and treats Redis loss as
+          # degraded. failureThreshold 3, not 1: a 5-second database hiccup must
+          # not pull the entire fleet out of the load balancer at once.
+          readinessProbe:
+            httpGet: { path: /ready, port: http }
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+
+          # Boot does a DB connect, a system-pool connect, partition maintenance
+          # and an immediate VaultBeam sweep. 60s of runway before liveness
+          # starts counting.
+          startupProbe:
+            httpGet: { path: /ready, port: http }
+            periodSeconds: 2
+            failureThreshold: 30
+
+          lifecycle:
+            preStop:
+              exec:
+                command: ["sleep", "{{ .Values.goApi.preStopSleepSeconds }}"]
+          resources:
+            {{- toYaml .Values.goApi.resources | nindent 12 }}
+      volumes:
+        - name: secret-files
+          secret:
+            secretName: cc-files
+            defaultMode: 0400
+        - name: tmp
+          emptyDir: {}
+        - name: uploads
+          emptyDir:
+            sizeLimit: 64Mi

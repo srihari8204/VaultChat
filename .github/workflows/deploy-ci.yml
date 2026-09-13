@@ -1,0 +1,135 @@
+# Deploy-manifest checks.
+#
+# Separate from ci.yml on purpose: that workflow runs the checks the repository
+# already had — client selftests, Go build/vet/test, migrations against a real
+# Postgres, the authorization suite. None of it knows anything about Kubernetes,
+# and a Helm rendering failure should not be buried in a job whose name says
+# "Go".
+#
+# Everything here is a guard against a specific failure that is invisible until
+# production: a chart that does not render, a host-networked pod that cannot
+# resolve cluster DNS, two SFUs that collide on a port, or a static page that
+# drifted from its source.
+
+name: Deploy CI
+
+on:
+  push:
+    branches: [hetzner-deploy, master]
+    paths: ['deploy/**', 'caddy/public/**', '.github/workflows/deploy-ci.yml']
+  pull_request:
+    paths: ['deploy/**', 'caddy/public/**', '.github/workflows/deploy-ci.yml']
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  guards:
+    name: Guards — port isolation, config drift
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      # The two LiveKit deployments exist to have separate blast radii, and
+      # internal/golive/config.go already refuses to start if their CREDENTIALS
+      # overlap. Ports are the other half of that isolation and nothing checks
+      # them at runtime, so they are checked here.
+      - name: LiveKit deployments must not share RTC ports
+        run: |
+          set -euo pipefail
+          calling=$(grep -oP 'rtcUDP: \K[0-9]+' deploy/charts/livekit/instances/calling.yaml)
+          golive=$(grep -oP 'rtcUDP: \K[0-9]+' deploy/charts/livekit/instances/golive.yaml)
+          if [ "$calling" = "$golive" ]; then
+            echo "::error::calling and Go Live SFUs share RTC UDP port $calling"
+            exit 1
+          fi
+          echo "calling=$calling golive=$golive — distinct"
+
+      # This repository's recurring failure mode is config that drifted between
+      # git and the box — the nginx vhost, the Caddy port and livekit's api_key
+      # have each done it, and each caused an outage. caddy/public is the source
+      # of truth for the Play-review pages; the chart ships a copy, and a copy
+      # nobody checks is a copy that rots.
+      - name: Static pages match caddy/public
+        run: |
+          set -euo pipefail
+          for f in assetlinks.json privacy.html delete-account.html; do
+            diff -q "caddy/public/$f" "deploy/charts/crazzychat/files/$f" >/dev/null || {
+              echo "::error::deploy/charts/crazzychat/files/$f has drifted from caddy/public/$f"
+              exit 1
+            }
+          done
+          echo "static pages in sync"
+
+  charts:
+    name: Helm — lint, render, schema
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/setup-helm@v4
+        with: { version: v3.16.3 }
+
+      - name: Lint
+        working-directory: deploy/charts
+        run: |
+          helm lint crazzychat --set image.tag=ci --set migrator.tag=ci
+          helm lint livekit
+          helm lint coturn
+
+      - name: Render
+        working-directory: deploy/charts
+        run: |
+          helm template cc crazzychat --set image.tag=ci --set migrator.tag=ci \
+            -f ../envs/prod/values.yaml > /tmp/cc.yaml
+          helm template lkc livekit -f livekit/instances/calling.yaml > /tmp/lkc.yaml
+          helm template lkg livekit -f livekit/instances/golive.yaml  > /tmp/lkg.yaml
+          helm template ct coturn > /tmp/ct.yaml
+
+      # A hostNetwork pod uses the NODE's resolver and cannot see
+      # *.svc.cluster.local without this. Omit it and every LiveKit egress
+      # webhook lookup fails — a broadcast is created, a room exists, and the
+      # status never leaves "starting", because the webhook is the only signal
+      # that recording began. Nothing errors. Cheap to assert, expensive to find.
+      - name: hostNetwork pods must set dnsPolicy ClusterFirstWithHostNet
+        run: |
+          set -euo pipefail
+          for f in /tmp/lkc.yaml /tmp/lkg.yaml /tmp/ct.yaml; do
+            if grep -q "hostNetwork: true" "$f"; then
+              grep -q "dnsPolicy: ClusterFirstWithHostNet" "$f" || {
+                echo "::error::$f uses hostNetwork without ClusterFirstWithHostNet"
+                exit 1
+              }
+            fi
+          done
+          echo "dnsPolicy correct on every hostNetwork DaemonSet"
+
+      - name: Validate against Kubernetes schemas
+        run: |
+          set -euo pipefail
+          go install github.com/yannh/kubeconform/cmd/kubeconform@v0.6.7
+          # CRDs (KEDA, cert-manager, Prometheus Operator) are not in the
+          # built-in schema set.
+          SKIP=ScaledObject,Certificate,PodMonitor,ServiceMonitor
+          for f in /tmp/cc.yaml /tmp/lkc.yaml /tmp/lkg.yaml /tmp/ct.yaml; do
+            "$(go env GOPATH)/bin/kubeconform" -strict -summary \
+              -skip "$SKIP" -kubernetes-version 1.33.0 "$f"
+          done
+
+  terraform:
+    name: Terraform — fmt, validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: deploy/terraform
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+      - run: terraform fmt -check -recursive
+      # -backend=false: validation must not need Spaces credentials.
+      - run: terraform init -backend=false
+      - run: terraform validate

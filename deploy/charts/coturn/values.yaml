@@ -1,0 +1,39 @@
+pool: media-calls
+image: coturn/coturn:4.6.2
+realm: turn.crazzychat.com
+
+ports:
+  listening: 3478
+  tls: 5349
+  # TURN over 443 for networks that permit nothing else. On the Hetzner box
+  # this was an iptables REDIRECT of UDP 443 to 3478, installed by a systemd
+  # unit that had to run after Docker rebuilt DOCKER-USER. Here coturn simply
+  # binds 443 — nothing else on a media node wants it — which removes a moving
+  # part rather than porting it.
+  alt: 443
+
+relay:
+  # NARROWED from the box's 49152-65535. This is a correctness fix.
+  #
+  # That range overlaps the kernel's ephemeral source-port range
+  # (net.ipv4.ip_local_port_range, typically 32768-60999). On a dedicated box
+  # that is survivable. On a Kubernetes node it is not: coturn claiming 16,384
+  # ports out of the ephemeral range starves outbound connections for the
+  # kubelet and every other host-networked process on that node.
+  #
+  # 20000-29999 sits above the reserved low ports, below the NodePort range
+  # (30000-32767) and below the ephemeral range. 10,000 relay ports is far more
+  # than one node will use.
+  minPort: 20000
+  maxPort: 29999
+
+quota:
+  user: 100
+  total: 5000
+
+secretName: cc-turn
+tlsSecretName: tls-turn
+
+resources:
+  requests: { cpu: "500m", memory: "256Mi" }
+  limits:   { cpu: "2", memory: "1Gi" }

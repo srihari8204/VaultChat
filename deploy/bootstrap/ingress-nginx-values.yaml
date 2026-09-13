@@ -1,0 +1,61 @@
+controller:
+  replicaCount: 3
+
+  config:
+    # Socket.IO connections are long-lived by definition. The default 60s would
+    # cut every one of them.
+    proxy-read-timeout: "86400"
+    proxy-send-timeout: "86400"
+
+    # ingress-nginx defaults to 1 MB; the current nginx allows 100M and
+    # UPLOAD_MAX_BYTES matches. Also set per-Ingress, because this default is
+    # the kind of thing that gets reset by a chart upgrade.
+    proxy-body-size: "100m"
+
+    # The DO load balancer runs in TCP mode and prepends PROXY protocol, which
+    # is how the real client address survives. Both sides must agree: enable it
+    # here and in the Service annotation, or every request arrives malformed.
+    use-proxy-protocol: "true"
+    use-forwarded-headers: "true"
+    compute-full-forwarded-for: "true"
+
+    # Cloudflare sits in front, so the useful client address is its header, not
+    # the socket peer. proxy-real-ip-cidr must list Cloudflare's ranges —
+    # fetch from https://www.cloudflare.com/ips/ and keep it current, because a
+    # stale list silently reverts to trusting the wrong hop.
+    real-ip-header: "CF-Connecting-IP"
+
+    upstream-keepalive-connections: "320"
+    upstream-keepalive-requests: "10000"
+
+    # Left at the default (false). Enabling snippets to express a routing rule
+    # would be a cluster-wide security regression; the /internal 404 is a
+    # dedicated backend instead. See ingress-main.yaml.
+    allow-snippet-annotations: "false"
+
+  metrics:
+    enabled: true
+    serviceMonitor:
+      enabled: true
+      additionalLabels: { release: kube-prometheus-stack }
+
+  service:
+    externalTrafficPolicy: Cluster
+    annotations:
+      service.beta.kubernetes.io/do-loadbalancer-name: "crazzychat-prod-edge"
+      service.beta.kubernetes.io/do-loadbalancer-protocol: "tcp"
+      service.beta.kubernetes.io/do-loadbalancer-enable-proxy-protocol: "true"
+      # A DO load-balancer size unit handles roughly 10,000 simultaneous
+      # connections. 20k sockets needs at least two; three leaves room for the
+      # reconnect spike a rolling update deliberately causes.
+      service.beta.kubernetes.io/do-loadbalancer-size-unit: "3"
+      service.beta.kubernetes.io/do-loadbalancer-http-idle-timeout-seconds: "600"
+      # Works around DO's LB hairpin limitation: without a hostname, in-cluster
+      # pods cannot reach the load balancer's own address.
+      service.beta.kubernetes.io/do-loadbalancer-hostname: "edge.crazzychat.com"
+      service.beta.kubernetes.io/do-loadbalancer-healthcheck-protocol: "http"
+      service.beta.kubernetes.io/do-loadbalancer-healthcheck-port: "10254"
+      service.beta.kubernetes.io/do-loadbalancer-healthcheck-path: "/healthz"
+
+  nodeSelector:
+    pool: sys

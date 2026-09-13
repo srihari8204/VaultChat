@@ -1,0 +1,63 @@
+{{- if .Values.goApi.autoscaling.enabled }}
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: go-api
+spec:
+  scaleTargetRef:
+    name: go-api
+  minReplicaCount: {{ .Values.goApi.autoscaling.minReplicas }}
+  maxReplicaCount: {{ .Values.goApi.autoscaling.maxReplicas }}
+  # The metric server needs time to have data after a pod starts.
+  pollingInterval: 15
+  cooldownPeriod: 300
+  advanced:
+    horizontalPodAutoscalerConfig:
+      behavior:
+        # Asymmetric on purpose. Scaling UP costs money; scaling DOWN costs
+        # 1500 live connections per evicted pod, which the clients then all
+        # re-establish at once. So: up immediately, down slowly and one pod at
+        # a time.
+        scaleUp:
+          stabilizationWindowSeconds: 0
+          policies:
+            - type: Percent
+              value: 100
+              periodSeconds: 60
+        scaleDown:
+          stabilizationWindowSeconds: 900
+          policies:
+            - type: Pods
+              value: 1
+              periodSeconds: 300
+  triggers:
+    # ── primary: sockets per pod ────────────────────────────────────────
+    #
+    # vaultchat_sockets_local, NOT vaultchat_sockets_online.
+    #
+    # sockets_online calls Hub.OnlineCount(), which under REDIS_ADAPTER=1 —
+    # production — returns a Redis SCARD over vc:pres:online. That is the
+    # FLEET-WIDE count, reported identically by every replica. An AverageValue
+    # trigger divides the summed metric by the pod count, so N pods each
+    # reporting the fleet total average to the fleet total, and the autoscaler
+    # immediately computes maxReplicas. It looks correct in a one-pod staging
+    # test, where local and fleet are the same number, which is what makes it
+    # dangerous rather than merely wrong.
+    - type: prometheus
+      metricType: AverageValue
+      metadata:
+        serverAddress: http://kube-prometheus-stack-prometheus.monitoring.svc.cluster.local:9090
+        metricName: vaultchat_sockets_local
+        query: sum(vaultchat_sockets_local)
+        threshold: "{{ .Values.goApi.autoscaling.targetSocketsPerPod }}"
+
+    # ── backstop: CPU ───────────────────────────────────────────────────
+    #
+    # Idle sockets are nearly free, so CPU alone would never scale this service
+    # until a fan-out burst arrived and it was already too late. Kept only to
+    # catch load that is not socket-shaped — a REST or crypto spike.
+    - type: cpu
+      metricType: Utilization
+      metadata:
+        value: "{{ .Values.goApi.autoscaling.targetCPUUtilization }}"
+{{- end }}

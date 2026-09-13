@@ -1,0 +1,47 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: coturn-config
+data:
+  turnserver.conf: |
+    listening-port={{ .Values.ports.listening }}
+    alt-listening-port={{ .Values.ports.alt }}
+    tls-listening-port={{ .Values.ports.tls }}
+    cert=/etc/coturn/certs/tls.crt
+    pkey=/etc/coturn/certs/tls.key
+
+    # REST-secret auth, matching GET /user/turn:
+    #   username   = "<expiry-unix>:<user-id>"
+    #   credential = base64(HMAC-SHA1(TURN_SECRET, username))
+    # The secret is passed as a command flag so it stays in env and never lands
+    # in this mounted file.
+    use-auth-secret
+    realm={{ .Values.realm }}
+
+    min-port={{ .Values.relay.minPort }}
+    max-port={{ .Values.relay.maxPort }}
+
+    user-quota={{ .Values.quota.user }}
+    total-quota={{ .Values.quota.total }}
+
+    # SSRF hardening. A TURN server will relay to whatever a client asks for
+    # unless told otherwise, which on a cluster node means the pod network, the
+    # Kubernetes API and the cloud metadata service. 169.254.169.254 is the one
+    # that matters most here: it is unauthenticated and it is how this
+    # deployment discovers node addresses.
+    no-multicast-peers
+    denied-peer-ip=0.0.0.0-0.255.255.255
+    denied-peer-ip=10.0.0.0-10.255.255.255
+    denied-peer-ip=127.0.0.0-127.255.255.255
+    denied-peer-ip=169.254.0.0-169.254.255.255
+    denied-peer-ip=172.16.0.0-172.31.255.255
+    denied-peer-ip=192.168.0.0-192.168.255.255
+    denied-peer-ip=100.64.0.0-100.127.255.255
+    denied-peer-ip=::1
+    denied-peer-ip=fc00::-fdff:ffff:ffff:ffff:ffff:ffff:ffff:ffff
+    denied-peer-ip=fe80::-febf:ffff:ffff:ffff:ffff:ffff:ffff:ffff
+
+    no-cli
+    prometheus
+    fingerprint
+    stale-nonce=600
