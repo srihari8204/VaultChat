@@ -164,10 +164,6 @@ func New() *Hub {
 	// OnlineCount takes pmu (or hits Redis in cluster mode), which is why
 	// metrics.Handler reads gauges outside its own lock.
 	metrics.SetGauge("sockets_online", func() float64 { return float64(h.OnlineCount()) })
-	// Per-process gauges. sockets_local is the HPA signal — see LocalSockets for
-	// why sockets_online cannot be used for that.
-	metrics.SetGauge("sockets_local", func() float64 { return float64(h.LocalSockets()) })
-	metrics.SetGauge("users_local", func() float64 { return float64(h.LocalUsers()) })
 
 	// JWT handshake middleware — runs before 'connection' (server.js io.use).
 	io.Of("/", nil).Use(func(s *socket.Socket, next func(*socket.ExtendedError)) {
@@ -217,65 +213,6 @@ func New() *Hub {
 
 // Handler returns the /socket.io HTTP handler to mount.
 func (h *Hub) Handler() http.Handler { return h.io.ServeHandler(nil) }
-
-// LocalUsers and LocalSockets are the counts for THIS process only.
-//
-// They exist because OnlineCount() is not a per-process number. Under
-// REDIS_ADAPTER=1 — which is production — it returns clusterOnlineCount(), a
-// Redis SCARD over vc:pres:online, so every replica reports the identical
-// fleet-wide figure. That is exactly right for an admin dashboard and exactly
-// wrong for an autoscaler: a Pods-type HPA metric averages the value across
-// pods, so the average of N identical fleet totals is the fleet total, and the
-// HPA computes desired = current x (fleet / target) and jumps straight to
-// maxReplicas on the first evaluation. The failure is invisible in a one-pod
-// test, where the fleet total and the local count are the same number.
-//
-// LocalSockets, not LocalUsers, is the autoscaling signal: the cost of a pod is
-// open connections, and a user with four devices is four connections.
-func (h *Hub) LocalUsers() int {
-	h.pmu.Lock()
-	defer h.pmu.Unlock()
-	return len(h.userSockets)
-}
-
-func (h *Hub) LocalSockets() int {
-	h.pmu.Lock()
-	defer h.pmu.Unlock()
-	n := 0
-	for _, set := range h.userSockets {
-		n += len(set)
-	}
-	return n
-}
-
-// Shutdown drains the realtime layer for an orderly process exit.
-//
-// Order matters. DisconnectSockets(true) sends every client a real disconnect
-// with close=true, which socket.io-client treats as "reconnect now" and retries
-// within its backoff floor. Without it the sockets simply die with the process
-// and each client waits out a ping timeout first — on a rolling update that is
-// tens of seconds of dead air per pod, which is exactly the window a message
-// gets dropped in.
-//
-// Close is then given a bounded wait: it is the library's own teardown and a
-// hung one must not outlive the pod's grace period. A timeout here is logged
-// and ignored, because the process is going away regardless.
-func (h *Hub) Shutdown(wait time.Duration) {
-	if h == nil || h.io == nil {
-		return
-	}
-	h.io.DisconnectSockets(true)
-
-	done := make(chan struct{})
-	go func() {
-		h.io.Close(func(error) { close(done) })
-	}()
-	select {
-	case <-done:
-	case <-time.After(wait):
-		log.Printf("[realtime] shutdown: hub close exceeded %s, exiting anyway", wait)
-	}
-}
 
 func (h *Hub) onConnection(s *socket.Socket) {
 	d := sd(s)

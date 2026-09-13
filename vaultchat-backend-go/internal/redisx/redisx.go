@@ -5,11 +5,8 @@ package redisx
 
 import (
 	"context"
-	"crypto/tls"
 	"fmt"
-	"log"
 	"os"
-	"strconv"
 	"sync"
 	"time"
 
@@ -18,62 +15,11 @@ import (
 
 var Client *redis.Client
 
-// Connect builds the shared client. Two ways in, and the URL form wins.
-//
-// REDIS_URL is what every managed provider actually hands you — a single
-// rediss://user:pass@host:port/db string. redis.ParseURL understands all of it,
-// including turning the rediss:// scheme into a real TLS config, so a managed
-// endpoint needs one variable rather than five and cannot be half-configured.
-//
-// The discrete REDIS_HOST/PORT/PASS form is kept because it is what the compose
-// stack sets, and dropping it would break every existing deployment. REDIS_TLS=1
-// turns TLS on for that path, which matters because this client previously had
-// NO TLS support at all: the only way to reach it was plaintext on a loopback
-// binding. DigitalOcean Managed Valkey refuses plaintext outright, so without
-// this the adapter, the presence keys and the rate limiter all fail closed at
-// connect time — and the socket layer's fail-open behaviour would quietly hide
-// it as "degraded" rather than reporting a misconfiguration.
 func Connect() {
-	if raw := os.Getenv("REDIS_URL"); raw != "" {
-		opt, err := redis.ParseURL(raw)
-		if err != nil {
-			// Deliberately fatal. A malformed URL here means no adapter, no
-			// shared presence and no distributed limiter, and every one of
-			// those fails open — the process would look healthy while silently
-			// running as an isolated node.
-			log.Fatalf("[redisx] REDIS_URL is not a valid redis URL: %v", err)
-		}
-		Client = redis.NewClient(opt)
-		log.Printf("[redisx] connected via REDIS_URL (tls=%t db=%d)", opt.TLSConfig != nil, opt.DB)
-		return
-	}
-
-	opt := &redis.Options{
+	Client = redis.NewClient(&redis.Options{
 		Addr:     fmt.Sprintf("%s:%s", envOr("REDIS_HOST", "127.0.0.1"), envOr("REDIS_PORT", "6379")),
 		Password: os.Getenv("REDIS_PASS"),
-		DB:       envInt("REDIS_DB", 0),
-	}
-	if os.Getenv("REDIS_TLS") == "1" {
-		// ServerName is left to the dialer, which derives it from Addr. That is
-		// correct for a managed endpoint reached by its own hostname and is the
-		// only form that verifies the certificate chain.
-		opt.TLSConfig = &tls.Config{MinVersion: tls.VersionTLS12}
-	}
-	Client = redis.NewClient(opt)
-	log.Printf("[redisx] connected to %s (tls=%t db=%d)", opt.Addr, opt.TLSConfig != nil, opt.DB)
-}
-
-func envInt(k string, def int) int {
-	v := os.Getenv(k)
-	if v == "" {
-		return def
-	}
-	n, err := strconv.Atoi(v)
-	if err != nil {
-		log.Printf("[redisx] %s=%q is not an integer, using %d", k, v, def)
-		return def
-	}
-	return n
+	})
 }
 
 func envOr(k, def string) string {

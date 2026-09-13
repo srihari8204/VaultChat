@@ -1,6 +1,0 @@
-apiVersion: v2
-name: coturn
-description: TURN/STUN relay for WebRTC, as a hostNetwork DaemonSet on the calls media pool.
-type: application
-version: 0.1.0
-appVersion: "4.6.2"

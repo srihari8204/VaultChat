@@ -7,14 +7,10 @@ package main
 
 import (
 	"context"
-	"errors"
 	"log"
 	"net/http"
 	"os"
-	"os/signal"
 	"runtime"
-	"sync/atomic"
-	"syscall"
 	"time"
 
 	"vaultchat/backend-go/internal/db"
@@ -25,7 +21,6 @@ import (
 	"vaultchat/backend-go/internal/realtime"
 	"vaultchat/backend-go/internal/redisx"
 	"vaultchat/backend-go/internal/routes"
-	"vaultchat/backend-go/internal/storage"
 )
 
 // Build provenance, set by the linker (-ldflags -X) in the Dockerfile.
@@ -87,41 +82,11 @@ func main() {
 		log.Printf("[boot] WARNING: JWT_SECRET is under 32 chars — brute-forceable offline; rotate to 32+ random bytes")
 	}
 
-	// REQUIRE_OBJECT_STORE — the guard that makes multi-replica safe.
-	//
-	// uploads.go has two write paths: an object store when storage.Enabled()
-	// (S3_ENDPOINT + S3_ACCESS_KEY both set), and a local-disk fallback when it
-	// is not. The fallback is correct for dev and for a single-box self-host,
-	// and it is quietly catastrophic behind a Deployment: each replica writes to
-	// its own ephemeral filesystem, so an upload succeeds on the pod that
-	// received it and 404s from every other one. Nothing errors. It presents as
-	// "some images don't load", intermittently, in proportion to replica count.
-	//
-	// Misconfiguration is the realistic way this happens — an S3_* key that did
-	// not reach the pod — and the symptom points nowhere near the cause. So the
-	// chart sets this and the process refuses to start rather than serving a
-	// storage layer that silently loses files.
-	if os.Getenv("REQUIRE_OBJECT_STORE") == "1" && !storage.Enabled() {
-		log.Fatal("[boot] REQUIRE_OBJECT_STORE=1 but S3_ENDPOINT/S3_ACCESS_KEY are unset — " +
-			"refusing to start: uploads would land on a single replica's local disk and 404 from the rest")
-	}
-
-	// Cancellable so the shutdown path can stop the in-process schedulers
-	// (jobs.StartAll, the reapers, the VaultBeam sweep) rather than leaving them
-	// mid-query while the process exits.
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx := context.Background()
 	if err := db.Connect(ctx); err != nil {
 		log.Fatalf("[db] %v", err)
 	}
 	redisx.Connect()
-
-	// draining flips on SIGTERM so /ready reports 503 immediately, rather than
-	// waiting for the next probe interval to discover the pod is going away.
-	// The kubelet needs a failed readiness check to pull the pod from the
-	// Service endpoints, and ingress-nginx needs that endpoint change to update
-	// its own backend list; every second between the signal and the first 503 is
-	// a second of requests still being routed to a process that is shutting down.
-	var draining atomic.Bool
 
 	mux := http.NewServeMux()
 
@@ -173,13 +138,6 @@ func main() {
 	// either way so an alert can fire on the body without taking the service
 	// out of the load balancer.
 	mux.HandleFunc("GET /ready", func(w http.ResponseWriter, r *http.Request) {
-		if draining.Load() {
-			httpx.JSON(w, http.StatusServiceUnavailable, map[string]any{
-				"ready": false, "draining": true,
-				"uptime": time.Since(start).Seconds(),
-			})
-			return
-		}
 		dbOK, redisOK := probe(r)
 		code := 200
 		if !dbOK {
@@ -199,27 +157,6 @@ func main() {
 		info := buildInfo()
 		info["uptime"] = time.Since(start).Seconds()
 		httpx.JSON(w, 200, info)
-	})
-
-	// LIVEZ — the probe-free liveness endpoint.
-	//
-	// /health is already safe to use as a liveness probe: it returns 200
-	// unconditionally, because restarting a pod does not fix a database
-	// outage. What it is not is FREE — it pings Postgres and Redis on every
-	// call with a 2s bound, so a kubelet probe configured with the default
-	// timeoutSeconds: 1 will time out and restart a pod whose only problem is
-	// a slow database. That is the same cluster-wide restart storm the
-	// always-200 contract was written to prevent, arriving through the probe
-	// timeout instead of the status code.
-	//
-	// This endpoint touches nothing. If the goroutine scheduler can run this
-	// handler, the process is alive, which is the entire question a liveness
-	// probe asks. Readiness stays on /ready, which is where dependency health
-	// belongs.
-	mux.HandleFunc("GET /livez", func(w http.ResponseWriter, r *http.Request) {
-		httpx.JSON(w, 200, map[string]any{
-			"alive": true, "uptime": time.Since(start).Seconds(),
-		})
 	})
 
 	routes.RegisterContacts(mux)
@@ -439,86 +376,7 @@ func main() {
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 	log.Printf("[go-api] listening on :%s", port)
-
-	// ── orderly shutdown ────────────────────────────────────────────────
-	//
-	// This used to be log.Fatal(srv.ListenAndServe()), which has no SIGTERM
-	// path at all: the process died mid-request and every WebSocket went with
-	// it, unclosed. On one long-lived box that cost a few seconds at deploy
-	// time and nobody noticed. Under an orchestrator it is a different thing
-	// entirely — every rolling update, every autoscale-down and every node
-	// drain terminates pods, so this path runs constantly rather than
-	// occasionally, and each time it drops live conversations.
-	//
-	// The sequence, in order, and each step is load-bearing:
-	//
-	//  1. A grace delay BEFORE anything stops. The load balancer learns a pod
-	//     is going away from its own health checks, which lag the SIGTERM by
-	//     design; accepting normally through that window is what keeps the
-	//     requests already in flight toward us from being refused. Sized by
-	//     SHUTDOWN_DRAIN_DELAY and meant to exceed the readiness interval.
-	//  2. Drain the realtime hub, so clients are told to reconnect instead of
-	//     discovering it via a ping timeout.
-	//  3. srv.Shutdown, which stops accepting and waits out in-flight requests.
-	//  4. Cancel the root context, stopping the background schedulers.
-	//
-	// The whole thing is bounded by SHUTDOWN_TIMEOUT and must stay below the
-	// pod's terminationGracePeriodSeconds, or the kubelet SIGKILLs us partway
-	// through and none of the above happened.
-	stop := make(chan os.Signal, 1)
-	signal.Notify(stop, syscall.SIGTERM, syscall.SIGINT)
-
-	errCh := make(chan error, 1)
-	go func() {
-		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			errCh <- err
-		}
-	}()
-
-	select {
-	case err := <-errCh:
-		log.Fatalf("[go-api] listen failed: %v", err)
-	case sig := <-stop:
-		log.Printf("[go-api] %s received — draining", sig)
-	}
-
-	// Announce unreadiness BEFORE the grace delay, not after: the delay exists
-	// to give this 503 time to propagate through the endpoints controller and
-	// the ingress, and a delay that starts before the signal is pointless.
-	draining.Store(true)
-
-	if d := envDuration("SHUTDOWN_DRAIN_DELAY", 5*time.Second); d > 0 {
-		log.Printf("[go-api] holding %s for load-balancer deregistration", d)
-		time.Sleep(d)
-	}
-
-	total := envDuration("SHUTDOWN_TIMEOUT", 45*time.Second)
-	shutCtx, shutCancel := context.WithTimeout(context.Background(), total)
-	defer shutCancel()
-
-	hub.Shutdown(10 * time.Second)
-
-	if err := srv.Shutdown(shutCtx); err != nil {
-		log.Printf("[go-api] shutdown: in-flight requests did not finish in %s: %v", total, err)
-	}
-	cancel()
-	log.Println("[go-api] stopped")
-}
-
-// envDuration reads a Go duration ("30s", "2m") and falls back to def when the
-// variable is unset or unparseable. Deliberately forgiving: a typo in a
-// shutdown tunable must not stop the server from starting.
-func envDuration(key string, def time.Duration) time.Duration {
-	v := os.Getenv(key)
-	if v == "" {
-		return def
-	}
-	d, err := time.ParseDuration(v)
-	if err != nil {
-		log.Printf("[go-api] %s=%q is not a duration, using %s", key, v, def)
-		return def
-	}
-	return d
+	log.Fatal(srv.ListenAndServe())
 }
 
 // broadcastChat = Node's broadcastNewMessage / broadcastChatEvent: the pure
