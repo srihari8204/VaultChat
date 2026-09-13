@@ -33,7 +33,15 @@
 -- Without it, message sends start failing on the hour after the flip — not at
 -- deploy time, which is the worst possible way to find out.
 --
---   psql "$DATABASE_URL" -v app_pass="'…'" -v sys_pass="'…'" -f scripts/rls-roles.sql
+--   psql "$DATABASE_URL" -v app_pass="$APP_PASS" -v sys_pass="$SYS_PASS" -f scripts/rls-roles.sql
+--
+-- PASS THE RAW PASSWORD, WITH NO QUOTES OF YOUR OWN. `:'app_pass'` is psql's
+-- quote-as-a-literal form, so it adds them. Passing "'secret'" stores a
+-- password whose first and last characters are single quotes — which then
+-- fails against every client that sends the password you thought you set.
+-- That happened on the first run here, and it presented as
+-- "SASL authentication failed" from PgBouncer, which points nowhere near the
+-- cause.
 --
 -- Idempotent: safe to re-run, and re-running is how you pick up grants for
 -- tables added by later migrations.

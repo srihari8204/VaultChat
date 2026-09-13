@@ -4,11 +4,11 @@
 package routes
 
 import (
-	"log"
 	"context"
 	"crypto/rand"
 	"fmt"
 	"io"
+	"log"
 	"mime/multipart"
 	"net/http"
 	"net/url"
@@ -23,6 +23,7 @@ import (
 	"vaultchat/backend-go/internal/db"
 	"vaultchat/backend-go/internal/emitx"
 	"vaultchat/backend-go/internal/httpx"
+	"vaultchat/backend-go/internal/metrics"
 	"vaultchat/backend-go/internal/storage"
 	"vaultchat/backend-go/internal/vault"
 )
@@ -914,13 +915,37 @@ func uploadsViewed(w http.ResponseWriter, r *http.Request) {
 		httpx.JSON(w, 200, map[string]any{"ok": true, "alreadyViewed": true})
 		return
 	}
-	err = db.WithUser(ctx, user.ID, func(tx pgx.Tx) error {
-		_, e := tx.Exec(ctx,
-			`UPDATE attachments SET viewed_at = NOW()
-			  WHERE id = $1 AND view_once = TRUE AND viewed_at IS NULL`, id)
-		return e
-	})
+	// SysPool, not WithUser — and this is load-bearing, not a shortcut.
+	//
+	// The row is UPDATEd by the RECIPIENT, who is not its owner, and
+	// attachments_update (migration 004) reads
+	// `USING (owner_user_id = vc_current_user_id())`. Under enforced RLS that
+	// matches zero rows and raises NO ERROR, so the burn silently did nothing
+	// and the handler still answered {"ok":true}: view-once media that could be
+	// reopened forever, with nothing in any log. It works in production today
+	// only because the API still connects as a superuser and bypasses every
+	// policy — which is exactly what the RLS rollout is meant to end, so this
+	// would have become a real bug at the moment of that change.
+	//
+	// The authorization decision is NOT being skipped, it has already been
+	// made: uploadsIsRecipient above is the single definition of who may see
+	// this attachment (audit F03), and widening attachments_update to admit
+	// recipients would duplicate that rule into SQL where the two would drift.
+	// One rule, enforced once, and then a system write on its behalf.
+	tag, err := db.SysPool.Exec(ctx,
+		`UPDATE attachments SET viewed_at = NOW()
+		  WHERE id = $1 AND view_once = TRUE AND viewed_at IS NULL`, id)
 	if err != nil {
+		httpx.Err(w, 500, "Failed to mark viewed")
+		return
+	}
+	// Zero rows here is not "already viewed" — that was answered above, and the
+	// id was proven to exist. It means the UPDATE was refused or the row moved
+	// under us, and answering {"ok":true} to that is precisely the silence that
+	// made the original bug invisible. Say so instead.
+	if tag.RowsAffected() == 0 {
+		metrics.Inc("view_once_burn_missed_total")
+		log.Printf("[uploads] view-once burn matched no row for %s — it has NOT been burned", id)
 		httpx.Err(w, 500, "Failed to mark viewed")
 		return
 	}

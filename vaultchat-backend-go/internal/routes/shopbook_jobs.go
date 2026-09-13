@@ -20,6 +20,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"vaultchat/backend-go/internal/db"
+	"vaultchat/backend-go/internal/redisx"
 )
 
 // StartShopBookJobs launches the hourly ticker. Each firing is idempotent —
@@ -55,6 +56,34 @@ func sbSummaryHourUTC() int {
 func sbJobsTick(ctx context.Context) {
 	if time.Now().UTC().Hour() != sbSummaryHourUTC() {
 		return
+	}
+
+	// ONE replica runs this tick, not all of them.
+	//
+	// The dedupe below is SELECT-then-INSERT with no unique index behind it,
+	// which is idempotent across a RESTART and not across two processes. That
+	// distinction does not matter today — there is one replica — and stops
+	// being academic the moment there are two, because `--scale go-api=2`
+	// starts both containers in the same second, so both hourly tickers fire
+	// within milliseconds of each other. Every hour. That is the steady state,
+	// not a rare interleave.
+	//
+	// The cost of losing that race is not a stray row: sbNotify emits a socket
+	// event, writes an inbox row AND sends an Expo push, so it is a duplicate
+	// notification to every shop owner and every customer carrying a balance.
+	//
+	// Same SETNX pattern as the realtime janitor and the chat-viewer sweep. The
+	// TTL is under the hour so a replica that dies mid-tick cannot wedge the
+	// job until someone notices, and over the work so a slow run cannot be
+	// lapped by the next tick.
+	if c := redisx.Client; c != nil {
+		ok, err := c.SetNX(ctx, "vc:sbjobs:lock", time.Now().UTC().Format(time.RFC3339), 55*time.Minute).Result()
+		if err == nil && !ok {
+			return // another replica has this hour
+		}
+		// err != nil ⇒ Redis is unreachable. Fall through and run: a missed
+		// daily summary is worse than a duplicated one, and with Redis down
+		// there is almost certainly only one replica serving anyway.
 	}
 	sbSendDailySummaries(ctx)
 	sbSendWeeklyReminders(ctx)
