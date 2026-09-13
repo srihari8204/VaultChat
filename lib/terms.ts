@@ -38,10 +38,23 @@ export async function fetchTermsState(force = false): Promise<TermsState | null>
     }
     cached = await api<TermsState>('/user/terms');
   } catch {
-    // Offline, an outage, or a server predating this endpoint. All three mean
-    // "do not interrupt the user"; an acceptance recorded a day later is a far
-    // better outcome than a screen nobody can dismiss.
-    cached = null;
+    // Offline, an outage, a server predating this endpoint, or SecureStore
+    // throwing inside hasSession(). All of them mean "do not interrupt the
+    // user" — an acceptance recorded a day later beats a screen nobody can
+    // dismiss.
+    //
+    // NOT cached, for the same reason the signed-out path is not. A transient
+    // failure is not an answer, and storing it as one pinned `cached = null`
+    // for the life of the process: the early return at the top of this function
+    // then short-circuited every later call, so TermsGate's retry ladder kept
+    // re-scheduling and every retry returned the pinned null WITHOUT a network
+    // call. One network blip at the wrong moment disabled the gate until the
+    // app was killed. Observed on a device: the gate ran on one boot and never
+    // requested /user/terms at all on the next.
+    //
+    // `cached` now only ever holds a real answer from the server. That is the
+    // whole invariant, and it is why both failure paths return without writing.
+    return null;
   }
   return cached;
 }

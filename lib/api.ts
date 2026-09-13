@@ -60,6 +60,15 @@ export async function clearTokens(): Promise<void> {
   // #32 Phase B: drop the in-memory cache DEK (the envelope on disk is cleared by
   // the account wipe in clearLocalDb, so a same-PIN re-unlock keeps cached rows readable).
   try { (await cacheMod()).clearCacheKey(); } catch {}
+  // The terms answer belongs to the USER, not the install. Without this, signing
+  // out and back in as somebody else carries the first account's acceptance for
+  // the life of the process — the second user is never asked, and the server has
+  // no record that they agreed to anything. resetTermsCache existed for exactly
+  // this and nothing called it.
+  //
+  // Dynamic import on purpose: lib/terms imports this module, so a static one is
+  // a cycle. Same reason sealMod() and cacheMod() above are lazy.
+  try { (await import('./terms')).resetTermsCache(); } catch {}
 }
 
 // ─── #32 session-seal seam (no-ops unless VAULT_SESSION_SEALED) ─────────────

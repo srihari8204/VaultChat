@@ -225,12 +225,64 @@ function withIosVoip(config) {
   });
 }
 
+
+/**
+ * LiveKitReactNative.setup(this) in MainApplication.onCreate().
+ *
+ * @livekit/react-native installs an audio device module whose
+ * audioRecordSamplesDispatcher is created by this call. Without it every call
+ * path eventually throws
+ *
+ *   IllegalStateException: audioRecordSamplesDispatcher is not initialized!
+ *   Did you remember to call LiveKitReactNative.setup in your Application.onCreate?
+ *
+ * It was missing entirely and nobody noticed, because it is NOT a startup
+ * crash: the app boots perfectly and the failure surfaces wherever audio
+ * capture is first touched. Found by reading a device log during an end-to-end
+ * walkthrough; no test could have shown it.
+ *
+ * It lives HERE rather than in the generated file because android/ is
+ * gitignored and rewritten by `expo prebuild` — a hand edit there is correct
+ * until the next prebuild and then silently gone, which is exactly how this
+ * would come back.
+ *
+ * Ordering matters: it must run BEFORE loadReactNative(this), so the native
+ * module is ready by the time React Native resolves it.
+ */
+function withLiveKitSetup(config) {
+  return withMainApplication(config, (cfg) => {
+    let src = cfg.modResults.contents;
+    if (src.includes('LiveKitReactNative.setup(this)')) return cfg;   // idempotent
+
+    const IMPORT = 'import com.livekit.reactnative.LiveKitReactNative';
+    const EXPO_IMPORT = 'import expo.modules.ApplicationLifecycleDispatcher';
+    if (!src.includes(IMPORT) && src.includes(EXPO_IMPORT)) {
+      src = src.replace(EXPO_IMPORT, [IMPORT, '', EXPO_IMPORT].join('\n'));
+    }
+
+    const SETUP = '    LiveKitReactNative.setup(this)';
+    if (src.includes('    loadReactNative(this)')) {
+      src = src.replace('    loadReactNative(this)', [SETUP, '    loadReactNative(this)'].join('\n'));
+    } else if (src.includes('    super.onCreate()')) {
+      // Older templates call SoLoader rather than loadReactNative.
+      src = src.replace('    super.onCreate()', ['    super.onCreate()', SETUP].join('\n'));
+    } else {
+      console.warn('[withVaultChatCalls] could not insert LiveKitReactNative.setup — add it to MainApplication.onCreate() by hand, or calls will have no audio');
+      return cfg;
+    }
+
+    cfg.modResults.contents = src;
+    return cfg;
+  });
+}
+
 module.exports = function withVaultChatCalls(config) {
   config = withPermissions(config);
   config = withServices(config);
   config = withPipActivity(config);   // back → PiP, not hang-up
   config = withKotlinSources(config);
   config = withPackageRegistration(config);
+  config = withLiveKitSetup(config);
   config = withFirebaseMessaging(config);
   config = withIosVoip(config);
   return config;

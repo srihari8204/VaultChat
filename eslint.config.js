@@ -11,7 +11,7 @@ module.exports = defineConfig([
     // reported ~700 `no-var` errors against code nobody writes and every build
     // regenerates. Linting them is noise that buries real findings, which is
     // exactly what it did: 776 total errors, of which 698 came from here.
-    ignores: ['dist/*', 'android/**', 'ios/**', '**/node_modules/**'],
+    ignores: ['**/dist/**', 'android/**', 'ios/**', '**/node_modules/**'],
   },
   {
     // scripts/ and the Expo config plugins are Node CLI code, not React Native.

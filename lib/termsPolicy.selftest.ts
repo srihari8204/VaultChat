@@ -65,7 +65,24 @@ console.log('\nThe wiring is in place:');
 const TERMS = read('lib/terms.ts');
 check('the client does not ask while signed out', /hasSession\(\)/.test(TERMS),
   'calling an authed endpoint signed out would trip the session-ended redirect');
-check('a failed request caches "no answer" rather than throwing', /catch \{[\s\S]{0,400}cached = null;/.test(TERMS));
+// The invariant that replaced it, and it is the stronger one: `cached` may only
+// ever hold a REAL ANSWER from the server. Both failure paths — signed out, and
+// the request throwing — must return without writing.
+//
+// The old assertion demanded the opposite, that a failure be cached. That is
+// what pinned `cached = null` for the life of the process: the early return at
+// the top of fetchTermsState then short-circuited every later call, so the
+// gate's retry ladder re-scheduled forever and never made another request. One
+// network blip disabled the terms gate until the app was killed. Observed on a
+// device, and the test was asserting the bug.
+check('a failed request does NOT poison the cache',
+  !/catch \{[\s\S]{0,600}cached = null;/.test(TERMS),
+  'caching a transient failure pins it for the whole process');
+check('the signed-out path does not poison it either',
+  !/hasSession\(\)\)\) \{[\s\S]{0,600}cached = null;/.test(TERMS));
+check('the only write to the cache is the server answer',
+  (TERMS.match(/^\s*cached = (?!undefined)/gm) ?? []).length === 2,
+  'expected exactly two: the api() result, and acceptTerms updating it');
 check('acceptance posts the version the SERVER said is current',
   /const version = \(state\.requiredVersion \?\? ''\)\.trim\(\)/.test(TERMS),
   'a hard-coded version would keep recording the old label after the terms changed');
