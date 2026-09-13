@@ -132,6 +132,12 @@ services:
       LIVEKIT_API_KEY: ${LIVEKIT_API_KEY:-}
       LIVEKIT_API_SECRET: ${LIVEKIT_API_SECRET:-}
       LIVEKIT_URL: ${LIVEKIT_URL:-}
+      # The IN-NETWORK address, as distinct from LIVEKIT_URL above which is
+      # what the CLIENT dials. Set on the box and missing from this file until
+      # now, so a rebuild from the repository dropped it, RPCURL went empty,
+      # and same-box twirp calls routed out to the edge and back in. That has
+      # already happened once in production.
+      LIVEKIT_HTTP_URL: ${LIVEKIT_HTTP_URL:-}
       # ── GO LIVE — a SEPARATE LiveKit project, never these credentials ──
       #
       # Broadcasting used to mint tokens from LIVEKIT_* above: same key, same
@@ -152,6 +158,7 @@ services:
       GOLIVE_LIVEKIT_API_KEY: ${GOLIVE_LIVEKIT_API_KEY:-}
       GOLIVE_LIVEKIT_API_SECRET: ${GOLIVE_LIVEKIT_API_SECRET:-}
       GOLIVE_LIVEKIT_URL: ${GOLIVE_LIVEKIT_URL:-}
+      GOLIVE_LIVEKIT_HTTP_URL: ${GOLIVE_LIVEKIT_HTTP_URL:-}
       # Room namespace. Default "golive_" — set only to migrate an existing
       # deployment, since changing it strands rooms already in flight.
       GOLIVE_ROOM_PREFIX: ${GOLIVE_ROOM_PREFIX:-}
@@ -408,7 +415,7 @@ services:
   # CALL_SESSIONS is on and LIVEKIT_* is set. Start with:
   #   docker compose --profile sfu up -d livekit
   livekit:
-    image: livekit/livekit-server:v1.8
+    image: livekit/livekit-server:${LIVEKIT_VERSION:-v1.13.5}
     restart: unless-stopped
     profiles: ["sfu"]
     network_mode: host
@@ -440,8 +447,10 @@ services:
   # than leaving it unset, so the tag is a variable: read the server's version
   # (`livekit-server --version`) and set LIVEKIT_EGRESS_VERSION to the egress
   # release LiveKit documents as compatible with it. The default below matches
-  # the livekit-server:v1.8 pinned above, NOT the newer version the deploy
-  # notes describe — set the variable rather than trusting it.
+  # the livekit-server pinned above. Both defaults now match what production
+  # actually runs (v1.13.5 / v1.14.0) — this file used to say v1.8/v1.8.4 while
+  # the box ran the newer pair, so a rebuild from the repository deployed a Go
+  # Live that did not work.
   #
   # SYS_ADMIN is required, not optional: egress renders the room in headless
   # Chrome, and Chrome's sandbox needs it. This is why egress is the only
@@ -449,7 +458,7 @@ services:
   #
   # Profile-gated with the SFU it depends on: `docker compose --profile sfu up -d egress`
   egress:
-    image: livekit/egress:${LIVEKIT_EGRESS_VERSION:-v1.8.4}
+    image: livekit/egress:${LIVEKIT_EGRESS_VERSION:-v1.14.0}
     restart: unless-stopped
     profiles: ["sfu"]
     cap_add:
@@ -533,8 +542,25 @@ services:
   # PROD SAFETY: bring these up BY NAME. `--remove-orphans` against this stack
   # deletes services that are running but not in the composed set, and the live
   # egress container is one of them.
+  # Go Live's OWN Redis. Not a luxury and not a db index on the shared one:
+  # egress and its server rendezvous through Redis keys, and sharing an
+  # instance with the calling egress left the publisher transport never
+  # settling — every broadcast dying in 'starting' with nothing in either log.
+  # Existed on the production box and in no repository until now, which is
+  # precisely why a rebuild from git produced a broken Go Live.
+  #
+  # No persistence: everything in here is rendezvous state that is worthless
+  # after a restart, and an appendonly file would only be a thing to corrupt.
+  golive-redis:
+    image: redis:7
+    restart: unless-stopped
+    profiles: ["golive"]
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    ports:
+      - "127.0.0.1:16380:6379"
+
   golive-livekit:
-    image: livekit/livekit-server:v1.8
+    image: livekit/livekit-server:${LIVEKIT_VERSION:-v1.13.5}
     restart: unless-stopped
     profiles: ["golive"]
     # Host networking for the same reason as the calling SFU: RTC needs its
@@ -559,7 +585,7 @@ services:
   # broadcast render that pins the CPU cannot starve anything the calling SFU
   # might one day record, and so the two can be restarted independently.
   golive-egress:
-    image: livekit/egress:${LIVEKIT_EGRESS_VERSION:-v1.8.4}
+    image: livekit/egress:${LIVEKIT_EGRESS_VERSION:-v1.14.0}
     restart: unless-stopped
     profiles: ["golive"]
     # Egress renders the room in headless Chrome and Chrome's sandbox needs it.
@@ -571,13 +597,14 @@ services:
       - "host.docker.internal:host-gateway"
     environment:
       EGRESS_CONFIG_BODY: |
-        # db 3 — the SAME keyspace livekit/golive.yaml uses, and NOT db 0 where
-        # the calling SFU's egress registers. Egress and its server find each
-        # other through these keys; pointed at different databases they never
-        # meet and every broadcast dies in 'starting' with no visible error.
+        # A DEDICATED Redis, not a db number on the shared one. Egress and its
+        # server find each other through these keys, and sharing an instance
+        # with the calling egress left the publisher transport never settling —
+        # every broadcast dying in 'starting' with no visible error on either
+        # side. Separating the instance removes the question instead of
+        # answering it with a db index nobody can see from the outside.
         redis:
-          address: redis:6379
-          db: 3
+          address: golive-redis:6379
         api_key: ${GOLIVE_LIVEKIT_API_KEY:-}
         api_secret: ${GOLIVE_LIVEKIT_API_SECRET:-}
         # Port 7890 — the Go Live SFU. 7880 would be the calling one.
@@ -597,7 +624,7 @@ services:
           region: ${S3_REGION:-auto}
           force_path_style: true
     depends_on:
-      redis:
+      golive-redis:
         condition: service_started
       minio:
         condition: service_started

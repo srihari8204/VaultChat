@@ -1,0 +1,85 @@
+# docker-compose.box.yml — THE THIRD OVERRIDE, and the one that was missing.
+#
+#   cp deploy/docker-compose.box.yml.example docker-compose.box.yml
+#   # then fill the ${VAR}s in ./.env — see deploy/env.example
+#
+# WHY THIS FILE EXISTS AT ALL
+# ---------------------------
+# docker-compose.yml is the bench. docker-compose.prod.yml is "any production
+# box". This file is THIS BOX: the values that are true of one machine and of
+# no other — which object store it talks to, which ports its particular edge
+# already owns. Splitting it out is right. Keeping it ONLY on the box was not:
+# for months the live stack could not be described, let alone rebuilt, from the
+# repository, because a third of its configuration existed as a single 600-perm
+# file in one person's home directory. That is finding P0-02.
+#
+# Reconstructed from /home/srihari/vaultchat/docker-compose.box.yml on
+# 65.21.229.167, 2026-09-13. Every secret in the original is a ${VAR} here and
+# the values live in ./.env, which is gitignored. Nothing below is a credential.
+#
+# ORDER MATTERS — this is third, and last:
+#   docker compose -f docker-compose.yml \
+#                  -f docker-compose.prod.yml \
+#                  -f docker-compose.box.yml  <cmd>
+# Drop it and go-api silently falls back to the MinIO defaults in
+# docker-compose.yml: the API keeps starting, keeps answering /health, and every
+# attachment lands in a bucket no client has a URL for. There is no error.
+services:
+  caddy:
+    ports: !override
+      # Identical to docker-compose.prod.yml on purpose — restated, not changed.
+      # Caddy is NOT the edge here; host nginx owns :80/:443 for
+      # api.corefinite.com and proxies to this (nginx/sites/vaultchat.conf).
+      # Publishing Caddy on 0.0.0.0:80 serves the entire API, auth included,
+      # over plaintext to the internet — it has done exactly that before.
+      - "127.0.0.1:8095:80"
+
+  go-api:
+    # !override [] DELETES the loopback publish prod.yml sets, it does not add
+    # to it. Compose merges list entries by appending; `!override` replaces.
+    #
+    # ⚠️ THIS IS LOAD-BEARING AND CURRENTLY WRONG ON THE BOX. Both SFUs run
+    # network_mode: host, so they are not on the compose network and reach
+    # go-api only through a published host port. livekit/livekit.yaml and
+    # livekit/golive.yaml both post their webhooks to
+    # http://127.0.0.1:14000/internal/... — and with this line in force nothing
+    # listens on 14000 (verified with `ss -lntp` on 2026-09-13: absent). Every
+    # LiveKit room/egress webhook is therefore posted into a closed port and
+    # dropped, silently, with no error on either side.
+    #
+    # Leave this line commented unless you have also retargeted both
+    # livekit yaml webhook URLs. The default from docker-compose.prod.yml —
+    # "127.0.0.1:14000:4000" — is the shape that works.
+    # ports: !override []
+    environment:
+      # ── OBJECT STORE: Cloudflare R2, not the bundled MinIO ────────────
+      #
+      # These are `environment:` entries, which beat the `env_file:` in
+      # docker-compose.yml. Setting S3_* in vaultchat-backend/.env instead
+      # changes NOTHING and reports nothing — that trap is what made "swap
+      # MinIO for R2" look like a code problem for a week.
+      #
+      # Both endpoints are the R2 *S3 API* host
+      # (https://<account-id>.r2.cloudflarestorage.com), not a custom domain:
+      # a custom domain serves objects without validating SigV4, so it cannot
+      # be the authorization boundary for presigned uploads.
+      S3_ENDPOINT: ${S3_ENDPOINT}                # where go-api PUTs/GETs
+      S3_PUBLIC_ENDPOINT: ${S3_PUBLIC_ENDPOINT}  # host the presigned URL is SIGNED for; clients dial this
+      S3_ACCESS_KEY: ${S3_ACCESS_KEY}            # R2 access key id
+      S3_SECRET_KEY: ${S3_SECRET_KEY}            # R2 secret access key
+      S3_BUCKET: ${S3_BUCKET}                    # vaultchat-media
+      # `auto` is mandatory for R2. MinIO ignores region entirely, so it is safe
+      # in both — and it stops storage.go (auto) and egress.go (us-east-1)
+      # signing under two different SigV4 scopes against one bucket.
+      S3_REGION: ${S3_REGION}
+      # Retention flag. On, media inherits the same 3-hour delete-on-delivery
+      # ceiling as the text it accompanies (internal/jobs/jobs.go). Off, media
+      # keeps the old two-week window — and the decryption key expires while the
+      # blob it unlocks lingers. The two must move together.
+      MESSAGE_BODIES: ${MESSAGE_BODIES:-1}
+
+# NOT OVERRIDDEN HERE, DELIBERATELY: the livekit `egress` services keep the
+# docker-compose.yml MinIO defaults. This deployment runs TWO object stores —
+# user media on R2, HLS broadcast segments on local MinIO — and go-api reads the
+# second through BROADCAST_S3_* (see deploy/env.example). Point BROADCAST_S3_*
+# at R2 the day segments move and the split collapses back to one store.
