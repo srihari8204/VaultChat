@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"time"
 
@@ -105,17 +106,43 @@ func env(k, def string) string {
 	return def
 }
 
+// dsn builds a libpq URL with the credentials properly escaped.
+//
+// The password used to be interpolated raw. That is fine for the compose
+// default ("vaultchat_dev") and breaks the moment a managed provider generates
+// one: DigitalOcean's passwords are drawn from an alphabet that includes
+// characters with meaning inside a URL authority, and a single @ or / silently
+// re-parses the host. The failure surfaces as "dial tcp: missing port" or a
+// wrong-host connection error that says nothing about the password, which is a
+// long way to travel for a quoting bug.
+//
+// sslmode is explicit for a related reason. pgx defaults to "prefer", which
+// negotiates TLS but does NOT verify the certificate — so a deployment that
+// looks encrypted is not authenticated. Managed Postgres requires TLS anyway;
+// this makes the mode a deliberate setting rather than a library default, and
+// lets the cluster ask for verify-full with a mounted CA.
+func dsn(user, pass, poolMax string) string {
+	q := url.Values{}
+	q.Set("pool_max_conns", poolMax)
+	q.Set("default_query_exec_mode", env("DB_QUERY_EXEC_MODE", "exec"))
+	q.Set("sslmode", env("DB_SSLMODE", "prefer"))
+	if ca := env("DB_SSLROOTCERT", ""); ca != "" {
+		q.Set("sslrootcert", ca)
+	}
+	return fmt.Sprintf("postgres://%s@%s:%s/%s?%s",
+		url.UserPassword(user, pass).String(),
+		env("DB_HOST", "127.0.0.1"), env("DB_PORT", "5432"),
+		env("DB_NAME", "vaultchat"), q.Encode())
+}
+
 func Connect(ctx context.Context) error {
 	// P2.3: default_query_exec_mode=exec avoids named prepared statements,
 	// which PgBouncer transaction pooling cannot track across server
 	// connections. Direct-to-Postgres deploys may set
 	// DB_QUERY_EXEC_MODE=cache_statement to restore pgx statement caching.
-	dsn := fmt.Sprintf("postgres://%s:%s@%s:%s/%s?pool_max_conns=%s&default_query_exec_mode=%s",
+	cfg, err := pgxpool.ParseConfig(dsn(
 		env("DB_USER", "vaultchat_user"), env("DB_PASS", ""),
-		env("DB_HOST", "127.0.0.1"), env("DB_PORT", "5432"),
-		env("DB_NAME", "vaultchat"), env("DB_POOL_MAX", "30"),
-		env("DB_QUERY_EXEC_MODE", "exec"))
-	cfg, err := pgxpool.ParseConfig(dsn)
+		env("DB_POOL_MAX", "30")))
 	if err != nil {
 		return err
 	}
@@ -146,15 +173,11 @@ func connectSystem(ctx context.Context) error {
 		SysPool = Pool
 		return nil
 	}
-	dsn := fmt.Sprintf("postgres://%s:%s@%s:%s/%s?pool_max_conns=%s&default_query_exec_mode=%s",
+	// Smaller pool by default: system work is sweeps and fan-out, not request
+	// traffic, and it should not be able to starve the user pool.
+	cfg, err := pgxpool.ParseConfig(dsn(
 		user, env("DB_SYSTEM_PASS", ""),
-		env("DB_HOST", "127.0.0.1"), env("DB_PORT", "5432"),
-		env("DB_NAME", "vaultchat"),
-		// Smaller by default: system work is sweeps and fan-out, not request
-		// traffic, and it should not be able to starve the user pool.
-		env("DB_SYSTEM_POOL_MAX", "8"),
-		env("DB_QUERY_EXEC_MODE", "exec"))
-	cfg, err := pgxpool.ParseConfig(dsn)
+		env("DB_SYSTEM_POOL_MAX", "8")))
 	if err != nil {
 		return fmt.Errorf("system pool config: %w", err)
 	}
