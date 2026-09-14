@@ -1,4 +1,4 @@
-// The three inbound bodies the Go server SERVES, and only those.
+// The inbound bodies the Go server SERVES, and only those.
 //
 // codec.go's rule — "the transport routes, the application interprets, bodies
 // stay opaque" — is still the rule. These are the exceptions it already names
@@ -275,4 +275,118 @@ func DecodeTyping(body []byte, lim Limits) (chatID string, typing bool, err erro
 		}
 	}
 	return chatID, typing, nil
+}
+
+// Edit is a decoded EditMessage: { Envelope envelope = 1; bytes sealed = 2;
+// uint64 edit_seq = 3; }
+//
+// Unlike Submit, Envelope.message_id IS read: on an edit it is not a
+// server-assigned value, it NAMES THE TARGET. Everything else about the
+// envelope is discarded for the same reasons Submit discards it.
+//
+// edit_seq (3) is skipped. The server keeps no per-message edit counter, and
+// the REST edit is an UPDATE guarded by sender_id and the 15-minute window —
+// replaying one produces the same row, not a second edit. A sequence number the
+// server cannot check is a field it must not pretend to honour.
+type Edit struct {
+	ChatID    string
+	MessageID string
+	Sealed    []byte // aliases the input buffer
+}
+
+func DecodeEdit(body []byte, lim Limits) (Edit, error) {
+	var ed Edit
+	r := reader{b: body}
+	for r.p < len(r.b) {
+		field, wire, err := r.tag()
+		if err != nil {
+			return Edit{}, err
+		}
+		switch {
+		case field == 1 && wire == 2:
+			span, err := r.lenSpan()
+			if err != nil {
+				return Edit{}, err
+			}
+			if err := ed.decodeEnvelope(span, lim); err != nil {
+				return Edit{}, err
+			}
+		case field == 2 && wire == 2:
+			span, err := r.lenSpan()
+			if err != nil {
+				return Edit{}, err
+			}
+			if len(span) > lim.MaxMessageBodyBytes {
+				return Edit{}, ErrBytesTooLong
+			}
+			ed.Sealed = span
+		default:
+			if err := r.skipField(wire); err != nil {
+				return Edit{}, err
+			}
+		}
+	}
+	return ed, nil
+}
+
+func (ed *Edit) decodeEnvelope(buf []byte, lim Limits) error {
+	r := reader{b: buf}
+	for r.p < len(r.b) {
+		field, wire, err := r.tag()
+		if err != nil {
+			return err
+		}
+		var e error
+		switch {
+		case field == 1 && wire == 2:
+			ed.ChatID, e = r.str(lim)
+		case field == 2 && wire == 2:
+			ed.MessageID, e = r.str(lim)
+		default:
+			// Includes public_meta (7): an edit changes the ciphertext, not the
+			// routing metadata, and the REST edit has no way to accept one —
+			// so a meta on an edit is skipped rather than half-applied.
+			e = r.skipField(wire)
+		}
+		if e != nil {
+			return e
+		}
+	}
+	return nil
+}
+
+// Delete is a decoded DeleteMessage:
+// { string chat_id = 1; string message_id = 2; bool for_everyone = 3; }
+type Delete struct {
+	ChatID      string
+	MessageID   string
+	ForEveryone bool
+}
+
+func DecodeDelete(body []byte, lim Limits) (Delete, error) {
+	var d Delete
+	r := reader{b: body}
+	for r.p < len(r.b) {
+		field, wire, err := r.tag()
+		if err != nil {
+			return Delete{}, err
+		}
+		var e error
+		switch {
+		case field == 1 && wire == 2:
+			d.ChatID, e = r.str(lim)
+		case field == 2 && wire == 2:
+			d.MessageID, e = r.str(lim)
+		case field == 3 && wire == 0:
+			var v uint64
+			v, e = r.varint64()
+			d.ForEveryone = v != 0
+		default:
+			e = r.skipField(wire)
+		}
+		if e != nil {
+			return Delete{}, e
+		}
+	}
+	return d, nil
 }

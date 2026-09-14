@@ -538,3 +538,353 @@ func TestCCWireFanOutHookIsInertWithNoSessions(t *testing.T) {
 		t.Fatal("the fan-out hook allocated session state for a user with no CC-Wire session")
 	}
 }
+
+// ── EditMessage / DeleteMessage ─────────────────────────────────────────
+
+// editRoutes is fakeRoutes plus the two per-message routes. It is separate so
+// the existing tests keep asserting exactly the send/receipt surface they were
+// written for.
+func editRoutes(t *testing.T, calls *[]capturedCall, reply func(capturedCall) (int, map[string]any)) {
+	t.Helper()
+	h := func(w http.ResponseWriter, r *http.Request) {
+		var b map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&b)
+		c := capturedCall{r.Method, r.URL.Path, b}
+		*calls = append(*calls, c)
+		status, out := reply(c)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(status)
+		_ = json.NewEncoder(w).Encode(out)
+	}
+	m := http.NewServeMux()
+	// The SAME patterns internal/routes registers on the CC-Wire mux, so a path
+	// this session builds has to match the real one to be served at all.
+	m.HandleFunc("POST /chats/{id}/messages", h)
+	m.HandleFunc("PATCH /chats/{id}/messages/{msgId}", h)
+	m.HandleFunc("DELETE /chats/{id}/messages/{msgId}", h)
+	SetCCWireRoutes(m)
+	t.Cleanup(func() { SetCCWireRoutes(nil) })
+}
+
+// editBody builds an EditMessage the way a client would: the target message id
+// lives in Envelope.message_id (field 2), which on an edit is not a
+// server-assigned value but the thing being named.
+func editBody(chatID, msgID, sealed string, extraEnvelope []byte) []byte {
+	env := ccwire.AppendStringField(nil, 1, chatID)
+	env = ccwire.AppendStringField(env, 2, msgID)
+	env = append(env, extraEnvelope...)
+	b := ccwire.AppendBytesField(nil, 1, env)
+	b = ccwire.AppendBytesField(b, 2, []byte(sealed))
+	return ccwire.AppendVarintField(b, 3, 7) // edit_seq: skipped by the server
+}
+
+func deleteBody(chatID, msgID string, forEveryone bool) []byte {
+	b := ccwire.AppendStringField(nil, 1, chatID)
+	b = ccwire.AppendStringField(b, 2, msgID)
+	return ccwire.AppendBoolField(b, 3, forEveryone)
+}
+
+func sendBody(t *testing.T, s *ccwireSession, field uint32, body []byte) bool {
+	t.Helper()
+	return s.handle(frame(t, ccwire.Message{
+		RequestID:    "r",
+		TrafficClass: ccwire.TrafficClassMessaging,
+		BodyField:    field,
+		Body:         body,
+	}))
+}
+
+// THE DESTINATION IS THE ARGUMENT. An edit is not persisted by this package; it
+// is PATCHed to chatsMessagePatch, whose WHERE clause carries sender ownership,
+// deleted_at IS NULL and the 15-minute window, behind chatsRequireMem, ending in
+// the message_edited fan-out. If the request stopped arriving there, every one
+// of those would be silently gone.
+func TestCCWireEditRunsTheRESTEditPath(t *testing.T) {
+	var calls []capturedCall
+	editRoutes(t, &calls, func(capturedCall) (int, map[string]any) {
+		return 200, map[string]any{"id": "9001"}
+	})
+
+	s, f := newSession("u1", map[string]cachedPerm{})
+	hello(t, s)
+	if !sendBody(t, s, ccwire.BodyEditMessage, editBody("c1", "9001", "\x00vc1:{new}", nil)) {
+		t.Fatal("a valid edit must not end the session")
+	}
+
+	if len(calls) != 1 {
+		t.Fatalf("expected exactly one loopback call, got %d", len(calls))
+	}
+	c := calls[0]
+	if c.method != http.MethodPatch || c.path != "/chats/c1/messages/9001" {
+		t.Fatalf("edit went somewhere other than the edit route: %s %s", c.method, c.path)
+	}
+	if c.body["content"] != "\x00vc1:{new}" {
+		t.Fatalf("sealed body was not forwarded verbatim: %q", c.body["content"])
+	}
+	// The request carries the new ciphertext and nothing else — in particular
+	// nothing that could name a sender or widen what the handler updates.
+	if len(c.body) != 1 {
+		t.Fatalf("the edit request carried more than the content: %v", c.body)
+	}
+	m := f.last(t)
+	if m.BodyField != ccwire.BodyAck {
+		t.Fatalf("expected Ack, got body %d", m.BodyField)
+	}
+	if got := pbStr(t, pbFields(t, m.Body), 1); got != "9001" {
+		t.Fatalf("Ack did not carry the edited message id: %q", got)
+	}
+}
+
+// A delete goes to the delete-for-everyone route, and ONLY when the client
+// actually asked for that. for_everyone = false has no handler on this server
+// (there is no delete-for-me on either transport), so it is answered rather
+// than quietly upgraded into an irreversible delete the user did not request.
+func TestCCWireDeleteRunsTheRESTDeletePath(t *testing.T) {
+	var calls []capturedCall
+	editRoutes(t, &calls, func(capturedCall) (int, map[string]any) {
+		return 200, map[string]any{"id": "9001", "deletedAt": "2026-09-14T12:00:00.000Z"}
+	})
+
+	s, f := newSession("u1", map[string]cachedPerm{})
+	hello(t, s)
+	if !sendBody(t, s, ccwire.BodyDeleteMessage, deleteBody("c1", "9001", true)) {
+		t.Fatal("a valid delete must not end the session")
+	}
+	if len(calls) != 1 {
+		t.Fatalf("expected exactly one loopback call, got %d", len(calls))
+	}
+	if calls[0].method != http.MethodDelete || calls[0].path != "/chats/c1/messages/9001" {
+		t.Fatalf("delete went somewhere else: %s %s", calls[0].method, calls[0].path)
+	}
+	if got := pbStr(t, pbFields(t, f.last(t).Body), 1); got != "9001" {
+		t.Fatalf("Ack did not carry the deleted message id: %q", got)
+	}
+
+	// for_everyone = false: refused, and no database path reached.
+	calls = nil
+	if !sendBody(t, s, ccwire.BodyDeleteMessage, deleteBody("c1", "9001", false)) {
+		t.Fatal("a refusal must not end the session")
+	}
+	if len(calls) != 0 {
+		t.Fatalf("delete-for-me reached a handler: %v", calls)
+	}
+	if got := errorCodeOf(t, f.last(t)); got != errUnknownOperation {
+		t.Fatalf("expected UNKNOWN_OPERATION for delete-for-me, got %d", got)
+	}
+}
+
+// A NON-OWNER'S EDIT IS REFUSED, and by the handler rather than by anything
+// here. chatsMessagePatch's UPDATE matches on sender_id = the authenticated
+// user, so someone else's message simply updates no row and returns 404 — which
+// this transport must surface as a refusal and must not paper over. 403 and 404
+// collapse to NOT_PERMITTED (errors.proto: no existence oracle for message ids).
+func TestCCWireEditAndDeleteSurfaceTheOwnershipRefusal(t *testing.T) {
+	for _, field := range []uint32{ccwire.BodyEditMessage, ccwire.BodyDeleteMessage} {
+		for _, status := range []int{http.StatusNotFound, http.StatusForbidden} {
+			var calls []capturedCall
+			st := status
+			editRoutes(t, &calls, func(capturedCall) (int, map[string]any) {
+				// What the real handler answers for "not yours, not there, or the
+				// window expired" — one answer to three questions.
+				return st, map[string]any{"error": "Message not found, not yours, or edit window expired"}
+			})
+			body := editBody("c1", "9001", "sealed", nil)
+			if field == ccwire.BodyDeleteMessage {
+				body = deleteBody("c1", "9001", true)
+			}
+			s, f := newSession("not-the-owner", map[string]cachedPerm{})
+			hello(t, s)
+			if !sendBody(t, s, field, body) {
+				t.Fatalf("body %d status %d: a refusal must not end the session", field, st)
+			}
+			m := f.last(t)
+			if got := errorCodeOf(t, m); got != errNotPermitted {
+				t.Fatalf("body %d status %d: expected NOT_PERMITTED, got %d", field, st, got)
+			}
+			if pbStr(t, pbFields(t, m.Body), 3) == "Message not found, not yours, or edit window expired" {
+				t.Fatalf("body %d: the handler's error text was echoed to the peer", field)
+			}
+		}
+	}
+}
+
+// IDENTITY COMES FROM THE SESSION, AND THERE IS NO PAYLOAD FIELD THAT COMPETES.
+//
+// EditMessage's envelope has no sender field (envelope.proto: "unrepresentable
+// beats unchecked"), so the attack shape is an unknown field smuggled in hoping
+// it is copied through. This asserts the WHOLE key set of the outgoing request
+// rather than the absence of one spelling — the next spelling would pass a
+// narrower test — and the sender the handler uses is httpx.UserFrom on the
+// session's own context, which nothing on this path can set.
+func TestCCWireEditCannotCarryAnIdentity(t *testing.T) {
+	var calls []capturedCall
+	editRoutes(t, &calls, func(capturedCall) (int, map[string]any) {
+		return 200, map[string]any{"id": "9001"}
+	})
+	// Envelope fields 99/100: "senderUid" and "userId" by any other name.
+	extra := ccwire.AppendStringField(nil, 99, "victim-uid")
+	extra = ccwire.AppendStringField(extra, 100, "victim-uid")
+
+	s, _ := newSession("attacker", map[string]cachedPerm{})
+	hello(t, s)
+	if !sendBody(t, s, ccwire.BodyEditMessage, editBody("c1", "9001", "sealed", extra)) {
+		t.Fatal("session ended unexpectedly")
+	}
+	if len(calls) != 1 {
+		t.Fatalf("expected one call, got %d", len(calls))
+	}
+	for k, v := range calls[0].body {
+		if k != "content" {
+			t.Fatalf("an unexpected key reached the edit request: %q = %v", k, v)
+		}
+	}
+	if calls[0].body["content"] == "victim-uid" {
+		t.Fatal("a smuggled envelope field became the edit content")
+	}
+}
+
+// A RETRIED EDIT IS NOT A SECOND EDIT. The REST edit is an UPDATE guarded by
+// (id, chat_id, sender_id, not deleted, inside the window), so replaying it
+// rewrites one row to the same content — there is no ON CONFLICT to honour and
+// no key for this transport to forward. What IS required of the transport is
+// that it produce exactly one request per frame and the same Ack each time, so
+// the client never sees two identities for one edit.
+func TestCCWireEditRetryIsIdempotent(t *testing.T) {
+	var calls []capturedCall
+	// Stands in for the UPDATE: the row is rewritten, its id never changes, and
+	// the number of stored revisions is one no matter how many times it runs.
+	stored := map[string]string{"9001": "old"}
+	editRoutes(t, &calls, func(c capturedCall) (int, map[string]any) {
+		content, _ := c.body["content"].(string)
+		stored["9001"] = content
+		return 200, map[string]any{"id": "9001"}
+	})
+
+	s, f := newSession("u1", map[string]cachedPerm{})
+	hello(t, s)
+	ids := make([]string, 2)
+	for i := range ids {
+		if !sendBody(t, s, ccwire.BodyEditMessage, editBody("c1", "9001", "\x00vc1:{new}", nil)) {
+			t.Fatalf("attempt %d ended the session", i)
+		}
+		m := f.last(t)
+		if m.BodyField != ccwire.BodyAck {
+			t.Fatalf("attempt %d: expected Ack, got body %d", i, m.BodyField)
+		}
+		ids[i] = pbStr(t, pbFields(t, m.Body), 1)
+	}
+	if ids[0] == "" || ids[0] != ids[1] {
+		t.Fatalf("a retried edit produced a different message: %q then %q", ids[0], ids[1])
+	}
+	if len(calls) != 2 {
+		t.Fatalf("expected one request per frame, got %d", len(calls))
+	}
+	if len(stored) != 1 || stored["9001"] != "\x00vc1:{new}" {
+		t.Fatalf("a retry produced more than one edited state: %v", stored)
+	}
+}
+
+// A MALFORMED ID IS REFUSED BEFORE IT IS INTERPOLATED INTO A PATH.
+//
+// Two real defects, one check, and the panic case is asserted explicitly
+// because it is the one that does not merely misbehave: httptest.NewRequest
+// builds a request line and hands it to http.ReadRequest, so a space in an id
+// PANICS inside the session goroutine, from a client-controlled string.
+// "x/read?" is the other half — without the check it reparses into a DIFFERENT
+// route, which makes the payload the router.
+func TestCCWireMalformedIDsAreRefusedNotInterpolated(t *testing.T) {
+	bad := []string{"c 1", "x/read?", "c1/../c2", "c1?x=1", "c1/messages", "", "c1#f", "c1%2f"}
+
+	for _, id := range bad {
+		var calls []capturedCall
+		editRoutes(t, &calls, func(capturedCall) (int, map[string]any) {
+			return 200, map[string]any{"id": "1"}
+		})
+		s, f := newSession("u1", map[string]cachedPerm{})
+		hello(t, s)
+
+		// chat_id on every body that interpolates one, plus message_id.
+		frames := []struct {
+			field uint32
+			body  []byte
+		}{
+			{ccwire.BodySubmitMessage, submitBody(id, "", "sealed", nil)},
+			{ccwire.BodyEditMessage, editBody(id, "9001", "sealed", nil)},
+			{ccwire.BodyEditMessage, editBody("c1", id, "sealed", nil)},
+			{ccwire.BodyDeleteMessage, deleteBody(id, "9001", true)},
+			{ccwire.BodyDeleteMessage, deleteBody("c1", id, true)},
+		}
+		for i, fr := range frames {
+			// A panic here fails the test rather than taking the process with it,
+			// which is the behaviour being fixed.
+			if !sendBody(t, s, fr.field, fr.body) {
+				t.Fatalf("id %q frame %d: a refusal must not end the session", id, i)
+			}
+			if got := errorCodeOf(t, f.last(t)); got != errPayloadInvalid {
+				t.Fatalf("id %q frame %d: expected PAYLOAD_INVALID, got %d", id, i, got)
+			}
+		}
+		if len(calls) != 0 {
+			t.Fatalf("id %q reached a handler: %v", id, calls)
+		}
+	}
+
+	// The mirror: an id of a shape this server actually issues is not refused,
+	// or the check above would pass by rejecting everything.
+	for _, id := range []string{"9001", "3f2504e0-4f89-11d3-9a0c-0305e82c3301", "abc_DEF-123"} {
+		var calls []capturedCall
+		editRoutes(t, &calls, func(capturedCall) (int, map[string]any) {
+			return 200, map[string]any{"id": "1"}
+		})
+		s, _ := newSession("u1", map[string]cachedPerm{})
+		hello(t, s)
+		if !sendBody(t, s, ccwire.BodyEditMessage, editBody(id, "9001", "sealed", nil)) {
+			t.Fatalf("id %q ended the session", id)
+		}
+		if len(calls) != 1 {
+			t.Fatalf("id %q was refused but is a real id shape", id)
+		}
+	}
+}
+
+// The outbound half. An edit or delete made by ANY transport ends in
+// emitx.ChatEvent → FanOutToChat → emitToUidIn — the same leaf new_message
+// uses, after the same roster, block-list and ghost-mode filtering — so a
+// CC-Wire session reached here is reached by a Socket.IO editor too, over one
+// audience decision. Without this a CC-Wire client could send an edit and never
+// receive one.
+func TestCCWireFanOutCarriesEditsAndDeletes(t *testing.T) {
+	h := &Hub{}
+	_, f := registered(t, h, "recipient")
+
+	h.emitToUidIn("c1", "recipient", "message_edited", map[string]any{
+		"id": "9001", "content": "\x00vc1:{new}", "editedAt": "2026-09-14T12:00:00.000Z",
+	})
+	m := f.last(t)
+	if m.BodyField != ccwire.BodyEditMessage {
+		t.Fatalf("expected EditMessage, got body %d", m.BodyField)
+	}
+	ef := pbFields(t, m.Body)
+	if got := pbStr(t, ef, 2); got != "\x00vc1:{new}" {
+		t.Fatalf("edited sealed body not carried verbatim: %q", got)
+	}
+	env := pbSub(t, ef, 1)
+	if pbStr(t, env, 1) != "c1" || pbStr(t, env, 2) != "9001" {
+		t.Fatalf("edit routing wrong: chat %q message %q", pbStr(t, env, 1), pbStr(t, env, 2))
+	}
+
+	h.emitToUidIn("c1", "recipient", "message_deleted", map[string]any{
+		"id": "9001", "deletedAt": "2026-09-14T12:00:00.000Z",
+	})
+	m = f.last(t)
+	if m.BodyField != ccwire.BodyDeleteMessage {
+		t.Fatalf("expected DeleteMessage, got body %d", m.BodyField)
+	}
+	df := pbFields(t, m.Body)
+	if pbStr(t, df, 1) != "c1" || pbStr(t, df, 2) != "9001" {
+		t.Fatalf("delete routing wrong: %v", df)
+	}
+	if len(df[3]) == 0 || df[3][0].num != 1 {
+		t.Fatal("the tombstone did not say for_everyone")
+	}
+}

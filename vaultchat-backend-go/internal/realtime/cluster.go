@@ -37,6 +37,8 @@ import (
 	"os"
 	"time"
 
+	"github.com/redis/go-redis/v9"
+
 	"vaultchat/backend-go/internal/redisx"
 )
 
@@ -68,13 +70,13 @@ func ClusterEnabled() bool {
 // random suffix, so self-recovery mostly matters for the janitor path).
 func (h *Hub) startCluster() {
 	c := redisx.Client
-	c.Set(bg, "vc:node:hb:"+nodeID, "1", nodeTTL)
-	c.SAdd(bg, "vc:nodes", nodeID)
+	c.Set(bg, keyPrefix+"node:hb:"+nodeID, "1", nodeTTL)
+	c.SAdd(bg, keyPrefix+"nodes", nodeID)
 	go func() {
 		t := time.NewTicker(nodeBeat)
 		defer t.Stop()
 		for range t.C {
-			c.Set(bg, "vc:node:hb:"+nodeID, "1", nodeTTL)
+			c.Set(bg, keyPrefix+"node:hb:"+nodeID, "1", nodeTTL)
 		}
 	}()
 	go func() {
@@ -88,56 +90,115 @@ func (h *Hub) startCluster() {
 }
 
 func nodeAlive(node string) bool {
-	n, err := redisx.Client.Exists(bg, "vc:node:hb:"+node).Result()
+	n, err := redisx.Client.Exists(bg, keyPrefix+"node:hb:"+node).Result()
 	return err == nil && n > 0
+}
+
+// ── Presence transitions — one atomic Lua script per operation ──────────
+//
+// These used to be HGETALL → decide → HSET/SREM over several round trips, and
+// two replicas could interleave inside that gap: B's trackFirst read "A is
+// live" and therefore skipped the online SADD, while A's untrackLast ran to
+// completion in between and flipped the user offline in Postgres and to every
+// contact. End state: a connected, messaging user marked offline forever —
+// the janitor only sweeps DEAD nodes, so nothing healed it.
+//
+// The hash stays the single membership authority; the scripts just make
+// "inspect the claims, update mine, decide the transition" one round trip, so
+// no other replica's claim can appear or vanish mid-decision.
+//
+// The heartbeat keys are read inside the script without being declared in
+// KEYS. That is fine here (one Redis instance / one slot owner — these keys
+// were never hash-tagged, so Redis Cluster was never supported by this layout)
+// and it is what lets the liveness check share the decision's atomicity.
+var (
+	// KEYS: pres hash, roster set, online set. ARGV: uid, node, key prefix.
+	//
+	// ARGV[3] exists so a test can run THIS script — byte for byte, not a
+	// reimplementation — against scoped keys. The heartbeat keys are built
+	// inside Lua and so cannot come through KEYS; passing the prefix is what
+	// lets the liveness check follow the same scope as the rest of the run.
+	// Production passes keyPrefix, which is unchanged.
+	// Returns 1 when uid was globally OFFLINE before this claim.
+	trackFirstScript = redis.NewScript(`
+local live = false
+for _, n in ipairs(redis.call('HKEYS', KEYS[1])) do
+  if n ~= ARGV[2] then
+    if redis.call('EXISTS', ARGV[3] .. 'node:hb:' .. n) == 1 then
+      live = true
+    else
+      redis.call('HDEL', KEYS[1], n)
+    end
+  end
+end
+redis.call('HSET', KEYS[1], ARGV[2], '1')
+redis.call('SADD', KEYS[2], ARGV[1])
+if live then return 0 end
+redis.call('SADD', KEYS[3], ARGV[1])
+return 1`)
+
+	// Same KEYS/ARGV. Returns 1 when uid is globally offline AFTER the
+	// withdrawal (caller fires the offline transition).
+	untrackLastScript = redis.NewScript(`
+redis.call('HDEL', KEYS[1], ARGV[2])
+redis.call('SREM', KEYS[2], ARGV[1])
+for _, n in ipairs(redis.call('HKEYS', KEYS[1])) do
+  if redis.call('EXISTS', ARGV[3] .. 'node:hb:' .. n) == 1 then return 0 end
+  redis.call('HDEL', KEYS[1], n)
+end
+redis.call('SREM', KEYS[3], ARGV[1])
+return 1`)
+)
+
+// keyPrefix is "vc:" in production and is NEVER changed at runtime. A test may
+// point it at an exclusive, unpredictable scope so a run cannot touch the live
+// presence keyspace — `vc:pres:online` in particular is a GLOBAL set, so
+// synthetic user ids alone do not isolate anything.
+var keyPrefix = "vc:"
+
+func presenceKeys(uid, node string) []string {
+	return []string{keyPrefix + "pres:" + uid, keyPrefix + "roster:" + node, keyPrefix + "pres:online"}
 }
 
 // clusterTrackFirst — this node just got uid's FIRST local socket. Registers
 // the node's claim and reports whether uid was globally offline before (i.e.
 // whether the caller should fire the online transition).
-func clusterTrackFirst(uid string) (wasGlobalOffline bool) {
-	c := redisx.Client
-	fields, _ := c.HGetAll(bg, "vc:pres:"+uid).Result()
-	live := false
-	for node := range fields {
-		if node == nodeID {
-			continue
-		}
-		if nodeAlive(node) {
-			live = true
-		} else {
-			c.HDel(bg, "vc:pres:"+uid, node) // lazy sweep of a dead node's field
-		}
+func clusterTrackFirst(uid string) (wasGlobalOffline bool) { return clusterClaim(uid, nodeID) }
+
+// clusterClaim registers `node`'s claim on uid. Split out from
+// clusterTrackFirst only so tests can drive two node identities in one process.
+func clusterClaim(uid, node string) bool {
+	n, err := trackFirstScript.Run(bg, redisx.Client, presenceKeys(uid, node), uid, node, keyPrefix).Int()
+	if err != nil {
+		// Fail open the way the rest of this file does: treat it as the online
+		// transition so a Redis hiccup cannot leave a connected user offline.
+		log.Printf("[cluster] trackFirst %s: %v", uid, err)
+		return true
 	}
-	c.HSet(bg, "vc:pres:"+uid, nodeID, "1")
-	c.SAdd(bg, "vc:roster:"+nodeID, uid)
-	if !live {
-		c.SAdd(bg, "vc:pres:online", uid)
-	}
-	return !live
+	return n == 1
 }
 
 // clusterUntrackLast — this node just lost uid's LAST local socket. Withdraws
 // the claim and reports whether uid is now globally offline.
-func clusterUntrackLast(uid string) (isGlobalOffline bool) {
-	c := redisx.Client
-	c.HDel(bg, "vc:pres:"+uid, nodeID)
-	c.SRem(bg, "vc:roster:"+nodeID, uid)
-	fields, _ := c.HGetAll(bg, "vc:pres:"+uid).Result()
-	for node := range fields {
-		if nodeAlive(node) {
-			return false
-		}
-		c.HDel(bg, "vc:pres:"+uid, node)
+func clusterUntrackLast(uid string) (isGlobalOffline bool) { return clusterWithdraw(uid, nodeID) }
+
+// clusterWithdraw drops `node`'s claim on uid. Shared by the disconnect path
+// (node = this node) and the janitor (node = a dead node it is adopting) —
+// the janitor had the same read-decide-write gap against a live replica's
+// trackFirst, so it takes the same script rather than its own sequence.
+func clusterWithdraw(uid, node string) bool {
+	n, err := untrackLastScript.Run(bg, redisx.Client, presenceKeys(uid, node), uid, node, keyPrefix).Int()
+	if err != nil {
+		log.Printf("[cluster] untrackLast %s: %v", uid, err)
+		return false // never announce an offline we could not record
 	}
-	c.SRem(bg, "vc:pres:online", uid)
-	return true
+	return n == 1
 }
 
 // clusterHasLive — does uid have a socket on any LIVE node?
 func clusterHasLive(uid string) bool {
 	c := redisx.Client
-	fields, err := c.HGetAll(bg, "vc:pres:"+uid).Result()
+	fields, err := c.HGetAll(bg, keyPrefix+"pres:"+uid).Result()
 	if err != nil {
 		return false
 	}
@@ -145,13 +206,13 @@ func clusterHasLive(uid string) bool {
 		if nodeAlive(node) {
 			return true
 		}
-		c.HDel(bg, "vc:pres:"+uid, node)
+		c.HDel(bg, keyPrefix+"pres:"+uid, node)
 	}
 	return false
 }
 
 func clusterOnlineCount() int {
-	n, err := redisx.Client.SCard(bg, "vc:pres:online").Result()
+	n, err := redisx.Client.SCard(bg, keyPrefix+"pres:online").Result()
 	if err != nil {
 		return 0
 	}
@@ -162,16 +223,16 @@ func clusterOnlineCount() int {
 
 func clusterCallJoin(chatID, uid string) {
 	c := redisx.Client
-	c.SAdd(bg, "vc:call:"+chatID, uid)
-	c.Expire(bg, "vc:call:"+chatID, callTTL)
+	c.SAdd(bg, keyPrefix+"call:"+chatID, uid)
+	c.Expire(bg, keyPrefix+"call:"+chatID, callTTL)
 }
 
 func clusterCallLeave(chatID, uid string) {
-	redisx.Client.SRem(bg, "vc:call:"+chatID, uid)
+	redisx.Client.SRem(bg, keyPrefix+"call:"+chatID, uid)
 }
 
 func clusterCallRoster(chatID, me string) []string {
-	members, err := redisx.Client.SMembers(bg, "vc:call:"+chatID).Result()
+	members, err := redisx.Client.SMembers(bg, keyPrefix+"call:"+chatID).Result()
 	if err != nil {
 		return []string{}
 	}
@@ -208,9 +269,7 @@ func (h *Hub) janitor() {
 		// node flip offline (DB + broadcast so peers' UIs update).
 		uids, _ := c.SMembers(bg, "vc:roster:"+node).Result()
 		for _, uid := range uids {
-			c.HDel(bg, "vc:pres:"+uid, node)
-			if !clusterHasLive(uid) {
-				c.SRem(bg, "vc:pres:online", uid)
+			if clusterWithdraw(uid, node) {
 				h.onUserOffline(uid)
 			}
 		}

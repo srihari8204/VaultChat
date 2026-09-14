@@ -389,12 +389,11 @@ func TestCCWireRefusesOversizedFrames(t *testing.T) {
 // UNKNOWN_OPERATION — "the fix for the silent-drop bug that shipped trips
 // broken" (errors.proto).
 func TestCCWireAnswersUnservedOperations(t *testing.T) {
-	// submit_message, receipt and typing_state have moved OFF this list — they
-	// are served now (ccwire_messages_test.go). Everything still on it is
-	// answered rather than dropped.
+	// submit_message, receipt, typing_state, edit_message and delete_message have
+	// moved OFF this list — they are served now (ccwire_messages_test.go).
+	// Everything still on it is answered rather than dropped.
 	for _, body := range []uint32{
-		ccwire.BodyEditMessage, ccwire.BodyDeleteMessage, ccwire.BodyCryptoControl,
-		ccwire.BodyCallSignal, ccwire.BodyFragment,
+		ccwire.BodyCryptoControl, ccwire.BodyCallSignal, ccwire.BodyFragment,
 	} {
 		s, f := newSession("u1", map[string]cachedPerm{})
 		hello(t, s)

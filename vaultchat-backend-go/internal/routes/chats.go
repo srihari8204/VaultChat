@@ -85,6 +85,12 @@ func RegisterChats(mux *http.ServeMux) {
 	if realtime.CCWireEnabled() {
 		cw := http.NewServeMux()
 		cw.HandleFunc("POST /chats/{id}/messages", chatsMessagePost)
+		// Edit and delete-for-everyone: the ownership rule and the 15-minute /
+		// 60-hour windows are WHERE clauses inside these two handlers, matched
+		// against the session's own user id, so routing through them is the only
+		// way CC-Wire gets the same rule rather than a second one.
+		cw.HandleFunc("PATCH /chats/{id}/messages/{msgId}", chatsMessagePatch)
+		cw.HandleFunc("DELETE /chats/{id}/messages/{msgId}", chatsMessageDelete)
 		cw.HandleFunc("POST /chats/{id}/delivered", chatsDelivered)
 		cw.HandleFunc("POST /chats/{id}/read", chatsRead)
 		realtime.SetCCWireRoutes(cw)

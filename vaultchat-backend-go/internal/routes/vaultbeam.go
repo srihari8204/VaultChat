@@ -603,20 +603,36 @@ func vbRelayInit(w http.ResponseWriter, r *http.Request) {
 
 	// Idempotent: re-init by the same sender resets an in-flight transfer of
 	// the same id (client retry). ON CONFLICT keeps ownership stable.
+	//
+	// THIS IS THE ONE PLACE session_version MOVES — and the only material reset
+	// of a transfer there is (migration 076: "increments ONLY on a material
+	// reset of the transfer (a re-init of the same transfer_id, or a replaced
+	// source file), never on a transport change, crash, resume, or plan
+	// growth"). A replaced source never reaches here: the client refuses to
+	// resume one and starts a new transfer_id, so a re-init IS the reset.
+	//
+	// Geometry was already rewritten on conflict while BOTH bitmaps kept the
+	// previous file's bits — a mask describing a layout that no longer exists.
+	// So the reset also zeroes uploaded_mask, drops recv_mask, and returns the
+	// row to 'pending'; the version bump is what makes every in-flight message
+	// from the pre-reset session 409 through the four vbStaleVersion gates
+	// instead of writing bits into the new layout.
 	var retID string
 	var expiresAt time.Time
-	sessionVersion := 1
+	var sessionVersion int
 	err = db.Pool.QueryRow(ctx,
 		`INSERT INTO vb_transfer
 		   (transfer_id, sender_id, recipient_id, chat_id, total_bytes, block_count, chunk_count, uploaded_mask, state, plan)
 		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'pending',$9)
 		 ON CONFLICT (transfer_id) DO UPDATE
 		   SET total_bytes = EXCLUDED.total_bytes, block_count = EXCLUDED.block_count,
-		       chunk_count = EXCLUDED.chunk_count, plan = EXCLUDED.plan
+		       chunk_count = EXCLUDED.chunk_count, plan = EXCLUDED.plan,
+		       uploaded_mask = EXCLUDED.uploaded_mask, recv_mask = NULL, state = 'pending',
+		       session_version = vb_transfer.session_version + 1
 		   WHERE vb_transfer.sender_id = $2 AND vb_transfer.state IN ('pending','ready')
-		 RETURNING transfer_id, expires_at`,
+		 RETURNING transfer_id, expires_at, session_version`,
 		transferID, user.ID, recipientID, chatID, tbParam, blockCount, chunkCount, mask, plan).
-		Scan(&retID, &expiresAt)
+		Scan(&retID, &expiresAt, &sessionVersion)
 	if err != nil {
 		if db.NoRows(err) {
 			httpx.Err(w, 409, "transferId already used")

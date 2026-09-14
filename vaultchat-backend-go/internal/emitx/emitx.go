@@ -20,6 +20,8 @@ import (
 	"net/http"
 	"os"
 	"time"
+
+	"vaultchat/backend-go/internal/workx"
 )
 
 // Local hooks, wired by main.go from the realtime Hub when Go owns sockets.
@@ -94,7 +96,7 @@ func Broadcast(event string, payload any) {
 // path. A dropped bridge call degrades like a dropped socket.
 func ChatNewMessage(chatID string, payload any) {
 	if LocalFanOutChat != nil {
-		go LocalFanOutChat(context.Background(), chatID, "new_message", payload, senderOf(payload))
+		submitFanOut(chatID, "new_message", payload, senderOf(payload))
 		return
 	}
 	go postTo("/internal/chat-event", map[string]any{"kind": "new_message", "chatId": chatID, "payload": payload})
@@ -102,10 +104,30 @@ func ChatNewMessage(chatID string, payload any) {
 
 func ChatEvent(chatID, event string, payload any) {
 	if LocalFanOutChat != nil {
-		go LocalFanOutChat(context.Background(), chatID, event, payload, "")
+		submitFanOut(chatID, event, payload, "")
 		return
 	}
 	go postTo("/internal/chat-event", map[string]any{"kind": "chat_event", "chatId": chatID, "event": event, "payload": payload})
+}
+
+// fanOutTimeout bounds one local fan-out. It runs up to three db.SysPool
+// queries on a pool of 8 connections, and it used to get
+// context.Background() — a context that can never expire — from a raw `go`
+// spawn per message. A stalled DB then parked one goroutine (and its pool
+// slot) per send, with nothing capping either.
+const fanOutTimeout = 30 * time.Second
+
+// submitFanOut runs the local fan-out on the shared bounded pool instead of a
+// per-message goroutine. workx caps concurrency, queues the overflow, and runs
+// the task INLINE when even the queue is full — so an overloaded node pushes
+// back on the caller rather than dropping accepted work or claiming a delivery
+// that never happened.
+func submitFanOut(chatID, event string, payload any, senderID string) {
+	workx.Submit(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), fanOutTimeout)
+		defer cancel()
+		LocalFanOutChat(ctx, chatID, event, payload, senderID)
+	})
 }
 
 // senderOf extracts payload.senderId (drives block-list suppression) from the

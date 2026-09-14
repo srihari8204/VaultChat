@@ -89,6 +89,35 @@ func (s *ccwireSession) call(method, path string, body map[string]any) (int, map
 	return rec.Code, out
 }
 
+// ccwireSafeID is the gate on every id that is INTERPOLATED INTO A LOOPBACK
+// PATH, and it is applied before the path string is built, not after.
+//
+// Two concrete defects, one check. `httptest.NewRequest` builds a request line
+// and hands it to `http.ReadRequest`, so an id containing a space does not
+// produce a bad request — it PANICS, inside the session goroutine, from a
+// client-controlled string. And an id containing `?` or `/` reparses: a
+// chat_id of `x/read?` turns a `/chats/{id}/messages` path into a different
+// route entirely, which is a routing decision made by the payload.
+//
+// The charset is what this server's ids actually are — a UUID for a chat, a
+// decimal BIGINT for a message — expressed as a charset rather than a format,
+// so it stays true if an id shape changes and false for everything that makes
+// a path mean something else.
+func ccwireSafeID(s string) bool {
+	if s == "" || len(s) > 64 {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		switch {
+		case c >= 'a' && c <= 'z', c >= 'A' && c <= 'Z', c >= '0' && c <= '9', c == '-', c == '_':
+		default:
+			return false
+		}
+	}
+	return true
+}
+
 // statusToErrorCode maps an HTTP refusal onto errors.proto. NOT_PERMITTED is
 // deliberately coarse for both 403 and 404 (errors.proto): "not a member", "no
 // such chat" and "not entitled" must be one answer, or the error channel is an
@@ -115,7 +144,7 @@ func (s *ccwireSession) submit(m ccwire.Message) bool {
 	if err != nil {
 		return s.sendError(m.RequestID, errPayloadInvalid, "submit")
 	}
-	if sub.ChatID == "" || len(sub.Sealed) == 0 {
+	if !ccwireSafeID(sub.ChatID) || len(sub.Sealed) == 0 {
 		return s.sendError(m.RequestID, errPayloadInvalid, "chat_id and sealed required")
 	}
 	// messages.content is a text column and the REST body is JSON, neither of
@@ -170,17 +199,7 @@ func (s *ccwireSession) submit(m ccwire.Message) bool {
 	metrics.Inc("ccwire_submit")
 
 	id, _ := resp["id"].(string)
-	var b []byte
-	b = ccwire.AppendStringField(b, 1, id) // server-assigned message_id
-	b = ccwire.AppendVarintField(b, 2, m.Seq)
-	b = ccwire.AppendVarintField(b, 3, uint64(time.Now().UnixMilli()))
-	return s.send(ccwire.Message{
-		RequestID:    m.RequestID,
-		TrafficClass: ccwire.TrafficClassControl,
-		Stream:       ccwireStreamControl,
-		BodyField:    ccwire.BodyAck,
-		Body:         b,
-	})
+	return s.sendAckID(m, id) // the server-assigned message_id
 }
 
 // ccwireSubmitMeta is the PublicMeta a text send may legitimately carry,
@@ -218,6 +237,109 @@ func ccwireSubmitMeta(sub ccwire.Submit) map[string]any {
 	return meta
 }
 
+// ── inbound: EditMessage ────────────────────────────────────────────────
+
+// edit runs chatsMessagePatch — the handler that owns the edit rule — rather
+// than restating it. That rule is one WHERE clause:
+//
+//	WHERE id = $ AND chat_id = $ AND sender_id = $ AND deleted_at IS NULL
+//	  AND created_at > NOW() - INTERVAL '15 minutes'
+//
+// sender_id is the AUTHENTICATED user (httpx.UserFrom, from the session context
+// this loopback carries), so a non-owner's edit matches no row and comes back
+// 404 — the ownership check is the update itself, not a check beside it that a
+// second transport could forget. chatsRequireMem runs first, the retention
+// invariant (an edit never extends body_expires_at) holds because the deadline
+// is derived from the immutable created_at, and the message_edited fan-out at
+// the end is what reaches every open client on both transports.
+//
+// IDEMPOTENCY needs nothing here: this is an UPDATE, not an INSERT. Replaying
+// the same edit rewrites the same row to the same content — there is no second
+// edit to produce, which is why EditMessage has no client_msg_id to forward.
+func (s *ccwireSession) edit(m ccwire.Message) bool {
+	ed, err := ccwire.DecodeEdit(m.Body, s.lim)
+	if err != nil {
+		return s.sendError(m.RequestID, errPayloadInvalid, "edit")
+	}
+	if !ccwireSafeID(ed.ChatID) || !ccwireSafeID(ed.MessageID) || len(ed.Sealed) == 0 {
+		return s.sendError(m.RequestID, errPayloadInvalid, "chat_id, message_id and sealed required")
+	}
+	// Same reason as submit: messages.content is a text column reached through a
+	// JSON body, so non-UTF-8 ciphertext is refused rather than mangled.
+	if !utf8.Valid(ed.Sealed) {
+		return s.sendError(m.RequestID, errPayloadInvalid, "sealed must be UTF-8")
+	}
+
+	status, resp := s.call(http.MethodPatch,
+		"/chats/"+ed.ChatID+"/messages/"+ed.MessageID,
+		map[string]any{"content": string(ed.Sealed)})
+	if status != http.StatusOK {
+		metrics.Inc("ccwire_edit_refused")
+		// 404 here is "not yours, not there, or the window closed" — one answer
+		// to three questions, collapsed to NOT_PERMITTED by statusToErrorCode
+		// so the error channel stays no kind of oracle.
+		return s.sendError(m.RequestID, statusToErrorCode(status), "edit refused")
+	}
+	metrics.Inc("ccwire_edit")
+
+	id, _ := resp["id"].(string)
+	return s.sendAckID(m, id)
+}
+
+// ── inbound: DeleteMessage ──────────────────────────────────────────────
+
+// del runs chatsMessageDelete: the same sender-owned, not-already-deleted,
+// inside-the-60-hour-window WHERE clause, the same tombstone, the same
+// best-effort body reclaim and the same message_deleted fan-out.
+//
+// for_everyone = false is REFUSED, not quietly upgraded. There is no
+// delete-for-me on this server — no per-user hide, on either transport — so the
+// only thing a transport could do with that flag is silently perform the
+// IRREVERSIBLE action the user did not ask for. Answered with
+// UNKNOWN_OPERATION, the same way RECEIPT_KIND_PLAYED is.
+func (s *ccwireSession) del(m ccwire.Message) bool {
+	d, err := ccwire.DecodeDelete(m.Body, s.lim)
+	if err != nil {
+		return s.sendError(m.RequestID, errPayloadInvalid, "delete")
+	}
+	if !ccwireSafeID(d.ChatID) || !ccwireSafeID(d.MessageID) {
+		return s.sendError(m.RequestID, errPayloadInvalid, "chat_id and message_id required")
+	}
+	if !d.ForEveryone {
+		metrics.Inc("ccwire_delete_for_me_refused")
+		return s.sendError(m.RequestID, errUnknownOperation, "delete for me is not served")
+	}
+
+	status, resp := s.call(http.MethodDelete,
+		"/chats/"+d.ChatID+"/messages/"+d.MessageID, nil)
+	if status != http.StatusOK {
+		metrics.Inc("ccwire_delete_refused")
+		return s.sendError(m.RequestID, statusToErrorCode(status), "delete refused")
+	}
+	metrics.Inc("ccwire_delete")
+
+	// A replayed delete is refused (deleted_at IS NULL no longer holds) rather
+	// than acked twice, which is the handler's answer on REST too. Nothing is
+	// deleted a second time either way.
+	id, _ := resp["id"].(string)
+	return s.sendAckID(m, id)
+}
+
+// sendAckID is sendAck plus the message_id the handler returned.
+func (s *ccwireSession) sendAckID(m ccwire.Message, id string) bool {
+	var b []byte
+	b = ccwire.AppendStringField(b, 1, id)
+	b = ccwire.AppendVarintField(b, 2, m.Seq)
+	b = ccwire.AppendVarintField(b, 3, uint64(time.Now().UnixMilli()))
+	return s.send(ccwire.Message{
+		RequestID:    m.RequestID,
+		TrafficClass: ccwire.TrafficClassControl,
+		Stream:       ccwireStreamControl,
+		BodyField:    ccwire.BodyAck,
+		Body:         b,
+	})
+}
+
 // ── inbound: Receipt ────────────────────────────────────────────────────
 
 // receipt advances this user's OWN delivery/read pointer, through the same two
@@ -230,7 +352,7 @@ func (s *ccwireSession) receipt(m ccwire.Message) bool {
 	if err != nil {
 		return s.sendError(m.RequestID, errPayloadInvalid, "receipt")
 	}
-	if rc.ChatID == "" || len(rc.MessageIDs) == 0 {
+	if !ccwireSafeID(rc.ChatID) || len(rc.MessageIDs) == 0 {
 		return s.sendError(m.RequestID, errPayloadInvalid, "chat_id and message_ids required")
 	}
 	// The product's pointers are high-water marks, not sets, so the highest id
@@ -368,6 +490,59 @@ func ccwireEventFrame(chatID, event string, payload any) []byte {
 			Stream:       ccwireStreamMessaging,
 			BodyField:    ccwire.BodyDeliverMessage,
 			Body:         ccwireDeliverBody(m),
+		}
+
+	// The other half of edit and delete. Both handlers end in
+	// emitx.ChatEvent → FanOutToChat → emitToUidIn, the SAME leaf new_message
+	// uses, so the audience is the one roster minus blockers minus ghost-mode —
+	// decided once, for both transports. Without these two cases a CC-Wire
+	// client would send an edit successfully and never see anyone else's, which
+	// is the silent half-failure this transport exists to stop.
+	case "message_edited":
+		m := ccwireJSONMap(payload)
+		if m == nil {
+			return nil
+		}
+		id, _ := m["id"].(string)
+		if id == "" {
+			return nil
+		}
+		env := ccwire.AppendStringField(nil, 1, chatID)
+		env = ccwire.AppendStringField(env, 2, id)
+		b := ccwire.AppendBytesField(nil, 1, env)
+		// content is a *string on the spine row and is nil when the body lives
+		// out of band; an absent sealed is the honest encoding of that, not "".
+		if c, ok := m["content"].(string); ok && c != "" {
+			b = ccwire.AppendBytesField(b, 2, []byte(c))
+		}
+		// edit_seq (3) is not written: the server keeps no per-message edit
+		// counter, and a fabricated one is worse than an absent one.
+		msg = ccwire.Message{
+			TrafficClass: ccwire.TrafficClassMessaging,
+			Stream:       ccwireStreamMessaging,
+			BodyField:    ccwire.BodyEditMessage,
+			Body:         b,
+		}
+
+	case "message_deleted":
+		m := ccwireJSONMap(payload)
+		if m == nil {
+			return nil
+		}
+		id, _ := m["id"].(string)
+		if id == "" {
+			return nil
+		}
+		b := ccwire.AppendStringField(nil, 1, chatID)
+		b = ccwire.AppendStringField(b, 2, id)
+		// for_everyone is true by construction: chatsMessageDelete is the
+		// delete-for-everyone handler and there is no other kind to emit.
+		b = ccwire.AppendBoolField(b, 3, true)
+		msg = ccwire.Message{
+			TrafficClass: ccwire.TrafficClassMessaging,
+			Stream:       ccwireStreamMessaging,
+			BodyField:    ccwire.BodyDeleteMessage,
+			Body:         b,
 		}
 
 	case "typing_start", "typing_stop":
@@ -571,6 +746,10 @@ func (s *ccwireSession) serveBody(m ccwire.Message) (handled, alive bool) {
 	switch m.BodyField {
 	case ccwire.BodySubmitMessage:
 		return true, s.submit(m)
+	case ccwire.BodyEditMessage:
+		return true, s.edit(m)
+	case ccwire.BodyDeleteMessage:
+		return true, s.del(m)
 	case ccwire.BodyReceipt:
 		return true, s.receipt(m)
 	case ccwire.BodyTypingState:
