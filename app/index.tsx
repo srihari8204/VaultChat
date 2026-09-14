@@ -9,7 +9,7 @@
 
 import { router } from "expo-router";
 import { useEffect } from "react";
-import { ActivityIndicator, StyleSheet, View } from "react-native";
+import { ImageBackground, StyleSheet } from "react-native";
 import * as SplashScreen from "expo-splash-screen";
 import { hasSession, sealedSessionLocked } from "../lib/api";
 import { isMfaEnabled } from "../lib/mfa";
@@ -63,15 +63,18 @@ export default function IndexScreen() {
     })();
   }, []);
 
-  // Fallback UI, only visible if the splash was already hidden. Uses the app's
-  // dark base (not white) so there is never a light flash before chats/onboard.
+  // Fallback UI, only visible if the splash was already hidden. It is the same
+  // splash artwork on the same background colour, so the hand-off from the
+  // native splash is seamless instead of a spinner flash.
   return (
-    <View style={S.bg}>
-      <ActivityIndicator color="#4A9FFF" size="large" />
-    </View>
+    <ImageBackground
+      source={require("../assets/images/splash.png")}
+      style={S.bg}
+      resizeMode="cover"
+    />
   );
 }
 
 const S = StyleSheet.create({
-  bg: { flex: 1, backgroundColor: "#0A0A0F", justifyContent: "center", alignItems: "center" },
+  bg: { flex: 1, backgroundColor: "#010527" },
 });
