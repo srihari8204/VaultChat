@@ -60,9 +60,25 @@ ufw allow 443/tcp                # HTTPS
 ufw allow in on cni0 from 10.42.0.0/16 to 10.42.0.0/16
 ufw allow in on cni0 from 10.42.0.0/16 to 10.43.0.0/16
 
+# ROUTED traffic, which is a SEPARATE policy from the two rules above.
+#
+# Those cover packets addressed to the host. Pod-to-pod and pod-to-internet
+# packets are FORWARDED through the host instead, and `ufw status verbose`
+# reports that policy separately as `disabled (routed)` — meaning dropped.
+# Left at the default, CoreDNS answers nothing and every pod fails to resolve
+# `postgres`, which looks exactly like a broken cluster rather than a firewall.
+#
+# One rule is enough: return traffic is already accepted by ufw's
+# RELATED,ESTABLISHED rule in before.rules.
+ufw route allow in on cni0
+
 ufw enable
 ufw status verbose
 ```
+
+`cni0` does not exist until k3s creates it in step 3. ufw still accepts the
+rules — it writes them and they take effect when the interface appears — so add
+them now and re-check `ufw status verbose` after k3s is up.
 
 > The Kubernetes API (6443) is deliberately NOT opened. Administer the cluster
 > over SSH. If you later need `kubectl` from your laptop, tunnel it:
@@ -329,6 +345,7 @@ sudo k3s crictl rmi --prune
 
 | Symptom | Cause / fix |
 |---|---|
+| Pods `Running` but nothing resolves; CoreDNS `CrashLoopBackOff` | ufw is dropping forwarded traffic. `ufw status verbose` shows `disabled (routed)` ⇒ `ufw route allow in on cni0` |
 | Pod `ErrImagePull` / `ImagePullBackOff` | Image is in Docker but not containerd. Re-run the import: `docker save vaultchat/go-api:<tag> \| sudo k3s ctr images import -`. Check the tag matches: `sudo k3s crictl images \| grep vaultchat` |
 | Pod `Pending`, events say "no persistent volumes available" | local-path provisioner not ready, or a second pod wants the same RWO PVC. `kubectl -n vaultchat describe pod <name>` and `kubectl get pods -n kube-system` |
 | `CrashLoopBackOff` on go-api | `kubectl -n vaultchat logs deploy/go-api --previous`. Usually a missing key in the Secret |
