@@ -1,0 +1,9 @@
+# Namespace for the whole VaultChat API stack.
+#
+# Everything the API needs lives in here: the API Deployment, Postgres, Redis,
+# the migration Job, and the Secret holding credentials. Nothing outside this
+# namespace is touched, so `kubectl delete ns vaultchat` is a complete teardown.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: vaultchat

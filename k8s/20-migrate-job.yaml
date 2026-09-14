@@ -1,0 +1,65 @@
+# Schema migrations — run as a Job BEFORE rolling a new API image.
+#
+# The runner is migrate.js from the NODE backend (vaultchat-backend/migrate.js):
+# it owns the migration ledger and the whole migrations/ directory, and the Go
+# backend shares that schema rather than carrying its own runner. So even on a
+# Go-only deployment, the migration image is the Node one.
+#
+# Idempotent: each file runs in its own transaction and is recorded in the
+# ledger, so re-running the Job on an up-to-date database is a no-op that
+# prints "nothing pending". A failing file rolls back and stops the run.
+#
+# FIRST DEPLOY ONLY — if you restored an existing database that already has
+# the tables, seed the ledger instead of applying them:
+#   kubectl -n vaultchat create job --from=cronjob/... is NOT used here; run
+#   the one-off directly:
+#     kubectl -n vaultchat run migrate-baseline --rm -it --restart=Never \
+#       --image=vaultchat/node-migrate:REPLACE_TAG --image-pull-policy=IfNotPresent \
+#       --env=DB_HOST=postgres --env=DB_PORT=5432 --env=DB_NAME=vaultchat \
+#       --env=DB_USER=vaultchat --env=DB_PASS="$DB_PASS" \
+#       -- node migrate.js baseline 009
+#
+# The Job name carries no tag, so delete it before re-running:
+#   kubectl -n vaultchat delete job vaultchat-migrate --ignore-not-found
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: vaultchat-migrate
+  namespace: vaultchat
+spec:
+  # Do not retry a failed migration forever: a bad SQL file fails the same way
+  # every time, and each retry holds locks. Two attempts covers a transient
+  # "database starting up".
+  backoffLimit: 2
+  # Clean the Job object up 1h after it finishes so the next deploy can create
+  # one with the same name without a manual delete.
+  ttlSecondsAfterFinished: 3600
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: migrate
+          # Built from ./vaultchat-backend — see k8s/build-images.sh
+          image: vaultchat/node-migrate:REPLACE_TAG
+          imagePullPolicy: IfNotPresent
+          command: ["node", "migrate.js", "up"]
+          env:
+            - name: DB_HOST
+              value: postgres
+            - name: DB_PORT
+              value: "5432"
+            - name: DB_NAME
+              value: vaultchat
+            - name: DB_USER
+              value: vaultchat
+            - name: DB_PASS
+              valueFrom:
+                secretKeyRef:
+                  name: vaultchat-secrets
+                  key: DB_PASS
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              memory: 512Mi

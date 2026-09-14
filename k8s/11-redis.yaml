@@ -1,0 +1,80 @@
+# Redis — Socket.IO adapter, presence/rosters, and rate-limit counters.
+#
+# REDIS_ADAPTER=1 in the API Deployment makes go-api publish socket events
+# through Redis, which is what lets the API run more than one replica at all
+# (see vaultchat-backend-go/SCALEOUT.md). Redis unreachable ⇒ the helpers fail
+# open to in-process maps, so a Redis outage degrades rather than breaks —
+# but presence goes wrong across replicas, so treat it as required.
+#
+# No password: like the compose deployment, Redis is reachable only from
+# inside the cluster network (ClusterIP, no Ingress, no NodePort). Do NOT add
+# a NodePort here — an unauthenticated datastore on a public IP is a takeover.
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis
+  namespace: vaultchat
+spec:
+  type: ClusterIP
+  selector:
+    app: redis
+  ports:
+    - name: redis
+      port: 6379
+      targetPort: 6379
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: redisdata
+  namespace: vaultchat
+spec:
+  accessModes: ["ReadWriteOnce"]
+  storageClassName: local-path
+  resources:
+    requests:
+      storage: 5Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: redis
+  namespace: vaultchat
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: redis
+  strategy:
+    # Recreate, not RollingUpdate: two pods cannot share one RWO volume, so a
+    # rolling update would deadlock with the new pod stuck Pending.
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        app: redis
+    spec:
+      containers:
+        - name: redis
+          image: redis:7-alpine
+          args: ["redis-server", "--appendonly", "yes"]
+          ports:
+            - containerPort: 6379
+          volumeMounts:
+            - name: redisdata
+              mountPath: /data
+          readinessProbe:
+            exec:
+              command: ["redis-cli", "ping"]
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              memory: 1Gi
+      volumes:
+        - name: redisdata
+          persistentVolumeClaim:
+            claimName: redisdata
