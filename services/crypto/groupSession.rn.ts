@@ -69,7 +69,19 @@ async function distribute(chatId: string, me: string, others: string[]): Promise
   if (distributions.length) {
     await api(`/chats/${encodeURIComponent(chatId)}/sender-keys`, { method: 'POST', json: { distributions } });
   }
-  await kv.set(MEMBERS(chatId), JSON.stringify([...others].sort()));
+  // RECORD WHO WE ACTUALLY REACHED, not who we meant to reach.
+  //
+  // The loop above skips any member whose pairwise session is not usable yet
+  // (no key bundle published, ratchet mid-reset). Recording the full membership
+  // anyway latched that failure PERMANENTLY: the next send sees no add and no
+  // removal, skips distribution, and that member can never read this group
+  // again even after their 1:1 session heals. Recording only the reached set
+  // makes an unreached member look "added" next time, so the next send retries.
+  //
+  // ponytail: a member who is permanently unreachable costs one extra
+  // sender-keys POST per send. ensureDistributed already does a GET /chats per
+  // send, so this is not a new round trip — add a cooldown if that GET ever goes.
+  await kv.set(MEMBERS(chatId), JSON.stringify(distributions.map(d => d.recipientId).sort()));
 }
 
 /** Ensure my sender key is distributed to the current membership, rotating on removal. */
@@ -150,7 +162,10 @@ export function isGroupEnvelope(wire: string | null | undefined): boolean {
 /** Encrypt a message for a group; ensures my sender key is distributed first. */
 export async function groupEncryptMessage(chatId: string, plaintext: string): Promise<string> {
   const me = await myId();
-  if (!me) return plaintext; // unknown identity → don't block sending
+  // Unknown identity → we cannot distribute a sender key, so we cannot encrypt.
+  // This used to return the plaintext and let the caller ship it; the caller now
+  // refuses anything that is not a GSK1 envelope, and this says why.
+  if (!me) throw new Error('group: own identity unknown — encryption keys not ready');
   await ensureDistributed(chatId, me);
   const own = await ensureOwn(chatId);
   const { cipher, next } = groupEncrypt(own, plaintext);

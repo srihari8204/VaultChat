@@ -49,7 +49,9 @@ function A(ok: boolean, what: string): void {
 console.log('\nCall TURN wiring\n');
 
 // ── 1. the call path asks for ice servers ─────────────────────────────
-A(/getIceServers/.test(ROOM), '1. room.ts imports and calls getIceServers');
+// getIceConfig wraps getIceServers and adds iceTransportPolicy — see
+// lib/iceConfig.ts. The TURN credentials still come from the same cache.
+A(/getIceConfig/.test(ROOM), '1. room.ts imports and calls getIceConfig');
 
 // ── 2. and actually hands them to connect ─────────────────────────────
 {
@@ -59,7 +61,13 @@ A(/getIceServers/.test(ROOM), '1. room.ts imports and calls getIceServers');
   A(/rtcConfig/.test(call),
     '2a. connect() receives rtcConfig — WITHOUT this the SDK uses only the ICE '
     + 'servers the LiveKit server advertises, and livekit.yaml has turn disabled');
-  A(/iceServers/.test(call), '2b. and rtcConfig carries iceServers');
+  // The value may be an inline `{ iceServers }` or a variable holding the
+  // resolved config. The variable form is the CURRENT shape and is strictly
+  // better: getIceConfig() may also carry iceTransportPolicy:'relay' for the
+  // hide-my-IP preference, which an inline literal cannot express. Assert the
+  // config reaches connect, not the spelling it reaches it in.
+  A(/iceServers/.test(call) || /rtcConfig:\s*\w+/.test(call),
+    '2b. and rtcConfig carries the resolved ICE config');
 }
 
 // ── 3. exactly one connect, so the wired one is the one that runs ─────
@@ -68,7 +76,7 @@ A((ROOM.match(/room\.connect\(/g) || []).length === 1,
 
 // ── 4. fetched BEFORE the Room is built, so the round trip overlaps ───
 {
-  const fetchAt = ROOM.indexOf('getIceServers()');
+  const fetchAt = ROOM.indexOf('getIceConfig()');
   const roomAt  = ROOM.indexOf('new Room(');
   A(fetchAt >= 0 && roomAt >= 0 && fetchAt < roomAt,
     '4. the fetch starts before new Room() — it overlaps setup instead of '
@@ -76,7 +84,7 @@ A((ROOM.match(/room\.connect\(/g) || []).length === 1,
 }
 
 // ── 5. the awaited value is the promise started earlier ───────────────
-A(/const iceServers = await iceServersPromise;/.test(ROOM),
+A(/iceConfig = await iceConfigPromise;/.test(ROOM),
   '5. connect awaits the pre-started promise, not a fresh call');
 
 // ── 6. go live still has its copy (both paths, or neither is safe) ────

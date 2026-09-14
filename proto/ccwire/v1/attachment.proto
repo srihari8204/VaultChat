@@ -1,0 +1,55 @@
+syntax = "proto3";
+package ccwire.v1;
+option go_package = "vaultchat/backend-go/internal/ccwire/v1;ccwirev1";
+
+// CONTROL ONLY. Attachment BYTES never traverse CC-Wire. They use the
+// existing upload path (routes/uploads.go: 8 MiB parts, 100 MiB relay
+// cap, 2 GiB ceiling) or VaultBeam (4 MiB blocks, 12 GiB cap).
+// This message coordinates; it does not carry.
+//
+// It also unifies the two parallel VaultBeam event families that exist
+// today — vaultbeam_* over the socket relay and vb_* over REST — which
+// is finding F-A2-2.
+message AttachmentControl {
+  AttachmentOp op = 1;
+  string attachment_id = 2;
+  string chat_id = 3;
+  string to_uid = 4;                     // peer transfers
+
+  // Size and offsets are uint64 + JS_STRING throughout. A 12 GiB
+  // VaultBeam transfer exceeds 2^32; an offset into it must not be
+  // truncated on a JavaScript client, silently or otherwise.
+  uint64 total_bytes = 5  [jstype = JS_STRING];
+  uint64 offset      = 6  [jstype = JS_STRING];
+  uint64 block_size  = 7  [jstype = JS_STRING];
+
+  // Sealed transfer metadata: filename, MIME, dimensions, thumbnail,
+  // duration, waveform. ALL of it is private per META_PUBLIC_KEYS —
+  // only attachment_id is public. Opaque here, and it stays that way.
+  bytes sealed_metadata = 8;             // <= max_opaque_bytes
+
+  // Sealed have-bitmap (today's vaultbeam_have). Opaque: the mask never
+  // reaches this process in cleartext.
+  bytes sealed_have = 9;                 // <= max_opaque_bytes
+
+  AttachmentTier tier = 10;
+}
+
+enum AttachmentOp {
+  ATTACHMENT_OP_UNSPECIFIED = 0;
+  ATTACHMENT_OP_OFFER       = 1;
+  ATTACHMENT_OP_ACCEPT      = 2;
+  ATTACHMENT_OP_READY       = 3;
+  ATTACHMENT_OP_HAVE        = 4;
+  ATTACHMENT_OP_PULL        = 5;
+  ATTACHMENT_OP_COMPLETE    = 6;
+  ATTACHMENT_OP_ABORT       = 7;
+  ATTACHMENT_OP_REVOKE      = 8;   // mirrors media_revoked / meta.revoked
+}
+
+enum AttachmentTier {
+  ATTACHMENT_TIER_UNSPECIFIED = 0;
+  ATTACHMENT_TIER_P2P         = 1;
+  ATTACHMENT_TIER_RELAY       = 2;
+  ATTACHMENT_TIER_SERVER      = 3;
+}

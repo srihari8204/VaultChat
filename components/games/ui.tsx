@@ -25,6 +25,11 @@ import {
   GOLD_FILL, GOLD_STOPS, RED_FILL, RED_STOPS, typeScale, ACCENT, type GameAccent,
 } from '../../lib/games/theme';
 import { boardFit } from '../../lib/games/boardFit';
+// The four rooms, for ROOM_BG below. Imported rather than re-typed: a hex
+// copied here is a hex that drifts the first time a room is repainted.
+import { CR } from '../../lib/games/chessRoom';
+import { LR } from '../../lib/games/ludoGlass';
+import { ROOM } from '../../lib/games/rummyGlass';
 
 const AnimPressable = Animated.createAnimatedComponent(Pressable);
 
@@ -776,6 +781,76 @@ export function RoundBtn({
     >
       <Ionicons name={ion} size={17} color={C.text} />
     </AnimPressable>
+  );
+}
+
+/**
+ * The room each game is played in.
+ *
+ * Read from the rooms themselves rather than re-typed, so a room that is
+ * repainted brings its chrome strip with it. This is the whole reason the bar
+ * below is not a navigator header: the chess board was moved onto its own
+ * emerald room precisely because a shared maroon stripe across the top of it
+ * read as a bar from a different screen.
+ */
+export const ROOM_BG: Record<GameAccent, string> = {
+  chess: CR.bg,
+  ludo: LR.bg,
+  rummy: ROOM[0],
+  tictactoe: C.bg,
+};
+
+/**
+ * THE WAY OUT. One bar, one back control, every game screen.
+ *
+ * The boards were written against a navigator header that does not exist —
+ * app/_layout.tsx sets `headerShown: false` for the whole stack, so the
+ * `Stack.Screen` options games.tsx passed were inert and Chess's own comment
+ * ("the navigator header already owns Back and the title") described a header
+ * nobody ever saw. The result: no visible way off a board, off a lobby, or off
+ * "Joining the table…" — the player's only exit was the hardware key, which on
+ * a deep link out of a turn notification exits the app.
+ *
+ * Drawn from the same furniture as everything else on a table (RoundBtn, the
+ * `C`/`S`/`R` tokens), so it is the room's own trim rather than a second design.
+ */
+export function GameTopBar({
+  title, onBack, backLabel = 'Back to games', right,
+}: {
+  title: string;
+  onBack: () => void;
+  /** What the screen reader says. Name the destination, not the gesture. */
+  backLabel?: string;
+  /** Controls that belong to the screen, not to navigation. */
+  right?: React.ReactNode;
+}) {
+  const t = useType();
+  return (
+    <View style={{
+      flexDirection: 'row', alignItems: 'center', gap: S[3],
+      paddingHorizontal: S[4], paddingVertical: S[2],
+    }}>
+      <RoundBtn ion="chevron-back" label={backLabel} onPress={onBack} />
+      <Text
+        numberOfLines={1}
+        style={{ flex: 1, color: C.text, fontSize: t.xl, fontWeight: '800', letterSpacing: 0.3 }}
+      >
+        {title}
+      </Text>
+      {right}
+    </View>
+  );
+}
+
+/** `GameTopBar` plus the room behind it, for a board that brings its own. */
+export function GameChrome({
+  game, children, ...bar
+}: React.ComponentProps<typeof GameTopBar> & { game: GameAccent; children?: React.ReactNode }) {
+  return (
+    <View style={{ flex: 1, backgroundColor: ROOM_BG[game] }}>
+      <GameTopBar {...bar} />
+      <View style={{ flex: 1 }}>{children}</View>
+    </View>
   );
 }
 

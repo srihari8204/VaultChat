@@ -28,9 +28,6 @@ import { useTheme } from '../lib/theme';
 import { sendMessage } from '../lib/chatService';
 import { AuroraBackground } from '../components/ui';
 
-// 8 stickers per row, with padding/gaps factored in
-const { width: SW } = Dimensions.get('window');
-const TILE = Math.floor((SW - 32 - 8 * 6) / 8);
 
 interface Pack {
   id:       string;
@@ -55,10 +52,16 @@ function useS() {
   const {width: SW} = useWindowDimensions();
 
   const { colors } = useTheme();
-  return useMemo(() => makeStyles(colors), [colors]);
+  return useMemo(() => makeStyles(colors, SW), [colors, SW]);
 }
 
 export default function StickerPickerScreen() {
+  // Live metrics owned by THIS component — the hook further up belongs to the
+  // useS() style helper, a different scope. Follows rotation and folds.
+  const { width: SW } = useWindowDimensions();
+  // 8 stickers per row, with padding/gaps factored in.
+  const TILE = Math.floor((SW - 32 - 8 * 6) / 8);
+
   const { colors } = useTheme();
   const S = useS();
   const router = useRouter();
@@ -124,7 +127,10 @@ export default function StickerPickerScreen() {
 }
 
 
-const makeStyles = (c: Palette) => StyleSheet.create({
+// Width/height are threaded in from useWindowDimensions() rather than read
+// from a module-level Dimensions.get(): orientation is 'default', so a frozen
+// value survived rotation, folds and split-screen resizes.
+const makeStyles = (c: Palette, SW: number) => StyleSheet.create({
   screen: { flex: 1, backgroundColor: 'transparent' },
   header:       { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingTop: HEADER_TOP, paddingBottom: 12, gap: 8, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.glassStroke },
   backBtn:      { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },

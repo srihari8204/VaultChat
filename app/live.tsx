@@ -137,7 +137,8 @@ pathname: '/live-view' as any, params: {
 
   return (
     <View style={[S.root, { backgroundColor: colors.surfaceSolid }]}>
-      <Stack.Screen options={{ title: 'Live' }} />
+      <Stack.Screen options={{
+        headerShown: true, /* the root Stack sets headerShown:false app-wide, so the options below were inert and this screen had no back control at all */  title: 'Live' }} />
 
       <ScrollView
         contentContainerStyle={S.scroll}

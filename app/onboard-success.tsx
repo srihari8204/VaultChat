@@ -3,24 +3,38 @@
 // (mpin/verify → JWT), optionally enrolls MFA, clears the onboarding store.
 
 import { brandAlpha, type Palette } from '../constants/theme';
-import { Stack, useRouter } from 'expo-router';
+import { Stack } from 'expo-router';
 import { useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Alert, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, BackHandler, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useTheme } from '../lib/theme';
+import { resetTo } from '../lib/authNav';
 import { onboarding, verifyMpinRemote, uploadAndSetProfilePhoto, onboardingError } from '../lib/onboarding';
 import { deviceSecurityAvailable, enableMfa } from '../lib/mfa';
 import { AuroraBackground } from '../components/ui';
 
 export default function OnboardSuccess() {
   const { colors } = useTheme();
-  const s = useMemo(() => makeStyles(colors), [colors]);
-  const router = useRouter();
+  const s = useMemo(() => makeStyles(colors), [colors]);
 
   const [mfaOn, setMfaOn] = useState(false);
   const [hasDeviceSecurity, setHasDeviceSecurity] = useState(true);
   const [busy, setBusy] = useState(false);
 
   useEffect(() => { deviceSecurityAvailable().then(setHasDeviceSecurity).catch(() => setHasDeviceSecurity(false)); }, []);
+
+  // BACK IS A DEAD END HERE, ON PURPOSE.
+  //
+  // By the time this screen mounts, onboard-mpin has already committed the
+  // whole chain server-side (profile/init → security questions → mpin/set).
+  // onboard-mpin replaced itself with this screen, so the entry BELOW us is
+  // onboard-security — and backing into it leads to a second commit attempt
+  // that the server rejects as "email already registered", stranding a user
+  // who now HAS an account inside a sign-up they can no longer finish.
+  // The way out of this screen is the button.
+  useEffect(() => {
+    const sub = BackHandler.addEventListener('hardwareBackPress', () => true);
+    return () => sub.remove();
+  }, []);
 
   // `next` lets the same login run land somewhere other than the chat list.
   // Exit Kit needs a real session (and a contact to import into), and neither
@@ -29,7 +43,7 @@ export default function OnboardSuccess() {
   const finish = async (next?: string) => {
     if (busy) return;
     const { userId, mpin } = onboarding.get();
-    if (!userId || !mpin) { Alert.alert('Session expired', 'Please sign in again.'); router.replace('/onboard' as any); return; }
+    if (!userId || !mpin) { Alert.alert('Session expired', 'Please sign in again.'); resetTo('/onboard'); return; }
     setBusy(true);
     try {
       await verifyMpinRemote(userId, mpin);              // logs in → JWT stored
@@ -45,7 +59,9 @@ export default function OnboardSuccess() {
         }
       }
       onboarding.reset();                                // wipe plaintext MPIN/answers
-      router.replace((next ?? '/(tabs)/chats') as any);
+      // resetTo, not replace: the sign-up screens below this one must not
+      // survive into the app (lib/authNav.ts).
+      resetTo(next ?? '/(tabs)/chats');
     } catch (e: any) {
       setBusy(false);
       Alert.alert('Could not continue', onboardingError(e, 'Please try again'));
@@ -55,7 +71,7 @@ export default function OnboardSuccess() {
   return (
     <View style={s.screen}>
       <AuroraBackground />
-      <Stack.Screen options={{ headerShown: false }} />
+      <Stack.Screen options={{ headerShown: false, gestureEnabled: false }} />
       <View style={s.body}>
         <View style={s.tick}><Text style={{ fontSize: 48 }}>✓</Text></View>
         <Text style={s.title}>Account secured</Text>

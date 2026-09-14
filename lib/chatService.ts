@@ -240,9 +240,22 @@ export async function encryptForChat(chatId: string, plaintext: string): Promise
     if (!GROUP_E2EE) return plaintext; // groups stay plaintext until enabled
     try {
       const g = await import('../services/crypto/groupSession.rn');
-      return await g.groupEncryptMessage(chatId, plaintext);
+      const out = await g.groupEncryptMessage(chatId, plaintext);
+      // BELT AND BRACES. groupEncryptMessage has its own non-throwing exits
+      // (unknown identity, and anything a future edit adds), and every one of
+      // them hands back the PLAINTEXT it was given. Checking the envelope here
+      // — the single funnel every group send goes through — closes all of them
+      // at once instead of trusting each early-return to stay honest.
+      if (!g.isGroupEnvelope(out)) throw new Error('group sender key not ready');
+      return out;
     } catch (err) {
-      console.warn('[e2ee] group encrypt fell back to plaintext:', (err as any)?.message);
+      console.warn('[e2ee] GROUP-ENCRYPT-FAILED chat=', chatId, 'err=', (err as any)?.message);
+      // STRICT: never silently downgrade a group message to plaintext. A
+      // sender-key failure is almost always transient (membership fetch, the
+      // pairwise session carrying the SKDM mid-rekey), so this must stay ON THE
+      // CLOCK rather than turn red — the wording below is what messageQueue's
+      // isKeysError matches to tag the row WAITING_KEYS and retry forever.
+      if (E2EE_STRICT) throw new Error("Couldn't encrypt this message — the group's encryption keys aren't available yet. It will retry.");
       return plaintext;
     }
   }
@@ -1414,10 +1427,20 @@ export async function scheduleEncryptedMessage(
   sendAtIso: string,
   opts: { replyToId?: number | null; meta?: any } = {},
 ): Promise<ScheduledMessageRow> {
-  const content = await encryptForChat(chatId, plaintext);
+  // Same meta split sendMessage applies (lib/msgEnvelope): the server gets the
+  // ROUTING subset only, everything else rides inside the ciphertext. Passing
+  // opts.meta straight through — as this did — would hand the server the
+  // private half (thumb, filename, linkPreview) in the clear, which is the one
+  // leak class msgEnvelope exists to close. Harmless while the only caller
+  // (app/schedule-message.tsx) sends no meta; a plaintext-thumbnail leak the
+  // day somebody schedules a photo.
+  const { pub: serverMeta, priv } = splitMeta(opts.meta);
+  const wire = wrapEnvelope(plaintext, priv);
+  let content = await encryptForChat(chatId, wire);
+  if (content === wire && wire !== plaintext) content = plaintext;  // never ship the wrapper unencrypted
   return api<ScheduledMessageRow>('/user/scheduled-messages', {
     method: 'POST',
-    json: { chatId, sendAt: sendAtIso, type: 'text', content, replyToId: opts.replyToId ?? null, meta: opts.meta ?? null },
+    json: { chatId, sendAt: sendAtIso, type: 'text', content, replyToId: opts.replyToId ?? null, meta: serverMeta },
   });
 }
 
@@ -2590,12 +2613,37 @@ export async function getTurnConfig(): Promise<TurnConfig> {
 }
 
 // ─── Phone normalization + hash (Day 5 — must match backend) ────────
-// SAME logic as vaultchat-backend/routes/chats.js:normalizePhone / hashPhone:
-//   * strip non-digits
+// This is the CLIENT HALF of a two-stage peppered discovery hash. It is
+// deliberately not the final value:
+//
+//   client  →  h  = sha256(digits)                         (this file)
+//   server  →  H  = HMAC-SHA256(PEPPER, h)                 (vault.DiscoveryHash)
+//              users.phone_hash stores H; /contacts/match peppers each
+//              submitted h and compares, then echoes the client's ORIGINAL h
+//              back so the app can key its address book by it.
+//
+// The pepper is a server-only env secret and never reaches the client, which
+// is the whole point: a stolen users-table dump is not rainbow-tableable over
+// the ~10^10 mobile keyspace without it. The client cannot compute H, and must
+// not be able to.
+//
+// Normalization (must be byte-identical on both sides, or discovery silently
+// returns zero matches — there is no error, just an empty list):
+//   * strip non-digits (note: no '+', the plus is stripped)
 //   * if exactly 10 digits → prepend "91" (India default for unprefixed)
-//   * SHA-256 of the resulting digits string, hex output
-// If the two diverge, contact discovery silently returns zero matches —
-// keep them in sync.
+//   * SHA-256 of the resulting digits string, lowercase hex
+// Server mirrors: vaultchat-backend-go/internal/routes/auth.go
+// authNormalizePhone / authHashPhone / authDiscoveryPhoneHash. A selftest
+// pins the agreement: internal/routes/contacts_discovery_test.go.
+//
+// NOT stretched with a slow KDF, on purpose. A sync hashes up to 5000 numbers,
+// which caps the per-number budget at ~1 ms; measured PBKDF2-SHA256 cost is
+// ~12 ms/hash at only 1k iterations under @noble (pure JS, the Expo Go path)
+// and ~7 ms at 4k natively — i.e. a 60-360 s blocking sync for a work factor a
+// GPU still clears in hours. Client-side stretching cannot win this trade at
+// 5000x; the pepper (which an attacker cannot parallelise around at all) and
+// the per-account hash quota on /contacts/match are what actually bound the
+// exposure. See SECRETS.md and contacts.go:matchHashesPerDay.
 
 export function normalizePhoneForHash(raw: string): string | null {
   if (!raw) return null;

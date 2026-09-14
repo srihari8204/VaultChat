@@ -137,7 +137,8 @@ export default function GroupInsightsScreen() {
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.bg }}>
-      <Stack.Screen options={{ title: 'Insights', headerTitleAlign: 'center' }} />
+      <Stack.Screen options={{
+        headerShown: true, /* the root Stack sets headerShown:false app-wide, so the options below were inert and this screen had no back control at all */  title: 'Insights', headerTitleAlign: 'center' }} />
 
       <View style={[st.tabs, { borderColor: colors.glassStroke }]}>
         {(['week', 'month'] as Span[]).map((sp) => {

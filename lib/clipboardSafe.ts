@@ -9,6 +9,24 @@
 // directly. Plain chat-message copies also route through here so a phone
 // left unattended doesn't keep the last message in the clipboard buffer.
 
+// WHAT THIS DOES NOT DO — Android 13+ clipboard preview.
+//
+// Since Android 13 the system shows a floating preview of whatever was just
+// copied, and an app suppresses the text in it by putting
+// ClipDescription.EXTRA_IS_SENSITIVE (`android.content.extra.IS_SENSITIVE`) in
+// the ClipData's extras. So a VaultChat message copied here is still previewed
+// on screen for a couple of seconds regardless of the auto-clear below.
+//
+// It is not fixed here because it CANNOT be from JS: expo-clipboard's
+// setStringAsync takes exactly one option, `inputFormat`
+// (node_modules/expo-clipboard/build/Clipboard.types.d.ts), and the word
+// "sensitive" does not appear anywhere in the package. Reaching the flag means
+// a native module or an expo-config-plugin patch calling
+// `clip.description.extras = PersistableBundle().apply {
+//     putBoolean(ClipDescription.EXTRA_IS_SENSITIVE, true) }`
+// before setPrimaryClip — a native change plus a rebuild, not a line here.
+// Writing a `sensitive: true` option that expo-clipboard drops on the floor
+// would be one more control that lies, which is the thing being audited.
 import * as Clipboard from 'expo-clipboard';
 
 const CLEAR_AFTER_MS = 30_000;

@@ -2739,6 +2739,39 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
     };
   }, [membersById, screenAuthHeader]);
 
+  // NO CHAT ID = NOTHING TO SHOW, AND THE USER MUST NOT BE STRANDED.
+  //
+  // Reached by a deep link with no/!invalid id (vaultchat://chat), a
+  // notification whose chat was since deleted, or a restored task whose params
+  // were dropped. Every effect below already no-ops on `!chatId`, so the screen
+  // rendered its full frame with no header, no messages and no way back — a
+  // blank wall. Say what happened and give them the exit.
+  //
+  // Deliberately AFTER the hooks: an early return above them would change hook
+  // order between renders. `embedded` is excluded because a pane with no id is
+  // the split view's own empty state, which it already draws.
+  if (!chatId && !embedded) {
+    return (
+      <View style={[S.screen, S.center, { padding: 24, gap: 12 }]}>
+        <Ionicons name="chatbubble-ellipses-outline" size={44} color={colors.textDim} />
+        <Text style={{ color: colors.text, fontSize: 17, fontWeight: '700', textAlign: 'center' }}>
+          Conversation not found
+        </Text>
+        <Text style={{ color: colors.textDim, fontSize: 14, textAlign: 'center' }}>
+          This link did not carry a conversation, or the chat has been deleted.
+        </Text>
+        <TouchableOpacity
+          onPress={() => (router.canGoBack() ? router.back() : router.replace('/(tabs)/chats' as any))}
+          accessibilityRole="button"
+          accessibilityLabel="Back to chats"
+          style={{ marginTop: 8, paddingHorizontal: 20, paddingVertical: 12, borderRadius: 24, backgroundColor: colors.primary }}
+        >
+          <Text style={{ color: '#fff', fontWeight: '700' }}>Back to chats</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  }
+
   if (loading) {
     return (
       <View style={[S.screen, S.center]}>

@@ -1,6 +1,7 @@
 package realtime
 
 import (
+	"encoding/json"
 	"log"
 	"os"
 	"strconv"
@@ -15,15 +16,128 @@ import (
 )
 
 // ── shared payload helpers ────────────────────────────────────────────
-func argMap(args []any) map[string]any {
+//
+// ONE BOUNDS GATE, NOT THIRTY.
+//
+// Every handler in this file starts with argMap, so argMap is where the trust
+// boundary is. It used to be `args[0].(map[string]any)` and nothing else: an
+// untyped map of whatever the client sent, with no schema, no type checks and
+// no lengths. The only ceiling anywhere was the 2 MB socket frame in server.go,
+// and roughly fifteen of these events are RELAYS — the server copies the map
+// and forwards it verbatim into another user's event handlers. So "2 MB" was
+// also the size of the JSON one account could inject into another's client.
+//
+// What this can and cannot check:
+//
+//   SHAPE, yes. Field count, key length, value types, string lengths, array
+//   counts, nesting depth, and a whole-payload budget.
+//
+//   CONTENT, no — and deliberately not. The relayed bodies are E2EE envelopes
+//   (SDP sealed per peer, call media keys, VaultBeam chunk bitmaps, rekey
+//   material). This process has no key for any of them and must not grow one.
+//
+//   FIELD NAMES, no allowlist. A per-event schema would be the stricter thing,
+//   but the relays forward fields this file has never enumerated and a deployed
+//   client that still sends one must keep working. Bounded-but-unnamed is the
+//   line that holds without a forced client update.
+//
+// A violation DROPS the event and logs. It never disconnects: the brief says a
+// bug in one client must not kick that user offline, and a drop is also the
+// behaviour every other refusal in this file already has.
+const (
+	maxEventFields = 32        // fields in one object; real payloads use <10
+	maxKeyLen      = 64        // "longitude" is 9
+	maxStringLen   = 192 << 10 // one sealed field: SDP, chunk bitmap, envelope
+	maxPayloadLen  = 256 << 10 // whole event — 8x under the 2 MB frame
+	maxArrayLen    = 1024      // e.g. a reaction list
+	maxDepth       = 6         // trip "plain" and reaction objects are 2-3
+)
+
+// bounded walks one decoded JSON value, charging every element against a single
+// shared budget so a payload cannot be large by being deep, wide, or long — only
+// by being all three under the cap. Returns false at the first violation.
+func bounded(v any, depth int, budget *int) bool {
+	if depth > maxDepth || *budget <= 0 {
+		return false
+	}
+	switch t := v.(type) {
+	case nil, bool, float64, int, int64, json.Number:
+		*budget -= 8
+	case string:
+		if len(t) > maxStringLen {
+			return false
+		}
+		*budget -= len(t) + 8
+	case []byte: // socket.io binary placeholder; bounded like a string
+		if len(t) > maxStringLen {
+			return false
+		}
+		*budget -= len(t) + 8
+	case []any:
+		if len(t) > maxArrayLen {
+			return false
+		}
+		for _, e := range t {
+			if !bounded(e, depth+1, budget) {
+				return false
+			}
+		}
+	case map[string]any:
+		if len(t) > maxEventFields {
+			return false
+		}
+		for k, e := range t {
+			if len(k) > maxKeyLen {
+				return false
+			}
+			*budget -= len(k) + 8
+			if !bounded(e, depth+1, budget) {
+				return false
+			}
+		}
+	default:
+		// Not a value the JSON decoder produces. Refusing beats relaying a type
+		// this server cannot reason about into someone else's client.
+		return false
+	}
+	return *budget > 0
+}
+
+// argMap returns the event payload, or nil if it is absent, not an object, or
+// out of bounds. Every caller already drops on a missing field, so nil is the
+// drop — no handler needs its own check.
+func argMap(event string, args []any) map[string]any {
 	if len(args) == 0 {
 		return nil
 	}
-	m, _ := args[0].(map[string]any)
+	m, ok := args[0].(map[string]any)
+	if !ok {
+		return nil
+	}
+	budget := maxPayloadLen
+	if !bounded(m, 0, &budget) {
+		// Logged, not silent: this fires on a hostile client or on a real one
+		// that has outgrown a limit, and those need telling apart.
+		log.Printf("[socket] dropped %s: payload out of bounds (%d fields)", event, len(m))
+		metrics.Inc("socket_payload_rejected")
+		return nil
+	}
 	return m
 }
 
 func mstr(m map[string]any, k string) string { s, _ := m[k].(string); return s }
+
+// latLng type- and range-checks the legacy plaintext location fields. The E2E
+// blob path is preferred and untouched by this — there is nothing to check in
+// ciphertext.
+func latLng(m map[string]any) (lat, lng float64, ok bool) {
+	lat, okA := m["latitude"].(float64)
+	lng, okB := m["longitude"].(float64)
+	if !okA || !okB || lat < -90 || lat > 90 || lng < -180 || lng > 180 {
+		return 0, 0, false
+	}
+	return lat, lng, true
+}
 
 func copyMap(m map[string]any) map[string]any {
 	out := make(map[string]any, len(m)+2)
@@ -69,7 +183,7 @@ func (h *Hub) registerChatHandlers(s *socket.Socket) {
 	// check the live-location and trip handlers already gate on — reused rather
 	// than reinvented, so there is one definition of "is a member".
 	s.On("join_chat", func(args ...any) {
-		id := mstr(argMap(args), "chatId")
+		id := mstr(argMap("join_chat", args), "chatId")
 		if id == "" {
 			return
 		}
@@ -84,18 +198,18 @@ func (h *Hub) registerChatHandlers(s *socket.Socket) {
 		s.Join(socket.Room("chat:" + id))
 	})
 	s.On("leave_chat", func(args ...any) {
-		if id := mstr(argMap(args), "chatId"); id != "" {
+		if id := mstr(argMap("leave_chat", args), "chatId"); id != "" {
 			s.Leave(socket.Room("chat:" + id))
 		}
 	})
 
 	s.On("channel_join", func(args ...any) {
-		if id := mstr(argMap(args), "channelId"); id != "" {
+		if id := mstr(argMap("channel_join", args), "channelId"); id != "" {
 			s.Join(socket.Room("channel:" + id))
 		}
 	})
 	s.On("channel_leave", func(args ...any) {
-		if id := mstr(argMap(args), "channelId"); id != "" {
+		if id := mstr(argMap("channel_leave", args), "channelId"); id != "" {
 			s.Leave(socket.Room("channel:" + id))
 		}
 	})
@@ -103,7 +217,7 @@ func (h *Hub) registerChatHandlers(s *socket.Socket) {
 	// Live location — zero-knowledge relay into the chat room (excl. self),
 	// gated on a per-socket cached membership check (server.js).
 	s.On("live_location_update", func(args ...any) {
-		m := argMap(args)
+		m := argMap("live_location_update", args)
 		chatID := mstr(m, "chatId")
 		if chatID == "" {
 			return
@@ -114,15 +228,18 @@ func (h *Hub) registerChatHandlers(s *socket.Socket) {
 		out := map[string]any{"userId": d.uid, "until": m["until"]}
 		if blob := mstr(m, "blob"); blob != "" {
 			out["blob"] = blob // E2E path (preferred)
-		} else if lat, has := m["latitude"]; has && lat != nil {
-			out["latitude"] = lat // legacy plaintext
-			out["longitude"] = m["longitude"]
-			out["address"] = m["address"]
+		} else if lat, lng, ok := latLng(m); ok {
+			// Legacy plaintext path. The coordinates are now TYPE- and
+			// RANGE-checked: they used to be forwarded as whatever `any` arrived,
+			// so a string or an object landed straight in the peer's map pin.
+			out["latitude"] = lat
+			out["longitude"] = lng
+			out["address"] = mstr(m, "address")
 		}
 		s.To(socket.Room("chat:"+chatID)).Emit("live_location_update", out)
 	})
 	s.On("live_location_stop", func(args ...any) {
-		if chatID := mstr(argMap(args), "chatId"); chatID != "" {
+		if chatID := mstr(argMap("live_location_stop", args), "chatId"); chatID != "" {
 			s.To(socket.Room("chat:"+chatID)).Emit("live_location_stop", map[string]any{"userId": d.uid})
 		}
 	})
@@ -145,7 +262,7 @@ func (h *Hub) registerChatHandlers(s *socket.Socket) {
 	// Membership is enforced identically for both; a ping with neither field is
 	// dropped rather than fanned out empty.
 	s.On("trip_update", func(args ...any) {
-		m := argMap(args)
+		m := argMap("trip_update", args)
 		chatID := mstr(m, "chatId")
 		blob := mstr(m, "blob")
 		plain, hasPlain := m["plain"]
@@ -165,7 +282,7 @@ func (h *Hub) registerChatHandlers(s *socket.Socket) {
 		s.To(socket.Room("chat:"+chatID)).Emit("trip_update", out)
 	})
 	s.On("trip_end", func(args ...any) {
-		m := argMap(args)
+		m := argMap("trip_end", args)
 		chatID := mstr(m, "chatId")
 		if chatID == "" {
 			return
@@ -184,36 +301,64 @@ func (h *Hub) registerChatHandlers(s *socket.Socket) {
 	h.registerRunRelay(s, d)
 
 	// Typing — routed via fanOutToChat so it reaches every member's user-room
-	// and honours hide_typing ghost-mode. uid comes from the CLIENT payload.
-	s.On("typing_start", func(args ...any) {
-		m := argMap(args)
-		if chatID := mstr(m, "chatId"); chatID != "" {
-			h.FanOutToChat(bg, chatID, "typing_start", map[string]any{"uid": m["uid"], "chatId": chatID}, "")
+	// and honours hide_typing ghost-mode.
+	//
+	// THE uid IS THE SOCKET'S, NOT THE PAYLOAD'S.
+	//
+	// It used to be m["uid"] — a client-declared identity, fanned out verbatim
+	// to every member of the chat on a channel the app treats as trusted. Any
+	// account could therefore make any other account appear to be typing in any
+	// chat it could name. Worse than the cosmetic version of that bug:
+	// delivery.go's senderOfEvent reads the SAME field to decide whose
+	// hide_typing ghost-mode applies, so a spoofed uid also picked the victim's
+	// privacy settings for them.
+	//
+	// d.uid comes from the verified JWT in the handshake middleware and cannot
+	// be influenced by the payload. The client still SENDS uid (lib/socket.ts
+	// emitTypingStart) and that stays on the wire untouched — it is simply no
+	// longer read, so no deployed client changes.
+	//
+	// Membership is now required too, for the same reason join_chat is: FanOutToChat
+	// reaches every member's user-room directly, bypassing the chat room, so
+	// without this a non-member could inject typing into any chat by id.
+	typing := func(event string) func(...any) {
+		return func(args ...any) {
+			chatID := mstr(argMap(event, args), "chatId")
+			if chatID == "" || !h.chatMemberAllowed(d, chatID) {
+				return
+			}
+			h.FanOutToChat(bg, chatID, event, map[string]any{"uid": d.uid, "chatId": chatID}, "")
 		}
-	})
-	s.On("typing_stop", func(args ...any) {
-		m := argMap(args)
-		if chatID := mstr(m, "chatId"); chatID != "" {
-			h.FanOutToChat(bg, chatID, "typing_stop", map[string]any{"uid": m["uid"], "chatId": chatID}, "")
-		}
-	})
+	}
+	s.On("typing_start", typing("typing_start"))
+	s.On("typing_stop", typing("typing_stop"))
 
-	s.On("chat_view", func(args ...any) { h.onChatView(s, argMap(args)) })
+	s.On("chat_view", func(args ...any) { h.onChatView(s, argMap("chat_view", args)) })
 
-	// Delivered tick — relay to the chat room (excl. self). Never gated.
+	// Delivered tick + reactions — relays into the chat room (excl. self).
+	//
+	// Both were "never gated", and `s.To(room)` broadcasts to a room whether or
+	// not this socket is IN it — so join_chat's membership check never covered
+	// these. Any authenticated account could push a message_delivered tick, or
+	// an arbitrary `reactions` object, into any chat it could name. Same cached
+	// check as every other publish path here.
 	s.On("new_message", func(args ...any) {
-		m := argMap(args)
-		if chatID := mstr(m, "chatId"); chatID != "" {
-			s.To(socket.Room("chat:"+chatID)).Emit("message_delivered", map[string]any{"messageId": m["messageId"]})
+		m := argMap("new_message", args)
+		chatID := mstr(m, "chatId")
+		if chatID == "" || !h.chatMemberAllowed(d, chatID) {
+			return
 		}
+		s.To(socket.Room("chat:"+chatID)).Emit("message_delivered", map[string]any{"messageId": m["messageId"]})
 	})
 
 	s.On("reaction_updated", func(args ...any) {
-		m := argMap(args)
-		if chatID := mstr(m, "chatId"); chatID != "" {
-			s.To(socket.Room("chat:"+chatID)).Emit("reaction_updated",
-				map[string]any{"messageId": m["messageId"], "reactions": m["reactions"]})
+		m := argMap("reaction_updated", args)
+		chatID := mstr(m, "chatId")
+		if chatID == "" || !h.chatMemberAllowed(d, chatID) {
+			return
 		}
+		s.To(socket.Room("chat:"+chatID)).Emit("reaction_updated",
+			map[string]any{"messageId": m["messageId"], "reactions": m["reactions"]})
 	})
 
 	// NOTE: the in-call extras (`call_emoji`, `call_chat`) used to be handled
@@ -253,7 +398,7 @@ func (h *Hub) registerChatHandlers(s *socket.Socket) {
 // ciphertext. Said plainly rather than implied.
 func (h *Hub) registerRunRelay(s *socket.Socket, d *sockData) {
 	s.On("run_subscribe", func(args ...any) {
-		m := argMap(args)
+		m := argMap("run_subscribe", args)
 		chatID, runID := mstr(m, "chatId"), mstr(m, "runId")
 		if chatID == "" || runID == "" || !h.chatMemberAllowed(d, chatID) {
 			return
@@ -265,13 +410,13 @@ func (h *Hub) registerRunRelay(s *socket.Socket, d *sockData) {
 	})
 
 	s.On("run_unsubscribe", func(args ...any) {
-		if runID := mstr(argMap(args), "runId"); runID != "" {
+		if runID := mstr(argMap("run_unsubscribe", args), "runId"); runID != "" {
 			s.Leave(socket.Room("run:" + runID))
 		}
 	})
 
 	s.On("run_update", func(args ...any) {
-		m := argMap(args)
+		m := argMap("run_update", args)
 		chatID, runID, blob := mstr(m, "chatId"), mstr(m, "runId"), mstr(m, "blob")
 		if chatID == "" || runID == "" || blob == "" || !h.chatMemberAllowed(d, chatID) {
 			return
@@ -288,7 +433,7 @@ func (h *Hub) registerRunRelay(s *socket.Socket, d *sockData) {
 	})
 
 	s.On("run_end", func(args ...any) {
-		m := argMap(args)
+		m := argMap("run_end", args)
 		runID := mstr(m, "runId")
 		if runID == "" || !h.runAllowed(d, runID, true) {
 			return
@@ -367,6 +512,59 @@ func (h *Hub) chatMemberAllowed(d *sockData, chatID string) bool {
 	return ok
 }
 
+// peerAllowed reports whether this socket may address a per-peer relay to `to`.
+//
+// The rule is the one broadcastPresence already applies: the two accounts share
+// at least one live chat. Reusing it rather than inventing a second notion of
+// "may reach" means the relay surface can never be wider than the presence
+// surface — if you are not allowed to know they are online, you cannot ring
+// them, rekey with them or open a VaultBeam to them.
+//
+// ponytail: TTL-only caching, no generation. Chat generations are keyed by chat
+// id and this decision is keyed by peer, so a bump cannot find it; permTTL (30s)
+// is the bound instead. Losing the last shared chat with someone therefore
+// leaves a ≤30s window in which signalling still reaches them — the same
+// backstop the other caches rely on in cluster mode. Key it by chat and bump it
+// if that window ever matters.
+func (h *Hub) peerAllowed(d *sockData, to string) bool {
+	if d == nil || to == "" {
+		return false
+	}
+	if to == d.uid {
+		return true // own other devices — always addressable
+	}
+	d.mu.Lock()
+	if d.peerOk == nil {
+		d.peerOk = map[string]cachedPerm{}
+	}
+	entry, cached := d.peerOk[to]
+	d.mu.Unlock()
+	if cached && entry.fresh(0) {
+		return entry.ok
+	}
+	ok := false
+	_ = db.WithUser(bg, d.uid, func(tx pgx.Tx) error {
+		var one int
+		if tx.QueryRow(bg,
+			`SELECT 1 FROM chat_members mine
+			   JOIN chat_members theirs ON theirs.chat_id = mine.chat_id
+			  WHERE mine.user_id = $1 AND mine.left_at IS NULL
+			    AND theirs.user_id = $2 AND theirs.left_at IS NULL
+			  LIMIT 1`, d.uid, to).Scan(&one) == nil {
+			ok = true
+		}
+		return nil
+	})
+	d.mu.Lock()
+	d.peerOk[to] = cachedPerm{ok: ok, gen: 0, at: time.Now()}
+	d.mu.Unlock()
+	if !ok {
+		log.Printf("[relay] refused uid=%s → %s (no shared chat)", d.uid, to)
+		metrics.Inc("socket_relay_refused")
+	}
+	return ok
+}
+
 // onChatView — ephemeral live-viewer presence (feature #58, server.js chat_view).
 func (h *Hub) onChatView(s *socket.Socket, m map[string]any) {
 	chatID := mstr(m, "chatId")
@@ -425,11 +623,24 @@ func (h *Hub) registerSignalHandlers(s *socket.Socket) {
 
 	// relayToPeer: forward to a specific peer uid, stamping the authenticated
 	// sender as from/fromUid (critical for webrtc_end hangup matching).
+	//
+	// AUTHORISE THE RECIPIENT, not just the sender.
+	//
+	// `from` was already trustworthy — it is stamped from the socket, not read
+	// from the payload — but `to` was any uid on the platform. Fifteen events
+	// route through here, so a stranger could push a call offer, a rekey, a
+	// VaultBeam invite or an in-call chat envelope straight into any account's
+	// handlers, unsolicited, with nothing but a uid.
+	//
+	// peerAllowed is the rule presence already uses ("shares a live chat"), so
+	// this adds no new notion of who may reach whom: if you cannot see that
+	// they are online, you cannot signal them. Every real caller qualifies —
+	// calls, rekeys and beams all start from a chat the two parties are in.
 	relay := func(event string) func(...any) {
 		return func(args ...any) {
-			m := argMap(args)
+			m := argMap(event, args)
 			to := mstr(m, "to")
-			if to == "" {
+			if to == "" || !h.peerAllowed(d, to) {
 				return
 			}
 			out := copyMap(m)
@@ -470,9 +681,11 @@ func (h *Hub) registerSignalHandlers(s *socket.Socket) {
 	// call_incoming — relay over socket AND fire a high-priority wake-up push
 	// when the callee has NO live socket (killed/doze).
 	s.On("call_incoming", func(args ...any) {
-		m := argMap(args)
+		m := argMap("call_incoming", args)
 		to := mstr(m, "to")
-		if to == "" {
+		// Same entitlement as every other per-peer relay: ringing a stranger is
+		// the one of these that also lights up their screen.
+		if to == "" || !h.peerAllowed(d, to) {
 			return
 		}
 		// Ringing is the one socket event that costs the RECIPIENT something:
@@ -528,7 +741,7 @@ func (h *Hub) registerSignalHandlers(s *socket.Socket) {
 	// only sees THIS node's sockets; the room join/leave still happens so the
 	// Redis adapter carries the in-room emits across nodes (P2.1).
 	s.On("join_call", func(args ...any) {
-		chatID := mstr(argMap(args), "chatId")
+		chatID := mstr(argMap("join_call", args), "chatId")
 		if chatID == "" {
 			return
 		}
@@ -597,7 +810,7 @@ func (h *Hub) registerSignalHandlers(s *socket.Socket) {
 		s.To(room).Emit("call_peer_joined", map[string]any{"chatId": chatID, "uid": d.uid})
 	})
 	s.On("leave_call", func(args ...any) {
-		chatID := mstr(argMap(args), "chatId")
+		chatID := mstr(argMap("leave_call", args), "chatId")
 		if chatID == "" {
 			return
 		}

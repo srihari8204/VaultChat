@@ -22,6 +22,35 @@ import { unzipSync, strFromU8, inflateSync, unzlibSync } from 'fflate';
 /** Biggest document we will pull into memory to read. */
 export const MAX_DOC_BYTES = 32 * 1024 * 1024;
 
+/**
+ * Cap on the DECOMPRESSED size of a docx/xlsx/pptx.
+ *
+ * Bounding the input alone is not a bound. A 32 MB zip of repeated bytes
+ * expands to many gigabytes, and unzipSync allocates all of it before anything
+ * here gets a chance to look at it — the app is killed by the OS, which reads
+ * to a user as "opening that file crashed VaultChat", not as a hostile file.
+ * fflate's filter runs per entry BEFORE inflating it and sees the entry's
+ * declared original size, so the running total is checked there and the whole
+ * read is abandoned the moment it goes over.
+ */
+export const MAX_UNZIPPED_BYTES = 128 * 1024 * 1024;
+
+/** Thrown out of the unzip filter; callers turn it into the usual plain text. */
+export const DOC_BOMB_MESSAGE = 'This document is too large to open here.';
+
+/**
+ * fflate `filter` that aborts once the declared uncompressed total exceeds
+ * MAX_UNZIPPED_BYTES. One instance per unzip call — it is stateful.
+ */
+export function unzipBudget(): (f: { originalSize: number }) => boolean {
+  let total = 0;
+  return (f) => {
+    total += f.originalSize || 0;
+    if (total > MAX_UNZIPPED_BYTES) throw new Error(DOC_BOMB_MESSAGE);
+    return true;
+  };
+}
+
 export type DocKind = 'docx' | 'xlsx' | 'pptx' | 'pdf' | 'unsupported';
 
 export function docKind(filename: string): DocKind {
@@ -374,8 +403,11 @@ export function extractDocText(bytes: Uint8Array, filename: string): ExtractResu
 
   let files: Record<string, Uint8Array>;
   try {
-    files = unzipSync(bytes);
-  } catch {
+    files = unzipSync(bytes, { filter: unzipBudget() });
+  } catch (e: any) {
+    // Distinguish "this is not a zip" from "this zip is a bomb" — the second is
+    // not a malformed file and must not be reported as one.
+    if (e?.message === DOC_BOMB_MESSAGE) throw e;
     // Every one of these formats is a ZIP; if it will not unzip it is not one.
     throw new Error('This file is not a readable document.');
   }

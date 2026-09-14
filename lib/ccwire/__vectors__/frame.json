@@ -1,0 +1,361 @@
+{
+  "note": "CC-Wire v1 framing parity vectors. Asserted by vaultchat-backend-go/internal/ccwire/frame_test.go and by lib/ccwire/parity.selftest.ts. Regenerate with CCWIRE_WRITE_VECTORS=1 go test ./internal/ccwire/...",
+  "framingVersion": 1,
+  "headerBytes": 5,
+  "maxFrameBytes": 2097152,
+  "encode": [
+    {
+      "name": "empty payload is legal (a bare Ping is zero bytes in proto3)",
+      "payloadHex": "",
+      "frameHex": "0100000000"
+    },
+    {
+      "name": "five bytes",
+      "payloadHex": "0102030405",
+      "frameHex": "01000000050102030405"
+    },
+    {
+      "name": "high bytes are not sign-extended anywhere",
+      "payloadHex": "ffff",
+      "frameHex": "0100000002ffff"
+    },
+    {
+      "name": "300 bytes exercises the multi-byte length path",
+      "payloadHex": "070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707",
+      "frameHex": "010000012c070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707"
+    }
+  ],
+  "decode": [
+    {
+      "name": "round trip",
+      "inputHex": "01000000050102030405",
+      "maxBytes": 0,
+      "strict": false,
+      "ok": true,
+      "version": 1,
+      "payloadHex": "0102030405",
+      "consumed": 10,
+      "error": ""
+    },
+    {
+      "name": "empty payload decodes to zero bytes, not an error",
+      "inputHex": "0100000000",
+      "maxBytes": 0,
+      "strict": false,
+      "ok": true,
+      "version": 1,
+      "payloadHex": "",
+      "consumed": 5,
+      "error": ""
+    },
+    {
+      "name": "300-byte payload",
+      "inputHex": "010000012c070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707",
+      "maxBytes": 0,
+      "strict": false,
+      "ok": true,
+      "version": 1,
+      "payloadHex": "070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707",
+      "consumed": 305,
+      "error": ""
+    },
+    {
+      "name": "0 bytes is INCOMPLETE",
+      "inputHex": "",
+      "maxBytes": 0,
+      "strict": false,
+      "ok": false,
+      "version": 0,
+      "payloadHex": "",
+      "consumed": 0,
+      "error": "INCOMPLETE"
+    },
+    {
+      "name": "1 byte is INCOMPLETE",
+      "inputHex": "01",
+      "maxBytes": 0,
+      "strict": false,
+      "ok": false,
+      "version": 0,
+      "payloadHex": "",
+      "consumed": 0,
+      "error": "INCOMPLETE"
+    },
+    {
+      "name": "2 bytes is INCOMPLETE",
+      "inputHex": "0100",
+      "maxBytes": 0,
+      "strict": false,
+      "ok": false,
+      "version": 0,
+      "payloadHex": "",
+      "consumed": 0,
+      "error": "INCOMPLETE"
+    },
+    {
+      "name": "3 bytes is INCOMPLETE",
+      "inputHex": "010000",
+      "maxBytes": 0,
+      "strict": false,
+      "ok": false,
+      "version": 0,
+      "payloadHex": "",
+      "consumed": 0,
+      "error": "INCOMPLETE"
+    },
+    {
+      "name": "4 bytes is INCOMPLETE",
+      "inputHex": "01000000",
+      "maxBytes": 0,
+      "strict": false,
+      "ok": false,
+      "version": 0,
+      "payloadHex": "",
+      "consumed": 0,
+      "error": "INCOMPLETE"
+    },
+    {
+      "name": "declares 10, carries 3",
+      "inputHex": "010000000a010203",
+      "maxBytes": 0,
+      "strict": false,
+      "ok": false,
+      "version": 0,
+      "payloadHex": "",
+      "consumed": 0,
+      "error": "INCOMPLETE"
+    },
+    {
+      "name": "declares 100000, carries 0 (multi-byte length path)",
+      "inputHex": "010001869f",
+      "maxBytes": 0,
+      "strict": false,
+      "ok": false,
+      "version": 0,
+      "payloadHex": "",
+      "consumed": 0,
+      "error": "INCOMPLETE"
+    },
+    {
+      "name": "a length of 4 GiB is refused before any allocation",
+      "inputHex": "01ffffffff",
+      "maxBytes": 0,
+      "strict": false,
+      "ok": false,
+      "version": 0,
+      "payloadHex": "",
+      "consumed": 0,
+      "error": "LENGTH_OVER_MAX"
+    },
+    {
+      "name": "the sign bit set does not read as negative",
+      "inputHex": "0180000000",
+      "maxBytes": 0,
+      "strict": false,
+      "ok": false,
+      "version": 0,
+      "payloadHex": "",
+      "consumed": 0,
+      "error": "LENGTH_OVER_MAX"
+    },
+    {
+      "name": "exactly the hard cap passes the bound check (body absent, so INCOMPLETE)",
+      "inputHex": "0100200000",
+      "maxBytes": 0,
+      "strict": false,
+      "ok": false,
+      "version": 0,
+      "payloadHex": "",
+      "consumed": 0,
+      "error": "INCOMPLETE"
+    },
+    {
+      "name": "hard cap + 1 is refused",
+      "inputHex": "0100200001",
+      "maxBytes": 0,
+      "strict": false,
+      "ok": false,
+      "version": 0,
+      "payloadHex": "",
+      "consumed": 0,
+      "error": "LENGTH_OVER_MAX"
+    },
+    {
+      "name": "a negotiated max ABOVE the hard max does not raise it",
+      "inputHex": "0100200001",
+      "maxBytes": 99999999,
+      "strict": false,
+      "ok": false,
+      "version": 0,
+      "payloadHex": "",
+      "consumed": 0,
+      "error": "LENGTH_OVER_MAX"
+    },
+    {
+      "name": "unknown framing version is refused outright, not downgraded",
+      "inputHex": "6300000000",
+      "maxBytes": 0,
+      "strict": false,
+      "ok": false,
+      "version": 0,
+      "payloadHex": "",
+      "consumed": 0,
+      "error": "BAD_VERSION"
+    },
+    {
+      "name": "version 0 is refused",
+      "inputHex": "0000000000",
+      "maxBytes": 0,
+      "strict": false,
+      "ok": false,
+      "version": 0,
+      "payloadHex": "",
+      "consumed": 0,
+      "error": "BAD_VERSION"
+    },
+    {
+      "name": "version 2 is refused (no forward tolerance)",
+      "inputHex": "0200000000",
+      "maxBytes": 0,
+      "strict": false,
+      "ok": false,
+      "version": 0,
+      "payloadHex": "",
+      "consumed": 0,
+      "error": "BAD_VERSION"
+    },
+    {
+      "name": "a bad version is rejected before the length is even read",
+      "inputHex": "63ffffffff",
+      "maxBytes": 0,
+      "strict": false,
+      "ok": false,
+      "version": 0,
+      "payloadHex": "",
+      "consumed": 0,
+      "error": "BAD_VERSION"
+    },
+    {
+      "name": "trailing bytes are tolerated by default",
+      "inputHex": "01000000020102000000",
+      "maxBytes": 0,
+      "strict": false,
+      "ok": true,
+      "version": 1,
+      "payloadHex": "0102",
+      "consumed": 7,
+      "error": ""
+    },
+    {
+      "name": "trailing bytes are refused under strict",
+      "inputHex": "01000000020102000000",
+      "maxBytes": 0,
+      "strict": true,
+      "ok": false,
+      "version": 0,
+      "payloadHex": "",
+      "consumed": 0,
+      "error": "TRAILING_BYTES"
+    },
+    {
+      "name": "strict accepts an exact frame",
+      "inputHex": "01000000020102",
+      "maxBytes": 0,
+      "strict": true,
+      "ok": true,
+      "version": 1,
+      "payloadHex": "0102",
+      "consumed": 7,
+      "error": ""
+    },
+    {
+      "name": "over the negotiated max but under the hard max",
+      "inputHex": "010000000a0102030405060708090a",
+      "maxBytes": 4,
+      "strict": false,
+      "ok": false,
+      "version": 0,
+      "payloadHex": "",
+      "consumed": 0,
+      "error": "LENGTH_OVER_MAX"
+    },
+    {
+      "name": "the same frame passes at the hard max",
+      "inputHex": "010000000a0102030405060708090a",
+      "maxBytes": 0,
+      "strict": false,
+      "ok": true,
+      "version": 1,
+      "payloadHex": "0102030405060708090a",
+      "consumed": 15,
+      "error": ""
+    },
+    {
+      "name": "a payload of exactly the negotiated max is accepted",
+      "inputHex": "010000000a0102030405060708090a",
+      "maxBytes": 10,
+      "strict": false,
+      "ok": true,
+      "version": 1,
+      "payloadHex": "0102030405060708090a",
+      "consumed": 15,
+      "error": ""
+    }
+  ],
+  "stream": [
+    {
+      "name": "three concatenated frames",
+      "inputHex": "010000000101010000000202020100000003030303",
+      "framesHex": [
+        "01",
+        "0202",
+        "030303"
+      ],
+      "consumed": 21,
+      "error": ""
+    },
+    {
+      "name": "empty buffer yields nothing and consumes nothing",
+      "inputHex": "",
+      "framesHex": [],
+      "consumed": 0,
+      "error": ""
+    },
+    {
+      "name": "a partial tail is retained for the next read",
+      "inputHex": "0100000003010101010000",
+      "framesHex": [
+        "010101"
+      ],
+      "consumed": 8,
+      "error": ""
+    },
+    {
+      "name": "a header-only tail is retained",
+      "inputHex": "0100000001090100000004",
+      "framesHex": [
+        "09"
+      ],
+      "consumed": 6,
+      "error": ""
+    },
+    {
+      "name": "a bad length stops the scan and reports (a stream cannot resynchronise)",
+      "inputHex": "01000000010901ffffffff",
+      "framesHex": [
+        "09"
+      ],
+      "consumed": 6,
+      "error": "LENGTH_OVER_MAX"
+    },
+    {
+      "name": "a bad version mid-stream stops the scan",
+      "inputHex": "0100000001096300000000",
+      "framesHex": [
+        "09"
+      ],
+      "consumed": 6,
+      "error": "BAD_VERSION"
+    }
+  ]
+}

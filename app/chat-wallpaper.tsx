@@ -19,9 +19,6 @@ import { useTheme } from '../lib/theme';
 import { type Palette } from '../constants/theme';
 import { AuroraBackground } from '../components/ui';
 
-const { width: SW } = Dimensions.get('window');
-const COLOR_SIZE = (SW - 32 - 4 * 12) / 5;
-const PRESET_W = (SW - 32 - 16) / 3;
 
 // WhatsApp-style solid wallpapers — a bright row then a dark row.
 const SOLID_COLORS = [
@@ -71,7 +68,7 @@ export default function ChatWallpaperScreen() {
 
   const router = useRouter();
   const { colors } = useTheme();
-  const s = useMemo(() => makeStyles(colors), [colors]);
+  const s = useMemo(() => makeStyles(colors, SW), [colors, SW]);
   const { chatId } = useLocalSearchParams<{ chatId: string }>();
   const storageKey = `vc_wallpaper_${chatId || 'default'}`;
 
@@ -240,7 +237,15 @@ export default function ChatWallpaperScreen() {
   );
 }
 
-const makeStyles = (c: Palette) => StyleSheet.create({
+// Width/height are threaded in from useWindowDimensions() rather than read
+// from a module-level Dimensions.get(): orientation is 'default', so a frozen
+// value survived rotation, folds and split-screen resizes.
+const makeStyles = (c: Palette, SW: number) => {
+  // Derived from the LIVE width, so a rotation re-sizes the tiles. These were
+  // module-level consts computed from a frozen Dimensions.get().
+  const COLOR_SIZE = (SW - 32 - 4 * 12) / 5;
+  const PRESET_W = (SW - 32 - 16) / 3;
+  return StyleSheet.create({
   root: { flex: 1, backgroundColor: 'transparent' },
   header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingTop: HEADER_TOP, paddingHorizontal: 12, paddingBottom: 12, backgroundColor: c.bg, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.glassStroke, gap: 8 },
   iconBtn: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
@@ -279,3 +284,4 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   setBtn: { backgroundColor: c.primary, borderRadius: 26, paddingVertical: 15, alignItems: 'center', marginTop: 24 },
   setBtnText: { color: '#fff', fontSize: 16, fontWeight: '800' },
 });
+}

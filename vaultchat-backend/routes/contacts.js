@@ -23,6 +23,15 @@ router.use(jwtUtil.requireAuth);
 const MAX_HASHES_PER_REQUEST = 5000;
 const HEX64_RE = /^[a-f0-9]{64}$/i;
 
+// Per-ACCOUNT phone-hash budget, on top of the 5 req/min call limiter. The call
+// limiter bounds requests, not how many numbers an account can probe: 5 req/min
+// x 5000 hashes is 36M/day, which turns discovery into a directory-enumeration
+// oracle. A real address book is <= 5000 numbers, so four full syncs a day is
+// generous for a human and a hard ceiling for a scraper.
+// Keep in sync with vaultchat-backend-go/internal/routes/contacts.go.
+const MATCH_HASHES_PER_DAY = 20000;
+const MATCH_QUOTA_WINDOW   = 86400;
+
 router.post('/match', async (req, res) => {
   try {
     const rl = await rateLimit.consume(`contacts:${req.user.id}`, 5, 60);
@@ -45,6 +54,19 @@ router.post('/match', async (req, res) => {
          .filter(s => HEX64_RE.test(s))
     ));
     if (hashes.length === 0) return res.json([]);
+
+    // Charge the daily per-account hash budget. Counted AFTER dedup/validation
+    // so duplicates and junk aren't billed, and so the meter tracks distinct
+    // numbers probed — the thing we actually cap.
+    const q = await rateLimit.consumeBy(
+      `contacts:hashes:${req.user.id}`, hashes.length,
+      MATCH_HASHES_PER_DAY, MATCH_QUOTA_WINDOW);
+    if (!q.allowed) {
+      return res.status(429).json({
+        error: 'Contact sync quota exceeded',
+        retryAfter: q.resetInSec,
+      });
+    }
 
     // Pepper each client hash server-side (F1): the stored phone_hash is
     // HMAC(pepper, sha256(digits)), so a stolen users-table dump alone can't be

@@ -430,9 +430,43 @@ function MediaViewerScreen() {
     </View></View>);
   };
 
+  // NO SOURCE = NOTHING TO VIEW, AND THE USER MUST NOT BE STRANDED.
+  //
+  // Reached by a bare deep link (vaultchat://media-viewer), a notification whose
+  // attachment was revoked, or a view-once item already burned. Without this the
+  // screen drew a black container with no header and no text at all — a blank
+  // wall with no way out. After the hooks, so hook order is unchanged.
+  if (!uri && !mediaUrl && !attachmentId) {
+    return (
+      <>
+        <Stack.Screen options={{
+          headerShown: true, title: 'Media unavailable',
+          headerStyle: { backgroundColor: '#000' }, headerTintColor: '#fff',
+        }} />
+        <View style={[s.container, { alignItems: 'center', justifyContent: 'center', padding: 24, gap: 12 }]}>
+          <Ionicons name="image-outline" size={44} color="#8A94A6" />
+          <Text style={{ color: '#fff', fontSize: 17, fontWeight: '700', textAlign: 'center' }}>
+            Nothing to show
+          </Text>
+          <Text style={{ color: '#8A94A6', fontSize: 14, textAlign: 'center' }}>
+            This link carried no media, or the file is no longer available.
+          </Text>
+          <TouchableOpacity
+            onPress={() => (router.canGoBack() ? router.back() : router.replace('/(tabs)/chats' as any))}
+            accessibilityRole="button"
+            accessibilityLabel="Go back"
+            style={{ marginTop: 8, paddingHorizontal: 20, paddingVertical: 12, borderRadius: 24, backgroundColor: '#1D4ED8' }}
+          >
+            <Text style={{ color: '#fff', fontWeight: '700' }}>Go back</Text>
+          </TouchableOpacity>
+        </View>
+      </>
+    );
+  }
+
   return (
     <>
-      <Stack.Screen options={{ title: fileName, headerStyle: { backgroundColor: '#000' }, headerTintColor: '#fff',
+      <Stack.Screen options={{ headerShown: true, title: fileName, headerStyle: { backgroundColor: '#000' }, headerTintColor: '#fff',
         // Share/Save are hidden for view-once media. Offering "Download" on a
         // photo the sender was promised is one-view-only would hand the
         // recipient a permanent copy through the app's own UI — the protection

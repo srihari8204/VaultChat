@@ -1,0 +1,31 @@
+syntax = "proto3";
+package ccwire.v1;
+option go_package = "vaultchat/backend-go/internal/ccwire/v1;ccwirev1";
+
+message Receipt {
+  string chat_id = 1;
+  repeated string message_ids = 2;   // <= max_repeated_elements (1024)
+  ReceiptKind kind = 3;
+  // Server-stamped on delivery. A client cannot assert a receipt on
+  // another user's behalf — which is exactly what the ungated
+  // new_message → message_delivered relay allowed (handlers.go:338-352).
+  string user_id = 4;
+  int64 at_ms = 5 [jstype = JS_STRING];
+}
+
+enum ReceiptKind {
+  RECEIPT_KIND_UNSPECIFIED = 0;
+  RECEIPT_KIND_DELIVERED   = 1;
+  RECEIPT_KIND_READ        = 2;   // suppressed per hide_read ghost-mode
+  RECEIPT_KIND_PLAYED      = 3;   // voice notes
+}
+
+// DeliveryState is a server→client summary for a message the caller
+// sent. Counts, never a per-recipient list: who read what and when is
+// finer-grained than the product needs on the wire.
+message DeliveryState {
+  string message_id = 1;
+  uint32 delivered_count = 2;
+  uint32 read_count = 3;
+  uint32 recipient_count = 4;
+}

@@ -177,6 +177,53 @@ export const RING_TIMEOUT_MS = 35_000;
 export const REKEY_WAIT_MS = 9_000;
 
 /**
+ * FRAME-LEVEL E2EE ON THE CALL PATH — and the fail-closed rule that goes with it.
+ *
+ * An SFU terminates SRTP in order to forward, so without this the server can
+ * decode every frame of every call. lib/call/frameCrypto.ts encrypts each frame
+ * before it reaches the transport (AES-GCM, native on Android and iOS), so the
+ * SFU forwards ciphertext it cannot read.
+ *
+ * WHEN ON (the default), the rule is FAIL CLOSED, in both of its two senses —
+ * "never silently send plaintext", the same position constants/flags.ts takes
+ * with E2EE_STRICT:
+ *
+ *   no cryptor  → the call FAILS. joinCallRoom disconnects and throws rather
+ *                 than run a call the server can listen to. Identical to
+ *                 lib/golive/room.ts, which has done this since it was written.
+ *   no key yet  → NOTHING IS PUBLISHED. The room is joined and subscribed, but
+ *                 the microphone and camera stay unpublished until the media key
+ *                 arrives (one relay round trip — the key is minted by one
+ *                 participant and sealed per peer through the Double Ratchet).
+ *                 Frames that cannot be encrypted are never sent at all.
+ *
+ * WHEN OFF, calls behave exactly as they did before frame encryption existed:
+ * encrypted in transit (TLS + DTLS-SRTP), readable by the SFU. Kept as a switch
+ * only so a device-level failure of the native cryptor can be backed out without
+ * a rebuild of the crypto path; it is NOT a per-call choice.
+ */
+export const CALL_FRAME_E2EE = true;
+
+/**
+ * How long a device may sit in the room with NO media key before it gives up.
+ *
+ * The "no key yet → publish nothing" rule above is correct and must stay, but
+ * it had no deadline, so its failure mode was unbounded: a dead ratchet on the
+ * minter's side means the sealed key never opens, and the device stays joined,
+ * subscribed, and silently mute for as long as the user tolerates it. That is
+ * the worst shape a failure can take — indistinguishable from a working call.
+ *
+ * Sized off the ring budget, not guessed: the key is minted by one participant
+ * and sealed per peer over the Double Ratchet, so the wait is a relay round
+ * trip plus, at worst, one session repair. Comfortably longer than
+ * REKEY_WAIT_MS (9 s, the callee's re-seal window) so a recovery that is
+ * already in flight is never cut off, and shorter than RING_TIMEOUT_MS (35 s)
+ * so the callee never outlives a caller that has already hung up.
+ * Asserted in lib/call/frameE2ee.selftest.ts.
+ */
+export const MEDIA_KEY_WAIT_MS = 20_000;
+
+/**
  * The immutable snapshot screens render from. Replaced wholesale on every
  * change so `useSyncExternalStore` reference checks work; individual selectors
  * (hooks/useCall.ts) then narrow it so a mute toggle does not re-render video.

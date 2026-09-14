@@ -5,22 +5,19 @@ import { Ionicons } from '@expo/vector-icons';
 // 1. Temp Chat Codes — generate a time-limited invite code
 //    that auto-expires and can only be used once
 // 2. Disappearing Messages — set default timer for all chats
-// 3. Fake PIN (Decoy Mode) — secondary PIN that opens a clean
-//    decoy account with no messages
-// 4. Screen Lock Timer — auto-lock after X minutes of inactivity
-// 5. Email Share — share encrypted chat transcript via email
-// 6. Chat Backup — export encrypted backup to email
+// 3. Screen Lock Timer — auto-lock after X minutes of inactivity
+// 4. Email Share — share encrypted chat transcript via email
+// 5. Chat Backup — export encrypted backup to email
 
 import { BRAND_ACCENT } from '../constants/theme';
 import React, { useState, useEffect, useMemo } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet,
   ScrollView, Switch, Alert, ActivityIndicator,
-  Modal, TextInput, Share,
+  Modal, Share,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import * as SecureStore from 'expo-secure-store';
-import * as pinStore from '../services/security/pinStore';
 import { copyAndAutoClear } from '../lib/clipboardSafe';
 import { createSyncCode } from '../lib/chatService';
 import type { Palette } from '../constants/theme';
@@ -36,12 +33,15 @@ type LockTimer      = '1m' | '5m' | '15m' | '30m' | 'never';
 interface VaultSettings {
   disappearTimer:     DisappearTimer;
   lockTimer:          LockTimer;
-  fakePinEnabled:     boolean;
   screenshotAlert:    boolean;
   incognitoKeyboard:  boolean;
-  hidePreviewInApp:   boolean;
-  hideChatPreview:    boolean;
 }
+// REMOVED: hidePreviewInApp / hideChatPreview. Both were written to SecureStore
+// and read by nothing — and "Hide message text in notification tray" described
+// hiding text that is never sent: the server pushes data-only FCM with no body
+// and the client hardcodes 'New message'. A switch that claims to protect you
+// and does nothing is worse than no switch. The real notification control now
+// lives in app/notifications.tsx → PRIVACY (lib/privacyPrefs.ts).
 
 // ─────────────────────────────────────────────────────────────────
 // Constants
@@ -68,26 +68,9 @@ const LOCK_OPTIONS: { label: string; value: LockTimer }[] = [
 const DEFAULT_SETTINGS: VaultSettings = {
   disappearTimer:    'off',
   lockTimer:         '5m',
-  fakePinEnabled:    false,
   screenshotAlert:   true,
   incognitoKeyboard: true,
-  hidePreviewInApp:  true,
-  hideChatPreview:   false,
 };
-
-// ─────────────────────────────────────────────────────────────────
-// Generate temp chat code — 8 chars, alphanumeric
-// ─────────────────────────────────────────────────────────────────
-
-function generateCode(): string {
-  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
-  let code = '';
-  for (let i = 0; i < 8; i++) {
-    code += chars[Math.floor(Math.random() * chars.length)];
-  }
-  // Format as XXXX-XXXX
-  return code.slice(0, 4) + '-' + code.slice(4);
-}
 
 // ─────────────────────────────────────────────────────────────────
 // Main Screen
@@ -108,10 +91,6 @@ export default function VaultFeaturesScreen() {
   const [codeCopied,    setCodeCopied]    = useState(false);
 
   // Fake PIN modal
-  const [showFakePin,   setShowFakePin]   = useState(false);
-  const [fakePin,       setFakePin]       = useState('');
-  const [fakePinConfirm,setFakePinConfirm]= useState('');
-  const [savingFakePin, setSavingFakePin] = useState(false);
 
   // Disappear picker modal
   const [showDisappear, setShowDisappear] = useState(false);
@@ -203,54 +182,6 @@ export default function VaultFeaturesScreen() {
           await SecureStore.deleteItemAsync('vault_chat_code_expiry');
           setChatCode(null);
           setCodeExpiry(null);
-        },
-      },
-    ]);
-  };
-
-  // ── Fake PIN ──────────────────────────────────────────────────
-  const handleSaveFakePin = async () => {
-    if (fakePin.length !== 8) {
-      Alert.alert('Error', 'Fake PIN must be 8 digits');
-      return;
-    }
-    if (fakePin !== fakePinConfirm) {
-      Alert.alert('Error', 'PINs do not match');
-      return;
-    }
-    // Must differ from the real PIN. The real PIN is no longer readable (scrypt
-    // record, not the value), so ask the store whether this one already IS it.
-    if (await pinStore.verifyPin(fakePin)) {
-      Alert.alert('Error', 'Fake PIN must be different from your real PIN');
-      return;
-    }
-
-    setSavingFakePin(true);
-    try {
-      await SecureStore.setItemAsync('vault_fake_pin', fakePin);
-      await saveSetting('fakePinEnabled', true);
-      setShowFakePin(false);
-      setFakePin('');
-      setFakePinConfirm('');
-      Alert.alert(
-        'Decoy Mode Enabled',
-        'When someone enters this PIN, they will see an empty VaultChat account with no messages or contacts.'
-      );
-    } catch (e: any) {
-      Alert.alert('Error', e.message);
-    } finally {
-      setSavingFakePin(false);
-    }
-  };
-
-  const handleDisableFakePin = async () => {
-    Alert.alert('Disable Decoy Mode', 'Remove the fake PIN?', [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Disable', style: 'destructive',
-        onPress: async () => {
-          await SecureStore.deleteItemAsync('vault_fake_pin');
-          await saveSetting('fakePinEnabled', false);
         },
       },
     ]);
@@ -383,23 +314,6 @@ export default function VaultFeaturesScreen() {
           )}
         </View>
 
-        {/* ── 3. Decoy / Duress PIN → the REAL cryptographically-separate vault ──
-            (The old in-screen "fake PIN" wrote a key nothing read. The genuine
-            decoy vault lives on /duresspin: a scrypt-derived, AES-GCM-sealed
-            alternate vault that the real PIN never unlocks.) */}
-        <TouchableOpacity style={styles.section} activeOpacity={0.7} onPress={() => router.push('/duresspin')}>
-          <View style={styles.sectionHeader}>
-            <Text style={styles.sectionIcon}>🎭</Text>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.sectionTitle}>Decoy / Duress PIN</Text>
-              <Text style={styles.sectionDesc}>
-                Set a separate PIN that opens a believable decoy vault — real and cryptographically isolated from your data.
-              </Text>
-            </View>
-            <Ionicons name="chevron-forward" size={18} color="#9CA3AF" style={{ marginLeft: 'auto' }} />
-          </View>
-        </TouchableOpacity>
-
         {/* ── 4. Auto Screen Lock ── */}
         <View style={styles.section}>
           <View style={styles.sectionHeader}>
@@ -443,18 +357,6 @@ export default function VaultFeaturesScreen() {
               title: 'Incognito Keyboard',
               desc:  'Prevent keyboard from learning your messages',
             },
-            {
-              key:   'hidePreviewInApp',
-              icon:  '🫥',
-              title: 'Hide In-App Previews',
-              desc:  'Blur notification previews inside app',
-            },
-            {
-              key:   'hideChatPreview',
-              icon:  '🔕',
-              title: 'Hide Chat Preview',
-              desc:  'Hide message text in notification tray',
-            },
           ].map(({ key, icon, title, desc }) => (
             <View key={key} style={styles.toggleRow}>
               <Text style={styles.toggleIcon}>{icon}</Text>
@@ -472,6 +374,20 @@ export default function VaultFeaturesScreen() {
               />
             </View>
           ))}
+
+          <TouchableOpacity
+            style={styles.exportRow}
+            accessibilityRole="button"
+            accessibilityLabel="Notification and link previews"
+            onPress={() => router.push('/notifications')}
+          >
+            <Text style={styles.exportIcon}>🔕</Text>
+            <View style={styles.exportInfo}>
+              <Text style={styles.exportTitle}>Notification & Link Previews</Text>
+              <Text style={styles.exportDesc}>Choose what notifications say, and whether links you receive are fetched</Text>
+            </View>
+            <Ionicons name="chevron-forward" size={18} color="#9CA3AF" />
+          </TouchableOpacity>
         </View>
 
         {/* ── 6. Export / Share ── */}
@@ -594,71 +510,6 @@ export default function VaultFeaturesScreen() {
         </TouchableOpacity>
       </Modal>
 
-      {/* ── Fake PIN setup modal ── */}
-      <Modal
-        visible={showFakePin}
-        transparent
-        animationType="slide"
-        onRequestClose={() => setShowFakePin(false)}
-      >
-        <TouchableOpacity
-          style={modalStyles.overlay}
-          activeOpacity={1}
-          onPress={() => setShowFakePin(false)}
-        >
-          <View style={modalStyles.panel}>
-            <View style={modalStyles.handle} />
-            <Text style={modalStyles.title}>🎭 Set Decoy PIN</Text>
-            <Text style={modalStyles.subtitle}>
-              When this PIN is entered, a clean empty account is shown.
-              Your real messages stay hidden.
-            </Text>
-
-            <Text style={modalStyles.inputLabel}>Fake PIN (8 digits)</Text>
-            <TextInput
-              style={modalStyles.pinInput}
-              value={fakePin}
-              onChangeText={v => setFakePin(v.replace(/[^0-9]/g, ''))}
-              keyboardType="number-pad"
-              maxLength={8}
-              secureTextEntry
-              placeholder="8-digit PIN"
-              placeholderTextColor="#6B7280"
-            />
-
-            <Text style={modalStyles.inputLabel}>Confirm Fake PIN</Text>
-            <TextInput
-              style={modalStyles.pinInput}
-              value={fakePinConfirm}
-              onChangeText={v => setFakePinConfirm(v.replace(/[^0-9]/g, ''))}
-              keyboardType="number-pad"
-              maxLength={8}
-              secureTextEntry
-              placeholder="Confirm PIN"
-              placeholderTextColor="#6B7280"
-            />
-
-            <View style={modalStyles.btnRow}>
-              <TouchableOpacity
-                style={modalStyles.cancelBtn}
-                onPress={() => { setShowFakePin(false); setFakePin(''); setFakePinConfirm(''); }}
-              >
-                <Text style={modalStyles.cancelText}>Cancel</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[modalStyles.confirmBtn, savingFakePin && modalStyles.confirmBtnDim]}
-                onPress={handleSaveFakePin}
-                disabled={savingFakePin}
-              >
-                {savingFakePin
-                  ? <ActivityIndicator color="#FFFFFF" size="small" />
-                  : <Text style={modalStyles.confirmText}>Enable Decoy</Text>
-                }
-              </TouchableOpacity>
-            </View>
-          </View>
-        </TouchableOpacity>
-      </Modal>
     </View>
   );
 }

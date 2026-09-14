@@ -27,7 +27,7 @@ import {
   decideNotifications, type SecurityNotification,
 } from './notificationPolicy';
 
-/** Minimal async key/value store (SecureStore-shaped; same idiom as duressPin.KV). */
+/** Minimal async key/value store (SecureStore-shaped; same idiom as pinAttempts.KV). */
 export interface StorageKV {
   get(key: string): Promise<string | null>;
   set(key: string, value: string): Promise<void>;

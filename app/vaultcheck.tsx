@@ -70,7 +70,8 @@ export default function VaultCheckScreen() {
 
   return (
     <>
-      <Stack.Screen options={{ title: 'Verify media', headerBackTitle: 'Back' }} />
+      <Stack.Screen options={{
+        headerShown: true, /* the root Stack sets headerShown:false app-wide, so the options below were inert and this screen had no back control at all */  title: 'Verify media', headerBackTitle: 'Back' }} />
       <ScrollView style={S.page} contentContainerStyle={{ padding: 16, paddingBottom: 40 }}>
         {!report && !error && (
           <View style={S.loading}>

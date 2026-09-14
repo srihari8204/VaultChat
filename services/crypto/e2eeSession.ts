@@ -288,6 +288,17 @@ export function createE2EESession(deps: { store: KVStore; transport: KeyBundleTr
           ek: b64(init.header.ephemeralKey),
           opkId: init.header.oneTimePreKeyId ?? null,
         },
+        // The peer's identity key, from the bundle we just built this session on.
+        //
+        // Recorded HERE and not only on the responder path, because the
+        // initiator is the side that gets no other chance to learn it. Without
+        // this line peerIdentityKey() returned null for every conversation this
+        // device STARTED, so lib/keyChange.ts had no baseline to compare
+        // against — it recorded a key for the first time only after the peer
+        // had already re-keyed, and reported "first contact, nothing to warn
+        // about". A peer reinstalling, or an attacker substituting their key,
+        // was silent on exactly the half of all conversations we initiated.
+        peerIkHex: bytesToHex(bundle.identityKey),
       };
     } else {
       state = deserializeState(session.state);

@@ -5,9 +5,10 @@
 // Nothing leaves the device except through the user-initiated share.
 
 import { HEADER_TOP } from '../constants/layout';
-import React, { useState , useMemo} from 'react';
+import React, { useState , useMemo, useRef} from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, StatusBar, Alert, ActivityIndicator, Share,
+  Modal, TextInput,
 } from 'react-native';
 import { useLocalSearchParams, Stack, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -18,6 +19,7 @@ import { useTheme } from '../lib/theme';
 import { getMessages, type Message } from '../lib/chatService';
 import { unionWithLocalHistoryAsc } from '../lib/messageHistory';
 import { getCurrentUserAsync } from './(constants)/authService';
+import { getLock, verifyBiometric, verifyPin, type LockedChat } from '../lib/chatLock';
 import { AuroraBackground } from '../components/ui';
 
 const PAGE = 200;
@@ -93,8 +95,67 @@ export default function ChatExportScreen() {
     return filePath;
   };
 
+  // ── Export gate ───────────────────────────────────────────────────
+  // An export turns a chat that is protected by biometrics/PIN into a plain
+  // .txt or .html on the shared filesystem, and it was reachable in two taps
+  // with no check at all — including for a chat the user had explicitly locked.
+  // So: a locked chat must satisfy its OWN lock (the same method app/chat.tsx
+  // enforces) every time, and an unlocked chat gets an explicit confirmation of
+  // what is about to leave the vault. Normal exports still work in two taps
+  // plus a confirm.
+  const [pinPrompt, setPinPrompt] = useState<LockedChat | null>(null);
+  const [pin, setPin] = useState('');
+  const [pinErr, setPinErr] = useState(false);
+  const pinResolve = useRef<((ok: boolean) => void) | null>(null);
+
+  const askPin = (lock: LockedChat) => new Promise<boolean>(resolve => {
+    pinResolve.current = resolve;
+    setPin(''); setPinErr(false); setPinPrompt(lock);
+  });
+  const closePin = (ok: boolean) => {
+    setPinPrompt(null); setPin(''); setPinErr(false);
+    pinResolve.current?.(ok); pinResolve.current = null;
+  };
+  const submitPin = () => {
+    if (pinPrompt && verifyPin(pinPrompt, pin)) closePin(true);
+    else setPinErr(true);
+  };
+
+  const confirm = (title: string, message: string) => new Promise<boolean>(resolve => {
+    Alert.alert(title, message, [
+      { text: 'Cancel', style: 'cancel', onPress: () => resolve(false) },
+      { text: 'Export', style: 'destructive', onPress: () => resolve(true) },
+    ], { onDismiss: () => resolve(false) });
+  });
+
+  const authorizeExport = async (): Promise<boolean> => {
+    const lock = await getLock(chatId);
+    if (!lock) {
+      return confirm(
+        'Export this chat?',
+        'The exported file is NOT encrypted. Anyone who can open the file can read the whole conversation.',
+      );
+    }
+    // Locked chat — satisfy the lock first, then still confirm.
+    let ok = false;
+    if (lock.lockMethod === 'biometric' || lock.lockMethod === 'both') {
+      ok = await verifyBiometric('Unlock to export this chat');
+      if (!ok && lock.lockMethod === 'biometric') {
+        Alert.alert('Export blocked', 'This chat is locked. Unlock it to export.');
+        return false;
+      }
+    }
+    if (!ok && lock.pinHash) ok = await askPin(lock);
+    if (!ok) { Alert.alert('Export blocked', 'This chat is locked. Unlock it to export.'); return false; }
+    return confirm(
+      'Export a LOCKED chat?',
+      'This chat is protected by a lock. The exported file is NOT encrypted and is not protected by that lock.',
+    );
+  };
+
   const guard = async (fn: (msgs: Message[], myId: string) => Promise<void>) => {
     if (!chatId) { Alert.alert('Export failed', 'Missing chat id.'); return; }
+    if (!(await authorizeExport())) return;
     setExporting(true);
     setProgress('Fetching messages…');
     setMsgCount(0);
@@ -204,9 +265,39 @@ export default function ChatExportScreen() {
 
         <View style={s.noteBox}>
           <Text style={s.noteTitle}>Privacy Note</Text>
-          <Text style={s.noteDesc}>Exported files are NOT encrypted. Only export chats you&apos;re comfortable saving in plain text. The export happens entirely on your device.</Text>
+          <Text style={s.noteDesc}>Exported files are NOT encrypted. Only export chats you&apos;re comfortable saving in plain text. The export happens entirely on your device. A locked chat asks for its lock first.</Text>
         </View>
       </View>
+
+      {/* Chat-lock PIN — same PIN the chat itself requires. */}
+      <Modal visible={!!pinPrompt} transparent animationType="fade" onRequestClose={() => closePin(false)}>
+        <View style={s.pinOverlay}>
+          <View style={s.pinPanel}>
+            <Text style={s.pinTitle}>Chat locked</Text>
+            <Text style={s.pinDesc}>Enter this chat&apos;s PIN to export it.</Text>
+            <TextInput
+              style={[s.pinInput, pinErr && { borderColor: colors.danger }]}
+              value={pin}
+              onChangeText={(t) => { setPin(t); setPinErr(false); }}
+              keyboardType="number-pad"
+              secureTextEntry
+              maxLength={12}
+              autoFocus
+              accessibilityLabel="Chat lock PIN"
+              onSubmitEditing={submitPin}
+            />
+            {pinErr && <Text style={{ color: colors.danger, fontSize: 11, marginBottom: 8 }}>Incorrect PIN.</Text>}
+            <View style={{ flexDirection: 'row', gap: 10 }}>
+              <TouchableOpacity style={s.pinCancel} onPress={() => closePin(false)} accessibilityRole="button">
+                <Text style={{ color: colors.textDim, fontWeight: '700' }}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={s.pinOk} onPress={submitPin} accessibilityRole="button">
+                <Text style={{ color: '#FFFFFF', fontWeight: '700' }}>Unlock</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -230,4 +321,11 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   noteBox: { marginTop: 24, backgroundColor: c.glassSoft, borderRadius: 12, padding: 14, borderWidth: 1, borderColor: c.glassStroke },
   noteTitle: { color: c.danger, fontSize: 12, fontWeight: '800', marginBottom: 4 },
   noteDesc: { color: c.textDim, fontSize: 11, lineHeight: 18 },
+  pinOverlay: { flex: 1, backgroundColor: '#00000099', justifyContent: 'center', padding: 28 },
+  pinPanel: { backgroundColor: c.surfaceSolid, borderRadius: 16, padding: 20, borderWidth: 1, borderColor: c.glassStroke },
+  pinTitle: { color: c.text, fontSize: 16, fontWeight: '800' },
+  pinDesc: { color: c.textDim, fontSize: 12, marginTop: 4, marginBottom: 14 },
+  pinInput: { backgroundColor: c.glassSoft, borderRadius: 10, borderWidth: 1, borderColor: c.glassStroke, color: c.text, fontSize: 20, letterSpacing: 6, textAlign: 'center', paddingVertical: 10, marginBottom: 10 },
+  pinCancel: { flex: 1, alignItems: 'center', paddingVertical: 12, borderRadius: 10, borderWidth: 1, borderColor: c.glassStroke },
+  pinOk: { flex: 1, alignItems: 'center', paddingVertical: 12, borderRadius: 10, backgroundColor: BRAND_ACCENT },
 });

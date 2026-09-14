@@ -35,8 +35,19 @@ export default function SlideshowScreen() {
     images: string; startIndex?: string;
   }>();
 
-  const imageList: string[] = imagesParam ? JSON.parse(imagesParam) : [];
-  const startIdx = parseInt(startParam || '0');
+  // JSON.parse THROWS on malformed input, and this runs during RENDER — so a
+  // deep link with a broken `images` value (truncated share, hand-edited URL,
+  // an old link whose format changed) took down the screen rather than showing
+  // the "No images" state that already exists below. A route parameter is
+  // untrusted input: parse it defensively and fall through to the empty state.
+  let imageList: string[] = [];
+  if (imagesParam) {
+    try {
+      const parsed = JSON.parse(imagesParam);
+      if (Array.isArray(parsed)) imageList = parsed.filter((u): u is string => typeof u === 'string');
+    } catch { /* malformed → empty, handled below */ }
+  }
+  const startIdx = Number.isFinite(parseInt(startParam || '0')) ? parseInt(startParam || '0') : 0;
 
   const [currentIndex, setCurrentIndex] = useState(startIdx);
   const [showControls, setShowControls] = useState(true);

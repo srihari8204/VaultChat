@@ -5,6 +5,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { View, Text, Image, TouchableOpacity, StyleSheet, Linking, ActivityIndicator } from 'react-native';
 import { api } from '../lib/api';
 import { useTheme } from '../lib/theme';
+import { getRemoteLinkPreviews } from '../lib/privacyPrefs';
 import { type Palette } from '../constants/theme';
 
 interface OGData { title: string; description: string; image: string; url: string; }
@@ -15,9 +16,15 @@ export function extractUrl(text: string): string | null {
   return m ? m[0] : null;
 }
 
-// Real Open Graph fetch via our own backend (SSRF-guarded; no third party sees
-// the user's links, and no demo "sample" key).
+// Open Graph fetch via our own backend. The backend is SSRF-guarded and no
+// third party sees the link — but OUR server does, and on the RECIPIENT's
+// device the URL it would learn came out of an end-to-end-encrypted message
+// that the server could not read. So this is gated on an explicit user setting
+// (lib/privacyPrefs) which is OFF by default; without it we render nothing
+// rather than quietly phoning home. Messages from an up-to-date sender carry
+// their own preview in the envelope and never reach this path at all.
 async function fetchOG(url: string): Promise<OGData | null> {
+  if (!(await getRemoteLinkPreviews())) return null;
   try {
     const data = await api<OGData>(`/link/preview?url=${encodeURIComponent(url)}`);
     return data && data.title ? data : null;

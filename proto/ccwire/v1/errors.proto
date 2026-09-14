@@ -1,0 +1,47 @@
+syntax = "proto3";
+package ccwire.v1;
+option go_package = "vaultchat/backend-go/internal/ccwire/v1;ccwirev1";
+
+message Error {
+  ErrorCode code = 1;
+  ErrorClass error_class = 2;
+  // Server-authored, bounded at max_string_field_bytes (4096).
+  // MUST NOT echo client input — echoing would reintroduce the relay
+  // injection surface inside the error channel itself.
+  string detail = 3;
+  uint32 retry_after_ms = 4;    // set iff code is a rate limit
+  string request_id = 5;
+}
+
+enum ErrorClass {
+  ERROR_CLASS_UNSPECIFIED = 0;
+  ERROR_CLASS_RETRYABLE   = 1;
+  ERROR_CLASS_FATAL       = 2;
+  ERROR_CLASS_AUTH        = 3;   // client should ReAuth, not retry
+}
+
+// Codes are COARSE ON PURPOSE. NOT_PERMITTED covers "not a member",
+// "no shared chat" and "no such chat" as one answer, so the error
+// channel is an existence oracle for nothing. This preserves the
+// property today's silent-return already has (handlers.go:760-762)
+// while still being debuggable via server-side metrics.
+enum ErrorCode {
+  ERROR_CODE_UNSPECIFIED         = 0;
+  ERROR_CODE_UNSUPPORTED_VERSION = 1;   // names the supported range
+  ERROR_CODE_AUTH_REQUIRED       = 2;
+  ERROR_CODE_AUTH_EXPIRED        = 3;   // replaces string-matching on
+                                        // connect_error (socket.ts:186-188)
+  ERROR_CODE_AUTH_INVALID        = 4;
+  ERROR_CODE_NOT_PERMITTED       = 5;   // deliberately coarse
+  ERROR_CODE_RATE_LIMITED        = 6;
+  ERROR_CODE_FRAME_TOO_LARGE     = 7;   // refused BEFORE allocation
+  ERROR_CODE_PAYLOAD_INVALID     = 8;
+  ERROR_CODE_FRAGMENT_INVALID    = 9;
+  ERROR_CODE_UNKNOWN_OPERATION   = 10;  // the fix for the silent-drop bug
+                                        // that shipped trips broken
+  ERROR_CODE_PROTOCOL_VIOLATION  = 11;  // e.g. CryptoControl on EPHEMERAL
+  ERROR_CODE_CAUSAL_TIMEOUT      = 12;  // dependency never arrived; resync
+  ERROR_CODE_RESUME_REJECTED     = 13;  // client must full-resync
+  ERROR_CODE_SERVER_DRAINING     = 14;
+  ERROR_CODE_INTERNAL            = 15;
+}

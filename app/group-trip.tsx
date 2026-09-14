@@ -161,7 +161,8 @@ export default function GroupTripScreen() {
 
   return (
     <KeyboardSafe style={{ flex: 1, backgroundColor: colors.bg }}>
-      <Stack.Screen options={{ title: trip ? 'Trip' : 'Start a trip', headerTitleAlign: 'center' }} />
+      <Stack.Screen options={{
+        headerShown: true, /* the root Stack sets headerShown:false app-wide, so the options below were inert and this screen had no back control at all */  title: trip ? 'Trip' : 'Start a trip', headerTitleAlign: 'center' }} />
       <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 40 }} keyboardShouldPersistTaps="handled">
 
         {!trip ? (

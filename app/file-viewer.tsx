@@ -34,7 +34,6 @@ import { DocView } from '../components/DocView';
 import { PdfView } from '../components/PdfView';
 import type { Palette } from '../constants/theme';
 
-const { width: SW, height: SH } = Dimensions.get('window');
 
 /**
  * Ceiling for the plain-text viewer. Generous — 5 MB of text is well over a
@@ -271,6 +270,10 @@ function WaveformBars({ progress, barCount = 48 }: { progress: number; barCount?
 // ██  MAIN SCREEN
 // ══════════════════════════════════════════════════════════════════
 function FileViewerScreen() {
+  // Own the live metrics here: the hook further up belongs to
+  // SkeletonShimmer, a different component, and this screen previously
+  // read a frozen module-level Dimensions.get().
+  const { width: SW, height: SH } = useWindowDimensions();
   const router = useRouter();
   const params = useLocalSearchParams<{ uri: string; filename: string; mimeType?: string }>();
   const fileUri = (params.uri || '') + '';

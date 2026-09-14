@@ -50,7 +50,7 @@ import path from 'node:path';
 // positives that a sweep then spends real attention on. The hole was found by
 // the first sweep to use the guard, which is the right way to find it and the
 // wrong way to keep it.
-const BUDGET = 132;
+const BUDGET = 125;
 
 const ROOTS = ['app', 'components'];
 const SKIP_DIR = /node_modules|\.expo|android|ios|dist|build/;

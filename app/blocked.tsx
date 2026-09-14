@@ -1,7 +1,13 @@
 // app/blocked.tsx
-// Shown when runSecurityCheck() detects jailbreak / Frida / root
-// User CANNOT dismiss this — the app is completely locked.
-// All keys have already been wiped before this screen appears.
+// Shown when runSecurityCheck() returns a `restrict` or `wipe` verdict.
+// User CANNOT dismiss this — the app is locked.
+//
+// THE COPY MUST MATCH WHAT ACTUALLY HAPPENED. This screen used to say "all
+// encryption keys have been permanently wiped" unconditionally, but
+// securityService only calls wipeAllKeys() on the `wipe` level. A `restrict`
+// user — blocked, keys intact — was told their data had been destroyed, which
+// is both false and the sort of thing someone acts on irreversibly. The verdict
+// now arrives as a `level` param and every claim below is branched on it.
 
 import React, { useEffect, useState, useMemo } from 'react';
 import {
@@ -23,7 +29,12 @@ const THREAT_LABELS: Record<string, { label: string; icon: string; desc: string 
   ROOT_DETECTED: {
     label: 'Device Rooted',
     icon: '⚠️',
-    desc: 'Root access detected. Encryption keys have been wiped to protect your messages.',
+    desc: 'Root access was detected on this device.',
+  },
+  JAILBREAK_DETECTED: {
+    label: 'Device Jailbroken',
+    icon: '⚠️',
+    desc: 'Jailbreak indicators were found on this device.',
   },
   MAGISK_DETECTED: {
     label: 'Magisk Detected',
@@ -43,7 +54,47 @@ const THREAT_LABELS: Record<string, { label: string; icon: string; desc: string 
   FRIDA_PORT_27042: {
     label: 'Frida Detected',
     icon: '🔍',
-    desc: 'Frida instrumentation server detected on port 27042. Keys wiped.',
+    desc: 'A Frida instrumentation server was detected on port 27042.',
+  },
+  FRIDA_DETECTED: {
+    label: 'Instrumentation Detected',
+    icon: '🔍',
+    desc: 'Runtime instrumentation tooling (Frida) is active against this app.',
+  },
+  HOOK_FRAMEWORK: {
+    label: 'Hooking Framework',
+    icon: '🪝',
+    desc: 'A code-hooking framework (Xposed / LSPosed / Zygisk) is present.',
+  },
+  DEBUGGER_ATTACHED: {
+    label: 'Debugger Attached',
+    icon: '🐞',
+    desc: 'A debugger is attached to VaultChat and can read app memory.',
+  },
+  APK_RESIGNED: {
+    label: 'Unofficial Build',
+    icon: '📦',
+    desc: 'This build’s signing certificate is not the one VaultChat ships.',
+  },
+  ACCESSIBILITY_RISK: {
+    label: 'Accessibility Service',
+    icon: '👁️',
+    desc: 'An accessibility service we do not recognise is enabled. These can read screen content.',
+  },
+  DEV_OPTIONS_ON: {
+    label: 'Developer Options',
+    icon: '🔧',
+    desc: 'Developer options are enabled on this device.',
+  },
+  USB_DEBUGGING_ON: {
+    label: 'USB Debugging',
+    icon: '🔌',
+    desc: 'USB debugging is enabled. This allows external access to your device.',
+  },
+  PIN_BRUTEFORCE: {
+    label: 'Repeated PIN Failures',
+    icon: '🔢',
+    desc: 'Many consecutive wrong PIN entries were recorded on this device.',
   },
   FRIDA_SERVER_RESPONSE: {
     label: 'Frida Active',
@@ -65,8 +116,12 @@ const THREAT_LABELS: Record<string, { label: string; icon: string; desc: string 
 export default function BlockedScreen() {
   const c = useColors();
   const styles = useMemo(() => makeStyles(c), [c]);
-  const params = useLocalSearchParams<{ threats: string }>();
+  const params = useLocalSearchParams<{ threats: string; level: string }>();
   const [threats, setThreats] = useState<ThreatDetail[]>([]);
+  // Only a `wipe` verdict ran wipeAllKeys(). Anything else (including a missing
+  // param from an older navigation) left the keys alone, and saying otherwise
+  // would be the lie this screen shipped with.
+  const wiped = params.level === 'wipe';
 
   useEffect(() => {
     // Parse threats passed from _layout.tsx
@@ -89,7 +144,9 @@ export default function BlockedScreen() {
   const handleContactSupport = () => {
     Alert.alert(
       'Contact Support',
-      'Email: security@vaultchat.app\n\nAll your encryption keys have been wiped to protect your data. To restore access, you will need to reinstall VaultChat on a clean, unrooted device.',
+      'Email: security@vaultchat.app\n\n' + (wiped
+        ? 'Your encryption keys were wiped to protect your data. To restore access, reinstall VaultChat on a clean, unrooted device.'
+        : 'Your encryption keys are still on this device. Clear the indicator below and reopen VaultChat to regain access.'),
       [{ text: 'OK' }]
     );
   };
@@ -112,9 +169,9 @@ export default function BlockedScreen() {
 
         <Text style={styles.title}>VaultChat Blocked</Text>
         <Text style={styles.subtitle}>
-          A security threat was detected on this device.
-          All encryption keys have been permanently wiped
-          to protect your messages.
+          {wiped
+            ? 'A serious security threat was detected on this device. All encryption keys have been permanently wiped to protect your messages.'
+            : 'A security problem was detected on this device, so VaultChat has locked itself. Your encryption keys have NOT been wiped — access returns once the device is clean.'}
         </Text>
 
         {/* Threat list */}
@@ -148,27 +205,33 @@ export default function BlockedScreen() {
         <View style={styles.infoBox}>
           <Text style={styles.infoTitle}>What happened?</Text>
           <Text style={styles.infoText}>
-            VaultChat detected that this device is compromised. On a rooted or
-            instrumented device, end-to-end encryption provides NO protection
-            because an attacker can read app memory directly.
+            {wiped
+              ? 'VaultChat found strong evidence that this device is compromised. On a rooted or instrumented device, end-to-end encryption provides NO protection, because an attacker can read app memory directly.'
+              : 'VaultChat found an indicator it will not run alongside. This is a precaution, not proof that anything was read — but on this device the app cannot promise your messages stay private.'}
           </Text>
           <Text style={styles.infoText}>
-            To protect you, VaultChat has immediately wiped all session keys,
-            ratchet states, and your Vault PIN from this device. Your messages
-            remain encrypted on the server — no plaintext was exposed.
+            {wiped
+              ? 'To protect you, VaultChat wiped all session keys, ratchet states and your Vault PIN from this device. Your messages remain encrypted on the server — no plaintext was exposed.'
+              : 'Nothing has been deleted. Your keys, your PIN and your messages are untouched on this device, and VaultChat will open normally once the indicator below is gone.'}
           </Text>
         </View>
 
         {/* What to do */}
         <View style={styles.stepsBox}>
           <Text style={styles.infoTitle}>To restore access:</Text>
-          {[
+          {(wiped ? [
             'Unroot your device or use a clean stock ROM',
             'Remove Magisk, SuperSU, or any root manager',
             'Disable any Frida / instrumentation tools',
             'Reinstall VaultChat from the Play Store',
             'Verify your identity with OTP again',
-          ].map((step, i) => (
+          ] : [
+            'Clear the indicator listed above',
+            'Turn off USB debugging / developer options if they are on',
+            'Disconnect any debugger or instrumentation tool',
+            'Disable accessibility services you do not recognise',
+            'Reopen VaultChat — it re-checks on every launch',
+          ]).map((step, i) => (
             <View key={i} style={styles.stepRow}>
               <View style={styles.stepNum}>
                 <Text style={styles.stepNumText}>{i + 1}</Text>

@@ -27,7 +27,9 @@ import { screenCaptureSize, screenCaptureBitrate } from './screenCapture';
 import { shouldRelax, relaxedEncoding } from './sharePolicy';
 import { newVisibleState, setVisible as setVisibleState, wantsTrack } from './visibleSet';
 import { simulcastLayers } from './mode';
-import { getIceServers } from '../iceConfig';
+import { getIceConfig } from '../iceConfig';
+import { enableFrameCrypto, type FrameCryptoHandle } from './frameCrypto';
+import { CALL_FRAME_E2EE, MEDIA_KEY_WAIT_MS } from './types';
 import { Room, RoomEvent, Track, VideoPresets, type RemoteParticipant, type RemoteTrackPublication } from 'livekit-client';
 
 // livekit-client is a browser library: registerGlobals installs the React Native
@@ -110,6 +112,18 @@ export interface CallRoomEvents {
   /** The SDK rebuilt the transport. Pairs with onReconnecting. */
   onReconnected?(): void;
   /**
+   * The media key never arrived. OPTIONAL, like the two above — a caller that
+   * ignores it sees the room disconnect, which is the same outcome with a
+   * worse explanation.
+   *
+   * This device joined, subscribed, and published NOTHING because it had no key
+   * to encrypt with (see the fail-closed rule below). Without a deadline that
+   * state is permanent: a dead ratchet on the minter's side means the sealed
+   * key is never openable, and the call sits connected and silently mute for as
+   * long as the user is willing to stare at it. Bounded by MEDIA_KEY_WAIT_MS.
+   */
+  onMediaKeyTimeout?(): void;
+  /**
    * Who the SFU says is speaking, whenever that set changes. OPTIONAL, like the
    * two above and for the same reason: a caller that ignores it behaves exactly
    * as it did before this existed — which is what every 1:1 screen does.
@@ -136,6 +150,19 @@ export interface CallRoom {
    * Audio is NEVER affected: see the note in joinCallRoom.
    */
   setVisible(ids: string[] | null): void;
+  /**
+   * Install or ROTATE the frame-encryption key.
+   *
+   * The first key is what releases publishing: with CALL_FRAME_E2EE on and no
+   * key at join, nothing at all is published (see JoinArgs.e2eeKey), so this is
+   * the call's "you may now send media". Later calls rotate — which is what
+   * makes a departed participant go dark, since the SFU keeps forwarding to
+   * anyone it has and has no idea who holds a key.
+   *
+   * Rejects if the cryptor cannot be created: the caller must end the call
+   * rather than fall back to sending frames the server can read.
+   */
+  setMediaKey(key: Uint8Array): Promise<void>;
   leave(): Promise<void>;
 }
 
@@ -145,30 +172,40 @@ export interface JoinArgs {
   video: boolean;
   /** False for a broadcast audience — subscribe only. */
   publish: boolean;
+  /**
+   * 32-byte frame-encryption key, or null when we do not have one YET.
+   *
+   * Explicit and required, as lib/golive/room.ts makes it, so the decision is
+   * visible at the call site. null does NOT mean "unencrypted": with
+   * CALL_FRAME_E2EE on it means "join and subscribe, publish nothing", and the
+   * key arrives later through setMediaKey. Only the participant who mints the
+   * key has it at join time; everyone else is briefly in this state.
+   */
+  e2eeKey: Uint8Array | null;
   events: CallRoomEvents;
 }
 
 export async function joinCallRoom(a: JoinArgs): Promise<CallRoom> {
   ensureGlobals();
 
-  // NO FRAME ENCRYPTION — owner decision, 2026-08-16.
+  // FRAME ENCRYPTION IS BACK ON — it is the only thing that makes an SFU call
+  // end to end.
   //
-  // Calls were built to be end-to-end encrypted through the SFU, using
-  // RTCFrameCryptor. It is genuinely possible, and it is also where every hard
-  // failure of the day lived: tracks the SDK refused to publish, cryptors
-  // attached to connections that had no senders yet, one-way audio. The
-  // decision was to ship calling that works and keep the E2EE promise where it
-  // is already true and load-bearing — messages, media and VaultBeam.
+  // It was removed on 2026-08-16 because every hard failure of that day lived
+  // near it: tracks the SDK refused to publish, cryptors attached to connections
+  // that had no senders yet, one-way audio. Those causes were found and fixed
+  // elsewhere in this file (dual peer connection, explicit setSubscribed, the
+  // reconcile loop), and lib/golive/room.ts has run the same RTCFrameCryptor in
+  // production since. What was actually wrong was the ATTACH TIMING, which is
+  // why the attach below happens on every publish and every subscribe rather
+  // than once at join — a sender or receiver does not exist until its track
+  // does, and "nothing attached" looks exactly like "no encryption".
   //
-  // What a call still has: TLS to the server, DTLS-SRTP on every hop, media
-  // never written to disk, and a server the owner runs. That is the same
-  // guarantee Zoom, Meet, Teams and Telegram group calls give, and the UI says
-  // exactly that — CallEncryptionBadge renders "Encrypted in transit", not the
-  // end-to-end claim. Nothing in the product may say otherwise.
+  // See ./types.ts CALL_FRAME_E2EE for the fail-closed rule.
   // FETCH TURN BEFORE ANYTHING ELSE, so the network round trip overlaps the
   // Room construction instead of adding to call setup time. Same pattern as
   // lib/golive/room.ts, which has done this correctly all along.
-  const iceServersPromise = getIceServers();
+  const iceConfigPromise = getIceConfig();
 
   const room = new Room({
     // SINGLE PEER CONNECTION OFF. This is the fix for one-way audio.
@@ -288,6 +325,24 @@ export async function joinCallRoom(a: JoinArgs): Promise<CallRoom> {
   // asserted without a device. This is only the part that touches the SDK.
   const vis = newVisibleState();
 
+  // Declared up here because the event handlers below close over it, and they
+  // are registered before connect(). Null until a media key exists.
+  let crypto: FrameCryptoHandle | null = null;
+  /**
+   * Cover every sender and receiver that exists RIGHT NOW.
+   *
+   * Called from inside SDK event handlers, so it never throws back into them —
+   * the last time something in here unwound into livekit-client's emitter it
+   * cost a whole call (see `safe` above). attach() is idempotent: it skips
+   * senders and receivers it has already covered, so calling it on every event
+   * is correct rather than merely cheap.
+   */
+  const attachCryptors = (why: string) => {
+    try { crypto?.attach(); } catch (err) {
+      console.warn('[call] frame cryptor attach failed on', why, '—', (err as any)?.message ?? err);
+    }
+  };
+
   /** Bring one publication in line with what this device wants. */
   const applyWant = (pub: RemoteTrackPublication, uid: string) => {
     const want = wantsTrack(vis, uid, {
@@ -319,6 +374,10 @@ export async function joinCallRoom(a: JoinArgs): Promise<CallRoom> {
     safe('participants', () => a.events.onParticipants(room.remoteParticipants.size + 1, null, p));
   });
   room.on(RoomEvent.TrackSubscribed, (track, pub, p) => {
+    // A RECEIVER EXISTS ONLY ONCE ITS TRACK IS SUBSCRIBED, so this is the
+    // moment its cryptor can be created. Miss it and every incoming frame stays
+    // ciphertext — silence, or video that is noise.
+    attachCryptors('subscribe');
     // The URL matters as much as the event: a subscribe with no stream URL
     // renders as a frozen tile, which looks exactly like a call that hung.
     const u = urlOf(track);
@@ -342,6 +401,10 @@ export async function joinCallRoom(a: JoinArgs): Promise<CallRoom> {
     safe('screenshare', () => a.events.onScreenShareStopped());
   });
   room.on(RoomEvent.LocalTrackPublished, pub => {
+    // The other half of the attach rule, and the one that must come FIRST here:
+    // a sender does not exist until publishTrack resolves, and this covers every
+    // later publication too — the camera coming back on, a screen share.
+    attachCryptors('publish');
     if (pub.kind !== Track.Kind.Video) return;
     safe('local', () => a.events.onLocal(urlOf(pub.track)));
   });
@@ -358,6 +421,10 @@ export async function joinCallRoom(a: JoinArgs): Promise<CallRoom> {
   });
   room.on(RoomEvent.Reconnected, () => {
     console.warn('[call] room: reconnected');
+    // A reconnect rebuilds both transports, and the new senders and receivers
+    // come up BARE. Without this, a call survives the blip and is plaintext for
+    // the rest of its life.
+    attachCryptors('reconnect');
     safe('reconnected', () => a.events.onReconnected?.());
   });
   room.on(RoomEvent.ConnectionStateChanged, st => console.warn('[call] room state →', st));
@@ -387,17 +454,110 @@ export async function joinCallRoom(a: JoinArgs): Promise<CallRoom> {
   //
   // ICE priority is untouched: host and srflx pairs are tried first by the
   // protocol, relay is last resort, so a normal network behaves exactly as
-  // before. getIceServers() never throws and never returns empty — it degrades
-  // to the last good config, then to STUN only, which is what this was already
-  // working with.
-  const iceServers = await iceServersPromise;
-  await room.connect(a.url, a.token, { autoSubscribe: true, rtcConfig: { iceServers } });
+  // before. getIceConfig() degrades to the last good config, then to STUN only,
+  // which is what this was already working with — and carries
+  // `iceTransportPolicy: 'relay'` when the user has asked for their IP to be
+  // withheld (lib/callPrefs). That is the ONE case where it rejects rather than
+  // degrades: relay-only with no relay available gathers nothing at all, and
+  // quietly falling back to a direct path would leak the address the user
+  // switched the preference on to hide. The message is user-facing and says
+  // "try again", because it is transient.
+  let iceConfig;
+  try { iceConfig = await iceConfigPromise; }
+  catch (err) { await AudioSession.stopAudioSession().catch(() => {}); throw err; }
+  await room.connect(a.url, a.token, { autoSubscribe: true, rtcConfig: iceConfig });
 
-  if (a.publish) {
-    await room.localParticipant.setMicrophoneEnabled(true);
-    if (a.video) await room.localParticipant.setCameraEnabled(true);
+  // ── FRAME E2EE, AND WHAT IT GATES ─────────────────────────────────
+  //
+  // FAIL CLOSED, stated once, here (the rule itself is in ./types.ts):
+  //
+  //   cryptor unavailable  → disconnect and throw. A call that believes it is
+  //                          encrypted and is not must never proceed quietly;
+  //                          lib/golive/room.ts has refused on exactly this
+  //                          since it was written.
+  //   no key yet           → publish NOTHING. Not "publish and encrypt later":
+  //                          the frames sent in that window would be readable by
+  //                          the server, which is the whole thing this prevents.
+  //                          Everyone but the minting participant passes through
+  //                          this state for one relay round trip.
+  //   attached nothing     → disconnect and throw. Publishing with zero cryptors
+  //                          is the SILENT downgrade: the call works perfectly
+  //                          and the server can read it.
+  let publishedOwn = false;
+  // What the USER has asked for, which can diverge from what is published while
+  // the key is awaited: a mute pressed during that window must survive it, or
+  // the microphone comes up live under a UI that says muted.
+  let wantMic = true;
+  let wantCam = a.video;
+  const publishOwn = async (): Promise<void> => {
+    if (publishedOwn || !a.publish) return;
+    publishedOwn = true;
+    await room.localParticipant.setMicrophoneEnabled(wantMic);
+    if (a.video && wantCam) await room.localParticipant.setCameraEnabled(true);
+    // LocalTrackPublished already attached; this is the RECEIPT, not the attach.
+    // It has to be asked for here because zero is only meaningful once something
+    // has actually been published.
+    if (crypto) {
+      crypto.attach();
+      if (!crypto.active) {
+        await room.disconnect().catch(() => {});
+        throw new Error('Secure calling is unavailable on this device');
+      }
+    }
+    console.warn('[call] room: publishing', a.video ? 'mic+camera' : 'mic',
+      crypto ? '(frame E2EE on)' : '(NOT frame encrypted)');
+  };
+
+  // The deadline on "joined, subscribed, publishing nothing, waiting for a key".
+  let keyWaitTimer: ReturnType<typeof setTimeout> | null = null;
+  const stopKeyWait = () => { if (keyWaitTimer) { clearTimeout(keyWaitTimer); keyWaitTimer = null; } };
+
+  const installKey = async (key: Uint8Array): Promise<void> => {
+    stopKeyWait();
+    if (crypto) { await crypto.setKey(key); return; }   // rotation
+    // BOTH transports: LiveKit publishes on one peer connection and subscribes
+    // on another, so attaching to one encrypts what we send and leaves what we
+    // receive undecryptable. A getter because a reconnect replaces them.
+    const pcs = () => {
+      const e: any = (room as any).engine;
+      return [
+        e?.pcManager?.publisher?.pc ?? e?.publisher?.pc,
+        e?.pcManager?.subscriber?.pc ?? e?.subscriber?.pc,
+      ].filter(Boolean);
+    };
+    const h = await enableFrameCrypto(pcs, room.localParticipant.identity, key);
+    if (!h.active) {
+      await room.disconnect().catch(() => {});
+      throw new Error('Secure calling is unavailable on this device');
+    }
+    crypto = h;
+    attachCryptors('key');     // whatever is already subscribed
+    await publishOwn();
+  };
+
+  if (a.e2eeKey) await installKey(a.e2eeKey);
+  else if (!CALL_FRAME_E2EE) await publishOwn();
+  else {
+    // BOUNDED, at last. The wait used to have no deadline: if the minter's seal
+    // never landed (a dead ratchet session — the same failure that would
+    // already have broken the chat thread) this device stayed connected and
+    // silently mute forever, which looks exactly like a working call that
+    // nobody can hear. Fail the call instead, with a reason the user can act on
+    // and the log can be grepped for.
+    console.warn('[call] room: connected, holding media until the key arrives');
+    keyWaitTimer = setTimeout(() => {
+      keyWaitTimer = null;
+      if (crypto) return;                       // the key landed; nothing to do
+      console.warn('[call] MEDIA_KEY_TIMEOUT — no media key after',
+        MEDIA_KEY_WAIT_MS / 1000, 's; failing the call rather than staying silently mute');
+      // Told BEFORE the disconnect, so the caller's reason wins over the
+      // generic onClosed that RoomEvent.Disconnected is about to fire.
+      safe('keytimeout', () => a.events.onMediaKeyTimeout?.());
+      void room.disconnect().catch(() => {});
+    }, MEDIA_KEY_WAIT_MS);
   }
-  console.warn('[call] room: connected, publishing', a.publish ? (a.video ? 'mic+camera' : 'mic') : 'nothing');
+  console.warn('[call] room: connected, publishing',
+    publishedOwn ? (a.video ? 'mic+camera' : 'mic') : 'nothing');
 
   // ── RECONCILE, DO NOT TRUST EVENTS ────────────────────────────────
   //
@@ -448,10 +608,30 @@ export async function joinCallRoom(a: JoinArgs): Promise<CallRoom> {
   // on the front camera, which is what setCameraEnabled gives us.
   let facing: 'user' | 'environment' = 'user';
 
+  /**
+   * May a track START SENDING right now?
+   *
+   * Publishing is not only publishOwn's business: unmuting, turning the camera
+   * back on and starting a screen share all publish, and any of them can be
+   * pressed during the window where the key has not arrived yet. Without this
+   * they would publish around the gate and hand the SFU readable frames — the
+   * exact thing the gate exists to prevent. Turning something OFF is never
+   * gated.
+   */
+  const mayPublish = () => !CALL_FRAME_E2EE || !!crypto;
+
   return {
     room,
-    async setMic(on) { await room.localParticipant.setMicrophoneEnabled(on); },
-    async setCamera(on) { await room.localParticipant.setCameraEnabled(on); },
+    async setMic(on) {
+      wantMic = on;
+      if (on && !mayPublish()) return;
+      await room.localParticipant.setMicrophoneEnabled(on);
+    },
+    async setCamera(on) {
+      wantCam = on;
+      if (on && !mayPublish()) return;
+      await room.localParticipant.setCameraEnabled(on);
+    },
     async flipCamera() {
       const pub = room.localParticipant.getTrackPublication(Track.Source.Camera);
       const t: any = pub?.videoTrack;
@@ -526,6 +706,9 @@ export async function joinCallRoom(a: JoinArgs): Promise<CallRoom> {
       safe('local', () => a.events.onLocal(urlOf(t)));
     },
     async setScreenShare(on) {
+      // Same gate as the mic and camera: a share started before the key exists
+      // would be the one stream the server could read.
+      if (on && !mayPublish()) throw new Error('Secure calling is still setting up');
       // VP8, no simulcast, modest framerate — for the ENCODER, not for quality.
       //
       // The capture starts, the consent is given, LiveKit issues a track id and
@@ -703,6 +886,7 @@ export async function joinCallRoom(a: JoinArgs): Promise<CallRoom> {
       setVisibleState(vis, ids, Date.now());
       room.remoteParticipants.forEach(p => wantAll(p));
     },
+    async setMediaKey(key) { await installKey(key); },
     setRemoteAudible(on) {
       try {
         room.remoteParticipants.forEach(p => {
@@ -714,8 +898,10 @@ export async function joinCallRoom(a: JoinArgs): Promise<CallRoom> {
       } catch { /* best effort — hold must never break the call */ }
     },
     async leave() {
+      stopKeyWait();
       clearInterval(reconcileTimer);
       if (statsTimer) { clearInterval(statsTimer); statsTimer = null; }
+      try { await crypto?.dispose(); } catch {}
       try { await room.disconnect(); } catch {}
       try { await AudioSession.stopAudioSession(); } catch {}
     },

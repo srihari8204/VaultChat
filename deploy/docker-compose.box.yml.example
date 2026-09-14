@@ -72,11 +72,17 @@ services:
       # in both — and it stops storage.go (auto) and egress.go (us-east-1)
       # signing under two different SigV4 scopes against one bucket.
       S3_REGION: ${S3_REGION}
-      # Retention flag. On, media inherits the same 3-hour delete-on-delivery
-      # ceiling as the text it accompanies (internal/jobs/jobs.go). Off, media
-      # keeps the old two-week window — and the decryption key expires while the
-      # blob it unlocks lingers. The two must move together.
-      MESSAGE_BODIES: ${MESSAGE_BODIES:-1}
+      # MESSAGE_BODIES is NOT set here, deliberately.
+      #
+      # It used to default to 1, which asserted a protection the binary cannot
+      # provide: the ephemeral body store is refused at boot because its schema
+      # caps body retention at 3h against a 30-day floor (jobs.bodyStoreRefused).
+      # With the flag on, production wrote zero bodies and every message still
+      # went permanently to messages.content — while this comment claimed media
+      # had a 3-hour ceiling. Media therefore keeps the legacy window today.
+      #
+      # Reclaim is delivery-driven instead: DELETE_ON_DELIVERY. Do not reinstate
+      # this default; the store is scheduled for removal.
 
 # NOT OVERRIDDEN HERE, DELIBERATELY: the livekit `egress` services keep the
 # docker-compose.yml MinIO defaults. This deployment runs TWO object stores —

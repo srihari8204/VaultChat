@@ -15,8 +15,8 @@
 // the backend mints those slugs).
 
 import React, { useState } from 'react';
-import { Pressable, ScrollView, Text, TextInput, View } from 'react-native';
-import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
+import { Alert, BackHandler, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useKeepAwake } from 'expo-keep-awake';
 import Animated, {
   useSharedValue, useAnimatedStyle, withRepeat, withTiming, withSequence, Easing, cancelAnimation,
@@ -25,7 +25,7 @@ import * as Haptics from 'expo-haptics';
 import type { GameKind } from '../lib/gamesSocket';
 import { useQuickMatch } from '../lib/games/useQuickMatch';
 import Ionicons from '@expo/vector-icons/Ionicons';
-import { TableBackground, Panel, Btn, useType, GameGlyph, Coin } from '../components/games/ui';
+import { TableBackground, Panel, Btn, useType, GameGlyph, Coin, GameTopBar, GameChrome } from '../components/games/ui';
 import { C, S, R, E, white, alpha, ACCENT } from '../lib/games/theme';
 import { playSfx, setSoundEnabled, soundEnabled } from '../lib/games/sfx';
 import { useWallet } from '../lib/games/useWallet';
@@ -76,31 +76,52 @@ export default function GamesScreen() {
   const seat: SeatIntent | undefined =
     params.seat === 'auto' || params.seat === 'bot' ? params.seat : undefined;
 
-  // The top of the chess room, so the navigator bar reads as part of it.
-  const CHESS_HEADER = '#08160F';
-  const CHESS_TITLE = '#F2D89A';
-
   const title = kind ? (GAMES.find(g => g.kind === kind)?.name ?? 'Games') : 'Games';
+
+  // NEVER A DEAD END. A board is usually reached by pushing /games over the
+  // hub, so back is back — but a turn notification or an invite deep link opens
+  // one cold, and there `router.back()` leaves the app. Fall through to the hub
+  // instead; from the hub, to wherever the tabs are.
+  const exit = React.useCallback(() => {
+    if (router.canGoBack()) router.back();
+    else router.replace((kind ? '/games' : '/(tabs)') as any);
+  }, [router, kind]);
+
+  /**
+   * LEAVING A TABLE ASKS FIRST.
+   *
+   * Not because leaving is destructive — none of these four servers has a
+   * "leave" intent and none of them forfeits on absence; the table stays live
+   * and the hub's "Your games" panel lists it for you to walk back into. It
+   * asks because a mis-swipe mid-hand looks identical to quitting, and the
+   * sentence below is the only thing that tells the player their game is not
+   * gone. NOTHING IS FORFEITED HERE and nothing invents a forfeit: chess has
+   * Resign and rummy has Drop, both on their own boards, and that is where a
+   * player who means to give up goes.
+   */
+  const leave = React.useCallback(() => {
+    if (!kind) { exit(); return; }
+    Alert.alert(
+      'Leave this table?',
+      'The game keeps running on the server — you can walk back into it from “Your games”.',
+      [
+        { text: 'Stay', style: 'cancel' },
+        { text: 'Leave', style: 'destructive', onPress: exit },
+      ],
+    );
+  }, [kind, exit]);
+
+  // The hardware key must do what the on-screen control does. Without this the
+  // button asks and the back gesture does not, which is worse than neither.
+  // Only while a board is open — the hub's default back is already correct.
+  React.useEffect(() => {
+    if (!kind) return;
+    const sub = BackHandler.addEventListener('hardwareBackPress', () => { leave(); return true; });
+    return () => sub.remove();
+  }, [kind, leave]);
 
   return (
     <>
-      <Stack.Screen
-        options={{
-          title,
-          headerBackTitle: 'Games',
-          // CHESS ONLY. The chess board was redesigned onto its own emerald
-          // room (see lib/games/chessRoom.ts) and the shared maroon header bar
-          // sat across the top of it as a stripe from a different screen. The
-          // other three games are untouched — this is the whole of the hub's
-          // involvement in that redesign.
-          headerStyle: { backgroundColor: kind === 'chess' ? CHESS_HEADER : C.bg2 },
-          headerTintColor: kind === 'chess' ? CHESS_TITLE : C.text,
-          headerTitleStyle: {
-            color: kind === 'chess' ? CHESS_TITLE : C.text,
-            fontWeight: '800',
-          },
-        }}
-      />
       {kind
         ? (
           // A BOARD MUST NOT BE ABLE TO TAKE THE APP DOWN WITH IT.
@@ -114,15 +135,24 @@ export default function GamesScreen() {
           // question of when, not if. This turns that into a message with a way
           // out. Every other screen that renders untrusted shapes already does
           // this (archive-viewer, dashboard, docscanner).
-          <ErrorBoundary
-            screen={`Game:${kind}`}
-            fallbackTitle="That table had a problem"
-            fallbackMessage="The game is still running on the server — try again, or go back and rejoin the table."
-          >
-            <Board kind={kind} room={room} auto={auto} autoBot={autoBot} seat={seat} />
-          </ErrorBoundary>
+          // The bar is OUTSIDE the boundary on purpose: a board that threw is
+          // exactly when the way out has to still be there.
+          <GameChrome game={kind} title={title} onBack={leave}>
+            <ErrorBoundary
+              screen={`Game:${kind}`}
+              fallbackTitle="That table had a problem"
+              fallbackMessage="The game is still running on the server — try again, or go back and rejoin the table."
+            >
+              <Board kind={kind} room={room} auto={auto} autoBot={autoBot} seat={seat} />
+            </ErrorBoundary>
+          </GameChrome>
         )
-        : <Hub onOpen={(g, opts) => router.push({ pathname: '/games', params: { game: g, ...opts } } as any)} />}
+        : (
+          <Hub
+            onBack={leave}
+            onOpen={(g, opts) => router.push({ pathname: '/games', params: { game: g, ...opts } } as any)}
+          />
+        )}
       {/* Mounted once for all four boards — they open it through openInvite(). */}
       <InviteSheet />
     </>
@@ -149,7 +179,7 @@ function Board({ kind, room, auto, autoBot, seat }: { kind: GameKind; room: stri
 
 /* ── the hub ────────────────────────────────────────────────────────── */
 
-function Hub({ onOpen }: { onOpen: (g: GameKind, opts?: Record<string, string>) => void }) {
+function Hub({ onBack, onOpen }: { onBack: () => void; onOpen: (g: GameKind, opts?: Record<string, string>) => void }) {
   const t = useType();
   const [code, setCode] = React.useState('');
   const qm = useQuickMatch();
@@ -195,12 +225,17 @@ function Hub({ onOpen }: { onOpen: (g: GameKind, opts?: Record<string, string>) 
 
   return (
     <TableBackground>
-      <ScrollView contentContainerStyle={{ padding: S[4], gap: S[3], paddingBottom: S[6] }}>
-        <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-          <Text style={{ flex: 1, color: C.text, fontSize: t['2xl'], fontWeight: '800', letterSpacing: 0.3 }}>Games</Text>
-          <CoinChip balance={wallet.balance} />
-          <SoundToggle />
-        </View>
+      {/* The hub's own heading IS the shared bar — the coin chip and the mute
+          toggle ride in its `right` slot rather than in a second row. The hub
+          needed a way out too: it is pushed from the tabs and from deep links,
+          and had no control of its own. */}
+      <GameTopBar
+        title="Games"
+        backLabel="Back"
+        onBack={onBack}
+        right={<><CoinChip balance={wallet.balance} /><SoundToggle /></>}
+      />
+      <ScrollView contentContainerStyle={{ paddingHorizontal: S[4], paddingBottom: S[6], gap: S[3] }}>
         <Text style={{ color: C.muted, fontSize: t.sm, lineHeight: 19 }}>
           Every table is refereed by the server, so both players always see the same board. Play a stranger, a friend, or the house bot.
         </Text>

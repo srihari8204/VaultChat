@@ -169,6 +169,11 @@ func StartAll(ctx context.Context) {
 	// only — see partitions.go for why dropping is not in this file yet.
 	StartPartitionMaintenance(ctx)
 	RegisterPartitionGauge()
+	RegisterBodyRefusalGauge()
+	// Force the refusal banner at BOOT rather than whenever some sweep happens to
+	// ask first. An operator who set MESSAGE_BODIES=1 needs to learn it did
+	// nothing while they are still looking at the deploy.
+	BodyStoreEnabled()
 	// Unknown-purpose objects are never deleted (by design). Surface them, or
 	// "safe to retain" turns into unbounded storage nobody is looking at.
 	RegisterAttachmentPurposeGauges()
@@ -957,7 +962,11 @@ func deliverScheduled(ctx context.Context, tx pgx.Tx, schedID int64, userID, cha
 		   FROM chats c WHERE c.id = $1
 		 RETURNING id, chat_id, sender_id, type, content, meta, reply_to_id,
 		           edited_at, deleted_at, created_at, expires_at`,
-		chatID, userID, msgType, content, meta, replyToID).
+		// SECOND WRITER OF messages.meta. Scheduled sends bypass
+		// routes.chatsMessagePost entirely, so the allow-list has to be applied
+		// here too — otherwise scheduling a photo was a way to put its base64
+		// preview on the durable spine that the live send path no longer allows.
+		chatID, userID, msgType, content, SplitMetaJSON(meta), replyToID).
 		Scan(&msgID, &mChatID, &mSenderID, &mType, &mContent, &mMeta, &mReplyToID,
 			&mEditedAt, &mDeletedAt, &mCreatedAt, &mExpiresAt); err != nil {
 		return err
@@ -989,8 +998,16 @@ func deliverScheduled(ctx context.Context, tx pgx.Tx, schedID int64, userID, cha
 
 	// Broadcast — same key set as Node's scheduled worker payload; BIGINT ids
 	// as strings + JS-shaped timestamps (node-pg parity).
+	//
+	// The ORIGINAL meta, not the row's. The spine now keeps only the routing
+	// subset (SplitMetaJSON above), and an online recipient's live delivery must
+	// still carry the filename/preview the sender scheduled — exactly as
+	// chatsMessagePost echoes the inbound values rather than the stored ones.
+	// What the server declined to KEEP is not what it declines to DELIVER.
 	var metaVal any
-	if len(mMeta) > 0 {
+	if len(meta) > 0 {
+		_ = json.Unmarshal(meta, &metaVal)
+	} else if len(mMeta) > 0 {
 		_ = json.Unmarshal(mMeta, &metaVal)
 	}
 	var replyVal any

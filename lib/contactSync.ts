@@ -1,10 +1,13 @@
-import * as ExpoCrypto from 'expo-crypto';
-
 // lib/contactSync.ts
-// Reads phone contacts, hashes phones, syncs with server.
-// Phone numbers are NEVER sent raw — SHA-256 hashed only.
+// Cache of the contacts that contact discovery matched, keyed for lookup by
+// VaultID. The READ+HASH+SYNC half of this file was deleted: it was dead code
+// (nothing imported readPhoneContacts/syncContactsWithServer) that hashed
+// sha256("+91XXXXXXXXXX") — WITH the plus — against a server that stores
+// sha256("91XXXXXXXXXX"), so it could only ever return zero matches, and it
+// POSTed to /api/contacts/match with no Authorization header at all. Contact
+// discovery lives in app/contacts.tsx via chatService.hashPhoneForLookup /
+// matchContacts; there is exactly one hashing path and this is not it.
 
-import * as Contacts from 'expo-contacts';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 export type PhoneContact = {
@@ -29,95 +32,6 @@ export type VaultContact = {
   status?:      string;
   online?:      boolean;
 };
-
-// Normalise to E.164 (+91XXXXXXXXXX for India)
-function normalisePhone(raw: string, cc = '+91'): string {
-  const d = raw.replace(/\D/g, '');
-  if (d.length === 10) return cc + d;
-  if (d.length > 10)   return '+' + d;
-  return d;
-}
-
-// Read all phone contacts
-export async function readPhoneContacts(): Promise<PhoneContact[]> {
-  const { status } = await Contacts.requestPermissionsAsync();
-  if (status !== 'granted') throw new Error('Contacts permission denied');
-
-  const { data } = await Contacts.getContactsAsync({
-    fields: [
-      Contacts.Fields.Name,
-      Contacts.Fields.PhoneNumbers,
-      Contacts.Fields.Image,
-    ],
-  });
-
-  const out: PhoneContact[] = [];
-  for (const c of data) {
-    if (!c.phoneNumbers?.length) continue;
-    for (const pn of c.phoneNumbers) {
-      if (!pn.number) continue;
-      const phone     = normalisePhone(pn.number);
-      const phoneHash = await ExpoCrypto.digestStringAsync(ExpoCrypto.CryptoDigestAlgorithm.SHA256, phone);
-      out.push({
-        id:        c.id || Math.random().toString(36).slice(2),
-        name:      c.name || 'Unknown',
-        phone,
-        phoneHash,
-        avatar:    c.imageAvailable ? c.image?.uri : undefined,
-      });
-    }
-  }
-  return out;
-}
-
-// Send hashes to server → get back VaultIDs + their profile info
-export async function syncContactsWithServer(
-  serverUrl:     string,
-  myVaultId:     string,
-  phoneContacts: PhoneContact[]
-): Promise<VaultContact[]> {
-  const hashes = phoneContacts.map(c => c.phoneHash);
-
-  const res = await fetch(`${serverUrl}/api/contacts/match`, {
-    method:  'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body:    JSON.stringify({ myVaultId, phoneHashes: hashes }),
-  });
-  if (!res.ok) throw new Error('Contact sync failed');
-
-  // Server returns: [{ phoneHash, vaultId, vaultName, vaultAvatar, online, lastSeen, status }]
-  const matched: {
-    phoneHash:   string;
-    vaultId:     string;
-    vaultName?:  string;
-    vaultAvatar?:string;
-    online?:     boolean;
-    lastSeen?:   number;
-    status?:     string;
-  }[] = await res.json();
-
-  const contacts: VaultContact[] = phoneContacts.map(pc => {
-    const m = matched.find(x => x.phoneHash === pc.phoneHash);
-    return {
-      vaultId:     m?.vaultId     || '',
-      name:        pc.name,            // YOUR saved name for this person
-      phone:       pc.phone,
-      phoneHash:   pc.phoneHash,
-      avatar:      pc.avatar,
-      vaultAvatar: m?.vaultAvatar,
-      vaultName:   m?.vaultName,
-      isOnVault:   !!m,
-      isSaved:     true,               // came from phone contacts = saved
-      online:      m?.online,
-      lastSeen:    m?.lastSeen,
-      status:      m?.status,
-    };
-  });
-
-  await AsyncStorage.setItem('vaultContacts', JSON.stringify(contacts));
-  await AsyncStorage.setItem('contactSyncTs', String(Date.now()));
-  return contacts;
-}
 
 export async function getCachedContacts(): Promise<VaultContact[]> {
   const raw = await AsyncStorage.getItem('vaultContacts');

@@ -1,7 +1,7 @@
 import { HEADER_TOP } from '../constants/layout';
 import { LinearGradient } from "expo-linear-gradient";
 import * as Haptics from "expo-haptics";
-import { router } from "expo-router";
+import { router, useLocalSearchParams } from "expo-router";
 import { useState } from "react";
 import { Platform, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import { savePIN } from "../services/securityService";
@@ -9,6 +9,8 @@ import { savePIN } from "../services/securityService";
 const KEYS = ["1","2","3","4","5","6","7","8","9","","0","⌫"];
 
 export default function BackupPINScreen() {
+  // Reached mid-onboarding (→ /biometric-setup next) or from Settings (→ back).
+  const fromSettings = useLocalSearchParams<{ from?: string }>().from === 'settings';
   const [pin,setPin]     = useState("");
   const [confirm,setConfirm] = useState("");
   const [stage,setStage] = useState<"set"|"confirm">("set");
@@ -28,8 +30,8 @@ export default function BackupPINScreen() {
   const advance = async (val:string) => {
     if (stage==="set"){setStage("confirm");return;}
     if (val!==pin){setError("PINs do not match. Try again.");setConfirm("");setStage("set");setPin("");return;}
-    await savePIN(val);
-    router.push("/biometric-setup");
+    await savePIN(val);   // also seals the session under it (#32) — see pinStore
+    if (fromSettings) router.back(); else router.push("/biometric-setup");
   };
 
   const dots = Array(6).fill(0).map((_,i)=>({filled:i<current.length}));

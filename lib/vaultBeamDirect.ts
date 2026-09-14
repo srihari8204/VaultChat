@@ -7,7 +7,7 @@
 // Negotiation (receiver-driven, mutually exclusive, over the existing vaultbeam_*
 // signaling relay):
 //   recipient → vaultbeam_pull   "I'm ready — let's try direct"
-//   sender    → vaultbeam_ready  "{lanIp,lanPort}"  (+ vaultbeam_offer for P2P)
+//   sender    → vaultbeam_ready  "{lan:<sealed {lanIp,lanPort}>}"  (+ vaultbeam_offer for P2P)
 //   recipient tries LAN connect, else answers the WebRTC offer, else
 //             → vaultbeam_tier {mode:'relay'}  and both fall back to the relay.
 //
@@ -24,6 +24,7 @@ import { getIceServers } from './iceConfig';
 import { reprioritizeIceObject, readWinningPair } from './icePriority';
 import perf from './perf';
 import { newCallCipher, openCallOffer, type CallCipher } from './callCrypto';
+import { sealLan, openLan } from './vaultBeam/lanSeal';
 import {
   isNativeStreamAvailable, prealloc, lanIp, lanServe, lanConnect,
   readCipherChunk, writeCipherChunk, onLanEvent,
@@ -58,6 +59,22 @@ const STALL_MS       = 15000;       // recipient: abandon a direct tier that goe
  */
 export const DIRECT_STALL_MAX_MS = 45000;
 const ACK_TIMEOUT_MS = 30000;       // sender: wait for the receiver's delivery ack after eof
+
+/**
+ * LEGACY-PEER PASSTHROUGH for the DIRECT tiers: accept an unsealed SDP offer /
+ * LAN endpoint from a build that predates sealed VaultBeam signalling.
+ *
+ * OFF, and an explicit flag rather than the implicit `cipher ? … : …` null
+ * check it replaces — that check made "we have no session with this peer" mean
+ * "send the DTLS fingerprint and every device IP to the server in the clear",
+ * silently, which is precisely the thing lib/callCrypto.ts exists to prevent.
+ *
+ * Turning it off costs an old peer NOTHING but speed: the R2 relay tier is the
+ * guaranteed baseline, it is always available, and its chunks are the same
+ * AES-256-GCM ciphertext the direct tiers carry. So a peer we cannot seal to
+ * still receives the file — over the relay.
+ */
+export const VB_ALLOW_LEGACY_PLAINTEXT = false;
 
 // A direct tier that CONNECTS but then goes silent (Wi-Fi drop, peer suspended)
 // must not hang forever — the recipient abandons it after STALL_MS with no
@@ -198,7 +215,17 @@ export async function serveDirect(g: DirectGeom & { srcPath: string; onProgress?
     let lanIpVal: string | null = null;
     lanIp().then((ip) => { lanIpVal = ip; }).catch(() => {});
     cleanups.push(onLanEvent('vbLanBound', (d) => {
-      if (d?.transferId === g.transferId) emit('vaultbeam_ready', { to: g.peerId, transferId: g.transferId, lanIp: lanIpVal, lanPort: d.port });
+      if (d?.transferId !== g.transferId) return;
+      // SEALED, never the raw IP. This used to hand the server the sender's LAN
+      // address in the clear — in the same function that buffers ICE candidates
+      // precisely so it cannot. ./vaultBeam/lanSeal seals it under a subkey of
+      // the per-transfer key, which both peers already hold and the server does
+      // not. An older receiver sees no `lanIp` field, skips the LAN tier, and
+      // takes P2P or the relay.
+      emit('vaultbeam_ready', {
+        to: g.peerId, transferId: g.transferId,
+        lan: sealLan(g.keyB64, { lanIp: lanIpVal, lanPort: d.port }),
+      });
     }));
     cleanups.push(onLanEvent('vbLanProgress', (d) => {
       if (d?.transferId === g.transferId) { markConnected(); g.onProgress?.(d.done, d.total); }
@@ -211,7 +238,8 @@ export async function serveDirect(g: DirectGeom & { srcPath: string; onProgress?
     // P2P: offer a datachannel; stream once the recipient opens it. The SDP + ICE
     // are sealed with the per-transfer call cipher (callCrypto) so the server
     // never sees the DTLS fingerprint or device IPs — defence-in-depth on top of
-    // the already-E2EE chunk payload. Plaintext fallback if E2EE isn't available.
+    // the already-E2EE chunk payload. NO plaintext fallback: a tier that cannot
+    // be sealed is abandoned, and the relay carries the file instead.
     (async () => {
       try {
         pc = makePc(await iceServers());
@@ -226,14 +254,24 @@ export async function serveDirect(g: DirectGeom & { srcPath: string; onProgress?
         // IPv6-first: rewrite each candidate's priority so the IPv6 pair is checked
         // before IPv4/relay (both sides do it; ICE still falls through if IPv6 fails).
         const addIce = async (cand: any) => { try { await pc.addIceCandidate(new RTC.RTCIceCandidate(reprioritizeIceObject(cand))); } catch {} };
-        inbox.setOnIce((c) => { const cand = cipher ? cipher.open(c) : c; if (!cand) return; if (remoteReady) addIce(cand); else pendingIce.push(cand); });
+        // `cipher?.open` and NOT `cipher ? … : c`: remote ICE can only arrive
+        // after the peer has our offer, and the offer is only sent once the
+        // cipher exists — so a candidate reaching here with no cipher is not a
+        // legacy peer, it is a frame we cannot authenticate. Drop it.
+        inbox.setOnIce((c) => { const cand = cipher?.open(c) ?? null; if (!cand) return; if (remoteReady) addIce(cand); else pendingIce.push(cand); });
 
         // Outgoing ICE must NOT egress before the cipher exists, or the server
-        // sees device IPs unsealed. Buffer until the cipher is derived, then flush.
+        // sees device IPs unsealed. Buffer until the cipher is derived, then
+        // flush — and if the cipher never arrives, DROP the buffer rather than
+        // ever sending it (sealDead).
         let sealReady = false;
+        let sealDead = false;
         const outIce: any[] = [];
-        const emitIce = (c: any) => { const b = reprioritizeIceObject(c); emit('vaultbeam_ice', { to: g.peerId, transferId: g.transferId, candidate: cipher ? cipher.seal(b) : b }); };
-        pc.onicecandidate = (e: any) => { if (!e.candidate) return; if (sealReady) emitIce(e.candidate); else outIce.push(e.candidate); };
+        const emitIce = (c: any) => {
+          if (!cipher) return;
+          emit('vaultbeam_ice', { to: g.peerId, transferId: g.transferId, candidate: cipher.seal(reprioritizeIceObject(c)) });
+        };
+        pc.onicecandidate = (e: any) => { if (!e.candidate || sealDead) return; if (sealReady) emitIce(e.candidate); else outIce.push(e.candidate); };
 
         const dc = pc.createDataChannel('vaultbeam', { ordered: true });
         // Delivery ack: the receiver sends {t:'ack'} only after every chunk is
@@ -285,12 +323,12 @@ export async function serveDirect(g: DirectGeom & { srcPath: string; onProgress?
         (async () => {
           const a = await until(() => inbox.state.answer, CONNECT_MS + 5000, g.signal);
           if (a?.answer) {
-            const ans = cipher ? cipher.open(a.answer) : a.answer;
+            const ans = cipher?.open(a.answer) ?? null;
             if (ans) { try { await pc.setRemoteDescription(new RTC.RTCSessionDescription(ans)); remoteReady = true; for (const c of pendingIce.splice(0)) addIce(c); } catch {} }
           }
           // From here on, any further answer is the receiver accepting an ICE restart.
           inbox.state.onAnswer = async (ra: any) => {
-            const rans = cipher ? cipher.open(ra.answer) : ra.answer;
+            const rans = cipher?.open(ra.answer) ?? null;
             if (!rans) return;
             try { await pc.setRemoteDescription(new RTC.RTCSessionDescription(rans)); } catch {}
           };
@@ -325,10 +363,24 @@ export async function serveDirect(g: DirectGeom & { srcPath: string; onProgress?
         const offer = await pc.createOffer({});
         await pc.setLocalDescription(offer);
         const cc = await newCallCipher(g.peerId, offer); // seal offer + derive cipher
-        cipher = cc?.cipher ?? null;
+        if (!cc) {
+          // FAIL CLOSED. No X3DH session with this peer means we cannot seal
+          // the SDP — and the SDP carries the DTLS-SRTP fingerprint that
+          // anchors the datachannel's encryption, so a server that can read or
+          // replace it can MITM the transfer. The candidates carry device IPs.
+          // Neither may go out in the clear (lib/callCrypto.ts header).
+          //
+          // The transfer is NOT lost: this abandons the P2P tier only, and the
+          // R2 relay baseline below still delivers the same AES-256-GCM chunks.
+          sealDead = true;
+          outIce.length = 0;
+          console.warn('[vb] no E2EE session with peer — refusing to send a plaintext SDP offer; falling back to LAN/relay');
+          throw new Error('vaultbeam: cannot seal the P2P offer');
+        }
+        cipher = cc.cipher;
         sealReady = true;
         for (const c of outIce.splice(0)) emitIce(c);   // flush candidates gathered pre-cipher
-        emit('vaultbeam_offer', { to: g.peerId, transferId: g.transferId, offer: cc ? cc.offerWire : offer });
+        emit('vaultbeam_offer', { to: g.peerId, transferId: g.transferId, offer: cc.offerWire });
       } catch { /* P2P setup failed → LAN or relay */ }
     })();
 
@@ -374,13 +426,18 @@ export async function receiveDirect(g: DirectGeom & { dstPath: string; onProgres
     // LAN first (fastest) — if the sender advertised a reachable endpoint. A tier
     // that connects then goes silent for STALL_MS is abandoned → next tier / relay.
     const ready = await until(() => inbox.state.ready, PULL_WAIT_MS, g.signal);
-    if (ready?.lanIp && ready?.lanPort) {
+    // The endpoint is sealed under the per-transfer key (./vaultBeam/lanSeal).
+    // A plaintext `{lanIp,lanPort}` is an old sender: honoured only behind the
+    // explicit legacy flag, never implicitly.
+    const lan = ready?.lan ? openLan(g.keyB64, ready.lan)
+      : (VB_ALLOW_LEGACY_PLAINTEXT ? ready : null);
+    if (lan?.lanIp && lan?.lanPort) {
       const guard = stallGuard(STALL_MS);
       const offP = onLanEvent('vbLanProgress', (d) => { if (d?.transferId === g.transferId) { guard.ping(); markTransportConnected(g.transferId); g.onProgress?.(d.done, d.total); } });
       try {
         const res = await Promise.race([
           lanConnect({
-            host: ready.lanIp, port: ready.lanPort, dstPath: g.dstPath, keyB64: g.keyB64,
+            host: lan.lanIp, port: lan.lanPort, dstPath: g.dstPath, keyB64: g.keyB64,
             transferId: g.transferId, fileId: g.fileId, token: g.token,
             chunkBytes: g.chunkBytes, chunkCount: g.chunkCount, totalBytes: g.totalBytes,
           }).then((n) => (n === g.chunkCount ? 'done' : 'fail')).catch(() => 'fail'),
@@ -440,10 +497,17 @@ async function p2pSend(dc: any, g: DirectGeom & { srcPath: string; onProgress?: 
 async function p2pReceive(g: DirectGeom & { dstPath: string; onProgress?: ProgressCb; signal?: AbortSignal; abandon?: AbortSignal }, inbox: Awaited<ReturnType<typeof openInbox>>): Promise<boolean> {
   const offerMsg = await until(() => inbox.state.offer, P2P_OFFER_MS, g.signal);
   if (!offerMsg?.offer) return false;
-  // Decrypt the sealed offer + derive the cipher (plaintext passthrough for a
-  // legacy peer). A sealed offer we can't open (stale session) → give up → relay.
+  // Decrypt the sealed offer + derive the cipher. A sealed offer we can't open
+  // (stale session) → give up → relay.
   const { cipher, offer: sdp } = await openCallOffer(g.peerId, offerMsg.offer);
   if (!sdp) return false;
+  // FAIL CLOSED, the receiving half. `cipher.enc === false` is openCallOffer's
+  // plaintext passthrough — the sender's SDP reached the server readable, and
+  // our answer and every candidate would too. Refuse; the relay tier delivers.
+  if (!cipher.enc && !VB_ALLOW_LEGACY_PLAINTEXT) {
+    console.warn('[vb] peer sent an UNSEALED offer — refusing the plaintext P2P tier; falling back to the relay');
+    return false;
+  }
   let pc: any = null;
   try {
     return await new Promise<boolean>((resolve) => {

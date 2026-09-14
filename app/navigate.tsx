@@ -144,7 +144,8 @@ export default function NavigateScreen() {
 
   return (
     <View style={[st.screen, { backgroundColor: colors.bg }]}>
-      <Stack.Screen options={{ title: 'Navigate', headerTitleAlign: 'center' }} />
+      <Stack.Screen options={{
+        headerShown: true, /* the root Stack sets headerShown:false app-wide, so the options below were inert and this screen had no back control at all */  title: 'Navigate', headerTitleAlign: 'center' }} />
 
       {/* Live banner while navigating */}
       <NavBanner />

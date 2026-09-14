@@ -13,7 +13,6 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import type { Palette } from '../constants/theme';
 import { useColors } from '../lib/theme';
 
-const { width: SW } = Dimensions.get('window');
 // bg/card were '#FFFFFF'/'#F9FAFB' while the text comes from the live theme —
 // white-on-white in dark mode, which is the default. This factory already
 // receives the real palette as `c`, so the ground comes from there now and the
@@ -39,13 +38,10 @@ const SETTINGS_KEY = 'vc_voice_effect';
 
 export default function VoiceEffectsScreen() {
   const c = useColors();
-  const s = useMemo(() => makeStyles(c), [c]);
-  // Reactive size. The module-level Dimensions.get above is captured ONCE at
-  // import and never updates, so it froze the layout at the size the app
-  // launched with. Shadowing it here makes every use in this component follow
-  // rotation; StyleSheet.create keeps the initial value, which is fine for
-  // static rules.
+  // Reactive size: this follows rotation, folds and split-screen resizes, and
+  // is threaded into makeStyles so the derived card widths follow too.
   const {width: SW} = useWindowDimensions();
+  const s = useMemo(() => makeStyles(c, SW), [c, SW]);
 
   const [selected, setSelected] = useState('none');
   const [recording, setRecording] = useState(null);
@@ -120,7 +116,8 @@ export default function VoiceEffectsScreen() {
 
   return (
     <>
-      <Stack.Screen options={{ title: 'Voice Effects', headerStyle: { backgroundColor: c.card }, headerTintColor: '#1F2937' }} />
+      <Stack.Screen options={{
+        headerShown: true, /* the root Stack sets headerShown:false app-wide, so the options below were inert and this screen had no back control at all */  title: 'Voice Effects', headerStyle: { backgroundColor: c.card }, headerTintColor: '#1F2937' }} />
       <ScrollView style={s.container}>
         <StatusBar barStyle="light-content" />
 
@@ -189,7 +186,7 @@ export default function VoiceEffectsScreen() {
   );
 }
 
-const makeStyles = (c: Palette) => StyleSheet.create({
+const makeStyles = (c: Palette, SW: number) => StyleSheet.create({
   container: { flex: 1, backgroundColor: c.bg, padding: 16 },
   previewCard: { backgroundColor: c.card, borderRadius: 20, padding: 24, alignItems: 'center', marginBottom: 16, borderWidth: 1, borderColor: c.border },
   effectName: { fontSize: 22, fontWeight: '900', marginTop: 8 },

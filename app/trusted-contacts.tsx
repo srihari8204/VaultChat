@@ -1,6 +1,6 @@
 // app/trusted-contacts.tsx — Trusted (emergency) Contacts (Postgres-backed).
 //
-// Up to 3 contacts alerted on duress-PIN / new-device / panic events.
+// Up to 3 contacts alerted on new-device / panic events.
 // Backed by /contacts/trusted (list/add-by-VaultID/remove). No Firestore.
 
 import { HEADER_TOP } from '../constants/layout';
@@ -101,7 +101,7 @@ export default function TrustedContactsScreen() {
           <Ionicons name="shield-checkmark" size={26} color={colors.primary} />
           <Text style={s.infoTitle}>Emergency Contacts</Text>
           <Text style={s.infoDesc}>
-            These contacts are silently notified with your location if you activate the duress PIN, and when your account is accessed from a new device.
+            These contacts are silently notified with your location if you trigger the panic button, and when your account is accessed from a new device.
           </Text>
           <Text style={s.infoStat}>{trusted.length}/{MAX_TRUSTED} contacts set</Text>
         </View>
@@ -169,7 +169,6 @@ export default function TrustedContactsScreen() {
 
         <View style={s.alertInfo}>
           <Text style={s.alertTitle}>What trusted contacts receive:</Text>
-          <Text style={s.alertItem}>🚨 Duress PIN activation — location + emergency alert</Text>
           <Text style={s.alertItem}>📱 New device login — device info + location</Text>
           <Text style={s.alertItem}>🆘 Panic button — instant location share</Text>
         </View>

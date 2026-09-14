@@ -22,6 +22,7 @@ import { Ionicons } from '@expo/vector-icons';
 import * as Clipboard from 'expo-clipboard';
 import { logoutUser, sendPhoneOTP, verifyPhoneOTP } from '../(constants)/authService';
 import { api, getAccessToken } from '../../lib/api';
+import { resetTo } from '../../lib/authNav';
 import { attachmentUrl, uploadAttachment } from '../../lib/chatService';
 import { unregisterPushToken } from '../../lib/push';
 import { disconnect as disconnectSocket } from '../../lib/socket';
@@ -226,12 +227,15 @@ export default function ProfileScreen() {
           try { await unregisterPushToken(); } catch {}
           try { disconnectSocket(); } catch {}
           await logoutUser();
-          router.replace('/onboard' as any);
+          // resetTo, not replace: anything pushed above the tabs stayed in the
+          // history under the sign-in screen, so BACK re-entered the signed-out
+          // account (lib/authNav.ts).
+          resetTo('/onboard');
         }
       },
       ],
     );
-  }, [router]);
+  }, []);
 
   if (loading) {
     return (

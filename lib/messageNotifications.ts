@@ -11,6 +11,10 @@
 // (resolved locally from the on-device directory), body = "New message". We
 // never decrypt in the background and never put plaintext in a notification.
 //
+// How much of that the user gets is now their choice, not a constant: see
+// lib/privacyPrefs.ts (name-only / generic / none). There is no "full text"
+// mode because there is no plaintext here to show.
+//
 // Taps reuse the existing expo-notifications handler (attachTapHandler in
 // _layout routes data.chatId → /chat), so no extra tap wiring is needed.
 
@@ -19,6 +23,7 @@ import { AppState, Platform } from 'react-native';
 import * as Notifications from 'expo-notifications';
 
 import { MESSAGE_CATEGORY } from './notificationActions';
+import { getNotifPreview, notifContent } from './privacyPrefs';
 
 const SEEN_KEY = 'vc_notif_seen_v1';  // chatId → highest already-notified message id
 const DIR_KEY  = 'vc_chat_dir_v1';    // chatId → display name (written by chatService)
@@ -78,10 +83,15 @@ export async function notify(msg: { id: number | string; chatId: string; senderI
   const s = await loadSeen();
   if ((s[msg.chatId] ?? 0) >= id) return;                 // already notified / older
   s[msg.chatId] = id; persistSeen();
+  // User-chosen preview mode (lib/privacyPrefs). 'hidden' raises nothing; the
+  // seen marker is still advanced above so switching back later doesn't dump a
+  // backlog of notifications for messages that already arrived.
+  const content = notifContent(await getNotifPreview(), await chatName(msg.chatId));
+  if (!content) return;
   try {
     await Notifications.scheduleNotificationAsync({
       content: {
-        title: await chatName(msg.chatId), body: 'New message',
+        title: content.title, body: content.body,
         // AUDIT F6. The category attaches Reply and Mark as read (see
         // lib/notificationActions). messageId rides in the data because
         // mark-as-read needs to know what "read" means — without it the action

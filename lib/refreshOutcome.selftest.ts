@@ -42,7 +42,13 @@ check('a thrown fetch — offline, DNS, TLS, abort — is transient',
 check('an unparseable 200 is transient, not terminal',
   /accessToken \|\| !data\?\.refreshToken\) return 'transient'/.test(SRC));
 check('no refresh token at all is terminal',
-  /if \(!refresh\) return 'terminal'/.test(SRC));
+  /if \(!refresh\) \{[\s\S]{0,600}?return 'terminal';\s*\n\s*\}/.test(SRC));
+// #32: …with exactly one exception. A SEALED session's tokens exist, they are
+// just still locked (a deep link or notification beat the unlock screen).
+// Terminal there would run endSessionAndBounce → clearTokens → the sealed blob
+// is deleted, i.e. a permanent logout. It must be transient + /app-lock.
+check('a sealed-but-locked session is transient, not terminal',
+  /if \(!refresh\) \{[\s\S]{0,400}?sealedSessionLocked\(\)[\s\S]{0,300}?return 'transient';/.test(SRC));
 
 console.log('\nThe caller acts on the distinction:');
 check('transient throws a retryable error instead of ending the session',
@@ -51,6 +57,28 @@ check('only the remaining (terminal) branch clears credentials',
   /\} else \{[\s\S]{0,900}?endSessionAndBounce\(\)/.test(SRC));
 check('credentials are NOT cleared on the transient path',
   !/outcome === 'transient'[\s\S]{0,300}?endSessionAndBounce/.test(SRC));
+
+console.log('\nThe bounce never fires on a user who has no session yet:');
+// Reported from the device: entering the email OTP threw the user back to the
+// landing screen with the form blank. Onboarding has no refresh token, so
+// doRefresh answers 'terminal' for any stray authenticated background request,
+// and endSessionAndBounce then router.replace('/onboard')'d out from under the
+// sign-up flow. Ending a session that never started is always wrong.
+check('endSessionAndBounce returns early when there is no session',
+  /sessionEndingPromise = \(async \(\) => \{[\s\S]{0,1800}?if \(!\(await hasSession\(\)\)\) \{[\s\S]{0,120}?return;\s*\n\s*\}/.test(SRC));
+// Scope the ordering checks to endSessionAndBounce's own body — clearTokens
+// appears elsewhere in the file, so a bare indexOf would compare the wrong one.
+const BOUNCE = SRC.slice(SRC.indexOf('async function endSessionAndBounce'));
+check('...and it checks BEFORE clearing tokens',
+  BOUNCE.indexOf('hasSession()') < BOUNCE.indexOf('clearTokens()'));
+check('...and before the redirect',
+  BOUNCE.indexOf('hasSession()') < BOUNCE.indexOf("resetTo('/onboard')"));
+check('a real dead session still clears and bounces',
+  /await clearTokens\(\);[\s\S]{0,600}?resetTo\('\/onboard'\)/.test(SRC));
+// resetTo, not a bare replace: replace() swaps only the TOP history entry, so a
+// forced sign-out left the signed-in stack underneath and BACK re-entered it.
+check('the forced sign-out resets the stack, not just the top entry',
+  /resetTo\('\/onboard'\)/.test(SRC) && !/router\.replace\('\/onboard' as any\)/.test(SRC));
 
 console.log('\nRefresh cannot hang forever (F09):');
 check('the refresh fetch carries an abort signal',

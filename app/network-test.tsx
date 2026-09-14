@@ -15,7 +15,6 @@ import NetInfo from '@react-native-community/netinfo';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { AuroraBackground } from '../components/ui';
 
-const { width: SW } = Dimensions.get('window');
 
 const STORAGE_KEY = 'vaultchat_speedtest_history';
 const GAUGE_SIZE = 220;
@@ -43,7 +42,7 @@ function useS() {
   const {width: SW} = useWindowDimensions();
 
   const { colors } = useTheme();
-  return useMemo(() => makeStyles(colors), [colors]);
+  return useMemo(() => makeStyles(colors, SW), [colors, SW]);
 }
 
 export default function NetworkTestScreen() {
@@ -426,7 +425,7 @@ export default function NetworkTestScreen() {
   );
 }
 
-const makeStyles = (c: Palette) => StyleSheet.create({
+const makeStyles = (c: Palette, SW: number) => StyleSheet.create({
   container: { flex: 1, backgroundColor: 'transparent' },
   header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingTop: Platform.OS === 'ios' ? 56 : 40, paddingHorizontal: 16, paddingBottom: 14 },
   backBtn: { width: 40, height: 40, borderRadius: 12, backgroundColor: 'rgba(74,159,255,0.08)', justifyContent: 'center', alignItems: 'center' },

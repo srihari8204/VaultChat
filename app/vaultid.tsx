@@ -11,19 +11,15 @@ import { VaultID, destroyVaultID, generateIdentityCertificate, generateVaultID, 
 import type { Palette } from '../constants/theme';
 import { useColors } from '../lib/theme';
 
-const { width } = Dimensions.get('window');
 
 const AVATARS = ['🧑','👩','👨','🧔','👧','👦','🧓','👴','👵','🦸','🦹','🧙','🧝','🧛','🤖','👾'];
 
 function VaultIDScreenContent() {
   const c = useColors();
-  const S = useMemo(() => makeS(c), [c]);
-  // Reactive size. The module-level Dimensions.get above is captured ONCE at
-  // import and never updates, so it froze the layout at the size the app
-  // launched with. Shadowing it here makes every use in this component follow
-  // rotation; StyleSheet.create keeps the initial value, which is fine for
-  // static rules.
+  // Reactive size: follows rotation, folds and split-screen resizes, and is
+  // threaded into makeS so the derived featureCard width follows too.
   const {width} = useWindowDimensions();
+  const S = useMemo(() => makeS(c, width), [c, width]);
 
   const router = useRouter();
   const [vaultID, setVaultID] = useState<VaultID | null>(null);
@@ -263,7 +259,6 @@ function VaultIDScreenContent() {
               {icon:'⛓️',title:'Cryptographic Proof',sub:'Cryptographic ownership'},
               {icon:'📵',title:'No Phone Number',sub:'VaultTag only'},
               {icon:'🌍',title:'Universal ID',sub:'Works everywhere'},
-              {icon:'💀',title:'MemoryShield',sub:'Instant key destruction'},
               {icon:'🛡️',title:'Sovereign Identity',sub:'You own your keys'},
             ].map((f,i)=>(
               <View key={i} style={S.featureCard}>
@@ -276,7 +271,7 @@ function VaultIDScreenContent() {
 
           {/* Danger zone */}
           <TouchableOpacity onPress={handleDestroy} style={S.destroyBtn}>
-            <Text style={{color:'#EF4444',fontSize:13,fontWeight:'700'}}>💀 Destroy VaultID (MemoryShield)</Text>
+            <Text style={{color:'#EF4444',fontSize:13,fontWeight:'700'}}>💀 Destroy VaultID</Text>
           </TouchableOpacity>
 
         </>) : (
@@ -397,7 +392,10 @@ function VaultIDScreenContent() {
   );
 }
 
-const makeS = (c: Palette) => StyleSheet.create({
+// Width is threaded in rather than read from a module-level Dimensions.get():
+// orientation is 'default', so a frozen value survived rotation and left
+// featureCard sized for the previous geometry.
+const makeS = (c: Palette, width: number) => StyleSheet.create({
   container: {paddingHorizontal:20,paddingTop:HEADER_TOP,paddingBottom:40},
   header: {flexDirection:'row',alignItems:'center',marginBottom:20,gap:12},
   backBtn: {width:36,height:36,borderRadius:18,backgroundColor: c.glassSoft,justifyContent:'center',alignItems:'center',borderWidth:1,borderColor:'#0D1E3A'},

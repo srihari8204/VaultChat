@@ -184,6 +184,7 @@ export default function FilePreviewScreen() {
   return (
     <>
       <Stack.Screen options={{
+        headerShown: true, /* the root Stack sets headerShown:false app-wide, so the options below were inert and this screen had no back control at all */ 
         title: (filename || 'Preview') + '',
         headerStyle: { backgroundColor: '#FFFFFF' },
         headerTintColor: '#1F2937',

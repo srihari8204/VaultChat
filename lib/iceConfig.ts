@@ -34,9 +34,18 @@
 import { getTurnConfig, type IceServer } from './chatService';
 // Pure, RN-free, and covered by lib/iceCredentials.selftest.ts.
 import { cacheUntil } from './iceCredentials';
+import { getHideIpCached } from './callPrefs';
 
 /** Used when the request fails and we have nothing cached — same as before. */
 const STUN_ONLY: IceServer[] = [{ urls: 'stun:stun.l.google.com:19302' }];
+
+/** Does this list contain a TURN relay? Nothing else can carry relay-only ICE. */
+function hasTurn(servers: IceServer[]): boolean {
+  return servers.some(s => {
+    const u = (s as any)?.urls;
+    return Array.isArray(u) ? u.some((x: string) => /^turns?:/i.test(x)) : /^turns?:/i.test(String(u ?? ''));
+  });
+}
 
 let cached: IceServer[] | null = null;
 let cachedUntil = 0;
@@ -63,11 +72,7 @@ export async function getIceServers(): Promise<IceServer[]> {
       // indistinguishable from "sometimes calls don't connect" unless it is
       // stated. The server returns STUN-only when TURN_SECRET is unset, so this
       // also reveals a missing server-side config.
-      const hasTurn = servers.some(s => {
-        const u = (s as any)?.urls;
-        return Array.isArray(u) ? u.some((x: string) => /^turns?:/i.test(x)) : /^turns?:/i.test(String(u ?? ''));
-      });
-      if (!hasTurn) console.warn('[ice] NO TURN server — relay unavailable; calls will fail behind symmetric NAT');
+      if (!hasTurn(servers)) console.warn('[ice] NO TURN server — relay unavailable; calls will fail behind symmetric NAT');
       const until = cacheUntil(servers, Date.now());   // 0 = do not cache
       if (until) { cached = servers; cachedUntil = until; }
       return servers;
@@ -79,6 +84,41 @@ export async function getIceServers(): Promise<IceServer[]> {
     .finally(() => { inFlight = null; });
 
   return inFlight;
+}
+
+/** What a peer connection should actually be built with. */
+export interface IceConfig {
+  iceServers: IceServer[];
+  /** 'relay' withholds host and srflx candidates entirely. Absent = 'all'. */
+  iceTransportPolicy?: 'all' | 'relay';
+}
+
+/**
+ * The rtcConfig for a new peer connection, INCLUDING the transport policy.
+ *
+ * `iceTransportPolicy` appeared nowhere in this app, so every call gathered
+ * host candidates (the device's LAN IP) and server-reflexive ones (its public
+ * IP) and offered them to the peer. That is the right default — it is what
+ * makes a direct, cheap, low-latency path possible — but it left a user who
+ * wants their IP withheld from the other party no way to ask for it.
+ * lib/callPrefs's hide-my-IP preference is that switch; 'relay' forces every
+ * packet through coturn, which costs bandwidth and a few ms of latency and is
+ * exactly the trade that preference is opting into.
+ *
+ * FAIL CLOSED ON THE PRIVACY CHOICE. getIceServers() degrades to a STUN-ONLY
+ * list when the TURN fetch fails — a list with no relay in it at all. Pairing
+ * that with 'relay' gathers literally nothing and the call hangs; pairing it
+ * with 'all' instead would silently deliver the IP exposure the user asked to
+ * avoid. So neither: this throws, and the caller turns it into a retryable
+ * error (lib/call/room.ts). A TRANSIENT failure, and the message says so.
+ */
+export async function getIceConfig(): Promise<IceConfig> {
+  const iceServers = await getIceServers();
+  if (!getHideIpCached()) return { iceServers };
+  if (!hasTurn(iceServers)) {
+    throw new Error('Relay-only calling is unavailable right now — check your connection and try again');
+  }
+  return { iceServers, iceTransportPolicy: 'relay' };
 }
 
 /**

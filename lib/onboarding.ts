@@ -82,8 +82,36 @@ export async function pickGoogleAccount(): Promise<GoogleAccount> {
 }
 
 // ── Backend calls (error envelope { error: { code, message } }) ──────────────
+/**
+ * A THROTTLED SIGN-IN MUST SAY SO, AND SAY FOR HOW LONG.
+ *
+ * OTP sends are capped at 3 per hour per address (auth.go, "otp:email:"), and
+ * both 429 shapes carry the wait: `retryAfter` seconds at the top level, or
+ * inside `error`. Neither was ever read. So the landing screen showed a bare
+ * "Too many requests. Try again later." with no duration and no cause — and the
+ * one thing a person does with that message is press the button again, which
+ * spends another of the three and pushes the reset further out.
+ *
+ * That is how somebody ends up locked out for an hour having never once reached
+ * the code-entry screen: `sendEmailOtp` throws, so the `router.push` after it in
+ * app/onboard.tsx never runs, and the alert gives no reason to stop tapping.
+ *
+ * Naming the minutes is the whole fix — it converts "broken" into "wait", and
+ * points at Google sign-in, which is a different code path and not throttled.
+ */
 function msg(e: any, fallback: string): string {
-  return e?.body?.error?.message || e?.message || fallback;
+  const base = e?.body?.error?.message || e?.message || fallback;
+  if (e?.status !== 429 && e?.status !== 423) return base;
+
+  const secs = Number(e?.body?.retryAfter ?? e?.body?.error?.retryAfter ?? 0);
+  if (!Number.isFinite(secs) || secs <= 0) {
+    return `${base}\n\nToo many sign-in attempts. Wait a little before trying again, or continue with Google instead.`;
+  }
+  const mins = Math.ceil(secs / 60);
+  const wait = mins >= 60
+    ? `${Math.ceil(mins / 60)} hour${Math.ceil(mins / 60) === 1 ? '' : 's'}`
+    : `${mins} minute${mins === 1 ? '' : 's'}`;
+  return `Too many sign-in attempts. Try again in about ${wait}.\n\nTrying again before then only extends the wait — use "Continue with Google" if you need in now.`;
 }
 
 export async function sendEmailOtp(email: string): Promise<void> {

@@ -50,7 +50,7 @@ import * as Linking from 'expo-linking';
 import * as Sentry from '@sentry/react-native';
 import { StatusBar } from 'expo-status-bar';
 import { HEADER_TOP, SCREEN_BOTTOM } from '../constants/layout';
-import { View, ActivityIndicator, StyleSheet, Platform, AppState, InteractionManager } from 'react-native';
+import { ActivityIndicator, StyleSheet, Platform, AppState, InteractionManager } from 'react-native';
 import notifee, { EventType } from '@notifee/react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { PdfThumbnailerHost } from '../components/PdfThumbnailer';
@@ -58,13 +58,6 @@ import { CallBar } from '../components/CallBar';
 import { UpdateGate } from '../components/UpdateGate';
 import { TermsGate } from '../components/TermsGate';
 import { enableFreeze } from 'react-native-screens';
-
-// Screens below the top of the stack stay MOUNTED by default, so every one of
-// them keeps re-rendering on each context/state change. Measured on-device:
-// native View count climbed 757 -> 1308 over 10 navigations and never came
-// back, with PSS reaching 359 MB. Freezing suspends offscreen screens without
-// unmounting them, so `back` is still instant.
-enableFreeze(true);
 import { useFonts, Sora_700Bold, Sora_800ExtraBold } from '@expo-google-fonts/sora';
 import { NunitoSans_400Regular, NunitoSans_600SemiBold, NunitoSans_700Bold } from '@expo-google-fonts/nunito-sans';
 import { FontReadyContext } from '../components/ui/Text';
@@ -93,8 +86,15 @@ import { getAccessToken } from '../lib/api';
 import { E2EE_ENABLED, SCHEDULED_LOCAL } from '../constants/flags';
 import { runDueScheduled, rearmAllTriggers } from '../lib/scheduledRunner';
 import { getLocalDb } from '../lib/localDb';
-import perf from '../lib/perf';
+import { mark } from '../lib/perf';
 global.Buffer = Buffer;
+
+// Screens below the top of the stack stay MOUNTED by default, so every one of
+// them keeps re-rendering on each context/state change. Measured on-device:
+// native View count climbed 757 -> 1308 over 10 navigations and never came
+// back, with PSS reaching 359 MB. Freezing suspends offscreen screens without
+// unmounting them, so `back` is still instant.
+enableFreeze(true);
 
 // Keep the native splash up until the cold-start router (app/index.tsx) has made
 // its auth decision and navigated. This is the WhatsApp trick: no intermediate
@@ -217,36 +217,28 @@ attachUsageFlush();
  * colors.bg in that top strip — invisible on the dark ground. A light-gradient
  * screen joining this list wants a real root padding instead.
  */
+// REMOVED from this list: the eleven screens that now render a NATIVE header
+// (they declare headerShown:true in their own Stack.Screen options). A native
+// header already owns the status-bar inset, so leaving them here padded them a
+// second time — the exact double-inset this list's own note warns about.
 const INSET_SCREENS = [
   'creator-channels',
   'current-location',
   'd2de-status',
-  'decentralized-id',
-  'duresspin',
   'emergency-sos',
   'filevault',
   'games',
   'group-calendar',
   'group-chat',
   'group-create',
-  'group-insights',
-  'group-notes',
-  'group-tasks',
-  'group-trip',
   'interest-calculator',
-  'location-lock',
   'lock-alert',
   'lock-history',
-  'lock-settings',
-  'navigate',
   'network-test',
   'onboard-mpin',
   'onboard-success',
   'setup-complete',
   'vaultbeam-settings',
-  'vaultcheck',
-  'voice-effects',
-  'voice-speed',
 ] as const;
 
 function RootLayoutInner() {
@@ -272,7 +264,7 @@ function RootLayoutInner() {
     //   boot_deferred_start→ the first frame has settled; deferred work begins
     // The gap boot_effect_start → boot_unblocked is cold-start cost the user
     // actually feels; anything after boot_deferred_start is off that path.
-    perf.mark('boot_effect_start');
+    mark('boot_effect_start');
 
     // START THE SOCKET HANDSHAKE FIRST, but INSIDE the boot sequence.
     //
@@ -302,7 +294,7 @@ function RootLayoutInner() {
     // binary without the native module can't crash launch.
     if (Platform.OS !== 'web') {
       getLocalDb()
-        .then(() => perf.mark('db_ready'))
+        .then(() => mark('db_ready'))
         .catch((e: any) => console.warn('[db] localDb init failed:', e?.message));
     }
 
@@ -333,7 +325,10 @@ function RootLayoutInner() {
       runSecurityCheck()
         .then(report => {
           if (!report.clean) {
-            router.replace({ pathname: '/blocked', params: { threats: JSON.stringify(report.threats) } });
+            // `level` matters to the copy: only a `wipe` verdict actually
+            // destroyed keys. Without it /blocked told a `restrict` user their
+            // keys were gone when they were not.
+            router.replace({ pathname: '/blocked', params: { threats: JSON.stringify(report.threats), level: report.level } });
           }
         })
         .catch(() => { /* fail open */ });
@@ -374,7 +369,7 @@ function RootLayoutInner() {
       .catch(() => {});
 
     // Unblock the UI immediately — nothing awaited gates the first render now.
-    perf.mark('boot_unblocked');
+    mark('boot_unblocked');
     setSecurityChecked(true);
 
     // (attachTapHandler is wired below, after the call handlers are defined)
@@ -511,7 +506,7 @@ function RootLayoutInner() {
     // one it barely waits at all. Both remain fire-and-forget and keep their own
     // error handling, so a deferred failure is still contained.
     const deferred = InteractionManager.runAfterInteractions(() => {
-      perf.mark('boot_deferred_start');
+      mark('boot_deferred_start');
       // VaultBeam: resume any relay upload interrupted by an app kill (the
       // recipient resumes symmetrically via the server bitmask).
       import('../lib/vaultBeamController').then(m => m.resumePendingSends()).catch(() => {});
@@ -923,8 +918,6 @@ function RootLayoutInner() {
         <Stack.Screen name="invite-link" />
         <Stack.Screen name="trusted-contacts" />
         <Stack.Screen name="login-history" />
-        <Stack.Screen name="decoy-chats" />
-        <Stack.Screen name="decoy-chat" />
         <Stack.Screen name="hidden-chats" />
         <Stack.Screen name="camera" options={{ headerShown: false, presentation: 'modal' }} />
         {/* status, calls now in (tabs) */}
@@ -972,7 +965,6 @@ function RootLayoutInner() {
         <Stack.Screen name="aiguardian" />
         <Stack.Screen name="backup-pin" />
         <Stack.Screen name="permissions" />
-        <Stack.Screen name="memoryshield" />
 
         {/* Social & Contacts */}
         <Stack.Screen name="contact" />

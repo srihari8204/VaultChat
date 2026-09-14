@@ -21,7 +21,7 @@
     "test:vaultcheck": "tsx lib/vaultcheck/vaultcheck.selftest.ts",
     "test:ice": "tsx lib/iceCredentials.selftest.ts",
     "test:gate": "tsx lib/status/gate.selftest.ts && tsx lib/status/gateKey.selftest.ts && tsx lib/status/gateWiring.selftest.ts",
-    "test:call": "tsx lib/call/machine.selftest.ts && tsx lib/call/quality.selftest.ts",
+    "test:call": "tsx lib/call/machine.selftest.ts && tsx lib/call/quality.selftest.ts && tsx lib/call/frameE2ee.selftest.ts",
     "test:crypto:vectors": "tsx services/crypto/vectors.selftest.ts",
     "test:vaultbeam:vectors": "tsx services/crypto/vaultbeam-vectors.selftest.ts",
     "test:crypto:parity": "tsx services/crypto/parity.selftest.ts",

@@ -14,8 +14,12 @@
 //
 //   RING        who is being called, over our own socket, with the ring budget
 //   IDENTITY    the server call session (calls.id) and the role it grants
-//   KEY         nothing. Calls are encrypted in transit (TLS + DTLS-SRTP) and
-//               not end to end — owner decision 2026-08-16, see lib/call/room.ts
+//   KEY         the call's 32-byte MEDIA KEY: minted by exactly one participant
+//               (./mode mintsMediaKey), sealed per peer through the pairwise
+//               Double Ratchet, and rotated when somebody leaves. lib/call/room
+//               hands it to RTCFrameCryptor, so the SFU forwards ciphertext it
+//               cannot read — calls are end to end again, not merely encrypted
+//               in transit. Fail-closed rules: ./types.ts CALL_FRAME_E2EE.
 //   STATE       the pure machine in ./machine, fed from SDK events
 //   OS          the foreground service, the ring notification, the call log
 //
@@ -36,7 +40,9 @@ import { durationSeconds, shouldCancelRing, wasMissed, type CallFlag } from './m
 import { dispatch, getSnapshot, begin, reset } from './store';
 import { RING_TIMEOUT_MS } from './types';
 import { callFail, callStage, offerTag } from './diag';
-import { chatRecipients } from './mode';
+import { chatRecipients, mintsMediaKey } from './mode';
+import { randomBytes } from '@noble/hashes/utils.js';
+import { Buffer } from 'buffer';
 import type { CallChatMessage, CallKind, EndReason } from './types';
 
 interface Session {
@@ -61,6 +67,16 @@ interface Session {
    * Present means join() skips its own round trip to /sfu-token.
    */
   sfu: import('../callSession').SfuCredential | null;
+  /**
+   * The call's 32-byte frame-encryption key, or null until it arrives.
+   *
+   * Held here rather than inside the room because it OUTLIVES the room object:
+   * the key can land before join() has finished (the minter may already have
+   * sent it), and join() picks up whatever is here.
+   */
+  mediaKey: Uint8Array | null;
+  /** base64 of the key the ROOM is running, so a re-send is not reinstalled. */
+  mediaKeyInstalled: string;
   disposers: (() => void)[];
   logged: boolean;
   disposed: boolean;
@@ -283,7 +299,7 @@ async function bootstrap(a: StartArgs, direction: 'outgoing' | 'incoming') {
   begin({ ...a, direction });
   session = {
     ...a, meId: '', meName: '', serverCallId: '', room: null, createdCall: false, sfu: null,
-    disposers: [], logged: false, disposed: false,
+    mediaKey: null, mediaKeyInstalled: '', disposers: [], logged: false, disposed: false,
   };
   const s = session;
 
@@ -353,7 +369,11 @@ async function bootstrap(a: StartArgs, direction: 'outgoing' | 'incoming') {
     onIce: () => {},
     onEnd: () => hangUp('remote_hangup', false),
     onPeerScreenShare: (_from, on) => dispatch({ type: 'flag', key: 'peerSharing', value: on }),
-    onMediaKey: () => {},
+    // THE CALL'S MEDIA KEY, sealed for us by whoever minted it. `accept` above
+    // already restricts this to the peer (1:1) or a live participant (group),
+    // and openFromPeer unwraps it through the pairwise ratchet — so a key that
+    // is not from someone in the room cannot reach applyMediaKey.
+    onMediaKey: (from, sealed) => openFromPeer(from, sealed, b64 => applyMediaKey(s, b64)),
     onChat: (from, sealed) => openFromPeer(from, sealed, text =>
       dispatch({ type: 'chat', message: chatMessage(from, peerNameOf(s, from), text, false) })),
     onReaction: (from, sealed) => openFromPeer(from, sealed, emoji =>
@@ -382,6 +402,92 @@ async function bootstrap(a: StartArgs, direction: 'outgoing' | 'incoming') {
 /** How long a group call may sit empty before it ends itself. */
 const ALONE_GRACE_MS = 20_000;
 
+// ── the call's media key ──────────────────────────────────────────────
+//
+// WHY THERE IS A KEY AT ALL: an SFU terminates SRTP in order to forward, so
+// without frame encryption the server decodes every frame. lib/call/frameCrypto
+// encrypts each frame before it reaches the transport; this is where its key
+// comes from.
+//
+// NOTHING NEW IS AGREED HERE. One participant mints 32 random bytes and seals
+// them ONCE PER PEER through the Double Ratchet the chat already runs — exactly
+// what lib/callCrypto does for signalling and what services/crypto/groupSession
+// does to distribute a sender key. The server relays an opaque envelope.
+//
+// WHO MINTS is ./mode's mintsMediaKey, which is already covered by
+// mediaKey.selftest and mode.selftest: the ANSWERING side in 1:1, the lowest uid
+// in a group. Exactly one, so the room cannot split across two keys.
+
+const keyB64 = (k: Uint8Array) => Buffer.from(k).toString('base64');
+
+function iMintTheKey(s: Session): boolean {
+  return mintsMediaKey({
+    oneToOne: !!s.peerUid,
+    direction: getSnapshot().direction === 'incoming' ? 'incoming' : 'outgoing',
+    meId: s.meId,
+    others: Object.keys(getSnapshot().participants).filter(u => u !== s.meId),
+  });
+}
+
+/**
+ * Seal the current key for everyone on the call and send it.
+ *
+ * Re-sent on every join rather than only to the joiner: the participant who
+ * mints may itself be the one arriving, and a joiner is never announced to
+ * itself — so "send it to whoever is there" is the only version that converges
+ * from both sides. N ratchet wraps per join, the same price in-call chat pays
+ * per message.
+ */
+async function shareMediaKey(s: Session, key: Uint8Array | null = s.mediaKey): Promise<void> {
+  if (!key || s.disposed) return;
+  await sealAndFanOut(s, keyB64(key),
+    (to, sealed) => signal.sendMediaKey(to, s.chatId, sealed));
+}
+
+/** A key arrived from the minter — install it, or hold it for join(). */
+function applyMediaKey(s: Session, b64: string): void {
+  let key: Uint8Array;
+  try { key = new Uint8Array(Buffer.from(b64, 'base64')); } catch { return; }
+  if (key.length !== 32) return;
+  s.mediaKey = key;
+  // Before the room exists this is all there is to do: join() reads s.mediaKey.
+  if (!s.room) return;
+  // The minter re-sends the key on every join, so most arrivals are a key we are
+  // already running. Installing it again is harmless but pointless churn.
+  if (s.mediaKeyInstalled === b64) return;
+  s.mediaKeyInstalled = b64;
+  s.room.setMediaKey(key).catch(err => {
+    // The room refuses a key it cannot install, which means this device cannot
+    // encrypt frames. Fail closed: end the call rather than keep a session the
+    // server can read — see CALL_FRAME_E2EE.
+    console.warn('[call] could not install the media key —', err?.message ?? err);
+    dispatch({ type: 'error', message: 'Secure calling is unavailable on this device' });
+    hangUp('setup_error', true);
+  });
+}
+
+/**
+ * Somebody left: mint a NEW key so they go dark.
+ *
+ * On a mesh this was free — their connection was gone. Through an SFU it is
+ * not: the server keeps forwarding, and a departed member who kept listening
+ * would still hold a working key. Only a rotation removes them.
+ *
+ * The new key is sent BEFORE we switch to it, so the people still here are not
+ * briefly unable to decode us. frameCrypto's key ring (2 entries) covers the
+ * remaining overlap in the other direction.
+ *
+ * Called on LEAVE, on JOIN, and on RECONNECT — see the room events in join().
+ */
+function rotateMediaKey(s: Session): void {
+  if (s.disposed || !s.room || !iMintTheKey(s)) return;
+  const next = randomBytes(32);
+  void (async () => {
+    await shareMediaKey(s, next).catch(() => {});
+    applyMediaKey(s, keyB64(next));
+  })();
+}
+
 async function join(s: Session): Promise<void> {
   // Per-participant video sources, so a screen share and a camera can coexist.
   const cams = new Map<string, string>();
@@ -397,11 +503,20 @@ async function join(s: Session): Promise<void> {
   if (s.sfu) callStage(s.serverCallId.slice(0, 8) || '--------', 'token_inline', 'saved a round trip');
   if (s.disposed) return;
 
+  // MINT BEFORE JOINING, if it is our job. The room publishes nothing until it
+  // has a key (CALL_FRAME_E2EE), so the minter is the one participant whose
+  // media starts immediately; everyone else starts one relay hop later, when
+  // the sealed key reaches them.
+  if (!s.mediaKey && iMintTheKey(s)) s.mediaKey = randomBytes(32);
+  const joinedWith = s.mediaKey;
+  if (joinedWith) s.mediaKeyInstalled = keyB64(joinedWith);
+
   const room = await joinCallRoom({
     url: cred.url,
     token: cred.token,
     video: s.kind === 'video',
     publish: cred.role !== 'audience',
+    e2eeKey: s.mediaKey,
     events: {
       // The reducer already owns both of these: 'reconnecting' is ignored
       // unless the call is connected, and 'recovered' is ignored unless it is
@@ -409,7 +524,21 @@ async function join(s: Session): Promise<void> {
       // a second Reconnecting, or one arriving while the call is still
       // dialling, costs nothing and changes nothing.
       onReconnecting: () => dispatch({ type: 'reconnecting' }),
-      onReconnected: () => dispatch({ type: 'recovered' }),
+      onReconnected: () => {
+        dispatch({ type: 'recovered' });
+        // A reconnect rebuilds both peer connections and brings fresh senders
+        // and receivers up, which makes it the natural point to heal the key
+        // as well — and now the ONLY one, since frameCrypto's never-called
+        // ratchet() is gone. No-op unless we mint.
+        rotateMediaKey(s);
+      },
+      // The room waited MEDIA_KEY_WAIT_MS for a key and never got one, so it
+      // has published nothing and disconnected. Say why: the silent version of
+      // this is a call that looks connected and carries no audio at all.
+      onMediaKeyTimeout: () => {
+        dispatch({ type: 'error', message: 'Could not set up encryption for this call — please try again' });
+        hangUp('setup_error', true);
+      },
       // Stamped into the store, not acted on here. The grid reads the stamps
       // and decides which tiles to show; a 1:1 screen ignores them entirely.
       onActiveSpeakers: (uids) => { if (uids.length) dispatch({ type: 'speaking', uids }); },
@@ -418,6 +547,10 @@ async function join(s: Session): Promise<void> {
           dispatch({ type: 'peer_left', uid: left.identity });
           // 1:1: the other side leaving the room IS the end of the call.
           if (s.peerUid) { hangUp('remote_hangup', false); return; }
+          // Group: re-key so the person who left cannot keep decoding what the
+          // SFU is still forwarding. Dispatched first, so the roster this reads
+          // no longer contains them.
+          rotateMediaKey(s);
         }
         if (joined) {
           // Someone who joins AFTER us is not in the join response, so their
@@ -427,6 +560,18 @@ async function join(s: Session): Promise<void> {
           const jname = (joined as { name?: string }).name;
           if (jname) dispatch({ type: 'peer_name', uid: joined.identity, name: jname });
           dispatch({ type: 'role', uid: joined.identity, role: 'speaker' });
+          // RE-KEY ON JOIN, exactly as on leave.
+          //
+          // This used to re-send the EXISTING key to the newcomer. A key that
+          // predates them is a key that decrypts what the SFU forwarded before
+          // they arrived — and an SFU is precisely a place where that traffic
+          // can have been recorded. Minting a fresh one costs the same N
+          // ratchet wraps the re-send already cost.
+          //
+          // AFTER the dispatches, deliberately: the fan-out targets are read
+          // from the live roster, so rotating first would seal the new key for
+          // everyone EXCEPT the person who just joined.
+          rotateMediaKey(s);
         }
 
         // A GROUP CALL WITH NOBODY ELSE IN IT IS OVER.
@@ -500,6 +645,15 @@ async function join(s: Session): Promise<void> {
   if (s.disposed) { void room.leave(); return; }
   s.room = room;
   onDispose(() => { void room.leave(); });
+  // PUSH THE KEY THE MOMENT WE ARE IN. The minter is usually the one who joined
+  // SECOND (1:1 mints on the answering side), and nobody is announced to
+  // themselves — so waiting for a `joined` event would leave the first joiner
+  // holding no key and publishing nothing, forever.
+  if (s.mediaKey) void shareMediaKey(s).catch(() => {});
+  // A key that landed WHILE joinCallRoom was connecting was stored on the
+  // session and could not be installed — there was no room yet, and the room was
+  // handed `joinedWith` (usually null). This is that window's only cure.
+  if (s.mediaKey && s.mediaKey !== joinedWith) applyMediaKey(s, keyB64(s.mediaKey));
   callStage(s.serverCallId.slice(0, 8) || '--------', 'room_joined',
     `${s.kind} role=${cred.role}`);
 }

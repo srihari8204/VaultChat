@@ -1,18 +1,19 @@
 // lib/sendMedia.ts — one entry point for sending an attachment message (W6).
 //
 // Decides per-chat whether to encrypt the media at rest:
-//   • DIRECT chat + MEDIA_E2EE + E2EE_ENABLED → encrypt the file bytes with a
-//     fresh per-file key (uploadEncryptedAttachment); the key is packed into the
-//     message CONTENT (buildMediaContent) which sendMessage then E2E-encrypts, so
-//     the server stores opaque ciphertext and never sees the key.
-//   • Otherwise (group chat, or flag off) → the original plaintext upload path,
-//     byte-identical to before.
+//   • MEDIA_E2EE + E2EE_ENABLED, in a DIRECT chat or (since GROUP_E2EE) a GROUP
+//     → encrypt the file bytes with a fresh per-file key
+//     (uploadEncryptedAttachment); the key is packed into the message CONTENT
+//     (buildMediaContent) which sendMessage then E2E-encrypts — pairwise for a
+//     direct chat, sender-key for a group — so the server stores opaque
+//     ciphertext and never sees the key.
+//   • Otherwise (flags off) → the original plaintext upload path.
 //
 // The render side (getDecryptedAttachmentUri) falls back to the direct URL when no
 // key is held, so plaintext/legacy/group media keeps rendering unchanged.
 
 import * as FileSystem from 'expo-file-system/legacy';
-import { MEDIA_E2EE, E2EE_ENABLED } from '../constants/flags';
+import { MEDIA_E2EE, E2EE_ENABLED, GROUP_E2EE } from '../constants/flags';
 import {
   sendMessage, uploadAttachment, ensureDirectChat, type Message,
 } from './chatService';
@@ -87,7 +88,16 @@ export async function sendMediaMessage(
   // Resolve the peer robustly first (beats the cold-start race) so a direct
   // chat reliably takes the encrypted path instead of silently going plaintext.
   const isDirect = await ensureDirectChat(chatId);
-  const encrypt = MEDIA_E2EE && E2EE_ENABLED && isDirect;
+  // GROUPS TOO, now that GROUP_E2EE is on.
+  //
+  // The per-file key rides inside the message CONTENT, and content is encrypted
+  // by whatever seam the chat uses — the Double Ratchet for a direct chat, the
+  // sender-key session for a group. So the only thing that ever made group media
+  // plaintext was that groups had no content encryption; they do now, and
+  // leaving this condition at `isDirect` meant every group photo, video, voice
+  // note and document still went to the server as readable bytes while the
+  // caption beside it was ciphertext.
+  const encrypt = MEDIA_E2EE && E2EE_ENABLED && (isDirect || GROUP_E2EE);
 
   // VaultView: protected sends carry a hidden recipient token under the visible
   // watermark. Done before upload so the marked bytes are what gets encrypted.

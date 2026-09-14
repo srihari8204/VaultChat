@@ -1,0 +1,456 @@
+syntax = "proto3";
+
+package ccwire.v1;
+
+option go_package   = "vaultchat/backend-go/internal/ccwire/v1;ccwirev1";
+option java_package = "chat.vault.ccwire.v1";
+
+import "ccwire/v1/capabilities.proto";
+import "ccwire/v1/errors.proto";
+import "ccwire/v1/cursor.proto";
+import "ccwire/v1/delivery.proto";
+import "ccwire/v1/attachment.proto";
+
+// ─────────────────────────────────────────────────────────────────────
+// Frame — the ONLY top-level message on the wire.
+//
+// Preceded on the wire by: u8 framing_version, u32be length.
+// The length is validated against the negotiated max_frame_bytes
+// BEFORE any buffer is allocated. Non-negotiable.
+//
+// Decoder configuration is part of the contract, not an implementation
+// detail. Every decoder MUST be configured with:
+//   recursion limit      = 6      (Limits.max_nesting_depth)
+//   total size limit     = negotiated max_frame_bytes
+//   unknown fields       = PRESERVED (never dropped, never rejected)
+//   unknown enum values  = retained as their number, surfaced as
+//                          *_UNSPECIFIED to application code
+// ─────────────────────────────────────────────────────────────────────
+message Frame {
+  // Correlates Ack/Error with the request that caused it. Client-generated,
+  // unique within a session. Empty for unsolicited server pushes.
+  // Bounded: max_string_field_bytes (4096); in practice a UUID.
+  string request_id = 1;
+
+  // Traffic class. Determines scheduling weight and whether the frame may
+  // travel as a datagram. See Frame.body for why EPHEMERAL cannot carry
+  // a control body.
+  TrafficClass traffic_class = 2;
+
+  // Logical stream. Per-stream FIFO; cross-stream ordering is NOT implied.
+  StreamId stream = 3;
+
+  // Monotonic per-stream sequence. uint64 so it cannot wrap in any
+  // realistic session; JS_STRING so JavaScript never silently truncates
+  // past 2^53.
+  uint64 seq = 4 [jstype = JS_STRING];
+
+  // Causal dependency: the chat causal_epoch this frame was produced
+  // under. A receiver MUST NOT deliver a frame whose depends_on exceeds
+  // the highest epoch it has applied from the CONTROL stream. Zero means
+  // "no dependency".
+  //
+  // This is the mechanism that stops a message overtaking the key update
+  // or membership change it depends on. See §B8.2.
+  uint64 depends_on = 5 [jstype = JS_STRING];
+
+  // Exactly one body. A closed set: an operation not listed here is not
+  // representable, which is the point.
+  //
+  // INVARIANT, enforced at both encode and decode: a frame whose
+  // traffic_class is EPHEMERAL may carry ONLY typing_state,
+  // viewer_state or geo_relay. A crypto_control or device_event in an
+  // EPHEMERAL frame is a protocol violation and MUST be refused with
+  // ERROR_CODE_PROTOCOL_VIOLATION — never "handled leniently".
+  oneof body {
+    ClientHello        client_hello        = 16;
+    ServerHello        server_hello        = 17;
+    ReAuth             reauth              = 18;
+    Ping               ping                = 19;
+    Pong               pong                = 20;
+    GoAway             go_away             = 21;
+    Ack                ack                 = 22;
+    Error              error               = 23;
+
+    Subscribe          subscribe           = 32;
+    Unsubscribe        unsubscribe         = 33;
+
+    SubmitMessage      submit_message      = 48;
+    DeliverMessage     deliver_message     = 49;
+    EditMessage        edit_message        = 50;
+    DeleteMessage      delete_message      = 51;
+    Receipt            receipt             = 52;
+
+    CursorSync         cursor_sync         = 64;
+    CursorBatch        cursor_batch        = 65;
+
+    PresenceUpdate     presence_update     = 80;
+    TypingState        typing_state        = 81;
+    ViewerState        viewer_state        = 82;
+    ViewerList         viewer_list         = 83;
+    GeoRelay           geo_relay           = 84;
+
+    AttachmentControl  attachment_control  = 96;
+    DeviceEvent        device_event        = 97;
+    CryptoControl      crypto_control      = 98;
+    CallSignal         call_signal         = 99;
+
+    Fragment           fragment            = 112;
+  }
+
+  // Field numbers 6-15 intentionally unused: reserved for future
+  // per-frame routing metadata that must stay in the 1-byte-tag range.
+  reserved 6 to 15;
+}
+
+enum TrafficClass {
+  TRAFFIC_CLASS_UNSPECIFIED = 0;   // never valid on the wire; refuse
+  TRAFFIC_CLASS_CONTROL     = 1;   // strict priority
+  TRAFFIC_CLASS_MESSAGING   = 2;
+  TRAFFIC_CLASS_SYNC        = 3;
+  TRAFFIC_CLASS_BULK        = 4;   // preemptible
+  TRAFFIC_CLASS_EPHEMERAL   = 5;   // droppable; datagram-eligible
+}
+
+enum StreamId {
+  STREAM_ID_UNSPECIFIED = 0;
+  STREAM_ID_CONTROL     = 1;
+  STREAM_ID_MESSAGING   = 2;
+  STREAM_ID_SYNC        = 3;
+  STREAM_ID_BULK        = 4;
+  STREAM_ID_EPHEMERAL   = 5;
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// Envelope — the MINIMAL server-visible routing header.
+//
+// Every field below is justified in §B10.8 with a retention rule. A field
+// added here without that justification is a new metadata leak. The
+// governing precedent is lib/msgEnvelope.ts META_PUBLIC_KEYS: an
+// ALLOW-list, private by default.
+//
+// The encrypted payload is NEVER a field of this message. It is a
+// sibling (`sealed`), so no code path can accidentally treat routing
+// metadata and ciphertext as one object.
+// ─────────────────────────────────────────────────────────────────────
+message Envelope {
+  string chat_id           = 1;  // routing. REQUIRED.
+  string message_id        = 2;  // server-assigned. Empty on submit.
+  string client_msg_id     = 3;  // idempotency key. Client-generated.
+  int64  server_ts_ms      = 4 [jstype = JS_STRING];  // server clock only
+  MessageClass msg_class   = 5;  // scheduling/notification ONLY
+  uint64 causal_epoch      = 6 [jstype = JS_STRING];
+  PublicMeta public_meta   = 7;  // the msgEnvelope.ts allow-list, verbatim
+
+  // NOT PRESENT, DELIBERATELY, AND EACH FOR A REASON:
+  //   sender_uid      — server stamps it on delivery; a client field would
+  //                     re-create the typing_start spoof (handlers.go
+  //                     :306-319). Unrepresentable beats unchecked.
+  //   client_ts       — a client clock the server would have to either
+  //                     trust or ignore; it chooses neither by not asking.
+  //   content_length  — derivable from sealed, and a precise ciphertext
+  //                     length is a side channel on short messages.
+  //   reply_to        — a conversation graph the server has no need to
+  //                     build. It lives inside the ciphertext.
+  //   content_type    — MIME is content. See META_PUBLIC_KEYS: it is
+  //                     private today and stays private.
+}
+
+// MessageClass exists ONLY so the server can schedule and can decide
+// whether a push notification is warranted. It MUST NOT be fine-grained
+// enough to reconstruct behaviour: there is no distinction between a
+// photo and a video, or between a poll and a text.
+//
+// Retention: not persisted beyond delivery.
+enum MessageClass {
+  MESSAGE_CLASS_UNSPECIFIED = 0;
+  MESSAGE_CLASS_NORMAL      = 1;  // text, media, poll — all one class
+  MESSAGE_CLASS_SILENT      = 2;  // no push (mirrors meta.silent)
+  MESSAGE_CLASS_SYSTEM      = 3;  // membership/system notice
+  MESSAGE_CLASS_CONTROL     = 4;  // crypto/device control; never notified
+}
+
+// PublicMeta mirrors lib/msgEnvelope.ts META_PUBLIC_KEYS EXACTLY.
+//
+// It is not a superset and must never become one. Every field here is
+// read by server code today and justified per-key in
+// internal/jobs/meta_public.go. The cross-language assertion in
+// msgEnvelope.selftest.ts (which reads the Go source) MUST be extended
+// to read this .proto as a third source of truth — otherwise CC-Wire
+// becomes the drift path the selftest exists to prevent.
+message PublicMeta {
+  string          attachment_id     = 1;
+  bool            view_once         = 2;
+  bool            revoked           = 3;
+  bool            announcement      = 4;
+  string          audience          = 5;
+  bool            silent            = 6;
+  string          group_id          = 7;
+  string          gif_url           = 8;
+  bool            allow_multiple    = 9;
+  uint32          option_count      = 10;  // DERIVED: bounds-checks a vote
+  repeated string mention_user_ids  = 11;  // DERIVED: ids only, no names
+  bool            encrypted         = 12;
+  string          game              = 13;
+  string          room              = 14;
+  // Bound: mention_user_ids <= max_repeated_elements (1024).
+  // Adding a field here requires the same per-key justification
+  // META_PUBLIC_KEYS demands. Private by default; no exceptions.
+}
+
+// ── Handshake ────────────────────────────────────────────────────────
+
+message ClientHello {
+  uint32 protocol_major = 1;   // 1
+  uint32 protocol_minor = 2;
+  Capabilities capabilities = 3;
+  Limits proposed_limits = 4;  // advisory; the server's values bind
+  string device_id = 5;
+  // Opaque credential. Today: the access JWT verified by
+  // httpx.VerifyAccess, or the admin key. Opaque here so the auth
+  // scheme can change without a wire change.
+  bytes credential = 6;
+  bytes resume_token = 7;      // empty for a fresh session
+  repeated StreamCursor resume_from = 8;  // <= 8 entries
+}
+
+message ServerHello {
+  uint32 protocol_major = 1;
+  uint32 protocol_minor = 2;
+  Capabilities capabilities = 3;   // INTERSECTION, never union
+  Limits limits = 4;               // BINDING
+  string session_id = 5;
+  bytes resume_token = 6;
+  int64 server_ts_ms = 7 [jstype = JS_STRING];
+  bool resumed = 8;                // false ⇒ client must full-resync
+}
+
+message StreamCursor {
+  StreamId stream = 1;
+  uint64 last_delivered_seq = 2 [jstype = JS_STRING];
+}
+
+message ReAuth  { bytes credential = 1; }
+message Ping    { bytes nonce = 1; repeated StreamCursor progress = 2; }
+message Pong    { bytes nonce = 1; repeated StreamCursor progress = 2; }
+
+message GoAway {
+  ErrorCode reason = 1;
+  repeated StreamCursor last_accepted = 2;
+  uint32 drain_deadline_ms = 3;
+  bytes resume_token = 4;
+}
+
+message Ack {
+  string message_id = 1;                            // server-assigned
+  uint64 seq = 2 [jstype = JS_STRING];
+  int64 server_ts_ms = 3 [jstype = JS_STRING];
+}
+
+// ── Subscriptions (rooms) ────────────────────────────────────────────
+
+enum ScopeKind {
+  SCOPE_KIND_UNSPECIFIED = 0;
+  SCOPE_KIND_CHAT        = 1;   // chat:<id>   — requires chat membership
+  SCOPE_KIND_CHANNEL     = 2;   // channel:<id>— requires channel membership
+                                //   (today: UNGATED. handlers.go:206-215)
+  SCOPE_KIND_CALL        = 3;   // call:<id>   — chat membership + mesh cap
+  SCOPE_KIND_RUN         = 4;   // run:<id>    — run entitlement (runAllowed)
+  SCOPE_KIND_ADMIN       = 5;   // admin key only
+  // NOTE: there is no SCOPE_KIND_USER. The per-user destination is the
+  // session's own identity, never a subscribable scope. A client cannot
+  // name it, therefore cannot subscribe to another user's.
+}
+
+message Subscribe   { ScopeKind kind = 1; string id = 2; }
+message Unsubscribe { ScopeKind kind = 1; string id = 2; }
+
+// ── Messaging ────────────────────────────────────────────────────────
+
+message SubmitMessage {
+  Envelope envelope = 1;
+  // The sealed body. Opaque authenticated bytes. Inside it, unchanged,
+  // is the existing '\0vc1:' + JSON({t, pm}) wrapper owned by
+  // lib/msgEnvelope.ts. CC-Wire does not parse, version, re-encode or
+  // even know about that wrapper — one content version, one owner.
+  bytes sealed = 2;              // <= max_message_body_bytes (1 MiB)
+}
+
+message DeliverMessage {
+  Envelope envelope = 1;
+  bytes sealed = 2;
+  // Stamped by the server from the authenticated session. There is no
+  // client-side field that can influence it, in any message, anywhere.
+  string sender_uid = 3;
+  string sender_device_id = 4;
+}
+
+message EditMessage {
+  Envelope envelope = 1;
+  bytes sealed = 2;
+  uint64 edit_seq = 3 [jstype = JS_STRING];  // monotonic per message
+}
+
+message DeleteMessage {
+  string chat_id = 1;
+  string message_id = 2;
+  bool for_everyone = 3;
+}
+
+// ── Ephemeral ────────────────────────────────────────────────────────
+
+message TypingState {
+  string chat_id = 1;
+  bool typing = 2;
+  string sender_uid = 3;   // SERVER→CLIENT ONLY. Ignored on the inbound
+                           // path; the server always overwrites it from
+                           // the session. Present as a field only so the
+                           // same message type serves both directions.
+}
+
+message ViewerState {
+  string chat_id = 1;
+  ViewerActivity activity = 2;
+  bool leaving = 3;
+  bool resync = 4;
+}
+
+enum ViewerActivity {
+  VIEWER_ACTIVITY_UNSPECIFIED = 0;
+  VIEWER_ACTIVITY_READING     = 1;
+  VIEWER_ACTIVITY_TYPING      = 2;
+  VIEWER_ACTIVITY_UPLOADING   = 3;
+}
+
+message ViewerList {
+  string chat_id = 1;
+  repeated Viewer viewers = 2;   // <= max_repeated_elements
+}
+message Viewer {
+  string user_id = 1;
+  ViewerActivity activity = 2;
+}
+
+message PresenceUpdate {
+  string user_id = 1;
+  bool online = 2;
+  int64 last_seen_ms = 3 [jstype = JS_STRING];
+}
+
+// GeoRelay — live location, trips and runs. The sealed blob path is
+// EPHEMERAL (a dropped position is superseded within a second).
+// Terminal events (ended = true) are MESSAGING: losing one leaves a
+// phantom trip on every peer's map.
+message GeoRelay {
+  ScopeKind scope_kind = 1;
+  string scope_id = 2;
+  string subject_id = 3;          // trip id / run id; empty for plain live
+  bytes sealed = 4;               // <= max_opaque_bytes
+  bool ended = 5;                 // terminal ⇒ MUST be sent reliably
+  int64 until_ms = 6 [jstype = JS_STRING];
+  string sender_uid = 7;          // server-stamped on delivery
+  // The legacy plaintext lat/lng path (handlers.go:231-238) is
+  // DELIBERATELY ABSENT. CC-Wire is a clean cut: sealed only. A client
+  // still on the plaintext path stays on Socket.IO until it updates.
+}
+
+// ── Control ──────────────────────────────────────────────────────────
+
+message DeviceEvent {
+  DeviceEventKind kind = 1;
+  string user_id = 2;
+  string device_id = 3;
+  int64 occurred_at_ms = 4 [jstype = JS_STRING];
+}
+enum DeviceEventKind {
+  DEVICE_EVENT_KIND_UNSPECIFIED = 0;
+  DEVICE_EVENT_KIND_ADDED       = 1;
+  DEVICE_EVENT_KIND_REMOVED     = 2;
+  DEVICE_EVENT_KIND_KEY_CHANGED = 3;
+}
+
+// CryptoControl — key distribution, rekey, and any future
+// standardized-format control message.
+//
+// THE BODY IS OPAQUE AUTHENTICATED BYTES. The server routes it and does
+// not parse it. If MLS is adopted, an MLSMessage goes in `payload` as
+// its own canonical serialization, BYTE FOR BYTE, and no field of it is
+// ever lifted into this schema. Translating a standardized crypto
+// format into protobuf fields and back is how a signature stops
+// verifying; it is forbidden here, not discouraged.
+//
+// `kind` exists so the scheduler knows this is CONTROL-class and so the
+// causal-dependency layer can bump the epoch. It is a ROUTING hint and
+// carries no interpretation of `payload`.
+message CryptoControl {
+  CryptoControlKind kind = 1;
+  string chat_id = 2;             // empty for a per-peer rekey
+  string to_uid = 3;              // per-peer target; server authorizes it
+  bytes payload = 4;              // OPAQUE. <= max_opaque_bytes (192 KiB)
+  uint64 epoch = 5 [jstype = JS_STRING];
+  // The format identifier travels WITH the bytes so a future format can
+  // be introduced without a schema change and without ambiguity.
+  string payload_format = 6;      // e.g. "vc-x3dh-1", "mls/1.0"
+}
+enum CryptoControlKind {
+  CRYPTO_CONTROL_KIND_UNSPECIFIED = 0;
+  CRYPTO_CONTROL_KIND_REKEY       = 1;  // today's e2ee_rekey
+  CRYPTO_CONTROL_KIND_MEDIA_KEY   = 2;  // today's call_media_key
+  CRYPTO_CONTROL_KIND_PREKEY      = 3;
+  CRYPTO_CONTROL_KIND_GROUP_OP    = 4;  // membership-affecting; bumps epoch
+}
+
+// CallSignal — the 15 existing per-peer relays, typed.
+// SDP/ICE stay opaque: they are already sealed per peer today
+// (handlers.go:36). The server stamps from_uid exactly as relayToPeer
+// does now, which webrtc_end hangup matching depends on.
+message CallSignal {
+  CallSignalKind kind = 1;
+  string to_uid = 2;
+  string from_uid = 3;            // server-stamped; ignored inbound
+  string chat_id = 4;
+  bytes sealed = 5;               // <= max_opaque_bytes
+}
+enum CallSignalKind {
+  CALL_SIGNAL_KIND_UNSPECIFIED     = 0;
+  CALL_SIGNAL_KIND_OFFER           = 1;
+  CALL_SIGNAL_KIND_ANSWER          = 2;
+  CALL_SIGNAL_KIND_ICE             = 3;
+  CALL_SIGNAL_KIND_END             = 4;
+  CALL_SIGNAL_KIND_INCOMING        = 5;   // rate-limited: 120/60s per uid
+  CALL_SIGNAL_KIND_SCREEN_START    = 6;
+  CALL_SIGNAL_KIND_SCREEN_STOP     = 7;
+  CALL_SIGNAL_KIND_CHAT            = 8;
+  CALL_SIGNAL_KIND_EMOJI           = 9;
+  CALL_SIGNAL_KIND_BEAM_OFFER      = 10;
+  CALL_SIGNAL_KIND_BEAM_ANSWER     = 11;
+  CALL_SIGNAL_KIND_BEAM_ICE        = 12;
+  CALL_SIGNAL_KIND_BEAM_END        = 13;
+  CALL_SIGNAL_KIND_BEAM_PULL       = 14;
+  CALL_SIGNAL_KIND_BEAM_READY      = 15;
+  CALL_SIGNAL_KIND_BEAM_TIER       = 16;
+  CALL_SIGNAL_KIND_BEAM_HAVE       = 17;
+  // call_media_key is NOT here. It is CryptoControl, because it is a key
+  // and must inherit key-event scheduling, reliability and causal
+  // ordering — not call-signal best-effort.
+}
+
+// ── Fragmentation ────────────────────────────────────────────────────
+//
+// A payload exceeding max_frame_bytes is split. Reassembly is bounded on
+// FOUR axes simultaneously — count, total bytes, concurrency and time —
+// because any single bound alone is evadable.
+message Fragment {
+  string fragment_id = 1;
+  uint32 index = 2;                        // 0-based
+  uint32 total = 3;                        // <= max_fragments_per_message (16)
+  uint64 total_bytes = 4 [jstype = JS_STRING];  // declared up front;
+                                                // checked BEFORE alloc
+  bytes chunk = 5;
+  bool last = 6;
+  // Refuse with ERROR_CODE_FRAGMENT_INVALID if: total >
+  // max_fragments_per_message, total_bytes > max_message_body_bytes, an
+  // index repeats, the summed chunk length would exceed total_bytes, the
+  // set exceeds reassembly_lifetime_ms (30 s), or concurrent sets exceed
+  // max_concurrent_reassemblies (8).
+}

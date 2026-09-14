@@ -85,11 +85,21 @@ A(!/AsyncStorage|SecureStore\.getItem[^\n]*ALLOW_EMULATOR|setAllowEmulator/.test
   }
 
   {
-    const j = code.indexOf('async function checkFrida');
-    const b = code.slice(j, j + 900);
-    A(j >= 0 && !/ALLOW_EMULATOR_TEST_BUILD|isEmulatorTestRig/.test(b),
-      '2f. checkFrida is NOT waived at all — instrumentation is an attack on an '
-      + 'emulator too');
+    // checkFrida USED to live here as a cleartext HTTP fetch to localhost:27042.
+    // Android's network policy blocks that, so it could never fire — the Kotlin
+    // module says so in its own comment. It was deleted rather than waived.
+    // Detection now lives natively (VaultShieldModule.kt: raw-socket port probe
+    // + /proc/self/maps needle scan), which is why this asserts its ABSENCE here
+    // and its presence there. What must never come back is a JS Frida probe that
+    // looks like a control and cannot run.
+    A(code.indexOf('async function checkFrida') === -1,
+      '2f. the dead JS checkFrida probe is gone — Frida detection is native');
+    const kotlin = readFileSync(
+      'android/app/src/main/java/com/vaultchat/app/vaultshield/VaultShieldModule.kt', 'utf8');
+    A(/fridaPortOpen/.test(kotlin) && /fridaNeedles/.test(kotlin),
+      '2g. ...and the native detector still probes the port AND scans maps');
+    A(!/ALLOW_EMULATOR_TEST_BUILD|isEmulatorTestRig/.test(kotlin),
+      '2h. ...and is not waived on an emulator — instrumentation is an attack there too');
   }
 }
 

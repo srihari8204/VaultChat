@@ -10,9 +10,9 @@
 // the publishing device, and the precise coordinate never leaves it.
 //
 // Naming: the "hide me entirely" mode is called INVISIBLE, never "ghost".
-// lib/ghostProtocol.ts already means the duress/decoy-account wipe — a
-// destructive security feature. In a codebase where one of the two triggers a
-// wipe, reusing the word is a genuine hazard.
+// "Ghost" historically meant the duress/decoy-account wipe here (that feature
+// has since been removed), so the word stays retired to avoid confusion with
+// anything destructive.
 //
 // Pure — no react-native imports — so the self-check runs under tsx:
 //   npx tsx lib/groups/privacy.ts

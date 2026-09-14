@@ -1,6 +1,7 @@
 // services/security/vaultKeys.ts — PIN-derived vault keys + sealed-blob crypto.
 //
-// The cryptographic core behind the genuine duress/decoy split (W3). PURE: no
+// The shared PIN-crypto primitive behind pinStore, sessionSeal, auditChain,
+// cacheCrypto, notesVaultCore and status/gateKey. PURE: no
 // React-Native imports, so the EXACT same code runs in Node (proven in
 // vaultKeys.selftest.ts) and in Hermes — same pattern as services/crypto/e2ee.ts.
 //
@@ -141,13 +142,12 @@ export function seal(key: Uint8Array, plaintext: string): string {
 /**
  * Open a sealed blob. Returns the plaintext, or null if `key` is wrong — the
  * GCM auth tag fails to verify, so a non-owning key cannot decrypt it. This
- * null-on-wrong-key is exactly the property the duress split relies on.
+ * null-on-wrong-key is exactly the property every caller relies on.
  *
  * On the native engine a decrypt throw means the auth tag refused the key —
  * the same null the @noble path reports. The startup probe already proved the
  * engine itself works, so a throw here is a verdict, not an outage; and the
- * fail direction is safe regardless (a rejected REAL header falls through to
- * the decoy, which its key also refuses — the PIN is rejected, never misrouted).
+ * fail direction is safe regardless (a wrong PIN is rejected, never misrouted).
  */
 export function open(key: Uint8Array, envelope: string): string | null {
   try {
@@ -167,78 +167,6 @@ export function open(key: Uint8Array, envelope: string): string | null {
   } catch {
     return null;
   }
-}
-
-// ─── Dual-vault header logic (pure; persistence lives in duressVault.ts) ──────
-
-export type VaultKind = 'real' | 'decoy';
-export interface VaultUnlock { kind: VaultKind; payload: Record<string, any>; }
-export interface VaultHeaders { realHeader: string; decoyHeader: string; }
-
-/**
- * Seal the real and decoy vault headers under their respective PIN-derived keys.
- * Neither PIN is stored — only the two opaque sealed blobs and the shared salt.
- */
-export function createVaultHeaders(
-  realPin: string,
-  duressPin: string,
-  salt: Uint8Array,
-  realPayload: Record<string, any> = {},
-  decoyPayload: Record<string, any> = {},
-): VaultHeaders {
-  const realKey = deriveVaultKey(realPin, salt);
-  const duressKey = deriveVaultKey(duressPin, salt);
-  return {
-    realHeader: seal(realKey, JSON.stringify({ kind: 'real', ...realPayload })),
-    decoyHeader: seal(duressKey, JSON.stringify({ kind: 'decoy', ...decoyPayload })),
-  };
-}
-
-/**
- * Decide which vault a PIN opens by trying to authenticate each header. Returns
- * the matching vault + its payload, or null when the PIN owns neither. The real
- * header is tried first but only opens if the key truly authenticates it, so a
- * duress PIN can never yield the real vault.
- */
-export function tryUnlock(
-  pin: string,
-  salt: Uint8Array,
-  realHeader: string,
-  decoyHeader: string,
-): VaultUnlock | null {
-  const key = deriveVaultKey(pin, salt);
-
-  const real = open(key, realHeader);
-  if (real != null) return { kind: 'real', payload: safeParse(real) };
-
-  const decoy = open(key, decoyHeader);
-  if (decoy != null) return { kind: 'decoy', payload: safeParse(decoy) };
-
-  return null;
-}
-
-/** Async twin of tryUnlock (P3.2): the scrypt derivation — the entire cost of
- *  an unlock attempt — runs off the JS thread on the native engine. Identical
- *  decision logic and results. */
-export async function tryUnlockAsync(
-  pin: string,
-  salt: Uint8Array,
-  realHeader: string,
-  decoyHeader: string,
-): Promise<VaultUnlock | null> {
-  const key = await deriveVaultKeyAsync(pin, salt);
-
-  const real = open(key, realHeader);
-  if (real != null) return { kind: 'real', payload: safeParse(real) };
-
-  const decoy = open(key, decoyHeader);
-  if (decoy != null) return { kind: 'decoy', payload: safeParse(decoy) };
-
-  return null;
-}
-
-function safeParse(s: string): Record<string, any> {
-  try { return JSON.parse(s); } catch { return {}; }
 }
 
 // ─── PIN credential (pure) ────────────────────────────────────────────────────

@@ -50,7 +50,13 @@ var usageScreens = map[string]bool{
 	"group-info": true, "create-group": true, "invite-link": true, "qr-contact": true,
 	"emergency-sos": true, "location-sharing": true, "schedule-message": true,
 	"hidden-chats": true, "blocked": true, "login-history": true, "ghost-mode": true,
-	"memoryshield": true, "vaultlens": true, "story-viewer": true, "whiteboard": true,
+	// "memoryshield" was here. The screen was deleted — it showed a destruction
+	// certificate for a wipe that deleted four SecureStore keys nothing used and
+	// never touched the message database. No client can report it any more, so
+	// the entry could only ever have accepted a name that cannot occur.
+	// NOTE: "ghost-mode" above is the LIVE per-contact privacy screen
+	// (app/ghost-mode.tsx), unrelated to the deleted Ghost Protocol decoy.
+	"vaultlens": true, "story-viewer": true, "whiteboard": true,
 }
 
 // A single request cannot report more than this many distinct screens. A real

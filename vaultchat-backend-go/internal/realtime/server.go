@@ -58,6 +58,11 @@ type sockData struct {
 	// "view:<runId>" / "drive:<runId>". Separate from chatMemberOk because a run is
 	// visible to a SUBSET of a space — being in the chat is not enough.
 	runOk map[string]cachedPerm
+	// Per-socket cache of "may I address a per-peer relay to this uid",
+	// keyed by peer uid. See peerAllowed: TTL-bounded, no generation, and
+	// lazily created so the package's DB-free tests can build a sockData
+	// without it.
+	peerOk map[string]cachedPerm
 }
 
 // ── permission caching, and why it needs a generation ──────────────────

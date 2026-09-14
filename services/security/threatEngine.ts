@@ -4,7 +4,7 @@
  * The old securityService wiped all keys on ANY single detected threat. This
  * engine widens that: each indicator carries a severity, several weaker
  * indicators COMBINE toward a wipe, and a single `critical` indicator (root,
- * Frida, registered duress PIN…) still wipes instantly. Response is graded —
+ * Frida, hook framework…) still wipes instantly. Response is graded —
  * clean / monitor / restrict / wipe — so weak signals (emulator, ADB) can
  * block access without nuking data, while combinations escalate.
  *
@@ -64,10 +64,15 @@ export function assessThreats(signals: ThreatSignal[], policy: ThreatPolicy = DE
 }
 
 /**
- * Default severity for the known device-integrity threat types. Root/Frida and
- * the duress PIN stay `critical` (instant wipe — at least as protective as the
- * old behaviour); emulator/ADB are graded so they restrict alone but escalate
- * in combination. Unknown types default to 'high'.
+ * Default severity for the known device-integrity threat types. Root/Frida stay
+ * `critical` (instant wipe); emulator/ADB are graded so they restrict alone but
+ * escalate in combination. Unknown types default to 'high'.
+ *
+ * PIN_BRUTEFORCE is deliberately NOT critical. A wipe triggered by repeated
+ * wrong PINs destroys data on a pocket-dial or a child with the handset, and
+ * gives an attacker a denial-of-service: type nonsense at a locked phone until
+ * it erases itself. It restricts; escalation needs a second, independent
+ * indicator.
  */
 const SEVERITY_BY_TYPE: Record<string, Severity> = {
   ROOT_DETECTED:        'critical',
@@ -76,8 +81,6 @@ const SEVERITY_BY_TYPE: Record<string, Severity> = {
   FRIDA_PORT_27042:     'critical',
   FRIDA_SERVER_RESPONSE:'critical',
   HOOK_FRAMEWORK:       'critical',
-  DURESS_PIN:           'critical',
-  DURESS_PIN_REPEATED:  'critical',
   DEBUGGER_ATTACHED:    'high',
   TEST_KEYS_BUILD:      'high',
   EMULATOR_DETECTED:    'high',
@@ -85,6 +88,18 @@ const SEVERITY_BY_TYPE: Record<string, Severity> = {
   OVERLAY_DETECTED:     'high',
   SUSPICIOUS_IME:       'high',
   PIN_BRUTEFORCE:       'high',
+
+  // ── signal names raised by the native VaultShield scan ──────────────
+  // The enforcement path (securityService) now grades the NATIVE detectors
+  // rather than three JS checks, so their type names need severities here or
+  // severityFor()'s 'high' default would block a phone for having developer
+  // options on. Graded to match what each signal actually proves:
+  JAILBREAK_DETECTED:   'critical',   // same fact as ROOT_DETECTED, iOS name
+  FRIDA_DETECTED:       'critical',   // native port + /proc/self/maps scan
+  APK_RESIGNED:         'critical',   // not the binary we shipped
+  ACCESSIBILITY_RISK:   'low',        // a11y services are mostly assistive tech
+  DEV_OPTIONS_ON:       'low',        // a setting, not a compromise
+  USB_DEBUGGING_ON:     'low',        // ditto (native twin of ADB_ENABLED)
 };
 
 export function severityFor(type: string): Severity {

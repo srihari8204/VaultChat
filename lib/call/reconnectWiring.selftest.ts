@@ -70,8 +70,12 @@ const ROOM_C = code(ROOM), ENGINE_C = code(ENGINE), MACHINE_C = code(MACHINE);
   // 6-7. The engine turns them into the actions the reducer already understands.
   check('6. engine dispatches {type:\'reconnecting\'} on onReconnecting',
     /onReconnecting:\s*\(\)\s*=>\s*dispatch\(\{\s*type:\s*'reconnecting'\s*\}\)/.test(ENGINE_C));
+  // onReconnected grew a body: it still dispatches 'recovered', and now also
+  // rotates the media key, because a reconnect rebuilds both peer connections
+  // and is the natural healing point. Match the dispatch INSIDE the handler
+  // rather than pinning the one-line arrow shape it used to have.
   check('7. engine dispatches {type:\'recovered\'} on onReconnected',
-    /onReconnected:\s*\(\)\s*=>\s*dispatch\(\{\s*type:\s*'recovered'\s*\}\)/.test(ENGINE_C));
+    /onReconnected:[\s\S]{0,300}?dispatch\(\{\s*type:\s*'recovered'\s*\}\)/.test(ENGINE_C));
 
   // 8-9. The reducer's own guards are what make an unguarded dispatch safe.
   check('8. reducer ignores reconnecting unless the call is connected',
@@ -106,9 +110,14 @@ const ROOM_C = code(ROOM), ENGINE_C = code(ENGINE), MACHINE_C = code(MACHINE);
   check('15. neither reconnect handler schedules anything',
     handlers.length > 0 && !/setTimeout|setInterval|\bbackoff\b|maxRetries/i.test(handlers),
     `${handlers.length} chars of handler body examined`);
-  check('15b. and the timer count is unchanged from before this change',
-    (ROOM_C.match(/setInterval|setTimeout/g) ?? []).length === 3,
-    `${(ROOM_C.match(/setInterval|setTimeout/g) ?? []).length} timers, expected the 3 pre-existing`);
+  // Was 3 (stats poll, 2s track reconcile). Now 5: the bounded media-key wait
+  // added a declaration and its setTimeout. That timer is the POINT of the
+  // change — without a deadline a dead ratchet left the device connected and
+  // silently mute forever — so the count is pinned at 5 to catch the NEXT
+  // unplanned timer, not to forbid this one.
+  check('15b. no timer beyond the 3 pre-existing plus the bounded key wait',
+    (ROOM_C.match(/setInterval|setTimeout/g) ?? []).length === 5,
+    `${(ROOM_C.match(/setInterval|setTimeout/g) ?? []).length} timers, expected 5`);
 
   // 16. Exactly one Room and one connect() — a second of either is the
   // duplicate-publisher failure this class of change most easily introduces.

@@ -77,6 +77,13 @@ function withPipActivity(config) {
     const main = (app.activity || []).find((a) => a.$['android:name'] === '.MainActivity');
     if (main) {
       main.$['android:supportsPictureInPicture'] = 'true';
+      // The other half of the lock-screen ring. setFullScreenIntent() launches
+      // MainActivity, but the KEYGUARD still sits in front of it unless the
+      // activity itself declares these — the phone lights up and shows the lock
+      // screen instead of the call. API 27+ manifest attributes, so they are the
+      // whole fix; no code change and nothing to request at runtime.
+      main.$['android:showWhenLocked'] = 'true';
+      main.$['android:turnScreenOn'] = 'true';
       const cc = main.$['android:configChanges'] || '';
       if (!cc.includes('smallestScreenSize')) {
         main.$['android:configChanges'] = cc ? `${cc}|smallestScreenSize` : 'smallestScreenSize';

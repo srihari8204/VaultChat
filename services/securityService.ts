@@ -7,7 +7,7 @@ import * as SecureStore from 'expo-secure-store';
 import { Platform } from 'react-native';
 import DeviceInfo from 'react-native-device-info';
 import { assessThreats, signal as toSignal, type ThreatSignal } from './security/threatEngine';
-import { createDuressPinTracker } from './security/duressPin';
+import { createPinAttemptTracker } from './security/pinAttempts';
 import * as pinStore from './security/pinStore';
 import { recordDeviceScan } from './security/auditChain';
 
@@ -29,7 +29,13 @@ export type ThreatType =
   | 'OVERLAY_DETECTED'
   | 'SUSPICIOUS_IME'
   | 'PIN_BRUTEFORCE'
-  | 'DURESS_PIN_REPEATED';
+  // Raised by the native VaultShield scan (services/security/deviceSecurity).
+  | 'JAILBREAK_DETECTED'
+  | 'FRIDA_DETECTED'
+  | 'APK_RESIGNED'
+  | 'ACCESSIBILITY_RISK'
+  | 'DEV_OPTIONS_ON'
+  | 'USB_DEBUGGING_ON';
 
 export interface ThreatDetail {
   type: ThreatType;
@@ -51,14 +57,14 @@ export interface SecurityReport {
   deviceModel: string;
 }
 
-// SecureStore-backed duress-PIN tracker (repeated failed/duress PIN entries
+// SecureStore-backed PIN-attempt tracker (repeated failed PIN entries
 // escalate toward self-destruct). Exposed so the PIN screens can also query it.
-const _duressKV = {
+const _pinAttemptKV = {
   get: (k: string) => SecureStore.getItemAsync(k),
   set: (k: string, v: string) => SecureStore.setItemAsync(k, v),
   del: (k: string) => SecureStore.deleteItemAsync(k).then(() => undefined),
 };
-export const duressPin = createDuressPinTracker(_duressKV);
+export const pinAttempts = createPinAttemptTracker(_pinAttemptKV);
 
 // ─────────────────────────────────────────────────────────────
 // 1. Root / Jailbreak Detection
@@ -112,59 +118,41 @@ async function checkRootJailbreak(): Promise<ThreatDetail[]> {
 }
 
 // ─────────────────────────────────────────────────────────────
-// 2. Frida / Anti-Instrumentation Detection
-//    Frida injects a server on port 27042 by default.
-//    We attempt a TCP connection — if anything responds, Frida is present.
+// 2. Native VaultShield scan — the real detectors
+//
+// This path used to run its own "Frida check": two cleartext HTTP requests to
+// http://127.0.0.1:27042. Android's default network-security policy blocks
+// cleartext, so the request never left the app — the probe could only ever
+// fail, i.e. it reported "no Frida" on a Frida-instrumented device while
+// costing ~1.4s of cold start. It is deleted.
+//
+// What replaces it is the detector set that was already in the app but only
+// fed the dashboard: the native VaultShield module (root/Magisk, TracerPid +
+// Debug.isDebuggerConnected, Frida port + /proc/self/maps, Xposed/LSPosed/
+// Zygisk needles, APK signing-cert SHA-256, accessibility enumeration). Its
+// signal types are passed through unchanged and graded by threatEngine, which
+// now carries a severity for each of them.
+//
+// Degrades honestly: with no native module linked (Expo Go, or a build from
+// before VaultShield) we fall back to the DeviceInfo checks below rather than
+// reporting a device clean that was never examined.
 // ─────────────────────────────────────────────────────────────
 
-async function checkFrida(): Promise<ThreatDetail[]> {
-  const threats: ThreatDetail[] = [];
+// An emulator's own properties are not an attack — same waiver as below, applied
+// to the native signal names.
+const EMULATOR_WAIVED = new Set<string>([
+  'EMULATOR_DETECTED', 'ROOT_DETECTED', 'SU_BINARY_FOUND', 'MAGISK_DETECTED',
+  'DEV_OPTIONS_ON', 'USB_DEBUGGING_ON',
+]);
 
-  try {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 800);
-
-    const response = await fetch('http://127.0.0.1:27042', {
-      method: 'GET',
-      signal: controller.signal,
-    });
-
-    clearTimeout(timeoutId);
-
-    threats.push({
-      type: 'FRIDA_PORT_27042',
-      detail: `Frida server responded on port 27042 — status ${response.status}`,
-    });
-  } catch (err: any) {
-    if (err?.name === 'AbortError') {
-    }
-  }
-
-  try {
-    const controller2 = new AbortController();
-    const timeoutId2 = setTimeout(() => controller2.abort(), 600);
-
-    const res = await fetch('http://127.0.0.1:27042/enumerate', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ type: 'session' }),
-      signal: controller2.signal,
-    });
-
-    clearTimeout(timeoutId2);
-
-    const text = await res.text();
-    if (text && (text.includes('frida') || text.includes('session') || text.length > 0)) {
-      threats.push({
-        type: 'FRIDA_SERVER_RESPONSE',
-        detail: 'Frida server returned data on /enumerate — instrumentation confirmed',
-      });
-    }
-  } catch {
-    // Connection refused = safe. Expected on clean devices.
-  }
-
-  return threats;
+async function checkNativeShield(): Promise<ThreatDetail[] | null> {
+  const { hasNativeShield, collectNativeSignals } = await import('./security/deviceSecurity/nativeSecurity');
+  if (!hasNativeShield()) return null;
+  const { signals } = await collectNativeSignals(Platform.OS as 'android' | 'ios');
+  const waive = await isEmulatorTestRig();
+  return signals
+    .filter(s => !(waive && EMULATOR_WAIVED.has(s.type)))
+    .map(s => ({ type: s.type as ThreatType, detail: s.detail ?? s.type }));
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -209,7 +197,7 @@ const ALLOW_EMULATOR_TEST_BUILD = process.env.EXPO_PUBLIC_ALLOW_EMULATOR === '1'
 // hold: the flag was compiled into this build AND the device really is an
 // emulator. On a phone the second half is false, so a rooted handset wipes
 // exactly as before; in a production build the first is a constant false and
-// none of this code is reachable at all. Frida, hooks and the duress PIN are
+// none of this code is reachable at all. Frida and hooking frameworks are
 // never waived — those are compromise signals on an emulator too.
 let emulatorRig: Promise<boolean> | null = null;
 function isEmulatorTestRig(): Promise<boolean> {
@@ -292,25 +280,31 @@ export async function wipeAllKeys(): Promise<void> {
 export async function runSecurityCheck(): Promise<SecurityReport> {
   const deviceModel = DeviceInfo.getModel();
 
-  const [rootThreats, fridaThreats, emulatorThreats] = await Promise.all([
+  // Prefer the native detectors; fall back to the DeviceInfo checks only when
+  // the native module is not linked.
+  const native = await checkNativeShield().catch(() => null);
+  const detected: ThreatDetail[] = native ?? (await Promise.all([
     checkRootJailbreak(),
-    checkFrida(),
     checkEmulator(),
-  ]);
-  const detected: ThreatDetail[] = [...rootThreats, ...fridaThreats, ...emulatorThreats];
+  ])).flat();
 
   // Grade the device-integrity signals + the accumulated PIN-failure signal,
   // then let the engine pick a proportional response.
   const signals: ThreatSignal[] = detected.map(d => toSignal(d.type, d.detail));
-  const pinSignal = await duressPin.getSignal();
+  const pinSignal = await pinAttempts.getSignal();
   if (pinSignal) {
     detected.push({ type: pinSignal.type as ThreatType, detail: pinSignal.detail ?? '' });
     signals.push(pinSignal);
   }
   const assessment = assessThreats(signals);
 
+  // `clean` means "let the app run", NOT "no signal at all". It used to mean the
+  // latter, so a single ADB_ENABLED (severity medium, score 3 — a `monitor`
+  // verdict, i.e. "allow but flag") routed to the unescapable /blocked screen.
+  // Anyone with developer options on was locked out of their own messages. The
+  // engine's own grading is now respected: monitor allows, restrict/wipe block.
   const report: SecurityReport = {
-    clean: assessment.level === 'clean',
+    clean: assessment.level === 'clean' || assessment.level === 'monitor',
     threats: detected,
     level: assessment.level,
     score: assessment.score,
@@ -319,14 +313,14 @@ export async function runSecurityCheck(): Promise<SecurityReport> {
     deviceModel,
   };
 
-  // Self-destruct only on a wipe-level assessment (root / Frida / duress PIN /
+  // Self-destruct only on a wipe-level assessment (root / Frida /
   // strong combinations). Weaker lone signals (emulator, ADB) restrict access
   // — caller still routes to /blocked — without destroying data on a possible
   // false positive.
   if (assessment.level === 'wipe') {
     await wipeAllKeys();
   }
-  if (!report.clean) {
+  if (assessment.level !== 'clean') {
     // Record threats in the on-device tamper-evident audit chain (#41) so they
     // surface in the Alerts tab. Clean launch scans are intentionally NOT logged
     // (no noise); user-initiated scans always log via scanDeviceAndRecord().
@@ -347,7 +341,7 @@ export async function runSecurityCheck(): Promise<SecurityReport> {
  */
 export async function scanDeviceAndRecord(): Promise<SecurityReport> {
   const report = await runSecurityCheck();
-  if (report.clean) {
+  if (report.level === 'clean') {
     await recordDeviceScan({
       level: report.level, score: report.score, threats: report.threats,
       deviceModel: report.deviceModel, platform: report.platform,
@@ -370,10 +364,11 @@ export async function savePIN(pin: string): Promise<void> {
 
 export async function verifyPIN(pin: string): Promise<boolean> {
   const ok = await pinStore.verifyPin(pin);
-  // Feed the duress-PIN tracker: consecutive failures escalate toward a
-  // self-destruct on the next runSecurityCheck().
-  if (ok) await duressPin.recordSuccess();
-  else await duressPin.recordFailure();
+  // Feed the attempt tracker: consecutive failures raise a PIN_BRUTEFORCE
+  // signal on the next runSecurityCheck() and lengthen the backoff. They no
+  // longer escalate to a wipe on their own — see services/security/pinAttempts.
+  if (ok) await pinAttempts.recordSuccess();
+  else await pinAttempts.recordFailure();
   return ok;
 }
 

@@ -1,0 +1,29 @@
+syntax = "proto3";
+package ccwire.v1;
+option go_package = "vaultchat/backend-go/internal/ccwire/v1;ccwirev1";
+
+// Cursors are per (chat, kind). Every position is uint64 + JS_STRING:
+// a message ordinal must never be silently truncated in JavaScript.
+message Cursor {
+  string chat_id = 1;
+  CursorKind kind = 2;
+  uint64 position = 3 [jstype = JS_STRING];
+  int64 updated_at_ms = 4 [jstype = JS_STRING];
+}
+
+enum CursorKind {
+  CURSOR_KIND_UNSPECIFIED = 0;
+  CURSOR_KIND_READ        = 1;
+  CURSOR_KIND_DELIVERED   = 2;
+  CURSOR_KIND_SYNCED      = 3;   // client's backfill watermark
+}
+
+message CursorSync {
+  repeated Cursor cursors = 1;   // <= max_batch_items (256)
+}
+
+message CursorBatch {
+  repeated Cursor cursors = 1;   // <= max_batch_items
+  bool more = 2;
+  string continuation = 3;       // opaque, server-authored
+}

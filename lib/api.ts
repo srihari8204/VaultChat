@@ -9,6 +9,7 @@ import * as Sentry from '@sentry/react-native';
 import { router } from 'expo-router';
 
 import { SessionEndedError } from './sessionEnded';
+import { resetTo } from './authNav';
 import * as SecureStore from 'expo-secure-store';
 import { SERVER_URL } from '../constants/server';
 import { VAULT_SESSION_SEALED } from '../constants/flags';
@@ -102,6 +103,30 @@ export async function sealCurrentSession(pin: string): Promise<void> {
     await SecureStore.deleteItemAsync(ACCESS_TOKEN_KEY).catch(() => {});
     await SecureStore.deleteItemAsync(REFRESH_TOKEN_KEY).catch(() => {});
   } catch { /* keep the plaintext fallback — never brick */ }
+}
+
+/**
+ * Undo sealing: put the session back on the plaintext path. Call when the local
+ * PIN is REMOVED, so a user who turns the feature off is never stranded holding
+ * a sealed blob they have no key for.
+ *
+ * No-op when nothing is in memory — which is exactly the logout case
+ * (clearTokens() already nulled _mem and deleted the sealed blob), so this can
+ * never resurrect tokens a logout just destroyed.
+ */
+export async function unsealCurrentSession(): Promise<void> {
+  if (!VAULT_SESSION_SEALED || !_mem) return;
+  await SecureStore.setItemAsync(ACCESS_TOKEN_KEY,  _mem.access);
+  await SecureStore.setItemAsync(REFRESH_TOKEN_KEY, _mem.refresh);
+  _sealKey = null;
+  try { await (await sealMod()).clearSealedSession(); } catch {}
+  // #32 Phase B: drop the in-memory DEK. The envelope on disk is deliberately
+  // LEFT ALONE — see the ponytail note in cacheCrypto's caller list.
+  // ponytail: rows already sealed under that DEK become unreadable ciphertext
+  // after a PIN removal/change. Harmless while VAULT_CACHE_ENCRYPTED is off (no
+  // row is ever sealed); before that flag can ship, this needs a row rewrite or
+  // a cache purge here.
+  try { (await cacheMod()).clearCacheKey(); } catch {}
 }
 
 /** Unseal the session with the PIN into memory. Returns true on success. Call at unlock. */
@@ -268,7 +293,21 @@ function tryRefresh(): Promise<RefreshOutcome> {
 async function doRefresh(): Promise<RefreshOutcome> {
   const refresh = await getRefreshToken();
   // No refresh token at all is genuinely terminal: there is nothing to retry.
-  if (!refresh) return 'terminal';
+  //
+  // EXCEPT when the session is SEALED AND STILL LOCKED (#32). Then the tokens
+  // exist, they are simply not in memory yet — this is a request that reached
+  // the network before the unlock screen did (a deep link, a notification tap,
+  // a background task). Calling it terminal would run endSessionAndBounce(),
+  // whose clearTokens() DELETES THE SEALED BLOB: a permanent logout for a user
+  // whose only crime was tapping a notification. Send them to the unlock screen
+  // and report the failure as retryable instead.
+  if (!refresh) {
+    if (await sealedSessionLocked()) {
+      try { router.replace('/app-lock' as any); } catch {}
+      return 'transient';
+    }
+    return 'terminal';
+  }
 
   // Bounded on purpose. This fetch used to run with no signal and no deadline,
   // outside the normal request timeout, so a black-hole connection could leave
@@ -305,11 +344,36 @@ let sessionEndingPromise: Promise<void> | null = null;
 async function endSessionAndBounce(): Promise<void> {
   if (sessionEndingPromise) return sessionEndingPromise;
   sessionEndingPromise = (async () => {
+    // YOU CANNOT END A SESSION THAT NEVER STARTED.
+    //
+    // During onboarding there are no tokens yet, so doRefresh() answers
+    // 'terminal' (correctly — there is nothing to retry) and every caller of a
+    // 401'd authenticated request lands here. The redirect below then fires
+    // router.replace('/onboard') UNDER A USER WHO IS MID-SIGN-UP: typing the
+    // email OTP, they are silently thrown back to the landing screen with the
+    // form blank, and the code they were sent is now unreachable. Any stray
+    // background request during onboarding does it — a version check, a sync
+    // tick, a listener warming up — so it looks random and untraceable.
+    //
+    // "Was there a session?" is the honest test, and it is the same question
+    // the bounce is really asking. Never had one → this is the sign-in flow
+    // doing its job, so leave the navigator alone. Had one → it is genuinely
+    // dead, clear it and send them to sign in, exactly as before.
+    if (!(await hasSession())) {
+      sessionEndingPromise = null;
+      return;
+    }
     await clearTokens();
     await setCachedUser(null);
     try {
       // expo-router's imperative router is safe outside React components.
-      router.replace('/onboard' as any);
+      //
+      // resetTo, not replace: replace() swaps only the TOP history entry, so a
+      // forced sign-out left the whole signed-in stack sitting underneath and
+      // one BACK press walked straight back into the app the redirect existed
+      // to eject the user from. The session is dead by this point — every
+      // screen below is unusable — so the stack goes with it.
+      resetTo('/onboard');
     } catch (err) {
       console.warn('[api] could not redirect after session end:', (err as any)?.message);
     }

@@ -24,12 +24,38 @@ export const E2EE_STRICT = true;
 // sealed under the unlock PIN (services/security/sessionSeal) instead of sitting
 // in plaintext SecureStore, so a duress/decoy PIN cannot reach the real session.
 //
-// DEFAULT OFF — when off, token storage behaves exactly as before (zero change).
-// When ON, unlock is PIN-only (a PIN-sealed session can't be unsealed by
-// biometrics, which is also a coercion weakness), and the seam falls back to
-// re-login if anything can't be unsealed — it can never brick. Verify with a
-// two-device set-PIN → reload → unlock round-trip before enabling in prod.
-export const VAULT_SESSION_SEALED = false;
+// ON as of 2026-09-13 — and it is now OPT-IN AND PIN-GATED, which is the only
+// shape in which it is safe. The three prerequisites the previous audit named
+// are implemented:
+//
+//   1. CALLERS. services/security/pinStore is the one place a local PIN is
+//      created or removed, and every caller (authService.savePIN,
+//      securityService.savePIN, /backup-pin, logout) already routes through it.
+//      setPin()   → api.sealCurrentSession(pin)   — seals what already exists
+//      clearPin() → api.unsealCurrentSession()    — puts it back in the clear
+//      app/app-lock.tsx → api.loadSealedSession(pin) at unlock.
+//   2. A LOCAL PIN IN THE BOOT PATH. Still absent for most users — so they are
+//      never sealed. sealCurrentSession only ever runs from setPin, so a user
+//      who has not deliberately set a device PIN keeps the byte-identical
+//      plaintext path: _sealKey stays null, nothing is sealed, nothing to
+//      unseal, /app-lock behaves exactly as before (biometric or remote MPIN).
+//      A BIOMETRIC-ONLY USER SEES NO CHANGE AT ALL.
+//      For a user who HAS set one, app/index.tsx routes on sealedSessionLocked()
+//      as well as the MFA flag, so a sealed session always reaches a screen that
+//      can ask for the PIN — including via deep link / notification, where
+//      doRefresh() now treats "sealed but locked" as transient + /app-lock
+//      instead of terminal (terminal ran clearTokens(), which deleted the seal).
+//   3. THE RE-LOGIN FALLBACK IS REAL. app-lock's sealed branch reports a wrong
+//      PIN, keeps the session, and offers "Forgotten your PIN?" → an explained,
+//      user-confirmed sign-in-again. There is no silent bounce to /onboard.
+//
+// Flip to false to restore the exact prior behaviour for everyone: setTokens /
+// getAccessToken / hasSession fall straight through to plaintext SecureStore,
+// and the seal/unseal calls all early-return.
+//
+// STILL REQUIRES A DEVICE PASS: set PIN → kill app → relaunch → unlock, plus
+// wrong-PIN → re-login, on a real handset (scrypt timing + SecureStore).
+export const VAULT_SESSION_SEALED = true;
 
 // VAULT_CACHE_ENCRYPTED gates #32 Phase B: the local SQLite message cache
 // (lib/localDb) holds message bodies in plaintext today. With this ON, the
@@ -44,8 +70,28 @@ export const VAULT_SESSION_SEALED = false;
 // sealed, so old plaintext rows and new encrypted rows coexist (lazy migration);
 // nothing is bulk-rewritten and the cache can never brick. Indexed/queried columns
 // (ids, chat_id, timestamps, deleted_at) stay cleartext — only message bodies are
-// sealed. Best paired with VAULT_SESSION_SEALED. Verify with a two-device
-// set-PIN → send → reload → unlock round-trip before enabling in prod.
+// sealed.
+//
+// ⚠️ STAYS OFF — but for a DIFFERENT reason than before (2026-09-13). The
+// wiring prerequisite is now met: VAULT_SESSION_SEALED is on and pinStore.setPin
+// → sealCurrentSession → provisionCacheKey, app-lock → loadSealedSession →
+// unlockCacheKey, so flipping this WOULD genuinely seal message bodies for a
+// PIN'd user. It is off because of the OTHER half — key loss:
+//
+//   The DEK envelope is sealed under the PIN key. Change the PIN or remove it
+//   (pinStore.clearPin → api.unsealCurrentSession) and the old DEK is gone,
+//   while the rows sealed under it are still in SQLite. decField degrades them
+//   to raw ciphertext — it never crashes, but the user would see `enc:v1:…`
+//   where their messages were. That is a data-visible regression, and fixing it
+//   means a row rewrite (decrypt-all on PIN change / purge the cache), which is
+//   real migration work, not a flag flip.
+//
+// So: turning this on today no longer makes the flag LIE, it makes it BITE
+// someone who changes their PIN. Before it can ship it needs (a) that rewrite
+// in unsealCurrentSession/sealCurrentSession, and (b) the device test below.
+// cacheCrypto.selftest asserts the coupling to VAULT_SESSION_SEALED and fails if
+// this is flipped while no caller of the seal seam exists. Verify with a
+// two-device set-PIN → send → reload → unlock → CHANGE-PIN round-trip.
 export const VAULT_CACHE_ENCRYPTED = false;
 
 // MEDIA_E2EE gates W6 media-at-rest: in DIRECT chats, attachment bytes (photo,

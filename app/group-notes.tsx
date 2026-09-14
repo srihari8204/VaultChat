@@ -140,6 +140,7 @@ export default function GroupNotesScreen() {
   return (
     <View style={{ flex: 1, backgroundColor: colors.bg }}>
       <Stack.Screen options={{
+        headerShown: true, /* the root Stack sets headerShown:false app-wide, so the options below were inert and this screen had no back control at all */ 
         title: 'Notes', headerTitleAlign: 'center',
         headerRight: () => (
           <TouchableOpacity onPress={openNew} accessibilityLabel="New note" style={{ paddingHorizontal: 8 }}>

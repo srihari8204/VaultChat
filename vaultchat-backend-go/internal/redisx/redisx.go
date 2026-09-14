@@ -205,6 +205,39 @@ func Consume(ctx context.Context, key string, limit int64, windowSec int64) Rate
 	return RateResult{Allowed: count <= limit, Remaining: rem, ResetInSec: reset}
 }
 
+// ConsumeBy is Consume with a weight: it charges n units to the bucket instead
+// of 1. Request-counting alone is the wrong meter for a bulk endpoint — five
+// /contacts/match calls a minute is five calls, but it is also 25,000 phone
+// hashes a minute (36M/day), which is enough to walk a meaningful slice of the
+// ~10^10 phone keyspace from a single account. Charge the hashes, not the call.
+//
+// Same fail-OPEN behaviour as Consume, deliberately: a Redis outage must not
+// lock real users out of contact discovery.
+func ConsumeBy(ctx context.Context, key string, n, limit, windowSec int64) RateResult {
+	open := RateResult{Allowed: true, Remaining: limit, ResetInSec: windowSec}
+	if Client == nil || n <= 0 {
+		return open
+	}
+	k := "rl:" + key
+	count, err := Client.IncrBy(ctx, k, n).Result()
+	if err != nil {
+		return open
+	}
+	if count == n { // first charge in this window
+		Client.Expire(ctx, k, time.Duration(windowSec)*time.Second)
+	}
+	ttl, err := Client.TTL(ctx, k).Result()
+	reset := windowSec
+	if err == nil && ttl >= 0 {
+		reset = int64(ttl.Seconds())
+	}
+	rem := limit - count
+	if rem < 0 {
+		rem = 0
+	}
+	return RateResult{Allowed: count <= limit, Remaining: rem, ResetInSec: reset}
+}
+
 // Reset mirrors rateLimit.reset.
 func Reset(ctx context.Context, key string) {
 	if Client != nil {

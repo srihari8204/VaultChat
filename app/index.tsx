@@ -11,7 +11,7 @@ import { router } from "expo-router";
 import { useEffect } from "react";
 import { ActivityIndicator, StyleSheet, View } from "react-native";
 import * as SplashScreen from "expo-splash-screen";
-import { getAccessToken } from "../lib/api";
+import { hasSession, sealedSessionLocked } from "../lib/api";
 import { isMfaEnabled } from "../lib/mfa";
 import { shouldOfferRestore } from "../lib/restoreGate";
 
@@ -21,10 +21,23 @@ export default function IndexScreen() {
       try {
         // Read the token and the MFA flag in parallel (both are SecureStore reads)
         // so the launch decision costs one round-trip, not two serial ones.
-        const [token, mfaOn] = await Promise.all([getAccessToken(), isMfaEnabled()]);
-        if (!token) { router.replace("/onboard" as any); return; }
+        // hasSession() — NOT getAccessToken(). Identical today (both answer
+        // "is there a plaintext token in SecureStore"), but under
+        // VAULT_SESSION_SEALED the tokens live in a sealed blob and
+        // getAccessToken() answers null until the PIN unseals them — which
+        // would route a signed-in user to /onboard, i.e. a silent logout.
+        const [signedIn, mfaOn, sealed] = await Promise.all([
+          hasSession(), isMfaEnabled(), sealedSessionLocked(),
+        ]);
+        if (!signedIn) { router.replace("/onboard" as any); return; }
         // Logged in → if device MFA is on, gate the launch (biometric or MPIN).
-        if (mfaOn) { router.replace("/app-lock" as any); return; }
+        //
+        // ALSO gate when the session is SEALED and still locked (#32), MFA flag
+        // or not: the tokens only exist inside a blob the PIN opens, so landing
+        // on /chats would mean an authenticated shell with no credentials and
+        // no way to ask for them. app-lock detects the sealed case and asks for
+        // the local PIN instead of the biometric/remote-MPIN path.
+        if (mfaOn || sealed) { router.replace("/app-lock" as any); return; }
 
         // NEW PHONE? OFFER THE BACKUP BEFORE THE EMPTY CHAT LIST.
         //

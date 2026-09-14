@@ -357,10 +357,13 @@ export default function SettingsScreen() {
         <Text style={S.label}>PRIVACY & SECURITY</Text>
         <View style={S.linkCard}>
           <LinkRow icon="shield-checkmark-outline" title="Vault features" sub="Screenshot alerts, disappearing messages, incognito keyboard" onPress={() => router.push('/vault-features' as any)} />
+          {/* #32: the opt-in for session sealing. Setting a device PIN is what
+              seals the signed-in session under it (services/security/pinStore);
+              nobody is migrated into it, they choose it here. */}
+          <LinkRow icon="keypad-outline" title="Device PIN" sub="Lock this device's session behind a PIN only you know" onPress={() => router.push('/backup-pin?from=settings' as any)} />
           <LinkRow icon="speedometer-outline" title="Privacy dashboard" sub="Your privacy score and what is protecting you" onPress={() => router.push('/privacy-dashboard' as any)} />
           <LinkRow icon="checkmark-done-outline" title="Read receipts" sub="Control who sees when you have read a message" onPress={() => router.push('/receipt-control' as any)} />
           <LinkRow icon="time-outline" title="Last seen & online" sub="Who can see when you were last active" onPress={() => router.push('/last-seen-privacy' as any)} />
-          <LinkRow icon="flame-outline" title="Memory Shield" sub="Panic wipe, auto-destruct, failed-login limit" onPress={() => router.push('/memoryshield' as any)} />
           {/* Opens in the browser, not a WebView: a privacy policy is the one
               document a person should be able to see is served from the real
               domain, with the padlock their own browser drew. Play also expects

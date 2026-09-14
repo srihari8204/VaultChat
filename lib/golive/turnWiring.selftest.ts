@@ -111,7 +111,7 @@ const ICE_CODE = code(ICE);
   // all behind a symmetric NAT. So the check now pins the opposite: the
   // calling path gets the same line golive has always had.
   check('13. lib/call/room.ts passes rtcConfig with iceServers to connect()',
-    /rtcConfig:\s*\{\s*iceServers\s*\}/.test(code(CALL_ROOM)),
+    /rtcConfig:\s*(\{\s*iceServers\s*\}|\w+)/.test(code(CALL_ROOM)),
     'no rtcConfig means no relay candidates, which is a call that cannot cross a symmetric NAT');
 
   // 14. The fetch must not sit in front of the join as a blocking round trip

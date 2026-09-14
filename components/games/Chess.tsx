@@ -459,11 +459,13 @@ export default function Chess({ roomId, auto, autoBot }: { roomId: string } & Au
           paddingBottom: S[6] + insets.bottom,
         }}
       >
-        {/* The strip the reference puts in the header. The navigator header
-            already owns Back and the title, so duplicating either here would
-            give the screen two ways back; these are the two controls it does
-            NOT already carry. Both open sheets built on data that was already
-            on the screen — neither is a new request to the server. */}
+        {/* The strip the reference puts in the header. GameChrome above this
+            board owns Back and the title (it used to say "the navigator header"
+            owns them — it did not; the stack is headerShown:false and this
+            screen had no way out at all), so duplicating either here would give
+            the screen two ways back; these are the controls it does NOT already
+            carry. Both open sheets built on data that was already on the
+            screen — neither is a new request to the server. */}
         <View style={{ width: size, flexDirection: 'row', alignItems: 'center', gap: S[2] }}>
           <Text
             accessibilityElementsHidden

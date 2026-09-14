@@ -96,7 +96,8 @@ export default function WhiteboardScreen() {
 
   return (
     <>
-      <Stack.Screen options={{ title: 'Whiteboard', headerStyle: { backgroundColor: '#FFFFFF' }, headerTintColor: '#1F2937',
+      <Stack.Screen options={{
+        headerShown: true, /* the root Stack sets headerShown:false app-wide, so the options below were inert and this screen had no back control at all */  title: 'Whiteboard', headerStyle: { backgroundColor: '#FFFFFF' }, headerTintColor: '#1F2937',
         headerRight: () => (
           <View style={{ flexDirection: 'row', gap: 14, marginRight: 8 }}>
             <TouchableOpacity onPress={undo}><Text style={{ color: '#4A9FFF', fontSize: 13, fontWeight: '700' }}>Undo</Text></TouchableOpacity>

@@ -13,6 +13,10 @@ import {
   sendSOS, listSOSHistory, listTrustedContacts, getSettings, updateSettings,
   type SOSHistoryItem, type TrustedContact, type UserSettings,
 } from '../lib/chatService';
+import {
+  NOTIF_PREVIEW_OPTIONS, getNotifPreview, setNotifPreview,
+  getRemoteLinkPreviews, setRemoteLinkPreviews, type NotifPreview,
+} from '../lib/privacyPrefs';
 
 const NAV = [{id:'chats',icon:'💬',label:'Chats',route:'/(tabs)/chats'},{id:'shield',icon:'🛡️',label:'Shield',route:'/dashboard'},{id:'community',icon:'🌐',label:'Community',route:'/communities'},{id:'vault',icon:'📦',label:'Vault',route:'/filevault'},{id:'alerts',icon:'🔔',label:'Alerts',route:'/notifications'}];
 
@@ -50,7 +54,22 @@ function NotificationsContent() {
   const panicAnim=useRef(new Animated.Value(1)).current;
   const glowAnim=useRef(new Animated.Value(0)).current;
 
+  // Device-local privacy prefs (lib/privacyPrefs) — these are real controls,
+  // read by lib/messageNotifications.ts and components/LinkPreview.tsx.
+  const [notifPreview, setNotifPreviewState] = useState<NotifPreview>('name');
+  const [remoteLinks, setRemoteLinksState] = useState(false);
+
   const loadSos = useCallback(async () => { try { setSos(await listSOSHistory()); } catch {} }, []);
+
+  useEffect(() => {
+    let cancel = false;
+    (async () => {
+      const [n, l] = await Promise.all([getNotifPreview(), getRemoteLinkPreviews()]);
+      if (cancel) return;
+      setNotifPreviewState(n); setRemoteLinksState(l);
+    })();
+    return () => { cancel = true; };
+  }, []);
 
   useEffect(()=>{
     let cancel = false;
@@ -187,6 +206,43 @@ function NotificationsContent() {
                   <Switch value={!!settings[d.key]} onValueChange={()=>toggleSetting(d.key)} trackColor={{false:'rgba(255,255,255,0.06)',true:colors.primary+'66'}} thumbColor={settings[d.key]?colors.primary:'rgba(255,255,255,0.3)'}/>
                 </View>
               ))}
+
+              {/* Notification preview. There is no "show message text" option:
+                  the push carries no text to show — see lib/privacyPrefs.ts. */}
+              <Text style={{color:colors.textFaint,fontSize:9,fontWeight:'800',letterSpacing:2,marginTop:18,marginBottom:10}}>NOTIFICATION PREVIEW</Text>
+              {NOTIF_PREVIEW_OPTIONS.map((o)=>{
+                const on = notifPreview === o.value;
+                return (
+                  <TouchableOpacity
+                    key={o.value}
+                    accessibilityRole="radio"
+                    accessibilityState={{ selected: on }}
+                    style={[S.settingRow, on && {borderColor:colors.primary}]}
+                    onPress={()=>{ setNotifPreviewState(o.value); setNotifPreview(o.value); }}
+                  >
+                    <View style={{flex:1}}>
+                      <Text numberOfLines={1} style={{color:colors.text,fontSize:13,fontWeight:'700'}}>{o.title}</Text>
+                      <Text style={{color:colors.textFaint,fontSize:10,marginTop:2}}>{o.desc}</Text>
+                    </View>
+                    {on && <Ionicons name="checkmark-circle" size={20} color={colors.primary} />}
+                  </TouchableOpacity>
+                );
+              })}
+              <Text style={{color:colors.textFaint,fontSize:10,lineHeight:15,marginTop:2}}>
+                Message text never appears in the tray on any setting — notifications are delivered without it.
+              </Text>
+
+              {/* Recipient-side link previews. OFF = the server never learns a
+                  URL that arrived inside an encrypted message. */}
+              <Text style={{color:colors.textFaint,fontSize:9,fontWeight:'800',letterSpacing:2,marginTop:18,marginBottom:10}}>LINK PREVIEWS</Text>
+              <View style={S.settingRow}>
+                <View style={{width:40,height:40,borderRadius:20,backgroundColor:'rgba(6,14,34,0.9)',justifyContent:'center',alignItems:'center',borderWidth:1,borderColor:'rgba(255,255,255,0.06)'}}><Text style={{fontSize:20}}>🔗</Text></View>
+                <View style={{flex:1}}>
+                  <Text numberOfLines={1} style={{color:colors.text,fontSize:13,fontWeight:'700'}}>Fetch previews for received links</Text>
+                  <Text style={{color:colors.textFaint,fontSize:10,marginTop:2}}>Off: VaultChat&apos;s server never sees links people send you. Previews the sender attached still show.</Text>
+                </View>
+                <Switch value={remoteLinks} onValueChange={(v)=>{ setRemoteLinksState(v); setRemoteLinkPreviews(v); }} trackColor={{false:'rgba(255,255,255,0.06)',true:colors.primary+'66'}} thumbColor={remoteLinks?colors.primary:'rgba(255,255,255,0.3)'}/>
+              </View>
             </View>
           )}
 

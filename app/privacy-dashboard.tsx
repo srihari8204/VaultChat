@@ -10,7 +10,6 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { Stack, useRouter } from 'expo-router';
 import React, { useEffect, useRef, useState , useMemo} from 'react';
 import {
-  Alert,
   Animated,
   Platform,
   ScrollView,
@@ -25,7 +24,6 @@ import Svg, { Circle } from 'react-native-svg';
 import { getSettings, updateSettings, listTrustedContacts } from '../lib/chatService';
 import { getSecurityOverview } from '../lib/security';
 import { hasPIN } from './(constants)/authService';
-import { E2EE_ENABLED } from '../constants/flags';
 import { AuroraBackground } from '../components/ui';
 
 
@@ -37,7 +35,6 @@ type PrivacyLevel = 'everyone' | 'contacts' | 'nobody';
 interface PrivacySettings {
   faceLock: boolean;
   pinSet: boolean;
-  duressPin: boolean;
   screenshotProtection: boolean;
   biometricLock: boolean;
   twoFactorAuth: boolean;
@@ -54,7 +51,6 @@ interface PrivacySettings {
 const DEFAULT_SETTINGS: PrivacySettings = {
   faceLock: false,
   pinSet: false,
-  duressPin: false,
   screenshotProtection: true,
   biometricLock: false,
   twoFactorAuth: false,
@@ -80,7 +76,6 @@ const FEATURES: FeatureItem[] = [
   { key: 'screenshotProtection', label: 'E2E Encryption', alwaysOn: true, points: 10 },
   { key: 'faceLock', label: 'Face Lock', points: 10, suggestion: 'Enable Face Lock in Settings for biometric protection.' },
   { key: 'pinSet', label: 'PIN Set', points: 10, suggestion: 'Set a PIN to add a second layer of security.' },
-  { key: 'duressPin', label: 'Duress PIN Configured', points: 10, suggestion: 'Set a duress PIN that wipes data if entered under threat.' },
   { key: 'screenshotProtection', label: 'Screenshot Protection', points: 10, suggestion: 'Screenshot protection is already enabled by default.' },
   { key: 'biometricLock', label: 'Biometric Lock', points: 10, suggestion: 'Enable biometric lock for quick secure access.' },
   { key: 'twoFactorAuth', label: '2FA Enabled', points: 10, suggestion: 'Enable two-factor authentication for account recovery.' },
@@ -148,7 +143,6 @@ export default function PrivacyDashboardScreen() {
     let score = 10; // E2E always on
     if (settings.faceLock) score += 10;
     if (settings.pinSet) score += 10;
-    if (settings.duressPin) score += 10;
     if (settings.screenshotProtection) score += 10;
     if (settings.biometricLock) score += 10;
     if (settings.twoFactorAuth) score += 10;

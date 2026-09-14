@@ -49,8 +49,16 @@ export interface FrameCryptoHandle {
   attach(): number;
   /** Rotate to a new key — call on join/leave so departed members go dark. */
   setKey(key: Uint8Array): Promise<void>;
-  /** Advance the ratchet without a full re-key. */
-  ratchet(): Promise<void>;
+  // NO ratchet(). There WAS one — `provider.ratchetSharedKey()` — with zero
+  // callers anywhere in the repo, which is the worst state a security control
+  // can be in: it reads as implemented and never runs. It is also not the
+  // control this needs. ratchetSharedKey advances OUR provider's key
+  // unilaterally, and every other participant is still on the old one, so our
+  // frames stop decrypting for the whole room. Healing a call's key requires
+  // agreement, and agreement is what setKey + the engine's rotateMediaKey
+  // already do: mint, seal per peer over the Double Ratchet, then switch. So
+  // this was deleted and the engine now rekeys on join, on leave, and on
+  // reconnect — the point the ratchet was notionally for.
   /** Detach and free native resources. Safe to call twice. */
   dispose(): Promise<void>;
   /**
@@ -63,7 +71,7 @@ export interface FrameCryptoHandle {
 
 const NOOP: FrameCryptoHandle = {
   attach() { return 0; },
-  async setKey() {}, async ratchet() {}, async dispose() {}, active: false,
+  async setKey() {}, async dispose() {}, active: false,
 };
 
 /**
@@ -94,19 +102,39 @@ export async function enableFrameCrypto(
   try {
     provider = RTCFrameCryptorFactory.createDefaultKeyProvider({
       sharedKey: true,
-      // Domain separation for the ratchet, NOT a secret — it only has to be
-      // identical on every participant, so it is a constant rather than
-      // something negotiated. Versioned so a future change can be rolled out
-      // without silently breaking calls between mixed builds.
+      // Domain separation, NOT a secret — it only has to be identical on every
+      // participant, so it is a constant rather than something negotiated.
+      // Versioned so a future change can be rolled out without silently
+      // breaking calls between mixed builds. Kept even though nothing ratchets
+      // any more: changing it would fork the key derivation across builds.
       ratchetSalt: 'vaultchat-call-frame-v1',
+      // THE WINDOW IN WHICH AN OLD KEY STILL WORKS — now two keys wide, not
+      // sixteen.
+      //
       // A key ring lets frames sealed with the PREVIOUS key still decrypt for a
-      // window after a rotation. Without it, every join/leave would produce a
+      // moment after a rotation. Without any ring, every join/leave produces a
       // burst of undecryptable frames — visible as a freeze — because senders
-      // do not switch keys at the same instant.
-      keyRingSize: 16,
-      ratchetWindowSize: 16,
-      // -1 = never give up on a participant. A few undecryptable frames during a
-      // rotation must not permanently mute someone.
+      // do not switch keys at the same instant. That argument justifies exactly
+      // ONE superseded key. Sixteen justified nothing: rotation is what makes a
+      // departed participant go dark, and a ring that deep is fifteen extra
+      // chances for a key they might hold to still open a frame. Two is the
+      // overlap the changeover actually needs (current + immediately previous),
+      // and it is the same bound lib/call/keyRotation.selftest.ts already pins
+      // on the SIGNALLING cipher's stale-key list, for the same reason.
+      keyRingSize: 2,
+      // Nothing ratchets (see the interface note above), so there is no window
+      // to keep open.
+      ratchetWindowSize: 0,
+      // -1 = never give up on a participant, and DELIBERATELY LEFT THERE.
+      //
+      // A finite tolerance does not narrow the key window — the ring above is
+      // what does that. What it does is permanently disable the cryptor for a
+      // participant after N consecutive failures, and N consecutive failures is
+      // the NORMAL shape of a rotation: a burst of frames sealed with a key
+      // that has just aged out. Trading "an old key works for one rotation's
+      // overlap" for "a participant is muted for the rest of the call and no
+      // rotation can bring them back" is a bad trade, and the bad half is
+      // unrecoverable. Tightened where tightening is free; not here.
       failureTolerance: -1,
     });
     await provider.setSharedKey(key);
@@ -169,10 +197,6 @@ export async function enableFrameCrypto(
       if (disposed || next?.length !== 32) return;
       await provider.setSharedKey(next);
       console.warn('[call] frame E2EE key rotated');
-    },
-    async ratchet() {
-      if (disposed) return;
-      try { await provider.ratchetSharedKey(); } catch {}
     },
     async dispose() {
       if (disposed) return;

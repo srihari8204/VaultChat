@@ -34,8 +34,6 @@ const EXEMPT = new Set([
   'app/story-viewer.tsx', 'app/whiteboard.tsx', 'app/live-view.tsx',
   // Camera viewfinders.
   'app/facescan.tsx', 'app/face-verify-new-device.tsx', 'app/camera.tsx',
-  // Ghost Protocol decoys: their look is a security decision, not a style one.
-  'app/decoy-chat.tsx', 'app/decoy-chats.tsx',
   // Renders after the tree threw — must not read context. See the file.
   'components/ErrorBoundary.tsx',
   // Their own published design systems.

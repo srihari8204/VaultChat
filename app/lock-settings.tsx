@@ -66,7 +66,8 @@ export default function LockSettingsScreen() {
 
   return (
     <View style={[st.screen, { backgroundColor: colors.bg }]}>
-      <Stack.Screen options={{ title: 'Alarm & Alert Settings', headerTitleAlign: 'center' }} />
+      <Stack.Screen options={{
+        headerShown: true, /* the root Stack sets headerShown:false app-wide, so the options below were inert and this screen had no back control at all */  title: 'Alarm & Alert Settings', headerTitleAlign: 'center' }} />
       <ScrollView contentContainerStyle={st.body}>
         {/* ── General ── */}
         <Text style={[st.h, { color: colors.text }]}>General · Units</Text>

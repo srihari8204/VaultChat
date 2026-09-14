@@ -15,7 +15,6 @@ import { LinearGradient } from 'expo-linear-gradient';
 import * as ImageManipulator from 'expo-image-manipulator';
 import ViewShot from 'react-native-view-shot';
 
-const { width: SW, height: SH } = Dimensions.get('window');
 
 const DRAW_COLORS = ['#FFFFFF', '#FF3C3C', '#4A9FFF', BRAND_ACCENT, '#FBBF24'];
 const FILTER_LIST = ['Original', 'B&W', 'Warm', 'Cool', 'Vivid'];
@@ -40,10 +39,14 @@ function useS() {
   const {width: SW, height: SH} = useWindowDimensions();
 
   const { colors } = useTheme();
-  return useMemo(() => makeStyles(colors), [colors]);
+  return useMemo(() => makeStyles(colors, SW, SH), [colors, SW, SH]);
 }
 
 export default function ImageEditorScreen() {
+  // Live metrics owned by THIS component — the hook further up belongs to the
+  // useS() style helper, a different scope. Follows rotation and folds.
+  const { width: SW, height: SH } = useWindowDimensions();
+
   const { colors } = useTheme();
   const styles = useS();
   const router = useRouter();
@@ -533,7 +536,10 @@ export default function ImageEditorScreen() {
   );
 }
 
-const makeStyles = (c: Palette) => StyleSheet.create({
+// Width/height are threaded in from useWindowDimensions() rather than read
+// from a module-level Dimensions.get(): orientation is 'default', so a frozen
+// value survived rotation, folds and split-screen resizes.
+const makeStyles = (c: Palette, SW: number, SH: number) => StyleSheet.create({
   container: { flex: 1, backgroundColor: c.bg },
   topBar: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingTop: Platform.OS === 'ios' ? 56 : 40, paddingHorizontal: 16, paddingBottom: 12, backgroundColor: 'rgba(2,11,24,0.95)' },
   topBtn: { paddingVertical: 6, paddingHorizontal: 14 },

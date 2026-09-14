@@ -1,9 +1,9 @@
 /**
- * Node self-test for the threat engine + duress-PIN tracker. Run via esbuild
+ * Node self-test for the threat engine + PIN-attempt tracker. Run via esbuild
  * bundle (see services/crypto/README_E2EE.md for the runner pattern). Dev-only.
  */
 import { assessThreats, signal, severityFor, DEFAULT_POLICY, type ThreatSignal } from './threatEngine';
-import { createDuressPinTracker, type KV } from './duressPin';
+import { createPinAttemptTracker, type KV } from './pinAttempts';
 
 let failures = 0;
 function check(name: string, cond: boolean): void {
@@ -41,21 +41,50 @@ const lvl = (sigs: ThreatSignal[]) => assessThreats(sigs).level;
   console.log('Severity mapping:');
   check('known type → mapped severity', severityFor('ROOT_DETECTED') === 'critical' && severityFor('ADB_ENABLED') === 'medium');
   check('unknown type → defaults high', severityFor('SOMETHING_NEW') === 'high');
+  // The enforcement path now grades the NATIVE VaultShield signal names. If one
+  // of these falls through to the 'high' default, a phone with developer
+  // options on gets hard-blocked — which is exactly the bug this fixed.
+  check('native compromise signals are critical',
+    severityFor('FRIDA_DETECTED') === 'critical' &&
+    severityFor('JAILBREAK_DETECTED') === 'critical' &&
+    severityFor('APK_RESIGNED') === 'critical');
+  check('native config signals stay below restrict',
+    lvl([signal('DEV_OPTIONS_ON'), signal('USB_DEBUGGING_ON'), signal('ACCESSIBILITY_RISK')]) === 'monitor');
   check('policy weights sane', DEFAULT_POLICY.weights.critical >= DEFAULT_POLICY.wipeAt);
 
-  // Duress PIN tracker
-  console.log('Duress-PIN tracker:');
-  const t = createDuressPinTracker(makeKV());
+  // PIN attempt tracker
+  console.log('PIN-attempt tracker:');
+  const t = createPinAttemptTracker(makeKV());
   check('starts at 0, no signal', (await t.getCount()) === 0 && (await t.getSignal()) === null);
   await t.recordFailure(); await t.recordFailure();
   check('2 failures → still no signal', (await t.getCount()) === 2 && (await t.getSignal()) === null);
   await t.recordFailure();
   check('3 failures → high signal (PIN_BRUTEFORCE)', (await t.getSignal())?.severity === 'high');
   await t.recordFailure(); await t.recordFailure();
-  check('5 failures → critical signal (DURESS_PIN_REPEATED)', (await t.getSignal())?.severity === 'critical');
-  check('5-failure signal would wipe', assessThreats([(await t.getSignal())!]).level === 'wipe');
+  // DELIBERATE: repeated wrong PINs must NEVER wipe on their own. The old
+  // tracker escalated to `critical` at 5, which handed any passer-by a
+  // denial-of-service (guess until the phone erases itself) and destroyed data
+  // on a pocket-dial. Guessing restricts; a wipe needs a second, independent
+  // indicator such as root or a hooking framework.
+  check('5 failures → still only high, never critical', (await t.getSignal())?.severity === 'high');
+  check('5 failures alone do NOT wipe', assessThreats([(await t.getSignal())!]).level !== 'wipe');
+  check('guessing + root DOES wipe', assessThreats([
+    (await t.getSignal())!, signal('ROOT_DETECTED', 'su found'),
+  ]).level === 'wipe');
+  check('backoff grows with the streak', (await t.getBackoffMs()) > 0);
   await t.recordSuccess();
   check('success resets the counter', (await t.getCount()) === 0 && (await t.getSignal()) === null);
+  check('a reset streak owes no backoff', (await t.getBackoffMs()) === 0);
+
+  // Failures decay: a streak that went quiet is not a streak. Three wrong
+  // entries on Monday and two on Friday must not look like five in a row.
+  let clock = 1_000_000;
+  const aged = createPinAttemptTracker(makeKV(), () => clock);
+  await aged.recordFailure(); await aged.recordFailure(); await aged.recordFailure();
+  check('3 recent failures signal', (await aged.getSignal())?.severity === 'high');
+  clock += 16 * 60_000;   // longer than DECAY_MS
+  check('the same failures go quiet after the decay window', (await aged.getSignal()) === null);
+  check('and the count is back to 0', (await aged.getCount()) === 0);
 
   console.log('──────────────────────────────');
   if (failures === 0) { console.log('ALL SECURITY TESTS PASSED ✓\n'); process.exit(0); }

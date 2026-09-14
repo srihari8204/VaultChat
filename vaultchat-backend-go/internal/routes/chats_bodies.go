@@ -97,44 +97,46 @@ var chatsMetaPublicKeys = jobs.MetaPublicKeySet
 //
 // Both are computed here, server-side, from whatever an existing client already
 // sends — so no client change is required for either to work.
+// The implementation now lives in jobs.SplitMeta, beside the allow-list, because
+// there are THREE writers of messages.meta (this one, the scheduled-message
+// deliverer, and the delete-on-delivery sweep) and a boundary only two of them
+// applied is not a boundary. This stays as the name the route code uses.
 func chatsSplitMeta(meta map[string]any) (pub map[string]any, priv map[string]any) {
-	if meta == nil {
-		return nil, nil
-	}
-	pub = map[string]any{}
-	priv = map[string]any{}
-	for k, v := range meta {
-		if chatsMetaPublicKeys[k] {
-			pub[k] = v
-			continue
-		}
-		priv[k] = v
-	}
-	// Derive optionCount from the poll options before they leave the spine.
-	if opts, ok := meta["options"].([]any); ok {
-		pub["optionCount"] = len(opts)
-	}
-	// Derive the bare mention ids from the full mention objects.
-	if arr, ok := meta["mentions"].([]any); ok {
-		ids := []any{}
-		for _, m := range arr {
-			if mm, ok := m.(map[string]any); ok {
-				if uid, ok := mm["userId"].(string); ok && uid != "" {
-					ids = append(ids, uid)
-				}
-			}
-		}
-		if len(ids) > 0 {
-			pub["mentionUserIds"] = ids
-		}
-	}
-	if len(pub) == 0 {
-		pub = nil
-	}
-	if len(priv) == 0 {
-		priv = nil
-	}
-	return pub, priv
+	return jobs.SplitMeta(meta)
+}
+
+// chatsSpineMeta is the ONLY thing allowed to become `messages.meta`.
+//
+// THE BUG THIS EXISTS TO CLOSE
+// ---------------------------
+// chatsSplitMeta was correct and was applied — but only inside
+// `if bodiesEnabled()`. That flag is REFUSED at boot in production
+// (jobs.bodyStoreRefused: the store's 3-hour ceiling cannot satisfy the 30-day
+// retention floor), so the branch never ran and the FULL client meta went onto
+// the durable spine on every send: `thumb` — a base64 JPEG preview of every
+// photo and video — filenames, MIME types, poll option TEXT and mention display
+// names. Measured on production, 22 of 24 image/video messages had a
+// server-readable preview.
+//
+// The allow-list was never the thing that was wrong. Its placement was. So the
+// split now runs UNCONDITIONALLY, and the body-store flag decides only where
+// the private half GOES:
+//
+//	bodies ON   priv is written to message_bodies in the same transaction
+//	bodies OFF  priv is DROPPED — the client already keeps it inside the
+//	            ciphertext (lib/msgEnvelope splits pub/priv before sealing), so
+//	            there is nothing for the server to hold on its behalf
+//
+// Dropping is the correct answer for an older client too. Such a client sends
+// `thumb` in the clear and renders from its own local copy; the only party that
+// loses anything is the server, which is the point. The response and the
+// realtime fan-out still echo the full meta the sender supplied (see
+// chatsMessagePost), so nothing on the wire changes — only what is persisted.
+//
+// Returns the jsonb bind param for the spine column and the private half.
+func chatsSpineMeta(meta map[string]any) (spineParam any, priv map[string]any) {
+	pub, priv := chatsSplitMeta(meta)
+	return chatsJSONParam(pub), priv
 }
 
 // chatsJSONParam marshals a map for a jsonb bind. nil stays nil so the column is

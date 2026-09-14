@@ -20,7 +20,7 @@ export interface VaultID {
 const VAULT_ID_KEY = 'vaultchat_vault_id';
 const PRIVATE_KEY_SECURE = 'vaultchat_private_key';
 
-// Generate a new VaultID — no phone number needed!
+// Generate a new VaultID ï¿½ no phone number needed!
 export const generateVaultID = async (displayName: string, avatar: string, bio: string): Promise<VaultID> => {
   // Create real ethereum wallet (Ethereum-format keypair (local, not on-chain))
   const wallet = ethers.Wallet.createRandom();
@@ -69,7 +69,7 @@ export const saveVaultID = async (vaultID: VaultID): Promise<void> => {
   await AsyncStorage.setItem(VAULT_ID_KEY, JSON.stringify(vaultID));
 };
 
-// Delete VaultID (MemoryShield — complete destruction)
+// Delete VaultID â€” removes the stored identity and its private key.
 export const destroyVaultID = async (): Promise<void> => {
   await AsyncStorage.removeItem(VAULT_ID_KEY);
   await SecureStore.deleteItemAsync(PRIVATE_KEY_SECURE);

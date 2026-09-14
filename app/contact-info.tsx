@@ -27,8 +27,6 @@ import { readCache, writeCache } from '../lib/localCache';
 import { unionWithLocalHistory } from '../lib/messageHistory';
 import { Avatar, AuroraBackground } from '../components/ui';
 
-const { width: SW } = Dimensions.get('window');
-const MEDIA_SIZE = (SW - 32 - 8) / 3;
 const URL_RE = /(https?:\/\/[^\s]+)/gi;
 
 interface LinkHit { id: number; url: string }
@@ -51,12 +49,19 @@ function useS() {
   // rotation; StyleSheet.create keeps the initial value, which is fine for
   // static rules.
   const {width: SW} = useWindowDimensions();
+  // Live width: the media grid re-tiles on rotation instead of keeping the
+  // size the app launched with.
 
   const { colors } = useTheme();
-  return useMemo(() => makeStyles(colors), [colors]);
+  return useMemo(() => makeStyles(colors, SW), [colors, SW]);
 }
 
 export default function ContactInfoScreen() {
+  // Live metrics owned by THIS component — the hook further up belongs to the
+  // useS() style helper, a different scope. Follows rotation and folds.
+  const { width: SW } = useWindowDimensions();
+  const MEDIA_SIZE = (SW - 32 - 8) / 3;
+
   const router = useRouter();
   const { colors } = useTheme();
   const s = useS();
@@ -398,7 +403,10 @@ export default function ContactInfoScreen() {
   );
 }
 
-const makeStyles = (c: Palette) => StyleSheet.create({
+// Width/height are threaded in from useWindowDimensions() rather than read
+// from a module-level Dimensions.get(): orientation is 'default', so a frozen
+// value survived rotation, folds and split-screen resizes.
+const makeStyles = (c: Palette, SW: number) => StyleSheet.create({
   root: { flex: 1, backgroundColor: 'transparent' },
   hero: { alignItems: 'center', paddingTop: 54, paddingBottom: 24 },
   backBtn: { position: 'absolute', top: 54, left: 16, zIndex: 10 },

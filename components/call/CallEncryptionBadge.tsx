@@ -1,10 +1,13 @@
 // components/call/CallEncryptionBadge.tsx — says which protection is actually
 // in force on THIS call.
 //
-// Required by decision D-1 (openspec/changes/calls-sfu-platform/design.md):
-// 1:1 calls are end-to-end encrypted; group calls will be routed through the
-// SFU and are encrypted in transit only, because the server must be able to
-// decrypt group media for recording and streaming to exist at all.
+// Required by decision D-1 (openspec/changes/calls-sfu-platform/design.md).
+// That decision assumed the SFU must read group media for recording and
+// streaming to exist. It does not: @livekit/react-native-webrtc ships
+// RTCFrameCryptor, so frames are encrypted before they reach the transport and
+// the SFU forwards ciphertext it cannot decode (lib/call/frameCrypto.ts).
+// Recording/streaming would need a participant that holds the key, not a
+// server that reads everyone's.
 //
 // WHY A COMPONENT RATHER THAN A STRING
 // ------------------------------------
@@ -20,25 +23,31 @@
 import React from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { CALL_FRAME_E2EE } from '../../lib/call/types';
 
 export type CallProtection = 'e2ee' | 'transport';
 
 /**
- * EVERY call is 'transport' now — owner decision, 2026-08-16.
+ * EVERY call is 'e2ee' while CALL_FRAME_E2EE is on — 1:1 and group alike.
  *
- * Calls used to be end-to-end encrypted at 1:1 (a per-call key, media never
- * leaving the two devices) and this returned 'e2ee' for two participants. That
- * is no longer true: all media goes through the SFU and the frame encryption
- * was removed to get calling working (see lib/call/room.ts for the reasoning).
+ * Between 2026-08-16 and the frame-crypto rewiring this returned 'transport'
+ * unconditionally, because the SFU genuinely could decode every frame. It can
+ * no longer: a per-call 32-byte key is sealed to each recipient through the
+ * pairwise Double Ratchet and installed as the frame cryptor's shared key
+ * before anything is published.
  *
- * The count argument stays so call sites do not churn, and because a future
- * build that restores frame encryption will need exactly this decision back.
- * What must never happen is this function returning 'e2ee' while the media
- * path cannot honour it — a privacy claim the product cannot keep is worse
- * than no badge at all.
+ * The participant count no longer changes the answer — the same mechanism
+ * covers both — but it stays so call sites do not churn, and because the
+ * decision belongs here if the two guarantees ever diverge again.
+ *
+ * THE RULE THIS FUNCTION EXISTS TO KEEP: it must never return 'e2ee' while the
+ * media path cannot honour it. That is safe here only because the publish path
+ * is fail-closed — no key or no cryptor means nothing is published at all
+ * (lib/call/room.ts), rather than something published in the clear. If that
+ * ever softens to a warn-and-continue, this must go back to 'transport'.
  */
 export function protectionFor(_participantCount: number): CallProtection {
-  return 'transport';
+  return CALL_FRAME_E2EE ? 'e2ee' : 'transport';
 }
 
 const COPY: Record<CallProtection, { icon: any; label: string }> = {

@@ -109,11 +109,58 @@ func BodyStoreEnabled() bool {
 		return false
 	}
 	if why := bodyStoreRefused(); why != "" {
-		bodyRefusalOnce.Do(func() { log.Printf("[retention] %s", why) })
+		bodyRefusalOnce.Do(func() { logBodyRefusalBanner(why) })
 		metrics.Inc("message_bodies_enable_refused_total")
 		return false
 	}
 	return true
+}
+
+// logBodyRefusalBanner makes the refusal LOUD.
+//
+// It was one INFO-shaped line among a thousand at boot, and the consequence was
+// exactly what you would predict: deploy/env.example and
+// deploy/docker-compose.box.yml.example both defaulted MESSAGE_BODIES=1, an
+// operator set it on production, the line scrolled past, and the deployment
+// spent months asserting a protection that had never once engaged. The
+// production audit (2026-08-15_audit.md §2.4) found `count(*) FROM
+// message_bodies` = 0 with the flag ON.
+//
+// A refusal that changes the meaning of a security flag deserves to look like
+// one. It is still a log line and not a fatal: refusing to boot would turn an
+// operator's stale env var into a platform outage, and the degraded state is
+// SAFER for retention (bodies stay on the durable spine), not less safe. What it
+// is not allowed to be is quiet.
+func logBodyRefusalBanner(why string) {
+	const rule = "════════════════════════════════════════════════════════════════════════"
+	log.Printf("\n%s\n[retention] MESSAGE_BODIES=1 IS BEING IGNORED\n%s\n%s\n\n"+
+		"The ephemeral body store is NOT running. Every message body is written\n"+
+		"permanently to messages.content and is reclaimed only by delivery-driven\n"+
+		"retention (DELETE_ON_DELIVERY), not by this flag.\n\n"+
+		"UNSET MESSAGE_BODIES. Leaving it set advertises a guarantee this build\n"+
+		"cannot provide, and it also leaves media on the legacy 14-day window\n"+
+		"(sweepDeliveredAttachments keys the short TTL off this same flag).\n\n"+
+		"The store is scheduled for REMOVAL, not repair — see\n"+
+		"2026-08-15_implementation_plan.md phase S3. Do not 'fix' the refusal by\n"+
+		"relaxing message_bodies_ttl_cap.\n%s",
+		rule, why, rule, rule)
+}
+
+// RegisterBodyRefusalGauge exposes the refusal to monitoring, because a log line
+// at boot is invisible to anyone who was not watching that boot.
+//
+//	message_bodies_refused  1 = MESSAGE_BODIES is set but not in effect
+//
+// Alert on it being 1. It is the only signal that separates "bodies are off"
+// from "bodies were asked for and silently declined", and those two look
+// identical in every other metric.
+func RegisterBodyRefusalGauge() {
+	metrics.SetGauge("message_bodies_refused", func() float64 {
+		if bodyStoreRefused() != "" {
+			return 1
+		}
+		return 0
+	})
 }
 
 // StartPartitionMaintenance keeps the message_bodies partition window ahead of

@@ -3,9 +3,10 @@
 // questions (argon2) → mpin/set (argon2, marks onboarding_complete). Then → success.
 // Weak MPINs are rejected client-side too (server re-checks).
 
+import { Ionicons } from '@expo/vector-icons';
 import { Stack, useRouter } from 'expo-router';
-import { useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, Animated, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { ActivityIndicator, Alert, Animated, BackHandler, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { type Palette } from '../constants/theme';
 import { useTheme } from '../lib/theme';
 import { MpinInput } from '../components/auth/MpinInput';
@@ -34,6 +35,20 @@ export default function OnboardMpin() {
   const shake = useRef(new Animated.Value(0)).current;
 
   const dobYear = onboarding.get().dob ? onboarding.get().dob.slice(0, 4) : undefined;
+
+  // BACK IS FINE UNTIL THE CONFIRM LANDS, AND FATAL AFTER IT.
+  //
+  // Nothing has been sent while the user is picking digits, so back to the
+  // security questions is a legitimate correction — hence the arrow below.
+  // Once onConfirm starts, three writes are in flight (profile/init → security
+  // questions → mpin/set) and the screen that owns the redirect to
+  // /onboard-success is this one: leaving mid-commit creates the account with
+  // nobody to hand it to, and the retry then fails as "email already
+  // registered". So back is swallowed for those few seconds only.
+  useEffect(() => {
+    const sub = BackHandler.addEventListener('hardwareBackPress', () => busy);
+    return () => sub.remove();
+  }, [busy]);
 
   const doShake = () => {
     shake.setValue(0);
@@ -71,7 +86,14 @@ export default function OnboardMpin() {
   return (
     <View style={s.screen}>
       <AuroraBackground />
-      <Stack.Screen options={{ headerShown: false }} />
+      <Stack.Screen options={{ headerShown: false, gestureEnabled: !busy }} />
+      {/* Step 3 of 3 had no back affordance at all — the only step in the chain
+          without one, though returning to the questions is perfectly valid. */}
+      {!busy && (
+        <TouchableOpacity onPress={() => router.back()} style={s.back} hitSlop={10} accessibilityLabel="Back">
+          <Ionicons name="arrow-back" size={24} color={colors.text} />
+        </TouchableOpacity>
+      )}
       <View style={s.body}>
         <Text style={s.lock}>🔐</Text>
         <Text style={s.title}>{setting ? 'Create your MPIN' : 'Confirm your MPIN'}</Text>
@@ -94,7 +116,8 @@ export default function OnboardMpin() {
 
 const makeStyles = (c: Palette) => StyleSheet.create({
   screen: { flex: 1, backgroundColor: 'transparent' },
-  body: { flex: 1, paddingHorizontal: 24, paddingTop: 96, alignItems: 'center' },
+  back: { paddingHorizontal: 20, paddingTop: 8, alignSelf: 'flex-start' },
+  body: { flex: 1, paddingHorizontal: 24, paddingTop: 72, alignItems: 'center' },
   lock: { fontSize: 44, marginBottom: 12 },
   title: { color: c.text, fontSize: 24, fontWeight: '900' },
   sub: { color: c.textDim, fontSize: 14, marginTop: 8, textAlign: 'center' },

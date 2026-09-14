@@ -22,7 +22,9 @@ export default function ContactScreen() {
   const { colors } = useTheme();
   const styles = useS();
   const router = useRouter();
-  const { name, avatar } = useLocalSearchParams();
+  // chatId matters: app/chat-export.tsx keys its lock check off it, and without
+  // one the export screen cannot tell a locked chat from an unlocked one.
+  const { name, avatar, chatId, id } = useLocalSearchParams();
   const [isMuted, setIsMuted] = useState(false);
   const [isBlocked, setIsBlocked] = useState(false);
 
@@ -115,7 +117,7 @@ export default function ContactScreen() {
 
         <TouchableOpacity
           style={styles.settingRow}
-          onPress={() => router.push({ pathname: '/chat-export' as any, params: { peerName: contactName } })}
+          onPress={() => router.push({ pathname: '/chat-export' as any, params: { peerName: contactName, chatId: String(chatId ?? id ?? '') } })}
         >
           <Ionicons name="share-outline" size={22} color={colors.text} />
           <Text style={styles.settingLabel}>Export chat</Text>

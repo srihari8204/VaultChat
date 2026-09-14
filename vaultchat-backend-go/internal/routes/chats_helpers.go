@@ -5,7 +5,6 @@ package routes
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
@@ -22,7 +21,9 @@ import (
 	"vaultchat/backend-go/internal/fcm"
 	"vaultchat/backend-go/internal/groups"
 	"vaultchat/backend-go/internal/httpx"
+	"vaultchat/backend-go/internal/metrics"
 	"vaultchat/backend-go/internal/realtime"
+	"vaultchat/backend-go/internal/redisx"
 	"vaultchat/backend-go/internal/vault"
 	"vaultchat/backend-go/internal/workx"
 )
@@ -367,10 +368,78 @@ func chatsValidateAttachmentRef(ctx context.Context, userID string, meta map[str
 	return ""
 }
 
+// ─── per-account send limit ────────────────────────────────────────────
+//
+// POST /chats/{id}/messages is the hottest write path in the service and had NO
+// rate limit at all — `grep -n Consume internal/routes/chats*.go` returned
+// nothing. The only throttle was per-group SlowModeSeconds, which an admin sets,
+// most chats do not have, and which does not apply to admins or to direct chats.
+//
+// That matters more here than it would elsewhere because the realtime hub is
+// single-node with SYNCHRONOUS in-process fan-out: one account posting in a
+// large group drives a write, an unread bump, a push fan-out and a socket write
+// per member, inline. One client could therefore saturate the whole deployment.
+//
+// TWO BUCKETS, BURST AND SUSTAINED — the same shape as the OTP limits in auth.go.
+// A single window cannot express both "a paste-forward of 40 items must work"
+// and "nobody sends 40 items a second for an hour".
+//
+//	burst     60 per 10s   6 sends/second. Human typing tops out near 1/s; the
+//	                       realistic bursts are multi-select forward and a
+//	                       multi-photo picker, both of which fire one POST per
+//	                       item — 60 covers a 60-item forward with no wait, and a
+//	                       larger one simply paces at 6/s instead of unbounded.
+//	sustained 1200 per 1h  20/minute averaged over an hour, ~29k/day. The busiest
+//	                       real accounts on this service are two orders of
+//	                       magnitude under that; anything above it is a script.
+//
+// Keyed on the ACCOUNT, not the IP (carrier NAT shares an address with thousands
+// of innocent users, and an account is what actually gets banned) and not on the
+// chat (per-chat keying is trivially evaded by rotating chats, which is exactly
+// the fan-out that hurts).
+//
+// Reactions and media count the same as text: they cost the same fan-out.
+const (
+	chatsSendBurstLimit  int64 = 60
+	chatsSendBurstWindow int64 = 10
+	chatsSendHourLimit   int64 = 1200
+	chatsSendHourWindow  int64 = 3600
+)
+
+// chatsSendConsume is redisx.Consume behind a variable so the limit boundary is
+// testable without a live Redis. Production never reassigns it.
+var chatsSendConsume = redisx.Consume
+
+// chatsSendAllowed charges one send against both buckets. Returns the seconds to
+// wait when refused.
+//
+// FAILS OPEN, deliberately, by inheriting redisx.Consume's behaviour (the same
+// convention as callSessionStart): a Redis outage must degrade to today's
+// unlimited behaviour, never to "nobody on the platform can send a message".
+func chatsSendAllowed(ctx context.Context, uid string) (bool, int64) {
+	if rl := chatsSendConsume(ctx, "msg:send:"+uid, chatsSendBurstLimit, chatsSendBurstWindow); !rl.Allowed {
+		return false, rl.ResetInSec
+	}
+	if rl := chatsSendConsume(ctx, "msg:send:h:"+uid, chatsSendHourLimit, chatsSendHourWindow); !rl.Allowed {
+		return false, rl.ResetInSec
+	}
+	return true, 0
+}
+
 func chatsMessagePost(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	user := httpx.UserFrom(r)
 	chatID := r.PathValue("id")
+
+	// Charged BEFORE the membership lookup, so a flood costs a Redis INCR rather
+	// than a database round trip per request.
+	if ok, retry := chatsSendAllowed(ctx, user.ID); !ok {
+		metrics.Inc("message_send_rate_limited_total")
+		httpx.Err(w, http.StatusTooManyRequests, "You're sending messages too fast. Wait a moment.",
+			map[string]any{"retryAfter": retry})
+		return
+	}
+
 	mem := chatsRequireMem(w, r, 403, "Not a member of this chat", "Failed to send message")
 	if mem == nil {
 		return
@@ -445,21 +514,17 @@ func chatsMessagePost(w http.ResponseWriter, r *http.Request) {
 		content = b["content"]
 	}
 	var meta map[string]any
-	var metaParam any
-	// Marshal to a JSON string, never pass the raw map: under
-	// default_query_exec_mode=exec (P2.3, PgBouncer) pgx cannot infer a type
-	// for map[string]any and every media send 500s with "cannot find encode
-	// plan". Postgres casts the text param to jsonb from the column type.
-	switch mv := b["meta"].(type) {
-	case map[string]any:
+	// Only an OBJECT meta is carried forward. A JSON array (typeof [] ===
+	// 'object' in JS) used to be marshalled onto the spine verbatim — it cannot
+	// carry a routing key the server reads, so it was pure retained content on a
+	// table with no expiry. It is now simply not persisted.
+	//
+	// The spine bind param is produced by chatsSpineMeta, which marshals to a
+	// JSON string rather than passing a raw map: under
+	// default_query_exec_mode=exec (P2.3, PgBouncer) pgx cannot infer a type for
+	// map[string]any and every media send 500s with "cannot find encode plan".
+	if mv, ok := b["meta"].(map[string]any); ok {
 		meta = mv
-		if j, err := json.Marshal(mv); err == nil {
-			metaParam = string(j)
-		}
-	case []any:
-		if j, err := json.Marshal(mv); err == nil {
-			metaParam = string(j) // typeof [] === 'object' in JS
-		}
 	}
 
 	// Groups & Circles: an ANNOUNCEMENT is an ordinary encrypted message flagged
@@ -669,18 +734,22 @@ func chatsMessagePost(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// ── ephemeral-body split (migration 099) ──────────────────────────
-	// When bodies are on, the spine row carries NO ciphertext and only the
-	// routing subset of meta; the payload and the private metadata go to
-	// message_bodies inside the same transaction. When off, both of these are
-	// the original values and the INSERT below is byte-identical to before.
+	// ── meta split (ALWAYS) + ephemeral body (flagged, migration 099) ──
+	//
+	// The meta allow-list is applied unconditionally. It used to sit inside the
+	// `bodiesEnabled()` branch, and that flag is refused at boot in production —
+	// so the split never ran and `meta.thumb` (a base64 JPEG of every photo and
+	// video) was persisted on a table with no expiry. See chatsSpineMeta.
+	//
+	// The flag now decides only whether the private half is STORED (ephemeral
+	// body) or DROPPED; either way it never touches the spine. The ciphertext
+	// still moves only when bodies are on — content on the spine is what
+	// satisfies the 30-day retention floor while the body store is refused.
 	spineContent := content
-	spineMetaParam := metaParam
+	spineMetaParam, priv := chatsSpineMeta(meta)
 	var bodyMetaPrivate map[string]any
 	if bodiesEnabled() {
-		pub, priv := chatsSplitMeta(meta)
 		spineContent = nil
-		spineMetaParam = chatsJSONParam(pub)
 		bodyMetaPrivate = priv
 	}
 
@@ -780,7 +849,15 @@ func chatsMessagePost(w http.ResponseWriter, r *http.Request) {
 	// chatsMsgSelBody, which already merged body+spine, so its values are
 	// authoritative — and if that body has since been reclaimed, NULL is the
 	// honest answer rather than a resurrection.
-	if bodiesEnabled() && !duplicate {
+	//
+	// NO LONGER GATED ON bodiesEnabled(). The meta split is unconditional now, so
+	// the spine row's `meta` is the routing subset on EVERY send — echoing the row
+	// as-read would strip the filename/thumbnail/mention detail out of the sender's
+	// own response and out of every online recipient's live delivery, on a flag
+	// that is refused in production. The values echoed here are the ones this
+	// request just received; the difference between them and the row is exactly
+	// what the server declined to keep.
+	if !duplicate {
 		if s, ok := content.(string); ok {
 			msg.Content = &s
 		}
@@ -824,6 +901,16 @@ func chatsSendMessagePush(chatID, senderID string, msg chatsPublicMsg) {
 				if uid, ok := mm["userId"].(string); ok && uid != "" {
 					mentionedIds = append(mentionedIds, uid)
 				}
+			}
+		}
+	} else if arr, ok := meta["mentionUserIds"].([]any); ok {
+		// The spine keeps only the DERIVED bare ids (chatsSplitMeta), so any push
+		// built from a row rather than from the inbound request — the dedup/retry
+		// path, a later re-send — sees this shape instead. Reading only one of the
+		// two silently stops overriding a muted chat for mentioned users.
+		for _, v := range arr {
+			if uid, ok := v.(string); ok && uid != "" {
+				mentionedIds = append(mentionedIds, uid)
 			}
 		}
 	}

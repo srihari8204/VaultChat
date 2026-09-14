@@ -10,6 +10,7 @@ import { type Palette } from '../constants/theme';
 import { useTheme } from '../lib/theme';
 import { MpinInput } from '../components/auth/MpinInput';
 import { onboarding, verifyMpinRemote, onboardingError } from '../lib/onboarding';
+import { resetTo } from '../lib/authNav';
 import { AuroraBackground } from '../components/ui';
 
 export default function MpinEntry() {
@@ -34,7 +35,9 @@ export default function MpinEntry() {
     try {
       await verifyMpinRemote(userId, value);
       onboarding.reset();
-      router.replace('/(tabs)/chats' as any);
+      // resetTo, not replace: the landing form below this screen must not
+      // survive the sign-in (lib/authNav.ts).
+      resetTo('/(tabs)/chats');
     } catch (e: any) {
       setMpin('');
       doShake();

@@ -91,6 +91,7 @@ export default function DecentralizedIDScreen() {
   return (
     <>
       <Stack.Screen options={{
+        headerShown: true, /* the root Stack sets headerShown:false app-wide, so the options below were inert and this screen had no back control at all */ 
         title: 'Decentralised ID',
         headerStyle: { backgroundColor: c.glassSoft },
         headerTintColor: '#1F2937',

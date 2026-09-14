@@ -9,6 +9,7 @@ import {
 import { useTheme } from '../lib/theme';
 import { type Palette } from '../constants/theme';
 import { useLocalSearchParams, Stack, useRouter } from 'expo-router';
+import { Ionicons } from '@expo/vector-icons';
 import { Video, ResizeMode, AVPlaybackStatus } from 'expo-av';
 import * as ScreenOrientation from 'expo-screen-orientation';
 import * as Sharing from 'expo-sharing';
@@ -379,6 +380,34 @@ export default function VideoPlayerScreen() {
           </TouchableOpacity>
         </View>
       </Animated.View>
+    );
+  }
+
+  // NO SOURCE = NOTHING TO PLAY. Reached by a bare deep link, or a notification
+  // whose file was revoked or expired. Without this the player drew a black
+  // full-bleed surface with headerShown:false — no text, no control, no exit.
+  // After the hooks, so hook order is unchanged.
+  if (!videoUri) {
+    return (
+      <View style={[styles.container, { alignItems: 'center', justifyContent: 'center', padding: 24, gap: 12 }]}>
+        <Stack.Screen options={{ headerShown: false }} />
+        <StatusBar hidden />
+        <Ionicons name="videocam-off-outline" size={44} color={colors.textDim} />
+        <Text style={{ color: '#fff', fontSize: 17, fontWeight: '700', textAlign: 'center' }}>
+          Nothing to play
+        </Text>
+        <Text style={{ color: colors.textDim, fontSize: 14, textAlign: 'center' }}>
+          This link carried no video, or the file is no longer available.
+        </Text>
+        <TouchableOpacity
+          onPress={() => (router.canGoBack() ? router.back() : router.replace('/(tabs)/chats' as any))}
+          accessibilityRole="button"
+          accessibilityLabel="Go back"
+          style={{ marginTop: 8, paddingHorizontal: 20, paddingVertical: 12, borderRadius: 24, backgroundColor: '#1D4ED8' }}
+        >
+          <Text style={{ color: '#fff', fontWeight: '700' }}>Go back</Text>
+        </TouchableOpacity>
+      </View>
     );
   }
 

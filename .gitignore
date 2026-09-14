@@ -105,3 +105,10 @@ rust/**/target/
 # nav-core Rust build output (same as the crypto/vaultbeam crates)
 services/nav/rust/target/
 vaultchat-backend-go/api.exe
+
+# Firebase app config. Ships inside every APK by design (the Android API key is
+# restricted by package name + signing-cert SHA-1, not by secrecy), but it names
+# the prod project and it does not belong in source control. Provision it in CI
+# / EAS as a secret file. See SECRETS.md.
+google-services.json
+GoogleService-Info.plist

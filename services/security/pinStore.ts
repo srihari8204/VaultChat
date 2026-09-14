@@ -35,6 +35,18 @@ async function write(rec: PinRecord): Promise<void> {
   await SecureStore.setItemAsync(KEY, JSON.stringify(rec));
 }
 
+// ─── #32: session sealing is OPT-IN and PIN-GATED, and this is the gate ───────
+//
+// Sealing the real session under a PIN is only safe for a user who HAS one.
+// Every other unlock path in the app (biometric, the REMOTE MPIN check in
+// app/app-lock) produces no local PIN, so a blanket seal would lock those users
+// out permanently. So the seal is hung on the two moments that define "this
+// user has a local PIN", right here where all callers already route through:
+// setPin → seal what already exists, clearPin → put it back in the clear.
+// A user who never sets a PIN never touches either, and their token path stays
+// byte-identical to before. Dynamic import: lib/api pulls in half the app.
+const apiMod = () => import('../../lib/api');
+
 /** Replace the stored PIN. Also clears the legacy keys so no weak copy lingers. */
 export async function setPin(pin: string): Promise<void> {
   if (!pin || pin.length < 4 || pin.length > 8 || !/^\d+$/.test(pin)) {
@@ -42,6 +54,10 @@ export async function setPin(pin: string): Promise<void> {
   }
   await write(await makePinRecordAsync(pin));
   await clearLegacy();
+  // Seal the session that already exists under the new PIN (and provision the
+  // at-rest cache DEK). No-op when the flag is off or there is no session yet;
+  // it keeps the plaintext fallback on any failure, so this cannot brick login.
+  try { await (await apiMod()).sealCurrentSession(pin); } catch {}
 }
 
 /** True when `pin` is the stored PIN. Upgrades a legacy value on first success. */
@@ -72,6 +88,10 @@ export async function hasPin(): Promise<boolean> {
 export async function clearPin(): Promise<void> {
   try { await SecureStore.deleteItemAsync(KEY); } catch {}
   await clearLegacy();
+  // Removing the PIN removes the only key to the sealed session — put the
+  // tokens back on the plaintext path so the user isn't stranded. No-op during
+  // logout (clearTokens() already ran and there is nothing in memory).
+  try { await (await apiMod()).unsealCurrentSession(); } catch {}
 }
 
 async function verifyLegacy(pin: string): Promise<boolean> {

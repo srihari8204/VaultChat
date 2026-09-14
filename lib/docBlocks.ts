@@ -16,7 +16,7 @@
 import { unzipSync, strFromU8 } from 'fflate';
 import {
   decodeEntities, docKind, orderedSheetPaths, orderedSlidePaths,
-  pdfPageStreams, MAX_DOC_BYTES, colIndexFromRef,
+  pdfPageStreams, MAX_DOC_BYTES, colIndexFromRef, unzipBudget, DOC_BOMB_MESSAGE,
 } from './docText';
 
 // ─── Model ───────────────────────────────────────────────────────────
@@ -319,8 +319,14 @@ export function extractDocBlocks(bytes: Uint8Array, filename: string): BlocksRes
   }
 
   let files: Record<string, Uint8Array>;
-  try { files = unzipSync(bytes); }
-  catch { throw new Error('This file is not a readable document.'); }
+  // Same output bound as extractDocText — see MAX_UNZIPPED_BYTES in docText.ts.
+  // Both entry points read the same untrusted attachment, so a cap on only one
+  // of them is no cap at all.
+  try { files = unzipSync(bytes, { filter: unzipBudget() }); }
+  catch (e: any) {
+    if (e?.message === DOC_BOMB_MESSAGE) throw e;
+    throw new Error('This file is not a readable document.');
+  }
   const get = (p: string) => (files[p] ? strFromU8(files[p]) : '');
 
   if (kind === 'docx') {

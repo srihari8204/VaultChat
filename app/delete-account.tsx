@@ -28,6 +28,7 @@ import { identityMatches } from '../lib/confirmIdentity';
 import { deleteAccount } from '../lib/chatService';
 import { unregisterPushToken } from '../lib/push';
 import { disconnect as disconnectSocket } from '../lib/socket';
+import { resetTo } from '../lib/authNav';
 import { logoutUser } from './(constants)/authService';
 import { AuroraBackground, KeyboardSafe } from '../components/ui';
 
@@ -88,12 +89,15 @@ export default function DeleteAccountScreen() {
       try { await unregisterPushToken(); } catch {}
       try { disconnectSocket(); } catch {}
       await logoutUser();          // wipes local chats, media and backups
-      router.replace('/onboard' as any);
+      // resetTo, not replace: Settings (and everything else the user walked
+      // through to get here) must not survive the deletion — replace swaps only
+      // the top entry, so BACK led straight back into an account that is gone.
+      resetTo('/onboard');
     } catch (e: any) {
       setBusy(false);
       Alert.alert('Delete failed', e?.message ?? 'Check your connection and try again.');
     }
-  }, [reason, router]);
+  }, [reason]);
 
   const confirm = useCallback(() => {
     if (!armed || busy) return;

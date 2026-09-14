@@ -21,6 +21,16 @@ import (
 const maxHashesPerRequest = 5000
 const maxTrusted = 3
 
+// Per-ACCOUNT phone-hash budget for /contacts/match, on top of the 5 req/min
+// call limiter. The call limiter bounds requests; it does not bound how many
+// numbers an account can probe — 5 req/min x 5000 hashes is 36M hashes a day,
+// which turns discovery into a directory-enumeration oracle over the ~10^9-10^10
+// mobile keyspace. A real address book is <= 5000 numbers and re-syncs rarely,
+// so four full syncs a day is generous headroom for a human and a hard ceiling
+// for a scraper.
+const matchHashesPerDay = 20000
+const matchQuotaWindow = 86400
+
 var hex64Re = regexp.MustCompile(`^[a-f0-9]{64}$`)
 
 func RegisterContacts(mux *http.ServeMux) {
@@ -70,6 +80,17 @@ func contactsMatch(w http.ResponseWriter, r *http.Request) {
 	}
 	if len(hashes) == 0 {
 		httpx.JSON(w, 200, []any{})
+		return
+	}
+
+	// Charge the daily per-account hash budget. Counted AFTER dedup/validation
+	// so a client that sends the same number twice, or sends junk, isn't billed
+	// for it — and so the meter tracks distinct numbers probed, which is the
+	// thing we actually care about capping.
+	if q := redisx.ConsumeBy(ctx, "contacts:hashes:"+user.ID,
+		int64(len(hashes)), matchHashesPerDay, matchQuotaWindow); !q.Allowed {
+		httpx.Err(w, http.StatusTooManyRequests, "Contact sync quota exceeded",
+			map[string]any{"retryAfter": q.ResetInSec})
 		return
 	}
 

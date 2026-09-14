@@ -416,6 +416,12 @@ async function reapAwaitingDelivery(): Promise<void> {
 // ─── Flush loop ───────────────────────────────────────────────
 
 let flushing = false;
+/** Set when flush() is called while a pass is already running; drains one more
+ *  pass at the end so a mid-flush send is never left waiting for the tick. */
+let flushAgain = false;
+/** Accepted-row GC is a 7-day cutoff, so once every few minutes is plenty. */
+const REAP_INTERVAL_MS = 5 * 60_000;
+let lastReapAt = 0;
 let flushScheduled: any = null;
 
 /** Arm the next flush, replacing any pending one. */
@@ -550,13 +556,35 @@ async function postOnce(item: QueuedMessage): Promise<PostResult> {
  * backoff. On 5 failures the entry is marked failed and emitted.
  */
 export async function flush(): Promise<void> {
-  if (flushing) return;
+  // A SEND THAT ARRIVES MID-FLUSH MUST NOT BE DROPPED.
+  //
+  // This used to `return` outright. enqueue() calls flush() straight after
+  // writing the row, so a message typed while any other flush was in flight —
+  // the 30 s periodic tick, a backoff retry, a reconnect drain — had its flush
+  // swallowed, and then sat in the queue showing a clock until the NEXT
+  // scheduled pass. With the backoff ladder that is up to 60 s of "sending…"
+  // for a message whose POST would have taken 200 ms, and it gets more likely
+  // the longer a flush takes (see the reap note below).
+  //
+  // Coalesce instead of dropping: remember that someone asked, and run exactly
+  // one more pass when the current one finishes. Bounded — the flag is cleared
+  // before the re-run, so N concurrent callers produce one extra pass, not N.
+  if (flushing) { flushAgain = true; return; }
   flushing = true;
   try {
-    // Reap first: accepted-but-unconfirmed rows are inert, and leaving them in
-    // place would let them fill a 200-item page and starve real sends behind
-    // them. Cheap — it only touches rows past the cap.
-    await reapAwaitingDelivery();
+    // Reap accepted-but-unconfirmed rows so they cannot fill a 200-item page
+    // and starve real sends behind them.
+    //
+    // THROTTLED, because this is garbage collection against a SEVEN-DAY cutoff
+    // (AWAIT_DELIVERY_MAX_MS) and it was running on every single send. Each run
+    // reads 500 rows out of SQLite and unseals every one of them through the
+    // cache codec — before the message the user is waiting on is even looked
+    // at. Nothing expires in the milliseconds between two sends, so per-send
+    // was pure latency on the path that matters most.
+    if (Date.now() - lastReapAt >= REAP_INTERVAL_MS) {
+      lastReapAt = Date.now();
+      await reapAwaitingDelivery();
+    }
     const q = await load();
     if (q.length === 0) {
       // An empty page while rotated means we walked off the end. Rewind to the
@@ -655,6 +683,10 @@ export async function flush(): Promise<void> {
   // it. Queued messages are what the user is waiting on; re-bodying one the
   // server already accepted is strictly less urgent.
   await reBodyAwaiting().catch(() => {});
+  // Someone enqueued while we were busy — serve them now rather than making
+  // them wait for the next scheduled tick. Cleared first so this is one extra
+  // pass, not a loop.
+  if (flushAgain) { flushAgain = false; void flush().catch(() => {}); }
 }
 
 // ─── Auto-flush on reconnect + periodic safety net ────────────
