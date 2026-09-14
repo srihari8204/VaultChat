@@ -165,25 +165,66 @@ for (const [name, src] of [['TicTacToe', TTT], ['Chess', CHESS], ['Ludo', LUDO],
 // ── voice ─────────────────────────────────────────────────────────────
 const VOICE = readFileSync('lib/games/useTableVoice.ts', 'utf8');
 
-// The SFU these used to check is gone: /api/voice/token answers 404 and the
-// deployment reports sfu:false, so voice is now a peer-to-peer mesh (see the
-// header of useTableVoice.ts). The GUARANTEES did not change — only where they
-// are enforced — so these assert the mesh's enforcement points, not LiveKit's.
+// Table voice has moved TWICE and these assertions have to move with it. It
+// began on the games server's own SFU (/api/voice/token — 404, and the
+// deployment reports sfu:false), became a peer-to-peer mesh port of the web
+// client, and is now a room on VaultChat's OWN LiveKit cluster, minted by our
+// backend at POST /games/voice-token. The GUARANTEES are the same each time;
+// only the place that enforces them moves, so these follow the enforcement.
 check('voice asks the SERVER whether this player may speak',
   /setCanSpeak\(!m\.spectator\)/.test(VOICE),
   'a client deciding its own publish rights is what the state frame closes');
 
-check('...and a spectator cannot be heard even once the mic is open',
-  /const startMuted = !canSpeak/.test(VOICE) && /if \(!s \|\| !canSpeak\) return/.test(VOICE),
-  'a mesh has no server-side publish gate, so the track must start disabled AND mute must refuse to lift');
+// The header still NAMES the games server's dead endpoint, because the history
+// is the argument for the current design. What must not come back is a call to
+// it — so this asserts the token comes from our own api() and that the games
+// origin is not reachable from this file at all.
+check('...and the token is minted by VaultChat, never by the games server',
+  /api<VoiceToken>\('\/games\/voice-token'/.test(VOICE) && !/GAMES_HTTP/.test(VOICE),
+  'the games server has no SFU and no token endpoint — asking it was the original bug');
 
-check('...and does not re-install the WebRTC globals',
-  /typeof g\.RTCPeerConnection !== 'undefined'/.test(VOICE),
-  'registering twice swaps the constructors under a running SDK');
+// Now enforced at the MEDIA SERVER rather than by the client keeping its own
+// track disabled: a spectator is minted with the `audience` role, which carries
+// no publish grant at all. The client still declines to open the microphone,
+// so a listener never even prompts for the permission.
+check('...and a spectator cannot be heard, at the server and not by agreement',
+  /spectator: !canSpeak/.test(VOICE) && /publish: canSpeak/.test(VOICE)
+    && /if \(!s \|\| !canSpeak\) return/.test(VOICE),
+  'the audience role has no publish grant; the client must also ask for it and refuse to unmute');
+
+// The mesh had to install the WebRTC globals itself and guard against doing it
+// twice. joinSfuRoom owns that now (lib/golive/room.ts), and the correct thing
+// for this file is to NOT touch them — a second registerGlobals() swaps the
+// constructors under an SDK that is already running on them.
+check('...and does not install the WebRTC globals itself',
+  !/registerGlobals\(\)/.test(VOICE),
+  'joinSfuRoom already guards this; a second registration swaps the constructors under a live SDK');
 
 check('the microphone cannot outlive the table',
-  /alive\.current = false; teardown\(\)/.test(VOICE),
-  'a room left connected keeps publishing from a board nobody is looking at');
+  /alive\.current = false; void teardown\(\)/.test(VOICE)
+    && /void teardown\(\); \}, \[roomId, game, teardown\]/.test(VOICE),
+  'a room left connected keeps publishing from a board nobody is looking at — on unmount AND on changing table');
+
+// The audio ROUTE is shared with calls and Go Live, and handing back a session
+// we never took is how opening rummy during a call cut the call.
+// TURN, and why this file no longer pins it directly.
+//
+// lib/games/turnWiring.selftest.ts used to assert that useTableVoice fetched
+// VaultChat's TURN list and handed it to each peer connection — the bug it was
+// written for being that the mesh used the games server's STUN-only list and
+// never asked for ours, so a player behind CGNAT could not be heard and every
+// test still passed. Table voice now goes through joinSfuRoom, which fetches
+// getIceServers() itself and passes it as `rtcConfig` to room.connect(); that
+// is pinned, on the same file, by lib/golive/turnWiring.selftest.ts. Two copies
+// of one rule is how they drift, so what is left here is the LINK: as long as
+// voice joins through that helper, the TURN wiring is the wiring already tested.
+check('table voice joins through the shared SFU helper, which carries our TURN',
+  /joinSfuRoom\(/.test(VOICE) && !/new RTCPeerConnection/.test(VOICE),
+  'a peer connection built here would bypass the ICE list lib/golive/room.ts assembles');
+
+check('...and only hands back the audio route if it took one',
+  /const wasJoined = joined\.current/.test(VOICE) && /if \(wasJoined\) \{ try \{ stopBroadcastAudio\(\)/.test(VOICE),
+  'teardown runs on unmount too, whether or not voice was ever joined');
 
 // ── online ────────────────────────────────────────────────────────────
 // Without matchmaking the only opponent reachable from the app is a bot, which

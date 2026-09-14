@@ -160,6 +160,39 @@ the server refuses reads to a player as a broken button.
 reconnecting player gets their arrangement back. `declare` is the scoring
 move and the server validates the melds.
 
+## Table voice — NOT on the games server
+
+Rummy and Ludo boards have a "talk at the table" control. **It does not use the
+games server at all**, and the history of getting that wrong is worth keeping:
+
+- The first implementation minted a token from `POST /api/voice/token` on the
+  games host. That endpoint answers **404**, and `GET /config.js` on the same
+  host reports `{"dev":false,"sfu":false,"sfuMinSeats":4}` — the SFU is off.
+  Voice was dead in all four games and looked like a microphone fault.
+- The second ported the shipped web client's peer-to-peer mesh
+  (`games-web/vgvoice.js`), signalled with `voice-hello|bye|state|offer|answer|
+  ice` frames shaped `{t, to, data}` relayed by the games socket. That works,
+  but it is O(n²): a six-handed table is five uploads from one phone.
+- It now joins a room on **VaultChat's own LiveKit cluster** — the one already
+  carrying calls and Go Live — with the token minted by **our** backend at
+  `POST /games/voice-token` (`games_voice.go`). Body `{game, room, spectator}`;
+  answers `{token, url, room, identity, role}`, or **503** when `LIVEKIT_*` is
+  unset, which the board renders as "not available here" rather than a failure.
+
+The room name is composed server-side as `gametable-<game>-<room>`, both halves
+slug-validated, so a client can never name a room and cannot reach `call-<id>`
+or a Go Live room. A seated player gets the `speaker` role; a spectator gets
+`audience`, which carries **no publish grant** — listen-only is enforced by the
+media server rather than by the client keeping its own track disabled.
+
+**The trade, stated plainly:** the mesh's membership was enforced by the one
+party that knows the seating — the games server relayed a `voice-*` frame only
+between peers at the same table. We cannot ask it who is seated (no endpoint),
+and `games_live_tables` only has a row once a turn/invite push has arrived. So
+the token route's real rule is *a signed-in VaultChat user who knows the table's
+room id*. Room ids travel in invite links. Tightening that needs the games
+server to vouch for a seat.
+
 ## Rules for the native clients
 
 - **Never derive game truth locally.** Whose turn, what is legal, who won — all

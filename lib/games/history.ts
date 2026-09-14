@@ -199,15 +199,34 @@ export async function readHistory(): Promise<GameRecord[]> {
 }
 
 /**
+ * Writes run one at a time.
+ *
+ * `recordGame` is read-modify-write over a single AsyncStorage key, and it is
+ * called from a SNAPSHOT handler — the games server re-sends a finished state
+ * on every frame, so two calls land back to back routinely. Both awaited the
+ * read before either had written, so both saw a list without the game in it and
+ * both prepended it: the `isSameGame` guard is correct and still loses, because
+ * it runs against a list that is already stale by the time the write happens.
+ * The visible result is duplicate rows in "your games".
+ *
+ * ponytail: an in-process chain, not a lock across processes. One app, one
+ * storage — the only writer that can race here is this module.
+ */
+let writeChain: Promise<void> = Promise.resolve();
+
+/**
  * Record a finished game. Fail-soft: a history that cannot be written must not
  * disturb the table the player is still looking at.
  */
-export async function recordGame(rec: GameRecord): Promise<void> {
-  try {
-    const list = await readHistory();
-    if (list.some(r => isSameGame(r, rec))) return;   // the same snapshot arrives repeatedly
-    await AsyncStorage.setItem(KEY, JSON.stringify(capHistory([rec, ...list])));
-  } catch {}
+export function recordGame(rec: GameRecord): Promise<void> {
+  writeChain = writeChain.then(async () => {
+    try {
+      const list = await readHistory();
+      if (list.some(r => isSameGame(r, rec))) return;   // the same snapshot arrives repeatedly
+      await AsyncStorage.setItem(KEY, JSON.stringify(capHistory([rec, ...list])));
+    } catch {}
+  });
+  return writeChain;
 }
 
 export async function clearHistory(): Promise<void> {

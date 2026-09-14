@@ -149,6 +149,18 @@ const EDGE_MIN = 28;
 const HAND_SIZE = 13;
 const GROUPS = 5;
 
+/**
+ * The pile row's parts, in the units Rummy.tsx lays them out in.
+ *
+ * Same contract as TRAY_PAD/TRAY_GAP above, and for the same reason: these MUST
+ * match the renderer. The gaps are the row's `gap: S[4]` / `S[3]`; the label
+ * floors are the width of a DeckLabel plate, which is `paddingHorizontal: S[2]`
+ * on both sides around 9.5dp text at 0.8 letter-spacing — 11 characters of
+ * "CLOSED DECK", 6 of "CLOSED".
+ */
+const PILE_GAP = 16, PILE_GAP_COMPACT = 12;
+const PILE_LABEL_FULL = 92, PILE_LABEL_SHORT = 58;
+
 /** One row of action buttons, at the compact size. */
 const ACTIONS_H = 46;
 
@@ -280,6 +292,22 @@ export interface Metrics {
   tableH: number;
   /** Piles are drawn a touch smaller than held cards so the hand stays the focus. */
   pileW: number;
+  /**
+   * The pile row's OWN width — closed deck, open deck and wild, side by side.
+   *
+   * The row renders `left:0 right:0 justifyContent:'center'`, so its real width
+   * was whatever its contents happened to measure, which nothing outside the
+   * renderer could know. `pileTop` has to know: it can only avoid the seats
+   * that are actually over the piles if it knows where the piles START and END.
+   *
+   * So the row is given this width explicitly and centred inside it. A column
+   * is a card with a label plate above it, and the PLATE is the wider of the
+   * two — "CLOSED DECK" at 9.5dp/800/0.8 tracking is about 74dp of glyphs plus
+   * its 8dp padding on each side. Sized for the plate, floored so the label is
+   * never the thing that overflows.
+   */
+  pileColW: number;
+  pileRowW: number;
   /** The header bar. Costs height — see HEADER_H. */
   headerH: number;
   /** Score panel width inside the band; 0 when it falls back to the action bar. */
@@ -411,6 +439,12 @@ export function metrics(win: { width: number; height: number }, insets: Insets):
   const readout = barTrio ? BAR_TRIO : barStandings ? barBtnW + BAR_GAP : 0;
   const barToggle = width >= barMust + readout + BAR_TOGGLE;
 
+  const pileW = Math.max(CARD_MIN, Math.round(cardW * (compact ? 0.82 : 0.95)));
+  // The column is as wide as the wider of its two parts: the card, or the label
+  // plate over it. `compact` shortens the labels ("CLOSED" rather than "CLOSED
+  // DECK"), so the floor drops with them.
+  const pileColW = Math.max(pileW, compact ? PILE_LABEL_SHORT : PILE_LABEL_FULL);
+
   return {
     width,
     height,
@@ -442,7 +476,9 @@ export function metrics(win: { width: number; height: number }, insets: Insets):
     handH,
     tableW: width,
     tableH,
-    pileW: Math.max(CARD_MIN, Math.round(cardW * (compact ? 0.82 : 0.95))),
+    pileW,
+    pileColW,
+    pileRowW: 3 * pileColW + 2 * (compact ? PILE_GAP_COMPACT : PILE_GAP),
     headerH: HEADER_H,
     scoreW,
     trayW,
@@ -472,15 +508,111 @@ export function actionBarWidth(m: Metrics): number {
 
 export interface Spot { x: number; y: number; w: number; h: number }
 
-/** A capsule this short holds two rows; taller ones also get the card backs. */
-export const SEAT_ROW3_MIN = 54;
-
-const SEAT_W_MIN = 72, SEAT_W_MAX = 168;
-const SEAT_H_MIN = 40, SEAT_H_MAX = 58;
+/**
+ * THE SEAT IS A COLUMN, NOT A ROW — and that is the fix for four separate bugs.
+ *
+ * It used to be a wide capsule laid out left-to-right: avatar, then the name
+ * beside it, then a status dot, with two more rows tucked underneath. Measured
+ * on real viewports, that shape could not hold its own contents:
+ *
+ *   - The name got `w - 57` after the avatar, the gap and the dot had taken
+ *     their share — 22dp on a 732dp-wide table. "Arjun" rendered as "Arj".
+ *   - The rows under it were indented past the avatar, leaving 29-41dp for a
+ *     string like "13 cards · 40", so an opponent's POINTS were ellipsised away
+ *     on every phone — on a staked table, the one number you want.
+ *   - Three rows need about 72dp and the capsule was capped at 58, so the card
+ *     backs painted BELOW the rounded border, on bare felt, outside the gold
+ *     turn ring. The three-row branch fired on every landscape phone.
+ *   - And the capsule was wide enough (0.16 of the felt) to reach into the
+ *     middle of the table, where the piles are.
+ *
+ * Turning it upright fixes all four at once, because a column spends its width
+ * on ONE thing. The name now gets the full capsule (56-84dp, roughly double),
+ * the card count moves onto the avatar as a badge instead of claiming a third
+ * row, and the capsule is narrower — which buys back both the arc spacing
+ * between seats (31-46dp, up from 24-33) and the clearance from the piles.
+ *
+ * It is also simply what a rummy table looks like: every client in the category
+ * seats a player as a portrait chip, because that is how a person reads as
+ * sitting somewhere rather than as a row in a scoreboard.
+ */
+const SEAT_W_MIN = 68, SEAT_W_MAX = 132;
+const SEAT_H_MIN = 50, SEAT_H_MAX = 88;
+/**
+ * A share of the felt, and it is the binding constraint at every real size —
+ * the side-by-side packing bound below never is. Lowered 0.16 → 0.145 with the
+ * column layout: the capsule needs less width and the arc wants more air.
+ */
+const SEAT_W_SHARE = 0.145;
+/**
+ * Of the band under the header. The column is taller than the old row, but it
+ * cannot take whatever it likes: the piles have to live under the arc, and on a
+ * 320dp-tall phone held sideways the oval is 141dp and the pile stack alone is
+ * 77 of them. 0.42 fitted every viewport except that one, where the top-centre
+ * seat — the one that is unavoidably over the piles — ended 8dp into them.
+ */
+const SEAT_H_SHARE = 0.36;
 /** Least gap between two capsules when width, not the arc, is the constraint. */
 const SEAT_GAP = 8;
 /** Keeps the outermost capsules off the brass rail. */
 const SEAT_EDGE = 6;
+
+/**
+ * Everything in the seat that is NOT the avatar, in the order it stacks.
+ *
+ * Written down as numbers, and the reason is the bug above: the old seat sized
+ * its avatar with `Math.min(28, h - 20)`, budgeting 20dp for two rows that
+ * actually cost 30 — and it measured those rows by their FONT SIZE, which is
+ * not their height. A 9.5dp font occupies about 12dp of line box. Every one of
+ * those estimates was short, and they were short in the same direction, so the
+ * capsule overflowed at every size.
+ *
+ * These are line boxes, not font sizes, and Rummy.tsx sets `lineHeight` to
+ * exactly these values so the two cannot drift. The avatar is then whatever is
+ * left over, which makes "the contents fit" arithmetic rather than a hope.
+ */
+const SEAT_PAD = 5;
+export const SEAT_NAME_LINE = 14;   // fontSize 11.5
+export const SEAT_DETAIL_LINE = 12; // fontSize 9.5
+const SEAT_GAP_AV = 3;              // avatar → name
+const SEAT_GAP_NAME = 2;            // name → detail
+/** Avatar and name — the two things a seat cannot do without. */
+export const SEAT_CHROME_BASE = SEAT_PAD * 2 + SEAT_GAP_AV + SEAT_NAME_LINE;
+/** ...and the line under the name, where there is room for it. */
+export const SEAT_CHROME_H = SEAT_CHROME_BASE + SEAT_GAP_NAME + SEAT_DETAIL_LINE;
+const SEAT_AV_MIN = 22, SEAT_AV_MAX = 36;
+
+/**
+ * Whether the line under the name fits — points, or "dropped", or the clock.
+ *
+ * The smallest screen in the support matrix (320x568, held sideways) leaves a
+ * 141dp oval, and the piles want 77 of it. There is no seat height that carries
+ * an avatar, a name AND a detail line and still leaves the stack somewhere to
+ * go. Something has to be dropped, and it is the third line: a seat that says
+ * who is there is worth more than one that says how they are doing but is
+ * painted through the closed deck.
+ *
+ * Everywhere else — every other device in the matrix, portrait or landscape —
+ * this is true and the seat is the full three lines.
+ */
+export function seatHasDetail(h: number): boolean {
+  return h >= SEAT_CHROME_H + SEAT_AV_MIN;
+}
+
+/**
+ * How big the avatar may be in a capsule this tall — the leftovers, clamped.
+ *
+ * Exported so the renderer and the self-check read ONE budget. The old code
+ * kept its avatar sum in Rummy.tsx and its height cap in this file, which is
+ * why they disagreed by a whole row for as long as they did.
+ *
+ * SEAT_H_MIN is deliberately above `SEAT_CHROME_H + SEAT_AV_MIN`, so the clamp
+ * is a taste limit and never a fit one.
+ */
+export function seatAvatar(h: number): number {
+  const chrome = seatHasDetail(h) ? SEAT_CHROME_H : SEAT_CHROME_BASE;
+  return Math.round(clamp(SEAT_AV_MIN, SEAT_AV_MAX, h - chrome));
+}
 
 /**
  * Seat `n` opponents AROUND the oval — not in a row along the top of it.
@@ -518,10 +650,10 @@ export function seatSpots(n: number, tableW: number, tableH: number, top = 0): S
   // could not stand side by side with a gap between.
   const w = Math.floor(clamp(
     SEAT_W_MIN, SEAT_W_MAX,
-    Math.min(tableW * 0.16, (tableW - SEAT_GAP * (n - 1)) / n),
+    Math.min(tableW * SEAT_W_SHARE, (tableW - SEAT_GAP * (n - 1)) / n),
   ));
   const band = Math.max(1, tableH - top);
-  const h = Math.round(clamp(SEAT_H_MIN, SEAT_H_MAX, band * 0.32));
+  const h = Math.round(clamp(SEAT_H_MIN, SEAT_H_MAX, band * SEAT_H_SHARE));
 
   // The ellipse the CENTRES ride. Both radii are shrunk by half a capsule so a
   // seat placed at an extreme lands flush inside the felt rather than centred
@@ -545,21 +677,47 @@ export function seatSpots(n: number, tableW: number, tableH: number, top = 0): S
 /**
  * Where the closed deck, the open pile and the wild card sit on the felt.
  *
- * Pinned to the BOTTOM of the table for as long as that has been a landscape
- * phone, where the felt is 206dp tall and the bottom is the only place the
- * piles are not under a seat. On a tablet the same rule drops them into the
- * near rail with 240dp of empty cloth above — designed at 1024x768 and visible
- * immediately.
+ * Centre them, but never under a seat, and never off the bottom. On a phone the
+ * seat clearance wins and they sit low; on a tablet the centring wins and they
+ * land in the middle of the oval, rather than in the near rail with 240dp of
+ * empty cloth above them.
  *
- * So: centre them, but never above the seat ring, and never off the bottom.
- * On a phone the seat clearance wins and they sit low exactly as before; on a
- * tablet the centring wins and they land in the middle of the oval.
+ * CLEARANCE IS MEASURED FROM THE SEATS THAT ARE ACTUALLY IN THE WAY.
+ *
+ * This used to be `headerH + seatH + 8` — the top of the ring plus one capsule,
+ * as if every seat began at `top`. Only ONE does. The ring is an arc, so with
+ * five opponents the seats at u = ±0.5 hang 9-10dp lower than the one at the
+ * far side, and that is exactly where they ended up: below the line this
+ * function had just declared clear. Measured at 844x390, seat 1's bottom edge
+ * was 73 and the piles started at 72, and once the capsule's own overflow was
+ * counted the real intrusion was 16dp. Horizontally the CLOSED DECK plate and
+ * the WILD column ran straight under those two capsules, and since the piles
+ * are painted after the seats, the labels came out on top of them.
+ *
+ * Two corrections, both of them "look at what is there rather than assume":
+ *
+ *   1. Take the LOWEST bottom edge among the seats, not the first seat's
+ *      height. `spots` is already computed by the caller; it costs a max().
+ *   2. Only count seats whose x-range meets the pile row's. The seats at the
+ *      extremes of the arc hang lowest of all, and they are also the furthest
+ *      from the middle of the table — clearing the piles past them would push
+ *      the stack off the bottom of the felt to avoid a collision that cannot
+ *      happen. `rowW` is why this takes the row's width rather than guessing:
+ *      the caller gives the row an explicit width (metrics().pileRowW) so the
+ *      range tested here is the range that renders.
  */
-export function pileTop(tableH: number, headerH: number, seatH: number, stackH: number): number {
-  const lo = headerH + seatH + 8;
+export function pileTop(
+  tableW: number, tableH: number,
+  spots: readonly Spot[], rowW: number, stackH: number,
+): number {
+  const x0 = (tableW - rowW) / 2;
+  const x1 = x0 + rowW;
+  const inTheWay = spots.filter(sp => sp.x < x1 && sp.x + sp.w > x0);
+  const lo = (inTheWay.length ? Math.max(...inTheWay.map(sp => sp.y + sp.h)) : 0) + 8;
   const hi = tableH - 2 - stackH;
   // No room under the seats at all: the bottom is the least bad answer, and a
-  // negative top would push the piles off the felt entirely.
+  // negative top would push the piles off the felt entirely. The 8dp above is
+  // breathing room, not clearance — losing some of it costs air, not overlap.
   if (hi <= lo) return Math.max(0, hi);
   return Math.round(clamp(lo, hi, (tableH - stackH) / 2));
 }

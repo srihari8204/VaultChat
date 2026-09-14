@@ -67,8 +67,9 @@ import { openInvite, shareResult, tableLink } from '../../lib/games/invite';
 import { useRummyMatch, type RummyMatch } from '../../lib/games/useRummyMatch';
 import { VARIANTS, variantLabel, standings, progressLabel } from '../../lib/games/match';
 import {
-  metrics, seatSpots, pileTop, SEAT_ROW3_MIN, ranked, activeCount, pid, allowsBots,
-  newPrivateCode, normalizeCode, filterBySeats, filterByKind, pickTable,
+  metrics, seatSpots, pileTop, seatAvatar, seatHasDetail, SEAT_NAME_LINE, SEAT_DETAIL_LINE,
+  ranked, activeCount, pid, allowsBots,
+  normalizeCode, filterBySeats, filterByKind, pickTable,
   type RummyPlayer, type Settlement, type TableInfo, type SeatFilter, type KindFilter, type SeatIntent,
 } from '../../lib/games/rummyTable';
 import { C, S, R, T, mix, alpha, goldLine, white } from '../../lib/games/theme';
@@ -465,7 +466,25 @@ export default function Rummy({ tableId = '', auto, autoBot, seat }: { tableId?:
    * frame cannot wedge the buttons for the rest of the hand.
    */
   const [pending, setPending] = useState<string | null>(null);
-  useEffect(() => { setPending(null); }, [raw]);
+  /**
+   * WHAT THE SERVER WOULD HAVE TO CHANGE for our move to have landed.
+   *
+   * The lock used to clear on `raw` — i.e. on EVERY frame. The server sends a
+   * full snapshot for anything that happens at the table, so somebody else's
+   * draw, an emote, or a player toggling their microphone released the lock
+   * while our own frame was still in flight, and the second tap it was there to
+   * absorb went through after all.
+   *
+   * Every action this lock guards (draw, discard, declare, drop) moves at least
+   * one of these: the cards we hold, whose turn it is, or the phase of the hand
+   * — a drop passes the turn on, so it lands here too. Nothing ANOTHER player does at our table moves any of
+   * them while it is still our turn — which it is, or the buttons would not
+   * have been tappable. The 6s timeout below is still the backstop, and it is
+   * what covers the one case this cannot see: a move the server REFUSED, which
+   * by definition changes nothing.
+   */
+  const ack = `${G?.turnPlayerId ?? ''}|${G?.phase ?? ''}|${hand.length}|${hand.map(c => c.id).join(',')}`;
+  useEffect(() => { setPending(null); }, [ack]);
   useEffect(() => {
     if (!pending) return;
     const id = setTimeout(() => setPending(null), 6000);
@@ -480,10 +499,27 @@ export default function Rummy({ tableId = '', auto, autoBot, seat }: { tableId?:
 
   /* ── the player's arrangement ────────────────────────────────────── */
 
-  const [picked, setPicked] = useState<string[]>([]);
+  // SELECTION IS BY CARD ID, AND AN ID CAN OUTLIVE THE CARD.
+  //
+  // A selection made in one deal survived into the next: nothing cleared it
+  // when a new hand arrived (the deal effect below resets `groups` and
+  // `dealtFor` and never touched this), so you finished a hand with a card
+  // selected — the usual case, since you were about to discard it — and after
+  // the re-deal DISCARD lit up on `picked.length === 1`, sent a cardId you no
+  // longer held, and came back as a bare "⚠" while the turn clock ran.
+  //
+  // Clearing it on a new deal would fix that one path and leave the others: the
+  // server auto-discards for a player who times out, and a reconnect can hand
+  // back a different hand entirely — both leave an id behind that names no card.
+  // So the selection is FILTERED BY THE HAND on the way out instead. An id that
+  // is not in `byId` is not a card you can act on, wherever it came from, and
+  // every read below — the buttons, their enablement, discard, declare — goes
+  // through the filtered value.
+  const [pickedRaw, setPicked] = useState<string[]>([]);
   const [groups, setGroups] = useState<Groups>([[]]);
   const [sortMode, setSortMode] = useState<SortMode>(sortModePref);
   const byId = useMemo(() => new Map(hand.map(c => [c.id, c])), [hand]);
+  const picked = useMemo(() => pickedRaw.filter(id => byId.has(id)), [pickedRaw, byId]);
 
   const isJoker = useCallback(
     (c: { suit: string; rank: string }) => c.suit === 'JOKER' || (!!G?.wildRank && c.rank === G.wildRank),
@@ -558,6 +594,11 @@ export default function Rummy({ tableId = '', auto, autoBot, seat }: { tableId?:
   const setZone = useCallback((i: number, z: Zone) => { zones.current[i] = z; }, []);
 
   const [confirmDeclare, setConfirmDeclare] = useState(false);
+  // ...and take the sheet away when the moment it asks about has passed, rather
+  // than leaving a live "Declare & win" button over a turn that is no longer
+  // yours. `declare` refuses it anyway; this is so the player is not invited to
+  // press it.
+  useEffect(() => { if (!mustDiscard) setConfirmDeclare(false); }, [mustDiscard]);
   const [showSettings, setShowSettings] = useState(false);
   const [showRules, setShowRules] = useState(false);
   // Offered once, before the first hand a player ever sees.
@@ -617,11 +658,18 @@ export default function Rummy({ tableId = '', auto, autoBot, seat }: { tableId?:
   }, [mustDraw, act]);
 
   const declare = useCallback(() => {
+    // The same guard `discard` opens with, and for a sharper reason: the
+    // confirm sheet stays open across state changes, so the turn can pass (or
+    // the server can auto-discard for you) while "Declare?" is on screen. The
+    // button's `disabled` prop was the ONLY gate, and a sheet that is already
+    // open does not re-read it — this was the one path in the UI that could
+    // emit an action out of turn.
+    if (!mustDiscard) { notify('It is not your turn.'); playSfx('error'); return; }
     if (picked.length !== 1) return;
     const laid = groups.map(g => g.filter(id => id !== picked[0])).filter(g => g.length > 0);
     act('declare', { t: 'declare', discardId: picked[0], groups: laid });
     setPicked([]);
-  }, [picked, groups, act]);
+  }, [mustDiscard, picked, groups, act, notify]);
 
   /** Lay the hand out now, without touching the remembered preference. */
   const sortNow = useCallback((mode: SortMode) => {
@@ -663,7 +711,16 @@ export default function Rummy({ tableId = '', auto, autoBot, seat }: { tableId?:
         <Text style={{ fontSize: 46 }}>🂡</Text>
         <Text style={{ color: C.text, fontSize: t.lg, fontWeight: '800' }}>Can’t reach the table</Text>
         <Text style={{ color: C.muted, fontSize: t.sm, textAlign: 'center' }}>{error}</Text>
-        <Btn label="Try again" kind="gold" onPress={retry} />
+        {/* `onPress={retry}` handed the press event straight in as `roomId`,
+            and left `seating`/`seatFailed` set — so a retry could land on the
+            stale "No seat at X" panel instead of the table, having asked the
+            socket to rejoin whatever a GestureResponderEvent stringifies to.
+            Rejoin the table we were actually at; '' means the table list. */}
+        <Btn
+          label="Try again"
+          kind="gold"
+          onPress={() => { setSeating(!!seated); setSeatFailed(false); retry(seated); }}
+        />
       </TableBackground>
     );
   }
@@ -733,7 +790,7 @@ export default function Rummy({ tableId = '', auto, autoBot, seat }: { tableId?:
   // The pile stack, measured the same way the felt places it: label plate, the
   // card, and the caption under it.
   const stackH = 14 + 3 + Math.round(m.pileW * 1.4) + 2 + 13;
-  const pilesY = pileTop(m.ovalH, OVAL_SEAT_TOP, spots[0]?.h ?? 0, stackH);
+  const pilesY = pileTop(m.ovalW, m.ovalH, spots, m.pileRowW, stackH);
   const turnName = players.find(p => pid(p) === G.turnPlayerId)?.name ?? 'Someone';
   const nameOf = (id: string) =>
     players.find(p => pid(p) === id)?.name
@@ -812,16 +869,27 @@ export default function Rummy({ tableId = '', auto, autoBot, seat }: { tableId?:
           ))}
 
           {/* piles, on the cloth */}
+          {/* AN EXPLICIT WIDTH, not `left:0 right:0` with centred content.
+              pileTop has to know where this row begins and ends to tell which
+              seats are over it, and a row whose width is whatever its contents
+              measured is a width only the renderer knows. Each column is
+              pileColW so the three are even and the label plates have a home. */}
           <View style={{
-            position: 'absolute', left: 0, right: 0, top: pilesY,
+            position: 'absolute', left: Math.round((m.ovalW - m.pileRowW) / 2),
+            width: m.pileRowW, top: pilesY,
             flexDirection: 'row', gap: m.compact ? S[3] : S[4],
+            // Centred INSIDE the fixed width, because the wild column is
+            // conditional: with no wild card the row holds two columns, and
+            // they belong in the middle of the table rather than flush left.
+            // pileRowW stays the three-column width, so the range pileTop
+            // clears is always at least the range that renders.
             justifyContent: 'center', alignItems: 'flex-start',
           }}>
-            <View style={{ alignItems: 'center', gap: 3 }}>
+            <View style={{ width: m.pileColW, alignItems: 'center', gap: 3 }}>
               <DeckLabel text={m.compact ? 'CLOSED' : 'CLOSED DECK'} />
               <Pile label={`${closedCount} left`} live={mustDraw && !pending} onPress={() => draw('closed')} back w={m.pileW} still={reduceMotion} />
             </View>
-            <View style={{ alignItems: 'center', gap: 3 }}>
+            <View style={{ width: m.pileColW, alignItems: 'center', gap: 3 }}>
               <DeckLabel text={m.compact ? 'OPEN' : 'OPEN DECK'} />
               <DiscardPile
                 card={openTop}
@@ -834,7 +902,7 @@ export default function Rummy({ tableId = '', auto, autoBot, seat }: { tableId?:
               />
             </View>
             {wild ? (
-              <View style={{ alignItems: 'center', gap: 3 }}>
+              <View style={{ width: m.pileColW, alignItems: 'center', gap: 3 }}>
                 <DeckLabel text="WILD" />
                 <CardFace card={wild} w={m.pileW} wild />
                 <Text style={{ color: C.gold2, fontSize: 10, fontWeight: '800' }}>
@@ -1114,7 +1182,25 @@ export default function Rummy({ tableId = '', auto, autoBot, seat }: { tableId?:
         <SettingRow label="Sound" value={sound ? 'On' : 'Off'} onPress={() => { const n = !sound; setSound(n); void setSoundEnabled(n); }} />
         <SettingRow label="Game rules" hint="How this table scores" value="Read" onPress={() => { setShowSettings(false); setShowRules(true); }} />
         <SettingRow label="Invite a friend" hint={seated ? `Code ${seated}` : 'Share this table'} value="Share" onPress={() => { setShowSettings(false); void openInvite('rummy', seated); }} />
-        <SettingRow label="Leave table" hint="Drops you from this hand" value="Leave" onPress={() => { setShowSettings(false); act('drop', { t: 'drop' }); }} />
+        {/* TWO DIFFERENT THINGS, and they were one row that did the wrong one.
+            It was labelled "Leave table" / "Leave" and sent `{t:'drop'}`, which
+            forfeits the hand and leaves you sitting at the table watching it
+            finish — you pay the drop points and you do not get up. Dropping is
+            a MOVE (it is already on the action bar, in danger red, next to
+            Discard); leaving is a navigation, and `leaveTable` is what every
+            other exit on this screen uses. */}
+        <SettingRow
+          label="Drop this hand"
+          hint="Forfeits the deal and scores drop points against you. You stay at the table."
+          value="Drop"
+          onPress={() => { setShowSettings(false); act('drop', { t: 'drop' }); }}
+        />
+        <SettingRow
+          label="Leave table"
+          hint="Back to the table list"
+          value="Leave"
+          onPress={() => { setShowSettings(false); leaveTable(); }}
+        />
       </Sheet>
     </View>
   );
@@ -1402,6 +1488,7 @@ function TableSelect({
   const t = useType();
   const column = useColumn();
   const [code, setCode] = useState('');
+  const [codeErr, setCodeErr] = useState('');
   const [seats, setSeats] = useState<SeatFilter>('all');
   const setKind = onKind;
   // Both filters compose; neither is allowed to be the only one that applies.
@@ -1409,6 +1496,31 @@ function TableSelect({
     () => filterBySeats(filterByKind(tables ?? [], kind), seats),
     [tables, kind, seats],
   );
+  /**
+   * Join by a typed code — CHECKED AGAINST THE SERVER'S OWN LIST FIRST.
+   *
+   * The server does not refuse an id it does not know; it seats you at Practice
+   * and says nothing. So a typo, a stale invite, or a code from one of the
+   * other three games used to look like it worked, right up until you noticed
+   * you were somewhere else on your own. The table list is already on screen —
+   * matching against it costs nothing and turns a silent wrong seat into a
+   * sentence. Matched on name as well as id, because the invite text and the
+   * table card both say "Casual" while the id is lower-case.
+   */
+  const tryCode = useCallback(() => {
+    const want = normalizeCode(code);
+    if (!want) return;
+    const hit = (tables ?? []).find(tb =>
+      tb.id.toLowerCase() === want.toLowerCase() || tb.name.toLowerCase() === want.toLowerCase());
+    if (!hit) {
+      setCodeErr(`There is no rummy table called "${want}". Rummy has ${(tables ?? []).map(tb => tb.name).join(', ') || 'no open tables right now'}.`);
+      return;
+    }
+    if (hit.players >= hit.maxPlayers) { setCodeErr(`${hit.name} is full (${hit.players}/${hit.maxPlayers}).`); return; }
+    setCodeErr('');
+    onJoin(hit.id);
+  }, [code, tables, onJoin]);
+
   const [record, setRecord] = useState<{ gamesPlayed: number; totalWon: number } | null>(null);
 
   // The only record the server exposes. There is no per-match history endpoint,
@@ -1441,7 +1553,12 @@ function TableSelect({
         <Text style={{ fontSize: 40 }}>🪑</Text>
         <Text style={{ color: C.text, fontSize: t.lg, fontWeight: '800' }}>No seat at “{seatedId}”</Text>
         <Text style={{ color: C.muted, fontSize: t.sm, textAlign: 'center', lineHeight: 19 }}>
-          The table did not answer. It may be full, finished, or the code may be wrong.
+          {/* NOT "the code may be wrong" any more. A typed code is now checked
+              against the server's own table list before we ever try to sit
+              down, so by the time we are waiting, the table is real. Naming a
+              cause that cannot apply sends the player off to re-read an invite
+              that was fine. What is left is the table, or the connection. */}
+          The table did not answer. It may be full or finished, or the connection may have dropped.
         </Text>
         <Btn label="Back to tables" kind="gold" onPress={onBack} />
       </TableBackground>
@@ -1550,29 +1667,55 @@ function TableSelect({
             Stakes are in play coins. They are not money, cannot be bought, and cannot be cashed out.
           </Text>
 
+          {/* PLAYING A FRIEND, described as it actually works.
+              ────────────────────────────────────────────────────────────────
+              This used to offer "Open a private table", which minted a code
+              like 2YR7QG and joined it. There is no such thing on this server
+              and there never was. Probed live: rummy publishes exactly three
+              GLOBAL tables — Practice, Casual, Pro — and a join carrying any
+              other id is not refused, it is silently answered with a seat at
+              Practice. Two friends who shared a minted code were each put at
+              Practice on their own, both reading "1/6 seated", which is exactly
+              the "private rummy does not connect" report. Extra fields on the
+              join (private, password, maxPlayers, name) are ignored, and every
+              invented verb — create, createTable, private, invite, host, room,
+              new — is dropped without an answer. It is a server feature that
+              does not exist, so the button was a promise the app could not keep
+              and the table screen had to apologise for afterwards.
+              The three tables seat six, so a friend CAN join you — you simply
+              cannot keep strangers out. That is what this now says. */}
           <Panel style={{ gap: S[3], marginTop: S[2] }}>
             <Text style={{ color: C.text, fontSize: t.md, fontWeight: '800' }}>Play your friends</Text>
             <Text style={{ color: C.muted, fontSize: t.sm, lineHeight: 18 }}>
-              Open a private table and send the code, or type one you were sent. Two to six players.
+              Rummy tables are shared — take a seat at one above, then send your friends the
+              invite from the table menu and they will land at the same table. Six seats each,
+              first come first served.
             </Text>
-            <Btn label="Open a private table" icon="lock" kind="gold" onPress={() => onJoin(newPrivateCode())} />
+            <Text style={{ color: C.muted, fontSize: 11.5, lineHeight: 17 }}>
+              There are no private rummy tables on this server. Chess, Ludo and Tic-tac-toe do
+              have them.
+            </Text>
             <View style={{ flexDirection: 'row', gap: S[2] }}>
               <TextInput
                 value={code}
-                onChangeText={setCode}
-                placeholder="Table code"
+                onChangeText={txt => { setCode(txt); setCodeErr(''); }}
+                placeholder="Table name or code"
                 placeholderTextColor={C.muted}
                 autoCapitalize="characters"
                 autoCorrect={false}
-                accessibilityLabel="Table code"
-                onSubmitEditing={() => onJoin(code)}
+                accessibilityLabel="Table name or code from an invite"
+                onSubmitEditing={() => tryCode()}
                 style={{
                   flex: 1, color: C.text, fontSize: t.md, paddingHorizontal: S[3], paddingVertical: S[3],
-                  borderRadius: R[2], borderWidth: 1, borderColor: goldLine[18], backgroundColor: C.panel2,
+                  borderRadius: R[2], borderWidth: 1,
+                  borderColor: codeErr ? C.bad : goldLine[18], backgroundColor: C.panel2,
                 }}
               />
-              <Btn label="Join" onPress={() => onJoin(code)} disabled={!normalizeCode(code)} />
+              <Btn label="Join" onPress={() => tryCode()} disabled={!normalizeCode(code)} />
             </View>
+            {!!codeErr && (
+              <Text style={{ color: C.bad, fontSize: t.sm, lineHeight: 18 }}>{codeErr}</Text>
+            )}
           </Panel>
         </ScrollView>
       </KeyboardAvoidingView>
@@ -1673,14 +1816,50 @@ function Room({
     if (!host || !canDeal) { setDealIn(null); return; }
     setDealIn(AUTO_DEAL_SECS);
     const id = setInterval(() => {
-      setDealIn(prev => {
-        if (prev == null) return null;
-        if (prev <= 1) { onSend({ t: 'start' }); return null; }
-        return prev - 1;
-      });
+      // TICK, AND NOTHING ELSE. The `start` used to be sent from inside this
+      // updater, which is two bugs in one line: React may invoke an updater
+      // twice for the same tick (it does in StrictMode), so a dev build dealt
+      // the table twice; and a state updater that talks to a socket runs
+      // wherever React decides to run it, which is not somewhere a network send
+      // belongs. The updater now only counts, and the effect below reacts to it
+      // reaching zero.
+      setDealIn(prev => (prev == null ? null : prev - 1));
     }, 1000);
     return () => clearInterval(id);
-  }, [host, canDeal, members.length, onSend]);
+    // members.length is DELIBERATELY not a dependency. It was, and it meant the
+    // countdown restarted at sixty every time anyone joined or left — a table
+    // that people drift in and out of never reached zero and never dealt, which
+    // is the failure this timer exists to prevent. `canDeal` is the part that
+    // actually matters (did we cross two players), and it is here.
+  }, [host, canDeal]);
+
+  // Zero is the deal. Separate from the tick so the send happens in an effect,
+  // once, after the state that triggered it has actually committed.
+  useEffect(() => {
+    if (dealIn !== 0) return;
+    setDealIn(null);
+    onSend({ t: 'start' });
+  }, [dealIn, onSend]);
+
+  /**
+   * ONE LOBBY ACTION AT A TIME — the same lock the action bar already puts on a
+   * turn (`act`/`pending` on the board), which these two buttons never had.
+   *
+   * `start` and `addbot` are both answered by a new snapshot rather than an ack,
+   * so a double-tap sent two frames and the server replied to the second with an
+   * error the player did nothing to earn: two bots seated from one tap, or
+   * "already started". Cleared by the snapshot that arrives — and by a timeout,
+   * so a dropped frame cannot wedge the buttons the way it could wedge the bar.
+   */
+  const [busy, setBusy] = useState(false);
+  useEffect(() => { setBusy(false); }, [members.length, lobby.status]);
+  useEffect(() => {
+    if (!busy) return;
+    const id = setTimeout(() => setBusy(false), 6000);
+    return () => clearTimeout(id);
+  }, [busy]);
+  const addBot = useCallback(() => { setBusy(true); onSend({ t: 'addbot' }); }, [onSend]);
+  const dealNow = useCallback(() => { setBusy(true); setDealIn(null); onSend({ t: 'start' }); }, [onSend]);
 
   const copy = async () => {
     await Clipboard.setStringAsync(code).catch(() => {});
@@ -1742,13 +1921,13 @@ function Room({
         {host ? (
           <>
             {allowsBots(table) && (
-              <Btn label="Add a bot" icon="bot" onPress={() => onSend({ t: 'addbot' })} disabled={full} />
+              <Btn label="Add a bot" icon="bot" onPress={addBot} disabled={full || busy} />
             )}
             <Btn
               label={dealIn != null ? `Deal now — starting in ${dealIn}s` : `Deal (${members.length})`}
               kind="gold"
-              onPress={() => { setDealIn(null); onSend({ t: 'start' }); }}
-              disabled={!canDeal}
+              onPress={dealNow}
+              disabled={!canDeal || busy}
             />
           </>
         ) : (
@@ -2902,48 +3081,38 @@ function Seat({
 
   if (!spot) return null;
   const out = status !== 'active' && status !== 'won';
-  // THREE ROWS ONLY IF THERE IS ROOM FOR THREE ROWS. Below SEAT_ROW3_MIN the
-  // card backs and the detail line were drawn on top of each other — measured
-  // in Figma at 640x360, where the capsule is 48dp and the two rows need 53.
-  const three = spot.h >= SEAT_ROW3_MIN;
-  const av = Math.min(28, spot.h - 20);
-  const tx = 8 + av + 6;
+
+  // THE AVATAR IS THE LEFTOVERS, and that is the whole trick. rummyTable owns
+  // the budget (SEAT_CHROME_H) and hands back what is left after the padding,
+  // the two line boxes and the gaps between them have been paid for. The old
+  // seat guessed at this — `Math.min(28, h - 20)` for chrome that cost 30 —
+  // and every capsule overflowed its own border by 12 to 18dp, painting the
+  // card-back row onto bare felt outside the gold turn ring.
+  const av = seatAvatar(spot.h);
   const initials = name.split(/\s+/).map(x => x[0]).join('').slice(0, 2).toUpperCase();
 
+  // The line under the name. The card count is NOT here — it is the badge on
+  // the avatar — so this is free to carry the number that actually decides the
+  // hand. On a staked table that is points, and the old row-based seat
+  // ellipsised them away at every phone width.
   const detail =
     status === 'won' ? 'WON'
-    : status === 'dropped' ? 'dropped'
+    : status === 'dropped' ? 'DROPPED'
     : status === 'lost' ? `${points ?? 0} pts`
-    : `${count} cards${points != null ? ` · ${points}` : ''}`;
+    : points != null ? `${points} pts`
+    : `${count} cards`;
 
-  // The clock owns ROW TWO, not the space beside the name. Sharing row one with
-  // a countdown chip leaves 16dp for a name on a 102dp capsule, and the name is
-  // what gets clipped — "Arjun" rendered as "Arju" at 640x360.
-  const backs = Math.min(5, count);
-  const showBacks = count > 0 && (three || (!turn && status === 'active'));
-  const backsRow = (
-    <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-      {Array.from({ length: backs }, (_, i) => (
-        <View
-          key={i}
-          style={{
-            width: 8, height: 12, borderRadius: 2, marginLeft: i ? -3 : 0,
-            backgroundColor: CARD.back[0], borderWidth: 0.5, borderColor: alpha(CARD.edge, 0.55),
-          }}
-        />
-      ))}
-      <Text style={{ color: INK_DIM, fontSize: 9, fontWeight: '600', marginLeft: 5 }}>{count}</Text>
-    </View>
-  );
+  const showCount = count > 0 && !out;
 
   return (
     <Animated.View
-      accessibilityLabel={`${name}, ${detail}${turn ? `, playing now${secs != null ? `, ${secs} seconds left` : ''}` : ''}${talking ? ', talking' : ''}${host ? ', host' : ''}`}
+      accessibilityLabel={`${name}, ${detail}${showCount ? `, ${count} cards` : ''}${turn ? `, playing now${secs != null ? `, ${secs} seconds left` : ''}` : ''}${talking ? ', talking' : ''}${host ? ', host' : ''}`}
       style={[
         onFelt(turn ? 'gold' : 'navy', { radius: 14, active: turn }),
         {
           position: 'absolute', left: spot.x, top: spot.y, width: spot.w, height: spot.h,
-          paddingHorizontal: 8, paddingVertical: 8, opacity: out ? 0.5 : 1,
+          paddingHorizontal: 6, paddingVertical: 5,
+          alignItems: 'center', opacity: out ? 0.5 : 1,
         },
       ]}
     >
@@ -2954,8 +3123,8 @@ function Seat({
         />
       )}
 
-      {/* row 1 — who, and whether they are still here */}
-      <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+      {/* the player */}
+      <View style={{ width: av, height: av }}>
         <View style={{
           width: av, height: av, borderRadius: av / 2, alignItems: 'center', justifyContent: 'center',
           backgroundColor: bot ? '#6F9BFF' : C.gold,
@@ -2970,28 +3139,62 @@ function Seat({
             ? <Ionicons name="hardware-chip" size={Math.round(av * 0.44)} color={C.onGold} />
             : <Text style={{ color: C.onGold, fontWeight: '800', fontSize: Math.round(av * 0.38) }}>{initials}</Text>}
         </View>
+
+        {/* HOW MANY CARDS THEY HOLD, as a badge rather than a row.
+            It used to be up to five little card backs on a third row, which is
+            what pushed the capsule past its own height — and five drawn backs
+            cannot show the difference between six cards and thirteen anyway,
+            because they capped at five. A number is smaller AND says more. */}
+        {showCount && (
+          <View
+            pointerEvents="none"
+            style={{
+              position: 'absolute', right: -5, bottom: -3,
+              minWidth: 15, height: 14, borderRadius: 7, paddingHorizontal: 3,
+              alignItems: 'center', justifyContent: 'center',
+              backgroundColor: 'rgba(8,14,26,0.92)',
+              borderWidth: 1, borderColor: alpha(CARD.edge, 0.55),
+            }}>
+            <Text style={{ color: INK_DIM, fontSize: 9, fontWeight: '800' }}>{count}</Text>
+          </View>
+        )}
+
+        {/* Still in the hand, out of it, or the winner. Opposite the count so
+            the two badges never sit on each other. */}
+        <View
+          pointerEvents="none"
+          style={{
+            position: 'absolute', right: -1, top: -1,
+            width: 8, height: 8, borderRadius: 4,
+            borderWidth: 1, borderColor: 'rgba(0,0,0,0.45)',
+            backgroundColor: out ? '#9A8F8F' : status === 'won' ? C.gold : C.good,
+          }}
+        />
+      </View>
+
+      {/* their name — the FULL width of the capsule, which is the point of
+          standing the seat up. It was 22dp on a 732dp table before. */}
+      <Text
+        numberOfLines={1}
+        style={{
+          width: '100%', marginTop: 3, textAlign: 'center',
+          color: '#fff', fontWeight: '800', fontSize: 11.5, lineHeight: SEAT_NAME_LINE,
+        }}
+      >{name}</Text>
+
+      {/* the clock while they are playing, otherwise the server's line.
+          DROPPED ENTIRELY on a felt too short to hold it — see seatHasDetail.
+          Rendering it anyway is what the old seat did with its third row, and
+          the row ended up painted on the cloth below the capsule's border. */}
+      {seatHasDetail(spot.h) && (
         <Text
           numberOfLines={1}
-          style={{ flex: 1, marginLeft: 6, color: '#fff', fontWeight: '800', fontSize: 11.5 }}
-        >{name}</Text>
-        <View style={{
-          width: 7, height: 7, borderRadius: 3.5,
-          backgroundColor: out ? '#9A8F8F' : status === 'won' ? C.gold : C.good,
-        }} />
-      </View>
-
-      {/* row 2 — the clock while they are playing, otherwise the server's line */}
-      <View style={{ marginLeft: tx - 8, marginTop: 3 }}>
-        {turn && secs != null ? (
-          <Text style={{ color: C.gold2, fontSize: 9.5, fontWeight: '800' }}>{`${secs}s left`}</Text>
-        ) : three || !showBacks ? (
-          <Text numberOfLines={1} style={{ color: INK_DIM, fontSize: 9, fontWeight: '600' }}>{detail}</Text>
-        ) : backsRow}
-      </View>
-
-      {/* row 3 — the cards they are holding, when the capsule is tall enough */}
-      {three && showBacks && (
-        <View style={{ marginLeft: tx - 8, marginTop: 2 }}>{backsRow}</View>
+          style={{
+            width: '100%', marginTop: 2, textAlign: 'center',
+            fontSize: 9.5, lineHeight: SEAT_DETAIL_LINE, fontWeight: turn ? '800' : '600',
+            color: turn && secs != null ? C.gold2 : INK_DIM,
+          }}
+        >{turn && secs != null ? `${secs}s left` : detail}</Text>
       )}
     </Animated.View>
   );

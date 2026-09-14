@@ -104,6 +104,9 @@ func RegisterGames(mux *http.ServeMux) {
 	// the games server's single-deal engine cannot keep (games_matches.go,
 	// migration 126).
 	RegisterGamesMatches(mux)
+	// Table voice: a LiveKit room per game table, on the SFU this app already
+	// runs for calls and Go Live (games_voice.go).
+	mux.HandleFunc("POST /games/voice-token", httpx.RequireAuth(gamesVoiceToken))
 }
 
 // gamesLiveTablesSQL reads ONE player's tables.
