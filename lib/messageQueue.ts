@@ -25,6 +25,7 @@ import { api } from './api';
 import { queuePut, queueList, queueListByTag, queueGet, queueDelete, queueMigrate } from './localDb';
 import { encryptForChat, cacheOwnPlaintext, editMessage, deleteMessage, type Message } from './chatService';
 import { splitMeta, wrapEnvelope } from './msgEnvelope';
+import { normalizeMsgIds } from './msgIds';
 import { type MsgState } from './messageState';
 import perf from './perf';
 
@@ -473,11 +474,12 @@ async function postOnce(item: QueuedMessage): Promise<PostResult> {
     method: 'POST',
     json: { content, type: item.type, replyToId: item.replyToId, meta: serverMeta, clientId: item.clientId },
   });
-  // The POST ack returns `id` as a STRING, but GET /chats and socket payloads
-  // deliver it as a NUMBER. Left as a string, the UI's `x.id === real.id`
-  // dedup fails (optimistic + synced rows collide on the same React key) and
-  // the local cache drops it (cacheMessages skips non-number ids). Normalize.
-  if (real && real.id != null) (real as any).id = Number(real.id);
+  // The POST ack returns `id` AND `replyToId` as STRINGS. Left as strings, the
+  // UI's `x.id === real.id` dedup fails (optimistic + synced rows collide on
+  // the same React key), the local cache drops the row (cacheMessages skips
+  // non-number ids), and a queued REPLY loses its quote — this path carries
+  // replyToId, so it was the one hand-rolled site where that actually bit.
+  normalizeMsgIds(real);
   const _tAck = Date.now();
   perf.recordSend({
     id: String(real?.id ?? item.tempId),

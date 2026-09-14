@@ -9,7 +9,7 @@
 import { api } from './api';
 import { getGlobalSyncCursor, noteGlobalSyncCursor, cacheMessages, getCachedMessagesByIds, getMeta, setMeta } from './localDb';
 import { metric } from './syncMetrics';
-import { hydrateMessages, looksEncrypted, type Message } from './chatService';
+import { hydrateMessages, looksEncrypted, normalizeMsgIds, type Message } from './chatService';
 import { markDeliveredDurable } from './receipts';
 import { notifyBatch } from './messageNotifications';
 import { onConnectionState } from './socket';
@@ -100,6 +100,21 @@ function maxMutationTs(rows: (Message & { chatId: string })[]): string | null {
   return max;
 }
 
+/**
+ * Coerce a delta page's wire ids to numbers.
+ *
+ * `/chats/delta` serializes `id`/`replyToId` as STRINGS like every other
+ * endpoint, and everything downstream of here is number-keyed: `cacheMessages`
+ * skips a row whose id is not a number, so an un-normalized page decrypted
+ * fine, rendered fine, and then persisted NOTHING — the history was gone on the
+ * next cold start. Both arrays go through it; mutations are message rows too.
+ */
+function normDelta(d: Delta | null | undefined): Delta | null | undefined {
+  d?.messages?.forEach(normalizeMsgIds);
+  d?.mutations?.forEach(normalizeMsgIds);
+  return d;
+}
+
 /** Drain the global delta from (cursor − lookback) to head. Returns #applied. */
 export async function catchUp(): Promise<number> {
   if (running) return 0;
@@ -113,7 +128,7 @@ export async function catchUp(): Promise<number> {
       // Ask for mutations only on the FIRST page (they're time-, not id-paginated).
       const mutParam = (guard === 0 && mutatedSince) ? `&mutatedSince=${encodeURIComponent(mutatedSince)}` : '';
       metric(since === 0 ? 'cold_sync.requests' : 'delta.requests');
-      const r = await api<Delta>(`/chats/delta?since=${since}&limit=${PAGE}${mutParam}`);
+      const r = normDelta(await api<Delta>(`/chats/delta?since=${since}&limit=${PAGE}${mutParam}`));
       metric(since === 0 ? 'cold_sync.rows' : 'delta.rows', r?.messages?.length ?? 0);
 
       if (guard === 0) {
@@ -138,7 +153,7 @@ export async function catchUp(): Promise<number> {
           cursor = (cursor && maxTs <= cursor)
             ? new Date(Date.parse(cursor) + 1).toISOString()
             : maxTs;
-          const rm = await api<Delta>(`/chats/delta?since=${sinceOrig}&limit=1&mutatedSince=${encodeURIComponent(cursor)}`);
+          const rm = normDelta(await api<Delta>(`/chats/delta?since=${sinceOrig}&limit=1&mutatedSince=${encodeURIComponent(cursor)}`));
           muts = rm?.mutations ?? [];
         }
         // Advance the stored cursor to the server clock only AFTER the drain —

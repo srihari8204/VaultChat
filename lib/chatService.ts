@@ -16,6 +16,7 @@ import { E2EE_ENABLED, GROUP_E2EE, E2EE_STRICT, UPLOAD_PROGRESS } from '../const
 import type { GroupType } from './groups/catalog';
 import type { Permission, GroupRole } from './groups/permissions';
 import { redactIds, warnOnce } from './diagLog';
+import { normalizeMsgIds } from './msgIds';
 
 export interface ChatSummary {
   id:            string;
@@ -1339,12 +1340,18 @@ export async function resolveVaultId(vaultId: string): Promise<ResolvedVault> {
   return api<ResolvedVault>(`/user/by-vault/${encodeURIComponent(vid)}`);
 }
 
+// Wire ids are strings; the device is number-keyed. The normalizer lives in
+// its own import-free module so its selftest can run under tsx. Re-exported
+// here because this is where every caller already looks for message helpers.
+export { normalizeMsgIds };
+
 export async function getMessages(chatId: string, opts: { before?: number; limit?: number } = {}): Promise<Message[]> {
   const params: string[] = [];
   if (opts.before) params.push(`before=${opts.before}`);
   if (opts.limit) params.push(`limit=${opts.limit}`);
   const qs = params.length ? `?${params.join('&')}` : '';
-  return api<Message[]>(`/chats/${encodeURIComponent(chatId)}/messages${qs}`);
+  const rows = await api<Message[]>(`/chats/${encodeURIComponent(chatId)}/messages${qs}`);
+  return Array.isArray(rows) ? rows.map(normalizeMsgIds) : rows;
 }
 
 export async function sendMessage(
@@ -1384,9 +1391,8 @@ export async function sendMessage(
     // delivered a number; they do not, and a caller that trusted that (the
     // root new_message listener) silently passed `undefined` as a message id
     // into the decrypt path. Normalize here so UI dedup and the local-cache
-    // upsert (number-id only) work; RAW SOCKET PAYLOADS ARE NOT NORMALIZED,
-    // so anything reading `m.id` straight off the wire must Number() it.
-    if (msg && msg.id != null) (msg as any).id = Number(msg.id);
+    // upsert (number-id only) work.
+    normalizeMsgIds(msg);
     const _tAck = Date.now();
     perf.mark('send_http_ack', { chatId, id: msg?.id, ms: _tAck - _tEnc });
     perf.recordSend({
@@ -1450,9 +1456,9 @@ export async function editMessage(chatId: string, msgId: number, plaintext: stri
     method: 'PATCH',
     json: { content },
   });
-  // PATCH returns `id` as a STRING; GET/socket deliver a NUMBER. Normalize so
-  // the queue's temp→real dedup and the number-id-only cache upsert both work.
-  if (msg && msg.id != null) (msg as any).id = Number(msg.id);
+  // PATCH returns `id` (and `replyToId`) as STRINGS. Normalize so the queue's
+  // temp→real dedup and the number-id-only cache upsert both work.
+  normalizeMsgIds(msg);
   // Cache the edited plaintext so the sender can read their own edited message
   // (the server now holds ciphertext we can't self-decrypt).
   if (content !== plaintext) await cacheOwnPlaintext(chatId, msgId, plaintext);

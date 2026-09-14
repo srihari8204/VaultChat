@@ -125,6 +125,7 @@ import {
   type Message,
   type ReactionSummary,
   groupRefOf,
+  normalizeMsgIds,
 } from '../lib/chatService';
 import { forwardNotice } from '../lib/forwardPolicy';
 import { groupTypeInfo } from '../lib/groups/catalog';
@@ -821,11 +822,12 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
 
           const me = meIdRef.current;
           if (m.chatId !== chatId) return;
-          // Socket payloads deliver `id` as a STRING, but the HTTP ack / cache use
-          // a NUMBER. Normalize so `x.id === m.id` dedup works — otherwise the
-          // socket echo of our own just-sent message survives alongside the ack'd
-          // row and both collide on the same React key.
-          if (m.id != null) (m as any).id = Number(m.id);
+          // Socket payloads deliver `id` AND `replyToId` as STRINGS, but the HTTP
+          // ack / cache use NUMBERs. Normalize so `x.id === m.id` dedup works —
+          // otherwise the socket echo of our own just-sent message survives
+          // alongside the ack'd row and both collide on the same React key — and
+          // so the reply-target lookup (a Map<number,…>) can find the quoted row.
+          normalizeMsgIds(m);
           // Tone immediately; the DELIVERY ACK deliberately does not fire here.
           if (m.senderId !== me) {
             playReceived();   // in-app "received" tone (respects sound prefs)
