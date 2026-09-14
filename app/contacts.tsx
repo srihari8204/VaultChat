@@ -75,6 +75,9 @@ export default function ContactsScreen() {
   const [invite,     setInvite]       = useState<InviteRow[]>([]);
   const [error,      setError]        = useState<string | null>(null);
   const [openingId,  setOpeningId]    = useState<string | null>(null);
+  // Hashing is one async digest PER PHONE NUMBER, so a 1000-contact book is
+  // minutes of work behind a spinner that never moves. Count it out loud.
+  const [progress,   setProgress]     = useState<{ done: number; total: number } | null>(null);
 
   // ── Request permission + scan ─────────────────────────────
   const scan = useCallback(async () => {
@@ -97,17 +100,21 @@ export default function ContactsScreen() {
       });
 
       // Flatten to per-phone-number entries (one contact can have many phones)
+      const withPhones = data.filter(c => c.phoneNumbers?.length);
+      setProgress({ done: 0, total: withPhones.length });
       const entries: PhoneEntry[] = [];
-      for (const c of data) {
-        if (!c.phoneNumbers || c.phoneNumbers.length === 0) continue;
+      for (let i = 0; i < withPhones.length; i++) {
+        const c = withPhones[i];
         const contactName = (c.name || '').trim() || 'Unknown';
-        for (const p of c.phoneNumbers) {
+        for (const p of c.phoneNumbers!) {
           const raw = p.number?.trim();
           if (!raw) continue;
           const hash = await hashPhoneForLookup(raw);
           if (!hash) continue;
           entries.push({ hash, contactId: c.id || raw, contactName, rawPhone: raw });
         }
+        // Every 25, not every one: 1000 setStates would cost more than the work.
+        if (i % 25 === 0 || i === withPhones.length - 1) setProgress({ done: i + 1, total: withPhones.length });
       }
       if (entries.length === 0) {
         setError('No phone numbers found in your contacts.');
@@ -163,6 +170,7 @@ export default function ContactsScreen() {
       setError(e?.message ?? 'Contact scan failed');
     } finally {
       setScanning(false);
+      setProgress(null);
     }
   }, []);
 
@@ -262,7 +270,11 @@ export default function ContactsScreen() {
       {scanning && matched.length === 0 && invite.length === 0 && (
         <View style={S.center}>
           <ActivityIndicator color={colors.primary} size="large" />
-          <Text style={S.scanHint}>Scanning your address book…</Text>
+          <Text style={S.scanHint}>
+            {progress
+              ? `Scanning your address book… ${progress.done} of ${progress.total}`
+              : 'Scanning your address book…'}
+          </Text>
         </View>
       )}
 

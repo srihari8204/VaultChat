@@ -17,6 +17,14 @@ import LocationMap from '../components/LocationMap';
 
 // const RED = '#EF4444';
 
+// Android hands back 0 — not null — for a coordinate field it has no fix for,
+// so `!= null` never fires and an unavailable altitude rendered as a confident
+// "0.0m". Only a finite, non-zero reading is a reading. (Exactly-0 altitude or
+// accuracy is not a value we can distinguish from "unknown", so we don't claim
+// it.)
+const reading = (v: number | null | undefined): number | null =>
+  (typeof v === 'number' && Number.isFinite(v) && v !== 0 ? v : null);
+
 function useS() {
   const { colors } = useTheme();
   return useMemo(() => makeStyles(colors), [colors]);
@@ -81,7 +89,7 @@ export default function CurrentLocationScreen() {
       await sendMessage(chatId, JSON.stringify({
         lat: location.coords.latitude,
         lng: location.coords.longitude,
-        accuracy: location.coords.accuracy,
+        accuracy: reading(location.coords.accuracy),
         address,
         live: false,
       }), 'location');
@@ -161,13 +169,17 @@ export default function CurrentLocationScreen() {
                   <Text style={s.coordVal}>{location.coords.longitude.toFixed(6)}</Text>
                 </View>
               </View>
-              {location.coords.altitude != null && (
+              {reading(location.coords.altitude) != null && (
                 <View style={s.coordItem}>
                   <Text style={s.coordLabel}>Altitude</Text>
-                  <Text style={s.coordVal}>{location.coords.altitude.toFixed(1)}m</Text>
+                  <Text style={s.coordVal}>{reading(location.coords.altitude)!.toFixed(1)}m</Text>
                 </View>
               )}
-              <Text style={s.coordLabel}>Accuracy: {'\u00B1'}{location.coords.accuracy?.toFixed(0)}m</Text>
+              <Text style={s.coordLabel}>
+                {reading(location.coords.accuracy) != null
+                  ? `Accuracy: \u00B1${reading(location.coords.accuracy)!.toFixed(0)}m`
+                  : 'Accuracy unavailable'}
+              </Text>
               {address ? <Text style={s.addressTxt}>{'\uD83C\uDFE0'} {address}</Text> : null}
             </View>
 

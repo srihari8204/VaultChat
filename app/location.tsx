@@ -27,6 +27,11 @@ import { emit } from '../lib/socket';
 import { newLiveKey, encryptPosition } from '../lib/liveLocationCrypto';
 import { AuroraBackground } from '../components/ui';
 import LocationMap, { type MapPoint } from '../components/LocationMap';
+import { readCache, writeCache } from '../lib/localCache';
+
+// Last fix we actually got, so a re-open paints the right part of the world
+// while the GPS warms up instead of a map of the whole subcontinent.
+const LAST_FIX = 'location:lastFix';
 
 const DURATIONS = [
   { label: '15 minutes', seconds: 900 },
@@ -66,6 +71,9 @@ export default function LocationScreen() {
   // built from the fixes the watcher already delivers — nothing extra is
   // collected, stored or sent.
   const [trail, setTrail] = useState<MapPoint[]>([]);
+  // Shown ONLY until the real fix lands, and only on the map — the address card
+  // keeps saying "Getting your location…", so nothing stale is presented as now.
+  const [lastFix, setLastFix] = useState<MapPoint | null>(null);
 
   const watchRef = useRef<Location.LocationSubscription | null>(null);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -83,11 +91,13 @@ export default function LocationScreen() {
   useEffect(() => {
     (async () => {
       setLoading(true);
+      readCache<MapPoint>(LAST_FIX).then((c) => { if (c) setLastFix(c); });
       const { status } = await Location.requestForegroundPermissionsAsync();
       if (status !== 'granted') { setPermDenied(true); setLoading(false); return; }
       try {
         const pos = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
         setLoc(pos);
+        writeCache(LAST_FIX, { lat: pos.coords.latitude, lng: pos.coords.longitude });
         reverseGeocode(pos.coords.latitude, pos.coords.longitude);
       } catch {
         Alert.alert('GPS error', 'Could not get your location. Check that GPS is enabled.');
@@ -211,7 +221,8 @@ export default function LocationScreen() {
         {/* The real map. While live sharing runs it also draws the path
             travelled so far, from the fixes the watcher already delivers. */}
         <LocationMap
-          coord={lat != null && lng != null ? { lat, lng } : null}
+          coord={lat != null && lng != null ? { lat, lng } : lastFix}
+          status={lat != null && lng != null ? 'ok' : 'locating'}
           trail={live ? trail : null}
           height={220}
           style={{ marginBottom: 12 }}
@@ -231,12 +242,6 @@ export default function LocationScreen() {
                 <TouchableOpacity style={S.mapsBtn} onPress={() => navigateTo(lat, lng, address || 'Location')}>
                   <Ionicons name="navigate" size={15} color={colors.primary} />
                   <Text style={S.mapsBtnText}>Navigate here</Text>
-                </TouchableOpacity>
-              )}
-              {lat != null && lng != null && (
-                <TouchableOpacity style={S.mapsBtn} onPress={() => Linking.openURL(`https://www.google.com/maps?q=${lat},${lng}`)}>
-                  <Ionicons name="map-outline" size={15} color={colors.primary} />
-                  <Text style={S.mapsBtnText}>Open in Google Maps</Text>
                 </TouchableOpacity>
               )}
             </>

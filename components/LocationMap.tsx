@@ -39,14 +39,20 @@ export type LocationMapStatus = 'ok' | 'locating' | 'denied';
 
 /** The page. Same shape as NavMap's mlHtml: one JS function per thing that can
  *  change, driven by injectJavaScript once 'ready' has been posted. */
-function page(styleUrl: string, bg: string, accent: string): string {
+function page(styleUrl: string, bg: string, accent: string, init: MapPoint): string {
   return `<!DOCTYPE html><html><head>
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
 <link rel="stylesheet" href="data:text/css;base64,${MAPLIBRE_CSS_B64}"/>
 <style>html,body,#map{height:100%;margin:0;background:${bg}}
 .pin{width:22px;height:22px;border-radius:50% 50% 50% 0;transform:rotate(-45deg);
   background:${accent};border:3px solid #fff;box-shadow:0 2px 6px rgba(0,0,0,.45)}
-.maplibregl-ctrl-attrib{font-size:9px}</style>
+/* OpenStreetMap's licence requires the credit stay LEGIBLE. The recentre button
+   is an RN overlay pinned bottom-RIGHT, so the attribution lives bottom-left
+   (added below) and gets a plate to read against, not 9px over the tiles. */
+.maplibregl-ctrl-bottom-left{max-width:calc(100% - 60px)}
+.maplibregl-ctrl-attrib{font-size:10px;line-height:14px;background:rgba(255,255,255,.82);
+  color:#111;border-radius:4px 4px 0 0}
+.maplibregl-ctrl-attrib a{color:#0b57d0}</style>
 </head><body><div id="map"></div>
 <script src="data:text/javascript;base64,${MAPLIBRE_JS_B64}"></script>
 <script>
@@ -58,8 +64,11 @@ function webglOK(){ try{ var c=document.createElement('canvas');
   return !!(window.WebGLRenderingContext&&(c.getContext('webgl')||c.getContext('experimental-webgl'))); }catch(e){ return false; } }
 if(!webglOK()){ if(RN)RN.postMessage(JSON.stringify({type:'maperror',msg:'this device cannot draw maps (no WebGL)'})); throw new Error('no webgl'); }
 var STYLE=${JSON.stringify(styleUrl)};
-var map=new maplibregl.Map({container:'map',center:[78.9,20.6],zoom:3,
-  attributionControl:{compact:true},style:STYLE});
+// Open ON the position we already have. Starting at [78.9,20.6] zoom 3 meant the
+// first seconds of every open were a map of the whole subcontinent with no pin.
+var map=new maplibregl.Map({container:'map',center:[${init.lng},${init.lat}],zoom:16,
+  attributionControl:false,style:STYLE});
+map.addControl(new maplibregl.AttributionControl({compact:false}),'bottom-left');
 var pin=null,placed=false,lastTouch=0,ready=false;
 function setPos(la,ln){
   if(!pin){ var el=document.createElement('div'); el.className='pin';
@@ -128,6 +137,13 @@ export default function LocationMap({
 
   const state: LocationMapStatus = status ?? (coord ? 'ok' : 'locating');
 
+  // The centre the page is BUILT with. Captured once so `source` stays
+  // referentially stable — rebuilding it would re-navigate the WebView (and
+  // re-parse the ~1.1MB embedded MapLibre) on every GPS fix.
+  const firstFix = useRef<MapPoint | null>(null);
+  if (coord && !firstFix.current) firstFix.current = { lat: coord.lat, lng: coord.lng };
+  const initial = firstFix.current;
+
   useEffect(() => {
     if (!ready || !coord || !ref.current) return;
     ref.current.injectJavaScript(`setPos(${coord.lat},${coord.lng});true;`);
@@ -156,8 +172,8 @@ export default function LocationMap({
   // WebView never re-navigates on an unchanged source.html. NavMap and
   // FamilyMap both carry the same memo for the same reason.
   const source = useMemo(
-    () => ({ html: page(mapStyleUrl(mapScheme), colors.bg, colors.primary) }),
-    [mapScheme, colors.bg, colors.primary],
+    () => ({ html: page(mapStyleUrl(mapScheme), colors.bg, colors.primary, initial ?? { lat: 20.6, lng: 78.9 }) }),
+    [mapScheme, colors.bg, colors.primary, initial],
   );
 
   const shell = [
@@ -234,6 +250,21 @@ export default function LocationMap({
         style={{ backgroundColor: colors.bg }}
         androidLayerType="hardware"
       />
+      {/* The style sheet is FETCHED, so there are seconds between mount and the
+          first painted tile. Say so instead of leaving a silent empty map. */}
+      {!ready && (
+        <View style={[S.veil, { backgroundColor: colors.bg }]} pointerEvents="none">
+          <ActivityIndicator color={colors.primary} />
+          <Text style={[S.sub, { color: colors.textDim }]}>Loading map…</Text>
+        </View>
+      )}
+      {/* A pin from the last known fix is not "you are here" yet. */}
+      {state === 'locating' && (
+        <View style={[S.badge, { backgroundColor: colors.glassSoft, borderColor: colors.glassStroke }]} pointerEvents="none">
+          <ActivityIndicator size="small" color={colors.primary} />
+          <Text style={[S.badgeTxt, { color: colors.textDim }]}>Last known · getting a fix…</Text>
+        </View>
+      )}
       <TouchableOpacity
         onPress={() => ref.current?.injectJavaScript('recenter();true;')}
         accessibilityRole="button"
@@ -260,4 +291,10 @@ const S = StyleSheet.create({
   retry: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 8, paddingHorizontal: 14, paddingVertical: 8, borderRadius: 10, borderWidth: 1 },
   retryTxt: { fontSize: 12.5, fontWeight: '700' },
   fab: { position: 'absolute', right: 10, bottom: 10, width: 38, height: 38, borderRadius: 19, borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
+  // layout-exempt: both are absolute overlays sized by their edges, not by a
+  // fixed vertical dimension, so a large font scale grows them instead of
+  // clipping. The map viewport underneath owns the height.
+  veil: { ...StyleSheet.absoluteFillObject, alignItems: 'center', justifyContent: 'center', gap: 8 },
+  badge: { position: 'absolute', left: 10, top: 10, flexDirection: 'row', alignItems: 'center', gap: 7, paddingHorizontal: 10, paddingVertical: 6, borderRadius: 14, borderWidth: 1 },
+  badgeTxt: { fontSize: 11.5, fontWeight: '700' },
 });
