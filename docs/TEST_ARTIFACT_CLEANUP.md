@@ -299,3 +299,163 @@ only.
    `docker-compose.box.yml.bak-20260812T231122Z`). They are each the only copy
    of that config. Someone who knows whether those configs still matter should
    either fold them into the live tree or delete them.
+
+---
+
+# 5. Revocation executed — 2026-09-13 20:43:34Z
+
+Operator to-do item 1 is **done**. Item 2 (fate of the account and its chat)
+is deliberately **still open** — nothing below deletes a `users` row, a chat,
+or a message.
+
+## 5.1 Review of the proposed SQL — one gap found
+
+The block in item 1 was checked against the live Go handlers before running.
+Three of its effects hold, but it was **incomplete**:
+
+`UPDATE users SET mpin_hash = NULL` alone does **not** neutralise the MPIN.
+`POST /auth/security-questions/verify` (`auth.go:1894`) needs only **3 correct
+answers out of the 5 stored rows** to mint a `recoveryTicket`, and
+`POST /auth/mpin/recover` (`auth.go:1961`) exchanges that ticket for a
+**brand-new `mpin_hash` plus a fresh token pair** — silently undoing the null.
+`GET /auth/security-questions/{userId}` is unauthenticated, so an attacker is
+handed the question codes to answer. A fourth statement was therefore added to
+delete the 5 `user_security_questions` rows: with none stored, the handler's
+`byCode` map is empty and `correct` is structurally 0 for any input.
+
+Two paths named in the hand-off were checked and found **already dead**, so
+nothing was done about them:
+
+- **The disposable mailbox does not yield a session.** `/auth/verify-otp` and
+  `/auth/google` both resolve accounts through
+  `authFindOrCreateUser` → `WHERE email = $1` (`auth.go:451`), and
+  `users.email` is **NULL for both users** (the encrypted-PII onboarding design
+  keeps the address in `email_cipher` / `email_lookup`). An OTP to
+  `vcdevice-tester2@uberip.com` would create a *separate new* account, not
+  re-enter this one.
+- **The onboarding path cannot take over either.** `/auth/profile/init`
+  returns `409 already_exists` when `email_lookup` matches (`auth.go:1575`).
+
+`revoked_reason = 'test-account cleanup'` was kept as proposed after checking
+the 30-second reuse grace in `/auth/refresh` (`auth.go:822-844`): the grace
+applies only to `revoked_reason = 'rotated'`, and the legacy `token_lookup IS
+NULL` branch (which would have accepted any reason other than `'revoked'` for
+30s) cannot match these rows — all 6 carry a non-null `token_lookup`. The
+revocation is therefore immediate, with no grace window.
+
+## 5.2 Statements run
+
+One transaction, every statement scoped to the test uuid:
+
+```sql
+BEGIN;
+UPDATE refresh_tokens SET revoked_at = now(), revoked_reason = 'test-account cleanup'
+ WHERE user_id = '24d4e63a-2773-472b-b588-dc862aefe42e' AND revoked_at IS NULL;   -- UPDATE 6
+UPDATE users SET mpin_hash = NULL, discoverable = false, updated_at = now()
+ WHERE id = '24d4e63a-2773-472b-b588-dc862aefe42e';                               -- UPDATE 1
+DELETE FROM user_security_questions
+ WHERE user_id = '24d4e63a-2773-472b-b588-dc862aefe42e';                          -- DELETE 5
+DELETE FROM one_time_prekeys
+ WHERE user_id = '24d4e63a-2773-472b-b588-dc862aefe42e' AND used_at IS NULL;      -- DELETE 16
+COMMIT;
+```
+
+**6, not 3, refresh tokens** were revoked: the three from the original test run
+plus three minted by this pass's own baseline probes (ids 16-18), which proved
+the MPIN was live before it was removed.
+
+`one_time_prekeys` was narrowed to `used_at IS NULL` — the 4 already-consumed
+rows are kept so existing session history stays readable. `identity_keys` and
+`signed_prekeys` were **left in place**: deleting the identity key would break
+the session the real user's client already has pinned to this peer.
+
+## 5.3 Proof, before and after
+
+| check | before | after |
+|---|---|---|
+| `POST /auth/mpin/verify` with the leaked `739184` | **HTTP 200** + `{accessToken, refreshToken}` | **HTTP 401** `invalid_mpin` |
+| `POST /auth/refresh` with a captured token | (token issued) | **HTTP 401** `Invalid refresh token` |
+| `POST /auth/security-questions/verify` | 5 answer rows stored | **HTTP 401** `insufficient_answers … (got 0)` |
+| `GET /user/24d4e63a-…/keybundle` | `oneTimePreKey: {keyId 5}`, `remainingOtpk: 16` | no session obtainable; 0 unused prekeys in DB |
+
+The 401 on the MPIN is `invalid_mpin`, **not** the `423 locked` rate-limit
+response — a genuine credential rejection, not a lockout artifact.
+
+The keybundle could not be re-fetched over HTTP after the change because the
+captured access token expired naturally (`token_expired`) and **a new one can
+no longer be minted — which is the point of the exercise.** The property is
+proven structurally instead: the handler selects
+`FROM one_time_prekeys WHERE user_id = $1 AND used_at IS NULL … LIMIT 1`
+(`user.go:2413`) and reports `remainingOtpk` from the same predicate, and the
+database now holds **0** such rows, so the response can only omit
+`oneTimePreKey` and report `remainingOtpk: 0`.
+
+Post-state:
+
+```
+ id        | discoverable | has_mpin | live_tokens | unused_otpk | secq
+ 24d4e63a… | f            | f        | 0           | 0           | 0
+ 470a57b3… | t            | t        | 1           | 19          | 5
+```
+
+## 5.4 The real user is untouched
+
+- **Tokens live.** 1 unrevoked refresh token (id 19, `okhttp/4.12.0`), valid to
+  2026-10-13. Its rotation chain (13→14→15→19, all `revoked_reason = 'rotated'`)
+  is the client's own normal activity and predates this change.
+- **Chat intact.** `7468ae81-…` still exists, `direct`, **2** `chat_members`
+  rows, **8** messages. The real user's own row is unchanged
+  (`role = member`, `favourite = t`, `unread_count = 0`).
+- **Key bundle intact.** 1 `identity_keys` row, 1 `signed_prekeys` row,
+  **19** unused one-time prekeys.
+- **Their credentials untouched.** `discoverable = true`, `mpin_hash` present,
+  5 `user_security_questions` rows — all as before.
+
+One honest note: the **baseline** keybundle fetch in this pass consumed one
+one-time prekey from each account (20 → 19 for the real user). That is exactly
+what any peer starting a session does, it is not damage, and clients replenish.
+All later verification used the database directly and consumed nothing.
+
+## 5.5 Local scratchpad secrets deleted
+
+All under
+`…\Temp\claude\c--Users-ADMIN-Desktop-Vaultchat-backup\5f36c7e8-…\scratchpad\`,
+each confirmed gone:
+
+| file | held |
+|---|---|
+| `user2_identity_PRIVATE.json` | the account's **private** keys — `ikPriv`, `signPriv`, `spkPriv`, per-prekey `priv` |
+| `user2_bundle.json` | its published public bundle |
+| `mkbundle.ts`, `decrypt.ts` | the scripts that generated and used that material |
+| `auth.json` | a live access **and** refresh token for the account |
+| `tok.txt` | another access token for the account |
+| `mpin_before.json` | the token pair captured by this pass's baseline probe |
+
+`auth.json` and `tok.txt` were **not** in the hand-off list and a literal-uuid
+grep missed them — the uuid sits base64-encoded inside the JWT payload, not as
+text. They were found by decoding every `eyJ…` string in the tree and matching
+the `sub` claim. A repeat of that sweep now returns nothing, and no file
+outside the app's own binaries holds `ikPriv`/`spkPriv`.
+
+The MPIN `739184` appears in **no** file on disk — it was disclosed in a
+report, never written out. Remaining scratch files (`risk*.sql`, `sweep.sql`,
+`samples.log`, `stream.log`, task `.output` logs) contain only the account
+uuid and vault_id — identifiers already documented above, not credentials — and
+were left alone. (`stream.log`'s many "private" hits are Android
+`DialerPrivate` logcat noise.) The repo working tree is clean: the `ikPriv` /
+`spkPriv` hits in `services/crypto/e2eeSession.ts` are the app's own type
+definitions, which is where that JSON shape comes from.
+
+Nothing under `/root/preflight-backup/` was touched.
+
+## 5.6 What is still open
+
+- **Item 2 stands.** The account row, its chat, its 8 messages, its identity
+  and signed prekeys, and its `email_lookup` / `*_cipher` PII all remain. The
+  account can no longer be logged into or started as a new E2EE session, but it
+  still exists and still appears in the real user's chat list — which is the
+  intent.
+- `otp_codes` rows 1 and 4 remain, both long expired and inert.
+- The disposable mailbox `vcdevice-tester2@uberip.com` is still the address
+  behind this row's `email_cipher`. Per 5.1 it grants no route back into the
+  account, but it should not be reused for future test accounts.
