@@ -108,6 +108,17 @@ services/nav/rust/target/
 # transport-core Rust build output. `rust/**/target/` above is root-anchored and
 # does not reach services/, so each crate under services/ needs its own line.
 services/transport/rust/target/
+
+# transport-net Rust build output. Tracked by mistake in 313d13b: 2522 generated
+# files (.exe/.pdb/.d/fingerprints/deps) were committed because this crate was
+# created after the rule above was written and `git add -A` swept it in.
+#
+# This rule is FORWARD-ONLY. It stops new generated files being added; it does
+# NOT untrack the 2522 already in the index, and it does not remove them from
+# published history. Untracking is a separate reviewed change
+# (docs/cleanup/rust-net-target-manifest.txt) and history rewriting is out of
+# scope entirely.
+services/transport/rust-net/target/
 vaultchat-backend-go/api.exe
 
 # Firebase app config. Ships inside every APK by design (the Android API key is
