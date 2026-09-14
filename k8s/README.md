@@ -18,15 +18,36 @@ the restart/rollout layer.
 
 ## 0. Before you start
 
-**Find the node's public IP.** The console shows `eth0: 10.0.0.2` — that is a
-VPC/private address, not what DNS points at. On the node:
+**Confirm the node has a public IP and outbound internet — FIRST.** A Linode
+created with only a VPC interface has neither, and every command from step 2 on
+fails in a way that points at the wrong thing: `apt` and the Docker install
+script report `Could not resolve host`, which reads as a DNS problem when the
+actual cause is that there is no route off the box at all. A VPC alone does not
+provide internet access.
 
 ```bash
-ip -4 addr show | grep inet        # all interfaces
-curl -4 -s ifconfig.me ; echo      # the address the internet sees
+ip -4 addr show      # a PUBLIC address, not just 10.x.x.x on eth0
+ip route             # a default route
+timeout 5 bash -c 'cat </dev/null >/dev/tcp/1.1.1.1/443' && echo "TCP OK" || echo "TCP FAIL"
+curl -4 -s ifconfig.me ; echo
 ```
 
-Use the public one for DNS and for the firewall rules below.
+Test with TCP as above, not `ping` — ICMP is filtered on plenty of networks, so
+a failed ping alone does not prove the route is missing, and a successful one
+does not prove it works.
+
+If `eth0` holds only a `10.x` address, fix it in Cloud Manager — no command on
+the box can create a route that does not exist:
+
+> Linodes → your instance → **Network** → the VPC interface → **Edit** → tick
+> **"Assign a public IPv4 address for this Linode"** (1:1 NAT) → Save. If there
+> is no VPC interface, **Network → Add an IP Address → Public IPv4**.
+
+Then `reboot` and re-run the checks above. (Ubuntu 24.04 has no `dhclient` —
+netplan/systemd-networkd manage the interface, and a reboot is the reliable way
+to pick up the new address.)
+
+Use the public address for DNS and for the firewall rules below.
 
 **Sizing.** Postgres + Redis + API + k3s on one box wants 4 GB RAM minimum,
 8 GB to be comfortable. The console shows 157 GB disk, which is plenty.
@@ -345,6 +366,7 @@ sudo k3s crictl rmi --prune
 
 | Symptom | Cause / fix |
 |---|---|
+| `Could not resolve host` on apt / the Docker install script | Usually NOT DNS: the node has no route out. See step 0 — a VPC-only Linode has no public IP and no internet until 1:1 NAT is enabled |
 | Pods `Running` but nothing resolves; CoreDNS `CrashLoopBackOff` | ufw is dropping forwarded traffic. `ufw status verbose` shows `disabled (routed)` ⇒ `ufw route allow in on cni0` |
 | Pod `ErrImagePull` / `ImagePullBackOff` | Image is in Docker but not containerd. Re-run the import: `docker save vaultchat/go-api:<tag> \| sudo k3s ctr images import -`. Check the tag matches: `sudo k3s crictl images \| grep vaultchat` |
 | Pod `Pending`, events say "no persistent volumes available" | local-path provisioner not ready, or a second pod wants the same RWO PVC. `kubectl -n vaultchat describe pod <name>` and `kubectl get pods -n kube-system` |
