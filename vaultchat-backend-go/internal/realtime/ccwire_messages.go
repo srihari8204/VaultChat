@@ -56,6 +56,21 @@ var ccwireRoutes *http.ServeMux
 // already imports this package (the other direction would be a cycle).
 func SetCCWireRoutes(m *http.ServeMux) { ccwireRoutes = m }
 
+// ccwireCtxKey marks a request context as belonging to the CC-Wire loopback.
+// Unexported, so nothing outside this package — and in particular no client,
+// through any header or payload — can set or clear it.
+type ccwireCtxKey struct{}
+
+// IsCCWire reports whether r arrived over the in-process CC-Wire loopback.
+// Handlers on the public mux see false for every real client request.
+func IsCCWire(r *http.Request) bool {
+	if r == nil {
+		return false
+	}
+	on, _ := r.Context().Value(ccwireCtxKey{}).(bool)
+	return on
+}
+
 // call runs one loopback request and returns the status and decoded JSON body.
 //
 // The AUTHENTICATED CONTEXT is the session's, carried from the upgrade request,
@@ -78,6 +93,16 @@ func (s *ccwireSession) call(method, path string, body map[string]any) (int, map
 	// regardless, and an unbounded one would pin a DB connection per stuck frame.
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
+
+	// Marks the request as arriving over CC-Wire. chatsDelta needs it because
+	// the cold-sync guard keys on an unrecognised X-Device-Id, and this
+	// transport has no way to present one - ClientHello carries no device field.
+	//
+	// A CONTEXT VALUE, not a header. GET /chats/delta is also on the PUBLIC mux,
+	// so a header is something a client can set (or clear) itself; the key here
+	// is unexported, exactly as httpx does for the authenticated user, so only
+	// this loopback can stamp it. Read it with IsCCWire.
+	ctx = context.WithValue(ctx, ccwireCtxKey{}, true)
 
 	req := httptest.NewRequest(method, path, bytes.NewReader(buf)).WithContext(ctx)
 	req.Header.Set("Content-Type", "application/json")
@@ -754,6 +779,20 @@ func (s *ccwireSession) serveBody(m ccwire.Message) (handled, alive bool) {
 		return true, s.receipt(m)
 	case ccwire.BodyTypingState:
 		return true, s.typing(m)
+	case ccwire.BodyCursorSync:
+		// 64 IN, 65 OUT. cursor.proto gives CursorBatch `more` and a
+		// server-authored `continuation`, so 65 is the REPLY shape and is left
+		// unserved here on purpose - it falls through to UNKNOWN_OPERATION.
+		return true, s.cursorSync(m)
+	case ccwire.BodyViewerState:
+		return true, s.viewerState(m)
+	case ccwire.BodyGeoRelay:
+		return true, s.geoRelay(m)
+		// 80 and 83 stay OFF this list. PresenceUpdate is entirely server-authored
+		// (presence.go owns that fact, and accepting one would let a client assert
+		// ANOTHER user's online state); ViewerList is the reply shape, carrying
+		// other users' identities a client cannot supply - the same argument
+		// cursor_batch already got. Neither is on the EPHEMERAL allow-list either.
 	default:
 		return false, true
 	}

@@ -93,6 +93,13 @@ func RegisterChats(mux *http.ServeMux) {
 		cw.HandleFunc("DELETE /chats/{id}/messages/{msgId}", chatsMessageDelete)
 		cw.HandleFunc("POST /chats/{id}/delivered", chatsDelivered)
 		cw.HandleFunc("POST /chats/{id}/read", chatsRead)
+		// Catch-up. cursor_sync (ccwire_cursor.go) answers by running THIS handler,
+		// so a CC-Wire client inherits chatsDelta's visibility filter, expiry
+		// filter, cold-sync cap and pagination instead of a second implementation
+		// of each. Without it the loopback 404s and every cursor frame comes back
+		// NOT_PERMITTED, which reads like an authorization bug rather than a
+		// missing route.
+		cw.HandleFunc("GET /chats/delta", chatsDelta)
 		realtime.SetCCWireRoutes(cw)
 	}
 	id.HandleFunc("POST /chats/{id}/members", httpx.RequireAuth(chatsMembersAdd))
@@ -637,6 +644,30 @@ func chatsDelta(w http.ResponseWriter, r *http.Request) {
 	// empty rather than inheriting history. That is the requested behaviour, and
 	// the explicit history path (GET /chats/{id}/messages?before=) still fetches
 	// it on demand, page by page.
+	// CC-WIRE: CLAMP A COLD START ONLY.
+	//
+	// The cold-sync guard keys on `since == 0` plus an unrecognised X-Device-Id.
+	// CC-Wire can present neither: the loopback sets no device id (ClientHello
+	// has no device field), and `since` comes from the cursor the CLIENT sent. So
+	// a CC-Wire client that sends position=1 instead of 0 skipped the guard
+	// completely and streamed its entire account history back.
+	//
+	// `since == 0` IS LOAD-BEARING. An earlier version clamped every CC-Wire
+	// catch-up, not just a cold one, and that is strictly worse than the bug it
+	// fixed: an ESTABLISHED client whose cursor has fallen more than the cap
+	// behind had `since` raised past the messages it had not received, and
+	// cursorSync then closes with a watermark past the gap - so the skipped
+	// messages are never delivered and never asked for again.
+	if since == 0 && realtime.IsCCWire(r) {
+		if capN := coldSyncMaxMessages(); capN > 0 && !coldSyncWarnOnly() {
+			if floor := coldSyncFloor(ctx, user.ID, capN); floor > since {
+				log.Printf("[chats/delta] cc-wire catch-up clamped %d -> %d for user=%s", since, floor, user.ID)
+				since = floor
+				coldStart = true // pick up the undelivered-only filter, as the REST cold path does
+			}
+		}
+	}
+
 	coldFilter := ""
 	if coldStart {
 		coldFilter = `

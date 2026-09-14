@@ -273,6 +273,14 @@ func (h *Hub) LocalSockets() int {
 // hung one must not outlive the pod's grace period. A timeout here is logged
 // and ignored, because the process is going away regardless.
 func (h *Hub) Shutdown(wait time.Duration) {
+	// CC-Wire sessions FIRST, and before the h.io nil check below: they live in
+	// their own registry, they are not Socket.IO sockets, and DisconnectSockets
+	// does not reach them. Until this existed they were simply dropped when the
+	// process exited, so every deploy looked like a network fault to a CC-Wire
+	// client. Placed above the early return because a hub with no Socket.IO
+	// server can still be serving CC-Wire.
+	h.ccwireShutdown(wait)
+
 	if h == nil || h.io == nil {
 		return
 	}
