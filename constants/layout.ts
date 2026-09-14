@@ -33,7 +33,17 @@ const TOP_INSET: number =
   initialWindowMetrics?.insets.top ??
   (Platform.OS === 'android' ? StatusBar.currentHeight ?? 24 : 44);
 
-const BOTTOM_INSET: number = initialWindowMetrics?.insets.bottom ?? 0;
+// The TOP inset has a per-platform fallback (below) because the metrics can be
+// missing; the bottom one silently fell back to 0, which is not the same kind of
+// guess — it is the claim that the device HAS no gesture/navigation bar. When
+// react-native-safe-area-context cannot resolve initialWindowMetrics at module
+// eval (Android returns nothing when the activity is not up yet), every
+// bottom-derived metric collapsed: TAB_BAR_SPACE reserved ~26pt too little and
+// the floating bar — which positions itself from the LIVE insets — covered the
+// last row of the list. `?? ` only fires when the metrics are ABSENT: a device
+// that genuinely reports 0 still gets 0.
+const BOTTOM_INSET: number =
+  initialWindowMetrics?.insets.bottom ?? (Platform.OS === 'android' ? 24 : 0);
 
 // Short screens pay the biggest price for a fat header, so they get the smaller
 // gap. 700dp is about where a 16:9 phone sits once the status and nav bars are
@@ -64,6 +74,17 @@ export const IS_SHORT = SHORT;
 export default { HEADER_TOP, SCREEN_BOTTOM, IS_NARROW, IS_SHORT };
 
 /**
+ * How far the raised Apps disc pops ABOVE the 66pt glass pill.
+ *
+ * Android does not hit-test a child outside its parent's bounds, so the disc
+ * was drawn where nothing could be tapped. The bar's view is this much taller
+ * than the pill it paints (the extra band is transparent) so the touchable
+ * covers the art — which also means content has to clear the taller view, not
+ * just the pill.
+ */
+export const TAB_BAR_RAISE = 32;
+
+/**
  * Vertical space the FLOATING tab bar occupies (Aurora Glass, U6).
  *
  * The bar is `position: absolute` so content scrolls under its blur — that is
@@ -71,6 +92,7 @@ export default { HEADER_TOP, SCREEN_BOTTOM, IS_NARROW, IS_SHORT };
  * tab screen must reserve this much bottom padding, or its last row can never
  * be brought clear of the glass.
  *
- * 66 bar + 12 gap below it + the device's own bottom inset + 12 breathing room.
+ * 66 bar + the raised Apps disc above it + 12 gap below it + the device's own
+ * bottom inset + 12 breathing room.
  */
-export const TAB_BAR_SPACE: number = 66 + 12 + Math.max(BOTTOM_INSET, 10) + 12;
+export const TAB_BAR_SPACE: number = 66 + TAB_BAR_RAISE + 12 + Math.max(BOTTOM_INSET, 10) + 12;

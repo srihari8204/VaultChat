@@ -14,6 +14,7 @@ import type { Palette } from '../../constants/theme';
 import { useColors } from '../../lib/theme';
 import { AppText } from '../../components/ui/Text';
 import { GlassView } from '../../components/ui/GlassView';
+import { TAB_BAR_RAISE } from '../../constants/layout';
 import { useUnreadTotal } from '../../lib/unreadStore';
 import { useReducedMotion } from '../../lib/useReducedMotion';
 import { MOTION } from '../../constants/theme';
@@ -118,7 +119,12 @@ export default function TabLayout() {
       <Tabs.Screen name="chats"   options={{ title: 'Chats',   tabBarIcon: ({ focused }) => <TabIcon tab="chats"   label="Chats"   focused={focused} /> }} />
       <Tabs.Screen name="status"  options={{ title: 'Status',  tabBarIcon: ({ focused }) => <TabIcon tab="status"  label="Status"  focused={focused} /> }} />
       {/* Center: Mini Apps — prominent raised button */}
-      <Tabs.Screen name="mini"    options={{ title: 'Apps',    tabBarIcon: ({ focused }) => <MiniCenterIcon focused={focused} /> }} />
+      {/* The ONLY item that fills the bar's full (raised) height: its disc is
+          drawn above the pill, and Android will not deliver a touch to a child
+          outside its parent, so the item has to reach up to the art. The other
+          four stay pinned to the pill so the band above it does not eat taps
+          meant for the list behind. */}
+      <Tabs.Screen name="mini"    options={{ title: 'Apps',    tabBarItemStyle: styles.tabItemCenter, tabBarIconStyle: styles.centerIconBox, tabBarIcon: ({ focused }) => <MiniCenterIcon focused={focused} /> }} />
       <Tabs.Screen name="calls"   options={{ title: 'Calls',   tabBarIcon: ({ focused }) => <TabIcon tab="calls"   label="Calls"   focused={focused} /> }} />
       <Tabs.Screen name="profile" options={{ title: 'Profile', tabBarIcon: ({ focused }) => <TabIcon tab="profile" label="Profile" focused={focused} /> }} />
       {/* Routable but hidden from the bar — opened from the Chats header */}
@@ -134,7 +140,10 @@ const makeStyles = (c: Palette) => StyleSheet.create({
     position: 'absolute',
     left: 16,
     right: 16,
-    height: 66,
+    // Taller than the 66pt pill it paints: the extra TAB_BAR_RAISE at the top
+    // is a transparent band that exists only so the raised Apps disc lands
+    // inside a touchable. tabBarGlass insets past it, so nothing moves.
+    height: 66 + TAB_BAR_RAISE,
     paddingTop: 8,
     paddingBottom: 8,
     backgroundColor: 'transparent',
@@ -149,13 +158,22 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   },
   tabBarGlass: {
     ...StyleSheet.absoluteFillObject,
+    top: TAB_BAR_RAISE,          // the pill is still 66pt, in the same place
     borderRadius: 30,
   },
-  tabItem: { height: 50 },
+  // flex-end keeps the four side tabs on the pill, exactly where they were.
+  tabItem: { height: 50, alignSelf: 'flex-end' },
+  tabItemCenter: { alignSelf: 'stretch' },
   tabIconWrap: { alignItems: 'center', justifyContent: 'center', gap: 3, width: 64 },
   tabLabel: { marginTop: 1 },
   // Raised, glowing center button for Mini Apps.
   centerWrap: { alignItems: 'center', justifyContent: 'center', width: 64 },
+  // react-navigation lays the icon wrapper out from the TOP of the item, so
+  // growing the item upwards would have dragged the disc up with it. This puts
+  // it back: the art paints exactly where it always did, only the touchable
+  // moved. (It goes on the wrapper, not on centerWrap — the wrapper CENTERS
+  // its child, so a margin in there would only move the art by half.)
+  centerIconBox: { marginTop: TAB_BAR_RAISE },
   centerBtn: {
     width: 54, height: 54, borderRadius: 27,
     alignItems: 'center', justifyContent: 'center',

@@ -13,9 +13,10 @@ import {
   ActivityIndicator,
   Alert,
   Image,
+  Platform,
   ScrollView,
   StyleSheet,
-  Text, TextInput, TouchableOpacity,
+  Text, TextInput, ToastAndroid, TouchableOpacity,
   View,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
@@ -289,7 +290,14 @@ export default function ProfileScreen() {
             <Text style={{ color: colors.text, fontSize: 15, fontWeight: '700' }}>@{profile.vaultId}</Text>
           </View>
           <TouchableOpacity hitSlop={10} style={{ padding: 6 }}
-            onPress={async () => { await Clipboard.setStringAsync('@' + (profile?.vaultId ?? '')); Alert.alert('Copied', `@${profile?.vaultId} copied to clipboard.`); }} accessibilityLabel="Copy your VaultID">
+            onPress={async () => {
+              await Clipboard.setStringAsync('@' + (profile?.vaultId ?? ''));
+              // A copy needs no acknowledgement — the OS toast is the native one
+              // and does not block the thumb. iOS has no toast, so it keeps the
+              // alert rather than confirming nothing at all.
+              if (Platform.OS === 'android') ToastAndroid.show('VaultID copied', ToastAndroid.SHORT);
+              else Alert.alert('Copied', `@${profile?.vaultId} copied to clipboard.`);
+            }} accessibilityLabel="Copy your VaultID">
             <Ionicons name="copy-outline" size={20} color={colors.primary} />
           </TouchableOpacity>
           <TouchableOpacity hitSlop={10} style={{ padding: 6 }} onPress={() => router.push('/qr-contact' as any)} accessibilityLabel="Show your QR code">

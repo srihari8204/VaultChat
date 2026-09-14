@@ -237,6 +237,7 @@ const INSET_SCREENS = [
   'network-test',
   'onboard-mpin',
   'onboard-success',
+  'settings',
   'setup-complete',
   'vaultbeam-settings',
 ] as const;

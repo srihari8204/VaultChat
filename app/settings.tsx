@@ -8,17 +8,19 @@
 //
 // No Firebase, no Firestore — pure Postgres + JWT.
 
-import { HEADER_TOP } from '../constants/layout';
 import * as FileSystem from 'expo-file-system/legacy';
 import { useRouter } from 'expo-router';
 import * as Sharing from 'expo-sharing';
+// In-app browser (Custom Tab), not a bounce out to the default browser: the
+// policy pages are part of the app's own agreement flow, so reading them
+// should not lose the user's place in Settings.
+import * as WebBrowser from 'expo-web-browser';
 import { isMfaEnabled, enableMfa, disableMfa } from '../lib/mfa';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
   Image,
-  Linking,
   ScrollView,
   StyleSheet,
   Switch,
@@ -211,6 +213,13 @@ export default function SettingsScreen() {
   }
 
   return (
+    // The ScrollView is wrapped so the <Sheet> below can be its SIBLING. A
+    // react-native <Modal> mounted inside a scroll container is laid out as a
+    // screen-sized host view in that container's content — its own window
+    // paints in the right place, but the scroll view it lives in no longer
+    // hit-tests where it paints, which is how a tap on one PRIVACY row fired a
+    // different row a thousand pixels away. A modal is never scroll content.
+    <View style={S.screen}>
     <ScrollView style={S.screen} contentContainerStyle={{ paddingBottom: 64 }}>
       <View style={S.header}>
         <TouchableOpacity onPress={() => router.back()} hitSlop={10} style={S.backBtn} activeOpacity={0.7}>
@@ -368,8 +377,8 @@ export default function SettingsScreen() {
               document a person should be able to see is served from the real
               domain, with the padlock their own browser drew. Play also expects
               this link to exist in-app, not only on the store listing. */}
-          <LinkRow icon="document-text-outline" title="Privacy Policy" sub="What we collect, and what we cannot read" onPress={() => Linking.openURL(`${SERVER_URL}/privacy`)} />
-          <LinkRow icon="reader-outline" title="Terms of Service" sub="The agreement you accepted" onPress={() => Linking.openURL(`${SERVER_URL}/terms`)} last />
+          <LinkRow icon="document-text-outline" title="Privacy Policy" sub="What we collect, and what we cannot read" onPress={() => WebBrowser.openBrowserAsync(`${SERVER_URL}/privacy`)} />
+          <LinkRow icon="reader-outline" title="Terms of Service" sub="The agreement you accepted" onPress={() => WebBrowser.openBrowserAsync(`${SERVER_URL}/terms`)} last />
         </View>
         {/* AUDIT F9. Stated in the sub-line rather than behind a help link,
             because the only reason a privacy product is allowed to count
@@ -444,6 +453,8 @@ export default function SettingsScreen() {
         )}
       </View>
 
+    </ScrollView>
+
       <Sheet
         visible={!!picker}
         title={picker?.title}
@@ -451,7 +462,7 @@ export default function SettingsScreen() {
         actions={picker?.actions ?? []}
         onClose={() => setPicker(null)}
       />
-    </ScrollView>
+    </View>
   );
 }
 
@@ -557,7 +568,10 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   screen: { flex: 1, backgroundColor: 'transparent' },
   center:        { justifyContent: 'center', alignItems: 'center' },
 
-  header:        { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingTop: HEADER_TOP, paddingBottom: 12, gap: 8 },
+  // The status-bar inset comes from the navigator (INSET_SCREENS in
+  // app/_layout.tsx), which pads the SCREEN — so scrolled rows clip at the
+  // inset instead of sliding under the clock. This is just the header's gap.
+  header:        { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingTop: 4, paddingBottom: 12, gap: 8 },
   backBtn:       { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
   backTxt:       { color: c.text, fontSize: 26, fontWeight: '600' },
   title:         { color: c.text, fontSize: 22, fontWeight: '800' },
