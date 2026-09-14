@@ -39,7 +39,12 @@ CREATE TABLE messages (
   content    text,
   meta       jsonb,
   deleted_at timestamptz,
-  created_at timestamptz NOT NULL
+  created_at timestamptz NOT NULL,
+  -- §15 finding 1. The real column is a self-FK (002_chats.sql:64); the
+  -- fixture leaves the constraint off because nothing here depends on it, but
+  -- the seed below still points every row at a REAL id so it would survive the
+  -- constraint being added.
+  reply_to_id bigint
 );
 CREATE TABLE chat_members (
   chat_id text NOT NULL, user_id text NOT NULL,
@@ -118,6 +123,11 @@ INSERT INTO chat_device_delivery VALUES
   ('c6','bob','phone',6),('c6','bob','tablet-live',6),
   ('c7','bob','phone',7),('c7','bob','tablet-live',7),
   ('c8','bob','phone',8),('c8','bob','tablet-live',8);
+
+-- §15 finding 1: every message replies to another real message, so the table
+-- holds a complete reply graph going in. Which of those edges survive is the
+-- assertion at the bottom of this file.
+UPDATE messages SET reply_to_id = (id % 8) + 1;
 `
 	if _, err := conn.Exec(ctx, seed); err != nil {
 		t.Fatalf("seed: %v", err)
@@ -237,6 +247,60 @@ chatsSendMessagePush needs the ids to override a muted chat for a mentioned user
 	t.Run("a NULL meta stays NULL", func(t *testing.T) {
 		if m := get(8).meta; m != nil {
 			t.Fatalf("meta was NULL and became %q — an empty object is not the same value", *m)
+		}
+	})
+
+	// ── the reply graph (§15 finding 1) ────────────────────────────────
+	//
+	// Both halves matter, and the second one is the one that can be faked. A
+	// test that only checked "reply_to_id is NULL after the sweep" would pass
+	// on a statement that nulls the column for EVERY row — which would destroy
+	// the reply pointer of a message that was never delivered, at the same time
+	// as that message still has its body and is still waiting to be sent.
+	replyTo := func(id int) *int64 {
+		var v *int64
+		if err := conn.QueryRow(ctx,
+			`SELECT reply_to_id FROM messages WHERE id = $1`, id).Scan(&v); err != nil {
+			t.Fatalf("read reply_to_id %d: %v", id, err)
+		}
+		return v
+	}
+
+	t.Run("a reclaimed message loses its reply pointer", func(t *testing.T) {
+		for _, id := range []int{1, 4, 6, 7, 8} {
+			if reclaimed(id) != true {
+				t.Fatalf("fixture drift: message %d was expected to be reclaimed", id)
+			}
+			if v := replyTo(id); v != nil {
+				t.Fatalf(`message %d had its body reclaimed but kept reply_to_id=%d.
+
+The ciphertext is gone and the server still knows which message this one
+answered. That is the conversation graph envelope.proto:153-154 says the server
+has no need to build, surviving the sweep that is supposed to be the backstop.`,
+					id, *v)
+			}
+		}
+	})
+
+	t.Run("an un-swept message keeps its reply pointer", func(t *testing.T) {
+		// 2 undelivered, 3 held by a live second device, 5 no other member.
+		for _, id := range []int{2, 3, 5} {
+			if reclaimed(id) {
+				t.Fatalf("fixture drift: message %d was expected to survive the sweep", id)
+			}
+			want := int64((id % 8) + 1)
+			v := replyTo(id)
+			if v == nil {
+				t.Fatalf(`message %d still has its body and lost reply_to_id.
+
+reply_to_id may only be cleared in the SET clause of the delivery sweep, on the
+same rows and at the same instant as content. Clearing it on a row that is still
+waiting to be delivered breaks reply rendering on a message the recipient has
+not even received yet.`, id)
+			}
+			if *v != want {
+				t.Fatalf("message %d: reply_to_id = %d, want %d (unchanged)", id, *v, want)
+			}
 		}
 	})
 

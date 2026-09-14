@@ -28,7 +28,10 @@ const fs = require('fs');
 const path = require('path');
 
 const ROOT = path.resolve(__dirname, '..');
-const SEARCH_DIRS = ['lib', 'services', 'utils', 'constants', 'db', 'hooks', 'components'];
+// 'scripts' is here so acceptance.selftest.ts is actually discovered. It was
+// written, passing, and silently not run by `npm test` — a suite nobody runs
+// is a suite that quietly stops being true.
+const SEARCH_DIRS = ['lib', 'services', 'utils', 'constants', 'db', 'hooks', 'components', 'scripts'];
 const SKIP_DIRS = new Set(['node_modules', '.git', 'android', 'ios', 'dist', 'rust', '__vectors__']);
 // tsx boots per process; this is the sweet spot between spawn overhead and
 // oversubscribing CI runners.

@@ -532,7 +532,27 @@ export async function startReceive(opts: {
     });
     return;                                     // no transport, no file, no retry
   }
-  const dstPath = `${VB_DIR}/${sanitize(manifest.name)}`;
+  // SCOPED TO THE TRANSFER, not just the sender's filename.
+  //
+  // This used to be `${VB_DIR}/${sanitize(manifest.name)}` — no transfer id, no
+  // uniquifier, no existence check. `sanitize` stops path traversal, so that was
+  // never an escape; it was a CLOBBER, and the victim was a file the recipient
+  // had already received in full:
+  //
+  //   prealloc() opens without truncate and calls set_len(), and set_len SHRINKS
+  //   a larger existing file. So a second incoming transfer named "video.mp4" —
+  //   from anyone not blocked, of any size, a single byte will do — destroyed a
+  //   previously delivered 12 GB "video.mp4" the moment it was accepted, before
+  //   a single byte of the new transfer had arrived.
+  //
+  // Two same-named transfers received concurrently also interleaved their writes
+  // into one file, and the sha256 gate only catches that when BOTH manifests
+  // happened to carry a digest — which is best-effort at send time.
+  //
+  // The transfer id is 32 hex chars and already unique per transfer, so a short
+  // prefix is enough to separate them while keeping the name readable to a human
+  // looking at the folder. The name still leads, so the file remains findable.
+  const dstPath = `${VB_DIR}/${transferId.slice(0, 8)}-${sanitize(manifest.name)}`;
   const chunkCount = chunkCountFor(manifest.size);
 
   setState(transferId, {

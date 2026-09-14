@@ -362,6 +362,14 @@ function VoiceCallLegacy() {
   const disconnectGraceRef = useRef<any>(null);   // see onconnectionstatechange
   // E2EE signaling cipher (F6) — per-call key; plaintext passthrough for legacy peers.
   const cipherRef       = useRef<CallCipher>(plainCipher);
+  // Candidates gathered BEFORE the cipher exists. ICE gathering starts the
+  // instant setLocalDescription resolves, but newCallCipher is a network fetch
+  // of the peer's key bundle — so host candidates (the ones that make a
+  // same-LAN or friendly-NAT call work) are always ready first. Dropping them
+  // is not fail-closed, it is just losing them: they are never re-gathered and
+  // the sealed offer carries none (this is trickle ICE). Hold them here and
+  // flush once the cipher lands. Same shape as pendingIce in group-call-active.
+  const pendingIceRef   = useRef<any[]>([]);
   const localStreamRef  = useRef<any>(null);
   const meIdRef         = useRef<string>('');
   const ringTimerRef    = useRef<any>(null);
@@ -537,7 +545,13 @@ function VoiceCallLegacy() {
         offsRef.current.push(() => s.off('webrtc_end',    onEnd));
 
         (pc as any).onicecandidate = (event: any) => {
+          // FAIL CLOSED at the one place a candidate reaches the wire (mirrors
+          // lib/vaultBeamDirect.ts's emitIce). `enc === false` is callCrypto's
+          // plaintext passthrough — sealing with it is a no-op, so the raw
+          // candidate, and the device IP in it, would go to our own server.
           if (!event.candidate || !peerUid) return;
+          // Not yet sealable: HOLD, do not drop. See pendingIceRef.
+          if (!cipherRef.current.enc) { pendingIceRef.current.push(event.candidate); return; }
           s.emit('webrtc_ice', { to: peerUid, from: meIdRef.current, candidate: cipherRef.current.seal(event.candidate) });
         };
 
@@ -570,6 +584,13 @@ function VoiceCallLegacy() {
           if (!offerObj?.type) {
             throw new Error('Secure call setup failed — ask the caller to try again');
           }
+          // FAIL CLOSED, the answering half. An offer that arrived UNSEALED is
+          // indistinguishable from one our own server wrote, and answering it
+          // would put our DTLS-SRTP fingerprint and every candidate on the wire
+          // in the clear too. (Same rule, same reason: lib/vaultBeamDirect.ts.)
+          if (!cipher.enc) {
+            throw new Error("This call wasn't encrypted, so we didn't connect it. The caller is on an old version of VaultChat — ask them to update, then call again.");
+          }
           await pc.setRemoteDescription(new RTCSessionDescription(offerObj));
           const answer = await pc.createAnswer();
           await pc.setLocalDescription(answer);
@@ -591,8 +612,26 @@ function VoiceCallLegacy() {
           await pc.setLocalDescription(offer);
           // F6: seal the signaling under a per-call key (ratchet-wrapped once).
           const sealed = await newCallCipher(peerUid, offer);
-          if (sealed) cipherRef.current = sealed.cipher;
-          const offerWire = sealed ? sealed.offerWire : offer;
+          // FAIL CLOSED. This used to be `sealed ? sealed.offerWire : offer` —
+          // a silent downgrade to a RAW SDP on our own socket, while the UI
+          // kept its encryption claim. The SDP carries the DTLS-SRTP
+          // fingerprint that anchors call-media encryption, so a server that
+          // can rewrite it MITMs the call outright (lib/callCrypto.ts header).
+          if (!sealed) {
+            throw new Error("Can't place an encrypted call — we couldn't get this person's encryption keys. Ask them to open VaultChat once (or update it), then try again.");
+          }
+          cipherRef.current = sealed.cipher;
+          // Flush what gathered while the key bundle was in flight. Sealed with
+          // the real cipher, so this is the fail-closed guarantee kept intact —
+          // nothing leaves unsealed, and nothing is thrown away either.
+          if (pendingIceRef.current.length) {
+            const held = pendingIceRef.current;
+            pendingIceRef.current = [];
+            for (const c of held) {
+              try { s.emit('webrtc_ice', { to: peerUid, from: meIdRef.current, candidate: cipherRef.current.seal(c) }); } catch {}
+            }
+          }
+          const offerWire = sealed.offerWire;
           // Notify peer it's an incoming call (separate event so the
           // recipient can show a UI before answering, and so that the
           // OFFER itself can ride alongside)

@@ -639,6 +639,59 @@ func authSendOtp(w http.ResponseWriter, r *http.Request) {
 	httpx.JSON(w, 200, map[string]any{"ok": true})
 }
 
+// ── OTP attempt accounting ─────────────────────────────────────────────
+
+// authOtpVerifyGate bounds guessing on a verify endpoint. A 6-digit code is a
+// million guesses, and the attempts column alone does not bound them: it is
+// read in one statement and incremented in another, so N concurrent requests
+// all see the same count and all get a guess evaluated. Same
+// 5-per-15-minutes-per-identity shape as /auth/onboard/verify-otp, with a
+// per-IP key beside it — the identity key alone lets one host walk a list of
+// addresses, the IP key alone is defeated by rotating them. ConsumeSecure, as
+// on /mpin/verify: a Redis outage must not lift a brute-force limit.
+func authOtpVerifyGate(w http.ResponseWriter, r *http.Request, scope, id string) bool {
+	ctx := r.Context()
+	gate := redisx.ConsumeSecure(ctx, scope+":"+id, 5, 900)
+	if gate.Allowed {
+		gate = redisx.ConsumeSecure(ctx, scope+"-ip:"+authClientIP(r), 50, 900)
+	}
+	if gate.Allowed {
+		return true
+	}
+	reset := gate.ResetInSec
+	if reset == 0 {
+		reset = 900
+	}
+	httpx.Err(w, 429, "Too many attempts. Request a new code.",
+		map[string]any{"retryAfter": reset})
+	return false
+}
+
+// authOtpBumpAttempts charges one wrong guess and reports whether the cap is
+// now spent. The cap lives in the WHERE clause rather than in a preceding
+// SELECT: zero rows updated means a concurrent guess already spent it.
+func authOtpBumpAttempts(ctx context.Context, otpID int64) (spent bool, err error) {
+	var n int
+	err = db.Pool.QueryRow(ctx,
+		`UPDATE otp_codes SET attempts = attempts + 1
+		   WHERE id = $1 AND attempts < $2
+		 RETURNING attempts`, otpID, authOtpMaxAttempts).Scan(&n)
+	if db.NoRows(err) {
+		return true, nil
+	}
+	return n >= authOtpMaxAttempts, err
+}
+
+// authOtpExhausted burns the code and tells the caller to request a new one.
+func authOtpExhausted(ctx context.Context, w http.ResponseWriter, otpID int64) {
+	if _, err := db.Pool.Exec(ctx,
+		`UPDATE otp_codes SET consumed_at = NOW() WHERE id = $1`, otpID); err != nil {
+		httpx.Err(w, 500, "Verification failed")
+		return
+	}
+	httpx.Err(w, 429, "Too many attempts. Request a new code.")
+}
+
 // ── POST /auth/verify-otp ──────────────────────────────────────────────
 
 func authVerifyOtp(w http.ResponseWriter, r *http.Request) {
@@ -664,6 +717,9 @@ func authVerifyOtp(w http.ResponseWriter, r *http.Request) {
 		httpx.Err(w, 400, "OTP must be 6 digits")
 		return
 	}
+	if !authOtpVerifyGate(w, r, "verify-otp", e) {
+		return
+	}
 
 	var otpID int64
 	var codeHash string
@@ -685,21 +741,20 @@ func authVerifyOtp(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if attempts >= authOtpMaxAttempts {
-		if _, err := db.Pool.Exec(ctx,
-			`UPDATE otp_codes SET consumed_at = NOW() WHERE id = $1`, otpID); err != nil {
-			httpx.Err(w, 500, "Verification failed")
-			return
-		}
-		httpx.Err(w, 429, "Too many attempts. Request a new code.")
+		authOtpExhausted(ctx, w, otpID)
 		return
 	}
 
 	// Dev-only fixed OTP bypass — same warning as Node: NEVER set DEV_OTP in prod.
 	match := (os.Getenv("DEV_OTP") != "" && code == os.Getenv("DEV_OTP")) || authVerifyOTP(code, codeHash)
 	if !match {
-		if _, err := db.Pool.Exec(ctx,
-			`UPDATE otp_codes SET attempts = attempts + 1 WHERE id = $1`, otpID); err != nil {
+		spent, err := authOtpBumpAttempts(ctx, otpID)
+		if err != nil {
 			httpx.Err(w, 500, "Verification failed")
+			return
+		}
+		if spent {
+			authOtpExhausted(ctx, w, otpID)
 			return
 		}
 		httpx.Err(w, 400, "Invalid code")
@@ -1073,6 +1128,9 @@ func authVerifyOtpPhone(w http.ResponseWriter, r *http.Request) {
 		httpx.Err(w, 500, "Verification failed")
 		return
 	}
+	if !authOtpVerifyGate(w, r, "verify-otp-phone", ph) {
+		return
+	}
 
 	var otpID int64
 	var codeHash string
@@ -1094,20 +1152,19 @@ func authVerifyOtpPhone(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if attempts >= authOtpMaxAttempts {
-		if _, err := db.Pool.Exec(ctx,
-			`UPDATE otp_codes SET consumed_at = NOW() WHERE id = $1`, otpID); err != nil {
-			httpx.Err(w, 500, "Verification failed")
-			return
-		}
-		httpx.Err(w, 429, "Too many attempts. Request a new code.")
+		authOtpExhausted(ctx, w, otpID)
 		return
 	}
 
 	match := (os.Getenv("DEV_OTP") != "" && code == os.Getenv("DEV_OTP")) || authVerifyOTP(code, codeHash)
 	if !match {
-		if _, err := db.Pool.Exec(ctx,
-			`UPDATE otp_codes SET attempts = attempts + 1 WHERE id = $1`, otpID); err != nil {
+		spent, err := authOtpBumpAttempts(ctx, otpID)
+		if err != nil {
 			httpx.Err(w, 500, "Verification failed")
+			return
+		}
+		if spent {
+			authOtpExhausted(ctx, w, otpID)
 			return
 		}
 		httpx.Err(w, 400, "Invalid code")

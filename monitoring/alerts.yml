@@ -1,0 +1,165 @@
+# Prometheus alert rules — VaultChat.
+#
+# STATUS: NOT DEPLOYED. This file exists in the repo only. Loading it requires
+# restarting the prometheus container, which is a production change and is not
+# made here.
+#
+# WHY THIS FILE EXISTS
+# `vaultchat-backend/scripts/backup-postgres.sh` says it plainly: "Prometheus
+# and Grafana also run on this box but have no alert rules, no Alertmanager and
+# no contact point; they are dashboards, not an alert path." A dashboard only
+# works when somebody is looking at it. The off-site backup copy failed for
+# seven consecutive nights (2026-09-06 to 09-12) and nothing said so — that is
+# what a missing alert path costs, and it is the reason these rules are written.
+#
+# ────────────────────────────────────────────────────────────────────────
+# THE HONEST LIMITATION, READ THIS BEFORE TRUSTING IT
+#
+# Rules alone DO NOT NOTIFY ANYONE. A firing rule turns a row red in the
+# Prometheus UI and stops there. Delivery needs an Alertmanager with a contact
+# point, and neither exists on that box.
+#
+# The one alert path that demonstrably reaches a human today is Sentry, which
+# the backup script already uses (see its `alert()` function). So the cheapest
+# way to make these real is an Alertmanager webhook receiver pointed at the same
+# Sentry store endpoint — not a new alerting stack.
+#
+# Until that exists, treat this file as: correct rules, no delivery.
+# ────────────────────────────────────────────────────────────────────────
+#
+# THRESHOLDS. §19 has never been measured — there is no performance baseline for
+# the Go backend, only a 2026-07-26 one for the retired Node backend. So this
+# file contains ONLY rules that are justifiable WITHOUT a baseline: conditions
+# that are wrong at any scale, on any hardware. Rules needing a "normal" value
+# to compare against are listed at the bottom, commented out, with the number
+# left blank on purpose. A guessed threshold is worse than no rule: it either
+# never fires, or it cries wolf until someone silences the whole file.
+#
+# Metric names were taken from `vaultchat-backend-go/internal/` — every metric
+# referenced here is one the server actually exports.
+
+groups:
+  - name: vaultchat-availability
+    rules:
+      # The only alert that needs no threshold and no baseline: the process the
+      # entire product depends on is not answering. Everything else in this file
+      # is a refinement of "is it healthy"; this one is "is it there".
+      - alert: GoApiDown
+        expr: up{job="go-api"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "go-api is not responding to scrapes"
+          description: >-
+            The Go backend serves 100% of user traffic. Two minutes of failed
+            scrapes means either the process is down or it cannot answer, and
+            both are a user-visible outage.
+          runbook: "docker ps | grep go-api; docker logs --tail 200 vaultchat-go-api-1"
+
+      # A restart is normal. A restart every few minutes is a crash loop, and a
+      # crash loop looks EXACTLY like a healthy container in `docker ps` — the
+      # status still reads "Up", because it genuinely is up, again.
+      - alert: GoApiCrashLooping
+        expr: vaultchat_uptime_seconds < 600 and changes(vaultchat_uptime_seconds[1h]) > 3
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "go-api has restarted repeatedly in the last hour"
+          description: >-
+            Uptime keeps resetting. Each restart drops every WebSocket, so users
+            see repeated reconnects even though the service appears to be up.
+          runbook: "docker inspect -f '{{.RestartCount}}' vaultchat-go-api-1"
+
+  - name: vaultchat-database
+    rules:
+      # Justifiable with no baseline: an empty acquire means a caller needed a
+      # connection and the pool had none. That is never healthy at any scale.
+      # The user-visible symptom is requests hanging, not failing, which is the
+      # harder kind to diagnose from the outside.
+      - alert: DbPoolExhausted
+        expr: rate(vaultchat_db_pool_empty_acquires_total[5m]) > 0
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Database connection pool is running dry"
+          description: >-
+            Callers are waiting for a connection. Sustained over ten minutes
+            this is either a leak (connections not returned) or genuine
+            saturation; the pool gauges below distinguish them.
+          runbook: "Compare vaultchat_db_pool_acquired_conns against vaultchat_db_pool_max_conns"
+
+      # Same reasoning: at capacity is not inherently broken, but at capacity
+      # for a sustained period means the next burst queues.
+      - alert: DbPoolAtCapacity
+        expr: vaultchat_db_pool_acquired_conns >= vaultchat_db_pool_max_conns
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Every database connection has been in use for 15 minutes"
+          description: >-
+            No headroom remains. This is a leading indicator: nothing is failing
+            yet, and the next traffic increase is what breaks.
+
+      # Cancelled acquires mean a caller gave up waiting — the request context
+      # expired. By the time this fires a user has already seen a failure.
+      - alert: DbAcquiresCancelled
+        expr: rate(vaultchat_db_pool_canceled_acquires_total[5m]) > 0
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Requests are timing out waiting for a database connection"
+
+  - name: vaultchat-resources
+    rules:
+      # Not a threshold on a value — a threshold on a TREND. Goroutines that
+      # only ever climb are a leak regardless of what "normal" turns out to be,
+      # which is what makes this safe to ship without a baseline.
+      - alert: GoroutinesGrowingUnbounded
+        expr: deriv(vaultchat_goroutines[30m]) > 0 and vaultchat_goroutines > 2 * avg_over_time(vaultchat_goroutines[24h])
+        for: 30m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Goroutine count is climbing and is double its daily average"
+          description: >-
+            A goroutine leak ends as an OOM kill, usually hours later and
+            usually at the worst time. Growth against the service's own history
+            is the signal; there is no universal correct number.
+
+      - alert: HeapGrowingUnbounded
+        expr: deriv(vaultchat_heap_alloc_bytes[30m]) > 0 and vaultchat_heap_alloc_bytes > 2 * avg_over_time(vaultchat_heap_alloc_bytes[24h])
+        for: 30m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Heap is climbing and is double its daily average"
+
+# ── RULES DELIBERATELY NOT WRITTEN ──────────────────────────────────────
+#
+# Each needs a measured baseline. Fill the blank and uncomment AFTER the first
+# run of `scripts/bench/run.sh` produces real numbers — see docs/PERF_BASELINE.md.
+# The blanks are intentional. Do not guess them.
+#
+#  - alert: HighRequestLatency
+#    expr: rate(vaultchat_http_request_duration_ms_sum[5m])
+#        / rate(vaultchat_http_request_duration_ms_count[5m]) > <p95 from baseline>
+#
+#  - alert: SocketCeilingApproaching
+#    expr: vaultchat_http_inflight > <ceiling from baseline>
+#
+# ── NOT COVERED BY PROMETHEUS AT ALL ────────────────────────────────────
+#
+# prometheus.yml scrapes ONE target: go-api. None of the following is visible to
+# it, so none can be alerted on here, and each has its own real failure mode:
+#
+#   * Postgres, Redis, Caddy, LiveKit, coturn — no exporters configured
+#   * Disk capacity on /dev/md2 — no node_exporter
+#   * TLS certificate expiry — renewal failure is silent; api.corefinite.com
+#     currently expires 2026-11-29
+#   * Off-site backup success — covered instead by the backup script's own
+#     Sentry alert, which IS a working path and was deployed 2026-09-13

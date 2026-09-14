@@ -118,6 +118,23 @@ func vbUnionMask(stored, incoming []byte, chunkCount int) []byte {
 	return out
 }
 
+// vbMaskOrSQL renders "col OR $1", the union of a stored bitmask column with a
+// delta bitmask passed as $1, done in SQL so no read-modify-write window exists.
+//
+// Postgres' bytea `|` demands operands of EQUAL length, and neither side's
+// width is guaranteed here — recv_mask starts NULL (migration 076 added it to
+// live rows), and uploaded_mask can be widened by /relay/grow between a
+// handler's read and its write. So the narrower side is zero-extended to the
+// wider one; nothing is ever truncated, because a truncated union silently
+// drops set bits, which is the very bug this replaces.
+func vbMaskOrSQL(col string) string {
+	c := `COALESCE(` + col + `, ''::bytea)`
+	return `(CASE WHEN length(` + c + `) >= length($1::bytea)
+	          THEN ` + c + ` | ($1::bytea || decode(repeat('00', length(` + c + `) - length($1::bytea)), 'hex'))
+	          ELSE $1::bytea | (` + c + ` || decode(repeat('00', length($1::bytea) - length(` + c + `)), 'hex'))
+	         END)`
+}
+
 // vbStaleVersion reports whether a client-supplied session version disagrees
 // with the stored one. An ABSENT version is not a mismatch: pre-vbm3 clients do
 // not send it, and they also predate the canonical wire, so they are handled by
@@ -782,6 +799,7 @@ func vbRelayUploaded(w http.ResponseWriter, r *http.Request) {
 	}
 
 	mask := append([]byte(nil), t.UploadedMask...) // mutable copy
+	delta := make([]byte, len(mask))               // only the bits THIS request sets
 	blocks := b.Blocks
 	if len(blocks) > vbMaxURLs {
 		blocks = blocks[:vbMaxURLs]
@@ -797,18 +815,36 @@ func vbRelayUploaded(w http.ResponseWriter, r *http.Request) {
 		}
 		if vbObjectExists(ctx, vbRelayKey(tid, i)) {
 			vbSetBit(mask, i)
+			vbSetBit(delta, i)
 		}
 	}
-	done := vbCountSet(mask, t.BlockCount)
-	ready := done == t.BlockCount
-	if _, err := db.Pool.Exec(ctx,
-		`UPDATE vb_transfer SET uploaded_mask = $1, state = CASE WHEN $2 THEN 'ready' ELSE state END
-		   WHERE transfer_id = $3`, mask, ready, tid); err != nil {
+	// OR the new bits into the stored mask IN THE DATABASE and count from what
+	// comes back. Writing the whole mask read a moment ago lost every bit a
+	// parallel batch set in between — last writer won, blocks read as
+	// un-uploaded and the transfer wedged short of 100%.
+	var merged []byte
+	if err := db.Pool.QueryRow(ctx,
+		`UPDATE vb_transfer SET uploaded_mask = `+vbMaskOrSQL("uploaded_mask")+`
+		   WHERE transfer_id = $2
+		 RETURNING uploaded_mask`, delta, tid).Scan(&merged); err != nil {
 		httpx.Err(w, 500, "mark failed")
 		return
 	}
+	done := vbCountSet(merged, t.BlockCount)
+	ready := done == t.BlockCount
 	if ready {
-		emitx.ToUids([]string{t.RecipientID}, "vb_ready", map[string]any{"transferId": tid})
+		// Flip the state from the POST-update count, and only once: the racing
+		// batch that also saw a full mask must not emit vb_ready a second time.
+		ct, err := db.Pool.Exec(ctx,
+			`UPDATE vb_transfer SET state = 'ready'
+			   WHERE transfer_id = $1 AND state NOT IN ('ready', 'complete', 'aborted')`, tid)
+		if err != nil {
+			httpx.Err(w, 500, "mark failed")
+			return
+		}
+		if ct.RowsAffected() > 0 {
+			emitx.ToUids([]string{t.RecipientID}, "vb_ready", map[string]any{"transferId": tid})
+		}
 	}
 	httpx.JSON(w, 200, map[string]any{"uploaded": done, "blockCount": t.BlockCount, "ready": ready})
 }
@@ -941,10 +977,21 @@ func vbRelayReceived(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	merged := vbUnionMask(t.RecvMask, raw, t.ChunkCount)
-	if _, err := db.Pool.Exec(ctx,
-		`UPDATE vb_transfer SET recv_mask = $1 WHERE transfer_id = $2 AND session_version = $3`,
-		merged, tid, t.Version); err != nil {
+	// Union IN THE DATABASE, not against the copy read a moment ago: two posts
+	// in flight would otherwise each write their own merge and the later one
+	// would drop the earlier one's bits. vbUnionMask against nil just sizes the
+	// incoming mask and clears any bits past chunkCount.
+	var merged []byte
+	err = db.Pool.QueryRow(ctx,
+		`UPDATE vb_transfer SET recv_mask = `+vbMaskOrSQL("recv_mask")+`
+		   WHERE transfer_id = $2 AND session_version = $3
+		 RETURNING recv_mask`,
+		vbUnionMask(nil, raw, t.ChunkCount), tid, t.Version).Scan(&merged)
+	if db.NoRows(err) {
+		httpx.Err(w, 409, "stale session")
+		return
+	}
+	if err != nil {
 		httpx.Err(w, 500, "received failed")
 		return
 	}

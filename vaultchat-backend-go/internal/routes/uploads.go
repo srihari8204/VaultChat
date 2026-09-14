@@ -620,6 +620,27 @@ func uploadsGet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Set only when this request is a chat recipient fetching someone else's
+	// attachment — the one case the retention sweeper counts. The owner
+	// re-downloading their own file is not a delivery to anyone.
+	deliverable := false
+
+	// recordDelivery marks the attachment delivered to this user. Call it ONLY
+	// after the bytes have actually reached the client: the sweeper treats a
+	// delivery row as permission to delete the object, so a row written for a
+	// transfer that failed is a row that destroys the file.
+	recordDelivery := func() {
+		if !deliverable {
+			return
+		}
+		_ = db.WithUser(ctx, user.ID, func(tx pgx.Tx) error {
+			_, e := tx.Exec(ctx,
+				`INSERT INTO attachment_deliveries (attachment_id, user_id) VALUES ($1, $2)
+				 ON CONFLICT DO NOTHING`, att.ID, user.ID)
+			return e
+		})
+	}
+
 	if att.OwnerUserID != user.ID {
 		inChat := false
 		err := db.WithUser(ctx, user.ID, func(tx pgx.Tx) error {
@@ -694,15 +715,23 @@ func uploadsGet(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
-		if inChat {
-			// Record delivery for the retention sweeper (best-effort, like Node).
-			_ = db.WithUser(ctx, user.ID, func(tx pgx.Tx) error {
-				_, e := tx.Exec(ctx,
-					`INSERT INTO attachment_deliveries (attachment_id, user_id) VALUES ($1, $2)
-					 ON CONFLICT DO NOTHING`, att.ID, user.ID)
-				return e
-			})
-		}
+		// Delivery is recorded AFTER the bytes actually arrive — see
+		// recordDelivery below. It used to be recorded HERE, before the stream
+		// started, and that destroyed files:
+		//
+		// The retention sweeper reclaims an attachment once
+		//   count(attachment_deliveries) >= count(distinct chat members)
+		// (internal/jobs/jobs.go). In a 1:1 chat that is 1 >= 1. So a single
+		// interrupted download — a dropped connection, the app backgrounded,
+		// the user scrolling away — recorded a delivery for bytes nobody
+		// received, and the sweeper deleted the object within five minutes.
+		// The recipient was left with a permanently broken photo while the
+		// sender's bubble still read "sent". There is no recovery path: the
+		// re-body PUT restores message text only, never attachment bytes.
+		//
+		// Recording it here also counted a delivery for a view-once attachment
+		// that was about to be refused with 410 immediately below.
+		deliverable = inChat
 
 		if att.ViewOnce && att.ViewedAt != nil {
 			httpx.Err(w, http.StatusGone, "This media has already been viewed and is no longer available.")
@@ -753,7 +782,12 @@ func uploadsGet(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Disposition", fmt.Sprintf(`inline; filename="%s"`, url.PathEscape(att.Filename)))
 		w.Header().Set("Cache-Control", "private, max-age=86400")
 		w.WriteHeader(200)
-		_, _ = io.Copy(w, obj.Body)
+		// io.Copy returns nil only when the body was copied to EOF, so a nil
+		// error here IS "the client received the whole file". A client that
+		// disconnects mid-stream produces a write error and no delivery row.
+		if _, cerr := io.Copy(w, obj.Body); cerr == nil {
+			recordDelivery()
+		}
 		return
 	}
 
@@ -778,7 +812,11 @@ func uploadsGet(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Disposition", fmt.Sprintf(`inline; filename="%s"`, url.PathEscape(att.Filename)))
 	w.Header().Set("Cache-Control", "private, max-age=86400")
 	w.WriteHeader(200)
-	_, _ = io.Copy(w, f)
+	// Same rule as the object-store path above: the delivery row is written
+	// only when the whole file reached the client.
+	if _, cerr := io.Copy(w, f); cerr == nil {
+		recordDelivery()
+	}
 }
 
 func upDecryptAvatar(ctx context.Context, backend *string, storagePath, keyCipher string) ([]byte, error) {

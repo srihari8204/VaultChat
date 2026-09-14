@@ -118,7 +118,7 @@ export default function NewChatScreen() {
     <KeyboardSafe style={S.screen} >
       <AuroraBackground />
       <View style={S.header}>
-        <TouchableOpacity onPress={() => router.back()} style={S.backBtn} activeOpacity={0.7}>
+        <TouchableOpacity accessibilityLabel="Go back" onPress={() => router.back()} style={S.backBtn} activeOpacity={0.7}>
           <Ionicons name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
         <Text style={S.title}>{ttlSeconds ? 'Temporary chat' : 'New chat'}</Text>
@@ -147,7 +147,7 @@ export default function NewChatScreen() {
           placeholderTextColor={colors.textDim}
           autoCorrect={false}
         />
-        {searching && <TouchableOpacity onPress={() => setQuery('')} hitSlop={8}><Ionicons name="close-circle" size={18} color={colors.textDim} /></TouchableOpacity>}
+        {searching && <TouchableOpacity accessibilityLabel="Clear search" onPress={() => setQuery('')} hitSlop={8}><Ionicons name="close-circle" size={18} color={colors.textDim} /></TouchableOpacity>}
       </View>
 
       <FlatList

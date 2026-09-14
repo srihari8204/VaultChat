@@ -3,6 +3,12 @@
 global:
   scrape_interval: 15s
 
+# Alert rules. Loading them needs a prometheus restart, which has NOT been done
+# — see the status note at the top of alerts.yml. Rules also do not notify
+# anyone without an Alertmanager, which this box does not run.
+rule_files:
+  - /etc/prometheus/alerts.yml
+
 scrape_configs:
   - job_name: go-api
     metrics_path: /internal/metrics

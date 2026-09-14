@@ -72,8 +72,9 @@ func deviceList(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// RLS returns the caller's own devices unless they run the space, so one
-	// query serves an owner and an administrator without branching here.
+	// Your own devices, plus the whole space's if you run it — policy
+	// space_devices_select (migration 091), spelled here because RLS is inert
+	// while the API connects as the table owner.
 	out := []map[string]any{}
 	err := chatsQueryU(ctx, user.ID,
 		`SELECT d.id, d.owner_id, `+spaceNameCols+`, d.label, d.kind, d.identifier,
@@ -84,9 +85,10 @@ func deviceList(w http.ResponseWriter, r *http.Request) {
 		   FROM space_devices d
 		   LEFT JOIN users u ON u.id = d.owner_id
 		  WHERE d.chat_id = $1 AND d.archived_at IS NULL
+		    AND (d.owner_id = $2 OR vc_space_ops_viewer($1))
 		  ORDER BY d.label
 		  LIMIT 300`,
-		[]any{chatID}, func(rows pgx.Rows) error {
+		[]any{chatID, user.ID}, func(rows pgx.Rows) error {
 			var (
 				did, label, kind string
 				owner, ident     *string
@@ -208,8 +210,9 @@ func devicePatch(w http.ResponseWriter, r *http.Request) {
 		                        ELSE NULL
 		                      END
 		  WHERE chat_id = $1 AND id = $2
+		    AND (owner_id = $5 OR vc_space_ops_viewer($1))
 		  RETURNING id`,
-		[]any{chatID, deviceID, label, archived}, &id)
+		[]any{chatID, deviceID, label, archived, user.ID}, &id)
 	if db.NoRows(err) {
 		httpx.Err(w, 404, "Device not found")
 		return
@@ -276,6 +279,7 @@ func deviceHeartbeat(w http.ResponseWriter, r *http.Request) {
 func deviceEvents(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	user := httpx.UserFrom(r)
+	chatID := r.PathValue("id")
 	deviceID := r.PathValue("deviceId")
 
 	if mem := chatsRequireMem(w, r, 403, "Not a member", "Failed to load device history"); mem == nil {
@@ -287,9 +291,12 @@ func deviceEvents(w http.ResponseWriter, r *http.Request) {
 		`SELECT id, kind, text, at, detail
 		   FROM space_device_events
 		  WHERE device_id = $1
+		    AND EXISTS (SELECT 1 FROM space_devices d
+		                 WHERE d.id = $1 AND d.chat_id = $2
+		                   AND (d.owner_id = $3 OR vc_space_ops_viewer(d.chat_id)))
 		  ORDER BY at DESC
 		  LIMIT 300`,
-		[]any{deviceID}, func(rows pgx.Rows) error {
+		[]any{deviceID, chatID, user.ID}, func(rows pgx.Rows) error {
 			var (
 				eid    int64
 				kind   string
@@ -371,6 +378,7 @@ func deviceEventCreate(w http.ResponseWriter, r *http.Request) {
 func deviceCommandList(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	user := httpx.UserFrom(r)
+	chatID := r.PathValue("id")
 	deviceID := r.PathValue("deviceId")
 
 	if mem := chatsRequireMem(w, r, 403, "Not a member", "Failed to load commands"); mem == nil {
@@ -382,9 +390,12 @@ func deviceCommandList(w http.ResponseWriter, r *http.Request) {
 		`SELECT id, action, payload, issued_at, delivered_at, executed_at, result
 		   FROM space_device_commands
 		  WHERE device_id = $1
+		    AND EXISTS (SELECT 1 FROM space_devices d
+		                 WHERE d.id = $1 AND d.chat_id = $2
+		                   AND (d.owner_id = $3 OR vc_space_ops_viewer(d.chat_id)))
 		  ORDER BY issued_at DESC
 		  LIMIT 100`,
-		[]any{deviceID}, func(rows pgx.Rows) error {
+		[]any{deviceID, chatID, user.ID}, func(rows pgx.Rows) error {
 			var (
 				cid             int64
 				action, result  string

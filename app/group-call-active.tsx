@@ -328,9 +328,10 @@ function GroupCallEngine() {
             <Text style={S.addPeopleTxt}>Add · {tiles}/{CALL_MAX}</Text>
           </TouchableOpacity>
         )}
-        {/* D-1: derived from the live participant count, so a call that grows
-            past the mesh cap stops claiming a guarantee it no longer has. */}
-        <CallEncryptionBadge protection={protectionFor(tiles)} />
+        {/* null = the V2 engine path has no signalling cipher of ours: SDP goes
+            to LiveKit over TLS and frames are sealed before publish, fail-closed
+            in lib/call/room.ts. See protectionFor's contract. */}
+        <CallEncryptionBadge protection={protectionFor(tiles, null)} />
       </View>
 
       {/* SOMEONE IS SHARING, AND THE GROUP HAD NO WAY TO KNOW.
@@ -448,7 +449,30 @@ function GroupCallLegacy() {
   // F6: per-peer E2EE signaling cipher (mesh = one ratchet-wrapped call key per
   // link). Defaults to plaintext passthrough for legacy peers.
   const ciphersRef = useRef<Record<string, CallCipher>>({});
+  // OUTBOUND candidates gathered before this link's cipher exists. Distinct
+  // from pendingIce above, which holds INBOUND ones until the peer
+  // connection is ready. Gathering starts on setLocalDescription; the
+  // per-peer cipher only exists after a key-bundle fetch, so host
+  // candidates are always ready first. Dropping them is not fail-closed,
+  // it is loss - they are never re-gathered and the sealed offer carries
+  // none (trickle ICE). In a mesh this is per-uid: one slow peer must not
+  // cost the others their candidates.
+  const pendingOutIce = useRef<Record<string, any[]>>({});
   const cipherFor = (uid: string) => ciphersRef.current[uid] ?? plainCipher;
+  // Flush this link's held candidates, sealed. Called wherever a cipher is
+  // assigned - holding them and never flushing would just be a slower drop.
+  const flushOutIce = (uid: string, chatId: string) => {
+    const held = pendingOutIce.current[uid];
+    if (!held?.length) return;
+    delete pendingOutIce.current[uid];
+    const c = ciphersRef.current[uid];
+    if (!c?.enc) return;   // still unsealable - drop rather than leak
+    getSocket().then(s => {
+      for (const cand of held) {
+        try { s.emit('webrtc_ice', { to: uid, chatId, candidate: c.seal(cand) }); } catch {}
+      }
+    }).catch(() => {});
+  };
 
   const setPeerUrl = (uid: string, url: string | null, nm?: string) =>
     setPeers(prev => ({ ...prev, [uid]: { pc: pcsRef.current[uid], url, name: nm ?? prev[uid]?.name ?? '' } }));
@@ -457,6 +481,7 @@ function GroupCallLegacy() {
     try { pcsRef.current[uid]?.close(); } catch {}
     delete pcsRef.current[uid];
     delete pendingIce.current[uid];
+    delete pendingOutIce.current[uid];
     delete ciphersRef.current[uid];
     setPeers(prev => { const n = { ...prev }; delete n[uid]; return n; });
   }, []);
@@ -468,7 +493,16 @@ function GroupCallLegacy() {
     setPeers(prev => ({ ...prev, [uid]: { pc, url: null, name: '' } }));
     try { localStreamRef.current?.getTracks().forEach((t: any) => pc.addTrack(t, localStreamRef.current)); } catch {}
     (pc as any).onicecandidate = (e: any) => {
-      if (e.candidate) getSocket().then(s => s.emit('webrtc_ice', { to: uid, chatId, candidate: cipherFor(uid).seal(e.candidate) })).catch(() => {});
+      // FAIL CLOSED at the one place a candidate reaches the wire (mirrors
+      // lib/vaultBeamDirect.ts's emitIce). `cipherFor` falls back to
+      // plainCipher, whose seal() is a no-op — so without this the raw
+      // candidate, and the device IP in it, goes to our own server whenever
+      // this link has no cipher yet or never got one.
+      const c = ciphersRef.current[uid];
+      if (!e.candidate) return;
+      // Not yet sealable for THIS link: hold, do not drop.
+      if (!c?.enc) { (pendingOutIce.current[uid] ||= []).push(e.candidate); return; }
+      getSocket().then(s => s.emit('webrtc_ice', { to: uid, chatId, candidate: c.seal(e.candidate) })).catch(() => {});
     };
     (pc as any).ontrack = (e: any) => { const rs = e.streams?.[0]; if (rs) setPeerUrl(uid, rs.toURL()); };
     (pc as any).oniceconnectionstatechange = () => {
@@ -482,8 +516,16 @@ function GroupCallLegacy() {
         const s = await getSocket();
         // F6: seal the offer under a per-peer call key (ratchet-wrapped once).
         const sealed = await newCallCipher(uid, pc.localDescription);
-        if (sealed) ciphersRef.current[uid] = sealed.cipher;
-        s.emit('webrtc_offer', { to: uid, chatId, sdp: sealed ? sealed.offerWire : pc.localDescription });
+        // FAIL CLOSED. This used to be `sealed ? sealed.offerWire :
+        // pc.localDescription` — a raw SDP on our own socket. A mesh call is N
+        // pairwise links; each one stands or falls on its own seal, so one
+        // peer we cannot key costs that LINK, not the call.
+        if (!sealed) {
+          throw new Error("Couldn't add someone to this call securely — we don't have their encryption keys. Ask them to open VaultChat once (or update it) and rejoin.");
+        }
+        ciphersRef.current[uid] = sealed.cipher;
+        flushOutIce(uid, chatId);
+        s.emit('webrtc_offer', { to: uid, chatId, sdp: sealed.offerWire });
       } catch (err: any) { setError(err?.message ?? 'offer failed'); }
     }
     return pc;
@@ -520,8 +562,20 @@ function GroupCallLegacy() {
           try {
             // F6: sdp is either an encrypted sig1 wire (new peer) or raw SDP (legacy).
             const { cipher, offer } = await openCallOffer(from, sdp);
+            if (!offer?.type) { setError('Secure group-call setup failed — ask them to rejoin the call'); return; }
+            // FAIL CLOSED, the answering half. An UNSEALED offer is
+            // indistinguishable from one our own server wrote, and answering it
+            // would put our DTLS-SRTP fingerprint and candidates in the clear
+            // too. Only this LINK is dropped — the rest of the mesh is fine.
+            if (!cipher.enc) {
+              setError("Someone joined on an old version of VaultChat and couldn't be connected securely — ask them to update.");
+              return;
+            }
+            // Stored only once it is PROVEN sealed: the badge and the ICE
+            // emitter both read this map, and a passthrough parked in it is a
+            // false claim plus an open candidate tap.
             ciphersRef.current[from] = cipher;
-            if (!offer?.type) { setError('Secure group-call setup failed'); return; }
+            flushOutIce(from, chatId);
             await pc.setRemoteDescription(new RTCSessionDescription(offer));
             (pendingIce.current[from] || []).forEach(c => pc.addIceCandidate(new RTCIceCandidate(c)).catch(() => {}));
             pendingIce.current[from] = [];
@@ -607,7 +661,14 @@ function GroupCallLegacy() {
       <View style={S.topBar}>
         <Text style={S.title} numberOfLines={1}>{name || 'Group call'}</Text>
         <Text style={S.sub}>{tiles} on call</Text>
-        <CallEncryptionBadge protection={protectionFor(tiles)} />
+        {/* The LIVE per-link ciphers, not a build flag. Keyed off `peers` so a
+            link is unsealed-until-proven: a peer present with no cipher yet
+            reads as 'transport' and only flips once its seal exists. Every
+            cipher write in ensurePeer/closePeer is paired with a setPeers, so
+            the ref is never staler than this render. */}
+        <CallEncryptionBadge
+          protection={protectionFor(tiles, Object.keys(peers).map(uid => ciphersRef.current[uid]))}
+        />
       </View>
 
       {error ? <Text style={S.err}>{error}</Text> : null}

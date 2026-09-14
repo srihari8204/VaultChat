@@ -2175,7 +2175,7 @@ export default function FamilySpaceScreen() {
             {/* Attendance is only meaningful where someone oversees others, so
                 it is offered on the same permission that shows the runs card
                 rather than to every member of every household. */}
-            {canOps && <TouchableOpacity onPress={() => { setManage(false); active && router.push({ pathname: '/space-attendance' as any, params: { spaceId: active.id, name: active.name } }); }} style={[st.mRow, { borderColor: G.line }]}>
+            {canOps && <TouchableOpacity onPress={() => { setManage(false); active && router.push({ pathname: '/space-attendance' as any, params: { spaceId: active.id, name: active.name, groupType: active.groupType ?? '' } }); }} style={[st.mRow, { borderColor: G.line }]}>
               <Ionicons name="calendar-number-outline" size={18} color={colors.text} />
               <Text style={[st.mTxt, { color: colors.text }]}>Attendance</Text>
             </TouchableOpacity>}
@@ -2183,7 +2183,7 @@ export default function FamilySpaceScreen() {
                 a parent's "roster" is their own child, and that is the screen
                 that tells them so. The server decides what is in it. */}
             {(canOps || hasPerm(perms, 'manage_roster') || !!active?.groupType?.includes('school') || !!active?.groupType?.includes('transport')) &&
-              <TouchableOpacity onPress={() => { setManage(false); active && router.push({ pathname: '/space-roster' as any, params: { spaceId: active.id, name: active.name, canManage: hasPerm(perms, 'manage_roster') ? '1' : '0' } }); }} style={[st.mRow, { borderColor: G.line }]}>
+              <TouchableOpacity onPress={() => { setManage(false); active && router.push({ pathname: '/space-roster' as any, params: { spaceId: active.id, name: active.name, canManage: hasPerm(perms, 'manage_roster') ? '1' : '0', groupType: active.groupType ?? '' } }); }} style={[st.mRow, { borderColor: G.line }]}>
                 <Ionicons name="people-outline" size={18} color={colors.text} />
                 <Text style={[st.mTxt, { color: colors.text }]}>Roster</Text>
               </TouchableOpacity>}

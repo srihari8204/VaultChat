@@ -258,11 +258,11 @@ export default function ContactsScreen() {
     <View style={S.screen}>
       <AuroraBackground />
       <View style={S.header}>
-        <TouchableOpacity onPress={() => router.back()} style={S.backBtn} activeOpacity={0.7}>
+        <TouchableOpacity accessibilityLabel="Go back" onPress={() => router.back()} style={S.backBtn} activeOpacity={0.7}>
           <Ionicons name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
         <Text style={S.title}>Contacts</Text>
-        <TouchableOpacity onPress={scan} disabled={scanning} style={S.refreshBtn} activeOpacity={0.7}>
+        <TouchableOpacity accessibilityLabel="Refresh contacts" onPress={scan} disabled={scanning} style={S.refreshBtn} activeOpacity={0.7}>
           {scanning ? <Text style={S.refreshTxt}>…</Text> : <Ionicons name="refresh" size={22} color={colors.primary} />}
         </TouchableOpacity>
       </View>

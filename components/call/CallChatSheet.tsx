@@ -81,7 +81,7 @@ function CallChatSheetImpl({ visible, onClose, messages, onSend }: CallChatSheet
         <View style={S.grabber} />
         <View style={S.head}>
           <Text style={S.title}>In-call chat</Text>
-          <TouchableOpacity onPress={onClose} hitSlop={10}>
+          <TouchableOpacity accessibilityLabel="Close in-call chat" onPress={onClose} hitSlop={10}>
             <Ionicons name="close" size={22} color="rgba(255,255,255,0.7)" />
           </TouchableOpacity>
         </View>
@@ -112,7 +112,7 @@ function CallChatSheetImpl({ visible, onClose, messages, onSend }: CallChatSheet
             onSubmitEditing={send}
             returnKeyType="send"
           />
-          <TouchableOpacity onPress={send} disabled={!draft.trim()} style={S.send} hitSlop={8}>
+          <TouchableOpacity accessibilityLabel="Send message" onPress={send} disabled={!draft.trim()} style={S.send} hitSlop={8}>
             <Ionicons name="send" size={20} color={draft.trim() ? '#fff' : 'rgba(255,255,255,0.3)'} />
           </TouchableOpacity>
         </View>

@@ -348,8 +348,30 @@ func sweepExpiredChats(ctx context.Context) {
 //	mentionUserIds  chatsSendMessagePush overrides a muted chat for mentioned
 //	                users, reading only userId — so the ids survive while the
 //	                display names go.
+// IT ALSO RECLAIMS reply_to_id (§15 finding 1).
+//
+// `reply_to_id` is not `meta`, so the allow-list never sees it, and no server
+// code reads it — it is written from the client body, selected back, and
+// nothing else. `envelope.proto:153-154` names `reply_to` as DELIBERATELY
+// absent from the wire: "a conversation graph the server has no need to build.
+// It lives inside the ciphertext." The column builds exactly that graph, and
+// before this it survived the sweep that reclaims everything else — so what
+// was left on the spine forever was a complete, queryable answer to "which
+// message replied to which", across every chat, with the bodies gone.
+//
+// Nulling it HERE is safe precisely because it happens in the same statement
+// that nulls `content`. A reply pointer whose target's body is gone is a
+// pointer to nothing: there is no quoted text to render, no message to scroll
+// back to. Every client that could still display the reply is displaying it
+// from its own local copy, which this sweep does not and cannot touch. So this
+// removes the graph without removing anything a client can still render.
+//
+// It is in the SET clause only. The row set is unchanged — still gated by the
+// three delivery clauses below — so an UNDELIVERED message keeps its
+// reply_to_id exactly as it keeps its content.
 const deliveredMessagesSQL = `UPDATE messages m
 			    SET content = NULL,
+			        reply_to_id = NULL,
 			        meta = CASE WHEN m.meta IS NULL THEN NULL ELSE (
 			                 SELECT COALESCE(jsonb_object_agg(e.key, e.value), '{}'::jsonb)
 			                   FROM jsonb_each(m.meta) AS e
@@ -438,7 +460,12 @@ func sweepDeliveredMessages(ctx context.Context) {
 	if maxDays > 0 {
 		for i := 0; i < sweepMaxIters; i++ {
 			t2, err := db.SysPool.Exec(ctx,
-				`UPDATE messages SET content = NULL
+				// reply_to_id goes with content for the same reason it does in
+			// the delivery sweep above: once the body is NULL the pointer
+			// cannot render anything. Leaving it here would mean an operator
+			// who turns the age purge ON reclaims the ciphertext and keeps the
+			// reply graph — the exact shape §15 finding 1 is about.
+			`UPDATE messages SET content = NULL, reply_to_id = NULL
 				  WHERE ctid IN (SELECT ctid FROM messages
 				                  WHERE content IS NOT NULL AND deleted_at IS NULL
 				                    AND created_at < NOW() - ($1 || ' days')::interval
@@ -905,12 +932,25 @@ func sweepScheduledMessages(ctx context.Context) {
 	}
 	rows.Close()
 
+	// Collect the fan-out, emit it AFTER the commit. Emitting inside the
+	// transaction meant a failed commit had already shown recipients a message
+	// that does not exist — and the row went back to sent_at IS NULL, so the
+	// next tick re-sent it with fresh ids.
+	type pending struct {
+		chatID  string
+		payload map[string]any
+	}
+	var emits []pending
 	delivered := 0
 	for _, c := range claims {
-		if err := deliverScheduled(ctx, tx, c.id, c.userID, c.chatID, c.msgType, c.content, c.meta, c.replyToID); err != nil {
+		payload, err := deliverScheduled(ctx, tx, c.id, c.userID, c.chatID, c.msgType, c.content, c.meta, c.replyToID)
+		if err != nil {
 			log.Printf("[sched %d] %v", c.id, err)
-		} else {
-			delivered++
+			continue
+		}
+		delivered++
+		if payload != nil {
+			emits = append(emits, pending{c.chatID, payload})
 		}
 	}
 	// Prune sent rows older than 30 d (same statement as Node).
@@ -921,12 +961,19 @@ func sweepScheduledMessages(ctx context.Context) {
 		log.Printf("[sched sweep] commit: %v", err)
 		return
 	}
+	for _, e := range emits {
+		emitx.ChatNewMessage(e.chatID, e.payload)
+	}
 	if delivered > 0 {
 		log.Printf("[sched] delivered %d scheduled message(s)", delivered)
 	}
 }
 
-func deliverScheduled(ctx context.Context, tx pgx.Tx, schedID int64, userID, chatID, msgType string, content *string, meta []byte, replyToID *int64) error {
+// deliverScheduled writes the message inside `tx` and RETURNS the broadcast
+// payload rather than emitting it — the caller emits once the transaction has
+// actually committed. A nil payload means there is nothing to announce (the
+// sender had left the chat).
+func deliverScheduled(ctx context.Context, tx pgx.Tx, schedID int64, userID, chatID, msgType string, content *string, meta []byte, replyToID *int64) (map[string]any, error) {
 	// Skip if the sender left after scheduling — stamp sent, no message.
 	var one int
 	if err := tx.QueryRow(ctx,
@@ -939,9 +986,9 @@ func deliverScheduled(ctx context.Context, tx pgx.Tx, schedID int64, userID, cha
 			// would otherwise sit here until the 30-day prune.
 			_, e := tx.Exec(ctx,
 				`UPDATE scheduled_messages SET sent_at = NOW(), content = NULL WHERE id = $1`, schedID)
-			return e
+			return nil, e
 		}
-		return err
+		return nil, err
 	}
 
 	var (
@@ -969,12 +1016,12 @@ func deliverScheduled(ctx context.Context, tx pgx.Tx, schedID int64, userID, cha
 		chatID, userID, msgType, content, SplitMetaJSON(meta), replyToID).
 		Scan(&msgID, &mChatID, &mSenderID, &mType, &mContent, &mMeta, &mReplyToID,
 			&mEditedAt, &mDeletedAt, &mCreatedAt, &mExpiresAt); err != nil {
-		return err
+		return nil, err
 	}
 	if _, err := tx.Exec(ctx,
 		`UPDATE chats SET last_message_id = $1, last_message_at = $2 WHERE id = $3`,
 		msgID, mCreatedAt, chatID); err != nil {
-		return err
+		return nil, err
 	}
 	// Drop the scheduled copy of the ciphertext the moment it has been handed to
 	// the messages table.
@@ -993,7 +1040,7 @@ func deliverScheduled(ctx context.Context, tx pgx.Tx, schedID int64, userID, cha
 	if _, err := tx.Exec(ctx,
 		`UPDATE scheduled_messages SET sent_at = NOW(), message_id = $2, content = NULL WHERE id = $1`,
 		schedID, msgID); err != nil {
-		return err
+		return nil, err
 	}
 
 	// Broadcast — same key set as Node's scheduled worker payload; BIGINT ids
@@ -1027,8 +1074,7 @@ func deliverScheduled(ctx context.Context, tx pgx.Tx, schedID int64, userID, cha
 		"createdAt": httpx.JSTime(mCreatedAt),
 		"expiresAt": httpx.JST(mExpiresAt),
 	}
-	emitx.ChatNewMessage(chatID, payload)
-	return nil
+	return payload, nil
 }
 
 // node-pg returns BIGINT columns as strings; keep that shape.

@@ -79,6 +79,17 @@ export default function CallRecordingScreen() {
     return () => {
       stopTimerInterval();
       cleanupSound();
+      // THE MIC MUST STOP WHEN THE SCREEN GOES. Leaving mid-recording used to
+      // leave recordingRef live: capture continued indefinitely (unbounded file,
+      // battery), and on iOS the audio session stayed in record mode so every
+      // other sound ducked. Only stopRecording() ever released either.
+      const rec = recordingRef.current;
+      if (rec) {
+        recordingRef.current = null;
+        rec.stopAndUnloadAsync()
+          .catch(() => {})
+          .then(() => Audio.setAudioModeAsync({ allowsRecordingIOS: false }).catch(() => {}));
+      }
     };
   }, [fadeIn]);
 

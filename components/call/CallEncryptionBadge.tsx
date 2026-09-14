@@ -24,30 +24,48 @@ import React from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { CALL_FRAME_E2EE } from '../../lib/call/types';
+import type { CallCipher } from '../../lib/callCrypto';
 
 export type CallProtection = 'e2ee' | 'transport';
 
 /**
- * EVERY call is 'e2ee' while CALL_FRAME_E2EE is on — 1:1 and group alike.
+ * THE RULE THIS FUNCTION EXISTS TO KEEP: it must never return 'e2ee' while the
+ * live call cannot honour it.
  *
- * Between 2026-08-16 and the frame-crypto rewiring this returned 'transport'
- * unconditionally, because the SFU genuinely could decode every frame. It can
- * no longer: a per-call 32-byte key is sealed to each recipient through the
- * pairwise Double Ratchet and installed as the frame cryptor's shared key
- * before anything is published.
+ * It used to keep that rule by assertion only — `CALL_FRAME_E2EE ? 'e2ee' : …`,
+ * a compile-time constant that says what the build INTENDS, never what this
+ * call actually negotiated. lib/callCrypto.ts hands back a `plainCipher`
+ * passthrough (`enc === false`) whenever the peer's key bundle could not be
+ * fetched, and a badge reading off a flag cheerfully said "End-to-end
+ * encrypted" over it. So the second argument is required, and every call site
+ * has to say which of the two shapes it is:
+ *
+ *   • a CallCipher (or one per mesh link) — the SDP/ICE for this call crosses
+ *     OUR OWN socket, so the live cipher is the only honest evidence. One
+ *     unsealed link downgrades the whole badge: the SDP carries the DTLS-SRTP
+ *     fingerprint that anchors media encryption, and the candidates carry
+ *     device IPs.
+ *   • null — this call has no signalling cipher because its SDP never crosses
+ *     our server: the V2 engine path negotiates with LiveKit over TLS and seals
+ *     media frames before publish (lib/call/frameCrypto.ts). That is safe only
+ *     because the publish path is fail-closed — no key or no cryptor means
+ *     nothing is published at all (lib/call/room.ts). If that ever softens to a
+ *     warn-and-continue, this must go back to 'transport'.
  *
  * The participant count no longer changes the answer — the same mechanism
- * covers both — but it stays so call sites do not churn, and because the
- * decision belongs here if the two guarantees ever diverge again.
- *
- * THE RULE THIS FUNCTION EXISTS TO KEEP: it must never return 'e2ee' while the
- * media path cannot honour it. That is safe here only because the publish path
- * is fail-closed — no key or no cryptor means nothing is published at all
- * (lib/call/room.ts), rather than something published in the clear. If that
- * ever softens to a warn-and-continue, this must go back to 'transport'.
+ * covers 1:1 and group — but it stays so call sites do not churn, and because
+ * the decision belongs here if the two guarantees ever diverge again.
  */
-export function protectionFor(_participantCount: number): CallProtection {
-  return CALL_FRAME_E2EE ? 'e2ee' : 'transport';
+export function protectionFor(
+  _participantCount: number,
+  signalling: CallCipher | CallCipher[] | null,
+): CallProtection {
+  if (!CALL_FRAME_E2EE) return 'transport';
+  if (signalling == null) return 'e2ee';
+  const links = Array.isArray(signalling) ? signalling : [signalling];
+  // Empty = nobody connected yet: nothing has been claimed and nothing has
+  // leaked. A missing entry is treated as unsealed, not as "not applicable".
+  return links.every(c => !!c && c.enc === true) ? 'e2ee' : 'transport';
 }
 
 const COPY: Record<CallProtection, { icon: any; label: string }> = {

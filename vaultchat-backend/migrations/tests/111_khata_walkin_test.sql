@@ -93,7 +93,15 @@ BEGIN
   BEGIN
     DELETE FROM shopbook_khata_customer WHERE id = '44444444-0000-4000-8000-00000000e001';
     RAISE EXCEPTION 'a khata contact with ledger history was deleted (RESTRICT not enforced)';
-  EXCEPTION WHEN foreign_key_violation THEN NULL; END;
+  -- ON DELETE RESTRICT raises restrict_violation (23001), NOT
+  -- foreign_key_violation (23503) — 23503 is what NO ACTION raises. The FK at
+  -- 111_shopbook_khata_walkin.sql:75 is RESTRICT, so catching only 23503 let
+  -- the very error this section is proving escape and abort the file. Found
+  -- the first time these tests were actually executed. Both are listed
+  -- because the assertion is "the delete must fail", not "it must fail with
+  -- one particular sqlstate" — and RAISE EXCEPTION above is P0001, so a
+  -- delete that SUCCEEDS is still uncaught and still fails the run.
+  EXCEPTION WHEN restrict_violation OR foreign_key_violation THEN NULL; END;
 END $chk4$;
 
 -- ---- 5. duplicate protection --------------------------------------

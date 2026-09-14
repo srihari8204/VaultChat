@@ -162,8 +162,11 @@ let pageOffset = 0;
 async function load(): Promise<QueuedMessage[]> {
   try { return await queueList<QueuedMessage>('msg', PAGE, pageOffset); } catch { return []; }
 }
-async function put(m: QueuedMessage): Promise<void> {
-  try { await queuePut('msg', m.tempId, m, m.createdAt, m.chatId); } catch {}
+/** Returns false when the row did NOT reach SQLite. Only enqueue acts on that
+ *  (see below); flush/retry are updating a row that is already on disk, so a
+ *  failed re-write loses nothing they cannot redo next pass. */
+async function put(m: QueuedMessage): Promise<boolean> {
+  try { await queuePut('msg', m.tempId, m, m.createdAt, m.chatId); return true; } catch { return false; }
 }
 async function drop(tempId: string): Promise<void> {
   try { await queueDelete('msg', tempId); } catch {}
@@ -192,8 +195,23 @@ function baseItem(chatId: string): QueuedMessage {
   };
 }
 
+// A PENDING BUBBLE FOR A ROW THAT DOES NOT EXIST IS A LOST MESSAGE.
+//
+// put() swallows its write error, so a failed queuePut (disk full, the cache DEK
+// not loaded yet, a locked database) used to return normally: the caller
+// rendered a clock, flush() then read a queue the row was never in, and the
+// message was gone at the next cold start with nothing having said so. The
+// user's evidence — a clock that never becomes a tick — is exactly what merely
+// being offline looks like, which is why this would never be reported as data
+// loss. It is the purest form of "acked to the UI but never persisted".
+//
+// Throw instead. Both callers already handle it correctly: chat.tsx's send
+// handler alerts "Send failed" AND leaves the text in the composer (its
+// setInput('') is after this await), and notificationActions swallows it. No
+// optimistic bubble is created, so nothing claims a message that isn't there.
 async function enqueue(msg: QueuedMessage): Promise<QueuedMessage> {
-  await put(msg);
+  const stored = await put(msg);
+  if (!stored) throw new Error('Could not save this message — try again.');
   emit('pending', { msg });
   flush().catch(() => {});   // background — don't make the caller wait
   return msg;
@@ -431,18 +449,20 @@ function scheduleFlush(delayMs: number): void {
   flushScheduled = setTimeout(() => { flushScheduled = null; flush(); }, delayMs);
 }
 
-/** What went on the wire, so the caller can retain the ciphertext (never the text). */
-interface PostResult { real: Message | null; wire: string | null }
+/** What went on the wire, so the caller can retain the ciphertext (never the text).
+ *  `committed` is false when the local plaintext record could not be written —
+ *  see the plaintext-retention branch in flush(). */
+interface PostResult { real: Message | null; wire: string | null; committed: boolean }
 
 async function postOnce(item: QueuedMessage): Promise<PostResult> {
   // Non-'send' ops mutate an existing message by id. Reuse chatService's exact
   // encrypt+verb logic; the queue only adds durability around it.
   if (item.op === 'delete') {
     await deleteMessage(item.chatId, item.targetId!);
-    return { real: null, wire: null };
+    return { real: null, wire: null, committed: true };
   }
   if (item.op === 'edit') {
-    return { real: await editMessage(item.chatId, item.targetId!, item.plaintext), wire: null };
+    return { real: await editMessage(item.chatId, item.targetId!, item.plaintext), wire: null, committed: true };
   }
 
   // The server receives ONLY the routing subset of meta; everything else is
@@ -518,6 +538,7 @@ async function postOnce(item: QueuedMessage): Promise<PostResult> {
   //
   // The server copy is untouched — it received `content`, the DR1/GSK1
   // envelope, and never sees any of this.
+  let committed = true;
   if (real && (item.op ?? 'send') === 'send' && item.plaintext) {
     (real as any).content = item.plaintext;
     // ...and the FULL meta, not the subset that came back from the server.
@@ -545,11 +566,21 @@ async function postOnce(item: QueuedMessage): Promise<PostResult> {
     } catch (err) {
       // Do NOT swallow this quietly — it is the sender's only readable copy.
       console.warn('[queue] local commit FAILED — id:', (real as any)?.id, '—', (err as any)?.message ?? err);
+      // ...AND SAY SO TO THE CALLER, which is the half that was missing.
+      //
+      // The comment above was already right that this is the only readable
+      // copy, and the code then threw the information away: flush() went on to
+      // blank item.plaintext unconditionally, because acceptance "swaps the
+      // payload". So on this branch BOTH copies went at once — cacheMessages
+      // never landed, and the outbox row that still held the text was wiped a
+      // few lines later. The recipient could read the message; the sender saw
+      // "not available on this device" forever, with a tick beside it.
+      committed = false;
     }
   }
   // Hand back the CIPHERTEXT (not `wire`, which is the pre-encryption text) so
   // the caller can retain it for recovery and discard the plaintext.
-  return { real, wire: encrypted ? content : null };
+  return { real, wire: encrypted ? content : null, committed };
 }
 
 /**
@@ -612,13 +643,33 @@ export async function flush(): Promise<void> {
     // are also the OLDEST rows, so they sort to the head of the page and this
     // was the normal case for an active user, not an edge one.
     let inert = 0;
+    // ORDER WITHIN A CHAT SURVIVES A RETRY.
+    //
+    // The page is oldest-first and sent serially, so ordering held as long as
+    // everything succeeded. It did NOT hold across a transient failure: message
+    // A 5xx'd and went to `remaining`, the loop carried straight on to message B
+    // in the same chat, B was accepted with a LOWER server id than A would later
+    // get, and the recipient read them backwards — permanently, because the ids
+    // are what both sides sort on. A 30-second blip in the middle of someone
+    // typing three lines is enough.
+    //
+    // So a transient failure blocks only the chat it happened in, for the rest
+    // of this pass. Other chats are untouched, which is what the page-rotation
+    // machinery above exists to protect: 200 messages wedged on one peer must
+    // not starve anybody else. A PERMANENT rejection does not block — that
+    // message is red and is never going to arrive, so holding the rest behind it
+    // would strand the chat forever (this is also what WhatsApp does).
+    const blocked = new Set<string>();
     for (const item of q) {
       // Already accepted and waiting on delivery — NOT a send candidate.
       // Re-POSTing would be a no-op anyway (the server dedups on clientId) but
       // it would burn a request per flush per row, forever.
       if (isAwaitingDelivery(item)) { inert++; continue; }
+      // An older message in this chat has not left yet. Not an error and not an
+      // attempt: no attempts++, no 'retry' event, the clock just keeps ticking.
+      if (blocked.has(item.chatId)) { remaining.push(item); continue; }
       try {
-        const { real, wire } = await postOnce(item);
+        const { real, wire, committed } = await postOnce(item);
         const serverId = Number(real?.id ?? 0);
         if ((item.op ?? 'send') === 'send' && serverId > 0 && wire) {
           // SERVER_ACCEPTED → hold the row until the recipient actually has the
@@ -630,7 +681,14 @@ export async function flush(): Promise<void> {
           // leaving readable text in a row that now lives for days would be a
           // plaintext-at-rest regression created by this feature.
           item.ciphertext = wire;
-          item.plaintext = '';
+          // ...EXCEPT when the local record did not commit. Then this row is
+          // the last copy of the sender's own text and blanking it destroys it
+          // (see postOnce). Holding readable text in an accepted row is the
+          // plaintext-at-rest cost this swap exists to avoid — but it is bounded
+          // by the same 7-day reap as every other accepted row, and it only
+          // happens on a local-write failure, which is rare and is already the
+          // worst outcome in the file. A recoverable message beats a tidy one.
+          if (committed) item.plaintext = '';
           item.serverId = serverId;
           item.acceptedAt = Date.now();
           item.state = 'SENT';
@@ -659,6 +717,7 @@ export async function flush(): Promise<void> {
         await put(item);                      // same row, updated attempt count
         emit('retry', { tempId: item.tempId, chatId: item.chatId, attempt: item.attempts });
         remaining.push(item);
+        blocked.add(item.chatId);             // keep this chat in order — see above
       }
     }
 

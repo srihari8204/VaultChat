@@ -69,6 +69,26 @@ func RegisterChats(mux *http.ServeMux) {
 	id.HandleFunc("DELETE /chats/{id}/messages/{msgId}", httpx.RequireAuth(chatsMessageDelete))
 	id.HandleFunc("POST /chats/{id}/delivered", httpx.RequireAuth(chatsDelivered))
 	id.HandleFunc("POST /chats/{id}/read", httpx.RequireAuth(chatsRead))
+
+	// CC-Wire (CCWIRE_WS=1, off by default) sends and acknowledges messages by
+	// running THESE handlers, not a copy of them — which is the only way a
+	// second transport inherits the send rate limit, the membership check, the
+	// block and group-policy gates, and the client_id idempotency rather than
+	// re-deriving weaker versions of each.
+	//
+	// RequireAuth is deliberately NOT applied: a CC-Wire session was already
+	// authenticated by RequireAuth at the WebSocket upgrade and carries that
+	// context, and re-running it would need a Bearer header the session does not
+	// keep. Nothing else can reach this mux — it is never mounted on a listener.
+	//
+	// Registered only with the flag on, so with it off this mux does not exist.
+	if realtime.CCWireEnabled() {
+		cw := http.NewServeMux()
+		cw.HandleFunc("POST /chats/{id}/messages", chatsMessagePost)
+		cw.HandleFunc("POST /chats/{id}/delivered", chatsDelivered)
+		cw.HandleFunc("POST /chats/{id}/read", chatsRead)
+		realtime.SetCCWireRoutes(cw)
+	}
 	id.HandleFunc("POST /chats/{id}/members", httpx.RequireAuth(chatsMembersAdd))
 	id.HandleFunc("PATCH /chats/{id}/members/{userId}/role", httpx.RequireAuth(chatsMemberRole))
 	id.HandleFunc("POST /chats/{id}/invite-links", httpx.RequireAuth(chatsInviteCreate))

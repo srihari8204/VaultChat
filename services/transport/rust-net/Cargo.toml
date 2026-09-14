@@ -1,0 +1,42 @@
+[package]
+name    = "transport-net"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+# THE I/O HALF. Everything tokio brings in lives HERE and never in the sibling.
+#
+# transport-core has an empty [dependencies] on purpose: that is what lets a
+# reviewer establish by reading ONE manifest that the transport coordinator
+# cannot encrypt and cannot reach a database. Owning a socket means owning an
+# async runtime, which would have spent that property. So the socket lives in a
+# second crate that DEPENDS ON core rather than being merged into it, and the
+# audit statement survives: `cargo tree -p transport-core` is still one line.
+#
+# Versions are pinned EXACTLY (`=`). A transport is the one component where a
+# patch bump to the WebSocket library changes bytes on the wire; "it worked in
+# CI last week" must mean the same bytes as today.
+[dependencies]
+transport-core   = { path = "../rust" }
+tokio            = { version = "=1.53.1", features = ["rt", "rt-multi-thread", "macros", "net", "time", "io-util"] }
+tokio-tungstenite = { version = "=0.30.0", features = ["connect", "handshake", "rustls-tls-webpki-roots"] }
+futures-util     = { version = "=0.3.34", default-features = false, features = ["sink", "std"] }
+
+[dev-dependencies]
+# Test-only: the SAME committed fixture Go and TypeScript assert. Reading it
+# here is what makes "this client speaks the protocol" a test rather than a claim.
+serde_json = "1"
+# `test-util` is what lets the backoff test assert a 30-second ceiling without
+# a 30-second test. Test-only, and deliberately not in [dependencies]: a
+# pausable clock in a shipped binary is a clock that can be paused in production.
+tokio = { version = "=1.53.1", features = ["test-util"] }
+
+[lib]
+name = "transport_net"
+
+[[bin]]
+name = "ccwire-connect"
+path = "src/main.rs"
+
+[profile.release]
+overflow-checks = true

@@ -89,7 +89,7 @@ export default function SearchScreen() {
     <View style={S.screen}>
       <AuroraBackground />
       <View style={S.header}>
-        <TouchableOpacity onPress={() => router.back()} hitSlop={10} style={S.backBtn} activeOpacity={0.7}>
+        <TouchableOpacity accessibilityLabel="Go back" onPress={() => router.back()} hitSlop={10} style={S.backBtn} activeOpacity={0.7}>
           <Ionicons name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
         <TextInput

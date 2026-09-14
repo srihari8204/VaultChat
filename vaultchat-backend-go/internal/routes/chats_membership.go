@@ -985,11 +985,28 @@ func membershipTransfer(w http.ResponseWriter, r *http.Request) {
 			chatID, target); e != nil {
 			return e
 		}
-		_, e := tx.Exec(ctx,
-			`UPDATE chat_members SET role = 'admin' WHERE chat_id = $1 AND user_id = $2`,
+		// AND role = 'owner': the caller's role came from a SELECT that is no
+		// longer authoritative. Two transfers racing would otherwise both
+		// promote and leave the group with TWO owners — and nothing demotes an
+		// owner, so there is no way back. The loser's UPDATE matches no row
+		// (read-committed re-checks the predicate after the lock), and the
+		// whole transaction — promotion included — rolls back.
+		ct, e := tx.Exec(ctx,
+			`UPDATE chat_members SET role = 'admin'
+			  WHERE chat_id = $1 AND user_id = $2 AND role = 'owner'`,
 			chatID, user.ID)
-		return e
+		if e != nil {
+			return e
+		}
+		if ct.RowsAffected() == 0 {
+			return errMembershipRaced
+		}
+		return nil
 	})
+	if err == errMembershipRaced {
+		httpx.Err(w, 409, "Someone else just transferred this group")
+		return
+	}
 	if err != nil {
 		log.Printf("[membership transfer] %v", err)
 		httpx.Err(w, 500, "Failed to transfer ownership")

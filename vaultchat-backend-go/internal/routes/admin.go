@@ -205,10 +205,23 @@ func adminUsers(w http.ResponseWriter, r *http.Request) {
 }
 
 // ── GET /api/admin/messages?limit= — METADATA ONLY (no content) ───────
+//
+// §15 finding 3: this feed does NOT select reply_to_id. It used to, and no
+// operator surface ever rendered it — admin/index.html draws six columns
+// (id, type, sender, chat, status, time) and never touched the field. What it
+// did do is assemble the reply graph of finding 1 into an operator-facing
+// live tail, which is the one thing envelope.proto:153-154 says the server has
+// no need to build. The delivery sweep now reclaims the column
+// (internal/jobs/jobs.go), but a row between send and sweep still carries it,
+// and this was the only place it was readable as a feed. Do not add it back.
+//
+// `type` is still selected: the console renders it in a column, so removing it
+// would blank an operator surface. That is finding 2, and it needs the coarse
+// CC-Wire MessageClass first — see docs/METADATA_PRIVACY.md.
 
 func adminMessages(w http.ResponseWriter, r *http.Request) {
 	rows, err := db.SysPool.Query(r.Context(),
-		`SELECT id, chat_id, sender_id, type, reply_to_id, edited_at, deleted_at, created_at
+		`SELECT id, chat_id, sender_id, type, edited_at, deleted_at, created_at
          FROM messages ORDER BY id DESC LIMIT $1`,
 		adminLimit(r.URL.Query().Get("limit")))
 	if err != nil {
@@ -220,17 +233,11 @@ func adminMessages(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var id int64
 		var chatID, senderID, typ string
-		var replyToID *int64
 		var editedAt, deletedAt *time.Time
 		var createdAt time.Time
-		if err := rows.Scan(&id, &chatID, &senderID, &typ, &replyToID, &editedAt, &deletedAt, &createdAt); err != nil {
+		if err := rows.Scan(&id, &chatID, &senderID, &typ, &editedAt, &deletedAt, &createdAt); err != nil {
 			httpx.Err(w, 500, "Failed to load messages")
 			return
-		}
-		var replyOut *string
-		if replyToID != nil {
-			s := strconv.FormatInt(*replyToID, 10)
-			replyOut = &s
 		}
 		// No per-message delivery column exists (delivery tracked per member);
 		// derive a coarse status from the metadata we DO have.
@@ -242,7 +249,7 @@ func adminMessages(w http.ResponseWriter, r *http.Request) {
 		}
 		messages = append(messages, map[string]any{
 			"id": strconv.FormatInt(id, 10), "chatId": chatID, "senderId": senderID, "type": typ,
-			"replyToId": replyOut, "status": status, "createdAt": httpx.JSTime(createdAt),
+			"status": status, "createdAt": httpx.JSTime(createdAt),
 		})
 	}
 	httpx.JSON(w, 200, map[string]any{"messages": messages})

@@ -704,6 +704,7 @@ function AudioBubble({
         style={[S.audioPlayBtn, isMine ? S.audioPlayBtnMine : S.audioPlayBtnTheirs]}
         onPress={togglePlay}
         activeOpacity={0.7}
+        accessibilityLabel={playing ? 'Pause voice message' : 'Play voice message'}
       >
         <Ionicons name={playing ? 'pause' : 'play'} size={19} color="#fff" style={playing ? undefined : { marginLeft: 2 }} />
       </TouchableOpacity>

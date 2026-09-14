@@ -98,8 +98,11 @@ export function on<K extends keyof Events>(e: K, fn: (d: Events[K]) => void): ()
 async function load(): Promise<MediaOutboxItem[]> {
   try { return await queueList<MediaOutboxItem>('media', READ_CAP); } catch { return []; }
 }
-async function save(q: MediaOutboxItem[]): Promise<void> {
-  try { await queueReplace('media', q.map(m => ({ id: m.tempId, item: m, createdAt: m.createdAt, tag: m.chatId }))); } catch {}
+/** Returns false when the queue did NOT reach SQLite. Only enqueueMedia acts on
+ *  that (see below); flush/retry/cancel are rewriting rows that are already on
+ *  disk, so a failed write loses nothing they cannot redo next pass. */
+async function save(q: MediaOutboxItem[]): Promise<boolean> {
+  try { await queueReplace('media', q.map(m => ({ id: m.tempId, item: m, createdAt: m.createdAt, tag: m.chatId }))); return true; } catch { return false; }
 }
 
 const inFlight = new Set<string>();
@@ -141,6 +144,19 @@ async function ensureDir(): Promise<void> { try { await FileSystem.makeDirectory
 /**
  * Persist a media send + a durable copy of the file, then kick a flush. Returns
  * the item so the caller can paint an optimistic bubble keyed by tempId.
+ *
+ * A PENDING BUBBLE FOR A ROW THAT DOES NOT EXIST IS A LOST MEDIA SEND.
+ *
+ * Exactly the messageQueue.enqueue() bug, in the media path: save() swallowed
+ * its write error, so a failed queueReplace (disk full, cache DEK not loaded
+ * yet, a locked database) returned normally, chat.tsx painted a pending bubble,
+ * and flush() then read a queue the row was never in. Nothing sends and no
+ * 'failed' event can ever fire — emit('failed') only reaches items that ARE in
+ * the queue — so the spinner turns forever and the bubble is simply gone at the
+ * next cold start, with nothing having said so.
+ *
+ * Throw instead: the callers already alert on a throwing send, and no optimistic
+ * bubble is created, so nothing claims a photo that isn't there.
  */
 export async function enqueueMedia(
   chatId: string, type: MediaType,
@@ -161,7 +177,12 @@ export async function enqueueMedia(
     filename: file.filename, mime: file.mime, caption: opts.caption, viewOnce: opts.viewOnce,
     metaExtra: opts.metaExtra, attempts: 0, createdAt: Date.now(), lastError: null, state: 'pending',
   };
-  const q = await load(); q.push(item); await save(q);
+  const q = await load(); q.push(item);
+  if (!(await save(q))) {
+    // Don't leave the durable copy behind for a send that never existed.
+    if (usable === srcPath) await FileSystem.deleteAsync(srcPath, { idempotent: true }).catch(() => {});
+    throw new Error('Could not save this media — try again.');
+  }
   flush().catch(() => {});
   return item;
 }

@@ -39,7 +39,7 @@ export function Header({ title, back = true, onBack, right, border, style }: Hea
     >
       <View style={styles.side}>
         {back && (
-          <TouchableOpacity onPress={onBack ?? (() => router.back())} hitSlop={10} style={styles.iconBtn}>
+          <TouchableOpacity accessibilityLabel="Go back" onPress={onBack ?? (() => router.back())} hitSlop={10} style={styles.iconBtn}>
             <Ionicons name="arrow-back" size={24} color={c.text} />
           </TouchableOpacity>
         )}

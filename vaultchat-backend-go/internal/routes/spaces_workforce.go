@@ -387,17 +387,19 @@ func attendanceList(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// RLS scopes this to the caller's own row unless they run the space, so the
-	// same endpoint serves an employee and their manager without a branch here.
+	// Your own row unless you run the space — policy space_attendance_select
+	// (migration 089), spelled here because RLS is inert while the API connects
+	// as the table owner.
 	out := []map[string]any{}
 	err := chatsQueryU(ctx, user.ID,
 		`SELECT a.user_id, `+spaceNameCols+`, a.check_in_at, a.check_out_at, a.source, a.note
 		   FROM space_attendance a
 		   JOIN users u ON u.id = a.user_id
 		  WHERE a.chat_id = $1 AND a.day = $2::date
+		    AND (a.user_id = $3 OR vc_space_ops_viewer($1))
 		  ORDER BY a.check_in_at NULLS LAST
 		  LIMIT 500`,
-		[]any{chatID, day}, func(rows pgx.Rows) error {
+		[]any{chatID, day, user.ID}, func(rows pgx.Rows) error {
 			var (
 				uid, source      string
 				fnc, lnc, ec     *string
@@ -516,9 +518,10 @@ func leaveList(w http.ResponseWriter, r *http.Request) {
 		   FROM space_leave l
 		   JOIN users u ON u.id = l.user_id
 		  WHERE l.chat_id = $1
+		    AND (l.user_id = $2 OR vc_space_ops_viewer($1))
 		  ORDER BY l.status = 'pending' DESC, l.from_day DESC
 		  LIMIT 300`,
-		[]any{chatID}, func(rows pgx.Rows) error {
+		[]any{chatID, user.ID}, func(rows pgx.Rows) error {
 			var (
 				lid              int64
 				uid, kind, st    string
@@ -795,8 +798,9 @@ func wfTaskCreate(w http.ResponseWriter, r *http.Request) {
 	httpx.JSON(w, 200, map[string]any{"id": id})
 }
 
-// wfTaskUpdate marks a task done or not done. The RLS policy already limits
-// this to the assignee or ops, so the handler does not repeat the check.
+// wfTaskUpdate marks a task done or not done — the assignee or ops, per policy
+// space_tasks_write (migration 089). Spelled in the WHERE rather than left to
+// RLS, which is inert while the API connects as the table owner.
 func wfTaskUpdate(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	user := httpx.UserFrom(r)
@@ -816,8 +820,9 @@ func wfTaskUpdate(w http.ResponseWriter, r *http.Request) {
 		`UPDATE space_tasks
 		    SET done_at = CASE WHEN $3::bool THEN COALESCE(done_at, NOW()) ELSE NULL END
 		  WHERE chat_id = $1 AND id = $2::bigint
+		    AND (assignee_id = $4 OR vc_space_ops_viewer($1))
 		  RETURNING id`,
-		[]any{chatID, taskID, done}, &id)
+		[]any{chatID, taskID, done, user.ID}, &id)
 	if db.NoRows(err) {
 		httpx.Err(w, 404, "Task not found")
 		return

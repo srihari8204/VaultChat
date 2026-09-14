@@ -1,0 +1,32 @@
+[package]
+name    = "transport-core"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+# NO DEPENDENCIES, DELIBERATELY.
+#
+# The lower half of this crate — config, frame, sched — is pure decision logic
+# with no I/O and no async. Keeping it dependency-free means it fuzzes and tests
+# without a runtime, and it makes the dependency-direction rule from the design
+# ("transport must not be able to express a crypto operation") checkable by
+# looking at this file rather than by reading code.
+#
+# tokio / quinn / tungstenite belong to conn/*, which is not written yet and
+# will be feature-gated when it is.
+[dependencies]
+
+[dev-dependencies]
+# Test-only: reads the parity vectors that Go and TypeScript already assert.
+# Never linked into a shipped artifact.
+serde_json = "1"
+
+[lib]
+crate-type = ["rlib"]
+name = "transport_core"
+
+[profile.release]
+# Matches the sibling crates' written rationale: an arithmetic overflow in a
+# bounds check must abort, not wrap into a valid-looking small number.
+overflow-checks = true
+panic           = "abort"

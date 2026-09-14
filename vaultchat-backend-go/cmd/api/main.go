@@ -283,6 +283,7 @@ func main() {
 	// ── Realtime (Phase 2 Step 5): Go owns the Socket.IO layer ──────────
 	hub := realtime.New()
 	mux.Handle("/socket.io/", hub.Handler())
+	realtime.RegisterCCWire(mux, hub) // CC-Wire v1: parallel listener, no-op unless CCWIRE_WS=1
 
 	// Point emitx at the local hub so Go-served routes emit IN-PROCESS
 	// instead of bridging to Node. The admin firehose mirror that Node's

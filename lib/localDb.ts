@@ -348,7 +348,21 @@ export async function cacheMessages(chatId: string, msgs: Message[]): Promise<vo
            sender_id   = excluded.sender_id,
            type        = excluded.type,
            content     = COALESCE(excluded.content, messages.content),
-           reply_to_id = excluded.reply_to_id,
+           -- COALESCE for the same reason as content, one layer along.
+           --
+           -- The delete-on-delivery sweep now NULLs reply_to_id server-side once
+           -- a message is delivered (internal/jobs/jobs.go) — the server has no
+           -- need for a reply graph and stops keeping one. But the sweep also
+           -- NULLs content, and the line above deliberately keeps the locally
+           -- cached plaintext when it does.
+           --
+           -- So without this COALESCE the two disagreed: the body stayed
+           -- readable and the pointer to what it replied to did not. The next
+           -- back-page or delta re-sync of that chat overwrote a good local
+           -- reply_to_id with NULL, and the bubble kept its text while silently
+           -- losing its "replying to…" quote and its jump-to-target
+           -- (MessageBubble gates on replyToId > 0). Permanent, and local.
+           reply_to_id = COALESCE(excluded.reply_to_id, messages.reply_to_id),
            meta        = COALESCE(excluded.meta, messages.meta),
            created_at  = excluded.created_at,
            edited_at   = excluded.edited_at,

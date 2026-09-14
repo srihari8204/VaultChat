@@ -183,7 +183,7 @@ export default function MsgRequests() {
 
       {/* Header */}
       <View style={s.header}>
-        <TouchableOpacity onPress={()=>router.back()} style={s.backBtn} hitSlop={10}>
+        <TouchableOpacity accessibilityLabel="Go back" onPress={()=>router.back()} style={s.backBtn} hitSlop={10}>
           <Ionicons name="arrow-back" size={22} color={colors.text} />
         </TouchableOpacity>
         <View style={{flex:1}}>

@@ -94,9 +94,23 @@ var callRoles = map[string]bool{"host": true, "cohost": true, "speaker": true, "
 
 // ── helpers ───────────────────────────────────────────────────────────
 
+// The predicate is policy calls_select (migration 066) done in Go, because RLS
+// is inert while the API connects as the table owner — see mayJoinCall below.
+// Without it GET /calls/{id} hands any call's metadata and full roster, names
+// and photos included, to any authenticated caller who can name the id.
+//
+// It is the policy's vc_is_chat_member(chat_id) OR an invite, because the
+// invite is how a 1:1 call gains a third person WITHOUT adding them to the
+// chat (migration 123). That is exactly the pair mayJoinCall admits, and a
+// member-only predicate would 404 a legitimately joined guest out of their own
+// call — including /leave. The seven mutating callers re-check myRole on top.
 const callSelect = `SELECT id::text, chat_id::text, started_by::text, kind, transport, mode,
                            started_at, ended_at, end_reason
-                    FROM calls WHERE id = $1`
+                    FROM calls WHERE id = $1
+                      AND (vc_is_chat_member(chat_id)
+                           OR EXISTS (SELECT 1 FROM call_invites i
+                                       WHERE i.call_id = $1
+                                         AND i.invitee_id = vc_current_user_id()))`
 
 func scanCall(row pgx.Row) (*callSession, error) {
 	var c callSession

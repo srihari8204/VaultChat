@@ -240,7 +240,7 @@ export default function ContactInfoScreen() {
 
       <ScrollView contentContainerStyle={{ paddingBottom: 60 }}>
         <View style={s.hero}>
-          <TouchableOpacity onPress={() => router.back()} style={s.backBtn} hitSlop={10}>
+          <TouchableOpacity accessibilityLabel="Go back" onPress={() => router.back()} style={s.backBtn} hitSlop={10}>
             <Ionicons name="arrow-back" size={24} color={colors.text} />
           </TouchableOpacity>
 
@@ -375,7 +375,7 @@ export default function ContactInfoScreen() {
           <TouchableOpacity
             style={[s.encryptionCard, { borderColor: 'rgba(139,92,246,0.25)', backgroundColor: 'rgba(139,92,246,0.06)' }]}
             activeOpacity={0.7}
-            onPress={() => router.push({ pathname: '/ghost-mode' as any, params: { contactUid: peerUid, contactName: displayName } })}
+            onPress={() => router.push({ pathname: '/ghost-mode' as any, params: { targetId: peerUid, targetName: displayName } })}
           >
             <Text style={{ fontSize: 22 }}>{'👻'}</Text>
             <View style={{ flex: 1, marginLeft: 12 }}>

@@ -69,6 +69,42 @@ func broadcastInvite(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// WHO MAY INVITE DEPENDS ON VISIBILITY, and for a private stream this is an
+	// authorization decision, not a courtesy.
+	//
+	// `broadcast_invites` is the ENTIRE audience table for a private broadcast:
+	// goliveMayWatch, goliveAudienceSQL, the stream chat read and write gates and
+	// the poll gates all resolve to a row in it. So an unchecked INSERT here is a
+	// self-service grant. Two accounts could invite each other into any private
+	// broadcast id and both would pass broadcastToken, receive a LiveKit token
+	// for the host's private room, and — once accept() stamped seen_at —
+	// goliveStageRole would return RoleSpeaker, i.e. publish rights. A stranger
+	// could put their camera and microphone on someone else's private stage.
+	//
+	// Public stays open on purpose: the handler's premise is that a public
+	// broadcast is reachable by anyone holding the link, so an invitation there
+	// only delivers a notification about something already permitted. Narrowing
+	// that would break sharing without protecting anything.
+	//
+	// Checked BEFORE the rate limiter's side effects matter and before any row
+	// is written.
+	var visibility, hostID string
+	if err := db.WithUser(ctx, uid, func(tx pgx.Tx) error {
+		return tx.QueryRow(ctx,
+			`SELECT visibility, host_id FROM broadcast_sessions WHERE id = $1`,
+			id).Scan(&visibility, &hostID)
+	}); err != nil {
+		// Deliberately the same answer as "not permitted" — a distinct 404 here
+		// would confirm which broadcast ids exist.
+		httpx.Err(w, 403, "Forbidden")
+		return
+	}
+	// Unrecognised visibility denies rather than guesses, matching goliveMayWatch.
+	if visibility != "public" && hostID != uid {
+		httpx.Err(w, 403, "Forbidden")
+		return
+	}
+
 	sent := 0
 	err := db.WithUser(ctx, uid, func(tx pgx.Tx) error {
 		for _, invitee := range body.UserIDs {

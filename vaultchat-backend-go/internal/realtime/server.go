@@ -131,6 +131,13 @@ type Hub struct {
 	// online-count too — OnlineCount == len(userSockets), matching admin.js.
 	pmu         sync.Mutex
 	userSockets map[string]map[string]struct{}
+
+	// CC-Wire sessions, by uid. NOT a second roster: who is in a chat is still
+	// decided once, by chatMemberIDs in FanOutToChat, and this map only says
+	// which of those uids also has a CC-Wire socket open. Nil until one
+	// connects, which requires CCWIRE_WS=1 (ccwire_messages.go).
+	cwmu       sync.Mutex
+	cwSessions map[string]map[*ccwireSession]struct{}
 }
 
 // New constructs the Socket.IO server, registers the JWT/admin-key auth
@@ -325,7 +332,31 @@ func (h *Hub) onConnection(s *socket.Socket) {
 // EmitToUid emits to every device of a user (room user:<uid>) — server.js
 // emitToUid.
 func (h *Hub) EmitToUid(uid, event string, payload any) {
-	h.io.To(socket.Room("user:"+uid)).Emit(event, payload)
+	h.emitToUidIn("", uid, event, payload)
+}
+
+// emitToUidIn is EmitToUid plus the chat the event belongs to, and it is THE
+// LEAF of the one fan-out both transports share.
+//
+// FanOutToChat decides the audience — the Redis-cached member roster, minus
+// blockers, minus ghost-mode targets — and then calls this once per surviving
+// uid. Putting the CC-Wire delivery HERE rather than beside FanOutToChat is
+// what stops the second transport from growing a second roster: a CC-Wire
+// client is reached because the shared fan-out already decided to reach that
+// user, never because CC-Wire computed its own list.
+//
+// chatID is what the Socket.IO payloads do not all carry (a receipt payload is
+// {userId, lastReadMessageId} and nothing else) while the CC-Wire Receipt body
+// requires it. It is "" for the handful of EmitToUid callers that are not
+// chat-scoped; those events have no CC-Wire body and are not translated.
+//
+// The Socket.IO emit is unchanged and goes first. The nil guard is for the
+// package's DB-free tests, which build a bare &Hub{}; production always has io.
+func (h *Hub) emitToUidIn(chatID, uid, event string, payload any) {
+	if h.io != nil {
+		h.io.To(socket.Room("user:"+uid)).Emit(event, payload)
+	}
+	h.ccwireDeliver(chatID, uid, event, payload)
 }
 
 // EmitToRooms emits to explicit socket rooms (chat:<id>, channel:<id>, admin…).

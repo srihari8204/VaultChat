@@ -700,6 +700,10 @@ services:
     restart: unless-stopped
     volumes:
       - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      # Required by prometheus.yml's rule_files. WITHOUT THIS MOUNT
+      # prometheus REFUSES TO START — a missing rule file is a fatal
+      # config error, not a warning.
+      - ./monitoring/alerts.yml:/etc/prometheus/alerts.yml:ro
       - promdata:/prometheus
 
   grafana:

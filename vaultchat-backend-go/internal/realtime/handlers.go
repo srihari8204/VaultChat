@@ -566,12 +566,20 @@ func (h *Hub) peerAllowed(d *sockData, to string) bool {
 }
 
 // onChatView — ephemeral live-viewer presence (feature #58, server.js chat_view).
+//
+// Gated like every other chat publisher in this file: cvList returns the uids
+// of everyone viewing, and a join announces the caller into the chat's room, so
+// an ungated call read and wrote presence for any chat id a client could name.
 func (h *Hub) onChatView(s *socket.Socket, m map[string]any) {
 	chatID := mstr(m, "chatId")
 	if chatID == "" {
 		return
 	}
-	uid := sd(s).uid
+	d := sd(s)
+	if !h.chatMemberAllowed(d, chatID) {
+		return
+	}
+	uid := d.uid
 	status := mstr(m, "status")
 	activity := mstr(m, "activity")
 	resync := truthy(m["resync"])

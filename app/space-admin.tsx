@@ -192,6 +192,11 @@ export default function SpaceAdminScreen() {
               params: {
                 spaceId, name: spaceName,
                 groupType: params.groupType ?? '',
+                // perms travel with every hop — the same contract space-overview
+                // and space-transport already keep. Without them Check-in,
+                // Tasks, Leave and Overview open in member mode when reached
+                // through this console, and in full mode from the space tiles.
+                perms: params.perms ?? '',
                 canManage: perms.has('manage_roster') ? '1' : '0',
               },
             })}

@@ -1455,10 +1455,21 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
           if (isMine && msg.id > 0 && withinRevoke) {
             opts.push({
               text: 'Delete for everyone', style: 'destructive', onPress: async () => {
-                // WhatsApp: tombstone instantly, sync the revoke when back online.
+                // Queue FIRST, then tombstone. enqueue() now throws when the
+                // outbox write does not land, and the old order painted the
+                // tombstone before that could happen: the bubble read "deleted",
+                // the revoke was never queued, every recipient still had the
+                // message, and no 'failed' event could reach it because the row
+                // was not in the outbox. Silent, permanent, and the user
+                // believed the opposite.
+                try {
+                  await enqueueDelete(chatId, msg.id);
+                } catch (e: any) {
+                  Alert.alert('Could not delete', e?.message ?? 'Try again');
+                  return;   // leave the message visible — it was NOT revoked
+                }
                 setMessages(prev => prev.map(x => x.id === msg.id
                   ? { ...x, content: null, deletedAt: new Date().toISOString(), type: 'system' } : x));
-                await enqueueDelete(chatId, msg.id);
               },
             });
           }
@@ -1867,7 +1878,16 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
     const removing = (mergedReactions[msg.id] || []).some(r => r.emoji === emoji && r.mine);
     // WhatsApp: a reaction works offline — durably enqueue it (it's an E2EE
     // message under the hood) and reconcile on the queue's 'sent' event.
-    const q = await enqueueReaction(chatId, msg.id, emoji, removing ? 'remove' : 'add');
+    // enqueueReaction throws when the outbox write fails. Unguarded, the haptic
+    // fired, the picker closed, and nothing else happened — no reaction, no
+    // alert, and an unhandled rejection. None of the four call sites await this.
+    let q;
+    try {
+      q = await enqueueReaction(chatId, msg.id, emoji, removing ? 'remove' : 'add');
+    } catch (e: any) {
+      Alert.alert('Could not react', e?.message ?? 'Try again');
+      return;
+    }
     // Optimistic: inject a local reaction MESSAGE keyed by the QUEUE tempId, so
     // 'sent' swaps it for the real row (no double count). The derived map updates
     // instantly; if it never sends, the row resolves to the server truth on reload.
@@ -2103,9 +2123,21 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
     const items = pendingItems;
     setPendingItems([]);
     setCurrentIdx(0);
+    // enqueueMedia now THROWS when the outbox write does not land, instead of
+    // reporting success for a row that was never saved. Unguarded, that throw
+    // would surface as an unhandled rejection — the user would see the picker
+    // close and nothing else, which is the same silence the throw exists to
+    // replace. Same shape as the file-pick handler below.
+    //
+    // Per item, not around the loop: one item failing to save must not silently
+    // drop the ones after it.
     for (const pm of items) {
-      await enqueueMediaOptimistic(pm.mediaType, { uri: pm.uri, filename: pm.filename, mime: pm.mime },
-        { caption: pm.caption.trim() || undefined, viewOnce: pm.viewOnce, metaExtra: pm.metaExtra });
+      try {
+        await enqueueMediaOptimistic(pm.mediaType, { uri: pm.uri, filename: pm.filename, mime: pm.mime },
+          { caption: pm.caption.trim() || undefined, viewOnce: pm.viewOnce, metaExtra: pm.metaExtra });
+      } catch (e: any) {
+        Alert.alert('Could not send', e?.message ?? 'Try again');
+      }
     }
   }, [pendingItems, enqueueMediaOptimistic]);
 

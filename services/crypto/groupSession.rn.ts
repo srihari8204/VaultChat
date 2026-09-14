@@ -16,6 +16,7 @@ import * as SecureStore from 'expo-secure-store';
 import { api, getCachedUser } from '../../lib/api';
 import { chunkedKV } from './e2eeStorage';
 import { e2eeEncrypt, e2eeDecrypt, e2eeCachePlaintext, e2eeGetCached, E2EE_UNDECRYPTABLE } from './e2eeSession.rn';
+import { createKeyedLock } from './messageStore';
 import { redactIds, shortId, warnOnce } from '../../lib/diagLog';
 import {
   createSenderKey, distributionMessage, processDistribution, groupEncrypt, groupDecrypt,
@@ -159,8 +160,43 @@ export function isGroupEnvelope(wire: string | null | undefined): boolean {
   return typeof wire === 'string' && wire.startsWith(PREFIX);
 }
 
+// ONE SENDER AT A TIME, PER GROUP. This is a confidentiality control, not a
+// tidiness one.
+//
+// groupEncryptMessage is a read-modify-write over the sending chain:
+//   ensureOwn(chatId)  →  groupEncrypt(own, …)  →  saveOwn(chatId, next)
+//
+// and senderKey.ts's msgKeyMaterial derives BOTH the AES-256 key and the 12-byte
+// nonce from the same message key:
+//
+//   const out = hkdf(sha256, mk, …, INFO_MSG, 44);
+//   return { key: out.slice(0, 32), nonce: out.slice(32, 44) };
+//
+// So two sends that read the same chain state encrypt two different plaintexts
+// under an IDENTICAL (key, nonce) pair. That is the one thing AES-GCM must never
+// do: it hands an observer P1 XOR P2, and the GHASH subkey for that key. The
+// server stores both ciphertexts, so it gets both.
+//
+// The window is wide, not theoretical: ensureDistributed awaits a network GET
+// before the state is read, and saveOwn is several SecureStore round-trips. Any
+// two overlapping sends hit it — a GIF and a text, a poll and a forward, an edit
+// during a queue flush. Callers like chatService.sendMessage and
+// scheduleEncryptedMessage do not go through the outbox's single-flight flag.
+//
+// The 1:1 path already does exactly this (e2eeSession.rn.ts: withLock(peerId, …));
+// the group path was simply missed. Same helper, keyed on chatId.
+//
+// The visible symptom people reported — a group message that every recipient
+// fails to open with "message key unavailable (too old / already used)" — is the
+// same bug: both sends went out at the same iteration.
+const withGroupSendLock = createKeyedLock();
+
 /** Encrypt a message for a group; ensures my sender key is distributed first. */
 export async function groupEncryptMessage(chatId: string, plaintext: string): Promise<string> {
+  return withGroupSendLock(chatId, () => groupEncryptMessageLocked(chatId, plaintext));
+}
+
+async function groupEncryptMessageLocked(chatId: string, plaintext: string): Promise<string> {
   const me = await myId();
   // Unknown identity → we cannot distribute a sender key, so we cannot encrypt.
   // This used to return the plaintext and let the caller ship it; the caller now

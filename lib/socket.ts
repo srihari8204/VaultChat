@@ -22,6 +22,7 @@ import { SERVER_URL } from '../constants/server';
 import { getAccessToken, refreshAccessToken } from './api';
 import { netKeyOf, reconnectReason, shouldKickOnForeground, shouldAbandonPendingConnect, SETTLE_MS } from './socketReconnect';
 import perf from './perf';
+import { isFeatureEnabled, TRANSPORT_RUST } from './featureFlags';
 
 let socket: Socket | null = null;
 let connecting: Promise<Socket> | null = null;
@@ -95,7 +96,51 @@ function applyPersistent(s: Socket) {
   }
 }
 
+/**
+ * Which transport this app session uses. §21 rollout — see
+ * docs/ROLLOUT_TRANSPORT.md.
+ *
+ * `'socketio'` is the live path, the default, and the answer on every error.
+ * `'ccwire'` requires EXPO_PUBLIC_FLAG_TRANSPORT_RUST_PCT to be set in the
+ * build AND this install to fall inside the bucket AND the server not to have
+ * killed the flag. With nothing configured — the state today — isFeatureEnabled
+ * returns false without touching storage or the network, so this is a pure
+ * function call that cannot fail and cannot delay anything.
+ *
+ * The try/catch is belt-and-braces: isFeatureEnabled is already total. It is
+ * here so that stays true no matter what the flag layer grows into.
+ */
+export type TransportName = 'socketio' | 'ccwire';
+export function selectTransport(): TransportName {
+  try {
+    return isFeatureEnabled(TRANSPORT_RUST) ? 'ccwire' : 'socketio';
+  } catch {
+    return 'socketio';
+  }
+}
+
 async function connect(): Promise<Socket> {
+  // ── §21 transport branch ────────────────────────────────────────────────
+  // Evaluated ONCE per connect, synchronously, before anything else happens,
+  // and sticky for the session (featureFlags freezes the answer) so a transport
+  // cannot swap under a live conversation. With no flag configured `chosen` is
+  // 'socketio' and every line below is the code that shipped, in the order it
+  // shipped.
+  const chosen = selectTransport();
+  if (chosen === 'ccwire') {
+    // Deliberately a no-op that FALLS THROUGH. Precondition P1 is not met:
+    // lib/ccwire is a codec only, no Go route terminates CC-Wire, and there is
+    // no client dialer in the tree — so there is nothing to connect to. When
+    // the server half lands, the dial goes here and returns from this block;
+    // the Socket.IO path below must stay reachable in every build (P3), which
+    // is what makes the flag a real rollback lever.
+    perf.mark('transport_ccwire_unavailable', { flag: TRANSPORT_RUST });
+  }
+  // Per-cohort send metrics (§4) are tagged with what actually carries the
+  // sends, which — because the branch above falls through — is Socket.IO for
+  // everyone. A no-op today by construction; that is the point.
+  perf.setSendTransport('socketio');
+
   // Fail fast when there is no session at all. The token itself is NOT captured
   // here any more — the auth callback below reads it fresh per handshake.
   if (!(await getAccessToken())) throw new Error('Not signed in');

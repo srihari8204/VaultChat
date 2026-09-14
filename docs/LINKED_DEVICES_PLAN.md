@@ -420,3 +420,39 @@ before Phase 3 is real.
   transfer happens to carry".
 - **iOS and desktop-native are out of scope here.** Phase 1's device model
   should not assume Android, but nothing in this plan validates an iOS path.
+
+---
+
+## Implementation status (appended 2026-09-14)
+
+**Built: the schema half of Phase 1, and nothing else.**
+
+- `vaultchat-backend/migrations/132_user_devices.sql` — `user_devices` keyed
+  `(user_id, device_id)` on the existing per-install id, plus nullable
+  `device_id` columns and composite FKs on `refresh_tokens` and `devices`.
+  **WRITTEN, NOT APPLIED.** Additive, idempotent, rollback block included.
+  (Migrations live in `vaultchat-backend/migrations/`, not
+  `vaultchat-backend-go/migrations/`, which does not exist.)
+- `vaultchat-backend-go/internal/routes/user_devices_migration_test.go` —
+  structural guard: the migration stays additive, issues no DDL against
+  `identity_keys` / `signed_prekeys` / `one_time_prekeys` /
+  `group_sender_keys`, and no Go file references `user_devices`. The second
+  test is meant to be deleted by whoever adds the JWT device claim.
+
+**Deliberately not built**, because each one edits a live path:
+
+- Device claim in the access JWT (`auth.go`, `authSignAccess`). Until it
+  lands `X-Device-Id` stays self-asserted and `user_devices` must stay
+  unread — a guard keyed on an unauthenticated header is worse than no guard.
+- `dev:<uid>:<deviceId>` socket rooms (`internal/realtime/server.go`), link
+  QR handshake, revoke-in-one-transaction, and renaming
+  `security-overview.linkedDevices`.
+- Everything in §2/Phase 2: `identity_keys` is still `user_id PRIMARY KEY`.
+
+**On the "blocked on identity_keys PK" framing:** Phase 1 is not blocked on
+it and never was — §6 says so. What *is* blocked is per-device E2EE (Phase
+2+), and the block is real: widening the prekey tables also requires
+`POST /user/keybundle`'s purge branch to be narrowed from account to device
+and `encryptForChat` to fan out per device. Getting either wrong is a silent
+account-wide decryption outage, so it is not a change to make alongside
+anything else.

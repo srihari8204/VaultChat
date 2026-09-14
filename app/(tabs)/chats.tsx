@@ -713,7 +713,8 @@ export default function ChatsScreen() {
                   )}
                   <TouchableOpacity style={S.avActionBtn} onPress={() => go(() => isDirect
                     ? router.push({ pathname: '/contact-info' as any, params: { chatId: av.id, peerUid, peerName: avTitle } })
-                    : router.push({ pathname: '/group-info' as any, params: { chatId: av.id } }))}>
+                    // group-info reads `id`, not `chatId` — see app/chat.tsx.
+                    : router.push({ pathname: '/group-info' as any, params: { id: av.id } }))}>
                     <Ionicons name="information-circle" size={22} color={colors.primary} /><Text style={S.avActionTxt}>Info</Text>
                   </TouchableOpacity>
                 </View>

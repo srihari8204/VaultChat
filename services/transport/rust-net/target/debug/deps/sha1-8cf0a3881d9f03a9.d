@@ -1,0 +1,11 @@
+C:\Users\Dell\Desktop\VaultChat0808\VaultChat\services\transport\rust-net\target\debug\deps\sha1-8cf0a3881d9f03a9.d: C:\Users\Dell\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\sha1-0.11.0\src\lib.rs C:\Users\Dell\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\sha1-0.11.0\src\block_api.rs C:\Users\Dell\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\sha1-0.11.0\src\compress.rs C:\Users\Dell\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\sha1-0.11.0\src\consts.rs C:\Users\Dell\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\sha1-0.11.0\src\../README.md C:\Users\Dell\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\sha1-0.11.0\src\compress\soft.rs C:\Users\Dell\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\sha1-0.11.0\src\compress\x86_sha.rs
+
+C:\Users\Dell\Desktop\VaultChat0808\VaultChat\services\transport\rust-net\target\debug\deps\libsha1-8cf0a3881d9f03a9.rmeta: C:\Users\Dell\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\sha1-0.11.0\src\lib.rs C:\Users\Dell\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\sha1-0.11.0\src\block_api.rs C:\Users\Dell\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\sha1-0.11.0\src\compress.rs C:\Users\Dell\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\sha1-0.11.0\src\consts.rs C:\Users\Dell\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\sha1-0.11.0\src\../README.md C:\Users\Dell\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\sha1-0.11.0\src\compress\soft.rs C:\Users\Dell\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\sha1-0.11.0\src\compress\x86_sha.rs
+
+C:\Users\Dell\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\sha1-0.11.0\src\lib.rs:
+C:\Users\Dell\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\sha1-0.11.0\src\block_api.rs:
+C:\Users\Dell\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\sha1-0.11.0\src\compress.rs:
+C:\Users\Dell\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\sha1-0.11.0\src\consts.rs:
+C:\Users\Dell\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\sha1-0.11.0\src\../README.md:
+C:\Users\Dell\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\sha1-0.11.0\src\compress\soft.rs:
+C:\Users\Dell\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\sha1-0.11.0\src\compress\x86_sha.rs:

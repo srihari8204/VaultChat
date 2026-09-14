@@ -117,14 +117,20 @@ router.get('/messages', async (req, res) => {
   try {
     const limit = Math.min(parseInt(req.query.limit || '50', 10) || 50, 200);
     const r = await db.query(
-      `SELECT id, chat_id, sender_id, type, reply_to_id, edited_at, deleted_at, created_at
+      // §15 finding 3: reply_to_id is NOT selected. It used to be, and nothing
+      // rendered it — admin/index.html draws id, type, sender, chat, status and
+      // time. Returning it assembled the reply graph (which message answered
+      // which, across every chat) into an operator-facing live tail for a
+      // reader that could not use it. Mirrored from the Go cutover in
+      // vaultchat-backend-go/internal/routes/admin.go, which is pinned by
+      // internal/routes/admin_metadata_test.go; keep the two the same.
+      `SELECT id, chat_id, sender_id, type, edited_at, deleted_at, created_at
          FROM messages ORDER BY id DESC LIMIT $1`,
       [limit]
     );
     res.json({
       messages: r.rows.map(m => ({
         id: String(m.id), chatId: m.chat_id, senderId: m.sender_id, type: m.type,
-        replyToId: m.reply_to_id ? String(m.reply_to_id) : null,
         // No per-message delivery column exists (delivery tracked per member);
         // derive a coarse status from the metadata we DO have.
         status: m.deleted_at ? 'deleted' : m.edited_at ? 'edited' : 'sent',

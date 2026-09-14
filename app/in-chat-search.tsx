@@ -124,7 +124,7 @@ export default function InChatSearchScreen() {
       <Stack.Screen options={{ headerShown: false }} />
 
       <View style={s.header}>
-        <TouchableOpacity onPress={() => router.back()} style={s.backBtn} hitSlop={10}>
+        <TouchableOpacity accessibilityLabel="Go back" onPress={() => router.back()} style={s.backBtn} hitSlop={10}>
           <Ionicons name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
 
@@ -142,7 +142,7 @@ export default function InChatSearchScreen() {
             returnKeyType="search"
           />
           {query.length > 0 && (
-            <TouchableOpacity onPress={() => setQuery('')} hitSlop={8}>
+            <TouchableOpacity accessibilityLabel="Clear search" onPress={() => setQuery('')} hitSlop={8}>
               <Ionicons name="close-circle" size={18} color={colors.textDim} />
             </TouchableOpacity>
           )}

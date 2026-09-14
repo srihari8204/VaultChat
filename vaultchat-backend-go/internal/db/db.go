@@ -156,7 +156,11 @@ func Connect(ctx context.Context) error {
 	if err := Pool.Ping(pingCtx); err != nil {
 		return err
 	}
-	return connectSystem(ctx)
+	if err := connectSystem(ctx); err != nil {
+		return err
+	}
+	// No-op — not one query — unless DB_RLS_ENFORCE is set. See rls.go.
+	return CheckRLSPreconditions(ctx)
 }
 
 // connectSystem opens the SysPool. Absent DB_SYSTEM_USER it aliases Pool, so

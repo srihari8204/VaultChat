@@ -300,7 +300,7 @@ export default function GroupInfoScreen() {
   return (
     <ScrollView style={S.screen} contentContainerStyle={{ paddingBottom: 64 }}>
       <View style={S.header}>
-        <TouchableOpacity onPress={() => router.back()} hitSlop={10} style={S.backBtn}>
+        <TouchableOpacity accessibilityLabel="Go back" onPress={() => router.back()} hitSlop={10} style={S.backBtn}>
           <Ionicons name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
         <Text style={S.titleBar}>Group info</Text>
@@ -492,7 +492,7 @@ export default function GroupInfoScreen() {
               placeholderTextColor={colors.textDim}
             />
             {memberQuery.length > 0 && (
-              <TouchableOpacity onPress={() => setMemberQuery('')} hitSlop={8}>
+              <TouchableOpacity accessibilityLabel="Clear member search" onPress={() => setMemberQuery('')} hitSlop={8}>
                 <Ionicons name="close-circle" size={16} color={colors.textDim} />
               </TouchableOpacity>
             )}

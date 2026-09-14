@@ -78,6 +78,11 @@ export function useChatViewers(opts: {
     (async () => {
       try {
         const s = await getSocket();
+        // Cleanup may have run while getSocket() was pending — offConnect was
+        // still the no-op stub then, so attaching now would leave the handler on
+        // the app-lifetime socket, re-announcing "is viewing" on every reconnect
+        // for a chat the user already left.
+        if (stopped) return;
         const onConnect = () => emitChatView(chatId, 'VIEWING', activityRef.current, true).catch(() => {});
         s.on('connect', onConnect);
         offConnect = () => { try { s.off('connect', onConnect); } catch {} };

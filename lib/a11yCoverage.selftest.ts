@@ -50,7 +50,15 @@ import path from 'node:path';
 // positives that a sweep then spends real attention on. The hole was found by
 // the first sweep to use the guard, which is the right way to find it and the
 // wrong way to keep it.
-const BUDGET = 125;
+//
+// 125 → 107: the messenger's own navigation chrome. Eighteen buttons on the
+// paths people take to reach a conversation — the back arrows and search
+// clears on new chat, search, in-chat search, message requests, group info,
+// bookmarks, hidden chats, create group, contacts, contact info and group
+// calls, the shared ui/Header back arrow, the in-call chat's close and send,
+// and the voice-message play/pause in the bubble, whose label states which it
+// will do next.
+const BUDGET = 107;
 
 const ROOTS = ['app', 'components'];
 const SKIP_DIR = /node_modules|\.expo|android|ios|dist|build/;

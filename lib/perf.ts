@@ -46,8 +46,21 @@ export interface SendTiming {
   at: number;
 }
 
+// §21 rollout cohort tag — "socketio" | "ccwire", the transport that actually
+// carried the send (docs/ROLLOUT_TRANSPORT.md §4). Set by lib/socket.ts at
+// connect time; defaults to the live path, so with no flag configured every
+// send is tagged "socketio", which is the truth today.
+let _sendTransport = 'socketio';
+export function setSendTransport(name: string): void { _sendTransport = name; }
+
 const sends: SendTiming[] = [];
 export function recordSend(t: SendTiming): void {
+  // Overwrites whatever the caller passed. Call sites pass snapshot().transport
+  // — the engine name ("websocket"/"polling") — which cannot answer "which
+  // cohort was this?", and that is the question a staged rollout is aborted on.
+  // The engine name is still recorded by setTransport/snapshot and the
+  // socket_connect mark, so nothing is lost.
+  t.transport = _sendTransport;
   sends.unshift(t);
   if (sends.length > 50) sends.length = 50;
   if (__DEV__) {
@@ -79,5 +92,5 @@ export function snapshot(): { transport: string; connState: string; reconnects: 
 
 export default {
   mark, recentMarks, recordSend, recentSends,
-  setTransport, setConnState, bumpReconnect, snapshot,
+  setTransport, setSendTransport, setConnState, bumpReconnect, snapshot,
 };

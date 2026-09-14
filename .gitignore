@@ -104,6 +104,10 @@ rust/**/target/
 
 # nav-core Rust build output (same as the crypto/vaultbeam crates)
 services/nav/rust/target/
+
+# transport-core Rust build output. `rust/**/target/` above is root-anchored and
+# does not reach services/, so each crate under services/ needs its own line.
+services/transport/rust/target/
 vaultchat-backend-go/api.exe
 
 # Firebase app config. Ships inside every APK by design (the Android API key is

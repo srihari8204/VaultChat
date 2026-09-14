@@ -155,7 +155,9 @@ func (h *Hub) FanOutToChat(ctx context.Context, chatID, event string, payload an
 		if blockerSet[uid] || ghostedSet[uid] {
 			continue
 		}
-		h.EmitToUid(uid, event, payload)
+		// chatID is carried into the leaf so a CC-Wire recipient can be handed a
+		// Receipt body, which requires it. The Socket.IO emit is identical.
+		h.emitToUidIn(chatID, uid, event, payload)
 	}
 }
 

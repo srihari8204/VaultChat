@@ -129,9 +129,15 @@ func ctFixture(t *testing.T, ctx context.Context) (msgID, bobSession int64) {
 		// view_once with viewed_at still NULL is the exact state F03 destroyed:
 		// media the recipient has not opened yet. Nothing asserts a burn that
 		// could not have happened.
+		// `purpose` is NOT NULL with no default and a CHECK — a later migration
+		// added it, and this fixture predates it, so the seed failed with
+		// 23502 the first time this test was run against a real database.
+		// 'chat' is the only value that fits: the retention sweep keys media
+		// lifetime off this column (internal/jobs/media_scope_test.go) and
+		// chat media is what a view-once attachment in a chat is.
 		fmt.Sprintf(`INSERT INTO attachments
-		 (id, owner_user_id, filename, mime_type, size_bytes, storage_path, view_once)
-		 VALUES ('%s','%s','secret.jpg','image/jpeg',1024,'ct/secret.jpg',TRUE)`, ctAtt, ctBob),
+		 (id, owner_user_id, filename, mime_type, size_bytes, storage_path, view_once, purpose)
+		 VALUES ('%s','%s','secret.jpg','image/jpeg',1024,'ct/secret.jpg',TRUE,'chat')`, ctAtt, ctBob),
 
 		// Two shops, so "another shop's order" is a real row and not an absence.
 		fmt.Sprintf(`INSERT INTO shopbook_shop (id, owner_user_id, name, category, address, phone, approved)
