@@ -289,6 +289,16 @@ kubectl -n vaultchat top pods
 cd /opt/VaultChat && git pull origin hetzner-deploy && ./k8s/build-and-deploy.sh
 ```
 
+**Confirm what is actually running.** The Go image bakes a fingerprint of the
+source it compiled (the tree on a box drifts from its git HEAD, so a commit SHA
+cannot answer this). Compare the checkout against the live API — equal means
+production is running this source:
+
+```bash
+./scripts/fingerprint-go.sh
+curl -s https://api.crazzychat.com/build ; echo
+```
+
 **Roll back** to the previous image:
 
 ```bash
