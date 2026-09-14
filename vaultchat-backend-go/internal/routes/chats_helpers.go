@@ -876,7 +876,13 @@ func chatsMessagePost(w http.ResponseWriter, r *http.Request) {
 		workx.Submit(func() {
 			bctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 			defer cancel()
-			if _, err := db.Pool.Exec(bctx, `SELECT vc_bump_unread($1, $2)`, chatID, user.ID); err != nil {
+			// Three-argument form (135_unread_bump_authoritative.sql): the bump is
+			// told WHICH message it is for, so a member who has already read past it
+			// is skipped. This statement is queued and runs after the message is
+			// already on the socket, so it routinely lands after a recipient with the
+			// chat open has acknowledged the read - and the old unconditional +1 then
+			// left the badge lit on a chat with nothing unread in it, permanently.
+			if _, err := db.Pool.Exec(bctx, `SELECT vc_bump_unread($1, $2, $3)`, chatID, user.ID, msg.ID); err != nil {
 				log.Printf("[unread bump] %v", err)
 			}
 		})
@@ -1383,32 +1389,99 @@ func chatsRead(w http.ResponseWriter, r *http.Request) {
 		httpx.Err(w, 400, "lastReadMessageId required")
 		return
 	}
+
+	// SCOPE THE CURSOR TO THIS CHAT.
+	//
+	// messages.id is one global BIGSERIAL (002_chats.sql), so a cursor from a
+	// DIFFERENT conversation is a perfectly well-formed integer here. Nothing
+	// used to reject it, and the damage is not limited to a wrong badge: the
+	// vanish sweep below hard-deletes every vanish_after_read message at or
+	// below the cursor, for every member. A client bug that posted chat A's
+	// newest id against chat B - which app/split.tsx made reachable by swapping
+	// two panes onto one mounted ChatScreen - would wipe B's vanish history, and
+	// GREATEST() then makes the cursor unrecoverable.
+	//
+	// The bound is the newest id THIS chat has, not whether that exact row is
+	// still retained: bodies are reclaimed after delivery and history is purged,
+	// so a cursor pointing at a legitimately gone message must still be accepted.
+	// Negative ids are Exit-Kit imports (lib/localDb.ts) and are local-only.
+	//
+	// REJECTED, never clamped. Silently lowering a malformed cursor would turn a
+	// client bug into a destructive read against whatever it clamped to.
+	var chatMaxID *int64
+	if err := chatsQRow(ctx, user.ID,
+		`SELECT MAX(id) FROM messages WHERE chat_id = $1`,
+		[]any{chatID}, &chatMaxID); err != nil && !db.NoRows(err) {
+		log.Printf("[read POST] cursor scope check: %v", err)
+		httpx.Err(w, 500, "Failed to mark read")
+		return
+	}
+	if id < 0 || chatMaxID == nil || id > *chatMaxID {
+		httpx.Err(w, 400, "lastReadMessageId is not a message in this chat")
+		return
+	}
 	var lastRead int64
 	var chatType *string
 	var receiptsMutual *bool
+	var prevRead *int64
 	err := chatsQRow(ctx, user.ID,
-		`UPDATE chat_members
-		 SET last_read_message_id = $1,
+		// The recompute must NOT sit behind the cursor guard.
+		//
+		// It used to: the WHERE required last_read_message_id < $1, so the only
+		// moment unread_count was ever corrected was a read that ALSO advanced the
+		// cursor. Any way the counter drifted high was therefore permanent, because
+		// vc_bump_unread (034_unread_count.sql) is a blind +1 that runs in a
+		// workx-queued goroutine AFTER the message is already on the socket. A
+		// recipient with the chat open acks read ~800ms later; if the queued bump
+		// lands after that recompute, the count is 1 with the cursor already at the
+		// newest id, and nothing can bring it back down — the badge said "1 unread"
+		// on a chat with nothing unread in it, forever, however many times it was
+		// opened.
+		//
+		// GREATEST keeps the cursor monotonic (a late or out-of-order POST can
+		// still never rewind it) while letting every read recompute the count, so
+		// a drifted counter self-heals on the next read instead of needing a
+		// newer message to arrive first.
+		`WITH prev AS (
+		   SELECT last_read_message_id AS old_read
+		     FROM chat_members WHERE chat_id = $2 AND user_id = $3
+		 )
+		 UPDATE chat_members
+		 SET last_read_message_id = GREATEST(COALESCE(last_read_message_id, 0), $1),
 		     unread_count = (
 		       SELECT COUNT(*) FROM messages m
-		        WHERE m.chat_id = $2 AND m.id > $1
+		        WHERE m.chat_id = $2
+		          AND m.id > GREATEST(COALESCE(last_read_message_id, 0), $1)
 		          AND m.sender_id <> $3 AND m.deleted_at IS NULL
 		          AND m.type <> 'reaction'
 		     )
 		 WHERE chat_id = $2 AND user_id = $3
-		   AND (last_read_message_id IS NULL OR last_read_message_id < $1)
 		 RETURNING last_read_message_id,
+		   (SELECT old_read FROM prev) AS prev_read,
 		   (SELECT c.type FROM chats c WHERE c.id = $2) AS chat_type,
 		   (SELECT bool_and(u.read_receipts)
 		      FROM chat_members cm2 JOIN users u ON u.id = cm2.user_id
 		     WHERE cm2.chat_id = $2 AND cm2.left_at IS NULL) AS receipts_mutual`,
-		[]any{id, chatID, user.ID}, &lastRead, &chatType, &receiptsMutual)
+		[]any{id, chatID, user.ID}, &lastRead, &prevRead, &chatType, &receiptsMutual)
 	if err != nil && !db.NoRows(err) {
 		log.Printf("[read POST] %v", err)
 		httpx.Err(w, 500, "Failed to mark read")
 		return
 	}
-	if err == nil {
+	// Emit ONLY when this POST actually moved the cursor.
+	//
+	// With the WHERE guard gone the UPDATE matches every time, so the row comes
+	// back for a late receipt (stored cursor already AHEAD) and for a plain
+	// duplicate (stored cursor already EXACTLY $1) as readily as for a real
+	// advance. `lastRead == id` alone does not separate those - it is true for
+	// the duplicate too. Duplicates are routine: two devices on one account keep
+	// independent receipt state and both post the same id, and a receipt whose
+	// response was lost is retried. Re-emitting tells every member their peer
+	// just read something they read long ago, and re-runs the vanish sweep
+	// behind it. prev_read is the pre-UPDATE value captured by the CTE above,
+	// which is the actual test.
+	advanced := prevRead == nil || *prevRead < id
+	if err == nil && lastRead == id && advanced {
 		// Read-receipt reciprocity (server-side, WhatsApp).
 		suppressReceipt := chatType != nil && *chatType == "direct" &&
 			receiptsMutual != nil && !*receiptsMutual

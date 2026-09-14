@@ -49,14 +49,26 @@
 set -euo pipefail
 
 HOST="${VAULTCHAT_PROD_HOST:-root@65.21.229.167}"
-ROOT=/home/srihari/vaultchat
+# The tree the LIVE stack was actually deployed from. Verified against the
+# running container's own compose labels, not assumed:
+#   docker inspect vaultchat-go-api-1 --format '{{index .Config.Labels "com.docker.compose.project.working_dir"}}'
+# /home/srihari/vaultchat is a STALE checkout (git HEAD 2026-08-11) whose
+# docker-compose.yml is 647 lines to this one's 729 and is missing the four
+# GOLIVE_LIVEKIT_* variables that are set on the running api. Deploying from
+# there recreates go-api from that older file, golive.ConfigFromEnv finds no
+# broadcast credentials, and POST /broadcasts starts answering 503.
+ROOT=/home/srihari/vaultchat-clean
 BRANCH="${VAULTCHAT_DEPLOY_BRANCH:-hetzner-deploy}"
 STAMP=$(date +%Y%m%d-%H%M%S)
 BAK="/home/srihari/deploy-predeploy.$STAMP"
 # All three files, in this order. Dropping the third is silent: go-api keeps
 # starting, keeps answering /health, and writes every attachment to a MinIO
 # bucket no client has a URL for.
-DC="docker compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.box.yml"
+# -p is NOT optional. With it unset compose names the project after the
+# directory, and this directory is "vaultchat-clean" while the live stack is
+# "vaultchat" - so every command here would address a second, empty stack and
+# happily "deploy" into it while production kept running the old binary.
+DC="docker compose -p vaultchat -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.box.yml"
 ASSUME_YES=0
 [ "${1:-}" = "--yes" ] && ASSUME_YES=1
 
@@ -72,8 +84,47 @@ say "1/8  local pre-flight"
 
 # rsync is not in Git Bash on Windows. Say so plainly rather than failing with
 # "command not found" halfway through a deploy.
-command -v rsync >/dev/null \
-  || die "rsync not found. Git Bash does not ship it — run this from WSL, or install rsync."
+if command -v rsync >/dev/null; then
+  SYNC_IMPL=rsync
+else
+  SYNC_IMPL=tar
+  printf '  note: rsync not found, using tar over ssh (same --delete semantics)\n'
+fi
+
+# sync_tree_delete <local-dir> <remote-dir>  — remote becomes an exact COPY.
+# That is point 2 of the header: scp adds and never removes, which is how a
+# deleted .go file stayed on the box and kept compiling. rm -rf + extract gives
+# that property more bluntly than --delete does. The trade is no delta transfer,
+# which costs a couple of seconds on a source tree, and step 4's fingerprint
+# gate verifies the result either way.
+sync_tree_delete() {
+  if [ "$SYNC_IMPL" = rsync ]; then
+    rsync -az --delete --exclude '.git' --exclude 'node_modules' "$1/" "$HOST:$2/"
+  else
+    tar czf - --exclude='.git' --exclude='node_modules' \
+      -C "$(dirname "$1")" "$(basename "$1")" \
+      | ssh "$HOST" "rm -rf '$2' && mkdir -p '$(dirname "$2")' && tar xzf - -C '$(dirname "$2")'"
+  fi
+}
+
+# sync_tree_merge <local-dir> <remote-dir>   — add/update, never remove.
+sync_tree_merge() {
+  if [ "$SYNC_IMPL" = rsync ]; then
+    rsync -az "$1/" "$HOST:$2/"
+  else
+    tar czf - -C "$1" . | ssh "$HOST" "mkdir -p '$2' && tar xzf - -C '$2'"
+  fi
+}
+
+# sync_files <remote-dir> <file>...
+sync_files() {
+  _d="$1"; shift
+  if [ "$SYNC_IMPL" = rsync ]; then
+    rsync -az "$@" "$HOST:$_d/"
+  else
+    tar czf - "$@" | ssh "$HOST" "tar xzf - -C '$_d'"
+  fi
+}
 
 git rev-parse --is-inside-work-tree >/dev/null 2>&1 || die "not a git checkout"
 [ -z "$(git status --porcelain)" ] \
@@ -149,17 +200,20 @@ say "4/8  rsync source (--delete: the box becomes a copy, not a pile)"
 #   _test.go                 excluded from the fingerprint, so syncing them
 #                            would be noise — but they are cheap, so they go;
 #                            what must NOT go is anything the box owns.
-rsync -az --delete \
-  --exclude '.git' --exclude 'node_modules' \
-  vaultchat-backend-go/ "$HOST:$ROOT/vaultchat-backend-go/" || rollback
+sync_tree_delete vaultchat-backend-go "$ROOT/vaultchat-backend-go" || rollback
 ok "vaultchat-backend-go synced"
 
 # Migrations and the compose/proxy config travel too — the API queries columns a
 # migration creates, and a compose file that disagrees with the source is how
 # the 14000-webhook port went missing.
-rsync -az vaultchat-backend/migrations/ "$HOST:$ROOT/vaultchat-backend/migrations/" || rollback
-rsync -az docker-compose.yml docker-compose.prod.yml "$HOST:$ROOT/" || rollback
-rsync -az caddy/ "$HOST:$ROOT/caddy/" || rollback
+sync_tree_merge vaultchat-backend/migrations "$ROOT/vaultchat-backend/migrations" || rollback
+# monitoring/ travels WITH the compose file, never after it. compose mounts
+# ./monitoring/alerts.yml into prometheus and prometheus.yml names it under
+# rule_files; a missing rule file is a fatal config error, and a missing bind
+# source is silently created as a DIRECTORY, which reads as an empty rule set
+# no matter how long it sits there. Ship the mount and its source together.
+sync_files "$ROOT" docker-compose.yml docker-compose.prod.yml monitoring/prometheus.yml monitoring/alerts.yml || rollback
+sync_tree_merge caddy "$ROOT/caddy" || rollback
 ok "migrations, compose and Caddyfile synced (docker-compose.box.yml untouched)"
 
 # ── THE GATE ───────────────────────────────────────────────────────────────

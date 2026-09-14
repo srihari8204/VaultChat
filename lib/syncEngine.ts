@@ -38,7 +38,7 @@ const MAX_MUT_PAGES = 20;  // 10k mutations/run, logged when tripped
 
 interface Delta { messages: (Message & { chatId: string })[]; nextSince: number; more: boolean; mutations?: (Message & { chatId: string })[]; serverTime?: string }
 
-let running = false;
+let inflight: Promise<number> | null = null;
 
 // Group caught-up rows by chat, decrypt once, cache. Reused for new messages and
 // for mutations (edited/deleted rows carry the same shape).
@@ -117,9 +117,24 @@ function normDelta(d: Delta | null | undefined): Delta | null | undefined {
 }
 
 /** Drain the global delta from (cursor − lookback) to head. Returns #applied. */
-export async function catchUp(): Promise<number> {
-  if (running) return 0;
-  running = true;
+// COALESCE on the in-flight run; do NOT return early.
+//
+// Callers await this to mean "the delta has landed". The old guard returned 0
+// immediately while a run was in flight, which is a different promise: on an
+// AppState resume, initSync's listener starts a run and synchronously takes
+// the flag, so app/chat.tsx's top-up then awaited a no-op and re-read the
+// cache BEFORE the round trip had written anything. The chat was already
+// focused, so no later focus event existed to retry, and the message the user
+// had just been notified about still did not appear.
+//
+// Sharing the promise keeps the single-flight property that guard was for
+// while making the await mean what every caller reads it as.
+export function catchUp(): Promise<number> {
+  if (!inflight) inflight = runCatchUp().finally(() => { inflight = null; });
+  return inflight;
+}
+
+async function runCatchUp(): Promise<number> {
   let applied = 0;
   try {
     let since = Math.max(0, (await getGlobalSyncCursor()) - LOOKBACK);
@@ -186,9 +201,19 @@ export async function catchUp(): Promise<number> {
       if (guard === MAX_PAGES - 1) console.warn(`[sync] catch-up hit ${MAX_PAGES}-page cap after ${applied} msgs — resuming next reconnect`);
     }
   } catch { /* offline / transient — next reconnect retries */ }
-  finally { running = false; }
   return applied;
 }
+
+// Minimum gap between AppState-triggered runs.
+//
+// On Android 'active' fires on return from the image picker, the document
+// picker, the camera, the share sheet, an OS permission dialog and the
+// biometric prompt - all of which the chat screen itself invokes. Attaching
+// three photos in a row would otherwise be three full delta round trips. The
+// ONLINE trigger is deliberately NOT throttled: a reconnect is exactly when a
+// catch-up is worth paying for.
+const RESUME_MIN_GAP_MS = 5000;
+let lastResumeSync = 0;
 
 let armed = false;
 /** Wire catch-up to run on every ONLINE transition. Call once at app boot. */
@@ -196,6 +221,30 @@ export function initSync(): void {
   if (armed) return;
   armed = true;
   onConnectionState((s) => { if (s === 'ONLINE') catchUp().catch(() => {}); });
+  // AppState is a SECOND trigger, not a duplicate of the one above.
+  //
+  // ONLINE only fires on a TRANSITION. A device that was backgrounded with a
+  // live socket, or that got its message by FCM push while the socket was
+  // parked, can come back to the foreground without the connection state ever
+  // changing — so nothing pulled the delta, and messages received while away
+  // were never fetched. app/chat.tsx only queries the server when its cache is
+  // EMPTY, so for any chat with history those messages appeared nowhere: the
+  // push notification had already fired, and opening the chat showed the old
+  // cache. Their ids also stayed above the read cursor, which is why the
+  // unread badge could not be cleared by reading.
+  //
+  // catchUp() COALESCES on the in-flight run rather than dropping the call, so
+  // overlapping with the ONLINE path joins that run instead of starting a
+  // second one - and an awaiting caller still waits for real work.
+  try {
+    const { AppState } = require('react-native');
+    AppState.addEventListener('change', (s: string) => {
+      if (s !== 'active') return;
+      if (Date.now() - lastResumeSync < RESUME_MIN_GAP_MS) return;
+      lastResumeSync = Date.now();
+      catchUp().catch(() => {});
+    });
+  } catch { /* non-RN (selftest under node) — the ONLINE hook is enough */ }
 }
 
 export default {};

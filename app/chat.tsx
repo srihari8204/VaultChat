@@ -42,6 +42,7 @@ import { saveDraft, getDraft, clearDraft } from '../lib/drafts';
 import { playSent, playReceived } from '../lib/sounds';
 import { NOTIF_CHANNELS } from '../lib/push';
 import {
+  AppState,
   ActivityIndicator,
   Alert,
   Animated,
@@ -177,6 +178,14 @@ const TYPING_IDLE_MS = 2500;
 const REVOKE_WINDOW_MS = 60 * 60 * 60 * 1000;
 
 const PAGE_SIZE = 50;
+
+// Module scope on purpose: the top-up below runs on every chat focus and every
+// foreground, and catchUp() is a network round trip even when it returns
+// nothing. Opening six chats in a row should not be six delta requests. The
+// cache re-read it guards is local and always runs, so a throttled tick still
+// picks up whatever a previous catch-up wrote.
+const TOPUP_MIN_GAP_MS = 5000;
+let lastTopUpAt = 0;
 /**
  * Most messages kept in JS state at once — eight pages.
  *
@@ -231,6 +240,12 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
   const { colors } = useTheme();
   const S = useS();
   const chatId = ((params.id ?? params.chatId) ?? '') as string;
+  // Read by async callbacks to answer "is this still the chat I started for?".
+  // Assigned during render, not in an effect: an effect lands too late for a
+  // promise that is already in flight when chatId changes under a live
+  // instance (app/split.tsx swaps its two panes onto the same ChatScreen).
+  const chatIdRef = useRef(chatId);
+  chatIdRef.current = chatId;
 
   // Keyboard avoidance, driven manually. edge-to-edge breaks adjustResize, and
   // KeyboardAvoidingView's "padding" left residual space after the keyboard
@@ -491,6 +506,58 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
     if (chatId && chat) getShareViewing(chatId, chat.type !== 'direct').then(setCvShareOn).catch(() => {});
     return () => setCvFocused(false);
   }, [chatId, chat?.type]));
+  // TOP-UP: messages that arrived while this screen was not mounted.
+  //
+  // The initial load above deliberately asks the server for messages ONLY when
+  // this device holds nothing for the chat. For every chat WITH history the
+  // painted cache is the whole story, and the only live update path is the
+  // socket - which delivers to an OPEN screen and nothing else. So a message
+  // that landed while the app was backgrounded (its FCM push already shown)
+  // was written to the local DB by lib/syncEngine's catch-up and then never
+  // read back: opening the chat from the notification showed the old page and
+  // the message appeared nowhere. Its id also stayed above the read cursor, so
+  // the unread badge could not be cleared by reading either.
+  //
+  // catchUp() self-guards re-entry and upserts by id, so running it here is
+  // idempotent; re-reading the cache afterwards is what this screen was
+  // missing. AppState covers the case where the chat is already focused when
+  // the app returns to the foreground, which fires no focus event.
+  useFocusEffect(useCallback(() => {
+    let cancel = false;
+    const topUp = async () => {
+      // chatId can change on a MOUNTED instance: app/split.tsx swaps its two
+      // panes and React reuses the same ChatScreen. Everything below is async,
+      // so without this the rows fetched for one chat get merged into the
+      // other chat's rendered list.
+      const cid = chatId;
+      if (Date.now() - lastTopUpAt > TOPUP_MIN_GAP_MS) {
+        lastTopUpAt = Date.now();
+        try { await (await import('../lib/syncEngine')).catchUp(); } catch {}
+      }
+      let rows: any[] | null = null;
+      try { rows = await getCachedMessages(cid, PAGE_SIZE); } catch { return; }
+      if (cancel || chatIdRef.current !== cid || !rows || !rows.length) return;
+      setMessages(prev => {
+        const have = new Set(prev.map(x => x._tempId ?? String(x.id)));
+        const add = rows!.filter(r => !have.has(String(r.id)));
+        if (!add.length) return prev;
+        // Optimistic bubbles carry id 0 and must stay pinned to the top of the
+        // inverted list; everything else is ordered newest-id-first.
+        // Split on the OUTBOX MARKER, not on the sign of the id. Exit-Kit
+        // imported history carries NEGATIVE ids (importMessages in
+        // lib/localDb.ts is their only writer), so an `id > 0` test buckets the
+        // whole imported archive as "pending" and pins it to the top of the
+        // inverted list, rendering years-old history as the newest messages.
+        // `_tempId` is the same key keyExtractor uses.
+        const pending = prev.filter(x => x._tempId);
+        const real = prev.filter(x => !x._tempId);
+        return [...pending, ...[...real, ...add].sort((a, b) => Number(b.id) - Number(a.id))];
+      });
+    };
+    topUp();
+    const sub = AppState.addEventListener('change', s => { if (s === 'active') topUp(); });
+    return () => { cancel = true; sub.remove(); };
+  }, [chatId]));
   const myViewerActivity: ViewerActivity = sending ? 'uploading' : (input.trim().length > 0 ? 'typing' : 'reading');
   const chatViewers = useChatViewers({ chatId, meId, enabled: cvShareOn, focused: cvFocused, activity: myViewerActivity });
 
@@ -554,6 +621,26 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
     () => chat?.members.filter(m => m.userId !== meId) ?? [],
     [chat, meId],
   );
+
+  // PER-CHAT RESET. Declared immediately before the load effect below so React
+  // runs it first: everything here must be cleared before anything repaints.
+  //
+  // lastReadSent holds the newest id already reported via POST /read, and
+  // messages.id is a single global BIGSERIAL (002_chats.sql). Without the
+  // reset, opening a busy chat (newest 9000) then a quieter one (newest 8500)
+  // hit `8500 <= 9000` and POST /read never fired for the second chat, so its
+  // unread badge stayed lit for the whole session however often it was opened.
+  //
+  // `messages` is cleared for the SAME reason the ref is. chatId can change on
+  // a mounted instance (app/split.tsx), and the load below is async, so the
+  // read effect would otherwise compute a latest id from the PREVIOUS chat's
+  // rows and report it against this one. That is not cosmetic: the server
+  // takes lastReadMessageId as a cursor and the vanish sweep hard-deletes
+  // vanish_after_read messages at or below it, for every member.
+  useEffect(() => {
+    lastReadSent.current = 0;
+    setMessages([]);
+  }, [chatId]);
 
   // Clear this chat's native message notification + unread counter (F2 —
   // the content-free doorbell posts per-chat notifications tagged by chatId).
