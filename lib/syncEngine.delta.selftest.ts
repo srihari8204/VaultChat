@@ -72,6 +72,11 @@ const REWRITES: [RegExp, string][] = [
   [/^import \{ metric \} from '\.\/syncMetrics';$/m, `import { metric } from './stubs.js';`],
   [/^import \{ hydrateMessages, looksEncrypted, type Message \} from '\.\/chatService';$/m,
    `import { hydrateMessages, looksEncrypted } from './stubs.js';`],
+  // msgIds stays REAL. It has no imports, and coercing the delta page's wire
+  // ids is the step that decides whether cacheMessages keeps the row at all —
+  // stubbing it would hide the bug this suite exists to catch.
+  [/^import \{ normalizeMsgIds \} from '\.\/msgIds';$/m,
+   `import { normalizeMsgIds } from './msgIds.ts';`],
   [/^import \{ markDeliveredDurable \} from '\.\/receipts';$/m, `import { markDeliveredDurable } from './stubs.js';`],
   [/^import \{ notifyBatch \} from '\.\/messageNotifications';$/m, `import { notifyBatch } from './stubs.js';`],
   [/^import \{ onConnectionState \} from '\.\/socket';$/m, `import { onConnectionState } from './stubs.js';`],
@@ -83,7 +88,10 @@ for (const [re, to] of REWRITES) {
   src = src.replace(re, to);
 }
 src = src.replace(/\bMessage\b(?=\s*[&>\]])/g, 'any').replace(/: \(Message & \{ chatId: string \}\)\[\]/g, ': any[]');
-const stray = [...src.matchAll(/^import .*from '([^']+)';$/gm)].map(m => m[1]).filter(p => p !== './stubs.js');
+writeFileSync(join(WORK, 'msgIds.ts'), readFileSync(join(HERE, 'msgIds.ts'), 'utf8'));
+
+const stray = [...src.matchAll(/^import .*from '([^']+)';$/gm)].map(m => m[1])
+  .filter(p => p !== './stubs.js' && p !== './msgIds.ts');
 check('every syncEngine import is accounted for', stray.length === 0, `unstubbed: ${stray.join(', ')}`);
 writeFileSync(join(WORK, 'sync.ts'), src);
 

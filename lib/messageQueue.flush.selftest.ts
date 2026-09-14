@@ -98,6 +98,11 @@ const IMPORT_REWRITES: [RegExp, string][] = [
   // meta split rather than a stand-in that always agrees with it.
   [/^import \{ splitMeta, wrapEnvelope \} from '\.\/msgEnvelope';$/m,
    `import { splitMeta, wrapEnvelope } from './msgEnvelope.ts';`],
+  // msgIds is NOT stubbed either, for the same reason and a sharper one: the
+  // POST ack it normalizes is the path that carries replyToId, so stubbing it
+  // would stub out the exact behaviour worth asserting here.
+  [/^import \{ normalizeMsgIds \} from '\.\/msgIds';$/m,
+   `import { normalizeMsgIds } from './msgIds.ts';`],
   [/^import \{ type MsgState \} from '\.\/messageState';$/m, ``],
   [/^import perf from '\.\/perf';$/m, `import { perf } from './stubs.js';`],
 ];
@@ -119,9 +124,13 @@ writeFileSync(join(WORK, 'msgEnvelope.ts'),
   readFileSync(join(HERE, 'msgEnvelope.ts'), 'utf8')
     .replace(/^import type .*$/m, ''));
 
+// Likewise the real msgIds — it has no imports at all, which is why it is its
+// own module rather than living in chatService.
+writeFileSync(join(WORK, 'msgIds.ts'), readFileSync(join(HERE, 'msgIds.ts'), 'utf8'));
+
 const stray = [...src.matchAll(/^import .*from '([^']+)';$/gm)]
   .map(m => m[1])
-  .filter(p => p !== './stubs.js' && p !== './msgEnvelope.ts');
+  .filter(p => p !== './stubs.js' && p !== './msgEnvelope.ts' && p !== './msgIds.ts');
 check('every messageQueue import is accounted for', stray.length === 0, `unstubbed: ${stray.join(', ')}`);
 
 writeFileSync(join(WORK, 'mq.ts'), src);

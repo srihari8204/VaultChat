@@ -167,6 +167,11 @@ function buildClient(userId: string): string {
   }
   // Dynamic imports: the e2ee binding is REAL code composed over in-memory
   // stores; everything else is a stub.
+  // msgIds is real, per-client: it has no imports, and it is what decides
+  // whether a wire row survives into the cache at all.
+  writeFileSync(join(dir, 'msgIds.ts'), readFileSync(join(ROOT, 'lib', 'msgIds.ts'), 'utf8'));
+  src = src.replace(/^import \{ normalizeMsgIds \} from '\.\/msgIds';$/m,
+    `import { normalizeMsgIds } from './msgIds.ts';`);
   src = src
     .replace(/await import\('\.\.\/services\/crypto\/e2eeSession\.rn'\)/g, `await import('./e2ee.ts')`)
     .replace(/await import\('\.\.\/services\/crypto\/groupSession\.rn'\)/g, `await import('./stubs.ts')`)
@@ -174,7 +179,7 @@ function buildClient(userId: string): string {
 
   const stray = [...src.matchAll(/^import (?!type )[^\n]*from '([^']+)';$/gm)]
     .map((m) => m[1])
-    .filter((p) => !p.startsWith('./stubs') && !p.startsWith('file:') && p !== 'node:buffer');
+    .filter((p) => !p.startsWith('./stubs') && !p.startsWith('file:') && p !== 'node:buffer' && p !== './msgIds.ts');
   check(`every ${userId} chatService import is accounted for`, stray.length === 0, `unstubbed: ${stray.join(', ')}`);
   const strayDyn = [...src.matchAll(/await import\('([^']+)'\)/g)].map((m) => m[1])
     .filter((p) => p !== './stubs.ts' && p !== './e2ee.ts');

@@ -9,7 +9,8 @@
 import { api } from './api';
 import { getGlobalSyncCursor, noteGlobalSyncCursor, cacheMessages, getCachedMessagesByIds, getMeta, setMeta } from './localDb';
 import { metric } from './syncMetrics';
-import { hydrateMessages, looksEncrypted, normalizeMsgIds, type Message } from './chatService';
+import { hydrateMessages, looksEncrypted, type Message } from './chatService';
+import { normalizeMsgIds } from './msgIds';
 import { markDeliveredDurable } from './receipts';
 import { notifyBatch } from './messageNotifications';
 import { onConnectionState } from './socket';
