@@ -27,6 +27,45 @@ export interface PersistedSession extends SessionSnapshot {
   updatedAt?: number;
 }
 
+/**
+ * Is the source file still the one this transfer was keyed against?
+ *
+ * WHY THIS EXISTS — AES-GCM NONCE REUSE.
+ *
+ * A resumed send re-seals blocks at the SAME (transfer key, chunkId), because
+ * the chunk id IS the nonce input and both survive the restart. That is correct
+ * and necessary — it is what makes resume cheap — but it holds only while the
+ * plaintext under a given chunkId is the same plaintext. A block whose PUT
+ * succeeded but whose relayMarkUploaded never landed is re-sealed on the next
+ * launch; if `srcPath` now holds different bytes (the DocumentPicker cache is
+ * app-managed and evictable, and a user can re-pick an edited file at the same
+ * path), the two ciphertexts share a keystream. XOR recovers it, and with it the
+ * GHASH authentication key — forgery, not just disclosure.
+ *
+ * So: record size+mtime at transfer start, verify them here on resume, refuse
+ * the resume on any disagreement. The invariant: a (transferId, chunkId) is
+ * sealed at most once over distinct plaintext.
+ *
+ * FAIL-CLOSED on anything unreadable — an un-stattable source is exactly the
+ * case where we cannot prove the bytes are the same. The single exception is a
+ * record written before this check existed, which carries NEITHER field; those
+ * keep the old behaviour rather than being mass-failed on one upgrade.
+ *
+ * ponytail: mtime granularity is the ceiling — an edit that preserves the byte
+ * count AND the timestamp slips through. The whole-file sha256 the sender
+ * already computes would close it; re-hashing up to 12 GB on every resume is
+ * the price, so it is not paid by default.
+ */
+export function sourceMatches(
+  rec: Pick<PersistedSession, 'srcSize' | 'srcMtime'>,
+  cur: { size?: unknown; mtime?: unknown },
+): boolean {
+  if (rec.srcSize === undefined && rec.srcMtime === undefined) return true;  // pre-binding record
+  if (rec.srcSize !== undefined && cur.size !== rec.srcSize) return false;
+  if (rec.srcMtime !== undefined && cur.mtime !== rec.srcMtime) return false;
+  return true;
+}
+
 export interface SessionStore {
   save(rec: PersistedSession): Promise<void>;
   loadAll(): Promise<PersistedSession[]>;

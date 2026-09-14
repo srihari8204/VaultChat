@@ -39,6 +39,7 @@ import { isNativeStreamAvailable } from './vaultBeamStreamNative';
 import { isOfferExpired } from './vaultBeam/offerExpiry';
 import { loadRecvBitmap } from './vaultBeamRecvBitmap';
 import { relayAbort, MAX_BYTES, CHUNK_BYTES } from './vaultbeamRelay';
+import { sourceMatches } from './vaultBeam/persistence';
 
 // vbm2 (2026-07): manifest gained the segmented-geometry `plan`. A version bump
 // (not an additive field) on purpose — an old client that ignored `plan` would
@@ -296,8 +297,23 @@ async function getLinkType(): Promise<string | null> {
 // the upload, which skips blocks already on R2 (server bitmask). The recipient
 // already resumes symmetrically. Persisted only for the sender (it alone holds
 // the source file); dropped the moment the send reaches a terminal state.
+//
+// The persisted record BINDS the source bytes (srcSize/srcMtime), because the
+// resume re-seals blocks at the same (key, chunkId) — see sourceMatches() in
+// lib/vaultBeam/persistence.ts for why a changed source there is AES-GCM nonce
+// reuse and not merely a wrong file.
 const SENDS_KEY = 'vc_vaultbeam_sends';
-interface PersistedSend { transferId: string; srcPath: string; name: string; size: number; fileId: string; keyB64: string; plan?: string; linkType?: string | null }
+interface PersistedSend { transferId: string; srcPath: string; name: string; size: number; fileId: string; keyB64: string; plan?: string; linkType?: string | null; srcSize?: number; srcMtime?: number }
+
+/** size+mtime of a local file, or {} if it cannot be read. */
+async function statSrc(path: string): Promise<{ size?: number; mtime?: number }> {
+  const fi: any = await FileSystem.getInfoAsync(path).catch(() => null);
+  if (!fi?.exists) return {};
+  return {
+    size: typeof fi.size === 'number' ? fi.size : undefined,
+    mtime: typeof fi.modificationTime === 'number' ? fi.modificationTime : undefined,
+  };
+}
 async function readSends(): Promise<PersistedSend[]> {
   try { const raw = await AsyncStorage.getItem(SENDS_KEY); return raw ? JSON.parse(raw) : []; } catch { return []; }
 }
@@ -319,8 +335,24 @@ export async function resumePendingSends(): Promise<void> {
   if (!isNativeStreamAvailable()) return;
   for (const r of await readSends()) {
     if (controllers.has(r.transferId)) continue; // already running (double-mount guard)
-    const fi: any = await FileSystem.getInfoAsync(r.srcPath).catch(() => null);
-    if (!fi?.exists) { await unpersistSend(r.transferId); continue; }
+    const cur = await statSrc(r.srcPath);
+    if (cur.size === undefined && cur.mtime === undefined) { await unpersistSend(r.transferId); continue; } // evicted
+    // SOURCE BINDING. Resuming re-seals blocks at the SAME (transfer key,
+    // chunkId); if the bytes behind srcPath changed, that is one nonce over two
+    // plaintexts, which hands the keystream AND the GCM auth key to anyone
+    // holding both ciphertexts. There is no safe partial resume here — the
+    // transfer is abandoned (and the relay's half-uploaded ciphertext purged),
+    // so a re-send gets a fresh transferId and a fresh key.
+    if (!sourceMatches(r, cur)) {
+      setState(r.transferId, {
+        transferId: r.transferId, role: 'sender', status: 'failed',
+        error: 'The file changed since this send started — send it again.',
+        done: 0, total: 0, bytes: 0, totalBytes: r.size, name: r.name,
+      });
+      await unpersistSend(r.transferId);
+      try { await relayAbort(r.transferId); } catch {}
+      continue;
+    }
     setState(r.transferId, { transferId: r.transferId, role: 'sender', status: 'uploading', tier: 'relay', done: 0, total: 0, bytes: 0, totalBytes: r.size, name: r.name });
     ensureListeners();
     const ac = new AbortController();
@@ -446,8 +478,12 @@ export async function startSend(opts: {
   const manifest: VBManifest = { v: VB_MANIFEST_VERSION, keyB64, fileId, name: opts.name, mime: opts.mime, size: opts.size, token, sha256: srcDigest };
   const meta = { vaultbeam: true, transferId, size: opts.size };
   const msg = await sendMessage(opts.chatId, JSON.stringify(manifest), 'vaultbeam', { meta });
-  // Persist so a killed relay upload resumes on next launch (manifest already sent).
-  await persistSend({ transferId, srcPath: opts.srcPath, name: opts.name, size: opts.size, fileId, keyB64, linkType });
+  // Persist so a killed relay upload resumes on next launch (manifest already
+  // sent) — WITH the source's size+mtime, which is what a later resume checks
+  // before it re-seals anything at an already-used (key, chunkId).
+  const srcStat = await statSrc(opts.srcPath);
+  await persistSend({ transferId, srcPath: opts.srcPath, name: opts.name, size: opts.size, fileId, keyB64, linkType,
+    srcSize: srcStat.size, srcMtime: srcStat.mtime });
 
   ensureListeners();
   const ac = new AbortController();
