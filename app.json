@@ -1,11 +1,11 @@
 {
   "expo": {
-    "name": "VaultChat",
+    "name": "crazzychat",
     "slug": "VaultChat",
     "version": "1.2.15",
     "orientation": "default",
     "icon": "./assets/images/icon.png",
-    "scheme": "vaultchat",
+    "scheme": ["vaultchat", "crazzychat"],
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "jsEngine": "hermes",
@@ -16,18 +16,18 @@
     "ios": {
       "supportsTablet": true,
       "infoPlist": {
-        "NSCameraUsageDescription": "VaultChat needs camera for video calls and face scan",
-        "NSMicrophoneUsageDescription": "VaultChat needs microphone for voice and video calls",
-        "NSSpeechRecognitionUsageDescription": "VaultChat uses speech recognition to transcribe your voice into text",
-        "NSFaceIDUsageDescription": "VaultChat uses Face ID to protect your messages",
-        "NSContactsUsageDescription": "VaultChat needs contacts to find people you know",
-        "NSLocationWhenInUseUsageDescription": "VaultChat needs location to share your position with contacts",
-        "NSPhotoLibraryUsageDescription": "VaultChat needs photo access to send and save media",
-        "NSPhotoLibraryAddUsageDescription": "VaultChat saves photos and videos you download or create to your photo library.",
-        "NSLocalNetworkUsageDescription": "VaultChat sends large files directly to a nearby device over your local network, so the transfer is fast and the file never leaves your network.",
-        "NSLocationAlwaysAndWhenInUseUsageDescription": "VaultChat shares your location with your Family Space circle so they can see you are safe. This continues in the background only while location sharing is switched on.",
-        "NSLocationAlwaysUsageDescription": "VaultChat shares your location with your Family Space circle while location sharing is switched on.",
-        "NSMotionUsageDescription": "VaultChat uses motion to tell whether you are moving, so Family Space can slow location updates when you are still and save battery.",
+        "NSCameraUsageDescription": "crazzychat needs camera for video calls and face scan",
+        "NSMicrophoneUsageDescription": "crazzychat needs microphone for voice and video calls",
+        "NSSpeechRecognitionUsageDescription": "crazzychat uses speech recognition to transcribe your voice into text",
+        "NSFaceIDUsageDescription": "crazzychat uses Face ID to protect your messages",
+        "NSContactsUsageDescription": "crazzychat needs contacts to find people you know",
+        "NSLocationWhenInUseUsageDescription": "crazzychat needs location to share your position with contacts",
+        "NSPhotoLibraryUsageDescription": "crazzychat needs photo access to send and save media",
+        "NSPhotoLibraryAddUsageDescription": "crazzychat saves photos and videos you download or create to your photo library.",
+        "NSLocalNetworkUsageDescription": "crazzychat sends large files directly to a nearby device over your local network, so the transfer is fast and the file never leaves your network.",
+        "NSLocationAlwaysAndWhenInUseUsageDescription": "crazzychat shares your location with your Family Space circle so they can see you are safe. This continues in the background only while location sharing is switched on.",
+        "NSLocationAlwaysUsageDescription": "crazzychat shares your location with your Family Space circle while location sharing is switched on.",
+        "NSMotionUsageDescription": "crazzychat uses motion to tell whether you are moving, so Family Space can slow location updates when you are still and save battery.",
         "UIBackgroundModes": [
           "location"
         ]
@@ -38,7 +38,7 @@
       "package": "com.vaultchat.app",
       "googleServicesFile": "./google-services.json",
       "adaptiveIcon": {
-        "backgroundColor": "#FFFFFF",
+        "backgroundColor": "#010628",
         "foregroundImage": "./assets/images/android-icon-foreground.png",
         "backgroundImage": "./assets/images/android-icon-background.png",
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
@@ -100,10 +100,10 @@
           "image": "./assets/images/splash-icon.png",
           "imageWidth": 200,
           "resizeMode": "contain",
-          "backgroundColor": "#010527",
+          "backgroundColor": "#010628",
           "dark": {
             "image": "./assets/images/splash-icon.png",
-            "backgroundColor": "#010527"
+            "backgroundColor": "#010628"
           }
         }
       ],
@@ -123,8 +123,8 @@
       [
         "expo-location",
         {
-          "locationAlwaysAndWhenInUsePermission": "VaultChat shares your location with your Family Space circle so they can see you are safe.",
-          "locationWhenInUsePermission": "VaultChat shares your location with your Family Space circle so they can see you are safe.",
+          "locationAlwaysAndWhenInUsePermission": "crazzychat shares your location with your Family Space circle so they can see you are safe.",
+          "locationWhenInUsePermission": "crazzychat shares your location with your Family Space circle so they can see you are safe.",
           "isAndroidBackgroundLocationEnabled": true,
           "isAndroidForegroundServiceEnabled": true
         }
@@ -158,7 +158,7 @@
       [
         "react-native-vision-camera",
         {
-          "cameraPermissionText": "VaultChat needs camera for Face ID",
+          "cameraPermissionText": "crazzychat needs camera for Face ID",
           "enableMicrophonePermission": false
         }
       ],
@@ -195,8 +195,8 @@
       [
         "expo-media-library",
         {
-          "photosPermission": "Allow VaultChat to save photos and videos you receive to your gallery.",
-          "savePhotosPermission": "Allow VaultChat to save photos and videos to your gallery.",
+          "photosPermission": "Allow crazzychat to save photos and videos you receive to your gallery.",
+          "savePhotosPermission": "Allow crazzychat to save photos and videos to your gallery.",
           "isAccessMediaLocationEnabled": false
         }
       ]

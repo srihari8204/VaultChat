@@ -1,5 +1,5 @@
 /**
- * VaultChat — Document Scanner
+ * crazzychat — Document Scanner
  * Step 1: Scan (camera / gallery)
  * Step 2: Enhance (filters + adjustments)
  * Step 3: Export (8 formats + 6 share targets)
@@ -39,7 +39,7 @@ const FILTERS = [
 ];
 
 const SHARE_APPS = [
-  { name: "VaultChat", icon: "??", color: "#4A9FFF" },
+  { name: "crazzychat", icon: "??", color: "#4A9FFF" },
   { name: "WhatsApp",  icon: "??", color: "#25D366" },
   { name: "Email",     icon: "??", color: "#4A9FFF" },
   { name: "Drive",     icon: "??", color: "#FBBC04" },

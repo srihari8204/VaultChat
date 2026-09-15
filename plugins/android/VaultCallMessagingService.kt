@@ -127,7 +127,7 @@ class VaultCallMessagingService : FirebaseMessagingService() {
         val prefs = getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         val title = try {
             org.json.JSONObject(prefs.getString(KEY_CHAT_DIR, "{}") ?: "{}").optString(chatId, "")
-        } catch (_: Throwable) { "" }.ifBlank { "VaultChat" }
+        } catch (_: Throwable) { "" }.ifBlank { "crazzychat" }
 
         // Per-chat unread counter → "New message" / "N new messages". Cleared by
         // CallModule.clearMessageNotifs(chatId) when JS opens the chat.
@@ -234,7 +234,7 @@ class VaultCallMessagingService : FirebaseMessagingService() {
      * NOT suppressed in the foreground, unlike showMessage: the games server
      * already refuses to notify a player who is currently connected to it, so a
      * push that reaches us is by definition for someone who is not looking at
-     * that table — even if VaultChat itself happens to be open.
+     * that table — even if crazzychat itself happens to be open.
      */
     private fun showGameTurn(data: Map<String, String>) {
         val game = data["game"].orEmpty()
@@ -314,7 +314,7 @@ class VaultCallMessagingService : FirebaseMessagingService() {
         val prefs = getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         val pending = prefs.getString("ring_callId", null)
         if (pending != null && (callId == null || pending == callId)) {
-            val name = prefs.getString("ring_name", "VaultChat user") ?: "VaultChat user"
+            val name = prefs.getString("ring_name", "crazzychat user") ?: "crazzychat user"
             val dpUrl = prefs.getString("ring_dp", "") ?: ""
             val video = prefs.getBoolean("ring_video", false)
             postMissed(name, dpUrl, video)
@@ -357,7 +357,7 @@ class VaultCallMessagingService : FirebaseMessagingService() {
         // out. Anything else → we ring, because JS may not even be running.
         if (appInForeground()) return
 
-        val name = data["callerName"]?.ifBlank { "VaultChat user" } ?: "VaultChat user"
+        val name = data["callerName"]?.ifBlank { "crazzychat user" } ?: "crazzychat user"
         val dpUrl = data["callerDpUrl"] ?: ""
         val isVideo = data["isVideo"] == "true"
 
@@ -409,7 +409,7 @@ class VaultCallMessagingService : FirebaseMessagingService() {
         val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         if (nm.getNotificationChannel(MISSED_CHANNEL) == null) {
             nm.createNotificationChannel(NotificationChannel(MISSED_CHANNEL, "Missed calls", NotificationManager.IMPORTANCE_DEFAULT).apply {
-                description = "Notifications for missed VaultChat calls"
+                description = "Notifications for missed crazzychat calls"
                 lockscreenVisibility = Notification.VISIBILITY_PUBLIC
             })
         }
@@ -443,7 +443,7 @@ class VaultCallMessagingService : FirebaseMessagingService() {
         val n: Notification = NotificationCompat.Builder(this, INCOMING_CHANNEL)
             .setSmallIcon(applicationInfo.icon)
             .setContentTitle(name)
-            .setContentText(if (isVideo) "VaultChat video call" else "VaultChat audio call")
+            .setContentText(if (isVideo) "crazzychat video call" else "crazzychat audio call")
             .setLargeIcon(large)
             .setCategory(NotificationCompat.CATEGORY_CALL)
             .setPriority(NotificationCompat.PRIORITY_MAX)
@@ -466,7 +466,7 @@ class VaultCallMessagingService : FirebaseMessagingService() {
         val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         if (nm.getNotificationChannel(INCOMING_CHANNEL) == null) {
             val ch = NotificationChannel(INCOMING_CHANNEL, "Incoming calls", NotificationManager.IMPORTANCE_HIGH).apply {
-                description = "Rings for incoming VaultChat calls"
+                description = "Rings for incoming crazzychat calls"
                 enableVibration(true)
                 vibrationPattern = longArrayOf(0, 800, 600, 800, 600)
                 setBypassDnd(true)
@@ -488,10 +488,10 @@ class VaultCallMessagingService : FirebaseMessagingService() {
             val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
             pm.newWakeLock(
                 PowerManager.FULL_WAKE_LOCK or PowerManager.ACQUIRE_CAUSES_WAKEUP or PowerManager.ON_AFTER_RELEASE,
-                "VaultChat:ring",
+                "crazzychat:ring",
             ).apply { acquire(10_000) }
             val km = getSystemService(Context.KEYGUARD_SERVICE) as KeyguardManager
-            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) km.newKeyguardLock("VaultChat").disableKeyguard()
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) km.newKeyguardLock("crazzychat").disableKeyguard()
         } catch (_: Throwable) {}
     }
 

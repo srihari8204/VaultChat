@@ -176,7 +176,7 @@ export default function CacheCleanupScreen() {
 
         <View style={S.note}>
           <Text style={S.noteText}>
-            Cache is temporary data that VaultChat recreates as needed. The first time you reopen a chat
+            Cache is temporary data that crazzychat recreates as needed. The first time you reopen a chat
             after clearing, images and thumbnails may take a moment to reload. Offline files you saved are
             not cache and are never removed.
           </Text>

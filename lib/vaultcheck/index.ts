@@ -161,7 +161,7 @@ export async function verifyMedia(
  */
 export function formatReport(r: VaultCheckReport): string {
   const lines: string[] = [];
-  lines.push('VaultChat — Media verification report');
+  lines.push('crazzychat — Media verification report');
   lines.push(`Checked: ${new Date(r.checkedAt).toLocaleString()}`);
   lines.push(`Media type: ${r.kind}`);
   lines.push('');

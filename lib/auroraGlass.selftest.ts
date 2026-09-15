@@ -58,7 +58,7 @@ for (const seed of ['Anitha', 'Kiran Kumar', '', 'ZZ', 'srihari.balla152@gmail.c
 ok('avatarRing handles null like avatarColor does', isColor(avatarRing(null)[0]) && isColor(avatarColor(null)));
 
 // ── Distinct contacts should not all land on one ring ────────────────
-const names = ['Anitha', 'Family Space', 'Kiran Kumar', 'Office Group', 'Priya', 'Dad', 'VaultChat Team', 'Sandeep'];
+const names = ['Anitha', 'Family Space', 'Kiran Kumar', 'Office Group', 'Priya', 'Dad', 'crazzychat Team', 'Sandeep'];
 const distinct = new Set(names.map(x => avatarRing(x).join('/')));
 ok('a realistic chat list gets varied rings', distinct.size >= 4);
 

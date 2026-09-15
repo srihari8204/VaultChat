@@ -23,7 +23,7 @@ import androidx.core.app.NotificationCompat
  * a call: there is no call id, no ringing, no CallModule.start(), so
  * CallForegroundService is simply NOT RUNNING while someone is live. Asking it
  * to carry mediaProjection for a broadcast would mean starting a service whose
- * notification says "VaultChat call • in progress" during a broadcast, and
+ * notification says "crazzychat call • in progress" during a broadcast, and
  * teaching the call lifecycle about broadcasts — coupling the two products at
  * exactly the layer this whole change is separating them at.
  *
@@ -124,7 +124,7 @@ class GoLiveForegroundService : Service() {
 
     private var wakeLock: PowerManager.WakeLock? = null
     /** Last broadcast title, so the projection promotion can reuse the chrome. */
-    private var lastTitle: String = "VaultChat Live"
+    private var lastTitle: String = "crazzychat Live"
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -160,7 +160,7 @@ class GoLiveForegroundService : Service() {
             return START_STICKY
         }
 
-        lastTitle = intent?.getStringExtra(EXTRA_TITLE)?.takeIf { it.isNotBlank() } ?: "VaultChat Live"
+        lastTitle = intent?.getStringExtra(EXTRA_TITLE)?.takeIf { it.isNotBlank() } ?: "crazzychat Live"
 
         ensureChannel()
         val notification = buildNotification(lastTitle)
@@ -214,7 +214,7 @@ class GoLiveForegroundService : Service() {
         val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         if (nm.getNotificationChannel(CHANNEL_ID) == null) {
             val ch = NotificationChannel(CHANNEL_ID, "Live broadcasts", NotificationManager.IMPORTANCE_LOW).apply {
-                description = "Keeps your broadcast publishing while VaultChat is in the background"
+                description = "Keeps your broadcast publishing while crazzychat is in the background"
                 setShowBadge(false)
             }
             nm.createNotificationChannel(ch)
@@ -248,7 +248,7 @@ class GoLiveForegroundService : Service() {
     private fun acquireWakeLock() {
         if (wakeLock?.isHeld == true) return
         val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
-        wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "VaultChat:golive").apply {
+        wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "crazzychat:golive").apply {
             setReferenceCounted(false)
             // 4h rather than the call service's 1h: a broadcast is a much
             // longer-lived thing than a call, and the cap is only a safety net

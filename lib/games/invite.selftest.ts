@@ -103,7 +103,7 @@ A(/Share a link instead/.test(SHEET)
   && SHEET.indexOf('Share a link instead') < SHEET.indexOf('chats.map'),
   '6d. the out-of-app share sits ABOVE the chat list — below it, a player with a '
   + 'dozen chats has to scroll past all of them to reach the only option that '
-  + 'works for someone who does not have VaultChat');
+  + 'works for someone who does not have crazzychat');
 A(/Send the link instead\?/.test(SHEET) && /onPress: \(\) => \{ void inviteToTable\(target\.game, target\.room\)/.test(SHEET),
   '6e. a card the SERVER refuses falls back to the link — otherwise the button '
   + 'is simply broken, which is exactly what production does today until '
@@ -119,7 +119,7 @@ A(/openInvite\('chess', code\)/.test(read('components/games/Chess.tsx')),
   + 'i.e. only after the game had already started');
 A(/inviteToTable/.test(SHEET),
   '6c. the share sheet survives inside the picker — it is the only way to reach '
-  + 'someone who does not have VaultChat yet');
+  + 'someone who does not have crazzychat yet');
 
 // ── 7. the server does not take the client's word for it ──────────────
 A(/"game_invite": true/.test(HELPERS), "7. the backend accepts the 'game_invite' type");

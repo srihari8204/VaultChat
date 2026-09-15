@@ -82,7 +82,7 @@ import {
  *  its kind while keeping contentMax numeric. */
 
 /**
- * Show a generated Shop Book document INSIDE VaultChat.
+ * Show a generated Shop Book document INSIDE crazzychat.
  *
  * Every bill, receipt and invoice here went straight from Print.printToFileAsync
  * to Sharing.shareAsync — the OS share sheet was the only thing that ever
@@ -3556,7 +3556,7 @@ function OwnerKhata({ currency }: { currency?: string }) {
   const [loading, setLoading] = useState(true);
   const [customers, setCustomers] = useState<SB.CustomerPending[]>([]);
   const [sel, setSel] = useState<SB.CustomerPending | null>(null);
-  // Adding a walk-in: someone with no VaultChat account who buys on credit.
+  // Adding a walk-in: someone with no crazzychat account who buys on credit.
   const [adding, setAdding] = useState(false);
   const [counter, setCounter] = useState(false);
   const [newName, setNewName] = useState('');
@@ -3608,7 +3608,7 @@ function OwnerKhata({ currency }: { currency?: string }) {
     <>
       <Text style={s.sectionLabel}>Customer Khata</Text>
 
-      {/* Walk-ins: the customer standing at the counter who has no VaultChat
+      {/* Walk-ins: the customer standing at the counter who has no crazzychat
           account. Without this the khata only ever listed people who already
           had one, so a shop could not start a tab for anybody new. */}
       {counter && <CounterSale currency={currency} onDone={() => setCounter(false)} />}

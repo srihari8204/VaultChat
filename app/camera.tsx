@@ -291,7 +291,7 @@ export default function CameraScreen() {
         </View>
         <Text variant="h2" color={AuroraDark.text} style={s.center}>Camera access</Text>
         <Text variant="callout" color={AuroraDark.textDim} style={[s.center, s.gateBody]}>
-          VaultChat needs the camera to take photos, record video and scan documents.
+          crazzychat needs the camera to take photos, record video and scan documents.
           Nothing leaves your device until you send it.
         </Text>
         <Pressable onPress={requestCam} style={s.gateBtn} accessibilityRole="button">

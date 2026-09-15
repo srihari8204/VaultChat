@@ -19,7 +19,7 @@ function check(name: string, cond: boolean): void {
 }
 
 (async () => {
-  console.log('\nVaultChat cache-cleanup planner self-test\n────────────────────────────────────────────');
+  console.log('\ncrazzychat cache-cleanup planner self-test\n────────────────────────────────────────────');
 
   const SIZES = {
     image: 40_000_000, thumbnail: 5_000_000, video: 120_000_000, audio: 8_000_000,

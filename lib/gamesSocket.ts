@@ -5,7 +5,7 @@
  * the separately-deployed games server. The flow mirrors what the web clients do
  * (games-web/*.js → establishSession → connect), but in RN:
  *
- *   1. Mint a short-lived Ed25519-signed launch token from VaultChat's OWN backend
+ *   1. Mint a short-lived Ed25519-signed launch token from crazzychat's OWN backend
  *      (POST /games/launch-token) — the token carries vaultId + name only.
  *   2. Exchange it for a games session by POSTing to the games server's
  *      /api/session with credentials:'include' — the server sets a `gsid` cookie
@@ -48,7 +48,7 @@ export type GameKind = "tictactoe" | "ludo" | "chess" | "rummy";
 export async function establishGamesSession(onExchange?: () => void): Promise<void> {
   const res = await api<{ token: string }>("/games/launch-token", { method: "POST" });
   const token = res?.token;
-  if (!token) throw new Error("No launch token returned by VaultChat backend.");
+  if (!token) throw new Error("No launch token returned by crazzychat backend.");
 
   onExchange?.();
   const sessionRes = await fetch(`${GAMES_HTTP}/api/session`, {

@@ -29,7 +29,7 @@ function cappedStore(cap: number): { kv: KVStore; size(): number; raw: Map<strin
 }
 
 (async () => {
-  console.log('\nVaultChat E2EE chunked-storage self-test\n────────────────────────────────────────');
+  console.log('\ncrazzychat E2EE chunked-storage self-test\n────────────────────────────────────────');
   const CAP = 2048;
   const backing = cappedStore(CAP);
   const kv = chunkedKV(backing.kv, 1800);

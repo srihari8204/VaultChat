@@ -36,7 +36,7 @@ export interface WaMessage {
   /** The timestamp EXACTLY as the export wrote it — kept so a timezone or
    *  date-order correction is possible later without re-importing. */
   tsRaw: string;
-  /** Sender label as written in the export. Mapping it to a VaultChat id is the
+  /** Sender label as written in the export. Mapping it to a crazzychat id is the
    *  caller's job — this module has no idea who "me" is. */
   sender: string;
   /** The body, byte-for-byte as exported. Never annotated. */

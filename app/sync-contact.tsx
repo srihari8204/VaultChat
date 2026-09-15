@@ -97,7 +97,7 @@ export default function SyncContactScreen() {
   };
 
   const copyCode = async () => { await copyAndAutoClear(myCode); Alert.alert('Copied', 'Code copied to clipboard'); };
-  const shareCode = () => Share.share({ message: `My VaultChat Sync Code: ${myCode} (valid 5 min)` });
+  const shareCode = () => Share.share({ message: `My crazzychat Sync Code: ${myCode} (valid 5 min)` });
 
   const reset = () => {
     setPhase('idle'); setMyCode(''); setEnterCode(''); setSynced(null); setErrMsg('');

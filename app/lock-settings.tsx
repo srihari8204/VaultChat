@@ -117,7 +117,7 @@ export default function LockSettingsScreen() {
             onPress={async () => {
               try {
                 if (await notifee.isBatteryOptimizationEnabled()) await notifee.openBatteryOptimizationSettings();
-                else Alert.alert('All good', 'VaultChat is already exempt from battery optimization.');
+                else Alert.alert('All good', 'crazzychat is already exempt from battery optimization.');
               } catch {}
             }}
             style={[st.row, { borderColor: colors.glassStroke }]}>
@@ -210,7 +210,7 @@ export default function LockSettingsScreen() {
           <Text style={{ color: colors.text, fontSize: 13.5, fontWeight: '700' }}>Location Lock · Navigate mini-app</Text>
           <Text style={{ color: colors.text + '88', fontSize: 12.5, marginTop: 6, lineHeight: 18 }}>
             Geofencing runs entirely on this device. Your coordinates and history never
-            leave it — the only network call is to VaultChat’s own routing engine when
+            leave it — the only network call is to crazzychat’s own routing engine when
             you navigate back.
           </Text>
           <Text style={{ color: colors.text + '66', fontSize: 11.5, marginTop: 8, lineHeight: 16 }}>

@@ -146,7 +146,7 @@ export default function ContactScreen() {
 
         <TouchableOpacity
           style={styles.dangerRow}
-          onPress={() => Alert.alert('Report contact?', `The last 5 messages from ${contactName} will be forwarded to VaultChat.`, [
+          onPress={() => Alert.alert('Report contact?', `The last 5 messages from ${contactName} will be forwarded to crazzychat.`, [
             { text: 'Cancel', style: 'cancel' },
             { text: 'Report', style: 'destructive' }
           ])}

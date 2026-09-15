@@ -169,7 +169,7 @@ export default function SettingsScreen() {
       const dest  = `${(FileSystem as any).cacheDirectory}${fname}`;
       await (FileSystem as any).writeAsStringAsync(dest, json, { encoding: 'utf8' });
       if (await Sharing.isAvailableAsync()) {
-        await Sharing.shareAsync(dest, { mimeType: 'application/json', dialogTitle: 'Save your VaultChat data' });
+        await Sharing.shareAsync(dest, { mimeType: 'application/json', dialogTitle: 'Save your crazzychat data' });
       } else {
         Alert.alert('Saved', `Export saved to ${dest}`);
       }
@@ -293,7 +293,7 @@ export default function SettingsScreen() {
 
         <ToggleRow
           title="Discoverable by phone"
-          sub="Allow others who have your number to find your VaultChat account when they tap Contacts."
+          sub="Allow others who have your number to find your crazzychat account when they tap Contacts."
           value={settings.discoverable}
           busy={saving === 'discoverable'}
           onValueChange={() => toggle('discoverable')}
@@ -355,7 +355,7 @@ export default function SettingsScreen() {
         <Text style={S.label}>SECURITY</Text>
         <ToggleRow
           title="Device MFA (PIN / fingerprint / face)"
-          sub="Require your device biometrics or MPIN each time VaultChat launches."
+          sub="Require your device biometrics or MPIN each time crazzychat launches."
           value={mfaOn}
           busy={mfaBusy}
           onValueChange={toggleMfa}
@@ -385,7 +385,7 @@ export default function SettingsScreen() {
             anything is that it says exactly what it counts. The sentence is the
             whole disclosure: a screen name and a day, no identity. */}
         <ToggleRow
-          title="Help improve VaultChat"
+          title="Help improve crazzychat"
           sub="Sends which screens get opened — a screen name and a day, with no account, device or message information. Never the content of anything."
           value={usageOn}
           onValueChange={toggleUsage}

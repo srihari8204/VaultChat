@@ -56,18 +56,18 @@ const SCORE_JUMP_DEFAULT = 15;
 // Per-factor notification copy. Body is intentionally generic enough to be safe
 // on a lock screen (the specifics live inside the app), per the privacy model.
 const COPY: Record<string, { event: string; title: string; body: string }> = {
-  root:            { event: 'ROOT_DETECTED',            title: 'Root access detected',           body: 'This device appears to be rooted. Open VaultChat to review.' },
+  root:            { event: 'ROOT_DETECTED',            title: 'Root access detected',           body: 'This device appears to be rooted. Open crazzychat to review.' },
   frida:           { event: 'FRIDA_DETECTED',           title: 'Instrumentation detected',        body: 'Debugging/instrumentation tooling is active on this device.' },
-  debugger:        { event: 'DEBUGGER_ATTACHED',        title: 'Debugger attached',               body: 'A debugger is attached to VaultChat.' },
-  appIntegrity:    { event: 'APK_INTEGRITY_FAILED',     title: 'App integrity check failed',      body: 'This build may not be the official VaultChat. Open to review.' },
+  debugger:        { event: 'DEBUGGER_ATTACHED',        title: 'Debugger attached',               body: 'A debugger is attached to crazzychat.' },
+  appIntegrity:    { event: 'APK_INTEGRITY_FAILED',     title: 'App integrity check failed',      body: 'This build may not be the official crazzychat. Open to review.' },
   hooks:           { event: 'HOOK_FRAMEWORK_DETECTED',  title: 'Hooking framework detected',      body: 'An Xposed/LSPosed-type module may be active.' },
   accessibility:   { event: 'ACCESSIBILITY_RISK',       title: 'Unknown accessibility service',   body: 'A screen-reader service you may not recognise is enabled.' },
-  emulator:        { event: 'EMULATOR_DETECTED',        title: 'Emulator detected',               body: 'VaultChat is running on an emulator.' },
+  emulator:        { event: 'EMULATOR_DETECTED',        title: 'Emulator detected',               body: 'crazzychat is running on an emulator.' },
   usbDebugging:    { event: 'USB_DEBUGGING_ON',         title: 'USB debugging enabled',           body: 'USB debugging was turned on. Turn it off when not developing.' },
   devOptions:      { event: 'DEV_OPTIONS_ON',           title: 'Developer options enabled',       body: 'Developer options were turned on.' },
-  permissionRisk:  { event: 'OVERLAY_RISK',             title: 'Screen-overlay permission',       body: 'An app can draw over the screen. Open VaultChat to review.' },
-  connectionIntegrity: { event: 'NETWORK_MITM',         title: 'Connection may be intercepted',   body: "VaultChat's secure connection failed a check. Switch networks and open VaultChat." },
-  proxy:           { event: 'PROXY_CONFIGURED',         title: 'System proxy detected',           body: 'A network proxy is configured. Open VaultChat to review.' },
+  permissionRisk:  { event: 'OVERLAY_RISK',             title: 'Screen-overlay permission',       body: 'An app can draw over the screen. Open crazzychat to review.' },
+  connectionIntegrity: { event: 'NETWORK_MITM',         title: 'Connection may be intercepted',   body: "crazzychat's secure connection failed a check. Switch networks and open crazzychat." },
+  proxy:           { event: 'PROXY_CONFIGURED',         title: 'System proxy detected',           body: 'A network proxy is configured. Open crazzychat to review.' },
 };
 
 // Rollup rows fully covered by their own leaf rows push NOTHING (the leaf row
@@ -77,7 +77,7 @@ const COPY: Record<string, { event: string; title: string; body: string }> = {
 const SILENT_FACTORS = new Set<string>(['deviceIntegrity', 'runtimeProtection', 'network', 'wifiSecurity']);
 
 function copyFor(factorKey: string): { event: string; title: string; body: string } {
-  return COPY[factorKey] ?? { event: 'SECURITY_STATE_CHANGED', title: 'Device security changed', body: 'A device-security indicator changed. Open VaultChat to review.' };
+  return COPY[factorKey] ?? { event: 'SECURITY_STATE_CHANGED', title: 'Device security changed', body: 'A device-security indicator changed. Open crazzychat to review.' };
 }
 
 function severityOf(status: FactorStatus): NotifySeverity | null {
@@ -125,7 +125,7 @@ export function decideNotifications(
   const jump = ctx.scoreJump ?? SCORE_JUMP_DEFAULT;
   if (diff.bandWorsened && diff.scoreDelta >= jump) {
     fire('score', 'warning', 'SECURITY_SCORE_CHANGED', 'Security risk increased',
-      `Your device risk rose to ${next.band}. Open VaultChat to review.`);
+      `Your device risk rose to ${next.band}. Open crazzychat to review.`);
   }
 
   return { notifications: out, lastSent };

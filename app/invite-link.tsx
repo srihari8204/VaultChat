@@ -66,7 +66,7 @@ export default function InviteLinkScreen() {
   };
 
   const shareLink = (code: string) =>
-    Share.share({ message: `Join ${groupName || 'our group'} on VaultChat!\n${JOIN_BASE}${code}` });
+    Share.share({ message: `Join ${groupName || 'our group'} on crazzychat!\n${JOIN_BASE}${code}` });
 
   const copyLink = async (code: string) => {
     await copyAndAutoClear(JOIN_BASE + code);

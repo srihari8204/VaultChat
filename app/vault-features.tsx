@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 // app/vault-features.tsx
-// VaultChat premium security features
+// crazzychat premium security features
 //
 // 1. Temp Chat Codes — generate a time-limited invite code
 //    that auto-expires and can only be used once
@@ -166,8 +166,8 @@ export default function VaultFeaturesScreen() {
     if (!chatCode) return;
     try {
       await Share.share({
-        message: `Join me on VaultChat — use this secure invite code:\n\n${chatCode}\n\nExpires in 5 minutes. Enter it under Add Contact → Enter Their Code.`,
-        title:   'VaultChat Secure Invite',
+        message: `Join me on crazzychat — use this secure invite code:\n\n${chatCode}\n\nExpires in 5 minutes. Enter it under Add Contact → Enter Their Code.`,
+        title:   'crazzychat Secure Invite',
       });
     } catch {}
   };

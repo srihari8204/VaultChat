@@ -3,7 +3,7 @@
 // # WHAT THIS PROTECTS
 //
 // `shopbook_ledger` stores the party in one of two columns: `customer_user_id`
-// for a VaultChat account, `khata_customer_id` for a walk-in. A CHECK
+// for a crazzychat account, `khata_customer_id` for a walk-in. A CHECK
 // constraint (`shopbook_ledger_party_ck`) rejects a row that sets both or
 // neither, so the client cannot be vague about which it means.
 //

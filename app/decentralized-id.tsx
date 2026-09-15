@@ -200,7 +200,7 @@ export default function DecentralizedIDScreen() {
               { app: 'WhatsApp', method: 'Phone number', revocable: true },
               { app: 'Telegram', method: 'Phone number', revocable: true },
               { app: 'Signal', method: 'Phone number', revocable: true },
-              { app: 'VaultChat', method: 'Self-custodied Ed25519 keypair', revocable: false },
+              { app: 'crazzychat', method: 'Self-custodied Ed25519 keypair', revocable: false },
             ].map((r, i) => (
               <View key={i} style={[st.compRow, i < 3 && { borderBottomWidth: 1, borderBottomColor: C.border }]}>
                 <Text style={{ color: C.text, fontSize: 13, fontWeight: '600', width: 80 }}>{r.app}</Text>

@@ -18,7 +18,7 @@
 //
 // WHAT THIS DOES
 //
-// Copies a decrypted local file into the system gallery under a "VaultChat"
+// Copies a decrypted local file into the system gallery under a "crazzychat"
 // album, the way WhatsApp groups its media. It is a COPY: the sandbox original
 // stays put, so retention, revoke and purgeLocalCopies keep working on it.
 //
@@ -40,7 +40,7 @@ import * as MediaLibrary from 'expo-media-library';
 
 const PREF_KEY = 'vc_save_media_to_gallery';
 const DONE_KEY = 'vc_gallery_exported_v1';
-const ALBUM = 'VaultChat';
+const ALBUM = 'crazzychat';
 
 let prefCached: boolean | null = null;
 let doneCached: Set<string> | null = null;
@@ -134,7 +134,7 @@ export async function exportToGallery(localUri: string, opts: ExportOpts): Promi
       granted = perm.granted;
     } catch { /* permission API unavailable — fall through to the save attempt */ }
 
-    // Preferred: a real asset we can file into a "VaultChat" album, the way
+    // Preferred: a real asset we can file into a "crazzychat" album, the way
     // WhatsApp groups its media. Needs enough access to manage albums.
     if (granted) {
       try {

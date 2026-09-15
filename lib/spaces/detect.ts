@@ -4,7 +4,7 @@
 // own device, and emitted as sealed alerts. Not because that is convenient —
 // because the server cannot read a position and is deliberately not going to be
 // given one. A plaintext position feed for school children would be the highest
-// value target in the system and would make every other E2EE claim in VaultChat
+// value target in the system and would make every other E2EE claim in crazzychat
 // a marketing line.
 //
 // The honest cost, stated in the design doc and repeated here so nobody has to

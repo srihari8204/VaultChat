@@ -147,7 +147,7 @@ export async function refreshCallRegistration(): Promise<void> {
 /** Keep audio alive while a call is connected. */
 export function startCallForeground(callId: string, otherName: string, otherDpUrl: string, isVideo: boolean): void {
   if (!has()) return;
-  try { VaultCalls.startCallService(callId, otherName || 'VaultChat call', otherDpUrl || '', !!isVideo); } catch {}
+  try { VaultCalls.startCallService(callId, otherName || 'crazzychat call', otherDpUrl || '', !!isVideo); } catch {}
 }
 
 export function stopCallForeground(): void {

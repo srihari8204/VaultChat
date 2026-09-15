@@ -100,7 +100,7 @@ class CallForegroundService : Service() {
 
     private var wakeLock: PowerManager.WakeLock? = null
     /** Last call's chrome, so the projection promotion can reuse it. */
-    private var lastName: String = "VaultChat call"
+    private var lastName: String = "crazzychat call"
     private var lastVideo: Boolean = false
 
     override fun onBind(intent: Intent?): IBinder? = null
@@ -115,7 +115,7 @@ class CallForegroundService : Service() {
             // kills the process with "did not call startForeground()". Promoting
             // with the same NOTIF_ID and immediately removing it is the standard
             // way out: the notification never becomes visible to the user.
-            try { startForeground(NOTIF_ID, buildNotification("VaultChat call", false)) } catch (_: Throwable) {}
+            try { startForeground(NOTIF_ID, buildNotification("crazzychat call", false)) } catch (_: Throwable) {}
             releaseWakeLock()
             stopForegroundCompat()
             try {
@@ -160,7 +160,7 @@ class CallForegroundService : Service() {
         }
 
         val callId = intent?.getStringExtra(EXTRA_CALL_ID) ?: ""
-        val name = intent?.getStringExtra(EXTRA_NAME) ?: "VaultChat call"
+        val name = intent?.getStringExtra(EXTRA_NAME) ?: "crazzychat call"
         val isVideo = intent?.getBooleanExtra(EXTRA_VIDEO, false) ?: false
         lastName = name
         lastVideo = isVideo
@@ -218,7 +218,7 @@ class CallForegroundService : Service() {
             PendingIntent.FLAG_UPDATE_CURRENT or (if (Build.VERSION.SDK_INT >= 23) PendingIntent.FLAG_IMMUTABLE else 0),
         )
         return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle(if (isVideo) "VaultChat video call" else "VaultChat call")
+            .setContentTitle(if (isVideo) "crazzychat video call" else "crazzychat call")
             .setContentText("$name • in progress")
             .setSmallIcon(applicationInfo.icon)
             .setCategory(NotificationCompat.CATEGORY_CALL)
@@ -232,7 +232,7 @@ class CallForegroundService : Service() {
     private fun acquireWakeLock() {
         if (wakeLock?.isHeld == true) return
         val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
-        wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "VaultChat:call").apply {
+        wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "crazzychat:call").apply {
             setReferenceCounted(false)
             acquire(60 * 60 * 1000L) // 1h safety cap; released on call end
         }

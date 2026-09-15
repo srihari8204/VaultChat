@@ -30,7 +30,7 @@ export default function BiometricSetupScreen() {
     if(Platform.OS==='web'){router.push("/permissions");return;}
     setStatus("scanning");setMsg("Scanning...");
     try {
-      const r=await LocalAuthentication.authenticateAsync({promptMessage:"Register your biometric for VaultChat",fallbackLabel:"Use PIN instead",cancelLabel:"Skip",disableDeviceFallback:false});
+      const r=await LocalAuthentication.authenticateAsync({promptMessage:"Register your biometric for crazzychat",fallbackLabel:"Use PIN instead",cancelLabel:"Skip",disableDeviceFallback:false});
       if(r.success){setStatus("success");setMsg("Biometric registered");setTimeout(()=>router.push("/permissions"),800);}
       else{setStatus("failed");setMsg("Try again or skip to use PIN only");}
     } catch {setStatus("failed");setMsg("Error. Tap to try again.");}
@@ -45,7 +45,7 @@ export default function BiometricSetupScreen() {
         <View style={S.header}>
           <View style={S.badge}><Text style={{fontSize:36}}>🤳</Text></View>
           <Text style={S.title}>Register Biometric</Text>
-          <Text style={S.sub}>FaceID or Fingerprint — required every time you open VaultChat</Text>
+          <Text style={S.sub}>FaceID or Fingerprint — required every time you open crazzychat</Text>
         </View>
         <View style={S.steps}>{[1,2,3,4,5,6,7,8].map(n=><View key={n} style={[S.dot,n<=6&&S.dotDone,n===7&&S.dotActive]}/>)}</View>
         <Text style={S.stepLbl}>Step 6 of 8 — Biometric Lock</Text>

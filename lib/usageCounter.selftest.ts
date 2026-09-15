@@ -83,7 +83,7 @@ check('a failed send does not put the counts back',
 console.log('\nIt is disclosed where it has to be:');
 check('the privacy policy names it', /Which screens get opened/.test(POLICY));
 check('the policy says no identity is attached', /No account, device, or session is attached/.test(POLICY));
-check('the policy says where to switch it off', /Help improve VaultChat/.test(POLICY));
+check('the policy says where to switch it off', /Help improve crazzychat/.test(POLICY));
 check('Settings carries the same sentence', /a screen name and a day, with no account, device or message information/.test(SETTINGS));
 check('Settings has the switch', /value=\{usageOn\}/.test(SETTINGS));
 

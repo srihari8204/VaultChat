@@ -1,4 +1,4 @@
-// Single fetch wrapper for the VaultChat backend (Phase 1+).
+// Single fetch wrapper for the crazzychat backend (Phase 1+).
 // Handles JWT attachment, automatic refresh on 401, and JSON I/O.
 //
 // Tokens live in SecureStore (encrypted at rest by the OS keystore).

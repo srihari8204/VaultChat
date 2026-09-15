@@ -268,7 +268,7 @@ export default function StorageManagerScreen() {
           <View style={s.storageHeader}>
             <Ionicons name="pie-chart-outline" size={28} color={colors.accent} />
             <View style={{ marginLeft: 12, flex: 1 }}>
-              <Text style={s.cardTitle}>VaultChat Storage Used</Text>
+              <Text style={s.cardTitle}>crazzychat Storage Used</Text>
               <Text style={s.storageBig}>{formatBytes(totalUsed)}</Text>
             </View>
           </View>
@@ -324,7 +324,7 @@ export default function StorageManagerScreen() {
           <Text style={s.cardTitle}>Media on this device</Text>
           <Text style={s.cardNote}>
             Downloaded and sent media is stored privately in the app and is removed when
-            VaultChat is uninstalled. Use “Save to gallery” on a photo to keep your own copy.
+            crazzychat is uninstalled. Use “Save to gallery” on a photo to keep your own copy.
           </Text>
 
           <TouchableOpacity style={s.actionBtn} onPress={deleteAllMedia} disabled={clearing} activeOpacity={0.7}>

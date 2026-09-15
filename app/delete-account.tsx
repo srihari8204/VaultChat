@@ -43,7 +43,7 @@ const CONSEQUENCES = [
 ];
 
 const REASONS = [
-  'I don’t use VaultChat',
+  'I don’t use crazzychat',
   'I’m missing a feature',
   'I have privacy concerns',
   'Too many notifications',

@@ -30,7 +30,7 @@ export default function SetupCompleteScreen() {
       <View style={S.container}>
         <Animated.View style={[S.content,{opacity,transform:[{scale}]}]}>
           <View style={S.circle}><Text style={{fontSize:52}}>🔐</Text></View>
-          <Text style={S.title}>VaultChat is Ready</Text>
+          <Text style={S.title}>crazzychat is Ready</Text>
           <Text style={S.sub}>Your secure vault is set up and locked.</Text>
           <View style={S.list}>
             {features.map(f=>(
@@ -45,7 +45,7 @@ export default function SetupCompleteScreen() {
             <Text style={S.badgeTxt}>Protected by E2EE + Biometric Lock</Text>
           </View>
           <TouchableOpacity style={S.btn} onPress={()=>router.replace("/(tabs)/chats")} activeOpacity={0.85}>
-            <Text style={S.btnTxt}>Enter VaultChat</Text>
+            <Text style={S.btnTxt}>Enter crazzychat</Text>
           </TouchableOpacity>
         </Animated.View>
       </View>

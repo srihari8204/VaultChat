@@ -401,9 +401,9 @@ function RootLayoutInner() {
       //
       // The call screens resolve a blank peerName via getChat(chatId) — but the
       // guard is `if (peerName || !chatId) return`, so handing them the literal
-      // 'VaultChat user' looks like a REAL name, skips the lookup, and pins the
+      // 'crazzychat user' looks like a REAL name, skips the lookup, and pins the
       // placeholder on screen for the whole call. That is the reported
-      // "usernames not getting displayed, instead getting VaultChat user": the
+      // "usernames not getting displayed, instead getting crazzychat user": the
       // fallback was being injected upstream as data rather than rendered
       // downstream as a last resort.
       const name = data.group ? (data.groupName || 'Group call') : (data.callerName ?? data.fromName ?? '');
@@ -475,7 +475,7 @@ function RootLayoutInner() {
       // Bound the re-derivable media cache (safe: never touches the user's library).
       import('../lib/mediaCacheGC').then(m => m.sweepMediaCache()).catch(() => {});
       // One-time: drain the legacy external media tree
-      // (/Android/media/<pkg>/VaultChat) into the private sandbox, then delete
+      // (/Android/media/<pkg>/crazzychat) into the private sandbox, then delete
       // it. That tree is the reason media used to survive uninstall. Self-gating
       // (no-ops once complete), resumable, and never fatal — see lib/mediaMigration.
       import('../lib/mediaMigration').then(m => m.migrateLegacyMedia()).catch(() => {});

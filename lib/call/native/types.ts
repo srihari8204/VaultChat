@@ -7,7 +7,7 @@
 //   Android  A foreground service keeps mic and camera alive, and a
 //            FirebaseMessagingService can start the process from a COLD START
 //            with no JS runtime and post a full-screen-intent notification.
-//            VaultChat implements both (plugins/android/*.kt).
+//            crazzychat implements both (plugins/android/*.kt).
 //
 //   iOS      Neither is permitted. The only sanctioned path is a PushKit VoIP
 //            push that MUST be reported to CallKit via

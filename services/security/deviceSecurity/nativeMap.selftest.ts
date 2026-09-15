@@ -17,7 +17,7 @@ function check(name: string, cond: boolean): void {
 const has = (r: { signals: { type: string }[] }, t: string) => r.signals.some((s) => s.type === t);
 
 (async () => {
-  console.log('\nVaultChat native-map self-test\n──────────────────────────────────');
+  console.log('\ncrazzychat native-map self-test\n──────────────────────────────────');
 
   // ── Android clean ────────────────────────────────────────────────
   console.log('Android:');

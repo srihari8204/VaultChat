@@ -108,7 +108,7 @@ export default function AppLock() {
       <Stack.Screen options={{ headerShown: false, gestureEnabled: false }} />
       <View style={s.body}>
         <Text style={s.lock}>🔐</Text>
-        <Text style={s.title}>VaultChat is locked</Text>
+        <Text style={s.title}>crazzychat is locked</Text>
 
         {mode === 'seal' ? (
           <>

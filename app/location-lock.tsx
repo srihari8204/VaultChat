@@ -154,7 +154,7 @@ export default function LocationLockScreen() {
           if (await notifee.isBatteryOptimizationEnabled()) {
             Alert.alert(
               'Keep the lock reliable',
-              'Battery optimization can pause background monitoring. Exempt VaultChat so the alarm always fires.',
+              'Battery optimization can pause background monitoring. Exempt crazzychat so the alarm always fires.',
               [{ text: 'Later' }, { text: 'Open settings', onPress: () => { notifee.openBatteryOptimizationSettings().catch(() => {}); } }],
             );
           }

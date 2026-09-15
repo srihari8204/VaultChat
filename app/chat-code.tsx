@@ -2,7 +2,7 @@
 //
 // A chat code is for the person sitting across from you who is not in your
 // address book and is not going to be. You read them six digits, they type them
-// in, and you have a normal VaultChat conversation — encryption, calls, files,
+// in, and you have a normal crazzychat conversation — encryption, calls, files,
 // all of it — without either of you handing over a phone number.
 //
 // Reached from the temporary-chat sheet on Chats, because the timer and the
@@ -204,7 +204,7 @@ export default function ChatCodeScreen() {
                   <TouchableOpacity
                     style={S.codeAction}
                     activeOpacity={0.7}
-                    onPress={() => Share.share({ message: `Chat with me on VaultChat. Code: ${live.code} (expires in 2 minutes)` })}>
+                    onPress={() => Share.share({ message: `Chat with me on crazzychat. Code: ${live.code} (expires in 2 minutes)` })}>
                     <Ionicons name="share-outline" size={20} color={colors.primary} />
                     <Text style={S.codeActionTxt}>Share</Text>
                   </TouchableOpacity>

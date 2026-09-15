@@ -86,7 +86,7 @@ function VaultIDScreenContent() {
 
   const handleSign = async () => {
     try {
-      const msg = 'VaultChat Identity Proof — ' + Date.now();
+      const msg = 'crazzychat Identity Proof — ' + Date.now();
       const sig = await signMessage(msg);
       setSignedMsg(sig.substring(0,40)+'...');
       Alert.alert('✅ Signed!','Message signed with your private key.\n\nThis proves you own this VaultID without revealing your private key.');
@@ -96,7 +96,7 @@ function VaultIDScreenContent() {
   const handleShare = async () => {
     if(!vaultID) return;
     await Share.share({
-      message: 'Add me on VaultChat!\n\nVaultTag: '+vaultID.vaultTag+'\nWallet: '+shortAddress(vaultID.walletAddress)+'\n\nNo phone number needed — find me by VaultTag only.',
+      message: 'Add me on crazzychat!\n\nVaultTag: '+vaultID.vaultTag+'\nWallet: '+shortAddress(vaultID.walletAddress)+'\n\nNo phone number needed — find me by VaultTag only.',
       title: 'My VaultID',
     });
   };
@@ -376,7 +376,7 @@ function VaultIDScreenContent() {
             <ScrollView style={{backgroundColor: c.bg,borderRadius:12,padding:14,maxHeight:200,marginBottom:16}}>
               <Text style={{color:BRAND_ACCENT,fontSize:10,fontFamily:'monospace',lineHeight:16}}>{certificate}</Text>
             </ScrollView>
-            <TouchableOpacity onPress={async()=>{ await Share.share({message:'My VaultChat Identity Certificate:\n\n'+certificate}); }}>
+            <TouchableOpacity onPress={async()=>{ await Share.share({message:'My crazzychat Identity Certificate:\n\n'+certificate}); }}>
               <LinearGradient colors={['#1D4ED8','#7C3AED']} style={{borderRadius:14,paddingVertical:14,alignItems:'center',marginBottom:12}}>
                 <Text style={{color:'#fff',fontSize:14,fontWeight:'800'}}>📤 Share Certificate</Text>
               </LinearGradient>

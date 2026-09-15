@@ -197,7 +197,7 @@ function MediaViewerScreen() {
   // "Download & Open" — it saves a copy to shared storage and hands the file to
   // another app. The in-app renderer (components/PdfView, pdf.js) was reachable
   // only through the secondary "Open without saving" link, so the default path
-  // for reading a document was OUT of VaultChat. file-viewer is the screen that
+  // for reading a document was OUT of crazzychat. file-viewer is the screen that
   // renders PDF pages, Word/Excel/PowerPoint structure and text, so send the
   // resolved local file straight there, exactly as video already redirects.
   const docRoute = viewerRouteFor(fileName, mime ? String(mime) : undefined);

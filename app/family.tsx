@@ -622,7 +622,7 @@ export default function FamilySpaceScreen() {
             Alert.alert(
               'Keep sharing when locked',
               `${(await getManufacturer()).toUpperCase()} phones stop background apps to save power, which stops your location too.\n\n`
-              + 'Turn ON auto-start for VaultChat so your family keeps seeing you while the screen is locked.',
+              + 'Turn ON auto-start for crazzychat so your family keeps seeing you while the screen is locked.',
               [{ text: 'Later', style: 'cancel' }, { text: 'Open settings', onPress: () => { openAutoStartSettings().catch(() => {}); } }],
             );
           }
@@ -632,7 +632,7 @@ export default function FamilySpaceScreen() {
     if (v && !ok) {
       Alert.alert(
         'Location is turned off',
-        `VaultChat needs location permission to share your position with ${active?.name ?? 'this space'}. `
+        `crazzychat needs location permission to share your position with ${active?.name ?? 'this space'}. `
         + 'You can still use everything else here without it.',
         [{ text: 'Not now' }, { text: 'Open settings', onPress: () => { Linking.openSettings().catch(() => {}); } }],
       );
@@ -928,7 +928,7 @@ export default function FamilySpaceScreen() {
   // Contact picker: add someone straight from the phone's contacts.
   //
   // The shareable invite CODE that used to sit alongside this is gone. Under
-  // membership v2 everything happens inside VaultChat, and a code you could
+  // membership v2 everything happens inside crazzychat, and a code you could
   // paste into a message was the last thing here that could be forwarded to
   // somebody it was not meant for. /group-invites replaces it.
   const openAdd = () => {

@@ -74,18 +74,72 @@ export interface Palette {
   accentOn: string;
 }
 
-// ─── Single source of truth for the brand ACCENT (lavender) ─────────
+// ─── Single source of truth for the brand ACCENT ────────────────────
 // Change BRAND_ACCENT and the whole app re-colors. Everything that needs the
 // accent imports this (solid) or brandAlpha(a) (translucent tints) — no screen
 // hardcodes the hex. Keep BRAND_ACCENT_RGB in sync with the hex.
-export const BRAND_ACCENT = '#9D6FD0';           // lavender (button-safe shade)
-export const BRAND_ACCENT_RGB = '157, 111, 208'; // keep in sync with BRAND_ACCENT
+//
+// crazzychat, and every value below was SAMPLED OUT OF THE ARTWORK rather than
+// eyeballed — logo/logo.png and logo/splashscreen.png, which ship as
+// assets/images/icon.png and splash.png. The mark is one continuous sweep from
+// cyan through electric blue into violet, so picking a single "brand colour"
+// means picking a point on that sweep; this is the one the wordmark itself uses
+// for "chat", which makes it the colour a person actually reads as the brand.
+//
+// It replaces the lavender #9D6FD0. A rebrand that keeps the old accent is half
+// a rebrand — a lavender send-bubble under a blue-and-violet logo reads as two
+// products.
+export const BRAND_ACCENT = '#1777FE';           // the wordmark blue
+export const BRAND_ACCENT_RGB = '23, 119, 254';  // keep in sync with BRAND_ACCENT
 export const brandAlpha = (a: number) => `rgba(${BRAND_ACCENT_RGB}, ${a})`;
+
+/**
+ * The three stops of the mark, cyan → blue → violet, in sweep order.
+ *
+ * Use this for anything that should read as THE LOGO — the wordmark, the sign-in
+ * button, a progress rail. Two stops of it look like a tasteful gradient; all
+ * three look like the brand, because the violet is what stops it being generic
+ * tech-blue.
+ */
+export const BRAND_CYAN   = '#33DDFE';
+export const BRAND_BLUE   = '#0040FD';
+export const BRAND_VIOLET = '#8C49FC';
+export const BRAND_GRADIENT = [BRAND_CYAN, BRAND_ACCENT, BRAND_VIOLET] as const;
+
+/**
+ * The gradient that is SAFE UNDER WHITE TEXT. Not the same list, on purpose.
+ *
+ * A gradient's contrast is only as good as its lightest stop, and BRAND_CYAN is
+ * 1.63:1 against white — so the logo sweep makes a beautiful button that nobody
+ * can read the label of. Measured, against white:
+ *
+ *     #33DDFE cyan    1.63:1   <- decorative only, never behind text
+ *     #1777FE accent  4.11:1   <- the brand blue; under AA for body text
+ *     #0040FD blue    6.66:1
+ *     #8C49FC violet  4.69:1
+ *
+ * So anything carrying a white label runs blue → violet, which passes at both
+ * ends, and the cyan is spent where it belongs: the mark, the glow, the rings.
+ * (For reference the lavender this replaces was 3.74:1, so the brand accent is
+ * a step up rather than a regression — but it is still not a text background.)
+ */
+export const BRAND_GRADIENT_CTA = [BRAND_BLUE, BRAND_VIOLET] as const;
+
+/**
+ * The night the splash is lit against, and the ink the wordmark is set in.
+ *
+ * BRAND_NIGHT is the actual background of splashscreen.png. The auth screens use
+ * it so that the hand-off from the native splash to the first React screen is
+ * invisible — same ground, same glow, the logo simply stops being a picture and
+ * becomes a screen.
+ */
+export const BRAND_NIGHT = '#010628';
+export const BRAND_INK   = '#001646';
 
 const BRAND = {
   primary: BRAND_ACCENT,
   accent:  BRAND_ACCENT, // secondary accent follows the brand color
-  purple:  '#8B5CF6',
+  purple:  BRAND_VIOLET,
   danger:  '#EF4444',
   success: '#22C55E', // green stays for "success / good" semantics (reference uses it)
   online:  '#22C55E', // presence stays green
@@ -105,7 +159,7 @@ export const AuroraDark: Palette = {
   // Conversation: received sits on a raised ground tone, sent carries the accent.
   chatBg:        '#0A0810',
   bubbleIn:      '#1B1626',
-  bubbleOut:     '#7C3AED',   // deep end of the accent ramp: white body text needs 4.5:1
+  bubbleOut:     '#1552E0',   // deep end of the accent ramp: white body text needs 4.5:1 (6.33:1)
 
   bubbleInText:  'rgba(255,255,255,0.96)',
   bubbleOutText: '#FFFFFF',
@@ -119,14 +173,14 @@ export const AuroraDark: Palette = {
   glassStroke: 'rgba(255,255,255,0.16)',
   hairline:    'rgba(255,255,255,0.06)',
   groundDisc:  '#171320',
-  accentLight: '#C9A6F5',
-  accentDeep:  '#7C3AED',
-  accentOn:    '#C9A6F5',
+  accentLight: '#7FB6FF',   // 9.49:1 on the dark ground — the on-dark accent TEXT colour
+  accentDeep:  '#1552E0',
+  accentOn:    '#7FB6FF',
 };
 
 export const AuroraLight: Palette = {
   ...BRAND,
-  bg:        '#F4F1FA', // lavender-tinted, NOT pure white — the blooms need a ground with hue
+  bg:        '#F2F5FC', // blue-tinted, NOT pure white — the blooms need a ground with hue
   surface:   'rgba(24,16,40,0.045)',
   surfaceSolid: '#EBE6F5',
   card:      '#FFFFFF',
@@ -138,7 +192,7 @@ export const AuroraLight: Palette = {
   // Conversation: received on white, sent on the brand accent.
   chatBg:        '#F4F1FA',
   bubbleIn:      '#FFFFFF',
-  bubbleOut:     '#6D28D9',   // deep end of the accent ramp: white body text needs 4.5:1
+  bubbleOut:     '#1552E0',   // deep end of the accent ramp: white body text needs 4.5:1 (6.33:1)
 
   bubbleInText:  '#1B1526',
   bubbleOutText: '#FFFFFF',
@@ -152,9 +206,9 @@ export const AuroraLight: Palette = {
   glassStroke: 'rgba(24,16,40,0.10)',
   hairline:    'rgba(24,16,40,0.08)',
   groundDisc:  '#FFFFFF',
-  accentLight: '#A78BFA',
-  accentDeep:  '#6D28D9',
-  accentOn:    '#6D28D9',
+  accentLight: '#6BA5FF',
+  accentDeep:  '#1552E0',
+  accentOn:    '#1552E0',
 };
 
 /** The static default palette (dark). Existing screens import this directly. */

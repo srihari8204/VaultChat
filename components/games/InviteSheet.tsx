@@ -1,9 +1,9 @@
 // components/games/InviteSheet.tsx — pick a chat and put the table in it.
 //
 // The invite used to leave through the OS share sheet and hope it came back.
-// VaultChat is the app it was going to be pasted into, so this sheet posts the
+// crazzychat is the app it was going to be pasted into, so this sheet posts the
 // invite straight into a chat as a 'game_invite' card (migration 124), and
-// keeps the share sheet as the row for someone who is not on VaultChat yet.
+// keeps the share sheet as the row for someone who is not on crazzychat yet.
 //
 // Mounted ONCE by app/games.tsx. All four boards keep their existing single
 // call and reach it through registerInvitePicker/openInvite in lib/games/invite
@@ -84,11 +84,11 @@ Send the link instead?`,
 
       {/* The way out of the app, ABOVE the list rather than below it. A player
           with a dozen chats had to scroll past all of them to find the only
-          option that reaches someone who does not have VaultChat yet — which is
+          option that reaches someone who does not have crazzychat yet — which is
           the one they need most often when a table is empty. */}
       <SettingRow
         label="Share a link instead"
-        hint="WhatsApp, SMS, anywhere — works even if they don't have VaultChat"
+        hint="WhatsApp, SMS, anywhere — works even if they don't have crazzychat"
         value="Share"
         onPress={() => { const t = target; close(); if (t) void inviteToTable(t.game, t.room); }}
       />

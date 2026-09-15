@@ -802,7 +802,7 @@ export async function joinCallRoom(a: JoinArgs): Promise<CallRoom> {
       // THE TRIAGE NUMBER, sampled REPEATEDLY.
       //
       // One sample four seconds in was misleading: at that moment the user is
-      // still looking at VaultChat, and VaultChat's window is FLAG_SECURE — so
+      // still looking at crazzychat, and crazzychat's window is FLAG_SECURE — so
       // Android has nothing capturable to hand the encoder and the honest
       // reading is zero. Frames start when they switch to the app they mean to
       // show, which is seconds later and was never measured.

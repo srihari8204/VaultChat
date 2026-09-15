@@ -1274,7 +1274,7 @@ function useReduceMotion(): boolean {
  * `docs/GAMES_PROTOCOL.md`: "There is no pool (101/201) and no deals variant on
  * this server: the wire protocol has no pool score, no elimination and no deal
  * count, and the engine only ever settles a single deal at a time." Pool and
- * Deals would be a VaultChat-side match layer over repeated deals — see
+ * Deals would be a crazzychat-side match layer over repeated deals — see
  * openspec/changes/rummy-variants. Until then, say which one this is.
  */
 const VARIANT = 'Points rummy';
@@ -1347,7 +1347,7 @@ function FilterChip({
  * Pool and Deals: the score across deals.
  *
  * The games server plays one deal and knows nothing about a match around it, so
- * this panel is VaultChat's half — the running scoreboard, and the way to start
+ * this panel is crazzychat's half — the running scoreboard, and the way to start
  * a match in the first place. It renders NOTHING at all when there is no match
  * and the table cannot host one, which is also exactly what happens while the
  * backend for it is undeployed.
@@ -2215,7 +2215,7 @@ function TableTop({ width, height }: { width: number; height: number }) {
         fill="#FFF8F1"
         fillOpacity={0.075}
       >
-        VAULTCHAT
+        CRAZZYCHAT
       </SvgText>
       <SvgText
         x={cx} y={cy + Math.max(13, Math.round(irx * 0.105))}

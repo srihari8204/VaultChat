@@ -33,7 +33,7 @@ export function pdfDocument(title: string, bodyHtml: string): string {
     .badge{display:inline-block;padding:2px 8px;border-radius:999px;background:#EFE7FA;color:#6D3FA8;font-size:11px;font-weight:700}
   </style></head><body>
   <h1>${escapeHtml(title)}</h1>
-  <div class="sub">VaultChat · Vault Finance · generated ${new Date().toLocaleString('en-IN')}</div>
+  <div class="sub">crazzychat · Vault Finance · generated ${new Date().toLocaleString('en-IN')}</div>
   ${bodyHtml}
   </body></html>`;
 }

@@ -47,7 +47,7 @@ function deps(store: StorageKV, signals: SecuritySignal[], now: number): ScanDep
 }
 
 (async () => {
-  console.log('\nVaultChat scan-orchestrator self-test\n──────────────────────────────────────────');
+  console.log('\ncrazzychat scan-orchestrator self-test\n──────────────────────────────────────────');
 
   // ── First scan: baseline, no alerts ──────────────────────────────
   console.log('First scan (baseline):');

@@ -426,7 +426,7 @@ export function GroupRefBubble({ gref, isMine }: { gref: GroupRef; isMine: boole
  * A game table invite — tap it to sit down at that exact table.
  *
  * The receiving half of sendGameInvite(). Before this existed, inviting someone
- * meant leaving VaultChat through the OS share sheet and hoping the link came
+ * meant leaving crazzychat through the OS share sheet and hoping the link came
  * back into the app it had just left.
  *
  * The card carries a game and a room id and NO token: the games server does its
@@ -1003,7 +1003,7 @@ function ReaderAffordance({ text, title, author, at }: {
 }
 
 /**
- * The seam between imported history and messages actually sent in VaultChat.
+ * The seam between imported history and messages actually sent in crazzychat.
  *
  * Imported rows carry negative ids, so the boundary is wherever the sign flips —
  * no extra bookkeeping, and it stays correct as native messages accumulate above

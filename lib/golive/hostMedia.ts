@@ -126,7 +126,7 @@ export async function setScreenShare(room: Room, on: boolean): Promise<void> {
   }
 
   // The foreground service must carry mediaProjection before Android will let
-  // anything capture. FLAG_SECURE is deliberately left ON — VaultChat's own
+  // anything capture. FLAG_SECURE is deliberately left ON — crazzychat's own
   // window is excluded from the capture and every other app records normally.
   // See lib/golive/native.ts.
   await beforeScreenShare();
@@ -202,7 +202,7 @@ export async function setScreenShare(room: Room, on: boolean): Promise<void> {
  *
  * Called when a broadcast ends. Without the explicit screen-share stop, Android
  * keeps the capture session — and its persistent "recording" notification —
- * alive after the room is gone, which reads to the user as VaultChat still
+ * alive after the room is gone, which reads to the user as crazzychat still
  * watching their screen.
  */
 export async function stopAllHostMedia(room: Room): Promise<void> {

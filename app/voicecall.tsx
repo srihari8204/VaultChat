@@ -89,7 +89,7 @@ function VoiceCallEngine() {
   //
   // peerName is a route param and arrives EMPTY on several paths — an incoming
   // call whose signal carried no name, or an outgoing one started from a list
-  // whose title had not loaded — so the screen showed "VaultChat user" during
+  // whose title had not loaded — so the screen showed "crazzychat user" during
   // the call. To be in a call at all we already share a chat, so the name is in
   // our own store; look it up rather than trusting what was passed in.
   //
@@ -106,7 +106,7 @@ function VoiceCallEngine() {
     })().catch(() => { /* keep the fallback */ });
     return () => { cancelled = true; };
   }, [chatId, peerName]);
-  const displayName = peerName || lookedUpName || 'VaultChat user';
+  const displayName = peerName || lookedUpName || 'crazzychat user';
 
   const status      = useCallStatus();
   const connectedAt = useCallConnectedAt();
@@ -199,7 +199,7 @@ function VoiceCallEngine() {
       //
       // enterPipMode() is Android's system picture-in-picture: it shrinks the
       // whole activity into a floating window, which lets you use OTHER apps
-      // and still leaves VaultChat itself unusable. Minimising in-app leaves
+      // and still leaves crazzychat itself unusable. Minimising in-app leaves
       // the call running behind <CallBar/> and hands the app back.
       engine.minimizeScreen();
       if (router.canGoBack()) router.back(); else router.replace('/(tabs)/chats' as any);
@@ -409,7 +409,7 @@ function VoiceCallLegacy() {
       const incoming = isIncoming === 'true' || isIncoming === '1';
       const dir: 'incoming' | 'outgoing' | 'missed' = incoming ? (connectedRef.current ? 'incoming' : 'missed') : 'outgoing';
       const durationSec = elapsedSeconds(connectedAtRef.current);
-      addCallLog({ chatId, peerUid, peerName: peerName || 'VaultChat user', kind: 'audio', direction: dir, at: Date.now() - durationSec * 1000, durationSec }).catch(() => {});
+      addCallLog({ chatId, peerUid, peerName: peerName || 'crazzychat user', kind: 'audio', direction: dir, at: Date.now() - durationSec * 1000, durationSec }).catch(() => {});
       // Outgoing call we hung up before it was answered → tell the callee's device
       // to stop ringing and show a "missed call".
       if (!incoming && !connectedRef.current && peerUid) {
@@ -433,7 +433,7 @@ function VoiceCallLegacy() {
 
   useEffect(() => {
     const me: ActiveCall = {
-      chatId, peerUid, peerName: peerName || 'VaultChat user', kind: 'audio',
+      chatId, peerUid, peerName: peerName || 'crazzychat user', kind: 'audio',
       hold:   () => { heldRef.current = true;  try {
         localStreamRef.current?.getAudioTracks?.().forEach((t: any) => { t.enabled = false; });   // mute my mic
         pcRef.current?.getReceivers?.().forEach((r: any) => { if (r.track) r.track.enabled = false; }); // silence the held peer
@@ -462,7 +462,7 @@ function VoiceCallLegacy() {
   useEffect(() => {
     if (state === 'connected' && !fgStartedRef.current) {
       fgStartedRef.current = true;
-      startCallForeground(String(chatId || peerUid || 'call'), peerName || 'VaultChat user', '', false);
+      startCallForeground(String(chatId || peerUid || 'call'), peerName || 'crazzychat user', '', false);
       dismissIncomingNotification();
     }
   }, [state, chatId, peerUid, peerName]);
@@ -589,7 +589,7 @@ function VoiceCallLegacy() {
           // would put our DTLS-SRTP fingerprint and every candidate on the wire
           // in the clear too. (Same rule, same reason: lib/vaultBeamDirect.ts.)
           if (!cipher.enc) {
-            throw new Error("This call wasn't encrypted, so we didn't connect it. The caller is on an old version of VaultChat — ask them to update, then call again.");
+            throw new Error("This call wasn't encrypted, so we didn't connect it. The caller is on an old version of crazzychat — ask them to update, then call again.");
           }
           await pc.setRemoteDescription(new RTCSessionDescription(offerObj));
           const answer = await pc.createAnswer();
@@ -618,7 +618,7 @@ function VoiceCallLegacy() {
           // fingerprint that anchors call-media encryption, so a server that
           // can rewrite it MITMs the call outright (lib/callCrypto.ts header).
           if (!sealed) {
-            throw new Error("Can't place an encrypted call — we couldn't get this person's encryption keys. Ask them to open VaultChat once (or update it), then try again.");
+            throw new Error("Can't place an encrypted call — we couldn't get this person's encryption keys. Ask them to open crazzychat once (or update it), then try again.");
           }
           cipherRef.current = sealed.cipher;
           // Flush what gathered while the key bundle was in flight. Sealed with
@@ -640,7 +640,7 @@ function VoiceCallLegacy() {
             from: meIdRef.current,
             chatId,
             type: 'audio',
-            callerName: me.name ?? me.email ?? 'VaultChat user',
+            callerName: me.name ?? me.email ?? 'crazzychat user',
             offer: offerWire,
           };
           s.emit('call_incoming', ringPayload);
@@ -705,7 +705,7 @@ function VoiceCallLegacy() {
         <View style={S.avatarWrap}>
           <View style={S.avatar}><Text style={S.avatarTxt}>{initial}</Text></View>
         </View>
-        <Text numberOfLines={1} style={S.name}>{peerName || 'VaultChat user'}</Text>
+        <Text numberOfLines={1} style={S.name}>{peerName || 'crazzychat user'}</Text>
         {state === 'connected'
           ? <CallTimer style={S.status} startedAt={connectedAtRef.current} />
           : <Text style={S.status}>{statusText}</Text>}

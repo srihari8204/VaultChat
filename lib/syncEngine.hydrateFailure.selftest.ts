@@ -109,7 +109,7 @@ export function addPersistentListener() { return () => {}; }
 }
 
 (async () => {
-  console.log('\nVaultChat sync: one undecryptable message must not stall catch-up\n' +
+  console.log('\ncrazzychat sync: one undecryptable message must not stall catch-up\n' +
               '────────────────────────────────────────────────────────────────');
 
   // Message 7 cannot be opened — exactly the production shape.

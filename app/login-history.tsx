@@ -196,7 +196,7 @@ function describeDevice(ua: string | null | undefined): string {
   if (/iPad/i.test(ua))             return `iPad`;
   if (/Android/i.test(ua))          return `Android`;
   if (/iOS/i.test(ua))              return `iOS`;
-  if (/VaultChat/i.test(ua))        return `VaultChat (mobile)`;
+  if (/crazzychat/i.test(ua))        return `crazzychat (mobile)`;
   if (/Mac OS X/i.test(ua))         return `macOS`;
   if (/Windows/i.test(ua))          return `Windows`;
   return ua.length > 40 ? `${ua.slice(0, 40)}…` : ua;

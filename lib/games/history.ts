@@ -5,7 +5,7 @@
 // This codebase keeps logic on the backend and lets the app render what the
 // server computed. History cannot follow that rule: the games server owns every
 // result, it is a separate deployment we do not own the source of, and the only
-// thing it tells VaultChat is a turn notification whose kinds are
+// thing it tells crazzychat is a turn notification whose kinds are
 // turn | invite | friend — there is NO game-over event and no results endpoint.
 // So the only party that ever learns how a game ended is the device that was
 // playing it, from the final snapshot on its own socket. That makes the device

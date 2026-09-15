@@ -55,10 +55,10 @@ console.log('\nNotification content:');
 check('name-only shows the chat name and no message text',
   JSON.stringify(notifContent('name', 'Alice')) === JSON.stringify({ title: 'Alice', body: 'New message' }));
 check('generic names neither the chat nor the message',
-  JSON.stringify(notifContent('generic', 'Alice')) === JSON.stringify({ title: 'VaultChat', body: 'New message' }));
+  JSON.stringify(notifContent('generic', 'Alice')) === JSON.stringify({ title: 'crazzychat', body: 'New message' }));
 check('hidden raises nothing at all', notifContent('hidden', 'Alice') === null);
 check('a missing chat name never falls through as an empty title',
-  notifContent('name', '')?.title === 'VaultChat');
+  notifContent('name', '')?.title === 'crazzychat');
 check('no mode ever carries message text',
   (['name', 'generic', 'hidden'] as const).every(m => {
     const c = notifContent(m, 'Alice');

@@ -40,7 +40,7 @@ export async function checkPasswordPwned(password: string): Promise<number> {
 export async function checkEmailBreaches(email: string, key: string): Promise<Breach[]> {
   const res = await fetch(
     `https://haveibeenpwned.com/api/v3/breachedaccount/${encodeURIComponent(email)}?truncateResponse=false`,
-    { headers: { 'hibp-api-key': key, 'User-Agent': 'VaultChat-SecurityApp' } },
+    { headers: { 'hibp-api-key': key, 'User-Agent': 'crazzychat-SecurityApp' } },
   );
   if (res.status === 404) return [];
   if (res.status === 401) throw new Error('Invalid HIBP API key');

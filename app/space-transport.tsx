@@ -281,7 +281,7 @@ export default function SpaceTransportScreen() {
                 <Ionicons name="map-outline" size={16} color="#fff" />
                 <Text style={s.btnText}>Live {kindWord}</Text>
               </TouchableOpacity>
-              {/* Calling goes through VaultChat's existing call stack, and only
+              {/* Calling goes through crazzychat's existing call stack, and only
                   when the server actually named a driver. */}
               {run.driverId && (
                 <TouchableOpacity

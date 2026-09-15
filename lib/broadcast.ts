@@ -2,11 +2,11 @@
 //
 // THE ONE THING THIS MODULE MUST NOT GET WRONG
 // --------------------------------------------
-// Broadcast is the only VaultChat mode that is NOT end-to-end encrypted: the
+// Broadcast is the only crazzychat mode that is NOT end-to-end encrypted: the
 // audience is unbounded and receives HLS from a CDN, so there is no key
 // exchange that could reach them. The server returns `e2ee` on every session
 // and the UI renders it from that value — never from an assumption about the
-// mode. In an app called VaultChat, a padlock shown over a stream that has none
+// mode. In an app called crazzychat, a padlock shown over a stream that has none
 // is worse than any crash.
 
 import { api } from './api';

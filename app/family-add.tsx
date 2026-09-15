@@ -18,7 +18,7 @@
 // — so the consent path is identical wherever you invite from. Params accept
 // circleId/circleName (family) or chatId/name (group).
 //
-// The invite code stays as the fallback for someone who is NOT yet a VaultChat
+// The invite code stays as the fallback for someone who is NOT yet a crazzychat
 // contact. It was previously the ONLY way in, which is why adding family was
 // hard: the person you most want in your circle is almost always already in
 // your chat list.
@@ -146,7 +146,7 @@ export default function FamilyAddScreen() {
     try {
       const code = await circleInviteCode(String(circleId));
       await Share.share({
-        message: `Join "${circleName || 'my space'}" on VaultChat.\nCode: ${code}`,
+        message: `Join "${circleName || 'my space'}" on crazzychat.\nCode: ${code}`,
       });
     } catch (e: any) {
       Alert.alert('Invite', e?.message ?? 'Could not create an invite.');
@@ -232,7 +232,7 @@ export default function FamilyAddScreen() {
         />
       )}
 
-      {/* Fallback for people who aren't on VaultChat / not yet a contact. */}
+      {/* Fallback for people who aren't on crazzychat / not yet a contact. */}
       <TouchableOpacity onPress={shareCode} style={s.codeRow} activeOpacity={0.7}>
         <Ionicons name="key-outline" size={18} color={colors.primary} />
         <Text style={s.codeTxt}>Not in your contacts? Share an invite code</Text>

@@ -573,7 +573,7 @@ export interface CustomerPending {
   pending: number;
   /**
    * True when this party is a WALK-IN (shopbook_khata_customer), not a
-   * VaultChat account. The two live in different columns of shopbook_ledger and
+   * crazzychat account. The two live in different columns of shopbook_ledger and
    * `shopbook_ledger_party_ck` rejects a row that sets both, so every write has
    * to know which one it is dealing with.
    */
@@ -835,7 +835,7 @@ export function addLedgerEntry(
 }
 
 // ── walk-in khata customers (migrations 111/112) ──────────────────
-// A customer with no VaultChat account: the person who walks in, takes goods on
+// A customer with no crazzychat account: the person who walks in, takes goods on
 // credit and is known to the shop by a name and a phone number.
 
 export interface KhataCustomer {
@@ -894,7 +894,7 @@ export function issueKhataReceipt(ledgerId: string) {
     `/shopbook/my-shop/ledger/${ledgerId}/receipt`, { method: 'POST' });
 }
 
-/** Cash sale to someone who is not a VaultChat user. Writes no ledger entry —
+/** Cash sale to someone who is not a crazzychat user. Writes no ledger entry —
  *  nothing is owed, so it must not appear as a debt. */
 export function counterSale(name: string, phone: string, items: LedgerItem[]) {
   return api<{ id: string; total: number }>(`/shopbook/my-shop/counter-sale`, {

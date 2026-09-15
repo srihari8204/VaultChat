@@ -14,7 +14,7 @@
 // Since Android 13 the system shows a floating preview of whatever was just
 // copied, and an app suppresses the text in it by putting
 // ClipDescription.EXTRA_IS_SENSITIVE (`android.content.extra.IS_SENSITIVE`) in
-// the ClipData's extras. So a VaultChat message copied here is still previewed
+// the ClipData's extras. So a crazzychat message copied here is still previewed
 // on screen for a couple of seconds regardless of the auto-clear below.
 //
 // It is not fixed here because it CANNOT be from JS: expo-clipboard's

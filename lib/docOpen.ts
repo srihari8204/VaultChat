@@ -11,7 +11,7 @@
 //                                      An https URL handed to the SYSTEM
 //                                      BROWSER, which holds no bearer token —
 //                                      so the Files tab answered 401, and a
-//                                      VaultChat attachment URL left the app.
+//                                      crazzychat attachment URL left the app.
 //                                      For encrypted files it passed a file://
 //                                      path to Linking, which Android refuses
 //                                      outright (FileUriExposedException).

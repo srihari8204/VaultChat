@@ -34,7 +34,7 @@ function check(name: string, ok: boolean, detail?: string) {
   console.log(`  ${ok ? '✓' : '✗'} ${name}${ok || !detail ? '' : `  (${detail})`}`);
 }
 
-const MARK = 'VAULTCHATMARKER';
+const MARK = 'CRAZZYCHATMARKER';
 
 /** What each generated fixture must yield. Anything else is reported, not asserted. */
 const EXPECT: Record<string, { ok: boolean; must?: string[]; why: string }> = {

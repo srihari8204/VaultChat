@@ -57,7 +57,7 @@ function makeBackend() {
 }
 
 (async () => {
-  console.log('\nVaultChat E2EE session-layer self-test\n──────────────────────────────────────');
+  console.log('\ncrazzychat E2EE session-layer self-test\n──────────────────────────────────────');
 
   const backend = makeBackend();
   const aliceKV = makeKV();

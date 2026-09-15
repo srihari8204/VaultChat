@@ -64,7 +64,7 @@ export async function setSoundEnabled(on: boolean): Promise<void> {
  * Game sound must duck under a call, not fight it.
  *
  * `MixWithOthers` + not staying active in the background means a table left
- * open never holds the audio session, and a ringtone or a VaultChat call is
+ * open never holds the audio session, and a ringtone or a crazzychat call is
  * never talked over by a dice roll.
  */
 async function prepare(): Promise<void> {

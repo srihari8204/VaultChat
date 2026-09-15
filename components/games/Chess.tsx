@@ -116,7 +116,7 @@ type ThemeName = keyof typeof THEMES;
  * The reference client defaults to GREEN and persists the choice to
  * localStorage (chess.js: `if (!settings.board) settings.board = "green"`).
  * This port defaulted to `classic` — a theme the web does not even have — so
- * the board every VaultChat player saw was one no chess.com player would
+ * the board every crazzychat player saw was one no chess.com player would
  * recognise, and re-picking green every time the screen opened was the only
  * way to get it back. Same module-level read as the rummy sort preference, so
  * the first paint is already correct rather than flipping a frame later.

@@ -51,7 +51,7 @@ export type SecuritySignalType =
   | 'DEV_OPTIONS_ON'
   | 'HIGH_POWER_APP'          // an app holding device-admin / notif-listener / usage-access
   // ── network posture (on-device only; NOT a threat-intel service) ─────
-  | 'NETWORK_MITM'           // VaultChat's own TLS pin failed → active interception
+  | 'NETWORK_MITM'           // crazzychat's own TLS pin failed → active interception
   | 'PROXY_CONFIGURED'       // a system HTTP proxy is set
   | 'OPEN_WIFI'              // connected to an open / unencrypted Wi-Fi
   | (string & {});
@@ -144,16 +144,16 @@ export const BAND_META: Record<RiskBand, { label: string; color: string; blurb: 
 
 // Per-signal recommended action for the dashboard's "Recommended actions" list.
 export const REMEDIATION: Record<string, string> = {
-  ROOT_DETECTED:            'This device is rooted. Use VaultChat on an unrooted device for sensitive chats.',
-  JAILBREAK_DETECTED:       'This device is jailbroken. Use VaultChat on a non-jailbroken device for sensitive chats.',
+  ROOT_DETECTED:            'This device is rooted. Use crazzychat on an unrooted device for sensitive chats.',
+  JAILBREAK_DETECTED:       'This device is jailbroken. Use crazzychat on a non-jailbroken device for sensitive chats.',
   SU_BINARY_FOUND:          'A superuser binary was found. Remove root access or switch devices.',
   MAGISK_DETECTED:          'Magisk was detected. Root hiding cannot be fully verified — treat this device as untrusted.',
   FRIDA_DETECTED:           'Instrumentation tooling is active. Close it and restart your device.',
-  DEBUGGER_ATTACHED:        'A debugger is attached to VaultChat. Disconnect it.',
+  DEBUGGER_ATTACHED:        'A debugger is attached to crazzychat. Disconnect it.',
   HOOK_FRAMEWORK:           'A code-hooking framework may be active. Disable Xposed/LSPosed-type modules.',
-  EMULATOR_DETECTED:        'VaultChat is running on an emulator. Use a physical device for real accounts.',
-  APK_RESIGNED:             'This build was re-signed and is not the official VaultChat. Reinstall from the official source.',
-  APK_UNOFFICIAL:           'This build is unofficial. Reinstall VaultChat from the official source.',
+  EMULATOR_DETECTED:        'crazzychat is running on an emulator. Use a physical device for real accounts.',
+  APK_RESIGNED:             'This build was re-signed and is not the official crazzychat. Reinstall from the official source.',
+  APK_UNOFFICIAL:           'This build is unofficial. Reinstall crazzychat from the official source.',
   INTEGRITY_VERDICT_FAILED: 'The device failed an app-integrity check. Update your OS and reinstall from the official source.',
   ACCESSIBILITY_RISK:       'An accessibility service you may not recognise is enabled. Review it in Settings → Accessibility.',
   OVERLAY_RISK:             'An app can draw over the screen. Review "Display over other apps" in Settings.',

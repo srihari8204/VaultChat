@@ -45,7 +45,7 @@ export const DEFAULT_REMOTE_LINK_PREVIEWS = false;
 
 export const NOTIF_PREVIEW_OPTIONS: { value: NotifPreview; title: string; desc: string }[] = [
   { value: 'name',    title: 'Sender name',  desc: 'Chat name, no message text' },
-  { value: 'generic', title: 'Generic',      desc: 'Just “VaultChat — New message”' },
+  { value: 'generic', title: 'Generic',      desc: 'Just “crazzychat — New message”' },
   { value: 'hidden',  title: 'No notification', desc: 'Nothing appears in the tray' },
 ];
 
@@ -58,8 +58,8 @@ export function notifContent(
   chatName: string,
 ): { title: string; body: string } | null {
   if (mode === 'hidden') return null;
-  if (mode === 'generic') return { title: 'VaultChat', body: 'New message' };
-  return { title: chatName || 'VaultChat', body: 'New message' };
+  if (mode === 'generic') return { title: 'crazzychat', body: 'New message' };
+  return { title: chatName || 'crazzychat', body: 'New message' };
 }
 
 // ── storage ──────────────────────────────────────────────────────────

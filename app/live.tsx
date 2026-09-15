@@ -4,7 +4,7 @@
 // NOT end-to-end encrypted — the audience is unbounded and receives HLS from a
 // CDN, so no key exchange can reach them. That is stated to the user here,
 // before they publish anything, rather than buried in settings: in an app
-// called VaultChat, someone going live has every reason to assume the same
+// called crazzychat, someone going live has every reason to assume the same
 // protection their calls have, and they would be wrong.
 //
 // The banner reads `e2ee` from the server rather than hardcoding "not
@@ -196,7 +196,7 @@ pathname: '/live-view' as any, params: {
             </View>
             <AppText style={[S.segmentHint, { color: colors.textFaint }]}>
               {visibility === 'public'
-                ? 'Anyone on VaultChat can find and watch this.'
+                ? 'Anyone on crazzychat can find and watch this.'
                 : 'Only people you invite can watch. It will not appear in Live now.'}
             </AppText>
 

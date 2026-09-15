@@ -100,9 +100,9 @@ export function canWakeForCalls(outcome: PushOutcome | null): boolean {
 export function pushWarningText(outcome: PushOutcome | null): string | null {
   switch (outcome) {
     case 'no_provider':
-      return 'Calls will not ring while VaultChat is closed on this device, because Google Play Services is unavailable. Keep the app open to receive calls.';
+      return 'Calls will not ring while crazzychat is closed on this device, because Google Play Services is unavailable. Keep the app open to receive calls.';
     case 'transient':
-      return 'VaultChat could not register for call notifications. Calls may not ring while the app is closed.';
+      return 'crazzychat could not register for call notifications. Calls may not ring while the app is closed.';
     // 'ok' and 'no_platform' need no warning, and 'not_signed_in' resolves
     // itself the moment the user signs in — warning about it would be noise.
     default:

@@ -236,7 +236,7 @@ class VaultBeamForegroundService : Service() {
         if (wakeLock?.isHeld == true) return
         try {
             val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
-            wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "VaultChat:vaultbeam").apply {
+            wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "crazzychat:vaultbeam").apply {
                 setReferenceCounted(false)
                 acquire(4L * 60L * 60L * 1000L)   // hard ceiling; stop() releases far sooner
             }

@@ -666,7 +666,7 @@ export default function ChatsScreen() {
             <SheetItem icon="timer-outline" label="1 hour" onPress={() => startTemporary(3600)} />
             <SheetItem icon="timer-outline" label="3 hours" onPress={() => startTemporary(10800)} />
             {/* The other half of the same question. Both rows above need someone
-                already reachable — a contact, or a number on VaultChat. These two
+                already reachable — a contact, or a number on crazzychat. These two
                 are for the person in front of you who is neither: a code opens
                 the chat, so no number changes hands. Same sheet because "talk to
                 someone without keeping it" is one intent, not two. */}

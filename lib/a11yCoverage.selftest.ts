@@ -58,7 +58,13 @@ import path from 'node:path';
 // calls, the shared ui/Header back arrow, the in-call chat's close and send,
 // and the voice-message play/pause in the bubble, whose label states which it
 // will do next.
-const BUDGET = 107;
+//
+// 107 → 102: the sign-up chain's night-sky restyle. The back arrows on
+// email-verify, onboard-profile, onboard-security and mpin-recover became
+// labelled Pressables like the one app/mpin-entry.tsx already had — four
+// buttons. The fifth came free: the rebrand sweep in flight alongside it had
+// already labelled one more, so the tree measured 106 before this change.
+const BUDGET = 102;
 
 const ROOTS = ['app', 'components'];
 const SKIP_DIR = /node_modules|\.expo|android|ios|dist|build/;

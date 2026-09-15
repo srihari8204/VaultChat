@@ -1,4 +1,4 @@
-// components/finance/useMe.ts — resolve the current VaultChat user for tagging
+// components/finance/useMe.ts — resolve the current crazzychat user for tagging
 // on-device finance rows. Falls back to a stable 'local' id when signed out.
 
 import { useEffect, useState } from 'react';

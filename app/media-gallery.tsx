@@ -254,7 +254,7 @@ export default function MediaGalleryScreen() {
     // This used to be Linking.openURL(r.uri), and it could not work either way
     // round. For a plaintext attachment `r.uri` is the /uploads URL and the
     // headers were dropped, so the file opened in the SYSTEM BROWSER — which
-    // holds no bearer token and so rendered a 401, after taking a VaultChat
+    // holds no bearer token and so rendered a 401, after taking a crazzychat
     // attachment URL out of the app. For an encrypted one `r.uri` is a file://
     // path, and handing that to another app is what Android's StrictMode kills
     // with FileUriExposedException. The Files tab was broken in both branches.

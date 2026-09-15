@@ -1,27 +1,30 @@
 // app/mpin-recover.tsx — Forgot MPIN. Phase 1: answer your security questions
 // (≥3 must match) → recovery ticket. Phase 2: set + confirm a new 6-digit MPIN
 // (weak rejected) → logged in → Chats.
+//
+// Reached from app/mpin-entry.tsx, so it keeps that screen's fixed night
+// palette rather than the app theme — see the always-dark note in
+// components/ui/Brand.tsx.
 
 import { HEADER_TOP } from '../constants/layout';
 import { Ionicons } from '@expo/vector-icons';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
-  ActivityIndicator, Alert, Animated, Platform,
-  ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View,
+  ActivityIndicator, Alert, Animated, Pressable,
+  ScrollView, StyleSheet, Text, TextInput, View,
 } from 'react-native';
-import { type Palette } from '../constants/theme';
-import { useTheme } from '../lib/theme';
+import { LinearGradient } from 'expo-linear-gradient';
+import { BRAND_GRADIENT_CTA } from '../constants/theme';
 import { questionLabel } from '../constants/securityQuestionPool';
 import { MpinInput } from '../components/auth/MpinInput';
 import {
   getRecoveryQuestions, verifyRecoveryAnswers, recoverMpin, onboarding, onboardingError,
 } from '../lib/onboarding';
-import { AuroraBackground, KeyboardSafe } from '../components/ui';
+import { AuthSky, BrandMark, KeyboardSafe } from '../components/ui';
+import { AUTH } from '../constants/authTheme';
 
 export default function MpinRecover() {
-  const { colors } = useTheme();
-  const s = useMemo(() => makeStyles(colors), [colors]);
   const router = useRouter();
   const { userId } = useLocalSearchParams<{ userId: string }>();
 
@@ -84,52 +87,88 @@ export default function MpinRecover() {
     }
   };
 
+  const canVerify = filled >= 3 && !busy;
+
   return (
     <View style={s.screen}>
-      <AuroraBackground />
+      <AuthSky />
       <Stack.Screen options={{ headerShown: false }} />
       <KeyboardSafe style={{ flex: 1 }} >
         <ScrollView contentContainerStyle={s.body} keyboardShouldPersistTaps="handled">
-          <TouchableOpacity onPress={() => router.back()} style={s.back}><Ionicons name="arrow-back" size={24} color={colors.text} /></TouchableOpacity>
+          <Pressable
+            onPress={() => router.back()}
+            style={s.back}
+            accessibilityRole="button"
+            accessibilityLabel="Go back"
+            hitSlop={10}
+          >
+            <Ionicons name="arrow-back" size={24} color={AUTH.text} />
+          </Pressable>
 
-          {phase === 'loading' && <ActivityIndicator color={colors.primary} style={{ marginTop: 80 }} />}
+          {phase === 'loading' && <ActivityIndicator color={AUTH.accent} style={{ marginTop: 80 }} />}
 
           {phase === 'answer' && (
             <>
-              <Text style={s.title}>Reset your MPIN</Text>
-              <Text style={s.sub}>Answer at least 3 of your security questions.</Text>
-              <View style={{ height: 12 }} />
-              {questions.map((q, i) => (
-                <View key={q} style={{ marginBottom: 16 }}>
-                  <Text style={s.qLabel}>{i + 1}. {questionLabel(q)}</Text>
-                  <TextInput
-                    style={s.input}
-                    value={answers[q] ?? ''}
-                    onChangeText={(t) => { setAnswers(prev => ({ ...prev, [q]: t })); setError(null); }}
-                    placeholder="Your answer"
-                    placeholderTextColor={colors.textFaint}
-                    autoCapitalize="none" autoCorrect={false} secureTextEntry
-                  />
-                </View>
-              ))}
-              {!!error && <Text style={s.error}>{error}</Text>}
-              <TouchableOpacity style={[s.cta, filled < 3 && s.ctaOff]} onPress={verify} disabled={filled < 3 || busy} activeOpacity={0.85}>
-                {busy ? <ActivityIndicator color="#fff" /> : <Text style={s.ctaTxt}>Verify ({filled}/3+)</Text>}
-              </TouchableOpacity>
+              <View style={s.head}>
+                <BrandMark size={52} markOnly />
+                <Text style={s.title}>Reset your MPIN</Text>
+                <Text style={s.sub}>Answer at least 3 of your security questions.</Text>
+              </View>
+
+              {/* All the questions in one card — they are one proof of identity,
+                  not a list of unrelated fields. */}
+              <View style={s.card}>
+                {questions.map((q, i) => (
+                  <View key={q} style={s.qBlock}>
+                    <Text style={s.qLabel}>{i + 1}. {questionLabel(q)}</Text>
+                    <TextInput
+                      style={s.input}
+                      value={answers[q] ?? ''}
+                      onChangeText={(t) => { setAnswers(prev => ({ ...prev, [q]: t })); setError(null); }}
+                      placeholder="Your answer"
+                      placeholderTextColor={AUTH.faint}
+                      autoCapitalize="none" autoCorrect={false} secureTextEntry
+                    />
+                  </View>
+                ))}
+              </View>
+
+              {!!error && <Text style={s.error} accessibilityLiveRegion="polite">{error}</Text>}
+
+              <Pressable
+                onPress={verify}
+                disabled={!canVerify}
+                accessibilityRole="button"
+                accessibilityLabel="Verify your answers"
+                accessibilityState={{ disabled: !canVerify, busy }}
+                style={({ pressed }) => [s.ctaWrap, filled < 3 && s.ctaOff, pressed && canVerify && s.ctaDown]}
+              >
+                <LinearGradient
+                  colors={[...BRAND_GRADIENT_CTA]}
+                  start={{ x: 0, y: 0 }}
+                  end={{ x: 1, y: 1 }}
+                  style={s.cta}
+                >
+                  {busy ? <ActivityIndicator color="#fff" /> : <Text style={s.ctaTxt}>Verify ({filled}/3+)</Text>}
+                </LinearGradient>
+              </Pressable>
             </>
           )}
 
           {phase === 'setmpin' && (
-            <View style={{ alignItems: 'center', paddingTop: 20 }}>
+            <View style={s.head}>
+              <BrandMark size={52} markOnly />
               <Text style={s.title}>{mpinPhase === 'set' ? 'New MPIN' : 'Confirm MPIN'}</Text>
               <Text style={s.sub}>{mpinPhase === 'set' ? 'Choose a new 6-digit PIN' : 'Re-enter to confirm'}</Text>
-              <View style={{ marginVertical: 28 }}>
-                {busy ? <ActivityIndicator color={colors.primary} size="large" />
+
+              <View style={s.pinCard}>
+                {busy ? <ActivityIndicator color={AUTH.accent} size="large" />
                   : mpinPhase === 'set'
-                    ? <MpinInput key="set" value={first} onChange={setFirst} onComplete={onSet} autoFocus shakeAnim={shake} />
-                    : <MpinInput key="confirm" value={confirm} onChange={setConfirm} onComplete={onConfirm} autoFocus shakeAnim={shake} />}
+                    ? <MpinInput key="set" value={first} onChange={setFirst} onComplete={onSet} autoFocus shakeAnim={shake} onDark />
+                    : <MpinInput key="confirm" value={confirm} onChange={setConfirm} onComplete={onConfirm} autoFocus shakeAnim={shake} onDark />}
               </View>
-              {!!error && <Text style={s.error}>{error}</Text>}
+
+              {!!error && <Text style={s.error} accessibilityLiveRegion="polite">{error}</Text>}
             </View>
           )}
         </ScrollView>
@@ -138,17 +177,53 @@ export default function MpinRecover() {
   );
 }
 
-const makeStyles = (c: Palette) => StyleSheet.create({
+const s = StyleSheet.create({
   screen: { flex: 1, backgroundColor: 'transparent' },
   body: { padding: 24, paddingTop: HEADER_TOP, paddingBottom: 48 },
-  back: { marginBottom: 8 },
-  backTxt: { color: c.text, fontSize: 26 },
-  title: { color: c.text, fontSize: 24, fontWeight: '900' },
-  sub: { color: c.textDim, fontSize: 14, marginTop: 8, textAlign: 'center' },
-  qLabel: { color: c.textDim, fontSize: 13, fontWeight: '600', marginBottom: 6, lineHeight: 18 },
-  input: { minHeight: 50, borderRadius: 12, borderWidth: 1, borderColor: c.glassStroke, backgroundColor: c.glassSoft, paddingHorizontal: 14, paddingVertical: 12, color: c.text, fontSize: 15 },
-  error: { color: c.danger, fontSize: 13, marginTop: 6, textAlign: 'center', fontWeight: '600' },
-  cta: { marginTop: 12, height: 56, borderRadius: 16, backgroundColor: c.primary, alignItems: 'center', justifyContent: 'center' },
-  ctaOff: { opacity: 0.4 },
-  ctaTxt: { color: '#fff', fontSize: 16, fontWeight: '800' },
+  back: { marginBottom: 8, alignSelf: 'flex-start' },
+
+  head: { alignItems: 'center' },
+  title: { color: AUTH.text, fontSize: 24, fontWeight: '900' },
+  sub: { color: AUTH.dim, fontSize: 14, marginTop: 8, textAlign: 'center' },
+
+  card: {
+    alignSelf: 'stretch',
+    marginTop: 20,
+    backgroundColor: AUTH.card,
+    borderColor: AUTH.stroke,
+    borderWidth: 1,
+    borderRadius: 22,
+    padding: 18,
+    paddingBottom: 2,      // the last question block carries its own margin
+  },
+  qBlock: { marginBottom: 16 },
+  qLabel: { color: AUTH.dim, fontSize: 13, fontWeight: '600', marginBottom: 6, lineHeight: 18 },
+  // Fainter than the card it sits in: card-on-card at the same alpha reads as a
+  // rendering bug rather than a field.
+  input: {
+    minHeight: 50, borderRadius: 12, borderWidth: 1, borderColor: AUTH.stroke,
+    backgroundColor: AUTH.hairline, paddingHorizontal: 14, paddingVertical: 12,
+    color: AUTH.text, fontSize: 15,
+  },
+
+  pinCard: {
+    alignSelf: 'stretch',
+    alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: 104,
+    marginVertical: 28,
+    backgroundColor: AUTH.card,
+    borderColor: AUTH.stroke,
+    borderWidth: 1,
+    borderRadius: 22,
+    padding: 18,
+  },
+
+  error: { color: AUTH.danger, fontSize: 13, marginTop: 10, textAlign: 'center', fontWeight: '600' },
+
+  ctaWrap: { marginTop: 20, borderRadius: 16, overflow: 'hidden' },
+  cta: { height: 56, alignItems: 'center', justifyContent: 'center' },
+  ctaOff: { opacity: 0.38 },
+  ctaDown: { opacity: 0.88 },
+  ctaTxt: { color: '#fff', fontSize: 16, fontWeight: '800', letterSpacing: 0.2 },
 });

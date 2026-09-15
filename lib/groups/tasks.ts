@@ -2,7 +2,7 @@
 //
 // WHY TASKS ARE MESSAGES
 // A task list needs offline creation, eventual consistency across devices, and
-// end-to-end encryption. VaultChat's message pipeline already provides all
+// end-to-end encryption. crazzychat's message pipeline already provides all
 // three: an outbox that survives being offline, delta sync, and E2EE where the
 // server stores ciphertext it cannot read. Building a separate tasks table
 // would mean reimplementing each of those, and would hand the server a

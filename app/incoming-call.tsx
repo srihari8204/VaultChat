@@ -41,7 +41,7 @@ export default function IncomingCallScreen() {
   // Who is calling.
   //
   // peerName rides on the call signal, and it arrives EMPTY often enough that
-  // an incoming call routinely announced itself as "VaultChat user" — the one
+  // an incoming call routinely announced itself as "crazzychat user" — the one
   // thing the screen exists to tell you. The signal is not the only source of
   // truth though: to be called at all we must already share a chat, so the name
   // is sitting in our own chat store. Look it up rather than depending on what
@@ -65,7 +65,7 @@ export default function IncomingCallScreen() {
   }, [chatId, peerName, isGroup]);
 
   /** Best name we have, in order of freshness. */
-  const displayName = (peerName || lookedUpName || 'VaultChat user');
+  const displayName = (peerName || lookedUpName || 'crazzychat user');
   // What we hand to the NEXT screen. Never displayName: that may already be the
   // placeholder, and the call screen's own getChat lookup is guarded on the name
   // being blank — so passing the placeholder forward would disable the one

@@ -39,7 +39,7 @@ function makeBundle() {
   return { bobIK, bobSPK, bundle };
 }
 
-console.log(`\nVaultChat E2EE benchmark — node ${process.version} on ${process.platform}/${process.arch}\n`);
+console.log(`\ncrazzychat E2EE benchmark — node ${process.version} on ${process.platform}/${process.arch}\n`);
 
 // ── X3DH: the first message to a NEW peer pays this once ───────────────
 // The peer's bundle comes off the wire, so generating it is NOT part of what a

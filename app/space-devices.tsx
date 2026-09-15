@@ -173,7 +173,7 @@ export default function SpaceDevicesScreen() {
           <View style={s.card}>
             <Text style={s.cardTitle}>No devices yet</Text>
             <Text style={s.muted}>
-              Add a phone, a vehicle or a bag to keep track of. A phone running VaultChat can
+              Add a phone, a vehicle or a bag to keep track of. A phone running crazzychat can
               also be locked or made to ring remotely; anything else can be listed and have its
               alerts recorded.
             </Text>
@@ -251,7 +251,7 @@ export default function SpaceDevicesScreen() {
             {open && !open.appBacked ? (
               <View style={s.card}>
                 <Text style={s.muted}>
-                  Remote actions need VaultChat running on the device itself. This one is tracked
+                  Remote actions need crazzychat running on the device itself. This one is tracked
                   as an item, so its alerts and history are kept, but it cannot be locked, rung or
                   erased from here.
                 </Text>
@@ -327,7 +327,7 @@ export default function SpaceDevicesScreen() {
             </View>
             {kind !== 'phone' && (
               <Text style={s.footnote}>
-                Only a phone running VaultChat can be locked or rung remotely. This will be
+                Only a phone running crazzychat can be locked or rung remotely. This will be
                 tracked as an item.
               </Text>
             )}

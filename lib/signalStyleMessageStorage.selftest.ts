@@ -22,7 +22,7 @@
 // message_send_log(content BLOB) exists, but that is retained ciphertext for
 // RESEND, not the render path.
 //
-// VaultChat had two stores: messages.content (nulled for own messages, because
+// crazzychat had two stores: messages.content (nulled for own messages, because
 // the POST ack carries an envelope) and a separate e2ee KV cache the render
 // path never consulted. That is what showed "unable to decrypt" on the sender's
 // own text after a restart.

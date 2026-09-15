@@ -61,7 +61,7 @@ function bootstrap(withOpk = true): { a: RatchetState; b: RatchetState; skMatch:
 const enc = (s: RatchetState, m: string): Envelope => ratchetEncrypt(s, utf8(m));
 const dec = (s: RatchetState, e: Envelope): string => fromUtf8(ratchetDecrypt(s, e));
 
-console.log('\nVaultChat E2EE core self-test\n──────────────────────────────');
+console.log('\ncrazzychat E2EE core self-test\n──────────────────────────────');
 
 // 1. X3DH agreement (with and without one-time prekey)
 console.log('X3DH key agreement:');

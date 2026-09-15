@@ -18,7 +18,7 @@
 // THE NAME IS OPTIONAL, and only private asks at all. A broadcast audience is
 // not a contact list — it can include people the host has never messaged — so
 // the joiner gets to decide what a room of strangers sees. Leave it blank and
-// the registered VaultChat name is used, which is exactly what a PUBLIC live
+// the registered crazzychat name is used, which is exactly what a PUBLIC live
 // shows and asks nobody about. Both answers resolve in one place server-side
 // (broadcast_social.go: COALESCE(NULLIF(display_name,''), users.name)), so the
 // two can never disagree.
@@ -155,7 +155,7 @@ export default function LiveJoinScreen() {
           <Text numberOfLines={1} style={s.sub}>
             {name.trim()
               ? 'This is the name other viewers will see.'
-              : 'Leave this blank to use your VaultChat name.'}
+              : 'Leave this blank to use your crazzychat name.'}
           </Text>
 
           <Text style={s.label}>Your name (optional)</Text>
@@ -163,7 +163,7 @@ export default function LiveJoinScreen() {
             style={s.input}
             value={name}
             onChangeText={setName}
-            placeholder="Your VaultChat name"
+            placeholder="Your crazzychat name"
             placeholderTextColor={colors.textDim}
             maxLength={64}
             autoCapitalize="words"

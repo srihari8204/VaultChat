@@ -1170,7 +1170,7 @@ function publishChatDirectory(rows: ChatSummary[]): void {
     // AsyncStorage, so both title notifications with the local name.
     require('@react-native-async-storage/async-storage').default.setItem('vc_chat_dir_v1', json).catch(() => {});
     require('./messageNotifications').invalidateDirectory();
-  } catch { /* directory is best-effort — notification falls back to "VaultChat" */ }
+  } catch { /* directory is best-effort — notification falls back to "crazzychat" */ }
 }
 
 export async function getChat(chatId: string): Promise<ChatDetail> {
@@ -2141,8 +2141,8 @@ export async function deleteGroupEvent(chatId: string, eventId: number): Promise
 
 // ─── In-app membership (Groups & Circles, membership v2) ────────────
 //
-// EVERYTHING HAPPENS INSIDE VAULTCHAT. There is no link to share, no QR to
-// scan, no SMS and no WhatsApp hand-off. An invitation names a VaultChat
+// EVERYTHING HAPPENS INSIDE CRAZZYCHAT. There is no link to share, no QR to
+// scan, no SMS and no WhatsApp hand-off. An invitation names a crazzychat
 // account and is acted on by being signed in as that account.
 //
 // Three steps, not two, and which ones apply depends on the group's mode:
@@ -2245,7 +2245,7 @@ export interface NewInvitation {
 }
 
 /**
- * Invite one person. They must already be on VaultChat: address them by
+ * Invite one person. They must already be on crazzychat: address them by
  * userId, or by an email/phone that resolves to an account. A handle that
  * matches nobody is refused — there is no off-platform invitation to fall
  * back to.
@@ -2697,7 +2697,7 @@ export interface MatchedContact {
 
 /**
  * Send a batch of phone-hashes to the server; get back the matching
- * VaultChat users. Server caps at 5000 hashes/request and rate-limits
+ * crazzychat users. Server caps at 5000 hashes/request and rate-limits
  * the endpoint. Empty input → returns [].
  */
 export async function matchContacts(phoneHashes: string[]): Promise<MatchedContact[]> {

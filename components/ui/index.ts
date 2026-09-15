@@ -11,3 +11,4 @@ export { GlassCard, type GlassCardProps } from './GlassCard';
 export { GlassChip, type GlassChipProps } from './GlassChip';
 export { KeyboardSafe, type KeyboardSafeProps } from './KeyboardSafe';
 export { AuroraBackground, type AuroraVariant } from './AuroraBackground';
+export { AuthSky, BrandMark, StepRail, type BrandMarkProps, type StepRailProps } from './Brand';

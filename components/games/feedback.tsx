@@ -379,7 +379,7 @@ export function VoiceSheet({
 
       {denied && (
         <Text style={{ color: C.muted, fontSize: 12, lineHeight: 18 }}>
-          The microphone is blocked for VaultChat. Turn it on in your phone’s app settings, then join again — you can keep playing without it.
+          The microphone is blocked for crazzychat. Turn it on in your phone’s app settings, then join again — you can keep playing without it.
         </Text>
       )}
 

@@ -219,7 +219,7 @@ export default function GroupMembersScreen() {
         {avatar(m)}
         <View style={{ flex: 1, minWidth: 0 }}>
           <Text style={{ color: colors.text, fontWeight: '600', fontSize: 14.5 }} numberOfLines={1}>
-            {m.name ?? 'VaultChat user'}{isMe ? ' (you)' : ''}
+            {m.name ?? 'crazzychat user'}{isMe ? ' (you)' : ''}
           </Text>
           <View style={st.roleWrap}>
             <View style={[st.dot, { backgroundColor: ROLE_TONE[role] ?? colors.textDim }]} />
@@ -366,7 +366,7 @@ export default function GroupMembersScreen() {
                     {avatar(sheet, 46)}
                     <View style={{ flex: 1, minWidth: 0 }}>
                       <Text style={{ color: colors.text, fontWeight: '800', fontSize: 16 }} numberOfLines={1}>
-                        {sheet.name ?? 'VaultChat user'}
+                        {sheet.name ?? 'crazzychat user'}
                       </Text>
                       <Text style={{ color: colors.textDim, fontSize: 12.5 }}>
                         {ROLE_LABELS[role] ?? sheet.role} · {ROLE_BLURBS[role] ?? ''}

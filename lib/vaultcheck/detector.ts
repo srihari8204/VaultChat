@@ -5,7 +5,7 @@
 // This module is deliberately EMPTY of detection logic, and that is the
 // feature, not an oversight.
 //
-// VaultChat previously shipped a "World-First AI" deepfake detector whose score
+// crazzychat previously shipped a "World-First AI" deepfake detector whose score
 // was computed from JPEG base64 character-code variance plus `Math.random() * 7`
 // (constants/deepfakeDetection.ts, since deleted — see
 // docs/FEATURE_GAP_MATRIX.md). It produced confident-looking percentages that

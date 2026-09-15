@@ -69,12 +69,12 @@ const THREAT_LABELS: Record<string, { label: string; icon: string; desc: string 
   DEBUGGER_ATTACHED: {
     label: 'Debugger Attached',
     icon: '🐞',
-    desc: 'A debugger is attached to VaultChat and can read app memory.',
+    desc: 'A debugger is attached to crazzychat and can read app memory.',
   },
   APK_RESIGNED: {
     label: 'Unofficial Build',
     icon: '📦',
-    desc: 'This build’s signing certificate is not the one VaultChat ships.',
+    desc: 'This build’s signing certificate is not the one crazzychat ships.',
   },
   ACCESSIBILITY_RISK: {
     label: 'Accessibility Service',
@@ -104,7 +104,7 @@ const THREAT_LABELS: Record<string, { label: string; icon: string; desc: string 
   EMULATOR_DETECTED: {
     label: 'Emulator',
     icon: '📱',
-    desc: 'VaultChat is not permitted to run on emulators.',
+    desc: 'crazzychat is not permitted to run on emulators.',
   },
   ADB_ENABLED: {
     label: 'ADB Enabled',
@@ -145,8 +145,8 @@ export default function BlockedScreen() {
     Alert.alert(
       'Contact Support',
       'Email: security@vaultchat.app\n\n' + (wiped
-        ? 'Your encryption keys were wiped to protect your data. To restore access, reinstall VaultChat on a clean, unrooted device.'
-        : 'Your encryption keys are still on this device. Clear the indicator below and reopen VaultChat to regain access.'),
+        ? 'Your encryption keys were wiped to protect your data. To restore access, reinstall crazzychat on a clean, unrooted device.'
+        : 'Your encryption keys are still on this device. Clear the indicator below and reopen crazzychat to regain access.'),
       [{ text: 'OK' }]
     );
   };
@@ -167,11 +167,11 @@ export default function BlockedScreen() {
           <Text style={styles.shieldIcon}>🛡️</Text>
         </View>
 
-        <Text style={styles.title}>VaultChat Blocked</Text>
+        <Text style={styles.title}>crazzychat Blocked</Text>
         <Text style={styles.subtitle}>
           {wiped
             ? 'A serious security threat was detected on this device. All encryption keys have been permanently wiped to protect your messages.'
-            : 'A security problem was detected on this device, so VaultChat has locked itself. Your encryption keys have NOT been wiped — access returns once the device is clean.'}
+            : 'A security problem was detected on this device, so crazzychat has locked itself. Your encryption keys have NOT been wiped — access returns once the device is clean.'}
         </Text>
 
         {/* Threat list */}
@@ -206,13 +206,13 @@ export default function BlockedScreen() {
           <Text style={styles.infoTitle}>What happened?</Text>
           <Text style={styles.infoText}>
             {wiped
-              ? 'VaultChat found strong evidence that this device is compromised. On a rooted or instrumented device, end-to-end encryption provides NO protection, because an attacker can read app memory directly.'
-              : 'VaultChat found an indicator it will not run alongside. This is a precaution, not proof that anything was read — but on this device the app cannot promise your messages stay private.'}
+              ? 'crazzychat found strong evidence that this device is compromised. On a rooted or instrumented device, end-to-end encryption provides NO protection, because an attacker can read app memory directly.'
+              : 'crazzychat found an indicator it will not run alongside. This is a precaution, not proof that anything was read — but on this device the app cannot promise your messages stay private.'}
           </Text>
           <Text style={styles.infoText}>
             {wiped
-              ? 'To protect you, VaultChat wiped all session keys, ratchet states and your Vault PIN from this device. Your messages remain encrypted on the server — no plaintext was exposed.'
-              : 'Nothing has been deleted. Your keys, your PIN and your messages are untouched on this device, and VaultChat will open normally once the indicator below is gone.'}
+              ? 'To protect you, crazzychat wiped all session keys, ratchet states and your Vault PIN from this device. Your messages remain encrypted on the server — no plaintext was exposed.'
+              : 'Nothing has been deleted. Your keys, your PIN and your messages are untouched on this device, and crazzychat will open normally once the indicator below is gone.'}
           </Text>
         </View>
 
@@ -223,14 +223,14 @@ export default function BlockedScreen() {
             'Unroot your device or use a clean stock ROM',
             'Remove Magisk, SuperSU, or any root manager',
             'Disable any Frida / instrumentation tools',
-            'Reinstall VaultChat from the Play Store',
+            'Reinstall crazzychat from the Play Store',
             'Verify your identity with OTP again',
           ] : [
             'Clear the indicator listed above',
             'Turn off USB debugging / developer options if they are on',
             'Disconnect any debugger or instrumentation tool',
             'Disable accessibility services you do not recognise',
-            'Reopen VaultChat — it re-checks on every launch',
+            'Reopen crazzychat — it re-checks on every launch',
           ]).map((step, i) => (
             <View key={i} style={styles.stepRow}>
               <View style={styles.stepNum}>
@@ -247,7 +247,7 @@ export default function BlockedScreen() {
         </TouchableOpacity>
 
         <Text style={styles.footer}>
-          VaultChat Security · AES-256-GCM · Signal Protocol
+          crazzychat Security · AES-256-GCM · Signal Protocol
         </Text>
       </ScrollView>
     </View>

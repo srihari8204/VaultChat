@@ -56,7 +56,7 @@ export default function CallReliabilityScreen() {
 
       <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 40 }}>
         <Text style={S.intro}>
-          To make sure calls ring even when VaultChat is closed, allow it to run in the background. This is required on most
+          To make sure calls ring even when crazzychat is closed, allow it to run in the background. This is required on most
           Android phones.
         </Text>
 
@@ -85,7 +85,7 @@ export default function CallReliabilityScreen() {
             <Ionicons name={battOk ? 'checkmark-circle' : 'battery-charging-outline'} size={22} color={battOk ? colors.online : colors.text} />
             <Text style={S.cardTitle}>1. Ignore battery optimization</Text>
           </View>
-          <Text style={S.cardBody}>Lets VaultChat receive a call while the app is closed or the screen is off.</Text>
+          <Text style={S.cardBody}>Lets crazzychat receive a call while the app is closed or the screen is off.</Text>
           <TouchableOpacity style={S.btn} onPress={async () => { await requestIgnoreBatteryOptimizations(); setBattOk(true); }}>
             <Text style={S.btnTxt}>Allow</Text>
           </TouchableOpacity>
@@ -116,7 +116,7 @@ export default function CallReliabilityScreen() {
         {Platform.OS === 'android' && battOk && autoOk && (
           <View style={S.okBar}>
             <Ionicons name="shield-checkmark" size={18} color={colors.online} />
-            <Text style={S.okTxt}>You’re set — calls should ring even when VaultChat is closed.</Text>
+            <Text style={S.okTxt}>You’re set — calls should ring even when crazzychat is closed.</Text>
           </View>
         )}
 

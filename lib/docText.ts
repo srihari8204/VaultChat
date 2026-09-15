@@ -28,7 +28,7 @@ export const MAX_DOC_BYTES = 32 * 1024 * 1024;
  * Bounding the input alone is not a bound. A 32 MB zip of repeated bytes
  * expands to many gigabytes, and unzipSync allocates all of it before anything
  * here gets a chance to look at it — the app is killed by the OS, which reads
- * to a user as "opening that file crashed VaultChat", not as a hostile file.
+ * to a user as "opening that file crashed crazzychat", not as a hostile file.
  * fflate's filter runs per entry BEFORE inflating it and sees the entry's
  * declared original size, so the running total is checked there and the whole
  * read is abandoned the moment it goes over.

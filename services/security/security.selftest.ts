@@ -21,7 +21,7 @@ function makeKV(): KV {
 const lvl = (sigs: ThreatSignal[]) => assessThreats(sigs).level;
 
 (async () => {
-  console.log('\nVaultChat security self-test\n──────────────────────────────');
+  console.log('\ncrazzychat security self-test\n──────────────────────────────');
 
   // Threat engine — graded response
   console.log('Threat engine:');

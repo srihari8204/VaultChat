@@ -135,7 +135,7 @@ check('chess decides the turn by colour, not by seat',
   'the shared seat-index helper always returns false for chess');
 
 // ── the look is shared, not re-invented per board ─────────────────────
-// The first native boards styled themselves from VaultChat's app palette and
+// The first native boards styled themselves from crazzychat's app palette and
 // came out looking like four different settings screens. The table has its own
 // identity and every board draws from it.
 for (const [name, src] of [['TicTacToe', TTT], ['Ludo', LUDO], ['Rummy', RUMMY]] as [string, string][]) {
@@ -157,7 +157,7 @@ for (const [name, src] of [['TicTacToe', TTT], ['Chess', CHESS], ['Ludo', LUDO],
   check(`${name} celebrates a win`, /<Confetti show=/.test(src));
   // openInvite(), not inviteToTable(): the invite now opens a chat picker and
   // posts a card into the thread, with the OS share sheet kept behind it as the
-  // way to reach someone who does not have VaultChat.
+  // way to reach someone who does not have crazzychat.
   check(`${name} can invite someone to the table`, /openInvite\(/.test(src));
   check(`${name} offers a rematch and a share`, /shareResult\(/.test(src) && /(Rematch|Play again|Deal again)/.test(src));
 }
@@ -168,7 +168,7 @@ const VOICE = readFileSync('lib/games/useTableVoice.ts', 'utf8');
 // Table voice has moved TWICE and these assertions have to move with it. It
 // began on the games server's own SFU (/api/voice/token — 404, and the
 // deployment reports sfu:false), became a peer-to-peer mesh port of the web
-// client, and is now a room on VaultChat's OWN LiveKit cluster, minted by our
+// client, and is now a room on crazzychat's OWN LiveKit cluster, minted by our
 // backend at POST /games/voice-token. The GUARANTEES are the same each time;
 // only the place that enforces them moves, so these follow the enforcement.
 check('voice asks the SERVER whether this player may speak',
@@ -179,7 +179,7 @@ check('voice asks the SERVER whether this player may speak',
 // is the argument for the current design. What must not come back is a call to
 // it — so this asserts the token comes from our own api() and that the games
 // origin is not reachable from this file at all.
-check('...and the token is minted by VaultChat, never by the games server',
+check('...and the token is minted by crazzychat, never by the games server',
   /api<VoiceToken>\('\/games\/voice-token'/.test(VOICE) && !/GAMES_HTTP/.test(VOICE),
   'the games server has no SFU and no token endpoint — asking it was the original bug');
 
@@ -210,7 +210,7 @@ check('the microphone cannot outlive the table',
 // TURN, and why this file no longer pins it directly.
 //
 // lib/games/turnWiring.selftest.ts used to assert that useTableVoice fetched
-// VaultChat's TURN list and handed it to each peer connection — the bug it was
+// crazzychat's TURN list and handed it to each peer connection — the bug it was
 // written for being that the mesh used the games server's STUN-only list and
 // never asked for ours, so a player behind CGNAT could not be heard and every
 // test still passed. Table voice now goes through joinSfuRoom, which fetches

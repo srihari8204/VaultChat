@@ -206,7 +206,7 @@ function VideoCallEngine() {
   // Who we are talking to. peerName is a route param and arrives EMPTY on
   // several paths — an incoming call whose signal carried no name, or an
   // outgoing one started from a list whose title had not loaded — so the call
-  // screen showed "VaultChat user". To be in a call we already share a chat, so
+  // screen showed "crazzychat user". To be in a call we already share a chat, so
   // the name is in our own store. Display only: nothing here touches the call,
   // and a failed lookup leaves the previous fallback in place.
   const [lookedUpName, setLookedUpName] = useState<string | null>(null);
@@ -220,7 +220,7 @@ function VideoCallEngine() {
     })().catch(() => { /* keep the fallback */ });
     return () => { cancelled = true; };
   }, [chatId, peerName]);
-  const displayName = peerName || lookedUpName || 'VaultChat user';
+  const displayName = peerName || lookedUpName || 'crazzychat user';
 
   const status      = useCallStatus();
   const connectedAt = useCallConnectedAt();
@@ -310,7 +310,7 @@ function VideoCallEngine() {
       //
       // enterPipMode() is Android's system picture-in-picture: it shrinks the
       // whole activity into a floating window, which lets you use OTHER apps
-      // and still leaves VaultChat itself unusable. Minimising in-app leaves
+      // and still leaves crazzychat itself unusable. Minimising in-app leaves
       // the call running behind <CallBar/> and hands the app back.
       engine.minimizeScreen();
       if (router.canGoBack()) router.back(); else router.replace('/(tabs)/chats' as any);
@@ -624,7 +624,7 @@ function VideoCallLegacy() {
       const incoming = isIncoming === 'true' || isIncoming === '1';
       const dir: 'incoming' | 'outgoing' | 'missed' = incoming ? (connectedRef.current ? 'incoming' : 'missed') : 'outgoing';
       const durationSec = elapsedSeconds(connectedAtRef.current);
-      addCallLog({ chatId, peerUid, peerName: peerName || 'VaultChat user', kind: 'video', direction: dir, at: Date.now() - durationSec * 1000, durationSec }).catch(() => {});
+      addCallLog({ chatId, peerUid, peerName: peerName || 'crazzychat user', kind: 'video', direction: dir, at: Date.now() - durationSec * 1000, durationSec }).catch(() => {});
       if (!incoming && !connectedRef.current && peerUid) {
         cancelCall(peerUid, String(chatId || peerUid)).catch(() => {});   // stop the callee's ring → missed call
       }
@@ -643,7 +643,7 @@ function VideoCallLegacy() {
 
   useEffect(() => {
     const me: ActiveCall = {
-      chatId, peerUid, peerName: peerName || 'VaultChat user', kind: 'video',
+      chatId, peerUid, peerName: peerName || 'crazzychat user', kind: 'video',
       hold: () => { heldRef.current = true; try {
         localStreamRef.current?.getAudioTracks?.().forEach((t: any) => { t.enabled = false; });
         localStreamRef.current?.getVideoTracks?.().forEach((t: any) => { t.enabled = false; });
@@ -672,7 +672,7 @@ function VideoCallLegacy() {
   useEffect(() => {
     if (state === 'connected' && !fgStartedRef.current) {
       fgStartedRef.current = true;
-      startCallForeground(String(chatId || peerUid || 'call'), peerName || 'VaultChat user', '', true);
+      startCallForeground(String(chatId || peerUid || 'call'), peerName || 'crazzychat user', '', true);
       dismissIncomingNotification();
     }
   }, [state, chatId, peerUid, peerName]);
@@ -801,7 +801,7 @@ function VideoCallLegacy() {
           // would put our DTLS-SRTP fingerprint and every candidate on the wire
           // in the clear too. (Same rule, same reason: lib/vaultBeamDirect.ts.)
           if (!cipher.enc) {
-            throw new Error("This call wasn't encrypted, so we didn't connect it. The caller is on an old version of VaultChat — ask them to update, then call again.");
+            throw new Error("This call wasn't encrypted, so we didn't connect it. The caller is on an old version of crazzychat — ask them to update, then call again.");
           }
           await pc.setRemoteDescription(new RTCSessionDescription(offerObj));
           const answer = await pc.createAnswer();
@@ -830,7 +830,7 @@ function VideoCallLegacy() {
           // fingerprint that anchors call-media encryption, so a server that
           // can rewrite it MITMs the call outright (lib/callCrypto.ts header).
           if (!sealed) {
-            throw new Error("Can't place an encrypted call — we couldn't get this person's encryption keys. Ask them to open VaultChat once (or update it), then try again.");
+            throw new Error("Can't place an encrypted call — we couldn't get this person's encryption keys. Ask them to open crazzychat once (or update it), then try again.");
           }
           cipherRef.current = sealed.cipher;
           // Flush what gathered while the key bundle was in flight, sealed with
@@ -848,7 +848,7 @@ function VideoCallLegacy() {
             from: meIdRef.current,
             chatId,
             type: 'video',
-            callerName: me.name ?? me.email ?? 'VaultChat user',
+            callerName: me.name ?? me.email ?? 'crazzychat user',
             offer: offerWire,
           };
           s.emit('call_incoming', ringPayload);
@@ -993,7 +993,7 @@ function VideoCallLegacy() {
 
       {/* Top bar: name + status (offset below the notch / status bar) */}
       <View style={[S.topBar, { top: insets.top + 8 }]} pointerEvents="none">
-        <Text style={S.name} numberOfLines={1}>{peerName || 'VaultChat user'}</Text>
+        <Text style={S.name} numberOfLines={1}>{peerName || 'crazzychat user'}</Text>
         {state === 'connected'
           ? <CallTimer style={S.status} startedAt={connectedAtRef.current} />
           : <Text style={S.status}>{statusText}</Text>}

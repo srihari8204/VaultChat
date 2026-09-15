@@ -48,5 +48,5 @@ export default function IndexScreen() {
 }
 
 const S = StyleSheet.create({
-  bg: { flex: 1, backgroundColor: "#010527" },
+  bg: { flex: 1, backgroundColor: "#010628" },
 });

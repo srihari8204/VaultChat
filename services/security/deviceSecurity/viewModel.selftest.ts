@@ -28,7 +28,7 @@ function snap(signals: ReturnType<typeof riskSignal>[], scannedAt: number) {
 }
 
 (async () => {
-  console.log('\nVaultChat dashboard view-model self-test\n────────────────────────────────────────────');
+  console.log('\ncrazzychat dashboard view-model self-test\n────────────────────────────────────────────');
 
   // ── Empty state (never scanned) ──────────────────────────────────
   console.log('Empty state:');

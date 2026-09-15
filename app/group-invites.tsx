@@ -1,4 +1,4 @@
-// app/group-invites.tsx — add people to a group, entirely inside VaultChat
+// app/group-invites.tsx — add people to a group, entirely inside crazzychat
 // (Groups & Circles, membership v2).
 //
 // WHAT IS NOT HERE, deliberately: no QR code, no shareable link, no SMS or
@@ -226,7 +226,7 @@ export default function GroupInvitesScreen() {
         </View>
 
         <Text style={{ color: colors.textFaint, fontSize: 11.5, marginTop: 8, lineHeight: 16 }}>
-          Search people you already chat with by name, or anyone on VaultChat by their exact
+          Search people you already chat with by name, or anyone on crazzychat by their exact
           email or phone number.
         </Text>
 
@@ -234,7 +234,7 @@ export default function GroupInvitesScreen() {
           <View style={[st.empty, { borderColor: colors.glassStroke }]}>
             <Ionicons name="person-outline" size={17} color={colors.textDim} />
             <Text style={{ color: colors.textDim, fontSize: 12.5, flex: 1, lineHeight: 17 }}>
-              Nobody found. They need a VaultChat account before they can be added — there is
+              Nobody found. They need a crazzychat account before they can be added — there is
               no invitation to send outside the app.
             </Text>
           </View>
@@ -245,7 +245,7 @@ export default function GroupInvitesScreen() {
             {avatar(c.name, c.photoURL)}
             <View style={{ flex: 1, minWidth: 0 }}>
               <Text style={{ color: colors.text, fontWeight: '600', fontSize: 14 }} numberOfLines={1}>
-                {c.name ?? 'VaultChat user'}
+                {c.name ?? 'crazzychat user'}
               </Text>
               {c.state !== 'invitable' && (
                 <Text style={{ color: colors.textDim, fontSize: 11.5 }}>{CANDIDATE_NOTE[c.state]}</Text>
@@ -283,7 +283,7 @@ export default function GroupInvitesScreen() {
             {avatar(p.name, p.photoURL)}
             <View style={{ flex: 1, minWidth: 0 }}>
               <Text style={{ color: colors.text, fontWeight: '600', fontSize: 14 }} numberOfLines={1}>
-                {p.name ?? 'VaultChat user'}
+                {p.name ?? 'crazzychat user'}
               </Text>
               <Text style={{ color: p.canApprove ? colors.primary : colors.textDim, fontSize: 11.5 }} numberOfLines={1}>
                 {p.requested ? 'Asked to join'
@@ -299,7 +299,7 @@ export default function GroupInvitesScreen() {
                   </TouchableOpacity>
                 )}
                 {p.canReject && (
-                  <TouchableOpacity accessibilityLabel={`Decline ${p.name ?? "VaultChat user"}`} onPress={() => decline(p)} style={st.rowBtn}>
+                  <TouchableOpacity accessibilityLabel={`Decline ${p.name ?? "crazzychat user"}`} onPress={() => decline(p)} style={st.rowBtn}>
                     <Ionicons name="close-circle" size={19} color={colors.danger} />
                   </TouchableOpacity>
                 )}
@@ -328,14 +328,14 @@ export default function GroupInvitesScreen() {
               </View>
               <View style={{ flex: 1, minWidth: 0 }}>
                 <Text style={{ color: colors.text, fontWeight: '600', fontSize: 14 }} numberOfLines={1}>
-                  {inv.name ?? inv.ref ?? 'VaultChat user'}
+                  {inv.name ?? inv.ref ?? 'crazzychat user'}
                 </Text>
                 <Text style={{ color: t, fontSize: 11.5 }}>{STATUS_LABEL[inv.status]}</Text>
               </View>
-              <TouchableOpacity accessibilityLabel={`Resend the invitation to ${inv.name ?? inv.ref ?? "VaultChat user"}`} onPress={() => doResend(inv)} style={st.rowBtn}>
+              <TouchableOpacity accessibilityLabel={`Resend the invitation to ${inv.name ?? inv.ref ?? "crazzychat user"}`} onPress={() => doResend(inv)} style={st.rowBtn}>
                 <Ionicons name="refresh" size={17} color={colors.primary} />
               </TouchableOpacity>
-              <TouchableOpacity accessibilityLabel={`Withdraw the invitation to ${inv.name ?? inv.ref ?? "VaultChat user"}`} onPress={() => doWithdraw(inv)} style={st.rowBtn}>
+              <TouchableOpacity accessibilityLabel={`Withdraw the invitation to ${inv.name ?? inv.ref ?? "crazzychat user"}`} onPress={() => doWithdraw(inv)} style={st.rowBtn}>
                 <Ionicons name="close-circle" size={17} color={colors.danger} />
               </TouchableOpacity>
             </View>
@@ -345,7 +345,7 @@ export default function GroupInvitesScreen() {
         <View style={[st.footer, { borderColor: colors.glassStroke }]}>
           <Ionicons name="lock-closed-outline" size={15} color={colors.textDim} />
           <Text style={{ color: colors.textDim, fontSize: 11.5, flex: 1, lineHeight: 16 }}>
-            Invitations stay inside VaultChat. There is no link or code to share, so an
+            Invitations stay inside crazzychat. There is no link or code to share, so an
             invitation cannot be forwarded to somebody it was not meant for.
           </Text>
         </View>

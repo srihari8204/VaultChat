@@ -22,7 +22,7 @@ const band = (sigs: SecuritySignal[]) => assessRisk(sigs).band;
 const score = (sigs: SecuritySignal[]) => assessRisk(sigs).score;
 
 (async () => {
-  console.log('\nVaultChat device-security risk engine self-test\n────────────────────────────────────────────────');
+  console.log('\ncrazzychat device-security risk engine self-test\n────────────────────────────────────────────────');
 
   // ── Empty / clean ────────────────────────────────────────────────
   console.log('Baseline:');

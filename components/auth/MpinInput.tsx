@@ -1,15 +1,21 @@
 // components/auth/MpinInput.tsx — N-cell numeric MPIN entry (default 6).
 // One hidden TextInput backs N visual cells: paste-aware, auto-advancing, masked.
+//
+// TWO GROUNDS, ONE COMPONENT. The sign-in chain stands on AuthSky, where the app
+// palette's light theme would paint dark cells and dark digits onto the night
+// sky — invisible fields. app/app-lock.tsx is an ordinary themed screen on
+// AuroraBackground, so hardcoding always-dark here would only move that bug. The
+// caller says which ground it is: `onDark`, default off = themed as before.
 
 import { useMemo, useRef } from 'react';
 import { Pressable, StyleSheet, Text, TextInput, View, Animated } from 'react-native';
-import { type Palette } from '../../constants/theme';
+import { AUTH_FIELDS, type FieldColors } from '../../constants/authTheme';
 import { useTheme } from '../../lib/theme';
 
 export const MPIN_LENGTH = 6;
 
 export function MpinInput({
-  value, onChange, onComplete, length = MPIN_LENGTH, secure = true, autoFocus = false, shakeAnim,
+  value, onChange, onComplete, length = MPIN_LENGTH, secure = true, autoFocus = false, shakeAnim, onDark = false,
 }: {
   value: string;
   onChange: (v: string) => void;
@@ -18,9 +24,11 @@ export function MpinInput({
   secure?: boolean;
   autoFocus?: boolean;
   shakeAnim?: Animated.Value;
+  onDark?: boolean;
 }) {
   const { colors } = useTheme();
-  const s = useMemo(() => makeStyles(colors), [colors]);
+  const c = onDark ? AUTH_FIELDS : colors;
+  const s = useMemo(() => makeStyles(c), [c]);
   const inputRef = useRef<TextInput>(null);
 
   const handle = (t: string) => {
@@ -77,7 +85,7 @@ export function MpinInput({
   );
 }
 
-const makeStyles = (c: Palette) => StyleSheet.create({
+const makeStyles = (c: FieldColors) => StyleSheet.create({
   row: { flexDirection: 'row', gap: 10, justifyContent: 'center' },
   cell: {
     width: 46, minHeight: 56, borderRadius: 12, borderWidth: 1.5, borderColor: c.glassStroke,

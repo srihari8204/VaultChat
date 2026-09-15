@@ -3216,7 +3216,7 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
     }
     const peer = directPeer();
     if (!peer) return;
-    router.push({ pathname: '/contact-info' as any, params: { chatId, peerUid: peer.userId, peerName: peer.name ?? peer.email ?? 'VaultChat user' } });
+    router.push({ pathname: '/contact-info' as any, params: { chatId, peerUid: peer.userId, peerName: peer.name ?? peer.email ?? 'crazzychat user' } });
   }, [chat, chatId, directPeer, router]);
 
   // Direct-chat peer presence — drives the "online" / "last seen X" sub-text
@@ -3307,7 +3307,7 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
   const resolveViewer = useCallback((userId: string) => {
     const m = membersById.get(userId);
     return {
-      name: m?.name || m?.email || 'VaultChat user',
+      name: m?.name || m?.email || 'crazzychat user',
       uri: m?.photoURL && screenAuthHeader ? attachmentUrl(m.photoURL) : null,
       headers: screenAuthHeader ? { Authorization: screenAuthHeader } : undefined,
     };
@@ -3425,7 +3425,7 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
         {chat?.type === 'direct' && meId && (() => {
           const peer = chat.members.find(m => m.userId !== meId);
           if (!peer) return null;
-          const params = { chatId, peerUid: peer.userId, peerName: peer.name ?? peer.email ?? 'VaultChat user' };
+          const params = { chatId, peerUid: peer.userId, peerName: peer.name ?? peer.email ?? 'crazzychat user' };
           return (
             <>
               <TouchableOpacity
@@ -3525,7 +3525,7 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
         <View style={S.keyChangeBanner}>
           <Text style={S.keyChangeTxt}>
             🔑 The security code for this chat changed. This usually means they
-            reinstalled VaultChat or switched device.
+            reinstalled crazzychat or switched device.
           </Text>
           <View style={S.keyChangeRow}>
             <TouchableOpacity
@@ -3650,7 +3650,7 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
           // once inside an IIFE for its member), doubling the lookup per bubble.
           const replyTarget = resolveReply(item.replyToId);
           // Exit Kit: imported history carries negative ids, so the seam between
-          // it and real VaultChat messages is exactly where the sign flips. Two
+          // it and real crazzychat messages is exactly where the sign flips. Two
           // cases — the transition, and the top of a chat that is ALL imported
           // (nothing has been sent here yet), which has no transition to mark.
           const mine   = item.meta?.origin as string | undefined;

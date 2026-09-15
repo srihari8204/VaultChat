@@ -8,7 +8,7 @@
 // Pool and Deals are only scoring wrappers around repeated Points deals, and the
 // server already gives us both inputs: each deal's per-player result, and
 // `start` to re-deal the same table. So a match is server-owned deals plus a
-// score VaultChat owns (GET/POST /games/matches, migration 126).
+// score crazzychat owns (GET/POST /games/matches, migration 126).
 //
 // NOTHING HERE SCORES ANYTHING. The rules live in the Go handler and only
 // there — a pool total decides who is ELIMINATED, so every seat must agree on

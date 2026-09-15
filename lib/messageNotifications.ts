@@ -53,7 +53,7 @@ function persistSeen(): void {
 let dir: Record<string, string> | null = null;
 async function chatName(chatId: string): Promise<string> {
   if (!dir) { try { dir = JSON.parse((await AsyncStorage.getItem(DIR_KEY)) || '{}'); } catch { dir = {}; } }
-  return dir?.[chatId] || 'VaultChat';
+  return dir?.[chatId] || 'crazzychat';
 }
 /** Called when the directory changes so the next lookup re-reads it. */
 export function invalidateDirectory(): void { dir = null; }

@@ -10,7 +10,7 @@
 // phone-home. Network identifiers (SSID/IP/proxy address) never leave the device.
 //
 // The strongest signal — NETWORK_MITM — is NOT produced here by polling. It is
-// reported by the app's TLS layer when VaultChat's own certificate pin fails
+// reported by the app's TLS layer when crazzychat's own certificate pin fails
 // (see reportPinFailure below), because active interception is something that
 // happens during a real request, not something a scan can see.
 
@@ -24,7 +24,7 @@ let _pinFailureDetail: string | null = null;
 
 /**
  * Called by the HTTP/TLS layer (e.g. lib/api's fetch wrapper / OkHttp
- * CertificatePinner / URLSession delegate) when VaultChat's OWN server pin fails.
+ * CertificatePinner / URLSession delegate) when crazzychat's OWN server pin fails.
  * The caller should ALSO trigger runMonitoringScan('event') so the alert is
  * immediate rather than waiting for the next scheduled scan.
  */

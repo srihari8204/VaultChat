@@ -42,7 +42,7 @@ export function startSecurityMonitoring(): void {
 }
 
 /**
- * Call from the HTTP/TLS layer when VaultChat's OWN certificate pin fails
+ * Call from the HTTP/TLS layer when crazzychat's OWN certificate pin fails
  * (OkHttp CertificatePinner / URLSession delegate / a fetch error that looks
  * like a trust failure). Latches the signal and scans immediately so the alert
  * is instant rather than waiting for the next scheduled scan.

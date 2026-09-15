@@ -3,7 +3,7 @@
 // Indian-market OEMs (Xiaomi/MIUI, Oppo/Realme/ColorOS, Vivo/FuntouchOS,
 // Honor/Huawei, Samsung) aggressively kill backgrounded apps, which stops call
 // pushes from ringing. Two things help:
-//   1. Ask the OS to exempt VaultChat from battery optimization.
+//   1. Ask the OS to exempt crazzychat from battery optimization.
 //   2. Deep-link the user to the OEM's Auto-start / Background-allowed page,
 //      which is the setting that actually matters on these phones (and which no
 //      API can toggle for you — the user must flip it).
@@ -157,30 +157,30 @@ export async function oemInstructions(): Promise<OemStep> {
   const oem = await getManufacturer();
   switch (oem) {
     case 'xiaomi': return { title: 'Xiaomi / Redmi / POCO (MIUI)', steps: [
-      'Open the Autostart page (button below) and enable VaultChat.',
-      'Settings → Apps → VaultChat → Battery saver → No restrictions.',
-      'Recents screen → lock VaultChat (pull down on the card → padlock).',
+      'Open the Autostart page (button below) and enable crazzychat.',
+      'Settings → Apps → crazzychat → Battery saver → No restrictions.',
+      'Recents screen → lock crazzychat (pull down on the card → padlock).',
     ]};
     case 'oppo': case 'realme': return { title: 'Oppo / Realme (ColorOS)', steps: [
-      'Open Startup Manager (button below) and allow VaultChat.',
-      'Settings → Battery → App Battery Management → VaultChat → Allow background activity.',
-      'Recents → lock VaultChat.',
+      'Open Startup Manager (button below) and allow crazzychat.',
+      'Settings → Battery → App Battery Management → crazzychat → Allow background activity.',
+      'Recents → lock crazzychat.',
     ]};
     case 'vivo': return { title: 'Vivo / iQOO (FuntouchOS)', steps: [
-      'Open Background startup (button below) and allow VaultChat.',
-      'Settings → Battery → High background power consumption → enable VaultChat.',
-      'i Manager → App manager → Autostart → enable VaultChat.',
+      'Open Background startup (button below) and allow crazzychat.',
+      'Settings → Battery → High background power consumption → enable crazzychat.',
+      'i Manager → App manager → Autostart → enable crazzychat.',
     ]};
     case 'huawei': case 'honor': return { title: 'Honor / Huawei', steps: [
-      'Open App launch (button below), turn OFF "Manage automatically" for VaultChat,',
+      'Open App launch (button below), turn OFF "Manage automatically" for crazzychat,',
       'then turn ON Auto-launch, Secondary launch, and Run in background.',
     ]};
     case 'samsung': return { title: 'Samsung (One UI)', steps: [
-      'Settings → Battery → Background usage limits → Never sleeping apps → add VaultChat.',
-      'Settings → Apps → VaultChat → Battery → Unrestricted.',
+      'Settings → Battery → Background usage limits → Never sleeping apps → add crazzychat.',
+      'Settings → Apps → crazzychat → Battery → Unrestricted.',
     ]};
     default: return { title: 'Battery optimization', steps: [
-      'Allow VaultChat to ignore battery optimization (button below) so calls ring when the app is closed.',
+      'Allow crazzychat to ignore battery optimization (button below) so calls ring when the app is closed.',
     ]};
   }
 }

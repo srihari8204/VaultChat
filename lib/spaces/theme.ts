@@ -1,6 +1,6 @@
 // lib/spaces/theme.ts — which palette a space screen renders with.
 //
-// Business/office spaces (and cab fleets) get the VaultChat Business design
+// Business/office spaces (and cab fleets) get the crazzychat Business design
 // system — blue on deep navy, dark-only. Every other space family keeps the
 // app-wide theme. The family routing is familyOf() in layout.ts, the same
 // decision that already picks the dashboard sections, so the skin and the
@@ -24,7 +24,7 @@ import ChatDoorButton, { type ChatDoorTarget } from '../../components/spaces/Cha
  * The ground is the flat bgMid tone (no gradient/aura): operational screens
  * put scanability first, and pane-over-bgMid is exactly the composite the
  * spaceTheme selftest pins for AA, so the contrast guarantees apply verbatim.
- * Business/office/cab spaces keep the VaultChat Business system untouched —
+ * Business/office/cab spaces keep the crazzychat Business system untouched —
  * that split is pinned by layout.ts's self-check and check-space-identity.
  */
 export function useSpaceColors(groupType?: string | null): Palette {

@@ -1,5 +1,5 @@
 /**
- * VaultChat — Real Push + Local Notifications
+ * crazzychat — Real Push + Local Notifications
  * Uses expo-notifications
  * Works in native build
  */
@@ -89,7 +89,7 @@ export const notifyIncomingCall = async (callerName: string): Promise<void> => {
   await Notifications.scheduleNotificationAsync({
     content: {
       title:    `?? ${callerName}`,
-      body:     'Incoming VaultChat call',
+      body:     'Incoming crazzychat call',
       sound:    'default',
       data:     { type: 'call' },
       categoryIdentifier: 'calls',

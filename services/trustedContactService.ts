@@ -99,7 +99,7 @@ export async function verifyScannedQR(scannedData: string, chatId: string, peerU
     const data = JSON.parse(scannedData);
 
     if (data.type !== 'vaultchat_verify') {
-      return { verified: false, message: 'Not a VaultChat verification code' };
+      return { verified: false, message: 'Not a crazzychat verification code' };
     }
 
     if (data.uid !== peerUid) {

@@ -454,7 +454,7 @@ export default function LiveViewScreen() {
       setStageScreens({});
       // Stop the screen capture BEFORE leaving the room. Android keeps the
       // capture session — and its persistent "recording" notification — alive
-      // past a plain disconnect, which reads to the user as VaultChat still
+      // past a plain disconnect, which reads to the user as crazzychat still
       // watching their screen after the broadcast ended.
       const s = session;
       const ls = localStream.current;
@@ -771,7 +771,7 @@ export default function LiveViewScreen() {
   const llScreen = lowLatency ? Object.values(stageScreens)[0] : undefined;
   // A HOST NEVER RENDERS THEIR OWN SCREEN CAPTURE.
   //
-  // FLAG_SECURE excludes VaultChat's own window from MediaProjection — that is
+  // FLAG_SECURE excludes crazzychat's own window from MediaProjection — that is
   // the rule, and it is not negotiable. The consequence is that the host's own
   // capture is BLACK for exactly as long as they are looking at this screen, so
   // promoting it to the stage replaced the host's camera with a black rectangle
@@ -1730,7 +1730,7 @@ export default function LiveViewScreen() {
                     </TouchableOpacity>
                     <TouchableOpacity accessibilityLabel="Share the invite link"
                       style={S.inviteBtn}
-                      onPress={() => Share.share({ message: 'Join my private live on VaultChat\n' + inviteUrl })}
+                      onPress={() => Share.share({ message: 'Join my private live on crazzychat\n' + inviteUrl })}
                     >
                       <Ionicons name="share-social-outline" size={15} color="#fff" />
                       <AppText style={S.inviteBtnText}>Share</AppText>

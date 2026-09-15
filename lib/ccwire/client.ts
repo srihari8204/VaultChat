@@ -24,7 +24,7 @@
 //
 //   * React Native / Expo (iOS, Android): YES. RN's WebSocket takes a third
 //     argument, `new WebSocket(url, protocols, { headers })`, which is exactly
-//     why this works on the platforms VaultChat actually ships to.
+//     why this works on the platforms crazzychat actually ships to.
 //   * `ws` under Node (the selftest, and any CLI tool): YES, same 3-arg shape.
 //   * A BROWSER (Expo web): NO. The DOM WebSocket constructor cannot set
 //     headers, and there is no supported workaround. On web this client will

@@ -88,7 +88,7 @@ for (const [name, SRC] of SCREENS) {
   A(/if \(!sealed\)/.test(body) && /throw new Error/.test(body),
     `2a. ${name}: it ABORTS instead — a call that cannot be sealed is not placed`);
   // Error copy has to name the cause and the fix, not just fail.
-  A(/encryption keys/.test(body) && /(update|open VaultChat)/.test(body),
+  A(/encryption keys/.test(body) && /(update|open crazzychat)/.test(body),
     `2b. ${name}: and says what happened and what to do about it`);
 }
 

@@ -15,7 +15,7 @@
 //     is FIVE simultaneous uploads of your microphone from a phone that is also
 //     animating thirteen cards. The reference client's own answer to that is to
 //     switch to an SFU above four seats; that deployment has none to switch to.
-//  3. VaultChat has one. The same LiveKit cluster already carries calls and Go
+//  3. crazzychat has one. The same LiveKit cluster already carries calls and Go
 //     Live, and `livekit.Mint` already signs join tokens. So a table's audio now
 //     costs each phone one upload and one download, whatever the table's size,
 //     and it reuses plumbing that is already in production rather than a second
@@ -30,14 +30,14 @@
 // the kind of comment that gets someone in trouble later:
 //
 //   - Audio was end-to-end between players (DTLS-SRTP) and never landed on a
-//     server. It now passes through VaultChat's SFU, exactly as a group call
+//     server. It now passes through crazzychat's SFU, exactly as a group call
 //     does. There is no frame encryption on a table room (`e2eeKey: null`) —
 //     players at a public rummy table have no ratchet sessions with each other,
 //     so there is no key to agree on.
 //   - Membership was enforced by the one party that knows the seating: the games
 //     server relayed a `voice-*` frame only between peers at the same table. Our
 //     backend cannot ask it who is seated, so the token route's real rule is
-//     "a signed-in VaultChat user who knows this table's room id". See the long
+//     "a signed-in crazzychat user who knows this table's room id". See the long
 //     note in games_voice.go.
 //
 // What we gained, besides the bandwidth: the SFU enforces listen-only for a
@@ -196,7 +196,7 @@ export function useTableVoice(game: GameKind, roomId: string, wire: VoiceWire): 
     session.current = null;
     // GUARDED ON `joined`. teardown also runs on unmount, and unconditionally
     // stopping the audio session there handed back a route we had never taken —
-    // which, with a VaultChat call or a Go Live broadcast running, cut THAT.
+    // which, with a crazzychat call or a Go Live broadcast running, cut THAT.
     const wasJoined = joined.current;
     joined.current = false;
     connecting.current = false;
@@ -239,7 +239,7 @@ export function useTableVoice(game: GameKind, roomId: string, wire: VoiceWire): 
             PermissionsAndroid.PERMISSIONS.RECORD_AUDIO,
             {
               title: 'Talk at the table',
-              message: 'VaultChat needs your microphone so the other players can hear you.',
+              message: 'crazzychat needs your microphone so the other players can hear you.',
               buttonPositive: 'Allow',
             },
           );

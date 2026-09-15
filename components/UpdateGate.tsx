@@ -44,7 +44,7 @@ export function UpdateGate({ children }: { children: React.ReactNode }) {
     return (
       <View style={styles.block}>
         <View style={styles.icon}><Ionicons name="arrow-up-circle" size={44} color="#fff" /></View>
-        <Text style={styles.title}>Update VaultChat to continue</Text>
+        <Text style={styles.title}>Update crazzychat to continue</Text>
         <Text style={styles.body}>
           {gate?.message?.trim()
             ? gate.message
@@ -65,7 +65,7 @@ export function UpdateGate({ children }: { children: React.ReactNode }) {
       {verdict === 'advise' && !dismissed && (
         <View style={styles.bar}>
           <Ionicons name="arrow-up-circle-outline" size={17} color="#fff" />
-          <Text style={styles.barTxt} numberOfLines={1}>A newer version of VaultChat is available</Text>
+          <Text style={styles.barTxt} numberOfLines={1}>A newer version of crazzychat is available</Text>
           <TouchableOpacity onPress={openStore} accessibilityRole="button" hitSlop={8}>
             <Text style={styles.barCta}>Update</Text>
           </TouchableOpacity>

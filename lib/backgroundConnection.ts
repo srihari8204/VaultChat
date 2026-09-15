@@ -91,7 +91,7 @@ export async function startBackgroundConnection(): Promise<void> {
   try {
     await notifee.displayNotification({
       id: NOTIF_ID,
-      title: 'VaultChat',
+      title: 'crazzychat',
       body: 'Keeping you connected',
       android: {
         channelId: CHANNEL_ID,

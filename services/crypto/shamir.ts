@@ -100,7 +100,7 @@ interface ParsedShare { k: number; group: string; x: number; payload: Uint8Array
 function parseShare(raw: string): ParsedShare {
   const s = raw.trim().toUpperCase();
   const parts = s.split('-');
-  if (parts.length !== 5 || parts[0] !== 'VCSS1') throw new Error('Not a VaultChat recovery share');
+  if (parts.length !== 5 || parts[0] !== 'VCSS1') throw new Error('Not a crazzychat recovery share');
   const k = parseInt(parts[1], 10);
   const group = parts[2].toLowerCase();
   const x = parseInt(parts[3], 16);

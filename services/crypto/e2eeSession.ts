@@ -1,5 +1,5 @@
 /**
- * VaultChat E2EE session + identity manager (pure, injectable).
+ * crazzychat E2EE session + identity manager (pure, injectable).
  * ───────────────────────────────────────────────────────────────────────
  * Sits between the proven crypto core (./e2ee) and the app. Handles:
  *   • local identity provisioning (IK + signing key + signed prekey + OTPKs)

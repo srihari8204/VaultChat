@@ -79,7 +79,7 @@ export default function NewChatScreen() {
         for (const c of list as ChatSummary[]) {
           if (c.type === 'direct' && c.peerUserId && !seen.has(c.peerUserId)) {
             seen.add(c.peerUserId);
-            out.push({ chatId: c.id, userId: c.peerUserId, name: c.peerName || 'VaultChat user', photoURL: c.peerPhotoURL ?? null, online: !!c.peerOnline });
+            out.push({ chatId: c.id, userId: c.peerUserId, name: c.peerName || 'crazzychat user', photoURL: c.peerPhotoURL ?? null, online: !!c.peerOnline });
           }
         }
         out.sort((a, b) => a.name.localeCompare(b.name));
@@ -101,7 +101,7 @@ export default function NewChatScreen() {
       const res = await createDirectChat({ phone: e164 });
       await openWithTtl(res.id, true);
     } catch (e: any) {
-      Alert.alert('Could not start chat', e?.message ?? 'The number may not be on VaultChat yet.');
+      Alert.alert('Could not start chat', e?.message ?? 'The number may not be on crazzychat yet.');
     } finally { setAdding(false); }
   };
 
@@ -168,13 +168,13 @@ export default function NewChatScreen() {
                   <TouchableOpacity style={[S.cta, !e164 && S.ctaOff]} onPress={startByPhone} disabled={!e164 || adding} activeOpacity={0.85}>
                     {adding ? <ActivityIndicator color="#fff" /> : <Text style={S.ctaTxt}>Start chat</Text>}
                   </TouchableOpacity>
-                  <Text style={S.hint}>The number must belong to someone on VaultChat.</Text>
+                  <Text style={S.hint}>The number must belong to someone on crazzychat.</Text>
                 </View>
               )}
 
               <ActionRow icon="book" title="Find from address book" onPress={() => router.push('/contacts' as any)} />
 
-              <Text style={S.sectionLabel}>CONTACTS ON VAULTCHAT</Text>
+              <Text style={S.sectionLabel}>CONTACTS ON CRAZZYCHAT</Text>
             </View>
           )
         }

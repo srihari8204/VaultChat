@@ -2,7 +2,7 @@
 //
 // The web client's look is not decoration: a maroon felt table with gold
 // hardware is what makes these read as GAMES rather than as another list
-// screen in a chat app. The native boards first shipped in VaultChat's own
+// screen in a chat app. The native boards first shipped in crazzychat's own
 // app palette and looked like settings pages, so the tokens below are copied
 // from theme.css rather than reinterpreted — same hexes, same 4px spacing
 // scale, same three elevations.
@@ -41,7 +41,7 @@ export function typeScale(width: number) {
 /**
  * The palette.
  *
- * This is intentionally NOT VaultChat's app palette and does not follow the
+ * This is intentionally NOT crazzychat's app palette and does not follow the
  * light/dark theme: a card table is a place, and it looks the same whichever
  * way the rest of the app is set. Mixing the two is what made the first native
  * boards look like a form.

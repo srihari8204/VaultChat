@@ -34,7 +34,7 @@ function snap(signals: ReturnType<typeof riskSignal>[], opts?: Partial<BuildOpti
 const factor = (s: PostureSnapshot, key: string) => s.factors.find((f) => f.key === key)!;
 
 (async () => {
-  console.log('\nVaultChat posture-model self-test\n──────────────────────────────────────');
+  console.log('\ncrazzychat posture-model self-test\n──────────────────────────────────────');
 
   // ── Clean device ─────────────────────────────────────────────────
   console.log('Clean device (all evaluated):');

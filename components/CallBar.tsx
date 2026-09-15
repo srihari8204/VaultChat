@@ -56,7 +56,7 @@ export function CallBar() {
 
   if (!show) return null;
 
-  const name = snap.peerName || 'VaultChat user';
+  const name = snap.peerName || 'crazzychat user';
   const kind = snap.kind || 'audio';
 
   const back = () => {

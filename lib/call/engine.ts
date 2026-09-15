@@ -193,7 +193,7 @@ export function hangUp(
       ? (wasMissed(snap) ? 'missed' : 'incoming')
       : 'outgoing';
     addCallLog({
-      chatId: s.chatId, peerUid: s.peerUid, peerName: s.peerName || 'VaultChat user',
+      chatId: s.chatId, peerUid: s.peerUid, peerName: s.peerName || 'crazzychat user',
       kind: s.kind, direction, at: Date.now() - durationSec * 1000, durationSec,
       group: !s.peerUid,
       callId: s.serverCallId || undefined,
@@ -698,7 +698,7 @@ export async function startOutgoing(a: StartArgs): Promise<void> {
       to: a.peerUid, from: s.meId, chatId: a.chatId,
       type: a.kind === 'video' ? 'video' : 'audio',
       // BLANK, never a placeholder. The callee's screens only run their name
-      // lookup when this arrives empty, so sending "VaultChat user" pinned that
+      // lookup when this arrives empty, so sending "crazzychat user" pinned that
       // placeholder on the receiver for the whole call.
       callerName: me.name ?? me.email ?? '',
       offer: wire,
@@ -1012,7 +1012,7 @@ function startCallForegroundService(s: Session): void {
   foregrounded = true;
   nativeCall.startCallSession({
     callId: String(s.chatId || s.peerUid || 'call'),
-    peerName: s.peerName || 'VaultChat user',
+    peerName: s.peerName || 'crazzychat user',
     isVideo: s.kind === 'video',
   });
 }
@@ -1063,7 +1063,7 @@ export function flipCamera(): void {
  *
  * FLAG_SECURE has to come off for the duration: app/_layout.tsx sets it at boot,
  * and it blocks MediaProjection as well as screenshots — so the share was black
- * frames for everything VaultChat drew. It is re-asserted on every exit path,
+ * frames for everything crazzychat drew. It is re-asserted on every exit path,
  * including a call that dies mid-share (see dispose).
  */
 /**
@@ -1089,10 +1089,10 @@ async function windowSecure(secure: boolean): Promise<void> {
 export async function startScreenShare(): Promise<void> {
   const s = session;
   if (!s?.room) throw new Error('No active call.');
-  // FLAG_SECURE STAYS ON. VaultChat is never made capturable.
+  // FLAG_SECURE STAYS ON. crazzychat is never made capturable.
   //
   // Android excludes a SECURE window from the capture and captures everything
-  // else normally, which is exactly the product requirement: VaultChat's own
+  // else normally, which is exactly the product requirement: crazzychat's own
   // content stays protected while Chrome, Maps, a gallery or a game share
   // fine. The user starts the share and switches away; what they switch to is
   // what the other side sees.
@@ -1139,7 +1139,7 @@ export async function stopScreenShare(): Promise<void> {
 
 function registerForCallWaiting(a: StartArgs): void {
   const me: ActiveCall = {
-    chatId: a.chatId, peerUid: a.peerUid, peerName: a.peerName || 'VaultChat user',
+    chatId: a.chatId, peerUid: a.peerUid, peerName: a.peerName || 'crazzychat user',
     kind: a.kind,
     hold: () => {
       const s = session; if (!s?.room) return;

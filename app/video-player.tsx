@@ -1,4 +1,4 @@
-// app/video-player.tsx — World-class Video Player for VaultChat
+// app/video-player.tsx — World-class Video Player for crazzychat
 // Full-featured playback: controls overlay, PiP, double-tap seek, pinch-zoom, swipe dismiss
 
 import React, { useState, useEffect, useRef, useCallback , useMemo} from 'react';

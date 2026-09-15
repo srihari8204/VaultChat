@@ -299,7 +299,7 @@ export interface SpaceDevice {
   ownerId: string | null; ownerName: string | null;
   label: string; kind: string; identifier: string | null;
   lastSeenAt: string | null; battery: number | null;
-  /** False = no VaultChat client backs it, so remote commands can never run.
+  /** False = no crazzychat client backs it, so remote commands can never run.
    *  The UI must not offer a Lock button that reports success into a void. */
   appBacked: boolean;
   /** Server's own verdict from silence — the one judgement it can make. */

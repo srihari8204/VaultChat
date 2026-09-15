@@ -130,7 +130,7 @@ export default function BroadcastScreen() {
   };
 
   const shareInvite = (ch: Channel) =>
-    Share.share({ message: `Join my VaultChat channel "${ch.name}"!\nCode: ${ch.inviteCode}\nhttps://vaultchat.app/channel/${ch.inviteCode}` });
+    Share.share({ message: `Join my crazzychat channel "${ch.name}"!\nCode: ${ch.inviteCode}\nhttps://vaultchat.app/channel/${ch.inviteCode}` });
 
   // ── Channel detail view ──
   if (selected) {

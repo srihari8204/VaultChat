@@ -3,7 +3,7 @@
 // Android grants ONE app the audio at a time. When a GSM call arrives mid-call
 // the OS takes focus away, and an app that ignores that keeps capturing and
 // playing into a device that is no longer its own: the user hears the carrier
-// call over VaultChat, the peer hears the room, and when the interruption ends
+// call over crazzychat, the peer hears the room, and when the interruption ends
 // nothing restores. That is the "the app went weird after a phone call" bug,
 // and it is one of the few remaining ways a call can end up in a state the user
 // cannot recover from without force-quitting.

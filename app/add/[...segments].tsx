@@ -54,7 +54,7 @@ export default function AddByVaultIdScreen() {
         } as any);
       } catch (e: any) {
         const msg = e?.status === 404
-          ? `No VaultChat user found for @${vaultId}.`
+          ? `No crazzychat user found for @${vaultId}.`
           : e?.status === 401
             ? 'Sign in first, then open this link again.'
             : (e?.message ?? 'Could not open this contact.');

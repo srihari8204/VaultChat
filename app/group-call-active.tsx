@@ -521,7 +521,7 @@ function GroupCallLegacy() {
         // pairwise links; each one stands or falls on its own seal, so one
         // peer we cannot key costs that LINK, not the call.
         if (!sealed) {
-          throw new Error("Couldn't add someone to this call securely — we don't have their encryption keys. Ask them to open VaultChat once (or update it) and rejoin.");
+          throw new Error("Couldn't add someone to this call securely — we don't have their encryption keys. Ask them to open crazzychat once (or update it) and rejoin.");
         }
         ciphersRef.current[uid] = sealed.cipher;
         flushOutIce(uid, chatId);
@@ -568,7 +568,7 @@ function GroupCallLegacy() {
             // would put our DTLS-SRTP fingerprint and candidates in the clear
             // too. Only this LINK is dropped — the rest of the mesh is fine.
             if (!cipher.enc) {
-              setError("Someone joined on an old version of VaultChat and couldn't be connected securely — ask them to update.");
+              setError("Someone joined on an old version of crazzychat and couldn't be connected securely — ask them to update.");
               return;
             }
             // Stored only once it is PROVEN sealed: the badge and the ICE

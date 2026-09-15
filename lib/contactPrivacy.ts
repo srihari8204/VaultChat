@@ -10,7 +10,7 @@
 //
 // CONTEXT: 'request' — they messaged YOU (incoming request)
 //   Saved   → full name, full photo (normal chat)
-//   Unsaved → SHOW their VaultChat photo + name so YOU can decide
+//   Unsaved → SHOW their crazzychat photo + name so YOU can decide
 //              You need to see who it is to accept/decline
 //
 // This matches exactly how WhatsApp works:
@@ -42,10 +42,10 @@ export function getVisibleProfile(
   context:   PrivacyContext = 'browse'
 ): VisibleProfile {
 
-  // ── Person not on VaultChat ────────────────────────────────
+  // ── Person not on crazzychat ────────────────────────────────
   if (!contact || !contact.isOnVault) {
     return {
-      displayName:     isSaved ? contact?.name || 'Unknown' : 'VaultChat User',
+      displayName:     isSaved ? contact?.name || 'Unknown' : 'crazzychat User',
       showPhoto:       false,
       showStatus:      false,
       showOnline:      false,
@@ -59,7 +59,7 @@ export function getVisibleProfile(
   // ── Saved in your phone contacts ──────────────────────────
   if (isSaved) {
     return {
-      // Always use YOUR saved name — not their VaultChat name
+      // Always use YOUR saved name — not their crazzychat name
       displayName:     contact.name,
       showPhoto:       true,
       photoUri:        contact.vaultAvatar || contact.avatar,
@@ -76,12 +76,12 @@ export function getVisibleProfile(
   }
 
   // ── NOT saved — but they sent YOU a message (request context)
-  // Show their photo + VaultChat name so you can recognise them
+  // Show their photo + crazzychat name so you can recognise them
   if (context === 'request') {
     return {
       displayName:     contact.vaultName || contact.vaultId.slice(0, 12),
       showPhoto:       true,                  // ✅ SHOW so you can recognise
-      photoUri:        contact.vaultAvatar,   // ✅ their VaultChat photo
+      photoUri:        contact.vaultAvatar,   // ✅ their crazzychat photo
       showStatus:      false,                 // still hidden (their privacy)
       showOnline:      false,                 // still hidden
       showLastSeen:    false,                 // still hidden

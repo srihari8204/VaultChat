@@ -315,7 +315,7 @@ export default function ProfileScreen() {
         />
         <View style={S.rowSep} />
         <EditRow
-          icon="information-circle-outline" label="About" value={status} placeholder="Hey, I'm on VaultChat"
+          icon="information-circle-outline" label="About" value={status} placeholder="Hey, I'm on crazzychat"
           editing={editing === 'status'} onEdit={() => setEditing('status')}
           onChangeText={setStatus} onSave={saveField} saving={saving} maxLength={200} multiline
         />
@@ -396,7 +396,7 @@ export default function ProfileScreen() {
         activeOpacity={1}
         style={{ alignItems: 'center', paddingVertical: 24 }}
       >
-        <Text style={{ color: colors.textDim, fontSize: 12 }}>VaultChat 1.1.1</Text>
+        <Text style={{ color: colors.textDim, fontSize: 12 }}>crazzychat 1.1.1</Text>
       </TouchableOpacity>
     </ScrollView>
     </View>

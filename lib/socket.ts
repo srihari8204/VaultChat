@@ -1,4 +1,4 @@
-// VaultChat real-time socket client.
+// crazzychat real-time socket client.
 //
 // One shared realtime connection: CC-Wire app events over WebTransport,
 // native WebSocket, or the platform WebSocket. It authenticates with the

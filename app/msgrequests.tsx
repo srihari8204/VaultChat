@@ -2,7 +2,7 @@
 // app/msgrequests.tsx — Message Requests
 //
 // When someone NOT in your contacts messages you:
-//   → Their VaultChat photo + name IS shown here
+//   → Their crazzychat photo + name IS shown here
 //   → So you can recognise them and decide Accept or Decline
 //   → Accept  → moves to normal chat, they appear in chat list
 //   → Decline → message deleted, sender not notified

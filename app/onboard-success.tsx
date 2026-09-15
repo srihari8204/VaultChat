@@ -1,21 +1,24 @@
 // app/onboard-success.tsx — account secured. Optional device-level MFA (PIN /
 // fingerprint / face) via expo-local-authentication. "Continue to Chats" logs in
 // (mpin/verify → JWT), optionally enrolls MFA, clears the onboarding store.
+//
+// The last screen of the chain, so it keeps the chain's fixed night palette —
+// see the always-dark note in components/ui/Brand.tsx. The lockup comes back at
+// full size here: this is the hand-off into the app, and the brand closing the
+// sign-up is the point, not a splash rerun.
 
-import { brandAlpha, type Palette } from '../constants/theme';
 import { Stack } from 'expo-router';
-import { useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Alert, BackHandler, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
-import { useTheme } from '../lib/theme';
+import { useEffect, useState } from 'react';
+import { ActivityIndicator, Alert, BackHandler, Pressable, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { LinearGradient } from 'expo-linear-gradient';
+import { BRAND_GRADIENT_CTA } from '../constants/theme';
 import { resetTo } from '../lib/authNav';
 import { onboarding, verifyMpinRemote, uploadAndSetProfilePhoto, onboardingError } from '../lib/onboarding';
 import { deviceSecurityAvailable, enableMfa } from '../lib/mfa';
-import { AuroraBackground } from '../components/ui';
+import { AuthSky, BrandMark } from '../components/ui';
+import { AUTH } from '../constants/authTheme';
 
 export default function OnboardSuccess() {
-  const { colors } = useTheme();
-  const s = useMemo(() => makeStyles(colors), [colors]);
-
   const [mfaOn, setMfaOn] = useState(false);
   const [hasDeviceSecurity, setHasDeviceSecurity] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -70,16 +73,22 @@ export default function OnboardSuccess() {
 
   return (
     <View style={s.screen}>
-      <AuroraBackground />
+      <AuthSky />
       <Stack.Screen options={{ headerShown: false, gestureEnabled: false }} />
       <View style={s.body}>
-        <View style={s.tick}><Text style={{ fontSize: 48 }}>✓</Text></View>
+        <BrandMark size={72} markOnly />
         <Text style={s.title}>Account secured</Text>
         <Text style={s.sub}>Your profile is encrypted and your MPIN is set.</Text>
 
         <View style={s.mfaCard}>
           <Text style={s.mfaTitle}>Add device-level protection (recommended)</Text>
-          <TouchableOpacity style={s.radioRow} onPress={() => setMfaOn(v => !v)} activeOpacity={0.8}>
+          <TouchableOpacity
+            style={s.radioRow}
+            onPress={() => setMfaOn(v => !v)}
+            activeOpacity={0.8}
+            accessibilityRole="checkbox"
+            accessibilityState={{ checked: mfaOn }}
+          >
             <View style={[s.radio, mfaOn && s.radioOn]}>{mfaOn && <View style={s.radioDot} />}</View>
             <Text style={s.radioTxt}>Enable MFA using device security (PIN / fingerprint / face)</Text>
           </TouchableOpacity>
@@ -88,9 +97,23 @@ export default function OnboardSuccess() {
           )}
         </View>
 
-        <TouchableOpacity style={s.cta} onPress={() => finish()} disabled={busy} activeOpacity={0.85}>
-          {busy ? <ActivityIndicator color="#fff" /> : <Text style={s.ctaTxt}>Continue to Chats</Text>}
-        </TouchableOpacity>
+        <Pressable
+          onPress={() => finish()}
+          disabled={busy}
+          accessibilityRole="button"
+          accessibilityLabel="Continue to Chats"
+          accessibilityState={{ disabled: busy, busy }}
+          style={({ pressed }) => [s.ctaWrap, pressed && !busy && s.ctaDown]}
+        >
+          <LinearGradient
+            colors={[...BRAND_GRADIENT_CTA]}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 1 }}
+            style={s.cta}
+          >
+            {busy ? <ActivityIndicator color="#fff" /> : <Text style={s.ctaTxt}>Continue to Chats</Text>}
+          </LinearGradient>
+        </Pressable>
 
         {/* Secondary on purpose: importing is something a few people want on day
             one, and nobody should be nudged into it before they have a chat. */}
@@ -107,22 +130,28 @@ export default function OnboardSuccess() {
   );
 }
 
-const makeStyles = (c: Palette) => StyleSheet.create({
+const s = StyleSheet.create({
   screen: { flex: 1, backgroundColor: 'transparent' },
-  body: { flex: 1, paddingHorizontal: 24, paddingTop: 96, alignItems: 'center' },
-  tick: { width: 96, height: 96, borderRadius: 48, backgroundColor: brandAlpha(0.15), borderWidth: 2, borderColor: c.primary, alignItems: 'center', justifyContent: 'center', marginBottom: 20 },
-  title: { color: c.text, fontSize: 26, fontWeight: '900' },
-  sub: { color: c.textDim, fontSize: 14, marginTop: 8, textAlign: 'center', lineHeight: 20 },
-  mfaCard: { width: '100%', backgroundColor: c.glassSoft, borderRadius: 16, borderWidth: 1, borderColor: c.glassStroke, padding: 16, marginTop: 36 },
-  mfaTitle: { color: c.text, fontSize: 14, fontWeight: '800', marginBottom: 12 },
+  body: { flex: 1, paddingHorizontal: 24, paddingTop: 88, alignItems: 'center' },
+  title: { color: AUTH.text, fontSize: 26, fontWeight: '900', marginTop: 8 },
+  sub: { color: AUTH.dim, fontSize: 14, marginTop: 8, textAlign: 'center', lineHeight: 20 },
+
+  mfaCard: {
+    width: '100%', marginTop: 36,
+    backgroundColor: AUTH.card, borderRadius: 22, borderWidth: 1, borderColor: AUTH.stroke, padding: 18,
+  },
+  mfaTitle: { color: AUTH.text, fontSize: 14, fontWeight: '800', marginBottom: 12 },
   radioRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
-  radio: { width: 24, height: 24, borderRadius: 12, borderWidth: 2, borderColor: c.glassStroke, alignItems: 'center', justifyContent: 'center' },
-  radioOn: { borderColor: c.primary },
-  radioDot: { width: 12, height: 12, borderRadius: 6, backgroundColor: c.primary },
-  radioTxt: { color: c.text, fontSize: 14, flex: 1, lineHeight: 19 },
-  note: { color: c.textFaint, fontSize: 12, marginTop: 10, lineHeight: 16 },
-  cta: { width: '100%', marginTop: 'auto', height: 56, borderRadius: 16, backgroundColor: c.primary, alignItems: 'center', justifyContent: 'center' },
-  ctaTxt: { color: '#fff', fontSize: 16, fontWeight: '800' },
+  radio: { width: 24, height: 24, borderRadius: 12, borderWidth: 2, borderColor: AUTH.stroke, alignItems: 'center', justifyContent: 'center' },
+  radioOn: { borderColor: AUTH.accent },
+  radioDot: { width: 12, height: 12, borderRadius: 6, backgroundColor: AUTH.accent },
+  radioTxt: { color: AUTH.text, fontSize: 14, flex: 1, lineHeight: 19 },
+  note: { color: AUTH.faint, fontSize: 12, marginTop: 10, lineHeight: 16 },
+
+  ctaWrap: { width: '100%', marginTop: 'auto', borderRadius: 16, overflow: 'hidden' },
+  cta: { height: 56, alignItems: 'center', justifyContent: 'center' },
+  ctaDown: { opacity: 0.88 },
+  ctaTxt: { color: '#fff', fontSize: 16, fontWeight: '800', letterSpacing: 0.2 },
   secondary: { width: '100%', marginTop: 12, marginBottom: 32, paddingVertical: 12, alignItems: 'center' },
-  secondaryTxt: { color: c.textDim, fontSize: 14, fontWeight: '700' },
+  secondaryTxt: { color: AUTH.cyan, fontSize: 14, fontWeight: '700' },
 });

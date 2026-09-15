@@ -89,7 +89,7 @@ export default function ChatExportScreen() {
   };
 
   const writeFile = async (ext: string, content: string) => {
-    const name = 'VaultChat_' + peerName.replace(/[^a-zA-Z0-9]/g, '_') + '_' + Date.now() + '.' + ext;
+    const name = 'crazzychat_' + peerName.replace(/[^a-zA-Z0-9]/g, '_') + '_' + Date.now() + '.' + ext;
     const filePath = FileSystem.documentDirectory + name;
     await FileSystem.writeAsStringAsync(filePath, content, { encoding: FileSystem.EncodingType.UTF8 });
     return filePath;
@@ -173,7 +173,7 @@ export default function ChatExportScreen() {
   };
 
   const exportAsText = () => guard(async (msgs, myId) => {
-    let text = 'VaultChat Export - ' + peerName + '\n';
+    let text = 'crazzychat Export - ' + peerName + '\n';
     text += 'Exported: ' + new Date().toLocaleString() + '\n';
     text += 'Messages: ' + msgs.length + '\n' + '='.repeat(50) + '\n\n';
     for (const m of msgs) {
@@ -188,7 +188,7 @@ export default function ChatExportScreen() {
   const exportAsHTML = () => guard(async (msgs, myId) => {
     const esc = (str: string) => str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
     let html = '<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width">';
-    html += '<title>VaultChat Export</title><style>';
+    html += '<title>crazzychat Export</title><style>';
     html += 'body{font-family:-apple-system,Segoe UI,sans-serif;background:#0A0A0F;color:#fff;max-width:600px;margin:0 auto;padding:16px}';
     html += '.header{text-align:center;padding:20px;border-bottom:1px solid #222;margin-bottom:20px}';
     html += `.header h1{color:${BRAND_ACCENT};margin:0}.header p{color:#888;font-size:12px}`;
@@ -199,7 +199,7 @@ export default function ChatExportScreen() {
     html += '.sender{color:#06B6D4;font-size:11px;font-weight:700;margin-bottom:2px}';
     html += '.meta{color:#777;font-size:10px;font-style:italic}';
     html += '</style></head><body>';
-    html += '<div class="header"><h1>VaultChat</h1><p>Chat with ' + esc(peerName) + '</p>';
+    html += '<div class="header"><h1>crazzychat</h1><p>Chat with ' + esc(peerName) + '</p>';
     html += '<p>' + msgs.length + ' messages | Exported ' + new Date().toLocaleString() + '</p></div>';
     for (const m of msgs) {
       const isMine = m.senderId === myId;
@@ -213,7 +213,7 @@ export default function ChatExportScreen() {
     html += '</body></html>';
     setProgress('Saving file…');
     const filePath = await writeFile('html', html);
-    await shareFile(filePath, 'text/html', 'VaultChat export');
+    await shareFile(filePath, 'text/html', 'crazzychat export');
   });
 
   return (

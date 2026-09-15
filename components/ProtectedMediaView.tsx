@@ -153,7 +153,7 @@ export default function ProtectedMediaView({
           <View key={r} style={S.wmRow}>
             {Array.from({ length: cols }).map((__, c) => (
               <Text key={c} style={S.wmText} numberOfLines={2}>
-                {label || 'VaultChat'}{'\n'}{stamp}
+                {label || 'crazzychat'}{'\n'}{stamp}
               </Text>
             ))}
           </View>

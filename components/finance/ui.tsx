@@ -4,7 +4,7 @@
 // screen files stay small. All colors come from constants/financeTheme, all
 // layout rules from lib/finance/grid.
 //
-// Implements the components in the Figma library "VaultChat — Vault Finance"
+// Implements the components in the Figma library "crazzychat — Vault Finance"
 // (N5Y6KcMUPA3LgtWjfHPctz, page "Components"). Component names map 1:1:
 // Glass Card → Card, Stat Tile → StatTile, Status Pill → Pill,
 // Finance Button → Btn, Segmented Control → Segment, Quick Action →

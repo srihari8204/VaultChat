@@ -1,4 +1,4 @@
-// VaultChat auth service — Phase 2.
+// crazzychat auth service — Phase 2.
 //
 // Backed by the custom Postgres + JWT backend (Phase 1).
 // NO Firebase Auth — sign-in produces a JWT stored in SecureStore.

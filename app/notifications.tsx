@@ -239,7 +239,7 @@ function NotificationsContent() {
                 <View style={{width:40,height:40,borderRadius:20,backgroundColor:'rgba(6,14,34,0.9)',justifyContent:'center',alignItems:'center',borderWidth:1,borderColor:'rgba(255,255,255,0.06)'}}><Text style={{fontSize:20}}>🔗</Text></View>
                 <View style={{flex:1}}>
                   <Text numberOfLines={1} style={{color:colors.text,fontSize:13,fontWeight:'700'}}>Fetch previews for received links</Text>
-                  <Text style={{color:colors.textFaint,fontSize:10,marginTop:2}}>Off: VaultChat&apos;s server never sees links people send you. Previews the sender attached still show.</Text>
+                  <Text style={{color:colors.textFaint,fontSize:10,marginTop:2}}>Off: crazzychat&apos;s server never sees links people send you. Previews the sender attached still show.</Text>
                 </View>
                 <Switch value={remoteLinks} onValueChange={(v)=>{ setRemoteLinksState(v); setRemoteLinkPreviews(v); }} trackColor={{false:'rgba(255,255,255,0.06)',true:colors.primary+'66'}} thumbColor={remoteLinks?colors.primary:'rgba(255,255,255,0.3)'}/>
               </View>

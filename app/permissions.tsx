@@ -13,7 +13,7 @@ import { canUseFullScreenIntent, openFullScreenIntentSettings } from "../lib/Cal
 const PERMS = [
   {key:"camera",   icon:"📷",label:"Camera",       sub:"Face scan and photo sharing"},
   {key:"mic",      icon:"🎙️",label:"Microphone",   sub:"Voice and video calls"},
-  {key:"contacts", icon:"👥",label:"Contacts",     sub:"Find friends on VaultChat"},
+  {key:"contacts", icon:"👥",label:"Contacts",     sub:"Find friends on crazzychat"},
   {key:"location", icon:"📍",label:"Location",     sub:"Secure location sharing"},
   {key:"background",icon:"🛰️",label:"Background Access",sub:"Keep Family Space sharing when the app is closed"},
   {key:"motion",   icon:"🏃",label:"Motion & Fitness",sub:"Detect driving so location updates adapt"},
@@ -81,7 +81,7 @@ export default function PermissionsScreen() {
         <View style={S.header}>
           <View style={S.badge}><Text style={{fontSize:36}}>🔑</Text></View>
           <Text style={S.title}>App Permissions</Text>
-          <Text style={S.sub}>Grant access so all VaultChat features work correctly</Text>
+          <Text style={S.sub}>Grant access so all crazzychat features work correctly</Text>
         </View>
         <View style={S.steps}>{[1,2,3,4,5,6,7,8].map(n=><View key={n} style={[S.dot,n<=7&&S.dotDone,n===8&&S.dotActive]}/>)}</View>
         <Text style={S.stepLbl}>Step 7 of 8 — Permissions</Text>

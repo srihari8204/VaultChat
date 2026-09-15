@@ -23,7 +23,7 @@ export async function deviceSecurityAvailable(): Promise<boolean> {
 // if the device has no enrolled security or the user dismisses the prompt.
 export async function enableMfa(): Promise<boolean> {
   if (!(await deviceSecurityAvailable())) return false;
-  const r = await LocalAuthentication.authenticateAsync({ promptMessage: 'Confirm to enable VaultChat MFA' });
+  const r = await LocalAuthentication.authenticateAsync({ promptMessage: 'Confirm to enable crazzychat MFA' });
   if (!r.success) return false;
   const bytes = await Crypto.getRandomBytesAsync(32);
   const token = Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join('');
@@ -40,7 +40,7 @@ export async function disableMfa(): Promise<void> {
 // Launch-gate biometric prompt (no enrollment side effects).
 export async function promptBiometricUnlock(): Promise<boolean> {
   try {
-    const r = await LocalAuthentication.authenticateAsync({ promptMessage: 'Unlock VaultChat', fallbackLabel: 'Use MPIN' });
+    const r = await LocalAuthentication.authenticateAsync({ promptMessage: 'Unlock crazzychat', fallbackLabel: 'Use MPIN' });
     return r.success;
   } catch { return false; }
 }

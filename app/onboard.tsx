@@ -4,25 +4,31 @@
 //
 // Email comes from the Google account picker but stays editable; ownership is
 // proven by the email OTP before any account is created.
+//
+// THE SCREEN IS THE SPLASH, CONTINUED.
+//
+// It stands on AuthSky — the same #010628 ground and the same blue/violet
+// lighting as assets/images/splash.png — so the hand-off from the native splash
+// is a form fading in over artwork that never moved, rather than a cut to a
+// different screen. That is also why nothing here reads the app palette: see
+// the always-dark note in components/ui/Brand.tsx.
 
 import { Stack, useRouter } from 'expo-router';
-import { useMemo, useState } from 'react';
+import { useState } from 'react';
 import {
-  ActivityIndicator, Alert, Image, Platform,
-  ScrollView, StyleSheet, Text, TouchableOpacity, View,
+  ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, Text, View,
 } from 'react-native';
-import { type Palette } from '../constants/theme';
-import { useTheme } from '../lib/theme';
+import { LinearGradient } from 'expo-linear-gradient';
+import { BRAND_GRADIENT_CTA } from '../constants/theme';
 import { EmailAccountPicker } from '../components/auth/EmailAccountPicker';
 import { PhoneField, toE164 } from '../components/auth/PhoneField';
 import { lookupUser, onboarding, sendEmailOtp, onboardingError } from '../lib/onboarding';
-import { AuroraBackground, KeyboardSafe } from '../components/ui';
+import { AuthSky, BrandMark, KeyboardSafe } from '../components/ui';
+import { AUTH } from '../constants/authTheme';
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 export default function OnboardLanding() {
-  const { colors } = useTheme();
-  const s = useMemo(() => makeStyles(colors), [colors]);
   const router = useRouter();
 
   const [dialCode, setDialCode] = useState('+91');
@@ -60,34 +66,50 @@ export default function OnboardLanding() {
 
   return (
     <View style={s.screen}>
-      <AuroraBackground />
+      <AuthSky />
       <Stack.Screen options={{ headerShown: false }} />
       <KeyboardSafe style={{ flex: 1 }} >
         <ScrollView contentContainerStyle={s.body} keyboardShouldPersistTaps="handled">
-          <View style={s.logoWrap}>
-            <Image source={require('../assets/images/icon.png')} style={s.logo} />
-            <Text style={s.brand}>VaultChat</Text>
-            <Text style={s.tag}>Private by design</Text>
+          <BrandMark size={92} tagline style={{ marginBottom: 34 }} />
+
+          {/* ONE CARD, NOT TWO LOOSE FIELDS. The pair is a single question —
+              "who are you" — and boxing them together is what stops the screen
+              reading as a form with a logo parked above it. */}
+          <View style={s.card}>
+            <Text style={s.label}>MOBILE NUMBER</Text>
+            <PhoneField dialCode={dialCode} national={national} onChange={(d, n) => { setDialCode(d); setNational(n); }} onDark />
+
+            <View style={s.rule} />
+
+            <Text style={s.label}>EMAIL</Text>
+            <EmailAccountPicker
+              email={email}
+              onEmailChange={setEmail}
+              onAccountPicked={(a) => onboarding.set({ firstName: a.firstName, lastName: a.lastName })}
+              onDark
+            />
           </View>
 
-          <Text style={s.label}>MOBILE NUMBER</Text>
-          <PhoneField dialCode={dialCode} national={national} onChange={(d, n) => { setDialCode(d); setNational(n); }} />
-
-          <Text style={[s.label, { marginTop: 20 }]}>EMAIL</Text>
-          <EmailAccountPicker
-            email={email}
-            onEmailChange={setEmail}
-            onAccountPicked={(a) => onboarding.set({ firstName: a.firstName, lastName: a.lastName })}
-          />
-
-          <TouchableOpacity
-            style={[s.cta, !valid && s.ctaOff]}
+          {/* The one gradient on the screen, so it reads as THE action. Runs
+              blue → violet rather than the logo's cyan → violet: cyan is
+              1.63:1 against white and the label would vanish into it. */}
+          <Pressable
             onPress={onContinue}
             disabled={!valid || busy}
-            activeOpacity={0.85}
+            accessibilityRole="button"
+            accessibilityLabel="Sign in or create an account"
+            accessibilityState={{ disabled: !valid || busy, busy }}
+            style={({ pressed }) => [s.ctaWrap, !valid && s.ctaOff, pressed && valid && s.ctaDown]}
           >
-            {busy ? <ActivityIndicator color="#fff" /> : <Text style={s.ctaTxt}>Sign In / Continue</Text>}
-          </TouchableOpacity>
+            <LinearGradient
+              colors={[...BRAND_GRADIENT_CTA]}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 1 }}
+              style={s.cta}
+            >
+              {busy ? <ActivityIndicator color="#fff" /> : <Text style={s.ctaTxt}>Sign In / Continue</Text>}
+            </LinearGradient>
+          </Pressable>
 
           <Text style={s.note}>We’ll text nothing — a one-time code goes to your email to confirm it’s you.</Text>
         </ScrollView>
@@ -96,16 +118,33 @@ export default function OnboardLanding() {
   );
 }
 
-const makeStyles = (c: Palette) => StyleSheet.create({
+const s = StyleSheet.create({
   screen: { flex: 1, backgroundColor: 'transparent' },
-  body: { flexGrow: 1, padding: 24, paddingTop: 72, justifyContent: 'center' },
-  logoWrap: { alignItems: 'center', marginBottom: 40 },
-  logo: { width: 72, height: 72, borderRadius: 18, marginBottom: 14 },
-  brand: { color: c.text, fontSize: 28, fontWeight: '900', letterSpacing: 0.5 },
-  tag: { color: c.textDim, fontSize: 13, marginTop: 4 },
-  label: { color: c.textDim, fontSize: 11, fontWeight: '800', letterSpacing: 1.2, marginBottom: 8 },
-  cta: { marginTop: 32, height: 56, borderRadius: 16, backgroundColor: c.primary, alignItems: 'center', justifyContent: 'center' },
-  ctaOff: { opacity: 0.4 },
-  ctaTxt: { color: '#fff', fontSize: 16, fontWeight: '800' },
-  note: { color: c.textFaint, fontSize: 12, textAlign: 'center', marginTop: 18, lineHeight: 17 },
+  body: { flexGrow: 1, padding: 24, paddingTop: 64, paddingBottom: 40, justifyContent: 'center' },
+
+  card: {
+    backgroundColor: AUTH.card,
+    borderColor: AUTH.stroke,
+    borderWidth: 1,
+    borderRadius: 22,
+    padding: 18,
+  },
+  // Separates the two fields without the weight of a full divider row.
+  rule: { height: 1, backgroundColor: AUTH.hairline, marginVertical: 18 },
+
+  label: {
+    color: AUTH.dim, fontSize: 11, fontWeight: '800',
+    letterSpacing: 1.2, marginBottom: 8,
+  },
+
+  ctaWrap: { marginTop: 24, borderRadius: 16, overflow: 'hidden' },
+  cta: { height: 56, alignItems: 'center', justifyContent: 'center' },
+  ctaOff: { opacity: 0.38 },
+  ctaDown: { opacity: 0.88 },
+  ctaTxt: { color: '#fff', fontSize: 16, fontWeight: '800', letterSpacing: 0.2 },
+
+  note: {
+    color: AUTH.faint, fontSize: 12, textAlign: 'center',
+    marginTop: 18, lineHeight: 17,
+  },
 });

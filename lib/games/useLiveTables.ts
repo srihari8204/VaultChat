@@ -7,7 +7,7 @@
 //
 // The push half already existed and had nowhere to land: a player who missed or
 // dismissed the notification had no way back to their own game. This is the
-// list. It is served by VaultChat's backend (GET /games/tables, migration 125),
+// list. It is served by crazzychat's backend (GET /games/tables, migration 125),
 // derived from the turn notifications the games server signs.
 //
 // A LAUNCHER, NOT A SOURCE OF TRUTH. Every row is what the games server last

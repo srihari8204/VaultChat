@@ -287,7 +287,7 @@ export default function LocationScreen() {
             </TouchableOpacity>
             <Text style={S.note}>
               Streams your position in real time. It’s relayed through the server and never stored,
-              stops automatically after the time you pick, and updates while VaultChat is open.
+              stops automatically after the time you pick, and updates while crazzychat is open.
             </Text>
           </>
         )}

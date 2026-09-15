@@ -7,11 +7,11 @@
 //
 // TWO WAYS OUT, AND ONE OF THEM IS THE POINT
 //
-// The share sheet sends the invite OUT of VaultChat and hopes it finds its way
-// back. But the app it was going to be pasted into is this one: VaultChat IS
+// The share sheet sends the invite OUT of crazzychat and hopes it finds its way
+// back. But the app it was going to be pasted into is this one: crazzychat IS
 // the chat thread. So the first-class path is a card posted straight into a
-// VaultChat chat (`sendGameInvite`), and the OS share sheet stays as the
-// out-of-app fallback for someone who is not on VaultChat yet.
+// crazzychat chat (`sendGameInvite`), and the OS share sheet stays as the
+// out-of-app fallback for someone who is not on crazzychat yet.
 //
 // The card is an ordinary message of type 'game_invite' (migration 124), so it
 // inherits delivery, E2EE, retention and sync from the message it already is —
@@ -31,7 +31,7 @@ import { GAME_NAMES, inviteText, slug, tableLink } from './inviteLink';
 export { gameInviteOf, gameName, inviteText, tableLink, type GameInvite } from './inviteLink';
 
 /**
- * Post an invite card into a VaultChat chat.
+ * Post an invite card into a crazzychat chat.
  *
  * Returns false when there is no shareable room — a table the player is at by
  * default has no id worth sending, and a card to nothing is worse than a
@@ -66,7 +66,7 @@ export async function sendGameInvite(chatId: string, game: GameKind, room: strin
 }
 
 /**
- * Invite someone outside VaultChat, through the OS share sheet.
+ * Invite someone outside crazzychat, through the OS share sheet.
  *
  * Kept as the fallback path: it is the only way to reach someone who does not
  * have the app yet.
@@ -116,8 +116,8 @@ export async function shareResult(game: GameKind, won: boolean): Promise<void> {
   try {
     await Share.share({
       message: won
-        ? `I just won at ${GAME_NAMES[game]} on VaultChat.`
-        : `Good game of ${GAME_NAMES[game]} on VaultChat — rematch?`,
+        ? `I just won at ${GAME_NAMES[game]} on crazzychat.`
+        : `Good game of ${GAME_NAMES[game]} on crazzychat — rematch?`,
     });
   } catch {}
 }

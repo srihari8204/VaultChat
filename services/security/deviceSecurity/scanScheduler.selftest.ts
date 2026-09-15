@@ -17,7 +17,7 @@ function check(name: string, cond: boolean): void {
 const NOW = 1_700_000_000_000;
 
 (async () => {
-  console.log('\nVaultChat scan-scheduler self-test\n──────────────────────────────────────');
+  console.log('\ncrazzychat scan-scheduler self-test\n──────────────────────────────────────');
 
   // ── Always-scan triggers ─────────────────────────────────────────
   console.log('Manual / event:');

@@ -2,16 +2,18 @@
 // whole onboarding chain server-side: profile/init (encrypted PII) → security
 // questions (argon2) → mpin/set (argon2, marks onboarding_complete). Then → success.
 // Weak MPINs are rejected client-side too (server re-checks).
+//
+// Step 3 of 3, on the same fixed night palette as the rest of the chain — see
+// the always-dark note in components/ui/Brand.tsx.
 
 import { Ionicons } from '@expo/vector-icons';
 import { Stack, useRouter } from 'expo-router';
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, Animated, BackHandler, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
-import { type Palette } from '../constants/theme';
-import { useTheme } from '../lib/theme';
+import { useEffect, useRef, useState } from 'react';
+import { ActivityIndicator, Alert, Animated, BackHandler, Pressable, StyleSheet, Text, View } from 'react-native';
 import { MpinInput } from '../components/auth/MpinInput';
 import { initProfile, onboarding, saveSecurityQuestions, setMpinRemote, onboardingError } from '../lib/onboarding';
-import { AuroraBackground } from '../components/ui';
+import { AuthSky, BrandMark, StepRail } from '../components/ui';
+import { AUTH } from '../constants/authTheme';
 
 function isWeak(m: string, dobYear?: string): boolean {
   if (!/^\d{6}$/.test(m)) return true;
@@ -23,8 +25,6 @@ function isWeak(m: string, dobYear?: string): boolean {
 }
 
 export default function OnboardMpin() {
-  const { colors } = useTheme();
-  const s = useMemo(() => makeStyles(colors), [colors]);
   const router = useRouter();
 
   const [phase, setPhase] = useState<'set' | 'confirm'>('set');
@@ -85,41 +85,66 @@ export default function OnboardMpin() {
   const setting = phase === 'set';
   return (
     <View style={s.screen}>
-      <AuroraBackground />
+      <AuthSky />
       <Stack.Screen options={{ headerShown: false, gestureEnabled: !busy }} />
       {/* Step 3 of 3 had no back affordance at all — the only step in the chain
           without one, though returning to the questions is perfectly valid. */}
       {!busy && (
-        <TouchableOpacity onPress={() => router.back()} style={s.back} hitSlop={10} accessibilityLabel="Back">
-          <Ionicons name="arrow-back" size={24} color={colors.text} />
-        </TouchableOpacity>
+        <Pressable
+          onPress={() => router.back()}
+          style={s.back}
+          hitSlop={10}
+          accessibilityRole="button"
+          accessibilityLabel="Back"
+        >
+          <Ionicons name="arrow-back" size={24} color={AUTH.text} />
+        </Pressable>
       )}
       <View style={s.body}>
-        <Text style={s.lock}>🔐</Text>
+        {/* The mark replaces the 🔐 emoji: a padlock glyph renders as whatever
+            font the OS picked, which is three different pictures across phones. */}
+        <BrandMark size={52} markOnly />
         <Text style={s.title}>{setting ? 'Create your MPIN' : 'Confirm your MPIN'}</Text>
-        <Text style={s.sub}>{setting ? 'A 6-digit PIN unlocks VaultChat' : 'Re-enter the same 6 digits'}</Text>
+        <Text style={s.sub}>{setting ? 'A 6-digit PIN unlocks crazzychat' : 'Re-enter the same 6 digits'}</Text>
+        <StepRail step={3} style={s.rail} />
 
-        <View style={{ marginVertical: 28 }}>
+        <View style={s.card}>
           {busy
-            ? <ActivityIndicator color={colors.primary} size="large" />
+            ? <ActivityIndicator color={AUTH.accent} size="large" />
             : setting
-              ? <MpinInput key="set" value={first} onChange={setFirst} onComplete={onSet} autoFocus shakeAnim={shake} />
-              : <MpinInput key="confirm" value={confirm} onChange={setConfirm} onComplete={onConfirm} autoFocus shakeAnim={shake} />}
+              ? <MpinInput key="set" value={first} onChange={setFirst} onComplete={onSet} autoFocus shakeAnim={shake} onDark />
+              : <MpinInput key="confirm" value={confirm} onChange={setConfirm} onComplete={onConfirm} autoFocus shakeAnim={shake} onDark />}
         </View>
 
-        {!!msg && <Text style={s.msg}>{msg}</Text>}
+        {/* accessibilityLiveRegion so a rejected PIN is announced rather than
+            only shaken — the shake is invisible to a screen reader. */}
+        {!!msg && <Text style={s.msg} accessibilityLiveRegion="polite">{msg}</Text>}
         {busy && <Text style={s.sub}>Securing your account…</Text>}
       </View>
     </View>
   );
 }
 
-const makeStyles = (c: Palette) => StyleSheet.create({
+const s = StyleSheet.create({
   screen: { flex: 1, backgroundColor: 'transparent' },
   back: { paddingHorizontal: 20, paddingTop: 8, alignSelf: 'flex-start' },
-  body: { flex: 1, paddingHorizontal: 24, paddingTop: 72, alignItems: 'center' },
-  lock: { fontSize: 44, marginBottom: 12 },
-  title: { color: c.text, fontSize: 24, fontWeight: '900' },
-  sub: { color: c.textDim, fontSize: 14, marginTop: 8, textAlign: 'center' },
-  msg: { color: c.danger, fontSize: 13, marginTop: 8, textAlign: 'center', fontWeight: '600' },
+  body: { flex: 1, paddingHorizontal: 24, paddingTop: 56, alignItems: 'center' },
+  title: { color: AUTH.text, fontSize: 24, fontWeight: '900' },
+  sub: { color: AUTH.dim, fontSize: 14, marginTop: 8, textAlign: 'center' },
+  rail: { width: 132, marginTop: 14 },
+
+  card: {
+    alignSelf: 'stretch',
+    alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: 104,
+    marginVertical: 28,
+    backgroundColor: AUTH.card,
+    borderColor: AUTH.stroke,
+    borderWidth: 1,
+    borderRadius: 22,
+    padding: 18,
+  },
+
+  msg: { color: AUTH.danger, fontSize: 13, marginTop: 8, textAlign: 'center', fontWeight: '600' },
 });

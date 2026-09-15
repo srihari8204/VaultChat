@@ -135,7 +135,7 @@ export default function LockScreen() {
         }
 
         const result = await LocalAuthentication.authenticateAsync({
-          promptMessage: "Scan your face to open VaultChat",
+          promptMessage: "Scan your face to open crazzychat",
           fallbackLabel: "Use Secret Code",
           cancelLabel: "Cancel",
           disableDeviceFallback: false,
@@ -169,7 +169,7 @@ export default function LockScreen() {
       }
 
       const result = await LocalAuthentication.authenticateAsync({
-        promptMessage: "Scan your face to open VaultChat",
+        promptMessage: "Scan your face to open crazzychat",
         fallbackLabel: "Use Secret Code",
         cancelLabel: "Cancel",
         disableDeviceFallback: false,
@@ -310,7 +310,7 @@ export default function LockScreen() {
               </Animated.View>
             </TouchableOpacity>
 
-            <Text style={S.appName}>VaultChat</Text>
+            <Text style={S.appName}>crazzychat</Text>
             <Text style={S.hint}>Scan face to unlock</Text>
 
             <View style={S.actionGroup}>
@@ -340,7 +340,7 @@ export default function LockScreen() {
         {/* Code Entry Stage */}
         {stage === "code" && (
           <View style={S.codeSection}>
-            <Text style={S.appName}>VaultChat</Text>
+            <Text style={S.appName}>crazzychat</Text>
             <Text style={S.codeLabel}>Enter 8-digit Secret Code</Text>
 
             {/* Dot indicators */}

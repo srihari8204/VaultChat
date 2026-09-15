@@ -79,7 +79,7 @@ A(!/useNativeControls\b(?!=\{false\})/.test(code),
 // ── A HOST NEVER RENDERS THEIR OWN SCREEN CAPTURE ──────────────────
 //
 // Found on device 2026-08-20, and it is not a cosmetic bug: FLAG_SECURE excludes
-// VaultChat's own window from MediaProjection, so a host's own capture is BLACK
+// crazzychat's own window from MediaProjection, so a host's own capture is BLACK
 // for exactly as long as they are looking at this screen. Promoting it to the
 // stage replaced the host's camera with a black rectangle and read as "screen
 // sharing is broken" while viewers were receiving the share perfectly.

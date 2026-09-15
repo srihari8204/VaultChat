@@ -1,24 +1,26 @@
 // app/onboard-security.tsx — pick 5 distinct security questions + answers.
 // Answers are held in the store and only sent (argon2-hashed server-side) after
 // the MPIN is set. Each row excludes questions chosen by the others.
+//
+// Step 2 of 3, on the same fixed night palette as the rest of the chain — see
+// the always-dark note in components/ui/Brand.tsx.
 
 import { HEADER_TOP } from '../constants/layout';
 import { Ionicons } from '@expo/vector-icons';
 import { Stack, useRouter } from 'expo-router';
-import { useMemo, useState } from 'react';
-import { Platform, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
-import { type Palette } from '../constants/theme';
-import { useTheme } from '../lib/theme';
+import { useState } from 'react';
+import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { LinearGradient } from 'expo-linear-gradient';
+import { BRAND_GRADIENT_CTA } from '../constants/theme';
 import { SecurityQuestionRow } from '../components/auth/SecurityQuestionRow';
 import { REQUIRED_SECURITY_ANSWERS } from '../constants/securityQuestionPool';
 import { onboarding } from '../lib/onboarding';
-import { AuroraBackground, KeyboardSafe } from '../components/ui';
+import { AuthSky, BrandMark, KeyboardSafe, StepRail } from '../components/ui';
+import { AUTH } from '../constants/authTheme';
 
 type Slot = { questionCode: string | null; answer: string };
 
 export default function OnboardSecurity() {
-  const { colors } = useTheme();
-  const s = useMemo(() => makeStyles(colors), [colors]);
   const router = useRouter();
 
   const [slots, setSlots] = useState<Slot[]>(() =>
@@ -40,43 +42,89 @@ export default function OnboardSecurity() {
 
   return (
     <View style={s.screen}>
-      <AuroraBackground />
+      <AuthSky />
       <Stack.Screen options={{ headerShown: false }} />
       <KeyboardSafe style={{ flex: 1 }} >
         <ScrollView contentContainerStyle={s.body} keyboardShouldPersistTaps="handled">
-          <TouchableOpacity onPress={() => router.back()} style={s.back}><Ionicons name="arrow-back" size={24} color={colors.text} /></TouchableOpacity>
-          <Text style={s.title}>Security questions</Text>
-          <Text style={s.step}>Step 2 of 3 · used to recover your account</Text>
+          <Pressable
+            onPress={() => router.back()}
+            style={s.back}
+            accessibilityRole="button"
+            accessibilityLabel="Go back"
+            hitSlop={10}
+          >
+            <Ionicons name="arrow-back" size={24} color={AUTH.text} />
+          </Pressable>
 
-          {slots.map((sl, i) => (
-            <SecurityQuestionRow
-              key={i}
-              index={i}
-              selectedCode={sl.questionCode}
-              answer={sl.answer}
-              excludeCodes={chosen.filter(c => c !== sl.questionCode)}
-              onSelect={(code) => setSlot(i, { questionCode: code })}
-              onAnswer={(answer) => setSlot(i, { answer })}
-            />
-          ))}
+          <View style={s.head}>
+            <BrandMark size={52} markOnly />
+            <Text style={s.title}>Security questions</Text>
+            <Text style={s.step}>Step 2 of 3 · used to recover your account</Text>
+            <StepRail step={2} style={s.rail} />
+          </View>
 
-          <TouchableOpacity style={[s.cta, !valid && s.ctaOff]} onPress={next} disabled={!valid} activeOpacity={0.85}>
-            <Text style={s.ctaTxt}>Next</Text>
-          </TouchableOpacity>
+          {/* All five rows in one card: they are one answer to one question
+              ("how do we know it's you"), not five separate settings. */}
+          <View style={s.card}>
+            {slots.map((sl, i) => (
+              <SecurityQuestionRow
+                key={i}
+                index={i}
+                selectedCode={sl.questionCode}
+                answer={sl.answer}
+                excludeCodes={chosen.filter(c => c !== sl.questionCode)}
+                onSelect={(code) => setSlot(i, { questionCode: code })}
+                onAnswer={(answer) => setSlot(i, { answer })}
+              />
+            ))}
+          </View>
+
+          <Pressable
+            onPress={next}
+            disabled={!valid}
+            accessibilityRole="button"
+            accessibilityLabel="Next, create your MPIN"
+            accessibilityState={{ disabled: !valid }}
+            style={({ pressed }) => [s.ctaWrap, !valid && s.ctaOff, pressed && valid && s.ctaDown]}
+          >
+            <LinearGradient
+              colors={[...BRAND_GRADIENT_CTA]}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 1 }}
+              style={s.cta}
+            >
+              <Text style={s.ctaTxt}>Next</Text>
+            </LinearGradient>
+          </Pressable>
         </ScrollView>
       </KeyboardSafe>
     </View>
   );
 }
 
-const makeStyles = (c: Palette) => StyleSheet.create({
+const s = StyleSheet.create({
   screen: { flex: 1, backgroundColor: 'transparent' },
   body: { padding: 24, paddingTop: HEADER_TOP, paddingBottom: 48 },
-  back: { marginBottom: 8 },
-  backTxt: { color: c.text, fontSize: 26 },
-  title: { color: c.text, fontSize: 24, fontWeight: '900' },
-  step: { color: c.primary, fontSize: 12, fontWeight: '700', marginTop: 4, marginBottom: 20 },
-  cta: { marginTop: 16, height: 56, borderRadius: 16, backgroundColor: c.primary, alignItems: 'center', justifyContent: 'center' },
-  ctaOff: { opacity: 0.4 },
-  ctaTxt: { color: '#fff', fontSize: 16, fontWeight: '800' },
+  back: { marginBottom: 8, alignSelf: 'flex-start' },
+
+  head: { alignItems: 'center', marginBottom: 16 },
+  title: { color: AUTH.text, fontSize: 24, fontWeight: '900' },
+  step: { color: AUTH.dim, fontSize: 12, fontWeight: '700', marginTop: 6, textAlign: 'center' },
+  rail: { width: 132, marginTop: 8 },
+
+  card: {
+    backgroundColor: AUTH.card,
+    borderColor: AUTH.stroke,
+    borderWidth: 1,
+    borderRadius: 22,
+    padding: 18,
+    // The rows carry their own bottom margin; trim the last one's.
+    paddingBottom: 2,
+  },
+
+  ctaWrap: { marginTop: 24, borderRadius: 16, overflow: 'hidden' },
+  cta: { height: 56, alignItems: 'center', justifyContent: 'center' },
+  ctaOff: { opacity: 0.38 },
+  ctaDown: { opacity: 0.88 },
+  ctaTxt: { color: '#fff', fontSize: 16, fontWeight: '800', letterSpacing: 0.2 },
 });

@@ -496,7 +496,7 @@ export default function EncryptedNotesScreen() {
     try {
       const raw = await FileSystem.readAsStringAsync(res.assets[0].uri, { encoding: FileSystem.EncodingType.UTF8 });
       const r = await restoreBundle(bkPass, JSON.parse(raw));
-      if (r.status === 'invalid') { Alert.alert('Not a notes backup', 'That file is not a VaultChat notes export.'); return; }
+      if (r.status === 'invalid') { Alert.alert('Not a notes backup', 'That file is not a crazzychat notes export.'); return; }
       if (r.status === 'wrong') { Alert.alert('Wrong passphrase', 'That passphrase does not open this backup.'); return; }
       if (r.status === 'occupied') {
         // Never silently swap the key: whatever this device already holds would

@@ -528,7 +528,7 @@ async function postOnce(item: QueuedMessage): Promise<PostResult> {
   // with ONE plaintext `body` column for both directions — sent and received
   // differ only by the `type` bitmask, never by where the text lives. The file
   // is encrypted at rest by SQLCipher, which is what makes a plaintext column
-  // safe; VaultChat's encField/DEK gives the same property.
+  // safe; crazzychat's encField/DEK gives the same property.
   //
   // The POST ack carries CIPHERTEXT, and cacheMessages nulls an envelope, so
   // handing `real` back untouched wrote messages.content = NULL for every own

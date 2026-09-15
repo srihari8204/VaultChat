@@ -45,7 +45,7 @@ export default function StatusPrivacyScreen() {
         for (const ch of chats) {
           if (ch.type === 'direct' && ch.peerUserId && !seen.has(ch.peerUserId)) {
             seen.add(ch.peerUserId);
-            c.push({ id: ch.peerUserId, name: ch.peerName || 'VaultChat user', photoURL: ch.peerPhotoURL ?? null });
+            c.push({ id: ch.peerUserId, name: ch.peerName || 'crazzychat user', photoURL: ch.peerPhotoURL ?? null });
           }
         }
         setContacts(c);

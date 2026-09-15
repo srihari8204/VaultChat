@@ -1,5 +1,5 @@
 // app/d2de-status.tsx
-// Live D2DE encryption status screen — unique to VaultChat
+// Live D2DE encryption status screen — unique to crazzychat
 
 import React, { useMemo } from 'react';
 import { View, Text, ScrollView, StyleSheet } from 'react-native';
@@ -9,7 +9,7 @@ import { Stack } from 'expo-router';
 import { getD2DEStatus } from '../services/d2deService';
 
 const LAYER_INFO: Record<string, string> = {
-  'TLS 1.3':           'All traffic between your device and VaultChat servers is encrypted with TLS 1.3. This protects data in transit.',
+  'TLS 1.3':           'All traffic between your device and crazzychat servers is encrypted with TLS 1.3. This protects data in transit.',
   'AES-256-GCM':       'Every message is encrypted on your device before being stored in Firestore. The server never sees plaintext.',
   'Double Ratchet':    'Per-message ephemeral keys provide Perfect Forward Secrecy. Compromising one key cannot decrypt past messages.',
   'X3DH':              'Extended Triple Diffie-Hellman key exchange establishes shared secrets without ever transmitting private keys.',
@@ -68,10 +68,10 @@ export default function D2DEStatusScreen() {
 
         {/* Unique callout */}
         <View style={s.uniqueBox}>
-          <Text style={s.uniqueTitle}>🏆 Unique to VaultChat</Text>
+          <Text style={s.uniqueTitle}>🏆 Unique to crazzychat</Text>
           <Text style={s.uniqueBody}>
             No other messaging app — not Signal, not WhatsApp, not Telegram — shows you a live encryption status screen.
-            VaultChat is the only app where you can see exactly what protection is active on your conversation right now.
+            crazzychat is the only app where you can see exactly what protection is active on your conversation right now.
           </Text>
         </View>
 

@@ -176,7 +176,7 @@ export default function FaceVerifyNewDeviceScreen() {
           <View style={S.resultWrap}>
             <Text style={[S.resultIcon]}>✅</Text>
             <Text style={[S.resultMsg,{color:"#22C55E"}]}>Identity Verified</Text>
-            <Text style={S.resultSub}>This device is now trusted. Entering VaultChat...</Text>
+            <Text style={S.resultSub}>This device is now trusted. Entering crazzychat...</Text>
           </View>
         )}
 

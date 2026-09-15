@@ -21,7 +21,7 @@ function makeKV(): KVStore {
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 (async () => {
-  console.log('\nVaultChat E2EE message-store self-test\n──────────────────────────────────────');
+  console.log('\ncrazzychat E2EE message-store self-test\n──────────────────────────────────────');
 
   // Plaintext cache
   const store = createMessageStore(makeKV());

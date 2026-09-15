@@ -29,7 +29,7 @@ function snap(signals: ReturnType<typeof riskSignal>[], scannedAt = 0): PostureS
 }
 
 (async () => {
-  console.log('\nVaultChat notification-policy self-test\n────────────────────────────────────────────');
+  console.log('\ncrazzychat notification-policy self-test\n────────────────────────────────────────────');
 
   const clean = snap([]);
   const rooted = snap([riskSignal('ROOT_DETECTED')]);

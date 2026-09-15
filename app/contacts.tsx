@@ -5,10 +5,10 @@
 //   2. Pull every address-book contact with at least one phone number
 //   3. Hash each phone (digits-only, India default for 10-digit, SHA-256)
 //      using the SAME normalize+hash we use server-side for users.phone_hash
-//   4. POST /contacts/match — get the subset already on VaultChat
+//   4. POST /contacts/match — get the subset already on crazzychat
 //   5. Render two sections:
-//       * "On VaultChat"  — tap → opens or creates a direct chat
-//       * "Invite to VaultChat" — fires the OS share sheet with an invite link
+//       * "On crazzychat"  — tap → opens or creates a direct chat
+//       * "Invite to crazzychat" — fires the OS share sheet with an invite link
 //
 // Privacy: raw phone numbers never leave the device. Only SHA-256 hashes go
 // over the wire, and the server only sees hashes for users who opted in to
@@ -189,7 +189,7 @@ export default function ContactsScreen() {
   }, [router]);
 
   const sendInvite = useCallback(async (row: InviteRow) => {
-    const message = `Hey, I'm on VaultChat — encrypted messaging without the noise. Try it: ${INVITE_URL}`;
+    const message = `Hey, I'm on crazzychat — encrypted messaging without the noise. Try it: ${INVITE_URL}`;
     try {
       const smsBody = encodeURIComponent(message);
       const smsUrl  = Platform.OS === 'ios'
@@ -199,7 +199,7 @@ export default function ContactsScreen() {
       if (can) {
         await Linking.openURL(smsUrl);
       } else {
-        await Share.share({ message, title: 'Invite to VaultChat' });
+        await Share.share({ message, title: 'Invite to crazzychat' });
       }
     } catch (e: any) {
       Alert.alert('Could not open invite', e?.message ?? 'Try again');
@@ -207,8 +207,8 @@ export default function ContactsScreen() {
   }, []);
 
   const sections = useMemo(() => ([
-    { key: 'matched', title: `On VaultChat (${matched.length})`, data: matched },
-    { key: 'invite',  title: `Invite to VaultChat (${invite.length})`, data: invite },
+    { key: 'matched', title: `On crazzychat (${matched.length})`, data: matched },
+    { key: 'invite',  title: `Invite to crazzychat (${invite.length})`, data: invite },
   ]), [matched, invite]);
 
   const renderItem = ({ item, section }: any) => {
@@ -219,8 +219,8 @@ export default function ContactsScreen() {
         <TouchableOpacity style={S.row} onPress={() => openChat(m)} activeOpacity={0.7} disabled={openingId === m.id}>
           <View style={[S.avatar, S.avatarOnApp]}><Text style={S.avatarTxt}>{initial}</Text></View>
           <View style={S.rowBody}>
-            <Text style={S.rowName} numberOfLines={1}>{m.contactName || m.name || 'VaultChat user'}</Text>
-            <Text style={S.rowSub} numberOfLines={1}>{m.rawPhone || 'On VaultChat'}</Text>
+            <Text style={S.rowName} numberOfLines={1}>{m.contactName || m.name || 'crazzychat user'}</Text>
+            <Text style={S.rowSub} numberOfLines={1}>{m.rawPhone || 'On crazzychat'}</Text>
           </View>
           {openingId === m.id
             ? <ActivityIndicator color={colors.primary} />
@@ -282,7 +282,7 @@ export default function ContactsScreen() {
         <View style={S.center}>
           <Text style={S.icon}>📇</Text>
           <Text style={S.heading}>Contacts permission needed</Text>
-          <Text style={S.sub}>{error ?? 'Allow VaultChat to read your contacts so you can find friends who are on the app.'}</Text>
+          <Text style={S.sub}>{error ?? 'Allow crazzychat to read your contacts so you can find friends who are on the app.'}</Text>
           <TouchableOpacity style={S.ctaBtn} onPress={scan} activeOpacity={0.85}>
             <Text style={S.ctaTxt}>Try again</Text>
           </TouchableOpacity>

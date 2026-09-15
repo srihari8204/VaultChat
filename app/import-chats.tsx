@@ -374,7 +374,7 @@ export default function ImportChatsScreen() {
           <>
             <Text style={s.h1}>Import one conversation at a time</Text>
             <Text style={s.sub}>
-              Bringing <Text style={s.strong} numberOfLines={1}>{peerName}</Text>’s history into VaultChat.
+              Bringing <Text style={s.strong} numberOfLines={1}>{peerName}</Text>’s history into crazzychat.
               To import someone else, come back and do it separately.
             </Text>
             <PrivacyNote s={s} colors={colors} />
@@ -663,7 +663,7 @@ function Preview({
           <Text style={s.ackTxt}>
             Yes — this WhatsApp conversation with{' '}
             <Text style={s.strong}>{parsed.counterpart || 'this person'}</Text> belongs in my
-            VaultChat chat with <Text numberOfLines={1} style={s.strong}>{peerName}</Text>.
+            crazzychat chat with <Text numberOfLines={1} style={s.strong}>{peerName}</Text>.
           </Text>
         </TouchableOpacity>
       )}

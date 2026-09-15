@@ -19,7 +19,7 @@
 //     encoder produces `encoded=0 size=0x0` — no frames at all — however
 //     correct everything else is.
 //
-// FLAG_SECURE is deliberately NOT one of them: VaultChat's own window stays
+// FLAG_SECURE is deliberately NOT one of them: crazzychat's own window stays
 // protected and Android simply excludes it from the capture, which is the
 // product rule. See beforeScreenShare below.
 //
@@ -62,10 +62,10 @@ export async function stopBroadcastService(): Promise<void> {
 /**
  * Make screen capture legal.
  *
- * FLAG_SECURE IS LEFT ALONE — VaultChat is never made capturable.
+ * FLAG_SECURE IS LEFT ALONE — crazzychat is never made capturable.
  *
  * Android excludes a SECURE window from the capture and records everything else
- * normally, which is exactly the product rule: the host's own VaultChat screens
+ * normally, which is exactly the product rule: the host's own crazzychat screens
  * stay protected while Chrome, Maps, a gallery or a game share fine. The host
  * starts the broadcast and switches away; what they switch TO is what the
  * audience sees.
@@ -78,7 +78,7 @@ export async function stopBroadcastService(): Promise<void> {
  * unbounded audience, so a host who glanced at a chat mid-share would show it to
  * everyone watching.
  *
- * Capture still works. room.ts measured it: zero frames while VaultChat's secure
+ * Capture still works. room.ts measured it: zero frames while crazzychat's secure
  * window is the only thing on screen, frames the moment the host switches to the
  * app they actually meant to show.
  *

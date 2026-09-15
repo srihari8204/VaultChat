@@ -24,8 +24,8 @@ export type VaultContact = {
   phone:        string;
   phoneHash:    string;
   avatar?:      string;   // local contact photo
-  vaultAvatar?: string;   // their VaultChat profile photo
-  vaultName?:   string;   // their VaultChat display name
+  vaultAvatar?: string;   // their crazzychat profile photo
+  vaultName?:   string;   // their crazzychat display name
   isOnVault:    boolean;
   isSaved:      boolean;  // true = saved in your phone contacts
   lastSeen?:    number;

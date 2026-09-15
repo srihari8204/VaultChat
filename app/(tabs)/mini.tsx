@@ -392,7 +392,7 @@ export default function MiniAppsScreen() {
           </View>
           <Text style={styles.devTitle}>Build Your Own</Text>
           <Text style={styles.devDesc}>
-            Create custom mini apps using the VaultChat SDK. Build, test, and publish to the community.
+            Create custom mini apps using the crazzychat SDK. Build, test, and publish to the community.
           </Text>
           <TouchableOpacity
             style={styles.devBtn}

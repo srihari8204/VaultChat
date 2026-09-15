@@ -39,7 +39,7 @@ const AnimPressable = Animated.createAnimatedComponent(Pressable);
  * These used to be emoji, and so came from four different families at once:
  * flat glyphs (↻, ⧉) sitting beside full-colour emoji (🎲, 🤖) that no theme
  * colour can reach and that redraw themselves differently on every Android
- * skin. The rest of VaultChat draws icons from Ionicons — 178 call sites — so
+ * skin. The rest of crazzychat draws icons from Ionicons — 178 call sites — so
  * the boards now do too, and an icon simply takes its button's foreground
  * colour.
  *

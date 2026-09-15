@@ -1,7 +1,7 @@
 // app/qr-contact.tsx — QR Code Add Contact (Postgres-backed).
 //
 // "My QR" renders your VaultID (GET /user/profile → vaultId) as a QR.
-// "Scan" reads a VaultChat QR, resolves the handle (GET /user/by-vault/:id),
+// "Scan" reads a crazzychat QR, resolves the handle (GET /user/by-vault/:id),
 // and opens/creates a direct chat (POST /chats). No Firestore.
 
 import { HEADER_TOP } from '../constants/layout';
@@ -29,7 +29,7 @@ export default function QRContactScreen() {
   const router = useRouter();
   const [tab, setTab] = useState<'my' | 'scan'>('my');
   const [myVaultId, setMyVaultId] = useState('');
-  const [myName, setMyName] = useState('VaultChat User');
+  const [myName, setMyName] = useState('crazzychat User');
   const [loading, setLoading] = useState(true);
   const [permission, requestPermission] = useCameraPermissions();
   const [scanned, setScanned] = useState(false);
@@ -40,7 +40,7 @@ export default function QRContactScreen() {
     (async () => {
       try {
         const p = await getMyProfile();
-        if (active) { setMyVaultId(p.vaultId || ''); setMyName(p.name || 'VaultChat User'); }
+        if (active) { setMyVaultId(p.vaultId || ''); setMyName(p.name || 'crazzychat User'); }
       } catch { /* header still renders */ } finally {
         if (active) setLoading(false);
       }
@@ -54,7 +54,7 @@ export default function QRContactScreen() {
     if (!myVaultId) return;
     try {
       await Share.share({
-        message: `Add me on VaultChat! My VaultID: @${myVaultId}\nhttps://vaultchat.app/add/${myVaultId}`,
+        message: `Add me on crazzychat! My VaultID: @${myVaultId}\nhttps://vaultchat.app/add/${myVaultId}`,
       });
     } catch { /* user cancelled */ }
   };
@@ -72,7 +72,7 @@ export default function QRContactScreen() {
     setProcessing(true);
     try {
       const vaultId = parseVaultId(data);
-      if (!vaultId) { Alert.alert('Invalid', 'Not a VaultChat QR code.'); setScanned(false); return; }
+      if (!vaultId) { Alert.alert('Invalid', 'Not a crazzychat QR code.'); setScanned(false); return; }
       if (vaultId === myVaultId) { Alert.alert('That’s you', "That's your own QR code!"); setScanned(false); return; }
 
       const peer = await resolveVaultId(vaultId);
@@ -92,7 +92,7 @@ export default function QRContactScreen() {
         },
       ]);
     } catch (e: any) {
-      Alert.alert('Not found', e?.message ?? 'No VaultChat user with that ID.');
+      Alert.alert('Not found', e?.message ?? 'No crazzychat user with that ID.');
       setScanned(false);
     } finally {
       setProcessing(false);
@@ -135,7 +135,7 @@ export default function QRContactScreen() {
                     ? <QRCode value={qrData} size={200} backgroundColor="#FFFFFF" color="#0A0A0F" />
                     : <Text style={{ color: colors.textDim }}>No VaultID yet</Text>}
                 </View>
-                <Text style={s.qrHint}>Show this to add you on VaultChat</Text>
+                <Text style={s.qrHint}>Show this to add you on crazzychat</Text>
               </View>
               <TouchableOpacity style={[s.shareBtn, { flexDirection: 'row', alignItems: 'center', gap: 8 }]} onPress={handleShare} disabled={!myVaultId}>
                 <Ionicons name="share-outline" size={16} color={colors.primary} />
@@ -165,7 +165,7 @@ export default function QRContactScreen() {
               />
               <View style={s.scanOverlay} pointerEvents="none">
                 <View style={s.scanFrame} />
-                <Text style={s.scanHint}>{processing ? 'Processing…' : 'Point camera at a VaultChat QR code'}</Text>
+                <Text style={s.scanHint}>{processing ? 'Processing…' : 'Point camera at a crazzychat QR code'}</Text>
               </View>
               {scanned && !processing && (
                 <TouchableOpacity style={[s.shareBtn, { position: 'absolute', bottom: 40, alignSelf: 'center' }]} onPress={() => setScanned(false)}>
