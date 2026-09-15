@@ -221,10 +221,22 @@ export interface Envelope {
   public_meta?: PublicMeta; unknown?: Uint8Array[];
 }
 export interface SubmitMessage { envelope?: Envelope; sealed?: Uint8Array; unknown?: Uint8Array[] }
+export interface MessageAck { message_id?: string; seq?: string; server_ts_ms?: string; unknown?: Uint8Array[] }
 export interface Fragment {
   fragment_id?: string; index?: number; total?: number;
   /** uint64 JS_STRING */ total_bytes?: string;
   chunk?: Uint8Array; last?: boolean; unknown?: Uint8Array[];
+}
+export interface Cursor {
+  chat_id?: string; kind?: number; /** uint64 JS_STRING */ position?: string;
+  /** int64 JS_STRING */ updated_at_ms?: string; unknown?: Uint8Array[];
+}
+export interface CursorSync {
+  cursors?: Cursor[]; mutation_continuation?: string; unknown?: Uint8Array[];
+}
+export interface CursorBatch {
+  cursors?: Cursor[]; more?: boolean; continuation?: string;
+  mutation_continuation?: string; unknown?: Uint8Array[];
 }
 
 export interface Frame {
@@ -353,7 +365,7 @@ function readBytes(r: R, cap: number): Uint8Array {
   return span;
 }
 
-function push(into: string[] | Uint8Array[], lim: number, what: string): void {
+function push<T>(into: T[], lim: number, what: string): void {
   if (into.length >= lim) fail('TOO_MANY_ELEMENTS', `${what} over ${lim}`);
 }
 
@@ -693,6 +705,65 @@ function writeFragment(m: Fragment): Uint8Array {
   return wDone(x);
 }
 
+function readCursor(r: R): Cursor {
+  const m: Cursor = { chat_id: '', kind: 0, position: '0', updated_at_ms: '0', unknown: [] };
+  while (r.p < r.end) {
+    const s = r.p, { field, wire } = tag(r);
+    if (field === 1 && wire === 2) m.chat_id = readString(r);
+    else if (field === 2 && wire === 0) m.kind = Number(varint64(r) & 0xffffffffn);
+    else if (field === 3 && wire === 0) m.position = u64str(r);
+    else if (field === 4 && wire === 0) m.updated_at_ms = i64str(r);
+    else keepUnknown(r, s, wire, m.unknown);
+  }
+  return m;
+}
+function writeCursor(m: Cursor): Uint8Array {
+  const x = w();
+  wStr(x, 1, m.chat_id ?? ''); wU32(x, 2, m.kind ?? 0);
+  wI64(x, 3, m.position ?? '0'); wI64(x, 4, m.updated_at_ms ?? '0');
+  wUnknown(x, m.unknown);
+  return wDone(x);
+}
+function readCursorSync(r: R, depth: number): CursorSync {
+  const m: CursorSync = { cursors: [], mutation_continuation: '', unknown: [] };
+  while (r.p < r.end) {
+    const s = r.p, { field, wire } = tag(r);
+    if (field === 1 && wire === 2) {
+      push(m.cursors, r.lim.max_repeated_elements, 'cursors');
+      m.cursors.push(readCursor(nest(r, depth + 1)));
+    } else if (field === 2 && wire === 2) m.mutation_continuation = readString(r);
+    else keepUnknown(r, s, wire, m.unknown);
+  }
+  return m;
+}
+function writeCursorSync(m: CursorSync): Uint8Array {
+  const x = w();
+  for (const c of m.cursors ?? []) wSub(x, 1, writeCursor(c));
+  wStr(x, 2, m.mutation_continuation ?? ''); wUnknown(x, m.unknown);
+  return wDone(x);
+}
+function readCursorBatch(r: R, depth: number): CursorBatch {
+  const m: CursorBatch = { cursors: [], more: false, continuation: '', mutation_continuation: '', unknown: [] };
+  while (r.p < r.end) {
+    const s = r.p, { field, wire } = tag(r);
+    if (field === 1 && wire === 2) {
+      push(m.cursors, r.lim.max_repeated_elements, 'cursors');
+      m.cursors.push(readCursor(nest(r, depth + 1)));
+    } else if (field === 2 && wire === 0) m.more = varint64(r) !== 0n;
+    else if (field === 3 && wire === 2) m.continuation = readString(r);
+    else if (field === 4 && wire === 2) m.mutation_continuation = readString(r);
+    else keepUnknown(r, s, wire, m.unknown);
+  }
+  return m;
+}
+function writeCursorBatch(m: CursorBatch): Uint8Array {
+  const x = w();
+  for (const c of m.cursors ?? []) wSub(x, 1, writeCursor(c));
+  wBool(x, 2, !!m.more); wStr(x, 3, m.continuation ?? '');
+  wStr(x, 4, m.mutation_continuation ?? ''); wUnknown(x, m.unknown);
+  return wDone(x);
+}
+
 /** The six bodies this build decodes. Everything else round-trips as `raw`. */
 const TYPED_BODY: Record<number, (r: R, depth: number) => any> = {
   48: readSubmitMessage,
@@ -751,6 +822,43 @@ function resolveLimits(o: CodecOptions): typeof LIMITS {
     if (typeof v === 'number' && v > 0 && v < out[k]) out[k] = v;
   }
   return out;
+}
+
+export interface CursorBodyDecodeResult<T> {
+  ok: boolean; value?: T; error?: CodecError; errorCode?: number; detail?: string;
+}
+
+function decodeCursorBody<T>(buf: Uint8Array, read: (r: R, depth: number) => T,
+  opts: CodecOptions): CursorBodyDecodeResult<T> {
+  const lim = resolveLimits(opts);
+  try {
+    return { ok: true, value: read({ b: buf, p: 0, end: buf.length, lim }, opts.depth ?? 1) };
+  } catch (e) {
+    const x = e as Refused;
+    return { ok: false, error: x.code, errorCode: ERROR_CODE[x.code], detail: x.why };
+  }
+}
+
+export const encodeCursorSync = (m: CursorSync): Uint8Array => writeCursorSync(m);
+export const encodeCursorBatch = (m: CursorBatch): Uint8Array => writeCursorBatch(m);
+export const decodeCursorSync = (b: Uint8Array, o: CodecOptions = {}): CursorBodyDecodeResult<CursorSync> =>
+  decodeCursorBody(b, readCursorSync, o);
+export const decodeCursorBatch = (b: Uint8Array, o: CodecOptions = {}): CursorBodyDecodeResult<CursorBatch> =>
+  decodeCursorBody(b, readCursorBatch, o);
+
+/** Ack stays opaque in Frame; submission alone interprets its persisted id. */
+export function decodeMessageAck(b: Uint8Array): CursorBodyDecodeResult<MessageAck> {
+  return decodeCursorBody(b, (r) => {
+    const m: MessageAck = { message_id: '', seq: '0', server_ts_ms: '0', unknown: [] };
+    while (r.p < r.end) {
+      const s = r.p, { field, wire } = tag(r);
+      if (field === 1 && wire === 2) m.message_id = readString(r);
+      else if (field === 2 && wire === 0) m.seq = u64str(r);
+      else if (field === 3 && wire === 0) m.server_ts_ms = i64str(r);
+      else keepUnknown(r, s, wire, m.unknown);
+    }
+    return m;
+  }, {});
 }
 
 /**

@@ -84,7 +84,7 @@ export async function getDidRecord(): Promise<DidRecord | null> {
 /**
  * Prove the device still holds the private key for the stored DID by signing a
  * fresh random challenge and verifying it against the public key. Returns true
- * only if the keypair is intact — this is what "verified" actually means here.
+ * only if the keypair matches the stored identity and its public fingerprint.
  */
 export async function proveControl(): Promise<boolean> {
   try {
@@ -92,6 +92,15 @@ export async function proveControl(): Promise<boolean> {
     if (!privHex) return false;
     const priv = hexToBytes(privHex);
     const pub  = ed25519.getPublicKey(priv);
+    const record = await getDidRecord();
+    if (!record || typeof record !== 'object' ||
+        typeof record.publicKeyHex !== 'string' ||
+        !/^[0-9a-fA-F]{64}$/.test(record.publicKeyHex) ||
+        record.publicKeyHex.toLowerCase() !== bytesToHex(pub) ||
+        record.did !== didKeyFromPub(pub) ||
+        record.fingerprint !== fingerprintOf(pub) ||
+        typeof record.displayName !== 'string' ||
+        !Number.isFinite(record.createdAt) || record.createdAt <= 0) return false;
     const challenge = randomBytes(32);
     const sig = ed25519.sign(challenge, priv);
     return ed25519.verify(sig, challenge, pub);

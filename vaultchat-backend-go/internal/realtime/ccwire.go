@@ -7,7 +7,7 @@
 // does not opt in is byte-for-byte the deployment it was before (asserted by
 // TestCCWireIsOffByDefault).
 //
-// WHY IT LIVES IN package realtime RATHER THAN package routes
+// # WHY IT LIVES IN package realtime RATHER THAN package routes
 //
 // Because of the one thing a second transport must never do: grow its own
 // notion of who may reach what. chatMemberAllowed, peerAllowed and runAllowed
@@ -96,6 +96,12 @@ func (h *Hub) ccwireServe(w http.ResponseWriter, r *http.Request) {
 	// ccwire.MaxFrameBytes; the negotiated per-frame bound (256 KiB) is checked
 	// inside, so an oversized frame is refused rather than dropping the socket.
 	c.SetReadLimit(int64(ccwire.HeaderBytes + ccwire.MaxFrameBytes))
+	h.ccwireRun(r, c)
+}
+
+// Both carriers enter the same authenticated protocol and fan-out session.
+func (h *Hub) ccwireRun(r *http.Request, c ccwireConnection) {
+	u := httpx.UserFrom(r)
 
 	s := &ccwireSession{
 		hub:  h,
@@ -166,13 +172,38 @@ func (s *ccwireSession) closeOnce() {
 	}
 }
 
+type ccwireConnection interface {
+	Close() error
+	SetReadDeadline(time.Time) error
+	SetWriteDeadline(time.Time) error
+	ReadMessage() (int, []byte, error)
+	WriteMessage(int, []byte) error
+}
+
 type ccwireSession struct {
 	hub   *Hub
-	conn  *websocket.Conn
+	conn  ccwireConnection
 	d     *sockData
 	lim   ccwire.Limits
 	hello bool
 	subs  map[string]struct{}
+	// frag is THIS session's fragment reassembler (ccwire_fragment.go).
+	// Per-session on purpose: a shared one would let any client evict or
+	// observe another's partial sets. Created lazily, so a peer that never
+	// fragments costs nothing.
+	frag *fragmentReassembler
+
+	// lastCursorAt throttles catch-up. ccwire_messages.go routes sends through
+	// the REST handler specifically so CC-Wire inherits its rate limit -
+	// chatsDelta has none, and each cursor_sync additionally costs an owner
+	// lookup over up to 256 ids under an RLS transaction plus a MAX(id) read. One
+	// authenticated socket looping the frame was unbounded work. Single goroutine
+	// per session (run()), so no mutex.
+	lastCursorAt time.Time
+	// deviceID comes from ClientHello's existing protobuf field. It is an
+	// authenticated session attribute used only to identify a sync install; it
+	// does not grant device trust or change authorization.
+	deviceID string
 	// w writes one already-framed message. Indirected so the protocol above it
 	// — the handshake, the authorization gates, the EPHEMERAL invariant — can
 	// be driven in a test without a socket, the same way this package's other
@@ -277,6 +308,12 @@ func (s *ccwireSession) handle(raw []byte) bool {
 			s.refuse(m.RequestID, errProtocolViolation, "ClientHello first")
 			return false
 		}
+		if id, ok := ccwireClientHelloDevice(m.Body, s.lim); ok {
+			s.deviceID = id
+		} else {
+			s.refuse(m.RequestID, errPayloadInvalid, "ClientHello")
+			return false
+		}
 		s.hello = true
 		// The credential inside ClientHello is NOT read: this connection was
 		// already authenticated by httpx.RequireAuth at the upgrade, which is
@@ -310,6 +347,23 @@ func (s *ccwireSession) handle(raw []byte) bool {
 	case ccwire.BodySubscribe, ccwire.BodyUnsubscribe:
 		return s.scope(m)
 
+	case ccwire.BodyFragment:
+		if s.frag == nil {
+			s.frag = newFragmentReassembler(s.lim)
+		}
+		// serveFragment re-dispatches a COMPLETED payload back through serveBody.
+		// That covers the MESSAGING bodies only. Ping is answered by handle()
+		// inline and Subscribe/Unsubscribe are routed by handle() to s.scope, so
+		// none of the three is reachable through a fragment - they fit in one
+		// frame by construction, so fragmenting one is a client bug and is
+		// answered UNKNOWN_OPERATION. No authorization is skipped either way:
+		// s.scope IS the gate, and it simply is not reached.
+		if handled, alive := serveFragment(s, s.frag, m); handled {
+			return alive
+		}
+		metrics.Inc("ccwire_unknown_operation")
+		return s.sendError(m.RequestID, errUnknownOperation, "operation not served")
+
 	default:
 		// The messaging bodies (ccwire_messages.go). They route through the SAME
 		// REST handlers and the SAME fan-out as Socket.IO rather than growing a
@@ -322,6 +376,30 @@ func (s *ccwireSession) handle(raw []byte) bool {
 		metrics.Inc("ccwire_unknown_operation")
 		return s.sendError(m.RequestID, errUnknownOperation, "operation not served")
 	}
+}
+
+// ccwireClientHelloDevice reads only ClientHello.device_id (field 5). Unknown
+// fields remain opaque, and the bounded protobuf reader rejects malformed data.
+func ccwireClientHelloDevice(body []byte, lim ccwire.Limits) (string, bool) {
+	r := pbr{b: body}
+	var device string
+	for r.p < len(r.b) {
+		tag, ok := r.varint()
+		if !ok || tag>>3 == 0 {
+			return "", false
+		}
+		field, wire := uint32(tag>>3), uint8(tag&7)
+		if field == 5 && wire == 2 {
+			b, ok := r.span(lim.MaxStringFieldBytes)
+			if !ok {
+				return "", false
+			}
+			device = string(b)
+		} else if !r.skip(wire, lim) {
+			return "", false
+		}
+	}
+	return device, true
 }
 
 // scope handles Subscribe / Unsubscribe — THE authorization path.
@@ -450,8 +528,20 @@ func (s *ccwireSession) serverHello() []byte {
 // implemented is ABSENT rather than advertised — a capability claimed and not
 // delivered is worse than one never offered.
 func (s *ccwireSession) capabilities() []byte {
+	// Negotiation is by INTERSECTION (capabilities.proto): a capability absent
+	// from either side is inactive. So the rule cuts both ways, and only one
+	// half was being observed. Claiming something unimplemented is the obvious
+	// error; NOT claiming something implemented is the quieter one - a
+	// conforming client is told fragmentation is off and will never fragment,
+	// while the reassembler (8 slots, 2 MiB) stays reachable by anyone who
+	// ignores the handshake. The two below are served and tested; advertise them.
 	var b []byte
+	b = ccwire.AppendBoolField(b, 1, true) // fragmentation     — serveFragment, this file
+	b = ccwire.AppendBoolField(b, 3, true) // batch_cursor_sync — ccwire_cursor.go
 	b = ccwire.AppendBoolField(b, 7, true) // structured_errors
+	// Still ABSENT on purpose: resumption (2) - no resume state is kept, which
+	// is why sendGoAway omits resume_token; datagrams (4) - not applicable over
+	// WebSocket; reauth_in_place (5) and causal_epochs (6) - unimplemented.
 	return b
 }
 
@@ -461,9 +551,9 @@ func encodeLimits(l ccwire.Limits) []byte {
 	b = ccwire.AppendVarintField(b, 2, uint64(l.MaxOpaqueBytes))
 	b = ccwire.AppendVarintField(b, 3, uint64(l.MaxMessageBodyBytes))
 	b = ccwire.AppendVarintField(b, 4, uint64(l.MaxFragmentsPerMessage))
-	b = ccwire.AppendVarintField(b, 5, 30000) // reassembly_lifetime_ms
-	b = ccwire.AppendVarintField(b, 6, 2097152)
-	b = ccwire.AppendVarintField(b, 7, 8)
+	b = ccwire.AppendVarintField(b, 5, ReassemblyLifetimeMS)      // enforced by ccwire_fragment.go
+	b = ccwire.AppendVarintField(b, 6, MaxReassemblyBytes)        // enforced by ccwire_fragment.go
+	b = ccwire.AppendVarintField(b, 7, MaxConcurrentReassemblies) // enforced by ccwire_fragment.go
 	b = ccwire.AppendVarintField(b, 8, uint64(l.MaxNestingDepth))
 	b = ccwire.AppendVarintField(b, 9, uint64(l.MaxRepeatedElements))
 	b = ccwire.AppendVarintField(b, 10, uint64(l.MaxStringFieldBytes))
@@ -488,13 +578,119 @@ func (s *ccwireSession) sendAck(m ccwire.Message) bool {
 	})
 }
 
+// sendGoAway tells the peer this server is going away on purpose.
+//
+// BodyGoAway (21) has existed in the codec tables since the contract was
+// written and lib/ccwire/client.ts has always handled it - it calls
+// down("transport", "go_away"), which is its RECONNECT path. Go never sent
+// one, so a deploy or a SIGTERM reached the client as an abrupt socket close,
+// which is indistinguishable from a network failure and is handled with the
+// backoff reserved for one. Saying "go away" instead lets the client reconnect
+// immediately, to another replica, without waiting out a penalty it did not
+// earn.
+//
+// drain_deadline_ms is the honest remainder of the shutdown budget, not a
+// constant: a client that is told 10s and then cut off at 2s learns to ignore
+// the field.
+func (s *ccwireSession) sendGoAway(reason uint32, drainMS uint32) bool {
+	var b []byte
+	b = ccwire.AppendVarintField(b, 1, uint64(reason))
+	b = ccwire.AppendVarintField(b, 3, uint64(drainMS))
+	// Field 2 (last_accepted) and field 4 (resume_token) are deliberately
+	// omitted. Both are promises: last_accepted says "everything up to here is
+	// durable" and resume_token says "hand this back and I will restore your
+	// state". Neither is true here - there is no resumption support on this
+	// server (Capabilities.resumption is not advertised), so emitting either
+	// would invite a client to skip a cold sync it actually needs.
+	return s.send(ccwire.Message{
+		TrafficClass: ccwire.TrafficClassControl,
+		Stream:       1,
+		BodyField:    ccwire.BodyGoAway,
+		Body:         b,
+	})
+}
+
+// ccwireShutdown tells every live CC-Wire session to go away, then ends them.
+//
+// Called from Hub.Shutdown. Socket.IO clients already got DisconnectSockets;
+// CC-Wire sessions had nothing equivalent and were simply dropped when the
+// process exited.
+//
+// Best-effort by construction: a peer that is already gone, or whose write
+// blocks, must not hold up the shutdown budget for everyone else, so a failed
+// send is ignored and the session is closed regardless.
+func (h *Hub) ccwireShutdown(drain time.Duration) {
+	if h == nil {
+		return
+	}
+	h.cwmu.Lock()
+	var all []*ccwireSession
+	for _, byUser := range h.cwSessions {
+		for s := range byUser {
+			all = append(all, s)
+		}
+	}
+	h.cwmu.Unlock()
+
+	// The grace we will ACTUALLY honour, which is what gets advertised. An
+	// earlier version advertised the caller's whole budget and then closed in
+	// the next statement - the precise behaviour sendGoAway's own comment
+	// condemns, and a client told 10s and cut off at 0 learns to ignore the
+	// field. It is capped well under the caller's budget because Hub.Shutdown
+	// still has to close the Socket.IO server inside the same deadline.
+	grace := drain / 4
+	if grace > 2*time.Second {
+		grace = 2 * time.Second
+	}
+	if grace < 0 {
+		grace = 0
+	}
+
+	// CONCURRENTLY. write() takes the session's write mutex and writeWS sets a
+	// 10s deadline, and drain() may already hold that mutex on a stalled
+	// fan-out write - so one wedged peer used to cost up to 20s BEFORE the next
+	// session was even reached. Serially, that is the whole SIGTERM budget for
+	// a handful of dead sockets.
+	var wg sync.WaitGroup
+	for _, s := range all {
+		wg.Add(1)
+		go func(s *ccwireSession) {
+			defer wg.Done()
+			_ = s.sendGoAway(errInternal, uint32(grace.Milliseconds()))
+		}(s)
+	}
+	done := make(chan struct{})
+	go func() { wg.Wait(); close(done) }()
+	select {
+	case <-done:
+	case <-time.After(grace):
+		// A peer that has not taken the frame in the grace it was promised does
+		// not get to extend it. Its goroutine is left to finish against its own
+		// write deadline; closing the socket below is what unblocks it.
+	}
+	for _, s := range all {
+		s.closeOnce()
+	}
+}
+
 // sendError writes a structured Error. `detail` is SERVER-AUTHORED and never
 // echoes client input — echoing would reintroduce the relay injection surface
 // inside the error channel itself (errors.proto).
 func (s *ccwireSession) sendError(requestID string, code uint32, detail string) bool {
 	class := uint32(2) // ERROR_CLASS_FATAL
 	switch code {
-	case errNotPermitted, errUnknownOperation, errRateLimited, errInternal:
+	// PAYLOAD_INVALID is a bad FRAME, not a bad session, and the two sides used
+	// to disagree about that: sendError's callers return true, so the server
+	// keeps serving, while the client read class FATAL and tore the transport
+	// down for good (client.ts down('protocol') -> fatal -> transport.ts refuses
+	// to re-dial for the life of the process). One stale cursor presented for
+	// the wrong chat - the exact case ccwire_cursor.go exists to catch - cost
+	// the client CC-Wire until the app was restarted.
+	//
+	// A violation that really must end the session goes through refuse(), which
+	// closes it deliberately rather than relying on the class to do it.
+	case errNotPermitted, errUnknownOperation, errRateLimited, errInternal,
+		errPayloadInvalid:
 		class = 1 // ERROR_CLASS_RETRYABLE — the session survives
 	case errAuthRequired:
 		class = 3 // ERROR_CLASS_AUTH
@@ -517,8 +713,8 @@ func (s *ccwireSession) sendError(requestID string, code uint32, detail string) 
 // reading a stream we have lost sync with.
 func (s *ccwireSession) refuse(requestID string, code uint32, detail string) {
 	_ = s.sendError(requestID, code, detail)
-	if s.conn != nil {
-		_ = s.conn.WriteControl(websocket.CloseMessage,
+	if c, ok := s.conn.(*websocket.Conn); ok {
+		_ = c.WriteControl(websocket.CloseMessage,
 			websocket.FormatCloseMessage(websocket.ClosePolicyViolation, ""),
 			time.Now().Add(time.Second))
 	}

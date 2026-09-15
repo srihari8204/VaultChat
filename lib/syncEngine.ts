@@ -13,7 +13,7 @@ import { hydrateMessages, looksEncrypted, type Message } from './chatService';
 import { normalizeMsgIds } from './msgIds';
 import { markDeliveredDurable } from './receipts';
 import { notifyBatch } from './messageNotifications';
-import { onConnectionState } from './socket';
+import { addPersistentListener, onConnectionState } from './socket';
 
 // Timestamp cursor for edits/deletes (they mutate a row in place, so the id
 // cursor can't see them). Seeded on the first catch-up from the server's clock;
@@ -21,6 +21,7 @@ import { onConnectionState } from './socket';
 // table next to the id cursor it pairs with, so wiping the cache on logout
 // can't leave a stale mutation cursor pointing past rows we no longer have.
 const MUT_KEY = 'vc_mutated_since_v1';
+const COLD_KEY = 'vc_sync_continuation_v1';
 
 // Re-scan the last few ids each reconnect so a message that committed just after
 // our cursor (bigserial commit-order window) isn't skipped. Idempotent re-apply.
@@ -36,7 +37,7 @@ const MAX_PAGES = 500;
 const MUT_PAGE = 500;      // server-side LIMIT on the mutation query
 const MAX_MUT_PAGES = 20;  // 10k mutations/run, logged when tripped
 
-interface Delta { messages: (Message & { chatId: string })[]; nextSince: number; more: boolean; mutations?: (Message & { chatId: string })[]; serverTime?: string }
+interface Delta { messages: (Message & { chatId: string })[]; nextSince: number; more: boolean; syncContinuation?: string; mutations?: (Message & { chatId: string })[]; nextMutationCursor?: string; serverTime?: string }
 
 let inflight: Promise<number> | null = null;
 
@@ -82,7 +83,29 @@ async function applyByChat(rows: (Message & { chatId: string })[]): Promise<Map<
 
     if (todo.length) {
       metric('delta.decrypts', todo.length);
-      const hydrated = await hydrateMessages(chatId, todo);
+      // ONE UNDECRYPTABLE MESSAGE MUST NOT DISCARD THE PAGE.
+      //
+      // hydrateMessages is try/FINALLY with no catch, so a decrypt that throws
+      // propagates out of here, past cacheMessages (which then never runs), and
+      // into catchUp's "offline / transient" catch. The whole page is dropped:
+      // nothing stored, no delivery ack, the cursor never advances - and because
+      // the same page is re-fetched on every reconnect, it fails again forever.
+      // One message the device cannot open silently blocks catch-up for the
+      // ENTIRE account, which is how a chat sits at delivered=6 with messages 7
+      // and 8 retained and eligible on the server.
+      //
+      // Falling back to the RAW rows keeps the envelope. That is deliberately
+      // "stored", not "displayable": cacheMessages persists the ciphertext, the
+      // bubble renders its locked state, and app/chat.tsx's bounded retry can
+      // open it once the key situation resolves. Storing it is also what makes
+      // the delivery ack honest - the device really does hold the message.
+      let hydrated: typeof todo;
+      try {
+        hydrated = await hydrateMessages(chatId, todo);
+      } catch {
+        metric('delta.hydrate_failed', todo.length);
+        hydrated = todo;
+      }
       await cacheMessages(chatId, hydrated);   // upsert by id → edits overwrite, deletes tombstone
     }
   }
@@ -116,6 +139,16 @@ function normDelta(d: Delta | null | undefined): Delta | null | undefined {
   return d;
 }
 
+// Send both parameters during a rolling upgrade. Older servers ignore the
+// keyset token but still receive a usable timestamp, including its boundary.
+function mutationParams(cursor: string | null): string {
+  if (!cursor) return '';
+  const sep = cursor.lastIndexOf('|');
+  if (sep < 0) return `&mutatedSince=${encodeURIComponent(cursor)}`;
+  const fallback = new Date(Date.parse(cursor.slice(0, sep)) - 1).toISOString();
+  return `&mutationCursor=${encodeURIComponent(cursor)}&mutatedSince=${encodeURIComponent(fallback)}`;
+}
+
 /** Drain the global delta from (cursor − lookback) to head. Returns #applied. */
 // COALESCE on the in-flight run; do NOT return early.
 //
@@ -140,45 +173,53 @@ async function runCatchUp(): Promise<number> {
     let since = Math.max(0, (await getGlobalSyncCursor()) - LOOKBACK);
     const sinceOrig = since;   // mutation pages keep the original id window
     const mutatedSince = await getMeta(MUT_KEY);   // null on first-ever sync
+    let syncContinuation = (await getMeta(COLD_KEY)) || null;
     for (let guard = 0; guard < MAX_PAGES; guard++) {
       // Ask for mutations only on the FIRST page (they're time-, not id-paginated).
-      const mutParam = (guard === 0 && mutatedSince) ? `&mutatedSince=${encodeURIComponent(mutatedSince)}` : '';
+      const mutParam = guard === 0 ? mutationParams(mutatedSince) : '';
       metric(since === 0 ? 'cold_sync.requests' : 'delta.requests');
-      const r = normDelta(await api<Delta>(`/chats/delta?since=${since}&limit=${PAGE}${mutParam}`));
+      const coldParam = syncContinuation
+        ? `&syncContinuation=${encodeURIComponent(syncContinuation)}` : '';
+      const r = normDelta(await api<Delta>(`/chats/delta?since=${since}&limit=${PAGE}${mutParam}${coldParam}`));
       metric(since === 0 ? 'cold_sync.rows' : 'delta.rows', r?.messages?.length ?? 0);
 
       if (guard === 0) {
-        // Edits/deletes to old messages — apply in place (no receipt/notify).
-        // P4.3: the server caps each mutation page at 500 and the old code read
-        // only ONE page, silently dropping the rest. Drain by advancing the
-        // mutatedSince cursor to the newest timestamp applied so far.
-        let muts = r?.mutations ?? [];
+        let mutationPage = r;
         let cursor = mutatedSince;
-        for (let mp = 0; muts.length > 0; mp++) {
+        for (let mp = 0; mp < MAX_MUT_PAGES; mp++) {
+          const muts = mutationPage?.mutations ?? [];
           await applyByChat(muts);
-          if (muts.length < MUT_PAGE) break;              // page not full → drained
-          if (mp >= MAX_MUT_PAGES) { console.warn('[sync] mutation drain hit page cap — resuming next reconnect'); break; }
           const maxTs = maxMutationTs(muts);
-          if (!maxTs) break;
-          // Advance strictly so the loop can never re-fetch the same full page
-          // forever. Trade-off: if a full page (500) shared ONE identical
-          // timestamp, the +1 ms bump skips any further rows at that exact
-          // instant — terminating beats spinning, and Postgres NOW() has
-          // microsecond resolution, so 500 mutations in one millisecond is not
-          // reachable in practice.
-          cursor = (cursor && maxTs <= cursor)
-            ? new Date(Date.parse(cursor) + 1).toISOString()
-            : maxTs;
-          const rm = normDelta(await api<Delta>(`/chats/delta?since=${sinceOrig}&limit=1&mutatedSince=${encodeURIComponent(cursor)}`));
-          muts = rm?.mutations ?? [];
+          // Older servers cannot page timestamp ties. Re-read the boundary
+          // rather than skip it; stop if that server cannot make progress.
+          const next = mutationPage?.nextMutationCursor || (maxTs
+            ? new Date(Date.parse(maxTs) - 1).toISOString()
+            : cursor || mutationPage?.serverTime);
+          const progressed = next && next !== cursor;
+          if (progressed) {
+            await setMeta(MUT_KEY, next);
+            cursor = next;
+          }
+          if (muts.length < MUT_PAGE || !progressed) break;
+          if (mp === MAX_MUT_PAGES - 1) {
+            console.warn('[sync] mutation drain hit page cap — resuming next reconnect');
+            break;
+          }
+          mutationPage = normDelta(await api<Delta>(`/chats/delta?since=${sinceOrig}&limit=1${mutationParams(cursor)}`));
         }
-        // Advance the stored cursor to the server clock only AFTER the drain —
-        // anything mutated during it is newer than serverTime and caught next run.
-        if (r?.serverTime) await setMeta(MUT_KEY, r.serverTime).catch(() => {});
       }
 
       const msgs = r?.messages ?? [];
-      if (msgs.length === 0) break;
+      if (msgs.length === 0) {
+        // A page with exactly PAGE rows is conservatively marked `more` by
+        // older servers. Its follow-up is empty; clear the cold continuation
+        // here or every later catch-up remains under the cold-history filter.
+        if (r && syncContinuation && !r.syncContinuation) {
+          syncContinuation = null;
+          await setMeta(COLD_KEY, '');
+        }
+        break;
+      }
       const byChat = await applyByChat(msgs);
       for (const [chatId, list] of byChat) {
         // WhatsApp: delivered (✓✓) fires the moment the device HAS the message,
@@ -193,6 +234,10 @@ async function runCatchUp(): Promise<number> {
       }
       applied += msgs.length;
       since = r.nextSince;
+      // Keep the opaque cold policy before advancing its numeric cursor. A
+      // crash between these writes can replay a page, but cannot widen it.
+      syncContinuation = r.syncContinuation || null;
+      await setMeta(COLD_KEY, syncContinuation ?? '');
       // Persist the high-water mark. Without this the cursor is re-derived from
       // MAX(id) of cached rows, so deleting messages (Clear chat, cache trim)
       // rewinds sync and re-downloads what was just removed.
@@ -216,11 +261,35 @@ const RESUME_MIN_GAP_MS = 5000;
 let lastResumeSync = 0;
 
 let armed = false;
+let liveSyncTimer: ReturnType<typeof setTimeout> | null = null;
+const LIVE_SYNC_DEBOUNCE_MS = 250;
+
+/**
+ * A socket event can arrive while no ChatScreen is mounted (for example while
+ * the user is on the chat list). In that state the per-screen new_message
+ * listener does not exist, so schedule the authoritative delta pull here.
+ * Coalescing a burst avoids one request per event while retaining prompt
+ * foreground delivery.
+ */
+function scheduleLiveCatchUp(): void {
+  if (liveSyncTimer) return;
+  liveSyncTimer = setTimeout(() => {
+    liveSyncTimer = null;
+    catchUp().catch(() => {});
+  }, LIVE_SYNC_DEBOUNCE_MS);
+}
+
 /** Wire catch-up to run on every ONLINE transition. Call once at app boot. */
 export function initSync(): void {
   if (armed) return;
   armed = true;
   onConnectionState((s) => { if (s === 'ONLINE') catchUp().catch(() => {}); });
+  // The per-chat listener is only mounted while a thread is open. Keep this
+  // app-global listener across socket reconnects so a message arriving on the
+  // chat list is fetched, cached and shown when that chat is opened.
+  for (const event of ['new_message', 'message_edited', 'message_deleted']) {
+    addPersistentListener(event, scheduleLiveCatchUp);
+  }
   // AppState is a SECOND trigger, not a duplicate of the one above.
   //
   // ONLINE only fires on a TRANSITION. A device that was backgrounded with a

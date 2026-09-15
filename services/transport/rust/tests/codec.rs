@@ -18,8 +18,15 @@ use transport_core::parse::{
 };
 
 fn vectors() -> Value {
-    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("..").join("..").join("..");
-    let p = root.join("lib").join("ccwire").join("__vectors__").join("codec.json");
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("..")
+        .join("..")
+        .join("..");
+    let p = root
+        .join("lib")
+        .join("ccwire")
+        .join("__vectors__")
+        .join("codec.json");
     let raw = fs::read_to_string(&p)
         .unwrap_or_else(|e| panic!("cannot read shared vectors at {}: {e}", p.display()));
     serde_json::from_str(&raw).expect("vectors are not valid JSON")
@@ -40,7 +47,9 @@ fn hex(b: &[u8]) -> String {
 }
 
 fn limits_from(case: &Value, base: Limits) -> Limits {
-    let Some(o) = case.get("limits").and_then(|v| v.as_object()) else { return base };
+    let Some(o) = case.get("limits").and_then(|v| v.as_object()) else {
+        return base;
+    };
     let mut p = Limits {
         max_frame_bytes: 0,
         max_opaque_bytes: 0,
@@ -73,8 +82,14 @@ fn constants_match_the_fixture() {
     let v = vectors();
     let l = Limits::default();
     let f = &v["limits"];
-    assert_eq!(f["max_frame_bytes"].as_u64().unwrap() as usize, l.max_frame_bytes);
-    assert_eq!(f["max_opaque_bytes"].as_u64().unwrap() as usize, l.max_opaque_bytes);
+    assert_eq!(
+        f["max_frame_bytes"].as_u64().unwrap() as usize,
+        l.max_frame_bytes
+    );
+    assert_eq!(
+        f["max_opaque_bytes"].as_u64().unwrap() as usize,
+        l.max_opaque_bytes
+    );
     assert_eq!(
         f["max_message_body_bytes"].as_u64().unwrap() as usize,
         l.max_message_body_bytes
@@ -83,19 +98,47 @@ fn constants_match_the_fixture() {
         f["max_fragments_per_message"].as_u64().unwrap() as u32,
         l.max_fragments_per_message
     );
-    assert_eq!(f["max_nesting_depth"].as_u64().unwrap() as u32, l.max_nesting_depth);
-    assert_eq!(f["max_repeated_elements"].as_u64().unwrap() as usize, l.max_repeated_elements);
-    assert_eq!(f["max_string_field_bytes"].as_u64().unwrap() as usize, l.max_string_field_bytes);
+    assert_eq!(
+        f["max_nesting_depth"].as_u64().unwrap() as u32,
+        l.max_nesting_depth
+    );
+    assert_eq!(
+        f["max_repeated_elements"].as_u64().unwrap() as usize,
+        l.max_repeated_elements
+    );
+    assert_eq!(
+        f["max_string_field_bytes"].as_u64().unwrap() as usize,
+        l.max_string_field_bytes
+    );
 
-    assert_eq!(v["trafficClassEphemeral"].as_u64().unwrap() as u32, TRAFFIC_CLASS_EPHEMERAL);
+    assert_eq!(
+        v["trafficClassEphemeral"].as_u64().unwrap() as u32,
+        TRAFFIC_CLASS_EPHEMERAL
+    );
 
-    let want: Vec<u32> =
-        v["ephemeralBodies"].as_array().unwrap().iter().map(|x| x.as_u64().unwrap() as u32).collect();
-    assert_eq!(want, EPHEMERAL_BODIES.to_vec(), "the EPHEMERAL allow-list drifted");
+    let want: Vec<u32> = v["ephemeralBodies"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|x| x.as_u64().unwrap() as u32)
+        .collect();
+    assert_eq!(
+        want,
+        EPHEMERAL_BODIES.to_vec(),
+        "the EPHEMERAL allow-list drifted"
+    );
 
-    let want: Vec<u32> =
-        v["bodyFields"].as_array().unwrap().iter().map(|x| x.as_u64().unwrap() as u32).collect();
-    assert_eq!(want, BODY_FIELDS.to_vec(), "the oneof body field numbers drifted from envelope.proto");
+    let want: Vec<u32> = v["bodyFields"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|x| x.as_u64().unwrap() as u32)
+        .collect();
+    assert_eq!(
+        want,
+        BODY_FIELDS.to_vec(),
+        "the oneof body field numbers drifted from envelope.proto"
+    );
 }
 
 #[test]
@@ -114,16 +157,28 @@ fn decode_matches_the_fixture() {
         match decode_frame(&input, &lim, max, depth) {
             Ok(f) => {
                 assert!(want_ok, "{name}: accepted input the fixture rejects");
-                assert_eq!(f.request_id, case["requestId"].as_str().unwrap(), "{name}: request_id");
+                assert_eq!(
+                    f.request_id,
+                    case["requestId"].as_str().unwrap(),
+                    "{name}: request_id"
+                );
                 assert_eq!(
                     f.traffic_class as u64,
                     case["trafficClass"].as_u64().unwrap(),
                     "{name}: traffic_class"
                 );
-                assert_eq!(f.stream as u64, case["stream"].as_u64().unwrap(), "{name}: stream");
+                assert_eq!(
+                    f.stream as u64,
+                    case["stream"].as_u64().unwrap(),
+                    "{name}: stream"
+                );
                 // Compared as decimal STRINGS, which is how the fixture stores
                 // them and how the TypeScript side hands them out.
-                assert_eq!(f.seq.to_string(), case["seq"].as_str().unwrap(), "{name}: seq");
+                assert_eq!(
+                    f.seq.to_string(),
+                    case["seq"].as_str().unwrap(),
+                    "{name}: seq"
+                );
                 assert_eq!(
                     f.depends_on.to_string(),
                     case["dependsOn"].as_str().unwrap(),
@@ -131,7 +186,11 @@ fn decode_matches_the_fixture() {
                 );
                 let want_body = case["bodyField"].as_u64().map(|x| x as u32);
                 assert_eq!(f.body_field, want_body, "{name}: body_field");
-                assert_eq!(hex(f.body), case["bodyHex"].as_str().unwrap(), "{name}: body bytes");
+                assert_eq!(
+                    hex(f.body),
+                    case["bodyHex"].as_str().unwrap(),
+                    "{name}: body bytes"
+                );
 
                 let want_unknown: Vec<String> = case["unknownHex"]
                     .as_array()
@@ -141,7 +200,10 @@ fn decode_matches_the_fixture() {
                 assert_eq!(got, want_unknown, "{name}: unknown fields");
             }
             Err(e) => {
-                assert!(!want_ok, "{name}: rejected input the fixture accepts ({e:?})");
+                assert!(
+                    !want_ok,
+                    "{name}: rejected input the fixture accepts ({e:?})"
+                );
                 assert_eq!(
                     e.as_str(),
                     case["error"].as_str().unwrap(),
@@ -196,8 +258,15 @@ fn encode_matches_the_fixture() {
                 );
             }
             Err(e) => {
-                assert!(!want_ok, "{name}: refused a frame the fixture encodes ({e:?})");
-                assert_eq!(e.as_str(), case["error"].as_str().unwrap(), "{name}: wrong reason");
+                assert!(
+                    !want_ok,
+                    "{name}: refused a frame the fixture encodes ({e:?})"
+                );
+                assert_eq!(
+                    e.as_str(),
+                    case["error"].as_str().unwrap(),
+                    "{name}: wrong reason"
+                );
                 assert_eq!(
                     e.error_code() as u64,
                     case["errorCode"].as_u64().unwrap(),
@@ -232,7 +301,11 @@ fn every_accepted_vector_round_trips_byte_for_byte() {
         }
 
         let out = encode_frame(&f, &lim, 0).unwrap_or_else(|e| panic!("{name}: re-encode: {e:?}"));
-        assert_eq!(hex(&out), hex(&input), "{name}: decode then encode changed the bytes");
+        assert_eq!(
+            hex(&out),
+            hex(&input),
+            "{name}: decode then encode changed the bytes"
+        );
     }
 }
 
@@ -275,7 +348,10 @@ fn an_absurd_declared_length_is_refused_without_allocating() {
     // peer can even declare here, and it is refused on the bounds check.
     let mut buf = vec![0x0a];
     buf.extend_from_slice(&[0xff, 0xff, 0xff, 0xff, 0x0f]);
-    assert_eq!(decode_frame(&buf, &lim, 0, 0).unwrap_err(), CodecError::Truncated);
+    assert_eq!(
+        decode_frame(&buf, &lim, 0, 0).unwrap_err(),
+        CodecError::Truncated
+    );
 
     // Ten bytes in LENGTH position is not a bigger number, it is an over-long
     // encoding, and it is refused earlier and differently. The fixture pins this
@@ -283,7 +359,10 @@ fn an_absurd_declared_length_is_refused_without_allocating() {
     let mut buf = vec![0x0a];
     buf.extend_from_slice(&[0xff; 9]);
     buf.push(0x01);
-    assert_eq!(decode_frame(&buf, &lim, 0, 0).unwrap_err(), CodecError::VarintOverflow);
+    assert_eq!(
+        decode_frame(&buf, &lim, 0, 0).unwrap_err(),
+        CodecError::VarintOverflow
+    );
 }
 
 /// Negotiation is not authority.
@@ -299,11 +378,28 @@ fn a_peer_cannot_negotiate_a_limit_upward() {
         max_repeated_elements: usize::MAX,
         max_string_field_bytes: usize::MAX,
     };
-    assert_eq!(base.tighten(&greedy), base, "a peer raised a bound this build compiled with");
+    assert_eq!(
+        base.tighten(&greedy),
+        base,
+        "a peer raised a bound this build compiled with"
+    );
 
-    let tight = Limits { max_string_field_bytes: 8, ..base };
-    assert_eq!(base.tighten(&tight).max_string_field_bytes, 8, "a peer could not tighten");
+    let tight = Limits {
+        max_string_field_bytes: 8,
+        ..base
+    };
+    assert_eq!(
+        base.tighten(&tight).max_string_field_bytes,
+        8,
+        "a peer could not tighten"
+    );
     // Zero means "not proposed", never "unlimited".
-    let unset = Limits { max_string_field_bytes: 0, ..base };
-    assert_eq!(base.tighten(&unset).max_string_field_bytes, base.max_string_field_bytes);
+    let unset = Limits {
+        max_string_field_bytes: 0,
+        ..base
+    };
+    assert_eq!(
+        base.tighten(&unset).max_string_field_bytes,
+        base.max_string_field_bytes
+    );
 }

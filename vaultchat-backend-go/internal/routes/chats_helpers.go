@@ -2641,8 +2641,14 @@ func chatsPollVotes(w http.ResponseWriter, r *http.Request) {
 	mine := []int64{}
 	total := 0
 	err := chatsQueryU(ctx, user.ID,
-		`SELECT option_index, user_id FROM poll_votes WHERE message_id = $1`,
-		[]any{msgID}, func(rows pgx.Rows) error {
+		// Scoped to the chat the caller proved membership of. messages.id is a
+		// single global sequence, so an unscoped message_id lookup would let any
+		// member of any chat read the tally of any poll on the server.
+		`SELECT pv.option_index, pv.user_id
+		   FROM poll_votes pv
+		   JOIN messages m ON m.id = pv.message_id
+		  WHERE m.chat_id = $1 AND pv.message_id = $2`,
+		[]any{r.PathValue("id"), msgID}, func(rows pgx.Rows) error {
 			var optionIndex int64
 			var userID string
 			if e := rows.Scan(&optionIndex, &userID); e != nil {

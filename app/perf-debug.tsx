@@ -14,6 +14,8 @@ import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-nati
 import { type Palette } from '../constants/theme';
 import { useTheme } from '../lib/theme';
 import perf, { type SendTiming } from '../lib/perf';
+import { ccwireDiagnostics } from '../lib/ccwire/transport';
+import { featureFlagDiagnostics, TRANSPORT_RUST } from '../lib/featureFlags';
 import { AuroraBackground } from '../components/ui';
 
 export default function PerfDebugScreen() {
@@ -23,11 +25,13 @@ export default function PerfDebugScreen() {
 
   const [snap, setSnap] = useState(perf.snapshot());
   const [sends, setSends] = useState<SendTiming[]>(perf.recentSends(20));
+  const [wire, setWire] = useState(ccwireDiagnostics());
 
   useEffect(() => {
     const id = setInterval(() => {
       setSnap(perf.snapshot());
       setSends(perf.recentSends(20));
+      setWire(ccwireDiagnostics());
     }, 1000);
     return () => clearInterval(id);
   }, []);
@@ -60,6 +64,12 @@ export default function PerfDebugScreen() {
           <Row S={S} k="Transport" v={snap.transport} bad={transportBad} />
           <Row S={S} k="State" v={snap.connState} bad={snap.connState !== 'connected'} />
           <Row S={S} k="Reconnects (session)" v={String(snap.reconnects)} />
+          <Row S={S} k="CC-Wire cohort" v={featureFlagDiagnostics(TRANSPORT_RUST).enabled ? 'Enabled' : 'Disabled'} />
+          <Row S={S} k="CC-Wire state" v={wire.status} />
+          <Row S={S} k="CC-Wire carrier" v={wire.carrier} />
+          <Row S={S} k="Protobuf submits / acks" v={`${wire.submitted} / ${wire.acknowledged}`} />
+          <Row S={S} k="HTTP fallbacks" v={String(wire.fallbacks)} />
+          {!!wire.lastError && <Row S={S} k="Last transport error" v={wire.lastError} bad />}
         </View>
         {transportBad && (
           <Text style={S.warn}>⚠️ On POLLING — websocket failed to negotiate. Sends will be slow.</Text>
@@ -99,7 +109,7 @@ export default function PerfDebugScreen() {
             <Text style={S.empty}>No sends yet — send a message, then come back.</Text>
           ) : sends.map((s, i) => (
             <View key={`${s.id}-${i}`} style={S.trow}>
-              <Text style={[S.td, { flex: 2 }]} numberOfLines={1}>{s.id}</Text>
+              <Text style={[S.td, { flex: 2 }]} numberOfLines={2}>{s.id}{'\n'}{s.transport ?? 'unknown'}</Text>
               <Text style={S.td}>{ms(s.tapToEncrypt)}</Text>
               <Text style={S.td}>{ms(s.encryptToAck)}</Text>
               <Text style={[S.td, s.failed ? S.tdFail : slow(s.totalMs)]}>
@@ -110,7 +120,7 @@ export default function PerfDebugScreen() {
         </View>
 
         <Text style={S.note}>
-          “tap→enc” = E2EE encryption time (X3DH/ratchet). “enc→ack” = HTTP POST round-trip.
+          “tap→enc” = E2EE encryption time (X3DH/ratchet). “enc→ack” = server acknowledgement time.
           A large tap→enc means the peer key-bundle fetch is the bottleneck.
         </Text>
       </ScrollView>

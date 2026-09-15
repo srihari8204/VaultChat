@@ -466,6 +466,10 @@ func main() {
 	// The whole thing is bounded by SHUTDOWN_TIMEOUT and must stay below the
 	// pod's terminationGracePeriodSeconds, or the kubelet SIGKILLs us partway
 	// through and none of the above happened.
+	wtServer, wtErr := realtime.StartCCWireWebTransport(hub)
+	if wtErr != nil {
+		log.Fatalf("[go-api] WebTransport setup failed: %v", wtErr)
+	}
 	stop := make(chan os.Signal, 1)
 	signal.Notify(stop, syscall.SIGTERM, syscall.SIGINT)
 
@@ -497,6 +501,9 @@ func main() {
 	shutCtx, shutCancel := context.WithTimeout(context.Background(), total)
 	defer shutCancel()
 
+	if wtServer != nil {
+		_ = wtServer.Close()
+	}
 	hub.Shutdown(10 * time.Second)
 
 	if err := srv.Shutdown(shutCtx); err != nil {

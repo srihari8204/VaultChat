@@ -238,7 +238,11 @@ impl Conn {
         }
         let bytes = encode(payload, self.max_frame).map_err(SendError::Frame)?;
         self.out
-            .push(Item { class, depends_on, bytes })
+            .push(Item {
+                class,
+                depends_on,
+                bytes,
+            })
             .map_err(SendError::Backpressure)
     }
 

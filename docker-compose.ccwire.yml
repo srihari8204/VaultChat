@@ -1,0 +1,6 @@
+# Optional authenticated endpoint. App cohorts opt in separately; existing
+# HTTP and Socket.IO clients keep using their current paths.
+services:
+  go-api:
+    environment:
+      CCWIRE_WS: "1"

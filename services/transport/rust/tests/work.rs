@@ -66,8 +66,15 @@ fn writing_a_frame_does_not_remove_it_only_acknowledgement_does() {
     assert_eq!(next.payload, b"frame");
     o.mark_written(b"k1", 1_000).unwrap();
 
-    assert_eq!(o.len(), 1, "a written frame left the queue — a crash now loses it");
-    assert!(o.next().is_none(), "an in-flight frame must not be handed out twice");
+    assert_eq!(
+        o.len(),
+        1,
+        "a written frame left the queue — a crash now loses it"
+    );
+    assert!(
+        o.next().is_none(),
+        "an in-flight frame must not be handed out twice"
+    );
 
     o.ack(b"k1").unwrap();
     assert!(o.is_empty());
@@ -98,7 +105,11 @@ fn a_dropped_connection_makes_written_frames_writable_again() {
     assert!(o.next().is_none());
 
     o.reset_written();
-    assert_eq!(o.next().unwrap().key, b"k1", "oldest first after a reconnect");
+    assert_eq!(
+        o.next().unwrap().key,
+        b"k1",
+        "oldest first after a reconnect"
+    );
     assert_eq!(o.pending()[0].written_ms, 0);
 }
 
@@ -106,9 +117,15 @@ fn a_dropped_connection_makes_written_frames_writable_again() {
 /// store has never seen is exactly the state a crash turns into a lost message.
 #[test]
 fn a_frame_the_host_could_not_persist_is_never_queued() {
-    let mut o = Outbox::new(FakeStore { fail_persist: true, ..Default::default() });
+    let mut o = Outbox::new(FakeStore {
+        fail_persist: true,
+        ..Default::default()
+    });
     assert_eq!(o.submit(b"k1", b"a"), Err(WorkError::HostFailed));
-    assert!(o.is_empty(), "an unpersisted frame was queued as though it were durable");
+    assert!(
+        o.is_empty(),
+        "an unpersisted frame was queued as though it were durable"
+    );
     assert!(o.next().is_none());
 }
 
@@ -116,7 +133,10 @@ fn a_frame_the_host_could_not_persist_is_never_queued() {
 /// frame dropped from both the queue and the store is not.
 #[test]
 fn a_failed_confirm_leaves_the_frame_pending() {
-    let mut o = Outbox::new(FakeStore { fail_confirm: true, ..Default::default() });
+    let mut o = Outbox::new(FakeStore {
+        fail_confirm: true,
+        ..Default::default()
+    });
     o.submit(b"k1", b"a").unwrap();
     assert_eq!(o.ack(b"k1"), Err(WorkError::HostFailed));
     assert_eq!(o.len(), 1);
@@ -188,7 +208,11 @@ fn the_store_holds_exactly_the_unacknowledged_frames() {
     for (i, k) in keys.iter().enumerate() {
         let unacked = i != 0 && i != 3;
         assert_eq!(o.pending().iter().any(|r| &r.key == k), unacked);
-        assert_eq!(o.host().holds(k), unacked, "the store disagrees with the queue");
+        assert_eq!(
+            o.host().holds(k),
+            unacked,
+            "the store disagrees with the queue"
+        );
     }
     assert_eq!(o.host().confirmed, vec![keys[0].clone(), keys[3].clone()]);
 }

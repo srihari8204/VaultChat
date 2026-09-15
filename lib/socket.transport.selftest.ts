@@ -19,11 +19,10 @@
 //      states — i.e. the ccwire branch falls through and the Socket.IO path
 //      stays reachable in every build (precondition P3, the rollback lever);
 //   4. no extra await lands ahead of the existing getAccessToken() guard;
-//   5. SendTiming.transport is populated, and defaults to 'socketio'.
+//   5. SendTiming.transport reports the HTTP message-send path.
 //
-// NOT checked, and cannot be: that the CC-Wire path works. There is no server
-// endpoint and no client dialer yet. This file proves the branch is unreachable,
-// not that the road behind it is paved.
+// CC-Wire protocol and dialer behavior are covered by lib/ccwire selftests.
+// This harness checks Socket.IO fallback and message-send metrics.
 
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -178,8 +177,8 @@ for (const mode of ['off', 'throw', 'on']) {
   check(`flag=${mode}: reconnect options unchanged`,
     call?.opts?.reconnection === true && call?.opts?.reconnectionDelay === 500
     && call?.opts?.reconnectionDelayMax === 5000 && call?.opts?.timeout === 10000);
-  check(`flag=${mode}: sends are tagged 'socketio'`, H.sendTransport === 'socketio',
-    'the branch falls through, so Socket.IO is what carries them');
+  check(`flag=${mode}: message sends are tagged 'http'`, H.sendTransport === 'http',
+    'message POSTs use HTTP independently of the realtime connection');
   // 4. Ordering: the flag decision adds no await ahead of the session guard.
   check(`flag=${mode}: getAccessToken still runs before the socket is built`,
     H.order.indexOf('getAccessToken') >= 0
@@ -203,11 +202,11 @@ S.disconnect();
 console.log('\nSendTiming.transport is populated (P4):');
 const perf: any = (await import(pathToFileURL(join(HERE, 'perf.ts')).href)).default;
 perf.recordSend({ id: 'a', totalMs: 1, at: Date.now() });
-check("an untagged send defaults to 'socketio'", perf.recentSends(1)[0].transport === 'socketio');
-perf.recordSend({ id: 'b', totalMs: 1, transport: 'websocket', at: Date.now() });
-check('the engine name is normalised to the cohort vocabulary',
-  perf.recentSends(1)[0].transport === 'socketio',
-  'callers pass snapshot().transport; §4 wants socketio|ccwire');
+check("an untagged send defaults to 'http'", perf.recentSends(1)[0].transport === 'http');
+perf.setSendTransport('ccwire');
+perf.recordSend({ id: 'b', totalMs: 1, transport: 'http', at: Date.now() });
+check('an actual HTTP send cannot be relabelled by sidecar readiness',
+  perf.recentSends(1)[0].transport === 'http');
 perf.setSendTransport('ccwire');
 perf.recordSend({ id: 'c', totalMs: 1, at: Date.now() });
 check("once a session is on CC-Wire its sends say so", perf.recentSends(1)[0].transport === 'ccwire');

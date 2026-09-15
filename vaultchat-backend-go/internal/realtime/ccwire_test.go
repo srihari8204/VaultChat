@@ -391,9 +391,21 @@ func TestCCWireRefusesOversizedFrames(t *testing.T) {
 func TestCCWireAnswersUnservedOperations(t *testing.T) {
 	// submit_message, receipt, typing_state, edit_message and delete_message have
 	// moved OFF this list — they are served now (ccwire_messages_test.go).
+	//
+	// fragment (112) moved off too: ccwire_fragment.go reassembles it, and a
+	// malformed one is now answered FRAGMENT_INVALID (9) rather than
+	// UNKNOWN_OPERATION. That is a deliberate behaviour change, not a weakened
+	// assertion — ccwire_fragment_test.go covers the body end to end, including
+	// that every refusal carries code 9.
+	//
+	// cursor_sync (64) is served as well (ccwire_cursor.go). cursor_batch (65)
+	// stays OFF the served list on purpose: cursor.proto gives it `more` and a
+	// server-authored `continuation`, which makes it the REPLY shape, not an
+	// inbound request.
+	//
 	// Everything still on it is answered rather than dropped.
 	for _, body := range []uint32{
-		ccwire.BodyCryptoControl, ccwire.BodyCallSignal, ccwire.BodyFragment,
+		ccwire.BodyCryptoControl, ccwire.BodyCallSignal,
 	} {
 		s, f := newSession("u1", map[string]cachedPerm{})
 		hello(t, s)

@@ -1,0 +1,55 @@
+apply plugin: "com.android.library"
+apply plugin: "org.jetbrains.kotlin.android"
+
+def transportAbis = (rootProject.findProperty("reactNativeArchitectures") ?: "arm64-v8a,armeabi-v7a,x86,x86_64").split(",")
+android {
+    namespace "com.vaultchat.transportcore"
+    compileSdkVersion rootProject.ext.compileSdkVersion
+    ndkVersion rootProject.ext.ndkVersion
+    defaultConfig {
+        minSdkVersion rootProject.ext.minSdkVersion
+        ndk { abiFilters(*transportAbis) }
+        externalNativeBuild { cmake { arguments "-DANDROID_STL=c++_shared" } }
+        consumerProguardFiles "consumer-rules.pro"
+    }
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+    kotlinOptions { jvmTarget = "17" }
+    externalNativeBuild { cmake { path "CMakeLists.txt" } }
+}
+dependencies { implementation "com.facebook.react:react-android" }
+
+def rustDir = new File(projectDir, "../../services/transport/rust-net").canonicalFile
+def enableWebTransport = (rootProject.findProperty("ccwireWebTransport") ?: "false").toString().toBoolean()
+def rustTargets = ["arm64-v8a": "aarch64-linux-android", "armeabi-v7a": "armv7-linux-androideabi", "x86": "i686-linux-android", "x86_64": "x86_64-linux-android"]
+def rustArchives = transportAbis.collect { abi ->
+    if (!rustTargets[abi]) throw new GradleException("Unsupported transport ABI: ${abi}")
+    new File(rustDir, "target/${rustTargets[abi]}/release/libtransport_net.a")
+}
+tasks.register("cargoBuildTransportCore") {
+    inputs.files(fileTree(new File(rustDir, "src")), new File(rustDir, "Cargo.toml"), new File(rustDir, "Cargo.lock"), fileTree(new File(rustDir, "../rust/src")), new File(rustDir, "../rust/Cargo.toml"))
+    inputs.property("abis", transportAbis.join(","))
+    inputs.property("webtransport", enableWebTransport)
+    outputs.files(rustArchives)
+    doLast {
+        transportAbis.each { abi ->
+            exec {
+                workingDir rustDir
+                environment "ANDROID_NDK_HOME", android.ndkDirectory.absolutePath
+                def cargoArgs = ["cargo", "ndk", "-t", abi, "build", "--locked", "--release", "--lib", "-j", "2"]
+                if (enableWebTransport) cargoArgs.addAll(["--features", "webtransport"])
+                commandLine cargoArgs
+            }
+        }
+    }
+}
+preBuild.dependsOn("cargoBuildTransportCore")
+// Rebuild JNI when the archive switches between WSS-only and WT-enabled builds.
+tasks.configureEach { nativeTask ->
+    if (nativeTask.name.startsWith("buildCMake")) {
+        nativeTask.dependsOn("cargoBuildTransportCore")
+        nativeTask.inputs.files(rustArchives)
+    }
+}

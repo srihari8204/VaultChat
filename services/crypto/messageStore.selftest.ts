@@ -31,6 +31,9 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
   check('keys are per (chat,id)', (await store.get('chatA', 2)) === null);
   await store.put('chatB', 1, 'other chat');
   check('different chat, same id, isolated', (await store.get('chatA', 1)) === 'hello world' && (await store.get('chatB', 1)) === 'other chat');
+  await store.del('chatA', 1);
+  check('delete removes only the addressed plaintext',
+    (await store.get('chatA', 1)) === null && (await store.get('chatB', 1)) === 'other chat');
 
   // Keyed lock: same key serializes
   console.log('Keyed lock:');

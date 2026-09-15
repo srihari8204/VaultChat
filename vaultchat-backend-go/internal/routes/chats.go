@@ -8,7 +8,10 @@ package routes
 
 import (
 	"context"
+	"crypto/hmac"
 	"crypto/rand"
+	"crypto/sha256"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -93,6 +96,13 @@ func RegisterChats(mux *http.ServeMux) {
 		cw.HandleFunc("DELETE /chats/{id}/messages/{msgId}", chatsMessageDelete)
 		cw.HandleFunc("POST /chats/{id}/delivered", chatsDelivered)
 		cw.HandleFunc("POST /chats/{id}/read", chatsRead)
+		// Catch-up. cursor_sync (ccwire_cursor.go) answers by running THIS handler,
+		// so a CC-Wire client inherits chatsDelta's visibility filter, expiry
+		// filter, cold-sync cap and pagination instead of a second implementation
+		// of each. Without it the loopback 404s and every cursor frame comes back
+		// NOT_PERMITTED, which reads like an authorization bug rather than a
+		// missing route.
+		cw.HandleFunc("GET /chats/delta", chatsDelta)
 		realtime.SetCCWireRoutes(cw)
 	}
 	id.HandleFunc("POST /chats/{id}/members", httpx.RequireAuth(chatsMembersAdd))
@@ -514,6 +524,39 @@ func coldSyncWarnOnly() bool {
 	return os.Getenv("COLD_SYNC_WARN_ONLY") == "true"
 }
 
+// A cold-sync continuation preserves the restricted query across pages. It is
+// opaque to the client and bound to the authenticated account; changing its
+// floor or replaying another account's token fails before any query runs.
+func chatsSyncContinuation(userID string, floor int64) string {
+	payload := base64.RawURLEncoding.EncodeToString([]byte(userID + "\n" + strconv.FormatInt(floor, 10)))
+	mac := hmac.New(sha256.New, []byte(os.Getenv("JWT_SECRET")))
+	_, _ = mac.Write([]byte("chats-sync-v1\n" + payload))
+	return payload + "." + base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
+}
+
+func chatsParseSyncContinuation(userID, token string) (int64, bool) {
+	dot := strings.LastIndexByte(token, '.')
+	if dot <= 0 || os.Getenv("JWT_SECRET") == "" {
+		return 0, false
+	}
+	payload, err := base64.RawURLEncoding.DecodeString(token[:dot])
+	if err != nil {
+		return 0, false
+	}
+	mac := hmac.New(sha256.New, []byte(os.Getenv("JWT_SECRET")))
+	_, _ = mac.Write([]byte("chats-sync-v1\n" + token[:dot]))
+	sig, err := base64.RawURLEncoding.DecodeString(token[dot+1:])
+	if err != nil || !hmac.Equal(sig, mac.Sum(nil)) {
+		return 0, false
+	}
+	prefix := userID + "\n"
+	if !strings.HasPrefix(string(payload), prefix) {
+		return 0, false
+	}
+	floor, err := strconv.ParseInt(string(payload[len(prefix):]), 10, 64)
+	return floor, err == nil && floor >= 0
+}
+
 // noteSyncDevice upserts the device row and reports whether this (user, device)
 // pair had been seen BEFORE this call. A blank deviceID is never "known".
 func noteSyncDevice(ctx context.Context, userID, deviceID string, cold bool) (known bool) {
@@ -569,10 +612,17 @@ func chatsDelta(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	user := httpx.UserFrom(r)
 	q := r.URL.Query()
+	if raw := q.Get("mutationCursor"); raw != "" {
+		if _, _, valid := chatsMutationCursor(raw); !valid {
+			httpx.Err(w, 400, "invalid mutation cursor")
+			return
+		}
+	}
 	since, ok := httpx.ParseIntPrefix(q.Get("since"))
 	if !ok || since < 0 {
 		since = 0
 	}
+	requestedSince := since
 
 	// Cold start (since=0): bound an unrecognised install to recent history.
 	//
@@ -582,8 +632,9 @@ func chatsDelta(w http.ResponseWriter, r *http.Request) {
 	// which is bandwidth nobody asked for and server-side exposure of old
 	// ciphertext to a client that has no key for it.
 	coldStart := false
-	if since == 0 {
-		deviceID := strings.TrimSpace(r.Header.Get("X-Device-Id"))
+	deviceID := strings.TrimSpace(r.Header.Get("X-Device-Id"))
+	continuation := strings.TrimSpace(q.Get("syncContinuation"))
+	if since == 0 && continuation == "" {
 		if !noteSyncDevice(ctx, user.ID, deviceID, true) {
 			coldStart = true
 			capN := coldSyncMaxMessages()
@@ -610,7 +661,21 @@ func chatsDelta(w http.ResponseWriter, r *http.Request) {
 				log.Printf("[chats/delta] cold sync NOT ENFORCED user=%s device=%q warnOnly=%v capN=%d", user.ID, deviceID, coldSyncWarnOnly(), capN)
 			}
 		}
-	} else if deviceID := strings.TrimSpace(r.Header.Get("X-Device-Id")); deviceID != "" {
+	} else if continuation != "" {
+		raw := continuation
+		floor, valid := chatsParseSyncContinuation(user.ID, raw)
+		if !valid {
+			httpx.Err(w, 400, "invalid sync continuation")
+			return
+		}
+		coldStart = true
+		if floor > since {
+			since = floor
+		}
+		if deviceID != "" {
+			noteSyncDevice(ctx, user.ID, deviceID, false)
+		}
+	} else if deviceID != "" {
 		noteSyncDevice(ctx, user.ID, deviceID, false)
 	}
 	limit, ok := httpx.ParseIntPrefix(q.Get("limit"))
@@ -637,20 +702,54 @@ func chatsDelta(w http.ResponseWriter, r *http.Request) {
 	// empty rather than inheriting history. That is the requested behaviour, and
 	// the explicit history path (GET /chats/{id}/messages?before=) still fetches
 	// it on demand, page by page.
+	// CC-WIRE: CLAMP A COLD START ONLY.
+	//
+	// The cold-sync guard keys on `since == 0` plus an unrecognised X-Device-Id.
+	// The loopback now forwards ClientHello.device_id. Both that identifier
+	// and the starting cursor are client-supplied, so this remains a sync policy,
+	// not an authorization boundary against a stolen account token.
+	//
+	// `since == 0` IS LOAD-BEARING. An earlier version clamped every CC-Wire
+	// catch-up, not just a cold one, and that is strictly worse than the bug it
+	// fixed: an ESTABLISHED client whose cursor has fallen more than the cap
+	// behind had `since` raised past the messages it had not received, and
+	// cursorSync then closes with a watermark past the gap - so the skipped
+	// messages are never delivered and never asked for again.
+	if since == 0 && realtime.IsCCWire(r) {
+		if capN := coldSyncMaxMessages(); capN > 0 && !coldSyncWarnOnly() {
+			if floor := coldSyncFloor(ctx, user.ID, capN); floor > since {
+				log.Printf("[chats/delta] cc-wire catch-up clamped %d -> %d for user=%s", since, floor, user.ID)
+				since = floor
+				coldStart = true // pick up the undelivered-only filter, as the REST cold path does
+			}
+		}
+	}
+
 	coldFilter := ""
 	if coldStart {
 		coldFilter = `
 		    AND (cm.last_delivered_message_id IS NULL OR m.id > cm.last_delivered_message_id)`
 	}
+	// Scope BEFORE pagination. Filtering after LIMIT could repeatedly return
+	// only already-synced rows or rows from chats absent from the CursorSync.
+	scopes := realtime.CCWireSyncPositions(r)
+	args := []any{user.ID, since, limit}
+	if len(scopes) > 0 {
+		// A cold chat must not raise the cursor or apply delivery filtering to
+		// a warm chat in the same batch. Apply those rules per scope below.
+		args[1] = requestedSince
+		coldFilter = ""
+	}
+	scopeFilter, args := chatsDeltaScopes(scopes, args, since, coldStart)
 	rows, err := db.SysPool.Query(ctx,
 		`SELECT `+chatsMsgSelBody("m")+` FROM messages m
 		   JOIN chat_members cm ON cm.chat_id = m.chat_id AND cm.user_id = $1 AND cm.left_at IS NULL
 		                       AND cm.hidden = FALSE`+
 			chatsBodyJoin+`
 		  WHERE m.id > $2 AND (m.expires_at IS NULL OR m.expires_at > NOW())`+
-			coldFilter+`
+			coldFilter+scopeFilter+`
 		  ORDER BY m.id ASC LIMIT $3`,
-		user.ID, since, limit)
+		args...)
 	if err != nil {
 		log.Printf("[chats/delta] %v", err)
 		httpx.Err(w, 500, "delta failed")
@@ -681,17 +780,19 @@ func chatsDelta(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	mutations := []chatsPublicMsg{}
-	if raw := q.Get("mutatedSince"); raw != "" {
-		if mutatedSince, ok := userParseJSDate(raw); ok {
+	nextMutationCursor := ""
+	if raw := q.Get("mutationCursor"); raw != "" {
+		if at, id, ok := chatsMutationCursor(raw); ok {
 			mrows, err := db.SysPool.Query(ctx,
 				`SELECT `+chatsMsgSelBody("m")+` FROM messages m
 				   JOIN chat_members cm ON cm.chat_id = m.chat_id AND cm.user_id = $1 AND cm.left_at IS NULL
 				                       AND cm.hidden = FALSE`+
 					chatsBodyJoin+`
-				  WHERE (m.edited_at > $2 OR m.deleted_at > $2) AND m.id <= $3
-				  ORDER BY GREATEST(COALESCE(m.edited_at, 'epoch'), COALESCE(m.deleted_at, 'epoch')) ASC
+				  WHERE (GREATEST(COALESCE(m.edited_at, 'epoch'), COALESCE(m.deleted_at, 'epoch')), m.id) > ($2, $3)
+				    AND m.id <= $4
+				  ORDER BY GREATEST(COALESCE(m.edited_at, 'epoch'), COALESCE(m.deleted_at, 'epoch')), m.id ASC
 				  LIMIT 500`,
-				user.ID, mutatedSince, since)
+				user.ID, at, id, since)
 			if err != nil {
 				log.Printf("[chats/delta] %v", err)
 				httpx.Err(w, 500, "delta failed")
@@ -702,15 +803,94 @@ func chatsDelta(w http.ResponseWriter, r *http.Request) {
 				httpx.Err(w, 500, "delta failed")
 				return
 			}
+			if n := len(mutations); n > 0 {
+				nextMutationCursor = chatsMutationCursorOf(mutations[n-1])
+			}
+		}
+	} else if raw := q.Get("mutatedSince"); raw != "" {
+		// Compatibility for released REST clients. New clients use mutationCursor
+		// above, which is lossless across timestamp ties.
+		if mutatedSince, ok := userParseJSDate(raw); ok {
+			mrows, err := db.SysPool.Query(ctx,
+				`SELECT `+chatsMsgSelBody("m")+` FROM messages m
+				   JOIN chat_members cm ON cm.chat_id = m.chat_id AND cm.user_id = $1 AND cm.left_at IS NULL
+				                       AND cm.hidden = FALSE`+chatsBodyJoin+`
+				  WHERE (m.edited_at > $2 OR m.deleted_at > $2) AND m.id <= $3
+				  ORDER BY GREATEST(COALESCE(m.edited_at, 'epoch'), COALESCE(m.deleted_at, 'epoch')), m.id ASC LIMIT 500`, user.ID, mutatedSince, since)
+			if err != nil {
+				log.Printf("[chats/delta] %v", err)
+				httpx.Err(w, 500, "delta failed")
+				return
+			}
+			if err := chatsCollectMsgs(mrows, &mutations); err != nil {
+				log.Printf("[chats/delta] %v", err)
+				httpx.Err(w, 500, "delta failed")
+				return
+			}
+			if n := len(mutations); n > 0 {
+				nextMutationCursor = chatsMutationCursorOf(mutations[n-1])
+			}
 		}
 	}
+	more := int64(len(messages)) == limit
+	syncContinuation := ""
+	if coldStart && more {
+		syncContinuation = chatsSyncContinuation(user.ID, since)
+	}
 	httpx.JSON(w, 200, map[string]any{
-		"messages":   messages,
-		"nextSince":  nextSince,
-		"more":       int64(len(messages)) == limit,
-		"mutations":  mutations,
-		"serverTime": httpx.JSTime(serverTime),
+		"messages":           messages,
+		"nextSince":          nextSince,
+		"more":               more,
+		"syncContinuation":   syncContinuation,
+		"mutations":          mutations,
+		"nextMutationCursor": nextMutationCursor,
+		"serverTime":         httpx.JSTime(serverTime),
 	})
+}
+
+func chatsDeltaScopes(scopes map[string]uint64, args []any, coldFloor int64, coldStart bool) (string, []any) {
+	if len(scopes) == 0 {
+		return "", args
+	}
+	chatIDs := make([]string, 0, len(scopes))
+	positions := make([]int64, 0, len(scopes))
+	for chatID, position := range scopes {
+		chatIDs = append(chatIDs, chatID)
+		positions = append(positions, int64(position))
+	}
+	return ` AND EXISTS (SELECT 1 FROM unnest($4::text[], $5::bigint[]) AS sync(chat_id, position)
+	  WHERE m.chat_id = sync.chat_id::uuid AND m.id > sync.position
+	    AND (sync.position > 0 OR (m.id > $6 AND (NOT $7::boolean
+	      OR cm.last_delivered_message_id IS NULL OR m.id > cm.last_delivered_message_id))))`, append(args, chatIDs, positions, coldFloor, coldStart)
+}
+
+// chatsMutationCursor is an opaque server-issued keyset position. Message ids
+// break timestamp ties, so no mutation can be skipped when a full page shares
+// one PostgreSQL timestamp.
+func chatsMutationCursor(v string) (time.Time, int64, bool) {
+	i := strings.LastIndexByte(v, '|')
+	if i <= 0 {
+		return time.Time{}, 0, false
+	}
+	at, ok := userParseJSDate(v[:i])
+	if !ok {
+		return time.Time{}, 0, false
+	}
+	id, err := strconv.ParseInt(v[i+1:], 10, 64)
+	if err != nil || id < 0 {
+		return time.Time{}, 0, false
+	}
+	return at, id, true
+}
+func chatsMutationCursorOf(m chatsPublicMsg) string {
+	at := m.EditedAt
+	if m.DeletedAt != nil && (at == nil || time.Time(*m.DeletedAt).After(time.Time(*at))) {
+		at = m.DeletedAt
+	}
+	if at == nil {
+		return ""
+	}
+	return time.Time(*at).UTC().Format(time.RFC3339Nano) + "|" + m.ID
 }
 
 // chatsMsgSel prefixes chatsMsgCols with a table alias (SELECT m.* parity).

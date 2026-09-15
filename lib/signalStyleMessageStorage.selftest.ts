@@ -70,16 +70,21 @@ check('only for real sends (edit/delete carry no local body)',
 // ── 2. the server still gets ciphertext only ─────────────────────────────
 console.log('the server must still receive only the envelope');
 
-check('the POST body sends `content` (the encrypted form)',
-  /json:\s*\{\s*content,/.test(postOnce),
+check('the submission payload contains `content` (the encrypted form)',
+  /const payload\s*=\s*\{\s*content,/.test(postOnce),
   'the request must carry the DR1/GSK1 envelope, never item.plaintext');
+check('CC-Wire and HTTP receive that same encrypted payload',
+  /submitCCWireMessage<Message>\(item\.chatId,\s*payload,\s*api\)/.test(postOnce) &&
+  /method:\s*'POST',\s*json:\s*payload/.test(postOnce));
 check('encryption still happens before the POST',
   /encryptForChat\(item\.chatId,\s*wire\)/.test(postOnce));
 // The plaintext assignment must come AFTER the network call, or it could be
 // the thing that gets serialised.
 const iPost = postOnce.indexOf('await api<Message>');
+const iSubmit = postOnce.indexOf('await transportModule.submitCCWireMessage<Message>');
 const iAssign = postOnce.search(/\(real as any\)\.content\s*=\s*item\.plaintext/);
-check('plaintext is attached only AFTER the request is sent', iPost >= 0 && iAssign > iPost,
+check('plaintext is attached only AFTER either submission path returns',
+  iPost >= 0 && iSubmit >= 0 && iAssign > iPost && iAssign > iSubmit,
   'assigning before the POST risks the plaintext reaching the wire');
 
 // ── 3. compat + lazy migration ───────────────────────────────────────────

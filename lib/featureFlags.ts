@@ -1,15 +1,12 @@
 // lib/featureFlags.ts — staged rollout gate for the Rust transport (§21).
 //
-// STATUS: NOT WIRED. Nothing imports this yet, and `initFeatureFlags()` is not
-// called from the boot path. Until something calls it there is no install id,
-// so every flag reads OFF and the app behaves exactly as it does today. That is
-// the intended state; see docs/ROLLOUT_TRANSPORT.md for how it gets switched on.
+// The boot path initializes install bucketing; socket startup reads this gate.
+// Builds opt in explicitly. Missing configuration keeps the existing paths.
 //
 // WHAT THIS IS FOR
 // ----------------
-// services/transport/rust is finished and tested and deliberately unwired. The
-// live transport is Socket.IO v4 over WebSocket (lib/socket.ts). This file is
-// the switch between them, and — more importantly — the switch back.
+// Socket.IO remains available for live events. The optional CC-Wire submission
+// path prefers the native Rust WebSocket carrier when the bridge is installed.
 //
 // THE TWO HALVES, AND WHY THEY ARE DIFFERENT SHAPES
 // ------------------------------------------------
@@ -143,10 +140,12 @@ export function envKeyFor(name: string): string {
 
 export function configuredPercent(name: string): number {
   try {
-    // eslint-disable-next-line no-undef
-    const env: any = typeof process !== 'undefined' && process ? process.env : null;
-    if (!env) return 0;
-    return normalizePercent(env[envKeyFor(name)]);
+    // Expo only inlines statically named EXPO_PUBLIC properties into a phone
+    // bundle. A computed env key works in Node tests but reads as absent on RN.
+    if (name === TRANSPORT_RUST) {
+      return normalizePercent(process.env.EXPO_PUBLIC_FLAG_TRANSPORT_RUST_PCT);
+    }
+    return 0;
   } catch {
     return 0;
   }

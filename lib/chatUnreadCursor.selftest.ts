@@ -56,7 +56,13 @@ check(
   'the read cursor is reset when the chat changes',
   // The reset is a multi-line effect (it clears `messages` too), so this spans
   // lines rather than expecting the one-liner it started as.
-  /lastReadSent\.current\s*=\s*0;[\s\S]{0,160}?\}, \[chatId\]\);/.test(CHAT),
+  // The reset effect now clears the whole per-chat surface (messages, replyTo,
+  // editingId, chat, pinnedId, typingUids, liveLoc, extraReplies,
+  // newSinceUp), so a tight character window is the wrong shape of
+  // assertion - it fails on the effect getting MORE correct. Anchor on the
+  // two things that must hold: the cursor is cleared, and the list with it.
+  /lastReadSent\.current\s*=\s*0;/.test(CHAT)
+    && /lastReadSent\.current\s*=\s*0;[\s\S]{0,600}?\}, \[chatId\]\);/.test(CHAT),
   'lastReadSent is no longer cleared on [chatId]. Message ids are global, so the '
     + 'ref now carries a previous chat’s newest id into this one and POST /read '
     + 'is skipped for every chat whose newest id happens to be lower.',

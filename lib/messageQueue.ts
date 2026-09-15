@@ -270,6 +270,9 @@ export async function retry(tempId: string): Promise<void> {
   if (!m) return;
   m.attempts = 0;
   m.lastError = null;
+  // Back off FAILED, or flush() would skip it as inert forever and Retry would
+  // be a no-op with a spinner — the state is what makes the row a send candidate.
+  if (m.state === 'FAILED') m.state = 'QUEUED';
   await put(m);
   flush().catch(() => {});
 }
@@ -490,10 +493,12 @@ async function postOnce(item: QueuedMessage): Promise<PostResult> {
   if (!encrypted && wire !== item.plaintext) content = item.plaintext;
   const _tEnc = Date.now();
   perf.mark('queue_encrypt_done', { chatId: item.chatId, ms: _tEnc - _t0, encrypted });
-  const real = await api<Message>(`/chats/${encodeURIComponent(item.chatId)}/messages`, {
-    method: 'POST',
-    json: { content, type: item.type, replyToId: item.replyToId, meta: serverMeta, clientId: item.clientId },
-  });
+  const payload = { content, type: item.type, replyToId: item.replyToId, meta: serverMeta, clientId: item.clientId };
+  const transportModule: typeof import('./ccwire/transport') = await import('./ccwire/transport').catch(() => null);
+  const result = transportModule
+    ? await transportModule.submitCCWireMessage<Message>(item.chatId, payload, api)
+    : { message: await api<Message>(`/chats/${encodeURIComponent(item.chatId)}/messages`, { method: 'POST', json: payload }), transport: 'http' };
+  const real = result.message;
   // The POST ack returns `id` AND `replyToId` as STRINGS. Left as strings, the
   // UI's `x.id === real.id` dedup fails (optimistic + synced rows collide on
   // the same React key), the local cache drops the row (cacheMessages skips
@@ -506,7 +511,7 @@ async function postOnce(item: QueuedMessage): Promise<PostResult> {
     tapToEncrypt: _tEnc - _t0,
     encryptToAck: _tAck - _tEnc,
     totalMs: _tAck - _t0,
-    transport: perf.snapshot().transport,
+    transport: result.transport,
     at: _tAck,
   });
   // Cache the WRAPPED plaintext (text + preview) so the sender's own bubble
@@ -665,6 +670,12 @@ export async function flush(): Promise<void> {
       // Re-POSTing would be a no-op anyway (the server dedups on clientId) but
       // it would burn a request per flush per row, forever.
       if (isAwaitingDelivery(item)) { inert++; continue; }
+      // Permanently rejected and kept only so the red bubble (and the text)
+      // survive a restart — see the FAILED branch below. Re-POSTing it would
+      // just 400 again on every flush; only retry() puts it back in the running.
+      // Counted inert for the same reason accepted rows are: it did not drain,
+      // so it must not look like progress to the page-rotation bookkeeping.
+      if (item.state === 'FAILED') { inert++; continue; }
       // An older message in this chat has not left yet. Not an error and not an
       // attempt: no attempts++, no 'retry' event, the clock just keeps ticking.
       if (blocked.has(item.chatId)) { remaining.push(item); continue; }
@@ -703,10 +714,22 @@ export async function flush(): Promise<void> {
       } catch (err: any) {
         item.lastError = err?.message ?? 'unknown error';
         if (isPermanent(err?.status)) {
-          // "Not sent" — the only case WhatsApp turns a message red. Drop from
-          // the queue; the UI keeps a failed bubble with tap-to-retry.
+          // "Not sent" — the only case WhatsApp turns a message red.
+          //
+          // THE ROW IS KEPT, NOT DROPPED. It used to be deleted here, and it is
+          // the only copy of the user's plaintext: chat.tsx marks the bubble
+          // failed in React state alone, so a remount asked pendingForChat for
+          // it, got nothing, and the red bubble — and the text — were simply
+          // gone. Worse while still mounted: retry() reads the row by tempId,
+          // found null, and returned silently, so tapping Retry did nothing at
+          // all, with no feedback.
+          //
+          // A FAILED row is inert in the same way an accepted one is (skipped at
+          // the top of this loop, so it cannot spin), still visible to
+          // pendingForChat, and put back in the running by retry(). cancel()
+          // remains the way it leaves.
           item.state = 'FAILED';
-          await drop(item.tempId);
+          await put(item);
           emit('failed', { tempId: item.tempId, chatId: item.chatId, error: item.lastError });
           continue;
         }

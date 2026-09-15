@@ -64,7 +64,10 @@ fn counters_saturate_rather_than_wrap() {
     let s = m.snapshot();
     assert_eq!(s.bytes_in, u64::MAX, "the byte counter wrapped");
     assert_eq!(s.bytes_out, u64::MAX, "the byte counter wrapped");
-    assert_eq!(s.frames_in, 2, "the frame counter must not be dragged along");
+    assert_eq!(
+        s.frames_in, 2,
+        "the frame counter must not be dragged along"
+    );
 }
 
 /// A fresh connection starts at zero, and a snapshot is a copy — reading one
@@ -76,6 +79,9 @@ fn a_new_metrics_is_zero_and_a_snapshot_is_a_copy() {
 
     let before = m.snapshot();
     m.shed();
-    assert_eq!(before.frames_shed, 0, "the snapshot tracked the live counter");
+    assert_eq!(
+        before.frames_shed, 0,
+        "the snapshot tracked the live counter"
+    );
     assert_eq!(m.snapshot().frames_shed, 1);
 }

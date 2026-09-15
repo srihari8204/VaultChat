@@ -1,10 +1,8 @@
 // lib/perf.ts — lightweight perf tracer (Task 1, kept permanently).
 //
 // Ring buffer of the last 500 marks + a rolling window of the last 50 send
-// timings. Adapted to VaultChat's REAL send path: messages go out over HTTP
-// POST (not a socket emit), so the meaningful segments are
-//   send_tap → encrypt_done → http_ack
-// (i.e. how long E2EE encryption takes, then the POST round-trip).
+// timings. Each submission names its actual HTTP or CC-Wire carrier.
+//   send_tap → encrypt_done → canonical server acknowledgement
 
 export interface PerfMark {
   event: string;
@@ -39,28 +37,21 @@ export function recentMarks(n = 50): PerfMark[] {
 export interface SendTiming {
   id: string;
   tapToEncrypt?: number;   // send tap → encryption finished (ms)
-  encryptToAck?: number;   // encryption finished → HTTP ack (ms)
+  encryptToAck?: number;   // encryption finished → canonical server result (ms)
   totalMs?: number;        // tap → ack
   transport?: string;
   failed?: boolean;
   at: number;
 }
 
-// §21 rollout cohort tag — "socketio" | "ccwire", the transport that actually
-// carried the send (docs/ROLLOUT_TRANSPORT.md §4). Set by lib/socket.ts at
-// connect time; defaults to the live path, so with no flag configured every
-// send is tagged "socketio", which is the truth today.
-let _sendTransport = 'socketio';
+// Default submission path. Individual sends name the transport they used;
+// a parallel socket's readiness must not rewrite that evidence.
+let _sendTransport = 'http';
 export function setSendTransport(name: string): void { _sendTransport = name; }
 
 const sends: SendTiming[] = [];
 export function recordSend(t: SendTiming): void {
-  // Overwrites whatever the caller passed. Call sites pass snapshot().transport
-  // — the engine name ("websocket"/"polling") — which cannot answer "which
-  // cohort was this?", and that is the question a staged rollout is aborted on.
-  // The engine name is still recorded by setTransport/snapshot and the
-  // socket_connect mark, so nothing is lost.
-  t.transport = _sendTransport;
+  t.transport = t.transport ?? _sendTransport;
   sends.unshift(t);
   if (sends.length > 50) sends.length = 50;
   if (__DEV__) {

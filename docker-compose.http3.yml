@@ -1,0 +1,17 @@
+# Safe-by-default HTTP/3 edge overlay. The default ports are loopback staging
+# ports so `up` cannot steal production :80/:443 from nginx. Production enables
+# only HTTP3_UDP_BIND=0.0.0.0:8443. TURN retains UDP/443 and nginx retains TCP.
+services:
+  h3-edge:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    depends_on:
+      - caddy
+      - minio
+    ports:
+      - "${HTTP3_HTTP_BIND:-127.0.0.1:18080}:80/tcp"
+      - "${HTTP3_TCP_BIND:-127.0.0.1:18443}:443/tcp"
+      - "${HTTP3_UDP_BIND:-127.0.0.1:18443}:443/udp"
+    volumes:
+      - ./caddy/Caddyfile.http3:/etc/caddy/Caddyfile:ro
+      - ${LETSENCRYPT_DIR:-/etc/letsencrypt}:/etc/letsencrypt:ro

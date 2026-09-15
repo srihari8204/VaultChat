@@ -146,7 +146,7 @@ delete process.env[ENV_KEY];
 
 // ── 7. The live path is genuinely untouched ────────────────────────────────
 console.log('\nNothing on the live path depends on this yet:');
-import('node:fs').then((fs) => {
+import('node:fs').then(async (fs) => {
   const src = fs.readFileSync('lib/featureFlags.ts', 'utf8');
   check('no random draw anywhere in the rollout logic', !/Math\.random\s*\(/.test(src),
     'a per-launch draw makes a 1% rollout a 1%-per-launch lottery');
@@ -155,6 +155,29 @@ import('node:fs').then((fs) => {
     'a native import at module scope would crash this very test');
   check('every storage touch is behind a lazy import in try/catch',
     (src.match(/await import\(/g) || []).length >= 2 && /\} catch \{/.test(src));
+
+  // Exercise Expo's actual production transform: Node's process.env alone
+  // cannot catch a flag that disappears when installed on a phone.
+  const { createRequire } = await import('node:module');
+  const load = createRequire(import.meta.url);
+  const { transformSync } = load('@babel/core');
+  const { expoInlineEnvVars } = load('babel-preset-expo/build/inline-env-vars');
+  const ts = load('typescript');
+  process.env[ENV_KEY] = '100';
+  const bundled = transformSync(src, {
+    configFile: false, babelrc: false, filename: 'featureFlags.ts',
+    parserOpts: { plugins: ['typescript'] },
+    caller: { name: 'metro', isProduction: true },
+    plugins: [expoInlineEnvVars],
+  }).code;
+  const output = ts.transpileModule(bundled, {
+    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 },
+  }).outputText;
+  const phone = { exports: {} as any };
+  new Function('module', 'exports', 'require', 'process', output)(phone, phone.exports, load, { env: {} });
+  check('production phone bundle retains the configured rollout without runtime env',
+    phone.exports.configuredPercent(TRANSPORT_RUST) === 100);
+  delete process.env[ENV_KEY];
 
   console.log(failures === 0 ? '\nAll feature-flag checks passed.\n' : `\n${failures} check(s) FAILED.\n`);
   process.exit(failures === 0 ? 0 : 1);

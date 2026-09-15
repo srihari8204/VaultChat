@@ -221,7 +221,11 @@ pub enum Accepted {
 /// proposed", never "unlimited" — the same rule and the same zero-value
 /// convention as `parse::Limits::tighten`.
 fn tighten_ms(cur: u64, proposed: u64) -> u64 {
-    if proposed > 0 && proposed < cur { proposed } else { cur }
+    if proposed > 0 && proposed < cur {
+        proposed
+    } else {
+        cur
+    }
 }
 
 /// splitmix64. A named, fixed, inline mixer rather than a random source: the
@@ -328,7 +332,10 @@ impl Session {
 
     fn edge(&mut self, from: State, to: State) -> Result<(), SessionError> {
         if self.state != from {
-            return Err(SessionError::IllegalTransition { from: self.state, to });
+            return Err(SessionError::IllegalTransition {
+                from: self.state,
+                to,
+            });
         }
         self.state = to;
         Ok(())
@@ -399,7 +406,11 @@ impl Session {
             self.token = Some(t);
         }
 
-        Ok(if resumed { Accepted::Resumed } else { Accepted::FullResync })
+        Ok(if resumed {
+            Accepted::Resumed
+        } else {
+            Accepted::FullResync
+        })
     }
 
     /// Ready → Draining. The connection still carries traffic and is still
@@ -478,7 +489,9 @@ impl Session {
                 // Back to Idle, not Closed: the token survives so the next
                 // handshake can offer it.
                 self.state = State::Idle;
-                Recovery::Retry { at_ms: now_ms.saturating_add(delay) }
+                Recovery::Retry {
+                    at_ms: now_ms.saturating_add(delay),
+                }
             }
             ErrorClass::Auth => {
                 // The token is authenticated state. Whatever rejected the

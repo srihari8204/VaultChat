@@ -1,8 +1,7 @@
 // lib/ccwire/client.ts — the CC-Wire v1 dialer.
 //
-// STATUS: INERT. Nothing imports this. lib/socket.ts still falls through to
-// Socket.IO and is untouched by this file. This is the client half that the
-// §21 branch will call LATER, once a parity soak has passed.
+// Used by the opt-in lib/socket.ts transport branch. transport.ts owns
+// protobuf submission and HTTP fallback; Socket.IO owns inbound live events.
 //
 // LAYERING, top to bottom:
 //   this file          dial, handshake, keepalive, reconnect, event surface
@@ -77,6 +76,7 @@ const STREAM_CONTROL = 1;
 /** capabilities.proto Limits defaults for the two heartbeat fields. */
 export const DEFAULT_HEARTBEAT_INTERVAL_MS = 10000;
 export const DEFAULT_HEARTBEAT_TIMEOUT_MS = 5000;
+export const HANDSHAKE_TIMEOUT_MS = 15000;
 
 /** errors.proto ErrorClass. A FATAL error ends the session. */
 const ERROR_CLASS_FATAL = 2;
@@ -405,6 +405,8 @@ export class CCWireClient {
   private hb: any = null;       // heartbeat interval timer
   private hbWait: any = null;   // outstanding-Pong timer
   private retry: any = null;
+  private dialTimer: any = null;
+  private dialGeneration = 0;
   private pendingPingId = '';
   private reqN = 0;
   private reqPrefix = '';
@@ -470,17 +472,25 @@ export class CCWireClient {
     if (this.st === 'connecting' || this.st === 'handshaking' || this.st === 'open') return;
     this.st = 'connecting';
     this.buf = new Uint8Array(0);
+    if (this.retry) { this.clearT(this.retry); this.retry = null; }
+    const generation = ++this.dialGeneration;
+    // Every attempt needs a deadline, including reconnects after a live session.
+    this.dialTimer = this.setT(() => {
+      if (generation !== this.dialGeneration || (this.st !== 'connecting' && this.st !== 'handshaking')) return;
+      this.dialTimer = null;
+      this.down('handshake_incomplete', { detail: 'handshake deadline' });
+    }, HANDSHAKE_TIMEOUT_MS);
 
     let token = '';
     try {
       token = await this.o.getToken();
     } catch (e) {
-      this.down('auth', { detail: `getToken: ${String(e)}` });
+      if (generation === this.dialGeneration) this.down('auth', { detail: `getToken: ${String(e)}` });
       return;
     }
-    if (!token) { this.down('auth', { detail: 'no access token' }); return; }
     // The dial may have been cancelled while we awaited the token.
-    if (this.st !== 'connecting') return;
+    if (generation !== this.dialGeneration || this.st !== 'connecting') return;
+    if (!token) { this.down('auth', { detail: 'no access token' }); return; }
 
     const Impl = this.o.WebSocketImpl ?? (globalThis as any).WebSocket;
     if (!Impl) { this.down('transport', { detail: 'no WebSocket implementation' }); return; }
@@ -610,14 +620,6 @@ export class CCWireClient {
     } else {
       this.buf = chunk;
     }
-    // The buffer cannot grow without bound: decodeFrame refuses a declared
-    // length over the cap BEFORE reporting INCOMPLETE, so a partial frame is
-    // at most one capped frame. This asserts that rather than assuming it.
-    if (this.buf.length > HEADER_BYTES + Math.min(this.maxFrameBytes, MAX_FRAME_BYTES)) {
-      this.down('framing', { detail: `read buffer ${this.buf.length} over cap` });
-      return;
-    }
-
     const r = decodeStream(this.buf, { maxBytes: this.maxFrameBytes });
     if (r.error) {
       // Unrecoverable by construction: after a bad length the next frame
@@ -629,6 +631,25 @@ export class CCWireClient {
       ? new Uint8Array(0)
       // A copy, not a view: the view would pin the whole merged buffer alive.
       : this.buf.slice(r.consumed);
+
+    // THE RESIDUE is what must stay bounded — not the merged buffer.
+    //
+    // This check used to run BEFORE the drain, on everything that had just
+    // arrived. But the whole reason this method buffers is that "two frames can
+    // arrive in one" (see above), and two legal 200 KiB frames in a single read
+    // are 409,610 bytes against a 262,149-byte cap. So the class refused the
+    // exact case it exists to handle — and `down('framing')` sets fatal, which
+    // is permanent for the life of the object: no reconnect, for the life of the
+    // app.
+    //
+    // decodeFrame refuses an over-cap declared length BEFORE reporting
+    // INCOMPLETE, so whatever is left after every whole frame has been drained
+    // is at most one capped frame. That is the real invariant, and this asserts
+    // it rather than assuming it.
+    if (this.buf.length > HEADER_BYTES + Math.min(this.maxFrameBytes, MAX_FRAME_BYTES)) {
+      this.down('framing', { detail: `read residue ${this.buf.length} over cap` });
+      return;
+    }
 
     for (const payload of r.frames) {
       if (this.st !== 'handshaking' && this.st !== 'open') return;
@@ -671,6 +692,7 @@ export class CCWireClient {
         MAX_FRAME_BYTES,
       );
       this.st = 'open';
+      if (this.dialTimer) { this.clearT(this.dialTimer); this.dialTimer = null; }
       this.helloAt = (this.o.now ?? Date.now)();
       this.backoff.reset();
       this.emit({ type: 'hello', hello: h });
@@ -777,11 +799,14 @@ export class CCWireClient {
 
   /** The one path out of a live session. Idempotent. */
   private down(reason: CloseReason, extra: Partial<CCWireEvent> = {}): void {
+    if (reason === 'client' && this.retry) { this.clearT(this.retry); this.retry = null; }
     if (this.st === 'closed' || this.st === 'idle') {
       // Still make close() stick even if we were never up.
       if (reason === 'client') this.st = 'closed';
       return;
     }
+    this.dialGeneration++;
+    if (this.dialTimer) { this.clearT(this.dialTimer); this.dialTimer = null; }
     const wasHandshaking = this.st === 'handshaking';
     this.st = 'closed';
     this.stopHeartbeat();

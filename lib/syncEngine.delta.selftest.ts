@@ -63,6 +63,10 @@ export function looksEncrypted(s) { return typeof s === 'string' && s.startsWith
 export async function markDeliveredDurable() {}
 export async function notifyBatch() {}
 export function onConnectionState() { return () => {}; }
+export function addPersistentListener(event, handler) {
+  H().persistent[event] = handler;
+  return () => { delete H().persistent[event]; };
+}
 `);
 
 const REWRITES: [RegExp, string][] = [
@@ -79,7 +83,7 @@ const REWRITES: [RegExp, string][] = [
    `import { normalizeMsgIds } from './msgIds.ts';`],
   [/^import \{ markDeliveredDurable \} from '\.\/receipts';$/m, `import { markDeliveredDurable } from './stubs.js';`],
   [/^import \{ notifyBatch \} from '\.\/messageNotifications';$/m, `import { notifyBatch } from './stubs.js';`],
-  [/^import \{ onConnectionState \} from '\.\/socket';$/m, `import { onConnectionState } from './stubs.js';`],
+  [/^import \{ addPersistentListener, onConnectionState \} from '\.\/socket';$/m, `import { addPersistentListener, onConnectionState } from './stubs.js';`],
 ];
 
 let src = readFileSync(join(HERE, 'syncEngine.ts'), 'utf8');
@@ -99,6 +103,7 @@ const D: any = {
   cursor: 0, cursorWrites: [] as number[], meta: new Map(), metrics: {} as any,
   local: new Map<number, string>(), cached: [] as number[], decrypted: [] as number[],
   requests: [] as string[], decryptMs: 0, server: [] as any[],
+  persistent: {} as Record<string, (data: any) => void>,
   api: async (path: string) => {
     D.requests.push(path);
     const since = Number(/since=(\d+)/.exec(path)?.[1] ?? 0);
@@ -162,6 +167,17 @@ async function main() {
   check('only the new one is decrypted', D.decrypted.length === 1, `${D.decrypted.join(',')}`);
   check('cursor advanced to it', D.cursor === 101, `${D.cursor}`);
   D.local.set(101, 'plain-101');
+
+  // ── Live socket delivery while no ChatScreen is mounted ───────────────
+  console.log('socket delivery wakes the global delta sync');
+  reset();
+  D.server.push({ id: 102, chatId: 'c1', content: '{"v":"dr1"}' });
+  S.initSync();
+  D.persistent.new_message?.({ id: '102', chatId: 'c1' });
+  await new Promise(r => setTimeout(r, 350));
+  check('a background chat-list socket event fetches the new message', D.decrypted.includes(102));
+  check('the listener also arms mutation events', typeof D.persistent.message_deleted === 'function' && typeof D.persistent.message_edited === 'function');
+  D.local.set(102, 'plain-102');
 
   // ── Q. a slow bulk sync must not block a live message ─────────────────
   console.log('bulk sync must not block live traffic');

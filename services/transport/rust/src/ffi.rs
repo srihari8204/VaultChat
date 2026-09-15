@@ -89,7 +89,10 @@ impl Registry {
             return Handle::new(slot, s.generation);
         }
         let slot = self.slots.len() as u32;
-        self.slots.push(Slot { generation: 0, conn: Some(Conn::new()) });
+        self.slots.push(Slot {
+            generation: 0,
+            conn: Some(Conn::new()),
+        });
         Handle::new(slot, 0)
     }
 
@@ -105,7 +108,9 @@ impl Registry {
     /// legitimately race a close against a transport error.
     pub fn close(&mut self, h: Handle) -> bool {
         let slot = h.slot();
-        let Some(s) = self.slots.get_mut(slot) else { return false };
+        let Some(s) = self.slots.get_mut(slot) else {
+            return false;
+        };
         if s.generation != h.generation() || s.conn.is_none() {
             return false;
         }
@@ -135,12 +140,18 @@ impl Registry {
     }
 
     pub fn on_transport_close(&mut self, h: Handle) -> Vec<Event> {
-        self.get(h).map(|c| c.on_transport_close()).unwrap_or_default()
+        self.get(h)
+            .map(|c| c.on_transport_close())
+            .unwrap_or_default()
     }
 
-    pub fn send(&mut self, h: Handle, class: Class, depends_on: u64, payload: &[u8])
-        -> Result<(), SendError>
-    {
+    pub fn send(
+        &mut self,
+        h: Handle,
+        class: Class,
+        depends_on: u64,
+        payload: &[u8],
+    ) -> Result<(), SendError> {
         match self.get(h) {
             Some(c) => c.send(class, depends_on, payload),
             None => Err(SendError::NotOpen),

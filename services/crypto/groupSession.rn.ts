@@ -88,6 +88,18 @@ async function distribute(chatId: string, me: string, others: string[]): Promise
 /** Ensure my sender key is distributed to the current membership, rotating on removal. */
 async function ensureDistributed(chatId: string, me: string): Promise<void> {
   const others = await fetchOtherMembers(chatId, me);
+  // A KEY WE HAD TO MINT HAS NEVER BEEN DISTRIBUTED — membership says nothing.
+  //
+  // ensureOwn() silently creates a fresh chain AND a fresh Ed25519 signing key
+  // when the stored one is gone (SecureStore cleared, restore onto a new device,
+  // a Keystore read error). The membership diff below cannot see that: with no
+  // add and no removal it skips distribution entirely, so every later message
+  // from this device is signed by a key nobody has — "signature verification
+  // failed" for every recipient, forever, with no signal to the sender.
+  //
+  // Checking BEFORE ensureOwn is what makes this work: distribute() calls
+  // ensureOwn itself, so the key minted below is the one that gets published.
+  if (!(await loadOwn(chatId))) { await distribute(chatId, me, others); return; }
   const lastRaw = await kv.get(MEMBERS(chatId));
   const last: string[] | null = lastRaw ? JSON.parse(lastRaw) : null;
   if (!last) { await distribute(chatId, me, others); return; }
@@ -128,8 +140,17 @@ async function ingest(chatId: string): Promise<void> {
     try {
       const dist = JSON.parse(await e2eeDecrypt('', senderId, 0, skdm)) as SenderKeyDistribution;
       const existing = await loadPeer(chatId, senderId);
-      // Don't reset a chain we've already advanced past (same signer, >= iteration).
-      if (existing && existing.signPubHex === dist.signPubHex && existing.iteration >= dist.iteration) continue;
+      // NEVER REPLACE A RECORD FOR THE SAME SIGNER. Only a ROTATION (new signing
+      // key) may install a new record.
+      //
+      // processDistribution() returns a virgin record: skipped = {} and the head
+      // jumped to the SKDM's iteration. Applying that to a signer we already
+      // track throws away the skipped message keys held for messages still in
+      // flight below that iteration — they then fail permanently with
+      // "message key unavailable (too old / already used)". The existing record
+      // needs nothing from the re-ingest anyway: groupDecrypt ratchets it forward
+      // on its own, over any gap up to MAX_SKIP.
+      if (existing && existing.signPubHex === dist.signPubHex) continue;
       await savePeer(chatId, senderId, processDistribution(dist));
     } catch (err) {
       // A sender key arrives wrapped in the 1:1 session with its sender, so a
@@ -191,6 +212,28 @@ export function isGroupEnvelope(wire: string | null | undefined): boolean {
 // same bug: both sends went out at the same iteration.
 const withGroupSendLock = createKeyedLock();
 
+// ONE DECRYPT AT A TIME, PER (GROUP, SENDER).
+//
+// groupDecryptMessage is the same read-modify-write shape as the send path:
+//   loadPeer(chat, sender) → groupDecrypt(rec, cipher) → savePeer(chat, sender, next)
+//
+// and hydrateMessages runs from several call sites at once (chat open, cold
+// sync, a live message landing). Two concurrent decrypts of the same sender each
+// read the same record, and the later savePeer discards the other's advanced
+// head AND its cached skipped keys — so the out-of-order messages those keys
+// existed for fail permanently with "message key unavailable".
+//
+// Unlike the send path this is not a nonce-reuse risk (decrypt derives nothing
+// new), so it is a durability fix, not a confidentiality one.
+//
+// KEYED PER (chat, sender), not per chat: different senders own independent
+// chains, and serializing a whole group's history behind one lock would make a
+// busy chat's hydrate crawl. A SEPARATE lock instance from the send lock, so a
+// decrypt can never sit behind a send — the send path awaits a network GET, and
+// nothing in either path calls the other (ingest goes through the 1:1 lock,
+// which is a third instance), so no cycle exists in either direction.
+const withGroupDecryptLock = createKeyedLock();
+
 /** Encrypt a message for a group; ensures my sender key is distributed first. */
 export async function groupEncryptMessage(chatId: string, plaintext: string): Promise<string> {
   return withGroupSendLock(chatId, () => groupEncryptMessageLocked(chatId, plaintext));
@@ -218,8 +261,19 @@ async function groupEncryptMessageLocked(chatId: string, plaintext: string): Pro
  */
 export async function groupDecryptMessage(
   chatId: string, senderId: string, messageId: number, wire: string,
+  edited = false,
 ): Promise<string> {
-  const cached = await e2eeGetCached(chatId, messageId);
+  return withGroupDecryptLock(chatId + '|' + senderId,
+    () => groupDecryptMessageLocked(chatId, senderId, messageId, wire, edited));
+}
+
+async function groupDecryptMessageLocked(
+  chatId: string, senderId: string, messageId: number, wire: string,
+  edited: boolean,
+): Promise<string> {
+  // An edit keeps its message id but replaces the ciphertext. Require the
+  // matching body so an old plaintext cache cannot win over the edit.
+  const cached = await e2eeGetCached(chatId, messageId, wire, edited);
   // Same store holds the "permanently undecryptable" tombstone. Returning it as
   // plaintext printed "__e2ee_undecryptable__" into group bubbles, exactly as it
   // did for 1:1 (seen on device). Fall through so the real state is reported.
@@ -248,7 +302,7 @@ export async function groupDecryptMessage(
   if (!rec) throw new Error('group: no sender key for ' + senderId);
   const { plaintext, next } = groupDecrypt(rec, cipher);
   await savePeer(chatId, senderId, next);
-  if (messageId > 0) await e2eeCachePlaintext(chatId, messageId, plaintext);
+  if (messageId > 0) await e2eeCachePlaintext(chatId, messageId, plaintext, wire);
   return plaintext;
 }
 

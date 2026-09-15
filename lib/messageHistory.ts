@@ -49,7 +49,7 @@ export async function unionWithLocalHistory(
   for (const m of local) byId.set(m.id, m);
   for (const m of serverMsgs) {
     const mine = byId.get(m.id);
-    byId.set(m.id, (mine && mine.content && !m.content) ? mine : m);
+    byId.set(m.id, (mine && mine.content && !m.content && !m.deletedAt) ? mine : m);
   }
   // Newest first — the order every list surface in the app renders in.
   return [...byId.values()].sort((a, b) => b.id - a.id);

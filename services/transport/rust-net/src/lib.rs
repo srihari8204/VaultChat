@@ -1,11 +1,9 @@
 //! transport-net — the I/O half of the CC-Wire client. A real socket.
 //!
-//! STATUS: NOT WIRED. No Gradle module includes this crate, there is no FFI
-//! surface, and nothing in the React Native app or the Go backend imports it.
-//! It builds, it connects, it is covered by integration tests that open real
-//! TCP sockets — and it is reachable only from its own test suite and from the
-//! `ccwire-connect` example binary. Wiring it into a shipping client is a
-//! separate decision that a parity soak has not yet earned.
+//! Android's optional TransportCore module exposes a raw binary carrier via
+//! `carrier` and `ffi`. That path leaves framing/session/reconnect with the
+//! existing TypeScript CCWireClient; `Connection` remains the standalone Rust
+//! session client. A native build and device validation are separate from tests.
 //!
 //! WHY A SECOND CRATE RATHER THAN A MODULE IN `transport-core`
 //! ----------------------------------------------------------
@@ -28,12 +26,13 @@
 //!
 //! WHAT THIS CRATE IS FORBIDDEN FROM DOING
 //! ---------------------------------------
-//!   * It must not frame. Every byte that reaches the socket came out of
+//!   * It must not frame. In the standalone client every byte sent came out of
 //!     [`transport_core::conn::Conn::poll_out`], and every byte off the socket
 //!     goes into [`transport_core::conn::Conn::on_bytes`]. No length prefix is
 //!     written anywhere in this crate, and no frame header is parsed: both
 //!     layers — the length prefix and the `ccwire.v1.Frame` routing header —
-//!     come from `transport_core::frame` and `transport_core::parse`.
+//!     come from `transport_core::frame` and `transport_core::parse`. The raw
+//!     Android carrier delegates these layers to the existing TypeScript core.
 //!   * It must not decide. Backoff, heartbeat timing, capability
 //!     intersection and limit tightening are all `transport_core::session`.
 //!     A second backoff in here would be a second policy to drift.
@@ -63,10 +62,15 @@
 //! strictly); a text message is refused as a protocol violation, not read
 //! leniently.
 
-#![forbid(unsafe_code)]
+#![deny(unsafe_code)]
 
 pub mod body;
 pub mod client;
+pub mod carrier;
+#[cfg(feature = "webtransport")]
+mod webtransport;
+#[allow(unsafe_code)]
+mod ffi;
 
 pub use client::{wait_for_retry, Connection, NetError};
 

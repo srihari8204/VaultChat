@@ -22,8 +22,14 @@ use transport_core::frame::{decode, decode_stream, encode, FrameError, FRAMING_V
 fn vectors() -> Value {
     // services/transport/rust/tests/ -> repo root
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("..").join("..").join("..");
-    let p = root.join("lib").join("ccwire").join("__vectors__").join("frame.json");
+        .join("..")
+        .join("..")
+        .join("..");
+    let p = root
+        .join("lib")
+        .join("ccwire")
+        .join("__vectors__")
+        .join("frame.json");
     let raw = fs::read_to_string(&p)
         .unwrap_or_else(|e| panic!("cannot read shared vectors at {}: {e}", p.display()));
     serde_json::from_str(&raw).expect("vectors are not valid JSON")
@@ -46,7 +52,10 @@ fn hex(b: &[u8]) -> String {
 #[test]
 fn constants_match_the_fixture() {
     let v = vectors();
-    assert_eq!(v["framingVersion"].as_u64().unwrap(), FRAMING_VERSION as u64);
+    assert_eq!(
+        v["framingVersion"].as_u64().unwrap(),
+        FRAMING_VERSION as u64
+    );
     assert_eq!(v["headerBytes"].as_u64().unwrap(), HEADER_BYTES as u64);
     assert_eq!(v["maxFrameBytes"].as_u64().unwrap(), MAX_FRAME_BYTES as u64);
 }
@@ -59,7 +68,11 @@ fn encode_matches_go_byte_for_byte() {
         let payload = unhex(case["payloadHex"].as_str().unwrap());
         let want = case["frameHex"].as_str().unwrap();
         let got = encode(&payload, 0).unwrap_or_else(|e| panic!("{name}: encode refused: {e:?}"));
-        assert_eq!(hex(&got), want, "{name}: encoded bytes differ from the fixture");
+        assert_eq!(
+            hex(&got),
+            want,
+            "{name}: encoded bytes differ from the fixture"
+        );
     }
 }
 
@@ -76,12 +89,27 @@ fn decode_matches_the_fixture_including_every_rejection() {
         match decode(&input, max, strict) {
             Ok(f) => {
                 assert!(want_ok, "{name}: accepted a frame the fixture rejects");
-                assert_eq!(f.version as u64, case["version"].as_u64().unwrap(), "{name}: version");
-                assert_eq!(hex(f.payload), case["payloadHex"].as_str().unwrap(), "{name}: payload");
-                assert_eq!(f.consumed as u64, case["consumed"].as_u64().unwrap(), "{name}: consumed");
+                assert_eq!(
+                    f.version as u64,
+                    case["version"].as_u64().unwrap(),
+                    "{name}: version"
+                );
+                assert_eq!(
+                    hex(f.payload),
+                    case["payloadHex"].as_str().unwrap(),
+                    "{name}: payload"
+                );
+                assert_eq!(
+                    f.consumed as u64,
+                    case["consumed"].as_u64().unwrap(),
+                    "{name}: consumed"
+                );
             }
             Err(e) => {
-                assert!(!want_ok, "{name}: rejected a frame the fixture accepts ({e:?})");
+                assert!(
+                    !want_ok,
+                    "{name}: rejected a frame the fixture accepts ({e:?})"
+                );
                 assert_eq!(
                     e.as_str(),
                     case["error"].as_str().unwrap(),
@@ -106,7 +134,11 @@ fn stream_framing_matches_the_fixture() {
             .unwrap_or_default();
         let got: Vec<String> = frames.iter().map(|f| hex(f)).collect();
         assert_eq!(got, want, "{name}: frames differ");
-        assert_eq!(consumed as u64, case["consumed"].as_u64().unwrap(), "{name}: consumed");
+        assert_eq!(
+            consumed as u64,
+            case["consumed"].as_u64().unwrap(),
+            "{name}: consumed"
+        );
 
         let want_err = case["error"].as_str().unwrap_or("");
         match err {
@@ -122,9 +154,15 @@ fn stream_framing_matches_the_fixture() {
 #[test]
 fn a_length_with_the_sign_bit_set_is_refused() {
     let buf = [FRAMING_VERSION, 0x80, 0x00, 0x00, 0x00];
-    assert_eq!(decode(&buf, 0, false).unwrap_err(), FrameError::LengthOverMax);
+    assert_eq!(
+        decode(&buf, 0, false).unwrap_err(),
+        FrameError::LengthOverMax
+    );
     let buf = [FRAMING_VERSION, 0xff, 0xff, 0xff, 0xff];
-    assert_eq!(decode(&buf, 0, false).unwrap_err(), FrameError::LengthOverMax);
+    assert_eq!(
+        decode(&buf, 0, false).unwrap_err(),
+        FrameError::LengthOverMax
+    );
 }
 
 /// A negotiated ceiling may tighten. It may never loosen.
@@ -132,7 +170,10 @@ fn a_length_with_the_sign_bit_set_is_refused() {
 fn a_negotiated_max_cannot_raise_the_hard_max() {
     let payload = vec![0u8; 2000];
     let framed = encode(&payload, 0).unwrap();
-    assert_eq!(decode(&framed, 1024, false).unwrap_err(), FrameError::LengthOverMax);
+    assert_eq!(
+        decode(&framed, 1024, false).unwrap_err(),
+        FrameError::LengthOverMax
+    );
     assert!(decode(&framed, 0, false).is_ok());
     // Proposing a larger max than the build compiled with must not grant it.
     assert!(encode(&vec![0u8; MAX_FRAME_BYTES + 1], usize::MAX).is_err());

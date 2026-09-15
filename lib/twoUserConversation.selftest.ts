@@ -42,6 +42,7 @@ import { transition, tickFor, type MsgState } from './messageState';
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(HERE, '..');
 const CRYPTO = pathToFileURL(join(ROOT, 'services', 'crypto')).href;
+const CCWIRE = pathToFileURL(join(HERE, 'ccwire', 'transport.ts')).href;
 
 (globalThis as any).__DEV__ = true;   // messageState.transition throws in dev
 
@@ -166,13 +167,15 @@ function buildClient(userId: string): string {
     src = src.replace(re, to);
   }
   // Dynamic imports: the e2ee binding is REAL code composed over in-memory
-  // stores; everything else is a stub.
+  // stores. The Node-compatible CC-Wire coordinator is real too, with its
+  // optional connection off; this exercises its normal HTTP submission path.
   // msgIds is real, per-client: it has no imports, and it is what decides
   // whether a wire row survives into the cache at all.
   writeFileSync(join(dir, 'msgIds.ts'), readFileSync(join(ROOT, 'lib', 'msgIds.ts'), 'utf8'));
   src = src.replace(/^import \{ normalizeMsgIds \} from '\.\/msgIds';$/m,
     `import { normalizeMsgIds } from './msgIds.ts';`);
   src = src
+    .replace(/await import\('\.\/ccwire\/transport'\)/g, `await import('${CCWIRE}')`)
     .replace(/await import\('\.\.\/services\/crypto\/e2eeSession\.rn'\)/g, `await import('./e2ee.ts')`)
     .replace(/await import\('\.\.\/services\/crypto\/groupSession\.rn'\)/g, `await import('./stubs.ts')`)
     .replace(/await import\('\.\/(localDb|sessionEpoch|socket|api|cacheCrypto)'\)/g, `await import('./stubs.ts')`);
@@ -182,7 +185,7 @@ function buildClient(userId: string): string {
     .filter((p) => !p.startsWith('./stubs') && !p.startsWith('file:') && p !== 'node:buffer' && p !== './msgIds.ts');
   check(`every ${userId} chatService import is accounted for`, stray.length === 0, `unstubbed: ${stray.join(', ')}`);
   const strayDyn = [...src.matchAll(/await import\('([^']+)'\)/g)].map((m) => m[1])
-    .filter((p) => p !== './stubs.ts' && p !== './e2ee.ts');
+    .filter((p) => p !== './stubs.ts' && p !== './e2ee.ts' && p !== CCWIRE);
   check(`every ${userId} dynamic import is accounted for`, strayDyn.length === 0, `unstubbed: ${strayDyn.join(', ')}`);
 
   writeFileSync(join(dir, 'chat.ts'), src);
@@ -295,6 +298,8 @@ const H = {
 
 // ── the conversation ──────────────────────────────────────────────────────
 async function main() {
+  const transport = await import(CCWIRE);
+  check('the real submission coordinator loads with CC-Wire off', transport.ccwireStatus() === 'off');
   const aliceDir = buildClient('alice');
   const bobDir = buildClient('bob');
   const A: any = await import(pathToFileURL(join(aliceDir, 'chat.ts')).href);

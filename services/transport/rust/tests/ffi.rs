@@ -22,7 +22,10 @@ fn a_handle_drives_its_own_connection() {
     let mut r = Registry::new();
     let h = r.open();
     assert_eq!(r.on_open(h), vec![Event::Open]);
-    assert_eq!(r.on_bytes(h, &framed(b"hi")), vec![Event::Frame(b"hi".to_vec())]);
+    assert_eq!(
+        r.on_bytes(h, &framed(b"hi")),
+        vec![Event::Frame(b"hi".to_vec())]
+    );
     r.send(h, Class::Message, 0, b"out").unwrap();
     assert_eq!(r.poll_out(h).unwrap(), framed(b"out"));
 }
@@ -38,7 +41,11 @@ fn a_stale_handle_never_addresses_a_reused_slot() {
     assert!(r.close(first));
 
     let second = r.open();
-    assert_eq!(r.allocated(), 1, "the freed slot was not reused, so this proves nothing");
+    assert_eq!(
+        r.allocated(),
+        1,
+        "the freed slot was not reused, so this proves nothing"
+    );
     assert_ne!(first, second, "a reused slot produced an identical handle");
 
     r.on_open(second);
@@ -83,7 +90,10 @@ fn connections_do_not_share_state() {
     r.on_open(b);
 
     r.send(a, Class::Message, 0, b"for a").unwrap();
-    assert!(r.poll_out(b).is_none(), "a frame queued on one connection surfaced on another");
+    assert!(
+        r.poll_out(b).is_none(),
+        "a frame queued on one connection surfaced on another"
+    );
     assert_eq!(r.poll_out(a).unwrap(), framed(b"for a"));
 }
 
@@ -112,7 +122,18 @@ fn events_flatten_into_one_buffer() {
     let out = encode_events(&events);
     assert_eq!(
         out,
-        vec![EVENT_OPEN, EVENT_FRAME, 0, 0, 0, 2, b'a', b'b', EVENT_CLOSED, CLOSE_LOCAL]
+        vec![
+            EVENT_OPEN,
+            EVENT_FRAME,
+            0,
+            0,
+            0,
+            2,
+            b'a',
+            b'b',
+            EVENT_CLOSED,
+            CLOSE_LOCAL
+        ]
     );
 }
 
@@ -124,8 +145,13 @@ fn events_flatten_into_one_buffer() {
 fn a_protocol_close_carries_no_parse_detail_across_the_boundary() {
     use transport_core::frame::FrameError;
     let a = encode_events(&[Event::Closed(CloseReason::Protocol(FrameError::BadVersion))]);
-    let b = encode_events(&[Event::Closed(CloseReason::Protocol(FrameError::LengthOverMax))]);
-    assert_eq!(a, b, "two different parse failures are distinguishable to the host");
+    let b = encode_events(&[Event::Closed(CloseReason::Protocol(
+        FrameError::LengthOverMax,
+    ))]);
+    assert_eq!(
+        a, b,
+        "two different parse failures are distinguishable to the host"
+    );
     assert_eq!(a, vec![EVENT_CLOSED, CLOSE_PROTOCOL]);
 }
 

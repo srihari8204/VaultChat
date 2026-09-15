@@ -324,6 +324,7 @@ export async function decryptFromChat(
   senderId: string,
   ciphertext: string | null,
   messageId?: number,
+  edited = false,
 ): Promise<string> {
   if (ciphertext == null) return '';
   if (!E2EE_ENABLED) return ciphertext;
@@ -345,7 +346,7 @@ export async function decryptFromChat(
   if (g.isGroupEnvelope(ciphertext)) {
     if (!GROUP_E2EE) return ciphertext;
     try {
-      return await g.groupDecryptMessage(chatId, senderId, messageId ?? 0, ciphertext);
+      return await g.groupDecryptMessage(chatId, senderId, messageId ?? 0, ciphertext, edited);
     } catch (err) {
       // ONCE PER SENDER, NOT ONCE PER MESSAGE. This fires for every message that
       // cannot be opened, so one broken sender key produced a warn per message —
@@ -850,13 +851,19 @@ export async function hydrateMessages(
   let ownMisses = 0;
   for (let i = out.length - 1; i >= 0; i--) {   // msgs arrive newest-first → iterate oldest-first
     const m = out[i];
+    // deletedAt is authoritative even if best-effort server body cleanup left
+    // ciphertext attached to the row. Never decrypt or retain deleted content.
+    if (m.deletedAt) {
+      out[i] = { ...m, type: 'system', content: null, replyToId: null, meta: null };
+      continue;
+    }
     const c = m.content;
     if (!looksEncrypted(c)) {                    // already plaintext (cache / pre-E2EE history)
       if (c && c.startsWith('\u0000')) out[i] = finish(m, c);   // wrapped plaintext straggler
       continue;
     }
     const cached = knownPlain?.get(m.id);
-    if (cached != null && !looksEncrypted(cached)) { out[i] = finish(m, cached); continue; }
+    if (!m.editedAt && cached != null && !looksEncrypted(cached)) { out[i] = finish(m, cached); continue; }
 
     // NEVER attempt to decrypt our OWN message.
     //
@@ -926,7 +933,7 @@ export async function hydrateMessages(
       continue;
     }
 
-    const plain = await decryptFromChat(chatId, senderId, c, m.id);
+    const plain = await decryptFromChat(chatId, senderId, c, m.id, !!m.editedAt);
     if (plain && !looksEncrypted(plain) && plain !== '🔒 unable to decrypt') {
       out[i] = finish(m, plain);
     }
@@ -1361,9 +1368,8 @@ export async function sendMessage(
   opts: { replyToId?: number | null; meta?: any; clientId?: string } = {},
 ): Promise<Message> {
   // ── Task 1 perf instrumentation ──────────────────────────────────
-  // The real send path is HTTP POST (not a socket emit). Split the timing
-  // into E2EE-encrypt vs. POST round-trip so we can see which one dominates
-  // the "pending clock" the user experiences.
+  // Split the timing into E2EE-encrypt vs. canonical server result so we see
+  // which stage dominates across HTTP and optional protobuf submissions.
   // F7: a stable idempotency key generated ONCE per call so an internal api()
   // retry (e.g. token refresh) reuses the same key and the server dedups. Media/
   // poll/sticker/GIF/location all route through here, so they're covered too.
@@ -1380,11 +1386,15 @@ export async function sendMessage(
   if (content === wire && wire !== plaintext) content = plaintext;  // never ship the wrapper unencrypted
   const _tEnc = Date.now();
   perf.mark('send_encrypt_done', { chatId, ms: _tEnc - _t0, encrypted: content !== plaintext });
+  let usedTransport = 'http';
   try {
-    const msg = await api<Message>(`/chats/${encodeURIComponent(chatId)}/messages`, {
-      method: 'POST',
-      json: { content, type, replyToId: opts.replyToId ?? null, meta: serverMeta, clientId },
-    });
+    const payload = { content, type, replyToId: opts.replyToId ?? null, meta: serverMeta, clientId };
+    const transportModule: typeof import('./ccwire/transport') = await import('./ccwire/transport').catch(() => null);
+    const result = transportModule
+      ? await transportModule.submitCCWireMessage<Message>(chatId, payload, api)
+      : { message: await api<Message>(`/chats/${encodeURIComponent(chatId)}/messages`, { method: 'POST', json: payload }), transport: 'http' };
+    const msg = result.message;
+    usedTransport = result.transport;
     // The server emits `id` as a STRING on EVERY path — chatsPublicMsg is
     // `ID string` (fmt.Sprintf("%d")), used by the POST ack, GET and the
     // socket alike. An earlier version of this comment claimed GET/socket
@@ -1394,13 +1404,13 @@ export async function sendMessage(
     // upsert (number-id only) work.
     normalizeMsgIds(msg);
     const _tAck = Date.now();
-    perf.mark('send_http_ack', { chatId, id: msg?.id, ms: _tAck - _tEnc });
+    perf.mark('send_ack', { chatId, id: msg?.id, ms: _tAck - _tEnc, transport: usedTransport });
     perf.recordSend({
       id: String(msg?.id ?? chatId),
       tapToEncrypt: _tEnc - _t0,
       encryptToAck: _tAck - _tEnc,
       totalMs: _tAck - _t0,
-      transport: perf.snapshot().transport,
+      transport: usedTransport,
       at: _tAck,
     });
     // Cache the WRAPPED form, so re-reading the sender's own message recovers
@@ -1415,7 +1425,7 @@ export async function sendMessage(
   } catch (err) {
     perf.recordSend({
       id: String(chatId), tapToEncrypt: _tEnc - _t0,
-      totalMs: Date.now() - _t0, transport: perf.snapshot().transport,
+      totalMs: Date.now() - _t0, transport: usedTransport,
       failed: true, at: Date.now(),
     });
     throw err;
@@ -1466,7 +1476,24 @@ export async function editMessage(chatId: string, msgId: number, plaintext: stri
 }
 
 export async function deleteMessage(chatId: string, msgId: number): Promise<{ id: number; deletedAt: string }> {
-  return api(`/chats/${encodeURIComponent(chatId)}/messages/${msgId}`, { method: 'DELETE' });
+  const deleted = await api<{ id: number; deletedAt: string }>(
+    `/chats/${encodeURIComponent(chatId)}/messages/${msgId}`, { method: 'DELETE' },
+  );
+  normalizeMsgIds(deleted as any);
+  await persistMessageDeletion(chatId, msgId, deleted.deletedAt);
+  return deleted;
+}
+
+/** Persist a server-authoritative delete in both local plaintext stores. */
+export async function persistMessageDeletion(chatId: string, msgId: number, deletedAt: string): Promise<void> {
+  const writes: Promise<unknown>[] = [
+    import('./localDb').then(m => m.cacheRemoteDeletion(chatId, msgId, deletedAt)),
+  ];
+  if (E2EE_ENABLED) {
+    writes.push(import('../services/crypto/e2eeSession.rn')
+      .then(m => m.e2eeDeleteCached(chatId, msgId)));
+  }
+  await Promise.allSettled(writes);
 }
 
 export async function markRead(chatId: string, lastReadMessageId: number): Promise<void> {
@@ -2424,20 +2451,31 @@ export async function searchInChat(chatId: string, q: string, limit = 80): Promi
   }
 
   const hits: InChatMessageHit[] = [];
-  for (const m of msgs) {
-    if (m.type !== 'text' || m.deletedAt) continue;
-    const text = await decryptFromChat(chatId, m.senderId, m.content, m.id);
-    if (text && text.toLowerCase().includes(term)) {
-      hits.push({
-        id:         m.id,
-        senderId:   m.senderId,
-        senderName: nameById.get(m.senderId) || null,
-        content:    text,
-        type:       m.type,
-        createdAt:  m.createdAt,
-      });
-      if (hits.length >= limit) break;
+  // SEARCH IS A BULK REPLAY — same guard hydrateMessages uses (see _bulkDecryptDepth).
+  // This decrypts up to 1000 cached messages of OLD history, whose ratchet states
+  // have long since advanced; two permanent failures among them is normal, and
+  // without this they were enough to fire e2eeResetSession + requestPeerRekey on a
+  // perfectly healthy live session — which is what breaks the next call with that
+  // peer. try/finally so an early `break` or a throw cannot leak the depth.
+  _bulkDecryptDepth++;
+  try {
+    for (const m of msgs) {
+      if (m.type !== 'text' || m.deletedAt) continue;
+      const text = await decryptFromChat(chatId, m.senderId, m.content, m.id, !!m.editedAt);
+      if (text && text.toLowerCase().includes(term)) {
+        hits.push({
+          id:         m.id,
+          senderId:   m.senderId,
+          senderName: nameById.get(m.senderId) || null,
+          content:    text,
+          type:       m.type,
+          createdAt:  m.createdAt,
+        });
+        if (hits.length >= limit) break;
+      }
     }
+  } finally {
+    _bulkDecryptDepth--;
   }
   return hits;
 }

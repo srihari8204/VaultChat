@@ -9,7 +9,11 @@ use transport_core::config::{MAX_FRAME_BYTES, MAX_QUEUED_BULK, MAX_QUEUED_CONTRO
 use transport_core::sched::{Class, Item, Reject, Sched};
 
 fn item(class: Class, depends_on: u64, n: usize) -> Item {
-    Item { class, depends_on, bytes: vec![0u8; n] }
+    Item {
+        class,
+        depends_on,
+        bytes: vec![0u8; n],
+    }
 }
 
 /// The reason the module exists. A control frame queued last goes first.
@@ -32,11 +36,18 @@ fn control_is_not_starved_by_bulk() {
 #[test]
 fn a_dependency_outranks_priority() {
     let mut s = Sched::new();
-    s.push(item(Class::Control, 7, 8)).unwrap();   // urgent, but depends on epoch 7
-    s.push(item(Class::Bulk, 0, 8)).unwrap();      // lowly, but ready
+    s.push(item(Class::Control, 7, 8)).unwrap(); // urgent, but depends on epoch 7
+    s.push(item(Class::Bulk, 0, 8)).unwrap(); // lowly, but ready
 
-    assert_eq!(s.pop().unwrap().class, Class::Bulk, "a blocked control frame was sent anyway");
-    assert!(s.pop().is_none(), "the blocked frame was released without its epoch");
+    assert_eq!(
+        s.pop().unwrap().class,
+        Class::Bulk,
+        "a blocked control frame was sent anyway"
+    );
+    assert!(
+        s.pop().is_none(),
+        "the blocked frame was released without its epoch"
+    );
     assert_eq!(s.blocked(), 1);
     assert!(!s.is_empty(), "None must not be mistaken for empty");
 
@@ -66,11 +77,22 @@ fn full_lanes_reject_but_ephemeral_sheds() {
 
     let mut e = Sched::new();
     for i in 0..200 {
-        e.push(Item { class: Class::Ephemeral, depends_on: 0, bytes: vec![i as u8] })
-            .expect("ephemeral must shed, never refuse");
+        e.push(Item {
+            class: Class::Ephemeral,
+            depends_on: 0,
+            bytes: vec![i as u8],
+        })
+        .expect("ephemeral must shed, never refuse");
     }
-    assert!(e.shed > 0, "a shallow lane that never sheds is just a deep lane");
-    assert_eq!(e.pop().unwrap().bytes[0], (200 - 64) as u8, "the OLDEST must be the one dropped");
+    assert!(
+        e.shed > 0,
+        "a shallow lane that never sheds is just a deep lane"
+    );
+    assert_eq!(
+        e.pop().unwrap().bytes[0],
+        (200 - 64) as u8,
+        "the OLDEST must be the one dropped"
+    );
 }
 
 /// Depth bounds alone let many shallow lanes add up to unbounded memory.
@@ -95,7 +117,10 @@ fn the_global_byte_budget_binds_across_lanes() {
 #[test]
 fn an_oversized_item_is_distinguishable_from_a_full_queue() {
     let mut s = Sched::new();
-    assert_eq!(s.push(item(Class::Message, 0, MAX_FRAME_BYTES + 1)), Err(Reject::TooLarge));
+    assert_eq!(
+        s.push(item(Class::Message, 0, MAX_FRAME_BYTES + 1)),
+        Err(Reject::TooLarge)
+    );
     assert!(s.is_empty());
 }
 
@@ -112,5 +137,9 @@ fn a_rejected_push_leaks_no_bytes() {
     assert_eq!(s.queued_bytes(), before);
 
     while s.pop().is_some() {}
-    assert_eq!(s.queued_bytes(), 0, "the byte counter drifts — the budget would shrink over time");
+    assert_eq!(
+        s.queued_bytes(),
+        0,
+        "the byte counter drifts — the budget would shrink over time"
+    );
 }

@@ -347,7 +347,8 @@ export async function cacheMessages(chatId: string, msgs: Message[]): Promise<vo
            chat_id     = excluded.chat_id,
            sender_id   = excluded.sender_id,
            type        = excluded.type,
-           content     = COALESCE(excluded.content, messages.content),
+           content     = CASE WHEN excluded.deleted_at IS NOT NULL THEN NULL
+                              ELSE COALESCE(excluded.content, messages.content) END,
            -- COALESCE for the same reason as content, one layer along.
            --
            -- The delete-on-delivery sweep now NULLs reply_to_id server-side once
@@ -362,8 +363,10 @@ export async function cacheMessages(chatId: string, msgs: Message[]): Promise<vo
            -- reply_to_id with NULL, and the bubble kept its text while silently
            -- losing its "replying to…" quote and its jump-to-target
            -- (MessageBubble gates on replyToId > 0). Permanent, and local.
-           reply_to_id = COALESCE(excluded.reply_to_id, messages.reply_to_id),
-           meta        = COALESCE(excluded.meta, messages.meta),
+           reply_to_id = CASE WHEN excluded.deleted_at IS NOT NULL THEN NULL
+                              ELSE COALESCE(excluded.reply_to_id, messages.reply_to_id) END,
+           meta        = CASE WHEN excluded.deleted_at IS NOT NULL THEN NULL
+                              ELSE COALESCE(excluded.meta, messages.meta) END,
            created_at  = excluded.created_at,
            edited_at   = excluded.edited_at,
            -- A local delete is STICKY. "Delete for me" never leaves the device,
@@ -382,9 +385,10 @@ export async function cacheMessages(chatId: string, msgs: Message[]): Promise<vo
           // read today (rotated identity, missing sender key) replaced good
           // plaintext with a blob, and dropped it from the search index too.
           // Writing NULL instead keeps whatever is already on disk.
-          m.id, chatId, (m as any).senderId ?? null, m.type ?? null,
-          encField(looksLikeEnvelope(m.content) ? null : (m.content ?? null)),
-          m.replyToId ?? null, encField(m.meta != null ? JSON.stringify(m.meta) : null),
+          m.id, chatId, (m as any).senderId ?? null, m.deletedAt ? 'system' : (m.type ?? null),
+          m.deletedAt ? null : encField(looksLikeEnvelope(m.content) ? null : (m.content ?? null)),
+          m.deletedAt ? null : (m.replyToId ?? null),
+          m.deletedAt ? null : encField(m.meta != null ? JSON.stringify(m.meta) : null),
           m.createdAt ?? null, m.editedAt ?? null, m.deletedAt ?? null, (m as any).expiresAt ?? null,
         ],
       );
@@ -406,6 +410,10 @@ export async function cacheMessages(chatId: string, msgs: Message[]): Promise<vo
     );
   }
 }
+
+// Remote tombstones stay visible; local "Delete for me" rows retain their
+// original type/body and remain hidden by this predicate.
+const VISIBLE_MESSAGE = `(deleted_at IS NULL OR (type = 'system' AND content IS NULL))`;
 
 // ═══ Exit Kit — importing local-only history ═══════════════════════════
 //
@@ -594,7 +602,7 @@ export async function deleteImportedMessages(chatId: string): Promise<number> {
 export async function getCachedMessages(chatId: string, limit = 50): Promise<Message[]> {
   const db = await getLocalDb();
   const rows = await db.getAllAsync(
-    `SELECT * FROM messages WHERE chat_id = ? AND deleted_at IS NULL ORDER BY id DESC LIMIT ?`,
+    `SELECT * FROM messages WHERE chat_id = ? AND ${VISIBLE_MESSAGE} ORDER BY id DESC LIMIT ?`,
     [chatId, limit],
   );
   return rows.map(rowToMessage);
@@ -619,7 +627,7 @@ export async function getCachedMessagesBefore(
   const db = await getLocalDb();
   const rows = await db.getAllAsync(
     `SELECT * FROM messages
-      WHERE chat_id = ? AND id < ? AND deleted_at IS NULL
+      WHERE chat_id = ? AND id < ? AND ${VISIBLE_MESSAGE}
       ORDER BY id DESC LIMIT ?`,
     [chatId, before, limit],
   );
@@ -633,7 +641,7 @@ export async function getCachedMessagesAfter(
   const db = await getLocalDb();
   const rows = await db.getAllAsync(
     `SELECT * FROM messages
-      WHERE chat_id = ? AND id > ? AND deleted_at IS NULL
+      WHERE chat_id = ? AND id > ? AND ${VISIBLE_MESSAGE}
       ORDER BY id ASC LIMIT ?`,
     [chatId, after, limit],
   );
@@ -655,7 +663,7 @@ export async function getCachedMessagesAround(
       const db = await getLocalDb();
       const rows = await db.getAllAsync(
         `SELECT * FROM messages
-          WHERE chat_id = ? AND id >= ? AND deleted_at IS NULL
+          WHERE chat_id = ? AND id >= ? AND ${VISIBLE_MESSAGE}
           ORDER BY id ASC LIMIT ?`,
         [chatId, around, radius + 1],
       );
@@ -675,7 +683,7 @@ export async function hasCachedOlderMessages(chatId: string, before: number): Pr
   const db = await getLocalDb();
   const row = await db.getFirstAsync(
     `SELECT 1 AS x FROM messages
-      WHERE chat_id = ? AND id < ? AND deleted_at IS NULL LIMIT 1`,
+      WHERE chat_id = ? AND id < ? AND ${VISIBLE_MESSAGE} LIMIT 1`,
     [chatId, before],
   );
   return !!row;
@@ -686,7 +694,7 @@ export async function hasCachedNewerMessages(chatId: string, after: number): Pro
   const db = await getLocalDb();
   const row = await db.getFirstAsync(
     `SELECT 1 AS x FROM messages
-      WHERE chat_id = ? AND id > ? AND deleted_at IS NULL LIMIT 1`,
+      WHERE chat_id = ? AND id > ? AND ${VISIBLE_MESSAGE} LIMIT 1`,
     [chatId, after],
   );
   return !!row;
@@ -979,6 +987,21 @@ export async function markCachedDeleted(chatId: string, id: number): Promise<voi
   const db = await getLocalDb();
   await db.runAsync(`UPDATE messages SET deleted_at = ? WHERE chat_id = ? AND id = ?`,
     [new Date().toISOString(), chatId, id]);
+}
+
+/** Persist a server-authoritative delete and wipe the cached message body. */
+export async function cacheRemoteDeletion(chatId: string, id: number, deletedAt: string): Promise<void> {
+  if (!(id > 0) || !deletedAt) return;
+  const db = await getLocalDb();
+  await db.withTransactionAsync(async () => {
+    await db.runAsync(
+      `UPDATE messages SET type = 'system', content = NULL, reply_to_id = NULL,
+                           meta = NULL, deleted_at = ?
+        WHERE chat_id = ? AND id = ?`,
+      [deletedAt, chatId, id],
+    );
+    if (_ftsOk) await db.runAsync(`DELETE FROM msg_fts WHERE rowid = ?`, [id]).catch(() => {});
+  });
 }
 
 /** Cache the chat-list summaries so the chat list renders instantly too. */

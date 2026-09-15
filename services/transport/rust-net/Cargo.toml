@@ -18,9 +18,16 @@ publish = false
 # CI last week" must mean the same bytes as today.
 [dependencies]
 transport-core   = { path = "../rust" }
-tokio            = { version = "=1.53.1", features = ["rt", "rt-multi-thread", "macros", "net", "time", "io-util"] }
+tokio            = { version = "=1.53.1", features = ["rt", "rt-multi-thread", "macros", "net", "time", "io-util", "sync"] }
 tokio-tungstenite = { version = "=0.30.0", features = ["connect", "handshake", "rustls-tls-webpki-roots"] }
 futures-util     = { version = "=0.3.34", default-features = false, features = ["sink", "std"] }
+rustls           = { version = "=0.23.44", default-features = false, features = ["ring", "std"] }
+wtransport       = { version = "=0.7.2", default-features = false, features = ["ring"], optional = true }
+webpki-roots     = { version = "=1.0.9", optional = true }
+
+[features]
+default = []
+webtransport = ["dep:wtransport", "dep:webpki-roots"]
 
 [dev-dependencies]
 # Test-only: the SAME committed fixture Go and TypeScript assert. Reading it
@@ -33,6 +40,7 @@ tokio = { version = "=1.53.1", features = ["test-util"] }
 
 [lib]
 name = "transport_net"
+crate-type = ["rlib", "staticlib"]
 
 [[bin]]
 name = "ccwire-connect"

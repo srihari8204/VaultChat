@@ -84,7 +84,11 @@ pub struct Frame<'a> {
 /// in every implementation.
 #[inline]
 fn cap_of(max_bytes: usize) -> usize {
-    if max_bytes == 0 { MAX_FRAME_BYTES } else { max_bytes.min(MAX_FRAME_BYTES) }
+    if max_bytes == 0 {
+        MAX_FRAME_BYTES
+    } else {
+        max_bytes.min(MAX_FRAME_BYTES)
+    }
 }
 
 /// Encode one frame.
@@ -153,7 +157,11 @@ pub fn decode(buf: &[u8], max_bytes: usize, strict: bool) -> Result<Frame<'_>, F
         return Err(FrameError::TrailingBytes);
     }
 
-    Ok(Frame { version, payload: &buf[HEADER_BYTES..end], consumed: end })
+    Ok(Frame {
+        version,
+        payload: &buf[HEADER_BYTES..end],
+        consumed: end,
+    })
 }
 
 /// Whole frames currently available in a stream buffer.
@@ -166,10 +174,7 @@ pub fn decode(buf: &[u8], max_bytes: usize, strict: bool) -> Result<Frame<'_>, F
 /// point, because after a bad length the next frame's offset is unknowable.
 /// Skipping ahead and hoping is how a parser starts interpreting payload as
 /// header.
-pub fn decode_stream(
-    buf: &[u8],
-    max_bytes: usize,
-) -> (Vec<&[u8]>, usize, Option<FrameError>) {
+pub fn decode_stream(buf: &[u8], max_bytes: usize) -> (Vec<&[u8]>, usize, Option<FrameError>) {
     let mut frames = Vec::new();
     let mut off = 0usize;
     loop {

@@ -18,7 +18,10 @@ const GEO_RELAY: u32 = 84;
 const CRYPTO_CONTROL: u32 = 98;
 
 fn both() -> Negotiated {
-    Negotiated { local: true, peer: true }
+    Negotiated {
+        local: true,
+        peer: true,
+    }
 }
 
 fn typing() -> Candidate {
@@ -36,8 +39,14 @@ fn every_term_present_earns_a_datagram() {
     assert_eq!(datagram_eligible(both(), &typing()), Ok(()));
     assert_eq!(path(both(), &typing()), Path::Datagram);
 
-    let viewer = Candidate { body_field: Some(VIEWER_STATE), ..typing() };
-    let live_geo = Candidate { body_field: Some(GEO_RELAY), ..typing() };
+    let viewer = Candidate {
+        body_field: Some(VIEWER_STATE),
+        ..typing()
+    };
+    let live_geo = Candidate {
+        body_field: Some(GEO_RELAY),
+        ..typing()
+    };
     assert_eq!(path(both(), &viewer), Path::Datagram);
     assert_eq!(path(both(), &live_geo), Path::Datagram);
 }
@@ -46,8 +55,14 @@ fn every_term_present_earns_a_datagram() {
 #[test]
 fn one_sided_support_is_not_a_negotiated_capability() {
     for n in [
-        Negotiated { local: true, peer: false },
-        Negotiated { local: false, peer: true },
+        Negotiated {
+            local: true,
+            peer: false,
+        },
+        Negotiated {
+            local: false,
+            peer: true,
+        },
         Negotiated::default(),
     ] {
         assert_eq!(
@@ -63,7 +78,11 @@ fn one_sided_support_is_not_a_negotiated_capability() {
 #[test]
 fn a_non_ephemeral_class_is_refused_even_with_the_capability_on() {
     for class in [1u32, 2, 3, 4] {
-        let c = Candidate { traffic_class: class, bytes: 8, ..typing() };
+        let c = Candidate {
+            traffic_class: class,
+            bytes: 8,
+            ..typing()
+        };
         assert_eq!(
             datagram_eligible(both(), &c),
             Err(NotDatagram::ClassNotEphemeral),
@@ -76,8 +95,18 @@ fn a_non_ephemeral_class_is_refused_even_with_the_capability_on() {
 /// Removing the body term. EPHEMERAL class alone does not make a body droppable.
 #[test]
 fn an_ephemeral_class_with_a_non_ephemeral_body_is_refused() {
-    for body in [Some(19u32), Some(80), Some(83), Some(CRYPTO_CONTROL), Some(112), None] {
-        let c = Candidate { body_field: body, ..typing() };
+    for body in [
+        Some(19u32),
+        Some(80),
+        Some(83),
+        Some(CRYPTO_CONTROL),
+        Some(112),
+        None,
+    ] {
+        let c = Candidate {
+            body_field: body,
+            ..typing()
+        };
         assert_eq!(
             datagram_eligible(both(), &c),
             Err(NotDatagram::BodyNotEphemeral),
@@ -90,17 +119,32 @@ fn an_ephemeral_class_with_a_non_ephemeral_body_is_refused() {
 /// the same reason a known-but-wrong body is. Unknown must never mean permitted.
 #[test]
 fn an_unknown_body_field_is_refused_rather_than_assumed_harmless() {
-    let c = Candidate { body_field: Some(1234), ..typing() };
-    assert_eq!(datagram_eligible(both(), &c), Err(NotDatagram::BodyNotEphemeral));
+    let c = Candidate {
+        body_field: Some(1234),
+        ..typing()
+    };
+    assert_eq!(
+        datagram_eligible(both(), &c),
+        Err(NotDatagram::BodyNotEphemeral)
+    );
 }
 
 /// Removing the size term.
 #[test]
 fn an_oversized_ephemeral_frame_is_refused() {
-    let fits = Candidate { bytes: MAX_DATAGRAM_BYTES, ..typing() };
-    let does_not = Candidate { bytes: MAX_DATAGRAM_BYTES + 1, ..typing() };
+    let fits = Candidate {
+        bytes: MAX_DATAGRAM_BYTES,
+        ..typing()
+    };
+    let does_not = Candidate {
+        bytes: MAX_DATAGRAM_BYTES + 1,
+        ..typing()
+    };
     assert_eq!(datagram_eligible(both(), &fits), Ok(()));
-    assert_eq!(datagram_eligible(both(), &does_not), Err(NotDatagram::OverDatagramBudget));
+    assert_eq!(
+        datagram_eligible(both(), &does_not),
+        Err(NotDatagram::OverDatagramBudget)
+    );
 }
 
 /// envelope.proto: a terminal GeoRelay is MESSAGING, because losing one leaves a
@@ -108,15 +152,27 @@ fn an_oversized_ephemeral_frame_is_refused() {
 /// from a live position update, so only the `terminal` flag can catch it.
 #[test]
 fn a_terminal_geo_relay_is_refused_a_datagram() {
-    let live = Candidate { body_field: Some(GEO_RELAY), ..typing() };
-    let ended = Candidate { terminal: true, ..live };
+    let live = Candidate {
+        body_field: Some(GEO_RELAY),
+        ..typing()
+    };
+    let ended = Candidate {
+        terminal: true,
+        ..live
+    };
 
     assert_eq!(datagram_eligible(both(), &live), Ok(()));
-    assert_eq!(datagram_eligible(both(), &ended), Err(NotDatagram::TerminalGeoRelay));
+    assert_eq!(
+        datagram_eligible(both(), &ended),
+        Err(NotDatagram::TerminalGeoRelay)
+    );
     assert!(must_be_reliable(both(), &ended));
 
     // And when the caller has already put it on MESSAGING, it stays reliable.
-    let messaging = Candidate { traffic_class: MESSAGING, ..ended };
+    let messaging = Candidate {
+        traffic_class: MESSAGING,
+        ..ended
+    };
     assert!(must_be_reliable(both(), &messaging));
 }
 
@@ -129,7 +185,10 @@ fn crypto_control_is_never_datagram_eligible() {
             for terminal in [false, true] {
                 for n in [
                     both(),
-                    Negotiated { local: true, peer: false },
+                    Negotiated {
+                        local: true,
+                        peer: false,
+                    },
                     Negotiated::default(),
                 ] {
                     let c = Candidate {
@@ -174,5 +233,8 @@ fn anything_not_eligible_goes_reliably() {
 #[test]
 fn the_default_path_is_reliable() {
     assert_eq!(Path::default(), Path::Reliable);
-    assert!(must_be_reliable(Negotiated::default(), &Candidate::default()));
+    assert!(must_be_reliable(
+        Negotiated::default(),
+        &Candidate::default()
+    ));
 }

@@ -5,8 +5,8 @@
 //! close arriving mid-frame" are the cases that actually break transports, and
 //! every one of them is a few lines here instead of a flaky integration test.
 
-use transport_core::conn::{CloseReason, Conn, Event, SendError, MAX_BUFFERED_BYTES};
 use transport_core::config::MAX_FRAME_BYTES;
+use transport_core::conn::{CloseReason, Conn, Event, SendError, MAX_BUFFERED_BYTES};
 use transport_core::frame::{encode, FrameError};
 use transport_core::sched::{Class, Reject};
 
@@ -25,7 +25,11 @@ fn a_whole_frame_in_one_read_yields_one_event() {
     let mut c = open();
     let ev = c.on_bytes(&framed(b"hello"));
     assert_eq!(ev, vec![Event::Frame(b"hello".to_vec())]);
-    assert_eq!(c.buffered(), 0, "a fully consumed read must leave nothing behind");
+    assert_eq!(
+        c.buffered(),
+        0,
+        "a fully consumed read must leave nothing behind"
+    );
 }
 
 /// The case a naive reader gets wrong: TCP does not preserve message boundaries,
@@ -37,7 +41,10 @@ fn a_frame_split_across_many_reads_still_assembles() {
     for (i, b) in bytes.iter().enumerate() {
         let ev = c.on_bytes(&[*b]);
         if i + 1 < bytes.len() {
-            assert!(ev.is_empty(), "byte {i}: emitted an event before the frame was complete");
+            assert!(
+                ev.is_empty(),
+                "byte {i}: emitted an event before the frame was complete"
+            );
         } else {
             assert_eq!(ev, vec![Event::Frame(b"split me up".to_vec())]);
         }
@@ -73,7 +80,10 @@ fn a_trailing_partial_frame_is_kept_for_the_next_read() {
 
     assert_eq!(c.on_bytes(&buf), vec![Event::Frame(b"first".to_vec())]);
     assert_eq!(c.buffered(), 3, "the partial frame was dropped");
-    assert_eq!(c.on_bytes(&partial[3..]), vec![Event::Frame(b"second".to_vec())]);
+    assert_eq!(
+        c.on_bytes(&partial[3..]),
+        vec![Event::Frame(b"second".to_vec())]
+    );
     assert_eq!(c.buffered(), 0);
 }
 
@@ -86,7 +96,10 @@ fn a_dribbling_peer_cannot_grow_the_buffer_without_bound() {
     let mut c = open();
     let mut header = vec![1u8];
     header.extend_from_slice(&(MAX_FRAME_BYTES as u32).to_be_bytes());
-    assert!(c.on_bytes(&header).is_empty(), "an incomplete frame must not emit");
+    assert!(
+        c.on_bytes(&header).is_empty(),
+        "an incomplete frame must not emit"
+    );
 
     let chunk = vec![0u8; 64 * 1024];
     for _ in 0..40 {
@@ -128,7 +141,10 @@ fn back_to_back_maximum_frames_do_not_disconnect_a_healthy_peer() {
             }
         }
     }
-    assert_eq!(frames, 2, "a legitimate peer lost frames or was disconnected");
+    assert_eq!(
+        frames, 2,
+        "a legitimate peer lost frames or was disconnected"
+    );
     assert!(c.is_open(), "a healthy peer was disconnected");
 }
 
@@ -141,9 +157,15 @@ fn a_declared_length_over_the_maximum_ends_the_connection() {
     header.extend_from_slice(&((MAX_FRAME_BYTES + 1) as u32).to_be_bytes());
     assert_eq!(
         c.on_bytes(&header),
-        vec![Event::Closed(CloseReason::Protocol(FrameError::LengthOverMax))]
+        vec![Event::Closed(CloseReason::Protocol(
+            FrameError::LengthOverMax
+        ))]
     );
-    assert_eq!(c.buffered(), 0, "the peer's bytes were retained after close");
+    assert_eq!(
+        c.buffered(),
+        0,
+        "the peer's bytes were retained after close"
+    );
 }
 
 /// A length-prefixed stream has no resynchronisation point: after a bad length
@@ -153,7 +175,10 @@ fn a_declared_length_over_the_maximum_ends_the_connection() {
 fn a_protocol_error_ends_the_connection_and_it_stays_ended() {
     let mut c = open();
     let ev = c.on_bytes(&[9, 0, 0, 0, 1, 0xff]); // version 9: not one we speak
-    assert_eq!(ev, vec![Event::Closed(CloseReason::Protocol(FrameError::BadVersion))]);
+    assert_eq!(
+        ev,
+        vec![Event::Closed(CloseReason::Protocol(FrameError::BadVersion))]
+    );
     assert!(!c.is_open());
 
     // Everything after is inert — no events, no resurrection.
@@ -171,18 +196,30 @@ fn frames_before_a_protocol_error_are_still_delivered() {
     buf.extend_from_slice(&[9, 0, 0, 0, 0]); // bad version
     let ev = c.on_bytes(&buf);
     assert_eq!(ev[0], Event::Frame(b"good".to_vec()));
-    assert_eq!(ev[1], Event::Closed(CloseReason::Protocol(FrameError::BadVersion)));
+    assert_eq!(
+        ev[1],
+        Event::Closed(CloseReason::Protocol(FrameError::BadVersion))
+    );
 }
 
 #[test]
 fn bytes_before_open_and_after_close_are_ignored() {
     let mut c = Conn::new();
-    assert!(c.on_bytes(&framed(b"early")).is_empty(), "data before open must not be parsed");
+    assert!(
+        c.on_bytes(&framed(b"early")).is_empty(),
+        "data before open must not be parsed"
+    );
     assert_eq!(c.on_open(), vec![Event::Open]);
-    assert!(c.on_open().is_empty(), "a second open must not emit a second event");
+    assert!(
+        c.on_open().is_empty(),
+        "a second open must not emit a second event"
+    );
 
     assert_eq!(c.close(), vec![Event::Closed(CloseReason::Local)]);
-    assert!(c.close().is_empty(), "a second close must not emit a second event");
+    assert!(
+        c.close().is_empty(),
+        "a second close must not emit a second event"
+    );
     assert!(c.on_transport_close().is_empty());
 }
 
@@ -192,7 +229,11 @@ fn sending_frames_the_payload_and_respects_priority() {
     c.send(Class::Bulk, 0, b"bulk").unwrap();
     c.send(Class::Control, 0, b"ctrl").unwrap();
 
-    assert_eq!(c.poll_out().unwrap(), framed(b"ctrl"), "control did not overtake bulk");
+    assert_eq!(
+        c.poll_out().unwrap(),
+        framed(b"ctrl"),
+        "control did not overtake bulk"
+    );
     assert_eq!(c.poll_out().unwrap(), framed(b"bulk"));
     assert!(c.poll_out().is_none());
     assert_eq!(c.frames_out, 2);
@@ -209,7 +250,11 @@ fn a_frame_waiting_on_an_epoch_is_not_sent_however_urgent() {
     assert_eq!(c.poll_out().unwrap(), framed(b"ready"));
     assert!(c.poll_out().is_none(), "a blocked frame was sent anyway");
     assert_eq!(c.blocked(), 1);
-    assert_eq!(c.queued(), 1, "None must not be confused with an empty queue");
+    assert_eq!(
+        c.queued(),
+        1,
+        "None must not be confused with an empty queue"
+    );
 
     c.set_applied_epoch(9);
     assert_eq!(c.poll_out().unwrap(), framed(b"needs epoch 9"));
@@ -251,14 +296,22 @@ fn backpressure_is_reported_not_silently_dropped() {
 fn a_negotiated_max_tightens_both_directions() {
     let mut c = open();
     c.set_max_frame(16);
-    assert!(c.send(Class::Message, 0, &[0u8; 17]).is_err(), "encode ignored the ceiling");
+    assert!(
+        c.send(Class::Message, 0, &[0u8; 17]).is_err(),
+        "encode ignored the ceiling"
+    );
     assert!(c.send(Class::Message, 0, &[0u8; 8]).is_ok());
 
     // A frame larger than the negotiated max must be refused inbound too.
     let mut d = open();
     d.set_max_frame(16);
     let ev = d.on_bytes(&framed(&[0u8; 100]));
-    assert_eq!(ev, vec![Event::Closed(CloseReason::Protocol(FrameError::LengthOverMax))]);
+    assert_eq!(
+        ev,
+        vec![Event::Closed(CloseReason::Protocol(
+            FrameError::LengthOverMax
+        ))]
+    );
 }
 
 #[test]
@@ -266,5 +319,8 @@ fn a_transport_close_is_distinguishable_from_a_protocol_error() {
     // The host must be able to tell "the network went away, reconnect" from
     // "the peer is broken", because the right response differs.
     let mut c = open();
-    assert_eq!(c.on_transport_close(), vec![Event::Closed(CloseReason::Transport)]);
+    assert_eq!(
+        c.on_transport_close(),
+        vec![Event::Closed(CloseReason::Transport)]
+    );
 }

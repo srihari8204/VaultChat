@@ -1,6 +1,7 @@
 -- 135_unread_bump_authoritative.sql — make the unread bump respect the read cursor.
 --
--- NOT YET APPLIED TO PRODUCTION. Prepared for approval; see the evidence below.
+-- APPLIED TO PRODUCTION 2026-09-14 17:37:35 UTC (migration ledger; both
+-- vc_bump_unread overloads present). Rationale and evidence below.
 --
 -- THE DEFECT, REPRODUCED
 -- ----------------------

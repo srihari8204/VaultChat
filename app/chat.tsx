@@ -113,6 +113,7 @@ import {
   resetChatSession,
   saveContact,
   revokeAttachment,
+  persistMessageDeletion,
   setChatNotifSound,
   sendMessage,
   setDisappearing,
@@ -489,6 +490,15 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
   const lastReadSent = useRef<number>(0);
   const typingIdleTimer = useRef<any>(null);
   const typingActiveRef = useRef(false);
+  // A cached chat screen stays mounted when Android backgrounds the app. Its
+  // rows can still change as sync catches up, but that is delivery, not a user
+  // reading the thread. Keep the receipt state reactive so returning to this
+  // focused thread sends its read pointer then, never while it is invisible.
+  const [appActive, setAppActive] = useState(() => AppState.currentState === 'active');
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', state => setAppActive(state === 'active'));
+    return () => sub.remove();
+  }, []);
 
   const membersById = useMemo(() => {
     const m = new Map<string, ChatMember>();
@@ -640,6 +650,18 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
   useEffect(() => {
     lastReadSent.current = 0;
     setMessages([]);
+    // Everything else that is ABOUT this chat and outlives a chatId change on a
+    // mounted instance. replyTo and editingId are the dangerous two: a send
+    // could carry a replyToId belonging to another conversation, and an edit
+    // could PATCH a message id in it.
+    setReplyTo(null);
+    setEditingId(null);
+    setChat(null);
+    setPinnedId(null);
+    setTypingUids(new Set());
+    setLiveLoc(null);
+    setExtraReplies(new Map());
+    setNewSinceUp(0);
   }, [chatId]);
 
   // Clear this chat's native message notification + unread counter (F2 —
@@ -652,6 +674,18 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
   // ── Initial load ──────────────────────────────────────────
   useEffect(() => {
     if (!chatId) return;
+    // A LOAD FOR CHAT A MUST NEVER LAND ON CHAT B.
+    //
+    // chatId can change on a MOUNTED instance (app/split.tsx swaps its two panes
+    // onto one ChatScreen), and every step below is async. A slow getMessages or
+    // getChat for the chat we just left otherwise resolved into the chat now on
+    // screen: the wrong header, the wrong member list, and another conversation's
+    // messages merged into this thread. `alive()` gates EVERY set* — including
+    // the setLoading(false) in the finally, which would otherwise clear the NEW
+    // chat's spinner while it is still loading.
+    const cid = chatId;
+    let cancelled = false;
+    const alive = () => !cancelled && chatIdRef.current === cid;
     (async () => {
       try {
         setLoading(true);
@@ -674,13 +708,14 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
         //    bubble alignment (isMine) is right even fully offline.
         const me = await getCurrentUserAsync().catch(() => null);
         const myId = me?.id ?? null;
+        if (!alive()) return;
         setMeId(myId);
 
         // 2. Chat header (name / peer / members) from the local cache → the
         //    header renders offline instead of blank.
         try {
           const cc = await getCachedChat(chatId);
-          if (cc) { setChat({ ...cc, members: cc.members ?? [] }); setPinnedId(cc.pinnedMessageId ?? null); }
+          if (cc && alive()) { setChat({ ...cc, members: cc.members ?? [] }); setPinnedId(cc.pinnedMessageId ?? null); }
         } catch {}
 
         // 3. Cached messages + still-in-flight outbox bubbles, painted instantly.
@@ -691,17 +726,42 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
         // sent us down the cold path below and re-downloaded a full page from
         // the server — which, before the sticky-tombstone fix, also resurrected
         // every message the user had deleted locally.
-        const [cachedMsgs, pendingQ, mediaQ] = await Promise.all([
+        let [cachedMsgs, pendingQ, mediaQ] = await Promise.all([
           getCachedMessages(chatId, PAGE_SIZE).catch(() => null),
           pendingForChat(chatId).catch(() => []),
           mediaPendingForChat(chatId).catch(() => []),
         ]);
+        if (!alive()) return;
         for (const m of (cachedMsgs ?? [])) if (!looksEncrypted(m.content)) knownPlain.set(m.id, m.content as string);
+
+        // On an empty cache, the account-wide forward sync and this screen's
+        // first history page can overlap. Both decrypt the same ratchet in
+        // message-id order, so two concurrent batches can make a newer page
+        // advance it before the older rows finish and permanently turn valid
+        // ciphertext into an undecryptable cache entry. Join the sync engine's
+        // single-flight run first, then use what it stored. A direct history
+        // request remains the fallback only when the authoritative delta did
+        // not contain this chat.
+        if (cachedMsgs !== null && !cachedMsgs.length) {
+          try { await (await import('../lib/syncEngine')).catchUp(); } catch {}
+          const synced = await getCachedMessages(chatId, PAGE_SIZE).catch(() => null);
+          if (!alive()) return;
+          if (synced?.length) {
+            cachedMsgs = synced;
+            knownPlain.clear();
+            for (const m of synced) if (!looksEncrypted(m.content)) knownPlain.set(m.id, m.content as string);
+          }
+        }
 
         const pendingBubbles = (pendingQ as any[]).map(q => ({
           id: 0, chatId: q.chatId, senderId: myId ?? '', type: q.type, content: q.plaintext,
           meta: null, replyToId: q.replyToId, editedAt: null, deletedAt: null,
-          createdAt: new Date(q.createdAt).toISOString(), _tempId: q.tempId, _state: 'pending',
+          createdAt: new Date(q.createdAt).toISOString(), _tempId: q.tempId,
+          // A permanently-rejected row is KEPT by the outbox now (it is the only
+          // copy of the text), so it must come back RED with tap-to-retry rather
+          // than as a clock that will never tick — same rule the media branch
+          // below already applies.
+          _state: q.state === 'FAILED' ? 'failed' : 'pending', _error: q.lastError ?? undefined,
         })) as DisplayMessage[];
         const mediaBubbles = (mediaQ as any[]).map(m => ({
           id: 0, chatId: m.chatId, senderId: myId ?? '', type: m.type as any, content: m.caption || '',
@@ -712,7 +772,7 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
         // Inverted list = newest first. Reversed ONCE, reused for the reconcile.
         const pendingNewestFirst = [...pendingBubbles, ...mediaBubbles]
           .sort((a, b) => +new Date(a.createdAt) - +new Date(b.createdAt)).reverse();
-        if ((cachedMsgs?.length ?? 0) || pendingNewestFirst.length) {
+        if (((cachedMsgs?.length ?? 0) || pendingNewestFirst.length) && alive()) {
           setMessages([...pendingNewestFirst, ...(cachedMsgs ?? [])]);
           setLoading(false);
         }
@@ -721,7 +781,7 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
         //    failure (offline) leaves the painted cache untouched. getChat also
         //    re-caches the detail (see getChat) for the next offline open.
         getChat(chatId)
-          .then(c => { setChat(c); setPinnedId(c.pinnedMessageId ?? null); })
+          .then(c => { if (alive()) { setChat(c); setPinnedId(c.pinnedMessageId ?? null); } })
           .catch(() => {});
         try {
           // Already-received messages are NOT re-fetched. The local DB owns
@@ -742,6 +802,10 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
           if (cachedMsgs !== null && !cachedMsgs.length) {
             const msgsRaw = await getMessages(chatId, { limit: PAGE_SIZE });
             const msgs = await hydrateMessages(chatId, msgsRaw, knownPlain);
+            cacheMessages(chatId, msgs).catch(() => {});   // persist for next instant open
+            // The persist above is keyed on the captured chatId and is correct
+            // whoever is on screen now; only the RENDER must be gated.
+            if (alive()) {
             // MERGE, don't replace. `pendingNewestFirst` was captured BEFORE the
             // getMessages round trip above, and the composer is already live by
             // then (loading was cleared once the cache came back empty). Anything
@@ -759,9 +823,9 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
               return [...stillPending, ...msgs];
             });
             setHasMore(msgs.length === PAGE_SIZE);
-            cacheMessages(chatId, msgs).catch(() => {});   // persist for next instant open
+            }
           } else {
-            setHasMore((cachedMsgs?.length ?? 0) >= PAGE_SIZE);
+            if (alive()) setHasMore((cachedMsgs?.length ?? 0) >= PAGE_SIZE);
             // RETRY THE ONES THAT NEVER DECRYPTED.
             //
             // Painting from cache skips hydrate entirely, which is right for
@@ -790,23 +854,26 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
               const fixed = await hydrateMessages(chatId, stuck, knownPlain, { live: true });
               const readable = fixed.filter(m => !looksEncrypted(m.content));
               if (readable.length) {
-                const byId = new Map(readable.map(m => [m.id, m]));
-                setMessages(prev => prev.map(p => byId.get(p.id) ?? p));
                 cacheMessages(chatId, readable).catch(() => {});
+                if (alive()) {
+                  const byId = new Map(readable.map(m => [m.id, m]));
+                  setMessages(prev => prev.map(p => byId.get(p.id) ?? p));
+                }
               }
             }
           }
-          setError(null);
+          if (alive()) setError(null);
         } catch {
           // Offline / transient — keep the painted cache silently; the connection
           // banner already tells the user. A failed background refresh is not an error.
         }
       } catch (e: any) {
-        setError(e?.message ?? 'Failed to load chat');
+        if (alive()) setError(e?.message ?? 'Failed to load chat');
       } finally {
-        setLoading(false);
+        if (alive()) setLoading(false);
       }
     })();
+    return () => { cancelled = true; };
   }, [chatId]);
 
   // ── Queue events: replace pending bubble with real, or mark failed ──
@@ -961,7 +1028,18 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
             // has nothing to add. Guard only the insert: the persist + ack below
             // must still run, because the ack means "this device HAS the message".
             const ownBlankEcho = fin.senderId === me && fin.content == null;
-            if (!ownBlankEcho) {
+            // RE-CHECK THE CHAT AFTER THE DECRYPT.
+            //
+            // The `m.chatId !== chatId` test at the top of this handler ran
+            // BEFORE the await above, and a decrypt takes 0.5–0.9 s on a real
+            // handset. chatId can change on a mounted instance (app/split.tsx
+            // pane swap), so a message for the chat we just left was prepended
+            // to the thread now on screen. Only the two VISIBLE writes are
+            // gated: the persist and the delivery ack below use the captured
+            // chatId, are correct regardless of what is on screen, and must
+            // still run — an un-acked message is re-delivered forever.
+            const stillHere = chatIdRef.current === chatId;
+            if (!ownBlankEcho && stillHere) {
               setMessages(prev => prev.some(x => x.id === fin.id) ? prev : [fin, ...prev]);
             }
             // ORDERING IS THE CONTRACT — same rule as lib/syncBackground.ts.
@@ -982,7 +1060,7 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
               if (fin.senderId !== me) markDeliveredDurable(chatId, fin.id).catch(() => {});
             } catch { /* not on disk → do NOT ack; catch-up re-delivers it */ }
             // Bump the "↓ N new" counter when a message lands while scrolled up.
-            if (!atBottomRef.current && fin.senderId !== me) setNewSinceUp(n => n + 1);
+            if (chatIdRef.current === chatId && !atBottomRef.current && fin.senderId !== me) setNewSinceUp(n => n + 1);
           })();
         };
         const onMemberDelivered = (e: { userId: string; lastDeliveredMessageId: number }) => {
@@ -1015,13 +1093,42 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
         const onEdit = (e: { id: number; content: string; editedAt: string }) => {
           const me = meIdRef.current;
           const eid = Number(e.id); // socket delivers id as string; rows hold numbers
-          setMessages(prev => prev.map(x =>
-            x.id === eid ? { ...x, content: e.content, editedAt: e.editedAt } : x
-          ));
+          // The server broadcasts an edit back to its author. `content` is the
+          // replacement E2EE envelope, which its author cannot decrypt: a
+          // double-ratchet sender only has the plaintext it just entered.
+          // The optimistic edit already holds that text while editMessage()
+          // persists it in the own-message store. Replacing it here turned the
+          // sender's bubble into "unable to decrypt" before that write landed.
+          // Keep the local plaintext and accept only the authoritative edit
+          // timestamp for an edit of our own message.
+          const current = messagesRef.current.find(x => x.id === eid);
+          if (current && me && current.senderId === me) {
+            setMessages(prev => prev.map(x =>
+              x.id === eid ? { ...x, editedAt: e.editedAt } : x
+            ));
+            return;
+          }
+          // The edit event deliberately contains just the changed wire fields.
+          // Merge them with the existing row, decrypt before painting, and
+          // persist the result. The old direct replacement painted ciphertext
+          // for recipients too until a later delta pull happened to repair it.
+          if (!current) return; // global delta sync fetches rows not on screen
+          void (async () => {
+            const raw: Message = { ...current, content: e.content, editedAt: e.editedAt };
+            let fin = raw;
+            if (looksEncrypted(raw.content)) {
+              try { fin = (await hydrateMessages(chatId, [raw], undefined, { live: true }))[0] ?? raw; }
+              catch { /* retain the envelope for a later secure retry */ }
+            }
+            try { await applyMessage(chatId, fin); } catch { /* delta sync retries persistence */ }
+            if (chatIdRef.current !== chatId) return;
+            setMessages(prev => prev.map(x => x.id === eid ? fin : x));
+          })();
         };
         const onDelete = (e: { id: number; deletedAt: string }) => {
           const me = meIdRef.current;
           const eid = Number(e.id); // socket delivers id as string; rows hold numbers
+          void persistMessageDeletion(chatId, eid, e.deletedAt);
           setMessages(prev => prev.map(x =>
             x.id === eid ? { ...x, content: null, deletedAt: e.deletedAt, type: 'system' } : x
           ));
@@ -1208,7 +1315,10 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
 
   // ── Mark-as-read (debounced) ──────────────────────────────
   useEffect(() => {
-    if (!chatId || messages.length === 0) return;
+    // A durable cache write earns ✓✓. Blue ✓✓ must mean the recipient was
+    // actually looking at this thread, so never mark read from a backgrounded
+    // or covered chat screen.
+    if (!appActive || !cvFocused || !chatId || messages.length === 0) return;
     // Newest REAL message, not messages[0]. The list is newest-first, but index 0
     // is an optimistic outbox bubble whenever a send is pending — and those carry
     // `id: 0`. A FAILED upload sits in the outbox indefinitely and is re-prepended
@@ -1221,13 +1331,22 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
     if (readDebounce.current) clearTimeout(readDebounce.current);
     readDebounce.current = setTimeout(() => {
       lastReadSent.current = latestId;
-      markReadDurable(chatId, latestId).catch(() => {});
-      // Reading here means we've seen up to latestId — don't let a later
-      // background sweep re-notify for these (Phase 4 no-GMS notifications).
-      import('../lib/messageNotifications').then(m => m.markSeen(chatId, latestId)).catch(() => {});
+      // markSeen is SEQUENCED behind the read, not fired beside it.
+      //
+      // markSeen writes a LOCAL monotonic watermark with no network call, so
+      // nothing can ever correct it: a foreign id written once means no real
+      // message in that chat ever exceeds it again, and the no-GMS background
+      // sweep stops notifying for that chat permanently. The server now
+      // rejects an out-of-chat cursor with 400 and lib/receipts.ts rolls its
+      // own pointer back, so letting the local watermark advance only after
+      // the server ACCEPTED the same id keeps the two from diverging.
+      markReadDurable(chatId, latestId)
+        .then(() => import('../lib/messageNotifications'))
+        .then(m => m.markSeen(chatId, latestId))
+        .catch(() => {});
     }, 800);
     return () => { if (readDebounce.current) clearTimeout(readDebounce.current); };
-  }, [chatId, messages]);
+  }, [appActive, cvFocused, chatId, messages]);
 
   // ── Unread divider (WhatsApp "N unread messages") ─────────
   // Capture the read boundary ONCE when the chat opens — before mark-as-read
@@ -1268,7 +1387,13 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
   const draftTimer = useRef<any>(null);
   useEffect(() => {
     let active = true;
-    getDraft(chatId).then(d => { if (active && d) setInput(d); });
+    // ALWAYS assign. getDraft returns '' when the chat has no draft, and the
+    // old `if (d)` treated that as "nothing to do" - so on a chatId change
+    // under a LIVE instance (app/split.tsx swaps two panes onto one mounted
+    // ChatScreen) the composer kept the PREVIOUS chat's text. The cleanup below
+    // has already saved that text under the old id, so it is not lost; leaving
+    // it on screen only means the next send delivers it to the wrong chat.
+    getDraft(chatId).then(d => { if (active) setInput(d); });
     return () => {
       active = false;
       if (draftTimer.current) clearTimeout(draftTimer.current);
@@ -1393,7 +1518,16 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
         'Message failed',
         msg._error || 'Could not send',
         [
-          { text: 'Retry', onPress: () => { retryMedia(msg._tempId!).catch(() => {}); queueRetry(msg._tempId!); } },
+          { text: 'Retry', onPress: () => {
+              retryMedia(msg._tempId!).catch(() => {});
+              queueRetry(msg._tempId!);
+              // Feedback. Without this the bubble stays red while the retry is
+              // in flight and the tap looks ignored — which is exactly what the
+              // old silent-no-op retry() looked like. 'sent' swaps it, 'failed'
+              // paints it red again.
+              setMessages(prev => prev.map(x => x._tempId === msg._tempId
+                ? { ...x, _state: 'pending', _error: undefined } : x));
+          } },
           { text: 'Delete', style: 'destructive', onPress: async () => {
               await cancelMedia(msg._tempId!).catch(() => {});
               await queueCancel(msg._tempId!);
@@ -2497,6 +2631,11 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
     if (loadingOlder || !hasMore || messages.length === 0) return;
     const oldest = messages[messages.length - 1]?.id;
     if (!oldest) return;
+    // Same pane-swap hazard as the initial load: chatId can change on a mounted
+    // instance while these reads are in flight, and appending the previous
+    // chat's page to the one now on screen is worse than not paging at all.
+    const cid = chatId;
+    const alive = () => chatIdRef.current === cid;
     setLoadingOlder(true);
     try {
       // Disk first. These rows are already plaintext, so a cached page costs no
@@ -2524,7 +2663,7 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
           older = [...older, ...fetched.filter(m => !seen.has(String(m.id)))];
           // Only the SERVER can say there is nothing older. Ending on a short
           // cached page would strand history the device simply had not fetched.
-          if (fetched.length < PAGE_SIZE) setHasMore(false);
+          if (fetched.length < PAGE_SIZE && alive()) setHasMore(false);
         } catch {
           // Offline. Whatever the cache gave us still renders, and hasMore is
           // deliberately left alone so a later attempt can resume.
@@ -2533,8 +2672,9 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
         // Inside imported history with nothing older on disk: this is the start
         // of the conversation. Nobody else can tell us so, because nobody else
         // has these messages.
-        setHasMore(false);
+        if (alive()) setHasMore(false);
       }
+      if (!alive()) return;
       // Dedupe against what's already loaded — a page boundary can overlap and
       // would otherwise inject duplicate ids (duplicate React keys).
       setMessages(prev => {
@@ -2586,6 +2726,10 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
   // Jump to a specific message (from in-chat search): page older until it's
   // loaded, scroll to it, and briefly flash it.
   const jumpToMessage = useCallback(async (targetId: number) => {
+    // Pane-swap guard (app/split.tsx) — the loop below is up to 40 round trips,
+    // and paging another chat's history into this one is not recoverable.
+    const cid = chatId;
+    const alive = () => chatIdRef.current === cid;
     let idx = messagesRef.current.findIndex(m => m.id === targetId);
     let guard = 0;
     // Page back far enough to reach old matches (40 * PAGE_SIZE messages).
@@ -2606,6 +2750,7 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
           cacheMessages(chatId, older).catch(() => {});
         }
       } catch { break; }
+      if (!alive()) return;
       if (!older.length) { setHasMore(false); break; }
       // Accumulate in the ref only. This used to setMessages on EVERY lap, so
       // jumping to an old search hit re-rendered a growing list up to forty
@@ -2617,16 +2762,35 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
       if (older.length < PAGE_SIZE) setHasMore(false);
       idx = next.findIndex(m => m.id === targetId);
     }
+    // MERGE, DON'T REPLACE.
+    //
+    // The paging loop above accumulates into messagesRef, a snapshot taken
+    // before up to 40 round trips. Publishing it wholesale threw away anything
+    // added to the rendered list in the meantime — an optimistic bubble the user
+    // sent while the jump was still paging, or a message that arrived on the
+    // socket. Both are newest, so they go back at the head; everything paged in
+    // is older and keeps its order.
+    const paged = messagesRef.current;
+    const key = (x: DisplayMessage) => x._tempId ?? String(x.id);
+    let committed = paged;
+    const publish = () => setMessages(prev => {
+      const have = new Set(paged.map(key));
+      const extra = prev.filter(x => !have.has(key(x)));
+      committed = extra.length ? [...extra, ...paged] : paged;
+      return committed;
+    });
     if (idx < 0) {
       // Not found: still publish what we paged in, or the ref and the rendered
       // list disagree about what is loaded and the next onEndReached would page
       // from an id the screen never showed.
-      setMessages(messagesRef.current);
+      if (alive()) publish();
       return;
     }
-    setMessages(messagesRef.current);
-    const at = idx;
+    if (!alive()) return;
+    publish();
     requestAnimationFrame(() => {
+      const at = committed.findIndex(m => m.id === targetId);
+      if (at < 0) return;
       try { listRef.current?.scrollToIndex({ index: at, animated: true, viewPosition: 0.5 }); } catch {}
     });
     setFlashId(targetId);

@@ -2,7 +2,7 @@
   "expo": {
     "name": "VaultChat",
     "slug": "VaultChat",
-    "version": "1.2.9",
+    "version": "1.2.10",
     "orientation": "default",
     "icon": "./assets/images/icon.png",
     "scheme": "vaultchat",
@@ -86,7 +86,7 @@
         "android.permission.FOREGROUND_SERVICE_LOCATION",
         "android.permission.ACTIVITY_RECOGNITION"
       ],
-      "versionCode": 25
+      "versionCode": 26
     },
     "web": {
       "bundler": "metro",
@@ -163,6 +163,7 @@
       "./plugins/withGradleMemory.js",
       "./plugins/withCryptoCore.js",
       "./plugins/withVaultBeamRust.js",
+      "./plugins/withTransportCore.js",
       "./plugins/withVaultView.js",
       "./plugins/withPdfJs.js",
       "./plugins/withVaultPdf",

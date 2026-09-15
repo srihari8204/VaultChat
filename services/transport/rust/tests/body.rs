@@ -20,8 +20,15 @@ use transport_core::body::{decode_body, Body, Envelope, PublicMeta, TYPED_BODIES
 use transport_core::parse::{CodecError, Limits};
 
 fn vectors() -> Value {
-    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("..").join("..").join("..");
-    let p = root.join("lib").join("ccwire").join("__vectors__").join("codec.json");
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("..")
+        .join("..")
+        .join("..");
+    let p = root
+        .join("lib")
+        .join("ccwire")
+        .join("__vectors__")
+        .join("codec.json");
     let raw = fs::read_to_string(&p)
         .unwrap_or_else(|e| panic!("cannot read shared vectors at {}: {e}", p.display()));
     serde_json::from_str(&raw).expect("vectors are not valid JSON")
@@ -48,7 +55,9 @@ fn unknown_hex(u: &[&[u8]]) -> Value {
 /// A negotiated limit may only TIGHTEN, which is what `tighten` enforces; zero
 /// means "not proposed", never "unlimited".
 fn limits_from(case: &Value, base: Limits) -> Limits {
-    let Some(o) = case.get("limits").and_then(|v| v.as_object()) else { return base };
+    let Some(o) = case.get("limits").and_then(|v| v.as_object()) else {
+        return base;
+    };
     let mut p = Limits {
         max_frame_bytes: 0,
         max_opaque_bytes: 0,
@@ -170,11 +179,18 @@ fn bodies_match_the_fixture() {
         match decode_body(field, &buf, &lim, 1) {
             Ok(Some(b)) => {
                 assert!(want_ok, "{name}: accepted a body the fixture refuses");
-                assert_eq!(body_json(&b), case["value"], "{name}: decoded to a different message");
+                assert_eq!(
+                    body_json(&b),
+                    case["value"],
+                    "{name}: decoded to a different message"
+                );
             }
             Ok(None) => panic!("{name}: field {field} is not typed, so this vector proves nothing"),
             Err(e) => {
-                assert!(!want_ok, "{name}: refused a body the fixture accepts ({e:?})");
+                assert!(
+                    !want_ok,
+                    "{name}: refused a body the fixture accepts ({e:?})"
+                );
                 assert_eq!(
                     e.as_str(),
                     case["error"].as_str().unwrap(),
@@ -206,7 +222,10 @@ fn every_typed_body_has_vectors() {
     }
     // The exclusion the fixture used to carry is gone, and the prose says so.
     assert!(
-        v["bodiesTypedByTypescriptOnly"].as_array().unwrap().is_empty(),
+        v["bodiesTypedByTypescriptOnly"]
+            .as_array()
+            .unwrap()
+            .is_empty(),
         "a body type is typed on one side only again"
     );
 }
@@ -220,7 +239,11 @@ fn an_untyped_body_is_left_alone() {
         assert!(!TYPED_BODIES.contains(&f));
         // Bytes that are not valid protobuf at all: an untyped body is never
         // parsed, so they are returned unexamined rather than refused.
-        assert_eq!(decode_body(f, &[0x0b, 0xff], &lim, 1), Ok(None), "body {f} was parsed");
+        assert_eq!(
+            decode_body(f, &[0x0b, 0xff], &lim, 1),
+            Ok(None),
+            "body {f} was parsed"
+        );
     }
 }
 
@@ -233,7 +256,10 @@ fn an_absurd_declared_length_in_a_body_is_refused_without_allocating() {
     // typing_state field 1, wire 2, length = the largest a 5-byte varint holds.
     let mut buf = vec![0x0a];
     buf.extend_from_slice(&[0xff, 0xff, 0xff, 0xff, 0x0f]);
-    assert_eq!(decode_body(81, &buf, &lim, 1).unwrap_err(), CodecError::Truncated);
+    assert_eq!(
+        decode_body(81, &buf, &lim, 1).unwrap_err(),
+        CodecError::Truncated
+    );
 }
 
 /// A body already at the recursion limit is refused before it is read, so a

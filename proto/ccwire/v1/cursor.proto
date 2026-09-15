@@ -19,11 +19,16 @@ enum CursorKind {
 }
 
 message CursorSync {
-  repeated Cursor cursors = 1;   // <= max_batch_items (256)
+  repeated Cursor cursors = 1;        // <= max_batch_items (256)
+  // Opaque value previously issued in CursorBatch.mutation_continuation.
+  // Empty starts mutation backfill; clients must never derive this from a
+  // local clock or Cursor.updated_at_ms.
+  string mutation_continuation = 2;
 }
 
 message CursorBatch {
   repeated Cursor cursors = 1;   // <= max_batch_items
   bool more = 2;
-  string continuation = 3;       // opaque, server-authored
+  string continuation = 3;       // opaque cold/message continuation, server-authored
+  string mutation_continuation = 4; // opaque mutation continuation, server-authored
 }

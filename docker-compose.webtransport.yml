@@ -1,0 +1,13 @@
+# Optional native WebTransport listener. Omit this overlay to keep it disabled.
+# Prepare secrets/ccwire-wt/tls.pem with scripts/http3-webtransport-certbot.sh.
+services:
+  go-api:
+    environment:
+      CCWIRE_WEBTRANSPORT: "1"
+      CCWIRE_WT_ADDR: ":4443"
+      CCWIRE_WT_CERT: /run/secrets/ccwire-wt/tls.pem
+      CCWIRE_WT_KEY: /run/secrets/ccwire-wt/tls.pem
+    ports:
+      - "${CCWIRE_WT_BIND:-127.0.0.1:14443}:4443/udp"
+    volumes:
+      - ./secrets/ccwire-wt:/run/secrets/ccwire-wt:ro

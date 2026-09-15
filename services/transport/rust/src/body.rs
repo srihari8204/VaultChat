@@ -197,6 +197,31 @@ pub struct Fragment<'a> {
     pub unknown: Vec<&'a [u8]>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct Cursor<'a> {
+    pub chat_id: &'a str,
+    pub kind: u32,
+    pub position: u64,
+    pub updated_at_ms: i64,
+    pub unknown: Vec<&'a [u8]>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct CursorSync<'a> {
+    pub cursors: Vec<Cursor<'a>>,
+    pub mutation_continuation: &'a str,
+    pub unknown: Vec<&'a [u8]>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct CursorBatch<'a> {
+    pub cursors: Vec<Cursor<'a>>,
+    pub more: bool,
+    pub continuation: &'a str,
+    pub mutation_continuation: &'a str,
+    pub unknown: Vec<&'a [u8]>,
+}
+
 /// A decoded body. `decode_body` returns `None` for the other 21 field numbers,
 /// which stay opaque — never lost, never silently reinterpreted.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -384,7 +409,10 @@ fn nest<'a>(r: &mut R<'a>, child_depth: u32, lim: &Limits) -> Res<R<'a>> {
     if child_depth > lim.max_nesting_depth {
         return Err(CodecError::NestingTooDeep);
     }
-    Ok(R { b: r.len_span()?, p: 0 })
+    Ok(R {
+        b: r.len_span()?,
+        p: 0,
+    })
 }
 
 // ── decoders ─────────────────────────────────────────────────────────────
@@ -559,6 +587,108 @@ fn read_fragment<'a>(r: &mut R<'a>, lim: &Limits) -> Res<Fragment<'a>> {
         }
     }
     Ok(m)
+}
+
+fn read_cursor<'a>(r: &mut R<'a>, lim: &Limits) -> Res<Cursor<'a>> {
+    let mut m = Cursor::default();
+    while !r.done() {
+        let start = r.p;
+        match r.tag()? {
+            (1, 2) => m.chat_id = r.string(lim)?,
+            (2, 0) => m.kind = r.u32()?,
+            (3, 0) => m.position = r.varint64()?,
+            (4, 0) => m.updated_at_ms = r.i64()?,
+            (_, wire) => keep_unknown(r, start, wire, &mut m.unknown, lim)?,
+        }
+    }
+    Ok(m)
+}
+
+pub fn decode_cursor_sync<'a>(buf: &'a [u8], lim: &Limits, depth: u32) -> Res<CursorSync<'a>> {
+    let mut r = R { b: buf, p: 0 };
+    let mut m = CursorSync::default();
+    while !r.done() {
+        let start = r.p;
+        match r.tag()? {
+            (1, 2) => {
+                if m.cursors.len() >= lim.max_repeated_elements {
+                    return Err(CodecError::TooManyElements);
+                }
+                let mut sub = nest(&mut r, depth + 1, lim)?;
+                m.cursors.push(read_cursor(&mut sub, lim)?);
+            }
+            (2, 2) => m.mutation_continuation = r.string(lim)?,
+            (_, wire) => keep_unknown(&mut r, start, wire, &mut m.unknown, lim)?,
+        }
+    }
+    Ok(m)
+}
+
+pub fn decode_cursor_batch<'a>(buf: &'a [u8], lim: &Limits, depth: u32) -> Res<CursorBatch<'a>> {
+    let mut r = R { b: buf, p: 0 };
+    let mut m = CursorBatch::default();
+    while !r.done() {
+        let start = r.p;
+        match r.tag()? {
+            (1, 2) => {
+                if m.cursors.len() >= lim.max_repeated_elements {
+                    return Err(CodecError::TooManyElements);
+                }
+                let mut sub = nest(&mut r, depth + 1, lim)?;
+                m.cursors.push(read_cursor(&mut sub, lim)?);
+            }
+            (2, 0) => m.more = r.bool()?,
+            (3, 2) => m.continuation = r.string(lim)?,
+            (4, 2) => m.mutation_continuation = r.string(lim)?,
+            (_, wire) => keep_unknown(&mut r, start, wire, &mut m.unknown, lim)?,
+        }
+    }
+    Ok(m)
+}
+
+fn put_varint(out: &mut Vec<u8>, mut v: u64) {
+    while v >= 0x80 {
+        out.push((v as u8 & 0x7f) | 0x80);
+        v >>= 7;
+    }
+    out.push(v as u8);
+}
+fn put_bytes(out: &mut Vec<u8>, field: u32, value: &[u8]) {
+    if value.is_empty() {
+        return;
+    }
+    put_varint(out, field as u64 * 8 + 2);
+    put_varint(out, value.len() as u64);
+    out.extend_from_slice(value);
+}
+fn put_uint(out: &mut Vec<u8>, field: u32, value: u64) {
+    if value == 0 {
+        return;
+    }
+    put_varint(out, field as u64 * 8);
+    put_varint(out, value);
+}
+
+pub fn encode_cursor_sync(m: &CursorSync<'_>) -> Vec<u8> {
+    let mut out = Vec::new();
+    for c in &m.cursors {
+        let mut sub = Vec::new();
+        put_bytes(&mut sub, 1, c.chat_id.as_bytes());
+        put_uint(&mut sub, 2, c.kind as u64);
+        put_uint(&mut sub, 3, c.position);
+        put_uint(&mut sub, 4, c.updated_at_ms as u64);
+        for u in &c.unknown {
+            sub.extend_from_slice(u);
+        }
+        put_varint(&mut out, 10);
+        put_varint(&mut out, sub.len() as u64);
+        out.extend_from_slice(&sub);
+    }
+    put_bytes(&mut out, 2, m.mutation_continuation.as_bytes());
+    for u in &m.unknown {
+        out.extend_from_slice(u);
+    }
+    out
 }
 
 /// Decode one body.

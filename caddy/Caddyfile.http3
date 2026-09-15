@@ -1,0 +1,38 @@
+{
+	servers {
+		protocols h1 h2 h3
+	}
+}
+
+# Public TLS/HTTP3 edge. It forwards to the existing internal Caddy service,
+# so every route, upload rule and internal-path denial remains in one place.
+api.corefinite.com {
+	tls /etc/letsencrypt/live/api.corefinite.com/fullchain.pem /etc/letsencrypt/live/api.corefinite.com/privkey.pem
+	# Host UDP/443 belongs to TURN. Docker publishes this listener on UDP/8443.
+	# Override Caddy's automatic advertisement of its internal port 443.
+	header Alt-Svc "h3=\":8443\"; ma=300"
+
+	# Keep the signed object-store path owned by MinIO, as it is in the retained
+	# nginx vhost. The request path and Host are part of the S3 signature.
+	@media path /vaultchat-media /vaultchat-media/*
+	handle @media {
+		reverse_proxy minio:9000 {
+			header_up X-Real-IP {remote_host}
+		}
+	}
+
+	handle {
+		# Match nginx's 100M limit for API requests; media remains streaming.
+		request_body {
+			max_size 104857600
+		}
+		reverse_proxy caddy:80 {
+			header_up X-Real-IP {remote_host}
+		}
+	}
+}
+
+# Preserve nginx's plaintext-to-TLS redirect after it releases :80.
+http://api.corefinite.com {
+	redir https://api.corefinite.com{uri} permanent
+}

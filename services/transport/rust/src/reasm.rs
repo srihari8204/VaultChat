@@ -41,6 +41,12 @@ pub struct ReasmLimits {
     pub max_fragments_per_message: u32,
     pub max_message_body_bytes: u64,
     pub reassembly_lifetime_ms: u64,
+    /// Bytes ONE session may hold across ALL in-progress sets.
+    /// capabilities.proto Limits field 6, advertised as 2 MiB by the Go server.
+    /// Distinct from max_message_body_bytes, which bounds a single message:
+    /// without this, the real ceiling is concurrency x body = 8 MiB, four times
+    /// what the handshake promises.
+    pub max_reassembly_bytes: u64,
     pub max_concurrent_reassemblies: usize,
 }
 
@@ -49,6 +55,7 @@ impl Default for ReasmLimits {
         ReasmLimits {
             max_fragments_per_message: 16,
             max_message_body_bytes: 1_048_576,
+            max_reassembly_bytes: 2_097_152,
             reassembly_lifetime_ms: 30_000,
             max_concurrent_reassemblies: 8,
         }
@@ -65,6 +72,11 @@ impl Default for ReasmLimits {
 pub enum ReasmError {
     /// `total` was zero. A set with no fragments is not representable.
     TotalZero,
+    /// `fragment_id` was empty. Sets are keyed by id, so an empty key merges
+    /// unrelated transfers into one - a correctness bug before a security one.
+    IdRequired,
+    /// Accepting this chunk would take the session past max_reassembly_bytes.
+    SessionBudget,
     /// `total` > max_fragments_per_message.
     TooManyFragments,
     /// `total_bytes` > max_message_body_bytes. Checked against the DECLARATION,
@@ -100,6 +112,8 @@ impl ReasmError {
         use ReasmError::*;
         match self {
             TotalZero => "TOTAL_ZERO",
+            IdRequired => "FRAGMENT_ID_REQUIRED",
+            SessionBudget => "REASSEMBLY_BUDGET_EXCEEDED",
             TooManyFragments => "TOO_MANY_FRAGMENTS",
             TotalBytesOverMax => "TOTAL_BYTES_OVER_MAX",
             IndexOutOfRange => "INDEX_OUT_OF_RANGE",
@@ -176,7 +190,10 @@ impl Default for Reassembler {
 
 impl Reassembler {
     pub fn new(limits: ReasmLimits) -> Self {
-        Reassembler { limits, sets: Vec::new() }
+        Reassembler {
+            limits,
+            sets: Vec::new(),
+        }
     }
 
     pub fn limits(&self) -> ReasmLimits {
@@ -208,7 +225,8 @@ impl Reassembler {
     pub fn sweep(&mut self, now_ms: u64) -> usize {
         let lifetime = self.limits.reassembly_lifetime_ms;
         let before = self.sets.len();
-        self.sets.retain(|(_, s)| !expired(s.started_ms, now_ms, lifetime));
+        self.sets
+            .retain(|(_, s)| !expired(s.started_ms, now_ms, lifetime));
         before - self.sets.len()
     }
 
@@ -219,7 +237,17 @@ impl Reassembler {
     /// until every bound decidable without storage has passed.
     pub fn accept(&mut self, f: &Fragment<'_>, now_ms: u64) -> Result<Accepted, ReasmError> {
         // ── decided from the fragment alone, before the map is touched ──
+        if f.fragment_id.is_empty() {
+            return Err(ReasmError::IdRequired);
+        }
         if f.total == 0 {
+            return Err(ReasmError::TotalZero);
+        }
+        // A zero-byte message is not a message. Nothing below refuses it: an
+        // empty chunk passes the length check, received(0) == total_bytes(0)
+        // completes the set, and an empty payload reaches the frame decoder
+        // having already consumed one of the slots.
+        if f.total_bytes == 0 {
             return Err(ReasmError::TotalZero);
         }
         if f.total > self.limits.max_fragments_per_message {
@@ -260,7 +288,8 @@ impl Reassembler {
                 // Opening a set is the only path that consumes a slot, so stale
                 // sets are reclaimed here rather than being allowed to hold the
                 // cap closed against honest peers.
-                self.sets.retain(|(_, s)| !expired(s.started_ms, now_ms, lifetime));
+                self.sets
+                    .retain(|(_, s)| !expired(s.started_ms, now_ms, lifetime));
                 if self.sets.len() >= self.limits.max_concurrent_reassemblies {
                     // AT THE CAP THE NEW SET LOSES, ALWAYS.
                     //
@@ -291,6 +320,12 @@ impl Reassembler {
             }
         };
 
+        // SESSION BUDGET. buffered_bytes() existed and nothing consulted it, so
+        // the real ceiling was max_concurrent_reassemblies x max_message_body_bytes
+        // = 8 MiB - four times the 2 MiB the Go server advertises in ServerHello,
+        // reachable with fragments that are individually legal everywhere.
+        // Computed before the set is borrowed mutably below.
+        let session_held = self.buffered_bytes();
         let set = &mut self.sets[i].1;
 
         // The set's shape is fixed by whoever opened it. A peer that re-declares
@@ -309,6 +344,10 @@ impl Reassembler {
         if grown > set.total_bytes {
             self.sets.remove(i);
             return Err(ReasmError::LengthExceedsTotal);
+        }
+        if session_held.saturating_add(f.chunk.len() as u64) > self.limits.max_reassembly_bytes {
+            self.sets.remove(i);
+            return Err(ReasmError::SessionBudget);
         }
 
         set.received = grown;

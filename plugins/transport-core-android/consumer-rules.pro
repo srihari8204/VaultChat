@@ -1,0 +1,3 @@
+-keep class com.vaultchat.transportcore.TransportCoreModule { *; }
+-keep class com.vaultchat.transportcore.TransportCoreModule$EventListener { *; }
+-keepclassmembers class * implements com.vaultchat.transportcore.TransportCoreModule$EventListener { public void onEvent(int, byte[], int); }

@@ -15,9 +15,7 @@
 //! `depends_on` epoch has not yet been applied is not "low priority", it is
 //! NOT ELIGIBLE, however urgent it claims to be.
 
-use crate::config::{
-    MAX_QUEUED_BULK, MAX_QUEUED_BYTES, MAX_QUEUED_CONTROL, MAX_QUEUED_MESSAGE,
-};
+use crate::config::{MAX_QUEUED_BULK, MAX_QUEUED_BYTES, MAX_QUEUED_CONTROL, MAX_QUEUED_MESSAGE};
 
 /// Traffic class. Order matters: `Control` is the highest.
 ///
@@ -105,8 +103,11 @@ impl Sched {
     }
 
     pub fn len(&self) -> usize {
-        self.control.len() + self.message.len() + self.sync.len()
-            + self.bulk.len() + self.ephemeral.len()
+        self.control.len()
+            + self.message.len()
+            + self.sync.len()
+            + self.bulk.len()
+            + self.ephemeral.len()
     }
 
     pub fn is_empty(&self) -> bool {
@@ -167,7 +168,13 @@ impl Sched {
     /// dependency. `blocked()` distinguishes the two, because "idle" and
     /// "waiting on a key update" need different handling upstairs.
     pub fn pop(&mut self) -> Option<Item> {
-        for c in [Class::Control, Class::Message, Class::Sync, Class::Bulk, Class::Ephemeral] {
+        for c in [
+            Class::Control,
+            Class::Message,
+            Class::Sync,
+            Class::Bulk,
+            Class::Ephemeral,
+        ] {
             let applied = self.applied_epoch;
             let lane = self.lane(c);
             if let Some(i) = lane.iter().position(|it| it.depends_on <= applied) {
@@ -182,9 +189,15 @@ impl Sched {
     /// Frames present but held by an unmet causal dependency.
     pub fn blocked(&self) -> usize {
         let a = self.applied_epoch;
-        [&self.control, &self.message, &self.sync, &self.bulk, &self.ephemeral]
-            .iter()
-            .map(|l| l.iter().filter(|it| it.depends_on > a).count())
-            .sum()
+        [
+            &self.control,
+            &self.message,
+            &self.sync,
+            &self.bulk,
+            &self.ephemeral,
+        ]
+        .iter()
+        .map(|l| l.iter().filter(|it| it.depends_on > a).count())
+        .sum()
     }
 }

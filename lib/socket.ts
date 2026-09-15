@@ -111,6 +111,9 @@ function applyPersistent(s: Socket) {
  * here so that stays true no matter what the flag layer grows into.
  */
 export type TransportName = 'socketio' | 'ccwire';
+let ccwireGeneration = 0;
+let stopCCWireSession: (() => void) | null = null;
+let recoverCCWireSession: (() => void) | null = null;
 export function selectTransport(): TransportName {
   try {
     return isFeatureEnabled(TRANSPORT_RUST) ? 'ccwire' : 'socketio';
@@ -128,18 +131,43 @@ async function connect(): Promise<Socket> {
   // shipped.
   const chosen = selectTransport();
   if (chosen === 'ccwire') {
-    // Deliberately a no-op that FALLS THROUGH. Precondition P1 is not met:
-    // lib/ccwire is a codec only, no Go route terminates CC-Wire, and there is
-    // no client dialer in the tree — so there is nothing to connect to. When
-    // the server half lands, the dial goes here and returns from this block;
-    // the Socket.IO path below must stay reachable in every build (P3), which
-    // is what makes the flag a real rollback lever.
-    perf.mark('transport_ccwire_unavailable', { flag: TRANSPORT_RUST });
+    // One protobuf submission owner uses the Rust carrier when installed.
+    // Socket.IO continues to own inbound delivery, calls, rooms and presence.
+    // Startup is independent so a failed native load cannot delay those paths.
+    const generation = ccwireGeneration;
+    import('./ccwire/transport')
+      .then(async (m) => {
+        // Keep the transport startup independent of this best-effort lookup:
+        // unsupported test/native environments must still dial without an id.
+        let deviceId: string | undefined;
+        try { deviceId = await import('../services/deviceService').then((x) => x.getDeviceId()); } catch {}
+        const native = await import('./ccwire/nativeSocket').catch(() => null);
+        const webSocket = native?.getNativeWebSocketImpl();
+        const webTransportUrl = m.ccwireWebTransportUrl(SERVER_URL, process.env.EXPO_PUBLIC_CCWIRE_WEBTRANSPORT_URL);
+        const webTransport = webTransportUrl ? native?.getNativeWebSocketImpl(webTransportUrl) : undefined;
+        if (generation !== ccwireGeneration) return;
+        stopCCWireSession = () => m.stopCCWire('logout');
+        recoverCCWireSession = () => m.recoverCCWire();
+        m.startCCWire({
+        serverUrl: SERVER_URL,
+        getToken: async () => (await getAccessToken()) ?? '',
+        // The existing ClientHello protobuf field is a stable per-install id.
+        // It identifies this sync install; authorization remains the upgrade JWT.
+        deviceId,
+        WebSocketImpl: webTransport ?? webSocket,
+        carrier: webTransport ? 'rust-wt' : webSocket ? 'rust-ws' : 'ws',
+        webSocketFallback: webTransport ? { WebSocketImpl: webSocket, carrier: webSocket ? 'rust-ws' : 'ws' } : undefined,
+        onStatus: (s, detail) => {
+          // Sidecar readiness is not evidence of message submission over it.
+          if (s === 'error') perf.mark('transport_ccwire_unavailable', { flag: TRANSPORT_RUST, detail });
+          else perf.mark(`transport_ccwire_${s}`, { flag: TRANSPORT_RUST, carrier: m.ccwireDiagnostics().carrier });
+        },
+        });
+      })
+      .catch((e) => perf.mark('transport_ccwire_unavailable', { flag: TRANSPORT_RUST, detail: String(e) }));
   }
-  // Per-cohort send metrics (§4) are tagged with what actually carries the
-  // sends, which — because the branch above falls through — is Socket.IO for
-  // everyone. A no-op today by construction; that is the point.
-  perf.setSendTransport('socketio');
+  // Each send records its actual carrier; default stays HTTP until an Ack.
+  perf.setSendTransport('http');
 
   // Fail fast when there is no session at all. The token itself is NOT captured
   // here any more — the auth callback below reads it fresh per handshake.
@@ -316,7 +344,7 @@ function watchNetwork(): void {
       const next = netKeyOf(st as any);
       const why = reconnectReason(netKey, next);
       netKey = next;
-      if (why) kickReconnect(why);
+      if (why) { recoverCCWireSession?.(); kickReconnect(why); }
       else if (next === null) setConn('OFFLINE');   // radio gone: say so, don't retry
     });
   } catch { /* NetInfo unavailable (Expo Go / web) — timeouts still recover */ }
@@ -324,6 +352,7 @@ function watchNetwork(): void {
   try {
     AppState.addEventListener('change', (state) => {
       if (state !== 'active') return;
+      recoverCCWireSession?.();
       if (!shouldKickOnForeground(!!socket?.connected)) return;
       kickReconnect('foreground');
     });
@@ -345,10 +374,17 @@ export async function getSocket(): Promise<Socket> {
 }
 
 export function disconnect(): void {
+  ccwireGeneration++;
   // A kick scheduled a moment before logout would otherwise fire into an empty
   // session and start dialling again — connect() would refuse it for lack of a
   // token, but only after churning. Cancel it here, where the intent is known.
   if (kickTimer) { clearTimeout(kickTimer); kickTimer = null; }
+  // A CC-Wire session is authenticated with THIS user's access token and must
+  // not outlive the session. Cancel it synchronously before another account
+  // can log in; the generation guard also cancels unfinished native startup.
+  stopCCWireSession?.();
+  stopCCWireSession = null;
+  recoverCCWireSession = null;
   if (socket) {
     try { socket.removeAllListeners(); socket.disconnect(); } catch {}
     socket = null;

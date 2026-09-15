@@ -118,7 +118,10 @@ pub struct Outbox<W: DurableWork> {
 
 impl<W: DurableWork> Outbox<W> {
     pub fn new(host: W) -> Self {
-        Outbox { host, pending: Vec::new() }
+        Outbox {
+            host,
+            pending: Vec::new(),
+        }
     }
 
     pub fn len(&self) -> usize {
@@ -236,7 +239,12 @@ impl<W: DurableWork> Outbox<W> {
             if self.pending.iter().any(|r| r.key == key) {
                 continue;
             }
-            self.pending.push(Record { key, payload, written: false, written_ms: 0 });
+            self.pending.push(Record {
+                key,
+                payload,
+                written: false,
+                written_ms: 0,
+            });
             taken += 1;
         }
         Ok(taken)

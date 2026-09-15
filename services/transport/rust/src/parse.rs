@@ -64,10 +64,18 @@ impl Limits {
     /// authority." Zero means "not proposed", never "unlimited".
     pub fn tighten(self, p: &Limits) -> Limits {
         fn lo(cur: usize, prop: usize) -> usize {
-            if prop > 0 && prop < cur { prop } else { cur }
+            if prop > 0 && prop < cur {
+                prop
+            } else {
+                cur
+            }
         }
         fn lo32(cur: u32, prop: u32) -> u32 {
-            if prop > 0 && prop < cur { prop } else { cur }
+            if prop > 0 && prop < cur {
+                prop
+            } else {
+                cur
+            }
         }
         Limits {
             max_frame_bytes: lo(self.max_frame_bytes, p.max_frame_bytes),
@@ -311,7 +319,11 @@ pub fn decode_frame<'a>(
     max_bytes: usize,
     depth: u32,
 ) -> Res<Frame<'a>> {
-    let cap = if max_bytes == 0 { lim.max_frame_bytes } else { max_bytes };
+    let cap = if max_bytes == 0 {
+        lim.max_frame_bytes
+    } else {
+        max_bytes
+    };
     let cap = cap.min(MAX_FRAME_BYTES);
 
     // Whole-payload size FIRST, so every bound below it bounds something already
@@ -417,7 +429,11 @@ fn w_tag(out: &mut Vec<u8>, field: u32, wire: u8) {
 pub fn encode_frame(f: &Frame, lim: &Limits, max_bytes: usize) -> Res<Vec<u8>> {
     check_invariants(f.traffic_class, f.body_field)?;
 
-    let cap = if max_bytes == 0 { lim.max_frame_bytes } else { max_bytes };
+    let cap = if max_bytes == 0 {
+        lim.max_frame_bytes
+    } else {
+        max_bytes
+    };
     let cap = cap.min(MAX_FRAME_BYTES);
 
     let mut out = Vec::new();
