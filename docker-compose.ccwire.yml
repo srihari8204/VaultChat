@@ -4,3 +4,4 @@ services:
   go-api:
     environment:
       CCWIRE_WS: "1"
+      CCWIRE_APP_EVENTS: "1"
