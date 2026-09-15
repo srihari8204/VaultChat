@@ -6,6 +6,6 @@ export function tokenSubject(token: string | null): string {
     const body = token?.split('.')[1];
     if (!body) return '';
     const payload = JSON.parse(Buffer.from(body.replace(/-/g, '+').replace(/_/g, '/'), 'base64').toString('utf8'));
-    return typeof payload?.sub === 'string' ? payload.sub : ''; 
+    return typeof payload?.sub === 'string' ? payload.sub : '';
   } catch { return ''; }
 }

@@ -53,4 +53,3 @@ These are single snapshots and establish current-device behavior, not a general 
 - Real iOS build/device testing requires macOS/Xcode or an iOS build runner.
 - A direct WhatsApp conversation benchmark was not performed; only its main activity was launched, without opening private conversations.
 - Rust `cargo fmt --check` reports the crate's existing repository-wide formatting drift. Functional tests and strict Clippy pass.
-
