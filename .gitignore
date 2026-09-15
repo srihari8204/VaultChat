@@ -49,6 +49,7 @@ vaultchat-backend/serviceAccountKey.json
 *.env
 
 .env.local
+.env.production
 
 # Build scripts & backups
 *.backup
@@ -96,6 +97,7 @@ logs-20*/
 
 # device-test capture output (hundreds of MB of logcat, machine-local)
 p2p-device-tests/
+deployment-snapshots/
 # generated audit reports
 docs/audit/
 
