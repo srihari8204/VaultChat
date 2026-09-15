@@ -99,9 +99,12 @@ func TestOnboardingFlowEndToEnd(t *testing.T) {
 	t.Cleanup(func() { onboardCleanup(ctx, t, email) })
 	onboardCleanup(ctx, t, email) // a previous failed run must not fail this one
 
-	// The client reaches profile/init holding an emailTicket from
-	// /auth/onboard/verify-otp. Mint it the same way that handler does rather
-	// than seeding an OTP row — the OTP path is not what this test is about.
+	// The client reaches profile/init holding a phoneTicket from
+	// /auth/onboard/verify-otp-phone — the PHONE ticket is now the only accepted
+	// proof (see the block in authProfileInit). Mint both the same way those
+	// handlers do rather than seeding an OTP row; the OTP path is not what this
+	// test is about, and the emailTicket rides along only to prove the optional
+	// recovery address is still recorded as verified when one is supplied.
 	el, err := vault.EmailLookup(vault.NormalizeEmail(email))
 	if err != nil {
 		t.Fatalf("EmailLookup: %v", err)
@@ -110,10 +113,18 @@ func TestOnboardingFlowEndToEnd(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SignTicket: %v", err)
 	}
+	pl, err := vault.PhoneLookup(phone)
+	if err != nil {
+		t.Fatalf("PhoneLookup: %v", err)
+	}
+	phoneTicket, err := vault.SignTicket(pl, 900)
+	if err != nil {
+		t.Fatalf("SignTicket: %v", err)
+	}
 
 	// ── STEP 1: profile/init ──────────────────────────────────────────
 	code, res := post(authProfileInit, map[string]any{
-		"email": email, "phone": phone, "emailTicket": emailTicket,
+		"email": email, "phone": phone, "emailTicket": emailTicket, "phoneTicket": phoneTicket,
 		"firstName": "Flow", "lastName": "Test", "dob": "1990-01-01", "status": "hi",
 	})
 	if code != 200 {
@@ -210,17 +221,19 @@ func TestOnboardingTicketIsNotTransferable(t *testing.T) {
 	onboardCleanup(ctx, t, victimEmail)
 	onboardCleanup(ctx, t, attackerEmail)
 
+	// phoneTicket, not emailTicket: profile/init now requires proof of the NUMBER
+	// in the body, so an email ticket alone no longer creates an account.
 	mk := func(email, phone string) (string, string) {
-		el, err := vault.EmailLookup(vault.NormalizeEmail(email))
+		pl, err := vault.PhoneLookup(phone)
 		if err != nil {
-			t.Fatalf("EmailLookup: %v", err)
+			t.Fatalf("PhoneLookup: %v", err)
 		}
-		tk, err := vault.SignTicket(el, 900)
+		tk, err := vault.SignTicket(pl, 900)
 		if err != nil {
 			t.Fatalf("SignTicket: %v", err)
 		}
 		code, res := post(authProfileInit, map[string]any{
-			"email": email, "phone": phone, "emailTicket": tk,
+			"email": email, "phone": phone, "phoneTicket": tk,
 			"firstName": "X", "dob": "1990-01-01",
 		})
 		if code != 200 {

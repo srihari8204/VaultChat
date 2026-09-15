@@ -120,6 +120,36 @@ func TestPhoneTicketBindsToThatNumber(t *testing.T) {
 	}
 }
 
+// An emailTicket proves an EMAIL. It said nothing about the phone in the body,
+// so while profile/init accepted it as a stand-in, anyone who could OTP their
+// own address could create an account on ANY number — which then answers
+// `exists:true` to /auth/lookup forever and locks its real owner out of signup.
+//
+// No database needed: the ticket check runs before the first query, so a refusal
+// never reaches db.Pool. That is also the failure this pins — if the ticket
+// check is ever moved below the duplicate-check, this test panics on a nil pool
+// instead of quietly passing.
+func TestProfileInitRefusesEmailTicketForSomeoneElsesNumber(t *testing.T) {
+	phoneTestEnv(t)
+
+	email := "attacker@example.com"
+	el, err := vault.EmailLookup(vault.NormalizeEmail(email))
+	if err != nil {
+		t.Fatalf("EmailLookup: %v", err)
+	}
+	emailTicket, err := vault.SignTicket(el, 900)
+	if err != nil {
+		t.Fatalf("SignTicket: %v", err)
+	}
+	status, body := post(authProfileInit, map[string]any{
+		"email": email, "phone": "+919000000099", "emailTicket": emailTicket,
+		"firstName": "Squatter", "dob": "1990-01-01",
+	})
+	if status != 401 {
+		t.Fatalf("profile/init created an account on an unproven number with an emailTicket alone: got %d (%v), want 401", status, body)
+	}
+}
+
 // ── 3. a wrong code is a wrong code, on HTTP 200 ───────────────────────
 
 // MSG91 answers 200 with {"type":"error"} for "OTP not match". verify-otp-phone

@@ -1694,14 +1694,22 @@ func authProfileInit(w http.ResponseWriter, r *http.Request) {
 	// it is bound to vault.PhoneLookup(phone), computed from the number in THIS
 	// body, so a ticket for one number cannot create an account for another.
 	//
-	// emailTicket is still accepted, and is the only option when no phone OTP
-	// was involved, so an in-flight signup on the older client does not break
-	// mid-flow. Whichever one proved the identity decides whether the email is
-	// recorded as verified below — an unverified address must not become a
-	// recovery channel.
+	// emailTicket may NOT stand in for it. It used to, "so an in-flight signup on
+	// the older client does not break mid-flow" — but an emailTicket is bound to
+	// an EMAIL lookup and says nothing about the phone in this body, so anyone who
+	// could OTP their own address could create an account on ANY phone number.
+	// That number's real owner then gets `exists:true` from /auth/lookup forever
+	// and can never sign up, and the squatter's account answers to their number in
+	// contact discovery. Now that the number IS the identity, "some identity was
+	// verified" is not proof of this one: the ticket must be the phone's.
+	// (No shipped client sends emailTicket any more — grep lib/ app/: zero hits.)
+	//
+	// emailVerified is still computed, but only to decide whether the OPTIONAL
+	// recovery address is recorded as proven — an unverified address must not
+	// silently become a recovery channel.
 	phoneVerified := vault.VerifyTicket(authStr(b.PhoneTicket), pl)
 	emailVerified := email != "" && vault.VerifyTicket(authStr(b.EmailTicket), el)
-	if !phoneVerified && !emailVerified {
+	if !phoneVerified {
 		authEnvErr(w, 401, "not_verified", "Verify your mobile number with the code first")
 		return
 	}
@@ -1774,10 +1782,9 @@ func authProfileInit(w http.ResponseWriter, r *http.Request) {
 	// column to answer "how does this person sign in?", and it was lying to them
 	// about the entire onboarding cohort. 'phone' matches what the legacy phone
 	// path writes, so the two agree.
+	// Always "phone" now: the block above refuses anything that did not arrive
+	// with a phoneTicket, so there is no email-only account left to label.
 	provider := "phone"
-	if !phoneVerified {
-		provider = "email"
-	}
 	// NULL, not NOW(): only an address whose OTP was actually answered counts as
 	// verified, or the recovery channel is one nobody proved they own.
 	var emailVerifiedAt *time.Time

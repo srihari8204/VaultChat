@@ -18,7 +18,7 @@
 import { HEADER_TOP } from '../constants/layout';
 import { Ionicons } from '@expo/vector-icons';
 import { Stack, useRouter } from 'expo-router';
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
 import { MpinInput } from '../components/auth/MpinInput';
 import { Sheet } from '../components/ui/Sheet';
@@ -37,21 +37,51 @@ export default function EmailVerify() {
   const phone = onboarding.get().phone;
   const [code, setCode] = useState('');
   const [busy, setBusy] = useState(false);
+  /**
+   * The in-flight latch, and it is a REF because `busy` cannot do this job.
+   *
+   * `busy` is render-closure state. Two onChangeText events in the SAME tick —
+   * which is exactly what Android's SMS autofill produces, and what paste-then-
+   * complete produces — both read `busy === false` and both POST. The first
+   * verify consumes the request id server-side, so the second comes back 400
+   * `code_expired` AFTER the screen has already navigated away, having also
+   * spent one of the five allowed attempts. A ref is written synchronously, so
+   * the second call in the same tick sees it.
+   */
+  const inFlight = useRef(false);
   const [err, setErr] = useState<string | null>(null);
   const [sheet, setSheet] = useState(false);
   // The SERVER's cooldown, not a guessed 30 — a button that goes live early
   // spends one of the few allowed sends on a certain 429. app/onboard.tsx put
   // it here when it sent the first code.
-  const [cooldown, setCooldown] = useState(onboarding.get().otpResendInSec);
+  const [cooldown, setCooldownState] = useState(onboarding.get().otpResendInSec);
+  /**
+   * WALL CLOCK, not a chain of setTimeouts.
+   *
+   * A `setTimeout(… c - 1, 1000)` chain only advances while JS is running, and
+   * the OS suspends timers on a backgrounded app — but the SERVER's 30 seconds
+   * keep passing. Come back after two minutes and the button still read
+   * "Resend code in 22s" over a door that had been open the whole time. The
+   * deadline is absolute, so returning to the screen re-derives the truth.
+   */
+  const deadline = useRef(Date.now() + onboarding.get().otpResendInSec * 1000);
+  const setCooldown = useCallback((sec: number) => {
+    deadline.current = Date.now() + Math.max(0, sec) * 1000;
+    setCooldownState(Math.max(0, sec));
+  }, []);
 
   useEffect(() => {
     if (cooldown <= 0) return;
-    const t = setTimeout(() => setCooldown(c => c - 1), 1000);
-    return () => clearTimeout(t);
+    const id = setInterval(() => {
+      const left = Math.ceil((deadline.current - Date.now()) / 1000);
+      setCooldownState(left > 0 ? left : 0);
+    }, 500);
+    return () => clearInterval(id);
   }, [cooldown]);
 
   const submit = async (value: string) => {
-    if (busy) return;
+    if (inFlight.current) return;
+    inFlight.current = true;
     setBusy(true); setErr(null);
     try {
       const ticket = await verifyPhoneOtp(phone, value);
@@ -64,18 +94,21 @@ export default function EmailVerify() {
       // than leaving a live button over a door that is shut.
       const wait = retryAfterSec(e);
       if (wait) setCooldown(wait);
-    } finally { setBusy(false); }
+    } finally { inFlight.current = false; setBusy(false); }
   };
 
   const resend = async (channel: OtpChannel = 'sms') => {
-    if (cooldown > 0 || busy) return;
+    // Same latch, same reason: two fast taps both passed `cooldown > 0` before
+    // either had set it, and the second earned a certain 429.
+    if (cooldown > 0 || inFlight.current) return;
+    inFlight.current = true;
     setErr(null);
     try {
       setCooldown(await resendPhoneOtp(phone, channel));
     } catch (e: any) {
       setCooldown(retryAfterSec(e));               // 0 keeps the button live
       setErr(onboardingError(e, 'Could not send another code'));
-    }
+    } finally { inFlight.current = false; }
   };
 
   const waiting = cooldown > 0;

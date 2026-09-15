@@ -310,7 +310,12 @@ func authOnboardVerifyOtpPhone(w http.ResponseWriter, r *http.Request) {
 	// MSG91 has its own attempt cap, but it is theirs, not ours, and it does not
 	// bound an attacker who walks a list of numbers from one host.
 	if ok, retryAfter := authOtpVerifyAllow(r, "verify-otp-phone-v2", lookup); !ok {
-		authEnvErrRetry(w, http.StatusLocked, "locked", "Too many attempts. Request a new code.", retryAfter)
+		// NOT "request a new code": this gate is keyed on the number, not on the
+		// attempt, so a resend does not clear it — and the app runs `retryAfter`
+		// down on the resend button itself (app/email-verify.tsx), so the old copy
+		// told the user to press a button it had just greyed out. Waiting is the
+		// only thing that works, so waiting is what it says.
+		authEnvErrRetry(w, http.StatusLocked, "locked", "Too many wrong codes. Wait before trying again.", retryAfter)
 		return
 	}
 
