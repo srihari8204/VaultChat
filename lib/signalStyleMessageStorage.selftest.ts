@@ -110,8 +110,8 @@ console.log('ciphertext must never overwrite a stored plaintext body');
 check('cacheMessages nulls an envelope before binding',
   /encField\(looksLikeEnvelope\(m\.content\) \? null : \(m\.content \?\? null\)\)/.test(LOCALDB),
   'a re-fetched envelope would replace good plaintext with a blob');
-check('and the upsert COALESCEs, so NULL keeps what is on disk',
-  /content\s*=\s*COALESCE\(excluded\.content,\s*messages\.content\)/.test(LOCALDB));
+check('upsert retains purged plaintext but wipes explicit tombstones',
+  /content\s*=\s*CASE WHEN excluded\.deleted_at IS NOT NULL THEN NULL\s*ELSE COALESCE\(excluded\.content,\s*messages\.content\) END/.test(LOCALDB));
 
 // ── 5. raw ciphertext must never reach the UI ────────────────────────────
 console.log('raw DR1/GSK1 must never be rendered');

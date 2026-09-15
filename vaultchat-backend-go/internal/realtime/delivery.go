@@ -108,6 +108,11 @@ func InvalidateChatMembers(ctx context.Context, chatID string) {
 
 // FanOutToChat is the exact port of server.js fanOutToChat.
 func (h *Hub) FanOutToChat(ctx context.Context, chatID, event string, payload any, senderID string) {
+	ctx, cancel := realtimeContext(ctx)
+	defer cancel()
+	if ctx.Err() != nil {
+		return
+	}
 	ghostCol := eventToGhostCol[event]
 	effectiveSender := senderID
 	if effectiveSender == "" {
@@ -148,16 +153,19 @@ func (h *Hub) FanOutToChat(ctx context.Context, chatID, event string, payload an
 	// Ghost-mode targets for this signal.
 	ghostedSet := map[string]bool{}
 	if ghostCol != "" && effectiveSender != "" {
-		ghostedSet = h.loadGhostTargets(effectiveSender, ghostCol)
+		ghostedSet = h.loadGhostTargets(effectiveSender, ghostCol, ctx)
 	}
 
 	for _, uid := range memberIDs {
+		if ctx.Err() != nil {
+			return
+		}
 		if blockerSet[uid] || ghostedSet[uid] {
 			continue
 		}
 		// chatID is carried into the leaf so a CC-Wire recipient can be handed a
 		// Receipt body, which requires it. The Socket.IO emit is identical.
-		h.emitToUidIn(chatID, uid, event, payload)
+		h.emitToUidInContext(ctx, chatID, uid, event, payload)
 	}
 }
 
@@ -171,7 +179,9 @@ func cvRedis() *redis.Client {
 	return redisx.Client
 }
 
-func (h *Hub) cvTouch(chatID, uid, activity string) (isNew, changed bool, act string) {
+func (h *Hub) cvTouch(chatID, uid, activity string, parents ...context.Context) (isNew, changed bool, act string) {
+	ctx, cancel := realtimeContext(parents...)
+	defer cancel()
 	c := cvRedis()
 	if c == nil {
 		if activity == "" {
@@ -180,7 +190,7 @@ func (h *Hub) cvTouch(chatID, uid, activity string) (isNew, changed bool, act st
 		return false, false, activity
 	}
 	now := time.Now().UnixMilli()
-	prev, _ := c.HGet(bg, "cv:h:"+chatID, uid).Result()
+	prev, _ := c.HGet(ctx, "cv:h:"+chatID, uid).Result()
 	prevAct := ""
 	if prev != "" {
 		var pj struct {
@@ -198,19 +208,21 @@ func (h *Hub) cvTouch(chatID, uid, activity string) (isNew, changed bool, act st
 		a = "reading"
 	}
 	val, _ := json.Marshal(map[string]any{"activity": a, "ts": now})
-	c.HSet(bg, "cv:h:"+chatID, uid, string(val))
-	c.ZAdd(bg, "cv:exp", redis.Z{Score: float64(now), Member: chatID + "|" + uid})
-	c.PExpire(bg, "cv:h:"+chatID, time.Duration(cvTTLms*3)*time.Millisecond)
+	c.HSet(ctx, "cv:h:"+chatID, uid, string(val))
+	c.ZAdd(ctx, "cv:exp", redis.Z{Score: float64(now), Member: chatID + "|" + uid})
+	c.PExpire(ctx, "cv:h:"+chatID, time.Duration(cvTTLms*3)*time.Millisecond)
 	return prev == "", prev != "" && activity != "" && activity != prevAct, a
 }
 
-func (h *Hub) cvRemove(chatID, uid string) {
+func (h *Hub) cvRemove(chatID, uid string, parents ...context.Context) {
+	ctx, cancel := realtimeContext(parents...)
+	defer cancel()
 	c := cvRedis()
 	if c == nil {
 		return
 	}
-	c.HDel(bg, "cv:h:"+chatID, uid)
-	c.ZRem(bg, "cv:exp", chatID+"|"+uid)
+	c.HDel(ctx, "cv:h:"+chatID, uid)
+	c.ZRem(ctx, "cv:exp", chatID+"|"+uid)
 }
 
 type cvViewer struct {
@@ -218,12 +230,14 @@ type cvViewer struct {
 	Activity string `json:"activity"`
 }
 
-func (h *Hub) cvList(chatID string) []cvViewer {
+func (h *Hub) cvList(chatID string, parents ...context.Context) []cvViewer {
+	ctx, cancel := realtimeContext(parents...)
+	defer cancel()
 	c := cvRedis()
 	if c == nil {
 		return []cvViewer{}
 	}
-	m, _ := c.HGetAll(bg, "cv:h:"+chatID).Result()
+	m, _ := c.HGetAll(ctx, "cv:h:"+chatID).Result()
 	out := make([]cvViewer, 0, len(m))
 	for uid, val := range m {
 		activity := "reading"
@@ -273,7 +287,7 @@ func (h *Hub) startViewerSweep() {
 				chatID, uid := member[:i], member[i+1:]
 				c.HDel(bg, "cv:h:"+chatID, uid)
 				c.ZRem(bg, "cv:exp", member)
-				h.io.To(socket.Room("chat:"+chatID)).Emit("viewer_left",
+				h.emitRooms([]string{"chat:" + chatID}, "", "viewer_left",
 					map[string]any{"chatId": chatID, "userId": uid})
 			}
 		}

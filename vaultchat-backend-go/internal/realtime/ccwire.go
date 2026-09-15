@@ -27,6 +27,7 @@ package realtime
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -103,6 +104,8 @@ func (h *Hub) ccwireServe(w http.ResponseWriter, r *http.Request) {
 func (h *Hub) ccwireRun(r *http.Request, c ccwireConnection) {
 	u := httpx.UserFrom(r)
 
+	ctx, cancel := context.WithCancel(context.WithoutCancel(r.Context()))
+	defer cancel()
 	s := &ccwireSession{
 		hub:  h,
 		conn: c,
@@ -124,13 +127,14 @@ func (h *Hub) ccwireRun(r *http.Request, c ccwireConnection) {
 		// of the session. httpx's context key is unexported, so carrying the real
 		// context is also the only way to reach httpx.UserFrom — a session cannot
 		// fabricate an identity it was not given.
-		ctx: context.WithoutCancel(r.Context()),
+		ctx:    ctx,
+		cancel: cancel,
 	}
 	s.w = s.writeWS
+	s.sessionID = fmt.Sprintf("cw:%s:%p", nodeID, s)
 
 	// Registered for fan-out AFTER the session is fully built and unregistered
 	// before the socket closes, so emitToUidIn never holds a half-live session.
-	h.ccwireRegister(s)
 	defer h.ccwireUnregister(s)
 	go s.drain()
 	defer s.closeOnce()
@@ -147,6 +151,9 @@ func (s *ccwireSession) drain() {
 	for {
 		select {
 		case raw := <-s.out:
+			s.queueMu.Lock()
+			s.queuedBytes -= len(raw)
+			s.queueMu.Unlock()
 			if s.write(raw) != nil {
 				s.closeOnce()
 				return
@@ -166,6 +173,9 @@ func (s *ccwireSession) closeOnce() {
 		return
 	}
 	s.closed = true
+	if s.cancel != nil {
+		s.cancel()
+	}
 	close(s.done)
 	if s.conn != nil {
 		_ = s.conn.Close()
@@ -181,12 +191,18 @@ type ccwireConnection interface {
 }
 
 type ccwireSession struct {
-	hub   *Hub
-	conn  ccwireConnection
-	d     *sockData
-	lim   ccwire.Limits
-	hello bool
-	subs  map[string]struct{}
+	sessionID   string
+	appEvents   bool
+	events      map[string]func(...any)
+	subMu       sync.RWMutex
+	queueMu     sync.Mutex
+	queuedBytes int
+	hub         *Hub
+	conn        ccwireConnection
+	d           *sockData
+	lim         ccwire.Limits
+	hello       bool
+	subs        map[string]struct{}
 	// frag is THIS session's fragment reassembler (ccwire_fragment.go).
 	// Per-session on purpose: a shared one would let any client evict or
 	// observe another's partial sets. Created lazily, so a peer that never
@@ -215,7 +231,10 @@ type ccwireSession struct {
 
 	// ctx is the authenticated request context (see ccwireServe), used by the
 	// loopback into the REST handlers. nil in tests that drive handle() directly.
-	ctx context.Context
+	ctx    context.Context
+	cancel context.CancelFunc
+	// Accessed only by the ordered command worker and its synchronous handlers.
+	commandCtx context.Context
 
 	// out is the fan-out queue; nil in tests, which write inline. done/closed
 	// end the session from any goroutine exactly once.
@@ -238,6 +257,35 @@ func (s *ccwireSession) writeWS(b []byte) error {
 }
 
 func (s *ccwireSession) run() {
+	// One ordered command worker keeps database work off the heartbeat reader.
+	// Eight frame slots bound pending input to at most 2 MiB at negotiated limits.
+	commands := make(chan []byte, 8)
+	finished := make(chan struct{})
+	go func() {
+		defer close(finished)
+		for {
+			select {
+			case <-s.done:
+				return
+			case raw := <-commands:
+				select {
+				case <-s.done:
+					return
+				default:
+				}
+				ctx, cancel := realtimeContext(s.ctx)
+				s.commandCtx = ctx
+				alive := s.handle(raw)
+				s.commandCtx = nil
+				cancel()
+				if !alive {
+					s.closeOnce()
+					return
+				}
+			}
+		}
+	}()
+	defer func() { s.closeOnce(); <-finished }()
 	for {
 		_ = s.conn.SetReadDeadline(time.Now().Add(ccwireIdleTimeout))
 		typ, raw, err := s.conn.ReadMessage()
@@ -250,7 +298,35 @@ func (s *ccwireSession) run() {
 			s.refuse("", errProtocolViolation, "binary frames only")
 			return
 		}
-		if !s.handle(raw) {
+		if !s.hello {
+			if !s.handle(raw) {
+				return
+			}
+			continue
+		}
+		// Parse before choosing the fast path; malformed frames cannot bypass validation.
+		fr, e := ccwire.Decode(raw, ccwire.Options{MaxBytes: s.lim.MaxFrameBytes, Strict: true})
+		if e != nil {
+			s.refuse("", errPayloadInvalid, "frame")
+			return
+		}
+		m, e := ccwire.DecodeMessage(fr.Payload, s.lim, 0, 0)
+		if e != nil {
+			s.refuse("", errPayloadInvalid, "frame")
+			return
+		}
+		if m.BodyField == ccwire.BodyPing {
+			if !s.handle(raw) {
+				return
+			}
+			continue
+		}
+		select {
+		case commands <- raw:
+		case <-s.done:
+			return
+		default:
+			s.refuse(m.RequestID, errRateLimited, "command queue full")
 			return
 		}
 	}
@@ -315,16 +391,31 @@ func (s *ccwireSession) handle(raw []byte) bool {
 			return false
 		}
 		s.hello = true
+		s.appEvents = appEventsEnabled() && (!ClusterEnabled() || s.hub.cwBusClose != nil) && helloAppEvents(m.Body, s.lim)
+		if s.appEvents {
+			s.lim.MaxMessageBodyBytes = appEventLogicalLimit
+			s.events = map[string]func(...any){}
+			peer := s.eventPeer()
+			s.hub.registerChatHandlersPeer(peer)
+			s.hub.registerSignalHandlersPeer(peer)
+		}
 		// The credential inside ClientHello is NOT read: this connection was
 		// already authenticated by httpx.RequireAuth at the upgrade, which is
 		// the same handshake-time-only model the Socket.IO middleware uses.
-		return s.send(ccwire.Message{
+		ok := s.send(ccwire.Message{
 			RequestID:    m.RequestID,
 			TrafficClass: ccwire.TrafficClassControl,
 			Stream:       1,
 			BodyField:    ccwire.BodyServerHello,
 			Body:         s.serverHello(),
 		})
+		if ok && s.sessionID != "" {
+			s.hub.ccwireRegister(s)
+			if s.appEvents {
+				s.hub.trackIdentity(s.d.uid, s.sessionID)
+			}
+		}
+		return ok
 	}
 
 	switch m.BodyField {
@@ -419,7 +510,9 @@ func (s *ccwireSession) scope(m ccwire.Message) bool {
 
 	if m.BodyField == ccwire.BodyUnsubscribe {
 		// Leaving is always permitted, exactly as leave_chat is.
+		s.subMu.Lock()
 		delete(s.subs, key)
+		s.subMu.Unlock()
 		return s.sendAck(m)
 	}
 
@@ -431,7 +524,9 @@ func (s *ccwireSession) scope(m ccwire.Message) bool {
 		metrics.Inc("ccwire_subscribe_refused")
 		return s.sendError(m.RequestID, errNotPermitted, "not permitted")
 	}
-	s.subs[key] = struct{}{}
+	if !s.joinEventRoom(key) {
+		return true
+	}
 	metrics.Inc("ccwire_subscribe")
 	return s.sendAck(m)
 }
@@ -446,19 +541,19 @@ func (s *ccwireSession) subscribeAllowed(kind uint32, id string) bool {
 		// The same check join_chat makes (handlers.go), same cache, same
 		// generation — so BumpChatPermissions invalidates a CC-Wire session's
 		// decision exactly as it does a Socket.IO one.
-		return s.hub.chatMemberAllowed(s.d, id)
+		return s.hub.chatMemberAllowed(s.d, id, s.ctxOrBG())
 
 	case ccwire.ScopeKindCall:
 		// envelope.proto: "chat membership + mesh cap" — which is call_join's
 		// rule (handlers.go:773 and the meshMaxParticipants check below it).
-		if !s.hub.chatMemberAllowed(s.d, id) {
+		if !s.hub.chatMemberAllowed(s.d, id, s.ctxOrBG()) {
 			return false
 		}
 		// ponytail: the roster counts Socket.IO sockets only, so this cap sees
 		// existing callers but not other CC-Wire subscribers. Harmless while
 		// no media is fanned out over this transport; when it is, call
 		// membership needs one roster both transports write to.
-		if max := meshMaxParticipants(); len(s.hub.callRoster(socket.Room("call:"+id), s.d.uid))+1 > max {
+		if max := meshMaxParticipants(); len(s.hub.callRoster(socket.Room("call:"+id), s.d.uid, s.ctxOrBG()))+1 > max {
 			metrics.Inc("ccwire_call_mesh_full")
 			return false
 		}
@@ -467,7 +562,7 @@ func (s *ccwireSession) subscribeAllowed(kind uint32, id string) bool {
 	case ccwire.ScopeKindRun:
 		// runAllowed(drive=false) is the view entitlement, matching the run
 		// relay's read side (handlers.go registerRunRelay).
-		return s.hub.runAllowed(s.d, id, false)
+		return s.hub.runAllowed(s.d, id, false, s.ctxOrBG())
 
 	case ccwire.ScopeKindChannel:
 		// UNGATED, and recorded as such in envelope.proto. channel_join has no
@@ -539,6 +634,9 @@ func (s *ccwireSession) capabilities() []byte {
 	b = ccwire.AppendBoolField(b, 1, true) // fragmentation     — serveFragment, this file
 	b = ccwire.AppendBoolField(b, 3, true) // batch_cursor_sync — ccwire_cursor.go
 	b = ccwire.AppendBoolField(b, 7, true) // structured_errors
+	if s.appEvents {
+		b = ccwire.AppendBoolField(b, 8, true)
+	}
 	// Still ABSENT on purpose: resumption (2) - no resume state is kept, which
 	// is why sendGoAway omits resume_token; datagrams (4) - not applicable over
 	// WebSocket; reauth_in_place (5) and causal_epochs (6) - unimplemented.

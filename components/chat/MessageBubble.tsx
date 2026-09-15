@@ -1134,7 +1134,9 @@ function MessageBubble({
   // Init from content directly when it's already plaintext (the common case
   // after decrypt-at-ingest) → no decryption flash on first render.
   const [plain, setPlain] = useState<string>(() => looksEncrypted(msg.content) ? '' : (msg.content ?? ''));
-  const [replyPlain, setReplyPlain] = useState<string>('');
+  const [replyPlain, setReplyPlain] = useState<string>(() =>
+    replyTarget && !looksEncrypted(replyTarget.content) ? (replyTarget.content ?? '') : '',
+  );
   const [authHeader, setAuthHeader] = useState<string | null>(null);
 
   // Tick state — only meaningful for own server-confirmed messages.
@@ -1192,13 +1194,17 @@ function MessageBubble({
 
   useEffect(() => {
     if (!replyTarget) { setReplyPlain(''); return; }
+    if (!looksEncrypted(replyTarget.content)) {
+      setReplyPlain(replyTarget.content ?? '');
+      return;
+    }
     let cancel = false;
     (async () => {
       const t = await decryptFromChat(chatId, replyTarget.senderId, replyTarget.content, replyTarget.id);
       if (!cancel) setReplyPlain(t);
     })();
     return () => { cancel = true; };
-  }, [replyTarget?.id, replyTarget?.content, chatId]);
+  }, [replyTarget, chatId]);
 
   // For image / audio / file bubbles, prepare the Authorization header so
   // RN can fetch the auth-gated /uploads endpoint.
@@ -1695,6 +1701,8 @@ function MessageBubble({
               name={tickState === 'pending' ? 'time-outline' : tickState === 'sent' ? 'checkmark' : 'checkmark-done'}
               size={14}
               color={tickState === 'read' ? '#4A9FFF' : colors.textDim}
+              accessibilityLabel={tickState === 'pending' ? 'Sending message' : `Message ${tickState}`}
+              testID={`message-status-${msg.id}`}
               style={{ marginLeft: 3 }}
             />
           )}

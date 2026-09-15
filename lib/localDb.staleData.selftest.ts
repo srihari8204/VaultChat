@@ -22,6 +22,9 @@ import Database from 'better-sqlite3';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const SRC = readFileSync(join(HERE, 'localDb.ts'), 'utf8');
+const visiblePredicate = SRC.match(/const VISIBLE_MESSAGE = `([^`]+)`;/)?.[1];
+if (!visiblePredicate) throw new Error('selftest: missing real visibility predicate');
+const expandSql = (sql: string) => sql.replace(/\$\{VISIBLE_MESSAGE\}/g, visiblePredicate);
 
 let failures = 0;
 function check(name: string, ok: boolean, detail?: string) {
@@ -38,11 +41,12 @@ function ddl(name: string): string {
 
 const db = new Database(':memory:');
 db.exec(ddl('messages'));
+db.exec(SRC.match(/ALTER TABLE messages ADD COLUMN pending_envelope TEXT/)![0]);
 db.exec(ddl('chats'));
 
 // The real upsert, extracted rather than retyped: if the ON CONFLICT clause
 // changes, these tests exercise the change.
-const upsertSrc = SRC.match(/INSERT INTO messages[\s\S]*?expires_at\s*=\s*excluded\.expires_at`/);
+const upsertSrc = SRC.match(/INSERT INTO messages[\s\S]*?WHERE messages\.deleted_at IS NULL`/);
 if (!upsertSrc) throw new Error('selftest: could not locate the messages upsert in localDb.ts');
 const UPSERT = upsertSrc[0]
   .replace(/^INSERT INTO/, 'INSERT INTO')
@@ -57,7 +61,7 @@ const put = db.prepare(UPSERT);
 type Row = { id: number; content: string | null; deleted_at: string | null };
 const insert = (m: Partial<Row> & { id: number }, chatId = 'c1') => put.run(
   m.id, chatId, 'u1', 'text', m.content ?? null, null, null,
-  '2026-01-01T00:00:00.000Z', null, m.deleted_at ?? null, null,
+  '2026-01-01T00:00:00.000Z', null, m.deleted_at ?? null, null, null,
 );
 const get = (id: number) => db.prepare(`SELECT * FROM messages WHERE id = ?`).get(id) as any;
 const count = () => (db.prepare(`SELECT COUNT(*) n FROM messages`).get() as any).n;
@@ -76,6 +80,7 @@ check('delete-for-me survives a server re-fetch', get(100).deleted_at !== null,
 insert({ id: 101, content: 'hi' });
 insert({ id: 101, content: 'hi', deleted_at: '2026-01-03T00:00:00.000Z' });
 check('a remote delete-for-everyone still applies', get(101).deleted_at !== null);
+check('a remote tombstone wipes cached plaintext', get(101).content === null);
 
 // ── 2/3. content is never downgraded ─────────────────────────────────────
 console.log('plaintext must not be overwritten');
@@ -102,7 +107,7 @@ check('an unopened envelope cannot replace plaintext', get(200).content === 'rea
 // while the server still holds it in full. MessageBubble.tsx must therefore
 // keep wording this as a local absence; see the comment on its null branch.
 insert({ id: 210, content: null });                       // never-seen, undecryptable
-check('an undecryptable message is stored indistinguishably from a purged one',
+check('an undecryptable message has no displayable plaintext',
   get(210).content === null,
   'if this ever stores the envelope instead, revisit MessageBubble’s null branch');
 
@@ -119,7 +124,7 @@ for (let i = 1; i <= 300; i++) insert({ id: 1000 + i, content: `m${i}` }, 'c2');
 const backSrc = SRC.match(/export async function getCachedMessagesBefore[\s\S]*?\n}/);
 check('getCachedMessagesBefore exists', !!backSrc,
   'no cached back-page reader — every scroll-up hits the network');
-const backSql = backSrc?.[0].match(/`([\s\S]*?)`/)?.[1] ?? '';
+const backSql = expandSql(backSrc?.[0].match(/`([\s\S]*?)`/)?.[1] ?? '');
 check('its query is bounded by id and skips deletes',
   /id < \?/.test(backSql) && /deleted_at IS NULL/.test(backSql), backSql.trim());
 if (backSql) {
@@ -148,7 +153,7 @@ if (backSql) {
 console.log('the device can browse its own history offline');
 const readerSql = (name: string) => {
   const fn = SRC.match(new RegExp(`export async function ${name}[\\s\\S]*?\\n}`));
-  return fn?.[0].match(/`([\s\S]*?)`/)?.[1] ?? '';
+  return expandSql(fn?.[0].match(/`([\s\S]*?)`/)?.[1] ?? '');
 };
 for (const [name, must] of [
   ['getCachedMessagesAfter', /id > \?/],
@@ -199,12 +204,11 @@ check('an empty/failed fetch prunes nothing (guarded by `if (!chats) return`)',
 // tempted to "tidy up" — so each is asserted against the real source here.
 console.log('imported history must survive, sort as the past, and never sync');
 
-// 8a. the prune sweep must not be able to reach imported rows.
-const victimSql = SRC.match(/SELECT id FROM \(\s*\n\s*SELECT id, ROW_NUMBER\(\)[\s\S]*?\) WHERE rn > \? ORDER BY id ASC LIMIT \?/);
-check('pruneMessageCache exists', !!victimSql);
-check('…and its victim selection is restricted to positive ids',
-  !!victimSql && /FROM messages WHERE id > 0/.test(victimSql[0]),
-  'without `id > 0` every sweep deletes imported history first, and it CANNOT be re-fetched');
+// 8a. capacity cleanup must never remove durable history. Only an explicit
+// expiry is safe: delivered bodies may already have been purged server-side.
+const victimSql = SRC.match(/SELECT id FROM messages\s+WHERE expires_at IS NOT NULL AND expires_at <= \?\s+ORDER BY expires_at ASC LIMIT 5000/);
+check('pruneMessageCache selects only explicitly expired rows', !!victimSql,
+  'a count/row-number sweep can permanently destroy delivered local history');
 
 // 8b. no sync/send path may ever pick up an imported row.
 const cacheFn = SRC.match(/export async function cacheMessages[\s\S]*?\n}/)?.[0] ?? '';
@@ -275,12 +279,14 @@ if (alterSql && idxSql) {
     (() => { const n = page.filter(r => r.id < 0).map(r => r.created_at); return [...n].sort().reverse().join() === n.join(); })(),
     'newest-first within the imported block');
 
-  // 8f. the prune sweep, run for real, must leave them alone.
+  // 8f. the expiry sweep, run for real, must leave all durable history alone.
   if (victimSql) {
-    const victims = db.prepare(victimSql[0]).all(2, 5000) as any[];   // keepPerChat=2
-    check('a real prune sweep selects no imported row',
-      victims.length > 0 && victims.every(v => v.id > 0),
-      `${victims.length} victims, min id ${Math.min(...victims.map(v => v.id))}`);
+    db.prepare(`UPDATE messages SET expires_at = ? WHERE id = ?`).run('2025-01-01T00:00:00Z', 1001);
+    const victims = db.prepare(victimSql[0]).all('2026-09-15T00:00:00Z') as any[];
+    check('expiry cleanup selects exactly the expired row',
+      victims.length === 1 && victims[0].id === 1001, victims.map(v => v.id).join(','));
+    check('ordinary and imported history survive automatic cleanup',
+      !victims.some(v => v.id < 0 || v.id === 1002));
   }
 
   // 8g. MAX(id) — the sync cursor's source — is unmoved by the import.
@@ -299,6 +305,67 @@ check('same second, later message still gets a larger id', idFor(t2022, 1) > idF
 check('every imported id is negative', idFor(t2026, SLOTS - 1) < 0);
 check('ids stay inside Number.MAX_SAFE_INTEGER', Math.abs(idFor(0, 0)) < Number.MAX_SAFE_INTEGER,
   `|min id| = ${Math.abs(idFor(0, 0))}`);
+
+// The same indexed keyset query must keep returning a fixed-size newest window
+// as local history grows. Avoid wall-clock assertions: the query plan is the
+// deterministic performance contract and does not flake on slower CI hosts.
+console.log('large local histories stay index-paged');
+const scale = new Database(':memory:');
+scale.exec(ddl('messages'));
+scale.exec(`CREATE INDEX idx_messages_chat ON messages(chat_id, id DESC)`);
+scale.exec(ddl('chats'));
+scale.exec(`CREATE INDEX idx_messages_preview ON messages(chat_id, id DESC)
+             WHERE deleted_at IS NULL AND type <> 'reaction'`);
+scale.exec(`CREATE INDEX idx_messages_expiry ON messages(expires_at)
+             WHERE expires_at IS NOT NULL`);
+scale.prepare(`INSERT INTO chats (id, data) VALUES ('large', '{}')`).run();
+const addScale = scale.prepare(
+  `INSERT INTO messages (id, chat_id, sender_id, type, content, created_at)
+   VALUES (?, 'large', 'u1', 'text', ?, '2026-01-01T00:00:00Z')`);
+const addMany = scale.transaction((from: number, to: number) => {
+  for (let id = from; id <= to; id++) addScale.run(id, `m${id}`);
+});
+let inserted = 0;
+for (const size of [100, 1000, 10000, 100000]) {
+  addMany(inserted + 1, size); inserted = size;
+  const newest = scale.prepare(
+    `SELECT id FROM messages WHERE chat_id = ? AND deleted_at IS NULL ORDER BY id DESC LIMIT ?`,
+  ).all('large', 50) as any[];
+  const older = scale.prepare(
+    `SELECT id FROM messages WHERE chat_id = ? AND id < ? AND deleted_at IS NULL ORDER BY id DESC LIMIT ?`,
+  ).all('large', size - 49, 100) as any[];
+  check(`${size.toLocaleString()} rows: newest 50 remains exact`,
+    newest.length === 50 && newest[0].id === size && newest[49].id === size - 49);
+  check(`${size.toLocaleString()} rows: older page is keyset-correct`,
+    older.length === Math.min(100, size - 50) && (older.length === 0 || older[0].id === size - 50));
+}
+const plan = scale.prepare(
+  `EXPLAIN QUERY PLAN SELECT id FROM messages
+    WHERE chat_id = ? AND id < ? AND deleted_at IS NULL ORDER BY id DESC LIMIT ?`,
+).all('large', 99951, 100) as any[];
+check('100,000-row pagination uses the chat/id index',
+  plan.some(r => /idx_messages_chat/i.test(String(r.detail))), plan.map(r => r.detail).join(' | '));
+const expiryPlan = scale.prepare(
+  `EXPLAIN QUERY PLAN SELECT id FROM messages
+    WHERE expires_at IS NOT NULL AND expires_at <= ? ORDER BY expires_at ASC LIMIT 5000`,
+).all('2026-09-15T00:00:00Z') as any[];
+check('expiry cleanup uses its partial index',
+  expiryPlan.some(r => /idx_messages_expiry/i.test(String(r.detail))),
+  expiryPlan.map(r => r.detail).join(' | '));
+addScale.run(100001, 'newest reaction');
+scale.prepare(`UPDATE messages SET type = 'reaction' WHERE id = 100001`).run();
+const previewFn = SRC.match(/export async function getLastMessagePerChat[\s\S]*?\n}/)?.[0] ?? '';
+const previewSql = previewFn.match(/getAllAsync\(\s*`([\s\S]*?)`, \[\]\)/)?.[1] ?? '';
+check('the preview query is lifted from production', !!previewSql);
+if (previewSql) {
+  const preview = scale.prepare(previewSql).get() as any;
+  check('100,000-row preview returns the newest non-reaction', preview?.id === 100000, `id=${preview?.id}`);
+  const previewPlan = scale.prepare(`EXPLAIN QUERY PLAN ${previewSql}`).all() as any[];
+  check('chat preview seeks the partial preview index',
+    previewPlan.some(r => /idx_messages_preview/i.test(String(r.detail))),
+    previewPlan.map(r => r.detail).join(' | '));
+}
+scale.close();
 
 console.log(failures === 0 ? '\nPASS' : `\nFAIL (${failures})`);
 process.exit(failures === 0 ? 0 : 1);

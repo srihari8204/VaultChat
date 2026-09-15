@@ -13,7 +13,8 @@
  *     whose CMake links it + the JNI bridge into libvaultbeamnative.so)
  *   - registers ':vaultbeam-core' in settings.gradle + app dependencies
  *   - registers VaultBeamStreamRustPackage in MainApplication.getPackages()
- *   - injects a guarded System.loadLibrary("vaultbeamnative") into onCreate
+ *     (the module companion loads libvaultbeamnative only if JS actually asks
+ *     for the Rust backend)
  *   Absent toolchain → NOTHING changes; the Kotlin VaultBeamStream fallback
  *   (plugins/withVaultBeamStream.js) stays and lib/vaultBeamStreamNative.ts uses it.
  *
@@ -99,14 +100,6 @@ function withAndroid(config) {
       } else {
         console.warn(`[withVaultBeamRust] could not auto-register VaultBeamStreamRustPackage — add \`packages.${add}\` to MainApplication.getPackages() manually`);
       }
-    }
-
-    // 2) Preload the native lib in onCreate (guarded; the module companion also
-    //    loads it, and System.loadLibrary is idempotent).
-    const load = 'System.loadLibrary("vaultbeamnative")';
-    if (!src.includes(load)) {
-      src = src.replace(/super\.onCreate\(\)/,
-        `super.onCreate()\n    try { ${load} } catch (t: Throwable) { android.util.Log.w("VaultBeamStreamRust", "native vaultbeam unavailable — Kotlin fallback", t) }`);
     }
 
     cfg.modResults.contents = src;

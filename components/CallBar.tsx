@@ -22,7 +22,6 @@ import { Ionicons } from '@expo/vector-icons';
 import { useRouter, usePathname } from 'expo-router';
 import { HEADER_TOP } from '../constants/layout';
 import { getSnapshot, subscribe } from '../lib/call/store';
-import { hasLiveSession, liveSessionRef, hangUp } from '../lib/call/engine';
 
 /** mm:ss, and h:mm:ss once a call runs past the hour. */
 function elapsed(connectedAt: number, now: number): string {
@@ -45,7 +44,7 @@ export function CallBar() {
   // Ticks only while the bar is actually on screen — see the effect's guard.
   const [now, setNow] = useState(() => Date.now());
 
-  const live = hasLiveSession() && snap.status !== 'ended';
+  const live = snap.status !== 'ended' && !!snap.chatId;
   const onCallScreen = CALL_ROUTES.some(r => (pathname || '').startsWith(r));
   const show = live && !onCallScreen;
 
@@ -57,19 +56,24 @@ export function CallBar() {
 
   if (!show) return null;
 
-  const ref = liveSessionRef();
-  const name = snap.peerName || ref?.peerName || 'VaultChat user';
-  const kind = snap.kind || ref?.kind || 'audio';
+  const name = snap.peerName || 'VaultChat user';
+  const kind = snap.kind || 'audio';
 
   const back = () => {
-    const r = ref;
-    if (!r) return;
+    if (!snap.chatId) return;
+    if (!snap.peerUid) {
+      router.push({
+        pathname: '/group-call-active' as any,
+        params: { chatId: snap.chatId, video: kind === 'video' ? '1' : '0', name: snap.peerName },
+      });
+      return;
+    }
     router.push({
       pathname: (kind === 'video' ? '/videocall' : '/voicecall') as any,
       params: {
-        chatId: r.chatId,
-        peerUid: r.peerUid,
-        peerName: r.peerName,
+        chatId: snap.chatId,
+        peerUid: snap.peerUid,
+        peerName: snap.peerName,
         // NOT incoming: the call is already answered and running. Passing
         // incoming here would send the screen down the acceptIncoming path
         // against a live session.
@@ -99,7 +103,7 @@ export function CallBar() {
           mean the only way to hang up is to navigate back into it first. */}
       <TouchableOpacity
         style={styles.end}
-        onPress={() => hangUp('local_hangup', true)}
+        onPress={() => { import('../lib/call/engine').then(m => m.hangUp('local_hangup', true)).catch(() => {}); }}
         accessibilityRole="button"
         accessibilityLabel="End call"
         hitSlop={8}

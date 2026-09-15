@@ -25,6 +25,16 @@ module.exports = function withTransportCore(config) {
       if (!/dependencies\s*\{/.test(cfg.modResults.contents)) throw new Error('TransportCore: app dependencies block missing');
       cfg.modResults.contents = cfg.modResults.contents.replace(/dependencies\s*\{/, (match) => `${match}\n    ${line}`);
     }
+    const envInputs = [
+      '// VaultChat CC-Wire release inputs: invalidate Hermes when rollout values change.',
+      'tasks.matching { it.name.startsWith("createBundle") && it.name.endsWith("JsAndAssets") }.configureEach {',
+      '    inputs.file(rootProject.file("../.env.production"))',
+      '    inputs.property("vaultchatTransportRustPct", providers.environmentVariable("EXPO_PUBLIC_FLAG_TRANSPORT_RUST_PCT").orElse(""))',
+      '    inputs.property("vaultchatWebTransportUrl", providers.environmentVariable("EXPO_PUBLIC_CCWIRE_WEBTRANSPORT_URL").orElse(""))',
+      '}',
+      '',
+    ].join('\n');
+    if (!cfg.modResults.contents.includes('vaultchatTransportRustPct')) cfg.modResults.contents += `\n${envInputs}`;
     return cfg;
   });
   return withMainApplication(config, (cfg) => {

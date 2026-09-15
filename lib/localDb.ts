@@ -160,6 +160,9 @@ export function getLocalDb(): Promise<LocalDb> {
         CREATE INDEX IF NOT EXISTS idx_messages_preview
           ON messages(chat_id, id DESC)
           WHERE deleted_at IS NULL AND type <> 'reaction';
+        CREATE INDEX IF NOT EXISTS idx_messages_expiry
+          ON messages(expires_at)
+          WHERE expires_at IS NOT NULL;
       `);
       // Exit Kit: additive migration for installs created before imports existed.
       // ADD COLUMN throws when the column is already there — that's the whole
@@ -169,6 +172,12 @@ export function getLocalDb(): Promise<LocalDb> {
       // schema rather than of the import loop. It is null for every pre-existing
       // row, so the index covers nothing until someone actually imports.
       try { await db.execAsync(`ALTER TABLE messages ADD COLUMN import_key TEXT`); } catch {}
+      // Keep failed decrypts separately from displayable plaintext. Migration
+      // errors other than an existing column must prevent delivery ACKs.
+      const messageColumns = await db.getAllAsync(`PRAGMA table_info(messages)`);
+      if (!messageColumns.some((c: any) => c.name === 'pending_envelope')) {
+        await db.execAsync(`ALTER TABLE messages ADD COLUMN pending_envelope TEXT`);
+      }
       try {
         await db.execAsync(
           `CREATE UNIQUE INDEX IF NOT EXISTS idx_messages_import_key
@@ -213,20 +222,29 @@ export function getLocalDb(): Promise<LocalDb> {
 
 let _ftsOk = false;
 let _ftsKey: Uint8Array | null = null;
+let _ftsKeyPromise: Promise<Uint8Array | null> | null = null;
+let _ftsReadyPromise: Promise<Uint8Array | null> | null = null;
+let _ftsGeneration = 0;
 const FTS_KEY_STORE = 'vc_search_k_v1';
-const FTS_BACKFILL_CAP = 20000;   // one-time backfill ceiling (== old scan cap ×4)
+// Two bind parameters per FTS row. 400 remains below SQLite's legacy 999
+// variable limit while reducing a whole page to one delete and one insert.
+const FTS_BACKFILL_PAGE = 400;
 
 async function ftsKeyBytes(): Promise<Uint8Array | null> {
   if (_ftsKey) return _ftsKey;
-  try {
-    let hex = await SecureStore.getItemAsync(FTS_KEY_STORE);
-    if (!hex) {
-      hex = Buffer.from(randomBytes(32)).toString('hex');
-      await SecureStore.setItemAsync(FTS_KEY_STORE, hex);
-    }
-    _ftsKey = new Uint8Array(Buffer.from(hex, 'hex'));
-    return _ftsKey;
-  } catch { return null; }
+  if (_ftsKeyPromise) return _ftsKeyPromise;
+  _ftsKeyPromise = (async () => {
+    try {
+      let hex = await SecureStore.getItemAsync(FTS_KEY_STORE);
+      if (!hex) {
+        hex = Buffer.from(randomBytes(32)).toString('hex');
+        await SecureStore.setItemAsync(FTS_KEY_STORE, hex);
+      }
+      _ftsKey = new Uint8Array(Buffer.from(hex, 'hex'));
+      return _ftsKey;
+    } catch { return null; }
+  })().finally(() => { _ftsKeyPromise = null; });
+  return _ftsKeyPromise;
 }
 
 const TEfts = new TextEncoder();
@@ -258,7 +276,7 @@ function queryTokens(key: Uint8Array, q: string): string[] {
 // The text worth indexing for a message: plain text bodies, or the caption of
 // a decrypted media envelope ({t, mk}). Never envelopes, never key material.
 function indexableText(type: string | null | undefined, content: string | null | undefined): string | null {
-  if (!content || looksLikeEnvelope(content)) return null;
+  if (!content || content.startsWith('enc:v1:') || looksLikeEnvelope(content)) return null;
   if (type === 'reaction') return null;
   if (type && type !== 'text') {
     try { const j = JSON.parse(content); return typeof j?.t === 'string' && j.t ? j.t : null; } catch { return content; }
@@ -277,33 +295,95 @@ async function ftsUpsert(db: LocalDb, key: Uint8Array, id: number, type: string 
   } catch { /* index is best-effort; search falls back to scan */ }
 }
 
-// One-time backfill of the newest FTS_BACKFILL_CAP cached rows, run lazily on
-// first search (so boot pays nothing). Also validates the key: if the stored
-// keycheck doesn't match (keystore wiped/rotated), the index is rebuilt.
+// Lazily backfill the complete local history in bounded, restart-safe pages.
+// Search pays this cost only on its first use; app launch and chat first paint
+// never wait for it. The cursor is committed with each page, so interruption
+// resumes instead of replaying the whole history. A key rotation rebuilds the
+// blind index because old HMAC tokens are no longer queryable.
 async function ensureFtsReady(db: LocalDb): Promise<Uint8Array | null> {
   if (!_ftsOk) return null;
+  if (_ftsReadyPromise) return _ftsReadyPromise;
+  _ftsReadyPromise = ensureFtsReadyLocked(db).finally(() => { _ftsReadyPromise = null; });
+  return _ftsReadyPromise;
+}
+
+async function ensureFtsReadyLocked(db: LocalDb): Promise<Uint8Array | null> {
+  const generation = _ftsGeneration;
   const key = await ftsKeyBytes();
   if (!key) return null;
   try {
     const check = blindTok(key, 'vc-keycheck');
-    const row = await db.getFirstAsync(`SELECT v FROM fts_meta WHERE k = 'keycheck'`);
-    if (row?.v === check) return key;              // index live and key matches
-    // Fresh or key-mismatched index → rebuild.
-    await db.runAsync(`DELETE FROM msg_fts`, []);
-    const rows = await db.getAllAsync(
-      `SELECT id, type, content, deleted_at FROM messages
-        WHERE content IS NOT NULL AND deleted_at IS NULL
-        ORDER BY id DESC LIMIT ?`, [FTS_BACKFILL_CAP]);
-    await db.withTransactionAsync(async () => {
-      for (const r of rows as any[]) {
-        const text = indexableText(r.type, decField(r.content));
-        if (!text) continue;
-        const toks = indexTokens(key, text);
-        if (toks) await db.runAsync(`INSERT INTO msg_fts (rowid, toks) VALUES (?, ?)`, [r.id, toks]);
-      }
-    });
-    await db.runAsync(`INSERT INTO fts_meta (k, v) VALUES ('keycheck', ?)
-                       ON CONFLICT(k) DO UPDATE SET v = excluded.v`, [check]);
+    const [keyRow, doneRow] = await Promise.all([
+      db.getFirstAsync(`SELECT v FROM fts_meta WHERE k = 'keycheck'`),
+      db.getFirstAsync(`SELECT v FROM fts_meta WHERE k = 'backfill_done'`),
+    ]);
+    if (keyRow?.v === check && doneRow?.v === '1') return key;
+
+    if (keyRow?.v !== check) {
+      await db.withTransactionAsync(async () => {
+        await db.runAsync(`DELETE FROM msg_fts`, []);
+        await db.runAsync(`DELETE FROM fts_meta`, []);
+        await db.runAsync(`INSERT INTO fts_meta (k, v) VALUES ('keycheck', ?)`, [check]);
+      });
+    }
+
+    const cursorRow = await db.getFirstAsync(`SELECT v FROM fts_meta WHERE k = 'backfill_before'`);
+    let before: number | null = cursorRow?.v != null ? Number(cursorRow.v) : null;
+    if (before != null && !Number.isFinite(before)) before = null;
+
+    for (;;) {
+      if (generation !== _ftsGeneration) return null;
+      let rows: any[] = [];
+      await db.withTransactionAsync(async () => {
+        rows = await db.getAllAsync(
+          `SELECT id, type, content FROM messages
+            WHERE content IS NOT NULL AND deleted_at IS NULL
+              ${before == null ? '' : 'AND id < ?'}
+            ORDER BY id DESC LIMIT ?`,
+          before == null ? [FTS_BACKFILL_PAGE] : [before, FTS_BACKFILL_PAGE],
+        ) as any[];
+        const indexed = rows.flatMap(r => {
+          const opened = decField(r.content);
+          // A locked/wrong DEK returns the sealed value unchanged. Do not move
+          // the durable cursor past it or mark the index complete; retry after
+          // unlock with the real plaintext instead.
+          if (opened?.startsWith('enc:v1:')) throw new Error('message cache is locked');
+          const text = indexableText(r.type, opened);
+          if (!text) return [];
+          const toks = indexTokens(key, text);
+          return toks ? [{ id: r.id, toks }] : [];
+        });
+        if (rows.length) {
+          await db.runAsync(
+            `DELETE FROM msg_fts WHERE rowid IN (${rows.map(() => '?').join(',')})`,
+            rows.map(r => r.id),
+          );
+        }
+        if (indexed.length) {
+          await db.runAsync(
+            `INSERT OR REPLACE INTO msg_fts (rowid, toks) VALUES ${indexed.map(() => '(?, ?)').join(',')}`,
+            indexed.flatMap(r => [r.id, r.toks]),
+          );
+        }
+        if (rows.length) {
+          before = Number(rows[rows.length - 1].id);
+          await db.runAsync(
+            `INSERT INTO fts_meta (k, v) VALUES ('backfill_before', ?)
+             ON CONFLICT(k) DO UPDATE SET v = excluded.v`, [String(before)],
+          );
+        }
+        if (rows.length < FTS_BACKFILL_PAGE) {
+          await db.runAsync(
+            `INSERT INTO fts_meta (k, v) VALUES ('backfill_done', '1')
+             ON CONFLICT(k) DO UPDATE SET v = excluded.v`, [],
+          );
+        }
+      });
+
+      if (rows.length < FTS_BACKFILL_PAGE) break;
+      // Let rendering and gestures run between pages during a first-use build.
+      await new Promise<void>(resolve => setTimeout(resolve, 0));
+    }
     return key;
   } catch { return null; }
 }
@@ -341,8 +421,8 @@ export async function cacheMessages(chatId: string, msgs: Message[]): Promise<vo
       // meta. A real edit (non-null content) still overwrites.
       await db.runAsync(
         `INSERT INTO messages
-           (id, chat_id, sender_id, type, content, reply_to_id, meta, created_at, edited_at, deleted_at, expires_at)
-         VALUES (?,?,?,?,?,?,?,?,?,?,?)
+           (id, chat_id, sender_id, type, content, reply_to_id, meta, created_at, edited_at, deleted_at, expires_at, pending_envelope)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
          ON CONFLICT(id) DO UPDATE SET
            chat_id     = excluded.chat_id,
            sender_id   = excluded.sender_id,
@@ -377,7 +457,11 @@ export async function cacheMessages(chatId: string, msgs: Message[]): Promise<vo
            -- COALESCE keeps ours; a genuine remote delete still lands, because
            -- in that case the local value is NULL and excluded's is not.
            deleted_at  = COALESCE(messages.deleted_at, excluded.deleted_at),
-           expires_at  = excluded.expires_at`,
+           expires_at  = excluded.expires_at,
+           pending_envelope = CASE
+             WHEN excluded.deleted_at IS NOT NULL OR excluded.content IS NOT NULL THEN NULL
+             ELSE COALESCE(excluded.pending_envelope, messages.pending_envelope) END
+         WHERE messages.deleted_at IS NULL`,
         [
           // Never let an unopened envelope overwrite plaintext we already hold.
           // COALESCE above only guards NULL, and a failed decrypt leaves the
@@ -390,6 +474,7 @@ export async function cacheMessages(chatId: string, msgs: Message[]): Promise<vo
           m.deletedAt ? null : (m.replyToId ?? null),
           m.deletedAt ? null : encField(m.meta != null ? JSON.stringify(m.meta) : null),
           m.createdAt ?? null, m.editedAt ?? null, m.deletedAt ?? null, (m as any).expiresAt ?? null,
+          !m.deletedAt && looksLikeEnvelope(m.content) ? encField(m.content) : null,
         ],
       );
       if (ftsKey) {
@@ -397,7 +482,10 @@ export async function cacheMessages(chatId: string, msgs: Message[]): Promise<vo
         // Content-null purge (delete-on-delivery) keeps the local copy above,
         // so it also keeps the index row (only re-index when we HAVE text).
         if (m.deletedAt) await ftsUpsert(db, ftsKey, m.id, m.type ?? null, null, true);
-        else if (m.content != null) await ftsUpsert(db, ftsKey, m.id, m.type ?? null, m.content, false);
+        else if (m.content != null && !looksLikeEnvelope(m.content)) {
+          const stored = await db.getFirstAsync(`SELECT deleted_at FROM messages WHERE id = ?`, [m.id]);
+          if (!stored?.deleted_at) await ftsUpsert(db, ftsKey, m.id, m.type ?? null, m.content, false);
+        }
       }
     }
   });
@@ -414,6 +502,19 @@ export async function cacheMessages(chatId: string, msgs: Message[]): Promise<vo
 // Remote tombstones stay visible; local "Delete for me" rows retain their
 // original type/body and remain hidden by this predicate.
 const VISIBLE_MESSAGE = `(deleted_at IS NULL OR (type = 'system' AND content IS NULL))`;
+
+/** Internal decrypt retry inputs only; UI reads never expose this ciphertext. */
+export async function getPendingEncryptedMessages(chatId: string, limit = 200): Promise<Message[]> {
+  const db = await getLocalDb();
+  const rows = await db.getAllAsync(
+    `SELECT * FROM messages WHERE chat_id = ? AND pending_envelope IS NOT NULL
+       AND deleted_at IS NULL AND (expires_at IS NULL OR expires_at > ?)
+       ORDER BY id DESC LIMIT ?`, [chatId, new Date().toISOString(), limit]);
+  return rows.flatMap((r: any) => {
+    const envelope = decField(r.pending_envelope);
+    return looksLikeEnvelope(envelope) ? [{ ...rowToMessage(r), content: envelope }] : [];
+  });
+}
 
 // ═══ Exit Kit — importing local-only history ═══════════════════════════
 //
@@ -617,9 +718,8 @@ export async function getCachedMessages(chatId: string, limit = 50): Promise<Mes
  * per scroll — and offline it simply dead-ended, because the only path to older
  * messages was a network call.
  *
- * pruneMessageCache keeps 300 rows per chat, so this answers the first several
- * pages from disk and the caller falls through to the server only past the
- * cache horizon.
+ * Local message history is durable, so this answers every cached page without
+ * depending on the server retaining an already-delivered body.
  */
 export async function getCachedMessagesBefore(
   chatId: string, before: number, limit = 50,
@@ -721,25 +821,16 @@ export function looksLikeEnvelope(text: string | null | undefined): boolean {
  */
 export async function getLastMessagePerChat(): Promise<Map<string, { content: string | null; type: string | null; senderId: string | null; id: number }>> {
   const db = await getLocalDb();
-  // P4.2 replaced a whole-table GROUP BY with a DISTINCT plus one indexed
-  // lookup per chat — right about the scan, wrong about the cost that was left.
-  // Each of those lookups is a separate round trip across the JS/native bridge,
-  // so a user with fifty chats paid fifty-one crossings every time the chat
-  // list rendered, and the bridge dominates a query the index answers in
-  // microseconds.
-  //
-  // A window function gets both properties at once: still an index-ordered
-  // scan, but ONE crossing. ROW_NUMBER partitions by chat and the outer filter
-  // keeps only each chat's newest row, which is exactly what the loop computed.
-  // SQLite has had window functions since 3.25; both engines used here are far
-  // newer.
+  // One bridge crossing, with one idx_messages_preview seek per visible chat.
+  // A window function produced the same result but scanned every cached
+  // message, making chat-list startup grow with years of local history.
   const rows = await db.getAllAsync(
-    `SELECT chat_id, id, content, type, sender_id FROM (
-       SELECT chat_id, id, content, type, sender_id,
-              ROW_NUMBER() OVER (PARTITION BY chat_id ORDER BY id DESC) AS rn
-         FROM messages
-        WHERE deleted_at IS NULL AND type <> 'reaction'   -- F4: reference messages never preview
-     ) WHERE rn = 1`, []);
+    `SELECT m.chat_id, m.id, m.content, m.type, m.sender_id
+       FROM chats c JOIN messages m ON m.id = (
+         SELECT id FROM messages
+          WHERE chat_id = c.id AND deleted_at IS NULL AND type <> 'reaction'
+          ORDER BY id DESC LIMIT 1
+       )`, []);
   const out = new Map<string, { content: string | null; type: string | null; senderId: string | null; id: number }>();
   for (const r of rows as any[]) {
     const text = decField(r.content);
@@ -772,23 +863,32 @@ export async function searchAllMessages(
     const toks = queryTokens(key, q);
     if (toks.length) {
       try {
-        const rows = await db.getAllAsync(
-          `SELECT m.chat_id, m.id, m.content, m.sender_id, m.created_at
-             FROM msg_fts f JOIN messages m ON m.id = f.rowid
-            WHERE msg_fts MATCH ? AND m.deleted_at IS NULL
-            ORDER BY m.id DESC LIMIT ?`,
-          [toks.map(t => `"${t}"`).join(' '), Math.max(limit * 3, 60)],
-        );
         const out: { chatId: string; id: number; content: string; senderId: string | null; createdAt: string }[] = [];
-        for (const r of rows as any[]) {
-          const text = decField(r.content);
-          if (!text || looksLikeEnvelope(text)) continue;
-          // Candidates are word/prefix matches (any order); this substring
-          // check restores the exact legacy phrase semantics on top.
-          if (text.toLowerCase().includes(q)) {
-            out.push({ chatId: r.chat_id, id: r.id, content: text, senderId: r.sender_id, createdAt: r.created_at });
-            if (out.length >= limit) break;
+        let candidateBefore: number | null = null;
+        for (;;) {
+          const rows = await db.getAllAsync(
+            `SELECT m.chat_id, m.id, m.content, m.sender_id, m.created_at
+               FROM msg_fts f JOIN messages m ON m.id = f.rowid
+              WHERE msg_fts MATCH ? AND m.deleted_at IS NULL
+                ${candidateBefore == null ? '' : 'AND m.id < ?'}
+              ORDER BY m.id DESC LIMIT 200`,
+            candidateBefore == null
+              ? [toks.map(t => `"${t}"`).join(' ')]
+              : [toks.map(t => `"${t}"`).join(' '), candidateBefore],
+          ) as any[];
+          for (const r of rows) {
+            const text = decField(r.content);
+            if (!text || text.startsWith('enc:v1:') || looksLikeEnvelope(text)) continue;
+            // MATCH is an unordered token conjunction. Keep paging candidates
+            // until enough exact phrase matches are found, or FTS is exhausted.
+            if (text.toLowerCase().includes(q)) {
+              out.push({ chatId: r.chat_id, id: r.id, content: text, senderId: r.sender_id, createdAt: r.created_at });
+              if (out.length >= limit) break;
+            }
           }
+          if (rows.length < 200 || out.length >= limit) break;
+          candidateBefore = Number(rows[rows.length - 1].id);
+          await new Promise<void>(resolve => setTimeout(resolve, 0));
         }
         // Blind tokens only cover word PREFIXES — an infix query ("ell" in
         // "hello") legitimately misses. Only fall through to the legacy scan
@@ -798,52 +898,126 @@ export async function searchAllMessages(
     }
   }
 
-  // Legacy scan (FTS unavailable, no tokenizable words, or zero FTS hits —
-  // e.g. infix queries): decrypt-and-match the newest 5000 rows.
-  const rows = await db.getAllAsync(
-    `SELECT chat_id, id, content, sender_id, created_at FROM messages
-      WHERE content IS NOT NULL AND deleted_at IS NULL ORDER BY id DESC LIMIT 5000`,
-    [],
-  );
+  // FTS-unavailable and infix queries still cover the complete local history.
+  // Read fixed pages so a rare fallback never allocates 10k/100k rows at once.
   const out: { chatId: string; id: number; content: string; senderId: string | null; createdAt: string }[] = [];
-  for (const r of rows as any[]) {
-    const text = decField(r.content);
-    // Skip un-decrypted envelopes ({..."v":"dr1"...} / GSK1:) and match plaintext.
-    if (!text || looksLikeEnvelope(text)) continue;
-    if (text.toLowerCase().includes(q)) {
-      out.push({ chatId: r.chat_id, id: r.id, content: text, senderId: r.sender_id, createdAt: r.created_at });
-      if (out.length >= limit) break;
+  let before: number | null = null;
+  while (out.length < limit) {
+    const rows = await db.getAllAsync(
+      `SELECT chat_id, id, content, sender_id, created_at FROM messages
+        WHERE content IS NOT NULL AND deleted_at IS NULL
+          ${before == null ? '' : 'AND id < ?'}
+        ORDER BY id DESC LIMIT 500`,
+      before == null ? [] : [before],
+    ) as any[];
+    for (const r of rows) {
+      const text = decField(r.content);
+      // Skip un-decrypted envelopes ({..."v":"dr1"...} / GSK1:) and match plaintext.
+      if (!text || text.startsWith('enc:v1:') || looksLikeEnvelope(text)) continue;
+      if (text.toLowerCase().includes(q)) {
+        out.push({ chatId: r.chat_id, id: r.id, content: text, senderId: r.sender_id, createdAt: r.created_at });
+        if (out.length >= limit) break;
+      }
     }
+    if (rows.length < 500 || out.length >= limit) break;
+    before = Number(rows[rows.length - 1].id);
+    await new Promise<void>(resolve => setTimeout(resolve, 0));
+  }
+  return out;
+}
+
+export interface CachedMessageSearchHit {
+  id: number;
+  senderId: string;
+  content: string;
+  type: Message['type'];
+  createdAt: string;
+}
+
+/** Search every locally retained plaintext message in one chat. */
+export async function searchCachedMessagesInChat(
+  chatId: string, query: string, limit = 80,
+): Promise<CachedMessageSearchHit[]> {
+  const q = query.trim().toLowerCase();
+  if (!chatId || !q || limit <= 0) return [];
+  const db = await getLocalDb();
+  const key = await ensureFtsReady(db);
+
+  if (key) {
+    const toks = queryTokens(key, q);
+    if (toks.length) {
+      try {
+        const out: CachedMessageSearchHit[] = [];
+        let candidateBefore: number | null = null;
+        for (;;) {
+          const rows = await db.getAllAsync(
+            `SELECT m.id, m.sender_id, m.content, m.type, m.created_at
+               FROM msg_fts f JOIN messages m ON m.id = f.rowid
+              WHERE msg_fts MATCH ? AND m.chat_id = ? AND m.deleted_at IS NULL
+                ${candidateBefore == null ? '' : 'AND m.id < ?'}
+              ORDER BY m.id DESC LIMIT 200`,
+            candidateBefore == null
+              ? [toks.map(t => `"${t}"`).join(' '), chatId]
+              : [toks.map(t => `"${t}"`).join(' '), chatId, candidateBefore],
+          ) as any[];
+          for (const r of rows) {
+            const text = decField(r.content);
+            if (!text || text.startsWith('enc:v1:') || looksLikeEnvelope(text) || r.type !== 'text') continue;
+            if (text.toLowerCase().includes(q)) {
+              out.push({ id: r.id, senderId: String(r.sender_id ?? ''), content: text, type: 'text', createdAt: r.created_at });
+              if (out.length >= limit) break;
+            }
+          }
+          if (rows.length < 200 || out.length >= limit) break;
+          candidateBefore = Number(rows[rows.length - 1].id);
+          await new Promise<void>(resolve => setTimeout(resolve, 0));
+        }
+        if (out.length) return out;
+      } catch { /* fall through to bounded-page scan */ }
+    }
+  }
+
+  const out: CachedMessageSearchHit[] = [];
+  let before: number | null = null;
+  while (out.length < limit) {
+    const rows = await db.getAllAsync(
+      `SELECT id, sender_id, content, type, created_at FROM messages
+        WHERE chat_id = ? AND type = 'text' AND content IS NOT NULL AND deleted_at IS NULL
+          ${before == null ? '' : 'AND id < ?'}
+        ORDER BY id DESC LIMIT 500`,
+      before == null ? [chatId] : [chatId, before],
+    ) as any[];
+    for (const r of rows) {
+      const text = decField(r.content);
+      if (!text || text.startsWith('enc:v1:') || looksLikeEnvelope(text)) continue;
+      if (text.toLowerCase().includes(q)) {
+        out.push({ id: r.id, senderId: String(r.sender_id ?? ''), content: text, type: 'text', createdAt: r.created_at });
+        if (out.length >= limit) break;
+      }
+    }
+    if (rows.length < 500 || out.length >= limit) break;
+    before = Number(rows[rows.length - 1].id);
+    await new Promise<void>(resolve => setTimeout(resolve, 0));
   }
   return out;
 }
 
 /**
- * P4.2: bound the local message cache. It previously grew forever, and the
- * full-scan paths (search backfill, storage attribution) scale with it. Keeps
- * the newest `keepPerChat` rows of every chat untouchable, then trims the
- * globally-oldest surplus above `maxTotal` in bounded batches (≤5000/run, so
- * a boot sweep can't jank). Server history is unaffected — scroll-back
- * re-fetches on demand (chat.tsx onEndReached) exactly like a fresh install.
+ * Remove only messages whose explicit expiry time has passed.
+ *
+ * Delivered message bodies may already be gone from the server, so ordinary
+ * text rows are durable local history rather than a rebuildable cache. The
+ * legacy size arguments remain for source compatibility with the storage GC;
+ * media has its own byte-bounded cleanup policy.
  */
-export async function pruneMessageCache(maxTotal = 200000, keepPerChat = 300): Promise<number> {
+export async function pruneMessageCache(_maxTotal = 200000, _keepPerChat = 300): Promise<number> {
   const db = await getLocalDb();
   try {
-    const row = await db.getFirstAsync(`SELECT COUNT(*) AS n FROM messages`);
-    const total = Number(row?.n ?? 0);
-    if (total <= maxTotal) return 0;
-    const surplus = Math.min(total - maxTotal, 5000);
-    // `id > 0` is load-bearing, not a tidy-up. Imported rows (Exit Kit) carry
-    // NEGATIVE ids, so they are the lowest ids in their chat and would be the
-    // first victims of every sweep — and unlike real messages there is no server
-    // to re-fetch them from, so a sweep would destroy them permanently. Server
-    // history is re-fetchable; imported history is not, so it is not cache.
     const victims = await db.getAllAsync(
-      `SELECT id FROM (
-         SELECT id, ROW_NUMBER() OVER (PARTITION BY chat_id ORDER BY id DESC) AS rn
-           FROM messages WHERE id > 0
-       ) WHERE rn > ? ORDER BY id ASC LIMIT ?`,
-      [keepPerChat, surplus],
+      `SELECT id FROM messages
+        WHERE expires_at IS NOT NULL AND expires_at <= ?
+        ORDER BY expires_at ASC LIMIT 5000`,
+      [new Date().toISOString()],
     );
     if (!victims.length) return 0;
     const ids = (victims as any[]).map(v => v.id);
@@ -974,7 +1148,7 @@ export async function getGlobalSyncCursor(): Promise<number> {
 export async function noteGlobalSyncCursor(id: number): Promise<void> {
   if (!Number.isFinite(id) || id <= 0) return;
   const stored = Number((await getMeta(GLOBAL_CURSOR_KEY)) ?? 0) || 0;
-  if (id > stored) await setMeta(GLOBAL_CURSOR_KEY, String(id)).catch(() => {});
+  if (id > stored) await setMeta(GLOBAL_CURSOR_KEY, String(id));
 }
 
 /** Apply a single incoming/edited message (from socket) to the cache. */
@@ -985,7 +1159,7 @@ export async function applyMessage(chatId: string, m: Message): Promise<void> {
 /** Soft-delete a message locally (tombstone via deleted_at). */
 export async function markCachedDeleted(chatId: string, id: number): Promise<void> {
   const db = await getLocalDb();
-  await db.runAsync(`UPDATE messages SET deleted_at = ? WHERE chat_id = ? AND id = ?`,
+  await db.runAsync(`UPDATE messages SET deleted_at = ?, pending_envelope = NULL WHERE chat_id = ? AND id = ?`,
     [new Date().toISOString(), chatId, id]);
 }
 
@@ -996,7 +1170,7 @@ export async function cacheRemoteDeletion(chatId: string, id: number, deletedAt:
   await db.withTransactionAsync(async () => {
     await db.runAsync(
       `UPDATE messages SET type = 'system', content = NULL, reply_to_id = NULL,
-                           meta = NULL, deleted_at = ?
+                           meta = NULL, pending_envelope = NULL, deleted_at = ?
         WHERE chat_id = ? AND id = ?`,
       [deletedAt, chatId, id],
     );
@@ -1296,7 +1470,7 @@ export async function setMeta(k: string, v: string): Promise<void> {
 export async function exportAll(): Promise<{ messages: any[]; chats: any[] }> {
   const db = await getLocalDb();
   const messages = (await db.getAllAsync(`SELECT * FROM messages`)).map((m: any) => ({
-    ...m, content: decField(m.content), meta: decField(m.meta),
+    ...m, content: decField(m.content), meta: decField(m.meta), pending_envelope: decField(m.pending_envelope),
   }));
   const chats = (await db.getAllAsync(`SELECT * FROM chats`)).map((c: any) => ({
     ...c, data: decField(c.data),
@@ -1308,12 +1482,19 @@ export async function exportAll(): Promise<{ messages: any[]; chats: any[] }> {
 export async function importAll(data: { messages?: any[]; chats?: any[] }): Promise<number> {
   const db = await getLocalDb();
   let n = 0;
+  // Replaced message ids may carry different text. Invalidate before import so
+  // no stale blind token survives and the next search resumes a full rebuild.
+  _ftsGeneration++;
   await db.withTransactionAsync(async () => {
+    if (_ftsOk) {
+      await db.runAsync(`DELETE FROM msg_fts`, []);
+      await db.runAsync(`DELETE FROM fts_meta`, []);
+    }
     for (const m of data.messages || []) {
       await db.runAsync(
-        `INSERT OR REPLACE INTO messages (id, chat_id, sender_id, type, content, reply_to_id, meta, created_at, edited_at, deleted_at, expires_at)
-         VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
-        [m.id, m.chat_id, m.sender_id, m.type, encField(m.content), m.reply_to_id, encField(m.meta), m.created_at, m.edited_at, m.deleted_at, m.expires_at],
+        `INSERT OR REPLACE INTO messages (id, chat_id, sender_id, type, content, reply_to_id, meta, created_at, edited_at, deleted_at, expires_at, pending_envelope)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
+        [m.id, m.chat_id, m.sender_id, m.type, encField(m.content), m.reply_to_id, encField(m.meta), m.created_at, m.edited_at, m.deleted_at, m.expires_at, m.deleted_at ? null : encField(m.pending_envelope)],
       );
       n++;
     }
@@ -1364,7 +1545,14 @@ export async function clearChatMessages(chatId: string): Promise<number> {
 /** Wipe everything (e.g. on logout / account switch). */
 export async function clearLocalDb(): Promise<void> {
   const db = await getLocalDb();
+  if (_ftsKeyPromise) { try { await _ftsKeyPromise; } catch {} }
+  _ftsGeneration++;
   await db.execAsync(`DELETE FROM messages; DELETE FROM chats; DELETE FROM sync_cursor; DELETE FROM queues; DELETE FROM kv;`);
+  if (_ftsOk) {
+    try { await db.execAsync(`DELETE FROM msg_fts; DELETE FROM fts_meta;`); } catch {}
+  }
+  _ftsKey = null;
+  try { await SecureStore.deleteItemAsync(FTS_KEY_STORE); } catch {}
   // #32 Phase B: wipe the sealed DEK envelope too, so no orphaned key survives an
   // account switch (rows are gone, so the key has nothing left to protect).
   try { await clearCacheKeyStore(); } catch {}

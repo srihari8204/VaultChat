@@ -160,13 +160,13 @@ function main(): void {
   //     refactor that quietly removes either one fails here.
   const src = (...p: string[]) => readFileSync(join(ROOT, ...p), 'utf8');
   const PIN_SRC   = src('services', 'security', 'pinStore.ts');
-  const INDEX_SRC = src('app', 'index.tsx');
+  const LAYOUT_SRC = src('app', '_layout.tsx');
   const LOCK_SRC  = src('app', 'app-lock.tsx');
   assert(/setPin[\s\S]*?sealCurrentSession\(pin\)/.test(PIN_SRC),
     'setPin() seals the existing session — sealing is PIN-gated, never blanket');
   assert(/clearPin[\s\S]*?unsealCurrentSession\(\)/.test(PIN_SRC),
     'clearPin() unseals back to the plaintext path — removing the PIN never strands a user');
-  assert(/sealedSessionLocked\(\)/.test(INDEX_SRC),
+  assert(/session\.sealedLocked/.test(LAYOUT_SRC) && /router\.replace\('\/app-lock'/.test(LAYOUT_SRC),
     'the boot path routes a sealed-but-locked session to the unlock screen');
   assert(/loadSealedSession\(pin\)/.test(LOCK_SRC),
     'the unlock screen actually unseals with the local PIN');

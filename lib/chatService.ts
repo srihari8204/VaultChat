@@ -1496,17 +1496,19 @@ export async function persistMessageDeletion(chatId: string, msgId: number, dele
   await Promise.allSettled(writes);
 }
 
-export async function markRead(chatId: string, lastReadMessageId: number): Promise<void> {
+export async function markRead(chatId: string, lastReadMessageId: number, expectedUserId?: string): Promise<void> {
   await api(`/chats/${encodeURIComponent(chatId)}/read`, {
     method: 'POST',
     json: { lastReadMessageId },
+    expectedUserId,
   });
 }
 
-export async function markDelivered(chatId: string, lastDeliveredMessageId: number): Promise<void> {
+export async function markDelivered(chatId: string, lastDeliveredMessageId: number, expectedUserId?: string): Promise<void> {
   await api(`/chats/${encodeURIComponent(chatId)}/delivered`, {
     method: 'POST',
     json: { lastDeliveredMessageId },
+    expectedUserId,
   });
 }
 
@@ -2439,10 +2441,10 @@ export async function searchInChat(chatId: string, q: string, limit = 80): Promi
   const term = q.trim().toLowerCase();
   if (!term || !chatId) return [];
 
-  const { getCachedMessages } = await import('./localDb');
-  const [msgs, chat] = await Promise.all([
-    getCachedMessages(chatId, 1000),
-    getChat(chatId).catch(() => null),
+  const { searchCachedMessagesInChat, getCachedChat } = await import('./localDb');
+  const [hits, chat] = await Promise.all([
+    searchCachedMessagesInChat(chatId, term, limit),
+    getCachedChat(chatId).catch(() => null),
   ]);
 
   const nameById = new Map<string, string>();
@@ -2450,34 +2452,16 @@ export async function searchInChat(chatId: string, q: string, limit = 80): Promi
     if (m.userId) nameById.set(m.userId, m.name || m.email || '');
   }
 
-  const hits: InChatMessageHit[] = [];
-  // SEARCH IS A BULK REPLAY — same guard hydrateMessages uses (see _bulkDecryptDepth).
-  // This decrypts up to 1000 cached messages of OLD history, whose ratchet states
-  // have long since advanced; two permanent failures among them is normal, and
-  // without this they were enough to fire e2eeResetSession + requestPeerRekey on a
-  // perfectly healthy live session — which is what breaks the next call with that
-  // peer. try/finally so an early `break` or a throw cannot leak the depth.
-  _bulkDecryptDepth++;
-  try {
-    for (const m of msgs) {
-      if (m.type !== 'text' || m.deletedAt) continue;
-      const text = await decryptFromChat(chatId, m.senderId, m.content, m.id, !!m.editedAt);
-      if (text && text.toLowerCase().includes(term)) {
-        hits.push({
-          id:         m.id,
-          senderId:   m.senderId,
-          senderName: nameById.get(m.senderId) || null,
-          content:    text,
-          type:       m.type,
-          createdAt:  m.createdAt,
-        });
-        if (hits.length >= limit) break;
-      }
-    }
-  } finally {
-    _bulkDecryptDepth--;
-  }
-  return hits;
+  // localDb decrypts only the at-rest cache field. It must not replay historical
+  // plaintext through the live Double Ratchet, which can advance/reset sessions.
+  return hits.map(m => ({
+    id: m.id,
+    senderId: m.senderId,
+    senderName: nameById.get(m.senderId) || null,
+    content: m.content,
+    type: m.type,
+    createdAt: m.createdAt,
+  }));
 }
 
 // ─── Mute (Day 11) ──────────────────────────────────────────────────

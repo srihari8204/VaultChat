@@ -3,7 +3,7 @@
 use std::time::Duration;
 use tokio::sync::{mpsc, watch};
 use wtransport::{ClientConfig, Endpoint, VarInt, endpoint::ConnectOptions, tls::rustls};
-use crate::carrier::Event;
+use crate::carrier::{Event, Outbound};
 
 fn client_config(roots: rustls::RootCertStore) -> ClientConfig {
     // Android's native cert store is not exposed to rustls-native-certs. Reuse
@@ -16,13 +16,13 @@ fn client_config(roots: rustls::RootCertStore) -> ClientConfig {
         .max_idle_timeout(Some(Duration::from_secs(30))).expect("valid idle timeout").build()
 }
 
-pub(crate) async fn drive(url: &str, token: &str, rx: mpsc::Receiver<Vec<u8>>, stop: watch::Receiver<bool>, emit: &mut impl FnMut(Event)) -> u16 {
+pub(crate) async fn drive(url: &str, token: &str, rx: mpsc::Receiver<Outbound>, stop: watch::Receiver<bool>, emit: &mut impl FnMut(Event)) -> u16 {
     let roots = rustls::RootCertStore::from_iter(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
     drive_with_config(url, token, rx, stop, emit, client_config(roots)).await
 }
 
-async fn drive_with_config(url: &str, token: &str, mut rx: mpsc::Receiver<Vec<u8>>, mut stop: watch::Receiver<bool>, emit: &mut impl FnMut(Event), config: ClientConfig) -> u16 {
-    if !url.starts_with("https://") || token.is_empty() || token.len() > 16384 || token.bytes().any(|b| b < 32 || b > 126) { return 1008; }
+async fn drive_with_config(url: &str, token: &str, mut rx: mpsc::Receiver<Outbound>, mut stop: watch::Receiver<bool>, emit: &mut impl FnMut(Event), config: ClientConfig) -> u16 {
+    if !url.starts_with("https://") || token.is_empty() || token.len() > 16384 || token.bytes().any(|b| !(32..=126).contains(&b)) { return 1008; }
     let Ok(endpoint) = Endpoint::client(config) else { return 1006 };
     let options = ConnectOptions::builder(url)
         .add_header("authorization", format!("Bearer {token}"))
@@ -59,7 +59,7 @@ async fn drive_with_config(url: &str, token: &str, mut rx: mpsc::Receiver<Vec<u8
                 let sent = tokio::select! {
                     biased;
                     _ = stop.changed() => break 1000,
-                    result = tokio::time::timeout(Duration::from_secs(10), send.write_all(&next)) => result,
+                    result = tokio::time::timeout(Duration::from_secs(10), send.write_all(&next.bytes)) => result,
                 };
                 if !matches!(sent, Ok(Ok(()))) { break 1006; }
             }
@@ -113,8 +113,8 @@ mod tests {
         let code = tokio::time::timeout(Duration::from_secs(15), drive_with_config(url, token, rx, stopped, &mut |event| match event {
             Event::Open => {
                 // Real QUIC stream fragmentation and pipelining, same shared frame codec.
-                tx.try_send(hello[..2].to_vec()).unwrap();
-                tx.try_send([&hello[2..], &ping].concat()).unwrap();
+                tx.try_send(Outbound::test(hello[..2].to_vec())).unwrap();
+                tx.try_send(Outbound::test([&hello[2..], &ping].concat())).unwrap();
             }
             Event::Binary(bytes) => for event in framed.on_bytes(&bytes) {
                 if let FrameEvent::Frame(payload) = event {

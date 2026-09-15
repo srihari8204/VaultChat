@@ -1326,8 +1326,28 @@ func chatsDelivered(w http.ResponseWriter, r *http.Request) {
 	if chatsTruthy(b["lastDeliveredMessageId"]) {
 		id, _ = chatsParseInt(b["lastDeliveredMessageId"])
 	}
-	if id == 0 {
+	if id <= 0 {
 		httpx.Err(w, 400, "lastDeliveredMessageId required")
+		return
+	}
+	// A global message id from another chat (or the future) must never poison
+	// this monotonic cursor. Permit holes left by purged messages, as /read
+	// does, but reject a retained row that demonstrably belongs to another chat.
+	// Scope explicitly: production's database role can bypass RLS.
+	var chatMaxID *int64
+	var foreignID bool
+	if err := chatsQRow(ctx, user.ID,
+		`SELECT MAX(m.id), EXISTS (SELECT 1 FROM messages WHERE id = $3 AND chat_id <> $1)
+		 FROM messages m WHERE m.chat_id = $1
+		 AND EXISTS (SELECT 1 FROM chat_members cm
+		             WHERE cm.chat_id = $1 AND cm.user_id = $2 AND cm.left_at IS NULL)`,
+		[]any{chatID, user.ID, id}, &chatMaxID, &foreignID); err != nil {
+		log.Printf("[delivered POST] cursor scope check: %v", err)
+		httpx.Err(w, 500, "Failed to mark delivered")
+		return
+	}
+	if chatMaxID == nil || id > *chatMaxID || foreignID {
+		httpx.Err(w, 400, "lastDeliveredMessageId is not a message in this chat")
 		return
 	}
 	// Record the pointer for THIS DEVICE as well as the account.
@@ -1342,7 +1362,8 @@ func chatsDelivered(w http.ResponseWriter, r *http.Request) {
 	if deviceID := strings.TrimSpace(r.Header.Get("X-Device-Id")); deviceID != "" {
 		if _, e := db.SysPool.Exec(ctx,
 			`INSERT INTO chat_device_delivery (chat_id, user_id, device_id, last_delivered_message_id)
-			      VALUES ($1, $2, $3, $4)
+			      SELECT $1, $2, $3, $4 FROM chat_members
+			      WHERE chat_id = $1 AND user_id = $2 AND left_at IS NULL
 			 ON CONFLICT (chat_id, user_id, device_id) DO UPDATE
 			    SET last_delivered_message_id = GREATEST(chat_device_delivery.last_delivered_message_id, EXCLUDED.last_delivered_message_id),
 			        updated_at = NOW()`,
@@ -1356,6 +1377,7 @@ func chatsDelivered(w http.ResponseWriter, r *http.Request) {
 		`UPDATE chat_members
 		 SET last_delivered_message_id = $1
 		 WHERE chat_id = $2 AND user_id = $3
+		   AND left_at IS NULL
 		   AND (last_delivered_message_id IS NULL OR last_delivered_message_id < $1)
 		 RETURNING last_delivered_message_id`,
 		[]any{id, chatID, user.ID}, &updated)

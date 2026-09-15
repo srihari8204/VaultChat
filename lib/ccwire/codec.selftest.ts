@@ -63,7 +63,7 @@ console.log('The schema is the spec — the codec must not drift from it:');
   const fromProto: Record<number, string> = {};
   for (const m of oneof.matchAll(/^\s*\w+\s+(\w+)\s*=\s*(\d+);/gm)) fromProto[Number(m[2])] = m[1];
   const n = Object.keys(fromProto).length;
-  check(`envelope.proto declares ${n} oneof bodies`, n === 27, `found ${n}`);
+  check(`envelope.proto declares ${n} oneof bodies`, n === 28, `found ${n}`);
   const mismatched = Object.keys(fromProto).filter((k) => fromProto[k] !== BODY_NAMES[k]);
   check('every body field number in BODY_NAMES matches envelope.proto',
     mismatched.length === 0 && Object.keys(BODY_NAMES).length === n,

@@ -40,8 +40,6 @@ package realtime
 import (
 	"encoding/base64"
 
-	"github.com/zishang520/socket.io/v2/socket"
-
 	"vaultchat/backend-go/internal/ccwire"
 	"vaultchat/backend-go/internal/metrics"
 )
@@ -97,7 +95,7 @@ func (s *ccwireSession) viewerState(m ccwire.Message) bool {
 	if v.ChatID == "" {
 		return s.sendError(m.RequestID, errPayloadInvalid, "chat_id required")
 	}
-	if !s.hub.chatMemberAllowed(s.d, v.ChatID) {
+	if !s.hub.chatMemberAllowed(s.d, v.ChatID, s.ctxOrBG()) {
 		metrics.Inc("ccwire_viewer_state_refused")
 		return s.sendError(m.RequestID, errNotPermitted, "not permitted")
 	}
@@ -105,38 +103,38 @@ func (s *ccwireSession) viewerState(m ccwire.Message) bool {
 	h, uid := s.hub, s.d.uid
 
 	if v.Leaving {
-		h.cvRemove(v.ChatID, uid)
+		h.cvRemove(v.ChatID, uid, s.ctxOrBG())
 		// onChatView emits viewer_left into the Socket.IO room, which no CC-Wire
 		// session is in. Fanning to the remaining viewers by uid reaches both
 		// transports and reuses the roster that was just updated, rather than
 		// inventing a second audience.
-		for _, w := range h.cvList(v.ChatID) {
+		for _, w := range h.cvList(v.ChatID, s.ctxOrBG()) {
 			if w.UserID != uid {
-				h.EmitToUid(w.UserID, "viewer_left", map[string]any{"chatId": v.ChatID, "userId": uid})
+				h.emitToUidContext(s.ctxOrBG(), w.UserID, "viewer_left", map[string]any{"chatId": v.ChatID, "userId": uid})
 			}
 		}
 		metrics.Inc("ccwire_viewer_state")
 		return true // EPHEMERAL: fire-and-forget, no Ack — as typing_state is.
 	}
 
-	isNew, changed, act := h.cvTouch(v.ChatID, uid, viewerActivityWire[v.Activity])
+	isNew, changed, act := h.cvTouch(v.ChatID, uid, viewerActivityWire[v.Activity], s.ctxOrBG())
 	if !isNew && !changed && !v.Resync {
 		metrics.Inc("ccwire_viewer_state")
 		return true // plain heartbeat
 	}
 
-	viewers := h.cvList(v.ChatID)
+	viewers := h.cvList(v.ChatID, s.ctxOrBG())
 	if (isNew || changed) && len(viewers) > 0 {
 		event := "viewer_activity"
 		if isNew {
 			event = "viewer_joined"
 		}
-		hideFrom := h.loadGhostTargets(uid, "hide_online")
+		hideFrom := h.loadGhostTargets(uid, "hide_online", s.ctxOrBG())
 		for _, w := range viewers {
 			if w.UserID == uid || hideFrom[w.UserID] {
 				continue
 			}
-			h.EmitToUid(w.UserID, event, map[string]any{"chatId": v.ChatID, "userId": uid, "activity": act})
+			h.emitToUidContext(s.ctxOrBG(), w.UserID, event, map[string]any{"chatId": v.ChatID, "userId": uid, "activity": act})
 		}
 	}
 
@@ -157,7 +155,7 @@ func (s *ccwireSession) viewerState(m ccwire.Message) bool {
 func (s *ccwireSession) sendViewerList(chatID, uid string, viewers []cvViewer) {
 	hiddenFromMe := map[string]bool{}
 	if len(viewers) > 0 {
-		hiddenFromMe = s.hub.loadGhostOwners(uid, "hide_online")
+		hiddenFromMe = s.hub.loadGhostOwners(uid, "hide_online", s.ctxOrBG())
 	}
 	b := ccwire.AppendStringField(nil, 1, chatID)
 	for _, w := range viewers {
@@ -217,7 +215,7 @@ func (s *ccwireSession) geoRelay(m ccwire.Message) bool {
 		// has: a live ping with no payload is nothing to relay.
 		return s.sendError(m.RequestID, errPayloadInvalid, "sealed required")
 	}
-	if !s.hub.chatMemberAllowed(s.d, g.ScopeID) {
+	if !s.hub.chatMemberAllowed(s.d, g.ScopeID, s.ctxOrBG()) {
 		metrics.Inc("ccwire_geo_relay_refused")
 		return s.sendError(m.RequestID, errNotPermitted, "not permitted")
 	}
@@ -227,9 +225,7 @@ func (s *ccwireSession) geoRelay(m ccwire.Message) bool {
 	// The same room the Socket.IO relay emits into. Guarded because the
 	// package's socket-free tests build a bare &Hub{} (emitToUidIn guards the
 	// same way, for the same reason).
-	if s.hub.io != nil {
-		s.hub.io.To(socket.Room("chat:" + g.ScopeID)).Emit(event, out)
-	}
+	s.hub.emitRooms([]string{"chat:" + g.ScopeID}, s.sessionID, event, out, s.ctxOrBG())
 	metrics.Inc("ccwire_geo_relay")
 	return true // EPHEMERAL: fire-and-forget, no Ack.
 }

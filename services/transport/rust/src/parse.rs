@@ -7,7 +7,7 @@
 //!
 //! WHAT THIS MODULE DELIBERATELY DOES NOT DO
 //! -----------------------------------------
-//! It does not decode the 27 body types. It reads the routing header —
+//! It does not decode the body types. It reads the routing header —
 //! request_id, traffic_class, stream, seq, depends_on — establishes WHICH body
 //! is set, and hands the body up as opaque bytes.
 //!
@@ -20,7 +20,7 @@
 //!
 //! The EPHEMERAL invariant is still enforced here in full, because `codec.ts`
 //! enforces it "on the FIELD NUMBER, before and independently of decoding the
-//! body, so it holds for all 27 bodies including the ones this build does not
+//! body, so it holds for all bodies including the ones this build does not
 //! type". Field numbers are all this module needs.
 //!
 //! ORDER OF CHECKS IS LOAD-BEARING, exactly as in `frame.rs`: total size →
@@ -145,13 +145,13 @@ impl CodecError {
 pub const TRAFFIC_CLASS_EPHEMERAL: u32 = 5;
 
 /// Every `Frame.body` field number, from envelope.proto.
-pub const BODY_FIELDS: [u32; 27] = [
+pub const BODY_FIELDS: [u32; 28] = [
     16, 17, 18, 19, 20, 21, 22, 23, //
     32, 33, //
     48, 49, 50, 51, 52, //
     64, 65, //
     80, 81, 82, 83, 84, //
-    96, 97, 98, 99, //
+    96, 97, 98, 99, 100, //
     112,
 ];
 

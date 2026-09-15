@@ -42,6 +42,12 @@ eq('snapshot reflects the new call', getSnapshot().peerUid, 'p1');
 check('a started call is active', isActive() === true);
 off();
 
+reset();
+begin({ ...START, peerUid: '', peerName: 'Core Team' });
+check('a started group call is active', isActive() === true);
+reset();
+begin(START);
+
 console.log('\nnotification is change-gated (the re-send storm):');
 [count, off] = counter();
 dispatch({ type: 'offer_sent' }, 1000);

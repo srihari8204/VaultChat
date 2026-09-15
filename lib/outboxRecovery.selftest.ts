@@ -54,6 +54,9 @@ export default {
 export async function markRead(chatId, id) { return H().markRead(chatId, id); }
 export async function markDelivered(chatId, id) { return H().markDelivered(chatId, id); }
 export function onConnectionState() { return () => {}; }
+export async function getAccessToken() { return 'test-owner'; }
+export function tokenSubject(token) { return token; }
+export class SessionEndedError extends Error {}
 
 // --- messageQueue deps ---
 export const NetInfo = { addEventListener(cb) { H().netListeners.push(cb); return () => {}; } };
@@ -111,6 +114,9 @@ function rewrite(file: string, out: string, rules: [RegExp, string][]) {
 }
 
 rewrite('receipts.ts', 'receipts.ts', [
+  [/^import \{ getAccessToken \} from '\.\/api';$/m, `import { getAccessToken } from './stubs.js';`],
+  [/^import \{ tokenSubject \} from '\.\/tokenIdentity';$/m, `import { tokenSubject } from './stubs.js';`],
+  [/^import \{ SessionEndedError \} from '\.\/sessionEnded';$/m, `import { SessionEndedError } from './stubs.js';`],
   [/^import AsyncStorage from '@react-native-async-storage\/async-storage';$/m,
    `import AsyncStorage from './stubs.js';`],
   [/^import \{ markRead, markDelivered \} from '\.\/chatService';$/m,
@@ -215,10 +221,9 @@ async function main() {
   check('and the pointer is NOT rolled back — it retries and lands',
     H.readCalls.length === 2 && H.readCalls[1] === 300, JSON.stringify(H.readCalls));
 
-  // persistSoon() is an 800ms debounce; the rolled-back value must reach disk or
-  // the wedge simply comes back at the next cold start.
-  await new Promise(r => setTimeout(r, 900));
-  const stored = JSON.parse(H.kv['vc_receipts_v1'] ?? '{}');
+  // Allow the coalesced persistence microtask to settle before inspecting disk.
+  await new Promise(r => setTimeout(r, 0));
+  const stored = JSON.parse(H.kv['vc_receipts_v2:test-owner'] ?? '{}');
   check('the healed pointer is persisted, so a restart stays healed',
     stored?.c1?.read === NEWEST_IN_CHAT && stored?.c1?.ackedRead === NEWEST_IN_CHAT,
     JSON.stringify(stored?.c1));
@@ -270,7 +275,7 @@ async function main() {
     /const stillHere = chatIdRef\.current === chatId;/.test(CHAT) &&
     /if \(!ownBlankEcho && stillHere\)/.test(CHAT));
   check('…while the persist + delivery ack still run unconditionally',
-    /await applyMessage\(chatId, fin\);[^\n]*\n\s*if \(fin\.senderId !== me\) markDeliveredDurable/.test(CHAT));
+    /await applyMessage\(chatId, fin\);[^\n]*\n\s*if \(me && fin\.senderId !== me\) markDeliveredDurable/.test(CHAT));
   const jump = CHAT.slice(CHAT.indexOf('const jumpToMessage'), CHAT.indexOf('// Consume a pending jump'));
   check('jumpToMessage guards the chat and MERGES instead of replacing',
     /chatIdRef\.current === cid/.test(jump) && !/setMessages\(messagesRef\.current\)/.test(jump));

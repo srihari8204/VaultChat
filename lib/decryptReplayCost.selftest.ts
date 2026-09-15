@@ -63,8 +63,8 @@ check('and is unwound on the same condition',
   /if \(bulk\) _bulkDecryptDepth--;/.test(CHAT_SERVICE),
   'an unbalanced counter would wedge replay detection on permanently');
 
-// Only DELIBERATE, BOUNDED decrypts may set it. Two qualify on this screen:
-// the socket handler (one message, just arrived), and the on-open retry of
+// Only DELIBERATE, BOUNDED decrypts may set it. Three qualify on this screen:
+// the new-message and edit handlers (one message each), and the on-open retry of
 // messages already known to be stuck (a short list, and healing them is the
 // entire point of that pass). Both are worth the 500ms retry.
 //
@@ -75,8 +75,8 @@ check('and is unwound on the same condition',
 // bounded before raising it.
 const liveCalls = CHAT_SCREEN.match(/hydrateMessages\([^)]*live:\s*true[^)]*\)/g) ?? [];
 check('only bounded chat-screen decrypts are marked live',
-  liveCalls.length === 2,
-  `${liveCalls.length} call sites pass live:true — expected the socket handler and the stuck-message retry`);
+  liveCalls.length === 3 && /hydrateMessages\(chatId, \[raw\], undefined, \{ live: true \}\)/.test(CHAT_SCREEN),
+  `${liveCalls.length} call sites pass live:true — expected new message, a single edited row, and the stuck-message retry`);
 check('syncEngine does NOT mark its replay as live',
   /hydrateMessages\(/.test(SYNC) && !/live:\s*true/.test(SYNC));
 

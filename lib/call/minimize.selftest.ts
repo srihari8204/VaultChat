@@ -28,6 +28,7 @@ const read = (...p: string[]) => fs.readFileSync(path.join(process.cwd(), ...p),
 const ENGINE = read('lib', 'call', 'engine.ts');
 const BAR = read('components', 'CallBar.tsx');
 const LAYOUT = read('app', '_layout.tsx');
+const MAIN_APPLICATION = read('android', 'app', 'src', 'main', 'java', 'com', 'vaultchat', 'app', 'MainApplication.kt');
 const VIDEO = read('app', 'videocall.tsx');
 const VOICE = read('app', 'voicecall.tsx');
 
@@ -60,8 +61,19 @@ check('it subscribes to the live call store',
   /useSyncExternalStore\(subscribe, getSnapshot/.test(BAR));
 check('it hides itself on the call screens',
   /CALL_ROUTES/.test(BAR) && /'\/videocall'/.test(BAR) && /'\/voicecall'/.test(BAR));
-check('it can end the call without navigating back in', /hangUp\('local_hangup', true\)/.test(BAR));
+check('CallBar does not load the LiveKit call engine during root render',
+  !/from ['"]\.\.\/lib\/call\/engine['"]/.test(BAR));
+check('it can end the call without navigating back in',
+  /import\('..\/lib\/call\/engine'\)[\s\S]{0,120}?hangUp\('local_hangup', true\)/.test(BAR));
 check('it routes back with resume=1', /resume: '1'/.test(BAR));
+check('it routes group calls back to the group call screen', /\/group-call-active/.test(BAR));
+check('root uses the tiny DOMException polyfill instead of importing LiveKit',
+  /import ['"]\.\.\/lib\/domExceptionPolyfill['"];/.test(LAYOUT)
+  && !/import ['"]@livekit\/react-native['"];/.test(LAYOUT));
+check('Application keeps LiveKit native setup eager for call audio',
+  /LiveKitReactNative\.setup\(this\)/.test(MAIN_APPLICATION));
+check('Application does not eagerly load VaultBeam native during app launch',
+  !/System\.loadLibrary\("vaultbeamnative"\)/.test(MAIN_APPLICATION));
 
 console.log('\nBoth call screens minimise instead of ending:');
 for (const [name, src] of [['videocall', VIDEO], ['voicecall', VOICE]] as const) {

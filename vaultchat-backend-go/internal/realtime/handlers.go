@@ -1,6 +1,7 @@
 package realtime
 
 import (
+	"context"
 	"encoding/json"
 	"log"
 	"os"
@@ -29,17 +30,17 @@ import (
 //
 // What this can and cannot check:
 //
-//   SHAPE, yes. Field count, key length, value types, string lengths, array
-//   counts, nesting depth, and a whole-payload budget.
+//	SHAPE, yes. Field count, key length, value types, string lengths, array
+//	counts, nesting depth, and a whole-payload budget.
 //
-//   CONTENT, no — and deliberately not. The relayed bodies are E2EE envelopes
-//   (SDP sealed per peer, call media keys, VaultBeam chunk bitmaps, rekey
-//   material). This process has no key for any of them and must not grow one.
+//	CONTENT, no — and deliberately not. The relayed bodies are E2EE envelopes
+//	(SDP sealed per peer, call media keys, VaultBeam chunk bitmaps, rekey
+//	material). This process has no key for any of them and must not grow one.
 //
-//   FIELD NAMES, no allowlist. A per-event schema would be the stricter thing,
-//   but the relays forward fields this file has never enumerated and a deployed
-//   client that still sends one must keep working. Bounded-but-unnamed is the
-//   line that holds without a forced client update.
+//	FIELD NAMES, no allowlist. A per-event schema would be the stricter thing,
+//	but the relays forward fields this file has never enumerated and a deployed
+//	client that still sends one must keep working. Bounded-but-unnamed is the
+//	line that holds without a forced client update.
 //
 // A violation DROPS the event and logs. It never disconnects: the brief says a
 // bug in one client must not kick that user offline, and a drop is also the
@@ -164,8 +165,8 @@ func truthy(v any) bool {
 }
 
 // ── Chat real-time handlers (server.js io.on('connection') chat block) ──
-func (h *Hub) registerChatHandlers(s *socket.Socket) {
-	d := sd(s)
+func (h *Hub) registerChatHandlersPeer(s *eventPeer) {
+	d := s.data
 
 	// AUTHORIZE THE ROOM, do not take the client's word for it.
 	//
@@ -187,7 +188,7 @@ func (h *Hub) registerChatHandlers(s *socket.Socket) {
 		if id == "" {
 			return
 		}
-		if !h.chatMemberAllowed(d, id) {
+		if !h.chatMemberAllowed(d, id, s.Context()) {
 			// Logged, not silent: a refusal here means a client believes it
 			// belongs to a chat the database disagrees about, and that is worth
 			// seeing rather than guessing at.
@@ -195,7 +196,9 @@ func (h *Hub) registerChatHandlers(s *socket.Socket) {
 			metrics.Inc("socket_join_chat_refused")
 			return
 		}
-		s.Join(socket.Room("chat:" + id))
+		if !s.Join(socket.Room("chat:" + id)) {
+			return
+		}
 	})
 	s.On("leave_chat", func(args ...any) {
 		if id := mstr(argMap("leave_chat", args), "chatId"); id != "" {
@@ -205,7 +208,9 @@ func (h *Hub) registerChatHandlers(s *socket.Socket) {
 
 	s.On("channel_join", func(args ...any) {
 		if id := mstr(argMap("channel_join", args), "channelId"); id != "" {
-			s.Join(socket.Room("channel:" + id))
+			if !s.Join(socket.Room("channel:" + id)) {
+				return
+			}
 		}
 	})
 	s.On("channel_leave", func(args ...any) {
@@ -222,7 +227,7 @@ func (h *Hub) registerChatHandlers(s *socket.Socket) {
 		if chatID == "" {
 			return
 		}
-		if !h.chatMemberAllowed(d, chatID) {
+		if !h.chatMemberAllowed(d, chatID, s.Context()) {
 			return
 		}
 		out := map[string]any{"userId": d.uid, "until": m["until"]}
@@ -269,7 +274,7 @@ func (h *Hub) registerChatHandlers(s *socket.Socket) {
 		if chatID == "" || (blob == "" && !hasPlain) {
 			return
 		}
-		if !h.chatMemberAllowed(d, chatID) {
+		if !h.chatMemberAllowed(d, chatID, s.Context()) {
 			return
 		}
 		out := map[string]any{"userId": d.uid, "tripId": m["tripId"]}
@@ -287,7 +292,7 @@ func (h *Hub) registerChatHandlers(s *socket.Socket) {
 		if chatID == "" {
 			return
 		}
-		if !h.chatMemberAllowed(d, chatID) {
+		if !h.chatMemberAllowed(d, chatID, s.Context()) {
 			return
 		}
 		s.To(socket.Room("chat:"+chatID)).Emit("trip_end", map[string]any{
@@ -298,7 +303,7 @@ func (h *Hub) registerChatHandlers(s *socket.Socket) {
 	// Run positions (Spaces & Operations, S2.8). Kept in its own function
 	// because, unlike trips, a run fans out to a per-run room rather than to the
 	// chat — see registerRunRelay for why.
-	h.registerRunRelay(s, d)
+	h.registerRunRelayPeer(s, d)
 
 	// Typing — routed via fanOutToChat so it reaches every member's user-room
 	// and honours hide_typing ghost-mode.
@@ -324,16 +329,16 @@ func (h *Hub) registerChatHandlers(s *socket.Socket) {
 	typing := func(event string) func(...any) {
 		return func(args ...any) {
 			chatID := mstr(argMap(event, args), "chatId")
-			if chatID == "" || !h.chatMemberAllowed(d, chatID) {
+			if chatID == "" || !h.chatMemberAllowed(d, chatID, s.Context()) {
 				return
 			}
-			h.FanOutToChat(bg, chatID, event, map[string]any{"uid": d.uid, "chatId": chatID}, "")
+			h.FanOutToChat(s.Context(), chatID, event, map[string]any{"uid": d.uid, "chatId": chatID}, "")
 		}
 	}
 	s.On("typing_start", typing("typing_start"))
 	s.On("typing_stop", typing("typing_stop"))
 
-	s.On("chat_view", func(args ...any) { h.onChatView(s, argMap("chat_view", args)) })
+	s.On("chat_view", func(args ...any) { h.onChatViewPeer(s, argMap("chat_view", args)) })
 
 	// Delivered tick + reactions — relays into the chat room (excl. self).
 	//
@@ -345,7 +350,7 @@ func (h *Hub) registerChatHandlers(s *socket.Socket) {
 	s.On("new_message", func(args ...any) {
 		m := argMap("new_message", args)
 		chatID := mstr(m, "chatId")
-		if chatID == "" || !h.chatMemberAllowed(d, chatID) {
+		if chatID == "" || !h.chatMemberAllowed(d, chatID, s.Context()) {
 			return
 		}
 		s.To(socket.Room("chat:"+chatID)).Emit("message_delivered", map[string]any{"messageId": m["messageId"]})
@@ -354,7 +359,7 @@ func (h *Hub) registerChatHandlers(s *socket.Socket) {
 	s.On("reaction_updated", func(args ...any) {
 		m := argMap("reaction_updated", args)
 		chatID := mstr(m, "chatId")
-		if chatID == "" || !h.chatMemberAllowed(d, chatID) {
+		if chatID == "" || !h.chatMemberAllowed(d, chatID, s.Context()) {
 			return
 		}
 		s.To(socket.Room("chat:"+chatID)).Emit("reaction_updated",
@@ -396,17 +401,19 @@ func (h *Hub) registerChatHandlers(s *socket.Socket) {
 // member. The confidentiality boundary here is therefore DELIVERY, not
 // cryptography: a member who is not in the run's room never receives the
 // ciphertext. Said plainly rather than implied.
-func (h *Hub) registerRunRelay(s *socket.Socket, d *sockData) {
+func (h *Hub) registerRunRelayPeer(s *eventPeer, d *sockData) {
 	s.On("run_subscribe", func(args ...any) {
 		m := argMap("run_subscribe", args)
 		chatID, runID := mstr(m, "chatId"), mstr(m, "runId")
-		if chatID == "" || runID == "" || !h.chatMemberAllowed(d, chatID) {
+		if chatID == "" || runID == "" || !h.chatMemberAllowed(d, chatID, s.Context()) {
 			return
 		}
-		if !h.runAllowed(d, runID, false) {
+		if !h.runAllowed(d, runID, false, s.Context()) {
 			return
 		}
-		s.Join(socket.Room("run:" + runID))
+		if !s.Join(socket.Room("run:" + runID)) {
+			return
+		}
 	})
 
 	s.On("run_unsubscribe", func(args ...any) {
@@ -418,13 +425,13 @@ func (h *Hub) registerRunRelay(s *socket.Socket, d *sockData) {
 	s.On("run_update", func(args ...any) {
 		m := argMap("run_update", args)
 		chatID, runID, blob := mstr(m, "chatId"), mstr(m, "runId"), mstr(m, "blob")
-		if chatID == "" || runID == "" || blob == "" || !h.chatMemberAllowed(d, chatID) {
+		if chatID == "" || runID == "" || blob == "" || !h.chatMemberAllowed(d, chatID, s.Context()) {
 			return
 		}
 		// Only the assigned driver may claim to be the vehicle. Without this a
 		// member could publish a position for a bus they are nowhere near, and
 		// every parent watching would believe it.
-		if !h.runAllowed(d, runID, true) {
+		if !h.runAllowed(d, runID, true, s.Context()) {
 			return
 		}
 		s.To(socket.Room("run:"+runID)).Emit("run_update", map[string]any{
@@ -435,7 +442,7 @@ func (h *Hub) registerRunRelay(s *socket.Socket, d *sockData) {
 	s.On("run_end", func(args ...any) {
 		m := argMap("run_end", args)
 		runID := mstr(m, "runId")
-		if runID == "" || !h.runAllowed(d, runID, true) {
+		if runID == "" || !h.runAllowed(d, runID, true, s.Context()) {
 			return
 		}
 		s.To(socket.Room("run:"+runID)).Emit("run_end", map[string]any{
@@ -451,7 +458,12 @@ func (h *Hub) registerRunRelay(s *socket.Socket, d *sockData) {
 // callers. drive=true asks "is this socket the run's driver", which is a plain
 // column read and deliberately not the same question: ops may watch every run
 // and must still not be able to publish a position for one.
-func (h *Hub) runAllowed(d *sockData, runID string, drive bool) bool {
+func (h *Hub) runAllowed(d *sockData, runID string, drive bool, parents ...context.Context) bool {
+	ctx, cancel := realtimeContext(parents...)
+	defer cancel()
+	if ctx.Err() != nil {
+		return false
+	}
 	key := "view:" + runID
 	if drive {
 		key = "drive:" + runID
@@ -467,13 +479,13 @@ func (h *Hub) runAllowed(d *sockData, runID string, drive bool) bool {
 		return entry.ok
 	}
 	ok := false
-	_ = db.WithUser(bg, d.uid, func(tx pgx.Tx) error {
+	_ = db.WithUser(ctx, d.uid, func(tx pgx.Tx) error {
 		var one bool
 		q := `SELECT vc_run_visible($1)`
 		if drive {
 			q = `SELECT EXISTS (SELECT 1 FROM runs WHERE id = $1 AND driver_id = current_setting('app.current_user_id', true)::uuid AND status = 'started')`
 		}
-		if tx.QueryRow(bg, q, runID).Scan(&one) == nil {
+		if tx.QueryRow(ctx, q, runID).Scan(&one) == nil {
 			ok = one
 		}
 		return nil
@@ -486,7 +498,12 @@ func (h *Hub) runAllowed(d *sockData, runID string, drive bool) bool {
 
 // chatMemberAllowed caches the chat-membership check per socket per chat (RLS,
 // server.js db.queryAs). One query per chat for the socket's lifetime.
-func (h *Hub) chatMemberAllowed(d *sockData, chatID string) bool {
+func (h *Hub) chatMemberAllowed(d *sockData, chatID string, parents ...context.Context) bool {
+	ctx, cancel := realtimeContext(parents...)
+	defer cancel()
+	if ctx.Err() != nil {
+		return false
+	}
 	gen := permGenerationOf(chatID)
 	d.mu.Lock()
 	entry, cached := d.chatMemberOk[chatID]
@@ -497,9 +514,9 @@ func (h *Hub) chatMemberAllowed(d *sockData, chatID string) bool {
 		return entry.ok
 	}
 	ok := false
-	_ = db.WithUser(bg, d.uid, func(tx pgx.Tx) error {
+	_ = db.WithUser(ctx, d.uid, func(tx pgx.Tx) error {
 		var one int
-		if tx.QueryRow(bg,
+		if tx.QueryRow(ctx,
 			`SELECT 1 FROM chat_members WHERE chat_id = $1 AND user_id = $2 AND left_at IS NULL LIMIT 1`,
 			chatID, d.uid).Scan(&one) == nil {
 			ok = true
@@ -526,7 +543,12 @@ func (h *Hub) chatMemberAllowed(d *sockData, chatID string) bool {
 // leaves a ≤30s window in which signalling still reaches them — the same
 // backstop the other caches rely on in cluster mode. Key it by chat and bump it
 // if that window ever matters.
-func (h *Hub) peerAllowed(d *sockData, to string) bool {
+func (h *Hub) peerAllowed(d *sockData, to string, parents ...context.Context) bool {
+	ctx, cancel := realtimeContext(parents...)
+	defer cancel()
+	if ctx.Err() != nil {
+		return false
+	}
 	if d == nil || to == "" {
 		return false
 	}
@@ -543,9 +565,9 @@ func (h *Hub) peerAllowed(d *sockData, to string) bool {
 		return entry.ok
 	}
 	ok := false
-	_ = db.WithUser(bg, d.uid, func(tx pgx.Tx) error {
+	_ = db.WithUser(ctx, d.uid, func(tx pgx.Tx) error {
 		var one int
-		if tx.QueryRow(bg,
+		if tx.QueryRow(ctx,
 			`SELECT 1 FROM chat_members mine
 			   JOIN chat_members theirs ON theirs.chat_id = mine.chat_id
 			  WHERE mine.user_id = $1 AND mine.left_at IS NULL
@@ -570,13 +592,13 @@ func (h *Hub) peerAllowed(d *sockData, to string) bool {
 // Gated like every other chat publisher in this file: cvList returns the uids
 // of everyone viewing, and a join announces the caller into the chat's room, so
 // an ungated call read and wrote presence for any chat id a client could name.
-func (h *Hub) onChatView(s *socket.Socket, m map[string]any) {
+func (h *Hub) onChatViewPeer(s *eventPeer, m map[string]any) {
 	chatID := mstr(m, "chatId")
 	if chatID == "" {
 		return
 	}
-	d := sd(s)
-	if !h.chatMemberAllowed(d, chatID) {
+	d := s.data
+	if !h.chatMemberAllowed(d, chatID, s.Context()) {
 		return
 	}
 	uid := d.uid
@@ -585,36 +607,36 @@ func (h *Hub) onChatView(s *socket.Socket, m map[string]any) {
 	resync := truthy(m["resync"])
 
 	if status == "LEFT" {
-		h.cvRemove(chatID, uid)
-		h.io.To(socket.Room("chat:"+chatID)).Emit("viewer_left", map[string]any{"chatId": chatID, "userId": uid})
+		h.cvRemove(chatID, uid, s.Context())
+		h.emitRooms([]string{"chat:" + chatID}, "", "viewer_left", map[string]any{"chatId": chatID, "userId": uid}, s.Context())
 		return
 	}
 
-	isNew, changed, act := h.cvTouch(chatID, uid, activity)
+	isNew, changed, act := h.cvTouch(chatID, uid, activity, s.Context())
 	if !isNew && !changed && !resync {
 		return // plain heartbeat
 	}
-	hideFrom := h.loadGhostTargets(uid, "hide_online")
-	viewers := h.cvList(chatID)
+	hideFrom := h.loadGhostTargets(uid, "hide_online", s.Context())
+	viewers := h.cvList(chatID, s.Context())
 
 	if isNew {
 		for _, v := range viewers {
 			if v.UserID == uid || hideFrom[v.UserID] {
 				continue
 			}
-			h.EmitToUid(v.UserID, "viewer_joined", map[string]any{"chatId": chatID, "userId": uid, "activity": act})
+			h.emitToUidContext(s.Context(), v.UserID, "viewer_joined", map[string]any{"chatId": chatID, "userId": uid, "activity": act})
 		}
 	} else if changed {
 		for _, v := range viewers {
 			if v.UserID == uid || hideFrom[v.UserID] {
 				continue
 			}
-			h.EmitToUid(v.UserID, "viewer_activity", map[string]any{"chatId": chatID, "userId": uid, "activity": act})
+			h.emitToUidContext(s.Context(), v.UserID, "viewer_activity", map[string]any{"chatId": chatID, "userId": uid, "activity": act})
 		}
 	}
 
 	if isNew || resync {
-		hiddenFromMe := h.loadGhostOwners(uid, "hide_online")
+		hiddenFromMe := h.loadGhostOwners(uid, "hide_online", s.Context())
 		list := []cvViewer{}
 		for _, v := range viewers {
 			if v.UserID != uid && !hiddenFromMe[v.UserID] {
@@ -626,8 +648,8 @@ func (h *Hub) onChatView(s *socket.Socket, m map[string]any) {
 }
 
 // ── WebRTC / VaultBeam / call signaling (server.js relayToPeer block) ──
-func (h *Hub) registerSignalHandlers(s *socket.Socket) {
-	d := sd(s)
+func (h *Hub) registerSignalHandlersPeer(s *eventPeer) {
+	d := s.data
 
 	// relayToPeer: forward to a specific peer uid, stamping the authenticated
 	// sender as from/fromUid (critical for webrtc_end hangup matching).
@@ -648,13 +670,13 @@ func (h *Hub) registerSignalHandlers(s *socket.Socket) {
 		return func(args ...any) {
 			m := argMap(event, args)
 			to := mstr(m, "to")
-			if to == "" || !h.peerAllowed(d, to) {
+			if to == "" || !h.peerAllowed(d, to, s.Context()) {
 				return
 			}
 			out := copyMap(m)
 			out["from"] = d.uid
 			out["fromUid"] = d.uid
-			h.EmitToUid(to, event, out)
+			h.emitToUidContext(s.Context(), to, event, out)
 		}
 	}
 	s.On("webrtc_offer", relay("webrtc_offer"))
@@ -693,7 +715,7 @@ func (h *Hub) registerSignalHandlers(s *socket.Socket) {
 		to := mstr(m, "to")
 		// Same entitlement as every other per-peer relay: ringing a stranger is
 		// the one of these that also lights up their screen.
-		if to == "" || !h.peerAllowed(d, to) {
+		if to == "" || !h.peerAllowed(d, to, s.Context()) {
 			return
 		}
 		// Ringing is the one socket event that costs the RECIPIENT something:
@@ -712,14 +734,14 @@ func (h *Hub) registerSignalHandlers(s *socket.Socket) {
 		// per-IP key would punish everyone behind one carrier NAT. Consume
 		// fails OPEN, so a Redis outage degrades to today's behaviour rather
 		// than silencing every call on the platform.
-		if rl := redisx.Consume(bg, "call:ring:"+d.uid, callRingLimit, callRingWindowSec); !rl.Allowed {
+		if rl := redisx.Consume(s.Context(), "call:ring:"+d.uid, callRingLimit, callRingWindowSec); !rl.Allowed {
 			metrics.Inc("call_ring_rate_limited")
 			return
 		}
 		out := copyMap(m)
 		out["from"] = d.uid
 		out["fromUid"] = d.uid
-		h.EmitToUid(to, "call_incoming", out)
+		h.emitToUidContext(s.Context(), to, "call_incoming", out)
 
 		// NO PUSH FROM HERE — /call/initiate already owns the ring.
 		//
@@ -778,16 +800,16 @@ func (h *Hub) registerSignalHandlers(s *socket.Socket) {
 		// before joining the group) and self-healing, and it is the behaviour
 		// the three existing relays already have. Give the call path its own
 		// positive-only cache if that window ever shows up in call_join_denied.
-		if !h.chatMemberAllowed(d, chatID) {
+		if !h.chatMemberAllowed(d, chatID, s.Context()) {
 			metrics.Inc("call_join_denied")
 			return
 		}
 		room := socket.Room("call:" + chatID)
 		var existing []string
 		if ClusterEnabled() {
-			existing = clusterCallRoster(chatID, d.uid)
+			existing = clusterCallRoster(chatID, d.uid, s.Context())
 		} else {
-			existing = h.callRoster(room, d.uid)
+			existing = h.callRoster(room, d.uid, s.Context())
 		}
 		// P6.1: enforce the mesh cap SERVER-side. This is a full mesh — each
 		// participant holds N-1 RTCPeerConnections and uploads N-1 encoded
@@ -810,10 +832,12 @@ func (h *Hub) registerSignalHandlers(s *socket.Socket) {
 			})
 			return
 		}
-		if ClusterEnabled() {
-			clusterCallJoin(chatID, d.uid)
+		if !s.Join(room) {
+			return
 		}
-		s.Join(room)
+		if ClusterEnabled() {
+			clusterCallJoin(chatID, d.uid, s.Context())
+		}
 		s.Emit("call_roster", map[string]any{"chatId": chatID, "peers": existing})
 		s.To(room).Emit("call_peer_joined", map[string]any{"chatId": chatID, "uid": d.uid})
 	})
@@ -826,7 +850,7 @@ func (h *Hub) registerSignalHandlers(s *socket.Socket) {
 		s.To(room).Emit("call_peer_left", map[string]any{"chatId": chatID, "uid": d.uid})
 		s.Leave(room)
 		if ClusterEnabled() {
-			clusterCallLeave(chatID, d.uid)
+			clusterCallLeave(chatID, d.uid, s.Context())
 		}
 	})
 }
@@ -873,7 +897,9 @@ func meshMaxParticipants() int {
 // callRoster returns the distinct uids already in a call room (excl. me).
 // FetchSockets runs its callback synchronously for the in-memory adapter; the
 // channel makes the read safe regardless.
-func (h *Hub) callRoster(room socket.Room, me string) []string {
+func (h *Hub) callRoster(room socket.Room, me string, parents ...context.Context) []string {
+	ctx, cancel := realtimeContext(parents...)
+	defer cancel()
 	seen := map[string]bool{}
 	out := []string{}
 	done := make(chan struct{})
@@ -886,6 +912,16 @@ func (h *Hub) callRoster(room socket.Room, me string) []string {
 		}
 		close(done)
 	})
-	<-done
+	select {
+	case <-done:
+	case <-ctx.Done():
+		return nil
+	}
+	for _, uid := range h.ccwireCallRoster(string(room), me) {
+		if !seen[uid] {
+			seen[uid] = true
+			out = append(out, uid)
+		}
+	}
 	return out
 }

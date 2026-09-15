@@ -431,7 +431,7 @@ func (s *ccwireSession) typing(m ccwire.Message) bool {
 	if chatID == "" {
 		return s.sendError(m.RequestID, errPayloadInvalid, "chat_id required")
 	}
-	if !s.hub.chatMemberAllowed(s.d, chatID) {
+	if !s.hub.chatMemberAllowed(s.d, chatID, s.ctxOrBG()) {
 		metrics.Inc("ccwire_typing_refused")
 		return s.sendError(m.RequestID, errNotPermitted, "not permitted")
 	}
@@ -439,7 +439,7 @@ func (s *ccwireSession) typing(m ccwire.Message) bool {
 	if isTyping {
 		event = "typing_start"
 	}
-	s.hub.FanOutToChat(bg, chatID, event, map[string]any{"uid": s.d.uid, "chatId": chatID}, "")
+	s.hub.FanOutToChat(s.ctxOrBG(), chatID, event, map[string]any{"uid": s.d.uid, "chatId": chatID}, "")
 	// EPHEMERAL is fire-and-forget: no Ack, matching the Socket.IO handler,
 	// which also answers nothing.
 	return true
@@ -466,6 +466,12 @@ func (h *Hub) ccwireRegister(s *ccwireSession) {
 }
 
 func (h *Hub) ccwireUnregister(s *ccwireSession) {
+	if s.appEvents {
+		s.leaveAppRooms()
+		if s.sessionID != "" {
+			h.untrackIdentity(s.d.uid, s.sessionID)
+		}
+	}
 	h.cwmu.Lock()
 	defer h.cwmu.Unlock()
 	set := h.cwSessions[s.d.uid]
@@ -479,7 +485,17 @@ func (h *Hub) ccwireUnregister(s *ccwireSession) {
 // CC-Wire sessions. It is called from emitToUidIn on EVERY Socket.IO emit, so
 // the no-sessions path must cost one uncontended lock and nothing else — which
 // is what it costs with the flag off, since no session can exist.
-func (h *Hub) ccwireDeliver(chatID, uid, event string, payload any) {
+func (h *Hub) ccwireDeliver(chatID, uid, event string, payload any, parents ...context.Context) {
+	ctx, cancel := realtimeContext(parents...)
+	defer cancel()
+	if ctx.Err() != nil {
+		return
+	}
+	h.ccwireDeliverLocal(chatID, uid, event, payload)
+	h.publishCCWire(uid, chatID, nil, "", event, payload, ctx)
+}
+
+func (h *Hub) ccwireDeliverLocal(chatID, uid, event string, payload any) {
 	if h == nil {
 		return
 	}
@@ -493,11 +509,18 @@ func (h *Hub) ccwireDeliver(chatID, uid, event string, payload any) {
 		return
 	}
 	raw := ccwireEventFrame(chatID, event, payload)
-	if raw == nil {
-		return // not an event with a CC-Wire body — Socket.IO-only, as before
-	}
+	var appFrames [][]byte
 	for _, s := range targets {
-		s.enqueue(raw)
+		if s.appEvents {
+			if appFrames == nil {
+				appFrames = appEventFrames(event, payload)
+			}
+			for _, raw := range appFrames {
+				s.enqueue(raw)
+			}
+		} else {
+			s.enqueue(raw)
+		}
 	}
 }
 
@@ -749,16 +772,36 @@ func ccwireFrame(m ccwire.Message) []byte {
 // has lost sync, and a silent hole in a message stream is worse than a
 // reconnect-and-resync (resumed=false in ServerHello already tells it to).
 const ccwireOutQueue = 256
+const ccwireOutBytes = 2 << 20
 
 func (s *ccwireSession) enqueue(raw []byte) {
+	s.closeMu.Lock()
+	closed := s.closed
+	s.closeMu.Unlock()
+	if closed {
+		return
+	}
+	if len(raw) == 0 {
+		return
+	}
 	if s.out == nil {
 		// No writer goroutine (the package's socket-free tests). Write inline.
 		_ = s.write(raw)
 		return
 	}
+	s.queueMu.Lock()
+	if s.queuedBytes+len(raw) > ccwireOutBytes {
+		s.queueMu.Unlock()
+		s.closeOnce()
+		return
+	}
+	s.queuedBytes += len(raw)
 	select {
 	case s.out <- raw:
+		s.queueMu.Unlock()
 	default:
+		s.queuedBytes -= len(raw)
+		s.queueMu.Unlock()
 		metrics.Inc("ccwire_slow_consumer")
 		s.closeOnce()
 	}
@@ -771,6 +814,8 @@ func (s *ccwireSession) enqueue(raw []byte) {
 // and this stays the application one.
 func (s *ccwireSession) serveBody(m ccwire.Message) (handled, alive bool) {
 	switch m.BodyField {
+	case ccwire.BodyAppEvent:
+		return true, s.appEvent(m)
 	case ccwire.BodySubmitMessage:
 		return true, s.submit(m)
 	case ccwire.BodyEditMessage:

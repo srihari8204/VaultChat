@@ -59,7 +59,7 @@ check('it no longer returns a promise that never settles',
   !/return new Promise<T>\(\(\) => \{\}\)/.test(API),
   'the never-settling promise is back; finally blocks will not run');
 check('the redirect still happens before the throw',
-  API.indexOf('await endSessionAndBounce()') < API.indexOf('throw new SessionEndedError()'));
+  /await endSessionAndBounce\(opts.expectedUserId\);[\s\S]*?throw new SessionEndedError\(\)/.test(API));
 
 const ALERT = read('lib/alertGuard.ts');
 check('the boundary is idempotent', /if \(installed\) return;/.test(ALERT));

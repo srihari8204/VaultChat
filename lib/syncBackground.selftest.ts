@@ -40,18 +40,21 @@ writeFileSync(join(WORK, 'package.json'), '{"type":"module"}');
 // Every call is recorded IN ORDER, because the order is the thing under test.
 writeFileSync(join(WORK, 'stubs.js'), `
 const H = () => globalThis.__BG;
+export function tokenSubject(token) { return token; }
 export async function getAccessToken() { H().calls.push('getAccessToken'); return H().token; }
-export async function catchUp() {
+export async function requestCatchUp() {
   H().calls.push('catchUp');
   if (H().catchUpThrows) throw new Error('network down');
   H().synced = true;
+  if (H().switchAccount) H().token = 'other-owner';
   return H().applied ?? 0;
 }
 export async function getCachedMessages(chatId, limit) {
   H().calls.push('getCachedMessages:' + chatId);
   return H().localNewest ? [H().localNewest] : [];
 }
-export async function markDelivered(chatId, id) {
+export async function markDelivered(chatId, id, owner) {
+  if (owner !== H().token) throw new Error('account changed');
   H().calls.push('markDelivered:' + chatId + ':' + id);
   if (H().ackThrows) throw new Error('receipt failed');
   H().acked = { chatId, id, syncedFirst: H().synced === true };
@@ -63,6 +66,7 @@ const SRC = readFileSync(join(HERE, 'syncBackground.ts'), 'utf8');
 const REWRITES: [RegExp, string][] = [
   [/^import \{ AppRegistry \} from 'react-native';$/m, `import { AppRegistry } from './stubs.js';`],
   [/await import\('\.\/api'\)/g, `await import('./stubs.js')`],
+  [/await import\('\.\/tokenIdentity'\)/g, `await import('./stubs.js')`],
   [/await import\('\.\/syncEngine'\)/g, `await import('./stubs.js')`],
   [/await import\('\.\/localDb'\)/g, `await import('./stubs.js')`],
   [/await import\('\.\/chatService'\)/g, `await import('./stubs.js')`],
@@ -152,6 +156,12 @@ async function main() {
     check('a failed receipt is reported, not swallowed as success', r === 'sync-failed');
   }
 
+  {
+    const H = harness({ switchAccount: true });
+    const r = await run({ chatId: 'c1' });
+    check('account switch while syncing cannot acknowledge as new user', r === 'sync-failed' && H.acked === null);
+  }
+
   // ── 4. never throws (a rejecting headless task crashes the app) ──────────
   console.log('the headless task must never reject');
   {
@@ -177,6 +187,15 @@ async function main() {
   console.log('the native service must find the task');
   check('registers VaultChatSync', registeredName === 'VaultChatSync' && mod.SYNC_TASK === 'VaultChatSync',
     'the name must match VaultChatSyncService.TASK_NAME or Android starts a task that does not exist');
+
+  // Native lifecycle wiring: foreground importance does not prove a healthy
+  // socket. A push must still reach this shared task during reconnect/resume.
+  const nativeService = readFileSync(join(HERE, '../plugins/android/VaultChatSyncService.kt'), 'utf8');
+  const nativePush = readFileSync(join(HERE, '../plugins/android/VaultCallMessagingService.kt'), 'utf8');
+  check('headless sync allows foreground lifecycle transitions', /TIMEOUT_MS,\s*true,/.test(nativeService));
+  const messageHandler = nativePush.split('"message" -> {')[1]?.split('showMessage(data)')[0] ?? '';
+  check('message push sync is not suppressed by process importance',
+    messageHandler.includes('startBackgroundSync(data)') && !messageHandler.includes('isAppForeground()'));
 
   rmSync(WORK, { recursive: true, force: true });
   console.log(failures === 0 ? '\nPASS' : `\nFAIL (${failures})`);

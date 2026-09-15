@@ -34,7 +34,7 @@ import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { consumePendingJump } from '../lib/chatJump';
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { E2EE_ENABLED } from '../constants/flags';
-import { getCachedMessages, getCachedMessagesBefore, cacheMessages, applyMessage, markCachedDeleted, getCachedMessagesByIds, getCachedChat, clearChatMessages } from '../lib/localDb';
+import { getCachedMessages, getPendingEncryptedMessages, getCachedMessagesBefore, getCachedMessagesAfter, getCachedMessagesAround, hasCachedOlderMessages, hasCachedNewerMessages, cacheMessages, applyMessage, markCachedDeleted, getCachedMessagesByIds, getCachedChat, clearChatMessages } from '../lib/localDb';
 import { metric } from '../lib/syncMetrics';
 import { groupAlbums, resetAlbumCache } from '../lib/albumGrouping';
 import { mergeReactions } from '../lib/reactionMerge';
@@ -48,6 +48,7 @@ import {
   Animated,
   FlatList,
   Image,
+  InteractionManager,
   Keyboard,
   Dimensions,
   KeyboardAvoidingView,
@@ -178,7 +179,9 @@ const TYPING_IDLE_MS = 2500;
 // REVOKE_WINDOW_MS (routes/chats.js). WhatsApp parity: 2 days 12 hours.
 const REVOKE_WINDOW_MS = 60 * 60 * 60 * 1000;
 
-const PAGE_SIZE = 50;
+const INITIAL_PAGE_SIZE = 50;
+const PREFETCH_PAGE_SIZE = 50;
+const SCROLL_PAGE_SIZE = 100;
 
 // Module scope on purpose: the top-up below runs on every chat focus and every
 // foreground, and catchUp() is a network round trip even when it returns
@@ -342,7 +345,10 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
   }, [messages]);
   const [loading,   setLoading]   = useState(true);
   const [loadingOlder, setLoadingOlder] = useState(false);
+  const [loadingNewer, setLoadingNewer] = useState(false);
   const [hasMore,   setHasMore]   = useState(true);
+  const [hasNewer, setHasNewer] = useState(false);
+  const [newerGapBeforeId, setNewerGapBeforeId] = useState<number | null>(null);
   const [input,     setInput]     = useState('');
   const [sending,   setSending]   = useState(false);
   const [error,     setError]     = useState<string | null>(null);
@@ -457,6 +463,12 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
 
   const listRef = useRef<FlatList>(null);
   const messagesRef = useRef<DisplayMessage[]>([]);
+  const messagesChatRef = useRef(chatId);
+  // onEndReached can fire more than once before React commits loadingOlder.
+  // This synchronous lock closes that gap and also serializes the local
+  // post-paint prefetch with manual pagination.
+  const pagingChatRef = useRef<string | null>(null);
+  const prefetchedChatRef = useRef<string | null>(null);
   const [flashId, setFlashId] = useState<number | null>(null);
   // Scroll-to-bottom FAB (WhatsApp "↓ N new"): shown when scrolled up.
   const [showScrollDown, setShowScrollDown] = useState(false);
@@ -507,14 +519,16 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
   }, [chat]);
 
   // ── Live Chat Viewers (feature #58) — who's viewing this chat right now ──
-  const [cvFocused, setCvFocused] = useState(true);
+  const [cvFocused, setCvFocused] = useState(false);
+  const chatFocusedRef = useRef(false);
   const [cvShareOn, setCvShareOn] = useState(false);
   // Focus toggles emission on/off and re-reads the per-chat toggle (so a change
   // made in chat-info takes effect the moment you return).
   useFocusEffect(useCallback(() => {
+    chatFocusedRef.current = true;
     setCvFocused(true);
     if (chatId && chat) getShareViewing(chatId, chat.type !== 'direct').then(setCvShareOn).catch(() => {});
-    return () => setCvFocused(false);
+    return () => { chatFocusedRef.current = false; setCvFocused(false); };
   }, [chatId, chat?.type]));
   // TOP-UP: messages that arrived while this screen was not mounted.
   //
@@ -545,12 +559,14 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
         try { await (await import('../lib/syncEngine')).catchUp(); } catch {}
       }
       let rows: any[] | null = null;
-      try { rows = await getCachedMessages(cid, PAGE_SIZE); } catch { return; }
+      try { rows = await getCachedMessages(cid, INITIAL_PAGE_SIZE); } catch { return; }
       if (cancel || chatIdRef.current !== cid || !rows || !rows.length) return;
       setMessages(prev => {
-        const have = new Set(prev.map(x => x._tempId ?? String(x.id)));
+        const base = messagesChatRef.current === cid ? prev : [];
+        messagesChatRef.current = cid;
+        const have = new Set(base.map(x => x._tempId ?? String(x.id)));
         const add = rows!.filter(r => !have.has(String(r.id)));
-        if (!add.length) return prev;
+        if (!add.length) return base;
         // Optimistic bubbles carry id 0 and must stay pinned to the top of the
         // inverted list; everything else is ordered newest-id-first.
         // Split on the OUTBOX MARKER, not on the sign of the id. Exit-Kit
@@ -559,8 +575,8 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
         // whole imported archive as "pending" and pins it to the top of the
         // inverted list, rendering years-old history as the newest messages.
         // `_tempId` is the same key keyExtractor uses.
-        const pending = prev.filter(x => x._tempId);
-        const real = prev.filter(x => !x._tempId);
+        const pending = base.filter(x => x._tempId);
+        const real = base.filter(x => !x._tempId);
         return [...pending, ...[...real, ...add].sort((a, b) => Number(b.id) - Number(a.id))];
       });
     };
@@ -649,7 +665,14 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
   // vanish_after_read messages at or below it, for every member.
   useEffect(() => {
     lastReadSent.current = 0;
+    messagesChatRef.current = chatId;
     setMessages([]);
+    setLoadingOlder(false);
+    setLoadingNewer(false);
+    setHasMore(true);
+    setHasNewer(false);
+    setNewerGapBeforeId(null);
+    prefetchedChatRef.current = null;
     // Everything else that is ABOUT this chat and outlives a chatId change on a
     // mounted instance. replyTo and editingId are the dangerous two: a send
     // could carry a replyToId belonging to another conversation, and an edit
@@ -727,7 +750,7 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
         // the server — which, before the sticky-tombstone fix, also resurrected
         // every message the user had deleted locally.
         let [cachedMsgs, pendingQ, mediaQ] = await Promise.all([
-          getCachedMessages(chatId, PAGE_SIZE).catch(() => null),
+          getCachedMessages(chatId, INITIAL_PAGE_SIZE).catch(() => null),
           pendingForChat(chatId).catch(() => []),
           mediaPendingForChat(chatId).catch(() => []),
         ]);
@@ -744,7 +767,7 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
         // not contain this chat.
         if (cachedMsgs !== null && !cachedMsgs.length) {
           try { await (await import('../lib/syncEngine')).catchUp(); } catch {}
-          const synced = await getCachedMessages(chatId, PAGE_SIZE).catch(() => null);
+          const synced = await getCachedMessages(chatId, INITIAL_PAGE_SIZE).catch(() => null);
           if (!alive()) return;
           if (synced?.length) {
             cachedMsgs = synced;
@@ -773,7 +796,19 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
         const pendingNewestFirst = [...pendingBubbles, ...mediaBubbles]
           .sort((a, b) => +new Date(a.createdAt) - +new Date(b.createdAt)).reverse();
         if (((cachedMsgs?.length ?? 0) || pendingNewestFirst.length) && alive()) {
-          setMessages([...pendingNewestFirst, ...(cachedMsgs ?? [])]);
+          const snapshot = [...pendingNewestFirst, ...(cachedMsgs ?? [])];
+          setMessages(prev => {
+            const base = messagesChatRef.current === chatId ? prev : [];
+            messagesChatRef.current = chatId;
+            const seen = new Set(snapshot.map(m => m._tempId ?? String(m.id)));
+            const arrived = base.filter(m => !seen.has(m._tempId ?? String(m.id)));
+            const all = [...arrived, ...snapshot];
+            const pending = all.filter(m => m._tempId)
+              .sort((a, b) => +new Date(b.createdAt) - +new Date(a.createdAt));
+            const settled = all.filter(m => !m._tempId)
+              .sort((a, b) => Number(b.id) - Number(a.id));
+            return [...pending, ...settled];
+          });
           setLoading(false);
         }
 
@@ -798,9 +833,9 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
           // `cachedMsgs === null` means the cache could not be READ, not that it
           // is empty — going to the server there would re-download a page this
           // device already has, so we leave it alone and let the next open (or
-          // the delta sync) reconcile.
+            // the delta sync) reconcile.
           if (cachedMsgs !== null && !cachedMsgs.length) {
-            const msgsRaw = await getMessages(chatId, { limit: PAGE_SIZE });
+            const msgsRaw = await getMessages(chatId, { limit: INITIAL_PAGE_SIZE });
             const msgs = await hydrateMessages(chatId, msgsRaw, knownPlain);
             cacheMessages(chatId, msgs).catch(() => {});   // persist for next instant open
             // The persist above is keyed on the captured chatId and is correct
@@ -813,8 +848,10 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
             // flat replace wiped it — and the queue's 'sent' handler then found
             // no _tempId to swap, so the message never came back on this screen.
             setMessages(prev => {
+              const base = messagesChatRef.current === chatId ? prev : [];
+              messagesChatRef.current = chatId;
               const seen = new Set(msgs.map(m => String(m.id)));
-              const stillPending = [...pendingNewestFirst, ...prev].filter(x => {
+              const stillPending = [...pendingNewestFirst, ...base].filter(x => {
                 const k = x._tempId ?? String(x.id);
                 if (seen.has(k)) return false;
                 seen.add(k);
@@ -822,10 +859,18 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
               });
               return [...stillPending, ...msgs];
             });
-            setHasMore(msgs.length === PAGE_SIZE);
+            setHasMore(msgs.length === INITIAL_PAGE_SIZE);
             }
           } else {
-            if (alive()) setHasMore((cachedMsgs?.length ?? 0) >= PAGE_SIZE);
+            // A short local page is a cache boundary, not proof that server
+            // history ended. Positive ids can still have remote history; for
+            // imported negative ids, only the local existence query can say
+            // there is another page.
+            const oldestCached = cachedMsgs?.[cachedMsgs.length - 1]?.id;
+            const localOlder = oldestCached
+              ? await hasCachedOlderMessages(chatId, Number(oldestCached)).catch(() => false)
+              : false;
+            if (alive()) setHasMore(localOlder || Number(oldestCached) > 0);
             // RETRY THE ONES THAT NEVER DECRYPTED.
             //
             // Painting from cache skips hydrate entirely, which is right for
@@ -847,12 +892,19 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
             // minutes ago is different: it SHOULD have opened, so its failure is
             // real evidence about the live session.
             const RETRY_AGE_MS = 60 * 60 * 1000;
-            const stuck = (cachedMsgs ?? []).filter(m =>
+            const pendingEncrypted = await getPendingEncryptedMessages(chatId);
+            const retryInputs = new Map<number, Message>((cachedMsgs ?? []).map(m => [m.id, m]));
+            for (const m of pendingEncrypted) {
+              retryInputs.set(m.id, m);
+              // An edit's old plaintext cannot satisfy decryption of its new envelope.
+              knownPlain.delete(m.id);
+            }
+            const stuck = [...retryInputs.values()].filter(m =>
               looksEncrypted(m.content) &&
-              Date.now() - new Date(m.createdAt).getTime() < RETRY_AGE_MS);
+              Date.now() - new Date(m.editedAt ?? m.createdAt).getTime() < RETRY_AGE_MS);
             if (stuck.length) {
               const fixed = await hydrateMessages(chatId, stuck, knownPlain, { live: true });
-              const readable = fixed.filter(m => !looksEncrypted(m.content));
+              const readable = fixed.filter(m => typeof m.content === 'string' && !looksEncrypted(m.content));
               if (readable.length) {
                 cacheMessages(chatId, readable).catch(() => {});
                 if (alive()) {
@@ -1057,19 +1109,19 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
             // re-fetches the message on the next reconnect.
             try {
               await applyMessage(chatId, fin);   // persist plaintext to local cache
-              if (fin.senderId !== me) markDeliveredDurable(chatId, fin.id).catch(() => {});
+              if (me && fin.senderId !== me) markDeliveredDurable(chatId, fin.id, me).catch(() => {});
             } catch { /* not on disk → do NOT ack; catch-up re-delivers it */ }
             // Bump the "↓ N new" counter when a message lands while scrolled up.
             if (chatIdRef.current === chatId && !atBottomRef.current && fin.senderId !== me) setNewSinceUp(n => n + 1);
           })();
         };
         const onMemberDelivered = (e: { userId: string; lastDeliveredMessageId: number }) => {
-          const me = meIdRef.current;
-          if (!e?.userId) return;
+          const cursor = Number(e?.lastDeliveredMessageId);
+          if (!e?.userId || !Number.isSafeInteger(cursor) || cursor <= 0) return;
           setChat(prev => prev ? {
             ...prev,
             members: prev.members.map(mem => mem.userId === e.userId
-              ? { ...mem, lastDeliveredMessageId: e.lastDeliveredMessageId }
+              ? { ...mem, lastDeliveredMessageId: Math.max(Number(mem.lastDeliveredMessageId) || 0, cursor) }
               : mem),
           } : prev);
           // Release the sender's recovery copies now that the recipient
@@ -1078,15 +1130,15 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
           // body may already have been reclaimed and this is the only copy that
           // could re-deliver. Best-effort: the queue's age cap reaps anything
           // this misses, e.g. delivery that happened while the chat was closed.
-          void queueNoteDelivered(chatId, Number(e.lastDeliveredMessageId));
+          void queueNoteDelivered(chatId, cursor);
         };
         const onMemberRead = (e: { userId: string; lastReadMessageId: number }) => {
-          const me = meIdRef.current;
-          if (!e?.userId) return;
+          const cursor = Number(e?.lastReadMessageId);
+          if (!e?.userId || !Number.isSafeInteger(cursor) || cursor <= 0) return;
           setChat(prev => prev ? {
             ...prev,
             members: prev.members.map(mem => mem.userId === e.userId
-              ? { ...mem, lastReadMessageId: e.lastReadMessageId }
+              ? { ...mem, lastReadMessageId: Math.max(Number(mem.lastReadMessageId) || 0, cursor) }
               : mem),
           } : prev);
         };
@@ -1318,7 +1370,7 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
     // A durable cache write earns ✓✓. Blue ✓✓ must mean the recipient was
     // actually looking at this thread, so never mark read from a backgrounded
     // or covered chat screen.
-    if (!appActive || !cvFocused || !chatId || messages.length === 0) return;
+    if (!appActive || !cvFocused || !meId || !chatId || messages.length === 0) return;
     // Newest REAL message, not messages[0]. The list is newest-first, but index 0
     // is an optimistic outbox bubble whenever a send is pending — and those carry
     // `id: 0`. A FAILED upload sits in the outbox indefinitely and is re-prepended
@@ -1330,23 +1382,19 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
     if (!latestId || latestId <= lastReadSent.current) return;
     if (readDebounce.current) clearTimeout(readDebounce.current);
     readDebounce.current = setTimeout(() => {
+      // Lifecycle callbacks can precede React's next effect cleanup. Recheck at
+      // the point of sending so a timer due on blur cannot mark an unseen read.
+      if (AppState.currentState !== 'active' || !chatFocusedRef.current) return;
       lastReadSent.current = latestId;
-      // markSeen is SEQUENCED behind the read, not fired beside it.
-      //
-      // markSeen writes a LOCAL monotonic watermark with no network call, so
-      // nothing can ever correct it: a foreign id written once means no real
-      // message in that chat ever exceeds it again, and the no-GMS background
-      // sweep stops notifying for that chat permanently. The server now
-      // rejects an out-of-chat cursor with 400 and lib/receipts.ts rolls its
-      // own pointer back, so letting the local watermark advance only after
-      // the server ACCEPTED the same id keeps the two from diverging.
-      markReadDurable(chatId, latestId)
+      // markReadDurable confirms local persistence, not server acceptance.
+      // Both local watermarks refer to a real row in this focused chat.
+      markReadDurable(chatId, latestId, meId)
         .then(() => import('../lib/messageNotifications'))
         .then(m => m.markSeen(chatId, latestId))
-        .catch(() => {});
+        .catch(() => { if (lastReadSent.current === latestId) lastReadSent.current = 0; });
     }, 800);
     return () => { if (readDebounce.current) clearTimeout(readDebounce.current); };
-  }, [appActive, cvFocused, chatId, messages]);
+  }, [appActive, cvFocused, meId, chatId, messages]);
 
   // ── Unread divider (WhatsApp "N unread messages") ─────────
   // Capture the read boundary ONCE when the chat opens — before mark-as-read
@@ -2628,7 +2676,7 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
 
   // ── Load older on scroll-up ───────────────────────────────
   const onEndReached = useCallback(async () => {
-    if (loadingOlder || !hasMore || messages.length === 0) return;
+    if (pagingChatRef.current || !hasMore || messages.length === 0) return;
     const oldest = messages[messages.length - 1]?.id;
     if (!oldest) return;
     // Same pane-swap hazard as the initial load: chatId can change on a mounted
@@ -2636,13 +2684,17 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
     // chat's page to the one now on screen is worse than not paging at all.
     const cid = chatId;
     const alive = () => chatIdRef.current === cid;
+    pagingChatRef.current = cid;
+    prefetchedChatRef.current = cid;
     setLoadingOlder(true);
     try {
       // Disk first. These rows are already plaintext, so a cached page costs no
       // network call and no decrypt — and it works offline, which the
       // server-only path never did. Only past the cache horizon do we ask the
       // server, which is also the only case where hydrate/re-cache is needed.
-      let older = await getCachedMessagesBefore(chatId, Number(oldest), PAGE_SIZE);
+      let older = await getCachedMessagesBefore(
+        cid, Number(oldest), SCROLL_PAGE_SIZE,
+      ) as DisplayMessage[];
       metric(older.length ? 'local.message_hits' : 'local.message_misses');
 
       // A FULL page from disk answered the request: no network, no decrypt.
@@ -2654,21 +2706,29 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
       // a guaranteed-empty round-trip on every scroll, and it would put a
       // synthetic local id on the wire. Imported history is the true start of the
       // conversation, so a short page there really is the end.
-      if (older.length < PAGE_SIZE && Number(oldest) > 0) {
+      const cachedPositiveCount = older.reduce((n, m) => n + (Number(m.id) > 0 ? 1 : 0), 0);
+      if (cachedPositiveCount < SCROLL_PAGE_SIZE && Number(oldest) > 0) {
         try {
-          const olderRaw = await getMessages(chatId, { before: oldest, limit: PAGE_SIZE });
-          const fetched = await hydrateMessages(chatId, olderRaw);  // decrypt once at ingest
-          cacheMessages(chatId, fetched).catch(() => {});           // persist for instant scroll-back
+          const olderRaw = await getMessages(cid, { before: oldest, limit: SCROLL_PAGE_SIZE });
+          const fetched = await hydrateMessages(cid, olderRaw);  // decrypt once at ingest
+          cacheMessages(cid, fetched).catch(() => {});           // persist for instant scroll-back
           const seen = new Set(older.map(m => String(m.id)));
-          older = [...older, ...fetched.filter(m => !seen.has(String(m.id)))];
+          older = [...older, ...fetched.filter(m => !seen.has(String(m.id)))]
+            .sort((a, b) => Number(b.id) - Number(a.id));
           // Only the SERVER can say there is nothing older. Ending on a short
           // cached page would strand history the device simply had not fetched.
-          if (fetched.length < PAGE_SIZE && alive()) setHasMore(false);
+          if (fetched.length < SCROLL_PAGE_SIZE && alive()) {
+            const pageOldest = older[older.length - 1]?.id;
+            const localMore = pageOldest != null
+              ? await hasCachedOlderMessages(cid, Number(pageOldest)).catch(() => false)
+              : false;
+            if (alive()) setHasMore(localMore);
+          }
         } catch {
           // Offline. Whatever the cache gave us still renders, and hasMore is
           // deliberately left alone so a later attempt can resume.
         }
-      } else if (older.length < PAGE_SIZE && Number(oldest) < 0) {
+      } else if (older.length < SCROLL_PAGE_SIZE && Number(oldest) < 0) {
         // Inside imported history with nothing older on disk: this is the start
         // of the conversation. Nobody else can tell us so, because nobody else
         // has these messages.
@@ -2677,13 +2737,111 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
       if (!alive()) return;
       // Dedupe against what's already loaded — a page boundary can overlap and
       // would otherwise inject duplicate ids (duplicate React keys).
+      const currentIds = new Set(messages.map(x => String(x.id)));
+      const projected = [...messages, ...older.filter(m => !currentIds.has(String(m.id)))];
+      const projectedSettled = projected.filter(m => !m._tempId);
+      const trimNewer = projectedSettled.length > MAX_LOADED;
+      if (trimNewer) {
+        setHasNewer(true);
+        setNewerGapBeforeId(projectedSettled[projectedSettled.length - MAX_LOADED]?.id ?? null);
+      }
       setMessages(prev => {
         const have = new Set(prev.map(x => String(x.id)));
-        return [...prev, ...older.filter(m => !have.has(String(m.id)))];
+        const combined = [...prev, ...older.filter(m => !have.has(String(m.id)))];
+        const pending = combined.filter(m => m._tempId);
+        let settled = combined.filter(m => !m._tempId);
+        if (trimNewer && settled.length > MAX_LOADED) {
+          // The user is moving into older history. Keep the rows around that
+          // viewport and make the discarded newer side pageable again.
+          settled = settled.slice(settled.length - MAX_LOADED);
+        }
+        return [...pending, ...settled];
       });
     } catch {}
-    finally { setLoadingOlder(false); }
-  }, [chatId, hasMore, loadingOlder, messages]);
+    finally {
+      if (pagingChatRef.current === cid) pagingChatRef.current = null;
+      if (alive()) setLoadingOlder(false);
+    }
+  }, [chatId, hasMore, messages]);
+
+  // When an old search window (or an upward-trimmed long thread) is open,
+  // page back toward the newest local rows without rebuilding the whole gap.
+  const onStartReached = useCallback(async () => {
+    if (pagingChatRef.current || !hasNewer || messages.length === 0) return;
+    const newest = messages.find(m => !m._tempId)?.id;
+    if (newest == null) return;
+    const cid = chatId;
+    const alive = () => chatIdRef.current === cid;
+    pagingChatRef.current = cid;
+    setLoadingNewer(true);
+    try {
+      const newerAsc = await getCachedMessagesAfter(cid, Number(newest), SCROLL_PAGE_SIZE);
+      if (!alive()) return;
+      const newer = [...newerAsc].reverse() as DisplayMessage[];
+      const nextNewest = newer[0]?.id ?? newest;
+      const more = await hasCachedNewerMessages(cid, Number(nextNewest)).catch(() => false);
+      if (!alive()) return;
+      const currentIds = new Set(messages.filter(m => !m._tempId).map(m => String(m.id)));
+      const willTrimOlder = currentIds.size + newer.filter(m => !currentIds.has(String(m.id))).length > MAX_LOADED;
+      setMessages(prev => {
+        const pending = prev.filter(m => m._tempId);
+        const have = new Set(prev.map(m => String(m.id)));
+        const settled = [
+          ...newer.filter(m => !have.has(String(m.id))),
+          ...prev.filter(m => !m._tempId),
+        ].sort((a, b) => Number(b.id) - Number(a.id)).slice(0, MAX_LOADED);
+        return [...pending, ...settled];
+      });
+      if (willTrimOlder) setHasMore(true);
+      setHasNewer(more);
+      setNewerGapBeforeId(more ? Number(nextNewest) : null);
+    } catch {
+      // Local cache may be temporarily locked; retain the affordance to retry.
+    } finally {
+      if (pagingChatRef.current === cid) pagingChatRef.current = null;
+      if (alive()) setLoadingNewer(false);
+    }
+  }, [chatId, hasNewer, messages]);
+
+  const returnToLatest = useCallback(async () => {
+    if (pagingChatRef.current) return;
+    const cid = chatId;
+    const alive = () => chatIdRef.current === cid;
+    pagingChatRef.current = cid;
+    try {
+      const latest = await getCachedMessages(cid, INITIAL_PAGE_SIZE + PREFETCH_PAGE_SIZE) as DisplayMessage[];
+      if (!alive()) return;
+      const latestId = latest[0]?.id ?? 0;
+      setMessages(prev => {
+        const pending = prev.filter(m => m._tempId);
+        const justArrived = prev.filter(m => !m._tempId && Number(m.id) > Number(latestId));
+        const seen = new Set<string>();
+        const settled = [...justArrived, ...latest].filter(m => {
+          const key = String(m.id);
+          if (seen.has(key)) return false;
+          seen.add(key);
+          return true;
+        }).sort((a, b) => Number(b.id) - Number(a.id)).slice(0, MAX_LOADED);
+        return [...pending, ...settled];
+      });
+      const oldest = latest[latest.length - 1]?.id;
+      const older = oldest != null
+        ? await hasCachedOlderMessages(cid, Number(oldest)).catch(() => false)
+        : false;
+      if (!alive()) return;
+      setHasMore(older || Number(oldest) > 0);
+      setHasNewer(false);
+      setNewerGapBeforeId(null);
+      atBottomRef.current = true;
+      setShowScrollDown(false);
+      setNewSinceUp(0);
+      requestAnimationFrame(() => listRef.current?.scrollToOffset({ offset: 0, animated: true }));
+    } catch {
+      // Keep the return affordance visible so a locked cache can be retried.
+    } finally {
+      if (pagingChatRef.current === cid) pagingChatRef.current = null;
+    }
+  }, [chatId]);
 
   // Album row identity is cached by albumId; drop it when the chat changes so a
   // row can never be reused across conversations.
@@ -2691,6 +2849,47 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
 
   // Keep a ref to loaded messages for the jump-to-message paging loop.
   useEffect(() => { messagesRef.current = messages; }, [messages]);
+
+  // Paint 50 rows first, then fill the in-memory window to roughly 100 from
+  // SQLite after gestures/animations settle. This is local-only: opening a
+  // chat never waits on network or a second decrypt batch.
+  useEffect(() => {
+    if (loading || prefetchedChatRef.current === chatId) return;
+    const cid = chatId;
+    let cancelled = false;
+    const task = InteractionManager.runAfterInteractions(async () => {
+      if (cancelled || chatIdRef.current !== cid) return;
+      // A pane swap may leave the previous chat's read in flight. Its finally
+      // block is ownership-checked, so the new pane can safely take the lock.
+      if (pagingChatRef.current && pagingChatRef.current !== cid) pagingChatRef.current = null;
+      if (pagingChatRef.current) return;
+      const current = messagesRef.current;
+      const oldest = current[current.length - 1]?.id;
+      if (!oldest) return;
+      prefetchedChatRef.current = cid;
+      pagingChatRef.current = cid;
+      try {
+        const older = await getCachedMessagesBefore(cid, Number(oldest), PREFETCH_PAGE_SIZE);
+        if (cancelled || chatIdRef.current !== cid) return;
+        if (older.length) {
+          setMessages(prev => {
+            const have = new Set(prev.map(x => String(x.id)));
+            return [...prev, ...older.filter(m => !have.has(String(m.id)))];
+          });
+        }
+        const nextOldest = older[older.length - 1]?.id ?? oldest;
+        const localOlder = await hasCachedOlderMessages(cid, Number(nextOldest)).catch(() => false);
+        if (!cancelled && chatIdRef.current === cid) {
+          setHasMore(localOlder || Number(nextOldest) > 0);
+        }
+      } catch {
+        if (!cancelled && chatIdRef.current === cid) prefetchedChatRef.current = null;
+      } finally {
+        if (pagingChatRef.current === cid) pagingChatRef.current = null;
+      }
+    });
+    return () => { cancelled = true; task.cancel(); };
+  }, [chatId, loading]);
 
   /**
    * Cap the in-memory window.
@@ -2718,22 +2917,91 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
    * one place cannot be forgotten by the seventh.
    */
   useEffect(() => {
-    if (!atBottomRef.current || messages.length <= MAX_LOADED) return;
-    setMessages(prev => (prev.length > MAX_LOADED ? prev.slice(0, MAX_LOADED) : prev));
+    const settledCount = messages.reduce((n, m) => n + (m._tempId ? 0 : 1), 0);
+    if (settledCount <= MAX_LOADED) return;
+    if (hasNewer) {
+      const retained = messages.filter(m => !m._tempId).slice(-MAX_LOADED);
+      setNewerGapBeforeId(retained[0]?.id ?? null);
+      setMessages(prev => {
+        const pending = prev.filter(m => m._tempId);
+        const settled = prev.filter(m => !m._tempId).slice(-MAX_LOADED);
+        return [...pending, ...settled];
+      });
+      return;
+    }
+    if (!atBottomRef.current) return;
+    setMessages(prev => {
+      const pending = prev.filter(m => m._tempId);
+      return [...pending, ...prev.filter(m => !m._tempId).slice(0, MAX_LOADED)];
+    });
     setHasMore(true);
-  }, [messages.length]);
+  }, [hasNewer, messages]);
 
   // Jump to a specific message (from in-chat search): page older until it's
   // loaded, scroll to it, and briefly flash it.
   const jumpToMessage = useCallback(async (targetId: number) => {
-    // Pane-swap guard (app/split.tsx) — the loop below is up to 40 round trips,
-    // and paging another chat's history into this one is not recoverable.
+    // Pane-swap guard: paging another chat's history into this one is not recoverable.
     const cid = chatId;
     const alive = () => chatIdRef.current === cid;
+    while (pagingChatRef.current && alive()) {
+      await new Promise<void>(resolve => setTimeout(resolve, 16));
+    }
+    if (!alive()) return;
+    pagingChatRef.current = cid;
+    try {
+    const startingWindow = messagesRef.current;
+    let replacedWithSegment = false;
     let idx = messagesRef.current.findIndex(m => m.id === targetId);
+    // Use the centred SQLite window only when it overlaps the loaded tail.
+    // Appending a distant window would make FlatList place two non-contiguous
+    // history ranges next to each other with no way to page the missing middle.
+    if (idx < 0) {
+      try {
+        const loadedOldest = messagesRef.current[messagesRef.current.length - 1]?.id;
+        const around = await getCachedMessagesAround(
+          cid, targetId, Math.floor(PREFETCH_PAGE_SIZE / 2),
+        ) as DisplayMessage[];
+        if (!alive()) return;
+        const overlapsLoadedTail = loadedOldest != null && around.some(m => m.id === loadedOldest);
+        if (around.some(m => m.id === targetId)) {
+          const seen = new Set<string>();
+          const source = overlapsLoadedTail
+            ? [...messagesRef.current, ...around]
+            : [...messagesRef.current.filter(m => m._tempId), ...around];
+          const combined = source.filter(m => {
+            const key = m._tempId ?? String(m.id);
+            if (seen.has(key)) return false;
+            seen.add(key);
+            return true;
+          });
+          const pending = combined.filter(m => m._tempId);
+          const settled = combined.filter(m => !m._tempId).sort((a, b) => Number(b.id) - Number(a.id));
+          messagesRef.current = [...pending, ...settled];
+          idx = messagesRef.current.findIndex(m => m.id === targetId);
+          if (!overlapsLoadedTail) {
+            replacedWithSegment = true;
+            const newestSegmentId = settled[0]?.id;
+            const oldestSegmentId = settled[settled.length - 1]?.id;
+            const [newer, older] = await Promise.all([
+              newestSegmentId == null ? false : hasCachedNewerMessages(cid, Number(newestSegmentId)).catch(() => false),
+              oldestSegmentId == null ? false : hasCachedOlderMessages(cid, Number(oldestSegmentId)).catch(() => false),
+            ]);
+            if (!alive()) return;
+            setHasNewer(newer);
+            setHasMore(older || Number(oldestSegmentId) > 0);
+            setNewerGapBeforeId(newer ? Number(newestSegmentId) : null);
+            atBottomRef.current = false;
+            setShowScrollDown(true);
+          }
+        }
+      } catch {}
+    }
     let guard = 0;
-    // Page back far enough to reach old matches (40 * PAGE_SIZE messages).
-    while (idx < 0 && guard < 40) {
+    const maxJumpPages = Math.max(
+      0, Math.ceil((MAX_LOADED - messagesRef.current.length) / SCROLL_PAGE_SIZE),
+    );
+    // Network fallback for a target absent from local storage.
+    while (idx < 0 && guard < maxJumpPages) {
       guard++;
       const oldest = messagesRef.current[messagesRef.current.length - 1]?.id;
       if (!oldest) break;
@@ -2741,13 +3009,19 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
       // used to re-download up to 40 pages it already had.
       let older;
       try {
-        older = await getCachedMessagesBefore(chatId, Number(oldest), PAGE_SIZE);
+        older = await getCachedMessagesBefore(cid, Number(oldest), SCROLL_PAGE_SIZE);
         // Same rule as onEndReached: a negative id is imported history, which the
         // server has never seen. Asking it would be an empty round-trip and would
         // put a local-only id on the wire.
-        if (!older.length && Number(oldest) > 0) {
-          older = await hydrateMessages(chatId, await getMessages(chatId, { before: oldest, limit: PAGE_SIZE }));
-          cacheMessages(chatId, older).catch(() => {});
+        const cachedPositiveCount = older.reduce((n, m) => n + (Number(m.id) > 0 ? 1 : 0), 0);
+        if (cachedPositiveCount < SCROLL_PAGE_SIZE && Number(oldest) > 0) {
+          const fetched = await hydrateMessages(
+            cid, await getMessages(cid, { before: oldest, limit: SCROLL_PAGE_SIZE }),
+          );
+          cacheMessages(cid, fetched).catch(() => {});
+          const cachedIds = new Set(older.map(m => String(m.id)));
+          older = [...older, ...fetched.filter(m => !cachedIds.has(String(m.id)))]
+            .sort((a, b) => Number(b.id) - Number(a.id));
         }
       } catch { break; }
       if (!alive()) return;
@@ -2757,9 +3031,11 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
       // times — forty full re-derivations of a list on its way to two thousand
       // rows — before the user saw anything. The screen is committed once,
       // below, when we actually have the target.
-      const next = [...messagesRef.current, ...older];
+      const have = new Set(messagesRef.current.map(m => m._tempId ?? String(m.id)));
+      const room = Math.max(0, MAX_LOADED - messagesRef.current.length);
+      const add = older.filter(m => !have.has(m._tempId ?? String(m.id))).slice(0, room);
+      const next = [...messagesRef.current, ...add];
       messagesRef.current = next;
-      if (older.length < PAGE_SIZE) setHasMore(false);
       idx = next.findIndex(m => m.id === targetId);
     }
     // MERGE, DON'T REPLACE.
@@ -2775,15 +3051,22 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
     let committed = paged;
     const publish = () => setMessages(prev => {
       const have = new Set(paged.map(key));
-      const extra = prev.filter(x => !have.has(key(x)));
+      const startingKeys = new Set(startingWindow.map(key));
+      const extra = prev.filter(x => !have.has(key(x)) &&
+        (!replacedWithSegment || x._tempId || !startingKeys.has(key(x))));
       committed = extra.length ? [...extra, ...paged] : paged;
+      if (replacedWithSegment) {
+        const pending = committed.filter(m => m._tempId);
+        const settled = committed.filter(m => !m._tempId)
+          .sort((a, b) => Number(b.id) - Number(a.id)).slice(0, MAX_LOADED);
+        committed = [...pending, ...settled];
+      }
       return committed;
     });
     if (idx < 0) {
-      // Not found: still publish what we paged in, or the ref and the rendered
-      // list disagree about what is loaded and the next onEndReached would page
-      // from an id the screen never showed.
-      if (alive()) publish();
+      // A distant target needs a bidirectional/segmented window. Do not publish
+      // thousands of intermediate rows or leave the ref ahead of the screen.
+      messagesRef.current = startingWindow;
       return;
     }
     if (!alive()) return;
@@ -2795,13 +3078,19 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
     });
     setFlashId(targetId);
     setTimeout(() => setFlashId(null), 2500);
+    } finally {
+      if (pagingChatRef.current === cid) pagingChatRef.current = null;
+    }
   }, [chatId]);
 
   // Consume a pending jump when the screen regains focus (e.g. back from search).
   useFocusEffect(useCallback(() => {
+    // A newly-pushed chat focuses before its asynchronous local page is ready.
+    // Leave the single-shot handoff intact until that page has painted.
+    if (loading) return;
     const target = consumePendingJump(chatId);
     if (target) jumpToMessage(target);
-  }, [chatId, jumpToMessage]));
+  }, [chatId, loading, jumpToMessage]));
 
   // Adopt outbox media enqueued from ANOTHER screen while this chat stayed
   // mounted — the document scanner is the live case. The initial load reads
@@ -3371,6 +3660,20 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
             : null;
           return (
           <View>
+            {newerGapBeforeId === item.id && (
+              <TouchableOpacity
+                onPress={onStartReached}
+                disabled={loadingNewer}
+                accessibilityRole="button"
+                accessibilityLabel="Load newer messages"
+                style={{ alignSelf: 'center', marginVertical: 8, paddingHorizontal: 14, paddingVertical: 7,
+                  borderRadius: 16, backgroundColor: colors.surfaceSolid }}
+              >
+                {loadingNewer
+                  ? <ActivityIndicator size="small" color={colors.primary} />
+                  : <Text style={{ color: colors.primary, fontSize: 12, fontWeight: '600' }}>Load newer messages</Text>}
+              </TouchableOpacity>
+            )}
             {importMark && <ImportedDivider origin={importMark.origin} atStart={importMark.atStart} />}
             {showDate && <DateChip iso={item.createdAt} />}
             {showUnread && <UnreadDivider count={unreadInfo!.count} />}
@@ -3452,6 +3755,8 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
         }}
         onEndReached={onEndReached}
         onEndReachedThreshold={0.4}
+        onStartReached={onStartReached}
+        onStartReachedThreshold={0.25}
         onScroll={onListScroll}
         scrollEventThrottle={32}
         ListFooterComponent={loadingOlder ? <ActivityIndicator color={colors.primary} style={{ paddingVertical: 12 }} /> : null}
@@ -3471,7 +3776,11 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
         <TouchableOpacity
           style={S.scrollDownBtn}
           activeOpacity={0.85}
-          onPress={() => { try { listRef.current?.scrollToOffset({ offset: 0, animated: true }); } catch {}; setNewSinceUp(0); setShowScrollDown(false); atBottomRef.current = true; }}
+          onPress={() => {
+            if (hasNewer) { void returnToLatest(); return; }
+            try { listRef.current?.scrollToOffset({ offset: 0, animated: true }); } catch {}
+            setNewSinceUp(0); setShowScrollDown(false); atBottomRef.current = true;
+          }}
         >
           <Ionicons name="chevron-down" size={24} color={colors.text} />
           {newSinceUp > 0 && (

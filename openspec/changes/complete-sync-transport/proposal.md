@@ -9,6 +9,10 @@ The repaired sync paths still lose policy continuity across cold-sync pages and 
 - Add a Caddy UDP/8443 HTTP/3 edge while retaining nginx TCP listeners, other hostnames and the existing TURN UDP/443 redirect; advertise it only after external protocol checks pass.
 - Define WebTransport as an optional CC-Wire carrier using the same frames, authentication and single delivery owner. Do not enable it until mobile support and interoperability pass.
 - Add focused cross-codec, pagination, fallback and transport verification.
+- Extend the user-approved staged migration to all Socket.IO application events through a negotiated CC-Wire compatibility envelope, retaining typed protobuf message submission and existing authorization handlers.
+- Use one active realtime carrier after event parity negotiation, with bounded queues and measured device/server performance. Keep legacy peers supported during rollout.
+- Repair receipt persistence, push-registration retries and lifecycle wake races before two-device acceptance.
+- Keep recoverable message history in encrypted local storage and make first paint, indexed scroll-back and cold start remain bounded as history grows from hundreds to at least 100,000 rows.
 
 Already built and reused: protobuf CC-Wire frames, Go WebSocket endpoint, TypeScript sidecar, Rust WebSocket client, Caddy upstream proxy, nginx TLS termination, REST mutation cursor and Socket.IO fallback.
 
@@ -31,4 +35,4 @@ None.
 
 ## Impact
 
-Affected areas include `proto/ccwire/v1`, Go realtime and chat delta handlers, TypeScript sync/CC-Wire code, Rust transport integration, nginx deployment configuration and transport tests. No database migration is required for the first implementation slice; production deployment remains a separate task with explicit rollback and device gates.
+Affected areas include `proto/ccwire/v1`, Go realtime and chat delta handlers, TypeScript sync/CC-Wire code, Rust transport integration, local encrypted history and chat rendering, application startup, nginx deployment configuration and transport tests. No server database migration is required; production deployment remains a separate task with explicit rollback and device gates.

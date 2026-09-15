@@ -10,6 +10,7 @@ import "ccwire/v1/errors.proto";
 import "ccwire/v1/cursor.proto";
 import "ccwire/v1/delivery.proto";
 import "ccwire/v1/attachment.proto";
+import "ccwire/v1/app_event.proto";
 
 // ─────────────────────────────────────────────────────────────────────
 // Frame — the ONLY top-level message on the wire.
@@ -94,6 +95,7 @@ message Frame {
     DeviceEvent        device_event        = 97;
     CryptoControl      crypto_control      = 98;
     CallSignal         call_signal         = 99;
+    AppEvent           app_event           = 100;
 
     Fragment           fragment            = 112;
   }

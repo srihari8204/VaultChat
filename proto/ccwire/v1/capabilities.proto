@@ -20,6 +20,7 @@ message Capabilities {
                                 // dependent traffic onto CONTROL order
                                 // — slower, still correct.
   bool structured_errors  = 7;
+  bool app_events_v1      = 8;
 
   // Forward compatibility: capabilities this build does not know about
   // arrive here and are echoed back unmodified but never activated.

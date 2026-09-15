@@ -23,7 +23,7 @@
 
 import {
   PUSH_RETRY_LIMIT, canWakeForCalls, pushRetryDelayMs, pushWarningText,
-  shouldReregister, shouldRetryPush, type PushOutcome,
+  shouldReregister, shouldRetryPush, pushTokenFailureOutcome, type PushOutcome,
 } from './pushRegistration';
 
 let failures = 0;
@@ -33,6 +33,10 @@ function check(name: string, ok: boolean, detail?: string) {
 }
 
 const ALL: PushOutcome[] = ['ok', 'no_platform', 'no_provider', 'not_signed_in', 'transient'];
+
+check('Firebase network outage is retryable', pushTokenFailureOutcome(new Error('SERVICE_NOT_AVAILABLE')) === 'transient');
+check('Firebase unknown bridge failure is retryable', pushTokenFailureOutcome({ code: 'fcm_token' }) === 'transient');
+check('explicit missing provider does not retry', pushTokenFailureOutcome(new Error('java.io.IOException: MISSING_INSTANCEID_SERVICE')) === 'no_provider');
 
 console.log('what gets retried — and what must never be:');
 check('a transient failure IS retried', shouldRetryPush('transient', 0));

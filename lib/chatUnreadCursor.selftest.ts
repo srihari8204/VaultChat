@@ -62,7 +62,7 @@ check(
   // assertion - it fails on the effect getting MORE correct. Anchor on the
   // two things that must hold: the cursor is cleared, and the list with it.
   /lastReadSent\.current\s*=\s*0;/.test(CHAT)
-    && /lastReadSent\.current\s*=\s*0;[\s\S]{0,600}?\}, \[chatId\]\);/.test(CHAT),
+    && /lastReadSent\.current\s*=\s*0;[\s\S]{0,1400}?\}, \[chatId\]\);/.test(CHAT),
   'lastReadSent is no longer cleared on [chatId]. Message ids are global, so the '
     + 'ref now carries a previous chat’s newest id into this one and POST /read '
     + 'is skipped for every chat whose newest id happens to be lower.',
@@ -79,7 +79,7 @@ check(
 
 check(
   'the chat screen re-reads the cache after a catch-up',
-  /catchUp\(\)/.test(CHAT) && /getCachedMessages\(chatId, PAGE_SIZE\)/.test(CHAT),
+  /catchUp\(\)/.test(CHAT) && /getCachedMessages\(cid, INITIAL_PAGE_SIZE\)/.test(CHAT),
   'app/chat.tsx no longer runs a catch-up and re-reads the local cache. Messages '
     + 'that arrived while the screen was unmounted are written to the DB by '
     + 'lib/syncEngine and would again be invisible to a chat that has any history, '
@@ -95,8 +95,8 @@ check(
 
 check(
   'outbox bubbles are split off by _tempId, not by the sign of the id',
-  /const pending = prev\.filter\(x => x\._tempId\)/.test(CHAT)
-    && /const real = prev\.filter\(x => !x\._tempId\)/.test(CHAT),
+  /const pending = (?:prev|base)\.filter\(x => x\._tempId\)/.test(CHAT)
+    && /const real = (?:prev|base)\.filter\(x => !x\._tempId\)/.test(CHAT),
   'the merge is bucketing on `id > 0` again. Optimistic bubbles must stay pinned '
     + 'to the top of the inverted list, but Exit-Kit imported history carries '
     + 'NEGATIVE ids (importMessages in lib/localDb.ts is their only writer), so an '
@@ -124,7 +124,7 @@ check(
 
 check(
   'catch-up coalesces on the in-flight run instead of returning 0',
-  /if \(!inflight\) inflight = runCatchUp\(\)/.test(SYNC) && !/if \(running\) return 0;/.test(SYNC),
+  /if \(!inflight\) \{\s*inflight = drainRequestedSync\(\);\s*ordinaryInflight = inflight\.then\(\(result\) => result\.applied\);\s*\}\s*return ordinaryInflight!;/.test(SYNC) && !/if \(running\) return 0;/.test(SYNC),
   'catchUp() drops the call while a run is in flight again. Callers AWAIT it to '
     + "mean the delta has landed; on a resume, initSync’s own listener takes the "
     + 'flag first, so the chat screen would await a no-op and re-read the cache '
@@ -141,7 +141,7 @@ check(
 
 check(
   'catch-up is armed on foreground, not only on an ONLINE transition',
-  /AppState\.addEventListener\('change'[\s\S]{0,220}?'active'[\s\S]{0,200}?catchUp\(\)/.test(SYNC),
+  /AppState\.addEventListener\('change'[\s\S]{0,220}?'active'[\s\S]{0,200}?requestCatchUp\(\)/.test(SYNC),
   'lib/syncEngine only wires catchUp to onConnectionState. ONLINE fires on a '
     + 'TRANSITION, so a device that was backgrounded holding a live socket, or '
     + 'that was woken by FCM, can foreground without ever pulling the delta.',
@@ -149,7 +149,7 @@ check(
 
 check(
   'the ONLINE trigger was kept alongside it',
-  /onConnectionState\(\(s\) => \{ if \(s === 'ONLINE'\) catchUp\(\)/.test(SYNC),
+  /onConnectionState\(\(s\) => \{ if \(s === 'ONLINE'\) requestCatchUp\(\)/.test(SYNC),
   'the reconnect trigger was replaced rather than added to; a device that comes '
     + 'back online without a foreground transition would no longer catch up.',
 );

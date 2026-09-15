@@ -22,6 +22,7 @@ import { readFileSync, writeFileSync, mkdirSync, rmSync } from 'node:fs';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
+import { generateDH, ratchetInitAlice, ratchetInitBob, ratchetEncrypt, ratchetDecrypt } from '../services/crypto/e2ee';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
@@ -37,14 +38,17 @@ writeFileSync(join(WORK, 'package.json'), '{"type":"module"}');
 
 writeFileSync(join(WORK, 'stubs.js'), `
 const H = () => globalThis.__D;
+export async function getAccessToken() { return 'test-owner'; }
+export function tokenSubject(token) { return token; }
 export async function api(path) { return H().api(path); }
 export async function getGlobalSyncCursor() { return H().cursor; }
 export async function noteGlobalSyncCursor(id) {
+  if (H().failCursor) throw new Error('cursor write failed');
   // Monotonic, exactly like the real one: a cursor must never go backwards.
   if (id > H().cursor) H().cursor = id;
   H().cursorWrites.push(id);
 }
-export async function cacheMessages(chatId, msgs) { H().cached.push(...msgs.map(m => m.id)); }
+export async function cacheMessages(chatId, msgs) { if (H().failCache) throw new Error('cache write failed'); H().cached.push(...msgs.map(m => m.id)); }
 export async function getCachedMessagesByIds(chatId, ids) {
   return ids.filter(i => H().local.has(i)).map(i => ({ id: i, content: H().local.get(i) }));
 }
@@ -52,6 +56,7 @@ export async function getMeta(k) { return H().meta.get(k) ?? null; }
 export async function setMeta(k, v) { H().meta.set(k, v); }
 export function metric(name, n = 1) { H().metrics[name] = (H().metrics[name] ?? 0) + n; }
 export async function hydrateMessages(chatId, msgs) {
+  if (H().hydrate) return H().hydrate(msgs);
   H().decrypted.push(...msgs.map(m => m.id));
   await new Promise(r => setTimeout(r, H().decryptMs));   // history decrypt is slow
   return msgs.map(m => ({ ...m, content: 'plain-' + m.id }));
@@ -60,7 +65,7 @@ export function looksEncrypted(s) { return typeof s === 'string' && s.startsWith
 // Both are called as fire-and-forget promises (\`.catch(() => {})\`), so they
 // MUST return one — a plain undefined throws a TypeError that the loop's outer
 // catch swallows, silently stopping the sync before the cursor advances.
-export async function markDeliveredDurable() {}
+export async function markDeliveredDurable(chatId, id) { H().delivered?.push(id); }
 export async function notifyBatch() {}
 export function onConnectionState() { return () => {}; }
 export function addPersistentListener(event, handler) {
@@ -70,7 +75,8 @@ export function addPersistentListener(event, handler) {
 `);
 
 const REWRITES: [RegExp, string][] = [
-  [/^import \{ api \} from '\.\/api';$/m, `import { api } from './stubs.js';`],
+  [/^import \{ api, getAccessToken \} from '\.\/api';$/m, `import { api, getAccessToken } from './stubs.js';`],
+  [/^import \{ tokenSubject \} from '\.\/tokenIdentity';$/m, `import { tokenSubject } from './stubs.js';`],
   [/^import \{ getGlobalSyncCursor, noteGlobalSyncCursor, cacheMessages, getCachedMessagesByIds, getMeta, setMeta \} from '\.\/localDb';$/m,
    `import { getGlobalSyncCursor, noteGlobalSyncCursor, cacheMessages, getCachedMessagesByIds, getMeta, setMeta } from './stubs.js';`],
   [/^import \{ metric \} from '\.\/syncMetrics';$/m, `import { metric } from './stubs.js';`],
@@ -175,6 +181,7 @@ async function main() {
   S.initSync();
   D.persistent.new_message?.({ id: '102', chatId: 'c1' });
   await new Promise(r => setTimeout(r, 350));
+  await S.catchUp(); // Join the debounced drain before resetting shared fixture state.
   check('a background chat-list socket event fetches the new message', D.decrypted.includes(102));
   check('the listener also arms mutation events', typeof D.persistent.message_deleted === 'function' && typeof D.persistent.message_edited === 'function');
   D.local.set(102, 'plain-102');
@@ -200,6 +207,140 @@ async function main() {
   check('the bulk sync still completed', D.cached.length >= 50,
     `${D.cached.length} cached in ${Date.now() - started}ms`);
   D.decryptMs = 0;
+
+  console.log('push during a stale response waits for one fresh drain');
+  reset();
+  const originalApi = D.api;
+  let releaseSnapshot!: () => void;
+  let snapshotReady!: () => void;
+  const ready = new Promise<void>(r => { snapshotReady = r; });
+  const gate = new Promise<void>(r => { releaseSnapshot = r; });
+  let first = true;
+  D.api = async (path: string) => {
+    const response = await originalApi(path);
+    if (first) {
+      first = false;
+      snapshotReady();
+      await gate;
+    }
+    return response;
+  };
+  const staleRun = S.catchUp();
+  await ready;
+  check('ordinary cache reader joins the existing drain', S.catchUp() === staleRun);
+  D.server.push({ id: 999, chatId: 'c1', content: '{"v":"dr1"}' });
+  const pushRun = S.requestCatchUp();
+  check('push joins a shared promise that includes its rerun', pushRun === staleRun);
+  // Multiple notifications of the same snapshot collapse to one extra pass.
+  S.requestCatchUp();
+  S.requestCatchUp();
+  releaseSnapshot();
+  await pushRun;
+  check('new post-snapshot message persisted before push waiter resolves', D.cached.includes(999));
+  check('burst causes exactly one follow-up request', D.requests.length === 2, String(D.requests.length));
+  D.api = originalApi;
+
+  reset();
+  await Promise.all([S.catchUp(), S.catchUp(), S.catchUp()]);
+  check('ordinary readers do not schedule dirty reruns', D.requests.length === 1, String(D.requests.length));
+
+  reset();
+  first = true;
+  let releaseStrict!: () => void;
+  let strictSnapshot!: () => void;
+  const strictReady = new Promise<void>(resolve => { strictSnapshot = resolve; });
+  const strictGate = new Promise<void>(resolve => { releaseStrict = resolve; });
+  D.api = async (path: string) => {
+    const response = await originalApi(path);
+    if (first) { first = false; strictSnapshot(); await strictGate; }
+    return response;
+  };
+  const ordinary = S.catchUp();
+  await strictReady;
+  D.server.push({ id: 1000, chatId: 'c1', content: '{"v":"dr1"}' });
+  const strict = S.resyncRequired();
+  releaseStrict();
+  await Promise.all([ordinary, strict]);
+  check('protocol resync drains a fresh snapshot before resolving', D.cached.includes(1000) && D.requests.length === 2);
+
+  D.api = async () => { throw new Error('HTTP unavailable'); };
+  const failedStrict = S.resyncRequired();
+  const bestEffort = S.catchUp();
+  check('strict HTTP failure rejects while ordinary reader returns count',
+    (await Promise.allSettled([failedStrict]))[0].status === 'rejected' && await bestEffort === 0);
+  D.api = originalApi;
+  for (const flag of ['failCache', 'failCursor']) {
+    D[flag] = true;
+    const result = await Promise.allSettled([S.resyncRequired()]);
+    check('protocol resync rejects ' + flag, result[0].status === 'rejected');
+    D[flag] = false;
+  }
+  check('a later successful resync has no stale failure latch',
+    (await Promise.allSettled([S.resyncRequired()]))[0].status === 'fulfilled');
+
+  console.log('an exact 100,000-message boundary continues after yielding');
+  reset(); D.cursor = 0; D.local.clear(); D.meta.clear();
+  const historyHead = 100_000;
+  D.api = async (path: string) => {
+    D.requests.push(path);
+    const since = sinceOf(path);
+    const count = Math.min(200, Math.max(0, historyHead - since));
+    const messages = Array.from({ length: count }, (_, i) => ({
+      id: since + i + 1, chatId: 'large', content: '{"v":"dr1"}',
+    }));
+    return {
+      messages,
+      nextSince: messages.at(-1)?.id ?? since,
+      // Older servers conservatively return true for every full page, so an
+      // exact multiple needs one fresh bounded pass to prove completion.
+      more: messages.length === 200,
+      mutations: [], serverTime: '2026-01-01T00:00:00.000Z',
+    };
+  };
+  const boundary = await Promise.allSettled([S.resyncRequired()]);
+  check('the 500-page boundary completes instead of rejecting', boundary[0].status === 'fulfilled');
+  check('all 100,000 messages are durable before continuation',
+    D.cursor === historyHead && D.cached.includes(historyHead), `cursor=${D.cursor}`);
+  check('the cap yields into exactly one continuation pass',
+    D.metrics['delta.page_cap_yields'] === 1 && D.requests.length === 501,
+    `yields=${D.metrics['delta.page_cap_yields'] ?? 0}, requests=${D.requests.length}`);
+
+  reset(); D.cursor = 0;
+  D.api = async (path: string) => {
+    D.requests.push(path);
+    return { messages: [{ id: 1, chatId: 'stalled', content: '{"v":"dr1"}' }], nextSince: 0, more: true, mutations: [] };
+  };
+  check('a stalled server cursor fails once instead of continuing forever',
+    (await Promise.allSettled([S.resyncRequired()]))[0].status === 'rejected' && D.requests.length === 1,
+    `${D.requests.length} requests`);
+  D.api = originalApi;
+
+  reset(); D.cursor = 0; D.local.clear(); D.delivered = [];
+  const secret = new Uint8Array(32).fill(7), signedKey = generateDH();
+  const sender = ratchetInitAlice(secret, signedKey.pub);
+  const envelopes = Array.from({ length: 1103 }, () => ratchetEncrypt(sender, new Uint8Array([42])));
+  const receiver = ratchetInitBob(secret, signedKey);
+  const decryptedOrder: number[] = [];
+  D.hydrate = async (rows: any[]) => {
+    // Shipping hydrateMessages consumes newest-first inputs backwards.
+    for (let i = rows.length - 1; i >= 0; i--) {
+      ratchetDecrypt(receiver, envelopes[rows[i].id]);
+      decryptedOrder.push(rows[i].id);
+    }
+    return rows.map(m => ({ ...m, content: 'plain-' + m.id }));
+  };
+  D.server = Array.from({ length: 200 }, (_, i) => ({ id: 900 + i, chatId: 'ordered', content: '{"v":"dr1"}' }));
+  await S.resyncRequired();
+  check('ASC delta decrypts all 200 messages oldest-first within MAX_SKIP',
+    decryptedOrder.length === 200 && decryptedOrder.every((id, i) => id === 900 + i));
+  check('sorting hydration leaves delivery high-water and response order intact',
+    D.delivered.at(-1) === 1099 && D.server.every((m: any, i: number) => m.id === 900 + i));
+  const mutations = [1102, 1100, 1101].map(id => ({ id, chatId: 'ordered', content: '{"v":"dr1"}' }));
+  D.api = async () => ({ messages: [], mutations, nextSince: 1099, more: false, serverTime: '2026-01-01T00:00:00.000Z' });
+  await S.resyncRequired();
+  check('timestamp-ordered mutations hydrate by ascending message id',
+    decryptedOrder.slice(-3).join(',') === '1100,1101,1102' && mutations.map(m => m.id).join(',') === '1102,1100,1101');
+  D.hydrate = null; D.api = originalApi;
 }
 
 main().then(() => {

@@ -296,11 +296,8 @@ func ccwireCursorFactsDB(ctx context.Context, uid string, pos []int64) (map[int6
 		}
 	}
 	var maxID int64
-	// ponytail: MAX(id) is a backward index scan on the primary key — cheap, but
-	// it shrinks if the newest row is ever hard-deleted. Swap for
-	// pg_sequence_last_value(pg_get_serial_sequence('messages','id')) if the
-	// retention sweep ever starts deleting from the top.
-	if err := db.SysPool.QueryRow(ctx, `SELECT COALESCE(MAX(id), 0) FROM messages`).Scan(&maxID); err != nil {
+	// Allocation high-water survives hard deletion of the newest message.
+	if err := db.SysPool.QueryRow(ctx, `SELECT COALESCE(pg_sequence_last_value(pg_get_serial_sequence('messages','id')::regclass), (SELECT COALESCE(MAX(id), 0) FROM messages))`).Scan(&maxID); err != nil {
 		return nil, 0, err
 	}
 	return owners, uint64(maxID), nil
@@ -583,6 +580,9 @@ func (s *ccwireSession) cursorSync(m ccwire.Message) bool {
 // ctxOrBG is the session's authenticated context, or the package background one
 // in the tests that build a session without a request.
 func (s *ccwireSession) ctxOrBG() context.Context {
+	if s.commandCtx != nil {
+		return s.commandCtx
+	}
 	if s.ctx != nil {
 		return s.ctx
 	}

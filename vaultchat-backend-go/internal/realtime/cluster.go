@@ -5,20 +5,20 @@
 // process-local and would lie under >1 replica:
 //
 //   - presence   : "is uid online anywhere?" drove hasLiveSocket (call wake
-//                  push suppression!) and first/last-socket online/offline
-//                  transitions. Local maps only see THIS node's sockets.
+//     push suppression!) and first/last-socket online/offline
+//     transitions. Local maps only see THIS node's sockets.
 //   - OnlineCount: admin metric — must count the whole cluster.
 //   - call roster: join_call listed peers via FetchSockets on the local
-//                  adapter; peers on another node were invisible.
+//     adapter; peers on another node were invisible.
 //
 // Layout (all keys live in the shared Redis the compose stack already runs):
 //
-//   vc:node:hb:<node>     STRING, EX nodeTTL — heartbeat, refreshed every 5s
-//   vc:nodes              SET of node ids ever seen (janitor work-list)
-//   vc:pres:<uid>         HASH node → local socket count for that node
-//   vc:pres:online        SET of uids with ≥1 socket on ≥1 live node
-//   vc:roster:<node>      SET of uids this node currently tracks (crash sweep)
-//   vc:call:<chatId>      SET of uids in the call room (TTL-refreshed)
+//	vc:node:hb:<node>     STRING, EX nodeTTL — heartbeat, refreshed every 5s
+//	vc:nodes              SET of node ids ever seen (janitor work-list)
+//	vc:pres:<uid>         HASH node → local socket count for that node
+//	vc:pres:online        SET of uids with ≥1 socket on ≥1 live node
+//	vc:roster:<node>      SET of uids this node currently tracks (crash sweep)
+//	vc:call:<chatId>      SET of uids in the call room (TTL-refreshed)
 //
 // A node's fields are only trusted while its heartbeat key exists; readers
 // skip (and lazily delete) fields of dead nodes, so a crashed node's users
@@ -31,6 +31,7 @@
 package realtime
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"log"
@@ -221,18 +222,24 @@ func clusterOnlineCount() int {
 
 // ── Call rosters ────────────────────────────────────────────────────────
 
-func clusterCallJoin(chatID, uid string) {
+func clusterCallJoin(chatID, uid string, parents ...context.Context) {
+	ctx, cancel := realtimeContext(parents...)
+	defer cancel()
 	c := redisx.Client
-	c.SAdd(bg, keyPrefix+"call:"+chatID, uid)
-	c.Expire(bg, keyPrefix+"call:"+chatID, callTTL)
+	c.SAdd(ctx, keyPrefix+"call:"+chatID, uid)
+	c.Expire(ctx, keyPrefix+"call:"+chatID, callTTL)
 }
 
-func clusterCallLeave(chatID, uid string) {
-	redisx.Client.SRem(bg, keyPrefix+"call:"+chatID, uid)
+func clusterCallLeave(chatID, uid string, parents ...context.Context) {
+	ctx, cancel := realtimeContext(parents...)
+	defer cancel()
+	redisx.Client.SRem(ctx, keyPrefix+"call:"+chatID, uid)
 }
 
-func clusterCallRoster(chatID, me string) []string {
-	members, err := redisx.Client.SMembers(bg, keyPrefix+"call:"+chatID).Result()
+func clusterCallRoster(chatID, me string, parents ...context.Context) []string {
+	ctx, cancel := realtimeContext(parents...)
+	defer cancel()
+	members, err := redisx.Client.SMembers(ctx, keyPrefix+"call:"+chatID).Result()
 	if err != nil {
 		return []string{}
 	}

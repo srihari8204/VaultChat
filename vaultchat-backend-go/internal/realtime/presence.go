@@ -1,6 +1,7 @@
 package realtime
 
 import (
+	"context"
 	"log"
 	"time"
 
@@ -22,18 +23,26 @@ var ghostCols = map[string]bool{
 // ── Multi-device socket tracking (server.js trackSocket/untrackSocket) ──
 
 func (h *Hub) trackSocket(s *socket.Socket) {
-	d := sd(s)
-	if d == nil || d.uid == "" {
+	if d := sd(s); d != nil {
+		h.trackIdentity(d.uid, string(s.Id()))
+	}
+}
+
+func (h *Hub) trackIdentity(uid, id string) {
+	if uid == "" {
 		return
 	}
 	h.pmu.Lock()
-	set := h.userSockets[d.uid]
+	if h.userSockets == nil {
+		h.userSockets = map[string]map[string]struct{}{}
+	}
+	set := h.userSockets[uid]
 	wasEmpty := len(set) == 0
 	if set == nil {
 		set = map[string]struct{}{}
-		h.userSockets[d.uid] = set
+		h.userSockets[uid] = set
 	}
-	set[string(s.Id())] = struct{}{}
+	set[id] = struct{}{}
 	h.pmu.Unlock()
 	if wasEmpty {
 		// First LOCAL socket. Single-node that IS the online transition; in a
@@ -43,31 +52,36 @@ func (h *Hub) trackSocket(s *socket.Socket) {
 		// reconnect storm must not fork one goroutine per flip (P2.2).
 		workx.Submit(func() {
 			if ClusterEnabled() {
-				if clusterTrackFirst(d.uid) {
-					h.onUserOnline(d.uid)
+				if clusterTrackFirst(uid) {
+					h.onUserOnline(uid)
 				}
 				return
 			}
-			h.onUserOnline(d.uid)
+			h.onUserOnline(uid)
 		})
 	}
 }
 
 func (h *Hub) untrackSocket(s *socket.Socket) {
-	d := sd(s)
-	if d == nil || d.uid == "" {
+	if d := sd(s); d != nil {
+		h.untrackIdentity(d.uid, string(s.Id()))
+	}
+}
+
+func (h *Hub) untrackIdentity(uid, id string) {
+	if uid == "" {
 		return
 	}
 	h.pmu.Lock()
-	set := h.userSockets[d.uid]
+	set := h.userSockets[uid]
 	if set == nil {
 		h.pmu.Unlock()
 		return
 	}
-	delete(set, string(s.Id()))
+	delete(set, id)
 	last := len(set) == 0
 	if last {
-		delete(h.userSockets, d.uid)
+		delete(h.userSockets, uid)
 	}
 	h.pmu.Unlock()
 	if last {
@@ -75,12 +89,12 @@ func (h *Hub) untrackSocket(s *socket.Socket) {
 		// claim; fire offline only when no live node still has the user.
 		workx.Submit(func() {
 			if ClusterEnabled() {
-				if clusterUntrackLast(d.uid) {
-					h.onUserOffline(d.uid)
+				if clusterUntrackLast(uid) {
+					h.onUserOffline(uid)
 				}
 				return
 			}
-			h.onUserOffline(d.uid)
+			h.onUserOffline(uid)
 		})
 	}
 }
@@ -149,12 +163,14 @@ func (h *Hub) broadcastPresence(uid string, payload map[string]any) {
 
 // loadGhostTargets: target users `senderId` has ghosted for `column` — the
 // recipients to SKIP when fanning senderId's signals (server.js).
-func (h *Hub) loadGhostTargets(senderID, column string) map[string]bool {
+func (h *Hub) loadGhostTargets(senderID, column string, parents ...context.Context) map[string]bool {
+	ctx, cancel := realtimeContext(parents...)
+	defer cancel()
 	out := map[string]bool{}
 	if senderID == "" || !ghostCols[column] {
 		return out
 	}
-	rows, err := db.SysPool.Query(bg,
+	rows, err := db.SysPool.Query(ctx,
 		`SELECT target_id FROM ghost_mode WHERE owner_id = $1 AND `+column+` = TRUE`, senderID)
 	if err != nil {
 		log.Printf("[loadGhostTargets] %v", err)
@@ -171,12 +187,14 @@ func (h *Hub) loadGhostTargets(senderID, column string) map[string]bool {
 }
 
 // loadGhostOwners: owners who have hidden `column` FROM `targetId` (server.js).
-func (h *Hub) loadGhostOwners(targetID, column string) map[string]bool {
+func (h *Hub) loadGhostOwners(targetID, column string, parents ...context.Context) map[string]bool {
+	ctx, cancel := realtimeContext(parents...)
+	defer cancel()
 	out := map[string]bool{}
 	if targetID == "" || !ghostCols[column] {
 		return out
 	}
-	rows, err := db.SysPool.Query(bg,
+	rows, err := db.SysPool.Query(ctx,
 		`SELECT owner_id FROM ghost_mode WHERE target_id = $1 AND `+column+` = TRUE`, targetID)
 	if err != nil {
 		log.Printf("[loadGhostOwners] %v", err)

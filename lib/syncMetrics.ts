@@ -16,6 +16,7 @@
 export type SyncMetric =
   // delta / cold sync
   | 'delta.requests' | 'delta.rows' | 'delta.duplicates' | 'delta.decrypts'
+  | 'delta.page_cap_yields'
   // Rows kept as raw envelopes because hydration threw. Non-zero means some
   // message could not be opened AND the page was saved anyway - which is the
   // whole point: before this existed the throw discarded the page and

@@ -43,6 +43,14 @@ Before this change, the app used REST for message submission and catch-up, Socke
 
 ## Remaining Acceptance
 
+The September 15 follow-up authorizes staged replacement of every app Socket.IO consumer. The stable event interface remains; negotiated `app_events_v1` carries allowlisted event names and bounded JSON payload bytes inside a protobuf AppEvent envelope. This compatibility payload is not fully typed protobuf. Server adapters invoke the same authenticated handlers for either carrier; room membership and user/broadcast fanout include both during mixed-client rollout. The capability stays gated until parity tests pass.
+
+The app chooses one steady-state realtime carrier, WebTransport or WSS. Unsupported negotiation closes before legacy fallback. LiveKit media, push and file transfers retain required independent connections. Games currently use separate raw WebSockets, not Socket.IO. Queues have count and byte ceilings; durable messages remain in existing persistent sync/outbox storage. App heartbeats share the selected session, with required carrier-level timers. Lower RAM and faster startup claims require equivalent before/after measurements.
+
+Large history remains encrypted on the device because delivered server message bodies may be purged and cannot be treated as a recoverable cache. Chat opening reads a small indexed newest-first window, mounts only visible rows, prepares the next local page after first paint and uses keyset pagination while keeping a bounded JavaScript window. Media work follows viewability and bounded concurrency. Startup changes remove repeated whole-history/schema work and defer nonvisual initialization only where killed-call, notification, security and realtime guarantees remain intact. Performance claims require 100, 1,000, 10,000 and 100,000-row fixtures on both authorized Android devices.
+
+Before migration rollout, source and the current signed APK were saved privately at `/home/srihari/vaultchat-checkpoints/pre-migration-20260915`. The live backend fingerprint `859b143426237b6b` matched the snapshot, requiring no identical-image restart. Image `vaultchat-go-api:pre-migration-20260915` preserves rollback. Fresh health/readiness and HTTP/3 checks passed.
+
 - Verify the corrected Android APK and actual carrier acknowledgements on the authorized phone.
 - Complete two-device delivery, receipts and network/background acceptance before broad rollout.
 - Verify external UDP/8443 reachability before advertising HTTP/3; nginx retains other hostnames and TURN retains UDP/443.

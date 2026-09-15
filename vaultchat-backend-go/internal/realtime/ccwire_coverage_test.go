@@ -83,6 +83,7 @@ var ccwireDisposition = map[uint32]struct {
 
 	// ── framing ────────────────────────────────────────────────────────────
 	ccwire.BodyFragment: {"fragment", servedInbound, ""},
+	ccwire.BodyAppEvent: {"app_event", servedInbound, ""},
 
 	// ── media ──────────────────────────────────────────────────────────────
 	ccwire.BodyAttachmentControl: {"attachment_control", notServed,
@@ -164,6 +165,9 @@ func TestServedBodiesAreNotAnsweredUnknown(t *testing.T) {
 		s, fc := newSession("u1", map[string]cachedPerm{})
 		hello(t, s)
 
+		if f == ccwire.BodyAppEvent {
+			s.appEvents = true
+		}
 		if !s.handle(frame(t, ccwire.Message{
 			RequestID:    "r",
 			TrafficClass: ccwire.TrafficClassMessaging,

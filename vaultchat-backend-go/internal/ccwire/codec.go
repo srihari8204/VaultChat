@@ -158,17 +158,18 @@ const (
 	BodyDeviceEvent       uint32 = 97
 	BodyCryptoControl     uint32 = 98
 	BodyCallSignal        uint32 = 99
+	BodyAppEvent          uint32 = 100
 	BodyFragment          uint32 = 112
 )
 
 // BodyFields is every Frame.body field number, in schema order.
-var BodyFields = [27]uint32{
+var BodyFields = [28]uint32{
 	16, 17, 18, 19, 20, 21, 22, 23,
 	32, 33,
 	48, 49, 50, 51, 52,
 	64, 65,
 	80, 81, 82, 83, 84,
-	96, 97, 98, 99,
+	96, 97, 98, 99, 100,
 	112,
 }
 

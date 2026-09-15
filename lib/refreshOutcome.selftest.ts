@@ -54,7 +54,7 @@ console.log('\nThe caller acts on the distinction:');
 check('transient throws a retryable error instead of ending the session',
   /outcome === 'transient'[\s\S]{0,400}?throw new Error/.test(SRC));
 check('only the remaining (terminal) branch clears credentials',
-  /\} else \{[\s\S]{0,900}?endSessionAndBounce\(\)/.test(SRC));
+  /\} else \{[\s\S]{0,900}?endSessionAndBounce\(opts.expectedUserId\)/.test(SRC));
 check('credentials are NOT cleared on the transient path',
   !/outcome === 'transient'[\s\S]{0,300}?endSessionAndBounce/.test(SRC));
 

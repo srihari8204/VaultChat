@@ -69,7 +69,7 @@ export function reset(): void {
 
 /** True when a call is live enough that a second one is "call waiting". */
 export function isActive(): boolean {
-  return snapshot.status !== 'ended' && !!snapshot.peerUid;
+  return snapshot.status !== 'ended' && !!snapshot.chatId;
 }
 
 export default {};

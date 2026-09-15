@@ -138,6 +138,7 @@ type Hub struct {
 	// connects, which requires CCWIRE_WS=1 (ccwire_messages.go).
 	cwmu       sync.Mutex
 	cwSessions map[string]map[*ccwireSession]struct{}
+	cwBusClose func()
 }
 
 // New constructs the Socket.IO server, registers the JWT/admin-key auth
@@ -219,6 +220,7 @@ func New() *Hub {
 	})
 
 	h.startViewerSweep()
+	h.startCCWireCluster()
 	if ClusterEnabled() {
 		h.startCluster() // heartbeat + dead-node janitor (cluster.go)
 	}
@@ -280,6 +282,9 @@ func (h *Hub) Shutdown(wait time.Duration) {
 	// client. Placed above the early return because a hub with no Socket.IO
 	// server can still be serving CC-Wire.
 	h.ccwireShutdown(wait)
+	if h.cwBusClose != nil {
+		h.cwBusClose()
+	}
 
 	if h == nil || h.io == nil {
 		return
@@ -325,6 +330,7 @@ func (h *Hub) onConnection(s *socket.Socket) {
 		for _, room := range s.Rooms().Keys() {
 			if r := string(room); len(r) > 5 && r[:5] == "call:" {
 				s.To(room).Emit("call_peer_left", map[string]any{"chatId": r[5:], "uid": d.uid})
+				h.ccwireRooms([]string{r}, "", "call_peer_left", map[string]any{"chatId": r[5:], "uid": d.uid})
 				if ClusterEnabled() {
 					clusterCallLeave(r[5:], d.uid) // keep the Redis roster honest on drops
 				}
@@ -341,6 +347,10 @@ func (h *Hub) onConnection(s *socket.Socket) {
 // emitToUid.
 func (h *Hub) EmitToUid(uid, event string, payload any) {
 	h.emitToUidIn("", uid, event, payload)
+}
+
+func (h *Hub) emitToUidContext(ctx context.Context, uid, event string, payload any) {
+	h.emitToUidInContext(ctx, "", uid, event, payload)
 }
 
 // emitToUidIn is EmitToUid plus the chat the event belongs to, and it is THE
@@ -361,10 +371,17 @@ func (h *Hub) EmitToUid(uid, event string, payload any) {
 // The Socket.IO emit is unchanged and goes first. The nil guard is for the
 // package's DB-free tests, which build a bare &Hub{}; production always has io.
 func (h *Hub) emitToUidIn(chatID, uid, event string, payload any) {
+	h.emitToUidInContext(bg, chatID, uid, event, payload)
+}
+
+func (h *Hub) emitToUidInContext(ctx context.Context, chatID, uid, event string, payload any) {
+	if ctx.Err() != nil {
+		return
+	}
 	if h.io != nil {
 		h.io.To(socket.Room("user:"+uid)).Emit(event, payload)
 	}
-	h.ccwireDeliver(chatID, uid, event, payload)
+	h.ccwireDeliver(chatID, uid, event, payload, ctx)
 }
 
 // EmitToRooms emits to explicit socket rooms (chat:<id>, channel:<id>, admin…).
@@ -377,11 +394,13 @@ func (h *Hub) EmitToRooms(rooms []string, event string, payload any) {
 		rs[i] = socket.Room(r)
 	}
 	h.io.To(rs...).Emit(event, payload)
+	h.ccwireRooms(rooms, "", event, payload)
 }
 
 // EmitBroadcast emits to every connected socket (admin /broadcast, announcements).
 func (h *Hub) EmitBroadcast(event string, payload any) {
 	h.io.Emit(event, payload)
+	h.ccwireRooms(nil, "", event, payload)
 }
 
 // OnlineCount is the number of distinct online users — matches Node's

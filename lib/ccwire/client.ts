@@ -53,9 +53,12 @@ import {
   decodeFrameMessage,
   encodeFrameMessage,
   LIMITS,
+  APP_EVENT_LOGICAL_MAX,
   type Frame,
+  type Fragment,
   type Limits,
 } from './codec';
+import { AppEventFragments } from './appEventFragments';
 
 // ─── Constants from proto/ccwire/v1 ──────────────────────────────────────────
 
@@ -135,6 +138,7 @@ export interface CCWireEvent {
 
 /** The binding half of the handshake. */
 export interface ServerHello {
+  appEventsV1?: boolean;
   protocolMajor?: number;
   protocolMinor?: number;
   sessionId?: string;
@@ -272,6 +276,7 @@ export function encodeClientHello(deviceId?: string): Uint8Array {
   const out: number[] = [];
   putVarintField(out, 1, 1);                 // protocol_major
   putStringField(out, 5, deviceId ?? '');    // device_id
+  out.push(26, 4, 8, 1, 64, 1); // capabilities: fragmentation + app_events_v1
   return Uint8Array.from(out);
 }
 
@@ -290,6 +295,12 @@ export function decodeServerHello(body: Uint8Array): ServerHello {
     heartbeatIntervalMs: DEFAULT_HEARTBEAT_INTERVAL_MS,
     heartbeatTimeoutMs: DEFAULT_HEARTBEAT_TIMEOUT_MS,
   };
+  const capsBytes = bytesOf(fs, 3);
+  if (capsBytes) {
+    const caps = scanFields(capsBytes);
+    if (!caps) return null;
+    h.appEventsV1 = boolOf(caps, 8);
+  }
   const limBytes = bytesOf(fs, 4);
   if (limBytes) {
     const lf = scanFields(limBytes);
@@ -392,6 +403,8 @@ export interface CCWireClientOptions {
 type State = 'idle' | 'connecting' | 'handshaking' | 'open' | 'closed';
 
 export class CCWireClient {
+  private appFragments = new AppEventFragments();
+  private fragmentTimer: any = null;
   private readonly o: CCWireClientOptions;
   private readonly backoff: Backoff;
   private readonly listeners = new Map<CCWireEventType, Set<CCWireListener>>();
@@ -552,18 +565,38 @@ export class CCWireClient {
    */
   send(f: Frame): boolean {
     if (this.st !== 'open') return false;
+    if (f.body_field === 100 && this.serverHello?.appEventsV1) {
+      const encoded = encodeFrameMessage(f, { maxBytes: APP_EVENT_LOGICAL_MAX, limits: this.limits, appEventsV1: true });
+      if (!encoded.ok) return false;
+      const bytes = encoded.bytes!;
+      if (bytes.length <= this.maxFrameBytes) return this.writeEncoded(bytes);
+      const chunkBytes = Math.min(128 * 1024, this.maxFrameBytes - 512);
+      if (chunkBytes < 1) return false;
+      const total = Math.ceil(bytes.length / chunkBytes);
+      if (total > (this.limits.max_fragments_per_message ?? LIMITS.max_fragments_per_message)) return false;
+      const id = this.nextRequestId();
+      for (let index = 0; index < total; index++) {
+        if (!this.write({ request_id: this.nextRequestId(), traffic_class: 1, stream: 1, body_field: 112,
+          value: { fragment_id: id, index, total, total_bytes: String(bytes.length),
+            chunk: bytes.subarray(index * chunkBytes, (index + 1) * chunkBytes), last: index === total - 1 } })) return false;
+      }
+      return true;
+    }
     return this.write(f);
   }
 
   private write(f: Frame): boolean {
-    const enc = encodeFrameMessage(f, { maxBytes: this.maxFrameBytes, limits: this.limits });
+    const enc = encodeFrameMessage(f, { maxBytes: this.maxFrameBytes, limits: this.limits, appEventsV1: !!this.serverHello?.appEventsV1 });
     if (!enc.ok) {
       this.emit({ type: 'error', detail: `encode refused: ${enc.error} ${enc.detail}`, errorCode: enc.errorCode });
       return false;
     }
+    return this.writeEncoded(enc.bytes!);
+  }
+  private writeEncoded(bytes: Uint8Array): boolean {
     let framed: Uint8Array;
     try {
-      framed = encodeFrame(enc.bytes, this.maxFrameBytes);
+      framed = encodeFrame(bytes, this.maxFrameBytes);
     } catch (e) {
       this.emit({ type: 'error', detail: String(e) });
       return false;
@@ -657,13 +690,23 @@ export class CCWireClient {
     }
   }
 
-  private onFrame(payload: Uint8Array): void {
-    const d = decodeFrameMessage(payload, { maxBytes: this.maxFrameBytes, limits: this.limits });
+  private onFrame(payload: Uint8Array, reassembled = false): void {
+    const d = decodeFrameMessage(payload, { maxBytes: reassembled ? APP_EVENT_LOGICAL_MAX : this.maxFrameBytes,
+      limits: this.limits, appEventsV1: !!this.serverHello?.appEventsV1, depth: reassembled ? 1 : 0 });
     if (!d.ok) {
       this.down('framing', { detail: `${d.error}: ${d.detail}` });
       return;
     }
     const f = d.frame;
+    if (reassembled && f.body_field !== 100) { this.down('protocol', { detail: 'reassembled body is not app_event' }); return; }
+    if (this.st === 'open' && f.body_field === 112 && this.serverHello?.appEventsV1) {
+      try {
+        const bytes = this.appFragments.accept(f.value as Fragment, (this.o.now ?? Date.now)());
+        this.scheduleFragmentExpiry();
+        if (bytes) this.onFrame(bytes, true);
+      } catch { this.down('protocol', { detail: 'invalid app event fragments' }); }
+      return;
+    }
 
     if (this.st === 'handshaking') {
       // THE HANDSHAKE IS NOT OPTIONAL AND NOT LENIENT. Anything before
@@ -695,11 +738,13 @@ export class CCWireClient {
       if (this.dialTimer) { this.clearT(this.dialTimer); this.dialTimer = null; }
       this.helloAt = (this.o.now ?? Date.now)();
       this.backoff.reset();
+      this.needsFullResync = !h.resumed;
       this.emit({ type: 'hello', hello: h });
+      // Capability negotiation may synchronously reject and close this owner.
+      if (this.st !== 'open') return;
       // resumed === false is a COMMAND to full-resync, not a hint. The flag is
       // set before the event so a handler that checks `ready` sees the truth.
       if (!h.resumed) {
-        this.needsFullResync = true;
         this.emit({ type: 'resync_required', hello: h });
       }
       this.startHeartbeat();
@@ -797,8 +842,21 @@ export class CCWireClient {
 
   // ── teardown and reconnect ─────────────────────────────────────────────────
 
+  private scheduleFragmentExpiry(): void {
+    if (this.fragmentTimer) this.clearT(this.fragmentTimer);
+    this.fragmentTimer = null;
+    if (!this.appFragments.size) return;
+    this.fragmentTimer = this.setT(() => {
+      this.fragmentTimer = null;
+      this.appFragments.expire((this.o.now ?? Date.now)());
+      this.scheduleFragmentExpiry();
+    }, Math.max(1, this.appFragments.nextExpiry - (this.o.now ?? Date.now)()));
+  }
+
   /** The one path out of a live session. Idempotent. */
   private down(reason: CloseReason, extra: Partial<CCWireEvent> = {}): void {
+    this.appFragments.clear();
+    if (this.fragmentTimer) { this.clearT(this.fragmentTimer); this.fragmentTimer = null; }
     if (reason === 'client' && this.retry) { this.clearT(this.retry); this.retry = null; }
     if (this.st === 'closed' || this.st === 'idle') {
       // Still make close() stick even if we were never up.

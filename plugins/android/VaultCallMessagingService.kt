@@ -79,7 +79,7 @@ class VaultCallMessagingService : FirebaseMessagingService() {
                 // A notification alone left the sender on ONE TICK: nothing
                 // synced and nothing was acknowledged until the user opened the
                 // app. Wake the JS sync first, then draw the notification.
-                if (!isAppForeground()) startBackgroundSync(data)
+                startBackgroundSync(data)
                 showMessage(data)
             }
         }
@@ -90,8 +90,9 @@ class VaultCallMessagingService : FirebaseMessagingService() {
      * existing sync engine and acknowledges delivery only after the rows are on
      * disk. This class stays out of the sync itself on purpose.
      *
-     * Foreground is the caller's check: the app is already syncing over its
-     * socket, and HeadlessJsTaskService refuses to start in the foreground.
+     * Also run while foregrounded: a socket may be reconnecting and Android's
+     * process importance can outlive the visible activity. The JS catchUp
+     * promise coalesces this with any foreground sync already in flight.
      *
      * Failure here must never cost the notification, so it is best-effort. If
      * Android refuses the background start the user still sees the message and

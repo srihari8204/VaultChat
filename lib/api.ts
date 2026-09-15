@@ -9,6 +9,7 @@ import * as Sentry from '@sentry/react-native';
 import { router } from 'expo-router';
 
 import { SessionEndedError } from './sessionEnded';
+import { tokenSubject } from './tokenIdentity';
 import { resetTo } from './authNav';
 import * as SecureStore from 'expo-secure-store';
 import { SERVER_URL } from '../constants/server';
@@ -23,6 +24,7 @@ const USER_KEY          = 'vc_user';
 // are sealed under the unlock PIN and held in memory after unlock, never in
 // plaintext SecureStore. When OFF, every path below is byte-identical to before.
 let _mem: { access: string; refresh: string } | null = null;  // in-memory session (sealed mode only)
+let tokenRevision = 0;
 let _sealKey: Uint8Array | null = null;                         // PIN-derived key, cached after unlock/setup
 const sealMod  = () => import('../services/security/sessionSeal');
 const cacheMod = () => import('./cacheCrypto');                 // #32 Phase B: at-rest cache DEK
@@ -38,6 +40,7 @@ export async function getRefreshToken(): Promise<string | null> {
 }
 
 export async function setTokens(access: string, refresh: string): Promise<void> {
+  tokenRevision++;
   if (VAULT_SESSION_SEALED) {
     _mem = { access, refresh };
     if (_sealKey) {
@@ -53,6 +56,7 @@ export async function setTokens(access: string, refresh: string): Promise<void> 
 }
 
 export async function clearTokens(): Promise<void> {
+  tokenRevision++;
   _mem = null;
   _sealKey = null;
   await SecureStore.deleteItemAsync(ACCESS_TOKEN_KEY).catch(() => {});
@@ -84,6 +88,23 @@ export async function hasSession(): Promise<boolean> {
 export async function sealedSessionLocked(): Promise<boolean> {
   if (!VAULT_SESSION_SEALED || _mem) return false;
   try { return await (await sealMod()).hasSealedSession(); } catch { return false; }
+}
+
+/** One cold-start read for the two routing questions index.tsx must answer. */
+export async function getLaunchSessionState(): Promise<{ signedIn: boolean; sealedLocked: boolean }> {
+  if (VAULT_SESSION_SEALED && _mem) return { signedIn: true, sealedLocked: false };
+  if (VAULT_SESSION_SEALED) {
+    try {
+      const sealed = await (await sealMod()).hasSealedSession();
+      // Unlock may have completed while the SecureStore read was in flight.
+      if (_mem) return { signedIn: true, sealedLocked: false };
+      if (sealed) return { signedIn: true, sealedLocked: true };
+    } catch {}
+  }
+  return {
+    signedIn: !!(await SecureStore.getItemAsync(ACCESS_TOKEN_KEY)),
+    sealedLocked: false,
+  };
 }
 
 /** Seal the current session under the PIN and drop the plaintext copy. Call at PIN setup. */
@@ -180,6 +201,7 @@ export async function getCachedUser(): Promise<any | null> {
 
 // ─── fetch wrapper ────────────────────────────────────────────
 type ApiOptions = Omit<RequestInit, 'body'> & {
+  expectedUserId?: string; // queued user-owned work must not borrow a later login
   auth?: boolean;     // default true — attach Bearer token if available
   json?: any;         // sets body to JSON + Content-Type
   body?: BodyInit;    // raw body, mutually exclusive with json
@@ -203,7 +225,7 @@ function deviceId(): Promise<string | null> {
 
 async function rawFetch(path: string, opts: ApiOptions): Promise<Response> {
   // Strip our internal keys so they don't leak into fetch init.
-  const { json, auth, headers: optHeaders, body: optBody, ...init } = opts;
+  const { json, auth, expectedUserId, headers: optHeaders, body: optBody, ...init } = opts;
 
   const headers: Record<string, string> = {
     Accept: 'application/json',
@@ -221,6 +243,7 @@ async function rawFetch(path: string, opts: ApiOptions): Promise<Response> {
 
   if (auth !== false) {
     const token = await getAccessToken();
+    if (expectedUserId && tokenSubject(token) !== expectedUserId) throw new SessionEndedError();
     if (token) headers.Authorization = `Bearer ${token}`;
   }
 
@@ -291,7 +314,9 @@ function tryRefresh(): Promise<RefreshOutcome> {
 }
 
 async function doRefresh(): Promise<RefreshOutcome> {
+  const revision = tokenRevision;
   const refresh = await getRefreshToken();
+  if (revision !== tokenRevision) return 'transient';
   // No refresh token at all is genuinely terminal: there is nothing to retry.
   //
   // EXCEPT when the session is SEALED AND STILL LOCKED (#32). Then the tokens
@@ -321,6 +346,7 @@ async function doRefresh(): Promise<RefreshOutcome> {
       body: JSON.stringify({ refreshToken: refresh }),
       signal: ctl.signal,
     });
+    if (revision !== tokenRevision) return 'transient';
     // 401/403 is the server telling us this token is dead. A 5xx is the server
     // having a bad time and says nothing about the token; 429 likewise.
     if (res.status === 401 || res.status === 403) return 'terminal';
@@ -330,6 +356,8 @@ async function doRefresh(): Promise<RefreshOutcome> {
     // A 200 we cannot parse is a broken response, not a revoked session —
     // a captive-portal login page answers 200 with HTML.
     if (!data?.accessToken || !data?.refreshToken) return 'transient';
+    // A response for a previous login must never replace a newer session.
+    if (revision !== tokenRevision) return 'transient';
     await setTokens(data.accessToken, data.refreshToken);
     return 'ok';
   } catch {
@@ -341,7 +369,7 @@ async function doRefresh(): Promise<RefreshOutcome> {
 
 // Guard so we don't navigate to /welcome from a hundred concurrent failing requests.
 let sessionEndingPromise: Promise<void> | null = null;
-async function endSessionAndBounce(): Promise<void> {
+async function endSessionAndBounce(expectedUserId?: string): Promise<void> {
   if (sessionEndingPromise) return sessionEndingPromise;
   sessionEndingPromise = (async () => {
     // YOU CANNOT END A SESSION THAT NEVER STARTED.
@@ -363,6 +391,7 @@ async function endSessionAndBounce(): Promise<void> {
       sessionEndingPromise = null;
       return;
     }
+    if (expectedUserId && tokenSubject(await getAccessToken()) !== expectedUserId) return;
     await clearTokens();
     await setCachedUser(null);
     try {
@@ -402,7 +431,9 @@ export async function api<T = any>(path: string, opts: ApiOptions = {}): Promise
 
   // Auto-refresh once on 401
   if (res.status === 401 && opts.auth !== false) {
+    if (opts.expectedUserId && tokenSubject(await getAccessToken()) !== opts.expectedUserId) throw new SessionEndedError();
     const outcome = await tryRefresh();
+    if (opts.expectedUserId && tokenSubject(await getAccessToken()) !== opts.expectedUserId) throw new SessionEndedError();
     if (outcome === 'ok') res = await rawFetch(path, opts);
     else if (outcome === 'transient') {
       // AUDIT F08: the session is probably fine — we just could not reach the
@@ -413,7 +444,7 @@ export async function api<T = any>(path: string, opts: ApiOptions = {}): Promise
       // Refresh failed → session is dead. Clear tokens and bounce to /welcome
       // so the user can sign in again instead of staring at a "token_expired"
       // alert with no way forward.
-      await endSessionAndBounce();
+      await endSessionAndBounce(opts.expectedUserId);
       // AUDIT F09, completed. This used to return a promise that never settled,
       // which suppressed the "token_expired" dialog that the ~20 sites doing
       //   catch (e) { Alert.alert('… failed', e?.message ?? 'Try again') }

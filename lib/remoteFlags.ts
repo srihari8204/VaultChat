@@ -27,6 +27,9 @@ const CACHE_KEY = 'vaultchat.remoteFlags.v1';
 const FLAGS_TIMEOUT_MS = 6000;
 
 let snapshot: RemoteFlags | null = null;
+let loading: Promise<RemoteFlags> | null = null;
+let cacheReadyResolve: () => void;
+const cacheReady = new Promise<void>((resolve) => { cacheReadyResolve = resolve; });
 
 /**
  * Is this feature on, for this build, right now?
@@ -52,7 +55,7 @@ export function remoteFlagSnapshot(): RemoteFlags {
  *
  * Never throws.
  */
-export async function loadRemoteFlags(): Promise<RemoteFlags> {
+async function loadRemoteFlagsOnce(): Promise<RemoteFlags> {
   // Persisted answer first, so a kill switch survives a cold start with no
   // network. Applied immediately rather than after the fetch resolves.
   try {
@@ -60,6 +63,8 @@ export async function loadRemoteFlags(): Promise<RemoteFlags> {
     if (raw) snapshot = sanitizeFlags(JSON.parse(raw));
   } catch {
     // A corrupt cache is not worth a failure — the server is about to answer.
+  } finally {
+    cacheReadyResolve();
   }
 
   const ctl = new AbortController();
@@ -84,4 +89,15 @@ export async function loadRemoteFlags(): Promise<RemoteFlags> {
   return snapshot ?? {};
 }
 
-export default { flagEnabled, loadRemoteFlags, remoteFlagSnapshot };
+export function loadRemoteFlags(): Promise<RemoteFlags> {
+  if (!loading) loading = loadRemoteFlagsOnce();
+  return loading;
+}
+
+/** Wait only for the persisted kill switch; the network refresh continues. */
+export function remoteFlagsCacheReady(): Promise<void> {
+  void loadRemoteFlags();
+  return cacheReady;
+}
+
+export default { flagEnabled, loadRemoteFlags, remoteFlagsCacheReady, remoteFlagSnapshot };

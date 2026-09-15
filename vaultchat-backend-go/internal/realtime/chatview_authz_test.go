@@ -17,7 +17,7 @@ import (
 func TestChatViewIsGatedOnMembership(t *testing.T) {
 	src := stripLineComments(mustRead(t, "handlers.go"))
 
-	i := strings.Index(src, "func (h *Hub) onChatView(")
+	i := strings.Index(src, "func (h *Hub) onChatViewPeer(")
 	if i < 0 {
 		t.Fatal("onChatView vanished")
 	}
@@ -26,7 +26,7 @@ func TestChatViewIsGatedOnMembership(t *testing.T) {
 		body = body[:j+1]
 	}
 
-	gate := strings.Index(body, "h.chatMemberAllowed(d, chatID)")
+	gate := strings.Index(body, "h.chatMemberAllowed(d, chatID, s.Context())")
 	if gate < 0 {
 		t.Fatal("onChatView no longer checks chat membership: the viewer list of " +
 			"any chat is readable, and joinable, by any authenticated socket")

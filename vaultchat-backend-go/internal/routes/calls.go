@@ -10,6 +10,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgconn"
+
 	"vaultchat/backend-go/internal/db"
 	"vaultchat/backend-go/internal/fcm"
 	"vaultchat/backend-go/internal/httpx"
@@ -81,7 +83,11 @@ func fcmTokensFor(ctx context.Context, userID string) []string {
 // row would hand every sender a duplicate token and every recipient a duplicate
 // notification. Shared by POST /call/token and POST /games/device-token.
 func registerFcmDevice(ctx context.Context, userID, fcmToken, platform string) error {
-	_, err := db.Pool.Exec(ctx,
+	return registerFcmDeviceWithExec(ctx, db.Pool.Exec, userID, fcmToken, platform)
+}
+
+func registerFcmDeviceWithExec(ctx context.Context, exec func(context.Context, string, ...any) (pgconn.CommandTag, error), userID, fcmToken, platform string) error {
+	_, err := exec(ctx,
 		`INSERT INTO devices (user_id, push_token, fcm_token, platform, last_seen_at)
 		 VALUES ($1, $2, $3, $4, NOW())
 		 ON CONFLICT (user_id, push_token) DO UPDATE SET fcm_token = EXCLUDED.fcm_token, last_seen_at = NOW()`,
@@ -90,10 +96,15 @@ func registerFcmDevice(ctx context.Context, userID, fcmToken, platform string) e
 		return nil
 	}
 	// devices may require a unique push_token; fall back like Node.
-	_, err = db.Pool.Exec(ctx,
+	tag, fallbackErr := exec(ctx,
 		`UPDATE devices SET fcm_token = $1 WHERE user_id = $2 AND fcm_token = $1`,
 		fcmToken, userID)
-	return err
+	if fallbackErr != nil || tag.RowsAffected() == 0 {
+		// A successful UPDATE of no rows registered nothing. Preserve the INSERT
+		// error so the client retries instead of persisting a false success.
+		return err
+	}
+	return nil
 }
 
 func callToken(w http.ResponseWriter, r *http.Request) {

@@ -44,6 +44,12 @@
  */
 export type PushOutcome = 'ok' | 'no_platform' | 'no_provider' | 'not_signed_in' | 'transient';
 
+/** Firebase uses one bridge error code for both missing services and outages. */
+export function pushTokenFailureOutcome(error: unknown): PushOutcome {
+  const message = error instanceof Error ? error.message : String((error as any)?.message ?? error ?? '');
+  return /\bMISSING_INSTANCEID_SERVICE\b/.test(message) ? 'no_provider' : 'transient';
+}
+
 /** Attempts after the first, before giving up on a transient failure. */
 export const PUSH_RETRY_LIMIT = 4;
 

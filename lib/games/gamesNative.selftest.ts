@@ -515,19 +515,12 @@ check('the games board is wrapped in an error boundary',
 check('...and the boundary offers a way out, not just a message',
   /Try Again/.test(readFileSync('components/ErrorBoundary.tsx', 'utf8')));
 
-// ── a deep link must not open a dead app ──────────────────────────────
-// hideAsync() lives only in app/index.tsx, the cold-start router at `/`. A cold
-// start from a deep link routes straight past it, so nothing hid the splash:
-// the window never became visible, never got an input channel, and every touch
-// was dropped until Android raised "isn't responding". Device-reproduced on two
-// phones. This is the guard for the whole notification/invite path.
+// ── a deep link must not open a dead or unguarded app ─────────────────
 const LAYOUT = readFileSync('app/_layout.tsx', 'utf8');
-check('a deep-link cold start hides the splash',
-  /Linking\.getInitialURL\(\)[\s\S]{0,200}SplashScreen\.hideAsync/.test(LAYOUT),
-  'without this a turn push or an invite card opens an app that takes no input');
-check('...and the launcher path still hides it in index.tsx',
-  /SplashScreen\.hideAsync/.test(readFileSync('app/index.tsx', 'utf8')),
-  'index covers its own auth read with the splash — moving it would flash a spinner');
+check('the root hides splash only after its auth/capture gate',
+  /if \(launchReady\) SplashScreen\.hideAsync/.test(LAYOUT) &&
+  /Promise\.all\(\[secure, getLaunchSessionState\(\), isMfaEnabled\(\)\]\)/.test(LAYOUT),
+  'deep links bypass index, so the root must protect their first frame');
 
 // ── two devices, one truth ────────────────────────────────────────────
 // Found with two phones in one room: chess announced every square by its DRAWN

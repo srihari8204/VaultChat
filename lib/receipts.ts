@@ -1,103 +1,125 @@
-// lib/receipts.ts — durable read/delivered receipts (Phase 3, WhatsApp parity).
-//
-// markRead/markDelivered were fire-once: read a chat offline → the receipt was
-// dropped → the sender's ✓✓/blue tick never arrived. This records the highest
-// read + delivered message id per chat, sends it coalesced (ONE call per chat,
-// not per message — that's the "batching" 3.5 wants), and re-flushes any un-acked
-// pointer on every reconnect. Pointers are monotonic + the server sets them
-// idempotently, so re-sending is always safe.
-
+// Durable monotonic receipts are owned by the authenticated account, not install.
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { markRead, markDelivered } from './chatService';
+import { getAccessToken } from './api';
+import { tokenSubject } from './tokenIdentity';
+import { SessionEndedError } from './sessionEnded';
 import { onConnectionState } from './socket';
 
-const KEY = 'vc_receipts_v1';
 interface Ptr { read: number; delivered: number; ackedRead: number; ackedDelivered: number }
-const state = new Map<string, Ptr>();
-const get = (chatId: string): Ptr => {
-  let p = state.get(chatId);
-  if (!p) { p = { read: 0, delivered: 0, ackedRead: 0, ackedDelivered: 0 }; state.set(chatId, p); }
-  return p;
-};
-
-let loaded = false;
-async function load(): Promise<void> {
-  if (loaded) return; loaded = true;
-  try { const raw = await AsyncStorage.getItem(KEY); if (raw) for (const [k, v] of Object.entries(JSON.parse(raw))) state.set(k, v as Ptr); } catch {}
+interface Session {
+  owner: string; state: Map<string, Ptr>; loading: Promise<void> | null;
+  saving: Promise<void> | null; pending: string | null;
+  timer: ReturnType<typeof setTimeout> | null; flushing: boolean; again: boolean;
 }
-let saveT: any = null;
-function persistSoon() {
-  if (saveT) return;
-  saveT = setTimeout(() => { saveT = null; AsyncStorage.setItem(KEY, JSON.stringify(Object.fromEntries(state))).catch(() => {}); }, 800);
+let active: Session | null = null;
+let selecting: Promise<unknown> = Promise.resolve();
+const key = (s: Session) => `vc_receipts_v2:${s.owner}`;
+async function session(expectedUserId?: string): Promise<Session> {
+  const owner = tokenSubject(await getAccessToken());
+  if (!owner || (expectedUserId && owner !== expectedUserId)) throw new SessionEndedError();
+  // Finish any old disk write before another session can hydrate the same key.
+  // Network requests never hold this lock; their completion may only save the
+  // still-active session. At most one account map remains retained when idle.
+  const selected = selecting.then(async () => {
+    if (active?.owner !== owner) {
+      if (active?.timer) clearTimeout(active.timer);
+      await active?.saving?.catch(() => {});
+      active = { owner, state: new Map(), loading: null, saving: null, pending: null,
+        timer: null, flushing: false, again: false };
+    }
+    return active!;
+  });
+  selecting = selected.catch(() => {});
+  const s = await selected;
+  await load(s);
+  await assertOwner(s);
+  return s;
 }
-
-let flushT: any = null;
-function flushSoon() { if (flushT) return; flushT = setTimeout(() => { flushT = null; flush(); }, 300); }
-
-/** Record that everything up to `msgId` is read in this chat. Coalesced + durable. */
-export async function markReadDurable(chatId: string, msgId: number): Promise<void> {
-  await load();
-  const p = get(chatId);
-  if (msgId > p.read) { p.read = msgId; persistSoon(); flushSoon(); }
+async function assertOwner(s: Session): Promise<void> {
+  if (tokenSubject(await getAccessToken()) !== s.owner || active !== s) throw new SessionEndedError();
 }
-/** Record that everything up to `msgId` is delivered to this device. */
-export async function markDeliveredDurable(chatId: string, msgId: number): Promise<void> {
-  await load();
-  const p = get(chatId);
-  if (msgId > p.delivered) { p.delivered = msgId; persistSoon(); flushSoon(); }
-}
-
-/**
- * A POINTER THE SERVER WILL NEVER ACCEPT IS PERMANENT, NOT TRANSIENT.
- *
- * These pointers are monotonic and PERSISTED: nothing ever lowers them. The
- * server now validates the cursor and answers 400 ("lastReadMessageId is not a
- * message in this chat") for one that belongs elsewhere. Swallowing that — the
- * bare `catch {}` this replaces — meant a single bad id (a foreign message id
- * written by any client bug) wedged the chat forever, across restarts: the
- * unread badge could never clear, read receipts never reached the peer, and
- * lib/messageNotifications' markSeen, which has the identical monotonic shape,
- * stopped too.
- *
- * So a rejection un-does the raise: drop back to the last value the server
- * actually acked, persist, and let the next genuine read re-advance it from a
- * known-good base. Everything without an HTTP status — offline, DNS, abort —
- * and every 5xx still falls through to the unchanged retry-forever path.
- *
- * `p.read === sent` guards the window: markReadDurable can raise the pointer to
- * a NEW, valid id while this request is in flight, and that one deserves its own
- * attempt rather than being rolled back with the bad one.
- */
-function rejected(e: any): boolean {
-  return e?.status === 400;
-}
-
-let flushing = false;
-/** Send every un-acked pointer (one call per chat). Un-acked stay for next flush. */
-export async function flush(): Promise<void> {
-  if (flushing) return; flushing = true;
-  try {
-    await load();
-    for (const [chatId, p] of state) {
-      if (p.delivered > p.ackedDelivered) {
-        const sent = p.delivered;
-        try { await markDelivered(chatId, sent); p.ackedDelivered = sent; persistSoon(); }
-        catch (e: any) { if (rejected(e) && p.delivered === sent) { p.delivered = p.ackedDelivered; persistSoon(); } }
+function load(s: Session): Promise<void> {
+  return s.loading ??= (async () => {
+    // An I/O failure must propagate: treating it as an empty snapshot loses data.
+    const raw = await AsyncStorage.getItem(key(s));
+    let entries: Record<string, Ptr> = {};
+    try { entries = raw ? JSON.parse(raw) : {}; } catch { /* corrupt local snapshot */ }
+    for (const [id, value] of Object.entries(entries ?? {})) {
+      if (!value || typeof value !== 'object') continue;
+      const p = { read: 0, delivered: 0, ackedRead: 0, ackedDelivered: 0 };
+      for (const field of Object.keys(p) as (keyof Ptr)[]) {
+        if (Number.isSafeInteger(value[field]) && value[field] >= 0) p[field] = value[field];
       }
-      if (p.read > p.ackedRead) {
-        const sent = p.read;
-        try { await markRead(chatId, sent); p.ackedRead = sent; persistSoon(); }
-        catch (e: any) { if (rejected(e) && p.read === sent) { p.read = p.ackedRead; persistSoon(); } }
+      p.ackedRead = Math.min(p.ackedRead, p.read);
+      p.ackedDelivered = Math.min(p.ackedDelivered, p.delivered);
+      s.state.set(id, p);
+    }
+  })().catch(error => { s.loading = null; throw error; });
+}
+function persist(s: Session): Promise<void> {
+  s.pending = JSON.stringify(Object.fromEntries(s.state));
+  // One writer plus one coalesced snapshot, including while storage is slow.
+  if (!s.saving) s.saving = (async () => {
+    while (s.pending !== null) {
+      const snapshot = s.pending; s.pending = null;
+      await AsyncStorage.setItem(key(s), snapshot);
+    }
+  })().finally(() => { s.saving = null; });
+  return s.saving;
+}
+function persistSoon(s: Session) { if (active === s) void persist(s).catch(() => {}); }
+function flushSoon(s: Session) {
+  if (s.timer || active !== s) return;
+  s.timer = setTimeout(() => { s.timer = null; void flushSession(s).catch(() => {}); }, 300);
+}
+async function mark(chatId: string, msgId: number, field: 'read' | 'delivered', expectedUserId?: string) {
+  if (!chatId || !Number.isSafeInteger(msgId) || msgId <= 0) return;
+  const s = await session(expectedUserId);
+  let p = s.state.get(chatId);
+  if (!p) { p = { read: 0, delivered: 0, ackedRead: 0, ackedDelivered: 0 }; s.state.set(chatId, p); }
+  p[field] = Math.max(p[field], msgId);
+  await persist(s);
+  if (p[field] > p[field === 'read' ? 'ackedRead' : 'ackedDelivered']) flushSoon(s);
+}
+/** Persists local intent; server acknowledgement is retried separately. */
+export function markReadDurable(chatId: string, msgId: number, expectedUserId?: string): Promise<void> {
+  return mark(chatId, msgId, 'read', expectedUserId);
+}
+export function markDeliveredDurable(chatId: string, msgId: number, expectedUserId?: string): Promise<void> {
+  return mark(chatId, msgId, 'delivered', expectedUserId);
+}
+async function flushSession(s: Session): Promise<void> {
+  await assertOwner(s);
+  if (s.flushing) { s.again = true; return; }
+  s.flushing = true;
+  try {
+    for (const [chatId, p] of s.state) {
+      for (const field of ['delivered', 'read'] as const) {
+        const ack = field === 'read' ? 'ackedRead' : 'ackedDelivered';
+        if (p[field] <= p[ack]) continue;
+        await assertOwner(s);
+        const sent = p[field];
+        try {
+          await (field === 'read' ? markRead : markDelivered)(chatId, sent, s.owner);
+          p[ack] = sent;
+          persistSoon(s);
+        } catch (error: any) {
+          // Invalid monotonic cursors must not wedge future genuine receipts.
+          // Offline/5xx keep the pointer; concurrent newer intent is never reset.
+          if (error?.status === 400 && p[field] === sent) { p[field] = p[ack]; persistSoon(s); }
+        }
       }
     }
-  } finally { flushing = false; }
+  } finally {
+    s.flushing = false;
+    if (s.again) { s.again = false; flushSoon(s); }
+  }
 }
-
+export async function flush(): Promise<void> { await flushSession(await session()); }
 let armed = false;
-/** Flush receipts on every reconnect. Call once at boot. */
 export function initReceipts(): void {
   if (armed) return; armed = true;
-  onConnectionState((s) => { if (s === 'ONLINE') flush(); });
+  onConnectionState(s => { if (s === 'ONLINE') void flush().catch(() => {}); });
 }
-
 export default {};

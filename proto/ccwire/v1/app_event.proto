@@ -1,0 +1,11 @@
+syntax = "proto3";
+package ccwire.v1;
+option go_package = "vaultchat/backend-go/internal/ccwire/v1;ccwirev1";
+
+// Negotiated compatibility event. Inbound names are limited to registered
+// application handlers; authenticated identity and authorization stay server-owned.
+// Payload JSON is bounded by the existing realtime payload validator.
+message AppEvent {
+  string event = 1;
+  bytes payload_json = 2;
+}

@@ -42,19 +42,23 @@ export async function runBackgroundSync(
   data?: { chatId?: string },
 ): Promise<'synced' | 'no-session' | 'sync-failed' | 'nothing-to-ack'> {
   const chatId = data?.chatId;
+  let owner = '';
   try {
     // 1. A session, or there is nothing we may call the API with. Not an error:
     //    a logged-out device legitimately receives no acks.
     const { getAccessToken } = await import('./api');
-    if (!(await getAccessToken())) return 'no-session';
+    const { tokenSubject } = await import('./tokenIdentity');
+    owner = tokenSubject(await getAccessToken());
+    if (!owner) return 'no-session';
 
     // 2. Drain the delta through the EXISTING engine — same cursor, same
     //    dedup, same cacheMessages upsert. Deliberately not a second sync
     //    implementation: a parallel path is how two cursors drift apart.
-    //    catchUp() also self-guards re-entry, so overlapping pushes collapse
-    //    into one drain instead of racing.
-    const { catchUp } = await import('./syncEngine');
-    await catchUp();
+    //    requestCatchUp() joins the shared drain and requests another pass if
+    //    this push arrived during an older response snapshot. The await covers
+    //    that follow-up before reading the local delivery high-water mark.
+    const { requestCatchUp } = await import('./syncEngine');
+    await requestCatchUp();
   } catch {
     // Offline, 401, server hiccup. Say nothing to the server: an ack here
     // would mark delivered a message we do not have.
@@ -70,7 +74,7 @@ export async function runBackgroundSync(
     const newest = (await getCachedMessages(chatId, 1))[0];
     if (!newest || typeof newest.id !== 'number' || newest.id <= 0) return 'nothing-to-ack';
     const { markDelivered } = await import('./chatService');
-    await markDelivered(chatId, newest.id);
+    await markDelivered(chatId, newest.id, owner);
     return 'synced';
   } catch {
     // The rows are on disk; only the receipt failed. The next sync re-acks —

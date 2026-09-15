@@ -557,6 +557,31 @@ func chatsParseSyncContinuation(userID, token string) (int64, bool) {
 	return floor, err == nil && floor >= 0
 }
 
+// Recovery continuations bind the allocation epoch's head and page position to
+// this account. Reuse the cold-sync signer with a distinct authenticated domain.
+func chatsRecoveryContinuation(userID string, cursor, head, warmSince int64) string {
+	h := strconv.FormatInt(head, 10)
+	w := strconv.FormatInt(warmSince, 10)
+	return "r1." + h + "." + w + "." + chatsSyncContinuation("recovery\n"+userID+"\n"+h+"\n"+w, cursor)
+}
+
+func chatsParseRecoveryContinuation(userID, token string) (cursor, head, warmSince int64, valid bool) {
+	parts := strings.SplitN(token, ".", 4)
+	if len(parts) != 4 || parts[0] != "r1" {
+		return 0, 0, 0, false
+	}
+	head, err := strconv.ParseInt(parts[1], 10, 64)
+	if err != nil || head < 0 {
+		return 0, 0, 0, false
+	}
+	warmSince, err = strconv.ParseInt(parts[2], 10, 64)
+	if err != nil || warmSince < 0 {
+		return 0, 0, 0, false
+	}
+	cursor, valid = chatsParseSyncContinuation("recovery\n"+userID+"\n"+parts[1]+"\n"+parts[2], parts[3])
+	return cursor, head, warmSince, valid
+}
+
 // noteSyncDevice upserts the device row and reports whether this (user, device)
 // pair had been seen BEFORE this call. A blank deviceID is never "known".
 func noteSyncDevice(ctx context.Context, userID, deviceID string, cold bool) (known bool) {
@@ -634,7 +659,41 @@ func chatsDelta(w http.ResponseWriter, r *http.Request) {
 	coldStart := false
 	deviceID := strings.TrimSpace(r.Header.Get("X-Device-Id"))
 	continuation := strings.TrimSpace(q.Get("syncContinuation"))
-	if since == 0 && continuation == "" {
+	scopes := realtime.CCWireSyncPositions(r)
+	recoveryHead := int64(-1)
+	recoveryWarmSince := requestedSince
+	if strings.HasPrefix(continuation, "r1.") {
+		cursor, head, warmSince, valid := chatsParseRecoveryContinuation(user.ID, continuation)
+		if !valid {
+			httpx.Err(w, 400, "invalid sync continuation")
+			return
+		}
+		since, requestedSince, recoveryHead, coldStart = cursor, cursor, head, true
+		recoveryWarmSince = warmSince
+	} else if continuation == "" && (since > 0 || len(scopes) > 0) {
+		// MAX(id) can fall after legitimate deletion; allocation high-water cannot.
+		// A cursor beyond that high-water otherwise returns empty success forever.
+		head, gap, err := chatsRecoveryFacts(ctx, user.ID, since, scopes)
+		if err != nil {
+			log.Printf("[chats/delta] recovery check failed: %v", err)
+			httpx.Err(w, 500, "delta failed")
+			return
+		}
+		ahead := since > head
+		for _, position := range scopes {
+			if position > uint64(head) {
+				ahead = true
+			}
+		}
+		if ahead || (gap && len(scopes) == 0) {
+			since, requestedSince, recoveryHead, coldStart = 0, 0, head, true
+		}
+	}
+	if recoveryHead >= 0 {
+		// Recover all pending rows in bounded pages. Applying the cold-history floor
+		// here would discard pending messages below that floor after a restore.
+		scopes = chatsRecoveryScopes(scopes, recoveryHead)
+	} else if since == 0 && continuation == "" {
 		if !noteSyncDevice(ctx, user.ID, deviceID, true) {
 			coldStart = true
 			capN := coldSyncMaxMessages()
@@ -715,7 +774,7 @@ func chatsDelta(w http.ResponseWriter, r *http.Request) {
 	// behind had `since` raised past the messages it had not received, and
 	// cursorSync then closes with a watermark past the gap - so the skipped
 	// messages are never delivered and never asked for again.
-	if since == 0 && realtime.IsCCWire(r) {
+	if recoveryHead < 0 && since == 0 && realtime.IsCCWire(r) {
 		if capN := coldSyncMaxMessages(); capN > 0 && !coldSyncWarnOnly() {
 			if floor := coldSyncFloor(ctx, user.ID, capN); floor > since {
 				log.Printf("[chats/delta] cc-wire catch-up clamped %d -> %d for user=%s", since, floor, user.ID)
@@ -732,7 +791,6 @@ func chatsDelta(w http.ResponseWriter, r *http.Request) {
 	}
 	// Scope BEFORE pagination. Filtering after LIMIT could repeatedly return
 	// only already-synced rows or rows from chats absent from the CursorSync.
-	scopes := realtime.CCWireSyncPositions(r)
 	args := []any{user.ID, since, limit}
 	if len(scopes) > 0 {
 		// A cold chat must not raise the cursor or apply delivery filtering to
@@ -741,6 +799,12 @@ func chatsDelta(w http.ResponseWriter, r *http.Request) {
 		coldFilter = ""
 	}
 	scopeFilter, args := chatsDeltaScopes(scopes, args, since, coldStart)
+	if recoveryHead >= 0 && len(scopes) == 0 {
+		// Preserve the original warm window, including rows acknowledged by
+		// another device. Recovery adds old pending rows; it must not hide new ones.
+		coldFilter = ` AND (m.id > $4 OR cm.last_delivered_message_id IS NULL OR m.id > cm.last_delivered_message_id)`
+		args = append(args, recoveryWarmSince)
+	}
 	rows, err := db.SysPool.Query(ctx,
 		`SELECT `+chatsMsgSelBody("m")+` FROM messages m
 		   JOIN chat_members cm ON cm.chat_id = m.chat_id AND cm.user_id = $1 AND cm.left_at IS NULL
@@ -769,6 +833,10 @@ func chatsDelta(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	mutationSince := since
+	if recoveryHead >= 0 {
+		mutationSince = recoveryHead
+	}
 	var serverTime time.Time
 	// Plain pool: reading the clock touches no table, so there is nothing for
 	// RLS to gate. Marking it SysPool would be a false claim — that label means
@@ -792,7 +860,7 @@ func chatsDelta(w http.ResponseWriter, r *http.Request) {
 				    AND m.id <= $4
 				  ORDER BY GREATEST(COALESCE(m.edited_at, 'epoch'), COALESCE(m.deleted_at, 'epoch')), m.id ASC
 				  LIMIT 500`,
-				user.ID, at, id, since)
+				user.ID, at, id, mutationSince)
 			if err != nil {
 				log.Printf("[chats/delta] %v", err)
 				httpx.Err(w, 500, "delta failed")
@@ -816,7 +884,7 @@ func chatsDelta(w http.ResponseWriter, r *http.Request) {
 				   JOIN chat_members cm ON cm.chat_id = m.chat_id AND cm.user_id = $1 AND cm.left_at IS NULL
 				                       AND cm.hidden = FALSE`+chatsBodyJoin+`
 				  WHERE (m.edited_at > $2 OR m.deleted_at > $2) AND m.id <= $3
-				  ORDER BY GREATEST(COALESCE(m.edited_at, 'epoch'), COALESCE(m.deleted_at, 'epoch')), m.id ASC LIMIT 500`, user.ID, mutatedSince, since)
+				  ORDER BY GREATEST(COALESCE(m.edited_at, 'epoch'), COALESCE(m.deleted_at, 'epoch')), m.id ASC LIMIT 500`, user.ID, mutatedSince, mutationSince)
 			if err != nil {
 				log.Printf("[chats/delta] %v", err)
 				httpx.Err(w, 500, "delta failed")
@@ -834,7 +902,9 @@ func chatsDelta(w http.ResponseWriter, r *http.Request) {
 	}
 	more := int64(len(messages)) == limit
 	syncContinuation := ""
-	if coldStart && more {
+	if recoveryHead >= 0 && more {
+		syncContinuation = chatsRecoveryContinuation(user.ID, nextSince, recoveryHead, recoveryWarmSince)
+	} else if coldStart && more {
 		syncContinuation = chatsSyncContinuation(user.ID, since)
 	}
 	httpx.JSON(w, 200, map[string]any{
@@ -846,6 +916,45 @@ func chatsDelta(w http.ResponseWriter, r *http.Request) {
 		"nextMutationCursor": nextMutationCursor,
 		"serverTime":         httpx.JSTime(serverTime),
 	})
+}
+
+// Pending rows behind a cursor require recovery even after allocation has
+// overtaken that cursor. All checks retain the canonical visibility rules.
+func chatsRecoveryFacts(ctx context.Context, userID string, since int64, scopes map[string]uint64) (head int64, gap bool, err error) {
+	var chats []string
+	var positions []int64
+	ceiling := since
+	for chatID, position := range scopes {
+		chats = append(chats, chatID)
+		positions = append(positions, int64(position))
+		if int64(position) > ceiling {
+			ceiling = int64(position)
+		}
+	}
+	err = db.SysPool.QueryRow(ctx, `SELECT
+	 COALESCE(pg_sequence_last_value(pg_get_serial_sequence('messages','id')::regclass), (SELECT COALESCE(MAX(id),0) FROM messages)),
+	 EXISTS (SELECT 1 FROM messages m JOIN chat_members cm ON cm.chat_id=m.chat_id
+	  AND cm.user_id=$1 AND cm.left_at IS NULL AND cm.hidden=FALSE
+	  WHERE m.id <= $2 AND (cm.last_delivered_message_id IS NULL OR m.id > cm.last_delivered_message_id)
+	   AND (m.expires_at IS NULL OR m.expires_at > NOW())
+	   AND ($3::text[] IS NULL OR EXISTS (
+	    SELECT 1 FROM unnest($3::text[], $4::bigint[]) AS sync(chat_id,position)
+	    WHERE m.chat_id=sync.chat_id::uuid AND m.id <= sync.position)))`, userID, ceiling, chats, positions).Scan(&head, &gap)
+	return
+}
+
+func chatsRecoveryScopes(scopes map[string]uint64, head int64) map[string]uint64 {
+	if len(scopes) == 0 {
+		return scopes
+	}
+	adjusted := make(map[string]uint64, len(scopes))
+	for chatID, position := range scopes {
+		if position > uint64(head) {
+			position = 0
+		}
+		adjusted[chatID] = position
+	}
+	return adjusted
 }
 
 func chatsDeltaScopes(scopes map[string]uint64, args []any, coldFloor int64, coldStart bool) (string, []any) {

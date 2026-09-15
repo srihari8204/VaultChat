@@ -18,7 +18,7 @@ import { api, getAccessToken } from './api';
 import { SERVER_URL } from '../constants/server';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
-  pushRetryDelayMs, setPushOutcome, shouldReregister, shouldRetryPush, type PushOutcome,
+  pushRetryDelayMs, pushTokenFailureOutcome, setPushOutcome, shouldReregister, shouldRetryPush, type PushOutcome,
 } from './pushRegistration';
 
 const VaultCalls: any = NativeModules.VaultCalls ?? null;
@@ -52,14 +52,12 @@ async function attemptRegister(): Promise<PushOutcome> {
   let token: string | null = null;
   try {
     token = await VaultCalls.getFcmToken();
-  } catch {
-    // The provider itself could not issue a token. On Android that means Play
-    // Services is missing, disabled or too old — a device with no GMS at all
-    // (Huawei post-2019) lands here on every attempt. It is a permanent fact
-    // about the install, not a transient error, so it must NOT be retried.
-    return 'no_provider';
+  } catch (error) {
+    // The native bridge uses the same error code for provider and network
+    // failures. A rejected token request does not establish missing GMS.
+    return pushTokenFailureOutcome(error);
   }
-  if (!token) return 'no_provider';
+  if (!token) return 'transient';
 
   const access = await getAccessToken();
   if (!access) return 'not_signed_in';

@@ -276,18 +276,18 @@ async function main() {
     check('two different senders decrypt concurrently', both.join(',') === 'a,b');
   }
 
-  // ── B (chatService, not runnable here): assert the guard by shape ──────────
-  // searchInChat decrypts up to 1000 cached messages; without the same bulk
-  // guard hydrateMessages uses, two permanent failures from old history reset a
-  // healthy live session and break the next call with that peer.
+  // ── B (chatService, not runnable here): search must not touch the ratchet ──
+  // localDb already returns plaintext opened only with the at-rest cache key.
+  // Replaying old rows through decryptFromChat can mutate/reset a healthy live
+  // session, so search now delegates directly to the blind local index.
   const CHAT = readFileSync(join(ROOT, 'lib', 'chatService.ts'), 'utf8').replace(/\r\n/g, '\n');
   const search = CHAT.slice(CHAT.indexOf('export async function searchInChat'));
   const searchBody = search.slice(0, search.indexOf('\n}\n') + 3);
   check('searchInChat was located', searchBody.length > 100 && searchBody.includes('hits'));
-  check('searchInChat raises the bulk-decrypt guard',
-    /_bulkDecryptDepth\+\+/.test(searchBody) && /decryptFromChat\(/.test(searchBody));
-  check('searchInChat releases it in a finally (an early break must not leak it)',
-    /finally\s*\{\s*_bulkDecryptDepth--;/.test(searchBody));
+  check('searchInChat delegates to the encrypted local index',
+    /searchCachedMessagesInChat\(chatId, term, limit\)/.test(searchBody));
+  check('searchInChat never replays cached plaintext through the live ratchet',
+    !/_bulkDecryptDepth\+\+/.test(searchBody) && !/decryptFromChat\(/.test(searchBody));
 
   rmSync(WORK, { recursive: true, force: true });
   console.log(failures ? `\n  ${failures} FAILED\n` : '\n  group sender-key state survives key loss, re-ingest and concurrency\n');

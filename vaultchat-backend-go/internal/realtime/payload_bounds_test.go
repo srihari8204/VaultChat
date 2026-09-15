@@ -191,7 +191,7 @@ func TestChatPublishersAreGatedOnMembership(t *testing.T) {
 	if n := strings.Count(src, "h.chatMemberAllowed(d,"); n < 8 {
 		t.Fatalf("only %d chat-membership gates left in handlers.go; a publisher lost its check", n)
 	}
-	if !strings.Contains(src, "h.peerAllowed(d, to)") {
+	if !strings.Contains(src, "h.peerAllowed(d, to, s.Context())") {
 		t.Fatal("the per-peer relays no longer authorise their recipient")
 	}
 }

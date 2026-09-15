@@ -45,11 +45,13 @@ export default function InChatSearchScreen() {
   // against out-of-order responses overwriting a newer query's results.
   useEffect(() => {
     if (debounce.current) clearTimeout(debounce.current);
+    // Invalidate an in-flight request immediately when the text changes; doing
+    // this inside the timer leaves a 300 ms window where stale results can win.
+    const seq = ++reqSeq.current;
     const term = query.trim();
     if (!chatId || !term) { setResults([]); setLoading(false); setError(null); return; }
     setLoading(true);
     debounce.current = setTimeout(async () => {
-      const seq = ++reqSeq.current;
       try {
         const hits = await searchInChat(chatId, term, 80);
         if (seq === reqSeq.current) { setResults(hits); setError(null); }

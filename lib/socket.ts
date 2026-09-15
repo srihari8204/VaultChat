@@ -1,20 +1,19 @@
 // VaultChat real-time socket client.
 //
-// Single Socket.IO connection per app instance. Authenticated with the
-// access JWT at handshake time (matches the backend's io.use middleware
-// in server.js).
+// One shared realtime connection: CC-Wire app events over WebTransport,
+// native WebSocket, or the platform WebSocket. It authenticates with the
+// access JWT at handshake time.
 //
 // Lifecycle:
-//   getSocket()    — lazy connect on first use, returns the live socket
+//   getSocket()    — lazy connect on first use, returns the shared event facade
 //   disconnect()   — call on logout to drop the connection + clear caches
 //   on(event, cb)  — typed subscription with auto-cleanup via returned fn
 //
 // Reconnect:
-//   socket.io has built-in reconnect with exponential backoff. We rely on
-//   it. If the token expires mid-connection, the server kicks us; we then
-//   refresh the token (via the api wrapper) and reconnect.
+//   the CC-Wire supervisor owns backoff/recovery. If the token expires
+//   mid-connection, the server closes the session; we refresh through the API
+//   wrapper and reconnect.
 
-import { io as ioClient, Socket } from 'socket.io-client';
 import { useSyncExternalStore } from 'react';
 import { AppState } from 'react-native';
 import NetInfo from '@react-native-community/netinfo';
@@ -22,10 +21,20 @@ import { SERVER_URL } from '../constants/server';
 import { getAccessToken, refreshAccessToken } from './api';
 import { netKeyOf, reconnectReason, shouldKickOnForeground, shouldAbandonPendingConnect, SETTLE_MS } from './socketReconnect';
 import perf from './perf';
-import { isFeatureEnabled, TRANSPORT_RUST } from './featureFlags';
 
-let socket: Socket | null = null;
-let connecting: Promise<Socket> | null = null;
+export interface RealtimeSocket {
+  connected: boolean;
+  on(event: string, handler: (...args: any[]) => void): any;
+  off(event: string, handler?: (...args: any[]) => void): any;
+  once(event: string, handler: (...args: any[]) => void): any;
+  emit(event: string, data?: any): any;
+  connect(): any;
+  disconnect(): any;
+  removeAllListeners(): any;
+  waitUntilReady?: () => Promise<RealtimeSocket>;
+}
+let socket: RealtimeSocket | null = null;
+let connecting: Promise<RealtimeSocket> | null = null;
 // When the in-flight connect started, so a hung handshake can be abandoned
 // rather than wedging every caller behind it forever.
 let connectingSince: number | null = null;
@@ -86,214 +95,94 @@ export function useConnectionState(): ConnState {
 
 // Listeners that MUST survive socket re-creation (reconnect after a network
 // drop, or a new instance after disconnect()/re-login). Re-applied every time
-// a fresh Socket is constructed. This is what keeps incoming calls reliable —
-// a one-shot `s.on('call_incoming', …)` is lost the moment the socket is
-// replaced, which is exactly why calls were silently not ringing.
+// a fresh facade is constructed. This is what keeps incoming calls reliable.
 const persistentListeners = new Map<string, Set<(data: any) => void>>();
-function applyPersistent(s: Socket) {
+let persistentTarget: RealtimeSocket | null = null;
+function applyPersistent(s: RealtimeSocket) {
+  persistentTarget = s;
   for (const [event, hs] of persistentListeners) {
     for (const h of hs) { try { s.off(event, h); s.on(event, h); } catch {} }
   }
 }
 
-/**
- * Which transport this app session uses. §21 rollout — see
- * docs/ROLLOUT_TRANSPORT.md.
- *
- * `'socketio'` is the live path, the default, and the answer on every error.
- * `'ccwire'` requires EXPO_PUBLIC_FLAG_TRANSPORT_RUST_PCT to be set in the
- * build AND this install to fall inside the bucket AND the server not to have
- * killed the flag. With nothing configured — the state today — isFeatureEnabled
- * returns false without touching storage or the network, so this is a pure
- * function call that cannot fail and cannot delay anything.
- *
- * The try/catch is belt-and-braces: isFeatureEnabled is already total. It is
- * here so that stays true no matter what the flag layer grows into.
- */
-export type TransportName = 'socketio' | 'ccwire';
+/** New app builds use CC-Wire for realtime events. */
+export type TransportName = 'ccwire';
 let ccwireGeneration = 0;
 let stopCCWireSession: (() => void) | null = null;
 let recoverCCWireSession: (() => void) | null = null;
 export function selectTransport(): TransportName {
-  try {
-    return isFeatureEnabled(TRANSPORT_RUST) ? 'ccwire' : 'socketio';
-  } catch {
-    return 'socketio';
-  }
+  return 'ccwire';
 }
 
-async function connect(): Promise<Socket> {
-  // ── §21 transport branch ────────────────────────────────────────────────
-  // Evaluated ONCE per connect, synchronously, before anything else happens,
-  // and sticky for the session (featureFlags freezes the answer) so a transport
-  // cannot swap under a live conversation. With no flag configured `chosen` is
-  // 'socketio' and every line below is the code that shipped, in the order it
-  // shipped.
-  const chosen = selectTransport();
-  if (chosen === 'ccwire') {
-    // One protobuf submission owner uses the Rust carrier when installed.
-    // Socket.IO continues to own inbound delivery, calls, rooms and presence.
-    // Startup is independent so a failed native load cannot delay those paths.
-    const generation = ccwireGeneration;
-    import('./ccwire/transport')
-      .then(async (m) => {
-        // Keep the transport startup independent of this best-effort lookup:
-        // unsupported test/native environments must still dial without an id.
-        let deviceId: string | undefined;
-        try { deviceId = await import('../services/deviceService').then((x) => x.getDeviceId()); } catch {}
-        const native = await import('./ccwire/nativeSocket').catch(() => null);
-        const webSocket = native?.getNativeWebSocketImpl();
-        const webTransportUrl = m.ccwireWebTransportUrl(SERVER_URL, process.env.EXPO_PUBLIC_CCWIRE_WEBTRANSPORT_URL);
-        const webTransport = webTransportUrl ? native?.getNativeWebSocketImpl(webTransportUrl) : undefined;
-        if (generation !== ccwireGeneration) return;
-        stopCCWireSession = () => m.stopCCWire('logout');
-        recoverCCWireSession = () => m.recoverCCWire();
-        m.startCCWire({
-        serverUrl: SERVER_URL,
-        getToken: async () => (await getAccessToken()) ?? '',
-        // The existing ClientHello protobuf field is a stable per-install id.
-        // It identifies this sync install; authorization remains the upgrade JWT.
-        deviceId,
-        WebSocketImpl: webTransport ?? webSocket,
-        carrier: webTransport ? 'rust-wt' : webSocket ? 'rust-ws' : 'ws',
-        webSocketFallback: webTransport ? { WebSocketImpl: webSocket, carrier: webSocket ? 'rust-ws' : 'ws' } : undefined,
-        onStatus: (s, detail) => {
-          // Sidecar readiness is not evidence of message submission over it.
-          if (s === 'error') perf.mark('transport_ccwire_unavailable', { flag: TRANSPORT_RUST, detail });
-          else perf.mark(`transport_ccwire_${s}`, { flag: TRANSPORT_RUST, carrier: m.ccwireDiagnostics().carrier });
-        },
-        });
-      })
-      .catch((e) => perf.mark('transport_ccwire_unavailable', { flag: TRANSPORT_RUST, detail: String(e) }));
-  }
-  // Each send records its actual carrier; default stays HTTP until an Ack.
-  perf.setSendTransport('http');
-
-  // Fail fast when there is no session at all. The token itself is NOT captured
-  // here any more — the auth callback below reads it fresh per handshake.
+async function connect(): Promise<RealtimeSocket> {
+  const generation = ccwireGeneration;
   if (!(await getAccessToken())) throw new Error('Not signed in');
-
-  const s = ioClient(SERVER_URL, {
-    // Task 2: websocket-only (no polling fallback — intentional launch
-    // decision), aggressive-but-jittered reconnect for fast network recovery.
-    transports: ['websocket'],
-    // AUDIT F13: a FUNCTION, not the object literal it used to be.
-    //
-    // `auth: { token }` captures one token at construction and presents that
-    // same string on every reconnect for the life of the socket. Access tokens
-    // last 15 minutes, so after the app sat idle and the connection dropped,
-    // every reconnect attempt handed the server a token it had already expired
-    // — and the middleware rejects rather than retries, so HTTP kept working
-    // while messaging and calls stayed dark until something happened to build
-    // a brand new socket.
-    //
-    // The callback form is invoked before EACH connection attempt, so a
-    // reconnect always carries whatever the HTTP layer last stored.
-    auth: (cb: (data: Record<string, unknown>) => void) => {
-      getAccessToken()
-        .then((t) => cb({ token: t ?? '' }))
-        .catch(() => cb({ token: '' }));
-    },
-    reconnection: true,
-    reconnectionDelay: 500,
-    reconnectionDelayMax: 5000,
-    randomizationFactor: 0.5,
-    timeout: 10000,
-  });
-  applyPersistent(s);   // re-attach call/global listeners onto the new socket
-
-  // ── Task 1 perf: log the negotiated transport + any upgrade ──────
+  perf.setSendTransport('http');
   perf.setConnState('connecting'); setConn('CONNECTING');
-  s.on('connect', () => {
-    const tname = (s as any).io?.engine?.transport?.name ?? 'unknown';
-    perf.setTransport(tname);
-    perf.setConnState('connected');
-    perf.mark('socket_connect', { transport: tname });
-    noteConnectSuccess();   // clears any "can't connect" state
-    // RE-APPLY PERSISTENT LISTENERS, not just at construction.
-    //
-    // applyPersistent() also runs when the socket is built, but that is only
-    // sufficient while the FIRST getSocket() happens to come from
-    // addPersistentListener itself — which is how it worked by accident. A
-    // caller that opens the socket earlier (a boot warm-up) creates it with an
-    // EMPTY listener map, and a handler registered while the handshake is still
-    // in flight finds `socket` still null and attaches to nothing. The map
-    // would hold it and no live socket would carry it: calls stop ringing, with
-    // nothing in any log to say so.
-    //
-    // Re-applying here closes that window for good. applyPersistent off()s
-    // before it on()s, so running twice is idempotent.
+  let candidate: RealtimeSocket | null = null;
+  try {
+    const m = await import('./ccwire/transport');
+    const { CCWireEventSocket } = await import('./ccwire/eventsSocket');
+    let deviceId: string | undefined;
+    try { deviceId = await import('../services/deviceService').then((x) => x.getDeviceId()); } catch {}
+    const native = await import('./ccwire/nativeSocket').catch(() => null);
+    const webSocket = native?.getNativeWebSocketImpl();
+    const webTransportUrl = m.ccwireWebTransportUrl(SERVER_URL, process.env.EXPO_PUBLIC_CCWIRE_WEBTRANSPORT_URL);
+    const webTransport = webTransportUrl ? native?.getNativeWebSocketImpl(webTransportUrl) : undefined;
+    if (generation !== ccwireGeneration) throw new Error('Session ended');
+    recoverCCWireSession = () => m.recoverCCWire();
+    const s = new CCWireEventSocket({
+      serverUrl: SERVER_URL,
+      getToken: async () => (await getAccessToken()) ?? '',
+      onResyncRequired: async () => { await (await import('./syncEngine')).resyncRequired(); },
+      // Stable per-install id for the protobuf ClientHello. Authorization
+      // remains the upgrade JWT; devices without the native module use JS WS.
+      deviceId,
+      WebSocketImpl: webTransport ?? webSocket,
+      carrier: webTransport ? 'rust-wt' : webSocket ? 'rust-ws' : 'ws',
+      webSocketFallback: webTransport ? { WebSocketImpl: webSocket, carrier: webSocket ? 'rust-ws' : 'ws' } : undefined,
+      onStatus: (status, detail) => {
+        if (status === 'error') perf.mark('transport_ccwire_unavailable', { detail });
+        else perf.mark(`transport_ccwire_${status}`, { carrier: m.ccwireDiagnostics().carrier });
+        if (status === 'pending') setConn('CONNECTING');
+      },
+    }, refreshAccessToken);
+    candidate = s;
+    stopCCWireSession = () => s.disconnect();
     applyPersistent(s);
-    // RE-JOIN CHAT ROOMS. The server joins a fresh socket only to user:<uid>;
-    // every chat-room membership dies with the old server-side session on
-    // reconnect, and nothing else re-establishes it — so live location,
-    // typing and every other room-fanout event silently stopped arriving
-    // after any reconnect until the screen was re-entered. Found on two
-    // physical devices that could each see themselves and never each other.
-    for (const id of joinedChatRooms) s.emit('join_chat', { chatId: id });
-    try {
-      (s as any).io?.engine?.on('upgrade', (t: any) => {
-        perf.setTransport(t?.name ?? 'unknown');
-        perf.mark('socket_upgrade', { transport: t?.name });
-      });
-    } catch {}
-  });
-  s.on('disconnect', (reason: string) => { perf.setConnState('disconnected'); setConn('CONNECTING'); perf.mark('socket_disconnect', { reason }); });
-  s.io.on('reconnect_attempt', () => { perf.setConnState('connecting'); setConn('CONNECTING'); perf.bumpReconnect(); });
-  // Count consecutive failures → drives the "Can't connect" banner after 5.
-  s.io.on('reconnect_error', () => noteConnectFailure());
-  s.io.on('error', () => noteConnectFailure());
-  s.on('connect_error', () => noteConnectFailure());
-
-  // ...and if the token is simply dead, renew it and let reconnection continue.
-  //
-  // The callback above covers the case where something else already refreshed.
-  // This covers the case where nothing has: the app has been idle, the socket
-  // is the first thing to notice, and there is no 401 anywhere to trigger the
-  // usual path. Without it the socket retries the same expired token until the
-  // user navigates somewhere that happens to make an HTTP call.
-  //
-  // Guarded so a rejecting server cannot become a refresh loop: one attempt per
-  // socket, and only for an auth-shaped failure.
-  let renewed = false;
-  s.on('connect_error', (err: any) => {
-    const why = String(err?.message ?? '').toLowerCase();
-    const isAuth = why.includes('token') || why.includes('auth') || why.includes('unauthorized');
-    if (!isAuth || renewed) return;
-    renewed = true;
-    refreshAccessToken()
-      .then((outcome) => {
-        // 'terminal' means the session is genuinely over — the HTTP path owns
-        // signing the user out; the socket must not race it.
-        if (outcome === 'ok') { try { s.connect(); } catch {} }
-      })
-      .catch(() => {});
-  });
-
-  return new Promise<Socket>((resolve, reject) => {
-    const onReady = () => {
-      s.off('connect_error', onErr);
-      resolve(s);
-    };
-    const onErr = (err: any) => {
-      s.off('ready', onReady);
-      s.disconnect();
-      reject(new Error(err?.message || 'socket connect failed'));
-    };
-    s.once('ready', onReady);
-    s.once('connect_error', onErr);
-  });
+    s.on('connect', () => {
+      applyPersistent(s);
+      perf.setTransport(m.ccwireCarrier() === 'none' ? 'websocket' : m.ccwireCarrier());
+      perf.setConnState('connected');
+      noteConnectSuccess();
+      for (const id of joinedChatRooms) s.emit('join_chat', { chatId: id });
+    });
+    s.on('disconnect', (reason: string) => {
+      perf.setConnState('disconnected');
+      setConn('CONNECTING');
+      perf.mark('socket_disconnect', { reason });
+    });
+    s.on('connect_error', noteConnectFailure);
+    await s.waitUntilReady();
+    if (generation !== ccwireGeneration) throw new Error('Session ended');
+    return s;
+  } catch (e) {
+    candidate?.disconnect();
+    candidate?.removeAllListeners();
+    stopCCWireSession = null;
+    recoverCCWireSession = null;
+    perf.mark('transport_ccwire_unavailable', { detail: String(e) });
+    throw e;
+  }
 }
 
 // ── Rebuild the transport the moment the platform says something changed ──
 //
 // Nothing here used to watch the network, so a Wi-Fi→cellular switch left a
 // socket whose TCP connection was ALREADY DEAD but which still reported
-// `connected === true` — so no retry began. socket.io only learned of it when
-// the server's ping went unanswered (pingInterval 10s + pingTimeout 5s in
-// realtime/server.go), meaning ~15s of "Connecting…" BEFORE the first attempt,
-// with reconnect backoff stacked on top. Foregrounding after Android killed
-// the socket in Doze had the same shape.
+// `connected === true` — so no retry began. Waiting for transport heartbeat
+// expiry added seconds of "Connecting..." before the first attempt. Foregrounding
+// after Android killed the socket in Doze had the same shape.
 //
 // Both are things the OS already knows and will tell us for free. The decision
 // of WHEN to act on that lives in ./socketReconnect (pure, selftested); this
@@ -326,8 +215,8 @@ function kickReconnect(why: string): void {
     setConn('CONNECTING');
     const s = socket;
     if (s) {
-      // disconnect() PARKS the client — socket.io will not auto-reconnect after
-      // an explicit disconnect — so connect() must follow it, in that order.
+      // connect() must follow the explicit close so the shared facade starts a
+      // fresh CC-Wire handshake immediately.
       try { s.disconnect(); s.connect(); return; } catch { /* fall through */ }
     }
     getSocket().catch(() => { /* the retry ladder owns the next attempt */ });
@@ -359,17 +248,28 @@ function watchNetwork(): void {
   } catch { /* AppState unavailable — same fallback */ }
 }
 
-export async function getSocket(): Promise<Socket> {
+export async function getSocket(): Promise<RealtimeSocket> {
   watchNetwork();
   if (socket && socket.connected) return socket;
+  if (socket?.waitUntilReady) return socket.waitUntilReady();
   // A pending attempt is shared rather than duplicated — UNLESS it has hung
   // past the deadline, in which case handing it out again would wedge this
   // caller too. See kickReconnect for how that happens.
   if (connecting && !shouldAbandonPendingConnect(connectingSince, Date.now())) return connecting;
   connectingSince = Date.now();
-  connecting = connect()
-    .then((s) => { socket = s; connecting = null; connectingSince = null; return s; })
-    .catch((e) => { connecting = null; connectingSince = null; throw e; });
+  const generation = ccwireGeneration;
+  const attempt = connect()
+    .then((s) => {
+      if (generation !== ccwireGeneration) { s.disconnect(); throw new Error('Session ended'); }
+      socket = s;
+      if (connecting === attempt) { connecting = null; connectingSince = null; }
+      return s;
+    })
+    .catch((e) => {
+      if (connecting === attempt) { connecting = null; connectingSince = null; }
+      throw e;
+    });
+  connecting = attempt;
   return connecting;
 }
 
@@ -391,6 +291,7 @@ export function disconnect(): void {
   }
   connecting = null;
   connectingSince = null;
+  persistentTarget = null;
   // Keep persistentListeners — they must re-arm on the next (re-login) socket.
   // Drop the room set: a different account must not inherit this one's rooms;
   // live screens re-join on mount.
@@ -427,7 +328,7 @@ export function addPersistentListener<T = any>(event: string, handler: (data: T)
       }
     }
   })();
-  return () => { stop = true; persistentListeners.get(event)?.delete(handler as any); try { socket?.off(event, handler as any); } catch {} };
+  return () => { stop = true; persistentListeners.get(event)?.delete(handler as any); try { (persistentTarget ?? socket)?.off(event, handler as any); } catch {} };
 }
 
 /**

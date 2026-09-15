@@ -48,9 +48,11 @@ async function alreadyAsked(): Promise<boolean> {
  */
 async function deviceHasHistory(): Promise<boolean> {
   try {
-    const { getCachedChats } = require('./localDb');
-    const chats = await getCachedChats();
-    return Array.isArray(chats) ? chats.length > 0 : true;
+    const { getLocalDb } = await import('./localDb');
+    const db = await getLocalDb();
+    // Preserve the previous definition of an established device (a cached
+    // conversation exists) without decrypting every chat row just to count it.
+    return !!(await db.getFirstAsync(`SELECT 1 AS x FROM chats LIMIT 1`));
   } catch {
     return true;
   }
@@ -65,13 +67,12 @@ async function deviceHasHistory(): Promise<boolean> {
  */
 export async function shouldOfferRestore(): Promise<boolean> {
   try {
-    if (await alreadyAsked()) return false;
-    if (await deviceHasHistory()) return false;
+    if (!(await shouldCheckRestore())) return false;
 
     // Only now is a network call worth making. Doing it first would put a
     // request in front of every cold start for a question that is usually
     // answered "no" locally.
-    const { cloudBackupMeta } = require('./cloudBackup');
+    const { cloudBackupMeta } = await import('./cloudBackup');
     const meta = await cloudBackupMeta();
     return !!meta?.exists;
   } catch {
@@ -79,4 +80,14 @@ export async function shouldOfferRestore(): Promise<boolean> {
   }
 }
 
-export default { shouldOfferRestore, markRestorePromptSeen, clearRestorePromptSeen };
+/** Local-only launch decision; the restore screen owns the network lookup. */
+export async function shouldCheckRestore(): Promise<boolean> {
+  try {
+    if (await alreadyAsked()) return false;
+    return !(await deviceHasHistory());
+  } catch {
+    return false;
+  }
+}
+
+export default { shouldOfferRestore, shouldCheckRestore, markRestorePromptSeen, clearRestorePromptSeen };

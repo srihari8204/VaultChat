@@ -12,7 +12,7 @@
 //   6. Wire notification tap listeners → navigate to correct chat
 //   7. Handle notification that launched app from killed state
 
-// MUST BE FIRST — installs DOMException and friends that Hermes does not have.
+// MUST BE FIRST — installs DOMException that Hermes does not have.
 //
 // livekit-client is a browser library and touches those globals at MODULE
 // SCOPE, so anything importing it before this line throws
@@ -20,23 +20,15 @@
 // WHITE SCREEN with no error of ours in the log, because the module never
 // evaluated. Observed exactly that on the Go Live screen.
 //
-// Placed at the entry point rather than relying on import order inside a
-// feature module: any formatter that sorts imports would silently reintroduce
-// the crash there. Side-effect import, so it must not be merged with a named
-// one or a bundler may hoist it.
-// `simple-import-sort/imports` was listed here too, but that plugin is not
-// installed — and eslint makes a disable-comment for an unknown rule a hard
-// ERROR, which failed `npm run prod:check` on a line whose whole purpose is to
-// stop this import being moved. If a sorter is ever added, put the rule back in
-// this comment at the same time.
-// eslint-disable-next-line import/order
-import '@livekit/react-native';
+// Placed at the entry point rather than relying on import order inside feature
+// modules. Importing @livekit/react-native here pulled the whole call stack into
+// every cold start; this local module provides only the global LiveKit needs.
+import '../lib/domExceptionPolyfill';
 
-import { BRAND_ACCENT } from '../constants/theme';
 import { Buffer } from 'buffer';
 
-import { Stack, useRouter } from 'expo-router';
-import { useEffect, useRef, useState } from 'react';
+import { Stack, usePathname, useRouter } from 'expo-router';
+import { type ComponentType, useEffect, useRef, useState } from 'react';
 import { setSecure } from '../lib/screenGuard';
 import { installAlertGuard } from '../lib/alertGuard';
 import { loadRemoteFlags } from '../lib/remoteFlags';
@@ -47,20 +39,16 @@ import { attachUsageFlush, initUsageCounter } from '../lib/usageCounter';
 import { UsageCounter } from '../components/UsageCounter';
 import { isSessionEnded } from '../lib/sessionEnded';
 import * as SplashScreen from 'expo-splash-screen';
-import * as Linking from 'expo-linking';
 import * as Sentry from '@sentry/react-native';
 import { StatusBar } from 'expo-status-bar';
 import { HEADER_TOP, SCREEN_BOTTOM } from '../constants/layout';
-import { ActivityIndicator, StyleSheet, Platform, AppState, InteractionManager } from 'react-native';
+import { Platform, AppState, InteractionManager, View } from 'react-native';
 import notifee, { EventType } from '@notifee/react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
-import { PdfThumbnailerHost } from '../components/PdfThumbnailer';
 import { CallBar } from '../components/CallBar';
 import { UpdateGate } from '../components/UpdateGate';
 import { TermsGate } from '../components/TermsGate';
 import { enableFreeze } from 'react-native-screens';
-import { useFonts, Sora_700Bold, Sora_800ExtraBold } from '@expo-google-fonts/sora';
-import { NunitoSans_400Regular, NunitoSans_600SemiBold, NunitoSans_700Bold } from '@expo-google-fonts/nunito-sans';
 import { FontReadyContext } from '../components/ui/Text';
 import { ThemeProvider, useTheme } from '../lib/theme';
 
@@ -83,10 +71,9 @@ import '../lib/family/background'; // registers the bg-location task — a headl
                                    // this line killed-app Family sharing drops fixes
 import '../lib/lock/background';   // registers the Location Lock geofence task — same
                                    // rule: headless wakes need it defined at load
-import { getAccessToken } from '../lib/api';
+import { getAccessToken, getLaunchSessionState } from '../lib/api';
+import { isMfaEnabled } from '../lib/mfa';
 import { E2EE_ENABLED, SCHEDULED_LOCAL } from '../constants/flags';
-import { runDueScheduled, rearmAllTriggers } from '../lib/scheduledRunner';
-import { getLocalDb } from '../lib/localDb';
 import { mark } from '../lib/perf';
 global.Buffer = Buffer;
 
@@ -103,31 +90,6 @@ enableFreeze(true);
 // the splash once it has routed. preventAutoHide MUST run at module load, before
 // the splash would auto-hide when the JS bundle finishes loading.
 SplashScreen.preventAutoHideAsync().catch(() => {});
-
-/**
- * ...AND HIDE IT WHEN A DEEP LINK MEANT app/index.tsx NEVER RUNS.
- *
- * hideAsync() lives in exactly one place: app/index.tsx, the cold-start router
- * at route `/`. A cold start from a deep link — a turn notification, a game
- * invite card, a vaultchat:// or /live/join link — routes STRAIGHT to that
- * screen and never mounts index, so nothing ever hid the splash.
- *
- * The result is not a visible splash. It is worse: the activity window never
- * becomes visible (`mHasSurface=false`), so it is never given an input channel
- * (`dumpsys input` → `FocusedWindows: <none>`), and every touch is dropped
- * until Android raises "isn't responding — Input dispatching timed out
- * (Application does not have a focused window)". The UI renders and the sockets
- * run, which is what makes it look like the app froze rather than failed to
- * start. Reproduced from cold on both test phones, on two Android versions,
- * with a plain VIEW intent, an explicit component, and BROWSABLE+NEW_TASK.
- *
- * Hiding here rather than moving index's call keeps the launcher path exactly
- * as it was: index still covers its own auth read with the splash, so there is
- * no spinner flash on a normal open.
- */
-Linking.getInitialURL()
-  .then(url => { if (url) SplashScreen.hideAsync().catch(() => {}); })
-  .catch(() => { SplashScreen.hideAsync().catch(() => {}); });
 
 // ── Sentry frontend init (Day 16) ──────────────────────────────────
 // Reads EXPO_PUBLIC_SENTRY_DSN from EAS env. If unset (dev), Sentry is
@@ -259,13 +221,42 @@ function RootLayoutInner() {
    *  listener closure outlives any render. */
   const selfIdRef = useRef<string | null>(null);
   const router = useRouter();
-  const [securityChecked, setSecurityChecked] = useState(false);
-  // U2: load brand fonts (non-blocking — render proceeds on system font, then
-  // swaps to Sora/Nunito Sans when ready via FontReadyContext).
-  const [fontsReady] = useFonts({
-    Sora_700Bold, Sora_800ExtraBold,
-    NunitoSans_400Regular, NunitoSans_600SemiBold, NunitoSans_700Bold,
-  });
+  const pathname = usePathname();
+  const [launchGate, setLaunchGate] = useState<'checking' | 'allow' | '/onboard' | '/app-lock'>('checking');
+  const [PdfHost, setPdfHost] = useState<ComponentType | null>(null);
+
+  // The root owns authentication because an initial deep link bypasses `/` and
+  // never mounts index.tsx. Keep an opaque veil over the navigator until both
+  // the session decision and Android FLAG_SECURE are ready. Authorized links
+  // are left untouched; only signed-out/locked launches are redirected.
+  useEffect(() => {
+    let live = true;
+    const secure = Platform.OS === 'web' ? Promise.resolve(false) : setSecure(true);
+    Promise.all([secure, getLaunchSessionState(), isMfaEnabled()])
+      .then(([, session, mfaOn]) => {
+        if (!live) return;
+        if (!session.signedIn) {
+          setLaunchGate('/onboard');
+          router.replace('/onboard' as any);
+        } else if (mfaOn || session.sealedLocked) {
+          setLaunchGate('/app-lock');
+          router.replace('/app-lock' as any);
+        } else {
+          setLaunchGate('allow');
+        }
+      })
+      .catch(() => {
+        if (!live) return;
+        setLaunchGate('/onboard');
+        router.replace('/onboard' as any);
+      });
+    return () => { live = false; };
+  }, [router]);
+
+  const launchReady = launchGate === 'allow' || launchGate === pathname;
+  useEffect(() => {
+    if (launchReady) SplashScreen.hideAsync().catch(() => {});
+  }, [launchReady]);
 
   useEffect(() => {
     // Boot timeline. These marks are what make a startup claim checkable
@@ -301,24 +292,6 @@ function RootLayoutInner() {
     // nothing. See lib/socket.ts.
     try { void getSocket().catch(() => {}); } catch { /* never block boot */ }
 
-    // ── 0. Warm up the op-sqlite local store (localDb, JSI engine) ──
-    // The local-first source of truth for chats/messages. Guarded so a stale
-    // binary without the native module can't crash launch.
-    if (Platform.OS !== 'web') {
-      getLocalDb()
-        .then(() => mark('db_ready'))
-        .catch((e: any) => console.warn('[db] localDb init failed:', e?.message));
-    }
-
-    // ── 1. Block screenshots app-wide (native only) ──────────
-    // Through screenGuard.setSecure, not expo-screen-capture directly: that is
-    // the one function that knows a dev build must never set FLAG_SECURE (it
-    // would blank every screenshot and screen recording of our own UI), and it
-    // also drives the native VaultView module when the build has it.
-    if (Platform.OS !== 'web') {
-      setSecure(true).catch(() => {});
-    }
-
     // ── 2. Google Sign-In is NOT configured here any more ───────
     // It used to be a synchronous require of ./(constants)/authService +
     // configureGoogleSignIn() on every launch, which parsed
@@ -345,28 +318,6 @@ function RootLayoutInner() {
         })
         .catch(() => { /* fail open */ });
 
-      // Passive device-security monitoring (Security Hub). Separate, NON-
-      // destructive path: it scores the device, records changes to the audit
-      // chain and notifies on worsenings — it never wipes. Throttled by the
-      // scan scheduler (a quick relaunch won't re-scan) and fully deferred, so
-      // it never gates first paint. Distinct from runSecurityCheck above, which
-      // is the boot self-destruct.
-      import('../services/security/deviceSecurity/monitorService')
-        .then(m => m.runMonitoringScan('launch'))
-        .catch(() => { /* best-effort; dashboard still scans on demand */ });
-
-      // Wire passive triggers: re-scan on foreground return (throttled) and on
-      // network change (debounced). Covers the while-running case; a periodic
-      // scan while KILLED still needs a native background job.
-      import('../services/security/deviceSecurity/monitorTriggers')
-        .then(m => m.startSecurityMonitoring())
-        .catch(() => {});
-
-      // Automatic cache cleanup, if the user enabled it (safe cache only, when
-      // due). Deferred + best-effort; never gates the UI.
-      import('../services/cache/cacheManager')
-        .then(m => m.maybeAutoClean())
-        .catch(() => {});
     }
 
     // Publish this device's E2EE key bundle on startup (lazy, fire-and-forget).
@@ -380,9 +331,8 @@ function RootLayoutInner() {
       })
       .catch(() => {});
 
-    // Unblock the UI immediately — nothing awaited gates the first render now.
+    // Nothing in this effect gates the first render.
     mark('boot_unblocked');
-    setSecurityChecked(true);
 
     // (attachTapHandler is wired below, after the call handlers are defined)
     let cleanupListeners = () => {};
@@ -529,6 +479,23 @@ function RootLayoutInner() {
       // it. That tree is the reason media used to survive uninstall. Self-gating
       // (no-ops once complete), resumable, and never fatal — see lib/mediaMigration.
       import('../lib/mediaMigration').then(m => m.migrateLegacyMedia()).catch(() => {});
+      import('../components/PdfThumbnailer').then(m => setPdfHost(() => m.PdfThumbnailerHost)).catch(() => {});
+      if (Platform.OS !== 'web') {
+        // Warm up the local message store after the first frame; screens that
+        // need it still open it directly if the user gets there first.
+        import('../lib/localDb')
+          .then(m => m.getLocalDb())
+          .then(() => mark('db_ready'))
+          .catch((e: any) => console.warn('[db] localDb init failed:', e?.message));
+        // Passive monitoring and cache maintenance have no first-frame output.
+        // Their native/headless registrations remain module-scope imports above.
+        import('../services/security/deviceSecurity/monitorService')
+          .then(m => m.runMonitoringScan('launch')).catch(() => {});
+        import('../services/security/deviceSecurity/monitorTriggers')
+          .then(m => m.startSecurityMonitoring()).catch(() => {});
+        import('../services/cache/cacheManager')
+          .then(m => m.maybeAutoClean()).catch(() => {});
+      }
     });
 
     // No-GMS background delivery (Phase 4): raise a local notification for each
@@ -730,7 +697,10 @@ function RootLayoutInner() {
     };
     const notifeeFg = notifee.onForegroundEvent(({ type, detail }) => {
       // Scheduled-message trigger fired (#73) → send any due items.
-      if (detail?.notification?.data?.type === 'scheduled_fire') { runDueScheduled(); return; }
+      if (detail?.notification?.data?.type === 'scheduled_fire') {
+        import('../lib/scheduledRunner').then(m => m.runDueScheduled()).catch(() => {});
+        return;
+      }
       if (type !== EventType.ACTION_PRESS && type !== EventType.PRESS) return;
       onNotifeeAnswerOrDecline(detail?.pressAction?.id === 'decline' ? 'decline' : 'answer', detail?.notification?.data);
     });
@@ -802,9 +772,12 @@ function RootLayoutInner() {
   // if not signed in yet and retry on the next sweep.
   useEffect(() => {
     if (!SCHEDULED_LOCAL) return;
-    runDueScheduled();
-    rearmAllTriggers();
-    const sub = AppState.addEventListener('change', (s) => { if (s === 'active') runDueScheduled(); });
+    import('../lib/scheduledRunner')
+      .then(m => { m.runDueScheduled(); m.rearmAllTriggers(); })
+      .catch(() => {});
+    const sub = AppState.addEventListener('change', (s) => {
+      if (s === 'active') import('../lib/scheduledRunner').then(m => m.runDueScheduled()).catch(() => {});
+    });
     return () => sub.remove();
   }, []);
 
@@ -829,20 +802,13 @@ function RootLayoutInner() {
     return () => sub.remove();
   }, []);
 
-  // Show spinner while security check runs
-  // Prevents any screen flashing before check completes
-  if (!securityChecked) {
-    return (
-      <GestureHandlerRootView style={[styles.loading, { backgroundColor: colors.bg }]}>
-        <StatusBar style={scheme === 'light' ? 'dark' : 'light'} />
-        <ActivityIndicator size="large" color={BRAND_ACCENT} />
-      </GestureHandlerRootView>
-    );
-  }
-
   return (
-    <FontReadyContext.Provider value={fontsReady}>
-    <GestureHandlerRootView style={{ flex: 1, backgroundColor: colors.bg }}>
+    <FontReadyContext.Provider value={true}>
+    <GestureHandlerRootView
+      style={{ flex: 1, backgroundColor: colors.bg }}
+      accessibilityElementsHidden={!launchReady}
+      importantForAccessibility={launchReady ? 'auto' : 'no-hide-descendants'}
+    >
       <StatusBar style={scheme === 'light' ? 'dark' : 'light'} />
       {/* The version floor wraps EVERYTHING below it. A build under the
           server's minimum cannot be allowed to reach the navigator at all:
@@ -1006,22 +972,19 @@ function RootLayoutInner() {
           used to build a WebView on every cold start, which meant every user
           paid to instantiate Chromium and load pdf.js whether or not they ever
           opened a document. See components/PdfThumbnailer.tsx. */}
-      <PdfThumbnailerHost />
+      {PdfHost ? <PdfHost /> : null}
+      {!launchReady && (
+        <View
+          style={{
+            position: 'absolute', top: 0, right: 0, bottom: 0, left: 0,
+            zIndex: 100000, backgroundColor: colors.bg,
+          }}
+        />
+      )}
     </GestureHandlerRootView>
     </FontReadyContext.Provider>
   );
 }
-
-const styles = StyleSheet.create({
-  loading: {
-    flex: 1,
-    // Ground colour is applied inline from the active palette; this is only the
-    // pre-theme fallback for the split second before the provider resolves.
-    backgroundColor: '#0A0810',   // theme-exempt: pre-provider fallback, overridden inline
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-});
 
 // Sentry.wrap forwards refs + injects a top-level error boundary that
 // reports to Sentry before re-throwing. No-op when Sentry isn't init'd.

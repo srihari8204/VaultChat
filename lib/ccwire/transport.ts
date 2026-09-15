@@ -1,28 +1,22 @@
 // lib/ccwire/transport.ts — the join between lib/socket.ts and CCWireClient.
 //
-// WHAT THIS IS, AND — MORE IMPORTANTLY — WHAT IT IS NOT.
-//
-// It is: a supervisor for AT MOST ONE CCWireClient per app instance, with an
+// A supervisor for AT MOST ONE CCWireClient per app instance, with an
 // explicit four-state lifecycle, a bounded number of pre-handshake attempts,
 // and a status callback for metrics. Supervisor failures are status transitions;
 // submission failures preserve normal request rejection semantics.
 //
 // Eligible text submissions use protobuf after ServerHello. One function owns
 // the attempt and sequential HTTP fallback, preserving the same ciphertext and
-// clientId (the server's shared idempotency key). Inbound live delivery stays on
-// Socket.IO; only request-correlated Acks are consumed from CC-Wire here.
-//
-// COEXISTENCE. Calls, mini-apps, rooms, typing and presence all run on the
-// Socket.IO connection, and lib/socket.ts builds and keeps that connection in
-// EVERY flag state. This runs alongside it, never instead of it. Nothing here
-// disconnects, replaces or reconfigures the Socket.IO socket.
+// clientId (the server's shared idempotency key). With app_events_v1 negotiated,
+// named inbound events go to the shared event facade. lib/socket.ts selects
+// this exclusive connection or legacy Socket.IO after closing this owner.
 //
 // NODE-IMPORTABLE ON PURPOSE. No react-native, no expo, no constants/*. The
 // server URL, the token reader and the clock come in as options, which is what
 // lets transport.selftest.ts drive the real thing under `npx tsx`.
 
 import CCWireClient from './client';
-import { decodeMessageAck, type PublicMeta } from './codec';
+import { decodeMessageAck, type PublicMeta, type AppEvent } from './codec';
 import { SessionEndedError } from '../sessionEnded';
 
 /** The CC-Wire route, mirroring realtime.CCWirePath in the Go server. */
@@ -36,15 +30,15 @@ export const CCWIRE_PATH = '/ccwire/v1';
  *   'ready'   ServerHello accepted; the session is live
  *   'error'   stopped; transient failures may recover on a platform signal
  *
- * 'pending' is not a hazard: Socket.IO is already connected by the time this
- * is ever 'pending', so a dial that never resolves leaves the app on exactly
- * the transport it would have had anyway. That is the answer to "a flag that
- * never resolves must not leave the app stuck with no transport" — the flag
- * cannot gate the Socket.IO connection, because it does not sit in front of it.
+ * The app coordinator bounds readiness and selects legacy when initial
+ * negotiation fails. A pending connection is not reported as ready to UI.
  */
 export type CCWireStatus = 'off' | 'pending' | 'ready' | 'error';
 
 export interface StartCCWireOptions {
+  requireAppEvents?: boolean;
+  onAppEvent?: (event: string, payload: any) => void;
+  onResyncRequired?: () => Promise<void>;
   /** e.g. https://api.corefinite.com — converted to wss://…/ccwire/v1. */
   serverUrl: string;
   /** Read fresh per dial; a token captured once outlives its 15-minute expiry. */
@@ -80,6 +74,7 @@ const MAX_PREHANDSHAKE_CLOSES = 3;
 
 /** Dial + handshake budget. Past this we stop waiting and call it an error. */
 const HANDSHAKE_DEADLINE_MS = 15000;
+const EVENT_UTF8 = new TextDecoder('utf-8', { fatal: true });
 
 let client: CCWireClient | null = null;
 let status: CCWireStatus = 'off';
@@ -247,7 +242,7 @@ export function ccwireWebTransportUrl(serverUrl: string, configured?: string): s
 }
 
 /**
- * Dial CC-Wire alongside the live Socket.IO connection.
+ * Dial the shared CC-Wire owner.
  *
  * Fire-and-forget by design: it returns void, synchronously, and the caller
  * must not await it. Idempotent — a second call while a session exists does
@@ -294,8 +289,7 @@ export function startCCWire(o: StartCCWireOptions): void {
     });
   } catch (e) {
     if (fallbackToWebSocket()) return;
-    // Fail CLOSED. Socket.IO is already the app's transport; this changes
-    // nothing except the metrics tag.
+    // The app coordinator handles legacy fallback after this owner fails.
     setStatus('error', `construct: ${String(e)}`);
     return;
   }
@@ -304,19 +298,39 @@ export function startCCWire(o: StartCCWireOptions): void {
   // Dial failure, handshake failure, auth failure, capability mismatch and a
   // 404 route all arrive here as one typed `closed` event. See the matrix in
   // CloseReason (client.ts) — this file only has to decide "retry or give up".
-  c.on('hello', () => {
+  let helloGeneration = 0;
+  c.on('hello', (e) => {
     if (client !== c) return;
+    helloGeneration++;
+    if (o.requireAppEvents && !e.hello?.appEventsV1) {
+      stopCCWire('app_events_v1 unsupported');
+      return;
+    }
     everReady = true;
     preHandshakeCloses = 0;
     if (deadlineTimer) { clearT(deadlineTimer); deadlineTimer = null; }
     setStatus('ready');
+  });
+  c.on('frame', (e) => {
+    if (client !== c || status !== 'ready' || e.frame?.body_field !== 100) return;
+    const body = e.frame.value as AppEvent;
+    if (!body?.event || body.event.length > 64 || !body.payload_json) return;
+    try { o.onAppEvent?.(body.event, JSON.parse(EVENT_UTF8.decode(body.payload_json))); }
+    catch { /* malformed input or a consumer exception cannot kill the carrier */ }
+  });
+  c.on('resync_required', () => {
+    if (client !== c || !o.onResyncRequired) return;
+    const generation = helloGeneration;
+    void o.onResyncRequired().then(() => {
+      if (client === c && status === 'ready' && generation === helloGeneration) c.markResynced();
+    }).catch(() => { /* HTTP submission remains available until recovery succeeds */ });
   });
   c.on('closed', (e) => {
     if (client !== c) return;
     lastCloseWasAuth = e.reason === 'auth';
     if (fallbackToWebSocket()) return;
     if (!everReady || !e.willRetry) preHandshakeCloses++;
-    const giveUp = !e.willRetry || c.fatal || preHandshakeCloses >= MAX_PREHANDSHAKE_CLOSES;
+    const giveUp = lastCloseWasAuth || !e.willRetry || c.fatal || preHandshakeCloses >= MAX_PREHANDSHAKE_CLOSES;
     if (giveUp) { stopCCWire(`closed: ${e.reason}${e.detail ? ` ${e.detail}` : ''}`, !c.fatal && !lastCloseWasAuth); return; }
     // Still retrying (the client owns the backoff): not ready, not dead.
     setStatus('pending', e.reason);

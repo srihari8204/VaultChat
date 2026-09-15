@@ -171,7 +171,7 @@ export const BODY_NAMES: Record<number, string> = {
   80: 'presence_update', 81: 'typing_state', 82: 'viewer_state',
   83: 'viewer_list', 84: 'geo_relay',
   96: 'attachment_control', 97: 'device_event', 98: 'crypto_control',
-  99: 'call_signal',
+  99: 'call_signal', 100: 'app_event',
   112: 'fragment',
 };
 
@@ -192,6 +192,10 @@ export const EPHEMERAL_BODIES = new Set([81, 82, 84]);
 // false, absent enum → 0, absent 64-bit → '0'), so a canonical value survives
 // decode→encode byte-for-byte.
 
+export interface AppEvent { event?: string; payload_json?: Uint8Array; unknown?: Uint8Array[] }
+// Legacy decoded event budget can expand sixfold when JSON escapes controls.
+export const APP_EVENT_JSON_MAX = 6 * 256 * 1024;
+export const APP_EVENT_LOGICAL_MAX = 2 * 1024 * 1024;
 export interface TypingState { chat_id?: string; typing?: boolean; sender_uid?: string; unknown?: Uint8Array[] }
 export interface ViewerState {
   chat_id?: string; activity?: number; activity_name?: string;
@@ -255,7 +259,7 @@ export interface Frame {
   /** The body's field number — authoritative; `body` is derived from it. */
   body_field?: number;
   /** Decoded body, for the six types this build types. */
-  value?: TypingState | ViewerState | GeoRelay | CryptoControl | SubmitMessage | Fragment;
+  value?: TypingState | ViewerState | GeoRelay | CryptoControl | SubmitMessage | Fragment | AppEvent;
   /** Verbatim body bytes when the type is not typed here. Round-trips exactly. */
   raw?: Uint8Array;
   /** Unrecognised top-level fields, tag+value, in wire order. NEVER dropped. */
@@ -295,7 +299,7 @@ class Refused extends Error {
 }
 const fail = (code: CodecError, why: string): never => { throw new Refused(code, why); };
 
-interface R { b: Uint8Array; p: number; end: number; lim: typeof LIMITS }
+interface R { b: Uint8Array; p: number; end: number; lim: typeof LIMITS; appEventsV1?: boolean }
 
 /** Varints in tag and length position. Capped at 5 bytes: a longer one there is
  *  not a large number, it is an over-long encoding probing for a mismatch. */
@@ -404,7 +408,7 @@ function nest(r: R, depth: number): R {
     fail('NESTING_TOO_DEEP', `depth ${depth} > ${r.lim.max_nesting_depth}`);
   }
   const span = lenSpan(r);
-  return { b: span, p: 0, end: span.length, lim: r.lim };
+  return { b: span, p: 0, end: span.length, lim: r.lim, appEventsV1: r.appEventsV1 };
 }
 
 // ─── Writer ──────────────────────────────────────────────────────────────────
@@ -483,6 +487,22 @@ const i64str = (r: R): string => { const v = varint64(r); return (v >= TWO63 ? v
 // Each is the same skeleton: loop fields, switch on number, anything else goes
 // to keepUnknown. Duplicate scalars are LAST-WINS, which is proto3's rule and
 // what the Go side will do; deviating from it here would be the differential.
+
+function readAppEvent(r: R): AppEvent {
+  const m: AppEvent = { event: '', payload_json: new Uint8Array(), unknown: [] };
+  while (r.p < r.end) {
+    const s = r.p, { field, wire } = tag(r);
+    if (field === 1 && wire === 2) m.event = readString(r);
+    else if (field === 2 && wire === 2) m.payload_json = readBytes(r, r.appEventsV1 ? APP_EVENT_JSON_MAX : r.lim.max_opaque_bytes);
+    else keepUnknown(r, s, wire, m.unknown);
+  }
+  return m;
+}
+function writeAppEvent(m: AppEvent): Uint8Array {
+  const x = w();
+  wStr(x, 1, m.event ?? ''); wBytes(x, 2, m.payload_json); wUnknown(x, m.unknown);
+  return wDone(x);
+}
 
 function readTypingState(r: R): TypingState {
   const m: TypingState = { chat_id: '', typing: false, sender_uid: '', unknown: [] };
@@ -688,8 +708,9 @@ function readFragment(r: R): Fragment {
       m.total_bytes = u64str(r);
       // Declared up front, checked BEFORE anything is allocated from it. The
       // reassembler must not be handed a number it would trust.
-      if (BigInt(m.total_bytes) > BigInt(r.lim.max_message_body_bytes)) {
-        fail('BYTES_TOO_LONG', `total_bytes ${m.total_bytes} > ${r.lim.max_message_body_bytes}`);
+      const logicalMax = r.appEventsV1 ? APP_EVENT_LOGICAL_MAX : r.lim.max_message_body_bytes;
+      if (BigInt(m.total_bytes) > BigInt(logicalMax)) {
+        fail('BYTES_TOO_LONG', `total_bytes ${m.total_bytes} > ${logicalMax}`);
       }
     } else if (field === 5 && wire === 2) m.chunk = lenSpan(r);   // bounded by the frame
     else if (field === 6 && wire === 0) m.last = varint64(r) !== 0n;
@@ -766,6 +787,7 @@ function writeCursorBatch(m: CursorBatch): Uint8Array {
 
 /** The six bodies this build decodes. Everything else round-trips as `raw`. */
 const TYPED_BODY: Record<number, (r: R, depth: number) => any> = {
+  100: (r) => readAppEvent(r),
   48: readSubmitMessage,
   81: (r) => readTypingState(r),
   82: (r) => readViewerState(r),
@@ -774,6 +796,7 @@ const TYPED_BODY: Record<number, (r: R, depth: number) => any> = {
   112: (r) => readFragment(r),
 };
 const TYPED_BODY_WRITER: Record<number, (m: any) => Uint8Array> = {
+  100: writeAppEvent,
   48: writeSubmitMessage,
   81: writeTypingState,
   82: writeViewerState,
@@ -799,6 +822,8 @@ function checkInvariants(f: Frame): string {
 // ─── Public API ──────────────────────────────────────────────────────────────
 
 export interface CodecOptions {
+  /** Negotiated app-event fragments only; other typed body limits stay unchanged. */
+  appEventsV1?: boolean;
   /** Negotiated ServerHello.limits.max_frame_bytes. Clamped to the hard ceiling. */
   maxBytes?: number;
   /** A negotiated Limits, overriding any of the defaults DOWNWARD. */
@@ -883,7 +908,7 @@ export function decodeFrameMessage(buf: Uint8Array, opts: CodecOptions = {}): Fr
       detail: `depth ${depth} > ${lim.max_nesting_depth}` };
   }
 
-  const r: R = { b: buf, p: 0, end: buf.length, lim };
+  const r: R = { b: buf, p: 0, end: buf.length, lim, appEventsV1: opts.appEventsV1 };
   const f: Frame = {
     request_id: '', traffic_class: 0, stream: 0, seq: '0', depends_on: '0', unknown: [],
   };

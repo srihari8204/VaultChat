@@ -159,6 +159,8 @@ let installId: string | null = null;
 /** Set during init to a live reader of the remote kill switches. */
 let killReader: ((name: string) => boolean) | null = null;
 const decided: Record<string, boolean> = {};
+let initialized = false;
+let initializing: Promise<void> | null = null;
 
 /**
  * Load what a flag decision needs. Call once at boot, do not await on a render
@@ -172,28 +174,40 @@ const decided: Record<string, boolean> = {};
  *     first flag read sees the freshest snapshot, not whatever had arrived by
  *     the time init ran.
  */
-export async function initFeatureFlags(): Promise<void> {
-  try {
-    const dev: any = await import('../services/deviceService');
-    const id = await dev.getDeviceId();
-    if (typeof id === 'string' && id.length > 0) installId = id;
-  } catch {
-    // No SecureStore, no native module, a rejected read: stay unbucketed.
-  }
-  try {
-    const rf: any = await import('./remoteFlags');
-    killReader = (name: string) => {
-      try {
-        // flagEnabled applies `buildDefault AND remote !== false`, so with a
-        // build default of true this is exactly "has the server killed it?".
-        return rf.flagEnabled(name, true) === false;
-      } catch {
-        return false;
-      }
-    };
-  } catch {
-    // No remote flags module ⇒ no kill signal ⇒ the percentage alone decides.
-  }
+export function initFeatureFlags(): Promise<void> {
+  if (initializing) return initializing;
+  initializing = (async () => {
+    await Promise.all([
+      (async () => {
+        try {
+          const dev: any = await import('../services/deviceService');
+          const id = await dev.getDeviceId();
+          if (typeof id === 'string' && id.length > 0) installId = id;
+        } catch {
+          // No SecureStore, no native module, a rejected read: stay unbucketed.
+        }
+      })(),
+      (async () => {
+        try {
+          const rf: any = await import('./remoteFlags');
+          await rf.remoteFlagsCacheReady();
+          killReader = (name: string) => {
+            try {
+              // flagEnabled applies `buildDefault AND remote !== false`, so with a
+              // build default of true this is exactly "has the server killed it?".
+              return rf.flagEnabled(name, true) === false;
+            } catch {
+              return false;
+            }
+          };
+        } catch {
+          // No remote flags module ⇒ no kill signal ⇒ the percentage alone decides.
+        }
+      })(),
+    ]);
+    initialized = true;
+  })();
+  return initializing;
 }
 
 /**
@@ -206,6 +220,9 @@ export async function initFeatureFlags(): Promise<void> {
 export function isFeatureEnabled(name: string): boolean {
   try {
     if (!name) return false;
+    // An early diagnostics render or socket warm-up must not freeze a decision
+    // before the install bucket and persisted kill switch have loaded.
+    if (!initialized) return false;
     if (name in decided) return decided[name];
     const killed = killReader ? killReader(name) : false;
     const on = evaluateFlag({
@@ -241,7 +258,7 @@ export function featureFlagDiagnostics(name: string): {
     bucket: installId ? bucketOf(name, installId) : -1,
     hasInstallId: !!installId,
     killed: killReader ? killReader(name) : false,
-    enabled: isFeatureEnabled(name),
+    enabled: initialized ? isFeatureEnabled(name) : false,
   };
 }
 
@@ -250,6 +267,8 @@ export function __resetFeatureFlagsForTest(id?: string, kill?: (n: string) => bo
   for (const k of Object.keys(decided)) delete decided[k];
   installId = id || null;
   killReader = kill || null;
+  initialized = true;
+  initializing = null;
 }
 
 export default { TRANSPORT_RUST, initFeatureFlags, isFeatureEnabled, featureFlagDiagnostics };

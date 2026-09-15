@@ -6,8 +6,7 @@ import com.facebook.react.bridge.Arguments
 import com.facebook.react.jstasks.HeadlessJsTaskConfig
 
 /**
- * Runs lib/syncBackground.ts when a chat FCM message arrives and the app is not
- * in the foreground.
+ * Runs lib/syncBackground.ts when a chat FCM message arrives.
  *
  * WHY THIS EXISTS
  *
@@ -27,35 +26,13 @@ import com.facebook.react.jstasks.HeadlessJsTaskConfig
  * when this is started. The server already sends android.priority=HIGH
  * (internal/fcm SendCallMessage), so the exemption applies.
  *
- * allowedInForeground = false on purpose. A foregrounded app is already syncing
- * over its socket, and HeadlessJsTaskService refuses to start in the foreground
- * anyway; the caller checks isAppForeground() before reaching here.
+ * Foreground execution is allowed: activity importance does not prove that the
+ * realtime connection is healthy. The shared JS sync engine coalesces callers.
  */
 class VaultChatSyncService : HeadlessJsTaskService() {
 
-    /**
-     * REACT NATIVE'S FOREGROUND CHECK IS THE AUTHORITY, AND IT CAN DISAGREE
-     * WITH OURS.
-     *
-     * VaultCallMessagingService already skips the start when
-     * ActivityManager reports the app foreground, but the two checks are not
-     * the same thing and cannot be made atomic: ActivityManager importance
-     * drops as soon as the launcher takes over, while React Native still holds
-     * a RESUMED ReactContext for a moment afterwards. Push arrives inside that
-     * window and super.onStartCommand throws:
-     *
-     *   IllegalStateException: Tried to start task VaultChatSync while in
-     *   foreground, but this is not allowed.
-     *
-     * It throws on the main thread from a service we started, so nothing above
-     * can catch it — observed on a Redmi Note 8 Pro as an AndroidRuntime crash
-     * and app restart, seconds after backgrounding.
-     *
-     * Refusing is the CORRECT outcome (a foreground app is already syncing over
-     * its socket); crashing is not. So the refusal is absorbed and the service
-     * stops. Nothing is acknowledged, which is right — the foreground app's own
-     * sync covers it.
-     */
+    // Service-start refusals must not crash the notification process. Sync
+    // retries on the next push/reconnect; foreground execution itself is allowed.
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int =
         try {
             super.onStartCommand(intent, flags, startId)
@@ -75,7 +52,7 @@ class VaultChatSyncService : HeadlessJsTaskService() {
             TASK_NAME,
             Arguments.fromBundle(extras),
             TIMEOUT_MS,
-            false, // allowedInForeground
+            true, // allowedInForeground: share catchUp even during lifecycle transitions
         )
     }
 

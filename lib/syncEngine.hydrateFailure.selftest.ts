@@ -43,6 +43,8 @@ export const cached = [];
 export const metrics = {};
 let cursor = 0;
 
+export async function getAccessToken() { return 'test-owner'; }
+export function tokenSubject(token) { return token; }
 export async function api(path) {
   // One page: ids 6,7,8 in one chat, then done.
   if (String(path).includes('/chats/delta')) {
@@ -80,7 +82,8 @@ export function onConnectionState() { return () => {}; }
 export function addPersistentListener() { return () => {}; }
 `);
   const REWRITES: [RegExp, string][] = [
-    [/^import \{ api \} from '\.\/api';$/m, `import { api } from './stubs.js';`],
+    [/^import \{ api, getAccessToken \} from '\.\/api';$/m, `import { api, getAccessToken } from './stubs.js';`],
+  [/^import \{ tokenSubject \} from '\.\/tokenIdentity';$/m, `import { tokenSubject } from './stubs.js';`],
     [/^import \{ getGlobalSyncCursor, noteGlobalSyncCursor, cacheMessages, getCachedMessagesByIds, getMeta, setMeta \} from '\.\/localDb';$/m,
      `import { getGlobalSyncCursor, noteGlobalSyncCursor, cacheMessages, getCachedMessagesByIds, getMeta, setMeta } from './stubs.js';`],
     [/^import \{ metric \} from '\.\/syncMetrics';$/m, `import { metric } from './stubs.js';`],

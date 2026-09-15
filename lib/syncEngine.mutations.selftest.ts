@@ -22,6 +22,7 @@ async function scenario(count: number, sameTime = false, legacy = false, failAt 
   let requests = 0, stores = 0;
   let failing = failAt;
   const stubs = {
+    getAccessToken: async () => 'test-owner', tokenSubject: (token: string) => token,
     api: async (path: string) => {
       requests++;
       const q = new URL(path, 'https://fixture.invalid').searchParams;
@@ -69,6 +70,7 @@ async function coldContinuationScenario() {
   const meta = new Map<string, string>();
   let page = 0;
   const stubs = {
+    getAccessToken: async () => 'test-owner', tokenSubject: (token: string) => token,
     api: async (path: string) => {
       requests.push(path);
       page++;
@@ -100,7 +102,33 @@ async function coldContinuationScenario() {
   assert.doesNotMatch(requests.at(-1)!, /syncContinuation=/, 'later catch-up is no longer cold-filtered');
 }
 
+async function accountSwitchScenario(switchDuring: 'fetch' | 'decrypt') {
+  let owner = 'A', cached = 0, delivered = 0;
+  const stubs = {
+    getAccessToken: async () => owner, tokenSubject: (token: string) => token,
+    api: async (_path: string, opts: any) => {
+      assert.equal(opts.expectedUserId, 'A');
+      if (switchDuring === 'fetch') owner = 'B';
+      return { messages: [{ id: 1, chatId: 'c', content: 'one' }], mutations: [], nextSince: 1, more: false };
+    },
+    getGlobalSyncCursor: async () => 0, getMeta: async () => null,
+    getCachedMessagesByIds: async () => [],
+    hydrateMessages: async (_chat: string, rows: any[]) => { owner = 'B'; return rows; },
+    cacheMessages: async () => { cached++; },
+    markDeliveredDurable: async () => { delivered++; },
+    setMeta: async () => {}, noteGlobalSyncCursor: async () => {},
+    normalizeMsgIds: () => {}, metric: () => {}, looksEncrypted: () => false,
+  };
+  const exports: { resyncRequired?: () => Promise<void> } = {};
+  runInNewContext(compiled, { exports, require: () => stubs, console, URL, Date, Map, Set, Promise });
+  await assert.rejects(exports.resyncRequired!(), /Sync account changed/);
+  assert.equal(cached, 0, 'old sync page must not enter the new account cache');
+  assert.equal(delivered, 0, 'old sync page must not acknowledge as the new user');
+}
+
 async function main() {
+  await accountSwitchScenario('fetch');
+  await accountSwitchScenario('decrypt');
   const capped = await scenario(11000);
   assert.equal(capped.firstCount, 10000);
   assert.equal(capped.applied.size, 11000, 'next run must resume beyond the page cap');

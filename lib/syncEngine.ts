@@ -6,7 +6,8 @@
 // and the live socket stream. All applies are idempotent (upsert by message id), so
 // running alongside live events can't dup or reorder.
 
-import { api } from './api';
+import { api, getAccessToken } from './api';
+import { tokenSubject } from './tokenIdentity';
 import { getGlobalSyncCursor, noteGlobalSyncCursor, cacheMessages, getCachedMessagesByIds, getMeta, setMeta } from './localDb';
 import { metric } from './syncMetrics';
 import { hydrateMessages, looksEncrypted, type Message } from './chatService';
@@ -39,11 +40,14 @@ const MAX_MUT_PAGES = 20;  // 10k mutations/run, logged when tripped
 
 interface Delta { messages: (Message & { chatId: string })[]; nextSince: number; more: boolean; syncContinuation?: string; mutations?: (Message & { chatId: string })[]; nextMutationCursor?: string; serverTime?: string }
 
-let inflight: Promise<number> | null = null;
+interface SyncResult { applied: number; error?: unknown }
+let inflight: Promise<SyncResult> | null = null;
+let ordinaryInflight: Promise<number> | null = null;
+let rerunRequested = false;
 
 // Group caught-up rows by chat, decrypt once, cache. Reused for new messages and
 // for mutations (edited/deleted rows carry the same shape).
-async function applyByChat(rows: (Message & { chatId: string })[]): Promise<Map<string, Message[]>> {
+async function applyByChat(rows: (Message & { chatId: string })[], owner: string): Promise<Map<string, Message[]>> {
   const byChat = new Map<string, Message[]>();
   for (const m of rows) { const c = (m as any).chatId; if (!c) continue; const a = byChat.get(c) ?? []; a.push(m); byChat.set(c, a); }
   for (const [chatId, list] of byChat) {
@@ -101,11 +105,14 @@ async function applyByChat(rows: (Message & { chatId: string })[]): Promise<Map<
       // the delivery ack honest - the device really does hold the message.
       let hydrated: typeof todo;
       try {
-        hydrated = await hydrateMessages(chatId, todo);
+        // Hydration walks newest-first input backwards. Delta rows arrive ASC,
+        // and mutation pages are timestamp-ordered, so normalize this boundary.
+        hydrated = await hydrateMessages(chatId, [...todo].sort((a, b) => b.id - a.id));
       } catch {
         metric('delta.hydrate_failed', todo.length);
         hydrated = todo;
       }
+      if (tokenSubject(await getAccessToken()) !== owner) throw new Error('Sync account changed');
       await cacheMessages(chatId, hydrated);   // upsert by id → edits overwrite, deletes tombstone
     }
   }
@@ -163,13 +170,51 @@ function mutationParams(cursor: string | null): string {
 // Sharing the promise keeps the single-flight property that guard was for
 // while making the await mean what every caller reads it as.
 export function catchUp(): Promise<number> {
-  if (!inflight) inflight = runCatchUp().finally(() => { inflight = null; });
-  return inflight;
+  if (!inflight) {
+    inflight = drainRequestedSync();
+    ordinaryInflight = inflight.then((result) => result.applied);
+  }
+  return ordinaryInflight!;
 }
 
-async function runCatchUp(): Promise<number> {
+/** Protocol resync requires a fresh, fully persisted drain, not a best-effort
+ * cache read. Share the work but keep failure attached to this exact flight. */
+export function resyncRequired(): Promise<void> {
+  if (inflight) rerunRequested = true;
+  catchUp();
+  return inflight!.then((result) => {
+    if ('error' in result) throw result.error;
+  });
+}
+
+/** A new event may postdate the in-flight response snapshot. Drain again before
+ * resolving its waiters; ordinary cache readers can still just join catchUp. */
+export function requestCatchUp(): Promise<number> {
+  if (inflight) rerunRequested = true;
+  return catchUp();
+}
+
+async function drainRequestedSync(): Promise<SyncResult> {
+  const result: SyncResult = { applied: 0 };
+  try {
+    do {
+      rerunRequested = false;
+      const pass = await runCatchUp();
+      result.applied += pass.applied;
+      if ('error' in pass) result.error = pass.error;
+    } while (rerunRequested);
+    return result;
+  } finally {
+    inflight = null;
+    ordinaryInflight = null;
+  }
+}
+
+async function runCatchUp(): Promise<SyncResult> {
   let applied = 0;
   try {
+    const owner = tokenSubject(await getAccessToken());
+    if (!owner) throw new Error('Sync requires an authenticated account');
     let since = Math.max(0, (await getGlobalSyncCursor()) - LOOKBACK);
     const sinceOrig = since;   // mutation pages keep the original id window
     const mutatedSince = await getMeta(MUT_KEY);   // null on first-ever sync
@@ -180,7 +225,8 @@ async function runCatchUp(): Promise<number> {
       metric(since === 0 ? 'cold_sync.requests' : 'delta.requests');
       const coldParam = syncContinuation
         ? `&syncContinuation=${encodeURIComponent(syncContinuation)}` : '';
-      const r = normDelta(await api<Delta>(`/chats/delta?since=${since}&limit=${PAGE}${mutParam}${coldParam}`));
+      const r = normDelta(await api<Delta>(`/chats/delta?since=${since}&limit=${PAGE}${mutParam}${coldParam}`, { expectedUserId: owner }));
+      if (tokenSubject(await getAccessToken()) !== owner) throw new Error('Sync account changed');
       metric(since === 0 ? 'cold_sync.rows' : 'delta.rows', r?.messages?.length ?? 0);
 
       if (guard === 0) {
@@ -188,7 +234,7 @@ async function runCatchUp(): Promise<number> {
         let cursor = mutatedSince;
         for (let mp = 0; mp < MAX_MUT_PAGES; mp++) {
           const muts = mutationPage?.mutations ?? [];
-          await applyByChat(muts);
+          await applyByChat(muts, owner);
           const maxTs = maxMutationTs(muts);
           // Older servers cannot page timestamp ties. Re-read the boundary
           // rather than skip it; stop if that server cannot make progress.
@@ -202,10 +248,10 @@ async function runCatchUp(): Promise<number> {
           }
           if (muts.length < MUT_PAGE || !progressed) break;
           if (mp === MAX_MUT_PAGES - 1) {
-            console.warn('[sync] mutation drain hit page cap — resuming next reconnect');
-            break;
+            throw new Error('Mutation sync page cap reached');
           }
-          mutationPage = normDelta(await api<Delta>(`/chats/delta?since=${sinceOrig}&limit=1${mutationParams(cursor)}`));
+          mutationPage = normDelta(await api<Delta>(`/chats/delta?since=${sinceOrig}&limit=1${mutationParams(cursor)}`, { expectedUserId: owner }));
+          if (tokenSubject(await getAccessToken()) !== owner) throw new Error('Sync account changed');
         }
       }
 
@@ -220,20 +266,24 @@ async function runCatchUp(): Promise<number> {
         }
         break;
       }
-      const byChat = await applyByChat(msgs);
+      const byChat = await applyByChat(msgs, owner);
       for (const [chatId, list] of byChat) {
         // WhatsApp: delivered (✓✓) fires the moment the device HAS the message,
         // not when the user opens the chat. Batch-ack the caught-up messages so
         // the sender's double-tick lands immediately on our reconnect.
         const maxId = Math.max(0, ...list.map((m) => Number(m.id)).filter(Number.isFinite));
-        if (maxId > 0) markDeliveredDurable(chatId, maxId).catch(() => {});
+        if (maxId > 0) markDeliveredDurable(chatId, maxId, owner).catch(() => {});
         // No-GMS: a catch-up that ran in the background (foreground-service
         // connection) is our only chance to tell the user. Gated internally so
         // it no-ops on push-capable devices and while the app is foregrounded.
         notifyBatch(chatId, list as any).catch(() => {});
       }
       applied += msgs.length;
-      since = r.nextSince;
+      const nextSince = Number(r.nextSince);
+      if (!Number.isFinite(nextSince) || nextSince <= since) {
+        throw new Error('Message sync cursor did not advance');
+      }
+      since = nextSince;
       // Keep the opaque cold policy before advancing its numeric cursor. A
       // crash between these writes can replay a page, but cannot widen it.
       syncContinuation = r.syncContinuation || null;
@@ -241,12 +291,21 @@ async function runCatchUp(): Promise<number> {
       // Persist the high-water mark. Without this the cursor is re-derived from
       // MAX(id) of cached rows, so deleting messages (Clear chat, cache trim)
       // rewinds sync and re-downloads what was just removed.
-      await noteGlobalSyncCursor(r.nextSince).catch(() => {});
+      await noteGlobalSyncCursor(r.nextSince);
       if (!r.more) break;
-      if (guard === MAX_PAGES - 1) console.warn(`[sync] catch-up hit ${MAX_PAGES}-page cap after ${applied} msgs — resuming next reconnect`);
+      if (guard === MAX_PAGES - 1) {
+        // The cursor and cold-policy token above are already durable. Yield to
+        // rendering, then continue from that checkpoint in a fresh bounded
+        // pass. An exact 100k backlog used to fail here even though all 500
+        // pages had been stored successfully.
+        metric('delta.page_cap_yields');
+        rerunRequested = true;
+        await new Promise<void>(resolve => setTimeout(resolve, 0));
+        break;
+      }
     }
-  } catch { /* offline / transient — next reconnect retries */ }
-  return applied;
+  } catch (error) { return { applied, error }; }
+  return { applied };
 }
 
 // Minimum gap between AppState-triggered runs.
@@ -275,7 +334,7 @@ function scheduleLiveCatchUp(): void {
   if (liveSyncTimer) return;
   liveSyncTimer = setTimeout(() => {
     liveSyncTimer = null;
-    catchUp().catch(() => {});
+    requestCatchUp().catch(() => {});
   }, LIVE_SYNC_DEBOUNCE_MS);
 }
 
@@ -283,7 +342,7 @@ function scheduleLiveCatchUp(): void {
 export function initSync(): void {
   if (armed) return;
   armed = true;
-  onConnectionState((s) => { if (s === 'ONLINE') catchUp().catch(() => {}); });
+  onConnectionState((s) => { if (s === 'ONLINE') requestCatchUp().catch(() => {}); });
   // The per-chat listener is only mounted while a thread is open. Keep this
   // app-global listener across socket reconnects so a message arriving on the
   // chat list is fetched, cached and shown when that chat is opened.
@@ -302,16 +361,15 @@ export function initSync(): void {
   // cache. Their ids also stayed above the read cursor, which is why the
   // unread badge could not be cleared by reading.
   //
-  // catchUp() COALESCES on the in-flight run rather than dropping the call, so
-  // overlapping with the ONLINE path joins that run instead of starting a
-  // second one - and an awaiting caller still waits for real work.
+  // Resume can postdate an in-flight response, so request a follow-up pass
+  // while sharing the existing drain with ONLINE and push callers.
   try {
     const { AppState } = require('react-native');
     AppState.addEventListener('change', (s: string) => {
       if (s !== 'active') return;
       if (Date.now() - lastResumeSync < RESUME_MIN_GAP_MS) return;
       lastResumeSync = Date.now();
-      catchUp().catch(() => {});
+      requestCatchUp().catch(() => {});
     });
   } catch { /* non-RN (selftest under node) — the ONLINE hook is enough */ }
 }

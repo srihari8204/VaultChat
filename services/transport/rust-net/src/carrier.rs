@@ -1,19 +1,34 @@
 //! Android carrier: opaque binary WebSocket messages, no second CC-Wire session.
 //! TLS uses the same verified rustls/WebPKI roots as the standalone client.
 use std::collections::HashMap;
-use std::sync::{Mutex, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
 use futures_util::{SinkExt, StreamExt};
-use tokio::sync::{mpsc, watch};
+use tokio::sync::{mpsc, watch, OwnedSemaphorePermit, Semaphore};
 use tokio_tungstenite::tungstenite::{client::IntoClientRequest, http::HeaderValue, protocol::WebSocketConfig, Message};
 
 pub const MAX_BYTES: usize = transport_core::config::MAX_FRAME_BYTES + transport_core::config::HEADER_BYTES;
 const MAX_SOCKETS: usize = 2; // One active account plus a connection being retired.
-const QUEUE: usize = 4;
-type Receivers = (mpsc::Receiver<Vec<u8>>, watch::Receiver<bool>);
+const QUEUE: usize = 32;
+// A large logical event uses several small physical frames. Bound their total
+// retained bytes, including the active write, instead of limiting a burst to four.
+#[derive(Debug)]
+pub(crate) struct Outbound {
+    pub bytes: Vec<u8>,
+    _budget: OwnedSemaphorePermit,
+}
+impl Outbound {
+    #[cfg(all(test, feature = "webtransport"))]
+    pub(crate) fn test(bytes: Vec<u8>) -> Self {
+        let budget = Arc::new(Semaphore::new(MAX_BYTES));
+        Self { _budget: budget.try_acquire_many_owned(bytes.len() as u32).unwrap(), bytes }
+    }
+}
+type Receivers = (mpsc::Receiver<Outbound>, watch::Receiver<bool>);
 struct Socket {
-    send: mpsc::Sender<Vec<u8>>,
+    send: mpsc::Sender<Outbound>,
+    budget: Arc<Semaphore>,
     cancel: watch::Sender<bool>,
     receivers: Option<Receivers>,
 }
@@ -33,14 +48,16 @@ pub fn create() -> u64 {
     let id = registry.next;
     let (send, receive) = mpsc::channel(QUEUE);
     let (cancel, stopped) = watch::channel(false);
-    registry.sockets.insert(id, Socket { send, cancel, receivers: Some((receive, stopped)) });
+    registry.sockets.insert(id, Socket { send, budget: Arc::new(Semaphore::new(MAX_BYTES)), cancel, receivers: Some((receive, stopped)) });
     id
 }
 
 pub fn send(id: u64, bytes: Vec<u8>) -> bool {
     if bytes.is_empty() || bytes.len() > MAX_BYTES { return false; }
     let Ok(registry) = registry().lock() else { return false };
-    registry.sockets.get(&id).is_some_and(|socket| socket.send.try_send(bytes).is_ok())
+    let Some(socket) = registry.sockets.get(&id) else { return false };
+    let Ok(permit) = socket.budget.clone().try_acquire_many_owned(bytes.len() as u32) else { return false };
+    socket.send.try_send(Outbound { bytes, _budget: permit }).is_ok()
 }
 
 pub fn close(id: u64) {
@@ -63,7 +80,7 @@ pub fn run(id: u64, url: &str, token: &str, mut emit: impl FnMut(Event)) {
     emit(Event::Closed(code));
 }
 
-async fn drive(url: &str, token: &str, mut rx: mpsc::Receiver<Vec<u8>>, mut stop: watch::Receiver<bool>, emit: &mut impl FnMut(Event)) -> u16 {
+async fn drive(url: &str, token: &str, mut rx: mpsc::Receiver<Outbound>, mut stop: watch::Receiver<bool>, emit: &mut impl FnMut(Event)) -> u16 {
     #[cfg(feature = "webtransport")]
     if url.starts_with("https://") { return crate::webtransport::drive(url, token, rx, stop, emit).await; }
     let Ok(mut request) = url.into_client_request() else { return 1002 };
@@ -99,7 +116,7 @@ async fn drive(url: &str, token: &str, mut rx: mpsc::Receiver<Vec<u8>>, mut stop
                 tokio::select! {
                     biased;
                     _ = stop.changed() => return 1000,
-                    result = tokio::time::timeout(Duration::from_secs(10), ws.send(Message::Binary(bytes.into()))) => {
+                    result = tokio::time::timeout(Duration::from_secs(10), ws.send(Message::Binary(bytes.bytes.into()))) => {
                         if !matches!(result, Ok(Ok(()))) { return 1006; }
                     }
                 }
@@ -135,6 +152,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::result_large_err)] // The WebSocket handshake callback's error type is fixed upstream.
     fn binary_io_auth_queue_and_cancel() {
         // Exercise the TLS configuration even when the socket fixture is plain
         // loopback WS; absence of a provider otherwise hides until a real phone.
@@ -147,6 +165,15 @@ mod tests {
         assert!(!send(id, vec![0; MAX_BYTES + 1]));
         close(id);
         assert!(!send(id, vec![1]));
+
+        let id = create();
+        // One maximally JSON-escaped legacy event fits as a fragment burst.
+        for _ in 0..12 { assert!(send(id, vec![0; 128 * 1024])); }
+        assert!(!send(id, vec![0; 1024 * 1024]), "byte budget binds before the count cap");
+        close(id);
+        let id = create();
+        assert!(send(id, vec![0; MAX_BYTES]), "closing releases all queued permits");
+        close(id);
 
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let address = listener.local_addr().unwrap();

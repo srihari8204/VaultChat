@@ -415,6 +415,9 @@ func serveFragment(s *ccwireSession, r *fragmentReassembler, m ccwire.Message) (
 		// a fresh frame) nor a second handshake.
 		return true, s.sendError(m.RequestID, errFragmentInvalid, "reassembled body")
 	}
+	if inner.BodyField != ccwire.BodyAppEvent && len(body) > ccwire.DefaultLimits().MaxMessageBodyBytes {
+		return true, s.sendError(m.RequestID, errFragmentInvalid, "typed body limit")
+	}
 	if inner.RequestID == "" {
 		inner.RequestID = m.RequestID
 	}
