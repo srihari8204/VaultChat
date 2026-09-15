@@ -2032,7 +2032,7 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
         icon: 'download-outline',
         onPress: () => router.push({
           pathname: '/import-chats' as any,
-          params: { chatId, peerName: peer.name ?? peer.email ?? '' },
+          params: { chatId, peerName: peer.name || peer.email || '' },
         }),
       });
       // Chat opened by code, still anonymous (migration 119). This is the ONLY
@@ -2067,7 +2067,7 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
         icon: 'eye-off-outline',
         onPress: () => router.push({
           pathname: '/ghost-mode' as any,
-          params: { targetId: peer.userId, targetName: peer.name ?? peer.email ?? '' },
+          params: { targetId: peer.userId, targetName: peer.name || peer.email || '' },
         }),
       });
       actions.push({
@@ -3198,7 +3198,7 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
       try {
         const feed = await listStoriesFeed();
         if (feed.some(e => e.userId === peer.userId)) {
-          router.push({ pathname: '/story-viewer' as any, params: { userId: peer.userId, userName: peer.name ?? peer.email ?? title } });
+          router.push({ pathname: '/story-viewer' as any, params: { userId: peer.userId, userName: peer.name || peer.email || title } });
           return;
         }
       } catch {}
@@ -3216,7 +3216,7 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
     }
     const peer = directPeer();
     if (!peer) return;
-    router.push({ pathname: '/contact-info' as any, params: { chatId, peerUid: peer.userId, peerName: peer.name ?? peer.email ?? 'crazzychat user' } });
+    router.push({ pathname: '/contact-info' as any, params: { chatId, peerUid: peer.userId, peerName: peer.name || peer.email || 'crazzychat user' } });
   }, [chat, chatId, directPeer, router]);
 
   // Direct-chat peer presence — drives the "online" / "last seen X" sub-text
@@ -3425,7 +3425,7 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
         {chat?.type === 'direct' && meId && (() => {
           const peer = chat.members.find(m => m.userId !== meId);
           if (!peer) return null;
-          const params = { chatId, peerUid: peer.userId, peerName: peer.name ?? peer.email ?? 'crazzychat user' };
+          const params = { chatId, peerUid: peer.userId, peerName: peer.name || peer.email || 'crazzychat user' };
           return (
             <>
               <TouchableOpacity
@@ -4130,11 +4130,11 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
               </TouchableOpacity>
               {chat?.type === 'direct' && (
                 <>
-                  <TouchableOpacity style={S.photoActionBtn} onPress={() => { setPhotoViewer(false); const p = directPeer(); if (p) router.push({ pathname: '/voicecall' as any, params: { chatId, peerUid: p.userId, peerName: p.name ?? p.email ?? title } }); }}>
+                  <TouchableOpacity style={S.photoActionBtn} onPress={() => { setPhotoViewer(false); const p = directPeer(); if (p) router.push({ pathname: '/voicecall' as any, params: { chatId, peerUid: p.userId, peerName: p.name || p.email || title } }); }}>
                     <Ionicons name="call" size={22} color={colors.primary} />
                     <Text style={S.photoActionTxt}>Audio</Text>
                   </TouchableOpacity>
-                  <TouchableOpacity style={S.photoActionBtn} onPress={() => { setPhotoViewer(false); const p = directPeer(); if (p) router.push({ pathname: '/videocall' as any, params: { chatId, peerUid: p.userId, peerName: p.name ?? p.email ?? title } }); }}>
+                  <TouchableOpacity style={S.photoActionBtn} onPress={() => { setPhotoViewer(false); const p = directPeer(); if (p) router.push({ pathname: '/videocall' as any, params: { chatId, peerUid: p.userId, peerName: p.name || p.email || title } }); }}>
                     <Ionicons name="videocam" size={22} color={colors.primary} />
                     <Text style={S.photoActionTxt}>Video</Text>
                   </TouchableOpacity>

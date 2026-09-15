@@ -23,4 +23,27 @@ export function formatDuration(totalSeconds: number): string {
   return `${String(m).padStart(2, '0')}:${String(r).padStart(2, '0')}`;
 }
 
+/**
+ * Avatar initial — first letter of the first part that actually has one.
+ *
+ * Replaces `(a ?? b ?? '?').trim()[0].toUpperCase()`, which white-screened the
+ * moment `a` was an EMPTY STRING: `??` only catches null/undefined, so `''`
+ * won the chain, `''.trim()[0]` was `undefined`, and `.toUpperCase()` threw.
+ * The `||` spelling of the same line had the same crash one step further out —
+ * a name of `'   '` is truthy, trims to nothing, and throws identically.
+ *
+ * Email is now optional on an account, so "name missing, email missing" is an
+ * ordinary state rather than a corrupt row, and every one of these call sites
+ * is a render path: it must return a character, never throw.
+ */
+export function initialOf(...parts: (string | null | undefined)[]): string {
+  for (const p of parts) {
+    // Spread, not [0]: an emoji or Devanagari name is a surrogate pair, and
+    // index 0 of one is half a character — which renders as a tofu box.
+    const c = p ? [...p.trim()][0] : undefined;
+    if (c) return c.toUpperCase();
+  }
+  return '?';
+}
+
 export default {};

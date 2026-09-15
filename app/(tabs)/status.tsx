@@ -55,6 +55,7 @@ import { StoryRing } from '../../components/StoryRing';
 import { type Palette } from '../../constants/theme';
 import { useTheme } from '../../lib/theme';
 import { getAccessToken } from '../../lib/api';
+import { initialOf } from '../../lib/format';
 import { getSocket } from '../../lib/socket';
 import { STORY_E2EE, E2EE_ENABLED } from '../../constants/flags';
 import { uploadEncryptedAttachment } from '../../lib/mediaAttachments';
@@ -317,21 +318,21 @@ export default function StatusScreen() {
       pathname: '/story-viewer' as any,
       params: {
         userId:   entry.userId,
-        userName: entry.name ?? entry.email ?? '',
+        userName: entry.name || entry.email || '',
       },
     });
   }, [router]);
 
   // A status row (reused for recent + muted), with long-press to (un)mute.
   const statusRow = useCallback((item: StoryFeedEntry) => (
-    <TouchableOpacity style={S.row} onPress={() => openViewer(item)} onLongPress={() => toggleMute(item.userId, item.name ?? item.email ?? 'this person')} delayLongPress={350} activeOpacity={0.7}>
+    <TouchableOpacity style={S.row} onPress={() => openViewer(item)} onLongPress={() => toggleMute(item.userId, item.name || item.email || 'this person')} delayLongPress={350} activeOpacity={0.7}>
       <StoryRing size={60} segments={item.stories.map(s => s.seen)} color={colors.primary} seenColor={colors.textDim}>
         {item.photoURL && authHeader
           ? <Image source={{ uri: attachmentUrl(item.photoURL), headers: { Authorization: authHeader } }} style={S.avatarImg} />
-          : <View style={S.avatarFallback}><Text style={S.avatarFallbackTxt}>{(item.name ?? item.email ?? '?').trim()[0].toUpperCase()}</Text></View>}
+          : <View style={S.avatarFallback}><Text style={S.avatarFallbackTxt}>{initialOf(item.name, item.email)}</Text></View>}
       </StoryRing>
       <View style={{ flex: 1 }}>
-        <Text style={S.rowName} numberOfLines={1}>{item.name ?? item.email ?? item.userId.slice(0, 8)}</Text>
+        <Text style={S.rowName} numberOfLines={1}>{item.name || item.email || item.userId.slice(0, 8)}</Text>
         <Text style={S.rowSub}>{item.stories.length} {item.stories.length === 1 ? 'update' : 'updates'} · {formatRelative(item.latestAt)}</Text>
       </View>
     </TouchableOpacity>

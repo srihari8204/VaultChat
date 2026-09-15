@@ -12,7 +12,7 @@ export function useMe(): Me | null {
     let alive = true;
     (async () => {
       const u = await getCurrentUserAsync().catch(() => null);
-      if (alive) setMe({ id: u?.id ?? 'local', name: u?.name ?? u?.email ?? 'You' });
+      if (alive) setMe({ id: u?.id ?? 'local', name: u?.name || u?.email || 'You' });
     })();
     return () => { alive = false; };
   }, []);

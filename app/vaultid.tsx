@@ -68,7 +68,7 @@ function VaultIDScreenContent() {
       setVaultID(id);
       setShowCreate(false);
       setDisplayName(''); setBio('');
-      Alert.alert('🧬 VaultID Created!', 'Your cryptographic identity is ready.\n\nNo phone number needed — ever!\n\nYour VaultTag: ' + id.vaultTag);
+      Alert.alert('🧬 VaultID Created!', 'Your cryptographic identity is ready.\n\nShare it and nobody learns your number.\n\nYour VaultTag: ' + id.vaultTag);
     } catch {
       Alert.alert('Error','Failed to create VaultID. Try again.');
     }
@@ -96,7 +96,7 @@ function VaultIDScreenContent() {
   const handleShare = async () => {
     if(!vaultID) return;
     await Share.share({
-      message: 'Add me on crazzychat!\n\nVaultTag: '+vaultID.vaultTag+'\nWallet: '+shortAddress(vaultID.walletAddress)+'\n\nNo phone number needed — find me by VaultTag only.',
+      message: 'Add me on crazzychat!\n\nVaultTag: '+vaultID.vaultTag+'\nWallet: '+shortAddress(vaultID.walletAddress)+'\n\nFind me by VaultTag instead of my number.',
       title: 'My VaultID',
     });
   };
@@ -257,7 +257,7 @@ function VaultIDScreenContent() {
             {[
               {icon:'🔐',title:'Zero-Knowledge',sub:'Identity without personal data'},
               {icon:'⛓️',title:'Cryptographic Proof',sub:'Cryptographic ownership'},
-              {icon:'📵',title:'No Phone Number',sub:'VaultTag only'},
+              {icon:'📵',title:'Number Stays Private',sub:'VaultTag only'},
               {icon:'🌍',title:'Universal ID',sub:'Works everywhere'},
               {icon:'🛡️',title:'Sovereign Identity',sub:'You own your keys'},
             ].map((f,i)=>(
@@ -279,7 +279,7 @@ function VaultIDScreenContent() {
           <View style={{alignItems:'center',paddingTop:40}}>
             <Text style={{fontSize:80,marginBottom:20}}>🧬</Text>
             <Text style={{color:'#fff',fontSize:22,fontWeight:'900',textAlign:'center'}}>No VaultID Yet</Text>
-            <Text style={{color:'#3D5A7A',fontSize:14,textAlign:'center',marginTop:8,lineHeight:22,paddingHorizontal:20}}>Create your cryptographic identity.\nNo phone number, no email required.</Text>
+            <Text style={{color:'#3D5A7A',fontSize:14,textAlign:'center',marginTop:8,lineHeight:22,paddingHorizontal:20}}>Create your cryptographic identity. A handle people can add you by, without your number.</Text>
             <TouchableOpacity onPress={()=>setShowCreate(true)} style={{marginTop:24}}>
               <LinearGradient colors={['#1D4ED8','#7C3AED']} style={{borderRadius:16,paddingVertical:16,paddingHorizontal:40}}>
                 <Text style={{color:'#fff',fontSize:16,fontWeight:'800'}}>🧬 Create VaultID</Text>
@@ -295,7 +295,7 @@ function VaultIDScreenContent() {
         <View style={{flex:1,backgroundColor:'rgba(0,0,0,0.92)',justifyContent:'flex-end'}}>
           <LinearGradient colors={['#F9FAFB','#0D1E3A']} style={{borderTopLeftRadius:28,borderTopRightRadius:28,padding:24,paddingBottom:44}}>
             <Text style={{color:'#fff',fontSize:22,fontWeight:'900',marginBottom:4}}>🧬 Create VaultID</Text>
-            <Text style={{color:'#3D5A7A',fontSize:13,marginBottom:20}}>Your cryptographic identity — no phone number needed</Text>
+            <Text style={{color:'#3D5A7A',fontSize:13,marginBottom:20}}>Your cryptographic identity — shareable without your number</Text>
 
             <Text style={{color:'#4A9FFF',fontSize:11,fontWeight:'700',marginBottom:8,letterSpacing:1}}>CHOOSE AVATAR</Text>
             <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{marginBottom:16}}>

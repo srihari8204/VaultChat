@@ -908,7 +908,13 @@ function RootLayoutInner() {
         <Stack.Screen name="location-sharing" />
         <Stack.Screen name="vault-features" />
         <Stack.Screen name="dashboard" />
-        <Stack.Screen name="settings" />
+        {/* The settings screen is NOT declared here — INSET_SCREENS above
+            already registers it, and that is the declaration carrying the
+            status-bar padding it needs. It was declared in both places, which
+            made expo-router throw "Screen names must be unique" out of
+            useFilterScreenChildren. That error is FATAL: the app rendered a
+            red error screen instead of booting, on every route. A bare second
+            declaration adds nothing the map has not already done. */}
         <Stack.Screen name="story-viewer" />
         <Stack.Screen name="meeting-scheduler" />
         <Stack.Screen name="finance" options={{ headerShown: false }} />

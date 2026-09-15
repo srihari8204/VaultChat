@@ -212,7 +212,7 @@ export default function GroupInvitesScreen() {
           <Ionicons name="search" size={17} color={colors.textDim} />
           <TextInput
             value={q} onChangeText={setQ}
-            placeholder="Name, email or phone number"
+            placeholder="Name, phone number or email"
             placeholderTextColor={colors.textFaint}
             style={[st.input, { color: colors.text }]}
             autoCapitalize="none" autoCorrect={false} returnKeyType="search"
@@ -227,7 +227,7 @@ export default function GroupInvitesScreen() {
 
         <Text style={{ color: colors.textFaint, fontSize: 11.5, marginTop: 8, lineHeight: 16 }}>
           Search people you already chat with by name, or anyone on crazzychat by their exact
-          email or phone number.
+          phone number or email.
         </Text>
 
         {searched && results.length === 0 && !searching && (

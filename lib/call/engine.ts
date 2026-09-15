@@ -306,7 +306,7 @@ async function bootstrap(a: StartArgs, direction: 'outgoing' | 'incoming') {
   const me = await getCachedUser();
   if (!me?.id) throw new Error('Not signed in');
   s.meId = me.id;
-  s.meName = me.name ?? me.email ?? 'You';
+  s.meName = me.name || me.email || 'You';
   dispatch({ type: 'me', uid: me.id });
 
   // The server call session IS the room. Awaited, unlike the old engine which
@@ -700,7 +700,7 @@ export async function startOutgoing(a: StartArgs): Promise<void> {
       // BLANK, never a placeholder. The callee's screens only run their name
       // lookup when this arrives empty, so sending "crazzychat user" pinned that
       // placeholder on the receiver for the whole call.
-      callerName: me.name ?? me.email ?? '',
+      callerName: me.name || me.email || '',
       offer: wire,
     }, isDone);
     onDispose(cancelRing);

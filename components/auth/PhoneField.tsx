@@ -1,6 +1,15 @@
 // components/auth/PhoneField.tsx — country code + national number → E.164.
-// Pragmatic validation (E.164 = '+' then 8–15 digits) without pulling in
-// libphonenumber-js; the small country list covers the common cases, default +91.
+// Pragmatic validation without pulling in libphonenumber-js: the generic E.164
+// shape ('+' then 8–15 digits) PLUS the national-number length for the country
+// that was picked. The small country list covers the common cases, default +91.
+//
+// THE GENERIC RULE ALONE IS TOO LOOSE FOR AN IDENTITY FIELD. '+91 12345678'
+// passed it — eight digits, so E.164-shaped, and no Indian number is eight
+// digits long. That was tolerable while the number was a secondary field and
+// the email carried the OTP; now the number IS the login, and a number that
+// cannot receive an SMS is an account nobody can ever sign into. The lengths
+// below are the national-number lengths, not counting the dial code; a country
+// missing from the table falls back to the generic rule rather than blocking.
 //
 // TWO GROUNDS, ONE COMPONENT — see the note in MpinInput.tsx. app/onboard.tsx
 // stands on AuthSky and passes `onDark`; app/new-chat.tsx is an ordinary themed
@@ -12,26 +21,32 @@ import { Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, TouchableOpa
 import { AUTH_FIELDS, type FieldColors } from '../../constants/authTheme';
 import { useTheme } from '../../lib/theme';
 
+// `len` = [min, max] digits in the NATIONAL number (dial code excluded).
 const COUNTRIES = [
-  { code: '+91', flag: '🇮🇳', name: 'India' },
-  { code: '+1',  flag: '🇺🇸', name: 'USA / Canada' },
-  { code: '+44', flag: '🇬🇧', name: 'UK' },
-  { code: '+61', flag: '🇦🇺', name: 'Australia' },
-  { code: '+971', flag: '🇦🇪', name: 'UAE' },
-  { code: '+65', flag: '🇸🇬', name: 'Singapore' },
-  { code: '+49', flag: '🇩🇪', name: 'Germany' },
-  { code: '+33', flag: '🇫🇷', name: 'France' },
-  { code: '+81', flag: '🇯🇵', name: 'Japan' },
-  { code: '+880', flag: '🇧🇩', name: 'Bangladesh' },
-  { code: '+92', flag: '🇵🇰', name: 'Pakistan' },
-  { code: '+94', flag: '🇱🇰', name: 'Sri Lanka' },
-];
+  { code: '+91', flag: '🇮🇳', name: 'India',        len: [10, 10] },
+  { code: '+1',  flag: '🇺🇸', name: 'USA / Canada', len: [10, 10] },
+  { code: '+44', flag: '🇬🇧', name: 'UK',           len: [10, 10] },
+  { code: '+61', flag: '🇦🇺', name: 'Australia',    len: [9, 9] },
+  { code: '+971', flag: '🇦🇪', name: 'UAE',         len: [9, 9] },
+  { code: '+65', flag: '🇸🇬', name: 'Singapore',    len: [8, 8] },
+  { code: '+49', flag: '🇩🇪', name: 'Germany',      len: [10, 11] },
+  { code: '+33', flag: '🇫🇷', name: 'France',       len: [9, 9] },
+  { code: '+81', flag: '🇯🇵', name: 'Japan',        len: [10, 10] },
+  { code: '+880', flag: '🇧🇩', name: 'Bangladesh',  len: [10, 10] },
+  { code: '+92', flag: '🇵🇰', name: 'Pakistan',     len: [10, 10] },
+  { code: '+94', flag: '🇱🇰', name: 'Sri Lanka',    len: [9, 9] },
+] as const;
+
+const MAX_NATIONAL = 14;   // generic ceiling for a country not in the table
 
 // Returns the full E.164 string, or '' if invalid.
 export function toE164(dialCode: string, national: string): string {
   const n = national.replace(/\D/g, '');
   const e164 = `${dialCode}${n}`;
-  return /^\+\d{8,15}$/.test(e164) ? e164 : '';
+  if (!/^\+\d{8,15}$/.test(e164)) return '';
+  const c = COUNTRIES.find(x => x.code === dialCode);
+  if (c && (n.length < c.len[0] || n.length > c.len[1])) return '';
+  return e164;
 }
 
 export function PhoneField({
@@ -48,6 +63,10 @@ export function PhoneField({
   const s = useMemo(() => makeStyles(c), [c]);
   const [pick, setPick] = useState(false);
   const country = COUNTRIES.find(x => x.code === dialCode) ?? COUNTRIES[0];
+  // Stop the typing at the country's own ceiling rather than a flat 14: on a
+  // 10-digit country the 11th keypress is always a mistake, and refusing it is
+  // quieter than accepting it and greying out the button with no reason given.
+  const maxDigits = country.code === dialCode ? country.len[1] : MAX_NATIONAL;
 
   return (
     <View style={s.row}>
@@ -65,12 +84,12 @@ export function PhoneField({
       <TextInput
         style={s.input}
         value={national}
-        onChangeText={(t) => onChange(dialCode, t.replace(/\D/g, '').slice(0, 14))}
+        onChangeText={(t) => onChange(dialCode, t.replace(/\D/g, '').slice(0, maxDigits))}
         placeholder="Mobile number"
         placeholderTextColor={c.textFaint}
         keyboardType="phone-pad"
         autoFocus={autoFocus}
-        maxLength={14}
+        maxLength={maxDigits}
       />
 
       <Modal visible={pick} transparent animationType="fade" onRequestClose={() => setPick(false)}>
@@ -82,7 +101,10 @@ export function PhoneField({
                 <TouchableOpacity
                   key={item.code}
                   style={[s.countryRow, item.code === dialCode && s.countryActive]}
-                  onPress={() => { onChange(item.code, national); setPick(false); }}
+                  // Trim to the new country's ceiling — 10 Indian digits are not
+                  // a Singapore number, and carrying them over silently is how
+                  // the CTA ends up dead with nothing on screen explaining it.
+                  onPress={() => { onChange(item.code, national.slice(0, item.len[1])); setPick(false); }}
                 >
                   <Text style={s.flag}>{item.flag}</Text>
                   <Text numberOfLines={1} style={s.countryName}>{item.name}</Text>

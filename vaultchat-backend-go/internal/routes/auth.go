@@ -14,6 +14,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net"
@@ -45,6 +46,12 @@ func RegisterAuth(mux *http.ServeMux) {
 	mux.HandleFunc("POST /auth/verify-otp-phone", authVerifyOtpPhone)
 	mux.HandleFunc("POST /auth/onboard/send-otp", authOnboardSendOtp)
 	mux.HandleFunc("POST /auth/onboard/verify-otp", authOnboardVerifyOtp)
+	// Mobile-number-first signup (auth_phone.go). Email is recovery-only now, so
+	// these are the primary path; the /auth/*-otp-phone pair above is the legacy
+	// one that cannot produce a phone_lookup.
+	mux.HandleFunc("POST /auth/onboard/send-otp-phone", authOnboardSendOtpPhone)
+	mux.HandleFunc("POST /auth/onboard/resend-otp-phone", authOnboardResendOtpPhone)
+	mux.HandleFunc("POST /auth/onboard/verify-otp-phone", authOnboardVerifyOtpPhone)
 	mux.HandleFunc("POST /auth/lookup", authLookup)
 	mux.HandleFunc("POST /auth/profile/init", authProfileInit)
 	mux.HandleFunc("POST /auth/security-questions/save", authSecurityQuestionsSave)
@@ -550,9 +557,24 @@ func authSmsConfigured() bool {
 		(os.Getenv("TWILIO_MESSAGING_SERVICE_SID") != "" || os.Getenv("TWILIO_FROM_NUMBER") != "")
 }
 
+// authSendOTPSMS delivers a code WE generated, which is why it is still Twilio
+// and not MSG91: the MSG91 widget mints and checks its own code, so it cannot
+// carry one from otp_codes. The number-first signup path does not come through
+// here at all — see auth_phone.go, where MSG91 owns the whole attempt.
+//
+// AUDIT: this used to return nil — SUCCESS — and print the code in cleartext
+// whenever Twilio was unconfigured, which is the state prod is in. Phone signup
+// therefore reported success, sent nothing, and left the code in the server log
+// as the only copy. A provider that is missing is now an ERROR, and the dev
+// shortcut requires ALLOW_DEV_OTP=1 to say so out loud.
 func authSendOTPSMS(phone, code string) error {
 	if !authSmsConfigured() {
-		log.Printf("[sms] OTP for %s: %s (Twilio not configured — visible only here)", phone, code)
+		if !authDevOtpAllowed() {
+			return errors.New("no SMS provider configured (TWILIO_* unset)")
+		}
+		// The number is deliberately absent: a dev log is still a log, and one
+		// developer's handset is enough context to know which code is theirs.
+		log.Printf("[sms][ALLOW_DEV_OTP] code %s not sent — no provider configured", code)
 		return nil
 	}
 	sid := os.Getenv("TWILIO_ACCOUNT_SID")
@@ -650,21 +672,34 @@ func authSendOtp(w http.ResponseWriter, r *http.Request) {
 // addresses, the IP key alone is defeated by rotating them. ConsumeSecure, as
 // on /mpin/verify: a Redis outage must not lift a brute-force limit.
 func authOtpVerifyGate(w http.ResponseWriter, r *http.Request, scope, id string) bool {
+	ok, retryAfter := authOtpVerifyAllow(r, scope, id)
+	if ok {
+		return true
+	}
+	httpx.Err(w, 429, "Too many attempts. Request a new code.",
+		map[string]any{"retryAfter": retryAfter})
+	return false
+}
+
+// authOtpVerifyAllow is the decision without the response, because the two auth
+// stacks disagree about what an error looks like: legacy writes {error:"msg"},
+// the onboarding stack writes {error:{code,message}}. Splitting the rule from
+// the rendering is what stops a v2 handler from having to copy the limits (and
+// then drift from them) just to answer in its own envelope.
+func authOtpVerifyAllow(r *http.Request, scope, id string) (ok bool, retryAfter int64) {
 	ctx := r.Context()
 	gate := redisx.ConsumeSecure(ctx, scope+":"+id, 5, 900)
 	if gate.Allowed {
 		gate = redisx.ConsumeSecure(ctx, scope+"-ip:"+authClientIP(r), 50, 900)
 	}
 	if gate.Allowed {
-		return true
+		return true, 0
 	}
 	reset := gate.ResetInSec
 	if reset == 0 {
 		reset = 900
 	}
-	httpx.Err(w, 429, "Too many attempts. Request a new code.",
-		map[string]any{"retryAfter": reset})
-	return false
+	return false, reset
 }
 
 // authOtpBumpAttempts charges one wrong guess and reports whether the cap is
@@ -745,8 +780,9 @@ func authVerifyOtp(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Dev-only fixed OTP bypass — same warning as Node: NEVER set DEV_OTP in prod.
-	match := (os.Getenv("DEV_OTP") != "" && code == os.Getenv("DEV_OTP")) || authVerifyOTP(code, codeHash)
+	// Dev-only fixed OTP bypass. It now takes TWO variables (see
+	// authDevOtpMatches): an inherited DEV_OTP on its own no longer opens it.
+	match := authDevOtpMatches(code) || authVerifyOTP(code, codeHash)
 	if !match {
 		spent, err := authOtpBumpAttempts(ctx, otpID)
 		if err != nil {
@@ -1095,7 +1131,10 @@ func authSendOtpPhone(w http.ResponseWriter, r *http.Request) {
 		httpx.Err(w, 500, "Failed to send code")
 		return
 	}
-	httpx.JSON(w, 200, map[string]any{"ok": true, "dev": !authSmsConfigured()})
+	// `dev` now means "nothing was actually sent", which is only ever true on
+	// the explicit opt-in — an unconfigured provider is a 500 above, not a
+	// silent success the client is told to treat as normal.
+	httpx.JSON(w, 200, map[string]any{"ok": true, "dev": !authSmsConfigured() && authDevOtpAllowed()})
 }
 
 // ── POST /auth/verify-otp-phone ────────────────────────────────────────
@@ -1156,7 +1195,7 @@ func authVerifyOtpPhone(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	match := (os.Getenv("DEV_OTP") != "" && code == os.Getenv("DEV_OTP")) || authVerifyOTP(code, codeHash)
+	match := authDevOtpMatches(code) || authVerifyOTP(code, codeHash)
 	if !match {
 		spent, err := authOtpBumpAttempts(ctx, otpID)
 		if err != nil {
@@ -1383,12 +1422,12 @@ func authOnboardSendOtp(w http.ResponseWriter, r *http.Request) {
 	}
 	perEmail := redisx.Consume(ctx, "otp:email:"+e, 3, 3600)
 	if !perEmail.Allowed {
-		authEnvErr(w, 429, "rate_limited", "Too many requests. Try again later.")
+		authEnvErrRetry(w, 429, "rate_limited", "Too many requests. Try again later.", perEmail.ResetInSec)
 		return
 	}
 	perIP := redisx.Consume(ctx, "otp:ip:"+authClientIP(r), 10, 3600)
 	if !perIP.Allowed {
-		authEnvErr(w, 429, "rate_limited", "Too many requests. Try again later.")
+		authEnvErrRetry(w, 429, "rate_limited", "Too many requests. Try again later.", perIP.ResetInSec)
 		return
 	}
 
@@ -1448,7 +1487,7 @@ func authOnboardVerifyOtp(w http.ResponseWriter, r *http.Request) {
 		if reset == 0 {
 			reset = 900
 		}
-		authEnvErr(w, http.StatusLocked, "locked", fmt.Sprintf("Too many attempts. Try again in %ds", reset))
+		authEnvErrRetry(w, http.StatusLocked, "locked", fmt.Sprintf("Too many attempts. Try again in %ds", reset), reset)
 		return
 	}
 	var otpID int64
@@ -1491,7 +1530,7 @@ func authLookup(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	ipLimit := redisx.Consume(ctx, "auth-ip:"+authClientIP(r), 20, 60)
 	if !ipLimit.Allowed {
-		authEnvErr(w, 429, "rate_limited", "Too many requests")
+		authEnvErrRetry(w, 429, "rate_limited", "Too many requests", ipLimit.ResetInSec)
 		return
 	}
 	var b struct {
@@ -1501,16 +1540,24 @@ func authLookup(w http.ResponseWriter, r *http.Request) {
 	_ = httpx.Body(r, &b)
 	email := vault.NormalizeEmail(authStr(b.Email))
 	phone := vault.NormalizePhone(authStr(b.Phone))
-	if email == "" || phone == "" {
-		authEnvErr(w, 400, "bad_request", "email and phone are required")
+	// THE NUMBER IS THE IDENTITY. This used to demand both, which made the
+	// mobile-first sign-in screen impossible to serve: it has a number and
+	// nothing else, and email is recovery-only now. Email stays accepted so the
+	// older client — which sends the pair — keeps getting the same answers.
+	if phone == "" {
+		authEnvErr(w, 400, "bad_request", "phone is required")
 		return
 	}
 
-	el, err := vault.EmailLookup(email)
-	if err != nil {
-		log.Printf("[auth/lookup] %v", err) // e.g. VAULTCHAT_LOOKUP_PEPPER not set
-		authEnvErr(w, 500, "server_error", "Lookup failed")
-		return
+	var el string
+	if email != "" {
+		var err error
+		el, err = vault.EmailLookup(email)
+		if err != nil {
+			log.Printf("[auth/lookup] %v", err) // e.g. VAULTCHAT_LOOKUP_PEPPER not set
+			authEnvErr(w, 500, "server_error", "Lookup failed")
+			return
+		}
 	}
 	pl, err := vault.PhoneLookup(phone)
 	if err != nil {
@@ -1518,9 +1565,12 @@ func authLookup(w http.ResponseWriter, r *http.Request) {
 		authEnvErr(w, 500, "server_error", "Lookup failed")
 		return
 	}
+	// The `$1 <> ''` guard is load-bearing: with no email supplied el is "", and
+	// an unguarded `email_lookup = ''` would match any row that ever stored an
+	// empty lookup — i.e. report somebody else's account as this caller's.
 	rows, err := db.Pool.Query(ctx,
 		`SELECT id, email_lookup, phone_lookup FROM users
-	     WHERE (email_lookup = $1 OR phone_lookup = $2) AND is_deleted = FALSE LIMIT 2`,
+	     WHERE (($1 <> '' AND email_lookup = $1) OR phone_lookup = $2) AND is_deleted = FALSE LIMIT 2`,
 		el, pl)
 	if err != nil {
 		log.Printf("[auth/lookup] %v", err) // e.g. column email_lookup does not exist → run migrations
@@ -1545,8 +1595,15 @@ func authLookup(w http.ResponseWriter, r *http.Request) {
 	rows.Close()
 
 	ip := authClientIP(r)
+	// "Exists" means the account answers to everything the caller supplied. With
+	// an email in the body that is still both halves (a number that belongs to a
+	// different account is a conflict, not a match); with only a number, the
+	// number alone decides.
 	for _, h := range hits {
-		if h.el != nil && *h.el == el && h.pl != nil && *h.pl == pl {
+		if h.pl == nil || *h.pl != pl {
+			continue
+		}
+		if email == "" || (h.el != nil && *h.el == el) {
 			authAudit(ctx, &h.id, ip, "lookup", true)
 			httpx.JSON(w, 200, map[string]any{"exists": true, "userId": h.id})
 			return
@@ -1557,7 +1614,7 @@ func authLookup(w http.ResponseWriter, r *http.Request) {
 		if h.pl != nil && *h.pl == pl {
 			phoneTaken = true
 		}
-		if h.el != nil && *h.el == el {
+		if email != "" && h.el != nil && *h.el == el {
 			emailTaken = true
 		}
 	}
@@ -1586,6 +1643,7 @@ func authProfileInit(w http.ResponseWriter, r *http.Request) {
 		Status        any `json:"status"`
 		ProfilePicUrl any `json:"profilePicUrl"`
 		EmailTicket   any `json:"emailTicket"`
+		PhoneTicket   any `json:"phoneTicket"`
 	}
 	_ = httpx.Body(r, &b)
 	email := vault.NormalizeEmail(authStr(b.Email))
@@ -1596,8 +1654,13 @@ func authProfileInit(w http.ResponseWriter, r *http.Request) {
 	status := authStr(b.Status)
 	profilePicUrl := authStrIfTruthy(b.ProfilePicUrl)
 
-	if email == "" || phone == "" || firstName == "" || dob == "" {
-		authEnvErr(w, 400, "bad_request", "email, phone, firstName and dob are required")
+	// Email is no longer part of the minimum account: it is recovery-only, and
+	// requiring it here is what forced the legacy phone path to fabricate a
+	// placeholder address. `users.email` is nullable (migration 042) and
+	// uq_users_phone_lookup is a partial unique index, so a row with no email is
+	// a first-class account, not a degraded one.
+	if phone == "" || firstName == "" || dob == "" {
+		authEnvErr(w, 400, "bad_request", "phone, firstName and dob are required")
 		return
 	}
 	age, ok := authAgeFromDob(dob)
@@ -1610,10 +1673,14 @@ func authProfileInit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	el, err := vault.EmailLookup(email)
-	if err != nil {
-		authEnvErr(w, 500, "server_error", "Could not create profile")
-		return
+	var el string
+	if email != "" {
+		var err error
+		el, err = vault.EmailLookup(email)
+		if err != nil {
+			authEnvErr(w, 500, "server_error", "Could not create profile")
+			return
+		}
 	}
 	pl, err := vault.PhoneLookup(phone)
 	if err != nil {
@@ -1621,15 +1688,27 @@ func authProfileInit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Email ownership: valid ticket from /auth/onboard/verify-otp for THIS email.
-	if !vault.VerifyTicket(authStr(b.EmailTicket), el) {
-		authEnvErr(w, 401, "email_unverified", "Verify your email with the code first")
+	// OWNERSHIP, IN THE ORDER IT NOW MATTERS.
+	//
+	// A phoneTicket from /auth/onboard/verify-otp-phone is the primary proof:
+	// it is bound to vault.PhoneLookup(phone), computed from the number in THIS
+	// body, so a ticket for one number cannot create an account for another.
+	//
+	// emailTicket is still accepted, and is the only option when no phone OTP
+	// was involved, so an in-flight signup on the older client does not break
+	// mid-flow. Whichever one proved the identity decides whether the email is
+	// recorded as verified below — an unverified address must not become a
+	// recovery channel.
+	phoneVerified := vault.VerifyTicket(authStr(b.PhoneTicket), pl)
+	emailVerified := email != "" && vault.VerifyTicket(authStr(b.EmailTicket), el)
+	if !phoneVerified && !emailVerified {
+		authEnvErr(w, 401, "not_verified", "Verify your mobile number with the code first")
 		return
 	}
 
 	var one int
 	err = db.Pool.QueryRow(ctx,
-		`SELECT 1 FROM users WHERE (email_lookup = $1 OR phone_lookup = $2) AND is_deleted = FALSE LIMIT 1`,
+		`SELECT 1 FROM users WHERE (($1 <> '' AND email_lookup = $1) OR phone_lookup = $2) AND is_deleted = FALSE LIMIT 1`,
 		el, pl).Scan(&one)
 	if err == nil {
 		authEnvErr(w, http.StatusConflict, "already_exists", "An account already exists for this email or mobile")
@@ -1640,10 +1719,16 @@ func authProfileInit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	emailC, err := vault.Encrypt(email)
-	if err != nil {
-		authEnvErr(w, 500, "server_error", "Could not create profile")
-		return
+	// Both email columns move together or neither does: email_lookup with no
+	// email_cipher is an account that can be found by an address it cannot show.
+	var emailC, emailL *string
+	if email != "" {
+		c, err := vault.Encrypt(email)
+		if err != nil {
+			authEnvErr(w, 500, "server_error", "Could not create profile")
+			return
+		}
+		emailC, emailL = &c, &el
 	}
 	phoneC, err := vault.Encrypt(phone)
 	if err != nil {
@@ -1684,16 +1769,32 @@ func authProfileInit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// auth_provider said 'google' for every account this endpoint ever created,
+	// including the ones that never saw Google — admin and support read that
+	// column to answer "how does this person sign in?", and it was lying to them
+	// about the entire onboarding cohort. 'phone' matches what the legacy phone
+	// path writes, so the two agree.
+	provider := "phone"
+	if !phoneVerified {
+		provider = "email"
+	}
+	// NULL, not NOW(): only an address whose OTP was actually answered counts as
+	// verified, or the recovery channel is one nobody proved they own.
+	var emailVerifiedAt *time.Time
+	if emailVerified {
+		now := time.Now()
+		emailVerifiedAt = &now
+	}
 	var userID string
 	err = db.Pool.QueryRow(ctx,
 		`INSERT INTO users
 	       (email_lookup, phone_lookup, email_cipher, phone_cipher,
 	        first_name_cipher, last_name_cipher, dob_cipher, status_cipher,
 	        photo_url, phone_hash, auth_provider, email_verified_at, onboarding_complete)
-	     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'google',NOW(),FALSE)
+	     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,FALSE)
 	     RETURNING id`,
-		el, pl, emailC, phoneC, firstC, lastC, dobC, statusC,
-		profilePicUrl, phoneHash).Scan(&userID)
+		emailL, pl, emailC, phoneC, firstC, lastC, dobC, statusC,
+		profilePicUrl, phoneHash, provider, emailVerifiedAt).Scan(&userID)
 	if err != nil {
 		authEnvErr(w, 500, "server_error", "Could not create profile")
 		return
@@ -1701,8 +1802,8 @@ func authProfileInit(w http.ResponseWriter, r *http.Request) {
 	// Onboarding continues with /security-questions/save and /mpin/set, both of
 	// which write credentials keyed on a body userId. Neither can require a JWT
 	// (there is no session until the MPIN exists), so they take THIS ticket
-	// instead — minted only here, only after the email OTP proved ownership,
-	// and bound to the id we just created. Without it those two endpoints hand
+	// instead — minted only here, only after an OTP (phone, or email on the
+	// older client) proved ownership, and bound to the id we just created. Without it those two endpoints hand
 	// any caller another user's account.
 	setupTicket, err := vault.SignTicket(authSetupTicketData(userID), 900)
 	if err != nil {
@@ -1891,7 +1992,7 @@ func authMpinVerify(w http.ResponseWriter, r *http.Request) {
 		if reset == 0 {
 			reset = 900
 		}
-		authEnvErr(w, http.StatusLocked, "locked", fmt.Sprintf("Too many attempts. Try again in %ds", reset))
+		authEnvErrRetry(w, http.StatusLocked, "locked", fmt.Sprintf("Too many attempts. Try again in %ds", reset), reset)
 		return
 	}
 
@@ -1970,7 +2071,7 @@ func authSecurityQuestionsVerify(w http.ResponseWriter, r *http.Request) {
 		if reset == 0 {
 			reset = 900
 		}
-		authEnvErr(w, http.StatusLocked, "locked", fmt.Sprintf("Too many attempts. Try again in %ds", reset))
+		authEnvErrRetry(w, http.StatusLocked, "locked", fmt.Sprintf("Too many attempts. Try again in %ds", reset), reset)
 		return
 	}
 

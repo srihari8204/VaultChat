@@ -43,7 +43,7 @@ export default function OnboardMpin() {
   // Once onConfirm starts, three writes are in flight (profile/init → security
   // questions → mpin/set) and the screen that owns the redirect to
   // /onboard-success is this one: leaving mid-commit creates the account with
-  // nobody to hand it to, and the retry then fails as "email already
+  // nobody to hand it to, and the retry then fails as "mobile number already
   // registered". So back is swallowed for those few seconds only.
   useEffect(() => {
     const sub = BackHandler.addEventListener('hardwareBackPress', () => busy);
@@ -67,7 +67,8 @@ export default function OnboardMpin() {
     try {
       const st = onboarding.get();
       const { userId, setupTicket } = await initProfile({
-        email: st.email, phone: st.phone, emailTicket: st.emailTicket,
+        phone: st.phone, phoneTicket: st.phoneTicket,
+        email: st.email || undefined,           // optional recovery address, or nothing at all
         firstName: st.firstName, lastName: st.lastName, dob: st.dob, status: st.status,
         profilePicUrl: st.profilePicUrl,
       });

@@ -33,6 +33,7 @@ import { type Palette } from '../constants/theme';
 import { useTheme } from '../lib/theme';
 import { readCache, writeCache } from '../lib/localCache';
 import { getAccessToken } from '../lib/api';
+import { initialOf } from '../lib/format';
 import {
   attachmentUrl,
   clearGhostMode,
@@ -129,7 +130,7 @@ function ListView() {
               activeOpacity={0.7}
               onPress={() => router.push({
                 pathname: '/ghost-mode' as any,
-                params: { targetId: item.targetId, targetName: item.name ?? item.email ?? '' },
+                params: { targetId: item.targetId, targetName: item.name || item.email || '' },
               })}
             >
               <View style={S.avatar}>
@@ -139,7 +140,7 @@ function ListView() {
                     style={S.avatarImg}
                   />
                 ) : (
-                  <Text style={S.avatarTxt}>{(item.name || item.email || '?').trim()[0].toUpperCase()}</Text>
+                  <Text style={S.avatarTxt}>{initialOf(item.name, item.email)}</Text>
                 )}
               </View>
               <View style={{ flex: 1 }}>

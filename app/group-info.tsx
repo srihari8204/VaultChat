@@ -35,6 +35,7 @@ import { type Palette } from '../constants/theme';
 import { useTheme } from '../lib/theme';
 import { getCurrentUserAsync } from './(constants)/authService';
 import { getAccessToken } from '../lib/api';
+import { initialOf } from '../lib/format';
 import { readCache, writeCache } from '../lib/localCache';
 import {
   attachmentUrl,
@@ -534,7 +535,11 @@ function MemberRow({
   const { colors } = useTheme();
   const isMe = member.userId === meId;
   const showRemove = isAdmin && !isMe && member.role !== 'owner';
-  const letter = (member.name?.trim()[0] || member.email?.trim()[0] || '?').toUpperCase();
+  const letter = initialOf(member.name, member.email);
+  // A member with no name and no email used to be shown as eight hex digits of
+  // their user id — which reads as a bug, not as a person. Email is optional now,
+  // so this is an ordinary row, and it says so in words.
+  const display = member.name?.trim() || member.email?.trim() || 'crazzychat user';
   return (
     <View style={S.memberRow}>
       <View style={S.memberAvatarWrap}>
@@ -552,13 +557,17 @@ function MemberRow({
       </View>
       <View style={{ flex: 1 }}>
         <Text style={S.memberName} numberOfLines={1}>
-          {member.name || member.email || member.userId.slice(0, 8)}
+          {display}
           {isMe && <Text style={S.memberMeTag}> (you)</Text>}
         </Text>
-        <Text style={S.memberSub} numberOfLines={1}>
-          {member.role !== 'member' && `${member.role} · `}
-          {member.email || member.userId.slice(0, 12)}
-        </Text>
+        {/* Sub-line only when there is something to say. Without an email it was
+            a second UUID fragment under the first — noise, not information. */}
+        {(member.role !== 'member' || !!member.email) && (
+          <Text style={S.memberSub} numberOfLines={1}>
+            {member.role !== 'member' && `${member.role}${member.email ? ' · ' : ''}`}
+            {member.email}
+          </Text>
+        )}
       </View>
       {showRemove && (
         <TouchableOpacity onPress={onRemove} style={S.removeBtn} activeOpacity={0.7}>

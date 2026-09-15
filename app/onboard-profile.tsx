@@ -1,7 +1,14 @@
-// app/onboard-profile.tsx — new-user profile. Email + mobile prefilled & disabled;
-// DOB (age ≥ 13); first/last name prefilled from Google, editable; status (≤139,
+// app/onboard-profile.tsx — new-user profile. Mobile is display-only (it is the
+// verified identity and cannot be edited here); EMAIL IS OPTIONAL and editable,
+// kept only as a recovery address; DOB (age ≥ 13); first/last name; status (≤139,
 // emoji allowed). "Next" → security questions. Nothing is sent yet — all held in
 // the in-memory onboarding store until /auth/profile/init at the end of the chain.
+//
+// The email field used to sit at the top, greyed out, showing the address the
+// user had just proven by OTP. It is now the only field on the screen that can
+// be left blank on purpose, so it sits below the number it no longer outranks
+// and says what it is for — an unlabelled optional field reads as a required
+// one somebody forgot to mark.
 //
 // Step 1 of 3 of the sign-up chain, and it stays on the night ground the landing
 // form established: the palette is fixed, not themed. See the always-dark note
@@ -31,11 +38,13 @@ function ageOf(d: Date): number {
   return a;
 }
 const iso = (d: Date) => d.toISOString().slice(0, 10);
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 export default function OnboardProfile() {
   const router = useRouter();
   const st = onboarding.get();
 
+  const [email, setEmail] = useState(st.email);
   const [firstName, setFirstName] = useState(st.firstName);
   const [lastName, setLastName] = useState(st.lastName);
   const [status, setStatus] = useState(st.status);
@@ -67,11 +76,15 @@ export default function OnboardProfile() {
   });
 
   const ageOk = !!dob && ageOf(dob) >= 13;
-  const valid = firstName.trim().length > 0 && ageOk;
+  // Blank is fine; typed-and-wrong is not. A recovery address with a typo in it
+  // is worse than none — it looks like a way back in until the day it is needed.
+  const emailOk = !email.trim() || EMAIL_RE.test(email.trim());
+  const valid = firstName.trim().length > 0 && ageOk && emailOk;
 
   const next = () => {
     if (!valid || !dob) return;
     onboarding.set({
+      email: email.trim().toLowerCase(),
       firstName: firstName.trim(), lastName: lastName.trim(),
       status: status.slice(0, 139), dob: iso(dob),
     });
@@ -119,11 +132,23 @@ export default function OnboardProfile() {
           {/* One card, not nine loose fields — the whole thing is a single
               question ("who are you"), same as the landing form. */}
           <View style={s.card}>
-            <Text style={s.labelFirst}>EMAIL</Text>
-            <TextInput style={[s.input, s.disabled]} value={st.email} editable={false} />
-
-            <Text style={s.label}>MOBILE</Text>
+            {/* Verified, and the account's identity — not editable here. */}
+            <Text style={s.labelFirst}>MOBILE</Text>
             <TextInput style={[s.input, s.disabled]} value={st.phone} editable={false} />
+
+            <Text style={s.label}>EMAIL (OPTIONAL) — FOR ACCOUNT RECOVERY</Text>
+            <TextInput
+              style={s.input}
+              value={email}
+              onChangeText={setEmail}
+              placeholder="you@example.com"
+              placeholderTextColor={AUTH.faint}
+              keyboardType="email-address"
+              autoCapitalize="none"
+              autoCorrect={false}
+              inputMode="email"
+            />
+            {!emailOk && <Text style={s.warn}>That doesn’t look like an email address.</Text>}
 
             <View style={s.rowTwo}>
               <View style={{ flex: 1 }}>

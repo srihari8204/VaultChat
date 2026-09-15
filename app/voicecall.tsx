@@ -640,7 +640,7 @@ function VoiceCallLegacy() {
             from: meIdRef.current,
             chatId,
             type: 'audio',
-            callerName: me.name ?? me.email ?? 'crazzychat user',
+            callerName: me.name || me.email || 'crazzychat user',
             offer: offerWire,
           };
           s.emit('call_incoming', ringPayload);

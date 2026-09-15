@@ -244,3 +244,44 @@ func Reset(ctx context.Context, key string) {
 		Client.Del(ctx, "rl:"+key)
 	}
 }
+
+// ── A small expiring key/value store ────────────────────────────────────
+//
+// The limiter owns the "rl:" keyspace and never hands a value back, so the
+// MSG91 OTP flow — which must hold the provider's request id from send until
+// verify — had nothing here to use.
+//
+// These deliberately report errors instead of failing open like Consume does.
+// The trade Consume makes ("a cache outage must not lock users out") is the
+// WRONG one for this: a request id that was never stored means the code the
+// user is about to receive can never be verified, so the honest move is to
+// fail the send and let them retry, not to send an SMS into the void.
+func SetEx(ctx context.Context, key, val string, ttlSec int64) error {
+	if Client == nil {
+		return fmt.Errorf("redisx: no client")
+	}
+	return Client.Set(ctx, key, val, time.Duration(ttlSec)*time.Second).Err()
+}
+
+// GetKey returns "" with a nil error when the key is absent or expired — an
+// expiry is a normal outcome here, not a fault, and every caller has to handle
+// "gone" anyway.
+func GetKey(ctx context.Context, key string) (string, error) {
+	if Client == nil {
+		return "", fmt.Errorf("redisx: no client")
+	}
+	v, err := Client.Get(ctx, key).Result()
+	if err == redis.Nil {
+		return "", nil
+	}
+	return v, err
+}
+
+// DelKey is best-effort: it is used to burn a single-use token after it has
+// already been accepted, and by then the caller has nothing useful to do with
+// a failure except let the TTL finish the job.
+func DelKey(ctx context.Context, key string) {
+	if Client != nil {
+		Client.Del(ctx, key)
+	}
+}

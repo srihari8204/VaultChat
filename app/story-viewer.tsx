@@ -33,6 +33,7 @@ import {
 import { useTheme } from '../lib/theme';
 import { type Palette } from '../constants/theme';
 import { getAccessToken } from '../lib/api';
+import { initialOf } from '../lib/format';
 import {
   attachmentUrl,
   deleteStory,
@@ -576,12 +577,12 @@ function StoryViewerScreen() {
                     />
                   ) : (
                     <Text style={S.viewerAvatarTxt}>
-                      {(v.name ?? v.email ?? '?').trim()[0].toUpperCase()}
+                      {initialOf(v.name, v.email)}
                     </Text>
                   )}
                 </View>
                 <Text style={S.viewerName} numberOfLines={1}>
-                  {v.name ?? v.email ?? v.userId.slice(0, 8)}
+                  {v.name || v.email || v.userId.slice(0, 8)}
                 </Text>
                 <Text style={S.viewerWhen}>{formatAgo(v.viewedAt)}</Text>
               </View>

@@ -1,25 +1,34 @@
 // lib/onboarding.ts — client for the encrypted onboarding backend + a tiny
 // in-memory store carried across the auth screens.
 //
-// The store holds onboarding-in-progress data (email, phone, names, dob, status,
+// IDENTITY IS THE MOBILE NUMBER, AND ONLY THE MOBILE NUMBER.
+//
+// Email used to be the login factor: the landing screen asked for both, the OTP
+// went to the inbox, and /auth/profile/init would not accept an account without
+// an emailTicket. That put a Google account (or a working mail server, or a spam
+// folder that behaved) between a person and their own phone. The WhatsApp model
+// is one factor the user is already holding — the SIM — so email is now nothing
+// but an optional recovery address, collected on the profile step and provable
+// later or never.
+//
+// The store holds onboarding-in-progress data (phone, email, names, dob, status,
 // answers, mpin). It is RAM-only and MUST be cleared on success — plaintext MPIN
 // and answers never touch disk. (The app has no Zustand; this module singleton
 // fills the same role the spec's useOnboardingStore would.)
 
-import { GoogleSignin, statusCodes } from '@react-native-google-signin/google-signin';
 import * as FileSystem from 'expo-file-system/legacy';
 import { gcm } from '@noble/ciphers/aes.js';
 import { randomBytes, bytesToHex } from '@noble/hashes/utils.js';
 import { Buffer } from 'buffer';
 import { api, setTokens, setCachedUser } from './api';
 import { uploadAttachment } from './chatService';
-import { configureGoogleSignIn } from '../app/(constants)/authService';
 
 // ── In-memory onboarding store ──────────────────────────────────────────────
 export interface OnboardingState {
-  email: string;
-  phone: string;
-  emailTicket: string;        // proof email was OTP-verified
+  phone: string;              // E.164 — the identity
+  phoneTicket: string;        // proof the number was SMS-OTP-verified
+  otpResendInSec: number;     // server's cooldown, handed to the OTP screen
+  email: string;              // OPTIONAL recovery address, collected on the profile step
   firstName: string;
   lastName: string;
   dob: string;                // ISO yyyy-mm-dd
@@ -33,7 +42,7 @@ export interface OnboardingState {
 
 function blank(): OnboardingState {
   return {
-    email: '', phone: '', emailTicket: '', firstName: '', lastName: '',
+    phone: '', phoneTicket: '', otpResendInSec: 0, email: '', firstName: '', lastName: '',
     dob: '', status: '', profilePicLocalUri: null, profilePicUrl: null,
     securityAnswers: [], mpin: '', userId: null,
   };
@@ -47,95 +56,87 @@ export const onboarding = {
   reset: () => { _state = blank(); },
 };
 
-// ── Google account picker (no auto-auth) ────────────────────────────────────
-// Opens the Google account chooser and returns the profile WITHOUT exchanging
-// for our JWT — the new flow authenticates via email-OTP + MPIN, not /auth/google.
-export interface GoogleAccount { email: string; firstName: string; lastName: string; photoURL: string | null }
-
-export async function pickGoogleAccount(): Promise<GoogleAccount> {
-  // This used to work only because app/_layout.tsx configured the SDK at boot.
-  // That call is gone (it put google-signin on every cold start), so configure
-  // here — the one authority on the web client id is authService; a second copy
-  // of it is how a DEVELOPER_ERROR gets shipped.
-  configureGoogleSignIn();
-  await GoogleSignin.hasPlayServices({ showPlayServicesUpdateDialog: true });
-  try { await GoogleSignin.signOut(); } catch { /* force the chooser to show */ }
-  let res: any;
-  try {
-    res = await GoogleSignin.signIn();
-  } catch (e: any) {
-    if (e?.code === statusCodes.SIGN_IN_CANCELLED) throw new Error('Cancelled');
-    if (e?.code === statusCodes.PLAY_SERVICES_NOT_AVAILABLE) throw new Error('Google Play Services not available');
-    throw new Error(e?.message ?? 'Google sign-in failed');
-  }
-  // v13+ returns { type: 'success' | 'cancelled' | 'noSavedCredential', data }.
-  // Treat a dismissed chooser as a clean cancel (not a hard error).
-  if (res?.type === 'cancelled' || res?.type === 'noSavedCredential') throw new Error('Cancelled');
-  const u = res?.data?.user ?? res?.user ?? {};   // v13+: data.user; legacy: user
-  if (!u.email) throw new Error('Could not read the account email');
-  return {
-    email: u.email,
-    firstName: u.givenName ?? (u.name ? String(u.name).split(' ')[0] : ''),
-    lastName: u.familyName ?? '',
-    photoURL: u.photo ?? null,
-  };
-}
-
 // ── Backend calls (error envelope { error: { code, message } }) ──────────────
 /**
  * A THROTTLED SIGN-IN MUST SAY SO, AND SAY FOR HOW LONG.
  *
- * OTP sends are capped at 3 per hour per address (auth.go, "otp:email:"), and
- * both 429 shapes carry the wait: `retryAfter` seconds at the top level, or
+ * OTP sends are capped per number per hour, and both 429 shapes carry the wait:
+ * `retryAfter` seconds at the top level, or
  * inside `error`. Neither was ever read. So the landing screen showed a bare
  * "Too many requests. Try again later." with no duration and no cause — and the
  * one thing a person does with that message is press the button again, which
  * spends another of the three and pushes the reset further out.
  *
  * That is how somebody ends up locked out for an hour having never once reached
- * the code-entry screen: `sendEmailOtp` throws, so the `router.push` after it in
+ * the code-entry screen: `sendPhoneOtp` throws, so the `router.push` after it in
  * app/onboard.tsx never runs, and the alert gives no reason to stop tapping.
  *
- * Naming the minutes is the whole fix — it converts "broken" into "wait", and
- * points at Google sign-in, which is a different code path and not throttled.
+ * Naming the minutes is the whole fix — it converts "broken" into "wait". The
+ * copy used to end by offering Google sign-in as the way in; there is no such
+ * way in any more, and pointing at a door that does not exist is worse than
+ * saying nothing. The OTP screen turns the same seconds into a live countdown.
  */
 function msg(e: any, fallback: string): string {
   const base = e?.body?.error?.message || e?.message || fallback;
   if (e?.status !== 429 && e?.status !== 423) return base;
 
-  const secs = Number(e?.body?.retryAfter ?? e?.body?.error?.retryAfter ?? 0);
-  if (!Number.isFinite(secs) || secs <= 0) {
-    return `${base}\n\nToo many sign-in attempts. Wait a little before trying again, or continue with Google instead.`;
-  }
+  const secs = retryAfterSec(e);
+  if (!secs) return `${base}\n\nToo many attempts. Wait a little before asking for another code.`;
+
   const mins = Math.ceil(secs / 60);
   const wait = mins >= 60
     ? `${Math.ceil(mins / 60)} hour${Math.ceil(mins / 60) === 1 ? '' : 's'}`
     : `${mins} minute${mins === 1 ? '' : 's'}`;
-  return `Too many sign-in attempts. Try again in about ${wait}.\n\nTrying again before then only extends the wait — use "Continue with Google" if you need in now.`;
+  return `Too many attempts. Try again in about ${wait}.\n\nAsking again before then only extends the wait.`;
 }
 
-export async function sendEmailOtp(email: string): Promise<void> {
-  await api('/auth/onboard/send-otp', { method: 'POST', json: { email }, auth: false });
+/** Seconds the server says to wait, off a 429/423 envelope; 0 when it did not say. */
+export function retryAfterSec(e: any): number {
+  const s = Number(e?.body?.retryAfter ?? e?.body?.error?.retryAfter ?? 0);
+  return Number.isFinite(s) && s > 0 ? s : 0;
 }
 
-export async function verifyEmailOtp(email: string, code: string): Promise<string> {
-  const r = await api<{ ok: true; emailTicket: string }>('/auth/onboard/verify-otp', {
-    method: 'POST', json: { email, code }, auth: false,
+export type OtpChannel = 'sms' | 'voice' | 'whatsapp';
+
+// The send calls return the server's resend cooldown so the OTP screen counts
+// down the REAL number instead of guessing 30s — guessing is how the button
+// goes live early and spends one of the few allowed sends on a certain 429.
+const FALLBACK_RESEND_SEC = 30;
+
+export async function sendPhoneOtp(phone: string): Promise<number> {
+  const r = await api<{ ok: true; resendInSec?: number }>('/auth/onboard/send-otp-phone', {
+    method: 'POST', json: { phone }, auth: false,
   });
-  return r.emailTicket;
+  return r.resendInSec ?? FALLBACK_RESEND_SEC;
 }
 
-export async function lookupUser(email: string, phone: string): Promise<{ exists: boolean; userId?: string; conflict?: 'phone' | 'email' }> {
-  return api('/auth/lookup', { method: 'POST', json: { email, phone }, auth: false });
+export async function resendPhoneOtp(phone: string, channel: OtpChannel = 'sms'): Promise<number> {
+  const r = await api<{ ok: true; resendInSec?: number }>('/auth/onboard/resend-otp-phone', {
+    method: 'POST', json: { phone, channel }, auth: false,
+  });
+  return r.resendInSec ?? FALLBACK_RESEND_SEC;
+}
+
+export async function verifyPhoneOtp(phone: string, code: string): Promise<string> {
+  const r = await api<{ ok: true; phoneTicket: string }>('/auth/onboard/verify-otp-phone', {
+    method: 'POST', json: { phone, code }, auth: false,
+  });
+  return r.phoneTicket;
+}
+
+// Email is OMITTED rather than sent empty when there isn't one: '' is not "no
+// address" to a uniqueness check, and every account would collide on it.
+export async function lookupUser(phone: string, email?: string): Promise<{ exists: boolean; userId?: string; conflict?: 'phone' | 'email' }> {
+  return api('/auth/lookup', { method: 'POST', json: email ? { phone, email } : { phone }, auth: false });
 }
 
 // Returns the new userId AND a short-lived setup ticket bound to it. The two
 // calls that follow write credentials but cannot send a JWT — there is no
 // session until the MPIN exists — so the ticket is what proves to the server
-// that this client is the one that just passed the email OTP. Carry it to both
+// that this client is the one that just passed the SMS OTP. Carry it to both
 // of them; without it they now 401.
 export async function initProfile(input: {
-  email: string; phone: string; emailTicket: string;
+  phone: string; phoneTicket: string; email?: string;
   firstName: string; lastName: string; dob: string; status: string; profilePicUrl?: string | null;
 }): Promise<{ userId: string; setupTicket: string }> {
   const r = await api<{ userId: string; setupTicket: string }>('/auth/profile/init', { method: 'POST', json: input, auth: false });

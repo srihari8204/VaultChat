@@ -31,6 +31,7 @@ import {
 import { SERVER_URL } from '../constants/server';
 import { initUsageCounter, setUsageCounterEnabled, usageCounterEnabled } from '../lib/usageCounter';
 import { api, getAccessToken } from '../lib/api';
+import { initialOf } from '../lib/format';
 import { getAutoDownload, setAutoDownload, type AutoDownloadPolicy } from '../lib/mediaPrefs';
 import { getSaveToGallery, setSaveToGallery } from '../lib/galleryExport';
 import { useTheme, type ThemePref } from '../lib/theme';
@@ -234,7 +235,7 @@ export default function SettingsScreen() {
           {profile?.photoURL && authHeader ? (
             <Image source={{ uri: attachmentUrl(profile.photoURL), headers: { Authorization: authHeader } }} style={S.profileAvatarImg} />
           ) : (
-            <Text style={S.profileAvatarTxt}>{(profile?.name || profile?.email || '?').trim()[0].toUpperCase()}</Text>
+            <Text style={S.profileAvatarTxt}>{initialOf(profile?.name, profile?.email)}</Text>
           )}
         </View>
         <View style={{ flex: 1 }}>
@@ -438,7 +439,7 @@ export default function SettingsScreen() {
                     style={S.blockAvatarImg}
                   />
                 ) : (
-                  <Text style={S.blockAvatarTxt}>{(u.name || u.email || '?').trim()[0].toUpperCase()}</Text>
+                  <Text style={S.blockAvatarTxt}>{initialOf(u.name, u.email)}</Text>
                 )}
               </View>
               <View style={{ flex: 1 }}>

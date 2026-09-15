@@ -24,7 +24,7 @@ import { HEADER_TOP } from '../constants/layout';
 import { type Palette } from '../constants/theme';
 import { useTheme } from '../lib/theme';
 import { api } from '../lib/api';
-import { identityMatches } from '../lib/confirmIdentity';
+import { identityMatches, type AccountIdentity } from '../lib/confirmIdentity';
 import { deleteAccount } from '../lib/chatService';
 import { unregisterPushToken } from '../lib/push';
 import { disconnect as disconnectSocket } from '../lib/socket';
@@ -56,7 +56,7 @@ export default function DeleteAccountScreen() {
   const { colors } = useTheme();
   const S = useS();
 
-  const [me, setMe] = useState<{ phone?: string; email?: string } | null>(null);
+  const [me, setMe] = useState<AccountIdentity | null>(null);
   const [loadErr, setLoadErr] = useState(false);
   const [typed, setTyped] = useState('');
   const [reason, setReason] = useState<string | null>(null);
@@ -66,16 +66,25 @@ export default function DeleteAccountScreen() {
     setLoadErr(false);
     try {
       const u: any = await api('/user/profile');
-      setMe({ phone: u?.phone || undefined, email: u?.email || undefined });
+      const id: AccountIdentity = {
+        phone: u?.phone || undefined, email: u?.email || undefined, vaultId: u?.vaultId || undefined,
+      };
+      // Nothing to confirm against is a FAILED LOAD, not an account that cannot
+      // be deleted. Rendering the form anyway leaves a button that can never
+      // arm; the retry at least has a way forward.
+      if (!id.phone && !id.email && !id.vaultId) { setLoadErr(true); return; }
+      setMe(id);
     } catch {
       setLoadErr(true);
     }
   }, []);
   useEffect(() => { load(); }, [load]);
 
-  // Phone if there is one, email otherwise — confirm with whatever identifies
-  // the account to its owner.
-  const byPhone = !!me?.phone;
+  // Whatever identifies the account to its owner, in the order confirmIdentity
+  // checks it: phone (the account, since sign-in is mobile-only), then email for
+  // accounts that predate that, then the @handle.
+  const mode: 'phone' | 'email' | 'vaultId' = me?.phone ? 'phone' : me?.email ? 'email' : 'vaultId';
+  const byPhone = mode === 'phone';
 
   const armed = useMemo(() => identityMatches(me, typed), [me, typed]);
 
@@ -152,13 +161,14 @@ export default function DeleteAccountScreen() {
         ) : (
           <>
             <Text style={S.sectionLabel}>
-              {byPhone ? 'CONFIRM YOUR PHONE NUMBER' : 'CONFIRM YOUR EMAIL'}
+              {mode === 'phone' ? 'CONFIRM YOUR PHONE NUMBER'
+                : mode === 'email' ? 'CONFIRM YOUR EMAIL' : 'CONFIRM YOUR VAULTID'}
             </Text>
             <TextInput
               style={S.input}
               value={typed}
               onChangeText={setTyped}
-              placeholder={byPhone ? 'Your number' : 'you@example.com'}
+              placeholder={mode === 'phone' ? 'Your number' : mode === 'email' ? 'you@example.com' : '@yourvaultid'}
               placeholderTextColor={colors.textFaint}
               keyboardType={byPhone ? 'phone-pad' : 'email-address'}
               autoCapitalize="none"
@@ -166,9 +176,11 @@ export default function DeleteAccountScreen() {
               editable={!busy}
             />
             <Text style={S.hint}>
-              {byPhone
+              {mode === 'phone'
                 ? 'Type the number on this account to turn on the button below.'
-                : 'Type the email on this account to turn on the button below.'}
+                : mode === 'email'
+                  ? 'Type the email on this account to turn on the button below.'
+                  : 'Type your VaultID — it is on your Profile — to turn on the button below.'}
             </Text>
 
             <Text style={S.sectionLabel}>WHY ARE YOU LEAVING? (OPTIONAL)</Text>

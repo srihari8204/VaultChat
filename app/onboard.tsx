@@ -1,9 +1,14 @@
-// app/onboard.tsx — Landing: mobile + email → /auth/lookup → branch.
+// app/onboard.tsx — Landing: MOBILE NUMBER ONLY → /auth/lookup → branch.
 //   exists  → /mpin-entry (existing user enters MPIN)
-//   new     → email OTP (/email-verify) → profile → security → mpin → success
+//   new     → SMS OTP (/email-verify) → profile → security → mpin → success
 //
-// Email comes from the Google account picker but stays editable; ownership is
-// proven by the email OTP before any account is created.
+// ONE FIELD, BECAUSE THERE IS ONE IDENTITY.
+//
+// This screen used to ask for an email beside the number and send the code to
+// the inbox — which put a Google account, a reachable mail server and a
+// well-behaved spam folder between a person and an app they were holding the
+// SIM for. The number is the account now; email is optional recovery info
+// collected two screens later. See the header of lib/onboarding.ts.
 //
 // THE SCREEN IS THE SPLASH, CONTINUED.
 //
@@ -20,41 +25,37 @@ import {
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { BRAND_GRADIENT_CTA } from '../constants/theme';
-import { EmailAccountPicker } from '../components/auth/EmailAccountPicker';
 import { PhoneField, toE164 } from '../components/auth/PhoneField';
-import { lookupUser, onboarding, sendEmailOtp, onboardingError } from '../lib/onboarding';
+import { lookupUser, onboarding, sendPhoneOtp, onboardingError } from '../lib/onboarding';
 import { AuthSky, BrandMark, KeyboardSafe } from '../components/ui';
 import { AUTH } from '../constants/authTheme';
-
-const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 export default function OnboardLanding() {
   const router = useRouter();
 
   const [dialCode, setDialCode] = useState('+91');
   const [national, setNational] = useState('');
-  const [email, setEmail] = useState('');
   const [busy, setBusy] = useState(false);
 
   const e164 = toE164(dialCode, national);
-  const emailOk = EMAIL_RE.test(email.trim());
-  const valid = !!e164 && emailOk;
+  const valid = !!e164;
 
   const onContinue = async () => {
     if (!valid || busy) return;
     setBusy(true);
     try {
-      const cleanEmail = email.trim().toLowerCase();
-      onboarding.set({ email: cleanEmail, phone: e164 });
-      const r = await lookupUser(cleanEmail, e164);
+      onboarding.set({ phone: e164 });
+      const r = await lookupUser(e164);
       if (r.exists && r.userId) {
         router.push({ pathname: '/mpin-entry', params: { userId: r.userId } } as any);
-      } else if (r.conflict === 'phone') {
-        Alert.alert('Mobile already registered', 'This mobile number is already registered with another email account. Use that email, or a different mobile number.');
-      } else if (r.conflict === 'email') {
-        Alert.alert('Email already registered', 'This email is already registered with another mobile number. Use that mobile number, or a different email.');
+      } else if (r.conflict) {
+        // Phone-only lookup makes 'exists' and a phone conflict the same thing,
+        // so this only fires if the server starts reporting one some other way.
+        Alert.alert('Number unavailable', 'This mobile number can’t be used to sign up. Try a different number.');
       } else {
-        await sendEmailOtp(cleanEmail);
+        // The cooldown rides in the store rather than a route param: the nav
+        // self-test pins this call to `router.push('/email-verify'` exactly.
+        onboarding.set({ otpResendInSec: await sendPhoneOtp(e164) });
         router.push('/email-verify' as any);
       }
     } catch (e: any) {
@@ -72,22 +73,12 @@ export default function OnboardLanding() {
         <ScrollView contentContainerStyle={s.body} keyboardShouldPersistTaps="handled">
           <BrandMark size={92} tagline style={{ marginBottom: 34 }} />
 
-          {/* ONE CARD, NOT TWO LOOSE FIELDS. The pair is a single question —
-              "who are you" — and boxing them together is what stops the screen
-              reading as a form with a logo parked above it. */}
+          {/* The card stays even though it now holds one field: it is what
+              stops the screen reading as a form with a logo parked above it,
+              and the email half is gone, not moved. */}
           <View style={s.card}>
             <Text style={s.label}>MOBILE NUMBER</Text>
-            <PhoneField dialCode={dialCode} national={national} onChange={(d, n) => { setDialCode(d); setNational(n); }} onDark />
-
-            <View style={s.rule} />
-
-            <Text style={s.label}>EMAIL</Text>
-            <EmailAccountPicker
-              email={email}
-              onEmailChange={setEmail}
-              onAccountPicked={(a) => onboarding.set({ firstName: a.firstName, lastName: a.lastName })}
-              onDark
-            />
+            <PhoneField dialCode={dialCode} national={national} onChange={(d, n) => { setDialCode(d); setNational(n); }} onDark autoFocus />
           </View>
 
           {/* The one gradient on the screen, so it reads as THE action. Runs
@@ -97,7 +88,7 @@ export default function OnboardLanding() {
             onPress={onContinue}
             disabled={!valid || busy}
             accessibilityRole="button"
-            accessibilityLabel="Sign in or create an account"
+            accessibilityLabel="Next, send a code to this number"
             accessibilityState={{ disabled: !valid || busy, busy }}
             style={({ pressed }) => [s.ctaWrap, !valid && s.ctaOff, pressed && valid && s.ctaDown]}
           >
@@ -107,11 +98,11 @@ export default function OnboardLanding() {
               end={{ x: 1, y: 1 }}
               style={s.cta}
             >
-              {busy ? <ActivityIndicator color="#fff" /> : <Text style={s.ctaTxt}>Sign In / Continue</Text>}
+              {busy ? <ActivityIndicator color="#fff" /> : <Text style={s.ctaTxt}>Next</Text>}
             </LinearGradient>
           </Pressable>
 
-          <Text style={s.note}>We’ll text nothing — a one-time code goes to your email to confirm it’s you.</Text>
+          <Text style={s.note}>We’ll send a 6-digit code by SMS to confirm this number is yours. Carrier charges may apply.</Text>
         </ScrollView>
       </KeyboardSafe>
     </View>
@@ -129,9 +120,6 @@ const s = StyleSheet.create({
     borderRadius: 22,
     padding: 18,
   },
-  // Separates the two fields without the weight of a full divider row.
-  rule: { height: 1, backgroundColor: AUTH.hairline, marginVertical: 18 },
-
   label: {
     color: AUTH.dim, fontSize: 11, fontWeight: '800',
     letterSpacing: 1.2, marginBottom: 8,

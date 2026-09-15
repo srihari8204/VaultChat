@@ -29,10 +29,14 @@ import { unregisterPushToken } from '../../lib/push';
 import { disconnect as disconnectSocket } from '../../lib/socket';
 import { readCache, writeCache } from '../../lib/localCache';
 import { AuroraBackground } from '../../components/ui';
+import { initialOf } from '../../lib/format';
 
 interface UserProfile {
   id: string;
-  email: string;
+  // Optional, and usually absent: sign-in is mobile-only and email is a
+  // thing you may add later. Typing it as `string` made every screen below
+  // believe in a value the server does not send.
+  email?: string | null;
   name?: string | null;
   phone?: string | null;
   photoURL?: string | null;
@@ -246,7 +250,9 @@ export default function ProfileScreen() {
     );
   }
 
-  const avatarLetter = (profile?.name?.trim()[0] ?? profile?.email?.[0] ?? '?').toUpperCase();
+  // Phone is deliberately not in this chain: its first character is '+' or a
+  // digit, which is a worse avatar than the '?' placeholder.
+  const avatarLetter = initialOf(profile?.name, profile?.email);
 
   return (
     <View style={{ flex: 1 }}>
@@ -273,7 +279,11 @@ export default function ProfileScreen() {
           <View style={S.cameraBadge}><Ionicons name="camera" size={18} color="#fff" /></View>
         </TouchableOpacity>
         <Text style={S.nameBig} numberOfLines={1}>{name || 'Your name'}</Text>
-        <Text style={S.emailDisplay} numberOfLines={1}>{profile?.email}</Text>
+        {/* Phone is the account; email is optional. Show whichever exists
+            rather than an empty line where a subtitle used to be. */}
+        {!!(profile?.phone || profile?.email) && (
+          <Text style={S.emailDisplay} numberOfLines={1}>{profile?.phone || profile?.email}</Text>
+        )}
         {!!profile?.photoURL && (
           <TouchableOpacity onPress={onRemovePhoto} disabled={photoBusy} hitSlop={8}>
             <Text style={S.removePhotoTxt}>Remove photo</Text>
@@ -327,7 +337,7 @@ export default function ProfileScreen() {
           verified={verifyStep === 'done' || !!profile?.phone}
         />
       </View>
-      <Text style={S.cardHint}>Your phone lets others start a direct chat with you. Leave blank to stay email-only.</Text>
+      <Text style={S.cardHint}>Your phone number is your account — it is how people find you and start a direct chat.</Text>
 
       {/* CHANGING A NUMBER MOVES THE ACCOUNT — say so before they do it.
           Verifying a different number here is the change-number flow: the
@@ -371,7 +381,9 @@ export default function ProfileScreen() {
       {/* Account (secondary) */}
       <Text style={S.groupLabel}>ACCOUNT</Text>
       <View style={S.card}>
-        <InfoRow k="Email verified" v={profile?.emailVerifiedAt ? '✓ Yes' : '—'} />
+        {/* Only meaningful once there IS an email; without one this row was a
+            permanent em-dash that read like something had failed. */}
+        {!!profile?.email && <InfoRow k="Email verified" v={profile.emailVerifiedAt ? '✓ Yes' : 'No'} />}
         <InfoRow k="PIN set" v={profile?.hasPin ? '✓ Yes' : 'No'} />
         <InfoRow k="Faces enrolled" v={String(profile?.faceCount ?? 0)} />
         <InfoRow k="User ID" v={profile?.id ?? '—'} small />

@@ -29,7 +29,7 @@ const ROWS: { key: keyof UserSettings; icon: any; title: string; info: string }[
   { key: 'lastSeenVisible',     icon: 'time-outline',           title: 'Last Seen & Online', info: 'Let others see when you were last active and whether you are online.' },
   { key: 'readReceipts',        icon: 'checkmark-done-outline', title: 'Read Receipts',      info: 'Send read receipts. If off, you also stop seeing others’ read receipts.' },
   { key: 'profilePhotoVisible', icon: 'person-circle-outline',  title: 'Profile Photo',      info: 'Allow other people to see your profile photo.' },
-  { key: 'discoverable',        icon: 'search-outline',         title: 'Discoverable',       info: 'Allow people to find you by your phone number or email.' },
+  { key: 'discoverable',        icon: 'search-outline',         title: 'Discoverable',       info: 'Allow people to find you by your phone number, or by email if you added one.' },
 ];
 
 export default function LastSeenPrivacyScreen() {

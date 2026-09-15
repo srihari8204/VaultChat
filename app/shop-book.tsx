@@ -187,7 +187,7 @@ export default function ShopBookScreen() {
   useEffect(() => { (async () => {
     await initShopBookLang();
     const u = await getCurrentUserAsync().catch(() => null);
-    setMe({ id: u?.id ?? 'local', name: u?.name ?? u?.email ?? 'You' });
+    setMe({ id: u?.id ?? 'local', name: u?.name || u?.email || 'You' });
     try { setUnread((await SB.notifications()).unread); } catch {}
   })(); }, []);
 
