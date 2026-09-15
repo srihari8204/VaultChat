@@ -75,4 +75,23 @@ config.transformer.getTransformOptions = async () => ({
   },
 });
 
+// ─── Do not WATCH the Rust build output ──────────────────────────
+// Metro crashed on startup with
+//   ENOENT: no such file or directory, watch '...\rust\target\...\deps\rmeta7KChbg'
+// whenever a Gradle build was running at the same time. There are four cargo
+// target trees under services/ (crypto, nav, transport/rust-net, vaultbeam),
+// and cargo writes and deletes thousands of short-lived intermediates in them.
+// Metro's directory walker stats a file, then opens a watch on it a moment
+// later; on Windows the FallbackWatcher has no way to survive the file having
+// vanished in between, so the whole dev server exits.
+//
+// Nothing here is ever imported by JS — the Rust reaches the app as a prebuilt
+// .so through Gradle, never through the bundler — so excluding it costs
+// nothing and removes the race entirely. Matches both separators because this
+// is read on Windows and CI alike.
+const rustTargets = /[\\/]services[\\/][^\\/]+[\\/]rust[^\\/]*[\\/]target[\\/]/;
+config.resolver.blockList = config.resolver.blockList
+  ? [].concat(config.resolver.blockList, rustTargets)
+  : rustTargets;
+
 module.exports = config;
