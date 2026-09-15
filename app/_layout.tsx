@@ -138,7 +138,7 @@ loadRemoteFlags().catch(() => {});
 //
 // Module scope and NOT awaited, for the same reason as the line above: nothing
 // may wait on it. Until it resolves there is no install id, so every flag reads
-// OFF and the app uses the Socket.IO transport it uses today — which is also
+// OFF and the app uses the realtime transport it uses today — which is also
 // what it does if this never resolves at all. It cannot reject (initFeatureFlags
 // swallows everything); the .catch is there so a future edit cannot make an
 // unhandled rejection out of it. See docs/ROLLOUT_TRANSPORT.md.
@@ -376,7 +376,7 @@ function RootLayoutInner() {
       });
     };
 
-    // ── Incoming-call listener (Socket.IO) ──────────────────────────────
+    // ── Incoming-call listener (realtime) ──────────────────────────────
     const onIncoming = (data: any) => {
       if (!data?.from || !data?.chatId) return;
 

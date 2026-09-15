@@ -5,7 +5,7 @@
 //
 // WHAT THIS IS FOR
 // ----------------
-// Socket.IO remains available for live events. The optional CC-Wire submission
+// Realtime remains available for live events. The optional CC-Wire submission
 // path prefers the native Rust WebSocket carrier when the bridge is installed.
 //
 // THE TWO HALVES, AND WHY THEY ARE DIFFERENT SHAPES

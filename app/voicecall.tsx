@@ -1,7 +1,7 @@
 // app/voicecall.tsx — Day 6 voice call (audio-only WebRTC).
 //
 // Real peer-to-peer with our coturn relay fallback. Signaling rides on
-// the shared Socket.IO connection (events: webrtc_offer, webrtc_answer,
+// the shared realtime connection (events: webrtc_offer, webrtc_answer,
 // webrtc_ice, webrtc_end, call_incoming — defined in server.js).
 //
 // Route params:

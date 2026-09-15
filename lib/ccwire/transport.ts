@@ -9,7 +9,9 @@
 // the attempt and sequential HTTP fallback, preserving the same ciphertext and
 // clientId (the server's shared idempotency key). With app_events_v1 negotiated,
 // named inbound events go to the shared event facade. lib/socket.ts selects
-// this exclusive connection or legacy Socket.IO after closing this owner.
+// this exclusive connection. When the optional native Rust carrier is absent,
+// CC-Wire uses the platform WebSocket; durable submissions still keep HTTP
+// fallback through their existing outbox owners.
 //
 // NODE-IMPORTABLE ON PURPOSE. No react-native, no expo, no constants/*. The
 // server URL, the token reader and the clock come in as options, which is what
@@ -65,7 +67,7 @@ export interface StartCCWireOptions {
  * own backoff would happily retry that until the app is killed. Three strikes
  * turns "the route does not exist" into one short burst and then silence,
  * instead of a permanent background retry ladder on a handset whose messaging
- * is working fine over Socket.IO.
+ * is working fine over CC-Wire/WebSocket.
  *
  * Reset on every successful ServerHello, so a server that restarts mid-session
  * is a reconnect, not a strike.

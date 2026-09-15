@@ -3,7 +3,7 @@
 //! STATUS: NOT WIRED. No Gradle module includes this crate, no FFI is exposed
 //! yet, and nothing in the app or the Go backend imports it. It is Stage 1 of
 //! the rollout plan — "shared transport interface and conformance harness, with
-//! behaviour unchanged". The live transport is Socket.IO v4 over WebSocket with
+//! behaviour unchanged". The live transport is CC-Wire over WebSocket/WebTransport with
 //! JSON payloads and stays that way until a parity soak says otherwise.
 //!
 //! WHAT THIS CRATE IS FORBIDDEN FROM DOING, and why it has no dependencies yet:

@@ -164,7 +164,7 @@ export function getPushOutcome(): PushOutcome | null { return last; }
 //
 // WHAT WORKS TODAY ON A NO-GMS DEVICE
 //   Calls ring and connect normally whenever the app is running: signalling is a
-//   Socket.IO connection and media is peer-to-peer, neither of which involves
+//   realtime connection and media is peer-to-peer, neither of which involves
 //   Google. What does NOT work is the doorbell — waking a KILLED or DOZING app —
 //   because that is the one job FCM does. attemptRegister() classifies such a
 //   device `no_provider`, never retries it, and pushWarningText() explains the

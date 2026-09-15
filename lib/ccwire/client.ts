@@ -1,7 +1,7 @@
 // lib/ccwire/client.ts — the CC-Wire v1 dialer.
 //
 // Used by the opt-in lib/socket.ts transport branch. transport.ts owns
-// protobuf submission and HTTP fallback; Socket.IO owns inbound live events.
+// protobuf submission, inbound app events, and HTTP fallback.
 //
 // LAYERING, top to bottom:
 //   this file          dial, handshake, keepalive, reconnect, event surface

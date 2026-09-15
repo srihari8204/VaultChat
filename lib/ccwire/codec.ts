@@ -1,7 +1,7 @@
 // lib/ccwire/codec.ts — CC-Wire v1 protobuf codec for ccwire.v1.Frame.
 //
 // STATUS: NOT WIRED. Nothing imports this from the app. The live transport is
-// still Socket.IO v4 with JSON (lib/socket.ts). Stage 2, ISOLATED.
+// now CC-Wire app events. The codec remains isolated and parity-tested.
 //
 // Layering: lib/ccwire/frame.ts owns the length-prefixed envelope and hands up
 // an OPAQUE payload. This file is what turns that payload into a Frame. The

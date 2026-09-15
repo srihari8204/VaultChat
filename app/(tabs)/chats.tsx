@@ -1,6 +1,6 @@
 // app/(tabs)/chats.tsx — WhatsApp-style chat list (Obsidian Aurora).
 //
-// Postgres backend (/chats REST + Socket.IO new_message/presence). Swipe
+// Postgres backend (/chats REST + realtime new_message/presence). Swipe
 // right → Pin / Mute; swipe left → Archive / Delete(hide). Sticky "Pinned"
 // and "All Chats" sections. FAB → /new-chat. Data wiring (presence, folders,
 // pin/archive/mute/hidden, unread) is preserved from the previous version.
@@ -276,7 +276,7 @@ export default function ChatsScreen() {
         };
         // RESYNC ON RECONNECT — the list has no other way to learn what it missed.
         //
-        // Socket.IO does not replay events sent while a client was away, so a
+        // Realtime events do not replay every event sent while a client was away, so a
         // message that arrives during a drop (backgrounded, doze, a tunnel) is
         // simply never seen by this screen. The only other refresh triggers are
         // a socket event and useFocusEffect — and if the user is ALREADY sitting

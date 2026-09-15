@@ -5,7 +5,7 @@
 // these were already top-level functions, which is what made the cut safe.
 // MemoBubble's comparator deliberately ignores the function props; see it.
 
-// app/chat.tsx — Phase 3a message thread (Postgres + Socket.IO).
+// app/chat.tsx — Phase 3a message thread (Postgres + CC-Wire realtime).
 //
 // Loads:
 //   GET /chats/:id           — chat metadata + members (for sender names)

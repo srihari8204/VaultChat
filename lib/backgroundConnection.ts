@@ -3,7 +3,7 @@
 //
 // With no FCM there is nothing to wake a backgrounded app, so real-time delivery
 // needs the app's own socket to stay alive. A Notifee foreground service keeps
-// the process (and therefore lib/socket's Socket.IO connection) running while
+// the process (and therefore lib/socket's realtime connection) running while
 // the app is in the background, with a single silent MIN-importance notification
 // ("Keeping you connected") — exactly what WhatsApp shows on protected-app OEMs.
 //

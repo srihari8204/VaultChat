@@ -1,4 +1,4 @@
-// app/chat.tsx — Phase 3a message thread (Postgres + Socket.IO).
+// app/chat.tsx — Phase 3a message thread (Postgres + CC-Wire realtime).
 //
 // Loads:
 //   GET /chats/:id           — chat metadata + members (for sender names)
@@ -940,7 +940,7 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
       // a delete resolves with real=null; nothing to swap or cache here.
       if (!real) return;
       setMessages(prev => {
-        // If real already arrived via Socket.IO, drop the temp — but OVERWRITE
+        // If real already arrived via realtime, drop the temp — but OVERWRITE
         // the row that arrived with `real` rather than trusting it. The echo can
         // be a degraded copy (own message, plaintext not cached yet → content
         // null); keeping it and deleting the temp is what blanked sent messages.

@@ -2,7 +2,7 @@
 //
 // The expensive bug this exists to stop: a Wi-Fi→cellular switch leaves a
 // socket whose TCP connection is ALREADY DEAD but which nothing has told. It
-// still reports `connected === true`, so no retry starts. socket.io only finds
+// still reports `connected === true`, so no retry starts. the transport only finds
 // out when the server's ping goes unanswered — pingInterval 10s + pingTimeout
 // 5s (realtime/server.go) — so the banner sits on "Connecting…" for ~15s
 // before the first attempt, and reconnect backoff is added on top of that.

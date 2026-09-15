@@ -3,7 +3,7 @@ import { Ionicons } from '@expo/vector-icons';
 //
 // Opened from a chat. Three modes:
 //   • Current  — one-time snapshot (a location message in the chat)
-//   • Live     — a snapshot message + live position relayed over Socket.IO for
+//   • Live     — a snapshot message + live position relayed over realtime for
 //                a chosen duration; peers' open chat shows a live banner
 //   • Until I stop — live with no time limit
 // Real GPS via expo-location. Removed the fake "D2DE" stubs + false crypto
