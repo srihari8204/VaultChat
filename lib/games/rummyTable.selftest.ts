@@ -9,13 +9,26 @@
 import { readFileSync } from 'fs';
 import { join } from 'path';
 import { fanFor,
-  metrics, seatSpots, pileTop, actionBarWidth, SEAT_ROW3_MIN, handWidthAt, secondsLeft, ranked, activeCount,
+  metrics, seatSpots, pileTop, actionBarWidth, seatAvatar, seatHasDetail, SEAT_CHROME_H, SEAT_CHROME_BASE, handWidthAt, secondsLeft, ranked, activeCount,
   allowsBots, newPrivateCode, normalizeCode, CARD_RATIO, CARD_MIN, CARD_COMFORT, filterBySeats, pickTable,
   tableKind, filterByKind,
   type RummyPlayer, type TableInfo,
 } from './rummyTable';
 
 let failures = 0;
+/**
+ * Landscape table sizes to sweep the seat ring and the piles across.
+ *
+ * Real phones and tablets held sideways, plus the two the device reports have
+ * pinned over the years (732x369 "Honor", 820x369). Rummy plays landscape-only,
+ * so these are the widths that matter.
+ */
+const VIEWPORTS: [number, number][] = [
+  [568, 320], [640, 360], [732, 369], [800, 360], [820, 369],
+  [844, 390], [914, 412], [1024, 768], [2264, 1080],
+];
+const ZERO_INSETS = { top: 0, bottom: 0, left: 0, right: 0 };
+
 const check = (name: string, ok: boolean, detail = '') => {
   if (!ok) failures++;
   console.log(`  ${ok ? '✓' : '✗'} ${name}${!ok && detail ? `  (${detail})` : ''}`);
@@ -232,13 +245,41 @@ check('cards stay legible on the smallest screen', worstCard >= 32, `smallest ca
     Math.abs(seatSpots(1, 574, 189, HEADER)[0].x + seatSpots(1, 574, 189, HEADER)[0].w / 2 - 287) < 1);
   check('no seats when nobody is opposite', seatSpots(0, 574, 189, HEADER).length === 0);
 
-  // A capsule holds three rows only when it is tall enough for three: below
-  // this the card backs were drawn over the detail line. Proven in Figma at
-  // 640x360, where the capsule resolves to 48dp and three rows need 53.
-  const short = seatSpots(5, 640, 155, HEADER)[0];
-  const tall = seatSpots(5, 696, 543, HEADER)[0];
-  check('a short felt gets two-row capsules', short.h < SEAT_ROW3_MIN, `h=${short.h}`);
-  check('a tall felt gets three-row capsules', tall.h >= SEAT_ROW3_MIN, `h=${tall.h}`);
+  // THE CHECK THIS FILE WAS MISSING, and the reason a seat that overflowed its
+  // own border by 12-18dp at every single viewport passed every run.
+  //
+  // Everything above compares seat rects with OTHER seat rects. Nothing asked
+  // whether a seat can hold what is drawn inside it — so the capsule was capped
+  // at 58dp while its three rows needed about 72, and the card-back row painted
+  // onto bare felt below the rounded border, outside the gold turn ring. The
+  // renderer had the avatar sum, this file had the height cap, and the two
+  // disagreed by a whole row for as long as they both existed.
+  //
+  // There is now one budget (SEAT_CHROME_H + seatAvatar) and both read it. This
+  // asserts the arithmetic closes at every size a seat can actually resolve to.
+  let tooSmall = '';
+  for (const [w, h] of VIEWPORTS) {
+    const m = metrics({ width: w, height: h }, ZERO_INSETS);
+    for (const n of [1, 2, 3, 4, 5]) {
+      for (const sp of seatSpots(n, m.ovalW, m.ovalH, 6)) {
+        const need = (seatHasDetail(sp.h) ? SEAT_CHROME_H : SEAT_CHROME_BASE) + seatAvatar(sp.h);
+        if (need > sp.h + 0.5) tooSmall = `${w}x${h} n=${n}: capsule ${sp.h}dp holds ${need}dp`;
+      }
+    }
+  }
+  check('a seat is always tall enough for what is drawn in it', !tooSmall, tooSmall);
+
+  // ...and wide enough that a name is a name. The old row layout left the name
+  // `w - 57` after the avatar, the gap and the status dot had taken their cut —
+  // 22dp, about three characters, on a 732dp-wide table. Standing the seat up
+  // gives the name the whole capsule less its padding.
+  let tooNarrow = '';
+  for (const [w, h] of VIEWPORTS) {
+    const m = metrics({ width: w, height: h }, ZERO_INSETS);
+    const nameW = seatSpots(5, m.ovalW, m.ovalH, 6)[0].w - 12;
+    if (nameW < 54) tooNarrow = `${w}x${h}: ${nameW}dp for a name`;
+  }
+  check('a six-handed seat has room for a name', !tooNarrow, tooNarrow);
 }
 
 // -- the piles sit on the cloth, not in the near rail -----------------
@@ -248,24 +289,46 @@ check('cards stay legible on the smallest screen', worstCard >= 32, `smallest ca
 {
   let clash = '';
   let offFelt = '';
-  // Real viewports, and everything measured against the OVAL — the piles sit on
-  // the cloth, which is narrower than the felt frame wherever the side panels
-  // fit. The seat top inside the oval is a small clearance, not the header.
+  // Everything is measured against the OVAL — the piles sit on the cloth, which
+  // is narrower than the felt frame wherever the side panels fit. The seat top
+  // inside the oval is a small clearance, not the header.
   const SEAT_TOP = 6;
-  for (const [w, h] of [[640, 360], [820, 369], [844, 390], [1024, 768], [2264, 1080]] as [number, number][]) {
-    const m = metrics({ width: w, height: h }, { top: 0, bottom: 0, left: 0, right: 0 });
+  for (const [w, h] of VIEWPORTS) {
+    const m = metrics({ width: w, height: h }, ZERO_INSETS);
     const spots = seatSpots(5, m.ovalW, m.ovalH, SEAT_TOP);
     const stackH = 14 + 3 + Math.round(m.pileW * 1.4) + 2 + 13;
-    const y = pileTop(m.ovalH, SEAT_TOP, spots[0].h, stackH);
-    if (y < SEAT_TOP + spots[0].h + 8 - 0.5) clash = `${w}x${h}: piles at ${y} run into the seat ring`;
+    const y = pileTop(m.ovalW, m.ovalH, spots, m.pileRowW, stackH);
+
+    // A RECTANGLE INTERSECTION, not a restatement of pileTop's own formula.
+    //
+    // The old version of this check recomputed `SEAT_TOP + spots[0].h + 8` and
+    // compared it to what pileTop returned from the same expression, so it
+    // could only ever agree with itself. It agreed happily while seats 1 and 3
+    // — which hang 9-10dp lower than seat 0, because the ring is an ARC — sat
+    // on top of the CLOSED DECK plate at every landscape phone size.
+    //
+    // This asks the question the player asks: do these two boxes overlap?
+    const x0 = (m.ovalW - m.pileRowW) / 2;
+    const hit = spots.find(sp =>
+      sp.x < x0 + m.pileRowW && sp.x + sp.w > x0 && sp.y < y + stackH && sp.y + sp.h > y);
+    if (hit) clash = `${w}x${h}: a seat at (${hit.x},${hit.y},${hit.w}x${hit.h}) overlaps piles at ${y}..${y + stackH}`;
     if (y + stackH > m.ovalH + 0.5) offFelt = `${w}x${h}: piles end at ${y + stackH} of ${m.ovalH}`;
   }
-  check('the piles never run into the seat ring', !clash, clash);
+  check('no seat ever overlaps the piles', !clash, clash);
   check('the piles never hang off the bottom of the felt', !offFelt, offFelt);
+
+  // The extremes of the arc hang lowest of all, and they are also furthest from
+  // the middle. Clearing past them would shove the stack off the felt to dodge
+  // a collision that cannot happen, so pileTop must ignore them.
+  const wide = [
+    { x: 0, y: 200, w: 80, h: 80 },     // far left, hanging low, nowhere near
+    { x: 400, y: 6, w: 80, h: 80 },     // straight across, over the piles
+  ];
+  check('only the seats over the piles set the clearance',
+    pileTop(900, 560, wide, 240, 120) > 200,
+    `${pileTop(900, 560, wide, 240, 120)} — the low seat at the rim must not count`);
   check('a tall felt centres the piles rather than dropping them in the rail',
-    pileTop(543, 6, 58, 102) > 200, `${pileTop(543, 6, 58, 102)}`);
-  check('a short felt keeps them clear of the seats',
-    pileTop(189, 6, 58, 102) === 72, `${pileTop(189, 6, 58, 102)}`);
+    pileTop(696, 543, [{ x: 300, y: 6, w: 100, h: 88 }], 240, 102) > 200);
 }
 
 // -- the turn clock --------------------------------------------------

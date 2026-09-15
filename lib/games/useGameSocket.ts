@@ -167,12 +167,13 @@ export function useGameSocket(game: GameKind, roomId = '', opts: AutoStart = {})
           you: typeof m.you === 'string' ? m.you : prev.you,
           spectator: typeof m.spectator === 'boolean' ? m.spectator : prev.spectator,
         }));
-      } else if (m.t === 'error' && typeof m.msg === 'string') {
-        // A rejected intent is a notice, not a connection failure — the next
-        // snapshot already corrects the board, so this must not read as "the
-        // game is broken".
-        setEvents(prev => [...prev, `⚠ ${m.msg}`].slice(-20));
       }
+      // `{t:'error'}` is NOT handled here. The socket already routes it to the
+      // event handlers, with the same "⚠ " prefix — so appending it here too
+      // put every rejected move on the table's feed twice, once per line. A
+      // rejected intent is a notice rather than a connection failure (the next
+      // snapshot corrects the board), and it is the offEvent subscription below
+      // that says so, in one place.
       // A subscriber that throws must not take the socket, nor the other
       // subscribers, down with it.
       try { onMsgRef.current?.(m); } catch { /* a board's handler must not kill the socket */ }

@@ -1,78 +1,63 @@
 // lib/games/useTableVoice.ts — talking at the table.
 //
-// WHY THIS WAS REWRITTEN
-// ----------------------
-// It used to mint a LiveKit token from `POST /api/voice/token` on the games
-// server and join an SFU room. That endpoint does not exist — it answers 404 —
-// and the deployment's own `/config.js` reports:
+// WHY THIS IS A LIVEKIT ROOM AND NOT A PEER MESH
+// ----------------------------------------------
+// This file has now been written three times, and the history is the argument.
 //
-//     window.GAMES_CONFIG = { "sfu": false, "sfuMinSeats": 4, "iceServers": [...] }
+//  1. It minted a token from `POST /api/voice/token` ON THE GAMES SERVER and
+//     joined an SFU. That endpoint answers 404, and the deployment's own
+//     /config.js reports `{"sfu": false, "sfuMinSeats": 4}` — there is no SFU
+//     there to join. Voice was dead in all four games.
+//  2. So it was rewritten as the peer-to-peer mesh the shipped web client
+//     actually runs (games-web/vgvoice.js), signalled over the game's own
+//     WebSocket. That is a faithful port and it is the right shape for two or
+//     three people — but it is O(n^2) connections, and a six-handed rummy table
+//     is FIVE simultaneous uploads of your microphone from a phone that is also
+//     animating thirteen cards. The reference client's own answer to that is to
+//     switch to an SFU above four seats; that deployment has none to switch to.
+//  3. VaultChat has one. The same LiveKit cluster already carries calls and Go
+//     Live, and `livekit.Mint` already signs join tokens. So a table's audio now
+//     costs each phone one upload and one download, whatever the table's size,
+//     and it reuses plumbing that is already in production rather than a second
+//     WebRTC stack maintained beside it.
 //
-// so even where the endpoint exists the SFU is switched off. The old code
-// treated that as "voice is unavailable, say so and stop", which is exactly what
-// every player saw: voice never connected in ANY of the four games.
+// The room is minted by OUR backend (`POST /games/voice-token`, games_voice.go),
+// never by the games server, which knows nothing about any of this.
 //
-// What the deployed web client actually does (games-web/vgvoice.js) is run a
-// PEER-TO-PEER AUDIO MESH, signalled over the game's own WebSocket, with the
-// games server relaying `voice-*` frames to the named peer. That is what this
-// now does. The protocol and the decisions it turns on live in
-// lib/games/voiceMesh.ts, which is checked by voiceMesh.selftest.ts.
+// WHAT WE GAVE UP, SAID PLAINLY
+// -----------------------------
+// The mesh had two properties this does not, and pretending otherwise would be
+// the kind of comment that gets someone in trouble later:
 //
-// WHAT THE MESH MEANS
-// -------------------
-// Audio is end-to-end between the players (DTLS-SRTP) and never lands on the
-// games server, which only ever sees the signalling envelope. That is a better
-// privacy story than the SFU it replaces — but it is O(n²) connections, so a
-// six-handed table is five uploads. The reference client switches to an SFU
-// above four seats; this deployment has none to switch to, and saying so is
-// better than pretending.
+//   - Audio was end-to-end between players (DTLS-SRTP) and never landed on a
+//     server. It now passes through VaultChat's SFU, exactly as a group call
+//     does. There is no frame encryption on a table room (`e2eeKey: null`) —
+//     players at a public rummy table have no ratchet sessions with each other,
+//     so there is no key to agree on.
+//   - Membership was enforced by the one party that knows the seating: the games
+//     server relayed a `voice-*` frame only between peers at the same table. Our
+//     backend cannot ask it who is seated, so the token route's real rule is
+//     "a signed-in VaultChat user who knows this table's room id". See the long
+//     note in games_voice.go.
 //
-// Membership is enforced by the SERVER: it relays a `voice-*` frame only to a
-// peer at the same table, and this client refuses to mesh with an id that is not
-// in the roster the table published. A stranger cannot dial in.
+// What we gained, besides the bandwidth: the SFU enforces listen-only for a
+// spectator (the `audience` role) instead of asking the client to please keep
+// its own microphone track disabled, and reconnection is livekit-client's
+// problem rather than a mesh that had to re-dial five peers by hand.
 //
-// The microphone is only ever requested when the player taps Join, nothing is
+// The microphone is only ever opened when the player taps Join, nothing is
 // recorded, and leaving voice does not leave the table.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Platform, PermissionsAndroid } from 'react-native';
-import { AudioSession, registerGlobals } from '@livekit/react-native';
+import { RoomEvent } from 'livekit-client';
 import type { GameKind } from '../gamesSocket';
-import { getIceServers } from '../iceConfig';
+import { api } from '../api';
 // Reused, not re-derived. These wrap InCallManager with the null-vs-false rule
 // that Go Live and calling both learned the hard way: "speaker off" must RELEASE
 // the route so a Bluetooth headset is followed, never pin the earpiece.
 import { startBroadcastAudio, stopBroadcastAudio, setBroadcastSpeaker } from '../golive/audio';
-import {
-  rosterFrom, diffRoster, shouldInitiate, IceQueue, audioLevelFrom, SPEAKING_LEVEL,
-  type Roster, type PeerState,
-} from './voiceMesh';
-
-// Lazy-require so a build without the native module (or a Node-run check that
-// pulls this file in) degrades to "voice unavailable" instead of failing to
-// load. Same pattern as lib/vaultBeamDirect.ts.
-let RTC: any = null;
-// eslint-disable-next-line @typescript-eslint/no-require-imports
-try { RTC = require('@livekit/react-native-webrtc'); } catch { RTC = null; }
-
-/** Falls back to public STUN, which is what the deployment currently serves. */
-const DEFAULT_ICE = [{ urls: 'stun:stun.l.google.com:19302' }];
-const GAMES_HTTP = 'https://games.corefinite.com';
-
-/**
- * Install LiveKit's WebRTC globals, but only if nobody already has.
- *
- * registerGlobals() puts RTCPeerConnection and MediaStream on globalThis, and
- * running it a SECOND time replaces those constructors underneath an SDK that
- * is already using them — which is a real bug this app has hit before. Calling
- * and Go Live each guard it with their own module-local flag, so a flag of our
- * own could not see that one of them had already registered.
- */
-function ensureGlobals(): void {
-  const g = globalThis as any;
-  if (typeof g.RTCPeerConnection !== 'undefined' && typeof g.MediaStream !== 'undefined') return;
-  registerGlobals();
-}
+import { joinSfuRoom, type SfuSession } from '../golive/room';
 
 export type VoicePhase =
   | 'off' | 'asking' | 'connecting' | 'live'
@@ -84,6 +69,9 @@ export type VoicePhase =
   | 'waiting'
   | 'unavailable' | 'error';
 
+/** What a peer's published state says about their own microphone. */
+export interface PeerState { mic: boolean; spk: boolean }
+
 export interface TableVoice {
   phase: VoicePhase;
   error: string | null;
@@ -92,9 +80,9 @@ export interface TableVoice {
   muted: boolean;
   /** Identities currently talking, for the seat rings. */
   speaking: Set<string>;
-  /** Everyone in the audio mesh, including us. */
+  /** Everyone in the audio room, including us. */
   participants: string[];
-  /** What each peer last told us about their own mic and speaker. */
+  /** What each peer's published state says about their microphone. */
   peerState: Record<string, PeerState>;
   /** True when the loudspeaker is forced on. Off means "follow the headset". */
   speaker: boolean;
@@ -107,11 +95,13 @@ export interface TableVoice {
 }
 
 /**
- * The game socket, which is also the signalling channel.
+ * The game socket.
  *
- * `subscribe` must survive a socket rebuild — see useGameSocket. A mesh that
- * quietly stopped receiving offers after one reconnect would present as a
- * microphone fault, which is the hardest kind of bug to chase.
+ * Still needed, though signalling has moved to LiveKit: it is where we learn
+ * that the table seated us as a SPECTATOR, which decides whether we ask for a
+ * token that may publish. `send` is no longer used for voice — the games server
+ * has nothing left to relay — and is kept because both boards already pass it
+ * and a narrower type would be a change at two call sites for no gain.
  */
 export interface VoiceWire {
   you: string;
@@ -119,14 +109,15 @@ export interface VoiceWire {
   subscribe: (handler: (msg: any) => void) => () => void;
 }
 
-interface Peer {
-  pc: any;
-  ice: IceQueue;
-  /** Held so the track can be re-enabled; RN plays remote audio automatically. */
-  stream: any | null;
-}
-
 const NO_SPEAKING: Set<string> = new Set();
+
+interface VoiceToken {
+  token: string;
+  url: string;
+  room: string;
+  identity: string;
+  role: string;
+}
 
 export function useTableVoice(game: GameKind, roomId: string, wire: VoiceWire): TableVoice {
   const [phase, setPhase] = useState<VoicePhase>('off');
@@ -135,307 +126,115 @@ export function useTableVoice(game: GameKind, roomId: string, wire: VoiceWire): 
   const [muted, setMuted] = useState(false);
   const [speaker, setSpeaker] = useState(false);
   const [since, setSince] = useState<number | null>(null);
+  const [participants, setParticipants] = useState<string[]>([]);
   const [speaking, setSpeaking] = useState<Set<string>>(NO_SPEAKING);
-  const [inVoiceIds, setInVoiceIds] = useState<string[]>([]);
   const [peerState, setPeerState] = useState<Record<string, PeerState>>({});
 
-  // Mesh state that must NOT drive rendering. A peer connection changing does
-  // not mean the panel changed, and re-rendering the table on every ICE
-  // candidate would be felt during play.
-  const peers = useRef<Map<string, Peer>>(new Map());
-  const roster = useRef<Roster>({});
-  const inVoice = useRef<Set<string>>(new Set());
-  const localStream = useRef<any>(null);
+  const session = useRef<SfuSession | null>(null);
   const joined = useRef(false);
+  /** Guards a second Join while the first is still connecting. */
+  const connecting = useRef(false);
   const alive = useRef(true);
-  const iceServers = useRef<any[]>(DEFAULT_ICE);
 
-  // Latest-ref: the socket's send/you change identity as the screen re-renders,
-  // and the signalling handlers must not be rebuilt (and re-subscribed) for it.
+  // Both boards build the wire inline, so it is a new object every render and
+  // is read through a ref. A dependency on it would re-subscribe every frame.
   const wireRef = useRef(wire);
   wireRef.current = wire;
 
-  const send = useCallback((msg: any) => { wireRef.current.send(msg); }, []);
-  const meId = wire.you;
-
-  /* ── ICE servers ─────────────────────────────────────────────────── */
-  //
-  // TWO sources, merged — and the second one is the whole point.
-  //
-  // The games deployment publishes its list at /config.js, but it currently
-  // serves public STUN and NOTHING ELSE ("iceServers":[{"urls":"stun:..."}],
-  // "sfu":false). STUN cannot traverse symmetric NAT or carrier CGNAT, which is
-  // the normal case for two phones on mobile data, so a table negotiated from
-  // that list alone has no relay to fall back on and the connection simply
-  // never completes — the voice bar sits on "waiting" with no error.
-  //
-  // VaultChat owns a TURN server and lib/iceConfig already mints credentials
-  // for it; calls and Go Live both use it, and game voice was the only WebRTC
-  // path in the app that did not. getIceServers() suits a mesh exactly: it
-  // never throws, never returns empty, and shares ONE in-flight request across
-  // the several peer connections a table brings up at once.
-  //
-  // Both sources are best-effort and independent — whichever resolves
-  // contributes, neither blocks joining voice, and the ref already holds a
-  // usable DEFAULT_ICE from the first frame. The games server's entries are
-  // kept rather than replaced: it is the authority on its own deployment, so
-  // if a relay is ever configured there we use that too.
-  useEffect(() => {
-    let ok = true;
-
-    /** Union, deduped on the urls — both lists start with the same public STUN. */
-    const add = (list: any[]) => {
-      if (!ok || !Array.isArray(list) || !list.length) return;
-      const by = new Map<string, any>();
-      for (const s of [...iceServers.current, ...list]) {
-        if (s?.urls) by.set(JSON.stringify(s.urls), s);
-      }
-      iceServers.current = [...by.values()];
-    };
-
-    getIceServers().then(add).catch(() => {});
-
-    fetch(`${GAMES_HTTP}/config.js`)
-      .then(r => r.text())
-      .then(txt => {
-        const m = txt.match(/window\.GAMES_CONFIG\s*=\s*(\{[\s\S]*?\});?\s*$/);
-        if (!m) return;
-        add(JSON.parse(m[1])?.iceServers);
-      })
-      .catch(() => {});
-
-    return () => { ok = false; };
-  }, []);
-
-  /* ── tearing down ────────────────────────────────────────────────── */
-
-  const dropPeer = useCallback((id: string) => {
-    const p = peers.current.get(id);
-    if (!p) return;
-    p.ice.reset();
-    try { p.pc.close(); } catch {}
-    peers.current.delete(id);
-    setInVoiceIds(prev => prev.filter(x => x !== id));
-  }, []);
-
-  const releaseMic = useCallback(() => {
-    const s = localStream.current;
-    localStream.current = null;
-    if (!s) return;
-    try { s.getTracks().forEach((t: any) => t.stop()); } catch {}
-  }, []);
-
-  const teardown = useCallback(() => {
-    joined.current = false;
-    peers.current.forEach((_p, id) => dropPeer(id));
-    peers.current.clear();
-    inVoice.current.clear();
-    releaseMic();
-    // Release the audio session and the route, or the phone stays in
-    // communication mode after the table is closed — which on Android ducks and
-    // reroutes every other app's audio as though a call were still up.
-    void AudioSession.stopAudioSession().catch(() => {});
-    stopBroadcastAudio();
-  }, [dropPeer, releaseMic]);
-
-  // A live microphone must not outlive the table.
-  useEffect(() => {
-    alive.current = true;
-    return () => { alive.current = false; teardown(); };
-  }, [teardown]);
-
-  const leave = useCallback(() => {
-    // Tell the table before dropping the connections, or peers keep a dead
-    // avatar on screen until their own ICE times out.
-    if (joined.current) {
-      Object.keys(roster.current).forEach(id => send({ t: 'voice-bye', to: id, data: {} }));
-    }
-    teardown();
-    if (!alive.current) return;
-    setPhase('off');
-    setSpeaking(NO_SPEAKING);
-    setInVoiceIds([]);
-    setPeerState({});
-    setSince(null);
-    setMuted(false);
-    setError(null);
-  }, [send, teardown]);
-
-  /* ── the mesh ────────────────────────────────────────────────────── */
-
-  const broadcastState = useCallback((toId?: string, micOn?: boolean) => {
-    const data = { mic: micOn ?? !muted, spk: true };
-    if (toId) { send({ t: 'voice-state', to: toId, data }); return; }
-    Object.keys(roster.current).forEach(id => send({ t: 'voice-state', to: id, data }));
-  }, [muted, send]);
-
-  const connect = useCallback((id: string, initiator: boolean) => {
-    if (!RTC || !localStream.current || peers.current.has(id)) return;
-
-    const pc = new RTC.RTCPeerConnection({ iceServers: iceServers.current });
-    const peer: Peer = { pc, ice: new IceQueue(), stream: null };
-    peers.current.set(id, peer);
-
-    try {
-      localStream.current.getTracks().forEach((t: any) => pc.addTrack(t, localStream.current));
-    } catch {
-      // addTrack can throw if the stream ended between join and here.
-      dropPeer(id);
-      return;
-    }
-
-    pc.onicecandidate = (e: any) => {
-      if (e?.candidate) send({ t: 'voice-ice', to: id, data: e.candidate });
-    };
-    // React Native plays remote audio automatically once the track lands —
-    // there is no <audio> sink to create, which is the one place this differs
-    // from the reference web client.
-    pc.ontrack = (e: any) => {
-      peer.stream = e?.streams?.[0] ?? null;
-      if (!alive.current) return;
-      setInVoiceIds(prev => (prev.includes(id) ? prev : [...prev, id]));
-      setPhase('live');
-    };
-    pc.onconnectionstatechange = () => {
-      if (!alive.current) return;
-      const st = pc.connectionState;
-      if (st === 'failed' || st === 'closed') {
-        dropPeer(id);
-        // Still in voice with nobody connected — waiting, not broken.
-        if (joined.current && peers.current.size === 0) setPhase('waiting');
-      }
-    };
-
-    if (initiator) {
-      void (async () => {
-        try {
-          const offer = await pc.createOffer({});
-          await pc.setLocalDescription(offer);
-          send({ t: 'voice-offer', to: id, data: pc.localDescription });
-        } catch {
-          dropPeer(id);
-        }
-      })();
-    }
-  }, [dropPeer, send]);
-
-  /** Dial a peer once we know both of us are in voice and it is our turn to. */
-  const attemptConnect = useCallback((id: string) => {
-    if (!joined.current || !inVoice.current.has(id) || peers.current.has(id)) return;
-    if (shouldInitiate(wireRef.current.you, id)) connect(id, true);
-    // else: they dial us. See shouldInitiate — both dialling is glare.
-  }, [connect]);
-
-  /* ── signalling ──────────────────────────────────────────────────── */
-  //
-  // One subscription for the life of the screen. Everything it touches is a ref,
-  // so this never needs rebuilding and can never miss a frame mid-rebuild.
-
+  /**
+   * Player or spectator?
+   *
+   * `state.spectator` is the games protocol's own flag (docs/GAMES_PROTOCOL.md).
+   * It decides which ROLE we ask the backend for, and therefore whether the SFU
+   * will accept a microphone track from us at all — so it has to be settled
+   * before we mint, which is why it is tracked continuously rather than read
+   * once at Join.
+   */
   useEffect(() => {
     const off = wireRef.current.subscribe((m: any) => {
-      if (!m?.t || !alive.current) return;
-      const me = wireRef.current.you;
-
-      // Roster first: a peer must be AT THE TABLE before we will mesh with it.
-      const next = rosterFrom(m, me);
-      if (next) {
-        const { added, gone } = diffRoster(roster.current, next);
-        roster.current = next;
-        gone.forEach(id => {
-          inVoice.current.delete(id);
-          dropPeer(id);
-          setPeerState(prev => { const c = { ...prev }; delete c[id]; return c; });
-        });
-        // Greet anyone new so the mesh forms regardless of who arrived first.
-        if (joined.current) added.forEach(id => send({ t: 'voice-hello', to: id, data: {} }));
-      }
-      // The table's own view of whether we may speak. Spectators are listen-only.
-      if (m.t === 'state' && typeof m.spectator === 'boolean') setCanSpeak(!m.spectator);
-
-      const from: string | undefined = typeof m.from === 'string' ? m.from : undefined;
-      if (!from) return;
-
-      if (m.t === 'voice-bye') {
-        inVoice.current.delete(from);
-        dropPeer(from);
-        setPeerState(prev => { const c = { ...prev }; delete c[from]; return c; });
-        return;
-      }
-
-      if (m.t === 'voice-hello') {
-        if (!roster.current[from]) return;      // not at this table: ignore
-        inVoice.current.add(from);
-        if (!joined.current) return;
-        // Answer an unacknowledged hello so they learn we are here too.
-        if (!m.data?.ack) send({ t: 'voice-hello', to: from, data: { ack: true } });
-        attemptConnect(from);
-        broadcastState(from);
-        return;
-      }
-
-      if (m.t === 'voice-state') {
-        if (!m.data) return;
-        setPeerState(prev => ({ ...prev, [from]: { mic: m.data.mic !== false, spk: m.data.spk !== false } }));
-        return;
-      }
-
-      if (m.t !== 'voice-offer' && m.t !== 'voice-answer' && m.t !== 'voice-ice') return;
-      if (!joined.current || !roster.current[from]) return;   // only mesh with the table
-
-      void (async () => {
-        try {
-          if (m.t === 'voice-offer') {
-            if (!peers.current.has(from)) connect(from, false);
-            const p = peers.current.get(from);
-            if (!p) return;
-            await p.pc.setRemoteDescription(new RTC.RTCSessionDescription(m.data));
-            for (const c of p.ice.flush()) {
-              try { await p.pc.addIceCandidate(new RTC.RTCIceCandidate(c)); } catch {}
-            }
-            const answer = await p.pc.createAnswer();
-            await p.pc.setLocalDescription(answer);
-            send({ t: 'voice-answer', to: from, data: p.pc.localDescription });
-            return;
-          }
-
-          const p = peers.current.get(from);
-          if (!p) return;
-
-          if (m.t === 'voice-answer') {
-            await p.pc.setRemoteDescription(new RTC.RTCSessionDescription(m.data));
-            for (const c of p.ice.flush()) {
-              try { await p.pc.addIceCandidate(new RTC.RTCIceCandidate(c)); } catch {}
-            }
-            return;
-          }
-
-          // voice-ice. Held until there IS a remote description — see IceQueue.
-          if (p.ice.accept(m.data)) {
-            try { await p.pc.addIceCandidate(new RTC.RTCIceCandidate(m.data)); } catch {}
-          }
-        } catch {
-          // A failed negotiation drops that ONE peer. Voice failing must never
-          // stop the game, and one bad peer must not take the table's audio out.
-          dropPeer(from);
-        }
-      })();
+      if (!alive.current) return;
+      if (m && m.t === 'state' && typeof m.spectator === 'boolean') setCanSpeak(!m.spectator);
     });
     return off;
-  }, [attemptConnect, broadcastState, connect, dropPeer, send]);
+  }, []);
 
-  /* ── joining ─────────────────────────────────────────────────────── */
+  /**
+   * Copy the room into React state.
+   *
+   * ONE FUNCTION FOR EVERY EVENT, deliberately. Someone joined, someone left, a
+   * track muted, we reconnected — each changes some subset of the same three
+   * things, and a bespoke handler per event is how a UI ends up disagreeing
+   * with the room it is rendering. The SDK is the source of truth and this
+   * copies it wholesale; the events only say WHEN to look.
+   */
+  const sync = useCallback(() => {
+    const s = session.current;
+    if (!s || !alive.current) return;
+    const room = s.room;
+    const remotes = [...room.remoteParticipants.values()];
+    const me = room.localParticipant;
+
+    setParticipants([me.identity, ...remotes.map(p => p.identity)].filter(Boolean));
+    setPeerState(() => {
+      const next: Record<string, PeerState> = {};
+      for (const p of remotes) {
+        // `spk` has no equivalent on the SFU. The mesh carried a peer's own "I
+        // have deafened myself" flag; LiveKit has no such notion. Reported as
+        // true rather than guessed — nothing renders it, and inventing a "they
+        // cannot hear you" warning out of no evidence is worse than silence.
+        next[p.identity] = { mic: p.isMicrophoneEnabled, spk: true };
+      }
+      return next;
+    });
+    setMuted(!me.isMicrophoneEnabled);
+    setPhase(remotes.length > 0 ? 'live' : 'waiting');
+  }, []);
+
+  /** Leave the room and hand the audio route back. */
+  const teardown = useCallback(async () => {
+    const s = session.current;
+    session.current = null;
+    // GUARDED ON `joined`. teardown also runs on unmount, and unconditionally
+    // stopping the audio session there handed back a route we had never taken —
+    // which, with a VaultChat call or a Go Live broadcast running, cut THAT.
+    const wasJoined = joined.current;
+    joined.current = false;
+    connecting.current = false;
+    if (s) { try { await s.leave(); } catch { /* already gone */ } }
+    if (wasJoined) { try { stopBroadcastAudio(); } catch {} }
+    if (alive.current) {
+      setPhase('off');
+      setSince(null);
+      setParticipants([]);
+      setSpeaking(NO_SPEAKING);
+      setPeerState({});
+      setSpeaker(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    alive.current = true;
+    return () => { alive.current = false; void teardown(); };
+  }, [teardown]);
+
+  // Changing table leaves the old table's room. The room name is derived from
+  // the table id, so staying in the previous one would be talking to the people
+  // we just got up from.
+  useEffect(() => { void teardown(); }, [roomId, game, teardown]);
 
   const join = useCallback(() => {
-    if (joined.current) return;
-    if (!RTC) { setPhase('unavailable'); setError('Voice is not available in this build.'); return; }
-    if (!roomId) { setPhase('error'); setError('This table has no voice channel.'); return; }
-
+    if (joined.current || connecting.current || !roomId) return;
+    connecting.current = true;
     setError(null);
+    setPhase('asking');
+
     void (async () => {
       try {
-        // The microphone is requested ONLY here — when the player asks to talk.
+        // ANDROID WANTS THE PERMISSION ASKED EXPLICITLY. getUserMedia requests
+        // it internally too, but asking here is what lets us tell "they said
+        // no" apart from "the connection failed" — two very different things to
+        // put on screen, and only one of them worth a Retry button.
         if (Platform.OS === 'android') {
-          if (alive.current) setPhase('asking');
           const granted = await PermissionsAndroid.request(
             PermissionsAndroid.PERMISSIONS.RECORD_AUDIO,
             {
@@ -445,161 +244,115 @@ export function useTableVoice(game: GameKind, roomId: string, wire: VoiceWire): 
             },
           );
           if (granted !== PermissionsAndroid.RESULTS.GRANTED) {
-            if (alive.current) { setPhase('error'); setError('Microphone permission denied.'); }
+            if (!alive.current) return;
+            connecting.current = false;
+            setPhase('error');
+            setError('Microphone permission is needed to talk at the table.');
             return;
           }
         }
-        if (!alive.current) return;
+        if (!alive.current) { connecting.current = false; return; }
         setPhase('connecting');
 
-        ensureGlobals();
-        await AudioSession.startAudioSession();
-        // startAudioSession alone leaves the ROUTE unmanaged, so a player
-        // wearing earbuds would be heard through the phone's own mic and hear
-        // nothing through the buds. `auto: true` follows the headset; the
-        // speaker is NOT forced here, because forcing it is precisely what
-        // would silence those earbuds (see lib/golive/audio.ts).
+        const cred = await api<VoiceToken>('/games/voice-token', {
+          method: 'POST',
+          body: JSON.stringify({ game, room: roomId, spectator: !canSpeak }),
+        });
+        if (!cred?.token || !cred?.url) throw new Error('No voice token');
+        if (!alive.current) { connecting.current = false; return; }
+
+        // The route is claimed BEFORE the room connects, so the first packet
+        // does not arrive into a session still pointed at the earpiece.
         startBroadcastAudio();
 
-        const stream = await RTC.mediaDevices.getUserMedia({
-          audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+        const s = await joinSfuRoom({
+          url: cred.url,
+          token: cred.token,
+          identity: cred.identity,
+          // A spectator's token cannot publish anyway — the SFU refuses it.
+          // Asking not to is how we avoid opening the microphone at all.
+          publish: canSpeak,
           video: false,
+          // No frame encryption: there is no key these players share. See header.
+          e2eeKey: null,
+          onParticipant: () => sync(),
+          onTrack: () => sync(),
+          onReconnected: () => sync(),
+          onLocalMedia: () => sync(),
+          onDisconnected: () => { void teardown(); },
         });
-        if (!alive.current) { try { stream.getTracks().forEach((t: any) => t.stop()); } catch {} return; }
-
-        localStream.current = stream;
-        joined.current = true;
-
-        // A spectator joins to LISTEN. The SFU used to enforce that server-side;
-        // a mesh has no such gate, so it is enforced here by starting the track
-        // disabled — and toggleMute already refuses to lift it for someone who
-        // may not speak, so there is no path back to a live microphone.
-        const startMuted = !canSpeak;
-        if (startMuted) {
-          try { stream.getAudioTracks().forEach((t: any) => { t.enabled = false; }); } catch {}
+        if (!alive.current) {
+          try { await s.leave(); } catch {}
+          connecting.current = false;
+          return;
         }
-        setMuted(startMuted);
-        setSpeaker(false);
+
+        session.current = s;
+        joined.current = true;
+        connecting.current = false;
+
+        /**
+         * WHO IS TALKING — from the server, not from a polled audio level.
+         *
+         * The mesh had to sample `getStats()` on every peer connection every
+         * 450ms to light the seat rings: six seats meant six native-bridge
+         * round trips, twice a second, on the screen that is also dragging
+         * thirteen cards. LiveKit computes this centrally and pushes it, so the
+         * rings now cost one event.
+         */
+        s.room.on(RoomEvent.ActiveSpeakersChanged, (ps: any[]) => {
+          if (!alive.current) return;
+          const ids = (ps ?? []).map(p => p?.identity).filter(Boolean);
+          setSpeaking(ids.length ? new Set(ids) : NO_SPEAKING);
+        });
+        s.room.on(RoomEvent.TrackMuted, sync);
+        s.room.on(RoomEvent.TrackUnmuted, sync);
+
         setSince(Date.now());
-
-        // Announce, then dial whoever was already in voice. Greeting everyone
-        // (not only those known to be in voice) is what makes join order
-        // irrelevant — the reference client does the same.
-        Object.keys(roster.current).forEach(id => send({ t: 'voice-hello', to: id, data: {} }));
-        inVoice.current.forEach(id => attemptConnect(id));
-        broadcastState(undefined, !startMuted);
-
-        // Alone in voice is a valid state, not a failure.
-        setPhase(peers.current.size > 0 ? 'live' : 'waiting');
-      } catch (err: unknown) {
+        sync();
+      } catch (e: any) {
+        connecting.current = false;
+        try { stopBroadcastAudio(); } catch {}
         if (!alive.current) return;
-        teardown();
-        setPhase('error');
-        setError(err instanceof Error ? err.message : String(err));
+        const msg = String(e?.message ?? e ?? '');
+        // 503 is "this deployment has no LiveKit", which is a different screen
+        // from "it did not work": one invites a retry and the other does not.
+        if (/503|not configured/i.test(msg)) {
+          setPhase('unavailable');
+          setError('Table voice is not available on this server.');
+        } else {
+          setPhase('error');
+          setError('Could not connect to table voice.');
+        }
       }
     })();
-  }, [attemptConnect, broadcastState, canSpeak, roomId, send, teardown]);
+  }, [game, roomId, canSpeak, sync, teardown]);
 
-  /* ── mute ────────────────────────────────────────────────────────── */
+  const leave = useCallback(() => { void teardown(); }, [teardown]);
 
-  /**
-   * Muting DISABLES the track rather than tearing the mesh down.
-   *
-   * The reference client releases the microphone entirely (replaceTrack(null))
-   * so a Bluetooth headset can leave the hands-free profile. That is the right
-   * instinct, but on React Native re-acquiring costs a renegotiation with every
-   * peer, and a six-handed table would blip five connections on every mute tap.
-   * `enabled = false` stops the audio at the source — nothing is transmitted —
-   * and the state is broadcast so everyone can SEE the mute.
-   *
-   * ponytail: track.enabled, not replaceTrack(null). Revisit if Bluetooth
-   * profile switching turns out to matter more than mute latency at the table.
-   */
   const toggleMute = useCallback(() => {
-    const s = localStream.current;
+    const s = session.current;
     if (!s || !canSpeak) return;
     const next = !muted;
-    setMuted(next);
-    try { s.getAudioTracks().forEach((t: any) => { t.enabled = !next; }); } catch {}
-    broadcastState(undefined, !next);
-  }, [muted, canSpeak, broadcastState]);
+    setMuted(next);                       // optimistic; `sync` corrects it
+    void s.room.localParticipant.setMicrophoneEnabled(!next).then(sync).catch(() => sync());
+  }, [muted, canSpeak, sync]);
 
   const toggleSpeaker = useCallback(() => {
     setSpeaker(prev => {
       const next = !prev;
-      // `false` RELEASES the force so the route follows a connected headset —
-      // it does not pin the earpiece. See lib/golive/audio.ts.
-      setBroadcastSpeaker(next);
+      // null, never false — see the import note. `false` pins the earpiece and
+      // a Bluetooth headset stops being followed.
+      try { setBroadcastSpeaker(next); } catch {}
       return next;
     });
   }, []);
 
-  /* ── who is talking ──────────────────────────────────────────────── */
-  //
-  // Polled from getStats rather than WebAudio: react-native-webrtc has no
-  // AnalyserNode. Each peer has its own connection, so its inbound level is
-  // unambiguous. A platform that reports no `audioLevel` shows no rings at all,
-  // because a ring on the wrong player is worse than no ring.
-
-  useEffect(() => {
-    if (phase !== 'live' && phase !== 'waiting') return;
-    let stop = false;
-
-    const tick = async () => {
-      const talking = new Set<string>();
-      let reported = false;
-
-      for (const [id, p] of peers.current) {
-        try {
-          const stats = await p.pc.getStats();
-          const level = audioLevelFrom(stats.values ? stats.values() : (stats as any), 'inbound-rtp');
-          if (level != null) { reported = true; if (level > SPEAKING_LEVEL) talking.add(id); }
-        } catch {}
-      }
-      // Our own microphone, from any one connection.
-      const first = peers.current.values().next().value as Peer | undefined;
-      if (first && !muted) {
-        try {
-          const stats = await first.pc.getStats();
-          const mine = audioLevelFrom(stats.values ? stats.values() : (stats as any), 'media-source');
-          if (mine != null) { reported = true; if (mine > SPEAKING_LEVEL) talking.add(wireRef.current.you); }
-        } catch {}
-      }
-
-      if (stop || !alive.current) return;
-      setSpeaking(prev => {
-        if (!reported) return prev.size ? NO_SPEAKING : prev;
-        if (prev.size === talking.size && [...talking].every(x => prev.has(x))) return prev;
-        return talking;
-      });
-    };
-
-    const timer = setInterval(() => { void tick(); }, 450);
-    return () => { stop = true; clearInterval(timer); };
-  }, [phase, muted]);
-
-  /* ── leaving the table ───────────────────────────────────────────── */
-  //
-  // A different table is a different voice channel. Staying connected would
-  // keep publishing into a room the player has walked away from.
-  const lastRoom = useRef(roomId);
-  useEffect(() => {
-    if (lastRoom.current === roomId) return;
-    lastRoom.current = roomId;
-    roster.current = {};
-    leave();
-  }, [roomId, leave]);
-
-  // Driven by `phase`, not by the `joined` ref: a ref does not re-render, so a
-  // list keyed off it would show yesterday's participants.
-  const inVoiceNow = phase === 'live' || phase === 'waiting';
-  const participants = useMemo(
-    () => (inVoiceNow ? [meId, ...inVoiceIds].filter(Boolean) : []),
-    [inVoiceNow, inVoiceIds, meId],
-  );
-
-  return {
+  return useMemo(() => ({
     phase, error, canSpeak, muted, speaking, participants, peerState, speaker, since,
     join, leave, toggleMute, toggleSpeaker,
-  };
+  }), [
+    phase, error, canSpeak, muted, speaking, participants, peerState, speaker, since,
+    join, leave, toggleMute, toggleSpeaker,
+  ]);
 }

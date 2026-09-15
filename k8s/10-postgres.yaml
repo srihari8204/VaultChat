@@ -1,0 +1,92 @@
+# Postgres — StatefulSet, one replica, backed by a local-path PVC.
+#
+# Single-node deployment: the data lives on THIS node's disk
+# (/var/lib/rancher/k3s/storage/...). That is fine for one box and is exactly
+# what docker-compose did, but it means the node's disk is the durability
+# story — take pg_dump backups off-box (see k8s/README.md "Backups").
+#
+# The Service is headless-free (ClusterIP): the API dials `postgres:5432`
+# inside the namespace. It is NOT exposed outside the cluster; there is no
+# NodePort and no Ingress, so Postgres is unreachable from the internet.
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+  namespace: vaultchat
+spec:
+  # ClusterIP, not NodePort. In-cluster only — see the note above.
+  type: ClusterIP
+  selector:
+    app: postgres
+  ports:
+    - name: postgres
+      port: 5432
+      targetPort: 5432
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: postgres
+  namespace: vaultchat
+spec:
+  serviceName: postgres
+  # ONE replica. Postgres does not scale by adding pods — a second replica
+  # would be a second independent database racing for the same PVC.
+  replicas: 1
+  selector:
+    matchLabels:
+      app: postgres
+  template:
+    metadata:
+      labels:
+        app: postgres
+    spec:
+      containers:
+        - name: postgres
+          image: postgres:16-alpine
+          ports:
+            - containerPort: 5432
+          env:
+            - name: POSTGRES_DB
+              value: vaultchat
+            - name: POSTGRES_USER
+              value: vaultchat
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: vaultchat-secrets
+                  key: DB_PASS
+            # The data dir must be a SUBDIRECTORY of the mount, not the mount
+            # itself: a fresh PVC mount root can carry a lost+found entry, and
+            # initdb refuses to initialise a non-empty directory.
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+          volumeMounts:
+            - name: pgdata
+              mountPath: /var/lib/postgresql/data
+          readinessProbe:
+            exec:
+              command: ["pg_isready", "-U", "vaultchat", "-d", "vaultchat"]
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          livenessProbe:
+            exec:
+              command: ["pg_isready", "-U", "vaultchat", "-d", "vaultchat"]
+            initialDelaySeconds: 30
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              memory: 2Gi
+  volumeClaimTemplates:
+    - metadata:
+        name: pgdata
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        # k3s ships local-path-provisioner as the default StorageClass.
+        storageClassName: local-path
+        resources:
+          requests:
+            storage: 20Gi

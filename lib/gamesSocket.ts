@@ -25,6 +25,8 @@
  * contacts, or file vault.
  */
 
+import { AppState, type NativeEventSubscription } from "react-native";
+
 import { api } from "./api";
 
 /** The separately-deployed games origin (HTTPS). */
@@ -97,6 +99,40 @@ export class GamesSocket {
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private reconnectAttempts = 0;
   private disposed = false;
+  /**
+   * A mint → session → open sequence is actually running.
+   *
+   * NOT the same thing as `phase === "connecting"`, and conflating the two is
+   * what made every reconnect in all four games a no-op: `onclose` sets the
+   * phase to "connecting" so the screen keeps its "Reconnecting — your hand is
+   * safe" banner, and then the retry timer called `connect()`, whose guard was
+   * `phase === "connecting" || phase === "connected"` — so it returned
+   * immediately without opening anything. Nothing scheduled another attempt
+   * either, because `scheduleReconnect` only ever runs from `onclose`. The
+   * result was a permanent banner with every button dead, a turn clock running
+   * out behind it, and the `reconnectAttempts > 8` error path unreachable so
+   * the player never even got offered Retry.
+   *
+   * `phase` is what the SCREEN shows. This is whether a connect is in flight.
+   * Cleared wherever an attempt ends: onopen, onclose, handleError, dispose.
+   */
+  private connecting = false;
+  private appState: NativeEventSubscription | null = null;
+  /**
+   * The table THIS socket has already asked to sit at.
+   *
+   * Re-sending a join for the table you are already in makes the rummy server
+   * close the connection — a bare CLOSE 1000 with no error frame, observed live
+   * against wss://games.corefinite.com/ws. Joining a DIFFERENT table is fine.
+   * So a second tap on the table you are sitting at, or any screen that re-asks
+   * for the seat it already has, would drop the socket mid-hand and look like a
+   * network failure.
+   *
+   * Per-SOCKET, not per-table: cleared whenever the connection is rebuilt, so a
+   * reconnect still rejoins normally (that is a new socket, which has not asked
+   * for anything yet).
+   */
+  private joinedOn: string | null = null;
 
   private stateHandlers = new Set<StateHandler>();
   private msgHandlers = new Set<MessageHandler>();
@@ -109,15 +145,45 @@ export class GamesSocket {
     // the reconnect loop has to rejoin whatever table the player is sitting at,
     // not the one the screen was opened with.
     private roomId: string = "",
-  ) {}
+  ) {
+    // Doze, a call, or a few minutes in the background kill a socket WITHOUT
+    // always firing `onclose`: the connection is half-dead and `readyState`
+    // still reads OPEN until the first failed write. `send()` then drops every
+    // frame on the floor silently, so the board looked live, the buttons were
+    // enabled, and nothing the player tapped reached the table.
+    //
+    // Coming back to the foreground is the one moment we can cheaply tell. Any
+    // socket that is not genuinely OPEN is rebuilt from scratch — which is also
+    // what makes "background the app mid-hand and come back" work at all, since
+    // there is no heartbeat in this protocol to notice it any sooner.
+    this.appState = AppState.addEventListener("change", (next) => {
+      if (next !== "active" || this.disposed) return;
+      if (this.ws && this.ws.readyState === WebSocket.OPEN) return;
+      // Drop the stale phase first: a half-dead socket leaves it at
+      // "connected", and connect() refuses to run in that state.
+      this.setPhase("connecting");
+      if (this.reconnectTimer) {
+        clearTimeout(this.reconnectTimer);
+        this.reconnectTimer = null;
+      }
+      // A deliberate resume is not a failed retry, so the backoff starts over
+      // rather than resuming at a ten-second delay.
+      this.reconnectAttempts = 0;
+      void this.connect();
+    });
+  }
 
   // ── Public API ────────────────────────────────────────────────────────
 
   /** Begin the connect sequence (mint → session → ws). Idempotent. */
   async connect(): Promise<void> {
-    if (this.phase === "connecting" || this.phase === "connected") return;
+    if (this.connecting || this.phase === "connected") return;
+    this.connecting = true;
     this.setPhase("minting");
-    this.reconnectAttempts = 0;
+    // reconnectAttempts is NOT reset here. `onopen` owns it, because a reset on
+    // every attempt is a reset on every RETRY — the backoff would restart at
+    // one second forever and the ">8 attempts, offer Retry" branch would never
+    // be reached. It is cleared when a connection actually succeeds.
 
     try {
       await establishGamesSession(() => this.setPhase("connecting"));
@@ -138,6 +204,8 @@ export class GamesSocket {
    * on the list with their cards gone.
    */
   join(roomId: string): void {
+    // See `joinedOn`: the server answers a self-rejoin by hanging up.
+    if (roomId && this.joinedOn === roomId) return;
     this.roomId = roomId;
     this.sendJoin();
   }
@@ -182,6 +250,9 @@ export class GamesSocket {
   /** Disconnect and free all resources. The screen calls this on unmount. */
   dispose(): void {
     this.disposed = true;
+    this.connecting = false;
+    this.appState?.remove();
+    this.appState = null;
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = null;
@@ -210,6 +281,8 @@ export class GamesSocket {
     const path = WS_PATH[this.game];
     const url = `${GAMES_WS}${path}`;
     this.setPhase("connecting");
+    // A fresh socket has asked for nothing yet.
+    this.joinedOn = null;
 
     try {
       this.ws = new WebSocket(url);
@@ -221,6 +294,7 @@ export class GamesSocket {
     }
 
     this.ws.onopen = () => {
+      this.connecting = false;
       this.reconnectAttempts = 0;
       this.setPhase("connected");
       this.sendJoin();
@@ -273,6 +347,8 @@ export class GamesSocket {
     };
 
     this.ws.onclose = () => {
+      this.connecting = false;
+      this.joinedOn = null;
       if (this.disposed) return;
       this.setPhase("connecting");
       this.scheduleReconnect();
@@ -295,11 +371,18 @@ export class GamesSocket {
    */
   private sendJoin(): void {
     if (this.game === "rummy") {
-      if (this.roomId) this.send({ t: "join", tableId: this.roomId });
-      else this.send({ t: "lobby" });
+      if (this.roomId) {
+        this.joinedOn = this.roomId;
+        this.send({ t: "join", tableId: this.roomId });
+      } else {
+        // No table chosen yet, so ask for the list. This is NOT a seat, and
+        // recording it as one would block the join that follows it.
+        this.send({ t: "lobby" });
+      }
       return;
     }
-    this.send({ t: "join", roomId: this.roomId || defaultRoom(this.game) });
+    this.joinedOn = this.roomId || defaultRoom(this.game);
+    this.send({ t: "join", roomId: this.joinedOn });
   }
 
   private scheduleReconnect(): void {
@@ -328,6 +411,7 @@ export class GamesSocket {
   }
 
   private handleError(msg: string): void {
+    this.connecting = false;
     if (this.disposed) return;
     this.setPhase("error", msg);
   }

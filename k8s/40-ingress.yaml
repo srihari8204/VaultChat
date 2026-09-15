@@ -1,0 +1,72 @@
+# Public entry point: Traefik (bundled with k3s) + Let's Encrypt via cert-manager.
+#
+# Chain on the Mumbai box:
+#   client ──► :443 Traefik (TLS, cert-manager cert) ──► go-api Service :4000
+#
+# Replace api.example.com below with your real hostname in BOTH places, and set
+# a real address in the ClusterIssuer, before applying. The A record for that
+# hostname must already point at the node's PUBLIC IP — cert-manager proves
+# ownership over HTTP-01 on :80, and issuance fails if DNS is not live yet.
+#
+# Cloudflare users: set SSL mode to "Full (strict)" and leave WebSockets on. In
+# "Flexible" mode Cloudflare talks plaintext to :80 here and Socket.IO upgrades
+# fail in ways that look like an app bug.
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: letsencrypt-prod
+spec:
+  acme:
+    server: https://acme-v02.api.letsencrypt.org/directory
+    # Expiry notices go here. A real mailbox — this is the only warning you
+    # get that renewal has been failing.
+    email: REPLACE_WITH_YOUR_EMAIL
+    privateKeySecretRef:
+      name: letsencrypt-prod-account-key
+    solvers:
+      - http01:
+          ingress:
+            ingressClassName: traefik
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: vaultchat-api
+  namespace: vaultchat
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    # Redirect plain HTTP to HTTPS. k3s ships this middleware definition only
+    # if you create it (see k8s/README.md step 8); without it, :80 serves the
+    # API in plaintext.
+    traefik.ingress.kubernetes.io/router.middlewares: vaultchat-redirect-https@kubernetescrd
+spec:
+  ingressClassName: traefik
+  tls:
+    - hosts:
+        - api.example.com
+      # cert-manager creates and renews this Secret. Do not create it by hand.
+      secretName: vaultchat-api-tls
+  rules:
+    - host: api.example.com
+      http:
+        paths:
+          # One catch-all rule. Socket.IO (/socket.io/...) rides the same path
+          # and Traefik proxies the WebSocket upgrade with no extra config.
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: go-api
+                port:
+                  number: 4000
+---
+# HTTP ➜ HTTPS redirect, referenced by the annotation above.
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: redirect-https
+  namespace: vaultchat
+spec:
+  redirectScheme:
+    scheme: https
+    permanent: true

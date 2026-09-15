@@ -1,0 +1,131 @@
+# go-api — the VaultChat/CrazzyChat API (REST + Socket.IO), port 4000.
+#
+# Config layering, and it matters as much here as it did in compose:
+#   envFrom (Secret vaultchat-secrets)  ← everything from your .env
+#   env     (below)                     ← WINS over envFrom, always
+# So the in-cluster wiring (DB_HOST=postgres, REDIS_HOST=redis, PORT=4000) is
+# pinned here and cannot be broken by a stale value left in the .env you
+# imported. Credentials — JWT_SECRET, DB_PASS, S3_*, LIVEKIT_* — come from the
+# Secret and are NOT duplicated in this file.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: uploads
+  namespace: vaultchat
+spec:
+  accessModes: ["ReadWriteOnce"]
+  storageClassName: local-path
+  resources:
+    requests:
+      storage: 20Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: go-api
+  namespace: vaultchat
+spec:
+  type: ClusterIP
+  selector:
+    app: go-api
+  ports:
+    - name: http
+      port: 4000
+      targetPort: 4000
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: go-api
+  namespace: vaultchat
+spec:
+  # ONE replica while uploads is a ReadWriteOnce PVC — two pods cannot mount
+  # it at once and the second stays Pending forever. To scale past 1:
+  #   1. move attachments to object storage (S3_*/MinIO) so the PVC is no
+  #      longer on the serving path, and drop the uploads volume below;
+  #   2. keep REDIS_ADAPTER=1 (already set) so socket events fan out via Redis;
+  #   3. add sticky sessions at the Ingress — Socket.IO's HTTP long-polling
+  #      handshake breaks when consecutive requests land on different pods
+  #      (see the sticky annotation in 40-ingress.yaml).
+  replicas: 1
+  selector:
+    matchLabels:
+      app: go-api
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        app: go-api
+    spec:
+      containers:
+        - name: go-api
+          # Built from ./vaultchat-backend-go — see k8s/build-images.sh.
+          # IfNotPresent, and the tag is explicit: the image is imported into
+          # containerd on this node, not pulled. A `:latest` tag would default
+          # to imagePullPolicy Always and fail with ErrImagePull.
+          image: vaultchat/go-api:REPLACE_TAG
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 4000
+          envFrom:
+            - secretRef:
+                name: vaultchat-secrets
+          env:
+            - name: PORT
+              value: "4000"
+            # Direct to Postgres. The compose stack puts PgBouncer in front for
+            # replica fan-out; at one replica the pooler is a moving part with
+            # nothing to pool. Add it when you add replicas.
+            - name: DB_HOST
+              value: postgres
+            - name: DB_PORT
+              value: "5432"
+            - name: DB_NAME
+              value: vaultchat
+            - name: DB_USER
+              value: vaultchat
+            - name: REDIS_HOST
+              value: redis
+            - name: REDIS_PORT
+              value: "6379"
+            - name: REDIS_PASS
+              value: ""
+            - name: REDIS_ADAPTER
+              value: "1"
+            - name: UPLOAD_DIR
+              value: /data/uploads
+          volumeMounts:
+            - name: uploads
+              mountPath: /data/uploads
+          # /health reports {"status":"ok","db":true,"redis":true,...}.
+          # It is deliberately allowed to answer while degraded, so readiness
+          # checks the endpoint answers at all — a DB blip should not pull the
+          # whole API out of the Ingress and turn a slow query into a 503.
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 4000
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 3
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 4000
+            initialDelaySeconds: 30
+            periodSeconds: 20
+            timeoutSeconds: 5
+            # 3 x 20s of no answer before a restart. Tighter than this restarts
+            # the API during ordinary GC pauses and load spikes.
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: 250m
+              memory: 256Mi
+            limits:
+              memory: 1Gi
+      volumes:
+        - name: uploads
+          persistentVolumeClaim:
+            claimName: uploads
