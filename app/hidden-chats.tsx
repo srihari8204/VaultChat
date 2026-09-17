@@ -13,19 +13,7 @@ import { HEADER_TOP } from '../constants/layout';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { useCallback, useEffect, useRef, useState , useMemo} from 'react';
-import {
-  ActivityIndicator,
-  Alert,
-  FlatList,
-  Image,
-  RefreshControl,
-  StatusBar,
-  StyleSheet,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  View,
-} from 'react-native';
+import { ActivityIndicator, Alert, FlatList, Image, RefreshControl, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { type Palette } from '../constants/theme';
 import { useTheme } from '../lib/theme';
 import { focusWithKeyboard, retryKeyboard } from '../lib/imeFocus';
@@ -112,7 +100,6 @@ function PinGate({
   return (
     <View style={[S.screen, S.center, { paddingHorizontal: 32 }]}>
       <AuroraBackground />
-      <StatusBar barStyle="light-content" />
       <Text style={S.gateIcon}>🔒</Text>
       <Text style={S.gateTitle}>Enter your PIN</Text>
       <Text style={S.gateSub}>Hidden chats are protected by your app PIN (the same MPIN you use to sign in).</Text>
@@ -213,7 +200,6 @@ function HiddenList({ router }: { router: any }) {
 
   return (
     <View style={S.screen}>
-      <StatusBar barStyle="light-content" />
       <View style={S.header}>
         <TouchableOpacity accessibilityLabel="Go back" onPress={() => router.back()} hitSlop={10} style={S.backBtn}>
           <Ionicons name="arrow-back" size={24} color={colors.text} />

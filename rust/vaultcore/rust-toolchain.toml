@@ -2,5 +2,8 @@
 # not a money core, and an FFI ABI that shifts under the app is worse. Bump
 # deliberately, never implicitly.
 [toolchain]
-channel = "1.97.1"
+# Host triple added 2026-09-17, NOT a version change: 1.97.1 is unchanged and
+# still deliberate. This machine has no MSVC linker, so the bare channel
+# resolved to an msvc host that cannot build this crate's own build scripts.
+channel = "1.97.1-x86_64-pc-windows-gnu"
 components = ["rustfmt", "clippy"]

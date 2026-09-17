@@ -1,0 +1,15 @@
+# Pinned to the GNU host, NOT to a different rustc (2026-09-17).
+#
+# This host has no MSVC toolchain, so an x86_64-pc-windows-msvc host cannot
+# link its own BUILD SCRIPTS (proc-macro2, quote, libc) - which must compile
+# for the host before anything can be cross-compiled for Android. The build
+# only ever worked because prebuilt host artifacts happened to be on disk;
+# once those were cleared, every release became arm64-only and 32-bit devices
+# got no build at all.
+#
+# The channel is the SAME 1.97.1 the msvc host used. Only the host triple
+# changes, so the one variable is the linker - not codegen, not the standard
+# library, not the ABI. rust/vaultcore keeps its own deliberate 1.97.1 pin and
+# is unaffected: a rust-toolchain.toml applies per directory.
+[toolchain]
+channel = "1.97.1-x86_64-pc-windows-gnu"

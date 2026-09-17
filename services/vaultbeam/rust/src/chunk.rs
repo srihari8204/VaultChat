@@ -60,9 +60,9 @@ pub struct ChunkSpec {
 /// The other two are retained to read data written by older clients during the
 /// one-release dual-read window (relay objects expire in 24 h, so the window
 /// only needs to exceed a day):
-///   * `Uniform`      — legacy, `id = blockIndex * chunksPerBlock + i`. Correct
-///                      only when every block has the same size.
-///   * `LegacyOffset` — vbm2 segmented relay, `id = plainOffset`.
+/// * `Uniform` — legacy, `id = blockIndex * chunksPerBlock + i`. Correct only
+///   when every block has the same size.
+/// * `LegacyOffset` — vbm2 segmented relay, `id = plainOffset`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum IdScheme {
     Uniform,
@@ -92,10 +92,27 @@ pub fn plan_block(
     block_plain_offset: Option<u64>,
     scheme: IdScheme,
 ) -> Vec<ChunkSpec> {
+    // `chunk_bytes` reaches this from a raw JSON number (ffi.rs `chunkBytes`),
+    // so zero is something a caller can actually send and it would divide by
+    // zero on the next line. An empty plan is the honest answer for a geometry
+    // that describes no chunks; the FFI-facing wrappers in fileio.rs turn the
+    // same input into a named error rather than a silently empty block.
+    if chunk_bytes == 0 {
+        return Vec::new();
+    }
     let chunks_per_block = block_bytes / chunk_bytes;
     let first_chunk = block_index * chunks_per_block;
     let base = block_plain_offset.unwrap_or(block_index * block_bytes);
-    let mut out = Vec::with_capacity(chunks_per_block as usize);
+    // Reserve what the loop below can actually produce, not what the block
+    // geometry nominally allows. The loop stops at `total_bytes`, so a caller
+    // sending chunkBytes=1 with a large blockBytes used to ask for a
+    // `chunks_per_block`-element reservation — billions of `ChunkSpec`s — for a
+    // plan of a handful. That reservation is the dangerous part: a failed
+    // allocation aborts the process outright instead of unwinding into the
+    // `catch_unwind` at the FFI boundary. This is a tighter hint, never a
+    // different plan: the loop's own termination is unchanged.
+    let reachable = total_bytes.saturating_sub(base).div_ceil(chunk_bytes);
+    let mut out = Vec::with_capacity(chunks_per_block.min(reachable) as usize);
     for i in 0..chunks_per_block {
         let plain_offset = base + i * chunk_bytes;
         if plain_offset >= total_bytes {
@@ -222,6 +239,26 @@ mod tests {
                 assert_eq!(plain, data[off as usize..off as usize + plain.len()], "{scheme:?}");
             }
         }
+    }
+
+    /// `chunkBytes` is a raw JSON number on the way in. Zero used to divide by
+    /// zero, and a tiny value with a large `blockBytes` used to reserve billions
+    /// of specs for a plan of a handful — and an allocation that fails aborts
+    /// the process rather than unwinding into the FFI's catch_unwind.
+    #[test]
+    fn a_hostile_block_geometry_neither_divides_by_zero_nor_over_reserves() {
+        assert!(plan_block(0, 0, 64, 100, None, IdScheme::Uniform).is_empty());
+        assert!(plan_block(3, 0, 64, 100, Some(0), IdScheme::Canonical).is_empty());
+
+        // 1 MiB block over 16-byte chunks nominally holds 65536 of them; the
+        // 100-byte file means the plan is 7 long, so that is what is reserved.
+        let v = plan_block(0, 16, 1 << 20, 100, None, IdScheme::Uniform);
+        assert_eq!(v.len(), 7);
+        assert!(v.capacity() < 64, "reserved {} for a plan of {}", v.capacity(), v.len());
+
+        // A block entirely past the end of the file reserves nothing at all.
+        let past = plan_block(0, 16, 1 << 20, 100, Some(1_000), IdScheme::Canonical);
+        assert!(past.is_empty() && past.capacity() == 0);
     }
 
     #[test]

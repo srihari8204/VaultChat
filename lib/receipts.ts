@@ -89,6 +89,21 @@ export function markReadDurable(chatId: string, msgId: number, expectedUserId?: 
 export function markDeliveredDurable(chatId: string, msgId: number, expectedUserId?: string): Promise<void> {
   return mark(chatId, msgId, 'delivered', expectedUserId);
 }
+/**
+ * MY read watermark per chat, as this device recorded it — chatId → message id.
+ *
+ * Read intent is durable here BEFORE the server hears about it (mark() persists,
+ * then flushSoon posts), so this map is the earliest correct answer to "have I
+ * read this chat". lib/chatService.listChats uses it to correct the server's
+ * denormalized unread_count; see applyLocalReadPointers in lib/unreadStore.
+ */
+export async function readPointers(): Promise<Record<string, number>> {
+  const s = await session();
+  const out: Record<string, number> = {};
+  for (const [chatId, p] of s.state) if (p.read > 0) out[chatId] = p.read;
+  return out;
+}
+
 async function flushSession(s: Session): Promise<void> {
   await assertOwner(s);
   if (s.flushing) { s.again = true; return; }

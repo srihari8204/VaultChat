@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/redis/go-redis/v9"
-	"github.com/zishang520/socket.io/v2/socket"
 
 	"vaultchat/backend-go/internal/db"
 	"vaultchat/backend-go/internal/redisx"
@@ -118,11 +117,11 @@ func (h *Hub) FanOutToChat(ctx context.Context, chatID, event string, payload an
 	if effectiveSender == "" {
 		effectiveSender = senderOfEvent(event, payload)
 	}
-	filtered := senderID != "" || ghostCol != ""
-
-	if !filtered {
-		h.io.To(socket.Room("chat:"+chatID)).Emit(event, payload)
-	}
+	// NOTE: this used to take a Socket.IO shortcut when unfiltered — one
+	// room emit instead of N per-user emits. CC-Wire has no room broadcast
+	// that bypasses per-recipient authorization, and the loop below already
+	// reaches every member, so the shortcut left with Socket.IO.
+	_ = senderID != "" || ghostCol != ""
 
 	// Members of this chat (Redis-cached, 30s TTL — P2.2).
 	memberIDs, err := chatMemberIDs(ctx, chatID)

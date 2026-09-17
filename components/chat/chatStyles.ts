@@ -12,6 +12,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '../../lib/theme';
 import { type Palette, ELEVATION, brandAlpha } from '../../constants/theme';
 import { type Message } from '../../lib/chatService';
+import { chatCardMax } from '../../constants/layoutMath';
 
 // Optimistic bubbles carry a few extra fields beyond a server Message.
 export type DisplayMessage = Message & {
@@ -49,7 +50,7 @@ export type DisplayMessage = Message & {
  * targets to 36pt there keeps every control reachable — still above the 32pt
  * floor where a target becomes genuinely hard to hit.
  */
-export type ChatMetrics = { topInset: number; bottomInset: number; narrow: boolean };
+export type ChatMetrics = { topInset: number; bottomInset: number; narrow: boolean; cardMax: number };
 
 export function useS() {
   const { colors } = useTheme();
@@ -59,10 +60,18 @@ export function useS() {
     topInset: insets.top,
     bottomInset: insets.bottom,
     narrow: width < 360,
+    // Widest a card may be INSIDE A TEXT BUBBLE. The bubble is maxWidth:'78%'
+    // with 14dp of padding each side, so the usable slot is 0.78*W - 28 - and
+    // file cards, previews and polls were all hardcoded to 240. That slot only
+    // reaches 240 at a window of ~344dp, so every phone below it (320dp is the
+    // floor we support) had 18dp of every file card pushed outside the bubble.
+    // Images, video and GIFs are unaffected: they swap in mediaBubble, whose
+    // padding is 3, and were already sized to fit that (2026-09-17).
+    cardMax: chatCardMax(width),
   };
   return useMemo(
     () => makeStyles(colors, m),
-    [colors, m.topInset, m.bottomInset, m.narrow],
+    [colors, m.topInset, m.bottomInset, m.narrow, m.cardMax],
   );
 }
 
@@ -88,7 +97,7 @@ export const HL = StyleSheet.create({
 // bar rather than the old 56 — an unmeasured guess should not be the tall one.
 export const makeStyles = (
   c: Palette,
-  m: ChatMetrics = { topInset: 24, bottomInset: 0, narrow: false },
+  m: ChatMetrics = { topInset: 24, bottomInset: 0, narrow: false, cardMax: 240 },
 ) => StyleSheet.create({
   screen:        { flex: 1, backgroundColor: c.chatBg },
   lockGate:      { ...StyleSheet.absoluteFillObject, backgroundColor: c.bg, alignItems: 'center', justifyContent: 'center', padding: 32, zIndex: 50 },
@@ -286,7 +295,7 @@ export const makeStyles = (
   recSendTxt:      { color: '#fff', fontSize: 18, fontWeight: '700' },
 
   // Voice-message bubble (playback): play/pause button + track + duration
-  audioRow:           { flexDirection: 'row', alignItems: 'center', gap: 10, minWidth: 200, maxWidth: 260 },
+  audioRow:           { flexDirection: 'row', alignItems: 'center', gap: 10, minWidth: Math.min(200, m.cardMax), maxWidth: Math.min(260, m.cardMax) },
   audioPlayBtn:       { width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center' },
   audioPlayBtnMine:   { backgroundColor: c.primary },
   audioPlayBtnTheirs: { backgroundColor: c.primary },
@@ -325,7 +334,7 @@ export const makeStyles = (
 
   // Poll bubble: question on top, options as rows with a horizontal fill
   // bar proportional to vote count, footer with totals + mode hint.
-  pollWrap:               { minWidth: 240, maxWidth: 300, gap: 8 },
+  pollWrap:               { minWidth: Math.min(240, m.cardMax), maxWidth: Math.min(300, m.cardMax), gap: 8 },
   pollQuestion:           { color: c.text, fontSize: 14, fontWeight: '700', marginBottom: 6 },
   pollQuestionMine:       { color: c.bubbleOutText },
   pollOptionRow:          { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 4 },
@@ -395,9 +404,9 @@ export const makeStyles = (
   viewOnceTombstoneTxt:  { color: c.textDim, fontSize: 12, fontStyle: 'italic' },
 
   // Day 9 — file bubble (documents)
-  fileRow:        { flexDirection: 'row', alignItems: 'center', gap: 10, minWidth: 220, maxWidth: 280 },
-  fileCard:       { width: 240, borderRadius: 8, overflow: 'hidden' },
-  filePreview:    { width: 240, height: 170, backgroundColor: 'rgba(0,0,0,0.06)' },
+  fileRow:        { flexDirection: 'row', alignItems: 'center', gap: 10, minWidth: Math.min(220, m.cardMax), maxWidth: Math.min(280, m.cardMax) },
+  fileCard:       { width: Math.min(240, m.cardMax), borderRadius: 8, overflow: 'hidden' },
+  filePreview:    { width: Math.min(240, m.cardMax), height: 170, backgroundColor: 'rgba(0,0,0,0.06)' },
   fileCardRow:    { flexDirection: 'row', alignItems: 'center', gap: 10, paddingTop: 8 },
   fileIcon:       { width: 40, height: 40, borderRadius: 8, alignItems: 'center', justifyContent: 'center' },
   fileIconMine:   { backgroundColor: c.primary },

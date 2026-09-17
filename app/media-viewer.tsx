@@ -21,6 +21,7 @@ import { attachmentUrl, markAttachmentViewed, reportScreenshotCaptured } from '.
 import { getCurrentUserAsync } from './(constants)/authService';
 import ProtectedMediaView from '../components/ProtectedMediaView';
 import { onScreenshot } from '../lib/screenGuard';
+import { permissionDenied } from '../lib/permissionDenied';
 
 // Playback status is a union (loaded | error); every read below wants the loaded
 // shape. Partial<> keeps the `{}` initial state honest — the fields genuinely
@@ -253,8 +254,11 @@ function MediaViewerScreen() {
         if (res.status >= 400) throw new Error(`Download failed (${res.status})`);
       }
       if (['image','video'].includes(fileType)) {
-        const { status } = await MediaLibrary.requestPermissionsAsync();
-        if (status === 'granted') { await MediaLibrary.saveToLibraryAsync(localPath); Alert.alert('Saved!', fileName + ' saved to gallery'); }
+        const { status, canAskAgain } = await MediaLibrary.requestPermissionsAsync();
+        // No else here meant a refused Save was indistinguishable from a saved
+        // one: nothing happened and nothing was said (2026-09-17).
+        if (status !== 'granted') { permissionDenied('Photo access needed', 'Allow photo access to save this to your gallery.', canAskAgain); return; }
+        await MediaLibrary.saveToLibraryAsync(localPath); Alert.alert('Saved!', fileName + ' saved to gallery');
       } else if (await Sharing.isAvailableAsync()) { await Sharing.shareAsync(localPath); }
     } catch (e) { Alert.alert('Error', e.message); }
   };
@@ -529,7 +533,10 @@ const s = StyleSheet.create({
   audioCard:{backgroundColor:'#F9FAFB',borderRadius:24,padding:32,alignItems:'center',borderWidth:1,borderColor:'#E5E7EB'},
   audioName:{color:'#1F2937',fontSize:16,fontWeight:800,marginTop:12,textAlign:'center'},
   audioMeta:{color:'#9CA3AF',fontSize:12,marginTop:4},
-  waveform:{flexDirection:'row',alignItems:'center',gap:2,marginTop:24,height:40},
+  waveform:{
+    // layout-exempt: draws fixed-width bars, no text — height is the drawing.
+    flexDirection:'row',alignItems:'center',gap:2,marginTop:24,height:40,
+  },
   waveBar:{width:3,borderRadius:2},
   audioTimeRow:{flexDirection:'row',justifyContent:'space-between',width:'100%',marginTop:8},
   audioTime:{color:'#9CA3AF',fontSize:11},

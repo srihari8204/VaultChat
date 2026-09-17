@@ -12,7 +12,7 @@
 import React, { useCallback, useMemo, useState } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, ScrollView, TextInput, Alert,
-  ActivityIndicator, Modal, KeyboardAvoidingView, Platform,
+  ActivityIndicator, Modal,
 } from 'react-native';
 import { Stack, useLocalSearchParams, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -27,6 +27,7 @@ import {
   monthKeysInRange, monthBounds, bucketFor, occurrencesInRange,
   type GroupEvent, type Occurrence, type Recurrence,
 } from '../lib/groups/calendar';
+import { KeyboardSafe } from '../components/ui';
 
 const REPEATS: { key: Recurrence; label: string }[] = [
   { key: 'none', label: 'Once' },
@@ -254,7 +255,12 @@ export default function GroupCalendarScreen() {
       )}
 
       <Modal visible={composing} transparent animationType="slide" onRequestClose={() => setComposing(false)}>
-        <KeyboardAvoidingView behavior={'padding'} style={st.backdrop}>
+        {/* KeyboardSafe, not KeyboardAvoidingView (2026-09-17): a React Native
+            <Modal> is its own Android window and never receives the activity's
+            adjustResize, and KAV's 'padding' math mixes Modal-relative layout
+            coords with absolute screen coords, so the lift came up short.
+            keyboardOnly: this sheet already sets its own bottom padding. */}
+        <KeyboardSafe keyboardOnly style={st.backdrop}>
           <TouchableOpacity style={{ flex: 1 }} activeOpacity={1} onPress={() => setComposing(false)} />
           <View style={[st.sheet, { backgroundColor: colors.glassSoft, borderColor: colors.glassStroke }]}>
             <Text style={{ color: colors.text, fontWeight: '800', fontSize: 16, marginBottom: 14 }}>New event</Text>
@@ -314,7 +320,7 @@ export default function GroupCalendarScreen() {
                 : <><Ionicons name="checkmark" size={18} color="#fff" /><Text style={st.btnTxt}>Add to calendar</Text></>}
             </TouchableOpacity>
           </View>
-        </KeyboardAvoidingView>
+        </KeyboardSafe>
       </Modal>
     </View>
   );

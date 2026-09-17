@@ -6,10 +6,7 @@
 
 import { HEADER_TOP } from '../constants/layout';
 import React, { useState , useMemo, useRef} from 'react';
-import {
-  View, Text, TouchableOpacity, StyleSheet, StatusBar, Alert, ActivityIndicator, Share,
-  Modal, TextInput,
-} from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, Alert, ActivityIndicator, Share, Modal, TextInput } from 'react-native';
 import { useLocalSearchParams, Stack, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import * as FileSystem from 'expo-file-system/legacy';
@@ -21,6 +18,7 @@ import { unionWithLocalHistoryAsc } from '../lib/messageHistory';
 import { getCurrentUserAsync } from './(constants)/authService';
 import { getLock, verifyBiometric, verifyPin, type LockedChat } from '../lib/chatLock';
 import { AuroraBackground } from '../components/ui';
+import { KeyboardSafe } from '../components/ui/KeyboardSafe';
 
 const PAGE = 200;
 
@@ -129,7 +127,17 @@ export default function ChatExportScreen() {
   });
 
   const authorizeExport = async (): Promise<boolean> => {
-    const lock = await getLock(chatId);
+    // FAIL CLOSED. getAllLocks now throws when the lock table cannot be read,
+    // instead of reporting "nothing is locked". An export is a full plaintext
+    // dump of the conversation, so an unreadable lock table must block it, not
+    // wave it through (2026-09-17).
+    let lock: LockedChat | null = null;
+    try {
+      lock = await getLock(chatId);
+    } catch {
+      Alert.alert('Export blocked', 'The chat lock settings could not be read, so this export cannot be authorised.');
+      return false;
+    }
     if (!lock) {
       return confirm(
         'Export this chat?',
@@ -137,16 +145,28 @@ export default function ChatExportScreen() {
       );
     }
     // Locked chat — satisfy the lock first, then still confirm.
-    let ok = false;
-    if (lock.lockMethod === 'biometric' || lock.lockMethod === 'both') {
-      ok = await verifyBiometric('Unlock to export this chat');
-      if (!ok && lock.lockMethod === 'biometric') {
-        Alert.alert('Export blocked', 'This chat is locked. Unlock it to export.');
-        return false;
-      }
+    //
+    // 'both' MEANS BOTH. This used to take the first factor that passed: a
+    // biometric OR a PIN, whichever answered, was enough for a full plaintext
+    // dump. The user who picked the strongest setting was getting the weakest
+    // enforcement (2026-09-17).
+    const deny = () => {
+      Alert.alert('Export blocked', 'This chat is locked. Unlock it to export.');
+      return false;
+    };
+    const m = lock.lockMethod;
+    const bioOk = (m === 'biometric' || m === 'both')
+      ? await verifyBiometric('Unlock to export this chat')
+      : false;
+    if (m === 'both' && !bioOk) return deny();
+    // The PIN is REQUIRED for 'pin' and 'both' (for 'both' it is a second
+    // factor, never a substitute for the fingerprint above). For 'biometric' it
+    // stays what it always was — the fallback when the sensor says no, which is
+    // also the only route left on web now that verifyBiometric fails closed there.
+    if (m !== 'biometric' || !bioOk) {
+      if (!lock.pinHash) return deny();
+      if (!(await askPin(lock))) return deny();
     }
-    if (!ok && lock.pinHash) ok = await askPin(lock);
-    if (!ok) { Alert.alert('Export blocked', 'This chat is locked. Unlock it to export.'); return false; }
     return confirm(
       'Export a LOCKED chat?',
       'This chat is protected by a lock. The exported file is NOT encrypted and is not protected by that lock.',
@@ -220,10 +240,9 @@ export default function ChatExportScreen() {
     <View style={s.container}>
       <AuroraBackground />
       <Stack.Screen options={{ headerShown: false }} />
-      <StatusBar barStyle="light-content" />
 
       <View style={s.header}>
-        <TouchableOpacity onPress={() => router.back()} style={s.backBtn} hitSlop={10}>
+        <TouchableOpacity accessibilityRole="button" accessibilityLabel="Back" onPress={() => router.back()} style={s.backBtn} hitSlop={10}>
           <Ionicons name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
         <Text style={s.headerTitle}>Export Chat</Text>
@@ -271,6 +290,7 @@ export default function ChatExportScreen() {
 
       {/* Chat-lock PIN — same PIN the chat itself requires. */}
       <Modal visible={!!pinPrompt} transparent animationType="fade" onRequestClose={() => closePin(false)}>
+        <KeyboardSafe keyboardOnly>
         <View style={s.pinOverlay}>
           <View style={s.pinPanel}>
             <Text style={s.pinTitle}>Chat locked</Text>
@@ -297,6 +317,7 @@ export default function ChatExportScreen() {
             </View>
           </View>
         </View>
+        </KeyboardSafe>
       </Modal>
     </View>
   );

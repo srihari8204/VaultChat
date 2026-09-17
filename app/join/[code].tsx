@@ -11,7 +11,7 @@
 // user their request was sent.
 
 import React, { useEffect, useState, useMemo, useCallback } from 'react';
-import { View, Text, StyleSheet, ActivityIndicator, TouchableOpacity, StatusBar } from 'react-native';
+import { View, Text, StyleSheet, ActivityIndicator, TouchableOpacity } from 'react-native';
 import { useLocalSearchParams, useRouter, Stack } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { type Palette } from '../../constants/theme';
@@ -54,7 +54,6 @@ export default function JoinScreen() {
     <View style={s.container}>
       <AuroraBackground />
       <Stack.Screen options={{ headerShown: false }} />
-      <StatusBar barStyle="light-content" />
       <View style={s.body}>
         {phase.kind === 'joining' && (
           <>
@@ -103,7 +102,10 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   body: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 32, gap: 12 },
   title: { color: c.text, fontSize: 20, fontWeight: '800', marginTop: 16 },
   sub: { color: c.textDim, fontSize: 14, textAlign: 'center', lineHeight: 20, maxWidth: 300 },
-  cta: { marginTop: 20, height: 52, borderRadius: 14, backgroundColor: c.accent, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 32, minWidth: 200 },
+  // 2026-09-18: minHeight, not height — at font scale 1.5 the 16sp label outgrew
+  // a pinned 52 and clipped, leaving the only retry on a failed invite unreadable.
+  // 52 stays the floor and the padding keeps the pill identical at scale 1.0.
+  cta: { marginTop: 20, minHeight: 52, paddingVertical: 10, borderRadius: 14, backgroundColor: c.accent, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 32, minWidth: 200 },
   ctaTxt: { color: '#fff', fontSize: 16, fontWeight: '800' },
   ghost: { marginTop: 6, paddingVertical: 10 },
   ghostTxt: { color: c.textDim, fontSize: 14, fontWeight: '600' },

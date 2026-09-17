@@ -123,7 +123,11 @@ const s = StyleSheet.create({
   },
 
   ctaWrap: { marginTop: 24, borderRadius: 16, overflow: 'hidden' },
-  cta: { height: 56, alignItems: 'center', justifyContent: 'center' },
+  // 2026-09-18: minHeight, not height. A pinned 56 clipped the 16sp label at
+  // font scale 1.5, and this is the step that sets the MPIN — nobody should be
+  // blocked from finishing it because their text is large. 56 remains the
+  // floor and the padding keeps the button identical at scale 1.0.
+  cta: { minHeight: 56, paddingVertical: 10, alignItems: 'center', justifyContent: 'center' },
   ctaOff: { opacity: 0.38 },
   ctaDown: { opacity: 0.88 },
   ctaTxt: { color: '#fff', fontSize: 16, fontWeight: '800', letterSpacing: 0.2 },

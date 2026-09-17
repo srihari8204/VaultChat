@@ -12,6 +12,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { type Palette } from '../constants/theme';
 import { useTheme } from '../lib/theme';
+import { SCREEN_BOTTOM } from '../constants/layout';
 
 export interface SheetAction {
   key: string;
@@ -111,7 +112,11 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   sheet: {
     position: 'absolute', left: 0, right: 0, bottom: 0,
     backgroundColor: c.surfaceSolid, borderTopLeftRadius: 26, borderTopRightRadius: 26,
-    paddingHorizontal: 16, paddingTop: 10, paddingBottom: 34,
+    // 34 was a hand-picked guess at the iOS home indicator. On an Android
+    // gesture-nav device the inset is 48dp, so the last action row sat in the
+    // swipe area. Math.max keeps the original look wherever the inset is small
+    // and only grows where the system actually reserves space (2026-09-17).
+    paddingHorizontal: 16, paddingTop: 10, paddingBottom: Math.max(34, 12 + SCREEN_BOTTOM),
     borderTopWidth: 1, borderColor: c.glassStroke,
   },
   handle: { alignSelf: 'center', width: 40, height: 4, borderRadius: 2, backgroundColor: c.border, marginBottom: 16 },

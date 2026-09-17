@@ -5,7 +5,7 @@
 // three assert one committed fixture (lib/ccwire/__vectors__/codec.json), so a
 // divergence fails a test rather than being discovered on the wire.
 //
-// WHAT THIS FILE DELIBERATELY DOES NOT DO
+// # WHAT THIS FILE DELIBERATELY DOES NOT DO
 //
 // It does not decode the 27 body types. It reads the routing header —
 // request_id, traffic_class, stream, seq, depends_on — establishes WHICH body

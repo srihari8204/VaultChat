@@ -51,7 +51,7 @@ export default function PerfDebugScreen() {
     <View style={S.screen}>
       <AuroraBackground />
       <View style={S.header}>
-        <TouchableOpacity onPress={() => router.back()} hitSlop={10} style={S.backBtn}>
+        <TouchableOpacity accessibilityRole="button" accessibilityLabel="Back" onPress={() => router.back()} hitSlop={10} style={S.backBtn}>
           <Ionicons name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
         <Text style={S.title}>Diagnostics</Text>
@@ -67,8 +67,23 @@ export default function PerfDebugScreen() {
           <Row S={S} k="CC-Wire cohort" v={featureFlagDiagnostics(TRANSPORT_RUST).enabled ? 'Enabled' : 'Disabled'} />
           <Row S={S} k="CC-Wire state" v={wire.status} />
           <Row S={S} k="CC-Wire carrier" v={wire.carrier} />
-          <Row S={S} k="Protobuf submits / acks" v={`${wire.submitted} / ${wire.acknowledged}`} />
-          <Row S={S} k="HTTP fallbacks" v={String(wire.fallbacks)} />
+          {/* NOT frame counters. These three move only for an eligible
+              outbound plain-text chat submission (lib/ccwire/transport.ts
+              submitCCWireMessage); a healthy session that exchanged a hundred
+              frames still reads 0 / 0 if no text was sent. Frames in/out below
+              is the answer to "did CC-Wire carry anything". Likewise
+              "text sends that fell back": when CC-Wire is not ready the send
+              goes straight to HTTP WITHOUT incrementing, so 0 here does not
+              mean HTTP was unused. */}
+          <Row S={S} k="Text submits / acks (ccwire)" v={`${wire.submitted} / ${wire.acknowledged}`} />
+          <Row S={S} k="Text sends that fell back" v={String(wire.fallbacks)} />
+          <Row S={S} k="Frames in / out" v={`${wire.framesIn ?? '-'} / ${wire.framesOut ?? '-'}`} />
+          <Row S={S} k="Bytes in / out" v={`${wire.bytesIn ?? '-'} / ${wire.bytesOut ?? '-'}`} />
+          <Row S={S} k="Decode fails / encode refusals"
+            v={`${wire.decodeFailures ?? '-'} / ${wire.encodeRefusals ?? '-'}`}
+            bad={!!(wire.decodeFailures || wire.encodeRefusals)} />
+          <Row S={S} k="Pre-handshake closes" v={String(wire.preHandshakeCloses ?? '-')}
+            bad={(wire.preHandshakeCloses ?? 0) > 0} />
           {!!wire.lastError && <Row S={S} k="Last transport error" v={wire.lastError} bad />}
         </View>
         {transportBad && (

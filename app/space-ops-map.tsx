@@ -274,7 +274,7 @@ export default function SpaceOpsMapScreen() {
                 placeholderTextColor={colors.textDim}
                 multiline
               />
-              <TouchableOpacity
+              <TouchableOpacity accessibilityRole="button" accessibilityLabel="Send instruction"
                 style={[s.send, (!instruction.trim() || sending) && s.sendOff]}
                 onPress={sendInstruction}
                 disabled={!instruction.trim() || sending}

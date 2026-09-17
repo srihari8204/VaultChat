@@ -20,7 +20,7 @@ import FamilyMap from '../components/family/FamilyMap';
 import { getTrack, summarize, type TrackSample } from '../lib/family/history';
 import { segmentTrips } from '../lib/family/status';
 import { useFamilyAlerts, loadAlerts, type FamilyAlert } from '../lib/family/alerts';
-import { getGroup } from '../lib/groups/store';
+import { getGroup, historyAccess } from '../lib/groups/store';
 import { getCurrentUserAsync } from './(constants)/authService';
 import { can as hasPerm, type Permission } from '../lib/groups/permissions';
 
@@ -85,13 +85,31 @@ export default function FamilyHistoryScreen() {
       const me = await getCurrentUserAsync().catch(() => null);
       if (live) setSelfId(me ? String(me.id) : null);
       const g = await getGroup(circleId);
-      const perms = new Set((g?.permissions ?? []) as Permission[]);
-      // An untyped legacy group has no matrix; the pre-existing behaviour there
-      // was that any member could see the circle's history, so preserve it.
-      const allowed = !g?.groupType || hasPerm(perms, 'view_history');
+      // ABSENT PERMISSIONS ARE UNKNOWN, NOT DENIED (2026-09-17).
+      //
+      // `permissions ?? []` collapsed "never cached" into "cached and empty",
+      // so every migrated or adopted circle denied its OWN OWNER - and once the
+      // gate below started withholding the load rather than just the button,
+      // this screen showed the locked view to people who are not locked out.
+      // historyAccess keeps the three cases apart; the gate itself is unchanged.
+      const allowed = historyAccess(g) !== 'denied';
+      // Withhold the LOAD, not just the render (2026-09-17).
+      //
+      // The gate below used to be render-only AND required `!!userId`. Entered
+      // circle-wide from family.tsx no userId is passed, so the gate never fired
+      // and getTrack returned EVERY member's track while `allowed` was computed
+      // and ignored. Worse than a UI leak: the road-distance effect feeds
+      // `samples` to fetchTraceDistance, which POSTs the polyline to /nav/trace
+      // (lib/nav/routing.ts) — so a denied viewer uploaded the whole circle's
+      // 31-day track to the routing backend.
+      //
+      // The only reading that is unconditionally yours is your own id. Anything
+      // else — including circle-wide, where userId is undefined — is other
+      // people and needs the permission. Fails closed when selfId is unknown.
+      const denied = !allowed && userId !== (me ? String(me.id) : null);
       if (!live) return;
       setMayViewOthers(allowed);
-      const t = await getTrack(circleId, { from, userId });
+      const t = denied ? [] : await getTrack(circleId, { from, userId });
       if (!live) return;
       setSamples(t);
       setTripSel(null); // a stale index into the previous range's trips would highlight the wrong drive
@@ -172,7 +190,7 @@ export default function FamilyHistoryScreen() {
 
       {loading ? (
         <View style={st.center}><ActivityIndicator color={colors.primary} /></View>
-      ) : (!mayViewOthers && !!userId && userId !== selfId) ? (
+      ) : (!mayViewOthers && userId !== selfId) ? (
         <View style={[st.center, { padding: 32 }]}>
           <Ionicons name="lock-closed-outline" size={30} color={colors.textFaint} />
           <Text style={{ color: colors.text, fontWeight: '700', marginTop: 10 }}>Not shared with you</Text>

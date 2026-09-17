@@ -19,8 +19,10 @@
 // the six TYPED bodies — decoded here by codec.ts and on the Rust side by
 // services/transport/rust/src/body.rs, which is what closed the gap where a
 // malformed typing_state was refused by TypeScript and accepted by Rust. The
-// exclusion list that recorded that gap is now empty, and still asserted: see
-// "the scope exclusion" below.
+// exclusion list that records what is STILL one-sided — app_event, field 100,
+// typed here and opaque in Go and Rust — is asserted below so no vector can
+// quietly come to depend on a body the other two never decode: see "the scope
+// exclusion".
 //
 // STATUS: NOT WIRED, like codec.ts itself. Nothing on the live path imports
 // either; the live transport remains Socket.IO v4 with JSON payloads.
@@ -30,7 +32,7 @@ import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   decodeFrameMessage, encodeFrameMessage,
-  LIMITS, BODY_NAMES, EPHEMERAL_BODIES, TRAFFIC_CLASS_EPHEMERAL, ERROR_CODE,
+  LIMITS, BODY_NAMES, EPHEMERAL_BODIES, TRAFFIC_CLASS_EPHEMERAL, ERROR_CODE, APP_EVENT_LOGICAL_MAX, APP_EVENT_JSON_MAX,
   type Frame, type Limits,
 } from './codec';
 
@@ -206,6 +208,118 @@ for (const c of v.encode) {
     check(c.name, !r.ok && r.error === c.error && r.errorCode === c.errorCode,
       r.ok ? 'ENCODED a frame the fixture refuses' : `got ${r.error}/${r.errorCode}`);
   }
+}
+
+// ── encode-side bounds ───────────────────────────────────────────────────────
+// Every bound is enforced on ENCODE as well as DECODE, so a local bug fails on
+// the machine that has the stack trace rather than on the peer that only has
+// bytes. These three are too large to live in the shared fixture — a 4 KiB
+// request_id and a 1 MiB body would be megabytes of hex — so they are built
+// here, and the Go (internal/ccwire/codec.go) and Rust
+// (transport/rust/src/parse.rs) encoders are read as the specification for what
+// each must return.
+//
+// The TYPED error matters as much as the refusal: a caller switches on it to
+// pick the errors.proto ErrorCode, and the encode and decode paths must hand it
+// the same value for the same overrun.
+
+console.log('\nEncode refuses what decode refuses, with the same typed error:');
+{
+  const ok = (r: ReturnType<typeof encodeFrameMessage>, err: keyof typeof ERROR_CODE) =>
+    !r.ok && r.error === err && r.errorCode === ERROR_CODE[err];
+  const why = (r: ReturnType<typeof encodeFrameMessage>) =>
+    r.ok ? 'ENCODED it' : `got ${r.error}/${r.errorCode}`;
+
+  // request_id is bounded in BYTES, before UTF-8 is considered — the same gate
+  // readString applies. Go refuses with ErrStringTooLong, Rust StringTooLong.
+  const atCap = encodeFrameMessage({
+    traffic_class: 1, request_id: 'a'.repeat(LIMITS.max_string_field_bytes),
+  });
+  check('request_id exactly at max_string_field_bytes still encodes', atCap.ok,
+    atCap.ok ? '' : `refused: ${atCap.error}`);
+
+  const overCap = encodeFrameMessage({
+    traffic_class: 1, request_id: 'a'.repeat(LIMITS.max_string_field_bytes + 1),
+  });
+  check('request_id over max_string_field_bytes → STRING_TOO_LONG',
+    ok(overCap, 'STRING_TOO_LONG'), why(overCap));
+
+  // A 2049-CHARACTER id whose UTF-8 is 4098 bytes. Bounding the JS string length
+  // instead would let a 3x multi-byte payload straight through the gate.
+  const multibyte = encodeFrameMessage({
+    traffic_class: 1, request_id: 'é'.repeat(LIMITS.max_string_field_bytes / 2 + 1),
+  });
+  check('a multi-byte request_id is measured in bytes, not characters',
+    ok(multibyte, 'STRING_TOO_LONG'), why(multibyte));
+
+  // A negotiated Limits may only tighten, and encode must honour the tightening
+  // too — otherwise the peer that asked for a smaller bound is the one that
+  // finds out it was ignored.
+  const negotiated = encodeFrameMessage(
+    { traffic_class: 1, request_id: 'a'.repeat(64) },
+    { limits: { max_string_field_bytes: 32 } });
+  check('a negotiated-down max_string_field_bytes binds encode',
+    ok(negotiated, 'STRING_TOO_LONG'), why(negotiated));
+
+  // The oneof is CLOSED. Field 7 is not an extension point: the peer preserves
+  // it as an unknown field, sees no body, and refuses the whole frame — a
+  // refusal with no stack trace anywhere near the bug.
+  for (const n of [7, 0, 15, 101, 113]) {
+    const r = encodeFrameMessage({ traffic_class: 1, body_field: n, raw: new Uint8Array(0) });
+    check(`body_field ${n} is not a oneof arm → PROTOCOL_VIOLATION`,
+      ok(r, 'PROTOCOL_VIOLATION'), why(r));
+  }
+  // The other half of a closed-set check: the new refusal must not have eaten a
+  // legal arm. traffic_class CONTROL, so the EPHEMERAL invariant is not in play.
+  const arms = Object.keys(BODY_NAMES).map(Number);
+  const rejected = arms.filter((n) =>
+    !encodeFrameMessage({ traffic_class: 1, body_field: n, raw: new Uint8Array(0) }).ok);
+  check(`all ${arms.length} real oneof arms still encode`, rejected.length === 0,
+    `refused ${JSON.stringify(rejected)}`);
+
+  // max_message_body_bytes, NOT the frame ceiling: the body limit is LARGER
+  // than a frame because a body arrives reassembled from fragments, so the
+  // whole-frame check at the end of encode is not a substitute for this one.
+  // It is reached with a raised maxBytes, which is what proves they are
+  // separate gates — SIZE_OVER_MAX here would mean the body bound never ran.
+  const bigBody = encodeFrameMessage(
+    { traffic_class: 1, body_field: 48, raw: new Uint8Array(LIMITS.max_message_body_bytes + 1) },
+    { maxBytes: LIMITS.max_message_body_bytes * 2 });
+  check('body over max_message_body_bytes → BYTES_TOO_LONG',
+    ok(bigBody, 'BYTES_TOO_LONG'), why(bigBody));
+
+  const bodyAtCap = encodeFrameMessage(
+    { traffic_class: 1, body_field: 48, raw: new Uint8Array(LIMITS.max_message_body_bytes) },
+    { maxBytes: LIMITS.max_message_body_bytes * 2 });
+  check('body exactly at max_message_body_bytes still encodes', bodyAtCap.ok,
+    bodyAtCap.ok ? '' : `refused: ${bodyAtCap.error}`);
+
+  // THE ONE DOCUMENTED EXCEPTION, and the reason it is not a hole. appEventsV1
+  // is a TypeScript-side negotiation Go and Rust do not have — the same
+  // asymmetry as app_event itself (see `bodiesTypedByTypescriptOnly`). Decode
+  // already raises the ceiling to APP_EVENT_LOGICAL_MAX under that flag, so
+  // encode must too, or this build would refuse to produce a body it will
+  // happily accept off the wire. Above that ceiling it still refuses, and with
+  // the flag OFF — the only mode the other two implementations run in — the
+  // bound is max_message_body_bytes exactly.
+  // APP_EVENT_JSON_MAX (1.5 MiB), not APP_EVENT_LOGICAL_MAX: the logical max is
+  // the SAME number as frame.ts's hard MAX_FRAME_BYTES, so a body sitting
+  // exactly on it can never fit a frame and SIZE_OVER_MAX is the honest answer
+  // there. 1.5 MiB is the size the live app-event path actually produces — over
+  // max_message_body_bytes, under the hard ceiling — so it is the one that
+  // distinguishes the two rules.
+  const appEvent = (n: number, flag = true) => encodeFrameMessage(
+    { traffic_class: 1, body_field: 100, raw: new Uint8Array(n) },
+    { maxBytes: APP_EVENT_LOGICAL_MAX, appEventsV1: flag });
+  check('appEventsV1 raises the body ceiling past max_message_body_bytes',
+    appEvent(APP_EVENT_JSON_MAX).ok, why(appEvent(APP_EVENT_JSON_MAX)));
+  check('the same body without appEventsV1 → BYTES_TOO_LONG',
+    ok(appEvent(APP_EVENT_JSON_MAX, false), 'BYTES_TOO_LONG'),
+    why(appEvent(APP_EVENT_JSON_MAX, false)));
+  check('appEventsV1 still refuses above APP_EVENT_LOGICAL_MAX',
+    ok(appEvent(APP_EVENT_LOGICAL_MAX + 1), 'BYTES_TOO_LONG'),
+    why(appEvent(APP_EVENT_LOGICAL_MAX + 1)));
+
 }
 
 // ── round trip ───────────────────────────────────────────────────────────────

@@ -61,6 +61,8 @@ import { STORY_E2EE, E2EE_ENABLED } from '../../constants/flags';
 import { uploadEncryptedAttachment } from '../../lib/mediaAttachments';
 import { putMediaKey } from '../../lib/mediaKeyStore';
 import { AuroraBackground } from '../../components/ui';
+import { permissionDenied } from '../../lib/permissionDenied';
+import { KeyboardSafe } from '../../components/ui/KeyboardSafe';
 
 const TEXT_BGS = ['#0B0B10', '#7E57C2', '#26A69A', '#EF5350', '#42A5F5', '#FFA726', '#5C6BC0'];
 const QUICK_EMOJIS = ['😀','😂','🥰','😍','😎','🤔','😅','😭','😡','👍','🙏','👏','🔥','✨','🎉','❤️','💔','💯','🙌','😴','🥳','😇','🤩','😱','😬','🤗','😉','😏','🤨','😌','💪','👀','🌟','⚡','🌈','☀️','🌙','⭐','💜','💙'];
@@ -181,7 +183,7 @@ export default function StatusScreen() {
     if (posting) return;
     const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (!perm.granted) {
-      Alert.alert('Permission needed', 'Allow photo library access to post a story.');
+      permissionDenied('Permission needed', 'Allow photo library access to post a story.', perm.canAskAgain);
       return;
     }
     const result = await ImagePicker.launchImageLibraryAsync({
@@ -348,7 +350,7 @@ export default function StatusScreen() {
       <View style={S.header}>
         <Text style={S.title}>Status</Text>
         <View style={{ flexDirection: 'row', gap: 6 }}>
-          <TouchableOpacity onPress={() => Alert.alert('Status', undefined, [
+          <TouchableOpacity accessibilityRole="button" accessibilityLabel="Status options" onPress={() => Alert.alert('Status', undefined, [
             { text: 'Status privacy', onPress: () => router.push('/status-privacy' as any) },
             { text: 'Cancel', style: 'cancel' },
           ])} activeOpacity={0.7} style={S.headerBtn}>
@@ -365,6 +367,7 @@ export default function StatusScreen() {
 
       {/* Text status composer (WhatsApp) */}
       <Modal visible={textOpen} transparent={false} animationType="slide" onRequestClose={() => setTextOpen(false)}>
+        <KeyboardSafe keyboardOnly>
         <View style={[S.textCompose, { backgroundColor: storyBg }]}>
           <View style={S.textComposeBar}>
             <TouchableOpacity onPress={() => setTextOpen(false)} hitSlop={10} accessibilityLabel="Cancel"><Ionicons name="close" size={26} color="#fff" /></TouchableOpacity>
@@ -423,10 +426,12 @@ export default function StatusScreen() {
             {posting ? <ActivityIndicator color="#fff" /> : <Ionicons name="send" size={24} color="#fff" />}
           </TouchableOpacity>
         </View>
+        </KeyboardSafe>
       </Modal>
 
       {/* Media status preview + caption editor (WhatsApp). Supports multiple. */}
       <Modal visible={previewAssets.length > 0} transparent={false} animationType="slide" onRequestClose={() => !posting && setPreviewAssets([])}>
+        <KeyboardSafe keyboardOnly>
         <View style={S.previewScreen}>
           <View style={S.previewBar}>
             <TouchableOpacity onPress={() => !posting && setPreviewAssets([])} hitSlop={10} accessibilityLabel="Discard">
@@ -482,6 +487,7 @@ export default function StatusScreen() {
             </TouchableOpacity>
           </View>
         </View>
+        </KeyboardSafe>
       </Modal>
 
       {error && <Text style={S.errorTxt}>{error}</Text>}

@@ -16,6 +16,7 @@ import { type Palette } from '../constants/theme';
 // that a raster suffers under resizeMode="contain".
 import KlipyBlack from '../assets/klipy/powered-by-klipy-black.svg';
 import KlipyWhite from '../assets/klipy/powered-by-klipy-white.svg';
+import { SCREEN_BOTTOM } from '../constants/layout';
 
 /** Powered by KLIPY, themed. viewBox 640x107.3 = 5.97, so sizes keep that ratio. */
 function KlipyMark({ scheme, width }: { scheme: string; width: number }) {
@@ -150,7 +151,7 @@ export default function GifPicker({ visible, onClose, onSelect, initialTab = 'gi
               rather than at the foot of the sheet where a long grid can push
               it out of view. Black on light, white on dark, from the brand pack. */}
           <KlipyMark scheme={scheme} width={92} />
-          <TouchableOpacity onPress={onClose} hitSlop={8}>
+          <TouchableOpacity accessibilityRole="button" accessibilityLabel="Close" onPress={onClose} hitSlop={8}>
             <Ionicons name="close" size={22} color={colors.textDim} />
           </TouchableOpacity>
         </View>
@@ -230,7 +231,7 @@ export default function GifPicker({ visible, onClose, onSelect, initialTab = 'gi
 
 const makeStyles = (c: Palette) => StyleSheet.create({
   overlay:   { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.55)', justifyContent: 'flex-end' },
-  sheet:     { backgroundColor: c.surfaceSolid, borderTopLeftRadius: 22, borderTopRightRadius: 22, maxHeight: '75%' },
+  sheet:     { backgroundColor: c.surfaceSolid, borderTopLeftRadius: 22, borderTopRightRadius: 22, maxHeight: '75%', paddingBottom: SCREEN_BOTTOM },
   handle:    { width: 40, height: 4, backgroundColor: c.border, borderRadius: 2, alignSelf: 'center', marginTop: 10, marginBottom: 8 },
   searchRow: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, gap: 10, marginBottom: 8 },
   input:     { flex: 1, backgroundColor: c.glassSoft, color: c.text, borderRadius: 20, paddingHorizontal: 14, paddingVertical: 8, fontSize: 14, borderWidth: StyleSheet.hairlineWidth, borderColor: c.glassStroke },

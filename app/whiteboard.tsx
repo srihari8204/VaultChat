@@ -4,10 +4,7 @@
 
 import { BRAND_ACCENT, type Palette } from '../constants/theme';
 import React, { useState, useRef , useMemo} from 'react';
-import {
-  View, Text, TouchableOpacity, StyleSheet, PanResponder,
-  StatusBar, Alert,
-} from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, PanResponder, Alert } from 'react-native';
 import { useTheme } from '../lib/theme';
 import { Stack } from 'expo-router';
 import { captureRef } from 'react-native-view-shot';
@@ -107,7 +104,6 @@ export default function WhiteboardScreen() {
       }} />
       <View style={s.container}>
       <AuroraBackground />
-        <StatusBar barStyle="light-content" />
 
         {/* Canvas */}
         <View ref={canvasRef} style={s.canvas} {...panResponder.panHandlers}>

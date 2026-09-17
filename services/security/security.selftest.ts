@@ -59,14 +59,28 @@ const lvl = (sigs: ThreatSignal[]) => assessThreats(sigs).level;
   await t.recordFailure(); await t.recordFailure();
   check('2 failures → still no signal', (await t.getCount()) === 2 && (await t.getSignal()) === null);
   await t.recordFailure();
-  check('3 failures → high signal (PIN_BRUTEFORCE)', (await t.getSignal())?.severity === 'high');
+  // SEVERITY IS medium AND THAT IS THE POINT (2026-09-17). This tracker was
+  // unreachable until the record calls moved into pinStore.verifyPin. On the
+  // day it became reachable, 'high' (weight 7) cleared restrictAt (5) BY
+  // ITSELF, so three mistyped PINs sent the launch scan to /blocked - back
+  // button disabled - for 15 minutes. The signal must inform a score built
+  // from independent indicators, never reach a verdict alone.
+  check('3 failures → signals PIN_BRUTEFORCE', (await t.getSignal())?.type === 'PIN_BRUTEFORCE');
+  check('...at medium, so it cannot restrict the app on its own',
+    (await t.getSignal())?.severity === 'medium'
+    // 'monitor' is the honest verdict for one medium signal, and
+    // securityService.ts:292 counts monitor as clean - so the launch scan
+    // does NOT send the user to /blocked. That is the invariant worth
+    // pinning: not the exact level, but that a fumbled PIN alone can never
+    // restrict or wipe.
+    && !['restrict', 'wipe'].includes(assessThreats([(await t.getSignal())!]).level));
   await t.recordFailure(); await t.recordFailure();
   // DELIBERATE: repeated wrong PINs must NEVER wipe on their own. The old
   // tracker escalated to `critical` at 5, which handed any passer-by a
   // denial-of-service (guess until the phone erases itself) and destroyed data
   // on a pocket-dial. Guessing restricts; a wipe needs a second, independent
   // indicator such as root or a hooking framework.
-  check('5 failures → still only high, never critical', (await t.getSignal())?.severity === 'high');
+  check('5 failures → still only medium, never critical', (await t.getSignal())?.severity === 'medium');
   check('5 failures alone do NOT wipe', assessThreats([(await t.getSignal())!]).level !== 'wipe');
   check('guessing + root DOES wipe', assessThreats([
     (await t.getSignal())!, signal('ROOT_DETECTED', 'su found'),
@@ -81,7 +95,7 @@ const lvl = (sigs: ThreatSignal[]) => assessThreats(sigs).level;
   let clock = 1_000_000;
   const aged = createPinAttemptTracker(makeKV(), () => clock);
   await aged.recordFailure(); await aged.recordFailure(); await aged.recordFailure();
-  check('3 recent failures signal', (await aged.getSignal())?.severity === 'high');
+  check('3 recent failures signal', (await aged.getSignal())?.severity === 'medium');
   clock += 16 * 60_000;   // longer than DECAY_MS
   check('the same failures go quiet after the decay window', (await aged.getSignal()) === null);
   check('and the count is back to 0', (await aged.getCount()) === 0);

@@ -53,19 +53,45 @@ pub struct ChunkRun {
     pub count: u64,
 }
 
+/// The largest chunk count any real transfer can have, and so the largest index
+/// list this module will ever build.
+///
+/// `chunkCount` is not a local constant — it rides the peer's manifest into
+/// `session.chunkCount` and lib/vaultBeam/drivers/lan.ts forwards it verbatim to
+/// `vb_lan_serve`/`vb_lan_connect`, where ffi.rs reads it as a raw JSON u64. An
+/// unbounded value is worse than a panic here: `(0..2^40).collect()` asks for an
+/// 8 TiB `Vec<u64>`, and a failed allocation does not unwind — `handle_alloc_error`
+/// aborts the process, straight past the `catch_unwind` every FFI entry point
+/// relies on. The ceiling therefore has to exist BEFORE the allocation does.
+///
+/// The number is two real limits divided, not a guess. A transfer is capped at
+/// 12 GiB (`vbMaxBytes` in vaultchat-backend-go/internal/routes/vaultbeam.go,
+/// mirrored as `MAX_BYTES` in lib/vaultbeamRelay.ts) and the smallest chunk any
+/// geometry in the app uses is 256 KiB (the slowest bucket in lib/networkState.ts;
+/// the canonical logical chunk is twice that, 512 KiB, in lib/vaultBeam/blockSize.ts).
+/// 12 GiB / 256 KiB = 49152, so no legitimate session can reach it.
+pub const MAX_CHUNK_COUNT: u64 = (12 * 1024 * 1024 * 1024) / (256 * 1024);
+
 /// Expand runs (or the whole file when absent) into the chunk indices to move.
 /// Order is preserved, so an ascending work-list streams ascending.
 pub fn run_indices(runs: Option<&[ChunkRun]>, chunk_count: u64) -> Vec<u64> {
+    // lan_serve/lan_connect refuse an over-large count outright; clamping again
+    // here keeps the helper safe for any other caller, since it cannot report.
+    let chunk_count = chunk_count.min(MAX_CHUNK_COUNT);
     match runs {
         None => (0..chunk_count).collect(),
         Some(rs) => {
             let mut out = Vec::new();
             for r in rs {
-                for g in r.start..r.start.saturating_add(r.count) {
-                    if g < chunk_count {
-                        out.push(g);
-                    }
-                }
+                // The clamp has to bound the ITERATION, not just what gets kept.
+                // `count` is a raw u64 from the caller's JSON, so a run of
+                // {start: 0, count: u64::MAX} used to walk 2^64 values while the
+                // `g < chunk_count` test silently dropped all but the first few:
+                // memory stayed flat, nothing panicked, and the blocking Kotlin
+                // worker thread the LAN call occupies simply never came back.
+                // A hang is the one failure `catch_unwind` cannot turn into JSON.
+                let end = r.start.saturating_add(r.count).min(chunk_count);
+                out.extend(r.start.min(end)..end);
             }
             out
         }
@@ -95,6 +121,9 @@ pub fn lan_serve(
     mut on_bound: impl FnMut(u16),
     mut on_progress: impl FnMut(u64, u64),
 ) -> Result<u64, VbError> {
+    if opts.chunk_count > MAX_CHUNK_COUNT {
+        return Err(VbError(format!("lan_range: chunkCount {} exceeds {MAX_CHUNK_COUNT}", opts.chunk_count)));
+    }
     let listener = TcpListener::bind(SocketAddr::from((Ipv4Addr::UNSPECIFIED, opts.port.unwrap_or(0))))
         .map_err(io("lanServe bind"))?;
     let port = listener.local_addr().map_err(io("lanServe local_addr"))?.port();
@@ -164,6 +193,9 @@ pub struct ConnectOpts<'a> {
 /// RECEIVER: connect, send the token, verify+write every streamed chunk at its
 /// offset (progress every 16), then send the 1-byte ack. Resolves chunk count.
 pub fn lan_connect(opts: ConnectOpts<'_>, mut on_progress: impl FnMut(u64, u64)) -> Result<u64, VbError> {
+    if opts.chunk_count > MAX_CHUNK_COUNT {
+        return Err(VbError(format!("lan_range: chunkCount {} exceeds {MAX_CHUNK_COUNT}", opts.chunk_count)));
+    }
     let addr: SocketAddr = format!("{}:{}", opts.host, opts.port)
         .parse()
         .map_err(|_| VbError(format!("lanConnect bad addr {}:{}", opts.host, opts.port)))?;
@@ -184,6 +216,19 @@ pub fn lan_connect(opts: ConnectOpts<'_>, mut on_progress: impl FnMut(u64, u64))
         reader.read_exact(&mut hdr).map_err(io("lanConnect frame hdr"))?;
         let idx = i32::from_be_bytes(hdr[0..4].try_into().unwrap()) as u64;
         let ct_len = i32::from_be_bytes(hdr[4..8].try_into().unwrap());
+        // The index is checked HERE, beside the length and before either is used
+        // for anything, for the same reason `ct_len` is: the frame is attacker-
+        // chosen. Being authenticated is not the same as being in range — a peer
+        // who holds K_t can seal a chunk under ANY id, and without this test the
+        // `idx * chunk_bytes` below decides where that plaintext lands. A
+        // negative i32 sign-extends into a huge u64 and the multiply wraps
+        // silently (release builds have overflow-checks off), so the sender
+        // picks an arbitrary offset in the receiver's file and writes verified
+        // plaintext at it. fileio.rs guards `read_cipher_chunk` and
+        // `write_cipher_chunk` exactly this way; LAN was the path that did not.
+        if idx >= opts.chunk_count {
+            return Err(VbError(format!("lanConnect chunk {idx} out of range (count {})", opts.chunk_count)));
+        }
         if ct_len < 16 || ct_len as u64 > opts.chunk_bytes + 64 {
             return Err(VbError(format!("lanConnect bad frame len {ct_len}")));
         }
@@ -193,7 +238,7 @@ pub fn lan_connect(opts: ConnectOpts<'_>, mut on_progress: impl FnMut(u64, u64))
         f.seek(SeekFrom::Start(idx * opts.chunk_bytes)).map_err(io("lanConnect seek"))?;
         f.write_all(&plain).map_err(io("lanConnect write"))?;
         received += 1;
-        if received % 16 == 0 {
+        if received.is_multiple_of(16) {
             on_progress(received, expected);
         }
     }
@@ -333,6 +378,114 @@ mod tests {
         }
 
         crate::fileio::delete_file(&src);
+        crate::fileio::delete_file(&dst);
+    }
+
+    /// `chunkCount` is peer-influenced and `(0..chunk_count).collect()` is an
+    /// allocation, not a computation — 2^40 chunks is an 8 TiB Vec<u64> and a
+    /// failed allocation ABORTS rather than unwinding, so the catch_unwind at
+    /// the FFI boundary never sees it. The ceiling must bite before the Vec.
+    #[test]
+    fn an_absurd_chunk_count_cannot_reach_the_allocator() {
+        // Just over the ceiling: small enough to run, large enough that the
+        // clamp is the only thing that can produce this answer.
+        assert_eq!(run_indices(None, MAX_CHUNK_COUNT + 1_000).len() as u64, MAX_CHUNK_COUNT);
+        // A real 12 GiB / 512 KiB transfer is nowhere near it and is untouched.
+        assert_eq!(run_indices(None, 24_576).len(), 24_576);
+
+        // …and the LAN entry points say so rather than silently moving a subset.
+        let key = [1u8; 32];
+        let e = lan_serve(
+            ServeOpts {
+                src_path: "/nonexistent", key, transfer_id: "T", file_id: "F", token: vec![0u8; 4],
+                chunk_bytes: 512 * 1024, chunk_count: 1 << 40, total_bytes: 1 << 40,
+                port: None, runs: None,
+            },
+            |_p| panic!("must be refused before a socket is bound"),
+            |_d, _t| {},
+        )
+        .unwrap_err();
+        assert!(e.0.contains("lan_range"), "got {}", e.0);
+
+        let e = lan_connect(
+            ConnectOpts {
+                host: "127.0.0.1", port: 1, dst_path: "/nonexistent", key, transfer_id: "T",
+                file_id: "F", token: vec![0u8; 4], chunk_bytes: 512 * 1024,
+                chunk_count: 1 << 40, runs: None,
+            },
+            |_d, _t| {},
+        )
+        .unwrap_err();
+        assert!(e.0.contains("lan_range"), "got {}", e.0);
+    }
+
+    /// The run bound has to stop the LOOP. Filtering only the push left the
+    /// iteration walking 2^64 values with flat memory and no panic — the LAN
+    /// call's blocking worker thread simply never returned, which is the one
+    /// failure mode catch_unwind cannot turn into a JSON error.
+    #[test]
+    fn a_giant_run_count_terminates_instead_of_spinning() {
+        assert_eq!(run_indices(Some(&[ChunkRun { start: 0, count: u64::MAX }]), 5), vec![0, 1, 2, 3, 4]);
+        assert_eq!(run_indices(Some(&[ChunkRun { start: 3, count: u64::MAX }]), 5), vec![3, 4]);
+        // A run that starts past the end yields nothing, as it always did.
+        assert!(run_indices(Some(&[ChunkRun { start: 9, count: u64::MAX }]), 5).is_empty());
+    }
+
+    /// A frame's index is attacker-chosen even when its ciphertext is authentic:
+    /// a peer holding K_t can seal a chunk under any id, and `idx * chunk_bytes`
+    /// then chooses where that plaintext lands in the destination file.
+    #[test]
+    fn a_frame_index_past_the_end_is_refused_before_anything_is_written() {
+        let key = [11u8; 32];
+        let (tid, fid) = ("LanIdx", "LanFile");
+        let (total, cb) = (100u64, 16u64);
+        let cc = crate::chunk::chunk_count(total, cb); // 7
+        let token = b"0123456789abcdef".to_vec();
+
+        let dst = tmp("idx-dst.bin");
+        crate::fileio::prealloc(&dst, total).unwrap();
+        std::fs::write(&dst, vec![0xAAu8; total as usize]).unwrap();
+
+        // A hostile sender: authentic ciphertext, but under chunk id 9 when the
+        // file only has 7 chunks. Deliberately a small overshoot rather than a
+        // negative index — a negative i32 sign-extends to ~4.3e9 and, without
+        // the bound, seeks tens of gigabytes into the file, which is not
+        // something a test should ask a filesystem to do.
+        let listener = TcpListener::bind(SocketAddr::from((Ipv4Addr::LOCALHOST, 0))).unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let tok2 = token.clone();
+        let sender = std::thread::spawn(move || {
+            let (mut s, _) = listener.accept().unwrap();
+            let mut tok = vec![0u8; tok2.len()];
+            s.read_exact(&mut tok).unwrap();
+            let ct = seal_chunk(&key, tid, fid, 9, &[0xEEu8; 16]);
+            s.write_all(&9i32.to_be_bytes()).unwrap();
+            s.write_all(&(ct.len() as i32).to_be_bytes()).unwrap();
+            s.write_all(&ct).unwrap();
+            s.flush().unwrap();
+            // Hold the connection open so the receiver fails on the index and
+            // not on a closed socket.
+            std::thread::sleep(Duration::from_millis(300));
+        });
+
+        let e = lan_connect(
+            ConnectOpts {
+                host: "127.0.0.1", port, dst_path: &dst, key, transfer_id: tid, file_id: fid,
+                token, chunk_bytes: cb, chunk_count: cc, runs: None,
+            },
+            |_d, _t| {},
+        )
+        .unwrap_err();
+        assert!(e.0.contains("out of range"), "got {}", e.0);
+
+        // The proof that matters: the destination is byte-for-byte as it was.
+        // Without the bound the chunk is written at offset 9*16 = 144 and the
+        // 100-byte file grows to 160.
+        let out = std::fs::read(&dst).unwrap();
+        assert_eq!(out.len(), total as usize, "destination must not have grown");
+        assert!(out.iter().all(|&b| b == 0xAA), "no plaintext may have landed");
+
+        sender.join().unwrap();
         crate::fileio::delete_file(&dst);
     }
 

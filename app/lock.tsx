@@ -215,16 +215,20 @@ export default function LockScreen() {
         return;
       }
 
-      // If no PIN and no secret code set, allow first-time access
-      const { hasPIN } = await import("./(constants)/authService");
-      const hasPin = await hasPIN();
-      const hasSecret = !!stored;
-      if (!hasPin && !hasSecret) {
-        // First-time user — no PIN set yet, let them in
-        await recordAuthTime();
-        router.replace("/(tabs)/chats");
-        return;
-      }
+      // FIRST-TIME ACCESS REMOVED (2026-09-17).
+      //
+      // This used to be: if no PIN and no secret code are set, let ANY 4-digit
+      // code straight into /(tabs)/chats. That was survivable while this screen
+      // was part of a first-run flow, but this screen is no longer routed from
+      // anywhere - app/app-lock.tsx is the live cold-launch gate. An unrouted
+      // file is still a routable URL in expo-router, so the branch was reachable
+      // by deep link and opened the app to anyone whenever no local PIN existed.
+      //
+      // hasPIN() reads pinStore, whose read() returns null on a JSON parse
+      // failure - so a CORRUPT pin record also read as "no PIN set" and armed
+      // this branch on a device that did have one.
+      //
+      // A wrong code is now simply a wrong code, whatever is or is not set up.
 
       handleFail();
       setCode("");

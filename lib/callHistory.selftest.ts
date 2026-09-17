@@ -7,6 +7,7 @@
 import { mergeCallHistory, type ChatNameLookup } from './callHistory';
 import type { CallLogEntry } from './callLog';
 import type { ServerCallEntry } from './callSession';
+import fs from 'node:fs';
 
 let failures = 0;
 function check(name: string, ok: boolean, detail?: string) {
@@ -105,7 +106,30 @@ out = mergeCallHistory([], [srv({ callId: 'cX', chatId: 'chat-unknown' })], ME, 
 check('an unknown chat still renders with a fallback name', !!out[0].peerName);
 eq('duration comes from the server row', out[0].durationSec, 60);
 
+// A DECLINE IS NOT A MISS.
+//
+// app/incoming-call.tsx has two call-log writes that looked alike: one when
+// the caller gives up before you answer (genuinely missed) and one when you
+// press Decline. Both wrote 'missed', so a call you deliberately refused
+// appeared in red as one you had failed to answer.
+//
+// Widening the union alone did NOT catch the display: dirLabel is a ternary
+// chain with an else, so 'declined' fell through to 'Outgoing' and tsc was
+// perfectly happy. So these assert the recorded value AND its rendering.
+{
+  const incoming = fs.readFileSync('app/incoming-call.tsx', 'utf8');
+  const declineAt = incoming.indexOf('const decline = async');
+  check('incoming-call still has a decline handler', declineAt > 0);
+  const tail = incoming.slice(declineAt, declineAt + 900);
+  check('pressing Decline logs it as declined', tail.includes(String.fromCharCode(100) + "irection: 'declined'"));
+  check('pressing Decline no longer logs a miss', !tail.includes("direction: 'missed'"));
+  check('a caller who gives up is still a miss', incoming.includes("direction: 'missed'"));
+  const calls = fs.readFileSync('app/(tabs)/calls.tsx', 'utf8');
+  check('the calls tab labels a declined call', calls.includes("d === 'declined' ? 'Declined'"));
+  check('a declined call is not painted as an error', calls.includes("d === 'declined' ? colors.textDim"));
+}
+
 console.log(failures === 0
   ? '\nALL CALL HISTORY CHECKS PASSED ✓'
   : `\n${failures} CHECK(S) FAILED ✗`);
-process.exit(failures === 0 ? 0 : 1);
+process.exit(failures === 0 ? 0 : 1);

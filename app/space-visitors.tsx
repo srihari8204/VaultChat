@@ -26,6 +26,7 @@ import {
   getVisitorPasses, issueVisitorPass, redeemVisitorPass, type VisitorPass,
 } from '../lib/spaces/api';
 import { AuroraBackground } from '../components/ui';
+import { KeyboardSafe } from '../components/ui/KeyboardSafe';
 
 const HOURS = [2, 4, 8, 24];
 
@@ -125,7 +126,7 @@ export default function SpaceVisitorsScreen() {
         options={{
           ...spaceHeader(colors, params.name ? `${params.name} · Visitors` : 'Visitors'),
           headerRight: () => (
-            <TouchableOpacity onPress={() => setIssuing(true)} style={{ paddingHorizontal: 8 }}>
+            <TouchableOpacity accessibilityRole="button" accessibilityLabel="Issue a visitor pass" onPress={() => setIssuing(true)} style={{ paddingHorizontal: 8 }}>
               <Ionicons name="add" size={24} color={colors.primary} />
             </TouchableOpacity>
           ),
@@ -184,6 +185,7 @@ export default function SpaceVisitorsScreen() {
 
       {/* issue */}
       <Modal visible={issuing} transparent animationType="fade" onRequestClose={() => setIssuing(false)}>
+        <KeyboardSafe keyboardOnly>
         <View style={s.modalWrap}>
           <View style={s.modal}>
             <Text style={s.modalTitle}>Issue a pass</Text>
@@ -214,10 +216,12 @@ export default function SpaceVisitorsScreen() {
             </View>
           </View>
         </View>
+        </KeyboardSafe>
       </Modal>
 
       {/* redeem */}
       <Modal visible={redeeming} transparent animationType="fade" onRequestClose={() => setRedeeming(false)}>
+        <KeyboardSafe keyboardOnly>
         <View style={s.modalWrap}>
           <View style={s.modal}>
             <Text style={s.modalTitle}>Visitor code</Text>
@@ -245,6 +249,7 @@ export default function SpaceVisitorsScreen() {
             </View>
           </View>
         </View>
+        </KeyboardSafe>
       </Modal>
     </View>
   );

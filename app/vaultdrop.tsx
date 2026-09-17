@@ -154,7 +154,7 @@ export default function VaultDropScreen() {
           {item.status === 'sent' && (
             <Text style={styles.sentCheck}>Done</Text>
           )}
-          <TouchableOpacity onPress={() => removeFile(item.id)} style={styles.removeBtn}>
+          <TouchableOpacity accessibilityRole="button" accessibilityLabel="Remove this file" onPress={() => removeFile(item.id)} style={styles.removeBtn}>
             <Ionicons name="close" size={14} color="#FF4D6D" />
           </TouchableOpacity>
         </View>

@@ -18,8 +18,7 @@ import { useTheme } from '../lib/theme';
 import { getTrack } from '../lib/family/history';
 import { loadAlerts, selectAlerts } from '../lib/family/alerts';
 import { circleMembers } from '../lib/family/circle';
-import { getGroup } from '../lib/groups/store';
-import { can as hasPerm, type Permission } from '../lib/groups/permissions';
+import { getGroup, historyAccess } from '../lib/groups/store';
 import { getCurrentUserAsync } from './(constants)/authService';
 import {
   summarise, groupSummary, weekBounds, formatDistance,
@@ -56,6 +55,10 @@ export default function GroupInsightsScreen() {
   // Whether this user may see OTHER members' figures. Starts denied.
   const [mayViewOthers, setMayViewOthers] = useState(false);
   const [trips, setTrips] = useState<TripRecord[]>([]);
+  /** Bumped by Retry. getCurrentUserAsync() failing used to end the screen on
+   *  "Nothing recorded yet" with no way back — the load only ever re-ran on a
+   *  fresh focus, so the user had to know to leave and come back (2026-09-17). */
+  const [reload, setReload] = useState(0);
 
   const range: Range = useMemo(() => {
     const now = Date.now();
@@ -73,14 +76,27 @@ export default function GroupInsightsScreen() {
       const myId = u ? String(u.id) : null;
 
       const g = await getGroup(groupId);
-      const perms = new Set((g?.permissions ?? []) as Permission[]);
       // Untyped legacy groups keep their previous openness rather than being
-      // silently tightened on upgrade.
-      const allowed = !g?.groupType || hasPerm(perms, 'view_history');
+      // silently tightened on upgrade — and a group whose permissions have
+      // never been CACHED is unknown, not denied (2026-09-17). The registry
+      // only learns permissions from a successful getChat, so a migrated
+      // circle, an unvisited space and every group read offline had an absent
+      // list; treating that as an empty permission set locked this screen down
+      // to "showing only your own activity" for people who own the circle.
+      // See historyAccess() for the three cases.
+      const allowed = historyAccess(g) !== 'denied';
 
+      // Withhold the LOAD, not just the computation (2026-09-17). getTrack with
+      // no userId returns EVERY member's positions, and `allowed` gated only the
+      // summarise() below — so a denied viewer's device had already been handed
+      // the whole group's track before anything was filtered. Scope the read to
+      // your own id instead: your own positions are the one reading that needs
+      // no permission. Fails closed when the id is unknown.
       const [mem, track] = await Promise.all([
         circleMembers(groupId).catch(() => [] as CircleMember[]),
-        getTrack(groupId, { from: range.from, to: range.to }),
+        allowed ? getTrack(groupId, { from: range.from, to: range.to })
+          : myId ? getTrack(groupId, { from: range.from, to: range.to, userId: myId })
+            : [],
       ]);
       await loadAlerts();
       const alerts = selectAlerts(groupId, 'all');
@@ -119,7 +135,7 @@ export default function GroupInsightsScreen() {
       setLoading(false);
     })();
     return () => { live = false; };
-  }, [groupId, range]));
+  }, [groupId, range, reload]));
 
   const summary = useMemo(() => groupSummary(insights), [insights]);
   const nameOf = (id: string) => (id === me ? 'You' : members.find((m) => m.id === id)?.name ?? 'Member');
@@ -175,18 +191,34 @@ export default function GroupInsightsScreen() {
 
           {!mayViewOthers && (
             <View style={[st.notice, { borderColor: colors.glassStroke, backgroundColor: colors.glassSoft }]}>
-              <Ionicons name="lock-closed-outline" size={15} color={colors.textDim} />
+              <Ionicons name={me ? 'lock-closed-outline' : 'alert-circle-outline'} size={15} color={colors.textDim} />
               <Text style={{ color: colors.textDim, fontSize: 12.5, flex: 1 }}>
-                Showing only your own activity — this group does not let your role view other
-                members&apos; history.
+                {me
+                  ? 'Showing only your own activity — this group does not let your role view other members’ history.'
+                  // Without an identity the denied branch cannot even read your
+                  // OWN track, so the screen was empty for a reason that had
+                  // nothing to do with the week. Say which, and offer the way out.
+                  : 'We could not confirm who you are, so not even your own figures were read. This is not an empty week — nothing was looked up.'}
               </Text>
+              {!me && (
+                <TouchableOpacity
+                  onPress={() => { setLoading(true); setReload((n) => n + 1); }}
+                  accessibilityRole="button"
+                  accessibilityLabel="Try loading insights again"
+                  style={[st.retry, { borderColor: colors.primary }]}
+                >
+                  <Text style={{ color: colors.primary, fontSize: 12.5, fontWeight: '700' }}>Retry</Text>
+                </TouchableOpacity>
+              )}
             </View>
           )}
 
           <Text style={[st.h, { color: colors.text }]}>By member</Text>
           {ranked.length === 0 && (
             <Text style={{ color: colors.textDim, fontSize: 13.5 }}>
-              Nothing recorded yet. Insights build up while location sharing is on.
+              {!mayViewOthers && !me
+                ? 'Nothing could be read until we know who you are.'
+                : 'Nothing recorded yet. Insights build up while location sharing is on.'}
             </Text>
           )}
 
@@ -271,7 +303,10 @@ const st = StyleSheet.create({
   statVal: { fontSize: 16, fontWeight: '800' },
   statLbl: { fontSize: 11 },
   vr: { width: 1, height: 30 },
-  notice: { flexDirection: 'row', alignItems: 'center', gap: 9, padding: 11, borderWidth: 1, borderRadius: 12, marginTop: 12 },
+  // flexWrap so the Retry chip drops below the sentence rather than crushing it
+  // at 320dp or font scale 1.5; minHeight, never height, for the same reason.
+  notice: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 9, padding: 11, borderWidth: 1, borderRadius: 12, marginTop: 12 },
+  retry: { borderWidth: 1, borderRadius: 999, paddingHorizontal: 14, minHeight: 34, justifyContent: 'center' },
   h: { fontSize: 13, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.3, marginTop: 26, marginBottom: 10 },
   row: { flexDirection: 'row', alignItems: 'center', gap: 11, paddingVertical: 12, borderBottomWidth: StyleSheet.hairlineWidth },
   avatar: { width: 34, height: 34, borderRadius: 17, alignItems: 'center', justifyContent: 'center' },

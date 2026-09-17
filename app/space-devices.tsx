@@ -35,6 +35,7 @@ import {
   type SpaceDevice, type DeviceEvent, type DeviceCommand,
 } from '../lib/spaces/api';
 import { AuroraBackground } from '../components/ui';
+import { KeyboardSafe } from '../components/ui/KeyboardSafe';
 
 const KINDS: { key: string; label: string; icon: keyof typeof Ionicons.glyphMap }[] = [
   { key: 'phone', label: 'Phone', icon: 'phone-portrait-outline' },
@@ -158,7 +159,7 @@ export default function SpaceDevicesScreen() {
         options={{
           ...spaceHeader(colors, params.name ? `${params.name} · Devices` : 'Devices'),
           headerRight: () => (
-            <TouchableOpacity onPress={() => setAdding(true)} style={{ paddingHorizontal: 8 }}>
+            <TouchableOpacity accessibilityRole="button" accessibilityLabel="Add a device" onPress={() => setAdding(true)} style={{ paddingHorizontal: 8 }}>
               <Ionicons name="add" size={24} color={colors.primary} />
             </TouchableOpacity>
           ),
@@ -226,7 +227,7 @@ export default function SpaceDevicesScreen() {
       <Modal visible={!!open} animationType="slide" onRequestClose={() => setOpen(null)}>
         <View style={s.screen}>
           <View style={s.sheetHead}>
-            <TouchableOpacity onPress={() => setOpen(null)}>
+            <TouchableOpacity accessibilityRole="button" accessibilityLabel="Close" onPress={() => setOpen(null)}>
               <Ionicons name="close" size={24} color={colors.text} />
             </TouchableOpacity>
             <Text style={s.sheetTitle} numberOfLines={1}>{open?.label}</Text>
@@ -312,6 +313,7 @@ export default function SpaceDevicesScreen() {
 
       {/* add */}
       <Modal visible={adding} transparent animationType="fade" onRequestClose={() => setAdding(false)}>
+        <KeyboardSafe keyboardOnly>
         <View style={s.modalWrap}>
           <View style={s.modal}>
             <Text style={s.modalTitle}>Add a device</Text>
@@ -342,10 +344,12 @@ export default function SpaceDevicesScreen() {
             </View>
           </View>
         </View>
+        </KeyboardSafe>
       </Modal>
 
       {/* show-a-message */}
       <Modal visible={asking} transparent animationType="fade" onRequestClose={() => setAsking(false)}>
+        <KeyboardSafe keyboardOnly>
         <View style={s.modalWrap}>
           <View style={s.modal}>
             <Text style={s.modalTitle}>Message on the lock screen</Text>
@@ -364,6 +368,7 @@ export default function SpaceDevicesScreen() {
             </View>
           </View>
         </View>
+        </KeyboardSafe>
       </Modal>
     </View>
   );

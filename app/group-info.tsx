@@ -51,6 +51,7 @@ import {
 import { unionWithLocalHistory } from '../lib/messageHistory';
 import SharedMediaThumb from '../components/chat/SharedMediaThumb';
 import { AuroraBackground } from '../components/ui';
+import { permissionDenied } from '../lib/permissionDenied';
 
 function useS() {
   const { colors } = useTheme();
@@ -188,7 +189,7 @@ export default function GroupInfoScreen() {
     if (!chat || !isAdmin || photoBusy) return;
     const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (!perm.granted) {
-      Alert.alert('Permission needed', 'Allow photo library access to set the group photo.');
+      permissionDenied('Permission needed', 'Allow photo library access to set the group photo.', perm.canAskAgain);
       return;
     }
     const result = await ImagePicker.launchImageLibraryAsync({

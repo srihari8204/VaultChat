@@ -42,11 +42,34 @@ export default function InterestCalc() {
       if (to <= from) return Alert.alert('Dates', 'End date must be after start date.');
       years = (to - from) / 31536000000;
     } else {
-      years = (num(durY) || 0) + (num(durM) || 0) / 12 + (num(durD) || 0) / 365;
+      // `|| 0` SWALLOWED THE HARDENED PARSER (2026-09-17). num() returns NaN
+      // for a half-typed "1,2" so that `!(x > 0)` can reject it — but `|| 0`
+      // turns that NaN back into a believable zero BEFORE the check, and the
+      // check then passes on the strength of the other two boxes. Years "1,2"
+      // with Months "6" calculated 0.5 years instead of 1.7 and WROTE that
+      // duration to interest_history, with no alert and a plausible number on
+      // the hero card. Blank is still 0 — num('') is 0, not NaN — so an
+      // unfilled Months box costs nothing.
+      const dY = num(durY), dM = num(durM), dD = num(durD);
+      if (!Number.isFinite(dY) || !Number.isFinite(dM) || !Number.isFinite(dD)) {
+        return Alert.alert('Duration', 'Years, months and days must be plain numbers. Use digits only — 1200 or 1,200 both work — or leave a box empty.');
+      }
+      years = dY + dM / 12 + dD / 365;
       if (!(years > 0)) return Alert.alert('Duration', 'Enter a duration greater than 0.');
     }
     const annual = periodRateToAnnualPct(R, rateMode, period);
     const r = type === 'simple' ? simpleInterest(P, annual, years) : compoundInterest(P, annual, years, 1);
+    // Nothing bounds the rate or the duration, and compounding overflows fast:
+    // a daily rate annualises to ×365 and P·(1+r)^(n·T) with T = 999999999 is
+    // Infinity. round2(Infinity) is Infinity, so the hero card read "₹∞" and
+    // interest_history (REAL NOT NULL) took Infinity on disk, where nothing
+    // downstream can recover from it. The bound is MAX_SAFE_INTEGER: past it a
+    // double can no longer hold whole rupees, so round2() and the stored REAL
+    // are already lying — a result we cannot represent is not a result we
+    // should show or save (2026-09-17).
+    if (!Number.isFinite(r.total) || Math.abs(r.total) > Number.MAX_SAFE_INTEGER) {
+      return Alert.alert('Out of range', 'That rate and duration produce a number too large to calculate. Try a shorter duration or a lower rate.');
+    }
     const out = { interest: round2(r.interest), total: round2(r.total), years };
     setRes(out);
     if (me) {

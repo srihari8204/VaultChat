@@ -21,6 +21,128 @@ export function formatMoney(n: number, symbol = '₹'): string {
   return symbol + v.toLocaleString('en-IN', { maximumFractionDigits: 2 });
 }
 
+/**
+ * Is this string a number at all?
+ *
+ * The other half of `num()` in app/shop-book.tsx, which answers "what number is
+ * this?" and — because `Number('')` is a perfectly finite 0 — cannot tell a
+ * BLANK box from a typed "₹285". Both arrive as a believable zero, and a zero
+ * passes a `< 0` guard, so an item could be sold for ₹0 and a ₹0 invoice
+ * printed. Blank is the caller's business (several fields legitimately mean 0
+ * when blank); GARBAGE never is.
+ *
+ * Strict on purpose, and rejection is the right answer rather than parsing:
+ *  - Number() accepts things no keyboard means: Number('0x10') is 16 and
+ *    Number('1e3') is 1000. A quantity of "0x10" used to mean sixteen.
+ *  - These are keyboardType="numeric" fields, so ₹ arrives by paste or a
+ *    locale keyboard — a rare path not worth a locale decision.
+ *
+ * Thousands grouping IS accepted, by the same rule utils/financeFormat.ts has
+ * always used (2026-09-17). This screen ships in India, where "1,200" and
+ * "1,00,000" are what a shopkeeper actually types; refusing them outright made
+ * a correctly-typed lakh look like garbage. See ungroup() below for why "12,5"
+ * is still refused.
+ *
+ * The house style for strict parsing already exists here: minsOfDay below
+ * returns null on anything unexpected. num() predates that lesson.
+ *
+ * A leading '-' is allowed: the stock screen deliberately accepts negative
+ * corrections. Every other call site already rejects negatives with its own
+ * guard.
+ */
+export function isNum(s: string): boolean {
+  const t = ungroup((s ?? '').trim());
+  return t != null && /^-?\d*\.?\d+$/.test(t);
+}
+
+/**
+ * Strip thousands grouping, or null when the commas are not grouping.
+ *
+ * THE COMMA IS THE WHOLE PROBLEM, and utils/financeFormat.ts already solved it
+ * — this is that rule, so the two screens cannot disagree about what a typed
+ * "1,00,000" is worth.
+ *
+ * A thousands separator is always followed by exactly three digits: in Western
+ * (1,200) and Indian (1,00,000) grouping alike the LAST group is three. One or
+ * two digits after the final comma is the decimal comma much of the world
+ * types, and a bare strip would turn "12,5" into 125 — a ₹12.50 item billed at
+ * ₹125, a TEN TIMES error with a plausible number at the end of it. So it is
+ * refused rather than multiplied.
+ */
+/**
+ * The submit gate for a money field where BLANK legitimately means zero/none.
+ *
+ * Seven money writes in app/shop-book.tsx called num() with no gate at all
+ * (2026-09-17), and every one of them had the same shape: blank is a real
+ * answer — no tax, no cost price, no minimum order, no credit ceiling — while
+ * garbage is not, yet num() renders both as an identical, believable 0. That 0
+ * then survives every `< 0` range check downstream, because 0 is not negative.
+ *
+ * Blank is the caller's business; GARBAGE never is. This says which is which.
+ */
+export function isBlankOrNum(s: string): boolean {
+  const t = (s ?? '').trim();
+  return t === '' || isNum(t);
+}
+/**
+ * As isBlankOrNum, but also refuses a NEGATIVE value.
+ *
+ * isNum accepts a leading minus on purpose - the stock screen takes negative
+ * corrections - so the garbage gates alone still let a negative through on
+ * fields where one is meaningless: a catalog price, an alternative price, a
+ * coupon minimum, a line on a customer bill, a bill discount. A negative price
+ * is not a typo the server rejects; it is a discount nobody authorised, and on
+ * the catalog it re-prices every future order of that product. On a bill
+ * DISCOUNT a negative is worse still - it is a surcharge (2026-09-17).
+ *
+ * NON-NEGATIVE, NOT POSITIVE, and named that way since 2026-09-17: a typed "0"
+ * passes. It used to be called isBlankOrPositive, and three comments then
+ * claimed the gates it guards catch a typed zero - they never did, and a name
+ * that lies is how that belief spread. Where zero is genuinely wrong the caller
+ * says so itself; see the ad-hoc bill line in app/shop-book.tsx.
+ */
+export function isBlankOrNonNegative(s: string): boolean {
+  const t = (s ?? '').trim();
+  if (t === '') return true;
+  return isNum(t) && num(t) >= 0;
+}
+
+
+function ungroup(t: string): string | null {
+  if (t.includes(',') && !/^[0-9]{3}([.][0-9]+)?$/.test(t.slice(t.lastIndexOf(',') + 1))) return null;
+  return t.replace(/,/g, '');
+}
+
+/**
+ * Parse a money / quantity field, falling back to 0.
+ *
+ * app/shop-book.tsx had this as a bare Number(s), which accepts forms a price
+ * field never means: Number('0x10') is 16 and Number('1e3') is 1000, so a
+ * typo produced a WRONG NUMBER rather than a rejection.
+ *
+ * Grouping now parses (2026-09-17, ungroup() above): "1,200" is 1200 and
+ * "1,00,000" is one lakh. It used to fall through to 0, so a shopkeeper typing
+ * the separator every Indian price tag carries silently priced the line at
+ * nothing. "12,5" is still 0 — a decimal comma is not grouping.
+ *
+ * Returns 0, not NaN, where financeFormat's twin returns NaN: every caller
+ * here assumes a number. That is exactly why the 0 is dangerous, and why the
+ * money call sites gate on isNum FIRST rather than trusting this.
+ *
+ * Deliberately looser than isNum in ONE way: a trailing point is kept, because
+ * this also runs on half-typed input while a running total is on screen, and
+ * flicking the total to 0 on the keystroke between '12' and '12.5' would be
+ * its own bug. isNum stays the strict gate on submit.
+ */
+export function num(s: string): number {
+  const t = ungroup(String(s ?? '').trim());
+  if (t == null) return 0;
+  if (t === '' || t === '-' || t === '.' || t === '-.') return 0;
+  if (!/^-?[0-9]*[.]?[0-9]*$/.test(t)) return 0;
+  const n = Number(t);
+  return Number.isFinite(n) ? n : 0;
+}
+
 export function formatINR(n: number): string {
   return formatMoney(n, '₹');
 }

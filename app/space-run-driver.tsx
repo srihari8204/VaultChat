@@ -42,6 +42,7 @@ import {
   type Run, type RunStop, type RunRider, type RiderState,
 } from '../lib/spaces/runs';
 import { AuroraBackground } from '../components/ui';
+import { KeyboardSafe } from '../components/ui/KeyboardSafe';
 
 /** Heartbeat cadence. The server calls a run stale after 3 minutes, so a
  *  60s beat survives one lost request without raising a false GPS-offline. */
@@ -486,6 +487,7 @@ export default function SpaceRunDriverScreen() {
 
       {/* handover code */}
       <Modal visible={!!codeFor} transparent animationType="fade" onRequestClose={() => setCodeFor(null)}>
+        <KeyboardSafe keyboardOnly>
         <View style={s.modalWrap}>
           <View style={s.modal}>
             <Text style={s.modalTitle}>Handover code</Text>
@@ -513,6 +515,7 @@ export default function SpaceRunDriverScreen() {
             </View>
           </View>
         </View>
+        </KeyboardSafe>
       </Modal>
 
       {/* incident */}

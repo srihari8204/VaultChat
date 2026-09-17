@@ -121,11 +121,32 @@ async function connect(): Promise<RealtimeSocket> {
   perf.setConnState('connecting'); setConn('CONNECTING');
   let candidate: RealtimeSocket | null = null;
   try {
-    const m = await import('./ccwire/transport');
-    const { CCWireEventSocket } = await import('./ccwire/eventsSocket');
-    let deviceId: string | undefined;
-    try { deviceId = await import('../services/deviceService').then((x) => x.getDeviceId()); } catch {}
-    const native = await import('./ccwire/nativeSocket').catch(() => null);
+    // Collapsed from sequential awaits into one Promise.all (2026-09-17).
+    //
+    // WHAT THIS ACTUALLY BUYS, precisely — the obvious story is wrong:
+    // metro-runtime's asyncRequire returns a SYNCHRONOUS require wrapped in a
+    // resolved promise, so these import() calls do no I/O and awaiting one only
+    // costs a microtask, not a yield back to the boot effect. Three of the five
+    // are also one static dependency chain (eventsSocket -> transport ->
+    // client), so requiring eventsSocket already evaluates the other two.
+    // The ONE real win: import('./ccwire/nativeSocket') used to sit behind
+    // `await getDeviceId()`, a genuine SecureStore/Keystore round trip (tens of
+    // ms on Android). Its module eval now overlaps that read. That is all.
+    //
+    // FAILURE SEMANTICS: preserved for every entry — a transport/eventsSocket/
+    // client rejection still rejects and lands in the catch below; nativeSocket
+    // still degrades to null; getDeviceId() still degrades to undefined. ONE
+    // difference: because the requires run left-to-right as the array is built,
+    // getDeviceId() now also runs on a failing-transport path where it used to
+    // be skipped, so a first-run device may persist vc_device_id there. It is
+    // idempotent and would happen on the next successful connect anyway.
+    const [m, { CCWireEventSocket }, { seedFromDeviceId }, deviceId, native] = await Promise.all([
+      import('./ccwire/transport'),
+      import('./ccwire/eventsSocket'),
+      import('./ccwire/client'),
+      import('../services/deviceService').then((x) => x.getDeviceId()).catch(() => undefined) as Promise<string | undefined>,
+      import('./ccwire/nativeSocket').catch(() => null),
+    ]);
     const webSocket = native?.getNativeWebSocketImpl();
     const webTransportUrl = m.ccwireWebTransportUrl(SERVER_URL, process.env.EXPO_PUBLIC_CCWIRE_WEBTRANSPORT_URL);
     const webTransport = webTransportUrl ? native?.getNativeWebSocketImpl(webTransportUrl) : undefined;
@@ -138,6 +159,12 @@ async function connect(): Promise<RealtimeSocket> {
       // Stable per-install id for the protobuf ClientHello. Authorization
       // remains the upgrade JWT; devices without the native module use JS WS.
       deviceId,
+      // The same id, as the reconnect jitter seed. Left unset it defaults to 1
+      // on every install, so every handset draws the same jitter factor and
+      // rebuilds the same backoff ladder — a restart that drops every socket
+      // brings them all back in one millisecond window, which is exactly what
+      // the jitter is there to stop.
+      seed: seedFromDeviceId(deviceId),
       WebSocketImpl: webTransport ?? webSocket,
       carrier: webTransport ? 'rust-wt' : webSocket ? 'rust-ws' : 'ws',
       webSocketFallback: webTransport ? { WebSocketImpl: webSocket, carrier: webSocket ? 'rust-ws' : 'ws' } : undefined,

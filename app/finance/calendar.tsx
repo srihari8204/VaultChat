@@ -71,9 +71,9 @@ export default function FinanceCalendar() {
       <FinHeader title="Calendar" />
       <ScrollView contentContainerStyle={s.body} showsVerticalScrollIndicator={false}>
         <View style={s.monthHead}>
-          <TouchableOpacity onPress={() => step(-1)} hitSlop={10}><Ionicons name="chevron-back" size={22} color={FIN.text} /></TouchableOpacity>
+          <TouchableOpacity accessibilityRole="button" accessibilityLabel="Previous month" onPress={() => step(-1)} hitSlop={10}><Ionicons name="chevron-back" size={22} color={FIN.text} /></TouchableOpacity>
           <Text style={s.monthTitle}>{MON[monthIdx]} {year}</Text>
-          <TouchableOpacity onPress={() => step(1)} hitSlop={10}><Ionicons name="chevron-forward" size={22} color={FIN.text} /></TouchableOpacity>
+          <TouchableOpacity accessibilityRole="button" accessibilityLabel="Next month" onPress={() => step(1)} hitSlop={10}><Ionicons name="chevron-forward" size={22} color={FIN.text} /></TouchableOpacity>
         </View>
 
         <View style={s.wdRow}>{WD.map(w => <Text key={w} style={s.wd}>{w}</Text>)}</View>

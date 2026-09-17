@@ -223,7 +223,12 @@ function deviceId(): Promise<string | null> {
   return _deviceIdPromise;
 }
 
-async function rawFetch(path: string, opts: ApiOptions): Promise<Response> {
+/**
+ * @param sentAs out-param: the `sub` of the token this request actually went out
+ *   with. api() needs it to tell a 401 for THIS session from a 401 for a session
+ *   that has since been replaced — see the call site.
+ */
+async function rawFetch(path: string, opts: ApiOptions, sentAs?: { sub: string }): Promise<Response> {
   // Strip our internal keys so they don't leak into fetch init.
   const { json, auth, expectedUserId, headers: optHeaders, body: optBody, ...init } = opts;
 
@@ -244,6 +249,7 @@ async function rawFetch(path: string, opts: ApiOptions): Promise<Response> {
   if (auth !== false) {
     const token = await getAccessToken();
     if (expectedUserId && tokenSubject(token) !== expectedUserId) throw new SessionEndedError();
+    if (sentAs) sentAs.sub = tokenSubject(token);   // free: we already hold the token
     if (token) headers.Authorization = `Bearer ${token}`;
   }
 
@@ -391,9 +397,26 @@ async function endSessionAndBounce(expectedUserId?: string): Promise<void> {
       sessionEndingPromise = null;
       return;
     }
-    if (expectedUserId && tokenSubject(await getAccessToken()) !== expectedUserId) return;
-    await clearTokens();
-    await setCachedUser(null);
+    // THE 401 BELONGS TO SOMEBODY ELSE'S SESSION — leave this one alone.
+    // Now that almost every caller supplies an id (see api()), this guard is
+    // live rather than theoretical. Null the guard promise on the way out, the
+    // same way the no-session branch above does: a stale 401 must not suppress
+    // the CURRENT user's genuine sign-out for the next five seconds.
+    if (expectedUserId && tokenSubject(await getAccessToken()) !== expectedUserId) {
+      sessionEndingPromise = null;
+      return;
+    }
+    // A FORCED SIGN-OUT ENDS THE ACCOUNT ON THIS DEVICE, NOT JUST ITS TOKENS.
+    // 2026-09-17.
+    //
+    // This used to be clearTokens() + setCachedUser(null), and then it navigated
+    // to /onboard — a screen where somebody else signs in. The previous user's
+    // message database, media, document cache, PIN record, face templates and
+    // E2EE identity were all still on disk underneath them. The full purge
+    // existed the whole time, on logoutUser(); it just was not reachable from
+    // the path that fires when a token is REVOKED, i.e. the path a stolen phone
+    // takes. purgeAccountData() starts with the same two calls.
+    //
     try {
       // expo-router's imperative router is safe outside React components.
       //
@@ -406,6 +429,28 @@ async function endSessionAndBounce(expectedUserId?: string): Promise<void> {
     } catch (err) {
       console.warn('[api] could not redirect after session end:', (err as any)?.message);
     }
+    // REDIRECT FIRST, PURGE AFTER — AND DO NOT AWAIT IT HERE. 2026-09-17.
+    //
+    // The purge used to run before the redirect and inside this promise. It
+    // cannot throw (best-effort by contract), but it can take a long time: a
+    // filesystem sweep, clearLocalDb, and ~25 SecureStore round trips. For that
+    // whole window the user sat on a signed-in screen that no longer works —
+    // and worse, `sessionEndingPromise` is the guard EVERY concurrent 401 joins,
+    // so one step that never settled meant it never resolved, the 5s reset in
+    // the finally below never ran, and every later forced sign-out queued
+    // silently behind a dead promise.
+    //
+    // Detaching keeps that guard bounded by the redirect alone. Nothing is
+    // weakened: purgeAccountData() runs to completion either way, and it starts
+    // with clearTokens(), so the credentials are gone within its first step.
+    // The 5-second guard window still prevents a second purge racing this one.
+    //
+    // Dynamic require: authService imports this module at the top, so a static
+    // import would close a cycle.
+    try {
+      void require('../app/(constants)/authService').purgeAccountData()
+        .catch(async () => { await clearTokens().catch(() => {}); await setCachedUser(null).catch(() => {}); });
+    } catch { await clearTokens().catch(() => {}); await setCachedUser(null).catch(() => {}); }
   })();
   try { await sessionEndingPromise; } finally {
     // Reset after a beat so a future fresh sign-in starts clean.
@@ -427,7 +472,11 @@ export function refreshAccessToken(): Promise<RefreshOutcome> {
 }
 
 export async function api<T = any>(path: string, opts: ApiOptions = {}): Promise<T> {
-  let res = await rawFetch(path, opts);
+  // Whose session this request actually went out under — filled in by rawFetch
+  // from the token it attached. Used only on the terminal-401 path below, to
+  // keep a dead session's 401 from purging a live account. 2026-09-17.
+  const sentAs = { sub: '' };
+  let res = await rawFetch(path, opts, sentAs);
 
   // Auto-refresh once on 401
   if (res.status === 401 && opts.auth !== false) {
@@ -444,6 +493,25 @@ export async function api<T = any>(path: string, opts: ApiOptions = {}): Promise
       // Refresh failed → session is dead. Clear tokens and bounce to /welcome
       // so the user can sign in again instead of staring at a "token_expired"
       // alert with no way forward.
+      // A 401 FOR A SESSION THAT IS ALREADY GONE MUST NOT PURGE THE NEW ONE.
+      //
+      // The bounce below now destroys the account's local data, so it matters
+      // enormously that it destroys the right account's. endSessionAndBounce
+      // has a guard for exactly that, but it only engages when the caller
+      // passed expectedUserId — and almost no caller does. A long-running
+      // request issued by account A that 401s after B has signed in would
+      // therefore wipe B's messages, media and E2EE identity. Before the purge
+      // was wired into this path the same race cost B only their tokens, which
+      // is why an optional parameter looked like enough.
+      //
+      // sentAs.sub is whose token actually went out, recorded by rawFetch at no
+      // extra cost. If the live token now belongs to somebody else, this 401 is
+      // about a session that has already ended: reject the request and leave
+      // the current one strictly alone. An unreadable/absent sub is '', which
+      // leaves this inert — i.e. exactly the old behaviour, never worse.
+      if (!opts.expectedUserId && sentAs.sub && tokenSubject(await getAccessToken()) !== sentAs.sub) {
+        throw new SessionEndedError();
+      }
       await endSessionAndBounce(opts.expectedUserId);
       // AUDIT F09, completed. This used to return a promise that never settled,
       // which suppressed the "token_expired" dialog that the ~20 sites doing

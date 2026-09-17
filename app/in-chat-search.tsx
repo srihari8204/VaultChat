@@ -11,16 +11,14 @@
 
 import { brandAlpha, type Palette } from '../constants/theme';
 import React, { useState, useEffect, useRef, useCallback , useMemo} from 'react';
-import {
-  View, Text, TextInput, TouchableOpacity, StyleSheet,
-  FlatList, StatusBar, ActivityIndicator,
-} from 'react-native';
+import { View, Text, TextInput, TouchableOpacity, StyleSheet, FlatList, ActivityIndicator } from 'react-native';
 import { useLocalSearchParams, Stack, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../lib/theme';
 import { searchInChat, type InChatMessageHit } from '../lib/chatService';
 import { setPendingJump } from '../lib/chatJump';
 import { AuroraBackground } from '../components/ui';
+import { HEADER_TOP } from '../constants/layout';
 
 function useS() {
   const { colors } = useTheme();
@@ -122,7 +120,6 @@ export default function InChatSearchScreen() {
   return (
     <View style={s.root}>
       <AuroraBackground />
-      <StatusBar barStyle="light-content" backgroundColor={colors.bg} />
       <Stack.Screen options={{ headerShown: false }} />
 
       <View style={s.header}>
@@ -203,11 +200,13 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   header: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingTop: 54,
+    paddingTop: HEADER_TOP,
     paddingHorizontal: 16,
     paddingBottom: 14,
   },
   backBtn: { marginRight: 12 },
+  // 2026-09-18: the 15sp input is ~30dp of line box at font scale 1.5 and the
+  // pinned 42 clipped it. minHeight holds the same 42 at scale 1.0.
   searchBox: {
     flex: 1,
     flexDirection: 'row',
@@ -217,7 +216,8 @@ const makeStyles = (c: Palette) => StyleSheet.create({
     borderWidth: 1,
     borderColor: c.glassStroke,
     paddingHorizontal: 12,
-    height: 42,
+    minHeight: 42,
+    paddingVertical: 6,
   },
   searchInput: { flex: 1, color: c.text, fontSize: 15, padding: 0 },
   badgeRow: { flexDirection: 'row', paddingHorizontal: 16, paddingTop: 8 },

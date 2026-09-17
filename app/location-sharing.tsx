@@ -27,6 +27,7 @@ import { sendMessage } from '../lib/chatService';
 import { newLiveKey, encryptPosition } from '../lib/liveLocationCrypto';
 import { AuroraBackground } from '../components/ui';
 import LocationMap, { type MapPoint } from '../components/LocationMap';
+import { permissionDenied } from '../lib/permissionDenied';
 
 const DURATIONS = [
   { val: 15, label: '15 min' }, { val: 30, label: '30 min' }, { val: 60, label: '1 hr' },
@@ -72,10 +73,10 @@ export default function LocationSharingScreen() {
   useEffect(() => {
     let mounted = true;
     (async () => {
-      const { status } = await Location.requestForegroundPermissionsAsync();
+      const { status, canAskAgain } = await Location.requestForegroundPermissionsAsync();
       if (status !== 'granted') {
         if (mounted) setDenied(true);
-        Alert.alert('Permission needed', 'Location access is required.');
+        permissionDenied('Location needed', 'Allow location access to share where you are.', canAskAgain);
         return;
       }
       const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });

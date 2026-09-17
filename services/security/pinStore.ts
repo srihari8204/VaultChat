@@ -19,6 +19,7 @@ import * as Crypto from 'expo-crypto';
 import {
   makePinRecordAsync, checkPinRecordAsync, type PinRecord,
 } from './vaultKeys';
+import { createPinAttemptTracker } from './pinAttempts';
 
 const KEY          = 'vc_pin_v1';     // the scrypt record
 const LEGACY_HASH  = 'vc_pin_hash';   // authService: unsalted SHA-256 of the PIN
@@ -60,10 +61,49 @@ export async function setPin(pin: string): Promise<void> {
   try { await (await apiMod()).sealCurrentSession(pin); } catch {}
 }
 
+// ─── Brute-force tracking lives HERE, not in the screens. 2026-09-17 ─────────
+//
+// services/security/pinAttempts has done this correctly since it was written,
+// and it was never reachable: recordFailure() had one caller
+// (securityService.verifyPIN, whose only caller is an unrouted screen) and
+// getBackoffMs() had NO caller anywhere. So a guessing attack against the app
+// lock, the vault or a hidden chat raised no signal and cost the attacker
+// nothing. verifyPin is the one function every local PIN check already routes
+// through, so wiring it here fixes all of them without touching a screen.
+//
+// Second tracker instance, on purpose: securityService keeps its own for
+// getSignal(). The tracker is stateless — all of it is the one SecureStore key
+// — so both instances read and write the same streak.
+const attempts = createPinAttemptTracker({
+  get: (k: string) => SecureStore.getItemAsync(k),
+  set: (k: string, v: string) => SecureStore.setItemAsync(k, v),
+  del: (k: string) => SecureStore.deleteItemAsync(k).then(() => undefined),
+});
+
 /** True when `pin` is the stored PIN. Upgrades a legacy value on first success. */
 export async function verifyPin(pin: string): Promise<boolean> {
   if (!pin) return false;
 
+  // Refuse while the backoff owed by the current streak is unspent.
+  //
+  // Returning false WITHOUT recording a failure is the whole safety argument:
+  // counting a refused attempt would extend the streak that caused the refusal,
+  // and a user tapping an impatient retry would ratchet themselves into a
+  // lockout that never ends. As written the streak can only grow from a real
+  // wrong PIN, caps at 60s (pinAttempts.BACKOFF_MS) and decays after 15 quiet
+  // minutes, so no PIN holder is ever locked out for good.
+  try { if (await attempts.getBackoffMs() > 0) return false; } catch {}
+
+  const ok = await check(pin);
+  // Never let the tracker's storage break an otherwise correct unlock.
+  try {
+    if (ok) await attempts.recordSuccess();
+    else await attempts.recordFailure();
+  } catch {}
+  return ok;
+}
+
+async function check(pin: string): Promise<boolean> {
   const rec = await read();
   if (rec) return checkPinRecordAsync(rec, pin);
 

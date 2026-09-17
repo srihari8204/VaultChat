@@ -52,5 +52,47 @@ console.log('\nKeyboard closed:');
 eq('a keyboard flush with the bottom covers nothing',
   keyboardInsetFrom({ screenY: SCREEN, height: 0 }, SCREEN), 0);
 
+// A MODAL DOES NOT GET adjustResize.
+//
+// The activity is adjustResize, but an RN <Modal> is a separate window and
+// never receives it - so a TextInput near the bottom of a modal sits under
+// the keyboard with nothing to push it clear. 15 screens shipped that way,
+// including every compose sheet in the Spaces section.
+//
+// KeyboardSafe works here because useKeyboardInset listens to the Keyboard
+// events globally rather than relying on the window being resized. Wrapping
+// the modal body in it lifts a bottom sheet and shrinks a centred card,
+// which is the right behaviour for both.
+const fsx = require('node:fs');
+const pathx = require('node:path');
+function walkx(d, o = []) {
+  for (const e of fsx.readdirSync(d, { withFileTypes: true })) {
+    const q = pathx.join(d, e.name);
+    if (e.isDirectory()) walkx(q, o);
+    else if (/[.]tsx$/.test(e.name) && !e.name.includes('selftest')) o.push(q.split(pathx.sep).join('/'));
+  }
+  return o;
+}
+const unguarded: string[] = [];
+for (const dir of ['app', 'components']) {
+  for (const f of walkx(dir)) {
+    const src = fsx.readFileSync(f, 'utf8');
+    if (!src.includes('<Modal')) continue;
+    const L2 = src.split(String.fromCharCode(10));
+    let depth = 0, hasInput = false;
+    for (const l of L2) {
+      if (l.includes('<Modal')) depth++;
+      if (depth > 0 && l.includes('<TextInput')) hasInput = true;
+      if (l.includes('</Modal>')) depth--;
+    }
+    if (!hasInput) continue;
+    if (src.includes('KeyboardSafe') || src.includes('KeyboardAvoidingView') || src.includes('useKeyboardInset')) continue;
+    if (src.includes('keyboard-exempt:')) continue;
+    unguarded.push(f);
+  }
+}
+eq('every modal with a text field handles the keyboard', unguarded.length, 0);
+if (unguarded.length) console.log('    ' + unguarded.join(String.fromCharCode(10) + '    '));
+
 console.log(failures ? `\n  ${failures} FAILED\n` : '\n  all keyboard-inset checks passed\n');
 process.exit(failures ? 1 : 0);

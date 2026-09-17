@@ -23,6 +23,7 @@ import { useLocalSearchParams } from 'expo-router';
 import { ThreatDetail } from '../services/securityService';
 import type { Palette } from '../constants/theme';
 import { useColors } from '../lib/theme';
+import { HEADER_TOP } from '../constants/layout';
 
 // Threat type to human-readable label mapping
 const THREAT_LABELS: Record<string, { label: string; icon: string; desc: string }> = {
@@ -261,7 +262,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   },
   topBar: {
     backgroundColor: '#FF4D6D',
-    paddingTop: 52,
+    paddingTop: HEADER_TOP,
     paddingBottom: 10,
     alignItems: 'center',
   },

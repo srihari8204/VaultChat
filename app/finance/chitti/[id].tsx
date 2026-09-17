@@ -107,9 +107,16 @@ export default function ChittiDetail() {
   };
 
   const submitAuction = async () => {
-    const b = num(bid), c = num(commission) || 0;
+    // `|| 0` SWALLOWED THE HARDENED PARSER (2026-09-17). num() answers NaN for
+    // a half-typed "1,2" precisely so a guard can see it; `|| 0` converted that
+    // back to a believable zero, so a commission the organiser typed was
+    // RECORDED AS NONE and the whole bid was then split across every member —
+    // over-distributing real money, silently. `!(c >= 0)` rejects the NaN and a
+    // negative commission alike; blank stays 0, because num('') is 0.
+    const b = num(bid), c = num(commission);
     if (!winnerId) return Alert.alert('Winner', 'Select the winning member.');
     if (!(b > 0)) return Alert.alert('Winning bid', 'Enter the winning bid amount.');
+    if (!(c >= 0)) return Alert.alert('Commission', 'The commission must be a plain number — digits only, 1200 or 1,200 — or empty for none. It cannot be negative.');
     const winner = members.find(m => m.id === winnerId);
     await recordAuction(g, month, winnerId, winner?.name ?? '—', b, c);
     setBid(''); setCommission(''); setWinnerId(null);
@@ -118,8 +125,11 @@ export default function ChittiDetail() {
   // Mirrors recordAuction exactly, so the preview can never promise a number
   // the recorded auction won't produce.
   const previewSplit = () => {
-    const b = num(bid), c = num(commission) || 0;
-    if (!(b > 0)) return { each: 0, remainder: 0, remainderPaise: 0 };
+    const b = num(bid), c = num(commission);
+    // Same `!(c >= 0)` as submitAuction, for the same reason the mirror exists:
+    // with `|| 0` the preview promised a full undiscounted split for a
+    // commission the recorded auction will now refuse outright (2026-09-17).
+    if (!(b > 0) || !(c >= 0)) return { each: 0, remainder: 0, remainderPaise: 0 };
     return splitEvenly(Math.max(0, b - c), g.members || 1);
   };
 
@@ -136,7 +146,7 @@ export default function ChittiDetail() {
         <>
           {/* Reuses the existing finance reminders flow (local notifications)
               via its refType/refId/title prefill — no separate scheduler. */}
-          <TouchableOpacity
+          <TouchableOpacity accessibilityRole="button" accessibilityLabel="Set a reminder"
             onPress={() => router.push({
               pathname: '/finance/reminders',
               params: { refType: 'chitti', refId: g.id, title: `${g.name} — collection due` },
@@ -145,7 +155,7 @@ export default function ChittiDetail() {
           >
             <Ionicons name="notifications-outline" size={20} color={FIN.brandDeep} />
           </TouchableOpacity>
-          <TouchableOpacity onPress={onDelete} hitSlop={8}><Ionicons name="trash-outline" size={20} color={FIN.bad} /></TouchableOpacity>
+          <TouchableOpacity accessibilityRole="button" accessibilityLabel="Delete this group" onPress={onDelete} hitSlop={8}><Ionicons name="trash-outline" size={20} color={FIN.bad} /></TouchableOpacity>
         </>
       } />
       <ScrollView contentContainerStyle={s.body} showsVerticalScrollIndicator={false}>
@@ -201,7 +211,12 @@ export default function ChittiDetail() {
                     </Text>
                   )}
                 </View>
-                <TouchableOpacity onPress={() => deleteMember(m.id).then(reload)} hitSlop={8}>
+                <TouchableOpacity accessibilityRole="button" accessibilityLabel="Remove this member" onPress={() => Alert.alert(
+                  'Remove member?',
+                  `Remove ${m.name} from ${g.name}? Their collection history stays in the group totals but is no longer attributed. This cannot be undone.`,
+                  [{ text: 'Cancel', style: 'cancel' },
+                   { text: 'Remove', style: 'destructive', onPress: () => deleteMember(m.id).then(reload) }],
+                )} hitSlop={8}>
                   <Ionicons name="close" size={16} color={FIN.faint} />
                 </TouchableOpacity>
               </TouchableOpacity>
@@ -284,7 +299,16 @@ export default function ChittiDetail() {
                   <Text style={s.aSub}>Bid {formatINR(a.winning_bid)} · Commission {formatINR(a.commission)}</Text>
                   <Text style={s.aDiv}>Dividend/member {formatINR(a.dividend)}</Text>
                 </View>
-                <TouchableOpacity onPress={() => deleteAuction(a.id).then(reload)} hitSlop={8}><Ionicons name="close" size={16} color={FIN.faint} /></TouchableOpacity>
+                {/* Confirmed like the group delete above (2026-09-17). This one
+                    also writes NO timeline entry — unlike deleteMember and
+                    recordAuction — so an accidental tap destroyed a settled
+                    auction (month, bid, winner) leaving no trace it happened. */}
+                <TouchableOpacity accessibilityRole="button" accessibilityLabel="Delete this auction" onPress={() => Alert.alert(
+                  'Delete auction?',
+                  `Delete month ${a.month}'s auction? The bid and the winner are removed and this is not recorded in the timeline. This cannot be undone.`,
+                  [{ text: 'Cancel', style: 'cancel' },
+                   { text: 'Delete', style: 'destructive', onPress: () => deleteAuction(a.id).then(reload) }],
+                )} hitSlop={8}><Ionicons name="close" size={16} color={FIN.faint} /></TouchableOpacity>
               </View>
             ))}
           </>

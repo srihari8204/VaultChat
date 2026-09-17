@@ -15,7 +15,7 @@ fn h32(v: &Value) -> [u8; 32] {
     let b = hex::decode(v.as_str().expect("hex string")).expect("hex");
     b.try_into().expect("32 bytes")
 }
-fn s<'a>(v: &'a Value) -> &'a str {
+fn s(v: &Value) -> &str {
     v.as_str().expect("string")
 }
 fn xkp(priv_hex: &Value) -> KeyPair {

@@ -168,7 +168,13 @@ pub fn project(geom: &RouteGeometry, p: LatLng, prev_index: usize, window: usize
     };
 
     let lo = prev_index.saturating_sub(SEARCH_BACK).min(n - 2);
-    let hi = (prev_index + window).min(n - 1).max(lo + 1);
+    // Saturating for the same reason `lo` is: `prev_index` is whatever the
+    // caller's JSON said (ffi.rs `u()` accepts any u64), and this crate builds
+    // with overflow-checks on, so a near-`usize::MAX` index turned a plain `+`
+    // into a panic. Every value that does not overflow lands exactly where it
+    // did before, and one that does is clamped to the end of the route, where
+    // the `bd > RESCAN_THRESHOLD_M` rescan below already recovers it.
+    let hi = prev_index.saturating_add(window).min(n - 1).max(lo + 1);
     let (mut bi, mut bd, mut bt, mut bp) = scan(lo, hi);
     let mut rescanned = false;
     if bd > RESCAN_THRESHOLD_M && (lo > 0 || hi < n - 1) {

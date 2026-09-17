@@ -223,7 +223,7 @@ export default function SettingsScreen() {
     <View style={S.screen}>
     <ScrollView style={S.screen} contentContainerStyle={{ paddingBottom: 64 }}>
       <View style={S.header}>
-        <TouchableOpacity onPress={() => router.back()} hitSlop={10} style={S.backBtn} activeOpacity={0.7}>
+        <TouchableOpacity accessibilityRole="button" accessibilityLabel="Back" onPress={() => router.back()} hitSlop={10} style={S.backBtn} activeOpacity={0.7}>
           <Ionicons name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
         <Text style={S.title}>Settings</Text>
@@ -242,7 +242,7 @@ export default function SettingsScreen() {
           <Text style={S.profileName} numberOfLines={1}>{profile?.name || 'Your name'}</Text>
           <Text style={S.profileSub} numberOfLines={1}>{profile?.status || profile?.email || ''}</Text>
         </View>
-        <TouchableOpacity onPress={() => router.push('/qr-contact' as any)} hitSlop={12}>
+        <TouchableOpacity accessibilityRole="button" accessibilityLabel="Show your QR code" onPress={() => router.push('/qr-contact' as any)} hitSlop={12}>
           <Ionicons name="qr-code-outline" size={22} color={colors.primary} />
         </TouchableOpacity>
       </TouchableOpacity>
@@ -371,6 +371,12 @@ export default function SettingsScreen() {
               seals the signed-in session under it (services/security/pinStore);
               nobody is migrated into it, they choose it here. */}
           <LinkRow icon="keypad-outline" title="Device PIN" sub="Lock this device's session behind a PIN only you know" onPress={() => router.push('/backup-pin?from=settings' as any)} />
+          {/* app/permissions.tsx existed with no entry point: the only way in was
+              the old onboarding chain, whose first screen nothing reaches. It is a
+              genuine feature - one place to see and re-request every permission,
+              including full-screen-intent, which no other screen surfaces - so it
+              is routed here rather than deleted (2026-09-17). */}
+          <LinkRow icon="options-outline" title="App permissions" sub="Camera, microphone, contacts, location and notifications" onPress={() => router.push('/permissions?from=settings' as any)} />
           <LinkRow icon="speedometer-outline" title="Privacy dashboard" sub="Your privacy score and what is protecting you" onPress={() => router.push('/privacy-dashboard' as any)} />
           <LinkRow icon="checkmark-done-outline" title="Read receipts" sub="Control who sees when you have read a message" onPress={() => router.push('/receipt-control' as any)} />
           <LinkRow icon="time-outline" title="Last seen & online" sub="Who can see when you were last active" onPress={() => router.push('/last-seen-privacy' as any)} />
@@ -413,7 +419,13 @@ export default function SettingsScreen() {
           <LinkRow icon="pie-chart-outline" title="Storage & data" sub="What is using space on this device" onPress={() => router.push('/storage-manager' as any)} />
           <LinkRow icon="cloud-offline-outline" title="Offline mode" sub="What works without a connection, and the pending queue" onPress={() => router.push('/offline-mode' as any)} />
           <LinkRow icon="glasses-outline" title="Ghost Mode contacts" sub="Hidden online, typing, read, last-seen" onPress={() => router.push('/ghost-mode' as any)} />
-          <LinkRow icon="download-outline" title="Export my data" sub="Download a JSON of your account" onPress={onExport} busy={exporting} last />
+          <LinkRow icon="download-outline" title="Export my data" sub="Download a JSON of your account" onPress={onExport} busy={exporting} />
+          {/* Both were unreachable. They are support tools, not dead code: the
+              network test is what tells you whether a call failure is the app or
+              the link, and d2de-status shows the device-to-device pairing state.
+              Routed at the end of the section, after the everyday rows. */}
+          <LinkRow icon="pulse-outline" title="Network test" sub="Check the connection this device is actually getting" onPress={() => router.push('/network-test' as any)} />
+          <LinkRow icon="git-compare-outline" title="Device-to-device status" sub="Direct transfer and pairing state" onPress={() => router.push('/d2de-status' as any)} last />
         </View>
 
         <TouchableOpacity

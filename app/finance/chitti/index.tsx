@@ -4,6 +4,7 @@ import React, { useCallback, useMemo, useState } from 'react';
 import { View, Text, ScrollView, StyleSheet, TouchableOpacity } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter, useFocusEffect } from 'expo-router';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { FIN } from '../../../constants/financeTheme';
 import { FinHeader, Segment, ProgressRing, EmptyState, LoadingState, ErrorState } from '../../../components/finance/ui';
 import { useLoadStatus } from '../../../components/finance/useLoad';
@@ -14,6 +15,10 @@ import { listGroups, listCollections, type ChittiGroup } from '../../../db/chitt
 type Tab = 'active' | 'closed' | 'draft';
 
 export default function ChittiList() {
+  // s.fab lives in a module-scope StyleSheet, so a literal bottom there
+  // would freeze at launch and never follow a rotation. Read the inset from the
+  // hook and apply it at the element instead (2026-09-17).
+  const insets = useSafeAreaInsets();
   const router = useRouter();
   const me = useMe();
   const [tab, setTab] = useState<Tab>('active');
@@ -47,7 +52,7 @@ export default function ChittiList() {
   return (
     <View style={s.screen}>
       <FinHeader title="Lucky Draw" right={
-        <TouchableOpacity onPress={() => router.push('/finance/chitti/new')} hitSlop={8}>
+        <TouchableOpacity accessibilityRole="button" accessibilityLabel="New lucky draw group" onPress={() => router.push('/finance/chitti/new')} hitSlop={8}>
           <Ionicons name="add-circle" size={26} color={FIN.brandDeep} />
         </TouchableOpacity>
       } />
@@ -78,7 +83,7 @@ export default function ChittiList() {
         ))}
         <View style={{ height: 90 }} />
       </ScrollView>
-      <TouchableOpacity style={s.fab} activeOpacity={0.9} onPress={() => router.push('/finance/chitti/new')}>
+      <TouchableOpacity style={[s.fab, { bottom: insets.bottom + 20 }]} activeOpacity={0.9} onPress={() => router.push('/finance/chitti/new')}>
         <Ionicons name="add" size={22} color="#fff" />
         <Text style={s.fabTxt}>New Lucky Draw Group</Text>
       </TouchableOpacity>

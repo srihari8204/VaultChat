@@ -290,7 +290,9 @@ const st = StyleSheet.create({
   dest: { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 14, borderWidth: 1, borderRadius: 16 },
   destIcon: { width: 42, height: 42, borderRadius: 21, alignItems: 'center', justifyContent: 'center' },
   actions: { flexDirection: 'row', gap: 9, marginTop: 12 },
-  action: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7, height: 48, borderWidth: 1, borderRadius: 13 },
+  // 2026-09-18: 13.5sp label in a pinned 48 clips at font scale 1.5; minHeight
+  // is the same 48 at scale 1.0. Icon-only `dot`/`destIcon` stay square.
+  action: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7, minHeight: 48, paddingVertical: 8, borderWidth: 1, borderRadius: 13 },
   actionTxt: { fontSize: 13.5, fontWeight: '700' },
   row: { flexDirection: 'row', alignItems: 'center', gap: 11, paddingVertical: 12, borderBottomWidth: StyleSheet.hairlineWidth },
   dot: { width: 32, height: 32, borderRadius: 16, alignItems: 'center', justifyContent: 'center' },

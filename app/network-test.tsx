@@ -313,7 +313,7 @@ export default function NetworkTestScreen() {
 
       {/* Header */}
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
+        <TouchableOpacity accessibilityRole="button" accessibilityLabel="Back" onPress={() => router.back()} style={styles.backBtn}>
           <Ionicons name="arrow-back" size={20} color={colors.accent} />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Speed Test</Text>

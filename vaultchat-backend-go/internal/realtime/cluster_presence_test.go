@@ -73,7 +73,7 @@ func testRedis(t *testing.T) *redis.Client {
 func arm(t *testing.T, c *redis.Client, nodes ...string) string {
 	t.Helper()
 	uid := "test-uid-" + t.Name()
-	keys := []string{keyPrefix+"pres:" + uid, keyPrefix+"pres:online"}
+	keys := []string{keyPrefix + "pres:" + uid, keyPrefix + "pres:online"}
 	for _, n := range nodes {
 		c.Set(bg, keyPrefix+"node:hb:"+n, "1", time.Minute)
 		keys = append(keys, keyPrefix+"roster:"+n)

@@ -465,16 +465,19 @@ const st = StyleSheet.create({
   setup: { padding: 16, paddingBottom: 48 },
   h: { fontSize: 13, fontWeight: '700', letterSpacing: 0.3, textTransform: 'uppercase', marginBottom: 10, opacity: 0.9 },
   row: { flexDirection: 'row', alignItems: 'center' },
-  srcBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, borderWidth: 1, borderRadius: 10, paddingHorizontal: 12, height: 40 },
-  searchRow: { flexDirection: 'row', alignItems: 'center', gap: 10, borderWidth: 1, borderRadius: 12, paddingHorizontal: 12, height: 48 },
+  // 2026-09-17: these four all pinned a height around a 15/16sp label. At font
+  // scale 1.5 the line box outgrew the box and the descenders went. minHeight
+  // keeps every one of them the same size at scale 1.0 and above the 44dp floor.
+  srcBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, borderWidth: 1, borderRadius: 10, paddingHorizontal: 12, minHeight: 40, paddingVertical: 6 },
+  searchRow: { flexDirection: 'row', alignItems: 'center', gap: 10, borderWidth: 1, borderRadius: 12, paddingHorizontal: 12, minHeight: 48, paddingVertical: 8 },
   input: { flex: 1, fontSize: 15 },
   destPill: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 12, padding: 12, borderRadius: 10 },
   previewMap: { height: 230, borderRadius: 14, borderWidth: 1, marginTop: 14 },
   chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   chip: { borderWidth: 1, borderRadius: 999, paddingHorizontal: 14, paddingVertical: 8 },
-  customInput: { flex: 1, borderWidth: 1, borderRadius: 10, paddingHorizontal: 12, height: 42, fontSize: 14 },
+  customInput: { flex: 1, borderWidth: 1, borderRadius: 10, paddingHorizontal: 12, minHeight: 42, paddingVertical: 6, fontSize: 14 },
   warn: { flexDirection: 'row', alignItems: 'center', gap: 8, padding: 10, borderRadius: 10, marginTop: 10 },
-  lockBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, height: 52, borderRadius: 14, marginTop: 28 },
+  lockBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, minHeight: 52, paddingVertical: 10, borderRadius: 14, marginTop: 28 },
   lockTxt: { color: '#fff', fontSize: 16, fontWeight: '800' },
   alarmBar: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 14, paddingVertical: 10 },
   alarmBarTxt: { color: '#fff', fontWeight: '800', fontSize: 13.5, flex: 1 },

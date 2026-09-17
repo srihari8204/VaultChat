@@ -27,6 +27,7 @@ import { useSpaceColors, spaceHeader } from '../lib/spaces/theme';
 import type { Palette } from '../constants/theme';
 import { getWorkTasks, createWorkTask, setWorkTaskDone, type WorkTask } from '../lib/spaces/api';
 import { AuroraBackground } from '../components/ui';
+import { KeyboardSafe } from '../components/ui/KeyboardSafe';
 
 /** Priority always carries a WORD and its spec color, never color alone. */
 const PRIORITY_TONE: Record<WorkTask['priority'], string> = {
@@ -230,12 +231,13 @@ export default function SpaceTasksScreen() {
       </ScrollView>
 
       {canAssign && (
-        <TouchableOpacity style={[s.fab, { backgroundColor: colors.primary }]} onPress={() => setCompose(true)}>
+        <TouchableOpacity accessibilityRole="button" accessibilityLabel="New task" style={[s.fab, { backgroundColor: colors.primary }]} onPress={() => setCompose(true)}>
           <Ionicons name="add" size={26} color="#fff" />
         </TouchableOpacity>
       )}
 
       <Modal visible={compose} animationType="slide" transparent onRequestClose={() => setCompose(false)}>
+        <KeyboardSafe keyboardOnly>
         <View style={s.sheetWrap}>
           <View style={s.sheet}>
             <Text style={s.cardTitle}>New task</Text>
@@ -273,6 +275,7 @@ export default function SpaceTasksScreen() {
             </View>
           </View>
         </View>
+        </KeyboardSafe>
       </Modal>
     </View>
   );

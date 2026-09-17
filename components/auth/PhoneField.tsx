@@ -121,7 +121,11 @@ export function PhoneField({
 
 const makeStyles = (c: FieldColors) => StyleSheet.create({
   row: { flexDirection: 'row', gap: 10 },
-  code: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 14, height: 52, borderRadius: 12, borderWidth: 1, borderColor: c.glassStroke, backgroundColor: c.glassSoft },
+  // 2026-09-17: minHeight, not height — this sits on the signup path, and at font
+  // scale 1.5 a pinned 52 clipped the dial code the user is typing to make an
+  // account. 52 is also the tap floor, and the padding keeps it visually
+  // identical at scale 1.0 while letting it grow. Matches `input` below.
+  code: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 14, minHeight: 52, paddingVertical: 10, borderRadius: 12, borderWidth: 1, borderColor: c.glassStroke, backgroundColor: c.glassSoft },
   flag: { fontSize: 18 },
   codeTxt: { color: c.text, fontSize: 16, fontWeight: '700' },
   chev: { color: c.textDim, fontSize: 12 },

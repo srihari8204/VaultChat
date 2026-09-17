@@ -3,7 +3,8 @@ import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
 import { router } from "expo-router";
 import { useState } from "react";
-import { KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
+import { ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
+import { KeyboardSafe } from "../components/ui";
 import { SECURITY_QUESTIONS } from "../constants/securityQuestions";
 import { saveSecurityAnswers } from "../services/securityService";
 
@@ -25,8 +26,22 @@ export default function SecurityQuestionsScreen() {
   };
 
   return (
-    <KeyboardAvoidingView style={{flex:1}} behavior={Platform.OS==="ios"?"padding":undefined}>
+    // KeyboardSafe, not KeyboardAvoidingView (2026-09-17). The old
+    // `behavior={Platform.OS==="ios"?"padding":undefined}` resolved to undefined
+    // on Android, and RN's KeyboardAvoidingView switches on `behavior` with a
+    // `default:` that returns a plain View — so this ACCOUNT RECOVERY screen had
+    // literally zero keyboard avoidance on Android.
+    //
+    // The gradient stays OUTSIDE the wrapper: KeyboardSafe works by padding, and
+    // an absolutely-positioned child resolves its insets against the parent's
+    // PADDING box, so a StyleSheet.absoluteFillObject background placed inside
+    // would be clipped by that padding. app/mpin-recover.tsx already does it this
+    // way. keyboardOnly because the CTA lives inside the ScrollView, which
+    // already has keyboardShouldPersistTaps and flexGrow, so no resting
+    // safe-area gap is wanted here.
+    <View style={{flex:1}}>
       <LinearGradient colors={["#FFFFFF","#020E1A","#FFFFFF"]} style={StyleSheet.absoluteFillObject}/>
+      <KeyboardSafe keyboardOnly style={{flex:1}}>
       <ScrollView contentContainerStyle={S.scroll} keyboardShouldPersistTaps="handled">
         <View style={S.header}>
           <View style={S.badge}><Text style={{fontSize:36}}>🛡️</Text></View>
@@ -62,7 +77,8 @@ export default function SecurityQuestionsScreen() {
           <Text style={S.btnTxt}>Save and Continue</Text>
         </TouchableOpacity>
       </ScrollView>
-    </KeyboardAvoidingView>
+      </KeyboardSafe>
+    </View>
   );
 }
 

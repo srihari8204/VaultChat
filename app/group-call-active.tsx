@@ -18,7 +18,7 @@
 import { HEADER_TOP } from '../constants/layout';
 import { useLocalSearchParams, useRouter, Stack } from 'expo-router';
 import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, StatusBar, StyleSheet, Text, TouchableOpacity, View, ScrollView } from 'react-native';
+import { Alert, BackHandler, StatusBar, StyleSheet, Text, TouchableOpacity, View, ScrollView } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { mediaDevices, RTCIceCandidate, RTCPeerConnection, RTCSessionDescription, RTCView } from '@livekit/react-native-webrtc';
 import InCallManager from 'react-native-incall-manager';
@@ -44,6 +44,9 @@ import {
   useCallStatus, useCanModerate, useMyHandRaised, useParticipant,
   useParticipantIds, useRaisedHands, useSharingPeer, useVisibleParticipantIds,
 } from '../hooks/useCall';
+import { setRingingPeer, setRingScreenPeer } from '../lib/ringTracker';
+import { endMessage } from '../lib/call/endMessage';
+import { getSnapshot } from '../lib/call/store';
 
 // How many people the Add sheet offers at once. 12 was the old value and it is
 // wrong for a 64-seat call: in a 40-person group you could see 12 of the
@@ -129,6 +132,11 @@ function GroupCallEngine() {
   const canModerate = useCanModerate();
   const hands       = useRaisedHands();
   const [sheet, setSheet] = useState<{ title: string; message?: string; actions: SheetAction[] } | null>(null);
+  // Height of the control bar, measured. CallExtras is pinned from the bottom
+  // and must clear it; the bar is 1-3 rows depending on width and call state,
+  // so a literal cannot be right on every device. 110 is the single-row value
+  // it used to hardcode, used until the first layout lands.
+  const [controlsH, setControlsH] = useState(110);
 
   // The COUNT is the whole call, never the visible page — "9 on call" in a room
   // of 40 is a lie, and it is also what the encryption badge reads. Declared
@@ -248,13 +256,29 @@ function GroupCallEngine() {
     // was live, so leaving a group call that had already been replaced by a
     // newly answered 1:1 hung THAT up instead. A group session is identified by
     // an empty peerUid — the same key startGroup's duplicate guard uses.
-    return () => { engine.leaveScreen({ chatId: String(chatId ?? ''), peerUid: '' }); };
+    return () => {
+      engine.leaveScreen({ chatId: String(chatId ?? ''), peerUid: '' });
+      // RELEASE THE RING CLAIM (2026-09-17). app/_layout.tsx claims it before
+      // pushing here ("The call screens release it when they unmount") and
+      // voicecall.tsx:176-177 / videocall.tsx:293-294 both honour that — this
+      // screen never did, and did not even import ringTracker. After one group
+      // call answered from a notification, _layout's duplicate-ring guard
+      // (`getRingScreenPeer() === p.peerUid`) stayed pinned to that caller, so
+      // the phone never rang for them again.
+      setRingingPeer(null);
+      setRingScreenPeer(null);
+    };
   }, [chatId, name, isVideo, members]);
 
   useEffect(() => { if (status === 'connected') engine.onConnected(); }, [status]);
 
   useEffect(() => {
     if (status !== 'ended') return;
+    // Say why, but only when the user did not ask for it. endMessage returns
+    // null for a hang-up either side made on purpose (2026-09-17).
+    const snap = getSnapshot();
+    const why = endMessage(snap.endReason, snap.error);
+    if (why) Alert.alert('Call ended', why);
     const t = setTimeout(() => router.back(), 200);
     return () => clearTimeout(t);
   }, [status, router]);
@@ -296,6 +320,27 @@ function GroupCallEngine() {
     // happened to turn a page.
     engine.setVisibleParticipants(paged ? shownKey.split(' ').filter(Boolean) : null);
   }, [shownKey, paged, status]);
+
+  // BACK MINIMISES THE CALL, IT DOES NOT END IT.
+  //
+  // videocall.tsx and voicecall.tsx both do this; the group screen had no
+  // hardwareBackPress listener at all, so Android back popped the route while
+  // the engine kept the call running - and the screen is the only place the
+  // group call can be ended from. The user was left in a call with no visible
+  // way out but the CallBar, and no way back to the grid except re-joining.
+  //
+  // Same shape as the 1:1 screens: only a CONNECTED call minimises. On one
+  // that is still connecting or already dead, back must genuinely leave, or a
+  // swallowed gesture strands the user in a call they cannot end (2026-09-17).
+  useEffect(() => {
+    const sub = BackHandler.addEventListener('hardwareBackPress', () => {
+      if (status !== 'connected') { engine.hangUp('local_hangup', true); return false; }
+      engine.minimizeScreen();
+      if (router.canGoBack()) router.back(); else router.replace('/(tabs)/chats' as any);
+      return true;
+    });
+    return () => sub.remove();
+  }, [status, router]);
 
   const cols = shown.length + 1 <= 1 ? 1 : shown.length + 1 <= 4 ? 2 : 3;
   const tileW = `${100 / cols - 2}%`;
@@ -371,7 +416,7 @@ function GroupCallEngine() {
           controls it can never use. */}
       {paged && (
         <View style={S.pager}>
-          <TouchableOpacity
+          <TouchableOpacity accessibilityRole="button" accessibilityLabel="Previous participants"
             style={S.pagerBtn} disabled={page === 0}
             onPress={() => setPage(p => Math.max(0, p - 1))}
           >
@@ -380,7 +425,7 @@ function GroupCallEngine() {
           <Text style={S.pagerLabel}>
             {page === 0 ? 'Speaking' : `Page ${page + 1} of ${pages}`}
           </Text>
-          <TouchableOpacity
+          <TouchableOpacity accessibilityRole="button" accessibilityLabel="Next participants"
             style={S.pagerBtn} disabled={page >= pages - 1}
             onPress={() => setPage(p => Math.min(pages - 1, p + 1))}
           >
@@ -398,19 +443,32 @@ function GroupCallEngine() {
         </Text>
       )}
 
-      {status === 'connected' && <CallExtras bottom={110} />}
+      {/* bottom is MEASURED, not guessed (2026-09-17). It used to be a literal
+          110, tuned for a single-row control bar. Once `controls` gained
+          flexWrap the bar became one row on a tablet, two on a phone and three
+          at 320dp — so any literal is wrong on some device, and 110 put the
+          chat/reaction buttons on top of the first row of call controls, where
+          they intercepted taps on mic and camera. Measuring covers every width
+          without a breakpoint. */}
+      {status === 'connected' && <CallExtras bottom={controlsH + 12} />}
 
-      <View style={S.controls}>
-        <CtrlBtn icon={muted ? 'mic-off' : 'mic'} active={muted} onPress={engine.toggleMute} colors={colors} />
-        {isVideo && <CtrlBtn icon={camOff ? 'videocam-off' : 'videocam'} active={camOff} onPress={engine.toggleCamera} colors={colors} />}
-        {isVideo && <CtrlBtn icon="camera-reverse" onPress={engine.flipCamera} colors={colors} />}
-        <CtrlBtn icon={speaker ? 'volume-high' : 'volume-low'} active={speaker} onPress={engine.toggleSpeaker} colors={colors} />
-        <CtrlBtn icon="hand-left" active={handUp} onPress={toggleHand} colors={colors} />
+      <View
+        style={S.controls}
+        onLayout={(e) => {
+          const h = Math.round(e.nativeEvent.layout.height);
+          if (h && h !== controlsH) setControlsH(h);
+        }}
+      >
+        <CtrlBtn icon={muted ? 'mic-off' : 'mic'} active={muted} onPress={engine.toggleMute} colors={colors} label={muted ? 'Unmute' : 'Mute'} />
+        {isVideo && <CtrlBtn icon={camOff ? 'videocam-off' : 'videocam'} active={camOff} onPress={engine.toggleCamera} colors={colors} label={camOff ? 'Turn camera on' : 'Turn camera off'} />}
+        {isVideo && <CtrlBtn icon="camera-reverse" onPress={engine.flipCamera} colors={colors} label="Switch camera" />}
+        <CtrlBtn icon={speaker ? 'volume-high' : 'volume-low'} active={speaker} onPress={engine.toggleSpeaker} colors={colors} label={speaker ? 'Turn speaker off' : 'Turn speaker on'} />
+        <CtrlBtn icon="hand-left" active={handUp} onPress={toggleHand} colors={colors} label={handUp ? 'Lower hand' : 'Raise hand'} />
         {/* Hidden at capacity rather than disabled: a button that does nothing
             invites tapping it, and "the call is full" is the more useful thing
             for the count in the header to be saying at that moment. */}
-        {seatsLeft > 0 && <CtrlBtn icon="person-add" onPress={invite} colors={colors} />}
-        <CtrlBtn icon="call" danger onPress={endGroupCall} colors={colors} />
+        {seatsLeft > 0 && <CtrlBtn icon="person-add" onPress={invite} colors={colors} label="Invite someone" />}
+        <CtrlBtn icon="call" danger onPress={endGroupCall} colors={colors} label="End call" />
       </View>
 
       <Sheet
@@ -701,9 +759,22 @@ function GroupCallLegacy() {
   );
 }
 
-function CtrlBtn({ icon, onPress, active, danger, colors }: any) {
+// Every control here is icon-only, so without a label a screen reader
+// announces seven identical "button"s - including the one that ENDS THE CALL.
+// A blind user could join a group call and have no way to leave it.
+//
+// The label states the ACTION the tap performs, not the icon drawn: a muted
+// mic shows mic-off and the useful thing to say is "Unmute". accessibilityState
+// carries the toggle position alongside it, so the current state is available
+// without being guessed from the verb (2026-09-17).
+function CtrlBtn({ icon, onPress, active, danger, colors, label }: any) {
   return (
-    <TouchableOpacity onPress={onPress} style={{ width: 60, height: 60, borderRadius: 30, alignItems: 'center', justifyContent: 'center', backgroundColor: danger ? colors.danger : active ? colors.primary : 'rgba(255,255,255,0.12)' }}>
+    <TouchableOpacity
+      onPress={onPress}
+      accessibilityRole="button"
+      accessibilityLabel={label}
+      accessibilityState={{ selected: !!active }}
+      style={{ width: 60, height: 60, borderRadius: 30, alignItems: 'center', justifyContent: 'center', backgroundColor: danger ? colors.danger : active ? colors.primary : 'rgba(255,255,255,0.12)' }}>
       <Ionicons name={icon} size={26} color="#fff" />
     </TouchableOpacity>
   );
@@ -741,5 +812,14 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   pager:      { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 18, paddingBottom: 4 },
   pagerBtn:   { padding: 8 },
   pagerLabel: { color: '#bbb', fontSize: 12, minWidth: 110, textAlign: 'center' },
-  controls:  { flexDirection: 'row', justifyContent: 'center', gap: 22, paddingVertical: 24, paddingBottom: 36 },
+  // flexWrap added 2026-09-17. CtrlBtn pins width:60 in its own body (see the
+  // component above), so the call sites carry no width and no width-grep ever
+  // found this: 7 controls x 60 + 6 x 22 gap = 552dp against 369dp on an Honor.
+  // justifyContent:'center' meant it overflowed BOTH ends symmetrically, so the
+  // first and last buttons — Mute and End call — were the two off-screen. A
+  // video group call with a free seat renders all 7, and SFU_MAX is 64
+  // (lib/call/mode.ts), so that is the normal case, not an edge case.
+  // Wrapping is enough: the sibling above is a ScrollView (flexGrow/flexShrink 1),
+  // so it yields the 82dp a second line needs and the grid just scrolls.
+  controls:  { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', gap: 22, paddingVertical: 24, paddingBottom: 36 },
 });

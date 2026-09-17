@@ -30,6 +30,8 @@ import { disconnect as disconnectSocket } from '../../lib/socket';
 import { readCache, writeCache } from '../../lib/localCache';
 import { AuroraBackground } from '../../components/ui';
 import { initialOf } from '../../lib/format';
+import { currentVersionName } from '../../lib/appVersion';
+import { permissionDenied } from '../../lib/permissionDenied';
 
 interface UserProfile {
   id: string;
@@ -82,14 +84,22 @@ export default function ProfileScreen() {
 
   const load = useCallback(async () => {
     // Local-first: paint last-known profile instantly, then fetch fresh.
-    const cached = await readCache<UserProfile>('my-profile');
-    if (cached) {
-      setProfile(cached);
-      setName(cached.name ?? '');
-      setStatus(cached.status ?? '');
-      setPhone(cached.phone ?? '');
-      setLoading(false);
-    }
+    //
+    // The cache read is wrapped (2026-09-17): it used to sit OUTSIDE the
+    // try/finally below, so a throwing readCache — a locked cache DEK is enough —
+    // escaped before `finally { setLoading(false) }` could run and left the
+    // Profile tab on a permanent spinner with no error and no retry.
+    let cached: UserProfile | null = null;
+    try {
+      cached = await readCache<UserProfile>('my-profile');
+      if (cached) {
+        setProfile(cached);
+        setName(cached.name ?? '');
+        setStatus(cached.status ?? '');
+        setPhone(cached.phone ?? '');
+        setLoading(false);
+      }
+    } catch { /* no cache is not an error; the network fetch below still runs */ }
     try {
       const p = await api<UserProfile>('/user/profile');
       setProfile(p);
@@ -135,7 +145,7 @@ export default function ProfileScreen() {
     if (photoBusy) return;
     const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (!perm.granted) {
-      Alert.alert('Permission needed', 'Allow photo library access to set your profile picture.');
+      permissionDenied('Permission needed', 'Allow photo library access to set your profile picture.', perm.canAskAgain);
       return;
     }
     const result = await ImagePicker.launchImageLibraryAsync({
@@ -408,7 +418,11 @@ export default function ProfileScreen() {
         activeOpacity={1}
         style={{ alignItems: 'center', paddingVertical: 24 }}
       >
-        <Text style={{ color: colors.textDim, fontSize: 12 }}>crazzychat 1.1.1</Text>
+        {/* Read, never hardcoded: this line said 1.1.1 while the build was
+            1.2.15, and it is the number a user quotes in a bug report. */}
+        <Text style={{ color: colors.textDim, fontSize: 12 }}>
+          {`crazzychat${currentVersionName() ? ` ${currentVersionName()}` : ''}`}
+        </Text>
       </TouchableOpacity>
     </ScrollView>
     </View>
@@ -458,7 +472,11 @@ function InfoRow({ k, v, small }: { k: string; v: string; small?: boolean }) {
   return (
     <View style={S.infoRow}>
       <Text style={S.infoK}>{k}</Text>
-      <Text style={[S.infoV, small && S.infoVSmall]} numberOfLines={1}>{v}</Text>
+      {/* `small` marks the identifier rows - VaultID, timestamps. Ellipsising an
+          identifier is worse than wrapping it: half a VaultID still LOOKS like a
+          whole one, so it gets copied down wrong. Those wrap; short labelled
+          values keep the one-line cap (2026-09-17). */}
+      <Text style={[S.infoV, small && S.infoVSmall]} numberOfLines={small ? 0 : 1}>{v}</Text>
     </View>
   );
 }
@@ -493,7 +511,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   groupLabel:   { color: c.textDim, fontSize: 11, fontWeight: '700', letterSpacing: 1.2, marginHorizontal: 22, marginTop: 24, marginBottom: 2 },
   infoRow:      { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.glassStroke },
   infoK:        { color: c.textDim, fontSize: 13 },
-  infoV:        { color: c.text, fontSize: 13, fontWeight: '600', maxWidth: '60%' },
+  infoV:        { color: c.text, fontSize: 13, fontWeight: '600', maxWidth: '60%', textAlign: 'right' },
   infoVSmall:   { fontSize: 11, fontWeight: '500' },
 
   input:        { color: c.text, backgroundColor: c.glassSoft, borderColor: c.glassStroke, borderWidth: 1, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12, fontSize: 15 },

@@ -77,9 +77,9 @@ fn shamir_split_combine() {
     assert!(shares.iter().all(|s| s.starts_with("VCSS1-3-")));
 
     assert_eq!(shamir::combine_shares(&shares).unwrap(), secret);
-    assert_eq!(shamir::combine_shares(&shares[..3].to_vec()).unwrap(), secret);
-    assert_eq!(shamir::combine_shares(&shares[2..].to_vec()).unwrap(), secret);
-    assert!(shamir::combine_shares(&shares[..2].to_vec()).is_err(), "k-1 must fail");
+    assert_eq!(shamir::combine_shares(&shares[..3]).unwrap(), secret);
+    assert_eq!(shamir::combine_shares(&shares[2..]).unwrap(), secret);
+    assert!(shamir::combine_shares(&shares[..2]).is_err(), "k-1 must fail");
 
     // Mixed sets rejected.
     let other = shamir::split_secret(&secret, 5, 3).unwrap();

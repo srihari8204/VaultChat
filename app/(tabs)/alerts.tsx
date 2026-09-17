@@ -66,14 +66,28 @@ export default function AlertsScreen() {
   const [events, setEvents] = useState<SecurityEvent[]>([]);
   const [status, setStatus] = useState<ChainStatus | null>(null);
   const [loading, setLoading] = useState(true);
+  // Added with the try/finally in load(): without somewhere to put the failure,
+  // a caught error would be silent and the tab would just look empty.
+  const [error, setError] = useState('');
   const [scanning, setScanning] = useState(false);
   const [expanded, setExpanded] = useState<number | null>(null);
 
   const load = useCallback(async () => {
-    const [evs, st] = await Promise.all([listSecurityEvents(), verifyAuditChain()]);
-    setEvents(evs);
-    setStatus(st);
-    setLoading(false);
+    // try/finally added 2026-09-17. setLoading(false) used to sit on the success
+    // path only, so ANY throw from listSecurityEvents/verifyAuditChain left this
+    // tab on a permanent spinner — and because useFocusEffect below re-runs the
+    // same failing call on every focus, it could never self-heal. This is the
+    // security console; it failing silently is the worst case for it.
+    try {
+      setError('');
+      const [evs, st] = await Promise.all([listSecurityEvents(), verifyAuditChain()]);
+      setEvents(evs);
+      setStatus(st);
+    } catch (e: any) {
+      setError(e?.message || 'Could not load security events');
+    } finally {
+      setLoading(false);
+    }
     markAllSeen().catch(() => {});
     // Background: mirror new events to the zero-knowledge backup and restore on
     // a fresh install, then refresh the feed if anything changed.
@@ -182,6 +196,17 @@ export default function AlertsScreen() {
             <RefreshControl refreshing={false} onRefresh={load} tintColor={colors.primary} />
           }
           ListEmptyComponent={
+            error ? (
+              // A load failure must not read as "you have no security events" —
+              // on this tab that is the difference between "nothing happened"
+              // and "we could not tell you what happened".
+              <View style={S.empty}>
+                <Ionicons name="alert-circle-outline" size={56} color={colors.textFaint} />
+                <Text style={S.emptyTitle}>Couldn’t load security events</Text>
+                <Text style={S.emptySub}>{error}</Text>
+                <Text style={S.emptySub}>Pull down to try again.</Text>
+              </View>
+            ) : (
             <View style={S.empty}>
               <Ionicons name="shield-checkmark-outline" size={56} color={colors.textFaint} />
               <Text style={S.emptyTitle}>No security events yet</Text>
@@ -190,6 +215,7 @@ export default function AlertsScreen() {
                 here in a tamper-evident on-device log. Tap “Scan device” to run a check now.
               </Text>
             </View>
+            )
           }
         />
       )}

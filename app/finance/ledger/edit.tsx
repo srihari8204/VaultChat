@@ -47,7 +47,13 @@ export default function EditLedger() {
     if (!name.trim()) return Alert.alert('Name', 'Enter a name.');
     const P = num(principal), R = num(rate);
     if (!(P > 0)) return Alert.alert('Principal', 'Enter a principal greater than 0.');
-    if (!(R > 0)) return Alert.alert('Rate', 'Enter a rate greater than 0.');
+    // 0% IS A REAL LOAN (2026-09-17): money lent to a relative at no interest is
+    // the commonest informal ledger there is, and utils/finance.ts prices a 0%
+    // rate deliberately (`r === 0 ? principal / months : ...`). `!(R > 0)`
+    // refused to record it at all. A rate must be FINITE and NON-NEGATIVE, not
+    // positive — NaN (a half-typed "1,2") and negatives are still refused.
+    // app/finance/emi.tsx has used this exact shape since 2026-09-17.
+    if (!Number.isFinite(R) || R < 0) return Alert.alert('Rate', 'Enter an interest rate of 0 or more.');
     try {
       await updateLedgerDetails(e.id, {
         name: name.trim(), mobile: mobile.trim() || null, interest_type: itype, principal: P,

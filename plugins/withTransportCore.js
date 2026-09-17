@@ -28,7 +28,13 @@ module.exports = function withTransportCore(config) {
     const envInputs = [
       '// VaultChat CC-Wire release inputs: invalidate Hermes when rollout values change.',
       'tasks.matching { it.name.startsWith("createBundle") && it.name.endsWith("JsAndAssets") }.configureEach {',
-      '    inputs.file(rootProject.file("../.env.production"))',
+      // files() NOT file(): .env.production is gitignored, and Gradle FAILS a
+      // task whose declared input file does not exist. That made a release
+      // build impossible on a clean clone or in CI - the one place this file
+      // is guaranteed absent. A FileCollection simply omits a missing entry,
+      // and still re-fingerprints the moment the file appears or changes, so
+      // the cache invalidation this exists for is unaffected.
+      '    inputs.files(rootProject.files("../.env.production"))',
       '    inputs.property("vaultchatTransportRustPct", providers.environmentVariable("EXPO_PUBLIC_FLAG_TRANSPORT_RUST_PCT").orElse(""))',
       '    inputs.property("vaultchatWebTransportUrl", providers.environmentVariable("EXPO_PUBLIC_CCWIRE_WEBTRANSPORT_URL").orElse(""))',
       '}',

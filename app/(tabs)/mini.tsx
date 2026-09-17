@@ -13,7 +13,7 @@ import { encField, decField } from '../../lib/cacheCrypto';
 import { flagEnabled } from '../../lib/remoteFlags';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Stack, useRouter } from 'expo-router';
-import { TAB_BAR_SPACE } from '../../constants/layout';
+import { HEADER_TOP, TAB_BAR_SPACE } from '../../constants/layout';
 import React, { useEffect, useState, useMemo } from 'react';
 import {
   Alert,
@@ -273,7 +273,7 @@ export default function MiniAppsScreen() {
               <Text style={[styles.todoText, item.done && styles.todoTextDone]}>
                 {item.text}
               </Text>
-              <TouchableOpacity onPress={() => deleteTodo(item.id)} style={styles.todoDelBtn} accessibilityLabel="Delete to-do">
+              <TouchableOpacity onPress={() => Alert.alert('Delete to-do?', `Delete "${item.text}"?`, [{ text: 'Cancel', style: 'cancel' }, { text: 'Delete', style: 'destructive', onPress: () => deleteTodo(item.id) }])} style={styles.todoDelBtn} accessibilityLabel="Delete to-do">
                 <Ionicons name="close" size={14} color="#DC2626" />
               </TouchableOpacity>
             </View>
@@ -425,7 +425,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   },
   scroll: {
     padding: 20,
-    paddingTop: 56,
+    paddingTop: HEADER_TOP,
     paddingBottom: TAB_BAR_SPACE + 16,
   },
   headerRow: {
@@ -520,7 +520,12 @@ const makeStyles = (c: Palette) => StyleSheet.create({
     marginBottom: 14,
   },
   devTitle: {
-    color: '#000000',
+    // Themed, not #000000 (2026-09-17): these sit on c.surfaceSolid /
+    // c.glassSoft, so in the DEFAULT dark theme they were black on
+    // near-black — the Todo list and calculator were invisible out of the
+    // box. The two blacks that remain (todoAddBtnText, todoCheckMark) are
+    // on the #4A9FFF accent fill, where black is the correct contrast.
+    color: c.text,
     fontSize: 18,
     fontWeight: '700',
     marginBottom: 6,
@@ -543,7 +548,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
     borderRadius: 12,
   },
   devBtnText: {
-    color: '#000000',
+    color: c.text,
     fontSize: 14,
     fontWeight: '700',
   },
@@ -577,7 +582,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
     borderColor: '#1A2744',
   },
   calcDisplayText: {
-    color: '#000000',
+    color: c.text,
     fontSize: 42,
     fontWeight: '300',
   },
@@ -612,21 +617,21 @@ const makeStyles = (c: Palette) => StyleSheet.create({
     borderRadius: 36,
   },
   calcBtnText: {
-    color: '#000000',
+    color: c.text,
     fontSize: 26,
     fontWeight: '500',
   },
   calcBtnTextOp: {
-    color: '#000000',
+    color: c.text,
     fontWeight: '600',
   },
   calcBtnTextFunc: {
-    color: '#000000',
+    color: c.text,
   },
 
   // ── Todo List ─────────────────────────────────────
   todoTitle: {
-    color: '#000000',
+    color: c.text,
     fontSize: 24,
     fontWeight: '700',
     marginBottom: 4,
@@ -646,7 +651,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
     borderRadius: 12,
     borderWidth: 1,
     borderColor: '#1A2744',
-    color: '#000000',
+    color: c.text,
     fontSize: 14,
     paddingHorizontal: 14,
     paddingVertical: 12,
@@ -696,7 +701,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   },
   todoText: {
     flex: 1,
-    color: '#000000',
+    color: c.text,
     fontSize: 14,
   },
   todoTextDone: {

@@ -92,12 +92,32 @@ export function createPinAttemptTracker(store: KV, now: () => number = Date.now)
     },
     async getBackoffMs(): Promise<number> {
       const { n, at } = await readState();
-      const owed = backoffFor(n) - (now() - at);
+      // CLAMP TO THE BACKOFF (2026-09-17). owed was backoffFor(n) - elapsed with
+      // no upper bound, so a clock that moves BACKWARDS makes elapsed negative
+      // and owed enormous: a device whose RTC lost power and booted at its build
+      // epoch refused the CORRECT PIN for years, indistinguishably from a wrong
+      // one. The decay test above cannot rescue it either - it needs now() > at.
+      // No streak can ever owe more than its own backoff.
+      const elapsed = now() - at;
+      const owed = Math.min(backoffFor(n), backoffFor(n) - elapsed);
       return owed > 0 ? owed : 0;
     },
     async getSignal(): Promise<ThreatSignal | null> {
       const { n } = await readState();
-      if (n >= HIGH_AT) return signal('PIN_BRUTEFORCE', `${n} consecutive failed PIN entries`, 'high');
+      // SEVERITY IS medium, NOT high (2026-09-17).
+      //
+      // This signal was unreachable until the tracker moved into
+      // pinStore.verifyPin. The moment it became reachable, high (weight 7)
+      // cleared threatEngine restrictAt (5) ON ITS OWN - so three mistyped
+      // PINs sent the launch scan to /blocked, where the back button is
+      // disabled, for the 15 minutes until the streak decayed. On any build
+      // carrying a second high signal it reached wipeAt (12) and erased the
+      // account. A fumbled PIN is not evidence of a compromised device.
+      //
+      // medium (3) keeps it contributing to a score built from INDEPENDENT
+      // indicators without ever reaching a verdict by itself. The real
+      // defence against guessing is the backoff above, not the kill switch.
+      if (n >= HIGH_AT) return signal('PIN_BRUTEFORCE', `${n} consecutive failed PIN entries`, 'medium');
       return null;
     },
   };

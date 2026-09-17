@@ -16,6 +16,7 @@ import { E2EE_ENABLED, GROUP_E2EE, E2EE_STRICT, UPLOAD_PROGRESS } from '../const
 import type { GroupType } from './groups/catalog';
 import type { Permission, GroupRole } from './groups/permissions';
 import { redactIds, warnOnce } from './diagLog';
+import { applyLocalReadPointers } from './unreadStore';
 import { normalizeMsgIds } from './msgIds';
 
 export interface ChatSummary {
@@ -1148,6 +1149,20 @@ export async function listChats(opts: { includeHidden?: boolean } = {}): Promise
   const rows = await api<ChatSummary[]>(`/chats${qs}`);
   for (const r of rows) rememberChatPeer(r);
   publishChatDirectory(rows);
+  // Correct the server's denormalized unread_count against what THIS device has
+  // already read (2026-09-18). The whole reason it lives here and not in the
+  // Chats screen: every list surface — app/(tabs)/chats.tsx, app/search.tsx,
+  // app/hidden-chats.tsx — reads unreadCount off these same rows, and the
+  // reported symptom was "all the application screens". One guard on the shared
+  // fetch beats the same patch in three callers. Lazy import because
+  // lib/receipts imports markRead from this file.
+  //
+  // Best-effort: readPointers throws SessionEndedError when the token is gone,
+  // and a missing correction must never fail the list.
+  try {
+    const { readPointers } = await import('./receipts');
+    applyLocalReadPointers(rows, await readPointers());
+  } catch { /* no session / unreadable snapshot — the server's count stands */ }
   return rows;
 }
 

@@ -23,7 +23,10 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
-const ROOTS = ['app', 'components'];
+// `constants` joined the walk on 2026-09-17: constants/layout.ts is the
+// foundation every screen's insets come from, and it sat outside the guard while
+// freezing five values at launch.
+const ROOTS = ['app', 'components', 'constants'];
 
 function walk(dir: string, out: string[] = []): string[] {
   if (!fs.existsSync(dir)) return out;
@@ -53,14 +56,23 @@ const FROZEN_EXCEPTIONS: Record<string, string> = {
     'buildGrid() runs at MODULE scope and reads MW/MH, so a hook there is an '
     + 'invalid-hook error — see the AUDIT F12 note at the site. The mesh is '
     + 'precomputed once at import by design.',
+  'constants/layout.ts':
+    'This file IS the fix, not a violation. Its module-scope read is only the '
+    + 'BOOTSTRAP value, needed before ThemeProvider mounts; syncLayoutMetrics() '
+    + 'then keeps every derived binding current from the live window. Pinned '
+    + 'separately by lib/layoutMetrics.selftest.ts, which fails if those bindings '
+    + 'are ever frozen back to const.',
 };
 const frozen: string[] = [];
 for (const abs of ROOTS.flatMap(r => walk(r))) {
   const rel = path.relative(process.cwd(), abs).replace(/\\/g, '/');
   if (rel in FROZEN_EXCEPTIONS) continue;
   const src = fs.readFileSync(abs, 'utf8');
-  // A top-level `const ... = Dimensions.get(...)` — no leading indentation.
-  if (/^const\s[^\n]*Dimensions\.get\(/m.test(src)) {
+  // A top-level `const|let|var ... = Dimensions.get(...)` — no leading indent.
+  // `let` and `var` are matched too: a binding that is merely mutable is still
+  // frozen unless something actually refreshes it, and anchoring only on `const`
+  // let a one-word edit slip past this guard.
+  if (/^(?:const|let|var)\s[^\n]*Dimensions\.get\(/m.test(src)) {
     frozen.push(rel);
   }
 }
@@ -109,6 +121,72 @@ check(
   wide.length === 0,
   wide.length ? wide.join(', ') : undefined,
 );
+
+// 3b. No screen may derive its own status-bar inset at module scope.
+//
+// The pattern was `const TOP = Platform.OS === 'android' ? (StatusBar.currentHeight ?? 0) : 44`,
+// which is wrong three ways: currentHeight omits the display cutout on some OEM
+// skins, the `?? 0` fallback draws the header UNDER the notch (gradle.properties
+// sets edgeToEdgeEnabled at every API level here), and the module-scope read
+// freezes at launch so it never follows a rotation or a fold. HEADER_TOP from
+// constants/layout.ts is the live binding and is the only supported source.
+//
+// Nine screens were converted on 2026-09-17. This check is what stops the tenth
+// from being written, and what turns red if one of the nine is reverted.
+const OWN_INSET_EXCEPTIONS: Record<string, string> = {
+  'constants/layout.ts':
+    'this file IS the source — its currentHeight read is the bootstrap fallback '
+    + 'before ThemeProvider mounts, after which syncLayoutMetrics() owns the value.',
+  'app/app-lock-chats.tsx':
+    'not yet converted — same three defects, listed so this guard can be absolute '
+    + 'about everything else rather than switched off. Convert it to HEADER_TOP and '
+    + 'delete this entry.',
+};
+const ownInset: string[] = [];
+for (const abs of ROOTS.flatMap(r => walk(r))) {
+  const rel = path.relative(process.cwd(), abs).replace(/\\/g, '/');
+  if (rel in OWN_INSET_EXCEPTIONS) continue;
+  const src = fs.readFileSync(abs, 'utf8');
+  // Module scope only (no leading indent), and only in real code: the converted
+  // screens all keep a comment quoting the old line, which must not trip this.
+  for (const line of src.split('\n')) {
+    if (/^\s*(?:\/\/|\*)/.test(line)) continue;
+    if (/StatusBar\.currentHeight/.test(line)) { ownInset.push(rel); break; }
+  }
+}
+check(
+  'no screen computes its own status-bar inset — HEADER_TOP is the live source',
+  ownInset.length === 0,
+  ownInset.length
+    ? `${ownInset.join(', ')}
+      Import HEADER_TOP from constants/layout. It is a LIVE binding, so read it
+      inside makeStyles(colors) or apply it at the element — never capture it
+      into a module-scope StyleSheet.create.`
+    : undefined,
+);
+
+// ...and the converted screens must still actually reference it.
+for (const rel of [
+  'app/call-recording.tsx', 'app/facescan.tsx', 'app/group-admin.tsx',
+  'app/privacy-dashboard.tsx', 'app/last-seen-privacy.tsx',
+]) {
+  if (!fs.existsSync(rel)) continue;
+  check(
+    `${rel}: header inset comes from HEADER_TOP`,
+    /import \{[^}]*HEADER_TOP[^}]*\} from ['"][^'"]*constants\/layout['"]/.test(fs.readFileSync(rel, 'utf8')),
+  );
+}
+
+// facescan builds styles with a MODULE-SCOPE StyleSheet.create, so a HEADER_TOP
+// written into that object would freeze at import exactly like the old constant.
+// It has to be applied at the element.
+{
+  const src = fs.readFileSync('app/facescan.tsx', 'utf8');
+  check(
+    'app/facescan.tsx: HEADER_TOP is applied at the element, not baked into its module-scope StyleSheet',
+    /style=\{\[[^\]]*HEADER_TOP/.test(src) && !/StyleSheet\.create\([\s\S]*HEADER_TOP/.test(src),
+  );
+}
 
 // 4. The type scaler must keep covering the whole device range it claims to.
 const ts = fs.readFileSync(path.join('lib', 'typeScale.ts'), 'utf8');

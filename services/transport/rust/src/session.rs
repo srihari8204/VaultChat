@@ -49,6 +49,11 @@ pub const BACKOFF_MAX_MS: u64 = 30_000;
 /// `overflow-checks` on in release too.
 const BACKOFF_SHIFT_MAX: u32 = 6;
 
+/// `StreamId` values plus the unused 0 slot. The oneof is closed at five
+/// streams, so this is a bound the protocol guarantees rather than one we hope
+/// for — a stream number outside it is malformed input, not a bigger array.
+const STREAM_SLOTS: usize = 6;
+
 /// Handshake lifecycle. The only legal edges are:
 ///   Idle → Connecting → Handshaking → Ready → Draining → Closed
 /// plus `close()` from anywhere, and `on_disconnect` back to Idle.
@@ -278,6 +283,16 @@ pub struct Session {
     attempt: u32,
     last_rx_ms: u64,
     ping_sent_ms: Option<u64>,
+    /// Highest `seq` handed to the application, per stream.
+    ///
+    /// The other half of resume. A token says WHICH session; these say WHERE it
+    /// got to, and the server needs both: with a token alone it has nothing to
+    /// replay from and answers `resumed = false`, so every reconnect is a full
+    /// resync and the token buys nothing.
+    ///
+    /// A fixed array, not a map: `StreamId` has five values and always will —
+    /// the oneof is closed. Index 0 is STREAM_UNSPECIFIED and is never written.
+    positions: [u64; STREAM_SLOTS],
 }
 
 impl Session {
@@ -295,6 +310,7 @@ impl Session {
             offered_resume: false,
             last_rx_ms: 0,
             ping_sent_ms: None,
+            positions: [0; STREAM_SLOTS],
         }
     }
 
@@ -328,6 +344,44 @@ impl Session {
     /// True only if a token is held AND `resumption` survived the intersection.
     pub fn can_resume(&self) -> bool {
         self.token.is_some() && self.negotiated.as_ref().is_some_and(|c| c.resumption)
+    }
+
+    /// The token to offer on the next `ClientHello`, if any.
+    pub fn resume_token(&self) -> Option<&ResumeToken> {
+        self.token.as_ref()
+    }
+
+    /// Record a frame the application has now been given.
+    ///
+    /// Called with what was DELIVERED, never merely received: the claim this
+    /// turns into is "I have this". Reporting a frame the caller never saw
+    /// would let the server release it from its replay window, which is exactly
+    /// how a message is lost across a reconnect.
+    ///
+    /// Unsequenced frames (seq 0) carry no position — the whole control plane,
+    /// and the EPHEMERAL frames the server never sequences because they are
+    /// lossy by design. A stream outside `StreamId` is ignored rather than
+    /// panicking: it is untrusted input arriving from the network.
+    pub fn note_delivered(&mut self, stream: u32, seq: u64) {
+        let i = stream as usize;
+        if i == 0 || i >= STREAM_SLOTS || seq == 0 {
+            return;
+        }
+        if seq > self.positions[i] {
+            self.positions[i] = seq;
+        }
+    }
+
+    /// Every tracked position, as `(stream, last_delivered_seq)`.
+    ///
+    /// Shaped for both places the wire needs it — `ClientHello.resume_from` and
+    /// `Ping.progress` carry the same `StreamCursor`.
+    pub fn positions(&self) -> impl Iterator<Item = (u32, u64)> + '_ {
+        self.positions
+            .iter()
+            .enumerate()
+            .filter(|(_, &seq)| seq != 0)
+            .map(|(i, &seq)| (i as u32, seq))
     }
 
     fn edge(&mut self, from: State, to: State) -> Result<(), SessionError> {
@@ -400,6 +454,13 @@ impl Session {
             // would make the NEXT reconnect offer a credential for a session
             // that no longer exists.
             self.token = None;
+            // And the positions with it. They belong to the session that
+            // produced them; this is a NEW one, numbering from 1 again, so
+            // carrying them forward would make the next reconnect claim a
+            // position far ahead of anything that session sent — which the
+            // server refuses as a future cursor. One un-resumed connection
+            // would then poison every resume after it.
+            self.positions = [0; STREAM_SLOTS];
         }
         // A token issued now supersedes whatever we held, resumed or not.
         if let Some(t) = hello.resume_token {
@@ -435,6 +496,7 @@ impl Session {
         self.negotiated = None;
         self.offered_resume = false;
         self.ping_sent_ms = None;
+        self.positions = [0; STREAM_SLOTS];
     }
 
     /// Anything received from the peer proves liveness — a ping is only needed

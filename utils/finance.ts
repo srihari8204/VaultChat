@@ -26,7 +26,14 @@ export function splitDuration(years: number): { y: number; m: number; d: number 
 export interface EmiResult { emi: number; totalPayment: number; totalInterest: number; }
 /** EMI = P·r·(1+r)^n / ((1+r)^n − 1), r = monthly rate, n = months. */
 export function emi(principal: number, annualRatePct: number, months: number): EmiResult {
-  if (months <= 0 || principal <= 0) return { emi: 0, totalPayment: 0, totalInterest: 0 };
+  // `x <= 0` is FALSE for NaN, so the old guard waved NaN straight through and
+  // every caller got a NaN EMI it then rendered and exported. Written as
+  // `!(x > 0)` the guard rejects NaN as well as zero and negatives. The rate is
+  // checked separately because 0% is a legitimate loan (handled below) while a
+  // half-typed rate — num('1,2') is NaN — is not (2026-09-17).
+  if (!(months > 0) || !(principal > 0) || !Number.isFinite(annualRatePct)) {
+    return { emi: 0, totalPayment: 0, totalInterest: 0 };
+  }
   const r = annualRatePct / 12 / 100;
   const e = r === 0 ? principal / months : (principal * r * Math.pow(1 + r, months)) / (Math.pow(1 + r, months) - 1);
   const total = e * months;
@@ -37,9 +44,14 @@ export function emi(principal: number, annualRatePct: number, months: number): E
 export interface AmortRow { month: number; emi: number; principal: number; interest: number; balance: number; }
 /** Month-by-month EMI split into principal / interest with the running balance. */
 export function amortization(principal: number, annualRatePct: number, months: number): AmortRow[] {
-  if (principal <= 0 || months <= 0) return [];
-  const r = annualRatePct / 12 / 100;
+  // One guard, not two: emi() already rejects NaN, zero and negative inputs and
+  // answers 0, so a non-positive EMI means there is no schedule to draw. Keeping
+  // the check here in sync with emi()'s by hand is how NaN got in the first time
+  // — the screen re-runs this on every keystroke of the live amount/rate
+  // strings, so a half-typed field must yield no rows, not NaN rows (2026-09-17).
   const e = emi(principal, annualRatePct, months).emi;
+  if (!(e > 0)) return [];
+  const r = annualRatePct / 12 / 100;
   const rows: AmortRow[] = [];
   let bal = principal;
   for (let m = 1; m <= months; m++) {
@@ -62,6 +74,11 @@ export function periodRateToAnnualPct(rate: number, mode: 'rupees' | 'percent', 
 }
 
 // ── Home-loan part payment ──────────────────────────────────────
+// ponytail: partPayment, compareLoans and goldLoan below have NO callers in
+// the app (verified 2026-09-17) — they are guarded rather than deleted only
+// because this working copy has no VCS, so a deletion here is not recoverable.
+// Delete all three the first time this repo is under git and nothing imports
+// them; financeGuards.selftest.ts is then the only edit that follows.
 export interface PartPaymentResult {
   oldEmi: number; newEmi: number; oldMonths: number; newMonths: number;
   interestSaved: number; emiReduced: number; monthsReduced: number;
@@ -75,6 +92,22 @@ export function partPayment(
 ): PartPaymentResult {
   const r = annualRatePct / 12 / 100;
   const old = emi(outstanding, annualRatePct, months);
+  // ONE ENTRY GUARD, because the 2026-09-17 flip only reached the `denom`
+  // branch below and left two NaN doors open:
+  //  - `r === 0` divides by `old.emi`, which emi() answers 0 for on a
+  //    zero/NaN outstanding or tenure. newP / 0 is Infinity or NaN, and a NaN
+  //    tenure survives the Math.max/Math.min clamp untouched.
+  //  - a NaN `lump` makes newP NaN, and emi() answers a flat 0 for a NaN
+  //    principal — so 'emi' mode reported "new EMI ₹0, interest saved
+  //    ₹4,87,828" with total confidence about a payment that never parsed.
+  // Both have the same answer: with no valid starting loan, or no valid lump,
+  // there is no part payment to report. Zeros, exactly as emi() does it.
+  if (!(old.emi > 0) || !(lump >= 0)) {
+    return {
+      oldEmi: old.emi, newEmi: old.emi, oldMonths: 0, newMonths: 0,
+      interestSaved: 0, emiReduced: 0, monthsReduced: 0,
+    };
+  }
   const newP = Math.max(0, outstanding - lump);
   const oldInterest = old.totalInterest;
 
@@ -90,7 +123,11 @@ export function partPayment(
   if (r === 0) newMonths = Math.ceil(newP / old.emi);
   else {
     const denom = old.emi - newP * r;
-    newMonths = denom <= 0 ? months : Math.ceil(Math.log(old.emi / denom) / Math.log(1 + r));
+    // Same shape as the EMI guard: `denom <= 0` passes NaN, and a NaN tenure
+    // survives Math.max/Math.min below untouched. `!(denom > 0)` falls back to
+    // the original tenure for a rate the EMI can never outrun AND for a rate
+    // that never parsed (2026-09-17).
+    newMonths = !(denom > 0) ? months : Math.ceil(Math.log(old.emi / denom) / Math.log(1 + r));
   }
   newMonths = Math.max(0, Math.min(newMonths, months));
   const newInterest = round2(old.emi * newMonths - newP);

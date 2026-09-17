@@ -17,10 +17,11 @@
 // where it would be pointing at the screen you are already looking at.
 
 import React, { useEffect, useState, useSyncExternalStore } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, Platform } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, Platform, useWindowDimensions } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter, usePathname } from 'expo-router';
-import { HEADER_TOP } from '../constants/layout';
+import { deriveLayout } from '../constants/layoutMath';
 import { getSnapshot, subscribe } from '../lib/call/store';
 
 /** mm:ss, and h:mm:ss once a call runs past the hour. */
@@ -40,6 +41,23 @@ export function CallBar() {
   const router = useRouter();
   const pathname = usePathname();
   const snap = useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
+
+  // The bar is mounted ONCE, above the navigator, for the whole life of the
+  // process. That made HEADER_TOP the wrong tool: it was read into a
+  // module-scope StyleSheet the first time this file was imported - the
+  // earliest possible moment, before anything had synced real metrics - and
+  // then never read again. A rotation, a fold or a split-screen resize left
+  // the green bar padded for the old status bar, either overlapping the clock
+  // or floating below it, for as long as the app stayed open.
+  //
+  // deriveLayout is the same rule HEADER_TOP is computed from, run here
+  // against live values, so the bar follows the window without depending on
+  // whether the theme provider has synced yet (2026-09-17).
+  const insets = useSafeAreaInsets();
+  const win = useWindowDimensions();
+  const { headerTop } = deriveLayout({
+    top: insets.top, bottom: insets.bottom, width: win.width, height: win.height,
+  });
 
   // Ticks only while the bar is actually on screen — see the effect's guard.
   const [now, setNow] = useState(() => Date.now());
@@ -83,7 +101,7 @@ export function CallBar() {
   };
 
   return (
-    <View style={styles.wrap} accessibilityRole="toolbar">
+    <View style={[styles.wrap, { paddingTop: headerTop }]} accessibilityRole="toolbar">
       <TouchableOpacity
         style={styles.tap}
         onPress={back}
@@ -121,7 +139,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: '#1F9D55',
-    paddingTop: HEADER_TOP,
+    // paddingTop is applied at the element from live insets - see above.
     paddingBottom: 8,
     paddingHorizontal: 14,
     gap: 10,

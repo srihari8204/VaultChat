@@ -5,8 +5,6 @@ import (
 	"log"
 	"time"
 
-	"github.com/zishang520/socket.io/v2/socket"
-
 	"vaultchat/backend-go/internal/db"
 	"vaultchat/backend-go/internal/workx"
 )
@@ -20,13 +18,12 @@ var ghostCols = map[string]bool{
 	"hide_last_seen": true,
 }
 
-// ── Multi-device socket tracking (server.js trackSocket/untrackSocket) ──
-
-func (h *Hub) trackSocket(s *socket.Socket) {
-	if d := sd(s); d != nil {
-		h.trackIdentity(d.uid, string(s.Id()))
-	}
-}
+// ── Multi-device session tracking ──
+//
+// trackSocket/untrackSocket — the Socket.IO adapters that unwrapped a
+// *socket.Socket into (uid, id) — are gone with Socket.IO. The identity pair
+// below is what always did the work, and CC-Wire calls it directly
+// (ccwire.go trackIdentity, ccwire_messages.go untrackIdentity).
 
 func (h *Hub) trackIdentity(uid, id string) {
 	if uid == "" {
@@ -59,12 +56,6 @@ func (h *Hub) trackIdentity(uid, id string) {
 			}
 			h.onUserOnline(uid)
 		})
-	}
-}
-
-func (h *Hub) untrackSocket(s *socket.Socket) {
-	if d := sd(s); d != nil {
-		h.untrackIdentity(d.uid, string(s.Id()))
 	}
 }
 

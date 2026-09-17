@@ -174,7 +174,13 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   lock: { fontSize: 48, marginBottom: 16 },
   title: { color: c.text, fontSize: 24, fontWeight: '900' },
   sub: { color: c.textDim, fontSize: 14, marginTop: 8, textAlign: 'center' },
-  bioBtn: { marginTop: 28, height: 54, paddingHorizontal: 40, borderRadius: 16, backgroundColor: c.primary, alignItems: 'center', justifyContent: 'center' },
+  // 2026-09-18: minHeight, not height. This is the cold-launch gate, and the
+  // button sizes itself to its label — at font scale 1.5 'Use biometrics' plus
+  // 40 of horizontal padding each side no longer fits one line on a narrow
+  // phone, wraps to two, and a pinned 54 cut the second line off. A user with
+  // large text was then looking at a button with no readable way in. 54 is also
+  // the tap floor; the padding keeps it pixel-identical at scale 1.0.
+  bioBtn: { marginTop: 28, minHeight: 54, paddingVertical: 16, paddingHorizontal: 40, borderRadius: 16, backgroundColor: c.primary, alignItems: 'center', justifyContent: 'center' },
   bioTxt: { color: '#fff', fontSize: 16, fontWeight: '800' },
   alt: { color: c.primary, fontSize: 14, fontWeight: '700' },
   error: { color: c.danger, fontSize: 13, marginTop: 12, fontWeight: '600', textAlign: 'center' },

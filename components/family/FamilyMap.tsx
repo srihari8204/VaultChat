@@ -880,8 +880,13 @@ export default function FamilyMap({
 const styles = StyleSheet.create({
   wrap: { flex: 1, overflow: 'hidden' },
   fab: { position: 'absolute', right: 12, bottom: 12, width: 44, height: 44, borderRadius: 22, borderWidth: 1, alignItems: 'center', justifyContent: 'center', elevation: 3 },
+  // camFab is NOT the square glyph slot `fab` is: it is a rounded chip that
+  // already flexes on width (minWidth 44) and stacks a 10sp label under the
+  // icon. That label scales with the OS font and the pinned 44 cut it off at
+  // the top font sizes (2026-09-18). minHeight keeps it at 44 on a normal
+  // device, still above the 44dp tap floor, and lets the caption breathe.
   camFab: {
     position: 'absolute', right: 12, bottom: 66, minWidth: 44, paddingHorizontal: 7,
-    height: 44, borderRadius: 14, borderWidth: 1, alignItems: 'center', justifyContent: 'center', gap: 1, elevation: 3,
+    minHeight: 44, paddingVertical: 4, borderRadius: 14, borderWidth: 1, alignItems: 'center', justifyContent: 'center', gap: 1, elevation: 3,
   },
 });

@@ -788,8 +788,12 @@ const s = StyleSheet.create({
     borderWidth: 1, borderColor: C.cardBorder,
     padding: 14, marginBottom: 10,
   },
+  // 2026-09-18: minHeight, not height. Not an icon slot — it stacks two real
+  // labels, the day number and the month, and at font scale 1.5 the pair needs
+  // roughly 59 where a pinned 54 cut the month off. 40 of stacked line box +
+  // 2×6 padding holds it at 54 on a normal device.
   meetingDateBadge: {
-    width: 50, height: 54, borderRadius: 12,
+    width: 50, minHeight: 54, paddingVertical: 6, borderRadius: 12,
     backgroundColor: C.accent + '18',
     justifyContent: 'center', alignItems: 'center',
     marginRight: 14,

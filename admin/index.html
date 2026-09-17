@@ -8,7 +8,6 @@
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Sora:wght@500;600;700;800&family=Nunito+Sans:wght@400;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet" />
-<script src="https://cdn.socket.io/4.7.5/socket.io.min.js" crossorigin="anonymous"></script>
 <style>
   :root{
     --bg:#070B14; --panel:#0D1322; --panel2:#111A2E; --line:rgba(232,182,76,.14);
@@ -463,30 +462,98 @@
     pill.className='pill '+(state==='on'?'on':state==='warn'?'warn':'off');
     txt.textContent = state==='on'?'Live':state==='warn'?'Reconnecting…':'Offline';
   }
-  function connectSocket(){
-    if(typeof io==='undefined'){ setStatus('off'); return; }
-    if(socket){ try{socket.disconnect();}catch{} }
-    setStatus('warn');
-    socket = io(SERVER, {
-      transports:['websocket','polling'], auth:{ adminKey:KEY },
-      reconnection:true, reconnectionDelay:800, reconnectionDelayMax:8000, timeout:8000
-    });
-    socket.on('connect', ()=>{ setStatus('on'); logEvent('conn','connect','socket '+socket.id); });
-    socket.io.on('reconnect_attempt', ()=>setStatus('warn'));
-    socket.on('disconnect', r=>{ setStatus('off'); logEvent('conn','disconnect',String(r)); });
-    socket.on('connect_error', e=>{ setStatus('warn'); logEvent('del','connect_error',e.message); });
-    // The real firehose: server mirrors chat events here (no content).
-    socket.on('admin:event', d=>{
+  // ── Admin firehose over SSE (was Socket.IO) ─────────────────────
+  //
+  // The app moved to CC-Wire and dropped socket.io-client entirely; this page
+  // was the last Socket.IO consumer, and the only reason SOCKET_IO_ENABLED had
+  // to stay on. It now reads GET /admin/events (internal/realtime/admin_sse.go).
+  //
+  // fetch() + ReadableStream rather than EventSource, ON PURPOSE: EventSource
+  // cannot set request headers, so it would force the admin key into the URL —
+  // and into access logs, proxy logs and browser history. This keeps the same
+  // x-admin-key header api() already uses. The cost is reconnect, below, which
+  // EventSource would have handled for us.
+  //
+  // Backoff bounds are socket.io's old ones (800ms → 8s) so the reconnect
+  // cadence an operator is used to seeing does not change.
+  function dispatchAdmin(ev, d){
+    if(ev === 'admin:event'){
       const kind = d.event==='new_message'?'new_message':(/delete/.test(d.event)?'message_deleted':'other');
       const det = [d.event,(d.type?('· '+d.type):''),(d.chatId?('chat '+short(d.chatId)):''),(d.senderId?('from '+short(d.senderId)):'')].filter(Boolean).join(' ');
       logEvent(kind, d.event, det);
-    });
-    socket.on('system:announcement', d=>logEvent('system','system:announcement','['+d.type+'] '+(d.text||'')));
-    // Catch anything else the server sends to this socket.
-    socket.onAny((ev,...args)=>{
-      if(ev==='admin:event'||ev==='system:announcement') return;
-      logEvent('other', ev, typeof args[0]==='object'?JSON.stringify(args[0]).slice(0,120):String(args[0]??''));
-    });
+      return;
+    }
+    if(ev === 'system:announcement'){
+      logEvent('system','system:announcement','['+d.type+'] '+(d.text||''));
+      return;
+    }
+    logEvent('other', ev, typeof d==='object'&&d!==null?JSON.stringify(d).slice(0,120):String(d??''));
+  }
+
+  function handleSseFrame(frame){
+    // Comments carry the heartbeat and the server's drop count. A drop is a gap
+    // in the firehose, so it is shown rather than swallowed.
+    if(frame.startsWith(':')){
+      const c = frame.slice(1).trim();
+      if(c.startsWith('dropped')) logEvent('del','dropped',c+' (admin stream fell behind)');
+      return;
+    }
+    let ev = 'message', data = '';
+    for(const line of frame.split('\n')){
+      if(line.startsWith('event:')) ev = line.slice(6).trim();
+      else if(line.startsWith('data:')) data += line.slice(5).trim();
+    }
+    if(!data) return;
+    let parsed = null;
+    try{ parsed = JSON.parse(data); }catch{ return; }
+    dispatchAdmin(ev, parsed && parsed.payload !== undefined ? parsed.payload : parsed);
+  }
+
+  function connectSocket(){
+    if(socket){ try{socket.disconnect();}catch{} }
+    let stopped = false, ac = null, delay = 800;
+    // Same shape the rest of the page expects: something with .disconnect().
+    socket = { disconnect(){ stopped = true; try{ ac && ac.abort(); }catch{} } };
+    const self = socket;
+
+    (async function loop(){
+      while(!stopped){
+        setStatus('warn');
+        ac = new AbortController();
+        try{
+          const res = await fetch(SERVER.replace(/\/$/,'') + '/admin/events', {
+            headers: { 'x-admin-key': KEY, 'accept': 'text/event-stream' },
+            signal: ac.signal, cache: 'no-store'
+          });
+          if(res.status === 401) throw new Error('401 — invalid admin key');
+          if(!res.ok || !res.body) throw new Error('HTTP ' + res.status);
+
+          setStatus('on'); logEvent('conn','connect','sse ' + SERVER);
+          delay = 800;  // a good connection resets the backoff
+
+          const reader = res.body.getReader(), dec = new TextDecoder();
+          let buf = '';
+          for(;;){
+            const { value, done } = await reader.read();
+            if(done) break;
+            buf += dec.decode(value, { stream:true });
+            let k;
+            while((k = buf.indexOf('\n\n')) >= 0){
+              handleSseFrame(buf.slice(0, k));
+              buf = buf.slice(k + 2);
+            }
+          }
+          if(stopped || socket !== self) return;
+          setStatus('off'); logEvent('conn','disconnect','stream ended');
+        }catch(e){
+          if(stopped || socket !== self) return;   // our own abort, or replaced
+          setStatus('warn'); logEvent('del','connect_error', String(e && e.message || e));
+        }
+        if(stopped || socket !== self) return;
+        await new Promise(r => setTimeout(r, delay));
+        delay = Math.min(delay * 2, 8000);
+      }
+    })();
   }
 
   // Dashboard auto-refresh 10s while connected + dashboard visible.

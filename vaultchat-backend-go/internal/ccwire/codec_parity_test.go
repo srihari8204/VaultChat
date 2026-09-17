@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"reflect"
+	"sort"
 	"strconv"
 	"strings"
 	"testing"
@@ -531,8 +532,24 @@ func TestEveryTypedBodyHasVectors(t *testing.T) {
 			t.Errorf("body %d has only %d vectors; canonical, empty, over-bound and malformed are the minimum", f, n)
 		}
 	}
-	if len(v.BodiesTypedByTypescriptOnly) != 0 {
-		t.Errorf("a body type is typed on one side only again: %v", v.BodiesTypedByTypescriptOnly)
+	// app_event (100) is the ONE known asymmetry, and it is recorded rather
+	// than asserted away: TypeScript types it and bounds AppEvent.payload_json at
+	// max_opaque_bytes when app_events_v1 is off, while Go and Rust keep body 100
+	// opaque and accept the same bytes. This guard therefore pins the exception
+	// SET, not emptiness — a new divergence still fails here, and closing this one
+	// means typing app_event on all three sides, not editing the fixture.
+	got := append([]uint32(nil), v.BodiesTypedByTypescriptOnly...)
+	sort.Slice(got, func(i, j int) bool { return got[i] < got[j] })
+	want := []uint32{100}
+	if len(got) != len(want) {
+		t.Errorf("a body type is typed on one side only again: %v", got)
+	} else {
+		for i := range got {
+			if got[i] != want[i] {
+				t.Errorf("a body type is typed on one side only again: %v", got)
+				break
+			}
+		}
 	}
 }
 

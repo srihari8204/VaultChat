@@ -31,6 +31,7 @@ import {
   createChatCode, getChatCode, joinChatCode, revokeChatCode, type ChatCode,
 } from '../lib/chatService';
 import { AuroraBackground, KeyboardSafe } from '../components/ui';
+import { HEADER_TOP } from '../constants/layout';
 
 // The four things a code can open.
 //
@@ -150,7 +151,7 @@ export default function ChatCodeScreen() {
     <KeyboardSafe style={S.screen} >
       <AuroraBackground />
       <View style={S.header}>
-        <TouchableOpacity onPress={() => router.back()} style={S.backBtn} activeOpacity={0.7}>
+        <TouchableOpacity accessibilityRole="button" accessibilityLabel="Back" onPress={() => router.back()} style={S.backBtn} activeOpacity={0.7}>
           <Ionicons name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
         <Text style={S.title}>Chat by code</Text>
@@ -293,7 +294,7 @@ function useS() {
 
 const makeStyles = (c: Palette) => StyleSheet.create({
   screen: { flex: 1, backgroundColor: 'transparent' },
-  header: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingTop: 56, paddingBottom: 12, gap: 8 },
+  header: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingTop: HEADER_TOP, paddingBottom: 12, gap: 8 },
   backBtn: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
   title: { color: c.text, fontSize: 20, fontWeight: '800' },
 
@@ -323,9 +324,13 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   codeAction: { alignItems: 'center', gap: 4 },
   codeActionTxt: { color: c.primary, fontSize: 12.5, fontWeight: '700' },
 
-  input: { marginTop: 22, height: 66, borderRadius: 14, backgroundColor: c.glassSoft, color: c.text, fontSize: 34, fontWeight: '800', letterSpacing: 10, textAlign: 'center' },
+  // 2026-09-18: minHeight on both — a 34sp code field and a 16sp button pinned
+  // to a fixed box clip once the OS font scale is turned up, and this screen is
+  // how a second device gets linked. The padding is sized so content + 2×10
+  // still sits inside the old 66 / 50 at scale 1.0, so nothing moves there.
+  input: { marginTop: 22, minHeight: 66, paddingVertical: 10, borderRadius: 14, backgroundColor: c.glassSoft, color: c.text, fontSize: 34, fontWeight: '800', letterSpacing: 10, textAlign: 'center' },
 
-  cta: { marginTop: 22, height: 50, borderRadius: 14, backgroundColor: c.primary, alignItems: 'center', justifyContent: 'center' },
+  cta: { marginTop: 22, minHeight: 50, paddingVertical: 10, borderRadius: 14, backgroundColor: c.primary, alignItems: 'center', justifyContent: 'center' },
   ctaOff: { opacity: 0.4 },
   ctaTxt: { color: '#fff', fontSize: 16, fontWeight: '800' },
 

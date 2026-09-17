@@ -41,6 +41,8 @@ import {
   useCallStatus, useParticipantStreamUrl,
 } from '../hooks/useCall';
 import { Ionicons } from '@expo/vector-icons';
+import { endMessage } from '../lib/call/endMessage';
+import { getSnapshot } from '../lib/call/store';
 
 type CallState = 'connecting' | 'ringing' | 'connected' | 'ended';
 
@@ -331,6 +333,11 @@ function VideoCallEngine() {
 
   useEffect(() => {
     if (status !== 'ended') return;
+    // Say why, but only when the user did not ask for it. endMessage returns
+    // null for a hang-up either side made on purpose (2026-09-17).
+    const snap = getSnapshot();
+    const why = endMessage(snap.endReason, snap.error);
+    if (why) Alert.alert('Call ended', why);
     // LEAVE, even when there is nothing to go back TO.
     //
     // router.back() is a no-op on an empty history, and a call answered from a

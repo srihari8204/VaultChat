@@ -7,9 +7,7 @@
 import { HEADER_TOP } from '../constants/layout';
 import { brandAlpha, type Palette } from '../constants/theme';
 import React, { useState, useEffect, useCallback , useMemo} from 'react';
-import {
-  View, Text, TouchableOpacity, StyleSheet, FlatList, Alert, StatusBar, TextInput, Modal, Share, ActivityIndicator,
-} from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, FlatList, Alert, TextInput, Modal, Share, ActivityIndicator } from 'react-native';
 import { Stack, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../lib/theme';
@@ -20,6 +18,7 @@ import {
   type Channel, type ChannelPost,
 } from '../lib/chatService';
 import { AuroraBackground } from '../components/ui';
+import { KeyboardSafe } from '../components/ui/KeyboardSafe';
 
 const CACHE_KEY = 'broadcasts';
 
@@ -139,7 +138,7 @@ export default function BroadcastScreen() {
       <AuroraBackground />
         <Stack.Screen options={{ headerShown: false }} />
         <View style={s.header}>
-          <TouchableOpacity onPress={() => { setSelected(null); setPosts([]); }} style={s.backBtn} hitSlop={10}>
+          <TouchableOpacity accessibilityRole="button" accessibilityLabel="Back" onPress={() => { setSelected(null); setPosts([]); }} style={s.backBtn} hitSlop={10}>
             <Ionicons name="arrow-back" size={24} color={colors.text} />
           </TouchableOpacity>
           <Text style={s.title} numberOfLines={1}>{selected.name}</Text>
@@ -195,10 +194,9 @@ export default function BroadcastScreen() {
   return (
     <View style={s.container}>
       <Stack.Screen options={{ headerShown: false }} />
-      <StatusBar barStyle="light-content" />
 
       <View style={s.header}>
-        <TouchableOpacity onPress={() => router.back()} style={s.backBtn} hitSlop={10}>
+        <TouchableOpacity accessibilityRole="button" accessibilityLabel="Back" onPress={() => router.back()} style={s.backBtn} hitSlop={10}>
           <Ionicons name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
         <Text style={s.title}>Broadcast Channels</Text>
@@ -246,6 +244,7 @@ export default function BroadcastScreen() {
 
       {/* Create modal */}
       <Modal visible={showCreate} transparent animationType="slide" onRequestClose={() => setShowCreate(false)}>
+        <KeyboardSafe keyboardOnly>
         <View style={s.modalBg}>
           <View style={s.modal}>
             <Text style={s.modalTitle}>Create Broadcast Channel</Text>
@@ -257,10 +256,12 @@ export default function BroadcastScreen() {
             <TouchableOpacity onPress={() => setShowCreate(false)}><Text style={s.modalCancel}>Cancel</Text></TouchableOpacity>
           </View>
         </View>
+        </KeyboardSafe>
       </Modal>
 
       {/* Join modal */}
       <Modal visible={showJoin} transparent animationType="slide" onRequestClose={() => setShowJoin(false)}>
+        <KeyboardSafe keyboardOnly>
         <View style={s.modalBg}>
           <View style={s.modal}>
             <Text style={s.modalTitle}>Join a Channel</Text>
@@ -279,6 +280,7 @@ export default function BroadcastScreen() {
             <TouchableOpacity onPress={() => setShowJoin(false)}><Text style={s.modalCancel}>Cancel</Text></TouchableOpacity>
           </View>
         </View>
+        </KeyboardSafe>
       </Modal>
     </View>
   );

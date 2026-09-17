@@ -74,6 +74,31 @@ services:
       # secret in this file, it is mounted alongside the others purely so the
       # two games keys are configured in one place and cannot drift apart.
       GAMES_NOTIFY_PUBLIC_KEY_FILE: /run/secrets/games-notify.pub
+
+      # ── Realtime: CC-Wire is what the app actually speaks ──────────────
+      #
+      # lib/socket.ts selectTransport() returns 'ccwire' unconditionally and
+      # socket.io-client is GONE from the app's dependencies — so an installed
+      # build has no Socket.IO path to fall back to. Both flags below default
+      # to OFF in cmd/api/main.go, which means a go-api started without them
+      # answers 404 on /ccwire/v1 and every client sits in reconnect forever:
+      # no messages, no calls, no presence, and nothing in the app that can
+      # route around it.
+      #
+      # These two lines were previously only in docker-compose.ccwire.yml,
+      # which no deploy script or runbook ever passes with -f — so the
+      # documented deploy chain shipped a server the current app cannot talk
+      # to. Moved here so the standard chain carries them.
+      #
+      CCWIRE_WS: "1"
+      CCWIRE_APP_EVENTS: "1"
+
+      # SOCKET_IO_ENABLED is deliberately absent. Socket.IO is GONE from the Go
+      # server — no import, no /socket.io/ mount, no code reads the variable —
+      # so setting it to any value does nothing. It was briefly set to "0" here
+      # while the code still existed and the flag was a real revert lever; it is
+      # not one any more, and leaving it would imply a rollback path that no
+      # longer exists. Rolling Socket.IO back now means reverting the code.
     volumes:
       - ./secrets/fcm-service-account.json:/run/secrets/firebase-sa.json:ro
       - ./secrets/games-signing.key:/run/secrets/games-signing.key:ro

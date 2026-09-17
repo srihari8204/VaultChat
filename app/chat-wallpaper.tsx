@@ -18,6 +18,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../lib/theme';
 import { type Palette } from '../constants/theme';
 import { AuroraBackground } from '../components/ui';
+import { permissionDenied } from '../lib/permissionDenied';
 
 
 // WhatsApp-style solid wallpapers — a bright row then a dark row.
@@ -96,9 +97,9 @@ export default function ChatWallpaperScreen() {
   const reset = () => setSelected(null);
 
   const pickImage = async () => {
-    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    const { status, canAskAgain } = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (status !== 'granted') {
-      Alert.alert('Permission required', 'Allow access to your photos to set a custom wallpaper.');
+      permissionDenied('Permission required', 'Allow access to your photos to set a custom wallpaper.', canAskAgain);
       return;
     }
     const result = await ImagePicker.launchImageLibraryAsync({
@@ -135,7 +136,7 @@ export default function ChatWallpaperScreen() {
 
       {/* Header */}
       <View style={s.header}>
-        <TouchableOpacity onPress={() => router.back()} style={s.iconBtn} hitSlop={8}>
+        <TouchableOpacity accessibilityRole="button" accessibilityLabel="Back" onPress={() => router.back()} style={s.iconBtn} hitSlop={8}>
           <Ionicons name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
         <Text style={s.headerTitle}>Wallpaper</Text>
@@ -182,7 +183,7 @@ export default function ChatWallpaperScreen() {
             {SOLID_COLORS.map((color, i) => {
               const on = selected?.type === 'solid' && selected.value === color;
               return (
-                <TouchableOpacity
+                <TouchableOpacity accessibilityRole="button" accessibilityLabel={`Wallpaper colour ${color}`}
                   key={i}
                   onPress={() => setSelected({ type: 'solid', value: color })}
                   style={[s.colorTile, { backgroundColor: color }, on && s.tileSelected]}
@@ -252,7 +253,7 @@ const makeStyles = (c: Palette, SW: number) => {
   headerTitle: { flex: 1, color: c.text, fontSize: 18, fontWeight: '700' },
   resetText: { color: c.primary, fontSize: 14, fontWeight: '700', paddingHorizontal: 8 },
 
-  previewBox: { height: 200, borderRadius: 16, overflow: 'hidden', borderWidth: StyleSheet.hairlineWidth, borderColor: c.glassStroke, justifyContent: 'flex-end', marginBottom: 18 },
+  previewBox: { minHeight: 200, borderRadius: 16, overflow: 'hidden', borderWidth: StyleSheet.hairlineWidth, borderColor: c.glassStroke, justifyContent: 'flex-end', marginBottom: 18 },
   sampleBubbles: { padding: 12 },
   peerBubble: { alignSelf: 'flex-start', borderRadius: 14, borderTopLeftRadius: 4, paddingHorizontal: 12, paddingVertical: 8, marginBottom: 8, maxWidth: '78%' },
   myBubble: { alignSelf: 'flex-end', borderRadius: 14, borderTopRightRadius: 4, paddingHorizontal: 12, paddingVertical: 8, maxWidth: '78%' },

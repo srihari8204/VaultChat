@@ -26,13 +26,21 @@ import { type Palette } from '../constants/theme';
 import { useTheme } from '../lib/theme';
 import { listChats } from '../lib/chatService';
 import {
-  getAllLocks, setChatLock, removeChatLock, verifyBiometric, hasBiometric,
+  getAllLocks, setChatLock, removeChatLock, verifyBiometric, verifyPin, hasBiometric,
   type LockedChat, type LockMethod, type AutoLockTimer,
 } from '../lib/chatLock';
 import { AuroraBackground } from '../components/ui';
+import { HEADER_TOP } from '../constants/layout';
 
 
-const TOP = Platform.OS === 'android' ? (StatusBar.currentHeight ?? 0) : 44;
+// Was: StatusBar.currentHeight on Android, a hardcoded 44 elsewhere, read ONCE
+// at module scope. Three defects in one line (2026-09-18): currentHeight omits
+// the display cutout on some OEM skins; the ?? 0 fallback draws the header
+// UNDER the notch, and edgeToEdge is on at every API level here; and a module
+// read freezes whichever value it got at launch, so it never follows a rotation
+// or a fold. HEADER_TOP is the live binding and already carries the gap, so the
+// old "+ 8" goes with it. makeStyles is a factory re-run per layout generation,
+// so reading it here is read-at-render, not a frozen capture.
 
 interface ChatItem {
   id: string;
@@ -65,6 +73,27 @@ export default function AppLockChatsScreen() {
 
   const [chats, setChats] = useState<ChatItem[]>([]);
   const [lockedChats, setLockedChats] = useState<Record<string, LockedChat>>({});
+  // The lock table could not be READ - distinct from "nothing is locked".
+  const [loadErr, setLoadErr] = useState(false);
+  // Promise-based PIN prompt, the same shape app/chat-export.tsx uses for the
+  // same job: a lock cannot be removed on a fingerprint alone when its owner
+  // chose a PIN (2026-09-17).
+  const [unlockPrompt, setUnlockPrompt] = useState<LockedChat | null>(null);
+  const [unlockPin, setUnlockPin] = useState('');
+  const [unlockErr, setUnlockErr] = useState(false);
+  const unlockResolve = useRef<((ok: boolean) => void) | null>(null);
+  const askUnlockPin = (lock: LockedChat) => new Promise<boolean>((resolve) => {
+    unlockResolve.current = resolve;
+    setUnlockPin(''); setUnlockErr(false); setUnlockPrompt(lock);
+  });
+  const closeUnlock = (ok: boolean) => {
+    setUnlockPrompt(null); setUnlockPin(''); setUnlockErr(false);
+    unlockResolve.current?.(ok); unlockResolve.current = null;
+  };
+  const submitUnlockPin = () => {
+    if (unlockPrompt && verifyPin(unlockPrompt, unlockPin)) closeUnlock(true);
+    else setUnlockErr(true);
+  };
   const [configChat, setConfigChat] = useState<string | null>(null);
   const [pinInput, setPinInput] = useState('');
   const [bioAvailable, setBioAvailable] = useState(false);
@@ -77,7 +106,11 @@ export default function AppLockChatsScreen() {
     Animated.timing(fadeIn, { toValue: 1, duration: 400, useNativeDriver: true }).start();
     (async () => {
       setBioAvailable(await hasBiometric());
-      setLockedChats(await getAllLocks());
+      // An empty list here reads as "no chats are locked", which is exactly the
+      // wrong thing to show when the table could not be read - the user would
+      // believe their locks had vanished. Surface the failure instead.
+      try { setLockedChats(await getAllLocks()); setLoadErr(false); }
+      catch { setLoadErr(true); }
       try {
         const list = await listChats();
         setChats(list.map(c => ({ id: c.id, name: c.name || c.peerName || 'Chat' })));
@@ -85,15 +118,41 @@ export default function AppLockChatsScreen() {
     })();
   }, [fadeIn]);
 
-  const reloadLocks = async () => setLockedChats(await getAllLocks());
+  const reloadLocks = async () => {
+    try { setLockedChats(await getAllLocks()); setLoadErr(false); }
+    catch { setLoadErr(true); }
+  };
 
   const toggleLock = async (chat: ChatItem) => {
     const existing = lockedChats[chat.id];
     if (existing?.locked) {
-      // Verify before unlocking. Biometric is required when the device has it
-      // enrolled; PIN-only locks are still enforced at the chat gate on open.
-      const ok = bioAvailable ? await verifyBiometric('Verify to unlock this chat') : true;
-      if (!ok) return;
+      // REMOVING A LOCK MUST SATISFY THAT LOCK (2026-09-17).
+      //
+      // This was: bioAvailable ? await verifyBiometric(...) : true. Two holes,
+      // and both DELETE the lock rather than merely opening the chat:
+      //
+      //   - On a device with no enrolled biometric, and on web where
+      //     hasBiometric() is false, the ternary fell through to TRUE and the
+      //     lock came off with no verification of any kind.
+      //   - A chat locked with a PIN, or with BOTH, came off on a fingerprint
+      //     alone. The PIN the user chose was never asked for.
+      //
+      // Verify against the lock OWN method, the same way the chat gate does.
+      // The old note said PIN-only locks were still enforced at the chat gate;
+      // true, and irrelevant once the lock itself has been deleted.
+      if (existing.lockMethod === 'biometric' || existing.lockMethod === 'both') {
+        if (!bioAvailable) {
+          Alert.alert(
+            'Biometrics unavailable',
+            'This chat is locked with biometrics, and none are enrolled on this device. Enrol a fingerprint or face, then try again.',
+          );
+          return;
+        }
+        if (!(await verifyBiometric('Verify to unlock this chat'))) return;
+      }
+      if (existing.lockMethod === 'pin' || existing.lockMethod === 'both') {
+        if (!(await askUnlockPin(existing))) return;
+      }
       await removeChatLock(chat.id);
       await reloadLocks();
     } else {
@@ -132,7 +191,15 @@ export default function AppLockChatsScreen() {
 
           <Text style={s.configLabel}>Lock Method</Text>
           <View style={s.chipRow}>
-            {LOCK_METHOD_OPTIONS.map(opt => (
+            {/* A METHOD YOU CANNOT SATISFY IS A CHAT YOU LOSE (2026-09-17).
+                Hardening the unlock gate removed the old bioAvailable ? verify : true
+                fall-through, which was the ONLY way to drop a lock you could not meet.
+                With it gone, picking "Biometric" on a device with nothing enrolled - or
+                on web, where hasBiometric() is always false - made the chat permanently
+                unreadable AND the lock permanently undeletable, in three taps.
+                The honest fix is upstream: do not offer a factor this device cannot
+                produce. PIN is always offerable, so there is always a way in. */}
+            {LOCK_METHOD_OPTIONS.filter(opt => bioAvailable || opt.value === 'pin').map(opt => (
               <TouchableOpacity
                 key={opt.value}
                 style={[s.chip, method === opt.value && s.chipActive]}
@@ -257,7 +324,7 @@ export default function AppLockChatsScreen() {
       <Animated.View style={{ flex: 1, opacity: fadeIn }}>
         {/* Header */}
         <View style={s.header}>
-          <TouchableOpacity onPress={() => router.back()} style={s.backBtn}>
+          <TouchableOpacity accessibilityRole="button" accessibilityLabel="Back" onPress={() => router.back()} style={s.backBtn}>
             <Ionicons name="arrow-back" size={24} color={colors.text} />
           </TouchableOpacity>
           <Text style={s.headerTitle}>Per-Chat Lock</Text>
@@ -276,6 +343,15 @@ export default function AppLockChatsScreen() {
         </View>
 
         {/* Chat list */}
+        {/* An unreadable lock table must never render as an empty list: that reads
+            as "none of your chats are locked", which is the opposite of what is
+            known, and would invite the user to re-lock chats that are already
+            locked. Say what actually happened (2026-09-17). */}
+        {loadErr && (
+          <Text style={{ color: colors.danger, textAlign: 'center', marginHorizontal: 20, marginBottom: 12 }}>
+            Your chat lock settings could not be read, so the list below may be incomplete. Existing locks are still in force.
+          </Text>
+        )}
         <FlatList
           data={chats}
           keyExtractor={c => c.id}
@@ -287,6 +363,42 @@ export default function AppLockChatsScreen() {
       </Animated.View>
 
       {configChat && renderConfigPanel()}
+      {/* Verify the PIN before a PIN-protected lock can be REMOVED. Reuses the
+          config panel styles, so it inherits the same responsive behaviour and
+          theme tokens rather than introducing a second dialog design. */}
+      {unlockPrompt && (
+        <View style={s.overlay}>
+          <View style={s.configPanel}>
+            <Text style={s.configTitle}>Enter this chat&apos;s PIN</Text>
+            <Text style={s.configLabel}>
+              {unlockPrompt.lockMethod === 'both'
+                ? 'Biometrics verified. The PIN is the second factor you chose.'
+                : 'Removing this lock needs the PIN that set it.'}
+            </Text>
+            <TextInput
+              style={s.pinInput}
+              value={unlockPin}
+              onChangeText={(t) => { setUnlockPin(t); setUnlockErr(false); }}
+              keyboardType="number-pad"
+              secureTextEntry
+              maxLength={8}
+              autoFocus
+              placeholder="Enter PIN"
+              placeholderTextColor={colors.textFaint}
+              onSubmitEditing={submitUnlockPin}
+            />
+            {unlockErr && <Text style={[s.configLabel, { color: colors.danger }]}>Incorrect PIN.</Text>}
+            <View style={s.chipRow}>
+              <TouchableOpacity style={s.cancelBtn} onPress={() => closeUnlock(false)} accessibilityRole="button" accessibilityLabel="Cancel">
+                <Text style={s.cancelBtnText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={s.confirmBtn} onPress={submitUnlockPin} accessibilityRole="button" accessibilityLabel="Confirm PIN and remove the lock">
+                <Text style={s.confirmBtnText}>Remove lock</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      )}
     </View>
   );
 }
@@ -298,7 +410,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingTop: TOP + 8,
+    paddingTop: HEADER_TOP,
     paddingHorizontal: 16,
     paddingBottom: 12,
   },

@@ -7,9 +7,10 @@
 import React, { useRef, useState, useEffect } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity,
-  Animated, Dimensions, Platform, StatusBar, useWindowDimensions } from 'react-native';
+  Animated, Dimensions, StatusBar, useWindowDimensions } from 'react-native';
 import Svg, { Circle, Line, Ellipse } from 'react-native-svg';
 import { router } from 'expo-router';
+import { HEADER_TOP } from '../constants/layout';
 
 const C = {
   bg: '#060E1E', panel: '#0D1F3C', cyan: '#4A9FFF',
@@ -17,7 +18,13 @@ const C = {
   white: '#FFFFFF', muted: '#7BA7C4', dark: '#030A14',
 };
 const { width: SW } = Dimensions.get('window');
-const TOP = Platform.OS === 'android' ? (StatusBar.currentHeight ?? 0) : 44;
+// Was: `const TOP = Platform.OS === 'android' ? (StatusBar.currentHeight ?? 0) : 44`.
+// currentHeight ignores the display cutout on some OEM skins, the `?? 0` drew
+// the top bar UNDER the notch (edgeToEdge is on at every API level here), and
+// the module-scope read froze whichever it picked for the life of the process.
+// HEADER_TOP is a LIVE binding and `s` below is a module-scope StyleSheet, so
+// it has to be applied at the element or it would freeze all over again
+// (2026-09-17).
 
 const PHASE = { INTRO: 'INTRO', SCANNING: 'SCANNING', CONFIRMED: 'CONFIRMED' } as const;
 type P = typeof PHASE[keyof typeof PHASE];
@@ -212,7 +219,7 @@ export default function FaceScanScreen() {
 
   // ── INTRO ─────────────────────────────────────────────────────────────────
   if (phase === PHASE.INTRO) return (
-    <View style={s.root}>
+    <View style={[s.root, { paddingTop: HEADER_TOP }]}>
       <StatusBar barStyle="light-content" backgroundColor={C.bg} />
       <Animated.View style={[s.center, { opacity: fadeIn }]}>
         <Text style={s.label}>V A U L T C H A T</Text>
@@ -251,7 +258,7 @@ export default function FaceScanScreen() {
       <ScanLine />
 
       <View style={s.topOv} pointerEvents="none" />
-      <View style={s.topBar} pointerEvents="none">
+      <View style={[s.topBar, { top: HEADER_TOP + 2 }]} pointerEvents="none">
         <Text style={s.labelSm}>V A U L T C H A T</Text>
         <Text style={s.camT}>Scanning Your Face…</Text>
       </View>
@@ -273,7 +280,7 @@ export default function FaceScanScreen() {
 
   // ── CONFIRMED ─────────────────────────────────────────────────────────────
   return (
-    <View style={s.root}>
+    <View style={[s.root, { paddingTop: HEADER_TOP }]}>
       <StatusBar barStyle="light-content" backgroundColor={C.bg} />
       <Animated.View style={[s.center, { opacity: okOp, transform: [{ scale: okSc }] }]}>
         <Text style={s.label}>V A U L T C H A T</Text>
@@ -294,7 +301,7 @@ export default function FaceScanScreen() {
 }
 
 const s = StyleSheet.create({
-  root:     { flex: 1, backgroundColor: C.bg, paddingTop: TOP },
+  root:     { flex: 1, backgroundColor: C.bg },
   center:   { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 24 },
   label:    { fontSize: 11, letterSpacing: 7, color: C.cyan, marginBottom: 6, fontWeight: '600' },
   labelSm:  { fontSize: 10, letterSpacing: 5, color: C.cyan, fontWeight: '500', marginBottom: 3 },
@@ -309,7 +316,7 @@ const s = StyleSheet.create({
   btn:      { marginTop: 8, backgroundColor: C.cyan, paddingVertical: 15, borderRadius: 13, width: '100%', alignItems: 'center' },
   btxt:     { fontSize: 16, fontWeight: '700', color: C.dark },
   topOv:    { position: 'absolute', top: 0, left: 0, right: 0, height: 155, backgroundColor: 'rgba(6,14,30,0.68)' },
-  topBar:   { position: 'absolute', top: TOP + 10, left: 0, right: 0, alignItems: 'center' },
+  topBar:   { position: 'absolute', left: 0, right: 0, alignItems: 'center' },
   camT:     { fontSize: 20, fontWeight: '700', color: C.white },
   bwrap:    { alignItems: 'center', justifyContent: 'center' },
   ringWrap: { position: 'absolute', bottom: 155, alignSelf: 'center', width: 80, height: 80, alignItems: 'center', justifyContent: 'center' },

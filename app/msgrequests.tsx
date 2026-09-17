@@ -16,10 +16,7 @@ import { useTheme } from '../lib/theme';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import {
-  Alert, Animated, FlatList, StatusBar, StyleSheet,
-  Text, TouchableOpacity, View,
-} from 'react-native';
+import { Alert, Animated, FlatList, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { VaultContact } from '../lib/contactSync';
 import {
@@ -179,7 +176,6 @@ export default function MsgRequests() {
   return (
     <View style={s.screen}>
       <AuroraBackground />
-      <StatusBar barStyle="light-content" backgroundColor={colors.bg} />
 
       {/* Header */}
       <View style={s.header}>

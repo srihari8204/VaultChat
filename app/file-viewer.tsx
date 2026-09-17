@@ -1229,6 +1229,7 @@ const s = StyleSheet.create({
   audioTitle: { color: C.text, fontSize: 20, fontWeight: '700', textAlign: 'center' },
   audioMeta: { color: C.textDim, fontSize: 13, marginTop: 6 },
   waveContainer: {
+    // layout-exempt: draws fixed-width bars, no text — height is the drawing.
     flexDirection: 'row', alignItems: 'flex-end',
     height: 56, gap: 2, justifyContent: 'center',
   },

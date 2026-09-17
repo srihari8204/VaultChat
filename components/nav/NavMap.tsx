@@ -456,6 +456,13 @@ const styles = StyleSheet.create({
   wrap: { flex: 1, overflow: 'hidden' },
   fab: { position: 'absolute', right: 12, bottom: 12, width: 44, height: 44, borderRadius: 22, borderWidth: 1, alignItems: 'center', justifyContent: 'center', elevation: 3 },
   zoomBox: { position: 'absolute', right: 12, bottom: 66, width: 44, borderRadius: 14, borderWidth: 1, overflow: 'hidden', elevation: 3 },
-  zoomBtn: { height: 40, alignItems: 'center', justifyContent: 'center' },
+  // 2026-09-18: height stays PINNED. +/- are Ionicons, not text, and they do not
+  // font-scale; the slot is already boxed to zoomBox's fixed 44 width, so letting
+  // the height grow would just turn two square buttons into ovals inside a
+  // capsule that cannot follow them.
+  zoomBtn: {
+    // layout-exempt: icon-only zoom control, no text to clip.
+    height: 40, alignItems: 'center', justifyContent: 'center',
+  },
   zoomSep: { height: StyleSheet.hairlineWidth, marginHorizontal: 8 },
 });

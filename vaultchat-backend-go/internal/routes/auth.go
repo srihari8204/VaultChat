@@ -1030,6 +1030,15 @@ func authRefresh(w http.ResponseWriter, r *http.Request) {
 
 // ── POST /auth/logout ──────────────────────────────────────────────────
 
+// OnSessionRevoked is called when a refresh token is revoked, with the user it
+// belonged to. Wired by cmd/api/main.go to drop that user's parked CC-Wire
+// resume sessions.
+//
+// A func var rather than an import so routes does not depend on realtime — the
+// same decoupling emitx already uses. Default is a no-op, so a build without
+// realtime (or a test) needs no wiring and logout still works.
+var OnSessionRevoked = func(uid string) {}
+
 func authLogout(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	var b struct {
@@ -1039,7 +1048,7 @@ func authLogout(w http.ResponseWriter, r *http.Request) {
 	presented := authStr(b.RefreshToken)
 	if presented != "" {
 		rows, err := db.Pool.Query(ctx,
-			`SELECT id, token_hash FROM refresh_tokens WHERE revoked_at IS NULL AND expires_at > NOW() LIMIT 500`)
+			`SELECT id, token_hash, user_id FROM refresh_tokens WHERE revoked_at IS NULL AND expires_at > NOW() LIMIT 500`)
 		if err != nil {
 			httpx.Err(w, 500, "Logout failed")
 			return
@@ -1047,11 +1056,12 @@ func authLogout(w http.ResponseWriter, r *http.Request) {
 		type cand struct {
 			id        int64
 			tokenHash string
+			userID    string
 		}
 		cands := []cand{}
 		for rows.Next() {
 			var c cand
-			if err := rows.Scan(&c.id, &c.tokenHash); err != nil {
+			if err := rows.Scan(&c.id, &c.tokenHash, &c.userID); err != nil {
 				rows.Close()
 				httpx.Err(w, 500, "Logout failed")
 				return
@@ -1066,6 +1076,14 @@ func authLogout(w http.ResponseWriter, r *http.Request) {
 					httpx.Err(w, 500, "Logout failed")
 					return
 				}
+				// A CC-Wire resume token must not outlive the authority it was
+				// issued under: without this, logging out leaves a credential
+				// that silently restores the session on the next connect.
+				//
+				// AFTER the revoke succeeded, so a failed logout does not drop
+				// live resume state; and it never fails the request, because a
+				// realtime hiccup must not turn logout into an error.
+				OnSessionRevoked(c.userID)
 				break
 			}
 		}

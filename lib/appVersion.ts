@@ -48,6 +48,23 @@ export function currentBuild(): number {
   return Number.isFinite(n) && n > 0 ? Math.floor(n) : 0;
 }
 
+/**
+ * This build's human version ("1.2.15"), for display only.
+ *
+ * Added 2026-09-17: app/(tabs)/profile.tsx printed the literal "crazzychat 1.1.1"
+ * while app.json and build.gradle were both on 1.2.15 — fourteen releases stale.
+ * That string is what a user reads out in a bug report, so it was sending support
+ * after the wrong build. It lives beside currentBuild() so the displayed version
+ * and the version the update gate enforces can never drift apart again.
+ *
+ * Returns '' when it cannot be read, so a caller renders the app name alone
+ * rather than "crazzychat undefined".
+ */
+export function currentVersionName(): string {
+  const v = Constants.expoConfig?.version;
+  return typeof v === 'string' && v.trim() ? v.trim() : '';
+}
+
 let cached: VersionGate | null | undefined;
 
 /** Ask the server. Never throws; null means "no usable answer". */

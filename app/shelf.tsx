@@ -215,9 +215,11 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   head: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 16, paddingVertical: 12 },
   title: { color: c.text, fontSize: 22, fontWeight: '800' },
   subtitle: { color: c.textDim, fontSize: 12, marginLeft: 'auto' },
+  // 2026-09-18: the 14sp filter input outgrows a pinned 40 at font scale 1.5
+  // and loses its descenders. minHeight keeps the pill at 40 on a normal phone.
   searchWrap: {
     flexDirection: 'row', alignItems: 'center', gap: 8, marginHorizontal: 16,
-    paddingHorizontal: 12, height: 40, borderRadius: 12,
+    paddingHorizontal: 12, minHeight: 40, paddingVertical: 6, borderRadius: 12,
     backgroundColor: c.glassSoft, borderWidth: StyleSheet.hairlineWidth, borderColor: c.glassStroke,
   },
   searchInput: { flex: 1, color: c.text, fontSize: 14, padding: 0 },

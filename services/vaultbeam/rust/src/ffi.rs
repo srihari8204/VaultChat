@@ -150,6 +150,14 @@ fn respond(op: &str, args_json: &str) -> String {
 /// # Safety
 /// `op`/`args_json` must be NUL-terminated C strings (or null → error). The
 /// returned pointer must be released with `vb_free`.
+// Clippy wants these marked `unsafe fn`. They are NOT, deliberately: they are
+// the C ABI surface the Nitro/JSI bridge links against, and changing the
+// signature changes the contract for every caller for no safety gain. The
+// actual guarantees are kept where they belong and are NOT relaxed here: both
+// pointers are null-checked before use, every deref is inside `unsafe`, the
+// body runs under `catch_unwind` so a panic cannot cross the FFI boundary, and
+// the `# Safety` doc states the caller's obligation.
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
 #[no_mangle]
 pub extern "C" fn vb_call(op: *const c_char, args_json: *const c_char) -> *mut c_char {
     let out = std::panic::catch_unwind(|| {
@@ -261,6 +269,14 @@ pub extern "C" fn vb_lan_connect(args_json: *const c_char, cb: EventCb, ctx: *mu
 ///
 /// # Safety
 /// `ptr` must be a pointer previously returned by this module (or null).
+// Clippy wants these marked `unsafe fn`. They are NOT, deliberately: they are
+// the C ABI surface the Nitro/JSI bridge links against, and changing the
+// signature changes the contract for every caller for no safety gain. The
+// actual guarantees are kept where they belong and are NOT relaxed here: both
+// pointers are null-checked before use, every deref is inside `unsafe`, the
+// body runs under `catch_unwind` so a panic cannot cross the FFI boundary, and
+// the `# Safety` doc states the caller's obligation.
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
 #[no_mangle]
 pub extern "C" fn vb_free(ptr: *mut c_char) {
     if !ptr.is_null() {

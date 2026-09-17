@@ -33,6 +33,7 @@
 //   produces symptom 1 as well.
 
 import { readFileSync } from 'node:fs';
+import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
@@ -154,8 +155,114 @@ check(
     + 'back online without a foreground transition would no longer catch up.',
 );
 
+// ── SYMPTOM 3 (2026-09-18) — read the message, row still shows unread ───────
+//
+// unreadCount is a denormalized server column and POST /chats/:id/read is the
+// only thing that recomputes it. app/chat.tsx debounces that 800ms and
+// lib/receipts.ts batches another 300ms before the round trip, but pressing
+// Back re-focuses the Chats tab, which refetches at once — so the list asks
+// before the server was told and then has no later trigger to correct itself.
+// A rejected receipt (Go 400s a cursor above the chat's MAX(id); the older Node
+// handler answers 200 having updated nothing) makes it permanent.
+//
+// The device's own read watermark is the earliest correct answer, so the list
+// trusts it over the server's count. Unlike everything above, this rule is
+// real code with no react-native in it, so it is EXECUTED rather than grepped.
+
+import { applyLocalReadPointers } from './unreadStore';
+
+type Row = { id: string; unreadCount: number; lastMessageId: number | null };
+const row = (id: string, unreadCount: number, lastMessageId: number | null): Row =>
+  ({ id, unreadCount, lastMessageId });
+
+// The bug: read to the newest message, server has not caught up yet.
+check(
+  'a chat read up to its newest message shows no badge',
+  applyLocalReadPointers([row('a', 3, 900)], { a: 900 })[0].unreadCount === 0,
+  'the stale server count survives a local read — the reported bug is back.',
+);
+
+// …and the half that must NOT regress.
+check(
+  'a genuinely unread chat stays unread',
+  applyLocalReadPointers([row('a', 3, 900)], { a: 880 })[0].unreadCount === 3,
+  'a chat with messages past my read watermark was cleared. Reading chat A must '
+    + 'never silence chat A’s later messages.',
+);
+check(
+  'a new incoming message raises the badge again',
+  applyLocalReadPointers([row('a', 1, 901)], { a: 900 })[0].unreadCount === 1,
+  'the watermark is being treated as "this chat is read forever" rather than as '
+    + 'a position. One message past it is unread.',
+);
+check(
+  'a chat this device has never read is left alone',
+  applyLocalReadPointers([row('a', 2, 900)], {})[0].unreadCount === 2
+    && applyLocalReadPointers([row('b', 2, 900)], { b: 0 })[0].unreadCount === 2,
+  'a missing pointer reads as 0 and 0 >= 0 would clear every badge on a device '
+    + 'that has read nothing — the whole list would go quiet on a fresh install.',
+);
+check(
+  'another chat’s pointer cannot clear this row',
+  applyLocalReadPointers([row('a', 2, 900)], { b: 9999 })[0].unreadCount === 2,
+  'pointers are being applied unkeyed. Message ids are a single global '
+    + 'BIGSERIAL, so one busy chat’s cursor would clear the entire list.',
+);
+check(
+  'a chat with no messages is not cleared on a stray pointer',
+  applyLocalReadPointers([row('a', 1, null)], { a: 5 })[0].unreadCount === 1,
+  'lastMessageId null means "nothing here to have read"; defaulting it to 0 '
+    + 'makes any pointer clear the row.',
+);
+
+// The rule has to be WIRED, not merely correct. Both list paths: the network
+// fetch every screen shares, and the cached paint that runs before it.
+const SERVICE = readFileSync(join(HERE, 'chatService.ts'), 'utf8');
+const CHATS = readFileSync(join(HERE, '..', 'app', '(tabs)', 'chats.tsx'), 'utf8');
+check(
+  'listChats applies the local read pointers',
+  /applyLocalReadPointers\(rows, await readPointers\(\)\)/.test(SERVICE),
+  'the correction was removed from lib/chatService.listChats. Every list surface '
+    + '— the Chats tab, app/search.tsx, app/hidden-chats.tsx — reads unreadCount '
+    + 'off those rows, so the badge goes stale on all of them at once.',
+);
+check(
+  'the cold-start cached paint applies them too',
+  /applyLocalReadPointers\(cached as any, await readPointers\(\)\)/.test(CHATS),
+  'lib/localDb.cacheChatDetail rewrites a chat’s cached row from the ChatDetail '
+    + 'fetched when the chat is OPENED — i.e. with its pre-read unreadCount — so '
+    + 'without this the badge returns on every cold start.',
+);
+
 if (failures) {
   console.error(`\nchatUnreadCursor.selftest: ${failures} failure(s)`);
   process.exit(1);
 }
-console.log('\nchatUnreadCursor.selftest: all checks passed');
+// A QUICK GLANCE MUST STILL WRITE A READ POINTER (2026-09-18).
+//
+// app/chat.tsx debounces the read by 800ms so the message list can settle and
+// the LATEST id is the one recorded. The cleanup used to clearTimeout and
+// nothing else, so backing out inside that window wrote no pointer at all -
+// and applyLocalReadPointers above cannot correct a count it has no pointer
+// for. That is the "I opened it and it still says unread" case.
+{
+  const src = fs.readFileSync('app/chat.tsx', 'utf8');
+  const cleanup = src.slice(src.indexOf('A GLANCE STILL COUNTS AS READING'));
+  check('the read debounce has a blur handler at all', cleanup.length > 0, 'the 2026-09-18 comment block is gone');
+  check('blur flushes the pending read instead of dropping it',
+    cleanup.slice(0, 1800).includes('markReadDurable(chatId, latestId, meId)'),
+    'backing out inside the 800ms window writes no read pointer at all');
+  check('...and still clears the timer', cleanup.slice(0, 1800).includes('clearTimeout(readDebounce.current)'), 'the debounce timer would leak');
+  check('...and still refuses to re-send an id already sent',
+    cleanup.slice(0, 1800).includes('latestId <= lastReadSent.current'),
+    'a blur after a completed read would re-send it');
+}
+
+// This line used to print unconditionally with no process.exit, so a FAILED
+// check printed its message and the suite still exited 0 - the file could not
+// fail. Found 2026-09-18 while adding the glance assertions below; the same
+// defect was fixed in utils/shopbook.selftest.ts earlier.
+console.log(failures === 0
+  ? String.fromCharCode(10) + 'chatUnreadCursor.selftest: all checks passed'
+  : String.fromCharCode(10) + failures + ' CHECK(S) FAILED');
+process.exit(failures === 0 ? 0 : 1);

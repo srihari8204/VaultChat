@@ -210,7 +210,7 @@ export default function LocationScreen() {
   return (
     <View style={S.container}>
       <View style={S.header}>
-        <TouchableOpacity onPress={() => router.back()} hitSlop={10}>
+        <TouchableOpacity accessibilityRole="button" accessibilityLabel="Back" onPress={() => router.back()} hitSlop={10}>
           <Ionicons name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
         <Text style={S.title}>Share location</Text>

@@ -144,6 +144,11 @@ const IMPORT_REWRITES: [RegExp, string][] = [
   [/^import \{ redactIds, warnOnce \} from '\.\/diagLog';$/m, `import { redactIds, warnOnce } from './stubs.ts';`],
   // mid-file import (forwarding), pure but not on the path under test
   [/^import \{ nextForwardScore \} from '\.\/forwardPolicy';$/m, `import { nextForwardScore } from './stubs.ts';`],
+  // unreadStore imports react, which does not resolve from the temp workdir.
+  // The unread clamp is list cosmetics, not the message path this suite drives,
+  // and it has its own executing test in lib/chatUnreadCursor.selftest.ts.
+  [/^import \{ applyLocalReadPointers \} from '\.\/unreadStore';$/m,
+   `import { applyLocalReadPointers } from './stubs.ts';`],
 ];
 
 const CHAT_SRC = readFileSync(join(HERE, 'chatService.ts'), 'utf8');
@@ -178,7 +183,7 @@ function buildClient(userId: string): string {
     .replace(/await import\('\.\/ccwire\/transport'\)/g, `await import('${CCWIRE}')`)
     .replace(/await import\('\.\.\/services\/crypto\/e2eeSession\.rn'\)/g, `await import('./e2ee.ts')`)
     .replace(/await import\('\.\.\/services\/crypto\/groupSession\.rn'\)/g, `await import('./stubs.ts')`)
-    .replace(/await import\('\.\/(localDb|sessionEpoch|socket|api|cacheCrypto)'\)/g, `await import('./stubs.ts')`);
+    .replace(/await import\('\.\/(localDb|sessionEpoch|socket|api|cacheCrypto|receipts)'\)/g, `await import('./stubs.ts')`);
 
   const stray = [...src.matchAll(/^import (?!type )[^\n]*from '([^']+)';$/gm)]
     .map((m) => m[1])
@@ -277,6 +282,9 @@ export async function decField(v: any) { return v; }
 export function getRefreshToken() { return null; }
 export const documentDirectory = '/tmp/';
 export async function getInfoAsync() { return { exists: false }; }
+// unread clamp (lib/unreadStore + lib/receipts): no read pointers in this suite.
+export function applyLocalReadPointers(rows: any[]) { return rows; }
+export async function readPointers() { return {}; }
 `);
 
   // The real keyChange.ts, with its AsyncStorage + e2ee imports redirected.

@@ -2,7 +2,9 @@
 //
 // WHY SDP AND NOT setParameters
 // -----------------------------
-// maxBitrate is an RTCRtpSender parameter, so lib/call/quality.ts can set it at
+// maxBitrate is an RTCRtpSender parameter, so it CAN be set at runtime (the
+// policy for that lives in lib/call/quality.ts, which is written and tested
+// but not yet wired to a sender - see its header).
 // runtime. FEC and DTX are NOT: they are negotiated codec parameters carried in
 // the SDP `a=fmtp` line for the Opus payload type, and they must be agreed at
 // offer/answer time. There is no runtime API for them, which is why this is a

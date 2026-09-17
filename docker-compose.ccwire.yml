@@ -1,5 +1,18 @@
-# Optional authenticated endpoint. App cohorts opt in separately; existing
-# HTTP and Socket.IO clients keep using their current paths.
+# CC-Wire realtime flags, for compose chains that do NOT include
+# docker-compose.prod.yml.
+#
+# NOT NEEDED FOR PRODUCTION ANY MORE. prod.yml now sets both flags directly,
+# because this overlay was never passed with -f by any deploy script or runbook
+# while the shipped app had already dropped socket.io-client entirely — so the
+# documented deploy chain described a server the app could not talk to. Passing
+# this file alongside prod.yml is harmless (identical values, compose merges
+# environment maps), just redundant.
+#
+# Still useful on its own: a local or bench stack built from docker-compose.yml
+# without prod.yml gets CC-Wire from here.
+#
+# Neither flag disables anything. (Socket.IO itself is gone from the server
+# entirely — there is no /socket.io/ mount and SOCKET_IO_ENABLED is inert.)
 services:
   go-api:
     environment:

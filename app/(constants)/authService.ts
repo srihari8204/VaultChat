@@ -384,8 +384,70 @@ export async function logoutUser() {
       await api('/auth/logout', { method: 'POST', json: { refreshToken }, auth: false });
     }
   } catch {}
-  await clearTokens();
-  await setCachedUser(null);
+  await purgeAccountData();
+}
+
+/**
+ * Erase everything on this device that belongs to the signed-in account.
+ * 2026-09-17.
+ *
+ * Extracted out of logoutUser() because it had exactly ONE caller and there are
+ * two ways a session ends. The other one — lib/api endSessionAndBounce(), the
+ * forced sign-out on a revoked token — dropped the tokens and bounced to
+ * /onboard, which is a screen where a DIFFERENT account signs in. Everything
+ * below stayed on disk: the message database, media, the document cache, the
+ * PIN record, the face templates and the E2EE identity. The deliberate purge
+ * lived on the voluntary path only, which is the path least likely to be a
+ * stolen or handed-over phone.
+ *
+ * EVERY STEP IS BEST-EFFORT AND THIS FUNCTION DOES NOT THROW. It runs on the
+ * forced path, where the caller is mid-bounce and has nothing to catch with —
+ * one failing SecureStore delete must not abandon the remaining twenty.
+ */
+export async function purgeAccountData() {
+  // READ THE PEER LIST FIRST — before clearTokens(). 2026-09-17.
+  //
+  // SecureStore cannot be enumerated, so the E2EE purge can only delete session
+  // keys it can NAME. Its own index covers everything written by this build;
+  // this covers the rest: an install that predates the index still holds
+  // `vc_e2ee_session_<peer>` blobs for peers nobody wrote down, and those are
+  // live symmetric ratchets (see PEER_INDEX in services/crypto/e2eeSession.ts)
+  // that the next account would silently keep using — sending as the previous
+  // user, on the previous user's chain.
+  //
+  // Before clearTokens() and not next to the clearE2EEIdentity() call below,
+  // because clearTokens() drops the in-memory cache DEK: with #32 Phase B on,
+  // the chat rows come back as ciphertext the instant it does and this
+  // enumeration would silently find nothing at all.
+  let knownPeers: string[] = [];
+  let knownGroups: { chatId: string; memberIds: string[] }[] = [];
+  try {
+    const chats: any[] = await require('../../lib/localDb').getCachedChats();
+    const ids = new Set<string>();
+    for (const c of chats ?? []) {
+      if (typeof c?.peerUserId === 'string' && c.peerUserId) ids.add(c.peerUserId);
+      // A direct chat cached as full detail may carry members but no
+      // peerUserId.
+      if (c?.type === 'direct' && Array.isArray(c?.members)) {
+        for (const m of c.members) if (typeof m?.userId === 'string' && m.userId) ids.add(m.userId);
+      }
+      // Groups need the OTHER list. They hold sender keys (vc_gsk_*), never a
+      // vc_e2ee_session_, so clearIdentity()'s peer list cannot reach them —
+      // this comment used to say group members were "wasted deletes", which
+      // was true of the pairwise purge and false of the group one. The keys
+      // survived every sign-out (2026-09-18).
+      if (c?.type === 'group' && typeof c?.id === 'string' && c.id) {
+        const memberIds = Array.isArray(c?.members)
+          ? c.members.map((m: any) => m?.userId).filter((x: any): x is string => typeof x === 'string' && !!x)
+          : [];
+        knownGroups.push({ chatId: c.id, memberIds });
+      }
+    }
+    knownPeers = [...ids];
+  } catch {}
+
+  try { await clearTokens(); } catch {}
+  try { await setCachedUser(null); } catch {}
   // Clear cache on logout when the user enabled that setting (cache only — the
   // user-content purge below handles saved data). Read before the vc_cache_*
   // keys are removed further down. Best-effort.
@@ -400,6 +462,43 @@ export async function logoutUser() {
   }
   await pinStore.clearPin().catch(() => {});   // v1 record + both legacy keys
   await clearPendingSignup().catch(() => {});   // sealed record + legacy plaintext
+
+  // The profile + recovery answers securityService writes. 'security_answers'
+  // is an account-recovery credential — answering it is how someone proves they
+  // are the previous user — and it survived every sign-out.
+  // vc_pin_fail_state is the brute-force streak. Left behind it does two bad
+  // things: a wipe triggered BY that streak leaves it intact, so the next
+  // launch inside the decay window scores the same and wipes again; and the
+  // next account to sign in on this device starts inside the previous
+  // user's backoff (2026-09-17).
+  await SecureStore.deleteItemAsync('vc_pin_fail_state').catch(() => {});
+  // The tab badge is module-scope state, not storage, so nothing above clears
+  // it - the next account would see the previous one's unread count until a
+  // fresh list loaded (2026-09-18).
+  try { (await import('../../lib/unreadStore')).resetUnreadTotal(); } catch {}
+  // vc_secret_code_hash is the 8-digit backdoor code app/lock.tsx accepts
+  // INSTEAD of the PIN. pinStore.clearPin() above never touched it, so it
+  // outlived every sign-out: the previous user's code still unlocked the next
+  // user's app. It is a lock credential, so it dies with the account (2026-09-17).
+  await SecureStore.deleteItemAsync('vc_secret_code_hash').catch(() => {});
+  for (const k of ['user_profile', 'setup_complete', 'security_answers']) {
+    await SecureStore.deleteItemAsync(k).catch(() => {});
+  }
+
+  // The E2EE identity keypair and every per-peer ratchet. Without this the next
+  // account on the device inherits the previous user's identity: their safety
+  // numbers, and their ability to decrypt that user's future messages.
+  // knownPeers (read at the top, before the cache DEK went) covers ratchets
+  // written before the peer index existed.
+  try { await require('../../services/crypto/e2eeSession.rn').clearE2EEIdentity(knownPeers); } catch {}
+
+  // Group sender keys, which clearE2EEIdentity does not reach (see
+  // clearGroupSessions). Must run BEFORE clearLocalDb() destroys nothing it
+  // needs — knownGroups was already read at the top — but it is placed here so
+  // the two E2EE purges sit together.
+  try {
+    await require('../../services/crypto/groupSession.rn').clearGroupSessions(knownGroups);
+  } catch {}
 
   // Cached chats/messages + the sealed cache DEK.
   try { await require('../../lib/localDb').clearLocalDb(); } catch {}

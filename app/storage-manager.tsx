@@ -12,10 +12,7 @@
 // delete the files that actually took up the space (audit F-6).
 
 import React, { useState, useEffect, useMemo } from 'react';
-import {
-  View, Text, TouchableOpacity, StyleSheet, ScrollView,
-  StatusBar, Platform, Alert, ActivityIndicator,
-} from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, ScrollView, Platform, Alert, ActivityIndicator } from 'react-native';
 import * as FileSystem from 'expo-file-system/legacy';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { type Palette } from '../constants/theme';
@@ -27,10 +24,15 @@ import { getAttachmentChatMap } from '../lib/localDb';
 import { listChats } from '../lib/chatService';
 import { measuredRoots, purgeMedia, toUri } from '../lib/storageRoots';
 import { AuroraBackground } from '../components/ui';
+import { HEADER_TOP } from '../constants/layout';
 
 type ChatStore = { id: string; name: string; size: number };
 
-const TOP = Platform.OS === 'android' ? (StatusBar.currentHeight ?? 0) : 44;
+// Was: StatusBar.currentHeight on Android, a hardcoded 44 elsewhere, read
+// ONCE at module scope. currentHeight ignores display cutouts, the 44 is a
+// guess, and the module read froze whichever it picked for the life of the
+// process. HEADER_TOP is the live binding and is applied at the element
+// below, so it follows a rotation like every other screen (2026-09-17).
 
 type Category = { label: string; size: number; color: string; icon: string };
 
@@ -249,11 +251,10 @@ export default function StorageManagerScreen() {
     <View style={s.root}>
       <AuroraBackground />
       <Stack.Screen options={{ headerShown: false }} />
-      <StatusBar barStyle="light-content" backgroundColor={colors.bg} />
 
       <LinearGradient colors={['#F9FAFB', colors.bg]} style={s.header}>
-        <View style={[s.headerRow, { marginTop: TOP }]}>
-          <TouchableOpacity onPress={() => router.back()} hitSlop={16}>
+        <View style={[s.headerRow, { marginTop: HEADER_TOP }]}>
+          <TouchableOpacity accessibilityRole="button" accessibilityLabel="Back" onPress={() => router.back()} hitSlop={16}>
             <Ionicons name="arrow-back" size={24} color={colors.text} />
           </TouchableOpacity>
           <Text style={s.headerTitle}>Storage Manager</Text>

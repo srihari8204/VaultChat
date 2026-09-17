@@ -10,7 +10,11 @@ const KEY = 'vc_call_log_v1';
 const MAX = 300;
 
 export type CallKind = 'audio' | 'video';
-export type CallDirection = 'incoming' | 'outgoing' | 'missed';
+// 'declined' is separate from 'missed' on purpose. A missed call is one you
+// never saw; a declined call is one you saw and refused. app/incoming-call.tsx
+// logged both as 'missed', so the calls tab showed a call you deliberately
+// turned down in red, as something you had failed to answer (2026-09-17).
+export type CallDirection = 'incoming' | 'outgoing' | 'missed' | 'declined';
 
 export interface CallLogEntry {
   id: string;

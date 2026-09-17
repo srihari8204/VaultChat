@@ -1,5 +1,20 @@
 // lib/call/quality.ts — adaptive video quality policy.
 //
+// STATUS: NOT WIRED. Nothing imports this module. The policy and its 14 tests
+// are complete and correct in isolation, but no sender ever receives a tier,
+// so calls today run at whatever ceiling libwebrtc picks - exactly what the
+// rationale below argues against.
+//
+// It is kept rather than deleted because the missing part is small and
+// mechanical: a getStats sample loop on the live call path feeding
+// sampleFromTotals -> nextQuality, then RTCRtpSender.setParameters with the
+// chosen tier. The only stats loop that exists today (lib/call/room.ts:838) is
+// screen-share specific and stops when the share does.
+//
+// It is NOT wired yet because tier changes can only be judged on a real call
+// over a real cellular link - oscillation, recovery timing and the audio floor
+// are the whole point, and none of them can be seen from a test runner.
+//
 // WHY THIS IS A SEPARATE, PURE MODULE
 // -----------------------------------
 // libwebrtc adapts on its own, but only within whatever ceiling the sender is

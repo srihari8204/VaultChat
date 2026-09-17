@@ -379,9 +379,12 @@ const styles = (c: Palette) => StyleSheet.create({
   count: { flex: 1, backgroundColor: c.glassSoft, borderRadius: 12, paddingVertical: 10, alignItems: 'center' },
   countValue: { fontSize: 20, fontWeight: '800' },
   countLabel: { color: c.textDim, fontSize: 11 },
+  // 2026-09-18: this is the TextInput itself, and at font scale 1.5 its line
+  // box outgrows a pinned 42, so what you type is cut off. minHeight is the
+  // same 42 at scale 1.0 and grows with the text.
   search: {
     borderWidth: 1, borderColor: c.glassStroke, borderRadius: 10,
-    paddingHorizontal: 12, height: 42, color: c.text,
+    paddingHorizontal: 12, minHeight: 42, paddingVertical: 6, color: c.text,
   },
   body: { padding: 16, gap: 4, paddingBottom: 40 },
   row: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 10 },

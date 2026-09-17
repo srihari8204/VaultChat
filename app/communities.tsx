@@ -18,6 +18,7 @@ import {
 } from '../lib/chatService';
 import { readCache, writeCache } from '../lib/localCache';
 import { AuroraBackground } from '../components/ui';
+import { KeyboardSafe } from '../components/ui/KeyboardSafe';
 
 export default function CommunitiesScreen() {
   const { colors } = useTheme();
@@ -87,7 +88,7 @@ export default function CommunitiesScreen() {
       <AuroraBackground />
         <Stack.Screen options={{ headerShown: false }} />
         <View style={S.header}>
-          <TouchableOpacity onPress={() => setDetail(null)} style={S.hBtn} hitSlop={8}><Ionicons name="arrow-back" size={24} color={colors.text} /></TouchableOpacity>
+          <TouchableOpacity accessibilityRole="button" accessibilityLabel="Back" onPress={() => setDetail(null)} style={S.hBtn} hitSlop={8}><Ionicons name="arrow-back" size={24} color={colors.text} /></TouchableOpacity>
           <Text style={S.hTitle} numberOfLines={1}>{detail.name}</Text>
         </View>
 
@@ -133,9 +134,9 @@ export default function CommunitiesScreen() {
     <View style={S.screen}>
       <Stack.Screen options={{ headerShown: false }} />
       <View style={S.header}>
-        <TouchableOpacity onPress={() => router.back()} style={S.hBtn} hitSlop={8}><Ionicons name="arrow-back" size={24} color={colors.text} /></TouchableOpacity>
+        <TouchableOpacity accessibilityRole="button" accessibilityLabel="Back" onPress={() => router.back()} style={S.hBtn} hitSlop={8}><Ionicons name="arrow-back" size={24} color={colors.text} /></TouchableOpacity>
         <Text style={S.hTitle}>Communities</Text>
-        <TouchableOpacity onPress={() => { setName(''); setDesc(''); setModal('community'); }} style={S.hBtn} hitSlop={8}><Ionicons name="add" size={24} color={colors.text} /></TouchableOpacity>
+        <TouchableOpacity accessibilityRole="button" accessibilityLabel="New community" onPress={() => { setName(''); setDesc(''); setModal('community'); }} style={S.hBtn} hitSlop={8}><Ionicons name="add" size={24} color={colors.text} /></TouchableOpacity>
       </View>
 
       {loading ? (
@@ -171,6 +172,7 @@ export default function CommunitiesScreen() {
   function nameModal() {
     return (
       <Modal visible={modal != null} transparent animationType="fade" onRequestClose={() => setModal(null)}>
+        <KeyboardSafe keyboardOnly>
         <View style={S.modalBackdrop}>
           <View style={S.modalCard}>
             <Text style={S.modalTitle}>{modal === 'group' ? 'New group' : 'New community'}</Text>
@@ -186,6 +188,7 @@ export default function CommunitiesScreen() {
             </View>
           </View>
         </View>
+        </KeyboardSafe>
       </Modal>
     );
   }

@@ -17,7 +17,6 @@ import {
   FlatList,
   Platform,
   ScrollView,
-  StatusBar,
   StyleSheet,
   Text,
   TouchableOpacity,
@@ -26,9 +25,16 @@ import {
 } from 'react-native';
 import { useTheme } from '../lib/theme';
 import { AuroraBackground } from '../components/ui';
+import { HEADER_TOP } from '../constants/layout';
+import { permissionDenied } from '../lib/permissionDenied';
 
 
-const TOP = Platform.OS === 'android' ? (StatusBar.currentHeight ?? 0) : 44;
+// Was: `const TOP = Platform.OS === 'android' ? (StatusBar.currentHeight ?? 0) : 44`.
+// currentHeight ignores the display cutout on some OEM skins, the `?? 0` drew
+// this header UNDER the notch (edgeToEdge is on at every API level here), and
+// the module-scope read froze whichever it picked for the life of the process.
+// HEADER_TOP is the live binding and already carries the gap the `+ 8` added
+// (2026-09-17).
 const STORAGE_KEY = 'vc_call_recordings';
 
 interface RecordingMeta {
@@ -171,7 +177,7 @@ export default function CallRecordingScreen() {
     try {
       const perm = await Audio.requestPermissionsAsync();
       if (!perm.granted) {
-        Alert.alert('Permission Required', 'Microphone access is needed to record calls.');
+        permissionDenied('Permission Required', 'Microphone access is needed to record calls.', perm.canAskAgain);
         return;
       }
 
@@ -507,7 +513,7 @@ const makeStyles = (c: Palette, winW: number) => StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingTop: TOP + 8,
+    paddingTop: HEADER_TOP,
     paddingHorizontal: 16,
     paddingBottom: 12,
   },
@@ -522,6 +528,7 @@ const makeStyles = (c: Palette, winW: number) => StyleSheet.create({
   timer: { fontSize: 48, fontWeight: '300', color: c.text, fontVariant: ['tabular-nums'] },
 
   waveContainer: {
+    // layout-exempt: draws fixed-width bars, no text — height is the drawing.
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
@@ -574,7 +581,13 @@ const makeStyles = (c: Palette, winW: number) => StyleSheet.create({
   },
   progressBarFill: { height: '100%', backgroundColor: c.accent, borderRadius: 2 },
 
-  actionRow: { flexDirection: 'row', marginTop: 32, gap: 12 },
+  // flexWrap added 2026-09-17. Four actionBtns at minWidth:72 + 3x12 gap = 324dp,
+  // plus finishedContainer's 24dp-a-side padding = 372dp against 369dp on an
+  // Honor — and that is the FLOOR: "Save to Vault" is text-sized to ~107dp, so
+  // the real need is ~407dp. The parent centres, so it clipped both ends (Play
+  // and Delete), not just Delete. flex:1 is not an alternative here: at 320dp it
+  // would hand each button 59dp, under its own 72dp minWidth.
+  actionRow: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', marginTop: 32, gap: 12 },
   actionBtn: {
     alignItems: 'center',
     backgroundColor: c.glassSoft,

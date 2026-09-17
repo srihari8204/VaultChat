@@ -124,7 +124,7 @@ export default function DeleteAccountScreen() {
     <KeyboardSafe style={S.screen} >
       <AuroraBackground />
       <View style={S.header}>
-        <TouchableOpacity onPress={() => router.back()} style={S.backBtn} activeOpacity={0.7}>
+        <TouchableOpacity accessibilityRole="button" accessibilityLabel="Back" onPress={() => router.back()} style={S.backBtn} activeOpacity={0.7}>
           <Ionicons name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
         <Text style={S.title}>Delete account</Text>

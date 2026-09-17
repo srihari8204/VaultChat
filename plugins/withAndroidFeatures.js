@@ -80,6 +80,25 @@ const REMOVED_PERMISSIONS = [
  */
 const CAPPED_PERMISSIONS = { 'android.permission.WRITE_EXTERNAL_STORAGE': '28' };
 
+/**
+ * Permissions that need a flag Expo's `android.permissions` array cannot express.
+ *
+ * BLUETOOTH_SCAN was MISSING ENTIRELY until 17 September, while
+ * lib/items/scanner.ts requested it on API 31+. Android returns denied for an
+ * undeclared runtime permission WITHOUT EVER PROMPTING, and ensureBlePermissions
+ * requires every result to be granted - so it returned false on every Android 12
+ * or newer device and the item-tracker feature was dead there, with no error to
+ * show for it.
+ *
+ * neverForLocation is what scanner.ts's own doc comment already claimed was set.
+ * Without it Android treats a BLE scan as a possible location derivation and
+ * withholds results unless ACCESS_FINE_LOCATION is also granted; with it, the
+ * tag scan stands on its own.
+ */
+const FLAGGED_PERMISSIONS = {
+  'android.permission.BLUETOOTH_SCAN': 'neverForLocation',
+};
+
 module.exports = function withAndroidFeatures(config) {
   return withAndroidManifest(config, (cfg) => {
     const manifest = cfg.modResults.manifest;
@@ -119,6 +138,13 @@ module.exports = function withAndroidFeatures(config) {
       // maxSdkVersion across manifests, so the cap has to replace the library's
       // attribute rather than sit beside it.
       const attrs = { 'android:name': name, 'android:maxSdkVersion': maxSdk, 'tools:node': 'replace' };
+      if (existing) Object.assign(existing.$, attrs);
+      else manifest['uses-permission'].push({ $: attrs });
+    }
+
+    for (const [name, flags] of Object.entries(FLAGGED_PERMISSIONS)) {
+      const existing = manifest['uses-permission'].find((p) => p.$?.['android:name'] === name);
+      const attrs = { 'android:name': name, 'android:usesPermissionFlags': flags };
       if (existing) Object.assign(existing.$, attrs);
       else manifest['uses-permission'].push({ $: attrs });
     }

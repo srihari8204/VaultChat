@@ -7,9 +7,7 @@
 import { HEADER_TOP } from '../constants/layout';
 import { brandAlpha, type Palette } from '../constants/theme';
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import {
-  View, Text, TouchableOpacity, StyleSheet, FlatList, Alert, Share, StatusBar, ActivityIndicator, Modal,
-} from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, FlatList, Alert, Share, ActivityIndicator, Modal } from 'react-native';
 import { useLocalSearchParams, Stack, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import QRCode from 'react-native-qrcode-svg';
@@ -99,10 +97,9 @@ export default function InviteLinkScreen() {
     <View style={s.container}>
       <AuroraBackground />
       <Stack.Screen options={{ headerShown: false }} />
-      <StatusBar barStyle="light-content" />
 
       <View style={s.header}>
-        <TouchableOpacity onPress={() => router.back()} style={s.backBtn} hitSlop={10}>
+        <TouchableOpacity accessibilityRole="button" accessibilityLabel="Back" onPress={() => router.back()} style={s.backBtn} hitSlop={10}>
           <Ionicons name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
         <Text style={s.title}>Invite Links</Text>

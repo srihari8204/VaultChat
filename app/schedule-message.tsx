@@ -11,17 +11,7 @@ import { HEADER_TOP } from '../constants/layout';
 import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useState , useMemo} from 'react';
-import {
-  ActivityIndicator,
-  Alert,
-  ScrollView,
-  StatusBar,
-  StyleSheet,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  View,
-} from 'react-native';
+import { ActivityIndicator, Alert, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { DateTimePickerAndroid } from '@react-native-community/datetimepicker';
 import { type Palette } from '../constants/theme';
 import { useTheme } from '../lib/theme';
@@ -118,9 +108,8 @@ export default function ScheduleMessageScreen() {
   return (
     <View style={S.screen}>
       <AuroraBackground />
-      <StatusBar barStyle="light-content" />
       <View style={S.header}>
-        <TouchableOpacity onPress={() => router.back()} hitSlop={10} style={S.backBtn}>
+        <TouchableOpacity accessibilityRole="button" accessibilityLabel="Back" onPress={() => router.back()} hitSlop={10} style={S.backBtn}>
           <Ionicons name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
         <Text style={S.title}>Schedule message</Text>

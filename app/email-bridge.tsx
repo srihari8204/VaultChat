@@ -3,21 +3,12 @@
 
 import { Ionicons } from '@expo/vector-icons';
 import React, { useState, useCallback , useMemo} from 'react';
-import {
-  View,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  ScrollView,
-  Modal,
-  Alert,
-  StyleSheet,
-  StatusBar,
-} from 'react-native';
+import { View, Text, TextInput, TouchableOpacity, ScrollView, Modal, Alert, StyleSheet } from 'react-native';
 import { useTheme } from '../lib/theme';
 import { type Palette } from '../constants/theme';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Stack, useRouter } from 'expo-router';
+import { HEADER_TOP } from '../constants/layout';
 
 
 // ── Mock inbox data ────────────────────────────────────────────
@@ -129,7 +120,6 @@ export default function EmailBridgeScreen() {
   return (
     <View style={styles.container}>
       <Stack.Screen options={{ headerShown: false }} />
-      <StatusBar barStyle="light-content" backgroundColor="#FFFFFF" />
 
       <ScrollView
         style={styles.scroll}
@@ -138,7 +128,7 @@ export default function EmailBridgeScreen() {
       >
         {/* ── Header ──────────────────────────────────── */}
         <View style={styles.headerRow}>
-          <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
+          <TouchableOpacity accessibilityRole="button" accessibilityLabel="Back" onPress={() => router.back()} style={styles.backBtn}>
             <Ionicons name="arrow-back" size={20} color={colors.accent} />
           </TouchableOpacity>
           <Text style={styles.headerTitle}>{'\u2709\uFE0F'} Encrypted Email</Text>
@@ -291,7 +281,7 @@ export default function EmailBridgeScreen() {
           <View style={styles.modalContainer}>
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>{'\uD83D\uDD10'} Decrypt Email</Text>
-              <TouchableOpacity onPress={() => setDecryptModal(false)}>
+              <TouchableOpacity accessibilityRole="button" accessibilityLabel="Close" onPress={() => setDecryptModal(false)}>
                 <Ionicons name="close" size={20} color="#5A6E8F" />
               </TouchableOpacity>
             </View>
@@ -376,7 +366,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   },
   scrollContent: {
     paddingHorizontal: 16,
-    paddingTop: 50,
+    paddingTop: HEADER_TOP,
   },
 
   // Header

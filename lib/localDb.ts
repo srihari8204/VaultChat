@@ -19,6 +19,7 @@ import { randomBytes } from '@noble/hashes/utils.js';
 import { Buffer } from 'buffer';
 import type { Message } from './chatService';
 import { encField, decField, clearCacheKeyStore } from './cacheCrypto';
+import { mark } from './perf';
 
 // Engine: op-sqlite (JSI) — faster than expo-sqlite, same SQL. A thin shim keeps
 // the expo-sqlite-style async API (getAllAsync/runAsync/withTransactionAsync/…)
@@ -75,6 +76,12 @@ let _dbPromise: Promise<LocalDb> | null = null;
 export function getLocalDb(): Promise<LocalDb> {
   if (!_dbPromise) {
     _dbPromise = (async () => {
+      // Marked HERE, not at a caller. getLocalDb is memoized, so a caller's
+      // .then() fires whenever that caller happens to observe an already
+      // resolved promise — which measures nothing. The first opener is
+      // usually app/index.tsx via shouldCheckRestore(), not the deferred
+      // warm-up in app/_layout.tsx.
+      mark('db_open_start');
       const db = wrap(open({ name: 'vaultchat.db' }));
       // One-time reconciliation: an earlier build's op-sqlite repo layer may have
       // created `messages`/`chats` in this same file with a DIFFERENT schema.
@@ -198,6 +205,7 @@ export function getLocalDb(): Promise<LocalDb> {
         _ftsOk = false;
         console.warn('[localDb] FTS5 unavailable — search falls back to linear scan:', e?.message);
       }
+      mark('db_ready');
       return db;
     })();
   }

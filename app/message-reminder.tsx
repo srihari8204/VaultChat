@@ -15,20 +15,11 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import * as Notifications from 'expo-notifications';
 import { useCallback, useEffect, useState , useMemo} from 'react';
-import {
-  ActivityIndicator,
-  Alert,
-  FlatList,
-  ScrollView,
-  StatusBar,
-  StyleSheet,
-  Text,
-  TouchableOpacity,
-  View,
-} from 'react-native';
+import { ActivityIndicator, Alert, FlatList, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { type Palette } from '../constants/theme';
 import { useTheme } from '../lib/theme';
 import { AuroraBackground } from '../components/ui';
+import { permissionDenied } from '../lib/permissionDenied';
 
 const STORAGE_KEY = 'vc_message_reminders_v1';
 
@@ -118,7 +109,7 @@ function Composer({
     if (!perm.granted) {
       const req = await Notifications.requestPermissionsAsync();
       if (!req.granted) {
-        Alert.alert('Permission needed', 'Allow notifications so we can remind you on time.');
+        permissionDenied('Permission needed', 'Allow notifications so we can remind you on time.', req.canAskAgain);
         return;
       }
     }
@@ -156,9 +147,8 @@ function Composer({
   return (
     <View style={S.screen}>
       <AuroraBackground />
-      <StatusBar barStyle="light-content" />
       <View style={S.header}>
-        <TouchableOpacity onPress={() => router.back()} hitSlop={10} style={S.backBtn}>
+        <TouchableOpacity accessibilityRole="button" accessibilityLabel="Back" onPress={() => router.back()} hitSlop={10} style={S.backBtn}>
           <Ionicons name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
         <Text style={S.title}>Remind me about</Text>
@@ -239,9 +229,8 @@ function RemindersList({ router }: { router: any }) {
 
   return (
     <View style={S.screen}>
-      <StatusBar barStyle="light-content" />
       <View style={S.header}>
-        <TouchableOpacity onPress={() => router.back()} hitSlop={10} style={S.backBtn}>
+        <TouchableOpacity accessibilityRole="button" accessibilityLabel="Back" onPress={() => router.back()} hitSlop={10} style={S.backBtn}>
           <Ionicons name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
         <Text style={S.title}>Reminders</Text>

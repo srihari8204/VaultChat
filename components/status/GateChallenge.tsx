@@ -88,7 +88,7 @@ export default function GateChallenge({
 
   return (
     <View style={S.wrap}>
-      <TouchableOpacity style={S.close} onPress={onDismiss} hitSlop={12}>
+      <TouchableOpacity accessibilityRole="button" accessibilityLabel="Close" style={S.close} onPress={onDismiss} hitSlop={12}>
         <Ionicons name="close" size={26} color="#fff" />
       </TouchableOpacity>
 

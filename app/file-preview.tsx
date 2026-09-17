@@ -4,10 +4,7 @@
 // Dark theme with line numbers
 
 import React, { useState, useEffect , useMemo} from 'react';
-import {
-  View, Text, TouchableOpacity, StyleSheet, ScrollView,
-  StatusBar, ActivityIndicator, Share, Alert,
-} from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, ScrollView, ActivityIndicator, Share, Alert } from 'react-native';
 import { type Palette } from '../constants/theme';
 import { useTheme } from '../lib/theme';
 import { useLocalSearchParams, Stack } from 'expo-router';
@@ -203,7 +200,6 @@ export default function FilePreviewScreen() {
         ),
       }} />
       <View style={s.container}>
-        <StatusBar barStyle="light-content" />
 
         {/* File info bar */}
         <View style={s.infoBar}>

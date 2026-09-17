@@ -12,6 +12,7 @@ import {
 } from 'react-native';
 import { useTheme } from '../lib/theme';
 import { type Palette } from '../constants/theme';
+import { HEADER_TOP } from '../constants/layout';
 
 function useS() {
   const { colors } = useTheme();
@@ -41,13 +42,15 @@ export default function ContactScreen() {
 
       {/* Header */}
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.backBtn} hitSlop={8}>
+        <TouchableOpacity accessibilityRole="button" accessibilityLabel="Back" onPress={() => router.back()} style={styles.backBtn} hitSlop={8}>
           <Ionicons name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Contact info</Text>
-        <TouchableOpacity style={styles.editBtn} hitSlop={8}>
-          <Ionicons name="create-outline" size={22} color={colors.text} />
-        </TouchableOpacity>
+        {/* The edit pencil that sat here had NO onPress: tapping it did nothing,
+            on any platform. Labelling a no-op for a screen reader would announce
+            an action that does not exist, which is worse than saying nothing, so
+            the dead affordance is removed rather than described. Nothing here
+            routed to an edit screen; if one is added, its button goes here. */}
       </View>
 
       {/* Profile */}
@@ -177,7 +180,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingTop: 55,
+    paddingTop: HEADER_TOP,
     paddingBottom: 12,
     paddingHorizontal: 16,
     borderBottomWidth: StyleSheet.hairlineWidth,

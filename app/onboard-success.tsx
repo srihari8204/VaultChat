@@ -67,7 +67,28 @@ export default function OnboardSuccess() {
       resetTo(next ?? '/(tabs)/chats');
     } catch (e: any) {
       setBusy(false);
-      Alert.alert('Could not continue', onboardingError(e, 'Please try again'));
+      // A WAY OUT (2026-09-17). Back is swallowed and the gesture is disabled on
+      // this screen, so a failing verify left the only affordance being the
+      // button that had just failed — killing the app was the sole escape.
+      //
+      // The account already EXISTS by now: setMpinRemote succeeded on the
+      // previous screen, which is precisely why back is blocked here. So signing
+      // in is a correct recovery, not a workaround — offer it alongside retry.
+      Alert.alert(
+        'Could not continue',
+        onboardingError(e, 'Please try again'),
+        [
+          { text: 'Try again', style: 'cancel' },
+          {
+            text: 'Sign in instead',
+            onPress: () => {
+              const { userId: uid } = onboarding.get();
+              onboarding.reset();                       // wipe the plaintext MPIN
+              resetTo(uid ? `/mpin-entry?userId=${encodeURIComponent(uid)}` : '/onboard');
+            },
+          },
+        ],
+      );
     }
   };
 
@@ -132,7 +153,11 @@ export default function OnboardSuccess() {
 
 const s = StyleSheet.create({
   screen: { flex: 1, backgroundColor: 'transparent' },
-  body: { flex: 1, paddingHorizontal: 24, paddingTop: 88, alignItems: 'center' },
+  // Same double-count as onboard-mpin: this screen is in INSET_SCREENS, so
+  // the container already adds HEADER_TOP and 52 + 88 left 140dp blank above
+  // the title on the Honor. 64 keeps the roomier hero spacing this screen
+  // wants without paying for the status bar twice (2026-09-17).
+  body: { flex: 1, paddingHorizontal: 24, paddingTop: 64, alignItems: 'center' },
   title: { color: AUTH.text, fontSize: 26, fontWeight: '900', marginTop: 8 },
   sub: { color: AUTH.dim, fontSize: 14, marginTop: 8, textAlign: 'center', lineHeight: 20 },
 
@@ -149,7 +174,11 @@ const s = StyleSheet.create({
   note: { color: AUTH.faint, fontSize: 12, marginTop: 10, lineHeight: 16 },
 
   ctaWrap: { width: '100%', marginTop: 'auto', borderRadius: 16, overflow: 'hidden' },
-  cta: { height: 56, alignItems: 'center', justifyContent: 'center' },
+  // 2026-09-18: minHeight, not height — at font scale 1.5 the 16sp label
+  // outgrew a pinned 56 and clipped, on the last tap of signup. 56 stays the
+  // floor; the padding keeps it identical at scale 1.0 and only gives way when
+  // the label is genuinely taller.
+  cta: { minHeight: 56, paddingVertical: 10, alignItems: 'center', justifyContent: 'center' },
   ctaDown: { opacity: 0.88 },
   ctaTxt: { color: '#fff', fontSize: 16, fontWeight: '800', letterSpacing: 0.2 },
   secondary: { width: '100%', marginTop: 12, marginBottom: 32, paddingVertical: 12, alignItems: 'center' },

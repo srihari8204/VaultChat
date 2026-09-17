@@ -13,16 +13,7 @@ import { HEADER_TOP } from '../constants/layout';
 import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useState , useMemo} from 'react';
-import {
-  ActivityIndicator,
-  Alert,
-  Dimensions,
-  ScrollView,
-  StatusBar,
-  StyleSheet,
-  Text,
-  TouchableOpacity,
-  View, useWindowDimensions } from 'react-native';
+import { ActivityIndicator, Alert, Dimensions, ScrollView, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
 import { type Palette } from '../constants/theme';
 import { useTheme } from '../lib/theme';
 import { sendMessage } from '../lib/chatService';
@@ -90,9 +81,8 @@ export default function StickerPickerScreen() {
   return (
     <View style={S.screen}>
       <AuroraBackground />
-      <StatusBar barStyle="light-content" />
       <View style={S.header}>
-        <TouchableOpacity onPress={() => router.back()} hitSlop={10} style={S.backBtn}>
+        <TouchableOpacity accessibilityRole="button" accessibilityLabel="Back" onPress={() => router.back()} hitSlop={10} style={S.backBtn}>
           <Ionicons name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
         <View style={{ flex: 1 }}>

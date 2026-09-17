@@ -6,7 +6,7 @@
 // The group is created on Postgres and opened in the shared /chat screen
 // (which renders groups), replacing the old Firebase + group-chat flow.
 
-import { HEADER_TOP } from '../constants/layout';
+import { HEADER_TOP, SCREEN_BOTTOM } from '../constants/layout';
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   View, Text, TextInput, FlatList, ScrollView, TouchableOpacity,
@@ -212,7 +212,9 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   chipRow: { maxHeight: 46, marginTop: 12 },
   chip: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: c.glassSoft, borderRadius: 18, paddingLeft: 4, paddingRight: 10, paddingVertical: 4 },
   chipTxt: { color: c.text, fontSize: 13, fontWeight: '600', maxWidth: 90 },
-  searchWrap: { flexDirection: 'row', alignItems: 'center', gap: 8, marginHorizontal: 16, marginTop: 12, paddingHorizontal: 14, height: 40, borderRadius: 20, backgroundColor: c.glassSoft },
+  // 2026-09-17: the 15sp input inside is ~30dp of line box at font scale 1.5,
+  // so a pinned 40 cut the descenders. minHeight holds the same 40 at scale 1.0.
+  searchWrap: { flexDirection: 'row', alignItems: 'center', gap: 8, marginHorizontal: 16, marginTop: 12, paddingHorizontal: 14, minHeight: 40, paddingVertical: 6, borderRadius: 20, backgroundColor: c.glassSoft },
   searchInput: { flex: 1, color: c.text, fontSize: 15 },
   row: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 10, gap: 12 },
   avatar: { width: 46, height: 46, borderRadius: 23, alignItems: 'center', justifyContent: 'center', backgroundColor: c.surfaceSolid, borderWidth: 1, borderColor: c.glassStroke },
@@ -223,7 +225,13 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   checkSel: { backgroundColor: c.primary, borderColor: c.primary },
   empty: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 40, gap: 12 },
   emptyTxt: { color: c.textDim, fontSize: 14, textAlign: 'center', lineHeight: 20 },
-  bottomBar: { position: 'absolute', left: 0, right: 0, bottom: 0, padding: 16, backgroundColor: c.bg, borderTopWidth: 1, borderTopColor: c.hairline },
+  // paddingBottom carries the gesture inset (2026-09-17). The bar is pinned at
+  // bottom:0 so its background correctly reaches the screen edge — but with a
+  // flat padding of 16 the CREATE BUTTON ITSELF sat inside the gesture area on
+  // every device, because edgeToEdge is enabled for all API levels. Padding the
+  // content, not moving the bar, keeps the fill edge-to-edge and the control
+  // reachable. SCREEN_BOTTOM is live, so this follows a rotation.
+  bottomBar: { position: 'absolute', left: 0, right: 0, bottom: 0, padding: 16, paddingBottom: 16 + SCREEN_BOTTOM, backgroundColor: c.bg, borderTopWidth: 1, borderTopColor: c.hairline },
   createBtn: { backgroundColor: c.primary, borderRadius: 12, paddingVertical: 15, alignItems: 'center' },
   createBtnOff: { backgroundColor: c.glassSoft },
   createTxt: { color: '#FFFFFF', fontSize: 16, fontWeight: '800' },

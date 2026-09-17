@@ -8,9 +8,7 @@
 
 import { HEADER_TOP } from '../constants/layout';
 import React, { useState, useEffect, useCallback , useMemo, useRef } from 'react';
-import {
-  View, Text, TouchableOpacity, StyleSheet, FlatList, SectionList, Dimensions, StatusBar,
-  ActivityIndicator, Alert, Linking, Modal, useWindowDimensions } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, FlatList, SectionList, Dimensions, ActivityIndicator, Alert, Linking, Modal, useWindowDimensions } from 'react-native';
 import * as Sharing from 'expo-sharing';
 // expo-image: the 3-up grid recycles tiles, so cache + recyclingKey matter here.
 import { Image } from 'expo-image';
@@ -377,7 +375,6 @@ export default function MediaGalleryScreen() {
     <View style={s.container}>
       <AuroraBackground />
       <Stack.Screen options={{ headerShown: false }} />
-      <StatusBar barStyle="light-content" />
 
       <View style={s.header}>
         <TouchableOpacity onPress={() => router.back()} style={s.backBtn} hitSlop={10} accessibilityLabel="Back">

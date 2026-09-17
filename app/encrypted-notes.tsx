@@ -50,6 +50,8 @@ import { verifyPin } from '../lib/chatService';
 import 'react-native-get-random-values';
 import { randomBytes } from '@noble/hashes/utils.js';
 import { AuroraBackground } from '../components/ui';
+import { permissionDenied } from '../lib/permissionDenied';
+import { KeyboardSafe } from '../components/ui/KeyboardSafe';
 
 
 // 9 Categories from PDF
@@ -291,7 +293,7 @@ export default function EncryptedNotesScreen() {
   // ── Attachments (encrypted via lib/notesAttachments) ──────────────────────
   const attachImage = async () => {
     const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (!perm.granted) { Alert.alert('Permission needed', 'Allow photo access to attach an image.'); return; }
+    if (!perm.granted) { permissionDenied('Permission needed', 'Allow photo access to attach an image.', perm.canAskAgain); return; }
     const res = await ImagePicker.launchImageLibraryAsync({ quality: 0.9 });
     if (res.canceled || !res.assets?.[0]) return;
     const a = res.assets[0];
@@ -721,6 +723,7 @@ export default function EncryptedNotesScreen() {
 
       {/* Note Editor Modal */}
       <Modal visible={showEditor} animationType="slide">
+        <KeyboardSafe keyboardOnly>
         <View style={s.editorScreen}>
           <View style={s.editorHeader}>
             <TouchableOpacity onPress={() => setShowEditor(false)}>
@@ -871,6 +874,7 @@ export default function EncryptedNotesScreen() {
             )}
           </ScrollView>
         </View>
+        </KeyboardSafe>
       </Modal>
 
       {/* Password Generator Modal */}
@@ -970,6 +974,7 @@ export default function EncryptedNotesScreen() {
 
       {/* Backup & restore — passphrase-wrapped key, ciphertext everywhere. */}
       <Modal visible={showBackup} animationType="slide" onRequestClose={() => setShowBackup(false)}>
+        <KeyboardSafe keyboardOnly>
         <View style={s.editorScreen}>
           <View style={s.editorHeader}>
             <TouchableOpacity onPress={() => setShowBackup(false)} style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
@@ -1044,6 +1049,7 @@ export default function EncryptedNotesScreen() {
             </View>
           </ScrollView>
         </View>
+        </KeyboardSafe>
       </Modal>
     </View>
   );

@@ -17,6 +17,7 @@ import { LinearGradient } from "expo-linear-gradient";
 import * as ImagePicker from "expo-image-picker";
 import * as FileSystem from "expo-file-system";
 import * as Sharing from "expo-sharing";
+import { permissionDenied } from '../lib/permissionDenied';
 
 // -----------------------------------------------------------------------------
 const FORMATS = [
@@ -122,9 +123,9 @@ export default function ScannerScreen() {
 
   // -- Camera ------------------------------------------------------------------
   const openCamera = async () => {
-    const { status } = await ImagePicker.requestCameraPermissionsAsync();
+    const { status, canAskAgain } = await ImagePicker.requestCameraPermissionsAsync();
     if (status !== "granted") {
-      Alert.alert("Permission needed", "Camera access required to scan documents.");
+      permissionDenied("Permission needed", "Camera access required to scan documents.", canAskAgain);
       return;
     }
     const result = Platform.OS === 'web'
@@ -206,7 +207,7 @@ export default function ScannerScreen() {
 
       {/* Header */}
       <View style={s.header}>
-        <TouchableOpacity onPress={() => router.back()} style={s.backBtn}>
+        <TouchableOpacity accessibilityRole="button" accessibilityLabel="Back" onPress={() => router.back()} style={s.backBtn}>
           <Ionicons name="arrow-back" size={22} color="#fff" />
         </TouchableOpacity>
         <View style={s.headerTitleWrap}>

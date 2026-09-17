@@ -135,7 +135,7 @@ export default function GroupCreateScreen() {
         <Text style={[st.h, { color: colors.text }]}>Colour</Text>
         <View style={st.swatches}>
           {PALETTE.map((c) => (
-            <TouchableOpacity key={c} onPress={() => setColor(c)}
+            <TouchableOpacity accessibilityRole="button" accessibilityLabel={`Colour ${c}`} key={c} onPress={() => setColor(c)}
               style={[st.swatch, { backgroundColor: c, borderColor: shownColor === c ? colors.text : 'transparent' }]}>
               {shownColor === c && <Ionicons name="checkmark" size={15} color="#fff" />}
             </TouchableOpacity>
@@ -145,7 +145,7 @@ export default function GroupCreateScreen() {
         <Text style={[st.h, { color: colors.text }]}>Icon</Text>
         <View style={st.swatches}>
           {ICONS.map((ic) => (
-            <TouchableOpacity key={ic} onPress={() => setIcon(ic)}
+            <TouchableOpacity accessibilityRole="button" accessibilityLabel={`Icon ${ic}`} key={ic} onPress={() => setIcon(ic)}
               style={[st.iconCell, { borderColor: shownIcon === ic ? shownColor : colors.border, backgroundColor: shownIcon === ic ? shownColor + '1a' : colors.card }]}>
               <Ionicons name={ic} size={18} color={shownIcon === ic ? shownColor : colors.textDim} />
             </TouchableOpacity>
@@ -189,7 +189,10 @@ const st = StyleSheet.create({
   previewIcon: { width: 58, height: 58, borderRadius: 29, alignItems: 'center', justifyContent: 'center', marginBottom: 4 },
   h: { fontSize: 13, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.3, marginTop: 24, marginBottom: 10 },
   grid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  typeCell: { flexBasis: '30%', flexGrow: 1, alignItems: 'center', justifyContent: 'center', gap: 5, height: 62, borderWidth: 1, borderRadius: 14 },
+  // 2026-09-17: an icon and a label stacked inside a pinned 62 — at font scale
+  // 1.5 the label's second line had nowhere to go. minHeight keeps the grid
+  // cells identical at scale 1.0 and lets the row of them grow together.
+  typeCell: { flexBasis: '30%', flexGrow: 1, alignItems: 'center', justifyContent: 'center', gap: 5, minHeight: 62, paddingVertical: 10, borderWidth: 1, borderRadius: 14 },
   field: { flexDirection: 'row', alignItems: 'center', gap: 10, borderWidth: 1, borderRadius: 12, paddingHorizontal: 12, minHeight: 50 },
   input: { flex: 1, fontSize: 15 },
   swatches: { flexDirection: 'row', flexWrap: 'wrap', gap: 9 },

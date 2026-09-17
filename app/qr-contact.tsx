@@ -7,9 +7,7 @@
 import { HEADER_TOP } from '../constants/layout';
 import { brandAlpha, type Palette } from '../constants/theme';
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import {
-  View, Text, TouchableOpacity, StyleSheet, Alert, StatusBar, ActivityIndicator, Share,
-} from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, Alert, ActivityIndicator, Share } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import QRCode from 'react-native-qrcode-svg';
@@ -102,10 +100,9 @@ export default function QRContactScreen() {
   return (
     <View style={s.container}>
       <AuroraBackground />
-      <StatusBar barStyle="light-content" />
 
       <View style={s.header}>
-        <TouchableOpacity onPress={() => router.back()} style={s.backBtn} hitSlop={10}>
+        <TouchableOpacity accessibilityRole="button" accessibilityLabel="Back" onPress={() => router.back()} style={s.backBtn} hitSlop={10}>
           <Ionicons name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
         <Text style={s.title}>QR Contact</Text>

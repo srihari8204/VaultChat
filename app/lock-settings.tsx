@@ -232,7 +232,10 @@ const st = StyleSheet.create({
   rowTxt: { flex: 1, fontSize: 14.5 },
   chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   chip: { borderWidth: 1, borderRadius: 999, paddingHorizontal: 14, paddingVertical: 8 },
-  testBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, height: 48, borderRadius: 12, marginTop: 30 },
+  // 2026-09-18: minHeight, not height — 'Test Alarm' at font scale 1.5 overran a
+  // pinned 48 and the label lost its bottom. 48 is the tap floor, and 19 of line
+  // box + 2×14 padding leaves it looking exactly as it did at scale 1.0.
+  testBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, minHeight: 48, paddingVertical: 14, borderRadius: 12, marginTop: 30 },
   testTxt: { color: '#fff', fontSize: 15, fontWeight: '800' },
   about: { borderWidth: 1, borderRadius: 12, padding: 14 },
 });

@@ -31,6 +31,40 @@ function useS() {
   return useMemo(() => makeStyles(colors), [colors]);
 }
 
+/**
+ * Best-effort position for an SOS. NEVER throws, NEVER blocks the send.
+ *
+ * Both trigger paths had the same three bugs (2026-09-17):
+ *  - getCurrentPositionAsync() sat INSIDE the caller's try, alongside sendSOS.
+ *    A rejected GPS call — an indoor timeout is enough — skipped sendSOS
+ *    ENTIRELY and showed "Failed to send SOS". An emergency in a basement sent
+ *    NOTHING. That is strictly worse than sending without coordinates, and the
+ *    button path's comment claimed the opposite.
+ *  - the OS's cached fix was ignored, though a ten-minute-old position beats
+ *    none. getLastKnownPositionAsync reads that cache with no GPS fix and no
+ *    power cost; family-map.tsx and navigate.tsx already use it.
+ *  - a high-accuracy fix can take tens of seconds, which is not a wait an
+ *    emergency can afford.
+ *
+ * A null result is a legitimate answer — sendSOS takes `number | null` — and the
+ * caller tells the sender their location did not go.
+ *
+ * ponytail: 6s is a hand-set ceiling, not a measurement. Tune on-device.
+ */
+const FIX_TIMEOUT_MS = 6000;
+async function sosFix(): Promise<{ lat: number | null; lng: number | null }> {
+  const none = { lat: null, lng: null };
+  try {
+    const { status } = await Location.requestForegroundPermissionsAsync();
+    if (status !== 'granted') return none;
+    const live = Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
+    const loc =
+      (await Promise.race([live, new Promise<null>((r) => setTimeout(() => r(null), FIX_TIMEOUT_MS))]).catch(() => null))
+      ?? (await Location.getLastKnownPositionAsync().catch(() => null));
+    return loc ? { lat: loc.coords.latitude, lng: loc.coords.longitude } : none;
+  } catch { return none; }
+}
+
 export default function EmergencySOSScreen() {
   const { colors } = useTheme();
   const styles = useS();
@@ -43,6 +77,9 @@ export default function EmergencySOSScreen() {
   const [countdown, setCountdown] = useState<number | null>(null);
   const [sending, setSending] = useState(false);
   const [sent, setSent] = useState(false);
+  // An SOS that went without coordinates is still worth sending — but the
+  // sender has to know, because the whole point of the alert is "come find me".
+  const [sentNoLoc, setSentNoLoc] = useState(false);
   const [testMode, setTestMode] = useState(false);
   const [history, setHistory] = useState<any[]>([]);
   const [shakeEnabled, setShakeEnabled] = useState(true);
@@ -97,15 +134,10 @@ export default function EmergencySOSScreen() {
     const triggerSOSInEffect = async (isTest: boolean) => {
       setSending(true);
       try {
-        const { status } = await Location.requestForegroundPermissionsAsync();
-        let lat: number | null = null, lng: number | null = null;
-        if (status === 'granted') {
-          const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
-          lat = loc.coords.latitude;
-          lng = loc.coords.longitude;
-        }
+        const { lat, lng } = await sosFix();
         await sendSOS(lat, lng, isTest, selectedContacts);
         setSent(true);
+        setSentNoLoc(lat == null);
         Vibration.vibrate([0, 500, 200, 500]);
         try { setHistory(await listSOSHistory()); } catch {}
       } catch {
@@ -198,19 +230,15 @@ export default function EmergencySOSScreen() {
   const triggerSOS = async (isTest: boolean) => {
     setSending(true);
     try {
-      // Get location (best-effort; SOS still sends without it)
-      const { status } = await Location.requestForegroundPermissionsAsync();
-      let lat: number | null = null, lng: number | null = null;
-      if (status === 'granted') {
-        const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
-        lat = loc.coords.latitude;
-        lng = loc.coords.longitude;
-      }
+      // Location is genuinely best-effort now — sosFix cannot throw, so a failed
+      // or slow fix can no longer take the SOS down with it.
+      const { lat, lng } = await sosFix();
 
       // Dispatch via backend — pushes to the selected trusted contacts.
       await sendSOS(lat, lng, isTest, selectedContacts);
 
       setSent(true);
+      setSentNoLoc(lat == null);
       Vibration.vibrate([0, 500, 200, 500]);
       try { setHistory(await listSOSHistory()); } catch {}
     } catch {
@@ -235,7 +263,7 @@ export default function EmergencySOSScreen() {
 
       {/* Header */}
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
+        <TouchableOpacity accessibilityRole="button" accessibilityLabel="Back" onPress={() => router.back()} style={styles.backBtn}>
           <Ionicons name="arrow-back" size={20} color={colors.accent} />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Emergency SOS</Text>
@@ -267,6 +295,11 @@ export default function EmergencySOSScreen() {
               <Text style={styles.sentCheck}>✓</Text>
               <Text style={styles.sentText}>{testMode ? 'Test SOS Sent' : 'SOS Sent!'}</Text>
               <Text style={styles.sentSub}>{selectedContacts.length} contact(s) notified</Text>
+              {sentNoLoc && (
+                <Text style={styles.sentWarn}>
+                  Sent without your location — turn on location access so your contacts can find you.
+                </Text>
+              )}
               <TouchableOpacity onPress={() => setSent(false)} style={styles.resetBtn}>
                 <Text style={styles.resetBtnText}>OK</Text>
               </TouchableOpacity>
@@ -401,6 +434,9 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   sentCheck: { fontSize: 48, color: c.primary },
   sentText: { color: '#FFF', fontSize: 22, fontWeight: '700', marginTop: 8 },
   sentSub: { color: c.textDim, fontSize: 14, marginTop: 4 },
+  // Wraps and grows: this line is longer than the others and must stay
+  // readable at any width or OS font scale.
+  sentWarn: { color: '#FBBF24', fontSize: 13, marginTop: 8, textAlign: 'center', paddingHorizontal: 20 },
   resetBtn: { marginTop: 20, backgroundColor: c.accent, paddingHorizontal: 40, paddingVertical: 10, borderRadius: 8 },
   resetBtnText: { color: '#FFF', fontSize: 15, fontWeight: '700' },
 

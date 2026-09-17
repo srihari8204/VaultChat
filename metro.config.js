@@ -43,8 +43,19 @@ const webOnlyShims = {
   "@livekit/react-native-webrtc": path.join(shimDir, "react-native-webrtc.js"),
 };
 
+// ─── Cap @expo/vector-icons to the families actually rendered ────
+// The package entry requires all 19 families, each of which requires its .ttf,
+// so one `import { Ionicons }` shipped 4.08MB of fonts — 2.02MB of it families
+// nothing renders. The shim re-exports only what is used; see its header.
+// The deep form ('@expo/vector-icons/Ionicons') is a different module name and
+// is left alone, which is also how the shim imports the real families.
+const vectorIconsShim = path.join(shimDir, "vector-icons.js");
+
 const originalResolveRequest = config.resolver.resolveRequest;
 config.resolver.resolveRequest = (context, moduleName, platform) => {
+  if (moduleName === "@expo/vector-icons") {
+    return { filePath: vectorIconsShim, type: "sourceFile" };
+  }
   // On web, redirect native-only modules to web shims
   if (platform === "web" && webOnlyShims[moduleName]) {
     return {

@@ -9,8 +9,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/zishang520/socket.io/v2/socket"
 	"vaultchat/backend-go/internal/ccwire"
+	"vaultchat/backend-go/internal/metrics"
 )
 
 // The feature is opt-in on both peers until deployment parity is verified.
@@ -28,7 +28,7 @@ func helloAppEvents(body []byte, lim ccwire.Limits) bool {
 	// ClientHello.capabilities is field 3.
 	r := pbr{b: body}
 	for r.p < len(r.b) {
-		t, ok := r.varint()
+		t, ok := r.tag()
 		if !ok {
 			return false
 		}
@@ -40,7 +40,7 @@ func helloAppEvents(body []byte, lim ccwire.Limits) bool {
 			c := pbr{b: b}
 			var fragments, events bool
 			for c.p < len(c.b) {
-				t, ok := c.varint()
+				t, ok := c.tag()
 				if !ok {
 					return false
 				}
@@ -76,36 +76,47 @@ func appEventFrame(event string, payload any) []byte {
 	return frames[0]
 }
 
+// appEventFrames is the SHARED encode: one set of bytes fanned out to every
+// session. appEventBuild also hands back the Messages behind those bytes, which
+// is what a resuming session needs in order to stamp its own per-session
+// sequence numbers — see (*ccwireSession).deliver.
 func appEventFrames(event string, payload any) [][]byte {
+	_, frames := appEventBuild(event, payload)
+	return frames
+}
+
+func appEventBuild(event string, payload any) ([]ccwire.Message, [][]byte) {
 	if event == "" || len(event) > 64 {
-		return nil
+		return nil, nil
 	}
 	data, err := json.Marshal(payload)
 	if err != nil || len(data) > maxAppEventPayload {
-		return nil
+		return nil, nil
 	}
 	body := ccwire.AppendStringField(nil, 1, event)
 	body = ccwire.AppendBytesField(body, 2, data)
 	lim := ccwire.DefaultLimits()
 	lim.MaxMessageBodyBytes = appEventLogicalLimit
-	message, err := ccwire.EncodeMessage(ccwire.Message{TrafficClass: ccwire.TrafficClassControl, Stream: ccwireStreamControl, BodyField: ccwire.BodyAppEvent, Body: body}, lim, appEventLogicalLimit)
+	msg := ccwire.Message{TrafficClass: ccwire.TrafficClassControl, Stream: ccwireStreamControl, BodyField: ccwire.BodyAppEvent, Body: body}
+	message, err := ccwire.EncodeMessage(msg, lim, appEventLogicalLimit)
 	if err != nil {
-		return nil
+		return nil, nil
 	}
 	if len(message) <= lim.MaxFrameBytes {
 		raw, err := ccwire.Encode(message, ccwire.Options{MaxBytes: lim.MaxFrameBytes})
 		if err != nil {
-			return nil
+			return nil, nil
 		}
-		return [][]byte{raw}
+		return []ccwire.Message{msg}, [][]byte{raw}
 	}
 	// Existing Fragment contract carries the complete logical Frame protobuf,
 	// not the five-byte physical header. Chunks never exceed max_opaque_bytes.
 	id := nodeID + ":event:" + strconv.FormatUint(appEventSequence.Add(1), 10)
 	total := (len(message) + lim.MaxOpaqueBytes - 1) / lim.MaxOpaqueBytes
 	if total > int(lim.MaxFragmentsPerMessage) {
-		return nil
+		return nil, nil
 	}
+	msgs := make([]ccwire.Message, 0, total)
 	frames := make([][]byte, 0, total)
 	for i := 0; i < total; i++ {
 		end := (i + 1) * lim.MaxOpaqueBytes
@@ -118,13 +129,15 @@ func appEventFrames(event string, payload any) [][]byte {
 		fragment = ccwire.AppendVarintField(fragment, 4, uint64(len(message)))
 		fragment = ccwire.AppendBytesField(fragment, 5, message[i*lim.MaxOpaqueBytes:end])
 		fragment = ccwire.AppendBoolField(fragment, 6, i == total-1)
-		raw := ccwireFrame(ccwire.Message{TrafficClass: ccwire.TrafficClassControl, Stream: ccwireStreamControl, BodyField: ccwire.BodyFragment, Body: fragment})
+		fm := ccwire.Message{TrafficClass: ccwire.TrafficClassControl, Stream: ccwireStreamControl, BodyField: ccwire.BodyFragment, Body: fragment}
+		raw := ccwireFrame(fm)
 		if raw == nil {
-			return nil
+			return nil, nil
 		}
+		msgs = append(msgs, fm)
 		frames = append(frames, raw)
 	}
-	return frames
+	return msgs, frames
 }
 
 func (s *ccwireSession) appEvent(m ccwire.Message) bool {
@@ -135,7 +148,7 @@ func (s *ccwireSession) appEvent(m ccwire.Message) bool {
 	var name string
 	var payload []byte
 	for r.p < len(r.b) {
-		t, ok := r.varint()
+		t, ok := r.tag()
 		if !ok {
 			return s.sendError(m.RequestID, errPayloadInvalid, "event")
 		}
@@ -187,13 +200,6 @@ func (h *Hub) emitRooms(rooms []string, exclude, event string, payload any, pare
 	if ctx.Err() != nil {
 		return
 	}
-	if h.io != nil {
-		rs := make([]socket.Room, len(rooms))
-		for i, r := range rooms {
-			rs[i] = socket.Room(r)
-		}
-		h.io.To(rs...).Emit(event, payload)
-	}
 	h.ccwireRooms(rooms, exclude, event, payload, ctx)
 }
 
@@ -213,7 +219,7 @@ func (h *Hub) ccwireRoomsLocal(rooms []string, exclude, event string, payload an
 	if ctx.Err() != nil {
 		return
 	}
-	frames := appEventFrames(event, payload)
+	msgs, frames := appEventBuild(event, payload)
 	if len(frames) == 0 {
 		return
 	}
@@ -239,14 +245,50 @@ func (h *Hub) ccwireRoomsLocal(rooms []string, exclude, event string, payload an
 		}
 	}
 	h.cwmu.Unlock()
-	for _, s := range targets {
-		if ctx.Err() != nil {
-			return
+	// NO ctx.Err() ABORT IN THIS LOOP.
+	//
+	// It used to return here, which made a fan-out that ran out of time deliver
+	// to the sessions early in the slice and silently skip the rest: no error,
+	// no hole in anyone's window, no metric. canReceiveRooms can reach the DB
+	// on a cache miss, once per target, so a call room with a few dozen
+	// participants on a cold permission cache exhausts the budget mid-loop —
+	// and the participants that never got call_peer_left keep rendering a tile
+	// for someone who left, for the rest of the call.
+	//
+	// The per-session authorization check below is a different thing and stays:
+	// skipping ONE session because it may not receive is correct. Abandoning
+	// the others because the clock ran out is not.
+	// Removing the loop's abort was NOT enough on its own, and that is worth
+	// stating because it looked like it was. canReceiveRooms derives its own
+	// context from this one and returns false the moment the parent is expired
+	// — before it checks anything — so every target after the deadline was
+	// still skipped, silently, exactly as before. The only observable change
+	// was a metric.
+	//
+	// So when the budget is gone, authorization continues on a FRESH one rather
+	// than failing closed for everyone remaining. The security check is still
+	// performed against the database; what changes is that blowing a deadline
+	// no longer decides who receives a message. One extra budget per fan-out,
+	// taken at most once, is the cost.
+	var fresh context.Context
+	var cancelFresh context.CancelFunc
+	defer func() {
+		if cancelFresh != nil {
+			cancelFresh()
 		}
-		if s.canReceiveRooms(rooms, ctx) {
-			for _, raw := range frames {
-				s.enqueue(raw)
+	}()
+
+	for _, s := range targets {
+		use := ctx
+		if use.Err() != nil {
+			if fresh == nil {
+				fresh, cancelFresh = realtimeContext()
+				metrics.Inc("ccwire_fanout_deadline_exceeded")
 			}
+			use = fresh
+		}
+		if s.canReceiveRooms(rooms, use) {
+			s.deliver(msgs, frames)
 		}
 	}
 }

@@ -117,6 +117,7 @@ export default function IncomingCallScreen() {
   useEffect(() => () => { if (acceptWaitRef.current) clearInterval(acceptWaitRef.current); }, []);
   useEffect(() => {
     let off: (() => void) | null = null;
+    let dead = false;
     (async () => {
       const s = await getSocket();
       const onOffer = (d: any) => {
@@ -130,16 +131,22 @@ export default function IncomingCallScreen() {
         liveOfferRef.current = next;
         if (had) callStage(offerTag(next), 'offer_resealed', `superseding ${offerTag(had)}`);
       };
+      // `dead` check before attaching (2026-09-17): the cleanup below runs
+      // synchronously, so unmounting while getSocket() was still in flight left
+      // `off` null and attached the listener afterwards, with nothing able to
+      // remove it. See the webrtc_end effect below for why that mattered.
+      if (dead) return;
       s.on('webrtc_offer', onOffer);
       off = () => s.off('webrtc_offer', onOffer);
     })();
-    return () => { if (off) off(); };
+    return () => { dead = true; if (off) off(); };
   }, [peerUid]);
 
   // Listen for caller-side hangup before answer
   const decidedRef = useRef(false);
   useEffect(() => {
     let off: (() => void) | null = null;
+    let dead = false;
     (async () => {
       const s = await getSocket();
       const onEnd = (data: any) => {
@@ -151,10 +158,14 @@ export default function IncomingCallScreen() {
           router.back();
         }
       };
+      // Same `dead` guard as the offer effect. This one is the reason it
+      // matters: the leaked handler calls router.back(), so a hangup arriving
+      // after this screen had gone POPPED WHATEVER SCREEN THE USER WAS ON.
+      if (dead) return;
       s.on('webrtc_end', onEnd);
       off = () => s.off('webrtc_end', onEnd);
     })();
-    return () => { if (off) off(); };
+    return () => { dead = true; if (off) off(); };
   }, [peerUid, router]);
 
   const accept = () => {
@@ -192,7 +203,7 @@ export default function IncomingCallScreen() {
   const decline = async () => {
     decidedRef.current = true;
     stopRingtone();
-    addCallLog({ chatId, peerUid, peerName: displayName, kind: type === 'video' ? 'video' : 'audio', direction: 'missed', at: Date.now(), durationSec: 0 }).catch(() => {});
+    addCallLog({ chatId, peerUid, peerName: displayName, kind: type === 'video' ? 'video' : 'audio', direction: 'declined', at: Date.now(), durationSec: 0 }).catch(() => {});
     try {
       const s = await getSocket();
       s.emit('webrtc_end', { to: peerUid, chatId });

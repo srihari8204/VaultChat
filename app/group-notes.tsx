@@ -12,7 +12,7 @@
 import React, { useCallback, useMemo, useState } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, ScrollView, TextInput, Alert,
-  ActivityIndicator, Modal, KeyboardAvoidingView, Platform,
+  ActivityIndicator, Modal,
 } from 'react-native';
 import { Stack, useLocalSearchParams, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -24,6 +24,7 @@ import {
   encodeNoteOp, decodeNoteOp, foldNotes, sortNotes, preview, newNoteId,
   type Note, type NoteOp,
 } from '../lib/groups/notes';
+import { KeyboardSafe } from '../components/ui';
 
 const SCAN_LIMIT = 400;
 
@@ -186,7 +187,12 @@ export default function GroupNotesScreen() {
       )}
 
       <Modal visible={creating} transparent animationType="slide" onRequestClose={() => setCreating(false)}>
-        <KeyboardAvoidingView behavior={'padding'} style={st.backdrop}>
+        {/* KeyboardSafe, not KeyboardAvoidingView (2026-09-17): a React Native
+            <Modal> is its own Android window and never receives the activity's
+            adjustResize, and KAV's 'padding' math mixes Modal-relative layout
+            coords with absolute screen coords, so the lift came up short.
+            keyboardOnly: this sheet already sets its own bottom padding. */}
+        <KeyboardSafe keyboardOnly style={st.backdrop}>
           <TouchableOpacity style={{ flex: 1 }} activeOpacity={1} onPress={() => setCreating(false)} />
           <View style={[st.sheet, { backgroundColor: colors.glassSoft, borderColor: colors.glassStroke }]}>
             <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 12 }}>
@@ -220,7 +226,7 @@ export default function GroupNotesScreen() {
               </Text>
             )}
           </View>
-        </KeyboardAvoidingView>
+        </KeyboardSafe>
       </Modal>
     </View>
   );

@@ -33,8 +33,7 @@ import {
   canCustomerCollect, notCollectedGate, isTerminalFailure,
   couponDiscount, couponLabel, starText, loyaltyTier, parseBulkProducts,
   type CartItem, type OrderStatus, type ItemAvailability,
-  UNIT_PRESETS, normalizeUnit, isStalePrice, dateLocale, orderStamp,
-} from '../utils/shopbook';
+  UNIT_PRESETS, normalizeUnit, isStalePrice, dateLocale, orderStamp, isNum, isBlankOrNum, isBlankOrNonNegative, num } from '../utils/shopbook';
 import * as SB from '../services/shopBookService';
 // ONE canonical document. Screen and PDF read the same model, so the two can
 // no longer disagree the way buildBillHtml and InvoiceView's inline template did.
@@ -57,6 +56,7 @@ import { listShopLists, saveShopList, deleteShopList, type ShopList } from '../d
 import {
   t, useShopBookLang, initShopBookLang, setShopBookLang, SB_LANGUAGES, speechLocale,
 } from '../lib/shopbookI18n';
+import { permissionDenied } from '../lib/permissionDenied';
 
 // ── palette ────────────────────────────────────────────────────────
 //
@@ -156,7 +156,7 @@ type Mode = 'customer' | 'owner';
 type CustTab = 'shops' | 'orders' | 'profile';
 type OwnerTab = 'dashboard' | 'orders' | 'products' | 'khata';
 
-const num = (s: string) => { const n = Number(s); return Number.isFinite(n) ? n : 0; };
+// num() now lives in utils/shopbook.ts beside isNum, where it can be tested.
 
 export default function ShopBookScreen() {
   const router = useRouter();
@@ -842,13 +842,42 @@ function Catalog({ shop, cart, setCart, onCart }: {
     setCart(next <= 0 ? cart.filter((c) => c.key !== line.key)
                       : cart.map((c) => (c.key === line.key ? { ...c, qty: next } : c)));
   };
+  // Typed quantities are drafts until the box loses focus. Committing on every
+  // keystroke means the empty string you pass through while backspacing is read
+  // as a quantity. Same rule as the bill screen's qtyDraft further down.
+  const [qtyDraft, setQtyDraft] = useState<Record<string, string>>({});
+
   const setExact = (productId: string, raw: string) => {
     const line = lineFor(productId);
     if (!line) return;
     // Typed, not stepped: loose weight is 2.5 kg and no +/- can express that.
-    const v = Math.max(0, num(raw));
-    setCart(v <= 0 ? cart.filter((c) => c.key !== line.key)
-                   : cart.map((c) => (c.key === line.key ? { ...c, qty: v } : c)));
+    //
+    // Committed on BLUR, and never on a value that is not a number (2026-09-17).
+    // This used to run on every keystroke and treat the result as a quantity, so
+    // the empty string you pass through while backspacing to retype became 0 —
+    // and 0 deleted the line out from under you mid-edit, stepper and all.
+    // "2,5" did the same, silently. Blank means "still typing" and garbage
+    // means "not a number"; NEITHER means zero. Only the - stepper and the
+    // delete control remove a line.
+    //
+    // A SILENT return was still wrong (2026-09-17): the draft is cleared by the
+    // caller on blur, so "2,5" put the old quantity back on screen with no
+    // explanation and the customer ordered 2 when they meant 2.5 — the refusal
+    // has to be visible. Blank stays silent, because blank is "still typing"
+    // and a keyboard dismiss is not a mistake worth an alert.
+    if (!isNum(raw)) {
+      if (raw.trim()) {
+        Alert.alert('Check the quantity',
+          `"${raw.trim()}" is not a quantity. Use digits only — 2.5 for two and a half, 1,200 or 1200 for a thousand two hundred.`);
+      }
+      return;
+    }
+    // num(), not Number(): isNum now accepts thousands grouping (2026-09-17),
+    // and Number('1,200') is NaN — which would set a quantity of NaN on a line
+    // that had just passed the gate.
+    const v = num(raw);
+    if (v <= 0) return;
+    setCart(cart.map((c) => (c.key === line.key ? { ...c, qty: v } : c)));
   };
 
   const filtered = products.filter(
@@ -899,7 +928,14 @@ function Catalog({ shop, cart, setCart, onCart }: {
                 {/* Tap the number to type an exact amount. The unit sits beside it
                     so "2" is never ambiguous between 2 pieces and 2 kg. */}
                 <TextInput style={s.qtyInput} keyboardType="numeric" selectTextOnFocus
-                  value={String(line.qty)} onChangeText={(v) => setExact(p.id, v)} />
+                  value={qtyDraft[p.id] ?? String(line.qty)}
+                  onChangeText={(v) => setQtyDraft({ ...qtyDraft, [p.id]: v })}
+                  onBlur={() => {
+                    const raw = qtyDraft[p.id];
+                    if (raw == null) return;
+                    setExact(p.id, raw);
+                    setQtyDraft({ ...qtyDraft, [p.id]: undefined as any });
+                  }} />
                 {!!p.unit && <Text style={s.qtyUnit}>{p.unit}</Text>}
                 <TouchableOpacity style={s.qtyBtn} onPress={() => bump(p.id, 1)}>
                   <Text style={s.qtyBtnText}>+</Text>
@@ -1696,7 +1732,7 @@ function CustomerProfile({ me }: { me: { id: string; name: string } | null }) {
           <TouchableOpacity accessibilityLabel={`Share the list ${l.name}`} onPress={() => shareList(l)} hitSlop={8} style={{ padding: 4 }}>
             <Ionicons name="share-social-outline" size={20} color={C.green} />
           </TouchableOpacity>
-          <TouchableOpacity accessibilityLabel={`Delete the list ${l.name}`} onPress={() => removeList(l.id)} hitSlop={8} style={{ padding: 4 }}>
+          <TouchableOpacity accessibilityLabel={`Delete the list ${l.name}`} onPress={() => Alert.alert('Delete list?', `Delete "${l.name}" and everything on it? This cannot be undone.`, [{ text: 'Cancel', style: 'cancel' }, { text: 'Delete', style: 'destructive', onPress: () => removeList(l.id) }])} hitSlop={8} style={{ padding: 4 }}>
             <Ionicons name="trash-outline" size={20} color={C.danger} />
           </TouchableOpacity>
         </View>
@@ -1717,13 +1753,37 @@ function OwnerApp({ me }: { me: { id: string; name: string } | null }) {
     'coupons' | 'suppliers' | 'plans' | 'reports'
     | 'purchases' | 'returns' | 'audit' | 'verify' | null>(null);
 
+  // A FAILED LOOKUP IS NOT "NO SHOP" (2026-09-17).
+  //
+  // myShop() legitimately resolves null when the user has no shop, so the empty
+  // `catch {}` made a 401 or a timeout indistinguishable from it. On a flaky
+  // connection an existing owner was dropped into the blank Create-Shop form
+  // with NO cancel (onCancel is undefined when shop is null) — and pressing
+  // Create POSTs the empty form to the same endpoint, OVERWRITING their real
+  // shop name, hours, address, country and tax config.
+  const [loadErr, setLoadErr] = useState('');
   const load = useCallback(async () => {
     setLoading(true);
-    try { setShop(await SB.myShop()); } catch {} finally { setLoading(false); }
+    try { setLoadErr(''); setShop(await SB.myShop()); }
+    catch (e: any) { setLoadErr(e?.message || 'Could not reach your shop'); }
+    finally { setLoading(false); }
   }, []);
   useEffect(() => { load(); }, [load]);
 
   if (loading) return <LoadingState />;
+
+  // Lookup FAILED: say so and offer a retry. Never fall through to the create
+  // form — that is the path that overwrites a real shop.
+  if (loadErr && !shop) {
+    return (
+      <View style={[s.screen, { alignItems: 'center', justifyContent: 'center', padding: 28 }]}>
+        <EmptyState icon="cloud-offline-outline" title="Couldn’t load your shop" sub={loadErr} />
+        <TouchableOpacity style={[s.primaryBtn, { marginTop: 18 }]} onPress={load}>
+          <Text style={s.primaryBtnText}>Try again</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  }
 
   // No shop yet → force settings/create.
   if (!shop || settings) {
@@ -2106,6 +2166,16 @@ function OwnerCoupons({ onBack }: { onBack: () => void }) {
 
   const add = async () => {
     if (!code.trim() || num(value) <= 0) { Alert.alert('Enter code and value'); return; }
+    // `value` is caught by the `<= 0` above; minOrder has no range guard to
+    // fall into (2026-09-17). num() turns an unparseable "₹1,2" into 0, and a
+    // 0 minimum is not a rejection — it is a coupon that applies to EVERY
+    // order, including the ₹20 ones it was written to exclude. Blank still
+    // means no minimum.
+    if (!isBlankOrNonNegative(minOrder)) {
+      Alert.alert('Check the minimum order',
+        `"${minOrder}" is not a plain number. Use digits only — 1200 or 1,200 both work — or leave it empty for no minimum.`);
+      return;
+    }
     setBusy(true);
     try {
       await SB.saveCoupon({ code: code.trim(), kind, value: num(value), minOrder: num(minOrder), active: true });
@@ -2154,7 +2224,7 @@ function OwnerCoupons({ onBack }: { onBack: () => void }) {
               <Text style={s.cardTitle}>{couponLabel(c2)}</Text>
               <Text style={s.cardSub}>{c2.active ? 'Active' : 'Inactive'}</Text>
             </View>
-            <TouchableOpacity accessibilityLabel={`Delete the coupon ${c2.code}`} onPress={() => remove(c2.id)} hitSlop={8} style={{ padding: 4 }}>
+            <TouchableOpacity accessibilityLabel={`Delete the coupon ${c2.code}`} onPress={() => Alert.alert('Delete coupon?', `Delete coupon ${c2.code}? Customers can no longer use it. This cannot be undone.`, [{ text: 'Cancel', style: 'cancel' }, { text: 'Delete', style: 'destructive', onPress: () => remove(c2.id) }])} hitSlop={8} style={{ padding: 4 }}>
               <Ionicons name="trash-outline" size={20} color={C.danger} />
             </TouchableOpacity>
           </View>
@@ -2222,7 +2292,7 @@ function OwnerSuppliers({ onBack }: { onBack: () => void }) {
               {!!sup.phone && <Text style={s.cardSub}>📞 {sup.phone}</Text>}
               {!!sup.items && <Text style={s.cardSub}>{sup.items}</Text>}
             </View>
-            <TouchableOpacity accessibilityLabel={`Delete the supplier ${sup.name}`} onPress={() => remove(sup.id)} hitSlop={8} style={{ padding: 4 }}>
+            <TouchableOpacity accessibilityLabel={`Delete the supplier ${sup.name}`} onPress={() => Alert.alert('Delete supplier?', `Delete ${sup.name}? Deliveries already recorded against them stay, but the supplier is gone. This cannot be undone.`, [{ text: 'Cancel', style: 'cancel' }, { text: 'Delete', style: 'destructive', onPress: () => remove(sup.id) }])} hitSlop={8} style={{ padding: 4 }}>
               <Ionicons name="trash-outline" size={20} color={C.danger} />
             </TouchableOpacity>
           </View>
@@ -2331,6 +2401,15 @@ function OwnerOrderDetail({ orderId, onBack }: { orderId: string; onBack: () => 
 
   const submitAlt = () => {
     if (!altFor || !altName.trim()) { Alert.alert(t('owner.suggestAlt'), 'Enter the alternative product'); return; }
+    // isNum, not just num (2026-09-17). This price is what the customer is
+    // asked to approve, and num() turns anything unparseable into 0 — the
+    // substitute was offered FREE and, once approved, sold at nothing. Blank
+    // still means 0, which is how the owner offers a straight swap.
+    if (!isBlankOrNonNegative(altPrice)) {
+      Alert.alert('Check the price',
+        `"${altPrice}" is not a plain number. Use digits only — 1200 or 1,200 both work.`);
+      return;
+    }
     setAvail(altFor, 'alternative', altName.trim(), num(altPrice));
     setAltFor(null); setAltName(''); setAltPrice('');
   };
@@ -2608,6 +2687,29 @@ function ProductEditor({ product, currency, onDone }: {
 
   const save = async () => {
     if (!name.trim()) { Alert.alert('Name required'); return; }
+    // isNum, not just num (2026-09-17). Nothing here has a range guard to fall
+    // into, and num() coerces anything unparseable to 0 — so a pasted "₹285"
+    // saved the CATALOG price as 0, and the server re-prices every future order
+    // from productId. One bad paste makes the item free forever, on orders
+    // nobody has placed yet. Blank still means 0 (a tax-free product leaves tax
+    // blank, an untracked one leaves cost and reorder blank); garbage never does.
+    //
+    // WHAT THIS GATE DOES NOT DO: catch a price of 0 (2026-09-17). The helper
+    // is non-negative, not positive — a typed "0" passes, exactly as a blank
+    // price already did before any of this. That is left alone deliberately:
+    // blank price is an accepted flow here (only the name is required, so a
+    // catalog can be typed names-first and priced later), and rejecting 0 while
+    // blank still saves 0 would be theatre. Pricing a product at literally zero
+    // stays the owner's call; the paste that turns ₹285 into 0 is what is
+    // refused.
+    const bad = ([['Price', price], ['Tax %', taxPercent],
+                  ['Cost price', costPrice], ['Reorder level', reorderLevel]] as const)
+      .find(([, v]) => !isBlankOrNonNegative(v));
+    if (bad) {
+      Alert.alert('Check the numbers',
+        `${bad[0]}: "${bad[1]}" is not a plain number. Use digits only — 1200 or 1,200 both work.`);
+      return;
+    }
     setBusy(true);
     try {
       await SB.saveProduct({
@@ -2689,6 +2791,22 @@ function ReturnRequest({ order, onDone }: { order: SB.OrderDetail; onDone: () =>
   const lines = order.items.filter((i) => i.availability !== 'unavailable' && !i.removed);
 
   const submit = async () => {
+    // isNum before the filter (2026-09-17). num() turns an unparseable qty into
+    // 0, and `qty > 0` then drops that line silently — the customer submitted a
+    // return that quietly left out the very item they were returning, and found
+    // out when the credit note arrived short.
+    //
+    // NON-NEGATIVE, not merely numeric: isBlankOrNum accepts a leading minus
+    // (the stock screen needs it), so "-1" passed this gate and then hit the
+    // very `qty > 0` filter above — reproducing, verbatim, the short credit
+    // note this comment claims to have fixed. You cannot return minus one of
+    // something. Blank still means "not returning this line".
+    const badLine = lines.find((l) => !isBlankOrNonNegative(qty[l.id] ?? ''));
+    if (badLine) {
+      Alert.alert('Check the quantity',
+        `"${(qty[badLine.id] ?? '').trim()}" is not a quantity for ${badLine.name}. Use digits only — 1200 or 1,200 both work — and it cannot be negative.`);
+      return;
+    }
     const items = lines
       .map((l) => ({ orderItemId: l.id, qty: num(qty[l.id] ?? '') }))
       .filter((x) => x.qty > 0);
@@ -3246,8 +3364,29 @@ function BillScreen({ orderId, onBack }: { orderId: string; onBack: () => void }
             <TouchableOpacity style={s.primaryBtn} onPress={() => {
               const name = addName.trim();
               if (!name) return;
+              // isNum, not just num (2026-09-17). An unparseable price becomes
+              // 0 and this line goes onto the customer's bill FREE; an
+              // unparseable qty falls through `|| 1` and bills one of whatever
+              // they meant. Blank is still fine — blank qty means 1 and a blank
+              // price is the "catalog items price themselves" case.
+              const badAdd = [addQty, addPrice].find((v) => !isBlankOrNonNegative(v));
+              if (badAdd != null) {
+                Alert.alert('Check the quantity and price',
+                  `"${badAdd.trim()}" is not a plain number. Use digits only — 1200 or 1,200 both work, and neither can be negative.`);
+                return;
+              }
+              // isBlankOrNonNegative passes a typed "0" — it is non-negative,
+              // not positive, whatever its old name suggested. `|| 1` then
+              // turned that 0 into ONE of the item and billed it (2026-09-17).
+              // Blank is the "how many? one" default and stays; a deliberately
+              // typed 0 is the one place on this screen where zero is genuinely
+              // wrong, because a zero-quantity line is not a line.
+              if (addQty.trim() && num(addQty) === 0) {
+                Alert.alert('Check the quantity', 'A quantity of 0 does not go on a bill. Leave it empty for one.');
+                return;
+              }
               setAddOpen(false);
-              void patch({ add: { name, qty: Math.max(0, num(addQty)) || 1, price: num(addPrice) } });
+              void patch({ add: { name, qty: num(addQty) || 1, price: num(addPrice) } });
               setAddName(''); setAddQty('1'); setAddPrice('');
             }}>
               <Text style={s.primaryBtnText}>Add</Text>
@@ -3287,6 +3426,22 @@ function BillScreen({ orderId, onBack }: { orderId: string; onBack: () => void }
                       if (raw == null) return;
                       // Empty clears back to "as requested" rather than zero —
                       // a blank box must never silently mean "packed nothing".
+                      // Neither may GARBAGE (2026-09-17): num() coerces it to 0,
+                      // which is a real packed quantity, so the line billed as
+                      // none-supplied and the customer paid for an empty bag.
+                      // The draft is left in place so the typo can be corrected
+                      // rather than thrown away.
+                      //
+                      // NON-NEGATIVE, not merely numeric: isBlankOrNum allows a
+                      // leading minus for the stock screen's corrections, so
+                      // "-3" passed here and sent fulfilledQty: -3 to the
+                      // CUSTOMER'S BILL, where a negative packed quantity is a
+                      // negative line total. Nothing is packed in negative.
+                      if (!isBlankOrNonNegative(raw)) {
+                        Alert.alert('Check the packed quantity',
+                          `"${raw.trim()}" is not a packed quantity. Use digits only — 1200 or 1,200 both work — or clear the box to pack the full ordered quantity. It cannot be negative.`);
+                        return;
+                      }
                       void patch({ lines: [{ id: l.id, fulfilledQty: raw.trim() === '' ? null : num(raw) }] });
                       setQtyDraft({ ...qtyDraft, [l.id]: undefined as any });
                     }}
@@ -3318,7 +3473,23 @@ function BillScreen({ orderId, onBack }: { orderId: string; onBack: () => void }
                   placeholder="0" keyboardType="numeric" />
               </View>
               <TouchableOpacity style={[s.outlineBtn, { marginTop: 0, paddingHorizontal: 18 }]}
-                onPress={() => patch({ billDiscount: num(discount) })}>
+                onPress={() => {
+                  // The EIGHTH ungated money write, and the only one pointed at
+                  // the live customer bill with no range check at all
+                  // (2026-09-17). A discount is money OFF, so a typed "-200"
+                  // put the bill UP by ₹200 — an unauthorised SURCHARGE — while
+                  // an unparseable "₹200" or "2,5" became num()'s believable 0,
+                  // so the discount the owner just promised out loud silently
+                  // did not apply and nothing said so. Blank still means no
+                  // discount, which is why the non-negative gate is the right
+                  // one rather than a bare isNum.
+                  if (!isBlankOrNonNegative(discount)) {
+                    Alert.alert('Check the discount',
+                      `"${discount.trim()}" is not a discount. Use digits only — 1200 or 1,200 both work — or leave it empty for no discount. A discount cannot be negative.`);
+                    return;
+                  }
+                  void patch({ billDiscount: num(discount) });
+                }}>
                 <Text style={s.outlineBtnText}>Apply</Text>
               </TouchableOpacity>
             </View>
@@ -3375,8 +3546,20 @@ function StockScreen({ currency, onBack }: { currency?: string; onBack: () => vo
 
   const submit = async () => {
     if (!sel) return;
+    // Three different problems, three different messages (2026-09-17). This
+    // screen had NO isNum gate at all: num() coerced "12,5" to 0 and the single
+    // `q === 0` branch then told the owner to "Enter a quantity" about a box
+    // with digits already in it, so retyping the same thing got the same
+    // refusal forever. Negatives stay legal — this is the one screen that means
+    // them, and a correction of -3 is the whole point of the Correction kind.
+    if (!qty.trim()) { Alert.alert('Enter a quantity'); return; }
+    if (!isNum(qty)) {
+      Alert.alert('Check the quantity',
+        `"${qty.trim()}" is not a plain number. Use digits only — 1200 or 1,200 both work, and -3 is a valid correction.`);
+      return;
+    }
     const q = num(qty);
-    if (q === 0) { Alert.alert('Enter a quantity'); return; }
+    if (q === 0) { Alert.alert('Enter a quantity', 'A movement of 0 would not change the stock.'); return; }
     if (!reason.trim()) { Alert.alert('Reason required', 'Stock never changes silently.'); return; }
     setBusy(true);
     try {
@@ -3725,8 +3908,20 @@ function CounterSale({ currency, onDone }: { currency?: string; onDone: () => vo
   const sell = async () => {
     const filled = items.filter((it) => it.name.trim() || it.price.trim());
     if (!filled.length) { Alert.alert('Nothing to sell', 'Add at least one product.'); return; }
-    if (filled.some((it) => !it.name.trim() || num(it.qty) <= 0 || num(it.price) < 0)) {
-      Alert.alert('Check the products', 'Every product needs a name, a quantity above 0 and a price.');
+    // isNum, not just a range check (2026-09-17). num() coerces anything
+    // unparseable to 0, and `< 0` can never catch a 0 — so "₹285" passed this
+    // guard and the item SOLD FOR ₹0, with a ₹0 invoice printed and shared. A
+    // `qty` of "0x10" meant sixteen, because Number() accepts hex. ("1,200" was
+    // the same bug until thousands grouping was made to parse, same date.)
+    const bad = filled.find((it) => !it.name.trim() || !isNum(it.qty) || !isNum(it.price)
+                                 || num(it.qty) <= 0 || num(it.price) < 0);
+    if (bad) {
+      Alert.alert(
+        'Check the products',
+        !isNum(bad.price) && bad.price.trim()
+          ? `"${bad.price}" is not a plain number — use digits only, 1200 or 1,200.`
+          : 'Every product needs a name, a quantity above 0 and a price.',
+      );
       return;
     }
     setBusy(true);
@@ -3835,8 +4030,30 @@ function KhataDetail({ customer, currency, onBack }: { customer: SB.CustomerPend
     // A blank row is someone who tapped "add product" and changed their mind —
     // drop it rather than making them hunt for the × to submit.
     const filled = lines.filter((it) => it.name.trim() || it.price.trim());
-    if (filled.some((it) => !it.name.trim() || num(it.qty) <= 0 || num(it.price) < 0)) {
-      Alert.alert('Check the products', 'Every product needs a name, a quantity above 0 and a price.');
+    // isNum, not just a range check (2026-09-17). num() coerces anything
+    // unparseable to 0, and `< 0` can never catch a 0 — so "₹285" passed this
+    // guard and the item SOLD FOR ₹0, with a ₹0 invoice printed and shared. A
+    // `qty` of "0x10" meant sixteen, because Number() accepts hex. ("1,200" was
+    // the same bug until thousands grouping was made to parse, same date.)
+    const bad = filled.find((it) => !it.name.trim() || !isNum(it.qty) || !isNum(it.price)
+                                 || num(it.qty) <= 0 || num(it.price) < 0);
+    if (bad) {
+      Alert.alert(
+        'Check the products',
+        !isNum(bad.price) && bad.price.trim()
+          ? `"${bad.price}" is not a plain number — use digits only, 1200 or 1,200.`
+          : 'Every product needs a name, a quantity above 0 and a price.',
+      );
+      return;
+    }
+    // Name the real problem (2026-09-17). A typed "₹500" is num()'s 0, and the
+    // `amt <= 0` branch below then said "Enter an amount" about a box holding
+    // 500 — so the owner retyped it and was refused identically. Blank still
+    // falls through to "Enter an amount", which is the honest message for a
+    // blank box.
+    if (!filled.length && amount.trim() && !isNum(amount)) {
+      Alert.alert('Check the amount',
+        `"${amount.trim()}" is not a plain number. Use digits only — 1200 or 1,200 both work.`);
       return;
     }
     const amt = filled.length ? itemsTotal : num(amount);
@@ -3933,6 +4150,16 @@ function KhataDetail({ customer, currency, onBack }: { customer: SB.CustomerPend
   const [limit, setLimit] = useState<number | undefined>(customer.creditLimit);
 
   const saveLimit = async () => {
+    // isNum FIRST, because 0 is not a rejection here — it is "no ceiling"
+    // (2026-09-17). num() coerces an unparseable "₹1,2" to 0, so the owner
+    // typing a limit would have REMOVED the limit, and sbCreditCheck would
+    // wave through every entry after it. The `< 0` guard below cannot see that,
+    // because 0 is not negative. Blank still means no limit.
+    if (!isBlankOrNum(limitText)) {
+      Alert.alert('Check the limit',
+        `"${limitText}" is not a plain number. Use digits only — 1200 or 1,200 both work — or leave it empty for no limit.`);
+      return;
+    }
     const v = num(limitText);
     if (v < 0) { Alert.alert('Enter 0 or more', 'Use 0 for no limit.'); return; }
     setBusy(true);
@@ -4159,12 +4386,13 @@ function ShopSettings({ shop, me, onSaved, onCancel }: {
   const captureLocation = async (silent = false): Promise<{ lat: number; lng: number } | null> => {
     setLocating(true);
     try {
-      const { status: perm } = await Location.requestForegroundPermissionsAsync();
+      const { status: perm, canAskAgain } = await Location.requestForegroundPermissionsAsync();
       if (perm !== 'granted') {
         if (!silent) {
-          Alert.alert(
+          permissionDenied(
             'Location needed',
-            'A shop location is required so nearby customers can find you and see how far away you are. Please enable location permission in Settings.',
+            'A shop location is required so nearby customers can find you and see how far away you are.',
+            canAskAgain,
           );
         }
         return null;

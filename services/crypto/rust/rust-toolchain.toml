@@ -1,0 +1,13 @@
+# Pinned to the GNU HOST (2026-09-17).
+#
+# This machine has no MSVC toolchain, so an x86_64-pc-windows-msvc host cannot
+# link its own BUILD SCRIPTS - which must compile for the HOST before anything
+# can be cross-compiled for Android. It only ever worked because prebuilt host
+# artifacts happened to be on disk; the moment those were cleared, the crate
+# stopped building at all.
+#
+# The channel is the SAME rustc the msvc host used. Only the host triple
+# changes, so the single variable is the linker - not codegen, not the standard
+# library, not the FFI ABI.
+[toolchain]
+channel = "1.97.1-x86_64-pc-windows-gnu"

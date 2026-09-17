@@ -1,10 +1,11 @@
 // app/finance/ledger/index.tsx — Ledger Book list (All / Lent / Borrowed) with
 // status filtering and a 30-second undo-delete snackbar.
 
-import React, { useCallback, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { View, Text, ScrollView, StyleSheet, TouchableOpacity, Animated } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter, useFocusEffect } from 'expo-router';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { FIN, STATUS_COLORS, TABULAR } from '../../../constants/financeTheme';
 import { FinHeader, Segment, Pill, EmptyState, LoadingState, ErrorState } from '../../../components/finance/ui';
 import { useLoadStatus } from '../../../components/finance/useLoad';
@@ -15,6 +16,10 @@ import { listLedger, deleteLedger, restoreLedger, type LedgerEntry } from '../..
 type Filter = 'all' | 'lend' | 'borrow';
 
 export default function LedgerList() {
+  // s.fab/s.snack live in a module-scope StyleSheet, so a literal bottom there
+  // would freeze at launch and never follow a rotation. Read the inset from the
+  // hook and apply it at the element instead (2026-09-17).
+  const insets = useSafeAreaInsets();
   const router = useRouter();
   const me = useMe();
   const [filter, setFilter] = useState<Filter>('all');
@@ -39,11 +44,29 @@ export default function LedgerList() {
   const askDelete = (e: LedgerEntry) => {
     // optimistic remove + start the 30s undo window
     setRows(prev => prev.filter(r => r.id !== e.id));
+    // COMMIT THE PREVIOUS ONE FIRST (2026-09-17). This used to be a bare
+    // clearTimeout, which cancelled the pending finalizeDelete WITHOUT running
+    // it — so deleting two entries inside 30s removed both from the list but
+    // only ever deleted the second. The first silently came back on the next
+    // reload, after the user had been told it was gone. Only ONE delete can be
+    // undoable at a time, so the earlier one is committed, not dropped.
+    if (timer.current) { clearTimeout(timer.current); if (pendingDelete) finalizeDelete(pendingDelete.id); }
     setPendingDelete(e);
     Animated.timing(snack, { toValue: 1, duration: 180, useNativeDriver: true }).start();
-    if (timer.current) clearTimeout(timer.current);
     timer.current = setTimeout(() => finalizeDelete(e.id), 30000);
   };
+
+  // FLUSH ON THE WAY OUT. The 30s timer dies with the screen, so leaving inside
+  // the window abandoned a delete the snackbar had already reported as done —
+  // the row reappeared on the next visit. A pending delete is a decision the
+  // user already made; unmounting is not an undo.
+  const pendingRef = useRef<LedgerEntry | null>(null);
+  pendingRef.current = pendingDelete;
+  useEffect(() => () => {
+    if (timer.current) clearTimeout(timer.current);
+    const p = pendingRef.current;
+    if (p) deleteLedger(p.id).catch(() => {});
+  }, []);
   const finalizeDelete = (id: string) => {
     deleteLedger(id).catch(() => {});
     setPendingDelete(null);
@@ -60,7 +83,7 @@ export default function LedgerList() {
   return (
     <View style={s.screen}>
       <FinHeader title="Ledger Book" right={
-        <TouchableOpacity onPress={() => router.push('/finance/ledger/new')} hitSlop={8}>
+        <TouchableOpacity accessibilityRole="button" accessibilityLabel="New ledger" onPress={() => router.push('/finance/ledger/new')} hitSlop={8}>
           <Ionicons name="add-circle" size={26} color={FIN.brandDeep} />
         </TouchableOpacity>
       } />
@@ -92,13 +115,21 @@ export default function LedgerList() {
               </View>
               <View style={{ flex: 1, minWidth: 0 }}>
                 <Text style={s.name} numberOfLines={1}>{e.name}</Text>
-                <Text style={s.sub} numberOfLines={1}>
+                {/* The outstanding balance is the LAST thing on this line, so a
+                    single line ellipsised exactly the number a lender opens this
+                    screen to read. Two lines: the rate/period can wrap, the money
+                    cannot be hidden (2026-09-17). */}
+                <Text style={s.sub} numberOfLines={2}>
                   {e.rate}{e.rate_mode === 'rupees' ? '₹' : '%'} · {PERIOD_LABEL[e.period]}
                   {e.remaining < e.principal ? ` · ₹${e.remaining.toLocaleString('en-IN')} left` : ''}
                 </Text>
               </View>
-              <View style={{ alignItems: 'flex-end', gap: 5 }}>
-                <Text style={s.amt}>{formatINR(e.principal)}</Text>
+              {/* This column had no flex, so at font scale 1.5 it took whatever
+                  width the amount wanted and the name column - which DOES carry
+                  minWidth: 0 - shrank to a lone "…". Let it shrink, and let the
+                  amount scale down inside it instead of starving the name. */}
+              <View style={{ alignItems: 'flex-end', gap: 5, flexShrink: 1, minWidth: 0 }}>
+                <Text style={s.amt} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.75}>{formatINR(e.principal)}</Text>
                 <Pill label={sc.label} fg={sc.fg} bg={sc.bg} />
               </View>
             </TouchableOpacity>
@@ -108,13 +139,13 @@ export default function LedgerList() {
         <View style={{ height: 90 }} />
       </ScrollView>
 
-      <TouchableOpacity style={s.fab} activeOpacity={0.9} onPress={() => router.push('/finance/ledger/new')}>
+      <TouchableOpacity style={[s.fab, { bottom: insets.bottom + 20 }]} activeOpacity={0.9} onPress={() => router.push('/finance/ledger/new')}>
         <Ionicons name="add" size={22} color="#fff" />
         <Text style={s.fabTxt}>Add New Ledger</Text>
       </TouchableOpacity>
 
       {pendingDelete && (
-        <Animated.View style={[s.snack, { opacity: snack, transform: [{ translateY: snack.interpolate({ inputRange: [0, 1], outputRange: [20, 0] }) }] }]}>
+        <Animated.View style={[s.snack, { bottom: insets.bottom + 84, opacity: snack, transform: [{ translateY: snack.interpolate({ inputRange: [0, 1], outputRange: [20, 0] }) }] }]}>
           <Text style={s.snackTxt}>Ledger deleted</Text>
           <TouchableOpacity onPress={undo} hitSlop={8}><Text style={s.snackBtn}>UNDO</Text></TouchableOpacity>
         </Animated.View>

@@ -72,6 +72,7 @@ import '../lib/family/background'; // registers the bg-location task — a headl
 import '../lib/lock/background';   // registers the Location Lock geofence task — same
                                    // rule: headless wakes need it defined at load
 import { getAccessToken, getLaunchSessionState } from '../lib/api';
+import { settleLaunchGate } from '../lib/launchGate';
 import { isMfaEnabled } from '../lib/mfa';
 import { E2EE_ENABLED, SCHEDULED_LOCAL } from '../constants/flags';
 import { mark } from '../lib/perf';
@@ -236,17 +237,21 @@ function RootLayoutInner() {
       .then(([, session, mfaOn]) => {
         if (!live) return;
         if (!session.signedIn) {
+          settleLaunchGate(false);
           setLaunchGate('/onboard');
           router.replace('/onboard' as any);
         } else if (mfaOn || session.sealedLocked) {
+          settleLaunchGate(false);
           setLaunchGate('/app-lock');
           router.replace('/app-lock' as any);
         } else {
+          settleLaunchGate(true);
           setLaunchGate('allow');
         }
       })
       .catch(() => {
         if (!live) return;
+        settleLaunchGate(false);
         setLaunchGate('/onboard');
         router.replace('/onboard' as any);
       });
@@ -483,9 +488,10 @@ function RootLayoutInner() {
       if (Platform.OS !== 'web') {
         // Warm up the local message store after the first frame; screens that
         // need it still open it directly if the user gets there first.
+        // db_open_start/db_ready are marked inside getLocalDb itself — this
+        // warm-up usually observes a promise index.tsx already resolved.
         import('../lib/localDb')
           .then(m => m.getLocalDb())
-          .then(() => mark('db_ready'))
           .catch((e: any) => console.warn('[db] localDb init failed:', e?.message));
         // Passive monitoring and cache maintenance have no first-frame output.
         // Their native/headless registrations remain module-scope imports above.

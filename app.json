@@ -70,6 +70,7 @@
         "android.permission.MODIFY_AUDIO_SETTINGS",
         "android.permission.BLUETOOTH",
         "android.permission.BLUETOOTH_CONNECT",
+        "android.permission.BLUETOOTH_SCAN",
         "android.permission.USE_FULL_SCREEN_INTENT",
         "android.permission.FOREGROUND_SERVICE",
         "android.permission.FOREGROUND_SERVICE_DATA_SYNC",
@@ -100,11 +101,7 @@
           "image": "./assets/images/splash-icon.png",
           "imageWidth": 200,
           "resizeMode": "contain",
-          "backgroundColor": "#010628",
-          "dark": {
-            "image": "./assets/images/splash-icon.png",
-            "backgroundColor": "#010628"
-          }
+          "backgroundColor": "#010628"
         }
       ],
       [
@@ -187,7 +184,7 @@
           "android": {
             "enableProguardInReleaseBuilds": true,
             "enableShrinkResourcesInReleaseBuilds": true,
-            "extraProguardRules": "# ── React Native: the two rules that matter most ─────────────────────\n# JNI entry points are called from C++ by name. R8 cannot see those calls,\n# so without this it strips or renames them and the failure is a runtime\n# UnsatisfiedLinkError — or worse, a module that silently does nothing.\n-keepclasseswithmembernames,includedescriptorclasses class * { native <methods>; }\n\n# @DoNotStrip is how RN and its module ecosystem mark reflection/JNI targets.\n-keep,allowobfuscation @interface com.facebook.proguard.annotations.DoNotStrip\n-keep @com.facebook.proguard.annotations.DoNotStrip class * { *; }\n-keepclassmembers class * { @com.facebook.proguard.annotations.DoNotStrip *; }\n-keepclassmembers class * { @com.facebook.react.uimanager.annotations.ReactProp <methods>; }\n-keepclassmembers class * { @com.facebook.react.bridge.ReactMethod <methods>; }\n\n# ── Bridge / JSI surfaces ────────────────────────────────────────────\n-keep class com.facebook.react.bridge.** { *; }\n-keep class com.facebook.react.turbomodule.** { *; }\n-keep class com.facebook.jni.** { *; }\n-keep class com.facebook.hermes.** { *; }\n-keep class com.facebook.soloader.** { *; }\n\n# ── Nitro modules ────────────────────────────────────────────────────\n# Was com.margelo.quickcrypto.** — WRONG package, so quick-crypto and the\n# whole Nitro HybridObject registry went unprotected. Real package tree is\n# com.margelo.nitro.* (core + quickcrypto + the Rust CryptoCore binding).\n-keep class com.margelo.nitro.** { *; }\n\n# ── Native modules reached by reflection / JNI ───────────────────────\n-keep class com.op.sqlite.** { *; }\n-keep class expo.modules.** { *; }\n-keep class com.swmansion.** { *; }\n-keep class com.th3rdwave.safeareacontext.** { *; }\n-keep class org.webrtc.** { *; }\n-keep class com.oney.WebRTCModule.** { *; }\n-keep class io.livekit.** { *; }\n-keep class com.mrousavy.** { *; }\n-keep class io.invertase.** { *; }\n-keep class app.notifee.** { *; }\n\n# ── Crash reports stay readable ──────────────────────────────────────\n-keepattributes SourceFile,LineNumberTable,*Annotation*,Signature,InnerClasses,EnclosingMethod\n-keep class io.sentry.** { *; }"
+            "extraProguardRules": "# ── React Native: the two rules that matter most ─────────────────────\n# JNI entry points are called from C++ by name. R8 cannot see those calls,\n# so without this it strips or renames them and the failure is a runtime\n# UnsatisfiedLinkError — or worse, a module that silently does nothing.\n-keepclasseswithmembernames,includedescriptorclasses class * { native <methods>; }\n\n# @DoNotStrip is how RN and its module ecosystem mark reflection/JNI targets.\n-keep,allowobfuscation @interface com.facebook.proguard.annotations.DoNotStrip\n-keep @com.facebook.proguard.annotations.DoNotStrip class * { *; }\n-keepclassmembers class * { @com.facebook.proguard.annotations.DoNotStrip *; }\n-keepclassmembers class * { @com.facebook.react.uimanager.annotations.ReactProp <methods>; }\n-keepclassmembers class * { @com.facebook.react.bridge.ReactMethod <methods>; }\n\n# ── Bridge / JSI surfaces ────────────────────────────────────────────\n-keep class com.facebook.react.bridge.** { *; }\n-keep class com.facebook.react.turbomodule.** { *; }\n-keep class com.facebook.jni.** { *; }\n-keep class com.facebook.hermes.** { *; }\n-keep class com.facebook.soloader.** { *; }\n\n# ── Nitro modules ────────────────────────────────────────────────────\n# Was com.margelo.quickcrypto.** — WRONG package, so quick-crypto and the\n# whole Nitro HybridObject registry went unprotected. Real package tree is\n# com.margelo.nitro.* (core + quickcrypto + the Rust CryptoCore binding).\n-keep class com.margelo.nitro.** { *; }\n\n# ── Native modules reached by reflection / JNI ───────────────────────\n-keep class com.op.sqlite.** { *; }\n-keep class expo.modules.** { *; }\n-keep class com.swmansion.** { *; }\n-keep class com.th3rdwave.safeareacontext.** { *; }\n-keep class org.webrtc.** { *; }\n-keep class com.oney.WebRTCModule.** { *; }\n-keep class io.livekit.** { *; }\n-keep class com.mrousavy.** { *; }\n-keep class io.invertase.** { *; }\n-keep class app.notifee.** { *; }\n\n# react-native-device-info reaches InstallReferrerClient BY NAME through\n# reflection, so R8 renames the class and the lookup throws on every cold\n# start: NoSuchMethodException: L3.a.newBuilder (observed on device). The\n# failure is silent apart from that stack trace, and install attribution is\n# simply gone. Keeping the API package is what makes the reflection resolve.\n-keep class com.android.installreferrer.** { *; }\n\n# ── Crash reports stay readable ──────────────────────────────────────\n-keepattributes SourceFile,LineNumberTable,*Annotation*,Signature,InnerClasses,EnclosingMethod\n-keep class io.sentry.** { *; }"
           }
         }
       ],
@@ -212,7 +209,8 @@
       "policy": "appVersion"
     },
     "updates": {
-      "url": "https://u.expo.dev/144570a3-de88-48f0-b7e1-ecda63618199"
+      "url": "https://u.expo.dev/144570a3-de88-48f0-b7e1-ecda63618199",
+      "checkAutomatically": "ON_ERROR_RECOVERY"
     }
   }
 }

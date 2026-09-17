@@ -102,7 +102,7 @@ function DashboardContent() {
 
       <Animated.View style={[{flex:1},{ opacity:fadeAnim}]}>
         <View style={S.header}>
-          <TouchableOpacity onPress={()=>router.back()} style={S.backBtn}><Ionicons name="arrow-back" size={24} color={colors.primary} /></TouchableOpacity>
+          <TouchableOpacity accessibilityRole="button" accessibilityLabel="Back" onPress={()=>router.back()} style={S.backBtn}><Ionicons name="arrow-back" size={24} color={colors.primary} /></TouchableOpacity>
           <View style={{flex:1}}>
             <Text style={S.title}>🛡️ Security Hub</Text>
             <Text style={{color:colors.textFaint,fontSize:9,letterSpacing:2}}>YOUR ACCOUNT SECURITY</Text>

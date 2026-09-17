@@ -1,0 +1,114 @@
+{
+  "note": "CC-Wire adversarial input corpus. ONE source of hostile bytes for every implementation, so Go and Rust cannot drift into disagreeing about what is refusable. Read by vaultchat-backend-go/internal/ccwire/fuzz_test.go (as fuzz seeds) and services/transport/rust/tests/adversarial.rs (as a table). Hand-written from the wire specification rather than dumped from either implementation, so neither can pass by agreeing with itself — the same rule codec.json and frame.json already follow.",
+  "howToUse": "Every entry is hex, whitespace-insignificant. `accept` records whether a CONFORMING decoder may return a value: false means the bytes are unrepresentable and must be refused. It is NOT an assertion about which error. Liveness — the decoder returns rather than panicking, hanging, or allocating a declared-but-absent length — is asserted for every entry regardless of `accept`.",
+  "cases": [
+    {
+      "name": "empty",
+      "hex": "",
+      "accept": false,
+      "why": "No frame is zero bytes. The degenerate input every parser sees first."
+    },
+    {
+      "name": "single zero byte",
+      "hex": "00",
+      "accept": false,
+      "why": "Field number 0 is illegal in protobuf, and one byte cannot carry a frame."
+    },
+    {
+      "name": "single high byte",
+      "hex": "ff",
+      "accept": false,
+      "why": "A lone continuation byte: a varint that never terminates."
+    },
+    {
+      "name": "tag without value",
+      "hex": "08",
+      "accept": false,
+      "why": "Varint tag present, payload truncated. The classic off-by-one read."
+    },
+    {
+      "name": "varint truncated mid-continuation",
+      "hex": "08 ff",
+      "accept": false,
+      "why": "Continuation bit set on the final byte — the decoder must not read past the buffer looking for the rest."
+    },
+    {
+      "name": "length-delimited with no payload",
+      "hex": "0a 7f",
+      "accept": false,
+      "why": "Declares 127 bytes, supplies none. A declared length is a claim, never a capacity."
+    },
+    {
+      "name": "malformed length",
+      "hex": "0a ff ff ff",
+      "accept": false,
+      "why": "The length varint is itself unterminated."
+    },
+    {
+      "name": "overlong varint beyond 64 bits",
+      "hex": "08 ff ff ff ff ff ff ff ff ff ff",
+      "accept": false,
+      "why": "Ten continuation bytes cannot fit a u64. Must be refused, not silently wrapped."
+    },
+    {
+      "name": "field number zero",
+      "hex": "00 01",
+      "accept": false,
+      "why": "Field 0 is reserved and can never appear on the wire."
+    },
+    {
+      "name": "reserved wire type 6",
+      "hex": "0e 01",
+      "accept": false,
+      "why": "Wire types 6 and 7 do not exist; a decoder that guesses is a decoder that can be steered."
+    },
+    {
+      "name": "reserved wire type 7",
+      "hex": "0f 01",
+      "accept": false,
+      "why": "As above."
+    },
+    {
+      "name": "declared length far beyond max_frame_bytes",
+      "hex": "0a ff ff ff ff 0f",
+      "accept": false,
+      "why": "A ~4 GiB declaration inside six bytes. THE remote-OOM case: it must be refused ON THE DECLARATION, before any allocation."
+    },
+    {
+      "name": "traffic_class UNSPECIFIED",
+      "hex": "10 00",
+      "accept": false,
+      "why": "TRAFFIC_CLASS_UNSPECIFIED is never valid on the wire. A decoder that treats 0 as a default rather than a refusal lets a frame arrive with no scheduling class."
+    },
+    {
+      "name": "seq = 0 with traffic_class CONTROL",
+      "hex": "10 01 20 00",
+      "accept": true,
+      "why": "Lower boundary of the sequence space, in an otherwise minimal valid frame. traffic_class is REQUIRED — a frame without it is refused, which is what makes the bare-seq form below unrepresentable."
+    },
+    {
+      "name": "seq = 2^53 (JavaScript safe-integer edge)",
+      "hex": "10 01 20 80 80 80 80 80 80 80 10",
+      "accept": true,
+      "why": "seq travels as JS_STRING precisely so JavaScript cannot truncate past 2^53. This is the value that would prove it wrong."
+    },
+    {
+      "name": "seq = 2^63 (sign-bit boundary)",
+      "hex": "10 01 20 80 80 80 80 80 80 80 80 80 01",
+      "accept": true,
+      "why": "An implementation treating seq as int64 turns this negative."
+    },
+    {
+      "name": "seq = u64 max",
+      "hex": "10 01 20 ff ff ff ff ff ff ff ff ff 01",
+      "accept": true,
+      "why": "Upper boundary. Must not wrap to zero and restart the sequence space."
+    },
+    {
+      "name": "seq without traffic_class",
+      "hex": "20 01",
+      "accept": false,
+      "why": "A sequence number with no traffic class. Found by the Go/Rust parity check on its first run: the original fixture asserted these were acceptable and the decoder correctly refused them. Kept as a case because the fixture was wrong, not the parser."
+    }
+  ]
+}

@@ -138,7 +138,7 @@ export default function VoiceSpeedPlayer() {
               <Text style={st.skipTxt}>-10s</Text>
             </TouchableOpacity>
 
-            <TouchableOpacity onPress={togglePlay} style={st.playBtn}>
+            <TouchableOpacity accessibilityRole="button" accessibilityLabel={isPlaying ? 'Pause' : 'Play'} onPress={togglePlay} style={st.playBtn}>
               <LinearGradient colors={['#4A9FFF', '#4A9FFF']} style={st.playGrad}>
                 <Ionicons name={isPlaying ? 'pause' : 'play'} size={26} color="#fff" />
               </LinearGradient>
@@ -181,7 +181,10 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   screen: { flex: 1, backgroundColor: c.glassSoft, justifyContent: 'center', padding: 20 },
   card: { backgroundColor: 'rgba(10,22,40,0.9)', borderRadius: 24, padding: 24, borderWidth: 1, borderColor: 'rgba(0,229,255,0.15)' },
   sender: { color: c.text, fontSize: 18, fontWeight: '800', textAlign: 'center', marginBottom: 20 },
-  waveform: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', height: 60, gap: 2, marginBottom: 16 },
+  waveform: {
+    // layout-exempt: draws fixed-width bars, no text — height is the drawing.
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', height: 60, gap: 2, marginBottom: 16,
+  },
   bar: { width: 4, borderRadius: 2 },
   progressBg: { height: 4, backgroundColor: 'rgba(255,255,255,0.1)', borderRadius: 2, overflow: 'hidden', marginBottom: 8 },
   progressFill: { height: 4, backgroundColor: '#4A9FFF', borderRadius: 2 },

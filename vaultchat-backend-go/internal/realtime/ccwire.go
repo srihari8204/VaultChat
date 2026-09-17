@@ -1,8 +1,10 @@
-// CC-Wire v1 — a SECOND, PARALLEL realtime listener, off by default.
+// CC-Wire v1 — the realtime listener, off by default.
 //
-// The live transport is Socket.IO v4 over WebSocket and everything else in this
-// package serves it. This file adds nothing to that path: it registers its own
-// route, on its own mux entry, only when CCWIRE_WS=1 is set. With the flag
+// HISTORY, because the shape of this file still shows it: CC-Wire was added as
+// a SECOND listener running beside Socket.IO, which is why it registers its own
+// route on its own mux entry behind its own flag. Socket.IO is now gone — from
+// this server, from the mobile client, and from the lockfile (asserted by
+// lib/socketioRemoval.selftest.ts). What remains is the flag: with CCWIRE_WS
 // unset RegisterCCWire returns before touching the mux, so a deployment that
 // does not opt in is byte-for-byte the deployment it was before (asserted by
 // TestCCWireIsOffByDefault).
@@ -27,7 +29,6 @@ package realtime
 import (
 	"context"
 	"errors"
-	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -35,15 +36,14 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
-	"github.com/zishang520/socket.io/v2/socket"
 
 	"vaultchat/backend-go/internal/ccwire"
 	"vaultchat/backend-go/internal/httpx"
 	"vaultchat/backend-go/internal/metrics"
 )
 
-// CCWirePath is the endpoint. Deliberately disjoint from /socket.io/ so the two
-// transports cannot collide on a mux prefix.
+// CCWirePath is the endpoint. The prefix was chosen to be disjoint from
+// /socket.io/ back when both were mounted; nothing is mounted there now.
 const CCWirePath = "/ccwire/v1"
 
 // ccwireIdleTimeout bounds a silent connection. The client drives liveness with
@@ -66,7 +66,7 @@ func RegisterCCWire(mux *http.ServeMux, h *Hub) {
 		return
 	}
 	mux.Handle(CCWirePath, http.HandlerFunc(httpx.RequireAuth(h.ccwireServe)))
-	log.Printf("[ccwire] CCWIRE_WS=1 — parallel CC-Wire listener mounted at %s (Socket.IO unaffected)", CCWirePath)
+	log.Printf("[ccwire] CCWIRE_WS=1 — CC-Wire listener mounted at %s", CCWirePath)
 }
 
 // The default CheckOrigin is deliberately left in place: it permits a request
@@ -131,7 +131,22 @@ func (h *Hub) ccwireRun(r *http.Request, c ccwireConnection) {
 		cancel: cancel,
 	}
 	s.w = s.writeWS
-	s.sessionID = fmt.Sprintf("cw:%s:%p", nodeID, s)
+	s.sessionID = newSessionID()
+	if s.sessionID == "" {
+		// The RNG failed. Every consumer of sessionID guards against "", so the
+		// session is inert for MATCHING — but it is not inert overall: it would
+		// complete the handshake, answer pings, accept submissions, and simply
+		// never be registered for fan-out. A client that receives nothing for
+		// the life of a connection that looks healthy, with no error and no
+		// GoAway, is the worst shape this can fail in. Refuse instead.
+		// The socket is already upgraded, so there is no status code left to
+		// send; closing it is the refusal. The client reconnects and gets a
+		// working session, which is what it would have to do anyway.
+		metrics.Inc("ccwire_refused_no_session_id")
+		log.Printf("[ccwire] refusing a connection: no session id (RNG unavailable)")
+		_ = c.Close()
+		return
+	}
 
 	// Registered for fan-out AFTER the session is fully built and unregistered
 	// before the socket closes, so emitToUidIn never holds a half-live session.
@@ -216,6 +231,42 @@ type ccwireSession struct {
 	// authenticated socket looping the frame was unbounded work. Single goroutine
 	// per session (run()), so no mutex.
 	lastCursorAt time.Time
+	// wantsResume records that the client negotiated Capabilities.resumption.
+	// Gates both the token handed out in ServerHello and the capability echoed
+	// back, so the two can never disagree.
+	wantsResume bool
+	// resumeToken is minted at ServerHello and handed to the client there, so
+	// the client is already holding it when the connection dies — which is the
+	// only order that works, because most disconnects give no warning. It
+	// resolves to nothing until the session parks under it.
+	resumeToken string
+	// resumed records whether THIS connection resumed a parked session. It is
+	// the value ServerHello.resumed reports, and it is false unless every check
+	// in tryResume passed — a partial resume is not a resume.
+	resumed bool
+	// generation is this connection's epoch for the logical session. A frame
+	// arriving on an older generation must not advance state: see
+	// parkedSession.supersedes.
+	generation uint64
+	// cursors is what the server has SENT on each stream, stream → seq. The
+	// authority against which a client's claimed resume_from is checked.
+	cursors map[uint32]uint64
+	// acked is what the client has CONFIRMED receiving, from Ping.progress.
+	// Always <= cursors: a claim past what we sent is discarded, not recorded.
+	acked map[uint32]uint64
+	// replay retains recent outbound frames so a resumed session can be handed
+	// what it missed (ccwire_replay.go). Nil unless this session negotiated
+	// resumption, so the cost is paid only where it can be used.
+	replay *replayWindow
+	// pos guards cursors, acked, replay and the sequence counters together —
+	// they are one fact, written from the fan-out goroutines and read from the
+	// reader goroutine. See ccwire_seq.go.
+	pos position
+	// pendingReplay is what a successful resume owes the client: already-encoded
+	// frames, written after ServerHello and before registration lets new traffic
+	// in, so replay cannot interleave with what comes next.
+	pendingReplay []retainedFrame
+
 	// deviceID comes from ClientHello's existing protobuf field. It is an
 	// authenticated session attribute used only to identify a sync install; it
 	// does not grant device trust or change authorization.
@@ -342,6 +393,7 @@ const (
 	errPayloadInvalid     uint32 = 8
 	errUnknownOperation   uint32 = 10
 	errProtocolViolation  uint32 = 11
+	errServerDraining     uint32 = 14
 	errInternal           uint32 = 15
 )
 
@@ -384,11 +436,60 @@ func (s *ccwireSession) handle(raw []byte) bool {
 			s.refuse(m.RequestID, errProtocolViolation, "ClientHello first")
 			return false
 		}
-		if id, ok := ccwireClientHelloDevice(m.Body, s.lim); ok {
-			s.deviceID = id
-		} else {
+		hello, ok := ccwireParseClientHello(m.Body, s.lim)
+		if !ok {
 			s.refuse(m.RequestID, errPayloadInvalid, "ClientHello")
 			return false
+		}
+		s.deviceID = hello.deviceID
+		// Resume is attempted ONLY when the client offered a token. Every
+		// failure path inside tryResume leaves s.resumed false, which makes the
+		// ServerHello say resumed=false and the client full-resync — exactly
+		// what it does today. That is the whole safety argument: this can only
+		// improve on the current behaviour, never fall below it.
+		//
+		// Gated on exactly what the mint below is gated on. The two used to
+		// disagree: resume ran on any hello carrying a token, while the token
+		// and window were only issued to a client that had negotiated the
+		// capability. A client that presented a token without negotiating
+		// resumption therefore got resumed=true and a replayed tail, in a
+		// ServerHello whose capabilities said resumption was not negotiated —
+		// and held a window for the life of the connection that it could never
+		// park, paying a per-frame re-encode for nothing.
+		wantsResume := resumptionEnabled() && helloWantsResumption(m.Body, s.lim)
+		if wantsResume && hello.resumeToken != "" {
+			s.tryResume(hello)
+		}
+		// Mint the NEXT token only for a client that negotiated resumption.
+		// A client that did not ask is never handed a credential it will not
+		// use, and never sees behaviour different from today.
+		if wantsResume {
+			s.wantsResume = true
+			if tok, ok := newResumeToken(); ok {
+				s.resumeToken = tok
+				// Same gate, same moment: a window without a token can never be
+				// resumed from, and a token without a window can only ever
+				// answer resumed=false. A resume already adopted the parked one
+				// — replacing it here would discard the tail we just promised.
+				if s.replay == nil {
+					s.replay = newReplayWindow()
+				}
+			} else if s.resumed {
+				// The RNG failed AFTER a successful resume. Left alone, this
+				// ServerHello would say resumed=true while its capabilities
+				// omit resumption — telling the client it resumed on a feature
+				// the same message says was not negotiated. The adopted window
+				// would also be retained for the connection's whole life and
+				// could never be parked, because park() refuses without a
+				// token: memory and a per-frame re-encode bought for nothing.
+				//
+				// Unwinding to a fresh session costs one resync, which is the
+				// fallback every other uncertain branch here takes.
+				metrics.Inc("ccwire_resume_unwound_no_token")
+				s.resumed = false
+				s.pendingReplay = nil
+				s.replay = nil
+			}
 		}
 		s.hello = true
 		s.appEvents = appEventsEnabled() && (!ClusterEnabled() || s.hub.cwBusClose != nil) && helloAppEvents(m.Body, s.lim)
@@ -402,20 +503,31 @@ func (s *ccwireSession) handle(raw []byte) bool {
 		// The credential inside ClientHello is NOT read: this connection was
 		// already authenticated by httpx.RequireAuth at the upgrade, which is
 		// the same handshake-time-only model the Socket.IO middleware uses.
-		ok := s.send(ccwire.Message{
+		sent := s.send(ccwire.Message{
 			RequestID:    m.RequestID,
 			TrafficClass: ccwire.TrafficClassControl,
 			Stream:       1,
 			BodyField:    ccwire.BodyServerHello,
 			Body:         s.serverHello(),
 		})
-		if ok && s.sessionID != "" {
+		// Registration follows the SEND, not the parse: a session the client
+		// never received a ServerHello for must not be registered as live.
+		// (`ok` here is the hello-parse result, which is always true by this
+		// point — using it would have silently registered on a failed send.)
+		// Replay BEFORE registration. Registration is what lets new traffic
+		// reach this session; writing the missed tail first is what makes
+		// "in ascending sequence within each stream, before any new traffic"
+		// true by construction rather than by timing.
+		if sent {
+			sent = s.flushReplay()
+		}
+		if sent && s.sessionID != "" {
 			s.hub.ccwireRegister(s)
 			if s.appEvents {
 				s.hub.trackIdentity(s.d.uid, s.sessionID)
 			}
 		}
-		return ok
+		return sent
 	}
 
 	switch m.BodyField {
@@ -424,9 +536,18 @@ func (s *ccwireSession) handle(raw []byte) bool {
 		return false
 
 	case ccwire.BodyPing:
-		// Pong mirrors Ping field-for-field (nonce = 1, progress = 2), so the
-		// body is echoed verbatim rather than re-encoded. Bytes not parsed are
-		// bytes that cannot be corrupted.
+		// Ping.progress (2) carries the client's acknowledged position. Read it
+		// so a resume after an ungraceful drop starts from where the client
+		// actually got to, not from the last thing the server happened to send.
+		//
+		// Read-only, and it CANNOT move a cursor forward: noteAcked clamps
+		// every claim to what this session actually sent. A client that lies
+		// about its progress gets its claim discarded, not honoured.
+		s.noteProgress(m.Body)
+
+		// Pong still mirrors Ping field-for-field, so the body is echoed
+		// verbatim rather than re-encoded. Bytes not re-serialised are bytes
+		// that cannot be corrupted on the way back.
 		return s.send(ccwire.Message{
 			RequestID:    m.RequestID,
 			TrafficClass: ccwire.TrafficClassControl,
@@ -472,25 +593,135 @@ func (s *ccwireSession) handle(raw []byte) bool {
 // ccwireClientHelloDevice reads only ClientHello.device_id (field 5). Unknown
 // fields remain opaque, and the bounded protobuf reader rejects malformed data.
 func ccwireClientHelloDevice(body []byte, lim ccwire.Limits) (string, bool) {
+	h, ok := ccwireParseClientHello(body, lim)
+	if !ok {
+		return "", false
+	}
+	return h.deviceID, true
+}
+
+// clientHello is the subset of ClientHello this server reads.
+//
+// credential (6) is deliberately absent: the connection was already
+// authenticated by httpx.RequireAuth at the upgrade, and reading a second copy
+// of a secret that nobody verifies would buy nothing.
+type clientHello struct {
+	deviceID    string
+	resumeToken string
+	// resumeFrom is the client's claimed progress, stream → last_delivered_seq.
+	// A CLAIM: validated in acceptCursors against what the server actually sent,
+	// never trusted as given.
+	resumeFrom map[uint32]uint64
+}
+
+// maxResumeFromEntries bounds resume_from. envelope.proto says "<= 8 entries"
+// and there are only five streams, so anything beyond this is malformed or
+// hostile; either way it is refused rather than allocated for.
+const maxResumeFromEntries = 8
+
+// ccwireParseClientHello reads the fields this server acts on.
+//
+// One parser for the whole message rather than one per field: a second pass
+// over the same bytes is a second chance to disagree with the first about what
+// they say.
+func ccwireParseClientHello(body []byte, lim ccwire.Limits) (clientHello, bool) {
+	var h clientHello
+	resumeFromSeen := 0
 	r := pbr{b: body}
-	var device string
 	for r.p < len(r.b) {
-		tag, ok := r.varint()
+		tag, ok := r.tag()
 		if !ok || tag>>3 == 0 {
-			return "", false
+			return clientHello{}, false
 		}
 		field, wire := uint32(tag>>3), uint8(tag&7)
-		if field == 5 && wire == 2 {
+		switch {
+		case field == 5 && wire == 2: // device_id
 			b, ok := r.span(lim.MaxStringFieldBytes)
 			if !ok {
-				return "", false
+				return clientHello{}, false
 			}
-			device = string(b)
-		} else if !r.skip(wire, lim) {
-			return "", false
+			h.deviceID = string(b)
+
+		case field == 7 && wire == 2: // resume_token
+			b, ok := r.span(lim.MaxStringFieldBytes)
+			if !ok {
+				return clientHello{}, false
+			}
+			h.resumeToken = string(b)
+
+		case field == 8 && wire == 2: // resume_from, repeated StreamCursor
+			b, ok := r.span(lim.MaxStringFieldBytes)
+			if !ok {
+				return clientHello{}, false
+			}
+			// Count ENTRIES, not distinct streams.
+			//
+			// This counted len(h.resumeFrom), a map — so N repetitions of the
+			// same stream collapsed to one key and the bound never tripped. A
+			// hello packed with field-8 entries for stream 2 made the server
+			// span() and parse every one of them while the count stayed at 1.
+			// Bounded by MaxFrameBytes, so a constant factor per connection
+			// rather than something unbounded, but the check did not do what
+			// its comment said.
+			resumeFromSeen++
+			if resumeFromSeen > maxResumeFromEntries {
+				// Past the declared bound. Refuse rather than keep allocating
+				// for a peer that is already outside the contract.
+				return clientHello{}, false
+			}
+			stream, seq, ok := parseStreamCursor(b, lim)
+			if !ok {
+				return clientHello{}, false
+			}
+			if h.resumeFrom == nil {
+				h.resumeFrom = map[uint32]uint64{}
+			}
+			if _, dup := h.resumeFrom[stream]; dup {
+				// A second cursor for a stream the client already named. Which
+				// one is the truth? Refusing is the only answer that does not
+				// involve picking one, and a conforming client never sends it.
+				return clientHello{}, false
+			}
+			h.resumeFrom[stream] = seq
+
+		default:
+			if !r.skip(wire, lim) {
+				return clientHello{}, false
+			}
 		}
 	}
-	return device, true
+	return h, true
+}
+
+// parseStreamCursor reads one StreamCursor{stream=1, last_delivered_seq=2}.
+func parseStreamCursor(b []byte, lim ccwire.Limits) (stream uint32, seq uint64, ok bool) {
+	r := pbr{b: b}
+	for r.p < len(r.b) {
+		tag, good := r.tag()
+		if !good || tag>>3 == 0 {
+			return 0, 0, false
+		}
+		field, wire := uint32(tag>>3), uint8(tag&7)
+		switch {
+		case field == 1 && wire == 0:
+			v, good := r.varint()
+			if !good {
+				return 0, 0, false
+			}
+			stream = uint32(v)
+		case field == 2 && wire == 0:
+			v, good := r.varint()
+			if !good {
+				return 0, 0, false
+			}
+			seq = v
+		default:
+			if !r.skip(wire, lim) {
+				return 0, 0, false
+			}
+		}
+	}
+	return stream, seq, true
 }
 
 // scope handles Subscribe / Unsubscribe — THE authorization path.
@@ -553,7 +784,7 @@ func (s *ccwireSession) subscribeAllowed(kind uint32, id string) bool {
 		// existing callers but not other CC-Wire subscribers. Harmless while
 		// no media is fanned out over this transport; when it is, call
 		// membership needs one roster both transports write to.
-		if max := meshMaxParticipants(); len(s.hub.callRoster(socket.Room("call:"+id), s.d.uid, s.ctxOrBG()))+1 > max {
+		if max := meshMaxParticipants(); len(s.hub.callRoster(Room("call:"+id), s.d.uid, s.ctxOrBG()))+1 > max {
 			metrics.Inc("ccwire_call_mesh_full")
 			return false
 		}
@@ -611,11 +842,21 @@ func (s *ccwireSession) serverHello() []byte {
 	b = ccwire.AppendBytesField(b, 3, s.capabilities()) // INTERSECTION, never union
 	b = ccwire.AppendBytesField(b, 4, encodeLimits(s.lim))
 	b = ccwire.AppendStringField(b, 5, s.d.uid) // session_id
-	// resume_token (6) stays empty: resumption is not implemented, and an
-	// unusable token is worse than none.
+	// resume_token (6) — the credential for the NEXT connection, handed over
+	// now because there is no later opportunity: a dropped connection cannot
+	// deliver anything. It is inert until this session parks under it.
+	//
+	// Only offered when the capability is negotiated, so a client that did not
+	// ask for resume is never handed a credential it will not use.
+	if s.resumeToken != "" {
+		b = ccwire.AppendStringField(b, 6, s.resumeToken)
+	}
 	b = ccwire.AppendVarintField(b, 7, uint64(time.Now().UnixMilli()))
-	// resumed (8) is false — a proto3 default, and honest: the client must
-	// full-resync.
+	if s.resumed {
+		// resumed (8). False is a proto3 default and stays unwritten, which is
+		// also the honest answer: the client must full-resync.
+		b = ccwire.AppendBoolField(b, 8, true)
+	}
 	return b
 }
 
@@ -637,9 +878,16 @@ func (s *ccwireSession) capabilities() []byte {
 	if s.appEvents {
 		b = ccwire.AppendBoolField(b, 8, true)
 	}
-	// Still ABSENT on purpose: resumption (2) - no resume state is kept, which
-	// is why sendGoAway omits resume_token; datagrams (4) - not applicable over
-	// WebSocket; reauth_in_place (5) and causal_epochs (6) - unimplemented.
+	// resumption (2) is advertised only when BOTH the deployment enabled it
+	// (CCWIRE_RESUME=1) and this client asked for it. The capability set is an
+	// INTERSECTION, so echoing it unconditionally would promise resume to
+	// clients that never negotiated it — and advertising it while the feature
+	// was off would promise it to everyone.
+	if s.wantsResume && s.resumeToken != "" {
+		b = ccwire.AppendBoolField(b, 2, true)
+	}
+	// Still ABSENT on purpose: datagrams (4) - not applicable over WebSocket;
+	// reauth_in_place (5) and causal_epochs (6) - unimplemented.
 	return b
 }
 
@@ -697,9 +945,17 @@ func (s *ccwireSession) sendGoAway(reason uint32, drainMS uint32) bool {
 	// Field 2 (last_accepted) and field 4 (resume_token) are deliberately
 	// omitted. Both are promises: last_accepted says "everything up to here is
 	// durable" and resume_token says "hand this back and I will restore your
-	// state". Neither is true here - there is no resumption support on this
-	// server (Capabilities.resumption is not advertised), so emitting either
-	// would invite a client to skip a cold sync it actually needs.
+	// state".
+	//
+	// This comment used to say there was no resumption support at all. With
+	// CCWIRE_RESUME=1 there is, so the reason has to be restated rather than
+	// left to rot into a false claim: a client that negotiated resumption is
+	// ALREADY holding a token from its ServerHello, and this frame is sent
+	// while the process is going down. Parked state dies with it, so the token
+	// the client holds will not resolve, the next ServerHello answers
+	// resumed=false, and the client resyncs. Offering a fresh token here would
+	// be promising to restore state that this process will not be alive to
+	// restore.
 	return s.send(ccwire.Message{
 		TrafficClass: ccwire.TrafficClassControl,
 		Stream:       1,
@@ -754,7 +1010,13 @@ func (h *Hub) ccwireShutdown(drain time.Duration) {
 		wg.Add(1)
 		go func(s *ccwireSession) {
 			defer wg.Done()
-			_ = s.sendGoAway(errInternal, uint32(grace.Milliseconds()))
+			// SERVER_DRAINING, not INTERNAL. errors.proto has both, and the
+			// difference is the whole message: draining says "this is a planned
+			// shutdown, come back", internal says "something broke". A client
+			// that cannot tell them apart treats every rolling deploy as a
+			// fault — and the ones that back off harder on faults take longest
+			// to come back exactly when the fleet is trying to.
+			_ = s.sendGoAway(errServerDraining, uint32(grace.Milliseconds()))
 		}(s)
 	}
 	done := make(chan struct{})
@@ -832,7 +1094,54 @@ func (s *ccwireSession) send(m ccwire.Message) bool {
 		log.Printf("[ccwire] refusing to emit an oversized frame: %v", err)
 		return false
 	}
-	return s.write(out) == nil
+	if s.write(out) != nil {
+		return false
+	}
+	// Under one lock, because a cursor that has moved past a frame the window
+	// has not retained yet is a window with a hole nobody recorded.
+	//
+	// Frames sent HERE are control-plane replies and carry no seq, so both
+	// calls are no-ops in practice. They stay because the invariant is "a frame
+	// with a seq is retained", and an invariant enforced at only one of its two
+	// call sites is one refactor away from being false.
+	s.pos.mu.Lock()
+	s.noteSentLocked(m)
+	s.replay.retain(m, out, time.Now())
+	s.pos.mu.Unlock()
+	return true
+}
+
+// noteSent records what this session has now SENT on each stream.
+//
+// This is the authority a resuming client's claimed progress is checked
+// against: without it, s.cursors stays empty, a parked session carries no
+// position, and acceptCursors compares a claim against nothing. The cursor half
+// of resume would look implemented and do nothing — which is worse than it not
+// existing, because the metrics would say it worked.
+//
+// Placed AFTER a successful write on purpose. A frame that failed to go out was
+// not sent, and recording it would tell the next connection to skip a frame the
+// peer never saw.
+func (s *ccwireSession) noteSent(m ccwire.Message) {
+	s.pos.mu.Lock()
+	defer s.pos.mu.Unlock()
+	s.noteSentLocked(m)
+}
+
+func (s *ccwireSession) noteSentLocked(m ccwire.Message) {
+	if m.Seq == 0 {
+		// Unsequenced control traffic (ServerHello, Pong, Error) carries no
+		// position and must not move one.
+		return
+	}
+	if s.cursors == nil {
+		s.cursors = map[uint32]uint64{}
+	}
+	// Monotonic only. Streams are per-stream FIFO, so a lower seq here means a
+	// bug upstream; taking it would move the cursor BACKWARDS and re-deliver.
+	if m.Seq > s.cursors[m.Stream] {
+		s.cursors[m.Stream] = m.Seq
+	}
 }
 
 // ── error mapping ───────────────────────────────────────────────────────

@@ -30,9 +30,29 @@ function hashPin(pin: string): string {
   return bytesToHex(sha256(new TextEncoder().encode('vaultchat-chatlock-v1:' + pin)));
 }
 
+// ABSENT IS NOT THE SAME AS UNREADABLE.
+//
+// This used to be try { ... } catch { return {}; }, so a corrupt or unreadable
+// lock table read as "no chat is locked anywhere". Every caller inherited that:
+// app/chat.tsx has a deliberate fail-closed catch that this swallow turned into
+// DEAD CODE, and chat-export.tsx opened its export gate the same way. Patching
+// the callers could never work while the shared reader lied to all of them.
+//
+// Now a missing key returns {} (genuinely nothing locked) and a storage or
+// parse failure THROWS, so each caller decides - and all three fail closed
+// (2026-09-17).
 export async function getAllLocks(): Promise<Record<string, LockedChat>> {
-  try { const raw = await AsyncStorage.getItem(KEY); return raw ? JSON.parse(raw) : {}; }
-  catch { return {}; }
+  const raw = await AsyncStorage.getItem(KEY);
+  if (raw == null) return {};
+  const parsed = JSON.parse(raw) as Record<string, LockedChat>;
+  // Array.isArray as well as typeof: typeof [] is 'object', so a truncated or
+  // rewritten blob that parses as an ARRAY sailed through this guard and then
+  // read as "no chat is locked anywhere" - the exact fail-open this throw was
+  // added to close, surviving in one shape (2026-09-17).
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error('chatLock: lock table is not an object');
+  }
+  return parsed;
 }
 async function saveAll(d: Record<string, LockedChat>): Promise<void> {
   await AsyncStorage.setItem(KEY, JSON.stringify(d));
@@ -69,8 +89,20 @@ export function verifyPin(lock: LockedChat, pin: string): boolean {
   return !!lock.pinHash && lock.pinHash === hashPin(pin);
 }
 
+// FAIL CLOSED ON WEB.
+//
+// This used to `return true` on web, and web is a configured platform (app.json)
+// — so in a browser build every biometric-locked chat opened with no check at
+// all, the export gate included. expo-local-authentication has no real web
+// implementation, so "no answer" was being read as "yes".
+//
+// The rest of the app already treats web as "biometrics do not exist here":
+// app/lock.tsx sends web straight to the secret-code stage, and hasBiometric()
+// below already returns false. This now agrees with both. Callers that also
+// hold a PIN fall through to it, so a web user with a PIN is not stranded —
+// only a biometric-only chat is, and that is the correct answer (2026-09-17).
 export async function verifyBiometric(reason = 'Unlock chat'): Promise<boolean> {
-  if (Platform.OS === 'web') return true;
+  if (Platform.OS === 'web') return false;
   try {
     const hw = await LocalAuthentication.hasHardwareAsync();
     const enrolled = await LocalAuthentication.isEnrolledAsync();

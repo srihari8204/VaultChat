@@ -70,7 +70,7 @@ export default function StatusPrivacyScreen() {
       <AuroraBackground />
       <Stack.Screen options={{ headerShown: false }} />
       <View style={S.header}>
-        <TouchableOpacity onPress={() => router.back()} hitSlop={8} style={S.hBtn}><Ionicons name="arrow-back" size={24} color={colors.text} /></TouchableOpacity>
+        <TouchableOpacity accessibilityRole="button" accessibilityLabel="Back" onPress={() => router.back()} hitSlop={8} style={S.hBtn}><Ionicons name="arrow-back" size={24} color={colors.text} /></TouchableOpacity>
         <Text style={S.hTitle}>Status privacy</Text>
       </View>
 

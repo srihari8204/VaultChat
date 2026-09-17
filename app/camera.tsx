@@ -589,8 +589,11 @@ const s = StyleSheet.create({
   },
   tab: { flex: 1, alignItems: 'center', justifyContent: 'center' },
 
+  // 2026-09-18: minHeight — the mm:ss readout is real text and does scale, and a
+  // pinned 32 clipped it at font scale 1.5. Not a tap target, so no 44 floor
+  // applies; 21 of line box + 2×5 padding keeps 32 exactly at scale 1.0.
   timerRow: {
-    flexDirection: 'row', alignSelf: 'center', alignItems: 'center', gap: SPACING.sm, height: 32,
+    flexDirection: 'row', alignSelf: 'center', alignItems: 'center', gap: SPACING.sm, minHeight: 32, paddingVertical: 5,
   },
   recDot: { width: 10, height: 10, borderRadius: 5, backgroundColor: AuroraDark.danger },
 
@@ -647,8 +650,11 @@ const s = StyleSheet.create({
     paddingHorizontal: SPACING.md, paddingVertical: SPACING.md,
     color: AuroraDark.text, fontSize: TYPOGRAPHY.body.fontSize,
   },
+  // 2026-09-18: minHeight — 'Attach' at font scale 1.5 outgrew a pinned 52 and
+  // lost its descenders. 15 of padding keeps the busy-state spinner and the
+  // label sitting in the same 52 at scale 1.0; 52 stays above the tap floor.
   attachBtn: {
-    marginTop: SPACING.md, height: 52, borderRadius: RADIUS.lg,
+    marginTop: SPACING.md, minHeight: 52, paddingVertical: 15, borderRadius: RADIUS.lg,
     backgroundColor: BRAND_ACCENT, alignItems: 'center', justifyContent: 'center',
   },
   attachBusy: { opacity: 0.7 },

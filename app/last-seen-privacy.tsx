@@ -7,18 +7,20 @@
 // in AsyncStorage that nothing read or enforced — those are gone.
 
 import React, { useState, useEffect, useMemo } from 'react';
-import {
-  View, Text, TouchableOpacity, StyleSheet, ScrollView,
-  StatusBar, Platform, Alert, Switch, ActivityIndicator,
-} from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, ScrollView, Platform, Alert, Switch, ActivityIndicator } from 'react-native';
 import { type Palette } from '../constants/theme';
 import { useTheme } from '../lib/theme';
 import { Stack, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { getSettings, updateSettings, type UserSettings } from '../lib/chatService';
 import { AuroraBackground } from '../components/ui';
+import { HEADER_TOP } from '../constants/layout';
 
-const TOP = Platform.OS === 'android' ? (StatusBar.currentHeight ?? 0) : 44;
+// Was: StatusBar.currentHeight on Android, a hardcoded 44 elsewhere, read
+// ONCE at module scope. currentHeight ignores display cutouts, the 44 is a
+// guess, and the module read froze whichever it picked for the life of the
+// process. HEADER_TOP is the live binding and is applied at the element
+// below, so it follows a rotation like every other screen (2026-09-17).
 
 function useS() {
   const { colors } = useTheme();
@@ -65,11 +67,10 @@ export default function LastSeenPrivacyScreen() {
     <View style={s.root}>
       <AuroraBackground />
       <Stack.Screen options={{ headerShown: false }} />
-      <StatusBar barStyle="light-content" backgroundColor={colors.bg} />
 
       <View style={s.header}>
-        <View style={[s.headerRow, { marginTop: TOP }]}>
-          <TouchableOpacity onPress={() => router.back()} hitSlop={16}>
+        <View style={[s.headerRow, { marginTop: HEADER_TOP }]}>
+          <TouchableOpacity accessibilityRole="button" accessibilityLabel="Back" onPress={() => router.back()} hitSlop={16}>
             <Ionicons name="arrow-back" size={24} color={colors.text} />
           </TouchableOpacity>
           <Text style={s.headerTitle}>Last Seen & Privacy</Text>

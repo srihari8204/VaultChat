@@ -129,8 +129,35 @@ func (r *pbr) varint() (uint64, bool) {
 	return 0, false
 }
 
+// tag reads a field tag.
+//
+// A TAG is bounded at five bytes, not ten. internal/ccwire's codec, the
+// TypeScript codec and the Rust parser all cap tag and length varints at
+// varint32 and refuse anything longer as VARINT_OVERFLOW — and codec.json pins
+// that refusal as a shared vector. This reader accepted ten, which made the
+// live handshake, cursor and Ping path accept bytes the frame layer of the same
+// server refuses: a parser differential reintroduced one layer up, in exactly
+// the place all three implementations wrote a comment saying they must not.
+func (r *pbr) tag() (uint64, bool) {
+	return r.varint32()
+}
+
+// varint32 is a varint that cannot describe more than 32 bits.
+//
+// Used for tags and lengths, where the protocol has no value that needs more.
+// Plain varint() stays for VALUE positions, where uint64 is legitimate — seq
+// and depends_on really are 64-bit.
+func (r *pbr) varint32() (uint64, bool) {
+	start := r.p
+	v, ok := r.varint()
+	if !ok || r.p-start > 5 || v > uint64(^uint32(0)) {
+		return 0, false
+	}
+	return v, true
+}
+
 func (r *pbr) span(max int) ([]byte, bool) {
-	n, ok := r.varint()
+	n, ok := r.varint32()
 	if !ok || n > uint64(len(r.b)-r.p) || int(n) > max {
 		return nil, false
 	}
@@ -177,7 +204,7 @@ func ccwireDecodeCursors(body []byte, lim ccwire.Limits, limitN int) ([]ccwireCu
 	mutationContinuation := ""
 	r := pbr{b: body}
 	for r.p < len(r.b) {
-		tag, ok := r.varint()
+		tag, ok := r.tag()
 		if !ok {
 			return nil, "", false
 		}
@@ -221,7 +248,7 @@ func ccwireDecodeCursor(buf []byte, lim ccwire.Limits) (ccwireCursor, bool) {
 	var c ccwireCursor
 	r := pbr{b: buf}
 	for r.p < len(r.b) {
-		tag, ok := r.varint()
+		tag, ok := r.tag()
 		if !ok || tag>>3 == 0 {
 			return c, false
 		}

@@ -29,6 +29,7 @@ import { onboarding } from '../lib/onboarding';
 import { Sheet, type SheetAction } from '../components/ui/Sheet';
 import { AuthSky, BrandMark, KeyboardSafe, StepRail } from '../components/ui';
 import { AUTH } from '../constants/authTheme';
+import { permissionDenied } from '../lib/permissionDenied';
 
 function ageOf(d: Date): number {
   const n = new Date();
@@ -37,7 +38,23 @@ function ageOf(d: Date): number {
   if (m < 0 || (m === 0 && n.getDate() < d.getDate())) a--;
   return a;
 }
-const iso = (d: Date) => d.toISOString().slice(0, 10);
+/**
+ * A calendar date, formatted from LOCAL fields — never via toISOString().
+ *
+ * The picker hands back a Date at local midnight. toISOString() converts to UTC
+ * first, so anywhere east of UTC that midnight lands on the PREVIOUS day: a user
+ * in IST picking 1 Jan 2000 had 1999-12-31 stored. Every user in India was
+ * born a day early, and the value then fed both the age-13 gate here and the
+ * weak-MPIN check in onboard-mpin.tsx, which compares against the birth year.
+ *
+ * ageOf() above already reads local getFullYear/getMonth/getDate, so the
+ * validated value and the stored value disagreed by a day. Now they match.
+ */
+const iso = (d: Date) => {
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  return `${d.getFullYear()}-${mm}-${dd}`;
+};
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 export default function OnboardProfile() {
@@ -58,7 +75,7 @@ export default function OnboardProfile() {
     const perm = source === 'camera'
       ? await ImagePicker.requestCameraPermissionsAsync()
       : await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (!perm.granted) { Alert.alert('Permission needed', `Allow ${source} access to set a photo.`); return; }
+    if (!perm.granted) { permissionDenied('Permission needed', `Allow ${source} access to set a photo.`, perm.canAskAgain); return; }
     const fn = source === 'camera' ? ImagePicker.launchCameraAsync : ImagePicker.launchImageLibraryAsync;
     const res = await fn({ allowsEditing: true, aspect: [1, 1], quality: 0.85 });   // square crop
     if (res.canceled || !res.assets?.[0]) return;
@@ -261,7 +278,11 @@ const s = StyleSheet.create({
   warn: { color: AUTH.danger, fontSize: 12, marginTop: 6 },
 
   ctaWrap: { marginTop: 24, borderRadius: 16, overflow: 'hidden' },
-  cta: { height: 56, alignItems: 'center', justifyContent: 'center' },
+  // 2026-09-18: minHeight, not height — same clip as `input` above already
+  // guards against. At font scale 1.5 'Next' outgrew a pinned 56 and stranded
+  // the user mid-signup. 56 is still the floor; the padding keeps the button
+  // identical at scale 1.0 and lets it grow only when the label needs it.
+  cta: { minHeight: 56, paddingVertical: 10, alignItems: 'center', justifyContent: 'center' },
   ctaOff: { opacity: 0.38 },
   ctaDown: { opacity: 0.88 },
   ctaTxt: { color: '#fff', fontSize: 16, fontWeight: '800', letterSpacing: 0.2 },

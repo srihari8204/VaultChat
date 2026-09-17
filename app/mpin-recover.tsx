@@ -222,7 +222,11 @@ const s = StyleSheet.create({
   error: { color: AUTH.danger, fontSize: 13, marginTop: 10, textAlign: 'center', fontWeight: '600' },
 
   ctaWrap: { marginTop: 20, borderRadius: 16, overflow: 'hidden' },
-  cta: { height: 56, alignItems: 'center', justifyContent: 'center' },
+  // 2026-09-18: minHeight, not height, for the same reason `input` above is
+  // minHeight. At font scale 1.5 the 16sp label outgrew a pinned 56 and
+  // clipped — on the one screen that exists to get a locked-out user back in.
+  // 56 stays the floor and the padding keeps it identical at scale 1.0.
+  cta: { minHeight: 56, paddingVertical: 10, alignItems: 'center', justifyContent: 'center' },
   ctaOff: { opacity: 0.38 },
   ctaDown: { opacity: 0.88 },
   ctaTxt: { color: '#fff', fontSize: 16, fontWeight: '800', letterSpacing: 0.2 },

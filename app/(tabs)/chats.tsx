@@ -29,7 +29,8 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { cloudBackupMeta } from '../../lib/cloudBackup';
 import { runScheduledBackupIfDue } from '../../lib/backupScheduler';
 import { getSocket } from '../../lib/socket';
-import { setUnreadTotal } from '../../lib/unreadStore';
+import { mark } from '../../lib/perf';
+import { applyLocalReadPointers, setUnreadTotal } from '../../lib/unreadStore';
 import { getDraftMap } from '../../lib/drafts';
 import { getLastMessagePerChat, getCachedChats, cacheChats } from '../../lib/localDb';
 import { getCurrentUserAsync } from '../(constants)/authService';
@@ -197,10 +198,23 @@ export default function ChatsScreen() {
       // cold start; the network fetch then reconciles in the background.
       try {
         const cached = await getCachedChats();
-        if (!cancel && cached.length) { setChats(cached as any); setLoading(false); }
+        // Same read-pointer correction listChats applies, because this row can
+        // be OLDER than the list that wrote it: lib/localDb.cacheChatDetail
+        // re-writes a chat's cached row from the ChatDetail fetched when the
+        // chat is OPENED, i.e. with the unreadCount it still had before it was
+        // read. Without this the badge comes back on every cold start (and
+        // stays, offline) for exactly the chats you just finished reading.
+        try {
+          const { readPointers } = await import('../../lib/receipts');
+          applyLocalReadPointers(cached as any, await readPointers());
+        } catch {}
+        if (!cancel && cached.length) {
+          setChats(cached as any); setLoading(false);
+          mark('chats_paint_cache', { rows: cached.length });
+        } else if (!cancel) mark('chats_cache_empty');
       } catch {}
       await fetchList();
-      if (!cancel) setLoading(false);
+      if (!cancel) { setLoading(false); mark('chats_paint_net'); }
     })();
     return () => { cancel = true; };
   }, [fetchList]);
@@ -293,6 +307,14 @@ export default function ChatsScreen() {
         // Same shape as the room re-join in lib/socket.ts, which exists because
         // this identical gap once stopped live location dead after any reconnect.
         const onReconnect = () => refresh();
+        // Check BEFORE attaching, not after (2026-09-17). The seven listeners
+        // below used to be registered first and the `if (!cancelled)` guard only
+        // decided whether to BUILD the detach function — so unmounting while
+        // getSocket() was still in flight left all seven attached with no way to
+        // remove them. Each leaked `refresh` then ran listChats() on every
+        // message in every chat for the rest of the process, and another seven
+        // leaked on each remount. Returning early is the whole fix.
+        if (cancelled) return;
         s.on('connect', onReconnect);
         s.on('new_message', refresh);
         s.on('message_deleted', refresh);
@@ -300,7 +322,7 @@ export default function ChatsScreen() {
         s.on('presence_changed', onPresence);
         s.on('typing_start', onTyping);
         s.on('typing_stop', onTypingStop);
-        if (!cancelled) off = () => {
+        off = () => {
           s.off('connect', onReconnect);
           s.off('new_message', refresh); s.off('message_deleted', refresh);
           s.off('message_edited', refresh); s.off('presence_changed', onPresence);
@@ -420,7 +442,17 @@ export default function ChatsScreen() {
     fetchList();
   };
   const bulkPin     = () => bulkRun(id => { patch(id, { pinned: true });   return pinChat(id, true); });
-  const bulkFav     = () => bulkRun(id => { patch(id, { favourite: true }); return setFavourite(id, true); });
+  // TOGGLE, not set-true (2026-09-17). setFavourite(id, false) was reachable
+  // only from doFavourite, whose sole caller is the long-press sheet that
+  // onLongPress never opens (see the note further down) — so NOTHING in the app
+  // could un-favourite a chat and the Favourites folder filled up permanently.
+  // Selection mode is the live path, so the toggle belongs here: if everything
+  // selected is already a favourite, the action removes them.
+  const allSelectedFav = () => {
+    const ids = [...selected];
+    return ids.length > 0 && ids.every(id => chats.find(c => c.id === id)?.favourite);
+  };
+  const bulkFav     = () => { const on = !allSelectedFav(); return bulkRun(id => { patch(id, { favourite: on }); return setFavourite(id, on); }); };
   const bulkMute    = () => bulkRun(id => { patch(id, { muted: true });    return muteChat(id, true); });
   const bulkArchive = () => bulkRun(id => { patch(id, { archived: true }); return archiveChat(id, true); });
   const bulkDelete  = () => {
@@ -503,7 +535,7 @@ export default function ChatsScreen() {
               </TouchableOpacity>
             )}
             <TouchableOpacity onPress={bulkPin} style={S.headerBtn} accessibilityLabel="Pin selected chats"><Ionicons name="pin" size={20} color={colors.text} /></TouchableOpacity>
-            <TouchableOpacity onPress={bulkFav} style={S.headerBtn} accessibilityLabel="Add selected chats to favourites"><Ionicons name="heart-outline" size={20} color={colors.text} /></TouchableOpacity>
+            <TouchableOpacity onPress={bulkFav} style={S.headerBtn} accessibilityLabel={allSelectedFav() ? 'Remove selected chats from favourites' : 'Add selected chats to favourites'}><Ionicons name={allSelectedFav() ? 'heart' : 'heart-outline'} size={20} color={colors.text} /></TouchableOpacity>
             <TouchableOpacity onPress={bulkMute} style={S.headerBtn} accessibilityLabel="Mute selected chats"><Ionicons name="notifications-off-outline" size={20} color={colors.text} /></TouchableOpacity>
             <TouchableOpacity onPress={bulkArchive} style={S.headerBtn} accessibilityLabel="Archive selected chats"><Ionicons name="archive-outline" size={20} color={colors.text} /></TouchableOpacity>
             <TouchableOpacity onPress={bulkDelete} style={S.headerBtn} accessibilityLabel="Delete selected chats"><Ionicons name="trash-outline" size={20} color={colors.danger} /></TouchableOpacity>

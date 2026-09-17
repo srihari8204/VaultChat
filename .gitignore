@@ -129,3 +129,5 @@ vaultchat-backend-go/api.exe
 # / EAS as a secret file. See SECRETS.md.
 google-services.json
 GoogleService-Info.plist
+build-uni5.log
+build-*.log

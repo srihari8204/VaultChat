@@ -38,13 +38,20 @@ export interface OnboardingState {
   securityAnswers: { questionCode: string; answer: string }[];
   mpin: string;
   userId: string | null;
+  // Held so a FAILED signup can RESUME instead of restarting (2026-09-17).
+  // initProfile consumes phoneTicket, so re-running it after a mid-chain failure
+  // always fails with "already registered" — leaving an account that exists
+  // server-side with no MPIN, which its owner can neither finish nor log into.
+  // Keeping the ticket lets the retry pick up at the step that failed.
+  // RAM-only, like mpin and securityAnswers: it is a short-lived credential.
+  setupTicket: string | null;
 }
 
 function blank(): OnboardingState {
   return {
     phone: '', phoneTicket: '', otpResendInSec: 0, email: '', firstName: '', lastName: '',
     dob: '', status: '', profilePicLocalUri: null, profilePicUrl: null,
-    securityAnswers: [], mpin: '', userId: null,
+    securityAnswers: [], mpin: '', userId: null, setupTicket: null,
   };
 }
 

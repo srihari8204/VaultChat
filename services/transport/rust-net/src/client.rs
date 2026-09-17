@@ -201,12 +201,27 @@ impl<'a> Connection<'a> {
         device_id: &str,
         credential: &[u8],
     ) -> Result<Accepted, NetError> {
-        self.session.send_client_hello(false)?;
+        // Offer resume when we actually can: a token survived the last
+        // ServerHello AND `resumption` survived the capability intersection.
+        // Both halves go out together — a token with no positions leaves the
+        // server nothing to replay from, so it refuses and the reconnect costs
+        // a full resync anyway.
+        let offer = self.session.can_resume();
+        self.session.send_client_hello(offer)?;
+        let from: Vec<(u32, u64)> = self.session.positions().collect();
+        let resume = if offer {
+            self.session
+                .resume_token()
+                .map(|token| body::Resume { token, from: &from })
+        } else {
+            None
+        };
         let hello = body::client_hello(
             device_id,
             credential,
             &Capabilities::all(),
             self.session.limits(),
+            resume,
         );
         self.send(Class::Control, TRAFFIC_CLASS_CONTROL, 1, bodies::CLIENT_HELLO, 0, &hello)?;
 
@@ -312,6 +327,17 @@ impl<'a> Connection<'a> {
     pub async fn next_event(&mut self) -> Option<Event> {
         loop {
             if let Some(e) = self.pending.pop_front() {
+                // Record the position HERE, as the frame is handed over — not
+                // when it was queued. `pending` can still be holding frames
+                // when the socket drops, and a position reported for a frame
+                // the caller never received would let the server release it
+                // from its replay window: the message is then gone, and the
+                // resume that should have recovered it reports success.
+                if let Event::Frame(payload) = &e {
+                    if let Ok(f) = decode_frame(payload, self.session.limits(), 0, 0) {
+                        self.session.note_delivered(f.stream, f.seq);
+                    }
+                }
                 return Some(e);
             }
             if !self.conn.is_open() {
@@ -367,10 +393,13 @@ impl<'a> Connection<'a> {
                         Beat::Idle => {}
                         Beat::SendPing => {
                             self.nonce = self.nonce.wrapping_add(1);
-                            let mut ping = Vec::with_capacity(10);
-                            ping.push(0x0a); // Ping.nonce, field 1, length-delimited
-                            ping.push(8);
-                            ping.extend_from_slice(&self.nonce.to_be_bytes());
+                            // Progress rides the heartbeat. It is what lets the
+                            // server release what it retained for us; without
+                            // it the replay window fills to its ceiling and
+                            // stays there for the life of the connection.
+                            let progress: Vec<(u32, u64)> =
+                                self.session.positions().collect();
+                            let ping = body::ping(self.nonce, &progress);
                             let _ = self.send(
                                 Class::Control,
                                 TRAFFIC_CLASS_CONTROL,

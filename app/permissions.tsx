@@ -1,15 +1,19 @@
-import { HEADER_TOP } from '../constants/layout';
+import { HEADER_TOP, SCREEN_BOTTOM } from '../constants/layout';
 import { LinearGradient } from "expo-linear-gradient";
 import { Camera } from "expo-camera";
 import * as Contacts from "expo-contacts";
 import * as Location from "expo-location";
 import * as Notifications from "expo-notifications";
 import { Pedometer } from "expo-sensors";
-import { router } from "expo-router";
+import { router, useLocalSearchParams } from "expo-router";
 import { useEffect, useState } from "react";
-import { AppState, Platform, StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import { AppState, Platform, ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import { canUseFullScreenIntent, openFullScreenIntentSettings } from "../lib/CallService";
 
+// Entered from Settings as well as mid-onboarding, exactly like backup-pin.tsx.
+// The three exits below used to push /setup-complete unconditionally, which
+// from Settings would have dropped the user into the OLD onboarding success
+// screen with no way back to where they came from (2026-09-17).
 const PERMS = [
   {key:"camera",   icon:"📷",label:"Camera",       sub:"Face scan and photo sharing"},
   {key:"mic",      icon:"🎙️",label:"Microphone",   sub:"Voice and video calls"},
@@ -21,6 +25,10 @@ const PERMS = [
 ];
 
 export default function PermissionsScreen() {
+  const fromSettings = useLocalSearchParams<{ from?: string }>().from === 'settings';
+  // One exit for all three buttons: back to Settings when that is where the
+  // user came from, onward through onboarding when it is not.
+  const done = () => { if (fromSettings) router.back(); else router.push('/setup-complete' as any); };
   const [granted,setGranted] = useState<Record<string,boolean>>({});
   const [loading,setLoading] = useState(false);
   // Android 14 turned USE_FULL_SCREEN_INTENT into a user-granted special
@@ -33,6 +41,28 @@ export default function PermissionsScreen() {
   const [fsiOk,setFsiOk] = useState(true);
   const [asked,setAsked] = useState(false);
 
+  // READ WHAT IS ALREADY GRANTED (2026-09-17).
+  //
+  // This screen only ever ran inside signup, where nothing is granted yet, so
+  // it never needed to ask. Routed from Settings it is the opposite case: a
+  // user who granted everything at signup opened it and saw seven empty
+  // circles, because `granted` starts {} and nothing populates it until the
+  // button is pressed. Settings promises "one place to see and re-request" -
+  // so read the real state, with getters that prompt nobody.
+  const readGranted = async () => {
+    const r: Record<string, boolean> = {};
+    try {
+      r.camera   = (await Camera.getCameraPermissionsAsync()).granted;
+      r.mic      = (await Camera.getMicrophonePermissionsAsync()).granted;
+      r.contacts = Platform.OS === 'web' ? true : (await Contacts.getPermissionsAsync()).granted;
+      r.location = (await Location.getForegroundPermissionsAsync()).granted;
+      try { r.background = (await Location.getBackgroundPermissionsAsync()).granted; } catch { r.background = false; }
+      try { r.motion = (await Pedometer.getPermissionsAsync()).granted; } catch { r.motion = false; }
+      r.notifs   = (await Notifications.getPermissionsAsync()).granted;
+    } catch { /* a getter that fails leaves its row unknown, which reads as not granted */ }
+    setGranted((prev) => ({ ...prev, ...r }));
+  };
+
   const checkFsi = () => { canUseFullScreenIntent().then(setFsiOk).catch(()=>{}); };
 
   // Re-check when the user comes back: the grant happens in Settings, in
@@ -40,7 +70,8 @@ export default function PermissionsScreen() {
   // the row would sit there looking unfinished after they had done it.
   useEffect(() => {
     checkFsi();
-    const sub = AppState.addEventListener('change', s => { if (s === 'active') checkFsi(); });
+    void readGranted();
+    const sub = AppState.addEventListener('change', s => { if (s === 'active') { checkFsi(); void readGranted(); } });
     return () => sub.remove();
   }, []);
 
@@ -72,19 +103,29 @@ export default function PermissionsScreen() {
     // the same as skipping it silently — and the cost is calls that do not ring
     // on a locked phone. The button becomes "Continue" instead, so nobody is
     // stuck: this pauses once, it does not block.
-    if (fsi) router.push("/setup-complete");
+    // Do NOT auto-exit when opened from Settings. In signup, advancing is the
+    // point; from Settings the user came to SEE the state, and closing the
+    // screen the instant the prompts finish means the ticks they just earned
+    // never render (2026-09-17).
+    await readGranted();
+    if (fsi && !fromSettings) done();
   };
 
   return (
     <LinearGradient colors={["#FFFFFF","#020E1A","#FFFFFF"]} style={{flex:1}}>
-      <View style={S.container}>
+      <ScrollView style={S.container} contentContainerStyle={S.content} showsVerticalScrollIndicator={false}>
         <View style={S.header}>
           <View style={S.badge}><Text style={{fontSize:36}}>🔑</Text></View>
           <Text style={S.title}>App Permissions</Text>
           <Text style={S.sub}>Grant access so all crazzychat features work correctly</Text>
         </View>
-        <View style={S.steps}>{[1,2,3,4,5,6,7,8].map(n=><View key={n} style={[S.dot,n<=7&&S.dotDone,n===8&&S.dotActive]}/>)}</View>
-        <Text style={S.stepLbl}>Step 7 of 8 — Permissions</Text>
+        {!fromSettings && <View style={S.steps}>{[1,2,3,4,5,6,7,8].map(n=><View key={n} style={[S.dot,n<=7&&S.dotDone,n===8&&S.dotActive]}/>)}</View>}
+        {/* "Step 7 of 8" is true in the signup chain and a lie from Settings, where
+            the user is not part-way through anything. Verified on device: the row
+            opened from Settings and still announced itself as a signup step. */}
+        <Text style={S.stepLbl}>
+          {fromSettings ? 'Permissions' : 'Step 7 of 8 — Permissions'}
+        </Text>
         <View style={S.list}>
           {PERMS.map(p=>(
             <View key={p.key} style={S.row}>
@@ -114,22 +155,28 @@ export default function PermissionsScreen() {
             would tap "Grant Permissions" forever and never leave this screen. */}
         <TouchableOpacity
           style={[S.btn,loading&&S.btnOff]}
-          onPress={asked && !fsiOk ? () => router.push("/setup-complete") : requestAll}
+          onPress={asked && !fsiOk ? () => done() : requestAll}
           disabled={loading}
           activeOpacity={0.85}
         >
           <Text style={S.btnTxt}>{loading?"Requesting...":asked&&!fsiOk?"Continue":"Grant Permissions"}</Text>
         </TouchableOpacity>
-        <TouchableOpacity style={S.skip} onPress={()=>router.push("/setup-complete")}>
-          <Text style={S.skipTxt}>Skip — grant later in settings</Text>
+        <TouchableOpacity style={S.skip} onPress={()=>done()}>
+          <Text style={S.skipTxt}>{fromSettings ? 'Done' : 'Skip — grant later in settings'}</Text>
         </TouchableOpacity>
-      </View>
+      </ScrollView>
     </LinearGradient>
   );
 }
 
 const S = StyleSheet.create({
-  container:{ flex:1,padding:24,paddingTop:HEADER_TOP },
+  // SCROLLVIEW, NOT A FIXED View (2026-09-17). Seven permission rows plus the
+  // amber full-screen-intent card plus two buttons overflow a short screen, and
+  // at OS font scale 1.5 the primary button and the exit clipped off the bottom
+  // entirely - leaving hardware back as the only way out of a screen that is
+  // now reachable from Settings. SCREEN_BOTTOM is the live gesture inset.
+  container:{ flex:1 },
+  content:{ padding:24, paddingTop:HEADER_TOP, paddingBottom:24+SCREEN_BOTTOM },
   header:   { alignItems:"center",marginBottom:24,gap:10 },
   badge:    { width:80,height:80,borderRadius:40,backgroundColor:"rgba(74,159,255,0.12)",borderWidth:1.5,borderColor:"rgba(74,159,255,0.3)",justifyContent:"center",alignItems:"center" },
   title:    { color:"#fff",fontSize:24,fontWeight:"900" },

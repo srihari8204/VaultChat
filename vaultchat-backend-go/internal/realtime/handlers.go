@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/zishang520/socket.io/v2/socket"
 
 	"vaultchat/backend-go/internal/db"
 	"vaultchat/backend-go/internal/metrics"
@@ -196,26 +195,26 @@ func (h *Hub) registerChatHandlersPeer(s *eventPeer) {
 			metrics.Inc("socket_join_chat_refused")
 			return
 		}
-		if !s.Join(socket.Room("chat:" + id)) {
+		if !s.Join(Room("chat:" + id)) {
 			return
 		}
 	})
 	s.On("leave_chat", func(args ...any) {
 		if id := mstr(argMap("leave_chat", args), "chatId"); id != "" {
-			s.Leave(socket.Room("chat:" + id))
+			s.Leave(Room("chat:" + id))
 		}
 	})
 
 	s.On("channel_join", func(args ...any) {
 		if id := mstr(argMap("channel_join", args), "channelId"); id != "" {
-			if !s.Join(socket.Room("channel:" + id)) {
+			if !s.Join(Room("channel:" + id)) {
 				return
 			}
 		}
 	})
 	s.On("channel_leave", func(args ...any) {
 		if id := mstr(argMap("channel_leave", args), "channelId"); id != "" {
-			s.Leave(socket.Room("channel:" + id))
+			s.Leave(Room("channel:" + id))
 		}
 	})
 
@@ -241,11 +240,11 @@ func (h *Hub) registerChatHandlersPeer(s *eventPeer) {
 			out["longitude"] = lng
 			out["address"] = mstr(m, "address")
 		}
-		s.To(socket.Room("chat:"+chatID)).Emit("live_location_update", out)
+		s.To(Room("chat:"+chatID)).Emit("live_location_update", out)
 	})
 	s.On("live_location_stop", func(args ...any) {
 		if chatID := mstr(argMap("live_location_stop", args), "chatId"); chatID != "" {
-			s.To(socket.Room("chat:"+chatID)).Emit("live_location_stop", map[string]any{"userId": d.uid})
+			s.To(Room("chat:"+chatID)).Emit("live_location_stop", map[string]any{"userId": d.uid})
 		}
 	})
 
@@ -284,7 +283,7 @@ func (h *Hub) registerChatHandlersPeer(s *eventPeer) {
 		if hasPlain {
 			out["plain"] = plain
 		}
-		s.To(socket.Room("chat:"+chatID)).Emit("trip_update", out)
+		s.To(Room("chat:"+chatID)).Emit("trip_update", out)
 	})
 	s.On("trip_end", func(args ...any) {
 		m := argMap("trip_end", args)
@@ -295,7 +294,7 @@ func (h *Hub) registerChatHandlersPeer(s *eventPeer) {
 		if !h.chatMemberAllowed(d, chatID, s.Context()) {
 			return
 		}
-		s.To(socket.Room("chat:"+chatID)).Emit("trip_end", map[string]any{
+		s.To(Room("chat:"+chatID)).Emit("trip_end", map[string]any{
 			"userId": d.uid, "tripId": m["tripId"],
 		})
 	})
@@ -353,7 +352,7 @@ func (h *Hub) registerChatHandlersPeer(s *eventPeer) {
 		if chatID == "" || !h.chatMemberAllowed(d, chatID, s.Context()) {
 			return
 		}
-		s.To(socket.Room("chat:"+chatID)).Emit("message_delivered", map[string]any{"messageId": m["messageId"]})
+		s.To(Room("chat:"+chatID)).Emit("message_delivered", map[string]any{"messageId": m["messageId"]})
 	})
 
 	s.On("reaction_updated", func(args ...any) {
@@ -362,7 +361,7 @@ func (h *Hub) registerChatHandlersPeer(s *eventPeer) {
 		if chatID == "" || !h.chatMemberAllowed(d, chatID, s.Context()) {
 			return
 		}
-		s.To(socket.Room("chat:"+chatID)).Emit("reaction_updated",
+		s.To(Room("chat:"+chatID)).Emit("reaction_updated",
 			map[string]any{"messageId": m["messageId"], "reactions": m["reactions"]})
 	})
 
@@ -411,14 +410,14 @@ func (h *Hub) registerRunRelayPeer(s *eventPeer, d *sockData) {
 		if !h.runAllowed(d, runID, false, s.Context()) {
 			return
 		}
-		if !s.Join(socket.Room("run:" + runID)) {
+		if !s.Join(Room("run:" + runID)) {
 			return
 		}
 	})
 
 	s.On("run_unsubscribe", func(args ...any) {
 		if runID := mstr(argMap("run_unsubscribe", args), "runId"); runID != "" {
-			s.Leave(socket.Room("run:" + runID))
+			s.Leave(Room("run:" + runID))
 		}
 	})
 
@@ -434,7 +433,7 @@ func (h *Hub) registerRunRelayPeer(s *eventPeer, d *sockData) {
 		if !h.runAllowed(d, runID, true, s.Context()) {
 			return
 		}
-		s.To(socket.Room("run:"+runID)).Emit("run_update", map[string]any{
+		s.To(Room("run:"+runID)).Emit("run_update", map[string]any{
 			"userId": d.uid, "runId": runID, "blob": blob,
 		})
 	})
@@ -445,7 +444,7 @@ func (h *Hub) registerRunRelayPeer(s *eventPeer, d *sockData) {
 		if runID == "" || !h.runAllowed(d, runID, true, s.Context()) {
 			return
 		}
-		s.To(socket.Room("run:"+runID)).Emit("run_end", map[string]any{
+		s.To(Room("run:"+runID)).Emit("run_end", map[string]any{
 			"userId": d.uid, "runId": runID,
 		})
 	})
@@ -804,7 +803,7 @@ func (h *Hub) registerSignalHandlersPeer(s *eventPeer) {
 			metrics.Inc("call_join_denied")
 			return
 		}
-		room := socket.Room("call:" + chatID)
+		room := Room("call:" + chatID)
 		var existing []string
 		if ClusterEnabled() {
 			existing = clusterCallRoster(chatID, d.uid, s.Context())
@@ -846,7 +845,7 @@ func (h *Hub) registerSignalHandlersPeer(s *eventPeer) {
 		if chatID == "" {
 			return
 		}
-		room := socket.Room("call:" + chatID)
+		room := Room("call:" + chatID)
 		s.To(room).Emit("call_peer_left", map[string]any{"chatId": chatID, "uid": d.uid})
 		s.Leave(room)
 		if ClusterEnabled() {
@@ -897,26 +896,14 @@ func meshMaxParticipants() int {
 // callRoster returns the distinct uids already in a call room (excl. me).
 // FetchSockets runs its callback synchronously for the in-memory adapter; the
 // channel makes the read safe regardless.
-func (h *Hub) callRoster(room socket.Room, me string, parents ...context.Context) []string {
+func (h *Hub) callRoster(room Room, me string, parents ...context.Context) []string {
 	ctx, cancel := realtimeContext(parents...)
 	defer cancel()
-	seen := map[string]bool{}
-	out := []string{}
-	done := make(chan struct{})
-	h.io.In(room).FetchSockets()(func(socks []*socket.RemoteSocket, _ error) {
-		for _, rs := range socks {
-			if d, ok := rs.Data().(*sockData); ok && d.uid != "" && d.uid != me && !seen[d.uid] {
-				seen[d.uid] = true
-				out = append(out, d.uid)
-			}
-		}
-		close(done)
-	})
-	select {
-	case <-done:
-	case <-ctx.Done():
+	if ctx.Err() != nil {
 		return nil
 	}
+	seen := map[string]bool{}
+	out := []string{}
 	for _, uid := range h.ccwireCallRoster(string(room), me) {
 		if !seen[uid] {
 			seen[uid] = true

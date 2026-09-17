@@ -98,11 +98,18 @@ function NotificationsContent() {
       } finally { if (!cancel) setLoading(false); }
     })();
     Animated.timing(fadeIn,{toValue:1,duration:500,useNativeDriver:true}).start();
-    Animated.loop(Animated.sequence([
+    // CAPTURE THE LOOP SO IT CAN BE STOPPED (2026-09-17). The handle was
+    // discarded, and the cleanup only flipped the unrelated `cancel` flag
+    // belonging to the async loader above. useNativeDriver is false here (it
+    // animates a colour), so it runs on the JS thread: opening this screen ONCE
+    // made every later screen pay a 60fps JS tax for the rest of the process.
+    // Invisible while you are on the screen - it only bites after you leave.
+    const glow = Animated.loop(Animated.sequence([
       Animated.timing(glowAnim,{toValue:1,duration:1800,easing:Easing.inOut(Easing.ease),useNativeDriver:false}),
       Animated.timing(glowAnim,{toValue:0,duration:1800,easing:Easing.inOut(Easing.ease),useNativeDriver:false}),
-    ])).start();
-    return () => { cancel = true; };
+    ]));
+    glow.start();
+    return () => { cancel = true; glow.stop(); };
   },[fadeIn, glowAnim]);
 
   const fireSOS = useCallback(async () => {
@@ -157,7 +164,7 @@ function NotificationsContent() {
       <LinearGradient colors={['#FFFFFF','#040F20','#060F24']} style={StyleSheet.absoluteFillObject}/>
       <Animated.View style={{flex:1,opacity:fadeIn}}>
         <View style={S.header}>
-          <TouchableOpacity onPress={()=>router.back()} style={S.backBtn}><Ionicons name="arrow-back" size={20} color={colors.primary} /></TouchableOpacity>
+          <TouchableOpacity accessibilityRole="button" accessibilityLabel="Back" onPress={()=>router.back()} style={S.backBtn}><Ionicons name="arrow-back" size={20} color={colors.primary} /></TouchableOpacity>
           <View style={{flex:1}}>
             <Text style={S.title}>🔔 Alerts & Safety</Text>
             <Text style={{color:colors.textFaint,fontSize:9,letterSpacing:2}}>EMERGENCY & PRIVACY CENTER</Text>

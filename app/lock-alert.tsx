@@ -129,6 +129,10 @@ const makeSt = (c: Palette) => StyleSheet.create({
   distSub: { color: '#FECACA', fontSize: 12.5, marginTop: 4 },
   btn: { flexDirection: 'row', alignItems: 'center', gap: 8, borderRadius: 14, paddingHorizontal: 26, minHeight: 52, justifyContent: 'center' },
   btnTxt: { fontSize: 16.5, fontWeight: '800', color: '#fff' },
-  navRow: { flexDirection: 'row', gap: 12, marginTop: 10 },
-  navBtn: { alignItems: 'center', justifyContent: 'center', width: 86, height: 68, borderRadius: 14, backgroundColor: 'rgba(255,255,255,.14)', borderWidth: 1, borderColor: 'rgba(255,255,255,.35)' },
+  // flexWrap: three 86dp buttons plus two 12dp gaps need 282dp, and a 320dp
+  // screen leaves 272dp after padding - so 'Drive' clipped off the right edge.
+  // This is the geofence ALARM screen, so the clipped control is a safety
+  // action, and it is invisible on both reference handsets (2026-09-17).
+  navRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 12, marginTop: 10 },
+  navBtn: { alignItems: 'center', justifyContent: 'center', minWidth: 86, minHeight: 68, paddingHorizontal: 10, paddingVertical: 8, borderRadius: 14, backgroundColor: 'rgba(255,255,255,.14)', borderWidth: 1, borderColor: 'rgba(255,255,255,.35)' },
 });

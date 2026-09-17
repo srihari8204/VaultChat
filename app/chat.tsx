@@ -78,6 +78,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { getWallpaper, type WallpaperConfig } from './chat-wallpaper';
 import { getBubbleColors } from './chat-themes';
 import { getLock, verifyBiometric, verifyPin, type LockedChat } from '../lib/chatLock';
+import { permissionDenied } from '../lib/permissionDenied';
 import { preloadViewedOnce, isViewedOnce, isViewedOnceSync, markViewedOnce } from '../lib/viewOnceStore';
 import { preloadRevoked, isRevokedSync, wipeRevokedMedia } from '../lib/protectedMedia';
 
@@ -1393,7 +1394,34 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
         .then(m => m.markSeen(chatId, latestId))
         .catch(() => { if (lastReadSent.current === latestId) lastReadSent.current = 0; });
     }, 800);
-    return () => { if (readDebounce.current) clearTimeout(readDebounce.current); };
+    // A GLANCE STILL COUNTS AS READING (2026-09-18).
+    //
+    // The cleanup used to just clearTimeout, so backing out inside the 800ms
+    // window wrote NO read pointer at all - not locally, not to the server. The
+    // chat therefore stayed bold in the list even though the user had opened it
+    // and seen the messages, which is exactly the "I read it and it still says
+    // unread" report. lib/unreadStore.applyLocalReadPointers cannot correct it
+    // either: there is no pointer to correct WITH.
+    //
+    // On blur, fire the pending read instead of discarding it. The debounce
+    // still exists for its real purpose - letting the message list settle so
+    // the LATEST id is the one recorded - and the guard inside the timer still
+    // stops a read being marked while the app is backgrounded. What changes is
+    // only that leaving the screen flushes the pending intent rather than
+    // dropping it on the floor.
+    return () => {
+      if (!readDebounce.current) return;
+      clearTimeout(readDebounce.current);
+      readDebounce.current = null;
+      // Same preconditions the timer body checks, minus chatFocusedRef: focus
+      // is being torn down right now, and it having been true is the point.
+      if (!latestId || latestId <= lastReadSent.current) return;
+      lastReadSent.current = latestId;
+      markReadDurable(chatId, latestId, meId)
+        .then(() => import('../lib/messageNotifications'))
+        .then(m => m.markSeen(chatId, latestId))
+        .catch(() => { if (lastReadSent.current === latestId) lastReadSent.current = 0; });
+    };
   }, [appActive, cvFocused, meId, chatId, messages]);
 
   // ── Unread divider (WhatsApp "N unread messages") ─────────
@@ -2349,7 +2377,7 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
     if (sending) return;
     const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (!perm.granted) {
-      Alert.alert('Permission needed', `Allow ${kind === 'videos' ? 'video' : 'photo'} library access to attach.`);
+      permissionDenied('Permission needed', `Allow ${kind === 'videos' ? 'video' : 'photo'} library access to attach.`, perm.canAskAgain);
       return;
     }
     const result = await ImagePicker.launchImageLibraryAsync({
@@ -2616,7 +2644,7 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
   const onEditPhoto = useCallback(async () => {
     if (sending) return;
     const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (!perm.granted) { Alert.alert('Permission needed', 'Allow photo library access to attach.'); return; }
+    if (!perm.granted) { permissionDenied('Permission needed', 'Allow photo library access to attach.', perm.canAskAgain); return; }
     const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], quality: 1, allowsEditing: false });
     if (result.canceled || !result.assets?.[0]) return;
     router.push({ pathname: '/image-editor' as any, params: { uri: result.assets[0].uri, chatId, returnTo: '/chat' } });
@@ -3138,30 +3166,66 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
   // attempted automatically; PIN-locked chats show a keypad. Enforced on every
   // focus so backgrounding + returning re-locks.
   const [lockInfo, setLockInfo] = useState<LockedChat | null>(null);
-  const [lockOpen, setLockOpen] = useState(true);
+  // Three states, not a boolean (2026-09-17). A boolean cannot say "we do not
+  // know yet", and BOTH of its defaults are wrong: `true` painted a locked
+  // chat's messages until getLock answered — and FOREVER if getLock threw,
+  // because the overlay needed both !lockOpen AND lockInfo and a throw set
+  // neither; `false` would flash a padlock over every unlocked chat. 'checking'
+  // shows the bare veil: no messages, no padlock, and nothing opens until the
+  // lock is known.
+  const [lockState, setLockState] = useState<'checking' | 'open' | 'locked'>('checking');
   const [lockPin, setLockPin] = useState('');
-  const [lockErr, setLockErr] = useState(false);
+  // The message, not a boolean: 'both' can now fail for a reason other than a
+  // wrong PIN, and "Incorrect PIN" would be a lie the user cannot act on.
+  const [lockErr, setLockErr] = useState<string | null>(null);
+  // 'both' MEANS BOTH (2026-09-17). It used to be enforced as "either": the
+  // biometric alone opened the chat, and so did the PIN alone, so the strongest
+  // setting was single-factor in practice. This remembers that the biometric
+  // half has been satisfied for THIS visit — it is reset on every focus below,
+  // so returning to the chat asks for both again.
+  const [lockBio, setLockBio] = useState(false);
   useFocusEffect(useCallback(() => {
     let cancel = false;
+    // Synchronously, BEFORE any await: re-focusing must re-veil in the same
+    // commit, or the previous session's messages sit on screen for the length of
+    // an AsyncStorage read every time this chat is returned to.
+    setLockState('checking');
     (async () => {
-      const lock = await getLock(chatId);
+      let lock: LockedChat | null = null;
+      try {
+        lock = await getLock(chatId);
+      } catch {
+        // FAIL CLOSED. We could not read the lock table, so we cannot prove this
+        // chat is unlocked. lockInfo stays null — there is nothing to verify a
+        // PIN or a fingerprint against — so the veil offers only "Back to chats".
+        if (!cancel) { setLockInfo(null); setLockState('locked'); }
+        return;
+      }
       if (cancel) return;
       setLockInfo(lock);
-      setLockPin(''); setLockErr(false);
-      if (!lock) { setLockOpen(true); return; }
-      setLockOpen(false);
+      setLockPin(''); setLockErr(null); setLockBio(false);
+      if (!lock) { setLockState('open'); return; }
+      setLockState('locked');
       if (lock.lockMethod === 'biometric' || lock.lockMethod === 'both') {
-        const ok = await verifyBiometric('Unlock chat');
-        if (!cancel && ok) setLockOpen(true);
+        const ok = await verifyBiometric('Unlock chat');   // already fails closed
+        // 'both': passing the fingerprint only banks the first factor — the veil
+        // stays up (already 'locked') until the PIN is entered too.
+        if (!cancel && ok) { setLockBio(true); if (lock.lockMethod !== 'both') setLockState('open'); }
       }
     })();
     return () => { cancel = true; };
   }, [chatId]));
 
   const submitLockPin = useCallback(() => {
-    if (lockInfo && verifyPin(lockInfo, lockPin)) { setLockOpen(true); setLockErr(false); setLockPin(''); }
-    else setLockErr(true);
-  }, [lockInfo, lockPin]);
+    if (!lockInfo || !verifyPin(lockInfo, lockPin)) { setLockErr('Incorrect PIN'); return; }
+    // The PIN is the SECOND factor on a 'both' chat, never the only one — a
+    // correct PIN on its own used to open it (2026-09-17).
+    if (lockInfo.lockMethod === 'both' && !lockBio) {
+      setLockErr('This chat needs biometrics too — tap “Use biometrics”.');
+      return;
+    }
+    setLockState('open'); setLockErr(null); setLockPin('');
+  }, [lockInfo, lockPin, lockBio]);
 
   const title = useMemo(() => {
     if (!chat) return '…';
@@ -3593,7 +3657,10 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
           <Ionicons name="navigate" size={20} color={colors.primary} />
           <View style={{ flex: 1 }}>
             <Text style={{ color: colors.primary, fontSize: 13, fontWeight: '700' }}>{membersById.get(liveLoc.userId)?.name || 'Someone'} is sharing live location</Text>
-            <Text style={{ color: 'rgba(255,255,255,0.6)', fontSize: 11, marginTop: 1 }} numberOfLines={1}>{liveLoc.address || `${liveLoc.latitude.toFixed(5)}, ${liveLoc.longitude.toFixed(5)}`} · Navigate</Text>
+            {/* Falls back to raw lat/long, which at fontSize 11 ellipsised mid-
+                coordinate - and half a coordinate points somewhere else entirely.
+                Shrink the glyphs instead of cutting them (2026-09-17). */}
+            <Text style={{ color: 'rgba(255,255,255,0.6)', fontSize: 11, marginTop: 1 }} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.75}>{liveLoc.address || `${liveLoc.latitude.toFixed(5)}, ${liveLoc.longitude.toFixed(5)}`} · Navigate</Text>
           </View>
           <TouchableOpacity onPress={() => setLiveLoc(null)} hitSlop={8}><Text style={{ color: 'rgba(255,255,255,0.5)', fontSize: 16 }}>✕</Text></TouchableOpacity>
         </TouchableOpacity>
@@ -4368,29 +4435,51 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
         </Pressable>
       </Modal>
 
-      {/* Per-chat lock gate — covers the chat until the user authenticates */}
-      {!lockOpen && lockInfo && (
+      {/* Per-chat lock gate. The condition is "not proven OPEN", never "known
+          locked": while the lock is still being read, and when reading it failed,
+          the veil is up. The `&& lockInfo` that used to be here is exactly what
+          rendered the chat in full when getLock threw. */}
+      {lockState !== 'open' && (
         <View style={S.lockGate}>
+          {lockState === 'locked' && (<>
           <Ionicons name="lock-closed" size={56} color={colors.primary} />
           <Text style={S.lockGateTitle}>Chat locked</Text>
-          <Text style={S.lockGateSub}>{lockInfo.chatName}</Text>
+          <Text style={S.lockGateSub}>{lockInfo?.chatName ?? 'This chat could not be unlocked'}</Text>
 
-          {(lockInfo.lockMethod === 'biometric' || lockInfo.lockMethod === 'both') && (
+          {/* 'both' has to SAY it needs both, or a user whose fingerprint just
+              passed and who is still looking at a veil concludes the app is
+              broken. The biometric button stays tappable either way so a failed
+              scan can be retried. */}
+          {lockInfo?.lockMethod === 'both' && (
+            <Text style={S.lockGateSub}>
+              {lockBio
+                ? 'Biometrics verified — now enter this chat’s PIN.'
+                : 'This chat needs both biometrics and its PIN.'}
+            </Text>
+          )}
+
+          {(lockInfo?.lockMethod === 'biometric' || lockInfo?.lockMethod === 'both') && (
             <TouchableOpacity
               style={S.lockGateBtn}
-              onPress={async () => { if (await verifyBiometric('Unlock chat')) setLockOpen(true); }}
+              accessibilityRole="button"
+              accessibilityLabel={lockBio ? 'Biometrics verified, scan again' : 'Use biometrics'}
+              onPress={async () => {
+                if (!(await verifyBiometric('Unlock chat'))) return;
+                setLockBio(true);
+                if (lockInfo?.lockMethod !== 'both') setLockState('open');
+              }}
             >
-              <Ionicons name="finger-print" size={18} color="#fff" />
-              <Text style={S.lockGateBtnTxt}>Use biometrics</Text>
+              <Ionicons name={lockBio ? 'checkmark-circle' : 'finger-print'} size={18} color="#fff" />
+              <Text style={S.lockGateBtnTxt}>{lockBio ? 'Biometrics verified' : 'Use biometrics'}</Text>
             </TouchableOpacity>
           )}
 
-          {(lockInfo.lockMethod === 'pin' || lockInfo.lockMethod === 'both') && (
+          {(lockInfo?.lockMethod === 'pin' || lockInfo?.lockMethod === 'both') && (
             <View style={{ width: '100%', maxWidth: 280, marginTop: 18 }}>
               <TextInput
                 style={S.lockGateInput}
                 value={lockPin}
-                onChangeText={(t) => { setLockPin(t); setLockErr(false); }}
+                onChangeText={(t) => { setLockPin(t); setLockErr(null); }}
                 keyboardType="number-pad"
                 secureTextEntry
                 maxLength={8}
@@ -4398,7 +4487,7 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
                 placeholderTextColor={colors.textFaint}
                 onSubmitEditing={submitLockPin}
               />
-              {lockErr && <Text style={S.lockGateErr}>Incorrect PIN</Text>}
+              {!!lockErr && <Text style={S.lockGateErr}>{lockErr}</Text>}
               <TouchableOpacity style={[S.lockGateBtn, { marginTop: 12 }]} onPress={submitLockPin}>
                 <Text style={S.lockGateBtnTxt}>Unlock</Text>
               </TouchableOpacity>
@@ -4408,6 +4497,7 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
           <TouchableOpacity style={{ marginTop: 20 }} onPress={() => router.replace('/(tabs)/chats' as any)}>
             <Text style={S.lockGateBack}>Back to chats</Text>
           </TouchableOpacity>
+          </>)}
         </View>
       )}
     </View>

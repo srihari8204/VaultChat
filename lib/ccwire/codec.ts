@@ -1,7 +1,9 @@
 // lib/ccwire/codec.ts — CC-Wire v1 protobuf codec for ccwire.v1.Frame.
 //
-// STATUS: NOT WIRED. Nothing imports this from the app. The live transport is
-// now CC-Wire app events. The codec remains isolated and parity-tested.
+// STATUS: LIVE on the app path. lib/ccwire/client.ts imports encodeFrameMessage
+// and decodeFrameMessage; client -> transport.ts -> socket.ts, where 'ccwire' is
+// the only TransportName. Every frame the app sends or receives is encoded here.
+// (This header previously read "NOT WIRED"; that was stale and misleading.)
 //
 // Layering: lib/ccwire/frame.ts owns the length-prefixed envelope and hands up
 // an OPAQUE payload. This file is what turns that payload into a Frame. The
@@ -38,11 +40,16 @@
 // ─────────────────────────────────────────────────────────────────────────────
 // WHAT IS AND IS NOT TYPED HERE
 //
-// All 27 oneof body field numbers are KNOWN (BODY_NAMES) — that is what the
+// All 28 oneof body field numbers are KNOWN (BODY_NAMES) — that is what the
 // EPHEMERAL invariant is enforced on, so it covers every body, including the
-// ones this build does not decode. Six bodies are decoded into fields; the rest
-// round-trip as opaque `raw` bytes. An unimplemented body is therefore never
-// lost and never silently reinterpreted.
+// ones this build does not decode. Seven bodies are decoded into fields; the
+// rest round-trip as opaque `raw` bytes. An unimplemented body is therefore
+// never lost and never silently reinterpreted.
+//
+// Seven, not six: app_event (100) is typed HERE and nowhere else. Go's
+// TypedBodies and Rust's TYPED_BODIES carry six. That asymmetry is recorded in
+// __vectors__/codec.json's `bodiesTypedByTypescriptOnly` so it cannot widen
+// unnoticed — it is a real difference, not a bookkeeping one.
 //
 // ─────────────────────────────────────────────────────────────────────────────
 // TYPE CONSTRAINT
@@ -182,7 +189,7 @@ export const BODY_NAMES: Record<number, string> = {
  * with ERROR_CODE_PROTOCOL_VIOLATION — never handled leniently."
  *
  * Enforced on the FIELD NUMBER, before and independently of decoding the body,
- * so it holds for all 27 bodies including the ones this build does not type.
+ * so it holds for all 28 bodies including the ones this build does not type.
  */
 export const EPHEMERAL_BODIES = new Set([81, 82, 84]);
 
@@ -785,7 +792,7 @@ function writeCursorBatch(m: CursorBatch): Uint8Array {
   return wDone(x);
 }
 
-/** The six bodies this build decodes. Everything else round-trips as `raw`. */
+/** The seven bodies this build decodes. Everything else round-trips as `raw`. */
 const TYPED_BODY: Record<number, (r: R, depth: number) => any> = {
   100: (r) => readAppEvent(r),
   48: readSubmitMessage,
@@ -962,6 +969,13 @@ export function decodeFrameMessage(buf: Uint8Array, opts: CodecOptions = {}): Fr
  * "enforced at both encode and decode". A bug that produces a CryptoControl on
  * EPHEMERAL should fail on the machine that has the stack trace, not on the peer
  * that only has bytes.
+ *
+ * The same reasoning covers every bound below: request_id at
+ * max_string_field_bytes, the body field number against the closed oneof, and
+ * the body at max_message_body_bytes. Each mirrors a refusal Go
+ * (internal/ccwire/codec.go) and Rust (transport/rust/src/parse.rs) already make
+ * on encode, and each returns the SAME typed error the decode path returns for
+ * the same overrun, so a caller's switch does not need a second arm.
  */
 export function encodeFrameMessage(f: Frame, opts: CodecOptions = {}): FrameEncodeResult {
   const lim = resolveLimits(opts);
@@ -976,14 +990,47 @@ export function encodeFrameMessage(f: Frame, opts: CodecOptions = {}): FrameEnco
   let out: Uint8Array;
   try {
     const x = w();
+    // BOUNDED ON ENCODE, exactly as on decode. Go refuses here with
+    // ErrStringTooLong and Rust with StringTooLong; without the same check a
+    // TypeScript bug ships a request_id both peers drop, and the only evidence
+    // is bytes on someone else's wire. Measured in BYTES after UTF-8 encoding,
+    // because that is what readString bounds and what the peers measure.
+    const rid = TOUTF8.encode(f.request_id ?? '').length;
+    if (rid > lim.max_string_field_bytes) {
+      fail('STRING_TOO_LONG', `request_id ${rid} > ${lim.max_string_field_bytes}`);
+    }
     wStr(x, 1, f.request_id ?? '');
     wU32(x, 2, f.traffic_class ?? 0);
     wU32(x, 3, f.stream ?? 0);
     wI64(x, 4, f.seq ?? '0');
     wI64(x, 5, f.depends_on ?? '0');
     if (f.body_field != null) {
+      // The oneof is CLOSED. A field number outside it is not a forward-
+      // compatible extension: the peer decodes it as a preserved unknown field
+      // with no body set, and then refuses the whole frame for having no body.
+      // So the refusal belongs here, where the caller's stack trace is.
+      if (!BODY_NAMES[f.body_field]) {
+        fail('PROTOCOL_VIOLATION', `body field ${f.body_field} is not a ccwire.v1.Frame oneof arm`);
+      }
       const writer = TYPED_BODY_WRITER[f.body_field];
       const body = writer && f.value ? writer(f.value) : (f.raw ?? new Uint8Array(0));
+      // The whole-frame ceiling below is not a substitute: max_message_body_bytes
+      // is LARGER than a frame, because a body arrives reassembled from
+      // fragments. Go: ErrBytesTooLong. Rust: BytesTooLong.
+      //
+      // The appEventsV1 exception is not a loophole — it is the SAME conditional
+      // the decode path already carries. readFragment bounds total_bytes at
+      // APP_EVENT_LOGICAL_MAX when appEventsV1 is negotiated, and client.ts
+      // encodes an app_event at that ceiling precisely so the fragmenter can cut
+      // it up. Bounding encode at max_message_body_bytes unconditionally would
+      // refuse a body this build then goes on to accept off the wire, which is
+      // the asymmetry this whole rule exists to prevent, pointed the other way.
+      // With appEventsV1 OFF — the only mode Go and Rust have — the ceiling is
+      // exactly max_message_body_bytes, so the three still agree.
+      const bodyCap = opts.appEventsV1 ? APP_EVENT_LOGICAL_MAX : lim.max_message_body_bytes;
+      if (body.length > bodyCap) {
+        fail('BYTES_TOO_LONG', `body ${body.length} > ${bodyCap}`);
+      }
       // Unlike every other field, an empty body is WRITTEN: a bare Ping is a
       // zero-byte submessage and dropping it would erase which body was set.
       wTag(x, f.body_field, 2); wVarint(x, body.length); wRaw(x, body);

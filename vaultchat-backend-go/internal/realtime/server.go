@@ -19,21 +19,11 @@ import (
 	"context"
 	"crypto/sha256"
 	"crypto/subtle"
-	"log"
-	"net/http"
-	"os"
 	"regexp"
 	"sync"
 	"time"
 
-	"github.com/zishang520/engine.io/v2/types"
-	redisadapter "github.com/zishang520/socket.io-go-redis/adapter"
-	redistypes "github.com/zishang520/socket.io-go-redis/types"
-	"github.com/zishang520/socket.io/v2/socket"
-
-	"vaultchat/backend-go/internal/httpx"
 	"vaultchat/backend-go/internal/metrics"
-	"vaultchat/backend-go/internal/redisx"
 )
 
 // Default is set by New() so the orchestrator's /internal/* bridge handlers
@@ -118,15 +108,11 @@ func (c cachedPerm) fresh(gen uint64) bool {
 	return c.gen == gen && time.Since(c.at) < permTTL
 }
 
-func sd(s *socket.Socket) *sockData {
-	d, _ := s.Data().(*sockData)
-	return d
-}
+// sd() unwrapped a *socket.Socket's Data() into *sockData. CC-Wire sessions
+// carry their *sockData directly (ccwireSession.d), so nothing needs it.
 
 // Hub wraps the Socket.IO server plus the process-local presence state.
 type Hub struct {
-	io *socket.Server
-
 	// presence: uid → set(socketId), mirrors server.js userSockets. Guards
 	// online-count too — OnlineCount == len(userSockets), matching admin.js.
 	pmu         sync.Mutex
@@ -139,37 +125,28 @@ type Hub struct {
 	cwmu       sync.Mutex
 	cwSessions map[string]map[*ccwireSession]struct{}
 	cwBusClose func()
+
+	// Admin firehose over SSE (admin_sse.go). Fed from the same EmitToRooms /
+	// EmitBroadcast call sites as the Socket.IO "admin" room, so the two cannot
+	// drift while both exist.
+	adminSSE adminSSE
+
+	// resume holds sessions parked across a disconnect (ccwire_resume.go).
+	// Process-local and bounded: a restart invalidates every token, which is
+	// why resume must never be a correctness dependency.
+	resume *resumeStore
 }
 
 // New constructs the Socket.IO server, registers the JWT/admin-key auth
 // middleware and every connection handler, and starts the chat-viewer sweep.
 func New() *Hub {
-	opts := socket.DefaultServerOptions()
-	// The client is websocket-only (server.js relies on the default upgrade but
-	// the RN client never long-polls); pin the transport to skip HTTP polling.
-	opts.SetTransports(types.NewSet("websocket"))
-	// 2 MB, same as server.js maxHttpBufferSize (encrypted media metadata).
-	opts.SetMaxHttpBufferSize(2 * 1024 * 1024)
-	opts.SetPingInterval(10 * time.Second) // server.js pingInterval 10000
-	opts.SetPingTimeout(5 * time.Second)   // server.js pingTimeout 5000
-
-	// P2.1: REDIS_ADAPTER=1 → cross-node room emits via the Redis adapter
-	// (same pub/sub wire format as Node's @socket.io/redis-adapter, so a mixed
-	// Node/Go fleet during a rollback window still interoperates). Flag off →
-	// the default in-memory adapter, byte-identical single-node behavior.
-	if ClusterEnabled() {
-		opts.SetAdapter(&redisadapter.RedisAdapterBuilder{
-			Redis: redistypes.NewRedisClient(context.Background(), redisx.Client),
-			Opts:  &redisadapter.RedisAdapterOptions{},
-		})
-	} else if os.Getenv("REDIS_ADAPTER") == "1" {
-		log.Printf("[realtime] REDIS_ADAPTER=1 but Redis is not connected — falling back to in-memory adapter (single node)")
-	}
-
-	io := socket.NewServer(nil, opts)
+	// Socket.IO's server options, Redis adapter and *socket.Server were
+	// constructed here. The adapter is not replaced: CC-Wire carries its own
+	// cross-node fan-out (publishCCWire / startCCWireCluster), which never used
+	// the Socket.IO pub/sub wire format.
 	h := &Hub{
-		io:          io,
 		userSockets: map[string]map[string]struct{}{},
+		resume:      newResumeStore(),
 	}
 
 	// Live readers rather than counters we would have to keep in sync — the
@@ -181,45 +158,22 @@ func New() *Hub {
 	// why sockets_online cannot be used for that.
 	metrics.SetGauge("sockets_local", func() float64 { return float64(h.LocalSockets()) })
 	metrics.SetGauge("users_local", func() float64 { return float64(h.LocalUsers()) })
-
-	// JWT handshake middleware — runs before 'connection' (server.js io.use).
-	io.Of("/", nil).Use(func(s *socket.Socket, next func(*socket.ExtendedError)) {
-		auth, _ := s.Handshake().Auth.(map[string]any)
-
-		// Admin console authenticates with the admin key (not a user JWT).
-		if adminKey, _ := auth["adminKey"].(string); adminKey != "" {
-			if k := os.Getenv("ADMIN_KEY"); k != "" && safeKeyEqual(adminKey, k) {
-				s.SetData(&sockData{uid: "admin", admin: true})
-				next(nil)
-				return
-			}
+	// Parked (disconnected but resumable) sessions. Bounded by
+	// maxParkedSessions; watching this is how the bound is known to hold.
+	metrics.SetGauge("ccwire_resume_parked_sessions", func() float64 {
+		if h.resume == nil {
+			return 0
 		}
-
-		token, _ := auth["token"].(string)
-		if token == "" {
-			token = bearerToken(s.Handshake().Headers)
-		}
-		if token == "" {
-			next(socket.NewExtendedError("auth_required", nil))
-			return
-		}
-		sub, email, err := httpx.VerifyAccess(token)
-		if err != nil {
-			// httpx.VerifyAccess returns "token_expired" | "invalid_token",
-			// the exact connect_error names server.js sends.
-			next(socket.NewExtendedError(err.Error(), nil))
-			return
-		}
-		s.SetData(&sockData{uid: sub, email: email, chatMemberOk: map[string]cachedPerm{}, runOk: map[string]cachedPerm{}})
-		next(nil)
+		return float64(h.resume.len())
 	})
 
-	io.On("connection", func(args ...any) {
-		s := args[0].(*socket.Socket)
-		h.onConnection(s)
-	})
+	// The Socket.IO JWT/admin-key handshake middleware and the "connection"
+	// binding were here. CC-Wire authenticates its own upgrade
+	// (httpx.RequireAuth in ccwire.go) and the admin console now authenticates
+	// per-request with x-admin-key on GET /admin/events (admin_sse.go).
 
 	h.startViewerSweep()
+	h.startResumeSweep()
 	h.startCCWireCluster()
 	if ClusterEnabled() {
 		h.startCluster() // heartbeat + dead-node janitor (cluster.go)
@@ -228,9 +182,6 @@ func New() *Hub {
 	Default = h
 	return h
 }
-
-// Handler returns the /socket.io HTTP handler to mount.
-func (h *Hub) Handler() http.Handler { return h.io.ServeHandler(nil) }
 
 // LocalUsers and LocalSockets are the counts for THIS process only.
 //
@@ -286,62 +237,14 @@ func (h *Hub) Shutdown(wait time.Duration) {
 		h.cwBusClose()
 	}
 
-	if h == nil || h.io == nil {
-		return
-	}
-	h.io.DisconnectSockets(true)
-
-	done := make(chan struct{})
-	go func() {
-		h.io.Close(func(error) { close(done) })
-	}()
-	select {
-	case <-done:
-	case <-time.After(wait):
-		log.Printf("[realtime] shutdown: hub close exceeded %s, exiting anyway", wait)
-	}
+	// Socket.IO's DisconnectSockets/Close were here. ccwireShutdown above is
+	// the whole shutdown path now.
 }
 
-func (h *Hub) onConnection(s *socket.Socket) {
-	d := sd(s)
-	if d == nil {
-		return
-	}
-	// Admin console socket — firehose room only, not counted online, no
-	// per-user handlers (server.js connection admin branch).
-	if d.admin {
-		s.Join(socket.Room("admin"))
-		s.Emit("ready", map[string]any{"admin": true})
-		return
-	}
-
-	h.trackSocket(s)
-	s.Join(socket.Room("user:" + d.uid))
-	metrics.Inc("socket_connect")
-	s.Emit("ready", map[string]any{"uid": d.uid})
-
-	h.registerChatHandlers(s)
-	h.registerSignalHandlers(s)
-
-	// Disconnect cleanup. 'disconnecting' still has the socket's rooms
-	// populated (the library empties them before 'disconnect'); we read call
-	// rooms there. Everything keyed off socket.data survives to 'disconnect'.
-	s.On("disconnecting", func(_ ...any) {
-		for _, room := range s.Rooms().Keys() {
-			if r := string(room); len(r) > 5 && r[:5] == "call:" {
-				s.To(room).Emit("call_peer_left", map[string]any{"chatId": r[5:], "uid": d.uid})
-				h.ccwireRooms([]string{r}, "", "call_peer_left", map[string]any{"chatId": r[5:], "uid": d.uid})
-				if ClusterEnabled() {
-					clusterCallLeave(r[5:], d.uid) // keep the Redis roster honest on drops
-				}
-			}
-		}
-	})
-	s.On("disconnect", func(_ ...any) {
-		h.untrackSocket(s)
-		metrics.Inc("socket_disconnect")
-	})
-}
+// onConnection — the Socket.IO connection handler — was here. It joined
+// user:/admin rooms, registered the chat and signal handlers and cleaned up
+// call rooms on disconnect. CC-Wire does all of that in ccwire_messages.go
+// against its own session, which is why this could go without a replacement.
 
 // EmitToUid emits to every device of a user (room user:<uid>) — server.js
 // emitToUid.
@@ -378,9 +281,6 @@ func (h *Hub) emitToUidInContext(ctx context.Context, chatID, uid, event string,
 	if ctx.Err() != nil {
 		return
 	}
-	if h.io != nil {
-		h.io.To(socket.Room("user:"+uid)).Emit(event, payload)
-	}
 	h.ccwireDeliver(chatID, uid, event, payload, ctx)
 }
 
@@ -389,18 +289,20 @@ func (h *Hub) EmitToRooms(rooms []string, event string, payload any) {
 	if len(rooms) == 0 {
 		return
 	}
-	rs := make([]socket.Room, len(rooms))
-	for i, r := range rooms {
-		rs[i] = socket.Room(r)
-	}
-	h.io.To(rs...).Emit(event, payload)
 	h.ccwireRooms(rooms, "", event, payload)
+	for _, r := range rooms {
+		if r == "admin" {
+			h.publishAdmin(event, payload)
+			break
+		}
+	}
 }
 
 // EmitBroadcast emits to every connected socket (admin /broadcast, announcements).
 func (h *Hub) EmitBroadcast(event string, payload any) {
-	h.io.Emit(event, payload)
 	h.ccwireRooms(nil, "", event, payload)
+	// A broadcast reaches every socket, which includes the admin console.
+	h.publishAdmin(event, payload)
 }
 
 // OnlineCount is the number of distinct online users — matches Node's

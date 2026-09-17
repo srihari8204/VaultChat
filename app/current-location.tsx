@@ -14,6 +14,7 @@ import * as Location from 'expo-location';
 import { sendMessage } from '../lib/chatService';
 import { AuroraBackground } from '../components/ui';
 import LocationMap from '../components/LocationMap';
+import { permissionDenied } from '../lib/permissionDenied';
 
 // const RED = '#EF4444';
 
@@ -47,10 +48,10 @@ export default function CurrentLocationScreen() {
   const getLocation = async () => {
     setLoading(true);
     try {
-      const { status } = await Location.requestForegroundPermissionsAsync();
+      const { status, canAskAgain } = await Location.requestForegroundPermissionsAsync();
       if (status !== 'granted') {
         setDenied(true);
-        Alert.alert('Permission Denied', 'Location permission is required');
+        permissionDenied('Location needed', 'Allow location access to show where you are.', canAskAgain);
         setLoading(false);
         return;
       }
@@ -109,7 +110,7 @@ export default function CurrentLocationScreen() {
       <Stack.Screen options={{ headerShown: false }} />
 
       <View style={s.header}>
-        <TouchableOpacity onPress={() => router.back()} style={s.backBtn}>
+        <TouchableOpacity accessibilityRole="button" accessibilityLabel="Back" onPress={() => router.back()} style={s.backBtn}>
           <Ionicons name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
         <View style={{ flex: 1 }}>

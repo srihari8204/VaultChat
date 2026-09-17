@@ -382,6 +382,7 @@ function StoryViewerScreen() {
   if (error) {
     return (
       <View style={[S.screen, S.center]}>
+      // statusbar-exempt: a story is full-bleed media on #000 at every theme, so light glyphs are correct here regardless of the palette.
         <StatusBar barStyle="light-content" />
         <Text style={S.errorTxt}>{error}</Text>
         <TouchableOpacity onPress={close} style={S.closeBtn}>

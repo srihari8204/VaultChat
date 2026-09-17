@@ -229,43 +229,28 @@ async function checkEmulator(): Promise<ThreatDetail[]> {
 //    from hardware-backed SecureStore.
 // ─────────────────────────────────────────────────────────────
 
+/**
+ * Self-destruct. Reached only from a `wipe`-level assessment, and the /blocked
+ * screen tells the user their keys have been destroyed.
+ *
+ * IT DESTROYED ALMOST NOTHING. 2026-09-17. The list it walked was written
+ * against a key layout that no longer exists: 'vault_pin' is the legacy
+ * constant pinStore MIGRATED AWAY from (and clears itself on every unlock),
+ * 'user_firstName'/'user_lastName'/'user_dob'/'active_sessions' have no writer
+ * anywhere in the repo, and neither does `d2de_key_*` or `ratchet_*` — the
+ * ratchets are `vc_e2ee_session_<peerId>` and the Double Ratchet has never been
+ * keyed by chat index. So on a device judged compromised the app deleted a
+ * handful of absent keys, left the message database, media and E2EE identity
+ * untouched, and said the keys were gone.
+ *
+ * The real purge already existed for sign-out; a compromised device wants
+ * exactly the same thing, so it calls it instead of keeping a second list that
+ * can rot the same way.
+ */
 export async function wipeAllKeys(): Promise<void> {
-
-  const keysToDelete = [
-    'vault_pin',
-    'user_firstName',
-    'user_lastName',
-    'user_dob',
-    'active_sessions',
-    'setup_complete',
-    'user_profile',
-    'security_answers',
-  ];
-
-  for (const key of keysToDelete) {
-    try {
-      await SecureStore.deleteItemAsync(key);
-    } catch {
-      // Key may not exist — continue
-    }
-  }
-
-  try {
-    const sessionsRaw = await SecureStore.getItemAsync('active_sessions');
-    if (sessionsRaw) {
-      const sessions: string[] = JSON.parse(sessionsRaw);
-      for (const id of sessions) {
-        try { await SecureStore.deleteItemAsync(`d2de_key_${id}`); } catch {}
-        try { await SecureStore.deleteItemAsync(`ratchet_${id}`); } catch {}
-      }
-    }
-  } catch {}
-
-  for (let i = 0; i < 50; i++) {
-    try { await SecureStore.deleteItemAsync(`d2de_key_chat_${i}`); } catch {}
-    try { await SecureStore.deleteItemAsync(`ratchet_chat_${i}`); } catch {}
-  }
-
+  // Dynamic require: authService pulls in Google Sign-In and lib/api, and this
+  // module is imported on the launch path (app/_layout runSecurityCheck).
+  try { await require('../app/(constants)/authService').purgeAccountData(); } catch {}
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -363,13 +348,13 @@ export async function savePIN(pin: string): Promise<void> {
 }
 
 export async function verifyPIN(pin: string): Promise<boolean> {
-  const ok = await pinStore.verifyPin(pin);
-  // Feed the attempt tracker: consecutive failures raise a PIN_BRUTEFORCE
-  // signal on the next runSecurityCheck() and lengthen the backoff. They no
-  // longer escalate to a wipe on their own — see services/security/pinAttempts.
-  if (ok) await pinAttempts.recordSuccess();
-  else await pinAttempts.recordFailure();
-  return ok;
+  // The attempt tracking that used to live here moved INTO pinStore.verifyPin
+  // (2026-09-17). It was only ever fed from this function, whose one caller is
+  // an unrouted screen, so the app lock, the vault and every other real PIN
+  // check raised nothing. pinAttempts is still read here — runSecurityCheck()
+  // turns the streak into a PIN_BRUTEFORCE signal — it is only the recording
+  // that had to move to where the PINs are actually checked.
+  return pinStore.verifyPin(pin);
 }
 
 // ─────────────────────────────────────────────────────────────

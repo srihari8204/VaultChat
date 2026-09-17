@@ -1,7 +1,8 @@
 // lib/ccwire/frame.ts — CC-Wire v1 length-prefixed framing.
 //
-// STATUS: NOT WIRED. Nothing imports this from the app. The live transport is
-// now CC-Wire app events; this framing stays covered by parity tests. This is the
+// STATUS: LIVE on the app path. lib/ccwire/client.ts calls encodeFrame on every
+// outbound frame and decodeStream on every inbound chunk. (This header
+// previously read "NOT WIRED"; that was stale and misleading.) Below is the
 // rollout plan — "Protobuf framing and binary-WebSocket parity in ISOLATED
 // testing" — and it must not be switched on until the conformance harness and a
 // parity soak have both passed.

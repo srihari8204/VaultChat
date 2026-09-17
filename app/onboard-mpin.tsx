@@ -66,12 +66,32 @@ export default function OnboardMpin() {
     setBusy(true); setMsg(null);
     try {
       const st = onboarding.get();
-      const { userId, setupTicket } = await initProfile({
-        phone: st.phone, phoneTicket: st.phoneTicket,
-        email: st.email || undefined,           // optional recovery address, or nothing at all
-        firstName: st.firstName, lastName: st.lastName, dob: st.dob, status: st.status,
-        profilePicUrl: st.profilePicUrl,
-      });
+      // RESUME, DO NOT RESTART (2026-09-17).
+      //
+      // These three calls are sequential and NOT idempotent. The retry used to
+      // re-run all of them, but initProfile consumes phoneTicket — so a network
+      // drop after step 1 left an account with no MPIN, and every retry failed
+      // with "already registered". Relaunching then routed to /mpin-entry, where
+      // there was no MPIN to enter, and "Forgot MPIN?" found no security
+      // questions if the drop happened between steps 1 and 2. The number could
+      // never be registered again: an account its owner could neither finish
+      // creating nor sign into.
+      //
+      // Persisting {userId, setupTicket} the instant step 1 returns lets the
+      // retry skip it and pick up where it failed.
+      let userId = st.userId;
+      let setupTicket = st.setupTicket;
+      if (!userId || !setupTicket) {
+        const created = await initProfile({
+          phone: st.phone, phoneTicket: st.phoneTicket,
+          email: st.email || undefined,           // optional recovery address, or nothing at all
+          firstName: st.firstName, lastName: st.lastName, dob: st.dob, status: st.status,
+          profilePicUrl: st.profilePicUrl,
+        });
+        userId = created.userId;
+        setupTicket = created.setupTicket;
+        onboarding.set({ userId, setupTicket });   // BEFORE the next call can fail
+      }
       await saveSecurityQuestions(userId, setupTicket, st.securityAnswers);
       await setMpinRemote(userId, setupTicket, v);
       onboarding.set({ userId, mpin: v });                  // mpin kept (RAM) for the success login
@@ -129,7 +149,12 @@ export default function OnboardMpin() {
 const s = StyleSheet.create({
   screen: { flex: 1, backgroundColor: 'transparent' },
   back: { paddingHorizontal: 20, paddingTop: 8, alignSelf: 'flex-start' },
-  body: { flex: 1, paddingHorizontal: 24, paddingTop: 56, alignItems: 'center' },
+  // 56 dated from before this screen was in INSET_SCREENS, where the root
+  // layout already pads the container by HEADER_TOP. The two stacked: 52 + 56
+  // = 108dp of empty space above the title on the Honor (44dp inset), and a
+  // back row sits between them as well. 32 is the design gap with the
+  // status-bar allowance taken back out (2026-09-17).
+  body: { flex: 1, paddingHorizontal: 24, paddingTop: 32, alignItems: 'center' },
   title: { color: AUTH.text, fontSize: 24, fontWeight: '900' },
   sub: { color: AUTH.dim, fontSize: 14, marginTop: 8, textAlign: 'center' },
   rail: { width: 132, marginTop: 14 },

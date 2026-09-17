@@ -454,18 +454,53 @@ const (
 )
 
 func (h *Hub) ccwireRegister(s *ccwireSession) {
+	var superseded []*ccwireSession
+
 	h.cwmu.Lock()
-	defer h.cwmu.Unlock()
 	if h.cwSessions == nil {
 		h.cwSessions = map[string]map[*ccwireSession]struct{}{}
 	}
 	if h.cwSessions[s.d.uid] == nil {
 		h.cwSessions[s.d.uid] = map[*ccwireSession]struct{}{}
 	}
+	// A RESUMED session supersedes the connection it took over from.
+	//
+	// The race this closes: connection A is alive but unreachable, B resumes at
+	// a higher generation, and A's queued frames arrive afterwards describing a
+	// world that has moved on. Without this, A keeps advancing cursors,
+	// presence and receipts for a session it no longer owns.
+	//
+	// Matched on sessionID, not uid: a user's OTHER devices are separate
+	// logical sessions and must not be disturbed — "one user, one connection"
+	// is exactly the assumption multi-device routing cannot make.
+	if s.resumed && s.sessionID != "" {
+		for other := range h.cwSessions[s.d.uid] {
+			if other != s && other.sessionID == s.sessionID && other.generation < s.generation {
+				superseded = append(superseded, other)
+			}
+		}
+	}
 	h.cwSessions[s.d.uid][s] = struct{}{}
+	h.cwmu.Unlock()
+
+	// Closed OUTSIDE the lock: closeOnce may take other locks, and holding the
+	// hub mutex across it is how a deadlock gets introduced quietly.
+	for _, old := range superseded {
+		metrics.Inc("ccwire_generation_superseded")
+		old.closeOnce()
+	}
 }
 
 func (h *Hub) ccwireUnregister(s *ccwireSession) {
+	// Park BEFORE tearing down, so the next connection can pick this session up
+	// instead of forcing a full application resync. Failure to park is silent
+	// and harmless: the client reconnects fresh, which is today's behaviour.
+	//
+	// Nothing about the teardown below is skipped or deferred because of this —
+	// the session still leaves its rooms and stops being tracked. Parking
+	// copies identity and position out; it does not keep the session alive.
+	s.parkForResume()
+
 	if s.appEvents {
 		s.leaveAppRooms()
 		if s.sessionID != "" {
@@ -499,6 +534,12 @@ func (h *Hub) ccwireDeliverLocal(chatID, uid, event string, payload any) {
 	if h == nil {
 		return
 	}
+	// Recorded BEFORE the live-session check, because the case that matters is
+	// exactly the one with no live sessions: the user's only connection is
+	// parked mid-tunnel, this frame reaches nobody, and nothing else in the
+	// system would ever know it happened. See resumeStore.noteTraffic.
+	h.resume.noteTraffic(uid)
+
 	h.cwmu.Lock()
 	var targets []*ccwireSession
 	for s := range h.cwSessions[uid] {
@@ -508,18 +549,22 @@ func (h *Hub) ccwireDeliverLocal(chatID, uid, event string, payload any) {
 	if len(targets) == 0 {
 		return
 	}
-	raw := ccwireEventFrame(chatID, event, payload)
+	// Encoded ONCE and shared, as before. deliver() hands those bytes straight
+	// to every session that has no replay window, and re-encodes with a
+	// per-session seq only for the ones that can use it.
+	msg, raw := ccwireEventBuild(chatID, event, payload)
+	var appMsgs []ccwire.Message
 	var appFrames [][]byte
+	built := false
 	for _, s := range targets {
 		if s.appEvents {
-			if appFrames == nil {
-				appFrames = appEventFrames(event, payload)
+			if !built {
+				appMsgs, appFrames = appEventBuild(event, payload)
+				built = true
 			}
-			for _, raw := range appFrames {
-				s.enqueue(raw)
-			}
+			s.deliver(appMsgs, appFrames)
 		} else {
-			s.enqueue(raw)
+			s.deliverOne(msg, raw)
 		}
 	}
 }
@@ -528,12 +573,17 @@ func (h *Hub) ccwireDeliverLocal(chatID, uid, event string, payload any) {
 // event CC-Wire has no body for. Built ONCE per (uid, event) and shared across
 // that user's sessions.
 func ccwireEventFrame(chatID, event string, payload any) []byte {
+	_, raw := ccwireEventBuild(chatID, event, payload)
+	return raw
+}
+
+func ccwireEventBuild(chatID, event string, payload any) (ccwire.Message, []byte) {
 	var msg ccwire.Message
 	switch event {
 	case "new_message":
 		m := ccwireJSONMap(payload)
 		if m == nil {
-			return nil
+			return msg, nil
 		}
 		msg = ccwire.Message{
 			TrafficClass: ccwire.TrafficClassMessaging,
@@ -551,11 +601,11 @@ func ccwireEventFrame(chatID, event string, payload any) []byte {
 	case "message_edited":
 		m := ccwireJSONMap(payload)
 		if m == nil {
-			return nil
+			return msg, nil
 		}
 		id, _ := m["id"].(string)
 		if id == "" {
-			return nil
+			return msg, nil
 		}
 		env := ccwire.AppendStringField(nil, 1, chatID)
 		env = ccwire.AppendStringField(env, 2, id)
@@ -577,11 +627,11 @@ func ccwireEventFrame(chatID, event string, payload any) []byte {
 	case "message_deleted":
 		m := ccwireJSONMap(payload)
 		if m == nil {
-			return nil
+			return msg, nil
 		}
 		id, _ := m["id"].(string)
 		if id == "" {
-			return nil
+			return msg, nil
 		}
 		b := ccwire.AppendStringField(nil, 1, chatID)
 		b = ccwire.AppendStringField(b, 2, id)
@@ -598,7 +648,7 @@ func ccwireEventFrame(chatID, event string, payload any) []byte {
 	case "typing_start", "typing_stop":
 		m := ccwireJSONMap(payload)
 		if m == nil {
-			return nil
+			return msg, nil
 		}
 		id, _ := m["chatId"].(string)
 		if id == "" {
@@ -621,7 +671,7 @@ func ccwireEventFrame(chatID, event string, payload any) []byte {
 	case "message_delivered", "message_read":
 		m := ccwireJSONMap(payload)
 		if m == nil {
-			return nil
+			return msg, nil
 		}
 		kind, idField := ccwire.ReceiptKindDelivered, "lastDeliveredMessageId"
 		if event == "message_read" {
@@ -629,7 +679,7 @@ func ccwireEventFrame(chatID, event string, payload any) []byte {
 		}
 		id, _ := m[idField].(string)
 		if id == "" {
-			return nil
+			return msg, nil
 		}
 		var b []byte
 		b = ccwire.AppendStringField(b, 1, chatID)
@@ -646,9 +696,9 @@ func ccwireEventFrame(chatID, event string, payload any) []byte {
 		}
 
 	default:
-		return nil
+		return msg, nil
 	}
-	return ccwireFrame(msg)
+	return msg, ccwireFrame(msg)
 }
 
 // ccwireDeliverBody encodes a DeliverMessage from the persisted public message

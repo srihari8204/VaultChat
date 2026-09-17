@@ -30,7 +30,7 @@ export default function VaultBeamSettings() {
       <Stack.Screen options={{ headerShown: false }} />
       <StatusBar barStyle={C.text === '#FFFFFF' ? 'light-content' : 'dark-content'} />
       <View style={[styles.header, { borderBottomColor: C.glassStroke }]}>
-        <TouchableOpacity onPress={() => router.back()} hitSlop={10} style={styles.hBtn}>
+        <TouchableOpacity accessibilityRole="button" accessibilityLabel="Back" onPress={() => router.back()} hitSlop={10} style={styles.hBtn}>
           <Ionicons name="arrow-back" size={22} color={C.text} />
         </TouchableOpacity>
         <Text style={[styles.hTitle, { color: C.text }]}>VaultBeam auto-download</Text>

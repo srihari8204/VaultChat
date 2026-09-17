@@ -1,10 +1,29 @@
 //! transport-core — the Rust transport coordinator for CrazzyChat.
 //!
-//! STATUS: NOT WIRED. No Gradle module includes this crate, no FFI is exposed
-//! yet, and nothing in the app or the Go backend imports it. It is Stage 1 of
-//! the rollout plan — "shared transport interface and conformance harness, with
-//! behaviour unchanged". The live transport is CC-Wire over WebSocket/WebTransport with
-//! JSON payloads and stays that way until a parity soak says otherwise.
+//! STATUS, and read this carefully because the old header was wrong in a way
+//! that cost a review its conclusion.
+//!
+//! This crate IS compiled into the Android app. Not directly: the Gradle module
+//! `android/transport-core` builds `services/transport/rust-net`, which depends
+//! on this crate by path, exports the five `vc_transport_*` symbols, and is
+//! linked through `TransportJni.cpp` into `libtransportnative.so` behind
+//! `NativeModules.TransportCore`. So "no Gradle module includes this crate" is
+//! false, and anyone reasoning from that sentence will misjudge what shipping a
+//! change here means.
+//!
+//! What IS true is narrower and still important: the shipped FFI path reaches
+//! only `carrier`, an opaque-byte WebSocket/WebTransport pipe. `session`,
+//! `conn`, `parse`, `frame` and `sched` are reached only through `rust-net`'s
+//! `client`, whose callers are the `ccwire-connect` dev binary (Gradle builds
+//! `--lib`, so it never ships) and the test suites. The live CC-Wire protocol —
+//! framing, handshake, resume, reconnect — runs in TypeScript, in
+//! `lib/ccwire/client.ts`, and `lib/ccwire/nativeSocket.ts` presents a
+//! WebSocket-shaped object precisely so it keeps owning those layers.
+//!
+//! Two resume state machines and two backoff policies cannot both be
+//! authoritative. Moving them here is a deliberate handover, not a wiring
+//! exercise — see `rust-net/src/lib.rs` on why a second backoff would be a
+//! second policy to drift.
 //!
 //! WHAT THIS CRATE IS FORBIDDEN FROM DOING, and why it has no dependencies yet:
 //!

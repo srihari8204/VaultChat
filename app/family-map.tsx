@@ -14,6 +14,7 @@ import { View, Text, ScrollView, ActivityIndicator, StyleSheet, TouchableOpacity
 import * as Location from 'expo-location';
 import { Ionicons } from '@expo/vector-icons';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '../lib/theme';
 import { useSpaceGlass } from '../components/spaces/SpaceGround';
 import FamilyMap, { type FamilyMarker } from '../components/family/FamilyMap';
@@ -67,6 +68,7 @@ const freshLabel = (f: Freshness, ts?: number, now?: number, sharingOff?: boolea
 };
 
 export default function FamilyMapScreen() {
+  const insets = useSafeAreaInsets();
   const { colors } = useTheme();
   // The map owns the whole ground here, so no SpaceGround — the glass system
   // shows up as SOLID sheet-toned floating bars: translucent panes over live
@@ -545,7 +547,12 @@ export default function FamilyMapScreen() {
   // Compact by intent: every pixel of chrome is a pixel of map the family
   // cannot see. Bars are sized to their content and stacked at that pitch.
   const TOP_0 = 8, TOP_PITCH = 46;
-  const BOT_0 = 10, BOT_PITCH = 44;
+  // BOT_0 carries the gesture inset. NavigationLayer already applies whatever
+  // it is handed (components/family/NavigationLayer.tsx:92), but the literal 10
+  // fed into it had none, so the dock, the follow button and the arrival card
+  // all sat inside the 48dp swipe strip on a gesture-nav device — edgeToEdge is
+  // on at every API level. One value, all three consumers (2026-09-17).
+  const BOT_0 = 10 + insets.bottom, BOT_PITCH = 44;
   const showTrip = !!trip && !meetOpen;
   const showFollowBar = !!followId && !meetOpen;
   const showLeave = !!destination && !meetOpen && destSecs != null;

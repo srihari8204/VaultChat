@@ -32,6 +32,7 @@ import {
   type LeaveRequest, type LeaveBalance,
 } from '../lib/spaces/api';
 import { AuroraBackground } from '../components/ui';
+import { KeyboardSafe } from '../components/ui/KeyboardSafe';
 
 const KINDS = ['casual', 'sick', 'privilege', 'unpaid', 'other'];
 
@@ -266,11 +267,12 @@ export default function SpaceLeaveScreen() {
         )}
       </ScrollView>
 
-      <TouchableOpacity style={[s.fab, { backgroundColor: colors.primary }]} onPress={() => setCompose(true)}>
+      <TouchableOpacity accessibilityRole="button" accessibilityLabel="New leave request" style={[s.fab, { backgroundColor: colors.primary }]} onPress={() => setCompose(true)}>
         <Ionicons name="add" size={26} color="#fff" />
       </TouchableOpacity>
 
       <Modal visible={compose} animationType="slide" transparent onRequestClose={() => setCompose(false)}>
+        <KeyboardSafe keyboardOnly>
         <View style={s.sheetWrap}>
           <View style={s.sheet}>
             <Text style={s.cardTitle}>Request leave</Text>
@@ -319,6 +321,7 @@ export default function SpaceLeaveScreen() {
             </View>
           </View>
         </View>
+        </KeyboardSafe>
       </Modal>
     </View>
   );

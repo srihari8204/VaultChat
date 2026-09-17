@@ -9,7 +9,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, ScrollView, Alert, ActivityIndicator,
-  Switch, Modal, TextInput, Animated, Vibration, Pressable, KeyboardAvoidingView, Platform,
+  Switch, Modal, TextInput, Animated, Vibration, Pressable,
   Linking, AppState,
 } from 'react-native';
 import * as Location from 'expo-location';
@@ -70,6 +70,7 @@ import {
   memberDistances, mergeRoadDistances, summarize as summarizeDistances, sortMembers, defaultRef,
   formatMetres, type SortMode,
 } from '../lib/family/distance';
+import { KeyboardSafe } from '../components/ui';
 
 const SOS_HOLD_MS = 1500;
 const AVATAR_COLORS = ['#4A9FFF', '#EC4899', '#22C55E', '#F59E0B', '#A855F7', '#EF4444', '#14B8A6', '#F97316'];
@@ -146,6 +147,16 @@ async function loadGroupsReconciled(): Promise<GroupRef[]> {
           groupType: detail.groupType,
           icon: detail.icon ?? null,
           color: detail.color ?? null,
+          // Adopt the ROLE AND PERMISSIONS the same response already carries
+          // (2026-09-17). Saving the type without them cached the space as
+          // "typed, permissions unknown", and until the user made it active
+          // — the only path that used to write permissions — every screen
+          // reading the registry had to guess. Free: no extra request.
+          // Spread conditionally because upsert() merges, and an explicit
+          // `permissions: undefined` would BLANK a set we already had.
+          ...(Array.isArray(detail.permissions)
+            ? { role: detail.myRole, permissions: detail.permissions as Permission[] }
+            : {}),
         } as GroupRef);
       } catch { /* one unreadable chat must not stop the others being adopted */ }
     }
@@ -1333,7 +1344,7 @@ export default function FamilySpaceScreen() {
         // parent's phone the whole point is to move between their family and
         // their child's school transport space.
         headerLeft: () => (
-          <TouchableOpacity
+          <TouchableOpacity accessibilityRole="button" accessibilityLabel="Back"
             onPress={() => (router.canGoBack() ? router.back() : router.replace('/(tabs)/mini' as any))}
             style={{ paddingHorizontal: 8 }}
           >
@@ -2017,7 +2028,12 @@ export default function FamilySpaceScreen() {
 
       {/* ── Check-in sheet ── */}
       <Modal visible={checkin} transparent animationType="slide" onRequestClose={() => setCheckin(false)}>
-        <KeyboardAvoidingView behavior={'padding'} style={st.modalWrap}>
+        {/* KeyboardSafe, not KeyboardAvoidingView (2026-09-17): a React Native
+            <Modal> is its own Android window and never receives the activity's
+            adjustResize, and KAV's 'padding' math mixes Modal-relative layout
+            coords with absolute screen coords, so the lift came up short.
+            keyboardOnly: this sheet already sets its own bottom padding. */}
+        <KeyboardSafe keyboardOnly style={st.modalWrap}>
           <Pressable style={{ flex: 1 }} onPress={() => setCheckin(false)} />
           <View style={[st.modal, { backgroundColor: G.sheet, borderColor: G.edge }]}>
             {/* Design screen 20: choose a status, then send.
@@ -2061,12 +2077,17 @@ export default function FamilySpaceScreen() {
             </TouchableOpacity>
             </ScrollView>
           </View>
-        </KeyboardAvoidingView>
+        </KeyboardSafe>
       </Modal>
 
       {/* ── Announcement sheet ── */}
       <Modal visible={announcing} transparent animationType="slide" onRequestClose={() => setAnnouncing(false)}>
-        <KeyboardAvoidingView behavior={'padding'} style={st.modalWrap}>
+        {/* KeyboardSafe, not KeyboardAvoidingView (2026-09-17): a React Native
+            <Modal> is its own Android window and never receives the activity's
+            adjustResize, and KAV's 'padding' math mixes Modal-relative layout
+            coords with absolute screen coords, so the lift came up short.
+            keyboardOnly: this sheet already sets its own bottom padding. */}
+        <KeyboardSafe keyboardOnly style={st.modalWrap}>
           <Pressable style={{ flex: 1 }} onPress={() => setAnnouncing(false)} />
           {/* Height-capped with an inner scroll, same recipe as the manage
               sheet: with the keyboard up at large font scales the fixed sheet
@@ -2111,12 +2132,17 @@ export default function FamilySpaceScreen() {
             </TouchableOpacity>
             </ScrollView>
           </View>
-        </KeyboardAvoidingView>
+        </KeyboardSafe>
       </Modal>
 
       {/* ── Manage circle sheet ── */}
       <Modal visible={manage} transparent animationType="slide" onRequestClose={() => setManage(false)}>
-        <KeyboardAvoidingView behavior={'padding'} style={st.modalWrap}>
+        {/* KeyboardSafe, not KeyboardAvoidingView (2026-09-17): a React Native
+            <Modal> is its own Android window and never receives the activity's
+            adjustResize, and KAV's 'padding' math mixes Modal-relative layout
+            coords with absolute screen coords, so the lift came up short.
+            keyboardOnly: this sheet already sets its own bottom padding. */}
+        <KeyboardSafe keyboardOnly style={st.modalWrap}>
           <Pressable style={{ flex: 1 }} onPress={() => setManage(false)} />
           {/* maxHeight + an inner scroll: this sheet holds 20+ actions, and on
               a short phone the top rows were pushed clean off the screen.
@@ -2133,7 +2159,7 @@ export default function FamilySpaceScreen() {
                 <TextInput value={renameTxt} onChangeText={setRenameTxt} placeholder="Rename circle" placeholderTextColor={colors.textFaint}
                   style={[st.noteInput, { flex: 1, marginTop: 0, color: colors.text, borderColor: colors.glassStroke, backgroundColor: colors.glassSoft }]}
                   returnKeyType="done" onSubmitEditing={doRename} />
-                <TouchableOpacity onPress={doRename} disabled={!renameTxt.trim() || busy}
+                <TouchableOpacity accessibilityRole="button" accessibilityLabel="Save name" onPress={doRename} disabled={!renameTxt.trim() || busy}
                   style={[st.saveBtn, { backgroundColor: renameTxt.trim() ? colors.primary : colors.border }]}>
                   {busy ? <ActivityIndicator color="#fff" size="small" /> : <Ionicons name="checkmark" size={20} color="#fff" />}
                 </TouchableOpacity>
@@ -2242,7 +2268,7 @@ export default function FamilySpaceScreen() {
             )}
             </ScrollView>
           </View>
-        </KeyboardAvoidingView>
+        </KeyboardSafe>
       </Modal>
 
       {/* ── Crash detected: loud, full-screen, and biased toward asking for

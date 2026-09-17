@@ -9,11 +9,16 @@
 import {
   ORDER_STEPS, orderProgress, nextOrderStatus, orderStatusLabel,
   normalizeOrderStatus, canCustomerCancel, canOwnerCancel, REJECT_REASONS,
-  formatMoney, shopOpenState, cartTotal,
+  formatMoney, shopOpenState, cartTotal, isNum, isBlankOrNum, isBlankOrNonNegative, num,
   canCustomerCollect, notCollectedGate, NOT_COLLECTED_AFTER_HOURS,
   isStalePrice, PRICE_STALE_DAYS, dateLocale, orderStamp,
   type OrderStatus, type TimelineEvent,
 } from './shopbook';
+// financeFormat is where the comma rule came from. Assert the two screens
+// agree rather than trusting that a copied rule stayed copied.
+import { num as financeNum } from './financeFormat';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 
 let failures = 0;
 function check(name: string, actual: unknown, expected: unknown) {
@@ -149,4 +154,217 @@ if (failures) {
   console.error(`\n${failures} check(s) failed`);
   process.exit(1);
 }
-console.log('\nall checks passed');
+
+// ── isNum: the blank-vs-garbage distinction num() cannot make ──────
+// Each rejection below is a real bug that shipped: "₹285" is the ₹0 invoice,
+// "12,5" is the 10x trap a lenient parser would reintroduce, and Number()
+// quietly accepting hex and exponents meant a quantity of "0x10" was sixteen.
+check('isNum blank',              isNum(''), false);
+check('isNum whitespace',         isNum('   '), false);
+check('isNum integer',            isNum('285'), true);
+check('isNum decimal',            isNum('2.5'), true);
+check('isNum leading dot',        isNum('.5'), true);
+check('isNum negative allowed',   isNum('-3'), true);
+check('isNum rupee symbol',       isNum('₹285'), false);
+check('isNum decimal comma',      isNum('12,5'), false);
+check('isNum trailing unit',      isNum('20 mins'), false);
+check('isNum hex',                isNum('0x10'), false);
+check('isNum exponent',           isNum('1e3'), false);
+check('isNum half-typed dot',     isNum('12.'), false);
+
+// ── thousands grouping (2026-09-17) ───────────────────────────────
+//
+// THE ASYMMETRY IS THE WHOLE POINT, and it is the rule utils/financeFormat.ts
+// has always used. This app ships in India: "1,200" and "1,00,000" are what a
+// shopkeeper types off a price tag, and refusing them outright made a
+// correctly-entered lakh look like garbage and priced the line at nothing.
+//
+// But a thousands separator is ALWAYS followed by exactly three digits, in
+// Western and Indian grouping alike — so one or two digits after the FINAL
+// comma is the decimal comma much of the world types, and a bare strip would
+// bill a ₹12.50 item at ₹125. Ten times, silently, with a plausible number at
+// the end of it. Accepted above the line, refused below it; never confused.
+check('isNum western grouping',   isNum('1,200'), true);
+check('isNum lakh grouping',      isNum('1,00,000'), true);
+check('isNum crore grouping',     isNum('1,00,00,000'), true);
+check('isNum grouping + paise',   isNum('1,200.50'), true);
+check('isNum negative grouped',   isNum('-1,200'), true);
+check('isNum two-digit group',    isNum('12,50'), false);
+check('isNum trailing comma',     isNum('1,'), false);
+check('isNum lone comma',         isNum(','), false);
+check('isNum grouped rupee',      isNum('₹1,200'), false);
+
+check('grouped thousands parse',     num('1,200'), 1200);
+check('a lakh parses',               num('1,00,000'), 100000);
+check('a crore parses',              num('1,00,00,000'), 10000000);
+check('grouping keeps the paise',    num('1,200.50'), 1200.5);
+check('negative grouped correction', num('-1,200'), -1200);
+// The ten-times trap: these must be 0, never 125 / 1250.
+check('the decimal comma is refused, not multiplied by ten', num('12,5'), 0);
+check('a two-digit group is refused too', num('12,50'), 0);
+check('a trailing comma is not a number', num('1,'), 0);
+check('a lone comma is not a number', num(','), 0);
+// The two screens must not disagree about what a typed lakh is worth.
+check('shopbook agrees with financeFormat on a lakh',
+  num('1,00,000'), financeNum('1,00,000'));
+check('shopbook agrees with financeFormat on western grouping',
+  num('1,200'), financeNum('1,200'));
+check('financeFormat refuses the same decimal comma (as NaN, its own contract)',
+  Number.isNaN(financeNum('12,5')), true);
+
+// ── isBlankOrNum: the shape all seven ungated money writes shared ──
+//
+// Blank is a real answer in every one of them — no tax, no cost price, no
+// minimum order, no credit ceiling, pack the full ordered quantity — while
+// garbage is not. num() renders BOTH as an identical, believable 0, and that 0
+// then survives every `< 0` range check downstream, because 0 is not negative.
+check('blank is a real answer',         isBlankOrNum(''), true);
+check('whitespace is still blank',      isBlankOrNum('   '), true);
+check('a plain number passes',          isBlankOrNum('285'), true);
+check('a typed lakh passes',            isBlankOrNum('1,00,000'), true);
+check('a negative correction passes',   isBlankOrNum('-3'), true);
+check('the decimal comma is garbage',   isBlankOrNum('12,5'), false);
+check('a pasted rupee sign is garbage', isBlankOrNum('₹285'), false);
+check('hex is garbage',                 isBlankOrNum('0x10'), false);
+check('an exponent is garbage',         isBlankOrNum('1e3'), false);
+check('Infinity is garbage',            isBlankOrNum('Infinity'), false);
+check('letters are garbage',            isBlankOrNum('abc'), false);
+// The distinction that is the entire reason this exists.
+check('num() cannot tell blank from garbage — both are 0',
+  [num(''), num('₹285')], [0, 0]);
+check('isBlankOrNum can',
+  [isBlankOrNum(''), isBlankOrNum('₹285')], [true, false]);
+
+// ── the seven gates actually being AT the seven call sites ────────
+//
+// isBlankOrNum being correct is worth nothing if a money write does not call
+// it, and that is precisely the bug that shipped: the helper's twin (isNum)
+// already existed and these seven writes simply did not use it. A unit test of
+// the predicate cannot see that, and app/shop-book.tsx is a 4500-line React
+// screen with no seam to import. So this reads the source and asserts each
+// gate is still there — delete one and this file exits non-zero (2026-09-17).
+//
+// ponytail: source scan, not a render test. If this screen ever grows a
+// testable seam (or RNTL lands in the project), assert on behaviour instead.
+{
+  const screen = [
+    join(process.cwd(), 'app', 'shop-book.tsx'),
+    join(process.cwd(), '..', 'app', 'shop-book.tsx'),
+  ].map((p) => { try { return readFileSync(p, 'utf8'); } catch { return null; } })
+   .find((x) => x != null);
+
+  check('app/shop-book.tsx is readable from the repo root', screen != null, true);
+
+  // Each entry: the money write, and the Alert that now stands in front of it.
+  // The copy names the offending value, because "invalid input" on a numeric
+  // keyboard tells a shopkeeper nothing about which box to look at.
+  //
+  // The parentheses say what each gate CATCHES, which is garbage (and, where
+  // the helper is the non-negative one, a negative). They used to say "0 = ..."
+  // as though a typed zero were rejected; it is not, and never was —
+  // isBlankOrNonNegative passes "0" by definition. The 0 in each case is what
+  // num() SILENTLY COERCES the garbage to, which is the reason the gate has to
+  // stand in front of it (2026-09-17).
+  const GATES: [string, string][] = [
+    ['catalog price/tax/cost/reorder (garbage → 0 re-prices every future order)',
+      "Alert.alert('Check the numbers',"],
+    ['packed quantity on the live bill (garbage → 0 bills an empty bag; -3 too)',
+      "Alert.alert('Check the packed quantity',"],
+    ['ad-hoc item added to a bill (garbage price → 0 sends the line out free)',
+      "Alert.alert('Check the quantity and price',"],
+    ['alternative product price (garbage → 0 offers the substitute free)',
+      "Alert.alert('Check the price',"],
+    ['coupon minimum order (garbage → 0 applies it to EVERY order)',
+      "Alert.alert('Check the minimum order',"],
+    ['credit limit (garbage → 0, and 0 means NO LIMIT — the dangerous coercion)',
+      "Alert.alert('Check the limit',"],
+    ['return quantity (garbage → 0 was silently filtered out of the return)',
+      "Alert.alert('Check the quantity',"],
+    ['bill discount (the eighth: -200 was a SURCHARGE, garbage → no discount)',
+      "Alert.alert('Check the discount',"],
+  ];
+  for (const [what, needle] of GATES) {
+    check(`gated: ${what}`, (screen ?? '').includes(needle), true);
+  }
+  // The two pre-existing gates whose pattern the seven copy must not regress.
+  check('the 2026-09-17 counter-sale / ledger gates are still in place',
+    ((screen ?? '').match(/isNum\(it\.qty\) \|\| !isNum\(it\.price\)/g) ?? []).length, 2);
+}
+
+// num(): the parse that actually reaches the database.
+//
+// isNum guards SUBMIT; num is what converts. They disagree on purpose in one
+// place - a trailing point - because num also runs on half-typed input.
+check('plain integers parse', num('12'), 12);
+check('decimals parse', num('12.5'), 12.5);
+check('a trailing point is kept mid-typing', num('12.'), 12);
+check('hex is NOT 16', num('0x10'), 0);
+check('exponent is NOT 1000', num('1e3'), 0);
+check('blank is zero', num(''), 0);
+check('whitespace is zero', num('   '), 0);
+check('a lone minus is zero', num('-'), 0);
+check('negatives still parse for stock corrections', num('-3'), -3);
+check('surrounding spaces are trimmed', num(' 42 '), 42);
+check('letters are zero', num('abc'), 0);
+check('Infinity is not a price', num('Infinity'), 0);
+check('num never returns NaN', Number.isFinite(num('nonsense')), true);
+
+// A negative price is not a typo the server rejects - it is an unauthorised
+// discount, and on the catalog it re-prices every future order of that item.
+// isNum allows a leading minus on purpose (stock corrections), so the money
+// fields need their own predicate.
+check('a negative price is refused', isBlankOrNonNegative('-3'), false);
+check('a negative grouped price is refused', isBlankOrNonNegative('-1,200'), false);
+check('blank is still allowed', isBlankOrNonNegative(''), true);
+check('zero is still allowed', isBlankOrNonNegative('0'), true);
+check('a grouped price is still allowed', isBlankOrNonNegative('1,200'), true);
+check('garbage is still refused', isBlankOrNonNegative('abc'), false);
+check('the stock screen keeps negatives', isNum('-3'), true);
+// The name is the contract: NON-NEGATIVE. It was called isBlankOrPositive and
+// the comments around three of its call sites grew to claim it catches a typed
+// zero. It does not, and a name that lies is how that spread (2026-09-17).
+check('the helper is named for what it actually accepts',
+  [isBlankOrNonNegative('0'), isBlankOrNonNegative('-0.01')], [true, false]);
+
+// ── the source-scanned half of the 2026-09-17 adversarial pass ──────
+//
+// These are the gaps a review found AFTER the first seven gates landed: writes
+// that were still ungated, and gates calling the wrong predicate so a negative
+// walked through a check that looked like it was there.
+{
+  const screen = [
+    join(process.cwd(), 'app', 'shop-book.tsx'),
+    join(process.cwd(), '..', 'app', 'shop-book.tsx'),
+  ].map((p) => { try { return readFileSync(p, 'utf8'); } catch { return null; } })
+   .find((x) => x != null) ?? '';
+
+  // A discount of -200 raised the bill by ₹200. The bare write is the bug.
+  check('the bill discount is no longer written straight from num()',
+    /patch\(\{ billDiscount: num\(discount\) \}\)\s*\}/.test(screen), false);
+
+  // isBlankOrNum accepts '-1' — the return filter then dropped the line, which
+  // is the exact short credit note the gate was added to prevent.
+  check('the return quantity gate refuses negatives',
+    screen.includes('!isBlankOrNonNegative(qty[l.id]'), true);
+  // fulfilledQty: -3 on a customer's bill is a negative line total.
+  check('the packed quantity gate refuses negatives',
+    /if \(!isBlankOrNonNegative\(raw\)\) \{/.test(screen), true);
+  // isBlankOrNonNegative passes '0'; `|| 1` then billed one of it.
+  check('a typed zero quantity is no longer billed as one',
+    /Math\.max\(0, num\(addQty\)\) \|\| 1/.test(screen), false);
+
+  // Rejections that named the wrong problem: a box with digits in it was told
+  // it was empty, and a bad cart quantity said nothing at all.
+  check('the stock screen tells a garbage quantity from an empty box',
+    /if \(!qty\.trim\(\)\) \{ Alert\.alert\('Enter a quantity'\); return; \}\s*\n\s*if \(!isNum\(qty\)\) \{/.test(screen), true);
+  check('a khata payment of "₹500" is not called an empty amount',
+    screen.includes("Alert.alert('Check the amount',"), true);
+  check('a garbage cart quantity is refused out loud, not silently',
+    /if \(raw\.trim\(\)\) \{\s*Alert\.alert\('Check the quantity',/.test(screen), true);
+}
+
+// This line used to print unconditionally, with no process.exit - so a failed
+// check printed a tick-less line and the suite still exited 0. Every money
+// assertion in this file was unenforceable until 2026-09-17.
+console.log(failures === 0 ? String.fromCharCode(10) + 'all checks passed' : String.fromCharCode(10) + failures + ' CHECK(S) FAILED');
+process.exit(failures === 0 ? 0 : 1);

@@ -8,7 +8,7 @@ import { useRouter, useFocusEffect } from 'expo-router';
 import { FIN, STATUS_COLORS, TABULAR } from '../../constants/financeTheme';
 import { FinHeader, Pill, EmptyState } from '../../components/finance/ui';
 import { useMe } from '../../components/finance/useMe';
-import { formatINR, inrShort } from '../../utils/financeFormat';
+import { formatINR, inrShort, num } from '../../utils/financeFormat';
 import { listLedger, type LedgerEntry } from '../../db/ledger';
 import { listGroups, type ChittiGroup } from '../../db/chitti';
 
@@ -27,7 +27,12 @@ export default function FinanceSearch() {
   useFocusEffect(reload);
 
   const query = q.trim().toLowerCase();
-  const amount = Number(q.replace(/[₹,\s]/g, ''));
+  // The last surviving copy of the bare comma strip: it read '12,5' as 125 and
+  // '0x10' as 16, so a search for one amount silently matched another. Nothing
+  // is persisted from here, but the whole point of the shared parser is that
+  // there is only one of it. ₹ and spaces still come off first — num() knows
+  // about commas, not currency symbols (2026-09-17).
+  const amount = num(q.replace(/[₹\s]/g, ''));
   const hasAmount = Number.isFinite(amount) && amount > 0;
 
   const matchedLedgers = useMemo(() => {
@@ -59,7 +64,7 @@ export default function FinanceSearch() {
           style={s.input} value={q} onChangeText={setQ} autoFocus
           placeholder="Name, mobile or amount" placeholderTextColor={FIN.faint} returnKeyType="search"
         />
-        {q.length > 0 && <TouchableOpacity onPress={() => setQ('')} hitSlop={8}><Ionicons name="close-circle" size={18} color={FIN.faint} /></TouchableOpacity>}
+        {q.length > 0 && <TouchableOpacity accessibilityRole="button" accessibilityLabel="Clear search" onPress={() => setQ('')} hitSlop={8}><Ionicons name="close-circle" size={18} color={FIN.faint} /></TouchableOpacity>}
       </View>
 
       <ScrollView contentContainerStyle={s.body} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>

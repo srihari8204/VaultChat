@@ -99,6 +99,44 @@ interface StoredSession {
 
 const IDENTITY_KEY = 'vc_e2ee_identity';
 const sessionKey = (peerId: string) => `vc_e2ee_session_${peerId}`;
+/**
+ * The peers we hold a session key for. 2026-09-17.
+ *
+ * Exists only so clearIdentity() can find its own keys. The store is
+ * SecureStore-backed and SecureStore CANNOT ENUMERATE — there is no listing
+ * call — so a key nobody wrote down is a key nobody can delete. That is how
+ * signing out left user A's identity keypair and every ratchet on the device
+ * for user B to inherit: the purge lists had nothing to name.
+ *
+ * PRE-INDEX SESSIONS ARE THE DANGEROUS CASE, not a cosmetic leftover. An
+ * earlier version of this comment claimed an orphaned `vc_e2ee_session_<peer>`
+ * was "unreadable without the identity and overwritten on next contact". Both
+ * halves were wrong, and the correction is the whole reason clearIdentity()
+ * takes an extra peer list:
+ *   • a StoredSession is serializeState(ratchet) — SYMMETRIC root/chain keys.
+ *     It does not need the identity keypair to work, so deleting the identity
+ *     does not make it unreadable.
+ *   • encryptForPeer() reuses any stored session UNCONDITIONALLY; it only
+ *     re-runs X3DH when none exists, so nothing overwrites it.
+ * So on an install predating the index, a sign-out left user B continuing user
+ * A's ratchet: B's messages encrypted under A's chain, arriving at the peer
+ * authenticated as A. That is an impersonation, not an orphan.
+ *
+ * Hence clearIdentity(alsoPeerIds) — the caller passes the peers the app
+ * already knows from the local chat cache (see e2eeSession.rn), so those blobs
+ * are enumerated even when the index never recorded them.
+ *
+ * RESIDUAL RISK, deliberately not papered over: a peer in NEITHER the index nor
+ * the local chat cache — e.g. a chat deleted locally on a pre-index build while
+ * its ratchet blob stayed — is still unreachable, because SecureStore cannot be
+ * enumerated. Reopening that chat re-fetches the peer's bundle only if no
+ * session exists, so such a blob would be reused. It is a narrow window on old
+ * installs and it closes for good on the first sign-out after this build.
+ *
+ * Entries are never removed on resetSession() — deleting an absent key is a
+ * no-op, and a stale name costs one wasted del() at purge time.
+ */
+const PEER_INDEX = 'vc_e2ee_peers';
 // Refill the one-time prekey pool well before it empties.
 //
 // The top-up only runs from provisionE2EEIdentity() — app start and opening a
@@ -136,6 +174,34 @@ export interface E2EESession {
    * what was missing is noticing that a key differs from the one used before.
    */
   peerIdentityKey(peerId: string): Promise<string | null>;
+  /**
+   * Destroy this device's E2EE identity and every per-peer ratchet. 2026-09-17.
+   *
+   * Sign-out purges the local database, media and PIN, but the identity keypair
+   * and the sessions built on it were in no purge list at all — so the next
+   * account signed in on the device adopted the previous user's identity, and
+   * their safety numbers were somebody else's.
+   *
+   * `alsoPeerIds` are peers to clear ON TOP of the index — see PEER_INDEX for
+   * why an install predating the index cannot rely on the index alone.
+   */
+  clearIdentity(alsoPeerIds?: string[]): Promise<void>;
+  /**
+   * Record peers in the index WITHOUT touching their sessions.
+   *
+   * For the one writer that legitimately puts a session blob in the store
+   * behind saveSession()'s back: the encrypted-backup restore in
+   * e2eeSession.rn. A session the index never heard of is a session
+   * clearIdentity() cannot delete.
+   */
+  rememberPeers(peerIds: string[]): Promise<void>;
+  /**
+   * The current identity generation — bumped by every clearIdentity().
+   *
+   * Lets a caller holding a fire-and-forget promise tell whether the identity
+   * it started with is still the live one. See provisionE2EEIdentity().
+   */
+  identityGeneration(): number;
 }
 
 export function createE2EESession(deps: { store: KVStore; transport: KeyBundleTransport }): E2EESession {
@@ -149,6 +215,26 @@ export function createE2EESession(deps: { store: KVStore; transport: KeyBundleTr
     await store.set(IDENTITY_KEY, JSON.stringify(id));
   }
 
+  /**
+   * Write a key, and make a concurrent purge WIN. 2026-09-17.
+   *
+   * Checking the generation before the write is not enough on its own: a
+   * SecureStore write is slow and chunked, so clearIdentity() lands DURING one
+   * routinely — the store deletes the key, our write then recreates it, and the
+   * account is back. The store offers no compare-and-swap, so the only way for
+   * the purge to win is to check again afterwards and undo what we wrote.
+   *
+   * Deleting is right even in the rare case where the next account has already
+   * written this key: chunkedKV serializes per key, so our write overwrote
+   * theirs whole, and an absent key re-provisions cleanly while a stale one is
+   * the leak this whole mechanism exists to stop.
+   */
+  async function guardedSet(k: string, v: string, gen: number): Promise<void> {
+    if (gen !== _generation) return;
+    await store.set(k, v);
+    if (gen !== _generation) { try { await store.del(k); } catch {} }
+  }
+
   // Single-flight identity: the local identity is loaded (or created) exactly
   // ONCE and shared by every caller — publish, encrypt, and decrypt. Without
   // this, provisioning fired from two places at once (app/_layout + app/chat)
@@ -158,11 +244,45 @@ export function createE2EESession(deps: { store: KVStore; transport: KeyBundleTr
   // published. Memoizing the create makes that race impossible.
   let _identity: StoredIdentity | null = null;
   let _identityPromise: Promise<StoredIdentity> | null = null;
+
+  /**
+   * IDENTITY GENERATION — the half a flag reset cannot reach. 2026-09-17.
+   *
+   * clearIdentity() can null the memos below, but it CANNOT cancel work that is
+   * already sitting on an await. provisionE2EEIdentity() is fired and forgotten
+   * from app/_layout, so a forced sign-out lands in the middle of it routinely:
+   *
+   *   1. ensurePublished() captures `id` from getIdentity()
+   *   2. the purge deletes vc_e2ee_identity, the sessions and the index
+   *   3. the in-flight publish reaches its OTPK top-up and calls
+   *      saveIdentitySerial(id) — WRITING THE DELETED IDENTITY BACK TO DISK,
+   *      re-publishing the purged public key, and marking itself provisioned
+   *
+   * The next account then inherits the previous user's identity and never
+   * publishes its own: exactly the leak the purge was added to close, restored
+   * by a promise nobody could cancel.
+   *
+   * So every write carries the generation it was PLANNED under and is dropped
+   * if the generation has moved on. A counter and not a flag, because a second
+   * purge during the first one's recovery has to invalidate that work too.
+   */
+  let _generation = 0;
+  /** Thrown when the account was purged while its identity was being loaded. */
+  const IDENTITY_CLEARED = 'e2ee: identity cleared during load';
+
   function getIdentity(): Promise<StoredIdentity> {
     if (_identity) return Promise.resolve(_identity);
     if (!_identityPromise) {
       _identityPromise = (async () => {
-        const id = (await loadIdentity()) ?? (await createIdentity());
+        const gen = _generation;
+        const id = (await loadIdentity()) ?? (await createIdentity(gen));
+        // A purge landed while we were reading: `id` is the dead account's
+        // keypair (or one created for it). Caching it would hand the next
+        // getIdentity() the very thing the purge deleted, and publishing it
+        // would re-expose the signed-out user's public key. Fail instead — the
+        // catch below clears the memo, so the next caller retries cleanly and
+        // gets a fresh identity for whoever is signed in now.
+        if (gen !== _generation) throw new Error(IDENTITY_CLEARED);
         _identity = id;
         return id;
       })();
@@ -174,8 +294,12 @@ export function createE2EESession(deps: { store: KVStore; transport: KeyBundleTr
   // Serialize identity writes so concurrent mutations (OTPK top-up on publish,
   // OTPK consumption on decrypt) never interleave their chunked writes.
   let _saveChain: Promise<void> = Promise.resolve();
-  function saveIdentitySerial(id: StoredIdentity): Promise<void> {
-    const next = _saveChain.then(() => saveIdentity(id), () => saveIdentity(id));
+  function saveIdentitySerial(id: StoredIdentity, gen: number): Promise<void> {
+    // Through guardedSet, and evaluated INSIDE the chained closure: this write
+    // may have been queued behind an await that a purge slipped through, and it
+    // may also be overtaken by one while it runs.
+    const write = () => guardedSet(IDENTITY_KEY, JSON.stringify(id), gen);
+    const next = _saveChain.then(write, write);
     _saveChain = next.catch(() => {});
     return next;
   }
@@ -187,7 +311,7 @@ export function createE2EESession(deps: { store: KVStore; transport: KeyBundleTr
     }
     return out;
   }
-  async function createIdentity(): Promise<StoredIdentity> {
+  async function createIdentity(gen: number): Promise<StoredIdentity> {
     const ik = generateDH();
     const signing = generateSigningKey();
     const spk = generateDH();
@@ -201,7 +325,9 @@ export function createE2EESession(deps: { store: KVStore; transport: KeyBundleTr
       opks,
       nextKeyId: 2 + OPK_BATCH,
     };
-    await saveIdentity(id);
+    // Through the guarded writer: a keypair minted for an account that signed
+    // out mid-creation must not be left on disk for the next one to adopt.
+    await saveIdentitySerial(id, gen);
     return id;
   }
   function publishPayload(id: StoredIdentity): PublishBundle {
@@ -217,6 +343,7 @@ export function createE2EESession(deps: { store: KVStore; transport: KeyBundleTr
   }
 
   async function ensurePublished(): Promise<void> {
+    const gen = _generation;
     const id = await getIdentity();
     // Top up the OTPK pool if it has run low.
     // <=, not <: the floor is the number of prekeys we want to KEEP available,
@@ -227,8 +354,16 @@ export function createE2EESession(deps: { store: KVStore; transport: KeyBundleTr
       const fresh = newOpks(id.nextKeyId, OPK_BATCH);
       id.opks.push(...fresh);
       id.nextKeyId += OPK_BATCH;
-      await saveIdentitySerial(id);
+      await saveIdentitySerial(id, gen);
     }
+    // Never republish an identity that has been purged since we captured it.
+    // This call is fire-and-forget from app/_layout, so a sign-out can land at
+    // any await above. The check cannot be atomic with the network call — a
+    // request already on the wire still lands — but it carries the signed-out
+    // user's bearer token, which the backend rejects, and the next account
+    // publishes its own bundle because _provisioned was never set (see
+    // provisionE2EEIdentity).
+    if (gen !== _generation) return;
     await transport.publish(publishPayload(id));
   }
 
@@ -254,8 +389,73 @@ export function createE2EESession(deps: { store: KVStore; transport: KeyBundleTr
     const raw = await store.get(sessionKey(peerId));
     return raw ? (JSON.parse(raw) as StoredSession) : null;
   }
-  async function saveSession(peerId: string, s: StoredSession): Promise<void> {
-    await store.set(sessionKey(peerId), JSON.stringify(s));
+  async function saveSession(peerId: string, s: StoredSession, gen: number): Promise<void> {
+    // Same reason as saveIdentitySerial: a ratchet written after the purge is a
+    // ratchet the purge cannot have deleted, and encryptForPeer() reuses any
+    // stored session unconditionally — so the next account would carry on this
+    // one's chain, sending as the previous user.
+    if (gen !== _generation) return;
+    await guardedSet(sessionKey(peerId), JSON.stringify(s), gen);
+    await rememberPeers([peerId], gen);
+  }
+
+  // Peer index (see PEER_INDEX). Cached in memory so the common case — a peer
+  // we already know, saving a session on every message — costs nothing.
+  let _peers: Set<string> | null = null;
+  async function loadPeers(): Promise<Set<string>> {
+    if (_peers) return _peers;
+    try {
+      const raw = await store.get(PEER_INDEX);
+      const arr = raw ? JSON.parse(raw) : [];
+      _peers = new Set(Array.isArray(arr) ? arr.filter((p) => typeof p === 'string') : []);
+    } catch { _peers = new Set(); }
+    return _peers;
+  }
+  async function rememberPeers(peerIds: string[], gen = _generation): Promise<void> {
+    // Best-effort: failing to index a peer must never fail a message.
+    try {
+      const peers = await loadPeers();
+      const added = [...new Set(peerIds)].filter((p) => p && !peers.has(p));
+      if (!added.length) return;
+      // WRITE FIRST, memoize on SUCCESS. 2026-09-17.
+      //
+      // This used to add to the memo and then write. The write is wrapped in
+      // `catch {}` (by design — indexing a peer must not fail a message), so a
+      // throwing SecureStore write left the peer marked indexed for the whole
+      // process lifetime: every later saveSession() short-circuited on the memo,
+      // nothing ever retried the write, and that peer's session survived the
+      // purge. A security index that silently stops recording is worse than
+      // none, because clearIdentity() reports success either way.
+      await guardedSet(PEER_INDEX, JSON.stringify([...peers, ...added]), gen);
+      for (const p of added) peers.add(p);
+    } catch {}
+  }
+
+  async function clearIdentity(alsoPeerIds: string[] = []): Promise<void> {
+    // BUMP FIRST. Everything already in flight was planned under the old
+    // generation and must be dropped from here on — including a publish or a
+    // ratchet save that is parked on an await right now. See _generation.
+    _generation++;
+    // Sessions first: if this is interrupted, an identity with no sessions
+    // re-keys cleanly, while sessions with no identity are undecryptable junk.
+    //
+    // `alsoPeerIds` covers what the index cannot: sessions written before the
+    // index existed. See PEER_INDEX — those blobs are live symmetric ratchets,
+    // not inert leftovers. Deleting a key that was never there is a no-op, so
+    // an over-broad list costs one wasted del() each and nothing else.
+    const targets = new Set<string>(alsoPeerIds.filter((p) => typeof p === 'string' && p));
+    try { for (const peerId of await loadPeers()) targets.add(peerId); } catch {}
+    for (const peerId of targets) {
+      try { await store.del(sessionKey(peerId)); } catch {}
+    }
+    try { await store.del(PEER_INDEX); } catch {}
+    try { await store.del(IDENTITY_KEY); } catch {}
+    // The single-flight memo is the other half of the leak: without this the
+    // next getIdentity() in this process hands out the keypair we just deleted
+    // from disk, and the new account publishes the old user's public key.
+    _identity = null;
+    _identityPromise = null;
+    _peers = null;
   }
 
   async function hasSession(peerId: string): Promise<boolean> {
@@ -268,6 +468,7 @@ export function createE2EESession(deps: { store: KVStore; transport: KeyBundleTr
   }
 
   async function encryptForPeer(peerId: string, plaintext: string): Promise<string> {
+    const gen = _generation;
     const id = await getIdentity();
 
     let session = await loadSession(peerId);
@@ -306,7 +507,7 @@ export function createE2EESession(deps: { store: KVStore; transport: KeyBundleTr
 
     const env = ratchetEncrypt(state, new TextEncoder().encode(plaintext));
     session.state = serializeState(state);
-    await saveSession(peerId, session);
+    await saveSession(peerId, session, gen);
 
     const wire: any = { v: 'dr1', env: encodeEnvelope(env) };
     if (session.includeX3DH && session.initialHeader) wire.x3dh = session.initialHeader;
@@ -348,7 +549,7 @@ export function createE2EESession(deps: { store: KVStore; transport: KeyBundleTr
    * re-key request.
    */
   async function bootstrapResponder(
-    parsed: any, id: StoredIdentity,
+    parsed: any, id: StoredIdentity, gen: number,
   ): Promise<{ state: RatchetState; commit: () => Promise<void> }> {
     const header: InitialHeader = {
       identityKey: unb64(parsed.x3dh.ik),
@@ -385,7 +586,7 @@ export function createE2EESession(deps: { store: KVStore; transport: KeyBundleTr
         const i = id.opks.findIndex((o) => o.id === header.oneTimePreKeyId);
         if (i >= 0) {
           id.opks.splice(i, 1);       // consumed exactly once, and only on success
-          await saveIdentitySerial(id);
+          await saveIdentitySerial(id, gen);
         }
       },
     };
@@ -395,6 +596,7 @@ export function createE2EESession(deps: { store: KVStore; transport: KeyBundleTr
     const parsed = JSON.parse(wire);
     if (parsed?.v !== 'dr1' || !parsed.env) throw new Error('e2ee: not a dr1 envelope');
 
+    const gen = _generation;
     const id = await getIdentity();
     const envelope = decodeEnvelope(parsed.env) as Envelope;
 
@@ -402,13 +604,13 @@ export function createE2EESession(deps: { store: KVStore; transport: KeyBundleTr
 
     if (!session) {
       if (!parsed.x3dh) throw new Error('e2ee: no session and no X3DH header to bootstrap responder');
-      const { state, commit } = await bootstrapResponder(parsed, id);
+      const { state, commit } = await bootstrapResponder(parsed, id, gen);
       // Decrypt FIRST. If this throws, the one-time prekey is still in the pool
       // and the sender's retry can bootstrap again with the same header.
       const plaintextBytes = ratchetDecrypt(state, envelope);
       await commit();
       await saveSession(peerId, { state: serializeState(state), role: 'responder', includeX3DH: false,
-        peerIkHex: bytesToHex(unb64(parsed.x3dh.ik)) });
+        peerIkHex: bytesToHex(unb64(parsed.x3dh.ik)) }, gen);
       return new TextDecoder().decode(plaintextBytes);
     }
 
@@ -419,7 +621,7 @@ export function createE2EESession(deps: { store: KVStore; transport: KeyBundleTr
       // stop attaching the X3DH header to future messages.
       if (session.role === 'initiator' && session.includeX3DH) session.includeX3DH = false;
       session.state = serializeState(state);
-      await saveSession(peerId, session);
+      await saveSession(peerId, session, gen);
       return new TextDecoder().decode(plaintextBytes);
     } catch (err) {
       // The cached session can't decrypt this. If the message carries an X3DH
@@ -459,11 +661,11 @@ export function createE2EESession(deps: { store: KVStore; transport: KeyBundleTr
         }
       }
 
-      const { state: fresh, commit } = await bootstrapResponder(parsed, id);
+      const { state: fresh, commit } = await bootstrapResponder(parsed, id, gen);
       const plaintextBytes = ratchetDecrypt(fresh, envelope); // throws if genuinely undecryptable
       await commit();                                        // only now is the OTPK spent
       await saveSession(peerId, { state: serializeState(fresh), role: 'responder', includeX3DH: false,
-        peerIkHex: bytesToHex(unb64(parsed.x3dh.ik)) });
+        peerIkHex: bytesToHex(unb64(parsed.x3dh.ik)) }, gen);
       return new TextDecoder().decode(plaintextBytes);
     }
   }
@@ -494,5 +696,6 @@ export function createE2EESession(deps: { store: KVStore; transport: KeyBundleTr
     return sess?.peerIkHex ?? null;
   }
 
-  return { ensurePublished, encryptForPeer, decryptFromPeer, isEnvelope, hasSession, resetSession, peerIdentityKey };
+  return { ensurePublished, encryptForPeer, decryptFromPeer, isEnvelope, hasSession, resetSession,
+    peerIdentityKey, clearIdentity, rememberPeers, identityGeneration: () => _generation };
 }

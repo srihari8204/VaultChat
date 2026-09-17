@@ -438,11 +438,18 @@ const st = StyleSheet.create({
   roleWrap: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 3 },
   dot: { width: 7, height: 7, borderRadius: 4 },
   avatar: { alignItems: 'center', justifyContent: 'center' },
-  addBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, height: 48, borderWidth: 1, borderRadius: 13, marginTop: 16 },
+  // 2026-09-18: minHeight, not height. 'Share this group in a chat' already wraps
+  // to two lines on a narrow phone at normal text; at font scale 1.5 both this
+  // and 'Add people' did, and a pinned 48 sliced the second line clean off.
+  // 48 is the tap floor and the padding keeps it identical at scale 1.0.
+  addBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, minHeight: 48, paddingVertical: 14, borderWidth: 1, borderRadius: 13, marginTop: 16 },
   mode: { flexDirection: 'row', alignItems: 'flex-start', gap: 11, padding: 13, borderWidth: 1, borderRadius: 13, marginBottom: 9 },
   backdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' },
   sheet: { borderTopLeftRadius: 22, borderTopRightRadius: 22, borderTopWidth: 1, padding: 20, paddingBottom: 34 },
   sheetHead: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   opt: { flexDirection: 'row', alignItems: 'center', gap: 11, padding: 13, borderWidth: 1, borderRadius: 12, marginBottom: 8 },
-  close: { alignItems: 'center', justifyContent: 'center', height: 48, borderWidth: 1, borderRadius: 13, marginTop: 14 },
+  // 2026-09-18: same as addBtn. This one is full-width in the sheet, not a square
+  // icon slot, so it carries the 'Close' label and must grow with it — the way
+  // out of a modal is the last control that may go unreadable.
+  close: { alignItems: 'center', justifyContent: 'center', minHeight: 48, paddingVertical: 14, borderWidth: 1, borderRadius: 13, marginTop: 14 },
 });

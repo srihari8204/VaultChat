@@ -43,7 +43,11 @@ function fmtDuration(sec: number): string {
   return m ? `${m}:${String(s).padStart(2, '0')}` : `${s}s`;
 }
 
-const dirLabel = (d: CallLogEntry['direction']) => d === 'missed' ? 'Missed' : d === 'incoming' ? 'Incoming' : 'Outgoing';
+// A declined call is its own thing: the user saw it and said no. Calling that
+// 'Missed' blames them for it, and the old ternary chain had no branch for it
+// at all, so it would have read 'Outgoing' - the opposite direction.
+const dirLabel = (d: CallLogEntry['direction']) =>
+  d === 'missed' ? 'Missed' : d === 'declined' ? 'Declined' : d === 'incoming' ? 'Incoming' : 'Outgoing';
 
 type CallGroup = {
   key: string;
@@ -151,7 +155,14 @@ export default function CallsScreen() {
         { label: 'Voice call', icon: 'call-outline', onPress: () => call({ chatId: latest.chatId, peerUid: g.peerUid, peerName: g.peerName, group: g.group }, 'audio') },
         { label: 'Video call', icon: 'videocam-outline', onPress: () => call({ chatId: latest.chatId, peerUid: g.peerUid, peerName: g.peerName, group: g.group }, 'video') },
         { label: 'Call info', icon: 'information-circle-outline', onPress: () => setInfoGroup(g) },
-        { label: 'Remove from log', icon: 'trash-outline', destructive: true, onPress: () => removeGroup(g) },
+        // Confirmed like confirmClear below (2026-09-17). This is not a local
+        // hide: removeGroup also calls hideServerCalls, so it is a permanent
+        // server-side dismissal. The BULK clear asked; the single row did not.
+        { label: 'Remove from log', icon: 'trash-outline', destructive: true, onPress: () => Alert.alert(
+          'Remove from log?',
+          'This removes the call from your history on all your devices. It cannot be undone.',
+          [{ text: 'Cancel', style: 'cancel' }, { text: 'Remove', style: 'destructive', onPress: () => removeGroup(g) }],
+        ) },
       ],
     });
   }, [call, removeGroup]);
@@ -174,7 +185,9 @@ export default function CallsScreen() {
   const DirArrow = ({ d, size = 15 }: { d: CallLogEntry['direction']; size?: number }) => (
     <Ionicons
       name="arrow-up-outline" size={size}
-      color={d === 'missed' ? colors.danger : colors.online}
+      // Declined is not a failure, so it is dimmed rather than red - red is
+      // reserved for a call that got away from you.
+      color={d === 'missed' ? colors.danger : d === 'declined' ? colors.textDim : colors.online}
       style={{ transform: [{ rotate: d === 'outgoing' ? '45deg' : '-135deg' }] }}
     />
   );
@@ -304,7 +317,16 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   name:    { color: c.text, fontSize: 16, fontWeight: '600' },
   subRow:  { flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 2 },
   sub:     { color: c.textDim, fontSize: 13, flexShrink: 1 },
-  callBtn: { width: 38, height: 40, alignItems: 'center', justifyContent: 'center' },
+  // 2026-09-18: height stays PINNED. Fixed-width icon slot, no Text inside — an
+  // Ionicon at size 22 does not font-scale, so there is nothing here to clip.
+  // Freeing the height would only stretch a 38-wide slot into an oval and grow
+  // every call row for nothing. hitSlop 8 carries it past the 44 tap floor.
+  callBtn: {
+    // layout-exempt: icon-only slot, no text to clip. NOTE: 38x40 is under the
+    // 44dp tap-target floor — worth raising, but that changes row height and
+    // wants a device check first.
+    width: 38, height: 40, alignItems: 'center', justifyContent: 'center',
+  },
   sep:     { height: StyleSheet.hairlineWidth, backgroundColor: c.border, marginLeft: 78 },
 
   body:    { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 10, paddingHorizontal: 40, paddingBottom: TAB_BAR_SPACE },

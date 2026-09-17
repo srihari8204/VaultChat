@@ -24,6 +24,8 @@ import * as Sharing from 'expo-sharing';
 import { vaultEncrypt, vaultDecrypt } from '../lib/vaultCrypto';
 import type { Palette } from '../constants/theme';
 import { useColors } from '../lib/theme';
+import { HEADER_TOP } from '../constants/layout';
+import { permissionDenied } from '../lib/permissionDenied';
 
 // ─────────────────────────────────────────────────────────────────
 // Types
@@ -254,9 +256,9 @@ export default function VaultScreen() {
   // ── Add file handlers per tab ─────────────────────────────────
   const handleAdd = async () => {
     if (activeTab === 'Photos') {
-      const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      const { status, canAskAgain } = await ImagePicker.requestMediaLibraryPermissionsAsync();
       if (status !== 'granted') {
-        Alert.alert('Permission needed', 'Grant gallery access');
+        permissionDenied('Photo access needed', 'Allow gallery access to move a photo into the vault.', canAskAgain);
         return;
       }
       const result = await ImagePicker.launchImageLibraryAsync({
@@ -271,9 +273,9 @@ export default function VaultScreen() {
         );
       }
     } else if (activeTab === 'Videos') {
-      const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      const { status , canAskAgain } = await ImagePicker.requestMediaLibraryPermissionsAsync();
       if (status !== 'granted') {
-        Alert.alert('Permission needed', 'Grant gallery access');
+        permissionDenied('Photo access needed', 'Allow gallery access to move a video into the vault.', canAskAgain);
         return;
       }
       const result = await ImagePicker.launchImageLibraryAsync({
@@ -409,7 +411,7 @@ export default function VaultScreen() {
 
       {/* Header */}
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.back()}>
+        <TouchableOpacity accessibilityRole="button" accessibilityLabel="Back" onPress={() => router.back()}>
           <Ionicons name="arrow-back" size={26} color={BRAND_ACCENT} />
         </TouchableOpacity>
         <View style={styles.headerCenter}>
@@ -531,7 +533,7 @@ export default function VaultScreen() {
       )}
 
       {/* Add file FAB */}
-      <TouchableOpacity style={styles.fab} onPress={handleAdd}>
+      <TouchableOpacity accessibilityRole="button" accessibilityLabel="Add to vault" style={styles.fab} onPress={handleAdd}>
         <Ionicons name="add" size={28} color="#FFFFFF" />
       </TouchableOpacity>
 
@@ -633,7 +635,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   header: {
     flexDirection: 'row', alignItems: 'center',
     backgroundColor: c.bg,
-    paddingTop: 48, paddingBottom: 12, paddingHorizontal: 16,
+    paddingTop: HEADER_TOP, paddingBottom: 12, paddingHorizontal: 16,
     borderBottomWidth: 0.5, borderBottomColor: c.glassStroke,
     gap: 12,
   },

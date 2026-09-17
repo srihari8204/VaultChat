@@ -26,6 +26,7 @@ import {
   type RosterEntry, type SpaceLink,
 } from '../lib/spaces/api';
 import { AuroraBackground } from '../components/ui';
+import { KeyboardSafe } from '../components/ui/KeyboardSafe';
 
 export default function SpaceRosterScreen() {
   const params = useLocalSearchParams<{ spaceId?: string; name?: string; canManage?: string; groupType?: string }>();
@@ -125,7 +126,7 @@ export default function SpaceRosterScreen() {
           ...spaceHeader(colors, params.name ? `${params.name} · Roster` : 'Roster'),
           headerRight: canManage
             ? () => (
-              <TouchableOpacity onPress={() => setAdding(true)} style={{ paddingHorizontal: 8 }}>
+              <TouchableOpacity accessibilityRole="button" accessibilityLabel="Add someone to the roster" onPress={() => setAdding(true)} style={{ paddingHorizontal: 8 }}>
                 <Ionicons name="person-add" size={20} color={colors.primary} />
               </TouchableOpacity>
             )
@@ -175,7 +176,7 @@ export default function SpaceRosterScreen() {
                 </Text>
               </View>
               {canManage && (
-                <TouchableOpacity onPress={() => onArchive(r)} style={{ padding: 8 }}>
+                <TouchableOpacity accessibilityRole="button" accessibilityLabel="Archive this person" onPress={() => onArchive(r)} style={{ padding: 8 }}>
                   <Ionicons name="close-circle-outline" size={20} color={colors.textDim} />
                 </TouchableOpacity>
               )}
@@ -191,6 +192,7 @@ export default function SpaceRosterScreen() {
       </ScrollView>
 
       <Modal visible={adding} transparent animationType="fade" onRequestClose={() => setAdding(false)}>
+        <KeyboardSafe keyboardOnly>
         <View style={s.modalWrap}>
           <View style={s.modal}>
             <Text style={s.modalTitle}>Add to the roster</Text>
@@ -222,6 +224,7 @@ export default function SpaceRosterScreen() {
             </View>
           </View>
         </View>
+        </KeyboardSafe>
       </Modal>
     </View>
   );

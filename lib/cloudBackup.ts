@@ -45,17 +45,21 @@
 import * as RNFS from '@dr.pogodin/react-native-fs';
 import * as SecureStore from 'expo-secure-store';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+
+import { isSecretBackupKey } from './backupSecretKeys';
 import { vaultEncrypt, vaultDecrypt } from './vaultCrypto';
 import {
   readE2EEHeader, stampE2EEHeader, newHeader, backupSecret, generateRecoveryKey,
   passwordProblem, type E2EEHeader, type BackupMode,
 } from './backupCrypto';
 import { exportAll, importAll } from './localDb';
-import { api } from './api';
+// getCachedUser is what app/(constants)/authService's getCurrentUserAsync
+// returned anyway — it is a one-line passthrough to this. Taken directly, so
+// lib no longer reaches up into app (2026-09-17).
+import { api, getCachedUser } from './api';
 import { BACKUP_ROOT, ensureDir } from './storageRoots';
 import { e2eeGetCached, e2eeCachePlaintext } from '../services/crypto/e2eeSession.rn';
 import { buildBackup as buildFinanceBackup, restoreBackup as restoreFinanceBackup } from '../db/financeBackup';
-import { getCurrentUserAsync } from '../app/(constants)/authService';
 
 /**
  * The id finance rows are tagged with. MUST match components/finance/useMe —
@@ -63,7 +67,7 @@ import { getCurrentUserAsync } from '../app/(constants)/authService';
  * will never query back.
  */
 async function financeUserId(): Promise<string> {
-  const u = await getCurrentUserAsync().catch(() => null);
+  const u = await getCachedUser().catch(() => null);
   return u?.id ?? 'local';
 }
 
@@ -197,10 +201,33 @@ async function buildEncryptedBackup(): Promise<{ blob: string; messageCount: num
   //    device that still has a legacy external tree that it had already been
   //    drained, stranding those files outside the sandbox permanently.
   const DEVICE_LOCAL_KEYS = new Set(['vc_media_migrated_v1', 'vc_restore_prompted']);
+  // ── Key material must not ride along in the blanket sweep ──────────────
+  //
+  // The exclusion documented above removed the e2eeKeys FIELD, and the identity
+  // itself lives in SecureStore, so that part holds. But this sweep copies ALL
+  // of AsyncStorage, and two kinds of key material live there:
+  //
+  //   vc_mk_*      per-file media keys (lib/mediaKeyStore.ts, whose own header
+  //                says "the key never leaves the device"). With the DEFAULT
+  //                account-managed mode the server holds the bundle key, so
+  //                shipping these hands the server the keys to the attachment
+  //                ciphertext it is already storing. Media E2EE, defeated.
+  //                They are not needed for the stated goal either: readable
+  //                history comes from the plaintext cache below.
+  //
+  //   vc_peer_ik_* the pinned peer identity keys behind the "safety number
+  //                changed" warning (lib/keyChange.ts). Exported they leak who
+  //                the user talks to; IMPORTED they are worse - applyEncrypted
+  //                Backup does a blanket multiSet, so a bundle that controls
+  //                these can pre-acknowledge a key change and silence the MITM
+  //                warning for a chosen peer.
+  //
+  // Prefix-matched, not listed: both are per-peer/per-attachment (2026-09-17).
+  const isSecret = isSecretBackupKey;
   const keys = await AsyncStorage.getAllKeys();
   const pairs = await AsyncStorage.multiGet(keys);
   const asyncStorage: Record<string, string | null> = {};
-  for (const [k, v] of pairs) if (!DEVICE_LOCAL_KEYS.has(k)) asyncStorage[k] = v;
+  for (const [k, v] of pairs) if (!DEVICE_LOCAL_KEYS.has(k) && !isSecret(k)) asyncStorage[k] = v;
 
   // 2. Local message DB (envelopes + chats)
   const local = await exportAll();
@@ -251,7 +278,14 @@ async function applyEncryptedBackup(secret: string, blob: string): Promise<numbe
   const data = JSON.parse(json);
 
   if (data.asyncStorage) {
-    const entries = Object.entries(data.asyncStorage).filter(([, v]) => v != null) as [string, string][];
+    // Filter on the way IN as well, not only on the way out. Bundles taken
+    // before 2026-09-17 already contain vc_mk_* and vc_peer_ik_*, and this
+    // multiSet would write them straight back. For the peer pins that is an
+    // active attack surface: a bundle that pre-acknowledges a key change
+    // silences the "safety number changed" warning for that peer, so a MITM
+    // lands with the user never told.
+    const entries = Object.entries(data.asyncStorage)
+      .filter(([k, v]) => v != null && !isSecretBackupKey(k)) as [string, string][];
     if (entries.length) await AsyncStorage.multiSet(entries);
   }
   const n = await importAll({ messages: data.messages, chats: data.chats });

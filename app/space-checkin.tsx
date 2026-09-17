@@ -29,6 +29,7 @@ import {
 } from '../lib/spaces/api';
 import { getCurrentUserAsync } from './(constants)/authService';
 import { AuroraBackground } from '../components/ui';
+import { KeyboardSafe } from '../components/ui/KeyboardSafe';
 
 const LEAVE_KINDS: { key: string; label: string }[] = [
   { key: 'casual', label: 'Casual' },
@@ -201,10 +202,10 @@ export default function SpaceCheckinScreen() {
                   screen drawing an action that always fails. */}
               {canDecide && l.status === 'pending' && l.userId !== me && (
                 <View style={{ flexDirection: 'row', gap: 10 }}>
-                  <TouchableOpacity onPress={() => decide(l, 'rejected')} disabled={busy}>
+                  <TouchableOpacity accessibilityRole="button" accessibilityLabel="Reject check-in" onPress={() => decide(l, 'rejected')} disabled={busy}>
                     <Ionicons name="close-circle-outline" size={21} color={colors.danger} />
                   </TouchableOpacity>
-                  <TouchableOpacity onPress={() => decide(l, 'approved')} disabled={busy}>
+                  <TouchableOpacity accessibilityRole="button" accessibilityLabel="Approve check-in" onPress={() => decide(l, 'approved')} disabled={busy}>
                     <Ionicons name="checkmark-circle-outline" size={21} color={colors.success} />
                   </TouchableOpacity>
                 </View>
@@ -244,6 +245,7 @@ export default function SpaceCheckinScreen() {
 
       {/* request leave */}
       <Modal visible={asking} transparent animationType="fade" onRequestClose={() => setAsking(false)}>
+        <KeyboardSafe keyboardOnly>
         <View style={s.modalWrap}>
           <View style={s.modal}>
             <Text style={s.modalTitle}>Request leave</Text>
@@ -273,6 +275,7 @@ export default function SpaceCheckinScreen() {
             </View>
           </View>
         </View>
+        </KeyboardSafe>
       </Modal>
     </ScrollView>
   );

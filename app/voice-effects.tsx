@@ -12,6 +12,7 @@ import { Audio } from 'expo-av';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import type { Palette } from '../constants/theme';
 import { useColors } from '../lib/theme';
+import { permissionDenied } from '../lib/permissionDenied';
 
 // bg/card were '#FFFFFF'/'#F9FAFB' while the text comes from the live theme —
 // white-on-white in dark mode, which is the default. This factory already
@@ -72,8 +73,8 @@ export default function VoiceEffectsScreen() {
   const startRecord = async () => {
     if (Platform.OS === 'web') { Alert.alert('Not supported', 'Recording is not available on web'); return; }
     try {
-      const { granted } = await Audio.requestPermissionsAsync();
-      if (!granted) { Alert.alert('Permission needed'); return; }
+      const { granted, canAskAgain } = await Audio.requestPermissionsAsync();
+      if (!granted) { permissionDenied('Microphone needed', 'Allow microphone access to record a voice effect.', canAskAgain); return; }
       await Audio.setAudioModeAsync({ allowsRecordingIOS: true, playsInSilentModeIOS: true });
       const { recording: rec } = await Audio.Recording.createAsync(Audio.RecordingOptionsPresets.HIGH_QUALITY);
       setRecording(rec);

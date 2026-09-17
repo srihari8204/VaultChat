@@ -12,9 +12,7 @@
 import { HEADER_TOP } from '../constants/layout';
 import { BRAND_ACCENT, type Palette } from '../constants/theme';
 import React, { useState, useEffect, useRef, useCallback , useMemo} from 'react';
-import {
-  View, Text, TouchableOpacity, StyleSheet, StatusBar, Alert, TextInput, ScrollView,
-} from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, Alert, TextInput, ScrollView } from 'react-native';
 import { useLocalSearchParams, Stack, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import Voice, { type SpeechResultsEvent, type SpeechErrorEvent } from '@react-native-voice/voice';
@@ -88,9 +86,8 @@ export default function VoiceTranscribeScreen() {
     <View style={s.container}>
       <AuroraBackground />
       <Stack.Screen options={{ headerShown: false }} />
-      <StatusBar barStyle="light-content" />
       <View style={s.header}>
-        <TouchableOpacity onPress={() => router.back()} style={s.backBtn} hitSlop={10}>
+        <TouchableOpacity accessibilityRole="button" accessibilityLabel="Back" onPress={() => router.back()} style={s.backBtn} hitSlop={10}>
           <Ionicons name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
         <Text style={s.title}>Voice to Text</Text>
@@ -116,7 +113,7 @@ export default function VoiceTranscribeScreen() {
         </ScrollView>
 
         <View style={s.controls}>
-          <TouchableOpacity
+          <TouchableOpacity accessibilityRole="button" accessibilityLabel={listening ? 'Stop listening' : 'Start listening'}
             style={[s.micBtn, listening && s.micActive]}
             onPress={listening ? stop : start}
             activeOpacity={0.85}

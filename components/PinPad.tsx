@@ -64,7 +64,19 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   dotFilled: { backgroundColor: c.primary, borderColor: c.primary },
   dotErr: { borderColor: c.danger },
   pad: { flexDirection: 'row', flexWrap: 'wrap', width: 280, justifyContent: 'center' },
+  // 2026-09-18: height stays PINNED, deliberately. The digits ARE text and do
+  // scale, but one glyph cannot wrap: 26 at font scale 1.5 is a ~51 line box
+  // inside 68, so nothing clips — there is no defect here to fix. Freeing it
+  // would add ~7 per key, ~28 over the four rows, and both callers in
+  // app/encrypted-notes.tsx (the screen gate and the locked-note modal) centre
+  // this pad in a container that does NOT scroll, so that growth comes off the
+  // bottom of the screen on a short device. Pinned is the safe reading here.
+  // ponytail: if the pad ever needs to scale, the callers must scroll first.
   key: {
+    // layout-exempt: a keypad key holds ONE digit at a fixed 26px, and the pad
+    // must stay a grid — a key that grew with the font scale would break the
+    // 3-across layout it depends on. 280 is the pad width, so 3 keys + margins
+    // fit inside 320dp.
     width: 280 / 3 - 10, height: 68, margin: 5, borderRadius: 34,
     alignItems: 'center', justifyContent: 'center',
     backgroundColor: c.glassSoft, borderWidth: StyleSheet.hairlineWidth, borderColor: c.glassStroke,

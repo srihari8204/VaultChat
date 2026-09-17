@@ -9,7 +9,7 @@ import * as FileSystem from 'expo-file-system/legacy';
 import { FIN } from '../../constants/financeTheme';
 import { FinHeader, Segment, Btn, Card } from '../../components/finance/ui';
 import { useMe } from '../../components/finance/useMe';
-import { fmtDate } from '../../utils/financeFormat';
+import { fmtDate, num as parseAmount } from '../../utils/financeFormat';
 import { listLedger, insertLedger } from '../../db/ledger';
 import { listGroups, listMembers, listCollections, listAuctions } from '../../db/chitti';
 import { exportCsv, exportExcel, shareTextFile } from '../../utils/financeIO';
@@ -99,8 +99,10 @@ export default function FinanceIO() {
           `${c.ledgers} ledger${c.ledgers === 1 ? '' : 's'} restored.`);
       }
 
-      const count = await importLedgerCsv(me.id, content);
-      Alert.alert('Import complete', `${count} ledger${count === 1 ? '' : 's'} imported.`);
+      const { count, skipped } = await importLedgerCsv(me.id, content);
+      Alert.alert('Import complete',
+        `${count} ledger${count === 1 ? '' : 's'} imported.`
+        + (skipped ? ` ${skipped} row${skipped === 1 ? '' : 's'} skipped — the Remaining cell was not a plain number, and guessing it would have resurrected a settled debt.` : ''));
     } catch (e: any) {
       Alert.alert('Import failed', e?.message ?? 'Could not read the file.');
     }
@@ -160,10 +162,16 @@ export default function FinanceIO() {
   );
 }
 
-/** Parse an exported ledger CSV and insert rows. Returns the count imported. */
-async function importLedgerCsv(userId: string, content: string): Promise<number> {
+/**
+ * Parse an exported ledger CSV and insert rows.
+ *
+ * Returns how many were imported AND how many were skipped: a skipped row is a
+ * ledger the user expected to see, and silently dropping it just moves the
+ * surprise to the day they go looking for it (2026-09-17).
+ */
+async function importLedgerCsv(userId: string, content: string): Promise<{ count: number; skipped: number }> {
   const lines = content.split(/\r?\n/).filter(l => l.trim().length > 0);
-  if (lines.length < 2) return 0;
+  if (lines.length < 2) return { count: 0, skipped: 0 };
   const parseRow = (line: string): string[] => {
     const out: string[] = []; let cur = ''; let q = false;
     for (let i = 0; i < line.length; i++) {
@@ -173,24 +181,45 @@ async function importLedgerCsv(userId: string, content: string): Promise<number>
     }
     out.push(cur); return out;
   };
-  const num = (v: string) => { const n = Number((v ?? '').replace(/,/g, '')); return Number.isFinite(n) ? n : 0; };
-  let count = 0;
+  // A THIRD copy of the amount parser used to live here, with the same bare
+  // comma strip that turns 12,5 into 125. CSV rows come from a file the user
+  // did not type, so a wrong number here is not even visible to them at the
+  // moment it is made. Share the hardened one; NaN is coerced to 0 only where
+  // a zero default is genuinely right, and the principal guard below rejects
+  // the row outright (2026-09-17).
+  const num = (v: string) => { const n = parseAmount(v); return Number.isFinite(n) ? n : 0; };
+  let count = 0, skipped = 0;
   for (let i = 1; i < lines.length; i++) {
     const c = parseRow(lines[i]);
     const name = (c[0] ?? '').trim();
     if (!name) continue;
     const principal = num(c[4]);
     if (!(principal > 0)) continue;
+    // Remaining = 0 is a SETTLED ledger, not a missing cell. `num(c[8]) ||
+    // principal` could not tell them apart, so every fully repaid ledger came
+    // back from its own export owing the full principal again while its status
+    // still said "completed". A cell that really says 0 stays 0 (2026-09-17).
+    //
+    // BLANK AND UNPARSEABLE ARE NOT THE SAME ANSWER EITHER. They still shared
+    // the `principal` fallback, so a Remaining cell of "₹1,00,000.00" — which
+    // this parser refuses, correctly — restored the FULL PRINCIPAL on a ledger
+    // that was settled, while its status column still said "completed". A blank
+    // cell means the exporter had no column and the principal is the honest
+    // default; a cell we cannot read is a number we must not invent, so the row
+    // is skipped exactly as a row with an unreadable principal already is.
+    const remCell = (c[8] ?? '').trim();
+    const rem = parseAmount(remCell);
+    if (remCell !== '' && !Number.isFinite(rem)) { skipped++; continue; }
     await insertLedger({
       user_id: userId, direction: c[2] === 'borrow' ? 'borrow' : 'lend', name, mobile: (c[1] || '').trim() || null,
       interest_type: c[3] === 'compound' ? 'compound' : 'simple', principal, rate: num(c[5]),
       rate_mode: c[6] === 'rupees' ? 'rupees' : 'percent', period: (['daily', 'weekly', 'monthly', 'yearly'].includes(c[7]) ? c[7] : 'monthly') as LedgerPeriod,
       start_date: Date.now(), end_date: null, notes: (c[10] || '').trim() || null,
-      remaining: num(c[8]) || principal, status: (['running', 'overdue', 'completed'].includes(c[9]) ? c[9] : 'running') as any,
+      remaining: remCell === '' ? principal : rem, status: (['running', 'overdue', 'completed'].includes(c[9]) ? c[9] : 'running') as any,
     });
     count++;
   }
-  return count;
+  return { count, skipped };
 }
 
 const s = StyleSheet.create({

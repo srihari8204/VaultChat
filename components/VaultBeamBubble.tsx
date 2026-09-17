@@ -172,7 +172,7 @@ export default function VaultBeamBubble({
 
 function CancelBtn({ onPress, colors }: { onPress: () => void; colors: any }) {
   return (
-    <TouchableOpacity onPress={onPress} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }} style={styles.cancelBtn}>
+    <TouchableOpacity accessibilityRole="button" accessibilityLabel="Cancel transfer" onPress={onPress} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }} style={styles.cancelBtn}>
       <Ionicons name="close" size={18} color={colors.textDim} />
     </TouchableOpacity>
   );

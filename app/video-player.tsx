@@ -726,6 +726,8 @@ const makeStyles = (c: Palette) => StyleSheet.create({
     textAlign: 'center',
   },
   seekBarOuter: {
+    // layout-exempt: a seek TRACK — the 28 is touch slop around a 3dp bar, and
+    // the only text on this row (elapsed/total) lives outside it.
     flex: 1,
     height: 28,
     justifyContent: 'center',

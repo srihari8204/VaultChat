@@ -34,6 +34,7 @@ import type { Run, RunStop, RunRider } from '../lib/spaces/runs';
 import { circleMembers } from '../lib/family/circle';
 import type { CircleMember } from '../lib/family/types';
 import { AuroraBackground } from '../components/ui';
+import { KeyboardSafe } from '../components/ui/KeyboardSafe';
 
 const KINDS: { key: string; label: string }[] = [
   { key: 'school_pickup', label: 'Morning pickup' },
@@ -207,7 +208,7 @@ export default function SpaceRunsAdminScreen() {
         options={{
           ...spaceHeader(colors, params.name ? `${params.name} · Runs` : 'Runs'),
           headerRight: () => (
-            <TouchableOpacity onPress={() => setCreating(true)} style={{ paddingHorizontal: 8 }}>
+            <TouchableOpacity accessibilityRole="button" accessibilityLabel="New run" onPress={() => setCreating(true)} style={{ paddingHorizontal: 8 }}>
               <Ionicons name="add" size={24} color={colors.primary} />
             </TouchableOpacity>
           ),
@@ -246,6 +247,7 @@ export default function SpaceRunsAdminScreen() {
 
       {/* ── create ── */}
       <Modal visible={creating} transparent animationType="fade" onRequestClose={() => setCreating(false)}>
+        <KeyboardSafe keyboardOnly>
         <View style={s.modalWrap}>
           <View style={s.modal}>
             <Text style={s.modalTitle}>New run</Text>
@@ -281,13 +283,15 @@ export default function SpaceRunsAdminScreen() {
             </View>
           </View>
         </View>
+        </KeyboardSafe>
       </Modal>
 
       {/* ── edit ── */}
       <Modal visible={!!editing} animationType="slide" onRequestClose={() => setEditing(null)}>
+        <KeyboardSafe keyboardOnly>
         <View style={s.screen}>
           <View style={s.sheetHeader}>
-            <TouchableOpacity onPress={() => setEditing(null)}><Ionicons name="close" size={24} color={colors.text} /></TouchableOpacity>
+            <TouchableOpacity accessibilityRole="button" accessibilityLabel="Close" onPress={() => setEditing(null)}><Ionicons name="close" size={24} color={colors.text} /></TouchableOpacity>
             <Text style={s.sheetTitle} numberOfLines={1}>
               {editing?.run.vehicleLabel || editing?.run.name}
             </Text>
@@ -325,7 +329,7 @@ export default function SpaceRunsAdminScreen() {
                 <View key={st.id} style={s.pickRow}>
                   <Text style={s.seq}>{i + 1}</Text>
                   <Text style={[s.pickText, { color: colors.text }]}>{st.label}</Text>
-                  <TouchableOpacity onPress={() => removeStop(st.id)}>
+                  <TouchableOpacity accessibilityRole="button" accessibilityLabel="Remove this stop" onPress={() => removeStop(st.id)}>
                     <Ionicons name="close-circle-outline" size={19} color={colors.textDim} />
                   </TouchableOpacity>
                 </View>
@@ -336,7 +340,7 @@ export default function SpaceRunsAdminScreen() {
                   placeholder="Add a stop" placeholderTextColor={colors.textDim}
                   onSubmitEditing={addStop}
                 />
-                <TouchableOpacity style={[s.addBtn, (!stopDraft.trim() || busy) && s.off]} onPress={addStop} disabled={!stopDraft.trim() || busy}>
+                <TouchableOpacity accessibilityRole="button" accessibilityLabel="Add stop" style={[s.addBtn, (!stopDraft.trim() || busy) && s.off]} onPress={addStop} disabled={!stopDraft.trim() || busy}>
                   <Ionicons name="add" size={20} color="#fff" />
                 </TouchableOpacity>
               </View>
@@ -372,6 +376,7 @@ export default function SpaceRunsAdminScreen() {
             </Text>
           </ScrollView>
         </View>
+        </KeyboardSafe>
       </Modal>
     </View>
   );

@@ -25,6 +25,7 @@ import {
   getBackupSettings, saveBackupSettings, markBackupDone, type BackupSettings,
 } from '../lib/backupScheduler';
 import { AuroraBackground } from '../components/ui';
+import { KeyboardSafe } from '../components/ui/KeyboardSafe';
 
 const FREQ = [
   { id: 'manual', label: 'Off' },
@@ -189,7 +190,7 @@ export default function ChatBackupScreen() {
       <AuroraBackground />
       <Stack.Screen options={{ headerShown: false }} />
       <View style={s.header}>
-        <TouchableOpacity onPress={() => router.back()} style={s.iconBtn} hitSlop={8}>
+        <TouchableOpacity accessibilityRole="button" accessibilityLabel="Back" onPress={() => router.back()} style={s.iconBtn} hitSlop={8}>
           <Ionicons name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
         <Text style={s.headerTitle}>Chat backup</Text>
@@ -303,6 +304,7 @@ export default function ChatBackupScreen() {
           install with their whole history behind one secret. */}
       <Modal visible={askSecret !== null} transparent animationType="fade"
              onRequestClose={() => { setAskSecret(null); setSecretInput(''); }}>
+        <KeyboardSafe keyboardOnly>
         <View style={s.modalWrap}>
           <View style={s.modalCard}>
             <Text style={s.modalTitle}>
@@ -338,6 +340,7 @@ export default function ChatBackupScreen() {
             </View>
           </View>
         </View>
+        </KeyboardSafe>
       </Modal>
     </View>
   );

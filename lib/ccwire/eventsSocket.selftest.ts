@@ -43,7 +43,21 @@ function decodeLast(wire: Wire): Frame {
   return decoded.frame!;
 }
 async function main() {
-  assert.ok(Buffer.from(encodeClientHello()).includes(Buffer.from([26, 4, 8, 1, 64, 1])));
+  // The capability blob is pinned BYTE-EXACT on purpose: it is the one place a
+  // capability can be added or dropped by accident, and a wrong offer is
+  // invisible at runtime (the server's reply is an intersection, so an
+  // unsupported offer just silently does nothing).
+  //
+  //   26 = field 3 (capabilities), wire 2   06 = length
+  //    8,1  = field 1 fragmentation
+  //   16,1  = field 2 resumption      <- added with CC-Wire session resume
+  //   64,1  = field 8 app_events_v1
+  //
+  // Update this deliberately, never to make a failure go away.
+  assert.ok(
+    Buffer.from(encodeClientHello()).includes(Buffer.from([26, 6, 8, 1, 16, 1, 64, 1])),
+    'ClientHello capability blob changed — update this constant deliberately',
+  );
   assert.equal(decodeServerHello(Uint8Array.from([8, 1, 26, 2, 64, 1])).appEventsV1, true);
   assert.equal(!!decodeServerHello(Uint8Array.from([8, 1])).appEventsV1, false);
   __resetCCWireForTest();

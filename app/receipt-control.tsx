@@ -99,11 +99,17 @@ export default function ReceiptControlScreen() {
     [contacts, search],
   );
 
-  const Toggle = ({ on, icon, onPress }: { on: boolean; icon: any; onPress: () => void }) => (
+  // role=switch, not button: this is a two-state control, and a screen reader
+  // should be able to say whether it is on without the user toggling it to
+  // find out. The label names the setting; accessibilityState carries state.
+  const Toggle = ({ on, icon, onPress, label }: { on: boolean; icon: any; onPress: () => void; label: string }) => (
     <TouchableOpacity
       style={[s.toggleBtn, on && s.toggleBtnOn]}
       onPress={onPress}
       hitSlop={4}
+      accessibilityRole="switch"
+      accessibilityLabel={label}
+      accessibilityState={{ checked: on }}
     >
       <Ionicons name={icon} size={16} color={on ? colors.primary : colors.textFaint} />
     </TouchableOpacity>
@@ -115,7 +121,7 @@ export default function ReceiptControlScreen() {
       <Stack.Screen options={{ headerShown: false }} />
 
       <View style={s.header}>
-        <TouchableOpacity onPress={() => router.back()} style={s.backBtn} hitSlop={10}>
+        <TouchableOpacity accessibilityRole="button" accessibilityLabel="Back" onPress={() => router.back()} style={s.backBtn} hitSlop={10}>
           <Ionicons name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
         <Text style={s.headerTitle}>Privacy per Contact</Text>
@@ -160,9 +166,9 @@ export default function ReceiptControlScreen() {
                   <View style={s.avatar}><Text style={s.avatarTxt}>{(item.name.trim()[0] ?? '#').toUpperCase()}</Text></View>
                   <Text style={s.contactName} numberOfLines={1}>{item.name}</Text>
                   <View style={s.toggleGroup}>
-                    <Toggle on={r.read} icon="checkmark-done" onPress={() => toggleRule(item.userId, 'read')} />
-                    <Toggle on={r.typing} icon="create-outline" onPress={() => toggleRule(item.userId, 'typing')} />
-                    <Toggle on={r.lastSeen} icon="time-outline" onPress={() => toggleRule(item.userId, 'lastSeen')} />
+                    <Toggle label="Read receipts" on={r.read} icon="checkmark-done" onPress={() => toggleRule(item.userId, 'read')} />
+                    <Toggle label="Typing indicator" on={r.typing} icon="create-outline" onPress={() => toggleRule(item.userId, 'typing')} />
+                    <Toggle label="Last seen" on={r.lastSeen} icon="time-outline" onPress={() => toggleRule(item.userId, 'lastSeen')} />
                   </View>
                 </View>
               );

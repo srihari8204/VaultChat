@@ -334,6 +334,16 @@ pub fn handle_line(line: &str) -> String {
 /// # Safety
 /// `op` and `args_json` must be NUL-terminated C strings (or null, which
 /// yields an error response).
+// Clippy wants these marked `unsafe fn`. They are NOT, deliberately: this is
+// the C ABI surface the Nitro/JSI bridge links against, and changing the
+// signature changes the contract for every caller without adding a single
+// guarantee. NOTHING protective is relaxed to silence the lint — both pointers
+// are null-checked before use, every deref stays inside `unsafe`, the body runs
+// under `catch_unwind` so a panic cannot unwind across the FFI boundary, and
+// the `# Safety` doc states the caller's obligation.
+//
+// No cryptographic behaviour is touched by this attribute.
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
 #[no_mangle]
 pub extern "C" fn vc_crypto_call(op: *const c_char, args_json: *const c_char) -> *mut c_char {
     let out = std::panic::catch_unwind(|| {
@@ -354,6 +364,16 @@ pub extern "C" fn vc_crypto_call(op: *const c_char, args_json: *const c_char) ->
 ///
 /// # Safety
 /// `ptr` must be a pointer previously returned by `vc_crypto_call` (or null).
+// Clippy wants these marked `unsafe fn`. They are NOT, deliberately: this is
+// the C ABI surface the Nitro/JSI bridge links against, and changing the
+// signature changes the contract for every caller without adding a single
+// guarantee. NOTHING protective is relaxed to silence the lint — both pointers
+// are null-checked before use, every deref stays inside `unsafe`, the body runs
+// under `catch_unwind` so a panic cannot unwind across the FFI boundary, and
+// the `# Safety` doc states the caller's obligation.
+//
+// No cryptographic behaviour is touched by this attribute.
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
 #[no_mangle]
 pub extern "C" fn vc_crypto_free(ptr: *mut c_char) {
     if !ptr.is_null() {

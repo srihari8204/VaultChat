@@ -27,13 +27,32 @@ pub fn prealloc(path: &str, total_bytes: u64) -> Result<bool, VbError> {
     if let Some(dir) = p.parent() {
         std::fs::create_dir_all(dir).map_err(io("prealloc mkdirs"))?;
     }
-    let f = OpenOptions::new().create(true).write(true).read(true).open(p).map_err(io("prealloc open"))?;
+    // truncate(false) is LOAD-BEARING, not a lint silencer. This shell is
+    // opened again on every resumed transfer, and clippy's default suggestion
+    // (truncate(true)) would zero every chunk already received — silently
+    // turning a resumed 12 GB transfer into a restarted one. set_len below both
+    // grows and shrinks, so the length is still set exactly; what must not
+    // happen is the CONTENT being discarded on open.
+    let f = OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .write(true)
+        .read(true)
+        .open(p)
+        .map_err(io("prealloc open"))?;
     f.set_len(total_bytes).map_err(io("prealloc set_len"))?;
     Ok(true)
 }
 
 /// SENDER (P2): read chunk `g` from `src_path` @ its offset, seal → wire bytes
 /// (JS base64-encodes for the datachannel). `g` is the GLOBAL chunk index; id = g.
+// 8 arguments against clippy's default of 7. Left as arguments on purpose:
+// these are chunk-level crypto/IO calls whose parameters are each independently
+// meaningful (path, key, transfer id, indices, offsets), and bundling them into
+// a params struct to satisfy a threshold would add an indirection that makes a
+// mis-ordered field EASIER to introduce, not harder — the opposite of what the
+// lint is protecting against.
+#[allow(clippy::too_many_arguments)]
 pub fn read_cipher_chunk(
     src_path: &str,
     key: &[u8; 32],
@@ -58,6 +77,9 @@ pub fn read_cipher_chunk(
 
 /// RECIPIENT (P2): verify + open a chunk wire and write plaintext @ its offset.
 /// Returns the plaintext byte count. `g` is the GLOBAL chunk index; id = g.
+// 8 arguments against clippy's default of 7 — see read_cipher_chunk above for
+// why these stay as arguments rather than becoming a params struct.
+#[allow(clippy::too_many_arguments)]
 pub fn write_cipher_chunk(
     dst_path: &str,
     key: &[u8; 32],
@@ -97,6 +119,12 @@ pub fn seal_block_from_file(
     block_plain_offset: Option<u64>,
     scheme: IdScheme,
 ) -> Result<Vec<u8>, VbError> {
+    // chunkBytes arrives as a raw JSON number. Zero is the whole geometry
+    // collapsing — it is what chunksPerBlock divides by — and answering with an
+    // empty block would look like a successful upload of nothing. Name it.
+    if chunk_bytes == 0 {
+        return Err(VbError("uploadBlock: chunkBytes must be non-zero".into()));
+    }
     let specs = plan_block(block_index, chunk_bytes, block_bytes, total_bytes, block_plain_offset, scheme);
     let mut f = File::open(fs_path(src_path)).map_err(io("uploadBlock open"))?;
     let mut out = Vec::new();
@@ -127,6 +155,12 @@ pub fn write_block_from_body(
     scheme: IdScheme,
     body: &[u8],
 ) -> Result<usize, VbError> {
+    // As in seal_block_from_file: a zero chunkBytes plans no chunks at all, and
+    // reporting "0 chunks written, fine" for a block the peer really sent would
+    // let the caller mark it received. Refuse it by name instead.
+    if chunk_bytes == 0 {
+        return Err(VbError("downloadBlock: chunkBytes must be non-zero".into()));
+    }
     let specs = plan_block(block_index, chunk_bytes, block_bytes, total_bytes, block_plain_offset, scheme);
     let opened = open_block(key, transfer_id, file_id, &specs, body)?;
     let mut f = OpenOptions::new().write(true).read(true).open(fs_path(dst_path)).map_err(io("downloadBlock open"))?;
@@ -198,6 +232,26 @@ mod tests {
         assert!(delete_file(&src));
         assert!(delete_file(&dst));
         assert!(!delete_file(&src)); // second delete → false, no panic
+    }
+
+    /// A zero chunkBytes is a geometry that describes nothing, and the block
+    /// ops must say so by name rather than panic on the division inside
+    /// plan_block or report a successful transfer of no chunks.
+    #[test]
+    fn a_zero_chunk_size_is_a_named_error_from_the_block_ops() {
+        let key = [3u8; 32];
+        let src = tmp("zero-src.bin");
+        std::fs::write(&src, vec![0u8; 100]).unwrap();
+
+        let e = seal_block_from_file(&src, &key, "T", "F", 0, 0, 64, 100, None, IdScheme::Uniform).unwrap_err();
+        assert!(e.0.contains("chunkBytes"), "got {}", e.0);
+
+        let e = write_block_from_body(&src, &key, "T", "F", 0, 0, 64, 100, None, IdScheme::Uniform, &[]).unwrap_err();
+        assert!(e.0.contains("chunkBytes"), "got {}", e.0);
+
+        // A real geometry is unaffected.
+        assert!(seal_block_from_file(&src, &key, "T", "F", 0, 16, 64, 100, None, IdScheme::Uniform).is_ok());
+        delete_file(&src);
     }
 
     #[test]

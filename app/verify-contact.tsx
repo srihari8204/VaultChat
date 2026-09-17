@@ -85,7 +85,7 @@ export default function VerifyContactScreen() {
     <View style={S.container}>
       <AuroraBackground />
       <View style={S.header}>
-        <TouchableOpacity onPress={() => router.back()} hitSlop={10}>
+        <TouchableOpacity accessibilityRole="button" accessibilityLabel="Back" onPress={() => router.back()} hitSlop={10}>
           <Ionicons name="chevron-back" size={26} color={colors.text} />
         </TouchableOpacity>
         <Text style={S.title}>Verify {peerName}</Text>

@@ -34,6 +34,7 @@ import { zoneColor, clampRadius } from '../lib/lock/zoneMachine';
 import { statsForPlace, type PlaceLockStats } from '../lib/lock/lockStore';
 import { navigateTo } from '../lib/nav/openNavigation';
 import { getCurrentUserAsync } from './(constants)/authService';
+import { permissionDenied } from '../lib/permissionDenied';
 
 const RADII = [100, 200, 500, 1000];
 const MIN_RADIUS = 50;
@@ -142,7 +143,7 @@ export default function FamilyPlacesScreen() {
     if (!q) {
       const perm = await Location.requestForegroundPermissionsAsync();
       if (perm.status !== 'granted') {
-        Alert.alert('Location needed', 'Enable location to drop a place where you are, or type an address instead.');
+        permissionDenied('Location needed', 'Enable location to drop a place where you are, or type an address instead.', perm.canAskAgain);
         return null;
       }
       const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
@@ -279,7 +280,7 @@ export default function FamilyPlacesScreen() {
             placeholderTextColor={colors.textFaint} autoCapitalize="none" style={[st.input, { color: colors.text }]}
             returnKeyType="done" onSubmitEditing={add} />
           {!!where && (
-            <TouchableOpacity onPress={() => setWhere('')}><Ionicons name="close-circle" size={17} color={colors.textFaint} /></TouchableOpacity>
+            <TouchableOpacity accessibilityRole="button" accessibilityLabel="Clear" onPress={() => setWhere('')}><Ionicons name="close-circle" size={17} color={colors.textFaint} /></TouchableOpacity>
           )}
         </View>
 
@@ -535,7 +536,9 @@ const st = StyleSheet.create({
   input: { flex: 1, fontSize: 15 },
   radii: { flexDirection: 'row', gap: 8, marginTop: 12, flexWrap: 'wrap' },
   days: { flexDirection: 'row', gap: 6 },
-  day: { flex: 1, height: 36, borderWidth: 1, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
+  // 2026-09-18: the day letter scales with the OS font, the pinned 36 did not.
+  // minHeight keeps the row of seven identical at scale 1.0.
+  day: { flex: 1, minHeight: 36, paddingVertical: 6, borderWidth: 1, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
   rchip: { borderWidth: 1, borderRadius: 999, paddingHorizontal: 14, paddingVertical: 8 },
   btn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, minHeight: 50, borderRadius: 16, marginTop: 14 },
   btnTxt: { color: '#fff', fontSize: 15, fontWeight: '800' },

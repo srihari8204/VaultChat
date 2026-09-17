@@ -200,6 +200,14 @@ export function reduce(s: CallSnapshot, e: CallEvent, now: number): CallSnapshot
       return { ...s, participants: next };
     }
 
+    // NOT DISPATCHED BY ANYTHING (checked 2026-09-17). This reducer is the
+    // half of remote-mute indicators that got built: no LiveKit TrackMuted /
+    // TrackUnmuted subscription ever raises the event, and no tile renders
+    // participants[uid].muted, so the grid cannot show that someone else is
+    // muted. Kept because the reducer is correct and is the smaller half;
+    // finishing it needs a RoomEvent subscription in lib/call/room.ts and a
+    // badge beside handBadge, neither of which can be judged without a real
+    // multi-party call to watch.
     case 'peer_muted': {
       const participants = withParticipant(s, e.uid, { muted: e.muted });
       return participants === s.participants ? s : { ...s, participants };

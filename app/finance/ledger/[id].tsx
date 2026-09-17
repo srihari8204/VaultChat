@@ -66,8 +66,8 @@ export default function LedgerDetail() {
     <View style={s.screen}>
       <FinHeader title="Ledger Details" right={
         <>
-          <TouchableOpacity onPress={() => router.push({ pathname: '/finance/ledger/edit', params: { id: e.id } })} hitSlop={8}><Ionicons name="create-outline" size={22} color={FIN.text} /></TouchableOpacity>
-          <TouchableOpacity onPress={onShare} hitSlop={8}><Ionicons name="share-outline" size={22} color={FIN.text} /></TouchableOpacity>
+          <TouchableOpacity accessibilityRole="button" accessibilityLabel="Edit this entry" onPress={() => router.push({ pathname: '/finance/ledger/edit', params: { id: e.id } })} hitSlop={8}><Ionicons name="create-outline" size={22} color={FIN.text} /></TouchableOpacity>
+          <TouchableOpacity accessibilityRole="button" accessibilityLabel="Share" onPress={onShare} hitSlop={8}><Ionicons name="share-outline" size={22} color={FIN.text} /></TouchableOpacity>
         </>
       } />
       <ScrollView contentContainerStyle={s.body} showsVerticalScrollIndicator={false}>

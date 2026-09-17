@@ -64,7 +64,21 @@ import path from 'node:path';
 // labelled Pressables like the one app/mpin-entry.tsx already had — four
 // buttons. The fifth came free: the rebrand sweep in flight alongside it had
 // already labelled one more, so the tree measured 106 before this change.
-const BUDGET = 102;
+// 102 -> 0: the sweep finished. The seven group-call controls came first and
+// mattered most - CtrlBtn took no label and none of its call sites passed one,
+// so a blind user could join a group call and have no way to END it. Then 49
+// plain router.back() arrows, which are the one case a script can label
+// honestly, and 44 written individually from their handler and icon.
+//
+// Two were not labels at all. app/receipt-control.tsx had three TOGGLES typed
+// as buttons: they are role=switch now, so a reader states on/off instead of
+// making the user flip one to learn where it was. And app/contact.tsx held a
+// pencil with NO onPress - a dead affordance. Announcing an action that does
+// not exist is worse than silence, so it was removed, not described.
+//
+// Zero is not "accessible". It means no icon-only button is unnamed. Reading
+// order, contrast and label ACCURACY still need a person.
+const BUDGET = 0;
 
 const ROOTS = ['app', 'components'];
 const SKIP_DIR = /node_modules|\.expo|android|ios|dist|build/;

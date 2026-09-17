@@ -22,6 +22,7 @@ import { copyAndAutoClear } from '../lib/clipboardSafe';
 import { createSyncCode } from '../lib/chatService';
 import type { Palette } from '../constants/theme';
 import { useColors } from '../lib/theme';
+import { HEADER_TOP } from '../constants/layout';
 
 // ─────────────────────────────────────────────────────────────────
 // Types
@@ -206,7 +207,7 @@ export default function VaultFeaturesScreen() {
 
       {/* Header */}
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.back()}>
+        <TouchableOpacity accessibilityRole="button" accessibilityLabel="Back" onPress={() => router.back()}>
           <Ionicons name="arrow-back" size={26} color={BRAND_ACCENT} />
         </TouchableOpacity>
         <View style={styles.headerCenter}>
@@ -523,7 +524,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   header: {
     flexDirection: 'row', alignItems: 'center',
     backgroundColor: c.bg,
-    paddingTop: 48, paddingBottom: 12, paddingHorizontal: 16,
+    paddingTop: HEADER_TOP, paddingBottom: 12, paddingHorizontal: 16,
     borderBottomWidth: 0.5, borderBottomColor: c.glassStroke, gap: 12,
   },
   back:          { fontSize: 28, color: BRAND_ACCENT, fontWeight: 'bold' },

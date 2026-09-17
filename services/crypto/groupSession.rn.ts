@@ -177,6 +177,43 @@ async function ingest(chatId: string): Promise<void> {
 
 const PREFIX = 'GSK1:'; // distinguishes a group cipher on the wire
 
+/**
+ * Delete this account's group sender keys. 2026-09-18.
+ *
+ * Group chats use sender keys (vc_gsk_*), never a vc_e2ee_session_, so
+ * clearIdentity()'s peer list does not reach them — purgeAccountData said so
+ * in its own comment and then skipped them. The consequence is the same class
+ * of defect the pairwise purge fixed: an own sender key is the signing key
+ * this device publishes as, and a peer sender key decrypts that member's group
+ * traffic. Left behind, the next account on the device inherits both.
+ *
+ * Deletes only what the caller can NAME — SecureStore has no listing call, the
+ * same limit documented in e2eeSession.ts. The caller passes the group ids and
+ * members it read from the local chat cache before that cache was cleared.
+ *
+ * RESIDUAL RISK, stated rather than papered over: a group that is not in the
+ * local chat cache at sign-out (left, or pruned) keeps its blobs, and a member
+ * missing from the cached member list keeps their peer key. Both are
+ * unreachable for the same reason, not for a new one.
+ *
+ * Best-effort and never throws: it runs on the forced sign-out path, where one
+ * failed delete must not abandon the rest.
+ */
+export async function clearGroupSessions(
+  groups: { chatId: string; memberIds?: string[] }[],
+): Promise<void> {
+  for (const g of groups ?? []) {
+    if (!g?.chatId) continue;
+    // kv.del, not SecureStore.deleteItemAsync: these values are chunked, and a
+    // bare head delete would strand the parts.
+    await kv.del(OWN(g.chatId)).catch(() => {});
+    await kv.del(MEMBERS(g.chatId)).catch(() => {});
+    for (const m of g.memberIds ?? []) {
+      if (m) await kv.del(PEER(g.chatId, m)).catch(() => {});
+    }
+  }
+}
+
 export function isGroupEnvelope(wire: string | null | undefined): boolean {
   return typeof wire === 'string' && wire.startsWith(PREFIX);
 }

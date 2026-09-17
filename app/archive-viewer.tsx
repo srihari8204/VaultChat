@@ -133,7 +133,7 @@ function ArchiveViewerScreen() {
       <Stack.Screen options={{ headerShown: false }} />
 
       <View style={S.head}>
-        <TouchableOpacity onPress={() => (up !== null ? setDir(up) : router.back())} hitSlop={12}>
+        <TouchableOpacity accessibilityRole="button" accessibilityLabel="Back" onPress={() => (up !== null ? setDir(up) : router.back())} hitSlop={12}>
           <Ionicons name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
         <View style={{ flex: 1 }}>

@@ -109,4 +109,36 @@ for (const f of EXEMPT) {
   ok(`exempt file still exists: ${f}`, fs.existsSync(f));
 }
 
+// -- A theme-following screen must not force the status bar --------
+//
+// app/_layout.tsx renders ONE theme-aware bar: dark glyphs in light mode,
+// light in dark. A screen that mounts its own <StatusBar barStyle="light-
+// content"/> overrides it while mounted, so in LIGHT mode the clock and
+// battery turned white on a white background - invisible. 18 screens did
+// this; app/email-bridge.tsx paired it with backgroundColor="#FFFFFF",
+// which is white-on-white stated outright.
+//
+// The rule is conditional, not absolute: a screen whose surface is dark at
+// EVERY theme - a call, the camera, a media or story viewer - is right to
+// force light-content. Those do not call useTheme, which is what separates
+// them here. A screen that reads the palette must let the root bar decide.
+const forcing: string[] = [];
+for (const dir of ['app', 'components']) {
+  for (const f of walk(dir)) {
+    if (!f.endsWith('.tsx')) continue;
+    const src = fs.readFileSync(f, 'utf8');
+    if (!src.includes('barStyle')) continue;
+    if (!src.includes('useTheme')) continue;          // dark-always surface
+    if (/barStyle={/.test(src)) continue;             // already conditional
+    if (src.includes('statusbar-exempt:')) continue;
+    forcing.push(f);
+  }
+}
+ok(
+  forcing.length === 0
+    ? 'no theme-following screen hardcodes the status bar style'
+    : 'these read the palette but force a fixed status bar style: ' + forcing.join(', '),
+  forcing.length === 0,
+);
+
 console.log(`themeCoverage.selftest: ${n} assertions passed, ${EXEMPT.size} documented exemptions`);

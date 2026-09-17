@@ -105,7 +105,7 @@ export default function BackupE2EEScreen() {
 
   const header = (
     <View style={s.header}>
-      <TouchableOpacity onPress={() => router.back()} style={s.iconBtn} hitSlop={8}>
+      <TouchableOpacity accessibilityRole="button" accessibilityLabel="Back" onPress={() => router.back()} style={s.iconBtn} hitSlop={8}>
         <Ionicons name="arrow-back" size={24} color={colors.text} />
       </TouchableOpacity>
       <Text style={s.headerTitle}>End-to-end encrypted backup</Text>

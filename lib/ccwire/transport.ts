@@ -120,7 +120,12 @@ export function ccwireStatus(): CCWireStatus { return status; }
 export function ccwireClient(): CCWireClient | null { return client; }
 export function ccwireCarrier(): string { return status === 'ready' ? carrier : 'none'; }
 export function ccwireDiagnostics() {
-  return { status, carrier, submitted, acknowledged, fallbacks, lastError };
+  // submitted/acknowledged/fallbacks count ONLY eligible outbound plain-text
+  // chat submissions (see submitCCWireMessage). They are not frame counters —
+  // a fully healthy session that carried a hundred frames still reads 0/0 if
+  // no text message was sent. client.metrics() is the frame-level answer.
+  return { status, carrier, submitted, acknowledged, fallbacks, lastError,
+    preHandshakeCloses, ...(client?.metrics() ?? {}) };
 }
 
 export interface MessageSubmission {

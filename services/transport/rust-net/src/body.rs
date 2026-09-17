@@ -84,6 +84,43 @@ pub fn limits(l: &Limits) -> Vec<u8> {
     b
 }
 
+/// What a reconnect offers the server, when it has something to offer.
+///
+/// Both halves or neither. A token alone tells the server WHICH session but not
+/// where it got to, and the server refuses rather than guessing — so offering
+/// one without the other turns every reconnect into a full resync while looking
+/// like resume is working.
+pub struct Resume<'a> {
+    pub token: &'a ResumeToken,
+    /// `(stream, last_delivered_seq)`, from `Session::positions`.
+    pub from: &'a [(u32, u64)],
+}
+
+/// One `StreamCursor`: stream (1), last_delivered_seq (2).
+///
+/// Shared by `ClientHello.resume_from` and `Ping.progress` because it is the
+/// same message in both — encoding it twice is how the two drift apart.
+fn stream_cursor(stream: u32, seq: u64) -> Vec<u8> {
+    let mut c = Vec::with_capacity(12);
+    f_varint(&mut c, 1, stream as u64);
+    f_varint(&mut c, 2, seq);
+    c
+}
+
+/// `Ping`: nonce (1), progress (2).
+///
+/// The progress is not decoration. It is what lets the server RELEASE the
+/// frames it retained for this session; without it every replay window fills to
+/// its ceiling and stays there until the connection ends.
+pub fn ping(nonce: u64, progress: &[(u32, u64)]) -> Vec<u8> {
+    let mut b = Vec::with_capacity(12 + progress.len() * 14);
+    f_bytes(&mut b, 1, &nonce.to_be_bytes());
+    for &(stream, seq) in progress {
+        f_bytes(&mut b, 2, &stream_cursor(stream, seq));
+    }
+    b
+}
+
 /// `ClientHello`.
 ///
 /// `credential` (6) is carried because the wire has the field, but the Go
@@ -96,6 +133,7 @@ pub fn client_hello(
     credential: &[u8],
     caps: &Capabilities,
     lim: &Limits,
+    resume: Option<Resume<'_>>,
 ) -> Vec<u8> {
     let mut b = Vec::new();
     f_varint(&mut b, 1, 1); // protocol_major. minor (2) is 0 ⇒ not written.
@@ -107,10 +145,28 @@ pub fn client_hello(
     if !credential.is_empty() {
         f_bytes(&mut b, 6, credential);
     }
-    // resume_token (7) is empty: the Go peer does not implement resumption and
-    // an unusable token is worse than none.
+    // resume_token (7) and resume_from (8).
+    //
+    // This used to be unconditionally empty, with a comment saying the Go peer
+    // did not implement resumption. It does now (CCWIRE_RESUME=1), and the
+    // comment outlived the fact — so the state machine in `transport-core`
+    // held a token, exposed `can_resume()`, and had no way to put either on the
+    // wire.
+    //
+    // resume_from is bounded at 8 entries by envelope.proto, which five streams
+    // cannot exceed; the take() is here so a malformed caller cannot make this
+    // encoder produce a frame the peer must refuse.
+    if let Some(r) = resume {
+        f_bytes(&mut b, 7, r.token.expose().as_bytes());
+        for &(stream, seq) in r.from.iter().take(MAX_RESUME_FROM) {
+            f_bytes(&mut b, 8, &stream_cursor(stream, seq));
+        }
+    }
     b
 }
+
+/// `ClientHello.resume_from` is `<= 8 entries` in envelope.proto.
+const MAX_RESUME_FROM: usize = 8;
 
 // ── reader ───────────────────────────────────────────────────────────────
 

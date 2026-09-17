@@ -24,6 +24,7 @@ import { enqueueMedia } from '../lib/mediaOutbox';
 import { listChats, chatTitle, type ChatSummary } from '../lib/chatService';
 import DocumentScanner from 'react-native-document-scanner-plugin';
 import { docFilename, DEFAULT_STYLE } from '../lib/docs/docStyle';
+import { permissionDenied } from '../lib/permissionDenied';
 
 const RECENT_KEY = 'vc_docscanner_recent';
 
@@ -104,7 +105,7 @@ function DocScannerContent() {
       let result;
       if (source === 'camera' && Platform.OS !== 'web') {
         const perm = await ImagePicker.requestCameraPermissionsAsync();
-        if (!perm.granted) { Alert.alert('Permission needed', 'Allow camera access to scan.'); return; }
+        if (!perm.granted) { permissionDenied('Permission needed', 'Allow camera access to scan.', perm.canAskAgain); return; }
         result = await ImagePicker.launchCameraAsync({ quality: 1, allowsEditing: false });
       } else {
         result = await ImagePicker.launchImageLibraryAsync({ quality: 1, allowsMultipleSelection: true, mediaTypes: ['images'] });
@@ -274,7 +275,7 @@ function DocScannerContent() {
       <LinearGradient colors={['#FFFFFF', '#040F20', '#060F24']} style={StyleSheet.absoluteFillObject} />
       <Animated.View style={{ flex: 1, opacity: fadeIn }}>
         <View style={S.header}>
-          <TouchableOpacity onPress={() => step === 'pick' ? router.back() : resetScanner()} style={S.backBtn}>
+          <TouchableOpacity accessibilityRole="button" accessibilityLabel="Back" onPress={() => step === 'pick' ? router.back() : resetScanner()} style={S.backBtn}>
             <Ionicons name="arrow-back" size={24} color={colors.primary} />
           </TouchableOpacity>
           <View style={{ flex: 1 }}>

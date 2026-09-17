@@ -259,9 +259,12 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   screen: { flex: 1, backgroundColor: 'transparent' },
   abRow: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 16, paddingVertical: 12 },
   abTxt: { flex: 1, fontSize: 14.5, fontWeight: '600' },
+  // 2026-09-18: the 15sp input is ~30dp of line box at font scale 1.5, so a
+  // pinned 44 cut the descenders off what you were typing. minHeight leaves the
+  // pill at 44 on a normal device and lets it grow when the font does.
   search: {
     flexDirection: 'row', alignItems: 'center', gap: 8,
-    margin: 14, paddingHorizontal: 12, height: 44,
+    margin: 14, paddingHorizontal: 12, minHeight: 44, paddingVertical: 8,
     borderRadius: 12, borderWidth: StyleSheet.hairlineWidth,
     borderColor: c.glassStroke, backgroundColor: c.glassSoft,
   },
@@ -287,8 +290,9 @@ const makeStyles = (c: Palette) => StyleSheet.create({
     paddingVertical: 14, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: c.glassStroke,
   },
   codeTxt: { color: c.primary, fontSize: 13.5, fontWeight: '600' },
+  // Same fix for the CTA label (2026-09-18): 15sp bold in a pinned 50.
   cta: {
-    margin: 14, marginTop: 0, height: 50, borderRadius: 13,
+    margin: 14, marginTop: 0, minHeight: 50, paddingVertical: 10, borderRadius: 13,
     alignItems: 'center', justifyContent: 'center',
   },
   ctaTxt: { color: '#fff', fontSize: 15, fontWeight: '800' },

@@ -22,7 +22,7 @@
 //   npx tsx lib/groups/store.ts
 
 import type { GroupType } from './catalog';
-import type { Permission } from './permissions';
+import { can as hasPerm, type Permission } from './permissions';
 import { normalizePrivacy, DEFAULT_GROUP_PRIVACY, type GroupPrivacy } from './privacy';
 
 // Lazy-required so the pure half stays free of the react-native graph — same
@@ -88,6 +88,35 @@ export function migrateCircles(existing: GroupRef[], circles: LegacyCircle[]): G
     added.push({ id: c.id, name: c.name || 'Family', groupType: 'family' });
   }
   return [...existing, ...added];
+}
+
+/**
+ * May this viewer see OTHER members' location history in this group?
+ *
+ * THREE answers, not two (2026-09-17). `permissions` is server truth CACHED
+ * here, and it is absent until a successful GET /chats/:id has written it: a
+ * circle adopted by migrateCircles above has never had one, nor has a space
+ * adopted offline, nor has any group that is not the active one. Reading that
+ * absence as an empty permission set is what turned the egress gate into a
+ * lying screen — every migrated circle answered "denied" to every member, its
+ * owner included, and the screens then reported the withheld track as facts
+ * about the person ("No recent location", "0 m travelled").
+ *
+ * So absence is 'unknown', and callers must treat it as "not yet decided" —
+ * i.e. keep the behaviour they had before the gate existed — rather than as a
+ * refusal. Only a cached answer that really lacks view_history denies.
+ *
+ * Untyped legacy groups stay 'allowed': they were open to every member before
+ * the group model, and an upgrade must not silently tighten them.
+ *
+ * Pure, so the egress self-check asserts it directly.
+ */
+export type HistoryAccess = 'allowed' | 'denied' | 'unknown';
+
+export function historyAccess(g: GroupRef | null | undefined): HistoryAccess {
+  if (!g?.groupType) return 'allowed';
+  if (g.permissions == null) return 'unknown';
+  return hasPerm(new Set(g.permissions), 'view_history') ? 'allowed' : 'denied';
 }
 
 /** Insert or merge one group, newest first, without duplicating. */

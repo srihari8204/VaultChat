@@ -10,7 +10,7 @@
 // presence.ts fills from already-decrypted pings), so the screen works without
 // having to re-plumb the parent's live subscription through navigation params.
 
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Alert, ActivityIndicator } from 'react-native';
 import { Stack, useLocalSearchParams, useRouter, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -21,8 +21,8 @@ import { SPACE_SHADOW } from '../constants/spaceTheme';
 import { getTrack, summarize, type TrackSample, timeAtPlace } from '../lib/family/history';
 import { useFamilyAlerts, loadAlerts, type FamilyAlert } from '../lib/family/alerts';
 import { getPlaces } from '../lib/family/store';
-import { getGroup } from '../lib/groups/store';
-import { can as hasPerm, type Permission } from '../lib/groups/permissions';
+import { getGroup, historyAccess } from '../lib/groups/store';
+import { getCurrentUserAsync } from './(constants)/authService';
 import { type Geofence } from '../lib/family/geofence';
 import { createDirectChat } from '../lib/chatService';
 import { navigateTo } from '../lib/nav/openNavigation';
@@ -73,6 +73,9 @@ export default function FamilyMemberScreen() {
   // Same gate as the history screen, so History cannot be reached sideways from
   // here when the group withholds it. Starts denied.
   const [mayViewHistory, setMayViewHistory] = useState(false);
+  // Blur has to cancel the write-back too: pull()'s awaits outlive the screen,
+  // so without this it setStates onto a tree that is gone (2026-09-17).
+  const alive = useRef(true);
   /** What this person is to me. Server-owned; this screen is where it is set. */
   const [relation, setRelationState] = useState('');
   const [savingRel, setSavingRel] = useState(false);
@@ -106,15 +109,36 @@ export default function FamilyMemberScreen() {
 
   const pull = useCallback(async () => {
     if (!circleId || !userId) { setLoading(false); return; }
-    const [track, ps, g] = await Promise.all([
-      getTrack(circleId, { from: startOfToday(), userId }),
+    const [ps, g, me] = await Promise.all([
       getPlaces(circleId),
       getGroup(circleId),
+      getCurrentUserAsync().catch(() => null),
     ]);
     // Untyped legacy groups keep their previous behaviour: any member could see
     // the circle's history, so do not start withholding it from them now.
-    const perms = new Set((g?.permissions ?? []) as Permission[]);
-    setMayViewHistory(!g?.groupType || hasPerm(perms, 'view_history'));
+    //
+    // UNKNOWN IS NOT DENIED (2026-09-17). `g.permissions` is a cache of server
+    // truth and it is absent until a getChat has landed — a migrated circle
+    // never had one, nor does a space you have not made active, nor does
+    // anything at all when you are offline. Reading that absence as an empty
+    // permission set denied every member of every such circle, its OWNER
+    // included, and the screen then reported the withheld track as facts about
+    // the person. historyAccess() keeps the three cases apart; only a cached
+    // answer that really lacks view_history withholds anything.
+    const allowed = historyAccess(g) !== 'denied';
+    // Withhold the LOAD, not just the render (2026-09-17) — the same fix
+    // family-history.tsx already carries. `mayViewHistory` only hid the History
+    // button while getTrack ran alongside getGroup regardless, and the travelled
+    // -distance effect below then POSTed the resulting polyline to /nav/trace
+    // (lib/nav/routing.ts) — so a denied viewer both saw and UPLOADED another
+    // member's day. Decide first, then fetch.
+    //
+    // The one reading that is unconditionally yours is your own track, so the
+    // gate is "others", not "no data". Fails closed when selfId is unknown.
+    const denied = !allowed && userId !== (me ? String(me.id) : null);
+    const track = denied ? [] : await getTrack(circleId, { from: startOfToday(), userId });
+    if (!alive.current) return;   // blurred mid-flight — nothing below may set state
+    setMayViewHistory(!denied);
     setToday(track);
     setPlaces(ps);
     setLoading(false);
@@ -122,12 +146,30 @@ export default function FamilyMemberScreen() {
 
   // Poll while focused: presence.ts keeps writing pings into history behind us.
   useFocusEffect(useCallback(() => {
-    let live = true;
-    const tick = () => { if (live) pull(); };
+    alive.current = true;
+    const tick = () => { if (alive.current) pull(); };
     tick();
     const t = setInterval(tick, REFRESH_MS);
-    return () => { live = false; clearInterval(t); };
+    return () => { alive.current = false; clearInterval(t); };
   }, [pull]));
+
+  /**
+   * The track was withheld by the group's permissions, not missing.
+   *
+   * These are two completely different sentences and the screen used to say the
+   * wrong one (2026-09-17): an empty track rendered as "No recent location",
+   * "0 m travelled", "0 km/h", no zones, and Follow saying the member "is not
+   * sharing a location right now" — every one of those a claim ABOUT THE PERSON
+   * that this device has no basis for. Nothing is broken and the viewer has
+   * done nothing wrong; the space simply does not share other members' history
+   * with their role. group-insights.tsx says so in a lock notice, so say it
+   * here in the same voice instead of inventing facts.
+   *
+   * A screen opened without a circle or a member is NOT a denied one — pull()
+   * returns before deciding anything — so it is excluded rather than shown a
+   * lock it did not earn.
+   */
+  const withheld = !mayViewHistory && !!circleId && !!userId;
 
   const last = today.length ? today[today.length - 1] : null;
   // Freshness tier (LIVE / RECENT / STALE / UNAVAILABLE) — a fix past the
@@ -236,7 +278,15 @@ export default function FamilyMemberScreen() {
     } finally { setOpening(false); }
   };
 
+  /** "Locked" and "not sharing" are different answers — never give the second
+   *  one when the truth is the first. */
+  const lockedAlert = () => Alert.alert(
+    'Not shared with you',
+    `This space does not share other members' location history with your role, so ${name}'s position is not available here.`,
+  );
+
   const route = () => {
+    if (withheld) { lockedAlert(); return; }
     if (!last) { Alert.alert('No location', `${name} is not sharing a location right now.`); return; }
     // Say WHICH position is being navigated to. A stale fix is a legitimate
     // destination, but calling it "live" when it is 20 minutes old is exactly
@@ -255,6 +305,7 @@ export default function FamilyMemberScreen() {
 
   /** Follow on the circle map (spec: Follow member). Needs a usable fix. */
   const follow = () => {
+    if (withheld) { lockedAlert(); return; }
     if (!last || tier === 'unavailable') {
       Alert.alert('Cannot follow', `${name} has no location to follow right now.`);
       return;
@@ -303,12 +354,13 @@ export default function FamilyMemberScreen() {
               {isGuardian && <Ionicons name="star" size={13} color={colors.primary} />}
             </View>
             <Text style={{ color: fresh ? G.goodText : colors.textDim, fontSize: 12.5, marginTop: 2 }}>
-              {tier === 'live' ? 'Online'
-                : tier === 'recent' ? `Updated ${ago(last!.ts)}`
-                  : tier === 'stale' ? `Last known · ${ago(last!.ts)}`
-                    // Neutral on silence: this device cannot tell sharing-off
-                    // from offline/permission/no-GPS for another member.
-                    : 'No recent location'}
+              {withheld ? 'Location not shared with you'
+                : tier === 'live' ? 'Online'
+                  : tier === 'recent' ? `Updated ${ago(last!.ts)}`
+                    : tier === 'stale' ? `Last known · ${ago(last!.ts)}`
+                      // Neutral on silence: this device cannot tell sharing-off
+                      // from offline/permission/no-GPS for another member.
+                      : 'No recent location'}
               {currentPlace && tier !== 'unavailable' && tier !== 'stale' ? ` · at ${currentPlace.name}` : ''}
             </Text>
           </View>
@@ -325,6 +377,21 @@ export default function FamilyMemberScreen() {
             </View>
           )}
         </View>
+
+        {/* The honest version of the denied state. Same shape and the same
+            plain wording as the lock notice on group-insights.tsx, because it
+            is the same fact. Message and Call are untouched by it, so say so
+            rather than leaving the screen looking broken. */}
+        {withheld && (
+          <View style={[st.notice, { backgroundColor: G.pane, borderColor: G.edge }]}>
+            <Ionicons name="lock-closed-outline" size={15} color={colors.textDim} />
+            <Text style={{ color: colors.textDim, fontSize: 12.5, flex: 1 }}>
+              This space does not share other members&apos; location history with your role, so
+              {' '}{name}&apos;s position, travel and safe-zone status are not shown here.
+              Messaging and calling still work.
+            </Text>
+          </View>
+        )}
 
         {/* actions */}
         <View style={st.actions}>
@@ -372,7 +439,12 @@ export default function FamilyMemberScreen() {
             : 'Tap one to show it beside their name on your family map.'}
         </Text>
 
-        {/* today at a glance */}
+        {/* today at a glance — and the whole of it, stats and timeline alike, is
+            DERIVED from the track this viewer may not have. Rendering it while
+            the track is withheld is how "0 m travelled · 0 km/h · nothing yet
+            today" got stated as fact about someone whose day we never saw. The
+            notice above is the answer for this viewer; these sections are not. */}
+        {!withheld && (<>
         <Text style={[st.h, { color: colors.textDim }]}>Today</Text>
         <View style={[st.statRow, { backgroundColor: G.pane, borderColor: G.edge }]}>
           <View style={st.stat}>
@@ -412,6 +484,7 @@ export default function FamilyMemberScreen() {
             <Text style={{ color: colors.textDim, fontSize: 11.5 }}>{clock(a.at)}</Text>
           </View>
         ))}
+        </>)}
 
         {/* location diagnostics (v3) — same data language as the lock engine */}
         {last && (
@@ -492,6 +565,9 @@ const st = StyleSheet.create({
   card: { flexDirection: 'row', alignItems: 'center', gap: 12, borderWidth: 1, borderRadius: 22, padding: 16, ...SPACE_SHADOW.raised },
   avatar: { width: 50, height: 50, borderRadius: 25, alignItems: 'center', justifyContent: 'center' },
   avatarTxt: { color: '#fff', fontWeight: '800', fontSize: 20 },
+  // No fixed height and the text takes flex:1 beside the icon, so it simply
+  // grows at font scale 1.5 and wraps on a 320dp screen.
+  notice: { flexDirection: 'row', alignItems: 'flex-start', gap: 9, padding: 12, borderWidth: 1, borderRadius: 16, marginTop: 12 },
   actions: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 12 },
   action: { flex: 1, minWidth: 62, alignItems: 'center', justifyContent: 'center', gap: 5, minHeight: 62, borderWidth: 1, borderRadius: 18, ...SPACE_SHADOW.rest },
   actionTxt: { fontSize: 11.5, fontWeight: '600' },

@@ -2,7 +2,6 @@ package realtime
 
 import (
 	"context"
-	"github.com/zishang520/socket.io/v2/socket"
 	"time"
 )
 
@@ -22,10 +21,10 @@ type eventPeer struct {
 	data    *sockData
 	context func() context.Context
 	on      func(string, func(...any))
-	join    func(socket.Room) bool
-	leave   func(socket.Room)
+	join    func(Room) bool
+	leave   func(Room)
 	emit    func(string, any)
-	to      func(socket.Room, string, any)
+	to      func(Room, string, any)
 }
 
 func (p *eventPeer) On(event string, fn func(...any)) { p.on(event, fn) }
@@ -35,55 +34,36 @@ func (p *eventPeer) Context() context.Context {
 	}
 	return bg
 }
-func (p *eventPeer) Join(room socket.Room) bool   { return p.join(room) }
-func (p *eventPeer) Leave(room socket.Room)       { p.leave(room) }
+func (p *eventPeer) Join(room Room) bool          { return p.join(room) }
+func (p *eventPeer) Leave(room Room)              { p.leave(room) }
 func (p *eventPeer) Emit(event string, value any) { p.emit(event, value) }
 
 type peerRoom struct {
 	p    *eventPeer
-	room socket.Room
+	room Room
 }
 
-func (p *eventPeer) To(room socket.Room) peerRoom { return peerRoom{p, room} }
-func (r peerRoom) Emit(event string, value any)   { r.p.to(r.room, event, value) }
+func (p *eventPeer) To(room Room) peerRoom      { return peerRoom{p, room} }
+func (r peerRoom) Emit(event string, value any) { r.p.to(r.room, event, value) }
 
-func (h *Hub) socketPeer(s *socket.Socket) *eventPeer {
-	return &eventPeer{
-		data:  sd(s),
-		on:    func(e string, fn func(...any)) { s.On(e, fn) },
-		join:  func(r socket.Room) bool { s.Join(r); return true },
-		leave: func(r socket.Room) { s.Leave(r) },
-		emit:  func(e string, v any) { s.Emit(e, v) },
-		to: func(r socket.Room, e string, v any) {
-			s.To(r).Emit(e, v)
-			h.ccwireRooms([]string{string(r)}, "", e, v)
-		},
-	}
-}
-
-func (h *Hub) registerChatHandlers(s *socket.Socket)   { h.registerChatHandlersPeer(h.socketPeer(s)) }
-func (h *Hub) registerSignalHandlers(s *socket.Socket) { h.registerSignalHandlersPeer(h.socketPeer(s)) }
-func (h *Hub) registerRunRelay(s *socket.Socket, d *sockData) {
-	h.registerRunRelayPeer(h.socketPeer(s), d)
-}
-func (h *Hub) onChatView(s *socket.Socket, m map[string]any) { h.onChatViewPeer(h.socketPeer(s), m) }
+// The Socket.IO peer constructor and its four *socket.Socket wrappers were
+// here. eventPeer itself stays — it is the transport-agnostic seam, and every
+// *Peer handler is now reached through ccwireSession.eventPeer() below.
 
 func (s *ccwireSession) eventPeer() *eventPeer {
 	return &eventPeer{
 		data:    s.d,
 		context: s.ctxOrBG,
 		on:      func(e string, fn func(...any)) { s.events[e] = fn },
-		join:    func(r socket.Room) bool { return s.joinEventRoom(string(r)) },
-		leave:   func(r socket.Room) { s.subMu.Lock(); delete(s.subs, string(r)); s.subMu.Unlock() },
+		join:    func(r Room) bool { return s.joinEventRoom(string(r)) },
+		leave:   func(r Room) { s.subMu.Lock(); delete(s.subs, string(r)); s.subMu.Unlock() },
 		emit: func(e string, v any) {
 			if s.ctxOrBG().Err() != nil {
 				return
 			}
-			for _, raw := range appEventFrames(e, v) {
-				s.enqueue(raw)
-			}
+			s.deliver(appEventBuild(e, v))
 		},
-		to: func(r socket.Room, e string, v any) {
+		to: func(r Room, e string, v any) {
 			s.hub.emitRooms([]string{string(r)}, s.sessionID, e, v, s.ctxOrBG())
 		},
 	}
@@ -92,19 +72,42 @@ func (s *ccwireSession) eventPeer() *eventPeer {
 const ccwireMaxSubscriptions = 256
 
 func (s *ccwireSession) joinEventRoom(room string) bool {
+	// THE REFUSAL IS SENT OUTSIDE closeMu, and that is not a tidy-up.
+	//
+	// sendError writes to the socket, and the write path takes the session's
+	// position lock. Delivery takes that lock in the other order — it holds
+	// pos.mu across enqueue(), which reads s.closed under closeMu — so sending
+	// while holding closeMu closes a cycle:
+	//
+	//   deliver()        pos.mu  -> closeMu
+	//   joinEventRoom()  closeMu -> pos.mu
+	//
+	// One Subscribe past the limit, concurrent with a fan-out to the same
+	// session, wedges both goroutines permanently. closeOnce() also needs
+	// closeMu, so the socket is never closed, drain() never exits, and the
+	// session leaks with pos.mu held forever.
+	//
+	// closeMu is only ever a snapshot of s.closed here — the session can close
+	// the instant after it is released either way — so nothing is lost by
+	// taking it, reading, and letting go.
 	s.closeMu.Lock()
-	defer s.closeMu.Unlock()
-	if s.closed || s.ctxOrBG().Err() != nil {
+	closed := s.closed
+	s.closeMu.Unlock()
+	if closed || s.ctxOrBG().Err() != nil {
 		return false
 	}
+
 	s.subMu.Lock()
 	_, exists := s.subs[room]
-	if len(room) > 256 || (!exists && len(s.subs) >= ccwireMaxSubscriptions) {
-		s.subMu.Unlock()
+	refused := len(room) > 256 || (!exists && len(s.subs) >= ccwireMaxSubscriptions)
+	if !refused {
+		s.subs[room] = struct{}{}
+	}
+	s.subMu.Unlock()
+
+	if refused {
 		s.sendError("", errRateLimited, "subscription limit")
 		return false
 	}
-	s.subs[room] = struct{}{}
-	s.subMu.Unlock()
 	return true
 }

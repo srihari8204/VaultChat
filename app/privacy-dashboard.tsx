@@ -11,9 +11,7 @@ import { Stack, useRouter } from 'expo-router';
 import React, { useEffect, useRef, useState , useMemo} from 'react';
 import {
   Animated,
-  Platform,
   ScrollView,
-  StatusBar,
   StyleSheet,
   Text,
   TouchableOpacity,
@@ -25,9 +23,15 @@ import { getSettings, updateSettings, listTrustedContacts } from '../lib/chatSer
 import { getSecurityOverview } from '../lib/security';
 import { hasPIN } from './(constants)/authService';
 import { AuroraBackground } from '../components/ui';
+import { HEADER_TOP } from '../constants/layout';
 
 
-const TOP = Platform.OS === 'android' ? (StatusBar.currentHeight ?? 0) : 44;
+// Was: `const TOP = Platform.OS === 'android' ? (StatusBar.currentHeight ?? 0) : 44`.
+// currentHeight ignores the display cutout on some OEM skins, the `?? 0` drew
+// this header UNDER the notch (edgeToEdge is on at every API level here), and
+// the module-scope read froze whichever it picked for the life of the process.
+// HEADER_TOP is the live binding and already carries the gap the `+ 8` added
+// (2026-09-17).
 const STORAGE_KEY = 'vc_privacy_settings';
 
 type PrivacyLevel = 'everyone' | 'contacts' | 'nobody';
@@ -380,7 +384,7 @@ export default function PrivacyDashboardScreen() {
       <Animated.View style={{ flex: 1, opacity: fadeIn }}>
         {/* Header */}
         <View style={s.header}>
-          <TouchableOpacity onPress={() => router.back()} style={s.backBtn}>
+          <TouchableOpacity accessibilityRole="button" accessibilityLabel="Back" onPress={() => router.back()} style={s.backBtn}>
             <Ionicons name="arrow-back" size={24} color={colors.text} />
           </TouchableOpacity>
           <Text style={s.headerTitle}>Privacy Dashboard</Text>
@@ -405,7 +409,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingTop: TOP + 8,
+    paddingTop: HEADER_TOP,
     paddingHorizontal: 16,
     paddingBottom: 12,
   },

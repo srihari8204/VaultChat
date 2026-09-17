@@ -100,7 +100,7 @@ export default function CacheCleanupScreen() {
     <View style={S.container}>
       <AuroraBackground />
       <View style={S.header}>
-        <TouchableOpacity onPress={() => router.back()} style={S.backBtn} hitSlop={10}>
+        <TouchableOpacity accessibilityRole="button" accessibilityLabel="Back" onPress={() => router.back()} style={S.backBtn} hitSlop={10}>
           <Ionicons name="chevron-back" size={26} color={colors.text} />
         </TouchableOpacity>
         <View style={{ flex: 1 }}>

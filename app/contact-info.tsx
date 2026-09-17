@@ -9,8 +9,7 @@
 
 import { brandAlpha, type Palette } from '../constants/theme';
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import {
-  View, Text, TouchableOpacity, StyleSheet, StatusBar, ScrollView, Dimensions, Alert, ActivityIndicator, Linking, Switch, useWindowDimensions } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, ScrollView, Dimensions, Alert, ActivityIndicator, Linking, Switch, useWindowDimensions } from 'react-native';
 import { getShareViewing, setShareViewing } from '../lib/viewerPrefs';
 import LinkPreview from '../components/LinkPreview';
 import { useLocalSearchParams, Stack, useRouter } from 'expo-router';
@@ -26,6 +25,7 @@ import SharedMediaThumb from '../components/chat/SharedMediaThumb';
 import { readCache, writeCache } from '../lib/localCache';
 import { unionWithLocalHistory } from '../lib/messageHistory';
 import { Avatar, AuroraBackground } from '../components/ui';
+import { HEADER_TOP } from '../constants/layout';
 
 const URL_RE = /(https?:\/\/[^\s]+)/gi;
 
@@ -235,7 +235,6 @@ export default function ContactInfoScreen() {
   return (
     <View style={s.root}>
       <AuroraBackground />
-      <StatusBar barStyle="light-content" backgroundColor={colors.bg} />
       <Stack.Screen options={{ headerShown: false }} />
 
       <ScrollView contentContainerStyle={{ paddingBottom: 60 }}>
@@ -408,7 +407,7 @@ export default function ContactInfoScreen() {
 // value survived rotation, folds and split-screen resizes.
 const makeStyles = (c: Palette, SW: number) => StyleSheet.create({
   root: { flex: 1, backgroundColor: 'transparent' },
-  hero: { alignItems: 'center', paddingTop: 54, paddingBottom: 24 },
+  hero: { alignItems: 'center', paddingTop: HEADER_TOP, paddingBottom: 24 },
   backBtn: { position: 'absolute', top: 54, left: 16, zIndex: 10 },
   avatar: { width: 100, height: 100, borderRadius: 50, marginTop: 12, backgroundColor: c.surfaceSolid, borderWidth: 1, borderColor: c.glassStroke, justifyContent: 'center', alignItems: 'center', overflow: 'visible' },
   avatarImg: { width: 100, height: 100, borderRadius: 50 },

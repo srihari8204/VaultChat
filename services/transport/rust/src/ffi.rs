@@ -13,9 +13,17 @@
 //! in one sitting. Merging them would mean auditing 2000 lines under the same
 //! suspicion the 40-line shim deserves.
 //!
-//! So the shim is a future crate with `unsafe` permitted and no logic of its
-//! own. This module is what it calls: handles instead of pointers, slices
-//! instead of (ptr, len), and no global mutable state.
+//! So the shim is a SEPARATE crate with `unsafe` permitted and no logic of its
+//! own. That crate now exists — `services/transport/rust-net`, whose `ffi.rs`
+//! carries the `#[no_mangle] extern "C"` surface and is linked through
+//! `TransportJni.cpp`. (This paragraph used to say "a future crate"; it stopped
+//! being future and the comment did not notice.)
+//!
+//! This module is what such a shim calls: handles instead of pointers, slices
+//! instead of (ptr, len), and no global mutable state. Note that the SHIPPED
+//! path does not currently come through here — `rust-net`'s exported symbols
+//! route to its own `carrier` — so this is the boundary as designed, not as
+//! deployed.
 //!
 //! NO GLOBAL REGISTRY, DELIBERATELY. A `static mut` or a lazily-initialised
 //! global would need a lock, and every FFI call would contend on it — including

@@ -2,10 +2,7 @@
 // Connection status, message queue, sync progress, cache management
 
 import React, { useState, useEffect, useRef , useMemo} from 'react';
-import {
-  View, Text, TouchableOpacity, StyleSheet, ScrollView,
-  StatusBar, Platform, Alert, ActivityIndicator, Animated,
-} from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, ScrollView, Platform, Alert, ActivityIndicator, Animated } from 'react-native';
 import { type Palette } from '../constants/theme';
 import { useTheme } from '../lib/theme';
 import { Stack, useRouter } from 'expo-router';
@@ -14,8 +11,13 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Ionicons } from '@expo/vector-icons';
 import NetInfo from '@react-native-community/netinfo';
 import { AuroraBackground } from '../components/ui';
+import { HEADER_TOP } from '../constants/layout';
 
-const TOP = Platform.OS === 'android' ? (StatusBar.currentHeight ?? 0) : 44;
+// Was: StatusBar.currentHeight on Android, a hardcoded 44 elsewhere, read
+// ONCE at module scope. currentHeight ignores display cutouts, the 44 is a
+// guess, and the module read froze whichever it picked for the life of the
+// process. HEADER_TOP is the live binding and is applied at the element
+// below, so it follows a rotation like every other screen (2026-09-17).
 
 
 const QUEUE_KEY = 'vc_offline_queue';
@@ -80,15 +82,21 @@ export default function OfflineModeScreen() {
     });
 
     loadQueueAndCache();
-    Animated.loop(
+    // ONE LOOP, NOT ONE PER QUEUED MESSAGE (2026-09-17). queue.length was in
+    // the deps, so every send re-ran this effect and started a FRESH infinite
+    // loop on the same Animated.Value while orphaning the previous one - N
+    // sends left N loops fighting each other, none ever released. The pulse
+    // depends on the screen being mounted, not on what is in the queue.
+    const pulse = Animated.loop(
       Animated.sequence([
         Animated.timing(pulseAnim, { toValue: 0.4, duration: 1000, useNativeDriver: true }),
         Animated.timing(pulseAnim, { toValue: 1, duration: 1000, useNativeDriver: true }),
       ])
-    ).start();
+    );
+    pulse.start();
 
-    return () => unsub();
-  }, [queue.length, pulseAnim]);
+    return () => { unsub(); pulse.stop(); };
+  }, [pulseAnim]);
 
   const loadQueueAndCache = async () => {
     try {
@@ -188,11 +196,10 @@ export default function OfflineModeScreen() {
     <View style={s.root}>
       <AuroraBackground />
       <Stack.Screen options={{ headerShown: false }} />
-      <StatusBar barStyle="light-content" backgroundColor={colors.bg} />
 
       <LinearGradient colors={['#F9FAFB', colors.bg]} style={s.header}>
-        <View style={[s.headerRow, { marginTop: TOP }]}>
-          <TouchableOpacity onPress={() => router.back()} hitSlop={16}>
+        <View style={[s.headerRow, { marginTop: HEADER_TOP }]}>
+          <TouchableOpacity accessibilityRole="button" accessibilityLabel="Back" onPress={() => router.back()} hitSlop={16}>
             <Ionicons name="arrow-back" size={24} color={colors.text} />
           </TouchableOpacity>
           <Text style={s.headerTitle}>Offline Mode</Text>

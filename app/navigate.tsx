@@ -173,7 +173,7 @@ export default function NavigateScreen() {
                 {banner.etaEpochMs > 0 ? ` · ETA ${new Date(banner.etaEpochMs).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : ''}
               </Text>
             </View>
-            <TouchableOpacity onPress={() => forceReroute()} disabled={banner.rerouting}
+            <TouchableOpacity accessibilityRole="button" accessibilityLabel="Find a new route" onPress={() => forceReroute()} disabled={banner.rerouting}
               style={[st.rerouteBtn, { borderColor: colors.primary, opacity: banner.rerouting ? 0.5 : 1 }]}>
               <Ionicons name="git-branch" size={16} color={colors.primary} />
             </TouchableOpacity>
@@ -320,7 +320,10 @@ const st = StyleSheet.create({
   lockEntry: { flexDirection: 'row', alignItems: 'center', gap: 12, borderWidth: 1.5, borderRadius: 14, padding: 12, marginBottom: 20 },
   lockEntryIcon: { width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center' },
   h: { fontSize: 13, fontWeight: '700', letterSpacing: 0.3, textTransform: 'uppercase', marginBottom: 10, opacity: 0.9 },
-  searchRow: { flexDirection: 'row', alignItems: 'center', gap: 10, borderWidth: 1, borderRadius: 12, paddingHorizontal: 12, height: 48 },
+  // 2026-09-17: searchRow, startBtn and endBtn each pinned a height around a
+  // 14-16sp label; at font scale 1.5 the line box outgrew the box and clipped.
+  // minHeight is the same size at scale 1.0 and stays over the 44dp tap floor.
+  searchRow: { flexDirection: 'row', alignItems: 'center', gap: 10, borderWidth: 1, borderRadius: 12, paddingHorizontal: 12, minHeight: 48, paddingVertical: 8 },
   sugBox: { borderWidth: 1, borderRadius: 12, marginTop: 6, overflow: 'hidden' },
   sugRow: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 12, paddingVertical: 11 },
   input: { flex: 1, fontSize: 15 },
@@ -328,11 +331,11 @@ const st = StyleSheet.create({
   previewMap: { height: 210, borderRadius: 14, borderWidth: 1, marginTop: 14 },
   chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   chip: { borderWidth: 1, borderRadius: 999, paddingHorizontal: 14, paddingVertical: 8 },
-  startBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, height: 52, borderRadius: 14, marginTop: 30 },
+  startBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, minHeight: 52, paddingVertical: 10, borderRadius: 14, marginTop: 30 },
   startTxt: { color: '#fff', fontSize: 16, fontWeight: '800' },
   sheet: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 16, paddingVertical: 14, paddingBottom: 22, borderTopWidth: StyleSheet.hairlineWidth },
   sheetInstr: { fontSize: 17, fontWeight: '800' },
-  endBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, height: 44, paddingHorizontal: 18, borderRadius: 12 },
+  endBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, minHeight: 44, paddingVertical: 8, paddingHorizontal: 18, borderRadius: 12 },
   rerouteBtn: { alignItems: 'center', justifyContent: 'center', width: 44, height: 44, borderRadius: 12, borderWidth: 1.5 },
   endTxt: { color: '#fff', fontSize: 14, fontWeight: '800' },
 });

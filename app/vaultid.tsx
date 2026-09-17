@@ -10,6 +10,7 @@ import { Alert, Animated, Dimensions, Easing, Modal, ScrollView, Share, StyleShe
 import { VaultID, destroyVaultID, generateIdentityCertificate, generateVaultID, loadVaultID, shortAddress, signMessage, updateTrustScore } from '../constants/vaultID';
 import type { Palette } from '../constants/theme';
 import { useColors } from '../lib/theme';
+import { KeyboardSafe } from '../components/ui/KeyboardSafe';
 
 
 const AVATARS = ['🧑','👩','👨','🧔','👧','👦','🧓','👴','👵','🦸','🦹','🧙','🧝','🧛','🤖','👾'];
@@ -129,7 +130,7 @@ function VaultIDScreenContent() {
 
         {/* Header */}
         <View style={S.header}>
-          <TouchableOpacity onPress={()=>router.back()} style={S.backBtn}>
+          <TouchableOpacity accessibilityRole="button" accessibilityLabel="Back" onPress={()=>router.back()} style={S.backBtn}>
             <Ionicons name="arrow-back" size={24} color="#4A9FFF" />
           </TouchableOpacity>
           <View style={{flex:1}}>
@@ -292,6 +293,7 @@ function VaultIDScreenContent() {
 
       {/* Create Modal */}
       <Modal visible={showCreate} transparent animationType="slide">
+        <KeyboardSafe keyboardOnly>
         <View style={{flex:1,backgroundColor:'rgba(0,0,0,0.92)',justifyContent:'flex-end'}}>
           <LinearGradient colors={['#F9FAFB','#0D1E3A']} style={{borderTopLeftRadius:28,borderTopRightRadius:28,padding:24,paddingBottom:44}}>
             <Text style={{color:'#fff',fontSize:22,fontWeight:'900',marginBottom:4}}>🧬 Create VaultID</Text>
@@ -332,6 +334,7 @@ function VaultIDScreenContent() {
             </TouchableOpacity>}
           </LinearGradient>
         </View>
+        </KeyboardSafe>
       </Modal>
 
       {/* Details Modal */}

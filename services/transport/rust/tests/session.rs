@@ -426,3 +426,90 @@ fn the_resume_token_never_appears_in_debug_output() {
         "clearing the session must clear the credential"
     );
 }
+
+// ── positions: the half of resume that was never put on the wire ────
+//
+// `Session` held a token and exposed `can_resume()`, and `body::client_hello`
+// had no way to encode either — so the state machine was complete and its
+// output was discarded. These pin the part that makes it reachable.
+
+#[test]
+fn positions_track_the_highest_seq_per_stream() {
+    let mut s = Session::new(Capabilities::all(), 1);
+    s.note_delivered(2, 5);
+    s.note_delivered(2, 3); // older: must not regress
+    s.note_delivered(3, 9);
+    let mut got: Vec<(u32, u64)> = s.positions().collect();
+    got.sort_unstable();
+    assert_eq!(got, vec![(2, 5), (3, 9)]);
+}
+
+#[test]
+fn unsequenced_and_out_of_range_frames_move_nothing() {
+    // seq 0 is the whole control plane and every EPHEMERAL frame — lossy by
+    // design, and never sequenced by the server. A stream outside StreamId is
+    // untrusted input off the network, so it is ignored rather than panicking.
+    let mut s = Session::new(Capabilities::all(), 1);
+    s.note_delivered(2, 0);
+    s.note_delivered(0, 4);
+    s.note_delivered(99, 4);
+    assert_eq!(s.positions().count(), 0);
+}
+
+#[test]
+fn a_refused_resume_clears_the_positions_with_the_token() {
+    // They belong to the session that produced them. A server answering
+    // resumed=false has started a NEW session numbering from 1, so carrying
+    // them forward would make the next reconnect claim a position far ahead of
+    // anything that session sent — which the server refuses as a future cursor.
+    // One un-resumed connection would poison every resume after it.
+    let mut s = Session::new(Capabilities::all(), 1);
+    s.connect().unwrap();
+    s.send_client_hello(false).unwrap();
+    s.on_server_hello(
+        ServerHello {
+            capabilities: Capabilities::all(),
+            limits: Default::default(),
+            heartbeat_interval_ms: HEARTBEAT_INTERVAL_MS,
+            heartbeat_timeout_ms: HEARTBEAT_TIMEOUT_MS,
+            resumed: false,
+            resume_token: Some(ResumeToken::new("tok-1")),
+        },
+        0,
+    )
+    .unwrap();
+    s.note_delivered(2, 42);
+    assert_eq!(s.positions().count(), 1);
+
+    // A second connection that the server refuses to resume.
+    s.on_disconnect(ErrorClass::Retryable, 1_000);
+    s.connect().unwrap();
+    s.send_client_hello(true).unwrap();
+    s.on_server_hello(
+        ServerHello {
+            capabilities: Capabilities::all(),
+            limits: Default::default(),
+            heartbeat_interval_ms: HEARTBEAT_INTERVAL_MS,
+            heartbeat_timeout_ms: HEARTBEAT_TIMEOUT_MS,
+            resumed: false,
+            resume_token: Some(ResumeToken::new("tok-2")),
+        },
+        2_000,
+    )
+    .unwrap();
+    assert_eq!(
+        s.positions().count(),
+        0,
+        "positions survived a session the server refused"
+    );
+}
+
+#[test]
+fn clearing_the_session_clears_the_positions() {
+    // A position is a claim about a session. Outliving it makes it a claim
+    // about nothing, offered to whoever connects next.
+    let mut s = Session::new(Capabilities::all(), 1);
+    s.note_delivered(2, 7);
+    s.close();
+    assert_eq!(s.positions().count(), 0);
+}

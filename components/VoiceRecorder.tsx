@@ -6,6 +6,7 @@ import { View, Text, TouchableOpacity, StyleSheet, ActivityIndicator, Alert } fr
 import { Audio } from 'expo-av';
 import type { Palette } from '../constants/theme';
 import { useColors } from '../lib/theme';
+import { permissionDenied } from '../lib/permissionDenied';
 
 interface Props {
   onSend: (uri: string, duration: number) => void;
@@ -23,7 +24,7 @@ export default function VoiceRecorder({ onSend, onCancel }: Props) {
   const startRecording = async () => {
     try {
       const perm = await Audio.requestPermissionsAsync();
-      if (!perm.granted) { Alert.alert('Permission denied', 'Microphone permission is required.'); return; }
+      if (!perm.granted) { permissionDenied('Permission denied', 'Microphone permission is required.', perm.canAskAgain); return; }
 
       await Audio.setAudioModeAsync({ allowsRecordingIOS: true, playsInSilentModeIOS: true });
       const { recording: rec } = await Audio.Recording.createAsync(

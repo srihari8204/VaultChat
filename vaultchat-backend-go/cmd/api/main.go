@@ -280,16 +280,18 @@ func main() {
 	routes.RegisterShopBookAdmin(mux)
 	routes.RegisterShopBookAdmin2(mux)
 
-	// ── Realtime: CC-Wire is the mobile runtime; Socket.IO remains legacy/admin-compatible. ──
-	// Default keeps existing deployments unchanged. Set SOCKET_IO_ENABLED=0 only
-	// after old clients and the Socket.IO admin console are no longer in use.
+	// ── Realtime: CC-Wire for the app, SSE for the admin console. ──
+	// Socket.IO is gone. /socket.io/ is no longer mounted and SOCKET_IO_ENABLED
+	// no longer does anything — the app dropped socket.io-client entirely and
+	// the admin console streams GET /admin/events (internal/realtime/admin_sse.go).
 	hub := realtime.New()
-	if os.Getenv("SOCKET_IO_ENABLED") != "0" {
-		mux.Handle("/socket.io/", hub.Handler())
-	} else {
-		log.Printf("[realtime] SOCKET_IO_ENABLED=0 — /socket.io disabled; CC-Wire remains available when CCWIRE_WS=1")
-	}
-	realtime.RegisterCCWire(mux, hub) // CC-Wire v1 listener, no-op unless CCWIRE_WS=1
+	realtime.RegisterCCWire(mux, hub)   // CC-Wire v1 listener, no-op unless CCWIRE_WS=1
+	realtime.RegisterAdminSSE(mux, hub) // admin firehose, x-admin-key per request
+
+	// Logout must invalidate parked CC-Wire resume sessions: a resume token
+	// that outlives the refresh token it was issued under would silently
+	// restore a session the user just ended.
+	routes.OnSessionRevoked = func(uid string) { hub.InvalidateResume(uid) }
 
 	// Point emitx at the local hub so Go-served routes emit IN-PROCESS
 	// instead of bridging to Node. The admin firehose mirror that Node's

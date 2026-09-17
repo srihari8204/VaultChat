@@ -21,7 +21,7 @@ import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import InCallManager from 'react-native-incall-manager';
 import { setActiveCall, clearActiveCall, type ActiveCall } from '../lib/callState';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { BackHandler, StatusBar, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { Alert, BackHandler, StatusBar, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Sheet, type SheetAction } from '../components/ui/Sheet';
 import { Ionicons } from '@expo/vector-icons';
@@ -48,6 +48,8 @@ import { callFail, offerTag } from '../lib/call/diag';
 import { setRingingPeer, setRingScreenPeer } from '../lib/ringTracker';
 import { DISCONNECT_GRACE_MS } from '../lib/call/types';
 import { useCallConnectedAt, useCallError, useCallFlag, useCallStatus } from '../hooks/useCall';
+import { endMessage } from '../lib/call/endMessage';
+import { getSnapshot } from '../lib/call/store';
 
 type CallState = 'connecting' | 'ringing' | 'connected' | 'ended';
 
@@ -214,6 +216,11 @@ function VoiceCallEngine() {
   // Leave when the call is over, matching the legacy 200 ms settle.
   useEffect(() => {
     if (status !== 'ended') return;
+    // Say why, but only when the user did not ask for it. endMessage returns
+    // null for a hang-up either side made on purpose (2026-09-17).
+    const snap = getSnapshot();
+    const why = endMessage(snap.endReason, snap.error);
+    if (why) Alert.alert('Call ended', why);
     // LEAVE, even when there is nothing to go back TO.
     //
     // router.back() is a no-op on an empty history, and a call answered from a

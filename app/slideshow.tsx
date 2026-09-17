@@ -6,13 +6,14 @@ import { Ionicons } from '@expo/vector-icons';
 import * as MediaLibrary from 'expo-media-library';
 import * as Sharing from 'expo-sharing';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
-import React, { useRef, useState , useMemo} from 'react';
+import React, {useRef, useState , useMemo, useEffect } from 'react';
 import {
   Alert, Dimensions, FlatList, Image, StyleSheet,
   Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
 import { useTheme } from '../lib/theme';
 import { type Palette } from '../constants/theme';
 import { AuroraBackground } from '../components/ui';
+import { permissionDenied } from '../lib/permissionDenied';
 
 function useS() {
   // Reactive size. The module-level Dimensions.get above is captured ONCE at
@@ -55,6 +56,12 @@ export default function SlideshowScreen() {
   const flatRef = useRef<FlatList>(null);
   const autoplayTimer = useRef<any>(null);
 
+  // The autoplay interval had NO cleanup anywhere in this file - there was no
+  // useEffect at all. Leaving the screen with autoplay on kept a 3s timer
+  // calling setCurrentIndex/scrollToIndex on a dead screen for the rest of the
+  // process, retaining the list ref and every image URI in the album (2026-09-17).
+  useEffect(() => () => { if (autoplayTimer.current) clearInterval(autoplayTimer.current); }, []);
+
   const goTo = (idx: number) => {
     if (idx >= 0 && idx < imageList.length) {
       flatRef.current?.scrollToIndex({ index: idx, animated: true });
@@ -80,8 +87,8 @@ export default function SlideshowScreen() {
 
   const saveToGallery = async () => {
     try {
-      const { status } = await MediaLibrary.requestPermissionsAsync();
-      if (status !== 'granted') { Alert.alert('Permission needed'); return; }
+      const { status, canAskAgain } = await MediaLibrary.requestPermissionsAsync();
+      if (status !== 'granted') { permissionDenied('Permission needed', 'Allow photo access to save this image to your gallery.', canAskAgain); return; }
       await MediaLibrary.saveToLibraryAsync(imageList[currentIndex]);
       Alert.alert('Saved!', 'Image saved to your gallery');
     } catch { Alert.alert('Error', 'Could not save image'); }

@@ -18,7 +18,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useCallback, useEffect, useState , useMemo} from 'react';
 import {
-  ActivityIndicator, Alert, Platform, ScrollView, StatusBar, Switch,
+  ActivityIndicator, Alert, ScrollView, Switch,
   StyleSheet, Text, TextInput, TouchableOpacity, View,
 } from 'react-native';
 import { useTheme } from '../lib/theme';
@@ -29,10 +29,16 @@ import {
   type ChatMember, type JoinRequest,
 } from '../lib/chatService';
 import { AuroraBackground } from '../components/ui';
+import { HEADER_TOP } from '../constants/layout';
 
 type Policy = 'everyone' | 'admins';
 
-const TOP = Platform.OS === 'android' ? (StatusBar.currentHeight ?? 0) : 44;
+// Was: `const TOP = Platform.OS === 'android' ? (StatusBar.currentHeight ?? 0) : 44`.
+// currentHeight ignores the display cutout on some OEM skins, the `?? 0` drew
+// this header UNDER the notch (edgeToEdge is on at every API level here), and
+// the module-scope read froze whichever it picked for the life of the process.
+// HEADER_TOP is the live binding and already carries the gap the `+ 8` added
+// (2026-09-17).
 
 type Role = 'owner' | 'admin' | 'member';
 
@@ -416,7 +422,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   center: { justifyContent: 'center', alignItems: 'center' },
   header: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    paddingTop: TOP + 8, paddingHorizontal: 16, paddingBottom: 12,
+    paddingTop: HEADER_TOP, paddingHorizontal: 16, paddingBottom: 12,
   },
   backBtn: { width: 40, height: 40, justifyContent: 'center', alignItems: 'center' },
   headerTitle: { fontSize: 18, fontWeight: '700', color: c.text },
