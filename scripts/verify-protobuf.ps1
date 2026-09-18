@@ -14,6 +14,10 @@
 param(
   [string]$VmHost      = 'root@65.21.229.167',
   [string]$Loopback    = 'http://127.0.0.1:8095',
+  # Caddy REFUSES /internal/* from outside (caddy/Caddyfile:25-26), so the
+  # metrics scrape has to go straight at go-api. Through :8095 it is a 404,
+  # which reads exactly like "the counter does not exist" and is not that.
+  [string]$GoApi       = 'http://127.0.0.1:14000',
   [string]$Edge        = 'https://api.corefinite.com',
   [string]$Fingerprint = ''          # expected /build source; blank = just report it
 )
@@ -83,7 +87,7 @@ foreach ($h in @(@{n='Accept: application/json'; a="-H 'Accept: application/json
 
 # --- 6. metrics - the only check covering the 7 AUTHENTICATED endpoints ---
 Section '6. metrics (you have no token, so this is the only view of the other 7)'
-$m = Box "curl -s -m 10 $Loopback/internal/metrics | grep responses_total"
+$m = Box "curl -s -m 10 $GoApi/internal/metrics | grep responses_total"
 if ($m) {
   $m | ForEach-Object { Write-Host "  $_" }
   Pass 'counter exists - on its own that proves the new binary is up'
@@ -91,7 +95,9 @@ if ($m) {
   Write-Host '  must keep rising. A flat json series means you are matching clients' -ForegroundColor DarkGray
   Write-Host '  that never opted in.' -ForegroundColor DarkGray
 } else {
-  Bad 'no responses_total - the old binary is still serving'
+  Bad 'no responses_total on go-api:14000 - the old binary is still serving'
+  Write-Host '  (a 404 here through :8095 instead would be Caddy doing its job,' -ForegroundColor DarkGray
+  Write-Host '   not a missing counter - see caddy/Caddyfile:25-26)' -ForegroundColor DarkGray
 }
 
 # --- 7. the edge, where a proxy can silently demote everyone --------------

@@ -116,7 +116,7 @@ Four properties, each one checkable rather than asserted:
       ```
 
 - [ ] Note the current representation split, so §5 has a baseline to move:
-      `ssh root@65.21.229.167 "curl -s http://127.0.0.1:8095/internal/metrics | grep responses_total"`
+      `ssh root@65.21.229.167 "curl -s http://127.0.0.1:14000/internal/metrics | grep responses_total"`
       Expect `repr="protobuf" 0` on a box that predates this change — and an
       *absent* series if the box predates the counter itself.
 
@@ -206,8 +206,14 @@ curl -s -m 10 -o /dev/null -w '%{content_type}\n' http://127.0.0.1:8095/app/vers
 AUTHENTICATED endpoints** — you have no token, so you cannot curl those:
 
 ```bash
-ssh root@65.21.229.167 "curl -s http://127.0.0.1:8095/internal/metrics | grep responses_total"
+ssh root@65.21.229.167 "curl -s http://127.0.0.1:14000/internal/metrics | grep responses_total"
 ```
+
+**Port 14000, not 8095.** Caddy refuses `/internal/*` from outside
+(`caddy/Caddyfile:25-26`), so scraping through 8095 returns a bare 404 that
+reads exactly like "the counter was never built" and is not that. Corrected
+2026-09-19, after the deploy, when 8095 404'd on a binary that was in fact
+serving the counter perfectly on 14000.
 
 `vaultchat_http_responses_total{repr="protobuf"}` must rise above the §3
 baseline as real clients arrive, **and** `repr="json"` must keep rising too —
