@@ -60,13 +60,13 @@ export function useS() {
     topInset: insets.top,
     bottomInset: insets.bottom,
     narrow: width < 360,
-    // Widest a card may be INSIDE A TEXT BUBBLE. The bubble is maxWidth:'78%'
-    // with 14dp of padding each side, so the usable slot is 0.78*W - 28 - and
-    // file cards, previews and polls were all hardcoded to 240. That slot only
-    // reaches 240 at a window of ~344dp, so every phone below it (320dp is the
-    // floor we support) had 18dp of every file card pushed outside the bubble.
-    // Images, video and GIFs are unaffected: they swap in mediaBubble, whose
-    // padding is 3, and were already sized to fit that (2026-09-17).
+    // Widest a card may be INSIDE A BUBBLE. The bubble is maxWidth:'78%' with
+    // 14dp of padding each side, and 78% resolves against `bubbleRow` inside a
+    // list padded 12dp each side - not against the window. So the usable slot
+    // is 0.78*(W-24) - 28, and file cards, previews, polls and the video player
+    // were all hardcoded to 240. That slot only reaches 240 at ~368dp, so every
+    // phone below it (320dp is the floor we support) had ~38dp of card pushed
+    // outside the bubble (2026-09-17; gutter and video corrected 2026-09-18).
     cardMax: chatCardMax(width),
   };
   return useMemo(
@@ -382,10 +382,17 @@ export const makeStyles = (
   imageErrorTxt: { color: c.textDim, fontSize: 12 },
 
   // Video bubble — inline player with native controls + duration pill
-  videoWrap:     { width: 240, height: 240, borderRadius: 8, overflow: 'hidden', backgroundColor: '#000', position: 'relative' },   // theme-exempt: neutral plate behind media
+  // 2026-09-18: was a flat 240x240. A media bubble's slot is only 224dp at the
+  // 320dp floor, so the player overhung it by 16dp and the duration pill in its
+  // bottom-right corner was the part that went off-screen. Capped by the same
+  // m.cardMax as every other card: that is the TEXT-bubble slot, so it is a few
+  // dp tighter than a media bubble strictly allows, and one number beats a
+  // second metric threaded through ChatMetrics for a difference nobody can see.
+  // Unchanged at 368dp and above, which includes both reference devices.
+  videoWrap:     { width: Math.min(240, m.cardMax), height: Math.min(240, m.cardMax), borderRadius: 8, overflow: 'hidden', backgroundColor: '#000', position: 'relative' },   // theme-exempt: neutral plate behind media
   videoView:     { width: '100%', height: '100%' },
   videoDuration: { position: 'absolute', right: 8, bottom: 8, color: '#fff', fontSize: 11, fontWeight: '700', backgroundColor: 'rgba(0,0,0,0.55)', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6, overflow: 'hidden' },
-  videoLoading:  { width: 240, height: 240, borderRadius: 8, backgroundColor: '#0F1217', alignItems: 'center', justifyContent: 'center' },   // theme-exempt: neutral plate behind media
+  videoLoading:  { width: Math.min(240, m.cardMax), height: Math.min(240, m.cardMax), borderRadius: 8, backgroundColor: '#0F1217', alignItems: 'center', justifyContent: 'center' },   // theme-exempt: neutral plate behind media
   videoPlaceholder: { alignItems: 'center', justifyContent: 'center', backgroundColor: '#10141B' },   // theme-exempt: neutral plate behind media
   // Round "video note" (Telegram/WhatsApp style) — distinct from a rectangular video.
   videoNoteWrap: { width: 200, height: 200, borderRadius: 100, overflow: 'hidden', backgroundColor: '#000', position: 'relative', alignSelf: 'center', borderWidth: 2, borderColor: 'rgba(255,255,255,0.18)' },   // theme-exempt: neutral plate behind media

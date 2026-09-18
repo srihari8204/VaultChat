@@ -264,7 +264,7 @@ export default function MiniAppsScreen() {
         <ScrollView style={{ maxHeight: 400 }} showsVerticalScrollIndicator={false}>
           {todos.map(item => (
             <View key={item.id} style={styles.todoItem}>
-              <TouchableOpacity
+              <TouchableOpacity hitSlop={9}
                 style={[styles.todoCheck, item.done && styles.todoCheckDone]}
                 onPress={() => toggleTodo(item.id)} accessibilityLabel="Mark to-do done"
               >
@@ -273,7 +273,7 @@ export default function MiniAppsScreen() {
               <Text style={[styles.todoText, item.done && styles.todoTextDone]}>
                 {item.text}
               </Text>
-              <TouchableOpacity onPress={() => Alert.alert('Delete to-do?', `Delete "${item.text}"?`, [{ text: 'Cancel', style: 'cancel' }, { text: 'Delete', style: 'destructive', onPress: () => deleteTodo(item.id) }])} style={styles.todoDelBtn} accessibilityLabel="Delete to-do">
+              <TouchableOpacity hitSlop={7} onPress={() => Alert.alert('Delete to-do?', `Delete "${item.text}"?`, [{ text: 'Cancel', style: 'cancel' }, { text: 'Delete', style: 'destructive', onPress: () => deleteTodo(item.id) }])} style={styles.todoDelBtn} accessibilityLabel="Delete to-do">
                 <Ionicons name="close" size={14} color="#DC2626" />
               </TouchableOpacity>
             </View>

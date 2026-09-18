@@ -130,7 +130,7 @@ function VaultIDScreenContent() {
 
         {/* Header */}
         <View style={S.header}>
-          <TouchableOpacity accessibilityRole="button" accessibilityLabel="Back" onPress={()=>router.back()} style={S.backBtn}>
+          <TouchableOpacity hitSlop={4} accessibilityRole="button" accessibilityLabel="Back" onPress={()=>router.back()} style={S.backBtn}>
             <Ionicons name="arrow-back" size={24} color="#4A9FFF" />
           </TouchableOpacity>
           <View style={{flex:1}}>

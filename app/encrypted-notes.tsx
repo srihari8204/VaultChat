@@ -624,7 +624,7 @@ export default function EncryptedNotesScreen() {
 
       {/* Header */}
       <View style={s.header}>
-        <TouchableOpacity onPress={() => router.back()} style={s.backBtn} accessibilityLabel="Back">
+        <TouchableOpacity hitSlop={4} onPress={() => router.back()} style={s.backBtn} accessibilityLabel="Back">
           <Ionicons name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
         <View style={{ flex: 1 }}>
@@ -635,10 +635,10 @@ export default function EncryptedNotesScreen() {
               the moment cloudBackup started sweeping this vault's blob. */}
           <Text style={s.headerSub}>AES-256-GCM {'\u2022'} PIN locked {'\u2022'} End-to-end encrypted</Text>
         </View>
-        <TouchableOpacity onPress={() => setShowBackup(true)} style={s.trashBtn} accessibilityLabel="Backup notes">
+        <TouchableOpacity hitSlop={4} onPress={() => setShowBackup(true)} style={s.trashBtn} accessibilityLabel="Backup notes">
           <Ionicons name="shield-checkmark-outline" size={18} color={colors.text} />
         </TouchableOpacity>
-        <TouchableOpacity onPress={() => setShowTrash(true)} style={s.trashBtn} accessibilityLabel="Deleted notes">
+        <TouchableOpacity hitSlop={4} onPress={() => setShowTrash(true)} style={s.trashBtn} accessibilityLabel="Deleted notes">
           <Ionicons name="trash-outline" size={18} color={colors.text} />
         </TouchableOpacity>
       </View>
@@ -820,7 +820,7 @@ export default function EncryptedNotesScreen() {
               <Text style={s.edLabel}>Tags & Color Labels</Text>
               <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 6 }}>
                 {TAG_COLORS.map(c => (
-                  <TouchableOpacity key={c} style={[s.colorDot, { backgroundColor: c }, edTagColor === c && s.colorDotActive]} onPress={() => setEdTagColor(c)} />
+                  <TouchableOpacity hitSlop={8} key={c} style={[s.colorDot, { backgroundColor: c }, edTagColor === c && s.colorDotActive]} onPress={() => setEdTagColor(c)} />
                 ))}
               </ScrollView>
               <TextInput style={s.tagInput} placeholder="Add tag (press enter)" placeholderTextColor="#555"

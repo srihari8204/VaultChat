@@ -922,7 +922,7 @@ function Catalog({ shop, cart, setCart, onCart }: {
             }
             return (
               <View style={s.qtyRow}>
-                <TouchableOpacity style={s.qtyBtn} onPress={() => bump(p.id, -1)}>
+                <TouchableOpacity hitSlop={7} style={s.qtyBtn} onPress={() => bump(p.id, -1)}>
                   <Text style={s.qtyBtnText}>−</Text>
                 </TouchableOpacity>
                 {/* Tap the number to type an exact amount. The unit sits beside it
@@ -937,7 +937,7 @@ function Catalog({ shop, cart, setCart, onCart }: {
                     setQtyDraft({ ...qtyDraft, [p.id]: undefined as any });
                   }} />
                 {!!p.unit && <Text style={s.qtyUnit}>{p.unit}</Text>}
-                <TouchableOpacity style={s.qtyBtn} onPress={() => bump(p.id, 1)}>
+                <TouchableOpacity hitSlop={7} style={s.qtyBtn} onPress={() => bump(p.id, 1)}>
                   <Text style={s.qtyBtnText}>+</Text>
                 </TouchableOpacity>
               </View>
@@ -1102,9 +1102,9 @@ function CartView({ shop, cart, setCart, onPlaced, coupons }: {
             <Text style={s.price}>{it.price > 0 ? money(it.price) : 'Price on confirm'}</Text>
           </View>
           <View style={s.qtyRow}>
-            <TouchableOpacity style={s.qtyBtn} onPress={() => setQty(it.key, -1)}><Text style={s.qtyBtnText}>−</Text></TouchableOpacity>
+            <TouchableOpacity hitSlop={7} style={s.qtyBtn} onPress={() => setQty(it.key, -1)}><Text style={s.qtyBtnText}>−</Text></TouchableOpacity>
             <Text style={s.qtyText}>{it.qty}</Text>
-            <TouchableOpacity style={s.qtyBtn} onPress={() => setQty(it.key, 1)}><Text style={s.qtyBtnText}>+</Text></TouchableOpacity>
+            <TouchableOpacity hitSlop={7} style={s.qtyBtn} onPress={() => setQty(it.key, 1)}><Text style={s.qtyBtnText}>+</Text></TouchableOpacity>
             <TouchableOpacity accessibilityLabel={`Remove ${it.name} from the cart`} onPress={() => remove(it.key)} style={{ marginLeft: 8 }}>
               <Ionicons name="trash-outline" size={18} color={C.danger} />
             </TouchableOpacity>
@@ -2459,7 +2459,12 @@ function OwnerOrderDetail({ orderId, onBack }: { orderId: string; onBack: () => 
         onSubmit={(reason) => setStatus('not_collected', reason)} onClose={() => setNotCollectAsk(false)} />
       {/* alternative suggestion: name + price, cross-platform */}
       <Modal visible={altFor != null} transparent animationType="fade" onRequestClose={() => setAltFor(null)}>
-        <View style={s.modalWrap}>
+        {/* KeyboardSafe + scroller (2026-09-18): a React Native <Modal> is its
+            own Android window and never receives the activity's adjustResize,
+            so this centred card had no keyboard avoidance at all and the
+            autoFocus'd field sat under the keyboard on a short screen. */}
+        <KeyboardSafe keyboardOnly style={s.modalWrap}>
+          <ScrollView style={{ flex: 1 }} contentContainerStyle={s.modalScroll} keyboardShouldPersistTaps="handled">
           <View style={s.modalCard}>
             <Text style={s.modalTitle}>{t('owner.suggestAlt')}</Text>
             <TextInput style={s.input} placeholder={t('owner.altName')} placeholderTextColor={C.sub}
@@ -2473,7 +2478,8 @@ function OwnerOrderDetail({ orderId, onBack }: { orderId: string; onBack: () => 
               <Text style={s.dangerBtnText}>{t('common.cancel')}</Text>
             </TouchableOpacity>
           </View>
-        </View>
+          </ScrollView>
+        </KeyboardSafe>
       </Modal>
       <ScrollView contentContainerStyle={s.body}
         refreshControl={<RefreshControl refreshing={loading} onRefresh={load} tintColor={C.green} />}>
@@ -3105,7 +3111,10 @@ function ReturnsScreen({ currency, onBack }: { currency?: string; onBack: () => 
     <>
       <SubHeader title="Returns" onBack={onBack} />
       <Modal visible={!!refuse} transparent animationType="fade" onRequestClose={() => setRefuse(null)}>
-        <View style={s.modalWrap}>
+        {/* KeyboardSafe + scroller (2026-09-18): see the suggest-alternative
+            modal above — a <Modal> never gets the activity's adjustResize. */}
+        <KeyboardSafe keyboardOnly style={s.modalWrap}>
+          <ScrollView style={{ flex: 1 }} contentContainerStyle={s.modalScroll} keyboardShouldPersistTaps="handled">
           <View style={s.modalCard}>
             <Text style={s.modalTitle}>Why are you declining?</Text>
             <Text style={s.hint}>The customer sees this. A refusal with no reason is the most complained-about outcome of any returns process.</Text>
@@ -3119,7 +3128,8 @@ function ReturnsScreen({ currency, onBack }: { currency?: string; onBack: () => 
               <Text style={s.outlineBtnText}>Cancel</Text>
             </TouchableOpacity>
           </View>
-        </View>
+          </ScrollView>
+        </KeyboardSafe>
       </Modal>
 
       <FlatList
@@ -3352,7 +3362,11 @@ function BillScreen({ orderId, onBack }: { orderId: string; onBack: () => void }
     <>
       <SubHeader title="Bill" onBack={onBack} />
       <Modal visible={addOpen} transparent animationType="fade" onRequestClose={() => setAddOpen(false)}>
-        <View style={s.modalWrap}>
+        {/* KeyboardSafe + scroller (2026-09-18): the tallest card on this
+            screen — 3 inputs and 2 buttons — and the one that overflows a
+            320dp phone at font scale 1.5 once the keyboard is up. */}
+        <KeyboardSafe keyboardOnly style={s.modalWrap}>
+          <ScrollView style={{ flex: 1 }} contentContainerStyle={s.modalScroll} keyboardShouldPersistTaps="handled">
           <View style={s.modalCard}>
             <Text style={s.modalTitle}>Add an item</Text>
             <TextInput style={s.input} placeholder="Item name" placeholderTextColor={C.sub}
@@ -3395,7 +3409,8 @@ function BillScreen({ orderId, onBack }: { orderId: string; onBack: () => void }
               <Text style={s.dangerBtnText}>Cancel</Text>
             </TouchableOpacity>
           </View>
-        </View>
+          </ScrollView>
+        </KeyboardSafe>
       </Modal>
 
       <ScrollView contentContainerStyle={s.body} keyboardShouldPersistTaps="handled">
@@ -4648,7 +4663,12 @@ function ReasonModal({ visible, title, codes, placeholder, onSubmit, onClose }: 
   };
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
-      <View style={s.modalWrap}>
+      {/* KeyboardSafe + scroller (2026-09-18): ReasonModal is the reject /
+          cancel / not-collected prompt, so it is reached three times from the
+          order screen. A <Modal> never receives the activity's adjustResize,
+          so the autoFocus'd reason field had no avoidance at all. */}
+      <KeyboardSafe keyboardOnly style={s.modalWrap}>
+        <ScrollView style={{ flex: 1 }} contentContainerStyle={s.modalScroll} keyboardShouldPersistTaps="handled">
         <View style={s.modalCard}>
           <Text numberOfLines={1} style={s.modalTitle}>{title}</Text>
           {codes && (
@@ -4672,7 +4692,8 @@ function ReasonModal({ visible, title, codes, placeholder, onSubmit, onClose }: 
             <Text style={s.dangerBtnText}>{t('common.cancel')}</Text>
           </TouchableOpacity>
         </View>
-      </View>
+        </ScrollView>
+      </KeyboardSafe>
     </Modal>
   );
 }
@@ -5303,6 +5324,12 @@ const makeStyles = (C: ReturnType<typeof makeC>) => StyleSheet.create({
   },
   findProductText: { color: C.green, fontWeight: '700', fontSize: 13.5 },
   modalWrap: { flex: 1, backgroundColor: 'rgba(0,0,0,0.55)', justifyContent: 'center', padding: 26 },
+  // The scroller inside a KeyboardSafe-wrapped modalWrap (2026-09-18). Centring
+  // alone is not enough: "Add an item" is a title + 3 inputs + 2 buttons, which
+  // needs ~430dp at OS font scale 1.5 — more than a 320dp-wide phone leaves once
+  // the keyboard is up. flexGrow keeps the card centred while it fits and lets
+  // it scroll the moment it does not, so the submit button is always reachable.
+  modalScroll: { flexGrow: 1, justifyContent: 'center' },
   // Solid, not glass: this sits over a 55% black scrim, where a translucent
   // pane would let the dark through and drop the text under AA.
   modalCard: { backgroundColor: C.cardSolid, borderRadius: 18, padding: 20 },

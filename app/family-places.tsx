@@ -388,7 +388,13 @@ export default function FamilyPlacesScreen() {
 
       {/* edit sheet */}
       <Modal visible={!!editing} transparent animationType="slide" onRequestClose={() => setEditing(null)}>
-        <View style={st.backdrop}>
+        {/* KeyboardSafe, not the screen-level one above (2026-09-18): a React
+            Native <Modal> is its own Android window, so the wrapper around the
+            screen does not reach in here and the sheet — which is pinned to the
+            bottom — sat underneath the keyboard. The inner ScrollView could not
+            rescue it, because the sheet itself was covered, not just its
+            content. keyboardOnly: the sheet already pads its own bottom. */}
+        <KeyboardSafe keyboardOnly style={st.backdrop}>
           <TouchableOpacity style={{ flex: 1 }} activeOpacity={1} onPress={() => setEditing(null)} />
           {/* Height-capped with an inner scroll: radius + schedule + lifetime
               + four buttons overflow a short phone, and the keyboard renders
@@ -524,7 +530,7 @@ export default function FamilyPlacesScreen() {
             </TouchableOpacity>
             </ScrollView>
           </View>
-        </View>
+        </KeyboardSafe>
       </Modal>
     </KeyboardSafe>
   );

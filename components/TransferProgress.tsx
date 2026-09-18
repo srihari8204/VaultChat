@@ -61,7 +61,7 @@ export default function TransferProgress({ visible, progress, filename, type = '
         </View>
         <Text style={s.pct}>{pct}%</Text>
         {onCancel && (
-          <TouchableOpacity onPress={onCancel} style={s.cancelBtn}>
+          <TouchableOpacity hitSlop={10} onPress={onCancel} style={s.cancelBtn}>
             <Text style={s.cancelTxt}>{"\u2715"}</Text>
           </TouchableOpacity>
         )}

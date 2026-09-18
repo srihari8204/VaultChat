@@ -207,7 +207,7 @@ export default function ScannerScreen() {
 
       {/* Header */}
       <View style={s.header}>
-        <TouchableOpacity accessibilityRole="button" accessibilityLabel="Back" onPress={() => router.back()} style={s.backBtn}>
+        <TouchableOpacity hitSlop={4} accessibilityRole="button" accessibilityLabel="Back" onPress={() => router.back()} style={s.backBtn}>
           <Ionicons name="arrow-back" size={22} color="#fff" />
         </TouchableOpacity>
         <View style={s.headerTitleWrap}>

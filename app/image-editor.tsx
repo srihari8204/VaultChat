@@ -402,7 +402,7 @@ export default function ImageEditorScreen() {
         <View style={styles.subPanel}>
           <View style={styles.subRow}>
             {DRAW_COLORS.map(c => (
-              <TouchableOpacity
+              <TouchableOpacity hitSlop={8}
                 key={c}
                 style={[styles.colorDot, { backgroundColor: c }, drawColor === c && styles.colorDotActive]}
                 onPress={() => setDrawColor(c)}
@@ -411,7 +411,7 @@ export default function ImageEditorScreen() {
             <View style={styles.sliderRow}>
               <Text style={styles.sliderLabel}>Size</Text>
               {[2, 4, 6, 8].map(s => (
-                <TouchableOpacity
+                <TouchableOpacity hitSlop={7}
                   key={s}
                   style={[styles.sizeBtn, brushSize === s && styles.sizeBtnActive]}
                   onPress={() => setBrushSize(s)}
@@ -444,7 +444,7 @@ export default function ImageEditorScreen() {
           </View>
           <View style={styles.subRow}>
             {DRAW_COLORS.map(c => (
-              <TouchableOpacity
+              <TouchableOpacity hitSlop={8}
                 key={c}
                 style={[styles.colorDot, { backgroundColor: c }, textColor === c && styles.colorDotActive]}
                 onPress={() => setTextColor(c)}
@@ -453,7 +453,7 @@ export default function ImageEditorScreen() {
             <View style={styles.sliderRow}>
               <Text style={styles.sliderLabel}>Size</Text>
               {[18, 24, 32, 42].map(s => (
-                <TouchableOpacity
+                <TouchableOpacity hitSlop={7}
                   key={s}
                   style={[styles.sizeBtn, textFontSize === s && styles.sizeBtnActive]}
                   onPress={() => setTextFontSize(s)}

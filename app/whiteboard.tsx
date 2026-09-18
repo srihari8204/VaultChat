@@ -129,7 +129,7 @@ export default function WhiteboardScreen() {
           {/* Colors */}
           <View style={s.colorRow}>
             {COLORS.map(c => (
-              <TouchableOpacity key={c} style={[s.colorDot, { backgroundColor: c }, color === c && s.colorActive]}
+              <TouchableOpacity hitSlop={8} key={c} style={[s.colorDot, { backgroundColor: c }, color === c && s.colorActive]}
                 onPress={() => { setColor(c); setTool('pen'); }} />
             ))}
           </View>
@@ -137,7 +137,7 @@ export default function WhiteboardScreen() {
           {/* Brush sizes */}
           <View style={s.brushRow}>
             {BRUSH_SIZES.map(sz => (
-              <TouchableOpacity key={sz} style={[s.brushBtn, brushSize === sz && s.brushActive]} onPress={() => setBrushSize(sz)}>
+              <TouchableOpacity hitSlop={4} key={sz} style={[s.brushBtn, brushSize === sz && s.brushActive]} onPress={() => setBrushSize(sz)}>
                 <View style={[s.brushDot, { width: sz, height: sz, borderRadius: sz / 2 }]} />
               </TouchableOpacity>
             ))}

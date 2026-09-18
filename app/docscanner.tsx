@@ -275,7 +275,7 @@ function DocScannerContent() {
       <LinearGradient colors={['#FFFFFF', '#040F20', '#060F24']} style={StyleSheet.absoluteFillObject} />
       <Animated.View style={{ flex: 1, opacity: fadeIn }}>
         <View style={S.header}>
-          <TouchableOpacity accessibilityRole="button" accessibilityLabel="Back" onPress={() => step === 'pick' ? router.back() : resetScanner()} style={S.backBtn}>
+          <TouchableOpacity hitSlop={4} accessibilityRole="button" accessibilityLabel="Back" onPress={() => step === 'pick' ? router.back() : resetScanner()} style={S.backBtn}>
             <Ionicons name="arrow-back" size={24} color={colors.primary} />
           </TouchableOpacity>
           <View style={{ flex: 1 }}>

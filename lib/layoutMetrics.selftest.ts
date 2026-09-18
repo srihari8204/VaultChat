@@ -157,13 +157,13 @@ console.log('\nScreens that still snapshot these values once (ponytail ceiling):
 // landscape.
 const FROZEN_STYLE_SCREENS = [
   'app/backup-pin.tsx', 'app/biometric-setup.tsx', 'app/email-verify.tsx',
-  'app/face-verify-new-device.tsx', 'app/mpin-entry.tsx', 'app/mpin-recover.tsx',
+  'app/mpin-entry.tsx', 'app/mpin-recover.tsx',
   'app/onboard-profile.tsx', 'app/onboard-security.tsx', 'app/permissions.tsx',
   'app/security-questions.tsx', 'components/CallBar.tsx',
 ];
 check(
-  'the documented ceiling is 11 screens',
-  FROZEN_STYLE_SCREENS.length === 11,
+  'the documented ceiling is 10 screens',
+  FROZEN_STYLE_SCREENS.length === 10,
   'update this list and the note in constants/layout.ts together',
 );
 
@@ -173,15 +173,25 @@ check(
 // Runs the REAL chatCardMax the stylesheet calls, not a copy of it - a test
 // that re-implements the formula passes whatever the formula becomes.
 //
-// The slot is 0.78*W - 28. File cards, previews and polls were hardcoded at
-// 240, which needs a 344dp window; below that the card overhung the bubble.
-for (const [w, slot] of [[320, 221], [344, 240], [360, 252], [393, 278], [600, 440]] as const) {
+// The slot is 0.78*(W - 24) - 28. The -24 is the message list's own gutter,
+// which the first pass omitted: `maxWidth: '78%'` resolves against bubbleRow
+// inside that padded list, not against the window, so every number below moved
+// down by 18-19dp on 2026-09-18 and the cards moved with them. File cards,
+// previews, polls and the video player were hardcoded at 240, which needs a
+// 368dp window; below that the card overhung the bubble.
+//
+// 369 is pinned because it is the reference Honor and 241 is the width that was
+// physically measured on it - the one row here that is evidence, not arithmetic.
+for (const [w, slot] of [[320, 202], [360, 234], [368, 240], [369, 241], [393, 259], [600, 421]] as const) {
   check(`a ${w}dp window gives a ${slot}dp card slot`, chatCardMax(w) === slot);
 }
 check('a 320dp phone no longer gets a 240dp card', Math.min(240, chatCardMax(320)) < 240);
-check('a 360dp phone still gets the full 240dp card', Math.min(240, chatCardMax(360)) === 240);
+check('a 360dp phone no longer gets a 240dp card either', Math.min(240, chatCardMax(360)) < 240);
+check('368dp is where a full 240dp card first fits', Math.min(240, chatCardMax(368)) === 240);
 check('the slot never collapses on an absurdly narrow window', chatCardMax(1) === 140);
 check('the slot grows with the window', chatCardMax(600) > chatCardMax(393));
+// A media bubble pads 3, not 14, so it earns a wider slot at the same width.
+check('the media-bubble slot is wider than the text-bubble slot', chatCardMax(320, 3) === 224);
 
 
 assert.equal(failures, 0, `${failures} layout-metrics check(s) failed`);

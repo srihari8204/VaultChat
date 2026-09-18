@@ -19,6 +19,7 @@
 
 import { BRAND_ACCENT, brandAlpha, type Palette, ELEVATION } from '../constants/theme';
 import { useKeyboardInset } from '../lib/useKeyboardInset';
+import { KeyboardSafe } from '../components/ui/KeyboardSafe';
 import { Audio, ResizeMode, Video } from 'expo-av';
 import { copyAndAutoClear } from '../lib/clipboardSafe';
 import * as DocumentPicker from 'expo-document-picker';
@@ -51,7 +52,6 @@ import {
   InteractionManager,
   Keyboard,
   Dimensions,
-  KeyboardAvoidingView,
   Linking,
   Modal,
   PanResponder,
@@ -4258,8 +4258,14 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
         animationType="slide"
         onRequestClose={() => setPendingItems([])}
       >
-        <KeyboardAvoidingView
-          behavior={'padding'}
+        {/* KeyboardSafe, not KeyboardAvoidingView (2026-09-18): behavior
+            'padding' is measured against the ACTIVITY, and a React Native
+            <Modal> is its own Android window that never receives the
+            manifest's adjustResize — so the keyboard covered the caption
+            field and the send button outright. keyboardOnly: the send row
+            below already applies its own bottom inset. */}
+        <KeyboardSafe
+          keyboardOnly
           style={{ flex: 1, backgroundColor: colors.bg }}
         >
           {(() => {
@@ -4369,7 +4375,7 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
               </>
             );
           })()}
-        </KeyboardAvoidingView>
+        </KeyboardSafe>
       </Modal>
 
       {/* Forward chat picker */}

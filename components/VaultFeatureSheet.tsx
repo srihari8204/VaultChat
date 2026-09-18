@@ -79,7 +79,7 @@ export default function VaultFeatureSheet({ visible, onClose, chatId }: Props) {
             <Text style={s.headerTitle}>Vault Features</Text>
             <Text style={s.headerSub}>VaultDrop · Location · Sync Contact</Text>
           </View>
-          <TouchableOpacity style={s.closeBtn} onPress={onClose}>
+          <TouchableOpacity hitSlop={8} style={s.closeBtn} onPress={onClose}>
             <Text style={{ color: 'rgba(255,255,255,0.4)', fontSize: 16 }}>✕</Text>
           </TouchableOpacity>
         </View>

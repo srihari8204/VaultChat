@@ -377,7 +377,7 @@ export default function StatusScreen() {
               </TouchableOpacity>
               <View style={{ flexDirection: 'row', gap: 8 }}>
                 {TEXT_BGS.map(b => (
-                  <TouchableOpacity key={b} onPress={() => setStoryBg(b)} style={[S.bgSwatch, { backgroundColor: b }, storyBg === b && S.bgSwatchOn]} />
+                  <TouchableOpacity hitSlop={11} key={b} onPress={() => setStoryBg(b)} style={[S.bgSwatch, { backgroundColor: b }, storyBg === b && S.bgSwatchOn]} />
                 ))}
               </View>
             </View>

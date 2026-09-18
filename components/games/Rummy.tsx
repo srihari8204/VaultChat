@@ -33,7 +33,7 @@
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  AccessibilityInfo, ActivityIndicator, KeyboardAvoidingView, Platform, Pressable,
+  AccessibilityInfo, ActivityIndicator, Platform, Pressable,
   ScrollView, Text, TextInput, View, useWindowDimensions,
   type LayoutChangeEvent, type ViewStyle,
 } from 'react-native';
@@ -52,6 +52,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import { useGameSocket, type AutoStart } from '../../lib/games/useGameSocket';
 import { TableBackground, Panel, Btn, Banner, PlayerRow, RematchBtn, useType } from './ui';
+import { KeyboardSafe } from '../ui/KeyboardSafe';
 import { useCountdown } from '../../lib/games/useCountdown';
 import { useRematch, type Rematch } from '../../lib/games/useRematch';
 import { RulesSheet, useFirstTimeRules } from './rules';
@@ -1567,7 +1568,12 @@ function TableSelect({
 
   return (
     <TableBackground>
-      <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
+      {/* KeyboardSafe, not KeyboardAvoidingView (2026-09-18): the old
+          `behavior={Platform.OS === 'ios' ? 'padding' : undefined}` resolved to
+          undefined on Android, where RN's KeyboardAvoidingView falls through to
+          a plain View — zero avoidance on the table-code field. keyboardOnly:
+          the ScrollView below already carries the resting padding. */}
+      <KeyboardSafe keyboardOnly style={{ flex: 1 }}>
         <ScrollView
           contentContainerStyle={[column, { gap: S[3] }]}
           keyboardShouldPersistTaps="handled"
@@ -1718,7 +1724,7 @@ function TableSelect({
             )}
           </Panel>
         </ScrollView>
-      </KeyboardAvoidingView>
+      </KeyboardSafe>
       <Toasts events={feed} />
     </TableBackground>
   );

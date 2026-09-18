@@ -258,7 +258,26 @@ function RootLayoutInner() {
     return () => { live = false; };
   }, [router]);
 
-  const launchReady = launchGate === 'allow' || launchGate === pathname;
+  // THE VEIL LATCHES DOWN ONCE THE REDIRECT HAS LANDED.
+  //
+  // `launchGate === pathname` exists to bridge the frames between the decision
+  // above and its router.replace() landing, so a signed-out deep link never
+  // flashes protected content. It was being re-evaluated on EVERY navigation
+  // after that, and the effect above runs once per launch (deps [router]) so
+  // launchGate never moves again — meaning the first step INSIDE the auth flow
+  // (onboard → mpin-entry, onboard → email-verify, app-lock → chats) made the
+  // two unequal and put the veil back up over a screen the user was typing
+  // into. Observed on a device 2026-09-19 as a blank page with the keyboard up:
+  // white in the light theme, black in dark, because the veil is colors.bg.
+  //
+  // Once the redirect target has been on screen, the veil's job is done for
+  // this launch: the user is on an unprotected auth route and can only reach
+  // protected content by authenticating. So remember that it landed.
+  const [landed, setLanded] = useState(false);
+  useEffect(() => {
+    if (launchGate !== 'checking' && launchGate === pathname) setLanded(true);
+  }, [launchGate, pathname]);
+  const launchReady = launchGate === 'allow' || landed || launchGate === pathname;
   useEffect(() => {
     if (launchReady) SplashScreen.hideAsync().catch(() => {});
   }, [launchReady]);
@@ -868,7 +887,6 @@ function RootLayoutInner() {
         {/* Auth flow */}
         <Stack.Screen name="index" />
         <Stack.Screen name="security-questions" />
-        <Stack.Screen name="facescan" />
         <Stack.Screen name="biometric-setup" />
         {/* Main app — 6-tab navigation */}
         <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
@@ -943,9 +961,6 @@ function RootLayoutInner() {
         <Stack.Screen name="slideshow" />
         <Stack.Screen name="group-calls" />
         <Stack.Screen name="group-info" />
-
-        {/* Auth extras */}
-        <Stack.Screen name="face-verify-new-device" />
 
         {/* Security & Privacy */}
         <Stack.Screen name="ghost-mode" />

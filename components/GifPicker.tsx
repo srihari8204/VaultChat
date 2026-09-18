@@ -237,7 +237,13 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   input:     { flex: 1, backgroundColor: c.glassSoft, color: c.text, borderRadius: 20, paddingHorizontal: 14, paddingVertical: 8, fontSize: 14, borderWidth: StyleSheet.hairlineWidth, borderColor: c.glassStroke },
   closeX:    { color: c.textDim, fontSize: 20, padding: 4 },
   tabs:      { flexDirection: 'row', gap: 8, paddingHorizontal: 12, marginBottom: 6 },
-  tab:       { paddingHorizontal: 14, paddingVertical: 6, borderRadius: 16, backgroundColor: c.glassSoft },
+  // flex:1 added 2026-09-18. This was the one tab row in the app whose children
+  // sized themselves from their label ("Stickers" is the widest) instead of
+  // sharing the row; the other 14 tab rows all use flex:1 + centred content.
+  // Three intrinsic pills fit at 369dp and stop fitting once the OS font scale
+  // grows the labels, because paddingHorizontal is fixed and the text is not.
+  // Same pattern as app/chat-code.tsx and app/media-gallery.tsx - no new idea.
+  tab:       { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 14, paddingVertical: 6, borderRadius: 16, backgroundColor: c.glassSoft },
   tabOn:     { backgroundColor: c.primary },
   tabTxt:    { color: c.textDim, fontSize: 13, fontWeight: '700' },
   tabTxtOn:  { color: '#fff' },

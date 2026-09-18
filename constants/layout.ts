@@ -38,7 +38,7 @@
 // identity whenever syncLayoutMetrics() reports a change. One call site drives
 // every screen that already uses the factory pattern.
 //
-// ponytail: 11 screens build styles with a module-scope StyleSheet.create and so
+// ponytail: 10 screens build styles with a module-scope StyleSheet.create and so
 // still snapshot these values once. They are listed in
 // lib/layoutMetrics.selftest.ts; convert one to the factory pattern if it ever
 // needs to be correct in landscape.

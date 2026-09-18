@@ -368,13 +368,13 @@ export default function VideoPlayerScreen() {
         />
         {/* Mini controls */}
         <View style={styles.pipOverlay}>
-          <TouchableOpacity onPress={togglePlay} style={styles.pipPlayBtn}>
+          <TouchableOpacity hitSlop={6} onPress={togglePlay} style={styles.pipPlayBtn}>
             <Text style={styles.pipPlayIcon}>{isPlaying ? '\u275A\u275A' : '\u25B6'}</Text>
           </TouchableOpacity>
-          <TouchableOpacity onPress={() => { deactivatePip(); }} style={styles.pipExpandBtn}>
+          <TouchableOpacity hitSlop={8} onPress={() => { deactivatePip(); }} style={styles.pipExpandBtn}>
             <Text style={styles.pipExpandIcon}>{'\u2922'}</Text>
           </TouchableOpacity>
-          <TouchableOpacity onPress={() => { videoRef.current?.stopAsync(); setPipActive(false); }}
+          <TouchableOpacity hitSlop={11} onPress={() => { videoRef.current?.stopAsync(); setPipActive(false); }}
             style={styles.pipCloseBtn}>
             <Text style={styles.pipCloseIcon}>{'\u2715'}</Text>
           </TouchableOpacity>

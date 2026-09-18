@@ -164,7 +164,7 @@ function NotificationsContent() {
       <LinearGradient colors={['#FFFFFF','#040F20','#060F24']} style={StyleSheet.absoluteFillObject}/>
       <Animated.View style={{flex:1,opacity:fadeIn}}>
         <View style={S.header}>
-          <TouchableOpacity accessibilityRole="button" accessibilityLabel="Back" onPress={()=>router.back()} style={S.backBtn}><Ionicons name="arrow-back" size={20} color={colors.primary} /></TouchableOpacity>
+          <TouchableOpacity hitSlop={4} accessibilityRole="button" accessibilityLabel="Back" onPress={()=>router.back()} style={S.backBtn}><Ionicons name="arrow-back" size={20} color={colors.primary} /></TouchableOpacity>
           <View style={{flex:1}}>
             <Text style={S.title}>🔔 Alerts & Safety</Text>
             <Text style={{color:colors.textFaint,fontSize:9,letterSpacing:2}}>EMERGENCY & PRIVACY CENTER</Text>

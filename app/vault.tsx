@@ -418,7 +418,7 @@ export default function VaultScreen() {
           <Text style={styles.headerTitle}>Vault</Text>
           <Text style={styles.headerSub}>AES-256-GCM Encrypted</Text>
         </View>
-        <TouchableOpacity
+        <TouchableOpacity hitSlop={4}
           style={styles.backupBtn}
           onPress={() => setShowBackup(true)}
         >

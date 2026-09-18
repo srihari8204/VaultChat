@@ -60,3 +60,13 @@ export const launchAllowed: Promise<boolean> = new Promise((r) => { settle = r; 
  * app does not proceed — the same behaviour as today, minus the bypass.
  */
 export function settleLaunchGate(allowed: boolean): void { settle(allowed); }
+
+// THE SAME WEDGE HAD A SECOND FORM, fixed in app/_layout.tsx (2026-09-19).
+// The header above describes launchGate '/app-lock' never equalling pathname
+// '/(tabs)/chats'. The index.tsx race was one way to get there; the other was
+// simply the user navigating — onboard → mpin-entry, or app-lock → chats after
+// unlocking — because that equality was re-checked on every route change while
+// launchGate itself is set once per launch. The root now latches the veil down
+// once the redirect has landed. Nothing in this file is involved; noted here so
+// the next reader of the header does not conclude the race fix was the whole
+// story.

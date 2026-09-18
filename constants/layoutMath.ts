@@ -77,19 +77,31 @@ export function sameLayout(a: DerivedLayout, b: DerivedLayout): boolean {
 /** Chat bubble geometry, kept here so a test can run the real arithmetic. */
 export const BUBBLE_MAX_FRACTION = 0.78;   // components/chat/chatStyles.ts `bubble.maxWidth: '78%'`
 export const BUBBLE_PAD_H = 14;            // ...and its paddingHorizontal
+/**
+ * The message FlatList's own gutter (app/chat.tsx `contentContainerStyle`).
+ *
+ * 2026-09-18: this was missing, and it is the whole reason the first pass at
+ * this still overhung. `maxWidth: '78%'` resolves against the PARENT's content
+ * box, and the parent is `bubbleRow` inside a list padded 12dp each side - not
+ * the window. Omitting it made every slot 18-19dp too generous, so a 240dp
+ * card still hung out of the bubble at the 320dp floor (real slot: 202dp).
+ * Cross-check: at 369dp (the Honor) this gives 241, which is the measured
+ * number the bug report carried.
+ */
+export const LIST_PAD_H = 12;
 
 /**
- * Widest a card may be inside a TEXT bubble at a given window width.
+ * Widest a card may be inside a chat bubble at a given window width.
  *
- * Image, video and GIF bubbles swap in `mediaBubble` (padding 3) and are not
- * governed by this. Everything else - file cards and their previews, polls,
- * audio rows - sits inside the 14dp padding, so the real slot is
- * 0.78*W - 28. Those were all hardcoded to 220-240, which only fits from
- * about 344dp upward; at the 320dp floor a 240 card overhangs by 18dp.
+ * `padH` is the bubble's own horizontal padding: 14 for a TEXT bubble (file
+ * cards and their previews, polls, audio rows), 3 for `mediaBubble`, which
+ * image, video and GIF bubbles swap in. Both were hardcoded to 220-240, which
+ * needs a ~368dp window in a text bubble and ~349dp in a media bubble.
  *
  * The 140 floor keeps a card usable if the window is ever reported absurdly
  * narrow (a split-screen sliver, a bad first frame) rather than collapsing it.
  */
-export function chatCardMax(width: number): number {
-  return Math.max(140, Math.floor(width * BUBBLE_MAX_FRACTION) - BUBBLE_PAD_H * 2);
+export function chatCardMax(width: number, padH: number = BUBBLE_PAD_H): number {
+  const row = width - LIST_PAD_H * 2;
+  return Math.max(140, Math.floor(row * BUBBLE_MAX_FRACTION) - padH * 2);
 }

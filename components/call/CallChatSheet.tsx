@@ -76,6 +76,12 @@ function CallChatSheetImpl({ visible, onClose, messages, onSend }: CallChatSheet
 
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
+      {/* keyboard-exempt: handled, just not by KeyboardSafe. The keyboard
+          listener that drives `bottom: kb` lives in the component body above,
+          outside this block, so the source scan in
+          lib/keyboardAvoidance.selftest.ts cannot see it. The sheet is pinned
+          bottom:0 and lifts by the measured keyboard height — see the note on
+          that effect for why a Modal needs its own measurement. */}
       <Pressable style={S.backdrop} onPress={onClose} />
       <View style={[S.sheet, { bottom: kb }]}>
         <View style={S.grabber} />

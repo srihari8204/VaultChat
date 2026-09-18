@@ -110,7 +110,7 @@ export default function CurrentLocationScreen() {
       <Stack.Screen options={{ headerShown: false }} />
 
       <View style={s.header}>
-        <TouchableOpacity accessibilityRole="button" accessibilityLabel="Back" onPress={() => router.back()} style={s.backBtn}>
+        <TouchableOpacity hitSlop={4} accessibilityRole="button" accessibilityLabel="Back" onPress={() => router.back()} style={s.backBtn}>
           <Ionicons name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
         <View style={{ flex: 1 }}>

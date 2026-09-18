@@ -242,6 +242,12 @@ export default function ChatsScreen() {
       try {
         if (await AsyncStorage.getItem('vc_restore_prompted')) return;
         const meta = await cloudBackupMeta();
+        // A NON-ANSWER MUST NOT BURN THE OFFER. This flag is once per install,
+        // and it used to be written before `exists` was read — so a reinstall
+        // whose first launch was offline (the common case, not the edge case)
+        // marked itself prompted and never offered the backup again. Leave the
+        // flag unset and ask on the next launch instead.
+        if (meta.unavailable) return;
         await AsyncStorage.setItem('vc_restore_prompted', '1');
         if (meta.exists) {
           Alert.alert(

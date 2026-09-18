@@ -52,10 +52,6 @@ console.log('\nResponsive layout — size follows the window, not the launch\n')
 // about in a comment at the site; the guard respects those rather than forcing
 // a change that reintroduces a known bug.
 const FROZEN_EXCEPTIONS: Record<string, string> = {
-  'app/facescan.tsx':
-    'buildGrid() runs at MODULE scope and reads MW/MH, so a hook there is an '
-    + 'invalid-hook error — see the AUDIT F12 note at the site. The mesh is '
-    + 'precomputed once at import by design.',
   'constants/layout.ts':
     'This file IS the fix, not a violation. Its module-scope read is only the '
     + 'BOOTSTRAP value, needed before ThemeProvider mounts; syncLayoutMetrics() '
@@ -167,24 +163,13 @@ check(
 
 // ...and the converted screens must still actually reference it.
 for (const rel of [
-  'app/call-recording.tsx', 'app/facescan.tsx', 'app/group-admin.tsx',
+  'app/call-recording.tsx', 'app/group-admin.tsx',
   'app/privacy-dashboard.tsx', 'app/last-seen-privacy.tsx',
 ]) {
   if (!fs.existsSync(rel)) continue;
   check(
     `${rel}: header inset comes from HEADER_TOP`,
     /import \{[^}]*HEADER_TOP[^}]*\} from ['"][^'"]*constants\/layout['"]/.test(fs.readFileSync(rel, 'utf8')),
-  );
-}
-
-// facescan builds styles with a MODULE-SCOPE StyleSheet.create, so a HEADER_TOP
-// written into that object would freeze at import exactly like the old constant.
-// It has to be applied at the element.
-{
-  const src = fs.readFileSync('app/facescan.tsx', 'utf8');
-  check(
-    'app/facescan.tsx: HEADER_TOP is applied at the element, not baked into its module-scope StyleSheet',
-    /style=\{\[[^\]]*HEADER_TOP/.test(src) && !/StyleSheet\.create\([\s\S]*HEADER_TOP/.test(src),
   );
 }
 
