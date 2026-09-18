@@ -1,4 +1,4 @@
-# VaultChat go-api deploy — PowerShell entry point.
+﻿# VaultChat go-api deploy - PowerShell entry point.
 #
 # This is a WRAPPER, not a reimplementation. scripts/deploy.sh owns the deploy:
 # backup-before-touch, fingerprint gating, tar-over-ssh with --delete semantics,
@@ -13,7 +13,7 @@
 #
 # Usage:
 #   .\scripts\deploy.ps1            # interactive, asks before deploying
-#   .\scripts\deploy.ps1 -Yes       # skip the prompt (CI only — see below)
+#   .\scripts\deploy.ps1 -Yes       # skip the prompt (CI only - see below)
 #
 # -Yes also skips the live-call count deploy.sh prints before asking. That
 # number is how many people's sockets a go-api restart is about to drop. Do not
@@ -31,7 +31,7 @@ function Fail($m)    { Write-Host "FAIL: $m" -ForegroundColor Red; exit 1 }
 
 Section 'locating Git Bash'
 
-# Explicitly NOT `Get-Command bash` — on a machine with WSL that finds
+# Explicitly NOT `Get-Command bash` - on a machine with WSL that finds
 # System32\bash.exe, which launches a Linux distro with no checkout in it.
 $bash = @(
   'C:\Program Files\Git\bin\bash.exe',
@@ -62,10 +62,10 @@ $code = $LASTEXITCODE
 if ($code -ne 0) {
   # deploy.sh rolls itself back on failure and says so on its own output; do not
   # restate an outcome this wrapper did not observe.
-  Fail "deploy.sh exited $code — read its output above for what it did or undid"
+  Fail "deploy.sh exited $code - read its output above for what it did or undid"
 }
 
 Write-Host ""
 Write-Host "deploy.sh finished cleanly. It proved the BINARY is running." -ForegroundColor Green
-Write-Host "It did NOT prove content negotiation works — run:" -ForegroundColor Yellow
+Write-Host "It did NOT prove content negotiation works - run:" -ForegroundColor Yellow
 Write-Host "  .\scripts\verify-protobuf.ps1" -ForegroundColor Yellow

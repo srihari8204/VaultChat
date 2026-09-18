@@ -1,4 +1,4 @@
-# Phase 3 preconditions — run this BEFORE scripts/deploy.ps1.
+﻿# Phase 3 preconditions - run this BEFORE scripts/deploy.ps1.
 #
 # Everything here is read-only. The point is the two "before" bodies: section 5
 # of the runbook requires the JSON responses to be byte-identical after the
@@ -35,7 +35,7 @@ if ($bash) {
   Note ("fingerprint: " + (& $bash 'scripts/fingerprint-go.sh'))
   Pop-Location
 } else {
-  Warn 'Git Bash not found — cannot read the local fingerprint'
+  Warn 'Git Bash not found - cannot read the local fingerprint'
 }
 
 Section '3. migration ledger vs the repo'
@@ -50,9 +50,9 @@ Note "repo .sql files:   $files"
 if ($ledger -match '^\s*(\d+)\|') {
   $applied = [int]$Matches[1]
   if ($applied -lt $files) {
-    Warn "$($files - $applied) migration(s) pending — deploy.sh will apply them. Read each one first; there is no automatic down."
+    Warn "$($files - $applied) migration(s) pending - deploy.sh will apply them. Read each one first; there is no automatic down."
   } else {
-    Note 'ledger level with the repo — nothing to apply'
+    Note 'ledger level with the repo - nothing to apply'
   }
 }
 
@@ -63,15 +63,15 @@ $sizes = Box 'wc -c /tmp/app-flags.before.json /tmp/app-version.before.json'
 $sizes | ForEach-Object { Note $_ }
 #
 # A zero-byte PROTOBUF /app/flags is legitimate later (proto3 elides an empty
-# repeated field). A zero-byte JSON capture here is not — it means the port or
+# repeated field). A zero-byte JSON capture here is not - it means the port or
 # the endpoint is wrong, and the post-deploy diff would then "pass" against
 # nothing at all.
-if ($sizes -match '(^|\s)0\s+/tmp/') { Warn 'a baseline is EMPTY — fix that before deploying, or check 4 proves nothing' }
+if ($sizes -match '(^|\s)0\s+/tmp/') { Warn 'a baseline is EMPTY - fix that before deploying, or check 4 proves nothing' }
 
 Section '5. metrics baseline'
 $m = Box "curl -s -m 10 $Loopback/internal/metrics | grep responses_total"
 if ($m) { $m | ForEach-Object { Note $_ } }
-else    { Note 'absent — this box predates the counter. Expected; you get a post-deploy reading, not a diff.' }
+else    { Note 'absent - this box predates the counter. Expected; you get a post-deploy reading, not a diff.' }
 
 Section '6. blast radius of a restart'
 Note ("live calls: " + (Box "docker exec vaultchat-postgres-1 psql -U vaultchat -d vaultchat -tAc 'SELECT count(*) FROM calls WHERE ended_at IS NULL;'"))
