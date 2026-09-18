@@ -32,6 +32,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"runtime/debug"
 	"sync"
 	"time"
 
@@ -324,6 +325,33 @@ func (s *ccwireSession) run() {
 	finished := make(chan struct{})
 	go func() {
 		defer close(finished)
+		// A panic in here is NOT recovered by net/http. This is our goroutine,
+		// not a request goroutine, and the handlers it runs are the same
+		// production write paths the HTTP mux serves -- chatsMessagePost,
+		// chatsMessagePatch, chatsMessageDelete, chatsDelivered, chatsRead,
+		// chatsDelta (internal/routes/chats.go:112-128). Without this, one nil
+		// map or slice index in any of them takes the WHOLE PROCESS down, for
+		// every connected client, not just the one that sent the frame.
+		//
+		// Recovering ends this session instead of resuming the loop: after a
+		// panic part-way through a handler the session state is whatever the
+		// panic left behind, and serving more commands from it is a worse
+		// failure than making that one client reconnect.
+		//
+		// Registered AFTER close(finished) so it runs BEFORE it -- run()'s
+		// `defer func(){ s.closeOnce(); <-finished }()` blocks on that channel,
+		// so finished must not close until recovery has done its work.
+		defer func() {
+			if r := recover(); r != nil {
+				// Two calls rather than one with an embedded newline: the
+				// stack is the whole point of this log line, and a format
+				// string that wraps is the kind of thing a later edit
+				// silently truncates.
+				log.Printf("[ccwire] PANIC in command worker, closing session: %v", r)
+				log.Printf("[ccwire] stack: %s", debug.Stack())
+				s.closeOnce()
+			}
+		}()
 		for {
 			select {
 			case <-s.done:

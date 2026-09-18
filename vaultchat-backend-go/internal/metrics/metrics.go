@@ -206,12 +206,22 @@ func WrapTransport(next http.Handler, routePrefix string) http.Handler {
 		t0 := time.Now()
 		if global {
 			inflight.Add(1)
+			// DEFERRED, not a matching Add(-1) after ServeHTTP. net/http
+			// recovers a handler panic, so the process survives -- but a plain
+			// decrement placed below never runs, and this gauge only ever goes
+			// up. One panicking handler leaves vaultchat_http_inflight
+			// permanently overstated and any alert on it permanently red, which
+			// is worse than the panic it is hiding.
+			//
+			// Only the gauge is deferred. The counters and histograms below are
+			// deliberately left to be skipped on a panic: a request that died
+			// mid-handler has no honest duration or status to record, whereas
+			// the gauge is tracking a fact -- this request is no longer in
+			// flight -- that is true either way.
+			defer inflight.Add(-1)
 		}
 		rw := &rec{ResponseWriter: w, code: 200}
 		next.ServeHTTP(rw, r)
-		if global {
-			inflight.Add(-1)
-		}
 		el := float64(time.Since(t0).Microseconds()) / 1000.0
 
 		// r.Pattern is set by ServeMux on this same *Request during
