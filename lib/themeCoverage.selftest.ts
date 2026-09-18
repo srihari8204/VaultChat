@@ -33,7 +33,7 @@ const EXEMPT = new Set([
   'app/docscanner.tsx', 'app/scanner.tsx', 'app/reader.tsx',
   'app/story-viewer.tsx', 'app/whiteboard.tsx', 'app/live-view.tsx',
   // Camera viewfinders.
-  'app/facescan.tsx', 'app/face-verify-new-device.tsx', 'app/camera.tsx',
+  'app/camera.tsx',
   // Renders after the tree threw — must not read context. See the file.
   'components/ErrorBoundary.tsx',
   // Their own published design systems.

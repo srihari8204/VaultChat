@@ -146,8 +146,6 @@ const REACHABLE_FROM: Record<string, string[]> = {
   '/group-chat': [],
   // Genuinely unrouted. app/app-lock.tsx is the live cold-launch gate.
   '/lock': [],
-  // Genuinely unrouted, and must stay so: it builds on generateMockFaceVector.
-  '/face-verify-new-device': [],
   // Still on the onboarding chain, which is why the old "unrouted" framing was
   // wrong about it. app/onboard-success.tsx is the live post-signup screen.
   '/setup-complete': ['app/permissions.tsx'],
@@ -160,9 +158,5 @@ for (const [route, allowed] of Object.entries(REACHABLE_FROM)) {
      (found.join() === allowed.slice().sort().join() ? '' : ` — found: ${found.join(', ') || 'nothing'}`),
      found.join() === allowed.slice().sort().join());
 }
-
-// The one that must never be routed: a mock face vector is not a security gate.
-ok('face-verify still uses a MOCK vector, so it stays unrouted',
-   /generateMockFaceVector/.test(code('app/face-verify-new-device.tsx')));
 
 console.log(`\norphanRoutes.selftest: ${n} assertions passed`);
