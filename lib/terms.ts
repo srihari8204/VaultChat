@@ -15,7 +15,7 @@
 //      not signed in yet. Onboarding is where a new account accepts.
 
 import { api, hasSession } from './api';
-import { termsOutstanding, type TermsState } from './termsPolicy';
+import { termsFromProtobuf, termsOutstanding, type TermsState } from './termsPolicy';
 
 export type { TermsState } from './termsPolicy';
 export { termsAreAnUpdate, termsOutstanding } from './termsPolicy';
@@ -36,7 +36,14 @@ export async function fetchTermsState(force = false): Promise<TermsState | null>
       // device, because nothing else could have found it.
       return null;
     }
-    cached = await api<TermsState>('/user/terms');
+    // protobuf-migration. Passing a decoder only OFFERS protobuf; a server that
+    // answers JSON — every deployment until the Go half ships — is parsed by the
+    // unchanged path in api(), with no second request.
+    //
+    // A decode failure throws out of api() and lands in the catch below, which
+    // returns null, which termsOutstanding() reads as NOT outstanding. That is
+    // the point: binary bytes must fail open exactly like being offline does.
+    cached = await api<TermsState>('/user/terms', { proto: termsFromProtobuf });
   } catch {
     // Offline, an outage, a server predating this endpoint, or SecureStore
     // throwing inside hasSession(). All of them mean "do not interrupt the

@@ -52,3 +52,47 @@ export function termsOutstanding(state: TermsState | null | undefined): boolean 
 export function termsAreAnUpdate(state: TermsState | null | undefined): boolean {
   return !!(state && (state.acceptedVersion ?? '').trim() !== '');
 }
+
+/**
+ * The protobuf body (ccwire.v1.TermsState) — protobuf-migration.
+ *
+ * Lives here rather than in lib/terms.ts because this is the react-native-free
+ * half: it can be run, and is run, under plain Node.
+ *
+ * DECODES TO THE SAME OBJECT THE JSON PATH PRODUCES, key for key. Two things
+ * make that non-obvious:
+ *
+ *   1. `?? null`, not `??  undefined` and not a conditional key. proto3 absence
+ *      arrives as undefined, the JSON writes an explicit `null`, and
+ *      JSON.stringify DROPS undefined — so an undefined here would compare equal
+ *      through a stringify and unequal through `in` or Object.keys. lib/terms.ts
+ *      caches this object for the life of the process; losing a key on the typed
+ *      path only is exactly the kind of difference that shows up months later.
+ *   2. `outstanding` is carried even though TermsState does not declare it and
+ *      nothing reads it — termsOutstanding() recomputes the rule. It is here
+ *      because the JSON has it, and dropping it would make the two
+ *      representations different objects for no gain.
+ *
+ * IT THROWS ON BAD BYTES, DELIBERATELY. fetchTermsState() has always wrapped its
+ * call in a try/catch that returns null, and termsOutstanding(null) is false —
+ * so a corrupt body lands on the same fail-open path as being offline. A decoder
+ * that returned a default-filled object instead could produce outstanding=true
+ * from garbage, i.e. an acceptance screen nobody can dismiss.
+ *
+ * The dynamic import carries NO `.js` suffix: tsc accepts one, Metro cannot
+ * resolve it (see lib/appVersionPolicy.ts). It also keeps @bufbuild/protobuf off
+ * the cold-start path until a server actually answers in binary.
+ */
+export async function termsFromProtobuf(
+  bytes: Uint8Array,
+): Promise<TermsState & { outstanding: boolean }> {
+  const { TermsState: Wire } = await import('./ccwire/gen/ccwire/v1/terms_pb');
+  const m = Wire.fromBinary(bytes);
+  return {
+    requiredVersion: m.requiredVersion,
+    acceptedVersion: m.acceptedVersion ?? null,
+    acceptedAt: m.acceptedAt ?? null,
+    outstanding: m.outstanding,
+    url: m.url,
+  };
+}

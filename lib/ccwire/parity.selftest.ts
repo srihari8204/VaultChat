@@ -13,7 +13,13 @@
 //   • These payloads encode → this file proves TS produces the same bytes Go
 //     produced, which is the other direction.
 //
-// STATUS: NOT WIRED, like frame.ts. Nothing on the live path imports either.
+// STATUS: LIVE. frame.ts is on the app path — client.ts calls encodeFrame on
+// every outbound frame and decodeStream on every inbound chunk. Socket.IO is
+// gone from the app and the backend.
+//
+// This header previously read "NOT WIRED, like frame.ts", which was stale in
+// the direction that matters: it told the reader these vectors guard nothing.
+// Corrected 2026-09-18.
 
 import * as fs from 'node:fs';
 import * as path from 'node:path';

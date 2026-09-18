@@ -71,7 +71,25 @@ async function financeUserId(): Promise<string> {
   return u?.id ?? 'local';
 }
 
-export interface BackupMeta { exists: boolean; sizeBytes?: number; messageCount?: number; updatedAt?: string }
+export interface BackupMeta {
+  exists: boolean; sizeBytes?: number; messageCount?: number; updatedAt?: string;
+  /**
+   * The server could not be asked — offline, a captive portal, an outage, or a
+   * response this build cannot decode. NEVER set on a real answer.
+   *
+   * WHY THIS EXISTS. The catch below has always collapsed "there is no backup"
+   * and "we could not find out" into the same `{ exists: false }`, and one
+   * caller acted on that difference without being able to see it:
+   * app/(tabs)/chats.tsx burned its once-per-install restore offer before
+   * reading `exists`, so a reinstall whose first launch was offline lost the
+   * offer permanently — the user's whole history silently never offered again.
+   * Offline-right-after-reinstall is the common case, not the edge case.
+   *
+   * Additive on purpose: every caller that reads `exists` is unaffected, and
+   * only the one that must not act on a non-answer looks at this.
+   */
+  unavailable?: true;
+}
 
 // Account-managed backup key: fetched once from the server (which generates and
 // stores it), cached on-device. No user passphrase needed — and, as set out
@@ -315,9 +333,56 @@ async function applyEncryptedBackup(secret: string, blob: string): Promise<numbe
 }
 
 // ── Cloud (zero-knowledge server storage) ───────────────────────────────
+// protobuf-migration. Decodes the typed answer into the SAME object the JSON
+// path produces — including the SHAPE of the no-backup answer.
+//
+// The keys are added conditionally rather than assigned undefined, because the
+// JSON for "no backup" is literally `{"exists":false}` with three keys ABSENT,
+// not null. Writing `sizeBytes: undefined` would make `'sizeBytes' in meta`
+// true on the typed path and false on the JSON path — a difference JSON.stringify
+// hides (it drops undefined) and `in` does not.
+//
+// sizeBytes is int64 on the wire, so protobuf-es hands back a bigint; BackupMeta
+// types it `number` and the JSON path has always produced one. Number() is the
+// adaptation — the typed path adapts, the runtime type is not "fixed".
+// ponytail: a backup above 2^53 bytes (9 PB) would lose precision here. Switch
+// the field to jstype = JS_STRING and the interface to string if that day comes.
+//
+// The dynamic import carries no `.js` suffix: Metro cannot resolve one, and tsc
+// does not catch it.
+async function decodeBackupMeta(bytes: Uint8Array): Promise<BackupMeta> {
+  const { BackupMeta: Wire } = await import('./ccwire/gen/ccwire/v1/backup_meta_pb');
+  const m = Wire.fromBinary(bytes);
+  const out: BackupMeta = { exists: m.exists };
+  if (m.sizeBytes !== undefined) out.sizeBytes = Number(m.sizeBytes);
+  if (m.messageCount !== undefined) out.messageCount = m.messageCount;
+  if (m.updatedAt !== undefined) out.updatedAt = m.updatedAt;
+  // THE SERVER'S OWN INVARIANT, ENFORCED HERE. userBackupMetaWrite (internal/
+  // routes/user.go) sets the three detail fields only inside the `Exists`
+  // branch, so `exists: true` with any of them missing is a shape the handler
+  // cannot produce. Treat it as a corrupt body.
+  //
+  // This is not defensive decoration — protobuf-es does NOT throw on every
+  // malformed body. The two bytes `0a 7f` (field 1 arriving with the
+  // length-delimited wire type, claiming 127 bytes that are not there) decode
+  // to exactly `{ exists: true }` with no error at all. Without this check a
+  // truncated or rewritten response makes the app announce "A cloud backup was
+  // found for this account" and offer a restore that cannot succeed.
+  if (out.exists && (out.sizeBytes === undefined
+    || out.messageCount === undefined || out.updatedAt === undefined)) {
+    throw new Error('backup meta: exists=true without the details the server always sends');
+  }
+  return out;
+}
+
 export async function cloudBackupMeta(): Promise<BackupMeta> {
-  try { return await api<BackupMeta>('/user/backup/meta'); }
-  catch { return { exists: false }; }
+  // Passing a decoder only OFFERS protobuf. A server that answers JSON — every
+  // deployment until the Go half ships — is parsed by the unchanged path in
+  // api(), with no second request.
+  try { return await api<BackupMeta>('/user/backup/meta', { proto: decodeBackupMeta }); }
+  // `exists: false` is kept so every existing caller behaves exactly as before;
+  // `unavailable` is the part that says this is not an answer. See BackupMeta.
+  catch { return { exists: false, unavailable: true }; }
 }
 
 export async function uploadCloudBackup(): Promise<{ messageCount: number; sizeBytes: number }> {

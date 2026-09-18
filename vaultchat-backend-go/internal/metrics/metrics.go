@@ -28,6 +28,7 @@ import (
 	"net/http"
 	"runtime"
 	"sort"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -70,6 +71,7 @@ var (
 
 	mu       sync.Mutex
 	requests = map[string]uint64{} // "METHOD|code" → count
+	respRepr = map[string]uint64{} // "protobuf"|"json"|"other" → count
 	durMs    float64               // total handler time
 	durN     uint64
 
@@ -95,6 +97,40 @@ func Observe(name string, ms float64) {
 		opDur[name] = h
 	}
 	h.observe(ms)
+}
+
+// reprOf labels a response by the REPRESENTATION it was written in, from the
+// Content-Type the handler set. Three constant values, so this adds exactly
+// three series and no user-derived string can ever reach a label.
+//
+// WHY THIS EXISTS. The negotiated-protobuf change (openspec/changes/
+// protobuf-migration) gives nine endpoints a second representation of a
+// response they already serve, chosen per request from the client's Accept
+// header. Without this counter NOTHING in /internal/metrics distinguishes the
+// two: request counts, latency and route histograms are identical whether the
+// box served protobuf to every client or JSON to every client. That is not an
+// abstract gap — it is the exact failure the runbook warns about, an edge proxy
+// stripping Accept or rewriting Content-Type, and the only way to see it would
+// have been to curl the box by hand and believe the answer.
+//
+// With it, the deploy is judgeable from the scrape alone: protobuf goes from
+// zero to non-zero, and the JSON series keeps moving (every unreleased client
+// still asks for JSON, so a JSON series that FELL to zero would mean the
+// negotiation is over-matching, not that the deploy worked).
+//
+// Prefix match, not equality: httpx.JSON writes "application/json; charset=utf-8".
+func reprOf(ct string) string {
+	switch {
+	case strings.HasPrefix(ct, "application/protobuf"):
+		return "protobuf"
+	case strings.HasPrefix(ct, "application/json"):
+		return "json"
+	default:
+		// Everything else on purpose: HLS segments, uploads, SSE, /internal/metrics
+		// itself. Splitting those out is a different question from "did negotiation
+		// take effect", and each split is a new series.
+		return "other"
+	}
 }
 
 // Inc bumps a domain counter under a CONSTANT name.
@@ -141,13 +177,41 @@ func (r *rec) Flush() {
 }
 
 // Wrap counts every request; mount the result as the server handler.
-func Wrap(next http.Handler) http.Handler {
+func Wrap(next http.Handler) http.Handler { return WrapTransport(next, "") }
+
+// WrapTransport is Wrap for a mux served by a transport OTHER than the public
+// listener — today the CC-Wire loopback, which runs the same chat handlers
+// under the same route patterns. routePrefix (a CONSTANT, e.g. "ccwire ") is
+// prepended to the route label so those sends get their own latency series
+// instead of being folded into the HTTP ones; pass "" for plain HTTP.
+func WrapTransport(next http.Handler, routePrefix string) http.Handler {
+	// The GLOBAL aggregates below (requests/code, mean duration, inflight) stay
+	// HTTP-ONLY. A non-empty routePrefix means this mux is served by another
+	// transport — today the CC-Wire loopback — and those requests never crossed
+	// the network.
+	//
+	// Folding them in silently changes what existing dashboards mean:
+	// rate(vaultchat_http_requests_total{code=~"5.."}) / rate(...total) would
+	// start counting CC-Wire failures in both numerator and denominator, the
+	// mean latency would blend two transports, and vaultchat_http_inflight
+	// would count loopback handler runs ON TOP of the long-lived WS upgrade
+	// request already in flight for that same connection — inflating the gauge
+	// for the whole session.
+	//
+	// So a CC-Wire send contributes exactly one thing: its own prefixed route
+	// histogram. That is the split an operator actually wants, and it leaves
+	// every pre-existing series meaning what it meant before.
+	global := routePrefix == ""
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		t0 := time.Now()
-		inflight.Add(1)
+		if global {
+			inflight.Add(1)
+		}
 		rw := &rec{ResponseWriter: w, code: 200}
 		next.ServeHTTP(rw, r)
-		inflight.Add(-1)
+		if global {
+			inflight.Add(-1)
+		}
 		el := float64(time.Since(t0).Microseconds()) / 1000.0
 
 		// r.Pattern is set by ServeMux on this same *Request during
@@ -158,11 +222,19 @@ func Wrap(next http.Handler) http.Handler {
 		if route == "" {
 			route = "other"
 		}
+		route = routePrefix + route
 
 		mu.Lock()
-		requests[r.Method+"|"+fmt.Sprint(rw.code)]++
-		durMs += el
-		durN++
+		if global {
+			requests[r.Method+"|"+fmt.Sprint(rw.code)]++
+			// Read from the recorder's header map AFTER the handler returned, so
+			// this is the type actually written — not the one the request asked
+			// for. A handler that fell back to JSON (every negotiation site does
+			// on a marshal failure) is counted as the json it really served.
+			respRepr[reprOf(rw.Header().Get("Content-Type"))]++
+			durMs += el
+			durN++
+		}
 		if h := routeDur[route]; h != nil {
 			h.observe(el)
 		} else if len(routeDur) < MaxSeries {
@@ -197,6 +269,15 @@ func Handler(w http.ResponseWriter, _ *http.Request) {
 		}
 		lines = append(lines, fmt.Sprintf(`vaultchat_http_requests_total{method=%q,code=%q} %d`, method, code, requests[k]))
 	}
+	// Always all three, in a fixed order, even at zero. A series that is absent
+	// until it is non-zero cannot be alerted on or graphed before the thing you
+	// are watching for happens — which is precisely the moment you need it.
+	reprLines := make([]string, 0, 3)
+	for _, k := range [3]string{"protobuf", "json", "other"} {
+		reprLines = append(reprLines,
+			fmt.Sprintf(`vaultchat_http_responses_total{repr=%q} %d`, k, respRepr[k]))
+	}
+
 	sumMs, n := durMs, durN
 
 	// Snapshot the histograms + counters under the same lock so a scrape is
@@ -217,6 +298,10 @@ func Handler(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
 	fmt.Fprintln(w, "# TYPE vaultchat_http_requests_total counter")
 	for _, l := range lines {
+		fmt.Fprintln(w, l)
+	}
+	fmt.Fprintln(w, "# TYPE vaultchat_http_responses_total counter")
+	for _, l := range reprLines {
 		fmt.Fprintln(w, l)
 	}
 	fmt.Fprintln(w, "# TYPE vaultchat_http_request_duration_ms_sum counter")

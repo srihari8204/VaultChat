@@ -151,6 +151,16 @@ export interface CCWireEvent {
 /** The binding half of the handshake. */
 export interface ServerHello {
   appEventsV1?: boolean;
+  /**
+   * Capabilities.typed_app_bodies (9) — the SERVER decodes typed app-domain
+   * bodies (typing_state 81, …) inbound. Permission to EMIT them, nothing else.
+   *
+   * Not the inverse of appEventsV1: a server sets both during the migration,
+   * and app_event stays the fallback. Absent on every server built before the
+   * field existed, so absence means "keep sending app_event" — which is the
+   * safe direction.
+   */
+  typedAppBodies?: boolean;
   protocolMajor?: number;
   protocolMinor?: number;
   sessionId?: string;
@@ -334,11 +344,21 @@ export function encodeClientHello(
   const out: number[] = [];
   putVarintField(out, 1, 1);                 // protocol_major
   putStringField(out, 5, deviceId ?? '');    // device_id
-  // capabilities (3): fragmentation (1) + resumption (2) + app_events_v1 (8).
+  // capabilities (3): fragmentation (1) + resumption (2) + app_events_v1 (8)
+  // + typed_app_bodies (9).
   // resumption is offered unconditionally — offering it costs nothing when the
   // server does not support it, because the reply is an INTERSECTION and a
   // server that cannot resume simply omits it.
-  out.push(26, 6, 8, 1, 16, 1, 64, 1);
+  //
+  // typed_app_bodies is the same shape of claim and it is TRUE of this build:
+  // transport.ts decodes body 81 TypingState. Advertising it is what lets a
+  // newer server send typed bodies TO us; it says nothing about what we send,
+  // which is gated on the server's own bit from ServerHello.
+  //
+  // Bytes: 26 = field 3, wire 2. Length 8, was 6. Then 8,1 (field 1) 16,1
+  // (field 2) 64,1 (field 8) 72,1 (field 9 — 9<<3 = 72). A wire change, so
+  // eventsSocket.selftest.ts pins these exact bytes and moves with them.
+  out.push(26, 8, 8, 1, 16, 1, 64, 1, 72, 1);
   if (resume?.token) {
     // resume_token — written back as the BYTES it arrived as. See binaryStrOf:
     // a credential the server matches byte for byte cannot go through a UTF-8
@@ -456,6 +476,10 @@ export function decodeServerHello(body: Uint8Array): ServerHello {
     // Capabilities is an INTERSECTION: the server only sets this when it will
     // actually honour a token, so it is safe to treat as permission to offer one.
     h.resumption = boolOf(caps, 2);
+    // Same rule, same reason: absent on any server that predates the field, and
+    // absent means keep sending app_event. boolOf returns false for a missing
+    // field, so an old ServerHello lands on the fallback by construction.
+    h.typedAppBodies = boolOf(caps, 9);
   }
   const limBytes = bytesOf(fs, 4);
   if (limBytes) {

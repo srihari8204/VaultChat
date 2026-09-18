@@ -34,9 +34,38 @@ const DIRECT_PAIRS = parseInt(arg('direct-pairs', '100'), 10);
 const SECRET = process.env.JWT_SECRET;
 if (!SECRET) { console.error('JWT_SECRET required'); process.exit(1); }
 
+// PORT 15432 IS AMBIGUOUS IN THIS REPO, AND THIS SCRIPT WRITES. 2026-09-18.
+//
+// The header above documents 15432 as "the docker-compose bench stack". Four Go
+// test files document the same port as "historically an SSH tunnel to
+// PRODUCTION Postgres" and refuse to touch it — see
+// internal/routes/auth_onboarding_flow_test.go:31 and
+// internal/routes/chats_unread_concurrency_test.go:7. Both statements live in
+// this repo and they contradict each other.
+//
+// This script INSERTs 1000 users, a group, and chat_members. It used to default
+// to 15432, so running it with only JWT_SECRET set would write a bench dataset
+// into whatever answered on that port. On a machine with the production tunnel
+// up, that is production.
+//
+// So: no default. DB_PORT must be stated, and 15432 must be opted into
+// explicitly with LOADTEST_ALLOW_15432=1 by someone who has checked what is
+// actually listening. Failing closed costs one env var; failing open costs
+// 1000 rows in the live users table.
+const DB_PORT = process.env.DB_PORT;
+if (!DB_PORT) {
+  console.error('DB_PORT is required — this script WRITES. The disposable bench stack, never a tunnel.');
+  process.exit(1);
+}
+if (DB_PORT === '15432' && process.env.LOADTEST_ALLOW_15432 !== '1') {
+  console.error('Refusing DB_PORT=15432: this repo documents that port as both the bench stack AND an SSH');
+  console.error('tunnel to production. Confirm what is listening, then set LOADTEST_ALLOW_15432=1.');
+  process.exit(1);
+}
+
 const pool = new Pool({
   host: process.env.DB_HOST || '127.0.0.1',
-  port: parseInt(process.env.DB_PORT || '15432', 10),
+  port: parseInt(DB_PORT, 10),
   database: process.env.DB_NAME || 'vaultchat',
   user: process.env.DB_USER || 'vaultchat',
   password: process.env.DB_PASS || 'vaultchat_dev',

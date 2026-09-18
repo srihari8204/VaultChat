@@ -1,0 +1,22 @@
+# Go generated-code config for CC-Wire schemas. Separate template from
+# buf.gen.yaml (TS) so `npm run proto:gen` stays Node-only and neither side
+# needs the other's toolchain installed.
+#
+# The protos declare go_package "vaultchat/backend-go/internal/ccwire/v1;ccwirev1",
+# an import path that does not exist. paths=source_relative ignores that path and
+# lays files out by their proto path instead, so output lands in
+# internal/ccwire/gen/ccwire/v1/ (package ccwirev1). All 16 protos are one proto
+# package, so no generated file imports another by that bogus path. (It said
+# "7" until 2026-09-18; the count had drifted nine files behind the directory,
+# which is the same class of rot the check script exists to catch.)
+#
+# Message types only: no gRPC/Connect plugins. The result is a reference codec
+# for conformance testing and is NOT wired into internal/ccwire/codec.go.
+#
+# Requires: go install google.golang.org/protobuf/cmd/protoc-gen-go@v1.36.12
+# Regenerate: npx buf generate proto --template buf.gen.go.yaml
+version: v1
+plugins:
+  - plugin: go
+    out: vaultchat-backend-go/internal/ccwire/gen
+    opt: paths=source_relative

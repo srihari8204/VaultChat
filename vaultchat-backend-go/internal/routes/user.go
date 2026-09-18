@@ -35,9 +35,12 @@ import (
 	"github.com/minio/minio-go/v7/pkg/credentials"
 	"golang.org/x/crypto/bcrypt"
 
+	ccwirev1 "vaultchat/backend-go/internal/ccwire/gen/ccwire/v1"
 	"vaultchat/backend-go/internal/db"
 	"vaultchat/backend-go/internal/httpx"
 	"vaultchat/backend-go/internal/vault"
+
+	"google.golang.org/protobuf/proto"
 )
 
 const userPinBcryptRounds = 10
@@ -282,16 +285,70 @@ func userSecurityOverview(w http.ResponseWriter, r *http.Request) {
 		fail()
 		return
 	}
+	userSecurityOverviewWrite(w, r, userSecurityOverviewData{
+		Sessions: sessions, Devices: devices, Blocks: blocks, Keys: keys,
+		CreatedAt:    createdAt,
+		Discoverable: discoverable, ReadReceipts: readReceipts,
+		LastSeenVisible: lastSeenVisible,
+	})
+}
+
+// userSecurityOverviewData is exactly what the handler above scanned — no JSON
+// intermediate. Both representations are built from these values directly, so
+// neither can drift from the other through a marshal/unmarshal round trip.
+type userSecurityOverviewData struct {
+	Sessions, Devices, Blocks, Keys             int
+	CreatedAt                                   *time.Time
+	Discoverable, ReadReceipts, LastSeenVisible *bool
+}
+
+// userSecurityOverviewWrite answers GET /user/security-overview in whichever
+// representation the caller asked for (protobuf-migration task 4.3). Same
+// route, method, RequireAuth and 200 — a request that does not name
+// application/protobuf gets the same JSON object, byte for byte as before.
+//
+// PRESENCE: the three settings are *bool fed straight to `optional bool`, so a
+// NULL column arrives ABSENT and never as false — lib/security.ts types them
+// `boolean | null` and the hub renders null as "not set", which is a different
+// state from "off". The counts and e2eeKeyPublished are plain: the handler has
+// already reduced them to a value, and absence is not a state they have.
+func userSecurityOverviewWrite(w http.ResponseWriter, r *http.Request, d userSecurityOverviewData) {
+	if acceptsProtobuf(w, r) {
+		reply := &ccwirev1.SecurityOverview{
+			ActiveSessions:   int32(d.Sessions),
+			LinkedDevices:    int32(d.Devices),
+			BlockedContacts:  int32(d.Blocks),
+			E2EeKeyPublished: d.Keys > 0,
+			// Reuses the chats helpers: same "2006-01-02T15:04:05.000Z" bytes
+			// httpx.JSTime writes, and nil stays nil.
+			AccountCreatedAt: chatsProtoTimePtr(httpx.JST(d.CreatedAt)),
+			// Always set: the JSON always ships a `settings` object, never null.
+			Settings: &ccwirev1.SecuritySettings{
+				Discoverable:    d.Discoverable,
+				ReadReceipts:    d.ReadReceipts,
+				LastSeenVisible: d.LastSeenVisible,
+			},
+		}
+		// A marshal failure is not a reason to fail the request: fall through to
+		// JSON, which every client understands either way.
+		if b, err := proto.Marshal(reply); err == nil {
+			w.Header().Set("Content-Type", protobufMediaType)
+			w.WriteHeader(200)
+			_, _ = w.Write(b)
+			return
+		}
+	}
+
 	httpx.JSON(w, 200, map[string]any{
-		"activeSessions":   sessions,
-		"linkedDevices":    devices,
-		"blockedContacts":  blocks,
-		"e2eeKeyPublished": keys > 0,
-		"accountCreatedAt": httpx.JST(createdAt),
+		"activeSessions":   d.Sessions,
+		"linkedDevices":    d.Devices,
+		"blockedContacts":  d.Blocks,
+		"e2eeKeyPublished": d.Keys > 0,
+		"accountCreatedAt": httpx.JST(d.CreatedAt),
 		"settings": map[string]any{
-			"discoverable":    discoverable,
-			"readReceipts":    readReceipts,
-			"lastSeenVisible": lastSeenVisible,
+			"discoverable":    d.Discoverable,
+			"readReceipts":    d.ReadReceipts,
+			"lastSeenVisible": d.LastSeenVisible,
 		},
 	})
 }
@@ -882,6 +939,31 @@ func userContactVerificationsGet(w http.ResponseWriter, r *http.Request) {
 		}
 		verified = append(verified, id)
 	}
+	userContactVerificationsWrite(w, r, verified)
+}
+
+// userContactVerificationsWrite answers GET /user/contact-verifications in
+// whichever representation the caller asked for (protobuf-migration, following
+// userSecurityOverviewWrite). Same route, method, RequireAuth and 200 — a
+// request that does not name application/protobuf gets the same JSON object,
+// byte for byte as before.
+//
+// PRESENCE: none to model. `verified` is seeded as an empty slice by the
+// handler, so the JSON is `[]` and never null, and proto3 elides an empty
+// repeated field — an account with no verifications is a ZERO-BYTE protobuf
+// body that decodes back to an empty list on both sides.
+func userContactVerificationsWrite(w http.ResponseWriter, r *http.Request, verified []string) {
+	if acceptsProtobuf(w, r) {
+		// A marshal failure is not a reason to fail the request: fall through to
+		// JSON, which every client understands either way.
+		if b, err := proto.Marshal(&ccwirev1.ContactVerifications{Verified: verified}); err == nil {
+			w.Header().Set("Content-Type", protobufMediaType)
+			w.WriteHeader(200)
+			_, _ = w.Write(b)
+			return
+		}
+	}
+
 	httpx.JSON(w, 200, map[string]any{"verified": verified})
 }
 
@@ -2850,15 +2932,68 @@ func userBackupMeta(w http.ResponseWriter, r *http.Request) {
 		user.ID).Scan(&sizeBytes, &messageCount, &updatedAt)
 	if err != nil {
 		if db.NoRows(err) {
-			httpx.JSON(w, 200, map[string]any{"exists": false})
+			userBackupMetaWrite(w, r, userBackupMetaData{})
 		} else {
 			httpx.Err(w, 500, "Failed")
 		}
 		return
 	}
+	userBackupMetaWrite(w, r, userBackupMetaData{
+		Exists: true, SizeBytes: sizeBytes, MessageCount: messageCount,
+		UpdatedAt: updatedAt,
+	})
+}
+
+// userBackupMetaData is exactly what the handler above scanned — no JSON
+// intermediate. Both representations are built from these values directly, so
+// neither can drift from the other through a marshal/unmarshal round trip.
+type userBackupMetaData struct {
+	Exists       bool
+	SizeBytes    int64
+	MessageCount int
+	UpdatedAt    time.Time
+}
+
+// userBackupMetaWrite answers GET /user/backup/meta in whichever representation
+// the caller asked for (protobuf-migration, following userSecurityOverviewWrite).
+// Same route, method, RequireAuth and 200 — a request that does not name
+// application/protobuf gets the same JSON object, byte for byte as before,
+// including the fact that the no-backup answer has ONE key and not four nulls.
+//
+// PRESENCE: when there is no backup row the three detail fields are ABSENT from
+// the JSON entirely, so they are absent from the protobuf too — `optional` in
+// backup_meta.proto, set only inside the Exists branch. The mirror case is why
+// they are `optional` rather than plain: a real backup of 0 bytes / 0 messages
+// must arrive PRESENT-and-zero, which proto3 would otherwise elide into the
+// same emptiness as "no backup at all".
+func userBackupMetaWrite(w http.ResponseWriter, r *http.Request, d userBackupMetaData) {
+	if acceptsProtobuf(w, r) {
+		reply := &ccwirev1.BackupMeta{Exists: d.Exists}
+		if d.Exists {
+			size := d.SizeBytes
+			count := int32(d.MessageCount)
+			// Reuses the chats helper: the same "2006-01-02T15:04:05.000Z" bytes
+			// httpx.JSTime writes below.
+			at := chatsProtoTime(httpx.JSTime(d.UpdatedAt))
+			reply.SizeBytes, reply.MessageCount, reply.UpdatedAt = &size, &count, &at
+		}
+		// A marshal failure is not a reason to fail the request: fall through to
+		// JSON, which every client understands either way.
+		if b, err := proto.Marshal(reply); err == nil {
+			w.Header().Set("Content-Type", protobufMediaType)
+			w.WriteHeader(200)
+			_, _ = w.Write(b)
+			return
+		}
+	}
+
+	if !d.Exists {
+		httpx.JSON(w, 200, map[string]any{"exists": false})
+		return
+	}
 	httpx.JSON(w, 200, map[string]any{
-		"exists": true, "sizeBytes": sizeBytes, "messageCount": messageCount,
-		"updatedAt": httpx.JSTime(updatedAt),
+		"exists": true, "sizeBytes": d.SizeBytes, "messageCount": d.MessageCount,
+		"updatedAt": httpx.JSTime(d.UpdatedAt),
 	})
 }
 

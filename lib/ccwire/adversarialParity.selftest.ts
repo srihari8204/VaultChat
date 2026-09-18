@@ -25,7 +25,11 @@
 // return. An uncaught throw is not, and would reach a caller that is switching
 // on `r.error`.
 //
-// STATUS: NOT WIRED, like codec.ts itself. Nothing on the live path imports it.
+// STATUS: LIVE. codec.ts is on the app path (client.ts → transport.ts →
+// socket.ts, where 'ccwire' is the only TransportName). This header previously
+// read "NOT WIRED" — stale, and misleading in the direction that matters: a
+// reader who believed it would think these adversarial vectors guard nothing.
+// Corrected 2026-09-18.
 
 import * as fs from 'node:fs';
 import * as path from 'node:path';

@@ -11,6 +11,7 @@ require (
 	github.com/redis/go-redis/v9 v9.11.0
 	github.com/zishang520/webtransport-go v0.9.1
 	golang.org/x/crypto v0.51.0
+	google.golang.org/protobuf v1.36.12
 )
 
 require (

@@ -48,18 +48,29 @@ async function main() {
   // invisible at runtime (the server's reply is an intersection, so an
   // unsupported offer just silently does nothing).
   //
-  //   26 = field 3 (capabilities), wire 2   06 = length
+  //   26 = field 3 (capabilities), wire 2   08 = length
   //    8,1  = field 1 fragmentation
-  //   16,1  = field 2 resumption      <- added with CC-Wire session resume
+  //   16,1  = field 2 resumption          <- added with CC-Wire session resume
   //   64,1  = field 8 app_events_v1
+  //   72,1  = field 9 typed_app_bodies    <- added with the protobuf migration
   //
   // Update this deliberately, never to make a failure go away.
   assert.ok(
-    Buffer.from(encodeClientHello()).includes(Buffer.from([26, 6, 8, 1, 16, 1, 64, 1])),
+    Buffer.from(encodeClientHello()).includes(Buffer.from([26, 8, 8, 1, 16, 1, 64, 1, 72, 1])),
     'ClientHello capability blob changed — update this constant deliberately',
   );
   assert.equal(decodeServerHello(Uint8Array.from([8, 1, 26, 2, 64, 1])).appEventsV1, true);
   assert.equal(!!decodeServerHello(Uint8Array.from([8, 1])).appEventsV1, false);
+
+  // typed_app_bodies (9) must default to FALSE, because that is the direction
+  // that keeps an old server working: absent bit -> client keeps emitting
+  // app_event (100). A default of true would make this build send typed bodies
+  // to every server that predates the field.
+  assert.equal(decodeServerHello(Uint8Array.from([8, 1, 26, 2, 72, 1])).typedAppBodies, true);
+  assert.equal(!!decodeServerHello(Uint8Array.from([8, 1, 26, 2, 64, 1])).typedAppBodies, false,
+    'a ServerHello without field 9 must not enable typed emit');
+  assert.equal(!!decodeServerHello(Uint8Array.from([8, 1])).typedAppBodies, false,
+    'a ServerHello with no capabilities at all must not enable typed emit');
   __resetCCWireForTest();
   const socket = new CCWireEventSocket(options, async () => 'terminal');
   let connects = 0;

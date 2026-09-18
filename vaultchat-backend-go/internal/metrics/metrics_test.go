@@ -3,6 +3,7 @@ package metrics
 import (
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -141,3 +142,57 @@ var errNoValue = errValue("no trailing integer")
 type errValue string
 
 func (e errValue) Error() string { return string(e) }
+
+// A CC-Wire send must contribute ONLY its own prefixed route histogram — never
+// the global HTTP aggregates.
+//
+// WHY THIS IS A TEST AND NOT A COMMENT. WrapTransport was first written
+// applying routePrefix to the route label alone, leaving requests/code, the
+// mean-duration sum/count and the inflight gauge unprefixed and unconditional.
+// Every CC-Wire loopback send then landed in series that had been HTTP-only,
+// which silently changes what a live dashboard means: an error-rate alert
+// built on rate(vaultchat_http_requests_total{code=~"5.."}) / rate(...total)
+// starts counting CC-Wire failures in BOTH numerator and denominator, and
+// vaultchat_http_inflight counts loopback handler runs on top of the
+// long-lived WS upgrade already in flight for the same connection.
+//
+// Nothing caught it: the route histogram was asserted, the global counters
+// were not. Hence this.
+func TestWrapTransportKeepsGlobalCountersHTTPOnly(t *testing.T) {
+	before := countLine(scrape(), `vaultchat_http_requests_total{method="GET",code="200"}`)
+
+	mux := http.NewServeMux()
+	mux.Handle("GET /ccwire-only", WrapTransport(
+		http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(200) }),
+		"ccwire ",
+	))
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, httptest.NewRequest("GET", "/ccwire-only", nil))
+	if rec.Code != 200 {
+		t.Fatalf("handler code = %d, want 200", rec.Code)
+	}
+
+	if got := countLine(scrape(), `vaultchat_http_requests_total{method="GET",code="200"}`); got != before {
+		t.Errorf("global request counter moved %d -> %d; a CC-Wire send must not land in the HTTP totals", before, got)
+	}
+
+	// It must still get its OWN series, or the fix has thrown the baby out.
+	if !strings.Contains(scrape(), `route="ccwire GET /ccwire-only"`) {
+		t.Error("the prefixed route histogram is missing; CC-Wire sends would be invisible entirely")
+	}
+}
+
+// countLine returns the numeric value of the metrics line with the given
+// prefix, or -1 when that series does not exist yet.
+func countLine(body, prefix string) int {
+	for _, ln := range strings.Split(body, "\n") {
+		if strings.HasPrefix(ln, prefix) {
+			n, err := strconv.Atoi(strings.TrimSpace(strings.TrimPrefix(ln, prefix)))
+			if err != nil {
+				return -1
+			}
+			return n
+		}
+	}
+	return -1
+}

@@ -27,7 +27,11 @@ check('session snapshot reads sealed state at most once',
 check('session snapshot preserves sealed-lock routing',
   snapshot.includes('{ signedIn: true, sealedLocked: true }'));
 check('protected content stays veiled until the root gate resolves',
-  layout.includes("const launchReady = launchGate === 'allow' || launchGate === pathname") &&
+  // 2026-09-19: the veil now also latches down once the redirect has landed
+  // (`landed`), so the first navigation inside the auth flow no longer veils
+  // the screen the user is typing into. 'checking' never sets the latch, so
+  // the property this check names — veiled until the gate resolves — holds.
+  layout.includes("const launchReady = launchGate === 'allow' || landed || launchGate === pathname") &&
   layout.includes('{!launchReady && (') &&
   layout.includes("importantForAccessibility={launchReady ? 'auto' : 'no-hide-descendants'}"));
 check('FLAG_SECURE participates in the root gate',

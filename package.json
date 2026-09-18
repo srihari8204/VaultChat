@@ -13,6 +13,8 @@
     "web": "expo start --web",
     "lint": "expo lint",
     "typecheck": "node scripts/check-sdk-versions.js && tsc --noEmit",
+    "proto:gen": "node scripts/proto-check.js --write",
+    "proto:check": "node scripts/proto-check.js",
     "test": "node ./scripts/test-all.js",
     "test:migrations": "node ./scripts/test-migrations.js",
     "test:e2ee": "tsx services/crypto/e2ee.selftest.ts && tsx services/crypto/senderKey.selftest.ts && tsx services/crypto/shamir.selftest.ts && tsx services/security/safetyNumber.selftest.ts && tsx services/crypto/vectors.selftest.ts && tsx services/crypto/vaultbeam-vectors.selftest.ts && tsx services/crypto/parity.selftest.ts && tsx services/crypto/vaultbeam-parity.selftest.ts",
@@ -69,6 +71,7 @@
   "dependencies": {
     "@any-routing/core": "^0.1.0",
     "@any-routing/maplibre-engine": "^0.2.0",
+    "@bufbuild/protobuf": "1.10.1",
     "@dr.pogodin/react-native-fs": "^2.39.0",
     "@expo-google-fonts/nunito-sans": "^0.4.2",
     "@expo-google-fonts/sora": "^0.4.2",
@@ -162,6 +165,8 @@
     "react-native-worklets": "0.5.1"
   },
   "devDependencies": {
+    "@bufbuild/buf": "1.47.2",
+    "@bufbuild/protoc-gen-es": "1.10.1",
     "@types/react": "~19.1.10",
     "babel-plugin-transform-remove-console": "^6.9.4",
     "better-sqlite3": "^13.0.3",

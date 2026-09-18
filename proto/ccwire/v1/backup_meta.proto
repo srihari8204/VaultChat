@@ -1,0 +1,49 @@
+syntax = "proto3";
+
+package ccwire.v1;
+
+option go_package = "vaultchat/backend-go/internal/ccwire/v1;ccwirev1";
+
+// GET /user/backup/meta — "is there a cloud backup for this account, and how
+// big is it?"
+//
+// SAME RULE AS security_overview.proto: the typed response expresses exactly
+// the states the existing JSON response expresses. The JSON contract is
+// authoritative and is NOT corrected here.
+//
+// WHY THIS ENDPOINT. Authenticated, first-party, read-only, GET, four scalars,
+// and off the cold-start path by the repo's own assertion —
+// lib/startupColdPath.selftest.ts checks that app/index.tsx does NOT call
+// cloudBackupMeta, and lib/restoreGate.ts only reaches the network after a
+// local check says it is worth it. Its client is lib/cloudBackup.ts.
+//
+// PRESENCE IS THE WHOLE POINT, AND IT IS THE MIRROR OF THE SECURITY-OVERVIEW
+// CASE. When no backup row exists the handler writes literally
+// `{"exists":false}` — the other three keys are NOT present with null values,
+// they are ABSENT. lib/cloudBackup.ts types them `sizeBytes?`, `messageCount?`,
+// `updatedAt?`, so the typed path must also produce an object with those keys
+// missing. Hence `optional` on all three: absent means "no backup", and the
+// decoder omits the key rather than writing undefined or 0.
+//
+// AND THE OPPOSITE DIRECTION, which is why plain (non-optional) fields would be
+// wrong: an existing backup can legitimately be 0 bytes / 0 messages (a row
+// committed before the first upload). Without `optional`, proto3 would elide
+// those zeros and the client would report "no size recorded" for a backup that
+// really is empty. `optional` makes present-and-zero cost two bytes and mean
+// what it says.
+//
+// size_bytes is int64 because the Go column is int64 and the JSON emits its
+// full value; the client narrows the generated bigint exactly as
+// lib/appVersionPolicy.ts already narrows the version floors. No jstype =
+// JS_STRING: that would change the JS type from number to string on the typed
+// path only, which is a contract change, and a backup blob is bytes, not an id.
+//
+// updated_at stays an ISO string byte-identical to httpx.JSTime
+// ("2006-01-02T15:04:05.000Z"). Not epoch-ms: that would be a representation
+// change and would collapse "absent" into "epoch 0".
+message BackupMeta {
+  bool exists = 1;
+  optional int64  size_bytes    = 2;  // absent => key missing, not 0
+  optional int32  message_count = 3;  // absent => key missing, not 0
+  optional string updated_at    = 4;  // ISO, verbatim; absent => key missing
+}

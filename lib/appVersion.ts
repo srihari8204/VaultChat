@@ -30,7 +30,10 @@ import { SERVER_URL } from '../constants/server';
 // so it can be unit-tested under Node. Re-exported so callers see one module.
 export { verdictFor } from './appVersionPolicy';
 export type { VersionGate, VersionVerdict } from './appVersionPolicy';
-import { verdictFor, type VersionGate, type VersionVerdict } from './appVersionPolicy';
+import {
+  verdictFor, APP_VERSION_ACCEPT, gateFromJson, gateFromProtobuf,
+  type VersionGate, type VersionVerdict,
+} from './appVersionPolicy';
 
 /** How long to wait before deciding the server has no opinion. */
 const VERSION_TIMEOUT_MS = 6000;
@@ -75,17 +78,17 @@ export async function fetchVersionGate(force = false): Promise<VersionGate | nul
   const timer = setTimeout(() => ctl.abort(), VERSION_TIMEOUT_MS);
   try {
     const res = await fetch(`${SERVER_URL}/app/version`, {
-      headers: { Accept: 'application/json' },
+      headers: { Accept: APP_VERSION_ACCEPT },
       signal: ctl.signal,
     });
     if (!res.ok) { cached = null; return null; }
-    const d: any = await res.json();
-    const gate: VersionGate = {
-      minBuild: Number(d?.minBuild) || 0,
-      adviseBuild: Number(d?.adviseBuild) || 0,
-      updateUrl: typeof d?.updateUrl === 'string' ? d.updateUrl : '',
-      message: typeof d?.message === 'string' ? d.message : '',
-    };
+    // Whichever representation came back. A server that does not know protobuf
+    // — or a proxy that rewrites the type — lands on the JSON branch, which is
+    // the same parse this function has always done.
+    const binary = (res.headers.get('content-type') || '').includes('application/protobuf');
+    const gate = binary
+      ? await gateFromProtobuf(new Uint8Array(await res.arrayBuffer()))
+      : gateFromJson(await res.text());
     cached = gate;
     return gate;
   } catch {

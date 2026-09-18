@@ -1,0 +1,51 @@
+syntax = "proto3";
+
+package ccwire.v1;
+
+option go_package = "vaultchat/backend-go/internal/ccwire/v1;ccwirev1";
+
+// GET /user/security-overview — the Security Hub's one read.
+//
+// THE RULE THIS SCHEMA FOLLOWS (same as chats_list.proto): the typed response
+// expresses exactly the states the existing JSON response expresses — no more,
+// no fewer. The JSON contract is authoritative and is NOT corrected here.
+//
+// WHY THIS ENDPOINT. It is authenticated, first-party, read-only, a single
+// bounded object of eight scalars, opened only when the user taps Security —
+// never on the cold-start path. No money, no 64-bit id, no free-form JSON.
+// Its only client is lib/security.ts, a 20-line module.
+//
+// PRESENCE IS THE WHOLE POINT HERE. Three of these fields are `*bool` scanned
+// straight from nullable user columns and serialised WITHOUT being collapsed —
+// lib/security.ts really types them `boolean | null`, and the Security Hub
+// shows "not set" for null, which is a different screen from "off". So they are
+// `optional bool`: a NULL column must arrive ABSENT, never as false. This is
+// the case chats_list.proto did not have (there every bool had already been
+// collapsed by the handler before serialising).
+//
+// The counts are plain int32: 0 is a real count — an account with no linked
+// device — and absence is not a state the JSON gives them. e2ee_key_published
+// is likewise a computed `keys > 0`, two-state in JSON already.
+//
+// accountCreatedAt stays an ISO string, byte-identical to httpx.JSTime
+// ("2006-01-02T15:04:05.000Z"), and is `optional` because the handler emits
+// JSON null for it when the users row is missing. Not epoch-ms: that would be a
+// representation change and would collapse "absent" into "epoch 0".
+message SecuritySettings {
+  // All three are NULL-able columns whose null survives into the JSON. Absent
+  // => "never set", which the client must not read as false.
+  optional bool discoverable      = 1;
+  optional bool read_receipts     = 2;
+  optional bool last_seen_visible = 3;
+}
+
+message SecurityOverview {
+  int32  active_sessions            = 1;
+  int32  linked_devices             = 2;
+  int32  blocked_contacts           = 3;
+  bool   e2ee_key_published         = 4;
+  optional string account_created_at = 5;  // ISO, verbatim; absent => null
+  // Always written, even when every field inside it is absent: the JSON always
+  // ships a `settings` object and never null.
+  SecuritySettings settings          = 6;
+}

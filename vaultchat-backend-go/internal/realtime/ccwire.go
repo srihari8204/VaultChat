@@ -206,8 +206,18 @@ type ccwireConnection interface {
 }
 
 type ccwireSession struct {
-	sessionID   string
-	appEvents   bool
+	sessionID string
+	appEvents bool
+	// typedAppBodies: the CLIENT said it decodes typed app-domain bodies
+	// (Capabilities field 9). Inbound typed bodies are served unconditionally
+	// either way; this is only about what the server may SEND.
+	//
+	// Scope is narrower than it looks — see ccwire_typed_bodies.go. Sessions
+	// that did NOT negotiate app_events already receive typed bodies through
+	// deliverOne and must keep doing so ungated. This flag is for sending a
+	// typed body to a session that DID negotiate app_events, where the client
+	// expects app_event (100) and would silently drop anything else.
+	typedAppBodies bool
 	events      map[string]func(...any)
 	subMu       sync.RWMutex
 	queueMu     sync.Mutex
@@ -493,6 +503,9 @@ func (s *ccwireSession) handle(raw []byte) bool {
 		}
 		s.hello = true
 		s.appEvents = appEventsEnabled() && (!ClusterEnabled() || s.hub.cwBusClose != nil) && helloAppEvents(m.Body, s.lim)
+		// No env gate, unlike appEvents: this records what the CLIENT can
+		// decode, which no server flag can change.
+		s.typedAppBodies = helloTypedAppBodies(m.Body, s.lim)
 		if s.appEvents {
 			s.lim.MaxMessageBodyBytes = appEventLogicalLimit
 			s.events = map[string]func(...any){}
@@ -742,12 +755,40 @@ func (s *ccwireSession) scope(m ccwire.Message) bool {
 	if m.BodyField == ccwire.BodyUnsubscribe {
 		// Leaving is always permitted, exactly as leave_chat is.
 		s.subMu.Lock()
+		_, was := s.subs[key]
 		delete(s.subs, key)
 		s.subMu.Unlock()
+		if was && kind == ccwire.ScopeKindCall {
+			// The two side effects leave_call has (handlers.go) and that
+			// leaveAppRooms already performs for every call room on disconnect.
+			// Without them a typed leave was invisible: every peer kept
+			// rendering a tile for someone who is gone, and in cluster mode the
+			// Redis roster kept counting a seat nobody holds — which is also a
+			// seat the mesh cap keeps refusing to the next joiner.
+			//
+			// Guarded on `was` so an Unsubscribe for a room this session never
+			// joined cannot announce a departure on its behalf.
+			p := s.eventPeer()
+			p.To(Room(key)).Emit("call_peer_left", map[string]any{"chatId": id, "uid": s.d.uid})
+			if ClusterEnabled() {
+				clusterCallLeave(id, s.d.uid, s.ctxOrBG())
+			}
+		}
 		return s.sendAck(m)
 	}
 
-	if !s.subscribeAllowed(kind, id) {
+	allowed, full, roster := s.subscribeAllowed(kind, id)
+	if !allowed {
+		if full {
+			// The mesh cap is not an authorization failure and the client can do
+			// something about it: it shows "call is full". The untyped handler
+			// has always said so; a typed subscriber heard only NOT_PERMITTED,
+			// which is indistinguishable from "you are not in this chat".
+			p := s.eventPeer()
+			p.Emit("call_full", map[string]any{
+				"chatId": id, "max": meshMaxParticipants(), "reason": "mesh_capacity",
+			})
+		}
 		// Coarse on purpose (errors.proto): "not a member", "no such chat" and
 		// "not entitled" are one answer, so the error channel is an existence
 		// oracle for nothing.
@@ -759,6 +800,24 @@ func (s *ccwireSession) scope(m ccwire.Message) bool {
 		return true
 	}
 	metrics.Inc("ccwire_subscribe")
+	if kind == ccwire.ScopeKindCall {
+		// The rest of join_call (handlers.go), through the SAME eventPeer emits
+		// it uses, so the frames are the ones that handler produces.
+		//
+		// NOT in joinEventRoom: that is shared with the untyped door
+		// (event_peer.go join -> handlers.go s.Join), so a roster emitted there
+		// would reach every legacy joiner TWICE.
+		//
+		// `roster` was read by the gate, before this session was in the room —
+		// re-reading it here would be a second Redis round trip for the same
+		// answer.
+		p := s.eventPeer()
+		if ClusterEnabled() {
+			clusterCallJoin(id, s.d.uid, s.ctxOrBG())
+		}
+		p.Emit("call_roster", map[string]any{"chatId": id, "peers": roster})
+		p.To(Room(key)).Emit("call_peer_joined", map[string]any{"chatId": id, "uid": s.d.uid})
+	}
 	return s.sendAck(m)
 }
 
@@ -766,51 +825,75 @@ func (s *ccwireSession) scope(m ccwire.Message) bool {
 // gate that ALREADY EXISTS and is already used by the Socket.IO handlers. No
 // new notion of "may reach" is introduced here, because a second transport that
 // invents one is a second transport that bypasses the first's.
-func (s *ccwireSession) subscribeAllowed(kind uint32, id string) bool {
+//
+// The two extra results belong to the CALL arm alone and are the zero value for
+// every other kind. `full` separates the mesh-cap refusal from the membership
+// refusal — the only thing the caller needs beyond yes/no, because join_call
+// answers a cap refusal with call_full and a typed subscriber must hear the
+// same. `roster` is the list the cap was measured against, handed back so the
+// join emit does not read it a second time (in cluster mode that is a second
+// Redis round trip for an answer already in hand).
+func (s *ccwireSession) subscribeAllowed(kind uint32, id string) (allowed bool, full bool, roster []string) {
 	switch kind {
 	case ccwire.ScopeKindChat:
 		// The same check join_chat makes (handlers.go), same cache, same
 		// generation — so BumpChatPermissions invalidates a CC-Wire session's
 		// decision exactly as it does a Socket.IO one.
-		return s.hub.chatMemberAllowed(s.d, id, s.ctxOrBG())
+		return s.hub.chatMemberAllowed(s.d, id, s.ctxOrBG()), false, nil
 
 	case ccwire.ScopeKindCall:
-		// envelope.proto: "chat membership + mesh cap" — which is call_join's
-		// rule (handlers.go:773 and the meshMaxParticipants check below it).
+		// envelope.proto: "chat membership + mesh cap" — which is join_call's
+		// rule (handlers.go:802 and the meshMaxParticipants check below it),
+		// read off the same roster, in the same order.
+		if !s.appEvents {
+			// A session that did not negotiate app_events cannot take part in a
+			// call at all: emitRooms and ccwireCallRoster both skip it, so it
+			// would hear no call_roster, no call_peer_joined and no webrtc_*,
+			// and no peer would ever see it — a seat held by a ghost. The
+			// untyped door is shut to it too (join_call is only registered for
+			// app_event sessions), so refusing here keeps ONE answer, not two.
+			return false, false, nil
+		}
 		if !s.hub.chatMemberAllowed(s.d, id, s.ctxOrBG()) {
-			return false
+			return false, false, nil
 		}
-		// ponytail: the roster counts Socket.IO sockets only, so this cap sees
-		// existing callers but not other CC-Wire subscribers. Harmless while
-		// no media is fanned out over this transport; when it is, call
-		// membership needs one roster both transports write to.
-		if max := meshMaxParticipants(); len(s.hub.callRoster(Room("call:"+id), s.d.uid, s.ctxOrBG()))+1 > max {
+		// The roster is whatever join_call counts — h.callRoster now delegates
+		// entirely to ccwireCallRoster (handlers.go), so both doors measure the
+		// same set of live app_event sessions. An earlier comment here claimed
+		// it "counts Socket.IO sockets only"; that transport is gone and the
+		// claim was the reverse of the truth.
+		if ClusterEnabled() {
+			roster = clusterCallRoster(id, s.d.uid, s.ctxOrBG())
+		} else {
+			roster = s.hub.callRoster(Room("call:"+id), s.d.uid, s.ctxOrBG())
+		}
+		if len(roster)+1 > meshMaxParticipants() {
 			metrics.Inc("ccwire_call_mesh_full")
-			return false
+			return false, true, nil
 		}
-		return true
+		return true, false, roster
 
 	case ccwire.ScopeKindRun:
 		// runAllowed(drive=false) is the view entitlement, matching the run
 		// relay's read side (handlers.go registerRunRelay).
-		return s.hub.runAllowed(s.d, id, false, s.ctxOrBG())
+		return s.hub.runAllowed(s.d, id, false, s.ctxOrBG()), false, nil
 
 	case ccwire.ScopeKindChannel:
 		// UNGATED, and recorded as such in envelope.proto. channel_join has no
 		// check today; adding one HERE would be a second, divergent policy.
 		// When channels grow a membership gate it belongs in one function both
 		// transports call.
-		return true
+		return true, false, nil
 
 	case ccwire.ScopeKindAdmin:
 		// The admin key is a Socket.IO handshake concept and is not accepted on
 		// this endpoint at all, so no session can ever satisfy this scope.
-		return false
+		return false, false, nil
 
 	default:
 		// SCOPE_KIND_UNSPECIFIED, or a kind from a newer peer. An unknown scope
 		// is refused, never assumed.
-		return false
+		return false, false, nil
 	}
 }
 
@@ -875,6 +958,7 @@ func (s *ccwireSession) capabilities() []byte {
 	b = ccwire.AppendBoolField(b, 1, true) // fragmentation     — serveFragment, this file
 	b = ccwire.AppendBoolField(b, 3, true) // batch_cursor_sync — ccwire_cursor.go
 	b = ccwire.AppendBoolField(b, 7, true) // structured_errors
+	b = ccwire.AppendBoolField(b, 9, true) // typed_app_bodies — serveBody serves 48/50/51/52/64/81/82/84 unconditionally (32/33 via handle→s.scope); NOT field 8 inverted, both may be set
 	if s.appEvents {
 		b = ccwire.AppendBoolField(b, 8, true)
 	}

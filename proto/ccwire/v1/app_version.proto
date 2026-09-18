@@ -1,0 +1,28 @@
+syntax = "proto3";
+package ccwire.v1;
+option go_package = "vaultchat/backend-go/internal/ccwire/v1;ccwirev1";
+
+// The response of GET /app/version — the minimum-build gate.
+//
+// FIRST NEGOTIATED HTTP RESPONSE (Wave 3 checkpoint 3.1). This endpoint was
+// chosen because it is unauthenticated, bodyless, read-only, four scalar
+// fields wide, and its only client reads it with a raw fetch() rather than
+// through lib/api.ts — so the 331 contracts that funnel through api() are
+// untouched by this checkpoint.
+//
+// The JSON representation (httpx.JSON in internal/routes/appversion.go) stays
+// the default and is byte-identical to before: a client gets these bytes only
+// when it asks for them with `Accept: application/protobuf`.
+//
+// The floors are int64 because the server parses them with ParseInt(…, 64)
+// from VAULTCHAT_MIN_BUILD / VAULTCHAT_ADVISE_BUILD. They arrive in JS as
+// bigint and the client narrows them exactly as it already narrows the JSON
+// numbers (Number(d.minBuild) || 0). Zero — the unset default — blocks nobody,
+// which is the same meaning proto3 gives an absent field, so the gate cannot
+// be armed by accident through a dropped field.
+message AppVersionGate {
+  int64  min_build    = 1;  // hard floor; below it the app refuses to run
+  int64  advise_build = 2;  // soft floor; below it the app nags but works
+  string update_url   = 3;  // where to send them
+  string message      = 4;  // reason shown on the blocking screen; may be empty
+}

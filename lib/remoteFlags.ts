@@ -18,7 +18,10 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import { SERVER_URL } from '../constants/server';
-import { resolveFlag, sanitizeFlags, type RemoteFlags } from './remoteFlagPolicy';
+import {
+  resolveFlag, sanitizeFlags, flagsFromProtobuf, APP_FLAGS_ACCEPT,
+  type RemoteFlags,
+} from './remoteFlagPolicy';
 
 export { resolveFlag, sanitizeFlags } from './remoteFlagPolicy';
 export type { RemoteFlags } from './remoteFlagPolicy';
@@ -71,13 +74,26 @@ async function loadRemoteFlagsOnce(): Promise<RemoteFlags> {
   const timer = setTimeout(() => ctl.abort(), FLAGS_TIMEOUT_MS);
   try {
     const res = await fetch(`${SERVER_URL}/app/flags`, {
-      headers: { Accept: 'application/json' },
+      headers: { Accept: APP_FLAGS_ACCEPT },
       signal: ctl.signal,
     });
     if (res.ok) {
-      const body = await res.json();
-      snapshot = sanitizeFlags(body?.flags);
-      try { await AsyncStorage.setItem(CACHE_KEY, JSON.stringify(snapshot)); } catch {}
+      // Whichever representation came back. A server that does not know the
+      // typed response — or a proxy that rewrites the content type — lands on
+      // the JSON branch, which is the same parse this function always did.
+      const binary = (res.headers.get('content-type') || '').includes('application/protobuf');
+      const next = binary
+        ? await flagsFromProtobuf(new Uint8Array(await res.arrayBuffer()))
+        : sanitizeFlags((await res.json())?.flags);
+      // ONLY ON A REAL ANSWER. flagsFromProtobuf returns null for bytes it
+      // cannot decode, and overwriting the snapshot with `{}` there would
+      // re-enable a feature an operator killed — the one outcome this endpoint
+      // exists to prevent. sanitizeFlags never returns null, so the JSON branch
+      // is unaffected by this guard.
+      if (next) {
+        snapshot = next;
+        try { await AsyncStorage.setItem(CACHE_KEY, JSON.stringify(snapshot)); } catch {}
+      }
     }
   } catch {
     // Offline, an outage, or a server predating this endpoint. Keep whatever

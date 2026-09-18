@@ -41,6 +41,17 @@ func vbSkip(t *testing.T) {
 	if os.Getenv("CALL_TEST_DB") != "1" {
 		t.Skip("set CALL_TEST_DB=1 (and DB_*/JWT_SECRET) to run the VaultBeam route tests")
 	}
+	// CONNECT. Without this these four tests nil-deref pgxpool inside vbSeed:
+	// db.Pool is package state that nothing here initialises, so they only ever
+	// worked if some OTHER test in the package happened to connect first. That
+	// is an ordering dependency, and `-run TestVaultbeam` alone always panicked.
+	//
+	// It went unnoticed because the whole file is gated on CALL_TEST_DB, which
+	// had never been set — the first run of these tests was 2026-09-18. Matches
+	// csSkip in chats_send_characterization_test.go, which does the same thing.
+	if err := db.Connect(context.Background()); err != nil {
+		t.Fatalf("connect: %v", err)
+	}
 }
 
 // vbSeed writes a transfer row directly, so the tests do not depend on

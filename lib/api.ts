@@ -200,12 +200,46 @@ export async function getCachedUser(): Promise<any | null> {
 }
 
 // ─── fetch wrapper ────────────────────────────────────────────
-type ApiOptions = Omit<RequestInit, 'body'> & {
+type ApiOptions<T = any> = Omit<RequestInit, 'body'> & {
   expectedUserId?: string; // queued user-owned work must not borrow a later login
   auth?: boolean;     // default true — attach Bearer token if available
   json?: any;         // sets body to JSON + Content-Type
   body?: BodyInit;    // raw body, mutually exclusive with json
+  /**
+   * OPT IN TO BINARY PROTOBUF FOR THIS ONE CALL (protobuf-migration 4.2).
+   *
+   * Absent — which is every one of the 331 contracts that has not been
+   * migrated — and this module behaves exactly as it always has: the same
+   * `Accept: application/json`, the same headers, the same response path.
+   * There is no registry, no middleware and no per-endpoint table; a caller
+   * either passes a decoder or it does not.
+   *
+   * The decoder, not a media type, is the option, for two reasons:
+   *   * it keeps @bufbuild/protobuf out of this module entirely. api() never
+   *     imports a codec, so nothing it does can drag one onto the cold-start
+   *     path. The dynamic import() lives in the caller, which is the shape
+   *     task 3.1 established (lib/appVersionPolicy.ts gateFromProtobuf).
+   *   * `T` is the caller's own response type, so the decoder is checked
+   *     against the type the call site already declares.
+   *
+   * Passing it only OFFERS protobuf. The server decides, and the answer is
+   * read off the response Content-Type, so a server that has never heard of
+   * protobuf answers JSON and is parsed by the unchanged path below — no
+   * second request, no probe, no failure.
+   */
+  proto?: (bytes: Uint8Array) => T | Promise<T>;
 };
+
+/**
+ * What an opted-in call asks for. Protobuf first, JSON still offered, because
+ * the JSON branch has to keep working against every server already deployed.
+ * Same string as APP_VERSION_ACCEPT (lib/appVersionPolicy.ts), duplicated
+ * rather than imported: that module is the /app/version policy, not a media
+ * type registry, and one shared constant between two endpoints is not a
+ * registry either.
+ */
+const PROTOBUF_ACCEPT = 'application/protobuf, application/json';
+const PROTOBUF_TYPE = 'application/protobuf';
 
 // Stable per-install id, cached in memory after the first read. Sent as
 // X-Device-Id so the server can tell a resumed client from a cold start — see
@@ -230,10 +264,13 @@ function deviceId(): Promise<string | null> {
  */
 async function rawFetch(path: string, opts: ApiOptions, sentAs?: { sub: string }): Promise<Response> {
   // Strip our internal keys so they don't leak into fetch init.
-  const { json, auth, expectedUserId, headers: optHeaders, body: optBody, ...init } = opts;
+  const { json, auth, expectedUserId, proto, headers: optHeaders, body: optBody, ...init } = opts;
 
   const headers: Record<string, string> = {
-    Accept: 'application/json',
+    // The ONLY request-side difference an opted-in call makes. Everything
+    // below — device id, body, Authorization, timeout — is shared verbatim, so
+    // a call without `proto` produces byte-identical requests to before.
+    Accept: proto ? PROTOBUF_ACCEPT : 'application/json',
     ...(optHeaders as Record<string, string> | undefined),
   };
 
@@ -471,7 +508,7 @@ export function refreshAccessToken(): Promise<RefreshOutcome> {
   return tryRefresh();
 }
 
-export async function api<T = any>(path: string, opts: ApiOptions = {}): Promise<T> {
+export async function api<T = any>(path: string, opts: ApiOptions<T> = {}): Promise<T> {
   // Whose session this request actually went out under — filled in by rawFetch
   // from the token it attached. Used only on the terminal-401 path below, to
   // keep a dead session's 401 from purging a live account. 2026-09-17.
@@ -545,6 +582,17 @@ export async function api<T = any>(path: string, opts: ApiOptions = {}): Promise
     // the body left them with a message and nothing to render.
     err.body = body;
     throw err;
+  }
+
+  // THE SERVER'S ANSWER DECIDES, NOT THE REQUEST (protobuf-migration 4.2).
+  //
+  // Guarded on `opts.proto` first, so a call that did not opt in does not even
+  // read a header here: it falls straight through to the text path below,
+  // unchanged. An opted-in call that got JSON back — an old server, a proxy
+  // that rewrote the type — also falls through, and is parsed by that same
+  // unchanged path. No second request either way.
+  if (opts.proto && (res.headers.get('content-type') || '').includes(PROTOBUF_TYPE)) {
+    return (await opts.proto(new Uint8Array(await res.arrayBuffer()))) as T;
   }
 
   // 204 / empty body

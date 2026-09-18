@@ -1,0 +1,79 @@
+syntax = "proto3";
+
+package ccwire.v1;
+
+option go_package = "vaultchat/backend-go/internal/ccwire/v1;ccwirev1";
+
+// GET /chats/delta — catch-up. The highest-consequence payload in the app:
+// it carries message rows AND the cursor that decides what is fetched next.
+//
+// Same rule as chats_list.proto: the typed response expresses exactly the
+// states the JSON response expresses. `optional` only where the handler really
+// emits JSON null. The JSON contract is authoritative and unchanged.
+//
+// ─────────────────────────────────────────────────────────────────────────
+// THE `meta` DECISION — made deliberately, not by default.
+//
+// `chatsPublicMsg.Meta` is Go `any`: free-form JSON merged from two jsonb
+// columns in SQL. It has no shape to generate from, and three options exist:
+//
+//   1. google.protobuf.Struct — costs MORE bytes than the JSON it replaces
+//      (every key re-encoded with a type tag and a nested Value wrapper), and
+//      loses exactness: Struct has only `double`, so an int64 in meta would
+//      round. Worse on both axes.
+//   2. Enumerate the shapes — not possible. The object is assembled by SQL
+//      (`meta || meta_private`) across every message type, and the private
+//      half is client-defined.
+//   3. `bytes meta_json` — the exact JSON bytes, preserved verbatim.
+//
+// Option 3 is chosen. It looks like the `AppEvent.payload_json` pattern this
+// whole migration exists to escape, and the difference is worth stating:
+// payload_json hid an ENTIRE event payload behind one opaque field, so nothing
+// about the event was typed. Here every other field of DeltaMessage is typed,
+// and `meta` is the one genuinely open-ended value in the row. It is NAMED for
+// what it is, documented here, and carries exact bytes rather than a lossy
+// re-encoding.
+//
+// This is an explicitly identified encoded message, not an undocumented escape
+// hatch. If meta is ever given a schema, it becomes a new field number and this
+// one is reserved — it must not be repurposed.
+// ─────────────────────────────────────────────────────────────────────────
+message DeltaMessage {
+  // Server row id. int64 on the wire, JS_STRING so the client never receives a
+  // bigint; the client adapter validates and narrows it. The JSON path emits it
+  // as a STRING (fmt.Sprintf("%d")) and keeps doing so.
+  int64  id                 = 1 [jstype = JS_STRING];
+  string chat_id            = 2;
+  string sender_id          = 3;
+  string type               = 4;
+  // E2EE ciphertext, opaque. Never decoded, re-encoded or normalised here —
+  // it is an authenticated byte contract. null on a soft-deleted row.
+  optional string content   = 5;
+  // See THE `meta` DECISION above. Absent when the JSON emits null.
+  optional bytes  meta_json = 6;
+  // JSON emits this as a STRING (userBigStr). Absent when null.
+  optional int64  reply_to_id = 7 [jstype = JS_STRING];
+  optional string edited_at   = 8;   // ISO, absent when null
+  optional string deleted_at  = 9;   // ISO, absent when null
+  string created_at           = 10;  // ISO, always present
+  optional string expires_at  = 11;  // ISO, absent when null
+  bool   vanish_after_read    = 12;
+}
+
+message DeltaReply {
+  repeated DeltaMessage messages = 1;
+  // The delta cursor. JSON emits a NUMBER. int64 with JS_STRING on the wire so
+  // it cannot arrive as a lossy double; the client validates it with
+  // Number.isSafeInteger before it is allowed anywhere near the durable
+  // high-water mark — a rounded cursor moves the mark PAST an undelivered id
+  // and skips that message permanently. See lib/syncCursorRegression.selftest.ts.
+  int64  next_since            = 2 [jstype = JS_STRING];
+  bool   more                  = 3;
+  // OPAQUE. Never parsed as an id, never interpreted. Empty string means "none",
+  // matching the JSON contract, which emits "" rather than null.
+  string sync_continuation     = 4;
+  repeated DeltaMessage mutations = 5;
+  // Opaque, same rules as sync_continuation.
+  string next_mutation_cursor  = 6;
+  string server_time           = 7;  // ISO, always present
+}

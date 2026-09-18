@@ -179,6 +179,21 @@ function buildClient(userId: string): string {
   writeFileSync(join(dir, 'msgIds.ts'), readFileSync(join(ROOT, 'lib', 'msgIds.ts'), 'utf8'));
   src = src.replace(/^import \{ normalizeMsgIds \} from '\.\/msgIds';$/m,
     `import { normalizeMsgIds } from './msgIds.ts';`);
+  // startupChatSummary — the wire→domain boundary listChats' protobuf decoder
+  // goes through. Real code, per client: it imports nothing but msgIds (real
+  // above) and two type-only shapes, and it is what fixes a chat row's three id
+  // representations.
+  writeFileSync(join(dir, 'startupAdapter.ts'),
+    readFileSync(join(ROOT, 'lib', 'ccwire', 'startupAdapter.ts'), 'utf8')
+      .replace(/from '\.\.\/chatService'/, `from './chat.ts'`)
+      .replace(/from '\.\.\/msgIds'/, `from './msgIds.ts'`));
+  // The binding list is CAPTURED rather than spelled out: chatService now takes
+  // commonGroupsFromProtobuf (the /chats/common decoder, moved out of an inline
+  // lambda so the negotiation selftest can drive the shipped one) from the same
+  // module, and a literal match would silently stop rewriting the day a symbol
+  // is added — which is exactly what happened.
+  src = src.replace(/^import \{([^}]*)\} from '\.\/ccwire\/startupAdapter';$/m,
+    `import {$1} from './startupAdapter.ts';`);
   src = src
     .replace(/await import\('\.\/ccwire\/transport'\)/g, `await import('${CCWIRE}')`)
     .replace(/await import\('\.\.\/services\/crypto\/e2eeSession\.rn'\)/g, `await import('./e2ee.ts')`)
@@ -187,10 +202,24 @@ function buildClient(userId: string): string {
 
   const stray = [...src.matchAll(/^import (?!type )[^\n]*from '([^']+)';$/gm)]
     .map((m) => m[1])
-    .filter((p) => !p.startsWith('./stubs') && !p.startsWith('file:') && p !== 'node:buffer' && p !== './msgIds.ts');
+    .filter((p) => !p.startsWith('./stubs') && !p.startsWith('file:') && p !== 'node:buffer' && p !== './msgIds.ts'
+      && p !== './startupAdapter.ts');
   check(`every ${userId} chatService import is accounted for`, stray.length === 0, `unstubbed: ${stray.join(', ')}`);
   const strayDyn = [...src.matchAll(/await import\('([^']+)'\)/g)].map((m) => m[1])
-    .filter((p) => p !== './stubs.ts' && p !== './e2ee.ts' && p !== CCWIRE);
+    // The generated codecs are left unrewritten on purpose: each is reached
+    // only from a `proto` decoder, i.e. only when a server answers
+    // application/protobuf, and the stub api() here always answers JSON. Node
+    // never resolves an import() that is not called.
+    //
+    // This list grows by one per migrated endpoint. That is the intended
+    // friction: a NEW dynamic import in chatService that is not a generated
+    // codec still fails this check, which is what it is for.
+    // chats_common_pb is NOT listed: its decoder moved to
+    // lib/ccwire/startupAdapter (copied in real above, its own dynamic import
+    // never called here), so chatService no longer names it. Leaving a dead
+    // allowance here would let it reappear unnoticed.
+    .filter((p) => p !== './stubs.ts' && p !== './e2ee.ts' && p !== CCWIRE
+      && p !== './ccwire/gen/ccwire/v1/chats_list_pb');
   check(`every ${userId} dynamic import is accounted for`, strayDyn.length === 0, `unstubbed: ${strayDyn.join(', ')}`);
 
   writeFileSync(join(dir, 'chat.ts'), src);

@@ -24,8 +24,15 @@
 // quietly come to depend on a body the other two never decode: see "the scope
 // exclusion".
 //
-// STATUS: NOT WIRED, like codec.ts itself. Nothing on the live path imports
-// either; the live transport remains Socket.IO v4 with JSON payloads.
+// STATUS: LIVE. codec.ts is on the app path — client.ts imports it,
+// transport.ts imports client.ts, socket.ts imports transport.ts, and
+// 'ccwire' is the ONLY TransportName (lib/socket.ts). Socket.IO is gone from
+// the app, this backend and the admin console.
+//
+// This header previously read "NOT WIRED … the live transport remains
+// Socket.IO v4 with JSON payloads". That was stale and actively misleading:
+// it sent readers to the conclusion that these vectors guard dead code, when
+// they guard every realtime byte the app sends. Corrected 2026-09-18.
 
 import * as fs from 'node:fs';
 import * as path from 'node:path';

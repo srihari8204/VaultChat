@@ -43,4 +43,67 @@ export function verdictFor(build: number, gate: VersionGate | null): VersionVerd
   return 'ok';
 }
 
-export default { verdictFor };
+// ─── Reading the answer ──────────────────────────────────────────────────────
+//
+// protobuf-migration task 3.1: /app/version is the first operation that can
+// answer in binary. The request asks for BOTH representations, so a server that
+// has never heard of protobuf — every deployment before this one — answers JSON
+// exactly as it always did and the client takes the JSON branch. Nothing else
+// in the app negotiates; this header is set at one call site on purpose.
+export const APP_VERSION_ACCEPT = 'application/protobuf, application/json';
+
+/** Narrow whatever the server sent into the gate. Never throws. */
+function gateOf(d: any): VersionGate {
+  return {
+    minBuild: Number(d?.minBuild) || 0,
+    adviseBuild: Number(d?.adviseBuild) || 0,
+    updateUrl: typeof d?.updateUrl === 'string' ? d.updateUrl : '',
+    message: typeof d?.message === 'string' ? d.message : '',
+  };
+}
+
+/** The JSON body, unchanged from what fetchVersionGate did inline before. */
+export function gateFromJson(text: string): VersionGate | null {
+  try {
+    return gateOf(JSON.parse(text));
+  } catch {
+    return null;                      // a captive portal's HTML is not a policy
+  }
+}
+
+/**
+ * The protobuf body (ccwire.v1.AppVersionGate).
+ *
+ * The generated codec is imported DYNAMICALLY so @bufbuild/protobuf stays off
+ * the cold-start path — the same reason lib/ccwire is only ever reached through
+ * an import() (see buf.gen.yaml). Nothing is loaded unless a server actually
+ * answered in binary.
+ *
+ * Corrupt bytes give null, which verdictFor reads as "no usable answer" — the
+ * failure direction that lets people keep using the app.
+ */
+export async function gateFromProtobuf(bytes: Uint8Array): Promise<VersionGate | null> {
+  try {
+    // NO `.js` SUFFIX. tsc accepts it (moduleResolution: bundler) but METRO
+    // DOES NOT: metro-resolver appends each sourceExt to the full requested
+    // path, so `…_pb.js` is probed as `_pb.js`, `_pb.js.ts`, `_pb.js.tsx` —
+    // none of which exist, because the generated file is `_pb.ts`.
+    //
+    // Metro resolves import() at BUILD time, so this would have been a bundling
+    // failure, not something the try/catch below could rescue. Typecheck stayed
+    // clean throughout. Caught by audit before the first APK build.
+    const { AppVersionGate } = await import('./ccwire/gen/ccwire/v1/app_version_pb');
+    const m = AppVersionGate.fromBinary(bytes);
+    // int64 arrives as bigint; the floors are versionCodes, far inside Number.
+    return gateOf({
+      minBuild: Number(m.minBuild),
+      adviseBuild: Number(m.adviseBuild),
+      updateUrl: m.updateUrl,
+      message: m.message,
+    });
+  } catch {
+    return null;
+  }
+}
+
+export default { verdictFor, gateFromJson, gateFromProtobuf };

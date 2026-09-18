@@ -1,0 +1,44 @@
+syntax = "proto3";
+package ccwire.v1;
+option go_package = "vaultchat/backend-go/internal/ccwire/v1;ccwirev1";
+
+// The response of GET /chats/common/{userId} — the groups a caller and one
+// other user are both in ("groups in common").
+//
+// FIRST NEGOTIATED RESPONSE THROUGH lib/api.ts (Wave 4.2). Task 3.1 proved
+// negotiation on GET /app/version, but deliberately picked an endpoint whose
+// client uses a raw fetch(), so the single funnel that 331 client contracts
+// share was never touched. This one goes through it.
+//
+// WHY THIS ENDPOINT
+//   * read-only GET, first-party, chats domain;
+//   * bounded by the handler's own `LIMIT 50` — not by a client page size;
+//   * its one caller is chatService.getCommonGroups(), reached from the
+//     contact-info screen. Nothing on cold start asks for it;
+//   * three string fields. No 64-bit id, no timestamp — so nothing here can
+//     silently change a representation the way a chat-list id or a
+//     httpx.JSTime would. (`chats.id` is a text id, carried as a string on
+//     both sides today: internal/routes/chats.go scans it into a Go string,
+//     lib/chatService.ts types it `string`.)
+//
+// NULLABILITY IS THE ONE THING TO GET RIGHT HERE. `name` and `photo_url` are
+// `*string` in Go and `string | null` in the client's type, and the JSON
+// representation really does emit `null` for a group with no name or no photo.
+// proto3 has no null, and a bare `string` would flatten null into "" — a
+// silent representation change, which is exactly what this migration forbids.
+// `optional` gives proto3 field presence: absent on the wire ⇔ null in JSON,
+// and the generated Go type stays `*string`, so the handler hands its scanned
+// pointers straight across with no lossy step in between.
+message CommonGroup {
+  string id = 1;                 // chat id, text — never parsed as a number
+  optional string name = 2;      // absent ⇔ JSON null
+  optional string photo_url = 3; // absent ⇔ JSON null
+}
+
+// The envelope, so the reply is a message rather than a bare repeated field —
+// and so a later addition (a member count, say) does not need a new top-level
+// type. The JSON representation is `{"groups": [...]}` and stays the default:
+// a client gets these bytes only when it asks for them by name.
+message CommonGroupsReply {
+  repeated CommonGroup groups = 1;
+}

@@ -1,0 +1,72 @@
+syntax = "proto3";
+
+package ccwire.v1;
+
+option go_package = "vaultchat/backend-go/internal/ccwire/v1;ccwirev1";
+
+// GET /chats — the authorized chat list.
+//
+// THE RULE THIS SCHEMA FOLLOWS: the typed response must express exactly the
+// states the existing JSON response expresses — no more, no fewer. The JSON
+// contract is authoritative and is NOT being corrected here.
+//
+// `optional` appears where the handler really emits JSON `null`, and is absent
+// where the handler has already collapsed a NULL before serialising (peerOnline
+// via *bool -> false, screenshotMode via chatsStrDefault). Encoding those as
+// `optional` would let the typed path carry a state the JSON path cannot, which
+// is the same defect in the other direction.
+//
+// IDS. The JSON response ships THREE id representations in one object, and that
+// is preserved deliberately:
+//   lastMessageId / myLastReadId          JSON *string*  (userBigStr)
+//   peerLastRead / peerLastDelivered      JSON *number*  (*int64)
+// On the wire all four are int64 with JS_STRING, which is lossless and uniform;
+// the client adapter maps each back to the shape its JSON counterpart produces.
+// jstype changes only the generated JS type, never the wire encoding — both are
+// varint. See openspec/changes/protobuf-migration/chats-schema.md.
+//
+// TIMESTAMPS stay ISO strings, byte-identical to httpx.JSTime
+// ("2006-01-02T15:04:05.000Z"). Not epoch-ms: that would be a representation
+// change, and it would collapse "absent" and "epoch 0" into one state.
+message ChatSummary {
+  string id                                   = 1;
+  string type                                 = 2;   // "direct" | "group"
+  optional string name                        = 3;
+  optional string photo_url                   = 4;
+  optional string created_by                  = 5;
+  string created_at                           = 6;   // ISO, verbatim
+  string updated_at                           = 7;   // ISO, verbatim
+  optional int64  last_message_id             = 8  [jstype = JS_STRING];
+  optional string last_message_at             = 9;   // ISO
+  string my_role                              = 10;
+  optional int64  my_last_read_id             = 11 [jstype = JS_STRING];
+  bool   muted                                = 12;
+  bool   pinned                               = 13;
+  bool   favourite                            = 14;
+  bool   archived                             = 15;
+  bool   hidden                               = 16;
+  // NULL is defaulted to "block" by the handler before serialising, so "" is
+  // unreachable and absence is not a state this field has.
+  string screenshot_mode                      = 17;
+  bool   vanish_mode                          = 18;
+  // 0 is a REAL count, never absence. Deliberately not optional.
+  int64  unread_count                         = 19;
+  optional string peer_user_id                = 20;  // absent => group, no peer
+  optional string peer_name                   = 21;
+  optional string peer_photo_url              = 22;  // masked peers force null
+  // *bool collapsed to false in the handler before serialising; already
+  // two-state in JSON. Deliberately not optional.
+  bool   peer_online                          = 23;
+  optional string peer_last_seen_at           = 24;  // absent => hidden by privacy
+  optional int64  peer_last_read_message_id   = 25 [jstype = JS_STRING];
+  optional int64  peer_last_delivered_message_id = 26 [jstype = JS_STRING];
+  bool   anon_masked                          = 27;
+  optional string expires_at                  = 28;  // absent => never expires
+}
+
+// proto3 has no top-level repeated field, so the typed reply needs an envelope.
+// The JSON response stays a BARE ARRAY — this wrapper exists only on the typed
+// path and must not change the legacy shape.
+message ChatListReply {
+  repeated ChatSummary chats = 1;
+}

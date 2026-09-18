@@ -204,16 +204,46 @@ console.log('\nccwire.v1.Frame bounds refuse what they must:');
 // ═══════════════════════════════════════════════════════════════════════════
 console.log('\nPublicMeta is the META_PUBLIC_KEYS allow-list, verbatim:');
 {
-  const proto = stripComments(read('proto', 'ccwire', 'v1', 'envelope.proto'));
-  const body = proto.match(/message\s+PublicMeta\s*\{([^}]*)\}/)?.[1] ?? '';
-  const fields = [...body.matchAll(/^\s*(?:repeated\s+)?[\w.]+\s+(\w+)\s*=\s*(\d+)\s*;/gm)]
-    .map((m) => ({ name: m[1], num: Number(m[2]) }));
+  // Declared fields plus the numbers `reserved` accounts for. A RETIRED field
+  // must leave a `reserved N;` behind — that is protobuf's own rule, and the
+  // contiguity check below is what makes forgetting it impossible. Only NUMBER
+  // reservations are collected: `reserved "old_name";` reserves a name, retires
+  // no number, and must not excuse a gap.
+  function parseMessage(src: string, name: string) {
+    const body = stripComments(src).match(new RegExp(`message\\s+${name}\\s*\\{([^}]*)\\}`))?.[1] ?? '';
+    const fields = [...body.matchAll(/^\s*(?:repeated\s+)?[\w.]+\s+(\w+)\s*=\s*(\d+)\s*;/gm)]
+      .map((m) => ({ name: m[1], num: Number(m[2]) }));
+    const top = Math.max(0, ...fields.map((f) => f.num));   // `to max` clamps here
+    const reserved: number[] = [];
+    for (const r of body.matchAll(/^\s*reserved\s+([^;]*);/gm)) {
+      for (const part of r[1].split(',')) {
+        const range = part.trim().match(/^(\d+)\s+to\s+(\d+|max)$/);
+        if (range) {
+          const end = range[2] === 'max' ? top : Number(range[2]);
+          for (let i = Number(range[1]); i <= end; i++) reserved.push(i);
+        } else if (/^\d+$/.test(part.trim())) reserved.push(Number(part.trim()));
+      }
+    }
+    return { fields, reserved };
+  }
+
+  // Used ∪ reserved is exactly 1..N, each number once. A skipped number is not
+  // in either set (fails); a reused number appears twice (fails); a number both
+  // declared and reserved appears twice (fails); a retired number is present
+  // exactly once, via `reserved` (passes). Same guarantee, retirement allowed.
+  const contiguous = (m: { fields: { num: number }[]; reserved: number[] }) => {
+    const nums = [...m.fields.map((f) => f.num), ...m.reserved];
+    return same(nums.map(String), nums.map((_, i) => String(i + 1)));
+  };
+
+  const meta = parseMessage(read('proto', 'ccwire', 'v1', 'envelope.proto'), 'PublicMeta');
+  const fields = meta.fields;
 
   check('the PublicMeta message was found and parsed', fields.length > 0,
     `parsed ${fields.length} fields`);
-  check('its field numbers are 1..n with no gap and no reuse',
-    same(fields.map((f) => String(f.num)), fields.map((_, i) => String(i + 1))),
-    fields.map((f) => `${f.num}:${f.name}`).join(' '));
+  check('its field numbers are 1..n with no gap and no reuse (a gap MUST be `reserved`)',
+    contiguous(meta),
+    `${fields.map((f) => `${f.num}:${f.name}`).join(' ')} reserved=[${meta.reserved}]`);
 
   const fromProto = fields.map((f) => snakeToCamel(f.name));
   check(`the .proto and META_PUBLIC_KEYS hold the same ${META_PUBLIC_KEYS.length} keys`,
@@ -234,6 +264,26 @@ console.log('\nPublicMeta is the META_PUBLIC_KEYS allow-list, verbatim:');
   for (const k of ['attachmentId', 'viewOnce', 'silent', 'groupId', 'game', 'room']) {
     check(`${k} survives all four definitions`,
       META_PUBLIC_KEYS.includes(k) && fromProto.includes(k));
+  }
+
+  // The rule above is only worth what it REFUSES, and the .proto has no
+  // `reserved` in PublicMeta today — so the refusals are proven against
+  // synthetic messages here rather than by editing the schema.
+  // One declaration per line, as in the real .proto: the field and reserved
+  // patterns are line-anchored so a name inside a string or an expression
+  // cannot be read as a declaration.
+  const synth = (lines: string[]) => contiguous(parseMessage(`message T {\n${lines.join('\n')}\n}`, 'T'));
+  for (const [why, src, want] of [
+    ['a clean 1..n passes',                     ['string a = 1;', 'bool b = 2;'], true],
+    ['an UNRESERVED gap is refused',            ['string a = 1;', 'bool c = 3;'], false],
+    ['a REUSED number is refused',              ['string a = 1;', 'bool b = 1;'], false],
+    ['a gap closed by `reserved` passes',       ['string a = 1;', 'reserved 2;', 'bool c = 3;'], true],
+    ['`reserved N to M` passes',                ['string a = 1;', 'reserved 2 to 4;', 'bool e = 5;'], true],
+    ['`reserved "name"` does not excuse a gap', ['string a = 1;', 'reserved "b";', 'bool c = 3;'], false],
+    ['reserving a LIVE number is refused',      ['string a = 1;', 'bool b = 2;', 'reserved 2;'], false],
+    ['a `reserved` in a comment does not count', ['string a = 1;', '// reserved 2;', 'bool c = 3;'], false],
+  ] as [string, string[], boolean][]) {
+    check(`retirement rule: ${why}`, synth(src) === want, `got ${synth(src)}`);
   }
 }
 

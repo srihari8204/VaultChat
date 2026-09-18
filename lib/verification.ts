@@ -17,9 +17,28 @@ export async function fetchIdentityKey(userId: string): Promise<string | null> {
   }
 }
 
+// protobuf-migration. Decodes the typed answer into the SAME object the JSON
+// path produces.
+//
+// `?? []` is belt-and-braces, not decoration: protobuf-es initialises a
+// repeated field to [], so an account with no verifications arrives as a
+// ZERO-BYTE body and still decodes to an empty array — never undefined, which
+// getVerifiedContacts would otherwise have to paper over a second time.
+//
+// The dynamic import carries no `.js` suffix: Metro cannot resolve one, and tsc
+// does not catch it.
+async function decodeContactVerifications(bytes: Uint8Array): Promise<{ verified: string[] }> {
+  const { ContactVerifications: Wire } = await import('./ccwire/gen/ccwire/v1/contact_verifications_pb');
+  return { verified: Wire.fromBinary(bytes).verified ?? [] };
+}
+
 /** Contact ids the user has marked as verified. */
 export async function getVerifiedContacts(): Promise<string[]> {
-  const r = await api<{ verified: string[] }>('/user/contact-verifications');
+  // Passing a decoder only OFFERS protobuf. A server that answers JSON — every
+  // deployment until the Go half ships — is parsed by the unchanged path in
+  // api(), with no second request.
+  const r = await api<{ verified: string[] }>('/user/contact-verifications',
+    { proto: decodeContactVerifications });
   return r?.verified ?? [];
 }
 

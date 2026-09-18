@@ -1,0 +1,41 @@
+syntax = "proto3";
+package ccwire.v1;
+option go_package = "vaultchat/backend-go/internal/ccwire/v1;ccwirev1";
+
+// The response of GET /app/flags — the kill switch.
+//
+// COLD START. This is the last unauthenticated request on the launch path
+// (lib/apiBypasses.selftest.ts calls it "module scope, pre-auth, cold start"),
+// and like /app/version next door its only caller uses a raw fetch() rather
+// than lib/api.ts, so none of the contracts funnelling through api() are
+// touched by this schema.
+//
+// ── WHY `repeated string disabled` AND NOT `map<string, bool>` ──────────────
+// This endpoint only ever carries `false`. appFlags() deletes every `true`
+// before serialising, and sanitizeFlags() in lib/remoteFlagPolicy.ts drops
+// everything that is not an explicit `false`. A map would therefore ship
+// values that are ALL the proto3 default — and a default is exactly what
+// proto3 is permitted to elide. A flag whose `false` went missing would decode
+// as absent, resolveFlag() would fall back to the build's own intent, and the
+// kill switch would SILENTLY STOP KILLING: the feature an operator switched
+// off during an incident comes back, and nothing reports an error.
+//
+// A list of names has no default to lose — a name is on the wire or it is not.
+// It is also fewer bytes, and it makes the asymmetry that this endpoint exists
+// to enforce ("kill switches only kill") a property of the SCHEMA rather than
+// a rule the two ends have to remember.
+//
+// The client rebuilds `{ name: false }` from it, which is exactly what
+// sanitizeFlags() produces from the JSON, so the persisted cache
+// (vaultchat.remoteFlags.v1) is byte-identical under either representation.
+//
+// The JSON `note` field has no counterpart here, deliberately: it is prose for
+// a human reading a capture, no client reads it, and the contract it states is
+// stated above.
+//
+// NAMES ARE SORTED on the wire. Go map iteration order is randomised, and
+// encoding/json already sorts object keys — so sorting here keeps the two
+// representations in the same order and makes a byte pin possible at all.
+message AppFlags {
+  repeated string disabled = 1;
+}

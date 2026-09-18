@@ -231,6 +231,8 @@ export interface Envelope {
   /** uint64 JS_STRING */ causal_epoch?: string;
   public_meta?: PublicMeta; unknown?: Uint8Array[];
 }
+/** Subscribe (32) / Unsubscribe (33) — the SAME two fields in both messages. */
+export interface Scope { kind?: number; id?: string; unknown?: Uint8Array[] }
 export interface SubmitMessage { envelope?: Envelope; sealed?: Uint8Array; unknown?: Uint8Array[] }
 export interface MessageAck { message_id?: string; seq?: string; server_ts_ms?: string; unknown?: Uint8Array[] }
 export interface Fragment {
@@ -266,7 +268,7 @@ export interface Frame {
   /** The body's field number — authoritative; `body` is derived from it. */
   body_field?: number;
   /** Decoded body, for the six types this build types. */
-  value?: TypingState | ViewerState | GeoRelay | CryptoControl | SubmitMessage | Fragment | AppEvent;
+  value?: TypingState | ViewerState | GeoRelay | CryptoControl | SubmitMessage | Fragment | AppEvent | Scope;
   /** Verbatim body bytes when the type is not typed here. Round-trips exactly. */
   raw?: Uint8Array;
   /** Unrecognised top-level fields, tag+value, in wire order. NEVER dropped. */
@@ -508,6 +510,30 @@ function readAppEvent(r: R): AppEvent {
 function writeAppEvent(m: AppEvent): Uint8Array {
   const x = w();
   wStr(x, 1, m.event ?? ''); wBytes(x, 2, m.payload_json); wUnknown(x, m.unknown);
+  return wDone(x);
+}
+
+/**
+ * Subscribe (32). ENCODE ONLY, and that asymmetry is deliberate.
+ *
+ * The server never SENDS a Subscribe — ccwire.go routes 32/33 inbound to
+ * s.scope and answers with an Ack (22) — so a reader here would be unreachable
+ * code. It would also not be free: __vectors__/codec.json pins
+ * `bodiesTypedByTypescriptOnly` at exactly [100], and both Go
+ * (internal/ccwire/codec_parity_test.go TestEveryTypedBodyHasVectors) and Rust
+ * (services/transport/rust/tests/body.rs every_typed_body_has_vectors) assert
+ * that list is [100] and nothing else. Adding 32 to TYPED_BODY would mean
+ * widening a guard whose whole job is to stop one-sided body typing — for a
+ * body this side can only ever write. So body 32 keeps decoding as opaque
+ * `raw`, exactly as it does today, and only the writer is added.
+ *
+ * Unsubscribe (33) is the same two fields and gets no writer either, because
+ * leave_chat still travels as app_event. One is added the day it is sent.
+ */
+function writeScope(m: Scope): Uint8Array {
+  const x = w();
+  wU32(x, 1, m.kind ?? 0); wStr(x, 2, m.id ?? '');
+  wUnknown(x, m.unknown);
   return wDone(x);
 }
 
@@ -804,6 +830,7 @@ const TYPED_BODY: Record<number, (r: R, depth: number) => any> = {
 };
 const TYPED_BODY_WRITER: Record<number, (m: any) => Uint8Array> = {
   100: writeAppEvent,
+  32: writeScope,   // encode-only; see writeScope for why there is no reader
   48: writeSubmitMessage,
   81: writeTypingState,
   82: writeViewerState,

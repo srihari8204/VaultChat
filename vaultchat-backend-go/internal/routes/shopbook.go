@@ -1208,6 +1208,16 @@ func orderWithItems(ctx context.Context, w http.ResponseWriter, orderID, userID 
 		"cancelReason": cancelReason, "cancelledBy": cancelledBy,
 		"rejectReason": rejectReason, "notCollectedReason": notCollectedReason,
 		"currency": currency,
+		// Additive minor-unit view of the SAME amounts (shopbook_currency.go).
+		// The decimal fields above are unchanged and stay authoritative for
+		// every shipped client; this is the representation a client that knows
+		// about ISO 4217 exponents should read, and the only one that is
+		// correct for JPY (exponent 0) and KWD (exponent 3).
+		"money": sbCurrencyBlock(ctx, shopCountry, map[string]money{
+			"total": money(totalC), "subtotal": money(subtotalC),
+			"discount": money(discountC), "taxTotal": money(taxTotalC),
+			"roundOff": money(roundOffC), "deliveryFee": money(deliveryFeeC),
+		}),
 		// Shop identity — the bill is worthless without who issued it.
 		"shop": map[string]any{
 			"name": shopName, "address": shopAddress, "phone": shopPhone,

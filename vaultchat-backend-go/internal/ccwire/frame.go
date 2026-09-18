@@ -1,7 +1,8 @@
 // Package ccwire implements CC-Wire v1 length-prefixed framing.
 //
-// STATUS: NOT WIRED. Nothing in production imports this package. The live
-// transport is still Socket.IO v4 with JSON payloads. This is the Go
+// STATUS: LIVE. internal/realtime serves CC-Wire frames through this package,
+// and Socket.IO is gone from the app, this backend and the admin console (see
+// fuzz_test.go, which states the same). This is the Go
 // counterpart of lib/ccwire/frame.ts and must match it byte for byte and
 // rejection for rejection; the shared fixture in lib/ccwire/__vectors__ is what
 // proves that (see frame_test.go).

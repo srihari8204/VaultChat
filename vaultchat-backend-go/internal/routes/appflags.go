@@ -38,11 +38,15 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"sort"
 	"strings"
 	"sync"
 	"time"
 
+	ccwirev1 "vaultchat/backend-go/internal/ccwire/gen/ccwire/v1"
 	"vaultchat/backend-go/internal/httpx"
+
+	"google.golang.org/protobuf/proto"
 )
 
 // Parsed once and cached: this is read on every cold start of every client, and
@@ -95,9 +99,39 @@ func RegisterAppFlags(mux *http.ServeMux) {
 	mux.HandleFunc("GET /app/flags", appFlagsGet)
 }
 
+// disabledNames — the flags that are switched off, sorted.
+//
+// appFlags() has already dropped every `true`, so every remaining key is a
+// feature an operator turned off. Sorted because Go randomises map iteration
+// and encoding/json sorts object keys: without this the typed bytes would
+// differ run to run while the JSON did not.
+func disabledNames(flags map[string]bool) []string {
+	names := make([]string, 0, len(flags))
+	for k := range flags {
+		names = append(names, k)
+	}
+	sort.Strings(names)
+	return names
+}
+
 func appFlagsGet(w http.ResponseWriter, r *http.Request) {
+	flags := appFlags()
+
+	if acceptsProtobuf(w, r) {
+		if b, err := proto.Marshal(&ccwirev1.AppFlags{Disabled: disabledNames(flags)}); err == nil {
+			w.Header().Set("Content-Type", protobufMediaType)
+			w.WriteHeader(200)
+			_, _ = w.Write(b)
+			return
+		}
+		// Marshal failing here is not reachable for a message this shape, and
+		// falling through to JSON is the right answer if it ever became so: the
+		// client understands both, and a cold start that gets no flags at all
+		// is worse than one that gets them in the older representation.
+	}
+
 	httpx.JSON(w, 200, map[string]any{
-		"flags": appFlags(),
+		"flags": flags,
 		// Stated on the wire so the contract is visible to anyone reading a
 		// response, not only to anyone reading this file.
 		"note": "false disables a feature; true is ignored. This endpoint cannot enable anything.",

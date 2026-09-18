@@ -24,10 +24,14 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"google.golang.org/protobuf/proto"
+
+	ccwirev1 "vaultchat/backend-go/internal/ccwire/gen/ccwire/v1"
 	"vaultchat/backend-go/internal/db"
 	"vaultchat/backend-go/internal/emitx"
 	"vaultchat/backend-go/internal/groups"
 	"vaultchat/backend-go/internal/httpx"
+	"vaultchat/backend-go/internal/metrics"
 	"vaultchat/backend-go/internal/realtime"
 	"vaultchat/backend-go/internal/vault"
 )
@@ -39,6 +43,25 @@ const (
 	chatsDefaultPage    = 50
 	chatsMaxPage        = 200
 )
+
+// ccwireRoutePrefix labels the CC-Wire loopback's latency series. A CC-Wire
+// send runs the SAME handler under the SAME route pattern as the HTTP one, so
+// without a prefix the two transports would share a series and an operator
+// could not tell "500 sends over HTTP" from "500 over CC-Wire".
+const ccwireRoutePrefix = "ccwire "
+
+// ccwireHandle registers a CC-Wire loopback route WITH metrics. The public mux
+// is wrapped once, at the listener (cmd/api/main.go); this mux is never mounted
+// on a listener — realtime serves it directly — so it inherits nothing, and
+// every CC-Wire send was invisible in vaultchat_http_route_duration_ms.
+//
+// Wrapped per route rather than around the mux because realtime.SetCCWireRoutes
+// takes a *http.ServeMux, not an http.Handler. Same metrics.Wrap body either
+// way: ServeMux sets r.Pattern when it matches, before the handler runs, so the
+// label is still the pattern ("POST /chats/{id}/messages"), never the raw path.
+func ccwireHandle(cw *http.ServeMux, pattern string, h http.HandlerFunc) {
+	cw.Handle(pattern, metrics.WrapTransport(h, ccwireRoutePrefix))
+}
 
 func RegisterChats(mux *http.ServeMux) {
 	// Top-level + literal-2nd-segment routes go on the main mux. The
@@ -87,22 +110,22 @@ func RegisterChats(mux *http.ServeMux) {
 	// Registered only with the flag on, so with it off this mux does not exist.
 	if realtime.CCWireEnabled() {
 		cw := http.NewServeMux()
-		cw.HandleFunc("POST /chats/{id}/messages", chatsMessagePost)
+		ccwireHandle(cw, "POST /chats/{id}/messages", chatsMessagePost)
 		// Edit and delete-for-everyone: the ownership rule and the 15-minute /
 		// 60-hour windows are WHERE clauses inside these two handlers, matched
 		// against the session's own user id, so routing through them is the only
 		// way CC-Wire gets the same rule rather than a second one.
-		cw.HandleFunc("PATCH /chats/{id}/messages/{msgId}", chatsMessagePatch)
-		cw.HandleFunc("DELETE /chats/{id}/messages/{msgId}", chatsMessageDelete)
-		cw.HandleFunc("POST /chats/{id}/delivered", chatsDelivered)
-		cw.HandleFunc("POST /chats/{id}/read", chatsRead)
+		ccwireHandle(cw, "PATCH /chats/{id}/messages/{msgId}", chatsMessagePatch)
+		ccwireHandle(cw, "DELETE /chats/{id}/messages/{msgId}", chatsMessageDelete)
+		ccwireHandle(cw, "POST /chats/{id}/delivered", chatsDelivered)
+		ccwireHandle(cw, "POST /chats/{id}/read", chatsRead)
 		// Catch-up. cursor_sync (ccwire_cursor.go) answers by running THIS handler,
 		// so a CC-Wire client inherits chatsDelta's visibility filter, expiry
 		// filter, cold-sync cap and pagination instead of a second implementation
 		// of each. Without it the loopback 404s and every cursor frame comes back
 		// NOT_PERMITTED, which reads like an authorization bug rather than a
 		// missing route.
-		cw.HandleFunc("GET /chats/delta", chatsDelta)
+		ccwireHandle(cw, "GET /chats/delta", chatsDelta)
 		realtime.SetCCWireRoutes(cw)
 	}
 	id.HandleFunc("POST /chats/{id}/members", httpx.RequireAuth(chatsMembersAdd))
@@ -907,6 +930,45 @@ func chatsDelta(w http.ResponseWriter, r *http.Request) {
 	} else if coldStart && more {
 		syncContinuation = chatsSyncContinuation(user.ID, since)
 	}
+	chatsDeltaWrite(w, r, messages, nextSince, more, syncContinuation,
+		mutations, nextMutationCursor, httpx.JSTime(serverTime))
+}
+
+// chatsDeltaWrite answers GET /chats/delta in whichever representation the
+// caller asked for. Same route, method, RequireAuth, status code, query
+// semantics and limits — a request that does not name application/protobuf gets
+// the byte-identical JSON object it always got, map-literal key order included
+// (encoding/json sorts them).
+//
+// PRESENCE: every `optional` proto field is fed a Go pointer that is nil exactly
+// when the JSON emits null — content, meta_json, reply_to_id, edited_at,
+// deleted_at, expires_at. created_at, vanish_after_read, id, chat_id, sender_id
+// and type are always present, so absence is not a state they have.
+// sync_continuation and next_mutation_cursor are OPAQUE strings, copied through
+// untouched; "" means none on both paths.
+func chatsDeltaWrite(w http.ResponseWriter, r *http.Request, messages []chatsPublicMsg,
+	nextSince int64, more bool, syncContinuation string, mutations []chatsPublicMsg,
+	nextMutationCursor string, serverTime httpx.JSTime) {
+	if acceptsProtobuf(w, r) {
+		msgs, okA := chatsProtoMsgs(messages)
+		muts, okB := chatsProtoMsgs(mutations)
+		if okA && okB {
+			reply := &ccwirev1.DeltaReply{
+				Messages: msgs, NextSince: nextSince, More: more,
+				SyncContinuation: syncContinuation, Mutations: muts,
+				NextMutationCursor: nextMutationCursor,
+				ServerTime:         chatsProtoTime(serverTime),
+			}
+			// A marshal failure is not a reason to fail the request: fall through
+			// to JSON, which every client understands either way.
+			if b, err := proto.Marshal(reply); err == nil {
+				w.Header().Set("Content-Type", protobufMediaType)
+				w.WriteHeader(200)
+				_, _ = w.Write(b)
+				return
+			}
+		}
+	}
 	httpx.JSON(w, 200, map[string]any{
 		"messages":           messages,
 		"nextSince":          nextSince,
@@ -914,8 +976,48 @@ func chatsDelta(w http.ResponseWriter, r *http.Request) {
 		"syncContinuation":   syncContinuation,
 		"mutations":          mutations,
 		"nextMutationCursor": nextMutationCursor,
-		"serverTime":         httpx.JSTime(serverTime),
+		"serverTime":         serverTime,
 	})
+}
+
+// chatsProtoMsgs converts the public rows to DeltaMessage. It reports false when
+// a row cannot be expressed typed, and the caller then serves JSON instead.
+//
+// `id` is REQUIRED, so an unparseable one has no honest typed form: 0 is a real
+// id-shaped value a client would act on, and dropping the row would silently
+// lose a message from a catch-up page — the one payload where a lost row is
+// never re-fetched. An unparseable id is a SERVER BUG; the whole reply degrades
+// to JSON, which ships the raw string as it always has. `reply_to_id` is
+// optional, so there absent is the correct rendering (chatsProtoID).
+func chatsProtoMsgs(in []chatsPublicMsg) ([]*ccwirev1.DeltaMessage, bool) {
+	out := make([]*ccwirev1.DeltaMessage, 0, len(in))
+	for i := range in {
+		m := &in[i]
+		id, err := strconv.ParseInt(m.ID, 10, 64)
+		if err != nil {
+			return nil, false
+		}
+		var metaJSON []byte
+		if m.Meta != nil {
+			// json.Marshal is correct HERE and nowhere else on this path: the
+			// field's contract IS "the exact JSON bytes of meta" (see THE `meta`
+			// DECISION in chats_delta.proto). This is not JSON-as-an-intermediate
+			// for typed fields — every other field is built from the row.
+			b, err := json.Marshal(m.Meta)
+			if err != nil {
+				return nil, false
+			}
+			metaJSON = b
+		}
+		out = append(out, &ccwirev1.DeltaMessage{
+			Id: id, ChatId: m.ChatID, SenderId: m.SenderID, Type: m.Type,
+			Content: m.Content, MetaJson: metaJSON, ReplyToId: chatsProtoID(m.ReplyToID),
+			EditedAt: chatsProtoTimePtr(m.EditedAt), DeletedAt: chatsProtoTimePtr(m.DeletedAt),
+			CreatedAt: chatsProtoTime(m.CreatedAt), ExpiresAt: chatsProtoTimePtr(m.ExpiresAt),
+			VanishAfterRead: m.VanishAfterRead,
+		})
+	}
+	return out, true
 }
 
 // Pending rows behind a cursor require recovery even after allocation has
@@ -1259,6 +1361,90 @@ func chatsList(w http.ResponseWriter, r *http.Request) {
 		log.Printf("[chats GET] %v", err)
 		httpx.Err(w, 500, "Failed to list chats")
 		return
+	}
+	chatsListWrite(w, r, out)
+}
+
+// chatsProtoTime renders an httpx.JSTime exactly as its MarshalJSON does, minus
+// the quotes. Same layout string, so the typed field and the JSON field can
+// never disagree about milliseconds or the trailing Z.
+func chatsProtoTime(t httpx.JSTime) string {
+	return time.Time(t).UTC().Format("2006-01-02T15:04:05.000Z")
+}
+
+func chatsProtoTimePtr(t *httpx.JSTime) *string {
+	if t == nil {
+		return nil // JSON null => proto field ABSENT, never ""
+	}
+	s := chatsProtoTime(*t)
+	return &s
+}
+
+// chatsProtoID converts the JSON-string id form (userBigStr) back to the int64
+// the row was scanned as. The legacy JSON keeps emitting the string.
+//
+// An unparseable string yields nil — ABSENT, not 0. 0 is a value ("read
+// nothing", "cleared"), and the client treats absent and 0 differently
+// (applyLocalReadPointers: null => never clear, 0 => always clear). Inventing a
+// 0 out of a corrupt id would silently clear a badge; absence degrades to the
+// same state a chat with no last message already has.
+func chatsProtoID(s *string) *int64 {
+	if s == nil {
+		return nil
+	}
+	n, err := strconv.ParseInt(*s, 10, 64)
+	if err != nil {
+		return nil
+	}
+	return &n
+}
+
+// chatsListWrite answers GET /chats in whichever representation the caller
+// asked for. Same route, method, RequireAuth, status code — a request that does
+// not name application/protobuf gets the bare JSON array, byte for byte as
+// before. The ChatListReply envelope exists only on the typed path (proto3 has
+// no top-level repeated field); the JSON shape is NOT wrapped.
+//
+// PRESENCE: every `optional` proto field is fed a Go pointer that is nil
+// exactly when the JSON emits null. peer_online, screenshot_mode, unread_count
+// and the bools are plain because the handler already collapsed them before
+// serialising, so absence is not a state they have.
+func chatsListWrite(w http.ResponseWriter, r *http.Request, out []chatsListItem) {
+	if acceptsProtobuf(w, r) {
+		reply := &ccwirev1.ChatListReply{Chats: make([]*ccwirev1.ChatSummary, 0, len(out))}
+		for i := range out {
+			it := &out[i]
+			reply.Chats = append(reply.Chats, &ccwirev1.ChatSummary{
+				Id: it.ID, Type: it.Type, Name: it.Name, PhotoUrl: it.PhotoURL,
+				CreatedBy: it.CreatedBy,
+				CreatedAt: chatsProtoTime(it.CreatedAt), UpdatedAt: chatsProtoTime(it.UpdatedAt),
+				// The id asymmetry, preserved: these two are JSON strings...
+				LastMessageId: chatsProtoID(it.LastMessageID),
+				LastMessageAt: chatsProtoTimePtr(it.LastMessageAt),
+				MyRole:        it.MyRole,
+				MyLastReadId:  chatsProtoID(it.MyLastReadID),
+				Muted:         it.Muted, Pinned: it.Pinned, Favourite: it.Favourite,
+				Archived: it.Archived, Hidden: it.Hidden,
+				ScreenshotMode: it.ScreenshotMode, VanishMode: it.VanishMode,
+				UnreadCount: it.UnreadCount,
+				PeerUserId:  it.PeerUserID, PeerName: it.PeerName, PeerPhotoUrl: it.PeerPhotoURL,
+				PeerOnline:     it.PeerOnline,
+				PeerLastSeenAt: chatsProtoTimePtr(it.PeerLastSeenAt),
+				// ...and these two are JSON numbers, already *int64.
+				PeerLastReadMessageId:      it.PeerLastReadMessageID,
+				PeerLastDeliveredMessageId: it.PeerLastDeliveredMessageID,
+				AnonMasked:                 it.AnonMasked,
+				ExpiresAt:                  chatsProtoTimePtr(it.ExpiresAt),
+			})
+		}
+		// A marshal failure is not a reason to fail the request: fall through to
+		// JSON, which every client understands either way.
+		if b, err := proto.Marshal(reply); err == nil {
+			w.Header().Set("Content-Type", protobufMediaType)
+			w.WriteHeader(200)
+			_, _ = w.Write(b)
+			return
+		}
 	}
 	httpx.JSON(w, 200, out)
 }
@@ -1922,14 +2108,49 @@ func chatsSearch(w http.ResponseWriter, r *http.Request) {
 
 // ─── GET /chats/common/{userId} — groups in common ─────────────────────
 
+// commonGroup is the row shape of GET /chats/common/{userId}. It was a type
+// declared inside the handler; it is package-level now only so the negotiation
+// test can drive chatsCommonWrite with fixed rows and no database.
+type commonGroup struct {
+	ID       string  `json:"id"`
+	Name     *string `json:"name"`
+	PhotoURL *string `json:"photoURL"`
+}
+
+// chatsCommonWrite answers in whichever representation the caller asked for.
+//
+// CONTENT NEGOTIATION, OPT-IN ONLY (protobuf-migration task 4.2, the first one
+// through lib/api.ts). Same route, same method, same authorization, same
+// status code. A request that does not name application/protobuf — every
+// client shipped so far, every browser, every `*/*` — takes the JSON branch
+// and gets bytes identical to what this handler has always written.
+//
+// The nullable columns cross as *string on both sides, so a group with no name
+// is absent on the wire and `null` in JSON. Nothing is flattened to "".
+func chatsCommonWrite(w http.ResponseWriter, r *http.Request, out []commonGroup) {
+	if acceptsProtobuf(w, r) {
+		reply := &ccwirev1.CommonGroupsReply{Groups: make([]*ccwirev1.CommonGroup, 0, len(out))}
+		for i := range out {
+			reply.Groups = append(reply.Groups, &ccwirev1.CommonGroup{
+				Id: out[i].ID, Name: out[i].Name, PhotoUrl: out[i].PhotoURL,
+			})
+		}
+		// A marshal failure is not a reason to fail the request: fall through
+		// to JSON, which every client understands either way.
+		if b, err := proto.Marshal(reply); err == nil {
+			w.Header().Set("Content-Type", protobufMediaType)
+			w.WriteHeader(200)
+			_, _ = w.Write(b)
+			return
+		}
+	}
+	httpx.JSON(w, 200, map[string]any{"groups": out})
+}
+
 func chatsCommon(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	user := httpx.UserFrom(r)
-	type g struct {
-		ID       string  `json:"id"`
-		Name     *string `json:"name"`
-		PhotoURL *string `json:"photoURL"`
-	}
+	type g = commonGroup
 	out := []g{}
 	err := chatsQueryU(ctx, user.ID,
 		`SELECT c.id, c.name, c.photo_url
@@ -1952,5 +2173,5 @@ func chatsCommon(w http.ResponseWriter, r *http.Request) {
 		httpx.Err(w, 500, "Failed")
 		return
 	}
-	httpx.JSON(w, 200, map[string]any{"groups": out})
+	chatsCommonWrite(w, r, out)
 }

@@ -146,6 +146,114 @@ function normDelta(d: Delta | null | undefined): Delta | null | undefined {
   return d;
 }
 
+/**
+ * A delta page that could not be turned into domain rows.
+ *
+ * TYPED and BOUNDED on purpose. It names the array and the index, and NOTHING
+ * from the row: ids, ciphertext and meta are the payload this app exists to
+ * keep private, and a decode failure is exactly when someone is tempted to log
+ * "the bad value". The index is enough to correlate with a server-side trace.
+ *
+ * Throwing is the whole point. Filtering the row out would make a corrupt page
+ * look like a shorter valid one, and runCatchUp would then ack, advance the
+ * cursor past it and never fetch it again — silent, permanent message loss.
+ * Rejecting makes a bad body look exactly like a failed fetch, which this
+ * engine already handles by keeping the cache and re-fetching from the
+ * unmoved cursor on the next reconnect.
+ */
+export class DeltaDecodeError extends Error {
+  constructor(readonly field: 'messages' | 'mutations', readonly index: number, readonly reason: string) {
+    super(`delta ${field}[${index}] rejected: ${reason}`);
+    this.name = 'DeltaDecodeError';
+  }
+}
+
+// meta rides as EXACT JSON bytes (see THE `meta` DECISION in chats_delta.proto).
+// `fatal: true` so invalid UTF-8 rejects instead of decoding to U+FFFD and
+// silently corrupting an attachment id — precedent: lib/ccwire/codec.ts.
+//
+// Built on first use, not at module scope: lib/syncEngine.mutations.selftest.ts
+// and lib/syncEngine.hydrateFailure.selftest.ts evaluate this module's source
+// inside a bare `vm.runInNewContext` sandbox that has no TextDecoder, and a
+// module-scope `new TextDecoder()` makes those suites throw on import.
+let META_UTF8: TextDecoder | null = null;
+
+/**
+ * Binary `DeltaReply` -> the SAME `Delta` object the JSON path produces.
+ *
+ * Passing this to api() only OFFERS protobuf (Batch C pattern, mirrors
+ * chatService.decodeChatList). A server that answers JSON — every deployed one
+ * until the Go half ships — is parsed by the unchanged path inside api(), with
+ * no second request and no behaviour change here.
+ *
+ * The ENTIRE page is decoded and validated before it is returned, so api()
+ * hands runCatchUp either a complete usable page or an error. No partial page
+ * can reach applyByChat, the ack batch, or the cursor.
+ */
+async function decodeDelta(bytes: Uint8Array): Promise<Delta> {
+  // No `.js` suffix: Metro cannot resolve one, and tsc will not catch it.
+  //
+  // startupMessage is imported here rather than at module scope for the same
+  // reason: lib/syncEngine.delta.selftest.ts copies this file into a temp dir
+  // and rewrites every top-level import to a stub, and an unstubbed one is a
+  // hard failure there. The whole CC-Wire boundary staying lazy also keeps it
+  // off the cold-start import graph, which is where it belongs.
+  const [{ DeltaReply }, { startupMessage }] = await Promise.all([
+    import('./ccwire/gen/ccwire/v1/chats_delta_pb'),
+    import('./ccwire/startupAdapter'),
+  ]);
+  const reply = DeltaReply.fromBinary(bytes);
+  META_UTF8 ??= new TextDecoder('utf-8', { fatal: true });
+
+  const rows = (list: typeof reply.messages, field: 'messages' | 'mutations') =>
+    list.map((m, i): Message & { chatId: string } => {
+      let meta: any = null;
+      if (m.metaJson !== undefined) {
+        try { meta = JSON.parse(META_UTF8!.decode(m.metaJson)); }
+        catch { throw new DeltaDecodeError(field, i, 'meta is not JSON'); }
+      }
+      // THE BATCH A NORMALISATION, APPLIED HERE — before anything numeric.
+      // syncEngine filters `typeof id === 'number'` (applyByChat) and sorts
+      // `b.id - a.id` (hydration); a string or bigint at either is silent loss
+      // or a hard TypeError inside a try/finally with no catch.
+      const row = startupMessage({
+        id:        m.id,
+        chatId:    m.chatId,
+        senderId:  m.senderId,
+        type:      m.type as Message['type'],
+        // JSON emits an explicit null for every nullable column (no omitempty
+        // on chatsPublicMsg), so absence becomes null here, not undefined —
+        // the cached row must keep the shape older builds wrote.
+        content:   m.content ?? null,
+        meta,
+        replyToId: m.replyToId,
+        editedAt:  m.editedAt ?? null,
+        deletedAt: m.deletedAt ?? null,
+        createdAt: m.createdAt,
+        expiresAt: m.expiresAt ?? null,
+        vanishAfterRead: m.vanishAfterRead,
+      });
+      if (!row) throw new DeltaDecodeError(field, i, 'unusable id or chatId');
+      return row as Message & { chatId: string };
+    });
+
+  return {
+    messages: rows(reply.messages, 'messages'),
+    mutations: rows(reply.mutations, 'mutations'),
+    // JSON emits nextSince as a NUMBER; the wire carries JS_STRING so it can
+    // never arrive as a lossy double. Coerced here only to match the JSON
+    // shape — the value is still validated by the isSafeInteger gate below,
+    // which is what actually protects the durable high-water mark.
+    nextSince: Number(reply.nextSince),
+    more: reply.more,
+    // Opaque tokens. '' means "none" on both paths, and both are consumed with
+    // `|| null` / `||` below, so '' and undefined are indistinguishable there.
+    syncContinuation: reply.syncContinuation,
+    nextMutationCursor: reply.nextMutationCursor,
+    serverTime: reply.serverTime,
+  };
+}
+
 // Send both parameters during a rolling upgrade. Older servers ignore the
 // keyset token but still receive a usable timestamp, including its boundary.
 function mutationParams(cursor: string | null): string {
@@ -225,7 +333,7 @@ async function runCatchUp(): Promise<SyncResult> {
       metric(since === 0 ? 'cold_sync.requests' : 'delta.requests');
       const coldParam = syncContinuation
         ? `&syncContinuation=${encodeURIComponent(syncContinuation)}` : '';
-      const r = normDelta(await api<Delta>(`/chats/delta?since=${since}&limit=${PAGE}${mutParam}${coldParam}`, { expectedUserId: owner }));
+      const r = normDelta(await api<Delta>(`/chats/delta?since=${since}&limit=${PAGE}${mutParam}${coldParam}`, { expectedUserId: owner, proto: decodeDelta }));
       if (tokenSubject(await getAccessToken()) !== owner) throw new Error('Sync account changed');
       metric(since === 0 ? 'cold_sync.rows' : 'delta.rows', r?.messages?.length ?? 0);
 
@@ -250,7 +358,7 @@ async function runCatchUp(): Promise<SyncResult> {
           if (mp === MAX_MUT_PAGES - 1) {
             throw new Error('Mutation sync page cap reached');
           }
-          mutationPage = normDelta(await api<Delta>(`/chats/delta?since=${sinceOrig}&limit=1${mutationParams(cursor)}`, { expectedUserId: owner }));
+          mutationPage = normDelta(await api<Delta>(`/chats/delta?since=${sinceOrig}&limit=1${mutationParams(cursor)}`, { expectedUserId: owner, proto: decodeDelta }));
           if (tokenSubject(await getAccessToken()) !== owner) throw new Error('Sync account changed');
         }
       }
@@ -280,7 +388,25 @@ async function runCatchUp(): Promise<SyncResult> {
       }
       applied += msgs.length;
       const nextSince = Number(r.nextSince);
-      if (!Number.isFinite(nextSince) || nextSince <= since) {
+      // isSafeInteger, not isFinite. This is a trust-boundary value from the
+      // network, and `Number()` + `isFinite` is not validation — proven against
+      // real SQLite in lib/syncCursorRegression.selftest.ts §6:
+      //
+      //   '123.5'             -> passed, wrote a FRACTIONAL durable cursor, and
+      //                          the next request became `?since=123.4`
+      //   '9007199254740995'  -> rounded UP to ...996, moving the high-water
+      //                          mark PAST an id that was never delivered. The
+      //                          mark is monotonic and survives deletion, so
+      //                          that message is skipped permanently, on every
+      //                          future launch.
+      //   1e21                -> wrote an absurd mark that suppresses every
+      //                          future delta row, silently, forever.
+      //
+      // `nextSince <= since` does not catch the rounding case because it rounds
+      // FORWARD, and noteGlobalSyncCursor's `id > 0` does not either. Only the
+      // integer check closes it. No legitimate page is affected: a BIGSERIAL id
+      // is always a safe integer here.
+      if (!Number.isSafeInteger(nextSince) || nextSince <= since) {
         throw new Error('Message sync cursor did not advance');
       }
       since = nextSince;
@@ -291,7 +417,17 @@ async function runCatchUp(): Promise<SyncResult> {
       // Persist the high-water mark. Without this the cursor is re-derived from
       // MAX(id) of cached rows, so deleting messages (Clear chat, cache trim)
       // rewinds sync and re-downloads what was just removed.
-      await noteGlobalSyncCursor(r.nextSince);
+      // `nextSince`, not `r.nextSince`. The coerced local is validated three
+      // lines up; the raw field is whatever the server sent. They are the same
+      // today only because the Go handler emits nextSince as a JSON number.
+      //
+      // noteGlobalSyncCursor gates on Number.isFinite (localDb.ts:1157), which
+      // is FALSE for a string — so a string here makes the durable high-water
+      // write a silent permanent no-op, and sync re-derives from MAX(id) on
+      // every launch instead. The CC-Wire cursor proxy's own fixtures already
+      // carry nextSince as a string, so this is one representation change away
+      // from firing. Passing the validated local closes it for good.
+      await noteGlobalSyncCursor(nextSince);
       if (!r.more) break;
       if (guard === MAX_PAGES - 1) {
         // The cursor and cold-policy token above are already durable. Yield to

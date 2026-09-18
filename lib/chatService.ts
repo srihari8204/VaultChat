@@ -18,6 +18,10 @@ import type { Permission, GroupRole } from './groups/permissions';
 import { redactIds, warnOnce } from './diagLog';
 import { applyLocalReadPointers } from './unreadStore';
 import { normalizeMsgIds } from './msgIds';
+// The ONE wire→domain boundary for startup rows. Value import, but it pulls in
+// nothing heavier than lib/msgIds (its ChatSummary/Message imports are
+// type-only, so the cycle back to this file is erased at compile).
+import { startupChatSummary, commonGroupsFromProtobuf, type CommonGroup } from './ccwire/startupAdapter';
 
 export interface ChatSummary {
   id:            string;
@@ -1144,9 +1148,87 @@ export function chatTitle(c: ChatSummary): string {
     : (c.name || 'Group chat');
 }
 
+/**
+ * GET /chats, binary (protobuf-migration batch C, client half).
+ *
+ * Reached ONLY from api()'s response path, and only when the server actually
+ * answered `application/protobuf`. That placement is the whole point of the
+ * dynamic import: import() does NOT defer evaluation — metro's asyncRequire is
+ * a synchronous require in an already-resolved promise (lib/socket.ts:127-129)
+ * — it only RELOCATES it, so @bufbuild/protobuf is evaluated the first time a
+ * protobuf chat list comes back, never on the module graph of anything that
+ * loads at startup. Same shape as lib/appVersionPolicy.ts gateFromProtobuf.
+ *
+ * NO `.js` SUFFIX on the specifier: metro appends its sourceExts to the full
+ * requested path, so `…_pb.js` is probed as `_pb.js`, `_pb.js.ts`, … none of
+ * which exist (the generated file is `_pb.ts`). tsc does not catch it.
+ *
+ * WHAT THE MAPPING IS FOR. `startupChatSummary` owns the id asymmetry; this
+ * function owns only the two differences between the GENERATED message and the
+ * JSON row, both of which would otherwise reach cacheChats:
+ *   · `photoUrl`/`peerPhotoUrl` — protoc lowercases the acronym; the JSON
+ *     contract (and every cached row ever written) says `photoURL`.
+ *   · absence. proto3 optional decodes to `undefined`, and `JSON.stringify`
+ *     DROPS an undefined value — the key would vanish from the cached row,
+ *     where the Go struct has no `omitempty` and always writes an explicit
+ *     `null`. So every nullable field is `?? null` here, and the four id
+ *     fields are handed to the adapter as '' (its documented "absent"), which
+ *     it turns into the same explicit nulls.
+ * `unreadCount` is int64 → bigint; the JSON path has a number.
+ *
+ * Proved field-for-field against the JSON path by lib/chatsProto.selftest.ts
+ * and lib/chatsCacheRollback.selftest.ts (the rollback gate).
+ */
+async function decodeChatList(bytes: Uint8Array): Promise<ChatSummary[]> {
+  const { ChatListReply } = await import('./ccwire/gen/ccwire/v1/chats_list_pb');
+  return ChatListReply.fromBinary(bytes).chats
+    .map((c): ChatSummary | null => startupChatSummary({
+      id:            c.id,
+      type:          c.type as ChatSummary['type'],
+      name:          c.name ?? null,
+      photoURL:      c.photoUrl ?? null,
+      createdBy:     c.createdBy ?? null,
+      createdAt:     c.createdAt,
+      updatedAt:     c.updatedAt,
+      lastMessageId: c.lastMessageId,
+      lastMessageAt: c.lastMessageAt ?? null,
+      myRole:        c.myRole as ChatSummary['myRole'],
+      myLastReadId:  c.myLastReadId,
+      muted:         c.muted,
+      pinned:        c.pinned,
+      favourite:     c.favourite,
+      archived:      c.archived,
+      hidden:        c.hidden,
+      screenshotMode: c.screenshotMode as ChatSummary['screenshotMode'],
+      vanishMode:    c.vanishMode,
+      unreadCount:   Number(c.unreadCount),
+      peerUserId:    c.peerUserId ?? null,
+      peerName:      c.peerName ?? null,
+      peerPhotoURL:  c.peerPhotoUrl ?? null,
+      peerOnline:    c.peerOnline,
+      peerLastSeenAt: c.peerLastSeenAt ?? null,
+      peerLastReadMessageId:      c.peerLastReadMessageId ?? '',
+      peerLastDeliveredMessageId: c.peerLastDeliveredMessageId ?? '',
+      anonMasked:    c.anonMasked,
+      expiresAt:     c.expiresAt ?? null,
+    }))
+    .filter((c): c is ChatSummary => c !== null);
+}
+
 export async function listChats(opts: { includeHidden?: boolean } = {}): Promise<ChatSummary[]> {
   const qs = opts.includeHidden ? '?includeHidden=1' : '';
-  const rows = await api<ChatSummary[]>(`/chats${qs}`);
+  // Passing a decoder only OFFERS protobuf. A server that answers JSON — every
+  // deployed one until the Go half ships — is parsed by the unchanged path in
+  // api(), with no second request.
+  //
+  // A DECODE FAILURE REJECTS, IT DOES NOT RETURN []. The bytes are spent by
+  // then, so there is no JSON to fall back to without re-issuing the GET; and
+  // `[]` would be far worse than an error, because cacheChats() PRUNES rows
+  // missing from the list it is given (app/(tabs)/chats.tsx:165) — a garbled
+  // response would wipe the offline chat list. Rejecting makes a bad body look
+  // exactly like a failed fetch, which every caller already handles by keeping
+  // what it has painted from the cache.
+  const rows = await api<ChatSummary[]>(`/chats${qs}`, { proto: decodeChatList });
   for (const r of rows) rememberChatPeer(r);
   publishChatDirectory(rows);
   // Correct the server's denormalized unread_count against what THIS device has
@@ -2553,9 +2635,25 @@ export async function updateSettings(patch: Partial<UserSettings>): Promise<void
 }
 
 /** Groups both me and `userId` are in (WhatsApp "groups in common"). */
-export async function getCommonGroups(userId: string): Promise<{ id: string; name: string | null; photoURL: string | null }[]> {
+export async function getCommonGroups(userId: string): Promise<CommonGroup[]> {
   try {
-    const r = await api<{ groups: { id: string; name: string | null; photoURL: string | null }[] }>(`/chats/common/${encodeURIComponent(userId)}`);
+    // Opted in to binary protobuf. The Go handler has had a typed branch since
+    // the Wave 4.2 enabling step, but the caller never asked for it — so the
+    // typed path was unreachable from the app and the endpoint was "migrated"
+    // only in a selftest. An unused proto option is not completion.
+    //
+    // The decoder is `commonGroupsFromProtobuf` in lib/ccwire/startupAdapter,
+    // NOT a lambda here. It was a lambda, and the consequence was that the
+    // negotiation selftest — which cannot import this module, react-native
+    // being what it is — tested a hand-written COPY of it and left the shipped
+    // one with no coverage whatsoever. The adapter module is react-native-free
+    // on purpose, so the selftest now drives the real function. It still pulls
+    // @bufbuild/protobuf in through a dynamic import, reached only after a
+    // server has actually answered in binary.
+    const r = await api<{ groups: CommonGroup[] }>(
+      `/chats/common/${encodeURIComponent(userId)}`,
+      { proto: commonGroupsFromProtobuf },
+    );
     return r.groups || [];
   } catch { return []; }
 }
@@ -2824,18 +2922,23 @@ export async function uploadAttachment(
     return postWithProgress(url, form, headers, opts.onProgress, opts.signal);
   }
 
-  const res = await fetch(url, {
+  // protobuf-migration 4.6: the no-progress path goes through the funnel.
+  // api() already special-cases a FormData body — it passes it through
+  // untouched (so RN still sets multipart/form-data + boundary itself) and
+  // deliberately skips the 30s abort backstop for it, which is exactly what
+  // this call site did by hand. What it gains is the part that was missing:
+  // the 401 refresh-and-retry, the X-Device-Id header, and `err.status` on a
+  // rejection (the XHR path above has always set it; this one never did, so
+  // mediaOutbox's isPermanent() saw `undefined` and burned all 8 transient
+  // retries on a 413).
+  //
+  // The manual Bearer above is still needed by postWithProgress, and the
+  // `!token` guard still short-circuits before any bytes are read.
+  return api<UploadResult>(`/uploads${qs}`, {
     method: 'POST',
-    headers,
     body: form,
     signal: opts.signal,
   });
-  if (!res.ok) {
-    let msg = res.statusText || `HTTP ${res.status}`;
-    try { const j: any = await res.json(); if (j?.error) msg = j.error; } catch {}
-    throw new Error(msg);
-  }
-  return res.json() as Promise<UploadResult>;
 }
 
 /**

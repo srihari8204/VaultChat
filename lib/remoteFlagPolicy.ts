@@ -57,3 +57,40 @@ export function sanitizeFlags(input: unknown): RemoteFlags {
   }
   return out;
 }
+
+/**
+ * What this client sends for GET /app/flags.
+ *
+ * Both, in preference order. A server that predates the typed response — which
+ * is every deployed server today — answers JSON and the client takes the branch
+ * it has always taken.
+ */
+export const APP_FLAGS_ACCEPT = 'application/protobuf, application/json';
+
+/**
+ * The typed representation of the kill switches.
+ *
+ * Returns null — never `{}` — when the bytes cannot be decoded. That
+ * distinction is the safety property: `{}` means "the server says nothing is
+ * switched off" and would re-enable a killed feature, while null means "no
+ * usable answer" and leaves the persisted snapshot in place. See the caller in
+ * lib/remoteFlags.ts, which only assigns on a non-null result.
+ *
+ * `disabled` is a list of names rather than a map of booleans; proto/ccwire/v1/
+ * app_flags.proto explains why at length. The object rebuilt here is exactly
+ * what sanitizeFlags() produces from the JSON, so the persisted cache does not
+ * depend on which representation the server chose.
+ */
+export async function flagsFromProtobuf(bytes: Uint8Array): Promise<RemoteFlags | null> {
+  try {
+    // NO `.js` SUFFIX — see lib/appVersionPolicy.ts for why Metro cannot
+    // resolve one against a generated `_pb.ts`, and why tsc would not notice.
+    const { AppFlags } = await import('./ccwire/gen/ccwire/v1/app_flags_pb');
+    const m = AppFlags.fromBinary(bytes);
+    const out: RemoteFlags = {};
+    for (const name of m.disabled) if (name) out[name] = false;
+    return out;
+  } catch {
+    return null;
+  }
+}

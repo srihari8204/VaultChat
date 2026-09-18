@@ -18,7 +18,7 @@
 // lets transport.selftest.ts drive the real thing under `npx tsx`.
 
 import CCWireClient from './client';
-import { decodeMessageAck, type PublicMeta, type AppEvent } from './codec';
+import { decodeMessageAck, type PublicMeta, type AppEvent, type TypingState } from './codec';
 import { SessionEndedError } from '../sessionEnded';
 
 /** The CC-Wire route, mirroring realtime.CCWirePath in the Go server. */
@@ -319,7 +319,29 @@ export function startCCWire(o: StartCCWireOptions): void {
     setStatus('ready');
   });
   c.on('frame', (e) => {
-    if (client !== c || status !== 'ready' || e.frame?.body_field !== 100) return;
+    if (client !== c || status !== 'ready') return;
+    // TypingState (81) — the TYPED form of typing_start/typing_stop. The Go
+    // server already builds it (ccwire_messages.go, `case "typing_start"`) and
+    // sends it to any session that did NOT negotiate app_events_v1; a session
+    // that did still gets the same fact as app_event (100) JSON. Decoding both
+    // here is the receiver-first half of retiring body 100: this client stops
+    // caring which form arrives, so the server can switch whenever it likes.
+    //
+    // Nothing else changes. The event NAME and payload shape handed to the app
+    // are byte-for-byte what the JSON form produces ({uid, chatId}), so
+    // app/chat.tsx and (tabs)/chats.tsx see no difference.
+    //
+    // No cursor can move here: EPHEMERAL frames are unsequenced by
+    // construction (ccwire_seq.go `sequenced()` excludes them), so a typing
+    // frame this client drops cannot advance a delivery or read position.
+    if (e.frame?.body_field === 81) {
+      const t = e.frame.value as TypingState;
+      if (!t?.chat_id) return;
+      try { o.onAppEvent?.(t.typing ? 'typing_start' : 'typing_stop', { uid: t.sender_uid ?? '', chatId: t.chat_id }); }
+      catch { /* a consumer exception cannot kill the carrier */ }
+      return;
+    }
+    if (e.frame?.body_field !== 100) return;
     const body = e.frame.value as AppEvent;
     if (!body?.event || body.event.length > 64 || !body.payload_json) return;
     try { o.onAppEvent?.(body.event, JSON.parse(EVENT_UTF8.decode(body.payload_json))); }

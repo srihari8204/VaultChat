@@ -22,6 +22,33 @@ message Capabilities {
   bool structured_errors  = 7;
   bool app_events_v1      = 8;
 
+  // This peer ACCEPTS typed app-domain bodies inbound (typing_state 81,
+  // viewer_state 82, receipt 52, cursor_sync 64, …) instead of the same events
+  // wrapped as app_event (100) JSON.
+  //
+  // IT IS NOT app_events_v1 INVERTED. Field 8 says "I speak app_event JSON";
+  // this says "I also decode the typed bodies". A peer may set both, and
+  // during the migration every peer does: app_event stays the fallback until
+  // typed coverage is complete. Gating typed emit on field 8 would have been
+  // repurposing a published flag to mean its own opposite.
+  //
+  // Emit is gated on the OTHER side's bit, per the intersection rule above: a
+  // server that omits this keeps receiving app_event JSON, and an old server
+  // omits it by construction. Nothing is guessed — a peer never sends a typed
+  // body until the other end has said it decodes them.
+  bool typed_app_bodies   = 9;
+
+  // Field numbers 10-14 intentionally unused, and NOT `reserved`: they are the
+  // rest of the one-byte-tag range, held open for the next capability bits.
+  // `experimental` jumps to 15 so that room exists; without this line the gap
+  // reads like five deleted fields, which is the one shape a reader is supposed
+  // to treat as poisoned. Frame in envelope.proto states its own gap the same
+  // way (`reserved 6 to 15`) — the difference is deliberate: Frame's gap must
+  // never be filled, this one is meant to be.
+  //
+  // A NUMBER HERE IS NEVER REUSED. 1-9 are published; a capability that is
+  // retired gets `reserved`, and the next bit takes 10.
+
   // Forward compatibility: capabilities this build does not know about
   // arrive here and are echoed back unmodified but never activated.
   // An unknown capability is INERT, never assumed.

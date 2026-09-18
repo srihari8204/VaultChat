@@ -1,0 +1,14 @@
+# Generated-code config for CC-Wire schemas.
+#
+# Output lands in lib/ccwire/gen/ ON PURPOSE: lib/socket.ts reaches every
+# ccwire module through a dynamic import() inside connectCCWire()
+# (lib/socket.ts:144-149), so anything under lib/ccwire/ is off the cold
+# start path. metro.config.js has inlineRequires, but an import alone
+# proves nothing — the dynamic import is what defers it.
+#
+# Regenerate:  npm run proto:gen      Verify no drift:  npm run proto:check
+version: v1
+plugins:
+  - plugin: es
+    out: lib/ccwire/gen
+    opt: target=ts

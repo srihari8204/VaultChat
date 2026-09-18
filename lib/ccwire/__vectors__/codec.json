@@ -535,6 +535,90 @@
       "unknownHex": []
     },
     {
+      "name": "ack carries the persisted message_id the submit path reads",
+      "why": "Ack (envelope.proto:246) is LIVE INBOUND TRAFFIC — lib/ccwire/transport.ts:188 matches body_field 22 on request_id and reads message_id. Its field numbers were asserted nowhere, so these bytes are the pin. Frame: 0a03 722d31 = field 1 len 3 'r-1'; 1002 = traffic_class MESSAGING; 1802 = stream MESSAGING; b201 = field 22 wire 2 (22*8+2 = 178 = varint b2 01), length 0f = 15. Body: 0a04 31373239 = field 1 len 4 message_id \"1729\", the /^[1-9][0-9]*$/ id transport.ts requires; 102a = field 2 varint 42 = seq; 18 80d095ffbc31 = field 3 varint 1700000000000 (groups 0..5 at shifts 0,7,14,21,28,35: 0,0x50,0x15,0x7f,0x3c,0x31).",
+      "inputHex": "0a03722d3110021802 b2010f 0a0431373239 102a 1880d095ffbc31",
+      "ok": true,
+      "requestId": "r-1",
+      "trafficClass": 2,
+      "stream": 2,
+      "seq": "0",
+      "dependsOn": "0",
+      "bodyField": 22,
+      "bodyHex": "0a0431373239102a1880d095ffbc31",
+      "unknownHex": []
+    },
+    {
+      "name": "ack seq = 2^53+1, the value a JS number rounds away, inside the body",
+      "why": "Ack.seq is uint64 [jstype = JS_STRING] for the same reason Frame.seq is. Body is field 2 only: proto3 omits the defaulted message_id and server_ts_ms, so the decoder must not depend on field 1 being present. 10 = field 2 varint; 81 80 80 80 80 80 80 10 = 2^53+1 (group 0 = 1, groups 1..6 = 0, group 7 at shift 49 carries 0x10 = 2^4, and 2^4 * 2^49 = 2^53). Body length 09.",
+      "inputHex": "1001 b20109 108180808080808010",
+      "ok": true,
+      "requestId": "",
+      "trafficClass": 1,
+      "stream": 0,
+      "seq": "0",
+      "dependsOn": "0",
+      "bodyField": 22,
+      "bodyHex": "108180808080808010",
+      "unknownHex": []
+    },
+    {
+      "name": "an ack with every field defaulted is still an ack",
+      "why": "A zero-length Ack: no message_id, seq 0, server_ts_ms 0. body_field must still be 22 or transport.ts:188 never sees the frame at all.",
+      "inputHex": "1001 b20100",
+      "ok": true,
+      "requestId": "",
+      "trafficClass": 1,
+      "stream": 0,
+      "seq": "0",
+      "dependsOn": "0",
+      "bodyField": 22,
+      "bodyHex": "",
+      "unknownHex": []
+    },
+    {
+      "name": "an ack keeps a field this build does not know",
+      "why": "Forward compatibility INSIDE the body, not just around it: 0a04 31373239 = message_id, then 2001 = field 4 varint 1, which Ack does not define today. The bytes must survive verbatim, in this order, so a server that starts sending a fourth field does not break a client that ignores it. Body length 08.",
+      "inputHex": "1001 b20108 0a04313732392001",
+      "ok": true,
+      "requestId": "",
+      "trafficClass": 1,
+      "stream": 0,
+      "seq": "0",
+      "dependsOn": "0",
+      "bodyField": 22,
+      "bodyHex": "0a04313732392001",
+      "unknownHex": []
+    },
+    {
+      "name": "client_hello proposes the limits this fixture already pins",
+      "why": "Frame field 16 wire 2 = 130 = varint 82 01, length 30 = 48. ClientHello (envelope.proto:203): 0801 = protocol_major 1 (minor 0 is defaulted away); 1a08 = field 3 Capabilities, 8 bytes = 0801 fragmentation, 1001 resumption, 3001 causal_epochs (field 6), 3801 structured_errors (field 7); 2216 = field 4 Limits, 22 bytes = 08 808010 max_frame_bytes 262144, 10 80800c max_opaque_bytes 196608, 18 808040 max_message_body_bytes 1048576, 20 10 max_fragments_per_message 16, 40 06 max_nesting_depth (field 8) 6, 48 8008 max_repeated_elements 1024, 50 8020 max_string_field_bytes 4096 — the SAME seven numbers the fixture's top-level `limits` block asserts against all three implementations, so this vector ties the Limits field numbers to values already agreed; 2a05 6465762d37 = device_id 'dev-7'; 3203 a1b2c3 = credential, opaque bytes.",
+      "inputHex": "1001 820130 08 01 1a08 0801100130013801 2216 088080101080800c1880804020104006488008508020 2a05 6465762d37 3203 a1b2c3",
+      "ok": true,
+      "requestId": "",
+      "trafficClass": 1,
+      "stream": 0,
+      "seq": "0",
+      "dependsOn": "0",
+      "bodyField": 16,
+      "bodyHex": "08011a0808011001300138012216088080101080800c18808040201040064880085080202a056465762d373203a1b2c3",
+      "unknownHex": []
+    },
+    {
+      "name": "server_hello answers with the binding limits",
+      "why": "Frame field 17 wire 2 = 138 = varint 8a 01, length 33 = 51. ServerHello (envelope.proto:216) is NOT ClientHello with the fields renamed — field 4 is `limits` and field 6 is `resume_token`, where ClientHello has `proposed_limits` at 4 and `credential` at 6, so the two must be pinned separately or a transposition would pass. 0801 major; 1a08 capabilities (INTERSECTION); 2216 limits, byte-identical to the client_hello vector because the server's values bind and these are them; 2a04 732d3432 = session_id 's-42'; 38 80d095ffbc31 = field 7 server_ts_ms 1700000000000; 4001 = field 8 resumed true.",
+      "inputHex": "1001 8a0133 08 01 1a08 0801100130013801 2216 088080101080800c1880804020104006488008508020 2a04 732d3432 3880d095ffbc31 4001",
+      "ok": true,
+      "requestId": "",
+      "trafficClass": 1,
+      "stream": 0,
+      "seq": "0",
+      "dependsOn": "0",
+      "bodyField": 17,
+      "bodyHex": "08011a0808011001300138012216088080101080800c18808040201040064880085080202a04732d34323880d095ffbc314001",
+      "unknownHex": []
+    },
+    {
       "name": "an unknown field is preserved, never dropped",
       "why": "field 7 wire 0 = 0x38, value 42 = 0x2a. envelope.proto requires unknown fields be PRESERVED; the tag+value bytes are kept verbatim so a re-encode is byte-identical.",
       "inputHex": "1001382a",
@@ -738,6 +822,12 @@
       "why": "Unlike every other field. Dropping it would erase which body was set, turning a bare Ping into a frame with no meaning.",
       "frame": { "trafficClass": 1, "bodyField": 19, "bodyHex": "" },
       "outHex": "10019a0100"
+    },
+    {
+      "name": "an ack frame encodes to the bytes the submit path expects back",
+      "why": "The encode side of the live Ack: same frame as the decode vector 'ack carries the persisted message_id the submit path reads', so the two directions are pinned to one byte string rather than to each other.",
+      "frame": { "requestId": "r-1", "trafficClass": 2, "stream": 2, "bodyField": 22, "bodyHex": "0a0431373239102a1880d095ffbc31" },
+      "outHex": "0a03722d3110021802 b2010f 0a0431373239 102a 1880d095ffbc31"
     },
     {
       "name": "unknown fields are written back verbatim, after the body",

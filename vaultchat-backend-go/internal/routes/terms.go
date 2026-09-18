@@ -33,10 +33,12 @@ import (
 	"strings"
 	"time"
 
+	ccwirev1 "vaultchat/backend-go/internal/ccwire/gen/ccwire/v1"
 	"vaultchat/backend-go/internal/db"
 	"vaultchat/backend-go/internal/httpx"
 
 	"github.com/jackc/pgx/v5"
+	"google.golang.org/protobuf/proto"
 )
 
 const defaultTermsURL = "https://api.corefinite.com/terms"
@@ -78,12 +80,72 @@ func termsGet(w http.ResponseWriter, r *http.Request) {
 	// would reasonably pick.
 	outstanding := required != "" && (accepted == nil || *accepted != required)
 
+	termsGetWrite(w, r, termsGetData{
+		RequiredVersion: required,
+		AcceptedVersion: accepted,
+		AcceptedAt:      at,
+		Outstanding:     outstanding,
+		URL:             termsURL(),
+	})
+}
+
+// termsGetData is exactly what the handler above scanned and computed — no JSON
+// intermediate. Both representations are built from these values directly, so
+// neither can drift from the other through a marshal/unmarshal round trip.
+type termsGetData struct {
+	RequiredVersion string
+	AcceptedVersion *string
+	AcceptedAt      *time.Time
+	Outstanding     bool
+	URL             string
+}
+
+// termsGetWrite answers GET /user/terms in whichever representation the caller
+// asked for (protobuf-migration, following userBackupMetaWrite). Same route,
+// method, RequireAuth and 200 — a request that does not name
+// application/protobuf gets the same JSON object, byte for byte as before,
+// including the fact that a user who has never accepted gets two explicit
+// nulls and not two missing keys.
+//
+// THE TIMESTAMP IS NOT httpx.JSTime. AcceptedAt is a *time.Time handed straight
+// to encoding/json below, and time.Time.MarshalJSON writes RFC3339 with trailing
+// zeros trimmed — which is exactly time.RFC3339Nano, offset included. pgx can
+// hand back a non-UTC location, so the offset is part of the string and must not
+// be normalised away here; formatting with anything else (JSTime's
+// "2006-01-02T15:04:05.000Z" in particular) would make the two representations
+// disagree on a value the client caches.
+//
+// PRESENCE: nil stays nil. `optional` in terms.proto is what lets absence be
+// told apart from an accepted version that is literally the empty string, and
+// the TS decoder turns that absence back into the JSON's `null`.
+func termsGetWrite(w http.ResponseWriter, r *http.Request, d termsGetData) {
+	if acceptsProtobuf(w, r) {
+		reply := &ccwirev1.TermsState{
+			RequiredVersion: d.RequiredVersion,
+			AcceptedVersion: d.AcceptedVersion,
+			Outstanding:     d.Outstanding,
+			Url:             d.URL,
+		}
+		if d.AcceptedAt != nil {
+			at := d.AcceptedAt.Format(time.RFC3339Nano)
+			reply.AcceptedAt = &at
+		}
+		// A marshal failure is not a reason to fail the request: fall through to
+		// JSON, which every client understands either way.
+		if b, err := proto.Marshal(reply); err == nil {
+			w.Header().Set("Content-Type", protobufMediaType)
+			w.WriteHeader(200)
+			_, _ = w.Write(b)
+			return
+		}
+	}
+
 	httpx.JSON(w, 200, map[string]any{
-		"requiredVersion": required,
-		"acceptedVersion": accepted,
-		"acceptedAt":      at,
-		"outstanding":     outstanding,
-		"url":             termsURL(),
+		"requiredVersion": d.RequiredVersion,
+		"acceptedVersion": d.AcceptedVersion,
+		"acceptedAt":      d.AcceptedAt,
+		"outstanding":     d.Outstanding,
+		"url":             d.URL,
 	})
 }
 

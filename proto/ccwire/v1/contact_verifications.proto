@@ -1,0 +1,35 @@
+syntax = "proto3";
+
+package ccwire.v1;
+
+option go_package = "vaultchat/backend-go/internal/ccwire/v1;ccwirev1";
+
+// GET /user/contact-verifications — which contacts this user has marked as
+// safety-number verified (#101).
+//
+// SAME RULE AS security_overview.proto: the typed response expresses exactly
+// the states the existing JSON response expresses, no more and no fewer. The
+// JSON contract is authoritative and is NOT corrected here.
+//
+// WHY THIS ENDPOINT. Authenticated, first-party, read-only, GET, and the whole
+// body is one array of opaque contact-id strings. Its only caller is
+// app/verify-contact.tsx via lib/verification.ts — a screen the user reaches by
+// opening a chat's safety number, never on the cold-start path. No money, no
+// 64-bit id (contact_id is a text column scanned into a Go string and handed
+// out verbatim), no free-form JSON.
+//
+// PRESENCE: there is none to model. The handler seeds `verified := []string{}`,
+// so the JSON is `[]` and never null, and proto3 elides an empty repeated field
+// — which protobuf-es decodes back to `[]`, not undefined. The empty case is
+// therefore a ZERO-BYTE body, and the TS decoder still produces `{verified: []}`.
+// That round trip is pinned on both sides rather than assumed.
+//
+// NOT a repeated message of {contactId, verifiedAt, ...}: the JSON ships bare
+// ids and nothing else, and inventing a richer row here would be exactly the
+// "fix the existing contract" this migration forbids.
+message ContactVerifications {
+  // Contact ids, verbatim and in the order the handler appended them (the
+  // query has no ORDER BY, so the order is the database's — the client treats
+  // it as a set, and this schema does not promise more than the JSON did).
+  repeated string verified = 1;
+}

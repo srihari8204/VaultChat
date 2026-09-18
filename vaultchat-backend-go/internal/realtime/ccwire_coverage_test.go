@@ -100,9 +100,11 @@ var ccwireDisposition = map[uint32]struct {
 		"key material and prekey exchange stay on the REST surface. The transport " +
 			"is deliberately blind to crypto state."},
 	ccwire.BodyCallSignal: {"call_signal", notServed,
-		"calls signal over Socket.IO today. NOTE the known asymmetry: subscribeAllowed " +
-			"accepts ScopeKindCall, so a client can subscribe to a call room it can " +
-			"never signal on."},
+		"calls signal over the app_event webrtc_* relay (handlers.go " +
+			"registerSignalHandlersPeer), not over this body. The asymmetry noted here " +
+			"before is gone: a ScopeKindCall Subscribe now needs app_events, which is " +
+			"exactly what the relay needs, so nothing can subscribe to a call room it " +
+			"cannot signal on. Serving 49 would be a second signalling path."},
 }
 
 // Bodies whose disposition this build decides dynamically are listed here so the

@@ -170,6 +170,23 @@ async function main() {
     process.exit(1);
   }
 
+  // Generated protobuf codecs vs proto/ccwire/v1/*.proto.
+  //
+  // Same reasoning as the backend contract above: generated code that nobody
+  // re-verifies becomes a THIRD definition that drifts, alongside the two
+  // hand-written codecs it was added to reconcile. This regenerates into a
+  // temp directory and byte-compares; it never writes into the repo.
+  console.log('\n  protobuf codegen drift');
+  const proto = require('child_process').spawnSync(
+    process.execPath, [path.join(__dirname, 'proto-check.js')],
+    { stdio: 'inherit' },
+  );
+  if (proto.status !== 0) {
+    console.log('\n  FAILED: generated protobuf is out of date — regenerate with:');
+    console.log('    npm run proto:gen');
+    process.exit(1);
+  }
+
   console.log('\nALL SUITES PASSED ✓');
 }
 

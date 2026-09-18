@@ -32,4 +32,34 @@ export function normalizeMsgIds<T>(m: T): T {
   return m;
 }
 
+/**
+ * Strict wire-id parser: the canonical decimal rendering of a positive
+ * BIGSERIAL, and nothing else. Returns null — never throws — for anything it
+ * cannot hold; the caller decides what null means (drop the row for `id`,
+ * `null` for every pointer field).
+ *
+ * A SIBLING of normalizeMsgIds, not a replacement: that one is a bare
+ * `Number()` on the JSON paths and validates nothing. This one is for the
+ * typed-wire boundary, where a rejection is a real outcome.
+ *
+ * Rejects, deliberately: whitespace (`Number` trims, the regex does not),
+ * fractions, exponent/hex, trailing characters, leading zeros, empty (= proto3
+ * absence, which means null and never 0), zero (the optimistic-bubble band),
+ * negatives (the Exit-Kit import band, `localDb.importMessages`) — and
+ * anything past 2^53-1.
+ *
+ * THE SAFE-INTEGER BOUND IS REACHABLE, not a formality: BIGSERIAL is int64.
+ * Rounding 2^53+1 down to 2^53 produces an id that collides with a real row
+ * under the `ON CONFLICT(id)` upsert in localDb.cacheMessages — one message
+ * silently overwriting a different one. Rejecting degrades; rounding corrupts.
+ *
+ * Regex precedent: lib/ccwire/transport.ts (ack id). Bound precedent:
+ * lib/receipts.ts (`mark`).
+ */
+export function wireId(s: unknown): number | null {
+  if (typeof s !== 'string' || !/^[1-9][0-9]*$/.test(s)) return null;
+  const n = Number(s);
+  return Number.isSafeInteger(n) ? n : null;
+}
+
 export default normalizeMsgIds;

@@ -2,10 +2,12 @@
 //
 // STATUS: LIVE on the app path. lib/ccwire/client.ts calls encodeFrame on every
 // outbound frame and decodeStream on every inbound chunk. (This header
-// previously read "NOT WIRED"; that was stale and misleading.) Below is the
-// rollout plan — "Protobuf framing and binary-WebSocket parity in ISOLATED
-// testing" — and it must not be switched on until the conformance harness and a
-// parity soak have both passed.
+// previously read "NOT WIRED", and then carried a trailing "must not be
+// switched on until the conformance harness and a parity soak have both
+// passed" clause that contradicted its own first sentence. Both were stale:
+// the framing IS switched on, and 'ccwire' is the only TransportName —
+// lib/socket.ts:109,114. Do not reintroduce a gating claim here without
+// changing selectTransport() to match it.)
 //
 // WHAT THIS LAYER IS
 //
