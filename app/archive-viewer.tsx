@@ -85,7 +85,19 @@ function ArchiveViewerScreen() {
           setEntries(rows);
         }
       } catch (e: any) {
-        if (alive) setError(e?.message ? `Could not read this archive: ${e.message}` : 'Could not read this archive.');
+        // Do NOT interpolate e.message. expo-file-system rejects with the raw
+        // platform text, so opening this screen without a usable uri put
+        //   "Call to function 'ExponentFileSystem.readAsStringAsync' has been
+        //    rejected. -> Caused by: java.io.IOException: Unsupported scheme
+        //    for location ''."
+        // on screen, verbatim, as the user-facing error (Honor ELI-NX9,
+        // 2026-09-19). A Java stack trace is not an error message.
+        //
+        // The detail is kept for whoever has to debug it, just not in the UI.
+        if (alive) {
+          console.warn('[archive-viewer] read failed:', e?.message ?? e);
+          setError('Could not read this archive. It may be damaged, or the file is no longer on this device.');
+        }
       } finally {
         if (alive) setLoading(false);
       }

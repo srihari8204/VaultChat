@@ -131,7 +131,16 @@ const IMPORT_REWRITES: [RegExp, string][] = [
   [/^import \{ Platform \} from 'react-native';$/m, `import { Platform } from './stubs.ts';`],
   [/^import \* as Crypto from 'expo-crypto';$/m, `import * as Crypto from './stubs.ts';`],
   [/^import \* as FileSystem from 'expo-file-system\/legacy';$/m, `import * as FileSystem from './stubs.ts';`],
-  [/^import \{ api, getAccessToken \} from '\.\/api';$/m, `import { api, getAccessToken } from './stubs.ts';`],
+  // BINDINGS CAPTURED, not spelled out. This was
+  //   /^import \{ api, getAccessToken \} from '\.\/api';$/
+  // and it stopped matching the moment chatService added a third symbol
+  // (httpErrorMessage, 2026-09-19) — the import fell through unrewritten and
+  // the run died on ERR_MODULE_NOT_FOUND for '<tmp>/alice/api', which names a
+  // path nobody wrote and points at nothing. That is the SAME failure this
+  // file's own note about startupAdapter already warned about, in a second
+  // place. Whatever chatService imports from './api' now comes along, and
+  // stubs.ts below must export it.
+  [/^import \{([^}]*)\} from '\.\/api';$/m, `import {$1} from './stubs.ts';`],
   [/^import \{ Buffer \} from 'buffer';.*$/m, `import { Buffer } from 'node:buffer';`],
   [/^import \{ splitMeta, wrapEnvelope, unwrapEnvelope \} from '\.\/msgEnvelope';$/m,
    `import { splitMeta, wrapEnvelope, unwrapEnvelope } from '${pathToFileURL(join(HERE, 'msgEnvelope.ts')).href}';`],
@@ -286,6 +295,15 @@ export function randomUUID() { return '${userId}-uuid-' + (++_n); }
 export async function api(path: string, opts?: any) { return H().api('${userId}')(path, opts); }
 export async function getAccessToken() { return H().token('${userId}'); }
 export async function getCachedUser() { return { id: '${userId}' }; }
+// Real behaviour, not a stub string: chatService's XHR upload path uses this for
+// the message a user is shown, and a test that faked it would prove nothing
+// about what they read. Kept in sync by lib/httpErrorMessage.selftest.ts.
+export function httpErrorMessage(status: number) {
+  if (status === 413) return 'That file is too large to upload.';
+  if (status >= 500) return 'The server is having trouble. Please try again shortly.';
+  if (status >= 400) return 'That request could not be completed.';
+  return 'Something went wrong. Please try again.';
+}
 export const SERVER_URL = 'http://test';
 // Pinned copies of constants/flags.ts (owned by another agent this session).
 export const E2EE_ENABLED = true, GROUP_E2EE = true, E2EE_STRICT = true, UPLOAD_PROGRESS = true;

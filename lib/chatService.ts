@@ -5,7 +5,7 @@
 import { Platform } from 'react-native';
 import * as Crypto from 'expo-crypto';
 import * as FileSystem from 'expo-file-system/legacy';
-import { api, getAccessToken } from './api';
+import { api, getAccessToken, httpErrorMessage } from './api';
 import { Buffer } from 'buffer';   // not a RN global — see myUserId's token fallback
 import { splitMeta, wrapEnvelope, unwrapEnvelope } from './msgEnvelope';
 import perf from './perf';
@@ -3001,7 +3001,11 @@ function postWithProgress(
         onProgress(1);
         resolve(body as UploadResult);
       } else {
-        const err: any = new Error(body?.error || xhr.statusText || `HTTP ${xhr.status}`);
+        // Same fallback as the fetch path (lib/api.ts httpErrorMessage), for the
+        // same reason: whatever lands here is read by a person in a dialog, and
+        // "HTTP 413" tells them nothing they can act on. A server-supplied
+        // body.error still wins, exactly as before.
+        const err: any = new Error(body?.error || httpErrorMessage(xhr.status));
         // mediaOutbox keys permanent-vs-transient off this (isPermanent), and
         // fetch's path threw plain Errors with no status — supplying it here
         // makes a 413 stop retrying instead of burning all 8 attempts.

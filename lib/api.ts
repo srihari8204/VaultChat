@@ -241,6 +241,12 @@ type ApiOptions<T = any> = Omit<RequestInit, 'body'> & {
 const PROTOBUF_ACCEPT = 'application/protobuf, application/json';
 const PROTOBUF_TYPE = 'application/protobuf';
 
+// Re-exported so the ~248 `e?.message` call sites keep getting their text from
+// one place. Lives in its own module because api.ts imports react-native, and a
+// selftest for a pure string function should not have to boot RN to run.
+export { httpErrorMessage } from './httpErrorMessage';
+import { httpErrorMessage } from './httpErrorMessage';
+
 // Stable per-install id, cached in memory after the first read. Sent as
 // X-Device-Id so the server can tell a resumed client from a cold start — see
 // the cold-sync guard in internal/routes/chats.go. It lives in the OS keystore,
@@ -567,7 +573,7 @@ export async function api<T = any>(path: string, opts: ApiOptions<T> = {}): Prom
   }
 
   if (!res.ok) {
-    let msg = res.statusText || `HTTP ${res.status}`;
+    let msg = httpErrorMessage(res.status, res.statusText);
     let body: any;
     try {
       const j: any = await res.json();

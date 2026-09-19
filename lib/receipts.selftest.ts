@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
 import { URL } from 'node:url';
 import ts from 'typescript';
+import { httpErrorMessage } from './httpErrorMessage';
 const compile = (file: string) => ts.transpileModule(readFileSync(new URL(file, import.meta.url), 'utf8'), {
   compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
 }).outputText;
@@ -65,6 +66,11 @@ async function apiOwnership() {
     '@sentry/react-native': {}, 'expo-router': { router: {} },
     './sessionEnded': { SessionEndedError }, './tokenIdentity': { tokenSubject: (token: string) => token },
     './authNav': { resetTo() {} }, '../constants/server': { SERVER_URL: 'https://test' },
+    // The REAL module, not a stub: api.ts uses it to build the message a person
+    // reads out of a failed request, and faking it here would let that text
+    // regress with this test still green. It imports nothing, so there is no
+    // cost to loading the shipped one.
+    './httpErrorMessage': { httpErrorMessage },
     '../constants/flags': { VAULT_SESSION_SEALED: false },
     'expo-secure-store': {
       getItemAsync: async (key: string) => key === 'vc_access_token' ? access : refresh,
