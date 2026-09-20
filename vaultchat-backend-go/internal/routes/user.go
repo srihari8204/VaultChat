@@ -148,7 +148,11 @@ func (u *userUsersRow) fields() []any {
 		&u.EmailCipher, &u.PhoneCipher, &u.DOBCipher, &u.StatusCipher}
 }
 
-func (u *userUsersRow) public() map[string]any {
+// identity decrypts the vaulted fields. Factored out of public() so the
+// protobuf representation in userProfileWrite derives from the SAME call rather
+// than repeating the legacy-DOB formatting below — two copies of that string
+// format is two chances for the representations to disagree about a date.
+func (u *userUsersRow) identity() vault.Identity {
 	// Legacy plaintext dob (pg DATE) renders as Node's String(row.dob) — the JS
 	// Date toString form (server TZ is UTC). Unreachable for post-042 rows.
 	var legacyDOB *string
@@ -156,9 +160,13 @@ func (u *userUsersRow) public() map[string]any {
 		s := u.DOB.UTC().Format("Mon Jan 02 2006 15:04:05 GMT+0000 (Coordinated Universal Time)")
 		legacyDOB = &s
 	}
-	ident := vault.IdentityFromRow(u.FirstNameCipher, u.LastNameCipher, u.EmailCipher,
+	return vault.IdentityFromRow(u.FirstNameCipher, u.LastNameCipher, u.EmailCipher,
 		u.PhoneCipher, u.DOBCipher, u.StatusCipher,
 		u.Name, u.Email, u.Phone, legacyDOB, u.Status)
+}
+
+func (u *userUsersRow) public() map[string]any {
+	ident := u.identity()
 	return map[string]any{
 		"id":              u.ID,
 		"email":           ident.Email,
@@ -244,8 +252,61 @@ func userProfileGet(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
+	userProfileWrite(w, r, u)
+}
+
+// userProfileWrite serves GET /user/profile in whichever representation the
+// caller asked for. Same shape as termsGetWrite and userSecurityOverviewWrite:
+// protobuf only when the client named it, JSON otherwise and on ANY marshal
+// failure. This endpoint is on the cold-start path, so a representation bug
+// must degrade to the old answer rather than to no answer.
+//
+// TIMESTAMPS: httpx.JSTime's format string is reused verbatim, not retyped.
+// The JSON path renders these through JSTime.MarshalJSON (httpx.go:27); if the
+// two ever disagree by a digit, a client that caches the string can never match
+// its own cache.
+func userProfileWrite(w http.ResponseWriter, r *http.Request, u *userUsersRow) {
+	if acceptsProtobuf(w, r) {
+		ident := u.identity()
+		reply := &ccwirev1.UserProfile{
+			Id:           u.ID,
+			Email:        ident.Email,
+			Name:         ident.Name,
+			Phone:        ident.Phone,
+			PhotoUrl:     u.PhotoURL,
+			VaultId:      u.VaultID,
+			Dob:          ident.DOB,
+			Status:       ident.Status,
+			Online:       u.Online,
+			AuthProvider: u.AuthProvider,
+			// DERIVED, exactly as public() does it: a present-but-empty hash is
+			// not a PIN. The hash itself never leaves the server.
+			HasPin:    u.PinHash != nil && *u.PinHash != "",
+			FaceCount: int32(u.FaceCount),
+			CreatedAt: u.CreatedAt.UTC().Format(userProfileTimeLayout),
+		}
+		if u.LastSeenAt != nil {
+			t := u.LastSeenAt.UTC().Format(userProfileTimeLayout)
+			reply.LastSeen = &t
+		}
+		if u.EmailVerifiedAt != nil {
+			t := u.EmailVerifiedAt.UTC().Format(userProfileTimeLayout)
+			reply.EmailVerifiedAt = &t
+		}
+		if b, err := proto.Marshal(reply); err == nil {
+			w.Header().Set("Content-Type", protobufMediaType)
+			w.WriteHeader(200)
+			_, _ = w.Write(b)
+			return
+		}
+	}
 	httpx.JSON(w, 200, u.public())
 }
+
+// The literal from httpx.JSTime.MarshalJSON with its surrounding quotes removed.
+// Pinned by a test rather than trusted: user_profile_negotiation_test.go asserts
+// the two paths emit the same string for the same instant.
+const userProfileTimeLayout = "2006-01-02T15:04:05.000Z"
 
 // ── GET /user/security-overview ────────────────────────────────────────
 

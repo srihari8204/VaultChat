@@ -20,6 +20,7 @@ import {
   setTokens,
 } from '../../lib/api';
 import { lockSession } from '../../lib/sessionLock';
+import { profileFromProtobuf } from '../../lib/userProfilePolicy';
 import * as pinStore from '../../services/security/pinStore';
 
 // Web Client ID from Firebase Console → Auth → Sign-in method → Google.
@@ -359,7 +360,12 @@ export async function isSetupComplete(): Promise<boolean> {
   const t = await getAccessToken();
   if (!t) return false;
   try {
-    const u: any = await api('/user/profile');
+    // Passing a decoder only OFFERS protobuf. A server that answers JSON —
+    // every deployment until the Go half ships — is parsed by the unchanged
+    // path in api(), with no second request. A decode failure throws and
+    // lands in the catch below, i.e. "setup not complete", exactly where a
+    // failed fetch already landed.
+    const u: any = await api('/user/profile', { proto: profileFromProtobuf });
     return !!u?.id;
   } catch {
     return false;

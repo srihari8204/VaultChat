@@ -32,6 +32,7 @@ import { AuroraBackground } from '../../components/ui';
 import { initialOf } from '../../lib/format';
 import { currentVersionName } from '../../lib/appVersion';
 import { permissionDenied } from '../../lib/permissionDenied';
+import { profileFromProtobuf } from '../../lib/userProfilePolicy';
 
 interface UserProfile {
   id: string;
@@ -101,7 +102,10 @@ export default function ProfileScreen() {
       }
     } catch { /* no cache is not an error; the network fetch below still runs */ }
     try {
-      const p = await api<UserProfile>('/user/profile');
+      // Passing a decoder only OFFERS protobuf; a server that answers JSON is
+      // parsed by the unchanged path in api(), with no second request. The
+      // PUT calls below still send and receive JSON — they carry bodies.
+      const p = await api<UserProfile>('/user/profile', { proto: profileFromProtobuf });
       setProfile(p);
       setName(p.name ?? '');
       setStatus(p.status ?? '');

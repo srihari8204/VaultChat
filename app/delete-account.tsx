@@ -24,6 +24,7 @@ import { HEADER_TOP } from '../constants/layout';
 import { type Palette } from '../constants/theme';
 import { useTheme } from '../lib/theme';
 import { api } from '../lib/api';
+import { profileFromProtobuf } from '../lib/userProfilePolicy';
 import { identityMatches, type AccountIdentity } from '../lib/confirmIdentity';
 import { deleteAccount } from '../lib/chatService';
 import { unregisterPushToken } from '../lib/push';
@@ -65,7 +66,7 @@ export default function DeleteAccountScreen() {
   const load = useCallback(async () => {
     setLoadErr(false);
     try {
-      const u: any = await api('/user/profile');
+      const u: any = await api('/user/profile', { proto: profileFromProtobuf });
       const id: AccountIdentity = {
         phone: u?.phone || undefined, email: u?.email || undefined, vaultId: u?.vaultId || undefined,
       };

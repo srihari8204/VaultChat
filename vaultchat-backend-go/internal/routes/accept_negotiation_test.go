@@ -109,6 +109,13 @@ func acceptNegotiatedEndpoints() []acceptCase {
 		{"/user/security-overview", func(w http.ResponseWriter, r *http.Request) {
 			userSecurityOverviewWrite(w, r, userSecurityOverviewData{})
 		}},
+		// Registered the same day userProfileWrite gained its protobuf branch.
+		// This list is the ONLY place the q=0-refusal, lookalike-media-type and
+		// Vary rules are checked, and a new negotiating endpoint that is not
+		// added here looks fully tested while none of those hold for it.
+		{"/user/profile", func(w http.ResponseWriter, r *http.Request) {
+			userProfileWrite(w, r, &userUsersRow{})
+		}},
 		{"/user/backup/meta", func(w http.ResponseWriter, r *http.Request) {
 			userBackupMetaWrite(w, r, userBackupMetaData{})
 		}},

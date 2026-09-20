@@ -1,0 +1,46 @@
+syntax = "proto3";
+package ccwire.v1;
+option go_package = "vaultchat/backend-go/internal/ccwire/v1;ccwirev1";
+
+// GET /user/profile — the authenticated shell's first authenticated read, on
+// the cold-start path (app/_layout.tsx -> authService.ts:362 and four others).
+//
+// SAME RULE AS terms.proto and security_overview.proto: this expresses exactly
+// what userUsersRow.public() already returns (internal/routes/user.go:151-179),
+// field for field. It is a second REPRESENTATION, not a second contract. No
+// field is added, renamed, widened or dropped here, because the JSON path stays
+// live for every installed build and the two must not drift.
+//
+// PRESENCE IS THE WHOLE POINT OF THE `optional`s BELOW.
+// Six of these come from vault.Identity (vault.go:310-318), whose every field
+// is a *string: an encrypted column that failed to decrypt, or was never set,
+// arrives nil and renders as JSON `null`. proto3 without `optional` cannot tell
+// nil from "", which for `status` is the difference between "no status set" and
+// "status deliberately cleared". Every nullable JSON field is therefore
+// `optional` here, and the TS decoder turns absence back into null — never
+// undefined, because JSON.stringify DROPS undefined and these rows are cached.
+//
+// TIMESTAMP FORMAT, and it is not negotiable:
+//   last_seen, email_verified_at, created_at carry httpx.JSTime's exact output,
+//   `2006-01-02T15:04:05.000Z` (httpx.go:27) — UTC, milliseconds, literal Z.
+//   NOT RFC3339Nano, which terms.proto uses for a different field for its own
+//   documented reason. A client caches these strings; the two representations
+//   disagreeing by a digit is a cache that never matches itself.
+message UserProfile {
+  string          id                = 1;   // users.id, never null
+  optional string email             = 2;   // vault.Identity.Email  — nil => null
+  optional string name              = 3;   // vault.Identity.Name   — nil => null
+  optional string phone             = 4;   // vault.Identity.Phone  — nil => null
+  optional string photo_url         = 5;   // JSON key is photoURL, not photoUrl
+  optional string vault_id          = 6;   // assigned lazily on first read
+  optional string dob               = 7;   // vault.Identity.DOB, verbatim string
+  optional string status            = 8;   // nil ("not set") != "" ("cleared")
+  bool            online            = 9;   // plain bool column, never null
+  optional string last_seen         = 10;  // JSTime; absent => null
+  optional string auth_provider     = 11;
+  bool            has_pin           = 12;  // DERIVED: pin_hash non-nil AND non-empty.
+                                           // The hash itself is never sent.
+  int32           face_count        = 13;  // Go int; a count, not an id — no jstype
+  optional string email_verified_at = 14;  // JSTime; absent => null
+  string          created_at        = 15;  // JSTime; NOT NULL in the schema
+}

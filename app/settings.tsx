@@ -31,6 +31,7 @@ import {
 import { SERVER_URL } from '../constants/server';
 import { initUsageCounter, setUsageCounterEnabled, usageCounterEnabled } from '../lib/usageCounter';
 import { api, getAccessToken } from '../lib/api';
+import { profileFromProtobuf } from '../lib/userProfilePolicy';
 import { initialOf } from '../lib/format';
 import { getAutoDownload, setAutoDownload, type AutoDownloadPolicy } from '../lib/mediaPrefs';
 import { getSaveToGallery, setSaveToGallery } from '../lib/galleryExport';
@@ -88,7 +89,8 @@ export default function SettingsScreen() {
       try {
         const [s, b, tok, p] = await Promise.all([
           getSettings(), listBlocks(), getAccessToken(),
-          api<{ name?: string; email?: string; status?: string; photoURL?: string }>('/user/profile').catch(() => null),
+          api<{ name?: string; email?: string; status?: string; photoURL?: string }>(
+            '/user/profile', { proto: profileFromProtobuf }).catch(() => null),
         ]);
         if (cancel) return;
         setSettings(s);
