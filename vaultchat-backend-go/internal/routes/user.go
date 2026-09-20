@@ -283,15 +283,17 @@ func userProfileWrite(w http.ResponseWriter, r *http.Request, u *userUsersRow) {
 			// not a PIN. The hash itself never leaves the server.
 			HasPin:    u.PinHash != nil && *u.PinHash != "",
 			FaceCount: int32(u.FaceCount),
-			CreatedAt: u.CreatedAt.UTC().Format(userProfileTimeLayout),
-		}
-		if u.LastSeenAt != nil {
-			t := u.LastSeenAt.UTC().Format(userProfileTimeLayout)
-			reply.LastSeen = &t
-		}
-		if u.EmailVerifiedAt != nil {
-			t := u.EmailVerifiedAt.UTC().Format(userProfileTimeLayout)
-			reply.EmailVerifiedAt = &t
+			// chatsProtoTime / chatsProtoTimePtr, NOT a local layout constant.
+			// The first version of this function declared its own copy of
+			// "2006-01-02T15:04:05.000Z" and hand-rolled the two nil checks --
+			// while the shared helpers sat two functions away in the same
+			// package, already used by userSecurityOverviewWrite (:385) and
+			// userBackupMetaWrite. That would have been the THIRD copy of the
+			// layout string, and a format that exists three times is a format
+			// that eventually disagrees with itself.
+			CreatedAt:       chatsProtoTime(httpx.JSTime(u.CreatedAt)),
+			LastSeen:        chatsProtoTimePtr(httpx.JST(u.LastSeenAt)),
+			EmailVerifiedAt: chatsProtoTimePtr(httpx.JST(u.EmailVerifiedAt)),
 		}
 		if b, err := proto.Marshal(reply); err == nil {
 			w.Header().Set("Content-Type", protobufMediaType)
@@ -302,11 +304,6 @@ func userProfileWrite(w http.ResponseWriter, r *http.Request, u *userUsersRow) {
 	}
 	httpx.JSON(w, 200, u.public())
 }
-
-// The literal from httpx.JSTime.MarshalJSON with its surrounding quotes removed.
-// Pinned by a test rather than trusted: user_profile_negotiation_test.go asserts
-// the two paths emit the same string for the same instant.
-const userProfileTimeLayout = "2006-01-02T15:04:05.000Z"
 
 // ── GET /user/security-overview ────────────────────────────────────────
 

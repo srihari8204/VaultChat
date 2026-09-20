@@ -12,7 +12,7 @@
 //   - presence per field, in both directions (nil must be ABSENT, "" must be
 //     present-and-empty — for `status` that is "not set" vs "cleared"),
 //   - the timestamps, compared against the JSON path's own output rather than
-//     a literal, because userProfileTimeLayout is a SECOND copy of the format
+//     a literal, because a hand-written layout string is a second copy of the format
 //     inside httpx.JSTime.MarshalJSON and a copy is what drifts.
 //
 // The database is not involved: userProfileWrite is the whole negotiation, and
@@ -22,6 +22,7 @@
 package routes
 
 import (
+	"encoding/hex"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -414,5 +415,49 @@ func TestUserProfileHasPinDerived(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// CROSS-LANGUAGE BYTE PIN, the one every sibling endpoint has and this file was
+// missing (user_backup_meta_negotiation_test.go:192, appversion, chats_common,
+// app_flags). Without it a renumbered field -- swapping 7 and 8, say -- keeps
+// every other Go test in this file green and breaks only real clients, because
+// nothing else here looks at the bytes. lib/userProfileNegotiation.selftest.ts
+// pins its own hex and its comment ASSERTS the Go side agrees; until now
+// nothing checked that claim.
+//
+// Decoded by hand, not pasted from a run:
+//
+//	0a06 "u_full"            1 id
+//	120e "a@example.test"    2 email
+//	1a0c "Ada Lovelace"      3 name
+//	220c "+15550001111"      4 phone
+//	2a16 "https://cdn…png"   5 photo_url
+//	320d "vdeadbeefcafe"     6 vault_id
+//	3a3e "Sat Jul 21 1990…"  7 dob, the legacy JS-Date string identity() builds
+//	4204 "Busy"              8 status
+//	4801                     9 online = true
+//	5218 "2026-03-04T…890Z" 10 last_seen
+//	5a06 "google"           11 auth_provider
+//	6001                    12 has_pin = true
+//	6803                    13 face_count = 3
+//	7218 "2025-12-31T…999Z" 14 email_verified_at
+//	7a18 "2024-01-02T…060Z" 15 created_at
+const userProfileGoldenWire = "0a06755f66756c6c120e61406578616d706c652e746573741a0c416461204c6f76656c616365220c2b31353535303030313131312a1668747470733a2f2f63646e2e746573742f612e706e67320d766465616462656566636166653a3e536174204a756c20323120313939302030303a30303a303020474d542b303030302028436f6f7264696e6174656420556e6976657273616c2054696d652942044275737948015218323032362d30332d30345430353a30363a30372e3839305a5a06676f6f676c65600168037218323032352d31322d33315432333a35393a35392e3939395a7a18323032342d30312d30325430333a30343a30352e3036305a"
+
+// The all-nulls row is the more valuable half of this pin: TWO fields, nothing
+// else. Ten absent optionals cost ZERO bytes, and online / has_pin / face_count
+// are proto3 defaults that are elided rather than sent as false/false/0. If a
+// nullable field ever loses its `optional`, a null starts encoding as "" and
+// this constant grows -- which is exactly the regression the TS decoder would
+// then turn back into "" instead of null, silently, in a cached row.
+const userProfileEmptyGoldenWire = "0a07755f656d7074797a18323032362d30312d30315430303a30303a30302e3030305a"
+
+func TestUserProfileWireBytePin(t *testing.T) {
+	if got := hex.EncodeToString(getUserProfile(t, protobufMediaType, userProfileFullRow()).Body.Bytes()); got != userProfileGoldenWire {
+		t.Errorf("wire bytes = %s want %s", got, userProfileGoldenWire)
+	}
+	if got := hex.EncodeToString(getUserProfile(t, protobufMediaType, userProfileEmptyRow()).Body.Bytes()); got != userProfileEmptyGoldenWire {
+		t.Errorf("all-nulls wire bytes = %s want %s", got, userProfileEmptyGoldenWire)
 	}
 }
