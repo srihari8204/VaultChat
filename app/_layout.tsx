@@ -73,6 +73,7 @@ import '../lib/lock/background';   // registers the Location Lock geofence task 
                                    // rule: headless wakes need it defined at load
 import { getAccessToken, getLaunchSessionState } from '../lib/api';
 import { settleLaunchGate } from '../lib/launchGate';
+import { stashLaunchLink } from '../lib/pendingLink';
 import { isMfaEnabled } from '../lib/mfa';
 import { E2EE_ENABLED, SCHEDULED_LOCAL } from '../constants/flags';
 import { mark } from '../lib/perf';
@@ -233,14 +234,37 @@ function RootLayoutInner() {
   useEffect(() => {
     let live = true;
     const secure = Platform.OS === 'web' ? Promise.resolve(false) : setSecure(true);
+    // WHERE THIS LAUNCH WAS TRYING TO GO, captured before anything redirects.
+    //
+    // Every branch below except 'allow' calls router.replace, and a replace
+    // discards the deep link for good -- nothing else in the app remembered it.
+    // So a link into a signed-out or locked app was silently dropped: tap link,
+    // get the lock screen, unlock, land on Chats, never learn the link existed.
+    // Found via vaultchat://emergency-sos, but SOS was never special -- an
+    // invite, a chat and a call all died the same way.
+    //
+    // `pathname`, NOT expo-linking's initial-URL read. Two guards forbid that
+    // call here by NAME, matching on the raw file text -- so this comment must
+    // not spell it either.
+    // (lib/startupColdPath.selftest.ts:40, lib/games/gamesNative.selftest.ts:520)
+    // because the splash must be hidden on `launchReady` and nothing else, and
+    // an await on the URL is how that property gets quietly broken. It is also
+    // unnecessary: expo-router has ALREADY routed the initial URL by the time
+    // this effect runs -- effects fire after the first render -- so pathname is
+    // that destination, with no new import on the cold-start path.
+    //
+    // Stashed only on the redirecting branches. A launch that is allowed
+    // through needs no help; it is already where it was going.
     Promise.all([secure, getLaunchSessionState(), isMfaEnabled()])
       .then(([, session, mfaOn]) => {
         if (!live) return;
         if (!session.signedIn) {
+          stashLaunchLink(pathname);
           settleLaunchGate(false);
           setLaunchGate('/onboard');
           router.replace('/onboard' as any);
         } else if (mfaOn || session.sealedLocked) {
+          stashLaunchLink(pathname);
           settleLaunchGate(false);
           setLaunchGate('/app-lock');
           router.replace('/app-lock' as any);
@@ -251,6 +275,10 @@ function RootLayoutInner() {
       })
       .catch(() => {
         if (!live) return;
+        // The catch redirects too, so it must stash too. This branch is not
+        // theoretical: a SecureStore read that throws lands here, and on some
+        // Android skins that is the common cold-start failure.
+        stashLaunchLink(pathname);
         settleLaunchGate(false);
         setLaunchGate('/onboard');
         router.replace('/onboard' as any);
