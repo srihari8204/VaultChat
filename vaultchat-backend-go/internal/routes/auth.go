@@ -2048,11 +2048,52 @@ func authMpinVerify(w http.ResponseWriter, r *http.Request) {
 
 // ── GET /auth/security-questions/{userId} ──────────────────────────────
 
+// THROTTLED, and deliberately NOT behind RequireAuth.
+//
+// Account recovery is pre-auth by definition — the whole point is that the
+// person cannot sign in — so demanding a token here would break the flow this
+// route exists to serve. What was missing is a cost per attempt.
+//
+// Without one, this is the front half of a recovery chain
+// (/auth/security-questions/{userId} -> .../verify -> /auth/mpin/recover) that
+// could be swept at line rate: hand it a userId, get that account's exact
+// recovery questions back, with no auth, no limit and no delay. The limiter it
+// now uses is the same redisx one authPhoneSendGate has used next door all
+// along (auth_phone.go:140-155); this route simply never picked it up.
+//
+// Two keys, because they stop different attacks:
+//   - per IP catches one attacker sweeping many userIds,
+//   - per userId catches a distributed sweep grinding one account.
+//
+// The limits are generous for a human — somebody recovering an account reloads
+// a handful of times, not twenty — and ruinous for a sweep.
+//
+// FAILS OPEN when Redis is down (redisx.Consume returns Allowed with a nil
+// Client, redisx.go:185-187). That is the existing convention on every other
+// limited route here, and the trade is deliberate: a Redis outage must not lock
+// people out of account recovery. It does mean the throttle is only as available
+// as Redis.
+//
+// STILL AN EXISTENCE ORACLE, and not fixed here: an unknown userId answers
+// `{"questions":[]}` while a real one answers a populated list, so this route
+// still distinguishes real accounts from invented ones. Closing that means
+// returning a plausible fixed-size list for unknown ids, which changes what the
+// recovery screen renders — a behaviour change that wants its own commit and its
+// own device test, not a quiet rider on a rate-limit fix.
 func authSecurityQuestionsGet(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
+	userID := r.PathValue("userId")
+	if perIP := redisx.Consume(ctx, "sq:get-ip:"+authClientIP(r), 20, 3600); !perIP.Allowed {
+		authEnvErrRetry(w, 429, "rate_limited", "Too many requests. Try again later.", perIP.ResetInSec)
+		return
+	}
+	if perUser := redisx.Consume(ctx, "sq:get-user:"+userID, 10, 3600); !perUser.Allowed {
+		authEnvErrRetry(w, 429, "rate_limited", "Too many requests. Try again later.", perUser.ResetInSec)
+		return
+	}
 	rows, err := db.Pool.Query(ctx,
 		`SELECT question_code FROM user_security_questions WHERE user_id = $1 ORDER BY created_at`,
-		r.PathValue("userId"))
+		userID)
 	if err != nil {
 		authEnvErr(w, 500, "server_error", "Could not load questions")
 		return
