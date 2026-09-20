@@ -12,7 +12,13 @@
 
 param(
   [string]$VmHost   = 'root@65.21.229.167',
-  [string]$Loopback = 'http://127.0.0.1:8095'
+  [string]$Loopback = 'http://127.0.0.1:8095',
+  # Caddy refuses /internal/* from outside (caddy/Caddyfile:25-26), so the
+  # metrics scrape must go straight at go-api. Through :8095 it is a 404, and
+  # section 5 then reports "absent - this box predates the counter" about a box
+  # that is serving the counter perfectly on :14000. Same trap already fixed in
+  # verify-protobuf.ps1; this file was missed.
+  [string]$GoApi    = 'http://127.0.0.1:14000'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -69,7 +75,7 @@ $sizes | ForEach-Object { Note $_ }
 if ($sizes -match '(^|\s)0\s+/tmp/') { Warn 'a baseline is EMPTY - fix that before deploying, or check 4 proves nothing' }
 
 Section '5. metrics baseline'
-$m = Box "curl -s -m 10 $Loopback/internal/metrics | grep responses_total"
+$m = Box "curl -s -m 10 $GoApi/internal/metrics | grep responses_total"
 if ($m) { $m | ForEach-Object { Note $_ } }
 else    { Note 'absent - this box predates the counter. Expected; you get a post-deploy reading, not a diff.' }
 
