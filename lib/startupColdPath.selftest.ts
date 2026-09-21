@@ -7,7 +7,6 @@ const index = read('app/index.tsx');
 const layout = read('app/_layout.tsx');
 const api = read('lib/api.ts');
 const pkg = JSON.parse(read('package.json'));
-const gradleProps = read('android/gradle.properties');
 
 function check(name: string, pass: boolean): void {
   if (!pass) throw new Error(`FAIL: ${name}`);
@@ -29,9 +28,28 @@ check('session snapshot reads sealed state at most once',
 check('session snapshot preserves sealed-lock routing',
   snapshot.includes('{ signedIn: true, sealedLocked: true }'));
 check('release Android build excludes Expo dev tooling',
+  // expo-dev-client is a real dependency (~6.0.20), so what actually keeps it
+  // out of a release APK is this autolinking exclude — it is the invariant.
+  //
+  // 2026-09-21: this check also required EX_DEV_CLIENT_NETWORK_INSPECTOR=false
+  // in android/gradle.properties. That assertion could never hold on a fresh
+  // tree and was dropped, NOT weakened:
+  //   * android/ is gitignored (.gitignore:43 `/android`) and has no tracked
+  //     files — it is `expo prebuild` output, regenerated from scratch by
+  //     build:android:apk (`expo prebuild --platform android --clean`).
+  //   * nothing in the tracked repo ever writes that property. No config
+  //     plugin touches gradle.properties and app.json's expo-build-properties
+  //     does not set it, so prebuild emits the stock template line, which is
+  //     `=true`. The commit that added the check (e407d6d) added the
+  //     package.json exclude but no build-config change to pair with it.
+  //   * reading the file at all was the wrong shape: a clean clone has no
+  //     android/ tree, so the top-level read threw ENOENT before any check
+  //     ran. lib/buildInputs.selftest.ts is the model here — it guards its
+  //     android/ read with existsSync and says so when the tree is absent.
+  // The property is moot once the modules are excluded: it is consumed by
+  // expo-dev-launcher's gradle logic, and an unlinked module reads nothing.
   ['expo-dev-client', 'expo-dev-launcher', 'expo-dev-menu', 'expo-dev-menu-interface']
-    .every((name) => pkg.expo?.autolinking?.android?.exclude?.includes(name)) &&
-  /EX_DEV_CLIENT_NETWORK_INSPECTOR=false/.test(gradleProps));
+    .every((name) => pkg.expo?.autolinking?.android?.exclude?.includes(name)));
 check('protected content stays veiled until the root gate resolves',
   // 2026-09-19: the veil now also latches down once the redirect has landed
   // (`landed`), so the first navigation inside the auth flow no longer veils

@@ -34,7 +34,19 @@ const ROOT = path.resolve(__dirname, '..');
 // is a suite that quietly stops being true.
 const SEARCH_DIRS = ['lib', 'services', 'utils', 'constants', 'db', 'hooks', 'components', 'scripts'];
 const SKIP_DIRS = new Set(['node_modules', '.git', 'android', 'ios', 'dist', 'rust', '__vectors__']);
-const SKIP_FILES = new Set(['scripts/audit-regression.ts', 'scripts/test-all.ts']);
+// scripts/coldstart.ts matches the `require.main === module` idiom, but what it
+// guards is a BENCHMARK, not a self-check: main() drives `adb`, force-stops the
+// app on every attached handset and measures launch times. With no device it
+// exits 1 ("no devices attached"), which is the right answer for a benchmark
+// (npm run bench:coldstart) and a false failure for npm test. Its pure parsers
+// are the part worth testing and they have their own suite,
+// scripts/coldstart.selftest.ts, which this runner discovers and which passes —
+// so skipping the CLI loses no coverage.
+const SKIP_FILES = new Set([
+  'scripts/audit-regression.ts',
+  'scripts/test-all.ts',
+  'scripts/coldstart.ts',
+]);
 // tsx boots per process; this is the sweet spot between spawn overhead and
 // oversubscribing CI runners.
 const CONCURRENCY = Number(process.env.TEST_CONCURRENCY || 6);
