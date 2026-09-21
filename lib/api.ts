@@ -28,46 +28,15 @@ let tokenRevision = 0;
 let _sealKey: Uint8Array | null = null;                         // PIN-derived key, cached after unlock/setup
 const sealMod  = () => import('../services/security/sessionSeal');
 const cacheMod = () => import('./cacheCrypto');                 // #32 Phase B: at-rest cache DEK
-let cachedAccessToken: string | null | undefined;
-let cachedRefreshToken: string | null | undefined;
-let accessTokenRead: Promise<string | null> | null = null;
-let refreshTokenRead: Promise<string | null> | null = null;
-
-function forgetPlaintextTokenCache(): void {
-  cachedAccessToken = undefined;
-  cachedRefreshToken = undefined;
-  accessTokenRead = null;
-  refreshTokenRead = null;
-}
 
 export async function getAccessToken(): Promise<string | null> {
-  if (VAULT_SESSION_SEALED) return _mem?.access ?? SecureStore.getItemAsync(ACCESS_TOKEN_KEY);
-  if (cachedAccessToken !== undefined) return cachedAccessToken;
-  if (!accessTokenRead) {
-    const revision = tokenRevision;
-    accessTokenRead = SecureStore.getItemAsync(ACCESS_TOKEN_KEY)
-      .then((token) => {
-        if (revision === tokenRevision) cachedAccessToken = token;
-        return token;
-      })
-      .finally(() => { accessTokenRead = null; });
-  }
-  return accessTokenRead;
+  if (VAULT_SESSION_SEALED && _mem) return _mem.access;
+  return SecureStore.getItemAsync(ACCESS_TOKEN_KEY);
 }
 
 export async function getRefreshToken(): Promise<string | null> {
-  if (VAULT_SESSION_SEALED) return _mem?.refresh ?? SecureStore.getItemAsync(REFRESH_TOKEN_KEY);
-  if (cachedRefreshToken !== undefined) return cachedRefreshToken;
-  if (!refreshTokenRead) {
-    const revision = tokenRevision;
-    refreshTokenRead = SecureStore.getItemAsync(REFRESH_TOKEN_KEY)
-      .then((token) => {
-        if (revision === tokenRevision) cachedRefreshToken = token;
-        return token;
-      })
-      .finally(() => { refreshTokenRead = null; });
-  }
-  return refreshTokenRead;
+  if (VAULT_SESSION_SEALED && _mem) return _mem.refresh;
+  return SecureStore.getItemAsync(REFRESH_TOKEN_KEY);
 }
 
 export async function setTokens(access: string, refresh: string): Promise<void> {
@@ -84,15 +53,12 @@ export async function setTokens(access: string, refresh: string): Promise<void> 
   }
   await SecureStore.setItemAsync(ACCESS_TOKEN_KEY,  access);
   await SecureStore.setItemAsync(REFRESH_TOKEN_KEY, refresh);
-  cachedAccessToken = access;
-  cachedRefreshToken = refresh;
 }
 
 export async function clearTokens(): Promise<void> {
   tokenRevision++;
   _mem = null;
   _sealKey = null;
-  forgetPlaintextTokenCache();
   await SecureStore.deleteItemAsync(ACCESS_TOKEN_KEY).catch(() => {});
   await SecureStore.deleteItemAsync(REFRESH_TOKEN_KEY).catch(() => {});
   if (VAULT_SESSION_SEALED) { try { await (await sealMod()).clearSealedSession(); } catch {} }
@@ -136,7 +102,7 @@ export async function getLaunchSessionState(): Promise<{ signedIn: boolean; seal
     } catch {}
   }
   return {
-    signedIn: !!(await getAccessToken()),
+    signedIn: !!(await SecureStore.getItemAsync(ACCESS_TOKEN_KEY)),
     sealedLocked: false,
   };
 }
