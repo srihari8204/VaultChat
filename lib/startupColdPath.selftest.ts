@@ -93,6 +93,11 @@ check('killed-state task registrations remain at module scope',
   layout.indexOf("import '../lib/syncBackground'") < layout.indexOf('function RootLayoutInner'));
 check('socket and active security scan still start before deferred work',
   layout.indexOf('void getSocket()') < deferredAt && layout.indexOf('runSecurityCheck()') < deferredAt);
+check('startup token reads are coalesced',
+  api.includes('let _accessTokenPromise: Promise<string | null> | null = null') &&
+  api.includes('let _refreshTokenPromise: Promise<string | null> | null = null') &&
+  (api.match(/_accessTokenPromise = null/g) ?? []).length >= 3 &&
+  (api.match(/_refreshTokenPromise = null/g) ?? []).length >= 3);
 
 // ── Instrumentation honesty ────────────────────────────────────────────────
 //
@@ -109,14 +114,19 @@ check('socket and active security scan still start before deferred work',
 const localDb = read('lib/localDb.ts');
 const perfDebug = read('app/perf-debug.tsx');
 const perf = read('lib/perf.ts');
+const socket = read('lib/socket.ts');
 
 check('instrumentation is measured at the real site, not at a caller',
   /mark\('db_open_start'\)/.test(localDb) && /mark\('db_ready'\)/.test(localDb) &&
   !layout.includes("mark('db_ready')"));
 check('cold-path marks survive into release logs',
-  ['db_open_start', 'db_ready', 'chats_paint_cache', 'chats_paint_net']
+  ['db_open_start', 'db_ready', 'chats_paint_cache', 'chats_paint_net', 'socket_connect_start']
     .every((m) => /const BOOT_MARK = (\/[^\n]*\/)/.exec(perf) != null &&
       new RegExp(/const BOOT_MARK = \/([^\n]*)\/;/.exec(perf)[1]).test(m)));
+check('CC-Wire connection timing is visible in boot marks',
+  /mark\('socket_connect_start'\)/.test(socket) &&
+  /mark\('socket_token_ready'\)/.test(socket) &&
+  /mark\('socket_connect_ready'/.test(socket));
 check('submit counters are not labelled as frame counters',
   !perfDebug.includes('Protobuf submits') &&
   perfDebug.includes('Text submits / acks (ccwire)') &&

@@ -8,7 +8,7 @@
 import { HEADER_TOP, TAB_BAR_SPACE } from '../../constants/layout';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, AppState, Modal, Pressable, RefreshControl, ScrollView, SectionList, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
+import { ActivityIndicator, Alert, AppState, InteractionManager, Modal, Pressable, RefreshControl, ScrollView, SectionList, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
 import { Image } from 'expo-image';
 import { Swipeable } from 'react-native-gesture-handler';
 import { Ionicons } from '@expo/vector-icons';
@@ -73,6 +73,11 @@ function mergeChats(prev: ChatSummary[], next: ChatSummary[]): ChatSummary[] {
   return merged;
 }
 
+function afterInteractions(task: () => void): () => void {
+  const handle = InteractionManager.runAfterInteractions(task);
+  return () => { try { (handle as any).cancel?.(); } catch {} };
+}
+
 function useS() {
   const { colors } = useTheme();
   return useMemo(() => makeStyles(colors), [colors]);
@@ -130,18 +135,25 @@ export default function ChatsScreen() {
       );
     } catch { /* offline / not signed in — leave the banner hidden */ }
   }, []);
-  useFocusEffect(useCallback(() => { refreshInvites(); }, [refreshInvites]));
+  const didInitialInviteFocus = useRef(false);
+  useFocusEffect(useCallback(() => {
+    if (!didInitialInviteFocus.current) {
+      didInitialInviteFocus.current = true;
+      return afterInteractions(() => { refreshInvites(); });
+    }
+    refreshInvites();
+  }, [refreshInvites]));
   useEffect(() => {
     let off: (() => void) | null = null;
     let dead = false;
-    (async () => {
+    const cancelStartup = afterInteractions(() => { (async () => {
       try {
         const { on } = await import('../../lib/socket');
         const unsub = await on('invitation_created', () => refreshInvites());
         if (dead) unsub(); else off = unsub;
       } catch {}
-    })();
-    return () => { dead = true; off?.(); };
+    })(); });
+    return () => { dead = true; cancelStartup(); off?.(); };
   }, [refreshInvites]);
 
   useEffect(() => {
@@ -154,21 +166,24 @@ export default function ChatsScreen() {
   }, []);
 
   // Core list load.
-  const loadList = useCallback(async () => {
+  const loadList = useCallback(async (refreshPreviews = true) => {
     // Previews come from the local DB and need NO network, but this used to sit
     // below `await listChats()` — so offline, that first line threw and every
     // row fell back to "Tap to open chat" even though the text was on disk.
     // Measured: online showed "You: Hiiiii", the same row offline showed the
     // placeholder. Load them first, unconditionally.
-    getLastMessagePerChat().then(hydrateOwnPreviews).then(setLastMsgs).catch(() => {});
+    if (refreshPreviews) getLastMessagePerChat().then(hydrateOwnPreviews).then(setLastMsgs).catch(() => {});
+    mark('chats_fetch_start');
     try {
       const list = await listChats();
+      mark('chats_fetch_done', { rows: list.length });
       setChats(prev => mergeChats(prev, list));                 // identity-preserving → memoized rows skip re-render
       cacheChats(list).catch(() => {});                         // persist for instant next-launch paint (op-sqlite engine)
       setError(null);
       // Publish total unread (non-archived) so the Chats tab can badge it.
       setUnreadTotal(list.reduce((n, c) => n + (c.archived ? 0 : (c.unreadCount > 0 ? 1 : 0)), 0));
     } catch (e: any) {
+      mark('chats_fetch_error');
       setError(e?.message ?? 'Failed to load chats');
     }
   }, []);
@@ -196,6 +211,8 @@ export default function ChatsScreen() {
   useEffect(() => {
     let cancel = false;
     (async () => {
+      const previewPromise = getLastMessagePerChat().then(hydrateOwnPreviews);
+      previewPromise.then(m => { if (!cancel) setLastMsgs(m); }).catch(() => {});
       // Paint cached chats instantly (WhatsApp-style) so there's no spinner on
       // cold start; the network fetch then reconciles in the background.
       try {
@@ -215,32 +232,44 @@ export default function ChatsScreen() {
           mark('chats_paint_cache', { rows: cached.length });
         } else if (!cancel) mark('chats_cache_empty');
       } catch {}
-      await fetchList();
+      await loadList(false);
       if (!cancel) { setLoading(false); mark('chats_paint_net'); }
     })();
     return () => { cancel = true; };
-  }, [fetchList]);
+  }, [loadList]);
 
   // Refresh the list (so unread counts clear after reading) + draft previews
   // whenever the screen regains focus — e.g. coming back from a chat.
+  //
+  // Skip the mount focus: the cold-start effect above already paints cache and
+  // starts exactly one listChats() refresh. Running this focus callback too made
+  // first launch do two identical /chats requests.
+  const didInitialFocus = useRef(false);
   useFocusEffect(useCallback(() => {
+    if (!didInitialFocus.current) {
+      didInitialFocus.current = true;
+      return afterInteractions(() => { getDraftMap().then(setDrafts).catch(() => {}); });
+    }
     fetchList();
     getDraftMap().then(setDrafts).catch(() => {});
   }, [fetchList]));
-  useEffect(() => { registerPushToken().catch(() => {}); }, []);
+  useEffect(() => afterInteractions(() => { registerPushToken().catch(() => {}); }), []);
 
   // Auto-backup: a few seconds after the list is up, run a scheduled backup if
   // it's due and the network policy (Wi-Fi only / any) allows. Silent + safe.
   useEffect(() => {
-    const t = setTimeout(() => { runScheduledBackupIfDue().catch(() => {}); }, 4000);
-    return () => clearTimeout(t);
+    let t: ReturnType<typeof setTimeout> | null = null;
+    const cancelStartup = afterInteractions(() => {
+      t = setTimeout(() => { runScheduledBackupIfDue().catch(() => {}); }, 4000);
+    });
+    return () => { cancelStartup(); if (t) clearTimeout(t); };
   }, []);
 
   // Restore-on-reinstall (WhatsApp-style): once per install, if a cloud backup
   // exists, offer to restore it. AsyncStorage is wiped on reinstall, so the
   // "prompted" flag resets and a returning user is offered their backup again.
   useEffect(() => {
-    (async () => {
+    const cancelStartup = afterInteractions(() => { (async () => {
       try {
         if (await AsyncStorage.getItem('vc_restore_prompted')) return;
         const meta = await cloudBackupMeta();
@@ -262,8 +291,9 @@ export default function ChatsScreen() {
           );
         }
       } catch {}
-    })();
-  }, []);
+    })(); });
+    return cancelStartup;
+  }, [router]);
 
   // Realtime: new messages refresh the list; presence patches in place.
   useEffect(() => {
@@ -354,7 +384,9 @@ export default function ChatsScreen() {
     return () => sub.remove();
   }, [scheduleRefresh]);
 
-  useEffect(() => { getCurrentUserAsync().then(u => setMeId(u?.id ?? null)).catch(() => {}); }, []);
+  useEffect(() => afterInteractions(() => {
+    getCurrentUserAsync().then(u => setMeId(u?.id ?? null)).catch(() => {});
+  }), []);
 
   const onRefresh = useCallback(async () => { setRefreshing(true); await fetchList(); setRefreshing(false); }, [fetchList]);
   const onOpenChat = (id: string) => router.push({ pathname: '/chat', params: { id } } as any);

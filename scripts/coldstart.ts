@@ -4,6 +4,7 @@
 //   tsx scripts/coldstart.ts                        all devices, VaultChat only
 //   tsx scripts/coldstart.ts --vs com.whatsapp      compare against another app
 //   tsx scripts/coldstart.ts --runs 8 --net         more runs, plus network timing
+//   tsx scripts/coldstart.ts --runs 8 --net --marks include app boot markers
 //   tsx scripts/coldstart.ts --device <serial>      one device
 //   tsx scripts/coldstart.ts --json out.json        machine-readable too
 //
@@ -149,7 +150,31 @@ function median(xs) {
   return s.length % 2 ? s[mid] : Math.round((s[mid - 1] + s[mid]) / 2);
 }
 
-module.exports = { parseDevices, parseUid, parseLauncher, parseStart, isCold, median };
+function parsePerfMarkLine(line) {
+  const m = String(line || '').match(/\[perf\]\s+([A-Za-z0-9_:-]+)(?:\s+@(\d{13}))?/);
+  return m ? { event: m[1], t: m[2] ? Number(m[2]) : null } : null;
+}
+
+function summarizePerfMarks(log) {
+  const marks = String(log || '').split('\n').map(parsePerfMarkLine).filter(Boolean);
+  const base = marks.find((m) => m.t != null)?.t ?? null;
+  return marks.map((m) => ({
+    ...m,
+    sinceFirstMs: base != null && m.t != null ? m.t - base : null,
+  }));
+}
+
+function medianMark(markRuns, event) {
+  const xs = (markRuns || [])
+    .map((run) => (run || []).find((m) => m.event === event)?.sinceFirstMs)
+    .filter((n) => typeof n === 'number');
+  return median(xs);
+}
+
+module.exports = {
+  parseDevices, parseUid, parseLauncher, parseStart, isCold, median,
+  parsePerfMarkLine, summarizePerfMarks, medianMark,
+};
 
 // ── everything below needs a device, and runs only under require.main ───
 
@@ -224,6 +249,8 @@ function main() {
   };
   const RUNS = Math.max(1, Number(flag('runs', 6)) || 6);
   const WANT_NET = argv.includes('--net');
+  const WANT_MARKS = argv.includes('--marks');
+  const MARK_WAIT_MS = Math.max(1000, Number(flag('mark-wait', 5000)) || 5000);
   const ONLY = flag('device', null);
   const JSON_OUT = flag('json', null);
   const VS = flag('vs', null);
@@ -240,18 +267,29 @@ function main() {
 
   const coldRuns = (serial, app) => {
     const times = [];
+    const markRuns = [];
     let warmed = 0;
     let metric = null;
     for (let i = 0; i < RUNS; i++) {
       sh(serial, `am force-stop ${app.pkg}`);
+      if (WANT_MARKS && app.pkg === PKG) adb(serial, ['logcat', '-c']);
       sleep(2000);
+      const launchT0 = WANT_MARKS && app.pkg === PKG ? Number(sh(serial, 'date +%s%3N').trim()) : null;
       const r = parseStart(sh(serial, `am start -W -S -n ${app.activity}`, 90000));
+      if (WANT_MARKS && app.pkg === PKG) {
+        sleep(MARK_WAIT_MS);
+        markRuns.push(summarizePerfMarks(adb(serial, ['logcat', '-d', '-v', 'brief', '-s', 'ReactNativeJS'], 90000))
+          .map((m) => ({
+            ...m,
+            sinceLaunchMs: launchT0 && m.t != null ? m.t - launchT0 : null,
+          })));
+      }
       if (!isCold(r.launchState)) { warmed++; sleep(3000); continue; }
       if (r.totalMs != null) { times.push(r.totalMs); metric = r.metric; }
       sleep(3000);
     }
     sh(serial, `am force-stop ${app.pkg}`);
-    return { times, warmed, metric };
+    return { times, warmed, metric, markRuns };
   };
 
   const pushNetScript = (serial) => {
@@ -287,7 +325,7 @@ function main() {
     process.exit(1);
   }
 
-  console.log(`\ncold start — ${devices.length} device(s), ${RUNS} runs each${WANT_NET ? ', +network' : ''}\n`);
+  console.log(`\ncold start — ${devices.length} device(s), ${RUNS} runs each${WANT_NET ? ', +network' : ''}${WANT_MARKS ? ', +boot marks' : ''}\n`);
   const report = [];
 
   for (const serial of devices) {
@@ -308,7 +346,7 @@ function main() {
       const app = appInfo(serial, pkg);
       if (!app) { console.log(`  ${pkg.padEnd(22)} not installed — skipped`); continue; }
 
-      const { times, warmed, metric } = coldRuns(serial, app);
+      const { times, warmed, metric, markRuns } = coldRuns(serial, app);
       const row = {
         ...app,
         runs: times,
@@ -317,6 +355,7 @@ function main() {
         coldMax: times.length ? Math.max(...times) : null,
         metric,
         warmedSkipped: warmed,
+        bootMarks: markRuns.length ? markRuns : undefined,
         connMs: remote ? netRun(serial, app, remote) : null,
       };
       dev.apps.push(row);
@@ -336,6 +375,23 @@ function main() {
                 : row.connMs ? `   first conn ${row.connMs}` : '')
         + (warmed ? `   [${warmed} non-cold dropped]` : ''),
       );
+      if (row.bootMarks) {
+        const parts = [
+          ['unblocked', medianMark(row.bootMarks, 'boot_unblocked')],
+          ['ccwire-start', medianMark(row.bootMarks, 'socket_connect_start')],
+          ['ccwire-token', medianMark(row.bootMarks, 'socket_token_ready')],
+          ['ccwire-ready', medianMark(row.bootMarks, 'socket_connect_ready')],
+          ['deferred', medianMark(row.bootMarks, 'boot_deferred_start')],
+          ['db', medianMark(row.bootMarks, 'db_ready')],
+          ['chats-cache', medianMark(row.bootMarks, 'chats_paint_cache')],
+          ['chats-net', medianMark(row.bootMarks, 'chats_paint_net')],
+        ].filter(([, v]) => typeof v === 'number');
+        if (parts.length) {
+          console.log(' '.repeat(26) + 'boot marks ' + parts.map(([k, v]) => `${k} ${v}ms`).join(', '));
+        } else {
+          console.log(' '.repeat(26) + 'boot marks no [perf] lines captured');
+        }
+      }
     }
     report.push(dev);
     console.log('');

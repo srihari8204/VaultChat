@@ -116,7 +116,6 @@ export function selectTransport(): TransportName {
 
 async function connect(): Promise<RealtimeSocket> {
   const generation = ccwireGeneration;
-  if (!(await getAccessToken())) throw new Error('Not signed in');
   perf.setSendTransport('http');
   perf.setConnState('connecting'); setConn('CONNECTING');
   let candidate: RealtimeSocket | null = null;
@@ -129,9 +128,10 @@ async function connect(): Promise<RealtimeSocket> {
     // costs a microtask, not a yield back to the boot effect. Three of the five
     // are also one static dependency chain (eventsSocket -> transport ->
     // client), so requiring eventsSocket already evaluates the other two.
-    // The ONE real win: import('./ccwire/nativeSocket') used to sit behind
-    // `await getDeviceId()`, a genuine SecureStore/Keystore round trip (tens of
-    // ms on Android). Its module eval now overlaps that read. That is all.
+    // The real wins are the native socket import and the first access-token read
+    // overlapping module/device-id setup. Both touch Android storage/native
+    // code and show up in cold-start marks; neither needs to serialize the
+    // other.
     //
     // FAILURE SEMANTICS: preserved for every entry — a transport/eventsSocket/
     // client rejection still rejects and lands in the catch below; nativeSocket
@@ -140,13 +140,19 @@ async function connect(): Promise<RealtimeSocket> {
     // getDeviceId() now also runs on a failing-transport path where it used to
     // be skipped, so a first-run device may persist vc_device_id there. It is
     // idempotent and would happen on the next successful connect anyway.
-    const [m, { CCWireEventSocket }, { seedFromDeviceId }, deviceId, native] = await Promise.all([
+    const [accessToken, m, { CCWireEventSocket }, { seedFromDeviceId }, deviceId, native] = await Promise.all([
+      getAccessToken(),
       import('./ccwire/transport'),
       import('./ccwire/eventsSocket'),
       import('./ccwire/client'),
       import('../services/deviceService').then((x) => x.getDeviceId()).catch(() => undefined) as Promise<string | undefined>,
       import('./ccwire/nativeSocket').catch(() => null),
     ]);
+    if (!accessToken) {
+      perf.mark('socket_connect_no_token');
+      throw new Error('Not signed in');
+    }
+    perf.mark('socket_token_ready');
     const webSocket = native?.getNativeWebSocketImpl();
     const webTransportUrl = m.ccwireWebTransportUrl(SERVER_URL, process.env.EXPO_PUBLIC_CCWIRE_WEBTRANSPORT_URL);
     const webTransport = webTransportUrl ? native?.getNativeWebSocketImpl(webTransportUrl) : undefined;
@@ -191,6 +197,7 @@ async function connect(): Promise<RealtimeSocket> {
     });
     s.on('connect_error', noteConnectFailure);
     await s.waitUntilReady();
+    perf.mark('socket_connect_ready', { carrier: m.ccwireDiagnostics().carrier });
     if (generation !== ccwireGeneration) throw new Error('Session ended');
     return s;
   } catch (e) {
@@ -284,6 +291,7 @@ export async function getSocket(): Promise<RealtimeSocket> {
   // caller too. See kickReconnect for how that happens.
   if (connecting && !shouldAbandonPendingConnect(connectingSince, Date.now())) return connecting;
   connectingSince = Date.now();
+  perf.mark('socket_connect_start');
   const generation = ccwireGeneration;
   const attempt = connect()
     .then((s) => {

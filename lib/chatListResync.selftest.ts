@@ -62,5 +62,16 @@ check('resync goes through the coalescing scheduler, not a raw fetch',
   /scheduleRefresh/.test(SCREEN),
   'refresh should be debounced — several triggers can fire at once');
 
+// ── cold-start paint stays first ──────────────────────────────────────
+check('initial fetch reuses the preview read started for cache paint',
+  /await loadList\(false\)/.test(SCREEN),
+  'first mount should not run getLastMessagePerChat twice');
+
+check('non-paint startup work waits until after interactions',
+  /InteractionManager/.test(SCREEN)
+    && /afterInteractions\(\(\) => \{ registerPushToken/.test(SCREEN)
+    && /afterInteractions\(\(\) => \{[\s\S]*cloudBackupMeta/.test(SCREEN),
+  'push registration and restore probing should not compete with first paint');
+
 console.log(failures ? `\n  ${failures} FAILED\n` : '\n  all chat-list resync checks passed\n');
 process.exit(failures ? 1 : 0);

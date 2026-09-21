@@ -24,6 +24,8 @@ const USER_KEY          = 'vc_user';
 // are sealed under the unlock PIN and held in memory after unlock, never in
 // plaintext SecureStore. When OFF, every path below is byte-identical to before.
 let _mem: { access: string; refresh: string } | null = null;  // in-memory session (sealed mode only)
+let _accessTokenPromise: Promise<string | null> | null = null;
+let _refreshTokenPromise: Promise<string | null> | null = null;
 let tokenRevision = 0;
 let _sealKey: Uint8Array | null = null;                         // PIN-derived key, cached after unlock/setup
 const sealMod  = () => import('../services/security/sessionSeal');
@@ -31,16 +33,32 @@ const cacheMod = () => import('./cacheCrypto');                 // #32 Phase B: 
 
 export async function getAccessToken(): Promise<string | null> {
   if (VAULT_SESSION_SEALED && _mem) return _mem.access;
-  return SecureStore.getItemAsync(ACCESS_TOKEN_KEY);
+  if (!_accessTokenPromise) {
+    const p = SecureStore.getItemAsync(ACCESS_TOKEN_KEY).catch((e) => {
+      if (_accessTokenPromise === p) _accessTokenPromise = null;
+      throw e;
+    });
+    _accessTokenPromise = p;
+  }
+  return _accessTokenPromise;
 }
 
 export async function getRefreshToken(): Promise<string | null> {
   if (VAULT_SESSION_SEALED && _mem) return _mem.refresh;
-  return SecureStore.getItemAsync(REFRESH_TOKEN_KEY);
+  if (!_refreshTokenPromise) {
+    const p = SecureStore.getItemAsync(REFRESH_TOKEN_KEY).catch((e) => {
+      if (_refreshTokenPromise === p) _refreshTokenPromise = null;
+      throw e;
+    });
+    _refreshTokenPromise = p;
+  }
+  return _refreshTokenPromise;
 }
 
 export async function setTokens(access: string, refresh: string): Promise<void> {
   tokenRevision++;
+  _accessTokenPromise = null;
+  _refreshTokenPromise = null;
   if (VAULT_SESSION_SEALED) {
     _mem = { access, refresh };
     if (_sealKey) {
@@ -53,11 +71,15 @@ export async function setTokens(access: string, refresh: string): Promise<void> 
   }
   await SecureStore.setItemAsync(ACCESS_TOKEN_KEY,  access);
   await SecureStore.setItemAsync(REFRESH_TOKEN_KEY, refresh);
+  _accessTokenPromise = Promise.resolve(access);
+  _refreshTokenPromise = Promise.resolve(refresh);
 }
 
 export async function clearTokens(): Promise<void> {
   tokenRevision++;
   _mem = null;
+  _accessTokenPromise = null;
+  _refreshTokenPromise = null;
   _sealKey = null;
   await SecureStore.deleteItemAsync(ACCESS_TOKEN_KEY).catch(() => {});
   await SecureStore.deleteItemAsync(REFRESH_TOKEN_KEY).catch(() => {});
@@ -137,8 +159,12 @@ export async function sealCurrentSession(pin: string): Promise<void> {
  */
 export async function unsealCurrentSession(): Promise<void> {
   if (!VAULT_SESSION_SEALED || !_mem) return;
+  _accessTokenPromise = null;
+  _refreshTokenPromise = null;
   await SecureStore.setItemAsync(ACCESS_TOKEN_KEY,  _mem.access);
   await SecureStore.setItemAsync(REFRESH_TOKEN_KEY, _mem.refresh);
+  _accessTokenPromise = Promise.resolve(_mem.access);
+  _refreshTokenPromise = Promise.resolve(_mem.refresh);
   _sealKey = null;
   try { await (await sealMod()).clearSealedSession(); } catch {}
   // #32 Phase B: drop the in-memory DEK. The envelope on disk is deliberately
@@ -159,6 +185,8 @@ export async function loadSealedSession(pin: string): Promise<boolean> {
     const tokens = await m.unsealWithKey(key);
     if (tokens) {
       _mem = tokens; _sealKey = key;
+      _accessTokenPromise = null;
+      _refreshTokenPromise = null;
       // #32 Phase B: load the at-rest cache DEK with the same PIN key.
       try { await (await cacheMod()).unlockCacheKey(key); } catch {}
       return true;

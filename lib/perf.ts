@@ -20,7 +20,7 @@ const marks: PerfMark[] = [];
 let markIdx = 0;
 
 /** Marks that survive into release logs — the cold-start timeline only. */
-const BOOT_MARK = /^(boot_|db_|chats_|transport_)/;
+const BOOT_MARK = /^(boot_|db_|chats_|socket_|transport_)/;
 
 /** Record an event into the ring buffer (+ log in dev; boot marks always). */
 export function mark(event: string, meta?: Record<string, unknown>): void {
@@ -38,8 +38,8 @@ export function mark(event: string, meta?: Record<string, unknown>): void {
   // production env, so a console.log here is DELETED from the release bundle
   // at build time. Verified the expensive way — a release APK was built and
   // installed with console.log and logged nothing at all on either handset.
-  if (DEV) console.log(`[perf] ${event}`, meta ?? '');
-  else if (BOOT_MARK.test(event)) console.warn(`[perf] ${event}`, meta ?? '');
+  if (DEV) console.log(`[perf] ${event} @${m.t}`, meta ?? '');
+  else if (BOOT_MARK.test(event)) console.warn(`[perf] ${event} @${m.t}`, meta ?? '');
 }
 
 /** The last `n` marks, oldest→newest. */

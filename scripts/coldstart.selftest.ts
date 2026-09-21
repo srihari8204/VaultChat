@@ -19,7 +19,10 @@
 // uid fixture below is that exact dumpsys text. A parser that regresses to
 // first-match-wins fails here instead of on someone's desk.
 
-const { parseDevices, parseUid, parseLauncher, parseStart, isCold, median } = require('./coldstart.ts');
+const {
+  parseDevices, parseUid, parseLauncher, parseStart, isCold, median,
+  parsePerfMarkLine, summarizePerfMarks,
+} = require('./coldstart.ts');
 
 let failed = 0;
 function A(ok: boolean, what: string): void {
@@ -167,6 +170,21 @@ console.log('\ncoldstart parsers — against captured device output\n');
   const input = [3, 1, 2];
   median(input);
   A(JSON.stringify(input) === '[3,1,2]', '6d. the caller\'s array is not sorted in place');
+}
+
+// ── 7. boot marker log parsing ───────────────────────────────────────
+{
+  const line = '09-21 19:44:01.123 123 456 W ReactNativeJS: [perf] boot_unblocked @1790000000123';
+  const parsed = parsePerfMarkLine(line);
+  A(parsed?.event === 'boot_unblocked' && parsed?.t === 1790000000123,
+    '7. ReactNativeJS perf lines expose event and app timestamp');
+
+  const marks = summarizePerfMarks([
+    'W ReactNativeJS: [perf] boot_effect_start @1790000000100',
+    'W ReactNativeJS: [perf] boot_unblocked @1790000000180',
+  ].join('\n'));
+  A(marks.length === 2 && marks[1].sinceFirstMs === 80,
+    '7a. boot mark deltas are relative to the first captured mark');
 }
 
 console.log(failed
