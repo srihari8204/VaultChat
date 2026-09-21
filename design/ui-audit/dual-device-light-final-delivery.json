@@ -1,0 +1,17 @@
+{
+  "artifact": "VaultChat-light-ui-arm64.apk",
+  "sha256": "CB8B93134EB614558AB5F123585882928591296D8EFAA7E344589A4C9856443F",
+  "version": "1.2.15 (31)",
+  "devices": [
+    {
+      "serial": "w4eygyinypswrcz9",
+      "installedSha256": "CB8B93134EB614558AB5F123585882928591296D8EFAA7E344589A4C9856443F",
+      "accountDataPreserved": true
+    },
+    {
+      "serial": "AWJDVB4702008616",
+      "installedSha256": "CB8B93134EB614558AB5F123585882928591296D8EFAA7E344589A4C9856443F",
+      "accountDataPreserved": true
+    }
+  ]
+}

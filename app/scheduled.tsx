@@ -4,7 +4,7 @@
 // (last 7 days). Tap a pending row to cancel it. Recently-sent rows are
 // read-only confirmation that delivery fired.
 
-import { HEADER_TOP } from '../constants/layout';
+import { HEADER_TOP, SCREEN_BOTTOM } from '../constants/layout';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { useCallback, useEffect, useState , useMemo} from 'react';
@@ -14,7 +14,7 @@ import {
   FlatList,
   RefreshControl,
   StyleSheet,
-  Text,
+  ScrollView,
   TouchableOpacity,
   View,
 } from 'react-native';
@@ -31,6 +31,7 @@ import { listScheduled, cancelScheduled } from '../lib/scheduledQueue';
 import { cancelTrigger } from '../lib/scheduledRunner';
 import { getScheduledCopy, deleteScheduledCopy } from '../lib/scheduledLocalCopy';
 import { AuroraBackground } from '../components/ui';
+import { AppText as Text } from '../components/ui/Text';
 
 const CACHE_KEY = 'scheduled';
 
@@ -135,6 +136,7 @@ export default function ScheduledScreen() {
 
   return (
     <View style={S.screen}>
+      <AuroraBackground />
       <View style={S.header}>
         <TouchableOpacity accessibilityRole="button" accessibilityLabel="Back" onPress={() => router.back()} hitSlop={10} style={S.backBtn}>
           <Ionicons name="arrow-back" size={24} color={colors.text} />
@@ -145,18 +147,19 @@ export default function ScheduledScreen() {
       {error && <Text style={S.errorTxt}>{error}</Text>}
 
       {rows.length === 0 ? (
-        <View style={[S.center, { flex: 1, paddingHorizontal: 32 }]}>
+        <ScrollView contentContainerStyle={[S.center, { flexGrow: 1, padding: 32, gap: 12 }]}>
+          <Ionicons name="time-outline" size={48} color={colors.primary} />
           <Text style={S.emptyTitle}>No scheduled messages</Text>
           <Text style={S.emptySub}>
             Open any chat, long-press the Send button, and pick a future time to schedule a message.
           </Text>
-        </View>
+        </ScrollView>
       ) : (
         <FlatList
           data={rows}
           keyExtractor={(r) => r.id}
           refreshControl={<RefreshControl tintColor={colors.primary} refreshing={refreshing} onRefresh={onRefresh} />}
-          contentContainerStyle={{ paddingBottom: 32 }}
+          contentContainerStyle={{ paddingBottom: SCREEN_BOTTOM + 16 }}
           ListHeaderComponent={
             <View style={S.intro}>
               <Text style={S.introTxt}>
@@ -224,7 +227,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   center:        { justifyContent: 'center', alignItems: 'center' },
 
   header:        { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingTop: HEADER_TOP, paddingBottom: 12, gap: 8, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.glassStroke },
-  backBtn:       { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
+  backBtn:       { width: 44, height: 44, borderRadius: 16, backgroundColor: c.glassSoft, alignItems: 'center', justifyContent: 'center' },
   backTxt:       { color: c.text, fontSize: 26, fontWeight: '600' },
   title:         { color: c.text, fontSize: 22, fontWeight: '800' },
 
@@ -232,14 +235,14 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   emptyTitle:    { color: c.text, fontSize: 16, fontWeight: '700', marginBottom: 8, textAlign: 'center' },
   emptySub:      { color: c.textDim, fontSize: 13, lineHeight: 18, textAlign: 'center' },
 
-  intro:         { paddingHorizontal: 20, paddingTop: 16, paddingBottom: 4 },
+  intro:         { paddingHorizontal: 20, paddingTop: 16, paddingBottom: 12 },
   introTxt:      { color: c.textDim, fontSize: 12 },
 
-  row:           { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 20, paddingVertical: 14, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.glassStroke },
-  rowSent:       { opacity: 0.6 },
+  row:           { flexDirection: 'row', alignItems: 'center', gap: 10, marginHorizontal: 16, marginBottom: 10, padding: 16, borderRadius: 20, backgroundColor: c.glassSoft, borderWidth: StyleSheet.hairlineWidth, borderColor: c.glassStroke },
+  rowSent:       { backgroundColor: c.glass },
   rowChatName:   { color: c.text, fontSize: 15, fontWeight: '600' },
-  rowContent:    { color: c.text, fontSize: 13, marginTop: 4 },
-  rowWhen:       { color: c.textDim, fontSize: 11, marginTop: 4 },
-  deliveredTag:  { color: '#22C55E', fontSize: 11, fontWeight: '700' },
+  rowContent:    { color: c.text, fontSize: 14, lineHeight: 20, marginTop: 4 },
+  rowWhen:       { color: c.textDim, fontSize: 12, marginTop: 6 },
+  deliveredTag:  { color: c.success, fontSize: 12, fontWeight: '700' },
   cancelTxt:     { color: c.danger, fontSize: 12, fontWeight: '700' },
 });

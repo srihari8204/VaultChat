@@ -32,6 +32,8 @@
 // file BamgQ9YetsdRxW2CfWM7By, frames "Ludo v2 — midnight — 390×844",
 // "— small — 360×780", "— large — 430×932", "— tokens →" and "— states →".
 
+import { BOARD_GUTTER, BOARD_MIN } from './boardFit';
+
 /* ── the room ───────────────────────────────────────────────────────── */
 
 /** Every value here is used by Ludo.tsx and nothing else. */
@@ -171,13 +173,37 @@ export const LG = {
   ctaQuiet: 0.045,
 } as const;
 
-/** A base spot is a HOLE in the pane, not a lift — so it darkens. */
-export const WELL = 'rgba(10,7,22,0.52)';
+/** Inset home sockets separate the colored pieces from their light yard. */
+export const WELL = '#E5ECF4';
+
+/** Light playing surface inside the midnight glass frame; dark markings stay readable. */
+export const TRACK = { cell: '#F6F8FC', safe: '#E2EAF4', edge: '#78889E', ink: '#26364C' } as const;
 /** The dice tray the die floats over. Recessed, for the same reason. */
 export const TRAY = 'rgba(0,0,0,0.30)';
 
 /** Translucent white — the substance every glass surface here is made of. */
 export const w = (a: number) => `rgba(255,255,255,${a})`;
+
+/** Controls follow the measured board, including when a short viewport shrinks it. */
+export function ludoControls(columnWidth: number, fontScale: number) {
+  return {
+    stacked: columnWidth < 320 || fontScale >= 1.4,
+    seatColumns: columnWidth < 300 || fontScale >= 1.4 ? 1 : 2,
+    dieSize: Math.round(Math.max(52, Math.min(76, columnWidth * 0.19))),
+  };
+}
+
+/** Wide viewports put controls beside the board instead of reserving 400dp below it. */
+export function ludoLayout(width: number, height: number, fontScale: number) {
+  const available = Math.max(1, width - BOARD_GUTTER * 2);
+  const minimumControls = Math.ceil(220 * Math.min(1.5, Math.max(1, fontScale)));
+  const wide = width > height && available >= BOARD_MIN + 12 + minimumControls;
+  const controlsWidth = wide ? Math.floor(Math.max(minimumControls, Math.min(360, available * 0.38)))
+    : Math.min(available, Math.max(BOARD_MIN, height - BOARD_GUTTER * 2));
+  const boardSize = wide ? Math.floor(Math.min(available - controlsWidth - 12, Math.max(BOARD_MIN, height - BOARD_GUTTER * 2)))
+    : controlsWidth;
+  return { wide, boardSize, controlsWidth, contentWidth: wide ? boardSize + 12 + controlsWidth : boardSize };
+}
 
 /**
  * A seat colour with an alpha. Takes the hex from SEAT so a caller can never
@@ -199,9 +225,9 @@ export function seatA(seat: number, tone: 'base' | 'light' | 'deep', a: number):
  * the first pass proved.
  */
 export const YARD = {
-  fillTop: 0.62,
-  fillMid: 0.55,
-  fillBottom: 0.62,
+  fillTop: 0.98,
+  fillMid: 0.96,
+  fillBottom: 0.94,
   rim: 0.9,
   glow: 0.55,
 } as const;
@@ -248,5 +274,5 @@ export const PAWN = {
   /** The single specular. Two would read as plastic. */
   specular: 0.72,
   /** The shape marker, sitting on the pawn's own colour. */
-  markerInk: 'rgba(0,0,0,0.42)',
+  markerInk: 'rgba(0,0,0,0.82)',
 } as const;

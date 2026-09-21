@@ -33,21 +33,20 @@
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  AccessibilityInfo, ActivityIndicator, Platform, Pressable,
+  AccessibilityInfo, ActivityIndicator, Pressable,
   ScrollView, Text, TextInput, View, useWindowDimensions,
   type LayoutChangeEvent, type ViewStyle,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Ionicons from '@expo/vector-icons/Ionicons';
-import Svg, { Defs, RadialGradient, Stop, Rect, Ellipse, Text as SvgText } from 'react-native-svg';
+import Svg, { Defs, RadialGradient, LinearGradient, Stop, Rect, Ellipse, G, Text as SvgText } from 'react-native-svg';
 import Animated, {
   useSharedValue, useAnimatedStyle, withSpring, withTiming, withRepeat,
   Easing, cancelAnimation, runOnJS,
 } from 'react-native-reanimated';
 import * as Haptics from 'expo-haptics';
 import * as Clipboard from 'expo-clipboard';
-import * as ScreenOrientation from 'expo-screen-orientation';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import { useGameSocket, type AutoStart } from '../../lib/games/useGameSocket';
@@ -68,14 +67,14 @@ import { openInvite, shareResult, tableLink } from '../../lib/games/invite';
 import { useRummyMatch, type RummyMatch } from '../../lib/games/useRummyMatch';
 import { VARIANTS, variantLabel, standings, progressLabel } from '../../lib/games/match';
 import {
-  metrics, seatSpots, pileTop, seatAvatar, seatHasDetail, SEAT_NAME_LINE, SEAT_DETAIL_LINE,
+  metrics, seatSpots, pileTop, seatContent, shiftDropTargets, SEAT_NAME_LINE, SEAT_DETAIL_LINE,
   ranked, activeCount, pid, allowsBots,
   normalizeCode, filterBySeats, filterByKind, pickTable,
   type RummyPlayer, type Settlement, type TableInfo, type SeatFilter, type KindFilter, type SeatIntent,
 } from '../../lib/games/rummyTable';
 import { C, S, R, T, mix, alpha, goldLine, white } from '../../lib/games/theme';
 import {
-  FELT, RAIL, WOOD, CARD, CARD_SHADOW, STAT, CYAN,
+  FELT, RAIL, CARD, CARD_SHADOW, STAT, CYAN,
   INK as INK_ON_FELT, INK_DIM, onFelt, ROOM, ROOM_GLOW,
 } from '../../lib/games/rummyGlass';
 
@@ -315,20 +314,6 @@ export default function Rummy({ tableId = '', auto, autoBot, seat }: { tableId?:
 
   const win = useWindowDimensions();
   const insets = useSafeAreaInsets();
-  /**
-   * SYMMETRIC side insets, so the table is centred on the SCREEN.
-   *
-   * In landscape — the orientation rummy plays in — the cutout sits on one side
-   * only. Padding each edge by its own inset is correct for avoiding it, but it
-   * makes the usable box asymmetric: measured on the Redmi at rotation 1, the
-   * hand's scroller ran 76..2264, so a hand centred inside it still sat 38px
-   * right of the middle of the screen. Padding both sides by the larger inset
-   * costs a little width and buys a table that is actually centred.
-   *
-   * The same value feeds `metrics` and the padded box below. That is the point:
-   * the last two bugs here were both a model describing a layout that did not
-   * render, so there is exactly one number and both sides read it.
-   */
   // MEASURED CONTAINER (§3). The window and the container may be different
   // coordinate systems: if this View is laid out edge-to-edge it is display-
   // width, while useWindowDimensions() reports the usable window. Sizing
@@ -342,64 +327,18 @@ export default function Rummy({ tableId = '', auto, autoBot, seat }: { tableId?:
       : { w: width, h: height });
   }, []);
 
-  const sideInset = Math.max(insets.left, insets.right);
-  const boxInsets = useMemo(
-    () => ({ top: insets.top, bottom: insets.bottom, left: sideInset, right: sideInset }),
-    [insets.top, insets.bottom, sideInset],
-  );
-  /**
-   * Geometry comes from the MEASURED CONTAINER, and the inset is applied ONCE.
-   *
-   * Measured at runtime on the Redmi in landscape:
-   *   BOX 851x393   SCR 851   WIN 823   INS 28/0
-   *
-   * BOX === SCR, so this container is laid out edge-to-edge at display width,
-   * while useWindowDimensions() reports the window — which has ALREADY had the
-   * 28dp system bar removed (823 = 851 - 28). Feeding that window width into
-   * metrics(), which subtracts the inset again on both sides, took the same
-   * inset off twice: 823 - 56 = 767. A 768dp child centred in an 851dp
-   * container then sits (851-768)/2 = 41.5dp from the edge instead of 28 —
-   * the 114px offset, exactly.
-   *
-   * Using the container width keeps one coordinate system: the inset is
-   * subtracted once, symmetrically, so the table clears the system bar AND
-   * lands with equal space either side on any display.
-   */
+  // GamesScreen owns all safe-area edges. The measured box is already safe;
+  // subtract device insets only for the first frame before it is measured.
   const m = useMemo(
-    () => metrics({ width: box.w || win.width, height: box.h || win.height }, boxInsets),
-    [box.w, box.h, win.width, win.height, boxInsets],
+    () => metrics({
+      width: box.w || win.width - insets.left - insets.right,
+      height: box.h || win.height - insets.top - insets.bottom,
+    }, { top: 0, bottom: 0, left: 0, right: 0 }),
+    [box.w, box.h, win.width, win.height, insets.left, insets.right, insets.top, insets.bottom],
   );
   const t = useType();
 
   const reduceMotion = useReduceMotion();
-
-  /**
-   * RUMMY IS LANDSCAPE. ALL OF IT.
-   *
-   * It used to be landscape only while a hand was in play and portrait for the
-   * table list and the lobby, which meant the device physically rotated twice
-   * per game — once when the host dealt and once when the round ended — and
-   * again for every rematch. A rotation is a full relayout and, on the Redmi,
-   * about a second of black screen; doing it at the exact moment the cards
-   * arrive is the worst possible time for it.
-   *
-   * So the lock is asserted ONCE on mount and held for as long as Rummy is on
-   * screen. The lobby and the table list are laid out as a centred column
-   * (see LandscapeScroll) rather than being allowed to rotate.
-   *
-   * Restoring on unmount is the part that matters, and it is not belt-and-
-   * braces: the app is portrait-locked everywhere else, and an OS orientation
-   * lock OUTLIVES the component — a force-stop skips this cleanup entirely and
-   * leaks landscape into the next launch. That is the documented root cause of
-   * the three other boards measuring 38px off-centre, which is why they each
-   * assert usePortraitLock() on mount rather than trusting this line.
-   */
-  useEffect(() => {
-    void ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.LANDSCAPE).catch(() => {});
-    return () => {
-      void ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP).catch(() => {});
-    };
-  }, []);
 
   useEffect(() => { void preloadSfx(['deal', 'discard', 'select', 'tick', 'win', 'lose', 'error']); }, []);
 
@@ -592,6 +531,13 @@ export default function Rummy({ tableId = '', auto, autoBot, seat }: { tableId?:
 
   const zones = useRef<Zone[]>([]);
   const discardZone = useRef<Zone | null>(null);
+  const tableScrollY = useRef(0);
+  const handScrollX = useRef(0);
+  const mountTableScroll = useCallback((node: ScrollView | null) => {
+    // The lobby can unmount this viewport without unmounting Rummy. A new
+    // viewport starts at zero, before its children measure their drop targets.
+    if (node) { tableScrollY.current = 0; handScrollX.current = 0; }
+  }, []);
   const setZone = useCallback((i: number, z: Zone) => { zones.current[i] = z; }, []);
 
   const [confirmDeclare, setConfirmDeclare] = useState(false);
@@ -810,21 +756,31 @@ export default function Rummy({ tableId = '', auto, autoBot, seat }: { tableId?:
 
   return (
     <View style={{ flex: 1 }}>
-      {/* Full-bleed: the room reaches under the notch and the gesture bar,
-          because a green screen with grey margins looks broken. Only the
-          CONTROLS are inset — see the padded box below. */}
+      {/* The route owns safe-area padding; this is the available play viewport. */}
       <Baize />
 
-      <View
+      <ScrollView
+        ref={mountTableScroll}
         onLayout={onBoxLayout}
-        style={{
-          flex: 1, alignItems: 'center',
-          paddingTop: boxInsets.top, paddingBottom: boxInsets.bottom,
+        style={{ flex: 1 }}
+        nestedScrollEnabled
+        scrollEventThrottle={16}
+        onScroll={event => {
+          // Drop targets are window coordinates. Scrolling does not trigger
+          // onLayout, so carry them with the content instead of using stale y.
+          const y = event.nativeEvent.contentOffset.y;
+          const delta = tableScrollY.current - y;
+          tableScrollY.current = y;
+          shiftDropTargets(zones.current, 0, delta);
+          if (discardZone.current) discardZone.current.y += delta;
+        }}
+        contentContainerStyle={{
+          alignItems: 'center',
         }}>
 
       {/* ── the header bar ─────────────────────────────────────────── */}
-      <View style={{
-        height: m.headerH, width: m.tableW, flexDirection: 'row',
+      <ScrollView horizontal style={{ width: m.tableW, flexGrow: 0 }} contentContainerStyle={{
+        minHeight: m.headerH, minWidth: m.tableW, flexDirection: 'row',
         alignItems: 'center', gap: S[2], paddingHorizontal: S[1],
       }}>
         <Wordmark />
@@ -844,7 +800,7 @@ export default function Rummy({ tableId = '', auto, autoBot, seat }: { tableId?:
         <VoicePill voice={voice} onPress={() => setVoiceOpen(true)} still={reduceMotion} />
         <IconBtn glyph="?" label="Game rules" onPress={() => setShowRules(true)} />
         <IconBtn glyph="⚙" label="Table settings" onPress={() => setShowSettings(true)} />
-      </View>
+      </ScrollView>
 
       {/* ── the felt ───────────────────────────────────────────────── */}
       <View style={{ height: m.tableH, width: m.tableW }}>
@@ -926,6 +882,7 @@ export default function Rummy({ tableId = '', auto, autoBot, seat }: { tableId?:
               </StatusPill>
             ) : (
               <StatusPill tone={mine ? 'you' : 'plain'}>
+                <Ionicons name="person-circle-outline" size={18} color={mine ? C.gold2 : CYAN} />
                 <Text numberOfLines={1} style={{ flexShrink: 1, color: mine ? C.gold2 : '#cfe8d8', fontSize: 11, fontWeight: '800' }}>
                   {statusText}
                 </Text>
@@ -969,6 +926,13 @@ export default function Rummy({ tableId = '', auto, autoBot, seat }: { tableId?:
         <ScrollView
           horizontal
           showsHorizontalScrollIndicator={false}
+          scrollEventThrottle={16}
+          onScroll={event => {
+            // Only the hand groups move horizontally; the discard pile stays put.
+            const x = event.nativeEvent.contentOffset.x;
+            shiftDropTargets(zones.current, handScrollX.current - x, 0);
+            handScrollX.current = x;
+          }}
           contentContainerStyle={{
             gap: S[3], alignItems: 'stretch', paddingHorizontal: S[1],
             flexGrow: 1, justifyContent: 'center',
@@ -1029,7 +993,7 @@ export default function Rummy({ tableId = '', auto, autoBot, seat }: { tableId?:
       </View>
 
       {/* ── actions ────────────────────────────────────────────────── */}
-      <View style={{ height: 46, width: m.tableW, flexDirection: 'row', gap: S[1], alignItems: 'center', paddingHorizontal: S[1] }}>
+      <ScrollView horizontal style={{ width: m.tableW, flexGrow: 0 }} contentContainerStyle={{ minHeight: 46, minWidth: m.tableW, flexDirection: 'row', gap: S[1], alignItems: 'center', paddingHorizontal: S[1], paddingVertical: 5 }}>
         <ActionBtn w={m.barBtnW} glyph="↕" label="SORT" accessibilityLabel="Sort your hand" onPress={() => sortNow(sortMode === 'manual' ? 'suit' : sortMode)} />
         <ActionBtn w={m.barBtnW} glyph="▣" label="GROUP" accessibilityLabel="Group the selected cards" disabled={picked.length < 2} onPress={() => { setGroups(g => groupUp(g, picked)); setPicked([]); playSfx('tick'); }} />
         <ActionBtn w={m.barBtnW} glyph="⊖" label="UNGROUP" accessibilityLabel="Ungroup the selected cards" disabled={picked.length === 0} onPress={() => { setGroups(g => ungroup(g, picked)); setPicked([]); playSfx('tick'); }} />
@@ -1075,8 +1039,8 @@ export default function Rummy({ tableId = '', auto, autoBot, seat }: { tableId?:
         <ActionBtn w={m.barBtnW} glyph="🗑" label="DISCARD" tone="blue" disabled={!mustDiscard || picked.length !== 1 || !!pending} onPress={() => discard(picked[0])} />
         <ActionBtn w={m.barBtnW} glyph="✓" label="DECLARE" tone="good" disabled={!mustDiscard || picked.length !== 1 || !!pending} onPress={() => setConfirmDeclare(true)} />
         <ActionBtn w={m.barBtnW} glyph="⏻" label="DROP" tone="danger" disabled={!mine || !!pending} onPress={() => act('drop', { t: 'drop' })} />
-      </View>
-
+      </ScrollView>
+      </ScrollView>
 
       <Toasts events={feed} />
       <Confetti show={!!finished && G.winnerId === state.you && !reduceMotion} />
@@ -1158,8 +1122,6 @@ export default function Rummy({ tableId = '', auto, autoBot, seat }: { tableId?:
         />
       </Sheet>
 
-      </View>
-
       <Sheet visible={showSettings} title="Table" onClose={() => setShowSettings(false)}>
         <SettingRow
           label="Sort"
@@ -1210,35 +1172,18 @@ export default function Rummy({ tableId = '', auto, autoBot, seat }: { tableId?:
 /* ── small hooks ────────────────────────────────────────────────────── */
 
 
-/**
- * The lobby and the table list, laid out for the landscape screen they now
- * always sit on.
- *
- * Rummy locks landscape for its whole lifetime (see the lock on mount), so
- * these two scrollers no longer get a 390dp-wide portrait window — they get
- * 844, or 2264 on the Redmi. A list of table cards run edge to edge at that
- * width is a line of text a foot long, which is the reason the screens used to
- * rotate at all.
- *
- * So the content becomes a centred column with a real maximum measure. Nothing
- * about the layout inside it changes; it simply stops being as wide as the
- * device. The side padding takes the LARGER of the two insets on both edges —
- * in landscape the cutout is on one side only, and padding each edge by its own
- * inset centres the column 38px off the middle of the screen, which is the
- * defect this file already carries a long note about for the felt.
- */
+/** A readable lobby column inside GamesScreen's already-safe viewport. */
 const COLUMN_MAX = 680;
 
 function useColumn() {
-  const insets = useSafeAreaInsets();
   return useMemo(() => ({
-    paddingHorizontal: Math.max(insets.left, insets.right, S[4]),
-    paddingTop: insets.top + S[3],
-    paddingBottom: insets.bottom + S[5],
+    paddingHorizontal: S[4],
+    paddingTop: S[3],
+    paddingBottom: S[5],
     maxWidth: COLUMN_MAX,
     width: '100%' as const,
     alignSelf: 'center' as const,
-  }), [insets.left, insets.right, insets.top, insets.bottom]);
+  }), []);
 }
 
 /**
@@ -2174,11 +2119,16 @@ function TableTop({ width, height }: { width: number; height: number }) {
           <Stop offset="0.74" stopColor={RAIL[2]} />
           <Stop offset="1" stopColor={RAIL[3]} />
         </RadialGradient>
-        {/* Walnut between brass and cloth — the part a player rests a hand on. */}
-        <RadialGradient id="rtWood" cx="50%" cy="0%" rx="75%" ry="105%">
-          <Stop offset="0" stopColor={WOOD[0]} />
-          <Stop offset="1" stopColor={WOOD[1]} />
-        </RadialGradient>
+        <LinearGradient id="rtGlass" x1="0%" y1="0%" x2="12%" y2="100%">
+          <Stop offset="0" stopColor="#86664B" />
+          <Stop offset="0.38" stopColor="#3D2B24" />
+          <Stop offset="1" stopColor="#151018" />
+        </LinearGradient>
+        <LinearGradient id="rtSheen" x1="0%" y1="0%" x2="65%" y2="100%">
+          <Stop offset="0" stopColor="#DFFFF4" stopOpacity="0.19" />
+          <Stop offset="0.48" stopColor="#DFFFF4" stopOpacity="0" />
+          <Stop offset="1" stopColor="#041C22" stopOpacity="0.3" />
+        </LinearGradient>
         {/* Cloth. The light sits high and slightly back, so the near edge —
             where the player's own hand is — falls into shadow and the middle of
             the table, where the piles are, is the brightest thing on screen.
@@ -2197,10 +2147,21 @@ function TableTop({ width, height }: { width: number; height: number }) {
         </RadialGradient>
       </Defs>
 
-      <Ellipse cx={cx} cy={cy} rx={rx} ry={ry} fill="url(#rtRail)" />
-      <Ellipse cx={cx} cy={cy} rx={rx - rail * 0.42} ry={ry - rail * 0.42} fill="url(#rtWood)" />
+      <Ellipse cx={cx} cy={cy} rx={rx} ry={ry} fill="url(#rtGlass)" stroke="#C6F1DF" strokeOpacity="0.36" />
+      <Ellipse cx={cx} cy={cy} rx={rx - rail * 0.48} ry={ry - rail * 0.48} fill="none" stroke="url(#rtRail)" strokeWidth="1.5" opacity="0.8" />
       <Ellipse cx={cx} cy={cy} rx={irx} ry={iry} fill="url(#rtCloth)" />
       <Ellipse cx={cx} cy={cy} rx={irx} ry={iry} fill="url(#rtBevel)" />
+      <Ellipse cx={cx} cy={cy} rx={irx} ry={iry} fill="url(#rtSheen)" />
+      <Ellipse cx={cx} cy={cy} rx={Math.max(1, irx - rail)} ry={Math.max(1, iry - rail)}
+        fill="none" stroke="#C6F1DF" strokeOpacity="0.13" strokeWidth="1" strokeDasharray="2 5" />
+
+      {/* Quiet suit medallions give the cloth a card-room identity without assets. */}
+      {['♠', '♥', '♦', '♣'].map((suit, index) => (
+        <SvgText key={suit} x={cx + (index - 1.5) * irx * 0.16} y={cy + iry * 0.55}
+          textAnchor="middle" fontSize={Math.min(20, iry * 0.22)} fill="#D7F7E9" fillOpacity="0.14">
+          {suit}
+        </SvgText>
+      ))}
 
       {/* A single bright hairline along the top of the cloth: the specular line
           every stretched surface has, and the cheapest way to say "taut". */}
@@ -2216,7 +2177,7 @@ function TableTop({ width, height }: { width: number; height: number }) {
       <SvgText
         x={cx} y={cy - iry * 0.02}
         textAnchor="middle"
-        fontSize={Math.max(14, Math.round(irx * 0.13))}
+        fontSize={Math.max(16, Math.round(irx * 0.15))}
         fontWeight="800"
         fill="#FFF8F1"
         fillOpacity={0.075}
@@ -2570,6 +2531,12 @@ function ScorePanel({
  * The three decisions are coloured and the utilities are not, because Declare
  * and Drop sit inches apart and one wins the hand while the other forfeits it.
  */
+const ACTION_ICONS: Record<string, React.ComponentProps<typeof Ionicons>['name']> = {
+  '↕': 'swap-vertical', '▣': 'albums-outline', '⊖': 'remove-circle-outline',
+  '★': 'podium-outline', '◉': 'eye-outline', '🗑': 'trash-outline',
+  '✓': 'checkmark-circle-outline', '⏻': 'exit-outline',
+};
+
 function ActionBtn({
   glyph, label, onPress, disabled, tone, wide, active, w, accessibilityLabel,
 }: {
@@ -2585,6 +2552,7 @@ function ActionBtn({
   accessibilityLabel?: string;
 }) {
   const ink = tone === 'good' ? '#F2FFF7' : tone === 'danger' ? '#FFF1F2' : tone === 'blue' ? '#F0F8FF' : INK_ON_FELT;
+  const { fontScale } = useWindowDimensions();
   const surface = tone === 'good' ? onFelt('emerald', { radius: 11, active: true })
     : tone === 'danger' ? onFelt('danger', { radius: 11, active: true })
     : tone === 'blue' ? onFelt('blue', { radius: 11, active: true })
@@ -2596,14 +2564,17 @@ function ActionBtn({
       accessibilityRole="button"
       accessibilityState={{ disabled: !!disabled, selected: !!active }}
       accessibilityLabel={accessibilityLabel ?? label}
+      hitSlop={4}
       style={[surface, {
-        height: 36, width: wide ? undefined : w, minWidth: wide ? 118 : (w ?? 62),
+        minHeight: 36, minWidth: wide ? 118 : (w ?? 62), paddingVertical: 4,
         paddingHorizontal: w && w < 56 ? 2 : S[2],
         alignItems: 'center', justifyContent: 'center', opacity: disabled ? 0.45 : 1,
       }]}
     >
-      <Text style={{ color: ink, fontSize: 11 }}>{glyph}</Text>
-      <Text numberOfLines={1} style={{ color: ink, fontSize: 7.5, fontWeight: '800', letterSpacing: 0.5 }}>{label}</Text>
+      {fontScale <= 1.25 && (ACTION_ICONS[glyph]
+        ? <Ionicons name={ACTION_ICONS[glyph]} size={13} color={ink} />
+        : <Text style={{ color: ink, fontSize: 11 }}>{glyph}</Text>)}
+      <Text numberOfLines={1} style={{ color: ink, fontSize: 11, fontWeight: '800', letterSpacing: 0.2 }}>{label}</Text>
     </Pressable>
   );
 }
@@ -2729,7 +2700,7 @@ function GroupZone({
           : verdict && (verdict.type === 'pure' || verdict.type === 'impure' || verdict.type === 'set')
             ? 'rgba(99,230,160,0.55)'
             : white(0.55),
-        backgroundColor: loose ? white(0.06) : white(0.16),
+        backgroundColor: loose ? white(0.08) : white(0.22),
         boxShadow: `inset 0 1px 0 ${white(0.22)}`,
         paddingHorizontal: S[2], paddingTop: S[1], paddingBottom: 2,
         gap: 2,
@@ -2899,7 +2870,7 @@ function CardFace({ card, w, glow, wild }: { card: Card; w: number; glow?: boole
   const h = Math.round(w * 1.4);
   const joker = card.suit === 'JOKER';
   const color = joker ? CARD.joker : RED.has(card.suit) ? CARD.red : CARD.ink;
-  const idx = Math.round(w * 0.3);
+  const idx = Math.round(w * 0.37);
 
   return (
     <View style={{
@@ -2909,7 +2880,7 @@ function CardFace({ card, w, glow, wild }: { card: Card; w: number; glow?: boole
       // is most of what makes a hand look like objects rather than rectangles.
       backgroundColor: joker ? CARD.jokerFace : CARD.face,
       borderWidth: 1, borderColor: wild ? C.gold : CARD.edge,
-      boxShadow: (glow || wild) ? CARD_SHADOW.wild(C.gold)
+      boxShadow: wild ? CARD_SHADOW.wild(C.gold)
         : glow ? CARD_SHADOW.raised : CARD_SHADOW.rest,
       overflow: 'hidden',
     }}>
@@ -2920,27 +2891,20 @@ function CardFace({ card, w, glow, wild }: { card: Card; w: number; glow?: boole
         position: 'absolute', left: 0, right: 0, bottom: 0, height: h * 0.55,
         backgroundColor: CARD.faceLow, opacity: 0.55,
       }} />
-      <Text style={{ position: 'absolute', top: 1, left: 3, fontSize: idx, lineHeight: idx * 1.1, fontWeight: '800', color }}>
-        {joker ? '★' : card.rank}
-      </Text>
-      {/* The suit UNDER the rank, the way a real index reads. Without it a
-          glance at a fanned hand shows a column of ranks and no suits at all —
-          the tuck hides the centre pip, which is the only other place the suit
-          appears. */}
-      {!joker && w >= 40 && (
-        <Text style={{
-          position: 'absolute', top: idx * 1.05, left: 3,
-          fontSize: Math.round(w * 0.2), lineHeight: Math.round(w * 0.22), color,
-        }}>
-          {SUIT_GLYPH[card.suit]}
-        </Text>
-      )}
-      <Text style={{
-        position: 'absolute', left: 0, right: 0, top: h / 2 - w * 0.3,
-        textAlign: 'center', fontSize: w * 0.46, lineHeight: w * 0.6, color, opacity: 0.9,
-      }}>
-        {joker ? '★' : SUIT_GLYPH[card.suit]}
-      </Text>
+      {/* Card markings scale with the physical card, while HandCard retains its
+          full spoken rank/suit. System font scaling must not crop a rank. */}
+      <Svg width={w - 2} height={h - 2} viewBox={`0 0 ${w} ${h}`} pointerEvents="none">
+        <Rect x="2" y="2" width={w - 4} height={h - 4} rx="4" fill="none" stroke={CARD.edge} strokeOpacity="0.25" />
+        {[false, true].map(flipped => (
+          <G key={String(flipped)} transform={flipped ? `rotate(180 ${w / 2} ${h / 2})` : undefined}>
+            <SvgText x="4" y={idx + 2} fontSize={idx} fontWeight="800" fill={color}>{joker ? '★' : card.rank}</SvgText>
+            {!joker && <SvgText x="4" y={idx * 1.72 + 2} fontSize={w * 0.24} fill={color}>{SUIT_GLYPH[card.suit]}</SvgText>}
+          </G>
+        ))}
+        <SvgText x={w / 2} y={h / 2 + w * 0.17} textAnchor="middle" fontSize={w * 0.52} fill={color}>
+          {joker ? '★' : SUIT_GLYPH[card.suit]}
+        </SvgText>
+      </Svg>
     </View>
   );
 }
@@ -3069,6 +3033,7 @@ function Seat({
   /** Seconds left on THIS player's turn. Only ever passed to the one playing. */
   secs: number | null;
 }) {
+  const { fontScale } = useWindowDimensions();
   const pulse = useSharedValue(0);
   useEffect(() => {
     if (turn && !still) {
@@ -3094,7 +3059,8 @@ function Seat({
   // seat guessed at this — `Math.min(28, h - 20)` for chrome that cost 30 —
   // and every capsule overflowed its own border by 12 to 18dp, painting the
   // card-back row onto bare felt outside the gold turn ring.
-  const av = seatAvatar(spot.h);
+  const layout = seatContent(spot.h, fontScale);
+  const av = layout.avatar;
   const initials = name.split(/\s+/).map(x => x[0]).join('').slice(0, 2).toUpperCase();
 
   // The line under the name. The card count is NOT here — it is the badge on
@@ -3114,18 +3080,21 @@ function Seat({
     <Animated.View
       accessibilityLabel={`${name}, ${detail}${showCount ? `, ${count} cards` : ''}${turn ? `, playing now${secs != null ? `, ${secs} seconds left` : ''}` : ''}${talking ? ', talking' : ''}${host ? ', host' : ''}`}
       style={[
-        onFelt(turn ? 'gold' : 'navy', { radius: 14, active: turn }),
+        onFelt(turn ? 'gold' : 'navy', { radius: 16, active: turn }),
         {
           position: 'absolute', left: spot.x, top: spot.y, width: spot.w, height: spot.h,
           paddingHorizontal: 6, paddingVertical: 5,
-          alignItems: 'center', opacity: out ? 0.5 : 1,
+          flexDirection: layout.inline ? 'row' : 'column',
+          justifyContent: 'center', alignItems: 'center', opacity: out ? 0.7 : 1,
+          backgroundColor: turn ? 'rgba(45,35,11,0.96)' : 'rgba(7,25,36,0.94)',
+          borderColor: turn ? C.gold : 'rgba(170,232,213,0.30)',
         },
       ]}
     >
       {turn && (
         <Animated.View
           pointerEvents="none"
-          style={[{ position: 'absolute', inset: -1, borderRadius: 15, borderWidth: 1.5, borderColor: C.gold }, ring]}
+          style={[{ position: 'absolute', inset: -1, borderRadius: 17, borderWidth: 1.5, borderColor: C.gold }, ring]}
         />
       )}
 
@@ -3133,17 +3102,18 @@ function Seat({
       <View style={{ width: av, height: av }}>
         <View style={{
           width: av, height: av, borderRadius: av / 2, alignItems: 'center', justifyContent: 'center',
-          backgroundColor: bot ? '#6F9BFF' : C.gold,
+          backgroundColor: bot ? '#1C4F86' : '#2B6658',
           // One ring, three meanings, in priority order: talking beats host,
           // because who is speaking changes second by second and who deals does
           // not. A seat with neither has no ring at all — five glowing avatars
           // is the same as none.
-          borderWidth: (talking || host) ? 2 : 0,
-          borderColor: talking ? C.good : C.gold2,
+          borderWidth: (talking || host) ? 2 : 1,
+          borderColor: talking ? C.good : host ? C.gold2 : 'rgba(199,242,225,0.38)',
+          boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.20)',
         }}>
           {bot
-            ? <Ionicons name="hardware-chip" size={Math.round(av * 0.44)} color={C.onGold} />
-            : <Text style={{ color: C.onGold, fontWeight: '800', fontSize: Math.round(av * 0.38) }}>{initials}</Text>}
+            ? <Ionicons name="hardware-chip-outline" size={Math.round(av * 0.52)} color="#C6DFFF" />
+            : <Svg width={av} height={av} pointerEvents="none"><SvgText x={av / 2} y={av * 0.65} textAnchor="middle" fontWeight="800" fontSize={av * 0.38} fill="#E4FFF0">{initials}</SvgText></Svg>}
         </View>
 
         {/* HOW MANY CARDS THEY HOLD, as a badge rather than a row.
@@ -3151,7 +3121,7 @@ function Seat({
             what pushed the capsule past its own height — and five drawn backs
             cannot show the difference between six cards and thirteen anyway,
             because they capped at five. A number is smaller AND says more. */}
-        {showCount && (
+        {showCount && !layout.inline && (
           <View
             pointerEvents="none"
             style={{
@@ -3161,7 +3131,7 @@ function Seat({
               backgroundColor: 'rgba(8,14,26,0.92)',
               borderWidth: 1, borderColor: alpha(CARD.edge, 0.55),
             }}>
-            <Text style={{ color: INK_DIM, fontSize: 9, fontWeight: '800' }}>{count}</Text>
+            <Svg width={17} height={12}><SvgText x="8.5" y="10" textAnchor="middle" fontSize="10" fontWeight="800" fill={INK_ON_FELT}>{count}</SvgText></Svg>
           </View>
         )}
 
@@ -3183,8 +3153,9 @@ function Seat({
       <Text
         numberOfLines={1}
         style={{
-          width: '100%', marginTop: 3, textAlign: 'center',
-          color: '#fff', fontWeight: '800', fontSize: 11.5, lineHeight: SEAT_NAME_LINE,
+          width: layout.inline ? undefined : '100%', flexShrink: 1,
+          marginLeft: layout.inline ? 4 : 0, marginTop: layout.inline ? 0 : 3, textAlign: 'center',
+          color: '#fff', fontWeight: '900', fontSize: 12.5, lineHeight: SEAT_NAME_LINE,
         }}
       >{name}</Text>
 
@@ -3192,16 +3163,17 @@ function Seat({
           DROPPED ENTIRELY on a felt too short to hold it — see seatHasDetail.
           Rendering it anyway is what the old seat did with its third row, and
           the row ended up painted on the cloth below the capsule's border. */}
-      {seatHasDetail(spot.h) && (
+      {layout.detail && (
         <Text
           numberOfLines={1}
           style={{
             width: '100%', marginTop: 2, textAlign: 'center',
-            fontSize: 9.5, lineHeight: SEAT_DETAIL_LINE, fontWeight: turn ? '800' : '600',
+            fontSize: 10, lineHeight: SEAT_DETAIL_LINE, fontWeight: turn ? '800' : '700',
             color: turn && secs != null ? C.gold2 : INK_DIM,
           }}
-        >{turn && secs != null ? `${secs}s left` : detail}</Text>
+        >{turn ? (secs != null ? `TURN · ${secs}s` : 'PLAYING') : detail}</Text>
       )}
+      {turn && <View pointerEvents="none" style={{ position: 'absolute', bottom: 1, left: '25%', right: '25%', height: 2, borderRadius: 1, backgroundColor: C.gold2 }} />}
     </Animated.View>
   );
 }

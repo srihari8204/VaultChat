@@ -6,14 +6,7 @@
 // against and `BrandMark` is the thing standing on it; splitting them into two
 // files would mean two places to keep one composition in sync.
 //
-// WHY THE AUTH SCREENS ARE ALWAYS DARK
-// ------------------------------------
-// Same rule the call screens already follow (constants/callTheme.ts): these do
-// NOT read the app palette. The native splash is a fixed piece of artwork on a
-// fixed #010628 ground, and the first React screen has to be the same picture
-// or the hand-off flickers from navy to white on a light-themed phone. A
-// sign-in screen is also seen once; matching the artwork matters more than
-// honouring a preference the user has not been asked for yet.
+// Mounted auth screens follow appearance. Native splash artwork stays unchanged.
 //
 // WHY THE LOGO IS TWO PNGs AND NOT ONE
 // ------------------------------------
@@ -27,10 +20,12 @@
 // own padding, which is generous because it was drawn for an app icon.
 
 import React from 'react';
+import { StatusBar } from 'expo-status-bar';
 import { Image, StyleSheet, Text, View, type StyleProp, type ViewStyle } from 'react-native';
 import Svg, { Circle, Defs, Ellipse, G, RadialGradient, Stop } from 'react-native-svg';
-import { BRAND_CYAN, BRAND_NIGHT, BRAND_VIOLET, BRAND_ACCENT } from '../../constants/theme';
-import { AUTH } from '../../constants/authTheme';
+import { BRAND_CYAN, BRAND_VIOLET, BRAND_ACCENT } from '../../constants/theme';
+import { useAuthTheme } from '../../lib/useAuthTheme';
+import { useTheme } from '../../lib/theme';
 
 /* ── the sky ─────────────────────────────────────────────────────────── */
 
@@ -55,15 +50,19 @@ const SKY: Bloom[] = [
  * tap meant for the form on top of it.
  */
 export function AuthSky() {
+  const auth = useAuthTheme();
+  const { scheme } = useTheme();
+  const bloom = scheme === 'light' ? 0.2 : 1;
   return (
-    <View style={[StyleSheet.absoluteFill, { backgroundColor: BRAND_NIGHT }]} pointerEvents="none">
+    <View style={[StyleSheet.absoluteFill, { backgroundColor: auth.bg }]} pointerEvents="none">
+      <StatusBar style={scheme === 'light' ? 'dark' : 'light'} />
       <Svg width="100%" height="100%" viewBox="0 0 390 844" preserveAspectRatio="xMidYMid slice">
         <Defs>
           {SKY.map((b, i) => (
             <RadialGradient key={i} id={`sky-${i}`} cx="50%" cy="50%" r="50%">
-              <Stop offset="0%" stopColor={b.c} stopOpacity={b.o} />
+              <Stop offset="0%" stopColor={b.c} stopOpacity={b.o * bloom} />
               {/* Mid stop keeps the falloff soft; a straight 0→1 ramp reads as a hard disc. */}
-              <Stop offset="55%" stopColor={b.c} stopOpacity={b.o * 0.45} />
+              <Stop offset="55%" stopColor={b.c} stopOpacity={b.o * 0.45 * bloom} />
               <Stop offset="100%" stopColor={b.c} stopOpacity={0} />
             </RadialGradient>
           ))}
@@ -135,6 +134,8 @@ export interface BrandMarkProps {
 export function BrandMark({
   size = 96, orbits = true, tagline = false, markOnly = false, style,
 }: BrandMarkProps) {
+  const auth = useAuthTheme();
+  const { scheme } = useTheme();
   // Measured off assets/images/brand-mark.png (512x562).
   const markH = Math.round(size * (562 / 512));
   // The rings need room around the mark or they crop to a rectangle.
@@ -157,7 +158,7 @@ export function BrandMark({
 
       {!markOnly && (
         <Image
-          source={require('../../assets/images/brand-wordmark-on-dark.png')}
+          source={scheme === 'light' ? require('../../assets/images/brand-wordmark.png') : require('../../assets/images/brand-wordmark-on-dark.png')}
           // 768x152 in the asset; width is 1.72x the mark in the original lockup.
           style={{ width: Math.round(size * 1.72), height: Math.round(size * 1.72 * (152 / 768)), marginTop: 2 }}
           resizeMode="contain"
@@ -166,7 +167,7 @@ export function BrandMark({
         />
       )}
 
-      {tagline && <Text style={S.tagline}>CONNECT INSTANTLY</Text>}
+      {tagline && <Text style={[S.tagline, scheme === 'light' && { color: auth.dim }]}>CONNECT INSTANTLY</Text>}
     </View>
   );
 }
@@ -192,6 +193,8 @@ export interface StepRailProps {
  * widths.
  */
 export function StepRail({ step, total = 3, style }: StepRailProps) {
+  const { scheme } = useTheme();
+  const auth = useAuthTheme();
   return (
     <View
       style={[S.rail, style]}
@@ -199,7 +202,7 @@ export function StepRail({ step, total = 3, style }: StepRailProps) {
       importantForAccessibility="no-hide-descendants"
     >
       {Array.from({ length: total }, (_, i) => (
-        <View key={i} style={[S.seg, i < step ? S.segOn : S.segOff]} />
+        <View key={i} style={[S.seg, { backgroundColor: i < step ? auth.accent : scheme === 'light' ? auth.stroke : auth.hairline }]} />
       ))}
     </View>
   );
@@ -208,11 +211,9 @@ export function StepRail({ step, total = 3, style }: StepRailProps) {
 const S = StyleSheet.create({
   rail: { flexDirection: 'row', gap: 6 },
   seg: { flex: 1, height: 3, borderRadius: 2 },
-  segOn: { backgroundColor: AUTH.accent },
-  segOff: { backgroundColor: AUTH.hairline },
 
   tagline: {
-    // Not a palette colour on purpose — see the always-dark note in the header.
+    // Original night tagline; the light appearance overrides its ink.
     color: 'rgba(255,255,255,0.62)',
     fontSize: 11,
     fontWeight: '600',

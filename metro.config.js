@@ -40,7 +40,7 @@ const shimDir = path.resolve(__dirname, "shims");
 // shim itself is unchanged: on web these are browser-native APIs, which have no
 // idea which native package the app would have used.
 const webOnlyShims = {
-  "@livekit/react-native-webrtc": path.join(shimDir, "react-native-webrtc.js"),
+  "@livekit/react-native-webrtc": path.join(shimDir, "react-native-webrtc.ts"),
 };
 
 // ─── Cap @expo/vector-icons to the families actually rendered ────
@@ -49,7 +49,7 @@ const webOnlyShims = {
 // nothing renders. The shim re-exports only what is used; see its header.
 // The deep form ('@expo/vector-icons/Ionicons') is a different module name and
 // is left alone, which is also how the shim imports the real families.
-const vectorIconsShim = path.join(shimDir, "vector-icons.js");
+const vectorIconsShim = path.join(shimDir, "vector-icons.ts");
 
 const originalResolveRequest = config.resolver.resolveRequest;
 config.resolver.resolveRequest = (context, moduleName, platform) => {

@@ -183,17 +183,17 @@ export default function FilePreviewScreen() {
       <Stack.Screen options={{
         headerShown: true, /* the root Stack sets headerShown:false app-wide, so the options below were inert and this screen had no back control at all */ 
         title: (filename || 'Preview') + '',
-        headerStyle: { backgroundColor: '#FFFFFF' },
-        headerTintColor: '#1F2937',
+        headerStyle: { backgroundColor: colors.surfaceSolid },
+        headerTintColor: colors.text,
         headerRight: () => (
           <View style={{ flexDirection: 'row', gap: 12, marginRight: 8 }}>
-            <TouchableOpacity onPress={() => setWordWrap(!wordWrap)}>
-              <Text style={{ color: wordWrap ? colors.accent : '#6B7280', fontSize: 12, fontWeight: '700' }}>Wrap</Text>
+            <TouchableOpacity style={{ minHeight: 44, justifyContent: 'center' }} onPress={() => setWordWrap(!wordWrap)}>
+              <Text style={{ color: wordWrap ? colors.accent : colors.textDim, fontSize: 12, fontWeight: '700' }}>Wrap</Text>
             </TouchableOpacity>
-            <TouchableOpacity onPress={copyAll}>
+            <TouchableOpacity style={{ minHeight: 44, justifyContent: 'center' }} onPress={copyAll}>
               <Text style={{ color: colors.accent, fontSize: 12, fontWeight: '700' }}>Copy</Text>
             </TouchableOpacity>
-            <TouchableOpacity onPress={shareFile}>
+            <TouchableOpacity style={{ minHeight: 44, justifyContent: 'center' }} onPress={shareFile}>
               <Text style={{ color: colors.accent, fontSize: 12, fontWeight: '700' }}>Share</Text>
             </TouchableOpacity>
           </View>
@@ -237,12 +237,13 @@ export default function FilePreviewScreen() {
 
 const makeStyles = (c: Palette) => StyleSheet.create({
   container: { flex: 1, backgroundColor: c.bg },
-  infoBar: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingVertical: 8, backgroundColor: c.card, borderBottomWidth: 1, borderBottomColor: '#21262D', gap: 12 },
-  langBadge: { backgroundColor: '#4A9FFF22', color: c.accent, fontSize: 10, fontWeight: '800', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 4 },
-  lineCount: { color: '#8B949E', fontSize: 11 },
-  sizeInfo: { color: '#8B949E', fontSize: 11 },
-  codeScroll: { flex: 1 },
+  infoBar: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingVertical: 8, backgroundColor: c.surfaceSolid, borderBottomWidth: 1, borderBottomColor: c.glassStroke, gap: 12 },
+  langBadge: { backgroundColor: '#4A9FFF22', color: c.accent, fontSize: 12, fontWeight: '800', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 4 },
+  lineCount: { color: c.textDim, fontSize: 11 },
+  sizeInfo: { color: c.textDim, fontSize: 11 },
+  // Syntax tokens use a fixed dark canvas; chrome follows the app theme.
+  codeScroll: { flex: 1, backgroundColor: '#0D1117' },
   lineRow: { flexDirection: 'row', minHeight: 22 },
-  lineNum: { color: '#484F58', fontSize: 12, fontFamily: 'monospace', textAlign: 'right', paddingRight: 12, paddingTop: 2, backgroundColor: '#FFFFFF', borderRightWidth: 1, borderRightColor: '#21262D' },
+  lineNum: { color: '#8B949E', fontSize: 12, fontFamily: 'monospace', textAlign: 'right', paddingRight: 12, paddingTop: 2, backgroundColor: '#161B22', borderRightWidth: 1, borderRightColor: '#21262D' },
   codeLine: { fontSize: 12, fontFamily: 'monospace', paddingLeft: 12, paddingTop: 2, color: '#C9D1D9' },
 });

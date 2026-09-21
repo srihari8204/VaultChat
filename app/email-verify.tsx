@@ -1,3 +1,5 @@
+import { AppText as Text } from '../components/ui/Text';
+import { KeyboardSafe } from '../components/ui/KeyboardSafe';
 // app/email-verify.tsx — the SMS OTP step. Proves the MOBILE NUMBER is the
 // user's → phoneTicket (required by /auth/profile/init). 6 visible digits.
 //
@@ -10,29 +12,29 @@
 // that proves the chain still navigates correctly offline exactly when it is
 // most needed. Rename it as its own commit, with the guard updated alongside.
 //
-// Pushed straight off app/onboard.tsx, so it stands on the same night ground and
-// reads the same fixed palette rather than the app theme — a flip from navy to
-// white one tap into a sign-up reads as a different app. See the always-dark
-// note in components/ui/Brand.tsx.
+// Auth appearance follows the selected app theme.
 
 import { HEADER_TOP } from '../constants/layout';
 import { Ionicons } from '@expo/vector-icons';
 import { Stack, useRouter } from 'expo-router';
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
+import { useMemo, useCallback, useEffect, useRef, useState } from 'react';
+import { ActivityIndicator, Pressable, StyleSheet, ScrollView, View } from 'react-native';
 import { MpinInput } from '../components/auth/MpinInput';
 import { Sheet } from '../components/ui/Sheet';
 import {
   onboarding, resendPhoneOtp, verifyPhoneOtp, onboardingError, retryAfterSec, type OtpChannel,
 } from '../lib/onboarding';
 import { AuthSky } from '../components/ui';
-import { AUTH } from '../constants/authTheme';
+import { type AuthPalette } from '../constants/authTheme';
+import { useAuthTheme } from '../lib/useAuthTheme';
 
 // All but the last four digits. Four is enough to catch "I typed my old SIM",
 // and the whole number is one tap away behind Edit number.
 const mask = (p: string) => p.replace(/\d(?=\d{4})/g, '•');
 
 export default function EmailVerify() {
+  const AUTH = useAuthTheme();
+  const s = useMemo(() => makeStyles(AUTH), [AUTH]);
   const router = useRouter();
   const phone = onboarding.get().phone;
   const [code, setCode] = useState('');
@@ -126,7 +128,8 @@ export default function EmailVerify() {
         <Ionicons name="arrow-back" size={24} color={AUTH.text} />
       </Pressable>
 
-      <View style={s.body}>
+      <KeyboardSafe keyboardOnly>
+      <ScrollView contentContainerStyle={s.body} keyboardShouldPersistTaps="handled">
         <Text style={s.title}>Enter the 6-digit code</Text>
         <Text style={s.sub}>Sent by SMS to{'\n'}<Text style={s.phone}>{mask(phone)}</Text></Text>
 
@@ -171,7 +174,8 @@ export default function EmailVerify() {
         >
           <Text style={[s.alt, waiting && s.resendOff]}>Didn’t get it?</Text>
         </Pressable>
-      </View>
+      </ScrollView>
+      </KeyboardSafe>
 
       {/* SMS is the one delivery that silently fails — a blocked sender ID, a
           roaming SIM, a DND list. Voice and WhatsApp are different carriers of
@@ -190,15 +194,15 @@ export default function EmailVerify() {
   );
 }
 
-const s = StyleSheet.create({
+const makeStyles = (AUTH: AuthPalette) => StyleSheet.create({
   screen: { flex: 1, backgroundColor: 'transparent' },
   back: { paddingTop: HEADER_TOP, paddingHorizontal: 20, alignSelf: 'flex-start' },
-  body: { flex: 1, paddingHorizontal: 24, paddingTop: 24, alignItems: 'center' },
+  body: { flexGrow: 1, paddingBottom: 32, paddingHorizontal: 24, paddingTop: 24, alignItems: 'center' },
   title: { color: AUTH.text, fontSize: 24, fontWeight: '900', textAlign: 'center' },
   sub: { color: AUTH.dim, fontSize: 14, textAlign: 'center', marginTop: 10, lineHeight: 20 },
-  phone: { color: AUTH.text, fontWeight: '700' },
+  phone: { fontSize: 14, color: AUTH.text, fontWeight: '700' },
 
-  editHit: { marginTop: 8, paddingVertical: 6, paddingHorizontal: 10 },
+  editHit: { minHeight: 44, justifyContent: 'center', marginTop: 8, paddingVertical: 6, paddingHorizontal: 10 },
   edit: { color: AUTH.cyan, fontSize: 13, fontWeight: '700' },
 
   card: {
@@ -212,7 +216,7 @@ const s = StyleSheet.create({
     padding: 18,
   },
 
-  resendHit: { marginTop: 18, paddingVertical: 6 },
+  resendHit: { minHeight: 44, justifyContent: 'center', marginTop: 18, paddingVertical: 6 },
   // Cyan rather than the accent: a secondary action on this ground reads better
   // cool, and it is text on night, not white on cyan.
   resend: { color: AUTH.cyan, fontSize: 14, fontWeight: '700' },
@@ -220,6 +224,6 @@ const s = StyleSheet.create({
 
   err: { color: AUTH.danger, fontSize: 13, fontWeight: '600', textAlign: 'center', marginTop: 14 },
 
-  altHit: { marginTop: 14, paddingVertical: 8, paddingHorizontal: 12 },
+  altHit: { minHeight: 44, justifyContent: 'center', marginTop: 14, paddingVertical: 8, paddingHorizontal: 12 },
   alt: { color: AUTH.dim, fontSize: 13, fontWeight: '700', textDecorationLine: 'underline' },
 });

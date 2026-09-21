@@ -5,10 +5,11 @@
 // settings (VB_AUTO_MAX_BYTES, enforced in the engine).
 
 import React from 'react';
-import { View, Text, ScrollView, StyleSheet, TouchableOpacity, Switch, StatusBar, Platform } from 'react-native';
+import { View, ScrollView, StyleSheet, TouchableOpacity, Switch, StatusBar, Platform } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { Stack, useRouter } from 'expo-router';
 import { useTheme } from '../lib/theme';
+import { AppText as Text, AuroraBackground } from '../components/ui';
 import { BRAND_ACCENT } from '../constants/theme';
 import { VB_AUTODOWNLOAD } from '../constants/flags';
 import {
@@ -18,17 +19,18 @@ import {
 
 export default function VaultBeamSettings() {
   const router = useRouter();
-  const { colors } = useTheme();
+  const { colors, scheme } = useTheme();
   const s = useVBSettings();
   const auto = s.mode === 'auto';
 
   const C = colors as any;
-  const card = { backgroundColor: C.surfaceSolid ?? C.surface, borderColor: C.glassStroke };
+  const card = { backgroundColor: C.glass, borderColor: C.glassStroke };
 
   return (
     <View style={[styles.screen, { backgroundColor: C.bg }]}>
+      <AuroraBackground />
       <Stack.Screen options={{ headerShown: false }} />
-      <StatusBar barStyle={C.text === '#FFFFFF' ? 'light-content' : 'dark-content'} />
+      <StatusBar barStyle={scheme === 'dark' ? 'light-content' : 'dark-content'} />
       <View style={[styles.header, { borderBottomColor: C.glassStroke }]}>
         <TouchableOpacity accessibilityRole="button" accessibilityLabel="Back" onPress={() => router.back()} hitSlop={10} style={styles.hBtn}>
           <Ionicons name="arrow-back" size={22} color={C.text} />

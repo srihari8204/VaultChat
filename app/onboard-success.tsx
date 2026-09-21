@@ -8,7 +8,7 @@
 // sign-up is the point, not a splash rerun.
 
 import { Stack } from 'expo-router';
-import { useEffect, useState } from 'react';
+import { useMemo, useEffect, useState } from 'react';
 import { ActivityIndicator, Alert, BackHandler, Pressable, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { BRAND_GRADIENT_CTA } from '../constants/theme';
@@ -16,9 +16,12 @@ import { resetTo } from '../lib/authNav';
 import { onboarding, verifyMpinRemote, uploadAndSetProfilePhoto, onboardingError } from '../lib/onboarding';
 import { deviceSecurityAvailable, enableMfa } from '../lib/mfa';
 import { AuthSky, BrandMark } from '../components/ui';
-import { AUTH } from '../constants/authTheme';
+import { type AuthPalette } from '../constants/authTheme';
+import { useAuthTheme } from '../lib/useAuthTheme';
 
 export default function OnboardSuccess() {
+  const AUTH = useAuthTheme();
+  const s = useMemo(() => makeStyles(AUTH), [AUTH]);
   const [mfaOn, setMfaOn] = useState(false);
   const [hasDeviceSecurity, setHasDeviceSecurity] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -151,7 +154,7 @@ export default function OnboardSuccess() {
   );
 }
 
-const s = StyleSheet.create({
+const makeStyles = (AUTH: AuthPalette) => StyleSheet.create({
   screen: { flex: 1, backgroundColor: 'transparent' },
   // Same double-count as onboard-mpin: this screen is in INSET_SCREENS, so
   // the container already adds HEADER_TOP and 52 + 88 left 140dp blank above

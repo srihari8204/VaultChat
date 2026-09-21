@@ -4,8 +4,6 @@
  */
 
 import { Ionicons } from '@expo/vector-icons';
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import * as LocalAuthentication from 'expo-local-authentication';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Stack, useRouter } from 'expo-router';
 import React, { useEffect, useRef, useState , useMemo} from 'react';
@@ -13,11 +11,8 @@ import {
   Alert,
   Animated,
   FlatList,
-  Platform,
-  StatusBar,
   StyleSheet,
   Switch,
-  Text,
   TextInput,
   TouchableOpacity,
   View,
@@ -29,7 +24,7 @@ import {
   getAllLocks, setChatLock, removeChatLock, verifyBiometric, verifyPin, hasBiometric,
   type LockedChat, type LockMethod, type AutoLockTimer,
 } from '../lib/chatLock';
-import { AuroraBackground } from '../components/ui';
+import { AppText as Text, AuroraBackground } from '../components/ui';
 import { HEADER_TOP } from '../constants/layout';
 
 
@@ -306,7 +301,7 @@ export default function AppLockChatsScreen() {
         <Switch
           value={isLocked}
           onValueChange={() => toggleLock(item)}
-          trackColor={{ false: '#D1D5DB', true: 'rgba(74,159,255,0.4)' }}
+          trackColor={{ false: colors.border, true: colors.primary }}
           thumbColor={isLocked ? colors.accent : '#9CA3AF'}
         />
       </View>
@@ -319,8 +314,6 @@ export default function AppLockChatsScreen() {
     <View style={s.container}>
       <AuroraBackground />
       <Stack.Screen options={{ headerShown: false }} />
-      <LinearGradient colors={[colors.bg, '#F9FAFB', colors.bg]} style={StyleSheet.absoluteFill} />
-
       <Animated.View style={{ flex: 1, opacity: fadeIn }}>
         {/* Header */}
         <View style={s.header}>
@@ -423,7 +416,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
     marginHorizontal: 16,
     marginBottom: 16,
     padding: 14,
-    backgroundColor: c.glassSoft,
+    backgroundColor: c.glass,
     borderRadius: 14,
     borderWidth: 1,
     borderColor: c.glassStroke,
@@ -432,7 +425,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
     width: 48,
     height: 48,
     borderRadius: 24,
-    backgroundColor: 'rgba(74,159,255,0.12)',
+    backgroundColor: c.glassSoft,
     justifyContent: 'center',
     alignItems: 'center',
     marginRight: 14,
@@ -443,7 +436,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   chatRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: c.glassSoft,
+    backgroundColor: c.glass,
     padding: 14,
     borderRadius: 14,
     borderWidth: 1,
@@ -467,7 +460,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
     width: 18,
     height: 18,
     borderRadius: 9,
-    backgroundColor: c.glassSoft,
+    backgroundColor: c.glass,
     justifyContent: 'center',
     alignItems: 'center',
     borderWidth: 1,
@@ -489,7 +482,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   },
   configPanel: {
     width: '100%',
-    backgroundColor: c.glassSoft,
+    backgroundColor: c.glass,
     borderRadius: 20,
     padding: 24,
     borderWidth: 1,
@@ -510,7 +503,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
     alignItems: 'center',
     gap: 6,
   },
-  chipActive: { backgroundColor: 'rgba(74,159,255,0.15)', borderColor: c.accent },
+  chipActive: { backgroundColor: c.glass, borderColor: c.accent },
   chipText: { fontSize: 13, color: c.textDim, fontWeight: '600' },
   chipTextActive: { color: c.accent },
 

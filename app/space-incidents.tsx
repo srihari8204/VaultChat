@@ -16,14 +16,15 @@
 // Resolving is ops-only, enforced server-side. A driver cannot close their own
 // breakdown report — someone who could resolve it could also make it disappear.
 
+import { AppText as Text } from '../components/ui/Text';
 import React, { useCallback, useMemo, useState } from 'react';
 import {
-  View, Text, StyleSheet, ScrollView, ActivityIndicator, TouchableOpacity, Alert,
+  View, StyleSheet, ScrollView, ActivityIndicator, TouchableOpacity, Alert,
 } from 'react-native';
 import { Stack, useLocalSearchParams, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useSpaceColors, spaceHeader } from '../lib/spaces/theme';
-import type { Palette } from '../constants/theme';
+import type { SpacePalette as Palette } from '../lib/spaces/theme';
 import { getIncidents, setIncidentStatus, getRuns, type Incident } from '../lib/spaces/api';
 import type { Run } from '../lib/spaces/runs';
 import { AuroraBackground } from '../components/ui';
@@ -209,7 +210,7 @@ const styles = (c: Palette) => StyleSheet.create({
   btn: { flex: 1, paddingVertical: 11, borderRadius: 10, alignItems: 'center' },
   ghost: { borderWidth: 1, borderColor: c.glassStroke },
   ghostText: { color: c.text, fontWeight: '600' },
-  solid: { backgroundColor: c.primary },
+  solid: { backgroundColor: c.brandOnLight },
   solidText: { color: '#fff', fontWeight: '700' },
   footnote: { color: c.textFaint, fontSize: 11.5, lineHeight: 16 },
 });

@@ -1,14 +1,18 @@
 import { HEADER_TOP } from '../constants/layout';
-import { LinearGradient } from "expo-linear-gradient";
 import * as Haptics from "expo-haptics";
 import { router, useLocalSearchParams } from "expo-router";
-import { useState } from "react";
-import { Platform, StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import { useMemo, useState } from "react";
+import { Platform, ScrollView, StyleSheet, TouchableOpacity, View } from "react-native";
 import { savePIN } from "../services/securityService";
+import { AppText as Text, AuthSky, KeyboardSafe } from "../components/ui";
+import { AUTH_LIGHT, type AuthPalette } from '../constants/authTheme';
+import { useAuthTheme } from '../lib/useAuthTheme';
 
 const KEYS = ["1","2","3","4","5","6","7","8","9","","0","⌫"];
 
 export default function BackupPINScreen() {
+  const AUTH = useAuthTheme();
+  const S = useMemo(() => makeStyles(AUTH), [AUTH]);
   // Reached mid-onboarding (→ /biometric-setup next) or from Settings (→ back).
   const fromSettings = useLocalSearchParams<{ from?: string }>().from === 'settings';
   const [pin,setPin]     = useState("");
@@ -37,8 +41,10 @@ export default function BackupPINScreen() {
   const dots = Array(6).fill(0).map((_,i)=>({filled:i<current.length}));
 
   return (
-    <LinearGradient colors={["#FFFFFF","#020E1A","#FFFFFF"]} style={{flex:1}}>
-      <View style={S.container}>
+    <View style={S.screen}>
+      <AuthSky />
+      <KeyboardSafe style={{ flex: 1 }}>
+        <ScrollView contentContainerStyle={S.container} keyboardShouldPersistTaps="handled">
         <View style={S.header}>
           <View style={S.badge}><Text style={{fontSize:36}}>🔢</Text></View>
           <Text style={S.title}>{stage==="set"?"Set Backup PIN":"Confirm PIN"}</Text>
@@ -55,29 +61,31 @@ export default function BackupPINScreen() {
           ))}
         </View>
         <Text style={S.hint}>PIN is stored securely on your device only.</Text>
-      </View>
-    </LinearGradient>
+        </ScrollView>
+      </KeyboardSafe>
+    </View>
   );
 }
 
-const S = StyleSheet.create({
-  container:  { flex:1,alignItems:"center",paddingTop:HEADER_TOP,paddingHorizontal:32 },
+const makeStyles = (AUTH: AuthPalette) => StyleSheet.create({
+  screen:     { flex:1, backgroundColor:"transparent" },
+  container:  { flexGrow:1,alignItems:"center",paddingTop:HEADER_TOP,paddingHorizontal:32,paddingBottom:32 },
   header:     { alignItems:"center",marginBottom:24,gap:10 },
   badge:      { width:80,height:80,borderRadius:40,backgroundColor:"rgba(74,159,255,0.12)",borderWidth:1.5,borderColor:"rgba(74,159,255,0.3)",justifyContent:"center",alignItems:"center" },
-  title:      { color:"#fff",fontSize:24,fontWeight:"900" },
-  sub:        { color:"rgba(255,255,255,0.4)",fontSize:13,textAlign:"center" },
+  title:      { color:AUTH.text,fontSize:24,fontWeight:"900" },
+  sub:        { color:AUTH.dim,fontSize:13,textAlign:"center" },
   steps:      { flexDirection:"row",gap:6,marginBottom:28 },
-  dot:        { width:24,height:4,borderRadius:2,backgroundColor:"rgba(255,255,255,0.12)" },
+  dot:        { width:24,height:4,borderRadius:2,backgroundColor:AUTH.bg === AUTH_LIGHT.bg ? AUTH.stroke : "rgba(255,255,255,0.12)" },
   dotActive:  { backgroundColor:"#4A9FFF",width:32 },
   dotDone:    { backgroundColor:"#22C55E" },
   dotsRow:    { flexDirection:"row",gap:14,marginBottom:16 },
-  pinDot:     { width:18,height:18,borderRadius:9,borderWidth:2,borderColor:"rgba(255,255,255,0.2)" },
+  pinDot:     { width:18,height:18,borderRadius:9,borderWidth:2,borderColor:AUTH.bg === AUTH_LIGHT.bg ? AUTH.stroke : "rgba(255,255,255,0.2)" },
   pinDotFilled:{ backgroundColor:"#4A9FFF",borderColor:"#4A9FFF" },
-  err:        { color:"#EF4444",fontSize:13,marginBottom:16,textAlign:"center" },
-  keypad:     { flexDirection:"row",flexWrap:"wrap",width:280,gap:14,justifyContent:"center",marginBottom:24 },
-  key:        { width:76,height:76,borderRadius:38,backgroundColor:"rgba(255,255,255,0.07)",borderWidth:1,borderColor:"rgba(255,255,255,0.1)",justifyContent:"center",alignItems:"center" },
+  err:        { color:AUTH.danger,fontSize:13,marginBottom:16,textAlign:"center" },
+  keypad:     { flexDirection:"row",flexWrap:"wrap",width:"100%",maxWidth:280,gap:14,justifyContent:"center",marginBottom:24 },
+  key:        { width:76,height:76,borderRadius:38,backgroundColor:AUTH.bg === AUTH_LIGHT.bg ? AUTH.card : "rgba(255,255,255,0.07)",borderWidth:1,borderColor:AUTH.bg === AUTH_LIGHT.bg ? AUTH.stroke : "rgba(255,255,255,0.1)",justifyContent:"center",alignItems:"center" },
   keyEmpty:   { backgroundColor:"transparent",borderColor:"transparent" },
   keyDel:     { backgroundColor:"rgba(239,68,68,0.08)",borderColor:"rgba(239,68,68,0.2)" },
-  keyTxt:     { color:"#fff",fontSize:24,fontWeight:"600" },
-  hint:       { color:"rgba(255,255,255,0.22)",fontSize:12,textAlign:"center" },
+  keyTxt:     { color:AUTH.text,fontSize:24,fontWeight:"600" },
+  hint:       { color:AUTH.dim,fontSize:12,textAlign:"center" },
 });

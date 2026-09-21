@@ -72,6 +72,11 @@ export interface Palette {
    * gradient stay a gradient in both themes.
    */
   accentOn: string;
+  /**
+   * Brand text/icon colour when the surface underneath is light, regardless of
+   * the active app theme. Used by mixed-material previews and handoff sheets.
+   */
+  brandOnLight: string;
 }
 
 // ─── Single source of truth for the brand ACCENT ────────────────────
@@ -92,6 +97,23 @@ export interface Palette {
 export const BRAND_ACCENT = '#1777FE';           // the wordmark blue
 export const BRAND_ACCENT_RGB = '23, 119, 254';  // keep in sync with BRAND_ACCENT
 export const brandAlpha = (a: number) => `rgba(${BRAND_ACCENT_RGB}, ${a})`;
+
+/** Navigation artwork keeps its identity in both appearances. */
+export const TAB_ICON_INK = {
+  chats: { light: '#1552E0', dark: '#8BC6FF' },
+  status: { light: '#00695C', dark: '#75E3CB' },
+  mini: { light: '#6D28D9', dark: '#CEB5FF' },
+  calls: { light: '#9A5700', dark: '#FFD285' },
+  profile: { light: '#B42361', dark: '#FFADCA' },
+} as const;
+
+export const CHAT_ACTION_INK = {
+  search: TAB_ICON_INK.chats,
+  alerts: TAB_ICON_INK.mini,
+  temporary: TAB_ICON_INK.calls,
+  contacts: TAB_ICON_INK.status,
+  broadcast: TAB_ICON_INK.profile,
+} as const;
 
 /**
  * The three stops of the mark, cyan → blue → violet, in sweep order.
@@ -148,14 +170,14 @@ const BRAND = {
 export const AuroraDark: Palette = {
   ...BRAND,
   bg:        '#0A0810', // deep aurora ground — the blooms are drawn on top of this
-  surface:   'rgba(255,255,255,0.06)',
-  surfaceSolid: '#1B1626',
+  surface:   'rgba(255,255,255,0.07)',
+  surfaceSolid: '#1F1A2B',
   card:      '#171320',
   border:    'rgba(255,255,255,0.09)',
   separator: 'rgba(255,255,255,0.06)',
   text:      'rgba(255,255,255,0.96)',
-  textDim:   'rgba(255,255,255,0.56)',
-  textFaint: 'rgba(255,255,255,0.34)',
+  textDim:   'rgba(255,255,255,0.72)',
+  textFaint: 'rgba(255,255,255,0.62)',
   // Conversation: received sits on a raised ground tone, sent carries the accent.
   chatBg:        '#0A0810',
   bubbleIn:      '#1B1626',
@@ -163,32 +185,38 @@ export const AuroraDark: Palette = {
 
   bubbleInText:  'rgba(255,255,255,0.96)',
   bubbleOutText: '#FFFFFF',
-  bubbleMetaIn:  'rgba(255,255,255,0.34)',
+  bubbleMetaIn:  'rgba(255,255,255,0.62)',
   bubbleMetaOut: 'rgba(255,255,255,0.70)',
   tickRead:      '#FFFFFF',
   headerBar:     '#12101A',
 
-  glass:       'rgba(255,255,255,0.08)',
-  glassSoft:   'rgba(255,255,255,0.06)',
-  glassStroke: 'rgba(255,255,255,0.16)',
-  hairline:    'rgba(255,255,255,0.06)',
+  glass:       'rgba(255,255,255,0.10)',
+  glassSoft:   'rgba(255,255,255,0.075)',
+  glassStroke: 'rgba(255,255,255,0.20)',
+  hairline:    'rgba(255,255,255,0.075)',
   groundDisc:  '#171320',
   accentLight: '#7FB6FF',   // 9.49:1 on the dark ground — the on-dark accent TEXT colour
   accentDeep:  '#1552E0',
   accentOn:    '#7FB6FF',
+  brandOnLight:'#1552E0',
 };
 
 export const AuroraLight: Palette = {
   ...BRAND,
-  bg:        '#F2F5FC', // blue-tinted, NOT pure white — the blooms need a ground with hue
-  surface:   'rgba(24,16,40,0.045)',
-  surfaceSolid: '#EBE6F5',
+  // These roles also label actions/statuses on light glass: use readable ink.
+  primary: '#1552E0',
+  accent: '#1552E0',
+  success: '#05603A',
+  danger: '#B42318',
+  bg:        '#D4E1F2', // a distinct blue ground separates white glass from the page
+  surface:   'rgba(49,76,118,0.11)',
+  surfaceSolid: '#EAF1FA',
   card:      '#FFFFFF',
-  border:    'rgba(24,16,40,0.11)',
-  separator: 'rgba(24,16,40,0.07)',
+  border:    'rgba(49,76,118,0.32)',
+  separator: 'rgba(49,76,118,0.20)',
   text:      '#1B1526',
-  textDim:   'rgba(27,21,38,0.60)',
-  textFaint: 'rgba(27,21,38,0.40)',
+  textDim:   'rgba(27,21,38,0.74)',
+  textFaint: 'rgba(27,21,38,0.66)',
   // Conversation: received on white, sent on the brand accent.
   chatBg:        '#F4F1FA',
   bubbleIn:      '#FFFFFF',
@@ -196,19 +224,20 @@ export const AuroraLight: Palette = {
 
   bubbleInText:  '#1B1526',
   bubbleOutText: '#FFFFFF',
-  bubbleMetaIn:  'rgba(27,21,38,0.45)',
+  bubbleMetaIn:  'rgba(27,21,38,0.66)',
   bubbleMetaOut: 'rgba(255,255,255,0.85)',
   tickRead:      '#FFFFFF',
   headerBar:     '#FFFFFF',
 
-  glass:       'rgba(255,255,255,0.70)',
-  glassSoft:   'rgba(255,255,255,0.55)',
-  glassStroke: 'rgba(24,16,40,0.10)',
-  hairline:    'rgba(24,16,40,0.08)',
+  glass:       'rgba(255,255,255,0.88)',
+  glassSoft:   'rgba(232,240,252,0.86)',
+  glassStroke: 'rgba(38,67,110,0.40)',
+  hairline:    'rgba(38,67,110,0.24)',
   groundDisc:  '#FFFFFF',
   accentLight: '#6BA5FF',
   accentDeep:  '#1552E0',
   accentOn:    '#1552E0',
+  brandOnLight:'#1552E0',
 };
 
 /** The static default palette (dark). Existing screens import this directly. */

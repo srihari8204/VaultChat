@@ -65,7 +65,15 @@ async function sosFix(): Promise<{ lat: number | null; lng: number | null }> {
   } catch { return none; }
 }
 
+// TEMPORARY INSTRUMENTATION (2026-09-20). This route does not navigate: not
+// from a deep link, not from the in-app SOS control, and JS logs nothing at
+// all either way. The bundle contains this screen and its imports resolve
+// everywhere else, so the remaining question is whether this module is ever
+// EVALUATED. These two lines answer it and come straight back out.
+console.warn('[sos-probe] module evaluated');
+
 export default function EmergencySOSScreen() {
+  console.warn('[sos-probe] component rendering');
   const { colors } = useTheme();
   const styles = useS();
   const router = useRouter();

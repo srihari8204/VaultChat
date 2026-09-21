@@ -9,19 +9,21 @@ import React, { useMemo } from 'react';
 import { View, Text, ActivityIndicator, StyleSheet } from 'react-native';
 import { useConnectionState } from '../lib/socket';
 import type { Palette } from '../constants/theme';
-import { useColors } from '../lib/theme';
+import { useColors, useTheme } from '../lib/theme';
 
 export default function ConnectionBanner() {
   const c = useColors();
+  const { scheme } = useTheme();
   const styles = useMemo(() => makeStyles(c), [c]);
   const state = useConnectionState();
   if (state === 'ONLINE') return null;
 
   const connecting = state === 'CONNECTING';
+  const ink = connecting && scheme === 'light' ? c.text : '#fff';
   return (
     <View style={[styles.bar, connecting ? styles.connecting : styles.offline]}>
-      {connecting && <ActivityIndicator size="small" color="#fff" style={styles.spinner} />}
-      <Text style={styles.txt}>{connecting ? 'Connecting…' : 'Waiting for network…'}</Text>
+      {connecting && <ActivityIndicator size="small" color={ink} style={styles.spinner} />}
+      <Text style={[styles.txt, { color: ink }]}>{connecting ? 'Connecting…' : 'Waiting for network…'}</Text>
     </View>
   );
 }

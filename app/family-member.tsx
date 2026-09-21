@@ -10,8 +10,9 @@
 // presence.ts fills from already-decrypted pings), so the screen works without
 // having to re-plumb the parent's live subscription through navigation params.
 
+import { AppText as Text } from '../components/ui/Text';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Alert, ActivityIndicator } from 'react-native';
+import { View, StyleSheet, TouchableOpacity, ScrollView, Alert, ActivityIndicator } from 'react-native';
 import { Stack, useLocalSearchParams, useRouter, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../lib/theme';
@@ -55,7 +56,7 @@ const ICON_FOR: Record<string, keyof typeof Ionicons.glyphMap> = {
 };
 
 export default function FamilyMemberScreen() {
-  const { colors } = useTheme();
+  const { colors, scheme } = useTheme();
   const G = useSpaceGlass();
   const router = useRouter();
   const params = useLocalSearchParams<{
@@ -346,7 +347,7 @@ export default function FamilyMemberScreen() {
         {/* identity card */}
         <View style={[st.card, { backgroundColor: G.paneStrong, borderColor: G.edge }]}>
           <View style={[st.avatar, { backgroundColor: colorFor(userId) }]}>
-            <Text style={st.avatarTxt}>{name.trim()[0]?.toUpperCase() ?? '?'}</Text>
+            <Text style={[st.avatarTxt, scheme === 'light' && { color: '#070A18' }]}>{name.trim()[0]?.toUpperCase() ?? '?'}</Text>
           </View>
           <View style={{ flex: 1 }}>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
@@ -498,7 +499,7 @@ export default function FamilyMemberScreen() {
             </Text>
             {last.acc != null && (
               <View style={{ borderRadius: 999, paddingHorizontal: 8, paddingVertical: 3, backgroundColor: QUALITY_COLOR[gpsQuality(last.acc)] + '22' }}>
-                <Text style={{ color: QUALITY_COLOR[gpsQuality(last.acc)], fontSize: 10.5, fontWeight: '800' }}>
+                <Text style={{ color: colors.text, fontSize: 11, fontWeight: '800' }}>
                   GPS {QUALITY_LABEL[gpsQuality(last.acc)].toUpperCase()} ±{Math.round(last.acc)}m
                 </Text>
               </View>
@@ -549,7 +550,7 @@ export default function FamilyMemberScreen() {
               </View>
               {zoneLabel && (
                 <View style={{ borderRadius: 999, paddingHorizontal: 8, paddingVertical: 3, backgroundColor: zc + '22' }}>
-                  <Text style={{ color: zc, fontSize: 10.5, fontWeight: '800' }}>{zoneLabel}</Text>
+                  <Text style={{ color: colors.text, fontSize: 11, fontWeight: '800' }}>{zoneLabel}</Text>
                 </View>
               )}
             </View>

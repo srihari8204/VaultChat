@@ -1,0 +1,124 @@
+
+Rummy table layout
+
+  ✓ the hand never needs more width than the screen has
+  ✓ the wide layout never leaves a card under the comfort floor
+  ✓ the action bar always fits, so DROP is never pushed off screen
+  ✓ the hand always fits the tray region it is actually drawn in
+  ✓ ...and the cards are never buried under each other
+  ✓ ...and the bar never shows the score readout twice
+  ✓ ...and the settings sheet always offers Standings, whatever the width
+  ✓ the gutters and the score panel are one decision
+  ✓ the Honor at its real 732dp viewport gets the full layout
+  ✓ table + hand + actions + status never exceed the safe height
+  ✓ cards stay legible on the smallest screen
+  ✓ cards keep their proportions
+  ✓ safe-area insets come off the usable box
+  ✓ seats never overlap, two- to six-handed
+  ✓ no seat hangs off the felt, in either axis
+  ✓ no seat is drawn under the header band
+  ✓ the middle seat sits furthest back
+  ✓ the outermost pair sits furthest round the sides
+  ✓ the ring is symmetric about the player
+  ✓ a lone opponent sits opposite, centred
+  ✓ no seats when nobody is opposite
+  ✓ a seat is always tall enough for what is drawn in it
+  ✓ six-player seat portraits adapt to large text and resized containers
+  ✓ a six-handed seat has room for a name
+  ✓ no seat ever overlaps the piles
+  ✓ the piles never hang off the bottom of the felt
+  ✓ only the seats over the piles set the clearance
+  ✓ a tall felt centres the piles rather than dropping them in the rail
+
+Turn clock
+
+  ✓ counts down in whole seconds
+  ✓ never goes negative
+  ✓ no deadline shows no clock
+  ✓ a nonsense deadline is refused rather than displayed
+  ✓ NaN is refused
+
+Standings
+
+  ✓ the declared winner ranks first
+  ✓ then ascending points
+  ✓ a winner the server named outranks a lower score
+  ✓ ranking with no winner yet still orders by points
+  ✓ active count ignores the players who are out
+  ✓ bots only at practice tables
+
+Room codes
+
+  ✓ a private code is six safe characters
+  ✓ no ambiguous glyphs
+  ✓ a pasted code is stripped to what the server accepts
+  ✓ an all-punctuation code comes back empty rather than as junk
+  ✓ a hyphenated code survives
+  ✓ a wide table stops overlapping the cards
+  ✓ a narrow one still tucks them in
+  ✓ and never tighter than the size was chosen for
+  ✓ Honor: no overlap at the shipped card size
+  ✓ Honor: the hand fits inside the display
+  ✓ Redmi: no overlap at the shipped card size
+  ✓ Redmi: the hand fits inside the display
+  ✓ a 2664px table keeps real slack (160px)
+  ✓ a 2340px table keeps real slack (140px)
+  ✓ a 1600px table keeps real slack (96px)
+  ✓ the hand still fits at the fan it chose
+  ✓ the hand never tucks with a NEGATIVE GAP — Yoga resolves it to 0
+  ✓ ...it tucks with a negative margin, which Yoga honours
+  ✓ ...and the paddingRight that compensated for the gap is gone
+  ✓ Redmi landscape: the hand fits
+  ✓ Redmi landscape: ...and at the whole-pixel overlap it renders with
+  ✓ Honor landscape: the hand fits
+  ✓ Honor landscape: ...and at the whole-pixel overlap it renders with
+  ✓ small landscape: the hand fits
+  ✓ small landscape: ...and at the whole-pixel overlap it renders with
+  ✓ smallest landscape: the hand fits
+  ✓ smallest landscape: ...and at the whole-pixel overlap it renders with
+  ✓ a phone-portrait width cannot show thirteen cards, and pins the card size to its floor
+
+Table size filter
+
+  ✓ a zero point value is a practice table
+  ✓ anything above zero is staked
+  ✓ a missing point value is UNKNOWN, not practice
+  ✓ NaN is unknown too
+  ✓ a null table is unknown, not a throw
+  ✓ kind all: every table survives
+  ✓ practice: the free tables
+  ✓ stakes: the paid tables
+  ✓ an unknown table is never hidden by a kind filter
+  ✓ bots lists exactly what practice lists
+  ✓ kind filters keep the order the server sent
+  ✓ kind: an empty list is empty, not a throw
+  ✓ kind: the input is not mutated
+  ✓ kind and seat filters compose
+  ✓ all: every table survives
+  ✓ all: in the order the server sent them
+  ✓ heads-up: only the 2-seat tables
+  ✓ multi: every table above 2 seats
+  ✓ multi: a 4-seat table is NOT hidden
+  ✓ multi: a 5-seat table is NOT hidden
+  ✓ the two filters partition the list
+  ✓ an empty list is empty, not a throw
+  ✓ no table of that size returns empty so the UI can say so
+  ✓ the input is not mutated
+
+Picking a real table
+
+  ✓ bot: seats at the practice table, the only one that accepts a bot
+  ✓ bot: no practice table means no seat, not a staked one
+  ✓ auto: goes where the humans already are
+  ✓ auto: skips a FULL table
+  ✓ auto: an all-empty list still seats somewhere
+  ✓ auto: the choice is deterministic across devices
+  ✓ no tables at all is null, not a throw
+  ✓ null is null, not a throw
+  ✓ every table full is null
+  ✓ scrolling both axes keeps a drop on the visible second group
+  ✓ the old group location is no longer an active target
+  ✓ scrolling back restores the original hit targets
+
+  all rummy table checks passed
+

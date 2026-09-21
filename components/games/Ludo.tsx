@@ -23,7 +23,7 @@
  */
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View, type StyleProp, type ViewStyle } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Text, View, useWindowDimensions, type StyleProp, type ViewStyle } from 'react-native';
 import Svg, {
   Defs, RadialGradient, LinearGradient as SvgLinear, Stop, Rect, G as SvgG, Polygon,
   Text as SvgText, Circle, Ellipse, Path,
@@ -35,7 +35,7 @@ import Animated, {
 import * as Haptics from 'expo-haptics';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { useGameSocket, type AutoStart } from '../../lib/games/useGameSocket';
-import { Panel, Btn, Banner, PlayerRow, Reconnecting, RematchBtn, TurnClock, useType, useBoardBox, usePortraitLock, Coin } from './ui';
+import { Panel, Btn, Banner, PlayerRow, Reconnecting, RematchBtn, TurnClock, useType, useBoardBox, Coin } from './ui';
 import { useRematch } from '../../lib/games/useRematch';
 import { RulesSheet, useFirstTimeRules } from './rules';
 import { rollSeed, receiptFrom, pushReceipt, type RollReceipt } from '../../lib/games/fairness';
@@ -45,7 +45,7 @@ import { useCountdown } from '../../lib/games/useCountdown';
 import { S, R, D3, white } from '../../lib/games/theme';
 import {
   LR, LR_AMBIENT, LR_STAGE, SEAT, P, PL, PD, COLOR_NAMES, SHAPE,
-  LG, WELL, TRAY, YARD, PAWN, PAWN_BODY, PAWN_BASE, w, seatA,
+  LG, WELL, TRACK, TRAY, YARD, PAWN, PAWN_BODY, PAWN_BASE, w, seatA, ludoControls, ludoLayout,
 } from '../../lib/games/ludoGlass';
 import { playSfx, preloadSfx, soundEnabled, setSoundEnabled } from '../../lib/games/sfx';
 import { Toasts, Confetti, Sheet, SettingRow, VoiceBar, VoiceSheet } from './feedback';
@@ -169,11 +169,14 @@ export default function Ludo({ roomId = 'ludo-main', auto, autoBot }: { roomId?:
   const tumbleTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => () => { if (tumbleTimer.current) clearTimeout(tumbleTimer.current); }, []);
 
-  // Up to four seat cards above, plus the die row and two button rows.
-  // Portrait only. See usePortraitLock.
-  usePortraitLock();
-  const { size, onLayout: onBoardBox } = useBoardBox(400);
+  // The parent owns system orientation and safe areas; fit its measured viewport.
+  const { width, height, onLayout: onBoardBox } = useBoardBox(0);
+  const { fontScale } = useWindowDimensions();
+  const layout = ludoLayout(width, height, fontScale);
+  const size = layout.boardSize;
   const cell = size / 15;
+  const controlsWidth = layout.controlsWidth;
+  const controls = ludoControls(controlsWidth, fontScale);
 
   useEffect(() => { void preloadSfx(['roll', 'move', 'capture', 'home', 'six', 'win', 'lose']); }, []);
 
@@ -300,7 +303,7 @@ export default function Ludo({ roomId = 'ludo-main', auto, autoBot }: { roomId?:
     const host = L.hostId === state.you;
     return (
       <LudoRoom>
-        <ScrollView contentContainerStyle={{ padding: S[4], gap: S[3] }}>
+        <ScrollView contentContainerStyle={{ padding: S[4], gap: S[3], width: '100%', maxWidth: 720, alignSelf: 'center' }}>
           <Text style={{ color: LR.text, fontSize: t.xl, fontWeight: '800' }}>Ludo</Text>
           <Text style={{ color: LR.muted, fontSize: t.sm, lineHeight: 19 }}>
             Two to four players. The table rolls the dice and settles every capture — neither phone decides anything.
@@ -338,13 +341,13 @@ export default function Ludo({ roomId = 'ludo-main', auto, autoBot }: { roomId?:
                 </View>
               )}
             </View>
-            <View style={{ flexDirection: 'row', gap: S[2] }}>
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: S[2] }}>
               {STAKES.map(v => (
                 <Btn
                   key={v}
                   label={stakeLabel(v)}
                   compact
-                  style={{ flex: 1 }}
+                  style={{ flexGrow: 1, flexBasis: Math.max(92, 72 * fontScale) }}
                   kind={stake === v ? 'gold' : 'secondary'}
                   disabled={!host || (wallet.balance != null && v > wallet.balance)}
                   onPress={() => setStake(v)}
@@ -458,37 +461,9 @@ export default function Ludo({ roomId = 'ludo-main', auto, autoBot }: { roomId?:
    * to somebody else, and saying it does is worse than saying nothing.
    */
   const yourTurn = G.turnPlayerId === state.you;
-
-  return (
-    <LudoRoom>
-      <ScrollView onLayout={onBoardBox} contentContainerStyle={{ padding: S[4], gap: S[3], alignItems: 'center', paddingBottom: S[6] }}>
-
-        {/* Seats, two to a row. Four stacked rows cost ~100dp of the board's
-            height for two words of information each; the grid gives that back
-            to the board, which is what the screen is for. Two players make one
-            row and three make a row plus a full-width card — no empty slot is
-            ever reserved. */}
-        <View style={{ width: size, gap: S[2] }}>
-          {[0, 2].map(i => {
-            const row = players.slice(i, i + 2);
-            if (!row.length) return null;
-            return (
-              <View key={i} style={{ flexDirection: 'row', gap: S[2] }}>
-                {row.map(p => (
-                  <SeatCard
-                    key={p.seat}
-                    player={p}
-                    you={pid(p) === state.you}
-                    active={G.turnPlayerId === pid(p)}
-                    status={seatStatus(p)}
-                  />
-                ))}
-              </View>
-            );
-          })}
-        </View>
-
-        <View style={{ width: size, height: size }}>
+  const board = (
+        <View style={{ width: size, height: size, borderRadius: 20, backgroundColor: LR.bg,
+          boxShadow: '0 16px 28px rgba(0,0,0,0.36), 0 2px 0 rgba(255,255,255,0.12)' }}>
           {/* Behind the board, and only as wide as the board. Every surface on
               the pane is translucent, so this is what they are lit BY. */}
           <StageLight size={size} />
@@ -510,20 +485,50 @@ export default function Ludo({ roomId = 'ludo-main', auto, autoBot }: { roomId?:
             )),
           )}
         </View>
+  );
+
+  const controlsPanel = (<>
+        {/* Seats, two to a row. Four stacked rows cost ~100dp of the board's
+            height for two words of information each; the grid gives that back
+            to the board, which is what the screen is for. Two players make one
+            row and three make a row plus a full-width card — no empty slot is
+            ever reserved. */}
+        <View style={{ width: controlsWidth, gap: S[2] }}>
+          {Array.from({ length: Math.ceil(players.length / controls.seatColumns) }, (_, rowIndex) => {
+            const i = rowIndex * controls.seatColumns;
+            const row = players.slice(i, i + controls.seatColumns);
+            if (!row.length) return null;
+            return (
+              <View key={i} style={{ flexDirection: 'row', gap: S[2] }}>
+                {row.map(p => (
+                  <SeatCard
+                    key={p.seat}
+                    player={p}
+                    you={pid(p) === state.you}
+                    active={G.turnPlayerId === pid(p)}
+                    status={seatStatus(p)}
+                  />
+                ))}
+              </View>
+            );
+          })}
+        </View>
+
+        {!layout.wide && board}
 
         {reconnecting && <Reconnecting error={error} onRetry={retry} />}
 
         {finished ? (
-          <View style={{ width: size }}>
+          <View style={{ width: controlsWidth }}>
             <Banner
               text={G.winnerId === state.you ? 'You win!' : `${players.find(p => pid(p) === G.winnerId)?.name ?? 'Someone'} wins`}
               tone={G.winnerId === state.you ? 'win' : 'lose'}
             />
           </View>
         ) : (
-          <View style={{ width: size, flexDirection: 'row', alignItems: 'stretch', gap: S[3] }}>
-            <DiceTray>
-              <Die value={die} tumbling={tumbling} armed={canRoll} seat={mySeat} />
+          <View style={{ width: controlsWidth, flexDirection: controls.stacked ? 'column' : 'row', alignItems: 'stretch', gap: S[3] }}>
+            <DiceTray wide={controls.stacked}>
+              <Die value={die} tumbling={tumbling} armed={canRoll} seat={mySeat} size={controls.dieSize} />
               {/* Renders nothing when the snapshot carries no deadline, so the
                   tray simply centres the die instead of holding a gap. */}
               <TurnClock secs={secs} />
@@ -532,7 +537,7 @@ export default function Ludo({ roomId = 'ludo-main', auto, autoBot }: { roomId?:
               label={tumbling ? 'Rolling…' : canRoll ? 'Roll the Dice' : die != null ? `Rolled ${die}` : 'Waiting…'}
               kind="gold"
               icon="dice"
-              style={{ flex: 1 }}
+              style={{ flexGrow: 1, minWidth: 0, minHeight: 64 }}
               disabled={!canRoll || tumbling}
               onPress={() => {
                 // Start the tumble first, then ask. The result is held back
@@ -549,7 +554,7 @@ export default function Ludo({ roomId = 'ludo-main', auto, autoBot }: { roomId?:
         )}
 
         {!finished && (
-          <View style={{ width: size }}>
+          <View style={{ width: controlsWidth }}>
             <TurnIndicator
               // `yourTurn`, not `mine` — see above. While the socket is down it
               // is still your turn, and the Reconnecting banner directly above
@@ -583,12 +588,12 @@ export default function Ludo({ roomId = 'ludo-main', auto, autoBot }: { roomId?:
             NO VOICE LOGIC LIVES HERE — the sheet drives the same `voice`
             object, so joining, muting and leaving behave exactly as before.
             The lobby keeps the full VoiceBar, where there is room for it. */}
-        <View style={{ width: size, flexDirection: 'row', gap: S[2] }}>
+        <View style={{ width: controlsWidth, flexDirection: 'row', flexWrap: 'wrap', gap: S[2] }}>
           <Btn
             label="Talk at the table"
             icon={voiceLive ? (voice.muted ? 'micOff' : 'mic') : 'mic'}
             compact
-            style={{ flex: 1.6 }}
+            style={{ flexGrow: 1, flexBasis: 150 }}
             disabled={voice.phase === 'unavailable'}
             onPress={() => setShowVoice(true)}
             accessibilityLabel={
@@ -597,8 +602,8 @@ export default function Ludo({ roomId = 'ludo-main', auto, autoBot }: { roomId?:
                 : 'Talk at the table'
             }
           />
-          <Btn label="Emote" icon="emote" compact style={{ flex: 1 }} onPress={() => setShowEmotes(true)} />
-          <Btn label="Invite" icon="link" compact style={{ flex: 1 }} onPress={() => { void openInvite('ludo', roomId); }} disabled={!roomId} />
+          <Btn label="Emote" icon="emote" compact style={{ flexGrow: 1, flexBasis: 90 }} onPress={() => setShowEmotes(true)} />
+          <Btn label="Invite" icon="link" compact style={{ flexGrow: 1, flexBasis: 90 }} onPress={() => { void openInvite('ludo', roomId); }} disabled={!roomId} />
           <Btn label="" icon="settings" compact onPress={() => setShowSettings(true)} accessibilityLabel="Settings" />
         </View>
 
@@ -606,14 +611,14 @@ export default function Ludo({ roomId = 'ludo-main', auto, autoBot }: { roomId?:
             full bar used to show has to be visible somewhere on the board. A
             dot and a count, not a second control. */}
         {voiceLive && (
-          <View style={{ width: size, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: S[2] }}>
+          <View style={{ width: controlsWidth, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: S[2] }}>
             <View style={{
               width: 7, height: 7, borderRadius: 4,
               // Amber while nobody else has joined: you ARE in voice, you just
               // have no one to talk to yet. Same rule as VoiceBar's own dot.
               backgroundColor: voice.phase === 'waiting' ? SEAT[2].base : LR.ok,
             }} />
-            <Text style={{ color: LR.muted, fontSize: 11.5 }}>
+            <Text style={{ flexShrink: 1, color: LR.muted, fontSize: 11.5 }}>
               {voice.phase === 'waiting'
                 ? 'In voice — waiting for others'
                 : `${voice.muted ? 'Muted' : voice.canSpeak ? 'Voice on' : 'Listening'} · ${voice.participants.length}`}
@@ -622,7 +627,7 @@ export default function Ludo({ roomId = 'ludo-main', auto, autoBot }: { roomId?:
         )}
 
         {finished && (
-          <View style={{ width: size, flexDirection: 'row', gap: S[2] }}>
+          <View style={{ width: controlsWidth, flexDirection: controls.stacked ? 'column' : 'row', gap: S[2] }}>
             <RematchBtn rm={rematch} label="Play again" />
             <Btn label="Share" icon="share" onPress={() => { void shareResult('ludo', G.winnerId === state.you); }} />
           </View>
@@ -638,8 +643,8 @@ export default function Ludo({ roomId = 'ludo-main', auto, autoBot }: { roomId?:
           accessibilityRole="button"
           accessibilityLabel="Are these dice fair?"
           style={{
-            width: size, minHeight: 44, flexDirection: 'row', alignItems: 'center', gap: S[3],
-            paddingHorizontal: S[4],
+            width: controlsWidth, minHeight: 44, flexDirection: 'row', alignItems: 'center', gap: S[3],
+            paddingHorizontal: S[4], paddingVertical: S[2],
             borderRadius: R.pill, borderWidth: 1, borderColor: white(0.12),
             backgroundColor: white(LG.ctaQuiet),
           }}
@@ -648,6 +653,20 @@ export default function Ludo({ roomId = 'ludo-main', auto, autoBot }: { roomId?:
           <Text style={{ flex: 1, color: LR.muted, fontSize: t.sm, fontWeight: '600' }}>Are these dice fair?</Text>
           <Ionicons name="chevron-forward" size={16} color={LR.muted} />
         </Pressable>
+  </>);
+
+  return (
+    <LudoRoom>
+      <ScrollView onLayout={onBoardBox} contentContainerStyle={{ padding: S[4], gap: S[3], alignItems: 'center' }}>
+        <View style={{ width: layout.contentWidth, flexDirection: layout.wide ? 'row' : 'column', alignItems: 'flex-start', gap: S[3] }}>
+          {layout.wide && board}
+
+          {layout.wide ? (
+            <ScrollView nestedScrollEnabled style={{ width: controlsWidth, maxHeight: Math.max(120, height - S[4] * 2) }} contentContainerStyle={{ gap: S[3], paddingBottom: S[2] }}>
+              {controlsPanel}
+            </ScrollView>
+          ) : <View style={{ width: controlsWidth, gap: S[3] }}>{controlsPanel}</View>}
+        </View>
       </ScrollView>
 
       <Sheet visible={showFair} title="How the dice are rolled" onClose={() => setShowFair(false)}>
@@ -820,14 +839,9 @@ const BoardSvg = React.memo(function BoardSvg({ size }: { size: number }) {
   const stars = useMemo(() => [...SAFE].filter(i => !START_OFFSET.includes(i)), []);
 
   return (
-    <Svg width={size} height={size} viewBox="0 0 15 15" style={{ position: 'absolute', borderRadius: 14 }}>
+    <Svg width={size} height={size} viewBox="0 0 15 15" style={{ position: 'absolute', borderRadius: 20 }}>
       <Defs>
-        {/* GLASS, not cream. Every stop below used to be an opaque board
-            colour; they are now opacities of white, so the room's ambient wash
-            comes through the board and the four corners of it are lit
-            differently — which is the whole difference between a pane and a
-            painted rectangle. The sheen is unchanged: a white highlight was
-            already the right idea, it simply had cream underneath it. */}
+        {/* Glass frame surrounds the familiar light track and colored homes. */}
         <RadialGradient id="lfelt" cx="50%" cy="50%" rx="65%" ry="65%">
           <Stop offset="0.42" stopColor="#ffffff" stopOpacity={LG.pane} />
           <Stop offset="1" stopColor="#ffffff" stopOpacity={LG.pane * 0.42} />
@@ -836,17 +850,6 @@ const BoardSvg = React.memo(function BoardSvg({ size }: { size: number }) {
           <Stop offset="0" stopColor="#ffffff" stopOpacity={LG.sheen} />
           <Stop offset="0.55" stopColor="#ffffff" stopOpacity="0" />
         </RadialGradient>
-        <RadialGradient id="lsafe" cx="32%" cy="26%" rx="60%" ry="60%">
-          <Stop offset="0" stopColor="#ffffff" stopOpacity={LG.safe} />
-          <Stop offset="0.62" stopColor="#ffffff" stopOpacity={LG.safe * 0.62} />
-          <Stop offset="1" stopColor="#ffffff" stopOpacity={LG.safe * 0.4} />
-        </RadialGradient>
-        {/* THE YARDS ARE NOW SEAT-COLOURED, and this is the change that makes
-            the board read as four players' territory rather than one grey
-            sheet. They were `lyard` — a single white gradient shared by all
-            four corners, so the only thing telling red's home from blue's was a
-            2px rim. Near-opaque on purpose: a low-alpha tint over a near-black
-            room composites to mud however carefully it is mixed. */}
         {SEAT.map((s, i) => (
           <SvgLinear key={i} id={`lyard${i}`} x1="0" y1="0" x2="0" y2="1">
             <Stop offset="0" stopColor={s.light} stopOpacity={YARD.fillTop} />
@@ -868,22 +871,22 @@ const BoardSvg = React.memo(function BoardSvg({ size }: { size: number }) {
         ))}
       </Defs>
 
-      <Rect x="0" y="0" width="15" height="15" fill="url(#lfelt)" />
-      <Rect x="0" y="0" width="15" height="15" fill="url(#lsheen)" />
+      <Rect x="0.025" y="0.025" width="14.95" height="14.95" rx="0.55" fill="url(#lfelt)" stroke={w(0.42)} strokeWidth="0.05" />
+      <Rect x="0.1" y="0.1" width="14.8" height="14.8" rx="0.48" fill="url(#lsheen)" stroke={w(0.12)} strokeWidth="0.035" />
 
       {RING.map(([r, c], i) => (
+        <SvgG key={`r${i}`}>
         <Rect
-          key={`r${i}`} x={c} y={r} width="1" height="1" rx="0.1"
-          fill={SAFE.has(i) ? 'url(#lsafe)' : w(LG.cell)}
-          // Every stroke on this board was dark ink for a cream ground. On
-          // glass a black hairline is invisible against a near-black room —
-          // the cells would have merged into one sheet with no grid at all.
-          stroke={w(LG.cellEdge)} strokeWidth="0.03"
+          x={c + 0.03} y={r + 0.03} width="0.94" height="0.94" rx="0.07"
+          fill={SAFE.has(i) ? TRACK.safe : TRACK.cell}
+          stroke={TRACK.edge} strokeWidth="0.035"
         />
+        <Path d={`M ${c + 0.2} ${r + 0.13} H ${c + 0.8}`} stroke={w(0.3)} strokeWidth="0.035" strokeLinecap="round" />
+        </SvgG>
       ))}
 
       {homeCells.map(({ rc: [r, c], seat }, i) => (
-        <Rect key={`h${i}`} x={c} y={r} width="1" height="1" rx="0.1" fill={`url(#lhome${seat})`} stroke={w(0.22)} strokeWidth="0.03" />
+        <Rect key={`h${i}`} x={c + 0.03} y={r + 0.03} width="0.94" height="0.94" rx="0.07" fill={`url(#lhome${seat})`} stroke={w(0.55)} strokeWidth="0.045" />
       ))}
 
       {/* start squares — solid colour plus an arrow pointing into the track */}
@@ -891,47 +894,55 @@ const BoardSvg = React.memo(function BoardSvg({ size }: { size: number }) {
         const [r, c] = RING[off];
         return (
           <SvgG key={`s${seat}`}>
-            <Rect x={c} y={r} width="1" height="1" rx="0.1" fill={seatA(seat, 'base', 0.92)} stroke={w(0.32)} strokeWidth="0.04" />
-            <SvgText
-              x={c + 0.5} y={r + 0.72} fontSize="0.62" fill="rgba(255,255,255,0.92)" textAnchor="middle"
-              transform={`rotate(${seat * 90} ${c + 0.5} ${r + 0.5})`}
-            >➜</SvgText>
+            <Rect x={c + 0.03} y={r + 0.03} width="0.94" height="0.94" rx="0.07" fill={seatA(seat, 'base', 0.92)} stroke={w(0.7)} strokeWidth="0.045" />
+            <Path d={`M ${c + 0.25} ${r + 0.5} H ${c + 0.73} M ${c + 0.53} ${r + 0.29} L ${c + 0.74} ${r + 0.5} L ${c + 0.53} ${r + 0.71}`}
+              fill="none" stroke={TRACK.ink} strokeWidth="0.085" strokeLinecap="round" strokeLinejoin="round"
+              transform={`rotate(${seat * 90} ${c + 0.5} ${r + 0.5})`} />
           </SvgG>
         );
       })}
 
       {stars.map(i => {
         const [r, c] = RING[i];
-        // Was #c2951f — a dark ochre chosen to sit on cream. On glass it
-        // disappeared; the safe squares need a star that reads as lit.
-        return <SvgText key={`st${i}`} x={c + 0.5} y={r + 0.78} fontSize="0.72" fill={SEAT[2].light} textAnchor="middle">★</SvgText>;
+        return <Path key={`st${i}`} d="M .5 .17 L .6 .38 L .84 .41 L .66 .58 L .71 .82 L .5 .7 L .29 .82 L .34 .58 L .16 .41 L .4 .38 Z"
+          transform={`translate(${c} ${r})`} fill="none" stroke={TRACK.ink} strokeWidth="0.065" strokeLinejoin="round" />;
       })}
 
       {/* centre — four triangles meeting in the middle, one per seat */}
-      <Polygon points="6,6 9,6 7.5,7.5" fill={seatA(1, 'base', 0.88)} />
-      <Polygon points="9,6 9,9 7.5,7.5" fill={seatA(2, 'base', 0.88)} />
-      <Polygon points="9,9 6,9 7.5,7.5" fill={seatA(3, 'base', 0.88)} />
-      <Polygon points="6,9 6,6 7.5,7.5" fill={seatA(0, 'base', 0.88)} />
+      <Polygon points="6,6 9,6 7.5,7.5" fill="url(#lhome1)" stroke={w(0.35)} strokeWidth="0.035" />
+      <Polygon points="9,6 9,9 7.5,7.5" fill="url(#lhome2)" stroke={w(0.35)} strokeWidth="0.035" />
+      <Polygon points="9,9 6,9 7.5,7.5" fill="url(#lhome3)" stroke={w(0.35)} strokeWidth="0.035" />
+      <Polygon points="6,9 6,6 7.5,7.5" fill="url(#lhome0)" stroke={w(0.35)} strokeWidth="0.035" />
       <Rect x="6" y="6" width="3" height="3" rx="0.14" fill="none" stroke={w(0.55)} strokeWidth="0.08" />
-      <SvgText x="7.5" y="7.85" fontSize="0.9" fill="#FFF6DA" textAnchor="middle">★</SvgText>
+      <Circle cx="7.5" cy="7.5" r="0.64" fill={LR.bg} stroke={SEAT[2].light} strokeWidth="0.065" />
+      <Circle cx="7.5" cy="7.5" r="0.5" fill={w(0.06)} stroke={w(0.3)} strokeWidth="0.025" />
+      <SvgText x="7.5" y="7.72" fontSize="0.67" fill={SEAT[2].light} textAnchor="middle">★</SvgText>
 
       {/* the four yards */}
       {YARD_RC.map(([r, c], seat) => (
         <SvgG key={`y${seat}`}>
           <Rect
-            x={c + 0.2} y={r + 0.2} width="5.6" height="5.6" rx="0.8"
+            x={c + 0.25} y={r + 0.25} width="5.5" height="5.5" rx="0.7"
             fill={`url(#lyard${seat})`}
             // The rim is the seat's LIGHT tone, not its base: on a quadrant now
             // filled with that same base, a base-coloured edge disappeared into
             // it and the yard lost its shape.
             stroke={seatA(seat, 'light', YARD.rim)} strokeWidth="0.07"
           />
+          <Rect x={c + 0.48} y={r + 0.48} width="5.04" height="5.04" rx="0.52"
+            fill={TRACK.cell} stroke={w(0.8)} strokeWidth="0.035" />
+          <Path d={`M ${c + 0.85} ${r + 0.64} H ${c + 5.15}`}
+            stroke={w(0.65)} strokeWidth="0.055" strokeLinecap="round" />
+          <Circle cx={c + 3} cy={r + 3} r="0.68" fill={seatA(seat, 'deep', 0.55)} stroke={seatA(seat, 'light', 0.8)} strokeWidth="0.045" />
+          <Circle cx={c + 3} cy={r + 3} r="0.54" fill="none" stroke={w(0.24)} strokeWidth="0.025" />
+          <SvgText x={c + 3} y={r + 3.24} fontSize="0.7" fill={LR.text} textAnchor="middle">{SHAPE[seat]}</SvgText>
           {BASE_SPOTS[seat].map(([br, bc], i) => (
-            // A base spot is a WELL a token sits in — it has to be darker than
-            // the yard around it, which on a cream board meant a darker cream
-            // and on glass means going the other way, to a hole in the pane.
-            // Darker again now that the yard above it is lit rather than white.
-            <Circle key={i} cx={bc + 0.5} cy={br + 0.5} r="0.62" fill={WELL} stroke={seatA(seat, 'light', 0.55)} strokeWidth="0.05" />
+            // Inset sockets retain a visible seat-colored rim beneath each pawn.
+            <SvgG key={i}>
+              <Circle cx={bc + 0.5} cy={br + 0.54} r="0.64" fill={seatA(seat, 'deep', 0.6)} />
+              <Circle cx={bc + 0.5} cy={br + 0.5} r="0.6" fill={WELL} stroke={PD[seat]} strokeWidth="0.055" />
+              <Circle cx={bc + 0.5} cy={br + 0.5} r="0.46" fill={seatA(seat, 'base', 0.18)} stroke={seatA(seat, 'deep', 0.35)} strokeWidth="0.025" />
+            </SvgG>
           ))}
         </SvgG>
       ))}
@@ -942,7 +953,7 @@ const BoardSvg = React.memo(function BoardSvg({ size }: { size: number }) {
 /* ── a token ────────────────────────────────────────────────────────── */
 
 /**
- * One glossy disc.
+ * A glass pawn on a rimmed medallion, with its seat's shape embossed on top.
  *
  * Position animates with a springy overshoot — the classic Ludo hop, and the
  * same curve ludo.css uses on left/top. Movable tokens breathe so the player
@@ -1006,6 +1017,7 @@ function TokenView({
         // less than the 6 it always had.
         hitSlop={Math.max(6, Math.ceil((44 - d) / 2))}
         accessibilityRole="button"
+        accessibilityState={{ disabled: !movable }}
         accessibilityLabel={`${COLOR_NAMES[seat]} token ${index + 1}${movable ? ', can move' : ''}`}
         style={{
           width: '100%', height: '100%',
@@ -1042,6 +1054,9 @@ function TokenView({
               <Stop offset="1" stopColor="#ffffff" stopOpacity="0" />
             </RadialGradient>
           </Defs>
+          <Circle cx="50" cy="53" r="45" fill={seatA(seat, 'deep', 0.9)}
+            stroke={movable ? LR.text : PL[seat]} strokeWidth={movable ? 5 : 3} />
+          <Circle cx="50" cy="51" r="38" fill={`url(#pb${seat})`} stroke={w(0.4)} strokeWidth="1.8" />
           {/* plinth first — it sits under the body */}
           <Path d={PAWN_BASE} fill={`url(#pb${seat})`} stroke={seatA(seat, 'light', 0.6)} strokeWidth="2.8" />
           <Path
@@ -1085,7 +1100,7 @@ const PIPS: Record<number, number[]> = {
  * server's number replaces it the moment the animation ends. Rolling the real
  * result early would be showing an answer the player has not seen arrive.
  */
-function Die({ value, tumbling, armed, seat }: { value: number | null; tumbling: boolean; armed: boolean; seat: number }) {
+function Die({ value, tumbling, armed, seat, size }: { value: number | null; tumbling: boolean; armed: boolean; seat: number; size: number }) {
   const shake = useSharedValue(0);
   const spin = useSharedValue(0);
   const [flicker, setFlicker] = useState(6);
@@ -1126,13 +1141,15 @@ function Die({ value, tumbling, armed, seat }: { value: number | null; tumbling:
 
   return (
     <Animated.View
+      accessible
+      accessibilityRole="image"
       accessibilityLabel={tumbling ? 'Rolling the dice' : value == null ? 'Dice, not rolled' : `Dice showing ${value}`}
       style={[{
-        width: 62, height: 62, borderRadius: 14, padding: 7,
+        width: size, height: size, borderRadius: size * 0.24, padding: size * 0.15,
         // Frosted glass rather than cream ivory. The cream was mixed for the
         // maroon table; against the midnight room it read as a yellow tile.
-        backgroundColor: 'rgba(244,245,255,0.94)',
-        borderWidth: 1.2, borderColor: white(0.9),
+        backgroundColor: LR.text,
+        borderWidth: 1.5, borderColor: armed || tumbling ? SEAT[2].light : white(0.9),
         // CLIPPED, so the sheen below stays inside the cube. Shadows are drawn
         // outside a clipped view either way, so the halo survives.
         overflow: 'hidden',
@@ -1141,20 +1158,27 @@ function Die({ value, tumbling, armed, seat }: { value: number | null; tumbling:
           // The gold halo is what makes it float over the tray rather than sit
           // on it. It is spent here and on the CTA, nowhere else on the board.
           + `0 0 16px ${seatA(2, 'base', armed || tumbling ? 0.4 : 0.16)}, `
-          + 'inset 0 2px 2px rgba(255,255,255,0.95), inset 0 -3px 6px rgba(90,80,140,0.22)',
-        opacity: value == null && !tumbling && !armed ? 0.55 : 1,
+          + 'inset 0 3px 1px rgba(255,255,255,1), inset 0 -5px 1px rgba(90,80,140,0.24)',
+        opacity: value == null && !tumbling && !armed ? 0.78 : 1,
       }, a]}
     >
       {/* The corner sheen — one band of light across the top-left. It is what
           reads as a glass CUBE rather than a rounded square, and it is static,
           so it costs one SVG that never re-renders while the die spins. */}
-      <Svg width={62} height={62} pointerEvents="none" style={StyleSheet.absoluteFill}>
+      <Svg width={size} height={size} viewBox="0 0 62 62" pointerEvents="none" style={StyleSheet.absoluteFill}>
         <Defs>
+          <SvgLinear id="dface" x1="0" y1="0" x2="1" y2="1">
+            <Stop offset="0" stopColor="#FFFFFF" />
+            <Stop offset="0.52" stopColor={LR.text} />
+            <Stop offset="1" stopColor="#DCE5F0" />
+          </SvgLinear>
           <RadialGradient id="dsheen" cx="50%" cy="50%" rx="50%" ry="50%">
             <Stop offset="0" stopColor="#ffffff" stopOpacity="0.55" />
             <Stop offset="1" stopColor="#ffffff" stopOpacity="0" />
           </RadialGradient>
         </Defs>
+        <Rect x="2" y="2" width="58" height="54" rx="12" fill="url(#dface)" stroke={w(0.85)} strokeWidth="0.8" />
+        <Path d="M 10 5 H 43" stroke="#FFFFFF" strokeWidth="1.8" strokeLinecap="round" />
         <Ellipse cx="20" cy="12" rx="26" ry="14" fill="url(#dsheen)" transform="rotate(18 20 12)" />
       </Svg>
       <View style={{ flex: 1, flexDirection: 'row', flexWrap: 'wrap' }}>
@@ -1162,8 +1186,9 @@ function Die({ value, tumbling, armed, seat }: { value: number | null; tumbling:
           <View key={i} style={{ width: '33.33%', height: '33.33%', alignItems: 'center', justifyContent: 'center' }}>
             {on.has(i) && (
               <View style={{
-                width: 9, height: 9, borderRadius: 5,
-                backgroundColor: tumbling ? '#8B86A8' : value == null ? '#A9A4C4' : P[seat],
+                width: size * 0.16, height: size * 0.16, borderRadius: size * 0.08,
+                backgroundColor: tumbling || value == null ? '#77718D' : LR.bg,
+                borderWidth: 0.8, borderColor: white(0.75),
                 // A pip only glows once it is a real published result — while
                 // the cube is tumbling the face means nothing and must not be
                 // dressed up as an answer.
@@ -1183,19 +1208,20 @@ function Die({ value, tumbling, armed, seat }: { value: number | null; tumbling:
  * A recessed well plus one warm pool of light under the cube. Purely a surface:
  * it holds the die and the server's clock and decides nothing.
  */
-function DiceTray({ children }: { children?: React.ReactNode }) {
+function DiceTray({ children, wide }: { children?: React.ReactNode; wide: boolean }) {
   return (
     <View style={{
-      width: 112, minHeight: 88, borderRadius: R[4],
-      alignItems: 'center', justifyContent: 'center', gap: S[1], paddingVertical: S[2],
+      width: wide ? '100%' : 112, minHeight: 110, borderRadius: R[4],
+      flexDirection: wide ? 'row' : 'column', flexWrap: 'wrap',
+      alignItems: 'center', justifyContent: 'center', gap: S[2], padding: S[3],
       backgroundColor: TRAY,
-      borderWidth: 1, borderColor: white(0.13),
-      boxShadow: 'inset 0 3px 8px rgba(0,0,0,0.5)',
+      borderWidth: 1, borderColor: seatA(2, 'light', 0.4),
+      boxShadow: 'inset 0 3px 8px rgba(0,0,0,0.5), inset 0 -1px 0 rgba(255,255,255,0.1)',
     }}>
       {/* The pool of warm light the cube sits in. Static and behind the die, so
           it costs one SVG that never re-renders — the die animating above it
           does not touch this. */}
-      <Svg width={96} height={44} pointerEvents="none" style={{ position: 'absolute', top: 30 }}>
+      <Svg width={96} height={44} pointerEvents="none" style={{ position: 'absolute', top: '50%', left: '50%', marginLeft: -48, marginTop: -10 }}>
         <Defs>
           <RadialGradient id="ltray" cx="50%" cy="50%" rx="50%" ry="50%">
             <Stop offset="0"   stopColor={SEAT[2].base} stopOpacity="0.45" />
@@ -1205,6 +1231,7 @@ function DiceTray({ children }: { children?: React.ReactNode }) {
         </Defs>
         <Ellipse cx={48} cy={22} rx={48} ry={22} fill="url(#ltray)" />
       </Svg>
+      <Text style={{ color: SEAT[2].light, fontSize: 10, fontWeight: '800', letterSpacing: 1.8 }}>DICE</Text>
       {children}
     </View>
   );
@@ -1230,6 +1257,8 @@ function DiceTray({ children }: { children?: React.ReactNode }) {
  */
 function SeatCard({ player, you, active, status }: { player: LPlayer; you: boolean; active: boolean; status: string }) {
   const t = useType();
+  const { fontScale } = useWindowDimensions();
+  const avatarSize = Math.max(32, Math.ceil(14 * fontScale + 12));
   const tokens = player.tokens ?? [];
   const done = tokens.filter(s => s >= HOME_STEP).length;
   const total = tokens.length || 4;
@@ -1242,9 +1271,9 @@ function SeatCard({ player, you, active, status }: { player: LPlayer; you: boole
     <View
       accessibilityLabel={`${player.name}${you ? ', you' : ''}${player.isBot ? ', bot' : ''}, ${COLOR_NAMES[player.seat] ?? ''}, ${status}, ${done} of ${total} home`}
       style={{
-        flex: 1, flexDirection: 'row', alignItems: 'center', gap: S[2],
-        paddingVertical: S[2], paddingHorizontal: S[2],
-        borderRadius: R[3], borderWidth: 1,
+        flex: 1, minWidth: 0, gap: S[2],
+        paddingVertical: S[2], paddingHorizontal: S[3],
+        borderRadius: R[4], borderWidth: 1,
         borderColor: active ? seatA(player.seat, 'base', 0.85) : white(0.14),
         backgroundColor: white(active ? LG.cardActive : LG.card),
         boxShadow: active
@@ -1252,9 +1281,10 @@ function SeatCard({ player, you, active, status }: { player: LPlayer; you: boole
           : `${D3.lift1}, inset 0 1px 0 ${white(0.14)}`,
       }}
     >
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: S[2] }}>
       {/* avatar: monogram over a seat-tinted disc, ringed and lit when active */}
       <View style={{
-        width: 32, height: 32, borderRadius: 16,
+        width: avatarSize, height: avatarSize, borderRadius: avatarSize / 2,
         alignItems: 'center', justifyContent: 'center',
         backgroundColor: seatA(player.seat, 'deep', 0.55),
         borderWidth: 1.5, borderColor: seatA(player.seat, 'light', active ? 0.95 : 0.6),
@@ -1274,28 +1304,29 @@ function SeatCard({ player, you, active, status }: { player: LPlayer; you: boole
         }}>{SHAPE[player.seat]}</Text>
       </View>
 
-      <View style={{ flex: 1, gap: 1 }}>
-        <Text numberOfLines={1} style={{ color: LR.text, fontSize: t.sm, fontWeight: '700' }}>
+      <View style={{ flex: 1, minWidth: 0, gap: 1 }}>
+        <Text style={{ color: LR.text, fontSize: t.sm, fontWeight: '700' }}>
           {player.name}{you ? ' (you)' : ''}
         </Text>
-        <Text numberOfLines={1} style={{ color: active ? LR.ok : LR.muted, fontSize: 10.5, fontWeight: active ? '700' : '400' }}>
-          {status}
-        </Text>
+      </View>
       </View>
 
       {/* Home counter. The house keeps the number from being a bare figure, and
           the bar underneath is the same `pct` the old row showed. */}
-      <View style={{ alignItems: 'flex-end', gap: 3 }}>
+      <View style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: S[1] }}>
+        <Text style={{ flexGrow: 1, flexShrink: 1, color: active ? LR.ok : LR.muted, fontSize: 11, fontWeight: active ? '700' : '400' }}>
+          {status}
+        </Text>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 3 }}>
           <Ionicons name="home" size={11} color={LR.muted} />
           <Text style={{ color: done > 0 ? seat.light : LR.text, fontSize: 12, fontWeight: '800' }}>
             {done}/{total}
           </Text>
         </View>
-        <View style={{ width: 38, height: 4, borderRadius: 2, backgroundColor: 'rgba(0,0,0,0.34)', overflow: 'hidden' }}>
+      </View>
+        <View style={{ width: '100%', height: 3, borderRadius: 2, backgroundColor: 'rgba(0,0,0,0.34)', overflow: 'hidden' }}>
           <View style={{ width: `${pct}%`, height: '100%', backgroundColor: seat.base }} />
         </View>
-      </View>
     </View>
   );
 }
@@ -1334,8 +1365,8 @@ function TurnIndicator({ title, sub, tone }: { title: string; sub?: string; tone
         <Ionicons name="dice-outline" size={19} color={tone === 'wait' ? LR.muted : LR.text} />
       </View>
       <View style={{ flex: 1 }}>
-        <Text numberOfLines={1} style={{ color: LR.text, fontSize: t.md, fontWeight: '800' }}>{title}</Text>
-        {sub ? <Text numberOfLines={1} style={{ color: LR.muted, fontSize: 11.5 }}>{sub}</Text> : null}
+        <Text style={{ color: LR.text, fontSize: t.md, fontWeight: '800' }}>{title}</Text>
+        {sub ? <Text style={{ color: LR.muted, fontSize: 11.5 }}>{sub}</Text> : null}
       </View>
     </View>
   );

@@ -24,8 +24,9 @@
 // It never edits. Roles change through setRoleKey() and the server re-checks;
 // there is no per-permission endpoint and this component must not imply one.
 
+import { AppText as Text } from '../ui/Text';
 import React, { useMemo } from 'react';
-import { View, Text, StyleSheet } from 'react-native';
+import { View, StyleSheet } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../../lib/theme';
 import type { Palette } from '../../constants/theme';

@@ -9,8 +9,9 @@
 // Sharing stays a deliberate switch on the hub (and is off by default), so
 // opening a map must not prompt for a permission or broadcast anything.
 
+import { AppText as Text } from '../components/ui/Text';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { View, Text, ScrollView, ActivityIndicator, StyleSheet, TouchableOpacity, Alert } from 'react-native';
+import { View, ScrollView, ActivityIndicator, StyleSheet, TouchableOpacity, Alert } from 'react-native';
 import * as Location from 'expo-location';
 import { Ionicons } from '@expo/vector-icons';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
@@ -932,7 +933,7 @@ export default function FamilyMapScreen() {
             style={[st.linkFab, { bottom: chipsBottom, backgroundColor: G.sheet, borderColor: showLinks ? colors.primary : G.edge }]}
           >
             <Ionicons name="git-network" size={17} color={showLinks ? colors.primary : colors.textDim} />
-            <Text style={{ color: showLinks ? G.accentText : colors.textDim, fontSize: 10, fontWeight: '800' }}>
+            <Text style={{ color: showLinks ? G.accentText : colors.textDim, fontSize: 11, fontWeight: '800' }}>
               Routes
             </Text>
           </TouchableOpacity>
@@ -951,7 +952,7 @@ export default function FamilyMapScreen() {
             style={[st.linkFab, { bottom: chipsBottom + 52, backgroundColor: G.sheet, borderColor: showHomeRoute ? colors.primary : G.edge }]}
           >
             <Ionicons name="home" size={16} color={showHomeRoute ? colors.primary : colors.textDim} />
-            <Text style={{ color: showHomeRoute ? G.accentText : colors.textDim, fontSize: 10, fontWeight: '800' }} numberOfLines={1}>
+            <Text style={{ color: showHomeRoute ? G.accentText : colors.textDim, fontSize: 11, fontWeight: '800' }} numberOfLines={1}>
               From {homeName}
             </Text>
           </TouchableOpacity>
@@ -1182,7 +1183,7 @@ const st = StyleSheet.create({
   },
   linkFab: {
     position: 'absolute', left: 12, bottom: 12, alignItems: 'center', justifyContent: 'center',
-    gap: 1, borderWidth: 1, borderRadius: 12, paddingHorizontal: 8, minHeight: 38, elevation: 3,
+    gap: 1, borderWidth: 1, borderRadius: 12, paddingHorizontal: 8, minHeight: 44, maxWidth: 180, elevation: 3,
   },
   routeBar: {
     position: 'absolute', left: 12, right: 12, bottom: 12, flexDirection: 'row', alignItems: 'center', gap: 8,

@@ -9,7 +9,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { SPACING } from '../../constants/theme';
-import { useColors } from '../../lib/theme';
+import { glassShadow } from '../../constants/glass';
+import { useColors, useTheme } from '../../lib/theme';
 import { AppText } from './Text';
 
 export interface HeaderProps {
@@ -28,18 +29,19 @@ export function Header({ title, back = true, onBack, right, border, style }: Hea
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const c = useColors();
+  const { scheme } = useTheme();
   return (
     <View
       style={[
         styles.header,
-        { paddingTop: insets.top + SPACING.xs, backgroundColor: c.bg },
-        border && { borderBottomWidth: 1, borderBottomColor: c.glassStroke },
+        glassShadow('chrome', scheme),
+        { paddingTop: insets.top + SPACING.xs, backgroundColor: c.glass, borderBottomWidth: border ? 1 : StyleSheet.hairlineWidth, borderBottomColor: c.glassStroke },
         style,
       ]}
     >
       <View style={styles.side}>
         {back && (
-          <TouchableOpacity accessibilityLabel="Go back" onPress={onBack ?? (() => router.back())} hitSlop={10} style={styles.iconBtn}>
+          <TouchableOpacity accessibilityRole="button" accessibilityLabel="Go back" onPress={onBack ?? (() => router.back())} hitSlop={4} style={[styles.iconBtn, { backgroundColor: c.glassSoft, borderColor: c.glassStroke }]}>
             <Ionicons name="arrow-back" size={24} color={c.text} />
           </TouchableOpacity>
         )}
@@ -57,7 +59,7 @@ const styles = StyleSheet.create({
   },
   side: { minWidth: 44, justifyContent: 'center' },
   right: { alignItems: 'flex-end' },
-  iconBtn: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
+  iconBtn: { width: 44, height: 44, borderRadius: 22, borderWidth: StyleSheet.hairlineWidth, alignItems: 'center', justifyContent: 'center' },
   title: { flex: 1, textAlign: 'center' },
 });
 

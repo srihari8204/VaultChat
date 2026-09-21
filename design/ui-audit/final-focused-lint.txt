@@ -1,0 +1,11 @@
+
+C:\Users\Dell\Desktop\VaultChat0808\VaultChat\app\(tabs)\chats.tsx
+  265:6  warning  React Hook useEffect has a missing dependency: 'router'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+  441:5  warning  Expected an assignment or function call and instead saw an expression                                      no-unused-expressions
+  791:9  warning  'avatarLetter' is assigned a value but never used                                                          @typescript-eslint/no-unused-vars
+
+C:\Users\Dell\Desktop\VaultChat0808\VaultChat\components\games\Rummy.tsx
+  36:41  warning  'Platform' is defined but never used  @typescript-eslint/no-unused-vars
+
+✖ 4 problems (0 errors, 4 warnings)
+

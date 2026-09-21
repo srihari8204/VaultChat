@@ -2,86 +2,82 @@
 // 5-tab navigation: Chats | Status | [Mini Apps] | Calls | Profile.
 // Mini Apps sits in the CENTER as a prominent raised/glowing button. Alerts
 // stays a hidden route (href: null), reached from the Chats header.
-// U5: vector icons (Ionicons) instead of emoji + Aurora design tokens.
+// Custom glass SVG artwork, with independent day/night tab inks.
 
 import { Tabs } from 'expo-router';
 import React, { useEffect, useMemo, useRef } from 'react';
-import { Animated, StyleSheet, View } from 'react-native';
+import { Animated, StyleSheet, View, useWindowDimensions } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
-import { Ionicons } from '@expo/vector-icons';
 import type { Palette } from '../../constants/theme';
-import { useColors } from '../../lib/theme';
+import { useColors, useTheme } from '../../lib/theme';
+import { TabGlyph, type TabGlyphName } from '../../components/ui/TabGlyph';
 import { AppText } from '../../components/ui/Text';
 import { GlassView } from '../../components/ui/GlassView';
 import { TAB_BAR_RAISE } from '../../constants/layout';
 import { useUnreadTotal } from '../../lib/unreadStore';
 import { useReducedMotion } from '../../lib/useReducedMotion';
-import { MOTION } from '../../constants/theme';
-
-type IoniconName = React.ComponentProps<typeof Ionicons>['name'];
-
-// Each tab's filled (active) + outline (inactive) glyphs.
-const ICONS: Record<string, { on: IoniconName; off: IoniconName }> = {
-  chats:   { on: 'chatbubble',     off: 'chatbubble-outline' },
-  status:  { on: 'aperture',       off: 'aperture-outline' },
-  calls:   { on: 'call',           off: 'call-outline' },
-  mini:    { on: 'grid',           off: 'grid-outline' },
-  alerts:  { on: 'notifications',  off: 'notifications-outline' },
-  profile: { on: 'person',         off: 'person-outline' },
-};
+import { MOTION, TAB_ICON_INK } from '../../constants/theme';
 
 // Prominent raised center button for Mini Apps (the eye-catcher).
 function MiniCenterIcon({ focused }: { focused: boolean }) {
   const c = useColors();
+  const { scheme } = useTheme();
+  const { width } = useWindowDimensions();
   const styles = useStyles(c);
   return (
-    <View style={styles.centerWrap} pointerEvents="none">
+    <View style={[styles.centerWrap, { width: Math.min(64, (width - 32) / 5) }]} pointerEvents="none">
       <LinearGradient
-        colors={[c.accentLight, c.accentDeep]}
+        colors={scheme === 'dark' ? ['#9D82F5', '#6036BB'] : ['#9471ED', '#5830AC']}
         start={{ x: 0, y: 0 }}
         end={{ x: 1, y: 1 }}
         style={[styles.centerBtn, focused && styles.centerBtnActive]}
       >
-        <Ionicons name="grid" size={24} color="#fff" />
+        <TabGlyph name="mini" size={28} color="#FFFFFF" active={focused} />
       </LinearGradient>
-      <AppText variant="tiny" color={focused ? c.accentOn : c.textFaint} style={styles.centerLabel} numberOfLines={1} maxFontSizeMultiplier={1.2}>Apps</AppText>
+      <AppText variant="tiny" color={TAB_ICON_INK.mini[scheme]} style={styles.centerLabel} numberOfLines={1} maxFontSizeMultiplier={1.2}>Apps</AppText>
     </View>
   );
 }
 
-function TabIcon({ tab, label, focused }: { tab: keyof typeof ICONS; label: string; focused: boolean }) {
+function TabIcon({ tab, label, focused }: { tab: TabGlyphName; label: string; focused: boolean }) {
   const c = useColors();
+  const { scheme } = useTheme();
+  const { width } = useWindowDimensions();
   const styles = useStyles(c);
   const reduced = useReducedMotion();
   const lift = useRef(new Animated.Value(focused ? 1 : 0)).current;
   useEffect(() => {
-    Animated.spring(lift, {
+    lift.stopAnimation();
+    if (reduced) { lift.setValue(focused ? 1 : 0); return; }
+    const animation = Animated.spring(lift, {
       toValue: focused ? 1 : 0,
       useNativeDriver: true,          // transform only — stays on the UI thread
       ...MOTION.springSnappy,
-    }).start();
-  }, [focused, lift]);
+    });
+    animation.start();
+    return () => animation.stop();
+  }, [focused, lift, reduced]);
   // One transform, not two: a mixed translate+scale array does not narrow in TS
   // without a cast, and the scale alone already reads as a lift.
   const anim = reduced
     ? undefined
     : { transform: [{ scale: lift.interpolate({ inputRange: [0, 1], outputRange: [1, 1.09] }) }] };
-  const g = ICONS[tab];
-  const color = focused ? c.accentOn : c.textFaint;
+  const color = TAB_ICON_INK[tab][scheme];
   const unread = useUnreadTotal();
   const badge = tab === 'chats' && unread > 0;
   return (
-    <View style={styles.tabIconWrap}>
+    <View style={[styles.tabIconWrap, { width: Math.min(64, (width - 32) / 5) }]}>
       <Animated.View style={anim}>
-        <Ionicons name={focused ? g.on : g.off} size={22} color={color} />
+        <TabGlyph name={tab} size={25} color={color} active={focused} />
         {badge && (
           <View style={styles.badge}>
             <AppText variant="tiny" color="#fff" style={styles.badgeTxt} numberOfLines={1} maxFontSizeMultiplier={1.1}>{unread > 99 ? '99+' : unread}</AppText>
           </View>
         )}
       </Animated.View>
-      <AppText variant="tiny" color={color} style={styles.tabLabel} numberOfLines={1} maxFontSizeMultiplier={1.2}>{label}</AppText>
+      <AppText variant="tiny" color={focused ? color : c.textDim} style={[styles.tabLabel, focused && styles.tabLabelActive]} numberOfLines={1} maxFontSizeMultiplier={1.2}>{label}</AppText>
+      {focused ? <View style={[styles.activeDash, { backgroundColor: color }]} /> : null}
     </View>
   );
 }
@@ -108,6 +104,7 @@ export default function TabLayout() {
         headerShown: false,
         tabBarStyle: tabBar,
         tabBarShowLabel: false,
+        tabBarLabelPosition: 'below-icon',
         tabBarActiveTintColor: c.accentOn,
         tabBarInactiveTintColor: c.textFaint,
         tabBarItemStyle: styles.tabItem,
@@ -165,7 +162,9 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   tabItem: { height: 50, alignSelf: 'flex-end' },
   tabItemCenter: { alignSelf: 'stretch' },
   tabIconWrap: { alignItems: 'center', justifyContent: 'center', gap: 3, width: 64 },
-  tabLabel: { marginTop: 1 },
+  tabLabel: { marginTop: 1, fontSize: 11, lineHeight: 14 },
+  tabLabelActive: { fontWeight: '800' },
+  activeDash: { position: 'absolute', bottom: -4, width: 12, height: 2, borderRadius: 1 },
   // Raised, glowing center button for Mini Apps.
   centerWrap: { alignItems: 'center', justifyContent: 'center', width: 64 },
   // react-navigation lays the icon wrapper out from the TOP of the item, so

@@ -1,11 +1,16 @@
+import { useTheme } from '../lib/theme';
+import type { Palette } from '../constants/theme';
+import { AppText as Text } from '../components/ui/Text';
+import { AuroraBackground } from '../components/ui';
 import { HEADER_TOP } from '../constants/layout';
-import { LinearGradient } from "expo-linear-gradient";
 import * as LocalAuthentication from "expo-local-authentication";
 import { router } from "expo-router";
-import { useEffect, useRef, useState } from "react";
-import { Animated, Platform, StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import { useMemo, useEffect, useRef, useState } from "react";
+import { Animated, Platform, StyleSheet, ScrollView, TouchableOpacity, View } from "react-native";
 
 export default function BiometricSetupScreen() {
+  const { colors: c, scheme } = useTheme();
+  const S = useMemo(() => makeStyles(c), [c]);
   const [status,setStatus] = useState<"idle"|"scanning"|"success"|"failed"|"unavailable">("idle");
   const [msg,setMsg] = useState("Tap to register your biometric");
   const pulse = useRef(new Animated.Value(1)).current;
@@ -36,12 +41,13 @@ export default function BiometricSetupScreen() {
     } catch {setStatus("failed");setMsg("Error. Tap to try again.");}
   };
 
-  const clr  = {idle:"#4A9FFF",scanning:"#F59E0B",success:"#22C55E",failed:"#EF4444",unavailable:"#475569"}[status];
+  const clr = {idle:scheme === 'light' ? c.primary : "#4A9FFF",scanning:scheme === 'light' ? '#925B00' : "#F59E0B",success:c.success,failed:c.danger,unavailable:c.textDim}[status];
   const icon = {idle:"👤",scanning:"⌛",success:"✅",failed:"❌",unavailable:"🔒"}[status];
 
   return (
-    <LinearGradient colors={["#FFFFFF","#020E1A","#FFFFFF"]} style={{flex:1}}>
-      <View style={S.container}>
+    <View style={{flex:1,backgroundColor:c.bg}}>
+      <AuroraBackground />
+      <ScrollView contentContainerStyle={S.container}>
         <View style={S.header}>
           <View style={S.badge}><Text style={{fontSize:36}}>🤳</Text></View>
           <Text style={S.title}>Register Biometric</Text>
@@ -63,27 +69,27 @@ export default function BiometricSetupScreen() {
         <TouchableOpacity style={S.skip} onPress={()=>router.push("/permissions")}>
           <Text style={S.skipTxt}>Skip — use PIN only</Text>
         </TouchableOpacity>
-      </View>
-    </LinearGradient>
+      </ScrollView>
+    </View>
   );
 }
 
-const S = StyleSheet.create({
-  container:{ flex:1,alignItems:"center",paddingTop:HEADER_TOP,paddingHorizontal:24 },
+const makeStyles = (c: Palette) => StyleSheet.create({
+  container:{ flexGrow:1,alignItems:"center",paddingTop:HEADER_TOP,paddingHorizontal:24,paddingBottom:32 },
   header:   { alignItems:"center",marginBottom:24,gap:10 },
   badge:    { width:80,height:80,borderRadius:40,backgroundColor:"rgba(74,159,255,0.12)",borderWidth:1.5,borderColor:"rgba(74,159,255,0.3)",justifyContent:"center",alignItems:"center" },
-  title:    { color:"#fff",fontSize:24,fontWeight:"900" },
-  sub:      { color:"rgba(255,255,255,0.4)",fontSize:13,textAlign:"center" },
+  title:    { color:c.text,fontSize:24,fontWeight:"900" },
+  sub:      { color:c.textDim,fontSize:13,textAlign:"center" },
   steps:    { flexDirection:"row",gap:6,marginBottom:6 },
-  dot:      { width:24,height:4,borderRadius:2,backgroundColor:"rgba(255,255,255,0.12)" },
+  dot:      { width:24,height:4,borderRadius:2,backgroundColor:c.border },
   dotActive:{ backgroundColor:"#4A9FFF",width:32 },
   dotDone:  { backgroundColor:"#22C55E" },
-  stepLbl:  { color:"rgba(74,159,255,0.7)",fontSize:11,marginBottom:32 },
+  stepLbl:  { color:c.primary,fontSize:12,marginBottom:32 },
   ring:     { width:190,height:190,borderRadius:95,borderWidth:2,backgroundColor:"rgba(74,159,255,0.05)",justifyContent:"center",alignItems:"center",marginBottom:20 },
   ringIn:   { width:150,height:150,borderRadius:75,borderWidth:1,justifyContent:"center",alignItems:"center" },
   msg:      { fontSize:15,fontWeight:"600",marginBottom:24,textAlign:"center" },
   info:     { backgroundColor:"rgba(74,159,255,0.06)",borderWidth:1,borderColor:"rgba(74,159,255,0.15)",borderRadius:12,padding:16,marginBottom:24,width:"100%" },
-  infoTxt:  { color:"rgba(255,255,255,0.4)",fontSize:12,lineHeight:18,textAlign:"center" },
+  infoTxt:  { color:c.textDim,fontSize:12,lineHeight:18,textAlign:"center" },
   skip:     { padding:12 },
-  skipTxt:  { color:"rgba(255,255,255,0.3)",fontSize:13,fontWeight:"600" },
+  skipTxt:  { color:c.textDim,fontSize:13,fontWeight:"600" },
 });

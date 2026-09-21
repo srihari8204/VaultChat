@@ -77,8 +77,8 @@ const protobufMediaType = "application/protobuf"
 // header costs 13 bytes and is the only thing that makes the negotiation safe
 // to cache at all.
 func acceptsProtobuf(w http.ResponseWriter, r *http.Request) bool {
-	w.Header().Set("Vary", "Accept")
-	for _, part := range strings.Split(r.Header.Get("Accept"), ",") {
+	w.Header().Add("Vary", "Accept")
+	for _, part := range strings.Split(strings.Join(r.Header.Values("Accept"), ","), ",") {
 		media, params, _ := strings.Cut(part, ";")
 		if !strings.EqualFold(strings.TrimSpace(media), protobufMediaType) {
 			continue

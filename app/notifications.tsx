@@ -2,10 +2,11 @@ import { HEADER_TOP } from '../constants/layout';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
-import { useEffect, useRef, useState, useCallback , useMemo} from 'react';
-import { Alert, Animated, Easing, ActivityIndicator, ScrollView, StyleSheet, Switch, Text, TouchableOpacity, View } from 'react-native';
-import { type Palette } from '../constants/theme';
+import { useEffect, useRef, useState, useCallback , useMemo, type ComponentProps } from 'react';
+import { Alert, Animated, Easing, ActivityIndicator, ScrollView, StyleSheet, Switch, TouchableOpacity, View } from 'react-native';
+import { brandAlpha, type Palette } from '../constants/theme';
 import { useTheme } from '../lib/theme';
+import { AppText as Text, AuroraBackground } from '../components/ui';
 import { readCache, writeCache } from '../lib/localCache';
 import * as Location from 'expo-location';
 import { ErrorBoundary } from '../components/ErrorBoundary';
@@ -18,13 +19,21 @@ import {
   getRemoteLinkPreviews, setRemoteLinkPreviews, type NotifPreview,
 } from '../lib/privacyPrefs';
 
-const NAV = [{id:'chats',icon:'💬',label:'Chats',route:'/(tabs)/chats'},{id:'shield',icon:'🛡️',label:'Shield',route:'/dashboard'},{id:'community',icon:'🌐',label:'Community',route:'/communities'},{id:'vault',icon:'📦',label:'Vault',route:'/filevault'},{id:'alerts',icon:'🔔',label:'Alerts',route:'/notifications'}];
+type IoniconName = ComponentProps<typeof Ionicons>['name'];
 
-const SETTING_DEFS: { key: keyof UserSettings; title: string; desc: string; icon: string }[] = [
-  { key:'discoverable',        title:'Discoverable',  desc:'Let others find you by phone or handle', icon:'🔍' },
-  { key:'lastSeenVisible',     title:'Last Seen',     desc:'Show your last-seen time to contacts',   icon:'👁️' },
-  { key:'readReceipts',        title:'Read Receipts', desc:'Send read receipts in your chats',       icon:'✓' },
-  { key:'profilePhotoVisible', title:'Profile Photo', desc:'Show your profile photo to others',      icon:'🖼️' },
+const NAV: { id: string; icon: IoniconName; label: string; route: string }[] = [
+  { id: 'chats', icon: 'chatbubble-ellipses-outline', label: 'Chats', route: '/(tabs)/chats' },
+  { id: 'shield', icon: 'shield-checkmark-outline', label: 'Shield', route: '/dashboard' },
+  { id: 'community', icon: 'people-outline', label: 'Community', route: '/communities' },
+  { id: 'vault', icon: 'file-tray-full-outline', label: 'Vault', route: '/filevault' },
+  { id: 'alerts', icon: 'notifications-outline', label: 'Alerts', route: '/notifications' },
+];
+
+const SETTING_DEFS: { key: keyof UserSettings; title: string; desc: string; icon: IoniconName }[] = [
+  { key:'discoverable',        title:'Discoverable',  desc:'Let others find you by phone or handle', icon:'search-outline' },
+  { key:'lastSeenVisible',     title:'Last Seen',     desc:'Show your last-seen time to contacts',   icon:'eye-outline' },
+  { key:'readReceipts',        title:'Read Receipts', desc:'Send read receipts in your chats',       icon:'checkmark-done-outline' },
+  { key:'profilePhotoVisible', title:'Profile Photo', desc:'Show your profile photo to others',      icon:'person-circle-outline' },
 ];
 
 function fmtTime(iso: string): string {
@@ -161,19 +170,19 @@ function NotificationsContent() {
 
   return (
     <View style={S.container}>
-      <LinearGradient colors={['#FFFFFF','#040F20','#060F24']} style={StyleSheet.absoluteFillObject}/>
+      <AuroraBackground />
       <Animated.View style={{flex:1,opacity:fadeIn}}>
         <View style={S.header}>
           <TouchableOpacity hitSlop={4} accessibilityRole="button" accessibilityLabel="Back" onPress={()=>router.back()} style={S.backBtn}><Ionicons name="arrow-back" size={20} color={colors.primary} /></TouchableOpacity>
           <View style={{flex:1}}>
-            <Text style={S.title}>🔔 Alerts & Safety</Text>
+            <Text style={S.title}>Alerts & Safety</Text>
             <Text style={{color:colors.textFaint,fontSize:9,letterSpacing:2}}>EMERGENCY & PRIVACY CENTER</Text>
           </View>
         </View>
 
         <View style={S.tabs}>
-          {[{id:'alerts',label:'SOS HISTORY'},{id:'settings',label:'PRIVACY'},{id:'panic',label:'🆘 PANIC'}].map(tab=>(
-            <TouchableOpacity key={tab.id} onPress={()=>setActiveTab(tab.id as any)} style={[S.tab,activeTab===tab.id&&S.tabActive]}>
+          {[{id:'alerts',label:'SOS HISTORY'},{id:'settings',label:'PRIVACY'},{id:'panic',label:'PANIC'}].map(tab=>(
+            <TouchableOpacity key={tab.id} onPress={()=>setActiveTab(tab.id as any)} style={[S.tab,activeTab===tab.id&&S.tabActive]} accessibilityRole="tab" accessibilityState={{ selected: activeTab === tab.id }}>
               <Text style={[S.tabText,{color:activeTab===tab.id?(tab.id==='panic'?colors.danger:colors.primary):colors.textFaint}]}>{tab.label}</Text>
             </TouchableOpacity>
           ))}
@@ -205,12 +214,12 @@ function NotificationsContent() {
               <Text style={{color:colors.textFaint,fontSize:9,fontWeight:'800',letterSpacing:2,marginBottom:10}}>PRIVACY</Text>
               {SETTING_DEFS.map((d)=>(
                 <View key={d.key} style={S.settingRow}>
-                  <View style={{width:40,height:40,borderRadius:20,backgroundColor:'rgba(6,14,34,0.9)',justifyContent:'center',alignItems:'center',borderWidth:1,borderColor:'rgba(255,255,255,0.06)'}}><Text style={{fontSize:20}}>{d.icon}</Text></View>
+                  <View style={S.settingIcon}><Ionicons name={d.icon} size={20} color={colors.primary} /></View>
                   <View style={{flex:1}}>
                     <Text numberOfLines={1} style={{color:colors.text,fontSize:13,fontWeight:'700'}}>{d.title}</Text>
                     <Text style={{color:colors.textFaint,fontSize:10,marginTop:2}}>{d.desc}</Text>
                   </View>
-                  <Switch value={!!settings[d.key]} onValueChange={()=>toggleSetting(d.key)} trackColor={{false:'rgba(255,255,255,0.06)',true:colors.primary+'66'}} thumbColor={settings[d.key]?colors.primary:'rgba(255,255,255,0.3)'}/>
+                  <Switch value={!!settings[d.key]} onValueChange={()=>toggleSetting(d.key)} trackColor={{false:colors.border,true:colors.primary}} thumbColor={colors.card}/>
                 </View>
               ))}
 
@@ -243,12 +252,12 @@ function NotificationsContent() {
                   URL that arrived inside an encrypted message. */}
               <Text style={{color:colors.textFaint,fontSize:9,fontWeight:'800',letterSpacing:2,marginTop:18,marginBottom:10}}>LINK PREVIEWS</Text>
               <View style={S.settingRow}>
-                <View style={{width:40,height:40,borderRadius:20,backgroundColor:'rgba(6,14,34,0.9)',justifyContent:'center',alignItems:'center',borderWidth:1,borderColor:'rgba(255,255,255,0.06)'}}><Text style={{fontSize:20}}>🔗</Text></View>
+                <View style={S.settingIcon}><Ionicons name="link-outline" size={20} color={colors.primary} /></View>
                 <View style={{flex:1}}>
                   <Text numberOfLines={1} style={{color:colors.text,fontSize:13,fontWeight:'700'}}>Fetch previews for received links</Text>
                   <Text style={{color:colors.textFaint,fontSize:10,marginTop:2}}>Off: crazzychat&apos;s server never sees links people send you. Previews the sender attached still show.</Text>
                 </View>
-                <Switch value={remoteLinks} onValueChange={(v)=>{ setRemoteLinksState(v); setRemoteLinkPreviews(v); }} trackColor={{false:'rgba(255,255,255,0.06)',true:colors.primary+'66'}} thumbColor={remoteLinks?colors.primary:'rgba(255,255,255,0.3)'}/>
+                <Switch value={remoteLinks} onValueChange={(v)=>{ setRemoteLinksState(v); setRemoteLinkPreviews(v); }} trackColor={{false:colors.border,true:colors.primary}} thumbColor={colors.card}/>
               </View>
             </View>
           )}
@@ -256,15 +265,15 @@ function NotificationsContent() {
           {!loading && activeTab==='panic' && (
             <View style={{gap:16}}>
               <View style={{backgroundColor:'rgba(239,68,68,0.08)',borderRadius:16,padding:16,borderWidth:1,borderColor:'rgba(239,68,68,0.25)'}}>
-                <Text style={{color:colors.danger,fontSize:12,fontWeight:'800',marginBottom:6}}>🆘 EMERGENCY PANIC BUTTON</Text>
+                <Text style={{color:colors.danger,fontSize:12,fontWeight:'800',marginBottom:6}}>EMERGENCY PANIC BUTTON</Text>
                 <Text style={{color:colors.textDim,fontSize:12,lineHeight:18}}>Sends an emergency alert with your current location to your trusted contacts.</Text>
               </View>
               <Animated.View style={{borderRadius:22,borderWidth:2,borderColor:panicBorderColor,overflow:'hidden'}}>
-                <TouchableOpacity onPress={armPanic} activeOpacity={0.85} disabled={sending}>
-                  <LinearGradient colors={panicArmed?['rgba(127,29,29,0.9)','rgba(153,27,27,0.9)']:['rgba(26,10,10,0.9)','rgba(42,10,10,0.9)']} style={{padding:28,alignItems:'center',gap:8}}>
-                    <Animated.Text style={{fontSize:52,transform:[{scale:panicAnim}]}}>🆘</Animated.Text>
-                    <Text style={{color:colors.danger,fontSize:17,fontWeight:'900',letterSpacing:2}}>{sending?'SENDING…':panicArmed?'SENDING IN '+panicCountdown+'...':'PANIC ALERT'}</Text>
-                    <Text style={{color:colors.textDim,fontSize:11}}>{panicArmed?'Tap again to cancel':'Tap to arm — auto-sends in 3 seconds'}</Text>
+                <TouchableOpacity onPress={armPanic} activeOpacity={0.85} disabled={sending} accessibilityRole="button" accessibilityLabel="Panic alert">
+                  <LinearGradient colors={panicArmed?[colors.danger,colors.danger]:[colors.glass,colors.glassSoft]} style={{padding:28,alignItems:'center',gap:8}}>
+                    <Animated.View style={{transform:[{scale:panicAnim}]}}><Ionicons name="warning-outline" size={52} color={colors.danger} /></Animated.View>
+                    <Text style={{color:panicArmed?'#FFFFFF':colors.danger,fontSize:17,fontWeight:'900',letterSpacing:2}}>{sending?'SENDING…':panicArmed?'SENDING IN '+panicCountdown+'...':'PANIC ALERT'}</Text>
+                    <Text style={{color:panicArmed?'#FFFFFF':colors.textDim,fontSize:11}}>{panicArmed?'Tap again to cancel':'Tap to arm — auto-sends in 3 seconds'}</Text>
                   </LinearGradient>
                 </TouchableOpacity>
               </Animated.View>
@@ -273,7 +282,7 @@ function NotificationsContent() {
                 ? <Text style={{color:colors.textFaint,fontSize:12}}>No trusted contacts yet. Add them from a contact’s profile so they’re alerted in an emergency.</Text>
                 : contacts.map((c)=>(
                     <View key={c.userId} style={[S.settingRow,{borderColor:'rgba(239,68,68,0.15)'}]}>
-                      <Text style={{fontSize:28}}>🛟</Text>
+                      <Ionicons name="people-circle-outline" size={30} color={colors.danger} />
                       <View style={{flex:1}}>
                         <Text numberOfLines={1} style={{color:colors.text,fontSize:13,fontWeight:'700'}}>{c.name || c.vaultId || 'Contact'}</Text>
                         {c.vaultId && <Text style={{color:colors.textFaint,fontSize:11,marginTop:2}}>@{c.vaultId}</Text>}
@@ -288,8 +297,8 @@ function NotificationsContent() {
 
       <View style={S.navBar}>
         {NAV.map(item=>(
-          <TouchableOpacity key={item.id} onPress={()=>handleNav(item)} style={[S.navItem,navTab===item.id&&S.navItemActive]}>
-            <Text style={{fontSize:20,lineHeight:22}}>{item.icon}</Text>
+          <TouchableOpacity key={item.id} onPress={()=>handleNav(item)} style={[S.navItem,navTab===item.id&&S.navItemActive]} accessibilityRole="button" accessibilityState={{ selected: navTab === item.id }}>
+            <Ionicons name={item.icon} size={20} color={navTab===item.id?colors.primary:colors.textFaint} />
             <Text style={[S.navLabel,{color:navTab===item.id?colors.primary:colors.textFaint}]}>{item.label}</Text>
           </TouchableOpacity>
         ))}
@@ -310,18 +319,19 @@ export default function NotificationsScreen() {
 }
 
 const makeStyles = (c: Palette) => StyleSheet.create({
-  container:{flex:1,backgroundColor: c.glassSoft},
+  container:{flex:1,backgroundColor: 'transparent'},
   header:{flexDirection:'row',alignItems:'center',paddingHorizontal:18,paddingTop:HEADER_TOP,paddingBottom:14,gap:10},
-  title:{color:'#fff',fontSize:20,fontWeight:'900'},
-  backBtn:{width:36,height:36,borderRadius:18,backgroundColor:'rgba(10,22,40,0.8)',justifyContent:'center',alignItems:'center',borderWidth:1,borderColor:'rgba(255,255,255,0.06)'},
-  tabs:{flexDirection:'row',marginHorizontal:18,backgroundColor:'rgba(6,14,34,0.9)',borderRadius:14,padding:4,marginBottom:14},
+  title:{color:c.text,fontSize:20,fontWeight:'900'},
+  backBtn:{width:36,height:36,borderRadius:18,backgroundColor:c.glass,justifyContent:'center',alignItems:'center',borderWidth:1,borderColor:c.glassStroke},
+  tabs:{flexDirection:'row',marginHorizontal:18,backgroundColor:c.glass,borderRadius:14,padding:4,marginBottom:14,borderWidth:1,borderColor:c.glassStroke},
   tab:{flex:1,paddingVertical:9,alignItems:'center',borderRadius:10},
-  tabActive:{backgroundColor:'rgba(10,22,40,0.9)',borderWidth:1,borderColor:'rgba(74,159,255,0.15)'},
+  tabActive:{backgroundColor:brandAlpha(0.12),borderWidth:1,borderColor:c.primary},
   tabText:{fontSize:10,fontWeight:'800',letterSpacing:0.5},
-  alertRow:{backgroundColor:'rgba(10,22,40,0.8)',borderRadius:16,padding:14,marginBottom:8,borderWidth:1,borderColor:'rgba(255,255,255,0.06)',borderLeftWidth:3},
-  settingRow:{flexDirection:'row',alignItems:'center',backgroundColor:'rgba(10,22,40,0.8)',borderRadius:16,padding:14,marginBottom:8,borderWidth:1,borderColor:'rgba(255,255,255,0.06)',gap:12},
-  navBar:{position:'absolute',bottom:18,left:14,right:14,backgroundColor:'rgba(4,12,28,0.92)',borderRadius:28,borderWidth:1,borderColor:'rgba(74,159,255,0.12)',paddingVertical:10,paddingHorizontal:6,flexDirection:'row',justifyContent:'space-around',alignItems:'center'},
+  alertRow:{backgroundColor:c.glass,borderRadius:16,padding:14,marginBottom:8,borderWidth:1,borderColor:c.glassStroke,borderLeftWidth:3},
+  settingRow:{flexDirection:'row',alignItems:'center',backgroundColor:c.glass,borderRadius:16,padding:14,marginBottom:8,borderWidth:1,borderColor:c.glassStroke,gap:12},
+  settingIcon:{width:40,height:40,borderRadius:20,backgroundColor:c.glassSoft,justifyContent:'center',alignItems:'center',borderWidth:1,borderColor:c.glassStroke},
+  navBar:{position:'absolute',bottom:18,left:14,right:14,backgroundColor:c.glass,borderRadius:28,borderWidth:1,borderColor:c.glassStroke,paddingVertical:10,paddingHorizontal:6,flexDirection:'row',justifyContent:'space-around',alignItems:'center'},
   navItem:{alignItems:'center',gap:4,paddingVertical:6,paddingHorizontal:12,borderRadius:20,borderWidth:1,borderColor:'transparent'},
-  navItemActive:{backgroundColor:'rgba(74,159,255,0.12)',borderColor:'rgba(74,159,255,0.25)'},
+  navItemActive:{backgroundColor:brandAlpha(0.12),borderColor:c.primary},
   navLabel:{fontSize:9,letterSpacing:0.5,fontWeight:'600'},
 });

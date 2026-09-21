@@ -10,6 +10,8 @@
 
 import { readFileSync } from 'fs';
 import { join } from 'path';
+import { runInNewContext } from 'vm';
+import { transpileModule } from 'typescript';
 import { boardFit, BOARD_MIN, BOARD_GUTTER } from './boardFit';
 
 let failed = 0;
@@ -22,9 +24,49 @@ function A(ok: boolean, what: string): void {
 const none = { top: 0, bottom: 0, left: 0, right: 0 };
 console.log('\nBoard fit\n');
 
+// Drive the actual sizing hook across native onLayout events. A window resize
+// and its later container measurement are different events on Android.
+{
+  const src = readFileSync(join(__dirname, '../../components/games/ui.tsx'), 'utf8');
+  const start = src.indexOf('export function useBoardBox(');
+  const hook = src.slice(start, src.indexOf('\n}', start) + 2).replace('export ', '');
+  let window = { width: 393, height: 851 };
+  let stored = { w: 0, h: 0 };
+  const context = {
+    boardFit, NO_INSETS: none,
+    useWindowDimensions: () => window,
+    useSafeAreaInsets: () => ({ top: 24, bottom: 24, left: 0, right: 0 }),
+    React: {
+      useState: () => [stored, (set: (previous: typeof stored) => typeof stored) => { stored = set(stored); }],
+      useCallback: (fn: unknown) => fn,
+      useMemo: (fn: () => unknown) => fn(),
+    },
+  };
+  const render = runInNewContext(transpileModule(hook, {}).outputText + '\nuseBoardBox;', context);
+  let state = render(300);
+  A(state.width === 393 && state.height === 803, '0. first frame uses safe window fallback');
+  state.onLayout({ nativeEvent: { layout: { width: 393, height: 740 } } });
+  state = render(300);
+  A(state.width === 393 && state.height === 740 && state.size === 361,
+    '0a. measured play viewport owns sizing without subtracting safe area twice');
+  window = { width: 851, height: 393 };
+  state.onLayout({ nativeEvent: { layout: { width: 795, height: 293 } } });
+  state = render(300);
+  A(state.width === 795 && state.height === 293, '0b. rotation exposes measured wide viewport to board/controls composition');
+  state.onLayout({ nativeEvent: { layout: { width: 300, height: 470 } } });
+  state = render(300);
+  A(state.width === 300 && state.height === 470, '0c. split-screen relayout wins over unchanged window dimensions');
+  const previous = stored;
+  state.onLayout({ nativeEvent: { layout: { width: 300, height: 470 } } });
+  A(stored === previous, '0d. identical native layout does not schedule another size state');
+}
+
 // ── it must never exceed what exists ─────────────────────────────────
 {
   const screens: [number, number, string][] = [
+    [320, 568, 'compact phone'],
+    [320, 320, 'compact split screen'],
+    [568, 320, 'compact landscape'],
     [360, 640, 'small phone'],
     [412, 915, 'standard phone'],
     [1080, 2340, 'Redmi, raw px'],
@@ -115,7 +157,7 @@ console.log('\nBoard fit\n');
     A(/useBoardBox\(/.test(code), `6b. ${f} sizes its board through the shared hook`);
     A(!/useBoardBox\(\s*\d+\s*,\s*\d+\s*\)/.test(code),
       `6c. ${f} no longer passes a hard maximum`);
-    A(/onLayout=\{onBoardBox\}/.test(code),
+    A(/onLayout=\{(?:onBoardBox|viewport\.onLayout)\}/.test(code),
       `6f. ${f} measures the container it lays the board out in, not the window`);
   }
 }
@@ -189,48 +231,22 @@ console.log('\nBoard fit\n');
   console.log(`  (7) ${centred} centring cases, ${once} inset-ownership cases`);
 }
 
-// ── 8. the three square boards hold themselves upright ───────────────
-//
-// Rummy locks LANDSCAPE while its table is up and restores PORTRAIT_UP on
-// unmount — but unmount never runs when the process is force-stopped, so the
-// OS lock SURVIVED into the next launch and the next board opened landscape.
-// That is how the 38px offset was reachable at all. Each board now asserts its
-// own orientation instead of inheriting the last screen's.
+// ── 8. orientation belongs to the focused games route ────────────────
 {
   const ROOT = join(__dirname, '..', '..');
-  const ui = readFileSync(join(ROOT, 'components/games/ui.tsx'), 'utf8');
-  A(/export function usePortraitLock/.test(ui), '8. ui exposes a shared portrait lock');
-  A(/PORTRAIT_UP/.test(ui), '8a. ...and it locks PORTRAIT_UP');
-
-  for (const f of ['Chess.tsx', 'Ludo.tsx', 'TicTacToe.tsx']) {
-    const src = readFileSync(join(ROOT, 'components/games', f), 'utf8');
-    const code = src.split('\n').filter(l => !/^\s*(\/\/|\*|\/\*)/.test(l)).join('\n');
-    A(/usePortraitLock\(\)/.test(code), `8b. ${f} holds itself portrait`);
+  const route = readFileSync(join(ROOT, 'app/games.tsx'), 'utf8');
+  A(/useFocusEffect/.test(route) && /ScreenOrientation\.unlockAsync\(/.test(route),
+    '8. games unlocks orientation on focus, including return to a mounted route');
+  A(/<SafeAreaView/.test(route), '8a. games owns the safe container for hub and boards');
+  for (const f of ['Chess.tsx', 'Ludo.tsx', 'TicTacToe.tsx', 'Rummy.tsx']) {
+    const code = readFileSync(join(ROOT, 'components/games', f), 'utf8');
+    A(!/usePortraitLock\(|ScreenOrientation\.lockAsync\(/.test(code),
+      `8b. ${f} does not override the focused route orientation`);
   }
-
-  // Rummy is the deliberate exception and must STAY landscape at the table.
   const rummy = readFileSync(join(ROOT, 'components/games/Rummy.tsx'), 'utf8');
-  A(/OrientationLock\.LANDSCAPE/.test(rummy), '8c. rummy still plays landscape');
-
-  // ...AND FOR THE WHOLE SCREEN, not only while a hand is up.
-  //
-  // The lock used to be `playing ? LANDSCAPE : PORTRAIT_UP`, which rotated the
-  // device twice per game — once when the host dealt and once when the round
-  // ended — and again on every rematch. Rummy is landscape-only by design; the
-  // lobby and the table list are laid out as a centred column instead.
-  const rummyCode = rummy.split('\n').filter(l => !/^\s*(\/\/|\*|\/\*)/.test(l)).join('\n');
-  A(!/\?\s*ScreenOrientation\.OrientationLock\.LANDSCAPE/.test(rummyCode),
-    '8f. rummy does not switch orientation on game state');
-  A(/useColumn\(\)/.test(rummyCode),
-    '8g. ...so its lobby and table list are a landscape column');
-  // The restore is what stops the OS lock leaking into the next launch, which
-  // is the documented root cause of the 38px offset on the other three boards.
-  A(/OrientationLock\.PORTRAIT_UP/.test(rummyCode),
-    '8h. ...and it still restores portrait on the way out');
-  A(/<Baize \/>/.test(rummy), '8d. the felt auto-fits its parent rather than the window');
-  A(!/<Baize width=\{win\./.test(rummy), '8e. ...and no longer reads window dimensions');
+  A(!/boxInsets|paddingTop: insets\.top|paddingBottom: insets\.bottom/.test(rummy),
+    '8c. Rummy does not subtract or pad safe-area edges a second time');
 }
-
 
 // ── 9. the chess board's FRAME comes out of the board, not out of the page ──
 //

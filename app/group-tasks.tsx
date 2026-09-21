@@ -9,12 +9,14 @@
 import React, { useCallback, useMemo, useState } from 'react';
 import { KeyboardSafe } from '../components/ui';
 import {
-  View, Text, StyleSheet, TouchableOpacity, ScrollView, TextInput, Alert,
+  View, StyleSheet, TouchableOpacity, ScrollView, TextInput, Alert,
   ActivityIndicator, Platform,
 } from 'react-native';
 import { Stack, useLocalSearchParams, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../lib/theme';
+import { AuroraBackground } from '../components/ui/AuroraBackground';
+import { AppText as Text } from '../components/ui/Text';
 import { brandAlpha } from '../constants/theme';
 import { sendMessage, getMessages, decryptFromChat } from '../lib/chatService';
 import { unionWithLocalHistoryAsc } from '../lib/messageHistory';
@@ -156,7 +158,8 @@ export default function GroupTasksScreen() {
 
   return (
     <KeyboardSafe style={{ flex: 1, backgroundColor: colors.bg }}>
-      <Stack.Screen options={{
+      <AuroraBackground variant="chat" />
+      <Stack.Screen options={{ headerStyle: { backgroundColor: colors.bg }, headerTintColor: colors.text, headerShadowVisible: false,
         headerShown: true, /* the root Stack sets headerShown:false app-wide, so the options below were inert and this screen had no back control at all */  title: 'Tasks', headerTitleAlign: 'center' }} />
       <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 40 }} keyboardShouldPersistTaps="handled">
 

@@ -34,7 +34,7 @@ export default function ChatDoorButton({ colors, chat, fallbackTitle, accessibil
       onPress={() => router.push({ pathname: '/chat', params: { id: chat.id, name } } as any)}
       accessibilityRole="button"
       accessibilityLabel={accessibilityLabel}
-      style={{ paddingHorizontal: 6 }}
+      style={{ minWidth: 44, minHeight: 44, alignItems: 'center', justifyContent: 'center' }}
     >
       <Ionicons name="chatbubble-ellipses-outline" size={20} color={colors.primary} />
     </TouchableOpacity>

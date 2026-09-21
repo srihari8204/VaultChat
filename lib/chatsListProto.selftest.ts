@@ -300,6 +300,8 @@ async function main() {
   for (const [label, body] of [
     ['truncated mid-field', WIRE.slice(0, 40)],
     ['garbage', Uint8Array.from([0xff, 0xff, 0xff, 0xff, 0xff])],
+    ['row without an id', Uint8Array.from(sub(1, str(2, 'group')))],
+    ['valid row followed by row without an id', Uint8Array.from([...sub(1, chat7), ...sub(1, [])])],
   ] as [string, Uint8Array][]) {
     calls.length = 0;
     serve(200, 'application/protobuf', body);

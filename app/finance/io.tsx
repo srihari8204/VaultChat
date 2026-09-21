@@ -2,11 +2,12 @@
 // Export writes a share-sheet file; import reads a CSV and bulk-inserts ledgers.
 
 import React, { useState } from 'react';
+import { useFinanceTheme } from '../../components/finance/useFinanceTheme';
 import { View, Text, ScrollView, StyleSheet, Alert } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as DocumentPicker from 'expo-document-picker';
 import * as FileSystem from 'expo-file-system/legacy';
-import { FIN } from '../../constants/financeTheme';
+import { type FinancePalette } from '../../constants/financeTheme';
 import { FinHeader, Segment, Btn, Card } from '../../components/finance/ui';
 import { useMe } from '../../components/finance/useMe';
 import { fmtDate, num as parseAmount } from '../../utils/financeFormat';
@@ -24,6 +25,8 @@ const LD_HEADERS = ['Group', 'MemberNo', 'Name', 'Mobile', 'Address', 'Paid', 'P
 const LEDGER_HEADERS = ['Name', 'Mobile', 'Direction', 'InterestType', 'Principal', 'Rate', 'RateMode', 'Period', 'Remaining', 'Status', 'Notes', 'Created'];
 
 export default function FinanceIO() {
+  const FIN = useFinanceTheme();
+  const s = React.useMemo(() => makeStyles(FIN), [FIN]);
   const me = useMe();
   const [dataset, setDataset] = useState<Dataset>('ledger');
   const [format, setFormat] = useState<Format>('excel');
@@ -222,7 +225,7 @@ async function importLedgerCsv(userId: string, content: string): Promise<{ count
   return { count, skipped };
 }
 
-const s = StyleSheet.create({
+const makeStyles = (FIN: FinancePalette) => StyleSheet.create({
   screen: { flex: 1, backgroundColor: FIN.bg },
   body: { padding: 16, alignSelf: 'center', width: '100%', maxWidth: FIN.contentMax },
   label: { color: FIN.text, fontSize: 14, fontWeight: '700', marginTop: 16, marginBottom: 8 },

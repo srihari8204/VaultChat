@@ -83,8 +83,8 @@ export const C = {
    * #EBE2E2 clears 4.5 on the panel and button surfaces that carry the body
    * copy (4.91 / 4.73) and is still clearly dimmer than `text`, so the
    * hierarchy the two colours exist to express survives. The active player row
-   * (the lightest surface in the set) reaches 4.38 — short of AA, but it holds
-   * only a one-word subtitle beside a `text`-coloured name.
+   * uses `text` for its subtitle too: muted ink on that brighter surface was
+   * only 4.38:1, below AA even for a one-word caption.
    */
   muted: '#EBE2E2',
   gold: '#f3c245',

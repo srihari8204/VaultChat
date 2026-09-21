@@ -66,6 +66,16 @@ export const GLASS: Record<GlassKind, GlassRecipe> = {
   sheet:  { intensity: 56, lip: 0.30, radius: RADIUS.xxl,  blur: true,  shadow: shadow(-6, 40, 0.60, 16) },
 };
 
+const LIGHT_SHADOW: Record<GlassKind, ViewStyle> = {
+  chrome: { shadowColor: '#244064', shadowOffset: { width: 0, height: 10 }, shadowOpacity: 0.18, shadowRadius: 26, elevation: 10 },
+  card:   { shadowColor: '#244064', shadowOffset: { width: 0, height: 8 },  shadowOpacity: 0.14, shadowRadius: 20, elevation: 5 },
+  chip:   { shadowColor: '#244064', shadowOffset: { width: 0, height: 2 },  shadowOpacity: 0.12, shadowRadius: 6,  elevation: 2 },
+  sheet:  { shadowColor: '#244064', shadowOffset: { width: 0, height: -6 }, shadowOpacity: 0.18, shadowRadius: 34, elevation: 14 },
+};
+
+export const glassShadow = (kind: GlassKind, scheme: 'dark' | 'light'): ViewStyle =>
+  scheme === 'light' ? LIGHT_SHADOW[kind] : GLASS[kind].shadow;
+
 /**
  * Coloured glow under a gradient disc — the FAB, the Apps tab, an active chip.
  * Keyed by SEMANTIC so a screen never picks a hex: the accent glow follows the

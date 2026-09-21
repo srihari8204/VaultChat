@@ -5,9 +5,9 @@
 // N5Y6KcMUPA3LgtWjfHPctz — that file is the source of truth, this is its
 // implementation. Changing a colour here without changing it there is drift.
 //
-// Kept as a STATIC palette (not the theme hook) so every finance screen renders
-// identically. That was a deliberate decision when the hub was built and it
-// still holds: the module is one coherent surface, not a themed shell.
+// The two stable palettes are selected by useFinanceTheme using the app's
+// saved light/dark/system preference. Static FIN remains the light palette
+// for existing consumers that explicitly choose their own scheme.
 //
 // ── Two token names carry the whole restyle ──────────────────────────
 // Every finance screen writes `backgroundColor: FIN.bg` for its root and
@@ -48,21 +48,21 @@ export const FIN = {
   // ── The ice ground. Rendered once as a gradient in the finance _layout;
   //    `bg` is transparent so it shows through every screen's root View.
   bg:         'transparent',
-  bgTop:      '#F8FAFD',
-  bgMid:      '#EBEFF7',
-  bgBottom:   '#DCE3F0',
+  bgTop:      '#F0F3FA',
+  bgMid:      '#E3E9F4',
+  bgBottom:   '#D4DEEE',
 
   // ── Glass. Translucent white over the ground — NOT a backdrop blur.
   //    expo-blur is installed but a live blur behind a scrolling list is the
   //    single most expensive thing you can put on a mid-range Android GPU, and
   //    on a ground this light it buys almost nothing visually. A translucent
   //    fill plus a bright rim reads as frost for free.
-  card:       'rgba(255,255,255,0.62)',   // the default pane
-  cardStrong: 'rgba(255,255,255,0.80)',   // raised: sheets, selected chips
+  card:       'rgba(255,255,255,0.82)',   // the default pane
+  cardStrong: 'rgba(255,255,255,0.94)',   // raised: sheets, selected chips
   cardSolid:  '#FFFFFF',                  // when opacity is actually required
   card2:      '#F1F4FA',
-  glassEdge:  'rgba(255,255,255,0.90)',   // the lit top rim
-  glassRim:   'rgba(16,24,40,0.06)',      // the cool outer hairline
+  glassEdge:  'rgba(44,62,96,0.18)',      // visible cool rim on the light ground
+  glassRim:   'rgba(16,24,40,0.12)',      // the cool outer hairline
 
   border:     '#D8DFEC',
   line:       '#E7ECF5',
@@ -78,8 +78,8 @@ export const FIN = {
   sub:        '#475467',
   // #98A2B3 was only 2.6:1 on white. `faint` is not decorative — it is the
   // placeholder in every money field and the hint under every form label, so it
-  // has to be readable. #667085 clears AA and is still plainly tertiary.
-  faint:      '#667085',
+  // has to be readable. #566176 also clears AA directly on the tinted ground.
+  faint:      '#566176',
   onBrand:    '#FFFFFF',
 } as const;
 
@@ -91,10 +91,11 @@ export const FIN = {
  * Each runs dark → light along the diagonal, matching the brand hero, and each
  * dark stop is chosen so white body text clears AA across the whole sweep.
  */
-export const FIN_HERO: Record<'good' | 'bad' | 'warn', [string, string]> = {
-  good: ['#05603A', '#0E9F6E'],
-  bad:  ['#912018', '#D92D20'],
-  warn: ['#93370D', '#DC6803'],
+export const FIN_HERO: Record<'brand' | 'good' | 'bad' | 'warn', [string, string]> = {
+  brand: ['#4C2A7A', '#6D3FA8'],
+  good: ['#05603A', '#06704C'],
+  bad:  ['#912018', '#B42318'],
+  warn: ['#93370D', '#9F3C08'],
 };
 
 /** Corner radii. Matches "Vault Finance / Scale" in Figma. */
@@ -116,11 +117,12 @@ export const TABULAR = { fontVariant: ['tabular-nums' as const] };
 
 export type LedgerStatus = 'running' | 'overdue' | 'completed';
 
-export const STATUS_COLORS: Record<LedgerStatus, { fg: string; bg: string; label: string }> = {
+export const financeStatusColors = (FIN: FinancePalette): Record<LedgerStatus, { fg: string; bg: string; label: string }> => ({
   running:   { fg: FIN.good, bg: FIN.goodSoft, label: 'Running' },
   overdue:   { fg: FIN.bad,  bg: FIN.badSoft,  label: 'Overdue' },
   completed: { fg: FIN.sub,  bg: FIN.card2,    label: 'Completed' },
-};
+});
+export const STATUS_COLORS = financeStatusColors(FIN);
 
 /**
  * The ice-glass palette after dark.
@@ -137,7 +139,7 @@ export const STATUS_COLORS: Record<LedgerStatus, { fg: string; bg: string; label
  */
 export const FIN_DARK = {
   brand:      '#C4A5E8',
-  brandDeep:  '#9D6FD0',
+  brandDeep:  '#B58AE4',
   brandInk:   '#E9DDF7',
   brandSoft:  '#2A1F3D',
   accent:     '#B98CF0',
@@ -178,5 +180,6 @@ export const FIN_DARK = {
 /** Both palettes share a shape, so this is the only lookup a screen needs. */
 export const FIN_PALETTES = { light: FIN, dark: FIN_DARK } as const;
 export type FinScheme = keyof typeof FIN_PALETTES;
+export type FinancePalette = { [K in keyof typeof FIN]: typeof FIN[K] extends number ? number : string };
 
 export default FIN;

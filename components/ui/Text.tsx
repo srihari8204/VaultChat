@@ -17,6 +17,7 @@ import { useColors } from '../../lib/theme';
 /** True once the brand fonts are registered (provided by the root layout). */
 export const FontReadyContext = createContext<boolean>(false);
 export const useFontsReady = () => useContext(FontReadyContext);
+const TextVariantContext = createContext<TypeVariant | null>(null);
 
 export interface AppTextProps extends TextProps {
   variant?: TypeVariant;
@@ -24,11 +25,14 @@ export interface AppTextProps extends TextProps {
   color?: string;
 }
 
-export function AppText({ variant = 'body', color, style, ...rest }: AppTextProps) {
+export function AppText({ variant, color, style, ...rest }: AppTextProps) {
+  const parentVariant = useContext(TextVariantContext);
+  const effectiveVariant = variant ?? parentVariant ?? 'body';
+  const inline = parentVariant != null && variant == null;
   const ready = useFontsReady();
   const colors = useColors();
   const { width } = useWindowDimensions();
-  const t = TYPOGRAPHY[variant];
+  const t = TYPOGRAPHY[effectiveVariant];
   // Screen-responsive sizing. Returns the TYPOGRAPHY numbers unchanged across
   // the whole ordinary phone range (see lib/typeScale.ts), so this is inert on
   // every device in use today; it exists for tablets and very narrow screens.
@@ -36,7 +40,7 @@ export function AppText({ variant = 'body', color, style, ...rest }: AppTextProp
   // rotation or split-screen resize is picked up instead of being frozen at
   // whatever the app launched into.
   const sized = scaleType(t, width);
-  const base: TextStyle = {
+  const base: TextStyle = inline ? (color ? { color } : {}) : {
     fontSize: sized.fontSize,
     lineHeight: sized.lineHeight,
     color: color ?? colors.text,
@@ -58,17 +62,26 @@ export function AppText({ variant = 'body', color, style, ...rest }: AppTextProp
   // or the family (losing the brand). Below 600 the regular face is correct, so
   // the weight is simply removed (2026-09-17).
   const merged = StyleSheet.flatten(style) as TextStyle | undefined;
+  // A larger caller font must not inherit the body's smaller line box.
+  if (merged?.fontSize != null && merged.lineHeight == null) {
+    base.lineHeight = Math.ceil(merged.fontSize * t.lineHeight / t.fontSize);
+  }
   let resolved: TextStyle | undefined = merged;
   if (ready && merged && merged.fontWeight != null && merged.fontFamily == null) {
     const { fontWeight, ...rest2 } = merged;
-    const w = Number(fontWeight);
+    const w = fontWeight === 'bold' ? 700 : fontWeight === 'normal' ? 400 : Number(fontWeight);
     const heading = t.family === FONT.heading || t.family === FONT.headingBold;
     const family = heading
       ? (w >= 800 ? FONT.headingBold : FONT.heading)
       : (w >= 700 ? FONT.bodyBold : w >= 600 ? FONT.bodySemibold : FONT.body);
     resolved = Number.isFinite(w) ? { ...rest2, fontFamily: family } : rest2;
   }
-  return <RNText style={[base, resolved]} {...rest} />;
+  // Context has no native view: nested runs retain React Native's text inheritance.
+  return (
+    <TextVariantContext.Provider value={effectiveVariant}>
+      <RNText style={[base, resolved]} {...rest} />
+    </TextVariantContext.Provider>
+  );
 }
 
 export default AppText;

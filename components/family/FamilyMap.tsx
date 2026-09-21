@@ -54,7 +54,7 @@ const initials = (name: string) => (name || '?').trim().split(/\s+/).slice(0, 2)
 
 /** Marker styling, shared verbatim by both engines so a member looks identical
  *  whichever page is running — an engine swap must not restyle the family. */
-const MARKER_CSS = (selfColor: string) => `
+const MARKER_CSS = (selfColor: string, light = false) => `
 .mk{width:34px;height:34px;border-radius:50%;display:flex;align-items:center;justify-content:center;
   color:#fff;font:700 12px system-ui,sans-serif;border:3px solid #fff;box-shadow:0 1px 5px rgba(0,0,0,.45)}
 .mk.self{box-shadow:0 0 0 5px ${selfColor}33,0 1px 5px rgba(0,0,0,.45)}
@@ -65,14 +65,15 @@ const MARKER_CSS = (selfColor: string) => `
   background:${selfColor};border:3px solid #fff;box-shadow:0 2px 6px rgba(0,0,0,.5)}
 .lnk{transform:translate(-50%,-50%);white-space:nowrap;padding:2px 7px;border-radius:999px;
   background:rgba(17,19,24,.82);color:#fff;font:700 10.5px system-ui,sans-serif;
-  border:1px solid rgba(255,255,255,.22)}`;
+  border:1px solid rgba(255,255,255,.22)}
+${light ? '.mk:not(.self),.cl:not(.self){color:#070A18}' : ''}`;
 
-function html(tileUrl: string, bg: string, selfColor: string): string {
+function html(tileUrl: string, bg: string, selfColor: string, light = false): string {
   return `<!DOCTYPE html><html><head>
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
 <link rel="stylesheet" href="data:text/css;base64,${LEAFLET_CSS_B64}"/>
 <style>html,body,#map{height:100%;margin:0;background:${bg}}
-${MARKER_CSS(selfColor)}
+${MARKER_CSS(selfColor, light)}
 .leaflet-control-attribution{font-size:9px;background:rgba(0,0,0,.35);color:#ddd}
 .leaflet-control-attribution a{color:#bbf}</style>
 </head><body><div id="map"></div>
@@ -99,7 +100,7 @@ function slide(mk,la,ln){ var f=mk.getLatLng();
 function setMembers(list){ var seen={};
   list.forEach(function(m){ seen[m.id]=1;
     var isCl=m.count>1;
-    var cls=isCl?'cl':('mk'+(m.self?' self':'')+(m.stale?' stale':''));
+    var cls=isCl?('cl'+(m.self?' self':'')):('mk'+(m.self?' self':'')+(m.stale?' stale':''));
     var body=isCl?String(m.count):m.ini;
     var sz=isCl?42:34, anc=sz/2;
     var ic=L.divIcon({className:'',html:'<div class="'+cls+'" style="background:'+m.color+'">'+body+'</div>',iconSize:[sz,sz],iconAnchor:[anc,anc]});
@@ -225,12 +226,12 @@ reportZoom();
 // Family markers are HTML elements, so they always paint ABOVE the basemap —
 // §66's "family markers beat every label" is a property of the engine here,
 // not a z-index we have to maintain.
-function mlHtml(styleUrl: string, bg: string, selfColor: string, svKey: string, buildings: Record<string, unknown>): string {
+function mlHtml(styleUrl: string, bg: string, selfColor: string, svKey: string, buildings: Record<string, unknown>, light = false): string {
   return `<!DOCTYPE html><html><head>
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
 <link rel="stylesheet" href="data:text/css;base64,${MAPLIBRE_CSS_B64}"/>
 <style>html,body,#map{height:100%;margin:0;background:${bg}}
-${MARKER_CSS(selfColor)}
+${MARKER_CSS(selfColor, light)}
 .mkwrap{cursor:pointer}
 .maplibregl-ctrl-attrib{font-size:9px}</style>
 </head><body><div id="map"></div>
@@ -256,7 +257,7 @@ function mkEl(m){
   var w=document.createElement('div'); w.className='mkwrap';
   var isCl=m.count>1, sz=isCl?42:34;
   w.style.width=sz+'px'; w.style.height=sz+'px';
-  w.innerHTML='<div class="'+(isCl?'cl':('mk'+(m.self?' self':'')+(m.stale?' stale':'')))
+  w.innerHTML='<div class="'+(isCl?('cl'+(m.self?' self':'')):('mk'+(m.self?' self':'')+(m.stale?' stale':'')))
     +'" style="background:'+m.color+'">'+(isCl?String(m.count):m.ini)+'</div>';
   w.addEventListener('click',function(){
     // A cluster has no single member to select, so tapping it zooms in until it
@@ -626,7 +627,7 @@ export default function FamilyMap({
    *  bottom can lift them clear instead of having them covered. */
   controlsBottom?: number;
 }) {
-  const { scheme, colors } = useTheme();
+  const { colors } = useTheme();
   const ref = useRef<WebView>(null);
   const [ready, setReady] = useState(false);
   // Synchronous mirror of `ready` — see the onMessage handler for why.
@@ -775,7 +776,7 @@ export default function FamilyMap({
     ref.current.injectJavaScript(`setHeading(${Math.round(headingDeg)});true;`);
   }, [ready, engine, headingDeg]);
 
-  const mapScheme = scheme === 'light' ? 'light' : 'dark';
+  const mapScheme = 'light' as const;
   // Memoized: mlHtml concatenates the embedded MapLibre bundle (~1.1MB) into a
   // fresh string on every call, and this component re-renders on every 15s
   // presence ping and every marker selection — an unmemoized allocation here
@@ -783,8 +784,8 @@ export default function FamilyMap({
   // NEVER RELOADS (react-native-webview does not re-navigate on an identical
   // source.html). Deps are exactly what the string's content depends on.
   const source = useMemo(() => (engine === 'maplibre'
-    ? { html: mlHtml(mapStyleUrl(mapScheme), colors.bg, colors.primary, STREETVIEW_API_KEY, buildings3DLayer(mapScheme)) }
-    : { html: html(RASTER_FALLBACK_URL, colors.bg, colors.primary) }),
+    ? { html: mlHtml(mapStyleUrl(mapScheme), colors.bg, colors.primary, STREETVIEW_API_KEY, buildings3DLayer(mapScheme), mapScheme === 'light') }
+    : { html: html(RASTER_FALLBACK_URL, colors.bg, colors.primary, mapScheme === 'light') }),
     [engine, mapScheme, colors.bg, colors.primary]);
 
   // Heading-up → north-up → overview, the three modes §46–48 name.

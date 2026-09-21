@@ -11,12 +11,14 @@
 
 import React, { useCallback, useMemo, useState } from 'react';
 import {
-  View, Text, StyleSheet, TouchableOpacity, ScrollView, TextInput, Alert,
+  View, StyleSheet, TouchableOpacity, ScrollView, TextInput, Alert,
   ActivityIndicator, Modal,
 } from 'react-native';
 import { Stack, useLocalSearchParams, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../lib/theme';
+import { AuroraBackground } from '../components/ui/AuroraBackground';
+import { AppText as Text } from '../components/ui/Text';
 import { sendMessage, getMessages, decryptFromChat } from '../lib/chatService';
 import { unionWithLocalHistoryAsc } from '../lib/messageHistory';
 import { getCurrentUserAsync } from './(constants)/authService';
@@ -140,8 +142,9 @@ export default function GroupNotesScreen() {
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.bg }}>
-      <Stack.Screen options={{
-        headerShown: true, /* the root Stack sets headerShown:false app-wide, so the options below were inert and this screen had no back control at all */ 
+      <AuroraBackground variant="chat" />
+      <Stack.Screen options={{ headerStyle: { backgroundColor: colors.bg }, headerTintColor: colors.text, headerShadowVisible: false,
+        headerShown: true, /* the root Stack sets headerShown:false app-wide, so the options below were inert and this screen had no back control at all */
         title: 'Notes', headerTitleAlign: 'center',
         headerRight: () => (
           <TouchableOpacity onPress={openNew} accessibilityLabel="New note" style={{ paddingHorizontal: 8 }}>

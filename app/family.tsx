@@ -6,9 +6,10 @@
 // Circle CRUD (rename/roles/remove/leave/delete) lives in the ⋯ manage sheet;
 // all of it rides existing group endpoints. Positions stay E2EE end to end.
 
+import { AppText as Text } from '../components/ui/Text';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  View, Text, StyleSheet, TouchableOpacity, ScrollView, Alert, ActivityIndicator,
+  View, StyleSheet, TouchableOpacity, ScrollView, Alert, ActivityIndicator,
   Switch, Modal, TextInput, Animated, Vibration, Pressable,
   Linking, AppState,
 } from 'react-native';
@@ -1236,7 +1237,7 @@ export default function FamilySpaceScreen() {
           pressed && { backgroundColor: G.press, borderRadius: 12 }]}
       >
         <View style={[st.dot, { backgroundColor: colorFor(m.id), opacity: p ? 1 : 0.5 }]}>
-          <Text style={st.dotTxt}>{(m.name || '?').trim()[0]?.toUpperCase()}</Text>
+          <Text style={[st.dotTxt, scheme === 'light' && { color: '#070A18' }]}>{(m.name || '?').trim()[0]?.toUpperCase()}</Text>
         </View>
         <View style={{ flex: 1 }}>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
@@ -1485,7 +1486,7 @@ export default function FamilySpaceScreen() {
               <View style={st.avatarRow}>
                 {roster.slice(0, 4).map((m, i) => (
                   <View key={m.id} style={[st.miniDot, { backgroundColor: colorFor(m.id), marginLeft: i ? -8 : 0, borderColor: G.sheet, opacity: presences[m.id] ? 1 : 0.45 }]}>
-                    <Text style={st.miniDotTxt}>{(m.name || '?').trim()[0]?.toUpperCase()}</Text>
+                    <Text style={[st.miniDotTxt, scheme === 'light' && { color: '#070A18' }]}>{(m.name || '?').trim()[0]?.toUpperCase()}</Text>
                   </View>
                 ))}
                 {roster.length > 4 && <View style={[st.miniDot, { backgroundColor: colors.border, marginLeft: -8, borderColor: G.sheet }]}><Text style={[st.miniDotTxt, { color: colors.text }]}>+{roster.length - 4}</Text></View>}

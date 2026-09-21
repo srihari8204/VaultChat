@@ -11,12 +11,14 @@
 
 import React, { useCallback, useMemo, useState } from 'react';
 import {
-  View, Text, StyleSheet, TouchableOpacity, ScrollView, TextInput, Alert,
+  View, StyleSheet, TouchableOpacity, ScrollView, TextInput, Alert,
   ActivityIndicator, Modal,
 } from 'react-native';
 import { Stack, useLocalSearchParams, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../lib/theme';
+import { AuroraBackground } from '../components/ui/AuroraBackground';
+import { AppText as Text } from '../components/ui/Text';
 import { brandAlpha } from '../constants/theme';
 import {
   listGroupEvents, createGroupEvent, deleteGroupEvent,
@@ -183,7 +185,8 @@ export default function GroupCalendarScreen() {
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.bg }}>
-      <Stack.Screen options={{
+      <AuroraBackground variant="chat" />
+      <Stack.Screen options={{ headerShown: true, headerStyle: { backgroundColor: colors.bg }, headerTintColor: colors.text, headerShadowVisible: false,
         title: 'Calendar', headerTitleAlign: 'center',
         headerRight: () => (
           <TouchableOpacity onPress={() => setComposing(true)} accessibilityLabel="New event" style={{ paddingHorizontal: 8 }}>

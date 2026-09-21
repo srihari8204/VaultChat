@@ -1,3 +1,5 @@
+import { AppText as Text } from '../components/ui/Text';
+import { AuroraBackground } from '../components/ui';
 // app/vaultcheck.tsx — VaultCheck result screen.
 //
 // Opened from a message long-press ("Verify") or the media viewer. Runs the
@@ -11,7 +13,7 @@
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  View, Text, ScrollView, StyleSheet, ActivityIndicator, TouchableOpacity, Share, Alert,
+  View, ScrollView, StyleSheet, ActivityIndicator, TouchableOpacity, Share, Alert,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { Stack, useLocalSearchParams } from 'expo-router';
@@ -71,8 +73,10 @@ export default function VaultCheckScreen() {
   return (
     <>
       <Stack.Screen options={{
-        headerShown: true, /* the root Stack sets headerShown:false app-wide, so the options below were inert and this screen had no back control at all */  title: 'Verify media', headerBackTitle: 'Back' }} />
-      <ScrollView style={S.page} contentContainerStyle={{ padding: 16, paddingBottom: 40 }}>
+        headerShown: true, /* the root Stack sets headerShown:false app-wide, so the options below were inert and this screen had no back control at all */  title: 'Verify media', headerBackTitle: 'Back', headerStyle: { backgroundColor: colors.surfaceSolid }, headerTintColor: colors.text }} />
+      <View style={S.page}>
+      <AuroraBackground />
+      <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 16, paddingBottom: 40 }}>
         {!report && !error && (
           <View style={S.loading}>
             <ActivityIndicator color={colors.primary} size="large" />
@@ -154,7 +158,7 @@ export default function VaultCheckScreen() {
             )}
 
             <TouchableOpacity style={S.shareBtn} onPress={onShare} activeOpacity={0.85}>
-              <Ionicons name="share-outline" size={16} color="#000" />
+              <Ionicons name="share-outline" size={16} color="#fff" />
               <Text style={S.shareTxt}>Share this report</Text>
             </TouchableOpacity>
 
@@ -165,6 +169,7 @@ export default function VaultCheckScreen() {
           </>
         )}
       </ScrollView>
+      </View>
     </>
   );
 }
@@ -209,6 +214,6 @@ const makeStyles = (c: Palette) => StyleSheet.create({
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
     backgroundColor: c.primary, borderRadius: 14, paddingVertical: 14, marginTop: 4,
   },
-  shareTxt: { color: '#000', fontSize: 14, fontWeight: '800' },
-  disclaimer: { color: c.textDim, fontSize: 11, lineHeight: 16, textAlign: 'center', marginTop: 14 },
+  shareTxt: { color: '#fff', fontSize: 14, fontWeight: '800' },
+  disclaimer: { color: c.textDim, fontSize: 12, lineHeight: 16, textAlign: 'center', marginTop: 14 },
 });

@@ -103,7 +103,7 @@ for (const scheme of ['light', 'dark'] as const) {
     const rDim = ratio(over(parse(TEXT[scheme].textDim), comp), comp);
     ok(`${scheme} text on ${surface} ≥ 4.5`, rText >= 4.5, rText.toFixed(2));
     ok(`${scheme} textDim on ${surface} ≥ 4.5`, rDim >= 4.5, rDim.toFixed(2));
-    for (const k of ['accentText', 'goodText', 'dangerText'] as const) {
+    for (const k of ['accentText', 'goodText', 'dangerText', 'warnText'] as const) {
       const r = ratio(parse(G[k]), comp);
       ok(`${scheme} ${k} on ${surface} ≥ 4.5`, r >= 4.5, r.toFixed(2));
     }

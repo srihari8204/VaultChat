@@ -1,3 +1,5 @@
+import { AppText as Text } from '../components/ui/Text';
+import { AuroraBackground } from '../components/ui';
 // app/docscanner.tsx — real photo → PDF document scanner.
 //
 // Pick/capture one or more photos → resize each (expo-image-manipulator) →
@@ -17,7 +19,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useEffect, useRef, useState, useMemo } from 'react';
-import { ActivityIndicator, Alert, Animated, FlatList, Image, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, Animated, FlatList, Image, Modal, Platform, Pressable, ScrollView, StyleSheet, TextInput, TouchableOpacity, View } from 'react-native';
 import { useTheme } from '../lib/theme';
 import { ErrorBoundary } from '../components/ErrorBoundary';
 import { enqueueMedia } from '../lib/mediaOutbox';
@@ -272,7 +274,7 @@ function DocScannerContent() {
 
   return (
     <View style={S.container}>
-      <LinearGradient colors={['#FFFFFF', '#040F20', '#060F24']} style={StyleSheet.absoluteFillObject} />
+      <AuroraBackground />
       <Animated.View style={{ flex: 1, opacity: fadeIn }}>
         <View style={S.header}>
           <TouchableOpacity hitSlop={4} accessibilityRole="button" accessibilityLabel="Back" onPress={() => step === 'pick' ? router.back() : resetScanner()} style={S.backBtn}>
@@ -280,7 +282,7 @@ function DocScannerContent() {
           </TouchableOpacity>
           <View style={{ flex: 1 }}>
             <Text style={S.title}>📄 Doc Scanner</Text>
-            <Text style={{ color: colors.textFaint, fontSize: 9, letterSpacing: 2 }}>PHOTO → PDF DOCUMENT</Text>
+            <Text style={{ color: colors.textFaint, fontSize: 12, letterSpacing: 2 }}>PHOTO → PDF DOCUMENT</Text>
           </View>
         </View>
 
@@ -291,17 +293,17 @@ function DocScannerContent() {
             <View style={{ gap: 16 }}>
               <View style={{ flexDirection: 'row', gap: 12 }}>
                 <TouchableOpacity onPress={scanDoc} style={{ flex: 1 }}>
-                  <LinearGradient colors={[colors.primary, colors.textDim]} style={S.sourceBtn}>
+                  <LinearGradient colors={['#4338CA', '#312E81']} style={S.sourceBtn}>
                     <Text style={{ fontSize: 40 }}>📄</Text>
                     <Text style={{ color: '#fff', fontSize: 14, fontWeight: '900', marginTop: 8 }}>Scan Document</Text>
-                    <Text style={{ color: 'rgba(255,255,255,0.6)', fontSize: 11, marginTop: 4, textAlign: 'center' }}>Auto edge-detect, crop & multi-page</Text>
+                    <Text style={{ color: '#FFFFFF', fontSize: 12, marginTop: 4, textAlign: 'center' }}>Auto edge-detect, crop & multi-page</Text>
                   </LinearGradient>
                 </TouchableOpacity>
                 <TouchableOpacity onPress={() => pickPhoto('gallery')} style={{ flex: 1 }}>
                   <LinearGradient colors={['#1D4ED8', '#1E40AF']} style={S.sourceBtn}>
                     <Text style={{ fontSize: 40 }}>🖼️</Text>
                     <Text style={{ color: '#fff', fontSize: 14, fontWeight: '900', marginTop: 8 }}>From Gallery</Text>
-                    <Text style={{ color: 'rgba(255,255,255,0.6)', fontSize: 11, marginTop: 4, textAlign: 'center' }}>Pick one or more photos</Text>
+                    <Text style={{ color: '#FFFFFF', fontSize: 12, marginTop: 4, textAlign: 'center' }}>Pick one or more photos</Text>
                   </LinearGradient>
                 </TouchableOpacity>
               </View>
@@ -324,27 +326,27 @@ function DocScannerContent() {
                   {recentDocs.map((doc) => (
                     <TouchableOpacity key={doc.id} style={S.docRow} onPress={() => sharePdf(doc)} onLongPress={() => deleteRecent(doc)}>
                       <Text style={{ fontSize: 26 }}>{DOC_TYPES.find(d => d.id === doc.type)?.icon || '📄'}</Text>
-                      <View style={{ flex: 1 }}>
+                      <View style={{ flex: 1, minWidth: 120 }}>
                         <Text style={{ color: colors.text, fontSize: 13, fontWeight: '700' }} numberOfLines={1}>{doc.title}</Text>
-                        <View style={{ flexDirection: 'row', gap: 8, marginTop: 4 }}>
-                          <Text style={{ color: colors.textFaint, fontSize: 10 }}>{fmtTime(doc.createdAt)}</Text>
-                          <Text style={{ color: colors.textFaint, fontSize: 10 }}>·</Text>
-                          <Text style={{ color: colors.textFaint, fontSize: 10 }}>{doc.pages} page{doc.pages > 1 ? 's' : ''}</Text>
-                          <Text style={{ color: colors.textFaint, fontSize: 10 }}>·</Text>
-                          <Text style={{ color: colors.textFaint, fontSize: 10 }}>{fmtSize(doc.sizeKb)}</Text>
+                        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 4 }}>
+                          <Text style={{ color: colors.textFaint, fontSize: 12 }}>{fmtTime(doc.createdAt)}</Text>
+                          <Text style={{ color: colors.textFaint, fontSize: 12 }}>·</Text>
+                          <Text style={{ color: colors.textFaint, fontSize: 12 }}>{doc.pages} page{doc.pages > 1 ? 's' : ''}</Text>
+                          <Text style={{ color: colors.textFaint, fontSize: 12 }}>·</Text>
+                          <Text style={{ color: colors.textFaint, fontSize: 12 }}>{fmtSize(doc.sizeKb)}</Text>
                         </View>
                       </View>
-                      <View style={{ flexDirection: 'row', gap: 14, alignItems: 'center' }}>
+                      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 14, alignItems: 'center', marginLeft: 'auto' }}>
                         <Pressable onPress={() => sendOrPick(doc)} hitSlop={8}>
-                          <Text style={{ color: colors.primary, fontSize: 11, fontWeight: '800' }}>Send</Text>
+                          <Text style={{ color: colors.primary, fontSize: 12, fontWeight: '800' }}>Send</Text>
                         </Pressable>
                         <Pressable onPress={() => sharePdf(doc)} hitSlop={8}>
-                          <Text style={{ color: colors.textDim, fontSize: 11, fontWeight: '800' }}>Share</Text>
+                          <Text style={{ color: colors.textDim, fontSize: 12, fontWeight: '800' }}>Share</Text>
                         </Pressable>
                       </View>
                     </TouchableOpacity>
                   ))}
-                  <Text style={{ color: colors.textFaint, fontSize: 10, textAlign: 'center' }}>Long-press a document to delete it</Text>
+                  <Text style={{ color: colors.textFaint, fontSize: 12, textAlign: 'center' }}>Long-press a document to delete it</Text>
                 </View>
               )}
             </View>
@@ -367,7 +369,7 @@ function DocScannerContent() {
                 <TextInput value={customTitle} onChangeText={setCustomTitle} placeholder="e.g. Invoice #2024-041" placeholderTextColor={colors.textFaint} style={S.input} />
               </View>
               <TouchableOpacity onPress={processToPdf}>
-                <LinearGradient colors={[colors.primary, colors.textDim]} style={{ borderRadius: 18, paddingVertical: 18, alignItems: 'center', flexDirection: 'row', justifyContent: 'center', gap: 10 }}>
+                <LinearGradient colors={[colors.accentDeep, colors.accentDeep]} style={{ borderRadius: 18, paddingVertical: 18, alignItems: 'center', flexDirection: 'row', justifyContent: 'center', gap: 10 }}>
                   <Text style={{ fontSize: 20 }}>⚡</Text>
                   <Text style={{ color: '#fff', fontSize: 16, fontWeight: '900' }}>Convert to PDF</Text>
                 </LinearGradient>
@@ -380,7 +382,7 @@ function DocScannerContent() {
             <View style={{ gap: 20, alignItems: 'center', paddingTop: 30 }}>
               <Text style={{ fontSize: 56 }}>📄</Text>
               <View style={{ width: '100%', gap: 10 }}>
-                <View style={{ height: 6, backgroundColor: 'rgba(255,255,255,0.06)', borderRadius: 3, overflow: 'hidden' }}>
+                <View style={{ height: 6, backgroundColor: colors.glassStroke, borderRadius: 3, overflow: 'hidden' }}>
                   <View style={{ width: (processingProgress + '%') as any, height: 6, backgroundColor: colors.primary, borderRadius: 3 }} />
                 </View>
                 <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
@@ -413,7 +415,7 @@ function DocScannerContent() {
                   <Text style={{ color: colors.accent, fontWeight: '800', fontSize: 13 }}>📤 Share PDF</Text>
                 </TouchableOpacity>
                 <TouchableOpacity onPress={() => sendOrPick(currentDoc)} disabled={busy} style={{ flex: 1 }}>
-                  <LinearGradient colors={[colors.primary, colors.textDim]} style={{ borderRadius: 16, paddingVertical: 14, alignItems: 'center' }}>
+                  <LinearGradient colors={[colors.accentDeep, colors.accentDeep]} style={{ borderRadius: 16, paddingVertical: 14, alignItems: 'center' }}>
                     <Text style={{ color: '#fff', fontWeight: '800', fontSize: 13 }}>{chatId ? '📨 Send in Chat' : '📨 Send to chat'}</Text>
                   </LinearGradient>
                 </TouchableOpacity>
@@ -485,16 +487,16 @@ export default function DocScannerScreen() {
 }
 
 const makeStyles = (c: Palette) => StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#FFFFFF' },
+  container: { flex: 1, backgroundColor: c.bg },
   header: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 18, paddingTop: HEADER_TOP, paddingBottom: 14, gap: 10 },
-  title: { color: '#fff', fontSize: 20, fontWeight: '900' },
-  backBtn: { width: 36, height: 36, borderRadius: 18, backgroundColor: 'rgba(10,22,40,0.8)', justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: 'rgba(255,255,255,0.06)' },
-  sectionLabel: { color: 'rgba(255,255,255,0.22)', fontSize: 9, fontWeight: '800', letterSpacing: 2, marginBottom: 8 },
+  title: { color: c.text, fontSize: 20, fontWeight: '900' },
+  backBtn: { width: 44, height: 44, borderRadius: 22, backgroundColor: c.glassSoft, justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: c.glassStroke },
+  sectionLabel: { color: c.textDim, fontSize: 12, fontWeight: '800', letterSpacing: 2, marginBottom: 8 },
   sourceBtn: { borderRadius: 20, paddingVertical: 28, alignItems: 'center', paddingHorizontal: 16 },
-  tipsCard: { backgroundColor: 'rgba(10,22,40,0.8)', borderRadius: 16, padding: 16, borderWidth: 1, borderColor: 'rgba(74,159,255,0.12)' },
-  docRow: { flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(10,22,40,0.8)', borderRadius: 14, padding: 14, gap: 12, borderWidth: 1, borderColor: 'rgba(255,255,255,0.06)' },
-  typeCard: { width: '30%', flex: 1, minWidth: 100, backgroundColor: 'rgba(10,22,40,0.8)', borderRadius: 16, padding: 14, alignItems: 'center', borderWidth: 1.5, borderColor: 'rgba(255,255,255,0.06)' },
-  input: { backgroundColor: 'rgba(6,14,34,0.9)', borderRadius: 14, padding: 15, color: '#fff', fontSize: 14, borderWidth: 1, borderColor: 'rgba(255,255,255,0.08)' },
+  tipsCard: { backgroundColor: c.glassSoft, borderRadius: 16, padding: 16, borderWidth: 1, borderColor: 'rgba(74,159,255,0.12)' },
+  docRow: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', backgroundColor: c.glassSoft, borderRadius: 14, padding: 14, gap: 12, borderWidth: 1, borderColor: c.glassStroke },
+  typeCard: { width: '30%', flex: 1, minWidth: 100, backgroundColor: c.glassSoft, borderRadius: 16, padding: 14, alignItems: 'center', borderWidth: 1.5, borderColor: c.glassStroke },
+  input: { backgroundColor: c.glassSoft, borderRadius: 14, padding: 15, color: c.text, fontSize: 14, borderWidth: 1, borderColor: c.glassStroke },
   sheetBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.55)', justifyContent: 'flex-end' },
   sheet: {
     maxHeight: '70%', backgroundColor: c.card, borderTopLeftRadius: 22, borderTopRightRadius: 22,
@@ -509,7 +511,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
     paddingVertical: 15, borderBottomWidth: 1, borderBottomColor: c.separator, gap: 12,
   },
   sheetRowTxt: { color: c.text, fontSize: 15, fontWeight: '700', flex: 1 },
-  sheetRowSub: { color: c.textFaint, fontSize: 11, textTransform: 'uppercase' },
+  sheetRowSub: { color: c.textFaint, fontSize: 12, textTransform: 'uppercase' },
   successBanner: { flexDirection: 'row', alignItems: 'center', backgroundColor: brandAlpha(0.1), borderRadius: 16, padding: 16, gap: 14, borderWidth: 1, borderColor: brandAlpha(0.25) },
   docPreviewLarge: { height: 320, borderRadius: 16, borderWidth: 1, borderColor: 'rgba(74,159,255,0.2)', overflow: 'hidden', backgroundColor: 'rgba(2,11,24,0.9)' },
 });

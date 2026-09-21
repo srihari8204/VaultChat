@@ -3,8 +3,9 @@
 // No chart library: a donut is N stroked arcs on one circle. Values arrive
 // already computed from the server; this component only draws them.
 
+import { AppText as Text } from '../ui/Text';
 import React from 'react';
-import { View, Text, StyleSheet } from 'react-native';
+import { View, StyleSheet } from 'react-native';
 import Svg, { Circle } from 'react-native-svg';
 
 export interface DonutSegment {

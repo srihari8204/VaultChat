@@ -11,8 +11,9 @@
 // One place, four texts: rules that live next to a board drift from the board
 // next door, and a rule this app states must be the rule the table plays.
 
+import { AppText as Text } from '../ui/Text';
 import React, { useCallback, useEffect, useState } from 'react';
-import { ScrollView, Text } from 'react-native';
+import { ScrollView, } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Sheet } from './feedback';
 import { Btn, useType } from './ui';

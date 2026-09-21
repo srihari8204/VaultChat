@@ -11,10 +11,7 @@
 // below are the national-number lengths, not counting the dial code; a country
 // missing from the table falls back to the generic rule rather than blocking.
 //
-// TWO GROUNDS, ONE COMPONENT — see the note in MpinInput.tsx. app/onboard.tsx
-// stands on AuthSky and passes `onDark`; app/new-chat.tsx is an ordinary themed
-// screen and must keep reading the app palette, which is why this is a prop
-// rather than an unconditional always-dark palette.
+// onDark preserves the auth night styling; light appearance uses app colors.
 
 import { useMemo, useState } from 'react';
 import { Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
@@ -58,8 +55,8 @@ export function PhoneField({
   autoFocus?: boolean;
   onDark?: boolean;
 }) {
-  const { colors } = useTheme();
-  const c = onDark ? AUTH_FIELDS : colors;
+  const { colors, scheme } = useTheme();
+  const c = onDark && scheme === 'dark' ? AUTH_FIELDS : colors;
   const s = useMemo(() => makeStyles(c), [c]);
   const [pick, setPick] = useState(false);
   const country = COUNTRIES.find(x => x.code === dialCode) ?? COUNTRIES[0];

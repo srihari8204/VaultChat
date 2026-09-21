@@ -1,0 +1,184 @@
+{
+  "apkSha256": "CB8B93134EB614558AB5F123585882928591296D8EFAA7E344589A4C9856443F",
+  "device": "w4eygyinypswrcz9",
+  "coverage": "Initial accessible labels and bounds; not pixel/gesture validation",
+  "routes": [
+    {
+      "device": "w4eygyinypswrcz9",
+      "phase": "light-final-cb8b9313",
+      "route": "docscanner",
+      "titleFound": true,
+      "titleBounds": [
+        "[198,98][1031,175]"
+      ],
+      "frame": "[0,0][1080,2220]",
+      "appNodes": 44,
+      "scrollContainers": 1,
+      "dialog": false,
+      "crashDialog": false
+    },
+    {
+      "device": "w4eygyinypswrcz9",
+      "phase": "light-final-cb8b9313",
+      "route": "email-bridge",
+      "titleFound": true,
+      "titleBounds": [
+        "[187,110][766,196]",
+        "[44,582][1036,648]"
+      ],
+      "frame": "[0,0][1080,2220]",
+      "appNodes": 54,
+      "scrollContainers": 1,
+      "dialog": false,
+      "crashDialog": false
+    },
+    {
+      "device": "w4eygyinypswrcz9",
+      "phase": "light-final-cb8b9313",
+      "route": "family-setup",
+      "titleFound": true,
+      "titleBounds": [
+        "[381,116][699,190]"
+      ],
+      "frame": "[0,0][1080,2220]",
+      "appNodes": 51,
+      "scrollContainers": 1,
+      "dialog": false,
+      "crashDialog": false
+    },
+    {
+      "device": "w4eygyinypswrcz9",
+      "phase": "light-final-cb8b9313",
+      "route": "finance",
+      "titleFound": true,
+      "titleBounds": [
+        "[198,109][750,191]"
+      ],
+      "frame": "[0,0][1080,2220]",
+      "appNodes": 92,
+      "scrollContainers": 1,
+      "dialog": false,
+      "crashDialog": false
+    },
+    {
+      "device": "w4eygyinypswrcz9",
+      "phase": "light-final-cb8b9313",
+      "route": "finance/interest",
+      "titleFound": true,
+      "titleBounds": [
+        "[137,123][942,194]"
+      ],
+      "frame": "[0,0][1080,2220]",
+      "appNodes": 76,
+      "scrollContainers": 1,
+      "dialog": false,
+      "crashDialog": false
+    },
+    {
+      "device": "w4eygyinypswrcz9",
+      "phase": "light-final-cb8b9313",
+      "route": "games",
+      "titleFound": true,
+      "titleBounds": [
+        "[176,115][624,190]",
+        "[272,543][846,607]",
+        "[272,836][846,900]",
+        "[272,908][846,1002]",
+        "[272,1129][846,1193]",
+        "[272,1435][846,1499]",
+        "[702,1706][948,1759]"
+      ],
+      "frame": "[0,0][1080,2220]",
+      "appNodes": 103,
+      "scrollContainers": 1,
+      "dialog": false,
+      "crashDialog": false
+    },
+    {
+      "device": "w4eygyinypswrcz9",
+      "phase": "light-final-cb8b9313",
+      "route": "group-create",
+      "titleFound": true,
+      "titleBounds": [
+        "[407,116][674,190]"
+      ],
+      "frame": "[0,0][1080,2220]",
+      "appNodes": 85,
+      "scrollContainers": 1,
+      "dialog": false,
+      "crashDialog": false
+    },
+    {
+      "device": "w4eygyinypswrcz9",
+      "phase": "light-final-cb8b9313",
+      "route": "new-chat",
+      "titleFound": true,
+      "titleBounds": [
+        "[165,114][407,191]"
+      ],
+      "frame": "[0,0][1080,2220]",
+      "appNodes": 52,
+      "scrollContainers": 1,
+      "dialog": false,
+      "crashDialog": false
+    },
+    {
+      "device": "w4eygyinypswrcz9",
+      "phase": "light-final-cb8b9313",
+      "route": "scanner",
+      "titleFound": true,
+      "titleBounds": [
+        "[303,116][564,173]"
+      ],
+      "frame": "[0,0][1080,2220]",
+      "appNodes": 129,
+      "scrollContainers": 3,
+      "dialog": false,
+      "crashDialog": false
+    },
+    {
+      "device": "w4eygyinypswrcz9",
+      "phase": "light-final-cb8b9313",
+      "route": "security-questions",
+      "titleFound": true,
+      "titleBounds": [
+        "[903,334][1436,420]",
+        "[66,591][2264,638]"
+      ],
+      "frame": "[0,0][2264,1036]",
+      "appNodes": 38,
+      "scrollContainers": 1,
+      "dialog": false,
+      "crashDialog": false
+    },
+    {
+      "device": "w4eygyinypswrcz9",
+      "phase": "light-final-cb8b9313",
+      "route": "settings",
+      "titleFound": true,
+      "titleBounds": [
+        "[165,121][400,207]"
+      ],
+      "frame": "[0,0][1080,2220]",
+      "appNodes": 76,
+      "scrollContainers": 1,
+      "dialog": false,
+      "crashDialog": false
+    },
+    {
+      "device": "w4eygyinypswrcz9",
+      "phase": "light-final-cb8b9313",
+      "route": "vaultid",
+      "titleFound": true,
+      "titleBounds": [
+        "[66,911][1014,997]",
+        "[339,1974][740,2032]"
+      ],
+      "frame": "[0,0][1080,2220]",
+      "appNodes": 39,
+      "scrollContainers": 2,
+      "dialog": false,
+      "crashDialog": false
+    }
+  ]
+}

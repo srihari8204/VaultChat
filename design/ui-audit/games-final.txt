@@ -1,0 +1,1412 @@
+
+> vaultchat@1.2.7 test:games
+> eslint components/games app/games.tsx lib/games && tsx lib/games/history.selftest.ts && tsx lib/games/gamesNative.selftest.ts && tsx lib/games/fairness.selftest.ts && tsx lib/games/invite.selftest.ts && tsx lib/games/liveTables.selftest.ts && tsx lib/games/handGroups.selftest.ts && tsx lib/games/meldHint.selftest.ts && tsx lib/games/rummyTable.selftest.ts && tsx lib/games/ludoGlass.selftest.ts && tsx lib/games/useAddBot.selftest.ts && tsx lib/games/boardFit.selftest.ts && tsx lib/games/match.selftest.ts && tsx lib/games/leaderboard.selftest.ts
+
+
+C:\Users\Dell\Desktop\VaultChat0808\VaultChat\components\games\Rummy.tsx
+  36:41  warning  'Platform' is defined but never used  @typescript-eslint/no-unused-vars
+
+✖ 1 problem (0 errors, 1 warning)
+
+
+Game history
+
+  ok   0. `result: "playing"` is NOT a finished game
+  ok   0a. nor is "ongoing"
+  ok   0a. nor is "in_progress"
+  ok   0a. nor is "active"
+  ok   0a. nor is "started"
+  ok   0a. nor is "live"
+  ok   0a. nor is "PLAYING"
+  ok   0b. a terminal result IS finished
+  ok   0c. and so is phase finished
+  ok   0d. and a winner of either shape
+  ok   0e. an empty snapshot is not finished
+  ok   0f. and a live game never yields a win or a loss
+  ok   0g. "playing" is never used as the description of how a game ended
+  ok   1. my id as winner is a win
+  ok   1a. someone else winning is a loss
+  ok   1b. a draw result is a draw
+  ok   1c. stalemate too
+  ok   2. CHESS: the winner is a COLOUR — comparing it to a player id would report every chess game as a loss
+  ok   2a. and the other colour is a loss
+  ok   2b. a colour with no colour of our own is UNKNOWN, not a guess
+  ok   3. a snapshot that says nothing records "ended", never a win
+  ok   4. lists the others and never yourself
+  ok   4a. a bot is labelled a bot — the same rule the tables follow
+  ok   4b. a player in both the game and the lobby is listed once
+  ok   4c. nothing to read means nobody, not "Player"
+  ok   5. the server's own words win
+  ok   5a. a settlement reads as coins
+  ok   5b. including a loss
+  ok   5c. and a bare outcome still says something true
+  ok   5d. a ZERO delta says nothing and must not displace the outcome — a rummy loss read "+0 coins" on device
+  ok   5e. MY delta, not whoever the server listed first — the first-value read showed another player's coins as mine
+  ok   6. plain SAN moves
+  ok   6a. object moves fall back to from+to rather than "[object Object]"
+  ok   6b. no history is undefined, not []
+  ok   7. only the newest 3 chess games keep their moves
+  ok   7a. and the older ones are KEPT without moves — the result outlives the move list
+  ok   7b. newest first
+  ok   8. results are capped at 20 per game
+  ok   8a. and non-chess games never carry moves
+  ok   8b. the cap is PER GAME — a busy rummy week must not erase every chess game
+  ok   9. the same table seconds apart is ONE game — a finished snapshot repeats on every frame until the player leaves
+  ok   9a. but a rematch on the same table later is a new game
+  ok   10. under a minute
+  ok   10a. minutes
+  ok   10b. hours
+  ok   10c. a future timestamp renders NOTHING, not "-60m ago"
+  ok   10d. and so does junk
+  ok   11z. the hook uses the SHARED finished rule, not a truthiness test on `result`
+  ok   11. a finished snapshot is recorded from useGameSocket — the one place all four boards share, so no game can forget to do it
+  ok   11a. and only chess carries moves
+  ok   11b. the hub can show it
+
+All good.
+
+
+Native games
+
+  ✓ the games hub no longer uses a WebView
+  ✓ ...and no longer loads the games site as a page
+  ✓ TicTacToe exists
+  ✓ ...and the hub routes to it
+  ✓ Chess exists
+  ✓ ...and the hub routes to it
+  ✓ Ludo exists
+  ✓ ...and the hub routes to it
+  ✓ Rummy exists
+  ✓ ...and the hub routes to it
+  ✓ the hub still honours the game/room deep-link params
+  ✓ TicTacToe renders from the server socket
+  ✓ Chess renders from the server socket
+  ✓ Ludo renders from the server socket
+  ✓ Rummy renders from the server socket
+  ✓ chess uses the server-sent legal move list
+  ✓ ...and contains no move generation of its own
+  ✓ ludo uses the server-sent movable token list
+  ✓ the rummy meld hint never blocks a declaration
+  ✓ ...and the hint lives apart from the board
+  ✓ rummy shows other players a COUNT, never their cards
+  ✓ state frames replace local state wholesale
+  ✓ the hook keeps the raw frame
+  ✓ the socket is disposed on unmount
+  ✓ ludo reads token steps as plain numbers
+  ✓ chess decides the turn by colour, not by seat
+  ✓ TicTacToe uses the games theme
+  ✓ Ludo uses the games theme
+  ✓ Rummy uses the games theme
+  ✓ the boards share one set of table furniture
+  ✓ TicTacToe shows server notices as toasts
+  ✓ TicTacToe celebrates a win
+  ✓ TicTacToe can invite someone to the table
+  ✓ TicTacToe offers a rematch and a share
+  ✓ Chess shows server notices as toasts
+  ✓ Chess celebrates a win
+  ✓ Chess can invite someone to the table
+  ✓ Chess offers a rematch and a share
+  ✓ Ludo shows server notices as toasts
+  ✓ Ludo celebrates a win
+  ✓ Ludo can invite someone to the table
+  ✓ Ludo offers a rematch and a share
+  ✓ Rummy shows server notices as toasts
+  ✓ Rummy celebrates a win
+  ✓ Rummy can invite someone to the table
+  ✓ Rummy offers a rematch and a share
+  ✓ voice asks the SERVER whether this player may speak
+  ✓ ...and the token is minted by crazzychat, never by the games server
+  ✓ ...and a spectator cannot be heard, at the server and not by agreement
+  ✓ ...and does not install the WebRTC globals itself
+  ✓ the microphone cannot outlive the table
+  ✓ table voice joins through the shared SFU helper, which carries our TURN
+  ✓ ...and only hands back the audio route if it took one
+  ✓ the hub can find a real opponent
+  ✓ ...over the matchmaker socket, reusing the games session
+  ✓ ...and leaves the queue when the player walks away
+  ✓ the ludo board is memoised
+  ✓ a rummy hand card is memoised
+  ✓ ...and its tap handler is stable, or the memo is decoration
+  ✓ the turn clock re-renders once a second, not on every tick
+  ✓ chess opens on the GLASS board, like the other three games
+  ✓ ...and green is still offered, since it is what the web uses
+  ✓ ...and remembers the one the player picks
+  ✓ a piece is a VECTOR, outlined not haloed
+  ✓ ...and every piece letter has a path
+  ✓ ...in chess.css's own ink
+  ✓ the check marker is not dimmed by its own pulse
+  ✓ coordinates sit on the rail, not on the squares
+  ✓ ...and it is still one rank column and one file row
+  ✓ the table voice room is shared, not per-board
+  ✓ ...and chess can reach it without scrolling
+  ✓ the standings sheet is shared, not one per screen
+  ✓ ...and chess opens it on the chess table
+  ✓ ...on every open, not only the first
+  ✓ the chess roster reads the lobby the server sent
+  ✓ ...and never names a side it cannot know
+  ✓ the leaderboard does not re-rank the server
+  ✓ tic-tac-toe keeps the board up while reconnecting
+  ✓ ...and tic-tac-toe disables input while the socket is down
+  ✓ chess keeps the board up while reconnecting
+  ✓ ...and chess disables input while the socket is down
+  ✓ ludo keeps the board up while reconnecting
+  ✓ ...and ludo disables input while the socket is down
+  ✓ rummy keeps the board up while reconnecting
+  ✓ ...and rummy disables input while the socket is down
+  ✓ the reconnect banner is shared, not copied into four boards
+  ✓ the turn clock is one hook, shared by every board
+  ✓ ...built on the tested secondsLeft, not a second implementation
+  ✓ ...and no deadline shows no clock
+  ✓ tic-tac-toe labels a bot seat
+  ✓ chess labels a bot seat
+  ✓ ludo labels a bot seat
+  ✓ rummy labels a bot seat
+  ✓ a bot offer is not opened as if it were a match
+  ✓ ...and the offer puts inviting someone beside the bot
+  ✓ tic-tac-toe rematches through the shared control
+  ✓ chess rematches through the shared control
+  ✓ ludo rematches through the shared control
+  ✓ rummy rematches through the shared control
+  ✓ the rematch is still `start` on the same table
+  ✓ ...the wait ENDS
+  ✓ ...it ends on the SERVER’s snapshot, not on the button firing
+  ✓ ...and an empty seat becomes an invite, not a longer wait
+  ✓ a game card asks HOW you want to play
+  ✓ ...and the private and bot rooms are ones the player HOSTS
+  ✓ ...with online play going through the matchmaker
+  ✓ rummy asks for a seat INTENT rather than minting a table id
+  ✓ ...for the bot mode too, at a practice table
+  ✓ ...and rummy never reaches the matchmaker, whose room is not a table
+  ✓ the board picks its table from the list the server sent
+  ✓ ...exactly once, so a filling table cannot bounce the player
+  ✓ ludo deals when the seats arrive, not on a timer
+  ✓ ...and it deals exactly once
+  ✓ tic-tac-toe offers voice in the LOBBY, not only mid-game
+  ✓ ...and tic-tac-toe shows the room code to share
+  ✓ chess offers voice in the LOBBY, not only mid-game
+  ✓ ...and chess shows the room code to share
+  ✓ ludo offers voice in the LOBBY, not only mid-game
+  ✓ ...and ludo shows the room code to share
+  ✓ rummy already had both
+  ✓ the games board is wrapped in an error boundary
+  ✓ ...and the boundary offers a way out, not just a message
+  ✓ the root hides splash only after its auth/capture gate
+  ✓ chess names a square by the square, not by where it is drawn
+  ✓ rummy admits when the server substituted the table
+  ✓ ...and stops offering a code to share in that case
+  ✓ the hub does not claim provably fair dice
+  ✓ chess compares the winner against the colour you play, not game.you
+  ✓ ...and the pieces that decide win/lose read myColor
+  ✓ the rummy result table does not colour a zero settlement as a win
+  ✓ the numeric token ramps are discovered from theme.ts
+  ✓ ...and each is read whole, not truncated at its first key
+  ✓ every token ramp index used is one that exists
+  ✓ the icon set parses
+  ✓ every Btn icon name is one the icon set defines
+  ✓ the table list filters by kind as well as by seat count
+  ✓ ...and the Bots tab actually seats a bot when you join
+  ✓ ...through the hook that already owns auto-start, not a second copy
+  ✓ the score strip caps deadwood at what the hand can actually lose
+  ✓ Score opens the standings from server data
+  ✓ ...and stays reachable at every width
+  ✓ the action bar budgets its width instead of overflowing
+
+  all native-games checks passed
+
+
+Provably fair dice
+
+  ok   1. every roll gets a fresh seed — 500 rolls, 500 seeds
+  ok   2. each is 128 bits of hex — a short or empty seed is a seed the server can guess
+  ok   3. the client does not compute a die face — the server rolls, this only contributes
+  ok   4. a receipt records both halves and the number
+  ok   5. an unpublished server half reads as null — a receipt that INVENTED it would be worse than no receipt, because it would look like proof
+  ok   5a. and a missing snapshot does not throw
+  ok   5b. a wrong-typed die is not read as a number
+  ok   6. the drawer keeps the newest few, not an unbounded log
+  ok   7. every ludo roll carries a fresh device seed
+  ok   7a. and a receipt is filed for OUR roll only — a seed we did not send proves nothing about a number we did not ask for
+  ok   7b. the player can actually open it
+  ok   8. chess has rules
+  ok   8. rummy has rules
+  ok   8. ludo has rules
+  ok   8. tictactoe has rules
+  ok   8a. and they are offered once, before the first move is required
+  ok   8b. a failed read SHOWS them — being shown rules you know costs a tap, not being shown them costs the game
+  ok   8c. chess renders them from the shared sheet
+  ok   8c. rummy renders them from the shared sheet
+  ok   8c. ludo renders them from the shared sheet
+  ok   8c. tictactoe renders them from the shared sheet
+  ok   8d. and rummy no longer keeps its own copy — rules that live beside one board drift from the board next door
+  ok   9. the hub states it beside the balance
+  ok   9a. and the table list states it beside the stakes
+  ok   9b. the app offers no way to buy or cash out coins
+  ok   9b. rummy offers no way to buy or cash out coins
+  ok   9b. ludo offers no way to buy or cash out coins
+
+All good.
+
+
+Game invite → table
+
+  ok   1. tableLink builds the deep link app.json registers
+  ok   1a. no room id → no link
+  ok   1b. rejects "a/b" — it would REWRITE the URL, not fill it in
+  ok   1b. rejects "a?b" — it would REWRITE the URL, not fill it in
+  ok   1b. rejects "a#b" — it would REWRITE the URL, not fill it in
+  ok   1b. rejects "a'b" — it would REWRITE the URL, not fill it in
+  ok   1b. rejects "a b" — it would REWRITE the URL, not fill it in
+  ok   1b. rejects "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx" — it would REWRITE the URL, not fill it in
+  ok   2. gameInviteOf reads a well-formed card
+  ok   2a. rejects a game this app does not expose — the screen would fall back to the menu, so the card would be a button that leads nowhere
+  ok   2b. rejects a room id that is not a slug
+  ok   2c. rejects junk without throwing
+  ok   3. the fallback line carries the link — this is what a client too old to know the type renders, instead of an empty bubble
+  ok   4. sendGameInvite posts a 'game_invite' with meta {game, room} and the readable line as its E2EE body
+  ok   4a. chatService's Message type union admits 'game_invite'
+  ok   4b. the invite inserts no local-only row — nothing here can mint a positive local messages.id, which is also the delta-sync cursor
+  ok   5. MessageBubble matches type 'game_invite' — without this branch the card renders as an EMPTY bubble, which is what shipped for the group card
+  ok   5a. and renders it through GameInviteBubble
+  ok   5b. which is defined here
+  ok   5c. tapping it opens /games with the two params that screen reads — the same route the deep link and the turn notification use
+  ok   6. the sheet registers itself as the picker
+  ok   6a. and app/games.tsx mounts it once
+  ok   6b. Chess opens the picker rather than going straight to the share sheet
+  ok   6b. Ludo opens the picker rather than going straight to the share sheet
+  ok   6b. Rummy opens the picker rather than going straight to the share sheet
+  ok   6b. TicTacToe opens the picker rather than going straight to the share sheet
+  ok   6d. the out-of-app share sits ABOVE the chat list — below it, a player with a dozen chats has to scroll past all of them to reach the only option that works for someone who does not have crazzychat
+  ok   6e. a card the SERVER refuses falls back to the link — otherwise the button is simply broken, which is exactly what production does today until migration 124 lands ('invalid type')
+  ok   6f. the sender CACHES its own card — the send happens from the games screen, so no chat screen persists it, a sender never gets its own message back over the socket, and the server has already advanced last_delivered past it. Without this the card is in the database and missing from the thread, which is exactly what device testing found for a group chat
+  ok   6g. chess can invite from the LOBBY — it used to offer it only on the board, i.e. only after the game had already started
+  ok   6c. the share sheet survives inside the picker — it is the only way to reach someone who does not have crazzychat yet
+  ok   7. the backend accepts the 'game_invite' type
+  ok   7a. and validates BOTH the game and the room id server-side — a client-side check alone is no check at all against a modified client
+  ok   7b. migration 124 makes the type storable
+  ok   7c. and deliberately withholds it from scheduled_messages — a table is a live thing and would be gone by send time
+
+All good.
+
+
+Your games → the table
+
+  ok   1. a well-formed row parses
+  ok   1a. a game this app does not expose is dropped — /games falls back to the menu for an unknown kind, so the row would be a button that leads nowhere
+  ok   1b. a blank room is dropped
+  ok   1c. junk is dropped without throwing — this is JSON off the network
+  ok   1d. wrong-typed fields degrade to empty rather than reaching the renderer
+  ok   2. under a minute reads "just now"
+  ok   2a. minutes
+  ok   2b. hours
+  ok   2c. days
+  ok   2d. an unparseable timestamp renders NOTHING — never "NaN ago"
+  ok   3. a turn notification upserts the table
+  ok   3a. BEFORE the push, so the list still exists for a phone with no token — the missed-notification case is the whole reason the list exists
+  ok   3b. and only for kinds that mean a table (a friend request is not one)
+  ok   4. both routes are registered
+  ok   4a. the read is scoped by user_id IN THE HANDLER — RLS is inert in prod, so a query that leaves scoping to a policy has no scoping at all
+  ok   4b. and so is the delete — a room id is not a capability over someone else’s list
+  ok   4c. the sweep ages rows out — the notify contract has NO game-over event, so nothing else would ever end a row on its own
+  ok   5. the hook reads the endpoint
+  ok   5a. a backend without the endpoint means an empty list, never an error — the two halves must be able to land in either order
+  ok   5b. the hub renders the list
+  ok   5c. and a row opens that table
+  ok   5d. a finished snapshot drops the table from the list — the client is the ONLY party that ever learns a game ended
+  ok   6. the tap handler matches 'games_turn' — without this branch the push fell through to the chat fallback, matched nothing, and did nothing at all
+  ok   6a. and hands on the two fields the backend mints
+  ok   6b. which the root layout routes to that table
+  ok   7. migration 125 creates it
+  ok   7a. keyed so a repeated turn notification updates one row rather than growing
+  ok   7b. and a deleted user takes their list with them
+
+All good.
+
+
+Rummy hand grouping
+
+  ✓ a fresh deal lands as one loose pile
+  ✓ grouping pulls the picked cards out
+  ✓ ...and keeps a loose pile last
+  ✓ a drawn card joins the loose pile
+  ✓ ...without disturbing an existing group
+  ✓ discarding from a group removes just that card
+  ✓ a new deal replaces the arrangement entirely
+  ✓ two groups plus a loose pile
+  ✓ ungrouping one card dissolves its whole group
+  ✓ ...and the freed cards go loose
+  ✓ reconciling an unchanged hand changes nothing
+  ✓ a duplicated id is not kept twice
+  ✓ dropping a card into a group puts it there
+  ✓ ...and removes it from where it was
+  ✓ dropping it back onto the loose pile works
+  ✓ a drop outside every group lands loose rather than vanishing
+  ✓ dropping a card that is not in the hand changes nothing
+  ✓ moving a card into the group it already sits in is safe
+  ✓ a dealt hand arrives already arranged, not as one loose pile
+  ✓ ...holding every dealt card exactly once
+  ✓ ...with the run pulled out
+  ✓ ...and the set pulled out
+  ✓ a joker is left loose rather than spent for you
+  ✓ the ungrouped remainder is SORTED, not left in deal order
+  ✓ ...and the joker sits in its own group at the end
+  ✓ ...still holding every card exactly once
+  ✓ never more than five groups
+  ✓ ...and still holds every card after the merge
+  ✓ sort "smart" still holds every card exactly once
+  ✓ sort "smart" stays within five groups
+  ✓ sort "suit" still holds every card exactly once
+  ✓ sort "suit" stays within five groups
+  ✓ sort "rank" still holds every card exactly once
+  ✓ sort "rank" stays within five groups
+  ✓ sort "manual" still holds every card exactly once
+  ✓ sort "manual" stays within five groups
+  ✓ manual leaves the arrangement exactly as it was
+  ✓ by suit puts each suit in its own group
+  ✓ ...and orders each suit ascending
+  ✓ ...and keeps the joker visible rather than buried in a suit
+  ✓ by rank produces one ascending run of the naturals
+  ✓ an empty hand is left alone rather than blanked
+  ✓ only the four modes are accepted back from storage
+
+  all hand-grouping checks passed
+
+
+Rummy meld hint
+
+  ✓ three in a row, one suit, no joker → pure sequence
+  ✓ a joker in the run makes it impure
+  ✓ a joker on the END still extends a run
+  ✓ a gap with no joker to fill it is not a sequence
+  ✓ mixed suits are not a sequence
+  ✓ a repeated rank is not a sequence
+  ✓ same rank, different suits → set
+  ✓ a set may be four cards
+  ✓ five cards is not a set
+  ✓ a repeated suit breaks a set
+  ✓ two cards are never a meld
+  ✓ an empty group is empty, not invalid
+  ✓ deadwood counts A/10/J/Q/K as ten
+  ✓ a meld costs nothing
+  ✓ a wild-rank card behaves as a joker
+  ✓ ...and a run made only of wild-rank cards is not pure
+  ✓ a hand needs every card melded
+  ✓ thirteen cards, two sequences, one pure → valid
+  ✓ ...and at least one sequence must be PURE
+  ✓ two sequences are required, not one
+  ✓ the misdeclare cost is capped at 80
+  ✓ deadwood itself is the true unmelded value, uncapped
+  ✓ ...and it can exceed what the hand can actually lose
+  ✓ ...so the capped display never exceeds MAX_LOSS
+  ✓ melded counts the face value sitting in real melds
+  ✓ ...and a fully melded hand carries no deadwood
+  ✓ a group that stops being a meld stops counting toward melded
+  ✓ ...and its points turn into deadwood instead
+  ✓ a wild card contributes nothing to melded
+  ✓ an empty hand melds nothing rather than throwing
+
+  all meld-hint checks passed
+
+
+Rummy table layout
+
+  ✓ the hand never needs more width than the screen has
+  ✓ the wide layout never leaves a card under the comfort floor
+  ✓ the action bar always fits, so DROP is never pushed off screen
+  ✓ the hand always fits the tray region it is actually drawn in
+  ✓ ...and the cards are never buried under each other
+  ✓ ...and the bar never shows the score readout twice
+  ✓ ...and the settings sheet always offers Standings, whatever the width
+  ✓ the gutters and the score panel are one decision
+  ✓ the Honor at its real 732dp viewport gets the full layout
+  ✓ table + hand + actions + status never exceed the safe height
+  ✓ cards stay legible on the smallest screen
+  ✓ cards keep their proportions
+  ✓ safe-area insets come off the usable box
+  ✓ seats never overlap, two- to six-handed
+  ✓ no seat hangs off the felt, in either axis
+  ✓ no seat is drawn under the header band
+  ✓ the middle seat sits furthest back
+  ✓ the outermost pair sits furthest round the sides
+  ✓ the ring is symmetric about the player
+  ✓ a lone opponent sits opposite, centred
+  ✓ no seats when nobody is opposite
+  ✓ a seat is always tall enough for what is drawn in it
+  ✓ six-player seat portraits adapt to large text and resized containers
+  ✓ a six-handed seat has room for a name
+  ✓ no seat ever overlaps the piles
+  ✓ the piles never hang off the bottom of the felt
+  ✓ only the seats over the piles set the clearance
+  ✓ a tall felt centres the piles rather than dropping them in the rail
+
+Turn clock
+
+  ✓ counts down in whole seconds
+  ✓ never goes negative
+  ✓ no deadline shows no clock
+  ✓ a nonsense deadline is refused rather than displayed
+  ✓ NaN is refused
+
+Standings
+
+  ✓ the declared winner ranks first
+  ✓ then ascending points
+  ✓ a winner the server named outranks a lower score
+  ✓ ranking with no winner yet still orders by points
+  ✓ active count ignores the players who are out
+  ✓ bots only at practice tables
+
+Room codes
+
+  ✓ a private code is six safe characters
+  ✓ no ambiguous glyphs
+  ✓ a pasted code is stripped to what the server accepts
+  ✓ an all-punctuation code comes back empty rather than as junk
+  ✓ a hyphenated code survives
+  ✓ a wide table stops overlapping the cards
+  ✓ a narrow one still tucks them in
+  ✓ and never tighter than the size was chosen for
+  ✓ Honor: no overlap at the shipped card size
+  ✓ Honor: the hand fits inside the display
+  ✓ Redmi: no overlap at the shipped card size
+  ✓ Redmi: the hand fits inside the display
+  ✓ a 2664px table keeps real slack (160px)
+  ✓ a 2340px table keeps real slack (140px)
+  ✓ a 1600px table keeps real slack (96px)
+  ✓ the hand still fits at the fan it chose
+  ✓ the hand never tucks with a NEGATIVE GAP — Yoga resolves it to 0
+  ✓ ...it tucks with a negative margin, which Yoga honours
+  ✓ ...and the paddingRight that compensated for the gap is gone
+  ✓ Redmi landscape: the hand fits
+  ✓ Redmi landscape: ...and at the whole-pixel overlap it renders with
+  ✓ Honor landscape: the hand fits
+  ✓ Honor landscape: ...and at the whole-pixel overlap it renders with
+  ✓ small landscape: the hand fits
+  ✓ small landscape: ...and at the whole-pixel overlap it renders with
+  ✓ smallest landscape: the hand fits
+  ✓ smallest landscape: ...and at the whole-pixel overlap it renders with
+  ✓ a phone-portrait width cannot show thirteen cards, and pins the card size to its floor
+
+Table size filter
+
+  ✓ a zero point value is a practice table
+  ✓ anything above zero is staked
+  ✓ a missing point value is UNKNOWN, not practice
+  ✓ NaN is unknown too
+  ✓ a null table is unknown, not a throw
+  ✓ kind all: every table survives
+  ✓ practice: the free tables
+  ✓ stakes: the paid tables
+  ✓ an unknown table is never hidden by a kind filter
+  ✓ bots lists exactly what practice lists
+  ✓ kind filters keep the order the server sent
+  ✓ kind: an empty list is empty, not a throw
+  ✓ kind: the input is not mutated
+  ✓ kind and seat filters compose
+  ✓ all: every table survives
+  ✓ all: in the order the server sent them
+  ✓ heads-up: only the 2-seat tables
+  ✓ multi: every table above 2 seats
+  ✓ multi: a 4-seat table is NOT hidden
+  ✓ multi: a 5-seat table is NOT hidden
+  ✓ the two filters partition the list
+  ✓ an empty list is empty, not a throw
+  ✓ no table of that size returns empty so the UI can say so
+  ✓ the input is not mutated
+
+Picking a real table
+
+  ✓ bot: seats at the practice table, the only one that accepts a bot
+  ✓ bot: no practice table means no seat, not a staked one
+  ✓ auto: goes where the humans already are
+  ✓ auto: skips a FULL table
+  ✓ auto: an all-empty list still seats somewhere
+  ✓ auto: the choice is deterministic across devices
+  ✓ no tables at all is null, not a throw
+  ✓ null is null, not a throw
+  ✓ every table full is null
+
+  all rummy table checks passed
+
+
+Ludo glass
+
+  ok   1a. RING is still declared in Ludo.tsx
+  ok   1b. RING still has exactly 52 cells (got 52)
+  ok   1c. START_OFFSET is unchanged
+  ok   1d. HOME_STEP is still 56 — the server's token encoding
+  ok   1e. the centre is still [7,7]
+  ok   1f. the safe set is unchanged
+  ok   1g. yard corners are unchanged — seat 0 top-left through seat 3 bottom-left
+  ok   1h. coord() still returns a total [row,col]
+  ok   1i. ...base
+  ok   1j. ...ring
+  ok   1k. ...home
+  ok   1l. cell is still size / 15
+  ok   1m. the board SVG is still a 15x15 viewBox
+  ok   2a. a token is movable iff the server says so
+  ok   2b. tapping a token still sends `move`
+  ok   2c. rolling still sends `roll` with a client seed
+  ok   2d. canRoll is unchanged
+  ok   2e. canMove is unchanged
+  ok   2f. the die shows the server's value, never a locally rolled one
+  ok   2g. the only Math.random left is the tumble flicker
+  ok   3a. the token still pads its touch area out to 44dp
+  ok   3b. ...and the token itself is still cell * 0.78, not grown to cheat it
+  ok   3c. board 200: token 10.4dp + slop reaches 44.4dp
+  ok   3c. board 290: token 15.1dp + slop reaches 45.1dp
+  ok   3c. board 310: token 16.1dp + slop reaches 44.1dp
+  ok   3c. board 328: token 17.1dp + slop reaches 45.1dp
+  ok   3c. board 358: token 18.6dp + slop reaches 44.6dp
+  ok   3c. board 398: token 20.7dp + slop reaches 44.7dp
+  ok   3c. board 460: token 23.9dp + slop reaches 45.9dp
+  ok   3c. board 600: token 31.2dp + slop reaches 45.2dp
+  ok   4a. Ludo still sizes with useBoardBox(400)
+  ok   4b. ...and actually wires onLayout, or the hook never measures
+  ok   4c. the board still asserts portrait on mount
+  ok   4d. 360x780: boardFit(chrome 400) gives 328, design drew 328
+  ok   4e. 360x780: board 328 + chrome 390 fits 740 usable
+  ok   4d. 390x844: boardFit(chrome 400) gives 358, design drew 358
+  ok   4e. 390x844: board 358 + chrome 390 fits 763 usable
+  ok   4d. 430x932: boardFit(chrome 400) gives 398, design drew 398
+  ok   4e. 430x932: board 398 + chrome 390 fits 839 usable
+  ok   5a. four distinct shape markers — the deuteranopia fallback
+  ok   5b. the pawn still carries its shape marker
+  ok   5c. ...and so does the seat card
+  ok   5d. the token label still names the colour, the index and whether it can move
+  ok   5e. the die still announces its real state
+  ok   5f. four colour names, for the labels above
+  ok   6a. LR.muted on seat card (rest): 7.61:1 (AA needs 4.5)
+  ok   6b. LR.text on seat card (rest): 11.17:1
+  ok   6a. LR.muted on seat card (active): 6.02:1 (AA needs 4.5)
+  ok   6b. LR.text on seat card (active): 8.84:1
+  ok   6a. LR.muted on fairness CTA: 7.94:1 (AA needs 4.5)
+  ok   6b. LR.text on fairness CTA: 11.64:1
+  ok   6a. LR.muted on board pane: 6.69:1 (AA needs 4.5)
+  ok   6b. LR.text on board pane: 9.81:1
+  ok   6c. LR.ok on the active seat: 7.27:1
+  ok   6d. SEAT[0].light as an edge on glass: 5.09:1
+  ok   6d. SEAT[1].light as an edge on glass: 7.36:1
+  ok   6d. SEAT[2].light as an edge on glass: 8.00:1
+  ok   6d. SEAT[3].light as an edge on glass: 6.95:1
+  ok   6e. LR.onGold on the gold CTA: 12.85:1
+  ok   7a. ACCENT.ludo is readable out of theme.ts
+  ok   7a'. SEAT[2].base === ACCENT.ludo (#FFD166 vs #FFD166)
+  ok   7b. four seats, and the flat lists agree
+  ok   7c. the four seat colours are distinct
+  ok   7d. Ludo.tsx no longer declares its own P
+  ok   7e. ...nor its own SHAPE
+  ok   7f. ...it reads them from ludoGlass
+  ok   7g. seatA composes an rgba from the seat hex
+  ok   7h. seatA is total for an out-of-range seat
+  ok   8a. four ambient glows
+  ok   8b. every glow is strong enough to tint a surface
+  ok   8c. the stage light is wider than the board it lights
+  ok   8d. ...and falls to zero, so it reads as light and not as a drawn circle
+  ok   8e. ...over enough stops to avoid the hard ring a two-stop falloff leaves
+  ok   8f. no BlurView on the board
+  ok   9a. no shared-palette colours left in Ludo.tsx
+  ok   9b. ...and no shared gold hairline
+  ok   9c. spacing, radii and elevation are still SHARED — only the light is local
+  ok   10a. the table has a voice control
+  ok   10b. ...and it opens the real VoiceSheet, so it is not a dead button
+  ok   10c. ...wired to it
+  ok   10d. ...driving the SAME voice object the bar drove — no second voice state
+  ok   10e. the lobby still renders the full VoiceBar
+  ok   10f. action bar keeps "Talk at the table"
+  ok   10f. action bar keeps "Emote"
+  ok   10f. action bar keeps "Invite"
+  ok   10g. ...and the gear is labelled for a screen reader
+  ok   10h. a live-voice indicator survives the fold
+  ok   10i. ...for the two phases VoiceBar showed its live row for
+  ok   11a. PAWN.rimRest is actually used by Ludo.tsx
+  ok   11a. PAWN.rimMovable is actually used by Ludo.tsx
+  ok   11a. PAWN.glowRest is actually used by Ludo.tsx
+  ok   11a. PAWN.glowMovable is actually used by Ludo.tsx
+  ok   11a. PAWN.specular is actually used by Ludo.tsx
+  ok   11a. PAWN.markerInk is actually used by Ludo.tsx
+  ok   11b. the pawn draws its plinth
+  ok   11c. ...and its body
+  ok   11d. ...plinth first, so the body sits on top of it
+  ok   11e. the old flat disc is gone
+  ok   11f. PAWN_BODY stays inside the 0..100 box (max 74)
+  ok   11g. PAWN_BODY is a closed path
+  ok   11f. PAWN_BASE stays inside the 0..100 box (max 93)
+  ok   11g. PAWN_BASE is a closed path
+  ok   11h. the die clips, so its sheen cannot escape the cube
+  ok   12a. there is a socket-independent "whose turn is it"
+  ok   12b. the turn line names another player only when it really is theirs
+  ok   12c. ...and no longer prints YOUR name at you while reconnecting
+  ok   12d. the seat card stops saying "Tap a token" once the socket is down
+  ok   12e. the gold "act" tone is never shown while a tap cannot land
+  ok   12f. `mine` still requires a live socket
+  ok   12g. ...and canMove still hangs off it
+  ok   13a. die fits 240x480 at font scale 1
+  ok   13b. roll action has room beside the tray at 240x480/1
+  ok   13c. large text stacks controls and seats at 240x480/1
+  ok   13a. die fits 240x480 at font scale 1.4
+  ok   13b. roll action has room beside the tray at 240x480/1.4
+  ok   13c. large text stacks controls and seats at 240x480/1.4
+  ok   13a. die fits 240x480 at font scale 2
+  ok   13b. roll action has room beside the tray at 240x480/2
+  ok   13c. large text stacks controls and seats at 240x480/2
+  ok   13a. die fits 320x568 at font scale 1
+  ok   13b. roll action has room beside the tray at 320x568/1
+  ok   13c. large text stacks controls and seats at 320x568/1
+  ok   13a. die fits 320x568 at font scale 1.4
+  ok   13b. roll action has room beside the tray at 320x568/1.4
+  ok   13c. large text stacks controls and seats at 320x568/1.4
+  ok   13a. die fits 320x568 at font scale 2
+  ok   13b. roll action has room beside the tray at 320x568/2
+  ok   13c. large text stacks controls and seats at 320x568/2
+  ok   13a. die fits 360x780 at font scale 1
+  ok   13b. roll action has room beside the tray at 360x780/1
+  ok   13c. large text stacks controls and seats at 360x780/1
+  ok   13a. die fits 360x780 at font scale 1.4
+  ok   13b. roll action has room beside the tray at 360x780/1.4
+  ok   13c. large text stacks controls and seats at 360x780/1.4
+  ok   13a. die fits 360x780 at font scale 2
+  ok   13b. roll action has room beside the tray at 360x780/2
+  ok   13c. large text stacks controls and seats at 360x780/2
+  ok   13a. die fits 430x932 at font scale 1
+  ok   13b. roll action has room beside the tray at 430x932/1
+  ok   13c. large text stacks controls and seats at 430x932/1
+  ok   13a. die fits 430x932 at font scale 1.4
+  ok   13b. roll action has room beside the tray at 430x932/1.4
+  ok   13c. large text stacks controls and seats at 430x932/1.4
+  ok   13a. die fits 430x932 at font scale 2
+  ok   13b. roll action has room beside the tray at 430x932/2
+  ok   13c. large text stacks controls and seats at 430x932/2
+  ok   13a. die fits 768x1024 at font scale 1
+  ok   13b. roll action has room beside the tray at 768x1024/1
+  ok   13c. large text stacks controls and seats at 768x1024/1
+  ok   13a. die fits 768x1024 at font scale 1.4
+  ok   13b. roll action has room beside the tray at 768x1024/1.4
+  ok   13c. large text stacks controls and seats at 768x1024/1.4
+  ok   13a. die fits 768x1024 at font scale 2
+  ok   13b. roll action has room beside the tray at 768x1024/2
+  ok   13c. large text stacks controls and seats at 768x1024/2
+  ok   13a. die fits 1024x768 at font scale 1
+  ok   13b. roll action has room beside the tray at 1024x768/1
+  ok   13c. large text stacks controls and seats at 1024x768/1
+  ok   13a. die fits 1024x768 at font scale 1.4
+  ok   13b. roll action has room beside the tray at 1024x768/1.4
+  ok   13c. large text stacks controls and seats at 1024x768/1.4
+  ok   13a. die fits 1024x768 at font scale 2
+  ok   13b. roll action has room beside the tray at 1024x768/2
+  ok   13c. large text stacks controls and seats at 1024x768/2
+  ok   13d. the board still measures its scrolling viewport
+  ok   13e. controls use the measured board and live text scale
+
+All good.
+
+
+Add a bot
+
+  ok   1a. a bot that arrives raises no complaint
+  ok   1b. ...and the timer is disarmed
+  ok   1c. ...so a late timer cannot complain retroactively
+  ok   2a. no seat before the timeout is reported
+  ok   2b. ...once, not on a loop
+  ok   3a. stalled after the first ask
+  ok   3b. asking again clears it immediately
+  ok   3c. ...and success keeps it clear
+  ok   4a. any new seat resolves the request
+  ok   4b. a late async seat still resolves it
+  ok   4c. ...and the armed timer cannot then report failure
+  ok   4d. the newer request owns the live timer
+  ok   4e. ...because addBot clears the old timeout BEFORE arming a new one
+  ok   5a. a timer that fires after unmount changes nothing
+  ok   6a. no ask, no complaint
+  ok   6b. ...and seats arriving unprompted say nothing
+  ok   7a. the hook clears its timeout on unmount
+  ok   7b. the timeout callback is findable
+  ok   7b'. ...and it does not send anything
+  ok   7b". `send` is called exactly once in the hook — one ask per tap
+  ok   7b'''. ...and it never reconnects on its own
+  ok   7c. ...and it does not quietly change rooms, which would lose invited players
+  ok   7d. Ludo uses the hook
+  ok   7e. Ludo's button goes through it
+  ok   7f. Ludo renders the message
+  ok   7g. Ludo uses the shared wording
+  ok   7h. Ludo no longer fires addbot straight past the watch
+  ok   7d. Chess uses the hook
+  ok   7e. Chess's button goes through it
+  ok   7f. Chess renders the message
+  ok   7g. Chess uses the shared wording
+  ok   7h. Chess no longer fires addbot straight past the watch
+  ok   7i. Ludo's multi-bot deal is untouched
+  ok   7l. Chess still sends {t:"addbot", level} — byte-identical
+  ok   7m. Ludo still sends {t:"addbot"} — written at the call site, not defaulted
+  ok   7n. ...and Chess's shim ignores the hook's payload entirely
+  ok   7j. the message says what happened and what to do, not "error"
+  ok   7k. the timeout is patient but still feedback (6000ms)
+
+All good.
+
+
+Board fit
+
+  ok   1. compact phone: 208 fits inside 208
+  ok   1. compact split screen: 200 fits inside -40
+  ok   1. compact landscape: 200 fits inside -40
+  ok   1. small phone: 280 fits inside 280
+  ok   1. standard phone: 380 fits inside 380
+  ok   1. Redmi, raw px: 1048 fits inside 1048
+  ok   1. Honor, raw px: 1192 fits inside 1192
+  ok   1. tablet portrait: 768 fits inside 768
+  ok   1. tablet landscape: 440 fits inside 440
+  ok   1. phone landscape: 200 fits inside 52
+  ok   2. a tablet gets a BIGGER board than a phone — the old 460 cap meant it did not
+  ok   2a. and a very large display keeps growing rather than stopping at a constant
+  ok   2b. when height is plentiful the board takes the full width less its gutter
+  ok   3. on a short screen HEIGHT binds, so the controls under the board stay reachable
+  ok   3a. on a narrow one WIDTH binds
+  ok   4. a notch and a gesture bar reduce the board rather than being drawn over
+  ok   4a. and a landscape cutout is taken off the width
+  ok   5. below the floor the board stays 200 and SAYS it scrolls — pieces that cannot be tapped are worse than a screen that scrolls
+  ok   5a. and a normal phone never reports scrolling
+  ok   6. useBoardBox is backed by boardFit
+  ok   6a. ...and the old capped expression is gone
+  ok   6d. the measured branch applies the safe-area inset exactly once
+  ok   6e. an unchanged measurement returns the SAME object, so onLayout cannot loop
+  ok   6b. Chess.tsx sizes its board through the shared hook
+  ok   6c. Chess.tsx no longer passes a hard maximum
+  ok   6f. Chess.tsx measures the container it lays the board out in, not the window
+  ok   6b. Ludo.tsx sizes its board through the shared hook
+  ok   6c. Ludo.tsx no longer passes a hard maximum
+  ok   6f. Ludo.tsx measures the container it lays the board out in, not the window
+  ok   6b. TicTacToe.tsx sizes its board through the shared hook
+  ok   6c. TicTacToe.tsx no longer passes a hard maximum
+  ok   6f. TicTacToe.tsx measures the container it lays the board out in, not the window
+  ok   7. centred: 320x568 inset(0,0) chrome 330
+  ok   7a. inset owned once: container 320x568 === window 320x568 less inset (chrome 330)
+  ok   7b. fits its box or declares scrolls: 320x568 chrome 330
+  ok   7. centred: 320x568 inset(0,0) chrome 330
+  ok   7a. inset owned once: container 320x544 === window 320x568 less inset (chrome 330)
+  ok   7b. fits its box or declares scrolls: 320x568 chrome 330
+  ok   7. centred: 320x568 inset(0,0) chrome 330
+  ok   7a. inset owned once: container 320x475 === window 320x568 less inset (chrome 330)
+  ok   7b. fits its box or declares scrolls: 320x568 chrome 330
+  ok   7. centred: 320x568 inset(76,0) chrome 330
+  ok   7a. inset owned once: container 244x524 === window 320x568 less inset (chrome 330)
+  ok   7b. fits its box or declares scrolls: 320x568 chrome 330
+  ok   7. centred: 320x568 inset(0,76) chrome 330
+  ok   7a. inset owned once: container 244x524 === window 320x568 less inset (chrome 330)
+  ok   7b. fits its box or declares scrolls: 320x568 chrome 330
+  ok   7. centred: 360x800 inset(0,0) chrome 330
+  ok   7a. inset owned once: container 360x800 === window 360x800 less inset (chrome 330)
+  ok   7b. fits its box or declares scrolls: 360x800 chrome 330
+  ok   7. centred: 360x800 inset(0,0) chrome 330
+  ok   7a. inset owned once: container 360x776 === window 360x800 less inset (chrome 330)
+  ok   7b. fits its box or declares scrolls: 360x800 chrome 330
+  ok   7. centred: 360x800 inset(0,0) chrome 330
+  ok   7a. inset owned once: container 360x707 === window 360x800 less inset (chrome 330)
+  ok   7b. fits its box or declares scrolls: 360x800 chrome 330
+  ok   7. centred: 360x800 inset(76,0) chrome 330
+  ok   7a. inset owned once: container 284x756 === window 360x800 less inset (chrome 330)
+  ok   7b. fits its box or declares scrolls: 360x800 chrome 330
+  ok   7. centred: 360x800 inset(0,76) chrome 330
+  ok   7a. inset owned once: container 284x756 === window 360x800 less inset (chrome 330)
+  ok   7b. fits its box or declares scrolls: 360x800 chrome 330
+  ok   7. centred: 393x851 inset(0,0) chrome 330
+  ok   7a. inset owned once: container 393x851 === window 393x851 less inset (chrome 330)
+  ok   7b. fits its box or declares scrolls: 393x851 chrome 330
+  ok   7. centred: 393x851 inset(0,0) chrome 330
+  ok   7a. inset owned once: container 393x827 === window 393x851 less inset (chrome 330)
+  ok   7b. fits its box or declares scrolls: 393x851 chrome 330
+  ok   7. centred: 393x851 inset(0,0) chrome 330
+  ok   7a. inset owned once: container 393x758 === window 393x851 less inset (chrome 330)
+  ok   7b. fits its box or declares scrolls: 393x851 chrome 330
+  ok   7. centred: 393x851 inset(76,0) chrome 330
+  ok   7a. inset owned once: container 317x807 === window 393x851 less inset (chrome 330)
+  ok   7b. fits its box or declares scrolls: 393x851 chrome 330
+  ok   7. centred: 393x851 inset(0,76) chrome 330
+  ok   7a. inset owned once: container 317x807 === window 393x851 less inset (chrome 330)
+  ok   7b. fits its box or declares scrolls: 393x851 chrome 330
+  ok   7. centred: 412x915 inset(0,0) chrome 330
+  ok   7a. inset owned once: container 412x915 === window 412x915 less inset (chrome 330)
+  ok   7b. fits its box or declares scrolls: 412x915 chrome 330
+  ok   7. centred: 412x915 inset(0,0) chrome 330
+  ok   7a. inset owned once: container 412x891 === window 412x915 less inset (chrome 330)
+  ok   7b. fits its box or declares scrolls: 412x915 chrome 330
+  ok   7. centred: 412x915 inset(0,0) chrome 330
+  ok   7a. inset owned once: container 412x822 === window 412x915 less inset (chrome 330)
+  ok   7b. fits its box or declares scrolls: 412x915 chrome 330
+  ok   7. centred: 412x915 inset(76,0) chrome 330
+  ok   7a. inset owned once: container 336x871 === window 412x915 less inset (chrome 330)
+  ok   7b. fits its box or declares scrolls: 412x915 chrome 330
+  ok   7. centred: 412x915 inset(0,76) chrome 330
+  ok   7a. inset owned once: container 336x871 === window 412x915 less inset (chrome 330)
+  ok   7b. fits its box or declares scrolls: 412x915 chrome 330
+  ok   7. centred: 674x841 inset(0,0) chrome 330
+  ok   7a. inset owned once: container 674x841 === window 674x841 less inset (chrome 330)
+  ok   7b. fits its box or declares scrolls: 674x841 chrome 330
+  ok   7. centred: 674x841 inset(0,0) chrome 330
+  ok   7a. inset owned once: container 674x817 === window 674x841 less inset (chrome 330)
+  ok   7b. fits its box or declares scrolls: 674x841 chrome 330
+  ok   7. centred: 674x841 inset(0,0) chrome 330
+  ok   7a. inset owned once: container 674x748 === window 674x841 less inset (chrome 330)
+  ok   7b. fits its box or declares scrolls: 674x841 chrome 330
+  ok   7. centred: 674x841 inset(76,0) chrome 330
+  ok   7a. inset owned once: container 598x797 === window 674x841 less inset (chrome 330)
+  ok   7b. fits its box or declares scrolls: 674x841 chrome 330
+  ok   7. centred: 674x841 inset(0,76) chrome 330
+  ok   7a. inset owned once: container 598x797 === window 674x841 less inset (chrome 330)
+  ok   7b. fits its box or declares scrolls: 674x841 chrome 330
+  ok   7. centred: 820x1180 inset(0,0) chrome 330
+  ok   7a. inset owned once: container 820x1180 === window 820x1180 less inset (chrome 330)
+  ok   7b. fits its box or declares scrolls: 820x1180 chrome 330
+  ok   7. centred: 820x1180 inset(0,0) chrome 330
+  ok   7a. inset owned once: container 820x1156 === window 820x1180 less inset (chrome 330)
+  ok   7b. fits its box or declares scrolls: 820x1180 chrome 330
+  ok   7. centred: 820x1180 inset(0,0) chrome 330
+  ok   7a. inset owned once: container 820x1087 === window 820x1180 less inset (chrome 330)
+  ok   7b. fits its box or declares scrolls: 820x1180 chrome 330
+  ok   7. centred: 820x1180 inset(76,0) chrome 330
+  ok   7a. inset owned once: container 744x1136 === window 820x1180 less inset (chrome 330)
+  ok   7b. fits its box or declares scrolls: 820x1180 chrome 330
+  ok   7. centred: 820x1180 inset(0,76) chrome 330
+  ok   7a. inset owned once: container 744x1136 === window 820x1180 less inset (chrome 330)
+  ok   7b. fits its box or declares scrolls: 820x1180 chrome 330
+  ok   7. centred: 851x393 inset(0,0) chrome 330
+  ok   7a. inset owned once: container 851x393 === window 851x393 less inset (chrome 330)
+  ok   7b. fits its box or declares scrolls: 851x393 chrome 330
+  ok   7. centred: 851x393 inset(0,0) chrome 330
+  ok   7a. inset owned once: container 851x369 === window 851x393 less inset (chrome 330)
+  ok   7b. fits its box or declares scrolls: 851x393 chrome 330
+  ok   7. centred: 851x393 inset(0,0) chrome 330
+  ok   7a. inset owned once: container 851x300 === window 851x393 less inset (chrome 330)
+  ok   7b. fits its box or declares scrolls: 851x393 chrome 330
+  ok   7. centred: 851x393 inset(76,0) chrome 330
+  ok   7a. inset owned once: container 775x349 === window 851x393 less inset (chrome 330)
+  ok   7b. fits its box or declares scrolls: 851x393 chrome 330
+  ok   7. centred: 851x393 inset(0,76) chrome 330
+  ok   7a. inset owned once: container 775x349 === window 851x393 less inset (chrome 330)
+  ok   7b. fits its box or declares scrolls: 851x393 chrome 330
+  ok   7. centred: 1180x820 inset(0,0) chrome 330
+  ok   7a. inset owned once: container 1180x820 === window 1180x820 less inset (chrome 330)
+  ok   7b. fits its box or declares scrolls: 1180x820 chrome 330
+  ok   7. centred: 1180x820 inset(0,0) chrome 330
+  ok   7a. inset owned once: container 1180x796 === window 1180x820 less inset (chrome 330)
+  ok   7b. fits its box or declares scrolls: 1180x820 chrome 330
+  ok   7. centred: 1180x820 inset(0,0) chrome 330
+  ok   7a. inset owned once: container 1180x727 === window 1180x820 less inset (chrome 330)
+  ok   7b. fits its box or declares scrolls: 1180x820 chrome 330
+  ok   7. centred: 1180x820 inset(76,0) chrome 330
+  ok   7a. inset owned once: container 1104x776 === window 1180x820 less inset (chrome 330)
+  ok   7b. fits its box or declares scrolls: 1180x820 chrome 330
+  ok   7. centred: 1180x820 inset(0,76) chrome 330
+  ok   7a. inset owned once: container 1104x776 === window 1180x820 less inset (chrome 330)
+  ok   7b. fits its box or declares scrolls: 1180x820 chrome 330
+  ok   7. centred: 320x568 inset(0,0) chrome 360
+  ok   7a. inset owned once: container 320x568 === window 320x568 less inset (chrome 360)
+  ok   7b. fits its box or declares scrolls: 320x568 chrome 360
+  ok   7. centred: 320x568 inset(0,0) chrome 360
+  ok   7a. inset owned once: container 320x544 === window 320x568 less inset (chrome 360)
+  ok   7b. fits its box or declares scrolls: 320x568 chrome 360
+  ok   7. centred: 320x568 inset(0,0) chrome 360
+  ok   7a. inset owned once: container 320x475 === window 320x568 less inset (chrome 360)
+  ok   7b. fits its box or declares scrolls: 320x568 chrome 360
+  ok   7. centred: 320x568 inset(76,0) chrome 360
+  ok   7a. inset owned once: container 244x524 === window 320x568 less inset (chrome 360)
+  ok   7b. fits its box or declares scrolls: 320x568 chrome 360
+  ok   7. centred: 320x568 inset(0,76) chrome 360
+  ok   7a. inset owned once: container 244x524 === window 320x568 less inset (chrome 360)
+  ok   7b. fits its box or declares scrolls: 320x568 chrome 360
+  ok   7. centred: 360x800 inset(0,0) chrome 360
+  ok   7a. inset owned once: container 360x800 === window 360x800 less inset (chrome 360)
+  ok   7b. fits its box or declares scrolls: 360x800 chrome 360
+  ok   7. centred: 360x800 inset(0,0) chrome 360
+  ok   7a. inset owned once: container 360x776 === window 360x800 less inset (chrome 360)
+  ok   7b. fits its box or declares scrolls: 360x800 chrome 360
+  ok   7. centred: 360x800 inset(0,0) chrome 360
+  ok   7a. inset owned once: container 360x707 === window 360x800 less inset (chrome 360)
+  ok   7b. fits its box or declares scrolls: 360x800 chrome 360
+  ok   7. centred: 360x800 inset(76,0) chrome 360
+  ok   7a. inset owned once: container 284x756 === window 360x800 less inset (chrome 360)
+  ok   7b. fits its box or declares scrolls: 360x800 chrome 360
+  ok   7. centred: 360x800 inset(0,76) chrome 360
+  ok   7a. inset owned once: container 284x756 === window 360x800 less inset (chrome 360)
+  ok   7b. fits its box or declares scrolls: 360x800 chrome 360
+  ok   7. centred: 393x851 inset(0,0) chrome 360
+  ok   7a. inset owned once: container 393x851 === window 393x851 less inset (chrome 360)
+  ok   7b. fits its box or declares scrolls: 393x851 chrome 360
+  ok   7. centred: 393x851 inset(0,0) chrome 360
+  ok   7a. inset owned once: container 393x827 === window 393x851 less inset (chrome 360)
+  ok   7b. fits its box or declares scrolls: 393x851 chrome 360
+  ok   7. centred: 393x851 inset(0,0) chrome 360
+  ok   7a. inset owned once: container 393x758 === window 393x851 less inset (chrome 360)
+  ok   7b. fits its box or declares scrolls: 393x851 chrome 360
+  ok   7. centred: 393x851 inset(76,0) chrome 360
+  ok   7a. inset owned once: container 317x807 === window 393x851 less inset (chrome 360)
+  ok   7b. fits its box or declares scrolls: 393x851 chrome 360
+  ok   7. centred: 393x851 inset(0,76) chrome 360
+  ok   7a. inset owned once: container 317x807 === window 393x851 less inset (chrome 360)
+  ok   7b. fits its box or declares scrolls: 393x851 chrome 360
+  ok   7. centred: 412x915 inset(0,0) chrome 360
+  ok   7a. inset owned once: container 412x915 === window 412x915 less inset (chrome 360)
+  ok   7b. fits its box or declares scrolls: 412x915 chrome 360
+  ok   7. centred: 412x915 inset(0,0) chrome 360
+  ok   7a. inset owned once: container 412x891 === window 412x915 less inset (chrome 360)
+  ok   7b. fits its box or declares scrolls: 412x915 chrome 360
+  ok   7. centred: 412x915 inset(0,0) chrome 360
+  ok   7a. inset owned once: container 412x822 === window 412x915 less inset (chrome 360)
+  ok   7b. fits its box or declares scrolls: 412x915 chrome 360
+  ok   7. centred: 412x915 inset(76,0) chrome 360
+  ok   7a. inset owned once: container 336x871 === window 412x915 less inset (chrome 360)
+  ok   7b. fits its box or declares scrolls: 412x915 chrome 360
+  ok   7. centred: 412x915 inset(0,76) chrome 360
+  ok   7a. inset owned once: container 336x871 === window 412x915 less inset (chrome 360)
+  ok   7b. fits its box or declares scrolls: 412x915 chrome 360
+  ok   7. centred: 674x841 inset(0,0) chrome 360
+  ok   7a. inset owned once: container 674x841 === window 674x841 less inset (chrome 360)
+  ok   7b. fits its box or declares scrolls: 674x841 chrome 360
+  ok   7. centred: 674x841 inset(0,0) chrome 360
+  ok   7a. inset owned once: container 674x817 === window 674x841 less inset (chrome 360)
+  ok   7b. fits its box or declares scrolls: 674x841 chrome 360
+  ok   7. centred: 674x841 inset(0,0) chrome 360
+  ok   7a. inset owned once: container 674x748 === window 674x841 less inset (chrome 360)
+  ok   7b. fits its box or declares scrolls: 674x841 chrome 360
+  ok   7. centred: 674x841 inset(76,0) chrome 360
+  ok   7a. inset owned once: container 598x797 === window 674x841 less inset (chrome 360)
+  ok   7b. fits its box or declares scrolls: 674x841 chrome 360
+  ok   7. centred: 674x841 inset(0,76) chrome 360
+  ok   7a. inset owned once: container 598x797 === window 674x841 less inset (chrome 360)
+  ok   7b. fits its box or declares scrolls: 674x841 chrome 360
+  ok   7. centred: 820x1180 inset(0,0) chrome 360
+  ok   7a. inset owned once: container 820x1180 === window 820x1180 less inset (chrome 360)
+  ok   7b. fits its box or declares scrolls: 820x1180 chrome 360
+  ok   7. centred: 820x1180 inset(0,0) chrome 360
+  ok   7a. inset owned once: container 820x1156 === window 820x1180 less inset (chrome 360)
+  ok   7b. fits its box or declares scrolls: 820x1180 chrome 360
+  ok   7. centred: 820x1180 inset(0,0) chrome 360
+  ok   7a. inset owned once: container 820x1087 === window 820x1180 less inset (chrome 360)
+  ok   7b. fits its box or declares scrolls: 820x1180 chrome 360
+  ok   7. centred: 820x1180 inset(76,0) chrome 360
+  ok   7a. inset owned once: container 744x1136 === window 820x1180 less inset (chrome 360)
+  ok   7b. fits its box or declares scrolls: 820x1180 chrome 360
+  ok   7. centred: 820x1180 inset(0,76) chrome 360
+  ok   7a. inset owned once: container 744x1136 === window 820x1180 less inset (chrome 360)
+  ok   7b. fits its box or declares scrolls: 820x1180 chrome 360
+  ok   7. centred: 851x393 inset(0,0) chrome 360
+  ok   7a. inset owned once: container 851x393 === window 851x393 less inset (chrome 360)
+  ok   7b. fits its box or declares scrolls: 851x393 chrome 360
+  ok   7. centred: 851x393 inset(0,0) chrome 360
+  ok   7a. inset owned once: container 851x369 === window 851x393 less inset (chrome 360)
+  ok   7b. fits its box or declares scrolls: 851x393 chrome 360
+  ok   7. centred: 851x393 inset(0,0) chrome 360
+  ok   7a. inset owned once: container 851x300 === window 851x393 less inset (chrome 360)
+  ok   7b. fits its box or declares scrolls: 851x393 chrome 360
+  ok   7. centred: 851x393 inset(76,0) chrome 360
+  ok   7a. inset owned once: container 775x349 === window 851x393 less inset (chrome 360)
+  ok   7b. fits its box or declares scrolls: 851x393 chrome 360
+  ok   7. centred: 851x393 inset(0,76) chrome 360
+  ok   7a. inset owned once: container 775x349 === window 851x393 less inset (chrome 360)
+  ok   7b. fits its box or declares scrolls: 851x393 chrome 360
+  ok   7. centred: 1180x820 inset(0,0) chrome 360
+  ok   7a. inset owned once: container 1180x820 === window 1180x820 less inset (chrome 360)
+  ok   7b. fits its box or declares scrolls: 1180x820 chrome 360
+  ok   7. centred: 1180x820 inset(0,0) chrome 360
+  ok   7a. inset owned once: container 1180x796 === window 1180x820 less inset (chrome 360)
+  ok   7b. fits its box or declares scrolls: 1180x820 chrome 360
+  ok   7. centred: 1180x820 inset(0,0) chrome 360
+  ok   7a. inset owned once: container 1180x727 === window 1180x820 less inset (chrome 360)
+  ok   7b. fits its box or declares scrolls: 1180x820 chrome 360
+  ok   7. centred: 1180x820 inset(76,0) chrome 360
+  ok   7a. inset owned once: container 1104x776 === window 1180x820 less inset (chrome 360)
+  ok   7b. fits its box or declares scrolls: 1180x820 chrome 360
+  ok   7. centred: 1180x820 inset(0,76) chrome 360
+  ok   7a. inset owned once: container 1104x776 === window 1180x820 less inset (chrome 360)
+  ok   7b. fits its box or declares scrolls: 1180x820 chrome 360
+  ok   7. centred: 320x568 inset(0,0) chrome 400
+  ok   7a. inset owned once: container 320x568 === window 320x568 less inset (chrome 400)
+  ok   7b. fits its box or declares scrolls: 320x568 chrome 400
+  ok   7. centred: 320x568 inset(0,0) chrome 400
+  ok   7a. inset owned once: container 320x544 === window 320x568 less inset (chrome 400)
+  ok   7b. fits its box or declares scrolls: 320x568 chrome 400
+  ok   7. centred: 320x568 inset(0,0) chrome 400
+  ok   7a. inset owned once: container 320x475 === window 320x568 less inset (chrome 400)
+  ok   7b. fits its box or declares scrolls: 320x568 chrome 400
+  ok   7. centred: 320x568 inset(76,0) chrome 400
+  ok   7a. inset owned once: container 244x524 === window 320x568 less inset (chrome 400)
+  ok   7b. fits its box or declares scrolls: 320x568 chrome 400
+  ok   7. centred: 320x568 inset(0,76) chrome 400
+  ok   7a. inset owned once: container 244x524 === window 320x568 less inset (chrome 400)
+  ok   7b. fits its box or declares scrolls: 320x568 chrome 400
+  ok   7. centred: 360x800 inset(0,0) chrome 400
+  ok   7a. inset owned once: container 360x800 === window 360x800 less inset (chrome 400)
+  ok   7b. fits its box or declares scrolls: 360x800 chrome 400
+  ok   7. centred: 360x800 inset(0,0) chrome 400
+  ok   7a. inset owned once: container 360x776 === window 360x800 less inset (chrome 400)
+  ok   7b. fits its box or declares scrolls: 360x800 chrome 400
+  ok   7. centred: 360x800 inset(0,0) chrome 400
+  ok   7a. inset owned once: container 360x707 === window 360x800 less inset (chrome 400)
+  ok   7b. fits its box or declares scrolls: 360x800 chrome 400
+  ok   7. centred: 360x800 inset(76,0) chrome 400
+  ok   7a. inset owned once: container 284x756 === window 360x800 less inset (chrome 400)
+  ok   7b. fits its box or declares scrolls: 360x800 chrome 400
+  ok   7. centred: 360x800 inset(0,76) chrome 400
+  ok   7a. inset owned once: container 284x756 === window 360x800 less inset (chrome 400)
+  ok   7b. fits its box or declares scrolls: 360x800 chrome 400
+  ok   7. centred: 393x851 inset(0,0) chrome 400
+  ok   7a. inset owned once: container 393x851 === window 393x851 less inset (chrome 400)
+  ok   7b. fits its box or declares scrolls: 393x851 chrome 400
+  ok   7. centred: 393x851 inset(0,0) chrome 400
+  ok   7a. inset owned once: container 393x827 === window 393x851 less inset (chrome 400)
+  ok   7b. fits its box or declares scrolls: 393x851 chrome 400
+  ok   7. centred: 393x851 inset(0,0) chrome 400
+  ok   7a. inset owned once: container 393x758 === window 393x851 less inset (chrome 400)
+  ok   7b. fits its box or declares scrolls: 393x851 chrome 400
+  ok   7. centred: 393x851 inset(76,0) chrome 400
+  ok   7a. inset owned once: container 317x807 === window 393x851 less inset (chrome 400)
+  ok   7b. fits its box or declares scrolls: 393x851 chrome 400
+  ok   7. centred: 393x851 inset(0,76) chrome 400
+  ok   7a. inset owned once: container 317x807 === window 393x851 less inset (chrome 400)
+  ok   7b. fits its box or declares scrolls: 393x851 chrome 400
+  ok   7. centred: 412x915 inset(0,0) chrome 400
+  ok   7a. inset owned once: container 412x915 === window 412x915 less inset (chrome 400)
+  ok   7b. fits its box or declares scrolls: 412x915 chrome 400
+  ok   7. centred: 412x915 inset(0,0) chrome 400
+  ok   7a. inset owned once: container 412x891 === window 412x915 less inset (chrome 400)
+  ok   7b. fits its box or declares scrolls: 412x915 chrome 400
+  ok   7. centred: 412x915 inset(0,0) chrome 400
+  ok   7a. inset owned once: container 412x822 === window 412x915 less inset (chrome 400)
+  ok   7b. fits its box or declares scrolls: 412x915 chrome 400
+  ok   7. centred: 412x915 inset(76,0) chrome 400
+  ok   7a. inset owned once: container 336x871 === window 412x915 less inset (chrome 400)
+  ok   7b. fits its box or declares scrolls: 412x915 chrome 400
+  ok   7. centred: 412x915 inset(0,76) chrome 400
+  ok   7a. inset owned once: container 336x871 === window 412x915 less inset (chrome 400)
+  ok   7b. fits its box or declares scrolls: 412x915 chrome 400
+  ok   7. centred: 674x841 inset(0,0) chrome 400
+  ok   7a. inset owned once: container 674x841 === window 674x841 less inset (chrome 400)
+  ok   7b. fits its box or declares scrolls: 674x841 chrome 400
+  ok   7. centred: 674x841 inset(0,0) chrome 400
+  ok   7a. inset owned once: container 674x817 === window 674x841 less inset (chrome 400)
+  ok   7b. fits its box or declares scrolls: 674x841 chrome 400
+  ok   7. centred: 674x841 inset(0,0) chrome 400
+  ok   7a. inset owned once: container 674x748 === window 674x841 less inset (chrome 400)
+  ok   7b. fits its box or declares scrolls: 674x841 chrome 400
+  ok   7. centred: 674x841 inset(76,0) chrome 400
+  ok   7a. inset owned once: container 598x797 === window 674x841 less inset (chrome 400)
+  ok   7b. fits its box or declares scrolls: 674x841 chrome 400
+  ok   7. centred: 674x841 inset(0,76) chrome 400
+  ok   7a. inset owned once: container 598x797 === window 674x841 less inset (chrome 400)
+  ok   7b. fits its box or declares scrolls: 674x841 chrome 400
+  ok   7. centred: 820x1180 inset(0,0) chrome 400
+  ok   7a. inset owned once: container 820x1180 === window 820x1180 less inset (chrome 400)
+  ok   7b. fits its box or declares scrolls: 820x1180 chrome 400
+  ok   7. centred: 820x1180 inset(0,0) chrome 400
+  ok   7a. inset owned once: container 820x1156 === window 820x1180 less inset (chrome 400)
+  ok   7b. fits its box or declares scrolls: 820x1180 chrome 400
+  ok   7. centred: 820x1180 inset(0,0) chrome 400
+  ok   7a. inset owned once: container 820x1087 === window 820x1180 less inset (chrome 400)
+  ok   7b. fits its box or declares scrolls: 820x1180 chrome 400
+  ok   7. centred: 820x1180 inset(76,0) chrome 400
+  ok   7a. inset owned once: container 744x1136 === window 820x1180 less inset (chrome 400)
+  ok   7b. fits its box or declares scrolls: 820x1180 chrome 400
+  ok   7. centred: 820x1180 inset(0,76) chrome 400
+  ok   7a. inset owned once: container 744x1136 === window 820x1180 less inset (chrome 400)
+  ok   7b. fits its box or declares scrolls: 820x1180 chrome 400
+  ok   7. centred: 851x393 inset(0,0) chrome 400
+  ok   7a. inset owned once: container 851x393 === window 851x393 less inset (chrome 400)
+  ok   7b. fits its box or declares scrolls: 851x393 chrome 400
+  ok   7. centred: 851x393 inset(0,0) chrome 400
+  ok   7a. inset owned once: container 851x369 === window 851x393 less inset (chrome 400)
+  ok   7b. fits its box or declares scrolls: 851x393 chrome 400
+  ok   7. centred: 851x393 inset(0,0) chrome 400
+  ok   7a. inset owned once: container 851x300 === window 851x393 less inset (chrome 400)
+  ok   7b. fits its box or declares scrolls: 851x393 chrome 400
+  ok   7. centred: 851x393 inset(76,0) chrome 400
+  ok   7a. inset owned once: container 775x349 === window 851x393 less inset (chrome 400)
+  ok   7b. fits its box or declares scrolls: 851x393 chrome 400
+  ok   7. centred: 851x393 inset(0,76) chrome 400
+  ok   7a. inset owned once: container 775x349 === window 851x393 less inset (chrome 400)
+  ok   7b. fits its box or declares scrolls: 851x393 chrome 400
+  ok   7. centred: 1180x820 inset(0,0) chrome 400
+  ok   7a. inset owned once: container 1180x820 === window 1180x820 less inset (chrome 400)
+  ok   7b. fits its box or declares scrolls: 1180x820 chrome 400
+  ok   7. centred: 1180x820 inset(0,0) chrome 400
+  ok   7a. inset owned once: container 1180x796 === window 1180x820 less inset (chrome 400)
+  ok   7b. fits its box or declares scrolls: 1180x820 chrome 400
+  ok   7. centred: 1180x820 inset(0,0) chrome 400
+  ok   7a. inset owned once: container 1180x727 === window 1180x820 less inset (chrome 400)
+  ok   7b. fits its box or declares scrolls: 1180x820 chrome 400
+  ok   7. centred: 1180x820 inset(76,0) chrome 400
+  ok   7a. inset owned once: container 1104x776 === window 1180x820 less inset (chrome 400)
+  ok   7b. fits its box or declares scrolls: 1180x820 chrome 400
+  ok   7. centred: 1180x820 inset(0,76) chrome 400
+  ok   7a. inset owned once: container 1104x776 === window 1180x820 less inset (chrome 400)
+  ok   7b. fits its box or declares scrolls: 1180x820 chrome 400
+  (7) 120 centring cases, 120 inset-ownership cases
+  ok   8. ui exposes a shared portrait lock
+  ok   8a. ...and it locks PORTRAIT_UP
+  ok   8b. Chess.tsx holds itself portrait
+  ok   8b. Ludo.tsx holds itself portrait
+  ok   8b. TicTacToe.tsx holds itself portrait
+  ok   8c. rummy still plays landscape
+  ok   8f. rummy does not switch orientation on game state
+  ok   8g. ...so its lobby and table list are a landscape column
+  ok   8h. ...and it still restores portrait on the way out
+  ok   8d. the felt auto-fits its parent rather than the window
+  ok   8e. ...and no longer reads window dimensions
+  ok   9. chess declares a board rim
+  ok   9a. ...and what is left after it is the felt board
+  ok   9b. the rail is a ratio of the board, clamped at both ends
+  ok   9c. ...the grid is what the rail leaves
+  ok   9d. ...and a cell is grid/8, never size/8
+  ok   9e. the felt is boardEdge and the squares container is grid
+  ok   9f. the rail constants parse
+  ok   9g. frame + rail + grid === size at 320x640
+  ok   9h. the whole assembly fits the column at 320x640: 288 <= 288
+  ok   9i. a square stays tappable at 320x640: 31.5dp
+  ok   9g. frame + rail + grid === size at 320x720
+  ok   9h. the whole assembly fits the column at 320x720: 288 <= 288
+  ok   9i. a square stays tappable at 320x720: 31.5dp
+  ok   9g. frame + rail + grid === size at 320x780
+  ok   9h. the whole assembly fits the column at 320x780: 288 <= 288
+  ok   9i. a square stays tappable at 320x780: 31.5dp
+  ok   9g. frame + rail + grid === size at 320x844
+  ok   9h. the whole assembly fits the column at 320x844: 288 <= 288
+  ok   9i. a square stays tappable at 320x844: 31.5dp
+  ok   9g. frame + rail + grid === size at 320x932
+  ok   9h. the whole assembly fits the column at 320x932: 288 <= 288
+  ok   9i. a square stays tappable at 320x932: 31.5dp
+  ok   9g. frame + rail + grid === size at 320x1180
+  ok   9h. the whole assembly fits the column at 320x1180: 288 <= 288
+  ok   9i. a square stays tappable at 320x1180: 31.5dp
+  ok   9g. frame + rail + grid === size at 360x640
+  ok   9h. the whole assembly fits the column at 360x640: 328 <= 328
+  ok   9i. a square stays tappable at 360x640: 36.0dp
+  ok   9g. frame + rail + grid === size at 360x720
+  ok   9h. the whole assembly fits the column at 360x720: 328 <= 328
+  ok   9i. a square stays tappable at 360x720: 36.0dp
+  ok   9g. frame + rail + grid === size at 360x780
+  ok   9h. the whole assembly fits the column at 360x780: 328 <= 328
+  ok   9i. a square stays tappable at 360x780: 36.0dp
+  ok   9g. frame + rail + grid === size at 360x844
+  ok   9h. the whole assembly fits the column at 360x844: 328 <= 328
+  ok   9i. a square stays tappable at 360x844: 36.0dp
+  ok   9g. frame + rail + grid === size at 360x932
+  ok   9h. the whole assembly fits the column at 360x932: 328 <= 328
+  ok   9i. a square stays tappable at 360x932: 36.0dp
+  ok   9g. frame + rail + grid === size at 360x1180
+  ok   9h. the whole assembly fits the column at 360x1180: 328 <= 328
+  ok   9i. a square stays tappable at 360x1180: 36.0dp
+  ok   9g. frame + rail + grid === size at 390x640
+  ok   9h. the whole assembly fits the column at 390x640: 340 <= 358
+  ok   9i. a square stays tappable at 390x640: 37.3dp
+  ok   9g. frame + rail + grid === size at 390x720
+  ok   9h. the whole assembly fits the column at 390x720: 358 <= 358
+  ok   9i. a square stays tappable at 390x720: 39.3dp
+  ok   9g. frame + rail + grid === size at 390x780
+  ok   9h. the whole assembly fits the column at 390x780: 358 <= 358
+  ok   9i. a square stays tappable at 390x780: 39.3dp
+  ok   9g. frame + rail + grid === size at 390x844
+  ok   9h. the whole assembly fits the column at 390x844: 358 <= 358
+  ok   9i. a square stays tappable at 390x844: 39.3dp
+  ok   9g. frame + rail + grid === size at 390x932
+  ok   9h. the whole assembly fits the column at 390x932: 358 <= 358
+  ok   9i. a square stays tappable at 390x932: 39.3dp
+  ok   9g. frame + rail + grid === size at 390x1180
+  ok   9h. the whole assembly fits the column at 390x1180: 358 <= 358
+  ok   9i. a square stays tappable at 390x1180: 39.3dp
+  ok   9g. frame + rail + grid === size at 412x640
+  ok   9h. the whole assembly fits the column at 412x640: 340 <= 380
+  ok   9i. a square stays tappable at 412x640: 37.3dp
+  ok   9g. frame + rail + grid === size at 412x720
+  ok   9h. the whole assembly fits the column at 412x720: 380 <= 380
+  ok   9i. a square stays tappable at 412x720: 41.8dp
+  ok   9g. frame + rail + grid === size at 412x780
+  ok   9h. the whole assembly fits the column at 412x780: 380 <= 380
+  ok   9i. a square stays tappable at 412x780: 41.8dp
+  ok   9g. frame + rail + grid === size at 412x844
+  ok   9h. the whole assembly fits the column at 412x844: 380 <= 380
+  ok   9i. a square stays tappable at 412x844: 41.8dp
+  ok   9g. frame + rail + grid === size at 412x932
+  ok   9h. the whole assembly fits the column at 412x932: 380 <= 380
+  ok   9i. a square stays tappable at 412x932: 41.8dp
+  ok   9g. frame + rail + grid === size at 412x1180
+  ok   9h. the whole assembly fits the column at 412x1180: 380 <= 380
+  ok   9i. a square stays tappable at 412x1180: 41.8dp
+  ok   9g. frame + rail + grid === size at 430x640
+  ok   9h. the whole assembly fits the column at 430x640: 340 <= 398
+  ok   9i. a square stays tappable at 430x640: 37.3dp
+  ok   9g. frame + rail + grid === size at 430x720
+  ok   9h. the whole assembly fits the column at 430x720: 398 <= 398
+  ok   9i. a square stays tappable at 430x720: 43.8dp
+  ok   9g. frame + rail + grid === size at 430x780
+  ok   9h. the whole assembly fits the column at 430x780: 398 <= 398
+  ok   9i. a square stays tappable at 430x780: 43.8dp
+  ok   9g. frame + rail + grid === size at 430x844
+  ok   9h. the whole assembly fits the column at 430x844: 398 <= 398
+  ok   9i. a square stays tappable at 430x844: 43.8dp
+  ok   9g. frame + rail + grid === size at 430x932
+  ok   9h. the whole assembly fits the column at 430x932: 398 <= 398
+  ok   9i. a square stays tappable at 430x932: 43.8dp
+  ok   9g. frame + rail + grid === size at 430x1180
+  ok   9h. the whole assembly fits the column at 430x1180: 398 <= 398
+  ok   9i. a square stays tappable at 430x1180: 43.8dp
+  ok   9g. frame + rail + grid === size at 480x640
+  ok   9h. the whole assembly fits the column at 480x640: 340 <= 448
+  ok   9i. a square stays tappable at 480x640: 37.3dp
+  ok   9g. frame + rail + grid === size at 480x720
+  ok   9h. the whole assembly fits the column at 480x720: 420 <= 448
+  ok   9i. a square stays tappable at 480x720: 46.3dp
+  ok   9g. frame + rail + grid === size at 480x780
+  ok   9h. the whole assembly fits the column at 480x780: 448 <= 448
+  ok   9i. a square stays tappable at 480x780: 49.5dp
+  ok   9g. frame + rail + grid === size at 480x844
+  ok   9h. the whole assembly fits the column at 480x844: 448 <= 448
+  ok   9i. a square stays tappable at 480x844: 49.5dp
+  ok   9g. frame + rail + grid === size at 480x932
+  ok   9h. the whole assembly fits the column at 480x932: 448 <= 448
+  ok   9i. a square stays tappable at 480x932: 49.5dp
+  ok   9g. frame + rail + grid === size at 480x1180
+  ok   9h. the whole assembly fits the column at 480x1180: 448 <= 448
+  ok   9i. a square stays tappable at 480x1180: 49.5dp
+  ok   9g. frame + rail + grid === size at 600x640
+  ok   9h. the whole assembly fits the column at 600x640: 340 <= 568
+  ok   9i. a square stays tappable at 600x640: 37.3dp
+  ok   9g. frame + rail + grid === size at 600x720
+  ok   9h. the whole assembly fits the column at 600x720: 420 <= 568
+  ok   9i. a square stays tappable at 600x720: 46.3dp
+  ok   9g. frame + rail + grid === size at 600x780
+  ok   9h. the whole assembly fits the column at 600x780: 480 <= 568
+  ok   9i. a square stays tappable at 600x780: 53.0dp
+  ok   9g. frame + rail + grid === size at 600x844
+  ok   9h. the whole assembly fits the column at 600x844: 544 <= 568
+  ok   9i. a square stays tappable at 600x844: 60.8dp
+  ok   9g. frame + rail + grid === size at 600x932
+  ok   9h. the whole assembly fits the column at 600x932: 568 <= 568
+  ok   9i. a square stays tappable at 600x932: 63.8dp
+  ok   9g. frame + rail + grid === size at 600x1180
+  ok   9h. the whole assembly fits the column at 600x1180: 568 <= 568
+  ok   9i. a square stays tappable at 600x1180: 63.8dp
+  ok   9g. frame + rail + grid === size at 768x640
+  ok   9h. the whole assembly fits the column at 768x640: 340 <= 736
+  ok   9i. a square stays tappable at 768x640: 37.3dp
+  ok   9g. frame + rail + grid === size at 768x720
+  ok   9h. the whole assembly fits the column at 768x720: 420 <= 736
+  ok   9i. a square stays tappable at 768x720: 46.3dp
+  ok   9g. frame + rail + grid === size at 768x780
+  ok   9h. the whole assembly fits the column at 768x780: 480 <= 736
+  ok   9i. a square stays tappable at 768x780: 53.0dp
+  ok   9g. frame + rail + grid === size at 768x844
+  ok   9h. the whole assembly fits the column at 768x844: 544 <= 736
+  ok   9i. a square stays tappable at 768x844: 60.8dp
+  ok   9g. frame + rail + grid === size at 768x932
+  ok   9h. the whole assembly fits the column at 768x932: 632 <= 736
+  ok   9i. a square stays tappable at 768x932: 71.8dp
+  ok   9g. frame + rail + grid === size at 768x1180
+  ok   9h. the whole assembly fits the column at 768x1180: 736 <= 736
+  ok   9i. a square stays tappable at 768x1180: 84.8dp
+  ok   9g. frame + rail + grid === size at 1024x640
+  ok   9h. the whole assembly fits the column at 1024x640: 340 <= 992
+  ok   9i. a square stays tappable at 1024x640: 37.3dp
+  ok   9g. frame + rail + grid === size at 1024x720
+  ok   9h. the whole assembly fits the column at 1024x720: 420 <= 992
+  ok   9i. a square stays tappable at 1024x720: 46.3dp
+  ok   9g. frame + rail + grid === size at 1024x780
+  ok   9h. the whole assembly fits the column at 1024x780: 480 <= 992
+  ok   9i. a square stays tappable at 1024x780: 53.0dp
+  ok   9g. frame + rail + grid === size at 1024x844
+  ok   9h. the whole assembly fits the column at 1024x844: 544 <= 992
+  ok   9i. a square stays tappable at 1024x844: 60.8dp
+  ok   9g. frame + rail + grid === size at 1024x932
+  ok   9h. the whole assembly fits the column at 1024x932: 632 <= 992
+  ok   9i. a square stays tappable at 1024x932: 71.8dp
+  ok   9g. frame + rail + grid === size at 1024x1180
+  ok   9h. the whole assembly fits the column at 1024x1180: 880 <= 992
+  ok   9i. a square stays tappable at 1024x1180: 102.8dp
+  ok   9j. a dock slot is flex:1, not a computed width
+  ok   9k. ...so there is no slot arithmetic left to get wrong
+  ok   9l. chess uses the shared dock
+  ok   9m. ...and no longer carries its own
+
+All good.
+
+
+Reading a match
+
+  ✓ a real payload parses
+  ✓ ...with its variant and limit
+  ✓ ...and every seat
+  ✓ an out player is marked out
+  ✓ no match is null, not a throw
+  ✓ an empty object is null
+  ✓ a match with no id is null
+  ✓ an explicit null match is null
+  ✓ a string where a number belongs does not survive as one
+  ✓ ...and never as NaN
+  ✓ a nameless seat falls back to its id
+  ✓ missing counters read as 0
+  ✓ an unknown status is treated as still playing
+
+Standings
+
+  ✓ pool: still-playing seats come first
+  ✓ pool: the LOWEST score leads
+  ✓ deals: the HIGHEST chip count leads
+  ✓ an empty scoreboard sorts to nothing, not a throw
+
+Progress label
+
+  ✓ a deals match counts its deals
+  ✓ ...and never past the total
+  ✓ a pool counts what has been played
+  ✓ one deal is singular
+
+Reporting a deal
+
+  ✓ every seat is reported
+  ✓ the winner is flagged
+  ✓ ...and only the winner
+  ✓ points come from the server untouched
+  ✓ either id field is read
+  ✓ a seat with no id is dropped, not reported under an empty key
+  ✓ no winner at all is not a crash
+  ✓ a non-array is empty, not a throw
+  ✓ a non-numeric score reads as 0
+
+Variants
+
+  ✓ exactly the four RummyCircle formats
+  ✓ ...pool 101 and 201
+  ✓ ...deals best-of-2 and best-of-6
+  ✓ a known variant is labelled
+  ✓ an unknown variant falls back to the format this server plays
+
+  all match checks passed
+
+
+Leaderboard
+
+parsing
+  ✓ a real payload parses
+  ✓ ...keeping the server order
+  ✓ ...and every field
+
+bad input cannot blank the board
+  ✓ one broken row is dropped, the rest survive
+  ✓ a row with no vaultId is dropped
+  ✓ a blank name falls back to the id
+  ✓ missing numbers read as 0, not NaN
+  ✓ a string where a number belongs does not survive as one
+  ✓ no leaderboard key is an empty board, not a throw
+  ✓ a non-object is an empty board
+
+the stat each board actually has
+  ✓ a per-game board shows the rating
+  ✓ the global board shows coins instead
+
+trimmings
+  ✓ the podium is medals
+  ✓ ...and below it, positions
+  ✓ one win is singular
+  ✓ ...and none is plural
+  ✓ a streak shows only when there is one
+  ✓ best shows only when it beats the current run
+
+  all leaderboard checks passed
+

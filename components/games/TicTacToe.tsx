@@ -1,3 +1,6 @@
+import { chessTttLayout } from '../../lib/games/chessTttLayout';
+import Svg, { Path, Circle, G, Defs, LinearGradient as SvgLinear, Stop } from 'react-native-svg';
+import { LinearGradient } from 'expo-linear-gradient';
 /**
  * components/games/TicTacToe.tsx
  *
@@ -10,15 +13,15 @@
  * the shared accents — see TEAL/PINK below.
  */
 
-import { useEffect, useRef } from 'react';
-import { Pressable, ScrollView, Text, View } from 'react-native';
+import { useEffect, useId, useRef } from 'react';
+import { Pressable, ScrollView, Text, View, useWindowDimensions } from 'react-native';
 import Animated, {
   useSharedValue, useAnimatedStyle, withTiming, withRepeat, withSpring,
   Easing, cancelAnimation,
 } from 'react-native-reanimated';
 import * as Haptics from 'expo-haptics';
 import { useGameSocket, isMyTurn, type AutoStart } from '../../lib/games/useGameSocket';
-import { TableBackground, Panel, Btn, Banner, PlayerRow, Reconnecting, RematchBtn, TurnClock, useType, useBoardBox, usePortraitLock } from './ui';
+import { TableBackground, Panel, Btn, Banner, PlayerRow, Reconnecting, RematchBtn, TurnClock, useType, useBoardBox, useReduceMotion } from './ui';
 import { useRematch } from '../../lib/games/useRematch';
 import { RulesSheet, useFirstTimeRules } from './rules';
 import { useCountdown } from '../../lib/games/useCountdown';
@@ -66,13 +69,14 @@ export default function TicTacToe({ roomId, auto, autoBot }: { roomId: string } 
   // integer cells always fit inside the frame: flex-wrap with a fractional
   // width drops the third cell onto its own row, which is what put the grid
   // out of alignment.
-  // Portrait only. See usePortraitLock.
-  usePortraitLock();
-  const { size, onLayout: onBoardBox } = useBoardBox(330);
+  const viewport = useBoardBox(330);
+  const { wide, size, controlsWidth } = chessTttLayout(viewport.width, viewport.height, viewport.size);
+  const { fontScale } = useWindowDimensions();
+  const stackSeats = controlsWidth < 280 || fontScale > 1.3;
   const gap = 10;
   const pad = 10;
-  const cell = Math.floor((size - pad * 2 - gap * 2) / 3);
-  const inner = cell * 3 + gap * 2 + pad * 2;
+  const cell = Math.floor((size - pad * 2 - gap * 2 - 2) / 3);
+  const inner = cell * 3 + gap * 2 + pad * 2 + 2;
 
   useEffect(() => { void preloadSfx(['tick', 'win', 'lose', 'draw']); }, []);
 
@@ -181,19 +185,8 @@ export default function TicTacToe({ roomId, auto, autoBot }: { roomId: string } 
   const me = players.find(p => p.id === state.you);
   const them = players.find(p => p.id !== state.you);
 
-  return (
-    <TableBackground>
-      <ScrollView onLayout={onBoardBox} contentContainerStyle={{ padding: S[4], gap: S[4], alignItems: 'center', paddingBottom: S[6] }}>
-
-        {reconnecting && <Reconnecting error={error} onRetry={retry} />}
-
-        <View style={{ width: size, flexDirection: 'row', gap: S[2] }}>
-          <SeatChip name={them?.name ?? 'Opponent'} mark={them ? MARK[them.seat] : '◯'} active={!mine && !finished} />
-          <SeatChip name={me ? `${me.name} (you)` : 'You'} mark={me ? MARK[me.seat] : '✕'} active={mine && !finished} />
-        </View>
-
-        <TurnClock secs={secs} />
-
+  const boardView = (
+    <>
         <View style={{
           width: inner, height: inner, padding: pad, borderRadius: 26, gap,
           // Was a hand-mixed navy (rgba(6,10,24)) - a blue-black plate on the
@@ -202,8 +195,8 @@ export default function TicTacToe({ roomId, auto, autoBot }: { roomId: string } 
           // darker, so the board reads as a pane laid over it instead of a hole
           // cut into it — and the cells, which were already translucent white,
           // finally sit on something of the same substance.
-          backgroundColor: white(0.07),
-          borderWidth: 1, borderColor: white(0.22),
+          backgroundColor: white(0.09),
+          borderWidth: 1, borderColor: white(0.34),
           boxShadow: `inset 0 1px 0 ${white(0.18)}, 0 30px 70px rgba(0,0,0,0.5)`,
         }}>
           {[0, 1, 2].map(row => (
@@ -230,8 +223,27 @@ export default function TicTacToe({ roomId, auto, autoBot }: { roomId: string } 
             </View>
           ))}
         </View>
+    </>
+  );
 
-        <View style={{ width: size }}>
+  return (
+    <TableBackground>
+      <View onLayout={viewport.onLayout} style={{ flex: 1, flexDirection: wide ? 'row' : 'column' }}>
+      {wide && <ScrollView style={{ width: size + 32, flexGrow: 0 }} contentContainerStyle={{ padding: 16, alignItems: 'center' }}>{boardView}</ScrollView>}
+      <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: S[4], gap: S[4], alignItems: 'center', paddingBottom: S[6] }}>
+
+        {reconnecting && <Reconnecting error={error} onRetry={retry} />}
+
+        <View style={{ width: controlsWidth, flexDirection: stackSeats ? 'column' : 'row', gap: S[2] }}>
+          <SeatChip stacked={stackSeats} name={them?.name ?? 'Opponent'} mark={them ? MARK[them.seat] : '◯'} active={!mine && !finished} />
+          <SeatChip stacked={stackSeats} name={me ? `${me.name} (you)` : 'You'} mark={me ? MARK[me.seat] : '✕'} active={mine && !finished} />
+        </View>
+
+        <TurnClock secs={secs} />
+
+        {!wide && boardView}
+
+        <View style={{ width: controlsWidth }}>
           {finished
             ? <Banner
                 text={G.winnerId ? (G.winnerId === state.you ? 'You win!' : `${them?.name ?? 'Opponent'} wins`) : 'Draw — nobody blinked'}
@@ -241,7 +253,7 @@ export default function TicTacToe({ roomId, auto, autoBot }: { roomId: string } 
         </View>
 
         <VoiceBar
-          width={size}
+          width={controlsWidth}
           phase={voice.phase}
           error={voice.error}
           canSpeak={voice.canSpeak}
@@ -253,14 +265,15 @@ export default function TicTacToe({ roomId, auto, autoBot }: { roomId: string } 
         />
 
         {finished ? (
-          <View style={{ width: size, flexDirection: 'row', gap: S[2] }}>
-            <RematchBtn rm={rematch} />
+          <View style={{ width: controlsWidth, gap: S[2] }}>
+            <View style={{ flexDirection: 'row' }}><RematchBtn rm={rematch} /></View>
             <Btn label="Share" icon="share" onPress={() => { void shareResult('tictactoe', G.winnerId === state.you); }} />
           </View>
         ) : (
-          <Btn label="Invite a friend" icon="link" style={{ width: size }} onPress={() => { void openInvite('tictactoe', roomId); }} disabled={!roomId} />
+          <Btn label="Invite a friend" icon="link" style={{ width: controlsWidth }} onPress={() => { void openInvite('tictactoe', roomId); }} disabled={!roomId} />
         )}
       </ScrollView>
+      </View>
       <Toasts events={events} />
       <Confetti show={finished && G.winnerId === state.you} />
     </TableBackground>
@@ -270,6 +283,7 @@ export default function TicTacToe({ roomId, auto, autoBot }: { roomId: string } 
 function Cell({
   value, size, won, fresh, playable, onPress, index,
 }: { value: number; size: number; won: boolean; fresh: boolean; playable: boolean; onPress: () => void; index: number }) {
+  const still = useReduceMotion();
   const pop = useSharedValue(value >= 0 ? 1 : 0);
   const glow = useSharedValue(0);
   const played = useRef(false);
@@ -279,22 +293,25 @@ function Cell({
     if (value >= 0 && !played.current) {
       played.current = true;
       pop.value = 0.4;
-      pop.value = withSpring(1, { damping: 9, stiffness: 260, mass: 0.6 });
+      pop.value = still ? 1 : withSpring(1, { damping: 9, stiffness: 260, mass: 0.6 });
     } else if (value < 0) {
       played.current = false;
       pop.value = 0;
+    } else if (still) {
+      cancelAnimation(pop);
+      pop.value = 1;
     }
-  }, [value, pop]);
+  }, [value, pop, still]);
 
   useEffect(() => {
-    if (won) {
+    if (won && !still) {
       glow.value = withRepeat(withTiming(1, { duration: 1200, easing: Easing.inOut(Easing.ease) }), -1, true);
     } else {
       cancelAnimation(glow);
-      glow.value = withTiming(0, { duration: 200 });
+      glow.value = still ? 0 : withTiming(0, { duration: 200 });
     }
     return () => cancelAnimation(glow);
-  }, [won, glow]);
+  }, [won, glow, still]);
 
   const aMark = useAnimatedStyle(() => ({ transform: [{ scale: pop.value }], opacity: pop.value }));
   const aCell = useAnimatedStyle(() => ({ shadowOpacity: won ? 0.2 + glow.value * 0.45 : 0 }));
@@ -303,65 +320,76 @@ function Cell({
 
   return (
     <Animated.View style={[{
-      width: size, height: size, borderRadius: 24,
+      width: size, height: size, borderRadius: Math.min(22, size * 0.2), overflow: 'hidden',
       borderWidth: won ? 1.6 : 1,
-      borderColor: won ? C.gold2 : white(0.13),
-      backgroundColor: won ? alpha(C.gold2, 0.16) : white(0.06),
+      borderColor: won ? C.gold2 : fresh ? color : white(playable ? 0.3 : 0.16),
+      backgroundColor: won ? alpha(C.gold2, 0.18) : fresh ? alpha(color, 0.14) : white(0.08),
       alignItems: 'center', justifyContent: 'center',
       // The lit top edge is what separates a cell from the pane behind it now
       // that both are made of the same translucent white.
       boxShadow: `inset 0 1px 0 ${white(0.16)}`,
       shadowColor: C.gold2, shadowRadius: 26, shadowOffset: { width: 0, height: 0 },
     }, aCell]}>
+      <LinearGradient pointerEvents="none" colors={[white(won ? 0.20 : 0.12), 'transparent', 'rgba(0,0,0,0.16)']} style={{ position: 'absolute', inset: 0 }} />
+      {fresh && !won ? <View pointerEvents="none" style={{ position: 'absolute', top: 8, right: 8, width: 5, height: 5, borderRadius: 3, backgroundColor: color }} /> : null}
       <Pressable
         onPress={onPress}
         disabled={!playable}
         accessibilityRole="button"
-        accessibilityLabel={cellLabel(index, value, playable)}
+        accessibilityLabel={`${cellLabel(index, value, playable)}${won ? ", winning line" : fresh ? ", latest move" : ""}`}
+        accessibilityState={{ disabled: !playable }}
         style={{ width: '100%', height: '100%', alignItems: 'center', justifyContent: 'center' }}
       >
         {value >= 0 && (
-          <Animated.Text style={[{
-            fontSize: size * 0.55, fontWeight: '700', color,
-            // Derived from the mark's own colour — these were two hand-written
-            // rgba()s of the OLD teal and pink, so recolouring the marks left
-            // each one haloed in the colour it used to be.
-            textShadowColor: alpha(color, 0.55),
-            textShadowOffset: { width: 0, height: 0 }, textShadowRadius: 22,
-          }, aMark]}>
-            {MARK[value]}
-          </Animated.Text>
+          <Animated.View style={aMark} pointerEvents="none">
+            <Mark cross={value === 0} size={size * 0.62} color={won ? C.gold2 : color} />
+          </Animated.View>
         )}
       </Pressable>
     </Animated.View>
   );
 }
 
+/** Rounded vector marks stay crisp at any board size and never depend on fonts. */
+function Mark({ cross, size, color }: { cross: boolean; size: number; color: string }) {
+  const gradientId = `mark${useId().replace(/:/g, '')}`;
+  const shape = cross ? <Path d="M 24 24 L 76 76 M 76 24 L 24 76" /> : <Circle cx="50" cy="50" r="29" />;
+  return (
+    <Svg width={size} height={size} viewBox="0 0 100 100">
+      <Defs><SvgLinear id={gradientId} x1="0" y1="0" x2="1" y2="1"><Stop offset="0" stopColor="#FFFFFF" /><Stop offset="0.35" stopColor={color} /><Stop offset="1" stopColor={color} /></SvgLinear></Defs>
+      <G transform="translate(0 3)" fill="none" stroke="rgba(0,0,0,0.45)" strokeWidth="14" strokeLinecap="round">{shape}</G>
+      <G fill="none" stroke={`url(#${gradientId})`} strokeWidth="10" strokeLinecap="round">{shape}</G>
+    </Svg>
+  );
+}
+
 /** The turn line, with the blinking dot from tictactoe.css. */
 function TurnLine({ mine, name }: { mine: boolean; name: string }) {
   const t = useType();
+  const still = useReduceMotion();
   const blink = useSharedValue(1);
   useEffect(() => {
+    if (still) { blink.value = 1; return; }
     blink.value = withRepeat(withTiming(0.25, { duration: 700, easing: Easing.inOut(Easing.ease) }), -1, true);
     return () => cancelAnimation(blink);
-  }, [blink]);
+  }, [blink, still]);
   const a = useAnimatedStyle(() => ({ opacity: blink.value }));
 
   return (
-    <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: S[2] }}>
+    <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: S[2], padding: S[3], borderRadius: R[3], borderWidth: 1, borderColor: white(0.16), backgroundColor: white(0.06) }}>
       <Animated.View style={[{ width: 8, height: 8, borderRadius: 4, backgroundColor: mine ? TEAL : C.muted }, a]} />
-      <Text style={{ color: C.text, fontSize: t.md, fontWeight: '700' }}>
+      <Text style={{ flexShrink: 1, textAlign: 'center', color: C.text, fontSize: t.md, fontWeight: '700' }}>
         {mine ? 'Your move' : `Waiting for ${name}`}
       </Text>
     </View>
   );
 }
 
-function SeatChip({ name, mark, active }: { name: string; mark: string; active: boolean }) {
+function SeatChip({ name, mark, active, stacked }: { name: string; mark: string; active: boolean; stacked: boolean }) {
   const t = useType();
   return (
     <View style={{
-      flex: 1, flexDirection: 'row', alignItems: 'center', gap: S[2],
+      flex: stacked ? undefined : 1, flexDirection: 'row', alignItems: 'center', gap: S[2],
       paddingVertical: S[2], paddingHorizontal: S[3], borderRadius: R[2],
       // Matches ui.tsx PlayerRow: an active seat is LIT, in its own mark's
       // colour. This block used to be a byte-for-byte copy of PlayerRow's, and
@@ -373,7 +401,7 @@ function SeatChip({ name, mark, active }: { name: string; mark: string; active: 
         ? `0 8px 22px rgba(0,0,0,0.38), inset 0 1px 0 ${white(0.20)}`
         : `${D3.lift1}, inset 0 1px 0 ${white(0.12)}`,
     }}>
-      <Text style={{ fontSize: t.md, color: mark === '✕' ? TEAL : PINK, fontWeight: '800' }}>{mark}</Text>
+      <Mark cross={mark === '✕'} size={24} color={mark === '✕' ? TEAL : PINK} />
       <Text numberOfLines={1} style={{ flex: 1, color: C.text, fontSize: t.sm, fontWeight: '700' }}>{name}</Text>
     </View>
   );

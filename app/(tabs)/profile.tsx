@@ -16,7 +16,7 @@ import {
   Platform,
   ScrollView,
   StyleSheet,
-  Text, TextInput, ToastAndroid, TouchableOpacity,
+  TextInput, ToastAndroid, TouchableOpacity,
   View,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
@@ -28,6 +28,7 @@ import { attachmentUrl, uploadAttachment } from '../../lib/chatService';
 import { unregisterPushToken } from '../../lib/push';
 import { disconnect as disconnectSocket } from '../../lib/socket';
 import { readCache, writeCache } from '../../lib/localCache';
+import { AppText as Text } from '../../components/ui/Text';
 import { AuroraBackground } from '../../components/ui';
 import { initialOf } from '../../lib/format';
 import { currentVersionName } from '../../lib/appVersion';
@@ -269,9 +270,9 @@ export default function ProfileScreen() {
   const avatarLetter = initialOf(profile?.name, profile?.email);
 
   return (
-    <View style={{ flex: 1 }}>
+    <View style={S.screen}>
       <AuroraBackground variant="profile" />
-    <ScrollView style={S.screen} contentContainerStyle={{ paddingBottom: TAB_BAR_SPACE + 16 }}>
+    <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: TAB_BAR_SPACE + 16 }}>
       <View style={S.header}>
         <Text style={S.title}>Profile</Text>
         <TouchableOpacity onPress={() => router.push('/settings' as any)} hitSlop={8} accessibilityLabel="Settings">
@@ -491,13 +492,13 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   header:       { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingTop: HEADER_TOP, paddingBottom: 8 },
   title:        { color: c.text, fontSize: 26, fontWeight: '800' },
 
-  avatarWrap:   { alignItems: 'center', paddingTop: 16, paddingBottom: 20 },
+  avatarWrap:   { alignItems: 'center', paddingHorizontal: 20, paddingTop: 16, paddingBottom: 20 },
   avatar:       { width: 120, height: 120, borderRadius: 60, backgroundColor: c.primary, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
   avatarImg:    { width: '100%', height: '100%' },
   avatarTxt:    { color: '#fff', fontSize: 46, fontWeight: '800' },
   avatarBusy:   { ...StyleSheet.absoluteFillObject, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(0,0,0,0.4)' },
   cameraBadge:  { position: 'absolute', right: 2, bottom: 2, width: 36, height: 36, borderRadius: 18, backgroundColor: c.primary, alignItems: 'center', justifyContent: 'center', borderWidth: 3, borderColor: c.bg },
-  nameBig:      { color: c.text, fontSize: 22, fontWeight: '800', marginTop: 14 },
+  nameBig:      { maxWidth: '100%', color: c.text, fontSize: 22, fontWeight: '800', marginTop: 14 },
   emailDisplay: { color: c.textDim, fontSize: 13, marginTop: 2 },
   removePhotoTxt: { color: c.danger, fontSize: 12, fontWeight: '600', marginTop: 8 },
 
@@ -512,11 +513,11 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   editPencil:   { padding: 4, minWidth: 26, alignItems: 'center' },
   rowSep:       { height: StyleSheet.hairlineWidth, backgroundColor: c.border, marginLeft: 54 },
 
-  groupLabel:   { color: c.textDim, fontSize: 11, fontWeight: '700', letterSpacing: 1.2, marginHorizontal: 22, marginTop: 24, marginBottom: 2 },
+  groupLabel:   { color: c.textDim, fontSize: 12, fontWeight: '700', letterSpacing: 1.2, marginHorizontal: 22, marginTop: 24, marginBottom: 2 },
   infoRow:      { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.glassStroke },
-  infoK:        { color: c.textDim, fontSize: 13 },
+  infoK:        { flexShrink: 1, marginRight: 12, color: c.textDim, fontSize: 13 },
   infoV:        { color: c.text, fontSize: 13, fontWeight: '600', maxWidth: '60%', textAlign: 'right' },
-  infoVSmall:   { fontSize: 11, fontWeight: '500' },
+  infoVSmall:   { fontSize: 12, fontWeight: '500' },
 
   input:        { color: c.text, backgroundColor: c.glassSoft, borderColor: c.glassStroke, borderWidth: 1, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12, fontSize: 15 },
   subHint:      { color: c.textDim, fontSize: 12, lineHeight: 16 },
@@ -529,5 +530,5 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   btnTxt:       { color: '#fff', fontWeight: '800', fontSize: 14 },
 
   actionRow:    { flexDirection: 'row', alignItems: 'center', gap: 14, marginHorizontal: 16, marginTop: 12, paddingHorizontal: 16, paddingVertical: 15, borderRadius: 16, borderWidth: StyleSheet.hairlineWidth, borderColor: c.glassStroke, backgroundColor: c.glassSoft },
-  actionTxt:    { color: c.text, fontWeight: '700', fontSize: 15 },
+  actionTxt:    { flex: 1, color: c.text, fontWeight: '700', fontSize: 15 },
 });

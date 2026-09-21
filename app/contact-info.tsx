@@ -9,7 +9,7 @@
 
 import { brandAlpha, type Palette } from '../constants/theme';
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, ScrollView, Dimensions, Alert, ActivityIndicator, Linking, Switch, useWindowDimensions } from 'react-native';
+import { View, TouchableOpacity, StyleSheet, ScrollView, Dimensions, Alert, ActivityIndicator, Linking, Switch, useWindowDimensions } from 'react-native';
 import { getShareViewing, setShareViewing } from '../lib/viewerPrefs';
 import LinkPreview from '../components/LinkPreview';
 import { useLocalSearchParams, Stack, useRouter } from 'expo-router';
@@ -24,7 +24,7 @@ import {
 import SharedMediaThumb from '../components/chat/SharedMediaThumb';
 import { readCache, writeCache } from '../lib/localCache';
 import { unionWithLocalHistory } from '../lib/messageHistory';
-import { Avatar, AuroraBackground } from '../components/ui';
+import { AppText as Text, Avatar, AuroraBackground } from '../components/ui';
 import { HEADER_TOP } from '../constants/layout';
 
 const URL_RE = /(https?:\/\/[^\s]+)/gi;
@@ -418,7 +418,7 @@ const makeStyles = (c: Palette, SW: number) => StyleSheet.create({
   heroPhone: { color: c.textFaint, fontSize: 14, marginTop: 4 },
   actionsRow: { flexDirection: 'row', justifyContent: 'space-around', paddingHorizontal: 10, paddingVertical: 16, borderBottomWidth: 1, borderColor: c.hairline },
   actionBtn: { alignItems: 'center', gap: 6 },
-  actionIcon: { width: 44, height: 44, borderRadius: 14, backgroundColor: c.glassSoft, borderWidth: 1, borderColor: c.glassStroke, justifyContent: 'center', alignItems: 'center' },
+  actionIcon: { width: 44, height: 44, borderRadius: 14, backgroundColor: c.glass, borderWidth: 1, borderColor: c.glassStroke, justifyContent: 'center', alignItems: 'center' },
   actionLabel: { fontSize: 12, fontWeight: '500' },
   section: { paddingHorizontal: 16, marginTop: 20 },
   sectionHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
@@ -426,10 +426,10 @@ const makeStyles = (c: Palette, SW: number) => StyleSheet.create({
   aboutText: { color: c.text, fontSize: 15, lineHeight: 21 },
   seeAll: { color: c.accent, fontSize: 13, fontWeight: '600', marginBottom: 12 },
   mediaGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 4 },
-  fileRow: { flexDirection: 'row', alignItems: 'center', backgroundColor: c.glassSoft, borderRadius: 12, borderWidth: 1, borderColor: c.glassStroke, padding: 12, marginBottom: 6, gap: 12 },
+  fileRow: { flexDirection: 'row', alignItems: 'center', backgroundColor: c.glass, borderRadius: 12, borderWidth: 1, borderColor: c.glassStroke, padding: 12, marginBottom: 8, gap: 12 },
   fileIcon: { width: 38, height: 38, borderRadius: 10, backgroundColor: 'rgba(6,182,212,0.12)', justifyContent: 'center', alignItems: 'center' },
   fileName: { flex: 1, color: c.text, fontSize: 14, fontWeight: '500' },
-  linkRow: { flexDirection: 'row', alignItems: 'center', backgroundColor: c.glassSoft, borderRadius: 12, borderWidth: 1, borderColor: c.glassStroke, padding: 12, marginBottom: 6, gap: 12 },
+  linkRow: { flexDirection: 'row', alignItems: 'center', backgroundColor: c.glass, borderRadius: 12, borderWidth: 1, borderColor: c.glassStroke, padding: 12, marginBottom: 8, gap: 12 },
   linkIcon: { width: 34, height: 34, borderRadius: 10, backgroundColor: 'rgba(6,182,212,0.12)', justifyContent: 'center', alignItems: 'center' },
   linkUrl: { flex: 1, color: c.accent, fontSize: 13 },
   encryptionCard: { flexDirection: 'row', alignItems: 'flex-start', backgroundColor: brandAlpha(0.06), borderRadius: 12, borderWidth: 1, borderColor: brandAlpha(0.2), padding: 14 },

@@ -9,8 +9,9 @@
 // detection, screenshot capture). Different data, different threat model — they
 // are deliberately not merged.
 
+import { AppText as Text } from '../components/ui/Text';
 import React, { useCallback, useEffect, useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, SectionList, Alert } from 'react-native';
+import { View, StyleSheet, TouchableOpacity, SectionList, Alert } from 'react-native';
 import { Stack, useLocalSearchParams, useRouter, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../lib/theme';
@@ -153,7 +154,7 @@ export default function FamilyAlertsScreen() {
             })}
             style={[st.row, { borderColor: G.line, backgroundColor: item.read ? 'transparent' : brandAlpha(0.07) }]}
           >
-            <View style={[st.icon, { backgroundColor: tint(item) + '22' }]}>
+            <View style={[st.icon, { backgroundColor: item.sev === 'critical' ? colors.danger + '22' : item.sev === 'important' ? brandAlpha(0.13) : G.paneFaint }]}>
               <Ionicons name={ICON_FOR[item.kind] ?? 'notifications'} size={17} color={tint(item)} />
             </View>
             <View style={{ flex: 1 }}>
@@ -162,7 +163,7 @@ export default function FamilyAlertsScreen() {
               </Text>
               <Text style={{ color: colors.textDim, fontSize: 11.5, marginTop: 2 }}>{when(item.at)}</Text>
             </View>
-            {!item.read && <View style={[st.unread, { backgroundColor: colors.primary }]} />}
+            {!item.read && <View style={[st.unread, { backgroundColor: colors.brandOnLight }]} />}
           </TouchableOpacity>
         )}
       />

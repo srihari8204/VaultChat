@@ -1,0 +1,432 @@
+
+> vaultchat@1.2.7 lint
+> expo lint
+
+env: load .env
+env: export S3_PUBLIC_ENDPOINT GOLIVE_LIVEKIT_KEYS GOLIVE_LIVEKIT_API_KEY GOLIVE_LIVEKIT_API_SECRET GOLIVE_LIVEKIT_URL GOLIVE_EGRESS_WS_URL PUBLIC_BASE_URL EXPO_PUBLIC_CRYPTO_BACKEND EXPO_PUBLIC_MONEY_BACKEND
+
+C:\Users\Dell\Desktop\VaultChat0808\VaultChat\app\(constants)\authService.ts
+   11:13  warning  'Crypto' is defined but never used       @typescript-eslint/no-unused-vars
+  431:32  warning  A `require()` style import is forbidden  @typescript-eslint/no-require-imports
+  460:15  warning  A `require()` style import is forbidden  @typescript-eslint/no-require-imports
+  463:9   warning  A `require()` style import is forbidden  @typescript-eslint/no-require-imports
+  499:15  warning  A `require()` style import is forbidden  @typescript-eslint/no-require-imports
+  506:11  warning  A `require()` style import is forbidden  @typescript-eslint/no-require-imports
+  510:15  warning  A `require()` style import is forbidden  @typescript-eslint/no-require-imports
+  515:15  warning  A `require()` style import is forbidden  @typescript-eslint/no-require-imports
+  523:16  warning  A `require()` style import is forbidden  @typescript-eslint/no-require-imports
+
+C:\Users\Dell\Desktop\VaultChat0808\VaultChat\app\(tabs)\chats.tsx
+  264:6  warning  React Hook useEffect has a missing dependency: 'router'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+  440:5  warning  Expected an assignment or function call and instead saw an expression                                      no-unused-expressions
+  790:9  warning  'avatarLetter' is assigned a value but never used                                                          @typescript-eslint/no-unused-vars
+
+C:\Users\Dell\Desktop\VaultChat0808\VaultChat\app\(tabs)\status.tsx
+   37:1   warning  Import in body of module; reorder to top                               import/first
+   38:1   warning  Import in body of module; reorder to top                               import/first
+   39:1   warning  Import in body of module; reorder to top                               import/first
+   52:1   warning  Import in body of module; reorder to top                               import/first
+   53:1   warning  Import in body of module; reorder to top                               import/first
+   54:1   warning  Import in body of module; reorder to top                               import/first
+   55:1   warning  Import in body of module; reorder to top                               import/first
+   56:1   warning  Import in body of module; reorder to top                               import/first
+   57:1   warning  Import in body of module; reorder to top                               import/first
+   58:1   warning  Import in body of module; reorder to top                               import/first
+   59:1   warning  Import in body of module; reorder to top                               import/first
+   60:1   warning  Import in body of module; reorder to top                               import/first
+   61:1   warning  Import in body of module; reorder to top                               import/first
+   62:1   warning  Import in body of module; reorder to top                               import/first
+   63:1   warning  Import in body of module; reorder to top                               import/first
+   64:1   warning  Import in body of module; reorder to top                               import/first
+   65:1   warning  Import in body of module; reorder to top                               import/first
+  119:53  warning  Expected an assignment or function call and instead saw an expression  no-unused-expressions
+
+C:\Users\Dell\Desktop\VaultChat0808\VaultChat\app\_layout.tsx
+  284:6  warning  React Hook useEffect has a missing dependency: 'pathname'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+
+C:\Users\Dell\Desktop\VaultChat0808\VaultChat\app\broadcast.tsx
+  86:6  warning  React Hook useEffect has a missing dependency: 'selected'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+
+C:\Users\Dell\Desktop\VaultChat0808\VaultChat\app\cache-cleanup.tsx
+  65:7  warning  Expected an assignment or function call and instead saw an expression  no-unused-expressions
+
+C:\Users\Dell\Desktop\VaultChat0808\VaultChat\app\call-recording.tsx
+   16:3   warning  'Dimensions' is defined but never used  @typescript-eslint/no-unused-vars
+  200:14  warning  'e' is defined but never used           @typescript-eslint/no-unused-vars
+  212:14  warning  'e' is defined but never used           @typescript-eslint/no-unused-vars
+  225:14  warning  'e' is defined but never used           @typescript-eslint/no-unused-vars
+  254:14  warning  'e' is defined but never used           @typescript-eslint/no-unused-vars
+
+C:\Users\Dell\Desktop\VaultChat0808\VaultChat\app\call-reliability.tsx
+  20:7  warning  'DONE_KEY' is assigned a value but never used  @typescript-eslint/no-unused-vars
+
+C:\Users\Dell\Desktop\VaultChat0808\VaultChat\app\chat-code.tsx
+  23:29  warning  'Platform' is defined but never used  @typescript-eslint/no-unused-vars
+
+C:\Users\Dell\Desktop\VaultChat0808\VaultChat\app\chat-themes.tsx
+  11:57  warning  'Alert' is defined but never used  @typescript-eslint/no-unused-vars
+
+C:\Users\Dell\Desktop\VaultChat0808\VaultChat\app\chat-wallpaper.tsx
+  12:15  warning  'Dimensions' is defined but never used  @typescript-eslint/no-unused-vars
+
+C:\Users\Dell\Desktop\VaultChat0808\VaultChat\app\chat.tsx
+    20:41  warning  'Palette' is defined but never used                                                                                                                                                                                                            @typescript-eslint/no-unused-vars
+    20:50  warning  'ELEVATION' is defined but never used                                                                                                                                                                                                          @typescript-eslint/no-unused-vars
+    23:10  warning  'Audio' is defined but never used                                                                                                                                                                                                              @typescript-eslint/no-unused-vars
+    26:13  warning  'FileSystem' is defined but never used                                                                                                                                                                                                         @typescript-eslint/no-unused-vars
+    27:13  warning  'IntentLauncher' is defined but never used                                                                                                                                                                                                     @typescript-eslint/no-unused-vars
+    32:13  warning  'Sharing' is defined but never used                                                                                                                                                                                                            @typescript-eslint/no-unused-vars
+    36:10  warning  'memo' is defined but never used                                                                                                                                                                                                               @typescript-eslint/no-unused-vars
+    54:3   warning  'Dimensions' is defined but never used                                                                                                                                                                                                         @typescript-eslint/no-unused-vars
+    55:3   warning  'Linking' is defined but never used                                                                                                                                                                                                            @typescript-eslint/no-unused-vars
+    66:10  warning  'Swipeable' is defined but never used                                                                                                                                                                                                          @typescript-eslint/no-unused-vars
+    73:8   warning  'LinkPreview' is defined but never used                                                                                                                                                                                                        @typescript-eslint/no-unused-vars
+    73:23  warning  'extractUrl' is defined but never used                                                                                                                                                                                                         @typescript-eslint/no-unused-vars
+    82:29  warning  'isViewedOnce' is defined but never used                                                                                                                                                                                                       @typescript-eslint/no-unused-vars
+    82:43  warning  'isViewedOnceSync' is defined but never used                                                                                                                                                                                                   @typescript-eslint/no-unused-vars
+    82:61  warning  'markViewedOnce' is defined but never used                                                                                                                                                                                                     @typescript-eslint/no-unused-vars
+    83:26  warning  'isRevokedSync' is defined but never used                                                                                                                                                                                                      @typescript-eslint/no-unused-vars
+    92:1   warning  Import in body of module; reorder to top                                                                                                                                                                                                       import/first
+    93:1   warning  Import in body of module; reorder to top                                                                                                                                                                                                       import/first
+    94:1   warning  Import in body of module; reorder to top                                                                                                                                                                                                       import/first
+    94:22  warning  'putLiveKey' is defined but never used                                                                                                                                                                                                         @typescript-eslint/no-unused-vars
+    95:1   warning  Import in body of module; reorder to top                                                                                                                                                                                                       import/first
+    95:37  warning  'navigateFromUrl' is defined but never used                                                                                                                                                                                                    @typescript-eslint/no-unused-vars
+    96:1   warning  Import in body of module; reorder to top                                                                                                                                                                                                       import/first
+   101:3   warning  'unvotePoll' is defined but never used                                                                                                                                                                                                         @typescript-eslint/no-unused-vars
+   102:3   warning  'voteOnPoll' is defined but never used                                                                                                                                                                                                         @typescript-eslint/no-unused-vars
+   104:3   warning  'decryptFromChat' is defined but never used                                                                                                                                                                                                    @typescript-eslint/no-unused-vars
+   131:3   warning  'groupRefOf' is defined but never used                                                                                                                                                                                                         @typescript-eslint/no-unused-vars
+   134:1   warning  Import in body of module; reorder to top                                                                                                                                                                                                       import/first
+   135:1   warning  Import in body of module; reorder to top                                                                                                                                                                                                       import/first
+   135:10  warning  'groupTypeInfo' is defined but never used                                                                                                                                                                                                      @typescript-eslint/no-unused-vars
+   136:1   warning  Import in body of module; reorder to top                                                                                                                                                                                                       import/first
+   137:1   warning  Import in body of module; reorder to top                                                                                                                                                                                                       import/first
+   138:1   warning  Import in body of module; reorder to top                                                                                                                                                                                                       import/first
+   139:1   warning  Import in body of module; reorder to top                                                                                                                                                                                                       import/first
+   139:8   warning  'VaultBeamBubble' is defined but never used                                                                                                                                                                                                    @typescript-eslint/no-unused-vars
+   140:1   warning  Import in body of module; reorder to top                                                                                                                                                                                                       import/first
+   141:1   warning  Import in body of module; reorder to top                                                                                                                                                                                                       import/first
+   142:1   warning  Import in body of module; reorder to top                                                                                                                                                                                                       import/first
+   143:1   warning  Import in body of module; reorder to top                                                                                                                                                                                                       import/first
+   143:10  warning  'getDecryptedAttachmentUri' is defined but never used                                                                                                                                                                                          @typescript-eslint/no-unused-vars
+   143:37  warning  'getAttachmentLocalUri' is defined but never used                                                                                                                                                                                              @typescript-eslint/no-unused-vars
+   143:60  warning  'parseMediaContent' is defined but never used                                                                                                                                                                                                  @typescript-eslint/no-unused-vars
+   144:1   warning  Import in body of module; reorder to top                                                                                                                                                                                                       import/first
+   144:10  warning  'shouldAutoDownloadNow' is defined but never used                                                                                                                                                                                              @typescript-eslint/no-unused-vars
+   145:1   warning  Import in body of module; reorder to top                                                                                                                                                                                                       import/first
+   145:10  warning  'ProgressRing' is defined but never used                                                                                                                                                                                                       @typescript-eslint/no-unused-vars
+   146:1   warning  Import in body of module; reorder to top                                                                                                                                                                                                       import/first
+   146:10  warning  'getMedia' is defined but never used                                                                                                                                                                                                           @typescript-eslint/no-unused-vars
+   146:20  warning  'copyToCache' is defined but never used                                                                                                                                                                                                        @typescript-eslint/no-unused-vars
+   147:1   warning  Import in body of module; reorder to top                                                                                                                                                                                                       import/first
+   147:10  warning  'thumbDataUri' is defined but never used                                                                                                                                                                                                       @typescript-eslint/no-unused-vars
+   148:1   warning  Import in body of module; reorder to top                                                                                                                                                                                                       import/first
+   149:1   warning  Import in body of module; reorder to top                                                                                                                                                                                                       import/first
+   161:1   warning  Import in body of module; reorder to top                                                                                                                                                                                                       import/first
+   167:3   warning  'useConnectionState' is defined but never used                                                                                                                                                                                                 @typescript-eslint/no-unused-vars
+   169:1   warning  Import in body of module; reorder to top                                                                                                                                                                                                       import/first
+   215:1   warning  Import in body of module; reorder to top                                                                                                                                                                                                       import/first
+   215:16  warning  'idealText' is defined but never used                                                                                                                                                                                                          @typescript-eslint/no-unused-vars
+   215:27  warning  'HL' is defined but never used                                                                                                                                                                                                                 @typescript-eslint/no-unused-vars
+   215:31  warning  'makeStyles' is defined but never used                                                                                                                                                                                                         @typescript-eslint/no-unused-vars
+   216:1   warning  Import in body of module; reorder to top                                                                                                                                                                                                       import/first
+   217:1   warning  Import in body of module; reorder to top                                                                                                                                                                                                       import/first
+   218:71  warning  'FileBubble' is defined but never used                                                                                                                                                                                                         @typescript-eslint/no-unused-vars
+   220:63  warning  'renderWithHighlight' is defined but never used                                                                                                                                                                                                @typescript-eslint/no-unused-vars
+   408:52  warning  Array type using 'Array<T>' is forbidden. Use 'T[]' instead                                                                                                                                                                                    @typescript-eslint/array-type
+   533:6   warning  React Hook useCallback has a missing dependency: 'chat'. Either include it or remove the dependency array                                                                                                                                      react-hooks/exhaustive-deps
+   695:11  warning  A `require()` style import is forbidden                                                                                                                                                                                                        @typescript-eslint/no-require-imports
+  1019:14  warning  Array type using 'Array<T>' is forbidden. Use 'T[]' instead                                                                                                                                                                                    @typescript-eslint/array-type
+  1182:17  warning  'me' is assigned a value but never used                                                                                                                                                                                                        @typescript-eslint/no-unused-vars
+  1203:17  warning  'me' is assigned a value but never used                                                                                                                                                                                                        @typescript-eslint/no-unused-vars
+  1213:17  warning  'me' is assigned a value but never used                                                                                                                                                                                                        @typescript-eslint/no-unused-vars
+  1257:17  warning  'me' is assigned a value but never used                                                                                                                                                                                                        @typescript-eslint/no-unused-vars
+  1284:17  warning  'me' is assigned a value but never used                                                                                                                                                                                                        @typescript-eslint/no-unused-vars
+  1353:5   warning  Unused eslint-disable directive (no problems were reported from 'react-hooks/exhaustive-deps')
+  1478:5   warning  Unused eslint-disable directive (no problems were reported from 'react-hooks/exhaustive-deps')
+  1502:6   warning  React Hook useCallback has a missing dependency: 'chat?.type'. Either include it or remove the dependency array. You can also replace multiple useState variables with useReducer if 'setMentionQuery' needs the current value of 'chat.type'  react-hooks/exhaustive-deps
+  1586:6   warning  React Hook useCallback has a missing dependency: 'composerLp'. Either include it or remove the dependency array                                                                                                                                react-hooks/exhaustive-deps
+  1639:6   warning  React Hook useCallback has unnecessary dependencies: 'chatId' and 'meId'. Either exclude them or remove the dependency array                                                                                                                   react-hooks/exhaustive-deps
+  1778:6   warning  React Hook useCallback has a missing dependency: 'openForward'. Either include it or remove the dependency array                                                                                                                               react-hooks/exhaustive-deps
+  1868:6   warning  React Hook useEffect has missing dependencies: 'chat' and 'title'. Either include them or remove the dependency array                                                                                                                          react-hooks/exhaustive-deps
+  2165:6   warning  React Hook useCallback has missing dependencies: 'openDisappearingPicker', 'openNotifSoundPicker', and 'openScreenshotPicker'. Either include them or remove the dependency array                                                              react-hooks/exhaustive-deps
+  2323:6   warning  React Hook useCallback has an unnecessary dependency: 'chatId'. Either exclude it or remove the dependency array                                                                                                                               react-hooks/exhaustive-deps
+  2602:6   warning  React Hook useCallback has an unnecessary dependency: 'chatId'. Either exclude it or remove the dependency array                                                                                                                               react-hooks/exhaustive-deps
+
+C:\Users\Dell\Desktop\VaultChat0808\VaultChat\app\contact-info.tsx
+   12:58  warning  'Dimensions' is defined but never used                                                                                                                        @typescript-eslint/no-unused-vars
+  150:6   warning  React Hook useEffect has missing dependencies: 'blocked', 'files', 'links', 'media', 'muted', and 'peer'. Either include them or remove the dependency array  react-hooks/exhaustive-deps
+  224:9   warning  'initials' is assigned a value but never used                                                                                                                 @typescript-eslint/no-unused-vars
+
+C:\Users\Dell\Desktop\VaultChat0808\VaultChat\app\delete-account.tsx
+  19:29  warning  'Platform' is defined but never used  @typescript-eslint/no-unused-vars
+
+C:\Users\Dell\Desktop\VaultChat0808\VaultChat\app\emergency-sos.tsx
+  23:7  warning  'SOS_MESSAGE' is assigned a value but never used   @typescript-eslint/no-unused-vars
+  26:7  warning  'TEST_MESSAGE' is assigned a value but never used  @typescript-eslint/no-unused-vars
+
+C:\Users\Dell\Desktop\VaultChat0808\VaultChat\app\encrypted-notes.tsx
+   19:60  warning  'useRef' is defined but never used                                                                               @typescript-eslint/no-unused-vars
+  258:6   warning  React Hook useCallback has a missing dependency: 'openEditor'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+
+C:\Users\Dell\Desktop\VaultChat0808\VaultChat\app\family-history.tsx
+   26:17  warning  'hasPerm' is defined but never used      @typescript-eslint/no-unused-vars
+   26:31  warning  'Permission' is defined but never used   @typescript-eslint/no-unused-vars
+  137:40  warning  A `require()` style import is forbidden  @typescript-eslint/no-require-imports
+
+C:\Users\Dell\Desktop\VaultChat0808\VaultChat\app\family-items.tsx
+  183:6  warning  React Hook useCallback has a missing dependency: 'circleId'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+
+C:\Users\Dell\Desktop\VaultChat0808\VaultChat\app\family-member.tsx
+  205:40  warning  A `require()` style import is forbidden  @typescript-eslint/no-require-imports
+  236:33  warning  A `require()` style import is forbidden  @typescript-eslint/no-require-imports
+
+C:\Users\Dell\Desktop\VaultChat0808\VaultChat\app\family-places.tsx
+  20:30  warning  'Platform' is defined but never used  @typescript-eslint/no-unused-vars
+
+C:\Users\Dell\Desktop\VaultChat0808\VaultChat\app\family-setup.tsx
+  7:95  warning  'Platform' is defined but never used  @typescript-eslint/no-unused-vars
+
+C:\Users\Dell\Desktop\VaultChat0808\VaultChat\app\family.tsx
+   295:12  warning  React Hook useEffect has a missing dependency: 'router'. Either include it or remove the dependency array            react-hooks/exhaustive-deps
+   357:67  warning  React Hook useEffect has a missing dependency: 'refreshMembers'. Either include it or remove the dependency array    react-hooks/exhaustive-deps
+   599:6   warning  React Hook useEffect has a missing dependency: 'active'. Either include it or remove the dependency array            react-hooks/exhaustive-deps
+   795:6   warning  React Hook useEffect has a missing dependency: 'active.groupType'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+   900:33  warning  A `require()` style import is forbidden                                                                              @typescript-eslint/no-require-imports
+  1009:3   warning  Unused eslint-disable directive (no problems were reported from 'react-hooks/exhaustive-deps')
+
+C:\Users\Dell\Desktop\VaultChat0808\VaultChat\app\finance\chitti\new.tsx
+  6:47  warning  'Platform' is defined but never used  @typescript-eslint/no-unused-vars
+
+C:\Users\Dell\Desktop\VaultChat0808\VaultChat\app\finance\customer.tsx
+  8:10  warning  'Ionicons' is defined but never used  @typescript-eslint/no-unused-vars
+
+C:\Users\Dell\Desktop\VaultChat0808\VaultChat\app\finance\interest.tsx
+   7:53   warning  'Platform' is defined but never used                                   @typescript-eslint/no-unused-vars
+  35:100  warning  Expected an assignment or function call and instead saw an expression  no-unused-expressions
+
+C:\Users\Dell\Desktop\VaultChat0808\VaultChat\app\finance\io.tsx
+  41:9  warning  Expected an assignment or function call and instead saw an expression  no-unused-expressions
+  81:9  warning  Expected an assignment or function call and instead saw an expression  no-unused-expressions
+
+C:\Users\Dell\Desktop\VaultChat0808\VaultChat\app\finance\ledger\edit.tsx
+   6:47   warning  'Platform' is defined but never used                                   @typescript-eslint/no-unused-vars
+  45:101  warning  Expected an assignment or function call and instead saw an expression  no-unused-expressions
+
+C:\Users\Dell\Desktop\VaultChat0808\VaultChat\app\finance\ledger\new.tsx
+   6:47  warning  'Platform' is defined but never used                                   @typescript-eslint/no-unused-vars
+  38:37  warning  Expected an assignment or function call and instead saw an expression  no-unused-expressions
+
+C:\Users\Dell\Desktop\VaultChat0808\VaultChat\app\finance\ledger\update.tsx
+  7:53  warning  'Platform' is defined but never used  @typescript-eslint/no-unused-vars
+
+C:\Users\Dell\Desktop\VaultChat0808\VaultChat\app\ghost-mode.tsx
+  53:11  warning  'colors' is assigned a value but never used  @typescript-eslint/no-unused-vars
+  54:9   warning  'S' is assigned a value but never used       @typescript-eslint/no-unused-vars
+  55:9   warning  'router' is assigned a value but never used  @typescript-eslint/no-unused-vars
+
+C:\Users\Dell\Desktop\VaultChat0808\VaultChat\app\group-call-active.tsx
+  505:26  warning  Array type using 'Array<T>' is forbidden. Use 'T[]' instead                                                                                                                                                                                                  @typescript-eslint/array-type
+  695:65  warning  The ref value 'pcsRef.current' will likely have changed by the time this effect cleanup function runs. If this ref points to a node rendered by React, copy 'pcsRef.current' to a variable inside the effect, and use that variable in the cleanup function  react-hooks/exhaustive-deps
+
+C:\Users\Dell\Desktop\VaultChat0808\VaultChat\app\group-chat.tsx
+  30:6  warning  React Hook useEffect has missing dependencies: 'params.groupName' and 'router'. Either include them or remove the dependency array  react-hooks/exhaustive-deps
+
+C:\Users\Dell\Desktop\VaultChat0808\VaultChat\app\group-create.tsx
+  16:22  warning  'Platform' is defined but never used  @typescript-eslint/no-unused-vars
+
+C:\Users\Dell\Desktop\VaultChat0808\VaultChat\app\group-info.tsx
+  176:6   warning  React Hook useCallback has a missing dependency: 'patchChat'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+  186:6   warning  React Hook useCallback has a missing dependency: 'patchChat'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+  214:6   warning  React Hook useCallback has a missing dependency: 'patchChat'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+  237:6   warning  React Hook useCallback has a missing dependency: 'patchChat'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+  536:11  warning  'colors' is assigned a value but never used                                                                     @typescript-eslint/no-unused-vars
+
+C:\Users\Dell\Desktop\VaultChat0808\VaultChat\app\group-insights.tsx
+  140:6  warning  React Hook useCallback has an unnecessary dependency: 'reload'. Either exclude it or remove the dependency array  react-hooks/exhaustive-deps
+
+C:\Users\Dell\Desktop\VaultChat0808\VaultChat\app\group-invites.tsx
+  22:22  warning  'Platform' is defined but never used  @typescript-eslint/no-unused-vars
+
+C:\Users\Dell\Desktop\VaultChat0808\VaultChat\app\group-tasks.tsx
+  13:22  warning  'Platform' is defined but never used  @typescript-eslint/no-unused-vars
+
+C:\Users\Dell\Desktop\VaultChat0808\VaultChat\app\group-trip.tsx
+  13:22  warning  'Platform' is defined but never used  @typescript-eslint/no-unused-vars
+
+C:\Users\Dell\Desktop\VaultChat0808\VaultChat\app\hidden-chats.tsx
+  38:11  warning  'colors' is assigned a value but never used  @typescript-eslint/no-unused-vars
+  39:9   warning  'S' is assigned a value but never used       @typescript-eslint/no-unused-vars
+
+C:\Users\Dell\Desktop\VaultChat0808\VaultChat\app\import-chats.tsx
+  176:6  warning  React Hook useCallback has a missing dependency: 'runParse'. Either include it or remove the dependency array         react-hooks/exhaustive-deps
+  336:6  warning  React Hook useCallback has a missing dependency: 'finishCancelled'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+
+C:\Users\Dell\Desktop\VaultChat0808\VaultChat\app\incoming-call.tsx
+   10:10  warning  'Alert' is defined but never used                                                                                                       @typescript-eslint/no-unused-vars
+  114:9   warning  'ACCEPT_OFFER_WAIT_MS' is assigned a value but never used                                                                               @typescript-eslint/no-unused-vars
+  115:27  warning  'setWaitingForOffer' is assigned a value but never used                                                                                 @typescript-eslint/no-unused-vars
+  169:6   warning  React Hook useEffect has missing dependencies: 'chatId', 'displayName', and 'type'. Either include them or remove the dependency array  react-hooks/exhaustive-deps
+
+C:\Users\Dell\Desktop\VaultChat0808\VaultChat\app\live-view.tsx
+   17:26  warning  'Platform' is defined but never used                                                                                                                @typescript-eslint/no-unused-vars
+  475:6   warning  React Hook useEffect has missing dependencies: 'releaseOwnedMedia', 'startCam', and 'startMic'. Either include them or remove the dependency array  react-hooks/exhaustive-deps
+  637:6   warning  React Hook useEffect has a missing dependency: 'releaseOwnedMedia'. Either include it or remove the dependency array                                react-hooks/exhaustive-deps
+
+C:\Users\Dell\Desktop\VaultChat0808\VaultChat\app\live\join\[code].tsx
+  32:14  warning  'Platform' is defined but never used  @typescript-eslint/no-unused-vars
+
+C:\Users\Dell\Desktop\VaultChat0808\VaultChat\app\location-sharing.tsx
+  12:10  warning  'brandAlpha' is defined but never used  @typescript-eslint/no-unused-vars
+  17:29  warning  'Platform' is defined but never used    @typescript-eslint/no-unused-vars
+
+C:\Users\Dell\Desktop\VaultChat0808\VaultChat\app\location.tsx
+  21:38  warning  'Platform' is defined but never used  @typescript-eslint/no-unused-vars
+
+C:\Users\Dell\Desktop\VaultChat0808\VaultChat\app\media-gallery.tsx
+   11:75  warning  'Dimensions' is defined but never used   @typescript-eslint/no-unused-vars
+  121:17  warning  'SW' is assigned a value but never used  @typescript-eslint/no-unused-vars
+
+C:\Users\Dell\Desktop\VaultChat0808\VaultChat\app\media-viewer.tsx
+   10:22  warning  'Dimensions' is defined but never used                                                                                                                                                                                                            @typescript-eslint/no-unused-vars
+   53:17  warning  'SW' is assigned a value but never used                                                                                                                                                                                                           @typescript-eslint/no-unused-vars
+   53:29  warning  'SH' is assigned a value but never used                                                                                                                                                                                                           @typescript-eslint/no-unused-vars
+   56:51  warning  'save' is assigned a value but never used                                                                                                                                                                                                         @typescript-eslint/no-unused-vars
+  189:6   warning  React Hook useEffect has missing dependencies: 'encrypted', 'fileType', 'fileUri', 'filename', 'isMine', 'isViewOnce', 'mime', and 'msgType'. Either include them or remove the dependency array                                                  react-hooks/exhaustive-deps
+  350:8   warning  React Hook useEffect has an unnecessary dependency: 'waitingForAuth'. Either exclude it or remove the dependency array. Outer scope values like 'waitingForAuth' aren't valid dependencies because mutating them doesn't re-render the component  react-hooks/exhaustive-deps
+
+C:\Users\Dell\Desktop\VaultChat0808\VaultChat\app\meeting-scheduler.tsx
+  398:14  warning  'e' is defined but never used  @typescript-eslint/no-unused-vars
+
+C:\Users\Dell\Desktop\VaultChat0808\VaultChat\app\message-reminder.tsx
+  79:11  warning  'colors' is assigned a value but never used  @typescript-eslint/no-unused-vars
+  80:9   warning  'S' is assigned a value but never used       @typescript-eslint/no-unused-vars
+
+C:\Users\Dell\Desktop\VaultChat0808\VaultChat\app\mpin-recover.tsx
+  56:6  warning  React Hook useEffect has a missing dependency: 'router'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+
+C:\Users\Dell\Desktop\VaultChat0808\VaultChat\app\navigate.tsx
+  78:6  warning  React Hook useEffect has a missing dependency: 's.routeOpts'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+  84:6  warning  React Hook useEffect has a missing dependency: 'params.name'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+
+C:\Users\Dell\Desktop\VaultChat0808\VaultChat\app\new-chat.tsx
+  10:39  warning  'Platform' is defined but never used  @typescript-eslint/no-unused-vars
+
+C:\Users\Dell\Desktop\VaultChat0808\VaultChat\app\notifications.tsx
+  316:11  warning  'colors' is assigned a value but never used  @typescript-eslint/no-unused-vars
+  317:9   warning  'S' is assigned a value but never used       @typescript-eslint/no-unused-vars
+
+C:\Users\Dell\Desktop\VaultChat0808\VaultChat\app\offline-mode.tsx
+   5:64  warning  'Platform' is defined but never used                                                                             @typescript-eslint/no-unused-vars
+  99:6   warning  React Hook useEffect has a missing dependency: 'queue.length'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+
+C:\Users\Dell\Desktop\VaultChat0808\VaultChat\app\onboard-profile.tsx
+  24:3  warning  'Alert' is defined but never used  @typescript-eslint/no-unused-vars
+
+C:\Users\Dell\Desktop\VaultChat0808\VaultChat\app\perf-debug.tsx
+  26:36  warning  Caution: `perf` also has a named export `snapshot`. Check if you meant to write `import {snapshot} from '../lib/perf'` instead        import/no-named-as-default-member
+  27:52  warning  Caution: `perf` also has a named export `recentSends`. Check if you meant to write `import {recentSends} from '../lib/perf'` instead  import/no-named-as-default-member
+  32:15  warning  Caution: `perf` also has a named export `snapshot`. Check if you meant to write `import {snapshot} from '../lib/perf'` instead        import/no-named-as-default-member
+  33:16  warning  Caution: `perf` also has a named export `recentSends`. Check if you meant to write `import {recentSends} from '../lib/perf'` instead  import/no-named-as-default-member
+  42:19  warning  Caution: `perf` also has a named export `recentMarks`. Check if you meant to write `import {recentMarks} from '../lib/perf'` instead  import/no-named-as-default-member
+
+C:\Users\Dell\Desktop\VaultChat0808\VaultChat\app\reader.tsx
+  37:11  warning  'width' is assigned a value but never used  @typescript-eslint/no-unused-vars
+
+C:\Users\Dell\Desktop\VaultChat0808\VaultChat\app\settings.tsx
+  38:24  warning  'brandAlpha' is defined but never used    @typescript-eslint/no-unused-vars
+  54:1   warning  Import in body of module; reorder to top  import/first
+  64:1   warning  Import in body of module; reorder to top  import/first
+
+C:\Users\Dell\Desktop\VaultChat0808\VaultChat\app\shelf.tsx
+  88:5  warning  Expected an assignment or function call and instead saw an expression  no-unused-expressions
+
+C:\Users\Dell\Desktop\VaultChat0808\VaultChat\app\shop-book.tsx
+   16:53  warning  'Platform' is defined but never used                                   @typescript-eslint/no-unused-vars
+  290:52  warning  Expected an assignment or function call and instead saw an expression  no-unused-expressions
+
+C:\Users\Dell\Desktop\VaultChat0808\VaultChat\app\slideshow.tsx
+  11:10  warning  'Dimensions' is defined but never used   @typescript-eslint/no-unused-vars
+  24:17  warning  'SW' is assigned a value but never used  @typescript-eslint/no-unused-vars
+  24:29  warning  'SH' is assigned a value but never used  @typescript-eslint/no-unused-vars
+
+C:\Users\Dell\Desktop\VaultChat0808\VaultChat\app\split.tsx
+  20:17  warning  'Platform' is defined but never used  @typescript-eslint/no-unused-vars
+
+C:\Users\Dell\Desktop\VaultChat0808\VaultChat\app\status-privacy.tsx
+  63:30  warning  Expected an assignment or function call and instead saw an expression  no-unused-expressions
+
+C:\Users\Dell\Desktop\VaultChat0808\VaultChat\app\stickers.tsx
+  16:36  warning  'Dimensions' is defined but never used  @typescript-eslint/no-unused-vars
+
+C:\Users\Dell\Desktop\VaultChat0808\VaultChat\app\storage-manager.tsx
+   15:64  warning  'Platform' is defined but never used                                                                                @typescript-eslint/no-unused-vars
+  109:43  warning  React Hook useEffect has a missing dependency: 'loadStorageData'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+
+C:\Users\Dell\Desktop\VaultChat0808\VaultChat\app\story-viewer.tsx
+  208:6  warning  React Hook useEffect has missing dependencies: 'current' and 'entry'. Either include them or remove the dependency array  react-hooks/exhaustive-deps
+  230:6  warning  React Hook useEffect has a missing dependency: 'current'. Either include it or remove the dependency array                react-hooks/exhaustive-deps
+  270:6  warning  React Hook useEffect has a missing dependency: 'entry'. Either include it or remove the dependency array                  react-hooks/exhaustive-deps
+  285:6  warning  React Hook useEffect has a missing dependency: 'current'. Either include it or remove the dependency array                react-hooks/exhaustive-deps
+
+C:\Users\Dell\Desktop\VaultChat0808\VaultChat\app\vault.tsx
+  17:10  warning  'TextInput' is defined but never used  @typescript-eslint/no-unused-vars
+
+C:\Users\Dell\Desktop\VaultChat0808\VaultChat\app\video-player.tsx
+   7:33  warning  'Dimensions' is defined but never used         @typescript-eslint/no-unused-vars
+  37:17  warning  'SCREEN_W' is assigned a value but never used  @typescript-eslint/no-unused-vars
+  37:35  warning  'SCREEN_H' is assigned a value but never used  @typescript-eslint/no-unused-vars
+
+C:\Users\Dell\Desktop\VaultChat0808\VaultChat\app\videocall.tsx
+   27:106  warning  'enterPipMode' is defined but never used                                                                                     @typescript-eslint/no-unused-vars
+   36:10   warning  'callFail' is defined but never used                                                                                         @typescript-eslint/no-unused-vars
+   36:20   warning  'offerTag' is defined but never used                                                                                         @typescript-eslint/no-unused-vars
+  108:7    warning  'IDENTITY' is assigned a value but never used                                                                                @typescript-eslint/no-unused-vars
+  298:6    warning  React Hook useEffect has a missing dependency: 'resumeParam'. Either include it or remove the dependency array               react-hooks/exhaustive-deps
+  329:6    warning  React Hook useEffect has a missing dependency: 'router'. Either include it or remove the dependency array                    react-hooks/exhaustive-deps
+  602:34   warning  Array type using 'Array<T>' is forbidden. Use 'T[]' instead                                                                  @typescript-eslint/array-type
+  642:6    warning  React Hook useCallback has a missing dependency: 'chatId'. Either include it or remove the dependency array                  react-hooks/exhaustive-deps
+  956:6    warning  React Hook useCallback has missing dependencies: 'chatId' and 'peerUid'. Either include them or remove the dependency array  react-hooks/exhaustive-deps
+
+C:\Users\Dell\Desktop\VaultChat0808\VaultChat\app\voicecall.tsx
+   39:106  warning  'enterPipMode' is defined but never used                                                                        @typescript-eslint/no-unused-vars
+   47:10   warning  'callFail' is defined but never used                                                                            @typescript-eslint/no-unused-vars
+   47:20   warning  'offerTag' is defined but never used                                                                            @typescript-eslint/no-unused-vars
+  181:6    warning  React Hook useEffect has a missing dependency: 'resumeParam'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+  211:6    warning  React Hook useEffect has a missing dependency: 'router'. Either include it or remove the dependency array       react-hooks/exhaustive-deps
+  383:34   warning  Array type using 'Array<T>' is forbidden. Use 'T[]' instead                                                     @typescript-eslint/array-type
+  429:6    warning  React Hook useCallback has a missing dependency: 'chatId'. Either include it or remove the dependency array     react-hooks/exhaustive-deps
+
+C:\Users\Dell\Desktop\VaultChat0808\VaultChat\components\MessageActionSheet.tsx
+  11:13  warning  'Dimensions' is defined but never used  @typescript-eslint/no-unused-vars
+
+C:\Users\Dell\Desktop\VaultChat0808\VaultChat\components\ProtectedMediaView.tsx
+  23:34  warning  'Dimensions' is defined but never used  @typescript-eslint/no-unused-vars
+
+C:\Users\Dell\Desktop\VaultChat0808\VaultChat\components\chat\MessageBubble.tsx
+   268:9  warning  The 'counts' logical expression could make the dependencies of useCallback Hook (at line 308) change on every render. To fix this, wrap the initialization of 'counts' in its own useMemo() Hook  react-hooks/exhaustive-deps
+   269:9  warning  The 'mine' logical expression could make the dependencies of useCallback Hook (at line 308) change on every render. To fix this, wrap the initialization of 'mine' in its own useMemo() Hook      react-hooks/exhaustive-deps
+   376:9  warning  'S' is assigned a value but never used                                                                                                                                                            @typescript-eslint/no-unused-vars
+   586:6  warning  React Hook useCallback has missing dependencies: 'encrypted', 'fileRouter', and 'isMine'. Either include them or remove the dependency array                                                      react-hooks/exhaustive-deps
+   694:6  warning  React Hook useCallback has an unnecessary dependency: 'authHeader'. Either exclude it or remove the dependency array                                                                              react-hooks/exhaustive-deps
+   820:6  warning  React Hook useEffect has a missing dependency: 'download'. Either include it or remove the dependency array                                                                                       react-hooks/exhaustive-deps
+  1183:6  warning  React Hook useEffect has a missing dependency: 'msg.id'. Either include it or remove the dependency array                                                                                         react-hooks/exhaustive-deps
+  1292:6  warning  React Hook useCallback has missing dependencies: 'msg.meta.localUri' and 'msg.meta?.mime'. Either include them or remove the dependency array                                                     react-hooks/exhaustive-deps
+
+C:\Users\Dell\Desktop\VaultChat0808\VaultChat\components\chat\chatStyles.ts
+  74:5  warning  React Hook useMemo has a missing dependency: 'm'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+
+C:\Users\Dell\Desktop\VaultChat0808\VaultChat\components\games\Rummy.tsx
+  36:41  warning  'Platform' is defined but never used  @typescript-eslint/no-unused-vars
+
+C:\Users\Dell\Desktop\VaultChat0808\VaultChat\components\nav\NavMap.tsx
+  348:6  warning  React Hook useEffect has a missing dependency: 'lock'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+  373:6  warning  React Hook useEffect has a missing dependency: 'pin'. Either include it or remove the dependency array   react-hooks/exhaustive-deps
+
+C:\Users\Dell\Desktop\VaultChat0808\VaultChat\components\nav\maplibreAsset.ts
+  5:1  warning  Unused eslint-disable directive (no problems were reported)
+
+✖ 268 problems (0 errors, 268 warnings)
+  0 errors and 54 warnings potentially fixable with the `--fix` option.
+

@@ -58,7 +58,8 @@ export function chunkMaskFromBlocks(
     if (first < 0 || last >= chunkCount || last < first) continue;
     for (let g = first; g <= last; g++) { if (bm.set(g)) any = true; }
   }
-  return any ? bm.encode() : null;
+  // HTTP /relay/received accepts raw base64, not the local b:/r: encoding.
+  return any ? bm.toBase64() : null;
 }
 
 /**
@@ -86,7 +87,7 @@ export function chunkMaskFromCommitted(committed: Iterable<number>, chunkCount: 
     if (!Number.isInteger(c) || c < 0 || c >= chunkCount) continue;
     if (bm.set(c)) any = true;
   }
-  return any ? bm.encode() : null;
+  return any ? bm.toBase64() : null;
 }
 
 /**
@@ -249,6 +250,31 @@ if (require.main === module) {
     A(ChunkBitmap.decode(mask, CHUNKS).popcount() === 5 &&
       contiguousVerifiedPrefix(committed, CHUNKS) === 3,
       '38. recv_mask carries all 5 verified chunks while haveBytes may claim only 3');
+  }
+
+  // Go's base64.StdEncoding rejects local b:/r: tags. Cover both choices
+  // without changing the compact local/socket bitmap representation.
+  for (const [prefix, chunks, ids] of [
+    ['b:', 20, [0, 2, 4, 6, 8, 10, 12, 14, 16, 18]],
+    ['r:', 256, Array.from({ length: 128 }, (_, i) => i)],
+  ] as [string, number, number[]][]) {
+    const local = new ChunkBitmap(chunks);
+    for (const id of ids) local.set(id);
+    A(local.encode().startsWith(prefix), `${prefix} fixture exercises the local encoding`);
+    const masks = [
+      chunkMaskFromCommitted(ids, chunks),
+      chunkMaskFromBlocks(ids, i => ({ blockPlainOffset: i * CHUNK, blockBytes: CHUNK }), CHUNK, chunks),
+    ];
+    for (const mask of masks) {
+      const rawBase64 = typeof mask === 'string'
+        && /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(mask);
+      A(rawBase64, `${prefix} HTTP report is standard padded base64 without a tag`);
+      const raw = rawBase64 ? atob(mask!) : '';
+      A(raw.length === Math.ceil(chunks / 8)
+        && Array.from({ length: chunks }, (_, i) =>
+          !!(raw.charCodeAt(i >> 3) & (1 << (i & 7))) === ids.includes(i)).every(Boolean),
+        `${prefix} HTTP report preserves byte length and every LSB-first bit`);
+    }
   }
 
   console.log(failures === 0

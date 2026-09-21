@@ -1,3 +1,5 @@
+import { AppText as Text } from '../components/ui/Text';
+import { AuroraBackground } from '../components/ui';
 // app/vault.tsx
 // Real 8-PIN gated secure storage
 // AES-256-GCM encrypted files via d2deService
@@ -10,7 +12,7 @@ import { BRAND_ACCENT } from '../constants/theme';
 import { Ionicons } from '@expo/vector-icons';
 import React, { useState, useEffect, useMemo } from 'react';
 import {
-  View, Text, TouchableOpacity, StyleSheet,
+  View, TouchableOpacity, StyleSheet,
   FlatList, Alert, Vibration, ActivityIndicator,
   Modal, TextInput,
 } from 'react-native';
@@ -23,7 +25,7 @@ import * as FileSystem from 'expo-file-system/legacy';
 import * as Sharing from 'expo-sharing';
 import { vaultEncrypt, vaultDecrypt } from '../lib/vaultCrypto';
 import type { Palette } from '../constants/theme';
-import { useColors } from '../lib/theme';
+import { useColors, useTheme } from '../lib/theme';
 import { HEADER_TOP } from '../constants/layout';
 import { permissionDenied } from '../lib/permissionDenied';
 
@@ -75,7 +77,8 @@ function formatDate(ms: number): string {
 
 function PinGate({ onUnlock }: { onUnlock: (pin: string) => void }) {
   const c = useColors();
-  const pinStyles = useMemo(() => makePinStyles(c), [c]);
+  const { scheme } = useTheme();
+  const pinStyles = useMemo(() => makePinStyles(c, scheme === 'light'), [c, scheme]);
   const [pin,   setPin]   = useState<string[]>([]);
   const [error, setError] = useState('');
   const [shake, setShake] = useState(false);
@@ -113,6 +116,7 @@ function PinGate({ onUnlock }: { onUnlock: (pin: string) => void }) {
 
   return (
     <View style={pinStyles.container}>
+      <AuroraBackground />
       <Text style={pinStyles.lockIcon}>🔒</Text>
       <Text style={pinStyles.title}>Vault</Text>
       <Text style={pinStyles.sub}>Enter 8-digit PIN to access</Text>
@@ -408,11 +412,12 @@ export default function VaultScreen() {
   // ─────────────────────────────────────────────────────────────
   return (
     <View style={styles.container}>
+      <AuroraBackground />
 
       {/* Header */}
       <View style={styles.header}>
         <TouchableOpacity accessibilityRole="button" accessibilityLabel="Back" onPress={() => router.back()}>
-          <Ionicons name="arrow-back" size={26} color={BRAND_ACCENT} />
+          <Ionicons name="arrow-back" size={26} color={c.primary} />
         </TouchableOpacity>
         <View style={styles.headerCenter}>
           <Text style={styles.headerTitle}>Vault</Text>
@@ -477,7 +482,7 @@ export default function VaultScreen() {
       {/* File list */}
       {loading ? (
         <View style={styles.loadingWrap}>
-          <ActivityIndicator color={BRAND_ACCENT} size="large" />
+          <ActivityIndicator color={c.primary} size="large" />
           <Text style={styles.loadingText}>Encrypting...</Text>
         </View>
       ) : (
@@ -599,7 +604,7 @@ export default function VaultScreen() {
 // Styles
 // ─────────────────────────────────────────────────────────────────
 
-const makePinStyles = (c: Palette) => StyleSheet.create({
+const makePinStyles = (c: Palette, light: boolean) => StyleSheet.create({
   container: {
     flex: 1, backgroundColor: c.glassSoft,
     alignItems: 'center', justifyContent: 'center',
@@ -614,8 +619,8 @@ const makePinStyles = (c: Palette) => StyleSheet.create({
     backgroundColor: c.surfaceSolid,
     borderWidth: 1.5, borderColor: c.glassStroke,
   },
-  dotFilled: { backgroundColor: BRAND_ACCENT, borderColor: BRAND_ACCENT },
-  error:     { color: '#FF4D6D', fontSize: 13, marginBottom: 12 },
+  dotFilled: { backgroundColor: c.primary, borderColor: c.primary },
+  error:     { color: light ? c.danger : '#FF4D6D', fontSize: 13, marginBottom: 12 },
   keyRow:    { flexDirection: 'row', gap: 20, marginBottom: 14 },
   key: {
     width: 72, height: 72, borderRadius: 36,
@@ -629,7 +634,7 @@ const makePinStyles = (c: Palette) => StyleSheet.create({
 });
 
 const makeStyles = (c: Palette) => StyleSheet.create({
-  container:    { flex: 1, backgroundColor: c.glassSoft },
+  container:    { flex: 1, backgroundColor: c.bg },
 
   // Header
   header: {
@@ -639,12 +644,12 @@ const makeStyles = (c: Palette) => StyleSheet.create({
     borderBottomWidth: 0.5, borderBottomColor: c.glassStroke,
     gap: 12,
   },
-  back:         { fontSize: 28, color: BRAND_ACCENT, fontWeight: 'bold' },
+  back:         { fontSize: 28, color: c.primary, fontWeight: 'bold' },
   headerCenter: { flex: 1 },
   headerTitle:  { fontSize: 18, fontWeight: 'bold', color: c.text },
-  headerSub:    { fontSize: 9, color: BRAND_ACCENT, marginTop: 1 },
+  headerSub:    { fontSize: 12, color: c.primary, marginTop: 1 },
   backupBtn: {
-    width: 36, height: 36, backgroundColor: c.surfaceSolid,
+    width: 44, height: 44, backgroundColor: c.glassSoft,
     borderRadius: 9, borderWidth: 0.5, borderColor: c.glassStroke,
     justifyContent: 'center', alignItems: 'center',
   },
@@ -658,7 +663,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   },
   statItem:    { flex: 1, alignItems: 'center' },
   statNum:     { fontSize: 15, fontWeight: 'bold', color: c.text },
-  statLabel:   { fontSize: 10, color: c.textDim, marginTop: 2 },
+  statLabel:   { fontSize: 12, color: c.textDim, marginTop: 2 },
   statDivider: { width: 0.5, backgroundColor: c.surfaceSolid, marginVertical: 4 },
 
   // Tabs
@@ -670,15 +675,15 @@ const makeStyles = (c: Palette) => StyleSheet.create({
     flex: 1, alignItems: 'center', paddingVertical: 10, gap: 3,
   },
   tabActive: {
-    borderBottomWidth: 2, borderBottomColor: BRAND_ACCENT,
+    borderBottomWidth: 2, borderBottomColor: c.primary,
   },
   tabIcon:       { fontSize: 20 },
-  tabText:       { fontSize: 10, color: c.textDim },
-  tabTextActive: { color: BRAND_ACCENT, fontWeight: 'bold' },
+  tabText:       { fontSize: 12, color: c.textDim },
+  tabTextActive: { color: c.primary, fontWeight: 'bold' },
   tabCount: {
     borderRadius: 8, paddingHorizontal: 5, paddingVertical: 1,
   },
-  tabCountText:  { fontSize: 9, fontWeight: 'bold' },
+  tabCountText:  { fontSize: 12, fontWeight: 'bold' },
 
   // Loading
   loadingWrap: {
@@ -711,14 +716,14 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   fileIconText:  { fontSize: 22 },
   fileInfo:      { flex: 1 },
   fileName:      { fontSize: 14, fontWeight: 'bold', color: c.text, marginBottom: 3 },
-  fileMeta:      { fontSize: 11, color: c.textDim },
+  fileMeta:      { fontSize: 12, color: c.textDim },
   fileActions:   { flexDirection: 'row', alignItems: 'center', gap: 8 },
   encBadge: {
     backgroundColor: 'rgba(34,197,94,0.14)', borderRadius: 6,
-    borderWidth: 0.5, borderColor: BRAND_ACCENT + '44',
+    borderWidth: 0.5, borderColor: c.primary + '44',
     paddingHorizontal: 6, paddingVertical: 2,
   },
-  encBadgeText:  { fontSize: 9, color: BRAND_ACCENT, fontWeight: 'bold' },
+  encBadgeText:  { fontSize: 12, color: c.primary, fontWeight: 'bold' },
   deleteBtn:     { padding: 4 },
   deleteBtnText: { fontSize: 16 },
 
@@ -726,7 +731,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   fab: {
     position: 'absolute', right: 18, bottom: 74,
     width: 54, height: 54, borderRadius: 27,
-    backgroundColor: BRAND_ACCENT,
+    backgroundColor: c.primary,
     justifyContent: 'center', alignItems: 'center',
     elevation: 6,
   },
@@ -768,10 +773,10 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   },
   backupCancelText:  { color: c.textDim, fontWeight: 'bold' },
   backupConfirmBtn: {
-    flex: 1, backgroundColor: BRAND_ACCENT,
+    flex: 1, backgroundColor: c.primary,
     borderRadius: 10, paddingVertical: 13, alignItems: 'center',
   },
   backupConfirmText: { color: '#FFFFFF', fontWeight: 'bold', fontSize: 15 },
-  backupLastText:    { fontSize: 11, color: c.textDim, textAlign: 'center' },
-  backupNote:        { fontSize: 10, color: c.text, textAlign: 'center', marginTop: 6 },
+  backupLastText:    { fontSize: 12, color: c.textDim, textAlign: 'center' },
+  backupNote:        { fontSize: 12, color: c.text, textAlign: 'center', marginTop: 6 },
 });

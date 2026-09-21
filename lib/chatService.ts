@@ -1182,37 +1182,41 @@ export function chatTitle(c: ChatSummary): string {
 async function decodeChatList(bytes: Uint8Array): Promise<ChatSummary[]> {
   const { ChatListReply } = await import('./ccwire/gen/ccwire/v1/chats_list_pb');
   return ChatListReply.fromBinary(bytes).chats
-    .map((c): ChatSummary | null => startupChatSummary({
-      id:            c.id,
-      type:          c.type as ChatSummary['type'],
-      name:          c.name ?? null,
-      photoURL:      c.photoUrl ?? null,
-      createdBy:     c.createdBy ?? null,
-      createdAt:     c.createdAt,
-      updatedAt:     c.updatedAt,
-      lastMessageId: c.lastMessageId,
-      lastMessageAt: c.lastMessageAt ?? null,
-      myRole:        c.myRole as ChatSummary['myRole'],
-      myLastReadId:  c.myLastReadId,
-      muted:         c.muted,
-      pinned:        c.pinned,
-      favourite:     c.favourite,
-      archived:      c.archived,
-      hidden:        c.hidden,
-      screenshotMode: c.screenshotMode as ChatSummary['screenshotMode'],
-      vanishMode:    c.vanishMode,
-      unreadCount:   Number(c.unreadCount),
-      peerUserId:    c.peerUserId ?? null,
-      peerName:      c.peerName ?? null,
-      peerPhotoURL:  c.peerPhotoUrl ?? null,
-      peerOnline:    c.peerOnline,
-      peerLastSeenAt: c.peerLastSeenAt ?? null,
-      peerLastReadMessageId:      c.peerLastReadMessageId ?? '',
-      peerLastDeliveredMessageId: c.peerLastDeliveredMessageId ?? '',
-      anonMasked:    c.anonMasked,
-      expiresAt:     c.expiresAt ?? null,
-    }))
-    .filter((c): c is ChatSummary => c !== null);
+    .map((c): ChatSummary => {
+      const row = startupChatSummary({
+        id:            c.id,
+        type:          c.type as ChatSummary['type'],
+        name:          c.name ?? null,
+        photoURL:      c.photoUrl ?? null,
+        createdBy:     c.createdBy ?? null,
+        createdAt:     c.createdAt,
+        updatedAt:     c.updatedAt,
+        lastMessageId: c.lastMessageId,
+        lastMessageAt: c.lastMessageAt ?? null,
+        myRole:        c.myRole as ChatSummary['myRole'],
+        myLastReadId:  c.myLastReadId,
+        muted:         c.muted,
+        pinned:        c.pinned,
+        favourite:     c.favourite,
+        archived:      c.archived,
+        hidden:        c.hidden,
+        screenshotMode: c.screenshotMode as ChatSummary['screenshotMode'],
+        vanishMode:    c.vanishMode,
+        unreadCount:   Number(c.unreadCount),
+        peerUserId:    c.peerUserId ?? null,
+        peerName:      c.peerName ?? null,
+        peerPhotoURL:  c.peerPhotoUrl ?? null,
+        peerOnline:    c.peerOnline,
+        peerLastSeenAt: c.peerLastSeenAt ?? null,
+        peerLastReadMessageId:      c.peerLastReadMessageId ?? '',
+        peerLastDeliveredMessageId: c.peerLastDeliveredMessageId ?? '',
+        anonMasked:    c.anonMasked,
+        expiresAt:     c.expiresAt ?? null,
+      });
+      // A partial list would make cacheChats prune valid offline chats.
+      if (!row) throw new Error('Chat list contains a row without an id');
+      return row;
+    });
 }
 
 export async function listChats(opts: { includeHidden?: boolean } = {}): Promise<ChatSummary[]> {

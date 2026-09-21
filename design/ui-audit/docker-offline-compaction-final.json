@@ -1,0 +1,14 @@
+{
+    "startedAt":  "2026-09-21T15:00:39.0739508+05:30",
+    "target":  "C:\\Users\\Dell\\AppData\\Local\\Docker\\wsl\\disk\\docker_data.vhdx",
+    "operation":  "Offline DiskPart compact vdisk",
+    "success":  true,
+    "beforeFileBytes":  264240103424,
+    "beforeCFreeBytes":  10523852800,
+    "diskpartExitCode":  0,
+    "afterFileBytes":  39055261696,
+    "afterCFreeBytes":  235746516992,
+    "fileReductionBytes":  225184841728,
+    "cFreeIncreaseBytes":  225222664192,
+    "finishedAt":  "2026-09-21T15:01:46.3580854+05:30"
+}

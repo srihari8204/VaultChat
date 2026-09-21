@@ -12,12 +12,14 @@
 import React, { useMemo, useState } from 'react';
 import { KeyboardSafe } from '../components/ui';
 import {
-  View, Text, StyleSheet, TouchableOpacity, ScrollView, TextInput, Alert,
+  View, StyleSheet, TouchableOpacity, ScrollView, TextInput, Alert,
   ActivityIndicator, Platform,
 } from 'react-native';
 import { Stack, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../lib/theme';
+import { AuroraBackground } from '../components/ui/AuroraBackground';
+import { AppText as Text } from '../components/ui/Text';
 import { brandAlpha } from '../constants/theme';
 import { GROUP_TYPES, groupTypeInfo, type GroupType } from '../lib/groups/catalog';
 import { saveGroup, setActiveGroupId } from '../lib/groups/store';
@@ -80,7 +82,8 @@ export default function GroupCreateScreen() {
 
   return (
     <KeyboardSafe style={{ flex: 1, backgroundColor: colors.bg }}>
-      <Stack.Screen options={{ title: 'New group', headerTitleAlign: 'center' }} />
+      <AuroraBackground variant="chat" />
+      <Stack.Screen options={{ headerShown: true, headerStyle: { backgroundColor: colors.bg }, headerTintColor: colors.text, headerShadowVisible: false,  title: 'New group', headerTitleAlign: 'center' }} />
       <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 44 }} keyboardShouldPersistTaps="handled">
 
         {/* live preview — the identity the group will actually have */}

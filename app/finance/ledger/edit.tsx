@@ -1,17 +1,20 @@
 // app/finance/ledger/edit.tsx — edit an existing ledger's terms (not balance).
 
 import React, { useCallback, useEffect, useState } from 'react';
+import { useFinanceTheme } from '../../../components/finance/useFinanceTheme';
 import { KeyboardSafe } from '../../../components/ui';
 import { View, ScrollView, StyleSheet, Alert, Platform } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { DateTimePickerAndroid } from '@react-native-community/datetimepicker';
-import { FIN } from '../../../constants/financeTheme';
+import { type FinancePalette } from '../../../constants/financeTheme';
 import { FinHeader, Label, Field, Segment, Btn, DateField } from '../../../components/finance/ui';
 import { fmtDate, num } from '../../../utils/financeFormat';
 import { getLedger, updateLedgerDetails, type LedgerEntry } from '../../../db/ledger';
 import type { LedgerPeriod } from '../../../utils/finance';
 
 export default function EditLedger() {
+  const FIN = useFinanceTheme();
+  const s = React.useMemo(() => makeStyles(FIN), [FIN]);
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
   const [e, setE] = useState<LedgerEntry | null>(null);
@@ -100,7 +103,7 @@ export default function EditLedger() {
   );
 }
 
-const s = StyleSheet.create({
+const makeStyles = (FIN: FinancePalette) => StyleSheet.create({
   screen: { flex: 1, backgroundColor: FIN.bg },
   body: { padding: 16, paddingBottom: 40, alignSelf: 'center', width: '100%', maxWidth: FIN.contentMax },
 });

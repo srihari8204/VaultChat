@@ -11,14 +11,14 @@
 import { HEADER_TOP } from '../constants/layout';
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
-  View, Text, TouchableOpacity, StyleSheet, FlatList, ActivityIndicator, TextInput,
+  View, TouchableOpacity, StyleSheet, FlatList, ActivityIndicator, TextInput,
 } from 'react-native';
 import { Stack, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { type Palette, brandAlpha } from '../constants/theme';
 import { useTheme } from '../lib/theme';
 import { listChats, listGhostMode, setGhostMode, type GhostMode } from '../lib/chatService';
-import { AuroraBackground } from '../components/ui';
+import { AppText as Text, AuroraBackground } from '../components/ui';
 
 interface Contact { userId: string; name: string }
 type Field = 'read' | 'typing' | 'lastSeen';
@@ -143,6 +143,7 @@ export default function ReceiptControlScreen() {
           onChangeText={setSearch}
           placeholder="Search contacts…"
           placeholderTextColor={colors.textFaint}
+          accessibilityLabel="Search contacts"
         />
 
         <View style={s.legendRow}>
@@ -191,16 +192,16 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   backBtn: { width: 40, height: 40, justifyContent: 'center', alignItems: 'center' },
   headerTitle: { color: c.text, fontSize: 18, fontWeight: '700' },
   body: { flex: 1, padding: 16 },
-  infoCard: { flexDirection: 'row', alignItems: 'center', backgroundColor: c.glassSoft, borderRadius: 14, padding: 16, marginBottom: 12, borderWidth: 1, borderColor: c.glassStroke },
+  infoCard: { flexDirection: 'row', alignItems: 'center', backgroundColor: c.glass, borderRadius: 14, padding: 16, marginBottom: 12, borderWidth: 1, borderColor: c.glassStroke },
   infoTitle: { color: c.text, fontSize: 16, fontWeight: '800' },
   infoDesc: { color: c.textDim, fontSize: 12, marginTop: 2, lineHeight: 18 },
-  searchInput: { backgroundColor: c.glassSoft, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 10, color: c.text, fontSize: 14, marginBottom: 8, borderWidth: 1, borderColor: c.glassStroke },
+  searchInput: { backgroundColor: c.glass, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 10, color: c.text, fontSize: 14, marginBottom: 8, borderWidth: 1, borderColor: c.glassStroke },
   legendRow: { flexDirection: 'row', gap: 16, marginBottom: 10, paddingLeft: 4 },
   legendItem: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   legendTxt: { color: c.textDim, fontSize: 10 },
   errorBar: { backgroundColor: c.danger + '1F', borderColor: c.danger + '66', borderWidth: 1, padding: 10, borderRadius: 10, marginBottom: 8 },
   errorTxt: { color: c.danger, fontSize: 12 },
-  contactRow: { flexDirection: 'row', alignItems: 'center', backgroundColor: c.glassSoft, borderRadius: 12, padding: 12, marginBottom: 6, borderWidth: 1, borderColor: c.glassStroke, gap: 12 },
+  contactRow: { flexDirection: 'row', alignItems: 'center', backgroundColor: c.glass, borderRadius: 14, padding: 12, marginBottom: 8, borderWidth: 1, borderColor: c.glassStroke, gap: 12 },
   avatar: { width: 40, height: 40, borderRadius: 20, backgroundColor: c.surfaceSolid, justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: c.glassStroke },
   avatarTxt: { color: c.textDim, fontSize: 16, fontWeight: '800' },
   contactName: { flex: 1, color: c.text, fontSize: 14, fontWeight: '700' },

@@ -17,7 +17,8 @@
 
 import { groupTypeInfo } from '../lib/groups/catalog';
 import { familyOf, sectionsFor, usesBusinessTheme, memberHeading } from '../lib/spaces/layout';
-import { BIZ } from '../constants/businessTheme';
+import { BIZ, businessPalette } from '../constants/businessTheme';
+import { PALETTES } from '../constants/theme';
 
 const fail = (m: string) => { throw new Error(`space-identity: ${m}`); };
 
@@ -58,6 +59,14 @@ if (usesBusinessTheme('family')) fail('family resolves to the Business theme');
 if (!usesBusinessTheme('business')) fail('business must resolve to the Business theme');
 if (family.color.toLowerCase() === BIZ.primary.toLowerCase()) {
   fail('the family brand colour is Business blue');
+}
+for (const scheme of ['light', 'dark'] as const) {
+  const base = PALETTES[scheme];
+  const resolved = businessPalette(base, scheme);
+  for (const role of ['bg', 'text', 'textDim', 'textFaint', 'glassSoft', 'glassStroke', 'surfaceSolid'] as const) {
+    if (resolved[role] !== base[role]) fail(`Business ${scheme} must use the active ${role}`);
+  }
+  if (resolved.brandOnLight !== BIZ.brandOnLight) fail('Business lost its blue identity');
 }
 
 // Layout: no family section may route into an employee-monitoring screen, and

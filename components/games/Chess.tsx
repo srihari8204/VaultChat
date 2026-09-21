@@ -1,3 +1,4 @@
+import { chessTttLayout } from '../../lib/games/chessTttLayout';
 /**
  * components/games/Chess.tsx — VaultChess board.
  *
@@ -18,7 +19,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Pressable, ScrollView, StyleSheet, Text, View, type ViewStyle } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import Svg, { Path, Ellipse, Defs, LinearGradient as SvgLinear, Stop } from 'react-native-svg';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -30,7 +30,7 @@ import * as Haptics from 'expo-haptics';
 import { useGameSocket, type GameState, type AutoStart } from '../../lib/games/useGameSocket';
 import {
   TableBackground, Btn, Panel, PlayerRow, Reconnecting, RematchBtn, ActionDock, RoundBtn,
-  useType, useBoardBox, usePortraitLock, useReduceMotion,
+  useType, useBoardBox, useReduceMotion,
 } from './ui';
 import { useRematch } from '../../lib/games/useRematch';
 import { RulesSheet, useFirstTimeRules } from './rules';
@@ -97,8 +97,8 @@ const THEMES = {
    */
   glass:      { light: CR.ivory, dark: CR.emerald,
                 hl: 'rgba(233,196,106,.42)', sel: 'rgba(233,196,106,.62)',
-                edge: CR.gold, dot: 'rgba(24,38,32,.34)',
-                ring: 'rgba(24,38,32,.34)',
+                edge: CR.gold, dot: 'rgba(24,38,32,.65)',
+                ring: 'rgba(24,38,32,.65)',
                 ink: { w: { fill: '#FBF4E6', line: '#2B2620' },
                        b: { fill: '#14120F', line: '#E0B455' } } },
   classic:    { light: '#ece6d3', dark: '#6f6253', hl: 'rgba(214,175,99,.50)', sel: 'rgba(214,175,99,.68)' },
@@ -182,7 +182,7 @@ const PIECE_PATH: Record<string, string> = {
   p: 'M 50 16 C 57.18 16 63 21.82 63 29 C 63 36.18 57.18 42 50 42 C 42.82 42 37 36.18 37 29 C 37 21.82 42.82 16 50 16 Z'
    + ' M 44 41.5 C 42.6 44.8 41.4 47.8 41 50.6 C 40.1 56.8 36.6 63.8 32.4 70 L 30 76 L 70 76 L 67.6 70 C 63.4 63.8 59.9 56.8 59 50.6 C 58.6 47.8 57.4 44.8 56 41.5 C 54.2 42.7 52.2 43.3 50 43.3 C 47.8 43.3 45.8 42.7 44 41.5 Z'
    + ' M 26 76 L 74 76 C 76.2 76 78 77.8 78 80 L 78 88 L 22 88 L 22 80 C 22 77.8 23.8 76 26 76 Z',
-  r: 'M 27 15 L 38 15 L 38 24 L 46 24 L 46 15 L 54 15 L 54 24 L 62 24 L 62 15 L 73 15 L 73 35 L 66 41 L 66 63 L 73 73 L 73 78 L 27 78 L 27 73 L 34 63 L 34 41 L 27 35 Z ' + BASE_WIDE,
+  r: 'M 24 14 L 37 14 L 37 25 L 44 25 L 44 14 L 56 14 L 56 25 L 63 25 L 63 14 L 76 14 L 76 35 L 67 42 L 64 65 L 73 75 L 73 78 L 27 78 L 27 75 L 36 65 L 33 42 L 24 35 Z ' + BASE_WIDE,
   b: 'M 50 11 C 53.31 11 56 13.69 56 17 C 56 20.31 53.31 23 50 23 C 46.69 23 44 20.31 44 17 C 44 13.69 46.69 11 50 11 Z'
    + ' M 50 21 C 60 27 67 36.5 67 45 C 67 52 63.4 58.2 57.9 61.8 L 61.5 67 L 38.5 67 L 42.1 61.8 C 36.6 58.2 33 52 33 45 C 33 36.5 40 27 50 21 Z'
    + ' M 36 67 L 64 67 C 66.2 67 68 68.8 68 71 L 68 74 L 32 74 L 32 71 C 32 68.8 33.8 67 36 67 Z ' + BASE_WIDE,
@@ -304,17 +304,14 @@ export default function Chess({ roomId, auto, autoBot }: { roomId: string } & Au
   // BoardTheme here is what makes those optional reads legal at the call site.
   const th: BoardTheme = THEMES[theme];
   // Seats above and below, the status line and two button rows.
-  // Portrait only. See usePortraitLock — this also stops a force-stopped
-  // rummy table from leaving the OS locked to landscape under this board.
-  usePortraitLock();
-  const insets = useSafeAreaInsets();
   const reduceMotion = useReduceMotion();
   // 300, not 360. The chrome shrank with the redesign: the full-width status
   // banner became a pill, the swatch row and the move list moved into the
   // sheet, and the voice bar only appears once someone is in the channel. An
   // estimate that is too LARGE is not safe — it is a smaller board than the
   // screen can hold, on every device.
-  const { size, onLayout: onBoardBox } = useBoardBox(300);
+  const viewport = useBoardBox(300);
+  const { wide, size, controlsWidth } = chessTttLayout(viewport.width, viewport.height, viewport.size);
   // THE RIM IS PART OF THE BOARD'S BOX, NOT EXTRA.
   //
   // boardFit returns the largest square that fits inside a 16dp gutter, and the
@@ -446,62 +443,14 @@ export default function Chess({ roomId, auto, autoBot }: { roomId: string } & Au
   // on a phone board — thick enough to close up the gaps inside a knight.
   const stroke = PIECE_STROKE;
 
-  return (
-    // The chess room, not the shared maroon card table. See lib/games/chessRoom.
-    <TableBackground bg={CR.bg} ambient={CR_AMBIENT} bokeh={CR_BOKEH} vignette={CR_VIGNETTE}>
-      <ScrollView
-        onLayout={onBoardBox}
-        contentContainerStyle={{
-          paddingHorizontal: S[4], paddingTop: S[2], gap: S[3],
-          alignItems: 'center',
-          // The gesture bar is not part of the board's box. Padding it here is
-          // what keeps the action dock off the system UI on a gesture phone.
-          paddingBottom: S[6] + insets.bottom,
-        }}
-      >
-        {/* The strip the reference puts in the header. GameChrome above this
-            board owns Back and the title (it used to say "the navigator header"
-            owns them — it did not; the stack is headerShown:false and this
-            screen had no way out at all), so duplicating either here would give
-            the screen two ways back; these are the controls it does NOT already
-            carry. Both open sheets built on data that was already on the
-            screen — neither is a new request to the server. */}
-        <View style={{ width: size, flexDirection: 'row', alignItems: 'center', gap: S[2] }}>
-          <Text
-            accessibilityElementsHidden
-            importantForAccessibility="no"
-            numberOfLines={1}
-            style={{ flex: 1, color: g(0.6), fontSize: 10, fontWeight: '800', letterSpacing: 1.5 }}
-          >
-            PLAY  •  CONNECT  •  CHALLENGE
-          </Text>
-          <RoundBtn ion="stats-chart-outline" label="Standings" onPress={() => setStatsOpen(true)} />
-          <RoundBtn ion="people-outline" label="Who is at this table" onPress={() => setPlayersOpen(true)} />
-          <RoundBtn ion="settings-outline" label="Board settings" onPress={() => setShowSettings(true)} />
-        </View>
-
-        {reconnecting && (
-          <View style={{ width: size }}><Reconnecting error={error} onRetry={retry} /></View>
-        )}
-
-        <Seat
-          name={opponentName(state)}
-          role={roleOf(state, G, false, mine)}
-          bot={opponentIsBot(state)}
-          glyph={myColor === 'w' ? '♚' : '♔'}
-          clock={clockFor(state, myColor === 'w' ? 'b' : 'w')}
-          taken={captured[myColor === 'w' ? 'w' : 'b']}
-          edge={captured.edge * (myColor === 'w' ? -1 : 1)}
-          active={!mine && G.result == null}
-          width={size}
-        />
-
+  const boardView = (
+    <>
         {/* The rim is a GRADIENT, so it has to be a view of its own wrapping the
             board — RN borderColor takes one colour. It adds RIM*2 to the width
             and nothing to `size`, so the cell geometry, the touch targets and
             every coordinate below are exactly what they were. */}
         <LinearGradient
-          colors={[CR.gold2, CR.gold, CR.goldDeep]}
+          colors={[white(0.8), CR.gold, CR.goldDeep]}
           locations={[0, 0.5, 1]}
           start={{ x: 0, y: 0 }}
           end={{ x: 1, y: 1 }}
@@ -525,6 +474,7 @@ export default function Chess({ roomId, auto, autoBot }: { roomId: string } & Au
             {coords ? Array.from({ length: 8 }, (_, i) => (
               <Text
                 key={`rk${i}`}
+                allowFontScaling={false}
                 accessibilityElementsHidden
                 importantForAccessibility="no"
                 style={{
@@ -539,6 +489,7 @@ export default function Chess({ roomId, auto, autoBot }: { roomId: string } & Au
             {coords ? Array.from({ length: 8 }, (_, i) => (
               <Text
                 key={`fl${i}`}
+                allowFontScaling={false}
                 accessibilityElementsHidden
                 importantForAccessibility="no"
                 style={{
@@ -593,7 +544,9 @@ export default function Chess({ roomId, auto, autoBot }: { roomId: string } & Au
                   tint={isSel ? th.sel : isLast ? th.hl : null}
                   check={inCheck}
                   piece={p}
-                  pieceSize={cell * 0.95}
+                  pieceSize={cell * 0.94}
+                  selected={isSel}
+                  last={isLast}
                   target={isTarget}
                   capture={isTarget && !!p}
                   slideFrom={
@@ -604,8 +557,8 @@ export default function Chess({ roomId, auto, autoBot }: { roomId: string } & Au
                       : null
                   }
                   ink={th.ink}
-                  dot={th.dot}
-                  ring={th.ring}
+                  dot={theme === 'glass' && !light ? 'rgba(240,248,242,.75)' : th.dot}
+                  ring={theme === 'glass' && !light ? 'rgba(240,248,242,.85)' : th.ring}
                   onPress={() => onSquare(idx)}
                   stroke={stroke}
                   still={reduceMotion}
@@ -615,6 +568,61 @@ export default function Chess({ roomId, auto, autoBot }: { roomId: string } & Au
             </View>
           </View>
         </LinearGradient>
+    </>
+  );
+
+  return (
+    // The chess room, not the shared maroon card table. See lib/games/chessRoom.
+    <TableBackground bg={CR.bg} ambient={CR_AMBIENT} bokeh={CR_BOKEH} vignette={CR_VIGNETTE}>
+      <View onLayout={viewport.onLayout} style={{ flex: 1, flexDirection: wide ? 'row' : 'column' }}>
+      {wide && <ScrollView style={{ width: size + 32, flexGrow: 0 }} contentContainerStyle={{ padding: 16, alignItems: 'center' }}>{boardView}</ScrollView>}
+      <ScrollView
+        style={{ flex: 1 }}
+        contentContainerStyle={{
+          paddingHorizontal: S[4], paddingTop: S[2], gap: S[3],
+          alignItems: 'center',
+          // GamesScreen already owns the live safe-area inset.
+          paddingBottom: S[6],
+        }}
+      >
+        {/* The strip the reference puts in the header. GameChrome above this
+            board owns Back and the title (it used to say "the navigator header"
+            owns them — it did not; the stack is headerShown:false and this
+            screen had no way out at all), so duplicating either here would give
+            the screen two ways back; these are the controls it does NOT already
+            carry. Both open sheets built on data that was already on the
+            screen — neither is a new request to the server. */}
+        <View style={{ width: controlsWidth, flexDirection: 'row', alignItems: 'center', gap: S[2] }}>
+          <Text
+            accessibilityElementsHidden
+            importantForAccessibility="no"
+            numberOfLines={1}
+            style={{ flex: 1, color: g(0.6), fontSize: 10, fontWeight: '800', letterSpacing: 1.5 }}
+          >
+            PLAY  •  CONNECT  •  CHALLENGE
+          </Text>
+          <RoundBtn ion="stats-chart-outline" label="Standings" onPress={() => setStatsOpen(true)} />
+          <RoundBtn ion="people-outline" label="Who is at this table" onPress={() => setPlayersOpen(true)} />
+          <RoundBtn ion="settings-outline" label="Board settings" onPress={() => setShowSettings(true)} />
+        </View>
+
+        {reconnecting && (
+          <View style={{ width: controlsWidth }}><Reconnecting error={error} onRetry={retry} /></View>
+        )}
+
+        <Seat
+          name={opponentName(state)}
+          role={roleOf(state, G, false, mine)}
+          bot={opponentIsBot(state)}
+          glyph={myColor === 'w' ? '♚' : '♔'}
+          clock={clockFor(state, myColor === 'w' ? 'b' : 'w')}
+          taken={captured[myColor === 'w' ? 'w' : 'b']}
+          edge={captured.edge * (myColor === 'w' ? -1 : 1)}
+          active={!mine && G.result == null}
+          width={controlsWidth}
+        />
+
+        {!wide && boardView}
 
         <Seat
           name={youName(state)}
@@ -625,7 +633,7 @@ export default function Chess({ roomId, auto, autoBot }: { roomId: string } & Au
           taken={captured[myColor === 'w' ? 'b' : 'w']}
           edge={captured.edge * (myColor === 'w' ? 1 : -1)}
           active={mine && G.result == null}
-          width={size}
+          width={controlsWidth}
         />
 
         <StatusPill
@@ -636,16 +644,16 @@ export default function Chess({ roomId, auto, autoBot }: { roomId: string } & Au
           phase={phase}
           reconnecting={reconnecting}
           still={reduceMotion}
-          width={size}
+          width={controlsWidth}
         />
 
         {drawOffer && !G.result && (
           <View style={{
-            width: size, flexDirection: 'row', alignItems: 'center', gap: S[2],
+            width: controlsWidth, flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: S[2],
             padding: S[3], borderRadius: R[2],
             borderWidth: 1, borderColor: CR.lineSoft, backgroundColor: g(0.12),
           }}>
-            <Text style={{ flex: 1, color: '#ffd97a', fontSize: t.sm, fontWeight: '700' }}>
+            <Text style={{ width: '100%', color: '#ffd97a', fontSize: t.sm, fontWeight: '700' }}>
               Your opponent offers a draw
             </Text>
             <Btn label="Accept" kind="gold" compact onPress={() => { send({ t: 'draw-accept' }); setDrawOffer(false); }} />
@@ -658,7 +666,7 @@ export default function Chess({ roomId, auto, autoBot }: { roomId: string } & Au
             of them reads "they did not come back, invite them" and needs the
             width to say so. */}
         {G.result ? (
-          <View style={{ flexDirection: 'row', gap: S[2], width: size }}>
+          <View style={{ flexDirection: 'row', gap: S[2], width: controlsWidth }}>
             <RematchBtn rm={rematch} />
           </View>
         ) : null}
@@ -667,7 +675,7 @@ export default function Chess({ roomId, auto, autoBot }: { roomId: string } & Au
             new behaviour and nothing that existed was dropped: resign, draw,
             voice, invite and the board settings are the same five sends. */}
         <ActionDock
-          width={size}
+          width={controlsWidth}
           accent={CR.line}
           actions={G.result
             ? [
@@ -696,7 +704,7 @@ export default function Chess({ roomId, auto, autoBot }: { roomId: string } & Au
             button is the whole control; live, this is where mute lives. */}
         {voice.phase !== 'off' && (
           <VoiceBar
-            width={size}
+            width={controlsWidth}
             phase={voice.phase}
             error={voice.error}
             canSpeak={voice.canSpeak}
@@ -726,6 +734,7 @@ export default function Chess({ roomId, auto, autoBot }: { roomId: string } & Au
           </Text>
         </View>
       </ScrollView>
+      </View>
 
       <Toasts events={events} />
       <Confetti show={!!G.result && G.winner === myColor} />
@@ -807,13 +816,13 @@ export default function Chess({ roomId, auto, autoBot }: { roomId: string } & Au
  */
 const Square = React.memo(function Square({
   d, sq, cell, bg, tint, check, piece, pieceSize,
-  target, capture, slideFrom, onPress, stroke, ink, dot, ring, still,
+  target, capture, selected, last, slideFrom, onPress, stroke, ink, dot, ring, still,
 }: {
   /** Where it is DRAWN (0 = top-left of the board as this player sees it). */
   d: number;
   /** Which square it actually IS (0 = a8). These differ when the board is flipped. */
   sq: number;
-  cell: number; bg: string; tint: string | null; check: boolean;
+  cell: number; bg: string; tint: string | null; check: boolean; selected: boolean; last: boolean;
   piece: Piece; pieceSize: number; target: boolean; capture: boolean;
   slideFrom: { dx: number; dy: number; key: string } | null;
   onPress: (sq: number) => void; stroke: number;
@@ -837,7 +846,9 @@ const Square = React.memo(function Square({
   return (
     <Pressable
       onPress={() => onPress(sq)}
-      accessibilityLabel={squareLabel(sq, piece, target, capture)}
+      accessibilityLabel={`${squareLabel(sq, piece, target, capture)}${check ? ", king in check" : ""}${last ? ", last move" : ""}`}
+      accessibilityRole="button"
+      accessibilityState={{ selected }}
       style={{
         position: 'absolute',
         left: (d & 7) * cell, top: (d >> 3) * cell,
@@ -846,14 +857,17 @@ const Square = React.memo(function Square({
         alignItems: 'center', justifyContent: 'center',
       }}
     >
+      {/* Keep the playing squares flat: glass belongs to the surrounding controls. */}
       {tint ? <View pointerEvents="none" style={{ position: 'absolute', inset: 0, backgroundColor: tint }} /> : null}
+      {last && !selected ? <View pointerEvents="none" style={{ position: 'absolute', left: 3, top: 3, width: cell * 0.16, height: cell * 0.16, borderTopWidth: 2, borderLeftWidth: 2, borderColor: CR.gold2 }} /> : null}
       <Animated.View pointerEvents="none" style={[{ position: 'absolute', inset: 0, backgroundColor: CHECK_RED }, aCheck]} />
 
+      {selected ? <View pointerEvents="none" style={{ position: 'absolute', inset: 1, borderWidth: 2.5, borderRadius: 3, borderColor: CR.gold2 }} /> : null}
       {/* Capture ring sits behind the piece; the plain dot marks an empty target. */}
       {target && capture ? (
         <View pointerEvents="none" style={{
-          position: 'absolute', width: cell * 0.78, height: cell * 0.78,
-          borderRadius: cell * 0.39, borderWidth: 4, borderColor: ring ?? 'rgba(40,35,28,.3)',
+          position: 'absolute', width: cell * 0.92, height: cell * 0.92,
+          borderRadius: cell * 0.46, borderWidth: Math.max(2, cell * 0.055), borderColor: ring ?? 'rgba(40,35,28,.3)',
         }} />
       ) : null}
 
@@ -943,6 +957,11 @@ function OutlinedGlyph({
     <View style={{ alignItems: 'center', justifyContent: 'center' }}>
       <Svg width={size} height={size} viewBox="0 0 100 100">
         <Defs>
+          <SvgLinear id={`body${c}`} x1="0" y1="0" x2="1" y2="1">
+            <Stop offset="0" stopColor={c === 'w' ? '#FFFFFF' : '#66717C'} />
+            <Stop offset="0.4" stopColor={fill} />
+            <Stop offset="1" stopColor={c === 'w' ? '#C8C3B7' : '#0D131A'} />
+          </SvgLinear>
           {/* Brass, lit from above: hot cap, body, dark underside. The same
               three tones the board rim uses, so the pieces and the frame read
               as one set of hardware rather than two golds. */}
@@ -963,7 +982,13 @@ function OutlinedGlyph({
           fill={`url(#plinth${c})`}
           stroke={CR.goldDeep} strokeWidth="1.1"
         />
-        <Path d={d} fill={fill} stroke={line} strokeWidth={stroke} strokeLinejoin="round" />
+        <Path d={d} fill={`url(#body${c})`} stroke={c === 'b' ? '#A0ABB4' : line} strokeWidth={stroke} strokeLinejoin="round" />
+        {/* Engraved details separate silhouettes at phone size without font glyphs. */}
+        <Path d="M 28 83 L 72 83" fill="none" stroke={c === 'w' ? line : '#DCE4E8'} strokeWidth="1.8" opacity={0.55} />
+        {t === 'r' ? <Path d="M 30 35 L 70 35 M 37 44 L 63 44 M 40 63 L 60 63" fill="none" stroke={c === 'w' ? line : '#DCE4E8'} strokeWidth="2.5" strokeLinecap="round" /> : null}
+        {t === 'b' ? <Path d="M 53 30 L 44 45" fill="none" stroke={c === 'w' ? line : '#DCE4E8'} strokeWidth="3" strokeLinecap="round" /> : null}
+        {t === 'n' ? <Ellipse cx="64" cy="29" rx="2.3" ry="2.3" fill={c === 'w' ? line : '#FFFFFF'} /> : null}
+        {t === 'q' || t === 'k' ? <Path d="M 37 62 L 63 62" fill="none" stroke={c === 'w' ? line : '#DCE4E8'} strokeWidth="2" strokeLinecap="round" /> : null}
       </Svg>
     </View>
   );
@@ -980,8 +1005,7 @@ function OutlinedGlyph({
  * placeholder anywhere in here; an absent clock renders nothing rather than
  * a zero, exactly as TurnClock does in ui.tsx.
  *
- * The captured pieces and the material edge ride on the role line rather than
- * a line of their own, so the card is the same height all game.
+ * The clock and bot badge wrap when the current width or font scale needs it.
  */
 function Seat({
   name, role, bot, glyph, clock, taken, edge, active, width,
@@ -999,7 +1023,7 @@ function Seat({
         (clock ? ` ${clock} on the clock.` : '')
       }
       style={{
-        width, flexDirection: 'row', alignItems: 'center', gap: S[3],
+        width, flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: S[3],
         paddingVertical: S[2], paddingHorizontal: S[3],
         borderRadius: R[4], borderWidth: 1,
         // An active seat is LIT and gold-edged. Gold is this screen's one
@@ -1030,7 +1054,7 @@ function Seat({
           borderWidth: 1, borderColor: g(active ? 0.55 : 0.28),
           backgroundColor: white(0.12),
         }}>
-          <Text style={{ fontSize: 22, color: CR.gold2 }}>{glyph}</Text>
+          <Text allowFontScaling={false} style={{ fontSize: 22, color: CR.gold2 }}>{glyph}</Text>
         </View>
         {/* THE AVATAR IS A GLYPH, NOT A PHOTO, and that is a protocol fact
             rather than a style choice: the lobby roster is
@@ -1046,7 +1070,7 @@ function Seat({
         </Text>
       </View>
 
-      <View style={{ flex: 1 }}>
+      <View style={{ flexGrow: 1, flexShrink: 1, flexBasis: 96 }}>
         <Text numberOfLines={1} style={{ color: CR.text, fontSize: t.md, fontWeight: '800' }}>{name}</Text>
         <Text numberOfLines={1} style={{ color: CR.muted, fontSize: t.sm }}>
           {material ? `${role}  ·  ${material}` : role}
@@ -1055,7 +1079,7 @@ function Seat({
 
       {clock ? (
         <View style={{
-          flexDirection: 'row', alignItems: 'center', gap: S[1] + 2,
+          flexDirection: 'row', alignItems: 'center', gap: S[1] + 2, maxWidth: '100%',
           paddingHorizontal: S[3], paddingVertical: S[1] + 2, borderRadius: R.pill,
           borderWidth: 1, borderColor: g(active ? 0.60 : 0.35),
           backgroundColor: active ? g(0.16) : white(0.07),
@@ -1063,7 +1087,7 @@ function Seat({
           <Ionicons name="time-outline" size={15} color={active ? '#FFDD9E' : CR.gold2} />
           <Text
             numberOfLines={1}
-            style={{ color: active ? '#FFDD9E' : '#EFE3D0', fontSize: t.md, fontWeight: '800', fontFamily: 'monospace' }}
+            style={{ flexShrink: 1, color: active ? '#FFDD9E' : '#EFE3D0', fontSize: t.md, fontWeight: '800', fontFamily: 'monospace' }}
           >
             {clock}
           </Text>
@@ -1073,7 +1097,7 @@ function Seat({
       {/* AI PRO — the opponent's own mark, and only when the roster says bot. */}
       {bot ? (
         <View style={{
-          width: 40, paddingVertical: S[1], borderRadius: R[2], alignItems: 'center',
+          minWidth: 40, paddingHorizontal: S[1], paddingVertical: S[1], borderRadius: R[2], alignItems: 'center',
           borderWidth: 1, borderColor: g(0.6), backgroundColor: g(0.14),
         }}>
           <Text style={{ color: CR.gold2, fontSize: 12, fontWeight: '800', letterSpacing: 0.4 }}>AI</Text>

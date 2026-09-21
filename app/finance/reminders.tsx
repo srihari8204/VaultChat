@@ -2,11 +2,12 @@
 // Opened standalone, or from a ledger with ?refType&refId&title to prefill.
 
 import React, { useCallback, useState } from 'react';
+import { useFinanceTheme } from '../../components/finance/useFinanceTheme';
 import { View, Text, ScrollView, StyleSheet, TouchableOpacity, Alert } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useFocusEffect } from 'expo-router';
 import { DateTimePickerAndroid } from '@react-native-community/datetimepicker';
-import { FIN } from '../../constants/financeTheme';
+import { type FinancePalette } from '../../constants/financeTheme';
 import { FinHeader, Label, Field, Segment, Btn, Pill, EmptyState, Card, LoadingState, ErrorState } from '../../components/finance/ui';
 import { useLoadStatus } from '../../components/finance/useLoad';
 import { useMe } from '../../components/finance/useMe';
@@ -20,6 +21,8 @@ import { scheduleReminder, scheduleAt, cancel } from '../../components/finance/n
 const FREQ_LABEL: Record<ReminderFreq, string> = { once: 'Once', daily: 'Daily', weekly: 'Weekly', monthly: 'Monthly', yearly: 'Yearly' };
 
 export default function Reminders() {
+  const FIN = useFinanceTheme();
+  const s = React.useMemo(() => makeStyles(FIN), [FIN]);
   const params = useLocalSearchParams<{ refType?: string; refId?: string; title?: string }>();
   const me = useMe();
   const [rows, setRows] = useState<Reminder[]>([]);
@@ -116,28 +119,33 @@ export default function Reminders() {
 
         {active.length > 0 && <Text style={s.section}>Active</Text>}
         {active.map(r => (
-          <View key={r.id} style={s.card}>
-            <View style={s.dot} />
-            <View style={{ flex: 1, minWidth: 0 }}>
-              <Text style={s.title} numberOfLines={1}>{r.title}</Text>
-              <Text style={s.sub}>{fmtDateTime(r.next_at)}</Text>
+          <View key={r.id} style={[s.card, s.activeCard]}>
+            <View style={s.reminderHeading}>
+              <View style={s.dot} />
+              <View style={{ flex: 1, minWidth: 0 }}>
+                <Text style={s.title} numberOfLines={2}>{r.title}</Text>
+                <Text style={s.sub}>{fmtDateTime(r.next_at)}</Text>
+              </View>
             </View>
-            <Pill label={FREQ_LABEL[r.freq]} fg={FIN.brandDeep} bg={FIN.brandSoft} />
-            <TouchableOpacity accessibilityLabel={`Snooze ${r.title} for a day`} onPress={() => onSnooze(r)} hitSlop={6} style={s.iconBtn}><Ionicons name="alarm-outline" size={18} color={FIN.warn} /></TouchableOpacity>
-            <TouchableOpacity accessibilityLabel={`Mark ${r.title} done`} onPress={() => onDone(r)} hitSlop={6} style={s.iconBtn}><Ionicons name="checkmark-done" size={18} color={FIN.good} /></TouchableOpacity>
-            <TouchableOpacity accessibilityLabel={`Delete ${r.title}`} onPress={() => onDelete(r)} hitSlop={6} style={s.iconBtn}><Ionicons name="trash-outline" size={17} color={FIN.faint} /></TouchableOpacity>
+            <View style={s.actions}>
+              <Pill label={FREQ_LABEL[r.freq]} fg={FIN.brandDeep} bg={FIN.brandSoft} />
+              <View style={{ flex: 1 }} />
+              <TouchableOpacity accessibilityRole="button" accessibilityLabel={`Snooze ${r.title} for a day`} onPress={() => onSnooze(r)} style={s.iconBtn}><Ionicons name="alarm-outline" size={18} color={FIN.warn} /></TouchableOpacity>
+              <TouchableOpacity accessibilityRole="button" accessibilityLabel={`Mark ${r.title} done`} onPress={() => onDone(r)} style={s.iconBtn}><Ionicons name="checkmark-done" size={18} color={FIN.good} /></TouchableOpacity>
+              <TouchableOpacity accessibilityRole="button" accessibilityLabel={`Delete ${r.title}`} onPress={() => onDelete(r)} style={s.iconBtn}><Ionicons name="trash-outline" size={17} color={FIN.faint} /></TouchableOpacity>
+            </View>
           </View>
         ))}
 
         {done.length > 0 && <Text style={s.section}>Completed</Text>}
         {done.map(r => (
-          <View key={r.id} style={[s.card, { opacity: 0.6 }]}>
+          <View key={r.id} style={s.card}>
             <Ionicons name="checkmark-circle" size={18} color={FIN.good} />
             <View style={{ flex: 1, minWidth: 0 }}>
               <Text style={[s.title, { textDecorationLine: 'line-through' }]} numberOfLines={1}>{r.title}</Text>
               <Text style={s.sub}>{fmtDateTime(r.next_at)}</Text>
             </View>
-            <TouchableOpacity accessibilityLabel={`Delete ${r.title}`} onPress={() => onDelete(r)} hitSlop={6} style={s.iconBtn}><Ionicons name="trash-outline" size={17} color={FIN.faint} /></TouchableOpacity>
+            <TouchableOpacity accessibilityRole="button" accessibilityLabel={`Delete ${r.title}`} onPress={() => onDelete(r)} style={s.iconBtn}><Ionicons name="trash-outline" size={17} color={FIN.faint} /></TouchableOpacity>
           </View>
         ))}
         <View style={{ height: 30 }} />
@@ -146,7 +154,7 @@ export default function Reminders() {
   );
 }
 
-const s = StyleSheet.create({
+const makeStyles = (FIN: FinancePalette) => StyleSheet.create({
   screen: { flex: 1, backgroundColor: FIN.bg },
   body: { padding: 16, alignSelf: 'center', width: '100%', maxWidth: FIN.contentMax },
   section: { color: FIN.text, fontSize: 14, fontWeight: '800', marginTop: 16, marginBottom: 10 },
@@ -154,7 +162,10 @@ const s = StyleSheet.create({
   dot: { width: 9, height: 9, borderRadius: 5, backgroundColor: FIN.good },
   title: { color: FIN.text, fontSize: 14.5, fontWeight: '700' },
   sub: { color: FIN.sub, fontSize: 12, marginTop: 2 },
-  iconBtn: { padding: 3 },
+  activeCard: { flexDirection: 'column', alignItems: 'stretch' },
+  reminderHeading: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  actions: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 4, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: FIN.border, paddingTop: 8 },
+  iconBtn: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center', backgroundColor: FIN.cardStrong, borderRadius: 12 },
   whenBtn: { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: FIN.brandSoft, borderRadius: 10, paddingVertical: 12, paddingHorizontal: 14, borderWidth: 1, borderColor: FIN.brand },
   whenTxt: { color: FIN.brandDeep, fontSize: 14, fontWeight: '700' },
 });

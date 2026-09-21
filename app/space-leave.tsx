@@ -17,15 +17,16 @@
 // PATCH re-checks it. A request cannot be approved by the person who made it —
 // that is enforced in the handler, not here.
 
+import { AppText as Text } from '../components/ui/Text';
 import React, { useCallback, useMemo, useState } from 'react';
 import {
-  View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator,
+  View, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator,
   RefreshControl, Modal, TextInput, Alert,
 } from 'react-native';
 import { Stack, useLocalSearchParams, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useSpaceColors, spaceHeader } from '../lib/spaces/theme';
-import type { Palette } from '../constants/theme';
+import type { SpacePalette as Palette } from '../lib/spaces/theme';
 import { getCurrentUserAsync } from './(constants)/authService';
 import {
   getLeave, requestLeave, decideLeave, getLeaveBalance,
@@ -134,7 +135,7 @@ export default function SpaceLeaveScreen() {
   const s = styles(colors);
   // Pending is orange in the design system — attention, not a verdict either way.
   const tone = (st: string) =>
-    st === 'approved' ? colors.success : st === 'pending' ? '#F59E0B' : colors.danger;
+    st === 'approved' ? colors.success : st === 'pending' ? colors.warning : colors.danger;
   const icon = (st: string) =>
     st === 'approved' ? 'checkmark-circle' : st === 'pending' ? 'time-outline' : 'close-circle';
 
@@ -208,7 +209,7 @@ export default function SpaceLeaveScreen() {
             onPress={() => setTab(t.key)}
             accessibilityRole="button"
             accessibilityState={{ selected: tab === t.key }}
-            style={[s.tabBtn, tab === t.key && { backgroundColor: colors.primary }]}
+            style={[s.tabBtn, tab === t.key && { backgroundColor: colors.brandOnLight }]}
           >
             <Text style={[s.tabText, tab === t.key && { color: '#fff' }]}>
               {t.label}{t.count > 0 ? ` (${t.count})` : ''}
@@ -247,7 +248,7 @@ export default function SpaceLeaveScreen() {
           <View style={[s.card, { borderColor: colors.danger, borderWidth: 1 }]}>
             <Text style={s.cardTitle}>Could not load leave</Text>
             <Text style={s.muted}>{err}</Text>
-            <TouchableOpacity onPress={load} style={[s.btn, { backgroundColor: colors.primary }]}>
+            <TouchableOpacity onPress={load} style={[s.btn, { backgroundColor: colors.brandOnLight }]}>
               <Text style={s.btnText}>Try again</Text>
             </TouchableOpacity>
           </View>
@@ -267,7 +268,7 @@ export default function SpaceLeaveScreen() {
         )}
       </ScrollView>
 
-      <TouchableOpacity accessibilityRole="button" accessibilityLabel="New leave request" style={[s.fab, { backgroundColor: colors.primary }]} onPress={() => setCompose(true)}>
+      <TouchableOpacity accessibilityRole="button" accessibilityLabel="New leave request" style={[s.fab, { backgroundColor: colors.brandOnLight }]} onPress={() => setCompose(true)}>
         <Ionicons name="add" size={26} color="#fff" />
       </TouchableOpacity>
 
@@ -281,7 +282,7 @@ export default function SpaceLeaveScreen() {
                 <TouchableOpacity
                   key={k}
                   onPress={() => setKind(k)}
-                  style={[s.kind, kind === k && { backgroundColor: colors.primary }]}
+                  style={[s.kind, kind === k && { backgroundColor: colors.brandOnLight }]}
                 >
                   <Text style={[s.kindText, kind === k && { color: '#fff' }]}>{k}</Text>
                 </TouchableOpacity>
@@ -314,7 +315,7 @@ export default function SpaceLeaveScreen() {
               <TouchableOpacity
                 onPress={submit}
                 disabled={saving}
-                style={[s.btn, { backgroundColor: colors.primary, flex: 1, opacity: saving ? 0.5 : 1 }]}
+                style={[s.btn, { backgroundColor: colors.brandOnLight, flex: 1, opacity: saving ? 0.5 : 1 }]}
               >
                 <Text style={s.btnText}>{saving ? 'Sending…' : 'Request'}</Text>
               </TouchableOpacity>

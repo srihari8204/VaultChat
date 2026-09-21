@@ -11,10 +11,12 @@
 // odometer.
 
 import React, { useCallback, useMemo, useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, ActivityIndicator } from 'react-native';
+import { View, StyleSheet, TouchableOpacity, ScrollView, ActivityIndicator } from 'react-native';
 import { Stack, useLocalSearchParams, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../lib/theme';
+import { AuroraBackground } from '../components/ui/AuroraBackground';
+import { AppText as Text } from '../components/ui/Text';
 import { getTrack } from '../lib/family/history';
 import { loadAlerts, selectAlerts } from '../lib/family/alerts';
 import { circleMembers } from '../lib/family/circle';
@@ -43,7 +45,7 @@ const ago = (ts: number) => {
 };
 
 export default function GroupInsightsScreen() {
-  const { colors } = useTheme();
+  const { colors, scheme } = useTheme();
   const params = useLocalSearchParams<{ groupId?: string; name?: string }>();
   const groupId = String(params.groupId || '');
 
@@ -153,7 +155,8 @@ export default function GroupInsightsScreen() {
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.bg }}>
-      <Stack.Screen options={{
+      <AuroraBackground variant="chat" />
+      <Stack.Screen options={{ headerStyle: { backgroundColor: colors.bg }, headerTintColor: colors.text, headerShadowVisible: false,
         headerShown: true, /* the root Stack sets headerShown:false app-wide, so the options below were inert and this screen had no back control at all */  title: 'Insights', headerTitleAlign: 'center' }} />
 
       <View style={[st.tabs, { borderColor: colors.glassStroke }]}>
@@ -225,7 +228,7 @@ export default function GroupInsightsScreen() {
           {ranked.map((i) => (
             <View key={i.userId} style={[st.row, { borderColor: colors.glassStroke }]}>
               <View style={[st.avatar, { backgroundColor: colorFor(i.userId) }]}>
-                <Text style={st.avatarTxt}>{nameOf(i.userId).trim()[0]?.toUpperCase() ?? '?'}</Text>
+                <Text style={[st.avatarTxt, scheme === 'light' && { color: '#070A18' }]}>{nameOf(i.userId).trim()[0]?.toUpperCase() ?? '?'}</Text>
               </View>
               <View style={{ flex: 1, minWidth: 0 }}>
                 <Text style={{ color: colors.text, fontWeight: '600', fontSize: 14 }} numberOfLines={1}>

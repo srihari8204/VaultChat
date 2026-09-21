@@ -1,3 +1,4 @@
+import { useGamePalette } from './appearance';
 // components/games/feedback.tsx — toasts, confetti and the settings sheet.
 //
 // The web client's tables talk back constantly: a toast for every server
@@ -6,8 +7,9 @@
 // nothing at all when you won, which is most of why they felt inert next to
 // the same game on the web.
 
+import { AppText as Text } from '../ui/Text';
 import React, { useEffect, useState } from 'react';
-import { Modal, Pressable, ScrollView, Text, View, useWindowDimensions } from 'react-native';
+import { Modal, Pressable, ScrollView, View, useWindowDimensions } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Animated, {
   useSharedValue, useAnimatedStyle, withTiming, withSpring, withDelay,
@@ -16,6 +18,8 @@ import Animated, {
 import type { ViewStyle } from 'react-native';
 import { C, S, R, E, white } from '../../lib/games/theme';
 import { Btn, useType } from './ui';
+import { KeyboardSafe } from '../ui/KeyboardSafe';
+
 import type { TableVoice } from '../../lib/games/useTableVoice';
 
 /* ── toasts ─────────────────────────────────────────────────────────── */
@@ -183,6 +187,7 @@ function Piece({
 export function Sheet({
   visible, title, onClose, children,
 }: { visible: boolean; title: string; onClose: () => void; children: React.ReactNode }) {
+  const C = useGamePalette();
   const t = useType();
   // A fixed 420dp cap ignored the actual window: rummy locks landscape while
   // playing, and Sheet's own scroller sat above the ENTIRE window on the
@@ -190,9 +195,11 @@ export function Sheet({
   // pushed off-screen below it. Bounded to the window instead, still capped
   // at 420 so a tall phone keeps its current, unshrunk sheet.
   const { height: winH } = useWindowDimensions();
+  const insets = useSafeAreaInsets();
   const scrollCap = Math.min(420, Math.round(winH * 0.6));
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose} statusBarTranslucent>
+      <KeyboardSafe style={{ backgroundColor: 'rgba(8,2,2,0.72)' }}>
       {/* Both wrappers below exist purely to catch taps (dismiss on the
           backdrop, swallow it on the sheet body) — neither is content. A
           Pressable is `accessible` by default, and an accessible view
@@ -206,7 +213,7 @@ export function Sheet({
       <Pressable
         onPress={onClose}
         accessible={false}
-        style={{ flex: 1, backgroundColor: 'rgba(8,2,2,0.72)', justifyContent: 'flex-end' }}
+        style={{ flex: 1, justifyContent: 'flex-end', paddingTop: insets.top, paddingLeft: insets.left, paddingRight: insets.right }}
       >
         {/* Stop taps inside the sheet from dismissing it. */}
         {/* A sheet is a LIFTED surface, so it is the most solid glass in the
@@ -217,20 +224,22 @@ export function Sheet({
             invite and history sheet renders inside, so it was the single most
             visible surface the restyle had missed. */}
         <Pressable onPress={() => {}} accessible={false} style={{
-          backgroundColor: 'rgba(14,4,5,0.94)',
+          maxHeight: '100%', width: '100%', maxWidth: 720, alignSelf: 'center',
+          backgroundColor: C.light ? C.panel : 'rgba(14,4,5,0.94)',
           borderTopLeftRadius: R[4], borderTopRightRadius: R[4],
-          borderWidth: 1, borderColor: white(0.16),
-          padding: S[4], paddingBottom: S[6], gap: S[3],
+          borderWidth: 1, borderColor: C.light ? C.line : white(0.16),
+          padding: S[4], gap: S[3],
           boxShadow: `${E[3]}, inset 0 1px 0 ${white(0.18)}`,
         }}>
-          <View style={{ alignSelf: 'center', width: 40, height: 4, borderRadius: 2, backgroundColor: white(0.30), marginBottom: S[2] }} />
-          <Text numberOfLines={1} style={{ color: C.text, fontSize: t.xl, fontWeight: '800' }}>{title}</Text>
-          <ScrollView style={{ maxHeight: scrollCap }} contentContainerStyle={{ gap: S[2] }}>
+          <View style={{ alignSelf: 'center', width: 40, height: 4, borderRadius: 2, backgroundColor: C.light ? C.line : white(0.30), marginBottom: S[2] }} />
+          <Text numberOfLines={2} style={{ color: C.text, fontSize: t.xl, fontWeight: '800' }}>{title}</Text>
+          <ScrollView style={{ maxHeight: scrollCap, flexShrink: 1 }} keyboardShouldPersistTaps="handled" contentContainerStyle={{ gap: S[2] }}>
             {children}
           </ScrollView>
           <Btn label="Close" onPress={onClose} />
         </Pressable>
       </Pressable>
+      </KeyboardSafe>
     </Modal>
   );
 }
@@ -239,6 +248,7 @@ export function Sheet({
 export function SettingRow({
   label, hint, value, onPress,
 }: { label: string; hint?: string; value: string; onPress: () => void }) {
+  const C = useGamePalette();
   const t = useType();
   return (
     <Pressable
@@ -252,17 +262,18 @@ export function SettingRow({
         // the same kind of surface as a row on a board, and these two had
         // drifted onto different palettes.
         borderRadius: R[2], borderWidth: 1, borderColor: white(0.12),
-        backgroundColor: white(0.06),
+        backgroundColor: C.light ? C.panel2 : white(0.06),
         boxShadow: `inset 0 1px 0 ${white(0.12)}`,
       }}
     >
-      <View style={{ flex: 1 }}>
+      <View style={{ flex: 1, minWidth: 0 }}>
         <Text style={{ color: C.text, fontSize: t.md, fontWeight: '700' }}>{label}</Text>
         {hint ? <Text style={{ color: C.muted, fontSize: 12, marginTop: 2 }}>{hint}</Text> : null}
       </View>
       <View style={{
+        maxWidth: '40%', flexShrink: 1,
         paddingHorizontal: S[3], paddingVertical: S[1], borderRadius: R.pill,
-        borderWidth: 1, borderColor: white(0.26), backgroundColor: white(0.10),
+        borderWidth: 1, borderColor: C.light ? C.line : white(0.26), backgroundColor: C.light ? C.card : white(0.10),
       }}>
         <Text style={{ color: C.gold, fontSize: t.sm, fontWeight: '800' }}>{value}</Text>
       </View>

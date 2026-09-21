@@ -16,6 +16,11 @@
 // Kept out of the component so it can be checked without a renderer — see
 // rummyTable.selftest.ts.
 
+/** Native scrolling moves window-coordinate drop targets without onLayout. */
+export function shiftDropTargets(targets: { x: number; y: number }[], dx: number, dy: number) {
+  targets.forEach(target => { if (target) { target.x += dx; target.y += dy; } });
+}
+
 /** One row of the server's `{t:'tables'}` frame. */
 export interface TableInfo {
   id: string;
@@ -61,7 +66,7 @@ export const CARD_MIN = 32;
  * roughly 230-260px of table left over. Bigger cards were never buying
  * legibility, because the overlap they forced was taking it straight back.
  */
-const CARD_MAX = 54;
+const CARD_MAX = 58;
 /**
  * A tablet gets bigger cards, and the reason is not "there is room".
  *
@@ -76,7 +81,7 @@ const CARD_MAX = 54;
  * the card size on every phone too, invalidating the two devices this layout is
  * actually proven on, to buy nothing — no phone is 900dp wide in landscape.
  */
-const CARD_MAX_LARGE = 72;
+const CARD_MAX_LARGE = 78;
 const LARGE_SCREEN = 900;
 
 /**
@@ -262,7 +267,7 @@ const SCORE_SHARE = 0.16;
  * encoding a guess about which devices are wide enough, and it re-decides
  * itself on any screen rather than needing a new constant per device.
  */
-export const CARD_COMFORT = 34;
+export const CARD_COMFORT = 56;
 
 /**
  * How much width the oval gives up so the side panels have somewhere to live.
@@ -275,7 +280,7 @@ const OVAL_INSET = 8;
 export interface Insets { top: number; bottom: number; left: number; right: number }
 
 export interface Metrics {
-  /** Usable box after safe areas — never place a control outside it. */
+  /** Content box after safe areas; short viewports scroll its 340dp height. */
   width: number;
   height: number;
   landscape: boolean;
@@ -376,13 +381,13 @@ export function fanFor(cardW: number, width: number): number {
  */
 export function metrics(win: { width: number; height: number }, insets: Insets): Metrics {
   const width = Math.max(240, win.width - insets.left - insets.right);
-  const height = Math.max(240, win.height - insets.top - insets.bottom);
+  const height = Math.max(340, win.height - insets.top - insets.bottom);
   const landscape = width > height;
 
   // The strip the hand may claim. Landscape is short, so it gets a bigger
   // share: there is no room to spend on a decorative felt, and the cards are
   // what the player is actually looking at.
-  const handShare = landscape ? 0.42 : 0.30;
+  const handShare = landscape ? 0.38 : 0.30;
 
   const byHeight = (height * handShare - BAND_EXTRA) / CARD_RATIO;
   // The third constraint, and the one that only bites on short screens: what is
@@ -419,7 +424,7 @@ export function metrics(win: { width: number; height: number }, insets: Insets):
 
   const handH = cardH + BAND_EXTRA;
   const tableH = Math.max(MIN_TABLE_H, height - HEADER_H - handH - ACTIONS_H);
-  const compact = tableH < 190;
+  const compact = tableH < 220;
 
   // The gutters and the score panel are ONE decision, so there is no width at
   // which you get half the design.
@@ -614,6 +619,23 @@ export function seatAvatar(h: number): number {
   return Math.round(clamp(SEAT_AV_MIN, SEAT_AV_MAX, h - chrome));
 }
 
+/** Budget the portrait around scaled text; short seats switch to an inline icon. */
+export function seatContent(h: number, fontScale = 1) {
+  const scale = Math.max(1, fontScale);
+  const nameH = SEAT_NAME_LINE * scale;
+  const inline = h < SEAT_PAD * 2 + SEAT_GAP_AV + nameH + SEAT_AV_MIN;
+  const detail = !inline && h >= SEAT_PAD * 2 + SEAT_GAP_AV + nameH
+    + SEAT_GAP_NAME + SEAT_DETAIL_LINE * scale + SEAT_AV_MIN;
+  const chrome = SEAT_PAD * 2 + SEAT_GAP_AV + nameH
+    + (detail ? SEAT_GAP_NAME + SEAT_DETAIL_LINE * scale : 0);
+  return {
+    inline, detail,
+    avatar: inline ? Math.min(22, h - SEAT_PAD * 2)
+      : Math.min(SEAT_AV_MAX, Math.floor(h - chrome)),
+    contentH: inline ? Math.max(22, nameH) + SEAT_PAD * 2 : chrome + Math.min(SEAT_AV_MAX, Math.floor(h - chrome)),
+  };
+}
+
 /**
  * Seat `n` opponents AROUND the oval — not in a row along the top of it.
  *
@@ -639,19 +661,16 @@ export function seatAvatar(h: number): number {
  * `top` is the header band. A capsule that starts at y=0 sits under the
  * settings button; passing `metrics().headerH` is what keeps the two apart.
  *
- * FLOOR: the ring is collision-free for `tableW >= 372`. Below that the width
- * clamp pins capsules to SEAT_W_MIN faster than the spacing shrinks and they
- * begin to touch — a portrait-phone width, and rummy plays landscape-only.
+ * A narrow split-screen can undercut the preferred seat width. Packing takes
+ * priority there so all five opponents remain separate during live resizing.
  */
 export function seatSpots(n: number, tableW: number, tableH: number, top = 0): Spot[] {
   if (n <= 0) return [];
 
   // Never wider than a share of the felt, and never so wide that n of them
   // could not stand side by side with a gap between.
-  const w = Math.floor(clamp(
-    SEAT_W_MIN, SEAT_W_MAX,
-    Math.min(tableW * SEAT_W_SHARE, (tableW - SEAT_GAP * (n - 1)) / n),
-  ));
+  const packedW = (tableW - SEAT_EDGE * 2 - SEAT_GAP * (n - 1)) / n;
+  const w = Math.floor(Math.min(packedW, clamp(SEAT_W_MIN, SEAT_W_MAX, tableW * SEAT_W_SHARE)));
   const band = Math.max(1, tableH - top);
   const h = Math.round(clamp(SEAT_H_MIN, SEAT_H_MAX, band * SEAT_H_SHARE));
 

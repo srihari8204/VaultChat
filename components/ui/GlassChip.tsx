@@ -10,7 +10,7 @@ import { StyleSheet, TouchableOpacity, View, type StyleProp, type ViewStyle } fr
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { GLASS, GLOW } from '../../constants/glass';
-import { useColors } from '../../lib/theme';
+import { useColors, useTheme } from '../../lib/theme';
 import { AppText } from './Text';
 
 export interface GlassChipProps {
@@ -26,6 +26,7 @@ export interface GlassChipProps {
 
 export function GlassChip({ label, count, active = false, onPress, icon, style, testID }: GlassChipProps) {
   const c = useColors();
+  const { scheme } = useTheme();
   // White on the accent gradient is the deliberate contrast choice in both
   // themes (the deep end is 4.5:1 against white); idle text is the dim token.
   const fg = active ? '#FFFFFF' : c.textDim;
@@ -35,7 +36,7 @@ export function GlassChip({ label, count, active = false, onPress, icon, style, 
       {icon && <Ionicons name={icon} size={14} color={fg} />}
       <AppText variant="callout" color={fg} numberOfLines={1}>{label}</AppText>
       {showCount && (
-        <View style={[styles.count, { backgroundColor: active ? 'rgba(255,255,255,0.22)' : c.glassSoft }]}>
+        <View style={[styles.count, { backgroundColor: active ? (scheme === 'light' ? 'rgba(0,0,0,0.08)' : 'rgba(255,255,255,0.22)') : c.glassSoft }]}>
           <AppText variant="tiny" color={fg} numberOfLines={1}>{count > 99 ? '99+' : String(count)}</AppText>
         </View>
       )}
@@ -53,15 +54,15 @@ export function GlassChip({ label, count, active = false, onPress, icon, style, 
     >
       {active ? (
         <LinearGradient
-          colors={[c.accentLight, c.accentDeep]}
+          colors={[scheme === 'light' ? c.accentDeep : c.accentLight, c.accentDeep]}
           start={{ x: 0, y: 0 }}
           end={{ x: 1, y: 1 }}
-          style={[styles.pill, { borderColor: c.glassStroke }]}
+          style={[styles.pill, { borderColor: c.glassStroke, borderWidth: scheme === 'light' ? 1 : StyleSheet.hairlineWidth }]}
         >
           {inner}
         </LinearGradient>
       ) : (
-        <View style={[styles.pill, { backgroundColor: c.glassSoft, borderColor: c.glassStroke }]}>{inner}</View>
+        <View style={[styles.pill, { backgroundColor: c.glassSoft, borderColor: c.glassStroke, borderWidth: scheme === 'light' ? 1 : StyleSheet.hairlineWidth }]}>{inner}</View>
       )}
     </TouchableOpacity>
   );

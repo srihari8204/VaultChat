@@ -3,17 +3,21 @@
 // they're derived by grouping ledger entries by name.
 
 import React, { useCallback, useMemo, useState } from 'react';
+import { useFinanceTheme } from '../../components/finance/useFinanceTheme';
 import { View, Text, ScrollView, StyleSheet, TouchableOpacity } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter, useFocusEffect } from 'expo-router';
-import { FIN, STATUS_COLORS, TABULAR } from '../../constants/financeTheme';
-import { FinHeader, HeroCard, StatTile, Pill, EmptyState } from '../../components/finance/ui';
+import { financeStatusColors, TABULAR, type FinancePalette } from '../../constants/financeTheme';
+import { FinHeader, HeroCard, StatTile, TileGrid, Pill, EmptyState } from '../../components/finance/ui';
 import { useMe } from '../../components/finance/useMe';
 import { sumRupees } from '../../utils/money';
 import { formatINR, fmtDate, inrShort, PERIOD_LABEL } from '../../utils/financeFormat';
 import { listLedger, type LedgerEntry } from '../../db/ledger';
 
 export default function CustomerProfile() {
+  const FIN = useFinanceTheme();
+  const s = React.useMemo(() => makeStyles(FIN), [FIN]);
+  const STATUS_COLORS = React.useMemo(() => financeStatusColors(FIN), [FIN]);
   const { name } = useLocalSearchParams<{ name: string }>();
   const router = useRouter();
   const me = useMe();
@@ -58,9 +62,11 @@ export default function CustomerProfile() {
         </HeroCard>
 
         <View style={s.tileRow}>
+          <TileGrid>
           <StatTile value={String(rows.length)} label="Ledgers" tone="brand" />
           <StatTile value={inrShort(totals.remaining)} label="Outstanding" tone="warn" />
           <StatTile value={String(rows.filter(r => r.status === 'completed').length)} label="Settled" tone="good" />
+          </TileGrid>
         </View>
 
         <Text style={s.section}>Ledgers</Text>
@@ -87,7 +93,7 @@ export default function CustomerProfile() {
   );
 }
 
-const s = StyleSheet.create({
+const makeStyles = (FIN: FinancePalette) => StyleSheet.create({
   screen: { flex: 1, backgroundColor: FIN.bg },
   body: { padding: 16, alignSelf: 'center', width: '100%', maxWidth: FIN.contentMax },
   head: { flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 14 },
@@ -97,9 +103,9 @@ const s = StyleSheet.create({
   mobile: { color: FIN.sub, fontSize: 13, marginTop: 2 },
   heroLabel: { color: 'rgba(255,255,255,0.85)', fontSize: 10.5, fontWeight: '700', letterSpacing: 0.8 },
   heroVal: { color: '#fff', fontSize: 28, fontWeight: '800', marginTop: 6, ...TABULAR },
-  heroFoot: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 12, paddingTop: 12, borderTopWidth: 1, borderTopColor: 'rgba(255,255,255,0.2)' },
+  heroFoot: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, justifyContent: 'space-between', marginTop: 12, paddingTop: 12, borderTopWidth: 1, borderTopColor: 'rgba(255,255,255,0.2)' },
   heroFootTxt: { color: 'rgba(255,255,255,0.9)', fontSize: 12, fontWeight: '600' },
-  tileRow: { flexDirection: 'row', gap: 8, marginTop: 12 },
+  tileRow: { marginTop: 12 },
   section: { color: FIN.text, fontSize: 16, fontWeight: '800', marginTop: 20, marginBottom: 12 },
   card: { flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: FIN.card, borderRadius: 12, padding: 13, marginBottom: 9, borderWidth: 1, borderColor: FIN.glassEdge, shadowColor: '#101828', shadowOpacity: 0.08, shadowRadius: 12, shadowOffset: { width: 0, height: 4 }, elevation: 2 },
   dot: { width: 9, height: 9, borderRadius: 5 },

@@ -9,15 +9,16 @@
 // us is not the same as somebody being away, and an app that quietly converts
 // one into the other produces an accusation out of a flat battery.
 
+import { AppText as Text } from '../components/ui/Text';
 import React, { useCallback, useMemo, useState } from 'react';
 import {
-  View, Text, StyleSheet, ScrollView, ActivityIndicator,
+  View, StyleSheet, ScrollView, ActivityIndicator,
   RefreshControl, TextInput, Alert, TouchableOpacity, Modal,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { Stack, useLocalSearchParams, useFocusEffect } from 'expo-router';
 import { useSpaceColors, spaceHeader } from '../lib/spaces/theme';
-import type { Palette } from '../constants/theme';
+import type { SpacePalette as Palette } from '../lib/spaces/theme';
 import { getPeople, setRoleKey, type Person } from '../lib/spaces/api';
 import { getChat } from '../lib/chatService';
 import { getCurrentUserAsync } from './(constants)/authService';
@@ -165,7 +166,7 @@ export default function SpacePeopleScreen() {
       <View style={s.head}>
         <View style={s.counts}>
           <Count value={counts.in} label="In" tone={colors.success} c={colors} />
-          <Count value={counts.leave} label="On leave" tone={'#F59E0B'} c={colors} />
+          <Count value={counts.leave} label="On leave" tone={colors.warning} c={colors} />
           <Count value={counts.unknown} label="No check-in" tone={colors.textFaint} c={colors} />
         </View>
         <TextInput
@@ -320,7 +321,7 @@ export default function SpacePeopleScreen() {
                   <TouchableOpacity
                     onPress={commit}
                     disabled={saving}
-                    style={[s.btn, { backgroundColor: colors.primary, flex: 1, opacity: saving ? 0.5 : 1 }]}
+                    style={[s.btn, { backgroundColor: colors.brandOnLight, flex: 1, opacity: saving ? 0.5 : 1 }]}
                   >
                     <Text style={s.btnText}>{saving ? 'Saving…' : 'Confirm'}</Text>
                   </TouchableOpacity>
@@ -335,7 +336,7 @@ export default function SpacePeopleScreen() {
                   onPress={() => setConfirming(true)}
                   disabled={!chosen || chosen.current || saving}
                   style={[s.btn, {
-                    backgroundColor: colors.primary, flex: 1,
+                    backgroundColor: colors.brandOnLight, flex: 1,
                     opacity: !chosen || chosen.current || saving ? 0.5 : 1,
                   }]}
                 >
@@ -363,7 +364,7 @@ function Count({ value, label, tone, c }: { value: number; label: string; tone: 
 function tone(st: Person['status'], c: Palette): string {
   switch (st) {
     case 'in': return c.success;
-    case 'on_leave': return '#F59E0B';
+    case 'on_leave': return c.warning;
     case 'left': return c.textDim;
     default: return c.textFaint;
   }
@@ -407,7 +408,7 @@ const styles = (c: Palette) => StyleSheet.create({
     borderWidth: 1, borderColor: c.glassStroke, borderRadius: 12,
     padding: 12, gap: 4, marginBottom: 8,
   },
-  currentTag: { color: c.textFaint, fontSize: 10, fontWeight: '800' },
+  currentTag: { color: c.textFaint, fontSize: 11, fontWeight: '800' },
   confirm: { backgroundColor: c.bg, borderRadius: 12, padding: 12, gap: 8 },
   btn: { alignItems: 'center', justifyContent: 'center', borderRadius: 10, paddingVertical: 12 },
   btnGhost: { backgroundColor: c.bg },

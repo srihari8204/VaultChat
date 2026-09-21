@@ -1,9 +1,10 @@
 // app/finance/reports.tsx — period reports with totals, breakdown and export.
 
 import React, { useCallback, useState } from 'react';
+import { useFinanceTheme } from '../../components/finance/useFinanceTheme';
 import { View, Text, ScrollView, StyleSheet, Alert } from 'react-native';
 import { useFocusEffect } from 'expo-router';
-import { FIN } from '../../constants/financeTheme';
+import { type FinancePalette } from '../../constants/financeTheme';
 import { FinHeader, Segment, StatTile, Card, RowLine, Btn } from '../../components/finance/ui';
 import { useMe } from '../../components/finance/useMe';
 import { inrShort, fmtDate } from '../../utils/financeFormat';
@@ -31,6 +32,8 @@ function periodStart(p: Period): number {
 }
 
 export default function Reports() {
+  const FIN = useFinanceTheme();
+  const s = React.useMemo(() => makeStyles(FIN), [FIN]);
   const me = useMe();
   const [period, setPeriod] = useState<Period>('month');
   const [r, setR] = useState<Report>(ZERO);
@@ -125,7 +128,7 @@ export default function Reports() {
   );
 }
 
-const s = StyleSheet.create({
+const makeStyles = (FIN: FinancePalette) => StyleSheet.create({
   screen: { flex: 1, backgroundColor: FIN.bg },
   body: { padding: 16, alignSelf: 'center', width: '100%', maxWidth: FIN.contentMax },
   heading: { color: FIN.text, fontSize: 16, fontWeight: '800', marginTop: 18, marginBottom: 12 },

@@ -161,6 +161,12 @@ export function dismissIncomingNotification(): void {
   try { VaultCalls.dismissIncoming(); } catch {}
 }
 
+/** Clear native message notifications for a chat. */
+export function clearMessageNotifications(chatId: string): void {
+  if (!has() || !chatId) return;
+  try { VaultCalls.clearMessageNotifs?.(chatId); } catch {}
+}
+
 /** Ring the callee (sends the high-priority data push from the backend).
  *  Doorbell only (F6): the SDP never rides in the push — it carries the
  *  DTLS-SRTP fingerprint and the callee gets it over the socket anyway. */
@@ -239,5 +245,6 @@ export async function openFullScreenIntentSettings(): Promise<boolean> {
 
 export default {
   registerForCalls, startCallForeground, stopCallForeground,
-  dismissIncomingNotification, initiateCall, cancelCall, drainDeclinedCall, getInitialCallIntent,
+  dismissIncomingNotification, clearMessageNotifications,
+  initiateCall, cancelCall, drainDeclinedCall, getInitialCallIntent,
 };

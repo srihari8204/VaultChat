@@ -1,0 +1,2646 @@
+{
+  "device": "w4eygyinypswrcz9",
+  "apkSha256": "0C7D0799F6F92DE617AB95F9BC55650032CA2E9183934FAC69A6D4AC2346025D",
+  "stats": {
+    "routes": 117,
+    "layouts": 3,
+    "observed": 81,
+    "fixture": 27,
+    "otherUnverified": 9
+  },
+  "rows": [
+    {
+      "file": "app/(tabs)/alerts.tsx",
+      "route": "alerts",
+      "safe": true,
+      "expectedRegex": "Alerts|No security events yet",
+      "reason": "Reads audit/security events; do not tap Scan device.",
+      "state": "Initial labels/bounds observed",
+      "observed": true,
+      "observations": [
+        {
+          "device": "w4eygyinypswrcz9",
+          "phase": "final-redmi-light-all",
+          "route": "alerts",
+          "titleFound": true,
+          "titleBounds": [
+            "[55,98][657,208]"
+          ],
+          "frame": "[0,0][1080,2220]",
+          "appNodes": 129,
+          "scrollContainers": 1,
+          "crashDialog": false
+        }
+      ]
+    },
+    {
+      "file": "app/(tabs)/calls.tsx",
+      "route": "calls",
+      "safe": true,
+      "expectedRegex": "Calls|No calls yet",
+      "reason": "Reads call history; do not initiate calls or delete entries.",
+      "state": "Initial labels/bounds observed",
+      "observed": true,
+      "observations": [
+        {
+          "device": "w4eygyinypswrcz9",
+          "phase": "final-redmi-light-all",
+          "route": "calls",
+          "titleFound": true,
+          "titleBounds": [
+            "[55,98][236,208]",
+            "[719,2177][792,2216]"
+          ],
+          "frame": "[0,0][1080,2220]",
+          "appNodes": 206,
+          "scrollContainers": 1,
+          "crashDialog": false
+        }
+      ]
+    },
+    {
+      "file": "app/(tabs)/chats.tsx",
+      "route": "chats",
+      "safe": false,
+      "expectedRegex": "Chats|Start a chat",
+      "reason": "Mount registers push token; use existing authenticated tab baseline only, permission/registration fixture for fresh navigation.",
+      "state": "Initial labels/bounds observed",
+      "observed": true,
+      "observations": []
+    },
+    {
+      "file": "app/(tabs)/mini.tsx",
+      "route": "mini",
+      "safe": true,
+      "expectedRegex": "Mini Apps",
+      "reason": "Tool directory and local todo read; do not submit todo or start tools.",
+      "state": "Initial labels/bounds observed",
+      "observed": true,
+      "observations": [
+        {
+          "device": "w4eygyinypswrcz9",
+          "phase": "final-redmi-light-all",
+          "route": "mini",
+          "titleFound": true,
+          "titleBounds": [
+            "[286,98][668,189]",
+            "[55,310][1025,376]"
+          ],
+          "frame": "[0,0][1080,2220]",
+          "appNodes": 155,
+          "scrollContainers": 1,
+          "crashDialog": false
+        }
+      ]
+    },
+    {
+      "file": "app/(tabs)/profile.tsx",
+      "route": "profile",
+      "safe": true,
+      "expectedRegex": "Profile",
+      "reason": "Reads profile; no photo picker, verify SMS, save, or sign-out.",
+      "state": "Initial labels/bounds observed",
+      "observed": true,
+      "observations": [
+        {
+          "device": "w4eygyinypswrcz9",
+          "phase": "final-redmi-light-all",
+          "route": "profile",
+          "titleFound": true,
+          "titleBounds": [
+            "[924,2177][1020,2216]"
+          ],
+          "frame": "[0,0][1080,2220]",
+          "appNodes": 126,
+          "scrollContainers": 1,
+          "crashDialog": false
+        }
+      ]
+    },
+    {
+      "file": "app/(tabs)/status.tsx",
+      "route": "status",
+      "safe": true,
+      "expectedRegex": "Status|My status",
+      "reason": "Reads status lists; no posting/picker or story opening.",
+      "state": "Initial labels/bounds observed",
+      "observed": true,
+      "observations": [
+        {
+          "device": "w4eygyinypswrcz9",
+          "phase": "final-redmi-light-retry",
+          "route": "status",
+          "titleFound": true,
+          "titleBounds": [
+            "[55,103][289,213]",
+            "[271,327][992,385]",
+            "[271,390][992,437]",
+            "[277,2177][371,2216]"
+          ],
+          "frame": "[0,0][1080,2220]",
+          "appNodes": 99,
+          "scrollContainers": 1,
+          "dialog": false,
+          "crashDialog": false
+        }
+      ]
+    },
+    {
+      "file": "app/app-lock-chats.tsx",
+      "route": "app-lock-chats",
+      "safe": true,
+      "expectedRegex": "Per-Chat Lock",
+      "reason": "Reads chat lock inventory; do not unlock, create, edit or disable locks.",
+      "state": "Initial labels/bounds observed",
+      "observed": true,
+      "observations": [
+        {
+          "device": "w4eygyinypswrcz9",
+          "phase": "final-redmi-light-all",
+          "route": "app-lock-chats",
+          "titleFound": true,
+          "titleBounds": [
+            "[374,117][705,189]"
+          ],
+          "frame": "[0,0][1080,2220]",
+          "appNodes": 43,
+          "scrollContainers": 1,
+          "crashDialog": false
+        }
+      ]
+    },
+    {
+      "file": "app/app-lock.tsx",
+      "route": "app-lock",
+      "safe": false,
+      "expectedRegex": "crazzychat is locked",
+      "reason": "Session security gate; may auto-authenticate or redirect; controlled locked-session fixture.",
+      "state": "Fixture required",
+      "observed": false,
+      "observations": []
+    },
+    {
+      "file": "app/backup-pin.tsx",
+      "route": "backup-pin",
+      "safe": false,
+      "expectedRegex": "Set Backup PIN|Confirm PIN",
+      "reason": "Backup PIN setup; auth/onboarding fixture, never enter or replace real PIN.",
+      "state": "Fixture required",
+      "observed": false,
+      "observations": []
+    },
+    {
+      "file": "app/biometric-setup.tsx",
+      "route": "biometric-setup",
+      "safe": false,
+      "expectedRegex": "Register Biometric",
+      "reason": "Biometric enrollment/onboarding flow; controlled fixture and explicit biometric interaction.",
+      "state": "Fixture required",
+      "observed": false,
+      "observations": []
+    },
+    {
+      "file": "app/blocked.tsx",
+      "route": "blocked",
+      "safe": false,
+      "expectedRegex": "SECURITY ALERT|crazzychat Blocked",
+      "reason": "Threat-enforcement screen takes threats/level; controlled threat fixture, not normal navigation.",
+      "state": "Fixture required",
+      "observed": false,
+      "observations": []
+    },
+    {
+      "file": "app/bookmarks.tsx",
+      "route": "bookmarks",
+      "safe": true,
+      "expectedRegex": "Bookmarks|No bookmarks yet",
+      "reason": "Authenticated read-only landing/list/settings load; no submit, delete, toggle or external actions. Source review only; native result not verified.",
+      "state": "Initial labels/bounds observed",
+      "observed": true,
+      "observations": [
+        {
+          "device": "w4eygyinypswrcz9",
+          "phase": "final-redmi-light-all",
+          "route": "bookmarks",
+          "titleFound": true,
+          "titleBounds": [
+            "[176,115][495,201]",
+            "[354,1271][725,1335]"
+          ],
+          "frame": "[0,0][1080,2220]",
+          "appNodes": 29,
+          "scrollContainers": 1,
+          "crashDialog": false
+        }
+      ]
+    },
+    {
+      "file": "app/chat.tsx",
+      "route": "chat",
+      "safe": true,
+      "expectedRegex": "Conversation not found|Back to chats",
+      "reason": "ONLY parameter-free missing-conversation state is safe. Valid id loads private messages and sends durable delivered/read receipts/live viewing state; no real conversation fixture used.",
+      "state": "Initial labels/bounds observed",
+      "observed": true,
+      "observations": [
+        {
+          "device": "w4eygyinypswrcz9",
+          "phase": "final-redmi-light-all",
+          "route": "chat",
+          "titleFound": true,
+          "titleBounds": [
+            "[292,1064][788,1127]",
+            "[421,1348][659,1401]"
+          ],
+          "frame": "[0,0][1080,2220]",
+          "appNodes": 19,
+          "scrollContainers": 0,
+          "crashDialog": false
+        }
+      ]
+    },
+    {
+      "file": "app/communities.tsx",
+      "route": "communities",
+      "safe": true,
+      "expectedRegex": "Communities|No communities yet",
+      "reason": "Authenticated read-only landing/list/settings load; no submit, delete, toggle or external actions. Source review only; native result not verified.",
+      "state": "Initial labels/bounds observed",
+      "observed": true,
+      "observations": [
+        {
+          "device": "w4eygyinypswrcz9",
+          "phase": "final-redmi-light-all",
+          "route": "communities",
+          "titleFound": true,
+          "titleBounds": [
+            "[187,122][893,194]",
+            "[310,1197][770,1269]",
+            "[88,1302][992,1412]"
+          ],
+          "frame": "[0,0][1080,2220]",
+          "appNodes": 33,
+          "scrollContainers": 1,
+          "crashDialog": false
+        }
+      ]
+    },
+    {
+      "file": "app/contact-info.tsx",
+      "route": "contact-info",
+      "safe": true,
+      "expectedRegex": "Contact|Media, links",
+      "reason": "No parameters renders Contact fallback; reads block list but skips chat/messages/common groups without ids. Passing chatId reads up to 200 private messages/media, so populated coverage excluded.",
+      "state": "Initial labels/bounds observed",
+      "observed": true,
+      "observations": [
+        {
+          "device": "w4eygyinypswrcz9",
+          "phase": "final-redmi-light-all",
+          "route": "contact-info",
+          "titleFound": true,
+          "titleBounds": [
+            "[421,444][658,538]",
+            "[44,1172][875,1219]",
+            "[194,1707][995,1807]",
+            "[167,1944][434,2002]",
+            "[167,2107][458,2165]"
+          ],
+          "frame": "[0,0][1080,2220]",
+          "appNodes": 69,
+          "scrollContainers": 1,
+          "crashDialog": false
+        }
+      ]
+    },
+    {
+      "file": "app/contact.tsx",
+      "route": "contact",
+      "safe": true,
+      "expectedRegex": "Contact info|Contact",
+      "reason": "Parameter-free static fallback profile; no mount effect. Do not tap message/call/video/export/delete controls.",
+      "state": "Initial labels/bounds observed",
+      "observed": true,
+      "observations": [
+        {
+          "device": "w4eygyinypswrcz9",
+          "phase": "final-redmi-light-all",
+          "route": "contact",
+          "titleFound": true,
+          "titleBounds": [
+            "[770,110][1036,176]",
+            "[421,642][658,736]"
+          ],
+          "frame": "[0,0][1080,2220]",
+          "appNodes": 68,
+          "scrollContainers": 1,
+          "crashDialog": false
+        }
+      ]
+    },
+    {
+      "file": "app/contacts.tsx",
+      "route": "contacts",
+      "safe": false,
+      "expectedRegex": "Contacts|Contacts permission needed",
+      "reason": "Mount automatically requests Contacts permission, reads entire device address book, hashes phones and POSTs contacts/match; excluded from automatic read-only sweep even if permission already granted.",
+      "state": "Fixture required",
+      "observed": false,
+      "observations": []
+    },
+    {
+      "file": "app/create-group.tsx",
+      "route": "create-group",
+      "safe": true,
+      "expectedRegex": "New Group",
+      "reason": "No params: reads chats and access token to populate the picker. Group creation is button-only. Check initial form only; do not select/create.",
+      "state": "Initial labels/bounds observed",
+      "observed": true,
+      "observations": [
+        {
+          "device": "w4eygyinypswrcz9",
+          "phase": "final-redmi-light-all",
+          "route": "create-group",
+          "titleFound": true,
+          "titleBounds": [
+            "[407,117][673,189]"
+          ],
+          "frame": "[0,0][1080,2220]",
+          "appNodes": 40,
+          "scrollContainers": 1,
+          "crashDialog": false
+        }
+      ]
+    },
+    {
+      "file": "app/create-poll.tsx",
+      "route": "create-poll",
+      "safe": true,
+      "expectedRegex": "New poll",
+      "reason": "Initial no-param compose screen has no mount effect; createPoll executes only on Send. Full send coverage requires controlled chatId. No input or submission.",
+      "state": "Initial labels/bounds observed",
+      "observed": true,
+      "observations": [
+        {
+          "device": "w4eygyinypswrcz9",
+          "phase": "final-redmi-light-all",
+          "route": "create-poll",
+          "titleFound": true,
+          "titleBounds": [
+            "[165,112][837,198]"
+          ],
+          "frame": "[0,0][1080,2220]",
+          "appNodes": 41,
+          "scrollContainers": 1,
+          "crashDialog": false
+        }
+      ]
+    },
+    {
+      "file": "app/d2de-status.tsx",
+      "route": "d2de-status",
+      "safe": true,
+      "expectedRegex": "Encryption status",
+      "reason": "Authenticated read-only landing/list/settings load; no submit, delete, toggle or external actions. Source review only; native result not verified.",
+      "state": "Initial labels/bounds observed",
+      "observed": true,
+      "observations": [
+        {
+          "device": "w4eygyinypswrcz9",
+          "phase": "final-redmi-light-all",
+          "route": "d2de-status",
+          "titleFound": true,
+          "titleBounds": [
+            "[198,116][628,190]"
+          ],
+          "frame": "[0,0][1080,2220]",
+          "appNodes": 64,
+          "scrollContainers": 1,
+          "crashDialog": false
+        }
+      ]
+    },
+    {
+      "file": "app/dashboard.tsx",
+      "route": "dashboard",
+      "safe": true,
+      "expectedRegex": "Security Hub",
+      "reason": "Authenticated read-only landing/list/settings load; no submit, delete, toggle or external actions. Source review only; native result not verified.",
+      "state": "Fresh hierarchy capture unavailable",
+      "observed": false,
+      "observations": [
+        {
+          "device": "w4eygyinypswrcz9",
+          "phase": "final-redmi-light-all",
+          "route": "dashboard",
+          "titleFound": false,
+          "titleBounds": [],
+          "frame": "[0,0][1080,2220]",
+          "appNodes": 178,
+          "scrollContainers": 2,
+          "crashDialog": false
+        },
+        {
+          "device": "w4eygyinypswrcz9",
+          "phase": "final-redmi-light-retry",
+          "route": "dashboard",
+          "titleFound": false,
+          "captureFailed": true
+        },
+        {
+          "device": "w4eygyinypswrcz9",
+          "phase": "final-redmi-light-headings",
+          "route": "dashboard",
+          "titleFound": false,
+          "captureFailed": true
+        }
+      ]
+    },
+    {
+      "file": "app/docscanner.tsx",
+      "route": "docscanner",
+      "safe": true,
+      "expectedRegex": "Doc Scanner",
+      "reason": "Initial landing mount only animates and reads local recent-document storage. Camera/gallery/scanning and sending require controlled media and permission fixtures; no actions.",
+      "state": "Initial labels/bounds observed",
+      "observed": true,
+      "observations": [
+        {
+          "device": "w4eygyinypswrcz9",
+          "phase": "final-redmi-light-all",
+          "route": "docscanner",
+          "titleFound": false,
+          "titleBounds": [],
+          "frame": "[0,0][1080,2220]",
+          "appNodes": 41,
+          "scrollContainers": 1,
+          "crashDialog": false
+        },
+        {
+          "device": "w4eygyinypswrcz9",
+          "phase": "final-redmi-light-retry",
+          "route": "docscanner",
+          "titleFound": true,
+          "titleBounds": [
+            "[198,98][1031,175]"
+          ],
+          "frame": "[0,0][1080,2220]",
+          "appNodes": 44,
+          "scrollContainers": 1,
+          "dialog": false,
+          "crashDialog": false
+        }
+      ]
+    },
+    {
+      "file": "app/email-bridge.tsx",
+      "route": "email-bridge",
+      "safe": true,
+      "expectedRegex": "Encrypted Email",
+      "reason": "Encrypted email landing; no compose/send/settings modifications.",
+      "state": "Initial labels/bounds observed",
+      "observed": true,
+      "observations": [
+        {
+          "device": "w4eygyinypswrcz9",
+          "phase": "final-redmi-light-all",
+          "route": "email-bridge",
+          "titleFound": true,
+          "titleBounds": [
+            "[187,110][766,196]",
+            "[44,582][1036,648]"
+          ],
+          "frame": "[0,0][1080,2220]",
+          "appNodes": 54,
+          "scrollContainers": 1,
+          "crashDialog": false
+        }
+      ]
+    },
+    {
+      "file": "app/email-verify.tsx",
+      "route": "email-verify",
+      "safe": false,
+      "expectedRegex": "Enter the 6-digit code",
+      "reason": "OTP verification depends on onboarding phone ticket; no resend/submit against real account.",
+      "state": "Fixture required",
+      "observed": false,
+      "observations": []
+    },
+    {
+      "file": "app/emergency-sos.tsx",
+      "route": "emergency-sos",
+      "safe": false,
+      "expectedRegex": "Emergency SOS",
+      "reason": "Sensitive SOS/location/alarm flow; controlled contacts and permissions fixture only.",
+      "state": "Fixture required",
+      "observed": false,
+      "observations": []
+    },
+    {
+      "file": "app/family-add.tsx",
+      "route": "family-add",
+      "safe": true,
+      "expectedRegex": "Invite to group",
+      "reason": "No params: reads chats/token; circleMembers is skipped without circleId. Missing destination, not an invitation-flow verification. Do not invite, share code or open address-book actions.",
+      "state": "Initial labels/bounds observed",
+      "observed": true,
+      "observations": [
+        {
+          "device": "w4eygyinypswrcz9",
+          "phase": "final-redmi-light-all",
+          "route": "family-add",
+          "titleFound": true,
+          "titleBounds": [
+            "[363,116][718,190]"
+          ],
+          "frame": "[0,0][1080,2220]",
+          "appNodes": 46,
+          "scrollContainers": 1,
+          "crashDialog": false
+        }
+      ]
+    },
+    {
+      "file": "app/family-alerts.tsx",
+      "route": "family-alerts",
+      "safe": false,
+      "expectedRegex": "Alerts|No alerts yet",
+      "reason": "Opening/focusing calls markAllRead(circleId) after600ms. No-param circleId is null, which marks ALL local circle alerts read; requires a controlled alert fixture.",
+      "state": "Fixture required",
+      "observed": false,
+      "observations": []
+    },
+    {
+      "file": "app/family-history.tsx",
+      "route": "family-history",
+      "safe": true,
+      "expectedRegex": "Location History",
+      "reason": "No params: loads local alerts then exits track loading because circleId is absent. Empty history shell only; no location request or track fetch.",
+      "state": "Initial labels/bounds observed",
+      "observed": true,
+      "observations": [
+        {
+          "device": "w4eygyinypswrcz9",
+          "phase": "final-redmi-light-all",
+          "route": "family-history",
+          "titleFound": true,
+          "titleBounds": [
+            "[338,116][742,190]",
+            "[104,1437][975,1490]"
+          ],
+          "frame": "[0,0][1080,2220]",
+          "appNodes": 36,
+          "scrollContainers": 0,
+          "crashDialog": false
+        }
+      ]
+    },
+    {
+      "file": "app/family-items.tsx",
+      "route": "family-items",
+      "safe": true,
+      "expectedRegex": "Find my things",
+      "reason": "No params: reads saved items/current user. BLE scanning starts false and only explicit Start enables scanning/location sightings. Do not scan, pair, toggle or edit.",
+      "state": "Initial labels/bounds observed",
+      "observed": true,
+      "observations": [
+        {
+          "device": "w4eygyinypswrcz9",
+          "phase": "final-redmi-light-all",
+          "route": "family-items",
+          "titleFound": true,
+          "titleBounds": [
+            "[359,116][721,190]"
+          ],
+          "frame": "[0,0][1080,2220]",
+          "appNodes": 33,
+          "scrollContainers": 1,
+          "crashDialog": false
+        }
+      ]
+    },
+    {
+      "file": "app/family-map.tsx",
+      "route": "family-map",
+      "safe": false,
+      "expectedRegex": "Live map|Open this map from a space",
+      "reason": "No-param render is a missing-space state, but hooks still read cached device location on mount and can observe an existing global trip/navigation state. Requires controlled location/trip fixture for strict read-only sweep.",
+      "state": "Fixture required",
+      "observed": false,
+      "observations": []
+    },
+    {
+      "file": "app/family-member.tsx",
+      "route": "family-member",
+      "safe": true,
+      "expectedRegex": "Member|No recent location",
+      "reason": "No params: local alerts load; relation/history/place loading is guarded by circleId and userId. Empty member shell only. Do not invoke relationship, chat or route actions.",
+      "state": "Initial labels/bounds observed",
+      "observed": true,
+      "observations": [
+        {
+          "device": "w4eygyinypswrcz9",
+          "phase": "final-redmi-light-all",
+          "route": "family-member",
+          "titleFound": true,
+          "titleBounds": [
+            "[437,116][643,190]",
+            "[261,329][439,395]",
+            "[261,400][989,450]"
+          ],
+          "frame": "[0,0][1080,2220]",
+          "appNodes": 89,
+          "scrollContainers": 1,
+          "crashDialog": false
+        }
+      ]
+    },
+    {
+      "file": "app/family-places.tsx",
+      "route": "family-places",
+      "safe": true,
+      "expectedRegex": "Safe Zones",
+      "reason": "No params: place/default-reference reads skip without circleId and list stays empty. Location permission, adding zones, notifications and reference changes require explicit actions; do not use them.",
+      "state": "Initial labels/bounds observed",
+      "observed": true,
+      "observations": [
+        {
+          "device": "w4eygyinypswrcz9",
+          "phase": "final-redmi-light-all",
+          "route": "family-places",
+          "titleFound": true,
+          "titleBounds": [
+            "[401,116][680,190]"
+          ],
+          "frame": "[0,0][1080,2220]",
+          "appNodes": 48,
+          "scrollContainers": 1,
+          "crashDialog": false
+        }
+      ]
+    },
+    {
+      "file": "app/family-setup.tsx",
+      "route": "family-setup",
+      "safe": true,
+      "expectedRegex": "Family Circle",
+      "reason": "Initial create/join form has no mount mutation or location effect. Do not submit Create or Join.",
+      "state": "Initial labels/bounds observed",
+      "observed": true,
+      "observations": [
+        {
+          "device": "w4eygyinypswrcz9",
+          "phase": "final-redmi-light-core",
+          "route": "family-setup",
+          "titleFound": true,
+          "titleBounds": [
+            "[381,116][699,190]"
+          ],
+          "frame": "[0,0][1080,2220]",
+          "appNodes": 52,
+          "scrollContainers": 1,
+          "crashDialog": false
+        }
+      ]
+    },
+    {
+      "file": "app/family.tsx",
+      "route": "family",
+      "safe": false,
+      "expectedRegex": "Spaces|Share my location",
+      "reason": "No params chooses existing/default space and starts presence/subscriptions; saved sharing may request permission and publish location. Also derives/persists alerts and may auto-navigate an active driver to run screen. Controlled space/location fixture required.",
+      "state": "Fixture required",
+      "observed": false,
+      "observations": []
+    },
+    {
+      "file": "app/file-preview.tsx",
+      "route": "file-preview",
+      "safe": false,
+      "expectedRegex": "Preview",
+      "reason": "Requires known harmless local uri/filename or controlled mediaUrl; may fetch file contents.",
+      "state": "Fixture required",
+      "observed": false,
+      "observations": []
+    },
+    {
+      "file": "app/file-viewer.tsx",
+      "route": "file-viewer",
+      "safe": false,
+      "expectedRegex": "file",
+      "reason": "Requires controlled uri/filename/mimeType; media playback and file actions need fixtures.",
+      "state": "Fixture required",
+      "observed": false,
+      "observations": []
+    },
+    {
+      "file": "app/finance/calendar.tsx",
+      "route": "finance/calendar",
+      "safe": true,
+      "expectedRegex": "Calendar",
+      "reason": "No parameters needed. Mount/focus reads on-device finance rows for current account (local fallback); financeDb may initialize local schema. No money writes on entry. Do not activate add/edit/delete/reminder actions.",
+      "state": "Initial labels/bounds observed",
+      "observed": true,
+      "observations": [
+        {
+          "device": "w4eygyinypswrcz9",
+          "phase": "final-redmi-light-core",
+          "route": "finance/calendar",
+          "titleFound": true,
+          "titleBounds": [
+            "[137,123][942,194]"
+          ],
+          "frame": "[0,0][1080,2220]",
+          "appNodes": 105,
+          "scrollContainers": 1,
+          "crashDialog": false
+        }
+      ]
+    },
+    {
+      "file": "app/finance/chitti/[id].tsx",
+      "route": "finance/chitti/[id]",
+      "safe": false,
+      "expectedRegex": "Lucky Draw Group",
+      "reason": "Dynamic route requires existing approved on-device record id; do not invent an id or create financial records. Placeholder is not a launchable route. Entry reads local record; buttons can mutate.",
+      "state": "Fixture required",
+      "observed": false,
+      "observations": []
+    },
+    {
+      "file": "app/finance/chitti/index.tsx",
+      "route": "finance/chitti",
+      "safe": true,
+      "expectedRegex": "Lucky Draw",
+      "reason": "No parameters needed. Mount/focus reads on-device finance rows for current account (local fallback); financeDb may initialize local schema. No money writes on entry. Do not activate add/edit/delete/reminder actions.",
+      "state": "Initial labels/bounds observed",
+      "observed": true,
+      "observations": [
+        {
+          "device": "w4eygyinypswrcz9",
+          "phase": "final-redmi-light-core",
+          "route": "finance/chitti",
+          "titleFound": true,
+          "titleBounds": [
+            "[137,123][942,194]"
+          ],
+          "frame": "[0,0][1080,2220]",
+          "appNodes": 43,
+          "scrollContainers": 1,
+          "crashDialog": false
+        }
+      ]
+    },
+    {
+      "file": "app/finance/chitti/new.tsx",
+      "route": "finance/chitti/new",
+      "safe": true,
+      "expectedRegex": "New Lucky Draw Group",
+      "reason": "No parameters needed. Form/calculator/import-export shell only; writes, document picker, export and notifications require explicit controls. Do not save/import/export/create.",
+      "state": "Initial labels/bounds observed",
+      "observed": true,
+      "observations": [
+        {
+          "device": "w4eygyinypswrcz9",
+          "phase": "final-redmi-light-all",
+          "route": "finance/chitti/new",
+          "titleFound": true,
+          "titleBounds": [
+            "[137,123][942,194]"
+          ],
+          "frame": "[0,0][1080,2220]",
+          "appNodes": 54,
+          "scrollContainers": 1,
+          "crashDialog": false
+        }
+      ]
+    },
+    {
+      "file": "app/finance/customer.tsx",
+      "route": "finance/customer",
+      "safe": true,
+      "expectedRegex": "Customer|No ledgers",
+      "reason": "Without name shows empty customer shell; meaningful populated coverage needs approved local customer fixture/name. No query without name.",
+      "state": "Initial labels/bounds observed",
+      "observed": true,
+      "observations": [
+        {
+          "device": "w4eygyinypswrcz9",
+          "phase": "final-redmi-light-all",
+          "route": "finance/customer",
+          "titleFound": true,
+          "titleBounds": [
+            "[137,123][942,194]",
+            "[437,1778][643,1835]",
+            "[164,1851][916,1901]"
+          ],
+          "frame": "[0,0][1080,2220]",
+          "appNodes": 51,
+          "scrollContainers": 1,
+          "crashDialog": false
+        }
+      ]
+    },
+    {
+      "file": "app/finance/emi.tsx",
+      "route": "finance/emi",
+      "safe": true,
+      "expectedRegex": "EMI Calculator",
+      "reason": "No parameters needed. Form/calculator/import-export shell only; writes, document picker, export and notifications require explicit controls. Do not save/import/export/create.",
+      "state": "Initial labels/bounds observed",
+      "observed": true,
+      "observations": [
+        {
+          "device": "w4eygyinypswrcz9",
+          "phase": "final-redmi-light-core",
+          "route": "finance/emi",
+          "titleFound": true,
+          "titleBounds": [
+            "[137,123][942,194]"
+          ],
+          "frame": "[0,0][1080,2220]",
+          "appNodes": 53,
+          "scrollContainers": 1,
+          "crashDialog": false
+        }
+      ]
+    },
+    {
+      "file": "app/finance/index.tsx",
+      "route": "finance",
+      "safe": true,
+      "expectedRegex": "Vault Finance",
+      "reason": "No parameters needed. Mount/focus reads on-device finance rows for current account (local fallback); financeDb may initialize local schema. No money writes on entry. Do not activate add/edit/delete/reminder actions.",
+      "state": "Initial labels/bounds observed",
+      "observed": true,
+      "observations": [
+        {
+          "device": "w4eygyinypswrcz9",
+          "phase": "final-redmi-light-core",
+          "route": "finance",
+          "titleFound": true,
+          "titleBounds": [
+            "[198,109][750,191]"
+          ],
+          "frame": "[0,0][1080,2220]",
+          "appNodes": 92,
+          "scrollContainers": 1,
+          "crashDialog": false
+        }
+      ]
+    },
+    {
+      "file": "app/finance/interest.tsx",
+      "route": "finance/interest",
+      "safe": true,
+      "expectedRegex": "Interest Calculator",
+      "reason": "No parameters needed. Form/calculator/import-export shell only; writes, document picker, export and notifications require explicit controls. Do not save/import/export/create.",
+      "state": "Initial labels/bounds observed",
+      "observed": true,
+      "observations": [
+        {
+          "device": "w4eygyinypswrcz9",
+          "phase": "final-redmi-light-core",
+          "route": "finance/interest",
+          "titleFound": true,
+          "titleBounds": [
+            "[137,123][942,194]"
+          ],
+          "frame": "[0,0][1080,2220]",
+          "appNodes": 76,
+          "scrollContainers": 1,
+          "crashDialog": false
+        }
+      ]
+    },
+    {
+      "file": "app/finance/io.tsx",
+      "route": "finance/io",
+      "safe": true,
+      "expectedRegex": "Import / Export",
+      "reason": "No parameters needed. Form/calculator/import-export shell only; writes, document picker, export and notifications require explicit controls. Do not save/import/export/create.",
+      "state": "Initial labels/bounds observed",
+      "observed": true,
+      "observations": [
+        {
+          "device": "w4eygyinypswrcz9",
+          "phase": "final-redmi-light-core",
+          "route": "finance/io",
+          "titleFound": true,
+          "titleBounds": [
+            "[137,123][942,194]"
+          ],
+          "frame": "[0,0][1080,2220]",
+          "appNodes": 50,
+          "scrollContainers": 1,
+          "crashDialog": false
+        }
+      ]
+    },
+    {
+      "file": "app/finance/ledger/[id].tsx",
+      "route": "finance/ledger/[id]",
+      "safe": false,
+      "expectedRegex": "Ledger Details|Ledger",
+      "reason": "Dynamic route requires existing approved on-device record id; do not invent an id or create financial records. Placeholder is not a launchable route. Entry reads local record; buttons can mutate.",
+      "state": "Fixture required",
+      "observed": false,
+      "observations": []
+    },
+    {
+      "file": "app/finance/ledger/edit.tsx",
+      "route": "finance/ledger/edit",
+      "safe": true,
+      "expectedRegex": "Edit Ledger",
+      "reason": "Without id renders header-only fallback and skips local record query. Does NOT cover edit/update form. Populated coverage needs existing approved local ledger id; never save.",
+      "state": "Initial labels/bounds observed",
+      "observed": true,
+      "observations": [
+        {
+          "device": "w4eygyinypswrcz9",
+          "phase": "final-redmi-light-all",
+          "route": "finance/ledger/edit",
+          "titleFound": true,
+          "titleBounds": [
+            "[137,123][942,194]"
+          ],
+          "frame": "[0,0][1080,2220]",
+          "appNodes": 24,
+          "scrollContainers": 0,
+          "crashDialog": false
+        }
+      ]
+    },
+    {
+      "file": "app/finance/ledger/index.tsx",
+      "route": "finance/ledger",
+      "safe": true,
+      "expectedRegex": "Ledger Book",
+      "reason": "No parameters needed. Mount/focus reads on-device finance rows for current account (local fallback); financeDb may initialize local schema. No money writes on entry. Do not activate add/edit/delete/reminder actions.",
+      "state": "Initial labels/bounds observed",
+      "observed": true,
+      "observations": [
+        {
+          "device": "w4eygyinypswrcz9",
+          "phase": "final-redmi-light-core",
+          "route": "finance/ledger",
+          "titleFound": true,
+          "titleBounds": [
+            "[137,123][942,194]"
+          ],
+          "frame": "[0,0][1080,2220]",
+          "appNodes": 43,
+          "scrollContainers": 1,
+          "crashDialog": false
+        }
+      ]
+    },
+    {
+      "file": "app/finance/ledger/new.tsx",
+      "route": "finance/ledger/new",
+      "safe": true,
+      "expectedRegex": "Add Ledger",
+      "reason": "No parameters needed. Form/calculator/import-export shell only; writes, document picker, export and notifications require explicit controls. Do not save/import/export/create.",
+      "state": "Initial labels/bounds observed",
+      "observed": true,
+      "observations": [
+        {
+          "device": "w4eygyinypswrcz9",
+          "phase": "final-redmi-light-all",
+          "route": "finance/ledger/new",
+          "titleFound": true,
+          "titleBounds": [
+            "[137,123][942,194]"
+          ],
+          "frame": "[0,0][1080,2220]",
+          "appNodes": 68,
+          "scrollContainers": 1,
+          "crashDialog": false
+        }
+      ]
+    },
+    {
+      "file": "app/finance/ledger/update.tsx",
+      "route": "finance/ledger/update",
+      "safe": true,
+      "expectedRegex": "Update Amount",
+      "reason": "Without id renders header-only fallback and skips local record query. Does NOT cover edit/update form. Populated coverage needs existing approved local ledger id; never save.",
+      "state": "Initial labels/bounds observed",
+      "observed": true,
+      "observations": [
+        {
+          "device": "w4eygyinypswrcz9",
+          "phase": "final-redmi-light-all",
+          "route": "finance/ledger/update",
+          "titleFound": true,
+          "titleBounds": [
+            "[137,123][942,194]"
+          ],
+          "frame": "[0,0][1080,2220]",
+          "appNodes": 24,
+          "scrollContainers": 0,
+          "crashDialog": false
+        }
+      ]
+    },
+    {
+      "file": "app/finance/reminders.tsx",
+      "route": "finance/reminders",
+      "safe": true,
+      "expectedRegex": "Reminders",
+      "reason": "No parameters needed. Mount/focus reads on-device finance rows for current account (local fallback); financeDb may initialize local schema. No money writes on entry. Do not activate add/edit/delete/reminder actions.",
+      "state": "Initial labels/bounds observed",
+      "observed": true,
+      "observations": [
+        {
+          "device": "w4eygyinypswrcz9",
+          "phase": "final-redmi-light-core",
+          "route": "finance/reminders",
+          "titleFound": true,
+          "titleBounds": [
+            "[137,123][942,194]"
+          ],
+          "frame": "[0,0][1080,2220]",
+          "appNodes": 33,
+          "scrollContainers": 1,
+          "crashDialog": false
+        }
+      ]
+    },
+    {
+      "file": "app/finance/reports.tsx",
+      "route": "finance/reports",
+      "safe": true,
+      "expectedRegex": "Reports",
+      "reason": "No parameters needed. Mount/focus reads on-device finance rows for current account (local fallback); financeDb may initialize local schema. No money writes on entry. Do not activate add/edit/delete/reminder actions.",
+      "state": "Initial labels/bounds observed",
+      "observed": true,
+      "observations": [
+        {
+          "device": "w4eygyinypswrcz9",
+          "phase": "final-redmi-light-core",
+          "route": "finance/reports",
+          "titleFound": true,
+          "titleBounds": [
+            "[137,123][942,194]"
+          ],
+          "frame": "[0,0][1080,2220]",
+          "appNodes": 71,
+          "scrollContainers": 1,
+          "crashDialog": false
+        }
+      ]
+    },
+    {
+      "file": "app/finance/saved.tsx",
+      "route": "finance/saved",
+      "safe": true,
+      "expectedRegex": "Saved & History",
+      "reason": "No parameters needed. Mount/focus reads on-device finance rows for current account (local fallback); financeDb may initialize local schema. No money writes on entry. Do not activate add/edit/delete/reminder actions.",
+      "state": "Initial labels/bounds observed",
+      "observed": true,
+      "observations": [
+        {
+          "device": "w4eygyinypswrcz9",
+          "phase": "final-redmi-light-core",
+          "route": "finance/saved",
+          "titleFound": true,
+          "titleBounds": [
+            "[137,123][942,194]"
+          ],
+          "frame": "[0,0][1080,2220]",
+          "appNodes": 40,
+          "scrollContainers": 1,
+          "crashDialog": false
+        }
+      ]
+    },
+    {
+      "file": "app/finance/search.tsx",
+      "route": "finance/search",
+      "safe": true,
+      "expectedRegex": "Search",
+      "reason": "No parameters needed. Mount/focus reads on-device finance rows for current account (local fallback); financeDb may initialize local schema. No money writes on entry. Do not activate add/edit/delete/reminder actions.",
+      "state": "Initial labels/bounds observed",
+      "observed": true,
+      "observations": [
+        {
+          "device": "w4eygyinypswrcz9",
+          "phase": "final-redmi-light-core",
+          "route": "finance/search",
+          "titleFound": true,
+          "titleBounds": [
+            "[137,123][942,194]"
+          ],
+          "frame": "[0,0][1080,2220]",
+          "appNodes": 34,
+          "scrollContainers": 1,
+          "crashDialog": false
+        }
+      ]
+    },
+    {
+      "file": "app/games.tsx",
+      "route": "games",
+      "safe": true,
+      "expectedRegex": "Games|Chess|Rummy|Ludo|Tic-Tac-Toe",
+      "reason": "Hub ONLY with no query params: establishes games session via POST launch-token/session exchange and reads demo wallet/live-table metadata; does not queue/join a game. Never pass game/room/auto/bot/seat or activate play/quick match.",
+      "state": "Initial labels/bounds observed",
+      "observed": true,
+      "observations": [
+        {
+          "device": "w4eygyinypswrcz9",
+          "phase": "final-redmi-light-core",
+          "route": "games",
+          "titleFound": true,
+          "titleBounds": [
+            "[176,137][624,212]"
+          ],
+          "frame": "[0,0][1080,2220]",
+          "appNodes": 103,
+          "scrollContainers": 1,
+          "crashDialog": false
+        }
+      ]
+    },
+    {
+      "file": "app/group-calendar.tsx",
+      "route": "group-calendar",
+      "safe": true,
+      "expectedRegex": "Calendar",
+      "reason": "No groupId: current-user read, then event load exits. Empty calendar shell only; do not add events.",
+      "state": "Initial labels/bounds observed",
+      "observed": true,
+      "observations": [
+        {
+          "device": "w4eygyinypswrcz9",
+          "phase": "final-redmi-light-core",
+          "route": "group-calendar",
+          "titleFound": true,
+          "titleBounds": [
+            "[430,116][651,190]"
+          ],
+          "frame": "[0,0][1080,2220]",
+          "appNodes": 37,
+          "scrollContainers": 0,
+          "crashDialog": false
+        }
+      ]
+    },
+    {
+      "file": "app/group-create.tsx",
+      "route": "group-create",
+      "safe": true,
+      "expectedRegex": "New group",
+      "reason": "Initial group-type/name form. Group creation/adoption happens only on explicit submit; no mount write. Do not create.",
+      "state": "Initial labels/bounds observed",
+      "observed": true,
+      "observations": [
+        {
+          "device": "w4eygyinypswrcz9",
+          "phase": "final-redmi-light-core",
+          "route": "group-create",
+          "titleFound": true,
+          "titleBounds": [
+            "[407,116][674,190]"
+          ],
+          "frame": "[0,0][1080,2220]",
+          "appNodes": 86,
+          "scrollContainers": 1,
+          "crashDialog": false
+        }
+      ]
+    },
+    {
+      "file": "app/group-insights.tsx",
+      "route": "group-insights",
+      "safe": true,
+      "expectedRegex": "Insights",
+      "reason": "No groupId: focus loader sets loading false and returns before member/history reads. Empty insights shell only.",
+      "state": "Initial labels/bounds observed",
+      "observed": true,
+      "observations": [
+        {
+          "device": "w4eygyinypswrcz9",
+          "phase": "final-redmi-light-all",
+          "route": "group-insights",
+          "titleFound": true,
+          "titleBounds": [
+            "[442,116][639,190]"
+          ],
+          "frame": "[0,0][1080,2220]",
+          "appNodes": 53,
+          "scrollContainers": 1,
+          "crashDialog": false
+        }
+      ]
+    },
+    {
+      "file": "app/group-invitations.tsx",
+      "route": "group-invitations",
+      "safe": true,
+      "expectedRegex": "Invitations",
+      "reason": "Mount/focus reads myInvitations only. Viewing list does not accept/decline or join. Do not press invitation actions.",
+      "state": "Initial labels/bounds observed",
+      "observed": true,
+      "observations": [
+        {
+          "device": "w4eygyinypswrcz9",
+          "phase": "final-redmi-light-core",
+          "route": "group-invitations",
+          "titleFound": true,
+          "titleBounds": [
+            "[411,116][669,190]"
+          ],
+          "frame": "[0,0][1080,2220]",
+          "appNodes": 32,
+          "scrollContainers": 1,
+          "crashDialog": false
+        }
+      ]
+    },
+    {
+      "file": "app/group-invites.tsx",
+      "route": "group-invites",
+      "safe": true,
+      "expectedRegex": "Add people",
+      "reason": "No chatId: invitation/pending-member reads skip. Search is empty initially. Missing-group form only; do not search, invite or approve.",
+      "state": "Initial labels/bounds observed",
+      "observed": true,
+      "observations": [
+        {
+          "device": "w4eygyinypswrcz9",
+          "phase": "final-redmi-light-all",
+          "route": "group-invites",
+          "titleFound": true,
+          "titleBounds": [
+            "[400,116][680,190]"
+          ],
+          "frame": "[0,0][1080,2220]",
+          "appNodes": 39,
+          "scrollContainers": 1,
+          "crashDialog": false
+        }
+      ]
+    },
+    {
+      "file": "app/group-join.tsx",
+      "route": "group-join",
+      "safe": true,
+      "expectedRegex": "Join a group",
+      "reason": "Mount reads myInvitations to show existing request status; no request/accept occurs automatically. No-param join shell only. Do not request/join.",
+      "state": "Initial labels/bounds observed",
+      "observed": true,
+      "observations": [
+        {
+          "device": "w4eygyinypswrcz9",
+          "phase": "final-redmi-light-all",
+          "route": "group-join",
+          "titleFound": true,
+          "titleBounds": [
+            "[386,116][694,190]"
+          ],
+          "frame": "[0,0][1080,2220]",
+          "appNodes": 38,
+          "scrollContainers": 1,
+          "crashDialog": false
+        }
+      ]
+    },
+    {
+      "file": "app/group-members.tsx",
+      "route": "group-members",
+      "safe": true,
+      "expectedRegex": "Members",
+      "reason": "No groupId: loader exits before getChat. Empty members shell only, not permission/role verification. Do not manage seats or members.",
+      "state": "Initial labels/bounds observed",
+      "observed": true,
+      "observations": [
+        {
+          "device": "w4eygyinypswrcz9",
+          "phase": "final-redmi-light-all",
+          "route": "group-members",
+          "titleFound": true,
+          "titleBounds": [
+            "[423,116][657,190]",
+            "[44,274][261,327]"
+          ],
+          "frame": "[0,0][1080,2220]",
+          "appNodes": 28,
+          "scrollContainers": 1,
+          "crashDialog": false
+        }
+      ]
+    },
+    {
+      "file": "app/group-notes.tsx",
+      "route": "group-notes",
+      "safe": true,
+      "expectedRegex": "Notes",
+      "reason": "No groupId: current-user read, then rebuild exits before messages. Empty notes shell only. Do not add/edit notes.",
+      "state": "Initial labels/bounds observed",
+      "observed": true,
+      "observations": [
+        {
+          "device": "w4eygyinypswrcz9",
+          "phase": "final-redmi-light-core",
+          "route": "group-notes",
+          "titleFound": true,
+          "titleBounds": [
+            "[467,116][613,190]"
+          ],
+          "frame": "[0,0][1080,2220]",
+          "appNodes": 31,
+          "scrollContainers": 0,
+          "crashDialog": false
+        }
+      ]
+    },
+    {
+      "file": "app/group-privacy.tsx",
+      "route": "group-privacy",
+      "safe": true,
+      "expectedRegex": "Privacy",
+      "reason": "No groupId: privacy load exits. Displays default local form, not real membership permissions; patch returns without ID. Do not toggle controls.",
+      "state": "Initial labels/bounds observed",
+      "observed": true,
+      "observations": [
+        {
+          "device": "w4eygyinypswrcz9",
+          "phase": "final-redmi-light-core",
+          "route": "group-privacy",
+          "titleFound": true,
+          "titleBounds": [
+            "[450,116][631,190]"
+          ],
+          "frame": "[0,0][1080,2220]",
+          "appNodes": 63,
+          "scrollContainers": 1,
+          "crashDialog": false
+        }
+      ]
+    },
+    {
+      "file": "app/group-tasks.tsx",
+      "route": "group-tasks",
+      "safe": true,
+      "expectedRegex": "Tasks",
+      "reason": "No groupId: reads current user; skips member load and task replay. Empty tasks shell only. Do not add/toggle tasks.",
+      "state": "Initial labels/bounds observed",
+      "observed": true,
+      "observations": [
+        {
+          "device": "w4eygyinypswrcz9",
+          "phase": "final-redmi-light-core",
+          "route": "group-tasks",
+          "titleFound": true,
+          "titleBounds": [
+            "[468,116][612,190]"
+          ],
+          "frame": "[0,0][1080,2220]",
+          "appNodes": 32,
+          "scrollContainers": 1,
+          "crashDialog": false
+        }
+      ]
+    },
+    {
+      "file": "app/group-trip.tsx",
+      "route": "group-trip",
+      "safe": true,
+      "expectedRegex": "Start a trip|Trip",
+      "reason": "No groupId: reads user and attempts read-only circleMembers with empty ID; subscribeTrip is guarded. currentTrip only reads global state, so existing trip may display. Do not start/join/leave/end/navigate.",
+      "state": "Initial labels/bounds observed",
+      "observed": true,
+      "observations": [
+        {
+          "device": "w4eygyinypswrcz9",
+          "phase": "final-redmi-light-all",
+          "route": "group-trip",
+          "titleFound": true,
+          "titleBounds": [
+            "[410,116][670,190]",
+            "[487,876][665,934]"
+          ],
+          "frame": "[0,0][1080,2220]",
+          "appNodes": 39,
+          "scrollContainers": 1,
+          "crashDialog": false
+        }
+      ]
+    },
+    {
+      "file": "app/image-editor.tsx",
+      "route": "image-editor",
+      "safe": false,
+      "expectedRegex": "Edit Image|Cancel|Crop",
+      "reason": "Requires test image uri and optional chatId/returnTo; save/send affects media.",
+      "state": "Fixture required",
+      "observed": false,
+      "observations": []
+    },
+    {
+      "file": "app/last-seen-privacy.tsx",
+      "route": "last-seen-privacy",
+      "safe": true,
+      "expectedRegex": "Last Seen & Privacy",
+      "reason": "Authenticated read-only landing/list/settings load; no submit, delete, toggle or external actions. Source review only; native result not verified.",
+      "state": "Initial labels/bounds observed",
+      "observed": true,
+      "observations": [
+        {
+          "device": "w4eygyinypswrcz9",
+          "phase": "final-redmi-light-all",
+          "route": "last-seen-privacy",
+          "titleFound": true,
+          "titleBounds": [
+            "[308,114][815,191]"
+          ],
+          "frame": "[0,0][1080,2220]",
+          "appNodes": 52,
+          "scrollContainers": 1,
+          "crashDialog": false
+        }
+      ]
+    },
+    {
+      "file": "app/live/join/[code].tsx",
+      "route": "live/join/[code]",
+      "safe": false,
+      "expectedRegex": "Join the live|Joining live",
+      "reason": "Dynamic invitation code required; Join redeems invite and enters live broadcast.",
+      "state": "Fixture required",
+      "observed": false,
+      "observations": []
+    },
+    {
+      "file": "app/location-lock.tsx",
+      "route": "location-lock",
+      "safe": false,
+      "expectedRegex": "Location Lock|Location Locked",
+      "reason": "Mount restores armed lock, requests location permission and current position; controlled lock/location fixture.",
+      "state": "Fixture required",
+      "observed": false,
+      "observations": []
+    },
+    {
+      "file": "app/lock-history.tsx",
+      "route": "lock-history",
+      "safe": true,
+      "expectedRegex": "Lock History",
+      "reason": "Authenticated read-only landing/list/settings load; no submit, delete, toggle or external actions. Source review only; native result not verified.",
+      "state": "Initial labels/bounds observed",
+      "observed": true,
+      "observations": [
+        {
+          "device": "w4eygyinypswrcz9",
+          "phase": "final-redmi-light-all",
+          "route": "lock-history",
+          "titleFound": true,
+          "titleBounds": [
+            "[386,116][695,190]"
+          ],
+          "frame": "[0,0][1080,2220]",
+          "appNodes": 68,
+          "scrollContainers": 1,
+          "crashDialog": false
+        }
+      ]
+    },
+    {
+      "file": "app/lock-settings.tsx",
+      "route": "lock-settings",
+      "safe": true,
+      "expectedRegex": "Alarm & Alert Settings",
+      "reason": "Authenticated read-only landing/list/settings load; no submit, delete, toggle or external actions. Source review only; native result not verified.",
+      "state": "Initial labels/bounds observed",
+      "observed": true,
+      "observations": [
+        {
+          "device": "w4eygyinypswrcz9",
+          "phase": "final-redmi-light-all",
+          "route": "lock-settings",
+          "titleFound": true,
+          "titleBounds": [
+            "[266,116][814,190]"
+          ],
+          "frame": "[0,0][1080,2220]",
+          "appNodes": 75,
+          "scrollContainers": 1,
+          "crashDialog": false
+        }
+      ]
+    },
+    {
+      "file": "app/lock.tsx",
+      "route": "lock",
+      "safe": false,
+      "expectedRegex": "crazzychat|Enter Code",
+      "reason": "Lockscreen can auto-authenticate/change routing; controlled locked account fixture.",
+      "state": "Fixture required",
+      "observed": false,
+      "observations": []
+    },
+    {
+      "file": "app/login-history.tsx",
+      "route": "login-history",
+      "safe": true,
+      "expectedRegex": "Active devices",
+      "reason": "Authenticated read-only landing/list/settings load; no submit, delete, toggle or external actions. Source review only; native result not verified.",
+      "state": "Initial labels/bounds observed",
+      "observed": true,
+      "observations": [
+        {
+          "device": "w4eygyinypswrcz9",
+          "phase": "final-redmi-light-all",
+          "route": "login-history",
+          "titleFound": true,
+          "titleBounds": [
+            "[165,110][568,196]"
+          ],
+          "frame": "[0,0][1080,2220]",
+          "appNodes": 47,
+          "scrollContainers": 1,
+          "crashDialog": false
+        }
+      ]
+    },
+    {
+      "file": "app/mpin-entry.tsx",
+      "route": "mpin-entry",
+      "safe": false,
+      "expectedRegex": "Welcome back",
+      "reason": "Requires controlled userId and locked account; PIN entry affects authentication.",
+      "state": "Fixture required",
+      "observed": false,
+      "observations": []
+    },
+    {
+      "file": "app/mpin-recover.tsx",
+      "route": "mpin-recover",
+      "safe": false,
+      "expectedRegex": "Reset your MPIN",
+      "reason": "Requires controlled userId/security answers; recovery changes credentials.",
+      "state": "Fixture required",
+      "observed": false,
+      "observations": []
+    },
+    {
+      "file": "app/network-test.tsx",
+      "route": "network-test",
+      "safe": true,
+      "expectedRegex": "Speed Test",
+      "reason": "Loads local history and connectivity/server status; do not start bandwidth upload/download test.",
+      "state": "Initial labels/bounds observed",
+      "observed": true,
+      "observations": [
+        {
+          "device": "w4eygyinypswrcz9",
+          "phase": "final-redmi-light-all",
+          "route": "network-test",
+          "titleFound": true,
+          "titleBounds": [
+            "[414,229][666,296]"
+          ],
+          "frame": "[0,0][1080,2220]",
+          "appNodes": 55,
+          "scrollContainers": 1,
+          "crashDialog": false
+        }
+      ]
+    },
+    {
+      "file": "app/new-chat.tsx",
+      "route": "new-chat",
+      "safe": true,
+      "expectedRegex": "New chat",
+      "reason": "No params loads chat-list metadata/contact avatars only, not message bodies or receipts. Do not select contact/create group/add contact; omit ttl parameter.",
+      "state": "Initial labels/bounds observed",
+      "observed": true,
+      "observations": [
+        {
+          "device": "w4eygyinypswrcz9",
+          "phase": "final-redmi-light-all",
+          "route": "new-chat",
+          "titleFound": true,
+          "titleBounds": [
+            "[165,114][407,191]"
+          ],
+          "frame": "[0,0][1080,2220]",
+          "appNodes": 52,
+          "scrollContainers": 1,
+          "crashDialog": false
+        }
+      ]
+    },
+    {
+      "file": "app/notifications.tsx",
+      "route": "notifications",
+      "safe": true,
+      "expectedRegex": "Alerts & Safety",
+      "reason": "Reads SOS history/contacts/privacy; no panic/test/location buttons or toggles.",
+      "state": "Initial labels/bounds observed",
+      "observed": true,
+      "observations": [
+        {
+          "device": "w4eygyinypswrcz9",
+          "phase": "final-redmi-light-all",
+          "route": "notifications",
+          "titleFound": true,
+          "titleBounds": [
+            "[176,98][1031,175]"
+          ],
+          "frame": "[0,0][1080,2220]",
+          "appNodes": 51,
+          "scrollContainers": 1,
+          "crashDialog": false
+        }
+      ]
+    },
+    {
+      "file": "app/onboard-mpin.tsx",
+      "route": "onboard-mpin",
+      "safe": false,
+      "expectedRegex": "Create your MPIN|Confirm your MPIN",
+      "reason": "Onboarding account fixture required; completion creates authentication PIN.",
+      "state": "Fixture required",
+      "observed": false,
+      "observations": []
+    },
+    {
+      "file": "app/onboard-profile.tsx",
+      "route": "onboard-profile",
+      "safe": false,
+      "expectedRegex": "Set up your profile",
+      "reason": "Onboarding store/phone ticket required; submit updates profile and auth flow.",
+      "state": "Fixture required",
+      "observed": false,
+      "observations": []
+    },
+    {
+      "file": "app/privacy-dashboard.tsx",
+      "route": "privacy-dashboard",
+      "safe": true,
+      "expectedRegex": "Privacy Dashboard",
+      "reason": "Authenticated read-only landing/list/settings load; no submit, delete, toggle or external actions. Source review only; native result not verified.",
+      "state": "Initial labels/bounds observed",
+      "observed": true,
+      "observations": [
+        {
+          "device": "w4eygyinypswrcz9",
+          "phase": "final-redmi-light-all",
+          "route": "privacy-dashboard",
+          "titleFound": true,
+          "titleBounds": [
+            "[322,117][758,189]"
+          ],
+          "frame": "[0,0][1080,2220]",
+          "appNodes": 72,
+          "scrollContainers": 1,
+          "crashDialog": false
+        }
+      ]
+    },
+    {
+      "file": "app/receipt-control.tsx",
+      "route": "receipt-control",
+      "safe": true,
+      "expectedRegex": "Privacy per Contact",
+      "reason": "Authenticated read-only landing/list/settings load; no submit, delete, toggle or external actions. Source review only; native result not verified.",
+      "state": "Initial labels/bounds observed",
+      "observed": true,
+      "observations": [
+        {
+          "device": "w4eygyinypswrcz9",
+          "phase": "final-redmi-light-all",
+          "route": "receipt-control",
+          "titleFound": true,
+          "titleBounds": [
+            "[313,117][766,189]"
+          ],
+          "frame": "[0,0][1080,2220]",
+          "appNodes": 46,
+          "scrollContainers": 1,
+          "crashDialog": false
+        }
+      ]
+    },
+    {
+      "file": "app/scanner.tsx",
+      "route": "scanner",
+      "safe": true,
+      "expectedRegex": "VaultScan",
+      "reason": "Initial landing has no mount effect; camera permission requested only inside openCamera handler. Camera/export/share coverage needs fixtures; no actions.",
+      "state": "Initial labels/bounds observed",
+      "observed": true,
+      "observations": [
+        {
+          "device": "w4eygyinypswrcz9",
+          "phase": "final-redmi-light-all",
+          "route": "scanner",
+          "titleFound": true,
+          "titleBounds": [
+            "[303,116][564,173]"
+          ],
+          "frame": "[0,0][1080,2220]",
+          "appNodes": 129,
+          "scrollContainers": 3,
+          "crashDialog": false
+        }
+      ]
+    },
+    {
+      "file": "app/scheduled.tsx",
+      "route": "scheduled",
+      "safe": true,
+      "expectedRegex": "Scheduled|No scheduled messages",
+      "reason": "Authenticated read-only landing/list/settings load; no submit, delete, toggle or external actions. Source review only; native result not verified.",
+      "state": "Initial labels/bounds observed",
+      "observed": true,
+      "observations": [
+        {
+          "device": "w4eygyinypswrcz9",
+          "phase": "final-redmi-light-all",
+          "route": "scheduled",
+          "titleFound": true,
+          "titleBounds": [
+            "[176,115][473,201]",
+            "[295,1271][785,1335]"
+          ],
+          "frame": "[0,0][1080,2220]",
+          "appNodes": 29,
+          "scrollContainers": 1,
+          "crashDialog": false
+        }
+      ]
+    },
+    {
+      "file": "app/search.tsx",
+      "route": "search",
+      "safe": true,
+      "expectedRegex": "Search chats and messages|Search your chats",
+      "reason": "Authenticated read-only landing/list/settings load; no submit, delete, toggle or external actions. Source review only; native result not verified.",
+      "state": "Initial labels/bounds observed",
+      "observed": true,
+      "observations": [
+        {
+          "device": "w4eygyinypswrcz9",
+          "phase": "final-redmi-light-all",
+          "route": "search",
+          "titleFound": false,
+          "titleBounds": [],
+          "frame": "[0,0][1080,2220]",
+          "appNodes": 41,
+          "scrollContainers": 1,
+          "crashDialog": false
+        },
+        {
+          "device": "w4eygyinypswrcz9",
+          "phase": "final-redmi-light-retry",
+          "route": "search",
+          "titleFound": false,
+          "titleBounds": [],
+          "frame": "[0,0][1080,2220]",
+          "appNodes": 41,
+          "scrollContainers": 1,
+          "dialog": false,
+          "crashDialog": false
+        },
+        {
+          "device": "w4eygyinypswrcz9",
+          "phase": "final-redmi-light-headings",
+          "route": "search",
+          "titleFound": true,
+          "titleBounds": [
+            "[176,98][1047,230]"
+          ],
+          "frame": "[0,0][1080,2220]",
+          "appNodes": 41,
+          "scrollContainers": 1,
+          "dialog": false,
+          "crashDialog": false
+        }
+      ]
+    },
+    {
+      "file": "app/security-questions.tsx",
+      "route": "security-questions",
+      "safe": true,
+      "expectedRegex": "Security Questions",
+      "reason": "No mount effects, credential reads/writes or redirects. Local empty answer state only; saveSecurityAnswers executes solely in handleNext. Presentation only, never enter answers or Save; recovery functionality requires controlled account fixture.",
+      "state": "Initial labels/bounds observed",
+      "observed": true,
+      "observations": [
+        {
+          "device": "w4eygyinypswrcz9",
+          "phase": "final-redmi-light-all",
+          "route": "security-questions",
+          "titleFound": true,
+          "titleBounds": [
+            "[273,345][806,431]",
+            "[66,652][1014,699]"
+          ],
+          "frame": "[0,0][1080,2220]",
+          "appNodes": 54,
+          "scrollContainers": 1,
+          "crashDialog": false
+        }
+      ]
+    },
+    {
+      "file": "app/settings.tsx",
+      "route": "settings",
+      "safe": true,
+      "expectedRegex": "Settings",
+      "reason": "Reads preferences/profile and initializes usage counter; no toggles, export, account or security actions.",
+      "state": "Initial labels/bounds observed",
+      "observed": true,
+      "observations": [
+        {
+          "device": "w4eygyinypswrcz9",
+          "phase": "final-redmi-light-core",
+          "route": "settings",
+          "titleFound": true,
+          "titleBounds": [
+            "[165,121][400,207]"
+          ],
+          "frame": "[0,0][1080,2220]",
+          "appNodes": 76,
+          "scrollContainers": 1,
+          "crashDialog": false
+        }
+      ]
+    },
+    {
+      "file": "app/setup-complete.tsx",
+      "route": "setup-complete",
+      "safe": false,
+      "expectedRegex": "crazzychat is Ready",
+      "reason": "UNSAFE ON MOUNT: markSetupComplete() mutates onboarding completion immediately.",
+      "state": "Fixture required",
+      "observed": false,
+      "observations": []
+    },
+    {
+      "file": "app/space-admin.tsx",
+      "route": "space-admin",
+      "safe": true,
+      "expectedRegex": "This space.*Admin",
+      "reason": "No spaceId: GET run/roster/incident requests use empty ID and failures become empty data. Empty admin shell only; not an authorized admin fixture. Do not open action tiles.",
+      "state": "Initial labels/bounds observed",
+      "observed": true,
+      "observations": [
+        {
+          "device": "w4eygyinypswrcz9",
+          "phase": "final-redmi-light-core",
+          "route": "space-admin",
+          "titleFound": true,
+          "titleBounds": [
+            "[198,116][671,190]",
+            "[160,313][998,371]"
+          ],
+          "frame": "[0,0][1080,2220]",
+          "appNodes": 52,
+          "scrollContainers": 1,
+          "crashDialog": false
+        }
+      ]
+    },
+    {
+      "file": "app/space-attendance.tsx",
+      "route": "space-attendance",
+      "safe": true,
+      "expectedRegex": "Attendance",
+      "reason": "No spaceId: saved-place and member reads; without a zone the result is empty. No attendance mutation or device-location request on mount. Empty/missing-space view only.",
+      "state": "Initial labels/bounds observed",
+      "observed": true,
+      "observations": [
+        {
+          "device": "w4eygyinypswrcz9",
+          "phase": "final-redmi-light-all",
+          "route": "space-attendance",
+          "titleFound": true,
+          "titleBounds": [
+            "[198,116][483,190]",
+            "[82,395][997,554]"
+          ],
+          "frame": "[0,0][1080,2220]",
+          "appNodes": 22,
+          "scrollContainers": 1,
+          "crashDialog": false
+        }
+      ]
+    },
+    {
+      "file": "app/space-checkin.tsx",
+      "route": "space-checkin",
+      "safe": true,
+      "expectedRegex": "Attendance",
+      "reason": "No spaceId: reads user, attendance and leave; errors become empty data. checkIn/checkOut/createLeave are explicit buttons only. Do not tap them.",
+      "state": "Initial labels/bounds observed",
+      "observed": true,
+      "observations": [
+        {
+          "device": "w4eygyinypswrcz9",
+          "phase": "final-redmi-light-all",
+          "route": "space-checkin",
+          "titleFound": true,
+          "titleBounds": [
+            "[198,116][483,190]"
+          ],
+          "frame": "[0,0][1080,2220]",
+          "appNodes": 32,
+          "scrollContainers": 1,
+          "crashDialog": false
+        }
+      ]
+    },
+    {
+      "file": "app/space-devices.tsx",
+      "route": "space-devices",
+      "safe": true,
+      "expectedRegex": "Devices|Could not load devices",
+      "reason": "No spaceId: GET devices may show read-error alert/empty list. No mount device command or provisioning. Error/empty shell only; do not add/control devices.",
+      "state": "Parameter-free error dialog; full screen unverified",
+      "observed": false,
+      "observations": [
+        {
+          "device": "w4eygyinypswrcz9",
+          "phase": "final-redmi-light-all",
+          "route": "space-devices",
+          "titleFound": true,
+          "titleBounds": [
+            "[138,1011][942,1085]"
+          ],
+          "frame": "[28,917][1052,1454]",
+          "appNodes": 17,
+          "scrollContainers": 0,
+          "crashDialog": false
+        },
+        {
+          "device": "w4eygyinypswrcz9",
+          "phase": "final-redmi-light-retry",
+          "route": "space-devices",
+          "titleFound": true,
+          "titleBounds": [
+            "[138,1011][942,1085]"
+          ],
+          "frame": "[28,917][1052,1454]",
+          "appNodes": 17,
+          "scrollContainers": 0,
+          "dialog": false,
+          "crashDialog": false
+        }
+      ]
+    },
+    {
+      "file": "app/space-incidents.tsx",
+      "route": "space-incidents",
+      "safe": true,
+      "expectedRegex": "Incidents|Could not load incidents",
+      "reason": "No spaceId: GET incidents/runs may show read-error alert. No mount acknowledgement/resolution/incident write. Error/empty shell only; do not act.",
+      "state": "Parameter-free error dialog; full screen unverified",
+      "observed": false,
+      "observations": [
+        {
+          "device": "w4eygyinypswrcz9",
+          "phase": "final-redmi-light-all",
+          "route": "space-incidents",
+          "titleFound": true,
+          "titleBounds": [
+            "[138,1011][942,1085]"
+          ],
+          "frame": "[28,917][1052,1454]",
+          "appNodes": 17,
+          "scrollContainers": 0,
+          "crashDialog": false
+        },
+        {
+          "device": "w4eygyinypswrcz9",
+          "phase": "final-redmi-light-retry",
+          "route": "space-incidents",
+          "titleFound": true,
+          "titleBounds": [
+            "[138,1011][942,1085]"
+          ],
+          "frame": "[28,917][1052,1454]",
+          "appNodes": 17,
+          "scrollContainers": 0,
+          "dialog": false,
+          "crashDialog": false
+        }
+      ]
+    },
+    {
+      "file": "app/space-leave.tsx",
+      "route": "space-leave",
+      "safe": true,
+      "expectedRegex": "No space was given\\.|This space.*Leave",
+      "reason": "Explicit missing-space guard before API loading. Missing-parameter state only; do not request/decide leave.",
+      "state": "Initial labels/bounds observed",
+      "observed": true,
+      "observations": [
+        {
+          "device": "w4eygyinypswrcz9",
+          "phase": "final-redmi-light-all",
+          "route": "space-leave",
+          "titleFound": false,
+          "titleBounds": [],
+          "frame": "[28,917][1052,1454]",
+          "appNodes": 17,
+          "scrollContainers": 0,
+          "crashDialog": false
+        },
+        {
+          "device": "w4eygyinypswrcz9",
+          "phase": "final-redmi-light-retry",
+          "route": "space-leave",
+          "titleFound": true,
+          "titleBounds": [
+            "[44,116][503,190]",
+            "[85,528][995,575]"
+          ],
+          "frame": "[0,0][1080,2220]",
+          "appNodes": 39,
+          "scrollContainers": 1,
+          "dialog": false,
+          "crashDialog": false
+        }
+      ]
+    },
+    {
+      "file": "app/space-ops-map.tsx",
+      "route": "space-ops-map",
+      "safe": true,
+      "expectedRegex": "Operations|Could not load runs",
+      "reason": "No spaceId: GET runs with empty ID fails/returns no runs, so there are no started runs to subscribe to. No local location watcher on mount. Error/empty operations shell only.",
+      "state": "Parameter-free error dialog; full screen unverified",
+      "observed": false,
+      "observations": [
+        {
+          "device": "w4eygyinypswrcz9",
+          "phase": "final-redmi-light-all",
+          "route": "space-ops-map",
+          "titleFound": true,
+          "titleBounds": [
+            "[138,1011][942,1085]"
+          ],
+          "frame": "[28,917][1052,1454]",
+          "appNodes": 17,
+          "scrollContainers": 0,
+          "crashDialog": false
+        },
+        {
+          "device": "w4eygyinypswrcz9",
+          "phase": "final-redmi-light-retry",
+          "route": "space-ops-map",
+          "titleFound": true,
+          "titleBounds": [
+            "[138,1011][942,1085]"
+          ],
+          "frame": "[28,917][1052,1454]",
+          "appNodes": 17,
+          "scrollContainers": 0,
+          "dialog": false,
+          "crashDialog": false
+        }
+      ]
+    },
+    {
+      "file": "app/space-overview.tsx",
+      "route": "space-overview",
+      "safe": true,
+      "expectedRegex": "Overview|Could not load the dashboard",
+      "reason": "No spaceId: GET ops summary only; missing-space/access error presentation. No mutation on mount; not a populated dashboard verification.",
+      "state": "Initial labels/bounds observed",
+      "observed": true,
+      "observations": [
+        {
+          "device": "w4eygyinypswrcz9",
+          "phase": "final-redmi-light-all",
+          "route": "space-overview",
+          "titleFound": false,
+          "titleBounds": [],
+          "frame": "[28,917][1052,1454]",
+          "appNodes": 17,
+          "scrollContainers": 0,
+          "crashDialog": false
+        },
+        {
+          "device": "w4eygyinypswrcz9",
+          "phase": "final-redmi-light-retry",
+          "route": "space-overview",
+          "titleFound": true,
+          "titleBounds": [
+            "[44,116][271,190]"
+          ],
+          "frame": "[0,0][1080,2220]",
+          "appNodes": 22,
+          "scrollContainers": 1,
+          "dialog": false,
+          "crashDialog": false
+        }
+      ]
+    },
+    {
+      "file": "app/space-pending.tsx",
+      "route": "space-pending",
+      "safe": true,
+      "expectedRegex": "Pending pickups|Could not load pending pickups",
+      "reason": "No spaceId: GET pending pickups only; may show error alert/empty data. Do not navigate into operational run actions.",
+      "state": "Parameter-free error dialog; full screen unverified",
+      "observed": false,
+      "observations": [
+        {
+          "device": "w4eygyinypswrcz9",
+          "phase": "final-redmi-light-all",
+          "route": "space-pending",
+          "titleFound": true,
+          "titleBounds": [
+            "[138,1011][942,1085]"
+          ],
+          "frame": "[28,917][1052,1454]",
+          "appNodes": 17,
+          "scrollContainers": 0,
+          "crashDialog": false
+        },
+        {
+          "device": "w4eygyinypswrcz9",
+          "phase": "final-redmi-light-retry",
+          "route": "space-pending",
+          "titleFound": true,
+          "titleBounds": [
+            "[138,1011][942,1085]"
+          ],
+          "frame": "[28,917][1052,1454]",
+          "appNodes": 17,
+          "scrollContainers": 0,
+          "dialog": false,
+          "crashDialog": false
+        }
+      ]
+    },
+    {
+      "file": "app/space-people.tsx",
+      "route": "space-people",
+      "safe": true,
+      "expectedRegex": "People|Could not load people",
+      "reason": "No spaceId: GET people/chat/current user/role catalogue only; may show error alert/empty list. No automatic role change. Do not edit roles.",
+      "state": "Parameter-free error dialog; full screen unverified",
+      "observed": false,
+      "observations": [
+        {
+          "device": "w4eygyinypswrcz9",
+          "phase": "final-redmi-light-all",
+          "route": "space-people",
+          "titleFound": true,
+          "titleBounds": [
+            "[138,1011][942,1085]"
+          ],
+          "frame": "[28,917][1052,1454]",
+          "appNodes": 17,
+          "scrollContainers": 0,
+          "crashDialog": false
+        },
+        {
+          "device": "w4eygyinypswrcz9",
+          "phase": "final-redmi-light-retry",
+          "route": "space-people",
+          "titleFound": true,
+          "titleBounds": [
+            "[138,1011][942,1085]"
+          ],
+          "frame": "[28,917][1052,1454]",
+          "appNodes": 17,
+          "scrollContainers": 0,
+          "dialog": false,
+          "crashDialog": false
+        }
+      ]
+    },
+    {
+      "file": "app/space-roster.tsx",
+      "route": "space-roster",
+      "safe": true,
+      "expectedRegex": "Roster|Could not load the roster",
+      "reason": "No spaceId: GET roster/links only; may show error alert/empty roster. Do not add/archive/link entries.",
+      "state": "Parameter-free error dialog; full screen unverified",
+      "observed": false,
+      "observations": [
+        {
+          "device": "w4eygyinypswrcz9",
+          "phase": "final-redmi-light-all",
+          "route": "space-roster",
+          "titleFound": true,
+          "titleBounds": [
+            "[138,1011][942,1085]"
+          ],
+          "frame": "[28,917][1052,1454]",
+          "appNodes": 17,
+          "scrollContainers": 0,
+          "crashDialog": false
+        },
+        {
+          "device": "w4eygyinypswrcz9",
+          "phase": "final-redmi-light-retry",
+          "route": "space-roster",
+          "titleFound": true,
+          "titleBounds": [
+            "[138,1011][942,1085]"
+          ],
+          "frame": "[28,917][1052,1454]",
+          "appNodes": 17,
+          "scrollContainers": 0,
+          "dialog": false,
+          "crashDialog": false
+        }
+      ]
+    },
+    {
+      "file": "app/space-run-driver.tsx",
+      "route": "space-run-driver",
+      "safe": false,
+      "expectedRegex": "Run|This run is not available\\.|Could not load the run",
+      "reason": "Focus unconditionally starts setInterval pingRun, a POST heartbeat, even without IDs or started run. With a started fixture also watches/publishes location, sets background run and delivers presence keys. Controlled driver/run fixture required.",
+      "state": "Fixture required",
+      "observed": false,
+      "observations": []
+    },
+    {
+      "file": "app/space-run.tsx",
+      "route": "space-run",
+      "safe": true,
+      "expectedRegex": "This run is not available\\.|Could not load the run|Run",
+      "reason": "No spaceId/runId: GET run may show read-error alert then unavailable state; subscription requires both IDs and started status. Missing-run state only, not live tracking.",
+      "state": "Parameter-free error dialog; full screen unverified",
+      "observed": false,
+      "observations": [
+        {
+          "device": "w4eygyinypswrcz9",
+          "phase": "final-redmi-light-all",
+          "route": "space-run",
+          "titleFound": true,
+          "titleBounds": [
+            "[138,1011][942,1085]"
+          ],
+          "frame": "[28,917][1052,1454]",
+          "appNodes": 17,
+          "scrollContainers": 0,
+          "crashDialog": false
+        },
+        {
+          "device": "w4eygyinypswrcz9",
+          "phase": "final-redmi-light-retry",
+          "route": "space-run",
+          "titleFound": true,
+          "titleBounds": [
+            "[138,1011][942,1085]"
+          ],
+          "frame": "[28,917][1052,1454]",
+          "appNodes": 17,
+          "scrollContainers": 0,
+          "dialog": false,
+          "crashDialog": false
+        }
+      ]
+    },
+    {
+      "file": "app/space-runs-admin.tsx",
+      "route": "space-runs-admin",
+      "safe": true,
+      "expectedRegex": "Runs",
+      "reason": "No spaceId: GET runs, members and roster errors become empty lists. No create/assign/cancel on mount. Empty runs shell only; do not submit actions.",
+      "state": "Initial labels/bounds observed",
+      "observed": true,
+      "observations": [
+        {
+          "device": "w4eygyinypswrcz9",
+          "phase": "final-redmi-light-retry",
+          "route": "space-runs-admin",
+          "titleFound": true,
+          "titleBounds": [
+            "[44,116][168,190]",
+            "[82,312][997,373]"
+          ],
+          "frame": "[0,0][1080,2220]",
+          "appNodes": 24,
+          "scrollContainers": 1,
+          "dialog": false,
+          "crashDialog": false
+        }
+      ]
+    },
+    {
+      "file": "app/space-tasks.tsx",
+      "route": "space-tasks",
+      "safe": true,
+      "expectedRegex": "No space was given\\.|This space.*Tasks",
+      "reason": "Explicit missing-space guard prevents load. Missing-parameter state only; do not create/toggle tasks.",
+      "state": "Initial labels/bounds observed",
+      "observed": true,
+      "observations": [
+        {
+          "device": "w4eygyinypswrcz9",
+          "phase": "final-redmi-light-core",
+          "route": "space-tasks",
+          "titleFound": true,
+          "titleBounds": [
+            "[198,116][654,190]"
+          ],
+          "frame": "[0,0][1080,2220]",
+          "appNodes": 38,
+          "scrollContainers": 1,
+          "crashDialog": false
+        }
+      ]
+    },
+    {
+      "file": "app/space-transport.tsx",
+      "route": "space-transport",
+      "safe": true,
+      "expectedRegex": "No space was given\\.|This space.*Transport",
+      "reason": "Explicit missing-space guard prevents run loading. No position fetch/draw here. Missing-parameter state only; do not call driver or navigate actions.",
+      "state": "Initial labels/bounds observed",
+      "observed": true,
+      "observations": [
+        {
+          "device": "w4eygyinypswrcz9",
+          "phase": "final-redmi-light-core",
+          "route": "space-transport",
+          "titleFound": true,
+          "titleBounds": [
+            "[198,116][749,190]",
+            "[85,315][995,376]"
+          ],
+          "frame": "[0,0][1080,2220]",
+          "appNodes": 32,
+          "scrollContainers": 1,
+          "crashDialog": false
+        }
+      ]
+    },
+    {
+      "file": "app/space-visitors.tsx",
+      "route": "space-visitors",
+      "safe": true,
+      "expectedRegex": "Visitors|Could not load passes",
+      "reason": "No spaceId: GET visitor passes only; may show error alert/empty list. Issuing/redeeming/exiting a pass are explicit actions, prohibited in this sweep.",
+      "state": "Parameter-free error dialog; full screen unverified",
+      "observed": false,
+      "observations": [
+        {
+          "device": "w4eygyinypswrcz9",
+          "phase": "final-redmi-light-retry",
+          "route": "space-visitors",
+          "titleFound": true,
+          "titleBounds": [
+            "[138,1011][942,1085]"
+          ],
+          "frame": "[28,917][1052,1454]",
+          "appNodes": 17,
+          "scrollContainers": 0,
+          "dialog": false,
+          "crashDialog": false
+        }
+      ]
+    },
+    {
+      "file": "app/status-privacy.tsx",
+      "route": "status-privacy",
+      "safe": true,
+      "expectedRegex": "Status privacy",
+      "reason": "Authenticated read-only landing/list/settings load; no submit, delete, toggle or external actions. Source review only; native result not verified.",
+      "state": "Initial labels/bounds observed",
+      "observed": true,
+      "observations": [
+        {
+          "device": "w4eygyinypswrcz9",
+          "phase": "final-redmi-light-retry",
+          "route": "status-privacy",
+          "titleFound": true,
+          "titleBounds": [
+            "[176,117][506,189]"
+          ],
+          "frame": "[0,0][1080,2220]",
+          "appNodes": 39,
+          "scrollContainers": 1,
+          "dialog": false,
+          "crashDialog": false
+        }
+      ]
+    },
+    {
+      "file": "app/story-viewer.tsx",
+      "route": "story-viewer",
+      "safe": false,
+      "expectedRegex": "No active stories from this user|Close",
+      "reason": "Requires userId/test story; viewing can mark read and autoplay/advance.",
+      "state": "Fixture required",
+      "observed": false,
+      "observations": []
+    },
+    {
+      "file": "app/vault-features.tsx",
+      "route": "vault-features",
+      "safe": false,
+      "expectedRegex": "Vault Features",
+      "reason": "Mount deletes expired vault_chat_code/expiry from SecureStore; controlled vault settings fixture.",
+      "state": "Fixture required",
+      "observed": false,
+      "observations": []
+    },
+    {
+      "file": "app/vault.tsx",
+      "route": "vault",
+      "safe": false,
+      "expectedRegex": "Vault|Enter 8-digit PIN",
+      "reason": "Controlled vault PIN fixture; do not try real security codes or import/export files.",
+      "state": "Fixture required",
+      "observed": false,
+      "observations": []
+    },
+    {
+      "file": "app/vaultbeam-settings.tsx",
+      "route": "vaultbeam-settings",
+      "safe": true,
+      "expectedRegex": "VaultBeam auto-download",
+      "reason": "Authenticated read-only landing/list/settings load; no submit, delete, toggle or external actions. Source review only; native result not verified.",
+      "state": "Initial labels/bounds observed",
+      "observed": true,
+      "observations": [
+        {
+          "device": "w4eygyinypswrcz9",
+          "phase": "final-redmi-light-retry",
+          "route": "vaultbeam-settings",
+          "titleFound": true,
+          "titleBounds": [
+            "[154,227][783,299]"
+          ],
+          "frame": "[0,0][1080,2220]",
+          "appNodes": 39,
+          "scrollContainers": 1,
+          "dialog": false,
+          "crashDialog": false
+        }
+      ]
+    },
+    {
+      "file": "app/vaultcheck.tsx",
+      "route": "vaultcheck",
+      "safe": true,
+      "expectedRegex": "Verify media|Could not check this file|Could not locate the media on this device",
+      "reason": "With NO uri or attachmentId, mount throws a caught missing-media error before getMedia/verifyMedia. Safe missing-param presentation only; real verification requires controlled local fixture.",
+      "state": "Initial labels/bounds observed",
+      "observed": true,
+      "observations": [
+        {
+          "device": "w4eygyinypswrcz9",
+          "phase": "final-redmi-light-retry",
+          "route": "vaultcheck",
+          "titleFound": true,
+          "titleBounds": [
+            "[44,116][356,190]",
+            "[83,410][996,465]",
+            "[83,481][996,531]"
+          ],
+          "frame": "[0,0][1080,2220]",
+          "appNodes": 30,
+          "scrollContainers": 1,
+          "dialog": false,
+          "crashDialog": false
+        }
+      ]
+    },
+    {
+      "file": "app/vaultdrop.tsx",
+      "route": "vaultdrop",
+      "safe": true,
+      "expectedRegex": "VaultDrop|No files yet",
+      "reason": "Empty local landing; no file picker or Send.",
+      "state": "Initial labels/bounds observed",
+      "observed": true,
+      "observations": [
+        {
+          "device": "w4eygyinypswrcz9",
+          "phase": "final-redmi-light-retry",
+          "route": "vaultdrop",
+          "titleFound": true,
+          "titleBounds": [
+            "[167,114][871,186]",
+            "[347,550][792,608]",
+            "[408,892][672,964]"
+          ],
+          "frame": "[0,0][1080,2220]",
+          "appNodes": 36,
+          "scrollContainers": 1,
+          "dialog": false,
+          "crashDialog": false
+        }
+      ]
+    },
+    {
+      "file": "app/vaultid.tsx",
+      "route": "vaultid",
+      "safe": true,
+      "expectedRegex": "VaultID",
+      "reason": "Reads identity; may show create modal if absent; dismiss only, never create/share/export.",
+      "state": "Initial labels/bounds observed",
+      "observed": true,
+      "observations": [
+        {
+          "device": "w4eygyinypswrcz9",
+          "phase": "final-redmi-light-retry",
+          "route": "vaultid",
+          "titleFound": true,
+          "titleBounds": [
+            "[66,911][1014,997]",
+            "[339,1974][740,2032]"
+          ],
+          "frame": "[0,0][1080,2220]",
+          "appNodes": 39,
+          "scrollContainers": 2,
+          "dialog": false,
+          "crashDialog": false
+        }
+      ]
+    },
+    {
+      "file": "app/voice-effects.tsx",
+      "route": "voice-effects",
+      "safe": true,
+      "expectedRegex": "Voice Effects",
+      "reason": "Reads saved effect only; no record/play/toggle (microphone requires fixture).",
+      "state": "Initial labels/bounds observed",
+      "observed": true,
+      "observations": [
+        {
+          "device": "w4eygyinypswrcz9",
+          "phase": "final-redmi-light-retry",
+          "route": "voice-effects",
+          "titleFound": true,
+          "titleBounds": [
+            "[44,116][372,190]"
+          ],
+          "frame": "[0,0][1080,2220]",
+          "appNodes": 69,
+          "scrollContainers": 1,
+          "dialog": false,
+          "crashDialog": false
+        }
+      ]
+    },
+    {
+      "file": "app/voice-speed.tsx",
+      "route": "voice-speed",
+      "safe": true,
+      "expectedRegex": "Voice Message",
+      "reason": "With NO uri, Audio.Sound.createAsync rejects invalid source; catch suppresses error. Installed expo-av AV.ts validates source before native load; shouldPlay:false. Safe empty player presentation only, not playback verification.",
+      "state": "Initial labels/bounds observed",
+      "observed": true,
+      "observations": [
+        {
+          "device": "w4eygyinypswrcz9",
+          "phase": "final-redmi-light-retry",
+          "route": "voice-speed",
+          "titleFound": true,
+          "titleBounds": [
+            "[44,116][422,190]",
+            "[123,724][957,796]",
+            "[55,1820][1025,1914]"
+          ],
+          "frame": "[0,0][1080,2220]",
+          "appNodes": 89,
+          "scrollContainers": 1,
+          "dialog": false,
+          "crashDialog": false
+        }
+      ]
+    },
+    {
+      "file": "app/whiteboard.tsx",
+      "route": "whiteboard",
+      "safe": true,
+      "expectedRegex": "Whiteboard",
+      "reason": "Empty local drawing canvas; do not draw, save, share or export.",
+      "state": "Initial labels/bounds observed",
+      "observed": true,
+      "observations": [
+        {
+          "device": "w4eygyinypswrcz9",
+          "phase": "final-redmi-light-retry",
+          "route": "whiteboard",
+          "titleFound": true,
+          "titleBounds": [
+            "[44,116][327,190]"
+          ],
+          "frame": "[0,0][1080,2220]",
+          "appNodes": 55,
+          "scrollContainers": 0,
+          "dialog": false,
+          "crashDialog": false
+        }
+      ]
+    }
+  ]
+}

@@ -23,9 +23,12 @@ export type MapScheme = 'light' | 'dark';
 
 const OFM = 'https://tiles.openfreemap.org';
 
-/** `liberty` is the full-colour road map (it ships its own 3D building layer);
- *  `dark` is its night counterpart. Both draw from the same planet tileset. */
-const STYLE: Record<MapScheme, string> = { light: 'liberty', dark: 'dark' };
+/** `liberty` is the full-colour road map (it ships its own 3D building layer).
+ *
+ * Keep it for BOTH app themes. The OpenFreeMap `dark` style hides too much
+ * road/landmark detail on phone brightness, and this app uses maps to navigate,
+ * so legibility beats matching the surrounding chrome. */
+const STYLE: Record<MapScheme, string> = { light: 'liberty', dark: 'liberty' };
 
 /** Attribution for any source we serve ourselves. OpenFreeMap already sends its
  *  own in the TileJSON, which is where MapLibre reads it from. */
@@ -87,7 +90,7 @@ if (typeof require !== 'undefined' && require.main === module) {
 
   const urls = (['light', 'dark'] as MapScheme[]).map(mapStyleUrl);
   A(urls.every((u) => u.startsWith('https://')), 'style URLs must be https');
-  A(new Set(urls).size === 2, 'light and dark must be different styles');
+  A(urls.every((u) => u.endsWith('/styles/liberty')), 'both app themes use the readable road-map style');
   // A style URL is fetched, not templated. A leftover z/x/y token here means
   // someone pasted a tile URL where a style belongs, which MapLibre reports as
   // a style parse error and the RN side reads as "this device has no WebGL".

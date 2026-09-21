@@ -2,10 +2,11 @@
 // dates or duration). Saves to on-device history; result exports to PDF.
 
 import React, { useState } from 'react';
+import { useFinanceTheme } from '../../components/finance/useFinanceTheme';
 import { KeyboardSafe } from '../../components/ui';
 import { View, Text, ScrollView, StyleSheet, Alert, Platform } from 'react-native';
 import { DateTimePickerAndroid } from '@react-native-community/datetimepicker';
-import { FIN, FIN_HERO, TABULAR } from '../../constants/financeTheme';
+import { FIN_HERO, TABULAR, type FinancePalette } from '../../constants/financeTheme';
 import { FinHeader, Label, Field, Segment, Radio, Btn, DateField, HeroCard, Card, RowLine } from '../../components/finance/ui';
 import { useMe } from '../../components/finance/useMe';
 import { fmtDate, num } from '../../utils/financeFormat';
@@ -15,6 +16,8 @@ import { insertInterest } from '../../db/interestHistory';
 import { sharePdf, pdfDocument, kvTable } from '../../utils/financeIO';
 
 export default function InterestCalc() {
+  const FIN = useFinanceTheme();
+  const s = React.useMemo(() => makeStyles(FIN), [FIN]);
   const me = useMe();
   const [type, setType] = useState<InterestType>('simple');
   const [principal, setPrincipal] = useState('');
@@ -136,9 +139,9 @@ export default function InterestCalc() {
             <>
               <Label>Duration</Label>
               <View style={s.durRow}>
-                <Field style={{ flex: 1 }} value={durY} onChangeText={setDurY} placeholder="Years" keyboardType="numeric" />
-                <Field style={{ flex: 1 }} value={durM} onChangeText={setDurM} placeholder="Months" keyboardType="numeric" />
-                <Field style={{ flex: 1 }} value={durD} onChangeText={setDurD} placeholder="Days" keyboardType="numeric" />
+                <View style={s.durationField}><Field value={durY} onChangeText={setDurY} placeholder="Years" keyboardType="numeric" /></View>
+                <View style={s.durationField}><Field value={durM} onChangeText={setDurM} placeholder="Months" keyboardType="numeric" /></View>
+                <View style={s.durationField}><Field value={durD} onChangeText={setDurD} placeholder="Days" keyboardType="numeric" /></View>
               </View>
             </>
           )}
@@ -172,11 +175,12 @@ export default function InterestCalc() {
   );
 }
 
-const s = StyleSheet.create({
+const makeStyles = (FIN: FinancePalette) => StyleSheet.create({
   screen: { flex: 1, backgroundColor: FIN.bg },
   body: { padding: 16, paddingBottom: 40, alignSelf: 'center', width: '100%', maxWidth: FIN.contentMax },
-  radioRow: { flexDirection: 'row', gap: 28, marginTop: 4 },
-  durRow: { flexDirection: 'row', gap: 8 },
+  radioRow: { flexDirection: 'row', flexWrap: 'wrap', columnGap: 28, rowGap: 8, marginTop: 4 },
+  durRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  durationField: { flexGrow: 1, flexBasis: 100, minWidth: 0 },
   btnRow: { flexDirection: 'row', gap: 12, marginTop: 20 },
   heroLabel: { color: 'rgba(255,255,255,0.85)', fontSize: 10.5, fontWeight: '700', letterSpacing: 0.8 },
   heroVal: { color: '#fff', fontSize: 28, fontWeight: '800', marginTop: 6, ...TABULAR },

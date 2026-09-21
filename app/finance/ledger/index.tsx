@@ -2,11 +2,12 @@
 // status filtering and a 30-second undo-delete snackbar.
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useFinanceTheme } from '../../../components/finance/useFinanceTheme';
 import { View, Text, ScrollView, StyleSheet, TouchableOpacity, Animated } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { FIN, STATUS_COLORS, TABULAR } from '../../../constants/financeTheme';
+import { financeStatusColors, TABULAR, type FinancePalette } from '../../../constants/financeTheme';
 import { FinHeader, Segment, Pill, EmptyState, LoadingState, ErrorState } from '../../../components/finance/ui';
 import { useLoadStatus } from '../../../components/finance/useLoad';
 import { useMe } from '../../../components/finance/useMe';
@@ -16,6 +17,9 @@ import { listLedger, deleteLedger, restoreLedger, type LedgerEntry } from '../..
 type Filter = 'all' | 'lend' | 'borrow';
 
 export default function LedgerList() {
+  const FIN = useFinanceTheme();
+  const s = React.useMemo(() => makeStyles(FIN), [FIN]);
+  const STATUS_COLORS = React.useMemo(() => financeStatusColors(FIN), [FIN]);
   // s.fab/s.snack live in a module-scope StyleSheet, so a literal bottom there
   // would freeze at launch and never follow a rotation. Read the inset from the
   // hook and apply it at the element instead (2026-09-17).
@@ -140,7 +144,7 @@ export default function LedgerList() {
       </ScrollView>
 
       <TouchableOpacity style={[s.fab, { bottom: insets.bottom + 20 }]} activeOpacity={0.9} onPress={() => router.push('/finance/ledger/new')}>
-        <Ionicons name="add" size={22} color="#fff" />
+        <Ionicons name="add" size={22} color={FIN.onBrand} />
         <Text style={s.fabTxt}>Add New Ledger</Text>
       </TouchableOpacity>
 
@@ -154,7 +158,7 @@ export default function LedgerList() {
   );
 }
 
-const s = StyleSheet.create({
+const makeStyles = (FIN: FinancePalette) => StyleSheet.create({
   screen: { flex: 1, backgroundColor: FIN.bg },
   filterWrap: { paddingHorizontal: 16, paddingTop: 12, alignSelf: 'center', width: '100%', maxWidth: FIN.contentMax },
   body: { padding: 16, paddingTop: 12, alignSelf: 'center', width: '100%', maxWidth: FIN.contentMax },
@@ -166,9 +170,9 @@ const s = StyleSheet.create({
   hint: { color: FIN.faint, fontSize: 11.5, textAlign: 'center', marginTop: 8 },
 
   fab: { position: 'absolute', left: 16, right: 16, bottom: 20, flexDirection: 'row', gap: 8, backgroundColor: FIN.brandDeep, borderRadius: 14, paddingVertical: 15, alignItems: 'center', justifyContent: 'center', shadowColor: FIN.brandDeep, shadowOpacity: 0.35, shadowRadius: 10, shadowOffset: { width: 0, height: 4 }, elevation: 6 },
-  fabTxt: { color: '#fff', fontSize: 15, fontWeight: '800' },
+  fabTxt: { color: FIN.onBrand, fontSize: 15, fontWeight: '800' },
 
   snack: { position: 'absolute', left: 16, right: 16, bottom: 84, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: FIN.text, borderRadius: 12, paddingVertical: 13, paddingHorizontal: 16 },
-  snackTxt: { color: '#fff', fontSize: 14, fontWeight: '600' },
-  snackBtn: { color: FIN.brand, fontSize: 14, fontWeight: '800', letterSpacing: 0.5 },
+  snackTxt: { color: FIN.cardSolid, fontSize: 14, fontWeight: '600' },
+  snackBtn: { color: FIN.cardSolid, fontSize: 14, fontWeight: '800', letterSpacing: 0.5 },
 });

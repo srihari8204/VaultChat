@@ -1,0 +1,18 @@
+{
+  "oldContainerId": "1bb542d2912807a3cbe4daf57149f2874abc8e29954cc27d51ba070b319eb5ed",
+  "newContainerId": "e7f80f48ae9418a438f99c96e10dc8c8377f2f579bb10e6a56787a2e981396ce",
+  "oldLogBytes": 202364462254,
+  "recentDiagnosticsPreserved": true,
+  "state": "created",
+  "imagePreserved": true,
+  "environmentPreserved": true,
+  "mountsPreserved": true,
+  "logging": {
+    "Type": "json-file",
+    "Config": {
+      "max-file": "3",
+      "max-size": "10m"
+    }
+  },
+  "completedAt": "2026-09-21T14:59:48.7699855+05:30"
+}

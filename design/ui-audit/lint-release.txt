@@ -1,0 +1,6 @@
+
+C:\Users\Dell\Desktop\VaultChat0808\VaultChat\lib\appTextRendering.selftest.ts
+  28:36  warning  A `require()` style import is forbidden  @typescript-eslint/no-require-imports
+
+✖ 1 problem (0 errors, 1 warning)
+

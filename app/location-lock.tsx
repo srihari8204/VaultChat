@@ -11,7 +11,7 @@
 import { geocodeSearch } from '../lib/nav/geocode';
 import React, { useEffect, useMemo, useState } from 'react';
 import {
-  View, Text, TextInput, TouchableOpacity, ScrollView, StyleSheet,
+  View, TextInput, TouchableOpacity, ScrollView, StyleSheet,
   Alert, ActivityIndicator, Platform,
 } from 'react-native';
 import { Stack, useRouter } from 'expo-router';
@@ -30,6 +30,7 @@ import {
   navigateBackToLock, enableKillSafe, testAlarm, applyAlertSettings,
 } from '../lib/lock/lockService';
 import { listCircles, getPlaces } from '../lib/family/store';
+import { AppText as Text, AuroraBackground } from '../components/ui';
 
 const RADII = [10, 20, 30, 50, 100, 200, 500, 1000];
 const MODES: { key: LockMode; label: string; icon: any }[] = [
@@ -190,7 +191,8 @@ export default function LocationLockScreen() {
     const zc = zoneColor(lock.state ?? 'safe');
     const alarming = lock.alarmPhase === 'alarming';
     return (
-      <View style={[st.screen, { backgroundColor: colors.bg }]}>
+      <View style={st.screen}>
+        <AuroraBackground />
         <Stack.Screen options={{
         headerShown: true, /* the root Stack sets headerShown:false app-wide, so the options below were inert and this screen had no back control at all */  title: 'Location Locked', headerTitleAlign: 'center' }} />
 
@@ -235,11 +237,11 @@ export default function LocationLockScreen() {
           style={{ flex: 1 }}
         />
 
-        <View style={[st.card, { backgroundColor: colors.glassSoft, borderColor: zc }]}>
+        <View style={[st.card, { backgroundColor: colors.glass, borderColor: zc }]}>
           <View style={st.row}>
             <View style={[st.stateDot, { backgroundColor: zc }]} />
             <Text style={[st.stateTxt, { color: zc }]}>{STATE_LABEL[lock.state ?? 'safe']}</Text>
-            <Text style={{ color: colors.text + '88', fontSize: 12.5, marginLeft: 'auto' }}>
+            <Text style={{ color: colors.textDim, fontSize: 12.5, marginLeft: 'auto' }}>
               {lock.killSafe ? 'Protected in background' : 'Foreground only'}
             </Text>
           </View>
@@ -253,7 +255,7 @@ export default function LocationLockScreen() {
             <Stat label="Battery" value={lock.battery != null ? `${lock.battery}%${lock.charging ? ' ⚡' : ''}` : '—'} colors={colors} />
             <Stat label="Confidence" value={`${QUALITY_LABEL[lock.quality]} · ${gpsConfidence(lock.accuracy)}%`} colors={colors} valueColor={QUALITY_COLOR[lock.quality]} />
           </View>
-          <Text style={{ color: colors.text + '66', fontSize: 11 }}>
+          <Text style={{ color: colors.textFaint, fontSize: 11 }}>
             GPS updated {lock.lastFixAt ? fmtAgo(Date.now() - lock.lastFixAt) : '—'}
           </Text>
 
@@ -303,7 +305,8 @@ export default function LocationLockScreen() {
 
   // ═══ SETUP ═══
   return (
-    <View style={[st.screen, { backgroundColor: colors.bg }]}>
+    <View style={st.screen}>
+      <AuroraBackground />
       <Stack.Screen options={{ title: 'Location Lock', headerTitleAlign: 'center' }} />
       <ScrollView contentContainerStyle={st.setup} keyboardShouldPersistTaps="handled">
         <Text style={[st.h, { color: colors.text }]}>Lock point</Text>
@@ -321,11 +324,11 @@ export default function LocationLockScreen() {
           </TouchableOpacity>
         </View>
 
-        <View style={[st.searchRow, { borderColor: colors.glassStroke, backgroundColor: colors.glassSoft, marginTop: 10 }]}>
-          <Ionicons name="search" size={18} color={colors.text + '99'} />
+        <View style={[st.searchRow, { borderColor: colors.glassStroke, backgroundColor: colors.glass, marginTop: 10 }]}>
+          <Ionicons name="search" size={18} color={colors.textDim} />
           <TextInput
             value={query} onChangeText={setQuery} onSubmitEditing={search} returnKeyType="search"
-            placeholder='Address or "lat, lng"' placeholderTextColor={colors.text + '66'}
+            placeholder='Address or "lat, lng"' placeholderTextColor={colors.textFaint}
             style={[st.input, { color: colors.text }]}
           />
           {searching ? <ActivityIndicator size="small" color={colors.primary} />
@@ -336,7 +339,7 @@ export default function LocationLockScreen() {
             and radius. Sourced read-only from the user's saved place list. */}
         {saved.length > 0 && (
           <View style={{ marginTop: 12 }}>
-            <Text style={{ color: colors.text + '88', fontSize: 12, fontWeight: '700', marginBottom: 6 }}>SAVED PLACES</Text>
+            <Text style={{ color: colors.textDim, fontSize: 12, fontWeight: '700', marginBottom: 6 }}>SAVED PLACES</Text>
             <View style={st.chips}>
               {saved.map((p, i) => (
                 <TouchableOpacity key={`${p.name}-${i}`}
@@ -354,7 +357,7 @@ export default function LocationLockScreen() {
           <View style={[st.destPill, { backgroundColor: colors.primary + '14' }]}>
             <Ionicons name="location" size={16} color={colors.primary} />
             <Text numberOfLines={1} style={{ color: colors.text, flex: 1 }}>{point.name}</Text>
-            <Text style={{ color: colors.text + '77', fontSize: 12 }}>
+            <Text style={{ color: colors.textDim, fontSize: 12 }}>
               {point.coords.lat.toFixed(5)}, {point.coords.lng.toFixed(5)}
             </Text>
           </View>
@@ -405,10 +408,10 @@ export default function LocationLockScreen() {
               if (Number.isFinite(n) && n > 0) setRadius(clampRadius(n));
             }}
             keyboardType="number-pad" placeholder="Custom (10–1000 m)"
-            placeholderTextColor={colors.text + '66'}
-            style={[st.customInput, { color: colors.text, borderColor: colors.glassStroke, backgroundColor: colors.glassSoft }]}
+            placeholderTextColor={colors.textFaint}
+            style={[st.customInput, { color: colors.text, borderColor: colors.glassStroke, backgroundColor: colors.glass }]}
           />
-          <Text style={{ color: colors.text + '88', fontSize: 13 }}>→ {clampRadius(radius)} m</Text>
+          <Text style={{ color: colors.textDim, fontSize: 13 }}>→ {clampRadius(radius)} m</Text>
         </View>
         {accWarn && (
           <View style={[st.warn, { backgroundColor: '#F9731622' }]}>
@@ -454,14 +457,14 @@ export default function LocationLockScreen() {
 function Stat({ label, value, colors, valueColor }: { label: string; value: string; colors: any; valueColor?: string }) {
   return (
     <View>
-      <Text style={{ color: colors.text + '77', fontSize: 11, fontWeight: '600', textTransform: 'uppercase' }}>{label}</Text>
+      <Text style={{ color: colors.textDim, fontSize: 11, fontWeight: '600', textTransform: 'uppercase' }}>{label}</Text>
       <Text style={{ color: valueColor ?? colors.text, fontSize: 15.5, fontWeight: '800', marginTop: 1 }}>{value}</Text>
     </View>
   );
 }
 
 const st = StyleSheet.create({
-  screen: { flex: 1 },
+  screen: { flex: 1, backgroundColor: 'transparent' },
   setup: { padding: 16, paddingBottom: 48 },
   h: { fontSize: 13, fontWeight: '700', letterSpacing: 0.3, textTransform: 'uppercase', marginBottom: 10, opacity: 0.9 },
   row: { flexDirection: 'row', alignItems: 'center' },

@@ -7,20 +7,20 @@
   },
   "scripts": {
     "start": "expo start",
-    "reset-project": "node ./scripts/reset-project.js",
+    "reset-project": "tsx ./scripts/reset-project.ts",
     "android": "expo run:android",
     "ios": "expo run:ios",
     "web": "expo start --web",
     "lint": "expo lint",
-    "typecheck": "node scripts/check-sdk-versions.js && tsc --noEmit",
-    "proto:gen": "node scripts/proto-check.js --write",
-    "proto:check": "node scripts/proto-check.js",
-    "test": "node ./scripts/test-all.js",
-    "test:migrations": "node ./scripts/test-migrations.js",
+    "typecheck": "tsx scripts/check-sdk-versions.ts && tsc --noEmit",
+    "proto:gen": "tsx scripts/proto-check.ts --write",
+    "proto:check": "tsx scripts/proto-check.ts",
+    "test": "tsx ./scripts/test-all.ts",
+    "test:migrations": "tsx ./scripts/test-migrations.ts",
     "test:e2ee": "tsx services/crypto/e2ee.selftest.ts && tsx services/crypto/senderKey.selftest.ts && tsx services/crypto/shamir.selftest.ts && tsx services/security/safetyNumber.selftest.ts && tsx services/crypto/vectors.selftest.ts && tsx services/crypto/vaultbeam-vectors.selftest.ts && tsx services/crypto/parity.selftest.ts && tsx services/crypto/vaultbeam-parity.selftest.ts",
     "test:localdb": "tsx lib/localDb.queue.selftest.ts",
     "bench:e2ee": "tsx services/crypto/e2ee.bench.ts",
-    "bench:coldstart": "node scripts/coldstart.js",
+    "bench:coldstart": "tsx scripts/coldstart.ts",
     "test:vaultcheck": "tsx lib/vaultcheck/vaultcheck.selftest.ts",
     "test:ice": "tsx lib/iceCredentials.selftest.ts",
     "test:gate": "tsx lib/status/gate.selftest.ts && tsx lib/status/gateKey.selftest.ts && tsx lib/status/gateWiring.selftest.ts",
@@ -32,8 +32,8 @@
     "prebuild": "expo prebuild --clean",
     "prebuild:android": "expo prebuild --platform android --clean",
     "prebuild:ios": "expo prebuild --platform ios --clean",
-    "build:android:apk": "node scripts/check-sdk-versions.js && expo prebuild --platform android --clean && node scripts/gradlew.js assembleRelease",
-    "build:android:aab": "node scripts/check-sdk-versions.js && expo prebuild --platform android --clean && node scripts/gradlew.js bundleRelease",
+    "build:android:apk": "tsx scripts/check-sdk-versions.ts && expo prebuild --platform android --clean && tsx scripts/gradlew.ts assembleRelease",
+    "build:android:aab": "tsx scripts/check-sdk-versions.ts && expo prebuild --platform android --clean && tsx scripts/gradlew.ts bundleRelease",
     "eas:build:android:preview": "eas build --platform android --profile preview",
     "eas:build:android:prod": "eas build --platform android --profile production",
     "eas:build:ios:prod": "eas build --platform ios --profile production",
@@ -43,9 +43,9 @@
     "deploy:firestore:indexes": "firebase deploy --only firestore:indexes",
     "deploy:firestore": "firebase deploy --only firestore",
     "prod:check": "npm run lint && npm run typecheck && npm test",
-    "prod:precheck": "node ./scripts/prod-precheck.js",
-    "gradle": "node scripts/gradlew.js",
-    "build:android:apk:arm64": "node scripts/gradlew.js assembleRelease -PreactNativeArchitectures=arm64-v8a",
+    "prod:precheck": "tsx ./scripts/prod-precheck.ts",
+    "gradle": "tsx scripts/gradlew.ts",
+    "build:android:apk:arm64": "tsx scripts/gradlew.ts assembleRelease -PreactNativeArchitectures=arm64-v8a",
     "test:reader": "tsx lib/reader.selftest.ts",
     "test:responsive": "tsx lib/responsive.selftest.ts",
     "test:typescale": "tsx lib/typeScale.selftest.ts",
@@ -58,7 +58,7 @@
     "test:envelope": "tsx lib/msgEnvelope.selftest.ts",
     "test:callmode": "tsx lib/call/mode.selftest.ts",
     "test:games": "eslint components/games app/games.tsx lib/games && tsx lib/games/history.selftest.ts && tsx lib/games/gamesNative.selftest.ts && tsx lib/games/fairness.selftest.ts && tsx lib/games/invite.selftest.ts && tsx lib/games/liveTables.selftest.ts && tsx lib/games/handGroups.selftest.ts && tsx lib/games/meldHint.selftest.ts && tsx lib/games/rummyTable.selftest.ts && tsx lib/games/ludoGlass.selftest.ts && tsx lib/games/useAddBot.selftest.ts && tsx lib/games/boardFit.selftest.ts && tsx lib/games/match.selftest.ts && tsx lib/games/leaderboard.selftest.ts",
-    "check:sdk": "node scripts/check-sdk-versions.js",
+    "check:sdk": "tsx scripts/check-sdk-versions.ts",
     "test:aurora": "tsx lib/auroraGlass.selftest.ts",
     "test:glass": "tsx constants/glass.selftest.ts",
     "test:theme": "tsx lib/themeCoverage.selftest.ts",
@@ -66,7 +66,8 @@
     "test:history": "tsx lib/messageHistory.selftest.ts",
     "test:delete": "tsx lib/confirmIdentity.selftest.ts",
     "test:rust": "cargo test --manifest-path rust/vaultcore/Cargo.toml && cargo clippy --manifest-path rust/vaultcore/Cargo.toml --all-targets -- -D warnings && cargo test --manifest-path services/transport/rust/Cargo.toml && cargo clippy --manifest-path services/transport/rust/Cargo.toml --all-targets -- -D warnings && cargo test --manifest-path services/transport/rust-net/Cargo.toml && cargo clippy --manifest-path services/transport/rust-net/Cargo.toml --all-targets -- -D warnings && cargo test --manifest-path services/crypto/rust/Cargo.toml && cargo clippy --manifest-path services/crypto/rust/Cargo.toml --all-targets -- -D warnings && cargo test --manifest-path services/nav/rust/Cargo.toml && cargo clippy --manifest-path services/nav/rust/Cargo.toml --all-targets -- -D warnings && cargo test --manifest-path services/vaultbeam/rust/Cargo.toml && cargo clippy --manifest-path services/vaultbeam/rust/Cargo.toml --all-targets -- -D warnings",
-    "check:migrations": "node ./scripts/check-migration-drift.js"
+    "check:migrations": "tsx ./scripts/check-migration-drift.ts",
+    "check:ts-uniffi": "tsx lib/jsToTsMigration.selftest.ts && tsx lib/nativeDeviceSupport.selftest.ts"
   },
   "dependencies": {
     "@any-routing/core": "^0.1.0",
@@ -191,6 +192,16 @@
       "reactNativeDirectoryCheck": {
         "exclude": [
           "@livekit/react-native-webrtc"
+        ]
+      }
+    },
+    "autolinking": {
+      "android": {
+        "exclude": [
+          "expo-dev-client",
+          "expo-dev-launcher",
+          "expo-dev-menu",
+          "expo-dev-menu-interface"
         ]
       }
     }

@@ -1,3 +1,4 @@
+import { AuroraBackground } from '../components/ui/AuroraBackground';
 // app/space-admin.tsx — the space admin console (Spaces & Operations).
 //
 // For the people who RUN a space: a Principal, a Super Admin, a Transport
@@ -20,14 +21,15 @@
 // The header says so out loud, because an administrator should be able to see
 // the limit of their own authority rather than having to trust it.
 
+import { AppText as Text } from '../components/ui/Text';
 import React, { useCallback, useMemo, useState } from 'react';
 import {
-  View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator,
+  View, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator,
 } from 'react-native';
 import { Stack, useLocalSearchParams, useRouter, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useSpaceColors, spaceHeader } from '../lib/spaces/theme';
-import type { Palette } from '../constants/theme';
+import type { SpacePalette as Palette } from '../lib/spaces/theme';
 import { getRuns, getRun, getRoster, getIncidents, type Incident } from '../lib/spaces/api';
 import { tilesForType, type RunSet } from '../lib/spaces/dashboard';
 import type { Run } from '../lib/spaces/runs';
@@ -114,6 +116,8 @@ export default function SpaceAdminScreen() {
   const s = styles(colors);
 
   return (
+    <View style={{ flex: 1, backgroundColor: colors.bg }}>
+      <AuroraBackground variant="profile" />
     <ScrollView style={s.screen} contentContainerStyle={s.body}>
       <Stack.Screen options={spaceHeader(colors, `${spaceName} · Admin`, { id: spaceId, name: params.name })} />
 
@@ -225,11 +229,12 @@ export default function SpaceAdminScreen() {
         does, and the server holds no copy of them.
       </Text>
     </ScrollView>
+    </View>
   );
 }
 
 const styles = (c: Palette) => StyleSheet.create({
-  screen: { flex: 1, backgroundColor: c.bg },
+  screen: { flex: 1, backgroundColor: 'transparent' },
   body: { padding: 16, gap: 10, paddingBottom: 40 },
   scope: {
     flexDirection: 'row', gap: 10, alignItems: 'flex-start',
@@ -258,7 +263,7 @@ const styles = (c: Palette) => StyleSheet.create({
     backgroundColor: c.glassSoft, borderRadius: 12, padding: 14,
   },
   rowIcon: { width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center' },
-  rowLabel: { color: c.text, fontSize: 15.5, fontWeight: '600' },
+  rowLabel: { color: c.text, fontSize: 15.5, fontWeight: '600', flexShrink: 1 },
   badge: { backgroundColor: c.border, borderRadius: 10, paddingHorizontal: 8, paddingVertical: 2 },
   badgeText: { color: c.text, fontSize: 12, fontWeight: '700' },
   footnote: { color: c.textFaint, fontSize: 11.5, lineHeight: 16, marginTop: 6 },

@@ -9,7 +9,7 @@
 import { HEADER_TOP } from '../constants/layout';
 import { Ionicons } from '@expo/vector-icons';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
-import { useEffect, useRef, useState } from 'react';
+import { useMemo, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator, Alert, Animated, Pressable,
   ScrollView, StyleSheet, Text, TextInput, View,
@@ -22,9 +22,12 @@ import {
   getRecoveryQuestions, verifyRecoveryAnswers, recoverMpin, onboarding, onboardingError,
 } from '../lib/onboarding';
 import { AuthSky, BrandMark, KeyboardSafe } from '../components/ui';
-import { AUTH } from '../constants/authTheme';
+import { type AuthPalette } from '../constants/authTheme';
+import { useAuthTheme } from '../lib/useAuthTheme';
 
 export default function MpinRecover() {
+  const AUTH = useAuthTheme();
+  const s = useMemo(() => makeStyles(AUTH), [AUTH]);
   const router = useRouter();
   const { userId } = useLocalSearchParams<{ userId: string }>();
 
@@ -53,7 +56,7 @@ export default function MpinRecover() {
         setQuestions(qs); setPhase('answer');
       } catch (e: any) { Alert.alert('Error', onboardingError(e, 'Could not load')); router.back(); }
     })();
-  }, [userId]);
+  }, [router, userId]);
 
   const filled = questions.filter(q => (answers[q] ?? '').trim().length >= 2).length;
 
@@ -177,7 +180,7 @@ export default function MpinRecover() {
   );
 }
 
-const s = StyleSheet.create({
+const makeStyles = (AUTH: AuthPalette) => StyleSheet.create({
   screen: { flex: 1, backgroundColor: 'transparent' },
   body: { padding: 24, paddingTop: HEADER_TOP, paddingBottom: 48 },
   back: { marginBottom: 8, alignSelf: 'flex-start' },

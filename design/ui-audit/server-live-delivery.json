@@ -1,0 +1,29 @@
+{
+  "verifiedAt": "2026-09-20T22:15:16.5548934Z",
+  "ready": {
+    "db": true,
+    "ready": true,
+    "redis": true,
+    "uptime": 13266.170816919
+  },
+  "source": "6492ff85dbd9db44",
+  "protobuf": {
+    "type": [
+      "application/protobuf"
+    ],
+    "bytes": 65,
+    "vary": [
+      "Accept"
+    ],
+    "status": 200
+  },
+  "action": "Already deployed source confirmed; no restart needed",
+  "database": {
+    "liveMax": 137.0,
+    "liveCount": 136,
+    "extra": [],
+    "missing": [],
+    "localCount": 136
+  },
+  "expectedSource": "6492ff85dbd9db44"
+}

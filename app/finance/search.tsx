@@ -2,10 +2,11 @@
 // Matches on name, mobile/phone and amount.
 
 import React, { useCallback, useMemo, useState } from 'react';
+import { useFinanceTheme } from '../../components/finance/useFinanceTheme';
 import { View, Text, ScrollView, StyleSheet, TextInput, TouchableOpacity } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter, useFocusEffect } from 'expo-router';
-import { FIN, STATUS_COLORS, TABULAR } from '../../constants/financeTheme';
+import { financeStatusColors, TABULAR, type FinancePalette } from '../../constants/financeTheme';
 import { FinHeader, Pill, EmptyState } from '../../components/finance/ui';
 import { useMe } from '../../components/finance/useMe';
 import { formatINR, inrShort, num } from '../../utils/financeFormat';
@@ -13,6 +14,9 @@ import { listLedger, type LedgerEntry } from '../../db/ledger';
 import { listGroups, type ChittiGroup } from '../../db/chitti';
 
 export default function FinanceSearch() {
+  const FIN = useFinanceTheme();
+  const s = React.useMemo(() => makeStyles(FIN), [FIN]);
+  const STATUS_COLORS = React.useMemo(() => financeStatusColors(FIN), [FIN]);
   const router = useRouter();
   const me = useMe();
   const [q, setQ] = useState('');
@@ -108,7 +112,7 @@ export default function FinanceSearch() {
   );
 }
 
-const s = StyleSheet.create({
+const makeStyles = (FIN: FinancePalette) => StyleSheet.create({
   screen: { flex: 1, backgroundColor: FIN.bg },
   searchWrap: { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: FIN.card, marginHorizontal: 16, marginTop: 10, borderRadius: 12, borderWidth: 1, borderColor: FIN.border, paddingHorizontal: 12 },
   input: { flex: 1, paddingVertical: 12, fontSize: 15, color: FIN.text },

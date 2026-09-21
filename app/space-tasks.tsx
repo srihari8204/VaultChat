@@ -16,23 +16,20 @@
 // the compose button only: POST /tasks re-checks it, so hiding the button is a
 // courtesy, never the control.
 
+import { AppText as Text } from '../components/ui/Text';
 import React, { useCallback, useMemo, useState } from 'react';
 import {
-  View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator,
+  View, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator,
   RefreshControl, Modal, TextInput, Alert,
 } from 'react-native';
 import { Stack, useLocalSearchParams, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useSpaceColors, spaceHeader } from '../lib/spaces/theme';
-import type { Palette } from '../constants/theme';
+import type { SpacePalette as Palette } from '../lib/spaces/theme';
 import { getWorkTasks, createWorkTask, setWorkTaskDone, type WorkTask } from '../lib/spaces/api';
 import { AuroraBackground } from '../components/ui';
 import { KeyboardSafe } from '../components/ui/KeyboardSafe';
 
-/** Priority always carries a WORD and its spec color, never color alone. */
-const PRIORITY_TONE: Record<WorkTask['priority'], string> = {
-  high: '#EF4444', medium: '#F59E0B', low: '#16C784',
-};
 
 const PRIORITIES: { key: 'low' | 'medium' | 'high'; label: string }[] = [
   { key: 'high', label: 'High' },
@@ -56,6 +53,7 @@ function dueWords(iso: string | null): { text: string; overdue: boolean } {
 export default function SpaceTasksScreen() {
   const params = useLocalSearchParams<{ spaceId?: string; name?: string; perms?: string; groupType?: string }>();
   const colors = useSpaceColors(params.groupType);
+  const PRIORITY_TONE = { high: colors.danger, medium: colors.warning, low: colors.success };
   const spaceId = String(params.spaceId || '');
   const spaceName = String(params.name || 'This space');
 
@@ -185,7 +183,7 @@ export default function SpaceTasksScreen() {
             onPress={() => setTab(t.key)}
             accessibilityRole="button"
             accessibilityState={{ selected: tab === t.key }}
-            style={[s.tab, tab === t.key && { backgroundColor: colors.primary }]}
+            style={[s.tab, tab === t.key && { backgroundColor: colors.brandOnLight }]}
           >
             <Text style={[s.tabText, tab === t.key && { color: '#fff' }]}>
               {t.label}{t.count > 0 ? ` (${t.count})` : ''}
@@ -206,7 +204,7 @@ export default function SpaceTasksScreen() {
           <View style={[s.card, { borderColor: colors.danger, borderWidth: 1 }]}>
             <Text style={s.cardTitle}>Could not load tasks</Text>
             <Text style={s.muted}>{err}</Text>
-            <TouchableOpacity onPress={load} style={[s.btn, { backgroundColor: colors.primary }]}>
+            <TouchableOpacity onPress={load} style={[s.btn, { backgroundColor: colors.brandOnLight }]}>
               <Text style={s.btnText}>Try again</Text>
             </TouchableOpacity>
           </View>
@@ -231,7 +229,7 @@ export default function SpaceTasksScreen() {
       </ScrollView>
 
       {canAssign && (
-        <TouchableOpacity accessibilityRole="button" accessibilityLabel="New task" style={[s.fab, { backgroundColor: colors.primary }]} onPress={() => setCompose(true)}>
+        <TouchableOpacity accessibilityRole="button" accessibilityLabel="New task" style={[s.fab, { backgroundColor: colors.brandOnLight }]} onPress={() => setCompose(true)}>
           <Ionicons name="add" size={26} color="#fff" />
         </TouchableOpacity>
       )}
@@ -255,7 +253,7 @@ export default function SpaceTasksScreen() {
                 <TouchableOpacity
                   key={p.key}
                   onPress={() => setPriority(p.key)}
-                  style={[s.prio, priority === p.key && { backgroundColor: colors.primary }]}
+                  style={[s.prio, priority === p.key && { backgroundColor: colors.brandOnLight }]}
                 >
                   <Text style={[s.prioText, priority === p.key && { color: '#fff' }]}>{p.label}</Text>
                 </TouchableOpacity>
@@ -268,7 +266,7 @@ export default function SpaceTasksScreen() {
               <TouchableOpacity
                 onPress={submit}
                 disabled={!title.trim() || saving}
-                style={[s.btn, { backgroundColor: colors.primary, flex: 1, opacity: !title.trim() || saving ? 0.5 : 1 }]}
+                style={[s.btn, { backgroundColor: colors.brandOnLight, flex: 1, opacity: !title.trim() || saving ? 0.5 : 1 }]}
               >
                 <Text style={s.btnText}>{saving ? 'Creating…' : 'Create'}</Text>
               </TouchableOpacity>

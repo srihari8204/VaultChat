@@ -1,7 +1,7 @@
 // lib/spaces/theme.ts — which palette a space screen renders with.
 //
 // Business/office spaces (and cab fleets) get the crazzychat Business design
-// system — blue on deep navy, dark-only. Every other space family keeps the
+// identity — blue accents over the active day/night theme. Other spaces keep the
 // app-wide theme. The family routing is familyOf() in layout.ts, the same
 // decision that already picks the dashboard sections, so the skin and the
 // content can never disagree about what kind of space this is.
@@ -9,7 +9,7 @@
 import { createElement, useMemo } from 'react';
 import { useTheme } from '../theme';
 import type { Palette } from '../../constants/theme';
-import { BIZ } from '../../constants/businessTheme';
+import { businessPalette } from '../../constants/businessTheme';
 import { SPACE_GLASS } from '../../constants/spaceTheme';
 import { usesBusinessTheme } from './layout';
 import ChatDoorButton, { type ChatDoorTarget } from '../../components/spaces/ChatDoorButton';
@@ -17,24 +17,24 @@ import ChatDoorButton, { type ChatDoorTarget } from '../../components/spaces/Cha
 /**
  * The palette for a space screen. Pass the route's groupType param.
  *
- * Non-business spaces wear the DUSK-GLASS skin here, at the palette layer:
+ * Spaces wear the DUSK-GLASS skin here, at the palette layer:
  * every operational screen builds its styles from these six surface tokens,
  * so mapping them onto SPACE_GLASS restyles the whole tier in one place —
  * the same trick financeTheme used ("two token names carry the restyle").
- * The ground is the flat bgMid tone (no gradient/aura): operational screens
- * put scanability first, and pane-over-bgMid is exactly the composite the
- * spaceTheme selftest pins for AA, so the contrast guarantees apply verbatim.
- * Business/office/cab spaces keep the crazzychat Business system untouched —
- * that split is pinned by layout.ts's self-check and check-space-identity.
+ * The screens draw their theme-aware ground behind these translucent panes.
+ * Business/office/cab retain blue identity accents while text and surfaces
+ * follow the active scheme, so light Aurora grounds never carry navy's white
+ * text. The identity split is pinned by check-space-identity.
  */
-export function useSpaceColors(groupType?: string | null): Palette {
+export type SpacePalette = Palette & { warning: string };
+
+export function useSpaceColors(groupType?: string | null): SpacePalette {
   const { colors, scheme } = useTheme();
   const biz = usesBusinessTheme(groupType);
   return useMemo(() => {
-    if (biz) return BIZ;
     const G = SPACE_GLASS[scheme];
     return {
-      ...colors,
+      ...(biz ? businessPalette(colors, scheme) : colors),
       bg: G.bgMid,
       card: G.pane,
       // Ink hairline, not the lit rim: chips, inputs and card outlines all
@@ -43,6 +43,7 @@ export function useSpaceColors(groupType?: string | null): Palette {
       separator: G.line,
       surface: G.paneFaint,
       surfaceSolid: G.sheet,
+      warning: G.warnText,
     };
   }, [biz, colors, scheme]);
 }

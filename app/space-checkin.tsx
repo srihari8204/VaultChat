@@ -14,15 +14,16 @@
 //
 // Nothing is computed here — times and counts arrive from the server.
 
+import { AppText as Text } from '../components/ui/Text';
 import React, { useCallback, useMemo, useState } from 'react';
 import {
-  View, Text, StyleSheet, ScrollView, ActivityIndicator, TouchableOpacity,
+  View, StyleSheet, ScrollView, ActivityIndicator, TouchableOpacity,
   Alert, TextInput, Modal,
 } from 'react-native';
 import { Stack, useLocalSearchParams, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useSpaceColors, spaceHeader } from '../lib/spaces/theme';
-import type { Palette } from '../constants/theme';
+import type { SpacePalette as Palette } from '../lib/spaces/theme';
 import {
   getAttendance, checkIn, checkOut, getLeave, requestLeave, decideLeave,
   type AttendanceRecord, type LeaveRequest,
@@ -154,7 +155,7 @@ export default function SpaceCheckinScreen() {
         </Text>
 
         {!inAt ? (
-          <TouchableOpacity style={[s.bigBtn, { backgroundColor: colors.primary }]} onPress={doCheckIn} disabled={busy}>
+          <TouchableOpacity style={[s.bigBtn, { backgroundColor: colors.brandOnLight }]} onPress={doCheckIn} disabled={busy}>
             {busy ? <ActivityIndicator color="#fff" /> : <Text style={s.bigBtnText}>Check In</Text>}
           </TouchableOpacity>
         ) : !outAt ? (
@@ -254,7 +255,7 @@ export default function SpaceCheckinScreen() {
                 <TouchableOpacity
                   key={k.key}
                   onPress={() => setKind(k.key)}
-                  style={[s.kind, kind === k.key && { backgroundColor: colors.primary }]}
+                  style={[s.kind, kind === k.key && { backgroundColor: colors.brandOnLight }]}
                 >
                   <Text style={[s.kindText, kind === k.key && { color: '#fff' }]}>{k.label}</Text>
                 </TouchableOpacity>
@@ -269,7 +270,7 @@ export default function SpaceCheckinScreen() {
               <TouchableOpacity style={s.modalBtn} onPress={() => setAsking(false)}>
                 <Text style={s.muted}>Cancel</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={[s.modalBtn, { backgroundColor: colors.primary }]} onPress={submitLeave} disabled={busy}>
+              <TouchableOpacity style={[s.modalBtn, { backgroundColor: colors.brandOnLight }]} onPress={submitLeave} disabled={busy}>
                 {busy ? <ActivityIndicator size="small" color="#fff" /> : <Text style={s.bigBtnText}>Submit</Text>}
               </TouchableOpacity>
             </View>
@@ -290,7 +291,7 @@ function statusColour(st: LeaveRequest['status'], c: Palette): string {
     case 'approved': return c.success;
     case 'rejected': return c.danger;
     case 'cancelled': return c.textFaint;
-    default: return '#F59E0B';
+    default: return c.warning;
   }
 }
 

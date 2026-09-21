@@ -5,7 +5,7 @@
 // chat thread loads from newest). Long-press to remove. Each row shows
 // chat name + sender + the message preview + relative time.
 
-import { HEADER_TOP } from '../constants/layout';
+import { HEADER_TOP, SCREEN_BOTTOM } from '../constants/layout';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { useCallback, useEffect, useState , useMemo} from 'react';
@@ -15,7 +15,7 @@ import {
   FlatList,
   RefreshControl,
   StyleSheet,
-  Text,
+  ScrollView,
   TouchableOpacity,
   View,
 } from 'react-native';
@@ -29,6 +29,7 @@ import {
 } from '../lib/chatService';
 import { readCache, writeCache } from '../lib/localCache';
 import { AuroraBackground } from '../components/ui';
+import { AppText as Text } from '../components/ui/Text';
 
 function useS() {
   const { colors } = useTheme();
@@ -121,6 +122,7 @@ export default function BookmarksScreen() {
 
   return (
     <View style={S.screen}>
+      <AuroraBackground />
       <View style={S.header}>
         <TouchableOpacity accessibilityLabel="Go back" onPress={() => router.back()} hitSlop={10} style={S.backBtn}>
           <Ionicons name="arrow-back" size={24} color={colors.text} />
@@ -131,18 +133,19 @@ export default function BookmarksScreen() {
       {error && <Text style={S.errorTxt}>{error}</Text>}
 
       {rows.length === 0 ? (
-        <View style={[S.center, { flex: 1, paddingHorizontal: 32 }]}>
+        <ScrollView contentContainerStyle={[S.center, { flexGrow: 1, padding: 32, gap: 12 }]}>
+          <Ionicons name="bookmark-outline" size={48} color={colors.primary} />
           <Text style={S.emptyTitle}>No bookmarks yet</Text>
           <Text style={S.emptySub}>
-            Long-press any message in a chat → 🔖 Bookmark to save it here.
+            Long-press any message in a chat and choose Bookmark to save it here.
           </Text>
-        </View>
+        </ScrollView>
       ) : (
         <FlatList
           data={rows}
           keyExtractor={(b) => b.id}
           refreshControl={<RefreshControl tintColor={colors.primary} refreshing={refreshing} onRefresh={onRefresh} />}
-          contentContainerStyle={{ paddingBottom: 32 }}
+          contentContainerStyle={{ paddingTop: 12, paddingBottom: SCREEN_BOTTOM + 16 }}
           renderItem={({ item: b }) => (
             <TouchableOpacity
               style={S.row}
@@ -151,7 +154,7 @@ export default function BookmarksScreen() {
               delayLongPress={300}
               activeOpacity={0.7}
             >
-              <View style={S.iconBox}><Text style={S.iconTxt}>🔖</Text></View>
+              <View style={S.iconBox}><Ionicons name="bookmark-outline" size={22} color={colors.primary} /></View>
               <View style={{ flex: 1 }}>
                 <Text style={S.rowChat} numberOfLines={1}>
                   {b.message?.chatName
@@ -203,7 +206,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   center:       { justifyContent: 'center', alignItems: 'center' },
 
   header:       { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingTop: HEADER_TOP, paddingBottom: 12, gap: 8, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.glassStroke },
-  backBtn:      { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
+  backBtn:      { width: 44, height: 44, borderRadius: 16, backgroundColor: c.glassSoft, alignItems: 'center', justifyContent: 'center' },
   backTxt:      { color: c.text, fontSize: 26, fontWeight: '600' },
   title:        { color: c.text, fontSize: 22, fontWeight: '800' },
 
@@ -211,10 +214,9 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   emptyTitle:   { color: c.text, fontSize: 16, fontWeight: '700', marginBottom: 8, textAlign: 'center' },
   emptySub:     { color: c.textDim, fontSize: 13, lineHeight: 18, textAlign: 'center' },
 
-  row:          { flexDirection: 'row', alignItems: 'flex-start', gap: 12, paddingHorizontal: 20, paddingVertical: 14, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.glassStroke },
+  row:          { flexDirection: 'row', alignItems: 'flex-start', gap: 12, marginHorizontal: 16, marginBottom: 10, padding: 16, borderRadius: 20, backgroundColor: c.glassSoft, borderWidth: StyleSheet.hairlineWidth, borderColor: c.glassStroke },
   iconBox:      { width: 36, height: 36, borderRadius: 18, backgroundColor: c.glassSoft, alignItems: 'center', justifyContent: 'center' },
-  iconTxt:      { fontSize: 18 },
-  rowChat:      { color: c.text, fontSize: 14, fontWeight: '700' },
-  rowContent:   { color: c.text, fontSize: 13, marginTop: 4 },
-  rowWhen:      { color: c.textDim, fontSize: 11, marginTop: 4 },
+  rowChat:      { color: c.text, fontSize: 16, fontWeight: '700' },
+  rowContent:   { color: c.text, fontSize: 14, lineHeight: 20, marginTop: 4 },
+  rowWhen:      { color: c.textDim, fontSize: 12, marginTop: 6 },
 });

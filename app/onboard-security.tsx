@@ -2,13 +2,12 @@
 // Answers are held in the store and only sent (argon2-hashed server-side) after
 // the MPIN is set. Each row excludes questions chosen by the others.
 //
-// Step 2 of 3, on the same fixed night palette as the rest of the chain — see
-// the always-dark note in components/ui/Brand.tsx.
+// Step 2 of 3, using the shared adaptive auth palette.
 
 import { HEADER_TOP } from '../constants/layout';
 import { Ionicons } from '@expo/vector-icons';
 import { Stack, useRouter } from 'expo-router';
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { BRAND_GRADIENT_CTA } from '../constants/theme';
@@ -16,11 +15,14 @@ import { SecurityQuestionRow } from '../components/auth/SecurityQuestionRow';
 import { REQUIRED_SECURITY_ANSWERS } from '../constants/securityQuestionPool';
 import { onboarding } from '../lib/onboarding';
 import { AuthSky, BrandMark, KeyboardSafe, StepRail } from '../components/ui';
-import { AUTH } from '../constants/authTheme';
+import { type AuthPalette } from '../constants/authTheme';
+import { useAuthTheme } from '../lib/useAuthTheme';
 
 type Slot = { questionCode: string | null; answer: string };
 
 export default function OnboardSecurity() {
+  const AUTH = useAuthTheme();
+  const s = useMemo(() => makeStyles(AUTH), [AUTH]);
   const router = useRouter();
 
   const [slots, setSlots] = useState<Slot[]>(() =>
@@ -102,7 +104,7 @@ export default function OnboardSecurity() {
   );
 }
 
-const s = StyleSheet.create({
+const makeStyles = (AUTH: AuthPalette) => StyleSheet.create({
   screen: { flex: 1, backgroundColor: 'transparent' },
   body: { padding: 24, paddingTop: HEADER_TOP, paddingBottom: 48 },
   back: { marginBottom: 8, alignSelf: 'flex-start' },

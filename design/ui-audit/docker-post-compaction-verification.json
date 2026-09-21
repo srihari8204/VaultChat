@@ -1,0 +1,20 @@
+{
+  "verifiedAt": "2026-09-21T15:02:56.2115706+05:30",
+  "dockerVersion": "29.6.2",
+  "images": 43,
+  "containers": 43,
+  "volumes": 46,
+  "goApiState": "created",
+  "goApiLogOptions": {
+    "Type": "json-file",
+    "Config": {
+      "max-file": "3",
+      "max-size": "10m"
+    }
+  },
+  "healthyContainers": 0,
+  "unhealthyContainers": 0,
+  "wslMemTotalKiB": 4009596,
+  "finalDockerStopped": true,
+  "healthCheckScope": "Engine restart and inventory/config verification; services did not wait through healthcheck grace periods"
+}

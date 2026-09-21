@@ -1,21 +1,5 @@
-// constants/authTheme.ts — fixed, always-DARK palette for the sign-in flow.
-//
-// The same decision constants/callTheme.ts makes, for the same reason and with
-// the same shape: these screens render on a dark surface whatever the app's
-// light/dark preference is, so pulling app theme colours (which flip to
-// dark-on-light) would make the chrome invisible in light mode.
-//
-// The reason is stronger here than for calls, though. The native splash is a
-// fixed piece of artwork on a fixed #010628 ground, and onboarding is the very
-// next thing drawn. If the first React screen honoured a light theme, launch
-// would flash navy → white before the user had been asked anything. And the
-// theme preference is stored per account — at the sign-in screen there is not
-// yet an account to have a preference.
-//
-// Every value is either taken from the brand tokens or measured against
-// BRAND_NIGHT, so this file has no opinions of its own about hue.
-
-import { BRAND_ACCENT, BRAND_CYAN, BRAND_NIGHT, BRAND_VIOLET, type Palette } from './theme';
+// Auth uses the selected appearance; the original night palette is preserved.
+import { AuroraLight, BRAND_ACCENT, BRAND_CYAN, BRAND_NIGHT, BRAND_VIOLET, type Palette } from './theme';
 
 export const AUTH = {
   /** The ground, identical to the splash artwork's background. */
@@ -47,27 +31,22 @@ export const AUTH = {
   danger: '#FF7A85',
 } as const;
 
+export type AuthPalette = { [K in keyof typeof AUTH]: string };
+
+export const AUTH_LIGHT: AuthPalette = {
+  bg: AuroraLight.bg, card: AuroraLight.glass, stroke: AuroraLight.glassStroke,
+  hairline: AuroraLight.glassSoft, text: AuroraLight.text, dim: AuroraLight.textDim,
+  faint: AuroraLight.textFaint, accent: AuroraLight.primary, cyan: '#0369A1',
+  violet: AuroraLight.purple, danger: AuroraLight.danger,
+};
+
 /** The slice of the app palette the shared auth inputs actually style with. */
 export type FieldColors = Pick<
   Palette,
   'text' | 'textDim' | 'textFaint' | 'glassSoft' | 'glassStroke' | 'surfaceSolid' | 'bg' | 'primary' | 'danger'
 >;
 
-/**
- * AUTH wearing the palette's key names, so ONE StyleSheet can serve both
- * grounds — `onDark ? AUTH_FIELDS : colors` — instead of every shared input
- * carrying two parallel stylesheets that drift apart.
- *
- * Why a prop and not "always dark like SecurityQuestionRow": these inputs have
- * themed callers too. PhoneField is the number field on app/new-chat.tsx and
- * MpinInput is the unlock keypad on app/app-lock.tsx — both ordinary in-app
- * screens on AuroraBackground, where always-dark would just move the
- * invisible-field bug rather than fix it.
- *
- * glassSoft maps to the FAINTER hairline tint, not AUTH.card: every auth caller
- * puts these fields inside a card, and card-on-card at the same alpha reads as a
- * rendering bug (the same note SecurityQuestionRow carries).
- */
+/** Original night input roles, used only for auth fields in dark appearance. */
 export const AUTH_FIELDS: FieldColors = {
   text:         AUTH.text,
   textDim:      AUTH.dim,

@@ -1,3 +1,4 @@
+import { useGamePalette } from './appearance';
 // components/games/LeaderboardSheet.tsx — the standings, in one place.
 //
 // MOVED OUT OF app/games.tsx, unchanged apart from the `scope` prop below.
@@ -6,11 +7,12 @@
 // guards against for VoiceSheet ("a second copy for chess is a second thing to
 // fix when the mesh changes"). The hub renders it the same way it always did.
 
+import { AppText as Text } from '../ui/Text';
 import React from 'react';
-import { ActivityIndicator, Pressable, ScrollView, Text, View } from 'react-native';
+import { ActivityIndicator, Pressable, ScrollView, View } from 'react-native';
 import { Btn, useType } from './ui';
 import { Sheet } from './feedback';
-import { C, S, R, white, alpha } from '../../lib/games/theme';
+import { S, R, white, alpha } from '../../lib/games/theme';
 import { getMyProfile } from '../../lib/chatService';
 import { useLeaderboard } from '../../lib/games/useLeaderboard';
 import { headline, medal, detail, type LeaderScope } from '../../lib/games/leaderboard';
@@ -51,6 +53,7 @@ export default function LeaderboardSheet({
   // whichever tab was last looked at inside a sheet that never unmounts.
   React.useEffect(() => { if (visible) setScope(initialScope); }, [visible, initialScope]);
   const { rows, loading, error, refresh } = useLeaderboard(scope);
+  const C = useGamePalette();
   const t = useType();
 
   // Which row is ME. The server returns ten rows and no rank for anyone else,
@@ -86,8 +89,8 @@ export default function LeaderboardSheet({
               paddingHorizontal: S[3], paddingVertical: S[2], borderRadius: R[3],
               minHeight: 44, justifyContent: 'center',
               borderWidth: 1,
-              borderColor: white(scope === sc.key ? 0.30 : 0.12),
-              backgroundColor: scope === sc.key ? white(0.13) : 'transparent',
+              borderColor: C.light ? C.line : white(scope === sc.key ? 0.30 : 0.12),
+              backgroundColor: scope === sc.key ? (C.light ? C.panel2 : white(0.13)) : 'transparent',
             }}
           >
             <Text style={{
@@ -137,7 +140,7 @@ export default function LeaderboardSheet({
                 </View>
                 <View style={{ alignItems: 'flex-end' }}>
                   <Text style={{ color: C.gold, fontSize: t.sm, fontWeight: '800' }}>{h.value}</Text>
-                  <Text style={{ color: C.muted, fontSize: 10.5 }}>{h.label}</Text>
+                  <Text style={{ color: C.muted, fontSize: 11 }}>{h.label}</Text>
                 </View>
               </View>
             );

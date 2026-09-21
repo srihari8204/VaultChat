@@ -1,0 +1,368 @@
+
+> vaultchat@1.2.7 test
+> node ./scripts/test-all.js
+
+Running 343 suite(s), 4 at a time
+
+  ✓ constants\glass.selftest.ts  1505ms
+  ✓ constants\financeTheme.selftest.ts  1943ms
+  ✓ constants\spaceTheme.selftest.ts  2003ms
+  ✓ db\chitti.selftest.ts  1894ms
+  ✓ db\financeBackup.selftest.ts  1806ms
+  ✓ db\financeBackup.sqlite.selftest.ts  2059ms
+  ✓ lib\a11yCoverage.selftest.ts  2208ms
+  ✓ lib\albumGrouping.selftest.ts  2412ms
+  ✓ lib\androidPermissions.selftest.ts  2379ms
+  ✓ lib\accountPurge.selftest.ts  6193ms
+  ✓ lib\appFlagsNegotiation.selftest.ts  3661ms
+  ✓ lib\appTextRendering.selftest.ts  2664ms
+  ✓ lib\appTextWeight.selftest.ts  2521ms
+  ✓ lib\apiBypasses.selftest.ts  8362ms
+  ✓ lib\appVersion.selftest.ts  2759ms
+  ✓ lib\appVersionNegotiation.selftest.ts  2573ms
+  ✓ lib\archive.selftest.ts  2087ms
+  ✓ lib\auroraGlass.selftest.ts  1674ms
+  ✓ lib\backupScheduler.selftest.ts  2156ms
+  ✓ lib\backupMetaNegotiation.selftest.ts  3639ms
+  ✓ lib\backupSecrets.selftest.ts  1986ms
+  ✓ lib\buildInputs.selftest.ts  1613ms
+  ✓ constants\vaultID.selftest.ts  23457ms
+  ✓ lib\call\addPerson.selftest.ts  1895ms
+  ✓ lib\call\background.selftest.ts  1738ms
+  ✓ lib\cacheCrypto.selftest.ts  4423ms
+  ✓ lib\call\callChat.selftest.ts  1492ms
+  ✓ lib\backupCrypto.selftest.ts  8991ms
+  ✓ lib\call\callControls.selftest.ts  1647ms
+  ✓ lib\call\duplicateCall.selftest.ts  1706ms
+  ✓ lib\call\endMessage.selftest.ts  1641ms
+  ✓ lib\call\earlyIce.selftest.ts  2110ms
+  ✓ lib\call\frameE2ee.selftest.ts  1702ms
+  ✓ lib\call\keyRotation.selftest.ts  2622ms
+  ✓ lib\call\glare.selftest.ts  2862ms
+  ✓ lib\call\machine.selftest.ts  2719ms
+  ✓ lib\call\mediaKey.selftest.ts  2531ms
+  ✓ lib\call\minimize.selftest.ts  1829ms
+  ✓ lib\call\mode.selftest.ts  1872ms
+  ✓ lib\call\netChange.selftest.ts  1960ms
+  ✓ lib\call\offerRefresh.selftest.ts  2294ms
+  ✓ lib\call\opus.selftest.ts  2448ms
+  ✓ lib\call\ownership.selftest.ts  2465ms
+  ✓ lib\call\quality.selftest.ts  2612ms
+  ✓ lib\call\reconnectWiring.selftest.ts  2423ms
+  ✓ lib\call\recovery.selftest.ts  2103ms
+  ✓ lib\call\reoffer.selftest.ts  2086ms
+  ✓ lib\call\reofferCipher.selftest.ts  1846ms
+  ✓ lib\call\reseal.selftest.ts  2250ms
+  ✓ lib\call\ringTimeout.selftest.ts  1956ms
+  ✓ lib\call\sharePolicy.selftest.ts  1973ms
+  ✓ lib\call\screenCapture.ts  2474ms  (embedded)
+  ✓ lib\call\signalFailClosed.selftest.ts  2007ms
+  ✓ lib\call\turnWiring.selftest.ts  1682ms
+  ✓ lib\call\store.selftest.ts  2285ms
+  ✓ lib\call\visibleSet.selftest.ts  1635ms
+  ✓ lib\callHistory.selftest.ts  1978ms
+  ✓ lib\ccwire\appEventFragments.selftest.ts  1787ms
+  ✓ lib\camera\cameraMode.selftest.ts  2039ms
+  ✓ lib\ccwire\adversarialParity.selftest.ts  1942ms
+  ✓ lib\ccwire\chatViewEmit.selftest.ts  1515ms
+  ✓ lib\ccwire\client.selftest.ts  1737ms
+  ✓ lib\ccwire\codecParity.selftest.ts  2052ms
+  ✓ lib\ccwire\codec.selftest.ts  2130ms
+  ✓ lib\ccwire\cursorCodec.selftest.ts  1629ms
+  ✓ lib\ccwire\eventsSocket.selftest.ts  1771ms
+  ✓ lib\ccwire\frame.selftest.ts  1900ms
+  ✓ lib\ccwire\joinEmit.selftest.ts  1787ms
+  ✓ lib\ccwire\generatedParity.selftest.ts  2828ms
+  ✓ lib\ccwire\nativeSocket.selftest.ts  2216ms
+  ✓ lib\ccwire\parity.selftest.ts  2020ms
+  ✓ lib\ccwire\protoConformance.selftest.ts  2067ms
+  ✓ lib\ccwire\recovery.selftest.ts  1821ms
+  ✓ lib\ccwire\resume.selftest.ts  1672ms
+  ✓ lib\ccwire\startupAdapter.selftest.ts  1593ms
+  ✓ lib\ccwire\submission.selftest.ts  1661ms
+  ✓ lib\ccwire\transport.selftest.ts  1677ms
+  ✓ lib\ccwire\typingEmit.selftest.ts  1734ms
+  ✓ lib\ccwire\typingState.selftest.ts  1774ms
+  ✓ lib\chatCode.selftest.ts  1923ms
+  ✓ lib\chatListResync.selftest.ts  1935ms
+  ✓ lib\chatsCacheRollback.selftest.ts  2212ms
+  ✓ lib\chatsCommonNegotiation.selftest.ts  3061ms
+  ✓ lib\chatLockFactors.selftest.ts  4870ms
+  ✓ lib\chatsListProto.selftest.ts  3604ms
+  ✓ lib\chatTimeline.selftest.ts  2385ms
+  ✓ lib\chatUnreadCursor.selftest.ts  2442ms
+  ✓ lib\chatsDeltaProto.selftest.ts  6520ms
+  ✓ lib\confirmIdentity.selftest.ts  2225ms
+  ✓ lib\contactVerificationsNegotiation.selftest.ts  3607ms
+  ✓ lib\decryptReplayCost.selftest.ts  2585ms
+  ✓ lib\diagLog.selftest.ts  2175ms
+  ✓ lib\docOpen.selftest.ts  2265ms
+  ✓ lib\docBlocks.selftest.ts  2604ms
+  ✓ lib\docs\docStyle.selftest.ts  2356ms
+  ✓ lib\decentralizedId.selftest.ts  6253ms
+  ✓ lib\docs\zoom.selftest.ts  2317ms
+  ✓ lib\docText.realfiles.selftest.ts  2325ms
+  ✓ lib\docText.selftest.ts  2426ms
+  ✓ lib\editWindow.selftest.ts  2246ms
+  ✓ lib\family\adaptive.ts  1723ms  (embedded)
+  ✓ lib\family\alerts.ts  1724ms  (embedded)
+  ✓ lib\family\crash.ts  1658ms  (embedded)
+  ✓ lib\family\battery.ts  2199ms  (embedded)
+  ✓ lib\family\distance.ts  1701ms  (embedded)
+  ✓ lib\family\fixPipeline.ts  1887ms  (embedded)
+  ✓ lib\family\geofence.ts  1576ms  (embedded)
+  ✓ lib\family\history.ts  1563ms  (embedded)
+  ✓ lib\family\leaveNow.ts  1576ms  (embedded)
+  ✓ lib\family\meetHere.ts  1634ms  (embedded)
+  ✓ lib\family\refresh.ts  1568ms  (embedded)
+  ✓ lib\family\presenceLifecycle.selftest.ts  1896ms
+  ✓ lib\family\relations.ts  1549ms  (embedded)
+  ✓ lib\family\roadDistance.selftest.ts  1541ms
+  ✓ lib\family\status.ts  1603ms  (embedded)
+  ✓ lib\family\visibility.selftest.ts  1615ms
+  ✓ lib\family\watchAlerts.ts  1547ms  (embedded)
+  ✓ lib\finance\grid.selftest.ts  2270ms
+  ✓ lib\format.selftest.ts  2285ms
+  ✓ lib\forwardPolicy.selftest.ts  2389ms
+  ✓ lib\games\boardFit.selftest.ts  2570ms
+  ✓ lib\games\fairness.selftest.ts  2664ms
+  ✓ lib\games\gamesNative.selftest.ts  2974ms
+  ✓ lib\games\handGroups.selftest.ts  2767ms
+  ✓ lib\games\history.selftest.ts  2703ms
+  ✓ lib\games\invite.selftest.ts  2438ms
+  ✓ lib\games\leaderboard.selftest.ts  2639ms
+  ✓ lib\games\liveTables.selftest.ts  2798ms
+  ✓ lib\featureFlags.selftest.ts  11217ms
+  ✓ lib\games\ludoGlass.selftest.ts  2468ms
+  ✓ lib\games\match.selftest.ts  2033ms
+  ✓ lib\games\meldHint.selftest.ts  1940ms
+  ✓ lib\games\rummyTable.selftest.ts  2321ms
+  ✓ lib\games\useAddBot.selftest.ts  2019ms
+  ✓ lib\gamesBackCoverage.selftest.ts  1810ms
+  ✓ lib\golive\connectionEvents.selftest.ts  1998ms
+  ✓ lib\golive\reconnectBudget.selftest.ts  1824ms
+  ✓ lib\golive\immersiveStage.selftest.ts  1932ms
+  ✓ lib\golive\stageLayout.ts  1882ms  (embedded)
+  ✓ lib\golive\turnWiring.selftest.ts  1907ms
+  ✓ lib\gridTile.selftest.ts  1990ms
+  ✓ lib\groupE2eeStrict.selftest.ts  2268ms
+  ✓ lib\groupRefRouting.selftest.ts  1709ms
+  ✓ lib\groups\analytics.ts  1715ms  (embedded)
+  ✓ lib\groups\calendar.ts  1699ms  (embedded)
+  ✓ lib\groups\catalog.ts  1820ms  (embedded)
+  ✓ lib\groups\clustering.ts  1978ms  (embedded)
+  ✓ lib\groups\notes.ts  2372ms  (embedded)
+  ✓ lib\groups\permissions.ts  2157ms  (embedded)
+  ✓ lib\groups\privacy.ts  2118ms  (embedded)
+  ✓ lib\groups\reminders.ts  2068ms  (embedded)
+  ✓ lib\groups\store.ts  1607ms  (embedded)
+  ✓ lib\groups\tasks.ts  1690ms  (embedded)
+  ✓ lib\groups\trips.ts  1568ms  (embedded)
+  ✓ lib\historyReplay.selftest.ts  1837ms
+  ✓ lib\httpErrorMessage.selftest.ts  1899ms
+  ✓ lib\i18n\i18n.selftest.ts  1903ms
+  ✓ lib\iceCredentials.selftest.ts  1892ms
+  ✓ lib\icePriority.ts  1516ms  (embedded)
+  ✓ lib\items\leftBehind.ts  1594ms  (embedded)
+  ✓ lib\items\proximity.ts  1679ms  (embedded)
+  ✓ lib\items\scanner.selftest.ts  1715ms
+  ✓ lib\keyboardAvoidance.selftest.ts  2566ms
+  ✓ lib\klipyAttribution.selftest.ts  2039ms
+  ✓ lib\keyboardInset.selftest.ts  2481ms
+  ✓ lib\lastMessageQuery.selftest.ts  2043ms
+  ✓ lib\launchVeil.selftest.ts  2015ms
+  ✓ lib\layoutMetrics.selftest.ts  1662ms
+  ✓ lib\legacyRefreshParity.selftest.ts  2047ms
+  ✓ lib\liveLocationCrypto.selftest.ts  1861ms
+  ✓ lib\localDb.queue.selftest.ts  2065ms
+  ✓ lib\location\live.ts  1541ms  (embedded)
+  ✓ lib\location\publisher.ts  2143ms  (embedded)
+  ✓ lib\locationEgress.selftest.ts  2458ms
+  ✓ lib\localDb.staleData.selftest.ts  5467ms
+  ✓ lib\localDb.pending.selftest.ts  6178ms
+  ✓ lib\lock\alarmController.ts  2184ms  (embedded)
+  ✓ lib\lock\format.ts  2056ms  (embedded)
+  ✓ lib\lock\zoneMachine.ts  1897ms  (embedded)
+  ✓ lib\map\mapHtml.selftest.ts  1916ms
+  ✓ lib\map\tileProvider.ts  1925ms  (embedded)
+  ✓ lib\media\compress.selftest.ts  1838ms
+  ✓ lib\mediaOutbox.progress.selftest.ts  1663ms
+  ✓ lib\mediaOutbox.enqueue.selftest.ts  2069ms
+  ✓ lib\mediaAtomicWrite.selftest.ts  2212ms
+  ✓ lib\messageHistory.selftest.ts  1641ms
+  ✓ lib\messageQueue.latency.selftest.ts  1849ms
+  ✓ lib\messageDeletion.selftest.ts  4338ms
+  ✓ lib\messageState.ts  1390ms  (embedded)
+  ✓ lib\messageQueue.flush.selftest.ts  3980ms
+  ✓ lib\metadataPrivacy.selftest.ts  1799ms
+  ✓ lib\msgEnvelope.selftest.ts  1789ms
+  ✓ lib\myUserId.selftest.ts  1442ms
+  ✓ lib\msgIds.selftest.ts  2061ms
+  ✓ lib\nativeDeviceSupport.selftest.ts  1496ms
+  ✓ lib\nav\geo.ts  1502ms  (embedded)
+  ✓ lib\nav\adaptiveDistance.ts  1563ms  (embedded)
+  ✓ lib\nav\hapticLanguage.ts  1604ms  (embedded)
+  ✓ lib\nav\missedTurn.ts  1769ms  (embedded)
+  ✓ lib\nav\navPresentation.ts  1669ms  (embedded)
+  ✓ lib\nav\navE2E.selftest.ts  2408ms
+  ✓ lib\nav\notificationTimeline.ts  1697ms  (embedded)
+  ✓ lib\nav\routeProgress.ts  1995ms  (embedded)
+  ✓ lib\nav\routing.ts  2018ms  (embedded)
+  ✓ lib\nav\urlCoords.ts  1834ms  (embedded)
+  ✓ lib\messageQueue.selftest.ts  11855ms
+  ✓ lib\nav\voiceGuide.ts  1964ms  (embedded)
+  ✓ lib\networkState.ts  2388ms  (embedded)
+  ✓ lib\notificationActions.selftest.ts  3126ms
+  ✓ lib\onboardNav.selftest.ts  3230ms
+  ✓ lib\orphanRoutes.selftest.ts  3255ms
+  ✓ lib\outboxRecovery.selftest.ts  2505ms
+  ✓ lib\pendingLink.selftest.ts  2235ms
+  ✓ lib\notesVault.selftest.ts  6858ms
+  ✓ lib\permissionDeadEnd.selftest.ts  2473ms
+  ✓ lib\pushRegistration.selftest.ts  2316ms
+  ✓ lib\reactionMerge.selftest.ts  1999ms
+  ✓ lib\reader.selftest.ts  2120ms
+  ✓ lib\privacyPrefs.selftest.ts  3353ms
+  ✓ lib\refreshOutcome.selftest.ts  1961ms
+  ✓ lib\rekeyFloor.selftest.ts  1852ms
+  ✓ lib\remoteFlags.selftest.ts  1981ms
+  ✓ lib\responsive.selftest.ts  1937ms
+  ✓ lib\receiptEvents.selftest.ts  4927ms
+  ✓ lib\receipts.selftest.ts  5488ms
+  ✓ lib\resumableUpload.plan.ts  1953ms  (embedded)
+  ✓ lib\responsiveLayout.selftest.ts  2706ms
+  ✓ lib\responsiveCoverage.selftest.ts  3095ms
+  ✓ lib\screenBackCoverage.selftest.ts  2284ms
+  ✓ lib\sessionEnded.selftest.ts  1939ms
+  ✓ lib\rowOverflow.selftest.ts  4053ms
+  ✓ lib\securityOverviewNegotiation.selftest.ts  2926ms
+  ✓ lib\socket.transport.selftest.ts  1599ms
+  ✓ lib\shelf.selftest.ts  2093ms
+  ✓ lib\signalStyleMessageStorage.selftest.ts  1960ms
+  ✓ lib\socketioRemoval.selftest.ts  1710ms
+  ✓ lib\socketReconnect.selftest.ts  2279ms
+  ✓ lib\socketPersistentListeners.selftest.ts  2424ms
+  ✓ lib\spaces\attendance.ts  2645ms  (embedded)
+  ✓ lib\spaces\dashboard.ts  2781ms  (embedded)
+  ✓ lib\spaces\detect.ts  2154ms  (embedded)
+  ✓ lib\spaces\layout.ts  2068ms  (embedded)
+  ✓ lib\spaces\rolepicker.ts  2264ms  (embedded)
+  ✓ lib\spaces\runs.ts  1779ms  (embedded)
+  ✓ lib\startupColdPath.selftest.ts  1689ms
+  ✓ lib\status\gate.selftest.ts  2063ms
+  ✓ lib\status\gateWiring.selftest.ts  2045ms
+  ✓ lib\syncBackground.selftest.ts  2286ms
+  ✓ lib\syncEngine.hydrateFailure.selftest.ts  3454ms
+  ✓ lib\syncCursorRegression.selftest.ts  6268ms
+  ✓ lib\status\gateKey.selftest.ts  8179ms
+  ✓ lib\temporaryChat.selftest.ts  1738ms
+  ✓ lib\termsPolicy.selftest.ts  1854ms
+  ✓ lib\termsNegotiation.selftest.ts  3147ms
+  ✓ lib\syncEngine.mutations.selftest.ts  4841ms
+  ✓ lib\thumbnails.selftest.ts  2019ms
+  ✓ lib\themeCoverage.selftest.ts  2353ms
+  ✓ lib\syncEngine.delta.selftest.ts  11504ms
+  ✓ lib\typeScale.selftest.ts  1924ms
+  ✓ lib\usageCounter.selftest.ts  3333ms
+  ✓ lib\userProfileNegotiation.selftest.ts  4904ms
+  ✓ lib\vaultBeam\audit.selftest.ts  3780ms
+  ✓ lib\vaultBeam\backgroundService.ts  2854ms  (embedded)
+  ✓ lib\vaultBeam\bitmap.ts  1999ms  (embedded)
+  ✓ lib\vaultBeam\blockMap.ts  2314ms  (embedded)
+  ✓ lib\vaultBeam\blockSize.ts  2136ms  (embedded)
+  ✓ lib\vaultBeam\blockSizeWiring.selftest.ts  2295ms
+  ✓ lib\twoUserConversation.selftest.ts  12046ms
+  ✓ lib\vaultBeam\chunkAccounting.selftest.ts  2445ms
+  ✓ lib\vaultBeam\completionForensics.ts  2396ms  (embedded)
+  ✓ lib\vaultBeam\directFallback.selftest.ts  2738ms
+  ✓ lib\vaultBeam\drivers\lan.ts  2918ms  (embedded)
+  ✓ lib\vaultBeam\drivers\p2p.ts  2868ms  (embedded)
+  ✓ lib\vaultBeam\drivers\relay.ts  3241ms  (embedded)
+  ✓ lib\vaultBeam\fileDigest.ts  2972ms  (embedded)
+  ✓ lib\vaultBeam\manager.ts  2412ms  (embedded)
+  ✓ lib\vaultBeam\metricsWiring.selftest.ts  2964ms
+  ✓ lib\vaultBeam\noRetransmit.selftest.ts  3241ms
+  ✓ lib\vaultBeam\offerExpiry.ts  2577ms  (embedded)
+  ✓ lib\vaultBeam\openFile.ts  2725ms  (embedded)
+  ✓ lib\vaultBeam\openFileWiring.selftest.ts  2256ms
+  ✓ lib\vaultBeam\persistence.ts  1923ms  (embedded)
+  ✓ lib\vaultBeam\progressMonotonic.selftest.ts  2153ms
+  ✓ lib\vaultBeam\reportReceived.ts  2095ms  (embedded)
+  ✓ lib\vaultBeam\senderStall.selftest.ts  2110ms
+  ✓ lib\vaultBeam\senderWorkList.ts  2011ms  (embedded)
+  ✓ lib\vaultBeam\session.ts  1628ms  (embedded)
+  ✓ lib\vaultBeam\signalSealed.selftest.ts  2045ms
+  ✓ lib\vaultBeam\srcBinding.selftest.ts  1805ms
+  ✓ lib\vaultBeam\transferMetrics.ts  3036ms  (embedded)
+  ✓ lib\vaultBeam\transportAdapter.ts  3184ms  (embedded)
+  ✓ lib\vaultBeam\transportEpoch.ts  2971ms  (embedded)
+  ✓ lib\vaultBeam\transportLabel.ts  3081ms  (embedded)
+  ✓ lib\vaultBeam\transportObservability.selftest.ts  2464ms
+  ✓ lib\vaultBeam\vbHaveWiring.selftest.ts  2161ms
+  ✓ lib\vaultBeamSegments.ts  1748ms  (embedded)
+  ✓ lib\vaultBeam\wiring.ts  2322ms  (embedded)
+  ✓ lib\vaultlensRemoved.selftest.ts  2133ms
+  ✓ lib\vaultcheck\vaultcheck.selftest.ts  2462ms
+  ✓ lib\vectorIcons.selftest.ts  2910ms
+  ✓ lib\whiteboardStroke.selftest.ts  2013ms
+  ✓ scripts\check-space-types.ts  2360ms  (embedded)
+  ✓ scripts\acceptance.selftest.ts  3669ms
+  ✓ scripts\coldstart.selftest.ts  2393ms
+  ✓ services\cache\cachePlan.selftest.ts  2370ms
+  ✓ services\crypto\e2eeStorage.selftest.ts  2368ms
+  ✓ lib\waImport.selftest.ts  10469ms
+  ✓ services\crypto\groupSendLock.selftest.ts  1531ms
+  ✓ services\crypto\e2eeSession.selftest.ts  5674ms
+  ✓ services\crypto\e2ee.selftest.ts  6320ms
+  ✓ services\crypto\messageStore.selftest.ts  1551ms
+  ✓ services\crypto\rekeyGlare.selftest.ts  2109ms
+  ✓ services\crypto\groupSessionRecovery.selftest.ts  5358ms
+  ✓ services\crypto\otpkConsume.selftest.ts  5634ms
+  ✓ services\crypto\parity.selftest.ts  6849ms
+  ✓ services\crypto\shamir.selftest.ts  2943ms
+  ✓ services\crypto\senderKey.selftest.ts  4543ms
+  ✓ services\crypto\tombstonePolicy.selftest.ts  2750ms
+  ✓ services\crypto\vaultbeam-vectors.selftest.ts  2003ms
+  ✓ services\deviceId.selftest.ts  2537ms
+  ✓ services\crypto\vaultbeam-parity.selftest.ts  4411ms
+  ✓ services\crypto\vectors.selftest.ts  3849ms
+  ✓ services\khataWalkin.selftest.ts  2455ms
+  ✓ services\security\deviceSecurity\nativeMap.selftest.ts  2034ms
+  ✓ services\security\deviceSecurity\notificationPolicy.selftest.ts  2286ms
+  ✓ services\security\deviceSecurity\orchestrator.selftest.ts  2136ms
+  ✓ services\security\deviceSecurity\posture.selftest.ts  2156ms
+  ✓ services\security\deviceSecurity\riskEngine.selftest.ts  2543ms
+  ✓ services\security\deviceSecurity\scanScheduler.selftest.ts  2414ms
+  ✓ services\security\deviceSecurity\viewModel.selftest.ts  3170ms
+  ✓ services\security\security.selftest.ts  3094ms
+  ✓ services\securityEmulatorFlag.selftest.ts  1724ms
+  ✓ services\security\safetyNumber.selftest.ts  6373ms
+  ✓ services\security\sessionSeal.selftest.ts  5119ms
+  ✓ utils\financeAmount.selftest.ts  1597ms
+  ✓ utils\currencyMinor.selftest.ts  1673ms
+  ✓ utils\financeGuards.selftest.ts  1667ms
+  ✓ services\security\vaultKeys.selftest.ts  7039ms
+  ✓ utils\money.selftest.ts  2391ms
+  ✓ utils\shopbook.selftest.ts  2456ms
+  ✓ utils\moneySeam.selftest.ts  3898ms
+  ✓ utils\units.selftest.ts  2141ms
+  ✓ utils\shopbookInvoice.selftest.ts  2353ms
+
+────────────────────────────────────────────────────────
+  selftest suites: 265
+  embedded checks: 78
+  passed: 343/343
+
+  skipped: cannot reach vaultchat — 127.0.0.1:5432: psql: error: connection to server at "127.0.0.1", port 5432 failed: fe_sendauth: no password supplied; vaultchat-postgres-1: spawnSync docker ETIMEDOUT
+  (set MIGRATION_TESTS=1 to make this a failure instead)
+
+  backend contract (endpoints + socket events)
+✓ endpoints.json matches source
+✓ socket-events.json matches source
+
+  protobuf codegen drift
+proto codegen [typescript]: 17 files
+proto codegen [go]: 17 files
+proto codegen is up to date (34 files)
+
+ALL SUITES PASSED ✓

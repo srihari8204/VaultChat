@@ -1,11 +1,8 @@
 // components/auth/MpinInput.tsx — N-cell numeric MPIN entry (default 6).
 // One hidden TextInput backs N visual cells: paste-aware, auto-advancing, masked.
 //
-// TWO GROUNDS, ONE COMPONENT. The sign-in chain stands on AuthSky, where the app
-// palette's light theme would paint dark cells and dark digits onto the night
-// sky — invisible fields. app/app-lock.tsx is an ordinary themed screen on
-// AuroraBackground, so hardcoding always-dark here would only move that bug. The
-// caller says which ground it is: `onDark`, default off = themed as before.
+// onDark preserves the auth night styling in dark mode. Both callers follow
+// the shared light palette when the selected appearance is light.
 
 import { useMemo, useRef } from 'react';
 import { Pressable, StyleSheet, Text, TextInput, View, Animated } from 'react-native';
@@ -26,8 +23,8 @@ export function MpinInput({
   shakeAnim?: Animated.Value;
   onDark?: boolean;
 }) {
-  const { colors } = useTheme();
-  const c = onDark ? AUTH_FIELDS : colors;
+  const { colors, scheme } = useTheme();
+  const c = onDark && scheme === 'dark' ? AUTH_FIELDS : colors;
   const s = useMemo(() => makeStyles(c), [c]);
   const inputRef = useRef<TextInput>(null);
 
@@ -58,7 +55,7 @@ export function MpinInput({
   };
 
   return (
-    <Pressable onPress={reveal}>
+    <Pressable onPress={reveal} style={s.inputWrap}>
       <Animated.View style={[s.row, shakeAnim ? { transform: [{ translateX: shakeAnim }] } : null]}>
         {Array.from({ length }).map((_, i) => {
           const filled = i < value.length;
@@ -86,9 +83,10 @@ export function MpinInput({
 }
 
 const makeStyles = (c: FieldColors) => StyleSheet.create({
-  row: { flexDirection: 'row', gap: 10, justifyContent: 'center' },
+  inputWrap: { width: '100%', maxWidth: 326, alignSelf: 'center' },
+  row: { width: '100%', flexDirection: 'row', gap: 10, justifyContent: 'center' },
   cell: {
-    width: 46, minHeight: 56, borderRadius: 12, borderWidth: 1.5, borderColor: c.glassStroke,
+    flex: 1, minWidth: 0, maxWidth: 46, minHeight: 56, borderRadius: 12, borderWidth: 1.5, borderColor: c.glassStroke,
     backgroundColor: c.glassSoft, alignItems: 'center', justifyContent: 'center',
   },
   cellFilled: { borderColor: c.primary },

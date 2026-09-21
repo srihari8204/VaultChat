@@ -17,15 +17,16 @@
 // off-by-one reordering bugs live — so the client sends what it wants to be
 // true and the server makes it so.
 
+import { AppText as Text } from '../components/ui/Text';
 import React, { useCallback, useMemo, useState } from 'react';
 import {
-  View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator,
+  View, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator,
   Alert, TextInput, Modal,
 } from 'react-native';
 import { Stack, useLocalSearchParams, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useSpaceColors, spaceHeader } from '../lib/spaces/theme';
-import type { Palette } from '../constants/theme';
+import type { SpacePalette as Palette } from '../lib/spaces/theme';
 import {
   getRuns, getRun, createRun, setRunStops, setRunRiders, setRunDriver, setRunStatus,
   getRoster, type RosterEntry,
@@ -264,7 +265,7 @@ export default function SpaceRunsAdminScreen() {
                 <TouchableOpacity
                   key={k.key}
                   onPress={() => setNewKind(k.key)}
-                  style={[s.kind, newKind === k.key && { backgroundColor: colors.primary }]}
+                  style={[s.kind, newKind === k.key && { backgroundColor: colors.brandOnLight }]}
                 >
                   <Text style={[s.kindText, newKind === k.key && { color: '#fff' }]}>{k.label}</Text>
                 </TouchableOpacity>
@@ -410,7 +411,7 @@ const styles = (c: Palette) => StyleSheet.create({
   pickText: { color: c.textDim, flex: 1, fontSize: 14.5 },
   seq: { color: c.textDim, width: 20, fontVariant: ['tabular-nums'] },
   addRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 4 },
-  addBtn: { width: 42, height: 42, borderRadius: 21, backgroundColor: c.primary, alignItems: 'center', justifyContent: 'center' },
+  addBtn: { width: 42, height: 42, borderRadius: 21, backgroundColor: c.brandOnLight, alignItems: 'center', justifyContent: 'center' },
   input: {
     borderWidth: 1, borderColor: c.glassStroke, borderRadius: 10, padding: 12,
     color: c.text, fontSize: 15,
@@ -423,7 +424,7 @@ const styles = (c: Palette) => StyleSheet.create({
   modalTitle: { color: c.text, fontSize: 18, fontWeight: '700' },
   modalRow: { flexDirection: 'row', justifyContent: 'flex-end', gap: 10, marginTop: 4 },
   modalBtn: { paddingHorizontal: 18, paddingVertical: 12, borderRadius: 10 },
-  primaryBtn: { backgroundColor: c.primary },
+  primaryBtn: { backgroundColor: c.brandOnLight },
   primaryText: { color: '#fff', fontWeight: '700' },
   off: { opacity: 0.4 },
   sheetHeader: {

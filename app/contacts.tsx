@@ -27,7 +27,7 @@ import {
   Platform,
   Share,
   StyleSheet,
-  Text, TouchableOpacity,
+  TouchableOpacity,
   View,
 } from 'react-native';
 import { type Palette } from '../constants/theme';
@@ -38,7 +38,7 @@ import {
   matchContacts,
   type MatchedContact,
 } from '../lib/chatService';
-import { AuroraBackground } from '../components/ui';
+import { AppText as Text, AuroraBackground } from '../components/ui';
 
 interface PhoneEntry {
   hash:        string;
@@ -333,11 +333,11 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   scanHint:      { color: c.textDim, fontSize: 13, marginTop: 8 },
 
   errorBar:      { backgroundColor: 'rgba(239,68,68,0.12)', borderColor: 'rgba(239,68,68,0.4)', borderWidth: 1, marginHorizontal: 16, marginTop: 8, padding: 10, borderRadius: 10 },
-  errorTxt:      { color: '#EF4444', fontSize: 12 },
+  errorTxt:      { color: c.danger, fontSize: 12 },
 
-  sectionHeader: { color: c.textDim, fontSize: 11, fontWeight: '700', letterSpacing: 1.2, paddingHorizontal: 20, paddingTop: 20, paddingBottom: 8, backgroundColor: c.bg },
+  sectionHeader: { color: c.textDim, fontSize: 11, fontWeight: '700', letterSpacing: 1.2, paddingHorizontal: 20, paddingTop: 20, paddingBottom: 8 },
 
-  row:           { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 20, paddingVertical: 12, gap: 12, backgroundColor: c.bg },
+  row:           { flexDirection: 'row', alignItems: 'center', marginHorizontal: 16, marginBottom: 8, paddingHorizontal: 14, paddingVertical: 12, gap: 12, borderRadius: 16, backgroundColor: c.glass, borderWidth: StyleSheet.hairlineWidth, borderColor: c.glassStroke },
   avatar:        { width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center' },
   avatarOnApp:   { backgroundColor: c.primary },
   avatarInvite:  { backgroundColor: c.glassSoft, borderWidth: 1, borderColor: c.glassStroke },

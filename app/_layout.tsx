@@ -199,16 +199,11 @@ attachUsageFlush();
 const INSET_SCREENS = [
   'creator-channels',
   'current-location',
-  'd2de-status',
   'emergency-sos',
   'filevault',
-  'games',
-  'group-calendar',
   'group-chat',
-  'group-create',
   'interest-calculator',
   'lock-alert',
-  'lock-history',
   'network-test',
   'onboard-mpin',
   'onboard-success',
@@ -933,6 +928,11 @@ function RootLayoutInner() {
         <Stack.Screen name="media-viewer" />
         <Stack.Screen name="whiteboard" />
         <Stack.Screen name="bookmarks" />
+        {/* TEMPORARY (2026-09-20): testing whether an explicit declaration is
+            what this route is missing. `settings` works undeclared, so this is
+            a hypothesis under test, not a known fix. Remove or keep once the
+            [sos-probe] logs say which. */}
+        <Stack.Screen name="emergency-sos" />
         <Stack.Screen name="receipt-control" />
         <Stack.Screen name="chat-themes" />
         <Stack.Screen name="chat-wallpaper" />

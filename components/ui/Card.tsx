@@ -4,8 +4,10 @@
 
 import React from 'react';
 import { View, TouchableOpacity, StyleSheet, type ViewStyle, type StyleProp } from 'react-native';
+import { LinearGradient } from 'expo-linear-gradient';
 import { RADIUS, SPACING, ELEVATION } from '../../constants/theme';
-import { useColors } from '../../lib/theme';
+import { glassShadow, lipGradient, lipPeak } from '../../constants/glass';
+import { useColors, useTheme } from '../../lib/theme';
 
 export interface CardProps {
   children: React.ReactNode;
@@ -16,21 +18,35 @@ export interface CardProps {
 
 export function Card({ children, onPress, padded = true, style }: CardProps) {
   const c = useColors();
+  const { scheme } = useTheme();
   const content = (
-    <View style={[styles.card, { backgroundColor: c.glassSoft, borderColor: c.glassStroke }, padded && styles.padded, style]}>
+    <View style={[
+      styles.card,
+      scheme === 'light' ? glassShadow('card', scheme) : ELEVATION.sm,
+      { backgroundColor: c.glassSoft, borderColor: c.glassStroke, borderWidth: scheme === 'light' ? 1 : StyleSheet.hairlineWidth },
+      padded && styles.padded,
+      style,
+    ]}>
       {children}
+      <LinearGradient
+        pointerEvents="none"
+        colors={lipGradient(lipPeak('card', scheme))}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 0 }}
+        style={styles.lip}
+      />
     </View>
   );
-  // (shadow lives on the card style below)
   if (onPress) {
-    return <TouchableOpacity onPress={onPress} activeOpacity={0.85}>{content}</TouchableOpacity>;
+    return <TouchableOpacity accessibilityRole="button" onPress={onPress} activeOpacity={0.85}>{content}</TouchableOpacity>;
   }
   return content;
 }
 
 const styles = StyleSheet.create({
-  card: { borderRadius: RADIUS.xl, borderWidth: StyleSheet.hairlineWidth, ...ELEVATION.sm, shadowColor: '#000' },
+  card: { borderRadius: RADIUS.xl, borderWidth: StyleSheet.hairlineWidth },
   padded: { padding: SPACING.lg },
+  lip: { position: 'absolute', top: 0, left: RADIUS.xl, right: RADIUS.xl, height: 1 },
 });
 
 export default Card;

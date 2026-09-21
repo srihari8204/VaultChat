@@ -9,9 +9,9 @@
 import { readFileSync } from 'fs';
 import { join } from 'path';
 import { fanFor,
-  metrics, seatSpots, pileTop, actionBarWidth, seatAvatar, seatHasDetail, SEAT_CHROME_H, SEAT_CHROME_BASE, handWidthAt, secondsLeft, ranked, activeCount,
+  metrics, seatSpots, pileTop, actionBarWidth, seatAvatar, seatHasDetail, seatContent, SEAT_CHROME_H, SEAT_CHROME_BASE, handWidthAt, secondsLeft, ranked, activeCount,
   allowsBots, newPrivateCode, normalizeCode, CARD_RATIO, CARD_MIN, CARD_COMFORT, filterBySeats, pickTable,
-  tableKind, filterByKind,
+  tableKind, filterByKind, shiftDropTargets,
   type RummyPlayer, type TableInfo,
 } from './rummyTable';
 
@@ -24,6 +24,7 @@ let failures = 0;
  * so these are the widths that matter.
  */
 const VIEWPORTS: [number, number][] = [
+  [400, 240], [480, 280], [600, 300],
   [568, 320], [640, 360], [732, 369], [800, 360], [820, 369],
   [844, 390], [914, 412], [1024, 768], [2264, 1080],
 ];
@@ -173,10 +174,11 @@ check('the hand never needs more width than the screen has', !overflowed, overfl
   }
   check('the gutters and the score panel are one decision', !halfDressed, halfDressed);
 
-  // The case that actually shipped broken, pinned by name.
+  // Phone landscape keeps the full table and bigger cards; the side panels are
+  // a tablet luxury now, because they steal width from the hand.
   const honor = metrics({ width: 732, height: 369 }, { top: 0, bottom: 0, left: 0, right: 0 });
-  check('the Honor at its real 732dp viewport gets the full layout',
-    honor.sidePanels && honor.scoreW > 0, `card ${honor.cardW}, score ${honor.scoreW}`);
+  check('the Honor at its real 732dp viewport keeps the table full-width',
+    !honor.sidePanels && honor.scoreW === 0 && honor.cardW >= 45, `card ${honor.cardW}, score ${honor.scoreW}`);
 }
 check('table + hand + actions + status never exceed the safe height', !squashed, squashed);
 check('cards stay legible on the smallest screen', worstCard >= 32, `smallest card ${worstCard}px`);
@@ -203,13 +205,9 @@ check('cards stay legible on the smallest screen', worstCard >= 32, `smallest ca
   let collided = '';
   let offEdge = '';
   let underHeader = '';
-  // 1..5 opponents = a 2..6 player table. LANDSCAPE widths: rummy locks
-  // landscape for the whole screen, and the ring is only collision-free above
-  // tableW 372 — below that the width clamp pins capsules to their 72dp floor
-  // faster than the spacing shrinks. The narrowest real landscape viewport is
-  // about 480dp, so the floor is never reached in practice; it is documented on
-  // seatSpots rather than defended here.
-  for (const tableW of [420, 568, 640, 844, 1024, 1540]) {
+  // 1..5 opponents = a 2..6 player table. Include narrow split-screen widths:
+  // live container resizing must pack seats even below the preferred width.
+  for (const tableW of [280, 320, 360, 420, 568, 640, 844, 1024, 1540]) {
     for (const tableH of [120, 155, 189, 543]) {
       for (let n = 1; n <= 5; n++) {
         const spots = seatSpots(n, tableW, tableH, HEADER);
@@ -268,6 +266,20 @@ check('cards stay legible on the smallest screen', worstCard >= 32, `smallest ca
     }
   }
   check('a seat is always tall enough for what is drawn in it', !tooSmall, tooSmall);
+
+  let scaledOverflow = '';
+  for (const [w, h] of [...VIEWPORTS, [320, 480], [480, 280], [600, 300]]) {
+    const m = metrics({ width: w, height: h }, ZERO_INSETS);
+    for (const scale of [1, 1.25, 1.5, 2, 2.5]) {
+      for (const sp of seatSpots(5, m.ovalW, m.ovalH, 6)) {
+        const content = seatContent(sp.h, scale);
+        if (content.contentH > sp.h + 0.5 || content.avatar < 0) {
+          scaledOverflow = `${w}x${h}, font ${scale}: ${content.contentH} in ${sp.h}`;
+        }
+      }
+    }
+  }
+  check('six-player seat portraits adapt to large text and resized containers', !scaledOverflow, scaledOverflow);
 
   // ...and wide enough that a name is a name. The old row layout left the name
   // `w - 57` after the avatar, the gap and the status dot had taken their cut —
@@ -586,6 +598,16 @@ console.log('\nPicking a real table\n');
   check('no tables at all is null, not a throw', pickTable([], 'auto') === null);
   check('null is null, not a throw', pickTable(null, 'auto') === null);
   check('every table full is null', pickTable([T('f', 6)], 'auto') === null);
+}
+
+{
+  const targets = [{ x: 100, y: 200, w: 80, h: 50 }, { x: 200, y: 200, w: 80, h: 50 }];
+  const hit = (x: number, y: number) => targets.findIndex(r => x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h);
+  shiftDropTargets(targets, -100, -40);
+  check('scrolling both axes keeps a drop on the visible second group', hit(157, 180) === 1);
+  check('the old group location is no longer an active target', hit(257, 220) === -1);
+  shiftDropTargets(targets, 100, 40);
+  check('scrolling back restores the original hit targets', hit(157, 220) === 0 && hit(257, 220) === 1);
 }
 
 console.log(failures ? `\n  ${failures} FAILED\n` : '\n  all rummy table checks passed\n');

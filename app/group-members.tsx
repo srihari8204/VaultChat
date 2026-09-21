@@ -21,12 +21,14 @@
 
 import React, { useCallback, useMemo, useState } from 'react';
 import {
-  View, Text, StyleSheet, TouchableOpacity, ScrollView, Alert,
+  View, StyleSheet, TouchableOpacity, ScrollView, Alert,
   ActivityIndicator, Modal, Image, Pressable,
 } from 'react-native';
 import { Stack, useLocalSearchParams, useFocusEffect, router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../lib/theme';
+import { AuroraBackground } from '../components/ui/AuroraBackground';
+import { AppText as Text } from '../components/ui/Text';
 import { brandAlpha } from '../constants/theme';
 import {
   getChat, setMemberRole, removeChatMember, transferOwnership, setApprovalMode,
@@ -237,6 +239,7 @@ export default function GroupMembersScreen() {
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.bg }}>
+      <AuroraBackground variant="chat" />
       <Stack.Screen options={{
         headerShown: true, title: 'Members', headerTitleAlign: 'center',
         headerStyle: { backgroundColor: colors.bg }, headerTintColor: colors.text, headerShadowVisible: false,

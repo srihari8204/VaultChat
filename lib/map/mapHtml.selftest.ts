@@ -49,12 +49,24 @@ function templatesIn(src: string): string[] {
 const STUB: Record<string, unknown> = {
   JSON,
   MAPLIBRE_CSS_B64: '', MAPLIBRE_JS_B64: '', LEAFLET_CSS_B64: '', LEAFLET_JS_B64: '', ROUTING_JS_B64: '',
-  MARKER_CSS: () => '',
+  MARKER_CSS: () => '', light: true,
   ATTRIBUTION: '(c) OpenStreetMap contributors',
   styleUrl: 'https://tiles.example.org/styles/x',
   tileUrl: '', bg: '#0d0f14', accent: '#7c5cff', selfColor: '#7c5cff', svKey: '',
   buildings: { id: 'building-3d', type: 'fill-extrusion' },
 };
+
+// Evaluate the actual shared marker CSS, including its day/night branch.
+const familySource = readFileSync(PAGES[1], 'utf8');
+const cssStart = familySource.indexOf('=> `', familySource.indexOf('const MARKER_CSS')) + 4;
+const cssEnd = familySource.indexOf('`;', cssStart);
+A(cssStart > 3 && cssEnd > cssStart, 'shared marker CSS is available');
+const markerCss = new Function('selfColor', 'light', 'return `' + familySource.slice(cssStart, cssEnd) + '`;');
+A(markerCss('#1552E0', true).includes('.mk:not(.self),.cl:not(.self){color:#070A18}'),
+  'light member initials and cluster counts use dark ink, self markers retain white');
+A(!markerCss('#1552E0', false).includes('#070A18'), 'dark marker CSS remains unchanged');
+A((familySource.match(/isCl\?\('cl'\+\(m\.self\?' self':''\)\)/g) ?? []).length === 2,
+  'both map engines identify self-containing clusters for correct light ink');
 
 let parsed = 0;
 

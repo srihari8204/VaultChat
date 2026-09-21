@@ -12,104 +12,107 @@
 import React, { useEffect, useState, useMemo } from 'react';
 import {
   View,
-  Text,
   StyleSheet,
   BackHandler,
   ScrollView,
   TouchableOpacity,
   Alert,
 } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams } from 'expo-router';
 import { ThreatDetail } from '../services/securityService';
 import type { Palette } from '../constants/theme';
 import { useColors } from '../lib/theme';
 import { HEADER_TOP } from '../constants/layout';
+import { AppText as Text, AuroraBackground } from '../components/ui';
 
 // Threat type to human-readable label mapping
-const THREAT_LABELS: Record<string, { label: string; icon: string; desc: string }> = {
+type IoniconName = React.ComponentProps<typeof Ionicons>['name'];
+
+const THREAT_LABELS: Record<string, { label: string; icon: IoniconName; desc: string }> = {
   ROOT_DETECTED: {
     label: 'Device Rooted',
-    icon: '⚠️',
+    icon: 'warning-outline',
     desc: 'Root access was detected on this device.',
   },
   JAILBREAK_DETECTED: {
     label: 'Device Jailbroken',
-    icon: '⚠️',
+    icon: 'warning-outline',
     desc: 'Jailbreak indicators were found on this device.',
   },
   MAGISK_DETECTED: {
     label: 'Magisk Detected',
-    icon: '⚠️',
+    icon: 'warning-outline',
     desc: 'Magisk root manager found on this device.',
   },
   SU_BINARY_FOUND: {
     label: 'su Binary Found',
-    icon: '⚠️',
+    icon: 'warning-outline',
     desc: 'Superuser binary found in system paths.',
   },
   TEST_KEYS_BUILD: {
     label: 'Modified ROM',
-    icon: '⚠️',
+    icon: 'warning-outline',
     desc: 'This device is running a custom ROM compiled with test keys.',
   },
   FRIDA_PORT_27042: {
     label: 'Frida Detected',
-    icon: '🔍',
+    icon: 'search-outline',
     desc: 'A Frida instrumentation server was detected on port 27042.',
   },
   FRIDA_DETECTED: {
     label: 'Instrumentation Detected',
-    icon: '🔍',
+    icon: 'search-outline',
     desc: 'Runtime instrumentation tooling (Frida) is active against this app.',
   },
   HOOK_FRAMEWORK: {
     label: 'Hooking Framework',
-    icon: '🪝',
+    icon: 'git-branch-outline',
     desc: 'A code-hooking framework (Xposed / LSPosed / Zygisk) is present.',
   },
   DEBUGGER_ATTACHED: {
     label: 'Debugger Attached',
-    icon: '🐞',
+    icon: 'bug-outline',
     desc: 'A debugger is attached to crazzychat and can read app memory.',
   },
   APK_RESIGNED: {
     label: 'Unofficial Build',
-    icon: '📦',
+    icon: 'cube-outline',
     desc: 'This build’s signing certificate is not the one crazzychat ships.',
   },
   ACCESSIBILITY_RISK: {
     label: 'Accessibility Service',
-    icon: '👁️',
+    icon: 'eye-outline',
     desc: 'An accessibility service we do not recognise is enabled. These can read screen content.',
   },
   DEV_OPTIONS_ON: {
     label: 'Developer Options',
-    icon: '🔧',
+    icon: 'construct-outline',
     desc: 'Developer options are enabled on this device.',
   },
   USB_DEBUGGING_ON: {
     label: 'USB Debugging',
-    icon: '🔌',
+    icon: 'hardware-chip-outline',
     desc: 'USB debugging is enabled. This allows external access to your device.',
   },
   PIN_BRUTEFORCE: {
     label: 'Repeated PIN Failures',
-    icon: '🔢',
+    icon: 'keypad-outline',
     desc: 'Many consecutive wrong PIN entries were recorded on this device.',
   },
   FRIDA_SERVER_RESPONSE: {
     label: 'Frida Active',
-    icon: '🔍',
+    icon: 'search-outline',
     desc: 'Frida server is actively responding to instrumentation requests.',
   },
   EMULATOR_DETECTED: {
     label: 'Emulator',
-    icon: '📱',
+    icon: 'phone-portrait-outline',
     desc: 'crazzychat is not permitted to run on emulators.',
   },
   ADB_ENABLED: {
     label: 'ADB Enabled',
-    icon: '🔌',
+    icon: 'hardware-chip-outline',
     desc: 'Android Debug Bridge is active. This allows external access to your device.',
   },
 };
@@ -154,6 +157,7 @@ export default function BlockedScreen() {
 
   return (
     <View style={styles.container}>
+      <AuroraBackground />
       {/* Top warning bar */}
       <View style={styles.topBar}>
         <Text style={styles.topBarText}>SECURITY ALERT</Text>
@@ -165,7 +169,7 @@ export default function BlockedScreen() {
       >
         {/* Shield icon */}
         <View style={styles.iconWrap}>
-          <Text style={styles.shieldIcon}>🛡️</Text>
+          <Ionicons name="shield" size={42} color={c.danger} />
         </View>
 
         <Text style={styles.title}>crazzychat Blocked</Text>
@@ -182,13 +186,13 @@ export default function BlockedScreen() {
             {threats.map((t, i) => {
               const info = THREAT_LABELS[t.type] || {
                 label: t.type,
-                icon: '⚠️',
+                icon: 'warning-outline' as IoniconName,
                 desc: t.detail,
               };
               return (
                 <View key={i} style={styles.threatCard}>
                   <View style={styles.threatHeader}>
-                    <Text style={styles.threatIcon}>{info.icon}</Text>
+                    <Ionicons name={info.icon} size={18} color={c.danger} />
                     <Text style={styles.threatLabel}>{info.label}</Text>
                   </View>
                   <Text style={styles.threatDesc}>{info.desc}</Text>
@@ -243,7 +247,7 @@ export default function BlockedScreen() {
         </View>
 
         {/* Support button */}
-        <TouchableOpacity style={styles.supportBtn} onPress={handleContactSupport}>
+        <TouchableOpacity accessibilityRole="button" style={styles.supportBtn} onPress={handleContactSupport}>
           <Text style={styles.supportBtnText}>Contact Support</Text>
         </TouchableOpacity>
 
@@ -258,10 +262,10 @@ export default function BlockedScreen() {
 const makeStyles = (c: Palette) => StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: c.glassSoft,
+    backgroundColor: 'transparent',
   },
   topBar: {
-    backgroundColor: '#FF4D6D',
+    backgroundColor: c.danger,
     paddingTop: HEADER_TOP,
     paddingBottom: 10,
     alignItems: 'center',
@@ -269,7 +273,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   topBarText: {
     fontSize: 13,
     fontWeight: 'bold',
-    color: c.text,
+    color: '#FFFFFF',
     letterSpacing: 2,
   },
   scroll: {
@@ -283,14 +287,11 @@ const makeStyles = (c: Palette) => StyleSheet.create({
     borderRadius: 44,
     backgroundColor: 'rgba(239,68,68,0.13)',
     borderWidth: 2,
-    borderColor: '#FF4D6D',
+    borderColor: c.danger,
     justifyContent: 'center',
     alignItems: 'center',
     marginTop: 24,
     marginBottom: 16,
-  },
-  shieldIcon: {
-    fontSize: 40,
   },
   title: {
     fontSize: 24,
@@ -314,7 +315,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   threatListTitle: {
     fontSize: 13,
     fontWeight: 'bold',
-    color: '#FF4D6D',
+    color: c.danger,
     marginBottom: 10,
     textTransform: 'uppercase',
     letterSpacing: 1,
@@ -322,7 +323,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   threatCard: {
     backgroundColor: 'rgba(239,68,68,0.10)',
     borderWidth: 0.5,
-    borderColor: '#FF4D6D44',
+    borderColor: c.danger,
     borderRadius: 10,
     padding: 14,
     marginBottom: 8,
@@ -333,17 +334,14 @@ const makeStyles = (c: Palette) => StyleSheet.create({
     marginBottom: 6,
     gap: 8,
   },
-  threatIcon: {
-    fontSize: 18,
-  },
   threatLabel: {
     fontSize: 14,
     fontWeight: 'bold',
-    color: '#FF4D6D',
+    color: c.danger,
   },
   threatDesc: {
     fontSize: 13,
-    color: c.textFaint,
+    color: c.textDim,
     lineHeight: 20,
     marginBottom: 4,
   },
@@ -354,7 +352,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   },
   infoBox: {
     width: '100%',
-    backgroundColor: c.bg,
+    backgroundColor: c.glass,
     borderRadius: 12,
     borderWidth: 0.5,
     borderColor: c.glassStroke,
@@ -363,7 +361,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   },
   stepsBox: {
     width: '100%',
-    backgroundColor: c.bg,
+    backgroundColor: c.glass,
     borderRadius: 12,
     borderWidth: 0.5,
     borderColor: c.glassStroke,
@@ -373,7 +371,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   infoTitle: {
     fontSize: 13,
     fontWeight: 'bold',
-    color: '#00D4AA',
+    color: c.success,
     marginBottom: 10,
     textTransform: 'uppercase',
     letterSpacing: 0.5,
@@ -396,7 +394,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
     borderRadius: 11,
     backgroundColor: 'rgba(34,197,94,0.14)',
     borderWidth: 1,
-    borderColor: '#00D4AA',
+    borderColor: c.success,
     justifyContent: 'center',
     alignItems: 'center',
     marginTop: 1,
@@ -404,16 +402,16 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   stepNumText: {
     fontSize: 11,
     fontWeight: 'bold',
-    color: '#00D4AA',
+    color: c.success,
   },
   stepText: {
     flex: 1,
     fontSize: 13,
-    color: c.textFaint,
+    color: c.textDim,
     lineHeight: 20,
   },
   supportBtn: {
-    backgroundColor: c.surfaceSolid,
+    backgroundColor: c.glass,
     borderWidth: 1,
     borderColor: c.glassStroke,
     borderRadius: 10,

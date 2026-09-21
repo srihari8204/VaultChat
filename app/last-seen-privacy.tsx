@@ -7,13 +7,13 @@
 // in AsyncStorage that nothing read or enforced — those are gone.
 
 import React, { useState, useEffect, useMemo } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, ScrollView, Platform, Alert, Switch, ActivityIndicator } from 'react-native';
+import { View, TouchableOpacity, StyleSheet, ScrollView, Alert, Switch, ActivityIndicator } from 'react-native';
 import { type Palette } from '../constants/theme';
 import { useTheme } from '../lib/theme';
 import { Stack, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { getSettings, updateSettings, type UserSettings } from '../lib/chatService';
-import { AuroraBackground } from '../components/ui';
+import { AppText as Text, AuroraBackground } from '../components/ui';
 import { HEADER_TOP } from '../constants/layout';
 
 // Was: StatusBar.currentHeight on Android, a hardcoded 44 elsewhere, read
@@ -70,7 +70,7 @@ export default function LastSeenPrivacyScreen() {
 
       <View style={s.header}>
         <View style={[s.headerRow, { marginTop: HEADER_TOP }]}>
-          <TouchableOpacity accessibilityRole="button" accessibilityLabel="Back" onPress={() => router.back()} hitSlop={16}>
+          <TouchableOpacity accessibilityRole="button" accessibilityLabel="Back" onPress={() => router.back()} hitSlop={16} style={s.backBtn}>
             <Ionicons name="arrow-back" size={24} color={colors.text} />
           </TouchableOpacity>
           <Text style={s.headerTitle}>Last Seen & Privacy</Text>
@@ -121,14 +121,15 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   root: { flex: 1, backgroundColor: 'transparent' },
   header: { paddingBottom: 16, paddingHorizontal: 20 },
   headerRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  backBtn: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center', borderRadius: 20 },
   headerTitle: { color: c.text, fontSize: 20, fontWeight: '700' },
   scroll: { flex: 1 },
   scrollContent: { padding: 16, paddingBottom: 40 },
 
-  infoCard: { flexDirection: 'row', alignItems: 'flex-start', backgroundColor: c.glassSoft, borderRadius: 10, padding: 12, marginBottom: 16, gap: 8 },
+  infoCard: { flexDirection: 'row', alignItems: 'flex-start', backgroundColor: c.glass, borderRadius: 14, padding: 12, marginBottom: 16, gap: 8, borderWidth: StyleSheet.hairlineWidth, borderColor: c.glassStroke },
   infoText: { color: c.textDim, fontSize: 13, flex: 1, lineHeight: 18 },
 
-  card: { backgroundColor: c.glassSoft, borderRadius: 16, padding: 20, marginBottom: 16, borderWidth: 1, borderColor: c.glassStroke },
+  card: { backgroundColor: c.glass, borderRadius: 16, padding: 20, marginBottom: 16, borderWidth: 1, borderColor: c.glassStroke },
   cardTitle: { color: c.text, fontSize: 17, fontWeight: '700', marginLeft: 10 },
   cardInfo: { color: c.textDim, fontSize: 13, lineHeight: 18, marginBottom: 12 },
   sectionHeader: { flexDirection: 'row', alignItems: 'center', marginBottom: 12 },

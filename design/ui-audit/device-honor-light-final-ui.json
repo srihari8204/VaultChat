@@ -1,0 +1,348 @@
+{
+  "device": "AWJDVB4702008616",
+  "model": "Honor",
+  "apkSha256": "CB8B93134EB614558AB5F123585882928591296D8EFAA7E344589A4C9856443F",
+  "apkProvenance": "Parent verified installed base APK SHA256 before this sweep",
+  "checkedAt": "2026-09-21T14:50:13.2885994+05:30",
+  "method": "Fresh Android UIAutomator hierarchies, safe tab taps, and read-only route launches; verify-delivery.ps1 exited 0",
+  "initialUnlocked": true,
+  "inputPermissionConfirmed": true,
+  "checks": {
+    "routePresentationChecks": 4,
+    "routeTitleAndBackPasses": 4,
+    "crashDialogs": 0,
+    "tabTapChecks": 10,
+    "appearanceChangesConfirmed": [
+      "Light",
+      "Dark"
+    ],
+    "tabTapSelectedPasses": 10,
+    "topAndBottomOrder": "Top Search, Alerts, Temporary chat, Contacts, Broadcast; bottom Chats, Status, raised Apps, Calls, Profile; all hierarchy nodes found in both appearances"
+  },
+  "notVerified": [
+    "Pixel-level glass/color/contrast: UI hierarchy does not expose painted colors; FLAG_SECURE preserved",
+    "Authentication/OTP/MPIN/setup: existing account preserved; no logout or submission",
+    "Full gameplay: only Games hub presentation opened",
+    "Landscape and large-font matrix: bounded sweep used original portrait font scale",
+    "Every screen and all feature interactions: not claimed"
+  ],
+  "restoration": {
+    "autoRotation": "1",
+    "kind": "restored",
+    "device": "AWJDVB4702008616",
+    "appearance": "Dark",
+    "fontScale": "1.0",
+    "rotation": "0"
+  },
+  "finalAppState": "Chats open; original Dark appearance, font scale 1.0, accelerometer rotation 1, user rotation 0 restored",
+  "records": [
+    {
+      "autoRotation": "1",
+      "kind": "initial-settings",
+      "device": "AWJDVB4702008616",
+      "appearance": "Dark",
+      "fontScale": "1.0",
+      "rotation": "0"
+    },
+    {
+      "confirmed": true,
+      "theme": "Light",
+      "kind": "appearance",
+      "device": "AWJDVB4702008616"
+    },
+    {
+      "top": [
+        {
+          "found": true,
+          "action": "Search",
+          "bounds": [
+            "[427,152][557,282]"
+          ]
+        },
+        {
+          "found": true,
+          "action": "Alerts",
+          "bounds": [
+            "[570,152][700,282]"
+          ]
+        },
+        {
+          "found": true,
+          "action": "Start a temporary chat",
+          "bounds": [
+            "[713,152][843,282]"
+          ]
+        },
+        {
+          "found": true,
+          "action": "Contacts",
+          "bounds": [
+            "[856,152][986,282]"
+          ]
+        },
+        {
+          "found": true,
+          "action": "New broadcast",
+          "bounds": [
+            "[999,152][1129,282]"
+          ]
+        }
+      ],
+      "device": "AWJDVB4702008616",
+      "kind": "icon-slots",
+      "phase": "light-portrait",
+      "bottom": [
+        {
+          "found": true,
+          "name": "Chats",
+          "bounds": "[0,2404][240,2567]"
+        },
+        {
+          "found": true,
+          "name": "Status",
+          "bounds": "[240,2404][480,2567]"
+        },
+        {
+          "found": true,
+          "name": "Apps",
+          "bounds": "[480,2300][720,2567]"
+        },
+        {
+          "found": true,
+          "name": "Calls",
+          "bounds": "[720,2404][960,2567]"
+        },
+        {
+          "found": true,
+          "name": "Profile",
+          "bounds": "[960,2404][1200,2567]"
+        }
+      ]
+    },
+    {
+      "crashDialog": false,
+      "kind": "tab-tap",
+      "device": "AWJDVB4702008616",
+      "phase": "light-portrait",
+      "tab": "Chats",
+      "selected": true
+    },
+    {
+      "crashDialog": false,
+      "kind": "tab-tap",
+      "device": "AWJDVB4702008616",
+      "phase": "light-portrait",
+      "tab": "Status",
+      "selected": true
+    },
+    {
+      "crashDialog": false,
+      "kind": "tab-tap",
+      "device": "AWJDVB4702008616",
+      "phase": "light-portrait",
+      "tab": "Apps",
+      "selected": true
+    },
+    {
+      "crashDialog": false,
+      "kind": "tab-tap",
+      "device": "AWJDVB4702008616",
+      "phase": "light-portrait",
+      "tab": "Calls",
+      "selected": true
+    },
+    {
+      "crashDialog": false,
+      "kind": "tab-tap",
+      "device": "AWJDVB4702008616",
+      "phase": "light-portrait",
+      "tab": "Profile",
+      "selected": true
+    },
+    {
+      "headerBackFound": true,
+      "scrollContainers": 1,
+      "kind": "route",
+      "route": "lock-history",
+      "phase": "light-portrait",
+      "device": "AWJDVB4702008616",
+      "crashDialog": false,
+      "titleBounds": [
+        "[411,173][790,260]"
+      ],
+      "titleFound": true,
+      "frame": "[0,0][1200,2664]"
+    },
+    {
+      "headerBackFound": true,
+      "scrollContainers": 1,
+      "kind": "route",
+      "route": "games",
+      "phase": "light-portrait",
+      "device": "AWJDVB4702008616",
+      "crashDialog": false,
+      "titleBounds": [
+        "[208,173][979,261]"
+      ],
+      "titleFound": true,
+      "frame": "[0,0][1200,2664]"
+    },
+    {
+      "confirmed": true,
+      "theme": "Dark",
+      "kind": "appearance",
+      "device": "AWJDVB4702008616"
+    },
+    {
+      "top": [
+        {
+          "found": true,
+          "action": "Search",
+          "bounds": [
+            "[427,152][557,282]"
+          ]
+        },
+        {
+          "found": true,
+          "action": "Alerts",
+          "bounds": [
+            "[570,152][700,282]"
+          ]
+        },
+        {
+          "found": true,
+          "action": "Start a temporary chat",
+          "bounds": [
+            "[713,152][843,282]"
+          ]
+        },
+        {
+          "found": true,
+          "action": "Contacts",
+          "bounds": [
+            "[856,152][986,282]"
+          ]
+        },
+        {
+          "found": true,
+          "action": "New broadcast",
+          "bounds": [
+            "[999,152][1129,282]"
+          ]
+        }
+      ],
+      "device": "AWJDVB4702008616",
+      "kind": "icon-slots",
+      "phase": "dark-portrait",
+      "bottom": [
+        {
+          "found": true,
+          "name": "Chats",
+          "bounds": "[0,2404][240,2567]"
+        },
+        {
+          "found": true,
+          "name": "Status",
+          "bounds": "[240,2404][480,2567]"
+        },
+        {
+          "found": true,
+          "name": "Apps",
+          "bounds": "[480,2300][720,2567]"
+        },
+        {
+          "found": true,
+          "name": "Calls",
+          "bounds": "[720,2404][960,2567]"
+        },
+        {
+          "found": true,
+          "name": "Profile",
+          "bounds": "[960,2404][1200,2567]"
+        }
+      ]
+    },
+    {
+      "crashDialog": false,
+      "kind": "tab-tap",
+      "device": "AWJDVB4702008616",
+      "phase": "dark-portrait",
+      "tab": "Chats",
+      "selected": true
+    },
+    {
+      "crashDialog": false,
+      "kind": "tab-tap",
+      "device": "AWJDVB4702008616",
+      "phase": "dark-portrait",
+      "tab": "Status",
+      "selected": true
+    },
+    {
+      "crashDialog": false,
+      "kind": "tab-tap",
+      "device": "AWJDVB4702008616",
+      "phase": "dark-portrait",
+      "tab": "Apps",
+      "selected": true
+    },
+    {
+      "crashDialog": false,
+      "kind": "tab-tap",
+      "device": "AWJDVB4702008616",
+      "phase": "dark-portrait",
+      "tab": "Calls",
+      "selected": true
+    },
+    {
+      "crashDialog": false,
+      "kind": "tab-tap",
+      "device": "AWJDVB4702008616",
+      "phase": "dark-portrait",
+      "tab": "Profile",
+      "selected": true
+    },
+    {
+      "headerBackFound": true,
+      "scrollContainers": 1,
+      "kind": "route",
+      "route": "lock-history",
+      "phase": "dark-portrait",
+      "device": "AWJDVB4702008616",
+      "crashDialog": false,
+      "titleBounds": [
+        "[411,173][790,260]"
+      ],
+      "titleFound": true,
+      "frame": "[0,0][1200,2664]"
+    },
+    {
+      "headerBackFound": true,
+      "scrollContainers": 1,
+      "kind": "route",
+      "route": "games",
+      "phase": "dark-portrait",
+      "device": "AWJDVB4702008616",
+      "crashDialog": false,
+      "titleBounds": [
+        "[208,173][661,261]"
+      ],
+      "titleFound": true,
+      "frame": "[0,0][1200,2664]"
+    },
+    {
+      "confirmed": true,
+      "theme": "Dark",
+      "kind": "appearance",
+      "device": "AWJDVB4702008616"
+    },
+    {
+      "autoRotation": "1",
+      "kind": "restored",
+      "device": "AWJDVB4702008616",
+      "appearance": "Dark",
+      "fontScale": "1.0",
+      "rotation": "0"
+    }
+  ]
+}

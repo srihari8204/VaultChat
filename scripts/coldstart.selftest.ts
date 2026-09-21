@@ -1,6 +1,6 @@
 // scripts/coldstart.selftest.ts — run: npx tsx scripts/coldstart.selftest.ts
 //
-// Covers the PARSING half of scripts/coldstart.js, and only that half.
+// Covers the PARSING half of scripts/coldstart.ts, and only that half.
 //
 // SCOPE, STATED PLAINLY. No device is touched here and none is needed. What is
 // asserted is that the parsers survive the output real handsets actually
@@ -19,7 +19,7 @@
 // uid fixture below is that exact dumpsys text. A parser that regresses to
 // first-match-wins fails here instead of on someone's desk.
 
-const { parseDevices, parseUid, parseLauncher, parseStart, isCold, median } = require('./coldstart.js');
+const { parseDevices, parseUid, parseLauncher, parseStart, isCold, median } = require('./coldstart.ts');
 
 let failed = 0;
 function A(ok: boolean, what: string): void {

@@ -55,14 +55,14 @@ export function GlassView({
   kind = 'chrome',
   intensity,
   bordered = true,
-  highlight = false,
+  highlight = true,
   soft = false,
   blurDisabled = false,
 }: GlassViewProps) {
   const c = useColors();
   const { scheme } = useTheme();
   const recipe = GLASS[kind];
-  const edge = bordered ? { borderWidth: StyleSheet.hairlineWidth, borderColor: c.glassStroke } : null;
+  const edge = bordered ? { borderWidth: scheme === 'light' ? 1 : StyleSheet.hairlineWidth, borderColor: c.glassStroke } : null;
   const lip = highlight
     ? <Lip radius={radiusOf(style) ?? recipe.radius} peak={lipPeak(kind, scheme)} />
     : null;
@@ -70,7 +70,7 @@ export function GlassView({
   if (blurDisabled) {
     // Opaque fallback: the same surface colour the blur would average to.
     return (
-      <View style={[{ overflow: 'hidden', backgroundColor: c.surfaceSolid }, edge, style]}>
+      <View style={[{ overflow: 'hidden', borderRadius: recipe.radius, backgroundColor: c.surfaceSolid }, edge, style]}>
         {children}
         {lip}
       </View>
@@ -82,7 +82,7 @@ export function GlassView({
       intensity={intensity ?? recipe.intensity}
       tint={scheme === 'light' ? 'light' : 'dark'}
       experimentalBlurMethod={Platform.OS === 'android' ? 'dimezisBlurView' : undefined}
-      style={[{ overflow: 'hidden', backgroundColor: soft ? c.glassSoft : c.glass }, edge, style]}
+      style={[{ overflow: 'hidden', borderRadius: recipe.radius, backgroundColor: soft ? c.glassSoft : c.glass }, edge, style]}
     >
       {children}
       {lip}

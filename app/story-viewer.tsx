@@ -382,7 +382,7 @@ function StoryViewerScreen() {
   if (error) {
     return (
       <View style={[S.screen, S.center]}>
-      // statusbar-exempt: a story is full-bleed media on #000 at every theme, so light glyphs are correct here regardless of the palette.
+        {/* statusbar-exempt: a story is full-bleed media on #000 at every theme, so light glyphs are correct here regardless of the palette. */}
         <StatusBar barStyle="light-content" />
         <Text style={S.errorTxt}>{error}</Text>
         <TouchableOpacity onPress={close} style={S.closeBtn}>
@@ -536,7 +536,7 @@ function StoryViewerScreen() {
           <View style={{ flex: 1 }} />
           {isMyStory && (
             <TouchableOpacity onPress={openViewers} hitSlop={8} style={S.iconBtn} accessibilityLabel="Who has seen this">
-              <Ionicons name="eye-outline" size={20} color={colors.text} />
+              <Ionicons name="eye-outline" size={20} color="#FFFFFF" />
             </TouchableOpacity>
           )}
           {isMyStory && (
@@ -545,7 +545,7 @@ function StoryViewerScreen() {
             </TouchableOpacity>
           )}
           <TouchableOpacity onPress={close} hitSlop={8} style={S.iconBtn} accessibilityLabel="Close">
-            <Ionicons name="close" size={22} color={colors.text} />
+            <Ionicons name="close" size={22} color="#FFFFFF" />
           </TouchableOpacity>
         </View>
       </View>
@@ -618,18 +618,18 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   // Full-bleed, but BELOW topBar in z-order (declared earlier in the tree), so
   // the progress segments and close button stay reachable over a locked story.
   gateLayer:     { ...StyleSheet.absoluteFillObject, backgroundColor: '#000' },
-  topBar:        { position: 'absolute', top: 56, left: 12, right: 12, gap: 8 },
+  topBar:        { position: 'absolute', top: 56, left: 12, right: 12, gap: 8, padding: 10, borderRadius: 16, backgroundColor: 'rgba(0,0,0,0.6)' },
   progressRow:   { flexDirection: 'row', gap: 3 },
   progressTrack: { flex: 1, height: 2, backgroundColor: 'rgba(255,255,255,0.25)', borderRadius: 1, overflow: 'hidden' },
   progressFill:  { height: 2, backgroundColor: '#fff', borderRadius: 1 },
   authorRow:     { flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 6 },
-  authorName:    { color: c.text, fontSize: 15, fontWeight: '700' },
+  authorName:    { flexShrink: 1, color: '#FFFFFF', fontSize: 15, fontWeight: '700' },
   authorTime:    { color: 'rgba(255,255,255,0.7)', fontSize: 12 },
-  iconBtn:       { width: 32, height: 32, alignItems: 'center', justifyContent: 'center' },
-  iconBtnTxt:    { color: c.text, fontSize: 18 },
+  iconBtn:       { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
+  iconBtnTxt:    { color: '#FFFFFF', fontSize: 18 },
 
   captionBar:    { position: 'absolute', left: 16, right: 16, bottom: 40, backgroundColor: 'rgba(0,0,0,0.55)', padding: 12, borderRadius: 12 },
-  captionTxt:    { color: c.text, fontSize: 14, lineHeight: 20 },
+  captionTxt:    { color: '#FFFFFF', fontSize: 14, lineHeight: 20 },
 
   errorTxt:      { color: c.text, fontSize: 14, marginBottom: 16 },
   closeBtn:      { backgroundColor: '#fff', paddingHorizontal: 20, paddingVertical: 10, borderRadius: 20 },
@@ -637,14 +637,14 @@ const makeStyles = (c: Palette) => StyleSheet.create({
 
   viewersBackdrop:  { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.55)', justifyContent: 'flex-end' },
   viewersSheet:     { backgroundColor: '#161A22', borderTopLeftRadius: 16, borderTopRightRadius: 16, padding: 16, paddingBottom: 32, maxHeight: '70%' },
-  viewersTitle:     { color: c.text, fontSize: 16, fontWeight: '700', marginBottom: 12 },
-  viewersEmpty:     { color: c.textDim, fontSize: 13, textAlign: 'center', paddingVertical: 24 },
-  viewerRow:        { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 8, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.border },
+  viewersTitle:     { color: '#FFFFFF', fontSize: 16, fontWeight: '700', marginBottom: 12 },
+  viewersEmpty:     { color: 'rgba(255,255,255,0.68)', fontSize: 13, textAlign: 'center', paddingVertical: 24 },
+  viewerRow:        { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 8, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: 'rgba(255,255,255,0.12)' },
   viewerAvatar:     { width: 36, height: 36, borderRadius: 18, backgroundColor: '#6C63FF', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
   viewerAvatarImg:  { width: '100%', height: '100%' },
-  viewerAvatarTxt:  { color: c.text, fontWeight: '700' },
-  viewerName:       { color: c.text, fontSize: 14, flex: 1 },
-  viewerWhen:       { color: c.textDim, fontSize: 11 },
+  viewerAvatarTxt:  { color: '#FFFFFF', fontWeight: '700' },
+  viewerName:       { color: '#FFFFFF', fontSize: 14, flex: 1 },
+  viewerWhen:       { color: 'rgba(255,255,255,0.62)', fontSize: 11 },
 });
 
 // A render fault in a viewer used to take the WHOLE app down: these screens

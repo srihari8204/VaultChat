@@ -2,17 +2,18 @@
 // searches message CONTENT across all chats, entirely on-device against the
 // local plaintext cache (zero-knowledge — the server never sees the query).
 
-import { HEADER_TOP } from '../constants/layout';
+import { HEADER_TOP, SCREEN_BOTTOM } from '../constants/layout';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  ActivityIndicator, SectionList, StyleSheet, Text, TextInput, TouchableOpacity, View,
+  ActivityIndicator, SectionList, StyleSheet, TextInput, TouchableOpacity, View,
 } from 'react-native';
 import { type Palette } from '../constants/theme';
 import { useTheme } from '../lib/theme';
 import { getAccessToken } from '../lib/api';
 import { Avatar, AuroraBackground } from '../components/ui';
+import { AppText as Text } from '../components/ui/Text';
 import { attachmentUrl, listChats, chatTitle as chatDisplayName, type ChatSummary } from '../lib/chatService';
 import { searchAllMessages } from '../lib/localDb';
 import { setPendingJump } from '../lib/chatJump';
@@ -93,6 +94,7 @@ export default function SearchScreen() {
           <Ionicons name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
         <TextInput
+          accessibilityLabel="Search chats and messages"
           style={S.input}
           placeholder="Search chats and messages…"
           placeholderTextColor={colors.textDim}
@@ -114,8 +116,10 @@ export default function SearchScreen() {
       ) : (
         <SectionList
           sections={sections}
+          keyboardShouldPersistTaps="handled"
+          keyboardDismissMode="on-drag"
           keyExtractor={(item, i) => (item.id ?? '') + ':' + i}
-          contentContainerStyle={{ paddingBottom: 40 }}
+          contentContainerStyle={{ paddingBottom: SCREEN_BOTTOM + 16 }}
           renderSectionHeader={({ section }) => <Text numberOfLines={1} style={S.sectionLabel}>{section.title.toUpperCase()}</Text>}
           renderItem={({ item, section }) => {
             if (section.kind === 'chat') {
@@ -153,13 +157,13 @@ export default function SearchScreen() {
 const makeStyles = (c: Palette) => StyleSheet.create({
   screen: { flex: 1, backgroundColor: 'transparent' },
   header:     { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingTop: HEADER_TOP, paddingBottom: 12, gap: 8, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.glassStroke },
-  backBtn:    { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
-  input:      { flex: 1, color: c.text, backgroundColor: c.glassSoft, borderRadius: 22, paddingHorizontal: 16, paddingVertical: 10, fontSize: 15 },
+  backBtn:    { width: 44, height: 44, borderRadius: 16, backgroundColor: c.glassSoft, alignItems: 'center', justifyContent: 'center' },
+  input:      { flex: 1, minWidth: 0, minHeight: 48, color: c.text, backgroundColor: c.glassSoft, borderWidth: StyleSheet.hairlineWidth, borderColor: c.glassStroke, borderRadius: 20, paddingHorizontal: 16, paddingVertical: 12, fontSize: 16 },
   empty:      { alignItems: 'center', paddingTop: 64, paddingHorizontal: 32 },
   emptyTitle: { color: c.text, fontSize: 16, fontWeight: '700' },
   emptySub:   { color: c.textDim, fontSize: 13, marginTop: 6, textAlign: 'center' },
   sectionLabel: { color: c.textDim, fontSize: 12, fontWeight: '700', letterSpacing: 1, paddingHorizontal: 16, paddingTop: 14, paddingBottom: 4, backgroundColor: c.bg },
-  row:        { flexDirection: 'row', gap: 12, alignItems: 'center', paddingVertical: 11, paddingHorizontal: 16 },
-  rowTitle:   { color: c.text, fontSize: 15, fontWeight: '600' },
-  rowSub:     { color: c.textDim, fontSize: 12, marginTop: 2 },
+  row:        { flexDirection: 'row', gap: 12, alignItems: 'center', marginHorizontal: 16, marginBottom: 8, padding: 14, borderRadius: 20, backgroundColor: c.glassSoft, borderWidth: StyleSheet.hairlineWidth, borderColor: c.glassStroke },
+  rowTitle:   { color: c.text, fontSize: 16, fontWeight: '600' },
+  rowSub:     { color: c.textDim, fontSize: 13, lineHeight: 19, marginTop: 4 },
 });

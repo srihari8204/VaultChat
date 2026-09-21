@@ -25,6 +25,7 @@ import {
 } from '../../lib/chatService';
 import { registerPushToken } from '../../lib/push';
 import ConnectionBanner from '../../components/ConnectionBanner';
+import { ChatHeaderAction } from '../../components/chat/ChatHeaderAction';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { cloudBackupMeta } from '../../lib/cloudBackup';
 import { runScheduledBackupIfDue } from '../../lib/backupScheduler';
@@ -548,8 +549,8 @@ export default function ChatsScreen() {
           </View>
         </View>
       ) : (
-        <View style={S.header}>
-          <Text style={S.title}>Chats</Text>
+        <View style={[S.header, winW < 360 && { paddingHorizontal: 12 }]}>
+          <Text style={[S.title, { flexShrink: 1, marginRight: 8 }]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>Chats</Text>
           <View style={{ flexDirection: 'row', gap: 4 }}>
             {/* Split view's own entry point. It used to exist ONLY inside
                 selection mode, so reaching it meant long-pressing a chat and
@@ -566,15 +567,15 @@ export default function ChatsScreen() {
                 <Ionicons name="git-compare-outline" size={22} color={colors.text} />
               </TouchableOpacity>
             )}
-            <TouchableOpacity onPress={() => router.push('/search' as any)} style={S.headerBtn} accessibilityLabel="Search"><Ionicons name="search" size={22} color={colors.text} /></TouchableOpacity>
-            <TouchableOpacity onPress={() => router.push('/alerts' as any)} style={S.headerBtn} accessibilityLabel="Alerts"><Ionicons name="notifications-outline" size={22} color={colors.text} /></TouchableOpacity>
+            <ChatHeaderAction action="search" label="Search" onPress={() => router.push('/search' as any)} />
+            <ChatHeaderAction action="alerts" label="Alerts" onPress={() => router.push('/alerts' as any)} />
             {/* Was the Mini Apps shortcut. Dropped, not lost — /mini is the
                 centre tab ("Apps"), so it already had a permanent home and this
                 was a second door to the same room. The header slot buys more as
                 a temporary chat, which has no entry point at all otherwise. */}
-            <TouchableOpacity onPress={() => setTempSheet(true)} style={S.headerBtn} accessibilityLabel="Start a temporary chat"><Ionicons name="timer-outline" size={22} color={colors.text} /></TouchableOpacity>
-            <TouchableOpacity onPress={() => router.push('/contacts' as any)} style={S.headerBtn} accessibilityLabel="Contacts"><Ionicons name="people-outline" size={22} color={colors.text} /></TouchableOpacity>
-            <TouchableOpacity onPress={() => router.push('/broadcast' as any)} style={S.headerBtn} accessibilityLabel="New broadcast"><Ionicons name="megaphone-outline" size={22} color={colors.text} /></TouchableOpacity>
+            <ChatHeaderAction action="temporary" label="Start a temporary chat" onPress={() => setTempSheet(true)} />
+            <ChatHeaderAction action="contacts" label="Contacts" onPress={() => router.push('/contacts' as any)} />
+            <ChatHeaderAction action="broadcast" label="New broadcast" onPress={() => router.push('/broadcast' as any)} />
           </View>
         </View>
       )}

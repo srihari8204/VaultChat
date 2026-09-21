@@ -9,14 +9,14 @@
 import { HEADER_TOP, SCREEN_BOTTOM } from '../constants/layout';
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
-  View, Text, TextInput, FlatList, ScrollView, TouchableOpacity,
+  View, TextInput, FlatList, ScrollView, TouchableOpacity,
   StyleSheet, ActivityIndicator,
 } from 'react-native';
 import { useRouter, Stack } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { type Palette } from '../constants/theme';
 import { useTheme } from '../lib/theme';
-import { Avatar, AuroraBackground } from '../components/ui';
+import { AppText as Text, Avatar, AuroraBackground } from '../components/ui';
 import { listChats, createGroupChat, attachmentUrl } from '../lib/chatService';
 import { getAccessToken } from '../lib/api';
 
@@ -202,7 +202,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   backBtn: { width: 40, height: 40, justifyContent: 'center', alignItems: 'center' },
   headerTitle: { color: c.text, fontSize: 18, fontWeight: '700' },
   nameInput: {
-    backgroundColor: c.glassSoft, color: c.text, fontSize: 16,
+    backgroundColor: c.glass, color: c.text, fontSize: 16,
     marginHorizontal: 16, borderRadius: 12, paddingHorizontal: 16, paddingVertical: 13,
     borderWidth: 1, borderColor: c.glassStroke,
   },
@@ -210,13 +210,13 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   errorTxt: { color: c.danger, fontSize: 12 },
   label: { color: c.textDim, fontSize: 11, fontWeight: '700', letterSpacing: 1, paddingHorizontal: 16, paddingTop: 14, paddingBottom: 8 },
   chipRow: { maxHeight: 46, marginTop: 12 },
-  chip: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: c.glassSoft, borderRadius: 18, paddingLeft: 4, paddingRight: 10, paddingVertical: 4 },
+  chip: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: c.glass, borderRadius: 18, paddingLeft: 4, paddingRight: 10, paddingVertical: 4, borderWidth: StyleSheet.hairlineWidth, borderColor: c.glassStroke },
   chipTxt: { color: c.text, fontSize: 13, fontWeight: '600', maxWidth: 90 },
   // 2026-09-17: the 15sp input inside is ~30dp of line box at font scale 1.5,
   // so a pinned 40 cut the descenders. minHeight holds the same 40 at scale 1.0.
-  searchWrap: { flexDirection: 'row', alignItems: 'center', gap: 8, marginHorizontal: 16, marginTop: 12, paddingHorizontal: 14, minHeight: 40, paddingVertical: 6, borderRadius: 20, backgroundColor: c.glassSoft },
+  searchWrap: { flexDirection: 'row', alignItems: 'center', gap: 8, marginHorizontal: 16, marginTop: 12, paddingHorizontal: 14, minHeight: 40, paddingVertical: 6, borderRadius: 20, backgroundColor: c.glass, borderWidth: 1, borderColor: c.glassStroke },
   searchInput: { flex: 1, color: c.text, fontSize: 15 },
-  row: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 10, gap: 12 },
+  row: { flexDirection: 'row', alignItems: 'center', marginHorizontal: 16, marginBottom: 8, paddingHorizontal: 14, paddingVertical: 10, gap: 12, borderRadius: 16, backgroundColor: c.glass, borderWidth: StyleSheet.hairlineWidth, borderColor: c.glassStroke },
   avatar: { width: 46, height: 46, borderRadius: 23, alignItems: 'center', justifyContent: 'center', backgroundColor: c.surfaceSolid, borderWidth: 1, borderColor: c.glassStroke },
   avatarSel: { borderColor: c.primary },
   avatarTxt: { color: c.accent, fontSize: 18, fontWeight: '800' },
@@ -231,7 +231,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   // every device, because edgeToEdge is enabled for all API levels. Padding the
   // content, not moving the bar, keeps the fill edge-to-edge and the control
   // reachable. SCREEN_BOTTOM is live, so this follows a rotation.
-  bottomBar: { position: 'absolute', left: 0, right: 0, bottom: 0, padding: 16, paddingBottom: 16 + SCREEN_BOTTOM, backgroundColor: c.bg, borderTopWidth: 1, borderTopColor: c.hairline },
+  bottomBar: { position: 'absolute', left: 0, right: 0, bottom: 0, padding: 16, paddingBottom: 16 + SCREEN_BOTTOM, backgroundColor: c.glass, borderTopWidth: 1, borderTopColor: c.hairline },
   createBtn: { backgroundColor: c.primary, borderRadius: 12, paddingVertical: 15, alignItems: 'center' },
   createBtnOff: { backgroundColor: c.glassSoft },
   createTxt: { color: '#FFFFFF', fontSize: 16, fontWeight: '800' },

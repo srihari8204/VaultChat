@@ -32,35 +32,35 @@ type Bloom = { c: string; rx: number; ry: number; cx: number; cy: number; o: num
  */
 const COMPOSITIONS = {
   chats:   [
-    { c: '#9D6FD0', rx: 210, ry: 190, cx: 80,  cy: 50,  o: 0.55 },
-    { c: '#7C3AED', rx: 180, ry: 170, cx: 370, cy: 230, o: 0.40 },
-    { c: '#3B82F6', rx: 170, ry: 150, cx: 60,  cy: 620, o: 0.22 },
-    { c: '#C084FC', rx: 130, ry: 120, cx: 340, cy: 740, o: 0.18 },
+    { c: '#33DDFE', rx: 190, ry: 170, cx: 78,  cy: 44,  o: 0.42 },
+    { c: '#8C49FC', rx: 188, ry: 170, cx: 366, cy: 220, o: 0.36 },
+    { c: '#22C55E', rx: 150, ry: 135, cx: 54,  cy: 622, o: 0.18 },
+    { c: '#F59E0B', rx: 132, ry: 122, cx: 342, cy: 742, o: 0.16 },
   ],
   chat:    [
-    { c: '#9D6FD0', rx: 190, ry: 170, cx: 50,  cy: 50,  o: 0.38 },
-    { c: '#7C3AED', rx: 160, ry: 150, cx: 360, cy: 450, o: 0.22 },
-    { c: '#3B82F6', rx: 150, ry: 140, cx: 50,  cy: 700, o: 0.16 },
+    { c: '#33DDFE', rx: 180, ry: 160, cx: 48,  cy: 48,  o: 0.30 },
+    { c: '#8C49FC', rx: 164, ry: 150, cx: 360, cy: 450, o: 0.22 },
+    { c: '#22C55E', rx: 146, ry: 136, cx: 52,  cy: 700, o: 0.13 },
   ],
   calls:   [
-    { c: '#9D6FD0', rx: 210, ry: 190, cx: 80,  cy: 50,  o: 0.50 },
-    { c: '#7C3AED', rx: 180, ry: 170, cx: 370, cy: 230, o: 0.36 },
-    { c: '#3B82F6', rx: 170, ry: 150, cx: 60,  cy: 620, o: 0.20 },
+    { c: '#33DDFE', rx: 202, ry: 184, cx: 80,  cy: 50,  o: 0.38 },
+    { c: '#22C55E', rx: 174, ry: 162, cx: 370, cy: 230, o: 0.24 },
+    { c: '#8C49FC', rx: 168, ry: 150, cx: 60,  cy: 620, o: 0.20 },
   ],
   status:  [
-    { c: '#C084FC', rx: 200, ry: 180, cx: 80,  cy: 50,  o: 0.45 },
-    { c: '#7C3AED', rx: 175, ry: 165, cx: 375, cy: 285, o: 0.34 },
-    { c: '#0EA5E9', rx: 160, ry: 150, cx: 50,  cy: 670, o: 0.18 },
+    { c: '#22C55E', rx: 194, ry: 178, cx: 80,  cy: 50,  o: 0.32 },
+    { c: '#8C49FC', rx: 176, ry: 164, cx: 375, cy: 285, o: 0.30 },
+    { c: '#33DDFE', rx: 160, ry: 150, cx: 50,  cy: 670, o: 0.18 },
   ],
   profile: [
-    { c: '#9D6FD0', rx: 220, ry: 200, cx: 190, cy: 30,  o: 0.52 },
-    { c: '#7C3AED', rx: 170, ry: 160, cx: 380, cy: 370, o: 0.28 },
-    { c: '#0EA5E9', rx: 160, ry: 150, cx: 40,  cy: 690, o: 0.16 },
+    { c: '#F59E0B', rx: 210, ry: 190, cx: 190, cy: 30,  o: 0.28 },
+    { c: '#8C49FC', rx: 176, ry: 160, cx: 380, cy: 370, o: 0.28 },
+    { c: '#33DDFE', rx: 160, ry: 150, cx: 40,  cy: 690, o: 0.16 },
   ],
   mini:    [
-    { c: '#9D6FD0', rx: 200, ry: 180, cx: 70,  cy: 40,  o: 0.42 },
-    { c: '#7C3AED', rx: 170, ry: 160, cx: 370, cy: 420, o: 0.24 },
-    { c: '#0EA5E9', rx: 160, ry: 150, cx: 50,  cy: 710, o: 0.16 },
+    { c: '#33DDFE', rx: 194, ry: 176, cx: 70,  cy: 40,  o: 0.32 },
+    { c: '#8C49FC', rx: 170, ry: 160, cx: 370, cy: 420, o: 0.24 },
+    { c: '#F59E0B', rx: 154, ry: 140, cx: 50,  cy: 710, o: 0.14 },
   ],
 } satisfies Record<string, Bloom[]>;
 
@@ -72,7 +72,7 @@ export type AuroraVariant = keyof typeof COMPOSITIONS;
  * lifting something dark. Scaling them back is what keeps the composition
  * recognisably the same picture in both themes.
  */
-const LIGHT_OPACITY_SCALE = 0.42;
+const LIGHT_OPACITY_SCALE = 0.32;
 
 export function AuroraBackground({ variant = 'chats' }: { variant?: AuroraVariant }) {
   const c = useColors();

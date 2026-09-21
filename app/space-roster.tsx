@@ -12,15 +12,16 @@
 // is worse than one told the hierarchy is deeper than the walk, so that flag is
 // rendered rather than logged.
 
+import { AppText as Text } from '../components/ui/Text';
 import React, { useCallback, useMemo, useState } from 'react';
 import {
-  View, Text, StyleSheet, ScrollView, ActivityIndicator, TouchableOpacity, Alert,
+  View, StyleSheet, ScrollView, ActivityIndicator, TouchableOpacity, Alert,
   TextInput, Modal,
 } from 'react-native';
 import { Stack, useLocalSearchParams, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useSpaceColors, spaceHeader } from '../lib/spaces/theme';
-import type { Palette } from '../constants/theme';
+import type { SpacePalette as Palette } from '../lib/spaces/theme';
 import {
   getRoster, addRosterEntry, updateRosterEntry, getLinks,
   type RosterEntry, type SpaceLink,
@@ -137,7 +138,7 @@ export default function SpaceRosterScreen() {
       <ScrollView contentContainerStyle={s.body}>
         {truncated && (
           <View style={s.warn}>
-            <Ionicons name="git-branch-outline" size={16} color="#F59E0B" />
+            <Ionicons name="git-branch-outline" size={16} color={colors.warning} />
             <Text style={s.warnText}>
               This space’s structure is deeper than the view can follow, so some people
               below you are not shown. Ask an administrator for the full list.
@@ -254,7 +255,7 @@ const styles = (c: Palette) => StyleSheet.create({
   },
   modalRow: { flexDirection: 'row', justifyContent: 'flex-end', gap: 10, marginTop: 4 },
   modalBtn: { paddingHorizontal: 18, paddingVertical: 12, borderRadius: 10 },
-  primaryBtn: { backgroundColor: c.primary },
+  primaryBtn: { backgroundColor: c.brandOnLight },
   primaryText: { color: '#fff', fontWeight: '700' },
   btnOff: { opacity: 0.4 },
 });

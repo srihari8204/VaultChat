@@ -10,8 +10,21 @@ import { configureMfa } from './onboarding';
 
 export const MFA_TOKEN_KEY = 'vc.mfa.token';
 
+let cachedMfaEnabled: boolean | undefined;
+let mfaRead: Promise<boolean> | null = null;
+
 export async function isMfaEnabled(): Promise<boolean> {
-  try { return !!(await SecureStore.getItemAsync(MFA_TOKEN_KEY)); } catch { return false; }
+  if (cachedMfaEnabled !== undefined) return cachedMfaEnabled;
+  if (!mfaRead) {
+    mfaRead = SecureStore.getItemAsync(MFA_TOKEN_KEY)
+      .then((token) => {
+        cachedMfaEnabled = !!token;
+        return cachedMfaEnabled;
+      })
+      .catch(() => false)
+      .finally(() => { mfaRead = null; });
+  }
+  return mfaRead;
 }
 
 export async function deviceSecurityAvailable(): Promise<boolean> {
@@ -28,12 +41,15 @@ export async function enableMfa(): Promise<boolean> {
   const bytes = await Crypto.getRandomBytesAsync(32);
   const token = Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join('');
   await SecureStore.setItemAsync(MFA_TOKEN_KEY, token);
+  cachedMfaEnabled = true;
   await configureMfa(true);
   return true;
 }
 
 export async function disableMfa(): Promise<void> {
   try { await SecureStore.deleteItemAsync(MFA_TOKEN_KEY); } catch { /* ignore */ }
+  cachedMfaEnabled = false;
+  mfaRead = null;
   await configureMfa(false);
 }
 

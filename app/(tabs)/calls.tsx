@@ -8,11 +8,12 @@
 
 import { HEADER_TOP, TAB_BAR_SPACE } from '../../constants/layout';
 import { useCallback, useMemo, useState } from 'react';
-import { FlatList, StyleSheet, Text, TouchableOpacity, View, Alert, Modal, Pressable, ScrollView } from 'react-native';
+import { FlatList, StyleSheet, TouchableOpacity, View, Alert, Modal, Pressable, ScrollView } from 'react-native';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { type Palette } from '../../constants/theme';
 import { useTheme } from '../../lib/theme';
+import { AppText as Text } from '../../components/ui/Text';
 import { Avatar, AuroraBackground } from '../../components/ui';
 import { Sheet, type SheetAction } from '../../components/ui/Sheet';
 import { getCallLog, clearCallLog, removeCallLog, callLogKey, getHiddenServerCalls, hideServerCalls, type CallLogEntry } from '../../lib/callLog';
@@ -239,17 +240,17 @@ export default function CallsScreen() {
       </View>
 
       {groups.length === 0 ? (
-        <View style={S.body}>
+        <ScrollView contentContainerStyle={S.body}>
           <Ionicons name="call-outline" size={52} color={colors.textDim} />
           <Text style={S.heading}>No calls yet</Text>
           <Text style={S.sub2}>Voice and video calls you make or receive will show up here.</Text>
-        </View>
+        </ScrollView>
       ) : (
         <FlatList
           data={groups}
           keyExtractor={g => g.entries[0].id}
           renderItem={renderItem}
-          contentContainerStyle={{ paddingVertical: 6, paddingBottom: TAB_BAR_SPACE + 16 }}
+          contentContainerStyle={{ paddingVertical: 6, paddingBottom: TAB_BAR_SPACE + 84 }}
           ListHeaderComponent={<Text style={S.sectionLabel}>RECENT</Text>}
           ItemSeparatorComponent={() => <View style={S.sep} />}
         />
@@ -313,7 +314,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   title:   { color: c.text, fontSize: 28, fontWeight: '800' },
   sectionLabel: { color: c.textDim, fontSize: 12, fontWeight: '700', letterSpacing: 1, marginHorizontal: 16, marginTop: 8, marginBottom: 4 },
 
-  row:     { flexDirection: 'row', alignItems: 'center', gap: 14, paddingHorizontal: 16, paddingVertical: 11 },
+  row:     { marginHorizontal: 12, marginVertical: 4, borderRadius: 18, borderWidth: StyleSheet.hairlineWidth, borderColor: c.glassStroke, backgroundColor: c.glassSoft, flexDirection: 'row', alignItems: 'center', gap: 14, paddingHorizontal: 16, paddingVertical: 11 },
   name:    { color: c.text, fontSize: 16, fontWeight: '600' },
   subRow:  { flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 2 },
   sub:     { color: c.textDim, fontSize: 13, flexShrink: 1 },
@@ -329,11 +330,11 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   },
   sep:     { height: StyleSheet.hairlineWidth, backgroundColor: c.border, marginLeft: 78 },
 
-  body:    { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 10, paddingHorizontal: 40, paddingBottom: TAB_BAR_SPACE },
+  body:    { flexGrow: 1, alignItems: 'center', justifyContent: 'center', gap: 10, paddingHorizontal: 40, paddingBottom: TAB_BAR_SPACE },
   heading: { color: c.text, fontSize: 18, fontWeight: '700' },
   sub2:    { color: c.textDim, fontSize: 14, textAlign: 'center', lineHeight: 20 },
 
-  fab:     { position: 'absolute', right: 20, bottom: 28, width: 56, height: 56, borderRadius: 28, backgroundColor: c.primary, alignItems: 'center', justifyContent: 'center', shadowColor: c.primary, shadowOpacity: 0.4, shadowRadius: 8, shadowOffset: { width: 0, height: 4 }, elevation: 6 },
+  fab:     { position: 'absolute', right: 20, bottom: TAB_BAR_SPACE + 12, width: 56, height: 56, borderRadius: 28, backgroundColor: c.primary, alignItems: 'center', justifyContent: 'center', shadowColor: c.primary, shadowOpacity: 0.4, shadowRadius: 8, shadowOffset: { width: 0, height: 4 }, elevation: 6 },
 
   infoBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
   infoSheet:    { backgroundColor: c.surfaceSolid, borderTopLeftRadius: 20, borderTopRightRadius: 20, paddingHorizontal: 18, paddingTop: 8, paddingBottom: 28 },
@@ -342,7 +343,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   infoName:     { color: c.text, fontSize: 18, fontWeight: '700', flex: 1 },
   infoActions:  { flexDirection: 'row', gap: 10, marginBottom: 8 },
   infoAction:   { flex: 1, flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 8, paddingVertical: 12, borderRadius: 14, backgroundColor: c.glassSoft },
-  infoActionTxt:{ color: c.text, fontSize: 14, fontWeight: '700' },
+  infoActionTxt:{ flexShrink: 1, color: c.text, fontSize: 14, fontWeight: '700' },
   infoRow:      { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 9 },
   infoRowTitle: { color: c.text, fontSize: 15, fontWeight: '600' },
   infoRowSub:   { color: c.textDim, fontSize: 12, marginTop: 1 },

@@ -5,7 +5,7 @@
 import React, { useState, useEffect, useRef , useMemo} from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, ScrollView,
-  ActivityIndicator, Platform, Dimensions, Animated, Easing, useWindowDimensions } from 'react-native';
+  ActivityIndicator, Platform, Animated, Easing, useWindowDimensions } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { type Palette } from '../constants/theme';
 import { useTheme } from '../lib/theme';
@@ -430,7 +430,7 @@ const makeStyles = (c: Palette, SW: number) => StyleSheet.create({
   header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingTop: Platform.OS === 'ios' ? 56 : 40, paddingHorizontal: 16, paddingBottom: 14 },
   backBtn: { width: 40, height: 40, borderRadius: 12, backgroundColor: 'rgba(74,159,255,0.08)', justifyContent: 'center', alignItems: 'center' },
   backArrow: { color: c.accent, fontSize: 20 },
-  headerTitle: { color: '#FFF', fontSize: 18, fontWeight: '700' },
+  headerTitle: { color: c.text, fontSize: 18, fontWeight: '700' },
   scroll: { flex: 1 },
   scrollContent: { paddingHorizontal: 16 },
 
@@ -438,7 +438,7 @@ const makeStyles = (c: Palette, SW: number) => StyleSheet.create({
   connectionRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', marginTop: 10, marginBottom: 16 },
   connectionBadge: { flexDirection: 'row', alignItems: 'center', backgroundColor: c.glassSoft, borderRadius: 10, paddingHorizontal: 14, paddingVertical: 8, marginRight: 16, borderWidth: 1, borderColor: 'rgba(74,159,255,0.1)' },
   connectionIcon: { fontSize: 16, marginRight: 6 },
-  connectionLabel: { color: '#FFF', fontSize: 14, fontWeight: '600' },
+  connectionLabel: { color: c.text, fontSize: 14, fontWeight: '600' },
   serverDot: { width: 8, height: 8, borderRadius: 4, marginRight: 6 },
   serverLabel: { color: c.textDim, fontSize: 13 },
 
@@ -452,7 +452,7 @@ const makeStyles = (c: Palette, SW: number) => StyleSheet.create({
   gaugeNeedle: { position: 'absolute', bottom: 10, width: 3, height: GAUGE_SIZE / 2 - 20, backgroundColor: c.danger, borderRadius: 2, transformOrigin: 'bottom center' },
   needleLine: { width: 3, height: '100%', backgroundColor: c.accent, borderRadius: 2 },
   gaugeCenterDot: { position: 'absolute', bottom: 4, width: 16, height: 16, borderRadius: 8, backgroundColor: c.glassSoft },
-  gaugeSpeed: { color: '#FFF', fontSize: 42, fontWeight: '800', marginTop: 8 },
+  gaugeSpeed: { color: c.text, fontSize: 42, fontWeight: '800', marginTop: 8 },
   gaugeUnit: { color: c.textDim, fontSize: 14, marginTop: -2 },
   gaugePhase: { color: c.accent, fontSize: 13, fontWeight: '600', marginTop: 8 },
 
@@ -470,19 +470,19 @@ const makeStyles = (c: Palette, SW: number) => StyleSheet.create({
   resultsGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginBottom: 16 },
   resultCard: { width: (SW - 42) / 2, backgroundColor: c.glassSoft, borderRadius: 14, padding: 16, alignItems: 'center', borderWidth: 1, borderColor: 'rgba(74,159,255,0.08)', borderLeftWidth: 3 },
   resultLabel: { color: c.textDim, fontSize: 12, marginBottom: 4 },
-  resultValue: { color: '#FFF', fontSize: 28, fontWeight: '800' },
+  resultValue: { color: c.text, fontSize: 28, fontWeight: '800' },
   resultUnit: { color: c.textDim, fontSize: 12, marginTop: 2 },
 
   // History
   section: { marginTop: 20 },
-  sectionTitle: { color: '#FFF', fontSize: 16, fontWeight: '700', marginBottom: 12 },
+  sectionTitle: { color: c.text, fontSize: 16, fontWeight: '700', marginBottom: 12 },
   noHistory: { color: c.textDim, fontSize: 13, textAlign: 'center', marginTop: 8 },
   historyRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: c.glassSoft, borderRadius: 12, padding: 14, marginBottom: 8, borderWidth: 1, borderColor: 'rgba(74,159,255,0.06)' },
   historyLeft: { flex: 1 },
-  historyDate: { color: '#FFF', fontSize: 13, fontWeight: '600' },
+  historyDate: { color: c.text, fontSize: 13, fontWeight: '600' },
   historyConn: { color: c.textDim, fontSize: 11, marginTop: 2 },
   historyRight: { flexDirection: 'row', gap: 14 },
   historyMetric: { alignItems: 'center' },
   historyMetricLabel: { color: c.accent, fontSize: 12 },
-  historyMetricValue: { color: '#FFF', fontSize: 13, fontWeight: '700', marginTop: 2 },
+  historyMetricValue: { color: c.text, fontSize: 13, fontWeight: '700', marginTop: 2 },
 });

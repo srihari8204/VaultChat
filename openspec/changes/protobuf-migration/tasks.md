@@ -2,8 +2,9 @@
 
 Levels, per `openspec/config.yaml`: **written** → **deployed to prod** (file
 copy, not git) → **device-verified**. No task here is past *written* until it
-says so. Packaging, deployment and device verification are unauthorized in this
-change; every such task stays unchecked and is marked NOT AUTHORIZED.
+says so. The September 20 follow-up explicitly authorizes running all tests
+and deploying the reviewed backend fixes when needed. Packaging and production
+data/schema changes are not part of this backend repair deployment.
 
 ## Wave 0 — Evidence and planning
 
@@ -78,7 +79,7 @@ both languages, regeneration proven to be a no-op.
       `adversarialParity.selftest.ts:28` still say "NOT WIRED … the live
       transport remains Socket.IO v4 with JSON payloads". Socket.IO is gone;
       `'ccwire'` is the only `TransportName`.
-- [ ] 1.11 `npx tsc --noEmit`, `npm test`, `go test ./...` — report actual
+- [x] 1.11 `npx tsc --noEmit`, `npm test`, `go test ./...` — report actual
       commands, exit status, counts and skips. No historical totals.
 
 ### Wave 1 result (written; NOT deployed, NOT device-verified)
@@ -124,7 +125,7 @@ extract or keep the loopback made on evidence.
       because `metrics.Wrap` wraps only the public mux
       (`cmd/api/main.go:447`). Independent of protobuf; do it here because this
       is where the tests land.
-- [ ] 2.4 Decide extraction on the evidence from 2.1–2.2. If extracting, the
+- [x] 2.4 Decide extraction on the evidence from 2.1–2.2. If extracting, the
       seam must include the rate limit (`:436`), block check (`:460`) and 2 MB
       body cap (`httpx.go:94`) — otherwise it trades an unavoidable gate set for
       three gates every future caller must remember.
@@ -338,12 +339,200 @@ Entry gate, all four required:
 - [ ] 7.3 Do not remove compatibility early to report "zero JSON", and do not
       keep it forever to avoid deciding.
 
-## Not authorized in this change
+## September 20 compatibility audit — written and local verification only
 
-- [ ] NOT AUTHORIZED — APK/AAB/IPA packaging.
-- [ ] NOT AUTHORIZED — deployment, file-copy to prod, or any production config
-      change.
-- [ ] NOT AUTHORIZED — physical-device performance verification. Reuse the
+This batch reviews the existing cold-start migration across the app, Go API,
+legacy Node/deployment configuration, PostgreSQL mappings and SQLite caches.
+It does not complete the unrelated migration waves above.
+
+- [x] 8.1 Reject a malformed typed chat-list row before a partial list can
+      replace/prune the SQLite cache; extend the existing real-caller selftest.
+- [x] 8.2 Preserve existing Vary fields and repeated Accept headers in the
+      shared Go negotiation helper; verify migrated endpoint compatibility.
+- [x] 8.3 Verify schema generation, deployment routing and DB migration
+      tooling; fix demonstrated tooling defects without adding dependencies.
+- [x] 8.4 Run frontend tests, type checking, lint, Go tests and OpenSpec
+      validation; record failures/skips and perform a Ponytail diff review.
+- [x] 8.5 Fix the VaultBeam progress-mask SQL failure reproduced by the
+      expanded DB audit: PostgreSQL has no `bytea | bytea` operator. Preserve
+      mask bit ordering, concurrent merges and session-version checks; verify
+      the existing receiver/upload progress and resume regression tests.
+- [x] 8.6 Make the HTTP-only receiver-mask builders emit the raw base64 the Go
+      handler accepts; preserve tagged/RLE bitmap encodings used by storage and
+      realtime paths, and check both sparse and dense masks.
+
+No SQL migration is required by this audit. Production and device verification
+remain separate from these local checks.
+
+### Audit evidence
+
+- `npm test`: exit 0, 341/341 suites (263 selftests, 78 embedded checks);
+  backend HTTP/socket contracts and all 34 generated TS/Go files match.
+  Its default DB phase skipped because local 5432 requires a password and
+  Docker timed out; the separate scratch DB run below covers that phase.
+- `npm run typecheck`: exit 0 (SDK versions and `tsc --noEmit`).
+- `go test ./...`: exit 0, 22 packages, 14 with tests. Focused negotiation
+  tests also pass across all 10 migrated endpoints.
+- Fresh PostgreSQL 18, bound only to `127.0.0.1:15499` in a unique temporary
+  directory: all 136 migrations through 137 applied, ledger/checksums agree,
+  no pending migrations, and all 17 SQL regression files pass.
+- Scratch Go integration: 19 top-level tests plus 18 validation subtests pass,
+  including the real HTTP and CC-Wire send handlers, idempotency, transaction
+  atomicity, membership refusals, undelivered recovery and cursor pagination.
+  This supersedes the historical Wave 2 "never executed" note above. Decision
+  2.4: keep the tested loopback and its shared validation/middleware; extraction
+  is unnecessary for this compatibility repair.
+- Final DB-enabled `go test -p 1 ./internal/routes -count=1 -json
+  -timeout 300s`: exit 0, 424 top-level tests and 67 subtests pass, zero skips.
+  Combined with unaffected packages from `go test -p 1 ./... -count=1 -json
+  -timeout 300s` and a separate retention-test database, final results are
+  860 top-level tests plus 634 subtests passing. Seven environment skips remain:
+  one separate RLS role, five Redis tests, and Rust WebTransport availability.
+  Test-only vault keys/pepper were supplied for onboarding fixtures; one
+  VaultBeam test ID was corrected to the handler's existing 16-character
+  minimum. The temporary PostgreSQL cluster was stopped after verification.
+- The chat-list regression passes against the fix and fails five assertions
+  against the old source in a disposable copy. Persisted JSON/cache encryption,
+  message IDs, sync cursors, queues and backup formats remain unchanged.
+- The expanded DB run also exposed an existing VaultBeam failure: PostgreSQL
+  rejects `bytea | bytea`. The shared mask UPDATE now unions integer bytes with
+  `get_byte`, keeps byte order and zero-extension, and rebuilds BYTEA without
+  moving the merge out of the atomic UPDATE. No stored format changes.
+- Receiver HTTP mask builders now use the existing raw-base64 encoder, matching
+  the Go handler. Their embedded check plus `noRetransmit` and `directFallback`
+  suites pass; reverting the two encoder calls in a disposable copy fails eight
+  assertions. Local and realtime tagged/RLE encodings remain intact.
+- `npm run lint`: exit 1, two existing JSX comment errors in
+  `app/live/join/[code].tsx:145` and `app/story-viewer.tsx:384`, plus 285
+  warnings. Neither error is in a file changed by this audit.
+- OpenSpec full validation: 39/42 pass; existing failures are
+  `fix-presence-publish-stall`, `harden-audit-findings` and
+  `responsive-breadth-and-toolchain`. `protobuf-migration` validates strictly.
+- Ponytail review: shared-boundary fixes, existing tests/dependencies reused,
+  no schema additions or new framework. Caddy/compose still route HTTP to Go;
+  the undeployed Node backend retains its existing contract.
+
+Production file-copy candidates are `internal/routes/appversion.go` and
+`internal/routes/vaultbeam.go` within the Go source deployment, and
+`scripts/check-migration-drift.js` for deployment
+tooling. Frontend `lib/chatService.ts` and `lib/vaultBeam/reportReceived.ts`
+fixes require a future app build.
+These files have only been changed locally; no production ledger was queried,
+no production files/data were changed, and no device verification was claimed.
+
+### Residual VaultBeam concurrency risk (source review, not reproduced)
+
+`vbRelayUploaded` checks a loaded session version before asynchronous object
+HEAD requests, but its mask/ready UPDATEs are scoped only by transfer id.
+`vbRelayGrow` writes a previously read whole mask and can race with uploads.
+`vbRelayComplete`/`vbRelayAbort` operate on an unversioned object prefix, so a
+concurrent re-init can also race with object cleanup. Adding a SQL version
+predicate alone would not protect those objects. These pre-existing generation
+and object-lifetime races need a coordinated lifecycle fix with concurrency
+tests (serialized cleanup/reset or versioned object keys), rather than a
+partial guard in this serialization repair. The fixes above do not establish
+full VaultBeam concurrency safety.
+
+## September 20 follow-up — complete verification and backend deployment
+
+- [x] 9.1 Rerun frontend, Go, SQL and Rust checks; enable isolated services for
+      previously skipped checks where available and report remaining limits.
+- [x] 9.2 Capture the live source/image/configuration and migration baseline,
+      prepare an immutable candidate snapshot and retain rollback state.
+- [x] 9.3 Deploy only the reviewed Go backend changes; verify direct/public
+      health, readiness, authentication and JSON/Protobuf compatibility.
+
+Prepared release: `protobuf-audit-20260920`, source fingerprint
+`6492ff85dbd9db44`. Read-only production comparison found only the two reviewed
+runtime files and three regression-test files differ. Baseline running source
+is `cef79a23c035eff2`; the original image and source files are retained under
+`/home/srihari/vaultchat-releases/protobuf-audit-20260920` with a rollback script.
+The candidate builds successfully in isolation with the existing Dockerfile.
+Compose configuration and transport flags are preserved; rollout recreates
+only `go-api` and applies no database migrations.
+
+DEPLOYED at approximately `2026-09-20T18:32Z` (`2026-09-21 00:02 IST`).
+Both direct and public `/build` identify `6492ff85dbd9db44`; `/health` and
+`/ready` report healthy DB/Redis. `/app/version` and `/app/flags` JSON bytes
+match the pre-deploy capture, explicitly negotiated Protobuf succeeds with
+`Vary: Accept`, and unauthenticated `/user/profile` and `/chats` still return
+401. Fresh focused regressions also passed in the isolated candidate Go build
+container without network/service access. Rollback remains available with
+`python3 /home/srihari/vaultchat-releases/protobuf-audit-20260920/release.py rollback`.
+Frontend changes still require an app release; no device verification is claimed.
+
+Fresh follow-up frontend verification: `npm test` passes all 341 suites and all
+17 SQL regression files with the disposable DB explicitly required (no DB skip),
+plus both backend contract checks and 34 generated-file checks. Typecheck passes.
+Lint now passes with zero errors and 285 existing warnings after correcting two
+stray JSX comments without changing application logic. The separate RLS-role
+test and all five real Redis tests also pass, closing six previous skips.
+Container-ID comparison confirms only `vaultchat-go-api-1` was recreated.
+The post-deployment soak check remains healthy with DB/Redis ready and zero
+container restarts. Legacy Node vault crypto checks pass all 26 assertions;
+syntax checks pass for 16 JavaScript files. The legacy Socket.IO benchmark
+harness requires obsolete routes and seeded fixtures and is not applicable to
+the deployed Go service; it was not run against production.
+
+Fresh full Go run passes 1,494 test results (860 top-level tests and 634
+subtests). All seven environment-gated skips were then executed separately and
+passed: RLS, five real Redis tests, and Go/Rust WebTransport interoperability.
+The latter verifies invalid CA rejection, invalid JWT rejection, and valid
+split/pipelined Hello/Ping exchange. No gated Go check remains unverified.
+The ignored verified-WSS test also passes against
+`wss://api.corefinite.com/ccwire/v1` using its hardcoded invalid token: trusted
+TLS succeeds and authentication correctly rejects it. No real user credentials
+or data writes are involved. Both disposable PostgreSQL and Redis are stopped.
+
+All six Rust crate test stages and strict Clippy (`-D warnings`) pass using the installed GNU toolchain and
+MinGW linker (the MSVC linker is unavailable on this host). Vaultcore passes
+14 tests, transport-net 13 default tests, crypto 18 tests, navigation 22 tests,
+and VaultBeam 27 tests; transport-core suites also pass. Navigation's ignored
+timing benchmark was separately exercised successfully in debug mode, without
+claiming performance evidence. Optional WSS and WebTransport checks are
+covered above. No tracked Rust source, dependency, or lockfile changes were
+needed for verification.
+The complete `npm run test:rust` chain exits zero. Repository-wide OpenSpec
+validation remains 39/42: the three existing planning changes
+`fix-presence-publish-stall`, `harden-audit-findings`, and
+`responsive-breadth-and-toolchain` lack delta specs. This change's strict
+validation passes. Frontend lint retains 285 existing warnings, with no errors.
+
+Production DB preflight found 136 ledger entries through 137. All file checksums
+match except existing migration 135 metadata (`ba5f19a58b91e8ed` in the ledger,
+`38d54d51d7925640` for the current file). The production migration file matches
+the checkout, and a read-only `pg_get_functiondef` comparison confirms the live
+three-argument `vc_bump_unread` body, SECURITY DEFINER and pinned search path
+match the migration. No ledger or function rewrite is part of this deployment.
+The new mask expression also produced the expected `0581ff` in a read-only
+constant-input query on production PostgreSQL 16.
+
+## Other delivery work
+
+- [x] 10.1 AUTHORIZED — build a release APK from the reviewed working tree
+      and retain its checksum.
+- [ ] 10.4 Install the APK on the user's connected Android phone, preserving
+      existing app data. No physical device is connected yet.
+- [ ] 10.2 AUTHORIZED — inventory every screen, exercise reachable screens and
+      transitions on Android, and record observed results and access blockers.
+- [ ] 10.3 AUTHORIZED — inspect runtime errors and cold-start behavior, fix
+      confirmed regressions, and retest affected paths.
+
+APK build completed September 21 at 01:22 IST: version 1.2.15 (31), ARM64,
+97,524,115 bytes. SHA-256:
+`3fb762dbdb5d8654cb1fd71fb0d9cdd3efcbf8dd8c1d36980839a31d56d3f01d`.
+APK signature verification passes (v2); manifest confirms ARM64-only package
+`com.vaultchat.app`, minimum SDK 24, target SDK 36.
+Artifact: `../deployment-snapshots/apk-screen-audit-20260921/crazzychat-1.2.15-protobuf-arm64.apk`.
+The initial two-ABI build was deliberately stopped after the user rejected
+emulator testing; the emulator was stopped. ARM64-only build succeeded in
+14m56s, with 76 tasks executed and 1,930 up-to-date. No clean prebuild or native
+rewrite was performed. A 187-route screen inventory is retained alongside the
+APK; screen execution remains pending physical-device connection and access.
+- [x] AUTHORIZED — backend deployment tracked in 9.2–9.3 above; app release
+      and unrelated production configuration changes remain outside this batch.
+- [ ] User requested physical-phone testing instead of emulator testing;
+      emulator stopped. Physical-device verification awaits USB connection. Reuse the
       `coldstart-evidence` instrumentation when it is authorized; keep first
       frame, authorized cached-list readiness, authenticated CC-Wire readiness
       and catch-up as separate milestones.

@@ -2,11 +2,12 @@
 // Members carry name, mobile (validated) and address. Local-only — see db/chitti.ts.
 
 import React, { useCallback, useMemo, useState } from 'react';
+import { useFinanceTheme } from '../../../components/finance/useFinanceTheme';
 import { View, Text, ScrollView, StyleSheet, TouchableOpacity, Alert } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter, useFocusEffect } from 'expo-router';
-import { FIN, TABULAR } from '../../../constants/financeTheme';
-import { FinHeader, HeroCard, Segment, StatTile, Field, Btn, Label, Card } from '../../../components/finance/ui';
+import { TABULAR, type FinancePalette } from '../../../constants/financeTheme';
+import { FinHeader, HeroCard, Segment, StatTile, TileGrid, Field, Btn, Label, Card } from '../../../components/finance/ui';
 import { inrShort, fmtDate, fmtDateTime, num } from '../../../utils/financeFormat';
 import { formatINR } from '../../../utils/interest';
 import {
@@ -19,13 +20,16 @@ import { splitEvenly } from '../../../utils/money';
 
 type Tab = 'members' | 'collections' | 'auctions' | 'history';
 const CYCLE: CollectionStatus[] = ['pending', 'paid', 'overdue'];
-const COL_META: Record<CollectionStatus, { fg: string; bg: string; label: string; icon: keyof typeof Ionicons.glyphMap }> = {
+const getCollectionMeta = (FIN: FinancePalette): Record<CollectionStatus, { fg: string; bg: string; label: string; icon: keyof typeof Ionicons.glyphMap }> => ({
   paid:    { fg: FIN.good, bg: FIN.goodSoft, label: 'Paid',    icon: 'checkmark-circle' },
   pending: { fg: FIN.warn, bg: FIN.warnSoft, label: 'Pending', icon: 'ellipse-outline' },
   overdue: { fg: FIN.bad,  bg: FIN.badSoft,  label: 'Overdue', icon: 'alert-circle' },
-};
+});
 
 export default function ChittiDetail() {
+  const FIN = useFinanceTheme();
+  const s = React.useMemo(() => makeStyles(FIN), [FIN]);
+  const COL_META = React.useMemo(() => getCollectionMeta(FIN), [FIN]);
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
   const [g, setG] = useState<ChittiGroup | null>(null);
@@ -169,9 +173,11 @@ export default function ChittiDetail() {
         </HeroCard>
 
         <View style={s.tileRow}>
+          <TileGrid>
           <StatTile value={String(members.length)} label={`of ${g.members} members`} tone="brand" />
           <StatTile value={String(paidThisMonth)} label="Paid this month" tone="good" />
           <StatTile value={String(members.length - paidThisMonth)} label="Pending" tone="warn" />
+          </TileGrid>
         </View>
 
         <View style={{ marginTop: 16 }}>
@@ -196,7 +202,7 @@ export default function ChittiDetail() {
               </Card>
             ) : (
               <TouchableOpacity style={s.addRow} onPress={openAddMember} activeOpacity={0.85}>
-                <View style={s.addBtn}><Ionicons name="add" size={20} color="#fff" /></View>
+                <View style={s.addBtn}><Ionicons name="add" size={20} color={FIN.onBrand} /></View>
                 <Text style={s.addRowTxt}>Add member</Text>
               </TouchableOpacity>
             )}
@@ -228,7 +234,7 @@ export default function ChittiDetail() {
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.monthRow}>
               {Array.from({ length: g.duration }, (_, i) => i + 1).map(mn => (
                 <TouchableOpacity key={mn} style={[s.monthChip, month === mn && s.monthChipOn]} onPress={() => setMonth(mn)}>
-                  <Text style={[s.monthTxt, month === mn && { color: '#fff' }]}>M{mn}</Text>
+                  <Text style={[s.monthTxt, month === mn && { color: FIN.onBrand }]}>M{mn}</Text>
                 </TouchableOpacity>
               ))}
             </ScrollView>
@@ -257,7 +263,7 @@ export default function ChittiDetail() {
                 <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.monthRow}>
                   {Array.from({ length: g.duration }, (_, i) => i + 1).map(mn => (
                     <TouchableOpacity key={mn} style={[s.monthChip, month === mn && s.monthChipOn]} onPress={() => setMonth(mn)}>
-                      <Text style={[s.monthTxt, month === mn && { color: '#fff' }]}>M{mn}</Text>
+                      <Text style={[s.monthTxt, month === mn && { color: FIN.onBrand }]}>M{mn}</Text>
                     </TouchableOpacity>
                   ))}
                 </ScrollView>
@@ -265,7 +271,7 @@ export default function ChittiDetail() {
                 <View style={s.winnerWrap}>
                   {members.map(m => (
                     <TouchableOpacity key={m.id} style={[s.winnerChip, winnerId === m.id && s.winnerChipOn]} onPress={() => setWinnerId(m.id)}>
-                      <Text numberOfLines={1} style={[s.winnerTxt, winnerId === m.id && { color: '#fff' }]}>{m.name}</Text>
+                      <Text numberOfLines={1} style={[s.winnerTxt, winnerId === m.id && { color: FIN.onBrand }]}>{m.name}</Text>
                     </TouchableOpacity>
                   ))}
                 </View>
@@ -334,14 +340,14 @@ export default function ChittiDetail() {
   );
 }
 
-const s = StyleSheet.create({
+const makeStyles = (FIN: FinancePalette) => StyleSheet.create({
   screen: { flex: 1, backgroundColor: FIN.bg },
   body: { padding: 16, alignSelf: 'center', width: '100%', maxWidth: FIN.contentMax },
   heroLabel: { color: 'rgba(255,255,255,0.85)', fontSize: 10.5, fontWeight: '700', letterSpacing: 0.8 },
   heroVal: { color: '#fff', fontSize: 28, fontWeight: '800', marginTop: 6, ...TABULAR },
   heroFoot: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 12, paddingTop: 12, borderTopWidth: 1, borderTopColor: 'rgba(255,255,255,0.2)' },
   heroFootTxt: { color: 'rgba(255,255,255,0.9)', fontSize: 12, fontWeight: '600' },
-  tileRow: { flexDirection: 'row', gap: 8, marginTop: 12 },
+  tileRow: { marginTop: 12 },
 
   addRow: { flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 16, backgroundColor: FIN.card, borderRadius: 12, padding: 10, borderWidth: 1, borderColor: FIN.glassEdge, shadowColor: '#101828', shadowOpacity: 0.08, shadowRadius: 12, shadowOffset: { width: 0, height: 4 }, elevation: 2 },
   addRowTxt: { color: FIN.brandDeep, fontSize: 14.5, fontWeight: '700' },
@@ -355,7 +361,7 @@ const s = StyleSheet.create({
 
   monthRow: { gap: 8, paddingVertical: 14 },
   monthChip: { paddingHorizontal: 14, paddingVertical: 8, borderRadius: 999, borderWidth: 1, borderColor: FIN.border, backgroundColor: FIN.card },
-  monthChipOn: { backgroundColor: FIN.brand, borderColor: FIN.brand },
+  monthChipOn: { backgroundColor: FIN.brandDeep, borderColor: FIN.brandDeep },
   monthTxt: { color: FIN.sub, fontSize: 13, fontWeight: '700' },
 
   colPill: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 10, paddingVertical: 5, borderRadius: 999 },
@@ -368,7 +374,7 @@ const s = StyleSheet.create({
   formLabel: { color: FIN.text, fontSize: 13, fontWeight: '700', marginBottom: 6, marginTop: 4 },
   winnerWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 7 },
   winnerChip: { paddingHorizontal: 12, paddingVertical: 7, borderRadius: 999, borderWidth: 1, borderColor: FIN.border, backgroundColor: FIN.card2 },
-  winnerChipOn: { backgroundColor: FIN.brand, borderColor: FIN.brand },
+  winnerChipOn: { backgroundColor: FIN.brandDeep, borderColor: FIN.brandDeep },
   winnerTxt: { color: FIN.sub, fontSize: 12.5, fontWeight: '700' },
   dividendHint: { color: FIN.brandDeep, fontSize: 12.5, fontWeight: '700', marginTop: 10 },
   dividendNote: { color: FIN.sub, fontSize: 11.5, marginTop: 3 },

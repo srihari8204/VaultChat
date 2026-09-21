@@ -29,7 +29,7 @@ const APP = path.join(process.cwd(), 'app');
 
 /** Anything here means the user can leave the screen. */
 const EXIT_PATTERNS: RegExp[] = [
-  /Header/,                    // components/ui/Header, FinHeader, GameTopBar…
+  /<(?:Header|FinHeader|GameTopBar)\b/, // actual navigation components, not ListHeaderComponent
   /router\.back\(\)/,
   /arrow-back/, /chevron-back/,
   /BackHandler/,

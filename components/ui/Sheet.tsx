@@ -13,7 +13,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Haptics from 'expo-haptics';
 import { Ionicons } from '@expo/vector-icons';
 import { RADIUS, SPACING } from '../../constants/theme';
-import { useColors } from '../../lib/theme';
+import { GLASS, glassShadow } from '../../constants/glass';
+import { useColors, useTheme } from '../../lib/theme';
 import { AppText } from './Text';
 
 export interface SheetAction {
@@ -33,8 +34,10 @@ export interface SheetProps {
 
 export function Sheet({ visible, title, message, actions, onClose }: SheetProps) {
   const Aurora = useColors();
+  const { scheme } = useTheme();
   const insets = useSafeAreaInsets();
-  const { height: winH } = useWindowDimensions();
+  const { height: winH, width: winW } = useWindowDimensions();
+  const sheetWidth = Math.min(600, winW - insets.left - insets.right);
   const slide = React.useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
@@ -57,30 +60,30 @@ export function Sheet({ visible, title, message, actions, onClose }: SheetProps)
 
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
-      <Pressable style={styles.scrim} onPress={onClose} />
-      <Animated.View style={[styles.sheet, { backgroundColor: Aurora.surfaceSolid, borderColor: Aurora.border, paddingBottom: insets.bottom + SPACING.sm, transform: [{ translateY }] }]}>
-        {(title || message) && (
-          <View style={[styles.headerBlock, { borderBottomColor: Aurora.separator }]}>
-            {title ? <AppText variant="bodyStrong" style={styles.center}>{title}</AppText> : null}
-            {message ? <AppText variant="caption" color={Aurora.textDim} style={styles.center}>{message}</AppText> : null}
-          </View>
-        )}
-        {/* 60% of the LIVE window, not a static Dimensions.get.
-            Dimensions.get returns the current size when it runs, but nothing
-            subscribes to it, so a sheet already open when the device rotates
-            keeps the height it was built with — in landscape that is taller
-            than the screen, and the Cancel row goes off the bottom with no way
-            to scroll to it. useWindowDimensions re-renders on the change.
-            This is a shared primitive, so the bug was every sheet in the app. */}
-        <ScrollView style={{ maxHeight: winH * 0.6 }} bounces={false} showsVerticalScrollIndicator={false}>
+      <Pressable style={styles.scrim} onPress={onClose} accessibilityRole="button" accessibilityLabel="Dismiss actions" />
+      <Animated.View accessibilityViewIsModal style={[styles.sheet, glassShadow('sheet', scheme), { width: sheetWidth, left: insets.left + (winW - insets.left - insets.right - sheetWidth) / 2, maxHeight: winH - insets.top - SPACING.md, backgroundColor: Aurora.glass, borderColor: Aurora.glassStroke, paddingBottom: insets.bottom + SPACING.sm, transform: [{ translateY }] }]}>
+        <View style={[styles.handle, { backgroundColor: Aurora.glassStroke }]} />
+        <ScrollView style={{ flexShrink: 1 }} bounces={false} showsVerticalScrollIndicator={false}>
+          {(title || message) && (
+            <View style={[styles.headerBlock, { borderBottomColor: Aurora.separator }]}>
+              {title ? <AppText variant="bodyStrong" style={styles.center}>{title}</AppText> : null}
+              {message ? <AppText variant="caption" color={Aurora.textDim} style={styles.center}>{message}</AppText> : null}
+            </View>
+          )}
           {actions.map((a, i) => (
-            <TouchableOpacity key={i} style={styles.row} onPress={() => pick(a)} activeOpacity={0.7}>
+            <TouchableOpacity
+              accessibilityRole="button"
+              key={i}
+              style={[styles.row, { backgroundColor: Aurora.glassSoft, borderColor: Aurora.glassStroke }]}
+              onPress={() => pick(a)}
+              activeOpacity={0.7}
+            >
               {a.icon && <Ionicons name={a.icon} size={20} color={a.destructive ? Aurora.danger : Aurora.text} />}
-              <AppText variant="body" color={a.destructive ? Aurora.danger : Aurora.text}>{a.label}</AppText>
+              <AppText style={{ flex: 1 }} variant="body" color={a.destructive ? Aurora.danger : Aurora.text}>{a.label}</AppText>
             </TouchableOpacity>
           ))}
         </ScrollView>
-        <TouchableOpacity style={[styles.row, styles.cancel]} onPress={onClose} activeOpacity={0.7}>
+        <TouchableOpacity accessibilityRole="button" style={[styles.row, styles.cancel, { backgroundColor: Aurora.glassSoft, borderColor: Aurora.glassStroke }]} onPress={onClose} activeOpacity={0.7}>
           <AppText variant="bodyStrong" color={Aurora.textDim}>Cancel</AppText>
         </TouchableOpacity>
       </Animated.View>
@@ -91,14 +94,16 @@ export function Sheet({ visible, title, message, actions, onClose }: SheetProps)
 const styles = StyleSheet.create({
   scrim: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.55)' },
   sheet: {
-    position: 'absolute', left: 0, right: 0, bottom: 0,
+    position: 'absolute', bottom: 0,
     borderTopLeftRadius: RADIUS.xxl, borderTopRightRadius: RADIUS.xxl,
     paddingTop: SPACING.sm, paddingHorizontal: SPACING.sm,
-    borderTopWidth: 1,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    ...GLASS.sheet.shadow,
   },
+  handle: { width: 42, height: 4, borderRadius: 2, alignSelf: 'center', marginBottom: SPACING.xs },
   headerBlock: { paddingVertical: SPACING.md, paddingHorizontal: SPACING.md, gap: 4, borderBottomWidth: 1, marginBottom: SPACING.xs },
   center: { textAlign: 'center' },
-  row: { flexDirection: 'row', alignItems: 'center', gap: SPACING.md, paddingVertical: 15, paddingHorizontal: SPACING.md, borderRadius: RADIUS.md },
+  row: { minHeight: 50, flexDirection: 'row', alignItems: 'center', gap: SPACING.md, paddingVertical: 14, paddingHorizontal: SPACING.md, borderRadius: RADIUS.md, borderWidth: StyleSheet.hairlineWidth, marginBottom: SPACING.xs },
   cancel: { justifyContent: 'center', marginTop: SPACING.xs },
 });
 

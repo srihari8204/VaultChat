@@ -1,12 +1,14 @@
+import { useTheme } from '../lib/theme';
+import type { Palette } from '../constants/theme';
+import { AuroraBackground } from '../components/ui';
 import { HEADER_TOP, SCREEN_BOTTOM } from '../constants/layout';
-import { LinearGradient } from "expo-linear-gradient";
 import { Camera } from "expo-camera";
 import * as Contacts from "expo-contacts";
 import * as Location from "expo-location";
 import * as Notifications from "expo-notifications";
 import { Pedometer } from "expo-sensors";
 import { router, useLocalSearchParams } from "expo-router";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { AppState, Platform, ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import { canUseFullScreenIntent, openFullScreenIntentSettings } from "../lib/CallService";
 
@@ -25,6 +27,8 @@ const PERMS = [
 ];
 
 export default function PermissionsScreen() {
+  const { colors: c, scheme } = useTheme();
+  const S = useMemo(() => makeStyles(c, scheme === "light"), [c, scheme]);
   const fromSettings = useLocalSearchParams<{ from?: string }>().from === 'settings';
   // One exit for all three buttons: back to Settings when that is where the
   // user came from, onward through onboarding when it is not.
@@ -112,7 +116,8 @@ export default function PermissionsScreen() {
   };
 
   return (
-    <LinearGradient colors={["#FFFFFF","#020E1A","#FFFFFF"]} style={{flex:1}}>
+    <View style={{flex:1,backgroundColor:c.bg}}>
+      <AuroraBackground />
       <ScrollView style={S.container} contentContainerStyle={S.content} showsVerticalScrollIndicator={false}>
         <View style={S.header}>
           <View style={S.badge}><Text style={{fontSize:36}}>🔑</Text></View>
@@ -135,7 +140,7 @@ export default function PermissionsScreen() {
                 <Text style={S.psub}>{p.sub}</Text>
               </View>
               <View style={[S.status,granted[p.key]&&S.statusOk]}>
-                <Text style={{fontSize:12,color:granted[p.key]?"#22C55E":"rgba(255,255,255,0.3)"}}>{granted[p.key]?"✓":"○"}</Text>
+                <Text style={{fontSize:12,color:granted[p.key]?c.success:c.textDim}}>{granted[p.key]?"✓":"○"}</Text>
               </View>
             </View>
           ))}
@@ -165,11 +170,11 @@ export default function PermissionsScreen() {
           <Text style={S.skipTxt}>{fromSettings ? 'Done' : 'Skip — grant later in settings'}</Text>
         </TouchableOpacity>
       </ScrollView>
-    </LinearGradient>
+    </View>
   );
 }
 
-const S = StyleSheet.create({
+const makeStyles = (c: Palette, light: boolean) => StyleSheet.create({
   // SCROLLVIEW, NOT A FIXED View (2026-09-17). Seven permission rows plus the
   // amber full-screen-intent card plus two buttons overflow a short screen, and
   // at OS font scale 1.5 the primary button and the exit clipped off the bottom
@@ -179,28 +184,28 @@ const S = StyleSheet.create({
   content:{ padding:24, paddingTop:HEADER_TOP, paddingBottom:24+SCREEN_BOTTOM },
   header:   { alignItems:"center",marginBottom:24,gap:10 },
   badge:    { width:80,height:80,borderRadius:40,backgroundColor:"rgba(74,159,255,0.12)",borderWidth:1.5,borderColor:"rgba(74,159,255,0.3)",justifyContent:"center",alignItems:"center" },
-  title:    { color:"#fff",fontSize:24,fontWeight:"900" },
-  sub:      { color:"rgba(255,255,255,0.4)",fontSize:13,textAlign:"center" },
+  title:    { color:c.text,fontSize:24,fontWeight:"900" },
+  sub:      { color:c.textDim,fontSize:13,textAlign:"center" },
   steps:    { flexDirection:"row",gap:6,justifyContent:"center",marginBottom:6 },
-  dot:      { width:24,height:4,borderRadius:2,backgroundColor:"rgba(255,255,255,0.12)" },
+  dot:      { width:24,height:4,borderRadius:2,backgroundColor:c.glassSoft },
   dotActive:{ backgroundColor:"#4A9FFF",width:32 },
   dotDone:  { backgroundColor:"#22C55E" },
-  stepLbl:  { color:"rgba(74,159,255,0.7)",fontSize:11,textAlign:"center",marginBottom:24 },
-  list:     { backgroundColor:"rgba(255,255,255,0.03)",borderRadius:16,padding:8,marginBottom:28,gap:4 },
+  stepLbl:  { color:c.accentOn,fontSize:11,textAlign:"center",marginBottom:24 },
+  list:     { backgroundColor:c.glassSoft,borderRadius:16,padding:8,marginBottom:28,gap:4 },
   row:      { flexDirection:"row",alignItems:"center",gap:12,padding:12,borderRadius:12 },
-  label:    { color:"#fff",fontSize:14,fontWeight:"600" },
-  psub:     { color:"rgba(255,255,255,0.3)",fontSize:12,marginTop:2 },
-  status:   { width:28,height:28,borderRadius:14,borderWidth:1,borderColor:"rgba(255,255,255,0.12)",justifyContent:"center",alignItems:"center" },
+  label:    { color:c.text,fontSize:14,fontWeight:"600" },
+  psub:     { color:c.textDim,fontSize:12,marginTop:2 },
+  status:   { width:28,height:28,borderRadius:14,borderWidth:1,borderColor:c.glassStroke,justifyContent:"center",alignItems:"center" },
   statusOk: { borderColor:"#22C55E",backgroundColor:"rgba(34,197,94,0.1)" },
   // Amber, not the blue of the primary button: this row is the one thing on the
   // screen that still needs the user, so it has to read as outstanding rather
   // than as another item in the list above.
   fsi:      { flexDirection:"row",alignItems:"center",gap:12,padding:12,borderRadius:12,marginBottom:12,
               backgroundColor:"rgba(245,158,11,0.12)",borderWidth:1,borderColor:"rgba(245,158,11,0.45)" },
-  fsiGo:    { color:"#F59E0B",fontWeight:"800",fontSize:13 },
-  btn:      { backgroundColor:"#4A9FFF",borderRadius:14,paddingVertical:16,alignItems:"center",marginBottom:12 },
+  fsiGo:    { color:light ? "#925B00" : "#F59E0B",fontWeight:"800",fontSize:13 },
+  btn:      { backgroundColor:light ? c.primary : "#4A9FFF",borderRadius:14,paddingVertical:16,alignItems:"center",marginBottom:12 },
   btnOff:   { opacity:0.5 },
   btnTxt:   { color:"#fff",fontSize:16,fontWeight:"800" },
   skip:     { padding:10,alignItems:"center" },
-  skipTxt:  { color:"rgba(255,255,255,0.3)",fontSize:12 },
+  skipTxt:  { color:c.textDim,fontSize:12 },
 });

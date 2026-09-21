@@ -1,3 +1,5 @@
+import { useGamePalette } from './appearance';
+import { AuroraBackground } from '../ui/AuroraBackground';
 // components/games/ui.tsx — shared game-table furniture.
 //
 // Ported from games-web/theme.css. These exist so the four boards cannot drift
@@ -5,9 +7,10 @@
 // panel, one button and one banner, and the first native attempt re-styled
 // each board by hand and looked like four different apps.
 
+import { AppText as Text } from '../ui/Text';
 import React from 'react';
 import {
-  AccessibilityInfo, ActivityIndicator, Pressable, StyleSheet, Text, View,
+  AccessibilityInfo, ActivityIndicator, Pressable, StyleSheet, View,
   useWindowDimensions, type LayoutChangeEvent, type ViewStyle, type StyleProp,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -18,7 +21,6 @@ import Animated, {
   withSequence, withDelay, Easing, cancelAnimation,
 } from 'react-native-reanimated';
 import * as Haptics from 'expo-haptics';
-import * as ScreenOrientation from 'expo-screen-orientation';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import {
   C, S, R, E, D3, T, glass, goldLine, mix, alpha, white, MOTION, AMBIENT, GRAIN,
@@ -165,7 +167,7 @@ const NO_INSETS = { top: 0, bottom: 0, left: 0, right: 0 };
  * would close a feedback loop, and a layout that oscillates is worse than one
  * that estimates. The ScrollView absorbs any error in the estimate.
  */
-export function useBoardBox(chrome = 300): { size: number; onLayout: (e: LayoutChangeEvent) => void } {
+export function useBoardBox(chrome = 300): { size: number; width: number; height: number; onLayout: (e: LayoutChangeEvent) => void } {
   const win = useWindowDimensions();
   // Destructured to four numbers on purpose: the inset OBJECT gets a new
   // identity on every render, so depending on it re-runs the memo constantly,
@@ -190,7 +192,12 @@ export function useBoardBox(chrome = 300): { size: number; onLayout: (e: LayoutC
     [box.w, box.h, win.width, win.height, top, bottom, left, right, chrome],
   );
 
-  return { size, onLayout };
+  return {
+    size,
+    width: box.w || win.width - left - right,
+    height: box.h || win.height - top - bottom,
+    onLayout,
+  };
 }
 
 /**
@@ -226,30 +233,6 @@ export function Coin({ size = 14 }: { size?: number }) {
       <Circle cx="8.6" cy="8.2" r="2.5" fill="#FFFFFF" opacity="0.34" />
     </Svg>
   );
-}
-
-/**
- * Hold this board upright.
- *
- * The three square boards are portrait games: they are one square plus a column
- * of chrome, and in landscape that column has nowhere to go — boardFit correctly
- * falls back to BOARD_MIN and lets the screen scroll, which is a survival mode,
- * not a layout.
- *
- * THIS IS ALSO A REAL BUG FIX, not just a preference. Rummy locks LANDSCAPE
- * while its table is up and restores PORTRAIT_UP on unmount — but an unmount
- * never runs when the process is force-stopped or killed, so the OS-level lock
- * SURVIVED into the next launch. A player whose rummy table died then opened
- * chess and got a landscape board, measured 38px off centre on the Redmi:
- * nothing owns the horizontal safe-area inset in that orientation, so the board
- * centres inside the full window while 76px of it sits under the cutout.
- * Asserting the lock on mount makes each board responsible for its own
- * orientation rather than inheriting whatever the last screen left behind.
- */
-export function usePortraitLock() {
-  React.useEffect(() => {
-    void ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP).catch(() => {});
-  }, []);
 }
 
 /** Fluid type sizes, resolved against the real screen width. */
@@ -299,6 +282,8 @@ export function TableBackground({
   /** Edge darkness, 0..1. 0 is off, which is what every existing caller gets. */
   vignette?: number;
 }) {
+  const palette = useGamePalette();
+  if (palette.light) return <View style={[{ flex: 1, backgroundColor: palette.bg }, style]}><AuroraBackground variant="mini" />{children}</View>;
   return (
     <View style={[{ flex: 1, backgroundColor: bg }, style]}>
       <Svg style={StyleSheet.absoluteFill} pointerEvents="none">
@@ -350,7 +335,8 @@ export function TableBackground({
 
 /** .glass / .panel / .lobby / .tablecard */
 export function Panel({ children, style }: { children?: React.ReactNode; style?: StyleProp<ViewStyle> }) {
-  return <View style={[glass, { padding: S[4] }, style]}>{children}</View>;
+  const palette = useGamePalette();
+  return <View style={[glass, palette.light && { backgroundColor: palette.card, borderColor: palette.line }, { padding: S[4] }, style]}>{children}</View>;
 }
 
 /**
@@ -386,6 +372,7 @@ export function Btn({
   compact?: boolean;
   accessibilityLabel?: string;
 }) {
+  const C = useGamePalette();
   const t = useType();
   const scale = useSharedValue(1);
   // Sweep travels in px across the measured width. Percentages would be
@@ -434,9 +421,9 @@ export function Btn({
   // Not `glassy()` from the theme: that carries elevation 12, which is a PANEL's
   // lift. A button lifted as far as the panel it sits on has nothing to sit on.
   const glassFace: ViewStyle = {
-    backgroundColor: white(0.09),
+    backgroundColor: C.light ? C.panel2 : white(0.09),
     borderWidth: 1,
-    borderColor: white(0.20),
+    borderColor: C.light ? C.line : white(0.20),
     borderRadius: R[2],
     boxShadow: `0 6px 18px rgba(0,0,0,0.35), inset 0 1px 0 ${white(0.18)}`,
   };
@@ -451,7 +438,7 @@ export function Btn({
       {busy
         ? <ActivityIndicator size="small" color={fg} />
         : label
-          ? <Text numberOfLines={1} style={{ color: fg, fontSize: compact ? t.sm : t.md, fontWeight: '800', letterSpacing: 0.2 }}>{label}</Text>
+          ? <Text numberOfLines={2} style={{ flexShrink: 1, textAlign: 'center', color: fg, fontSize: compact ? t.sm : t.md, fontWeight: '800', letterSpacing: 0.2 }}>{label}</Text>
           : null}
     </>
   );
@@ -590,7 +577,7 @@ export function PlayerRow({
           right edge — the subtitle is caller-supplied and short only by
           convention (a colour name, "N wins"), never by contract. */}
       {subtitle ? (
-        <Text numberOfLines={1} style={{ flexShrink: 1, color: C.muted, fontSize: t.sm }}>{subtitle}</Text>
+        <Text numberOfLines={1} style={{ flexShrink: 1, color: active ? C.text : C.muted, fontSize: t.sm }}>{subtitle}</Text>
       ) : null}
       {tag ? <Tag label={tag} /> : null}
     </View>
@@ -760,6 +747,7 @@ export function RoundBtn({
   label: string;
   onPress: () => void;
 }) {
+  const C = useGamePalette();
   const scale = useSharedValue(1);
   const a = useAnimatedStyle(() => ({ transform: [{ scale: scale.value }] }));
   return (
@@ -775,7 +763,7 @@ export function RoundBtn({
       style={[a, {
         width: 36, height: 36, borderRadius: 18,
         alignItems: 'center', justifyContent: 'center',
-        borderWidth: 1, borderColor: white(0.20), backgroundColor: white(0.08),
+        borderWidth: 1, borderColor: C.light ? C.line : white(0.20), backgroundColor: C.light ? C.panel : white(0.08),
         boxShadow: `0 4px 12px rgba(0,0,0,0.30), inset 0 1px 0 ${white(0.16)}`,
       }]}
     >
@@ -824,6 +812,7 @@ export function GameTopBar({
   /** Controls that belong to the screen, not to navigation. */
   right?: React.ReactNode;
 }) {
+  const C = useGamePalette();
   const t = useType();
   return (
     <View style={{

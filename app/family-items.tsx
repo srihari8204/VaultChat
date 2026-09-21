@@ -9,9 +9,10 @@
 // in lib/items/proximity + leftBehind (pure, self-checked); this file is
 // permission, scan lifecycle and layout.
 
+import { AppText as Text } from '../components/ui/Text';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  View, Text, ScrollView, TouchableOpacity, StyleSheet, ActivityIndicator, Alert, TextInput, Switch,
+  View, ScrollView, TouchableOpacity, StyleSheet, ActivityIndicator, Alert, TextInput, Switch,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { Stack, useLocalSearchParams } from 'expo-router';
@@ -270,7 +271,7 @@ export default function FamilyItemsScreen() {
           const dir = trend(prevRssiRef.current.get(it.id), r);
           return (
             <View key={it.id} style={[st.card, { backgroundColor: G.pane, borderColor: band === 'immediate' ? colors.success : G.edge }]}>
-              <View style={[st.icon, { backgroundColor: BAND_COLOR(band, colors) + '22' }]}>
+              <View style={[st.icon, { backgroundColor: G.paneFaint }]}>
                 <Ionicons name={it.icon as any} size={20} color={BAND_COLOR(band, colors)} />
               </View>
               <View style={{ flex: 1, minWidth: 0 }}>

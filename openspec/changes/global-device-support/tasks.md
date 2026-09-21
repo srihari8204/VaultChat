@@ -74,7 +74,7 @@
 - [ ] 5.1 Act on the task 0.3 decision for `app/permissions.tsx`, `app/biometric-setup.tsx`, `app/security-questions.tsx`. If kept, wire a real entry point and cover it; if deleted, remove their now-unreferenced imports. Either way the copy "Skip — grant later in settings" must name a destination that exists, or be changed to describe what actually happens.
 - [ ] 5.2 Delete `utils/notifications.ts` — a duplicate notification-permission implementation with zero importers, superseded by `lib/push.ts`.
 - [ ] 5.3 `app/(tabs)/chats.tsx` — the long-press action sheet is unreachable and holds `doFavourite`, the **only** un-favourite path in the app. Rewire it to a reachable control; the capability is otherwise absent from the product.
-- [ ] 5.4 `app/(tabs)/mini.tsx` — the calculator (~150 lines, 4 `useState`) is unreachable because nothing passes `'calculator'` to the open handler. Reroute if wanted, delete if not.
+- [x] 5.4 `app/(tabs)/mini.tsx` — the calculator (~150 lines, 4 `useState`) is unreachable because nothing passes `'calculator'` to the open handler. Reroute if wanted, delete if not.
 - [ ] 5.5 Add a route-coverage guardrail: every route file is reachable from at least one navigation path or carries a documented exemption.
 - [ ] 5.6 **Written → verified**: typecheck, full suite, guardrails green; confirm no dead imports remain from any deletion.
 
@@ -83,7 +83,7 @@
 - [ ] 6.1 Record the task 0.1 counts as ratchet budgets: direct `Text` imports, and hardcoded user-visible strings. Each fails on an increase and lowers on improvement.
 - [ ] 6.2 Tighten `lib/themeCoverage.selftest.ts` so the black/white text exemption requires an adjacent non-themed `backgroundColor`. This is the rule that would have caught the mini-apps tab rendering black text on a dark themed surface.
 - [ ] 6.3 Add the direction-aware layout guardrail: flag `marginLeft`/`marginRight`/`paddingLeft`/`paddingRight`/`left`/`right` in direction-sensitive contexts, with documented exemptions. `lib/i18n/engine.ts` remains the single source of direction.
-- [ ] 6.4 Fix `app/(tabs)/mini.tsx`'s 11 hardcoded `#000000` text colours on themed dark surfaces — the bug 6.2 pins.
+- [x] 6.4 Fix `app/(tabs)/mini.tsx`'s 11 hardcoded `#000000` text colours on themed dark surfaces — the bug 6.2 pins.
 - [ ] 6.5 **Written → verified**: full suite green with all new guardrails active; every new rule has a runnable assert-based selftest and none uses `require('fs')` in app code.
 
 ## 7. Ponytail review and close-out

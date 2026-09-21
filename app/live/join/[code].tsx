@@ -143,7 +143,7 @@ export default function LiveJoinScreen() {
 >
       <AuroraBackground />
         <Stack.Screen options={{ headerShown: false }} />
-      // statusbar-exempt: live video fills the screen on a dark ground at every theme.
+        {/* statusbar-exempt: live video fills the screen on a dark ground at every theme. */}
         <StatusBar barStyle="light-content" />
         <View style={s.body}>
           <Ionicons name="person-circle-outline" size={48} color={colors.primary} />

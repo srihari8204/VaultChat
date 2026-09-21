@@ -116,22 +116,18 @@ export function selectTransport(): TransportName {
 
 async function connect(): Promise<RealtimeSocket> {
   const generation = ccwireGeneration;
-  if (!(await getAccessToken())) throw new Error('Not signed in');
   perf.setSendTransport('http');
   perf.setConnState('connecting'); setConn('CONNECTING');
   let candidate: RealtimeSocket | null = null;
   try {
-    // Collapsed from sequential awaits into one Promise.all (2026-09-17).
+    // Token, module setup, native transport discovery, and device id are all
+    // independent. Keep them overlapped so the first network handshake is not
+    // serialized behind a Keystore read during cold start.
     //
-    // WHAT THIS ACTUALLY BUYS, precisely — the obvious story is wrong:
-    // metro-runtime's asyncRequire returns a SYNCHRONOUS require wrapped in a
-    // resolved promise, so these import() calls do no I/O and awaiting one only
-    // costs a microtask, not a yield back to the boot effect. Three of the five
-    // are also one static dependency chain (eventsSocket -> transport ->
-    // client), so requiring eventsSocket already evaluates the other two.
-    // The ONE real win: import('./ccwire/nativeSocket') used to sit behind
-    // `await getDeviceId()`, a genuine SecureStore/Keystore round trip (tens of
-    // ms on Android). Its module eval now overlaps that read. That is all.
+    // WHAT THIS ACTUALLY BUYS: the expensive pieces are the Android Keystore
+    // reads for the access token and device id. Module imports are mostly
+    // synchronous Metro work, but overlapping them with those reads keeps the
+    // first CC-Wire dial from waiting on each step one after another.
     //
     // FAILURE SEMANTICS: preserved for every entry — a transport/eventsSocket/
     // client rejection still rejects and lands in the catch below; nativeSocket
@@ -140,13 +136,16 @@ async function connect(): Promise<RealtimeSocket> {
     // getDeviceId() now also runs on a failing-transport path where it used to
     // be skipped, so a first-run device may persist vc_device_id there. It is
     // idempotent and would happen on the next successful connect anyway.
-    const [m, { CCWireEventSocket }, { seedFromDeviceId }, deviceId, native] = await Promise.all([
+    const [token, m, { CCWireEventSocket }, { seedFromDeviceId }, deviceId, native] = await Promise.all([
+      getAccessToken(),
       import('./ccwire/transport'),
       import('./ccwire/eventsSocket'),
       import('./ccwire/client'),
       import('../services/deviceService').then((x) => x.getDeviceId()).catch(() => undefined) as Promise<string | undefined>,
       import('./ccwire/nativeSocket').catch(() => null),
     ]);
+    if (!token) throw new Error('Not signed in');
+    let firstToken: string | null = token;
     const webSocket = native?.getNativeWebSocketImpl();
     const webTransportUrl = m.ccwireWebTransportUrl(SERVER_URL, process.env.EXPO_PUBLIC_CCWIRE_WEBTRANSPORT_URL);
     const webTransport = webTransportUrl ? native?.getNativeWebSocketImpl(webTransportUrl) : undefined;
@@ -154,7 +153,10 @@ async function connect(): Promise<RealtimeSocket> {
     recoverCCWireSession = () => m.recoverCCWire();
     const s = new CCWireEventSocket({
       serverUrl: SERVER_URL,
-      getToken: async () => (await getAccessToken()) ?? '',
+      getToken: async () => {
+        if (firstToken) { const t = firstToken; firstToken = null; return t; }
+        return (await getAccessToken()) ?? '';
+      },
       onResyncRequired: async () => { await (await import('./syncEngine')).resyncRequired(); },
       // Stable per-install id for the protobuf ClientHello. Authorization
       // remains the upgrade JWT; devices without the native module use JS WS.

@@ -6,7 +6,7 @@ context: |
   Stack
   - App: React Native + Expo (TS), op-sqlite local store, socket.io, LiveKit for all calls, MapLibre (@any-routing) for maps.
   - Backend: Go (vaultchat-backend-go, go 1.26) + Node (vaultchat-backend). Postgres, numbered SQL migrations in
-    vaultchat-backend/migrations/NNN_*.sql (122 is the latest applied on prod).
+    vaultchat-backend/migrations/NNN_*.sql (137 is the latest applied on prod; 136 ledger entries verified 2026-09-21).
   - Prod: Hetzner, docker compose, host nginx -> caddy. Self-hosted LiveKit, Valhalla (road distance), coturn, R2 for media.
 
   Conventions that constrain every proposal

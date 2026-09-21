@@ -9,14 +9,15 @@
 // Scoped server-side: ops sees the space, a driver sees their own run, a
 // guardian sees only riders they are linked to. There is no filter here.
 
+import { AppText as Text } from '../components/ui/Text';
 import React, { useCallback, useMemo, useState } from 'react';
 import {
-  View, Text, StyleSheet, ScrollView, ActivityIndicator, TouchableOpacity,
+  View, StyleSheet, ScrollView, ActivityIndicator, TouchableOpacity,
   RefreshControl, Alert,
 } from 'react-native';
 import { Stack, useLocalSearchParams, useRouter, useFocusEffect } from 'expo-router';
 import { useSpaceColors, spaceHeader } from '../lib/spaces/theme';
-import type { Palette } from '../constants/theme';
+import type { SpacePalette as Palette } from '../lib/spaces/theme';
 import { getPendingPickups, type PendingPickup } from '../lib/spaces/api';
 import { AuroraBackground } from '../components/ui';
 

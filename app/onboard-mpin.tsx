@@ -8,12 +8,13 @@
 
 import { Ionicons } from '@expo/vector-icons';
 import { Stack, useRouter } from 'expo-router';
-import { useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, Animated, BackHandler, Pressable, StyleSheet, Text, View } from 'react-native';
+import { useMemo, useEffect, useRef, useState } from 'react';
+import { ActivityIndicator, Alert, Animated, BackHandler, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { MpinInput } from '../components/auth/MpinInput';
 import { initProfile, onboarding, saveSecurityQuestions, setMpinRemote, onboardingError } from '../lib/onboarding';
-import { AuthSky, BrandMark, StepRail } from '../components/ui';
-import { AUTH } from '../constants/authTheme';
+import { AuthSky, BrandMark, KeyboardSafe, StepRail } from '../components/ui';
+import { type AuthPalette } from '../constants/authTheme';
+import { useAuthTheme } from '../lib/useAuthTheme';
 
 function isWeak(m: string, dobYear?: string): boolean {
   if (!/^\d{6}$/.test(m)) return true;
@@ -25,6 +26,8 @@ function isWeak(m: string, dobYear?: string): boolean {
 }
 
 export default function OnboardMpin() {
+  const AUTH = useAuthTheme();
+  const s = useMemo(() => makeStyles(AUTH), [AUTH]);
   const router = useRouter();
 
   const [phase, setPhase] = useState<'set' | 'confirm'>('set');
@@ -121,7 +124,8 @@ export default function OnboardMpin() {
           <Ionicons name="arrow-back" size={24} color={AUTH.text} />
         </Pressable>
       )}
-      <View style={s.body}>
+      <KeyboardSafe style={{ flex: 1 }}>
+      <ScrollView contentContainerStyle={s.body} keyboardShouldPersistTaps="handled">
         {/* The mark replaces the 🔐 emoji: a padlock glyph renders as whatever
             font the OS picked, which is three different pictures across phones. */}
         <BrandMark size={52} markOnly />
@@ -141,12 +145,13 @@ export default function OnboardMpin() {
             only shaken — the shake is invisible to a screen reader. */}
         {!!msg && <Text style={s.msg} accessibilityLiveRegion="polite">{msg}</Text>}
         {busy && <Text style={s.sub}>Securing your account…</Text>}
-      </View>
+      </ScrollView>
+      </KeyboardSafe>
     </View>
   );
 }
 
-const s = StyleSheet.create({
+const makeStyles = (AUTH: AuthPalette) => StyleSheet.create({
   screen: { flex: 1, backgroundColor: 'transparent' },
   back: { paddingHorizontal: 20, paddingTop: 8, alignSelf: 'flex-start' },
   // 56 dated from before this screen was in INSET_SCREENS, where the root
@@ -154,7 +159,7 @@ const s = StyleSheet.create({
   // = 108dp of empty space above the title on the Honor (44dp inset), and a
   // back row sits between them as well. 32 is the design gap with the
   // status-bar allowance taken back out (2026-09-17).
-  body: { flex: 1, paddingHorizontal: 24, paddingTop: 32, alignItems: 'center' },
+  body: { flexGrow: 1, paddingHorizontal: 24, paddingTop: 32, paddingBottom: 32, alignItems: 'center' },
   title: { color: AUTH.text, fontSize: 24, fontWeight: '900' },
   sub: { color: AUTH.dim, fontSize: 14, marginTop: 8, textAlign: 'center' },
   rail: { width: 132, marginTop: 14 },

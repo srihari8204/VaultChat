@@ -105,8 +105,31 @@ contrast('dark warn on warnSoft', FIN_DARK.warn, FIN_DARK.warnSoft);
 contrast('dark info on infoSoft', FIN_DARK.info, FIN_DARK.infoSoft);
 // Brand text on the dark brand fill, at heading weight.
 contrast('dark brandInk on brandSoft', FIN_DARK.brandInk, FIN_DARK.brandSoft, AA_LARGE);
+contrast('dark brand action on brandSoft', FIN_DARK.brandDeep, FIN_DARK.brandSoft);
+// The brightest dark pane: white at 12% over bgTop (#151A24).
+contrast('dark brand action on raised glass', FIN_DARK.brandDeep, '#31353E');
 // Text ON the brand colour (buttons): onBrand is dark ink on a light lavender.
 contrast('dark onBrand on brand', FIN_DARK.onBrand, FIN_DARK.brand);
+for (const [scheme, palette] of [['light', FIN], ['dark', FIN_DARK]] as const) {
+  contrast(`${scheme} button text on brandDeep`, palette.onBrand, palette.brandDeep);
+  contrast(`${scheme} destructive button text`, palette.onBrand, palette.bad);
+  contrast(`${scheme} completed status`, palette.sub, palette.card2);
+  contrast(`${scheme} undo text on snackbar`, palette.cardSolid, palette.text);
+}
+
+// Hero captions are translucent white even in dark mode; check their actual
+// composited colour at every gradient stop, not just fully opaque headings.
+function whiteOver(bg: string, alpha: number): string {
+  return '#' + [1, 3, 5].map(start => Math.round(
+    255 * alpha + parseInt(bg.slice(start, start + 2), 16) * (1 - alpha),
+  ).toString(16).padStart(2, '0')).join('');
+}
+const heroes = SRC.slice(SRC.indexOf('export const FIN_HERO:'), SRC.indexOf('/** Corner radii.'));
+for (const match of heroes.matchAll(/(brand|good|bad|warn):\s*\['(#[A-Fa-f0-9]+)',\s*'(#[A-Fa-f0-9]+)'\]/g)) {
+  for (const stop of [match[2], match[3]]) {
+    contrast(`${match[1]} hero caption on ${stop}`, whiteOver(stop, 0.8), stop);
+  }
+}
 
 // ── 4. the light palette keeps the contrast fixes it was given ────
 contrast('light bad on white',  FIN.bad,  '#FFFFFF');
@@ -114,6 +137,7 @@ contrast('light warn on white', FIN.warn, '#FFFFFF');
 contrast('light good on white', FIN.good, '#FFFFFF');
 contrast('light sub on white',  FIN.sub,  '#FFFFFF');
 contrast('light faint on white', FIN.faint, '#FFFFFF');
+for (const stop of [FIN.bgTop, FIN.bgMid, FIN.bgBottom]) contrast('light faint directly on ground', FIN.faint, stop);
 // The regression guard: these two values were replaced BECAUSE they failed.
 ok('light danger is not the old #DC2626', FIN.bad !== '#DC2626');
 ok('light warn is not the old #D97706',   FIN.warn !== '#D97706');

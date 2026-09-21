@@ -27,6 +27,7 @@ package routes
 import (
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -189,6 +190,25 @@ func TestNegotiatedEndpointsVaryOnAccept(t *testing.T) {
 				t.Errorf("%s with Accept %q: Vary %q, want \"Accept\"", c.name, accept, v)
 			}
 		}
+	}
+}
+
+func TestNegotiatedEndpointsPreserveHeaderLists(t *testing.T) {
+	for _, c := range acceptNegotiatedEndpoints() {
+		t.Run(c.name, func(t *testing.T) {
+			r := httptest.NewRequest(http.MethodGet, "/", nil)
+			r.Header.Add("Accept", "application/json")
+			r.Header.Add("Accept", protobufMediaType)
+			w := httptest.NewRecorder()
+			w.Header().Add("Vary", "Origin")
+			c.call(w, r)
+			if got := w.Header().Get("Content-Type"); got != protobufMediaType {
+				t.Fatalf("split Accept header: Content-Type = %q", got)
+			}
+			if got := strings.Join(w.Header().Values("Vary"), ","); got != "Origin,Accept" {
+				t.Fatalf("Vary = %q, want Origin,Accept", got)
+			}
+		})
 	}
 }
 

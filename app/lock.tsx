@@ -16,6 +16,7 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
+import { StatusBar } from "expo-status-bar";
 import { recordAuthTime } from "../services/lockService";
 
 // CRED palette
@@ -260,6 +261,7 @@ export default function LockScreen() {
 
   return (
     <View style={S.bg}>
+      <StatusBar style="light" />
       <Animated.View
         style={[
           S.container,

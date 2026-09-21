@@ -34,26 +34,18 @@
  * The felt, brightest first: the lit centre, the body of the cloth, and the
  * shadow at the rail. ONE LINE TO CHANGE if you want a different table.
  *
- * DEEP EMERALD. It has been green (a port of rummy.css), then wine (to match
- * the maroon room), then teal (because a red table in a red room has nothing to
- * push against). Emerald is the teal carried back toward green: it keeps the
- * separation from the maroon surround that the teal bought, and recovers the
- * card-room register that the teal was starting to lose — a table should read
- * as cloth, not as a UI panel that happens to be oval.
+ * Teal emerald keeps ivory ranks clear and separates the felt from the slate
+ * surround. The rail's transparent highlights share the same cool light.
  */
-export const FELT = ['#2A8A63', '#14624A', '#0A3A2C'] as const;
+export const FELT = ['#23977C', '#0F6A59', '#063C38'] as const;
 
 /**
  * The room the table stands in.
  *
- * A warm lounge rather than the old maroon near-black: amber from the left,
- * cool from the right, so the brass rail has something to catch and the cloth
- * is not the only lit thing on screen. This is the LIGHT of the reference
- * photograph, not the photograph — a full-bleed image compositing behind a
- * board that animates thirteen cards is a per-frame cost for a surface nobody
- * looks at.
+ * Slate, lit from both sides. Amber catches the fine brass inlay; the teal
+ * reflection connects the surround to the felt without a bitmap or blur.
  */
-export const ROOM = ['#2A1A12', '#160D0C', '#0B0708'] as const;
+export const ROOM = ['#23394A', '#122235', '#07101E'] as const;
 export const ROOM_GLOW = [
   { color: '#C98A3C', opacity: 0.22, cx: '4%',  cy: '34%', rx: '46%', ry: '62%' },
   { color: '#2E6B7A', opacity: 0.16, cx: '86%', cy: '6%',  rx: '42%', ry: '56%' },
@@ -99,12 +91,12 @@ export type GlassTone = 'navy' | 'emerald' | 'teal' | 'gold' | 'blue' | 'danger'
  * composites to mud, which is what the first attempt at this looked like.
  */
 const TONE: Record<GlassTone, { fill: string; edge: string; ink: string }> = {
-  navy:    { fill: 'rgba(8,14,26,0.46)',   edge: 'rgba(255,255,255,0.16)', ink: INK },
-  emerald: { fill: 'rgba(4,32,24,0.48)',   edge: 'rgba(126,240,190,0.26)', ink: '#CFF6E4' },
-  teal:    { fill: 'rgba(4,28,32,0.46)',   edge: 'rgba(111,227,210,0.30)', ink: CYAN },
-  gold:    { fill: 'rgba(30,20,2,0.50)',   edge: 'rgba(243,194,69,0.42)',  ink: '#FFDD72' },
-  blue:    { fill: 'rgba(10,20,40,0.46)',  edge: 'rgba(127,216,255,0.28)', ink: '#BFE6FF' },
-  danger:  { fill: 'rgba(38,6,12,0.50)',   edge: 'rgba(255,125,134,0.36)', ink: '#FF9BA2' },
+  navy:    { fill: 'rgba(6,14,28,0.68)',   edge: 'rgba(255,255,255,0.22)', ink: INK },
+  emerald: { fill: 'rgba(3,36,27,0.66)',   edge: 'rgba(126,240,190,0.34)', ink: '#CFF6E4' },
+  teal:    { fill: 'rgba(3,32,38,0.66)',   edge: 'rgba(111,227,210,0.38)', ink: CYAN },
+  gold:    { fill: 'rgba(34,22,3,0.70)',   edge: 'rgba(243,194,69,0.50)',  ink: '#FFDD72' },
+  blue:    { fill: 'rgba(8,20,44,0.68)',   edge: 'rgba(127,216,255,0.36)', ink: '#BFE6FF' },
+  danger:  { fill: 'rgba(44,7,14,0.70)',   edge: 'rgba(255,125,134,0.46)', ink: '#FF9BA2' },
 };
 
 /** The colour a tone's own text should be, so a caller never guesses. */
@@ -171,13 +163,13 @@ export function onRoom(radius = 16, alpha = 0.075): GlassStyle {
  * is most of what makes a hand look like objects rather than rectangles.
  */
 export const CARD = {
-  face: '#FFFDF4',
+  face: '#FFFEFA',
   /** The paper's shaded lower half — a one-stop gradient, not a texture image. */
-  faceLow: '#F4EEDD',
+  faceLow: '#F1F3EC',
   jokerFace: '#F7F0FF',
-  edge: '#C9A44C',
-  ink: '#14161C',
-  red: '#D41F3C',
+  edge: '#C7CEC5',
+  ink: '#111C22',
+  red: '#BF1730',
   joker: '#7C3AED',
   /**
    * The back: NAVY, not the old crimson pair.

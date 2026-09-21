@@ -18,15 +18,16 @@
 // `applied` flag, because a driver cannot wait for a round trip before turning
 // to the next child.
 
+import { AppText as Text } from '../components/ui/Text';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  View, Text, StyleSheet, TouchableOpacity, ScrollView, ActivityIndicator,
+  View, StyleSheet, TouchableOpacity, ScrollView, ActivityIndicator,
   Alert, TextInput, Modal,
 } from 'react-native';
 import { Stack, useLocalSearchParams, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useSpaceColors, spaceHeader } from '../lib/spaces/theme';
-import type { Palette } from '../constants/theme';
+import type { SpacePalette as Palette } from '../lib/spaces/theme';
 import {
   getRun, setRiderState, setRunStatus, pingRun, fileIncident, arriveAtStop,
 } from '../lib/spaces/api';
@@ -63,6 +64,7 @@ export default function SpaceRunDriverScreen() {
   const runId = String(params.runId || '');
 
   const [run, setRun] = useState<Run | null>(null);
+  const [loadedSpaceId, setLoadedSpaceId] = useState('');
   const [stops, setStops] = useState<RunStop[]>([]);
   const [riders, setRiders] = useState<RunRider[]>([]);
   const [loading, setLoading] = useState(true);
@@ -70,7 +72,6 @@ export default function SpaceRunDriverScreen() {
   const [codeFor, setCodeFor] = useState<{ rider: RunRider; state: RiderState } | null>(null);
   const [code, setCode] = useState('');
   const [incidentOpen, setIncidentOpen] = useState(false);
-  const pingTimer = useRef<any>(null);
   // Detection state carries the hysteresis, so it must survive re-renders — a
   // fresh state on every render would re-arm every condition and turn one
   // incident into an alert per fix.
@@ -90,9 +91,11 @@ export default function SpaceRunDriverScreen() {
   );
 
   const load = useCallback(async () => {
+    setLoadedSpaceId('');
     try {
       const data = await getRun(spaceId, runId);
       setRun(data.run);
+      setLoadedSpaceId(spaceId);
       setStops(data.stops || []);
       setRiders(data.riders || []);
     } catch (e: any) {
@@ -102,15 +105,18 @@ export default function SpaceRunDriverScreen() {
     }
   }, [spaceId, runId]);
 
+  useFocusEffect(useCallback(() => { void load(); }, [load]));
+
   useFocusEffect(useCallback(() => {
-    load();
     // Heartbeat only while the screen is open and the run is out. Pinging a
     // scheduled or finished run would be claiming a bus is on the road.
-    pingTimer.current = setInterval(() => {
+    if (!spaceId.trim() || !runId.trim() || loadedSpaceId !== spaceId
+      || run?.id !== runId || run.status !== 'started') return;
+    const timer = setInterval(() => {
       pingRun(spaceId, runId).catch(() => { /* the gap IS the signal; nothing to do here */ });
     }, PING_MS);
-    return () => { if (pingTimer.current) clearInterval(pingTimer.current); };
-  }, [load, spaceId, runId]));
+    return () => clearInterval(timer);
+  }, [spaceId, runId, loadedSpaceId, run?.id, run?.status]));
 
   // Broadcast this vehicle's position while the run is out (S2.8).
   //
@@ -481,7 +487,7 @@ export default function SpaceRunDriverScreen() {
       </ScrollView>
 
       <TouchableOpacity style={s.incidentBar} onPress={() => setIncidentOpen(true)}>
-        <Ionicons name="alert-circle-outline" size={20} color="#EF4444" />
+        <Ionicons name="alert-circle-outline" size={20} color={colors.danger} />
         <Text style={s.incidentText}>Report a problem</Text>
       </TouchableOpacity>
 
@@ -567,7 +573,7 @@ function settledIcon(s: RiderState): any {
 function settledColour(s: RiderState, colors: Palette): string {
   // Amber, not red: a child who was not at the stop is a fact to follow up, not
   // a failure. Red is reserved for incidents.
-  return s === 'absent' || s === 'no_show' ? '#F59E0B' : colors.success;
+  return s === 'absent' || s === 'no_show' ? colors.warning : colors.success;
 }
 
 const styles = (c: Palette) => StyleSheet.create({
@@ -577,11 +583,11 @@ const styles = (c: Palette) => StyleSheet.create({
   vehicle: { fontSize: 22, fontWeight: '700', color: c.text },
   muted: { color: c.textDim, fontSize: 14 },
   runBtn: { paddingHorizontal: 20, paddingVertical: 12, borderRadius: 12 },
-  runBtnGo: { backgroundColor: c.primary },
-  runBtnStop: { backgroundColor: '#EF4444' },
+  runBtnGo: { backgroundColor: c.brandOnLight },
+  runBtnStop: { backgroundColor: c.danger },
   runBtnText: { color: '#fff', fontWeight: '700', fontSize: 16 },
   progressTrack: { height: 4, backgroundColor: c.border, marginHorizontal: 16, borderRadius: 2 },
-  progressFill: { height: 4, backgroundColor: c.primary, borderRadius: 2 },
+  progressFill: { height: 4, backgroundColor: c.brandOnLight, borderRadius: 2 },
   body: { padding: 16, paddingBottom: 90, gap: 10 },
   notice: { flexDirection: 'row', gap: 8, alignItems: 'center', padding: 12, borderRadius: 10, backgroundColor: c.glassSoft },
   noticeText: { color: c.text, flex: 1 },
@@ -601,12 +607,12 @@ const styles = (c: Palette) => StyleSheet.create({
   absentBtn: { backgroundColor: c.border },
   arriveBtn: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
-    backgroundColor: c.primary, borderRadius: 12, paddingVertical: 14, marginBottom: 12,
+    backgroundColor: c.brandOnLight, borderRadius: 12, paddingVertical: 14, marginBottom: 12,
   },
   arriveBtnDone: { backgroundColor: c.success + '18' },
   arriveText: { color: '#fff', fontWeight: '800', fontSize: 15 },
   absentText: { color: c.text, fontWeight: '600' },
-  boardBtn: { backgroundColor: c.primary },
+  boardBtn: { backgroundColor: c.brandOnLight },
   boardText: { color: '#fff', fontWeight: '700' },
   done: { alignItems: 'center', gap: 8, paddingVertical: 40 },
   doneText: { color: c.text, fontSize: 18, fontWeight: '600' },
@@ -616,9 +622,9 @@ const styles = (c: Palette) => StyleSheet.create({
     // surfaceSolid: this floats OVER the scrolling manifest, and the dusk
     // skin's translucent card let rider rows bleed through the button.
     paddingVertical: 14, borderRadius: 12, backgroundColor: c.surfaceSolid,
-    borderWidth: 1, borderColor: '#EF444455',
+    borderWidth: 1, borderColor: c.danger,
   },
-  incidentText: { color: '#EF4444', fontWeight: '600' },
+  incidentText: { color: c.danger, fontWeight: '600' },
   modalWrap: { flex: 1, backgroundColor: '#0008', alignItems: 'center', justifyContent: 'center', padding: 24 },
   modal: { width: '100%', backgroundColor: c.bg, borderRadius: 16, padding: 20, gap: 10 },
   modalTitle: { color: c.text, fontSize: 18, fontWeight: '700' },

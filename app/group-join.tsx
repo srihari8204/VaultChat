@@ -16,11 +16,13 @@
 
 import React, { useCallback, useState } from 'react';
 import {
-  View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, Alert, ScrollView,
+  View, StyleSheet, TouchableOpacity, ActivityIndicator, Alert, ScrollView,
 } from 'react-native';
 import { Stack, useLocalSearchParams, useFocusEffect, router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../lib/theme';
+import { AuroraBackground } from '../components/ui/AuroraBackground';
+import { AppText as Text } from '../components/ui/Text';
 import { brandAlpha } from '../constants/theme';
 import { requestToJoin, myInvitations } from '../lib/chatService';
 import { groupTypeInfo } from '../lib/groups/catalog';
@@ -80,7 +82,8 @@ export default function GroupJoinScreen() {
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.bg }}>
-      <Stack.Screen options={{ title: 'Join a group', headerTitleAlign: 'center' }} />
+      <AuroraBackground variant="chat" />
+      <Stack.Screen options={{ headerShown: true, headerStyle: { backgroundColor: colors.bg }, headerTintColor: colors.text, headerShadowVisible: false,  title: 'Join a group', headerTitleAlign: 'center' }} />
       <ScrollView contentContainerStyle={{ padding: 20, paddingTop: 32 }}>
 
         <View style={st.hero}>

@@ -1,10 +1,11 @@
 // app/finance/ledger/[id].tsx — Ledger detail: computed totals, actions, timeline.
 
 import React, { useCallback, useState } from 'react';
+import { useFinanceTheme } from '../../../components/finance/useFinanceTheme';
 import { View, Text, ScrollView, StyleSheet, TouchableOpacity, Alert } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter, useFocusEffect } from 'expo-router';
-import { FIN, STATUS_COLORS, FIN_HERO, TABULAR } from '../../../constants/financeTheme';
+import { financeStatusColors, FIN_HERO, TABULAR, type FinancePalette } from '../../../constants/financeTheme';
 import { FinHeader, Card, HeroCard, RowLine, Pill } from '../../../components/finance/ui';
 import { formatINR, fmtDate, fmtDateTime, PERIOD_LABEL } from '../../../utils/financeFormat';
 import { getLedger, deleteLedger, type LedgerEntry } from '../../../db/ledger';
@@ -23,6 +24,9 @@ function computeInterest(e: LedgerEntry) {
 }
 
 export default function LedgerDetail() {
+  const FIN = useFinanceTheme();
+  const s = React.useMemo(() => makeStyles(FIN), [FIN]);
+  const STATUS_COLORS = React.useMemo(() => financeStatusColors(FIN), [FIN]);
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
   const [e, setE] = useState<LedgerEntry | null>(null);
@@ -144,6 +148,8 @@ function tlLabel(k: TimelineRow['kind']): string {
 }
 
 function Action({ icon, label, onPress, primary, danger }: { icon: keyof typeof Ionicons.glyphMap; label: string; onPress: () => void; primary?: boolean; danger?: boolean }) {
+  const FIN = useFinanceTheme();
+  const s = React.useMemo(() => makeStyles(FIN), [FIN]);
   const color = danger ? FIN.bad : primary ? FIN.brandDeep : FIN.text;
   const bg = danger ? FIN.badSoft : primary ? FIN.brandSoft : FIN.card;
   return (
@@ -154,7 +160,7 @@ function Action({ icon, label, onPress, primary, danger }: { icon: keyof typeof 
   );
 }
 
-const s = StyleSheet.create({
+const makeStyles = (FIN: FinancePalette) => StyleSheet.create({
   screen: { flex: 1, backgroundColor: FIN.bg },
   body: { padding: 16, alignSelf: 'center', width: '100%', maxWidth: FIN.contentMax },
   contactRow: { flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 14 },

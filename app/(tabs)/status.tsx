@@ -17,7 +17,8 @@
 // Visibility / TTL / per-viewer tracking happens server-side. This screen
 // just renders + posts.
 
-import { HEADER_TOP, TAB_BAR_SPACE } from '../../constants/layout';
+import { AppText as Text } from '../../components/ui/Text';
+import { HEADER_TOP, SCREEN_BOTTOM, TAB_BAR_SPACE } from '../../constants/layout';
 import * as ImagePicker from 'expo-image-picker';
 import { compressForStatus } from '../../lib/media/compressMedia';
 import GatePicker, { type GateDraft } from '../../components/status/GatePicker';
@@ -44,7 +45,6 @@ import {
   RefreshControl,
   ScrollView,
   StyleSheet,
-  Text,
   TextInput,
   TouchableOpacity,
   View,
@@ -52,7 +52,7 @@ import {
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Ionicons } from '@expo/vector-icons';
 import { StoryRing } from '../../components/StoryRing';
-import { type Palette } from '../../constants/theme';
+import { AuroraDark, type Palette } from '../../constants/theme';
 import { useTheme } from '../../lib/theme';
 import { getAccessToken } from '../../lib/api';
 import { initialOf } from '../../lib/format';
@@ -568,21 +568,22 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   center:       { justifyContent: 'center', alignItems: 'center' },
 
   header:       { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 20, paddingTop: HEADER_TOP, paddingBottom: 16, justifyContent: 'space-between' },
-  title:        { color: c.text, fontSize: 28, fontWeight: '800' },
-  headerBtn:    { width: 40, height: 40, borderRadius: 20, backgroundColor: c.glassSoft, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: c.glassStroke },
+  title:        { flexShrink: 1, marginRight: 8, color: c.text, fontSize: 28, fontWeight: '800' },
+  headerBtn:    { width: 44, height: 44, borderRadius: 22, backgroundColor: c.glassSoft, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: c.glassStroke },
   headerBtnTxt: { color: c.primary, fontSize: 22, fontWeight: '600', marginTop: -2 },
   // Text status composer
   textCompose:      { flex: 1, paddingTop: HEADER_TOP },
   textComposeBar:   { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingBottom: 8 },
   bgSwatch:         { width: 22, height: 22, borderRadius: 11, borderWidth: 1, borderColor: 'rgba(255,255,255,0.4)' },
-  bgSwatchOn:       { borderWidth: 3, borderColor: c.glassStroke },
+  bgSwatchOn:       { borderWidth: 3, borderColor: AuroraDark.text },
   textComposeInput: { flex: 1, color: '#fff', fontSize: 26, fontWeight: '700', paddingHorizontal: 24, textAlignVertical: 'center' },
-  textPostBtn:      { position: 'absolute', right: 20, bottom: 36, width: 56, height: 56, borderRadius: 28, backgroundColor: 'rgba(0,0,0,0.4)', alignItems: 'center', justifyContent: 'center' },
+  textPostBtn:      { position: 'absolute', right: 20, bottom: SCREEN_BOTTOM + 20, width: 56, height: 56, borderRadius: 28, backgroundColor: 'rgba(0,0,0,0.4)', alignItems: 'center', justifyContent: 'center' },
   emojiPanel:       { maxHeight: 200, backgroundColor: 'rgba(0,0,0,0.35)', paddingVertical: 8 },
   emojiGrid:        { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', paddingHorizontal: 8 },
-  emojiSection:     { color: 'rgba(255,255,255,0.6)', fontSize: 11, fontWeight: '700', letterSpacing: 1, paddingHorizontal: 14, paddingTop: 8, paddingBottom: 2 },
+  emojiSection:     { color: 'rgba(255,255,255,0.6)', fontSize: 12, fontWeight: '700', letterSpacing: 1, paddingHorizontal: 14, paddingTop: 8, paddingBottom: 2 },
 
-  previewScreen:    { flex: 1, backgroundColor: c.bg, paddingTop: HEADER_TOP },
+  // Media editing intentionally stays dark: preview controls and gate labels are white.
+  previewScreen:    { flex: 1, backgroundColor: AuroraDark.bg, paddingTop: HEADER_TOP },
   previewBar:       { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingBottom: 8 },
   previewCount:     { color: '#fff', fontSize: 14, fontWeight: '700' },
   previewMain:      { flex: 1, alignItems: 'center', justifyContent: 'center' },
@@ -590,10 +591,10 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   previewPlay:      { position: 'absolute', width: 64, height: 64, borderRadius: 32, backgroundColor: 'rgba(0,0,0,0.45)', alignItems: 'center', justifyContent: 'center' },
   filmstrip:        { maxHeight: 64, paddingVertical: 8 },
   thumb:            { width: 48, height: 48, borderRadius: 8, overflow: 'hidden', borderWidth: 2, borderColor: 'transparent' },
-  thumbOn:          { borderColor: c.glassStroke },
+  thumbOn:          { borderColor: AuroraDark.text },
   thumbImg:         { width: '100%', height: '100%' },
   gateArea:         { maxHeight: 260, backgroundColor: 'rgba(0,0,0,0.35)' },
-  captionRow:       { flexDirection: 'row', alignItems: 'flex-end', gap: 10, paddingHorizontal: 12, paddingBottom: 28, paddingTop: 8 },
+  captionRow:       { flexDirection: 'row', alignItems: 'flex-end', gap: 10, paddingHorizontal: 12, paddingBottom: SCREEN_BOTTOM + 16, paddingTop: 8 },
   captionInput:     { flex: 1, color: '#fff', fontSize: 16, maxHeight: 120, paddingHorizontal: 16, paddingVertical: 12, borderRadius: 24, backgroundColor: 'rgba(255,255,255,0.12)' },
   sendFab:          { width: 50, height: 50, borderRadius: 25, backgroundColor: c.primary, alignItems: 'center', justifyContent: 'center' },
   emojiBtn:         { width: 46, height: 46, alignItems: 'center', justifyContent: 'center' },
@@ -601,9 +602,9 @@ const makeStyles = (c: Palette) => StyleSheet.create({
 
   errorTxt:     { color: c.danger, paddingHorizontal: 16, paddingVertical: 8, fontSize: 12 },
 
-  sectionLabel: { color: c.textDim, fontSize: 11, fontWeight: '700', letterSpacing: 1.2, paddingHorizontal: 20, paddingTop: 16, paddingBottom: 8 },
+  sectionLabel: { color: c.textDim, fontSize: 12, fontWeight: '700', letterSpacing: 1.2, paddingHorizontal: 20, paddingTop: 16, paddingBottom: 8 },
 
-  row:          { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 20, paddingVertical: 12 },
+  row:          { marginHorizontal: 12, marginVertical: 4, borderRadius: 18, borderWidth: StyleSheet.hairlineWidth, borderColor: c.glassStroke, backgroundColor: c.glassSoft, flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 20, paddingVertical: 12 },
   // 3px-thick ring that wraps the avatar. Purple = unseen, grey = all
   // seen. The ring is a padded square with a coloured background.
   avatarRing:        { width: 60, height: 60, borderRadius: 30, padding: 3, alignItems: 'center', justifyContent: 'center' },

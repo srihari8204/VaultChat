@@ -5,7 +5,7 @@
 // these screens make no network requests (spec: lock-history).
 
 import React, { useCallback, useEffect, useState } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, FlatList, Alert, Share, TextInput } from 'react-native';
+import { View, TouchableOpacity, StyleSheet, FlatList, Alert, Share, TextInput } from 'react-native';
 import { Stack } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../lib/theme';
@@ -16,6 +16,7 @@ import {
 } from '../lib/lock/lockStore';
 import { fmtDistance } from '../lib/lock/format';
 import { useLockSettings } from '../lib/lock/lockSettings';
+import { AppText as Text, AuroraBackground } from '../components/ui';
 
 const FILTERS: { key: HistoryFilter; label: string }[] = [
   { key: 'all', label: 'All' }, { key: 'exits', label: 'Exits' },
@@ -127,7 +128,7 @@ export default function LockHistoryScreen() {
       {/* 7-day distance trend (plain Views — no chart lib) */}
       {trend.some((t) => t.meters > 0) && (
         <View style={[st.trendCard, { backgroundColor: colors.glassSoft, borderColor: colors.glassStroke }]}>
-          <Text style={{ color: colors.text + '88', fontSize: 11.5, fontWeight: '700', marginBottom: 8 }}>
+          <Text style={{ color: colors.textDim, fontSize: 11.5, fontWeight: '700', marginBottom: 8 }}>
             DISTANCE WHILE LOCKED — LAST 7 DAYS
           </Text>
           <View style={st.trendRow}>
@@ -139,7 +140,7 @@ export default function LockHistoryScreen() {
                     height: Math.max(3, (t.meters / max) * 56),
                     backgroundColor: t.meters > 0 ? colors.primary : colors.border,
                   }]} />
-                  <Text style={{ color: colors.text + '77', fontSize: 10, marginTop: 4 }}>{t.day}</Text>
+                  <Text style={{ color: colors.textDim, fontSize: 10, marginTop: 4 }}>{t.day}</Text>
                 </View>
               );
             })}
@@ -159,45 +160,46 @@ export default function LockHistoryScreen() {
           <Text style={{ color: colors.primary, fontWeight: '600', fontSize: 13 }}>Export</Text>
         </TouchableOpacity>
         <TouchableOpacity onPress={doClear} style={st.linkRow}>
-          <Ionicons name="trash-outline" size={15} color="#EF4444" />
-          <Text style={{ color: '#EF4444', fontWeight: '600', fontSize: 13 }}>Delete all</Text>
+          <Ionicons name="trash-outline" size={15} color={colors.danger} />
+          <Text style={{ color: colors.danger, fontWeight: '600', fontSize: 13 }}>Delete all</Text>
         </TouchableOpacity>
       </View>
     </View>
   );
 
   return (
-    <View style={[st.screen, { backgroundColor: colors.bg }]}>
-      <Stack.Screen options={{ title: 'Lock History', headerTitleAlign: 'center' }} />
+    <View style={st.screen}>
+      <AuroraBackground />
+      <Stack.Screen options={{ headerShown: true, title: 'Lock History', headerTitleAlign: 'center', headerStyle: { backgroundColor: colors.bg }, headerTintColor: colors.text }} />
       <FlatList
         data={sessions}
         keyExtractor={(s) => String(s.id)}
         ListHeaderComponent={header}
         contentContainerStyle={st.body}
         ListEmptyComponent={
-          <Text style={{ color: colors.text + '77', textAlign: 'center', marginTop: 40, fontSize: 13.5 }}>
+          <Text style={{ color: colors.textDim, textAlign: 'center', marginTop: 40, fontSize: 13.5 }}>
             No lock sessions {filter !== 'all' ? 'matching this filter ' : ''}yet.
           </Text>
         }
         renderItem={({ item: s }) => (
           <TouchableOpacity onPress={() => toggle(s.id)} onLongPress={() => removeOne(s.id)}
-            style={[st.session, { backgroundColor: colors.glassSoft, borderColor: colors.glassStroke }]}>
+            style={[st.session, { backgroundColor: colors.glass, borderColor: colors.glassStroke }]}>
             <View style={st.rowBetween}>
               <Text style={{ color: colors.text, fontWeight: '800', fontSize: 14 }}>{fmtT(s.started_at)}</Text>
-              <Text style={{ color: colors.text + '88', fontSize: 12.5 }}>
+              <Text style={{ color: colors.textDim, fontSize: 12.5 }}>
                 {fmtDistance(s.radius, settings.units)} · {s.ended_at ? fmtMs(s.ended_at - s.started_at) : 'active'}
               </Text>
             </View>
             <View style={[st.rowBetween, { marginTop: 6 }]}>
-              <Text style={{ color: s.exits ? '#EF4444' : '#22C55E', fontSize: 12.5, fontWeight: '600' }}>
+              <Text style={{ color: s.exits ? colors.danger : colors.success, fontSize: 12.5, fontWeight: '600' }}>
                 {s.exits ? `${s.exits} exit${s.exits > 1 ? 's' : ''} · max ${fmtDistance(s.max_distance, settings.units)}` : 'Stayed inside'}
               </Text>
-              <Text style={{ color: colors.text + '77', fontSize: 12.5 }}>
+              <Text style={{ color: colors.textDim, fontSize: 12.5 }}>
                 {s.alarm_ms > 0 ? `alarm ${fmtMs(s.alarm_ms)} · ` : ''}outside {fmtMs(s.time_outside_ms)}
               </Text>
             </View>
             {!!s.notes && open !== s.id && (
-              <Text numberOfLines={1} style={{ color: colors.text + '66', fontSize: 12, marginTop: 4 }}>📝 {s.notes}</Text>
+              <Text numberOfLines={1} style={{ color: colors.textFaint, fontSize: 12, marginTop: 4 }}>📝 {s.notes}</Text>
             )}
 
             {open === s.id && (
@@ -208,8 +210,8 @@ export default function LockHistoryScreen() {
                     <View key={e.id} style={st.eventRow}>
                       <Ionicons name={meta.icon} size={14} color={meta.color} />
                       <Text style={{ color: colors.text, fontSize: 12.5, flex: 1 }}>{meta.label}</Text>
-                      {e.distance != null && <Text style={{ color: colors.text + '77', fontSize: 12 }}>{Math.round(e.distance)} m</Text>}
-                      <Text style={{ color: colors.text + '77', fontSize: 12 }}>
+                      {e.distance != null && <Text style={{ color: colors.textDim, fontSize: 12 }}>{Math.round(e.distance)} m</Text>}
+                      <Text style={{ color: colors.textDim, fontSize: 12 }}>
                         {new Date(e.t).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
                       </Text>
                     </View>
@@ -220,8 +222,8 @@ export default function LockHistoryScreen() {
                   <TextInput
                     value={noteDraft} onChangeText={setNoteDraft}
                     placeholder="Add a note (e.g. “parked at north gate”)…"
-                    placeholderTextColor={colors.text + '55'}
-                    style={{ flex: 1, borderWidth: 1, borderColor: colors.glassStroke, borderRadius: 8, paddingHorizontal: 8, paddingVertical: 5, color: colors.text, fontSize: 12 }}
+                    placeholderTextColor={colors.textFaint}
+                    style={{ flex: 1, borderWidth: 1, borderColor: colors.glassStroke, borderRadius: 8, paddingHorizontal: 8, paddingVertical: 5, color: colors.text, fontSize: 12, backgroundColor: colors.glass }}
                   />
                   <TouchableOpacity
                     accessibilityRole="button" accessibilityLabel="Save note"
@@ -229,7 +231,7 @@ export default function LockHistoryScreen() {
                     <Text style={{ color: colors.primary, fontWeight: '700', fontSize: 12 }}>Save</Text>
                   </TouchableOpacity>
                 </View>
-                <Text style={{ color: colors.text + '55', fontSize: 11, marginTop: 6 }}>
+                <Text style={{ color: colors.textFaint, fontSize: 11, marginTop: 6 }}>
                   {s.center_lat.toFixed(5)}, {s.center_lng.toFixed(5)} · long-press card to delete
                 </Text>
               </View>
@@ -245,13 +247,13 @@ function StatCell({ label, value, colors }: { label: string; value: string; colo
   return (
     <View style={st.statCell}>
       <Text style={{ color: colors.text, fontSize: 16, fontWeight: '800' }}>{value}</Text>
-      <Text style={{ color: colors.text + '77', fontSize: 11, marginTop: 2 }}>{label}</Text>
+      <Text style={{ color: colors.textDim, fontSize: 11, marginTop: 2 }}>{label}</Text>
     </View>
   );
 }
 
 const st = StyleSheet.create({
-  screen: { flex: 1 },
+  screen: { flex: 1, backgroundColor: 'transparent' },
   body: { padding: 16, paddingBottom: 48 },
   chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   chip: { borderWidth: 1, borderRadius: 999, paddingHorizontal: 12, paddingVertical: 7 },

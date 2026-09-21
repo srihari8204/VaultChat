@@ -1,0 +1,214 @@
+{
+  "device": "AWJDVB4702008616",
+  "model": "Honor",
+  "apkSha256": "CB8B93134EB614558AB5F123585882928591296D8EFAA7E344589A4C9856443F",
+  "checkedAt": "2026-09-21T14:56:08.7394313+05:30",
+  "script": "verify-delivery.ps1 -LayoutMatrix",
+  "exitCode": 0,
+  "initialCaptureRetry": "First initial hierarchy failed before matrix settings changed; second attempt captured original Dark/1.0/auto1/rotation0 and completed",
+  "settingsWritableConfirmed": true,
+  "actualReadbacks": [
+    {
+      "hierarchyFrame": "[0,0][1200,2664]",
+      "phase": "font1.5-portrait",
+      "fontScale": "1.5",
+      "autoRotation": "1",
+      "rotation": "0"
+    },
+    {
+      "hierarchyFrame": "[0,0][2664,1200]",
+      "phase": "landscape",
+      "fontScale": "1.0",
+      "autoRotation": "0",
+      "rotation": "1"
+    }
+  ],
+  "routeTitlePasses": 12,
+  "routeChecks": 12,
+  "crashDialogs": 0,
+  "captureFailures": 0,
+  "scope": "Dark appearance: Settings, Finance, Interest Calculator, Family Circle, New group and Games hub at font1.5 portrait and font1.0 landscape; initial presentations only, no form submissions",
+  "restored": {
+    "autoRotation": "1",
+    "fontScale": "1.0",
+    "confirmed": true,
+    "rotation": "0",
+    "appearance": "Dark",
+    "finalScreen": "Chats"
+  },
+  "limitations": [
+    "Actual game boards were not opened: gameplay rotation is not verified",
+    "Hierarchy titles/frames and scroll containers do not prove all text is unclipped or painted contrast is correct",
+    "Light large-font/landscape and every-route matrix remain untested"
+  ],
+  "records": [
+    {
+      "device": "AWJDVB4702008616",
+      "phase": "delivery-dark-font1.5-portrait",
+      "route": "settings",
+      "titleFound": true,
+      "titleBounds": [
+        "[195,179][471,280]"
+      ],
+      "frame": "[0,0][1200,2664]",
+      "appNodes": 73,
+      "scrollContainers": 1,
+      "dialog": false,
+      "crashDialog": false
+    },
+    {
+      "device": "AWJDVB4702008616",
+      "phase": "delivery-dark-font1.5-portrait",
+      "route": "finance",
+      "titleFound": true,
+      "titleBounds": [
+        "[234,165][810,282]"
+      ],
+      "frame": "[0,0][1200,2664]",
+      "appNodes": 77,
+      "scrollContainers": 1,
+      "dialog": false,
+      "crashDialog": false
+    },
+    {
+      "device": "AWJDVB4702008616",
+      "phase": "delivery-dark-font1.5-portrait",
+      "route": "finance/interest",
+      "titleFound": true,
+      "titleBounds": [
+        "[162,168][1037,278]"
+      ],
+      "frame": "[0,0][1200,2664]",
+      "appNodes": 66,
+      "scrollContainers": 1,
+      "dialog": false,
+      "crashDialog": false
+    },
+    {
+      "device": "AWJDVB4702008616",
+      "phase": "delivery-dark-font1.5-portrait",
+      "route": "family-setup",
+      "titleFound": true,
+      "titleBounds": [
+        "[344,160][856,274]"
+      ],
+      "frame": "[0,0][1200,2664]",
+      "appNodes": 50,
+      "scrollContainers": 1,
+      "dialog": false,
+      "crashDialog": false
+    },
+    {
+      "device": "AWJDVB4702008616",
+      "phase": "delivery-dark-font1.5-portrait",
+      "route": "group-create",
+      "titleFound": true,
+      "titleBounds": [
+        "[381,160][819,274]"
+      ],
+      "frame": "[0,0][1200,2664]",
+      "appNodes": 79,
+      "scrollContainers": 1,
+      "dialog": false,
+      "crashDialog": false
+    },
+    {
+      "device": "AWJDVB4702008616",
+      "phase": "delivery-dark-font1.5-portrait",
+      "route": "games",
+      "titleFound": true,
+      "titleBounds": [
+        "[208,173][661,261]"
+      ],
+      "frame": "[0,0][1200,2664]",
+      "appNodes": 103,
+      "scrollContainers": 1,
+      "dialog": false,
+      "crashDialog": false
+    },
+    {
+      "device": "AWJDVB4702008616",
+      "phase": "delivery-dark-landscape",
+      "route": "settings",
+      "titleFound": true,
+      "titleBounds": [
+        "[195,166][471,267]"
+      ],
+      "frame": "[0,0][2664,1200]",
+      "appNodes": 47,
+      "scrollContainers": 1,
+      "dialog": false,
+      "crashDialog": false
+    },
+    {
+      "device": "AWJDVB4702008616",
+      "phase": "delivery-dark-landscape",
+      "route": "finance",
+      "titleFound": true,
+      "titleBounds": [
+        "[591,165][1917,262]"
+      ],
+      "frame": "[0,0][2664,1200]",
+      "appNodes": 52,
+      "scrollContainers": 1,
+      "dialog": false,
+      "crashDialog": false
+    },
+    {
+      "device": "AWJDVB4702008616",
+      "phase": "delivery-dark-landscape",
+      "route": "finance/interest",
+      "titleFound": true,
+      "titleBounds": [
+        "[162,182][2501,265]"
+      ],
+      "frame": "[0,0][2664,1200]",
+      "appNodes": 41,
+      "scrollContainers": 1,
+      "dialog": false,
+      "crashDialog": false
+    },
+    {
+      "device": "AWJDVB4702008616",
+      "phase": "delivery-dark-landscape",
+      "route": "family-setup",
+      "titleFound": true,
+      "titleBounds": [
+        "[1199,160][1592,247]"
+      ],
+      "frame": "[0,0][2664,1200]",
+      "appNodes": 34,
+      "scrollContainers": 1,
+      "dialog": false,
+      "crashDialog": false
+    },
+    {
+      "device": "AWJDVB4702008616",
+      "phase": "delivery-dark-landscape",
+      "route": "group-create",
+      "titleFound": true,
+      "titleBounds": [
+        "[1227,160][1563,247]"
+      ],
+      "frame": "[0,0][2664,1200]",
+      "appNodes": 38,
+      "scrollContainers": 1,
+      "dialog": false,
+      "crashDialog": false
+    },
+    {
+      "device": "AWJDVB4702008616",
+      "phase": "delivery-dark-landscape",
+      "route": "games",
+      "titleFound": true,
+      "titleBounds": [
+        "[334,161][2125,272]"
+      ],
+      "frame": "[0,0][2664,1200]",
+      "appNodes": 59,
+      "scrollContainers": 1,
+      "dialog": false,
+      "crashDialog": false
+    }
+  ]
+}

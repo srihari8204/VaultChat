@@ -1,3 +1,5 @@
+import { AppText as Text } from '../components/ui/Text';
+import { AuroraBackground } from '../components/ui';
 // app/image-editor.tsx — Image Editor before sending
 // Crop, Rotate, Draw, Text overlay, Filters, Brightness/Contrast
 // Uses expo-image-manipulator for transforms, react-native-view-shot to capture
@@ -6,12 +8,11 @@ import { BRAND_ACCENT, type Palette } from '../constants/theme';
 import { Ionicons } from '@expo/vector-icons';
 import React, { useState, useRef , useMemo} from 'react';
 import {
-  View, Text, TouchableOpacity, StyleSheet, Image, ScrollView,
-  Dimensions, PanResponder, TextInput, Alert, ActivityIndicator,
+  View, TouchableOpacity, StyleSheet, Image, ScrollView,
+  PanResponder, TextInput, Alert, ActivityIndicator,
   Platform, useWindowDimensions } from 'react-native';
 import { useTheme } from '../lib/theme';
 import { useRouter, useLocalSearchParams, Stack } from 'expo-router';
-import { LinearGradient } from 'expo-linear-gradient';
 import * as ImageManipulator from 'expo-image-manipulator';
 import ViewShot from 'react-native-view-shot';
 
@@ -296,7 +297,7 @@ export default function ImageEditorScreen() {
   return (
     <View style={styles.container}>
       <Stack.Screen options={{ headerShown: false }} />
-      <LinearGradient colors={['#FFFFFF', '#F9FAFB', '#FFFFFF']} style={StyleSheet.absoluteFill} />
+      <AuroraBackground />
 
       {/* Top bar */}
       <View style={styles.topBar}>
@@ -458,7 +459,7 @@ export default function ImageEditorScreen() {
                   style={[styles.sizeBtn, textFontSize === s && styles.sizeBtnActive]}
                   onPress={() => setTextFontSize(s)}
                 >
-                  <Text style={{ color: '#FFF', fontSize: 11 }}>{s}</Text>
+                  <Text style={{ color: colors.text, fontSize: 12 }}>{s}</Text>
                 </TouchableOpacity>
               ))}
             </View>
@@ -541,10 +542,10 @@ export default function ImageEditorScreen() {
 // value survived rotation, folds and split-screen resizes.
 const makeStyles = (c: Palette, SW: number, SH: number) => StyleSheet.create({
   container: { flex: 1, backgroundColor: c.bg },
-  topBar: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingTop: Platform.OS === 'ios' ? 56 : 40, paddingHorizontal: 16, paddingBottom: 12, backgroundColor: 'rgba(2,11,24,0.95)' },
-  topBtn: { paddingVertical: 6, paddingHorizontal: 14 },
+  topBar: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingTop: Platform.OS === 'ios' ? 56 : 40, paddingHorizontal: 16, paddingBottom: 12, backgroundColor: c.surfaceSolid },
+  topBtn: { minHeight: 44, justifyContent: 'center', paddingVertical: 6, paddingHorizontal: 14 },
   topBtnText: { color: c.textDim, fontSize: 16, fontWeight: '600' },
-  topTitle: { color: '#FFF', fontSize: 17, fontWeight: '700' },
+  topTitle: { color: c.text, fontSize: 17, fontWeight: '700' },
   doneBtn: { backgroundColor: c.accent, borderRadius: 8 },
   doneBtnText: { color: '#FFF', fontSize: 16, fontWeight: '700' },
   canvasWrapper: { flex: 1, justifyContent: 'center', alignItems: 'center' },
@@ -556,7 +557,7 @@ const makeStyles = (c: Palette, SW: number, SH: number) => StyleSheet.create({
   toolBtnActive: { backgroundColor: 'rgba(0,229,255,0.15)' },
   toolIcon: { fontSize: 20, color: c.textDim },
   toolIconActive: { color: c.accent },
-  toolLabel: { fontSize: 11, color: c.textDim, marginTop: 3 },
+  toolLabel: { fontSize: 12, color: c.textDim, marginTop: 3 },
   toolLabelActive: { color: c.accent },
   subPanel: { backgroundColor: c.card, paddingHorizontal: 14, paddingVertical: 10, borderTopWidth: 1, borderTopColor: 'rgba(74,159,255,0.08)' },
   subRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
@@ -567,20 +568,20 @@ const makeStyles = (c: Palette, SW: number, SH: number) => StyleSheet.create({
   colorDot: { width: 28, height: 28, borderRadius: 14, borderWidth: 2, borderColor: 'transparent' },
   colorDotActive: { borderColor: c.accent, borderWidth: 3 },
   sliderRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginLeft: 10 },
-  sliderLabel: { color: c.textDim, fontSize: 11, marginRight: 4 },
+  sliderLabel: { color: c.textDim, fontSize: 12, marginRight: 4 },
   sizeBtn: { width: 30, height: 30, borderRadius: 15, justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: 'rgba(255,255,255,0.15)' },
   sizeBtnActive: { borderColor: c.accent, backgroundColor: 'rgba(0,229,255,0.15)' },
   undoBtn: { marginLeft: 'auto', paddingHorizontal: 12, paddingVertical: 6, backgroundColor: 'rgba(255,60,110,0.15)', borderRadius: 6 },
   undoBtnText: { color: c.danger, fontSize: 12, fontWeight: '600' },
   textInputRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 8 },
-  textInput: { flex: 1, backgroundColor: 'rgba(255,255,255,0.06)', borderRadius: 8, paddingHorizontal: 12, paddingVertical: 8, color: '#FFF', fontSize: 14, borderWidth: 1, borderColor: 'rgba(74,159,255,0.15)' },
+  textInput: { flex: 1, backgroundColor: 'rgba(255,255,255,0.06)', borderRadius: 8, paddingHorizontal: 12, paddingVertical: 8, color: c.text, fontSize: 14, borderWidth: 1, borderColor: 'rgba(74,159,255,0.15)' },
   addTextBtn: { marginLeft: 8, backgroundColor: c.accent, paddingHorizontal: 14, paddingVertical: 8, borderRadius: 8 },
   addTextBtnText: { color: '#FFF', fontSize: 13, fontWeight: '700' },
   textTag: { flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(255,255,255,0.06)', paddingHorizontal: 10, paddingVertical: 5, borderRadius: 6, marginRight: 6 },
   filterBtn: { alignItems: 'center', marginRight: 14 },
   filterBtnActive: {},
   filterPreview: { width: 48, height: 48, borderRadius: 8, backgroundColor: 'rgba(255,255,255,0.1)', marginBottom: 4, borderWidth: 2, borderColor: 'transparent' },
-  filterLabel: { fontSize: 11, color: c.textDim },
+  filterLabel: { fontSize: 12, color: c.textDim },
   adjustRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 10 },
   adjustLabel: { color: c.textDim, fontSize: 13, width: 80 },
   adjustSlider: { flex: 1, flexDirection: 'row', justifyContent: 'space-around' },

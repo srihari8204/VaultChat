@@ -21,7 +21,7 @@
 
 import { readFileSync } from 'fs';
 import { join } from 'path';
-import { LR, LR_AMBIENT, LR_STAGE, SEAT, SHAPE, COLOR_NAMES, P, PL, PD, LG, PAWN, PAWN_BODY, PAWN_BASE, seatA } from './ludoGlass';
+import { LR, LR_AMBIENT, LR_STAGE, SEAT, SHAPE, COLOR_NAMES, P, PL, PD, LG, TRACK, PAWN, PAWN_BODY, PAWN_BASE, seatA, ludoControls, ludoLayout } from './ludoGlass';
 
 // theme.ts is NOT imported: it pulls in react-native for Platform.select, which
 // tsx cannot transform, and importing it here would make this whole file
@@ -125,31 +125,13 @@ console.log('\nLudo glass\n');
   }
 }
 
-/* ── 4. the layout still measures, and still budgets 400 ─────────────── */
+/* ── 4. measured viewport; orientation and safe areas belong to the route ── */
 {
-  // The measured branch subtracts NO insets — taking the inset off a second
-  // time IS the 76px centring bug. The hook owns that; the board only has to
-  // keep using it, and keep passing the chrome it was designed against.
-  A(/const \{ size, onLayout: onBoardBox \} = useBoardBox\(400\);/.test(src),
-    '4a. Ludo still sizes with useBoardBox(400)');
-  A(/onLayout=\{onBoardBox\}/.test(src),
-    '4b. ...and actually wires onLayout, or the hook never measures');
-  A(/usePortraitLock\(\);/.test(src),
-    '4c. the board still asserts portrait on mount');
-
-  // The Figma reflow put the non-board rows at 390dp on all three artboards.
-  // 400 is the budget with 10dp of headroom; the ScrollView absorbs the rest.
-  const CHROME = 390;
-  for (const [w, h, it, ib, want] of [
-    [360, 780, 24, 16, 328],
-    [390, 844, 47, 34, 358],
-    [430, 932, 59, 34, 398],
-  ] as const) {
-    const board = Math.min(w - 32, h - it - ib - 400);
-    A(board === want, `4d. ${w}x${h}: boardFit(chrome 400) gives ${board}, design drew ${want}`);
-    A(board + CHROME <= h - it - ib,
-      `4e. ${w}x${h}: board ${board} + chrome ${CHROME} fits ${h - it - ib} usable`);
-  }
+  A(/const \{ width, height, onLayout: onBoardBox \} = useBoardBox\(0\);/.test(src),
+    '4a. Ludo reads the actual safe viewport without a fixed chrome deduction');
+  A(/onLayout=\{onBoardBox\}/.test(src), '4b. the viewport still wires onLayout');
+  A(!/usePortraitLock/.test(src), '4c. Ludo honors the parent/system orientation');
+  A(/<ScrollView nestedScrollEnabled/.test(src), '4d. wide control column can scroll independently of the board');
 }
 
 /* ── 5. accessibility must survive a restyle ─────────────────────────── */
@@ -210,6 +192,11 @@ console.log('\nLudo glass\n');
   for (let s = 0; s < 4; s++) {
     const r = ratio(SEAT[s].light, active);
     A(r >= 3, `6d. SEAT[${s}].light as an edge on glass: ${r.toFixed(2)}:1`);
+  }
+
+  for (const surface of [TRACK.cell, TRACK.safe, ...P]) {
+    A(ratio(TRACK.ink, rgb(surface) as [number, number, number]) >= 3,
+      `6f. vector track marker contrasts with ${surface}`);
   }
 
   // The CTA is a light surface, so its ink has to be dark.
@@ -356,6 +343,35 @@ console.log('\nLudo glass\n');
     '12f. `mine` still requires a live socket');
   A(/const canMove = mine && die != null && movable\.length > 0;/.test(src),
     '12g. ...and canMove still hangs off it');
+}
+
+/* Both orientations, short viewports, split windows and enlarged text. */
+{
+  const viewports = [[240, 480], [320, 568], [360, 780], [430, 932], [768, 1024], [1024, 768], [844, 390], [600, 300], [400, 240]];
+  for (const [width, height] of viewports) {
+    for (const fontScale of [1, 1.4, 2, 3]) {
+      const layout = ludoLayout(width, height, fontScale);
+      const controls = ludoControls(layout.controlsWidth, fontScale);
+      A(layout.contentWidth <= width - 32 && layout.boardSize > 0,
+        `13a. board and controls stay within ${width}x${height}/${fontScale}`);
+      A(controls.dieSize + 24 <= layout.controlsWidth,
+        `13b. die fits its control column at ${width}x${height}/${fontScale}`);
+      A(controls.stacked || layout.controlsWidth - 112 - 12 >= 120,
+        `13c. roll action has room beside the tray at ${width}x${height}/${fontScale}`);
+      A(fontScale < 1.4 || (controls.stacked && controls.seatColumns === 1),
+        `13d. large text stacks controls and seats at ${width}x${height}/${fontScale}`);
+      A(!layout.wide || (layout.boardSize >= 200 && layout.boardSize <= Math.max(200, height - 32)),
+        `13e. wide board fits the viewport height at ${width}x${height}/${fontScale}`);
+    }
+  }
+  A(ludoLayout(844, 390, 1).boardSize === 358,
+    '13f. landscape uses its height instead of collapsing to the old 200dp board');
+  A(ludoLayout(320, 568, 1).boardSize === 288,
+    '13g. short portrait uses its width instead of reserving a fictional400dp');
+  A(ludoLayout(844, 390, 1).wide && !ludoLayout(390, 844, 1).wide,
+    '13h. live rotation switches column layout from actual dimensions');
+  A(/ludoControls\(controlsWidth, fontScale\)/.test(src),
+    '13i. controls use their own measured column and live text scale');
 }
 
 console.log(failed === 0 ? '\nAll good.\n' : `\n${failed} FAILED\n`);

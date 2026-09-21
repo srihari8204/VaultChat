@@ -1,0 +1,200 @@
+{
+  "changes": [
+    {
+      "name": "glass-screen-polish",
+      "completedTasks": 21,
+      "totalTasks": 24,
+      "lastModified": "2026-09-20T22:29:21.533Z",
+      "status": "in-progress"
+    },
+    {
+      "name": "global-device-support",
+      "completedTasks": 18,
+      "totalTasks": 49,
+      "lastModified": "2026-09-20T20:30:03.762Z",
+      "status": "in-progress"
+    },
+    {
+      "name": "protobuf-migration",
+      "completedTasks": 37,
+      "totalTasks": 66,
+      "lastModified": "2026-09-20T19:54:38.032Z",
+      "status": "in-progress"
+    },
+    {
+      "name": "coldstart-evidence",
+      "completedTasks": 16,
+      "totalTasks": 26,
+      "lastModified": "2026-09-17T20:08:26.683Z",
+      "status": "in-progress"
+    },
+    {
+      "name": "responsive-breadth-and-toolchain",
+      "completedTasks": 0,
+      "totalTasks": 0,
+      "lastModified": "2026-09-17T14:14:02.924Z",
+      "status": "no-tasks"
+    },
+    {
+      "name": "harden-audit-findings",
+      "completedTasks": 16,
+      "totalTasks": 18,
+      "lastModified": "2026-09-17T11:28:05.521Z",
+      "status": "in-progress"
+    },
+    {
+      "name": "ccwire-replay-window",
+      "completedTasks": 87,
+      "totalTasks": 99,
+      "lastModified": "2026-09-16T15:39:53.791Z",
+      "status": "in-progress"
+    },
+    {
+      "name": "ccwire-session-resume",
+      "completedTasks": 43,
+      "totalTasks": 49,
+      "lastModified": "2026-09-16T13:43:54.231Z",
+      "status": "in-progress"
+    },
+    {
+      "name": "ccwire-codec-benchmark",
+      "completedTasks": 11,
+      "totalTasks": 11,
+      "lastModified": "2026-09-16T11:02:27.186Z",
+      "status": "complete"
+    },
+    {
+      "name": "ccwire-fuzz-hardening",
+      "completedTasks": 25,
+      "totalTasks": 25,
+      "lastModified": "2026-09-16T10:57:06.762Z",
+      "status": "complete"
+    },
+    {
+      "name": "complete-sync-transport",
+      "completedTasks": 31,
+      "totalTasks": 33,
+      "lastModified": "2026-09-15T14:56:54.686Z",
+      "status": "in-progress"
+    },
+    {
+      "name": "family-navigation",
+      "completedTasks": 24,
+      "totalTasks": 29,
+      "lastModified": "2026-09-07T19:21:33.206Z",
+      "status": "in-progress"
+    },
+    {
+      "name": "rummy-variants",
+      "completedTasks": 22,
+      "totalTasks": 24,
+      "lastModified": "2026-09-06T12:01:01.738Z",
+      "status": "in-progress"
+    },
+    {
+      "name": "games-voice-turn",
+      "completedTasks": 14,
+      "totalTasks": 17,
+      "lastModified": "2026-09-06T12:01:01.731Z",
+      "status": "in-progress"
+    },
+    {
+      "name": "fix-presence-publish-stall",
+      "completedTasks": 0,
+      "totalTasks": 0,
+      "lastModified": "2026-09-05T12:38:17.506Z",
+      "status": "no-tasks"
+    },
+    {
+      "name": "games-apple-ui",
+      "completedTasks": 45,
+      "totalTasks": 47,
+      "lastModified": "2026-09-04T02:45:40.290Z",
+      "status": "in-progress"
+    },
+    {
+      "name": "rummy-hand-fit",
+      "completedTasks": 8,
+      "totalTasks": 8,
+      "lastModified": "2026-09-03T16:45:46.586Z",
+      "status": "complete"
+    },
+    {
+      "name": "mini-games-pro",
+      "completedTasks": 92,
+      "totalTasks": 93,
+      "lastModified": "2026-09-03T11:51:05.533Z",
+      "status": "in-progress"
+    },
+    {
+      "name": "theme-studio-ui",
+      "completedTasks": 23,
+      "totalTasks": 33,
+      "lastModified": "2026-09-01T18:29:59.854Z",
+      "status": "in-progress"
+    },
+    {
+      "name": "calls-64-participant",
+      "completedTasks": 42,
+      "totalTasks": 55,
+      "lastModified": "2026-09-01T07:28:13.080Z",
+      "status": "in-progress"
+    },
+    {
+      "name": "shop-book-commerce",
+      "completedTasks": 33,
+      "totalTasks": 34,
+      "lastModified": "2026-08-29T21:32:54.876Z",
+      "status": "in-progress"
+    },
+    {
+      "name": "spaces-operations",
+      "completedTasks": 61,
+      "totalTasks": 61,
+      "lastModified": "2026-08-28T17:49:43.782Z",
+      "status": "complete"
+    },
+    {
+      "name": "chat-map-separation",
+      "completedTasks": 11,
+      "totalTasks": 12,
+      "lastModified": "2026-08-28T13:37:50.462Z",
+      "status": "in-progress"
+    },
+    {
+      "name": "whatsapp-exit-kit",
+      "completedTasks": 38,
+      "totalTasks": 42,
+      "lastModified": "2026-08-23T06:20:02.004Z",
+      "status": "in-progress"
+    },
+    {
+      "name": "location-lock",
+      "completedTasks": 55,
+      "totalTasks": 60,
+      "lastModified": "2026-08-09T06:56:53.285Z",
+      "status": "in-progress"
+    },
+    {
+      "name": "groups-circles",
+      "completedTasks": 58,
+      "totalTasks": 61,
+      "lastModified": "2026-08-09T06:56:53.281Z",
+      "status": "in-progress"
+    },
+    {
+      "name": "vaultbeam-seamless-resume",
+      "completedTasks": 30,
+      "totalTasks": 46,
+      "lastModified": "2026-08-08T07:24:12.085Z",
+      "status": "in-progress"
+    },
+    {
+      "name": "family-circle",
+      "completedTasks": 0,
+      "totalTasks": 23,
+      "lastModified": "2026-08-08T07:24:12.064Z",
+      "status": "in-progress"
+    }
+  ]
+}

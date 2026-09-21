@@ -1,3 +1,4 @@
+import { AuroraBackground } from '../components/ui/AuroraBackground';
 // app/space-transport.tsx — the transport landing for someone who is NOT running
 // the operation: a parent watching a school bus, an employee waiting for a cab.
 //
@@ -26,14 +27,15 @@
 // It requires no location permission of its own. That is the point: tracking a
 // child's bus must never require the parent to share their own position.
 
+import { AppText as Text } from '../components/ui/Text';
 import React, { useCallback, useMemo, useState } from 'react';
 import {
-  View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator, RefreshControl, Alert,
+  View, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator, RefreshControl, Alert,
 } from 'react-native';
 import { Stack, useLocalSearchParams, useRouter, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useSpaceColors, spaceHeader } from '../lib/spaces/theme';
-import type { Palette } from '../constants/theme';
+import type { SpacePalette as Palette } from '../lib/spaces/theme';
 import { getRuns, getRun } from '../lib/spaces/api';
 import { createDirectChat } from '../lib/chatService';
 import type { Run, RunStop, RunRider } from '../lib/spaces/runs';
@@ -161,6 +163,8 @@ export default function SpaceTransportScreen() {
     t === 'ok' ? colors.success : t === 'warn' ? colors.danger : colors.textDim;
 
   return (
+    <View style={{ flex: 1, backgroundColor: colors.bg }}>
+      <AuroraBackground variant="profile" />
     <ScrollView
       style={s.screen}
       contentContainerStyle={s.body}
@@ -179,7 +183,7 @@ export default function SpaceTransportScreen() {
         <View style={[s.card, { borderColor: colors.danger, borderWidth: 1 }]}>
           <Text style={s.cardTitle}>Could not load transport</Text>
           <Text style={s.muted}>{err}</Text>
-          <TouchableOpacity onPress={load} style={[s.btn, { backgroundColor: colors.primary }]}>
+          <TouchableOpacity onPress={load} style={[s.btn, { backgroundColor: colors.brandOnLight }]}>
             <Text style={s.btnText}>Try again</Text>
           </TouchableOpacity>
         </View>
@@ -201,7 +205,7 @@ export default function SpaceTransportScreen() {
           {canOps && (
             <TouchableOpacity
               onPress={() => router.push({ pathname: '/space-admin' as any, params: { spaceId, name: spaceName, groupType: params.groupType ?? '', perms: params.perms ?? '' } })}
-              style={[s.btn, { backgroundColor: colors.primary }]}
+              style={[s.btn, { backgroundColor: colors.brandOnLight }]}
             >
               <Text style={s.btnText}>Set up transport</Text>
             </TouchableOpacity>
@@ -276,7 +280,7 @@ export default function SpaceTransportScreen() {
               {/* The live map reads the same sealed stream everyone else does. */}
               <TouchableOpacity
                 onPress={() => router.push({ pathname: '/space-run' as any, params: { spaceId, runId: run.id, name: spaceName, groupType: params.groupType ?? '' } })}
-                style={[s.btn, { backgroundColor: colors.primary, flex: 1 }]}
+                style={[s.btn, { backgroundColor: colors.brandOnLight, flex: 1 }]}
               >
                 <Ionicons name="map-outline" size={16} color="#fff" />
                 <Text style={s.btnText}>Live {kindWord}</Text>
@@ -307,11 +311,12 @@ export default function SpaceTransportScreen() {
         </Text>
       )}
     </ScrollView>
+    </View>
   );
 }
 
 const styles = (c: Palette) => StyleSheet.create({
-  screen: { flex: 1, backgroundColor: c.bg },
+  screen: { flex: 1, backgroundColor: 'transparent' },
   body: { padding: 16, gap: 12, paddingBottom: 40 },
   centre: { alignItems: 'center', gap: 10, paddingVertical: 40 },
   card: { backgroundColor: c.glassSoft, borderRadius: 14, padding: 14, gap: 10 },
@@ -325,10 +330,10 @@ const styles = (c: Palette) => StyleSheet.create({
   avatar: { width: 34, height: 34, borderRadius: 17, alignItems: 'center', justifyContent: 'center' },
   riderName: { color: c.text, fontSize: 14.5, fontWeight: '600' },
   next: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  actions: { flexDirection: 'row', gap: 8, marginTop: 2 },
+  actions: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 2 },
   btn: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6,
-    borderRadius: 10, paddingVertical: 11, paddingHorizontal: 14,
+    borderRadius: 10, paddingVertical: 11, paddingHorizontal: 14, minWidth: 140,
   },
   btnText: { color: '#fff', fontWeight: '700', fontSize: 13.5 },
   footnote: { color: c.textFaint, fontSize: 11.5, lineHeight: 16, marginTop: 4 },

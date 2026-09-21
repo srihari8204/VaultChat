@@ -1,3 +1,5 @@
+import { useTheme } from '../lib/theme';
+import type { Palette } from '../constants/theme';
 /**
  * crazzychat — Document Scanner
  * Step 1: Scan (camera / gallery)
@@ -5,7 +7,7 @@
  * Step 3: Export (8 formats + 6 share targets)
  */
 import { BRAND_ACCENT, brandAlpha } from '../constants/theme';
-import React, { useState } from "react";
+import React, { useMemo, useState } from "react";
 import {
   View, Text, TouchableOpacity, StyleSheet,
   ScrollView, Alert, ActivityIndicator,
@@ -51,7 +53,9 @@ const SHARE_APPS = [
 const STEPS = ["Scan", "Enhance", "Export"];
 
 // -- Step Bar ------------------------------------------------------------------
-const StepBar = ({ step }: { step: number }) => (
+const StepBar = ({ step }: { step: number }) => {
+  const { s, c, light } = useScannerStyles();
+  return (
   <View style={s.stepBar}>
     {STEPS.map((name, i) => (
       <React.Fragment key={i}>
@@ -67,7 +71,7 @@ const StepBar = ({ step }: { step: number }) => (
               {step > i ? "?" : `${i+1}`}
             </Text>
           </LinearGradient>
-          <Text style={[s.stepLabel, step >= i && { color:"rgba(255,255,255,0.85)" }]}>
+          <Text style={[s.stepLabel, step >= i && { color:light ? c.text : "rgba(255,255,255,0.85)" }]}>
             {name}
           </Text>
         </View>
@@ -77,33 +81,41 @@ const StepBar = ({ step }: { step: number }) => (
       </React.Fragment>
     ))}
   </View>
-);
+  );
+};
 
 // -- Format Chip ---------------------------------------------------------------
-const FormatChip = ({ fmt, active, onPress }: any) => (
+const FormatChip = ({ fmt, active, onPress }: any) => {
+  const { s, c, light } = useScannerStyles();
+  return (
   <TouchableOpacity onPress={onPress} style={[
     s.fmtChip,
     active && { backgroundColor:`${fmt.color}20`, borderColor:`${fmt.color}60` }
   ]}>
     <Text style={s.fmtIcon}>{fmt.icon}</Text>
-    <Text style={[s.fmtExt, active && { color: fmt.color }]}>.{fmt.ext}</Text>
+    <Text style={[s.fmtExt, active && { color: light ? c.primary : fmt.color }]}>.{fmt.ext}</Text>
     <Text style={s.fmtDesc}>{fmt.desc}</Text>
   </TouchableOpacity>
-);
+  );
+};
 
 // -- Share App Chip ------------------------------------------------------------
-const AppChip = ({ app, active, onPress }: any) => (
+const AppChip = ({ app, active, onPress }: any) => {
+  const { s, c, light } = useScannerStyles();
+  return (
   <TouchableOpacity onPress={onPress} style={[
     s.appChip,
     active && { backgroundColor:`${app.color}20`, borderColor:`${app.color}60` }
   ]}>
     <Text style={s.appIcon}>{app.icon}</Text>
-    <Text numberOfLines={1} style={[s.appName, active && { color: app.color }]}>{app.name}</Text>
+    <Text numberOfLines={1} style={[s.appName, active && { color: light ? c.primary : app.color }]}>{app.name}</Text>
   </TouchableOpacity>
-);
+  );
+};
 
 // -- Main Screen ---------------------------------------------------------------
 export default function ScannerScreen() {
+  const { s, c, light } = useScannerStyles();
   const router   = useRouter();
   const params   = useLocalSearchParams();
   const chatName = (params.name as string) || "Contact";
@@ -203,15 +215,15 @@ export default function ScannerScreen() {
 
   // -- Render ------------------------------------------------------------------
   return (
-    <LinearGradient colors={["#FFFFFF","#071020","#0a1628"]} style={s.root}>
+    <LinearGradient colors={light ? [c.bg,c.surfaceSolid,c.bg] : ["#071020","#0B1530","#0A1628"]} style={s.root}>
 
       {/* Header */}
       <View style={s.header}>
         <TouchableOpacity hitSlop={4} accessibilityRole="button" accessibilityLabel="Back" onPress={() => router.back()} style={s.backBtn}>
-          <Ionicons name="arrow-back" size={22} color="#fff" />
+          <Ionicons name="arrow-back" size={22} color={light ? c.text : "#fff"} />
         </TouchableOpacity>
         <View style={s.headerTitleWrap}>
-          <LinearGradient colors={["#4A9FFF","#7C3AED"]} style={s.headerIcon}>
+          <LinearGradient colors={light ? [c.primary,"#6D28D9"] : ["#4A9FFF","#7C3AED"]} style={s.headerIcon}>
             <Text style={{ fontSize: 18 }}>??</Text>
           </LinearGradient>
           <View>
@@ -233,7 +245,7 @@ export default function ScannerScreen() {
         {step === 0 && (
           <View>
             <View style={s.viewfinder}>
-              <LinearGradient colors={["#0d1929","#0a1420"]} style={s.viewfinderInner}>
+              <LinearGradient colors={light ? [c.glassSoft,c.surfaceSolid] : ["#0d1929","#0a1420"]} style={s.viewfinderInner}>
                 <Text style={{ fontSize: 52, marginBottom: 14 }}>??</Text>
                 <Text style={s.vfTitle}>Position your document</Text>
                 <Text style={s.vfSub}>Make sure it&apos;s well lit and flat</Text>
@@ -255,7 +267,7 @@ export default function ScannerScreen() {
                 <Text style={s.galleryBtnText}>Gallery</Text>
               </TouchableOpacity>
               <TouchableOpacity onPress={openCamera} style={s.cameraBtn}>
-                <LinearGradient colors={["#4A9FFF","#7C3AED"]} style={s.cameraBtnInner}>
+                <LinearGradient colors={light ? [c.primary,"#6D28D9"] : ["#4A9FFF","#7C3AED"]} style={s.cameraBtnInner}>
                   <Text style={{ fontSize: 28 }}>??</Text>
                   <Text style={s.cameraBtnText}>Scan Document</Text>
                 </LinearGradient>
@@ -369,7 +381,7 @@ export default function ScannerScreen() {
                 <Text style={s.backStepText}>? Rescan</Text>
               </TouchableOpacity>
               <TouchableOpacity onPress={() => setStep(2)} style={{ flex:2 }}>
-                <LinearGradient colors={["#4A9FFF","#7C3AED"]} style={s.nextBtn}>
+                <LinearGradient colors={light ? [c.primary,"#6D28D9"] : ["#4A9FFF","#7C3AED"]} style={s.nextBtn}>
                   <Text style={s.nextBtnText}>Export ?</Text>
                 </LinearGradient>
               </TouchableOpacity>
@@ -396,10 +408,10 @@ export default function ScannerScreen() {
                 ]}>
                   <Text style={{ fontSize:20 }}>{f.icon}</Text>
                   <View style={{ flex:1 }}>
-                    <Text style={[s.fmtGridExt, selectedFmt===i && { color:f.color }]}>.{f.ext}</Text>
+                    <Text style={[s.fmtGridExt, selectedFmt===i && { color:light ? c.primary : f.color }]}>.{f.ext}</Text>
                     <Text style={s.fmtGridDesc}>{f.desc}</Text>
                   </View>
-                  {selectedFmt===i && <Text style={[s.fmtCheck, { color:f.color }]}>?</Text>}
+                  {selectedFmt===i && <Text style={[s.fmtCheck, { color:light ? c.primary : f.color }]}>?</Text>}
                 </TouchableOpacity>
               ))}
             </View>
@@ -426,7 +438,7 @@ export default function ScannerScreen() {
                   selectedApp===i && { borderColor:`${a.color}60`, backgroundColor:`${a.color}15` }
                 ]}>
                   <Text style={{ fontSize:22 }}>{a.icon}</Text>
-                  <Text numberOfLines={1} style={[s.shareGridName, selectedApp===i && { color:a.color }]}>{a.name}</Text>
+                  <Text numberOfLines={1} style={[s.shareGridName, selectedApp===i && { color:light ? c.primary : a.color }]}>{a.name}</Text>
                 </TouchableOpacity>
               ))}
             </View>
@@ -462,7 +474,7 @@ export default function ScannerScreen() {
             </View>
             <View style={s.rowBtns}>
               <TouchableOpacity onPress={reset} style={{ flex:1 }}>
-                <LinearGradient colors={["#4A9FFF","#7C3AED"]} style={s.nextBtn}>
+                <LinearGradient colors={light ? [c.primary,"#6D28D9"] : ["#4A9FFF","#7C3AED"]} style={s.nextBtn}>
                   <Text style={s.nextBtnText}>?? Scan More</Text>
                 </LinearGradient>
               </TouchableOpacity>
@@ -479,81 +491,81 @@ export default function ScannerScreen() {
 }
 
 // -- Styles --------------------------------------------------------------------
-const s = StyleSheet.create({
+const makeStyles = (c: Palette, light: boolean) => StyleSheet.create({
   root:              { flex:1 },
   header:            { flexDirection:"row", alignItems:"center", gap:10,
                        paddingTop:Platform.OS==="ios"?54:42, paddingBottom:14, paddingHorizontal:18,
-                       backgroundColor:"rgba(1,8,18,0.95)", borderBottomWidth:1,
-                       borderBottomColor:"rgba(255,255,255,0.06)" },
+                       backgroundColor:light ? c.glass : "rgba(1,8,18,0.95)", borderBottomWidth:1,
+                       borderBottomColor:light ? c.glassStroke : "rgba(255,255,255,0.06)" },
   backBtn:           { width:36, height:36, justifyContent:"center", alignItems:"center" },
-  backText:          { color:"#fff", fontSize:22, fontWeight:"900" },
+  backText:          { color:light ? c.text : "#fff", fontSize:22, fontWeight:"900" },
   headerTitleWrap:   { flex:1, flexDirection:"row", alignItems:"center", gap:10 },
   headerIcon:        { width:36, height:36, borderRadius:10, justifyContent:"center", alignItems:"center" },
-  headerTitle:       { color:"#fff", fontSize:15, fontWeight:"900" },
-  headerSub:         { color:"rgba(255,255,255,0.35)", fontSize:11 },
+  headerTitle:       { color:light ? c.text : "#fff", fontSize:15, fontWeight:"900" },
+  headerSub:         { color:light ? c.textDim : "rgba(255,255,255,0.68)", fontSize:11 },
   secBadge:          { backgroundColor:brandAlpha(0.1), borderRadius:8,
                        paddingHorizontal:8, paddingVertical:4,
                        borderWidth:1, borderColor:brandAlpha(0.25) },
-  secText:           { color:BRAND_ACCENT, fontSize:10, fontWeight:"800" },
+  secText:           { color:light ? c.primary : BRAND_ACCENT, fontSize:10, fontWeight:"800" },
   stepBar:           { flexDirection:"row", alignItems:"center", paddingHorizontal:18,
                        paddingVertical:12, borderBottomWidth:1,
-                       borderBottomColor:"rgba(255,255,255,0.05)" },
+                       borderBottomColor:light ? c.glassStroke : "rgba(255,255,255,0.05)" },
   stepItem:          { flexDirection:"row", alignItems:"center", gap:5, flexShrink:0 },
   stepCircle:        { width:22, height:22, borderRadius:11,
                        justifyContent:"center", alignItems:"center" },
-  stepCircleInactive:{ borderWidth:1, borderColor:"rgba(255,255,255,0.15)" },
-  stepNum:           { color:"rgba(255,255,255,0.25)", fontSize:10, fontWeight:"900" },
-  stepLabel:         { color:"rgba(255,255,255,0.25)", fontSize:11, fontWeight:"700" },
-  stepLine:          { flex:1, height:1.5, backgroundColor:"rgba(255,255,255,0.06)",
+  stepCircleInactive:{ borderWidth:1, borderColor:light ? c.glassStroke : "rgba(255,255,255,0.15)" },
+  stepNum:           { color:light ? c.textDim : "rgba(255,255,255,0.25)", fontSize:10, fontWeight:"900" },
+  stepLabel:         { color:light ? c.textDim : "rgba(255,255,255,0.56)", fontSize:11, fontWeight:"700" },
+  stepLine:          { flex:1, height:1.5, backgroundColor:light ? c.glassSoft : "rgba(255,255,255,0.06)",
                        marginHorizontal:6, borderRadius:1 },
   scroll:            { padding:16, paddingBottom:48 },
-  sectionLabel:      { color:"rgba(255,255,255,0.4)", fontSize:10, fontWeight:"700",
+  sectionLabel:      { color:light ? c.textDim : "rgba(255,255,255,0.4)", fontSize:10, fontWeight:"700",
                        textTransform:"uppercase", letterSpacing:0.8, marginBottom:8 },
   viewfinder:        { borderRadius:16, overflow:"hidden", marginBottom:14, height:200 },
   viewfinderInner:   { flex:1, justifyContent:"center", alignItems:"center",
-                       borderWidth:1, borderColor:"rgba(255,255,255,0.07)", borderRadius:16 },
-  vfTitle:           { color:"#fff", fontSize:15, fontWeight:"800", marginTop:4 },
-  vfSub:             { color:"rgba(255,255,255,0.4)", fontSize:12, marginTop:4 },
+                       borderWidth:1, borderColor:light ? c.glassStroke : "rgba(255,255,255,0.07)", borderRadius:16 },
+  vfTitle:           { color:light ? c.text : "#fff", fontSize:15, fontWeight:"800", marginTop:4 },
+  vfSub:             { color:light ? c.textDim : "rgba(255,255,255,0.4)", fontSize:12, marginTop:4 },
   corner:            { position:"absolute", top:16, left:16, width:24, height:24 },
   cornerH:           { position:"absolute", top:0, left:0, height:2.5, width:20,
                        backgroundColor:"#4A9FFF", borderRadius:1 },
   cornerV:           { position:"absolute", top:0, left:0, width:2.5, height:20,
                        backgroundColor:"#4A9FFF", borderRadius:1 },
   captureRow:        { flexDirection:"row", alignItems:"center", gap:10, marginBottom:12 },
-  galleryBtn:        { alignItems:"center", gap:4, backgroundColor:"rgba(255,255,255,0.07)",
+  galleryBtn:        { alignItems:"center", gap:4, backgroundColor:light ? c.glassSoft : "rgba(255,255,255,0.07)",
                        borderRadius:14, padding:12, borderWidth:1,
-                       borderColor:"rgba(255,255,255,0.1)" },
-  galleryBtnText:    { color:"rgba(255,255,255,0.6)", fontSize:10, fontWeight:"700" },
+                       borderColor:light ? c.glassStroke : "rgba(255,255,255,0.1)" },
+  galleryBtnText:    { color:light ? c.textDim : "rgba(255,255,255,0.6)", fontSize:10, fontWeight:"700" },
   cameraBtn:         { flex:1, borderRadius:14, overflow:"hidden" },
   cameraBtnInner:    { flexDirection:"row", alignItems:"center", justifyContent:"center",
                        gap:10, paddingVertical:14 },
   cameraBtnText:     { color:"#fff", fontSize:14, fontWeight:"900" },
-  pagesBox:          { alignItems:"center", backgroundColor:"rgba(255,255,255,0.07)",
+  pagesBox:          { alignItems:"center", backgroundColor:light ? c.glassSoft : "rgba(255,255,255,0.07)",
                        borderRadius:14, padding:10, borderWidth:1,
-                       borderColor:"rgba(255,255,255,0.1)", gap:4 },
-  pagesBtn:          { color:"#4A9FFF", fontSize:18, fontWeight:"900", paddingHorizontal:4 },
-  pagesCount:        { color:"#fff", fontSize:14, fontWeight:"900" },
+                       borderColor:light ? c.glassStroke : "rgba(255,255,255,0.1)", gap:4 },
+  pagesBtn:          { color:light ? c.primary : "#4A9FFF", fontSize:18, fontWeight:"900", paddingHorizontal:4 },
+  pagesCount:        { color:light ? c.text : "#fff", fontSize:14, fontWeight:"900" },
   toolRow:           { flexDirection:"row", justifyContent:"space-around",
                        paddingVertical:10, marginBottom:14,
                        borderTopWidth:1, borderTopColor:"rgba(255,255,255,0.05)",
-                       borderBottomWidth:1, borderBottomColor:"rgba(255,255,255,0.05)" },
+                       borderBottomWidth:1, borderBottomColor:light ? c.glassStroke : "rgba(255,255,255,0.05)" },
   toolBtn:           { alignItems:"center", gap:4, padding:"4px 6px" as any },
-  toolLabel:         { color:"rgba(255,255,255,0.35)", fontSize:9, fontWeight:"700",
+  toolLabel:         { color:light ? c.textDim : "rgba(255,255,255,0.35)", fontSize:9, fontWeight:"700",
                        textAlign:"center" },
-  fmtChip:           { alignItems:"center", gap:3, backgroundColor:"rgba(255,255,255,0.06)",
+  fmtChip:           { alignItems:"center", gap:3, backgroundColor:light ? c.glassSoft : "rgba(255,255,255,0.06)",
                        borderRadius:12, padding:10, borderWidth:1,
-                       borderColor:"rgba(255,255,255,0.08)", minWidth:60 },
+                       borderColor:light ? c.glassStroke : "rgba(255,255,255,0.08)", minWidth:60 },
   fmtIcon:           { fontSize:18 },
-  fmtExt:            { color:"rgba(255,255,255,0.6)", fontSize:10, fontWeight:"800" },
-  fmtDesc:           { color:"rgba(255,255,255,0.3)", fontSize:9 },
-  appChip:           { alignItems:"center", gap:3, backgroundColor:"rgba(255,255,255,0.06)",
+  fmtExt:            { color:light ? c.textDim : "rgba(255,255,255,0.6)", fontSize:10, fontWeight:"800" },
+  fmtDesc:           { color:light ? c.textDim : "rgba(255,255,255,0.3)", fontSize:9 },
+  appChip:           { alignItems:"center", gap:3, backgroundColor:light ? c.glassSoft : "rgba(255,255,255,0.06)",
                        borderRadius:12, padding:10, borderWidth:1,
-                       borderColor:"rgba(255,255,255,0.08)", minWidth:68 },
+                       borderColor:light ? c.glassStroke : "rgba(255,255,255,0.08)", minWidth:68 },
   appIcon:           { fontSize:18 },
-  appName:           { color:"rgba(255,255,255,0.5)", fontSize:9, fontWeight:"700" },
+  appName:           { color:light ? c.textDim : "rgba(255,255,255,0.5)", fontSize:9, fontWeight:"700" },
   infoBox:           { backgroundColor:"rgba(74,159,255,0.06)", borderRadius:10,
                        padding:10, borderWidth:1, borderColor:"rgba(74,159,255,0.12)" },
-  infoText:          { color:"rgba(255,255,255,0.35)", fontSize:11, textAlign:"center" },
+  infoText:          { color:light ? c.textDim : "rgba(255,255,255,0.35)", fontSize:11, textAlign:"center" },
   previewBox:        { height:180, borderRadius:16, overflow:"hidden", marginBottom:14, position:"relative" },
   previewImg:        { width:"100%", height:"100%" },
   previewPlaceholder:{ flex:1, justifyContent:"center", alignItems:"center" },
@@ -562,60 +574,67 @@ const s = StyleSheet.create({
   previewBadgeText:  { color:"#fff", fontSize:10, fontWeight:"700" },
   filterRow:         { flexDirection:"row", gap:6, marginBottom:14 },
   filterBtn:         { flex:1, paddingVertical:9, borderRadius:10,
-                       backgroundColor:"rgba(255,255,255,0.07)",
+                       backgroundColor:light ? c.glassSoft : "rgba(255,255,255,0.07)",
                        alignItems:"center", borderWidth:1,
-                       borderColor:"rgba(255,255,255,0.08)" },
-  filterBtnActive:   { backgroundColor:"#4A9FFF", borderColor:"#4A9FFF" },
-  filterBtnText:     { color:"rgba(255,255,255,0.5)", fontSize:11, fontWeight:"800" },
+                       borderColor:light ? c.glassStroke : "rgba(255,255,255,0.08)" },
+  filterBtnActive:   { backgroundColor:light ? c.primary : "#4A9FFF", borderColor:light ? c.primary : "#4A9FFF" },
+  filterBtnText:     { color:light ? c.textDim : "rgba(255,255,255,0.5)", fontSize:11, fontWeight:"800" },
   sliderWrap:        { marginBottom:12 },
   sliderHeader:      { flexDirection:"row", justifyContent:"space-between", marginBottom:6 },
-  sliderLabel:       { color:"rgba(255,255,255,0.5)", fontSize:12 },
-  sliderVal:         { color:"#4A9FFF", fontSize:12, fontWeight:"700" },
-  sliderTrack:       { height:4, backgroundColor:"rgba(255,255,255,0.08)", borderRadius:2, overflow:"hidden" },
+  sliderLabel:       { color:light ? c.textDim : "rgba(255,255,255,0.5)", fontSize:12 },
+  sliderVal:         { color:light ? c.primary : "#4A9FFF", fontSize:12, fontWeight:"700" },
+  sliderTrack:       { height:4, backgroundColor:light ? c.glassSoft : "rgba(255,255,255,0.08)", borderRadius:2, overflow:"hidden" },
   sliderFill:        { height:"100%" as any, backgroundColor:"#4A9FFF", borderRadius:2 },
   sliderThumb:       { display:"none" as any },
   sliderBtns:        { flexDirection:"row", gap:6, marginTop:4 },
-  sliderAdjBtn:      { flex:1, paddingVertical:5, backgroundColor:"rgba(255,255,255,0.06)",
+  sliderAdjBtn:      { flex:1, paddingVertical:5, backgroundColor:light ? c.glassSoft : "rgba(255,255,255,0.06)",
                        borderRadius:8, alignItems:"center", borderWidth:1,
-                       borderColor:"rgba(255,255,255,0.08)" },
-  sliderAdjText:     { color:"#4A9FFF", fontSize:16, fontWeight:"900" },
+                       borderColor:light ? c.glassStroke : "rgba(255,255,255,0.08)" },
+  sliderAdjText:     { color:light ? c.primary : "#4A9FFF", fontSize:16, fontWeight:"900" },
   exportPreview:     { height:120, borderRadius:14, overflow:"hidden", marginBottom:14 },
   exportImg:         { width:"100%", height:"100%" },
   exportPlaceholder: { flex:1, justifyContent:"center", alignItems:"center" },
   fmtGrid:           { flexDirection:"row", flexWrap:"wrap", gap:8, marginBottom:14 },
   fmtGridItem:       { width:"47%", flexDirection:"row", alignItems:"center", gap:8,
-                       padding:10, borderRadius:12, backgroundColor:"rgba(255,255,255,0.04)",
-                       borderWidth:1.5, borderColor:"rgba(255,255,255,0.07)" },
-  fmtGridExt:        { color:"#fff", fontSize:13, fontWeight:"800" },
-  fmtGridDesc:       { color:"rgba(255,255,255,0.3)", fontSize:10, marginTop:1 },
+                       padding:10, borderRadius:12, backgroundColor:light ? c.glassSoft : "rgba(255,255,255,0.04)",
+                       borderWidth:1.5, borderColor:light ? c.glassStroke : "rgba(255,255,255,0.07)" },
+  fmtGridExt:        { color:light ? c.text : "#fff", fontSize:13, fontWeight:"800" },
+  fmtGridDesc:       { color:light ? c.textDim : "rgba(255,255,255,0.3)", fontSize:10, marginTop:1 },
   fmtCheck:          { fontSize:12, fontWeight:"900" },
   fileCard:          { flexDirection:"row", alignItems:"center", gap:12,
-                       backgroundColor:"rgba(255,255,255,0.04)", borderRadius:14,
+                       backgroundColor:light ? c.glassSoft : "rgba(255,255,255,0.04)", borderRadius:14,
                        padding:12, marginBottom:14, borderWidth:1,
-                       borderColor:"rgba(255,255,255,0.07)" },
+                       borderColor:light ? c.glassStroke : "rgba(255,255,255,0.07)" },
   fileCardIcon:      { width:42, height:42, borderRadius:10, justifyContent:"center",
                        alignItems:"center", flexShrink:0 },
-  fileCardName:      { color:"#fff", fontSize:12, fontWeight:"800" },
-  fileCardMeta:      { color:"rgba(255,255,255,0.35)", fontSize:11, marginTop:3 },
+  fileCardName:      { color:light ? c.text : "#fff", fontSize:12, fontWeight:"800" },
+  fileCardMeta:      { color:light ? c.textDim : "rgba(255,255,255,0.35)", fontSize:11, marginTop:3 },
   shareGrid:         { flexDirection:"row", flexWrap:"wrap", gap:8, marginBottom:14 },
   shareGridItem:     { width:"30%", alignItems:"center", gap:5, padding:12,
-                       borderRadius:12, backgroundColor:"rgba(255,255,255,0.04)",
-                       borderWidth:1, borderColor:"rgba(255,255,255,0.07)" },
-  shareGridName:     { color:"rgba(255,255,255,0.45)", fontSize:10, fontWeight:"700" },
+                       borderRadius:12, backgroundColor:light ? c.glassSoft : "rgba(255,255,255,0.04)",
+                       borderWidth:1, borderColor:light ? c.glassStroke : "rgba(255,255,255,0.07)" },
+  shareGridName:     { color:light ? c.textDim : "rgba(255,255,255,0.45)", fontSize:10, fontWeight:"700" },
   rowBtns:           { flexDirection:"row", gap:10, marginTop:4 },
   backStepBtn:       { justifyContent:"center", alignItems:"center",
-                       backgroundColor:"rgba(255,255,255,0.07)", borderRadius:14,
+                       backgroundColor:light ? c.glassSoft : "rgba(255,255,255,0.07)", borderRadius:14,
                        paddingHorizontal:16, borderWidth:1,
-                       borderColor:"rgba(255,255,255,0.1)" },
-  backStepText:      { color:"rgba(255,255,255,0.6)", fontWeight:"800", fontSize:13 },
+                       borderColor:light ? c.glassStroke : "rgba(255,255,255,0.1)" },
+  backStepText:      { color:light ? c.textDim : "rgba(255,255,255,0.6)", fontWeight:"800", fontSize:13 },
   nextBtn:           { paddingVertical:14, alignItems:"center", borderRadius:14 },
   nextBtnText:       { color:"#fff", fontSize:14, fontWeight:"900" },
   doneWrap:          { alignItems:"center", paddingVertical:24 },
-  doneTitle:         { color:"#fff", fontSize:20, fontWeight:"900", marginBottom:8 },
-  doneSub:           { color:"rgba(255,255,255,0.4)", fontSize:13, textAlign:"center",
+  doneTitle:         { color:light ? c.text : "#fff", fontSize:20, fontWeight:"900", marginBottom:8 },
+  doneSub:           { color:light ? c.textDim : "rgba(255,255,255,0.4)", fontSize:13, textAlign:"center",
                        lineHeight:20, marginBottom:20, paddingHorizontal:10 },
   doneEncBadge:      { backgroundColor:brandAlpha(0.08), borderRadius:12,
                        padding:12, marginBottom:24, borderWidth:1,
                        borderColor:brandAlpha(0.2), width:"100%" },
-  doneEncText:       { color:BRAND_ACCENT, fontSize:12, fontWeight:"700", textAlign:"center" },
+  doneEncText:       { color:light ? c.primary : BRAND_ACCENT, fontSize:12, fontWeight:"700", textAlign:"center" },
 });
+
+function useScannerStyles() {
+  const { colors: c, scheme } = useTheme();
+  const light = scheme === "light";
+  const s = useMemo(() => makeStyles(c, light), [c, light]);
+  return { s, c, light };
+}

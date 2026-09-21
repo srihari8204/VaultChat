@@ -1,0 +1,5 @@
+
+> vaultchat@1.2.7 typecheck
+> node scripts/check-sdk-versions.js && tsc --noEmit
+
+LiveKit versions aligned: client 2.19.2, rn 2.12.0, webrtc 144.1.2

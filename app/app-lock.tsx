@@ -10,14 +10,14 @@
 
 import { Stack, useRouter } from 'expo-router';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, Animated, BackHandler, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, Animated, BackHandler, ScrollView, StyleSheet, TextInput, TouchableOpacity, View } from 'react-native';
 import { type Palette } from '../constants/theme';
 import { useTheme } from '../lib/theme';
 import { clearTokens, getCachedUser, loadSealedSession, sealedSessionLocked, setCachedUser } from '../lib/api';
 import { MpinInput } from '../components/auth/MpinInput';
 import { promptBiometricUnlock } from '../lib/mfa';
 import { verifyMpinRemote, onboardingError } from '../lib/onboarding';
-import { AuroraBackground } from '../components/ui';
+import { AppText as Text, AuroraBackground, KeyboardSafe } from '../components/ui';
 import { resetTo } from '../lib/authNav';
 
 export default function AppLock() {
@@ -106,7 +106,8 @@ export default function AppLock() {
     <View style={s.screen}>
       <AuroraBackground />
       <Stack.Screen options={{ headerShown: false, gestureEnabled: false }} />
-      <View style={s.body}>
+      <KeyboardSafe style={{ flex: 1 }}>
+      <ScrollView contentContainerStyle={s.body} keyboardShouldPersistTaps="handled">
         <Text style={s.lock}>🔐</Text>
         <Text style={s.title}>crazzychat is locked</Text>
 
@@ -163,14 +164,15 @@ export default function AppLock() {
             </TouchableOpacity>
           </>
         )}
-      </View>
+      </ScrollView>
+      </KeyboardSafe>
     </View>
   );
 }
 
 const makeStyles = (c: Palette) => StyleSheet.create({
   screen: { flex: 1, backgroundColor: 'transparent' },
-  body: { flex: 1, paddingHorizontal: 24, paddingTop: 120, alignItems: 'center' },
+  body: { flexGrow: 1, paddingHorizontal: 24, paddingTop: 120, paddingBottom: 32, alignItems: 'center' },
   lock: { fontSize: 48, marginBottom: 16 },
   title: { color: c.text, fontSize: 24, fontWeight: '900' },
   sub: { color: c.textDim, fontSize: 14, marginTop: 8, textAlign: 'center' },

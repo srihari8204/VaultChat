@@ -2,9 +2,10 @@
 // and PDF export. Uses the existing emi()/amortization() math in utils/finance.
 
 import React, { useMemo, useState } from 'react';
+import { useFinanceTheme } from '../../components/finance/useFinanceTheme';
 import { KeyboardSafe } from '../../components/ui';
-import { View, Text, ScrollView, StyleSheet, Alert, Platform } from 'react-native';
-import { FIN, TABULAR } from '../../constants/financeTheme';
+import { View, Text, ScrollView, StyleSheet, Alert, Pressable } from 'react-native';
+import { TABULAR, type FinancePalette } from '../../constants/financeTheme';
 import { FinHeader, Label, Field, Segment, Btn, HeroCard, Card, RowLine } from '../../components/finance/ui';
 import { num } from '../../utils/financeFormat';
 import { formatINR } from '../../utils/interest';
@@ -14,6 +15,8 @@ import { sharePdf, pdfDocument, kvTable, htmlTable } from '../../utils/financeIO
 const LOAN_TYPES = ['Home', 'Car', 'Bike', 'Personal', 'Education', 'Business'];
 
 export default function EmiCalc() {
+  const FIN = useFinanceTheme();
+  const s = React.useMemo(() => makeStyles(FIN), [FIN]);
   const [loanType, setLoanType] = useState('Home');
   const [amount, setAmount] = useState('');
   const [rate, setRate] = useState('');
@@ -87,7 +90,9 @@ export default function EmiCalc() {
           {/* Wraps rather than crushing: on a narrow phone the unit selector
               drops to its own line instead of squeezing the tenure field. */}
           <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap' }}>
-            <Field style={{ flexGrow: 1, flexBasis: 140 }} value={tenure} onChangeText={setTenure} placeholder="Enter tenure" keyboardType="numeric" />
+            <View style={{ flexGrow: 1, flexBasis: 140, minWidth: 0 }}>
+              <Field value={tenure} onChangeText={setTenure} placeholder="Enter tenure" keyboardType="numeric" />
+            </View>
             <View style={{ flexGrow: 1, flexBasis: 132 }}>
               <Segment<'yr' | 'mo'> options={[{ k: 'yr', label: 'Years' }, { k: 'mo', label: 'Months' }]} value={unit} onChange={setUnit} small />
             </View>
@@ -111,8 +116,8 @@ export default function EmiCalc() {
               </Card>
 
               <View style={s.btnRow}>
-                <Btn label={showSchedule ? 'Hide Schedule' : 'View Amortization'} kind="ghost" icon="list" onPress={() => setShowSchedule(v => !v)} wide />
-                <Btn label="PDF" kind="ghost" icon="share-outline" onPress={onShare} wide />
+                <Btn label={showSchedule ? 'Hide Schedule' : 'View Amortization'} kind="ghost" icon="list" onPress={() => setShowSchedule(v => !v)} style={{ flexGrow: 1, flexBasis: 200 }} />
+                <Btn label="PDF" kind="ghost" icon="share-outline" onPress={onShare} style={{ flexGrow: 1, flexBasis: 80 }} />
               </View>
 
               {showSchedule && (
@@ -127,8 +132,8 @@ export default function EmiCalc() {
                     <View key={r.month} style={s.schRow}>
                       <Text style={[s.schCell, { flex: 0.7, color: FIN.sub }]}>{r.month}</Text>
                       <Text style={s.schCell} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>{Math.round(r.principal).toLocaleString('en-IN')}</Text>
-                      <Text style={s.schCell}>{Math.round(r.interest).toLocaleString('en-IN')}</Text>
-                      <Text style={s.schCell}>{Math.round(r.balance).toLocaleString('en-IN')}</Text>
+                      <Text style={s.schCell} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>{Math.round(r.interest).toLocaleString('en-IN')}</Text>
+                      <Text style={s.schCell} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>{Math.round(r.balance).toLocaleString('en-IN')}</Text>
                     </View>
                   ))}
                   {schedule.length > 24 && <Text style={s.schMore}>Showing first 24 of {schedule.length} months · full schedule in the PDF</Text>}
@@ -144,20 +149,28 @@ export default function EmiCalc() {
 }
 
 function Chip({ label, active, onPress }: { label: string; active: boolean; onPress: () => void }) {
+  const FIN = useFinanceTheme();
+  const s = React.useMemo(() => makeStyles(FIN), [FIN]);
   return (
-    <Text
+    <Pressable
       onPress={onPress}
-      style={[s.chip, active && { backgroundColor: FIN.brand, color: '#fff', borderColor: FIN.brand }]}
-    >{label}</Text>
+      accessibilityRole="radio"
+      accessibilityState={{ selected: active }}
+      accessibilityLabel={label}
+      style={[s.chip, active && { backgroundColor: FIN.brandDeep, borderColor: FIN.brandDeep }]}
+    >
+      <Text style={[s.chipText, active && { color: FIN.onBrand }]}>{label}</Text>
+    </Pressable>
   );
 }
 
-const s = StyleSheet.create({
+const makeStyles = (FIN: FinancePalette) => StyleSheet.create({
   screen: { flex: 1, backgroundColor: FIN.bg },
   body: { padding: 16, paddingBottom: 40, alignSelf: 'center', width: '100%', maxWidth: FIN.contentMax },
   chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  chip: { paddingHorizontal: 14, paddingVertical: 8, borderRadius: 999, borderWidth: 1, borderColor: FIN.border, backgroundColor: FIN.card, color: FIN.sub, fontSize: 13, fontWeight: '700', overflow: 'hidden' },
-  btnRow: { flexDirection: 'row', gap: 12, marginTop: 14 },
+  chip: { minHeight: 44, paddingHorizontal: 14, paddingVertical: 10, borderRadius: 999, borderWidth: 1, borderColor: FIN.border, backgroundColor: FIN.card, justifyContent: 'center' },
+  chipText: { color: FIN.sub, fontSize: 13, fontWeight: '700' },
+  btnRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 12, marginTop: 14 },
   heroLabel: { color: 'rgba(255,255,255,0.85)', fontSize: 10.5, fontWeight: '700', letterSpacing: 0.8 },
   heroVal: { color: '#fff', fontSize: 30, fontWeight: '800', marginTop: 6, ...TABULAR },
 

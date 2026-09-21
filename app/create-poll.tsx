@@ -9,11 +9,11 @@ import { HEADER_TOP } from '../constants/layout';
 import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useState , useMemo} from 'react';
-import { ActivityIndicator, Alert, ScrollView, StyleSheet, Switch, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, ScrollView, StyleSheet, Switch, TextInput, TouchableOpacity, View } from 'react-native';
 import { type Palette } from '../constants/theme';
 import { useTheme } from '../lib/theme';
 import { createPoll } from '../lib/chatService';
-import { AuroraBackground } from '../components/ui';
+import { AppText as Text, AuroraBackground } from '../components/ui';
 
 const MIN_OPTIONS = 2;
 const MAX_OPTIONS = 12;
@@ -167,14 +167,14 @@ const makeStyles = (c: Palette) => StyleSheet.create({
 
   label:         { color: c.textDim, fontSize: 11, fontWeight: '700', letterSpacing: 1.2, marginBottom: 8 },
 
-  questionInput: { color: c.text, backgroundColor: c.glassSoft, borderColor: c.glassStroke, borderWidth: 1, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12, fontSize: 16, minHeight: 80, textAlignVertical: 'top' },
+  questionInput: { color: c.text, backgroundColor: c.glass, borderColor: c.glassStroke, borderWidth: 1, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12, fontSize: 16, minHeight: 80, textAlignVertical: 'top' },
   counter:       { color: c.textDim, fontSize: 11, marginTop: 4, textAlign: 'right' },
 
   optionRow:     { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 8 },
-  optionInput:   { flex: 1, color: c.text, backgroundColor: c.glassSoft, borderColor: c.glassStroke, borderWidth: 1, borderRadius: 10, paddingHorizontal: 14, paddingVertical: 10, fontSize: 15 },
-  removeBtn:     { width: 36, height: 36, alignItems: 'center', justifyContent: 'center', borderRadius: 18, borderWidth: 1, borderColor: c.glassStroke, backgroundColor: c.glassSoft },
+  optionInput:   { flex: 1, color: c.text, backgroundColor: c.glass, borderColor: c.glassStroke, borderWidth: 1, borderRadius: 10, paddingHorizontal: 14, paddingVertical: 10, fontSize: 15 },
+  removeBtn:     { width: 36, height: 36, alignItems: 'center', justifyContent: 'center', borderRadius: 18, borderWidth: 1, borderColor: c.glassStroke, backgroundColor: c.glass },
   removeBtnTxt:  { color: c.danger, fontSize: 22, fontWeight: '700' },
-  addBtn:        { flexDirection: 'row', justifyContent: 'center', padding: 12, borderRadius: 12, backgroundColor: c.glassSoft, borderWidth: 1, borderColor: c.glassStroke, alignItems: 'center', marginTop: 4 },
+  addBtn:        { flexDirection: 'row', justifyContent: 'center', padding: 12, borderRadius: 12, backgroundColor: c.glass, borderWidth: 1, borderColor: c.glassStroke, alignItems: 'center', marginTop: 4 },
   addBtnTxt:     { color: c.primary, fontWeight: '700' },
 
   toggleRow:     { flexDirection: 'row', alignItems: 'center', gap: 12, marginTop: 24, paddingVertical: 12, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: c.glassStroke },

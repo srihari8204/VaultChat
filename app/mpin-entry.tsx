@@ -10,15 +10,18 @@
 import { HEADER_TOP } from '../constants/layout';
 import { Ionicons } from '@expo/vector-icons';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
-import { useRef, useState } from 'react';
-import { ActivityIndicator, Animated, Pressable, StyleSheet, Text, View } from 'react-native';
+import { useMemo, useRef, useState } from 'react';
+import { ActivityIndicator, Animated, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { MpinInput } from '../components/auth/MpinInput';
 import { onboarding, verifyMpinRemote, onboardingError } from '../lib/onboarding';
 import { resetTo } from '../lib/authNav';
-import { AuthSky, BrandMark } from '../components/ui';
-import { AUTH } from '../constants/authTheme';
+import { AuthSky, BrandMark, KeyboardSafe } from '../components/ui';
+import { type AuthPalette } from '../constants/authTheme';
+import { useAuthTheme } from '../lib/useAuthTheme';
 
 export default function MpinEntry() {
+  const AUTH = useAuthTheme();
+  const s = useMemo(() => makeStyles(AUTH), [AUTH]);
   const router = useRouter();
   const { userId } = useLocalSearchParams<{ userId: string }>();
   const [mpin, setMpin] = useState('');
@@ -62,7 +65,8 @@ export default function MpinEntry() {
         <Ionicons name="arrow-back" size={24} color={AUTH.text} />
       </Pressable>
 
-      <View style={s.body}>
+      <KeyboardSafe style={{ flex: 1 }}>
+      <ScrollView contentContainerStyle={s.body} keyboardShouldPersistTaps="handled">
         <BrandMark size={64} markOnly style={{ marginBottom: 4 }} />
         <Text style={s.title}>Welcome back</Text>
         <Text style={s.sub}>Enter your 6-digit MPIN to unlock crazzychat</Text>
@@ -86,15 +90,16 @@ export default function MpinEntry() {
         >
           <Text style={s.forgot}>Forgot MPIN?</Text>
         </Pressable>
-      </View>
+      </ScrollView>
+      </KeyboardSafe>
     </View>
   );
 }
 
-const s = StyleSheet.create({
+const makeStyles = (AUTH: AuthPalette) => StyleSheet.create({
   screen: { flex: 1, backgroundColor: 'transparent' },
   back: { paddingTop: HEADER_TOP, paddingHorizontal: 20, alignSelf: 'flex-start' },
-  body: { flex: 1, paddingHorizontal: 24, paddingTop: 24, alignItems: 'center' },
+  body: { flexGrow: 1, paddingHorizontal: 24, paddingTop: 24, paddingBottom: 32, alignItems: 'center' },
   title: { color: AUTH.text, fontSize: 24, fontWeight: '900' },
   sub: { color: AUTH.dim, fontSize: 14, marginTop: 8, textAlign: 'center' },
   error: { color: AUTH.danger, fontSize: 13, marginTop: 14, textAlign: 'center', fontWeight: '600' },

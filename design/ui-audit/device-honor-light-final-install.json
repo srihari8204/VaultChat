@@ -1,0 +1,11 @@
+{
+  "device": "AWJDVB4702008616",
+  "model": "Honor ELI-NX9",
+  "androidSdk": 36,
+  "version": "1.2.15 (31)",
+  "artifactSha256": "CB8B93134EB614558AB5F123585882928591296D8EFAA7E344589A4C9856443F",
+  "installedSha256": "CB8B93134EB614558AB5F123585882928591296D8EFAA7E344589A4C9856443F",
+  "installedAt": "2026-09-21T14:47:49.4050743+05:30",
+  "accountDataPreserved": true,
+  "launchSucceeded": true
+}

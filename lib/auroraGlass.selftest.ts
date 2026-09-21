@@ -13,7 +13,7 @@
  * every role, and every value is a real colour string.
  */
 import assert from 'node:assert/strict';
-import { PALETTES, AuroraDark, AuroraLight, avatarRing, avatarColor, AVATAR_RING_PALETTE, AVATAR_PALETTE, type Palette } from '../constants/theme';
+import { PALETTES, AuroraDark, AuroraLight, TAB_ICON_INK, avatarRing, avatarColor, AVATAR_RING_PALETTE, AVATAR_PALETTE, type Palette } from '../constants/theme';
 import { BIZ } from '../constants/businessTheme';
 
 let n = 0;
@@ -21,6 +21,7 @@ const ok = (label: string, cond: boolean) => { assert.ok(cond, label); n++; };
 
 const AURORA_ROLES = [
   'glass', 'glassSoft', 'glassStroke', 'hairline', 'groundDisc', 'accentLight', 'accentDeep',
+  'accentOn', 'brandOnLight',
 ] as const satisfies readonly (keyof Palette)[];
 
 const isColor = (v: unknown): boolean =>
@@ -101,7 +102,46 @@ function contrast(fg: string, bg: string): number {
   return (hi + 0.05) / (lo + 0.05);
 }
 
+// Light panes must remain visibly separate from the page and from inset fields.
+// These are visual hierarchy budgets, not WCAG text-contrast thresholds.
+const lightPane = `rgb(${over(AuroraLight.glass, AuroraLight.bg).join(',')})`;
+const lightField = `rgb(${over(AuroraLight.glassSoft, AuroraLight.bg).join(',')})`;
+ok('light glass separates from the page ground', contrast(lightPane, AuroraLight.bg) >= 1.18);
+ok('light inset fields differ from raised panes', contrast(lightPane, lightField) >= 1.10);
+ok('light pane rim survives on white glass', contrast(AuroraLight.glassStroke, lightPane) >= 1.6);
+for (const ground of [AuroraLight.bg, `rgb(${over('rgba(157,111,208,0.176)', AuroraLight.bg).join(',')})`]) {
+  for (const glass of [AuroraLight.glass, AuroraLight.glassSoft]) {
+    const surface = `rgb(${over(glass, ground).join(',')})`;
+    for (const role of ['text', 'textDim', 'textFaint', 'accentOn', 'success', 'danger'] as const) {
+      ok(`light ${role} remains readable over glass and the strongest bloom`, contrast(AuroraLight[role], surface) >= 4.5);
+    }
+  }
+}
+
+for (const role of ['primary', 'accent', 'success', 'danger'] as const) {
+  for (const surface of [AuroraLight.bg, AuroraLight.card, AuroraLight.surfaceSolid]) {
+    ok(`light: ${role} text on ${surface} >= 4.5:1`, contrast(AuroraLight[role], surface) >= 4.5);
+  }
+}
+
+for (const scheme of ['light', 'dark'] as const) {
+  const p = PALETTES[scheme];
+  for (const [action, ink] of Object.entries(TAB_ICON_INK)) {
+    for (const surface of [p.glass, p.glassSoft]) {
+      const bg = `rgb(${over(surface, p.bg).join(',')})`;
+      ok(`${scheme}: ${action} icon/selected label has >= 4.5:1 contrast on glass`, contrast(ink[scheme], bg) >= 4.5);
+    }
+  }
+}
+
 for (const [name, p] of [['dark', AuroraDark], ['light', AuroraLight]] as [string, Palette][]) {
+  for (const surface of [p.bg, p.card, p.surfaceSolid, p.bubbleIn]) {
+    for (const role of ['text', 'textDim', 'textFaint'] as const) {
+      const ratio = contrast(p[role], surface);
+      ok(`${name}: ${role} on ${surface} >= 4.5:1 (${ratio.toFixed(2)})`, ratio >= 4.5);
+    }
+  }
+  ok(`${name}: primary button white on accentDeep >= 4.5:1`, contrast('#FFFFFF', p.accentDeep) >= 4.5);
   const bodyText = contrast(p.text, p.bg);
   ok(`${name}: body text on ground is at least 4.5:1 (got ${bodyText.toFixed(2)})`, bodyText >= 4.5);
 
@@ -111,6 +151,9 @@ for (const [name, p] of [['dark', AuroraDark], ['light', AuroraLight]] as [strin
   // accentOn is the tab label, the link, the "online" line — UI text, so 3:1.
   const accent = contrast(p.accentOn, p.bg);
   ok(`${name}: accentOn on ground is at least 3:1 (got ${accent.toFixed(2)})`, accent >= 3);
+
+  const brandOnLight = contrast(p.brandOnLight, AuroraLight.bg);
+  ok(`${name}: brandOnLight on light ground is at least 3:1 (got ${brandOnLight.toFixed(2)})`, brandOnLight >= 3);
 
   const onBubble = contrast(p.bubbleOutText, p.bubbleOut);
   ok(`${name}: sent-bubble text on the accent fill is at least 4:1 (got ${onBubble.toFixed(2)})`, onBubble >= 4);

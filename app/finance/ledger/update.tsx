@@ -2,16 +2,19 @@
 // User enters what they received; remaining auto-computes but stays editable.
 
 import React, { useCallback, useEffect, useState } from 'react';
+import { useFinanceTheme } from '../../../components/finance/useFinanceTheme';
 import { KeyboardSafe } from '../../../components/ui';
 import { View, Text, ScrollView, StyleSheet, Alert, Platform } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { FIN } from '../../../constants/financeTheme';
+import { type FinancePalette } from '../../../constants/financeTheme';
 import { FinHeader, Label, Field, Btn, Card, RowLine } from '../../../components/finance/ui';
 import { formatINR, fmtDateTime, num } from '../../../utils/financeFormat';
 import { getLedger, addLedgerUpdate, type LedgerEntry } from '../../../db/ledger';
 import { round2 } from '../../../utils/interest';
 
 export default function UpdateAmount() {
+  const FIN = useFinanceTheme();
+  const s = React.useMemo(() => makeStyles(FIN), [FIN]);
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
   const [e, setE] = useState<LedgerEntry | null>(null);
@@ -76,7 +79,7 @@ export default function UpdateAmount() {
   );
 }
 
-const s = StyleSheet.create({
+const makeStyles = (FIN: FinancePalette) => StyleSheet.create({
   screen: { flex: 1, backgroundColor: FIN.bg },
   body: { padding: 16, paddingBottom: 40, alignSelf: 'center', width: '100%', maxWidth: FIN.contentMax },
   who: { color: FIN.text, fontSize: 16, fontWeight: '800', marginBottom: 6 },

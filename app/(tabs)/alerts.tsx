@@ -12,7 +12,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from 'expo-router';
 import React, { useCallback, useState , useMemo} from 'react';
 import {
-  ActivityIndicator, FlatList, RefreshControl, StyleSheet, Text,
+  ActivityIndicator, FlatList, RefreshControl, StyleSheet,
   TouchableOpacity, View,
 } from 'react-native';
 import { useTheme } from '../../lib/theme';
@@ -21,6 +21,7 @@ import {
   type AuditSeverity, type ChainStatus, type SecurityEvent,
 } from '../../services/security/auditChain';
 import { scanDeviceAndRecord } from '../../services/securityService';
+import { AppText as Text } from '../../components/ui/Text';
 import { AuroraBackground } from '../../components/ui';
 
 const SEV_COLOR: Record<AuditSeverity, string> = {
@@ -128,7 +129,7 @@ export default function AlertsScreen() {
         </View>
         <View style={S.rowBody}>
           <View style={S.rowTop}>
-            <Text style={S.rowTitle} numberOfLines={1}>{item.title}</Text>
+            <Text style={S.rowTitle}>{item.title}</Text>
             <Text style={S.rowTime}>{timeAgo(item.ts)}</Text>
           </View>
           <Text style={S.rowDetail} numberOfLines={isOpen ? undefined : 2}>
@@ -151,7 +152,7 @@ export default function AlertsScreen() {
         </View>
       </TouchableOpacity>
     );
-  }, [expanded]);
+  }, [expanded, S]);
 
   return (
     <View style={S.screen}>
@@ -224,12 +225,12 @@ export default function AlertsScreen() {
 }
 
 const makeStyles = (c: Palette) => StyleSheet.create({
-  screen: { flex: 1, backgroundColor: 'transparent' },
+  screen: { flex: 1, backgroundColor: c.bg },
   header:   { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 20, paddingTop: HEADER_TOP, paddingBottom: 12, gap: 12 },
   title:    { color: c.text, fontSize: 28, fontWeight: '800' },
   subtitle: { color: c.textDim, fontSize: 13, marginTop: 2 },
-  scanBtn:  { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: c.primary, paddingHorizontal: 14, paddingVertical: 9, borderRadius: 12 },
-  scanBtnText: { color: '#fff', fontWeight: '700', fontSize: 13 },
+  scanBtn:  { minHeight: 44, flexShrink: 1, flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: c.primary, paddingHorizontal: 14, paddingVertical: 9, borderRadius: 12 },
+  scanBtnText: { flexShrink: 1, color: '#fff', fontWeight: '700', fontSize: 13 },
 
   banner:   { flexDirection: 'row', alignItems: 'center', gap: 8, marginHorizontal: 16, marginBottom: 8, paddingHorizontal: 12, paddingVertical: 9, borderRadius: 10, borderWidth: 1 },
   bannerOk: { backgroundColor: brandAlpha(0.08), borderColor: brandAlpha(0.3) },
@@ -238,18 +239,18 @@ const makeStyles = (c: Palette) => StyleSheet.create({
 
   center:   { flex: 1, justifyContent: 'center', alignItems: 'center' },
 
-  row:      { flexDirection: 'row', gap: 12, paddingHorizontal: 16, paddingVertical: 12, alignItems: 'flex-start' },
+  row:      { marginHorizontal: 12, marginVertical: 4, borderRadius: 18, borderWidth: StyleSheet.hairlineWidth, borderColor: c.glassStroke, backgroundColor: c.glassSoft, flexDirection: 'row', gap: 12, paddingHorizontal: 16, paddingVertical: 12, alignItems: 'flex-start' },
   iconWrap: { width: 40, height: 40, borderRadius: 12, justifyContent: 'center', alignItems: 'center' },
   rowBody:  { flex: 1 },
-  rowTop:   { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  rowTop:   { gap: 3 },
   rowTitle: { color: c.text, fontSize: 15, fontWeight: '700', flex: 1 },
-  rowTime:  { color: c.textFaint, fontSize: 11.5 },
+  rowTime:  { color: c.textDim, fontSize: 12 },
   rowDetail:{ color: c.textDim, fontSize: 13, lineHeight: 18, marginTop: 2 },
   metaBox:  { marginTop: 8, padding: 10, borderRadius: 10, backgroundColor: c.glassSoft, gap: 3 },
   metaLine: { color: c.textDim, fontSize: 12 },
   metaKey:  { color: c.textFaint, fontWeight: '700' },
 
-  emptyWrap:{ flexGrow: 1, justifyContent: 'center' },
+  emptyWrap:{ paddingBottom: TAB_BAR_SPACE + 16, paddingTop: 20, flexGrow: 1, justifyContent: 'center' },
   empty:    { alignItems: 'center', paddingHorizontal: 36, gap: 10 },
   emptyTitle: { color: c.text, fontSize: 17, fontWeight: '700', marginTop: 6 },
   emptySub: { color: c.textDim, fontSize: 13.5, textAlign: 'center', lineHeight: 20 },

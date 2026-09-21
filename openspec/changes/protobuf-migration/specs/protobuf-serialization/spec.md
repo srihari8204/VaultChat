@@ -321,6 +321,11 @@ offline path; a representation change may not alter either.
 - **THEN** it SHALL still be rendered before the network response, and the typed
   response SHALL replace it on the same schedule as the JSON response
 
+#### Scenario: Malformed chat identity preserves the cache
+- **WHEN** a typed chat-list response contains a row without a chat id
+- **THEN** the entire response SHALL fail before replacing or pruning cached
+  chats, and SHALL NOT be silently filtered into a successful partial list
+
 #### Scenario: Offline
 - **WHEN** the chat list request fails or the device is offline
 - **THEN** behaviour SHALL be unchanged from today, with no additional retry

@@ -1,9 +1,10 @@
 // app/family-setup.tsx — create a new Family Circle or join one with a code.
 // A Circle is a private group; invite links are the existing group-invite system.
 
+import { AppText as Text } from '../components/ui/Text';
 import React, { useState } from 'react';
 import { KeyboardSafe } from '../components/ui';
-import { View, Text, TextInput, TouchableOpacity, StyleSheet, Alert, ActivityIndicator, ScrollView, Platform } from 'react-native';
+import { View, TextInput, TouchableOpacity, StyleSheet, Alert, ActivityIndicator, ScrollView, Platform } from 'react-native';
 import { Stack, useRouter, useLocalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../lib/theme';

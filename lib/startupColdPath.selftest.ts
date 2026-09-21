@@ -6,6 +6,10 @@ const gate = read('lib/restoreGate.ts');
 const index = read('app/index.tsx');
 const layout = read('app/_layout.tsx');
 const api = read('lib/api.ts');
+const mfa = read('lib/mfa.ts');
+const socket = read('lib/socket.ts');
+const pkg = JSON.parse(read('package.json'));
+const gradleProps = read('android/gradle.properties');
 
 function check(name: string, pass: boolean): void {
   if (!pass) throw new Error(`FAIL: ${name}`);
@@ -26,6 +30,26 @@ check('session snapshot reads sealed state at most once',
   (snapshot.match(/hasSealedSession\(\)/g) ?? []).length === 1);
 check('session snapshot preserves sealed-lock routing',
   snapshot.includes('{ signedIn: true, sealedLocked: true }'));
+check('launch gate and socket share the plaintext token read',
+  api.includes('let accessTokenRead: Promise<string | null> | null = null') &&
+  api.includes('if (cachedAccessToken !== undefined) return cachedAccessToken') &&
+  api.includes('signedIn: !!(await getAccessToken())') &&
+  !snapshot.includes('SecureStore.getItemAsync(ACCESS_TOKEN_KEY)'));
+check('MFA launch read is memoized',
+  mfa.includes('let mfaRead: Promise<boolean> | null = null') &&
+  mfa.includes('if (cachedMfaEnabled !== undefined) return cachedMfaEnabled') &&
+  mfa.includes('cachedMfaEnabled = true') &&
+  mfa.includes('cachedMfaEnabled = false'));
+check('socket overlaps token and device reads before first network dial',
+  /const \[token, m, \{ CCWireEventSocket \}, \{ seedFromDeviceId \}, deviceId, native\] = await Promise\.all\(\[/.test(socket) &&
+  socket.indexOf('getAccessToken(),') < socket.indexOf("import('../services/deviceService')") &&
+  socket.includes("if (!token) throw new Error('Not signed in')") &&
+  socket.includes('let firstToken: string | null = token') &&
+  socket.includes('if (firstToken) { const t = firstToken; firstToken = null; return t; }'));
+check('release Android build excludes Expo dev tooling',
+  ['expo-dev-client', 'expo-dev-launcher', 'expo-dev-menu', 'expo-dev-menu-interface']
+    .every((name) => pkg.expo?.autolinking?.android?.exclude?.includes(name)) &&
+  /EX_DEV_CLIENT_NETWORK_INSPECTOR=false/.test(gradleProps));
 check('protected content stays veiled until the root gate resolves',
   // 2026-09-19: the veil now also latches down once the redirect has landed
   // (`landed`), so the first navigation inside the auth flow no longer veils

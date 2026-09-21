@@ -305,7 +305,7 @@ export default function NavMap({
    *  that fails to init WebGL/worker auto-falls-back to the Leaflet 2D map. */
   camera3D?: boolean;
 }) {
-  const { scheme, colors } = useTheme();
+  const { colors } = useTheme();
   const storeGeo = useNavGeo();
   const geo = data ?? storeGeo;
   const ref = useRef<WebView>(null);
@@ -385,7 +385,7 @@ export default function NavMap({
     setCam(next);
   };
   const camIcon = cam === 'follow' ? 'cube' : cam === 'north' ? 'navigate' : 'scan';
-  const mapScheme = scheme === 'light' ? 'light' : 'dark';
+  const mapScheme = 'light' as const;
   // Memoized — same reasoning as FamilyMap's identical fix: mlHtml
   // concatenates the ~1.1MB embedded MapLibre bundle into a fresh string on
   // every call, and this component re-renders on every GPS fix. The WebView

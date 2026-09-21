@@ -3,16 +3,17 @@
 // Touch-based drawing with color picker, brush sizes, undo, clear
 
 import { BRAND_ACCENT, type Palette } from '../constants/theme';
-import React, { useState, useRef , useMemo} from 'react';
+import React, { useState, useRef , useMemo, useEffect} from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, PanResponder, Alert } from 'react-native';
 import { useTheme } from '../lib/theme';
 import { Stack } from 'expo-router';
 import { captureRef } from 'react-native-view-shot';
 import * as Sharing from 'expo-sharing';
 import { AuroraBackground } from '../components/ui';
+import { CANVAS_BG, DEFAULT_INK, commitWhiteboardPath, type Tool } from '../lib/whiteboardStroke';
 
 
-const COLORS = ['#FFFFFF', '#FF3C6E', '#4A9FFF', BRAND_ACCENT, '#F59E0B', '#A78BFA', BRAND_ACCENT, '#EC4899', '#8B5CF6'];
+const COLORS = [DEFAULT_INK, '#FF3C6E', '#4A9FFF', BRAND_ACCENT, '#F59E0B', '#A78BFA', '#FFFFFF', '#EC4899', '#8B5CF6'];
 const BRUSH_SIZES = [2, 4, 8, 14, 22];
 
 function useS() {
@@ -26,26 +27,43 @@ export default function WhiteboardScreen() {
   const canvasRef = useRef(null);
   const [paths, setPaths] = useState([]);
   const [currentPath, setCurrentPath] = useState([]);
-  const [color, setColor] = useState('#FFFFFF');
+  const [color, setColor] = useState(DEFAULT_INK);
   const [brushSize, setBrushSize] = useState(4);
-  const [tool, setTool] = useState('pen');
+  const [tool, setTool] = useState<Tool>('pen');
+  const currentPathRef = useRef(currentPath);
+  const colorRef = useRef(color);
+  const brushSizeRef = useRef(brushSize);
+  const toolRef = useRef(tool);
+
+  useEffect(() => { colorRef.current = color; }, [color]);
+  useEffect(() => { brushSizeRef.current = brushSize; }, [brushSize]);
+  useEffect(() => { toolRef.current = tool; }, [tool]);
 
   const panResponder = useRef(PanResponder.create({
     onStartShouldSetPanResponder: () => true,
     onMoveShouldSetPanResponder: () => true,
     onPanResponderGrant: (e) => {
       const { locationX, locationY } = e.nativeEvent;
-      setCurrentPath([{ x: locationX, y: locationY }]);
+      const next = [{ x: locationX, y: locationY }];
+      currentPathRef.current = next;
+      setCurrentPath(next);
     },
     onPanResponderMove: (e) => {
       const { locationX, locationY } = e.nativeEvent;
-      setCurrentPath(prev => [...prev, { x: locationX, y: locationY }]);
+      const next = [...currentPathRef.current, { x: locationX, y: locationY }];
+      currentPathRef.current = next;
+      setCurrentPath(next);
     },
     onPanResponderRelease: () => {
-      if (currentPath.length > 0) {
-        setPaths(prev => [...prev, { points: currentPath, color: tool === 'eraser' ? '#FFFFFF' : color, width: tool === 'eraser' ? brushSize * 3 : brushSize }]);
-        setCurrentPath([]);
+      const latestPath = currentPathRef.current;
+      const latestTool = toolRef.current;
+      const latestBrush = brushSizeRef.current;
+      const committed = commitWhiteboardPath(latestPath, latestTool, colorRef.current, latestBrush);
+      if (committed) {
+        setPaths(prev => [...prev, committed]);
       }
+      currentPathRef.current = [];
+      setCurrentPath([]);
     },
   })).current;
 
@@ -94,11 +112,11 @@ export default function WhiteboardScreen() {
   return (
     <>
       <Stack.Screen options={{
-        headerShown: true, /* the root Stack sets headerShown:false app-wide, so the options below were inert and this screen had no back control at all */  title: 'Whiteboard', headerStyle: { backgroundColor: '#FFFFFF' }, headerTintColor: '#1F2937',
+        headerShown: true, /* the root Stack sets headerShown:false app-wide, so the options below were inert and this screen had no back control at all */  title: 'Whiteboard', headerStyle: { backgroundColor: colors.bg }, headerTintColor: colors.text,
         headerRight: () => (
           <View style={{ flexDirection: 'row', gap: 14, marginRight: 8 }}>
-            <TouchableOpacity onPress={undo}><Text style={{ color: '#4A9FFF', fontSize: 13, fontWeight: '700' }}>Undo</Text></TouchableOpacity>
-            <TouchableOpacity onPress={saveAndShare}><Text style={{ color: BRAND_ACCENT, fontSize: 13, fontWeight: '700' }}>Share</Text></TouchableOpacity>
+            <TouchableOpacity accessibilityRole="button" style={{ minHeight: 44, justifyContent: 'center' }} onPress={undo}><Text style={{ color: colors.accentOn, fontSize: 13, fontWeight: '700' }}>Undo</Text></TouchableOpacity>
+            <TouchableOpacity accessibilityRole="button" style={{ minHeight: 44, justifyContent: 'center' }} onPress={saveAndShare}><Text style={{ color: colors.accentOn, fontSize: 13, fontWeight: '700' }}>Share</Text></TouchableOpacity>
           </View>
         ),
       }} />
@@ -108,7 +126,7 @@ export default function WhiteboardScreen() {
         {/* Canvas */}
         <View ref={canvasRef} style={s.canvas} {...panResponder.panHandlers}>
           {paths.map((p, i) => renderPath(p, i))}
-          {currentPath.length > 0 && renderPath({ points: currentPath, color: tool === 'eraser' ? '#FFFFFF' : color, width: tool === 'eraser' ? brushSize * 3 : brushSize }, 'current')}
+          {currentPath.length > 0 && renderPath({ points: currentPath, color: tool === 'eraser' ? CANVAS_BG : color, width: tool === 'eraser' ? brushSize * 3 : brushSize }, 'current')}
         </View>
 
         {/* Toolbar */}
@@ -150,17 +168,17 @@ export default function WhiteboardScreen() {
 
 const makeStyles = (c: Palette) => StyleSheet.create({
   container: { flex: 1, backgroundColor: 'transparent' },
-  canvas: { flex: 1, backgroundColor: c.bg },
-  toolbar: { backgroundColor: '#161B22', padding: 12, paddingBottom: 28, borderTopWidth: 1, borderTopColor: '#21262D' },
+  canvas: { flex: 1, backgroundColor: CANVAS_BG },
+  toolbar: { backgroundColor: c.glass, padding: 12, paddingBottom: 28, borderTopWidth: 1, borderTopColor: c.glassStroke },
   toolRow: { flexDirection: 'row', justifyContent: 'center', gap: 16, marginBottom: 12 },
-  toolBtn: { width: 44, height: 44, borderRadius: 22, backgroundColor: '#21262D', justifyContent: 'center', alignItems: 'center' },
-  toolActive: { backgroundColor: '#4A9FFF33', borderWidth: 2, borderColor: '#4A9FFF' },
+  toolBtn: { width: 44, height: 44, borderRadius: 22, backgroundColor: c.glassSoft, justifyContent: 'center', alignItems: 'center', borderWidth: StyleSheet.hairlineWidth, borderColor: c.glassStroke },
+  toolActive: { backgroundColor: c.glass, borderWidth: 2, borderColor: c.primary },
   toolTxt: { fontSize: 18 },
-  colorRow: { flexDirection: 'row', justifyContent: 'center', gap: 10, marginBottom: 12 },
+  colorRow: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', gap: 10, marginBottom: 12 },
   colorDot: { width: 28, height: 28, borderRadius: 14 },
-  colorActive: { borderWidth: 3, borderColor: '#fff', transform: [{ scale: 1.15 }] },
+  colorActive: { borderWidth: 3, borderColor: c.primary, transform: [{ scale: 1.15 }] },
   brushRow: { flexDirection: 'row', justifyContent: 'center', gap: 16 },
-  brushBtn: { width: 36, height: 36, borderRadius: 18, backgroundColor: '#21262D', justifyContent: 'center', alignItems: 'center' },
-  brushActive: { backgroundColor: '#4A9FFF33', borderWidth: 1, borderColor: '#4A9FFF' },
-  brushDot: { backgroundColor: '#fff' },
+  brushBtn: { width: 36, height: 36, borderRadius: 18, backgroundColor: c.glassSoft, justifyContent: 'center', alignItems: 'center', borderWidth: StyleSheet.hairlineWidth, borderColor: c.glassStroke },
+  brushActive: { backgroundColor: c.glass, borderWidth: 1, borderColor: c.primary },
+  brushDot: { backgroundColor: c.text },
 });

@@ -20,12 +20,14 @@
 
 import React, { useCallback, useState } from 'react';
 import {
-  View, Text, StyleSheet, TouchableOpacity, ScrollView, Alert,
+  View, StyleSheet, TouchableOpacity, ScrollView, Alert,
   ActivityIndicator, RefreshControl,
 } from 'react-native';
 import { Stack, useFocusEffect, router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../lib/theme';
+import { AuroraBackground } from '../components/ui/AuroraBackground';
+import { AppText as Text } from '../components/ui/Text';
 import { brandAlpha } from '../constants/theme';
 import { myInvitations, acceptInvitation, rejectInvitation, type MyInvitation } from '../lib/chatService';
 import { groupTypeInfo } from '../lib/groups/catalog';
@@ -180,6 +182,7 @@ export default function GroupInvitationsScreen() {
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.bg }}>
+      <AuroraBackground variant="chat" />
       <Stack.Screen options={{
         headerShown: true, title: 'Invitations', headerTitleAlign: 'center',
         headerStyle: { backgroundColor: colors.bg }, headerTintColor: colors.text, headerShadowVisible: false,

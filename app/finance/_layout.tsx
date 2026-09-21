@@ -9,11 +9,14 @@
 
 import { Stack } from 'expo-router';
 import React from 'react';
+import { useFinanceTheme } from '../../components/finance/useFinanceTheme';
 import { View, StyleSheet } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-import { FIN } from '../../constants/financeTheme';
+import { type FinancePalette } from '../../constants/financeTheme';
 
 export default function FinanceLayout() {
+  const FIN = useFinanceTheme();
+  const styles = React.useMemo(() => makeStyles(FIN), [FIN]);
   return (
     <View style={styles.root}>
       <LinearGradient
@@ -46,7 +49,7 @@ export default function FinanceLayout() {
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (FIN: FinancePalette) => StyleSheet.create({
   // bgMid under the gradient: if the gradient ever fails to draw for a frame
   // during a transition, the fallback is the mid ice tone, not black.
   root: { flex: 1, backgroundColor: FIN.bgMid },

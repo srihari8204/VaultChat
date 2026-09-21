@@ -18,7 +18,6 @@ import {
   FlatList,
   RefreshControl,
   StyleSheet,
-  Text,
   TouchableOpacity,
   View,
 } from 'react-native';
@@ -31,7 +30,7 @@ import {
   revokeSession,
   type SessionRow,
 } from '../lib/chatService';
-import { AuroraBackground } from '../components/ui';
+import { AppText as Text, AuroraBackground } from '../components/ui';
 
 const CACHE_KEY = 'sessions';
 
@@ -132,6 +131,7 @@ export default function LoginHistoryScreen() {
 
   return (
     <View style={S.screen}>
+      <AuroraBackground />
       <View style={S.header}>
         <TouchableOpacity accessibilityRole="button" accessibilityLabel="Back" onPress={() => router.back()} hitSlop={10} style={S.backBtn}>
           <Ionicons name="arrow-back" size={24} color={colors.text} />
@@ -159,6 +159,9 @@ export default function LoginHistoryScreen() {
             onPress={() => onRevoke(r)}
             activeOpacity={r.isCurrent ? 1 : 0.7}
             disabled={r.isCurrent}
+            accessibilityRole="button"
+            accessibilityLabel={r.isCurrent ? `${describeDevice(r.userAgent)}, this device` : `Sign out ${describeDevice(r.userAgent)}`}
+            accessibilityState={{ disabled: r.isCurrent }}
           >
             <View style={{ flex: 1 }}>
               <View style={S.rowTop}>
@@ -175,7 +178,7 @@ export default function LoginHistoryScreen() {
         )}
         ListFooterComponent={
           others.length > 0 ? (
-            <TouchableOpacity style={S.revokeAllBtn} onPress={onRevokeAllOthers} activeOpacity={0.85}>
+            <TouchableOpacity accessibilityRole="button" style={S.revokeAllBtn} onPress={onRevokeAllOthers} activeOpacity={0.85}>
               <Text style={S.revokeAllTxt}>Sign out all other devices ({others.length})</Text>
             </TouchableOpacity>
           ) : null
@@ -228,11 +231,11 @@ const makeStyles = (c: Palette) => StyleSheet.create({
 
   errorTxt:      { color: c.danger, paddingHorizontal: 16, paddingVertical: 8, fontSize: 12 },
 
-  intro:         { paddingHorizontal: 20, paddingTop: 14, paddingBottom: 4 },
+  intro:         { marginHorizontal: 16, marginTop: 12, marginBottom: 8, padding: 14, borderRadius: 16, backgroundColor: c.glass, borderWidth: StyleSheet.hairlineWidth, borderColor: c.glassStroke },
   introTxt:      { color: c.textDim, fontSize: 12, lineHeight: 16 },
 
-  row:           { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 20, paddingVertical: 14, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.glassStroke },
-  rowCurrent:    { backgroundColor: 'rgba(108,99,255,0.08)' },
+  row:           { flexDirection: 'row', alignItems: 'center', gap: 10, marginHorizontal: 16, marginBottom: 8, paddingHorizontal: 14, paddingVertical: 14, borderRadius: 16, backgroundColor: c.glass, borderWidth: StyleSheet.hairlineWidth, borderColor: c.glassStroke },
+  rowCurrent:    { backgroundColor: c.glassSoft, borderColor: c.primary },
   rowTop:        { flexDirection: 'row', alignItems: 'center', gap: 8 },
   rowDevice:     { color: c.text, fontSize: 15, fontWeight: '600', flex: 1 },
   currentTag:    { color: c.primary, fontSize: 10, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 1, borderColor: c.primary, borderWidth: 1, paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6, overflow: 'hidden' },

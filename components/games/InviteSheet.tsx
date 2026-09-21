@@ -1,3 +1,4 @@
+import { useGamePalette } from './appearance';
 // components/games/InviteSheet.tsx — pick a chat and put the table in it.
 //
 // The invite used to leave through the OS share sheet and hope it came back.
@@ -10,10 +11,11 @@
 // — threading a modal through four board layouts to show the same list would be
 // four places to get it wrong.
 
+import { AppText as Text } from '../ui/Text';
 import React, { useCallback, useEffect, useState } from 'react';
-import { ActivityIndicator, Alert, Text, View } from 'react-native';
+import { ActivityIndicator, Alert, View } from 'react-native';
 import { Sheet, SettingRow } from './feedback';
-import { C, S } from '../../lib/games/theme';
+import { S } from '../../lib/games/theme';
 import { listChats, type ChatSummary } from '../../lib/chatService';
 import { gameName, inviteToTable, registerInvitePicker, sendGameInvite } from '../../lib/games/invite';
 import type { GameKind } from '../../lib/gamesSocket';
@@ -24,6 +26,7 @@ function chatLabel(c: ChatSummary): string {
 }
 
 export default function InviteSheet() {
+  const C = useGamePalette();
   const [target, setTarget] = useState<{ game: GameKind; room: string } | null>(null);
   const [chats, setChats] = useState<ChatSummary[] | null>(null);
 

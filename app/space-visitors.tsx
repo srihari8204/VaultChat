@@ -13,15 +13,16 @@
 // at a gate. Redemption is a conditional UPDATE, so two gates scanning the same
 // code in the same second cannot both admit.
 
+import { AppText as Text } from '../components/ui/Text';
 import React, { useCallback, useMemo, useState } from 'react';
 import {
-  View, Text, StyleSheet, ScrollView, ActivityIndicator, TouchableOpacity,
+  View, StyleSheet, ScrollView, ActivityIndicator, TouchableOpacity,
   Alert, TextInput, Modal,
 } from 'react-native';
 import { Stack, useLocalSearchParams, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useSpaceColors, spaceHeader } from '../lib/spaces/theme';
-import type { Palette } from '../constants/theme';
+import type { SpacePalette as Palette } from '../lib/spaces/theme';
 import {
   getVisitorPasses, issueVisitorPass, redeemVisitorPass, type VisitorPass,
 } from '../lib/spaces/api';
@@ -197,7 +198,7 @@ export default function SpaceVisitorsScreen() {
               {HOURS.map((h) => (
                 <TouchableOpacity
                   key={h} onPress={() => setHours(h)}
-                  style={[s.hour, hours === h && { backgroundColor: colors.primary }]}
+                  style={[s.hour, hours === h && { backgroundColor: colors.brandOnLight }]}
                 >
                   <Text style={[s.hourText, hours === h && { color: '#fff' }]}>{h}h</Text>
                 </TouchableOpacity>
@@ -287,7 +288,7 @@ const styles = (c: Palette) => StyleSheet.create({
   modalBtn: { paddingHorizontal: 16, paddingVertical: 12, borderRadius: 10 },
   ghost: { borderWidth: 1, borderColor: c.glassStroke },
   ghostText: { color: c.text, fontWeight: '600' },
-  solid: { backgroundColor: c.primary },
+  solid: { backgroundColor: c.brandOnLight },
   solidText: { color: '#fff', fontWeight: '700' },
   off: { opacity: 0.4 },
   footnote: { color: c.textFaint, fontSize: 11.5, lineHeight: 16 },

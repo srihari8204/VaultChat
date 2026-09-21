@@ -3,10 +3,10 @@
 // A community is an umbrella over group chats with an auto-created Announcements
 // group. List your communities → open one → see its groups → tap to chat.
 
-import { HEADER_TOP } from '../constants/layout';
+import { HEADER_TOP, SCREEN_BOTTOM } from '../constants/layout';
 import React, { useCallback, useMemo, useState } from 'react';
 import {
-  View, Text, FlatList, TouchableOpacity, StyleSheet, Modal, TextInput, Alert, ActivityIndicator,
+  View, ScrollView, FlatList, TouchableOpacity, StyleSheet, Modal, TextInput, Alert, ActivityIndicator,
 } from 'react-native';
 import { useRouter, useFocusEffect, Stack } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -19,6 +19,7 @@ import {
 import { readCache, writeCache } from '../lib/localCache';
 import { AuroraBackground } from '../components/ui';
 import { KeyboardSafe } from '../components/ui/KeyboardSafe';
+import { AppText as Text } from '../components/ui/Text';
 
 export default function CommunitiesScreen() {
   const { colors } = useTheme();
@@ -94,6 +95,7 @@ export default function CommunitiesScreen() {
 
         <FlatList
           data={detail.groups}
+          contentContainerStyle={S.listContent}
           keyExtractor={g => g.id}
           ListHeaderComponent={
             <View>
@@ -108,7 +110,7 @@ export default function CommunitiesScreen() {
           renderItem={({ item: g }) => (
             <TouchableOpacity style={S.row} activeOpacity={0.7} onPress={() => router.push({ pathname: '/chat', params: { id: g.id } } as any)}>
               <View style={[S.groupIcon, g.isAnnouncement && { backgroundColor: colors.primary }]}>
-                <Ionicons name={g.isAnnouncement ? 'megaphone' : 'people-outline'} size={20} color="#fff" />
+                <Ionicons name={g.isAnnouncement ? 'megaphone' : 'people-outline'} size={20} color={g.isAnnouncement ? '#fff' : colors.primary} />
               </View>
               <View style={{ flex: 1 }}>
                 <Text style={S.rowName} numberOfLines={1}>{g.name}</Text>
@@ -132,6 +134,7 @@ export default function CommunitiesScreen() {
   // ── Communities list ───────────────────────────────────────────────
   return (
     <View style={S.screen}>
+      <AuroraBackground />
       <Stack.Screen options={{ headerShown: false }} />
       <View style={S.header}>
         <TouchableOpacity accessibilityRole="button" accessibilityLabel="Back" onPress={() => router.back()} style={S.hBtn} hitSlop={8}><Ionicons name="arrow-back" size={24} color={colors.text} /></TouchableOpacity>
@@ -142,17 +145,17 @@ export default function CommunitiesScreen() {
       {loading ? (
         <View style={S.center}><ActivityIndicator color={colors.primary} size="large" /></View>
       ) : list.length === 0 ? (
-        <View style={S.center}>
+        <ScrollView contentContainerStyle={S.center}>
           <Ionicons name="people-circle-outline" size={56} color={colors.textDim} />
           <Text style={S.emptyTitle}>No communities yet</Text>
           <Text style={S.emptySub}>Communities bring related groups together under one roof.</Text>
           <TouchableOpacity style={S.cta} onPress={() => { setName(''); setDesc(''); setModal('community'); }}><Text style={S.ctaTxt}>New community</Text></TouchableOpacity>
-        </View>
+        </ScrollView>
       ) : (
         <FlatList
           data={list}
           keyExtractor={c => c.id}
-          contentContainerStyle={{ paddingVertical: 6 }}
+          contentContainerStyle={S.listContent}
           renderItem={({ item: c }) => (
             <TouchableOpacity style={S.row} activeOpacity={0.7} onPress={() => openCommunity(c.id)}>
               <View style={S.commIconSm}><Ionicons name="people" size={22} color="#fff" /></View>
@@ -174,7 +177,7 @@ export default function CommunitiesScreen() {
       <Modal visible={modal != null} transparent animationType="fade" onRequestClose={() => setModal(null)}>
         <KeyboardSafe keyboardOnly>
         <View style={S.modalBackdrop}>
-          <View style={S.modalCard}>
+          <ScrollView style={S.modalCard} contentContainerStyle={S.modalContent} keyboardShouldPersistTaps="handled">
             <Text style={S.modalTitle}>{modal === 'group' ? 'New group' : 'New community'}</Text>
             <TextInput style={S.modalInput} value={name} onChangeText={setName} placeholder={modal === 'group' ? 'Group name' : 'Community name'} placeholderTextColor={colors.textDim} autoFocus maxLength={100} />
             {modal === 'community' && (
@@ -186,7 +189,7 @@ export default function CommunitiesScreen() {
                 {busy ? <ActivityIndicator color="#fff" /> : <Text style={S.modalCreate}>Create</Text>}
               </TouchableOpacity>
             </View>
-          </View>
+          </ScrollView>
         </View>
         </KeyboardSafe>
       </Modal>
@@ -196,9 +199,10 @@ export default function CommunitiesScreen() {
 
 const makeStyles = (c: Palette) => StyleSheet.create({
   screen: { flex: 1, backgroundColor: 'transparent' },
-  center:  { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 10, paddingHorizontal: 40 },
+  center:  { flexGrow: 1, alignItems: 'center', justifyContent: 'center', gap: 12, paddingHorizontal: 32, paddingVertical: 32 },
+  listContent: { paddingTop: 8, paddingBottom: SCREEN_BOTTOM + 16 },
   header:  { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 12, paddingTop: HEADER_TOP, paddingBottom: 12, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.glassStroke },
-  hBtn:    { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
+  hBtn:    { width: 44, height: 44, borderRadius: 16, backgroundColor: c.glassSoft, alignItems: 'center', justifyContent: 'center' },
   hTitle:  { flex: 1, color: c.text, fontSize: 18, fontWeight: '700' },
 
   commHero: { alignItems: 'center', paddingVertical: 24, gap: 8 },
@@ -207,7 +211,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   commDesc: { color: c.textDim, fontSize: 14, textAlign: 'center', lineHeight: 20, paddingHorizontal: 24 },
   sectionLabel: { color: c.textDim, fontSize: 12, fontWeight: '700', letterSpacing: 1, marginHorizontal: 16, marginTop: 8, marginBottom: 4 },
 
-  row:      { flexDirection: 'row', alignItems: 'center', gap: 14, paddingHorizontal: 16, paddingVertical: 12 },
+  row:      { flexDirection: 'row', alignItems: 'center', gap: 14, marginHorizontal: 16, marginBottom: 10, padding: 16, borderRadius: 20, backgroundColor: c.glassSoft, borderWidth: StyleSheet.hairlineWidth, borderColor: c.glassStroke },
   rowName:  { color: c.text, fontSize: 16, fontWeight: '600' },
   rowSub:   { color: c.textDim, fontSize: 13, marginTop: 2 },
   commIconSm: { width: 48, height: 48, borderRadius: 16, backgroundColor: c.primary, alignItems: 'center', justifyContent: 'center' },
@@ -222,7 +226,8 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   ctaTxt:   { color: '#fff', fontWeight: '800', fontSize: 14 },
 
   modalBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', alignItems: 'center', justifyContent: 'center', padding: 28 },
-  modalCard: { width: '100%', maxWidth: 360, backgroundColor: c.surfaceSolid, borderRadius: 18, padding: 18, gap: 12 },
+  modalCard: { width: '100%', maxWidth: 420, maxHeight: '100%', flexGrow: 0, backgroundColor: c.surfaceSolid, borderRadius: 24, borderWidth: StyleSheet.hairlineWidth, borderColor: c.glassStroke },
+  modalContent: { padding: 20, gap: 12 },
   modalTitle: { color: c.text, fontSize: 17, fontWeight: '800' },
   modalInput: { color: c.text, backgroundColor: c.glassSoft, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12, fontSize: 15 },
   modalBtns: { flexDirection: 'row', justifyContent: 'flex-end', gap: 8, marginTop: 4 },

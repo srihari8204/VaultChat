@@ -12,7 +12,7 @@
 import React from 'react';
 import { StyleSheet, TouchableOpacity, View, type StyleProp, type ViewStyle } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-import { GLASS, GLOW, lipGradient, lipPeak, type GlowKind } from '../../constants/glass';
+import { GLASS, GLOW, glassShadow, lipGradient, lipPeak, type GlowKind } from '../../constants/glass';
 import { SPACING } from '../../constants/theme';
 import { useColors, useTheme } from '../../lib/theme';
 import { GlassView } from './GlassView';
@@ -39,7 +39,7 @@ export function GlassCard({
   const recipe = GLASS.card;
   // Shadow lives on the OUTER view: the surface clips (overflow hidden) so the
   // lip and children stay inside the curve, and a clipped view cannot cast.
-  const outer = [styles.outer, { borderRadius: recipe.radius }, glow ? GLOW[glow] : recipe.shadow, style];
+  const outer = [styles.outer, { borderRadius: recipe.radius }, glow ? GLOW[glow] : glassShadow('card', scheme), style];
 
   const body = blur ? (
     <GlassView kind="card" highlight={highlight} style={[styles.surface, { borderRadius: recipe.radius }, padded && styles.padded]}>
@@ -49,7 +49,7 @@ export function GlassCard({
     <View
       style={[
         styles.surface,
-        { borderRadius: recipe.radius, backgroundColor: c.glass, borderColor: c.glassStroke, borderWidth: StyleSheet.hairlineWidth },
+        { borderRadius: recipe.radius, backgroundColor: c.glass, borderColor: c.glassStroke, borderWidth: scheme === 'light' ? 1 : StyleSheet.hairlineWidth },
         padded && styles.padded,
       ]}
     >
@@ -68,7 +68,7 @@ export function GlassCard({
 
   if (onPress) {
     return (
-      <TouchableOpacity onPress={onPress} activeOpacity={0.85} style={outer} testID={testID}>
+      <TouchableOpacity accessibilityRole="button" onPress={onPress} activeOpacity={0.85} style={outer} testID={testID}>
         {body}
       </TouchableOpacity>
     );

@@ -91,7 +91,7 @@ func TestVaultbeamRelayInitResetsSessionOverTheWire(t *testing.T) {
 	t.Setenv("VAULTBEAM_S3_ACCESS_KEY", "test")
 
 	mux := vbMux()
-	const id, n = "vbinitreset0001", 8
+	const id, n = "vbinitreset000001", 8
 	vbSeed(t, id, n, n, "pending")
 
 	// The receiver publishes a bitmap describing THIS file's layout, and the

@@ -13,14 +13,15 @@
 // whole point: an attendance screen that reports a flat battery as a no-show
 // gets switched off within a week, and deserves to be.
 
+import { AppText as Text } from '../components/ui/Text';
 import React, { useCallback, useMemo, useState } from 'react';
 import {
-  View, Text, StyleSheet, ScrollView, ActivityIndicator, TouchableOpacity,
+  View, StyleSheet, ScrollView, ActivityIndicator, TouchableOpacity,
 } from 'react-native';
 import { Stack, useLocalSearchParams, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useSpaceColors, spaceHeader } from '../lib/spaces/theme';
-import type { Palette } from '../constants/theme';
+import type { SpacePalette as Palette } from '../lib/spaces/theme';
 import { getTrack } from '../lib/family/history';
 import { getPlaces } from '../lib/family/store';
 import { circleMembers } from '../lib/family/circle';
@@ -247,8 +248,8 @@ function stateIcon(s: AttendanceState): any {
 function stateColour(s: AttendanceState, c: Palette): string {
   switch (s) {
     case 'present': return c.success;
-    case 'late': return '#F59E0B';
-    case 'left_early': return '#F59E0B';
+    case 'late': return c.warning;
+    case 'left_early': return c.warning;
     case 'absent': return c.danger;
     default: return c.textFaint;
   }

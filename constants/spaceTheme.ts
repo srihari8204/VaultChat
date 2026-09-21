@@ -15,23 +15,23 @@
 export const SPACE_GLASS = {
   light: {
     // Ground, top → bottom. Drawn once behind the whole screen.
-    bgTop:      '#F7F5FC',
-    bgMid:      '#EFECF7',
-    bgBottom:   '#E5E1F0',
+    bgTop:      '#F0EDF8',
+    bgMid:      '#E6E0F2',
+    bgBottom:   '#DCD5EC',
 
     // Three weights of glass. Hierarchy lives in the glass itself:
     // strong = the hero pane and floating controls, pane = every ordinary
     // card, faint = tertiary rows and resting chips.
-    pane:       'rgba(255,255,255,0.62)',
-    paneStrong: 'rgba(255,255,255,0.82)',
-    paneFaint:  'rgba(255,255,255,0.38)',
+    pane:       'rgba(255,255,255,0.82)',
+    paneStrong: 'rgba(255,255,255,0.94)',
+    paneFaint:  'rgba(255,255,255,0.58)',
 
-    edge:       'rgba(255,255,255,0.92)',   // the lit rim — doubles as pane border
-    line:       'rgba(22,17,44,0.08)',      // hairline separators inside a pane
+    edge:       'rgba(52,39,82,0.18)',      // visible cool rim on light panes
+    line:       'rgba(22,17,44,0.12)',      // hairline separators inside a pane
     // Shadowless chips can't lean on elevation to separate from the ground,
-    // and a white rim on a white ground is invisible — so chips take an ink
-    // hairline in light while panes keep the lit edge. Dark keeps the rim.
-    chipEdge:   'rgba(22,17,44,0.10)',
+    // and a white rim on a white ground is invisible — so both chips and
+    // panes take an ink hairline in light. Dark keeps its lit rim.
+    chipEdge:   'rgba(22,17,44,0.18)',
     // Press tint for rows: white-over-white shows nothing, ink does.
     press:      'rgba(22,17,44,0.05)',
 
@@ -46,6 +46,7 @@ export const SPACE_GLASS = {
     accentText: '#6D3FA8',
     goodText:   '#05603A',
     dangerText: '#B42318',
+    warnText:   '#93370D',
 
     // Alpha suffixes for the three concentric aura circles (hex, appended to
     // the identity colour). Concentric fades stand in for a radial blur.
@@ -71,6 +72,7 @@ export const SPACE_GLASS = {
     accentText: '#C9ADED',
     goodText:   '#6CE9A6',
     dangerText: '#FDA29B',
+    warnText:   '#FEC84B',
 
     // The dark ground swallows more, so the aura breathes a little brighter.
     auraAlphas: ['20', '18', '10'],

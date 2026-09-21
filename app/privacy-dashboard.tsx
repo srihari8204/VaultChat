@@ -6,14 +6,12 @@
 import { brandAlpha, type Palette } from '../constants/theme';
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { LinearGradient } from 'expo-linear-gradient';
 import { Stack, useRouter } from 'expo-router';
 import React, { useEffect, useRef, useState , useMemo} from 'react';
 import {
   Animated,
   ScrollView,
   StyleSheet,
-  Text,
   TouchableOpacity,
   View,
 } from 'react-native';
@@ -22,7 +20,7 @@ import Svg, { Circle } from 'react-native-svg';
 import { getSettings, updateSettings, listTrustedContacts } from '../lib/chatService';
 import { getSecurityOverview } from '../lib/security';
 import { hasPIN } from './(constants)/authService';
-import { AuroraBackground } from '../components/ui';
+import { AppText as Text, AuroraBackground } from '../components/ui';
 import { HEADER_TOP } from '../constants/layout';
 
 
@@ -212,7 +210,7 @@ export default function PrivacyDashboardScreen() {
               cx={size / 2}
               cy={size / 2}
               r={radius}
-              stroke="rgba(255,255,255,0.06)"
+              stroke={colors.hairline}
               strokeWidth={strokeWidth}
               fill="transparent"
             />
@@ -256,6 +254,9 @@ export default function PrivacyDashboardScreen() {
             style={s.checkRow}
             onPress={() => !f.alwaysOn && toggleFeature(f.key)}
             disabled={f.alwaysOn}
+            accessibilityRole="switch"
+            accessibilityLabel={f.label}
+            accessibilityState={{ checked: enabled, disabled: f.alwaysOn }}
           >
             <View style={[s.checkIcon, enabled ? s.checkIconOn : s.checkIconOff]}>
               <Ionicons
@@ -301,6 +302,8 @@ export default function PrivacyDashboardScreen() {
               key={opt.value}
               style={[s.pChip, value === opt.value && s.pChipActive]}
               onPress={() => setPrivacyLevel(key, opt.value)}
+              accessibilityRole="radio"
+              accessibilityState={{ selected: value === opt.value }}
             >
               <Text style={[s.pChipText, value === opt.value && s.pChipTextActive]}>{opt.label}</Text>
             </TouchableOpacity>
@@ -327,12 +330,16 @@ export default function PrivacyDashboardScreen() {
           <TouchableOpacity
             style={[s.pChip, settings.onlineStatus && s.pChipActive]}
             onPress={() => saveSettings({ ...settings, onlineStatus: true })}
+            accessibilityRole="radio"
+            accessibilityState={{ selected: settings.onlineStatus }}
           >
             <Text style={[s.pChipText, settings.onlineStatus && s.pChipTextActive]}>Show</Text>
           </TouchableOpacity>
           <TouchableOpacity
             style={[s.pChip, !settings.onlineStatus && s.pChipActive]}
             onPress={() => saveSettings({ ...settings, onlineStatus: false })}
+            accessibilityRole="radio"
+            accessibilityState={{ selected: !settings.onlineStatus }}
           >
             <Text style={[s.pChipText, !settings.onlineStatus && s.pChipTextActive]}>Hide</Text>
           </TouchableOpacity>
@@ -379,7 +386,6 @@ export default function PrivacyDashboardScreen() {
     <View style={s.container}>
       <AuroraBackground />
       <Stack.Screen options={{ headerShown: false }} />
-      <LinearGradient colors={[colors.bg, '#F9FAFB', colors.bg]} style={StyleSheet.absoluteFill} />
 
       <Animated.View style={{ flex: 1, opacity: fadeIn }}>
         {/* Header */}
@@ -428,7 +434,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   section: {
     marginHorizontal: 16,
     marginTop: 20,
-    backgroundColor: c.glassSoft,
+    backgroundColor: c.glass,
     borderRadius: 16,
     padding: 16,
     borderWidth: 1,
@@ -442,7 +448,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
     alignItems: 'center',
     paddingVertical: 10,
     borderBottomWidth: 1,
-    borderBottomColor: 'rgba(255,255,255,0.04)',
+    borderBottomColor: c.hairline,
   },
   checkIcon: {
     width: 24,
@@ -453,7 +459,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
     marginRight: 12,
   },
   checkIconOn: { backgroundColor: c.primary },
-  checkIconOff: { backgroundColor: 'rgba(255,255,255,0.08)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.15)' },
+  checkIconOff: { backgroundColor: c.glassSoft, borderWidth: 1, borderColor: c.glassStroke },
   checkLabel: { fontSize: 14, color: c.text, fontWeight: '500', flex: 1 },
   alwaysBadge: {
     backgroundColor: brandAlpha(0.15),
@@ -467,7 +473,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   privacyRow: {
     paddingVertical: 12,
     borderBottomWidth: 1,
-    borderBottomColor: 'rgba(255,255,255,0.04)',
+    borderBottomColor: c.hairline,
   },
   privacyLeft: { flexDirection: 'row', alignItems: 'center', marginBottom: 8 },
   privacyLabel: { fontSize: 14, color: c.text, fontWeight: '600' },
@@ -480,7 +486,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
     borderWidth: 1,
     borderColor: c.glassStroke,
   },
-  pChipActive: { backgroundColor: 'rgba(74,159,255,0.15)', borderColor: c.accent },
+  pChipActive: { backgroundColor: brandAlpha(0.15), borderColor: c.accent },
   pChipText: { fontSize: 12, color: c.textDim, fontWeight: '600' },
   pChipTextActive: { color: c.accent },
 
@@ -499,7 +505,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
     alignItems: 'flex-start',
     paddingVertical: 10,
     borderBottomWidth: 1,
-    borderBottomColor: 'rgba(255,255,255,0.04)',
+    borderBottomColor: c.hairline,
   },
   suggestionLabel: { fontSize: 13, fontWeight: '600', color: c.text },
   suggestionText: { fontSize: 12, color: c.textDim, marginTop: 2, lineHeight: 18 },

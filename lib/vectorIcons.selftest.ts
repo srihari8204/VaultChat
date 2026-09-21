@@ -1,6 +1,6 @@
 // Run: npx tsx lib/vectorIcons.selftest.ts
 //
-// metro.config.js resolves '@expo/vector-icons' to shims/vector-icons.js, which
+// metro.config.js resolves '@expo/vector-icons' to shims/vector-icons.ts, which
 // re-exports only the families this app renders — because the real entry point
 // requires all 19 families and each one drags its own .ttf into the APK
 // (measured: 4,076,840 bytes of fonts, 2,022,616 of them never drawn).
@@ -17,7 +17,7 @@ import { URL, fileURLToPath } from 'node:url';
 
 const ROOT = resolve(fileURLToPath(new URL('.', import.meta.url)), '..');
 const SCAN = ['app', 'components', 'lib', 'constants', 'db', 'hooks', 'utils'];
-const SHIM = join(ROOT, 'shims', 'vector-icons.js');
+const SHIM = join(ROOT, 'shims', 'vector-icons.ts');
 
 const walk = (dir: string, out: string[] = []): string[] => {
   for (const name of readdirSync(dir)) {
@@ -29,16 +29,19 @@ const walk = (dir: string, out: string[] = []): string[] => {
 };
 
 // What the shim actually hands out. Read as text rather than imported: the file
-// is CommonJS and pulls native-only modules through @expo/vector-icons.
+// pulls native-only modules through @expo/vector-icons.
 const shimSource = readFileSync(SHIM, 'utf8');
-const exported = new Set(
-  [...shimSource.matchAll(/^const (\w+) = require\('@expo\/vector-icons\/\w+'\)\.default;$/gm)].map((m) => m[1]),
-);
-assert.ok(exported.size > 0, 'could not read the shim — did its require() style change?');
-// The re-exported consts have to be in the exported object, not just declared.
-const bundledBlock = shimSource.match(/const bundled = \{([^}]*)\}/)?.[1] ?? '';
+const exported = new Set([
+  ...[...shimSource.matchAll(/^const (\w+) = require\('@expo\/vector-icons\/\w+'\)\.default;$/gm)].map((m) => m[1]),
+  ...[...shimSource.matchAll(/^import (\w+) from ['\"]@expo\/vector-icons\/\w+['\"];$/gm)].map((m) => m[1]),
+]);
+assert.ok(exported.size > 0, 'could not read the shim - did its icon import style change?');
+// The imported consts have to be in the bundled object and named exports, not just declared.
+const bundledBlock = shimSource.match(/const bundled[^=]*= \{([^}]*)\}/)?.[1] ?? '';
+const namedExportBlock = shimSource.match(/export\s*\{([^}]*)\}/)?.[1] ?? '';
 for (const name of exported) {
-  assert.ok(bundledBlock.includes(name), `${name} is required in the shim but missing from its exports`);
+  assert.ok(bundledBlock.includes(name), `${name} is imported in the shim but missing from bundled`);
+  assert.ok(namedExportBlock.includes(name), `${name} is imported in the shim but missing from named exports`);
 }
 
 const barrelImport = /import\s+(?:type\s+)?\{([^}]+)\}\s+from\s+['"]@expo\/vector-icons['"]/g;
@@ -61,7 +64,7 @@ for (const dir of SCAN) {
 assert.equal(
   missing.length,
   0,
-  `these import a family the shim does not bundle — add it to shims/vector-icons.js ` +
+  `these import a family the shim does not bundle — add it to shims/vector-icons.ts ` +
     `(it costs that family's whole .ttf) or switch to a family that is already there:\n  ` +
     missing.join('\n  '),
 );

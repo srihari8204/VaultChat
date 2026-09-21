@@ -18,6 +18,8 @@
 // and a soft shadow — all of which are free.
 
 import React, { useState } from 'react';
+import { useFinanceTheme } from './useFinanceTheme';
+import { useTheme } from '../../lib/theme';
 import {
   View, Text, TextInput, TouchableOpacity, Pressable, StyleSheet, StatusBar,
   ActivityIndicator, useWindowDimensions,
@@ -27,7 +29,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { FIN, FIN_RADIUS, FIN_SHADOW, TABULAR } from '../../constants/financeTheme';
+import { FIN, FIN_RADIUS, FIN_SHADOW, TABULAR, type FinancePalette, FIN_HERO } from '../../constants/financeTheme';
 import {
   FIN_GUTTER, FIN_GAP, contentWidth, tileColumns, quickActionColumns,
   heroStacks, columnWidth,
@@ -49,11 +51,14 @@ const TAP = 44;
  * the clock on some devices and floated with a band of dead space on others.
  */
 export function FinHeader({ title, right }: { title: string; right?: React.ReactNode }) {
+  const { scheme } = useTheme();
+  const FIN = useFinanceTheme();
+  const s = React.useMemo(() => makeStyles(FIN), [FIN]);
   const router = useRouter();
   const insets = useSafeAreaInsets();
   return (
     <View style={[s.header, { paddingTop: insets.top + 8 }]}>
-      <StatusBar barStyle="dark-content" backgroundColor="transparent" translucent />
+      <StatusBar barStyle={scheme === 'dark' ? 'light-content' : 'dark-content'} backgroundColor="transparent" translucent />
       <TouchableOpacity
         onPress={() => router.back()}
         hitSlop={10}
@@ -75,6 +80,8 @@ export function FinHeader({ title, right }: { title: string; right?: React.React
  * ~600dp a balance sheet stretched edge to edge is a banner, not a document.
  */
 export function FinBody({ children, style }: { children: React.ReactNode; style?: ViewStyle }) {
+  const FIN = useFinanceTheme();
+  const s = React.useMemo(() => makeStyles(FIN), [FIN]);
   const { width } = useWindowDimensions();
   const inner = contentWidth(width);
   return (
@@ -85,10 +92,14 @@ export function FinBody({ children, style }: { children: React.ReactNode; style?
 }
 
 export function Label({ children, hint }: { children: React.ReactNode; hint?: string }) {
+  const FIN = useFinanceTheme();
+  const s = React.useMemo(() => makeStyles(FIN), [FIN]);
   return <Text style={s.label}>{children}{hint ? <Text style={s.hint}>  {hint}</Text> : null}</Text>;
 }
 
 export function SectionTitle({ children, action }: { children: React.ReactNode; action?: React.ReactNode }) {
+  const FIN = useFinanceTheme();
+  const s = React.useMemo(() => makeStyles(FIN), [FIN]);
   return (
     <View style={s.sectionRow}>
       <Text style={s.sectionTitle} accessibilityRole="header">{children}</Text>
@@ -108,6 +119,8 @@ export function Field(props: {
   keyboardType?: KeyboardTypeOptions; multiline?: boolean; error?: string;
   style?: ViewStyle | TextStyle | (ViewStyle | TextStyle)[];
 }) {
+  const FIN = useFinanceTheme();
+  const s = React.useMemo(() => makeStyles(FIN), [FIN]);
   const { style, multiline, error, ...rest } = props;
   const [focused, setFocused] = useState(false);
   return (
@@ -133,6 +146,8 @@ export function Field(props: {
 }
 
 export function DateField({ value, onPress }: { value: string; onPress: () => void }) {
+  const FIN = useFinanceTheme();
+  const s = React.useMemo(() => makeStyles(FIN), [FIN]);
   return (
     <TouchableOpacity
       style={s.dateField} onPress={onPress} activeOpacity={0.85}
@@ -140,7 +155,7 @@ export function DateField({ value, onPress }: { value: string; onPress: () => vo
       accessibilityLabel={value ? `Date ${value}. Change date` : 'Choose a date'}
     >
       <Text style={[s.dateTxt, !value && { color: FIN.faint }]}>{value || 'dd/mm/yyyy'}</Text>
-      <View style={s.dateBtn}><Ionicons name="calendar" size={18} color="#fff" /></View>
+      <View style={s.dateBtn}><Ionicons name="calendar" size={18} color={FIN.onBrand} /></View>
     </TouchableOpacity>
   );
 }
@@ -149,6 +164,8 @@ export function DateField({ value, onPress }: { value: string; onPress: () => vo
 export function Segment<T extends string>({ options, value, onChange, small }: {
   options: { k: T; label: string }[]; value: T; onChange: (k: T) => void; small?: boolean;
 }) {
+  const FIN = useFinanceTheme();
+  const s = React.useMemo(() => makeStyles(FIN), [FIN]);
   return (
     <View style={s.segment} accessibilityRole="tablist">
       {options.map(o => {
@@ -182,6 +199,8 @@ export function Segment<T extends string>({ options, value, onChange, small }: {
 }
 
 export function Radio({ label, active, onPress }: { label: string; active: boolean; onPress: () => void }) {
+  const FIN = useFinanceTheme();
+  const s = React.useMemo(() => makeStyles(FIN), [FIN]);
   return (
     <TouchableOpacity
       style={s.radio} onPress={onPress} activeOpacity={0.85} hitSlop={8}
@@ -198,9 +217,11 @@ export function Btn({ label, onPress, kind = 'primary', icon, wide, style, disab
   label: string; onPress: () => void; kind?: 'primary' | 'ghost' | 'danger';
   icon?: IconName; wide?: boolean; style?: ViewStyle; disabled?: boolean; loading?: boolean;
 }) {
+  const FIN = useFinanceTheme();
+  const s = React.useMemo(() => makeStyles(FIN), [FIN]);
   const ghost = kind === 'ghost';
   const off = !!disabled || !!loading;
-  const fg = ghost ? FIN.brandInk : '#fff';
+  const fg = ghost ? FIN.brandInk : FIN.onBrand;
   return (
     <Pressable
       style={({ pressed }) => [
@@ -220,7 +241,7 @@ export function Btn({ label, onPress, kind = 'primary', icon, wide, style, disab
       {loading
         ? <ActivityIndicator size="small" color={fg} style={{ marginRight: 8 }} />
         : icon ? <Ionicons name={icon} size={16} color={fg} style={{ marginRight: 6 }} /> : null}
-      <Text style={[s.btnTxt, ghost && { color: FIN.brandInk }]} numberOfLines={1}>{label}</Text>
+      <Text style={[s.btnTxt, { color: fg }]} numberOfLines={1}>{label}</Text>
     </Pressable>
   );
 }
@@ -229,6 +250,8 @@ export function Btn({ label, onPress, kind = 'primary', icon, wide, style, disab
 export function IconBtn({ icon, onPress, label, tone }: {
   icon: IconName; onPress: () => void; label: string; tone?: 'plain' | 'brand';
 }) {
+  const FIN = useFinanceTheme();
+  const s = React.useMemo(() => makeStyles(FIN), [FIN]);
   return (
     <Pressable
       onPress={onPress}
@@ -246,6 +269,8 @@ export function IconBtn({ icon, onPress, label, tone }: {
 export function Card({ children, style, raised }: {
   children: React.ReactNode; style?: ViewStyle; raised?: boolean;
 }) {
+  const FIN = useFinanceTheme();
+  const s = React.useMemo(() => makeStyles(FIN), [FIN]);
   return <View style={[s.card, raised && s.cardRaised, style]}>{children}</View>;
 }
 
@@ -253,6 +278,8 @@ export function StatTile({ value, label, tone = 'plain', style }: {
   value: string; label: string; tone?: 'plain' | 'good' | 'bad' | 'warn' | 'info' | 'brand';
   style?: ViewStyle;
 }) {
+  const FIN = useFinanceTheme();
+  const s = React.useMemo(() => makeStyles(FIN), [FIN]);
   const c = tone === 'good' ? FIN.good : tone === 'bad' ? FIN.bad : tone === 'warn' ? FIN.warn
     : tone === 'info' ? FIN.info : tone === 'brand' ? FIN.brandDeep : FIN.text;
   return (
@@ -272,6 +299,8 @@ export function StatTile({ value, label, tone = 'plain', style }: {
  * derived from the measured window, never from a device list.
  */
 export function TileGrid({ children }: { children: React.ReactNode }) {
+  const FIN = useFinanceTheme();
+  const s = React.useMemo(() => makeStyles(FIN), [FIN]);
   const { width } = useWindowDimensions();
   const cols = tileColumns(width);
   const w = columnWidth(contentWidth(width), cols);
@@ -287,6 +316,8 @@ export function TileGrid({ children }: { children: React.ReactNode }) {
 
 /** Responsive quick-action grid: as many columns as genuinely fit. */
 export function ActionGrid({ children }: { children: React.ReactNode }) {
+  const FIN = useFinanceTheme();
+  const s = React.useMemo(() => makeStyles(FIN), [FIN]);
   const { width } = useWindowDimensions();
   const cols = quickActionColumns(width);
   const w = columnWidth(contentWidth(width), cols);
@@ -306,10 +337,11 @@ export function ActionGrid({ children }: { children: React.ReactNode }) {
  * shouting.
  */
 export function HeroCard({ children, colors }: { children: React.ReactNode; colors?: [string, string] }) {
+  const FIN = useFinanceTheme();
+  const s = React.useMemo(() => makeStyles(FIN), [FIN]);
   return (
     <LinearGradient
-      colors={colors ?? [FIN.brandInk, FIN.brandDeep, FIN.brand]}
-      locations={colors ? undefined : [0, 0.55, 1]}
+      colors={colors ?? FIN_HERO.brand}
       start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
       style={s.hero}
     >
@@ -324,6 +356,8 @@ export function HeroCard({ children, colors }: { children: React.ReactNode; colo
  * the 320dp Figma artboard, pinned by grid.selftest §5.
  */
 export function HeroSplit({ children }: { children: React.ReactNode }) {
+  const FIN = useFinanceTheme();
+  const s = React.useMemo(() => makeStyles(FIN), [FIN]);
   const { width } = useWindowDimensions();
   const stack = heroStacks(width);
   return (
@@ -341,6 +375,8 @@ export function HeroSplit({ children }: { children: React.ReactNode }) {
 }
 
 export function Pill({ label, fg, bg }: { label: string; fg: string; bg: string }) {
+  const FIN = useFinanceTheme();
+  const s = React.useMemo(() => makeStyles(FIN), [FIN]);
   return (
     <View style={[s.pill, { backgroundColor: bg }]} accessible accessibilityLabel={`Status: ${label}`}>
       <Text style={[s.pillTxt, { color: fg }]} numberOfLines={1}>{label}</Text>
@@ -349,6 +385,8 @@ export function Pill({ label, fg, bg }: { label: string; fg: string; bg: string 
 }
 
 export function RowLine({ k, v, bold, tone }: { k: string; v: string; bold?: boolean; tone?: 'good' | 'bad' | 'warn' }) {
+  const FIN = useFinanceTheme();
+  const s = React.useMemo(() => makeStyles(FIN), [FIN]);
   const c = tone === 'good' ? FIN.good : tone === 'bad' ? FIN.bad : tone === 'warn' ? FIN.warn : FIN.text;
   return (
     <View style={s.rowLine} accessible accessibilityLabel={`${k}: ${v}`}>
@@ -361,6 +399,8 @@ export function RowLine({ k, v, bold, tone }: { k: string; v: string; bold?: boo
 export function QuickAction({ icon, label, onPress, colors }: {
   icon: IconName; label: string; onPress: () => void; colors?: [string, string];
 }) {
+  const FIN = useFinanceTheme();
+  const s = React.useMemo(() => makeStyles(FIN), [FIN]);
   return (
     <Pressable
       style={({ pressed }) => [s.qa, pressed && { opacity: 0.65, transform: [{ scale: 0.97 }] }]}
@@ -377,6 +417,8 @@ export function QuickAction({ icon, label, onPress, colors }: {
 
 // ── Screen states ───────────────────────────────────────────────────
 export function EmptyState({ icon, title, sub }: { icon: IconName; title: string; sub?: string }) {
+  const FIN = useFinanceTheme();
+  const s = React.useMemo(() => makeStyles(FIN), [FIN]);
   return (
     <View style={s.empty} accessible accessibilityLabel={sub ? `${title}. ${sub}` : title}>
       <View style={s.emptyIcon}><Ionicons name={icon} size={26} color={FIN.faint} /></View>
@@ -387,6 +429,8 @@ export function EmptyState({ icon, title, sub }: { icon: IconName; title: string
 }
 
 export function LoadingState({ label = 'Loading' }: { label?: string }) {
+  const FIN = useFinanceTheme();
+  const s = React.useMemo(() => makeStyles(FIN), [FIN]);
   return (
     <View style={s.empty} accessible accessibilityLabel={label} accessibilityRole="progressbar">
       <ActivityIndicator size="small" color={FIN.brandDeep} />
@@ -398,6 +442,8 @@ export function LoadingState({ label = 'Loading' }: { label?: string }) {
 export function ErrorState({ title = 'Something went wrong', sub, onRetry }: {
   title?: string; sub?: string; onRetry?: () => void;
 }) {
+  const FIN = useFinanceTheme();
+  const s = React.useMemo(() => makeStyles(FIN), [FIN]);
   return (
     <View style={s.empty} accessible accessibilityLabel={sub ? `${title}. ${sub}` : title}>
       <View style={[s.emptyIcon, { backgroundColor: FIN.badSoft }]}>
@@ -412,6 +458,8 @@ export function ErrorState({ title = 'Something went wrong', sub, onRetry }: {
 
 /** Progress ring built from two nested circles — no SVG, no reflow cost. */
 export function ProgressRing({ pct, size = 44 }: { pct: number; size?: number }) {
+  const FIN = useFinanceTheme();
+  const s = React.useMemo(() => makeStyles(FIN), [FIN]);
   const clamped = Math.max(0, Math.min(100, pct));
   return (
     <View
@@ -430,6 +478,7 @@ export function ProgressRing({ pct, size = 44 }: { pct: number; size?: number })
 // shadow. Spelled out once here rather than repeated per component.
 // Deliberately un-annotated: `field` spreads this into a TEXT style, and typing
 // it as ViewStyle would make StyleSheet.create reject fontSize/color there.
+const makeStyles = (FIN: FinancePalette) => {
 const glass = {
   backgroundColor: FIN.card,
   borderWidth: 1,
@@ -437,7 +486,7 @@ const glass = {
   ...FIN_SHADOW.rest,
 };
 
-const s = StyleSheet.create({
+return StyleSheet.create({
   header: {
     flexDirection: 'row', alignItems: 'center',
     backgroundColor: FIN.cardStrong,
@@ -501,7 +550,7 @@ const s = StyleSheet.create({
   btnDanger: { backgroundColor: FIN.bad },
   btnPressed: { opacity: 0.86, transform: [{ scale: 0.985 }] },
   btnOff: { opacity: 0.55 },
-  btnTxt: { color: '#fff', fontSize: 15, fontWeight: '800' },
+  btnTxt: { color: FIN.onBrand, fontSize: 15, fontWeight: '800' },
 
   iconBtn: {
     width: TAP, height: TAP, borderRadius: FIN_RADIUS.sm,
@@ -514,7 +563,7 @@ const s = StyleSheet.create({
 
 
   // `flex: 1` is load-bearing in BOTH layouts and must stay:
-  //   - reports / customer / chitti place bare StatTiles in a plain `tileRow`
+  //   - reports places bare StatTiles in a plain `tileRow`
   //     and rely on it to split the row evenly;
   //   - inside TileGrid the tile fills its fixed-width wrapper, which the wrap
   //     container stretches to the tallest tile on the line, so a one-line and
@@ -560,5 +609,6 @@ const s = StyleSheet.create({
   ringInner: { backgroundColor: FIN.cardSolid, alignItems: 'center', justifyContent: 'center' },
   ringTxt: { fontSize: 11, fontWeight: '800', color: FIN.text },
 });
+};
 
 export { FIN, FIN_GUTTER };

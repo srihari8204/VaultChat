@@ -1,8 +1,9 @@
 // app/d2de-status.tsx
 // Live D2DE encryption status screen — unique to crazzychat
 
+import { AppText as Text, AuroraBackground } from '../components/ui';
 import React, { useMemo } from 'react';
-import { View, Text, ScrollView, StyleSheet } from 'react-native';
+import { View, ScrollView, StyleSheet } from 'react-native';
 import { useTheme } from '../lib/theme';
 import { type Palette } from '../constants/theme';
 import { Stack } from 'expo-router';
@@ -29,7 +30,9 @@ export default function D2DEStatusScreen() {
 
   return (
     <>
-      <Stack.Screen options={{ title: '🔐 D2DE Status', headerStyle: { backgroundColor: colors.glassSoft }, headerTintColor: '#1F2937' }} />
+      <Stack.Screen options={{ headerShown: true, title: 'Encryption status', headerStyle: { backgroundColor: colors.glassSoft }, headerTintColor: colors.text }} />
+      <View style={{ flex: 1, backgroundColor: colors.bg }}>
+      <AuroraBackground />
       <ScrollView style={s.screen}>
 
         {/* Score card */}
@@ -54,9 +57,9 @@ export default function D2DEStatusScreen() {
           <View key={i} style={[s.layerCard, { borderLeftColor: layer.active ? '#00FF88' : '#D1D5DB' }]}>
             <View style={s.layerHeader}>
               <View style={[s.layerDot, { backgroundColor: layer.active ? '#00FF88' : '#D1D5DB' }]} />
-              <Text style={[s.layerName, { color: layer.active ? '#fff' : '#6B7280' }]}>{layer.layer}</Text>
-              <View style={[s.layerBadge, { backgroundColor: layer.active ? '#00FF8822' : '#F3F4F6' }]}>
-                <Text style={[s.layerBadgeTxt, { color: layer.active ? '#00FF88' : '#6B7280' }]}>
+              <Text style={[s.layerName, { color: layer.active ? colors.text : colors.textDim }]}>{layer.layer}</Text>
+              <View style={[s.layerBadge, { backgroundColor: colors.glassSoft }]}>
+                <Text style={[s.layerBadgeTxt, { color: layer.active ? colors.accentOn : colors.textDim }]}>
                   {layer.active ? 'ACTIVE' : 'PENDING'}
                 </Text>
               </View>
@@ -77,27 +80,28 @@ export default function D2DEStatusScreen() {
 
         <View style={{ height: 40 }} />
       </ScrollView>
+      </View>
     </>
   );
 }
 
 const makeStyles = (c: Palette) => StyleSheet.create({
   screen:       { flex: 1, backgroundColor: c.glassSoft },
-  scoreCard:    { backgroundColor: c.bg, margin: 16, borderRadius: 16, padding: 24, alignItems: 'center', borderWidth: 1, borderColor: '#00FF8822' },
-  scoreNum:     { fontSize: 56, fontWeight: 'bold', color: '#00FF88' },
+  scoreCard:    { backgroundColor: c.glass, margin: 16, borderRadius: 16, padding: 24, alignItems: 'center', borderWidth: 1, borderColor: c.glassStroke },
+  scoreNum:     { fontSize: 56, fontWeight: 'bold', color: c.accentOn },
   scoreLabel:   { color: c.textDim, fontSize: 14, marginBottom: 16 },
   scoreBar:     { flexDirection: 'row', gap: 6, marginBottom: 12 },
   scoreSeg:     { flex: 1, height: 6, borderRadius: 3 },
   scoreNote:    { color: c.textDim, fontSize: 12, textAlign: 'center' },
   layerCard:    { backgroundColor: c.glassSoft, marginHorizontal: 16, marginBottom: 10, borderRadius: 12, padding: 16, borderLeftWidth: 3 },
-  layerHeader:  { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 6 },
+  layerHeader:  { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 10, marginBottom: 6 },
   layerDot:     { width: 10, height: 10, borderRadius: 5 },
-  layerName:    { fontSize: 16, fontWeight: '700', flex: 1 },
+  layerName:    { fontSize: 16, fontWeight: '700', flex: 1, minWidth: 120 },
   layerBadge:   { borderRadius: 6, paddingHorizontal: 8, paddingVertical: 3 },
-  layerBadgeTxt:{ fontSize: 10, fontWeight: 'bold', letterSpacing: 0.5 },
-  layerLabel:   { color: c.accent, fontSize: 12, marginBottom: 6 },
+  layerBadgeTxt:{ fontSize: 12, fontWeight: 'bold', letterSpacing: 0.5 },
+  layerLabel:   { color: c.accentOn, fontSize: 12, marginBottom: 6 },
   layerInfo:    { color: c.textDim, fontSize: 12, lineHeight: 18 },
-  uniqueBox:    { backgroundColor: c.bg, margin: 16, borderRadius: 12, padding: 18, borderWidth: 1, borderColor: '#FFD16633' },
-  uniqueTitle:  { color: '#FFD166', fontSize: 15, fontWeight: 'bold', marginBottom: 8 },
+  uniqueBox:    { backgroundColor: c.glass, margin: 16, borderRadius: 12, padding: 18, borderWidth: 1, borderColor: '#FFD16633' },
+  uniqueTitle:  { color: c.accentOn, fontSize: 15, fontWeight: 'bold', marginBottom: 8 },
   uniqueBody:   { color: c.textDim, fontSize: 13, lineHeight: 20 },
 });

@@ -1,10 +1,11 @@
 // app/finance/saved.tsx — Saved & History across ledgers, interest calcs & chitti.
 
 import React, { useCallback, useMemo, useState } from 'react';
+import { useFinanceTheme } from '../../components/finance/useFinanceTheme';
 import { View, Text, ScrollView, StyleSheet, TouchableOpacity } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter, useFocusEffect } from 'expo-router';
-import { FIN, TABULAR } from '../../constants/financeTheme';
+import { TABULAR, type FinancePalette } from '../../constants/financeTheme';
 import { FinHeader, Segment, Pill, EmptyState, LoadingState, ErrorState } from '../../components/finance/ui';
 import { useLoadStatus } from '../../components/finance/useLoad';
 import { useMe } from '../../components/finance/useMe';
@@ -17,13 +18,16 @@ type Kind = 'ledger' | 'interest' | 'chitti';
 interface SavedItem { id: string; kind: Kind; title: string; sub: string; amount: number; at: number; onPress?: () => void; }
 type Tab = 'all' | Kind;
 
-const KIND_META: Record<Kind, { label: string; fg: string; bg: string }> = {
+const getKindMeta = (FIN: FinancePalette): Record<Kind, { label: string; fg: string; bg: string }> => ({
   ledger:   { label: 'Ledger',   fg: FIN.good, bg: FIN.goodSoft },
   interest: { label: 'Interest', fg: FIN.warn, bg: FIN.warnSoft },
   chitti:   { label: 'Lucky Draw', fg: FIN.info, bg: FIN.infoSoft },
-};
+});
 
 export default function Saved() {
+  const FIN = useFinanceTheme();
+  const s = React.useMemo(() => makeStyles(FIN), [FIN]);
+  const KIND_META = React.useMemo(() => getKindMeta(FIN), [FIN]);
   const router = useRouter();
   const me = useMe();
   const [tab, setTab] = useState<Tab>('all');
@@ -103,7 +107,7 @@ export default function Saved() {
   );
 }
 
-const s = StyleSheet.create({
+const makeStyles = (FIN: FinancePalette) => StyleSheet.create({
   screen: { flex: 1, backgroundColor: FIN.bg },
   filterWrap: { paddingHorizontal: 16, paddingTop: 12, alignSelf: 'center', width: '100%', maxWidth: FIN.contentMax },
   body: { padding: 16, paddingTop: 12, alignSelf: 'center', width: '100%', maxWidth: FIN.contentMax },

@@ -1,3 +1,5 @@
+import { GamePaletteContext, lightHubPalette, useGamePalette } from '../components/games/appearance';
+import { useTheme } from '../lib/theme';
 // app/games.tsx — Games hub. Native, no WebView.
 //
 // The four games are React Native screens talking to the games server over a
@@ -14,9 +16,13 @@
 // notifications already in the wild point here with them (gamesNotifySlug in
 // the backend mints those slugs).
 
+import { AppText as Text } from '../components/ui/Text';
 import React, { useState } from 'react';
-import { Alert, BackHandler, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import { Alert, BackHandler, Pressable, ScrollView, StatusBar, TextInput, View } from 'react-native';
+import { KeyboardSafe } from '../components/ui/KeyboardSafe';
+import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import * as ScreenOrientation from 'expo-screen-orientation';
 import { useKeepAwake } from 'expo-keep-awake';
 import Animated, {
   useSharedValue, useAnimatedStyle, withRepeat, withTiming, withSequence, Easing, cancelAnimation,
@@ -62,12 +68,20 @@ const GAMES: Entry[] = [
 const KINDS = new Set(GAMES.map(g => g.kind));
 
 export default function GamesScreen() {
+  const { colors, scheme } = useTheme();
   const router = useRouter();
   const params = useLocalSearchParams<{ game?: string; room?: string; auto?: string; bot?: string; seat?: string }>();
+
+  // The focused route owns orientation; an older table left on the navigation
+  // stack must not keep the next game locked. Follow the device's rotation setting.
+  useFocusEffect(React.useCallback(() => {
+    void ScreenOrientation.unlockAsync().catch(() => {});
+  }, []));
 
   const kind = typeof params.game === 'string' && KINDS.has(params.game as GameKind)
     ? (params.game as GameKind)
     : null;
+  const hubColors = !kind && scheme === 'light' ? lightHubPalette(colors) : null;
   const room = typeof params.room === 'string' ? params.room : '';
   const auto = params.auto === '1';
   const autoBot = params.bot === '1';
@@ -121,7 +135,9 @@ export default function GamesScreen() {
   }, [kind, leave]);
 
   return (
-    <>
+    <GamePaletteContext.Provider value={hubColors}>
+    <SafeAreaView style={{ flex: 1, backgroundColor: hubColors?.bg ?? C.bg }} edges={['top', 'right', 'bottom', 'left']}>
+      <StatusBar barStyle={hubColors ? "dark-content" : "light-content"} backgroundColor={hubColors?.bg ?? C.bg} />
       {kind
         ? (
           // A BOARD MUST NOT BE ABLE TO TAKE THE APP DOWN WITH IT.
@@ -155,7 +171,8 @@ export default function GamesScreen() {
         )}
       {/* Mounted once for all four boards — they open it through openInvite(). */}
       <InviteSheet />
-    </>
+    </SafeAreaView>
+    </GamePaletteContext.Provider>
   );
 }
 
@@ -180,6 +197,7 @@ function Board({ kind, room, auto, autoBot, seat }: { kind: GameKind; room: stri
 /* ── the hub ────────────────────────────────────────────────────────── */
 
 function Hub({ onBack, onOpen }: { onBack: () => void; onOpen: (g: GameKind, opts?: Record<string, string>) => void }) {
+  const C = useGamePalette();
   const t = useType();
   const [code, setCode] = React.useState('');
   const qm = useQuickMatch();
@@ -235,7 +253,8 @@ function Hub({ onBack, onOpen }: { onBack: () => void; onOpen: (g: GameKind, opt
         onBack={onBack}
         right={<><CoinChip balance={wallet.balance} /><SoundToggle /></>}
       />
-      <ScrollView contentContainerStyle={{ paddingHorizontal: S[4], paddingBottom: S[6], gap: S[3] }}>
+      <KeyboardSafe keyboardOnly>
+      <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={{ width: '100%', maxWidth: 720, alignSelf: 'center', paddingHorizontal: S[4], paddingBottom: S[6], gap: S[3] }}>
         <Text style={{ color: C.muted, fontSize: t.sm, lineHeight: 19 }}>
           Every table is refereed by the server, so both players always see the same board. Play a stranger, a friend, or the house bot.
         </Text>
@@ -302,16 +321,17 @@ function Hub({ onBack, onOpen }: { onBack: () => void; onOpen: (g: GameKind, opt
               accessibilityLabel="Room code"
               style={{
                 flex: 1, color: C.text, fontSize: t.md, paddingHorizontal: S[3], paddingVertical: S[3],
-                borderRadius: R[2], borderWidth: 1, borderColor: white(0.14),
+                borderRadius: R[2], borderWidth: 1, borderColor: C.light ? C.line : white(0.14),
                 // A field is the one control that should read as RECESSED — a
                 // hole in the panel rather than another pane sitting on it.
-                backgroundColor: 'rgba(0, 0, 0, 0.22)',
+                backgroundColor: C.light ? C.panel2 : 'rgba(0, 0, 0, 0.22)',
               }}
             />
             <Btn label="Join" kind="gold" onPress={joinCode} disabled={!code.trim()} />
           </View>
         </Panel>
       </ScrollView>
+      </KeyboardSafe>
 
       <LeaderboardSheet visible={boardOpen} onClose={() => setBoardOpen(false)} />
       <HistorySheet visible={histOpen} onClose={() => setHistOpen(false)} />
@@ -378,6 +398,7 @@ function Hub({ onBack, onOpen }: { onBack: () => void; onOpen: (g: GameKind, opt
  * wallet balance.
  */
 function CoinChip({ balance }: { balance: number | null }) {
+  const C = useGamePalette();
   if (balance == null) return null;
   return (
     <View
@@ -385,7 +406,7 @@ function CoinChip({ balance }: { balance: number | null }) {
       style={{
         flexDirection: 'row', alignItems: 'center', gap: 5,
         paddingHorizontal: S[3], paddingVertical: S[2], borderRadius: R.pill,
-        borderWidth: 1, borderColor: white(0.22), backgroundColor: white(0.10),
+        borderWidth: 1, borderColor: C.light ? C.line : white(0.22), backgroundColor: C.light ? C.card : white(0.10),
         boxShadow: `inset 0 1px 0 ${white(0.18)}`,
         marginRight: S[2],
       }}
@@ -405,6 +426,7 @@ function CoinChip({ balance }: { balance: number | null }) {
  * the player has to hunt for again every time.
  */
 function SoundToggle() {
+  const C = useGamePalette();
   const [on, setOn] = React.useState(soundEnabled());
   return (
     <Pressable
@@ -420,7 +442,7 @@ function SoundToggle() {
       hitSlop={10}
       style={{
         width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center',
-        borderWidth: 1, borderColor: white(on ? 0.26 : 0.12), backgroundColor: white(on ? 0.10 : 0.05),
+        borderWidth: 1, borderColor: C.light ? C.line : white(on ? 0.26 : 0.12), backgroundColor: C.light ? C.card : white(on ? 0.10 : 0.05),
         boxShadow: `inset 0 1px 0 ${white(0.18)}`,
       }}
     >
@@ -434,8 +456,9 @@ function SoundToggle() {
 }
 
 function GameCard({ entry, onOpen, onQuick }: { entry: Entry; onOpen: () => void; onQuick: () => void }) {
+  const C = useGamePalette();
   const t = useType();
-  const accent = ACCENT[entry.kind];
+  const accent = C.light ? { chess: '#05603A', rummy: '#00695C', ludo: '#925B00', tictactoe: '#1552E0' }[entry.kind] : ACCENT[entry.kind];
   const scale = useSharedValue(1);
   const a = useAnimatedStyle(() => ({ transform: [{ scale: scale.value }] }));
 
@@ -450,8 +473,8 @@ function GameCard({ entry, onOpen, onQuick }: { entry: Entry; onOpen: () => void
         style={{
           flexDirection: 'row', alignItems: 'center', gap: S[3],
           padding: S[4], borderRadius: R[3],
-          backgroundColor: white(0.075),
-          borderWidth: 1, borderColor: white(0.16),
+          backgroundColor: C.light ? C.card : white(0.075),
+          borderWidth: 1, borderColor: C.light ? C.line : white(0.16),
           boxShadow: `${E[2]}, inset 0 1px 0 ${white(0.18)}`,
         }}
       >
@@ -481,7 +504,7 @@ function GameCard({ entry, onOpen, onQuick }: { entry: Entry; onOpen: () => void
           style={{
             width: 40, height: 40, borderRadius: R.pill,
             alignItems: 'center', justifyContent: 'center',
-            borderWidth: 1, borderColor: white(0.26), backgroundColor: white(0.10),
+            borderWidth: 1, borderColor: C.light ? C.line : white(0.26), backgroundColor: C.light ? C.panel2 : white(0.10),
             boxShadow: `inset 0 1px 0 ${white(0.18)}`,
           }}
         >
@@ -496,6 +519,7 @@ function GameCard({ entry, onOpen, onQuick }: { entry: Entry; onOpen: () => void
 function Searching({
   entry, status, error, onCancel,
 }: { entry: Entry; status: string; error: string | null; onCancel: () => void }) {
+  const C = useGamePalette();
   const t = useType();
   const pulse = useSharedValue(0);
 
@@ -514,9 +538,8 @@ function Searching({
   }));
 
   return (
-    <View style={{
-      position: 'absolute', inset: 0, backgroundColor: 'rgba(20,4,4,0.92)',
-      alignItems: 'center', justifyContent: 'center', padding: S[5], gap: S[4],
+    <ScrollView style={{ position: 'absolute', inset: 0, backgroundColor: C.light ? C.bg : 'rgba(20,4,4,0.92)' }} contentContainerStyle={{
+      flexGrow: 1, alignItems: 'center', justifyContent: 'center', padding: S[5], gap: S[4],
     }}>
       <Animated.View style={aBolt}>
         <Ionicons name="flash" size={64} color={C.gold} />
@@ -534,7 +557,7 @@ function Searching({
         </Text>
       )}
       <Btn label="Cancel" onPress={onCancel} />
-    </View>
+    </ScrollView>
   );
 }
 
@@ -559,6 +582,7 @@ function Searching({
 function ModeSheet({
   entry, onOnline, onPrivate, onBot, onClose,
 }: { entry: Entry; onOnline: () => void; onPrivate: () => void; onBot: () => void; onClose: () => void }) {
+  const C = useGamePalette();
   const t = useType();
   const rummy = entry.kind === 'rummy';
   return (
@@ -610,13 +634,13 @@ function ModeSheet({
 function BotOffer({
   entry, onBot, onInvite, onCancel,
 }: { entry: Entry; onBot: () => void; onInvite: () => void; onCancel: () => void }) {
+  const C = useGamePalette();
   const t = useType();
   return (
-    <View style={{
-      position: 'absolute', inset: 0, backgroundColor: 'rgba(20,4,4,0.92)',
-      alignItems: 'center', justifyContent: 'center', padding: S[5], gap: S[3],
+    <ScrollView style={{ position: 'absolute', inset: 0, backgroundColor: C.light ? C.bg : 'rgba(20,4,4,0.92)' }} contentContainerStyle={{
+      flexGrow: 1, alignItems: 'center', justifyContent: 'center', padding: S[5], gap: S[3],
     }}>
-      <GameGlyph game={entry.kind} size={56} />
+      <GameGlyph game={entry.kind} size={56} color={C.light ? C.gold : undefined} />
       <Text style={{ color: C.text, fontSize: t.xl, fontWeight: '800', textAlign: 'center' }}>
         Nobody is waiting for {entry.name}
       </Text>
@@ -627,7 +651,6 @@ function BotOffer({
       <Btn label={`Play the house bot`} icon="bot" kind="gold" onPress={onBot} />
       <Btn label="Invite someone" icon="link" onPress={onInvite} />
       <Btn label="Not now" onPress={onCancel} />
-    </View>
+    </ScrollView>
   );
 }
-

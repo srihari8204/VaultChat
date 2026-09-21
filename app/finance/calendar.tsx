@@ -2,11 +2,11 @@
 // ledger end-dates, chitti next-auction dates and reminders.
 
 import React, { useCallback, useMemo, useState } from 'react';
+import { useFinanceTheme } from '../../components/finance/useFinanceTheme';
 import { View, Text, ScrollView, StyleSheet, TouchableOpacity } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from 'expo-router';
-import { FIN } from '../../constants/financeTheme';
-import { FinHeader, EmptyState } from '../../components/finance/ui';
+import { type FinancePalette } from '../../constants/financeTheme';
+import { FinHeader, EmptyState, IconBtn } from '../../components/finance/ui';
 import { useMe } from '../../components/finance/useMe';
 import { fmtDateTime } from '../../utils/financeFormat';
 import { listLedger } from '../../db/ledger';
@@ -19,6 +19,8 @@ const MON = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'Au
 const dayKey = (ms: number) => { const d = new Date(ms); return `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`; };
 
 export default function FinanceCalendar() {
+  const FIN = useFinanceTheme();
+  const s = React.useMemo(() => makeStyles(FIN), [FIN]);
   const me = useMe();
   const today = new Date();
   const [year, setYear] = useState(today.getFullYear());
@@ -71,9 +73,9 @@ export default function FinanceCalendar() {
       <FinHeader title="Calendar" />
       <ScrollView contentContainerStyle={s.body} showsVerticalScrollIndicator={false}>
         <View style={s.monthHead}>
-          <TouchableOpacity accessibilityRole="button" accessibilityLabel="Previous month" onPress={() => step(-1)} hitSlop={10}><Ionicons name="chevron-back" size={22} color={FIN.text} /></TouchableOpacity>
+          <IconBtn icon="chevron-back" label="Previous month" onPress={() => step(-1)} />
           <Text style={s.monthTitle}>{MON[monthIdx]} {year}</Text>
-          <TouchableOpacity accessibilityRole="button" accessibilityLabel="Next month" onPress={() => step(1)} hitSlop={10}><Ionicons name="chevron-forward" size={22} color={FIN.text} /></TouchableOpacity>
+          <IconBtn icon="chevron-forward" label="Next month" onPress={() => step(1)} />
         </View>
 
         <View style={s.wdRow}>{WD.map(w => <Text key={w} style={s.wd}>{w}</Text>)}</View>
@@ -85,11 +87,11 @@ export default function FinanceCalendar() {
             const isToday = d === today.getDate() && monthIdx === today.getMonth() && year === today.getFullYear();
             const isSel = d === selected;
             return (
-              <TouchableOpacity key={i} style={s.cell} onPress={() => setSelected(d)}>
+              <TouchableOpacity key={i} style={s.cell} onPress={() => setSelected(d)} accessibilityRole="button" accessibilityState={{ selected: isSel }} accessibilityLabel={`${MON[monthIdx]} ${d}, ${year}${has ? ', events due' : ''}`}>
                 <View style={[s.dayWrap, isSel && s.daySel, isToday && !isSel && s.dayToday]}>
-                  <Text style={[s.dayTxt, isSel && { color: '#fff' }]}>{d}</Text>
+                  <Text style={[s.dayTxt, isSel && { color: FIN.onBrand }]}>{d}</Text>
                 </View>
-                {has && <View style={[s.evDot, { backgroundColor: isSel ? '#fff' : FIN.brand }]} />}
+                {has && <View style={[s.evDot, { backgroundColor: FIN.brandDeep }]} />}
               </TouchableOpacity>
             );
           })}
@@ -113,17 +115,17 @@ export default function FinanceCalendar() {
   );
 }
 
-const s = StyleSheet.create({
+const makeStyles = (FIN: FinancePalette) => StyleSheet.create({
   screen: { flex: 1, backgroundColor: FIN.bg },
   body: { padding: 16, alignSelf: 'center', width: '100%', maxWidth: FIN.contentMax },
   monthHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 6 },
-  monthTitle: { color: FIN.text, fontSize: 18, fontWeight: '800' },
+  monthTitle: { flex: 1, color: FIN.text, fontSize: 18, fontWeight: '800', textAlign: 'center' },
   wdRow: { flexDirection: 'row', marginTop: 10 },
   wd: { flex: 1, textAlign: 'center', color: FIN.faint, fontSize: 11, fontWeight: '700' },
   grid: { flexDirection: 'row', flexWrap: 'wrap', marginTop: 6 },
   cell: { width: `${100 / 7}%`, aspectRatio: 1, alignItems: 'center', justifyContent: 'center' },
   dayWrap: { width: 34, height: 34, borderRadius: 17, alignItems: 'center', justifyContent: 'center' },
-  daySel: { backgroundColor: FIN.brand },
+  daySel: { backgroundColor: FIN.brandDeep },
   dayToday: { borderWidth: 1.5, borderColor: FIN.brand },
   dayTxt: { color: FIN.text, fontSize: 14, fontWeight: '600' },
   evDot: { width: 5, height: 5, borderRadius: 3, marginTop: 2 },

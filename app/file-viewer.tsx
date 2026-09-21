@@ -9,7 +9,6 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Animated,
-  Dimensions,
   Easing,
   PanResponder,
   Platform,
@@ -88,6 +87,10 @@ const paperColors = {
   bubbleInText: '#111827', bubbleOutText: '#111827',
   bubbleMetaIn: '#6B7280', bubbleMetaOut: '#6B7280',
   tickRead: '#2563EB', headerBar: '#FFFFFF',
+  glass: 'rgba(17,24,39,0.06)', glassSoft: '#F8FAFC',
+  glassStroke: 'rgba(17,24,39,0.12)', hairline: '#E5E7EB',
+  groundDisc: '#FFFFFF', accentLight: '#60A5FA', accentDeep: '#2563EB',
+  accentOn: '#1D4ED8', brandOnLight: '#1552E0',
 } as Palette;
 
 // ── File type detection ──────────────────────────────────────────
@@ -227,7 +230,7 @@ function SkeletonShimmer({
   // launched with. Shadowing it here makes every use in this component follow
   // rotation; StyleSheet.create keeps the initial value, which is fine for
   // static rules.
-  const { width: SW, height: SH } = useWindowDimensions();
+  const { width: SW } = useWindowDimensions();
 
   const shimmer = useRef(new Animated.Value(0)).current;
   useEffect(() => {

@@ -18,6 +18,7 @@
 import * as tsE2ee from './e2ee';
 import * as tsSenderKey from './senderKey';
 import * as tsShamir from './shamir';
+import { selectNativeCore } from '../../lib/nativeCore';
 
 export type {
   Envelope,
@@ -46,9 +47,6 @@ export {
 
 type NativeModule = typeof import('./native/CryptoCore');
 
-let backend: 'ts' | 'rust' = 'ts';
-let native: NativeModule | null = null;
-
 function breadcrumb(reason: string): void {
   console.warn(`[crypto] rust backend unavailable — TS fallback: ${reason}`);
   try {
@@ -64,23 +62,21 @@ function breadcrumb(reason: string): void {
   }
 }
 
-(function selectBackend(): void {
-  const want = String(process.env.EXPO_PUBLIC_CRYPTO_BACKEND || 'ts').toLowerCase();
-  if (want !== 'rust') return;
-  try {
+const selected = selectNativeCore<NativeModule>({
+  name: 'crypto-core',
+  envValue: process.env.EXPO_PUBLIC_CRYPTO_BACKEND,
+  load: () => {
     // Lazy require so 'ts' sessions and Node test runs never touch native.
     // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const mod = require('./native/CryptoCore') as NativeModule;
-    if (mod.initNativeCrypto()) {
-      native = mod;
-      backend = 'rust';
-      return;
-    }
-    breadcrumb(mod.nativeCryptoInitError() || 'unknown init error');
-  } catch (e) {
-    breadcrumb(String((e as Error)?.message || e));
-  }
-})();
+    return require('./native/CryptoCore') as NativeModule;
+  },
+  init: mod => mod.initNativeCrypto(),
+  initError: mod => mod.nativeCryptoInitError(),
+  onFallback: breadcrumb,
+});
+
+const backend = selected.backend;
+const native = selected.module;
 
 /** Which backend is live — for QA screens, diagnostics, and tests. */
 export function cryptoBackend(): 'ts' | 'rust' {

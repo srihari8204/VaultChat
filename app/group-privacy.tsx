@@ -13,11 +13,13 @@
 
 import React, { useCallback, useState } from 'react';
 import {
-  View, Text, StyleSheet, TouchableOpacity, ScrollView, Switch, ActivityIndicator, Alert,
+  View, StyleSheet, TouchableOpacity, ScrollView, Switch, ActivityIndicator, Alert,
 } from 'react-native';
 import { Stack, useLocalSearchParams, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../lib/theme';
+import { AuroraBackground } from '../components/ui/AuroraBackground';
+import { AppText as Text } from '../components/ui/Text';
 import { brandAlpha } from '../constants/theme';
 import { getGroupPrivacy, setGroupPrivacy } from '../lib/groups/store';
 import {
@@ -75,13 +77,20 @@ export default function GroupPrivacyScreen() {
     patch({ sharingUntil: ms == null ? null : Date.now() + ms, invisible: false });
 
   if (loading) {
-    return <View style={[st.center, { backgroundColor: colors.bg }]}><ActivityIndicator color={colors.primary} /></View>;
+    return (
+      <View style={[st.center, { backgroundColor: colors.bg }]}>
+        <AuroraBackground variant="chat" />
+        <Stack.Screen options={{ headerShown: true, title: 'Privacy', headerTitleAlign: 'center', headerStyle: { backgroundColor: colors.bg }, headerTintColor: colors.text, headerShadowVisible: false }} />
+        <ActivityIndicator color={colors.primary} />
+      </View>
+    );
   }
 
   const muted = p.invisible || p.precision === 'off';
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.bg }}>
+      <AuroraBackground variant="chat" />
       <Stack.Screen options={{
         headerShown: true, title: 'Privacy', headerTitleAlign: 'center',
         headerStyle: { backgroundColor: colors.bg }, headerTintColor: colors.text, headerShadowVisible: false,
@@ -90,7 +99,7 @@ export default function GroupPrivacyScreen() {
 
         {/* live summary — what this group can see right now */}
         <View style={[st.summary, { backgroundColor: colors.glassSoft, borderColor: muted ? colors.border : colors.primary }]}>
-          <View style={[st.summaryIcon, { backgroundColor: (muted ? colors.textFaint : colors.primary) + '22' }]}>
+          <View style={[st.summaryIcon, { backgroundColor: muted ? colors.glassSoft : brandAlpha(0.13) }]}>
             <Ionicons name={muted ? 'eye-off' : 'eye'} size={22} color={muted ? colors.textDim : colors.primary} />
           </View>
           <View style={{ flex: 1 }}>

@@ -37,6 +37,9 @@ ok('body resolves across all three Nunito faces',
 ok('base still sets family when ready and weight only when not',
    src.includes('...(ready ? { fontFamily: t.family } : { fontWeight: t.fontWeight })'));
 
+ok('named bold weight resolves to a registered face', src.includes("fontWeight === 'bold' ? 700"));
+ok('custom font sizes get proportional line boxes unless explicitly supplied', src.includes('merged?.fontSize != null && merged.lineHeight == null') && src.includes('Math.ceil(merged.fontSize * t.lineHeight / t.fontSize)'));
+
 // The call sites that triggered this must still be covered by it.
 const live = fs.readFileSync('app/live.tsx', 'utf8');
 const avatar = fs.readFileSync('components/ui/Avatar.tsx', 'utf8');

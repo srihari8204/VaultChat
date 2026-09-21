@@ -223,17 +223,22 @@ const SCREENS: [number, string][] = [
 // ── 9. StatTile keeps the flex that three screens depend on ──────────
 // Dropping `flex: 1` from the tile style is invisible on the dashboard (where
 // TileGrid gives each tile a fixed-width wrapper) and silently collapses the
-// bare `tileRow` on reports / customer / chitti. It was removed once already.
+// bare `tileRow` on reports. It was removed once already.
 {
   const ROOT = join(__dirname, '..', '..');
   const ui = readFileSync(join(ROOT, 'components/finance/ui.tsx'), 'utf8');
   const tileLine = ui.split('\n').find(l => /^\s{2}tile:\s*\{/.test(l)) ?? '';
   A(/flex:\s*1/.test(tileLine), '9a. the StatTile style still declares flex: 1');
 
-  for (const f of ['app/finance/reports.tsx', 'app/finance/customer.tsx', 'app/finance/chitti/[id].tsx']) {
+  for (const f of ['app/finance/reports.tsx']) {
     const src = readFileSync(join(ROOT, f), 'utf8');
     A(/tileRow:\s*\{[^}]*flexDirection:\s*'row'/.test(src),
       `9b. ${f} still lays its tiles out in a row`);
+  }
+  for (const f of ['app/finance/customer.tsx', 'app/finance/chitti/[id].tsx']) {
+    const src = readFileSync(join(ROOT, f), 'utf8');
+    A(/<TileGrid>[\s\S]*?<StatTile[\s\S]*?<\/TileGrid>/.test(src),
+      `9c. ${f} wraps its three totals in the responsive grid`);
   }
 }
 

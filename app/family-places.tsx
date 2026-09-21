@@ -12,10 +12,11 @@
 //   * edit an existing place (rename / re-radius) instead of delete-and-redo.
 //   * any radius, not just the three hardcoded presets.
 
+import { AppText as Text } from '../components/ui/Text';
 import React, { useEffect, useState } from 'react';
 import { KeyboardSafe } from '../components/ui';
 import {
-  View, Text, TextInput, TouchableOpacity, StyleSheet, Alert, ActivityIndicator,
+  View, TextInput, TouchableOpacity, StyleSheet, Alert, ActivityIndicator,
   ScrollView, Switch, Modal, Platform,
 } from 'react-native';
 import * as Location from 'expo-location';
@@ -294,7 +295,7 @@ export default function FamilyPlacesScreen() {
         </View>
 
         <TouchableOpacity onPress={add} disabled={!name.trim() || busy}
-          style={[st.btn, { backgroundColor: name.trim() && !busy ? colors.primary : colors.border }]}>
+          style={[st.btn, { backgroundColor: name.trim() && !busy ? colors.brandOnLight : colors.border }]}>
           {busy
             ? <ActivityIndicator color="#fff" />
             : <><Ionicons name="add-circle" size={18} color="#fff" /><Text style={st.btnTxt}>{where.trim() ? 'Add place' : 'Add here'}</Text></>}
@@ -369,7 +370,7 @@ export default function FamilyPlacesScreen() {
                   {lockedHere(p) && (
                     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 3, borderRadius: 999, paddingHorizontal: 7, paddingVertical: 2, backgroundColor: zoneColor(lock.state ?? 'safe') + '22' }}>
                       <Ionicons name="lock-closed" size={9} color={zoneColor(lock.state ?? 'safe')} />
-                      <Text style={{ color: zoneColor(lock.state ?? 'safe'), fontSize: 9.5, fontWeight: '800' }}>
+                      <Text style={{ color: colors.text, fontSize: 11, fontWeight: '800' }}>
                         {(lock.state ?? 'safe') === 'safe' ? 'LOCKED · SAFE' : (lock.state ?? '').toUpperCase()}
                       </Text>
                     </View>
@@ -521,7 +522,7 @@ export default function FamilyPlacesScreen() {
               </TouchableOpacity>
             )}
 
-            <TouchableOpacity onPress={saveEdit} style={[st.btn, { backgroundColor: colors.primary }]}>
+            <TouchableOpacity onPress={saveEdit} style={[st.btn, { backgroundColor: colors.brandOnLight }]}>
               <Ionicons name="checkmark" size={18} color="#fff" /><Text style={st.btnTxt}>Save</Text>
             </TouchableOpacity>
             <TouchableOpacity onPress={() => editing && remove(editing)} style={[st.btn, { backgroundColor: 'transparent', borderWidth: 1, borderColor: colors.danger, marginTop: 8 }]}>

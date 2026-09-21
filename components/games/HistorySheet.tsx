@@ -1,3 +1,4 @@
+import { useGamePalette } from './appearance';
 // components/games/HistorySheet.tsx — the games you have already played.
 //
 // Two audiences in one sheet. A chess player wants the MOVES back — that is the
@@ -13,15 +14,15 @@
 // disagrees with the other phone in your pocket is worse than one that explains
 // itself. The games server keeps no results we can read.
 
+import { AppText as Text } from '../ui/Text';
 import React, { useCallback, useEffect, useState } from 'react';
-import { ActivityIndicator, Pressable, Text, View } from 'react-native';
+import { ActivityIndicator, Pressable, View } from 'react-native';
 import { Sheet } from './feedback';
 import { Btn, useType } from './ui';
-import { C, S, R, mix, goldLine } from '../../lib/games/theme';
+import { S, R, mix, goldLine } from '../../lib/games/theme';
 import { readHistory, clearHistory, whenLabel, MOVES_KEPT, type GameRecord } from '../../lib/games/history';
 import { gameName } from '../../lib/games/inviteLink';
 
-const TONE: Record<string, string> = { won: C.win, lost: C.lose, draw: C.gold, ended: C.muted };
 
 /** Moves as numbered pairs, the way a scoresheet reads. */
 function pairs(moves: string[]): { n: number; w: string; b: string }[] {
@@ -33,13 +34,15 @@ function pairs(moves: string[]): { n: number; w: string; b: string }[] {
 }
 
 function Row({ rec }: { rec: GameRecord }) {
+  const C = useGamePalette();
+  const TONE: Record<string, string> = { won: C.win, lost: C.lose, draw: C.gold, ended: C.muted };
   const t = useType();
   const [open, setOpen] = useState(false);
   const canOpen = !!rec.moves?.length;
 
   return (
     <View style={{
-      borderRadius: R[2], borderWidth: 1, borderColor: goldLine[14],
+      borderRadius: R[2], borderWidth: 1, borderColor: C.light ? C.line : goldLine[14],
       backgroundColor: mix(C.panel2, 88, '#ffffff'), padding: S[3], gap: 4,
     }}>
       <Pressable
@@ -63,7 +66,7 @@ function Row({ rec }: { rec: GameRecord }) {
           <Text style={{ color: TONE[rec.outcome] ?? C.muted, fontSize: t.sm, fontWeight: '800' }}>
             {rec.outcome === 'ended' ? '—' : rec.outcome}
           </Text>
-          <Text style={{ color: C.muted, fontSize: 10.5 }}>{whenLabel(rec.at)}</Text>
+          <Text style={{ color: C.muted, fontSize: 11 }}>{whenLabel(rec.at)}</Text>
         </View>
         {canOpen && <Text style={{ color: C.gold, fontSize: 14 }}>{open ? '▾' : '▸'}</Text>}
       </Pressable>
@@ -82,6 +85,7 @@ function Row({ rec }: { rec: GameRecord }) {
 }
 
 export default function HistorySheet({ visible, onClose }: { visible: boolean; onClose: () => void }) {
+  const C = useGamePalette();
   const t = useType();
   const [rows, setRows] = useState<GameRecord[] | null>(null);
 

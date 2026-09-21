@@ -1,0 +1,175 @@
+{
+  "date": "2026-09-21",
+  "scope": "User-authorized local Windows Docker resource cleanup; no remote production changes",
+  "measurements": [
+    {
+      "stage": "initial",
+      "freeRamMiB": 283,
+      "cFreeGiB": 11.85,
+      "dockerDataVhdxFileLengthGiB": 244.74,
+      "note": "Disk sampled shortly after initial memory inspection"
+    },
+    {
+      "stage": "first_docker_stop",
+      "freeRamMiB": 2309,
+      "cFreeGiB": 11.66,
+      "dockerDataVhdxFileLengthGiB": 244.74
+    },
+    {
+      "stage": "combined_cleanup_including_root_gradle_stop",
+      "freeRamMiB": 7647
+    },
+    {
+      "stage": "restarted_docker_cleanup",
+      "freeRamMiB": 3538
+    },
+    {
+      "stage": "final_graceful_docker_stop",
+      "freeRamMiB": 5943,
+      "cFreeGiB": 9.9,
+      "dockerDataVhdxFileLengthGiB": 246.09
+    },
+    {
+      "stage": "final_wsl_config_recheck",
+      "freeRamMiB": 6285
+    }
+  ],
+  "measurementLimits": [
+    "Sequential host samples, not controlled attribution; root independently stopped idle Gradle daemon",
+    "VHDX file length is not a sparse-allocation measurement",
+    "Final RAM sample did not resample disk"
+  ],
+  "cache": {
+    "recordsBefore": 80,
+    "recordsAfter": 0,
+    "dockerReportedSizeBeforeGB": 5.314,
+    "dockerReportedSizeAfterBytes": 0,
+    "sharedWithRetainedImages": true,
+    "hostDiskSpaceReclaimedConfirmed": false,
+    "danglingImagePruneReclaimedBytes": 0
+  },
+  "preserved": {
+    "imagesBeforeAndAfter": 43,
+    "containersBeforeAndAfter": 43,
+    "volumesBeforeAndAfter": 46,
+    "imageSizeGB": 25.24,
+    "volumeSizeGB": 5.315,
+    "containerWritableLayerBeforeMB": 70.99,
+    "containerWritableLayerAfterMB": 71.02,
+    "remoteProductionUntouched": true,
+    "noDatabaseDataDeletion": true
+  },
+  "actions": [
+    "Initial bounded graceful commands timed out; stopped only Docker Desktop/backend/build processes and terminated docker-desktop distro",
+    "Backed up unchanged Docker settings; created previously absent .wslconfig",
+    "Restarted Docker hidden; existing restart policies started 13 local containers",
+    "Inspected explicit local desktop-linux context",
+    "Pruned unused build cache and dangling images only; no volume, container, broad system, or all-image prune",
+    "Final graceful Docker Desktop stop succeeded"
+  ],
+  "configuration": {
+    "path": "%USERPROFILE%\\.wslconfig",
+    "previouslyExisted": false,
+    "wsl2Memory": "4GB",
+    "experimentalAutoMemoryReclaim": "gradual",
+    "scope": "WSL VM-wide; effective on fresh VM startup",
+    "effectiveRuntimeLimitVerified": true,
+    "reversal": "Remove newly created .wslconfig to restore prior defaults",
+    "settingsBackup": "%TEMP%\\docker-resource-dec697b9badc431bb0736cf3837a9e95\\settings-store.json",
+    "settingsBackupSha256": "8536409F027B56E849E468463EA1EC9DFC88A3083409F5CEA3C66B8BE843906C"
+  },
+  "finalState": {
+    "checkedAt": "2026-09-21T15:03:28.1293170+05:30",
+    "dockerProcessesRunning": 0,
+    "dockerDataVhdxBytes": 39063650304,
+    "cFreeBytes": 235686486016,
+    "freeRamMiB": 7262.0,
+    "hostDiskReclamationConfirmed": true,
+    "postCompactionDockerStartedSuccessfully": true,
+    "images": 43,
+    "containers": 43,
+    "volumes": 46,
+    "goApiStopped": true,
+    "goApiLogRotationVerified": true,
+    "wslMemTotalKiB": 4009596,
+    "restart": "Open Docker Desktop; Go API remains stopped as before maintenance"
+  },
+  "references": [
+    "https://learn.microsoft.com/en-us/windows/wsl/wsl-config",
+    "https://docs.docker.com/desktop/use-desktop/resource-saver/",
+    "https://docs.docker.com/desktop/settings-and-maintenance/settings/",
+    "https://learn.microsoft.com/en-us/windows-server/administration/windows-commands/compact-vdisk",
+    "https://docs.docker.com/engine/logging/drivers/json-file/"
+  ],
+  "rootFollowup": {
+    "firstCompaction": {
+      "uacApproved": true,
+      "success": true,
+      "finishedAt": "2026-09-21T14:54:55.4203392+05:30",
+      "fileReductionBytes": 2097152,
+      "beforeFileBytes": 264241152000,
+      "afterFileBytes": 264239054848,
+      "beforeCFreeBytes": 10573729792,
+      "afterCFreeBytes": 10580897792,
+      "evidence": "../deployment-snapshots/glass-ui-20260921/docker-compaction/first-pass-result.json"
+    },
+    "rootCause": {
+      "container": "vaultchat-go-api-1",
+      "composeProject": "vaultchat",
+      "composeService": "go-api",
+      "logBytes": 202364462254,
+      "driver": "json-file",
+      "previousLogOptions": {},
+      "allContainerLogsAllocatedKiB": 198288636
+    },
+    "preservedDiagnostics": {
+      "tailLines": 2000,
+      "stderrBytes": 124000,
+      "storage": "Private outside Git; contents not included"
+    },
+    "remediation": {
+      "composeFile": "docker-compose.yml",
+      "maxSize": "10m",
+      "maxFile": "3",
+      "onlyRecreatedService": "go-api",
+      "flags": [
+        "--no-start",
+        "--no-deps",
+        "--no-build",
+        "--pull",
+        "never"
+      ],
+      "temporaryEnvironmentOverride": true,
+      "newConfigurationEnvironmentKeysExcluded": 2,
+      "imageEnvironmentMountsEquivalent": true,
+      "newState": "created/stopped",
+      "containerIdentityChanged": true,
+      "directLogTruncation": false,
+      "dockerRemovedOldContainerLog": true
+    },
+    "inventoryAfter": {
+      "images": 43,
+      "containers": 43,
+      "volumes": 46
+    },
+    "guestFilesystem": {
+      "usedBeforeGiB": 219.5,
+      "usedAfterGiB": 31.1
+    },
+    "secondCompaction": {
+      "startedAt": "2026-09-21T15:00:39.0739508+05:30",
+      "target": "C:\\Users\\Dell\\AppData\\Local\\Docker\\wsl\\disk\\docker_data.vhdx",
+      "operation": "Offline DiskPart compact vdisk",
+      "success": true,
+      "beforeFileBytes": 264240103424,
+      "beforeCFreeBytes": 10523852800,
+      "diskpartExitCode": 0,
+      "afterFileBytes": 39055261696,
+      "afterCFreeBytes": 235746516992,
+      "fileReductionBytes": 225184841728,
+      "cFreeIncreaseBytes": 225222664192,
+      "finishedAt": "2026-09-21T15:01:46.3580854+05:30"
+    },
+    "dockerGracefullyStoppedBeforeCompaction": true
+  }
+}

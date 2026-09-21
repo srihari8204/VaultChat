@@ -1,9 +1,13 @@
 package routes
 
 import (
+	"bytes"
+	"context"
 	"os"
 	"strings"
 	"testing"
+
+	"vaultchat/backend-go/internal/db"
 )
 
 // VAULTBEAM BITMAPS — LOST UPDATES.
@@ -45,10 +49,24 @@ func TestVaultbeamMasksAreUnionedInSQL(t *testing.T) {
 			t.Errorf("a whole-mask overwrite is back: %q", bad)
 		}
 	}
-	// bytea "|" needs equal widths, so the union must zero-extend the narrow
-	// side. Truncating instead would drop exactly the bits at issue.
-	if !strings.Contains(src, "decode(repeat('00'") || strings.Contains(src, "substring($1::bytea") {
-		t.Error("vbMaskOrSQL no longer pads the narrower operand (or truncates one)")
+}
+
+func TestVaultbeamMaskSQLAgainstPostgres(t *testing.T) {
+	vbSkip(t)
+	for _, stored := range [][]byte{nil, {}, {0x01}, {0x80, 0xff, 0x01}} {
+		for _, incoming := range [][]byte{{}, {0x04}, {0xff, 0x01, 0x80}} {
+			var got []byte
+			err := db.Pool.QueryRow(context.Background(),
+				`SELECT `+vbMaskOrSQL("stored")+` FROM (SELECT $2::bytea AS stored) masks`,
+				incoming, stored).Scan(&got)
+			if err != nil {
+				t.Fatal(err)
+			}
+			want := vbUnionMask(stored, incoming, max(len(stored), len(incoming))*8)
+			if !bytes.Equal(got, want) {
+				t.Fatalf("%x OR %x = %x, want %x", stored, incoming, got, want)
+			}
+		}
 	}
 }
 

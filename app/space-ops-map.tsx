@@ -16,14 +16,15 @@
 // be honest about: a bus that has not pinged since this screen opened has NO
 // position to draw, which is different from a bus that is not moving.
 
+import { AppText as Text } from '../components/ui/Text';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator, Alert, TextInput,
+  View, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator, Alert, TextInput,
 } from 'react-native';
 import { Stack, useLocalSearchParams, useRouter, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useSpaceColors, spaceHeader } from '../lib/spaces/theme';
-import type { Palette } from '../constants/theme';
+import type { SpacePalette as Palette } from '../lib/spaces/theme';
 import FamilyMap, { type FamilyMarker } from '../components/family/FamilyMap';
 import { getRuns, getRun } from '../lib/spaces/api';
 import { subscribeRun, type RunPing } from '../lib/spaces/runSession';
@@ -211,7 +212,7 @@ export default function SpaceOpsMapScreen() {
       {/* What the map cannot show, said rather than left blank. */}
       {waiting > 0 && (
         <View style={s.banner}>
-          <Ionicons name="cloud-offline-outline" size={16} color="#F59E0B" />
+          <Ionicons name="cloud-offline-outline" size={16} color={colors.warning} />
           <Text style={s.bannerText}>
             {waiting} {waiting === 1 ? 'vehicle has' : 'vehicles have'} not sent a position since this
             screen opened. Positions are end-to-end encrypted and arrive live — there is no history to load.
@@ -339,7 +340,7 @@ export default function SpaceOpsMapScreen() {
 function dotColour(r: Run, noFix: boolean, c: Palette): string {
   if (r.status !== 'started') return c.textFaint;
   if (r.stale) return c.danger;      // the server has not heard from it at all
-  if (noFix) return '#F59E0B';       // it is reporting, we just have not received one yet
+  if (noFix) return c.warning;       // it is reporting, we just have not received one yet
   return c.success;
 }
 
@@ -394,7 +395,7 @@ const styles = (c: Palette) => StyleSheet.create({
     paddingHorizontal: 12, paddingVertical: 10, maxHeight: 110,
   },
   send: {
-    width: 42, height: 42, borderRadius: 21, backgroundColor: c.primary,
+    width: 42, height: 42, borderRadius: 21, backgroundColor: c.brandOnLight,
     alignItems: 'center', justifyContent: 'center',
   },
   sendOff: { opacity: 0.4 },

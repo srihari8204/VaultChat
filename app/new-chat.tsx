@@ -8,12 +8,12 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator, Alert, FlatList, Platform,
-  StyleSheet, Text, TextInput, TouchableOpacity, View,
+  StyleSheet, TextInput, TouchableOpacity, View,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { type Palette } from '../constants/theme';
 import { useTheme } from '../lib/theme';
-import { Avatar, AuroraBackground, KeyboardSafe } from '../components/ui';
+import { AppText as Text, Avatar, AuroraBackground, KeyboardSafe } from '../components/ui';
 import { PhoneField, toE164 } from '../components/auth/PhoneField';
 import { createDirectChat, listChats, attachmentUrl, setDisappearing, type ChatSummary } from '../lib/chatService';
 import { getAccessToken } from '../lib/api';
@@ -108,7 +108,7 @@ export default function NewChatScreen() {
   const ActionRow = ({ icon, title, onPress }: { icon: any; title: string; onPress: () => void }) => (
     <TouchableOpacity style={S.action} onPress={onPress} activeOpacity={0.7}>
       <View style={S.actionIcon}><Ionicons name={icon} size={22} color="#fff" /></View>
-      <Text numberOfLines={1} style={S.actionTitle}>{title}</Text>
+      <Text style={S.actionTitle}>{title}</Text>
     </TouchableOpacity>
   );
 
@@ -208,23 +208,23 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   title: { color: c.text, fontSize: 20, fontWeight: '800' },
   ttlBanner: { flexDirection: 'row', alignItems: 'center', gap: 8, marginHorizontal: 16, marginBottom: 4,
                paddingHorizontal: 12, paddingVertical: 10, borderRadius: 12,
-               backgroundColor: c.glassSoft, borderWidth: 1, borderColor: c.accent },
+               backgroundColor: c.glass, borderWidth: 1, borderColor: c.accent },
   ttlBannerTxt: { flex: 1, color: c.textDim, fontSize: 12.5, lineHeight: 17 },
   ttlBannerStrong: { color: c.text, fontWeight: '800' },
   // 2026-09-17: same as create-group — the 15sp input grows past a pinned 42 at
   // font scale 1.5 and clipped. minHeight keeps the pill identical at scale 1.0.
-  searchWrap: { flexDirection: 'row', alignItems: 'center', gap: 8, marginHorizontal: 14, marginBottom: 8, paddingHorizontal: 14, minHeight: 42, paddingVertical: 6, borderRadius: 21, backgroundColor: c.glassSoft },
+  searchWrap: { flexDirection: 'row', alignItems: 'center', gap: 8, marginHorizontal: 14, marginBottom: 8, paddingHorizontal: 14, minHeight: 42, paddingVertical: 6, borderRadius: 21, backgroundColor: c.glass, borderWidth: 1, borderColor: c.glassStroke },
   searchInput: { flex: 1, color: c.text, fontSize: 15 },
-  action: { flexDirection: 'row', alignItems: 'center', gap: 16, paddingVertical: 12, paddingHorizontal: 18 },
+  action: { flexDirection: 'row', alignItems: 'center', gap: 16, marginHorizontal: 14, marginBottom: 8, paddingVertical: 12, paddingHorizontal: 14, borderRadius: 16, backgroundColor: c.glass, borderWidth: StyleSheet.hairlineWidth, borderColor: c.glassStroke },
   actionIcon: { width: 46, height: 46, borderRadius: 23, backgroundColor: c.primary, alignItems: 'center', justifyContent: 'center' },
-  actionTitle: { color: c.text, fontSize: 16, fontWeight: '600' },
+  actionTitle: { flex: 1, minWidth: 0, color: c.text, fontSize: 16, fontWeight: '600' },
   addBox: { paddingHorizontal: 18, paddingVertical: 8, gap: 4 },
   cta: { marginTop: 12, minHeight: 50, paddingVertical: 10, borderRadius: 14, backgroundColor: c.primary, alignItems: 'center', justifyContent: 'center' },
   ctaOff: { opacity: 0.4 },
   ctaTxt: { color: '#fff', fontSize: 16, fontWeight: '800' },
   hint: { color: c.textFaint, fontSize: 12, marginTop: 8, lineHeight: 17 },
   sectionLabel: { color: c.textDim, fontSize: 12, fontWeight: '700', letterSpacing: 1, paddingHorizontal: 18, paddingTop: 14, paddingBottom: 4 },
-  row: { flexDirection: 'row', alignItems: 'center', gap: 14, paddingVertical: 9, paddingHorizontal: 18 },
+  row: { flexDirection: 'row', alignItems: 'center', gap: 14, marginHorizontal: 14, marginBottom: 8, paddingVertical: 10, paddingHorizontal: 14, borderRadius: 16, backgroundColor: c.glass, borderWidth: StyleSheet.hairlineWidth, borderColor: c.glassStroke },
   rowName: { color: c.text, fontSize: 16, fontWeight: '500' },
   rowSub: { color: c.online ?? c.textDim, fontSize: 12, marginTop: 1 },
   empty: { color: c.textDim, fontSize: 14, textAlign: 'center', marginTop: 40, paddingHorizontal: 40, lineHeight: 20 },

@@ -24,7 +24,6 @@ import {
   ScrollView,
   StyleSheet,
   Switch,
-  Text,
   TouchableOpacity,
   View,
 } from 'react-native';
@@ -62,7 +61,7 @@ import {
   type BlockedUser,
   type UserSettings,
 } from '../lib/chatService';
-import { AuroraBackground } from '../components/ui';
+import { AppText as Text, AuroraBackground } from '../components/ui';
 
 export default function SettingsScreen() {
   const router = useRouter();
@@ -223,6 +222,7 @@ export default function SettingsScreen() {
     // hit-tests where it paints, which is how a tap on one PRIVACY row fired a
     // different row a thousand pixels away. A modal is never scroll content.
     <View style={S.screen}>
+      <AuroraBackground />
     <ScrollView style={S.screen} contentContainerStyle={{ paddingBottom: 64 }}>
       <View style={S.header}>
         <TouchableOpacity accessibilityRole="button" accessibilityLabel="Back" onPress={() => router.back()} hitSlop={10} style={S.backBtn} activeOpacity={0.7}>
@@ -513,7 +513,7 @@ function AppearanceSection() {
   return (
     <View style={S.section}>
       <Text style={S.label}>APPEARANCE</Text>
-      <View style={[apS.row, { backgroundColor: colors.surfaceSolid, borderColor: colors.glassStroke }]}>
+      <View style={[apS.row, { backgroundColor: colors.glass, borderColor: colors.glassStroke }]}>
         {opts.map(o => {
           const active = pref === o.key;
           return (

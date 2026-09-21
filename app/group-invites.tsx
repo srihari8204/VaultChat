@@ -18,12 +18,14 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { KeyboardSafe } from '../components/ui';
 import {
-  View, Text, StyleSheet, TouchableOpacity, ScrollView, TextInput, Alert,
+  View, StyleSheet, TouchableOpacity, ScrollView, TextInput, Alert,
   ActivityIndicator, Platform, Image,
 } from 'react-native';
 import { Stack, useLocalSearchParams, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../lib/theme';
+import { AuroraBackground } from '../components/ui/AuroraBackground';
+import { AppText as Text } from '../components/ui/Text';
 import { brandAlpha } from '../constants/theme';
 import {
   createInvitation, listInvitations, resendInvitation, revokeInvitation, cancelInvitation,
@@ -200,6 +202,7 @@ export default function GroupInvitesScreen() {
 
   return (
     <KeyboardSafe style={{ flex: 1, backgroundColor: colors.bg }}>
+      <AuroraBackground variant="chat" />
       <Stack.Screen options={{
         headerShown: true, title: 'Add people', headerTitleAlign: 'center',
         headerStyle: { backgroundColor: colors.bg }, headerTintColor: colors.text, headerShadowVisible: false,

@@ -45,3 +45,10 @@ available:
 
 Report what was checked and any existing failures. Never report a deployment or
 device verification based only on local tests.
+
+## Terminal output
+
+Use RTK (Rust Token Killer) for supported verbose commands when available, as
+requested by the user. Preserve command exit codes and full failure logs; use
+unfiltered source/output whenever compression could hide details needed for a
+correct review. Fall back to the original command if RTK is unavailable.

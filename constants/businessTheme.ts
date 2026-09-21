@@ -1,10 +1,9 @@
 // constants/businessTheme.ts — palette for the Business space mini-app.
 //
 // The VaultChat Business design system (see the Business Dashboard reference)
-// is blue-on-navy and dark-only, distinct from the app-wide lavender brand.
-// Like financeTheme.ts it is a STATIC palette: every business screen renders
-// identically regardless of the device theme, because the design specifies the
-// surfaces exactly and forbids white backgrounds.
+// uses blue identity accents, distinct from the app-wide lavender brand.
+// BIZ remains the legacy static navy palette; businessPalette combines its
+// identity with the active app theme for operational space screens.
 //
 // Shaped as a `Palette` so the existing space screens — all written as
 // `styles(colors)` over that interface — re-skin through lib/spaces/theme.ts
@@ -12,6 +11,20 @@
 // app palette; the routing lives in useSpaceColors(), not here.
 
 import type { Palette } from './theme';
+
+/** Keep Business blue while surfaces and text follow the app's day/night setting. */
+export function businessPalette(base: Palette, scheme: 'light' | 'dark'): Palette {
+  return {
+    ...base,
+    primary: scheme === 'light' ? BIZ.brandOnLight : BIZ.primary,
+    accent: BIZ.accent,
+    purple: BIZ.purple,
+    accentLight: BIZ.accentLight,
+    accentDeep: BIZ.accentDeep,
+    accentOn: scheme === 'light' ? BIZ.brandOnLight : BIZ.accentOn,
+    brandOnLight: BIZ.brandOnLight,
+  };
+}
 
 export const BIZ: Palette = {
   primary: '#1677FF',   // VaultChat Business blue
@@ -53,6 +66,7 @@ export const BIZ: Palette = {
   accentLight: '#7DD3FC',
   accentDeep:  '#1677FF',
   accentOn:    '#7DD3FC',
+  brandOnLight:'#1552E0',
 };
 
 // The design system's status colors that Palette has no slot for. Fixed by

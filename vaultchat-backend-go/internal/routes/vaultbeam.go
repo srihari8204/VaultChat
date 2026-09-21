@@ -121,7 +121,7 @@ func vbUnionMask(stored, incoming []byte, chunkCount int) []byte {
 // vbMaskOrSQL renders "col OR $1", the union of a stored bitmask column with a
 // delta bitmask passed as $1, done in SQL so no read-modify-write window exists.
 //
-// Postgres' bytea `|` demands operands of EQUAL length, and neither side's
+// Postgres supports integer bitwise OR, but not bytea OR. Neither side's
 // width is guaranteed here — recv_mask starts NULL (migration 076 added it to
 // live rows), and uploaded_mask can be widened by /relay/grow between a
 // handler's read and its write. So the narrower side is zero-extended to the
@@ -129,10 +129,11 @@ func vbUnionMask(stored, incoming []byte, chunkCount int) []byte {
 // drops set bits, which is the very bug this replaces.
 func vbMaskOrSQL(col string) string {
 	c := `COALESCE(` + col + `, ''::bytea)`
-	return `(CASE WHEN length(` + c + `) >= length($1::bytea)
-	          THEN ` + c + ` | ($1::bytea || decode(repeat('00', length(` + c + `) - length($1::bytea)), 'hex'))
-	          ELSE $1::bytea | (` + c + ` || decode(repeat('00', length($1::bytea) - length(` + c + `)), 'hex'))
-	         END)`
+	return `(SELECT decode(COALESCE(string_agg(lpad(to_hex(
+	          (CASE WHEN i < length(` + c + `) THEN get_byte(` + c + `, i) ELSE 0 END) |
+	          (CASE WHEN i < length($1::bytea) THEN get_byte($1::bytea, i) ELSE 0 END)
+	         ), 2, '0'), '' ORDER BY i), ''), 'hex')
+	         FROM generate_series(0, GREATEST(length(` + c + `), length($1::bytea)) - 1) AS bytes(i))`
 }
 
 // vbStaleVersion reports whether a client-supplied session version disagrees

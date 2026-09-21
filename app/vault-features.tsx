@@ -1,3 +1,5 @@
+import { AppText as Text } from '../components/ui/Text';
+import { AuroraBackground } from '../components/ui';
 import { Ionicons } from '@expo/vector-icons';
 // app/vault-features.tsx
 // crazzychat premium security features
@@ -9,10 +11,10 @@ import { Ionicons } from '@expo/vector-icons';
 // 4. Email Share — share encrypted chat transcript via email
 // 5. Chat Backup — export encrypted backup to email
 
-import { BRAND_ACCENT } from '../constants/theme';
+
 import React, { useState, useEffect, useMemo } from 'react';
 import {
-  View, Text, TouchableOpacity, StyleSheet,
+  View, TouchableOpacity, StyleSheet,
   ScrollView, Switch, Alert, ActivityIndicator,
   Modal, Share,
 } from 'react-native';
@@ -21,7 +23,7 @@ import * as SecureStore from 'expo-secure-store';
 import { copyAndAutoClear } from '../lib/clipboardSafe';
 import { createSyncCode } from '../lib/chatService';
 import type { Palette } from '../constants/theme';
-import { useColors } from '../lib/theme';
+import { useTheme } from '../lib/theme';
 import { HEADER_TOP } from '../constants/layout';
 
 // ─────────────────────────────────────────────────────────────────
@@ -78,8 +80,8 @@ const DEFAULT_SETTINGS: VaultSettings = {
 // ─────────────────────────────────────────────────────────────────
 
 export default function VaultFeaturesScreen() {
-  const c = useColors();
-  const styles = useMemo(() => makeStyles(c), [c]);
+  const { colors: c, scheme } = useTheme();
+  const styles = useMemo(() => makeStyles(c, scheme === 'light'), [c, scheme]);
   const modalStyles = useMemo(() => makeModalStyles(c), [c]);
   const router = useRouter();
 
@@ -204,11 +206,12 @@ export default function VaultFeaturesScreen() {
   // ─────────────────────────────────────────────────────────────
   return (
     <View style={styles.container}>
+      <AuroraBackground />
 
       {/* Header */}
       <View style={styles.header}>
         <TouchableOpacity accessibilityRole="button" accessibilityLabel="Back" onPress={() => router.back()}>
-          <Ionicons name="arrow-back" size={26} color={BRAND_ACCENT} />
+          <Ionicons name="arrow-back" size={26} color={c.primary} />
         </TouchableOpacity>
         <View style={styles.headerCenter}>
           <Text style={styles.headerTitle}>Vault Features</Text>
@@ -301,7 +304,7 @@ export default function VaultFeaturesScreen() {
               <Text style={styles.pickerValueText}>
                 {DISAPPEAR_OPTIONS.find(o => o.value === settings.disappearTimer)?.label}
               </Text>
-              <Ionicons name="chevron-forward" size={18} color="#9CA3AF" />
+              <Ionicons name="chevron-forward" size={18} color={scheme === 'light' ? c.textDim : '#9CA3AF'} />
             </View>
           </TouchableOpacity>
 
@@ -336,7 +339,7 @@ export default function VaultFeaturesScreen() {
               <Text style={styles.pickerValueText}>
                 {LOCK_OPTIONS.find(o => o.value === settings.lockTimer)?.label}
               </Text>
-              <Ionicons name="chevron-forward" size={18} color="#9CA3AF" />
+              <Ionicons name="chevron-forward" size={18} color={scheme === 'light' ? c.textDim : '#9CA3AF'} />
             </View>
           </TouchableOpacity>
         </View>
@@ -370,7 +373,7 @@ export default function VaultFeaturesScreen() {
                 onValueChange={v => saveSetting(key as keyof VaultSettings, v)}
                 trackColor={{ false: '#E5E7EB', true: '#D1FAE5' }}
                 thumbColor={
-                  settings[key as keyof VaultSettings] ? BRAND_ACCENT : '#6B7280'
+                  settings[key as keyof VaultSettings] ? c.primary : '#6B7280'
                 }
               />
             </View>
@@ -387,7 +390,7 @@ export default function VaultFeaturesScreen() {
               <Text style={styles.exportTitle}>Notification & Link Previews</Text>
               <Text style={styles.exportDesc}>Choose what notifications say, and whether links you receive are fetched</Text>
             </View>
-            <Ionicons name="chevron-forward" size={18} color="#9CA3AF" />
+            <Ionicons name="chevron-forward" size={18} color={scheme === 'light' ? c.textDim : '#9CA3AF'} />
           </TouchableOpacity>
         </View>
 
@@ -408,7 +411,7 @@ export default function VaultFeaturesScreen() {
               <Text style={styles.exportTitle}>Email Encrypted Transcript</Text>
               <Text style={styles.exportDesc}>Share a chat history via email</Text>
             </View>
-            <Ionicons name="chevron-forward" size={18} color="#9CA3AF" />
+            <Ionicons name="chevron-forward" size={18} color={scheme === 'light' ? c.textDim : '#9CA3AF'} />
           </TouchableOpacity>
 
           <TouchableOpacity
@@ -420,7 +423,7 @@ export default function VaultFeaturesScreen() {
               <Text style={styles.exportTitle}>Vault Backup</Text>
               <Text style={styles.exportDesc}>Backup vault files to email</Text>
             </View>
-            <Ionicons name="chevron-forward" size={18} color="#9CA3AF" />
+            <Ionicons name="chevron-forward" size={18} color={scheme === 'light' ? c.textDim : '#9CA3AF'} />
           </TouchableOpacity>
         </View>
 
@@ -461,7 +464,7 @@ export default function VaultFeaturesScreen() {
                   {opt.label}
                 </Text>
                 {settings.disappearTimer === opt.value && (
-                  <Ionicons name="checkmark" size={16} color={BRAND_ACCENT} />
+                  <Ionicons name="checkmark" size={16} color={c.primary} />
                 )}
               </TouchableOpacity>
             ))}
@@ -503,7 +506,7 @@ export default function VaultFeaturesScreen() {
                   {opt.label}
                 </Text>
                 {settings.lockTimer === opt.value && (
-                  <Ionicons name="checkmark" size={16} color={BRAND_ACCENT} />
+                  <Ionicons name="checkmark" size={16} color={c.primary} />
                 )}
               </TouchableOpacity>
             ))}
@@ -519,18 +522,18 @@ export default function VaultFeaturesScreen() {
 // Styles
 // ─────────────────────────────────────────────────────────────────
 
-const makeStyles = (c: Palette) => StyleSheet.create({
-  container:    { flex: 1, backgroundColor: c.glassSoft },
+const makeStyles = (c: Palette, light: boolean) => StyleSheet.create({
+  container:    { flex: 1, backgroundColor: c.bg },
   header: {
     flexDirection: 'row', alignItems: 'center',
     backgroundColor: c.bg,
     paddingTop: HEADER_TOP, paddingBottom: 12, paddingHorizontal: 16,
     borderBottomWidth: 0.5, borderBottomColor: c.glassStroke, gap: 12,
   },
-  back:          { fontSize: 28, color: BRAND_ACCENT, fontWeight: 'bold' },
+  back:          { fontSize: 28, color: c.primary, fontWeight: 'bold' },
   headerCenter:  { flex: 1 },
   headerTitle:   { fontSize: 18, fontWeight: 'bold', color: c.text },
-  headerSub:     { fontSize: 9, color: BRAND_ACCENT, marginTop: 1, fontWeight: 'bold' },
+  headerSub:     { fontSize: 12, color: c.primary, marginTop: 1, fontWeight: 'bold' },
   headerBadge:   { fontSize: 22 },
 
   scroll:        { flex: 1 },
@@ -538,7 +541,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
 
   // Section
   section: {
-    backgroundColor: c.bg,
+    backgroundColor: c.glassSoft,
     borderRadius: 14, borderWidth: 0.5, borderColor: c.glassStroke,
     padding: 16, marginBottom: 12,
   },
@@ -556,26 +559,26 @@ const makeStyles = (c: Palette) => StyleSheet.create({
     padding: 14, alignItems: 'center', gap: 6,
   },
   codeValue: {
-    fontSize: 28, fontWeight: 'bold', color: BRAND_ACCENT,
+    fontSize: 28, fontWeight: 'bold', color: c.primary,
     letterSpacing: 3, fontFamily: 'monospace',
   },
-  codeExpiry:   { fontSize: 11, color: c.textDim, marginBottom: 4 },
-  codeActions:  { flexDirection: 'row', gap: 8, marginTop: 4 },
+  codeExpiry:   { fontSize: 12, color: c.textDim, marginBottom: 4 },
+  codeActions:  { flexWrap: 'wrap', flexDirection: 'row', gap: 8, marginTop: 4 },
   codeBtn: {
-    backgroundColor: c.surfaceSolid, borderRadius: 8,
+    minHeight: 44, justifyContent: 'center', backgroundColor: c.surfaceSolid, borderRadius: 8,
     borderWidth: 0.5, borderColor: c.glassStroke,
     paddingHorizontal: 12, paddingVertical: 7,
   },
-  codeBtnCopied:    { backgroundColor: 'rgba(34,197,94,0.14)', borderColor: BRAND_ACCENT },
+  codeBtnCopied:    { backgroundColor: 'rgba(34,197,94,0.14)', borderColor: c.primary },
   codeBtnRevoke:    { borderColor: '#FF4D6D44' },
   codeBtnText:      { fontSize: 12, color: c.text },
-  codeBtnTextRevoke:{ color: '#FF4D6D' },
+  codeBtnTextRevoke:{ color: light ? c.danger : '#FF4D6D' },
 
   actionBtn: {
-    backgroundColor: BRAND_ACCENT, borderRadius: 10,
+    backgroundColor: c.primary, borderRadius: 10,
     paddingVertical: 12, alignItems: 'center',
   },
-  actionBtnDim:   { backgroundColor: 'rgba(34,197,94,0.14)' },
+  actionBtnDim:   { opacity: 0.5 },
   actionBtnText:  { color: '#FFFFFF', fontWeight: 'bold', fontSize: 14 },
 
   // Picker row
@@ -587,20 +590,20 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   },
   pickerLabel:      { fontSize: 14, color: c.text },
   pickerValue:      { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  pickerValueText:  { fontSize: 14, color: BRAND_ACCENT, fontWeight: 'bold' },
+  pickerValueText:  { fontSize: 14, color: c.primary, fontWeight: 'bold' },
   pickerChevron:    { fontSize: 18, color: c.textDim },
 
   // Info banner
   infoBanner: {
     backgroundColor: '#D1FAE520', borderRadius: 8,
-    borderWidth: 0.5, borderColor: BRAND_ACCENT + '33',
+    borderWidth: 0.5, borderColor: c.primary + '33',
     paddingHorizontal: 12, paddingVertical: 7, marginTop: 10,
   },
-  infoBannerText: { fontSize: 12, color: BRAND_ACCENT, lineHeight: 17 },
+  infoBannerText: { fontSize: 12, color: c.primary, lineHeight: 17 },
 
   // Toggle section
   toggleSectionLabel: {
-    fontSize: 10, fontWeight: 'bold', color: c.textDim,
+    fontSize: 12, fontWeight: 'bold', color: c.textDim,
     letterSpacing: 0.8, marginBottom: 10,
   },
   toggleRow: {
@@ -611,7 +614,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   toggleIcon:   { fontSize: 20 },
   toggleInfo:   { flex: 1 },
   toggleTitle:  { fontSize: 13, fontWeight: 'bold', color: c.text, marginBottom: 2 },
-  toggleDesc:   { fontSize: 11, color: c.textDim, lineHeight: 15 },
+  toggleDesc:   { fontSize: 12, color: c.textDim, lineHeight: 15 },
 
   // Export rows
   exportRow: {
@@ -622,7 +625,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   exportIcon:    { fontSize: 22 },
   exportInfo:    { flex: 1 },
   exportTitle:   { fontSize: 13, fontWeight: 'bold', color: c.text, marginBottom: 2 },
-  exportDesc:    { fontSize: 11, color: c.textDim },
+  exportDesc:    { fontSize: 12, color: c.textDim },
   exportChevron: { fontSize: 18, color: c.textDim },
 });
 
@@ -651,11 +654,11 @@ const makeModalStyles = (c: Palette) => StyleSheet.create({
     marginBottom: 6, backgroundColor: c.surfaceSolid,
     borderWidth: 0.5, borderColor: c.glassStroke,
   },
-  optionActive:     { backgroundColor: 'rgba(34,197,94,0.14)', borderColor: BRAND_ACCENT },
+  optionActive:     { backgroundColor: 'rgba(34,197,94,0.14)', borderColor: c.primary },
   optionText:       { fontSize: 15, color: c.text },
-  optionTextActive: { color: BRAND_ACCENT, fontWeight: 'bold' },
-  checkmark:        { fontSize: 16, color: BRAND_ACCENT, fontWeight: 'bold' },
-  inputLabel:       { fontSize: 11, color: c.textDim, marginBottom: 6, marginTop: 4 },
+  optionTextActive: { color: c.primary, fontWeight: 'bold' },
+  checkmark:        { fontSize: 16, color: c.primary, fontWeight: 'bold' },
+  inputLabel:       { fontSize: 12, color: c.textDim, marginBottom: 6, marginTop: 4 },
   pinInput: {
     backgroundColor: c.surfaceSolid, borderRadius: 10,
     borderWidth: 0.5, borderColor: c.glassStroke,
@@ -671,9 +674,9 @@ const makeModalStyles = (c: Palette) => StyleSheet.create({
   },
   cancelText:   { color: c.textDim, fontWeight: 'bold' },
   confirmBtn: {
-    flex: 1, backgroundColor: BRAND_ACCENT,
+    flex: 1, backgroundColor: c.primary,
     borderRadius: 10, paddingVertical: 13, alignItems: 'center',
   },
-  confirmBtnDim:  { backgroundColor: 'rgba(34,197,94,0.14)' },
+  confirmBtnDim:  { opacity: 0.5 },
   confirmText:    { color: '#FFFFFF', fontWeight: 'bold', fontSize: 15 },
 });

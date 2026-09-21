@@ -42,6 +42,7 @@ import { mergeReactions } from '../lib/reactionMerge';
 import { saveDraft, getDraft, clearDraft } from '../lib/drafts';
 import { playSent, playReceived } from '../lib/sounds';
 import { NOTIF_CHANNELS } from '../lib/push';
+import { clearMessageNotifications } from '../lib/CallService';
 import {
   AppState,
   ActivityIndicator,
@@ -691,8 +692,7 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
   // Clear this chat's native message notification + unread counter (F2 —
   // the content-free doorbell posts per-chat notifications tagged by chatId).
   useEffect(() => {
-    if (!chatId || Platform.OS !== 'android') return;
-    try { require('react-native').NativeModules?.VaultCalls?.clearMessageNotifs?.(chatId); } catch {}
+    clearMessageNotifications(chatId);
   }, [chatId]);
 
   // ── Initial load ──────────────────────────────────────────
@@ -4324,7 +4324,7 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
                         style={{ width: 56, height: 56, borderRadius: 8, overflow: 'hidden', borderWidth: 2, borderColor: i === currentIdx ? colors.primary : 'transparent' }}>
                         {it.mediaType === 'file'
                           ? <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.surfaceSolid }}>
-                              <Ionicons name="document-text" size={22} color="#fff" />
+                              <Ionicons name="document-text" size={22} color={colors.text} />
                             </View>
                           : <Image source={{ uri: it.uri }} style={{ width: '100%', height: '100%' }} />}
                         <TouchableOpacity onPress={() => removePendingAt(i)} hitSlop={6} accessibilityLabel="Remove this attachment"
@@ -4355,9 +4355,9 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
                     value={cur.caption}
                     onChangeText={(t) => updateCurrentItem({ caption: t })}
                     placeholder={multi ? 'Add a caption…' : 'Add a caption…'}
-                    placeholderTextColor="#9CA3AF"
+                    placeholderTextColor={colors.textFaint}
                     multiline
-                    style={{ flex: 1, color: '#fff', backgroundColor: colors.surfaceSolid, borderRadius: 22, paddingHorizontal: 16, paddingVertical: 10, maxHeight: 120, fontSize: 16 }}
+                    style={{ flex: 1, color: colors.text, backgroundColor: colors.surfaceSolid, borderRadius: 22, paddingHorizontal: 16, paddingVertical: 10, maxHeight: 120, fontSize: 16 }}
                   />
                   <TouchableOpacity
                     onPress={confirmSendPendingMedia}

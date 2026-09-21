@@ -3,13 +3,13 @@
 import { HEADER_TOP } from '../constants/layout';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  View, Text, FlatList, TouchableOpacity, StyleSheet, ActivityIndicator, Alert,
+  View, FlatList, TouchableOpacity, StyleSheet, ActivityIndicator, Alert,
 } from 'react-native';
 import { useRouter, Stack } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../lib/theme';
 import { type Palette } from '../constants/theme';
-import { Avatar, AuroraBackground } from '../components/ui';
+import { AppText as Text, Avatar, AuroraBackground } from '../components/ui';
 import {
   getStatusPrivacy, setStatusPrivacy, listChats, attachmentUrl,
   type StatusPrivacyMode,
@@ -83,7 +83,14 @@ export default function StatusPrivacyScreen() {
           ListHeaderComponent={
             <View>
               {MODES.map(m => (
-                <TouchableOpacity key={m.key} style={S.modeRow} activeOpacity={0.7} onPress={() => pickMode(m.key)}>
+                <TouchableOpacity
+                  key={m.key}
+                  style={S.modeRow}
+                  activeOpacity={0.7}
+                  onPress={() => pickMode(m.key)}
+                  accessibilityRole="radio"
+                  accessibilityState={{ selected: mode === m.key }}
+                >
                   <Ionicons name={mode === m.key ? 'radio-button-on' : 'radio-button-off'} size={22} color={mode === m.key ? colors.primary : colors.textDim} />
                   <View style={{ flex: 1 }}>
                     <Text style={S.modeLabel}>{m.label}</Text>
@@ -101,7 +108,13 @@ export default function StatusPrivacyScreen() {
           renderItem={({ item }) => {
             const on = selected.has(item.id);
             return (
-              <TouchableOpacity style={S.contactRow} activeOpacity={0.7} onPress={() => toggle(item.id)}>
+              <TouchableOpacity
+                style={S.contactRow}
+                activeOpacity={0.7}
+                onPress={() => toggle(item.id)}
+                accessibilityRole="checkbox"
+                accessibilityState={{ checked: on }}
+              >
                 <Avatar uri={item.photoURL && authHeader ? attachmentUrl(item.photoURL) : null} headers={authHeader ? { Authorization: authHeader } : undefined} name={item.name} size={44} ring />
                 <Text style={S.contactName} numberOfLines={1}>{item.name}</Text>
                 <Ionicons name={on ? 'checkmark-circle' : 'ellipse-outline'} size={22} color={on ? colors.primary : colors.textDim} />
@@ -120,10 +133,10 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   header: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 12, paddingTop: HEADER_TOP, paddingBottom: 12, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.glassStroke },
   hBtn: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
   hTitle: { color: c.text, fontSize: 18, fontWeight: '700' },
-  modeRow: { flexDirection: 'row', alignItems: 'center', gap: 14, paddingHorizontal: 16, paddingVertical: 14 },
+  modeRow: { flexDirection: 'row', alignItems: 'center', gap: 14, marginHorizontal: 16, marginBottom: 8, paddingHorizontal: 14, paddingVertical: 14, borderRadius: 16, backgroundColor: c.glass, borderWidth: StyleSheet.hairlineWidth, borderColor: c.glassStroke },
   modeLabel: { color: c.text, fontSize: 16, fontWeight: '600' },
   modeSub: { color: c.textDim, fontSize: 13, marginTop: 2 },
   sectionLabel: { color: c.textDim, fontSize: 12, fontWeight: '700', letterSpacing: 1, marginHorizontal: 16, marginTop: 12, marginBottom: 4 },
-  contactRow: { flexDirection: 'row', alignItems: 'center', gap: 14, paddingHorizontal: 16, paddingVertical: 10 },
+  contactRow: { flexDirection: 'row', alignItems: 'center', gap: 14, marginHorizontal: 16, marginBottom: 8, paddingHorizontal: 14, paddingVertical: 10, borderRadius: 16, backgroundColor: c.glass, borderWidth: StyleSheet.hairlineWidth, borderColor: c.glassStroke },
   contactName: { flex: 1, color: c.text, fontSize: 16, fontWeight: '500' },
 });

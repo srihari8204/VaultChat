@@ -5,7 +5,7 @@
 // Edits persist via lockSettings and apply live to an armed lock.
 
 import React from 'react';
-import { View, Text, TouchableOpacity, ScrollView, StyleSheet, Switch, Platform, Alert, Vibration } from 'react-native';
+import { View, TouchableOpacity, ScrollView, StyleSheet, Switch, Platform, Alert, Vibration } from 'react-native';
 import { Stack } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import notifee from '@notifee/react-native';
@@ -20,6 +20,7 @@ import { type LockMode } from '../lib/lock/zoneMachine';
 import {
   applyAlertSettings, testAlarm, useLockView, enableKillSafe, disableKillSafe,
 } from '../lib/lock/lockService';
+import { AppText as Text, AuroraBackground } from '../components/ui';
 
 const VOLUMES = [0.2, 0.4, 0.6, 0.8, 1];
 const GRACES = [0, 5, 10, 30, 60];
@@ -59,13 +60,14 @@ export default function LockSettingsScreen() {
 
   const Chip = ({ on, label, onPress }: { on: boolean; label: string; onPress: () => void }) => (
     <TouchableOpacity onPress={onPress}
-      style={[st.chip, { borderColor: on ? colors.primary : colors.border, backgroundColor: on ? colors.primary + '1a' : 'transparent' }]}>
+      style={[st.chip, { borderColor: on ? colors.primary : colors.glassStroke, backgroundColor: on ? colors.glass : colors.glassSoft }]}>
       <Text style={{ color: on ? colors.primary : colors.text, fontWeight: on ? '700' : '500', fontSize: 13 }}>{label}</Text>
     </TouchableOpacity>
   );
 
   return (
-    <View style={[st.screen, { backgroundColor: colors.bg }]}>
+    <View style={st.screen}>
+      <AuroraBackground />
       <Stack.Screen options={{
         headerShown: true, /* the root Stack sets headerShown:false app-wide, so the options below were inert and this screen had no back control at all */  title: 'Alarm & Alert Settings', headerTitleAlign: 'center' }} />
       <ScrollView contentContainerStyle={st.body}>
@@ -82,19 +84,19 @@ export default function LockSettingsScreen() {
         </View>
         {s.mode === 'custom' && (
           <View style={{ marginTop: 10 }}>
-            <Text style={{ color: colors.text + '88', fontSize: 12.5, marginBottom: 6 }}>Warning band (m inside the boundary)</Text>
+            <Text style={{ color: colors.textDim, fontSize: 12.5, marginBottom: 6 }}>Warning band (m inside the boundary)</Text>
             <View style={st.chips}>
               {BANDS.map((b) => <Chip key={b} on={s.customSensitivity.warningBand === b} label={`${b} m`}
                 onPress={() => setGeneral({ customSensitivity: { ...s.customSensitivity, warningBand: b } })} />)}
             </View>
-            <Text style={{ color: colors.text + '88', fontSize: 12.5, marginVertical: 6 }}>Hysteresis (m past the boundary before alarm)</Text>
+            <Text style={{ color: colors.textDim, fontSize: 12.5, marginVertical: 6 }}>Hysteresis (m past the boundary before alarm)</Text>
             <View style={st.chips}>
               {HYSTS.map((h) => <Chip key={h} on={s.customSensitivity.hysteresis === h} label={`${h} m`}
                 onPress={() => setGeneral({ customSensitivity: { ...s.customSensitivity, hysteresis: h } })} />)}
             </View>
           </View>
         )}
-        <Text style={{ color: colors.text + '77', fontSize: 12, marginTop: 6 }}>
+        <Text style={{ color: colors.textDim, fontSize: 12, marginTop: 6 }}>
           Faster modes use a wider envelope so highway-speed GPS scatter can’t false-alarm.
         </Text>
 
@@ -123,7 +125,7 @@ export default function LockSettingsScreen() {
             style={[st.row, { borderColor: colors.glassStroke }]}>
             <Ionicons name="battery-charging" size={19} color={colors.primary} />
             <Text style={[st.rowTxt, { color: colors.text }]}>Battery optimization exemption</Text>
-            <Ionicons name="chevron-forward" size={16} color={colors.text + '66'} />
+            <Ionicons name="chevron-forward" size={16} color={colors.textFaint} />
           </TouchableOpacity>
         )}
         <Text style={[st.h, { color: colors.text, marginTop: 20 }]}>Tracking frequency</Text>
@@ -132,7 +134,7 @@ export default function LockSettingsScreen() {
           <Chip on={s.cadence === 'saver'} label="Battery saver" onPress={() => setGeneral({ cadence: 'saver' })} />
           <Chip on={s.cadence === 'high'} label="High precision" onPress={() => setGeneral({ cadence: 'high' })} />
         </View>
-        <Text style={{ color: colors.text + '77', fontSize: 12, marginTop: 6 }}>
+        <Text style={{ color: colors.textDim, fontSize: 12, marginTop: 6 }}>
           Adaptive speeds up GPS only near the boundary or while moving; saver stays slow while safe; high precision always runs at navigation cadence.
         </Text>
 
@@ -149,7 +151,7 @@ export default function LockSettingsScreen() {
           {VOLUMES.map((v) => <Chip key={v} on={Math.abs(a.volume - v) < 0.01} label={`${Math.round(v * 100)}%`} onPress={() => set({ volume: v })} />)}
         </View>
         {Platform.OS === 'ios' && (
-          <Text style={{ color: colors.text + '77', fontSize: 12, marginTop: 8 }}>
+          <Text style={{ color: colors.textDim, fontSize: 12, marginTop: 8 }}>
             iOS: the alarm plays at app volume even in silent mode, but cannot exceed the system media volume.
           </Text>
         )}
@@ -171,7 +173,7 @@ export default function LockSettingsScreen() {
         <View style={st.chips}>
           {GRACES.map((g) => <Chip key={g} on={a.graceS === g} label={g === 0 ? 'Instantly' : `${g} s`} onPress={() => set({ graceS: g })} />)}
         </View>
-        <Text style={{ color: colors.text + '77', fontSize: 12, marginTop: 6 }}>
+        <Text style={{ color: colors.textDim, fontSize: 12, marginTop: 6 }}>
           Returning inside the radius within this window cancels the alarm silently.
         </Text>
 
@@ -200,20 +202,20 @@ export default function LockSettingsScreen() {
           <Chip on={false} label="🗣 Test voice" onPress={() => { try { Speech.stop(); Speech.speak(VOICE.outside, { rate: 1.0 }); } catch {} }} />
           <Chip on={false} label="〰 Test vibration" onPress={() => { try { Vibration.vibrate(VIBE_PATTERN[a.vibePattern], false); } catch {} }} />
         </View>
-        <Text style={{ color: colors.text + '77', fontSize: 12, textAlign: 'center', marginTop: 8 }}>
+        <Text style={{ color: colors.textDim, fontSize: 12, textAlign: 'center', marginTop: 8 }}>
           Plays the enabled channels for a few seconds. Nothing is written to history.
         </Text>
 
         {/* ── About ── */}
         <Text style={[st.h, { color: colors.text, marginTop: 28 }]}>About Location Lock</Text>
-        <View style={[st.about, { borderColor: colors.glassStroke, backgroundColor: colors.glassSoft }]}>
+        <View style={[st.about, { borderColor: colors.glassStroke, backgroundColor: colors.glass }]}>
           <Text style={{ color: colors.text, fontSize: 13.5, fontWeight: '700' }}>Location Lock · Navigate mini-app</Text>
-          <Text style={{ color: colors.text + '88', fontSize: 12.5, marginTop: 6, lineHeight: 18 }}>
+          <Text style={{ color: colors.textDim, fontSize: 12.5, marginTop: 6, lineHeight: 18 }}>
             Geofencing runs entirely on this device. Your coordinates and history never
             leave it — the only network call is to crazzychat’s own routing engine when
             you navigate back.
           </Text>
-          <Text style={{ color: colors.text + '66', fontSize: 11.5, marginTop: 8, lineHeight: 16 }}>
+          <Text style={{ color: colors.textFaint, fontSize: 11.5, marginTop: 8, lineHeight: 16 }}>
             Open-source components: OpenStreetMap data (ODbL) · MapLibre GL (BSD-3) ·
             Leaflet (BSD-2) · Valhalla routing (MIT) · OpenFreeMap vector basemap
             tiles (OpenMapTiles schema). Alarm sounds are generated, license-free.
@@ -225,7 +227,7 @@ export default function LockSettingsScreen() {
 }
 
 const st = StyleSheet.create({
-  screen: { flex: 1 },
+  screen: { flex: 1, backgroundColor: 'transparent' },
   body: { padding: 16, paddingBottom: 48 },
   h: { fontSize: 13, fontWeight: '700', letterSpacing: 0.3, textTransform: 'uppercase', marginBottom: 10, opacity: 0.9 },
   row: { flexDirection: 'row', alignItems: 'center', gap: 10, borderBottomWidth: StyleSheet.hairlineWidth, paddingVertical: 12 },

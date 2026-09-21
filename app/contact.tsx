@@ -6,13 +6,13 @@ import {
   ScrollView,
   StyleSheet,
   Switch,
-  Text,
   TouchableOpacity,
   View
 } from 'react-native';
 import { useTheme } from '../lib/theme';
 import { type Palette } from '../constants/theme';
 import { HEADER_TOP } from '../constants/layout';
+import { AppText as Text, AuroraBackground } from '../components/ui';
 
 function useS() {
   const { colors } = useTheme();
@@ -38,7 +38,9 @@ export default function ContactScreen() {
   ];
 
   return (
-    <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
+    <View style={styles.container}>
+      <AuroraBackground />
+    <ScrollView style={styles.scroller} showsVerticalScrollIndicator={false}>
 
       {/* Header */}
       <View style={styles.header}>
@@ -171,11 +173,13 @@ export default function ContactScreen() {
       </View>
 
     </ScrollView>
+    </View>
   );
 }
 
 const makeStyles = (c: Palette) => StyleSheet.create({
-  container: { flex: 1, backgroundColor: c.bg },
+  container: { flex: 1, backgroundColor: 'transparent' },
+  scroller: { flex: 1 },
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -193,13 +197,18 @@ const makeStyles = (c: Palette) => StyleSheet.create({
     alignItems: 'center',
     paddingVertical: 28,
     paddingHorizontal: 24,
-    backgroundColor: c.glassSoft,
+    backgroundColor: c.glass,
+    marginHorizontal: 16,
+    marginTop: 8,
+    borderRadius: 20,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: c.glassStroke,
   },
   bigAvatar: {
     width: 100,
     height: 100,
     borderRadius: 50,
-    backgroundColor: c.glassSoft,
+    backgroundColor: c.glass,
     justifyContent: 'center',
     alignItems: 'center',
     marginBottom: 8,
@@ -214,7 +223,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   },
   actionBtn: {
     alignItems: 'center',
-    backgroundColor: c.glassSoft,
+    backgroundColor: c.glass,
     borderRadius: 16,
     paddingVertical: 14,
     minWidth: 84,
@@ -227,7 +236,11 @@ const makeStyles = (c: Palette) => StyleSheet.create({
     marginTop: 10,
     paddingHorizontal: 16,
     paddingVertical: 14,
-    backgroundColor: c.glassSoft,
+    backgroundColor: c.glass,
+    marginHorizontal: 16,
+    borderRadius: 16,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: c.glassStroke,
   },
   aboutText: { color: c.text, fontSize: 15, lineHeight: 21 },
   rowBetween: {
@@ -246,7 +259,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   },
   mediaItem: {
     width: 80, height: 80,
-    backgroundColor: c.glassSoft,
+    backgroundColor: c.glass,
     borderRadius: 12,
     justifyContent: 'center',
     alignItems: 'center',

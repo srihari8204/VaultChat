@@ -1,11 +1,12 @@
 // app/finance/ledger/new.tsx — Add a Lend / Borrow ledger entry.
 
 import React, { useState } from 'react';
+import { useFinanceTheme } from '../../../components/finance/useFinanceTheme';
 import { KeyboardSafe } from '../../../components/ui';
 import { View, ScrollView, StyleSheet, Alert, Platform } from 'react-native';
 import { useRouter } from 'expo-router';
 import { DateTimePickerAndroid } from '@react-native-community/datetimepicker';
-import { FIN } from '../../../constants/financeTheme';
+import { type FinancePalette } from '../../../constants/financeTheme';
 import { FinHeader, Label, Field, Segment, Radio, Btn, DateField } from '../../../components/finance/ui';
 import { useMe } from '../../../components/finance/useMe';
 import { fmtDate, num } from '../../../utils/financeFormat';
@@ -13,6 +14,8 @@ import { insertLedger } from '../../../db/ledger';
 import type { LedgerPeriod } from '../../../utils/finance';
 
 export default function NewLedger() {
+  const FIN = useFinanceTheme();
+  const s = React.useMemo(() => makeStyles(FIN), [FIN]);
   const router = useRouter();
   const me = useMe();
 
@@ -112,7 +115,7 @@ export default function NewLedger() {
   );
 }
 
-const s = StyleSheet.create({
+const makeStyles = (FIN: FinancePalette) => StyleSheet.create({
   screen: { flex: 1, backgroundColor: FIN.bg },
   body: { padding: 16, paddingBottom: 40, alignSelf: 'center', width: '100%', maxWidth: FIN.contentMax },
   radioRow: { flexDirection: 'row', gap: 28, marginTop: 8, marginBottom: 4 },

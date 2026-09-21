@@ -21,15 +21,16 @@
 //    tick. A phone that is off in a drawer must not look like a phone that
 //    locked.
 
+import { AppText as Text } from '../components/ui/Text';
 import React, { useCallback, useState } from 'react';
 import {
-  View, Text, StyleSheet, ScrollView, ActivityIndicator, TouchableOpacity,
+  View, StyleSheet, ScrollView, ActivityIndicator, TouchableOpacity,
   Alert, TextInput, Modal, RefreshControl,
 } from 'react-native';
 import { Stack, useLocalSearchParams, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useSpaceColors, spaceHeader } from '../lib/spaces/theme';
-import type { Palette } from '../constants/theme';
+import type { SpacePalette as Palette } from '../lib/spaces/theme';
 import {
   getDevices, addDevice, getDeviceEvents, getDeviceCommands, issueDeviceCommand,
   type SpaceDevice, type DeviceEvent, type DeviceCommand,
@@ -322,7 +323,7 @@ export default function SpaceDevicesScreen() {
             <View style={s.kinds}>
               {KINDS.map((k) => (
                 <TouchableOpacity key={k.key} onPress={() => setKind(k.key)}
-                  style={[s.kind, kind === k.key && { backgroundColor: colors.primary }]}>
+                  style={[s.kind, kind === k.key && { backgroundColor: colors.brandOnLight }]}>
                   <Text style={[s.kindText, kind === k.key && { color: '#fff' }]}>{k.label}</Text>
                 </TouchableOpacity>
               ))}
@@ -337,7 +338,7 @@ export default function SpaceDevicesScreen() {
               <TouchableOpacity style={s.modalBtn} onPress={() => setAdding(false)}>
                 <Text style={s.muted}>Cancel</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={[s.modalBtn, { backgroundColor: colors.primary }]}
+              <TouchableOpacity style={[s.modalBtn, { backgroundColor: colors.brandOnLight }]}
                 onPress={onAdd} disabled={!label.trim() || busy}>
                 {busy ? <ActivityIndicator size="small" color="#fff" /> : <Text style={s.primaryText}>Add</Text>}
               </TouchableOpacity>
@@ -360,7 +361,7 @@ export default function SpaceDevicesScreen() {
               <TouchableOpacity style={s.modalBtn} onPress={() => setAsking(false)}>
                 <Text style={s.muted}>Cancel</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={[s.modalBtn, { backgroundColor: colors.primary }]}
+              <TouchableOpacity style={[s.modalBtn, { backgroundColor: colors.brandOnLight }]}
                 onPress={() => { const d = open; setAsking(false); if (d) runAction(d, 'message', msg.trim()); }}
                 disabled={!msg.trim() || busy}>
                 <Text style={s.primaryText}>Send</Text>
@@ -399,13 +400,13 @@ function resultColour(r: DeviceCommand['result'], c: Palette): string {
     case 'executed': return c.success;
     case 'failed': return c.danger;
     case 'cancelled': return c.textFaint;
-    default: return '#F59E0B';
+    default: return c.warning;
   }
 }
 function eventColour(kind: string, c: Palette): string {
   switch (kind) {
     case 'overspeed': case 'shock': return c.danger;
-    case 'left_zone': case 'disconnected': case 'powered_off': return '#F59E0B';
+    case 'left_zone': case 'disconnected': case 'powered_off': return c.warning;
     case 'entered_zone': return c.success;
     default: return c.textDim;
   }

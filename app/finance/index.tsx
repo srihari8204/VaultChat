@@ -10,11 +10,13 @@
 // accumulation via sumRupees, same totals.
 
 import React, { useCallback, useState } from 'react';
+import { useFinanceTheme } from '../../components/finance/useFinanceTheme';
+import { useTheme } from '../../lib/theme';
 import { View, Text, ScrollView, StyleSheet, StatusBar, Pressable } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { Stack, useRouter, useFocusEffect } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { FIN, TABULAR } from '../../constants/financeTheme';
+import { TABULAR, type FinancePalette } from '../../constants/financeTheme';
 import {
   HeroCard, HeroSplit, StatTile, QuickAction, TileGrid, ActionGrid, FinBody, IconBtn,
 } from '../../components/finance/ui';
@@ -36,6 +38,9 @@ const ZERO: Totals = { lent: 0, borrowed: 0, earned: 0, pending: 0, active: 0, o
 const startOfDay = (ms: number) => { const d = new Date(ms); d.setHours(0, 0, 0, 0); return d.getTime(); };
 
 export default function FinanceDashboard() {
+  const { scheme } = useTheme();
+  const FIN = useFinanceTheme();
+  const s = React.useMemo(() => makeStyles(FIN), [FIN]);
   const router = useRouter();
   const me = useMe();
   const insets = useSafeAreaInsets();
@@ -77,7 +82,7 @@ export default function FinanceDashboard() {
   return (
     <View style={s.screen}>
       <Stack.Screen options={{ headerShown: false }} />
-      <StatusBar barStyle="dark-content" backgroundColor="transparent" translucent />
+      <StatusBar barStyle={scheme === 'dark' ? 'light-content' : 'dark-content'} backgroundColor="transparent" translucent />
       <ScrollView
         contentContainerStyle={[s.scroll, { paddingTop: insets.top + 12, paddingBottom: insets.bottom + 32 }]}
         showsVerticalScrollIndicator={false}
@@ -173,7 +178,7 @@ export default function FinanceDashboard() {
   );
 }
 
-const s = StyleSheet.create({
+const makeStyles = (FIN: FinancePalette) => StyleSheet.create({
   screen: { flex: 1, backgroundColor: FIN.bg },
   scroll: { paddingHorizontal: 0 },
 
@@ -186,7 +191,7 @@ const s = StyleSheet.create({
     backgroundColor: FIN.bad, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 4,
     borderWidth: 1.5, borderColor: FIN.bgTop,
   },
-  badgeTxt: { color: '#fff', fontSize: 9.5, fontWeight: '800' },
+  badgeTxt: { color: FIN.onBrand, fontSize: 9.5, fontWeight: '800' },
 
   heroLabel: { color: 'rgba(255,255,255,0.8)', fontSize: 10.5, fontWeight: '700', letterSpacing: 0.9 },
   heroKey: { color: 'rgba(255,255,255,0.85)', fontSize: 12 },

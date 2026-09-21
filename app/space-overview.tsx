@@ -18,17 +18,19 @@
 // Business gets the blue-on-navy Business palette (useSpaceColors); school
 // keeps the app theme.
 
+import { AppText as Text } from '../components/ui/Text';
 import React, { useCallback, useMemo, useState } from 'react';
 import {
-  View, Text, StyleSheet, ScrollView, ActivityIndicator, TouchableOpacity, RefreshControl,
+  View, StyleSheet, ScrollView, ActivityIndicator, TouchableOpacity, RefreshControl,
 } from 'react-native';
 import { Stack, useLocalSearchParams, useRouter, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import type { Palette } from '../constants/theme';
+import type { SpacePalette as Palette } from '../lib/spaces/theme';
 import { BIZ_WARN, BIZ_TEAL, BIZ_GRAY } from '../constants/businessTheme';
 import { useSpaceColors, spaceHeader } from '../lib/spaces/theme';
 import { getOpsSummary, type OpsSummary } from '../lib/spaces/api';
 import Donut from '../components/spaces/Donut';
+import { useTheme } from '../lib/theme';
 import { AuroraBackground } from '../components/ui';
 
 interface Tile {
@@ -48,6 +50,9 @@ export default function SpaceOverviewScreen() {
   const params = useLocalSearchParams<{ spaceId?: string; name?: string; groupType?: string; perms?: string }>();
   const spaceId = String(params.spaceId || '');
   const colors = useSpaceColors(params.groupType);
+  const { scheme } = useTheme();
+  const warningTint = scheme === 'light' ? colors.warning : BIZ_WARN;
+  const visitorTint = scheme === 'light' ? colors.success : BIZ_TEAL;
 
   const [sum, setSum] = useState<OpsSummary | null>(null);
   const [loading, setLoading] = useState(true);
@@ -179,16 +184,16 @@ export default function SpaceOverviewScreen() {
                   <Metric c={colors} icon="people" tint={colors.primary} value={dash(w.members)} label="Total People" />
                   <Metric c={colors} icon="pulse" tint={colors.success} value={dash(w.stillIn)} label="Active Now" />
                   <Metric c={colors} icon="log-in" tint={colors.purple} value={dash(w.checkedIn)} label="Checked In" />
-                  <Metric c={colors} icon="airplane" tint={BIZ_WARN} value={dash(w.onLeave)} label="On Leave" />
+                  <Metric c={colors} icon="airplane" tint={warningTint} value={dash(w.onLeave)} label="On Leave" />
                   <Metric
                     c={colors} icon="time" tint={(w.lateToday ?? 0) > 0 ? colors.danger : BIZ_GRAY}
                     value={dash(w.lateToday)} label="Late Today"
                   />
                   <Metric
-                    c={colors} icon="hourglass" tint={w.leavePending > 0 ? BIZ_WARN : BIZ_GRAY}
+                    c={colors} icon="hourglass" tint={w.leavePending > 0 ? warningTint : BIZ_GRAY}
                     value={dash(w.leavePending)} label="Leave Requests"
                   />
-                  <Metric c={colors} icon="qr-code" tint={BIZ_TEAL} value={dash(sum.open.visitors)} label="Visitors On Site" />
+                  <Metric c={colors} icon="qr-code" tint={visitorTint} value={dash(sum.open.visitors)} label="Visitors On Site" />
                 </View>
                 {w.lateToday == null && (
                   <Text style={s.footnote}>
@@ -212,14 +217,14 @@ export default function SpaceOverviewScreen() {
                       segments={[
                         { value: w.stillIn, color: colors.success },
                         { value: checkedOut, color: colors.primary },
-                        { value: w.onLeave, color: BIZ_WARN },
+                        { value: w.onLeave, color: warningTint },
                         { value: noCheckIn, color: BIZ_GRAY },
                       ]}
                     />
                     <View style={{ flex: 1, gap: 8 }}>
                       <Legend c={colors} color={colors.success} label="Active now" value={w.stillIn} />
                       <Legend c={colors} color={colors.primary} label="Checked out" value={checkedOut} />
-                      <Legend c={colors} color={BIZ_WARN} label="On leave" value={w.onLeave} />
+                      <Legend c={colors} color={warningTint} label="On leave" value={w.onLeave} />
                       <Legend c={colors} color={BIZ_GRAY} label="No check-in" value={noCheckIn} />
                     </View>
                   </View>
@@ -303,7 +308,7 @@ export default function SpaceOverviewScreen() {
                     <Text style={s.muted}>This month</Text>
                     <View style={s.chips}>
                       <Chip c={colors} tint={colors.primary} value={sum.leaveMonth.requests} label="Requests" />
-                      <Chip c={colors} tint={BIZ_WARN} value={sum.leaveMonth.pending} label="Pending" />
+                      <Chip c={colors} tint={warningTint} value={sum.leaveMonth.pending} label="Pending" />
                       <Chip c={colors} tint={colors.success} value={sum.leaveMonth.approved} label="Approved" />
                       <Chip c={colors} tint={colors.danger} value={sum.leaveMonth.declined} label="Declined" />
                     </View>
@@ -378,7 +383,7 @@ export default function SpaceOverviewScreen() {
                 <Text style={s.sectionTitle}>QUICK ACTIONS</Text>
                 <View style={s.actions}>
                   <Action c={colors} icon="log-in" tint={colors.success} label="Check In" onPress={() => go('/space-checkin')} />
-                  <Action c={colors} icon="calendar" tint={BIZ_WARN} label="Request Leave" onPress={() => go('/space-leave')} />
+                  <Action c={colors} icon="calendar" tint={warningTint} label="Request Leave" onPress={() => go('/space-leave')} />
                   <Action c={colors} icon="clipboard" tint={colors.primary} label="Create Task" onPress={() => go('/space-tasks')} />
                   <Action c={colors} icon="people" tint={colors.purple} label="People" onPress={() => go('/space-people')} />
                 </View>
@@ -518,7 +523,7 @@ const styles = (c: Palette) => StyleSheet.create({
   chips: { flexDirection: 'row', gap: 8 },
   chip: { flex: 1, borderRadius: 12, paddingVertical: 10, alignItems: 'center', gap: 2 },
   chipValue: { fontSize: 20, fontWeight: '800' },
-  chipLabel: { color: c.textDim, fontSize: 10.5 },
+  chipLabel: { color: c.textDim, fontSize: 11 },
   actions: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   action: {
     flexGrow: 1, flexBasis: '47%', borderRadius: 14, borderWidth: 1,

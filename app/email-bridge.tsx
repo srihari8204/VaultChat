@@ -3,12 +3,13 @@
 
 import { Ionicons } from '@expo/vector-icons';
 import React, { useState, useCallback , useMemo} from 'react';
-import { View, Text, TextInput, TouchableOpacity, ScrollView, Modal, Alert, StyleSheet } from 'react-native';
+import { View, TextInput, TouchableOpacity, ScrollView, Modal, Alert, StyleSheet } from 'react-native';
 import { useTheme } from '../lib/theme';
 import { type Palette } from '../constants/theme';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Stack, useRouter } from 'expo-router';
 import { HEADER_TOP } from '../constants/layout';
+import { AppText as Text, AuroraBackground } from '../components/ui';
 
 
 // ── Mock inbox data ────────────────────────────────────────────
@@ -120,6 +121,7 @@ export default function EmailBridgeScreen() {
   return (
     <View style={styles.container}>
       <Stack.Screen options={{ headerShown: false }} />
+      <AuroraBackground />
 
       <ScrollView
         style={styles.scroll}
@@ -139,7 +141,7 @@ export default function EmailBridgeScreen() {
 
         {/* ── Info Card ───────────────────────────────── */}
         <LinearGradient
-          colors={['#0D1B3E', '#F9FAFB']}
+          colors={[colors.glass, colors.glassSoft]}
           start={{ x: 0, y: 0 }}
           end={{ x: 1, y: 1 }}
           style={styles.infoCard}
@@ -359,7 +361,7 @@ export default function EmailBridgeScreen() {
 const makeStyles = (c: Palette) => StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: c.glassSoft,
+    backgroundColor: 'transparent',
   },
   scroll: {
     flex: 1,
@@ -379,7 +381,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
     width: 40,
     height: 40,
     borderRadius: 20,
-    backgroundColor: c.glassSoft,
+    backgroundColor: c.glass,
     justifyContent: 'center',
     alignItems: 'center',
     marginRight: 12,
@@ -396,12 +398,12 @@ const makeStyles = (c: Palette) => StyleSheet.create({
     flex: 1,
   },
   encBadge: {
-    backgroundColor: c.glassSoft,
+    backgroundColor: c.glass,
     borderRadius: 8,
     paddingHorizontal: 10,
     paddingVertical: 5,
     borderWidth: 1,
-    borderColor: '#4A9FFF33',
+    borderColor: c.glassStroke,
   },
   encBadgeText: {
     color: c.accent,
@@ -425,7 +427,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
     marginRight: 12,
   },
   infoText: {
-    color: '#8899BB',
+    color: c.textDim,
     fontSize: 13,
     lineHeight: 19,
     flex: 1,
@@ -453,14 +455,14 @@ const makeStyles = (c: Palette) => StyleSheet.create({
     alignItems: 'center',
   },
   countBadgeText: {
-    color: c.text,
+    color: '#FFFFFF',
     fontSize: 12,
     fontWeight: '700',
   },
 
   // Compose
   composeCard: {
-    backgroundColor: c.bg,
+    backgroundColor: c.glass,
     borderRadius: 16,
     padding: 18,
     marginBottom: 24,
@@ -471,7 +473,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
     marginBottom: 14,
   },
   inputLabel: {
-    color: '#6B7FA3',
+    color: c.textDim,
     fontSize: 12,
     fontWeight: '600',
     marginBottom: 6,
@@ -479,7 +481,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
     letterSpacing: 0.8,
   },
   input: {
-    backgroundColor: c.glassSoft,
+    backgroundColor: c.glass,
     borderRadius: 12,
     paddingHorizontal: 14,
     paddingVertical: 12,
@@ -506,7 +508,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
 
   // Email cards
   emailCard: {
-    backgroundColor: c.bg,
+    backgroundColor: c.glass,
     borderRadius: 16,
     padding: 16,
     marginBottom: 12,
@@ -547,7 +549,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
     fontWeight: '600',
   },
   emailTime: {
-    color: '#5A6E8F',
+    color: c.textDim,
     fontSize: 12,
     marginTop: 2,
   },
@@ -594,7 +596,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
     justifyContent: 'flex-end',
   },
   modalContainer: {
-    backgroundColor: c.bg,
+    backgroundColor: c.glass,
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,
     maxHeight: '85%',
@@ -619,7 +621,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
     fontWeight: '700',
   },
   modalClose: {
-    color: '#5A6E8F',
+    color: c.textDim,
     fontSize: 20,
     fontWeight: '600',
     padding: 4,
@@ -632,7 +634,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
     marginBottom: 12,
   },
   modalLabel: {
-    color: '#5A6E8F',
+    color: c.textDim,
     fontSize: 12,
     fontWeight: '600',
     textTransform: 'uppercase',
@@ -645,13 +647,13 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   },
   modalDivider: {
     height: 1,
-    backgroundColor: c.glassSoft,
+    backgroundColor: c.glass,
     marginVertical: 16,
   },
 
   // Encrypted block
   encryptedBlock: {
-    backgroundColor: c.glassSoft,
+    backgroundColor: c.glass,
     borderRadius: 14,
     padding: 20,
     alignItems: 'center',
@@ -663,7 +665,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
     marginBottom: 12,
   },
   encryptedBlockText: {
-    color: '#8899BB',
+    color: c.textDim,
     fontSize: 14,
     textAlign: 'center',
     lineHeight: 20,
@@ -690,7 +692,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
     width: '80%',
     height: 4,
     borderRadius: 2,
-    backgroundColor: c.glassSoft,
+    backgroundColor: c.glass,
     overflow: 'hidden',
   },
   progressFill: {

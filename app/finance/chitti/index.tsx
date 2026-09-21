@@ -1,11 +1,12 @@
 // app/finance/chitti/index.tsx — Lucky Draw group list with progress + status.
 
 import React, { useCallback, useMemo, useState } from 'react';
+import { useFinanceTheme } from '../../../components/finance/useFinanceTheme';
 import { View, Text, ScrollView, StyleSheet, TouchableOpacity } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { FIN } from '../../../constants/financeTheme';
+import { type FinancePalette } from '../../../constants/financeTheme';
 import { FinHeader, Segment, ProgressRing, EmptyState, LoadingState, ErrorState } from '../../../components/finance/ui';
 import { useLoadStatus } from '../../../components/finance/useLoad';
 import { useMe } from '../../../components/finance/useMe';
@@ -15,6 +16,8 @@ import { listGroups, listCollections, type ChittiGroup } from '../../../db/chitt
 type Tab = 'active' | 'closed' | 'draft';
 
 export default function ChittiList() {
+  const FIN = useFinanceTheme();
+  const s = React.useMemo(() => makeStyles(FIN), [FIN]);
   // s.fab lives in a module-scope StyleSheet, so a literal bottom there
   // would freeze at launch and never follow a rotation. Read the inset from the
   // hook and apply it at the element instead (2026-09-17).
@@ -84,14 +87,14 @@ export default function ChittiList() {
         <View style={{ height: 90 }} />
       </ScrollView>
       <TouchableOpacity style={[s.fab, { bottom: insets.bottom + 20 }]} activeOpacity={0.9} onPress={() => router.push('/finance/chitti/new')}>
-        <Ionicons name="add" size={22} color="#fff" />
+        <Ionicons name="add" size={22} color={FIN.onBrand} />
         <Text style={s.fabTxt}>New Lucky Draw Group</Text>
       </TouchableOpacity>
     </View>
   );
 }
 
-const s = StyleSheet.create({
+const makeStyles = (FIN: FinancePalette) => StyleSheet.create({
   screen: { flex: 1, backgroundColor: FIN.bg },
   filterWrap: { paddingHorizontal: 16, paddingTop: 12, alignSelf: 'center', width: '100%', maxWidth: FIN.contentMax },
   body: { padding: 16, paddingTop: 12, alignSelf: 'center', width: '100%', maxWidth: FIN.contentMax },
@@ -100,5 +103,5 @@ const s = StyleSheet.create({
   sub: { color: FIN.sub, fontSize: 12.5, marginTop: 2 },
   chit: { color: FIN.brandDeep, fontSize: 12, fontWeight: '700', marginTop: 3 },
   fab: { position: 'absolute', left: 16, right: 16, bottom: 20, flexDirection: 'row', gap: 8, backgroundColor: FIN.brandDeep, borderRadius: 14, paddingVertical: 15, alignItems: 'center', justifyContent: 'center', elevation: 6 },
-  fabTxt: { color: '#fff', fontSize: 15, fontWeight: '800' },
+  fabTxt: { color: FIN.onBrand, fontSize: 15, fontWeight: '800' },
 });

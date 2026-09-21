@@ -23,9 +23,10 @@
 // hard: the person you most want in your circle is almost always already in
 // your chat list.
 
+import { AppText as Text } from '../components/ui/Text';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  View, Text, TextInput, FlatList, TouchableOpacity, StyleSheet,
+  View, TextInput, FlatList, TouchableOpacity, StyleSheet,
   ActivityIndicator, Alert, Share,
 } from 'react-native';
 import { useRouter, Stack, useLocalSearchParams } from 'expo-router';
@@ -241,7 +242,7 @@ export default function FamilyAddScreen() {
       <TouchableOpacity
         onPress={add}
         disabled={!selected.size || busy}
-        style={[s.cta, { backgroundColor: selected.size && !busy ? colors.primary : colors.border }]}
+        style={[s.cta, { backgroundColor: selected.size && !busy ? colors.brandOnLight : colors.border }]}
       >
         {busy
           ? <ActivityIndicator color="#fff" />
@@ -280,11 +281,11 @@ const makeStyles = (c: Palette) => StyleSheet.create({
     borderWidth: 2, borderColor: c.glassStroke,
     alignItems: 'center', justifyContent: 'center',
   },
-  checkSel: { backgroundColor: c.primary, borderColor: c.primary },
+  checkSel: { backgroundColor: c.brandOnLight, borderColor: c.primary },
   empty: { alignItems: 'center', padding: 32, gap: 10 },
   emptyTxt: { color: c.textDim, fontSize: 13.5, textAlign: 'center', lineHeight: 19 },
-  errorBar: { backgroundColor: '#FF3C6E22', padding: 10, marginHorizontal: 14, borderRadius: 10 },
-  errorTxt: { color: '#FF3C6E', fontSize: 12.5 },
+  errorBar: { backgroundColor: c.danger + '22', padding: 10, marginHorizontal: 14, borderRadius: 10 },
+  errorTxt: { color: c.danger, fontSize: 12.5 },
   codeRow: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
     paddingVertical: 14, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: c.glassStroke,

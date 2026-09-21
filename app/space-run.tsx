@@ -19,14 +19,15 @@
 //
 // Arrival is a WINDOW, never a single time. See lib/spaces/runs.ts for why.
 
+import { AppText as Text } from '../components/ui/Text';
 import React, { useCallback, useMemo, useState } from 'react';
 import {
-  View, Text, StyleSheet, ScrollView, ActivityIndicator, TouchableOpacity, Alert,
+  View, StyleSheet, ScrollView, ActivityIndicator, TouchableOpacity, Alert,
 } from 'react-native';
 import { Stack, useLocalSearchParams, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useSpaceColors, spaceHeader } from '../lib/spaces/theme';
-import type { Palette } from '../constants/theme';
+import type { SpacePalette as Palette } from '../lib/spaces/theme';
 import { getRun, getRunEvents } from '../lib/spaces/api';
 import { subscribeRun, type RunPing } from '../lib/spaces/runSession';
 import { haversine, type LatLng } from '../lib/nav/geo';
@@ -198,7 +199,7 @@ export default function SpaceRunScreen() {
         <Row icon="ellipse" label="Status" value={statusLabel(run)} colors={colors} />
         {run.stale && active && (
           <View style={s.warn}>
-            <Ionicons name="cloud-offline-outline" size={16} color="#F59E0B" />
+            <Ionicons name="cloud-offline-outline" size={16} color={colors.warning} />
             <Text style={s.warnText}>
               This vehicle has stopped reporting. Its last known position may be out of date.
             </Text>

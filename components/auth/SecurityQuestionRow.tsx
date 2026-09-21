@@ -2,15 +2,13 @@
 // a dropdown of still-available questions + an answer field. The parent excludes
 // codes already chosen in other rows so the same question can't be picked twice.
 //
-// ALWAYS DARK, like its only caller. app/onboard-security.tsx stands on the
-// night ground (constants/authTheme.ts) and these rows ARE that screen's
-// content — reading the app palette here would paint dark-on-dark text over the
-// sky in light mode. See the always-dark note in components/ui/Brand.tsx.
+// Follows the same selected appearance as its parent auth screen.
 
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { SECURITY_QUESTION_POOL, questionLabel } from '../../constants/securityQuestionPool';
-import { AUTH } from '../../constants/authTheme';
+import { type AuthPalette } from '../../constants/authTheme';
+import { useAuthTheme } from '../../lib/useAuthTheme';
 
 export function SecurityQuestionRow({
   index, selectedCode, answer, excludeCodes, onSelect, onAnswer,
@@ -22,6 +20,8 @@ export function SecurityQuestionRow({
   onSelect: (code: string) => void;
   onAnswer: (text: string) => void;
 }) {
+  const AUTH = useAuthTheme();
+  const s = useMemo(() => makeStyles(AUTH), [AUTH]);
   const [open, setOpen] = useState(false);
 
   const available = SECURITY_QUESTION_POOL.filter(q => q.code === selectedCode || !excludeCodes.includes(q.code));
@@ -77,7 +77,7 @@ export function SecurityQuestionRow({
   );
 }
 
-const s = StyleSheet.create({
+const makeStyles = (AUTH: AuthPalette) => StyleSheet.create({
   block: { marginBottom: 16 },
   num: { color: AUTH.dim, fontSize: 11, fontWeight: '800', letterSpacing: 1, marginBottom: 6 },
   // These sit INSIDE the screen's glass card, so the fill is the fainter

@@ -10,16 +10,10 @@
 // SIM for. The number is the account now; email is optional recovery info
 // collected two screens later. See the header of lib/onboarding.ts.
 //
-// THE SCREEN IS THE SPLASH, CONTINUED.
-//
-// It stands on AuthSky — the same #010628 ground and the same blue/violet
-// lighting as assets/images/splash.png — so the hand-off from the native splash
-// is a form fading in over artwork that never moved, rather than a cut to a
-// different screen. That is also why nothing here reads the app palette: see
-// the always-dark note in components/ui/Brand.tsx.
+// Mounted auth screens follow the selected appearance; native splash artwork is unchanged.
 
 import { Stack, useRouter } from 'expo-router';
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import {
   ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, Text, View,
 } from 'react-native';
@@ -28,9 +22,12 @@ import { BRAND_GRADIENT_CTA } from '../constants/theme';
 import { PhoneField, toE164 } from '../components/auth/PhoneField';
 import { lookupUser, onboarding, sendPhoneOtp, onboardingError } from '../lib/onboarding';
 import { AuthSky, BrandMark, KeyboardSafe } from '../components/ui';
-import { AUTH } from '../constants/authTheme';
+import { type AuthPalette } from '../constants/authTheme';
+import { useAuthTheme } from '../lib/useAuthTheme';
 
 export default function OnboardLanding() {
+  const AUTH = useAuthTheme();
+  const s = useMemo(() => makeStyles(AUTH), [AUTH]);
   const router = useRouter();
 
   const [dialCode, setDialCode] = useState('+91');
@@ -109,7 +106,7 @@ export default function OnboardLanding() {
   );
 }
 
-const s = StyleSheet.create({
+const makeStyles = (AUTH: AuthPalette) => StyleSheet.create({
   screen: { flex: 1, backgroundColor: 'transparent' },
   body: { flexGrow: 1, padding: 24, paddingTop: 64, paddingBottom: 40, justifyContent: 'center' },
 
