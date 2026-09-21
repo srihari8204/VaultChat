@@ -20,8 +20,10 @@
 package routes
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -29,8 +31,40 @@ import (
 
 	"vaultchat/backend-go/internal/db"
 	"vaultchat/backend-go/internal/msg91"
+	"vaultchat/backend-go/internal/redisx"
 	"vaultchat/backend-go/internal/vault"
 )
+
+// postFrom is post() with a caller address.
+//
+// NEEDED SINCE THE SEND LIMITERS STOPPED FAILING OPEN. httptest.NewRequest
+// hands every request the same RemoteAddr, so with no Redis the per-IP bucket
+// is one in-process counter SHARED BY THE WHOLE PACKAGE — ten sends anywhere in
+// this file would start 429-ing an unrelated test that happened to run later.
+// One IP per test keeps each test's bucket its own.
+func postFrom(h http.HandlerFunc, ip string, body map[string]any) (int, map[string]any) {
+	b, _ := json.Marshal(body)
+	r := httptest.NewRequest("POST", "/", bytes.NewReader(b))
+	r.Header.Set("Content-Type", "application/json")
+	r.RemoteAddr = ip + ":40000"
+	w := httptest.NewRecorder()
+	h(w, r)
+	var out map[string]any
+	_ = json.Unmarshal(w.Body.Bytes(), &out)
+	return w.Code, out
+}
+
+// phoneHourlyRemaining charges the per-number hourly bucket once and reports
+// what is left. There is no read-only peek in redisx, and one charge is enough
+// to tell a refunded bucket (2 left) from a spent one (1 left).
+func phoneHourlyRemaining(t *testing.T, phone string) int64 {
+	t.Helper()
+	lookup, err := vault.PhoneLookup(phone)
+	if err != nil {
+		t.Fatalf("PhoneLookup: %v", err)
+	}
+	return redisx.ConsumeSecure(context.Background(), authPhoneHourKey(lookup), 3, 3600).Remaining
+}
 
 // phoneTestEnv gives vault a master key and pepper so the lookup/ticket
 // primitives work without a deployment's secrets.
@@ -202,8 +236,7 @@ func TestSendOtpPhoneRateLimitCarriesRetryAfter(t *testing.T) {
 	const phone = "+919876500001"
 
 	// No MSG91 credentials and no dev opt-in: the handler answers 503 rather
-	// than pretending — which is the point of task 5 and is asserted below. The
-	// limiter runs FIRST either way, so the 4th call is still a 429.
+	// than pretending — which is the point of task 5 and is asserted below.
 	t.Setenv("MSG91_AUTH_KEY", "")
 	t.Setenv("MSG91_WIDGET_ID", "")
 	t.Setenv("ALLOW_DEV_OTP", "")
@@ -211,7 +244,7 @@ func TestSendOtpPhoneRateLimitCarriesRetryAfter(t *testing.T) {
 	var status int
 	var body map[string]any
 	for i := 0; i < 5; i++ {
-		status, body = post(authOnboardSendOtpPhone, map[string]any{"phone": phone})
+		status, body = postFrom(authOnboardSendOtpPhone, "198.51.100.11", map[string]any{"phone": phone})
 		if status == 429 {
 			break
 		}
@@ -232,6 +265,162 @@ func TestSendOtpPhoneRateLimitCarriesRetryAfter(t *testing.T) {
 	if !ok || ra <= 0 {
 		t.Errorf("429 envelope has no usable retryAfter (%v) — the app cannot show 'resend in Ns'", env["retryAfter"])
 	}
+	// THE 429 MUST BE THE COOLDOWN, NOT THE HOURLY CAP. This test used to be
+	// indifferent about which limit fired, because the old code charged all
+	// three before calling the provider and three 503s really did burn the
+	// hour's allowance. Now a failed send refunds the hourly bucket, so the only
+	// limit that can still be refusing at this point is the 30s one — a
+	// retryAfter above that width would mean the refund silently stopped
+	// working and the user is locked out for an hour over our outage.
+	if ra > authPhoneResendSec+1 {
+		t.Errorf("429 retryAfter = %v — that is the HOURLY cap, not the %ds cooldown: a failed send is still spending the hour's allowance", ra, authPhoneResendSec)
+	}
+}
+
+// ── 4b. a send that never left must not cost the user an attempt ───────
+
+// Observed in production: send-otp-phone returned 503 (MSG91 unconfigured) and
+// the next resend answered 429 retryAfter:29 — the user was charged for an SMS
+// that was never sent. Three provider blips in an hour locked a real person out
+// for an hour having received nothing.
+func TestFailedSendRefundsHourlyAllowanceButNotCooldown(t *testing.T) {
+	phoneTestEnv(t)
+	const phone = "+919876500003"
+	t.Setenv("MSG91_AUTH_KEY", "")
+	t.Setenv("MSG91_WIDGET_ID", "")
+	t.Setenv("ALLOW_DEV_OTP", "")
+
+	if status, body := postFrom(authOnboardSendOtpPhone, "198.51.100.12", map[string]any{"phone": phone}); status != http.StatusServiceUnavailable {
+		t.Fatalf("send with no provider: want 503, got %d (%v)", status, body)
+	}
+
+	// Refunded, so the probe below is the FIRST charge in the window: 3 - 1 = 2.
+	// Unrefunded it would be the second and leave 1.
+	if rem := phoneHourlyRemaining(t, phone); rem != 2 {
+		t.Errorf("hourly allowance after a failed send leaves %d of 3 — the undelivered code was charged to the user", rem)
+	}
+
+	// THE COOLDOWN MUST STILL BE SPENT. It is the only thing standing between a
+	// double-tapped button and free sends, and a cooldown that any failure
+	// refunds is not a cooldown at all — the failing case is exactly when a user
+	// taps fastest.
+	status, body := postFrom(authOnboardResendOtpPhone, "198.51.100.12", map[string]any{"phone": phone})
+	if status != 429 {
+		t.Fatalf("resend immediately after a failed send: want 429 (cooldown still charged), got %d (%v) — the refund gave back the cooldown too", status, body)
+	}
+}
+
+// ── 4c. the send limits may not evaporate when Redis does ──────────────
+
+// These tests run with redisx.Client == nil, i.e. exactly the Redis-is-down
+// case. Under the old redisx.Consume the per-number and per-IP hourly limits
+// returned Allowed unconditionally there, so the only surviving limit was the
+// 30s cooldown: one host could walk a list of numbers at 2/minute each, in
+// parallel, forever — someone else's handset and our SMS bill on the far side.
+//
+// Distinct numbers on purpose: that clears the per-number cooldown and hourly
+// buckets, leaving the per-IP cap as the only thing that can refuse. Note the
+// per-IP bucket is deliberately NOT refunded on a failed send — otherwise a
+// caller who can make the provider fail gets an unmetered channel.
+func TestPhoneSendPerIPLimitHoldsWithoutRedis(t *testing.T) {
+	phoneTestEnv(t)
+	t.Setenv("MSG91_AUTH_KEY", "")
+	t.Setenv("MSG91_WIDGET_ID", "")
+	t.Setenv("ALLOW_DEV_OTP", "")
+	if redisx.Client != nil {
+		t.Skip("this test is about the no-Redis fallback")
+	}
+
+	const ip = "198.51.100.13"
+	for i := 0; i < 10; i++ {
+		phone := fmt.Sprintf("+9198765610%02d", i)
+		if status, body := postFrom(authOnboardSendOtpPhone, ip, map[string]any{"phone": phone}); status != http.StatusServiceUnavailable {
+			t.Fatalf("send %d to a fresh number: want 503, got %d (%v)", i+1, status, body)
+		}
+	}
+	status, body := postFrom(authOnboardSendOtpPhone, ip, map[string]any{"phone": "+919876561099"})
+	if status != 429 {
+		t.Fatalf("11th send from one host: want 429, got %d (%v) — the per-IP cap is failing OPEN with Redis down, which is unmetered SMS from a single address", status, body)
+	}
+	env, _ := body["error"].(map[string]any)
+	if ra, _ := env["retryAfter"].(float64); ra <= 0 {
+		t.Errorf("per-IP 429 has no retryAfter: %v", env)
+	}
+}
+
+// ── 4d. "call me with the code" must not silently send a text ──────────
+
+// MSG91's widget API puts channel selection on /retryOtp ONLY; /sendOtp takes
+// widgetId + identifier and nothing else. So once the attempt behind the reqId
+// has expired there is nothing to retry, and a voice or WhatsApp resend can
+// only go out as a fresh SMS.
+//
+// That is a real limitation and the response has to admit it: the user pressed
+// "Call me with the code" precisely BECAUSE the SMS is not arriving, so another
+// silent SMS reads as a dead button. Asserted on authPhoneSent directly — it
+// owns the contract, and the handler path through it needs a live Redis to
+// reach (GetKey has no client here).
+func TestResendReportsTheChannelItActuallyUsed(t *testing.T) {
+	// Fell back: say so, and say what was asked for.
+	w := httptest.NewRecorder()
+	authPhoneSent(w, "sms", "voice")
+	var body map[string]any
+	_ = json.Unmarshal(w.Body.Bytes(), &body)
+	if body["channel"] != "sms" {
+		t.Errorf("channel = %v, want the channel that carried the code", body["channel"])
+	}
+	if body["channelFallback"] != true || body["requestedChannel"] != "voice" {
+		t.Errorf("a voice request answered by SMS is indistinguishable from a voice call: %v", body)
+	}
+
+	// Honoured: no fallback flag, or the client shows an apology for nothing.
+	// Fresh map — json.Unmarshal MERGES into a non-nil one, so reusing `body`
+	// would carry the fallback flag over from above and pass by accident.
+	w = httptest.NewRecorder()
+	authPhoneSent(w, "voice", "voice")
+	var ok map[string]any
+	_ = json.Unmarshal(w.Body.Bytes(), &ok)
+	if ok["channel"] != "voice" || ok["channelFallback"] != nil {
+		t.Errorf("a voice resend that worked is being reported as a fallback: %v", ok)
+	}
+
+	// The channel words the app sends must map to MSG91's magic numbers, and an
+	// unknown one falls back to SMS rather than erroring mid-"didn't get it?".
+	for in, wantName := range map[string]string{"call": "voice", "voice": "voice", "WhatsApp": "whatsapp", "wa": "whatsapp", "": "sms", "carrier pigeon": "sms"} {
+		code, name := authPhoneChannel(in)
+		if name != wantName {
+			t.Errorf("authPhoneChannel(%q) named %q, want %q", in, name, wantName)
+		}
+		if name == "sms" && code != msg91.ChannelSMS || name == "voice" && code != msg91.ChannelVoice || name == "whatsapp" && code != msg91.ChannelWhatsApp {
+			t.Errorf("authPhoneChannel(%q) = %d, which is not the %s channel", in, code, name)
+		}
+	}
+}
+
+// ── 4e. the E.164 guard belongs on every door, not just the OTP ones ───
+
+// /auth/lookup and /auth/profile/init hashed whatever they were given, so
+// "9876543210" was a DIFFERENT identity from "+919876543210". It failed closed
+// (the ticket is minted over the E.164 form and would not verify against the
+// other hash) so it cost a confusing refusal rather than a wrong account — but
+// a number-shaped identity system should refuse the wrong shape at the door.
+//
+// No database: both handlers validate before their first query, so a nil
+// db.Pool is never reached. If that ordering is ever inverted this panics
+// rather than quietly passing.
+func TestLookupAndProfileInitRequireE164(t *testing.T) {
+	phoneTestEnv(t)
+
+	for _, bad := range []string{"9876543210", "+0123456789", "+1234567", "not a phone", ""} {
+		if status, body := post(authLookup, map[string]any{"phone": bad}); status != 400 {
+			t.Errorf("lookup(%q): got %d (%v), want 400 — a non-E.164 number is a second identity for the same person", bad, status, body)
+		}
+		if status, body := post(authProfileInit, map[string]any{
+			"phone": bad, "firstName": "X", "dob": "1990-01-01",
+		}); status != 400 {
+			t.Errorf("profile/init(%q): got %d (%v), want 400", bad, status, body)
+		}
+	}
 }
 
 // The cooldown is charged before the hourly cap, so a double-tap costs a
@@ -244,10 +433,10 @@ func TestPhoneResendCooldownRefusesImmediateRetry(t *testing.T) {
 	t.Setenv("ALLOW_DEV_OTP", "")
 	const phone = "+919876500002"
 
-	if status, body := post(authOnboardSendOtpPhone, map[string]any{"phone": phone}); status != http.StatusServiceUnavailable {
+	if status, body := postFrom(authOnboardSendOtpPhone, "198.51.100.14", map[string]any{"phone": phone}); status != http.StatusServiceUnavailable {
 		t.Fatalf("first send: want 503 with no provider configured, got %d (%v) — a missing provider must never look like success", status, body)
 	}
-	status, body := post(authOnboardResendOtpPhone, map[string]any{"phone": phone, "channel": "voice"})
+	status, body := postFrom(authOnboardResendOtpPhone, "198.51.100.14", map[string]any{"phone": phone, "channel": "voice"})
 	if status != 429 {
 		t.Fatalf("resend one second after send: want 429 (cooldown), got %d (%v)", status, body)
 	}

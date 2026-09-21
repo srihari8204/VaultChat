@@ -37,8 +37,15 @@ import (
 )
 
 func RegisterAuth(mux *http.ServeMux) {
-	mux.HandleFunc("POST /auth/send-otp", authSendOtp)
-	mux.HandleFunc("POST /auth/verify-otp", authVerifyOtp)
+	// POST /auth/send-otp + POST /auth/verify-otp are GONE (2026-09-21). They were
+	// the original email login — OTP an address, get a session, and an account if
+	// none existed. Sign-in is mobile-number-only now and the last client caller
+	// (authService.sendOTP/verifyOTP) has been deleted, so all that was left on
+	// production was an unauthenticated, session-minting second front door keyed
+	// on an email address, with none of the registration-lock or phone-ownership
+	// checks the current flow enforces. /auth/onboard/{send,verify}-otp below is
+	// NOT the same thing: it proves an OPTIONAL recovery address and returns a
+	// ticket, never tokens.
 	mux.HandleFunc("POST /auth/google", authGoogle)
 	mux.HandleFunc("POST /auth/refresh", authRefresh)
 	mux.HandleFunc("POST /auth/logout", authLogout)
@@ -605,62 +612,6 @@ func authSendOTPSMS(phone, code string) error {
 	return nil
 }
 
-// ── POST /auth/send-otp ────────────────────────────────────────────────
-
-func authSendOtp(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
-	var b struct {
-		Email any `json:"email"`
-	}
-	_ = httpx.Body(r, &b)
-	e := authNormalizeEmail(b.Email)
-	if e == "" {
-		httpx.Err(w, 400, "Invalid email")
-		return
-	}
-
-	perEmail := redisx.Consume(ctx, "otp:email:"+e, 3, 3600)
-	if !perEmail.Allowed {
-		httpx.Err(w, 429, "Too many requests. Try again later.",
-			map[string]any{"retryAfter": perEmail.ResetInSec})
-		return
-	}
-	perIP := redisx.Consume(ctx, "otp:ip:"+authClientIP(r), 10, 3600)
-	if !perIP.Allowed {
-		httpx.Err(w, 429, "Too many requests. Try again later.",
-			map[string]any{"retryAfter": perIP.ResetInSec})
-		return
-	}
-
-	code := genSyncCode()
-	codeHash, err := authHashOTP(code)
-	if err != nil {
-		httpx.Err(w, 500, "Failed to send code")
-		return
-	}
-	err = authTx(ctx, func(tx pgx.Tx) error {
-		if _, err := tx.Exec(ctx,
-			`UPDATE otp_codes SET consumed_at = NOW()
-	         WHERE email = $1 AND consumed_at IS NULL`, e); err != nil {
-			return err
-		}
-		_, err := tx.Exec(ctx,
-			`INSERT INTO otp_codes (email, code_hash, expires_at)
-	         VALUES ($1, $2, NOW() + ($3 || ' seconds')::INTERVAL)`,
-			e, codeHash, strconv.Itoa(authOtpTTLSec))
-		return err
-	})
-	if err != nil {
-		httpx.Err(w, 500, "Failed to send code")
-		return
-	}
-	if err := authSendOTPEmail(e, code); err != nil {
-		httpx.Err(w, 500, "Failed to send code")
-		return
-	}
-	httpx.JSON(w, 200, map[string]any{"ok": true})
-}
-
 // ── OTP attempt accounting ─────────────────────────────────────────────
 
 // authOtpVerifyGate bounds guessing on a verify endpoint. A 6-digit code is a
@@ -725,95 +676,6 @@ func authOtpExhausted(ctx context.Context, w http.ResponseWriter, otpID int64) {
 		return
 	}
 	httpx.Err(w, 429, "Too many attempts. Request a new code.")
-}
-
-// ── POST /auth/verify-otp ──────────────────────────────────────────────
-
-func authVerifyOtp(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
-	var b struct {
-		Email any `json:"email"`
-		Otp   any `json:"otp"`
-		Name  any `json:"name"`
-	}
-	_ = httpx.Body(r, &b)
-	e := authNormalizeEmail(b.Email)
-	code := strings.TrimSpace(authStr(b.Otp))
-	var namePtr *string
-	if name := strings.TrimSpace(authStr(b.Name)); name != "" {
-		namePtr = &name
-	}
-
-	if e == "" {
-		httpx.Err(w, 400, "Invalid email")
-		return
-	}
-	if !sixDigitsRe.MatchString(code) {
-		httpx.Err(w, 400, "OTP must be 6 digits")
-		return
-	}
-	if !authOtpVerifyGate(w, r, "verify-otp", e) {
-		return
-	}
-
-	var otpID int64
-	var codeHash string
-	var expiresAt time.Time
-	var attempts int
-	err := db.Pool.QueryRow(ctx,
-		`SELECT id, code_hash, expires_at, attempts
-	     FROM otp_codes
-	     WHERE email = $1 AND consumed_at IS NULL AND expires_at > NOW()
-	     ORDER BY id DESC
-	     LIMIT 1`, e).Scan(&otpID, &codeHash, &expiresAt, &attempts)
-	if err != nil {
-		if db.NoRows(err) {
-			httpx.Err(w, 400, "OTP expired or not found. Request a new one.")
-		} else {
-			httpx.Err(w, 500, "Verification failed")
-		}
-		return
-	}
-
-	if attempts >= authOtpMaxAttempts {
-		authOtpExhausted(ctx, w, otpID)
-		return
-	}
-
-	// Dev-only fixed OTP bypass. It now takes TWO variables (see
-	// authDevOtpMatches): an inherited DEV_OTP on its own no longer opens it.
-	match := authDevOtpMatches(code) || authVerifyOTP(code, codeHash)
-	if !match {
-		spent, err := authOtpBumpAttempts(ctx, otpID)
-		if err != nil {
-			httpx.Err(w, 500, "Verification failed")
-			return
-		}
-		if spent {
-			authOtpExhausted(ctx, w, otpID)
-			return
-		}
-		httpx.Err(w, 400, "Invalid code")
-		return
-	}
-
-	if _, err := db.Pool.Exec(ctx,
-		`UPDATE otp_codes SET consumed_at = NOW() WHERE id = $1`, otpID); err != nil {
-		httpx.Err(w, 500, "Verification failed")
-		return
-	}
-
-	user, isNewUser, err := authFindOrCreateUser(ctx, e, namePtr, nil, "email")
-	if err != nil {
-		httpx.Err(w, 500, "Verification failed")
-		return
-	}
-	access, refresh, err := authIssueTokens(ctx, r, user.ID, user.Email)
-	if err != nil {
-		httpx.Err(w, 500, "Verification failed")
-		return
-	}
-	httpx.JSON(w, 200, authSessionResp{access, refresh, user.public(), isNewUser})
 }
 
 // ── POST /auth/google ──────────────────────────────────────────────────
@@ -1557,13 +1419,17 @@ func authLookup(w http.ResponseWriter, r *http.Request) {
 	}
 	_ = httpx.Body(r, &b)
 	email := vault.NormalizeEmail(authStr(b.Email))
-	phone := vault.NormalizePhone(authStr(b.Phone))
+	// authPhoneE164, not bare vault.NormalizePhone: the shape guard belongs on
+	// every door into the lookup hash, not just the OTP ones. Without it
+	// "9876543210" hashes to a different account than "+919876543210" and the
+	// caller is told, truthfully and uselessly, that no such account exists.
+	phone := authPhoneE164(b.Phone)
 	// THE NUMBER IS THE IDENTITY. This used to demand both, which made the
 	// mobile-first sign-in screen impossible to serve: it has a number and
 	// nothing else, and email is recovery-only now. Email stays accepted so the
 	// older client — which sends the pair — keeps getting the same answers.
 	if phone == "" {
-		authEnvErr(w, 400, "bad_request", "phone is required")
+		authEnvErr(w, 400, "bad_request", "A valid mobile number is required")
 		return
 	}
 
@@ -1665,7 +1531,10 @@ func authProfileInit(w http.ResponseWriter, r *http.Request) {
 	}
 	_ = httpx.Body(r, &b)
 	email := vault.NormalizeEmail(authStr(b.Email))
-	phone := vault.NormalizePhone(authStr(b.Phone))
+	// Same shape guard as /auth/lookup and the OTP endpoints — see authPhoneE164.
+	// A ticket is minted over the E.164 form, so a non-E.164 body here could only
+	// ever fail the ticket check; refusing it up front says WHY.
+	phone := authPhoneE164(b.Phone)
 	firstName := strings.TrimSpace(authStr(b.FirstName))
 	lastName := strings.TrimSpace(authStr(b.LastName))
 	dob := strings.TrimSpace(authStr(b.Dob))
@@ -1678,7 +1547,7 @@ func authProfileInit(w http.ResponseWriter, r *http.Request) {
 	// uq_users_phone_lookup is a partial unique index, so a row with no email is
 	// a first-class account, not a degraded one.
 	if phone == "" || firstName == "" || dob == "" {
-		authEnvErr(w, 400, "bad_request", "phone, firstName and dob are required")
+		authEnvErr(w, 400, "bad_request", "A valid mobile number, firstName and dob are required")
 		return
 	}
 	age, ok := authAgeFromDob(dob)

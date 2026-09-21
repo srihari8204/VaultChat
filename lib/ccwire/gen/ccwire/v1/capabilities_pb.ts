@@ -9,7 +9,7 @@ import { Message, proto3 } from "@bufbuild/protobuf";
 /**
  * Capabilities are negotiated by INTERSECTION. A capability absent from
  * either side is inactive.
- * 
+ *
  * NO CAPABILITY MAY WEAKEN CRYPTOGRAPHY. There is deliberately no
  * "legacy_crypto", no "plaintext_fallback", no "skip_verification"
  * capability, and none may ever be added: a transport negotiation is
@@ -70,13 +70,13 @@ export class Capabilities extends Message<Capabilities> {
    * This peer ACCEPTS typed app-domain bodies inbound (typing_state 81,
    * viewer_state 82, receipt 52, cursor_sync 64, …) instead of the same events
    * wrapped as app_event (100) JSON.
-   * 
+   *
    * IT IS NOT app_events_v1 INVERTED. Field 8 says "I speak app_event JSON";
    * this says "I also decode the typed bodies". A peer may set both, and
    * during the migration every peer does: app_event stays the fallback until
    * typed coverage is complete. Gating typed emit on field 8 would have been
    * repurposing a published flag to mean its own opposite.
-   * 
+   *
    * Emit is gated on the OTHER side's bit, per the intersection rule above: a
    * server that omits this keeps receiving app_event JSON, and an old server
    * omits it by construction. Nothing is guessed — a peer never sends a typed

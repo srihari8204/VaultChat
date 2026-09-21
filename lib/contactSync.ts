@@ -33,9 +33,17 @@ export type VaultContact = {
   online?:      boolean;
 };
 
+// A CACHE, not a source of truth: a truncated blob (killed mid-write, disk
+// full) must read as "nothing cached yet" so the caller re-fetches, never as a
+// throw the caller has no way to recover from. Array.isArray as well, because
+// a blob that parses to an object would sail through and then fail on .find.
 export async function getCachedContacts(): Promise<VaultContact[]> {
   const raw = await AsyncStorage.getItem('vaultContacts');
-  return raw ? JSON.parse(raw) : [];
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch { return []; }
 }
 
 export async function findContactByVaultId(

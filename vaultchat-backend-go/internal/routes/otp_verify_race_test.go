@@ -40,8 +40,11 @@ func TestOtpVerifyHandlersAreRateLimited(t *testing.T) {
 		t.Error("authOtpVerifyGate no longer limits per identity AND per IP via ConsumeSecure")
 	}
 
+	// authVerifyOtp (the email login) was deleted 2026-09-21 — see RegisterAuth.
+	// The phone verifier is the only token-issuing OTP handler left in this file;
+	// auth_phone.go's v2 verifier goes through authOtpVerifyAllow and is covered
+	// by its own tests.
 	for _, h := range []struct{ fn, scope string }{
-		{"func authVerifyOtp(", `authOtpVerifyGate(w, r, "verify-otp", e)`},
 		{"func authVerifyOtpPhone(", `authOtpVerifyGate(w, r, "verify-otp-phone", ph)`},
 	} {
 		i := strings.Index(src, h.fn)
@@ -74,7 +77,7 @@ func TestOtpAttemptCapIsEnforcedInTheUpdate(t *testing.T) {
 	if !regexp.MustCompile(`db\.NoRows\(err\)\s*{\s*return true, nil`).MatchString(bumpFn) {
 		t.Error("authOtpBumpAttempts no longer treats zero rows as an exhausted cap")
 	}
-	for _, fn := range []string{"func authVerifyOtp(", "func authVerifyOtpPhone("} {
+	for _, fn := range []string{"func authVerifyOtpPhone("} {
 		body := src[strings.Index(src, fn):]
 		if !strings.Contains(body[:strings.Index(body, "authIssueTokens")], "authOtpBumpAttempts(ctx, otpID)") {
 			t.Errorf("%s no longer charges a wrong guess through the guarded UPDATE", fn)

@@ -32,6 +32,7 @@ import { STREETVIEW_API_KEY, FAMILY_MAP_3D } from '../../constants/flags';
 import { clusterForZoom } from '../../lib/groups/clustering';
 import { fetchRoute } from '../../lib/nav/routing';
 import { mapStyleUrl, buildings3DLayer, RASTER_FALLBACK_URL, ATTRIBUTION } from '../../lib/map/tileProvider';
+import { initialOf } from '../../lib/format';
 
 export interface FamilyMarker {
   id: string;
@@ -50,7 +51,7 @@ export interface FamilyMarker {
 export type FamilyCameraMode = 'follow' | 'north' | 'overview';
 
 const COLORS = ['#4A9FFF', '#EC4899', '#22C55E', '#F59E0B', '#A855F7', '#EF4444', '#14B8A6', '#F97316'];
-const initials = (name: string) => (name || '?').trim().split(/\s+/).slice(0, 2).map((w) => w[0]?.toUpperCase() ?? '').join('') || '?';
+const initials = (name: string) => (name || '?').trim().split(/\s+/).slice(0, 2).map((w) => [...w][0]?.toUpperCase() ?? '').join('') || '?';
 
 /** Marker styling, shared verbatim by both engines so a member looks identical
  *  whichever page is running — an engine swap must not restyle the family. */

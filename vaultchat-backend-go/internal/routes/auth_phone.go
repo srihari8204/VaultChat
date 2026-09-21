@@ -78,6 +78,11 @@ func authPhoneE164(v any) string {
 // the only handle the rest of the flow has anyway.
 func authPhoneReqKey(lookup string) string { return "otp:msg91:" + lookup }
 
+// authPhoneHourKey is the 3-per-hour-per-number bucket. Named because the
+// refund path has to charge and un-charge the SAME key, and two string
+// literals that must stay in step are one edit away from not being.
+func authPhoneHourKey(lookup string) string { return "otp:phone:" + lookup }
+
 // authEnvErrRetry is authEnvErr with the wait attached.
 //
 // The client (lib/onboarding.ts onboardingError) reads
@@ -136,21 +141,56 @@ func authDevOtpMatches(code string) bool {
 // The cooldown is a 1-per-30s fixed window under ConsumeSecure, which also
 // means the FIRST send starts it — a resend one second later is refused with
 // the remaining wait, which is what the button's timer displays.
+//
+// ALL THREE ARE ConsumeSecure, none is Consume. The per-number and per-IP
+// limits used to fail OPEN, which is the trade redisx.Consume documents for
+// "you are posting comments too fast" — a cache outage must not lock a real
+// user out of a harmless action. This is not that: the thing on the other side
+// of these two buckets is an SMS bill and a stranger's handset, so with Redis
+// down the only surviving limit was the per-process cooldown and one host could
+// walk a list of numbers at 2/minute each, indefinitely and in parallel. The
+// in-process fallback is the right answer to an outage here; "no limit" is not.
+//
+// ponytail: that fallback is per-process, so N replicas means N × limit during
+// a Redis outage (redisx's own note). Bounded and small beats unbounded; make
+// the fallback shared if this ever runs more than one replica in anger.
 func authPhoneSendGate(w http.ResponseWriter, r *http.Request, lookup string) bool {
 	ctx := r.Context()
 	if cd := redisx.ConsumeSecure(ctx, "otp:phone-resend:"+lookup, 1, authPhoneResendSec); !cd.Allowed {
 		authEnvErrRetry(w, 429, "rate_limited", "Wait a moment before asking for another code.", cd.ResetInSec)
 		return false
 	}
-	if perPhone := redisx.Consume(ctx, "otp:phone:"+lookup, 3, 3600); !perPhone.Allowed {
+	if perPhone := redisx.ConsumeSecure(ctx, authPhoneHourKey(lookup), 3, 3600); !perPhone.Allowed {
 		authEnvErrRetry(w, 429, "rate_limited", "Too many codes requested for this number. Try again later.", perPhone.ResetInSec)
 		return false
 	}
-	if perIP := redisx.Consume(ctx, "otp:phone-ip:"+authClientIP(r), 10, 3600); !perIP.Allowed {
+	if perIP := redisx.ConsumeSecure(ctx, "otp:phone-ip:"+authClientIP(r), 10, 3600); !perIP.Allowed {
 		authEnvErrRetry(w, 429, "rate_limited", "Too many requests. Try again later.", perIP.ResetInSec)
 		return false
 	}
 	return true
+}
+
+// authPhoneRefundSend hands back the hourly allowance for a send that never
+// reached anybody — MSG91 unconfigured (503) or MSG91 having a bad day (502).
+// Charging for those is how three provider blips lock a real person out for an
+// hour having received nothing, which was observed in production: a 503 from
+// send-otp-phone still made the next resend answer 429.
+//
+// ONLY the per-number hourly bucket is refunded:
+//   - the 30s COOLDOWN stays charged. It exists to absorb a double-tapped
+//     button, and a cooldown that a failed send refunds is not a cooldown — the
+//     failing case is exactly when the user taps fastest.
+//   - the per-IP hourly bucket stays charged. It meters a HOST, not a person,
+//     and refunding it would give anyone who can make the provider call fail
+//     an unmetered channel.
+func authPhoneRefundSend(ctx context.Context, lookup string) {
+	if err := redisx.RefundSecure(ctx, authPhoneHourKey(lookup)); err != nil {
+		// Never fatal to the request: the user is already getting an error, and
+		// the only cost is one allowance staying spent. Logged so a systematic
+		// refund failure is visible rather than showing up as mystery 429s.
+		log.Printf("[auth/onboard] hourly send allowance not refunded: %v", err)
+	}
 }
 
 // authPhoneStart sends a fresh code and records the attempt. Returns the
@@ -158,18 +198,24 @@ func authPhoneSendGate(w http.ResponseWriter, r *http.Request, lookup string) bo
 func authPhoneStart(ctx context.Context, e164, lookup string) (string, error) {
 	// MSG91 wants bare international digits; the '+' is ours, not theirs.
 	reqID, err := msg91.Send(ctx, strings.TrimPrefix(e164, "+"))
-	if errors.Is(err, msg91.ErrNotConfigured) {
-		if !authDevOtpAllowed() {
-			return "", err // surfaced as 503 — see the callers
-		}
+	if errors.Is(err, msg91.ErrNotConfigured) && authDevOtpAllowed() {
 		reqID, err = authPhoneDevReqID, nil
 	}
 	if err != nil {
-		return "", err
+		// Nothing was delivered — not an unconfigured deployment (503), not a
+		// provider that refused (502). Give the hourly allowance back; this is
+		// THE place that can tell those apart from the store failure below.
+		authPhoneRefundSend(ctx, lookup)
+		return "", err // 503 or 502 — see authPhoneSendErr
 	}
 	if err := redisx.SetEx(ctx, authPhoneReqKey(lookup), reqID, authPhoneOtpTTLSec); err != nil {
 		// A code is already in flight and we cannot verify it. Say so now
 		// rather than letting the user type a code that can only fail.
+		//
+		// NO REFUND here, deliberately: MSG91 accepted the send, so a message is
+		// on its way to that handset. It cost real money and it rang a real
+		// phone, so it counts against the hourly allowance even though we lost
+		// the handle needed to check the code.
 		return "", err
 	}
 	return reqID, nil
@@ -201,7 +247,9 @@ func authOnboardSendOtpPhone(w http.ResponseWriter, r *http.Request) {
 		authPhoneSendErr(w, "send-otp-phone", err)
 		return
 	}
-	httpx.JSON(w, 200, map[string]any{"ok": true, "resendInSec": authPhoneResendSec})
+	// The first send has no channel to choose from: /sendOtp uses the widget's
+	// configured one. Stated anyway so both endpoints answer the same shape.
+	authPhoneSent(w, "sms", "")
 }
 
 // ── POST /auth/onboard/resend-otp-phone ────────────────────────────────
@@ -209,15 +257,39 @@ func authOnboardSendOtpPhone(w http.ResponseWriter, r *http.Request) {
 // authPhoneChannel maps the app's words to MSG91's magic numbers. An unknown
 // value falls back to SMS rather than erroring: "didn't get it?" is the worst
 // moment to hand someone a validation failure.
-func authPhoneChannel(v any) int {
+//
+// It also returns the CANONICAL NAME, because the response now has to state
+// which channel actually carried the code — see authOnboardResendOtpPhone.
+func authPhoneChannel(v any) (int, string) {
 	switch strings.ToLower(strings.TrimSpace(authStr(v))) {
 	case "voice", "call":
-		return msg91.ChannelVoice
+		return msg91.ChannelVoice, "voice"
 	case "whatsapp", "wa":
-		return msg91.ChannelWhatsApp
+		return msg91.ChannelWhatsApp, "whatsapp"
 	default:
-		return msg91.ChannelSMS
+		return msg91.ChannelSMS, "sms"
 	}
+}
+
+// authPhoneSent is the success body for both send and resend.
+//
+// `channel` is what actually went out, which is not always what was asked for:
+// MSG91's widget API puts channel selection on /retryOtp ONLY — /sendOtp takes
+// widgetId and identifier and nothing else (confirmed against MSG91's own SDKs;
+// their `retryChannel` codes live on retry). So a fresh attempt always leaves
+// over whatever the widget is configured for, i.e. SMS.
+//
+// When the two differ, `channelFallback` says so and `requestedChannel` says
+// what the user actually pressed. Silently texting someone who pressed "Call me
+// with the code" is the worst version of this: they chose voice BECAUSE the SMS
+// is not arriving, and a silent SMS looks to them like the button does nothing.
+func authPhoneSent(w http.ResponseWriter, sent, requested string) {
+	body := map[string]any{"ok": true, "resendInSec": authPhoneResendSec, "channel": sent}
+	if requested != "" && requested != sent {
+		body["requestedChannel"] = requested
+		body["channelFallback"] = true
+	}
+	httpx.JSON(w, 200, body)
 }
 
 func authOnboardResendOtpPhone(w http.ResponseWriter, r *http.Request) {
@@ -228,6 +300,7 @@ func authOnboardResendOtpPhone(w http.ResponseWriter, r *http.Request) {
 	}
 	_ = httpx.Body(r, &b)
 	e164 := authPhoneE164(b.Phone)
+	want, wantName := authPhoneChannel(b.Channel)
 	if e164 == "" {
 		authEnvErr(w, 400, "bad_request", "Enter a valid mobile number")
 		return
@@ -256,14 +329,21 @@ func authOnboardResendOtpPhone(w http.ResponseWriter, r *http.Request) {
 			authPhoneSendErr(w, "resend-otp-phone", err)
 			return
 		}
-		httpx.JSON(w, 200, map[string]any{"ok": true, "resendInSec": authPhoneResendSec})
+		// A fresh attempt cannot honour `channel` — /sendOtp has no such
+		// parameter, only /retryOtp does, and there is no live reqId left to
+		// retry. The code goes out by SMS; authPhoneSent tells the client that
+		// happened instead of pretending the request was honoured.
+		authPhoneSent(w, "sms", wantName)
 		return
 	}
-	if err := msg91.Retry(ctx, reqID, authPhoneChannel(b.Channel)); err != nil {
+	if err := msg91.Retry(ctx, reqID, want); err != nil {
+		// Same reasoning as authPhoneStart: the provider refused, nothing was
+		// delivered, so the hourly allowance charged by the gate is given back.
+		authPhoneRefundSend(ctx, lookup)
 		authPhoneSendErr(w, "resend-otp-phone", err)
 		return
 	}
-	httpx.JSON(w, 200, map[string]any{"ok": true, "resendInSec": authPhoneResendSec})
+	authPhoneSent(w, wantName, wantName)
 }
 
 // authPhoneSendErr keeps the delivery failure shapes identical across the send

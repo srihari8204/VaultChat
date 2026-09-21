@@ -113,7 +113,7 @@ proto3.util.setEnumType(StreamId, "ccwire.v1.StreamId", [
  * whether a push notification is warranted. It MUST NOT be fine-grained
  * enough to reconstruct behaviour: there is no distinction between a
  * photo and a video, or between a poll and a text.
- * 
+ *
  * Retention: not persisted beyond delivery.
  *
  * @generated from enum ccwire.v1.MessageClass
@@ -450,11 +450,11 @@ proto3.util.setEnumType(CallSignalKind, "ccwire.v1.CallSignalKind", [
 /**
  * ─────────────────────────────────────────────────────────────────────
  * Frame — the ONLY top-level message on the wire.
- * 
+ *
  * Preceded on the wire by: u8 framing_version, u32be length.
  * The length is validated against the negotiated max_frame_bytes
  * BEFORE any buffer is allocated. Non-negotiable.
- * 
+ *
  * Decoder configuration is part of the contract, not an implementation
  * detail. Every decoder MUST be configured with:
  *   recursion limit      = 6      (Limits.max_nesting_depth)
@@ -506,7 +506,7 @@ export class Frame extends Message<Frame> {
    * under. A receiver MUST NOT deliver a frame whose depends_on exceeds
    * the highest epoch it has applied from the CONTROL stream. Zero means
    * "no dependency".
-   * 
+   *
    * This is the mechanism that stops a message overtaking the key update
    * or membership change it depends on. See §B8.2.
    *
@@ -517,7 +517,7 @@ export class Frame extends Message<Frame> {
   /**
    * Exactly one body. A closed set: an operation not listed here is not
    * representable, which is the point.
-   * 
+   *
    * INVARIANT, enforced at both encode and decode: a frame whose
    * traffic_class is EPHEMERAL may carry ONLY typing_state,
    * viewer_state or geo_relay. A crypto_control or device_event in an
@@ -759,12 +759,12 @@ export class Frame extends Message<Frame> {
 /**
  * ─────────────────────────────────────────────────────────────────────
  * Envelope — the MINIMAL server-visible routing header.
- * 
+ *
  * Every field below is justified in §B10.8 with a retention rule. A field
  * added here without that justification is a new metadata leak. The
  * governing precedent is lib/msgEnvelope.ts META_PUBLIC_KEYS: an
  * ALLOW-list, private by default.
- * 
+ *
  * The encrypted payload is NEVER a field of this message. It is a
  * sibling (`sealed`), so no code path can accidentally treat routing
  * metadata and ciphertext as one object.
@@ -856,7 +856,7 @@ export class Envelope extends Message<Envelope> {
 
 /**
  * PublicMeta mirrors lib/msgEnvelope.ts META_PUBLIC_KEYS EXACTLY.
- * 
+ *
  * It is not a superset and must never become one. Every field here is
  * read by server code today and justified per-key in
  * internal/jobs/meta_public.go. The cross-language assertion in
@@ -2115,14 +2115,14 @@ export class DeviceEvent extends Message<DeviceEvent> {
 /**
  * CryptoControl — key distribution, rekey, and any future
  * standardized-format control message.
- * 
+ *
  * THE BODY IS OPAQUE AUTHENTICATED BYTES. The server routes it and does
  * not parse it. If MLS is adopted, an MLSMessage goes in `payload` as
  * its own canonical serialization, BYTE FOR BYTE, and no field of it is
  * ever lifted into this schema. Translating a standardized crypto
  * format into protobuf fields and back is how a signature stops
  * verifying; it is forbidden here, not discouraged.
- * 
+ *
  * `kind` exists so the scheduler knows this is CONTROL-class and so the
  * causal-dependency layer can bump the epoch. It is a ROUTING hint and
  * carries no interpretation of `payload`.
@@ -2276,7 +2276,7 @@ export class CallSignal extends Message<CallSignal> {
 
 /**
  * ── Fragmentation ────────────────────────────────────────────────────
- * 
+ *
  * A payload exceeding max_frame_bytes is split. Reassembly is bounded on
  * FOUR axes simultaneously — count, total bytes, concurrency and time —
  * because any single bound alone is evadable.

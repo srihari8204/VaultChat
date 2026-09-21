@@ -57,11 +57,17 @@ function withGoLiveService(config) {
     const app = cfg.modResults.manifest.application[0];
     app.service = app.service || [];
     const name = `${GOLIVE_PKG}.GoLiveForegroundService`;
-    if (app.service.some((s) => s.$['android:name'] === name)) return cfg;
+    // Find-or-create, then ALWAYS assign. Returning early on a name match would
+    // make this mod write-once: android/ is prebuild output that a plain
+    // `expo prebuild` keeps, so a service added by an older version of this
+    // plugin would hold its original foregroundServiceType forever and a change
+    // to the line below would reach fresh trees only. The failure mode is the
+    // silent one documented underneath, which is the worst kind to make
+    // un-fixable without --clean.
+    let svc = app.service.find((s) => s.$['android:name'] === name);
+    if (!svc) { svc = { $: { 'android:name': name } }; app.service.push(svc); }
 
-    app.service.push({
-      $: {
-        'android:name': name,
+    Object.assign(svc.$, {
         'android:exported': 'false',
         // mediaProjection MUST be declared here even though the service only
         // ADDS it at runtime, once the host actually shares. Android validates
@@ -70,7 +76,6 @@ function withGoLiveService(config) {
         // screen capture would produce nothing, which is the exact failure this
         // plugin exists to prevent.
         'android:foregroundServiceType': 'microphone|camera|mediaProjection',
-      },
     });
     return cfg;
   });

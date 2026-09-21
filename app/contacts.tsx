@@ -39,6 +39,7 @@ import {
   type MatchedContact,
 } from '../lib/chatService';
 import { AppText as Text, AuroraBackground } from '../components/ui';
+import { initialOf } from '../lib/format';
 
 interface PhoneEntry {
   hash:        string;
@@ -214,7 +215,7 @@ export default function ContactsScreen() {
   const renderItem = ({ item, section }: any) => {
     if (section === 'matched') {
       const m: MatchedRow = item;
-      const initial = (m.contactName?.trim()[0] || m.name?.trim()[0] || '?').toUpperCase();
+      const initial = initialOf(m.contactName, m.name);
       return (
         <TouchableOpacity style={S.row} onPress={() => openChat(m)} activeOpacity={0.7} disabled={openingId === m.id}>
           <View style={[S.avatar, S.avatarOnApp]}><Text style={S.avatarTxt}>{initial}</Text></View>
@@ -229,7 +230,7 @@ export default function ContactsScreen() {
       );
     }
     const r: InviteRow = item;
-    const initial = (r.contactName.trim()[0] || '?').toUpperCase();
+    const initial = initialOf(r.contactName);
     return (
       <TouchableOpacity style={S.row} onPress={() => sendInvite(r)} activeOpacity={0.7}>
         <View style={[S.avatar, S.avatarInvite]}><Text style={S.avatarTxt}>{initial}</Text></View>

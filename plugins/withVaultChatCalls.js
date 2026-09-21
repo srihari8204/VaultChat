@@ -102,10 +102,22 @@ function withServices(config) {
     const hasService = (name) => app.service.some((s) => s.$['android:name'] === name);
     const hasReceiver = (name) => app.receiver.some((s) => s.$['android:name'] === name);
 
-    if (!hasService(`${CALLS_PKG}.CallForegroundService`)) {
-      app.service.push({
-        $: {
-          'android:name': `${CALLS_PKG}.CallForegroundService`,
+    // FIND-OR-CREATE, then ALWAYS assign — not push-if-absent.
+    //
+    // android/ is prebuild OUTPUT that a plain `expo prebuild` preserves, so a
+    // push-if-absent mod can ADD this service once and then never CORRECT it:
+    // the name is already there, the guard skips, and whatever attributes the
+    // first prebuild wrote survive every later one. That is not hypothetical
+    // here — foregroundServiceType gained `mediaProjection` after this service
+    // already existed, and on any tree generated before that the type stayed
+    // `microphone|camera`, which is precisely the encoded=0 size=0x0 silent
+    // failure described below. Assigning unconditionally is what makes a
+    // changed type actually reach an existing tree.
+    {
+      const NAME = `${CALLS_PKG}.CallForegroundService`;
+      let svc = app.service.find((s) => s.$['android:name'] === NAME);
+      if (!svc) { svc = { $: { 'android:name': NAME } }; app.service.push(svc); }
+      Object.assign(svc.$, {
           'android:exported': 'false',
           // mediaProjection is REQUIRED for screen share on Android 14+.
           //
@@ -118,7 +130,6 @@ function withServices(config) {
           // only after the user has granted the projection (Android forbids
           // starting this type without a live projection token).
           'android:foregroundServiceType': 'microphone|camera|mediaProjection',
-        },
       });
     }
     if (!hasService(`${CALLS_PKG}.VaultCallMessagingService`)) {
@@ -190,13 +201,22 @@ const FIREBASE_MESSAGING = 'com.google.firebase:firebase-messaging:24.1.1';
 function withFirebaseMessaging(config) {
   return withAppBuildGradle(config, (cfg) => {
     let src = cfg.modResults.contents;
+    // Re-pin the VERSION before the guard below decides there is nothing to do.
+    // app/build.gradle is prebuild output that a plain `expo prebuild` keeps,
+    // and the guard matches on the artifact name, not the coordinate — so
+    // bumping FIREBASE_MESSAGING above would land in every fresh tree and in no
+    // existing one, leaving a build whose FCM version silently disagrees with
+    // this file forever. Only the coordinate is rewritten: no quoting, no
+    // parentheses and no braces are touched, so the surrounding `implementation`
+    // line keeps whatever shape it had.
+    src = src.replace(/com\.google\.firebase:firebase-messaging:[^"']*/g, FIREBASE_MESSAGING);
     if (!src.includes('firebase-messaging')) {
       src = src.replace(
         /dependencies\s*\{/,
         `dependencies {\n    implementation("${FIREBASE_MESSAGING}")  // native FCM for call wake-up`,
       );
-      cfg.modResults.contents = src;
     }
+    cfg.modResults.contents = src;   // written back even when only the version moved
     return cfg;
   });
 }

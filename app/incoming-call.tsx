@@ -18,6 +18,7 @@ import { holdActiveCall } from '../lib/callState';
 import { setRingingPeer, setRingScreenPeer } from '../lib/ringTracker';
 import { cancelIncomingCall } from '../lib/callNotification';
 import { callStage, offerTag } from '../lib/call/diag';
+import { initialOf } from '../lib/format';
 
 // Call chrome is always dark (independent of app theme).
 const S = makeStyles();
@@ -211,7 +212,7 @@ export default function IncomingCallScreen() {
     router.back();
   };
 
-  const initial = (displayName.trim()[0] ?? '?').toUpperCase();
+  const initial = initialOf(displayName);
 
   return (
     <View style={S.screen}>

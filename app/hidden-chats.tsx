@@ -26,6 +26,7 @@ import {
   type ChatSummary,
 } from '../lib/chatService';
 import { AuroraBackground } from '../components/ui';
+import { initialOf } from '../lib/format';
 
 const MAX_ATTEMPTS = 5;
 
@@ -242,7 +243,7 @@ function HiddenList({ router }: { router: any }) {
                       style={S.avatarImg}
                     />
                   ) : (
-                    <Text style={S.avatarTxt}>{(title.trim()[0] ?? '#').toUpperCase()}</Text>
+                    <Text style={S.avatarTxt}>{initialOf(title, '#')}</Text>
                   )}
                 </View>
                 <View style={{ flex: 1 }}>

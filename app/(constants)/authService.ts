@@ -104,46 +104,16 @@ export async function signOutGoogle(): Promise<void> {
   try { await GoogleSignin.signOut(); } catch {}
 }
 
-// ─── Email OTP ────────────────────────────────────────────────
-// (Server emits the OTP via Nodemailer — needs EMAIL_PASS set on
-//  the backend, otherwise /auth/send-otp returns 500.)
-
-export async function sendOTP(email: string): Promise<void> {
-  const e = (email ?? '').trim().toLowerCase();
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e)) {
-    throw new Error('Enter a valid email address');
-  }
-  await api('/auth/send-otp', { method: 'POST', json: { email: e }, auth: false });
-}
-
-/**
- * Verify OTP. `name` only matters on first sign-up (backend ignores it
- * for existing accounts). Returns { isNewUser } so the caller can route
- * to profile-setup vs straight to chats.
- */
-export async function verifyOTP(
-  email: string,
-  code: string,
-  name?: string,
-): Promise<{ isNewUser: boolean; user: any }> {
-  const e = (email ?? '').trim().toLowerCase();
-  if (!/^\d{6}$/.test(code ?? '')) throw new Error('OTP must be 6 digits');
-
-  const r = await api<{
-    accessToken: string; refreshToken: string; user: any; isNewUser: boolean;
-  }>('/auth/verify-otp', {
-    method: 'POST',
-    json: { email: e, otp: code, name: name?.trim() || undefined },
-    auth: false,
-  });
-
-  await setTokens(r.accessToken, r.refreshToken);
-  await setCachedUser(r.user);
-  return { isNewUser: r.isNewUser, user: r.user };
-}
-
-// Old phone-flow state machine is gone. Stub kept so existing imports compile.
-export function clearOTPState() {}
+// ─── Email OTP — REMOVED 2026-09-21 ───────────────────────────
+//
+// sendOTP/verifyOTP/clearOTPState are gone, and so are the /auth/send-otp and
+// /auth/verify-otp routes they called (both backends). Login is mobile-number
+// only; verifyOTP called setTokens()+setCachedUser(), i.e. it was a complete
+// second sign-in path that minted a session from an email address alone. It had
+// no importer anywhere in app/ lib/ components/ services/ — a dead surface, but
+// a working one, one import away from being live again.
+// Email OTP still exists for the OPTIONAL recovery address: lib/onboarding.ts
+// → /auth/onboard/{send,verify}-otp, which returns a ticket, never tokens.
 
 // ─── Phone OTP (Day 17) ─────────────────────────────────────
 // Same shape as email OTP. The backend either issues tokens (signup) or
@@ -183,86 +153,26 @@ export async function verifyPhoneOTP(
   return { isNewUser: r.isNewUser, linked: r.linked, user: r.user };
 }
 
-// ─── Signup pending data (multi-step UI) ─────────────────────
-export interface SignupData {
-  name: string; dob: string; email: string; mobile: string;
-  securityQ1: string; securityA1: string;
-  securityQ2: string; securityA2: string;
-}
-
-// SecureStore, not AsyncStorage. securityA1/A2 are ACCOUNT-RECOVERY CREDENTIALS
-// — answering them is how someone proves they are you — and they were being
-// written to AsyncStorage, which is an unencrypted SQLite file in the app
-// sandbox. They also survive an abandoned signup: the key is only cleared on
-// success, so a user who quit at the OTP step left their answers on disk
-// indefinitely.
+// ─── Legacy pending-signup record — CLEANUP ONLY ─────────────
 //
-// The whole blob moves rather than just the answers: the name/dob/email/mobile
-// beside them are the exact fields a recovery flow asks to corroborate, so
-// splitting the record would protect the answer and leak the check.
+// The 2-security-question signup model is gone (SignupData, savePendingSignup,
+// getPendingSignup, clearPendingSignup, saveUserProfile — all removed 2026-09-21,
+// zero importers; onboarding now writes 5 answers through lib/onboarding.ts and
+// /auth/security-questions/save). What is NOT gone is the data it left behind.
+//
+// An install that started signup on an old build and abandoned it still holds
+// this blob — name, dob, email, mobile AND two recovery answers — and on the
+// oldest builds it is in AsyncStorage, an UNENCRYPTED SQLite file in the app
+// sandbox. Those answers are an account-recovery credential: answering them is
+// how someone proves they are you. Deleting the code that used to clear them
+// would have stranded the plaintext on disk forever, so the delete survives the
+// readers. Both stores, because the record migrated between them.
 const PENDING_SIGNUP_KEY = 'vc_pending_signup';
 
-export async function savePendingSignup(d: SignupData) {
-  await SecureStore.setItemAsync(PENDING_SIGNUP_KEY, JSON.stringify(d));
-}
-
-export async function getPendingSignup(): Promise<SignupData | null> {
-  try {
-    const r = await SecureStore.getItemAsync(PENDING_SIGNUP_KEY);
-    if (r) return JSON.parse(r);
-  } catch {}
-  // Migration: an install that started signup on an older build still has the
-  // cleartext copy. Read it once, re-seal it, and delete the plaintext.
-  try {
-    const legacy = await AsyncStorage.getItem(PENDING_SIGNUP_KEY);
-    if (!legacy) return null;
-    await SecureStore.setItemAsync(PENDING_SIGNUP_KEY, legacy).catch(() => {});
-    await AsyncStorage.removeItem(PENDING_SIGNUP_KEY).catch(() => {});
-    return JSON.parse(legacy);
-  } catch { return null; }
-}
-
-export async function clearPendingSignup() {
+/** One-shot, idempotent, never throws. Called once per boot from app/_layout. */
+export async function purgeLegacyPendingSignup() {
   await SecureStore.deleteItemAsync(PENDING_SIGNUP_KEY).catch(() => {});
-  // Clear the legacy key too, even on installs that never read it back —
-  // otherwise an abandoned signup keeps its answers in the clear forever.
   await AsyncStorage.removeItem(PENDING_SIGNUP_KEY).catch(() => {});
-}
-
-/**
- * Push profile fields to the backend after OTP verify.
- * Called from the OTP screen on successful signup.
- */
-export async function saveUserProfile(d: SignupData) {
-  // DOB in the UI is "DD/Month/YYYY" — backend wants YYYY-MM-DD or omit.
-  let dobIso: string | undefined;
-  if (d.dob) {
-    const m = d.dob.match(/^(\d{1,2})\/([A-Za-z]+|\d{1,2})\/(\d{4})$/);
-    if (m) {
-      const day = m[1].padStart(2, '0');
-      const monthRaw = m[2];
-      const year = m[3];
-      const monthIdx = /^\d+$/.test(monthRaw)
-        ? parseInt(monthRaw, 10) - 1
-        : ['January','February','March','April','May','June','July','August','September','October','November','December']
-            .findIndex(n => n.toLowerCase() === monthRaw.toLowerCase());
-      if (monthIdx >= 0) {
-        dobIso = `${year}-${String(monthIdx + 1).padStart(2, '0')}-${day}`;
-      }
-    }
-  }
-  await api('/user/profile', {
-    method: 'PUT',
-    json: {
-      name:        d.name?.trim(),
-      phone:       d.mobile?.trim() || undefined,
-      dob:         dobIso,
-      securityQ1:  d.securityQ1 || undefined,
-      securityA1:  d.securityA1 || undefined,
-      securityQ2:  d.securityQ2 || undefined,
-      securityA2:  d.securityA2 || undefined,
-    },
-  });
 }
 
 // ─── PIN (one store: services/security/pinStore) ─────────────
@@ -467,7 +377,7 @@ export async function purgeAccountData() {
     await AsyncStorage.removeItem(faceKey(i)).catch(() => {});
   }
   await pinStore.clearPin().catch(() => {});   // v1 record + both legacy keys
-  await clearPendingSignup().catch(() => {});   // sealed record + legacy plaintext
+  await purgeLegacyPendingSignup();             // sealed record + legacy plaintext
 
   // The profile + recovery answers securityService writes. 'security_answers'
   // is an account-recovery credential — answering it is how someone proves they

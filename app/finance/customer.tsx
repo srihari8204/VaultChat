@@ -13,6 +13,7 @@ import { useMe } from '../../components/finance/useMe';
 import { sumRupees } from '../../utils/money';
 import { formatINR, fmtDate, inrShort, PERIOD_LABEL } from '../../utils/financeFormat';
 import { listLedger, type LedgerEntry } from '../../db/ledger';
+import { initialOf } from '../../lib/format';
 
 export default function CustomerProfile() {
   const FIN = useFinanceTheme();
@@ -45,7 +46,7 @@ export default function CustomerProfile() {
       <FinHeader title="Customer" />
       <ScrollView contentContainerStyle={s.body} showsVerticalScrollIndicator={false}>
         <View style={s.head}>
-          <View style={s.avatar}><Text style={s.avatarTxt}>{String(name ?? '?').charAt(0).toUpperCase()}</Text></View>
+          <View style={s.avatar}><Text style={s.avatarTxt}>{initialOf(String(name ?? ''))}</Text></View>
           <View style={{ flex: 1 }}>
             <Text numberOfLines={1} style={s.name}>{name}</Text>
             {mobile ? <Text style={s.mobile}>{mobile}</Text> : null}

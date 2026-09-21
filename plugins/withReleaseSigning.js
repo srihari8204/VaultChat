@@ -68,7 +68,39 @@ const withReleaseSigning = (config) => {
   // 2. Add the signingConfig and point buildTypes.release at it.
   config = withAppBuildGradle(config, (cfg) => {
     const creds = readCreds(cfg.modRequest.projectRoot);
-    if (!creds || cfg.modResults.contents.includes('vaultchatRelease')) return cfg;
+    if (!creds) return cfg;
+
+    // REMOVE THE OLD BLOCK FIRST, then write the current one.
+    //
+    // The guard here used to be `contents.includes('vaultchatRelease')`, which
+    // made this mod write-once. android/app/build.gradle is prebuild output
+    // that a plain `expo prebuild` preserves, so the credentials baked in by
+    // the FIRST prebuild survived every later one: rotate a keystore password,
+    // change the alias, or point VAULTCHAT_STORE_FILE at a different .jks, and
+    // the generated gradle kept the superseded values. The build then fails at
+    // signing time with a wrong-password error that says nothing about
+    // keystore.properties having already been updated.
+    //
+    // The guard also could not simply be dropped: buildTypes.release is
+    // repointed at signingConfigs.vaultchatRelease below, so after one run the
+    // NAME appears twice and `includes` can no longer tell "config present"
+    // from "config merely referenced" — stripping is the only shape that works.
+    // `[^{}]*` keeps the match inside one brace-free block, so it can never run
+    // past the closing brace into the rest of signingConfigs.
+    cfg.modResults.contents = cfg.modResults.contents.replace(
+      /\n[ \t]*vaultchatRelease \{[^{}]*\}\n?/g, '');
+    if (cfg.modResults.contents.includes('vaultchatRelease {')) {
+      // Only reachable if a credential value contains a brace, which would end
+      // the `[^{}]*` match early. Fail loudly: inserting a second block here
+      // would leave Groovy configuring the same signingConfig twice, and the
+      // SUPERSEDED one is the one that wins — a release APK signed with the old
+      // key and nothing in the output to say so.
+      throw new Error(
+        '[withReleaseSigning] could not remove the existing vaultchatRelease block from ' +
+        'android/app/build.gradle. Remove it by hand (or run `expo prebuild --clean`) and ' +
+        'avoid { } characters in keystore.properties values.',
+      );
+    }
 
     const store = path.basename(creds.VAULTCHAT_STORE_FILE);
     const block = `

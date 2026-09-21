@@ -53,6 +53,7 @@ import { useTableVoice } from '../../lib/games/useTableVoice';
 import { openInvite, shareResult } from '../../lib/games/invite';
 import { useWallet, STAKES, stakeLabel } from '../../lib/games/useWallet';
 import { useAddBot, ADD_BOT_STALLED } from '../../lib/games/useAddBot';
+import { initialOf } from '../../lib/format';
 
 /** 52-cell ring [row,col] on a 15x15 board, clockwise from red's start. */
 const RING: [number, number][] = [
@@ -1293,7 +1294,7 @@ function SeatCard({ player, you, active, status }: { player: LPlayer; you: boole
         {player.isBot
           ? <Ionicons name="hardware-chip-outline" size={16} color={LR.text} />
           : <Text style={{ color: LR.text, fontSize: 14, fontWeight: '800' }}>
-              {(player.name || '?').trim().charAt(0).toUpperCase()}
+              {initialOf(player.name)}
             </Text>}
         {/* The shape marker rides the avatar. The colourblind fallback has to be
             on the CARD as well as on the pawn, or a red/green pair is

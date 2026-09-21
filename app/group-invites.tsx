@@ -32,6 +32,7 @@ import {
   inviteCandidates, pendingMembers, approveMember, rejectMember,
   type Invitation, type InvitationStatus, type InviteCandidate, type PendingMember,
 } from '../lib/chatService';
+import { initialOf } from '../lib/format';
 
 const STATUS_TONE: Record<InvitationStatus, 'good' | 'warn' | 'bad' | 'mute'> = {
   joined: 'good', accepted: 'warn', pending: 'warn',
@@ -194,7 +195,7 @@ export default function GroupInvitesScreen() {
       : (
         <View style={[st.avatar, { width: size, height: size, borderRadius: size / 2, backgroundColor: brandAlpha(0.18) }]}>
           <Text style={{ color: colors.primary, fontWeight: '800', fontSize: size * 0.4 }}>
-            {(name ?? '?').trim()[0]?.toUpperCase() ?? '?'}
+            {initialOf(name)}
           </Text>
         </View>
       )

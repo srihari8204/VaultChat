@@ -107,7 +107,7 @@ proto3.util.setEnumType(AttachmentTier, "ccwire.v1.AttachmentTier", [
  * existing upload path (routes/uploads.go: 8 MiB parts, 100 MiB relay
  * cap, 2 GiB ceiling) or VaultBeam (4 MiB blocks, 12 GiB cap).
  * This message coordinates; it does not carry.
- * 
+ *
  * It also unifies the two parallel VaultBeam event families that exist
  * today — vaultbeam_* over the socket relay and vb_* over REST — which
  * is finding F-A2-2.

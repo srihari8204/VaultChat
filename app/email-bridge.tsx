@@ -10,6 +10,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { Stack, useRouter } from 'expo-router';
 import { HEADER_TOP } from '../constants/layout';
 import { AppText as Text, AuroraBackground } from '../components/ui';
+import { initialOf } from '../lib/format';
 
 
 // ── Mock inbox data ────────────────────────────────────────────
@@ -228,7 +229,7 @@ export default function EmailBridgeScreen() {
                   style={styles.emailAvatar}
                 >
                   <Text style={styles.emailAvatarText}>
-                    {email.sender.charAt(0).toUpperCase()}
+                    {initialOf(email.sender)}
                   </Text>
                 </LinearGradient>
                 <View style={styles.emailMeta}>

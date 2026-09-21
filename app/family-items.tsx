@@ -421,8 +421,13 @@ export default function FamilyItemsScreen() {
             <Switch
               value={items.every((i) => i.leftBehindAlerts !== false)}
               onValueChange={async (v) => {
-                for (const i of items) await patchItem(i.id, { leftBehindAlerts: v });
-                setItems(await listItems());
+                // allSettled, and refresh WHATEVER happened. The sequential
+                // await threw on the first network failure, so the remaining
+                // items were never touched AND setItems never ran: the switch
+                // kept showing the old value while half the items had flipped,
+                // with nothing on screen admitting it.
+                await Promise.allSettled(items.map((i) => patchItem(i.id, { leftBehindAlerts: v })));
+                setItems(await listItems().catch(() => items));
               }}
               trackColor={{ true: colors.primary }}
             />

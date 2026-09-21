@@ -32,7 +32,15 @@ const ROOT = path.resolve(__dirname, '..');
 // 'scripts' is here so acceptance.selftest.ts is actually discovered. It was
 // written, passing, and silently not run by `npm test` — a suite nobody runs
 // is a suite that quietly stops being true.
-const SEARCH_DIRS = ['lib', 'services', 'utils', 'constants', 'db', 'hooks', 'components', 'scripts'];
+// 'plugins' is here because the config plugins GENERATE NATIVE CODE, and their
+// characteristic failure is invisible: an append-if-absent mod writes its block
+// once and can never update it, so a plugin whose output later changes keeps
+// shipping whatever it wrote first until someone pays for a --clean prebuild.
+// That has now bitten three times (MainApplication's stale loadLibrary, the
+// strict build.gradle input, a rotated keystore that never reached the signing
+// config). plugins/selfHealing.selftest.ts is the thing that notices; it was
+// written and then not run, because this array did not include its directory.
+const SEARCH_DIRS = ['lib', 'services', 'utils', 'constants', 'db', 'hooks', 'components', 'scripts', 'plugins'];
 const SKIP_DIRS = new Set(['node_modules', '.git', 'android', 'ios', 'dist', 'rust', '__vectors__']);
 // scripts/coldstart.ts matches the `require.main === module` idiom, but what it
 // guards is a BENCHMARK, not a self-check: main() drives `adb`, force-stops the

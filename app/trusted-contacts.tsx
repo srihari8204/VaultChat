@@ -13,6 +13,7 @@ import { useTheme } from '../lib/theme';
 import { readCache, writeCache } from '../lib/localCache';
 import { listTrustedContacts, addTrustedContact, removeTrustedContact, type TrustedContact } from '../lib/chatService';
 import { AuroraBackground } from '../components/ui';
+import { initialOf } from '../lib/format';
 
 const MAX_TRUSTED = 3;
 const CACHE_KEY = 'trusted-contacts';
@@ -112,7 +113,7 @@ export default function TrustedContactsScreen() {
             renderItem={({ item }) => (
               <View style={s.contactRow}>
                 <View style={s.contactAvatar}>
-                  <Text style={s.contactAvatarTxt}>{(item.name || '?')[0].toUpperCase()}</Text>
+                  <Text style={s.contactAvatarTxt}>{initialOf(item.name)}</Text>
                 </View>
                 <View style={{ flex: 1 }}>
                   <Text numberOfLines={1} style={s.contactName}>{item.name || 'Contact'}</Text>

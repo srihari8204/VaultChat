@@ -22,6 +22,7 @@ import { getAccessToken } from '../lib/api';
 import { getSocket } from '../lib/socket';
 import { getCurrentUserAsync } from './(constants)/authService';
 import { AuroraBackground } from '../components/ui';
+import { initialOf } from '../lib/format';
 
 type CallMode = 'voice' | 'video';
 
@@ -136,7 +137,7 @@ export default function GroupCallsScreen() {
                 <View style={s.avatar}>
                   {item.photoURL && authHeader
                     ? <Image source={{ uri: attachmentUrl(item.photoURL), headers: { Authorization: authHeader } }} style={s.avatarImg} />
-                    : <Text style={s.avatarTxt}>{name.charAt(0).toUpperCase()}</Text>}
+                    : <Text style={s.avatarTxt}>{initialOf(name)}</Text>}
                   {item.online && <View style={s.onlineDot} />}
                 </View>
                 <View style={{ flex: 1 }}>

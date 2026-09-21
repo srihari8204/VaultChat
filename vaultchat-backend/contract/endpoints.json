@@ -16,9 +16,7 @@
     "POST /auth/refresh",
     "POST /auth/security-questions/save",
     "POST /auth/security-questions/verify",
-    "POST /auth/send-otp",
     "POST /auth/send-otp-phone",
-    "POST /auth/verify-otp",
     "POST /auth/verify-otp-phone"
   ],
   "user": [

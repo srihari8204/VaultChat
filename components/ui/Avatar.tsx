@@ -12,6 +12,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { avatarColor, avatarRing } from '../../constants/theme';
 import { useColors } from '../../lib/theme';
 import { AppText } from './Text';
+import { initialOf } from '../../lib/format';
 
 export interface AvatarProps {
   /** Remote image URL (auth-gated /uploads etc). Falls back to initials if absent. */
@@ -46,7 +47,7 @@ export function Avatar({ uri, headers, name, size = 48, presence, style, anon, r
   const c = useColors();
   const [failed, setFailed] = useState(false);
   useEffect(() => { setFailed(false); }, [uri]);   // retry when the uri changes
-  const initial = (name || '?').trim()[0]?.toUpperCase() || '?';
+  const initial = initialOf(name);
   // With a ring the artwork is inset by the ring width on each side.
   const ringWidth = ring ? Math.max(2, Math.round(size * 0.045)) : 0;
   const inner = size - ringWidth * 2;

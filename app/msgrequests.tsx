@@ -18,7 +18,7 @@ import { useRouter } from 'expo-router';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, Animated, FlatList, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { VaultContact } from '../lib/contactSync';
+import { VaultContact, getCachedContacts } from '../lib/contactSync';
 import {
   getVisibleProfile, isSavedContact, formatLastSeen,
 } from '../lib/contactPrivacy';
@@ -126,14 +126,16 @@ export default function MsgRequests() {
   },[]);
 
   const loadRequests = async () => {
-    // Load all contacts (to check saved status)
-    const raw = await AsyncStorage.getItem('vaultContacts');
-    const contacts: VaultContact[] = raw ? JSON.parse(raw) : [];
-    setAllContacts(contacts);
+    // Second copy of the 'vaultContacts' parse; contactSync owns that key and
+    // now fails soft, so this one inherits the guard instead of repeating it.
+    setAllContacts(await getCachedContacts());
 
-    // Load pending requests
+    // Load pending requests. A corrupt blob threw out of an un-awaited effect
+    // callback — an unhandled rejection, and the list stayed empty forever with
+    // no way back. Empty-and-usable beats stuck.
     const reqRaw = await AsyncStorage.getItem('msgRequests');
-    const reqs: MessageRequest[] = reqRaw ? JSON.parse(reqRaw) : [];
+    let reqs: MessageRequest[] = [];
+    try { const p = reqRaw ? JSON.parse(reqRaw) : []; if (Array.isArray(p)) reqs = p; } catch {}
     setRequests(reqs);
   };
 

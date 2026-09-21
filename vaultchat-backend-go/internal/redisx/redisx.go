@@ -178,6 +178,51 @@ func ConsumeSecure(ctx context.Context, key string, limit int64, windowSec int64
 	return RateResult{Allowed: count <= limit, Remaining: rem, ResetInSec: reset}
 }
 
+// refundInProcess undoes one charge in the fallback bucket. A window that has
+// already rolled over is left alone: its count belongs to a different window,
+// and decrementing it would hand back an allowance that was never spent there.
+func refundInProcess(key string) {
+	memMu.Lock()
+	defer memMu.Unlock()
+	if b := memBuckets[key]; b != nil && b.count > 0 && time.Now().Before(b.resetAt) {
+		b.count--
+	}
+}
+
+// RefundSecure gives back ONE unit charged by ConsumeSecure on the same key —
+// for the case where the limit was charged before an action that then did not
+// happen (a send that the provider refused, say), so the caller must not be
+// billed an attempt for work nobody received.
+//
+// It returns an error instead of failing open because there is nothing to fail
+// open TO: a refund can only ever make a bucket emptier, so a failed refund
+// cannot let anything through — it can only leave an allowance wrongly spent,
+// and the one useful response to that is a log line saying so. (Contrast
+// Consume, where "fail open" is a real choice about admitting traffic.)
+func RefundSecure(ctx context.Context, key string) error {
+	if Client == nil {
+		refundInProcess(key)
+		return nil
+	}
+	k := "rl:" + key
+	n, err := Client.Decr(ctx, k).Result()
+	if err != nil {
+		// Redis was reachable for the charge or it was not; either way the
+		// in-process bucket is the only one we can still touch. Undo there and
+		// report, so a permanently-spent allowance is visible in the log.
+		refundInProcess(key)
+		return err
+	}
+	// DECR AUTOVIVIFIES. If the window had already expired (or a refund arrives
+	// with no matching charge) Redis creates the key at -1 WITH NO TTL, and the
+	// next window would then start counting from a negative number — a bucket
+	// that silently grants extra attempts forever. Drop it instead.
+	if n <= 0 {
+		Client.Del(ctx, k)
+	}
+	return nil
+}
+
 // Consume mirrors rateLimit.consume: INCR + EXPIRE-on-first, fail-OPEN when
 // Redis is unavailable (Node's deliberate trade-off — keep it).
 func Consume(ctx context.Context, key string, limit int64, windowSec int64) RateResult {

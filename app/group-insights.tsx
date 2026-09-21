@@ -31,6 +31,7 @@ import { announceFromMessage } from '../lib/groups/tripSession';
 import { unionWithLocalHistoryAsc } from '../lib/messageHistory';
 import { getMessages } from '../lib/chatService';
 import { type CircleMember } from '../lib/family/types';
+import { initialOf } from '../lib/format';
 
 type Span = 'week' | 'month';
 
@@ -228,7 +229,7 @@ export default function GroupInsightsScreen() {
           {ranked.map((i) => (
             <View key={i.userId} style={[st.row, { borderColor: colors.glassStroke }]}>
               <View style={[st.avatar, { backgroundColor: colorFor(i.userId) }]}>
-                <Text style={[st.avatarTxt, scheme === 'light' && { color: '#070A18' }]}>{nameOf(i.userId).trim()[0]?.toUpperCase() ?? '?'}</Text>
+                <Text style={[st.avatarTxt, scheme === 'light' && { color: '#070A18' }]}>{initialOf(nameOf(i.userId))}</Text>
               </View>
               <View style={{ flex: 1, minWidth: 0 }}>
                 <Text style={{ color: colors.text, fontWeight: '600', fontSize: 14 }} numberOfLines={1}>

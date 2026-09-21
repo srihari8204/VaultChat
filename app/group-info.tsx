@@ -317,7 +317,7 @@ export default function GroupInfoScreen() {
                 style={S.heroImg}
               />
             ) : (
-              <Text style={S.heroTxt}>{(chat.name?.trim()[0] ?? '#').toUpperCase()}</Text>
+              <Text style={S.heroTxt}>{initialOf(chat.name, '#')}</Text>
             )}
             {photoBusy && (
               <View style={S.heroBusy}><ActivityIndicator color="#fff" /></View>

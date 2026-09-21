@@ -36,6 +36,7 @@ import { getDraftMap } from '../../lib/drafts';
 import { getLastMessagePerChat, getCachedChats, cacheChats } from '../../lib/localDb';
 import { getCurrentUserAsync } from '../(constants)/authService';
 import { isFamEvent } from '../../lib/family/alerts';
+import { initialOf } from '../../lib/format';
 
 type LastMsg = { content: string | null; type: string | null; senderId: string | null; id: number };
 
@@ -732,7 +733,7 @@ export default function ChatsScreen() {
                   {avPhoto && authHeader ? (
                     <Image source={{ uri: attachmentUrl(avPhoto), headers: { Authorization: authHeader } }} style={S.avImg} contentFit="cover" cachePolicy="memory-disk" />
                   ) : (
-                    <View style={[S.avImg, S.avInitials]}><Text style={S.avInitialsTxt}>{(avTitle.trim()[0] ?? '?').toUpperCase()}</Text></View>
+                    <View style={[S.avImg, S.avInitials]}><Text style={S.avInitialsTxt}>{initialOf(avTitle)}</Text></View>
                   )}
                   <View style={S.avNameBar}><Text style={S.avNameTxt} numberOfLines={1}>{avTitle}</Text></View>
                 </View>
@@ -788,7 +789,7 @@ const ChatRow = memo(function ChatRow({
   const S = useS();
   const swipeRef = useRef<Swipeable>(null);
   const title = chat.type === 'direct' ? (chat.peerName || chat.name || 'Direct chat') : (chat.name || 'Group chat');
-  const avatarLetter = (title.trim()[0] ?? '#').toUpperCase();
+  const avatarLetter = initialOf(title, '#');
   const photoId = chat.type === 'direct' ? chat.peerPhotoURL : chat.photoURL;
   const showPhoto = !!photoId && !!authHeader;
   const time = chat.lastMessageAt ? formatRelative(chat.lastMessageAt) : '';

@@ -21,6 +21,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../../lib/theme';
 import { useSpaceGlass } from '../spaces/SpaceGround';
 import { SPACE_SHADOW } from '../../constants/spaceTheme';
+import { initialOf } from '../../lib/format';
 
 export interface SelectedMemberSheetProps {
   name: string;
@@ -49,7 +50,7 @@ const HIT = { top: 8, bottom: 8, left: 8, right: 8 };
 export default function SelectedMemberSheet(p: SelectedMemberSheetProps) {
   const { colors } = useTheme();
   const G = useSpaceGlass();
-  const initial = (p.name || '?').trim()[0]?.toUpperCase() ?? '?';
+  const initial = initialOf(p.name);
 
   const action = (
     icon: React.ComponentProps<typeof Ionicons>['name'],

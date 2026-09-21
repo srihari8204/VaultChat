@@ -526,6 +526,12 @@ function RootLayoutInner() {
       // it. That tree is the reason media used to survive uninstall. Self-gating
       // (no-ops once complete), resumable, and never fatal — see lib/mediaMigration.
       import('../lib/mediaMigration').then(m => m.migrateLegacyMedia()).catch(() => {});
+      // One-time: delete the abandoned 'vc_pending_signup' record. On old builds
+      // it sat in AsyncStorage IN THE CLEAR, and it contains two account-recovery
+      // answers — the credential /auth/security-questions/verify trades for a
+      // session. The signup flow that wrote it is gone, so nothing will ever read
+      // it again; boot is the only place left that can reach the plaintext.
+      import('./(constants)/authService').then(m => m.purgeLegacyPendingSignup()).catch(() => {});
       import('../components/PdfThumbnailer').then(m => setPdfHost(() => m.PdfThumbnailerHost)).catch(() => {});
       if (Platform.OS !== 'web') {
         // Warm up the local message store after the first frame; screens that

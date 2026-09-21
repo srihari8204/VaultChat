@@ -33,6 +33,7 @@ import { getRelations, setRelation, RELATION_PRESETS } from '../lib/family/relat
 // v3 — shared Location Lock engine classifiers/formatters (same bands as Navigate)
 import { classifyDistance, zoneColor } from '../lib/lock/zoneMachine';
 import { fmtSpeed, gpsQuality, QUALITY_LABEL, QUALITY_COLOR } from '../lib/lock/format';
+import { initialOf } from '../lib/format';
 
 const REFRESH_MS = 15_000;
 const AVATAR_COLORS = ['#4A9FFF', '#EC4899', '#22C55E', '#F59E0B', '#A855F7', '#EF4444', '#14B8A6', '#F97316'];
@@ -347,7 +348,7 @@ export default function FamilyMemberScreen() {
         {/* identity card */}
         <View style={[st.card, { backgroundColor: G.paneStrong, borderColor: G.edge }]}>
           <View style={[st.avatar, { backgroundColor: colorFor(userId) }]}>
-            <Text style={[st.avatarTxt, scheme === 'light' && { color: '#070A18' }]}>{name.trim()[0]?.toUpperCase() ?? '?'}</Text>
+            <Text style={[st.avatarTxt, scheme === 'light' && { color: '#070A18' }]}>{initialOf(name)}</Text>
           </View>
           <View style={{ flex: 1 }}>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>

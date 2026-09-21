@@ -50,6 +50,7 @@ import { DISCONNECT_GRACE_MS } from '../lib/call/types';
 import { useCallConnectedAt, useCallError, useCallFlag, useCallStatus } from '../hooks/useCall';
 import { endMessage } from '../lib/call/endMessage';
 import { getSnapshot } from '../lib/call/store';
+import { initialOf } from '../lib/format';
 
 type CallState = 'connecting' | 'ringing' | 'connected' | 'ended';
 
@@ -241,7 +242,7 @@ function VoiceCallEngine() {
     : status === 'ringing' ? 'Ringing…'
     : status === 'reconnecting' ? 'Reconnecting…'
     : 'Call ended';
-  const initial = (displayName.trim()[0] ?? '?').toUpperCase();
+  const initial = initialOf(displayName);
 
   // ── ADD PERSON TO THIS CALL ────────────────────────────────────────
   //
@@ -702,7 +703,7 @@ function VoiceCallLegacy() {
   const statusText = state === 'connecting' ? 'Connecting…'
     : state === 'ringing'   ? 'Ringing…'
     : 'Call ended';
-  const initial = (peerName?.trim()[0] ?? '?').toUpperCase();
+  const initial = initialOf(peerName);
 
   return (
     <View style={S.screen}>

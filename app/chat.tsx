@@ -220,6 +220,7 @@ import {
   DISAPPEARING_PRESETS, bumpPollVote, formatDisappearing, formatLastSeen,
   formatRecDuration, formatScreenshotMode, isSameCalendarDay, renderWithHighlight,
 } from '../components/chat/MessageBubble';
+import { initialOf } from '../lib/format';
 
 /**
  * @param chatIdProp  When present, this screen is EMBEDDED (a split-view pane,
@@ -4186,7 +4187,7 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
               {headerPhotoId && screenAuthHeader ? (
                 <Image source={{ uri: attachmentUrl(headerPhotoId), headers: { Authorization: screenAuthHeader } }} style={S.photoImg} resizeMode="cover" />
               ) : (
-                <View style={[S.photoImg, S.photoInitialsWrap]}><Text style={S.photoInitials}>{(title?.trim()[0] ?? '?').toUpperCase()}</Text></View>
+                <View style={[S.photoImg, S.photoInitialsWrap]}><Text style={S.photoInitials}>{initialOf(title)}</Text></View>
               )}
               <View style={S.photoNameBar}><Text style={S.photoNameTxt} numberOfLines={1}>{title}</Text></View>
             </View>

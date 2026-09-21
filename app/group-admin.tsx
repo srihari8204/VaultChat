@@ -30,6 +30,7 @@ import {
 } from '../lib/chatService';
 import { AuroraBackground } from '../components/ui';
 import { HEADER_TOP } from '../constants/layout';
+import { initialOf } from '../lib/format';
 
 type Policy = 'everyone' | 'admins';
 
@@ -347,7 +348,7 @@ export default function GroupAdminScreen() {
               <Text style={s.hint}>No pending requests.</Text>
             ) : joinReqs.map(r => (
               <View key={r.userId} style={s.memberRow}>
-                <View style={s.avatar}><Text style={s.avatarText}>{(r.name || '?').charAt(0).toUpperCase()}</Text></View>
+                <View style={s.avatar}><Text style={s.avatarText}>{initialOf(r.name)}</Text></View>
                 <Text style={[s.memberName, { flex: 1 }]} numberOfLines={1}>{r.name || r.userId.slice(0, 8)}</Text>
                 <TouchableOpacity style={s.reqApprove} onPress={() => approveReq(r.userId)}><Text style={s.reqApproveTxt}>Approve</Text></TouchableOpacity>
                 <TouchableOpacity accessibilityLabel={`Reject the join request from ${r.name || r.userId.slice(0, 8)}`} style={s.reqReject} onPress={() => rejectReq(r.userId)} hitSlop={6}><Ionicons name="close" size={18} color={colors.danger} /></TouchableOpacity>
@@ -375,7 +376,7 @@ export default function GroupAdminScreen() {
                   activeOpacity={canManage ? 0.6 : 1}
                   onPress={() => canManage && setRoleMenuUid(roleMenuUid === m.userId ? null : m.userId)}
                 >
-                  <View style={s.avatar}><Text style={s.avatarText}>{label.charAt(0).toUpperCase()}</Text></View>
+                  <View style={s.avatar}><Text style={s.avatarText}>{initialOf(label)}</Text></View>
                   <View style={{ flex: 1 }}>
                     <Text style={s.memberName} numberOfLines={1}>{label}{isMe ? ' (You)' : ''}</Text>
                     <Text style={s.roleBadgeText}>{ROLE_LABELS[role]}</Text>

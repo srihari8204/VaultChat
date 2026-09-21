@@ -1,10 +1,9 @@
-// POST /auth/send-otp        { email }                       → 200 { ok: true }
-// POST /auth/verify-otp      { email, otp, name? }           → 200 { accessToken, refreshToken, user, isNewUser }
 // POST /auth/google          { idToken, name? }              → 200 { accessToken, refreshToken, user, isNewUser }
 // POST /auth/refresh         { refreshToken }                → 200 { accessToken, refreshToken }
 // POST /auth/logout          (Bearer)  { refreshToken? }     → 200 { ok: true }
 //
-// Email is the canonical identity. Phone is a profile field only.
+// The MOBILE NUMBER is the canonical identity (see /auth/profile/init). Email is
+// an optional recovery address — it never proves who you are on its own.
 
 const express  = require('express');
 const crypto   = require('crypto');
@@ -129,99 +128,17 @@ async function issueTokens(user, req) {
 
 // ── routes ──────────────────────────────────────────────────────────
 
-// POST /auth/send-otp
-router.post('/send-otp', async (req, res) => {
-  try {
-    const e = normalizeEmail(req.body?.email);
-    if (!e) return res.status(400).json({ error: 'Invalid email' });
-
-    // Rate limit: 3 sends per email per hour, 10 per IP per hour
-    const perEmail = await rateLimit.consume(`otp:email:${e}`, 3, 3600);
-    if (!perEmail.allowed) {
-      return res.status(429).json({ error: 'Too many requests. Try again later.', retryAfter: perEmail.resetInSec });
-    }
-    const perIP = await rateLimit.consume(`otp:ip:${req.ip}`, 10, 3600);
-    if (!perIP.allowed) {
-      return res.status(429).json({ error: 'Too many requests. Try again later.', retryAfter: perIP.resetInSec });
-    }
-
-    const code = otp.generate();
-    const codeHash = await otp.hash(code);
-
-    // Invalidate any prior unconsumed OTPs for this email, then insert new
-    await db.transaction(async (client) => {
-      await client.query(
-        `UPDATE otp_codes SET consumed_at = NOW()
-         WHERE email = $1 AND consumed_at IS NULL`,
-        [e]
-      );
-      await client.query(
-        `INSERT INTO otp_codes (email, code_hash, expires_at)
-         VALUES ($1, $2, NOW() + ($3 || ' seconds')::INTERVAL)`,
-        [e, codeHash, otp.OTP_TTL_SECONDS.toString()]
-      );
-    });
-
-    await email.sendOTP(e, code);
-    return res.json({ ok: true });
-  } catch (err) {
-    console.error('[auth/send-otp]', err.message);
-    return res.status(500).json({ error: 'Failed to send code' });
-  }
-});
-
-// POST /auth/verify-otp
-router.post('/verify-otp', async (req, res) => {
-  try {
-    const e   = normalizeEmail(req.body?.email);
-    const code = (req.body?.otp || '').toString().trim();
-    const name = (req.body?.name || '').toString().trim() || null;
-
-    if (!e) return res.status(400).json({ error: 'Invalid email' });
-    if (!/^\d{6}$/.test(code)) return res.status(400).json({ error: 'OTP must be 6 digits' });
-
-    // Most-recent unconsumed, unexpired OTP for this email
-    const sel = await db.query(
-      `SELECT id, code_hash, expires_at, attempts
-       FROM otp_codes
-       WHERE email = $1 AND consumed_at IS NULL AND expires_at > NOW()
-       ORDER BY id DESC
-       LIMIT 1`,
-      [e]
-    );
-    const row = sel.rows[0];
-    if (!row) return res.status(400).json({ error: 'OTP expired or not found. Request a new one.' });
-
-    if (row.attempts >= otp.MAX_ATTEMPTS) {
-      await db.query(`UPDATE otp_codes SET consumed_at = NOW() WHERE id = $1`, [row.id]);
-      return res.status(429).json({ error: 'Too many attempts. Request a new code.' });
-    }
-
-    // Dev-only fixed OTP bypass: when DEV_OTP is set in the environment the
-    // matching code is accepted without SMS/email. NEVER set DEV_OTP in a real
-    // production deployment — it makes every account loginable with that code.
-    const match = (process.env.DEV_OTP && code === process.env.DEV_OTP) || await otp.verify(code, row.code_hash);
-    if (!match) {
-      await db.query(`UPDATE otp_codes SET attempts = attempts + 1 WHERE id = $1`, [row.id]);
-      return res.status(400).json({ error: 'Invalid code' });
-    }
-
-    // Consume the OTP, find-or-create user, issue tokens
-    await db.query(`UPDATE otp_codes SET consumed_at = NOW() WHERE id = $1`, [row.id]);
-
-    const { user, isNewUser } = await findOrCreateUser({ email: e, name, authProvider: 'email' });
-    const tokens = await issueTokens(user, req);
-
-    return res.json({
-      ...tokens,
-      user: publicUser(user),
-      isNewUser,
-    });
-  } catch (err) {
-    console.error('[auth/verify-otp]', err.message);
-    return res.status(500).json({ error: 'Verification failed' });
-  }
-});
+// POST /auth/send-otp + POST /auth/verify-otp — REMOVED 2026-09-21.
+//
+// They were the original email login: OTP an address, get a session. Sign-in is
+// mobile-number-only now, and no shipped client has called either since (the
+// only caller, authService.sendOTP/verifyOTP, is gone too). What was left was an
+// unauthenticated, session-minting, account-CREATING surface keyed on an email
+// address — i.e. a second front door to every account, reachable by anyone who
+// can receive mail, with none of the registration-lock and phone-ownership
+// checks the current flow enforces. Deleted in the Go backend in the same pass,
+// so the two stacks agree; the /auth/onboard/* email OTP stays, because it only
+// proves an OPTIONAL recovery address and never issues tokens.
 
 // POST /auth/google — accepts idToken from @react-native-google-signin
 router.post('/google', async (req, res) => {
@@ -722,11 +639,30 @@ router.post('/profile/init', async (req, res) => {
     const el = vault.emailLookup(email);
     const pl = vault.phoneLookup(phone);
 
-    // Email ownership: require a valid ticket from /auth/onboard/verify-otp for
-    // THIS email. Closes the impersonation gap (no account creation for an email
-    // the caller hasn't proven they control).
-    if (!vault.verifyTicket((req.body?.emailTicket || '').toString(), el)) {
-      return envErr(res, 401, 'email_unverified', 'Verify your email with the code first');
+    // OWNERSHIP. Mirrors authProfileInit in the Go backend — read its comment
+    // for the full reasoning; the short version:
+    //
+    // An emailTicket is bound to vault.emailLookup(email) and says NOTHING about
+    // the phone in this body. Accepting it alone let anyone OTP their OWN address
+    // and register SOMEONE ELSE'S number: the real owner then gets exists:true
+    // from /auth/lookup forever and can never sign up, and the squatter's account
+    // answers to their number in contact discovery. Now that the number IS the
+    // identity, "some identity was verified" is not proof of THIS one.
+    //
+    // So the accepted proof is a phoneTicket bound to vault.phoneLookup(phone),
+    // computed from the number in this same body. emailVerified is still computed,
+    // but only to decide whether the OPTIONAL recovery address is recorded as
+    // proven — an unverified address must not silently become a recovery channel.
+    //
+    // NOTE: this Node stack has no endpoint that MINTS a phoneTicket (the phone
+    // onboarding OTP lives only in the Go backend, which serves every REST module
+    // today). That makes this route fail closed rather than fail open, which is
+    // the correct direction: anyone re-pointing traffic at Node must port the
+    // phone-onboarding endpoints, not re-open email-only registration.
+    const phoneVerified = vault.verifyTicket((req.body?.phoneTicket || '').toString(), pl);
+    const emailVerified = vault.verifyTicket((req.body?.emailTicket || '').toString(), el);
+    if (!phoneVerified) {
+      return envErr(res, 401, 'not_verified', 'Verify your mobile number with the code first');
     }
 
     const dup = await db.query(
@@ -740,13 +676,19 @@ router.post('/profile/init', async (req, res) => {
          (email_lookup, phone_lookup, email_cipher, phone_cipher,
           first_name_cipher, last_name_cipher, dob_cipher, status_cipher,
           photo_url, phone_hash, auth_provider, email_verified_at, onboarding_complete)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'google',NOW(),FALSE)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'phone',$11,FALSE)
        RETURNING id`,
       [
         el, pl, vault.encrypt(email), vault.encrypt(phone),
         vault.encrypt(firstName), lastName ? vault.encrypt(lastName) : null,
         vault.encrypt(dob), status.trim() ? vault.encrypt(status) : null,
         profilePicUrl, discoveryPhoneHash(phone),
+        // NULL, not NOW(): only an address whose OTP was actually answered counts
+        // as verified, or the recovery channel is one nobody proved they own.
+        // auth_provider is 'phone' for the same reason it is in Go — the block
+        // above refuses anything that did not arrive with a phoneTicket, so
+        // there is no email-only account left to mislabel 'google'.
+        emailVerified ? new Date() : null,
       ],
     );
     // Onboarding continues with /security-questions/save and /mpin/set, both of

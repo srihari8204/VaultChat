@@ -20,6 +20,7 @@ import { useSpaceColors, spaceHeader } from '../lib/spaces/theme';
 import type { SpacePalette as Palette } from '../lib/spaces/theme';
 import { getPendingPickups, type PendingPickup } from '../lib/spaces/api';
 import { AuroraBackground } from '../components/ui';
+import { initialOf } from '../lib/format';
 
 export default function SpacePendingScreen() {
   const router = useRouter();
@@ -98,7 +99,7 @@ export default function SpacePendingScreen() {
             <View key={p.riderId} style={s.row}>
               <View style={[s.avatar, { backgroundColor: colors.primary + '22' }]}>
                 <Text style={{ color: colors.primary, fontWeight: '800' }}>
-                  {(p.name || '?').trim()[0]?.toUpperCase()}
+                  {initialOf(p.name)}
                 </Text>
               </View>
               <View style={{ flex: 1, minWidth: 0 }}>

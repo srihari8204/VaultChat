@@ -10,3 +10,25 @@
 # exactly the thing an attribute is for.
 *.sh text eol=lf
 *.py text eol=lf
+
+# Protobuf schemas and the trees generated from them must stay LF, because
+# `npm run proto:check` BYTE-compares fresh generator output against the
+# working tree. Two independent line-ending faults made that comparison
+# machine-dependent, and neither was the trailing whitespace it looked like
+# (measured: 0 trailing-whitespace lines on either side, and `diff -w` empty):
+#
+#  1. protoc-gen-es writes LF, but core.autocrlf=true checks the committed LF
+#     files out as CRLF. Every line then differs — 210 of 211 in cursor_pb.ts —
+#     so the check fails on any Windows clone and passes on any Linux one.
+#  2. Even with autocrlf off, the generator's output is MIXED: it copies
+#     comment text verbatim out of the .proto sources, so a CRLF .proto puts
+#     CRLF on exactly those lines (10 of 211 in cursor_pb.ts) and LF on the
+#     rest. Pinning the gen tree alone would not have been enough; the schemas
+#     have to be LF too.
+#
+# Pinning both ends makes the generator's bytes equal the working tree's bytes
+# everywhere. The index already stores LF, so this renormalises nothing and
+# commits no churn — `git status` stays clean across the change.
+*.proto text eol=lf
+lib/ccwire/gen/** text eol=lf
+vaultchat-backend-go/internal/ccwire/gen/** text eol=lf

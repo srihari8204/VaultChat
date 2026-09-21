@@ -72,6 +72,7 @@ import {
   formatMetres, type SortMode,
 } from '../lib/family/distance';
 import { KeyboardSafe } from '../components/ui';
+import { initialOf } from '../lib/format';
 
 const SOS_HOLD_MS = 1500;
 const AVATAR_COLORS = ['#4A9FFF', '#EC4899', '#22C55E', '#F59E0B', '#A855F7', '#EF4444', '#14B8A6', '#F97316'];
@@ -1237,7 +1238,7 @@ export default function FamilySpaceScreen() {
           pressed && { backgroundColor: G.press, borderRadius: 12 }]}
       >
         <View style={[st.dot, { backgroundColor: colorFor(m.id), opacity: p ? 1 : 0.5 }]}>
-          <Text style={[st.dotTxt, scheme === 'light' && { color: '#070A18' }]}>{(m.name || '?').trim()[0]?.toUpperCase()}</Text>
+          <Text style={[st.dotTxt, scheme === 'light' && { color: '#070A18' }]}>{initialOf(m.name)}</Text>
         </View>
         <View style={{ flex: 1 }}>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
@@ -1486,7 +1487,7 @@ export default function FamilySpaceScreen() {
               <View style={st.avatarRow}>
                 {roster.slice(0, 4).map((m, i) => (
                   <View key={m.id} style={[st.miniDot, { backgroundColor: colorFor(m.id), marginLeft: i ? -8 : 0, borderColor: G.sheet, opacity: presences[m.id] ? 1 : 0.45 }]}>
-                    <Text style={[st.miniDotTxt, scheme === 'light' && { color: '#070A18' }]}>{(m.name || '?').trim()[0]?.toUpperCase()}</Text>
+                    <Text style={[st.miniDotTxt, scheme === 'light' && { color: '#070A18' }]}>{initialOf(m.name)}</Text>
                   </View>
                 ))}
                 {roster.length > 4 && <View style={[st.miniDot, { backgroundColor: colors.border, marginLeft: -8, borderColor: G.sheet }]}><Text style={[st.miniDotTxt, { color: colors.text }]}>+{roster.length - 4}</Text></View>}

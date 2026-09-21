@@ -88,6 +88,27 @@ function withAndroid(config) {
   config = withMainApplication(config, (cfg) => {
     let src = cfg.modResults.contents;
 
+    // 0) Undo what an OLDER version of THIS plugin wrote.
+    //
+    // Until 4fd0a6d this mod injected a guarded
+    // `System.loadLibrary("vaultbeamnative")` into onCreate (added in f0ec0c2).
+    // It stopped: VaultBeamStreamRustModule's companion loads the library
+    // lazily, only if JS actually asks for the Rust backend, so an eager load
+    // in Application.onCreate is pure cold-start cost on every single launch.
+    //
+    // Removing the emitter was NOT enough. android/ is gitignored prebuild
+    // output that a plain `expo prebuild` preserves, so every tree generated
+    // before that commit still carries the line and no prebuild will ever take
+    // it away — `--clean` (~25 min) was the only escape. This strip is the
+    // durable half of that removal; lib/call/minimize.selftest.ts asserts the
+    // line is absent, and until now that assertion could only be satisfied by
+    // hand-editing generated output, which does not travel between machines.
+    //
+    // No-op on a tree that never had it, which is every tree built from
+    // current source.
+    src = src.replace(
+      /^[ \t]*(?:try \{ )?System\.loadLibrary\("vaultbeamnative"\)[^\n]*\n/gm, '');
+
     // 1) Register the ReactPackage (same insertion points as withVaultBeamStream).
     if (!src.includes(`${AND_PACKAGE}()`)) {
       const add = `add(${AND_PACKAGE}())`;

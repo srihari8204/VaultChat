@@ -26,6 +26,7 @@ import {
 } from '../lib/chatLock';
 import { AppText as Text, AuroraBackground } from '../components/ui';
 import { HEADER_TOP } from '../constants/layout';
+import { initialOf } from '../lib/format';
 
 
 // Was: StatusBar.currentHeight on Android, a hardcoded 44 elsewhere, read ONCE
@@ -269,7 +270,7 @@ export default function AppLockChatsScreen() {
     return (
       <View style={s.chatRow}>
         <View style={s.chatAvatar}>
-          <Text style={s.chatAvatarText}>{item.name.charAt(0)}</Text>
+          <Text style={s.chatAvatarText}>{initialOf(item.name)}</Text>
           {isLocked && (
             <View style={s.lockBadge}>
               <Ionicons name="lock-closed" size={10} color={'#F59E0B'} />

@@ -19,6 +19,7 @@ import { type Palette, brandAlpha } from '../constants/theme';
 import { useTheme } from '../lib/theme';
 import { listChats, listGhostMode, setGhostMode, type GhostMode } from '../lib/chatService';
 import { AppText as Text, AuroraBackground } from '../components/ui';
+import { initialOf } from '../lib/format';
 
 interface Contact { userId: string; name: string }
 type Field = 'read' | 'typing' | 'lastSeen';
@@ -164,7 +165,7 @@ export default function ReceiptControlScreen() {
               const r = shownFor(item.userId);
               return (
                 <View style={s.contactRow}>
-                  <View style={s.avatar}><Text style={s.avatarTxt}>{(item.name.trim()[0] ?? '#').toUpperCase()}</Text></View>
+                  <View style={s.avatar}><Text style={s.avatarTxt}>{initialOf(item.name, '#')}</Text></View>
                   <Text style={s.contactName} numberOfLines={1}>{item.name}</Text>
                   <View style={s.toggleGroup}>
                     <Toggle label="Read receipts" on={r.read} icon="checkmark-done" onPress={() => toggleRule(item.userId, 'read')} />

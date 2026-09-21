@@ -43,6 +43,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { endMessage } from '../lib/call/endMessage';
 import { getSnapshot } from '../lib/call/store';
+import { initialOf } from '../lib/format';
 
 type CallState = 'connecting' | 'ringing' | 'connected' | 'ended';
 
@@ -433,7 +434,7 @@ function VideoCallEngine() {
           <RTCView style={S.remoteVid} streamURL={remoteUrl} objectFit="cover" />
         ) : (
           <View style={[S.remoteVid, S.remotePlaceholder]}>
-            <Text style={S.placeholderInitial}>{(displayName.trim()[0] ?? '?').toUpperCase()}</Text>
+            <Text style={S.placeholderInitial}>{initialOf(displayName)}</Text>
           </View>
         )}
         {/* NO beautify overlay here. This view is the OTHER PERSON's video.
@@ -991,7 +992,7 @@ function VideoCallLegacy() {
           <RTCView style={S.remoteVid} streamURL={remoteUrl} objectFit="cover" />
         ) : (
           <View style={[S.remoteVid, S.remotePlaceholder]}>
-            <Text style={S.placeholderInitial}>{(peerName?.trim()[0] ?? '?').toUpperCase()}</Text>
+            <Text style={S.placeholderInitial}>{initialOf(peerName)}</Text>
           </View>
         )}
         {/* NO beautify overlay here — see the note on the other remote view.

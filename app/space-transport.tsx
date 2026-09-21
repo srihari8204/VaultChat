@@ -41,6 +41,7 @@ import { createDirectChat } from '../lib/chatService';
 import type { Run, RunStop, RunRider } from '../lib/spaces/runs';
 import { nextStop } from '../lib/spaces/runs';
 import { familyOf } from '../lib/spaces/layout';
+import { initialOf } from '../lib/format';
 
 interface Loaded {
   run: Run;
@@ -248,7 +249,7 @@ export default function SpaceTransportScreen() {
                 <View key={r.riderId} style={s.rider}>
                   <View style={[s.avatar, { backgroundColor: colors.primary + '22' }]}>
                     <Text style={{ color: colors.primary, fontWeight: '800' }}>
-                      {(r.displayName || '?').trim()[0]?.toUpperCase()}
+                      {initialOf(r.displayName)}
                     </Text>
                   </View>
                   <View style={{ flex: 1, minWidth: 0 }}>

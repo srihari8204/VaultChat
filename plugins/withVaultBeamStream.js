@@ -83,13 +83,16 @@ function withTransferService(config) {
     if (!app) return cfg;
     app.service = app.service || [];
     const NAME = `${VB_PKG}.VaultBeamForegroundService`;
-    if (app.service.some((s) => s?.$?.['android:name'] === NAME)) return cfg; // idempotent
-    app.service.push({
-      $: {
-        'android:name': NAME,
-        'android:exported': 'false',
-        'android:foregroundServiceType': 'dataSync',
-      },
+    // Find-or-create then always assign, rather than push-if-absent. The old
+    // shape was idempotent but write-once: android/ survives a prebuild without
+    // --clean, so once the <service> existed its attributes were frozen and a
+    // changed foregroundServiceType here would never reach it. Assigning every
+    // time costs nothing and lets this file stay the source of truth.
+    let svc = app.service.find((s) => s?.$?.['android:name'] === NAME);
+    if (!svc) { svc = { $: { 'android:name': NAME } }; app.service.push(svc); }
+    Object.assign(svc.$, {
+      'android:exported': 'false',
+      'android:foregroundServiceType': 'dataSync',
     });
     return cfg;
   });

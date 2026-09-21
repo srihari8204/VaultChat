@@ -42,6 +42,7 @@ import {
   type GroupRole, type Permission,
 } from '../lib/groups/permissions';
 import { getCurrentUserAsync } from './(constants)/authService';
+import { initialOf } from '../lib/format';
 
 /** Roles that can be ASSIGNED. Owner is absent on purpose — see transfer. */
 const ASSIGNABLE: GroupRole[] = ['admin', 'moderator', 'member', 'guest'];
@@ -194,7 +195,7 @@ export default function GroupMembersScreen() {
       : (
         <View style={[st.avatar, { width: size, height: size, borderRadius: size / 2, backgroundColor: brandAlpha(0.18) }]}>
           <Text style={{ color: colors.primary, fontWeight: '800', fontSize: size * 0.38 }}>
-            {(m.name ?? '?').trim()[0]?.toUpperCase() ?? '?'}
+            {initialOf(m.name)}
           </Text>
         </View>
       )

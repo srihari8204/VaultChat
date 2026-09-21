@@ -29,6 +29,7 @@ import {
 import type { RoleDef } from '../lib/groups/permissions';
 import PermissionMatrix from '../components/spaces/PermissionMatrix';
 import { AuroraBackground } from '../components/ui';
+import { initialOf } from '../lib/format';
 
 const LABEL: Record<Person['status'], string> = {
   in: 'In',
@@ -196,7 +197,7 @@ export default function SpacePeopleScreen() {
           >
             <View style={[s.avatar, { backgroundColor: colors.primary + '22' }]}>
               <Text style={{ color: colors.primary, fontWeight: '800' }}>
-                {(p.name || '?').trim()[0]?.toUpperCase()}
+                {initialOf(p.name)}
               </Text>
             </View>
             <View style={{ flex: 1, minWidth: 0 }}>
@@ -242,7 +243,7 @@ export default function SpacePeopleScreen() {
               <View style={s.who}>
                 <View style={[s.avatar, { backgroundColor: colors.primary + '22' }]}>
                   <Text style={{ color: colors.primary, fontWeight: '800' }}>
-                    {(editing.name || '?').trim()[0]?.toUpperCase()}
+                    {initialOf(editing.name)}
                   </Text>
                 </View>
                 <View style={{ flex: 1, minWidth: 0 }}>
