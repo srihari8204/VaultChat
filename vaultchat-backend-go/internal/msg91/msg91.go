@@ -1,70 +1,89 @@
-// Package msg91 is a SERVER-SIDE client for MSG91's OTP widget REST API.
+// Package msg91 is a SERVER-SIDE client for MSG91's standalone OTP API.
 //
-// WHY THE SERVER CALLS THIS AND NOT THE APP
-// -----------------------------------------
-// MSG91 ships a React Native widget (@msg91comm/sendotp-react-native) that runs
-// the whole OTP flow on the device. It is the obvious integration and it is the
-// wrong one here, for four reasons:
+// WHY THE STANDALONE OTP API AND NOT THE WIDGET
+// ---------------------------------------------
+// This was written against MSG91's *widget* endpoints first (/widget/sendOtp,
+// /verifyOtp, /retryOtp) and every call came back AuthenticationFailure, with
+// both the account authkey and the widget's own tokenAuth, on both hosts, with
+// the credential in a header and in the body. The reason is in MSG91's own
+// panel, on the widget's "Server Side Integration" page, which documents
+// exactly ONE server-side call:
 //
-//   1. It needs a `tokenAuth` credential INSIDE the app bundle. That token is
-//      scoped (it is not the account authkey) but anyone who unzips the APK can
-//      use it to send OTPs on our account — i.e. burn SMS credits and spam
-//      numbers. Calling from the server means no MSG91 credential ships at all.
-//   2. It owns the resend policy, configured in MSG91's panel rather than in
-//      our code — which would bypass the rate limits this backend already
-//      enforces (3/phone/hour on send, 5/15min on verify, plus a per-code
-//      attempt cap).
-//   3. It carries a native module, `RawFetch`, that opens RAW SOCKETS to follow
-//      carrier redirects for silent network auth — deliberately bypassing
-//      Android's cleartext-traffic rules and iOS ATS. That is an App Review
-//      conversation and a Play Data Safety disclosure for a feature we do not
-//      use, plus a ProGuard keep rule whose absence fails SILENTLY in release
-//      builds only.
-//   4. With the widget, the server learns the verified number by exchanging an
-//      access token (`verifyAccessToken`) whose lifetime, single-use semantics
-//      and replay behaviour MSG91 does not document anywhere. Calling verifyOtp
-//      here instead means the server IS the party that verified the code, so
-//      there is nothing to replay and nothing to bind after the fact.
+//	POST /api/v5/widget/verifyAccessToken   { authkey, access-token }
+//
+// and introduces it with "use the access token received from the CLIENT SIDE
+// integration". That is the whole design: the widget runs on the device, does
+// the sending and the verifying itself, and hands back a JWT that the server
+// exchanges for the verified identifier. The send/verify endpoints are the
+// widget's own private calls — they authenticate through a handshake the widget
+// performs (getWidgetProcess), not through an authkey — so there is no way to
+// drive them from a server, and no amount of credential-shuffling was going to
+// make there be one.
+//
+// Using the widget as intended would mean shipping @msg91comm/sendotp-react-
+// native: a tokenAuth inside the APK, MSG91's panel owning the resend policy
+// instead of the limits this backend already enforces, and a native module that
+// opens raw sockets to bypass Android cleartext rules and iOS ATS. That was
+// declined deliberately, and it is still declined.
+//
+// So this speaks to the STANDALONE OTP API instead — /api/v5/otp{,/verify,
+// /retry} — which is a genuine server-to-server product, authenticates with the
+// authkey, and needs nothing on the device. Verified against the live account:
+// POST /api/v5/otp returns {"request_id":"…","type":"success"} and a real
+// handset receives a code.
 //
 // THE AUTHKEY IS THE SECRET. It comes from MSG91_AUTH_KEY and never leaves this
-// process. `widgetId` is not secret (it names the widget) but is kept here too,
-// so the client sends nothing but a phone number and a six-digit code.
+// process. Nothing MSG91-related ships in the app bundle.
 //
-// GOTCHA THAT WILL BITE ANYONE EDITING THIS: **MSG91 RETURNS HTTP 200 FOR
-// LOGICAL FAILURES.** "OTP expired" and "OTP not match" both arrive as 200 with
-// `{"type":"error"}`. Every decision here is made on the `type` field and never
-// on the status code. Gating on res.ok would treat a wrong code as a correct
-// one, which is the whole ballgame.
+// TWO GOTCHAS THAT COST HOURS, BOTH RECORDED SO NOBODY PAYS AGAIN:
+//
+//  1. MSG91 RETURNS HTTP 200 FOR LOGICAL FAILURES. "OTP expired" and "OTP not
+//     match" both arrive as 200 with {"type":"error"}. Every decision here is
+//     made on the `type` field and never on the status code. Gating on res.ok
+//     would accept every wrong code, which is the whole ballgame.
+//
+//  2. `418` means "IP is not whitelisted", NOT a bad key. The message says so
+//     once you reach an endpoint that bothers to explain itself; the widget
+//     endpoints just say AuthenticationFailure. If sends work and verifies do
+//     not, look at the IP allowlist on the authkey in MSG91's panel before
+//     suspecting anything here.
 package msg91
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 )
 
-// Base is MSG91's widget API root.
-//
-// Their docs are inconsistent about the host (api.msg91.com vs
-// control.msg91.com) and about whether the authkey goes in a header or the
-// body. We send the header form against api.msg91.com, which is what the
-// current docs show, and make it overridable so a deployment can correct it
-// without a code change if MSG91 moves again.
-var Base = envOr("MSG91_BASE_URL", "https://api.msg91.com/api/v5/widget")
+// Base is the standalone OTP API root. Overridable because MSG91's docs
+// disagree with themselves about api. vs control., so a deployment can correct
+// it without a code change if they move again.
+var Base = envOr("MSG91_BASE_URL", "https://control.msg91.com/api/v5")
 
-// Retry channels, from the widget SDK's own source.
+// Length of the code we ask MSG91 to generate.
+//
+// MUST STAY 6. The API's own default is 4, and the whole client is built for
+// six: the server rejects anything that is not six digits, and the OTP screen
+// renders six cells and auto-submits when they fill. A 4-digit code would never
+// fill them — the user would sit on a screen that silently never submits.
+const otpLength = 6
+
+// How long a code stays valid, in minutes. Matches what the screen implies.
+const otpExpiryMin = 10
+
+// Retry channels for the resend path. The standalone API takes words, not the
+// numeric ids the widget SDK used.
 const (
-	ChannelSMS      = 11
-	ChannelVoice    = 4
-	ChannelEmail    = 3
-	ChannelWhatsApp = 12
+	ChannelSMS   = "text"
+	ChannelVoice = "voice"
 )
 
 var (
@@ -84,36 +103,46 @@ func envOr(k, def string) string {
 	return def
 }
 
-func authKey() string  { return strings.TrimSpace(os.Getenv("MSG91_AUTH_KEY")) }
-func widgetID() string { return strings.TrimSpace(os.Getenv("MSG91_WIDGET_ID")) }
+func authKey() string { return strings.TrimSpace(os.Getenv("MSG91_AUTH_KEY")) }
 
-// Configured reports whether OTPs can actually be sent.
-func Configured() bool { return authKey() != "" && widgetID() != "" }
+// templateID is optional: an account with a default DLT template does not need
+// one, and this one does not. Kept because Indian traffic on a second sender
+// will, and finding that out at launch is worse than an unused env var.
+func templateID() string { return strings.TrimSpace(os.Getenv("MSG91_TEMPLATE_ID")) }
+
+// Configured reports whether OTPs can actually be sent. The widget id is no
+// longer part of this — the standalone API does not use one.
+func Configured() bool { return authKey() != "" }
 
 // Short timeout on purpose: a user is staring at a spinner, and MSG91 being
 // slow should surface as a retryable failure rather than a hung request.
 var client = &http.Client{Timeout: 12 * time.Second}
 
-// resp is the shape every widget endpoint answers with.
+// resp covers every shape these endpoints answer with. `request_id` is only on
+// a send; `message` carries the prose on both success and failure.
 type resp struct {
-	Type    string `json:"type"`
-	Message string `json:"message"`
+	Type      string `json:"type"`
+	Message   string `json:"message"`
+	RequestID string `json:"request_id"`
 }
 
-func post(ctx context.Context, path string, body map[string]any) (resp, error) {
+// call performs one request and decides success on `type`, never on status.
+func call(ctx context.Context, method, path string, q url.Values) (resp, error) {
 	if !Configured() {
 		return resp{}, ErrNotConfigured
 	}
-	raw, err := json.Marshal(body)
+	u := Base + path
+	if len(q) > 0 {
+		u += "?" + q.Encode()
+	}
+	req, err := http.NewRequestWithContext(ctx, method, u, nil)
 	if err != nil {
 		return resp{}, err
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, Base+path, bytes.NewReader(raw))
-	if err != nil {
-		return resp{}, err
-	}
-	req.Header.Set("Content-Type", "application/json")
+	// Header, not a query parameter. The legacy docs put it in the URL, and a
+	// URL carrying a live credential ends up in access logs and proxy traces.
 	req.Header.Set("authkey", authKey())
+	req.Header.Set("Content-Type", "application/json")
 
 	res, err := client.Do(req)
 	if err != nil {
@@ -128,9 +157,8 @@ func post(ctx context.Context, path string, body map[string]any) (resp, error) {
 
 	var out resp
 	if err := json.Unmarshal(payload, &out); err != nil {
-		// Unparseable body. Include the status because at this point it IS the
-		// only signal we have — but note this is the one branch where status
-		// matters, precisely because `type` was unreadable.
+		// Unparseable body — the one branch where the status code IS the only
+		// signal left, precisely because `type` could not be read.
 		return resp{}, fmt.Errorf("msg91 %s: bad response (%d)", path, res.StatusCode)
 	}
 	// THE ONLY SUCCESS TEST. Not res.StatusCode — see the package note.
@@ -141,64 +169,65 @@ func post(ctx context.Context, path string, body map[string]any) (resp, error) {
 }
 
 /*
-Send starts a verification for `identifier` (a phone number in international
-form WITHOUT a leading +, e.g. 919876543210 — the form MSG91 uses).
+Send issues a code to `identifier` — a phone number in international form
+WITHOUT a leading + (e.g. 919876543210), which is the shape MSG91 wants.
 
-Returns MSG91's request id, which every later call for this attempt needs. The
-caller is responsible for holding it against the phone for the life of the
-attempt; it is not a secret, but it IS a capability to resend, so it should not
-be handed to the client.
+Returns MSG91's request id. The standalone API keys everything on the NUMBER
+rather than that id, so nothing downstream strictly needs it — but it is what
+their support will ask for, so it is threaded through and stored.
 */
 func Send(ctx context.Context, identifier string) (reqID string, err error) {
-	out, err := post(ctx, "/sendOtp", map[string]any{
-		"widgetId":   widgetID(),
-		"identifier": identifier,
-	})
+	q := url.Values{}
+	q.Set("mobile", identifier)
+	q.Set("otp_length", strconv.Itoa(otpLength))
+	q.Set("otp_expiry", strconv.Itoa(otpExpiryMin))
+	if t := templateID(); t != "" {
+		q.Set("template_id", t)
+	}
+	out, err := call(ctx, http.MethodPost, "/otp", q)
 	if err != nil {
 		return "", err
 	}
-	if out.Message == "" {
-		return "", errors.New("msg91 sendOtp: no request id returned")
-	}
-	return out.Message, nil
+	return out.RequestID, nil
 }
 
 /*
-Retry re-sends the code for an in-flight attempt, optionally over a different
-channel (voice, WhatsApp) — which is the "didn't get it?" escape hatch.
+Retry re-sends the current code, optionally by voice — the "didn't get it?"
+escape hatch, and the one case where a different channel genuinely helps.
 
 MSG91 enforces its own retry ceiling ("OTP retry count maxed out") on top of
 whatever the caller enforces. Both matter: theirs protects their platform, ours
-protects our bill and the person being messaged.
+protects the bill and the person being messaged.
 */
-func Retry(ctx context.Context, reqID string, channel int) error {
-	body := map[string]any{"widgetId": widgetID(), "reqId": reqID}
-	if channel > 0 {
-		body["retryChannel"] = channel
+func Retry(ctx context.Context, identifier, channel string) error {
+	if channel != ChannelVoice {
+		channel = ChannelSMS
 	}
-	_, err := post(ctx, "/retryOtp", body)
+	q := url.Values{}
+	q.Set("mobile", identifier)
+	q.Set("retrytype", channel)
+	_, err := call(ctx, http.MethodGet, "/otp/retry", q)
 	return err
 }
 
 /*
-Verify checks a code against an in-flight attempt.
+Verify checks a code against the number it was sent to.
 
 Returns ErrBadCode for a wrong or expired code so the caller can tell a user
 error apart from an outage — they need very different handling, and conflating
-them is how a wrong code ends up looking like a server fault (or worse, how an
-outage ends up looking like a wrong code and burns the user's attempts).
+them is how a wrong code ends up looking like a server fault, or worse, how an
+outage ends up looking like a wrong code and burns the user's attempts.
 */
-func Verify(ctx context.Context, reqID, code string) error {
-	out, err := post(ctx, "/verifyOtp", map[string]any{
-		"widgetId": widgetID(),
-		"reqId":    reqID,
-		"otp":      code,
-	})
+func Verify(ctx context.Context, identifier, code string) error {
+	q := url.Values{}
+	q.Set("mobile", identifier)
+	q.Set("otp", code)
+	out, err := call(ctx, http.MethodGet, "/otp/verify", q)
 	if err == nil {
 		return nil
 	}
-	// MSG91 phrases these in prose and does not publish codes, so matching the
-	// message is the only option available. Anything unrecognised stays a
+	// MSG91 phrases these in prose and publishes no codes for them, so matching
+	// the message is the only option available. Anything unrecognised stays a
 	// generic error, which fails CLOSED — the user is told to try again rather
 	// than being let in.
 	m := strings.ToLower(out.Message)

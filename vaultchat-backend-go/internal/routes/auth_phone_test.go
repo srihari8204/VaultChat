@@ -195,13 +195,14 @@ func TestMsg91VerifyRejectsWrongCodeOnHTTP200(t *testing.T) {
 	t.Setenv("MSG91_WIDGET_ID", "test-widget")
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var body struct {
-			Otp string `json:"otp"`
-		}
-		_ = json.NewDecoder(r.Body).Decode(&body)
+		// The standalone OTP API takes the code as a QUERY PARAMETER, not a JSON
+		// body — that is the difference from the widget endpoints this used to
+		// speak to. Reading the body here would see "" and make the test pass
+		// for the wrong reason.
+		otp := r.URL.Query().Get("otp")
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK) // 200 for BOTH outcomes — MSG91's actual behaviour
-		if body.Otp == "123456" {
+		if otp == "123456" {
 			_, _ = w.Write([]byte(`{"type":"success","message":"OTP verified success"}`))
 			return
 		}
@@ -213,10 +214,10 @@ func TestMsg91VerifyRejectsWrongCodeOnHTTP200(t *testing.T) {
 	msg91.Base = srv.URL
 	defer func() { msg91.Base = old }()
 
-	if err := msg91.Verify(context.Background(), "req-1", "123456"); err != nil {
+	if err := msg91.Verify(context.Background(), "919876543210", "123456"); err != nil {
 		t.Errorf("correct code rejected: %v", err)
 	}
-	err := msg91.Verify(context.Background(), "req-1", "000000")
+	err := msg91.Verify(context.Background(), "919876543210", "000000")
 	if err == nil {
 		t.Fatal("A WRONG CODE WAS ACCEPTED — msg91.Verify is gating on the HTTP status, not `type`")
 	}
@@ -384,15 +385,27 @@ func TestResendReportsTheChannelItActuallyUsed(t *testing.T) {
 		t.Errorf("a voice resend that worked is being reported as a fallback: %v", ok)
 	}
 
-	// The channel words the app sends must map to MSG91's magic numbers, and an
-	// unknown one falls back to SMS rather than erroring mid-"didn't get it?".
-	for in, wantName := range map[string]string{"call": "voice", "voice": "voice", "WhatsApp": "whatsapp", "wa": "whatsapp", "": "sms", "carrier pigeon": "sms"} {
-		code, name := authPhoneChannel(in)
+	// The channel words the app sends must map to the channels the standalone
+	// OTP API actually has, and an unknown one falls back to SMS rather than
+	// erroring mid-"didn't get it?".
+	//
+	// WHATSAPP RESOLVES TO SMS, and that is the assertion worth having. The
+	// widget API had a WhatsApp retry channel; the standalone API has text and
+	// voice only. The client still offers it, so the mapping must degrade to
+	// SMS *and report itself as* "sms" — that name is what authPhoneSent turns
+	// into channelFallback, which is the difference between telling the user
+	// their code went by text and leaving them waiting on WhatsApp forever.
+	for in, wantName := range map[string]string{
+		"call": "voice", "voice": "voice",
+		"WhatsApp": "sms", "wa": "sms",
+		"": "sms", "carrier pigeon": "sms",
+	} {
+		ch, name := authPhoneChannel(in)
 		if name != wantName {
 			t.Errorf("authPhoneChannel(%q) named %q, want %q", in, name, wantName)
 		}
-		if name == "sms" && code != msg91.ChannelSMS || name == "voice" && code != msg91.ChannelVoice || name == "whatsapp" && code != msg91.ChannelWhatsApp {
-			t.Errorf("authPhoneChannel(%q) = %d, which is not the %s channel", in, code, name)
+		if name == "sms" && ch != msg91.ChannelSMS || name == "voice" && ch != msg91.ChannelVoice {
+			t.Errorf("authPhoneChannel(%q) = %q, which is not the %s channel", in, ch, name)
 		}
 	}
 }

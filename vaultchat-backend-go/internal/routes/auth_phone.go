@@ -254,18 +254,23 @@ func authOnboardSendOtpPhone(w http.ResponseWriter, r *http.Request) {
 
 // ── POST /auth/onboard/resend-otp-phone ────────────────────────────────
 
-// authPhoneChannel maps the app's words to MSG91's magic numbers. An unknown
-// value falls back to SMS rather than erroring: "didn't get it?" is the worst
-// moment to hand someone a validation failure.
+// authPhoneChannel maps the app's words to the channels MSG91's standalone OTP
+// API actually has. An unknown value falls back to SMS rather than erroring:
+// "didn't get it?" is the worst possible moment to hand someone a validation
+// failure.
 //
-// It also returns the CANONICAL NAME, because the response now has to state
-// which channel actually carried the code — see authOnboardResendOtpPhone.
-func authPhoneChannel(v any) (int, string) {
+// WHATSAPP IS GONE, AND THE SECOND RETURN VALUE IS WHY IT MATTERS. The widget
+// API had a WhatsApp retry channel; the standalone API has `text` and `voice`
+// and nothing else. The client still offers WhatsApp — deliberately, because
+// removing a working-looking option is worse than telling the truth about it —
+// so a WhatsApp request resolves to SMS and the canonical name comes back as
+// "sms". authPhoneSent then reports requestedChannel/channelFallback, and the
+// user is told the code went by text instead of silently wondering why no
+// WhatsApp message arrived.
+func authPhoneChannel(v any) (string, string) {
 	switch strings.ToLower(strings.TrimSpace(authStr(v))) {
 	case "voice", "call":
 		return msg91.ChannelVoice, "voice"
-	case "whatsapp", "wa":
-		return msg91.ChannelWhatsApp, "whatsapp"
 	default:
 		return msg91.ChannelSMS, "sms"
 	}
@@ -336,7 +341,7 @@ func authOnboardResendOtpPhone(w http.ResponseWriter, r *http.Request) {
 		authPhoneSent(w, "sms", wantName)
 		return
 	}
-	if err := msg91.Retry(ctx, reqID, want); err != nil {
+	if err := msg91.Retry(ctx, strings.TrimPrefix(e164, "+"), want); err != nil {
 		// Same reasoning as authPhoneStart: the provider refused, nothing was
 		// delivered, so the hourly allowance charged by the gate is given back.
 		authPhoneRefundSend(ctx, lookup)
