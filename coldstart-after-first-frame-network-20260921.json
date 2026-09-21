@@ -1,0 +1,37 @@
+{
+  "at": "2026-09-21T14:13:39.533Z",
+  "runs": 7,
+  "devices": [
+    {
+      "serial": "w4eygyinypswrcz9",
+      "model": "Redmi Note 8 Pro",
+      "brand": "Redmi",
+      "release": "11",
+      "sdk": "30",
+      "abi": "arm64-v8a",
+      "apps": [
+        {
+          "pkg": "com.vaultchat.app",
+          "activity": "com.vaultchat.app/.MainActivity",
+          "uid": 11396,
+          "version": "1.2.15",
+          "runs": [
+            1479,
+            1506,
+            1360,
+            1359,
+            1332,
+            1369,
+            1360
+          ],
+          "coldMedian": 1360,
+          "coldMin": 1332,
+          "coldMax": 1506,
+          "metric": "TotalTime",
+          "warmedSkipped": 0,
+          "connMs": 1578
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,203 @@
+{
+  "at": "2026-09-21T17:05:00.264Z",
+  "runs": 3,
+  "devices": [
+    {
+      "serial": "AWJDVB4702008616",
+      "model": "ELI-NX9",
+      "brand": "HONOR",
+      "release": "16",
+      "sdk": "36",
+      "abi": "arm64-v8a",
+      "apps": [
+        {
+          "pkg": "com.vaultchat.app",
+          "activity": "com.vaultchat.app/.MainActivity",
+          "uid": 10455,
+          "version": "1.2.15",
+          "runs": [
+            929,
+            886,
+            853
+          ],
+          "coldMedian": 886,
+          "coldMin": 853,
+          "coldMax": 929,
+          "metric": "TotalTime",
+          "warmedSkipped": 0,
+          "bootMarks": [
+            [
+              {
+                "event": "boot_effect_start",
+                "t": 1790010140607,
+                "sinceFirstMs": 0,
+                "sinceLaunchMs": 1088
+              },
+              {
+                "event": "boot_unblocked",
+                "t": 1790010140629,
+                "sinceFirstMs": 22,
+                "sinceLaunchMs": 1110
+              },
+              {
+                "event": "boot_deferred_start",
+                "t": 1790010140650,
+                "sinceFirstMs": 43,
+                "sinceLaunchMs": 1131
+              },
+              {
+                "event": "db_open_start",
+                "t": 1790010140653,
+                "sinceFirstMs": 46,
+                "sinceLaunchMs": 1134
+              },
+              {
+                "event": "transport_ccwire_pending",
+                "t": 1790010140658,
+                "sinceFirstMs": 51,
+                "sinceLaunchMs": 1139
+              },
+              {
+                "event": "db_ready",
+                "t": 1790010140689,
+                "sinceFirstMs": 82,
+                "sinceLaunchMs": 1170
+              },
+              {
+                "event": "chats_paint_cache",
+                "t": 1790010141228,
+                "sinceFirstMs": 621,
+                "sinceLaunchMs": 1709
+              },
+              {
+                "event": "transport_ccwire_ready",
+                "t": 1790010143353,
+                "sinceFirstMs": 2746,
+                "sinceLaunchMs": 3834
+              },
+              {
+                "event": "chats_paint_net",
+                "t": 1790010143450,
+                "sinceFirstMs": 2843,
+                "sinceLaunchMs": 3931
+              }
+            ],
+            [
+              {
+                "event": "boot_effect_start",
+                "t": 1790010152463,
+                "sinceFirstMs": 0,
+                "sinceLaunchMs": 1033
+              },
+              {
+                "event": "boot_unblocked",
+                "t": 1790010152489,
+                "sinceFirstMs": 26,
+                "sinceLaunchMs": 1059
+              },
+              {
+                "event": "boot_deferred_start",
+                "t": 1790010152506,
+                "sinceFirstMs": 43,
+                "sinceLaunchMs": 1076
+              },
+              {
+                "event": "db_open_start",
+                "t": 1790010152508,
+                "sinceFirstMs": 45,
+                "sinceLaunchMs": 1078
+              },
+              {
+                "event": "transport_ccwire_pending",
+                "t": 1790010152513,
+                "sinceFirstMs": 50,
+                "sinceLaunchMs": 1083
+              },
+              {
+                "event": "db_ready",
+                "t": 1790010152528,
+                "sinceFirstMs": 65,
+                "sinceLaunchMs": 1098
+              },
+              {
+                "event": "chats_paint_cache",
+                "t": 1790010153013,
+                "sinceFirstMs": 550,
+                "sinceLaunchMs": 1583
+              },
+              {
+                "event": "transport_ccwire_ready",
+                "t": 1790010153887,
+                "sinceFirstMs": 1424,
+                "sinceLaunchMs": 2457
+              },
+              {
+                "event": "chats_paint_net",
+                "t": 1790010154290,
+                "sinceFirstMs": 1827,
+                "sinceLaunchMs": 2860
+              }
+            ],
+            [
+              {
+                "event": "boot_effect_start",
+                "t": 1790010164402,
+                "sinceFirstMs": 0,
+                "sinceLaunchMs": 1132
+              },
+              {
+                "event": "boot_unblocked",
+                "t": 1790010164420,
+                "sinceFirstMs": 18,
+                "sinceLaunchMs": 1150
+              },
+              {
+                "event": "boot_deferred_start",
+                "t": 1790010164438,
+                "sinceFirstMs": 36,
+                "sinceLaunchMs": 1168
+              },
+              {
+                "event": "db_open_start",
+                "t": 1790010164440,
+                "sinceFirstMs": 38,
+                "sinceLaunchMs": 1170
+              },
+              {
+                "event": "transport_ccwire_pending",
+                "t": 1790010164445,
+                "sinceFirstMs": 43,
+                "sinceLaunchMs": 1175
+              },
+              {
+                "event": "db_ready",
+                "t": 1790010164462,
+                "sinceFirstMs": 60,
+                "sinceLaunchMs": 1192
+              },
+              {
+                "event": "chats_paint_cache",
+                "t": 1790010164923,
+                "sinceFirstMs": 521,
+                "sinceLaunchMs": 1653
+              },
+              {
+                "event": "transport_ccwire_ready",
+                "t": 1790010166430,
+                "sinceFirstMs": 2028,
+                "sinceLaunchMs": 3160
+              },
+              {
+                "event": "chats_paint_net",
+                "t": 1790010167758,
+                "sinceFirstMs": 3356,
+                "sinceLaunchMs": 4488
+              }
+            ]
+          ],
+          "connMs": 1018
+        }
+      ]
+    }
+  ]
+}

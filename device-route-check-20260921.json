@@ -1,0 +1,254 @@
+[
+  {
+    "mode": "yes",
+    "uri": "vaultchat://",
+    "ok": true,
+    "pid": "10317",
+    "labels": "Chats, Split view: pick two chats, , Search, Alerts, Start a temporary chat, Contacts, New broadcast, All, All",
+    "fatal": "",
+    "start": "Starting: Intent { act=android.intent.action.VIEW dat=vaultchat:///... pkg=com.vaultchat.app } | Status: ok | LaunchState: COLD | Activity: com.vaultchat.app/.MainActivity | TotalTime: 918 | WaitTime: 923 | Complete"
+  },
+  {
+    "mode": "yes",
+    "uri": "vaultchat://games",
+    "ok": true,
+    "pid": "10571",
+    "labels": "Chats, Split view: pick two chats, , Search, Alerts, Start a temporary chat, Contacts, New broadcast, All, All",
+    "fatal": "",
+    "start": "Starting: Intent { act=android.intent.action.VIEW dat=vaultchat://games/... pkg=com.vaultchat.app } | Status: ok | LaunchState: COLD | Activity: com.vaultchat.app/.MainActivity | TotalTime: 1195 | WaitTime: 1197 | Complete"
+  },
+  {
+    "mode": "yes",
+    "uri": "vaultchat://settings",
+    "ok": true,
+    "pid": "10985",
+    "labels": "Back, , Create your MPIN, A 6-digit PIN unlocks crazzychat",
+    "fatal": "",
+    "start": "Starting: Intent { act=android.intent.action.VIEW dat=vaultchat://settings/... pkg=com.vaultchat.app } | Status: ok | LaunchState: COLD | Activity: com.vaultchat.app/.MainActivity | TotalTime: 1007 | WaitTime: 1016 | Complete"
+  },
+  {
+    "mode": "yes",
+    "uri": "vaultchat://onboard",
+    "ok": true,
+    "pid": "11330",
+    "labels": "Back, , Create your MPIN, A 6-digit PIN unlocks crazzychat",
+    "fatal": "",
+    "start": "Starting: Intent { act=android.intent.action.VIEW dat=vaultchat://onboard/... pkg=com.vaultchat.app } | Status: ok | LaunchState: COLD | Activity: com.vaultchat.app/.MainActivity | TotalTime: 993 | WaitTime: 1001 | Complete"
+  },
+  {
+    "mode": "yes",
+    "uri": "vaultchat://onboard-mpin",
+    "ok": true,
+    "pid": "11634",
+    "labels": "Back, , Create your MPIN, A 6-digit PIN unlocks crazzychat",
+    "fatal": "",
+    "start": "Starting: Intent { act=android.intent.action.VIEW dat=vaultchat://onboard-mpin/... pkg=com.vaultchat.app } | Status: ok | LaunchState: COLD | Activity: com.vaultchat.app/.MainActivity | TotalTime: 932 | WaitTime: 935 | Complete"
+  },
+  {
+    "mode": "yes",
+    "uri": "vaultchat://security-questions",
+    "ok": true,
+    "pid": "11910",
+    "labels": "&#128737;️, Security Questions, Step 4 of 8 — Security Questions, Question 1, What was your first pet's name?, , What was your first pet's name?, , Your answer, Question 2, What is your mother's maiden name?, ",
+    "fatal": "",
+    "start": "Starting: Intent { act=android.intent.action.VIEW dat=vaultchat://security-questions/... pkg=com.vaultchat.app } | Status: ok | LaunchState: COLD | Activity: com.vaultchat.app/.MainActivity | TotalTime: 1006 | WaitTime: 1010 | Complete"
+  },
+  {
+    "mode": "yes",
+    "uri": "vaultchat://mpin-entry",
+    "ok": true,
+    "pid": "12175",
+    "labels": "Go back, , Welcome back, Forgot MPIN?, Forgot MPIN?",
+    "fatal": "",
+    "start": "Starting: Intent { act=android.intent.action.VIEW dat=vaultchat://mpin-entry/... pkg=com.vaultchat.app } | Status: ok | LaunchState: COLD | Activity: com.vaultchat.app/.MainActivity | TotalTime: 971 | WaitTime: 975 | Complete"
+  },
+  {
+    "mode": "yes",
+    "uri": "vaultchat://contacts",
+    "ok": true,
+    "pid": "12369",
+    "labels": "Go back, , Contacts, Refresh contacts, , On crazzychat (1), K, Kammu Ec, 77022 91840, Message →, K, Kammu Ec, 77022 91840",
+    "fatal": "",
+    "start": "Starting: Intent { act=android.intent.action.VIEW dat=vaultchat://contacts/... pkg=com.vaultchat.app } | Status: ok | LaunchState: COLD | Activity: com.google.android.permissioncontroller/com.android.permissioncontroller.permission.ui.GrantPermissionsActivity | TotalTime: 896 | WaitTime: 911 | Complete"
+  },
+  {
+    "mode": "yes",
+    "uri": "vaultchat://new-chat",
+    "ok": true,
+    "pid": "13043",
+    "labels": "Go back, , New chat, , Search name or number, , New group, , New group, , New community, ",
+    "fatal": "",
+    "start": "Starting: Intent { act=android.intent.action.VIEW dat=vaultchat://new-chat/... pkg=com.vaultchat.app } | Status: ok | LaunchState: COLD | Activity: com.vaultchat.app/.MainActivity | TotalTime: 1054 | WaitTime: 1057 | Complete"
+  },
+  {
+    "mode": "yes",
+    "uri": "vaultchat://search",
+    "ok": true,
+    "pid": "13274",
+    "labels": "Go back, , Search chats and messages…, Search chats and messages, CHATS, L, Leo B, Direct, L, Leo B, Direct, T, Testing, Group",
+    "fatal": "",
+    "start": "Starting: Intent { act=android.intent.action.VIEW dat=vaultchat://search/... pkg=com.vaultchat.app } | Status: ok | LaunchState: COLD | Activity: com.vaultchat.app/.MainActivity | TotalTime: 1051 | WaitTime: 1055 | Complete"
+  },
+  {
+    "mode": "yes",
+    "uri": "vaultchat://privacy-dashboard",
+    "ok": true,
+    "pid": "13560",
+    "labels": "Back, , Privacy Dashboard, Security Score, 20, Security Features, E2E Encryption, , E2E Encryption, Always On",
+    "fatal": "",
+    "start": "Starting: Intent { act=android.intent.action.VIEW dat=vaultchat://privacy-dashboard/... pkg=com.vaultchat.app } | Status: ok | LaunchState: COLD | Activity: com.vaultchat.app/.MainActivity | TotalTime: 1069 | WaitTime: 1077 | Complete"
+  },
+  {
+    "mode": "yes",
+    "uri": "vaultchat://vault",
+    "ok": true,
+    "pid": "13766",
+    "labels": "&#128274;, Vault, Enter 8-digit PIN to access, 1, 1, 2, 2, 3, 3, 4",
+    "fatal": "",
+    "start": "Starting: Intent { act=android.intent.action.VIEW dat=vaultchat://vault/... pkg=com.vaultchat.app } | Status: ok | LaunchState: COLD | Activity: com.vaultchat.app/.MainActivity | TotalTime: 994 | WaitTime: 997 | Complete"
+  },
+  {
+    "mode": "yes",
+    "uri": "vaultchat://finance",
+    "ok": true,
+    "pid": "13973",
+    "labels": "Go back, , Vault Finance, All money tools in one place, Search finance, , Reminders, , TOTAL OVERVIEW · THIS MONTH, Total Lent",
+    "fatal": "",
+    "start": "Starting: Intent { act=android.intent.action.VIEW dat=vaultchat://finance/... pkg=com.vaultchat.app } | Status: ok | LaunchState: COLD | Activity: com.vaultchat.app/.MainActivity | TotalTime: 993 | WaitTime: 1003 | Complete"
+  },
+  {
+    "mode": "yes",
+    "uri": "vaultchat://family",
+    "ok": true,
+    "pid": "14255",
+    "labels": "Back, , Testing, Open the group chat, , Invite member, , Space options, , Good evening, Me &#128075;",
+    "fatal": "",
+    "start": "Starting: Intent { act=android.intent.action.VIEW dat=vaultchat://family/... pkg=com.vaultchat.app } | Status: ok | LaunchState: COLD | Activity: com.vaultchat.app/.MainActivity | TotalTime: 926 | WaitTime: 932 | Complete"
+  },
+  {
+    "mode": "no",
+    "uri": "vaultchat://",
+    "ok": true,
+    "pid": "14776",
+    "labels": "Chats, Split view: pick two chats, , Search, Alerts, Start a temporary chat, Contacts, New broadcast, All, All",
+    "fatal": "",
+    "start": "Starting: Intent { act=android.intent.action.VIEW dat=vaultchat:///... pkg=com.vaultchat.app } | Status: ok | LaunchState: COLD | Activity: com.vaultchat.app/.MainActivity | TotalTime: 1661 | WaitTime: 1679 | Complete"
+  },
+  {
+    "mode": "no",
+    "uri": "vaultchat://games",
+    "ok": true,
+    "pid": "15142",
+    "labels": "Back, , Games, 1000 play coins, 1000, Game sound on, , Chess, Quick match at Chess, ",
+    "fatal": "",
+    "start": "Starting: Intent { act=android.intent.action.VIEW dat=vaultchat://games/... pkg=com.vaultchat.app } | Status: ok | LaunchState: COLD | Activity: com.vaultchat.app/.MainActivity | TotalTime: 1188 | WaitTime: 1191 | Complete"
+  },
+  {
+    "mode": "no",
+    "uri": "vaultchat://settings",
+    "ok": true,
+    "pid": "15455",
+    "labels": "Back, , Settings, S, Srihari B, Hug, S, Srihari B, Hug, Show your QR code, , APPEARANCE",
+    "fatal": "",
+    "start": "Starting: Intent { act=android.intent.action.VIEW dat=vaultchat://settings/... pkg=com.vaultchat.app } | Status: ok | LaunchState: COLD | Activity: com.vaultchat.app/.MainActivity | TotalTime: 965 | WaitTime: 970 | Complete"
+  },
+  {
+    "mode": "no",
+    "uri": "vaultchat://onboard",
+    "ok": false,
+    "pid": "",
+    "labels": "Screen 3 of 6, Weather, Thubarahalli, ThubarahalliCurrent location, 5:32 pm, 5:32, Mon, 21 Sept, Monday, 21 Sept, Light rain, ‪29°‬",
+    "fatal": "",
+    "start": "Starting: Intent { act=android.intent.action.VIEW dat=vaultchat://onboard/... pkg=com.vaultchat.app } | Status: ok | LaunchState: UNKNOWN (0) | Activity: com.vaultchat.app/.MainActivity | WaitTime: 60 | Complete"
+  },
+  {
+    "mode": "no",
+    "uri": "vaultchat://onboard-mpin",
+    "ok": true,
+    "pid": "15762",
+    "labels": "Back, , Create your MPIN, A 6-digit PIN unlocks crazzychat",
+    "fatal": "",
+    "start": "Starting: Intent { act=android.intent.action.VIEW dat=vaultchat://onboard-mpin/... pkg=com.vaultchat.app } | Status: ok | LaunchState: COLD | Activity: com.vaultchat.app/.MainActivity | TotalTime: 923 | WaitTime: 928 | Complete"
+  },
+  {
+    "mode": "no",
+    "uri": "vaultchat://security-questions",
+    "ok": true,
+    "pid": "15987",
+    "labels": "Back, , Games, Game sound on, , Chess, Quick match at Chess, , Rummy, Quick match at Rummy",
+    "fatal": "",
+    "start": "Starting: Intent { act=android.intent.action.VIEW dat=vaultchat://security-questions/... pkg=com.vaultchat.app } | Status: ok | LaunchState: COLD | Activity: com.vaultchat.app/.MainActivity | TotalTime: 942 | WaitTime: 947 | Complete"
+  },
+  {
+    "mode": "no",
+    "uri": "vaultchat://mpin-entry",
+    "ok": true,
+    "pid": "16245",
+    "labels": "Go back, , Welcome back, Forgot MPIN?, Forgot MPIN?",
+    "fatal": "",
+    "start": "Starting: Intent { act=android.intent.action.VIEW dat=vaultchat://mpin-entry/... pkg=com.vaultchat.app } | Status: ok | LaunchState: COLD | Activity: com.vaultchat.app/.MainActivity | TotalTime: 961 | WaitTime: 964 | Complete"
+  },
+  {
+    "mode": "no",
+    "uri": "vaultchat://contacts",
+    "ok": true,
+    "pid": "16613",
+    "labels": "Go back, , Welcome back, Forgot MPIN?, Forgot MPIN?",
+    "fatal": "",
+    "start": "Starting: Intent { act=android.intent.action.VIEW dat=vaultchat://contacts/... pkg=com.vaultchat.app } | Status: ok | LaunchState: COLD | Activity: com.google.android.permissioncontroller/com.android.permissioncontroller.permission.ui.GrantPermissionsActivity | TotalTime: 1192 | WaitTime: 1216 | Complete"
+  },
+  {
+    "mode": "no",
+    "uri": "vaultchat://new-chat",
+    "ok": true,
+    "pid": "17029",
+    "labels": "Go back, , New chat, , Search name or number, , New group, , New group, , New community, ",
+    "fatal": "",
+    "start": "Starting: Intent { act=android.intent.action.VIEW dat=vaultchat://new-chat/... pkg=com.vaultchat.app } | Status: ok | LaunchState: COLD | Activity: com.vaultchat.app/.MainActivity | TotalTime: 1064 | WaitTime: 1067 | Complete"
+  },
+  {
+    "mode": "no",
+    "uri": "vaultchat://search",
+    "ok": true,
+    "pid": "17350",
+    "labels": "Go back, , Search chats and messages…, Search chats and messages, CHATS, L, Leo B, Direct, L, Leo B, Direct, T, Testing, Group",
+    "fatal": "",
+    "start": "Starting: Intent { act=android.intent.action.VIEW dat=vaultchat://search/... pkg=com.vaultchat.app } | Status: ok | LaunchState: COLD | Activity: com.vaultchat.app/.MainActivity | TotalTime: 1080 | WaitTime: 1084 | Complete"
+  },
+  {
+    "mode": "no",
+    "uri": "vaultchat://privacy-dashboard",
+    "ok": true,
+    "pid": "17610",
+    "labels": "Back, , Privacy Dashboard, Security Score, 20, Security Features, E2E Encryption, , E2E Encryption, Always On",
+    "fatal": "",
+    "start": "Starting: Intent { act=android.intent.action.VIEW dat=vaultchat://privacy-dashboard/... pkg=com.vaultchat.app } | Status: ok | LaunchState: COLD | Activity: com.vaultchat.app/.MainActivity | TotalTime: 1024 | WaitTime: 1027 | Complete"
+  },
+  {
+    "mode": "no",
+    "uri": "vaultchat://vault",
+    "ok": true,
+    "pid": "17826",
+    "labels": "&#128274;, Vault, Enter 8-digit PIN to access, 1, 1, 2, 2, 3, 3, 4",
+    "fatal": "",
+    "start": "Starting: Intent { act=android.intent.action.VIEW dat=vaultchat://vault/... pkg=com.vaultchat.app } | Status: ok | LaunchState: COLD | Activity: com.vaultchat.app/.MainActivity | TotalTime: 940 | WaitTime: 943 | Complete"
+  },
+  {
+    "mode": "no",
+    "uri": "vaultchat://finance",
+    "ok": true,
+    "pid": "18023",
+    "labels": "Go back, , Vault Finance, All money tools in one place, Search finance, , Reminders, , TOTAL OVERVIEW · THIS MONTH, Total Lent",
+    "fatal": "",
+    "start": "Starting: Intent { act=android.intent.action.VIEW dat=vaultchat://finance/... pkg=com.vaultchat.app } | Status: ok | LaunchState: COLD | Activity: com.vaultchat.app/.MainActivity | TotalTime: 916 | WaitTime: 921 | Complete"
+  },
+  {
+    "mode": "no",
+    "uri": "vaultchat://family",
+    "ok": true,
+    "pid": "18230",
+    "labels": "Back, , Testing, Open the group chat, , Invite member, , Space options, , Good evening, Me &#128075;",
+    "fatal": "",
+    "start": "Starting: Intent { act=android.intent.action.VIEW dat=vaultchat://family/... pkg=com.vaultchat.app } | Status: ok | LaunchState: COLD | Activity: com.vaultchat.app/.MainActivity | TotalTime: 874 | WaitTime: 877 | Complete"
+  }
+]

@@ -1,0 +1,282 @@
+{
+  "at": "2026-09-21T17:00:46.206Z",
+  "runs": 5,
+  "devices": [
+    {
+      "serial": "AWJDVB4702008616",
+      "model": "ELI-NX9",
+      "brand": "HONOR",
+      "release": "16",
+      "sdk": "36",
+      "abi": "arm64-v8a",
+      "apps": [
+        {
+          "pkg": "com.vaultchat.app",
+          "activity": "com.vaultchat.app/.MainActivity",
+          "uid": 10455,
+          "version": "1.2.15",
+          "runs": [
+            1172,
+            879,
+            880,
+            850,
+            823
+          ],
+          "coldMedian": 879,
+          "coldMin": 823,
+          "coldMax": 1172,
+          "metric": "TotalTime",
+          "warmedSkipped": 0,
+          "bootMarks": [
+            [
+              {
+                "event": "boot_effect_start",
+                "t": 1790009863769,
+                "sinceFirstMs": 0
+              },
+              {
+                "event": "boot_unblocked",
+                "t": 1790009863782,
+                "sinceFirstMs": 13
+              },
+              {
+                "event": "boot_deferred_start",
+                "t": 1790009863814,
+                "sinceFirstMs": 45
+              },
+              {
+                "event": "db_open_start",
+                "t": 1790009863818,
+                "sinceFirstMs": 49
+              },
+              {
+                "event": "transport_ccwire_pending",
+                "t": 1790009863827,
+                "sinceFirstMs": 58
+              },
+              {
+                "event": "db_ready",
+                "t": 1790009863844,
+                "sinceFirstMs": 75
+              },
+              {
+                "event": "chats_paint_cache",
+                "t": 1790009864404,
+                "sinceFirstMs": 635
+              },
+              {
+                "event": "transport_ccwire_unavailable",
+                "t": 1790009865187,
+                "sinceFirstMs": 1418
+              },
+              {
+                "event": "transport_ccwire_off",
+                "t": 1790009866028,
+                "sinceFirstMs": 2259
+              },
+              {
+                "event": "transport_ccwire_pending",
+                "t": 1790009866028,
+                "sinceFirstMs": 2259
+              },
+              {
+                "event": "chats_paint_net",
+                "t": 1790009867049,
+                "sinceFirstMs": 3280
+              },
+              {
+                "event": "transport_ccwire_ready",
+                "t": 1790009867677,
+                "sinceFirstMs": 3908
+              }
+            ],
+            [
+              {
+                "event": "boot_effect_start",
+                "t": 1790009875479,
+                "sinceFirstMs": 0
+              },
+              {
+                "event": "boot_unblocked",
+                "t": 1790009875489,
+                "sinceFirstMs": 10
+              },
+              {
+                "event": "boot_deferred_start",
+                "t": 1790009875509,
+                "sinceFirstMs": 30
+              },
+              {
+                "event": "db_open_start",
+                "t": 1790009875511,
+                "sinceFirstMs": 32
+              },
+              {
+                "event": "transport_ccwire_pending",
+                "t": 1790009875516,
+                "sinceFirstMs": 37
+              },
+              {
+                "event": "db_ready",
+                "t": 1790009875543,
+                "sinceFirstMs": 64
+              },
+              {
+                "event": "chats_paint_cache",
+                "t": 1790009875988,
+                "sinceFirstMs": 509
+              },
+              {
+                "event": "transport_ccwire_ready",
+                "t": 1790009878309,
+                "sinceFirstMs": 2830
+              },
+              {
+                "event": "chats_paint_net",
+                "t": 1790009879505,
+                "sinceFirstMs": 4026
+              }
+            ],
+            [
+              {
+                "event": "boot_effect_start",
+                "t": 1790009887105,
+                "sinceFirstMs": 0
+              },
+              {
+                "event": "boot_unblocked",
+                "t": 1790009887139,
+                "sinceFirstMs": 34
+              },
+              {
+                "event": "boot_deferred_start",
+                "t": 1790009887156,
+                "sinceFirstMs": 51
+              },
+              {
+                "event": "db_open_start",
+                "t": 1790009887158,
+                "sinceFirstMs": 53
+              },
+              {
+                "event": "transport_ccwire_pending",
+                "t": 1790009887162,
+                "sinceFirstMs": 57
+              },
+              {
+                "event": "db_ready",
+                "t": 1790009887179,
+                "sinceFirstMs": 74
+              },
+              {
+                "event": "chats_paint_cache",
+                "t": 1790009887626,
+                "sinceFirstMs": 521
+              },
+              {
+                "event": "transport_ccwire_ready",
+                "t": 1790009892130,
+                "sinceFirstMs": 5025
+              }
+            ],
+            [
+              {
+                "event": "boot_effect_start",
+                "t": 1790009898833,
+                "sinceFirstMs": 0
+              },
+              {
+                "event": "boot_unblocked",
+                "t": 1790009898855,
+                "sinceFirstMs": 22
+              },
+              {
+                "event": "boot_deferred_start",
+                "t": 1790009898874,
+                "sinceFirstMs": 41
+              },
+              {
+                "event": "db_open_start",
+                "t": 1790009898876,
+                "sinceFirstMs": 43
+              },
+              {
+                "event": "transport_ccwire_pending",
+                "t": 1790009898880,
+                "sinceFirstMs": 47
+              },
+              {
+                "event": "db_ready",
+                "t": 1790009898894,
+                "sinceFirstMs": 61
+              },
+              {
+                "event": "chats_paint_cache",
+                "t": 1790009899342,
+                "sinceFirstMs": 509
+              },
+              {
+                "event": "transport_ccwire_ready",
+                "t": 1790009900220,
+                "sinceFirstMs": 1387
+              },
+              {
+                "event": "chats_paint_net",
+                "t": 1790009900572,
+                "sinceFirstMs": 1739
+              }
+            ],
+            [
+              {
+                "event": "boot_effect_start",
+                "t": 1790009910445,
+                "sinceFirstMs": 0
+              },
+              {
+                "event": "boot_unblocked",
+                "t": 1790009910454,
+                "sinceFirstMs": 9
+              },
+              {
+                "event": "boot_deferred_start",
+                "t": 1790009910475,
+                "sinceFirstMs": 30
+              },
+              {
+                "event": "db_open_start",
+                "t": 1790009910477,
+                "sinceFirstMs": 32
+              },
+              {
+                "event": "transport_ccwire_pending",
+                "t": 1790009910486,
+                "sinceFirstMs": 41
+              },
+              {
+                "event": "db_ready",
+                "t": 1790009910500,
+                "sinceFirstMs": 55
+              },
+              {
+                "event": "chats_paint_cache",
+                "t": 1790009910946,
+                "sinceFirstMs": 501
+              },
+              {
+                "event": "transport_ccwire_ready",
+                "t": 1790009911906,
+                "sinceFirstMs": 1461
+              },
+              {
+                "event": "chats_paint_net",
+                "t": 1790009912175,
+                "sinceFirstMs": 1730
+              }
+            ]
+          ],
+          "connMs": 1063
+        }
+      ]
+    }
+  ]
+}

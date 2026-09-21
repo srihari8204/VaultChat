@@ -1,0 +1,64 @@
+{
+  "at": "2026-09-21T13:56:24.269Z",
+  "runs": 5,
+  "devices": [
+    {
+      "serial": "AWJDVB4702008616",
+      "model": "ELI-NX9",
+      "brand": "HONOR",
+      "release": "16",
+      "sdk": "36",
+      "abi": "arm64-v8a",
+      "apps": [
+        {
+          "pkg": "com.vaultchat.app",
+          "activity": "com.vaultchat.app/.MainActivity",
+          "uid": 10455,
+          "version": "1.2.15",
+          "runs": [
+            1101,
+            1060,
+            1006,
+            949,
+            1043
+          ],
+          "coldMedian": 1043,
+          "coldMin": 949,
+          "coldMax": 1101,
+          "metric": "TotalTime",
+          "warmedSkipped": 0,
+          "connMs": 1026
+        }
+      ]
+    },
+    {
+      "serial": "w4eygyinypswrcz9",
+      "model": "Redmi Note 8 Pro",
+      "brand": "Redmi",
+      "release": "11",
+      "sdk": "30",
+      "abi": "arm64-v8a",
+      "apps": [
+        {
+          "pkg": "com.vaultchat.app",
+          "activity": "com.vaultchat.app/.MainActivity",
+          "uid": 11396,
+          "version": "1.2.15",
+          "runs": [
+            1596,
+            1322,
+            1350,
+            1365,
+            1344
+          ],
+          "coldMedian": 1350,
+          "coldMin": 1322,
+          "coldMax": 1596,
+          "metric": "TotalTime",
+          "warmedSkipped": 0,
+          "connMs": 1477
+        }
+      ]
+    }
+  ]
+}

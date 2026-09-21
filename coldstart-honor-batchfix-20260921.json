@@ -1,0 +1,659 @@
+{
+  "at": "2026-09-21T17:44:42.302Z",
+  "runs": 7,
+  "devices": [
+    {
+      "serial": "AWJDVB4702008616",
+      "model": "ELI-NX9",
+      "brand": "HONOR",
+      "release": "16",
+      "sdk": "36",
+      "abi": "arm64-v8a",
+      "apps": [
+        {
+          "pkg": "com.vaultchat.app",
+          "activity": "com.vaultchat.app/.MainActivity",
+          "uid": 10455,
+          "version": "1.2.15",
+          "runs": [
+            1808,
+            1677,
+            900,
+            846,
+            867,
+            863,
+            845
+          ],
+          "coldMedian": 867,
+          "coldMin": 845,
+          "coldMax": 1808,
+          "metric": "TotalTime",
+          "warmedSkipped": 0,
+          "bootMarks": [
+            [
+              {
+                "event": "boot_effect_start",
+                "t": 1790012474673,
+                "sinceFirstMs": 0,
+                "sinceLaunchMs": 2064
+              },
+              {
+                "event": "socket_connect_start",
+                "t": 1790012474678,
+                "sinceFirstMs": 5,
+                "sinceLaunchMs": 2069
+              },
+              {
+                "event": "boot_unblocked",
+                "t": 1790012474698,
+                "sinceFirstMs": 25,
+                "sinceLaunchMs": 2089
+              },
+              {
+                "event": "boot_deferred_start",
+                "t": 1790012474719,
+                "sinceFirstMs": 46,
+                "sinceLaunchMs": 2110
+              },
+              {
+                "event": "db_open_start",
+                "t": 1790012474725,
+                "sinceFirstMs": 52,
+                "sinceLaunchMs": 2116
+              },
+              {
+                "event": "socket_token_ready",
+                "t": 1790012474733,
+                "sinceFirstMs": 60,
+                "sinceLaunchMs": 2124
+              },
+              {
+                "event": "transport_ccwire_pending",
+                "t": 1790012474735,
+                "sinceFirstMs": 62,
+                "sinceLaunchMs": 2126
+              },
+              {
+                "event": "db_ready",
+                "t": 1790012474775,
+                "sinceFirstMs": 102,
+                "sinceLaunchMs": 2166
+              },
+              {
+                "event": "chats_paint_cache",
+                "t": 1790012475091,
+                "sinceFirstMs": 418,
+                "sinceLaunchMs": 2482
+              },
+              {
+                "event": "chats_fetch_start",
+                "t": 1790012475091,
+                "sinceFirstMs": 418,
+                "sinceLaunchMs": 2482
+              },
+              {
+                "event": "transport_ccwire_unavailable",
+                "t": 1790012475926,
+                "sinceFirstMs": 1253,
+                "sinceLaunchMs": 3317
+              },
+              {
+                "event": "transport_ccwire_off",
+                "t": 1790012476852,
+                "sinceFirstMs": 2179,
+                "sinceLaunchMs": 4243
+              },
+              {
+                "event": "transport_ccwire_pending",
+                "t": 1790012476852,
+                "sinceFirstMs": 2179,
+                "sinceLaunchMs": 4243
+              },
+              {
+                "event": "chats_fetch_done",
+                "t": 1790012477148,
+                "sinceFirstMs": 2475,
+                "sinceLaunchMs": 4539
+              },
+              {
+                "event": "chats_paint_net",
+                "t": 1790012477150,
+                "sinceFirstMs": 2477,
+                "sinceLaunchMs": 4541
+              },
+              {
+                "event": "transport_ccwire_ready",
+                "t": 1790012478471,
+                "sinceFirstMs": 3798,
+                "sinceLaunchMs": 5862
+              },
+              {
+                "event": "socket_connect_ready",
+                "t": 1790012478474,
+                "sinceFirstMs": 3801,
+                "sinceLaunchMs": 5865
+              }
+            ],
+            [
+              {
+                "event": "boot_effect_start",
+                "t": 1790012487421,
+                "sinceFirstMs": 0,
+                "sinceLaunchMs": 1857
+              },
+              {
+                "event": "socket_connect_start",
+                "t": 1790012487426,
+                "sinceFirstMs": 5,
+                "sinceLaunchMs": 1862
+              },
+              {
+                "event": "boot_unblocked",
+                "t": 1790012487437,
+                "sinceFirstMs": 16,
+                "sinceLaunchMs": 1873
+              },
+              {
+                "event": "boot_deferred_start",
+                "t": 1790012487467,
+                "sinceFirstMs": 46,
+                "sinceLaunchMs": 1903
+              },
+              {
+                "event": "db_open_start",
+                "t": 1790012487470,
+                "sinceFirstMs": 49,
+                "sinceLaunchMs": 1906
+              },
+              {
+                "event": "socket_token_ready",
+                "t": 1790012487474,
+                "sinceFirstMs": 53,
+                "sinceLaunchMs": 1910
+              },
+              {
+                "event": "transport_ccwire_pending",
+                "t": 1790012487475,
+                "sinceFirstMs": 54,
+                "sinceLaunchMs": 1911
+              },
+              {
+                "event": "db_ready",
+                "t": 1790012487496,
+                "sinceFirstMs": 75,
+                "sinceLaunchMs": 1932
+              },
+              {
+                "event": "chats_paint_cache",
+                "t": 1790012487777,
+                "sinceFirstMs": 356,
+                "sinceLaunchMs": 2213
+              },
+              {
+                "event": "chats_fetch_start",
+                "t": 1790012487777,
+                "sinceFirstMs": 356,
+                "sinceLaunchMs": 2213
+              },
+              {
+                "event": "transport_ccwire_ready",
+                "t": 1790012488712,
+                "sinceFirstMs": 1291,
+                "sinceLaunchMs": 3148
+              },
+              {
+                "event": "socket_connect_ready",
+                "t": 1790012488721,
+                "sinceFirstMs": 1300,
+                "sinceLaunchMs": 3157
+              },
+              {
+                "event": "chats_fetch_done",
+                "t": 1790012488942,
+                "sinceFirstMs": 1521,
+                "sinceLaunchMs": 3378
+              },
+              {
+                "event": "chats_paint_net",
+                "t": 1790012488942,
+                "sinceFirstMs": 1521,
+                "sinceLaunchMs": 3378
+              }
+            ],
+            [
+              {
+                "event": "boot_effect_start",
+                "t": 1790012499278,
+                "sinceFirstMs": 0,
+                "sinceLaunchMs": 1051
+              },
+              {
+                "event": "socket_connect_start",
+                "t": 1790012499284,
+                "sinceFirstMs": 6,
+                "sinceLaunchMs": 1057
+              },
+              {
+                "event": "boot_unblocked",
+                "t": 1790012499300,
+                "sinceFirstMs": 22,
+                "sinceLaunchMs": 1073
+              },
+              {
+                "event": "boot_deferred_start",
+                "t": 1790012499318,
+                "sinceFirstMs": 40,
+                "sinceLaunchMs": 1091
+              },
+              {
+                "event": "db_open_start",
+                "t": 1790012499320,
+                "sinceFirstMs": 42,
+                "sinceLaunchMs": 1093
+              },
+              {
+                "event": "socket_token_ready",
+                "t": 1790012499324,
+                "sinceFirstMs": 46,
+                "sinceLaunchMs": 1097
+              },
+              {
+                "event": "transport_ccwire_pending",
+                "t": 1790012499326,
+                "sinceFirstMs": 48,
+                "sinceLaunchMs": 1099
+              },
+              {
+                "event": "db_ready",
+                "t": 1790012499359,
+                "sinceFirstMs": 81,
+                "sinceLaunchMs": 1132
+              },
+              {
+                "event": "chats_paint_cache",
+                "t": 1790012499607,
+                "sinceFirstMs": 329,
+                "sinceLaunchMs": 1380
+              },
+              {
+                "event": "chats_fetch_start",
+                "t": 1790012499607,
+                "sinceFirstMs": 329,
+                "sinceLaunchMs": 1380
+              },
+              {
+                "event": "transport_ccwire_ready",
+                "t": 1790012503259,
+                "sinceFirstMs": 3981,
+                "sinceLaunchMs": 5032
+              },
+              {
+                "event": "socket_connect_ready",
+                "t": 1790012503265,
+                "sinceFirstMs": 3987,
+                "sinceLaunchMs": 5038
+              },
+              {
+                "event": "chats_fetch_done",
+                "t": 1790012503282,
+                "sinceFirstMs": 4004,
+                "sinceLaunchMs": 5055
+              },
+              {
+                "event": "chats_paint_net",
+                "t": 1790012503282,
+                "sinceFirstMs": 4004,
+                "sinceLaunchMs": 5055
+              }
+            ],
+            [
+              {
+                "event": "boot_effect_start",
+                "t": 1790012511075,
+                "sinceFirstMs": 0,
+                "sinceLaunchMs": 1015
+              },
+              {
+                "event": "socket_connect_start",
+                "t": 1790012511081,
+                "sinceFirstMs": 6,
+                "sinceLaunchMs": 1021
+              },
+              {
+                "event": "boot_unblocked",
+                "t": 1790012511099,
+                "sinceFirstMs": 24,
+                "sinceLaunchMs": 1039
+              },
+              {
+                "event": "boot_deferred_start",
+                "t": 1790012511119,
+                "sinceFirstMs": 44,
+                "sinceLaunchMs": 1059
+              },
+              {
+                "event": "db_open_start",
+                "t": 1790012511121,
+                "sinceFirstMs": 46,
+                "sinceLaunchMs": 1061
+              },
+              {
+                "event": "socket_token_ready",
+                "t": 1790012511125,
+                "sinceFirstMs": 50,
+                "sinceLaunchMs": 1065
+              },
+              {
+                "event": "transport_ccwire_pending",
+                "t": 1790012511127,
+                "sinceFirstMs": 52,
+                "sinceLaunchMs": 1067
+              },
+              {
+                "event": "db_ready",
+                "t": 1790012511157,
+                "sinceFirstMs": 82,
+                "sinceLaunchMs": 1097
+              },
+              {
+                "event": "chats_paint_cache",
+                "t": 1790012511411,
+                "sinceFirstMs": 336,
+                "sinceLaunchMs": 1351
+              },
+              {
+                "event": "chats_fetch_start",
+                "t": 1790012511412,
+                "sinceFirstMs": 337,
+                "sinceLaunchMs": 1352
+              },
+              {
+                "event": "transport_ccwire_ready",
+                "t": 1790012512675,
+                "sinceFirstMs": 1600,
+                "sinceLaunchMs": 2615
+              },
+              {
+                "event": "socket_connect_ready",
+                "t": 1790012512681,
+                "sinceFirstMs": 1606,
+                "sinceLaunchMs": 2621
+              },
+              {
+                "event": "chats_fetch_done",
+                "t": 1790012512706,
+                "sinceFirstMs": 1631,
+                "sinceLaunchMs": 2646
+              },
+              {
+                "event": "chats_paint_net",
+                "t": 1790012512706,
+                "sinceFirstMs": 1631,
+                "sinceLaunchMs": 2646
+              }
+            ],
+            [
+              {
+                "event": "boot_effect_start",
+                "t": 1790012522866,
+                "sinceFirstMs": 0,
+                "sinceLaunchMs": 1032
+              },
+              {
+                "event": "socket_connect_start",
+                "t": 1790012522869,
+                "sinceFirstMs": 3,
+                "sinceLaunchMs": 1035
+              },
+              {
+                "event": "boot_unblocked",
+                "t": 1790012522874,
+                "sinceFirstMs": 8,
+                "sinceLaunchMs": 1040
+              },
+              {
+                "event": "boot_deferred_start",
+                "t": 1790012522902,
+                "sinceFirstMs": 36,
+                "sinceLaunchMs": 1068
+              },
+              {
+                "event": "db_open_start",
+                "t": 1790012522904,
+                "sinceFirstMs": 38,
+                "sinceLaunchMs": 1070
+              },
+              {
+                "event": "socket_token_ready",
+                "t": 1790012522908,
+                "sinceFirstMs": 42,
+                "sinceLaunchMs": 1074
+              },
+              {
+                "event": "transport_ccwire_pending",
+                "t": 1790012522910,
+                "sinceFirstMs": 44,
+                "sinceLaunchMs": 1076
+              },
+              {
+                "event": "db_ready",
+                "t": 1790012522925,
+                "sinceFirstMs": 59,
+                "sinceLaunchMs": 1091
+              },
+              {
+                "event": "chats_paint_cache",
+                "t": 1790012523165,
+                "sinceFirstMs": 299,
+                "sinceLaunchMs": 1331
+              },
+              {
+                "event": "chats_fetch_start",
+                "t": 1790012523165,
+                "sinceFirstMs": 299,
+                "sinceLaunchMs": 1331
+              },
+              {
+                "event": "transport_ccwire_ready",
+                "t": 1790012524210,
+                "sinceFirstMs": 1344,
+                "sinceLaunchMs": 2376
+              },
+              {
+                "event": "socket_connect_ready",
+                "t": 1790012524216,
+                "sinceFirstMs": 1350,
+                "sinceLaunchMs": 2382
+              },
+              {
+                "event": "chats_fetch_done",
+                "t": 1790012524557,
+                "sinceFirstMs": 1691,
+                "sinceLaunchMs": 2723
+              },
+              {
+                "event": "chats_paint_net",
+                "t": 1790012524558,
+                "sinceFirstMs": 1692,
+                "sinceLaunchMs": 2724
+              }
+            ],
+            [
+              {
+                "event": "boot_effect_start",
+                "t": 1790012534660,
+                "sinceFirstMs": 0,
+                "sinceLaunchMs": 1028
+              },
+              {
+                "event": "socket_connect_start",
+                "t": 1790012534664,
+                "sinceFirstMs": 4,
+                "sinceLaunchMs": 1032
+              },
+              {
+                "event": "boot_unblocked",
+                "t": 1790012534681,
+                "sinceFirstMs": 21,
+                "sinceLaunchMs": 1049
+              },
+              {
+                "event": "boot_deferred_start",
+                "t": 1790012534698,
+                "sinceFirstMs": 38,
+                "sinceLaunchMs": 1066
+              },
+              {
+                "event": "db_open_start",
+                "t": 1790012534700,
+                "sinceFirstMs": 40,
+                "sinceLaunchMs": 1068
+              },
+              {
+                "event": "socket_token_ready",
+                "t": 1790012534704,
+                "sinceFirstMs": 44,
+                "sinceLaunchMs": 1072
+              },
+              {
+                "event": "transport_ccwire_pending",
+                "t": 1790012534706,
+                "sinceFirstMs": 46,
+                "sinceLaunchMs": 1074
+              },
+              {
+                "event": "db_ready",
+                "t": 1790012534723,
+                "sinceFirstMs": 63,
+                "sinceLaunchMs": 1091
+              },
+              {
+                "event": "chats_paint_cache",
+                "t": 1790012534974,
+                "sinceFirstMs": 314,
+                "sinceLaunchMs": 1342
+              },
+              {
+                "event": "chats_fetch_start",
+                "t": 1790012534975,
+                "sinceFirstMs": 315,
+                "sinceLaunchMs": 1343
+              },
+              {
+                "event": "chats_fetch_done",
+                "t": 1790012535867,
+                "sinceFirstMs": 1207,
+                "sinceLaunchMs": 2235
+              },
+              {
+                "event": "chats_paint_net",
+                "t": 1790012535868,
+                "sinceFirstMs": 1208,
+                "sinceLaunchMs": 2236
+              },
+              {
+                "event": "transport_ccwire_ready",
+                "t": 1790012535927,
+                "sinceFirstMs": 1267,
+                "sinceLaunchMs": 2295
+              },
+              {
+                "event": "socket_connect_ready",
+                "t": 1790012535930,
+                "sinceFirstMs": 1270,
+                "sinceLaunchMs": 2298
+              }
+            ],
+            [
+              {
+                "event": "boot_effect_start",
+                "t": 1790012546389,
+                "sinceFirstMs": 0,
+                "sinceLaunchMs": 1001
+              },
+              {
+                "event": "socket_connect_start",
+                "t": 1790012546393,
+                "sinceFirstMs": 4,
+                "sinceLaunchMs": 1005
+              },
+              {
+                "event": "boot_unblocked",
+                "t": 1790012546410,
+                "sinceFirstMs": 21,
+                "sinceLaunchMs": 1022
+              },
+              {
+                "event": "boot_deferred_start",
+                "t": 1790012546428,
+                "sinceFirstMs": 39,
+                "sinceLaunchMs": 1040
+              },
+              {
+                "event": "db_open_start",
+                "t": 1790012546430,
+                "sinceFirstMs": 41,
+                "sinceLaunchMs": 1042
+              },
+              {
+                "event": "socket_token_ready",
+                "t": 1790012546433,
+                "sinceFirstMs": 44,
+                "sinceLaunchMs": 1045
+              },
+              {
+                "event": "transport_ccwire_pending",
+                "t": 1790012546435,
+                "sinceFirstMs": 46,
+                "sinceLaunchMs": 1047
+              },
+              {
+                "event": "db_ready",
+                "t": 1790012546450,
+                "sinceFirstMs": 61,
+                "sinceLaunchMs": 1062
+              },
+              {
+                "event": "chats_paint_cache",
+                "t": 1790012546725,
+                "sinceFirstMs": 336,
+                "sinceLaunchMs": 1337
+              },
+              {
+                "event": "chats_fetch_start",
+                "t": 1790012546725,
+                "sinceFirstMs": 336,
+                "sinceLaunchMs": 1337
+              },
+              {
+                "event": "transport_ccwire_ready",
+                "t": 1790012547622,
+                "sinceFirstMs": 1233,
+                "sinceLaunchMs": 2234
+              },
+              {
+                "event": "socket_connect_ready",
+                "t": 1790012547626,
+                "sinceFirstMs": 1237,
+                "sinceLaunchMs": 2238
+              },
+              {
+                "event": "chats_fetch_done",
+                "t": 1790012547690,
+                "sinceFirstMs": 1301,
+                "sinceLaunchMs": 2302
+              },
+              {
+                "event": "chats_paint_net",
+                "t": 1790012547691,
+                "sinceFirstMs": 1302,
+                "sinceLaunchMs": 2303
+              }
+            ]
+          ],
+          "connMs": 1170
+        }
+      ]
+    }
+  ]
+}
