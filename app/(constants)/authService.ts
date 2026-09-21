@@ -364,6 +364,15 @@ export async function purgeAccountData() {
 
   try { await clearTokens(); } catch {}
   try { await setCachedUser(null); } catch {}
+  // The in-RAM onboarding store, which nothing outside the signup screens ever
+  // cleared. It holds the PREVIOUS signup's userId and setupTicket, and both
+  // outlive a sign-out because this process does not restart. Sign out, sign up
+  // on a DIFFERENT number, and /auth/mpin/set was called with the stale userId:
+  // the new number's MPIN was written onto the old account, and the account
+  // just created stayed MPIN-less — i.e. bricked, the same way the resumable
+  // half-signup in authLookup was. It also still holds a plaintext MPIN and the
+  // plaintext security answers, which is reason enough on its own.
+  try { require('../../lib/onboarding').onboarding.reset(); } catch {}
   // Clear cache on logout when the user enabled that setting (cache only — the
   // user-content purge below handles saved data). Read before the vc_cache_*
   // keys are removed further down. Best-effort.

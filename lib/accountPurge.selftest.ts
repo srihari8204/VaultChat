@@ -60,6 +60,12 @@ function ok(name: string, cond: boolean, detail = ''): void {
   const purge = auth.slice(auth.indexOf('export async function purgeAccountData'));
   for (const step of ['clearTokens', 'clearLocalDb', 'purgeUserContent', 'purgeDocumentCache', 'clearPin'])
     ok(`purgeAccountData still does ${step}()`, purge.includes(step));
+  // The onboarding store is RAM, not storage, so nothing above reaches it: it
+  // outlives a sign-out because the process does not restart. Left behind, the
+  // PREVIOUS signup's userId and setupTicket are still there when someone signs
+  // up on a different number, and /auth/mpin/set writes the new number's PIN
+  // onto the old account — while the new one stays MPIN-less, i.e. unusable.
+  ok('purgeAccountData resets the in-RAM onboarding store', /onboarding\.reset\(\)/.test(purge));
 }
 
 // ── 2. E2EE identity does not survive a purge ────────────────────────────────

@@ -529,6 +529,22 @@ func TestPhoneOnlyLookup(t *testing.T) {
 		t.Fatal("profile/init returned no userId")
 	}
 
+	// FINISH THE SIGNUP BEFORE ASKING WHETHER IT EXISTS.
+	//
+	// This used to assert `exists` straight off profile/init, which passed only
+	// because lookup could not tell a real account from an abandoned first
+	// step. It can now, and it must: a row with no mpin_hash cannot be signed
+	// into, so reporting it sends the client to a PIN screen that 401s forever
+	// (see TestOnboardingResumeAfterInterruption). Setting the PIN is what
+	// makes this an account, and is what the real client does two screens
+	// later — so the test now covers what it always claimed to.
+	setupTicket, _ := body["setupTicket"].(string)
+	if status, out := post(authMpinSet, map[string]any{
+		"userId": userID, "setupTicket": setupTicket, "mpin": "246813",
+	}); status != 200 {
+		t.Fatalf("mpin/set for the email-less account: want 200, got %d (%v)", status, out)
+	}
+
 	status, body = post(authLookup, map[string]any{"phone": phone})
 	if status != 200 || body["exists"] != true || body["userId"] != userID {
 		t.Fatalf("the account just created is invisible to a phone-only lookup: %d %v", status, body)

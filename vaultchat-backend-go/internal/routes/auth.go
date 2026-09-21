@@ -1452,9 +1452,29 @@ func authLookup(w http.ResponseWriter, r *http.Request) {
 	// The `$1 <> ''` guard is load-bearing: with no email supplied el is "", and
 	// an unguarded `email_lookup = ''` would match any row that ever stored an
 	// empty lookup — i.e. report somebody else's account as this caller's.
+	// `mpin_hash IS NOT NULL` IS THE WHOLE POINT OF THIS QUERY.
+	//
+	// Signup writes three times: profile/init, security-questions/save,
+	// mpin/set. Only the last one sets the hash. A row between the first and
+	// the last is an account that CANNOT BE SIGNED INTO — /auth/mpin/verify has
+	// no hash to compare against and answers 401 — and this endpoint used to
+	// report it as `exists`, which sends the client to /mpin-entry, where the
+	// 401 renders as "Incorrect MPIN". That is a lie: there is no MPIN. Five
+	// tries locks the number for 15 minutes, "Forgot MPIN?" finds no security
+	// questions, and the number is bricked for good. One dropped packet in the
+	// ~2s between the last confirm digit and "Account secured" was enough.
+	//
+	// Reported as absent instead, the client runs the OTP path and
+	// /auth/profile/init resumes the half-built row in place (see there).
+	//
+	// mpin_hash, not onboarding_complete: they are written by the same
+	// statement, but 042 backfilled every pre-existing row to FALSE, so the
+	// flag says nothing about accounts older than it. The hash is the thing
+	// sign-in actually needs.
 	rows, err := db.Pool.Query(ctx,
 		`SELECT id, email_lookup, phone_lookup FROM users
-	     WHERE (($1 <> '' AND email_lookup = $1) OR phone_lookup = $2) AND is_deleted = FALSE LIMIT 2`,
+	     WHERE (($1 <> '' AND email_lookup = $1) OR phone_lookup = $2)
+	       AND is_deleted = FALSE AND mpin_hash IS NOT NULL LIMIT 2`,
 		el, pl)
 	if err != nil {
 		log.Printf("[auth/lookup] %v", err) // e.g. column email_lookup does not exist → run migrations
@@ -1601,17 +1621,47 @@ func authProfileInit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var one int
-	err = db.Pool.QueryRow(ctx,
-		`SELECT 1 FROM users WHERE (($1 <> '' AND email_lookup = $1) OR phone_lookup = $2) AND is_deleted = FALSE LIMIT 1`,
-		el, pl).Scan(&one)
-	if err == nil {
-		authEnvErr(w, http.StatusConflict, "already_exists", "An account already exists for this email or mobile")
-		return
-	}
-	if !db.NoRows(err) {
-		authEnvErr(w, 500, "server_error", "Could not create profile")
-		return
+	// A HALF-BUILT SIGNUP IS RESUMED, NOT REFUSED FOREVER.
+	//
+	// This used to be a bare "does a row exist" check, and any row was fatal.
+	// Combined with /auth/lookup reporting the same row as `exists`, a signup
+	// interrupted after profile/init — a dropped packet, a backgrounded app, a
+	// killed process — left the number in a state with NO WAY OUT: sign-in
+	// 401s on a NULL mpin_hash, and signing up again lands here and 409s. The
+	// only fix was a hand-written UPDATE on the users table.
+	//
+	// So: a row with no mpin_hash is an abandoned attempt, not an account. If
+	// the caller's phoneTicket proves the NUMBER on that row, it is theirs to
+	// finish, and the insert below becomes an overwrite. A row that matched on
+	// the optional email instead (rowPL != pl) is still refused — an email OTP
+	// says nothing about whose number this is, which is the hole 9c726e1 shut.
+	var resumeID string
+	{
+		rows, err := db.Pool.Query(ctx,
+			`SELECT id, phone_lookup, (mpin_hash IS NOT NULL) FROM users
+		     WHERE (($1 <> '' AND email_lookup = $1) OR phone_lookup = $2) AND is_deleted = FALSE LIMIT 2`,
+			el, pl)
+		if err != nil {
+			authEnvErr(w, 500, "server_error", "Could not create profile")
+			return
+		}
+		for rows.Next() {
+			var id string
+			var rowPL *string
+			var signedUp bool
+			if err := rows.Scan(&id, &rowPL, &signedUp); err != nil {
+				rows.Close()
+				authEnvErr(w, 500, "server_error", "Could not create profile")
+				return
+			}
+			if signedUp || rowPL == nil || *rowPL != pl {
+				rows.Close()
+				authEnvErr(w, http.StatusConflict, "already_exists", "An account already exists for this email or mobile")
+				return
+			}
+			resumeID = id
+		}
+		rows.Close()
 	}
 
 	// Both email columns move together or neither does: email_lookup with no
@@ -1679,6 +1729,41 @@ func authProfileInit(w http.ResponseWriter, r *http.Request) {
 		now := time.Now()
 		emailVerifiedAt = &now
 	}
+	// Resume path: same columns, same values, onto the row that already holds
+	// this phone_lookup. Overwrite rather than merge — the abandoned attempt's
+	// data is stale by definition, the user is re-typing the form right now.
+	//
+	// `AND mpin_hash IS NULL` repeats the check the SELECT above already made,
+	// because the two are not in one transaction: it closes the window where
+	// the original attempt finishes in between, which would otherwise let this
+	// call rewrite a live account's name and recovery address.
+	if resumeID != "" {
+		tag, err := db.Pool.Exec(ctx,
+			`UPDATE users
+			    SET email_lookup = $1, email_cipher = $2, phone_cipher = $3,
+			        first_name_cipher = $4, last_name_cipher = $5, dob_cipher = $6,
+			        status_cipher = $7, photo_url = $8, phone_hash = $9,
+			        auth_provider = $10, email_verified_at = $11, updated_at = NOW()
+			  WHERE id = $12 AND mpin_hash IS NULL`,
+			emailL, emailC, phoneC, firstC, lastC, dobC, statusC,
+			profilePicUrl, phoneHash, provider, emailVerifiedAt, resumeID)
+		if err != nil {
+			authEnvErr(w, 500, "server_error", "Could not create profile")
+			return
+		}
+		if tag.RowsAffected() == 0 {
+			authEnvErr(w, http.StatusConflict, "already_exists", "An account already exists for this email or mobile")
+			return
+		}
+		setupTicket, err := vault.SignTicket(authSetupTicketData(resumeID), 900)
+		if err != nil {
+			authEnvErr(w, 500, "server_error", "Could not create profile")
+			return
+		}
+		httpx.JSON(w, 200, map[string]any{"userId": resumeID, "setupTicket": setupTicket})
+		return
+	}
+
 	var userID string
 	err = db.Pool.QueryRow(ctx,
 		`INSERT INTO users

@@ -288,3 +288,104 @@ func onboardFirstFiveQuestionCodes(t *testing.T) []string {
 }
 
 var _ = fmt.Sprintf
+
+// TestOnboardingResumeAfterInterruption — the brick, and that it is gone.
+//
+// Signup writes three times and only the last one sets mpin_hash. Interrupt it
+// in between — a dropped packet, a backgrounded app, a killed process, roughly
+// a two-second window — and the account exists but cannot be signed into.
+// Before this, /auth/lookup called that row `exists`, which sent the client to
+// /mpin-entry, where the NULL hash 401s and renders as "Incorrect MPIN"; five
+// of those lock the number for fifteen minutes and "Forgot MPIN?" finds no
+// security questions. Signing up again 409'd. The number was finished, and the
+// only way back was a hand-written UPDATE on the users table.
+//
+// So the two halves are asserted together, because either alone still bricks:
+// lookup must report the half-built row as ABSENT, and profile/init must then
+// RESUME it (same id — a second row cannot exist, phone_lookup is unique).
+func TestOnboardingResumeAfterInterruption(t *testing.T) {
+	ctx := onboardSkip(t)
+
+	email := onboardMarker + "-resume@example.com"
+	phone := "+919000000019"
+	t.Cleanup(func() { onboardCleanup(ctx, t, email) })
+	onboardCleanup(ctx, t, email)
+
+	pl, err := vault.PhoneLookup(phone)
+	if err != nil {
+		t.Fatalf("PhoneLookup: %v", err)
+	}
+	ticket := func() string {
+		s, err := vault.SignTicket(pl, 900)
+		if err != nil {
+			t.Fatalf("SignTicket: %v", err)
+		}
+		return s
+	}
+	initBody := func(first string) map[string]any {
+		return map[string]any{
+			"email": email, "phone": phone, "phoneTicket": ticket(),
+			"firstName": first, "lastName": "Test", "dob": "1990-01-01", "status": "hi",
+		}
+	}
+
+	// ── The interrupted attempt: profile/init lands, nothing after it does ──
+	code, res := post(authProfileInit, initBody("First"))
+	if code != 200 {
+		t.Fatalf("profile/init: want 200, got %d (%v)", code, res)
+	}
+	userID, _ := res["userId"].(string)
+	if userID == "" {
+		t.Fatal("profile/init returned no userId")
+	}
+
+	// ── lookup must NOT send this number to the MPIN screen ──
+	code, res = post(authLookup, map[string]any{"phone": phone})
+	if code != 200 {
+		t.Fatalf("lookup: want 200, got %d (%v)", code, res)
+	}
+	if res["exists"] == true {
+		t.Fatal("lookup reports a half-built account as exists — the client goes to /mpin-entry and the number is bricked")
+	}
+	// Not a conflict either: app/onboard.tsx turns that into "Number
+	// unavailable", which is the same dead end wearing a politer message.
+	if res["conflict"] != nil {
+		t.Fatalf("lookup reports conflict %v — the client refuses to continue", res["conflict"])
+	}
+
+	// ── The retry resumes the SAME row rather than 409ing ──
+	code, res = post(authProfileInit, initBody("Second"))
+	if code != 200 {
+		t.Fatalf("profile/init retry: want 200, got %d (%v) — the number is bricked", code, res)
+	}
+	if got, _ := res["userId"].(string); got != userID {
+		t.Fatalf("profile/init retry made a NEW account %q (was %q)", got, userID)
+	}
+	setupTicket, _ := res["setupTicket"].(string)
+	if setupTicket == "" {
+		t.Fatal("profile/init retry returned no setupTicket — signup still cannot finish")
+	}
+
+	// ── And the resumed account completes and logs in ──
+	const pin = "246813"
+	if code, out := post(authMpinSet, map[string]any{
+		"userId": userID, "setupTicket": setupTicket, "mpin": pin,
+	}); code != 200 {
+		t.Fatalf("mpin/set after resume: want 200, got %d (%v)", code, out)
+	}
+	if code, out := post(authMpinVerify, map[string]any{"userId": userID, "mpin": pin}); code != 200 {
+		t.Fatalf("mpin/verify after resume: want 200, got %d (%v)", code, out)
+	}
+
+	// ── Now that it IS an account, both endpoints flip back ──
+	code, res = post(authLookup, map[string]any{"phone": phone})
+	if res["exists"] != true {
+		t.Fatalf("lookup after completion: want exists, got %d (%v)", code, res)
+	}
+	// The resume MUST NOT be a way to rewrite a live account's name, recovery
+	// address and photo with only a phone OTP — that is the takeover 9c726e1
+	// closed, re-opened through a different door.
+	if code, res := post(authProfileInit, initBody("Third")); code != http.StatusConflict {
+		t.Fatalf("profile/init against a FINISHED account: want 409, got %d (%v) — live accounts are overwritable", code, res)
+	}
+}

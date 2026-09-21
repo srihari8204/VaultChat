@@ -101,8 +101,26 @@ config.transformer.getTransformOptions = async () => ({
 // nothing and removes the race entirely. Matches both separators because this
 // is read on Windows and CI alike.
 const rustTargets = /[\\/]services[\\/][^\\/]+[\\/]rust[^\\/]*[\\/]target[\\/]/;
+
+// ...and the SAME race from the other direction: Gradle's own output.
+//
+// The rust rule above fixed the crash Metro hit while cargo churned. It did not
+// fix this one, because the churn is not only ours — a Gradle build writes and
+// deletes thousands of intermediates under `node_modules/*/android/build/` too,
+// and Metro walks node_modules. Running a build alongside the dev server, which
+// is the whole debug loop, killed it outright:
+//
+//   Error "ENOENT" reading contents of
+//     node_modules/@sentry/react-native/android/build/intermediates/javac/...
+//   Failed to construct transformer: Error: Failed to start watch mode.
+//
+// Note the failure is WORSE than the rust one: that produced a crash with a
+// stack, this one leaves Metro alive but serving nothing, so the device sits on
+// the splash with no error anywhere. Matched anywhere in the tree rather than
+// under a fixed prefix, because every autolinked native package has one.
+const nativeBuildOutput = /[\\/](android|ios)[\\/]build[\\/]/;
 config.resolver.blockList = config.resolver.blockList
-  ? [].concat(config.resolver.blockList, rustTargets)
-  : rustTargets;
+  ? [].concat(config.resolver.blockList, rustTargets, nativeBuildOutput)
+  : [rustTargets, nativeBuildOutput];
 
 module.exports = config;
