@@ -420,7 +420,14 @@ func authOnboardVerifyOtpPhone(w http.ResponseWriter, r *http.Request) {
 			authEnvErr(w, 401, "invalid_code", "That code is not right")
 			return
 		}
-	} else if err := msg91.Verify(ctx, reqID, code); err != nil {
+		// THE NUMBER, NOT THE REQUEST ID. The standalone OTP API keys a
+		// verification on the mobile it was sent to; the widget API keyed it on a
+		// reqId, and this call site kept passing reqID after the switch. Both are
+		// strings, so the compiler said nothing and MSG91 answered "Mobile no.
+		// empty or not numeric" — which surfaced to the user as a 502 outage on
+		// every single correct code. The reqID is still what proves an attempt is
+		// in flight (checked above); it is just not what identifies it.
+	} else if err := msg91.Verify(ctx, strings.TrimPrefix(e164, "+"), code); err != nil {
 		// ErrBadCode is a user mistake, not an outage, and the two need opposite
 		// handling — see msg91.Verify, which is also the reason a non-"success"
 		// `type` on an HTTP 200 counts as a failure at all.
