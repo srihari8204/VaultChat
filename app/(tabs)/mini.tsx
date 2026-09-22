@@ -250,13 +250,5 @@ const makeStyles = (c: Palette, width: number, m: ReturnType<typeof useVisionCom
     marginTop: 2,
     fontStyle: 'italic',
   },
-
-  // ── Developer card ────────────────────────────────
-
-  // ── Mini app container ────────────────────────────
-
-  // ── Calculator ────────────────────────────────────
-
-  // ── Todo List ─────────────────────────────────────
   });
 };
