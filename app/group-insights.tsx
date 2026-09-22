@@ -164,7 +164,21 @@ export default function GroupInsightsScreen() {
         {(['week', 'month'] as Span[]).map((sp) => {
           const on = sp === span;
           return (
-            <TouchableOpacity key={sp} onPress={() => { setSpan(sp); setLoading(true); }}
+            <TouchableOpacity key={sp} onPress={() => {
+              // Re-tapping the ACTIVE tab used to strand the spinner forever.
+              // setSpan(sp) with sp === span is a React bail-out, so `span` does
+              // not change; `range` is useMemo([span]) so it keeps its identity;
+              // the useFocusEffect callback's deps [groupId, range, reload] are
+              // therefore unchanged and the effect never re-runs — and the only
+              // setLoading(false) for this screen lives inside it. The screen sat
+              // under an ActivityIndicator with no way out, and the obvious
+              // recovery (tap the tab again) was the thing causing it.
+              //
+              // A `finally` in the effect does NOT fix this: the effect body never
+              // runs. Not entering the loading state is the only fix at this site.
+              if (sp === span) return;
+              setSpan(sp); setLoading(true);
+            }}
               style={[st.tab, { borderColor: on ? colors.primary : 'transparent', backgroundColor: on ? colors.primary + '22' : 'transparent' }]}>
               <Text style={{ color: on ? colors.primary : colors.textDim, fontWeight: on ? '800' : '600', fontSize: 13 }}>
                 {sp === 'week' ? 'This week' : 'This month'}

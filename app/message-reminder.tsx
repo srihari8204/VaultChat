@@ -214,7 +214,19 @@ function RemindersList({ router }: { router: any }) {
     Alert.alert('Cancel reminder?', r.preview || 'You won\'t be notified at the chosen time.', [
       { text: 'Keep', style: 'cancel' },
       { text: 'Cancel', style: 'destructive', onPress: async () => {
-          try { await Notifications.cancelScheduledNotificationAsync(r.id); } catch {}
+          // DELETE THE ROW ONLY IF THE OS ACTUALLY CANCELLED.
+          //
+          // This used to swallow the cancel failure and drop the row anyway.
+          // `r.id` IS the cancellation handle, so erasing it while the
+          // notification survives left the user with an alert that will fire at
+          // the chosen time and no way — in the app or out of it — to stop it.
+          // The dialog they just confirmed says "You won't be notified".
+          try {
+            await Notifications.cancelScheduledNotificationAsync(r.id);
+          } catch (e: any) {
+            Alert.alert('Could not cancel', e?.message ?? 'The reminder is still set. Try again.');
+            return;
+          }
           const next = (await loadReminders()).filter(x => x.id !== r.id);
           await saveReminders(next);
           setRows(next);
