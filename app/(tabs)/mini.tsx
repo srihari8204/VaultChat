@@ -15,7 +15,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { flagEnabled } from '../../lib/remoteFlags';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Stack, useRouter } from 'expo-router';
-import { HEADER_TOP, TAB_BAR_SPACE } from '../../constants/layout';
+import { HEADER_TOP, SCREEN_BOTTOM } from '../../constants/layout';
 import React, { useMemo } from 'react';
 import {
   Alert,
@@ -169,7 +169,11 @@ const makeStyles = (c: Palette, width: number, m: ReturnType<typeof useVisionCom
   scroll: {
     padding: 20,
     paddingTop: HEADER_TOP,
-    paddingBottom: TAB_BAR_SPACE + 16,
+    // NOT TAB_BAR_SPACE any more: this screen hides the floating bar
+    // (app/(tabs)/_layout.tsx), so reserving room for it left ~80px of dead
+    // space under the last row of tiles. SCREEN_BOTTOM is the safe-area inset,
+    // which is all that sits below the grid now.
+    paddingBottom: SCREEN_BOTTOM + 16,
   },
   headerRow: {
     flexDirection: 'row',

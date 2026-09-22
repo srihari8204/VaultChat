@@ -110,19 +110,53 @@ ok(
 );
 
 // ── 2. Tab screens reserve room for the floating bar ─────────────────
+// The exemption below is derived from the navigator rather than hardcoded:
+// re-show the bar on a screen and its padding requirement returns automatically,
+// with no list here to remember to update. The inverse is checked too — a screen
+// with no bar must NOT reserve room for one, or it carries ~80px of dead space.
+//
+// Comments are stripped before matching (2026-09-23). They were not, and a
+// comment reading "NOT TAB_BAR_SPACE any more" satisfied this check on a file
+// that had removed the padding entirely — prose standing in for code, the exact
+// substitution lib/financeBtnLatch.selftest.ts strips comments to prevent.
+const decomment = (src: string) =>
+  src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+
+const navSrc = decomment(fs.readFileSync(path.join(process.cwd(), 'app/(tabs)/_layout.tsx'), 'utf8'));
+/** Screens whose Tabs.Screen sets tabBarStyle display:'none'. */
+const barless = new Set<string>();
+for (const m of navSrc.matchAll(/<Tabs\.Screen\s+name="([^"]+)"([\s\S]*?)\/>/g)) {
+  if (/tabBarStyle:\s*\{\s*display:\s*'none'\s*\}/.test(m[2])) barless.add(m[1]);
+}
+ok('the navigator is still readable as the exemption source', navSrc.includes('<Tabs.Screen'));
+
 const SCROLLER = /<(?:ScrollView|FlatList|SectionList|KeyboardAwareScrollView)\b/;
 const missing: string[] = [];
+const wasteful: string[] = [];
 for (const file of walk('app/(tabs)')) {
   if (file.endsWith('_layout.tsx')) continue;
-  const src = fs.readFileSync(file, 'utf8');
+  const src = decomment(fs.readFileSync(file, 'utf8'));
   if (!SCROLLER.test(src)) continue;
-  if (!src.includes('TAB_BAR_SPACE')) missing.push(file);
+  const screen = path.basename(file).replace(/\.tsx$/, '');
+  // paddingBottom SPECIFICALLY, not merely the identifier anywhere in the file.
+  // Mutation showed the looser test was vacuous: app/(tabs)/chats.tsx also uses
+  // TAB_BAR_SPACE to position its FAB (`bottom:`), so deleting the LIST's
+  // padding still left the string present and the check still passed.
+  const reserves = /paddingBottom:\s*TAB_BAR_SPACE/.test(src);
+  if (barless.has(screen)) { if (reserves) wasteful.push(file); }
+  else if (!reserves) missing.push(file);
 }
 ok(
   missing.length === 0
-    ? 'every tab screen with a scroll container reserves TAB_BAR_SPACE'
+    ? 'every tab screen that SHOWS the bar reserves TAB_BAR_SPACE'
     : 'tab screens whose content can hide under the floating bar:\n      ' + missing.join('\n      '),
   missing.length === 0,
+);
+ok(
+  wasteful.length === 0
+    ? 'no tab screen reserves room for a bar it hides'
+    : 'tab screens padding for a bar that is not rendered:\n      ' + wasteful.join('\n      '),
+  wasteful.length === 0,
 );
 
 // ── 3. Tab chrome grows for profile and OS text scaling ──────────────
