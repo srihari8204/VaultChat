@@ -58,7 +58,6 @@ const MINI_APPS_MAIN = [
   // yet by design \u2014 the site loads anonymously until it is.
   { id: 'games',       icon: 'game-controller-outline', name: 'Games',       route: '/games',      gradient: ['#DB2777', '#7C3AED'] as [string, string] },
   { id: 'security',    icon: 'shield-checkmark-outline', name: 'Security Hub', route: '/aiguardian', gradient: ['#0E7490', '#164E63'] as [string, string] },
-  { id: 'vaultid',     icon: 'id-card-outline', name: 'VaultID',     route: '/decentralized-id', gradient: ['#7C3AED', '#1777FE'] as [string, string] },
 ] satisfies readonly { id: string; icon: IoniconName; name: string; route: string; gradient: [string, string] }[];
 
 // The Todo List's saved items are still on device under `vc_miniapp_todos`,

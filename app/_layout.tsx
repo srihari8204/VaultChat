@@ -1023,7 +1023,6 @@ function RootLayoutInner() {
         <Stack.Screen name="docscanner" />
         <Stack.Screen name="notifications" />
         <Stack.Screen name="location" />
-        <Stack.Screen name="vaultid" />
 
         {/* Mini Apps destinations */}
         <Stack.Screen name="encrypted-notes" />
