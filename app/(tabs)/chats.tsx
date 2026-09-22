@@ -32,6 +32,7 @@ import { cloudBackupMeta } from '../../lib/cloudBackup';
 import { runScheduledBackupIfDue } from '../../lib/backupScheduler';
 import { getSocket } from '../../lib/socket';
 import { mark } from '../../lib/perf';
+import { takePrimedChats } from '../../lib/chatsPrefetch';
 import { applyLocalReadPointers, setUnreadTotal } from '../../lib/unreadStore';
 import { getDraftMap } from '../../lib/drafts';
 import { getLastMessagePerChat, getCachedChats, cacheChats } from '../../lib/localDb';
@@ -174,7 +175,20 @@ export default function ChatsScreen() {
     if (refreshPreviews) getLastMessagePerChat().then(hydrateOwnPreviews).then(setLastMsgs).catch(() => {});
     mark('chats_fetch_start');
     try {
-      const list = await listChats();
+      // Boot dispatched this request already (lib/chatsPrefetch.ts); take that
+      // one rather than opening a second. Single-use and age-limited, so every
+      // later refresh — pull-to-refresh, focus, socket events — fetches
+      // normally. If the head start failed, fall back to a fresh request rather
+      // than inheriting its error: the network may simply not have been up yet
+      // at boot, and that must not become a permanent empty list.
+      const primed = takePrimedChats();
+      let list: Awaited<ReturnType<typeof listChats>>;
+      if (primed) {
+        try { list = await primed; }
+        catch { mark('chats_prime_fallback'); list = await listChats(); }
+      } else {
+        list = await listChats();
+      }
       mark('chats_fetch_done', { rows: list.length });
       setChats(prev => mergeChats(prev, list));                 // identity-preserving → memoized rows skip re-render
       cacheChats(list).catch(() => {});                         // persist for instant next-launch paint (op-sqlite engine)

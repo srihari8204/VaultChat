@@ -32,6 +32,7 @@ import { type ComponentType, useEffect, useRef, useState } from 'react';
 import { setSecure } from '../lib/screenGuard';
 import { installAlertGuard } from '../lib/alertGuard';
 import { loadRemoteFlags } from '../lib/remoteFlags';
+import { primeChats } from '../lib/chatsPrefetch';
 import { initFeatureFlags } from '../lib/featureFlags';
 import { registerMessageActions } from '../lib/notificationActions';
 import { initLang } from '../lib/i18n';
@@ -380,6 +381,12 @@ function RootLayoutInner() {
     // Publish this device's E2EE key bundle on startup (lazy, fire-and-forget).
     getAccessToken()
       .then(tok => {
+        // FIRST, and before the crypto work below: this is a network request
+        // whose answer the Chats screen will block on in a few hundred ms, and
+        // everything after it here is local. See lib/chatsPrefetch.ts for the
+        // measurements — the request used to be dispatched at +395ms simply
+        // because that is when the screen mounted.
+        if (tok) primeChats();
         if (tok && E2EE_ENABLED) {
           import('../services/crypto/e2eeSession.rn').then(m => m.provisionE2EEIdentity()).catch(() => {});
         }
