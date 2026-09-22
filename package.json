@@ -47,6 +47,7 @@
     "gradle": "tsx scripts/gradlew.ts",
     "build:android:apk:arm64": "tsx scripts/gradlew.ts assembleRelease -PreactNativeArchitectures=arm64-v8a",
     "test:reader": "tsx lib/reader.selftest.ts",
+    "test:textwindow": "tsx lib/textWindow.selftest.ts",
     "test:responsive": "tsx lib/responsive.selftest.ts",
     "test:typescale": "tsx lib/typeScale.selftest.ts",
     "test:roaddistance": "tsx lib/family/roadDistance.selftest.ts",

@@ -16,7 +16,7 @@
 import React, { useCallback, useMemo, useRef, useState } from 'react';
 import { View, Text, ScrollView, StyleSheet, Pressable, useWindowDimensions } from 'react-native';
 import {
-  Gesture, GestureDetector, ScrollView as GHScrollView,
+  Gesture, GestureDetector, FlatList as GHFlatList,
 } from 'react-native-gesture-handler';
 import { runOnJS } from 'react-native-reanimated';
 import type { Block, Run } from '../lib/docBlocks';
@@ -45,6 +45,16 @@ function Runs({ runs, style }: { runs: Run[]; style?: any }) {
 
 // ─── Grid (Word tables and Excel sheets) ─────────────────────────────
 
+// ponytail: lib/docBlocks.ts emits ONE block per worksheet, so a 50k-row sheet is
+// a single item in the outer FlatList — windowing buys it nothing and it would
+// mount whole. Ceiling: rows are revealed ROW_CHUNK at a time behind a tap, and
+// column widths are measured from the first WIDTH_SAMPLE rows only, so a column
+// whose widest cell sits below that sample renders slightly narrow. Upgrade path:
+// chunk sheet rows into separate blocks in lib/docBlocks.ts so the outer FlatList
+// virtualises them, then delete all of this.
+const ROW_CHUNK = 200;
+const WIDTH_SAMPLE = 500;
+
 /**
  * Column widths from the CONTENT, not equal shares.
  *
@@ -52,10 +62,15 @@ function Runs({ runs, style }: { runs: Run[]; style?: any }) {
  * — the note wraps to eight lines while the numbers sit in acres of space. Width
  * tracks the longest cell, clamped so one enormous cell cannot push the rest off
  * the screen.
+ *
+ * Measured from the whole sheet's first WIDTH_SAMPLE rows — never from the rows
+ * currently revealed, or the columns would visibly jump on every "show more".
  */
 function columnWidths(rows: string[][], cols: number, zoom: number): number[] {
   const w: number[] = new Array(cols).fill(0);
-  for (const r of rows) {
+  const n = Math.min(rows.length, WIDTH_SAMPLE);
+  for (let i = 0; i < n; i++) {
+    const r = rows[i];
     for (let c = 0; c < cols; c++) {
       const len = (r[c] ?? '').length;
       if (len > w[c]) w[c] = len;
@@ -71,11 +86,21 @@ function Grid({
   const widths = useMemo(() => columnWidths(rows, cols, zoom), [rows, cols, zoom]);
   const total = widths.reduce((a, b) => a + b, 0);
 
+  // A new document — or the deferred full parse replacing the preview — must not
+  // inherit the last sheet's reveal count. Reset during render, not in an effect,
+  // so the stale count never reaches the tree.
+  const [shown, setShown] = useState(ROW_CHUNK);
+  const seen = useRef(rows);
+  const fresh = seen.current !== rows;
+  if (fresh) { seen.current = rows; setShown(ROW_CHUNK); }
+  const limit = fresh ? ROW_CHUNK : shown;
+  const remaining = rows.length - limit;
+
   // Only scroll horizontally when the grid genuinely does not fit. Wrapping every
   // grid in a horizontal scroller steals the vertical pan near the edges.
   const body = (
     <View style={[s.grid, { minWidth: Math.min(total, maxWidth) }]}>
-      {rows.map((row, ri) => {
+      {rows.slice(0, limit).map((row, ri) => {
         const head = header && ri === 0;
         return (
           <View key={ri} style={[s.gridRow, head && s.gridHead, !head && ri % 2 === 1 && s.gridAlt]}>
@@ -98,11 +123,28 @@ function Grid({
     </View>
   );
 
-  if (total <= maxWidth) return body;
+  // Outside the horizontal scroller: the way to more rows must not be somewhere
+  // off to the right.
+  const more = remaining > 0 ? (
+    <Pressable
+      onPress={() => setShown(n => n + ROW_CHUNK)}
+      style={s.moreRow}
+      accessibilityRole="button"
+    >
+      <Text style={s.moreTxt}>
+        Show {Math.min(ROW_CHUNK, remaining)} more rows ({remaining.toLocaleString()} remaining)
+      </Text>
+    </Pressable>
+  ) : null;
+
+  if (total <= maxWidth) return <>{body}{more}</>;
   return (
-    <ScrollView horizontal showsHorizontalScrollIndicator directionalLockEnabled>
-      {body}
-    </ScrollView>
+    <>
+      <ScrollView horizontal showsHorizontalScrollIndicator directionalLockEnabled>
+        {body}
+      </ScrollView>
+      {more}
+    </>
   );
 }
 
@@ -119,6 +161,9 @@ function looksLikeHeader(rows: string[][]): boolean {
 }
 
 // ─── Document ────────────────────────────────────────────────────────
+
+/** Scroll past the last block. Hoisted: inline, it was a new element every render. */
+const PAGE_TAIL = <View style={{ height: 28 }} />;
 
 export function DocView({ blocks, colors }: { blocks: Block[]; colors: Palette }) {
   const [zoom, setZoom] = useState(1);
@@ -152,25 +197,37 @@ export function DocView({ blocks, colors }: { blocks: Block[]; colors: Palette }
   return (
     <View style={{ flex: 1 }}>
     <GestureDetector gesture={pinch}>
-    <GHScrollView
+    <GHFlatList
       // Paint the page explicitly. Inheriting whatever surface the host happens
       // to have is how this shipped as near-white text on a white background —
       // present, correct, and unreadable.
       style={[{ flex: 1 }, { backgroundColor: colors.bg }]}
       contentContainerStyle={s.page}
       showsVerticalScrollIndicator
-    >
-      {blocks.map((b, i) => {
+      data={blocks}
+      keyExtractor={(_, i) => String(i)}
+      // Nothing here is memoised — renderItem is a fresh arrow every render, so
+      // CellRenderer's PureComponent check already fails. extraData is kept
+      // because it is the documented way to say "the rows depend on this" and
+      // costs nothing; it is not what makes a pinch repaint.
+      extraData={zoom}
+      // No removeClippedSubviews: it blanks the horizontal Grid scrollers on
+      // Android. No getItemLayout either — block heights vary wildly.
+      windowSize={5}
+      initialNumToRender={8}
+      maxToRenderPerBatch={8}
+      ListFooterComponent={PAGE_TAIL}
+      renderItem={({ item: b }) => {
         switch (b.t) {
           case 'h':
-            return <Runs key={i} runs={b.runs} style={[s.h, b.level === 1 ? s.h1 : b.level === 2 ? s.h2 : s.h3]} />;
+            return <Runs runs={b.runs} style={[s.h, b.level === 1 ? s.h1 : b.level === 2 ? s.h2 : s.h3]} />;
 
           case 'p':
-            return <Runs key={i} runs={b.runs} style={s.p} />;
+            return <Runs runs={b.runs} style={s.p} />;
 
           case 'li':
             return (
-              <View key={i} style={[s.liRow, { marginLeft: 4 + Math.min(b.level, 4) * 16 }]}>
+              <View style={[s.liRow, { marginLeft: 4 + Math.min(b.level, 4) * 16 }]}>
                 <Text style={s.bullet}>{b.level % 2 === 0 ? '•' : '◦'}</Text>
                 <Runs runs={b.runs} style={[s.p, s.liTxt]} />
               </View>
@@ -178,14 +235,14 @@ export function DocView({ blocks, colors }: { blocks: Block[]; colors: Palette }
 
           case 'table':
             return (
-              <View key={i} style={s.blockGap}>
+              <View style={s.blockGap}>
                 <Grid rows={b.rows} header={looksLikeHeader(b.rows)} s={s} colors={colors} maxWidth={maxWidth} zoom={zoom} />
               </View>
             );
 
           case 'sheet':
             return (
-              <View key={i} style={s.blockGap}>
+              <View style={s.blockGap}>
                 <View style={s.sheetTab}>
                   <Text style={s.sheetName} numberOfLines={1}>{b.name}</Text>
                   <Text style={s.sheetMeta}>
@@ -198,7 +255,7 @@ export function DocView({ blocks, colors }: { blocks: Block[]; colors: Palette }
 
           case 'slide':
             return (
-              <View key={i} style={s.slide}>
+              <View style={s.slide}>
                 <View style={s.slideHead}>
                   <View style={s.slideNum}><Text style={s.slideNumTxt}>{b.n}</Text></View>
                   {!!b.title && <Text style={s.slideTitle} numberOfLines={3}>{b.title}</Text>}
@@ -214,7 +271,7 @@ export function DocView({ blocks, colors }: { blocks: Block[]; colors: Palette }
 
           case 'page':
             return (
-              <View key={i} style={s.pageBreak}>
+              <View style={s.pageBreak}>
                 <View style={s.pageRule} />
                 <Text style={s.pageTxt}>Page {b.n}</Text>
                 <View style={s.pageRule} />
@@ -224,9 +281,8 @@ export function DocView({ blocks, colors }: { blocks: Block[]; colors: Palette }
           default:
             return null;
         }
-      })}
-      <View style={{ height: 28 }} />
-    </GHScrollView>
+      }}
+    />
     </GestureDetector>
 
     {/* Only present once zoomed, and it is the way back to 100% — a pinch can
@@ -274,6 +330,8 @@ const makeStyles = (c: Palette, zoom: number) => {
               borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.glassStroke },
   gridTxt:      { color: c.text, fontSize: z(13), lineHeight: z(18) },
   gridHeadTxt:  { fontWeight: '800', color: c.text },
+  moreRow:      { paddingVertical: 10, alignItems: 'center' },
+  moreTxt:      { color: c.textDim, fontSize: z(13), fontWeight: '700' },
 
   sheetTab:  { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
                gap: 10, marginBottom: 7 },

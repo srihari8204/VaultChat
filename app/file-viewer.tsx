@@ -5,11 +5,13 @@
 import { Ionicons } from '@expo/vector-icons';
 import { ErrorBoundary } from '../components/ErrorBoundary';
 import { BRAND_ACCENT } from '../constants/theme';
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Animated,
   Easing,
+  FlatList,
+  InteractionManager,
   PanResponder,
   Platform,
   ScrollView,
@@ -28,6 +30,7 @@ import * as IntentLauncher from 'expo-intent-launcher';
 import { getAccessToken } from '../lib/api';
 import { Buffer } from 'buffer';
 import { docKind, MAX_DOC_BYTES } from '../lib/docText';
+import { decodeWindow, WINDOW_BYTES } from '../lib/textWindow';
 import type { Block } from '../lib/docBlocks';
 import { DocView } from '../components/DocView';
 import { PdfView } from '../components/PdfView';
@@ -35,10 +38,21 @@ import type { Palette } from '../constants/theme';
 
 
 /**
- * Ceiling for the plain-text viewer. Generous — 5 MB of text is well over a
- * hundred thousand lines — but finite, which is the point.
+ * Ceiling for the plain-text viewer — now an ACCUMULATION cap, not a refusal.
+ *
+ * This used to reject the file outright, because readAsStringAsync materialises
+ * the whole thing as one JS string and a multi-hundred-MB .log took the app down
+ * with it. The file is now read in WINDOW_BYTES windows (lib/textWindow), so
+ * opening a huge log and reading its first screens costs one window — refusing it
+ * bought nothing and cost the user the file. What still has to be bounded is the
+ * string we have ACCUMULATED, so windowing stops here and the footer says so.
  */
 const MAX_TEXT_BYTES = 5 * 1024 * 1024;
+
+/** Units of a document parsed before the first paint — see readDoc. */
+const PREVIEW_UNITS = 3;
+/** Word has no pages, so its unit is a block; 3 paragraphs is not a screen. */
+const PREVIEW_DOCX_BLOCKS = 60;
 
 // ── Design tokens ────────────────────────────────────────────────
 const C = {
@@ -303,6 +317,32 @@ function FileViewerScreen() {
   const [docLocalUri, setDocLocalUri] = useState<string | null>(null);
   // Set when pdf.js cannot render this file, which drops it back to the text
   // reader rather than leaving a blank grey screen.
+  // Windowed plain-text reading. The cursor lives in a ref, not state: it is
+  // advanced from inside the read and must not re-render or re-trigger the list.
+  // `size` 0 means UNKNOWN, not empty: some content:// providers report no size,
+  // and windowing works without one — a short read is end of file either way.
+  // `carry` is annotated because Uint8Array is generic in the repo's TS lib and
+  // an inferred Uint8Array<ArrayBuffer> will not accept a Uint8Array<ArrayBufferLike>.
+  const textWin = useRef<{
+    uri: string; size: number; pos: number; carry: Uint8Array; busy: boolean; done: boolean;
+  }>({ uri: '', size: 0, pos: 0, carry: new Uint8Array(0), busy: false, done: false });
+  /**
+   * Which load this is. A BOOLEAN "is this screen dead" cannot express "a newer
+   * load started": React runs the previous effect's cleanup and the next effect
+   * body back to back in one commit, so a flag set true in cleanup is already
+   * false again by the time a deferred callback from the old run fires — and it
+   * would then write the PREVIOUS document's blocks over the new one's. A
+   * counter can express it: capture it, compare it, bail if it moved.
+   */
+  const runRef = useRef(0);
+  /** More of the file exists and has not been read yet. */
+  const [textMore, setTextMore] = useState(false);
+  /** Windowing stopped at MAX_TEXT_BYTES rather than at end of file. */
+  const [textCapped, setTextCapped] = useState(false);
+  /** A window AFTER the first one failed. Not a load failure — see readTextWindow. */
+  const [textFailed, setTextFailed] = useState(false);
+  /** The rest of the document is still being parsed behind the first page. */
+  const [docMore, setDocMore] = useState(false);
   const [pdfFailed, setPdfFailed] = useState(false);
   const [reloadKey, setReloadKey] = useState(0);
   const [openingExternally, setOpeningExternally] = useState(false);
@@ -355,6 +395,70 @@ function FileViewerScreen() {
     return dl.uri;
   }, []);
 
+  // Read the NEXT window of a plain-text file and append it.
+  //
+  // readAsStringAsync only honours `position`/`length` under base64 encoding
+  // (expo-file-system/build/legacy/FileSystem.types.d.ts:232), so a window comes
+  // back as base64 -> bytes, and a BYTE window can cut a multi-byte character in
+  // half. Telugu and Hindi are 3 bytes per character, emoji 4 — decoding each
+  // window on its own corrupts one character at every boundary. lib/textWindow
+  // carries the cut bytes across; this only drives it.
+  // Split ONCE per window, not once per render. This used to run a full
+  // regex-replace and split over the whole accumulated string on every single
+  // render — including renders nothing to do with the text (the fade animation,
+  // the share button's spinner) — and the string now grows by a window at a
+  // time, so the cost compounded across a paging session. It is a hook at
+  // component scope because renderText is called conditionally.
+  const textLines = useMemo(
+    () => textContent.replace(/^\uFEFF/, '').split(/\r?\n/),
+    [textContent],
+  );
+
+  const readTextWindow = useCallback(async () => {
+    const st = textWin.current;
+    if (st.busy || !st.uri || st.done) return;
+    st.busy = true;
+    const first = st.pos === 0;
+    try {
+      const len = st.size ? Math.min(WINDOW_BYTES, st.size - st.pos) : WINDOW_BYTES;
+      const b64 = await FileSystem.readAsStringAsync(
+        st.uri, { encoding: 'base64' as any, position: st.pos, length: len },
+      );
+      const bytes = Uint8Array.from(Buffer.from(b64, 'base64'));
+      // Advance by what CAME BACK, not by what was asked for. A file still being
+      // written, or a provider that short-reads, would otherwise leave the cursor
+      // past bytes nothing decoded — and this window's carry would then be glued
+      // to bytes that do not follow it, so the seam decodes to garbage.
+      st.pos += bytes.length;
+      const atEof = bytes.length < len || (!!st.size && st.pos >= st.size);
+      const { text, carry } = decodeWindow(bytes, st.carry, atEof);
+      st.carry = carry;
+      setTextContent(prev => prev + text);
+      // Gate on BYTES CONSUMED — st.pos already is exactly that. Deciding inside
+      // a setTextContent updater and reading the result back on the next line
+      // was wrong twice over: React only computes an updater eagerly when no
+      // other update is pending on the fiber, so the flag read false and the cap
+      // silently never engaged; and an updater with a side effect runs twice
+      // under StrictMode. Bytes also make the footer's "5 MB" honest, which
+      // counting UTF-16 code units did not — 5M code units of Telugu is ~15 MB.
+      const capped = st.pos >= MAX_TEXT_BYTES;
+      if (capped) setTextCapped(true);
+      st.done = atEof || capped;
+      setTextMore(!st.done);
+    } catch {
+      // A failure PAGING is not a failure LOADING. `error` replaces the whole
+      // viewer with the error card, so using it here threw away every window the
+      // user had already read — six screens of a log gone because window seven
+      // hiccuped. Only the FIRST window failing means the file did not open.
+      if (first) setError('Could not read file contents');
+      else setTextFailed(true);
+      st.done = true;
+      setTextMore(false);
+    } finally {
+      st.busy = false;
+    }
+  }, []);
+
   // Read the document's TEXT. Split out of the loader effect so a PDF can defer
   // it: pdf.js renders from the FILE (components/PdfView), so extracting text up
   // front was pure waste — it loaded the whole document into memory as base64
@@ -363,23 +467,84 @@ function FileViewerScreen() {
   // mid-range phone that is a visible freeze for a result nothing displays.
   // Office formats still read eagerly: for them the text IS the renderer.
   const readDoc = useCallback(async (local: string) => {
+    // Everything below sits behind awaits, and the screen is reused for the next
+    // file and for Retry. Without this, a slow read for file A lands on file B's
+    // screen and writes A's document into it.
+    const run = runRef.current;
+    const stale = () => runRef.current !== run;
     try {
       const b64 = await FileSystem.readAsStringAsync(local, { encoding: 'base64' as any });
       const bytes = Uint8Array.from(Buffer.from(b64, 'base64'));
-      const { extractDocText } = await import('../lib/docText');
-      const { text, empty } = extractDocText(bytes, fileName);
-      setDocText(empty ? '' : text);
-      setDocEmpty(empty);
-      // Structure is a bonus on top of the text, never a precondition for it:
-      // a document that reads fine flat must not become unreadable because the
-      // richer pass tripped over some XML shape.
+      if (stale()) return;
+      // BLOCKS FIRST. Both passes unzip and re-parse the SAME bytes in full, and
+      // the render path only ever shows docText when docBlocks is null — so
+      // running extractDocText first was a second full parse of a document
+      // nothing was going to display. Structure is still a bonus, never a
+      // precondition: if the richer pass trips over some XML shape, or finds
+      // nothing, the flat text below is exactly the fallback it always was.
+      //
+      // TWO PHASES. Phase one parses only the first few units — slides, sheets,
+      // PDF pages, or (docx, which has no pages) blocks — so the first screen
+      // paints without waiting on a 200-slide deck. fflate's filter runs per
+      // entry BEFORE inflating, so for pptx/xlsx the skipped slides and sheets
+      // are never decompressed at all; that is real saved work, not skipped
+      // parsing. Phase two then parses the whole document and replaces the
+      // preview, deferred past the first paint so the long parse cannot eat the
+      // frame the user is waiting for.
+      //
+      // Phase two re-does phase one's work rather than merging into it. That is
+      // deliberate: parsing on demand per unit would re-unzip on every request
+      // (O(n^2) over a document), and merging needs the shared parts — xlsx's
+      // sharedStrings above all — held and reconciled. One extra pass off the
+      // critical path is the smaller, duller cost.
+      let blocked = false;
       try {
         const { extractDocBlocks } = await import('../lib/docBlocks');
-        const r = extractDocBlocks(bytes, fileName);
-        setDocBlocks(r.empty ? null : r.blocks);
+        // PDF is deliberately NOT limited. pdfPageStreams (lib/docText.ts) builds a
+        // latin1 string of the whole file and inflates every content stream BEFORE
+        // a page limit can apply, so a limited pass costs what a full one costs —
+        // and phase two would then pay it a second time. One full parse is
+        // cheaper than two, and this path is already the degraded one (it is only
+        // reached when the native page renderer gave up).
+        const k = docKind(fileName);
+        const limit = k === 'pdf' ? undefined
+          : k === 'docx' ? PREVIEW_DOCX_BLOCKS
+          : PREVIEW_UNITS;
+        const r = extractDocBlocks(bytes, fileName, { limit });
+        if (!r.empty) {
+          setDocBlocks(r.blocks);
+          setDocEmpty(false);
+          blocked = true;
+          setDocMore(r.partial);
+          if (r.partial) {
+            // After the interactions, not on this tick: the whole point is that
+            // the first paint happens before the full parse starts.
+            InteractionManager.runAfterInteractions(() => {
+              if (stale()) return;
+              try {
+                const full = extractDocBlocks(bytes, fileName);
+                if (stale() || full.empty) return;
+                setDocBlocks(full.blocks);
+              } catch (fe: any) {
+                // The preview is already on screen and stays there. A failure
+                // here costs the tail of the document, never the head.
+                console.warn('[docBlocks] full parse failed, keeping the preview —', fe?.message ?? fe);
+              } finally {
+                if (!stale()) setDocMore(false);
+              }
+            });
+          }
+        }
       } catch (be: any) {
         console.warn('[docBlocks] structured read failed, showing plain text —', be?.message ?? be);
         setDocBlocks(null);
+      }
+      if (!blocked) {
+        setDocBlocks(null);
+        const { extractDocText } = await import('../lib/docText');
+        const { text, empty } = extractDocText(bytes, fileName);
+        setDocText(empty ? '' : text);
+        setDocEmpty(empty);
       }
     } catch (e: any) {
       // Fall back to the hand-off card rather than a dead end — but say WHY.
@@ -398,11 +563,12 @@ function FileViewerScreen() {
       const raw = String(e?.message ?? '');
       const internal = /ExponentFileSystem|java\.io\.|java\.lang\.|rejected|ENOENT|EACCES/i.test(raw);
       console.warn('[docText] could not read', fileName, '—', raw || e);
+      if (stale()) return;
       setDocError(internal || !raw
         ? 'This file could not be opened from where it is stored. Try opening it in another app.'
         : raw);
     } finally {
-      setDocLoading(false);
+      if (!stale()) setDocLoading(false);
     }
   }, [fileName]);
 
@@ -417,17 +583,21 @@ function FileViewerScreen() {
         if (fileUri.startsWith('http')) {
           local = await downloadAuthed(fileUri, FileSystem.cacheDirectory + 'temp_view_' + Date.now());
         }
-        // Documents are capped at MAX_DOC_BYTES; plain text had no ceiling at
-        // all, and readAsStringAsync materialises the WHOLE file as one JS
-        // string. A multi-hundred-MB .log — the exact thing someone opens from
-        // a chat "just to look" — takes the app down with it. Refuse it and
-        // point at the hand-off, which is what the device is better at anyway.
+        // WINDOWED, not whole-file. readAsStringAsync materialises everything it
+        // reads as one JS string, so reading a multi-hundred-MB .log in one call
+        // took the app down — which is why this used to REFUSE anything over
+        // MAX_TEXT_BYTES and send the user to another app. Reading a window at a
+        // time makes the refusal unnecessary: the first screen costs one window
+        // whatever the file weighs, and the cap now bounds what we accumulate.
         const info = await FileSystem.getInfoAsync(local);
-        if (info.exists && (info as any).size > MAX_TEXT_BYTES) {
-          setError('This file is too large to open here. Try opening it in another app.');
-          return;
-        }
-        setTextContent(await FileSystem.readAsStringAsync(local));
+        // A missing size is not a reason to fall back to one whole-file read:
+        // that is exactly what killed the app on a big file, and slicing AFTER
+        // readAsStringAsync bounds nothing — the process dies inside the read.
+        // Windowing does not need the size; a short read is end of file. The
+        // size is only a second, cheaper EOF signal when we do have it.
+        const size = info.exists ? Number((info as any).size ?? 0) : 0;
+        textWin.current = { uri: local, size, pos: 0, carry: new Uint8Array(0), busy: false, done: false };
+        await readTextWindow();
       } catch {
         setError('Could not read file contents');
       }
@@ -505,11 +675,27 @@ function FileViewerScreen() {
         setLoading(false);
       }
     };
+    // A new load. Everything the previous one left behind is reset HERE, on the
+    // one path every load goes through — synchronously, before any await, so a
+    // stale footer or cursor can never be seen or acted on. Missing these is how
+    // one file's contents got appended to another's: textWin still named the old
+    // file while textMore was still true, so the list happily paged file A into
+    // file B's screen.
+    runRef.current += 1;
+    textWin.current = { uri: '', size: 0, pos: 0, carry: new Uint8Array(0), busy: false, done: false };
+    setTextContent(''); setTextMore(false); setTextCapped(false); setTextFailed(false);
+    setDocMore(false);
+    setPdfFailed(false);
     loadFileMeta();
-    return () => { soundRef.current?.unloadAsync(); soundRef.current = null; };
+    return () => {
+      // Bump again so anything still in flight from THIS run is stale too — the
+      // next effect body will bump past it either way.
+      runRef.current += 1;
+      soundRef.current?.unloadAsync(); soundRef.current = null;
+    };
     // reloadKey: Retry re-runs THIS loader (see handleRetry) instead of the
     // component-scope duplicate, so first load and retry share one code path.
-  }, [fadeIn, slideUp, fileUri, fileType, fileName, readDoc, reloadKey, downloadAuthed]);
+  }, [fadeIn, slideUp, fileUri, fileType, fileName, readDoc, reloadKey, downloadAuthed, readTextWindow]);
 
   // pdf.js could not render this file, so the text reader is about to be shown.
   // NOW the extraction is worth doing — and only now.
@@ -838,7 +1024,8 @@ function FileViewerScreen() {
         )}
         <View style={s.docActionBar}>
           <Text style={s.docActionHint} numberOfLines={1}>
-            {docBlocks ? 'Reader view — no images or charts' : 'Text only — no formatting'}
+            {docMore ? 'Reader view — loading the rest…'
+            : docBlocks ? 'Reader view — no images or charts' : 'Text only — no formatting'}
           </Text>
           <TouchableOpacity
             onPress={openInDeviceApp}
@@ -867,33 +1054,68 @@ function FileViewerScreen() {
     // line end, which shifts the last column and corrupts any copy-paste out of
     // it. A BOM does the same at the start: U+FEFF printed as a stray glyph
     // before the first character of line 1.
-    const lines = textContent.replace(/^\uFEFF/, '').split(/\r?\n/);
+    const lines = textLines;
     const ext = fileName.split('.').pop()?.toLowerCase() || '';
     return (
       <View style={s.contentFill}>
-      <ScrollView
+      {/* FlatList, not ScrollView + map: a 5 MB .log is ~100k lines, and
+          mounting one View + two Text per line at once is what made a big text
+          file freeze the app. No getItemLayout — s.codeLine is minHeight 22 and
+          s.lineText wraps, so row height is not statically known; guessing one
+          would be worse than none. */}
+      <FlatList
         style={{ flex: 1 }}
+        data={lines}
+        keyExtractor={(_, i) => String(i)}
         contentContainerStyle={s.codeContainer}
         showsVerticalScrollIndicator
         indicatorStyle="white"
-      >
-        <View style={s.codeHeader}>
-          <View style={s.codeLangBadge}>
-            <Text style={s.codeLangText}>{ext.toUpperCase()}</Text>
+        initialNumToRender={40}
+        maxToRenderPerBatch={40}
+        windowSize={7}
+        removeClippedSubviews
+        onEndReached={textMore ? readTextWindow : undefined}
+        onEndReachedThreshold={1.5}
+        ListFooterComponent={
+          textMore ? <ActivityIndicator style={{ marginVertical: 16 }} color={C.primary} />
+          : textFailed ? (
+            // The rest could not be read. What IS read stays on screen — the
+            // full-screen error card would have thrown it all away.
+            <TouchableOpacity
+              onPress={() => { textWin.current.done = false; setTextFailed(false); setTextMore(true); }}
+              style={{ marginVertical: 16 }}
+              activeOpacity={0.85}
+            >
+              <Text style={[s.codeLineCount, { textAlign: 'center' }]}>
+                Could not read the rest — tap to try again
+              </Text>
+            </TouchableOpacity>
+          )
+          : textCapped ? (
+            <Text style={[s.codeLineCount, { marginVertical: 16, textAlign: 'center' }]}>
+              First 5 MB shown — open in another app for the rest
+            </Text>
+          ) : null
+        }
+        ListHeaderComponent={
+          <View style={s.codeHeader}>
+            <View style={s.codeLangBadge}>
+              <Text style={s.codeLangText}>{ext.toUpperCase()}</Text>
+            </View>
+            <Text style={s.codeLineCount}>{lines.length} lines{textMore ? ' so far' : ''}</Text>
           </View>
-          <Text style={s.codeLineCount}>{lines.length} lines</Text>
-        </View>
-        {lines.map((line, idx) => (
-          <View key={idx} style={s.codeLine}>
-            <Text style={s.lineNumber}>{idx + 1}</Text>
-            <Text style={s.lineText}>{line || ' '}</Text>
+        }
+        renderItem={({ item, index }) => (
+          <View style={s.codeLine}>
+            <Text style={s.lineNumber}>{index + 1}</Text>
+            <Text style={s.lineText}>{item || ' '}</Text>
           </View>
-        ))}
-      </ScrollView>
+        )}
+      />
       {/* Same choice as documents get: read here, or hand the file to whatever
           app the user prefers. Consistent across every readable type. */}
       <View style={s.docActionBar}>
-        <Text style={s.docActionHint} numberOfLines={1}>{lines.length} lines</Text>
+        <Text style={s.docActionHint} numberOfLines={1}>{lines.length} lines{textMore ? ' so far' : ''}</Text>
         <TouchableOpacity
           onPress={openInDeviceApp}
           disabled={openingExternally}
