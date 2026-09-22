@@ -6,13 +6,17 @@ import Svg, { Circle, G, Line, Path } from 'react-native-svg';
 import { AppText as Text, AuroraBackground } from '../components/ui';
 import { useTheme } from '../lib/theme';
 import {
-  answerCheck, expectedOrientation, INITIAL_CHECK_STEP,
-  startLeftEye, symbolScale, TRIALS_PER_EYE,
+  answerCheck, CLEAR_SCREEN_MATCHES, expectedOrientation, INITIAL_CHECK_STEP,
+  SCREEN_LEVELS, screenClarityIndex, startLeftEye, symbolScale, TRIALS_PER_EYE,
 } from '../lib/eyeCheckModel';
 
 const NOTICE = 'ఇది కేవలం ప్రాథమిక స్క్రీనింగ్ మాత్రమే. ఇది డాక్టర్ కంటి పరీక్షకు ప్రత్యామ్నాయం కాదు';
 const WHOEYES_URL = 'https://www.who.int/teams/noncommunicable-diseases/sensory-functions-disability-and-rehabilitation/whoeyes';
 const DIGITS = ['5', '8', '3', '6', '2', '9'] as const;
+const indexLabel = (correct: number) => {
+  const value = screenClarityIndex(correct);
+  return `${value > 0 ? '+' : ''}${value} points`;
+};
 const DIRECTIONS = [
   { angle: 0, symbol: '→', label: 'right' }, { angle: 45, symbol: '↘', label: 'down right' },
   { angle: 90, symbol: '↓', label: 'down' }, { angle: 135, symbol: '↙', label: 'down left' },
@@ -47,13 +51,14 @@ export default function EyeCheckScreen() {
   const ringButtonSize = Math.min(60, Math.max(44, ringSize * 60 / 252));
   const ringRadius = Math.min(85, (ringSize - ringButtonSize) / 2);
   const currentDigit = DIGITS[(seed + colorIndex) % DIGITS.length];
-  const needsExam = step.rightCorrect < 9 || step.leftCorrect < 9 || colorCorrect < DIGITS.length || astigSame.right !== true || astigSame.left !== true || amslerConcern.right || amslerConcern.left;
+  const suggestComfort = step.rightCorrect < CLEAR_SCREEN_MATCHES || step.leftCorrect < CLEAR_SCREEN_MATCHES;
+  const needsExam = suggestComfort || colorCorrect < DIGITS.length || astigSame.right !== true || astigSame.left !== true || amslerConcern.right || amslerConcern.left;
 
   const nextSetup = () => {
     if (setupStep < 3) setSetupStep(value => value + 1);
     else { setStep({ ...INITIAL_CHECK_STEP, seed }); setPhase('acuity'); }
   };
-  const answerAcuity = (angle: number) => {
+  const answerAcuity = (angle: number | null) => {
     if (pending.current || step.phase !== 'right' && step.phase !== 'left') return;
     pending.current = true;
     setFeedback(angle === expectedOrientation(step));
@@ -154,7 +159,7 @@ export default function EyeCheckScreen() {
           <Pressable accessibilityRole="button" onPress={() => setStep(current => startLeftEye(current))} style={primary}><Text style={s.primaryLabel}>Start left eye</Text></Pressable>
         </>}
         {phase === 'acuity' && step.phase === 'result' && <>
-          <View style={card}><Text style={s.cardTitle}>Visual acuity screen result</Text><Text style={s.body}>Right eye: {step.rightCorrect >= 9 ? 'seemed clear' : 'needs a closer check'} · {step.rightCorrect}/{TRIALS_PER_EYE} gap matches · smallest matched screen level {step.rightCompleted}/10</Text><Text style={s.body}>Left eye: {step.leftCorrect >= 9 ? 'seemed clear' : 'needs a closer check'} · {step.leftCorrect}/{TRIALS_PER_EYE} gap matches · smallest matched screen level {step.leftCompleted}/10</Text><Text style={[s.smallNote, { color: colors.textDim }]}>These are phone responses, not 20/20 acuity or spectacle power.</Text></View>
+          <View style={card}><Text style={s.cardTitle}>C-gap screen test scores</Text><Text style={s.resultHeading}>Right eye</Text><Text style={s.scoreValue}>{step.rightCorrect}/{TRIALS_PER_EYE}</Text><Text style={s.body}>Screen clarity index: {indexLabel(step.rightCorrect)} · {step.rightCorrect >= CLEAR_SCREEN_MATCHES ? 'Appears clear on this screen' : 'Further eye check recommended'} · smallest matched detail level {step.rightCompleted}/{SCREEN_LEVELS}</Text><Text style={s.resultHeading}>Left eye</Text><Text style={s.scoreValue}>{step.leftCorrect}/{TRIALS_PER_EYE}</Text><Text style={s.body}>Screen clarity index: {indexLabel(step.leftCorrect)} · {step.leftCorrect >= CLEAR_SCREEN_MATCHES ? 'Appears clear on this screen' : 'Further eye check recommended'} · smallest matched detail level {step.leftCompleted}/{SCREEN_LEVELS}</Text><Text style={[s.smallNote, { color: colors.textDim }]}>The −4 to +4 index only remaps your C-gap answers: negative means fewer gaps matched, positive means more. It is not spectacle power (+/− D), eyesight percentage or a prescription.</Text></View>
           <Pressable accessibilityRole="button" onPress={() => setPhase('color')} style={primary}><Text style={s.primaryLabel}>Next: colour vision</Text></Pressable>
         </>}
         {phase === 'acuity' && (step.phase === 'right' || step.phase === 'left') && <>
@@ -162,7 +167,7 @@ export default function EyeCheckScreen() {
           <Text style={s.body}>Cover your {step.eye === 'right' ? 'left' : 'right'} eye. At arm&apos;s length, match the gap in the top C using the direction buttons below.</Text>
           <Text style={[s.smallNote, { color: colors.textDim }]}>Gap {step.trial + 1}/{TRIALS_PER_EYE} · {glasses === 'with' ? 'with glasses' : 'without glasses'}</Text>
           <View style={[s.chartCard, { backgroundColor: '#FFFFFF', borderColor: colors.glassStroke }]}>{/* theme-exempt: the C chart uses a stable white test field */}
-            <LandoltC size={Math.max(20, Math.min(100, 64 * symbolScale(step.stage) * calibration))} angle={expectedOrientation(step)} />
+            <LandoltC size={Math.max(14, Math.min(100, 64 * symbolScale(step.stage) * calibration))} angle={expectedOrientation(step)} />
             <View style={ringSize < 190 ? s.narrowDirectionGrid : [s.directionRing, { width: ringSize, height: ringSize }]}>
               {DIRECTIONS.map(direction => {
                 const rad = direction.angle * Math.PI / 180;
@@ -171,6 +176,7 @@ export default function EyeCheckScreen() {
               {ringSize >= 190 && <View style={[s.ringCenter, { left: (ringSize - 36) / 2, top: (ringSize - 36) / 2 }]}><Ionicons name={feedback === null ? 'eye-outline' : feedback ? 'checkmark-circle' : 'close-circle'} size={36} color={feedback === null ? colors.primary : feedback ? '#15803D' : '#B91C1C'} /></View>}
             </View>
           </View>
+          <Pressable accessibilityRole="button" onPress={() => answerAcuity(null)} style={[s.secondaryButton, { borderColor: colors.glassStroke }]}><Text style={[s.secondaryLabel, { color: colors.text }]}>I can&apos;t see the gap</Text></Pressable>
           <Text style={[s.smallNote, { color: colors.textDim }]}>The gap changes direction and the C changes size after each answer. Keep looking at the top C, then tap its direction below.</Text>
         </>}
 
@@ -204,17 +210,24 @@ export default function EyeCheckScreen() {
 
         {phase === 'summary' && <>
           <View style={card}>
-            <Text style={s.cardTitle}>Estimated sight on this screen</Text>
+            <Text style={s.cardTitle}>Your screen vision result</Text>
+            <Text style={s.body}>Based on the C-gap answers you gave in this test:</Text>
             <Text style={s.resultHeading}>Right eye</Text>
-            <Text style={s.resultHeading}>{step.rightCorrect >= 9 ? 'Appears clear on this screen' : 'Further eye check recommended'}</Text>
-            <Text style={s.body}>{step.rightCorrect}/{TRIALS_PER_EYE} C gaps matched · smallest matched screen level {step.rightCompleted}/10</Text>
+            <Text style={s.scoreValue}>{step.rightCorrect}/{TRIALS_PER_EYE}</Text>
+            <Text style={s.body}>Screen clarity index: {indexLabel(step.rightCorrect)} (−4 to +4 scale)</Text>
+            <Text style={s.resultHeading}>{step.rightCorrect >= CLEAR_SCREEN_MATCHES ? 'Appears clear on this screen' : 'Further eye check recommended'}</Text>
+            <Text style={s.body}>C gaps matched · smallest matched detail level {step.rightCompleted}/{SCREEN_LEVELS}</Text>
             <Text style={s.resultHeading}>Left eye</Text>
-            <Text style={s.resultHeading}>{step.leftCorrect >= 9 ? 'Appears clear on this screen' : 'Further eye check recommended'}</Text>
-            <Text style={s.body}>{step.leftCorrect}/{TRIALS_PER_EYE} C gaps matched · smallest matched screen level {step.leftCompleted}/10</Text>
-            <Text style={[s.smallNote, { color: colors.textDim }]}>This estimate reflects your answers on this phone. Screen level 0 means no level was matched. It is not an eyesight percentage or spectacle power.</Text>
+            <Text style={s.scoreValue}>{step.leftCorrect}/{TRIALS_PER_EYE}</Text>
+            <Text style={s.body}>Screen clarity index: {indexLabel(step.leftCorrect)} (−4 to +4 scale)</Text>
+            <Text style={s.resultHeading}>{step.leftCorrect >= CLEAR_SCREEN_MATCHES ? 'Appears clear on this screen' : 'Further eye check recommended'}</Text>
+            <Text style={s.body}>C gaps matched · smallest matched detail level {step.leftCompleted}/{SCREEN_LEVELS}</Text>
+            <Text style={s.resultHeading}>Spectacle power (+/− D): not measured</Text>
+            <Text style={[s.smallNote, { color: colors.textDim }]}>The −4 to +4 index only remaps correct C-gap answers: negative means fewer matched, positive means more. It is not diopters, myopia or hyperopia. An eye examination is needed for a prescription. Detail level 0 means no level was matched.</Text>
           </View>
-          <View style={card}><Text style={s.cardTitle}>Your screening responses</Text><Text style={s.resultHeading}>Right eye</Text><Text style={s.body}>C gaps {step.rightCorrect}/10 · screen level {step.rightCompleted}/10 · lines {astigSame.right ? 'equal' : 'uneven/unsure'} · grid {amslerConcern.right ? 'difference' : 'no difference'}</Text><Text style={s.resultHeading}>Left eye</Text><Text style={s.body}>C gaps {step.leftCorrect}/10 · screen level {step.leftCompleted}/10 · lines {astigSame.left ? 'equal' : 'uneven/unsure'} · grid {amslerConcern.left ? 'difference' : 'no difference'}</Text><Text style={s.resultHeading}>Both eyes</Text><Text style={s.body}>Colour plates {colorCorrect}/{DIGITS.length} · {glasses === 'with' ? 'with glasses/contacts' : 'without glasses/contacts'}</Text></View>
-          <View style={card}><Text style={s.cardTitle}>What to do next</Text><Text style={s.body}>{needsExam ? 'One or more responses were unclear. Arrange a professional eye examination, especially for new or unequal changes.' : 'No difficulty was reported on this screen. Continue regular professional eye checks.'}</Text><Text style={s.body}>These screen levels are not 20/20 acuity, eyesight percentages, myopia or hyperopia, or plus/minus prescription values. Results stay on this screen only.</Text><Text style={s.body}>Seek prompt care for sudden sight loss, flashes or eye pain.</Text><Text style={s.body}>{NOTICE}</Text></View>
+          <View style={card}><Text style={s.cardTitle}>Your screening responses</Text><Text style={s.resultHeading}>Right eye</Text><Text style={s.body}>C gaps {step.rightCorrect}/{TRIALS_PER_EYE} · detail level {step.rightCompleted}/{SCREEN_LEVELS} · lines {astigSame.right ? 'equal' : 'uneven/unsure'} · grid {amslerConcern.right ? 'difference' : 'no difference'}</Text><Text style={s.resultHeading}>Left eye</Text><Text style={s.body}>C gaps {step.leftCorrect}/{TRIALS_PER_EYE} · detail level {step.leftCompleted}/{SCREEN_LEVELS} · lines {astigSame.left ? 'equal' : 'uneven/unsure'} · grid {amslerConcern.left ? 'difference' : 'no difference'}</Text><Text style={s.resultHeading}>Both eyes</Text><Text style={s.body}>Colour plates {colorCorrect}/{DIGITS.length} · {glasses === 'with' ? 'with glasses/contacts' : 'without glasses/contacts'}</Text></View>
+          <View style={card}><Text style={s.cardTitle}>Suggested app display setup</Text><Text style={s.body}>{suggestComfort ? 'Try at least comfort level 3 of 6: larger text, higher contrast and less transparent backgrounds.' : 'Your current display can stay as it is. You can still adjust Vision Comfort if reading feels uncomfortable.'}</Text><Text style={[s.smallNote, { color: colors.textDim }]}>This is a starting point from your screen responses, not an eye treatment. Check the live preview and save only when it looks comfortable.</Text><Pressable accessibilityRole="button" onPress={() => router.replace({ pathname: '/vision-comfort' as any, params: { eyeCheckSuggestion: suggestComfort ? '1' : '0', eyeCheckGlasses: glasses } })} style={primary}><Text style={s.primaryLabel}>Preview Vision Comfort suggestion</Text></Pressable></View>
+          <View style={card}><Text style={s.cardTitle}>What to do next</Text><Text style={s.body}>{needsExam ? 'One or more responses were unclear. Arrange a professional eye examination, especially for new or unequal changes.' : 'No difficulty was reported on this screen. Continue regular professional eye checks.'}</Text><Text style={s.body}>These detail levels are not 20/20 acuity, eyesight percentages, myopia or hyperopia, or plus/minus prescription values. Results stay on this screen only.</Text><Text style={s.body}>Seek prompt care for sudden sight loss, flashes or eye pain.</Text><Text style={s.body}>{NOTICE}</Text></View>
           <Pressable accessibilityRole="button" onPress={restart} style={primary}><Text style={s.primaryLabel}>Re-do test</Text></Pressable>
           <Pressable accessibilityRole="link" onPress={() => Linking.openURL(WHOEYES_URL)} style={s.linkButton}><Text style={[s.linkLabel, { color: colors.accentOn }]}>Learn about WHOeyes screening</Text></Pressable>
         </>}
@@ -260,7 +273,7 @@ function AmslerGrid({ size }: { size: number }) {
 const s = StyleSheet.create({
   screen: { flex: 1 }, scroll: { paddingHorizontal: 16, paddingBottom: 40 }, container: { width: '100%', maxWidth: 680, alignSelf: 'center' },
   header: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 8, minWidth: 0 }, back: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' }, title: { fontSize: 24, fontWeight: '800', flexShrink: 1 }, subtitle: { fontSize: 14, lineHeight: 20, marginBottom: 20 },
-  card: { borderWidth: 1, borderRadius: 16, padding: 16, marginBottom: 16, gap: 12 }, cardTitle: { fontSize: 18, fontWeight: '800' }, sectionTitle: { fontSize: 20, fontWeight: '800', marginBottom: 12 }, body: { fontSize: 15, lineHeight: 22 }, smallNote: { fontSize: 13, lineHeight: 19, marginTop: 8 }, resultHeading: { fontSize: 16, fontWeight: '800', marginTop: 4 },
+  card: { borderWidth: 1, borderRadius: 16, padding: 16, marginBottom: 16, gap: 12 }, cardTitle: { fontSize: 18, fontWeight: '800' }, sectionTitle: { fontSize: 20, fontWeight: '800', marginBottom: 12 }, body: { fontSize: 15, lineHeight: 22 }, smallNote: { fontSize: 13, lineHeight: 19, marginTop: 8 }, resultHeading: { fontSize: 16, fontWeight: '800', marginTop: 4 }, scoreValue: { fontSize: 32, lineHeight: 40, fontWeight: '800' },
   primaryButton: { minHeight: 54, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 10, alignItems: 'center', justifyContent: 'center', marginTop: 8 }, primaryLabel: { color: '#FFFFFF', fontSize: 16, fontWeight: '800', textAlign: 'center' },
   secondaryButton: { minHeight: 54, borderWidth: 1, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 10, alignItems: 'center', justifyContent: 'center', marginTop: 10 }, secondaryLabel: { fontSize: 15, fontWeight: '700', textAlign: 'center' }, linkButton: { minHeight: 48, alignItems: 'center', justifyContent: 'center', paddingVertical: 10, marginTop: 8 }, linkLabel: { fontSize: 14, fontWeight: '700', textAlign: 'center' },
   chartCard: { minHeight: 170, borderWidth: 1, borderRadius: 16, alignItems: 'center', justifyContent: 'center', marginVertical: 16, padding: 16, gap: 24 },

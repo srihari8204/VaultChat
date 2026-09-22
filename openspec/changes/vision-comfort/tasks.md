@@ -11,7 +11,8 @@
 - [x] 2.2 Add independent contrast and reduced-transparency choices; render preview using the same tokens as supported screens.
 - [x] 2.3 Add skippable sight-category and optional spectacle-value input below the preview; derive only a coarse starting hint, discard raw input, and show the nonmedical explanation.
 - [ ] 2.4 Verify in focused tests that dragging changes only draft state, confirmation saves, skipping sight works, and buttons/screen-reader actions match drag behavior.
-- [x] 2.5 Add an optional Eye Check from Vision Comfort with safety, card-size screen setup, ten adaptive C-gap trials for each eye, six colour plates, separate-eye semicircle and Amsler checks, transient results, and start/end Telugu disclaimers. Do not store or infer eyesight percentage.
+- [x] 2.5 Add an optional Eye Check from Vision Comfort with safety, card-size screen setup, sixteen adaptive C-gap trials for each eye including smaller symbols and a cannot-see response, six colour plates, separate-eye semicircle and Amsler checks, transient results, and start/end Telugu disclaimers. Do not store or infer eyesight percentage.
+- [x] 2.6 Show a per-eye −4 to +4 point screen clarity index derived from the C-gap answer count, explicitly distinct from spectacle power in diopters.
 
 ## 3. Shared display and chat — written
 

@@ -1,5 +1,10 @@
 import assert from 'node:assert/strict';
-import { answerCheck, expectedOrientation, INITIAL_CHECK_STEP, ORIENTATIONS, STAGE_MAX, STAGE_MIN, startLeftEye, symbolScale, TRIALS_PER_EYE } from './eyeCheckModel';
+import { answerCheck, expectedOrientation, INITIAL_CHECK_STEP, ORIENTATIONS, screenClarityIndex, STAGE_MAX, STAGE_MIN, startLeftEye, symbolScale, TRIALS_PER_EYE } from './eyeCheckModel';
+
+assert.equal(screenClarityIndex(0), -4);
+assert.equal(screenClarityIndex(8), 0);
+assert.equal(screenClarityIndex(14), 3);
+assert.equal(screenClarityIndex(16), 4);
 
 let step = INITIAL_CHECK_STEP;
 let previous: number | null = null;
@@ -35,5 +40,7 @@ assert.equal(step.leftCompleted, 0);
 assert.equal(step.rightCorrect, TRIALS_PER_EYE);
 assert.ok(symbolScale(STAGE_MIN) > symbolScale(0));
 assert.ok(symbolScale(STAGE_MAX) < symbolScale(0));
+assert.ok(64 * symbolScale(STAGE_MAX) < 20, 'the finest C level is smaller than the previous 20 dp floor');
 assert.notEqual(expectedOrientation(INITIAL_CHECK_STEP), expectedOrientation({ ...INITIAL_CHECK_STEP, seed: 1 }));
+assert.notEqual(expectedOrientation(INITIAL_CHECK_STEP), expectedOrientation({ ...INITIAL_CHECK_STEP, trial: ORIENTATIONS.length }));
 console.log('Eye Check adaptive flow OK');

@@ -13,10 +13,16 @@ export type CheckStep = {
   seed: number;
 };
 
-export const TRIALS_PER_EYE = 10;
+export const TRIALS_PER_EYE = 16;
 export const STAGE_MIN = -3;
-export const STAGE_MAX = 6;
+export const STAGE_MAX = 8;
+export const SCREEN_LEVELS = STAGE_MAX - STAGE_MIN + 1;
+export const CLEAR_SCREEN_MATCHES = 14;
 export const ORIENTATIONS = [0, 45, 90, 135, 180, 225, 270, 315] as const;
+// Screen-response points only: fewer matched gaps are negative, more are positive. Not diopters.
+export function screenClarityIndex(correct: number): number {
+  return Math.floor(Math.max(0, Math.min(TRIALS_PER_EYE, correct)) / 2) - 4;
+}
 export const INITIAL_CHECK_STEP: CheckStep = {
   phase: 'right', eye: 'right', stage: 0, trial: 0, correct: 0,
   rightCorrect: 0, leftCorrect: 0, rightCompleted: 0, leftCompleted: 0, seed: 0,
@@ -28,7 +34,8 @@ export function symbolScale(stage: number): number {
 }
 
 export function expectedOrientation(step: CheckStep): typeof ORIENTATIONS[number] {
-  const index = ((step.seed + step.trial * 3 + (step.eye === 'left' ? 4 : 0)) % ORIENTATIONS.length + ORIENTATIONS.length) % ORIENTATIONS.length;
+  const cycle = Math.floor(step.trial / ORIENTATIONS.length);
+  const index = ((step.seed + step.trial * 3 + cycle + (step.eye === 'left' ? 4 : 0)) % ORIENTATIONS.length + ORIENTATIONS.length) % ORIENTATIONS.length;
   return ORIENTATIONS[index];
 }
 

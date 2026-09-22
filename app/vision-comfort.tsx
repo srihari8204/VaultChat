@@ -1,5 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
-import { Stack, useRouter } from 'expo-router';
+import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, Switch,
@@ -17,6 +17,7 @@ const TRACK_HEIGHT = 192;
 
 export default function VisionComfortScreen() {
   const router = useRouter();
+  const { eyeCheckSuggestion, eyeCheckGlasses } = useLocalSearchParams<{ eyeCheckSuggestion?: string; eyeCheckGlasses?: string }>();
   const { colors, scheme } = useTheme();
   const previewColors = PALETTES[scheme];
   const { ready, activeProfile, profiles, saveProfile, setActiveProfile, resetProfile } = useVisionComfort();
@@ -31,9 +32,12 @@ export default function VisionComfortScreen() {
   useEffect(() => {
     if (!ready || initialized.current) return;
     initialized.current = true;
-    setSelected(activeProfile);
-    setDraft(profiles[activeProfile]);
-  }, [ready, activeProfile, profiles]);
+    const key = eyeCheckSuggestion !== undefined ? (eyeCheckGlasses === 'without' ? 'without-glasses' : 'with-glasses') : activeProfile;
+    setSelected(key);
+    setDraft(eyeCheckSuggestion === '1'
+      ? { ...profiles[key], level: Math.max(2, profiles[key].level), highContrast: true, reduceTransparency: true }
+      : profiles[key]);
+  }, [ready, activeProfile, profiles, eyeCheckSuggestion, eyeCheckGlasses]);
 
   const chooseProfile = (key: VisionProfileKey) => {
     if (key === selected) return;
@@ -107,6 +111,7 @@ export default function VisionComfortScreen() {
           {!ready ? <ActivityIndicator color={colors.primary} style={s.loading} /> : (
             <>
               <Text style={[s.intro, { color: colors.textDim }]}>Drag until this chat looks clear and comfortable. You decide what works best for your sight.</Text>
+              {eyeCheckSuggestion !== undefined && <View style={[s.checkCard, { backgroundColor: colors.surfaceSolid, borderColor: colors.glassStroke }]}><Text style={s.checkTitle}>Eye Check display suggestion</Text><Text style={[s.checkStep, { color: colors.textDim }]}>{eyeCheckSuggestion === '1' ? 'A starting preview with larger text, higher contrast and solid backgrounds is ready below.' : 'Your existing display profile is ready below. Adjust it if reading feels uncomfortable.'} Check the sample chat with both eyes and change anything you need before saving.</Text><Text style={[s.checkNote, { color: colors.textDim }]}>This changes app readability only. It does not measure or correct spectacle power.</Text></View>}
 
               <Text style={[s.sectionTitle, { color: colors.textDim }]}>PROFILE</Text>
               <View style={s.profileRow}>
