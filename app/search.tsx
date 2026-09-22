@@ -2,6 +2,7 @@
 // searches message CONTENT across all chats, entirely on-device against the
 // local plaintext cache (zero-knowledge — the server never sees the query).
 
+import { useAuthHeader } from '../hooks/useAuthHeader';
 import { HEADER_TOP, SCREEN_BOTTOM } from '../constants/layout';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
@@ -11,7 +12,6 @@ import {
 } from 'react-native';
 import { type Palette } from '../constants/theme';
 import { useTheme } from '../lib/theme';
-import { getAccessToken } from '../lib/api';
 import { Avatar, AuroraBackground } from '../components/ui';
 import { AppText as Text } from '../components/ui/Text';
 import { attachmentUrl, listChats, chatTitle as chatDisplayName, type ChatSummary } from '../lib/chatService';
@@ -36,17 +36,16 @@ export default function SearchScreen() {
   const [chats, setChats] = useState<ChatSummary[]>([]);
   const [msgs, setMsgs] = useState<MsgHit[]>([]);
   const [loading, setLoading] = useState(true);
-  const [authHeader, setAuthHeader] = useState<string | null>(null);
+  const authHeader = useAuthHeader();
   const debounce = useRef<any>(null);
 
   useEffect(() => {
     let cancel = false;
     (async () => {
       try {
-        const [list, tok] = await Promise.all([listChats(), getAccessToken()]);
+        const list = await listChats();
         if (cancel) return;
         setChats(list);
-        setAuthHeader(tok ? `Bearer ${tok}` : null);
       } catch {}
       finally { if (!cancel) setLoading(false); }
     })();

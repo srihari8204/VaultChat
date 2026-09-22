@@ -3,6 +3,7 @@
 // (tap to open). Phone-number add + invite-link join live under "New contact"
 // and a footer row. Full address-book discovery stays on /contacts.
 
+import { useAuthHeader } from '../hooks/useAuthHeader';
 import { HEADER_TOP } from '../constants/layout';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useEffect, useMemo, useState } from 'react';
@@ -16,7 +17,6 @@ import { useTheme } from '../lib/theme';
 import { AppText as Text, Avatar, AuroraBackground, KeyboardSafe } from '../components/ui';
 import { PhoneField, toE164 } from '../components/auth/PhoneField';
 import { createDirectChat, listChats, attachmentUrl, setDisappearing, type ChatSummary } from '../lib/chatService';
-import { getAccessToken } from '../lib/api';
 
 type Contact = { chatId: string; userId: string; name: string; photoURL: string | null; online: boolean };
 
@@ -57,7 +57,7 @@ export default function NewChatScreen() {
 
   const [query, setQuery] = useState('');
   const [contacts, setContacts] = useState<Contact[]>([]);
-  const [authHeader, setAuthHeader] = useState<string | null>(null);
+  const authHeader = useAuthHeader();
   const [loadingList, setLoadingList] = useState(true);
 
   // "New contact" inline add
@@ -71,9 +71,8 @@ export default function NewChatScreen() {
     let cancel = false;
     (async () => {
       try {
-        const [list, tok] = await Promise.all([listChats(), getAccessToken()]);
+        const list = await listChats();
         if (cancel) return;
-        setAuthHeader(tok ? `Bearer ${tok}` : null);
         const seen = new Set<string>();
         const out: Contact[] = [];
         for (const c of list as ChatSummary[]) {

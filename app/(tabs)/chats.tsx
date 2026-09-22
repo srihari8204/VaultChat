@@ -5,6 +5,7 @@
 // and "All Chats" sections. FAB → /new-chat. Data wiring (presence, folders,
 // pin/archive/mute/hidden, unread) is preserved from the previous version.
 
+import { useAuthHeader } from '../../hooks/useAuthHeader';
 import { HEADER_TOP, TAB_BAR_SPACE } from '../../constants/layout';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -17,7 +18,6 @@ import { useTheme } from '../../lib/theme';
 import { useVisionComfort } from '../../lib/visionComfort';
 import { Avatar, AuroraBackground, GlassChip } from '../../components/ui';
 import { canSplit } from '../../lib/responsive';
-import { getAccessToken } from '../../lib/api';
 import {
   archiveChat, attachmentUrl, listChats, listStoriesFeed, muteChat, pinChat, setFavourite, setHidden,
   hydrateOwnPreviews,
@@ -93,7 +93,7 @@ export default function ChatsScreen() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
-  const [authHeader, setAuthHeader] = useState<string | null>(null);
+  const authHeader = useAuthHeader();
   const [folder, setFolder] = useState<FolderId>('all');
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   // Real last-message previews from the local plaintext cache (WhatsApp-style).
@@ -161,8 +161,6 @@ export default function ChatsScreen() {
   useEffect(() => {
     let cancel = false;
     (async () => {
-      const tok = await getAccessToken();
-      if (!cancel) setAuthHeader(tok ? `Bearer ${tok}` : null);
     })();
     return () => { cancel = true; };
   }, []);

@@ -9,6 +9,7 @@
 //
 // PIN session is screen-scoped: leaving the screen requires re-entering.
 
+import { useAuthHeader } from '../hooks/useAuthHeader';
 import { HEADER_TOP } from '../constants/layout';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
@@ -17,7 +18,6 @@ import { ActivityIndicator, Alert, FlatList, Image, RefreshControl, StyleSheet, 
 import { type Palette } from '../constants/theme';
 import { useTheme } from '../lib/theme';
 import { focusWithKeyboard, retryKeyboard } from '../lib/imeFocus';
-import { getAccessToken } from '../lib/api';
 import {
   attachmentUrl,
   listChats,
@@ -145,17 +145,13 @@ function HiddenList({ router }: { router: any }) {
   const [rows,       setRows]       = useState<ChatSummary[]>([]);
   const [loading,    setLoading]    = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [authHeader, setAuthHeader] = useState<string | null>(null);
+  const authHeader = useAuthHeader();
   const [error,      setError]      = useState<string | null>(null);
 
   const load = useCallback(async () => {
     try {
-      const [list, tok] = await Promise.all([
-        listChats({ includeHidden: true }),
-        getAccessToken(),
-      ]);
+      const list = await listChats({ includeHidden: true });
       setRows(list);
-      setAuthHeader(tok ? `Bearer ${tok}` : null);
       setError(null);
     } catch (e: any) {
       setError(e?.message ?? 'Failed to load');

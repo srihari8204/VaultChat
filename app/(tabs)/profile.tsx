@@ -3,6 +3,7 @@
 // Backed by /user/profile (Postgres). Edit name + status, sign out.
 // Photo upload is deferred to Phase 4 (file storage).
 
+import { useAuthHeader } from '../../hooks/useAuthHeader';
 import { HEADER_TOP, TAB_BAR_SPACE } from '../../constants/layout';
 import * as ImagePicker from 'expo-image-picker';
 import { useRouter } from 'expo-router';
@@ -23,7 +24,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import * as Clipboard from 'expo-clipboard';
 import { logoutUser, sendPhoneOTP, verifyPhoneOTP } from '../(constants)/authService';
-import { api, getAccessToken } from '../../lib/api';
+import { api } from '../../lib/api';
 import { resetTo } from '../../lib/authNav';
 import { attachmentUrl, uploadAttachment } from '../../lib/chatService';
 import { unregisterPushToken } from '../../lib/push';
@@ -68,7 +69,7 @@ export default function ProfileScreen() {
   const [loading, setLoading] = useState(true);
   const [saving,  setSaving]  = useState(false);
   const [photoBusy, setPhotoBusy] = useState(false);
-  const [authHeader, setAuthHeader] = useState<string | null>(null);
+  const authHeader = useAuthHeader();
 
   const [name,   setName]   = useState('');
   const [status, setStatus] = useState('');
@@ -80,8 +81,6 @@ export default function ProfileScreen() {
   useEffect(() => {
     let cancel = false;
     (async () => {
-      const tok = await getAccessToken();
-      if (!cancel) setAuthHeader(tok ? `Bearer ${tok}` : null);
     })();
     return () => { cancel = true; };
   }, []);

@@ -1,5 +1,6 @@
 // app/status-privacy.tsx — WhatsApp "Status privacy" (who can see my status).
 
+import { useAuthHeader } from '../hooks/useAuthHeader';
 import { HEADER_TOP } from '../constants/layout';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
@@ -14,7 +15,6 @@ import {
   getStatusPrivacy, setStatusPrivacy, listChats, attachmentUrl,
   type StatusPrivacyMode,
 } from '../lib/chatService';
-import { getAccessToken } from '../lib/api';
 
 type Contact = { id: string; name: string; photoURL: string | null };
 const MODES: { key: StatusPrivacyMode; label: string; sub: string }[] = [
@@ -31,15 +31,14 @@ export default function StatusPrivacyScreen() {
   const [mode, setMode] = useState<StatusPrivacyMode>('contacts');
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [contacts, setContacts] = useState<Contact[]>([]);
-  const [authHeader, setAuthHeader] = useState<string | null>(null);
+  const authHeader = useAuthHeader();
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     (async () => {
       try {
-        const [priv, chats, tok] = await Promise.all([getStatusPrivacy(), listChats(), getAccessToken()]);
+        const [priv, chats] = await Promise.all([getStatusPrivacy(), listChats()]);
         setMode(priv.mode); setSelected(new Set(priv.userIds));
-        setAuthHeader(tok ? `Bearer ${tok}` : null);
         const seen = new Set<string>();
         const c: Contact[] = [];
         for (const ch of chats) {

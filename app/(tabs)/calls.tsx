@@ -6,6 +6,7 @@
 // red), audio/video kind, time + duration. Tap = redial; long-press = menu;
 // the info button opens a call detail. A FAB starts a new call.
 
+import { useAuthHeader } from '../../hooks/useAuthHeader';
 import { HEADER_TOP, TAB_BAR_SPACE } from '../../constants/layout';
 import { useCallback, useMemo, useState } from 'react';
 import { FlatList, StyleSheet, TouchableOpacity, View, Alert, Modal, Pressable, ScrollView } from 'react-native';
@@ -19,7 +20,7 @@ import { Avatar, AuroraBackground } from '../../components/ui';
 import { Sheet, type SheetAction } from '../../components/ui/Sheet';
 import { getCallLog, clearCallLog, removeCallLog, callLogKey, getHiddenServerCalls, hideServerCalls, type CallLogEntry } from '../../lib/callLog';
 import { listChats, attachmentUrl } from '../../lib/chatService';
-import { getAccessToken, getCachedUser } from '../../lib/api';
+import { getCachedUser } from '../../lib/api';
 import { fetchCallHistory } from '../../lib/callSession';
 import { mergeCallHistory, type CallHistoryEntry } from '../../lib/callHistory';
 
@@ -71,7 +72,7 @@ export default function CallsScreen() {
   // silently dropped 'Call info' and 'Remove from log'. Sheet scrolls instead.
   const [sheet, setSheet] = useState<{ title: string; message?: string; actions: SheetAction[] } | null>(null);
   const [photos, setPhotos] = useState<Map<string, string>>(new Map());
-  const [authHeader, setAuthHeader] = useState<string | null>(null);
+  const authHeader = useAuthHeader();
   const [infoGroup, setInfoGroup] = useState<CallGroup | null>(null);
 
   useFocusEffect(useCallback(() => {
@@ -82,8 +83,8 @@ export default function CallsScreen() {
     // whole story and nothing below changes what's on screen.
     getCallLog().then(l => { if (alive) setLog(l); });
 
-    Promise.all([listChats(), getAccessToken(), getCachedUser(), fetchCallHistory(), getHiddenServerCalls()])
-      .then(([chats, tok, me, server, hidden]) => {
+    Promise.all([listChats(), getCachedUser(), fetchCallHistory(), getHiddenServerCalls()])
+      .then(([chats, me, server, hidden]) => {
         if (!alive) return;
         const m = new Map<string, string>();
         // chatId → how to name a call the server told us about but this device
@@ -98,7 +99,6 @@ export default function CallsScreen() {
           });
         }
         setPhotos(m);
-        setAuthHeader(tok ? `Bearer ${tok}` : null);
         // Merge only when the server actually returned something. With
         // CALL_SESSIONS off fetchCallHistory resolves [] without a request, so
         // this is a no-op and the log stays exactly as it was.

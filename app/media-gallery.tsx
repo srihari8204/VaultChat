@@ -6,6 +6,7 @@
 // opens it in a self-contained full-screen viewer (no dependency on other
 // screens). Links open externally. No Firestore.
 
+import { useAuthHeader } from '../hooks/useAuthHeader';
 import { HEADER_TOP } from '../constants/layout';
 import React, { useState, useEffect, useCallback , useMemo, useRef } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, FlatList, SectionList, Dimensions, ActivityIndicator, Alert, Linking, Modal, useWindowDimensions } from 'react-native';
@@ -16,7 +17,6 @@ import { useLocalSearchParams, Stack, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { type Palette } from '../constants/theme';
 import { useTheme } from '../lib/theme';
-import { getAccessToken } from '../lib/api';
 import { getMessages, getChat, decryptFromChat, attachmentUrl, type Message } from '../lib/chatService';
 import { getDecryptedAttachmentUri, parseMediaContent } from '../lib/mediaAttachments';
 import { resolveAttachmentFile, viewerRouteFor } from '../lib/docOpen';
@@ -132,7 +132,7 @@ export default function MediaGalleryScreen() {
   const cid = String(chatId ?? idParam ?? '');
 
   const [tab, setTab] = useState<TabId>('photos');
-  const [authHeader, setAuthHeader] = useState<string | null>(null);
+  const authHeader = useAuthHeader();
   // Who we are, so a file WE sent resolves to the Sent/ copy already on disk
   // instead of being downloaded back from the server.
   const [meId, setMeId] = useState<string | null>(null);
@@ -171,8 +171,6 @@ export default function MediaGalleryScreen() {
       }
 
       try {
-        const tok = await getAccessToken();
-        if (active) setAuthHeader(tok ? `Bearer ${tok}` : null);
         if (!cid) { setLoading(false); return; }
 
         // Remember the chat's direct peer so encrypted media content can be

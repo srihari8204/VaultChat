@@ -17,6 +17,7 @@
 // Visibility / TTL / per-viewer tracking happens server-side. This screen
 // just renders + posts.
 
+import { useAuthHeader } from '../../hooks/useAuthHeader';
 import { AppText as Text } from '../../components/ui/Text';
 import { HEADER_TOP, SCREEN_BOTTOM, TAB_BAR_SPACE } from '../../constants/layout';
 import * as ImagePicker from 'expo-image-picker';
@@ -55,7 +56,6 @@ import { StoryRing } from '../../components/StoryRing';
 import { AuroraDark, type Palette } from '../../constants/theme';
 import { useTheme } from '../../lib/theme';
 import { useVisionComfort } from '../../lib/visionComfort';
-import { getAccessToken } from '../../lib/api';
 import { initialOf } from '../../lib/format';
 import { getSocket } from '../../lib/socket';
 import { STORY_E2EE, E2EE_ENABLED } from '../../constants/flags';
@@ -88,7 +88,7 @@ export default function StatusScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [posting,    setPosting]    = useState(false);
   const [error,      setError]      = useState<string | null>(null);
-  const [authHeader, setAuthHeader] = useState<string | null>(null);
+  const authHeader = useAuthHeader();
   // Text status (WhatsApp) compose
   const [textOpen,   setTextOpen]   = useState(false);
   const [storyText,  setStoryText]  = useState('');
@@ -125,9 +125,8 @@ export default function StatusScreen() {
 
   const load = useCallback(async () => {
     try {
-      const [f, tok] = await Promise.all([listStoriesFeed(), getAccessToken()]);
+      const f = await listStoriesFeed();
       setFeed(f);
-      setAuthHeader(tok ? `Bearer ${tok}` : null);
       setError(null);
       putStoryFeed(f);   // offline cache AND the viewer's warm start — see lib/storyFeedCache.ts
     } catch (e: any) {

@@ -6,6 +6,7 @@
 // The group is created on Postgres and opened in the shared /chat screen
 // (which renders groups), replacing the old Firebase + group-chat flow.
 
+import { useAuthHeader } from '../hooks/useAuthHeader';
 import { HEADER_TOP, SCREEN_BOTTOM } from '../constants/layout';
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
@@ -18,7 +19,6 @@ import { type Palette } from '../constants/theme';
 import { useTheme } from '../lib/theme';
 import { AppText as Text, Avatar, AuroraBackground } from '../components/ui';
 import { listChats, createGroupChat, attachmentUrl } from '../lib/chatService';
-import { getAccessToken } from '../lib/api';
 
 interface Pick { userId: string; name: string; photoURL: string | null }
 
@@ -36,7 +36,7 @@ export default function CreateGroupScreen() {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [groupName, setGroupName] = useState('');
   const [query, setQuery] = useState('');
-  const [authHeader, setAuthHeader] = useState<string | null>(null);
+  const authHeader = useAuthHeader();
   const [loading, setLoading] = useState(true);
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -45,8 +45,7 @@ export default function CreateGroupScreen() {
     let active = true;
     (async () => {
       try {
-        const [chats, tok] = await Promise.all([listChats(), getAccessToken()]);
-        if (active) setAuthHeader(tok ? `Bearer ${tok}` : null);
+        const chats = await listChats();
         // Direct-chat peers → dedup by userId.
         const seen = new Map<string, Pick>();
         for (const c of chats) {

@@ -13,6 +13,7 @@
 // View tracking: as each story flips active, we POST /stories/:id/viewed
 // (server is idempotent + treats author-as-viewer as no-op).
 
+import { useAuthHeader } from '../hooks/useAuthHeader';
 import { Ionicons } from '@expo/vector-icons';
 import { ErrorBoundary } from '../components/ErrorBoundary';
 import { useLocalSearchParams, useRouter } from 'expo-router';
@@ -32,7 +33,6 @@ import {
 } from 'react-native';
 import { useTheme } from '../lib/theme';
 import { type Palette } from '../constants/theme';
-import { getAccessToken } from '../lib/api';
 import { initialOf } from '../lib/format';
 import {
   attachmentUrl,
@@ -68,7 +68,7 @@ function StoryViewerScreen() {
 
   const [entry,      setEntry]      = useState<StoryFeedEntry | null>(null);
   const [index,      setIndex]      = useState(0);
-  const [authHeader, setAuthHeader] = useState<string | null>(null);
+  const authHeader = useAuthHeader();
   const [paused,     setPaused]     = useState(false);
   const [loaded,     setLoaded]     = useState(false);   // media actually rendered?
   const [error,      setError]      = useState<string | null>(null);
@@ -119,11 +119,10 @@ function StoryViewerScreen() {
       if (seed) apply(seed, true);
 
       try {
-        const [feed, tok] = await Promise.all([listStoriesFeed(), getAccessToken()]);
+        const feed = await listStoriesFeed();
         if (cancel) return;
         putStoryFeed(feed);
         apply(feed, !seed);
-        setAuthHeader(tok ? `Bearer ${tok}` : null);
       } catch (e: any) {
         // With a cached entry already on screen there is something to look at,
         // so a failed revalidation must not replace it with an error.

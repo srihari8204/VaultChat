@@ -8,6 +8,7 @@
 //
 // No Firebase, no Firestore — pure Postgres + JWT.
 
+import { useAuthHeader } from '../hooks/useAuthHeader';
 import * as FileSystem from 'expo-file-system/legacy';
 import { useRouter } from 'expo-router';
 import * as Sharing from 'expo-sharing';
@@ -29,7 +30,7 @@ import {
 } from 'react-native';
 import { SERVER_URL } from '../constants/server';
 import { initUsageCounter, setUsageCounterEnabled, usageCounterEnabled } from '../lib/usageCounter';
-import { api, getAccessToken } from '../lib/api';
+import { api } from '../lib/api';
 import { profileFromProtobuf } from '../lib/userProfilePolicy';
 import { initialOf } from '../lib/format';
 import { getAutoDownload, setAutoDownload, type AutoDownloadPolicy } from '../lib/mediaPrefs';
@@ -74,7 +75,7 @@ export default function SettingsScreen() {
   const [blocks,   setBlocks]   = useState<BlockedUser[]>([]);
   const [loading,  setLoading]  = useState(true);
   const [saving,   setSaving]   = useState<null | keyof UserSettings>(null);
-  const [authHeader, setAuthHeader] = useState<string | null>(null);
+  const authHeader = useAuthHeader();
   const [profile, setProfile] = useState<{ name?: string; email?: string; status?: string; photoURL?: string } | null>(null);
   const [autoDl, setAutoDl] = useState<AutoDownloadPolicy>('always');
   const [picker, setPicker] = useState<Picker>(null);
@@ -88,15 +89,14 @@ export default function SettingsScreen() {
     let cancel = false;
     (async () => {
       try {
-        const [s, b, tok, p] = await Promise.all([
-          getSettings(), listBlocks(), getAccessToken(),
+        const [s, b, p] = await Promise.all([
+          getSettings(), listBlocks(),
           api<{ name?: string; email?: string; status?: string; photoURL?: string }>(
             '/user/profile', { proto: profileFromProtobuf }).catch(() => null),
         ]);
         if (cancel) return;
         setSettings(s);
         setBlocks(b);
-        setAuthHeader(tok ? `Bearer ${tok}` : null);
         setProfile(p);
       } catch (e: any) {
         Alert.alert('Could not load settings', e?.message ?? 'Try again');
