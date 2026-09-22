@@ -36,6 +36,7 @@ import { initFeatureFlags } from '../lib/featureFlags';
 import { registerMessageActions } from '../lib/notificationActions';
 import { initLang } from '../lib/i18n';
 import { attachUsageFlush, initUsageCounter } from '../lib/usageCounter';
+import { purgeRetiredKeys } from '../lib/retiredKeys';
 import { UsageCounter } from '../components/UsageCounter';
 import { isSessionEnded } from '../lib/sessionEnded';
 import * as SplashScreen from 'expo-splash-screen';
@@ -170,6 +171,12 @@ initLang().catch(() => {});
 // module scope closes that window.
 initUsageCounter().catch(() => {});
 attachUsageFlush();
+
+// Delete storage belonging to features that no longer exist — see
+// lib/retiredKeys.ts for what and why. Fire-and-forget at module scope
+// deliberately: nothing waits on it, nothing reads what it deletes, and a
+// device whose keystore is locked at launch simply finishes the job next time.
+purgeRetiredKeys().catch(() => {});
 
 /**
  * Screens that draw their OWN header and never accounted for the status bar.
