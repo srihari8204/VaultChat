@@ -87,11 +87,35 @@ both Node and Go, sharing live location's membership check.
 - [x] 6.3 Shared trip history — derived, not stored: a fold over the group thread's own trip announcements plus the local alert inbox. Attribution is by `tripId` on the alert, never by parsing its text, which is rendered for humans and changes with the copy
 - [x] 6.4 Weekly summary computed and rendered ON DEVICE; nothing is uploaded, not even a total
 
-## G7 — Group calling (BLOCKED — infrastructure, not code)
-- [ ] 7.1 Provision SFU + TURN. Nothing below can start until this exists
-- [ ] 7.2 N-way voice, then video
-- [ ] 7.3 Screen share, raise hand, mute controls, join/leave notifications
-- [x] 7.4 Until 7.1 lands, keep the honest 1:1 fallback in `app/group-calls.tsx` — no simulated participants
+## G7 — Group calling (UNBLOCKED — delivered by `calls-64-participant`)
+
+This section was written when no SFU existed. It was overtaken: the whole of G7
+shipped inside `openspec/changes/calls-64-participant`, so these are closed
+against that change's evidence rather than re-implemented here.
+
+- [x] 7.1 SFU + TURN provisioned. LiveKit runs as `vaultchat-livekit-1` (config
+      `livekit/livekit.yaml`); coturn is `coturn/turnserver.conf`, minted per client by
+      `getIceServers()` (`lib/iceConfig.ts:61`), which **fails closed** — it degrades to
+      STUN-only rather than silently leaking a direct path. Deployed and hash-verified
+      2026-08-31 (`calls-64-participant` 4.6, 4.7) — **deployed**
+- [x] 7.2 N-way voice and video live to a 64-participant ceiling, enforced server-side inside
+      the join transaction. Measured at 64: 36% CPU, 537 MiB, zero errors
+      (`calls-64-participant` 10.5).
+      **CORRECTED 2026-09-22.** This line first read "with mesh retained as the degraded path
+      when the SFU is unreachable (`lib/call/mode.ts` `topologyFor`)". That is FALSE.
+      `topologyFor` has no production caller — the only references are in `mode.selftest.ts`
+      — and `engine.ts` `join()` goes straight to `joinCallRoom` with an SFU token. The mesh
+      is not merely unused, it is gone: `onOffer`/`onAnswer`/`onIce` are inert and no SDP
+      crosses the wire. An unreachable SFU fails the call — **written**
+- [x] 7.3 Screen share `app/videocall.tsx:357` → `engine.startScreenShare()`; raise and lower
+      hand `engine.raiseHand` → `POST /calls/{id}/hand`, rendered on the tile not just in a
+      host list (`group-call-active.tsx:94,162,166`); mute `engine.toggleMute`
+      (`group-call-active.tsx:462`); join and leave via `call_peer_joined` /
+      `call_peer_left` — **written**
+- [~] 7.4 SUPERSEDED. `app/group-calls.tsx` no longer downgrades to 1:1 — it rings every
+      member and joins the call room. The honesty rule it encoded still holds and is still
+      met: no simulated participants anywhere. Device proof of the N-way path is tracked in
+      `calls-64-participant` 5.2 and 5.7, not here
 
 ## Cross-cutting
 - [x] X.1 Server-side permission check on EVERY mutating endpoint; client `can()` is UX only
