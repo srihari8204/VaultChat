@@ -113,4 +113,10 @@ room:
   # Hard ceiling, well above the 64-participant target, so a runaway client
   # cannot exhaust the box. The REAL limit is the role model in
   # call_participants — this is only a backstop.
-  max_participants: 100
+  #
+  # 100 → 200 on 2026-08-31 (calls-64-participant task 4.7), applied on prod by
+  # editing the bind-mounted file and `docker restart vaultchat-livekit-1`. The
+  # repo copy was left at 100 and drifted. Corrected here so a future file-copy
+  # deploy does not silently walk the live ceiling back down — deploys are file
+  # copy, not git, so the repo value is what a redeploy would install.
+  max_participants: 200
