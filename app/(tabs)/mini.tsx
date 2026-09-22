@@ -27,6 +27,7 @@ import {
 import { AppText, AuroraBackground } from '../../components/ui';
 import type { Palette } from '../../constants/theme';
 import { useColors } from '../../lib/theme';
+import { useVisionComfort } from '../../lib/visionComfort';
 import { GLOW } from '../../constants/glass';
 
 type IoniconName = React.ComponentProps<typeof Ionicons>['name'];
@@ -76,7 +77,8 @@ interface TodoItem {
 export default function MiniAppsScreen() {
   const c = useColors();
   const { width } = useWindowDimensions();
-  const styles = useMemo(() => makeStyles(c, width), [c, width]);
+  const { metrics } = useVisionComfort();
+  const styles = useMemo(() => makeStyles(c, width, metrics), [c, width, metrics]);
   const router = useRouter();
   const [activeApp, setActiveApp] = useState<string | null>(null);
 
@@ -343,7 +345,7 @@ export default function MiniAppsScreen() {
           <TouchableOpacity onPress={() => router.back()} style={styles.backBtn} accessibilityLabel="Back">
             <Ionicons name="arrow-back" size={20} color={c.text} />
           </TouchableOpacity>
-          <View style={{ flex: 1 }}>
+          <View style={{ flex: 1, minWidth: 0 }}>
             <View style={styles.titleRow}>
               <Ionicons name="grid-outline" size={24} color={c.accentOn} />
               <AppText variant="title" style={styles.headerTitle}>Mini Apps</AppText>
@@ -375,7 +377,7 @@ export default function MiniAppsScreen() {
               <LinearGradient colors={app.gradient} style={styles.appIconWrap}>
                 <Ionicons name={app.icon} size={24} color="#FFFFFF" />
               </LinearGradient>
-              <AppText variant="tiny" numberOfLines={2} style={styles.appName}>{app.name}</AppText>
+              <AppText variant="tiny" style={styles.appName}>{app.name}</AppText>
               {!app.route && <AppText variant="tiny" style={styles.comingSoon}>Soon</AppText>}
             </TouchableOpacity>
           ))}
@@ -398,7 +400,7 @@ export default function MiniAppsScreen() {
               <LinearGradient colors={app.gradient} style={styles.appIconWrap}>
                 <Ionicons name={app.icon} size={24} color="#FFFFFF" />
               </LinearGradient>
-              <AppText variant="tiny" numberOfLines={2} style={styles.appName}>{app.name}</AppText>
+              <AppText variant="tiny" style={styles.appName}>{app.name}</AppText>
             </TouchableOpacity>
           ))}
         </View>
@@ -442,10 +444,11 @@ export default function MiniAppsScreen() {
 }
 
 // ── Styles ───────────────────────────────────────────────────────
-const makeStyles = (c: Palette, width: number) => {
-  const contentW = Math.max(280, width - 40);
+const makeStyles = (c: Palette, width: number, m: ReturnType<typeof useVisionComfort>['metrics']) => {
+  const contentW = Math.max(0, width - 40);
   const gridGap = 10;
-  const gridCols = width >= 840 ? 5 : width >= 600 ? 4 : 3;
+  const baseCols = width >= 840 ? 5 : width >= 600 ? 4 : 3;
+  const gridCols = baseCols;
   const appCardW = Math.floor((contentW - gridGap * (gridCols - 1)) / gridCols);
   const calcBtn = Math.min(72, Math.floor((contentW - gridGap * 3) / 4));
   const calcZero = calcBtn * 2 + gridGap;
@@ -476,11 +479,12 @@ const makeStyles = (c: Palette, width: number) => {
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: c.glassStroke,
   },
-  titleRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  titleRow: { flexDirection: 'row', alignItems: 'center', gap: 8, minWidth: 0, flexShrink: 1 },
   headerTitle: {
     color: c.text,
     fontSize: 26,
     fontWeight: '800',
+    flexShrink: 1,
   },
   headerSub: {
     color: c.textDim,
@@ -530,7 +534,7 @@ const makeStyles = (c: Palette, width: number) => {
   appName: {
     color: c.text,
     textAlign: 'center',
-    minHeight: 28,
+    flexShrink: 1,
   },
   comingSoon: {
     color: c.textDim,
@@ -675,7 +679,7 @@ const makeStyles = (c: Palette, width: number) => {
     borderWidth: 1,
     borderColor: c.glassStroke,
     color: c.text,
-    fontSize: 14,
+    fontSize: 14 * m.textScale,
     paddingHorizontal: 14,
     paddingVertical: 12,
     marginRight: 10,

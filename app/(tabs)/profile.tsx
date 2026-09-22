@@ -8,6 +8,7 @@ import * as ImagePicker from 'expo-image-picker';
 import { useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useState, type ComponentProps } from 'react';
 import { useTheme } from '../../lib/theme';
+import { useVisionComfort } from '../../lib/visionComfort';
 import { type Palette } from '../../constants/theme';
 import {
   ActivityIndicator,
@@ -55,7 +56,8 @@ interface UserProfile {
 
 function useS() {
   const { colors } = useTheme();
-  return useMemo(() => makeStyles(colors), [colors]);
+  const { metrics } = useVisionComfort();
+  return useMemo(() => makeStyles(colors, metrics), [colors, metrics]);
 }
 
 export default function ProfileScreen() {
@@ -293,11 +295,11 @@ export default function ProfileScreen() {
           </View>
           <View style={S.cameraBadge}><Ionicons name="camera" size={18} color="#fff" /></View>
         </TouchableOpacity>
-        <Text style={S.nameBig} numberOfLines={1}>{name || 'Your name'}</Text>
+        <Text style={S.nameBig}>{name || 'Your name'}</Text>
         {/* Phone is the account; email is optional. Show whichever exists
             rather than an empty line where a subtitle used to be. */}
         {!!(profile?.phone || profile?.email) && (
-          <Text style={S.emailDisplay} numberOfLines={1}>{profile?.phone || profile?.email}</Text>
+          <Text style={S.emailDisplay}>{profile?.phone || profile?.email}</Text>
         )}
         {!!profile?.photoURL && (
           <TouchableOpacity onPress={onRemovePhoto} disabled={photoBusy} hitSlop={8}>
@@ -456,7 +458,7 @@ function EditRow({ icon, label, value, placeholder, editing, onEdit, onChangeTex
           />
         ) : (
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-            <Text style={[S.editValue, !value && { color: colors.textDim, fontWeight: '400' }]} numberOfLines={multiline ? 2 : 1}>
+            <Text style={[S.editValue, !value && { color: colors.textDim, fontWeight: '400' }]}>
               {value || placeholder}
             </Text>
             {verified && <Ionicons name="checkmark-circle" size={15} color={colors.success} />}
@@ -477,16 +479,13 @@ function InfoRow({ k, v, small }: { k: string; v: string; small?: boolean }) {
   return (
     <View style={S.infoRow}>
       <Text style={S.infoK}>{k}</Text>
-      {/* `small` marks the identifier rows - VaultID, timestamps. Ellipsising an
-          identifier is worse than wrapping it: half a VaultID still LOOKS like a
-          whole one, so it gets copied down wrong. Those wrap; short labelled
-          values keep the one-line cap (2026-09-17). */}
-      <Text style={[S.infoV, small && S.infoVSmall]} numberOfLines={small ? 0 : 1}>{v}</Text>
+      {/* Account values wrap so identifiers and dates remain fully readable. */}
+      <Text style={[S.infoV, small && S.infoVSmall]}>{v}</Text>
     </View>
   );
 }
 
-const makeStyles = (c: Palette) => StyleSheet.create({
+const makeStyles = (c: Palette, m: ReturnType<typeof useVisionComfort>['metrics']) => StyleSheet.create({
   screen:       { flex: 1, backgroundColor: c.bg },
   center:       { justifyContent: 'center', alignItems: 'center' },
   header:       { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingTop: HEADER_TOP, paddingBottom: 8 },
@@ -498,28 +497,28 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   avatarTxt:    { color: '#fff', fontSize: 46, fontWeight: '800' },
   avatarBusy:   { ...StyleSheet.absoluteFillObject, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(0,0,0,0.4)' },
   cameraBadge:  { position: 'absolute', right: 2, bottom: 2, width: 36, height: 36, borderRadius: 18, backgroundColor: c.primary, alignItems: 'center', justifyContent: 'center', borderWidth: 3, borderColor: c.bg },
-  nameBig:      { maxWidth: '100%', color: c.text, fontSize: 22, fontWeight: '800', marginTop: 14 },
-  emailDisplay: { color: c.textDim, fontSize: 13, marginTop: 2 },
+  nameBig:      { maxWidth: '100%', color: c.text, fontSize: 22, fontWeight: '800', marginTop: 14, textAlign: 'center' },
+  emailDisplay: { maxWidth: '100%', color: c.textDim, fontSize: 13, marginTop: 2, textAlign: 'center' },
   removePhotoTxt: { color: c.danger, fontSize: 12, fontWeight: '600', marginTop: 8 },
 
   card:         { backgroundColor: c.glassSoft, borderRadius: 16, marginHorizontal: 16, marginTop: 12, borderWidth: StyleSheet.hairlineWidth, borderColor: c.glassStroke, overflow: 'hidden' },
   cardHint:     { color: c.textDim, fontSize: 12, lineHeight: 16, marginHorizontal: 22, marginTop: 8 },
 
-  editRow:      { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 14, gap: 14 },
+  editRow:      { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 14 * m.spacingScale, gap: 14 },
   editIcon:     { width: 24, textAlign: 'center' },
   editLabel:    { color: c.textDim, fontSize: 12, marginBottom: 2 },
-  editValue:    { color: c.text, fontSize: 15.5, fontWeight: '600' },
-  editInput:    { color: c.text, fontSize: 15.5, fontWeight: '600', padding: 0, borderBottomWidth: 1.5, borderBottomColor: c.primary, paddingBottom: 2 },
-  editPencil:   { padding: 4, minWidth: 26, alignItems: 'center' },
+  editValue:    { color: c.text, fontSize: 15.5, fontWeight: '600', flexShrink: 1 },
+  editInput:    { color: c.text, fontSize: 15.5 * m.textScale, fontWeight: '600', padding: 0, borderBottomWidth: 1.5, borderBottomColor: c.primary, paddingBottom: 2 },
+  editPencil:   { padding: 4, minWidth: 44 * m.controlScale, minHeight: 44 * m.controlScale, alignItems: 'center', justifyContent: 'center' },
   rowSep:       { height: StyleSheet.hairlineWidth, backgroundColor: c.border, marginLeft: 54 },
 
   groupLabel:   { color: c.textDim, fontSize: 12, fontWeight: '700', letterSpacing: 1.2, marginHorizontal: 22, marginTop: 24, marginBottom: 2 },
-  infoRow:      { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.glassStroke },
+  infoRow:      { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', alignItems: 'center', gap: 4, paddingHorizontal: 16, paddingVertical: 12 * m.spacingScale, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.glassStroke },
   infoK:        { flexShrink: 1, marginRight: 12, color: c.textDim, fontSize: 13 },
-  infoV:        { color: c.text, fontSize: 13, fontWeight: '600', maxWidth: '60%', textAlign: 'right' },
+  infoV:        { color: c.text, fontSize: 13, fontWeight: '600', flexShrink: 1, textAlign: 'right' },
   infoVSmall:   { fontSize: 12, fontWeight: '500' },
 
-  input:        { color: c.text, backgroundColor: c.glassSoft, borderColor: c.glassStroke, borderWidth: 1, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12, fontSize: 15 },
+  input:        { color: c.text, backgroundColor: c.glassSoft, borderColor: c.glassStroke, borderWidth: 1, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12, fontSize: 15 * m.textScale },
   subHint:      { color: c.textDim, fontSize: 12, lineHeight: 16 },
   verifyRow:    { flexDirection: 'row', alignItems: 'center', gap: 8, marginHorizontal: 22, marginTop: 12, paddingVertical: 6 },
   verifyLinkTxt:{ color: c.primary, fontWeight: '700', fontSize: 13 },
@@ -529,6 +528,6 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   btnOff:       { opacity: 0.5 },
   btnTxt:       { color: '#fff', fontWeight: '800', fontSize: 14 },
 
-  actionRow:    { flexDirection: 'row', alignItems: 'center', gap: 14, marginHorizontal: 16, marginTop: 12, paddingHorizontal: 16, paddingVertical: 15, borderRadius: 16, borderWidth: StyleSheet.hairlineWidth, borderColor: c.glassStroke, backgroundColor: c.glassSoft },
+  actionRow:    { flexDirection: 'row', alignItems: 'center', gap: 14, marginHorizontal: 16, marginTop: 12, paddingHorizontal: 16, paddingVertical: 15 * m.spacingScale, borderRadius: 16, borderWidth: StyleSheet.hairlineWidth, borderColor: c.glassStroke, backgroundColor: c.glassSoft },
   actionTxt:    { flex: 1, color: c.text, fontWeight: '700', fontSize: 15 },
 });

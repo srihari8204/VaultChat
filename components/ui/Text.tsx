@@ -13,6 +13,7 @@ import { StyleSheet, Text as RNText, useWindowDimensions, type TextProps, type T
 import { scaleType } from '../../lib/typeScale';
 import { FONT, TYPOGRAPHY, type TypeVariant } from '../../constants/theme';
 import { useColors } from '../../lib/theme';
+import { useVisionComfort } from '../../lib/visionComfort';
 
 /** True once the brand fonts are registered (provided by the root layout). */
 export const FontReadyContext = createContext<boolean>(false);
@@ -31,6 +32,7 @@ export function AppText({ variant, color, style, ...rest }: AppTextProps) {
   const inline = parentVariant != null && variant == null;
   const ready = useFontsReady();
   const colors = useColors();
+  const { metrics } = useVisionComfort();
   const { width } = useWindowDimensions();
   const t = TYPOGRAPHY[effectiveVariant];
   // Screen-responsive sizing. Returns the TYPOGRAPHY numbers unchanged across
@@ -76,10 +78,20 @@ export function AppText({ variant, color, style, ...rest }: AppTextProps) {
       : (w >= 700 ? FONT.bodyBold : w >= 600 ? FONT.bodySemibold : FONT.body);
     resolved = Number.isFinite(w) ? { ...rest2, fontFamily: family } : rest2;
   }
+  const comfort: TextStyle = inline || (metrics.textScale === 1 && metrics.lineScale === 1) ? {} : {
+    fontSize: Math.round((merged?.fontSize ?? sized.fontSize) * metrics.textScale * 10) / 10,
+    lineHeight: Math.ceil((merged?.lineHeight ?? base.lineHeight ?? sized.lineHeight) * metrics.textScale * metrics.lineScale),
+  };
+  if (!inline && metrics.bold && merged?.fontWeight == null && merged?.fontFamily == null) {
+    comfort.fontFamily = ready
+      ? (t.family === FONT.heading || t.family === FONT.headingBold ? FONT.headingBold : FONT.bodySemibold)
+      : undefined;
+    if (!ready) comfort.fontWeight = '600';
+  }
   // Context has no native view: nested runs retain React Native's text inheritance.
   return (
     <TextVariantContext.Provider value={effectiveVariant}>
-      <RNText style={[base, resolved]} {...rest} />
+      <RNText style={[base, resolved, comfort]} {...rest} />
     </TextVariantContext.Provider>
   );
 }

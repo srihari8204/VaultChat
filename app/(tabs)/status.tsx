@@ -54,6 +54,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { StoryRing } from '../../components/StoryRing';
 import { AuroraDark, type Palette } from '../../constants/theme';
 import { useTheme } from '../../lib/theme';
+import { useVisionComfort } from '../../lib/visionComfort';
 import { getAccessToken } from '../../lib/api';
 import { initialOf } from '../../lib/format';
 import { getSocket } from '../../lib/socket';
@@ -74,7 +75,8 @@ type PreviewAsset = { uri: string; type: 'image' | 'video'; filename: string; mi
 
 function useS() {
   const { colors } = useTheme();
-  return useMemo(() => makeStyles(colors), [colors]);
+  const { metrics } = useVisionComfort();
+  return useMemo(() => makeStyles(colors, metrics), [colors, metrics]);
 }
 
 export default function StatusScreen() {
@@ -334,7 +336,7 @@ export default function StatusScreen() {
           : <View style={S.avatarFallback}><Text style={S.avatarFallbackTxt}>{initialOf(item.name, item.email)}</Text></View>}
       </StoryRing>
       <View style={{ flex: 1 }}>
-        <Text style={S.rowName} numberOfLines={1}>{item.name || item.email || item.userId.slice(0, 8)}</Text>
+        <Text style={S.rowName}>{item.name || item.email || item.userId.slice(0, 8)}</Text>
         <Text style={S.rowSub}>{item.stories.length} {item.stories.length === 1 ? 'update' : 'updates'} · {formatRelative(item.latestAt)}</Text>
       </View>
     </TouchableOpacity>
@@ -521,7 +523,7 @@ export default function StatusScreen() {
               </View>
               <View style={{ flex: 1 }}>
                 <Text style={S.rowName}>My status</Text>
-                <Text style={S.rowSub} numberOfLines={1}>
+                <Text style={S.rowSub}>
                   {mine ? `Tap to view · ${formatRelative(mine.latestAt)}` : 'Tap to add status update'}
                 </Text>
               </View>
@@ -563,21 +565,21 @@ function formatRelative(iso: string): string {
 }
 
 
-const makeStyles = (c: Palette) => StyleSheet.create({
+const makeStyles = (c: Palette, m: ReturnType<typeof useVisionComfort>['metrics']) => StyleSheet.create({
   screen:       { flex: 1, backgroundColor: c.bg },
   center:       { justifyContent: 'center', alignItems: 'center' },
 
-  header:       { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 20, paddingTop: HEADER_TOP, paddingBottom: 16, justifyContent: 'space-between' },
+  header:       { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', paddingHorizontal: 20, paddingTop: HEADER_TOP, paddingBottom: 16, justifyContent: 'space-between' },
   title:        { flexShrink: 1, marginRight: 8, color: c.text, fontSize: 28, fontWeight: '800' },
-  headerBtn:    { width: 44, height: 44, borderRadius: 22, backgroundColor: c.glassSoft, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: c.glassStroke },
+  headerBtn:    { width: 44 * m.controlScale, height: 44 * m.controlScale, borderRadius: 22 * m.controlScale, backgroundColor: c.glassSoft, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: c.glassStroke },
   headerBtnTxt: { color: c.primary, fontSize: 22, fontWeight: '600', marginTop: -2 },
   // Text status composer
   textCompose:      { flex: 1, paddingTop: HEADER_TOP },
   textComposeBar:   { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingBottom: 8 },
   bgSwatch:         { width: 22, height: 22, borderRadius: 11, borderWidth: 1, borderColor: 'rgba(255,255,255,0.4)' },
   bgSwatchOn:       { borderWidth: 3, borderColor: AuroraDark.text },
-  textComposeInput: { flex: 1, color: '#fff', fontSize: 26, fontWeight: '700', paddingHorizontal: 24, textAlignVertical: 'center' },
-  textPostBtn:      { position: 'absolute', right: 20, bottom: SCREEN_BOTTOM + 20, width: 56, height: 56, borderRadius: 28, backgroundColor: 'rgba(0,0,0,0.4)', alignItems: 'center', justifyContent: 'center' },
+  textComposeInput: { flex: 1, color: '#fff', fontSize: 26 * m.textScale, fontWeight: '700', paddingHorizontal: 24, textAlignVertical: 'center' },
+  textPostBtn:      { position: 'absolute', right: 20, bottom: SCREEN_BOTTOM + 20, width: 56 * m.controlScale, height: 56 * m.controlScale, borderRadius: 28 * m.controlScale, backgroundColor: 'rgba(0,0,0,0.4)', alignItems: 'center', justifyContent: 'center' },
   emojiPanel:       { maxHeight: 200, backgroundColor: 'rgba(0,0,0,0.35)', paddingVertical: 8 },
   emojiGrid:        { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', paddingHorizontal: 8 },
   emojiSection:     { color: 'rgba(255,255,255,0.6)', fontSize: 12, fontWeight: '700', letterSpacing: 1, paddingHorizontal: 14, paddingTop: 8, paddingBottom: 2 },
@@ -595,8 +597,8 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   thumbImg:         { width: '100%', height: '100%' },
   gateArea:         { maxHeight: 260, backgroundColor: 'rgba(0,0,0,0.35)' },
   captionRow:       { flexDirection: 'row', alignItems: 'flex-end', gap: 10, paddingHorizontal: 12, paddingBottom: SCREEN_BOTTOM + 16, paddingTop: 8 },
-  captionInput:     { flex: 1, color: '#fff', fontSize: 16, maxHeight: 120, paddingHorizontal: 16, paddingVertical: 12, borderRadius: 24, backgroundColor: 'rgba(255,255,255,0.12)' },
-  sendFab:          { width: 50, height: 50, borderRadius: 25, backgroundColor: c.primary, alignItems: 'center', justifyContent: 'center' },
+  captionInput:     { flex: 1, color: '#fff', fontSize: 16 * m.textScale, maxHeight: 120 * m.textScale, paddingHorizontal: 16, paddingVertical: 12, borderRadius: 24, backgroundColor: 'rgba(255,255,255,0.12)' },
+  sendFab:          { width: 50 * m.controlScale, height: 50 * m.controlScale, borderRadius: 25 * m.controlScale, backgroundColor: c.primary, alignItems: 'center', justifyContent: 'center' },
   emojiBtn:         { width: 46, height: 46, alignItems: 'center', justifyContent: 'center' },
   emojiTxt:         { fontSize: 28 },
 
@@ -604,7 +606,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
 
   sectionLabel: { color: c.textDim, fontSize: 12, fontWeight: '700', letterSpacing: 1.2, paddingHorizontal: 20, paddingTop: 16, paddingBottom: 8 },
 
-  row:          { marginHorizontal: 12, marginVertical: 4, borderRadius: 18, borderWidth: StyleSheet.hairlineWidth, borderColor: c.glassStroke, backgroundColor: c.glassSoft, flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 20, paddingVertical: 12 },
+  row:          { marginHorizontal: 12, marginVertical: 4, borderRadius: 18, borderWidth: StyleSheet.hairlineWidth, borderColor: c.glassStroke, backgroundColor: c.glassSoft, flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 16, paddingVertical: 12 * m.spacingScale },
   // 3px-thick ring that wraps the avatar. Purple = unseen, grey = all
   // seen. The ring is a padded square with a coloured background.
   avatarRing:        { width: 60, height: 60, borderRadius: 30, padding: 3, alignItems: 'center', justifyContent: 'center' },

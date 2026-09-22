@@ -13,6 +13,7 @@ import { useFocusEffect, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { type Palette } from '../../constants/theme';
 import { useTheme } from '../../lib/theme';
+import { useVisionComfort } from '../../lib/visionComfort';
 import { AppText as Text } from '../../components/ui/Text';
 import { Avatar, AuroraBackground } from '../../components/ui';
 import { Sheet, type SheetAction } from '../../components/ui/Sheet';
@@ -24,7 +25,8 @@ import { mergeCallHistory, type CallHistoryEntry } from '../../lib/callHistory';
 
 function useS() {
   const { colors } = useTheme();
-  return useMemo(() => makeStyles(colors), [colors]);
+  const { metrics } = useVisionComfort();
+  return useMemo(() => makeStyles(colors, metrics), [colors, metrics]);
 }
 
 function fmtWhen(at: number): string {
@@ -205,12 +207,12 @@ export default function CallsScreen() {
         onLongPress={() => onLongPress(g)} delayLongPress={300}>
         <Avatar uri={photo && authHeader ? attachmentUrl(photo) : null} headers={authHeader ? { Authorization: authHeader } : undefined} name={g.peerName} size={52} ring />
         <View style={{ flex: 1 }}>
-          <Text style={[S.name, missed && { color: colors.danger }]} numberOfLines={1}>
+          <Text style={[S.name, missed && { color: colors.danger }]}>
             {g.peerName}{count > 1 ? `  (${count})` : ''}
           </Text>
           <View style={S.subRow}>
             <DirArrow d={latest.direction} />
-            <Text style={S.sub} numberOfLines={1}>
+            <Text style={S.sub}>
               {dirLabel(latest.direction)}{`  ·  ${fmtWhen(latest.at)}`}{dur ? `  ·  ${dur}` : ''}
             </Text>
           </View>
@@ -269,7 +271,7 @@ export default function CallsScreen() {
               <>
                 <View style={S.infoHead}>
                   <Avatar uri={(infoGroup.peerPhoto || photos.get(infoGroup.peerUid)) && authHeader ? attachmentUrl(infoGroup.peerPhoto || photos.get(infoGroup.peerUid)!) : null} headers={authHeader ? { Authorization: authHeader } : undefined} name={infoGroup.peerName} size={48} ring />
-                  <Text style={S.infoName} numberOfLines={1}>{infoGroup.peerName}</Text>
+                  <Text style={S.infoName}>{infoGroup.peerName}</Text>
                 </View>
                 <View style={S.infoActions}>
                   <TouchableOpacity style={S.infoAction} onPress={() => { const u = infoGroup; setInfoGroup(null); call({ chatId: u.entries[0].chatId, peerUid: u.peerUid, peerName: u.peerName, group: u.group }, 'audio'); }}>
@@ -308,25 +310,19 @@ export default function CallsScreen() {
   );
 }
 
-const makeStyles = (c: Palette) => StyleSheet.create({
+const makeStyles = (c: Palette, m: ReturnType<typeof useVisionComfort>['metrics']) => StyleSheet.create({
   screen:  { flex: 1, backgroundColor: c.bg },
   header:  { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingTop: HEADER_TOP, paddingBottom: 12 },
   title:   { color: c.text, fontSize: 28, fontWeight: '800' },
   sectionLabel: { color: c.textDim, fontSize: 12, fontWeight: '700', letterSpacing: 1, marginHorizontal: 16, marginTop: 8, marginBottom: 4 },
 
-  row:     { marginHorizontal: 12, marginVertical: 4, borderRadius: 18, borderWidth: StyleSheet.hairlineWidth, borderColor: c.glassStroke, backgroundColor: c.glassSoft, flexDirection: 'row', alignItems: 'center', gap: 14, paddingHorizontal: 16, paddingVertical: 11 },
+  row:     { marginHorizontal: 12, marginVertical: 4, borderRadius: 18, borderWidth: StyleSheet.hairlineWidth, borderColor: c.glassStroke, backgroundColor: c.glassSoft, flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 12, paddingVertical: 11 * m.spacingScale },
   name:    { color: c.text, fontSize: 16, fontWeight: '600' },
-  subRow:  { flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 2 },
+  subRow:  { flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 2, flexWrap: 'wrap' },
   sub:     { color: c.textDim, fontSize: 13, flexShrink: 1 },
-  // 2026-09-18: height stays PINNED. Fixed-width icon slot, no Text inside — an
-  // Ionicon at size 22 does not font-scale, so there is nothing here to clip.
-  // Freeing the height would only stretch a 38-wide slot into an oval and grow
-  // every call row for nothing. hitSlop 8 carries it past the 44 tap floor.
+  // Icon-only action grows with the comfort level and keeps a 44dp tap floor.
   callBtn: {
-    // layout-exempt: icon-only slot, no text to clip. NOTE: 38x40 is under the
-    // 44dp tap-target floor — worth raising, but that changes row height and
-    // wants a device check first.
-    width: 38, height: 40, alignItems: 'center', justifyContent: 'center',
+    width: 44 * m.controlScale, minHeight: 44 * m.controlScale, alignItems: 'center', justifyContent: 'center',
   },
   sep:     { height: StyleSheet.hairlineWidth, backgroundColor: c.border, marginLeft: 78 },
 
@@ -334,15 +330,15 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   heading: { color: c.text, fontSize: 18, fontWeight: '700' },
   sub2:    { color: c.textDim, fontSize: 14, textAlign: 'center', lineHeight: 20 },
 
-  fab:     { position: 'absolute', right: 20, bottom: TAB_BAR_SPACE + 12, width: 56, height: 56, borderRadius: 28, backgroundColor: c.primary, alignItems: 'center', justifyContent: 'center', shadowColor: c.primary, shadowOpacity: 0.4, shadowRadius: 8, shadowOffset: { width: 0, height: 4 }, elevation: 6 },
+  fab:     { position: 'absolute', right: 20, bottom: TAB_BAR_SPACE + 12, width: 56 * m.controlScale, height: 56 * m.controlScale, borderRadius: 28 * m.controlScale, backgroundColor: c.primary, alignItems: 'center', justifyContent: 'center', shadowColor: c.primary, shadowOpacity: 0.4, shadowRadius: 8, shadowOffset: { width: 0, height: 4 }, elevation: 6 },
 
   infoBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
   infoSheet:    { backgroundColor: c.surfaceSolid, borderTopLeftRadius: 20, borderTopRightRadius: 20, paddingHorizontal: 18, paddingTop: 8, paddingBottom: 28 },
   grip:         { alignSelf: 'center', width: 38, height: 4, borderRadius: 2, backgroundColor: c.border, marginBottom: 12 },
   infoHead:     { flexDirection: 'row', alignItems: 'center', gap: 14, marginBottom: 14 },
   infoName:     { color: c.text, fontSize: 18, fontWeight: '700', flex: 1 },
-  infoActions:  { flexDirection: 'row', gap: 10, marginBottom: 8 },
-  infoAction:   { flex: 1, flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 8, paddingVertical: 12, borderRadius: 14, backgroundColor: c.glassSoft },
+  infoActions:  { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginBottom: 8 },
+  infoAction:   { minWidth: 110, flexGrow: 1, flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 8, paddingVertical: 12 * m.controlScale, borderRadius: 14, backgroundColor: c.glassSoft },
   infoActionTxt:{ flexShrink: 1, color: c.text, fontSize: 14, fontWeight: '700' },
   infoRow:      { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 9 },
   infoRowTitle: { color: c.text, fontSize: 15, fontWeight: '600' },

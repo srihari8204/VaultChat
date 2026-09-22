@@ -13,7 +13,17 @@
 // being testable and the guard silently degrades back to a source scan.
 
 /** Window metrics as the live window reports them. */
-export type LayoutMetrics = { top: number; bottom: number; width: number; height: number };
+export type LayoutMetrics = { top: number; bottom: number; width: number; height: number; tabBarGrowth?: number };
+
+/** Leave room for the icon and every visible line of its label. */
+export function visionTabBarGrowth(osFontScale: number, textScale: number, lineScale: number, controlScale: number): number {
+  if (![osFontScale, textScale, lineScale, controlScale].every(Number.isFinite)) return 0;
+  const normalLabels = osFontScale <= 1.2 && textScale <= 1.15;
+  const labelLines = normalLabels ? 1 : 2;
+  const labelHeight = labelLines * Math.ceil(16 * textScale * lineScale) * Math.min(Math.max(osFontScale, 1), 1.2);
+  const iconHeight = 25 * controlScale;
+  return Math.max(0, Math.ceil(iconHeight + 3 + labelHeight + 1 + 8 - 54));
+}
 
 /** Everything derived from the window. */
 export type DerivedLayout = {
@@ -25,7 +35,7 @@ export type DerivedLayout = {
 };
 
 /**
- * How far the raised Apps disc pops ABOVE the 66pt glass pill.
+ * How far the raised Apps disc pops ABOVE the 70pt glass pill.
  *
  * Android does not hit-test a child outside its parent's bounds, so the disc
  * was drawn where nothing could be tapped. The bar's view is this much taller
@@ -57,9 +67,9 @@ export function deriveLayout(m: LayoutMetrics): DerivedLayout {
     // navigation bar; anything pinned to the bottom sits beneath it unless it
     // accounts for this.
     screenBottom: m.bottom,
-    // 66 bar + the raised Apps disc above it + 12 gap below it + the device's
+    // 70 bar + the raised Apps disc above it + 12 gap below it + the device's
     // own bottom inset + 12 breathing room.
-    tabBarSpace: 66 + TAB_BAR_RAISE + 12 + Math.max(m.bottom, 10) + 12,
+    tabBarSpace: 70 + TAB_BAR_RAISE + 12 + Math.max(m.bottom, 10) + 12 + Math.max(0, m.tabBarGrowth ?? 0),
     isNarrow,
     isShort,
   };

@@ -47,6 +47,7 @@ import * as SecureStore from 'expo-secure-store';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import { isSecretBackupKey } from './backupSecretKeys';
+import { VISION_COMFORT_STORAGE_KEY } from './visionComfortModel';
 import { vaultEncrypt, vaultDecrypt } from './vaultCrypto';
 import {
   readE2EEHeader, stampE2EEHeader, newHeader, backupSecret, generateRecoveryKey,
@@ -218,7 +219,7 @@ async function buildEncryptedBackup(): Promise<{ blob: string; messageCount: num
   //    state — e.g. carrying the media-migration flag across would convince a
   //    device that still has a legacy external tree that it had already been
   //    drained, stranding those files outside the sandbox permanently.
-  const DEVICE_LOCAL_KEYS = new Set(['vc_media_migrated_v1', 'vc_restore_prompted']);
+  const DEVICE_LOCAL_KEYS = new Set(['vc_media_migrated_v1', 'vc_restore_prompted', VISION_COMFORT_STORAGE_KEY]);
   // ── Key material must not ride along in the blanket sweep ──────────────
   //
   // The exclusion documented above removed the e2eeKeys FIELD, and the identity
@@ -303,7 +304,7 @@ async function applyEncryptedBackup(secret: string, blob: string): Promise<numbe
     // silences the "safety number changed" warning for that peer, so a MITM
     // lands with the user never told.
     const entries = Object.entries(data.asyncStorage)
-      .filter(([k, v]) => v != null && !isSecretBackupKey(k)) as [string, string][];
+      .filter(([k, v]) => v != null && k !== VISION_COMFORT_STORAGE_KEY && !isSecretBackupKey(k)) as [string, string][];
     if (entries.length) await AsyncStorage.multiSet(entries);
   }
   const n = await importAll({ messages: data.messages, chats: data.chats });

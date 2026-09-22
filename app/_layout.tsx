@@ -51,6 +51,7 @@ import { TermsGate } from '../components/TermsGate';
 import { enableFreeze } from 'react-native-screens';
 import { FontReadyContext } from '../components/ui/Text';
 import { ThemeProvider, useTheme } from '../lib/theme';
+import { VisionComfortProvider } from '../lib/visionComfort';
 
 import { runSecurityCheck } from '../services/securityService';
 import { attachTapHandler } from '../lib/push';
@@ -210,6 +211,8 @@ const INSET_SCREENS = [
   'settings',
   'setup-complete',
   'vaultbeam-settings',
+  'vision-comfort',
+  'eye-check',
 ] as const;
 
 function RootLayoutInner() {
@@ -1051,9 +1054,11 @@ function RootLayoutInner() {
 // reports to Sentry before re-throwing. No-op when Sentry isn't init'd.
 function RootLayout() {
   return (
-    <ThemeProvider>
-      <RootLayoutInner />
-    </ThemeProvider>
+    <VisionComfortProvider>
+      <ThemeProvider>
+        <RootLayoutInner />
+      </ThemeProvider>
+    </VisionComfortProvider>
   );
 }
 

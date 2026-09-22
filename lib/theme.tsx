@@ -15,6 +15,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { PALETTES, AuroraDark, type Palette, type ColorScheme } from '../constants/theme';
 import { syncLayoutMetrics } from '../constants/layout';
+import { visionTabBarGrowth } from '../constants/layoutMath';
+import { useVisionComfort } from './visionComfort';
 
 export type ThemePref = 'light' | 'dark' | 'system';
 const PREF_KEY = 'vc_theme_pref';
@@ -32,6 +34,7 @@ const ThemeCtx = createContext<ThemeValue>({
 });
 
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
+  const { profile: visionProfile, metrics: visionMetrics } = useVisionComfort();
   const system = useColorScheme(); // 'light' | 'dark' | null
   const [pref, setPrefState] = useState<ThemePref>('system');
 
@@ -65,18 +68,32 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
   // current BEFORE children render, or the first frame after a rotation paints
   // with stale insets.
   const insets = useSafeAreaInsets();
-  const { width, height } = useWindowDimensions();
+  const { width, height, fontScale } = useWindowDimensions();
   const layoutGen = useMemo(
-    () => syncLayoutMetrics({ top: insets.top, bottom: insets.bottom, width, height }),
-    [insets.top, insets.bottom, width, height],
+    () => syncLayoutMetrics({ top: insets.top, bottom: insets.bottom, width, height,
+      tabBarGrowth: visionTabBarGrowth(fontScale, visionMetrics.textScale, visionMetrics.lineScale, visionMetrics.controlScale) }),
+    [insets.top, insets.bottom, width, height, fontScale, visionMetrics],
   );
 
   const value = useMemo<ThemeValue>(() => {
     const scheme: ColorScheme = pref === 'system' ? (system === 'light' ? 'light' : 'dark') : pref;
     // Spread so the identity changes when layoutGen does; the values are the
     // palette's own. `colors` is the memo key all 53 style factories depend on.
-    return { scheme, colors: { ...PALETTES[scheme] }, pref, setPref };
-  }, [pref, system, layoutGen]);
+    const colors = { ...PALETTES[scheme] };
+    if (visionProfile.reduceTransparency || visionProfile.highContrast) {
+      colors.surface = colors.surfaceSolid;
+      colors.glass = colors.surfaceSolid;
+      colors.glassSoft = colors.surfaceSolid;
+      colors.glassStroke = colors.border;
+    }
+    if (visionProfile.highContrast) {
+      colors.textDim = colors.text;
+      colors.textFaint = colors.text;
+      colors.bubbleMetaIn = colors.bubbleInText;
+      colors.bubbleMetaOut = colors.bubbleOutText;
+    }
+    return { scheme, colors, pref, setPref };
+  }, [pref, system, layoutGen, visionProfile.reduceTransparency, visionProfile.highContrast]);
 
   return <ThemeCtx.Provider value={value}>{children}</ThemeCtx.Provider>;
 }

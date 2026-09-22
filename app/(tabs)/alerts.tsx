@@ -16,6 +16,7 @@ import {
   TouchableOpacity, View,
 } from 'react-native';
 import { useTheme } from '../../lib/theme';
+import { useVisionComfort } from '../../lib/visionComfort';
 import {
   listSecurityEvents, markAllSeen, syncAuditChain, verifyAuditChain,
   type AuditSeverity, type ChainStatus, type SecurityEvent,
@@ -58,7 +59,8 @@ function timeAgo(ts: number): string {
 
 function useS() {
   const { colors } = useTheme();
-  return useMemo(() => makeStyles(colors), [colors]);
+  const { metrics } = useVisionComfort();
+  return useMemo(() => makeStyles(colors, metrics), [colors, metrics]);
 }
 
 export default function AlertsScreen() {
@@ -144,7 +146,7 @@ export default function AlertsScreen() {
               <Text style={S.metaLine}>
                 <Text style={S.metaKey}>Recorded  </Text>{new Date(item.ts).toLocaleString()}
               </Text>
-              <Text style={S.metaLine} numberOfLines={1}>
+              <Text style={S.metaLine}>
                 <Text style={S.metaKey}>Hash  </Text>{item.hash.slice(0, 24)}…
               </Text>
             </View>
@@ -224,12 +226,12 @@ export default function AlertsScreen() {
   );
 }
 
-const makeStyles = (c: Palette) => StyleSheet.create({
+const makeStyles = (c: Palette, m: ReturnType<typeof useVisionComfort>['metrics']) => StyleSheet.create({
   screen: { flex: 1, backgroundColor: c.bg },
-  header:   { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 20, paddingTop: HEADER_TOP, paddingBottom: 12, gap: 12 },
+  header:   { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', paddingHorizontal: 20, paddingTop: HEADER_TOP, paddingBottom: 12, gap: 12 },
   title:    { color: c.text, fontSize: 28, fontWeight: '800' },
   subtitle: { color: c.textDim, fontSize: 13, marginTop: 2 },
-  scanBtn:  { minHeight: 44, flexShrink: 1, flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: c.primary, paddingHorizontal: 14, paddingVertical: 9, borderRadius: 12 },
+  scanBtn:  { minHeight: 44 * m.controlScale, flexShrink: 1, flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: c.primary, paddingHorizontal: 14, paddingVertical: 9 * m.controlScale, borderRadius: 12 },
   scanBtnText: { flexShrink: 1, color: '#fff', fontWeight: '700', fontSize: 13 },
 
   banner:   { flexDirection: 'row', alignItems: 'center', gap: 8, marginHorizontal: 16, marginBottom: 8, paddingHorizontal: 12, paddingVertical: 9, borderRadius: 10, borderWidth: 1 },
@@ -239,7 +241,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
 
   center:   { flex: 1, justifyContent: 'center', alignItems: 'center' },
 
-  row:      { marginHorizontal: 12, marginVertical: 4, borderRadius: 18, borderWidth: StyleSheet.hairlineWidth, borderColor: c.glassStroke, backgroundColor: c.glassSoft, flexDirection: 'row', gap: 12, paddingHorizontal: 16, paddingVertical: 12, alignItems: 'flex-start' },
+  row:      { marginHorizontal: 12, marginVertical: 4, borderRadius: 18, borderWidth: StyleSheet.hairlineWidth, borderColor: c.glassStroke, backgroundColor: c.glassSoft, flexDirection: 'row', gap: 12, paddingHorizontal: 16, paddingVertical: 12 * m.spacingScale, alignItems: 'flex-start' },
   iconWrap: { width: 40, height: 40, borderRadius: 12, justifyContent: 'center', alignItems: 'center' },
   rowBody:  { flex: 1 },
   rowTop:   { gap: 3 },

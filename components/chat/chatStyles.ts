@@ -10,6 +10,7 @@ import { useMemo } from 'react';
 import { StyleSheet, useWindowDimensions } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '../../lib/theme';
+import { useVisionComfort } from '../../lib/visionComfort';
 import { type Palette, ELEVATION, brandAlpha } from '../../constants/theme';
 import { type Message } from '../../lib/chatService';
 import { chatCardMax } from '../../constants/layoutMath';
@@ -54,6 +55,7 @@ export type ChatMetrics = { topInset: number; bottomInset: number; narrow: boole
 
 export function useS() {
   const { colors } = useTheme();
+  const { metrics, profile } = useVisionComfort();
   const insets = useSafeAreaInsets();
   const { width } = useWindowDimensions();
   const m: ChatMetrics = {
@@ -70,8 +72,8 @@ export function useS() {
     cardMax: chatCardMax(width),
   };
   return useMemo(
-    () => makeStyles(colors, m),
-    [colors, m.topInset, m.bottomInset, m.narrow, m.cardMax],
+    () => makeStyles(colors, m, metrics, profile.highContrast),
+    [colors, m.topInset, m.bottomInset, m.narrow, m.cardMax, metrics, profile.highContrast],
   );
 }
 
@@ -98,6 +100,8 @@ export const HL = StyleSheet.create({
 export const makeStyles = (
   c: Palette,
   m: ChatMetrics = { topInset: 24, bottomInset: 0, narrow: false, cardMax: 240 },
+  v = { textScale: 1, lineScale: 1, spacingScale: 1, controlScale: 1, bold: false },
+  highContrast = false,
 ) => StyleSheet.create({
   screen:        { flex: 1, backgroundColor: c.chatBg },
   lockGate:      { ...StyleSheet.absoluteFillObject, backgroundColor: c.bg, alignItems: 'center', justifyContent: 'center', padding: 32, zIndex: 50 },
@@ -118,7 +122,7 @@ export const makeStyles = (
   headerGlass:   { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.glassStroke },
   composerGlass: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: c.glassStroke },
   header:        { flexDirection: 'row', alignItems: 'center', paddingHorizontal: m.narrow ? 10 : 14, paddingTop: m.topInset + (m.narrow ? 4 : 6), paddingBottom: m.narrow ? 8 : 12, gap: m.narrow ? 6 : 10, backgroundColor: 'transparent' },
-  headerIconBtn: { width: m.narrow ? 36 : 40, height: m.narrow ? 36 : 40, alignItems: 'center', justifyContent: 'center' },
+  headerIconBtn: { width: (m.narrow ? 36 : 40) * v.controlScale, height: (m.narrow ? 36 : 40) * v.controlScale, alignItems: 'center', justifyContent: 'center' },
   headerIcon:    { fontSize: m.narrow ? 18 : 20 },
   headerAvatarWrap:  { width: m.narrow ? 32 : 36, height: m.narrow ? 32 : 36 },
   // Scroll-to-bottom FAB
@@ -166,8 +170,8 @@ export const makeStyles = (
   // 17 — and every extra point came straight off the width available before the
   // name ellipsises. lineHeight pinned so the two-line title block does not
   // shift when the presence line changes.
-  title:         { color: c.text, fontSize: 17, lineHeight: 20, fontWeight: '600' },
-  sub:           { color: c.accentLight, fontSize: 12, lineHeight: 16 },
+  title:         { color: c.text, fontSize: 17 * v.textScale, lineHeight: Math.ceil(20 * v.textScale * v.lineScale), fontWeight: v.bold ? '700' : '600' },
+  sub:           { color: c.accentLight, fontSize: 12 * v.textScale, lineHeight: Math.ceil(16 * v.textScale * v.lineScale) },
   e2eBadge:      { color: '#22C55E', fontSize: 11, fontWeight: '600' },
   // Self-destruct countdown for a chat opened by a 1h/3h code (migration 120).
   // Sits directly under the header subtitle; goes red under ten minutes.
@@ -218,11 +222,11 @@ export const makeStyles = (
   emojiCell:     { width: `${100 / 8}%`, aspectRatio: 1, alignItems: 'center', justifyContent: 'center' },
   emojiGlyph:    { fontSize: 26 },
 
-  bubbleRow:     { marginVertical: 4, flexDirection: 'row' },
-  bubbleRowGrouped: { marginTop: 1 }, // tighter spacing for consecutive same-sender msgs
+  bubbleRow:     { marginVertical: 4 * v.spacingScale, flexDirection: 'row' },
+  bubbleRowGrouped: { marginTop: 1 * v.spacingScale }, // tighter spacing for consecutive same-sender msgs
   bubbleRowMine: { justifyContent: 'flex-end' },
   bubbleRowTheirs:{ justifyContent: 'flex-start' },
-  bubble:        { maxWidth: '78%', paddingVertical: 9, paddingHorizontal: 14, borderRadius: 20, gap: 3 },
+  bubble:        { maxWidth: v.textScale > 1.2 ? '90%' : '78%', paddingVertical: 9 * v.spacingScale, paddingHorizontal: 14, borderRadius: 20, gap: 3 * v.spacingScale },
   bubbleMine:    { backgroundColor: c.bubbleOut, borderTopRightRadius: 6 },   // Aurora "sent"
   bubbleTheirs:  { backgroundColor: c.bubbleIn, borderTopLeftRadius: 6 },     // Aurora "received"
   bubblePending: { opacity: 0.6 },
@@ -230,7 +234,7 @@ export const makeStyles = (
   bubbleSystem:  { alignSelf: 'center', backgroundColor: 'transparent', paddingVertical: 4 },
   bubbleSystemTxt:{ color: c.textDim, fontSize: 11, fontStyle: 'italic' },
   senderTag:     { color: c.textDim, fontSize: 11, fontWeight: '600', marginBottom: 2 },
-  bubbleTxt:     { color: c.bubbleInText, fontSize: 15, lineHeight: 20 },
+  bubbleTxt:     { color: c.bubbleInText, fontSize: 15 * v.textScale, lineHeight: Math.ceil(20 * v.textScale * v.lineScale), fontWeight: v.bold ? '600' : undefined },
   // Chat Reader hand-off, shown only under a long message (see ReaderAffordance).
   readerChip:    {
     flexDirection: 'row', alignItems: 'center', gap: 6, alignSelf: 'flex-start',
@@ -240,7 +244,7 @@ export const makeStyles = (
   },
   readerChipTxt: { color: c.text, fontSize: 12, fontWeight: '600' },
   bubbleTxtMine: { color: c.bubbleOutText },
-  bubbleMeta:    { color: c.bubbleMetaOut, fontSize: 10, alignSelf: 'flex-end', marginTop: 2 },
+  bubbleMeta:    { color: highContrast ? c.bubbleOutText : c.bubbleMetaOut, fontSize: 10 * v.textScale, alignSelf: 'flex-end', marginTop: 2 * v.spacingScale },
   ttlBadge:      { color: '#FCD34D', fontSize: 10, fontWeight: '700' },
   tick:          { color: c.bubbleMetaOut, fontSize: 11, fontWeight: '700' },
   tickRead:      { color: c.tickRead,      fontSize: 11, fontWeight: '700' },
@@ -263,15 +267,15 @@ export const makeStyles = (
   editTxt:       { color: c.primary, fontSize: 12, fontWeight: '600' },
   editCancelTxt: { color: c.textDim, fontSize: 12 },
 
-  composer:      { flexDirection: 'row', alignItems: 'flex-end', paddingHorizontal: 14, paddingVertical: 12, gap: 10, backgroundColor: 'transparent' },
-  inputPill:     { flex: 1, flexDirection: 'row', alignItems: 'flex-end', backgroundColor: c.glassSoft, borderRadius: 26, minHeight: 50, paddingLeft: 18, paddingRight: 8, borderWidth: StyleSheet.hairlineWidth, borderColor: c.glassStroke },
-  pillIconBtn:   { width: 38, height: 46, alignItems: 'center', justifyContent: 'center' },
+  composer:      { flexDirection: 'row', alignItems: 'flex-end', paddingHorizontal: 14, paddingVertical: 12 * v.spacingScale, gap: 10, backgroundColor: 'transparent' },
+  inputPill:     { flex: 1, flexDirection: 'row', alignItems: 'flex-end', backgroundColor: highContrast ? c.surfaceSolid : c.glassSoft, borderRadius: 26, minHeight: 50 * v.controlScale, paddingLeft: 18, paddingRight: 8, borderWidth: StyleSheet.hairlineWidth, borderColor: c.glassStroke },
+  pillIconBtn:   { width: 38 * v.controlScale, height: 46 * v.controlScale, alignItems: 'center', justifyContent: 'center' },
   camWrap:       { width: 38, height: 46, alignItems: 'center', justifyContent: 'center', position: 'relative' },
   camRing:       { position: 'absolute', width: 40, height: 40, borderRadius: 20, borderWidth: 2, borderColor: c.primary, backgroundColor: 'rgba(0,0,0,0)' },
   camDragHint:   { position: 'absolute', bottom: 50, alignSelf: 'center', flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: c.primary, paddingHorizontal: 10, paddingVertical: 6, borderRadius: 14, ...ELEVATION.sm, shadowColor: c.primary },
   camDragHintTxt:{ color: '#fff', fontSize: 12, fontWeight: '800' },
   camHintChevron:{ position: 'absolute', bottom: 42, alignSelf: 'center' },
-  sendFab:       { width: 50, height: 50, borderRadius: 25, backgroundColor: c.accentDeep, alignItems: 'center', justifyContent: 'center', borderWidth: StyleSheet.hairlineWidth, borderColor: c.glassStroke, elevation: 6, shadowColor: c.accentDeep, shadowOpacity: 0.55, shadowOffset: { width: 0, height: 6 }, shadowRadius: 18 },
+  sendFab:       { width: 50 * v.controlScale, height: 50 * v.controlScale, borderRadius: 25 * v.controlScale, backgroundColor: c.accentDeep, alignItems: 'center', justifyContent: 'center', borderWidth: StyleSheet.hairlineWidth, borderColor: c.glassStroke, elevation: 6, shadowColor: c.accentDeep, shadowOpacity: 0.55, shadowOffset: { width: 0, height: 6 }, shadowRadius: 18 },
   attachBtn:     { width: 40, height: 40, borderRadius: 20, backgroundColor: c.surface, alignItems: 'center', justifyContent: 'center' },
   attachTxt:     { fontSize: 18 },
 
@@ -317,7 +321,7 @@ export const makeStyles = (
   audioTime:          { color: c.bubbleMetaIn, fontSize: 11 },
   audioTimeMine:      { color: c.bubbleMetaOut },
 
-  input:         { flex: 1, color: c.text, paddingVertical: 11, paddingRight: 4, maxHeight: 120, fontSize: 16, lineHeight: 21 },
+  input:         { flex: 1, color: c.text, paddingVertical: 11, paddingRight: 4, maxHeight: 120 * v.textScale, fontSize: 16 * v.textScale, lineHeight: Math.ceil(21 * v.textScale * v.lineScale) },
   sendBtn:       { backgroundColor: c.primary, paddingHorizontal: 16, paddingVertical: 10, borderRadius: 20, justifyContent: 'center' },
   sendBtnOff:    { backgroundColor: c.textFaint, elevation: 0, shadowOpacity: 0 },
   sendTxt:       { color: '#fff', fontWeight: '700' },

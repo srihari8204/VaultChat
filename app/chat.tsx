@@ -61,7 +61,7 @@ import {
   ScrollView,
   StyleSheet,
   Text, TextInput, TouchableOpacity,
-  View,
+  View, useWindowDimensions,
 } from 'react-native';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { Swipeable } from 'react-native-gesture-handler';
@@ -84,6 +84,7 @@ import { preloadViewedOnce, isViewedOnce, isViewedOnceSync, markViewedOnce } fro
 import { preloadRevoked, isRevokedSync, wipeRevokedMedia } from '../lib/protectedMedia';
 
 import { useTheme } from '../lib/theme';
+import { useVisionComfort } from '../lib/visionComfort';
 import { getCurrentUserAsync } from './(constants)/authService';
 
 // Fire-and-forget haptic (no-op on web / if unavailable).
@@ -245,6 +246,9 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
   const params = chatIdProp ? { ...routeParams, id: chatIdProp, chatId: chatIdProp } : routeParams;
   const router = useRouter();
   const { colors } = useTheme();
+  const { width: windowWidth, fontScale } = useWindowDimensions();
+  const compactHeader = embedded || windowWidth < 520;
+  const { activeProfile, metrics: visionMetrics, setActiveProfile } = useVisionComfort();
   const S = useS();
   const chatId = ((params.id ?? params.chatId) ?? '') as string;
   // Read by async callbacks to answer "is this still the chat I started for?".
@@ -1958,6 +1962,22 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
     const isMuted = chat.muted;
 
     const actions: MenuAction[] = [
+      ...(compactHeader ? [{
+        label: 'Voice call', icon: 'call-outline' as const,
+        onPress: () => chat.type === 'group'
+          ? router.push({ pathname: '/group-calls' as any, params: { chatId, groupName: chat.name ?? 'Group', mode: 'voice' } })
+          : peer && router.push({ pathname: '/voicecall' as any, params: { chatId, peerUid: peer.userId, peerName: peer.name || peer.email || 'crazzychat user' } }),
+      }, {
+        label: 'Video call', icon: 'videocam-outline' as const,
+        onPress: () => chat.type === 'group'
+          ? router.push({ pathname: '/group-calls' as any, params: { chatId, groupName: chat.name ?? 'Group', mode: 'video' } })
+          : peer && router.push({ pathname: '/videocall' as any, params: { chatId, peerUid: peer.userId, peerName: peer.name || peer.email || 'crazzychat user' } }),
+      }] : []),
+      {
+        label: 'Vision Comfort settings',
+        icon: 'eye-outline',
+        onPress: () => router.push('/vision-comfort' as any),
+      },
       // Search lives here, not in the header.
       //
       // The header had FOUR trailing actions where WhatsApp has three (spec
@@ -2163,7 +2183,7 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
     }
 
     setOverflowMenu({ title: chat.name || (peer?.name ?? 'Chat'), actions });
-  }, [chat, meId, chatId, router]);
+  }, [chat, meId, chatId, router, compactHeader]);
 
   // ── React / Reply / Forward handlers ──────────────────────
   const toggleReaction = useCallback(async (msg: DisplayMessage, emoji: string) => {
@@ -3459,7 +3479,7 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
         </TouchableOpacity>
         <View style={{ flex: 1 }}>
           <TouchableOpacity activeOpacity={0.6} onPress={openProfile}>
-            <Text style={S.title} numberOfLines={1}>{title}</Text>
+            <Text style={S.title} numberOfLines={fontScale * visionMetrics.textScale > 1.2 ? 2 : 1}>{title}</Text>
             {chat && (
               <Text style={S.sub}>
                 {headerSub}
@@ -3487,7 +3507,7 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
             </View>
           )}
         </View>
-        {chat?.type === 'direct' && meId && (() => {
+        {!compactHeader && chat?.type === 'direct' && meId && (() => {
           const peer = chat.members.find(m => m.userId !== meId);
           if (!peer) return null;
           const params = { chatId, peerUid: peer.userId, peerName: peer.name || peer.email || 'crazzychat user' };
@@ -3513,7 +3533,7 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
         {/* Group call. Mirrors the direct-chat pair above and opens the group
             call hub, which rings every member and joins the mesh room. The hub
             takes `mode`, so both icons land in the right place. */}
-        {chat?.type === 'group' && (() => {
+        {!compactHeader && chat?.type === 'group' && (() => {
           const params = { chatId, groupName: chat.name ?? 'Group' };
           return (
             <>
@@ -3534,6 +3554,19 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
             </>
           );
         })()}
+        <TouchableOpacity
+          style={S.headerIconBtn}
+          onPress={() => setActiveProfile(activeProfile === 'with-glasses' ? 'without-glasses' : 'with-glasses')
+            .catch(() => Alert.alert('Could not switch Vision Profile', 'Try again.'))}
+          onLongPress={() => router.push('/vision-comfort' as any)}
+          activeOpacity={0.7}
+          accessibilityRole="button"
+          accessibilityLabel={`Vision Comfort: ${activeProfile === 'with-glasses' ? 'with glasses' : 'without glasses'}. Switch profile`}
+          accessibilityHint="Long press to adjust your Vision Comfort settings"
+          hitSlop={6}
+        >
+          <Ionicons name="eye-outline" size={22 * visionMetrics.controlScale} color={colors.text} />
+        </TouchableOpacity>
         <TouchableOpacity style={S.headerIconBtn} onPress={onPressMenu} activeOpacity={0.7} accessibilityLabel="More options">
           <Ionicons name="ellipsis-vertical" size={20} color={colors.text} />
         </TouchableOpacity>

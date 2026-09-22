@@ -15,16 +15,20 @@ import { TabGlyph, type TabGlyphName } from '../../components/ui/TabGlyph';
 import { AppText } from '../../components/ui/Text';
 import { GlassView } from '../../components/ui/GlassView';
 import { TAB_BAR_RAISE } from '../../constants/layout';
+import { visionTabBarGrowth } from '../../constants/layoutMath';
 import { useUnreadTotal } from '../../lib/unreadStore';
 import { useReducedMotion } from '../../lib/useReducedMotion';
+import { useVisionComfort } from '../../lib/visionComfort';
 import { MOTION, TAB_ICON_INK } from '../../constants/theme';
 
 // Prominent raised center button for Mini Apps (the eye-catcher).
 function MiniCenterIcon({ focused }: { focused: boolean }) {
   const c = useColors();
+  const { metrics } = useVisionComfort();
   const { scheme } = useTheme();
-  const { width } = useWindowDimensions();
+  const { width, fontScale } = useWindowDimensions();
   const styles = useStyles(c);
+  const normalLabels = fontScale <= 1.2 && metrics.textScale <= 1.15;
   return (
     <View style={[styles.centerWrap, { width: Math.min(64, (width - 32) / 5) }]} pointerEvents="none">
       <LinearGradient
@@ -35,16 +39,18 @@ function MiniCenterIcon({ focused }: { focused: boolean }) {
       >
         <TabGlyph name="mini" size={28} color="#FFFFFF" active={focused} />
       </LinearGradient>
-      <AppText variant="tiny" color={TAB_ICON_INK.mini[scheme]} style={styles.centerLabel} numberOfLines={1} maxFontSizeMultiplier={1.2}>Apps</AppText>
+      <AppText variant="tiny" color={TAB_ICON_INK.mini[scheme]} style={styles.centerLabel} numberOfLines={normalLabels ? 1 : 2} maxFontSizeMultiplier={1.2}>Apps</AppText>
     </View>
   );
 }
 
 function TabIcon({ tab, label, focused }: { tab: TabGlyphName; label: string; focused: boolean }) {
   const c = useColors();
+  const { metrics } = useVisionComfort();
   const { scheme } = useTheme();
-  const { width } = useWindowDimensions();
+  const { width, fontScale } = useWindowDimensions();
   const styles = useStyles(c);
+  const normalLabels = fontScale <= 1.2 && metrics.textScale <= 1.15;
   const reduced = useReducedMotion();
   const lift = useRef(new Animated.Value(focused ? 1 : 0)).current;
   useEffect(() => {
@@ -69,14 +75,14 @@ function TabIcon({ tab, label, focused }: { tab: TabGlyphName; label: string; fo
   return (
     <View style={[styles.tabIconWrap, { width: Math.min(64, (width - 32) / 5) }]}>
       <Animated.View style={anim}>
-        <TabGlyph name={tab} size={25} color={color} active={focused} />
+        <TabGlyph name={tab} size={25 * metrics.controlScale} color={color} active={focused} />
         {badge && (
           <View style={styles.badge}>
             <AppText variant="tiny" color="#fff" style={styles.badgeTxt} numberOfLines={1} maxFontSizeMultiplier={1.1}>{unread > 99 ? '99+' : unread}</AppText>
           </View>
         )}
       </Animated.View>
-      <AppText variant="tiny" color={focused ? color : c.textDim} style={[styles.tabLabel, focused && styles.tabLabelActive]} numberOfLines={1} maxFontSizeMultiplier={1.2}>{label}</AppText>
+      <AppText variant="tiny" color={focused ? color : c.textDim} style={[styles.tabLabel, focused && styles.tabLabelActive]} numberOfLines={normalLabels ? 1 : 2} maxFontSizeMultiplier={1.2}>{label}</AppText>
       {focused ? <View style={[styles.activeDash, { backgroundColor: color }]} /> : null}
     </View>
   );
@@ -130,17 +136,20 @@ export default function TabLayout() {
   );
 }
 
-const useStyles = (c: Palette) => useMemo(() => makeStyles(c), [c]);
+const useStyles = (c: Palette) => {
+  const { metrics } = useVisionComfort();
+  const { fontScale } = useWindowDimensions();
+  return useMemo(() => makeStyles(c, visionTabBarGrowth(fontScale, metrics.textScale, metrics.lineScale, metrics.controlScale)), [c, fontScale, metrics]);
+};
 
-const makeStyles = (c: Palette) => StyleSheet.create({
+const makeStyles = (c: Palette, barGrowth: number) => StyleSheet.create({
   tabBar: {
     position: 'absolute',
     left: 16,
     right: 16,
-    // Taller than the 66pt pill it paints: the extra TAB_BAR_RAISE at the top
-    // is a transparent band that exists only so the raised Apps disc lands
-    // inside a touchable. tabBarGlass insets past it, so nothing moves.
-    height: 66 + TAB_BAR_RAISE,
+    // The pill grows for OS and profile font scaling; the raised Apps disc
+    // stays inside its touchable through TAB_BAR_RAISE.
+    height: 70 + barGrowth + TAB_BAR_RAISE,
     paddingTop: 8,
     paddingBottom: 8,
     backgroundColor: 'transparent',
@@ -155,14 +164,14 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   },
   tabBarGlass: {
     ...StyleSheet.absoluteFillObject,
-    top: TAB_BAR_RAISE,          // the pill is still 66pt, in the same place
+    top: TAB_BAR_RAISE,          // leave the transparent touch band above the pill
     borderRadius: 30,
   },
   // flex-end keeps the four side tabs on the pill, exactly where they were.
-  tabItem: { height: 50, alignSelf: 'flex-end' },
+  tabItem: { height: 54 + barGrowth, alignSelf: 'flex-end' },
   tabItemCenter: { alignSelf: 'stretch' },
   tabIconWrap: { alignItems: 'center', justifyContent: 'center', gap: 3, width: 64 },
-  tabLabel: { marginTop: 1, fontSize: 11, lineHeight: 14 },
+  tabLabel: { marginTop: 1, fontSize: barGrowth > 0 ? 10.5 : 11, lineHeight: 16, ...(barGrowth > 0 ? { textAlign: 'center' as const, maxWidth: '100%' as const } : {}) },
   tabLabelActive: { fontWeight: '800' },
   activeDash: { position: 'absolute', bottom: -4, width: 12, height: 2, borderRadius: 1 },
   // Raised, glowing center button for Mini Apps.
@@ -182,7 +191,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
     elevation: 10,
   },
   centerBtnActive: { transform: [{ scale: 1.06 }] },
-  centerLabel: { marginTop: 3, fontWeight: '700' },
+  centerLabel: { marginTop: 3, lineHeight: 16, fontWeight: '700', ...(barGrowth > 0 ? { textAlign: 'center' as const, maxWidth: '100%' as const } : {}) },
   badge: {
     position: 'absolute', top: -5, right: -10, minWidth: 18, height: 18, borderRadius: 9,
     backgroundColor: c.danger, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 4,

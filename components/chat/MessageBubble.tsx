@@ -47,6 +47,7 @@ import { exportToGalleryInBackground } from '../../lib/galleryExport';
 import { isRevokedSync } from '../../lib/protectedMedia';
 
 import { useTheme } from '../../lib/theme';
+import { useVisionComfort } from '../../lib/visionComfort';
 
 import { getAccessToken } from '../../lib/api';
 import { putLiveKey } from '../../lib/liveLocationCrypto';
@@ -1125,6 +1126,7 @@ function MessageBubble({
 }) {
   const { colors } = useTheme();
   const S = useS();
+  const { profile: visionProfile } = useVisionComfort();
   const isMine = msg.senderId === meId;
   // Per-chat bubble theme: recolors only YOUR (outgoing) bubble — received
   // bubbles always follow the theme (WhatsApp-style). Text color auto-picked
@@ -1663,7 +1665,7 @@ function MessageBubble({
           ) : null;
         })()}
 
-        <Text style={[S.bubbleMeta, (!isMine || isImage || isVideo || isGif) && { color: colors.bubbleMetaIn }, (isImage || isVideo || isGif) && { paddingHorizontal: 4 }]}>
+        <Text style={[S.bubbleMeta, (!isMine || isImage || isVideo || isGif) && { color: visionProfile.highContrast ? colors.bubbleInText : colors.bubbleMetaIn }, (isImage || isVideo || isGif) && { paddingHorizontal: 4 }]}>
           {/* createdAt IS the original timestamp for an imported message — it is
               never the import time — so this line needs no special case to show
               the right hour. */}

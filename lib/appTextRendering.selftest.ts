@@ -23,6 +23,9 @@ try {
   loader._load = function (name: string, ...args: any[]) {
     if (name === 'react-native') return native;
     if (name === '../../lib/theme') return { useColors: () => ({ text: '#101828' }) };
+    if (name === '../../lib/visionComfort') return { useVisionComfort: () => ({ metrics: {
+      textScale: 1, lineScale: 1, bold: false,
+    } }) };
     return original.call(this, name, ...args);
   };
   ({ AppText, FontReadyContext } = require('../components/ui/Text'));

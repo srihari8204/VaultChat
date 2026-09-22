@@ -125,19 +125,20 @@ ok(
   missing.length === 0,
 );
 
-// ── 3. Fixed-height chrome caps its own text ─────────────────────────
-// The tab bar cannot grow — it is a 66pt pill — so unlike the rest of the app
-// its labels must be bounded, or a large-text user loses them entirely.
+// ── 3. Tab chrome grows for profile and OS text scaling ──────────────
 const tabs = fs.readFileSync('app/(tabs)/_layout.tsx', 'utf8');
 for (const [label, needle] of [
   ['tab labels', 'styles.tabLabel'],
   ['the Apps label', 'styles.centerLabel'],
-  ['the unread badge', 'styles.badgeTxt'],
 ] as [string, string][]) {
   const line = tabs.split('\n').find(l => l.includes(needle) && l.includes('AppText'));
-  ok(`${label} cap font scaling`, !!line && /maxFontSizeMultiplier=\{[\d.]+\}/.test(line));
-  ok(`${label} stay on one line`, !!line && /numberOfLines=\{1\}/.test(line));
+  ok(`${label} keeps normal labels on one line and enlarged labels on two`, !!line &&
+    /numberOfLines=\{normalLabels \? 1 : 2\}/.test(line) &&
+    /maxFontSizeMultiplier=\{1\.2\}/.test(line));
 }
+ok('the tab bar grows with profile and OS text and icon scale', tabs.includes('visionTabBarGrowth(fontScale, metrics.textScale, metrics.lineScale, metrics.controlScale)'));
+const badgeLine = tabs.split('\n').find(l => l.includes('styles.badgeTxt') && l.includes('AppText'));
+ok('the unread count stays inside its badge', !!badgeLine && /numberOfLines=\{1\}/.test(badgeLine) && /maxFontSizeMultiplier=\{[\d.]+\}/.test(badgeLine));
 
 // ── 4. The type scale stays inert on real phones ─────────────────────
 // Guards the promise lib/typeScale.ts makes: adopting it moved no pixels on any
@@ -219,7 +220,7 @@ for (const [f, re] of insetPinned) {
 // their launch size through every resize that did not cross 360.
 const chatStyles = fs.readFileSync('components/chat/chatStyles.ts', 'utf8');
 ok('chat cards are sized by chatCardMax, not a literal', /cardMax: chatCardMax\(width\)/.test(chatStyles));
-ok('the chat style memo recomputes when the card slot moves', /m\.narrow, m\.cardMax\]/.test(chatStyles));
+ok('the chat style memo recomputes when the card slot moves', /m\.narrow, m\.cardMax,/.test(chatStyles));
 for (const style of ['fileCard', 'filePreview', 'fileRow', 'pollWrap', 'audioRow']) {
   const line = chatStyles.split(String.fromCharCode(10)).find((l) => l.trimStart().startsWith(style + ':')) ?? '';
   ok(`${style} is capped by the bubble slot`, /Math\.min\(\d+, m\.cardMax\)/.test(line));

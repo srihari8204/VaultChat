@@ -35,6 +35,7 @@ import { initialOf } from '../lib/format';
 import { getAutoDownload, setAutoDownload, type AutoDownloadPolicy } from '../lib/mediaPrefs';
 import { getSaveToGallery, setSaveToGallery } from '../lib/galleryExport';
 import { useTheme, type ThemePref } from '../lib/theme';
+import { useVisionComfort } from '../lib/visionComfort';
 import { type Palette, brandAlpha } from '../constants/theme';
 import { Ionicons } from '@expo/vector-icons';
 import { Sheet, type SheetAction } from '../components/ui/Sheet';
@@ -66,6 +67,7 @@ import { AppText as Text, AuroraBackground } from '../components/ui';
 export default function SettingsScreen() {
   const router = useRouter();
   const { colors } = useTheme();
+  const { activeProfile } = useVisionComfort();
   const S = useS();
 
   const [settings, setSettings] = useState<UserSettings | null>(null);
@@ -241,8 +243,8 @@ export default function SettingsScreen() {
           )}
         </View>
         <View style={{ flex: 1 }}>
-          <Text style={S.profileName} numberOfLines={1}>{profile?.name || 'Your name'}</Text>
-          <Text style={S.profileSub} numberOfLines={1}>{profile?.status || profile?.email || ''}</Text>
+        <Text style={S.profileName}>{profile?.name || 'Your name'}</Text>
+        <Text style={S.profileSub}>{profile?.status || profile?.email || ''}</Text>
         </View>
         <TouchableOpacity accessibilityRole="button" accessibilityLabel="Show your QR code" onPress={() => router.push('/qr-contact' as any)} hitSlop={12}>
           <Ionicons name="qr-code-outline" size={22} color={colors.primary} />
@@ -250,6 +252,13 @@ export default function SettingsScreen() {
       </TouchableOpacity>
 
       <AppearanceSection />
+
+      <View style={S.section}>
+        <Text style={S.label}>ACCESSIBILITY</Text>
+        <View style={S.linkCard}>
+          <LinkRow icon="eye-outline" title="Vision Comfort" sub={`Active: ${activeProfile === 'with-glasses' ? 'With glasses' : 'Without glasses'}`} onPress={() => router.push('/vision-comfort' as any)} last />
+        </View>
+      </View>
 
       <View style={S.section}>
         <Text style={S.label}>CHATS</Text>
@@ -492,8 +501,8 @@ function LinkRow({ icon, title, sub, onPress, busy, last }: {
     <TouchableOpacity style={[S.linkRow, last && { borderBottomWidth: 0 }]} onPress={onPress} activeOpacity={0.7} disabled={busy}>
       <View style={S.linkIconWrap}><Ionicons name={icon} size={22} color={colors.text} /></View>
       <View style={{ flex: 1 }}>
-        <Text style={S.linkTitle} numberOfLines={1}>{title}</Text>
-        {sub ? <Text style={S.linkSub} numberOfLines={1}>{sub}</Text> : null}
+        <Text style={S.linkTitle}>{title}</Text>
+        {sub ? <Text style={S.linkSub}>{sub}</Text> : null}
       </View>
       {busy ? <ActivityIndicator color={colors.primary} /> : <Ionicons name="chevron-forward" size={18} color={colors.textDim} />}
     </TouchableOpacity>
@@ -537,8 +546,8 @@ function AppearanceSection() {
 }
 
 const apS = StyleSheet.create({
-  row: { flexDirection: 'row', borderRadius: 14, borderWidth: 1, padding: 4, gap: 4, marginTop: 4 },
-  pill: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: 10, borderRadius: 11 },
+  row: { flexDirection: 'row', flexWrap: 'wrap', borderRadius: 14, borderWidth: 1, padding: 4, gap: 4, marginTop: 4 },
+  pill: { flexGrow: 1, minWidth: 120, minHeight: 44, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: 10, borderRadius: 11 },
   pillTxt: { fontSize: 13, fontWeight: '700' },
   hint: { fontSize: 11.5, marginTop: 8, lineHeight: 16 },
 });
@@ -562,7 +571,7 @@ function ToggleRow({
   return (
     <View style={S.toggleRow}>
       <View style={{ flex: 1 }}>
-        <Text numberOfLines={1} style={S.toggleTitle}>{title}</Text>
+        <Text style={S.toggleTitle}>{title}</Text>
         <Text style={S.toggleSub}>{sub}</Text>
       </View>
       {busy ? (

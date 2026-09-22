@@ -23,7 +23,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 // Importable because constants/layoutMath.ts depends on nothing. This is what
 // turns the section below from a grep into a real behavioural assertion.
-import { deriveLayout, sameLayout, TAB_BAR_RAISE, chatCardMax } from '../constants/layoutMath';
+import { deriveLayout, sameLayout, TAB_BAR_RAISE, chatCardMax, visionTabBarGrowth } from '../constants/layoutMath';
 
 const ROOT = join(__dirname, '..');
 const read = (p: string) => readFileSync(join(ROOT, p), 'utf8');
@@ -47,6 +47,16 @@ console.log('\nThe derived values actually change with the window (executed, not
 
 // Honor ELI_NX9 portrait: 1200x2664 @520dpi ≈ 369 x 820 dp, ~44dp top inset.
 const honorPortrait  = deriveLayout({ top: 44, bottom: 24, width: 369, height: 820 });
+const normalGrowth = visionTabBarGrowth(1, 1, 1, 1);
+const enlargedGrowth = visionTabBarGrowth(1, 1.4, 1.15, 1.3);
+const enlargedOsGrowth = visionTabBarGrowth(1.5, 1.4, 1.15, 1.3);
+check('normal tab bar keeps its base height', normalGrowth === 0);
+check('level 5 reserves two label lines and a larger icon', enlargedGrowth >= 40);
+check('large OS text reserves still more tab height', enlargedOsGrowth > enlargedGrowth);
+const comfortBar = deriveLayout({ top: 44, bottom: 24, width: 369, height: 820,
+  tabBarGrowth: enlargedOsGrowth });
+check('vision and OS text growth reserves enough space below the floating tab bar',
+  comfortBar.tabBarSpace - honorPortrait.tabBarSpace === enlargedOsGrowth);
 // Rotated: a landscape notch moves to the side, so the TOP inset collapses and
 // the window becomes short. This is the case the old frozen constants got wrong.
 const honorLandscape = deriveLayout({ top: 0, bottom: 24, width: 820, height: 369 });
@@ -80,7 +90,7 @@ check(
 );
 check(
   'a device reporting zero bottom inset still reserves tab-bar space',
-  redmi.tabBarSpace === 66 + TAB_BAR_RAISE + 12 + 10 + 12,
+  redmi.tabBarSpace === 70 + TAB_BAR_RAISE + 12 + 10 + 12,
   `got ${redmi.tabBarSpace}; the Math.max(bottom, 10) floor stops the bar covering the last row`,
 );
 
@@ -132,7 +142,7 @@ check(
 );
 check(
   'colors identity changes with the layout generation',
-  /colors:\s*\{\s*\.\.\.PALETTES\[scheme\]\s*\}/.test(theme) && /\[pref, system, layoutGen\]/.test(theme),
+  /const colors\s*=\s*\{\s*\.\.\.PALETTES\[scheme\]\s*\}/.test(theme) && /\[pref, system, layoutGen,/.test(theme),
   'the 53 style factories memo on `colors`; without a new identity they never re-run',
 );
 check(
