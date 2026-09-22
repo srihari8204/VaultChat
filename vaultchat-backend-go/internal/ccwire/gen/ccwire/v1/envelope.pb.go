@@ -204,7 +204,7 @@ const (
 	ScopeKind_SCOPE_KIND_UNSPECIFIED ScopeKind = 0
 	ScopeKind_SCOPE_KIND_CHAT        ScopeKind = 1 // chat:<id>   — requires chat membership
 	ScopeKind_SCOPE_KIND_CHANNEL     ScopeKind = 2 // channel:<id>— requires channel membership
-	//   (today: UNGATED. handlers.go:206-215)
+	// (today: UNGATED. handlers.go:206-215)
 	ScopeKind_SCOPE_KIND_CALL  ScopeKind = 3 // call:<id>   — chat membership + mesh cap
 	ScopeKind_SCOPE_KIND_RUN   ScopeKind = 4 // run:<id>    — run entitlement (runAllowed)
 	ScopeKind_SCOPE_KIND_ADMIN ScopeKind = 5 // admin key only
@@ -519,11 +519,13 @@ func (CallSignalKind) EnumDescriptor() ([]byte, []int) {
 //
 // Decoder configuration is part of the contract, not an implementation
 // detail. Every decoder MUST be configured with:
-//   recursion limit      = 6      (Limits.max_nesting_depth)
-//   total size limit     = negotiated max_frame_bytes
-//   unknown fields       = PRESERVED (never dropped, never rejected)
-//   unknown enum values  = retained as their number, surfaced as
-//                          *_UNSPECIFIED to application code
+//
+//	recursion limit      = 6      (Limits.max_nesting_depth)
+//	total size limit     = negotiated max_frame_bytes
+//	unknown fields       = PRESERVED (never dropped, never rejected)
+//	unknown enum values  = retained as their number, surfaced as
+//	                       *_UNSPECIFIED to application code
+//
 // ─────────────────────────────────────────────────────────────────────
 type Frame struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
