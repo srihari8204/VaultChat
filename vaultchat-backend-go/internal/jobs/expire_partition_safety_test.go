@@ -71,8 +71,20 @@ statement:
 // CHECK constraint only bounds the UPPER side (expires <= created + 3h), so a
 // future created_at with a past deadline is legal.
 func TestExpireBodiesSparesNonExpiredInOtherPartitions(t *testing.T) {
-	if os.Getenv("CALL_TEST_DB") != "1" {
-		t.Skip("set CALL_TEST_DB=1 and DB_* to run against a scratch database")
+	// DB_SYSTEM_USER is part of the gate, not optional garnish. Every seed
+	// below goes through db.SysPool, which aliases Pool when that variable is
+	// unset (internal/db/db.go) — so the INSERT runs as the ordinary app role
+	// and RLS refuses it:
+	//
+	//   seed: ERROR: new row violates row-level security policy for table
+	//         "message_bodies" (SQLSTATE 42501)
+	//
+	// That reads like a product bug and is not one: nothing under test has run
+	// at that point. Its sibling in internal/db/syspool_test.go already gates
+	// on both; this one did not, so a developer with CALL_TEST_DB set and no
+	// BYPASSRLS role got a red failure where an honest skip belongs.
+	if os.Getenv("CALL_TEST_DB") != "1" || os.Getenv("DB_SYSTEM_USER") == "" {
+		t.Skip("set CALL_TEST_DB=1, DB_* and DB_SYSTEM_USER (a BYPASSRLS role) to run against a scratch database")
 	}
 	ctx := context.Background()
 	if err := db.Connect(ctx); err != nil {

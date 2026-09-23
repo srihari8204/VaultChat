@@ -158,13 +158,6 @@ export default function ChatsScreen() {
     return () => { dead = true; cancelStartup(); off?.(); };
   }, [refreshInvites]);
 
-  useEffect(() => {
-    let cancel = false;
-    (async () => {
-    })();
-    return () => { cancel = true; };
-  }, []);
-
   // Core list load.
   const loadList = useCallback(async (refreshPreviews = true) => {
     // Previews come from the local DB and need NO network, but this used to sit

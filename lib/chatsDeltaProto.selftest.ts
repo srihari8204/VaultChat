@@ -138,6 +138,20 @@ let TOKEN: string | null = USER_1;
 const ENGINE_PATH = process.env.VC_SYNCENGINE || './syncEngine';
 const engine = require(ENGINE_PATH) as typeof import('./syncEngine');
 
+// SWITCH ACCOUNTS THE WAY THE APP DOES, NOT BY WRITING SECURESTORE BEHIND api.ts.
+//
+// api.ts memoises the access token (lib/api.ts:34) and drops that cache inside
+// setTokens/clearTokens — synchronously, before either function's first await.
+// Nothing in the app writes vc_access_token by any other route, so the cache is
+// coherent there; but a test that only moves the SecureStore stub leaves
+// getAccessToken() serving the old token forever, and the account guard in
+// syncEngine/api has nothing to bite on.
+const apiMod = require('./api') as typeof import('./api');
+function setToken(next: string | null) {
+  TOKEN = next;
+  void (next ? apiMod.setTokens(next, next) : apiMod.clearTokens());
+}
+
 // ─── a scripted fetch that records what it was asked ────────────────────────
 type Served = { status?: number; type: string; body: Uint8Array | string; before?: () => void };
 const requests: string[] = [];
@@ -166,7 +180,7 @@ const JSONT = 'application/json; charset=utf-8';
 function reset(cursor = 0) {
   store.msgs.clear(); store.meta.clear();
   store.cacheCalls = []; store.lookups = []; store.acks = []; store.notifies = [];
-  requests.length = 0; queue = []; TOKEN = USER_1;
+  requests.length = 0; queue = []; setToken(USER_1);
   if (cursor) store.meta.set(CURSOR_KEY, String(cursor));
 }
 
@@ -427,7 +441,7 @@ async function main() {
     queue.push({
       type: PROTO,
       body: reply({ messages: [msg({ id: 7 }), msg({ id: 8 })], nextSince: 8 }),
-      before: () => { TOKEN = next; },
+      before: () => setToken(next),
     });
     err = await drain();
     ok(`${label}: the drain is refused`, err !== null, 'no error');
@@ -436,7 +450,7 @@ async function main() {
     ok(`${label}: the cursor did not move`, cursor() === 6, String(cursor()));
     ok(`${label}: no ack was generated for the other account`, store.acks.length === 0, canon(store.acks));
   }
-  TOKEN = USER_1;
+  setToken(USER_1);
 
   // ── §7. local id bands the server never sends SURVIVE a sync ──────────────
   console.log('\n§7 negative imported ids and optimistic id-0 bubbles survive:');

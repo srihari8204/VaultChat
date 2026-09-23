@@ -951,11 +951,12 @@ function RootLayoutInner() {
         <Stack.Screen name="media-viewer" />
         <Stack.Screen name="whiteboard" />
         <Stack.Screen name="bookmarks" />
-        {/* TEMPORARY (2026-09-20): testing whether an explicit declaration is
-            what this route is missing. `settings` works undeclared, so this is
-            a hypothesis under test, not a known fix. Remove or keep once the
-            [sos-probe] logs say which. */}
-        <Stack.Screen name="emergency-sos" />
+        {/* NOT declared here: `emergency-sos` is already registered by the
+            INSET_SCREENS map above. A SECOND <Stack.Screen> with the same name
+            throws "Screen names must be unique" out of expo-router's
+            withLayoutContext on every non-production build, and in production
+            silently logs `No route named "emergency-sos" exists` because the
+            first declaration has already consumed the route. */}
         <Stack.Screen name="receipt-control" />
         <Stack.Screen name="chat-themes" />
         <Stack.Screen name="chat-wallpaper" />

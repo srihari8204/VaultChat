@@ -246,8 +246,22 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
   const params = chatIdProp ? { ...routeParams, id: chatIdProp, chatId: chatIdProp } : routeParams;
   const router = useRouter();
   const { colors } = useTheme();
-  const { width: windowWidth, fontScale } = useWindowDimensions();
-  const compactHeader = embedded || windowWidth < 520;
+  const { fontScale } = useWindowDimensions();
+  // COMPACT MEANS THE SPLIT-VIEW PANE, NOT "a phone".
+  //
+  // This was `embedded || windowWidth < 520`. 520dp is wider than essentially
+  // every handset in portrait — a Pixel 8 is 412, an iPhone 15 Pro Max 430 —
+  // so it was true on ALL of them, and the two things it gates are Voice and
+  // Video. The chat header on a real phone quietly lost the app's two most
+  // used actions to the overflow menu while an always-rendered eye toggle took
+  // their place. WhatsApp puts video and call in the header on every phone;
+  // that is the bar.
+  //
+  // The width test existed to make room for a fourth trailing icon. The header
+  // is specced for three (video, call, overflow) — see the note on Search in
+  // onPressMenu, which is the same crowding, solved the same way — so the
+  // fourth icon moves to the menu instead and the calls come back.
+  const compactHeader = embedded;
   const { activeProfile, metrics: visionMetrics, setActiveProfile } = useVisionComfort();
   const S = useS();
   const chatId = ((params.id ?? params.chatId) ?? '') as string;
@@ -1978,9 +1992,18 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
           ? router.push({ pathname: '/group-calls' as any, params: { chatId, groupName: chat.name ?? 'Group', mode: 'video' } })
           : peer && router.push({ pathname: '/videocall' as any, params: { chatId, peerUid: peer.userId, peerName: peer.name || peer.email || 'crazzychat user' } }),
       }] : []),
+      // The header's fourth trailing icon, relocated. Tap-to-switch survives —
+      // it is one press deeper, which is the trade the three-action header
+      // costs, and the same trade Search already pays two entries down.
+      {
+        label: activeProfile === 'with-glasses' ? 'Vision Comfort: without glasses' : 'Vision Comfort: with glasses',
+        icon: 'eye-outline',
+        onPress: () => { setActiveProfile(activeProfile === 'with-glasses' ? 'without-glasses' : 'with-glasses')
+          .catch(() => Alert.alert('Could not switch Vision Profile', 'Try again.')); },
+      },
       {
         label: 'Vision Comfort settings',
-        icon: 'eye-outline',
+        icon: 'options-outline',
         onPress: () => router.push('/vision-comfort' as any),
       },
       // Search lives here, not in the header.
@@ -2194,7 +2217,7 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
     }
 
     setOverflowMenu({ title: chat.name || (peer?.name ?? 'Chat'), actions });
-  }, [chat, meId, chatId, router, compactHeader]);
+  }, [chat, meId, chatId, router, compactHeader, activeProfile, setActiveProfile]);
 
   // ── React / Reply / Forward handlers ──────────────────────
   const toggleReaction = useCallback(async (msg: DisplayMessage, emoji: string) => {
@@ -3565,19 +3588,6 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
             </>
           );
         })()}
-        <TouchableOpacity
-          style={S.headerIconBtn}
-          onPress={() => setActiveProfile(activeProfile === 'with-glasses' ? 'without-glasses' : 'with-glasses')
-            .catch(() => Alert.alert('Could not switch Vision Profile', 'Try again.'))}
-          onLongPress={() => router.push('/vision-comfort' as any)}
-          activeOpacity={0.7}
-          accessibilityRole="button"
-          accessibilityLabel={`Vision Comfort: ${activeProfile === 'with-glasses' ? 'with glasses' : 'without glasses'}. Switch profile`}
-          accessibilityHint="Long press to adjust your Vision Comfort settings"
-          hitSlop={6}
-        >
-          <Ionicons name="eye-outline" size={22 * visionMetrics.controlScale} color={colors.text} />
-        </TouchableOpacity>
         <TouchableOpacity style={S.headerIconBtn} onPress={onPressMenu} activeOpacity={0.7} accessibilityLabel="More options">
           <Ionicons name="ellipsis-vertical" size={20} color={colors.text} />
         </TouchableOpacity>
