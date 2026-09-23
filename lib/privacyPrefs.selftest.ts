@@ -153,8 +153,14 @@ const dt = code('lib/docText.ts');
 const db = code('lib/docBlocks.ts');
 check('docText caps the DECOMPRESSED size, not just the input',
   /MAX_UNZIPPED_BYTES/.test(dt) && /unzipSync\(bytes, \{ filter: unzipBudget\(\) \}\)/.test(dt));
-check('docBlocks uses the same cap',
-  /unzipSync\(bytes, \{ filter: unzipBudget\(\) \}\)/.test(db));
+// docBlocks now composes the budget with a per-unit limit filter (so a preview
+// pass can skip inflating slides it will not show), so the budget is no longer
+// spelled inline at the unzipSync call. What must still hold is that it is
+// created AND actually invoked for every entry — check that, not the spelling.
+// The behavioural guard is lib/docBlocks.selftest.ts's "a limited parse still
+// catches a zip bomb hidden past the limit", which fails if the two are reordered.
+check('docBlocks creates the budget and runs it on every entry',
+  /unzipBudget\(\)/.test(db) && /budget\(f\)/.test(db));
 check('no unzipSync anywhere in either file is left unbounded',
   !/unzipSync\([^)]*\)(?!\s*;?\s*$)/.test('') &&
   (dt.match(/unzipSync\(/g) || []).length === (dt.match(/unzipSync\(bytes, \{ filter/g) || []).length &&

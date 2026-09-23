@@ -149,9 +149,21 @@ export function topologyFor({ participants, isBroadcast = false, sfuAvailable = 
   // this call derived over the Double Ratchet — the transport changes, the trust
   // model does not.
   //
-  // Mesh remains reachable ONLY through the sfuAvailable=false branch above, so
-  // an unprovisioned or failed SFU still degrades to a working call rather than
-  // no call.
+  // THIS FUNCTION HAS NO PRODUCTION CALLER. Audited 2026-09-22: the only
+  // references anywhere are in mode.selftest.ts. engine.ts's join() goes
+  // straight to joinCallRoom with an SFU token and never asks what topology to
+  // use, so the sfuAvailable=false branch above is a MODEL of a degradation
+  // that does not run.
+  //
+  // Read that branch as a design intent, never as shipped behaviour: today an
+  // unreachable SFU fails the call, it does not fall back to a mesh. There is
+  // no mesh left to fall back to — engine.ts's onOffer/onAnswer/onIce are
+  // inert and no SDP crosses the wire.
+  //
+  // Left in place rather than deleted because MESH_MAX, SFU_MAX and the
+  // capacity helpers below ARE used, and because this is where the decision
+  // belongs the day a fallback is actually built. If that day does not come,
+  // delete the branch rather than letting it keep reading as a safety net.
   return 'sfu';
 }
 

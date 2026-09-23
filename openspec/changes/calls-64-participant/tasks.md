@@ -248,13 +248,25 @@ The ceiling and the subscription model make 64 *affordable*. These are what make
 - [ ] 5.6 Ring budget: two 64-member group calls started inside one rate-limit window both
       ring everyone — **device-verified**
 - [ ] 5.7 Off-screen participant speaks → promoted into the grid and heard by everyone — **device-verified**
-- [ ] 5.8 OEM matrix from `CALLS_README.md` before the mesh fallback is considered removable — **device-verified**
+- [~] 5.8 OEM matrix from `CALLS_README.md` before the mesh fallback is considered removable.
+      **Honor row, preconditions only, checked 2026-09-22 on ELI-NX9 (AWJDVB4702008616,
+      Android 16, app 1.2.15):** the app is on the deviceidle whitelist
+      (`user,com.vaultchat.app,10455`), `POST_NOTIFICATIONS` is `granted=true`, and
+      `.calls.VaultCallMessagingService` is registered with an intent filter — so the
+      cold-start FCM ring path is not blocked by this OEM's battery policy. That is the
+      *precondition*, NOT the behaviour: whether a killed phone actually rings still needs a
+      second handset to call from, and the Redmi row is untouched — **device-verified**
 
 ## 6. Close-out
 
 - [ ] 6.1 Sync `specs/group-call-scale/` into `openspec/specs/` — only after 5.4 and 5.5 pass
       on prod, per the project's spec convention
-- [ ] 6.2 Open a follow-up to delete the 4.5 ring fallback once the binary is proven on prod
+- [x] 6.2 **OPENED: `openspec/changes/calls-drop-ring-fallback`.** The binary carrying
+      `POST /calls/{id}/ring` is proven on prod (4.6, plus the 8.1 fix), so the fallback's
+      original justification is spent. The change is written but GATED on 5.6 — until two
+      64-member calls inside one rate-limit window are proven on hardware, the fallback is
+      still earning its place. Landing it before then would trade a known safety net for an
+      unproven one — **written**
 - [x] 6.3 **MEASURED. RECOMMENDED LIMIT = 64 — keep it.**
       64 costs 36% CPU / 537 MiB on a 12-core box: roughly 2x headroom, which is the right
       margin for a number a product promises. 96 fits at 76% but leaves almost none. 128 is

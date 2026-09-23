@@ -10,6 +10,7 @@ import {
   docxBlocks, xlsxRows, sheetNames, pptxSlide,
   pdfPageLines, pdfBlocksFromLines, extractDocBlocks, type Block,
 } from './docBlocks';
+import { DOC_BOMB_MESSAGE } from './docText';
 
 let failures = 0;
 function check(name: string, ok: boolean, detail?: string) {
@@ -162,6 +163,100 @@ console.log('\nend to end');
   let msg2 = '';
   try { extractDocBlocks(new Uint8Array(4), 'old.doc'); } catch (e: any) { msg2 = e.message; }
   check('legacy .doc is refused', /docx/i.test(msg2), msg2);
+}
+
+// ── limit: parse only the first few units ────────────────────────────
+console.log('\nlimit parses only the first few units');
+{
+  const slideXml = (s: string) =>
+    strToU8(`<p:sp><p:txBody><a:p><a:r><a:t>${s}</a:t></a:r></a:p></p:txBody></p:sp>`);
+  const sheetXml = (v: string) =>
+    strToU8(`<sheetData><row r="1"><c r="A1" t="s"><v>${v}</v></c></row></sheetData>`);
+
+  const pptx = zipSync({
+    'ppt/slides/slide1.xml': slideXml('One'),
+    'ppt/slides/slide2.xml': slideXml('Two'),
+    'ppt/slides/slide3.xml': slideXml('Three'),
+  });
+  const docx = zipSync({ 'word/document.xml': strToU8(
+    `<w:body>${['A', 'B', 'C', 'D'].map(t => `<w:p><w:r><w:t>${t}</w:t></w:r></w:p>`).join('')}</w:body>`) });
+  const xlsx = zipSync({
+    'xl/sharedStrings.xml': strToU8('<sst><si><t>First</t></si><si><t>Second</t></si></sst>'),
+    'xl/workbook.xml': strToU8('<sheets><sheet name="One" sheetId="1"/><sheet name="Two" sheetId="2"/></sheets>'),
+    'xl/worksheets/sheet1.xml': sheetXml('0'),
+    'xl/worksheets/sheet2.xml': sheetXml('1'),
+  });
+  // Two Flate-compressed content streams — one page each.
+  const pdfOf = (...bodies: string[]) => {
+    const parts: Uint8Array[] = [strToU8('%PDF-1.4\n')];
+    bodies.forEach((body, i) => {
+      const comp = zlibSync(strToU8(body));
+      parts.push(
+        strToU8(`${i + 1} 0 obj\n<< /Length ${comp.length} /Filter /FlateDecode >>\nstream\n`),
+        comp, strToU8('\nendstream\nendobj\n'));
+    });
+    parts.push(strToU8('%%EOF\n'));
+    const out = new Uint8Array(parts.reduce((n, p) => n + p.length, 0));
+    let o = 0;
+    for (const p of parts) { out.set(p, o); o += p.length; }
+    return out;
+  };
+  const pdf = pdfOf('BT /F1 12 Tf (Page one) Tj ET', 'BT /F1 12 Tf (Page two) Tj ET');
+
+  const cases: Array<[string, Uint8Array, string, number]> = [
+    ['docx', docx, 'a.docx', 4],   // 4 paragraphs = 4 blocks (Word has no pages)
+    ['xlsx', xlsx, 'b.xlsx', 2],
+    ['pptx', pptx, 'c.pptx', 3],
+    ['pdf', pdf, 'd.pdf', 2],
+  ];
+  for (const [name, bytes, file, units] of cases) {
+    eq(`${name}: limit omitted is identical to limit: undefined`,
+       extractDocBlocks(bytes, file), extractDocBlocks(bytes, file, { limit: undefined }));
+    const full = extractDocBlocks(bytes, file);
+    check(`${name}: a full parse still reads every unit and is not partial`,
+          !full.partial && full.blocks.length >= units, JSON.stringify(full));
+    const over = extractDocBlocks(bytes, file, { limit: units + 5 });
+    eq(`${name}: a limit past the unit count is not partial`,
+       [over.partial, JSON.stringify(over.blocks)], [false, JSON.stringify(full.blocks)]);
+  }
+
+  const one = extractDocBlocks(pptx, 'c.pptx', { limit: 1 });
+  eq('pptx: limit 1 yields one slide, flagged partial',
+     [one.blocks.length, (one.blocks[0] as any).title || (one.blocks[0] as any).lines[0], one.partial],
+     [1, 'One', true]);
+
+  // The documented caveat: the unzip filter sees one entry at a time, so the cut
+  // is on the slide NUMBER, not on ordinal position. Slides 1 and 5 at limit 3
+  // therefore give only slide 1 — acceptable ONLY because partial says so.
+  const gappy = extractDocBlocks(
+    zipSync({ 'ppt/slides/slide1.xml': slideXml('One'), 'ppt/slides/slide5.xml': slideXml('Five') }),
+    'gap.pptx', { limit: 3 });
+  eq('pptx: a gap in slide numbering under-reads, and admits it',
+     [gappy.blocks.length, gappy.partial], [1, true]);
+
+  const sheet1 = extractDocBlocks(xlsx, 'b.xlsx', { limit: 1 });
+  eq('xlsx: limit 1 keeps sharedStrings and workbook, so the sheet is readable',
+     [sheet1.blocks.length, (sheet1.blocks[0] as any).name, (sheet1.blocks[0] as any).rows, sheet1.partial],
+     [1, 'One', [['First']], true]);
+
+  const doc2 = extractDocBlocks(docx, 'a.docx', { limit: 2 });
+  eq('docx: limit 2 yields two blocks, flagged partial',
+     [doc2.blocks.map(txt), doc2.partial], [['A', 'B'], true]);
+
+  const pdf1 = extractDocBlocks(pdf, 'd.pdf', { limit: 1 });
+  eq('pdf: limit 1 yields one page, flagged partial',
+     [pdf1.blocks.map(b => b.t), txt(pdf1.blocks[1]), pdf1.partial],
+     [['page', 'p'], 'Page one', true]);
+
+  // The guard: a bomb hidden in a slide the LIMIT rejects must still be caught,
+  // which only holds while the budget runs before the limit filter.
+  const bomb = zipSync({
+    'ppt/slides/slide1.xml': slideXml('One'),
+    'ppt/slides/slide9.xml': new Uint8Array(129 * 1024 * 1024),
+  });
+  let bmsg = '';
+  try { extractDocBlocks(bomb, 'bomb.pptx', { limit: 1 }); } catch (e: any) { bmsg = e.message; }
+  eq('a limited parse still catches a zip bomb hidden past the limit', bmsg, DOC_BOMB_MESSAGE);
 }
 
 console.log(failures === 0 ? '\nPASS' : `\nFAIL (${failures})`);

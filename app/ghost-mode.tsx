@@ -13,6 +13,7 @@
 // Enforced server-side at the fan-out layer (presence, typing, read).
 // Last-seen blanking happens in the GET /chats query.
 
+import { useAuthHeader } from '../hooks/useAuthHeader';
 import { HEADER_TOP } from '../constants/layout';
 import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
@@ -32,7 +33,6 @@ import {
 import { type Palette } from '../constants/theme';
 import { useTheme } from '../lib/theme';
 import { readCache, writeCache } from '../lib/localCache';
-import { getAccessToken } from '../lib/api';
 import { initialOf } from '../lib/format';
 import {
   attachmentUrl,
@@ -66,7 +66,7 @@ function ListView() {
   const router = useRouter();
   const [rows,    setRows]    = useState<GhostMode[]>([]);
   const [loading, setLoading] = useState(true);
-  const [authHeader, setAuthHeader] = useState<string | null>(null);
+  const authHeader = useAuthHeader();
 
   useEffect(() => {
     let cancel = false;
@@ -75,10 +75,9 @@ function ListView() {
       const cached = await readCache<GhostMode[]>('ghost-mode');
       if (!cancel && cached) { setRows(cached); setLoading(false); }
       try {
-        const [list, tok] = await Promise.all([listGhostMode(), getAccessToken()]);
+        const list = await listGhostMode();
         if (!cancel) {
           setRows(list);
-          setAuthHeader(tok ? `Bearer ${tok}` : null);
         }
         writeCache('ghost-mode', list);
       } catch (e: any) {

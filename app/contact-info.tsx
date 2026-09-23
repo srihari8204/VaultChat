@@ -7,6 +7,7 @@
 // encryption card now reflects the real E2EE_ENABLED flag so we don't claim a
 // guarantee the build doesn't yet provide.
 
+import { useAuthHeader } from '../hooks/useAuthHeader';
 import { brandAlpha, type Palette } from '../constants/theme';
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { View, TouchableOpacity, StyleSheet, ScrollView, Dimensions, Alert, ActivityIndicator, Linking, Switch, useWindowDimensions } from 'react-native';
@@ -16,7 +17,6 @@ import { useLocalSearchParams, Stack, useRouter } from 'expo-router';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useTheme } from '../lib/theme';
 import { E2EE_ENABLED } from '../constants/flags';
-import { getAccessToken } from '../lib/api';
 import {
   getChat, getMessages, muteChat, listBlocks, blockUser, unblockUser, reportUser,
   attachmentUrl, getCommonGroups, type Message, type ChatMember,
@@ -76,7 +76,7 @@ export default function ContactInfoScreen() {
     setShareViewingState(on);
     setShareViewing(chatId, on).catch(() => {});
   }, [chatId]);
-  const [authHeader, setAuthHeader] = useState<string | null>(null);
+  const authHeader = useAuthHeader();
   const [media, setMedia] = useState<Message[]>([]);
   const [files, setFiles] = useState<FileHit[]>([]);
   const [links, setLinks] = useState<LinkHit[]>([]);
@@ -107,8 +107,6 @@ export default function ContactInfoScreen() {
       }
 
       try {
-        const tok = await getAccessToken();
-        if (active) setAuthHeader(tok ? `Bearer ${tok}` : null);
 
         const tasks: Promise<any>[] = [listBlocks()];
         if (chatId) tasks.push(getChat(chatId), getMessages(chatId, { limit: 200 }));

@@ -127,9 +127,19 @@ export default function TabLayout() {
           outside its parent, so the item has to reach up to the art. The other
           four stay pinned to the pill so the band above it does not eat taps
           meant for the list behind. */}
-      <Tabs.Screen name="mini"    options={{ title: 'Apps',    tabBarItemStyle: styles.tabItemCenter, tabBarIconStyle: styles.centerIconBox, tabBarIcon: ({ focused }) => <MiniCenterIcon focused={focused} /> }} />
+      {/* BAR HIDDEN ON THIS SCREEN (2026-09-23). Mini Apps is a full-screen
+          grid of its own and the floating bar competed with it. Safe to hide
+          here because this screen already carries its own way out — the header
+          back button — so nothing is stranded. `display: 'none'` rather than
+          removing the Screen: the tab must stay routable and stay reachable
+          from the bar on Chats, Status and Calls, which still show it. */}
+      <Tabs.Screen name="mini"    options={{ title: 'Apps',    tabBarStyle: { display: 'none' }, tabBarItemStyle: styles.tabItemCenter, tabBarIconStyle: styles.centerIconBox, tabBarIcon: ({ focused }) => <MiniCenterIcon focused={focused} /> }} />
       <Tabs.Screen name="calls"   options={{ title: 'Calls',   tabBarIcon: ({ focused }) => <TabIcon tab="calls"   label="Calls"   focused={focused} /> }} />
-      <Tabs.Screen name="profile" options={{ title: 'Profile', tabBarIcon: ({ focused }) => <TabIcon tab="profile" label="Profile" focused={focused} /> }} />
+      {/* BAR HIDDEN HERE TOO — and this one needed a back control added first.
+          Profile had NO way off it other than the bar: no header back, no
+          router.back() anywhere in the file. Hiding the bar without that would
+          have stranded the screen on iOS, which has no hardware back. */}
+      <Tabs.Screen name="profile" options={{ title: 'Profile', tabBarStyle: { display: 'none' }, tabBarIcon: ({ focused }) => <TabIcon tab="profile" label="Profile" focused={focused} /> }} />
       {/* Routable but hidden from the bar — opened from the Chats header */}
       <Tabs.Screen name="alerts"  options={{ href: null }} />
     </Tabs>

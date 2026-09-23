@@ -80,6 +80,64 @@ export function wantsTrack(st: VisibleState, uid: string, t: TrackShape, now: nu
   return wantsVideo(st, uid, now);
 }
 
+/** Which published simulcast layer this device is asking the SFU for. */
+export type LayerWant = 'low' | 'medium' | 'high';
+
+/**
+ * WHICH SIZE, not merely whether.
+ *
+ * The visible set above decides WHAT is subscribed. It says nothing about the
+ * SIZE, and until this existed the answer was "whatever the SFU sends" — the
+ * top layer. So a 3x3 grid of 360px-wide tiles pulled nine 720p streams into a
+ * phone that renders each of them at a quarter of that. Publishing simulcast
+ * layers and then asking for the biggest one wastes the entire point of
+ * publishing them: the bandwidth is spent, the decoder is loaded, and the
+ * viewer sees no difference because the pixels have nowhere to go.
+ *
+ * livekit-client would normally do this itself through adaptiveStream, which
+ * measures the <VideoTrack> element it rendered. This app draws remote video
+ * with RTCView over a stream URL, so the SDK sees no attached view and would be
+ * entitled to pause every tile — which is why adaptiveStream is off (room.ts).
+ * The choice therefore has to be made from the side that knows, exactly as the
+ * subscribe decision already is.
+ *
+ * THE COUNT IS THE MEASUREMENT. A phone lays its tiles out in a grid across a
+ * roughly 1080-1200px panel, so the tile count fixes the tile width without
+ * anyone having to thread pixels down from the UI:
+ *
+ *   1 tile     full width, ~1080px   → the 720p layer
+ *   2-4 tiles  a 2-up or 2x2, ~540px → the 360p layer
+ *   5+ tiles   3x3 or denser, ≤360px → the 180p layer
+ *
+ * Deliberately coarse. A tile that is slightly under-served for a moment during
+ * a page change is invisible; a wrong THRESHOLD that pulls 720p into a
+ * sixty-four-person grid is a thermal problem.
+ */
+export function qualityForTileCount(tiles: number): LayerWant {
+  if (tiles <= 1) return 'high';
+  if (tiles <= 4) return 'medium';
+  return 'low';
+}
+
+/**
+ * The layer to request for one publication.
+ *
+ * Audio has no layers, and a SCREEN SHARE is always asked for at full size: it
+ * is published as a single encoding (room.ts sets `simulcast: false` for it),
+ * and it carries text, which is the one thing that does not survive being
+ * scaled down.
+ *
+ * `visible === null` means "no paging in this call" — every 1:1, and any screen
+ * not taught about pages. One remote face, full screen: 'high' is both the
+ * correct answer and the behaviour that existed before this function did, so
+ * adopting it changes nothing for 1:1.
+ */
+export function wantedQuality(st: VisibleState, t: TrackShape): LayerWant {
+  if (t.kind !== 'video') return 'high';
+  if (t.screenShare) return 'high';
+  return qualityForTileCount(st.visible === null ? 1 : st.visible.size);
+}
+
 /**
  * Declare the new visible set. Returns nothing — the caller re-applies the
  * subscription for every participant afterwards, because only it knows what

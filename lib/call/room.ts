@@ -25,12 +25,12 @@ import { Dimensions, PixelRatio } from 'react-native';
 import { AudioSession, registerGlobals, setLogLevel } from '@livekit/react-native';
 import { screenCaptureSize, screenCaptureBitrate } from './screenCapture';
 import { shouldRelax, relaxedEncoding } from './sharePolicy';
-import { newVisibleState, setVisible as setVisibleState, wantsTrack } from './visibleSet';
+import { newVisibleState, setVisible as setVisibleState, wantsTrack, wantedQuality } from './visibleSet';
 import { simulcastLayers } from './mode';
 import { getIceConfig } from '../iceConfig';
 import { enableFrameCrypto, type FrameCryptoHandle } from './frameCrypto';
 import { CALL_FRAME_E2EE, MEDIA_KEY_WAIT_MS } from './types';
-import { Room, RoomEvent, Track, VideoPresets, type RemoteParticipant, type RemoteTrackPublication } from 'livekit-client';
+import { Room, RoomEvent, Track, VideoPresets, VideoQuality, type RemoteParticipant, type RemoteTrackPublication } from 'livekit-client';
 
 // livekit-client is a browser library: registerGlobals installs the React Native
 // WebRTC implementations under the names it expects. Must run before a Room is
@@ -267,11 +267,34 @@ export async function joinCallRoom(a: JoinArgs): Promise<CallRoom> {
     // with `simulcast: false`, which override these. That is deliberate and
     // device-proven: odd panel geometry plus a hardware encoder that silently
     // emits nothing means one encoder to satisfy, not three.
+    // WHAT THE CAMERA ACTUALLY CAPTURES.
+    //
+    // This was UNSET, and unset does not mean "sensible default" — it means
+    // whatever the SDK happens to pick on this handset. A face arriving soft is
+    // usually decided here, before a single frame reaches the encoder: you
+    // cannot sharpen what was never captured.
+    //
+    // 720p on a capable phone, 540p on a budget one. Higher is not better on a
+    // phone call — 1080p triples the pixels a budget encoder must chew for a
+    // head-and-shoulders shot nobody renders larger than a tile.
+    videoCaptureDefaults: {
+      resolution: isLowEndDevice() ? VideoPresets.h540.resolution : VideoPresets.h720.resolution,
+    },
     publishDefaults: {
       simulcast: true,
       // main layer + the extras listed = simulcastLayers() total.
       videoSimulcastLayers: simulcastLayers('sfu', isLowEndDevice())
         >= 3 ? [VideoPresets.h180, VideoPresets.h360] : [VideoPresets.h180],
+      // SPEND THE BITRATE ON SHARPNESS, NOT ON FRAMES.
+      //
+      // Also previously unset, so the top layer ran on the SDK's generic camera
+      // encoding. A video call is a head and shoulders: the subject barely
+      // moves, so 24 fps is indistinguishable from 30 to the person watching,
+      // and the frames it saves go into detail on the face instead.
+      videoEncoding: {
+        maxBitrate: isLowEndDevice() ? 800_000 : 1_700_000,
+        maxFramerate: 24,
+      },
     },
   });
 
@@ -343,16 +366,35 @@ export async function joinCallRoom(a: JoinArgs): Promise<CallRoom> {
     }
   };
 
+  /** ./visibleSet speaks in sizes; the SDK speaks in this enum. */
+  const QUALITY = { low: VideoQuality.LOW, medium: VideoQuality.MEDIUM, high: VideoQuality.HIGH };
+
   /** Bring one publication in line with what this device wants. */
   const applyWant = (pub: RemoteTrackPublication, uid: string) => {
-    const want = wantsTrack(vis, uid, {
-      kind: pub.kind === Track.Kind.Video ? 'video' : 'audio',
+    const shape = {
+      kind: pub.kind === Track.Kind.Video ? 'video' as const : 'audio' as const,
       screenShare: pub.source === Track.Source.ScreenShare,
-    }, Date.now());
+    };
+    const want = wantsTrack(vis, uid, shape, Date.now());
     // No keyframe request on re-subscribe: the SFU sends one when a
     // subscription starts, and livekit-client exposes no client-side PLI. The
     // linger window in ./visibleSet is what covers the gap.
-    if (want) { try { pub.setSubscribed(true); } catch {} return; }
+    if (want) {
+      try { pub.setSubscribed(true); } catch {}
+      // AND AT WHAT SIZE. Subscribing said yes; this says how big, and without
+      // it every tile in a 64-person grid was served the 720p layer it cannot
+      // draw. Set on every pass rather than only on change: setVisible and the
+      // 2-second reconcile both route through here, so a page flip re-sizes
+      // what it re-subscribes, with no separate bookkeeping to drift.
+      //
+      // Best-effort. An SDK that refuses the request leaves the call exactly as
+      // it behaved before this line existed — a working call at the wrong size,
+      // never a broken one.
+      if (shape.kind === 'video') {
+        try { pub.setVideoQuality(QUALITY[wantedQuality(vis, shape)]); } catch {}
+      }
+      return;
+    }
     if (pub.isSubscribed) { try { pub.setSubscribed(false); } catch {} }
   };
 
@@ -493,7 +535,10 @@ export async function joinCallRoom(a: JoinArgs): Promise<CallRoom> {
     if (publishedOwn || !a.publish) return;
     publishedOwn = true;
     await room.localParticipant.setMicrophoneEnabled(wantMic);
-    if (a.video && wantCam) await room.localParticipant.setCameraEnabled(true);
+    if (a.video && wantCam) {
+      await room.localParticipant.setCameraEnabled(true);
+      await tuneCameraSender('publish');
+    }
     // LocalTrackPublished already attached; this is the RECEIPT, not the attach.
     // It has to be asked for here because zero is only meaningful once something
     // has actually been published.
@@ -620,6 +665,57 @@ export async function joinCallRoom(a: JoinArgs): Promise<CallRoom> {
    */
   const mayPublish = () => !CALL_FRAME_E2EE || !!crypto;
 
+  /**
+   * KEEP THE FACE SHARP WHEN THE NETWORK TIGHTENS.
+   *
+   * WebRTC's default for a camera track is to protect frame rate and throw away
+   * resolution the moment the uplink dips — the right call for a football
+   * match, the wrong one for a person talking. It is why a video call starts
+   * crisp and quietly turns to mush a minute in, without ever dropping.
+   *
+   * Screen share already makes this exact trade (see setScreenShare, tuned for
+   * text). A face is the same kind of subject: mostly still, judged on detail.
+   * So it gets the same two knobs, for the same reason.
+   *
+   *   contentHint 'detail'   bias the encoder toward spatial detail
+   *   degradationPreference  give up frames, never resolution
+   *     'maintain-resolution'
+   *
+   * Applied on EVERY camera publish, not once at join: unmuting the camera and
+   * flipping it both produce a NEW sender, and a sender that was never tuned is
+   * indistinguishable from one that was, right up until the network dips.
+   *
+   * The simulcast encodings are deliberately left alone. `params.encodings[0]`
+   * is the LOWEST layer, not the highest — the value screen share edits safely
+   * because it publishes a single encoding. Touching it here would shrink the
+   * thumbnail layer and leave the layer that carries the face untouched, which
+   * is the opposite of the intent. The top layer is already set by
+   * publishDefaults.videoEncoding above.
+   *
+   * Best-effort throughout: React Native's WebRTC does not implement every
+   * knob, and an untuned camera is still a working camera.
+   *
+   * A FUNCTION DECLARATION, deliberately: publishOwn is defined above this
+   * point but RUNS before it (the key-install path calls it), so a `const`
+   * arrow here would be in its temporal dead zone and throw on the first
+   * publish of every call. Hoisting is what makes the placement free.
+   */
+  async function tuneCameraSender(why: string): Promise<void> {
+    try {
+      const pub = room.localParticipant.getTrackPublication(Track.Source.Camera);
+      const track: any = pub?.track;
+      if (!track) return;
+      try { if (track.mediaStreamTrack) track.mediaStreamTrack.contentHint = 'detail'; } catch {}
+      const sender = track.sender;
+      const params = sender?.getParameters?.();
+      if (!params) return;
+      params.degradationPreference = 'maintain-resolution';
+      await sender.setParameters(params);
+    } catch (err) {
+      console.warn('[call] camera tune failed on', why, '—', (err as any)?.message ?? err);
+    }
+  }
+
   return {
     room,
     async setMic(on) {
@@ -631,6 +727,7 @@ export async function joinCallRoom(a: JoinArgs): Promise<CallRoom> {
       wantCam = on;
       if (on && !mayPublish()) return;
       await room.localParticipant.setCameraEnabled(on);
+      if (on) await tuneCameraSender('camera on');
     },
     async flipCamera() {
       const pub = room.localParticipant.getTrackPublication(Track.Source.Camera);
@@ -703,6 +800,12 @@ export async function joinCallRoom(a: JoinArgs): Promise<CallRoom> {
         if (!switched) console.warn('[call] flip: restartTrack did not take either');
       }
       if (switched) facing = next;
+      // RE-TUNE. The restartTrack path above REPLACES the capture, and with it
+      // the sender, so the detail bias and the resolution-over-frames
+      // preference set at publish are gone — a flip would quietly hand the rest
+      // of the call an untuned camera. Idempotent on the applyConstraints path,
+      // which keeps the same sender, so it is simply always called.
+      await tuneCameraSender('flip');
       safe('local', () => a.events.onLocal(urlOf(t)));
     },
     async setScreenShare(on) {

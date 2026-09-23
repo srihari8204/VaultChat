@@ -23,6 +23,7 @@
 // hard: the person you most want in your circle is almost always already in
 // your chat list.
 
+import { useAuthHeader } from '../hooks/useAuthHeader';
 import { AppText as Text } from '../components/ui/Text';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
@@ -35,7 +36,6 @@ import { type Palette } from '../constants/theme';
 import { useTheme } from '../lib/theme';
 import { Avatar, AuroraBackground } from '../components/ui';
 import { listChats, createInvitation, attachmentUrl } from '../lib/chatService';
-import { getAccessToken } from '../lib/api';
 import { circleInviteCode, circleMembers } from '../lib/family/circle';
 
 interface Pick { userId: string; name: string; photoURL: string | null }
@@ -54,7 +54,7 @@ export default function FamilyAddScreen() {
   const [already, setAlready] = useState<Set<string>>(new Set());
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [query, setQuery] = useState('');
-  const [authHeader, setAuthHeader] = useState<string | null>(null);
+  const authHeader = useAuthHeader();
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -63,13 +63,11 @@ export default function FamilyAddScreen() {
     let live = true;
     (async () => {
       try {
-        const [chats, tok, members] = await Promise.all([
+        const [chats, members] = await Promise.all([
           listChats(),
-          getAccessToken(),
           circleId ? circleMembers(String(circleId)).catch(() => []) : Promise.resolve([]),
         ]);
         if (!live) return;
-        setAuthHeader(tok ? `Bearer ${tok}` : null);
         // Members already in the circle are shown but not selectable — clearer
         // than hiding them, which reads as "this contact is missing".
         setAlready(new Set(members.map((m: any) => String(m.id))));

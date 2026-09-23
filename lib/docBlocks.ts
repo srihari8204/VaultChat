@@ -43,6 +43,8 @@ export interface BlocksResult {
   blocks: Block[];
   /** True when the document parsed but carries nothing readable. */
   empty: boolean;
+  /** True when `opts.limit` actually left something out. False on a full parse. */
+  partial: boolean;
 }
 
 // ─── Word ────────────────────────────────────────────────────────────
@@ -91,12 +93,17 @@ function cellText(tcXml: string): string {
  * Paragraphs and tables are matched by ONE alternation rather than separately:
  * running two passes and concatenating would put every table after every
  * paragraph, which silently reorders the document.
+ *
+ * `limit` stops the scan after that many blocks — Word has no pages, so a block
+ * is the only unit there is to cut on. The regex genuinely stops; it does not
+ * parse the document and slice.
  */
-export function docxBlocks(xml: string): Block[] {
+export function docxBlocks(xml: string, limit?: number): Block[] {
   const out: Block[] = [];
   const re = /<w:tbl(?:\s[^>]*)?>[\s\S]*?<\/w:tbl>|<w:p(?:\s[^>]*)?>[\s\S]*?<\/w:p>/g;
 
   for (let m = re.exec(xml); m; m = re.exec(xml)) {
+    if (out.length === limit) break;
     const chunk = m[0];
 
     if (chunk.startsWith('<w:tbl')) {
@@ -300,29 +307,67 @@ export function pdfBlocksFromLines(lines: Array<{ text: string; size: number }>)
 /**
  * Read a document as blocks. Throws the same plain, user-facing messages
  * extractDocText does, so the viewer's error handling is unchanged.
+ *
+ * `opts.limit` caps how many UNITS are parsed — a pptx slide, an xlsx sheet, a
+ * PDF page, or (docx, which has no pages) a top-level block — so the viewer can
+ * paint the first screen and parse the rest afterwards. Omitted means "parse
+ * everything", byte for byte the behaviour that was here before.
  */
-export function extractDocBlocks(bytes: Uint8Array, filename: string): BlocksResult {
+export function extractDocBlocks(
+  bytes: Uint8Array, filename: string, opts?: { limit?: number },
+): BlocksResult {
+  const limit = opts?.limit;
   if (bytes.byteLength > MAX_DOC_BYTES) throw new Error('This document is too large to open here.');
   const kind = docKind(filename);
   if (kind === 'unsupported') throw new Error('Only .docx, .xlsx, .pptx and .pdf can be read in the app.');
 
   if (kind === 'pdf') {
     const blocks: Block[] = [];
-    const pages = pdfPageStreams(bytes);
+    const all = pdfPageStreams(bytes);
+    const pages = limit === undefined ? all : all.slice(0, limit);
     pages.forEach((content, i) => {
       const b = pdfBlocksFromLines(pdfPageLines(content));
       if (!b.length) return;
       blocks.push({ t: 'page', n: i + 1 });
       blocks.push(...b);
     });
-    return { blocks, empty: blocks.length === 0 };
+    return { blocks, empty: blocks.length === 0, partial: pages.length < all.length };
   }
+
+  // The part whose trailing number IS the unit number, per format. Anything that
+  // does not match — xl/sharedStrings.xml, xl/workbook.xml — is always inflated;
+  // the sheets are unreadable without them.
+  const part = kind === 'pptx' ? /^ppt\/slides\/slide(\d+)\.xml$/
+             : kind === 'xlsx' ? /^xl\/worksheets\/sheet(\d+)\.xml$/
+             : null;
+  let skipped = 0;
+  const budget = unzipBudget();
+  // ORDER: the budget runs FIRST and on EVERY entry, then the limit may reject.
+  // Reversed, a limited parse would never let the budget see the entries it
+  // skipped, and a bomb hidden in slide 400 would stop being caught on exactly
+  // the pass a first paint uses. Skipping an entry saves the inflate, which is
+  // the whole point; it must not save the accounting.
+  //
+  // CAVEAT: this filter sees one entry at a time and cannot know the full part
+  // list, so "N > limit" is a test on the NUMBER in the part name, not on
+  // ordinal position — a deck whose slides are numbered 1, 5, 9 yields only
+  // slide 1 at limit 3. That is fine for a first-paint preview *provided* the
+  // caller is told, so `partial` is counted from the rejections here rather than
+  // by comparing counts afterwards, which cannot see what was never inflated.
+  const filter = (f: { name: string; originalSize: number }) => {
+    budget(f);
+    if (limit === undefined || !part) return true;
+    const n = part.exec(f.name)?.[1];
+    if (n === undefined || Number(n) <= limit) return true;
+    skipped++;
+    return false;
+  };
 
   let files: Record<string, Uint8Array>;
   // Same output bound as extractDocText — see MAX_UNZIPPED_BYTES in docText.ts.
   // Both entry points read the same untrusted attachment, so a cap on only one
   // of them is no cap at all.
-  try { files = unzipSync(bytes, { filter: unzipBudget() }); }
+  try { files = unzipSync(bytes, { filter }); }
   catch (e: any) {
     if (e?.message === DOC_BOMB_MESSAGE) throw e;
     throw new Error('This file is not a readable document.');
@@ -330,15 +375,20 @@ export function extractDocBlocks(bytes: Uint8Array, filename: string): BlocksRes
   const get = (p: string) => (files[p] ? strFromU8(files[p]) : '');
 
   if (kind === 'docx') {
-    const blocks = docxBlocks(get('word/document.xml'));
-    return { blocks, empty: blocks.length === 0 };
+    // One block PAST the limit, not the whole document: that extra block is the
+    // only honest evidence the limit left something out, and the scan still
+    // stops there rather than running to the end.
+    const all = docxBlocks(get('word/document.xml'), limit === undefined ? undefined : limit + 1);
+    const partial = limit !== undefined && all.length > limit;
+    const blocks = partial ? all.slice(0, limit) : all;
+    return { blocks, empty: blocks.length === 0, partial };
   }
 
   if (kind === 'pptx') {
     const blocks = orderedSlidePaths(Object.keys(files))
       .map((p, i) => pptxSlide(strFromU8(files[p]), i + 1))
       .filter(b => b.t === 'slide' && (b.title || b.lines.length));
-    return { blocks, empty: blocks.length === 0 };
+    return { blocks, empty: blocks.length === 0, partial: skipped > 0 };
   }
 
   // xlsx
@@ -353,7 +403,7 @@ export function extractDocBlocks(bytes: Uint8Array, filename: string): BlocksRes
   const blocks = orderedSheetPaths(Object.keys(files))
     .map((p, i) => ({ t: 'sheet' as const, name: names[i] || `Sheet ${i + 1}`, rows: xlsxRows(strFromU8(files[p]), shared) }))
     .filter(s => s.rows.length);
-  return { blocks, empty: blocks.length === 0 };
+  return { blocks, empty: blocks.length === 0, partial: skipped > 0 };
 }
 
 export default {};

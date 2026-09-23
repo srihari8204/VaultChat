@@ -1,14 +1,23 @@
 // app/group-calls.tsx — Group call hub (honest, no fake/Firebase).
 //
 // Two real ways out of this screen:
-//   • "Start group call" → /group-call-active, a full-mesh N-way call over the
-//     existing webrtc_* relay + TURN. No SFU: every participant holds one
-//     RTCPeerConnection to every other, which is why the server caps the room
-//     (meshMaxParticipants). An SFU is a scale step, not a prerequisite.
+//   • "Start group call" → /group-call-active, an N-way call THROUGH THE SFU,
+//     up to the 64-seat ceiling the server enforces at POST /calls.
 //   • tap a member → a 1:1 call on the voicecall/videocall screens.
+//
+// THIS COMMENT USED TO SAY "full-mesh, no SFU, every participant holds one
+// RTCPeerConnection to every other". That has not been true since the owner
+// decision of 2026-08-16 (lib/call/mode.ts): every call rides the SFU, 1:1
+// included, and engine.ts's onOffer/onAnswer/onIce are inert — no SDP crosses
+// the wire at all. The mesh is gone, not merely unused. Corrected 2026-09-22
+// after the stale text was quoted as fact in an external document.
+//
+// Scale costs no trust here: RTCFrameCryptor encrypts each frame before it
+// leaves the device (lib/call/frameCrypto.ts), so the SFU forwards ciphertext.
 //
 // The old screen simulated participants joining; nothing here is simulated.
 
+import { useAuthHeader } from '../hooks/useAuthHeader';
 import { HEADER_TOP } from '../constants/layout';
 import { brandAlpha, type Palette } from '../constants/theme';
 import { useLocalSearchParams, useRouter, Stack } from 'expo-router';
@@ -18,7 +27,6 @@ import { Ionicons } from '@expo/vector-icons';
 import { CALL_ENGINE_V2 } from '../constants/flags';
 import { useTheme } from '../lib/theme';
 import { getChat, attachmentUrl, type ChatMember } from '../lib/chatService';
-import { getAccessToken } from '../lib/api';
 import { getSocket } from '../lib/socket';
 import { getCurrentUserAsync } from './(constants)/authService';
 import { AuroraBackground } from '../components/ui';
@@ -38,15 +46,13 @@ export default function GroupCallsScreen() {
   const { chatId, groupName, mode: modeParam } = useLocalSearchParams<{ chatId: string; groupName: string; mode?: string }>();
   const [mode, setMode] = useState<CallMode>((modeParam as CallMode) || 'voice');
   const [members, setMembers] = useState<ChatMember[]>([]);
-  const [authHeader, setAuthHeader] = useState<string | null>(null);
+  const authHeader = useAuthHeader();
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     let active = true;
     (async () => {
       try {
-        const tok = await getAccessToken();
-        if (active) setAuthHeader(tok ? `Bearer ${tok}` : null);
         const [chat, me] = await Promise.all([chatId ? getChat(chatId) : Promise.resolve(null as any), getCurrentUserAsync()]);
         if (active && chat) {
           setMembers(chat.members.filter((m: ChatMember) => !m.leftAt && m.userId !== me?.id));

@@ -44,6 +44,21 @@ IMAGE="${CLI_IMAGE:-livekit/livekit-cli:latest}"
 # 3x3 matches the app's 9-tile page (PAGE in app/group-call-active.tsx), and
 # --simulate-speakers exercises the active-speaker promotion the grid relies on.
 LAYOUT="${LAYOUT:-3x3}"
+# HOW MANY PARTICIPANTS RECEIVE. Defaults to the tier, so an N-person call is
+# measured as N publishing AND N receiving.
+#
+# THIS WAS MISSING, AND ITS ABSENCE INVALIDATED THE FIRST TABLE. `--subscribers`
+# defaults to 0 in livekit-cli, and publishers do NOT subscribe to each other,
+# so every tier measured INGEST ONLY — the SFU accepting 64 streams and
+# forwarding them to nobody. Fan-out is the dominant cost and it was not in the
+# number. Measured on the bench 2026-09-22, 64 publishers:
+#
+#   subscribers=0    0.24 cores    ← what the old table reported
+#   subscribers=8    0.72 cores
+#   subscribers=64   2.11 cores    ← 9x the reported figure
+#
+# Set SUBSCRIBERS=0 deliberately if ingest alone is what you mean to measure,
+# and say so in whatever you write down. The per-tier default is set in the loop.
 
 : "${LIVEKIT_URL:?set LIVEKIT_URL}"
 : "${LIVEKIT_API_KEY:?set LIVEKIT_API_KEY}"
@@ -134,8 +149,11 @@ sample_server() {   # $1 = seconds; prints "peakcpu|mem|rxMB|txMB"
 
 for N in "${TIERS[@]}"; do
   ROOM="$ROOM_PREFIX-$N-$ts"
+  # Per tier, because the default IS the tier: an N-person call is N publishing
+  # and N receiving. SUBSCRIBERS overrides it for a deliberate ingest-only run.
+  SUBS="${SUBSCRIBERS:-$N}"
   echo
-  echo "── tier $N (room $ROOM) ────────────────────────────────"
+  echo "── tier $N (room $ROOM, ${SUBS} receiving) ──────────────"
   LOG=$(mktemp)
 
   docker run --rm --network host \
@@ -147,6 +165,7 @@ for N in "${TIERS[@]}"; do
       --duration "$DURATION" \
       --video-publishers "$N" \
       --audio-publishers "$N" \
+      --subscribers "$SUBS" \
       --layout "$LAYOUT" \
       --simulate-speakers \
       --num-per-second 4 \

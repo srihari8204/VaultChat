@@ -1651,8 +1651,13 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
       { key: 'reply',   label: 'Reply',   icon: 'arrow-undo', onPress: () => setReplyTo(msg) },
       { key: 'pin',     label: isPinned ? 'Unpin' : 'Pin', icon: 'pin', onPress: async () => {
           const next = isPinned ? null : msg.id;
+          const prev = pinnedId;
           setPinnedId(next == null ? null : String(msg.id)); // optimistic
-          try { await pinMessage(chatId, next); } catch (e: any) { Alert.alert('Could not pin', e?.message ?? 'Try again'); }
+          // Restoring `prev` is the half this was missing: it told the user the
+          // call failed and then left the optimistic value on screen, so the UI
+          // disagreed with the server until the next sync corrected it silently.
+          try { await pinMessage(chatId, next); }
+          catch (e: any) { setPinnedId(prev); Alert.alert('Could not pin', e?.message ?? 'Try again'); }
         } },
       { key: 'forward', label: 'Forward', icon: 'arrow-redo', onPress: () => openForward(msg) },
       { key: 'copy',    label: 'Copy',    icon: 'copy-outline', onPress: () => copyAndAutoClear(plain) },
@@ -2152,8 +2157,14 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
                   // listChats() would return the chat on the next refresh and
                   // sync would pull the whole history back — which is exactly
                   // what happened when this only deleted local rows. Same call
-                  // the chat list's own Delete uses, so both behave alike.
-                  try { await setHidden(chatId, true); } catch {}
+                  // the chat list's own Delete uses — and like it, this failure
+                  // is now SHOWN (2026-09-22). Swallowed, the screen popped back
+                  // looking cleared and the history returned on the next
+                  // refresh, which is the exact regression the lines above
+                  // describe. The outer catch reports it and skips the
+                  // success-looking pop; every local delete is DELETE..WHERE and
+                  // setHidden is an absolute SET, so Clear again is a safe retry.
+                  await setHidden(chatId, true);
                   setMessages([]);
                   router.back();
                 } catch (e: any) { Alert.alert('Could not clear', e?.message ?? 'Try again'); }
@@ -3716,7 +3727,20 @@ export default function ChatScreen({ chatIdProp, embedded }: { chatIdProp?: stri
               <Text style={S.pinnedBarTitle}>Pinned message</Text>
               <Text style={S.pinnedBarSub} numberOfLines={1}>{label}</Text>
             </View>
-            <TouchableOpacity hitSlop={10} onPress={async () => { setPinnedId(null); try { await pinMessage(chatId, null); } catch {} }} accessibilityLabel="Unpin message">
+            <TouchableOpacity hitSlop={10} onPress={async () => {
+              // OPTIMISTIC, AND IT PUTS THE PIN BACK IF THE SERVER REFUSES.
+              //
+              // This used to be `try { await pinMessage(chatId, null) } catch {}`:
+              // the bar vanished, the server kept pinnedMessageId, and the next
+              // sync (see setPinnedId(cc.pinnedMessageId) where the cached chat
+              // loads) made the pin reappear with no explanation. The same
+              // mutation in the message action sheet already alerts on failure,
+              // so the silence here was an oversight rather than a policy.
+              const prev = pinnedId;
+              setPinnedId(null);
+              try { await pinMessage(chatId, null); }
+              catch (e: any) { setPinnedId(prev); Alert.alert('Could not unpin', e?.message ?? 'Try again'); }
+            }} accessibilityLabel="Unpin message">
               <Ionicons name="close" size={16} color={colors.textDim} />
             </TouchableOpacity>
           </TouchableOpacity>

@@ -3,7 +3,8 @@
 // Backed by /user/profile (Postgres). Edit name + status, sign out.
 // Photo upload is deferred to Phase 4 (file storage).
 
-import { HEADER_TOP, TAB_BAR_SPACE } from '../../constants/layout';
+import { useAuthHeader } from '../../hooks/useAuthHeader';
+import { HEADER_TOP, SCREEN_BOTTOM } from '../../constants/layout';
 import * as ImagePicker from 'expo-image-picker';
 import { useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useState, type ComponentProps } from 'react';
@@ -23,7 +24,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import * as Clipboard from 'expo-clipboard';
 import { logoutUser, sendPhoneOTP, verifyPhoneOTP } from '../(constants)/authService';
-import { api, getAccessToken } from '../../lib/api';
+import { api } from '../../lib/api';
 import { resetTo } from '../../lib/authNav';
 import { attachmentUrl, uploadAttachment } from '../../lib/chatService';
 import { unregisterPushToken } from '../../lib/push';
@@ -68,7 +69,7 @@ export default function ProfileScreen() {
   const [loading, setLoading] = useState(true);
   const [saving,  setSaving]  = useState(false);
   const [photoBusy, setPhotoBusy] = useState(false);
-  const [authHeader, setAuthHeader] = useState<string | null>(null);
+  const authHeader = useAuthHeader();
 
   const [name,   setName]   = useState('');
   const [status, setStatus] = useState('');
@@ -80,8 +81,6 @@ export default function ProfileScreen() {
   useEffect(() => {
     let cancel = false;
     (async () => {
-      const tok = await getAccessToken();
-      if (!cancel) setAuthHeader(tok ? `Bearer ${tok}` : null);
     })();
     return () => { cancel = true; };
   }, []);
@@ -274,9 +273,28 @@ export default function ProfileScreen() {
   return (
     <View style={S.screen}>
       <AuroraBackground variant="profile" />
-    <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: TAB_BAR_SPACE + 16 }}>
+    {/* NOT TAB_BAR_SPACE any more: this screen hides the floating bar
+        (app/(tabs)/_layout.tsx), so reserving room for it left ~80px of dead
+        space under Sign out. SCREEN_BOTTOM is the safe-area inset, which is all
+        that is actually below the content now. */}
+    <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: SCREEN_BOTTOM + 16 }}>
       <View style={S.header}>
-        <Text style={S.title}>Profile</Text>
+        {/* ADDED WITH THE TAB BAR'S REMOVAL (2026-09-23). This screen had no
+            way off it except the bar — no header back, no router.back() in the
+            file — so hiding the bar without this stranded it. Android's system
+            back would still work; iOS has no hardware back, and a deep link
+            straight to /profile leaves nothing to go back TO on either OS.
+            Hence the fallback: go back if there is history, otherwise go to
+            Chats, which is where the bar would have taken you. */}
+        <TouchableOpacity
+          onPress={() => { if (router.canGoBack()) router.back(); else router.replace('/(tabs)/chats' as any); }}
+          hitSlop={10}
+          accessibilityLabel="Back"
+          style={{ marginRight: 10 }}
+        >
+          <Ionicons name="arrow-back" size={22} color={colors.text} />
+        </TouchableOpacity>
+        <Text style={[S.title, { flex: 1 }]}>Profile</Text>
         <TouchableOpacity onPress={() => router.push('/settings' as any)} hitSlop={8} accessibilityLabel="Settings">
           <Ionicons name="settings-outline" size={22} color={colors.text} />
         </TouchableOpacity>

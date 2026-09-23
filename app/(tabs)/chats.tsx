@@ -5,6 +5,7 @@
 // and "All Chats" sections. FAB → /new-chat. Data wiring (presence, folders,
 // pin/archive/mute/hidden, unread) is preserved from the previous version.
 
+import { useAuthHeader } from '../../hooks/useAuthHeader';
 import { HEADER_TOP, TAB_BAR_SPACE } from '../../constants/layout';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -17,7 +18,6 @@ import { useTheme } from '../../lib/theme';
 import { useVisionComfort } from '../../lib/visionComfort';
 import { Avatar, AuroraBackground, GlassChip } from '../../components/ui';
 import { canSplit } from '../../lib/responsive';
-import { getAccessToken } from '../../lib/api';
 import {
   archiveChat, attachmentUrl, listChats, listStoriesFeed, muteChat, pinChat, setFavourite, setHidden,
   hydrateOwnPreviews,
@@ -32,6 +32,7 @@ import { cloudBackupMeta } from '../../lib/cloudBackup';
 import { runScheduledBackupIfDue } from '../../lib/backupScheduler';
 import { getSocket } from '../../lib/socket';
 import { mark } from '../../lib/perf';
+import { takePrimedChats } from '../../lib/chatsPrefetch';
 import { applyLocalReadPointers, setUnreadTotal } from '../../lib/unreadStore';
 import { getDraftMap } from '../../lib/drafts';
 import { getLastMessagePerChat, getCachedChats, cacheChats } from '../../lib/localDb';
@@ -93,7 +94,7 @@ export default function ChatsScreen() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
-  const [authHeader, setAuthHeader] = useState<string | null>(null);
+  const authHeader = useAuthHeader();
   const [folder, setFolder] = useState<FolderId>('all');
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   // Real last-message previews from the local plaintext cache (WhatsApp-style).
@@ -104,7 +105,6 @@ export default function ChatsScreen() {
   // Chats with someone typing right now (chatId set) — shows "typing…" in the row.
   const [typingChats, setTypingChats] = useState<Set<string>>(new Set());
   const typingTimers = useRef<Record<string, any>>({});
-  const [menuChat, setMenuChat] = useState<ChatSummary | null>(null);   // long-press action sheet
   const { width: winW, height: winH } = useWindowDimensions();
   const splitReady = canSplit(winW, winH);
 
@@ -161,8 +161,6 @@ export default function ChatsScreen() {
   useEffect(() => {
     let cancel = false;
     (async () => {
-      const tok = await getAccessToken();
-      if (!cancel) setAuthHeader(tok ? `Bearer ${tok}` : null);
     })();
     return () => { cancel = true; };
   }, []);
@@ -177,7 +175,20 @@ export default function ChatsScreen() {
     if (refreshPreviews) getLastMessagePerChat().then(hydrateOwnPreviews).then(setLastMsgs).catch(() => {});
     mark('chats_fetch_start');
     try {
-      const list = await listChats();
+      // Boot dispatched this request already (lib/chatsPrefetch.ts); take that
+      // one rather than opening a second. Single-use and age-limited, so every
+      // later refresh — pull-to-refresh, focus, socket events — fetches
+      // normally. If the head start failed, fall back to a fresh request rather
+      // than inheriting its error: the network may simply not have been up yet
+      // at boot, and that must not become a permanent empty list.
+      const primed = takePrimedChats();
+      let list: Awaited<ReturnType<typeof listChats>>;
+      if (primed) {
+        try { list = await primed; }
+        catch { mark('chats_prime_fallback'); list = await listChats(); }
+      } else {
+        list = await listChats();
+      }
       mark('chats_fetch_done', { rows: list.length });
       setChats(prev => mergeChats(prev, list));                 // identity-preserving → memoized rows skip re-render
       cacheChats(list).catch(() => {});                         // persist for instant next-launch paint (op-sqlite engine)
@@ -431,12 +442,6 @@ export default function ChatsScreen() {
     try { await pinChat(chat.id, next); await fetchList(); }
     catch (e: any) { patch(chat.id, { pinned: !next }); setError(e?.message ?? 'Pin failed'); }
   };
-  const doFavourite = async (chat: ChatSummary) => {
-    const next = !chat.favourite;
-    patch(chat.id, { favourite: next });
-    try { await setFavourite(chat.id, next); await fetchList(); }
-    catch (e: any) { patch(chat.id, { favourite: !next }); setError(e?.message ?? 'Favourite failed'); }
-  };
   const doMute = async (chat: ChatSummary) => {
     const next = !chat.muted;
     patch(chat.id, { muted: next });
@@ -477,26 +482,36 @@ export default function ChatsScreen() {
     if (n.size === 0) setSelectMode(false);
     return n;
   });
-  const bulkRun = async (fn: (id: string) => Promise<any>) => {
+  // Per-item failures used to vanish into `catch {}` (2026-09-22). The
+  // ROLLBACK was never the missing half — fetchList() refetches and replaces
+  // the optimistic patch with server truth — the TELLING was: the selection is
+  // cleared first, so a user whose Mute silently applied to 4 of 6 chats had
+  // nothing on screen to say so and no selection left to retry with. Counted
+  // and reported through the same `error` bar the single-chat actions use.
+  // Reported AFTER the refetch is awaited, because loadList() calls
+  // setError(null) on success and would otherwise erase the message.
+  const bulkRun = async (fn: (id: string) => Promise<any>, label: string) => {
     const ids = [...selected];
     exitSelect();
-    for (const id of ids) { try { await fn(id); } catch {} }
-    fetchList();
+    let failed = 0;
+    for (const id of ids) { try { await fn(id); } catch { failed++; } }
+    await fetchList();
+    if (failed) setError(`${label} failed for ${failed} of ${ids.length} chat${ids.length > 1 ? 's' : ''}`);
   };
-  const bulkPin     = () => bulkRun(id => { patch(id, { pinned: true });   return pinChat(id, true); });
-  // TOGGLE, not set-true (2026-09-17). setFavourite(id, false) was reachable
-  // only from doFavourite, whose sole caller is the long-press sheet that
-  // onLongPress never opens (see the note further down) — so NOTHING in the app
-  // could un-favourite a chat and the Favourites folder filled up permanently.
-  // Selection mode is the live path, so the toggle belongs here: if everything
-  // selected is already a favourite, the action removes them.
+  const bulkPin     = () => bulkRun(id => { patch(id, { pinned: true });   return pinChat(id, true); }, 'Pin');
+  // TOGGLE, not set-true (2026-09-17). setFavourite(id, false) used to be
+  // reachable only from the long-press sheet that could never open — so NOTHING
+  // in the app could un-favourite a chat and the Favourites folder filled up
+  // permanently. That sheet has since been deleted (see the note further down),
+  // which makes this the ONLY favourite path in the app: if everything selected
+  // is already a favourite, the action removes them.
   const allSelectedFav = () => {
     const ids = [...selected];
     return ids.length > 0 && ids.every(id => chats.find(c => c.id === id)?.favourite);
   };
-  const bulkFav     = () => { const on = !allSelectedFav(); return bulkRun(id => { patch(id, { favourite: on }); return setFavourite(id, on); }); };
-  const bulkMute    = () => bulkRun(id => { patch(id, { muted: true });    return muteChat(id, true); });
-  const bulkArchive = () => bulkRun(id => { patch(id, { archived: true }); return archiveChat(id, true); });
+  const bulkFav     = () => { const on = !allSelectedFav(); return bulkRun(id => { patch(id, { favourite: on }); return setFavourite(id, on); }, on ? 'Favourite' : 'Remove from favourites'); };
+  const bulkMute    = () => bulkRun(id => { patch(id, { muted: true });    return muteChat(id, true); }, 'Mute');
+  const bulkArchive = () => bulkRun(id => { patch(id, { archived: true }); return archiveChat(id, true); }, 'Archive');
   const bulkDelete  = () => {
     const ids = [...selected];
     Alert.alert(`Delete ${ids.length} chat${ids.length > 1 ? 's' : ''}?`, 'They stay reachable from Hidden chats.', [
@@ -504,8 +519,12 @@ export default function ChatsScreen() {
       { text: 'Delete', style: 'destructive', onPress: async () => {
         exitSelect();
         setChats(prev => prev.filter(c => !ids.includes(c.id)));
-        for (const id of ids) { try { await setHidden(id, true); } catch {} }
-        fetchList();
+        let failed = 0;
+        for (const id of ids) { try { await setHidden(id, true); } catch { failed++; } }
+        await fetchList();
+        // The refetch puts an undeleted chat straight back in the list, so the
+        // row reappearing is the rollback; this names why it came back.
+        if (failed) setError(`Delete failed for ${failed} of ${ids.length} chat${ids.length > 1 ? 's' : ''}`);
       } },
     ]);
   };
@@ -709,22 +728,15 @@ export default function ChatsScreen() {
         <Ionicons name="create-outline" size={26} color="#fff" />
       </TouchableOpacity>
 
-      {/* Long-press action sheet (WhatsApp-style) */}
-      <Modal visible={!!menuChat} transparent animationType="fade" onRequestClose={() => setMenuChat(null)}>
-        <Pressable style={S.sheetBackdrop} onPress={() => setMenuChat(null)}>
-          <Pressable style={S.sheet} onPress={() => {}}>
-            <View style={S.sheetHandle} />
-            <Text style={S.sheetTitle} numberOfLines={1}>
-              {menuChat ? (menuChat.type === 'direct' ? (menuChat.peerName || menuChat.name || 'Direct chat') : (menuChat.name || 'Group chat')) : ''}
-            </Text>
-            <SheetItem icon={menuChat?.pinned ? 'pin' : 'pin-outline'} label={menuChat?.pinned ? 'Unpin' : 'Pin'} onPress={() => { const c = menuChat!; setMenuChat(null); doPin(c); }} />
-            <SheetItem icon={menuChat?.favourite ? 'heart' : 'heart-outline'} label={menuChat?.favourite ? 'Remove from favourites' : 'Add to favourites'} onPress={() => { const c = menuChat!; setMenuChat(null); doFavourite(c); }} />
-            <SheetItem icon={menuChat?.muted ? 'notifications-outline' : 'notifications-off-outline'} label={menuChat?.muted ? 'Unmute' : 'Mute'} onPress={() => { const c = menuChat!; setMenuChat(null); doMute(c); }} />
-            <SheetItem icon={menuChat?.archived ? 'archive' : 'archive-outline'} label={menuChat?.archived ? 'Unarchive' : 'Archive'} onPress={() => { const c = menuChat!; setMenuChat(null); doArchive(c); }} />
-            <SheetItem icon="trash-outline" label="Delete chat" danger onPress={() => { const c = menuChat!; setMenuChat(null); doDelete(c); }} />
-          </Pressable>
-        </Pressable>
-      </Modal>
+      {/* DELETED 2026-09-22: a long-press action sheet that could never open.
+          `setMenuChat` existed but was only ever called with `null` — nothing
+          assigned a chat to it — so `visible={!!menuChat}` was permanently
+          false and all five rows were unreachable. onLongPress enters
+          selection mode instead. Every action it offered is live elsewhere:
+          Pin/Mute swipe left, Archive/Delete swipe right, and Favourite is the
+          header heart in selection mode (`bulkFav`, which toggles). Removed
+          rather than rewired — restoring it would take long-press away from
+          selection mode, which Split view is reached through. */}
 
       {/* Temporary chat — pick how long messages live, then pick who with.
           The duration is carried to /new-chat and applied to whichever chat is

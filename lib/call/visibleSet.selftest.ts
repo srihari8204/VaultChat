@@ -19,6 +19,7 @@
 
 import {
   newVisibleState, setVisible, wantsTrack, wantsVideo, visibleOrder,
+  qualityForTileCount, wantedQuality,
   SPEAKER_DWELL_MS, VISIBLE_LINGER_MS, type SpeakerTimes,
 } from './visibleSet';
 
@@ -127,6 +128,45 @@ console.log('visibleSet');
   const later = visibleOrder(roster, spoke, 2, t + 250);
   A(JSON.stringify(page) === JSON.stringify(later),
     '6a. and the page does not reshuffle 50ms later');
+}
+
+// ── 7. which SIZE, not only whether ───────────────────────────────────
+//
+// The subscribe decision and the size decision are separate rules over the same
+// state, and the size one is the newer. What it must not do is change the
+// answer for a call that declares no visible set — every 1:1 in production.
+{
+  const st = newVisibleState();
+  A(wantedQuality(st, CAM) === 'high',
+    '7. a call with no visible set still asks for the full-size layer');
+
+  A(qualityForTileCount(1) === 'high', '7a. one tile is full screen — top layer');
+  A(qualityForTileCount(4) === 'medium', '7b. a 2x2 takes the middle layer');
+  A(qualityForTileCount(5) === 'low', '7c. past four tiles, the small layer');
+  A(qualityForTileCount(64) === 'low', '7d. and a full 64-person grid does not ask for 720p');
+
+  // The thresholds are a step function, so the only way to be wrong is at a
+  // boundary. Assert it never goes UP as tiles are added — a monotonicity bug
+  // would serve a denser grid a bigger layer, which is the exact failure this
+  // whole change exists to prevent.
+  const rank = { low: 0, medium: 1, high: 2 };
+  let monotonic = true;
+  for (let n = 1; n < 64; n++) {
+    if (rank[qualityForTileCount(n + 1)] > rank[qualityForTileCount(n)]) monotonic = false;
+  }
+  A(monotonic, '7e. adding a tile never asks the SFU for a BIGGER layer');
+
+  // Audio has no layers and a screen share is a single encoding carrying text.
+  // Both are unconditional, for the same reason they are unconditional in
+  // wantsTrack — and both are what a "tidy this into the video path" edit
+  // would break.
+  setVisible(st, ['u1', 'u2', 'u3', 'u4', 'u5', 'u6'], Date.now());
+  A(wantedQuality(st, { kind: 'audio', screenShare: false }) === 'high',
+    '7f. audio is never downgraded by a grid decision');
+  A(wantedQuality(st, { kind: 'video', screenShare: true }) === 'high',
+    '7g. nor is a screen share — scaled-down text is unreadable text');
+  A(wantedQuality(st, CAM) === 'low',
+    '7h. but six camera tiles do take the small layer');
 }
 
 console.log(failed === 0 ? '\nvisibleSet: all checks passed' : `\nvisibleSet: ${failed} FAILED`);

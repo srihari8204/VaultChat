@@ -11,6 +11,7 @@
 // Backend: GET /chats/:id, PATCH /chats/:id, POST /chats/:id/members,
 // DELETE /chats/:id/members/:userId
 
+import { useAuthHeader } from '../hooks/useAuthHeader';
 import { HEADER_TOP } from '../constants/layout';
 import * as ImagePicker from 'expo-image-picker';
 import { useLocalSearchParams, useRouter } from 'expo-router';
@@ -34,7 +35,6 @@ import { Ionicons } from '@expo/vector-icons';
 import { type Palette } from '../constants/theme';
 import { useTheme } from '../lib/theme';
 import { getCurrentUserAsync } from './(constants)/authService';
-import { getAccessToken } from '../lib/api';
 import { initialOf } from '../lib/format';
 import { readCache, writeCache } from '../lib/localCache';
 import {
@@ -71,7 +71,7 @@ export default function GroupInfoScreen() {
   const [chat, setChat]   = useState<ChatDetail | null>(null);
   const [media, setMedia] = useState<Message[]>([]);
   const [meId, setMeId]   = useState<string | null>(null);
-  const [authHeader, setAuthHeader] = useState<string | null>(null);
+  const authHeader = useAuthHeader();
 
   const [loading,   setLoading]   = useState(true);
   const [renaming,  setRenaming]  = useState(false);
@@ -113,12 +113,11 @@ export default function GroupInfoScreen() {
         setLoading(true);
       }
 
-      const [c, me, tok] = await Promise.all([
-        getChat(chatId), getCurrentUserAsync(), getAccessToken(),
+      const [c, me] = await Promise.all([
+        getChat(chatId), getCurrentUserAsync(),
       ]);
       setChat(c);
       setMeId(me?.id ?? null);
-      setAuthHeader(tok ? `Bearer ${tok}` : null);
       setNameDraft(c.name ?? '');
       if (chatId) writeCache<ChatDetail>(cacheKey, c);
     } catch (e: any) {

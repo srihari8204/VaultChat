@@ -78,7 +78,17 @@ export default function InterestCalc() {
     if (me) {
       try {
         await insertInterest({ user_id: me.id, user_name: me.name, type, principal: P, rate: R, time_years: round2(years), frequency: type === 'compound' ? 1 : null, interest: out.interest, total_amount: out.total });
-      } catch {}
+      } catch (e: any) {
+        // `catch {}` made this file's own header comment ("Saves to on-device
+        // history") a lie (2026-09-22). The result above is real and on screen,
+        // but it is ephemeral — onClear and navigating away destroy it, and
+        // unlike a ledger there is no detail route to reopen it — so a dropped
+        // row is gone for good, while Saved & History tells the user "Nothing
+        // has been lost". Announced exactly as a failed write is in
+        // ledger/new.tsx; the title differs from that screen's 'Could not save'
+        // because here the calculation itself DID succeed.
+        Alert.alert('Not saved to history', `The result above is correct, but it could not be written to Saved & History. ${e?.message ?? 'Try again.'}`);
+      }
     }
   };
 

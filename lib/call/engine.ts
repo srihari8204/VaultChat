@@ -875,9 +875,14 @@ function openFromPeer(from: string, sealed: any, use: (text: string) => void): v
  * message, and that is the price of the guarantee, deliberately paid: volume is
  * a handful of messages per call, so the "never ratchet per frame" rule that
  * governs MEDIA does not apply. The cheap alternative — one plaintext emit the
- * server fans out — was rejected: media gave up end-to-end encryption for
- * reasons that do not apply to text, and text is exactly the content that
- * should not lose the guarantee because the video did.
+ * server fans out — was rejected: the server must not read in-call text.
+ *
+ * CORRECTION (2026-09-22): this paragraph used to justify itself with "media
+ * gave up end-to-end encryption". Media did NOT give it up. CALL_FRAME_E2EE is
+ * true and lib/call/frameCrypto.ts attaches an RTCFrameCryptor on subscribe,
+ * publish, reconnect and key install, so the SFU forwards ciphertext. Text and
+ * media are BOTH end-to-end encrypted; they differ only in which key agreement
+ * carries them — the pairwise ratchet here, the per-call media key there.
  *
  * allSettled, not all: one peer with no E2EE session yet must not silence the
  * message for the other 62. Each recipient succeeds or fails alone.

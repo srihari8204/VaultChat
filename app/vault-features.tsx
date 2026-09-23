@@ -175,12 +175,28 @@ export default function VaultFeaturesScreen() {
     } catch {}
   };
 
+  // Revoke used to delete only the LOCAL copy (2026-09-22), so the shared code
+  // stayed valid on the server until its 5-minute expiry and the button's own
+  // promise — "This will invalidate the current invite code" — was false.
+  // There is no revoke endpoint (contacts.go registers create/status/verify and
+  // nothing else), but POST /contacts/sync/create opens with
+  // `DELETE FROM sync_codes WHERE initiator_id = $1`, so minting a replacement
+  // and throwing it away kills the shared code server-side at once. The unshared
+  // replacement nobody has seen expires on its own five minutes later.
+  // On failure the local copy is KEPT: clearing it while the code is still live
+  // would hide a working invite from the one person who might re-revoke it.
   const handleRevokeCode = async () => {
     Alert.alert('Revoke Code', 'This will invalidate the current invite code.', [
       { text: 'Cancel', style: 'cancel' },
       {
         text: 'Revoke', style: 'destructive',
         onPress: async () => {
+          try {
+            await createSyncCode();
+          } catch (e: any) {
+            Alert.alert('Not revoked', `The code is still valid. ${e?.message ?? 'Try again.'}`);
+            return;
+          }
           await SecureStore.deleteItemAsync('vault_chat_code');
           await SecureStore.deleteItemAsync('vault_chat_code_expiry');
           setChatCode(null);
@@ -232,8 +248,11 @@ export default function VaultFeaturesScreen() {
             <Text style={styles.sectionIcon}>🔗</Text>
             <View>
               <Text style={styles.sectionTitle}>Temp Chat Code</Text>
+              {/* "24 hours" was wrong by 288x: the server mints these with
+                  INTERVAL '5 minutes' (contacts.go) and both read paths enforce
+                  it with a 410. */}
               <Text style={styles.sectionDesc}>
-                Single-use invite code — expires in 24 hours
+                Single-use invite code — expires in 5 minutes
               </Text>
             </View>
           </View>

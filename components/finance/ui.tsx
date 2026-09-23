@@ -222,6 +222,36 @@ export function Btn({ label, onPress, kind = 'primary', icon, wide, style, disab
   const ghost = kind === 'ghost';
   const off = !!disabled || !!loading;
   const fg = ghost ? FIN.brandInk : FIN.onBrand;
+
+  // SINGLE-FLIGHT LATCH — the fix for six confirmed duplicate writes.
+  //
+  // Six finance screens pass neither `disabled` nor `loading` and hold no busy
+  // state of their own, so the form stayed live for the whole await and a second
+  // press wrote a second row: a repayment recorded twice in ledger_updates, a
+  // duplicate loan, a duplicate chitti group, two members sharing one `number`,
+  // two OS notifications where only one can ever be cancelled, a duplicate
+  // interest row. Every one of those writes mints a fresh uuid() and there is no
+  // unique index behind them, so nothing downstream collapses the duplicate.
+  //
+  // A ref, not state: `setBusy(true)` only blocks the next press once a render
+  // has flushed, and these handlers open SQLite on the first call of a session,
+  // which is exactly when the window is widest.
+  //
+  // IT LATCHES ONLY ON A PROMISE. A handler that returns nothing behaves exactly
+  // as it did before this existed — which is what keeps this from changing the
+  // many Btn presses that are already fine. Fixing it here rather than adding
+  // six `busy` states is one change instead of six, in the component they
+  // already share.
+  const inFlight = React.useRef(false);
+  const guardedPress = React.useCallback(() => {
+    if (inFlight.current) return;
+    const r = (onPress as () => unknown)();
+    if (r && typeof (r as Promise<unknown>).then === 'function') {
+      inFlight.current = true;
+      void (r as Promise<unknown>).finally(() => { inFlight.current = false; });
+    }
+  }, [onPress]);
+
   return (
     <Pressable
       style={({ pressed }) => [
@@ -232,7 +262,7 @@ export function Btn({ label, onPress, kind = 'primary', icon, wide, style, disab
         off && s.btnOff,
         style,
       ]}
-      onPress={onPress}
+      onPress={guardedPress}
       disabled={off}
       accessibilityRole="button"
       accessibilityState={{ disabled: off, busy: !!loading }}

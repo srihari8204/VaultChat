@@ -47,6 +47,7 @@
     "gradle": "tsx scripts/gradlew.ts",
     "build:android:apk:arm64": "tsx scripts/gradlew.ts assembleRelease -PreactNativeArchitectures=arm64-v8a",
     "test:reader": "tsx lib/reader.selftest.ts",
+    "test:textwindow": "tsx lib/textWindow.selftest.ts",
     "test:responsive": "tsx lib/responsive.selftest.ts",
     "test:typescale": "tsx lib/typeScale.selftest.ts",
     "test:roaddistance": "tsx lib/family/roadDistance.selftest.ts",
@@ -170,7 +171,6 @@
     "@bufbuild/protoc-gen-es": "1.10.1",
     "@types/react": "~19.1.10",
     "babel-plugin-transform-remove-console": "^6.9.4",
-    "better-sqlite3": "^13.0.3",
     "eslint": "^9.39.4",
     "eslint-config-expo": "~10.0.0",
     "ethers": "^6.16.0",
@@ -211,5 +211,8 @@
   },
   "overrides": {
     "livekit-client": "2.19.2"
+  },
+  "optionalDependencies": {
+    "better-sqlite3": "^13.0.3"
   }
 }

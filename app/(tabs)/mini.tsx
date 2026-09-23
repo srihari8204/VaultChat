@@ -1,25 +1,26 @@
 // app/(tabs)/mini.tsx
-// Mini Apps Platform — a launcher for the full mini apps, plus the built-in
-// Calculator and Todo List that run inline here.
+// Mini Apps Platform — a launcher for the full mini apps.
 //
 // Tiles that only raise "Coming Soon" are NOT listed: a dead tile on a primary
 // tab reads as a broken app, not as a promise. Add one back the same day its
 // screen lands.
+//
+// EVERY TILE HERE IS A ROUTE. The Calculator and Todo List used to run inline
+// on this screen, and "Build Your Own" advertised an SDK whose only button
+// raised "Documentation portal coming soon" — the exact shape of dead tile the
+// note above refuses. All three were removed 2026-09-22, and with them the
+// fullscreen-inside-a-tab mechanism they needed.
 
-import { BRAND_ACCENT, BRAND_GRADIENT_CTA } from '../../constants/theme';
 import { Ionicons } from '@expo/vector-icons';
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import { encField, decField } from '../../lib/cacheCrypto';
 import { flagEnabled } from '../../lib/remoteFlags';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Stack, useRouter } from 'expo-router';
-import { HEADER_TOP, TAB_BAR_SPACE } from '../../constants/layout';
-import React, { useEffect, useState, useMemo } from 'react';
+import { HEADER_TOP, SCREEN_BOTTOM } from '../../constants/layout';
+import React, { useMemo } from 'react';
 import {
   Alert,
   ScrollView,
   StyleSheet,
-  TextInput,
   TouchableOpacity,
   useWindowDimensions,
   View,
@@ -57,22 +58,14 @@ const MINI_APPS_MAIN = [
   // yet by design \u2014 the site loads anonymously until it is.
   { id: 'games',       icon: 'game-controller-outline', name: 'Games',       route: '/games',      gradient: ['#DB2777', '#7C3AED'] as [string, string] },
   { id: 'security',    icon: 'shield-checkmark-outline', name: 'Security Hub', route: '/aiguardian', gradient: ['#0E7490', '#164E63'] as [string, string] },
-  { id: 'vaultid',     icon: 'id-card-outline', name: 'VaultID',     route: '/decentralized-id', gradient: ['#7C3AED', '#1777FE'] as [string, string] },
 ] satisfies readonly { id: string; icon: IoniconName; name: string; route: string; gradient: [string, string] }[];
 
-// ── Built-in utility mini apps ──────────────────────────────────
-const MINI_APPS_UTILS = [
-  { id: 'calculator', icon: 'calculator-outline', name: 'Calculator', gradient: [BRAND_ACCENT, '#7C3AED'] as [string, string] },
-  { id: 'todo',       icon: 'checkmark-done-outline', name: 'Todo List', gradient: [BRAND_ACCENT, '#059669'] as [string, string] },
-] satisfies readonly { id: string; icon: IoniconName; name: string; gradient: [string, string] }[];
-
-const TODO_STORAGE_KEY = 'vc_miniapp_todos';
-
-interface TodoItem {
-  id: string;
-  text: string;
-  done: boolean;
-}
+// The Todo List's saved items are still on device under `vc_miniapp_todos`,
+// sealed with the cache DEK. NOT deleted with the feature: that key holds the
+// user's own text, and removing a screen is reversible while destroying what
+// someone wrote is not. It is also not in purgeAccountData()'s scoped list, so
+// it already outlived sign-out before this change. Decide it deliberately —
+// purge it, or leave it — rather than as a side effect of deleting a tile.
 
 export default function MiniAppsScreen() {
   const c = useColors();
@@ -80,222 +73,9 @@ export default function MiniAppsScreen() {
   const { metrics } = useVisionComfort();
   const styles = useMemo(() => makeStyles(c, width, metrics), [c, width, metrics]);
   const router = useRouter();
-  const [activeApp, setActiveApp] = useState<string | null>(null);
-
-  // ── Calculator state ──────────────────────────────────────────
-  const [calcDisplay, setCalcDisplay] = useState('0');
-  const [calcPrev, setCalcPrev] = useState<number | null>(null);
-  const [calcOp, setCalcOp] = useState<string | null>(null);
-  const [calcReset, setCalcReset] = useState(false);
-
-  // ── Todo state ────────────────────────────────────────────────
-  const [todos, setTodos] = useState<TodoItem[]>([]);
-  const [todoInput, setTodoInput] = useState('');
-
-  useEffect(() => {
-    loadTodos();
-  }, []);
-
-  // Todo text is user content, so it is sealed at rest with the same cache DEK
-  // as messages and notes (encField/decField) rather than sitting in the clear.
-  // decField returns the value unchanged for rows written before this, so
-  // existing lists keep loading.
-  const loadTodos = async () => {
-    try {
-      const raw = decField(await AsyncStorage.getItem(TODO_STORAGE_KEY));
-      if (raw) setTodos(JSON.parse(raw));
-    } catch { /* sealed while locked, or corrupt — start empty rather than crash */ }
-  };
-
-  const saveTodos = async (items: TodoItem[]) => {
-    try {
-      await AsyncStorage.setItem(TODO_STORAGE_KEY, encField(JSON.stringify(items))!);
-      setTodos(items);
-    } catch {}
-  };
-
-  // ── Calculator logic ──────────────────────────────────────────
-  const calcPress = (val: string) => {
-    if (val === 'C') {
-      setCalcDisplay('0');
-      setCalcPrev(null);
-      setCalcOp(null);
-      setCalcReset(false);
-      return;
-    }
-    if (val === '±') {
-      setCalcDisplay(d => (parseFloat(d) * -1).toString());
-      return;
-    }
-    if (val === '%') {
-      setCalcDisplay(d => (parseFloat(d) / 100).toString());
-      return;
-    }
-    if (['+', '−', '×', '÷'].includes(val)) {
-      setCalcPrev(parseFloat(calcDisplay));
-      setCalcOp(val);
-      setCalcReset(true);
-      return;
-    }
-    if (val === '=') {
-      if (calcPrev === null || !calcOp) return;
-      const current = parseFloat(calcDisplay);
-      let result = 0;
-      switch (calcOp) {
-        case '+': result = calcPrev + current; break;
-        case '−': result = calcPrev - current; break;
-        case '×': result = calcPrev * current; break;
-        case '÷': result = current === 0 ? 0 : calcPrev / current; break;
-      }
-      setCalcDisplay(result.toString());
-      setCalcPrev(null);
-      setCalcOp(null);
-      setCalcReset(true);
-      return;
-    }
-    // Number or decimal
-    if (calcReset) {
-      setCalcDisplay(val === '.' ? '0.' : val);
-      setCalcReset(false);
-    } else {
-      setCalcDisplay(d => (d === '0' && val !== '.') ? val : d + val);
-    }
-  };
-
-  // ── Todo logic ────────────────────────────────────────────────
-  const addTodo = () => {
-    if (!todoInput.trim()) return;
-    const item: TodoItem = { id: Date.now().toString(), text: todoInput.trim(), done: false };
-    const updated = [...todos, item];
-    saveTodos(updated);
-    setTodoInput('');
-  };
-
-  const toggleTodo = (id: string) => {
-    const updated = todos.map(t => (t.id === id ? { ...t, done: !t.done } : t));
-    saveTodos(updated);
-  };
-
-  const deleteTodo = (id: string) => {
-    const updated = todos.filter(t => t.id !== id);
-    saveTodos(updated);
-  };
-
-  // ── Render Calculator ─────────────────────────────────────────
-  const renderCalculator = () => {
-    const buttons = [
-      ['C', '±', '%', '÷'],
-      ['7', '8', '9', '×'],
-      ['4', '5', '6', '−'],
-      ['1', '2', '3', '+'],
-      ['0', '.', '='],
-    ];
-    return (
-      <View style={styles.appContainer}>
-        <TouchableOpacity onPress={() => setActiveApp(null)} style={styles.closeAppBtn}>
-          <Ionicons name="arrow-back" size={16} color={c.accentOn} />
-          <AppText variant="bodyStrong" color={c.accentOn} style={styles.closeAppText}>Back to Apps</AppText>
-        </TouchableOpacity>
-        <View style={styles.calcDisplay}>
-          <AppText style={styles.calcDisplayText} numberOfLines={1} adjustsFontSizeToFit>
-            {calcDisplay}
-          </AppText>
-          {calcOp && (
-            <AppText variant="bodyStrong" color={c.accentOn} style={styles.calcOpIndicator}>{calcOp}</AppText>
-          )}
-        </View>
-        {buttons.map((row, ri) => (
-          <View key={ri} style={styles.calcRow}>
-            {row.map(btn => {
-              const isOp = ['+', '−', '×', '÷', '='].includes(btn);
-              const isFunc = ['C', '±', '%'].includes(btn);
-              const isZero = btn === '0';
-              return (
-                <TouchableOpacity
-                  key={btn}
-                  style={[
-                    styles.calcBtn,
-                    isOp && styles.calcBtnOp,
-                    isFunc && styles.calcBtnFunc,
-                    isZero && styles.calcBtnZero,
-                  ]}
-                  onPress={() => calcPress(btn)}
-                >
-                  <AppText
-                    style={[
-                      styles.calcBtnText,
-                      isOp && styles.calcBtnTextOp,
-                      isFunc && styles.calcBtnTextFunc,
-                    ]}
-                  >
-                    {btn}
-                  </AppText>
-                </TouchableOpacity>
-              );
-            })}
-          </View>
-        ))}
-      </View>
-    );
-  };
-
-  // ── Render Todo List ──────────────────────────────────────────
-  const renderTodoList = () => {
-    const pending = todos.filter(t => !t.done).length;
-    return (
-      <View style={styles.appContainer}>
-        <TouchableOpacity onPress={() => setActiveApp(null)} style={styles.closeAppBtn}>
-          <Ionicons name="arrow-back" size={16} color={c.accentOn} />
-          <AppText variant="bodyStrong" color={c.accentOn} style={styles.closeAppText}>Back to Apps</AppText>
-        </TouchableOpacity>
-        <AppText variant="title" style={styles.todoTitle}>Todo List</AppText>
-        <AppText variant="callout" style={styles.todoSubtitle}>
-          {todos.length === 0
-            ? 'No tasks yet — add one below'
-            : `${pending} pending · ${todos.length - pending} done`}
-        </AppText>
-        <View style={styles.todoInputRow}>
-          <TextInput
-            style={styles.todoInput}
-            placeholder="Add a task..."
-            placeholderTextColor={c.textDim}
-            value={todoInput}
-            onChangeText={setTodoInput}
-            onSubmitEditing={addTodo}
-            returnKeyType="done"
-          />
-          <TouchableOpacity style={styles.todoAddBtn} onPress={addTodo} accessibilityLabel="Add to-do" accessibilityRole="button">
-            <Ionicons name="add" size={24} color="#FFFFFF" />
-          </TouchableOpacity>
-        </View>
-        <ScrollView style={{ maxHeight: 400 }} showsVerticalScrollIndicator={false}>
-          {todos.map(item => (
-            <View key={item.id} style={styles.todoItem}>
-              <TouchableOpacity hitSlop={9}
-                style={[styles.todoCheck, item.done && styles.todoCheckDone]}
-                onPress={() => toggleTodo(item.id)} accessibilityLabel="Mark to-do done" accessibilityRole="checkbox" accessibilityState={{ checked: item.done }}
-              >
-                {item.done && <Ionicons name="checkmark" size={14} color="#FFFFFF" />}
-              </TouchableOpacity>
-              <AppText style={[styles.todoText, item.done && styles.todoTextDone]}>
-                {item.text}
-              </AppText>
-              <TouchableOpacity hitSlop={7} onPress={() => Alert.alert('Delete to-do?', `Delete "${item.text}"?`, [{ text: 'Cancel', style: 'cancel' }, { text: 'Delete', style: 'destructive', onPress: () => deleteTodo(item.id) }])} style={styles.todoDelBtn} accessibilityLabel="Delete to-do" accessibilityRole="button">
-                <Ionicons name="close" size={14} color="#DC2626" />
-              </TouchableOpacity>
-            </View>
-          ))}
-        </ScrollView>
-      </View>
-    );
-  };
 
   // ── Handle app open ───────────────────────────────────────────
   const handleOpenApp = (appId: string) => {
-    if (appId === 'calculator' || appId === 'todo') {
-      setActiveApp(appId);
-      return;
-    }
     // Main mini apps — navigate to their routes
     //
     // A tile hidden by a kill switch must not be reachable by a stale deep link
@@ -314,24 +94,6 @@ export default function MiniAppsScreen() {
     }
     Alert.alert('Coming Soon', 'This mini app is under development.');
   };
-
-  // ── If a mini app is active, show it fullscreen ───────────────
-  if (activeApp === 'calculator') {
-    return (
-      <View style={styles.container}>
-        {/* header hidden by tab layout */}
-        <ScrollView contentContainerStyle={styles.scroll}>{renderCalculator()}</ScrollView>
-      </View>
-    );
-  }
-  if (activeApp === 'todo') {
-    return (
-      <View style={styles.container}>
-        {/* header hidden by tab layout */}
-        <ScrollView contentContainerStyle={styles.scroll}>{renderTodoList()}</ScrollView>
-      </View>
-    );
-  }
 
   // ── Main grid view ────────────────────────────────────────────
   return (
@@ -385,58 +147,6 @@ export default function MiniAppsScreen() {
 
         {/* Games ship as a separate WebView deployment — no in-app games. */}
 
-        {/* ── Utility Apps ───────────────────────────── */}
-        <AppText variant="h3" style={[styles.sectionTitle, { marginTop: 24 }]}>Tools</AppText>
-        <View style={styles.grid}>
-          {MINI_APPS_UTILS.map(app => (
-            <TouchableOpacity
-              key={app.id}
-              style={styles.appCard}
-              onPress={() => handleOpenApp(app.id)}
-              activeOpacity={0.78}
-              accessibilityRole="button"
-              accessibilityLabel={app.name}
-            >
-              <LinearGradient colors={app.gradient} style={styles.appIconWrap}>
-                <Ionicons name={app.icon} size={24} color="#FFFFFF" />
-              </LinearGradient>
-              <AppText variant="tiny" style={styles.appName}>{app.name}</AppText>
-            </TouchableOpacity>
-          ))}
-        </View>
-
-        {/* ── Developer Section ─────────────────────── */}
-        <AppText variant="h3" style={[styles.sectionTitle, { marginTop: 28 }]}>Developer</AppText>
-        <LinearGradient
-          colors={[c.glass, c.glassSoft]}
-          style={styles.devCard}
-        >
-          <View style={styles.devIconWrap}>
-            <Ionicons name="construct-outline" size={28} color={c.accentOn} />
-          </View>
-          <AppText variant="h3" style={styles.devTitle}>Build Your Own</AppText>
-          <AppText variant="callout" style={styles.devDesc}>
-            Create custom mini apps using the crazzychat SDK. Build, test, and publish to the community.
-          </AppText>
-          <TouchableOpacity
-            style={styles.devBtn}
-            onPress={() =>
-              Alert.alert('Developer Docs', 'Documentation portal coming soon. Stay tuned!')
-            }
-            accessibilityRole="button"
-            accessibilityLabel="View developer documentation"
-          >
-            <LinearGradient
-              colors={BRAND_GRADIENT_CTA}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 0 }}
-              style={styles.devBtnGrad}
-            >
-              <AppText variant="bodyStrong" style={styles.devBtnText}>View Documentation</AppText>
-            </LinearGradient>
-          </TouchableOpacity>
-        </LinearGradient>
-
         <View style={{ height: 40 }} />
       </ScrollView>
     </View>
@@ -450,8 +160,6 @@ const makeStyles = (c: Palette, width: number, m: ReturnType<typeof useVisionCom
   const baseCols = width >= 840 ? 5 : width >= 600 ? 4 : 3;
   const gridCols = baseCols;
   const appCardW = Math.floor((contentW - gridGap * (gridCols - 1)) / gridCols);
-  const calcBtn = Math.min(72, Math.floor((contentW - gridGap * 3) / 4));
-  const calcZero = calcBtn * 2 + gridGap;
 
   return StyleSheet.create({
   container: {
@@ -461,7 +169,11 @@ const makeStyles = (c: Palette, width: number, m: ReturnType<typeof useVisionCom
   scroll: {
     padding: 20,
     paddingTop: HEADER_TOP,
-    paddingBottom: TAB_BAR_SPACE + 16,
+    // NOT TAB_BAR_SPACE any more: this screen hides the floating bar
+    // (app/(tabs)/_layout.tsx), so reserving room for it left ~80px of dead
+    // space under the last row of tiles. SCREEN_BOTTOM is the safe-area inset,
+    // which is all that sits below the grid now.
+    paddingBottom: SCREEN_BOTTOM + 16,
   },
   headerRow: {
     flexDirection: 'row',
@@ -540,198 +252,6 @@ const makeStyles = (c: Palette, width: number, m: ReturnType<typeof useVisionCom
     color: c.textDim,
     marginTop: 2,
     fontStyle: 'italic',
-  },
-
-  // ── Developer card ────────────────────────────────
-  devCard: {
-    borderRadius: 24,
-    padding: 22,
-    alignItems: 'center',
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: c.glassStroke,
-  },
-  devIconWrap: {
-    width: 60,
-    height: 60,
-    borderRadius: 18,
-    backgroundColor: c.glassSoft,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginBottom: 14,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: c.glassStroke,
-  },
-  devTitle: {
-    color: c.text,
-    marginBottom: 6,
-  },
-  devDesc: {
-    color: c.textDim,
-    textAlign: 'center',
-    marginBottom: 16,
-  },
-  devBtn: {
-    borderRadius: 12,
-    overflow: 'hidden',
-    width: '100%',
-  },
-  devBtnGrad: {
-    paddingVertical: 13,
-    alignItems: 'center',
-    borderRadius: 12,
-  },
-  devBtnText: {
-    color: '#FFFFFF',
-  },
-
-  // ── Mini app container ────────────────────────────
-  appContainer: {
-    paddingBottom: 20,
-  },
-  closeAppBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    marginBottom: 20,
-  },
-  closeAppText: {
-    marginTop: -1,
-  },
-
-  // ── Calculator ────────────────────────────────────
-  calcDisplay: {
-    backgroundColor: c.glassSoft,
-    borderRadius: 16,
-    padding: 20,
-    marginBottom: 16,
-    alignItems: 'flex-end',
-    minHeight: 90,
-    justifyContent: 'flex-end',
-    borderWidth: 1,
-    borderColor: c.glassStroke,
-  },
-  calcDisplayText: {
-    color: c.text,
-    fontSize: 42,
-    fontWeight: '300',
-  },
-  calcOpIndicator: {
-    color: c.accentOn,
-    fontSize: 16,
-    position: 'absolute',
-    top: 14,
-    right: 20,
-  },
-  calcRow: {
-    flexDirection: 'row',
-    justifyContent: 'flex-start',
-    gap: gridGap,
-    marginBottom: 10,
-  },
-  calcBtn: {
-    width: calcBtn,
-    height: calcBtn,
-    borderRadius: calcBtn / 2,
-    backgroundColor: c.surfaceSolid,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  calcBtnOp: {
-    backgroundColor: c.accentDeep,
-  },
-  calcBtnFunc: {
-    backgroundColor: c.surfaceSolid,
-  },
-  calcBtnZero: {
-    width: calcZero,
-    borderRadius: calcBtn / 2,
-  },
-  calcBtnText: {
-    color: c.text,
-    fontSize: 26,
-    fontWeight: '500',
-  },
-  calcBtnTextOp: {
-    color: c.text,
-    fontWeight: '600',
-  },
-  calcBtnTextFunc: {
-    color: c.text,
-  },
-
-  // ── Todo List ─────────────────────────────────────
-  todoTitle: {
-    color: c.text,
-    marginBottom: 4,
-  },
-  todoSubtitle: {
-    color: c.textDim,
-    marginBottom: 18,
-  },
-  todoInputRow: {
-    flexDirection: 'row',
-    marginBottom: 18,
-  },
-  todoInput: {
-    flex: 1,
-    backgroundColor: c.glassSoft,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: c.glassStroke,
-    color: c.text,
-    fontSize: 14 * m.textScale,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    marginRight: 10,
-  },
-  todoAddBtn: {
-    width: 48,
-    height: 48,
-    borderRadius: 12,
-    backgroundColor: c.accentDeep,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  todoItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: c.glassSoft,
-    borderRadius: 12,
-    padding: 14,
-    marginBottom: 8,
-    borderWidth: 1,
-    borderColor: c.glassStroke,
-  },
-  todoCheck: {
-    width: 26,
-    height: 26,
-    borderRadius: 13,
-    borderWidth: 2,
-    borderColor: c.accentOn,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: 12,
-  },
-  todoCheckDone: {
-    backgroundColor: c.accentDeep,
-    borderColor: c.accentDeep,
-  },
-  todoText: {
-    flex: 1,
-    color: c.text,
-    fontSize: 14,
-  },
-  todoTextDone: {
-    color: c.textDim,
-    textDecorationLine: 'line-through',
-  },
-  todoDelBtn: {
-    width: 30,
-    height: 30,
-    borderRadius: 15,
-    backgroundColor: 'rgba(220,38,38,0.15)',
-    justifyContent: 'center',
-    alignItems: 'center',
   },
   });
 };
