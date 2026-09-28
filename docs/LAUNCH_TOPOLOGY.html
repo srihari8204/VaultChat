@@ -1,0 +1,1634 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>VaultChat Launch Topology</title>
+<meta name="description" content="Deployment topology, architecture, server sizing and go-live prerequisites for running VaultChat on new servers.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Sora:wght@600;700&family=Nunito+Sans:ital,wght@0,400;0,600;0,700;0,800;1,400&family=JetBrains+Mono:wght@400;500;700&display=swap">
+<style>
+:root{
+  color-scheme: light;
+  --ground:#EAF1FA; --card:#FFFFFF; --raised:#F3F7FC; --code:#EEF3FA;
+  --ink:#1B1526; --ink-2:rgba(27,21,38,.76); --ink-3:rgba(27,21,38,.62);
+  --line:rgba(49,76,118,.16); --line-2:rgba(49,76,118,.32);
+  --accent:#1552E0; --accent-wash:rgba(21,82,224,.10);
+  --core:#2a78d6; --core-wash:rgba(42,120,214,.12);
+  --media:#eb6834; --media-wash:rgba(235,104,52,.12);
+  --data:#1baf7a; --data-wash:rgba(27,175,122,.14);
+  --ext:#7d8799; --ext-wash:rgba(125,135,153,.13);
+  --ok:#05603A; --ok-mark:#0ca30c; --ok-wash:rgba(12,163,12,.11);
+  --warn:#7A4A00; --warn-mark:#fab219; --warn-wash:rgba(250,178,25,.20);
+  --bad:#B42318; --bad-mark:#d03b3b; --bad-wash:rgba(208,59,59,.12);
+  --shadow:0 1px 2px rgba(16,24,40,.05),0 8px 24px rgba(16,24,40,.06);
+  --bloom-a:rgba(51,221,254,.30); --bloom-b:rgba(23,119,254,.22); --bloom-c:rgba(140,73,252,.20);
+  --sans:"Nunito Sans",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  --display:"Sora","Nunito Sans",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --mono:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    color-scheme: dark;
+    --ground:#0A0810; --card:#15111E; --raised:#1D1829; --code:#110E19;
+    --ink:rgba(255,255,255,.95); --ink-2:rgba(255,255,255,.74); --ink-3:rgba(255,255,255,.58);
+    --line:rgba(255,255,255,.09); --line-2:rgba(255,255,255,.18);
+    --accent:#7FB6FF; --accent-wash:rgba(127,182,255,.13);
+    --core:#3987e5; --core-wash:rgba(57,135,229,.18);
+    --media:#d95926; --media-wash:rgba(217,89,38,.18);
+    --data:#199e70; --data-wash:rgba(25,158,112,.20);
+    --ext:#9aa3b2; --ext-wash:rgba(154,163,178,.13);
+    --ok:#3fcf6a; --ok-mark:#0ca30c; --ok-wash:rgba(12,163,12,.16);
+    --warn:#fab219; --warn-mark:#fab219; --warn-wash:rgba(250,178,25,.16);
+    --bad:#f07a7a; --bad-mark:#d03b3b; --bad-wash:rgba(208,59,59,.20);
+    --shadow:0 0 0 1px rgba(255,255,255,.02);
+    --bloom-a:rgba(51,221,254,.16); --bloom-b:rgba(23,119,254,.16); --bloom-c:rgba(140,73,252,.16);
+  }
+}
+:root[data-theme="dark"]{
+  color-scheme: dark;
+  --ground:#0A0810; --card:#15111E; --raised:#1D1829; --code:#110E19;
+  --ink:rgba(255,255,255,.95); --ink-2:rgba(255,255,255,.74); --ink-3:rgba(255,255,255,.58);
+  --line:rgba(255,255,255,.09); --line-2:rgba(255,255,255,.18);
+  --accent:#7FB6FF; --accent-wash:rgba(127,182,255,.13);
+  --core:#3987e5; --core-wash:rgba(57,135,229,.18);
+  --media:#d95926; --media-wash:rgba(217,89,38,.18);
+  --data:#199e70; --data-wash:rgba(25,158,112,.20);
+  --ext:#9aa3b2; --ext-wash:rgba(154,163,178,.13);
+  --ok:#3fcf6a; --ok-mark:#0ca30c; --ok-wash:rgba(12,163,12,.16);
+  --warn:#fab219; --warn-mark:#fab219; --warn-wash:rgba(250,178,25,.16);
+  --bad:#f07a7a; --bad-mark:#d03b3b; --bad-wash:rgba(208,59,59,.20);
+  --shadow:0 0 0 1px rgba(255,255,255,.02);
+  --bloom-a:rgba(51,221,254,.16); --bloom-b:rgba(23,119,254,.16); --bloom-c:rgba(140,73,252,.16);
+}
+
+*,*::before,*::after{box-sizing:border-box}
+html{scroll-behavior:smooth;scroll-padding-top:76px}
+@media (prefers-reduced-motion: reduce){html{scroll-behavior:auto}}
+body{margin:0;background:var(--ground);color:var(--ink);font:400 16px/1.6 var(--sans);-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
+.page{padding-inline:clamp(16px,3.5vw,32px);padding-block:20px 72px}
+.shell{max-width:1140px;margin:0 auto}
+a{color:var(--accent);text-underline-offset:2px}
+a:focus-visible,button:focus-visible,input:focus-visible,summary:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:6px}
+p{margin:0 0 12px}
+strong,b{font-weight:700}
+code{font:500 .86em/1.4 var(--mono);background:var(--code);border:1px solid var(--line);padding:.08em .34em;border-radius:5px;overflow-wrap:anywhere}
+.prose{max-width:74ch}
+.muted{color:var(--ink-2)}
+.fine{font-size:13.5px;color:var(--ink-3)}
+
+/* header */
+.hero{position:relative;overflow:hidden;border-radius:22px;background:var(--card);border:1px solid var(--line);padding:clamp(22px,4.2vw,46px);box-shadow:var(--shadow)}
+.hero::before{content:"";position:absolute;right:-12%;top:-35%;width:72%;height:170%;background:
+  radial-gradient(38% 34% at 72% 30%,var(--bloom-a),transparent 72%),
+  radial-gradient(42% 40% at 42% 58%,var(--bloom-b),transparent 72%),
+  radial-gradient(34% 30% at 84% 74%,var(--bloom-c),transparent 72%);pointer-events:none}
+.hero>*{position:relative}
+.eyebrow{font:600 12px/1.5 var(--mono);letter-spacing:.05em;text-transform:uppercase;color:var(--ink-3);margin:0}
+h1{font:700 clamp(31px,4.8vw,48px)/1.06 var(--display);letter-spacing:-.022em;margin:14px 0 14px;text-wrap:balance}
+.lede{font-size:clamp(16px,1.7vw,18.5px);line-height:1.55;color:var(--ink-2);max-width:64ch;margin:0}
+.facts{display:flex;flex-wrap:wrap;gap:8px;margin-top:22px}
+.fact{font-size:13px;line-height:1.3;padding:6px 11px;border-radius:12px;background:var(--raised);border:1px solid var(--line);color:var(--ink-2)}
+.fact b{color:var(--ink)}
+.fact.gap{background:var(--bad-wash);border-color:transparent;color:var(--ink)}
+
+/* nav */
+.nav{position:sticky;top:env(safe-area-inset-top,0px);z-index:30;display:flex;gap:4px;overflow-x:auto;scrollbar-width:none;margin:14px 0 0;padding:7px;border-radius:14px;border:1px solid var(--line);background:color-mix(in srgb,var(--ground) 80%,transparent);-webkit-backdrop-filter:blur(14px) saturate(1.3);backdrop-filter:blur(14px) saturate(1.3)}
+.nav::-webkit-scrollbar{display:none}
+.nav a{flex:0 0 auto;font:700 13px/1 var(--sans);color:var(--ink-2);text-decoration:none;padding:9px 12px;border-radius:999px}
+.nav a:hover{background:var(--accent-wash);color:var(--ink)}
+.nav a[aria-current="true"]{background:var(--ink);color:var(--card)}
+
+/* sections */
+.sec{margin-top:60px}
+.sec-h{margin-bottom:20px;max-width:76ch}
+.sec-h h2{font:700 clamp(23px,2.7vw,30px)/1.18 var(--display);letter-spacing:-.014em;margin:0 0 8px;text-wrap:balance}
+.sec-h p{margin:0;color:var(--ink-2)}
+h3{font:600 17px/1.3 var(--display);margin:0;text-wrap:balance}
+.sub{margin:36px 0 12px;display:flex;flex-wrap:wrap;align-items:baseline;justify-content:space-between;gap:6px 16px}
+.sub p{margin:0;font-size:14px;color:var(--ink-3)}
+
+/* role marks */
+.dot{display:inline-block;width:9px;height:9px;border-radius:2px;background:var(--ext);margin-right:7px;vertical-align:.02em;flex:0 0 auto}
+.dot.core{background:var(--core)}.dot.data{background:var(--data)}.dot.media{background:var(--media)}
+.plate{display:inline-flex;align-items:center;font:700 12.5px/1 var(--mono);letter-spacing:.04em;padding:6px 9px;border-radius:7px;border:1.5px solid var(--ext);background:var(--ext-wash);color:var(--ink);white-space:nowrap}
+.plate.core{border-color:var(--core);background:var(--core-wash)}
+.plate.data{border-color:var(--data);background:var(--data-wash)}
+.plate.media{border-color:var(--media);background:var(--media-wash)}
+.plate.sm{font-size:11.5px;padding:4px 7px;border-width:1.25px}
+
+/* server cards */
+.srv-grid{display:grid;gap:14px;grid-template-columns:1fr}
+@media (min-width:600px){.srv-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media (min-width:1040px){.srv-grid{grid-template-columns:repeat(4,minmax(0,1fr))}}
+.srv{display:flex;flex-direction:column;gap:14px;background:var(--card);border:1px solid var(--line);border-radius:16px;padding:16px 16px 14px}
+.srv-h{display:flex;flex-direction:column;align-items:flex-start;gap:9px}
+.srv-role{font:600 15.5px/1.3 var(--display);margin:0}
+.spec{margin:0;display:grid;gap:7px}
+.spec div{display:grid;grid-template-columns:66px minmax(0,1fr);gap:10px;font-size:14px;line-height:1.35}
+.spec dt{color:var(--ink-3)}
+.spec dd{margin:0;font-weight:700}
+.spec small{display:block;font-weight:400;color:var(--ink-3);font-size:12.5px;margin-top:1px}
+.runs{font-size:13.5px;line-height:1.5;color:var(--ink-2);margin:0;padding-top:12px;border-top:1px solid var(--line)}
+.ports{margin:auto 0 0;display:flex;flex-wrap:wrap;gap:5px;align-items:center;font-size:12.5px;color:var(--ink-3)}
+.ports span{margin-right:2px}
+.ports code{font-size:11.5px}
+.totals{display:flex;flex-wrap:wrap;gap:6px 26px;align-items:baseline;margin-top:14px;padding:14px 18px;border-radius:14px;background:var(--card);border:1px solid var(--line);font-size:14.5px}
+.totals .k{color:var(--ink-3)}
+.totals b{font-size:16px}
+
+/* callouts */
+.callout{display:grid;grid-template-columns:22px minmax(0,1fr);gap:12px;align-items:start;padding:14px 16px;border-radius:14px;border:1px solid var(--line);background:var(--card);margin:16px 0 0}
+.callout p{margin:0}
+.callout p+p{margin-top:8px}
+.ico{width:20px;height:20px;display:block;margin-top:2px}
+.ico.ok{color:var(--ok-mark)}.ico.warn{color:var(--warn-mark)}.ico.over{color:var(--bad-mark)}.ico.info{color:var(--accent)}
+.twocol{display:grid;gap:14px;margin-top:16px}
+@media (min-width:860px){.twocol{grid-template-columns:1fr 1fr}}
+.twocol .callout{margin:0}
+
+/* tables */
+.tbl-wrap{overflow-x:auto;border:1px solid var(--line);border-radius:14px;background:var(--card)}
+table{border-collapse:collapse;width:100%;font-size:14px;line-height:1.45}
+th,td{text-align:left;vertical-align:top;padding:10px 14px;border-bottom:1px solid var(--line)}
+thead th{font:700 11.5px/1.3 var(--sans);letter-spacing:.06em;text-transform:uppercase;color:var(--ink-3);background:var(--raised);white-space:nowrap}
+tbody tr:last-child td{border-bottom:0}
+tbody th{font-weight:700;white-space:nowrap}
+td.nw,th.nw{white-space:nowrap}
+.num{font-variant-numeric:tabular-nums;white-space:nowrap}
+.cmp td,.cmp th{min-width:150px}
+.cmp tbody th{min-width:128px;color:var(--ink-2);font-weight:600}
+.cmp .pick{background:var(--accent-wash)}
+.cmp thead th.pick{color:var(--ink)}
+.tbl-note{font-size:13px;color:var(--ink-3);margin:8px 2px 0}
+
+/* provenance tags */
+.tag{display:inline-block;font:700 10.5px/1 var(--sans);letter-spacing:.04em;text-transform:uppercase;padding:4px 7px;border-radius:999px;white-space:nowrap;color:var(--ink);border:1px solid var(--line-2)}
+.tag.m{background:var(--ok-wash);border-color:transparent}
+.tag.c{background:var(--raised)}
+.tag.e{background:var(--accent-wash);border-color:transparent}
+.tag.a{background:var(--warn-wash);border-color:transparent}
+.tag.g{background:var(--bad-wash);border-color:transparent}
+.tag.n{background:transparent}
+
+/* figure */
+.fig{background:var(--card);border:1px solid var(--line);border-radius:18px;padding:10px 10px 4px;margin:0}
+.fig-scroll{overflow-x:auto;-webkit-overflow-scrolling:touch}
+.fig svg{display:block;width:100%;min-width:1000px;height:auto;color:var(--ink)}
+.fig figcaption{font-size:14px;color:var(--ink-2);padding:10px 8px 10px;max-width:86ch}
+.svg-zone{fill:var(--raised);stroke:var(--line-2);stroke-dasharray:6 5}
+.svg-box{fill:var(--card);stroke-width:1.6}
+.svg-ext{fill:var(--raised);stroke:var(--line-2);stroke-width:1.2}
+.svg-client{fill:var(--card);stroke:var(--ink-3);stroke-width:1.2}
+.s-core{stroke:var(--core)}.s-media{stroke:var(--media)}.s-data{stroke:var(--data)}
+.f-core{fill:var(--core)}.f-media{fill:var(--media)}.f-data{fill:var(--data)}.f-ext{fill:var(--ext)}
+.p-core{fill:var(--core-wash);stroke:var(--core);stroke-width:1.4}
+.p-media{fill:var(--media-wash);stroke:var(--media);stroke-width:1.4}
+.p-data{fill:var(--data-wash);stroke:var(--data);stroke-width:1.4}
+.svg-t{fill:var(--ink);font:700 12.5px var(--sans)}
+.svg-t2{fill:var(--ink-2);font:400 12px var(--sans)}
+.svg-pl{fill:var(--ink);font:700 12px var(--mono)}
+.svg-m{fill:var(--ink-3);font:500 11px var(--mono)}
+.svg-lab{fill:var(--ink);font:700 11px var(--mono)}
+.svg-z{fill:var(--ink-3);font:800 11px var(--sans);letter-spacing:.09em}
+.svg-ln{stroke:var(--ink-2);stroke-width:1.4;fill:none}
+.svg-priv{stroke:var(--ink-3);stroke-width:1.4;fill:none}
+.svg-ah{fill:var(--ink-2)}
+
+/* request paths */
+.flows{display:grid;gap:12px}
+@media (min-width:940px){.flows{grid-template-columns:repeat(2,minmax(0,1fr))}}
+.flow{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:16px;display:flex;flex-direction:column;gap:12px}
+.flow h3{font-size:16px}
+.flow .why{font-size:13.5px;color:var(--ink-2);margin:4px 0 0}
+.hops{list-style:none;margin:0;padding:0;display:flex;flex-wrap:wrap;align-items:flex-end;gap:10px 4px}
+.hop{font:700 13px/1.2 var(--sans);padding:7px 10px;border-radius:9px;border:1.5px solid var(--ext);background:var(--ext-wash)}
+.hop small{display:block;font:500 10.5px/1.25 var(--mono);color:var(--ink-3);margin-top:2px}
+.hop.core{border-color:var(--core);background:var(--core-wash)}
+.hop.data{border-color:var(--data);background:var(--data-wash)}
+.hop.media{border-color:var(--media);background:var(--media-wash)}
+.hop.client{border-color:var(--line-2);background:var(--raised)}
+.edge{display:flex;flex-direction:column;align-items:center;gap:3px;font:500 10.5px/1.2 var(--mono);color:var(--ink-3);padding:0 2px 9px;text-align:center}
+.edge svg{width:44px;height:10px;display:block;color:var(--ink-2)}
+.lane-l{font:800 11px/1 var(--sans);letter-spacing:.07em;text-transform:uppercase;color:var(--ink-3);margin:2px 0 -4px}
+.flow .foot{font-size:13px;color:var(--ink-3);margin:0;padding-top:10px;border-top:1px solid var(--line)}
+
+/* calculator */
+.calc{background:var(--card);border:1px solid var(--line);border-radius:18px;padding:clamp(14px,2.4vw,24px)}
+.presets{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:20px}
+.presets button{font:700 13.5px/1 var(--sans);padding:10px 13px;border-radius:10px;border:1px solid var(--line-2);background:var(--raised);color:var(--ink);cursor:pointer}
+.presets button:hover{border-color:var(--accent)}
+.presets button[aria-pressed="true"]{background:var(--ink);color:var(--card);border-color:var(--ink)}
+.presets .lbl{font:800 11px/1 var(--sans);letter-spacing:.07em;text-transform:uppercase;color:var(--ink-3);align-self:center;margin-right:4px}
+.calc-grid{display:grid;gap:26px;grid-template-columns:minmax(0,1fr)}
+#calc-form,.calc-out{min-width:0}
+@media (min-width:1000px){.calc-grid{grid-template-columns:minmax(300px,370px) minmax(0,1fr)}}
+fieldset{border:0;padding:0;margin:0 0 18px;min-width:0}
+legend{font:800 11px/1 var(--sans);letter-spacing:.07em;text-transform:uppercase;color:var(--ink-3);margin-bottom:6px;padding:0}
+.fld{display:grid;grid-template-columns:minmax(0,1fr) 124px;align-items:center;gap:12px;padding:6px 0;border-bottom:1px solid var(--line)}
+.fld label{font-size:14px;line-height:1.3;color:var(--ink-2)}
+.inp{display:flex;align-items:center;border:1px solid var(--line-2);border-radius:9px;background:var(--raised);overflow:hidden}
+.inp:focus-within{border-color:var(--accent)}
+.inp input{width:100%;min-width:0;border:0;outline:0;background:transparent;color:var(--ink);font:700 14px/1 var(--sans);padding:8px 8px 8px 10px;font-variant-numeric:tabular-nums;text-align:right;-moz-appearance:textfield}
+.inp input::-webkit-outer-spin-button,.inp input::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
+.inp span{font:600 12px/1 var(--sans);color:var(--ink-3);padding-right:10px;white-space:nowrap}
+.tog{display:grid;grid-template-columns:18px minmax(0,1fr);gap:10px;align-items:start;font-size:14px;color:var(--ink-2);padding:12px 12px;border-radius:12px;background:var(--raised);border:1px solid var(--line);cursor:pointer}
+.tog input{width:17px;height:17px;margin:2px 0 0;accent-color:var(--accent)}
+details.adv{margin-top:14px;border:1px solid var(--line);border-radius:12px;background:var(--raised)}
+details.adv summary{cursor:pointer;padding:12px 14px;font:700 14px/1.3 var(--sans)}
+details.adv .adv-b{padding:0 14px 10px}
+.fld .tag{margin-left:4px;vertical-align:1px}
+.out-h{font:800 11px/1 var(--sans);letter-spacing:.07em;text-transform:uppercase;color:var(--ink-3);margin:24px 0 10px}
+.verdict{display:grid;grid-template-columns:22px minmax(0,1fr);gap:12px;align-items:start;padding:16px 18px;border-radius:14px}
+.verdict[data-state="ok"]{background:var(--ok-wash)}
+.verdict[data-state="warn"]{background:var(--warn-wash)}
+.verdict[data-state="over"]{background:var(--bad-wash)}
+.verdict h4{font:700 18px/1.3 var(--display);margin:0 0 4px;text-wrap:balance}
+.verdict p{margin:0;font-size:14px;color:var(--ink-2)}
+.verdict p+p{margin-top:6px}
+.kpis{display:grid;gap:10px;grid-template-columns:repeat(2,minmax(0,1fr))}
+@media (min-width:640px){.kpis{grid-template-columns:repeat(3,minmax(0,1fr))}}
+.kpi{padding:12px 14px;border-radius:12px;background:var(--raised);border:1px solid var(--line);min-width:0}
+.kpi .l{font-size:12.5px;line-height:1.3;color:var(--ink-3)}
+.kpi .v{font:800 24px/1.15 var(--sans);letter-spacing:-.01em;margin:5px 0 3px;overflow-wrap:anywhere}
+.kpi .s{font-size:12px;line-height:1.35;color:var(--ink-3)}
+.meters{display:grid;gap:14px}
+.meter .top{display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:2px 12px;font-size:14px}
+.meter .top b{font-weight:700}
+.meter .top span{color:var(--ink-3);font-size:13px;font-variant-numeric:tabular-nums}
+.meter .track{height:8px;border-radius:999px;background:var(--accent-wash);overflow:hidden;margin:7px 0 5px}
+.meter .fill{height:100%;border-radius:999px;background:var(--accent);width:0;transition:width .35s ease}
+@media (prefers-reduced-motion: reduce){.meter .fill{transition:none}}
+.meter[data-state="warn"] .track{background:var(--warn-wash)}
+.meter[data-state="warn"] .fill{background:var(--warn-mark)}
+.meter[data-state="over"] .track{background:var(--bad-wash)}
+.meter[data-state="over"] .fill{background:var(--bad-mark)}
+.meter .st{display:flex;align-items:center;gap:6px;font-size:12.5px;color:var(--ink-3)}
+.meter .st svg{width:14px;height:14px;flex:0 0 auto}
+.meter[data-state="ok"] .st svg{color:var(--ok-mark)}
+.meter[data-state="warn"] .st svg{color:var(--warn-mark)}
+.meter[data-state="over"] .st svg{color:var(--bad-mark)}
+.meter .st b{color:var(--ink);font-weight:700}
+.bom td:first-child{white-space:nowrap}
+.bom .nw{white-space:nowrap}
+.bom .cnt{font:800 16px/1.2 var(--sans);font-variant-numeric:tabular-nums;text-align:right;white-space:nowrap}
+.bom tfoot td{font-weight:700;background:var(--raised);border-bottom:0}
+.bom .role{display:block;font-size:12.5px;color:var(--ink-3);margin-top:3px}
+
+/* checklist */
+.chk-top{display:flex;flex-wrap:wrap;gap:10px 16px;align-items:center;justify-content:space-between;margin-bottom:12px}
+.chk-top p{margin:0;font-size:14px;color:var(--ink-3)}
+.btn{font:700 13px/1 var(--sans);padding:9px 12px;border-radius:10px;border:1px solid var(--line-2);background:var(--card);color:var(--ink);cursor:pointer}
+.btn:hover{border-color:var(--accent)}
+.chk-groups{display:grid;gap:14px}
+@media (min-width:900px){.chk-groups{grid-template-columns:repeat(2,minmax(0,1fr))}}
+.chk-group{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:14px 16px 6px}
+.chk-group header{display:flex;justify-content:space-between;align-items:baseline;gap:10px;margin-bottom:6px}
+.chk-count{font:700 12.5px/1 var(--sans);color:var(--ink-3);white-space:nowrap;font-variant-numeric:tabular-nums}
+.chk{display:grid;grid-template-columns:18px minmax(0,1fr);gap:10px;padding:10px 0;border-top:1px solid var(--line);font-size:14px;line-height:1.45;cursor:pointer}
+.chk input{width:17px;height:17px;margin:2px 0 0;accent-color:var(--accent)}
+.chk input:checked+span{color:var(--ink-3)}
+.chk .tag{margin-right:6px;vertical-align:1px}
+
+/* steps */
+.steps{counter-reset:s;list-style:none;margin:0;padding:0;display:grid;gap:12px}
+.steps>li{counter-increment:s;display:grid;grid-template-columns:36px minmax(0,1fr);gap:12px;background:var(--card);border:1px solid var(--line);border-radius:16px;padding:16px 16px 16px 14px}
+.steps>li::before{content:counter(s,decimal-leading-zero);font:700 14px/1.6 var(--mono);color:var(--accent)}
+.step-h{display:flex;flex-wrap:wrap;align-items:center;gap:8px 10px;margin-bottom:6px}
+.step-h h3{font-size:16px}
+.steps p{margin:0 0 8px;font-size:14.5px;color:var(--ink-2);max-width:80ch}
+.code{position:relative;margin:8px 0 2px;min-width:0}
+.code pre{margin:0;overflow-x:auto;padding:12px 14px;padding-right:74px;border-radius:12px;background:var(--code);border:1px solid var(--line);font:500 12.5px/1.65 var(--mono);color:var(--ink);tab-size:2}
+.code pre .c{color:var(--ink-3)}
+.copy{position:absolute;top:8px;right:8px;font:700 11.5px/1 var(--sans);padding:6px 9px;border-radius:7px;border:1px solid var(--line-2);background:var(--card);color:var(--ink-2);cursor:pointer}
+.copy:hover{color:var(--ink);border-color:var(--accent)}
+
+/* traps */
+.trap-grid{display:grid;gap:12px}
+@media (min-width:780px){.trap-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+.trap{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px 16px}
+.trap h4{font:700 15px/1.35 var(--sans);margin:0 0 5px}
+.trap p{font-size:14px;color:var(--ink-2);margin:0}
+.trap .src{display:block;font:500 11.5px/1.4 var(--mono);color:var(--ink-3);margin-top:8px;overflow-wrap:anywhere}
+.trap.new{border-color:color-mix(in srgb,var(--bad-mark) 40%,var(--line))}
+
+/* sources */
+.src-grid{display:grid;gap:10px 28px;font-size:14px}
+@media (min-width:760px){.src-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+.src-grid div{display:grid;grid-template-columns:minmax(0,1fr);gap:1px}
+.src-grid a{font:500 13px/1.4 var(--mono);overflow-wrap:anywhere}
+.src-grid span{color:var(--ink-3);font-size:13px}
+footer.end{margin-top:56px;padding-top:18px;border-top:1px solid var(--line);font-size:13.5px;color:var(--ink-3)}
+</style>
+</head>
+<body>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
+  <symbol id="i-arr" viewBox="0 0 44 10"><path d="M1 5H36" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M35 1.2L43 5L35 8.8Z" fill="currentColor"/></symbol>
+  <symbol id="i-arr2" viewBox="0 0 44 10"><path d="M8 5H36" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M35 1.2L43 5L35 8.8ZM9 1.2L1 5L9 8.8Z" fill="currentColor"/></symbol>
+  <symbol id="i-ok" viewBox="0 0 20 20"><circle cx="10" cy="10" r="9" fill="currentColor"/><path d="M6 10.4l2.7 2.7L14.2 7.4" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+  <symbol id="i-warn" viewBox="0 0 20 20"><path d="M10 1.8L19 17.6H1Z" fill="currentColor" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><path d="M10 7.3v4.9" stroke="#1B1526" stroke-width="2" stroke-linecap="round"/><circle cx="10" cy="14.9" r="1.15" fill="#1B1526"/></symbol>
+  <symbol id="i-over" viewBox="0 0 20 20"><circle cx="10" cy="10" r="9" fill="currentColor"/><path d="M6.8 6.8l6.4 6.4M13.2 6.8l-6.4 6.4" stroke="#fff" stroke-width="2" stroke-linecap="round"/></symbol>
+  <symbol id="i-info" viewBox="0 0 20 20"><circle cx="10" cy="10" r="9" fill="currentColor"/><path d="M10 9v5.2" stroke="#fff" stroke-width="2" stroke-linecap="round"/><circle cx="10" cy="6" r="1.2" fill="#fff"/></symbol>
+</svg>
+
+<div class="page">
+<div class="shell">
+
+<header class="hero">
+  <p class="eyebrow">Deployment plan · VaultChat repo at ee3e282 · 28 Sep 2026</p>
+  <h1>VaultChat Launch Topology</h1>
+  <p class="lede">What it takes to run VaultChat on new servers: how many machines, what runs on each, how big they should be, and what to have ready before traffic moves. Everything here comes from the repo's compose files, service configs and ops notes. Measured figures and estimates are labelled as such.</p>
+  <div class="facts">
+    <span class="fact">Stack <b>Go API · Postgres 16 · Redis 7 · 2 × LiveKit · coturn · Valhalla</b></span>
+    <span class="fact">Today <b>1 Hetzner box · 12 threads · 64 GB · 18 accounts</b></span>
+    <span class="fact gap">Go backend load test <b>not run yet</b></span>
+  </div>
+</header>
+
+<nav class="nav" id="nav" aria-label="Sections">
+  <a href="#answer">Answer</a>
+  <a href="#architecture">Architecture</a>
+  <a href="#topology">Topology</a>
+  <a href="#capacity">Capacity</a>
+  <a href="#network">Network</a>
+  <a href="#prereqs">Prerequisites</a>
+  <a href="#bringup">Bring-up</a>
+  <a href="#changes">Config changes</a>
+  <a href="#traps">Traps</a>
+  <a href="#backups">Backups</a>
+  <a href="#migrate">Migration</a>
+  <a href="#sources">Sources</a>
+</nav>
+
+<!-- ============================================================ ANSWER -->
+<section class="sec" id="answer" aria-labelledby="answer-h">
+  <div class="sec-h">
+    <h2 id="answer-h">Four servers, one region</h2>
+    <p>Run the core stack as the repo ships it on one server, move call media and broadcast rendering onto their own machines, and keep a live standby of the database. Cloudflare, R2 and the push, SMS and email providers stay managed services.</p>
+  </div>
+
+  <div class="srv-grid">
+    <article class="srv">
+      <div class="srv-h"><span class="plate core">CORE-1</span><h3 class="srv-role">API and primary database</h3></div>
+      <dl class="spec">
+        <div><dt>CPU</dt><dd>16 vCPU<small>8 dedicated cores; min 8 vCPU</small></dd></div>
+        <div><dt>Memory</dt><dd>64 GB<small>min 32 GB</small></dd></div>
+        <div><dt>Disk</dt><dd>2 × 1 TB NVMe, RAID 1<small>min 2 × 512 GB (today's box)</small></dd></div>
+        <div><dt>Network</dt><dd>1 Gbps, public IPv4<small>plus the private network</small></dd></div>
+      </dl>
+      <p class="runs">nginx (TLS) · Caddy · go-api · PgBouncer · Postgres 16 · Redis 7 · Valhalla · nightly backup job</p>
+      <p class="ports"><span>Open to the internet</span><code>80/tcp</code><code>443/tcp</code></p>
+    </article>
+    <article class="srv">
+      <div class="srv-h"><span class="plate data">DB-2</span><h3 class="srv-role">Standby and monitoring</h3></div>
+      <dl class="spec">
+        <div><dt>CPU</dt><dd>8 vCPU<small>min 4 vCPU</small></dd></div>
+        <div><dt>Memory</dt><dd>32 GB<small>64 GB if it must run the core stack after a failover</small></dd></div>
+        <div><dt>Disk</dt><dd>2 × 1 TB NVMe, RAID 1<small>holds a full copy; match CORE-1</small></dd></div>
+        <div><dt>Network</dt><dd>1 Gbps<small>private network; public IP for outbound only</small></dd></div>
+      </dl>
+      <p class="runs">Postgres 16 hot standby streaming from CORE-1 · Prometheus · Grafana with alerting</p>
+      <p class="ports"><span>Open to the internet</span><code>none</code></p>
+    </article>
+    <article class="srv">
+      <div class="srv-h"><span class="plate media">MEDIA-1</span><h3 class="srv-role">Calls: SFU and TURN relay</h3></div>
+      <dl class="spec">
+        <div><dt>CPU</dt><dd>8 vCPU<small>min 4 vCPU; an SFU forwards, it never transcodes</small></dd></div>
+        <div><dt>Memory</dt><dd>16 GB<small>min 8 GB</small></dd></div>
+        <div><dt>Disk</dt><dd>80 GB SSD<small>min 40 GB</small></dd></div>
+        <div><dt>Network</dt><dd>1 Gbps, generous traffic<small>bandwidth is this server's capacity</small></dd></div>
+      </dl>
+      <p class="runs">LiveKit calling SFU · coturn · a local Redis for LiveKit's room state</p>
+      <p class="ports"><span>Open to the internet</span><code>3478</code><code>5349</code><code>443/udp</code><code>7881/tcp</code><code>7882/udp</code><code>49152–65535/udp</code></p>
+    </article>
+    <article class="srv">
+      <div class="srv-h"><span class="plate media">LIVE-1</span><h3 class="srv-role">Go Live broadcasting</h3></div>
+      <dl class="spec">
+        <div><dt>CPU</dt><dd>16 vCPU, dedicated<small>min 8; rendering needs 4 per live broadcast</small></dd></div>
+        <div><dt>Memory</dt><dd>32 GB<small>min 16 GB</small></dd></div>
+        <div><dt>Disk</dt><dd>80 GB SSD<small>segments go straight to R2</small></dd></div>
+        <div><dt>Network</dt><dd>1 Gbps<small>viewers are served by Cloudflare, not this box</small></dd></div>
+      </dl>
+      <p class="runs">Go Live SFU · egress (headless Chrome + ffmpeg → HLS) · a local Redis for Go Live</p>
+      <p class="ports"><span>Open to the internet</span><code>7891/tcp</code><code>7892/udp</code></p>
+    </article>
+  </div>
+
+  <div class="totals" role="group" aria-label="Totals">
+    <span class="k">Recommended total</span><b>48 vCPU · 144 GB RAM · 2.2 TB usable NVMe</b>
+    <span class="k">Minimum</span><b>24 vCPU · 72 GB RAM</b>
+    <span class="k">Plus managed</span><b>Cloudflare DNS, CDN and R2 · FCM · Expo push · MSG91 · Resend · Klipy</b>
+  </div>
+
+  <div class="sub"><h3>Pick the shape that fits the stage</h3><p>The calculator in <a href="#capacity">Capacity</a> tells you when to move right.</p></div>
+  <div class="tbl-wrap">
+    <table class="cmp">
+      <thead><tr><th scope="col"></th><th scope="col">Single box</th><th scope="col" class="pick">Launch (recommended)</th><th scope="col">Growth</th></tr></thead>
+      <tbody>
+        <tr><th scope="row">Servers</th><td>1</td><td class="pick"><b>4</b></td><td>9 or more</td></tr>
+        <tr><th scope="row">Fits</th><td>Closed beta, soft launch</td><td class="pick">Public launch. Tested envelope: 5,000 live connections per go-api process, about 50,000 accounts at 10% peak concurrency</td><td>100,000+ accounts</td></tr>
+        <tr><th scope="row">Kept apart</th><td>Nothing. Call media and broadcast rendering share the database host</td><td class="pick">Call media, broadcast rendering and a standby database each get their own machine</td><td>Every tier, with the API behind a load balancer</td></tr>
+        <tr><th scope="row">Data lost if the main host dies</th><td>Up to 24 hours (nightly dump)</td><td class="pick">Seconds (streaming standby)</td><td>Seconds</td></tr>
+        <tr><th scope="row">Getting back up</th><td>New box, restore the dump, copy 9.8 GB of routing tiles</td><td class="pick">Promote DB-2 and start the core stack on it</td><td>API fails over on its own; promote the standby</td></tr>
+        <tr><th scope="row">Work beyond the repo</th><td>None; this is today's shape</td><td class="pick">10 config changes, listed in <a href="#changes">Config changes</a></td><td>Those, plus a load balancer, the two replica fixes and multi-node LiveKit</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="twocol">
+    <div class="callout">
+      <svg class="ico over" aria-hidden="true"><use href="#i-over"/></svg>
+      <div>
+        <p><b>Server counts here are planning math.</b> The Go backend that serves all traffic has never been load-tested: every results table in <code>docs/PERF_BASELINE.md</code> is empty. The figures come from the Node benchmark it replaced and the repo's LiveKit notes.</p>
+        <p>Before launch, run <code>scripts/bench/run.sh</code> on a machine with CORE-1's spec and put the measured numbers into the calculator's planning figures.</p>
+      </div>
+    </div>
+    <div class="callout">
+      <svg class="ico info" aria-hidden="true"><use href="#i-info"/></svg>
+      <div>
+        <p><b>Choose a region near your users.</b> The repo points at India: routing uses <code>india-latest.osm.pbf</code>, Photon defaults to <code>REGION=in</code>, SMS goes through MSG91, and <code>nginx/sites/vaultchat.conf</code> measured a cold request from India at about 640 ms, 600 ms of it three round trips to Germany. A Mumbai region removes most of that. The topology is the same anywhere.</p>
+        <p><b>Keep the hostnames.</b> The app has <code>https://api.corefinite.com</code> compiled in (<code>constants/server.ts</code>). With the same names, moving servers is a DNS change and needs no app release.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================ ARCHITECTURE -->
+<section class="sec" id="architecture" aria-labelledby="arch-h">
+  <div class="sec-h">
+    <h2 id="arch-h">What runs</h2>
+    <p>One Go service does almost all of the work. Postgres is the system of record, Redis keeps several go-api processes in step, and two separate LiveKit deployments carry live media. The rest is edge and helpers.</p>
+  </div>
+
+  <div class="tbl-wrap">
+    <table>
+      <thead><tr><th scope="col">Component</th><th scope="col">Version</th><th scope="col">Job</th><th scope="col">Limited by</th><th scope="col">Server</th></tr></thead>
+      <tbody>
+        <tr><td class="nw"><span class="dot core"></span>nginx</td><td class="nw">host package, 1.24</td><td>TLS for <code>api.</code>, <code>stream.</code> and <code>admin.corefinite.com</code>; WebSocket upgrade; keep-alive pool to Caddy</td><td>connections</td><td class="nw">CORE-1</td></tr>
+        <tr><td class="nw"><span class="dot core"></span>Caddy</td><td class="nw">caddy:2-alpine</td><td>Router. <code>/internal/*</code> answers 404, <code>/livekit</code> goes to the calling SFU, <code>/golive-livekit</code> to the Go Live SFU, legal pages and <code>assetlinks.json</code> from disk, everything else to go-api</td><td>light</td><td class="nw">CORE-1</td></tr>
+        <tr><td class="nw"><span class="dot core"></span>go-api</td><td class="nw">Go 1.26 on alpine 3.20</td><td>Every REST module, CC-Wire realtime on <code>/ccwire/v1</code>, background jobs, LiveKit token signing, push</td><td>open connections, CPU</td><td class="nw">CORE-1</td></tr>
+        <tr><td class="nw"><span class="dot data"></span>PgBouncer</td><td class="nw">1.23.1-p2</td><td>Transaction pooling: up to 2,000 client connections share 40 real Postgres connections</td><td>light</td><td class="nw">CORE-1</td></tr>
+        <tr><td class="nw"><span class="dot data"></span>Postgres</td><td class="nw">16</td><td>Accounts, chats, E2EE ciphertext, key bundles, ShopBook, spaces. Migrations numbered up to 138</td><td>disk I/O, memory</td><td class="nw">CORE-1, standby on DB-2</td></tr>
+        <tr><td class="nw"><span class="dot data"></span>Redis</td><td class="nw">7, append-only</td><td>Cross-replica fan-out, presence, rate limits, membership cache, single-runner job locks</td><td>memory</td><td class="nw">CORE-1</td></tr>
+        <tr><td class="nw"><span class="dot media"></span>LiveKit, calls</td><td class="nw">v1.13.5, host network</td><td>Media for every 1:1 and group call. Frames are encrypted on the phone, so it forwards bytes it cannot read. Rooms up to 200</td><td>bandwidth</td><td class="nw">MEDIA-1</td></tr>
+        <tr><td class="nw"><span class="dot media"></span>coturn</td><td class="nw">4.6.2, host network</td><td>TURN/STUN relay for strict NATs and VaultBeam peer-to-peer transfers</td><td>bandwidth, UDP ports</td><td class="nw">MEDIA-1</td></tr>
+        <tr><td class="nw"><span class="dot media"></span>LiveKit, Go Live</td><td class="nw">v1.13.5, own Redis</td><td>Broadcast stage: up to 20 publishers, room cap 70. Separate keys, ports and room names from calls</td><td>bandwidth</td><td class="nw">LIVE-1</td></tr>
+        <tr><td class="nw"><span class="dot media"></span>Egress</td><td class="nw">v1.14.0</td><td>Renders the broadcast room in headless Chrome and writes 4-second HLS segments</td><td>CPU, 4 vCPU floor</td><td class="nw">LIVE-1</td></tr>
+        <tr><td class="nw"><span class="dot"></span>Valhalla</td><td class="nw">pin a digest</td><td>Road routing and distances. India tiles take 9.8 GB</td><td>memory, disk</td><td class="nw">CORE-1</td></tr>
+        <tr><td class="nw"><span class="dot"></span>Photon</td><td class="nw">optional</td><td>Address search kept in-house. Without it, searches go to <code>photon.komoot.io</code></td><td>disk</td><td class="nw">CORE-1</td></tr>
+        <tr><td class="nw"><span class="dot"></span>Prometheus, Grafana</td><td class="nw">v2.53.0, 11.1.0</td><td>Scrape go-api's <code>/internal/metrics</code>; SLI dashboard; alert rules in <code>monitoring/alerts.yml</code></td><td>light</td><td class="nw">DB-2</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="tbl-note">Not deployed: Kafka, the Node API and its fan-out worker sit behind the <code>legacy</code> profile and in-process fan-out replaced them. The calling-side egress container is optional, because no route starts egress on the calling project; broadcasts use Go Live's. The external games server (<code>games.corefinite.com</code>) is a prebuilt image with no source in this repo; carry it over only if you keep the games mini-app.</p>
+
+  <div class="sub"><h3>How requests move</h3><p>Colours follow the tier: <span class="dot core"></span>API <span class="dot data"></span>data <span class="dot media"></span>media <span class="dot"></span>external</p></div>
+  <div class="flows">
+    <article class="flow">
+      <div><h3>Send a message</h3><p class="why">Stored and forwarded as ciphertext: X3DH and Double Ratchet for 1:1, sender keys for groups.</p></div>
+      <ol class="hops">
+        <li class="hop client">Phone</li>
+        <li class="edge">HTTPS 443<svg aria-hidden="true"><use href="#i-arr"/></svg></li>
+        <li class="hop core">nginx<small>CORE-1</small></li>
+        <li class="edge">:8095<svg aria-hidden="true"><use href="#i-arr"/></svg></li>
+        <li class="hop core">Caddy</li>
+        <li class="edge">:4000<svg aria-hidden="true"><use href="#i-arr"/></svg></li>
+        <li class="hop core">go-api</li>
+        <li class="edge">:6432<svg aria-hidden="true"><use href="#i-arr"/></svg></li>
+        <li class="hop data">PgBouncer</li>
+        <li class="edge">:5432<svg aria-hidden="true"><use href="#i-arr"/></svg></li>
+        <li class="hop data">Postgres</li>
+      </ol>
+      <p class="foot">go-api then publishes through Redis, so whichever replica holds the recipient's CC-Wire socket delivers it. A recipient with no open socket gets an Expo push.</p>
+    </article>
+    <article class="flow">
+      <div><h3>Join a call</h3><p class="why">The SFU forwards encrypted frames and never transcodes, so it needs bandwidth, not CPU.</p></div>
+      <p class="lane-l">Signalling</p>
+      <ol class="hops">
+        <li class="hop client">Phone</li>
+        <li class="edge">wss 443 /livekit<svg aria-hidden="true"><use href="#i-arr"/></svg></li>
+        <li class="hop core">nginx → Caddy<small>CORE-1</small></li>
+        <li class="edge">private :7880<svg aria-hidden="true"><use href="#i-arr"/></svg></li>
+        <li class="hop media">LiveKit<small>MEDIA-1</small></li>
+      </ol>
+      <p class="lane-l">Media</p>
+      <ol class="hops">
+        <li class="hop client">Phone</li>
+        <li class="edge">UDP 7882 · TCP 7881<svg aria-hidden="true"><use href="#i-arr2"/></svg></li>
+        <li class="hop media">LiveKit<small>MEDIA-1</small></li>
+        <li class="edge">UDP 7882<svg aria-hidden="true"><use href="#i-arr2"/></svg></li>
+        <li class="hop client">Phones</li>
+      </ol>
+      <p class="foot">Behind a strict NAT the phone relays through coturn on 3478, 5349 or UDP 443. Roughly 600 kbps per forwarded video stream; a 10-person video call is about 54 Mbps.</p>
+    </article>
+    <article class="flow">
+      <div><h3>Go live</h3><p class="why">Broadcast media is not end-to-end encrypted by design, which is what lets a CDN cache it.</p></div>
+      <ol class="hops">
+        <li class="hop client">Host phone</li>
+        <li class="edge">UDP 7892<svg aria-hidden="true"><use href="#i-arr"/></svg></li>
+        <li class="hop media">Go Live SFU<small>LIVE-1</small></li>
+        <li class="edge">local<svg aria-hidden="true"><use href="#i-arr"/></svg></li>
+        <li class="hop media">Egress<small>Chrome + ffmpeg</small></li>
+        <li class="edge">HLS, 4 s<svg aria-hidden="true"><use href="#i-arr"/></svg></li>
+        <li class="hop">R2<small>vaultchat-broadcast</small></li>
+        <li class="edge">read<svg aria-hidden="true"><use href="#i-arr"/></svg></li>
+        <li class="hop core">go-api<small>origin</small></li>
+        <li class="edge">cache<svg aria-hidden="true"><use href="#i-arr"/></svg></li>
+        <li class="hop">Cloudflare CDN<small>stream.</small></li>
+        <li class="edge">HLS<svg aria-hidden="true"><use href="#i-arr"/></svg></li>
+        <li class="hop client">Viewers</li>
+      </ol>
+      <p class="foot">Viewers never join the room, so the audience is unbounded while the stage holds 20. Segments are cached for a year, playlists for 2 seconds.</p>
+    </article>
+    <article class="flow">
+      <div><h3>Send an attachment</h3><p class="why">File bytes never pass through your servers.</p></div>
+      <ol class="hops">
+        <li class="hop client">Phone</li>
+        <li class="edge">ask to upload<svg aria-hidden="true"><use href="#i-arr"/></svg></li>
+        <li class="hop core">go-api<small>presigned URL</small></li>
+      </ol>
+      <ol class="hops">
+        <li class="hop client">Phone</li>
+        <li class="edge">HTTPS PUT / GET<svg aria-hidden="true"><use href="#i-arr2"/></svg></li>
+        <li class="hop">R2<small>vaultchat-media · AES-256-GCM blob</small></li>
+      </ol>
+      <p class="foot">The presigned URL is signed for <code>S3_PUBLIC_ENDPOINT</code>, which must be the R2 S3 API host. A custom domain does not check signatures, so it cannot be the gate.</p>
+    </article>
+    <article class="flow">
+      <div><h3>Ring a phone that is asleep</h3><p class="why">Needs the Firebase service account mounted at <code>/run/secrets/firebase-sa.json</code>.</p></div>
+      <ol class="hops">
+        <li class="hop core">go-api</li>
+        <li class="edge">FCM v1 data<svg aria-hidden="true"><use href="#i-arr"/></svg></li>
+        <li class="hop">FCM</li>
+        <li class="edge">wake<svg aria-hidden="true"><use href="#i-arr"/></svg></li>
+        <li class="hop client">Phone<small>full-screen ring</small></li>
+      </ol>
+      <ol class="hops">
+        <li class="hop core">go-api</li>
+        <li class="edge">exp.host<svg aria-hidden="true"><use href="#i-arr"/></svg></li>
+        <li class="hop">Expo push</li>
+        <li class="edge">notify<svg aria-hidden="true"><use href="#i-arr"/></svg></li>
+        <li class="hop client">Phone<small>message banner</small></li>
+      </ol>
+      <p class="foot">Both are outbound HTTPS from CORE-1. Without the Firebase file there is no ring when the app has been killed.</p>
+    </article>
+    <article class="flow">
+      <div><h3>Media servers report back</h3><p class="why">Signed webhooks are the only way go-api learns that a broadcast has its first segment.</p></div>
+      <ol class="hops">
+        <li class="hop media">LiveKit<small>MEDIA-1 · LIVE-1</small></li>
+        <li class="edge">private :8097<svg aria-hidden="true"><use href="#i-arr"/></svg></li>
+        <li class="hop core">Caddy<small>private listener</small></li>
+        <li class="edge">:4000<svg aria-hidden="true"><use href="#i-arr"/></svg></li>
+        <li class="hop core">go-api<small>/internal/…/webhook</small></li>
+      </ol>
+      <p class="foot">Without this path every broadcast stays in "starting" until a reaper cleans it up. The listener is new: change S2 below.</p>
+    </article>
+  </div>
+</section>
+
+<!-- ============================================================ TOPOLOGY -->
+<section class="sec" id="topology" aria-labelledby="topo-h">
+  <div class="sec-h">
+    <h2 id="topo-h">Where it runs</h2>
+    <p>Phones reach CORE-1 on 443 for everything except live media, which goes straight to MEDIA-1 and LIVE-1 over UDP. The servers talk to each other only on the private network.</p>
+  </div>
+
+  <figure class="fig">
+    <div class="fig-scroll">
+      <svg viewBox="0 0 1080 650" role="img" aria-label="Four servers in one region. Phones reach CORE-1 on TCP 443 for the API, WebSocket and call signalling, MEDIA-1 on UDP 7882, TCP 7881 and TURN ports for call media, and LIVE-1 on UDP 7892 or TCP 7891 for broadcast hosts. Viewers watch through the Cloudflare CDN, which fetches from CORE-1. On the private network CORE-1 connects to MEDIA-1 port 7880 and LIVE-1 port 7890, both report back to CORE-1 port 8097, and DB-2 streams the database from CORE-1 port 5432.">
+        <defs>
+          <marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="svg-ah"/></marker>
+        </defs>
+
+        <text x="30" y="18" class="svg-z">PUBLIC INTERNET</text>
+        <rect x="30" y="30" width="150" height="40" rx="9" class="svg-ext"/>
+        <text x="105" y="55" text-anchor="middle" class="svg-t">Broadcast viewers</text>
+        <line x1="105" y1="70" x2="105" y2="101" class="svg-ln" marker-end="url(#ah)"/>
+        <text x="113" y="91" class="svg-lab">HLS</text>
+        <rect x="30" y="104" width="150" height="46" rx="9" class="svg-ext"/>
+        <text x="105" y="123" text-anchor="middle" class="svg-t">Cloudflare CDN</text>
+        <text x="105" y="140" text-anchor="middle" class="svg-m">stream.corefinite.com</text>
+
+        <rect x="210" y="30" width="620" height="40" rx="9" class="svg-client"/>
+        <text x="520" y="55" text-anchor="middle" class="svg-t">VaultChat app on phones · Android and iOS</text>
+
+        <rect x="860" y="30" width="190" height="120" rx="9" class="svg-ext"/>
+        <text x="874" y="51" class="svg-t">Managed services</text>
+        <text x="874" y="71" class="svg-t2">R2 storage · Cloudflare DNS</text>
+        <text x="874" y="89" class="svg-t2">FCM · Expo push</text>
+        <text x="874" y="107" class="svg-t2">MSG91 SMS · Resend email</text>
+        <text x="874" y="125" class="svg-t2">Klipy GIFs · Let's Encrypt</text>
+        <text x="874" y="142" class="svg-m">outbound HTTPS only</text>
+
+        <!-- region zone, drawn first so arrows sit on top -->
+        <rect x="18" y="192" width="1044" height="444" rx="16" class="svg-zone"/>
+
+        <!-- public ingress -->
+        <line x1="105" y1="150" x2="105" y2="222" class="svg-ln" marker-end="url(#ah)"/>
+        <text x="113" y="172" class="svg-lab">origin fetch</text>
+        <line x1="240" y1="70" x2="240" y2="222" class="svg-ln" marker-end="url(#ah)"/>
+        <text x="248" y="100" class="svg-lab">443/tcp</text>
+        <text x="248" y="115" class="svg-t2">API · WebSocket</text>
+        <text x="248" y="130" class="svg-t2">call signalling</text>
+        <line x1="505" y1="74" x2="505" y2="222" class="svg-ln" marker-start="url(#ah)" marker-end="url(#ah)"/>
+        <text x="513" y="100" class="svg-lab">UDP 7882 · TCP 7881</text>
+        <text x="513" y="115" class="svg-lab">TURN 3478 · 5349</text>
+        <text x="513" y="130" class="svg-lab">UDP 443 → 3478</text>
+        <text x="513" y="145" class="svg-t2">call media, both ways</text>
+        <line x1="736" y1="74" x2="736" y2="222" class="svg-ln" marker-start="url(#ah)" marker-end="url(#ah)"/>
+        <text x="744" y="164" class="svg-lab">UDP 7892 · TCP 7891</text>
+        <text x="744" y="179" class="svg-t2">stage hosts only</text>
+
+
+        <!-- CORE-1 -->
+        <rect x="34" y="226" width="340" height="240" rx="12" class="svg-box s-core"/>
+        <rect x="48" y="240" width="74" height="24" rx="6" class="p-core"/>
+        <text x="85" y="256" text-anchor="middle" class="svg-pl">CORE-1</text>
+        <text x="132" y="256" class="svg-t2">API + primary database</text>
+        <rect x="50" y="282" width="8" height="8" rx="1.5" class="f-core"/><text x="66" y="290" class="svg-t">nginx · TLS edge</text><text x="360" y="290" text-anchor="end" class="svg-m">80 · 443</text>
+        <rect x="50" y="301" width="8" height="8" rx="1.5" class="f-core"/><text x="66" y="309" class="svg-t">Caddy router</text><text x="360" y="309" text-anchor="end" class="svg-m">8095 · 8097</text>
+        <rect x="50" y="320" width="8" height="8" rx="1.5" class="f-core"/><text x="66" y="328" class="svg-t">go-api</text><text x="360" y="328" text-anchor="end" class="svg-m">4000</text>
+        <rect x="50" y="339" width="8" height="8" rx="1.5" class="f-data"/><text x="66" y="347" class="svg-t">PgBouncer</text><text x="360" y="347" text-anchor="end" class="svg-m">6432</text>
+        <rect x="50" y="358" width="8" height="8" rx="1.5" class="f-data"/><text x="66" y="366" class="svg-t">Postgres 16 primary</text><text x="360" y="366" text-anchor="end" class="svg-m">5432</text>
+        <rect x="50" y="377" width="8" height="8" rx="1.5" class="f-data"/><text x="66" y="385" class="svg-t">Redis 7</text><text x="360" y="385" text-anchor="end" class="svg-m">6379</text>
+        <rect x="50" y="396" width="8" height="8" rx="1.5" class="f-ext"/><text x="66" y="404" class="svg-t">Valhalla (+ Photon)</text><text x="360" y="404" text-anchor="end" class="svg-m">8002 · 2322</text>
+        <rect x="50" y="415" width="8" height="8" rx="1.5" class="f-ext"/><text x="66" y="423" class="svg-t">Nightly dump → R2</text><text x="360" y="423" text-anchor="end" class="svg-m">cron</text>
+        <text x="50" y="452" class="svg-t2">16 vCPU · 64 GB · 2 × 1 TB NVMe</text>
+
+        <!-- MEDIA-1 -->
+        <rect x="400" y="226" width="210" height="240" rx="12" class="svg-box s-media"/>
+        <rect x="414" y="240" width="82" height="24" rx="6" class="p-media"/>
+        <text x="455" y="256" text-anchor="middle" class="svg-pl">MEDIA-1</text>
+        <text x="504" y="256" class="svg-t2">Calls + TURN</text>
+        <rect x="414" y="282" width="8" height="8" rx="1.5" class="f-media"/><text x="428" y="290" class="svg-t">LiveKit SFU, calls</text><text x="428" y="305" class="svg-m">7880 · 7881 · 7882</text>
+        <rect x="414" y="319" width="8" height="8" rx="1.5" class="f-media"/><text x="428" y="327" class="svg-t">coturn TURN/STUN</text><text x="428" y="342" class="svg-m">3478 · 5349 · 49152+</text>
+        <rect x="414" y="356" width="8" height="8" rx="1.5" class="f-data"/><text x="428" y="364" class="svg-t">Redis for LiveKit</text><text x="428" y="379" class="svg-m">127.0.0.1:16379</text>
+        <text x="414" y="452" class="svg-t2">8 vCPU · 16 GB · 1 Gbps</text>
+
+        <!-- LIVE-1 -->
+        <rect x="636" y="226" width="200" height="240" rx="12" class="svg-box s-media"/>
+        <rect x="650" y="240" width="70" height="24" rx="6" class="p-media"/>
+        <text x="685" y="256" text-anchor="middle" class="svg-pl">LIVE-1</text>
+        <text x="728" y="256" class="svg-t2">Go Live</text>
+        <rect x="650" y="282" width="8" height="8" rx="1.5" class="f-media"/><text x="664" y="290" class="svg-t">Go Live SFU</text><text x="664" y="305" class="svg-m">7890 · 7891 · 7892</text>
+        <rect x="650" y="319" width="8" height="8" rx="1.5" class="f-media"/><text x="664" y="327" class="svg-t">Egress → HLS</text><text x="664" y="342" class="svg-m">Chrome + ffmpeg, 4+ vCPU</text>
+        <rect x="650" y="356" width="8" height="8" rx="1.5" class="f-data"/><text x="664" y="364" class="svg-t">Redis for Go Live</text><text x="664" y="379" class="svg-m">127.0.0.1:16380</text>
+        <text x="650" y="452" class="svg-t2">16 vCPU · 32 GB · 1 Gbps</text>
+
+        <!-- DB-2 -->
+        <rect x="862" y="226" width="186" height="240" rx="12" class="svg-box s-data"/>
+        <rect x="876" y="240" width="58" height="24" rx="6" class="p-data"/>
+        <text x="905" y="256" text-anchor="middle" class="svg-pl">DB-2</text>
+        <text x="942" y="256" class="svg-t2">Standby</text>
+        <rect x="876" y="282" width="8" height="8" rx="1.5" class="f-data"/><text x="890" y="290" class="svg-t">Postgres 16 standby</text><text x="890" y="305" class="svg-m">WAL from CORE-1</text>
+        <rect x="876" y="319" width="8" height="8" rx="1.5" class="f-ext"/><text x="890" y="327" class="svg-t">Prometheus · Grafana</text><text x="890" y="342" class="svg-m">scrapes CORE-1:8097</text>
+        <rect x="876" y="356" width="8" height="8" rx="1.5" class="f-ext"/><text x="890" y="364" class="svg-t">Failover target</text><text x="890" y="379" class="svg-m">can run the core stack</text>
+        <text x="876" y="452" class="svg-t2">8 vCPU · 32 GB · 2 × 1 TB</text>
+
+        <!-- private links: label = listening port on that end -->
+        <path d="M310,466 V496 H505 V466" class="svg-priv" marker-start="url(#ah)" marker-end="url(#ah)"/>
+        <text x="318" y="490" class="svg-lab">8097</text>
+        <text x="497" y="490" text-anchor="end" class="svg-lab">7880</text>
+        <path d="M230,466 V526 H736 V466" class="svg-priv" marker-start="url(#ah)" marker-end="url(#ah)"/>
+        <text x="238" y="520" class="svg-lab">8097</text>
+        <text x="728" y="520" text-anchor="end" class="svg-lab">7890</text>
+        <path d="M150,466 V556 H955 V466" class="svg-priv" marker-start="url(#ah)" marker-end="url(#ah)"/>
+        <text x="158" y="550" class="svg-lab">5432 · 8097</text>
+        <text x="947" y="550" text-anchor="end" class="svg-t2">replication, metrics</text>
+
+        <!-- legend -->
+        <rect x="34" y="584" width="9" height="9" rx="1.5" class="f-core"/><text x="49" y="592" class="svg-t2">API tier</text>
+        <rect x="120" y="584" width="9" height="9" rx="1.5" class="f-data"/><text x="135" y="592" class="svg-t2">Data tier</text>
+        <rect x="212" y="584" width="9" height="9" rx="1.5" class="f-media"/><text x="227" y="592" class="svg-t2">Media tier</text>
+        <rect x="310" y="584" width="9" height="9" rx="1.5" class="f-ext"/><text x="325" y="592" class="svg-t2">Helper</text>
+        <text x="392" y="592" class="svg-t2">Private-link numbers are the listening port on that server.</text>
+        <text x="34" y="620" class="svg-z">ONE REGION · PRIVATE NETWORK 10.20.0.0/24</text>
+      </svg>
+    </div>
+    <figcaption>Recommended launch topology. Only the ports drawn at the top are reachable from the internet; 7880, 7890, 8097 and 5432 are open to the listed private addresses only. Bulk bytes (attachments, HLS segments, database dumps) go to R2 over outbound HTTPS.</figcaption>
+  </figure>
+
+  <div class="sub"><h3>Per-server bring-up commands</h3><p>All four servers use the same repo checkout; only the services started differ.</p></div>
+  <div class="tbl-wrap">
+    <table>
+      <thead><tr><th scope="col">Server</th><th scope="col">Compose services</th><th scope="col">Host pieces outside Docker</th><th scope="col">Its own <code>./.env</code> needs</th></tr></thead>
+      <tbody>
+        <tr><td><span class="plate core sm">CORE-1</span></td><td>All three compose files (<code>dc</code> alias). <code>postgres pgbouncer redis</code>, then <code>go-api</code>, <code>valhalla</code>, <code>caddy</code></td><td>nginx, certbot, admin panel files, <code>vaultchat-logs</code> service, firewall units, backup cron</td><td>Sections A and B of <code>deploy/env.example</code>, <code>secrets/</code></td></tr>
+        <tr><td><span class="plate data sm">DB-2</span></td><td><code>--profile monitoring</code>: <code>prometheus grafana</code>. Postgres 16 standby from the same <code>postgres:16</code> image</td><td>Replication config, Grafana contact point</td><td>No app secrets. A replication password; change Grafana's default admin login on first use</td></tr>
+        <tr><td><span class="plate media sm">MEDIA-1</span></td><td><code>redis coturn</code>, then <code>--profile sfu</code> <code>livekit</code> only</td><td>certbot for <code>turn.</code> plus deploy hook, UDP 443 → 3478 redirect unit, UDP buffer sysctl</td><td><code>TURN_SECRET</code>, <code>TURN_EXTERNAL_IP</code>, <code>LIVEKIT_KEYS</code></td></tr>
+        <tr><td><span class="plate media sm">LIVE-1</span></td><td><code>--profile golive</code>: <code>golive-redis golive-livekit</code>, then <code>golive-egress</code> with <code>--no-deps</code></td><td>UDP buffer sysctl</td><td><code>GOLIVE_LIVEKIT_KEYS</code>, R2 values for <code>S3_*</code>, <code>BROADCAST_BUCKET</code>, <code>GOLIVE_EGRESS_CPUS=12</code>, <code>GOLIVE_EGRESS_MEMORY=6g</code></td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- ============================================================ CAPACITY -->
+<section class="sec" id="capacity" aria-labelledby="cap-h">
+  <div class="sec-h">
+    <h2 id="cap-h">How big</h2>
+    <p>Each tier runs out of something different: go-api of connections and delivery throughput, MEDIA-1 of bandwidth, LIVE-1 of CPU, Postgres of disk. These are the numbers the sizing rests on and where each came from.</p>
+  </div>
+
+  <div class="tbl-wrap">
+    <table>
+      <thead><tr><th scope="col">Figure</th><th scope="col">Value</th><th scope="col">Kind</th><th scope="col">Source</th></tr></thead>
+      <tbody>
+        <tr><td>go-api memory at idle</td><td>8.7 MiB</td><td><span class="tag m">Measured, prod</span></td><td><code>docs/SECOND_REPLICA_READINESS.md</code> §6</td></tr>
+        <tr><td>Today's load</td><td>Load average 0.14 on 12 threads, 55 GB free, 18 accounts</td><td><span class="tag m">Measured, prod</span></td><td>same, 13 Sep 2026</td></tr>
+        <tr><td>Connections held by one process</td><td>5,000 with zero failures, about 20 KB each</td><td><span class="tag m">Measured, Node</span></td><td><code>vaultchat-backend/loadtest/REPORT.md</code></td></tr>
+        <tr><td>Message delivery, one process</td><td>Clean to 2,500 deliveries/s; knee near 3,000/s, all in 50-member groups</td><td><span class="tag m">Measured, Node</span></td><td>same</td></tr>
+        <tr><td>Planning ceiling per go-api process</td><td>1,500 deliveries/s</td><td><span class="tag c">Repo threshold</span></td><td>REPORT.md: revisit at half the knee</td></tr>
+        <tr><td>Go backend under load</td><td>Never measured</td><td><span class="tag g">Gap</span></td><td><code>docs/PERF_BASELINE.md</code></td></tr>
+        <tr><td>Postgres connections</td><td>40 real connections shared by every replica; 2,000 client slots; <code>max_connections</code> 100</td><td><span class="tag c">Config</span></td><td><code>docker-compose.yml</code> pgbouncer</td></tr>
+        <tr><td>SFU bandwidth</td><td>About 600 kbps per forwarded video stream; 10-person call about 54 Mbps</td><td><span class="tag e">Repo estimate</span></td><td><code>docs/SFU_DEPLOY.md</code></td></tr>
+        <tr><td>Audio stream</td><td>About 40 kbps</td><td><span class="tag a">Assumption</span></td><td>typical Opus voice</td></tr>
+        <tr><td>One LiveKit node</td><td>Enough below the low thousands of participants</td><td><span class="tag e">Repo estimate</span></td><td><code>docs/SFU_DEPLOY.md</code></td></tr>
+        <tr><td>Room limits</td><td>Calls 200 per room; Go Live room 70, stage 20</td><td><span class="tag c">Config</span></td><td><code>livekit/livekit.yaml</code>, <code>livekit/golive.yaml</code></td></tr>
+        <tr><td>Broadcast rendering</td><td>At least 4 vCPU per egress; below that every broadcast stalls in "starting"</td><td><span class="tag m">Measured, bench</span></td><td><code>docker-compose.yml</code> golive-egress</td></tr>
+        <tr><td>TURN relay</td><td>Ports 49152–65535, 100 allocations per user, 5,000 in total</td><td><span class="tag c">Config</span></td><td><code>coturn/turnserver.conf</code></td></tr>
+        <tr><td>Stored message</td><td>About 1.5 KB with indexes</td><td><span class="tag a">Assumption</span></td><td>E2EE envelope plus row and index overhead</td></tr>
+        <tr><td>Database restore</td><td>Under 10 seconds for today's database</td><td><span class="tag m">Measured, prod</span></td><td><code>docs/BACKUP_VERIFICATION.md</code></td></tr>
+        <tr><td>Routing tiles</td><td>9.8 GB for India; rebuilding takes hours</td><td><span class="tag m">Measured, prod</span></td><td><code>docs/SERVER_INVENTORY.md</code> §1.3</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="sub"><h3>Sizing calculator</h3><p>Starts on the repo's own 10,000-user launch bar. Change any input.</p></div>
+  <div class="calc" id="calc">
+    <div class="presets" role="group" aria-label="Load presets">
+      <span class="lbl">Presets</span>
+      <button type="button" data-preset="beta" aria-pressed="false">Closed beta · 1K</button>
+      <button type="button" data-preset="launch" aria-pressed="true">Launch · 10K</button>
+      <button type="button" data-preset="growth" aria-pressed="false">Growth · 100K</button>
+      <button type="button" data-preset="scale" aria-pressed="false">Scale · 1M</button>
+    </div>
+    <div class="calc-grid">
+      <form id="calc-form" autocomplete="off" novalidate>
+        <fieldset>
+          <legend>Users</legend>
+          <div class="fld"><label for="in-users">Registered accounts</label><div class="inp"><input id="in-users" type="number" inputmode="numeric" min="0" step="1000" value="10000"></div></div>
+          <div class="fld"><label for="in-dau">Active each day</label><div class="inp"><input id="in-dau" type="number" inputmode="decimal" min="0" max="100" step="1" value="40"><span>%</span></div></div>
+          <div class="fld"><label for="in-conc">Connected at the peak moment</label><div class="inp"><input id="in-conc" type="number" inputmode="decimal" min="0" max="100" step="1" value="10"><span>%</span></div></div>
+        </fieldset>
+        <fieldset>
+          <legend>Messaging</legend>
+          <div class="fld"><label for="in-msgs">Messages per active user per day</label><div class="inp"><input id="in-msgs" type="number" inputmode="decimal" min="0" step="5" value="40"></div></div>
+          <div class="fld"><label for="in-peak">Peak hour vs daily average</label><div class="inp"><input id="in-peak" type="number" inputmode="decimal" min="1" step="0.5" value="3"><span>×</span></div></div>
+          <div class="fld"><label for="in-fan">Socket deliveries per message, receipts included</label><div class="inp"><input id="in-fan" type="number" inputmode="decimal" min="1" step="1" value="3"></div></div>
+        </fieldset>
+        <fieldset>
+          <legend>Calls</legend>
+          <div class="fld"><label for="in-call">Connected users in a call at peak</label><div class="inp"><input id="in-call" type="number" inputmode="decimal" min="0" max="100" step="0.5" value="3"><span>%</span></div></div>
+          <div class="fld"><label for="in-video">Calls with video</label><div class="inp"><input id="in-video" type="number" inputmode="decimal" min="0" max="100" step="5" value="40"><span>%</span></div></div>
+          <div class="fld"><label for="in-part">People per call, average</label><div class="inp"><input id="in-part" type="number" inputmode="decimal" min="2" step="0.1" value="2.4"></div></div>
+        </fieldset>
+        <fieldset>
+          <legend>Go Live</legend>
+          <div class="fld"><label for="in-bcasts">Broadcasts live at once</label><div class="inp"><input id="in-bcasts" type="number" inputmode="numeric" min="0" step="1" value="2"></div></div>
+          <div class="fld"><label for="in-viewers">Viewers per broadcast</label><div class="inp"><input id="in-viewers" type="number" inputmode="numeric" min="0" step="50" value="300"></div></div>
+        </fieldset>
+        <fieldset>
+          <legend>Storage and traffic</legend>
+          <div class="fld"><label for="in-mb">Attachments per active user per day</label><div class="inp"><input id="in-mb" type="number" inputmode="decimal" min="0" step="1" value="4"><span>MB</span></div></div>
+          <div class="fld"><label for="in-mdays">Attachment retention</label><div class="inp"><input id="in-mdays" type="number" inputmode="numeric" min="0" step="1" value="30"><span>days</span></div></div>
+          <div class="fld"><label for="in-phours">Hours a day near peak</label><div class="inp"><input id="in-phours" type="number" inputmode="decimal" min="0" max="24" step="1" value="6"><span>h</span></div></div>
+        </fieldset>
+        <label class="tog" for="in-two"><input type="checkbox" id="in-two"><span>Run two go-api processes on CORE-1. Needs changes C1 and C2 from <code>docs/SECOND_REPLICA_READINESS.md</code> first.</span></label>
+        <details class="adv">
+          <summary>Planning figures (replace with bench results)</summary>
+          <div class="adv-b">
+            <div class="fld"><label for="f-sock">Connections per go-api process <span class="tag m">Node</span></label><div class="inp"><input id="f-sock" type="number" min="1" step="500" value="5000"></div></div>
+            <div class="fld"><label for="f-deliv">Deliveries/s per process <span class="tag c">Repo</span></label><div class="inp"><input id="f-deliv" type="number" min="1" step="100" value="1500"></div></div>
+            <div class="fld"><label for="f-vid">Video per forwarded stream <span class="tag e">Repo</span></label><div class="inp"><input id="f-vid" type="number" min="0" step="0.05" value="0.6"><span>Mbps</span></div></div>
+            <div class="fld"><label for="f-aud">Audio per forwarded stream <span class="tag a">Assumed</span></label><div class="inp"><input id="f-aud" type="number" min="0" step="0.01" value="0.04"><span>Mbps</span></div></div>
+            <div class="fld"><label for="f-sfu">Usable SFU egress per media server <span class="tag a">Assumed</span></label><div class="inp"><input id="f-sfu" type="number" min="1" step="50" value="600"><span>Mbps</span></div></div>
+            <div class="fld"><label for="f-pnode">Call participants per media server <span class="tag e">Repo</span></label><div class="inp"><input id="f-pnode" type="number" min="1" step="100" value="1000"></div></div>
+            <div class="fld"><label for="f-vcpu">vCPU per live broadcast <span class="tag m">Bench</span></label><div class="inp"><input id="f-vcpu" type="number" min="0.5" step="0.5" value="4"></div></div>
+            <div class="fld"><label for="f-egress">Egress vCPU per LIVE server <span class="tag a">Assumed</span></label><div class="inp"><input id="f-egress" type="number" min="1" step="1" value="12"></div></div>
+            <div class="fld"><label for="f-hls">HLS bitrate per viewer <span class="tag a">Assumed</span></label><div class="inp"><input id="f-hls" type="number" min="0" step="0.5" value="2.5"><span>Mbps</span></div></div>
+            <div class="fld"><label for="f-row">Stored size per message <span class="tag a">Assumed</span></label><div class="inp"><input id="f-row" type="number" min="0" step="0.1" value="1.5"><span>KB</span></div></div>
+            <div class="fld"><label for="f-dbcap">First-year database budget on CORE-1 <span class="tag a">Assumed</span></label><div class="inp"><input id="f-dbcap" type="number" min="1" step="50" value="600"><span>GB</span></div></div>
+          </div>
+        </details>
+      </form>
+
+      <div class="calc-out" aria-live="polite">
+        <div class="verdict" id="out-verdict" data-state="ok">
+          <svg class="ico ok" aria-hidden="true"><use href="#i-ok"/></svg>
+          <div><h4>The four-server launch topology covers this load</h4><p>Largest driver is under half of what the launch servers hold.</p></div>
+        </div>
+        <p class="out-h">At the peak moment</p>
+        <div class="kpis" id="out-kpis"></div>
+        <p class="out-h">Against the launch topology</p>
+        <div class="meters" id="out-meters"></div>
+        <p class="out-h" id="out-bom-h">Servers to provision</p>
+        <div class="tbl-wrap">
+          <table class="bom">
+            <thead><tr><th scope="col">Server</th><th scope="col" class="num">Count</th><th scope="col">Each</th><th scope="col">Sized by</th></tr></thead>
+            <tbody id="out-bom"></tbody>
+            <tfoot><tr><td>Servers you run</td><td class="cnt" id="out-total">4</td><td colspan="2" id="out-total-note"></td></tr></tfoot>
+          </table>
+        </div>
+        <p class="fine" id="out-notes" style="margin-top:12px"></p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================ NETWORK -->
+<section class="sec" id="network" aria-labelledby="net-h">
+  <div class="sec-h">
+    <h2 id="net-h">Network, DNS and TLS</h2>
+    <p>Default-deny everywhere. Anything not in this table stays closed, and Docker-published ports need their own drop rules because Docker bypasses UFW.</p>
+  </div>
+
+  <div class="tbl-wrap">
+    <table>
+      <thead><tr><th scope="col">Server</th><th scope="col">Port</th><th scope="col">Protocol</th><th scope="col">Allowed from</th><th scope="col">Carries</th></tr></thead>
+      <tbody>
+        <tr><td rowspan="5"><span class="plate core sm">CORE-1</span></td><td class="num">443</td><td>TCP</td><td>Internet</td><td>API, CC-Wire WebSocket, LiveKit signalling (<code>/livekit</code>, <code>/golive-livekit</code>), HLS origin, admin</td></tr>
+        <tr><td class="num">80</td><td>TCP</td><td>Internet</td><td>Redirect to HTTPS; ACME challenges</td></tr>
+        <tr><td class="num">8097</td><td>TCP</td><td>MEDIA-1, LIVE-1, DB-2 private IPs</td><td>New private Caddy listener: LiveKit webhooks and <code>/internal/metrics</code> (S2)</td></tr>
+        <tr><td class="num">5432</td><td>TCP</td><td>DB-2 private IP</td><td>Streaming replication (S8)</td></tr>
+        <tr><td class="num">8443</td><td>UDP</td><td>Internet, optional</td><td>HTTP/3 edge from <code>docs/HTTP3_EDGE.md</code></td></tr>
+        <tr><td rowspan="7"><span class="plate media sm">MEDIA-1</span></td><td class="num">3478</td><td>UDP + TCP</td><td>Internet</td><td>STUN and TURN</td></tr>
+        <tr><td class="num">5349</td><td>UDP + TCP</td><td>Internet</td><td>TURN over TLS/DTLS for networks that only pass TLS</td></tr>
+        <tr><td class="num">443</td><td>UDP</td><td>Internet</td><td>Redirected to 3478 (IPv4 and IPv6) for networks that only allow 443</td></tr>
+        <tr><td class="num">49152–65535</td><td>UDP</td><td>Internet</td><td>TURN relay allocations</td></tr>
+        <tr><td class="num">7881 · 7882</td><td>TCP · UDP</td><td>Internet</td><td>Call media, TCP as the fallback</td></tr>
+        <tr><td class="num">7880</td><td>TCP</td><td>CORE-1 private IP</td><td>Signalling proxied by Caddy and go-api's room API</td></tr>
+        <tr><td class="num">80</td><td>TCP</td><td>Internet</td><td>ACME HTTP-01 for <code>turn.corefinite.com</code> at issue and renewal, or use DNS-01 and keep it closed</td></tr>
+        <tr><td rowspan="2"><span class="plate media sm">LIVE-1</span></td><td class="num">7891 · 7892</td><td>TCP · UDP</td><td>Internet</td><td>Media from stage hosts</td></tr>
+        <tr><td class="num">7890</td><td>TCP</td><td>CORE-1 private IP</td><td>Signalling proxied by Caddy and egress start/stop from go-api</td></tr>
+        <tr><td><span class="plate data sm">DB-2</span></td><td class="num">—</td><td>—</td><td>Nothing inbound</td><td>Grafana on 3001 through an SSH tunnel only</td></tr>
+        <tr><td>All four</td><td class="num">22</td><td>TCP</td><td>Admin IPs only</td><td>SSH with keys, password login off, fail2ban</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="tbl-note">Loopback only, never published: Caddy 8095, go-api 4000, Redis 16379 and 16380, Valhalla 8002, Photon 2322, Grafana 3001. Outbound HTTPS from CORE-1: R2, <code>fcm.googleapis.com</code>, <code>exp.host</code>, MSG91, Resend, Klipy, <code>photon.komoot.io</code> unless Photon runs locally, Sentry. LIVE-1 and CORE-1 reach R2 for segments and dumps.</p>
+
+  <div class="twocol">
+    <div>
+      <div class="sub" style="margin-top:22px"><h3>DNS records</h3></div>
+      <div class="tbl-wrap">
+        <table>
+          <thead><tr><th scope="col">Name</th><th scope="col">Points to</th><th scope="col">Cloudflare proxy</th></tr></thead>
+          <tbody>
+            <tr><td><code>api.corefinite.com</code></td><td>CORE-1</td><td>Off, as today</td></tr>
+            <tr><td><code>stream.corefinite.com</code></td><td>CORE-1</td><td>On (CDN for HLS)</td></tr>
+            <tr><td><code>admin.corefinite.com</code></td><td>CORE-1</td><td>On; restrict it with Cloudflare Access or a WAF IP rule</td></tr>
+            <tr><td><code>turn.corefinite.com</code></td><td>MEDIA-1</td><td>Off. TURN cannot be proxied</td></tr>
+            <tr><td><code>games.corefinite.com</code></td><td>CORE-1</td><td>Only if the games server moves</td></tr>
+            <tr><td>Resend sender records</td><td>SPF, DKIM as Resend lists them</td><td>Off</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="tbl-note">There is no wildcard record. Every new name needs its own record before its vhost or certificate can work. Set TTL to 60 seconds a day before any cutover.</p>
+    </div>
+    <div>
+      <div class="sub" style="margin-top:22px"><h3>Certificates</h3></div>
+      <div class="tbl-wrap">
+        <table>
+          <thead><tr><th scope="col">Where</th><th scope="col">Names</th><th scope="col">Notes</th></tr></thead>
+          <tbody>
+            <tr><td><span class="plate core sm">CORE-1</span></td><td><code>api</code> + <code>stream</code>, <code>admin</code></td><td>certbot with the nginx plugin, renewed by <code>certbot.timer</code></td></tr>
+            <tr><td><span class="plate media sm">MEDIA-1</span></td><td><code>turn</code></td><td>Issue before coturn first starts. A deploy hook copies it to <code>coturn/certs/</code>, owned 65534:65534, key mode 640, then restarts coturn</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="tbl-note">Let's Encrypt allows 5 duplicate certificates per name set per week. When you keep the same names, copy <code>/etc/letsencrypt</code> from the old box instead of reissuing. If DNS still points at the old box, HTTP-01 cannot succeed; use the copy or a DNS-01 challenge.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================ PREREQS -->
+<section class="sec" id="prereqs" aria-labelledby="pre-h">
+  <div class="sec-h">
+    <h2 id="pre-h">What to have before go-live</h2>
+    <p>Most of this cannot be scripted: credentials issued by other companies, keys that must never change, and data that takes hours to rebuild. Ticks are saved in this browser only.</p>
+  </div>
+  <div class="chk-top"><p id="chk-total">0 done</p><button type="button" class="btn" id="chk-clear">Clear ticks</button></div>
+  <div class="chk-groups">
+    <section class="chk-group" aria-labelledby="g1">
+      <header><h3 id="g1">Accounts and keys from other companies</h3><span class="chk-count"></span></header>
+      <label class="chk" for="p-cf"><input type="checkbox" id="p-cf"><span><span class="tag e">Required</span>Access to the Cloudflare account that owns <code>corefinite.com</code>. Its credentials are not on the current box; find them first.</span></label>
+      <label class="chk" for="p-r2"><input type="checkbox" id="p-r2"><span><span class="tag e">Required</span>R2 buckets <code>vaultchat-media</code>, <code>vaultchat-beam</code> (VaultBeam and <code>db-backups/</code>) and a new <code>vaultchat-broadcast</code>, with one S3 token per use. A single revoked token stopped off-site backups for seven nights in September.</span></label>
+      <label class="chk" for="p-fcm"><input type="checkbox" id="p-fcm"><span><span class="tag e">Required</span>Firebase service account JSON for project <code>vaultchatprod01</code>, saved as <code>secrets/fcm-service-account.json</code>.</span></label>
+      <label class="chk" for="p-msg91"><input type="checkbox" id="p-msg91"><span><span class="tag e">Required</span>MSG91 auth key and widget ID. SMS OTP is the login path; without MSG91 the send fails.</span></label>
+      <label class="chk" for="p-resend"><input type="checkbox" id="p-resend"><span><span class="tag e">Required</span>Resend API key and a verified sender domain for email OTP and recovery.</span></label>
+      <label class="chk" for="p-google"><input type="checkbox" id="p-google"><span><span class="tag e">Required</span>Google Web Client ID, the same one the app ships, for Google Sign-In.</span></label>
+      <label class="chk" for="p-klipy"><input type="checkbox" id="p-klipy"><span><span class="tag e">Required</span>Klipy production key. The test key allows 100 calls an hour.</span></label>
+      <label class="chk" for="p-play"><input type="checkbox" id="p-play"><span><span class="tag e">Required</span>Play app-signing SHA-256 added to <code>caddy/public/assetlinks.json</code> after the first upload, or <code>/live/join</code> links open a browser.</span></label>
+      <label class="chk" for="p-sentry"><input type="checkbox" id="p-sentry"><span><span class="tag n">Recommended</span>Sentry DSN. The backup job reads it from go-api to report failures.</span></label>
+    </section>
+    <section class="chk-group" aria-labelledby="g2">
+      <header><h3 id="g2">Secrets to carry over or generate</h3><span class="chk-count"></span></header>
+      <label class="chk" for="p-master"><input type="checkbox" id="p-master"><span><span class="tag e">Required</span><code>VAULTCHAT_MASTER_KEY</code> and <code>VAULTCHAT_LOOKUP_PEPPER</code>, copied from the current box. Regenerating them against existing data makes stored PII unreadable and every account unfindable, with no recovery.</span></label>
+      <label class="chk" for="p-jwt"><input type="checkbox" id="p-jwt"><span><span class="tag e">Required</span><code>JWT_SECRET</code> (32+ random bytes). go-api refuses to start without it; changing it signs everyone out.</span></label>
+      <label class="chk" for="p-misc"><input type="checkbox" id="p-misc"><span><span class="tag e">Required</span><code>INVITE_SECRET</code>, <code>ADMIN_KEY</code>, <code>INTERNAL_EMIT_KEY</code>, <code>DB_PASS</code>.</span></label>
+      <label class="chk" for="p-turn"><input type="checkbox" id="p-turn"><span><span class="tag e">Required</span><code>TURN_SECRET</code>, identical on MEDIA-1 (coturn) and CORE-1 (go-api).</span></label>
+      <label class="chk" for="p-lk"><input type="checkbox" id="p-lk"><span><span class="tag e">Required</span>Two LiveKit key pairs, one for calls and one for Go Live. They must differ; go-api refuses a shared pair. Paste each key ID into its YAML's <code>webhook.api_key</code>.</span></label>
+      <label class="chk" for="p-offsite"><input type="checkbox" id="p-offsite"><span><span class="tag e">Required</span>The backup passphrase (<code>.offsite-key</code>) in a password manager. Today it exists only on the box the backups are meant to survive.</span></label>
+      <label class="chk" for="p-ssh"><input type="checkbox" id="p-ssh"><span><span class="tag e">Required</span>SSH keys for each admin; password login off.</span></label>
+      <label class="chk" for="p-rls"><input type="checkbox" id="p-rls"><span><span class="tag n">Recommended</span>RLS role passwords, if you run <code>scripts/rls-roles.sql</code>. They live in a root-only file on the old box.</span></label>
+    </section>
+    <section class="chk-group" aria-labelledby="g3">
+      <header><h3 id="g3">Every server</h3><span class="chk-count"></span></header>
+      <label class="chk" for="p-os"><input type="checkbox" id="p-os"><span><span class="tag e">Required</span>Ubuntu 24.04 LTS, Docker Engine with Compose v2. The overrides use <code>!override</code>, which v1 does not understand.</span></label>
+      <label class="chk" for="p-time"><input type="checkbox" id="p-time"><span><span class="tag e">Required</span>Time sync on. TURN credentials and JWTs carry expiry timestamps.</span></label>
+      <label class="chk" for="p-daemon"><input type="checkbox" id="p-daemon"><span><span class="tag e">Required</span><code>/etc/docker/daemon.json</code> with <code>live-restore</code> and json-file log rotation, 10 MB × 3.</span></label>
+      <label class="chk" for="p-fw"><input type="checkbox" id="p-fw"><span><span class="tag e">Required</span>UFW default deny, plus <code>DOCKER-USER</code> drop rules matched on <code>--ctorigdstport</code> for every published internal port. The script that does this on the old box is not in the repo.</span></label>
+      <label class="chk" for="p-f2b"><input type="checkbox" id="p-f2b"><span><span class="tag e">Required</span>fail2ban for SSH and unattended security upgrades.</span></label>
+      <label class="chk" for="p-pin"><input type="checkbox" id="p-pin"><span><span class="tag e">Required</span>Pinned images: LiveKit v1.13.5, egress v1.14.0, Valhalla (and MinIO, if you keep it) by digest rather than <code>latest</code>.</span></label>
+    </section>
+    <section class="chk-group" aria-labelledby="g4">
+      <header><h3 id="g4">Per-server host setup</h3><span class="chk-count"></span></header>
+      <label class="chk" for="p-nginx"><input type="checkbox" id="p-nginx"><span><span class="tag e">Required</span>CORE-1: nginx, certbot and its nginx plugin, the vhosts from <code>nginx/sites/</code>, and <code>/etc/nginx/vaultchat-stream-proxy.conf</code>, which the stream vhost includes but the repo does not contain.</span></label>
+      <label class="chk" for="p-logs"><input type="checkbox" id="p-logs"><span><span class="tag n">Recommended</span>CORE-1: the admin log API (<code>admin/logserver.py</code> as a systemd unit with <code>/etc/vaultchat-logs.env</code>).</span></label>
+      <label class="chk" for="p-sysctl"><input type="checkbox" id="p-sysctl"><span><span class="tag e">Required</span>MEDIA-1 and LIVE-1: <code>net.core.rmem_max</code> and <code>wmem_max</code> set to 5000000. Without it the kernel drops RTP under load and nothing logs it.</span></label>
+      <label class="chk" for="p-redirect"><input type="checkbox" id="p-redirect"><span><span class="tag e">Required</span>MEDIA-1: UDP 443 → 3478 NAT redirect for IPv4 and IPv6, persisted as a systemd unit.</span></label>
+      <label class="chk" for="p-hook"><input type="checkbox" id="p-hook"><span><span class="tag e">Required</span>MEDIA-1: the certbot deploy hook that refreshes coturn's certificate. coturn reads it only at start, so a missing hook fails quietly about 60 days later.</span></label>
+      <label class="chk" for="p-egress"><input type="checkbox" id="p-egress"><span><span class="tag e">Required</span>LIVE-1: <code>GOLIVE_EGRESS_CPUS</code> of 4 or more (12 on a 16-vCPU box) and memory at 2 GB per 4 vCPU.</span></label>
+    </section>
+    <section class="chk-group" aria-labelledby="g5">
+      <header><h3 id="g5">Files and data</h3><span class="chk-count"></span></header>
+      <label class="chk" for="p-tiles"><input type="checkbox" id="p-tiles"><span><span class="tag e">Required</span>Valhalla India tiles (9.8 GB) in <code>valhalla/custom_files/</code>. Copy them; a rebuild takes hours with turn-by-turn down.</span></label>
+      <label class="chk" for="p-legal"><input type="checkbox" id="p-legal"><span><span class="tag e">Required</span>Legal pages at <code>/privacy</code>, <code>/terms</code>, <code>/delete-account</code>, with <code>VAULTCHAT_TERMS_VERSION</code> naming the served terms.</span></label>
+      <label class="chk" for="p-admin"><input type="checkbox" id="p-admin"><span><span class="tag e">Required</span>Admin panel files for <code>/var/www/admin.corefinite.com</code>. The deployed <code>shopbook.html</code> is newer than the repo copy.</span></label>
+      <label class="chk" for="p-dump"><input type="checkbox" id="p-dump"><span><span class="tag e">Required</span>If migrating: a fresh dump, restored into a throwaway database with row counts compared before you trust it.</span></label>
+      <label class="chk" for="p-le"><input type="checkbox" id="p-le"><span><span class="tag n">Recommended</span><code>/etc/letsencrypt</code> from the old box, so no certificate is reissued.</span></label>
+      <label class="chk" for="p-photon"><input type="checkbox" id="p-photon"><span><span class="tag n">Optional</span>Photon index for in-house address search.</span></label>
+    </section>
+    <section class="chk-group" aria-labelledby="g6">
+      <header><h3 id="g6">The app</h3><span class="chk-count"></span></header>
+      <label class="chk" for="p-url"><input type="checkbox" id="p-url"><span><span class="tag e">Required</span>Keep <code>https://api.corefinite.com</code>. It is a constant in <code>constants/server.ts</code>; a new hostname needs a new release and strands installed apps on the old box.</span></label>
+      <label class="chk" for="p-build"><input type="checkbox" id="p-build"><span><span class="tag e">Required</span><code>google-services.json</code> supplied at build time, release keystore and <code>keystore.properties</code> kept outside git.</span></label>
+      <label class="chk" for="p-precheck"><input type="checkbox" id="p-precheck"><span><span class="tag e">Required</span><code>npm run prod:precheck</code> passes.</span></label>
+      <label class="chk" for="p-smoke"><input type="checkbox" id="p-smoke"><span><span class="tag e">Required</span>The two-phone smoke test in <code>docs/GO_LIVE_SMOKE_TEST.md</code> passes on the new servers.</span></label>
+      <label class="chk" for="p-bench"><input type="checkbox" id="p-bench"><span><span class="tag e">Required</span><code>scripts/bench/run.sh</code> run on CORE-1's spec, results entered in the calculator.</span></label>
+      <label class="chk" for="p-devotp"><input type="checkbox" id="p-devotp"><span><span class="tag e">Required</span><code>ALLOW_DEV_OTP</code> unset in production.</span></label>
+    </section>
+  </div>
+</section>
+
+<!-- ============================================================ BRING-UP -->
+<section class="sec" id="bringup" aria-labelledby="up-h">
+  <div class="sec-h">
+    <h2 id="up-h">Bring-up order</h2>
+    <p>The order matters: each step needs the one before it. It follows <code>deploy/README.md</code>, adjusted for four servers.</p>
+  </div>
+  <ol class="steps">
+    <li>
+      <div>
+        <div class="step-h"><h3>Provision</h3><span class="plate sm">all four</span></div>
+        <p>Four servers in one region with a private network between them. Suggested addresses: CORE-1 <code>10.20.0.11</code>, DB-2 <code>10.20.0.12</code>, MEDIA-1 <code>10.20.0.21</code>, LIVE-1 <code>10.20.0.31</code>. Avoid 172.16.0.0/12, which Docker uses.</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <div class="step-h"><h3>Prepare each host</h3><span class="plate sm">all four</span></div>
+        <div class="code"><pre>curl -fsSL https://get.docker.com | sh
+docker compose version        <span class="c"># must print v2.x</span>
+sudo apt-get install -y fail2ban unattended-upgrades
+<span class="c"># CORE-1 only</span>
+sudo apt-get install -y nginx certbot python3-certbot-nginx rsync git
+<span class="c"># MEDIA-1 and LIVE-1 only: UDP buffers for RTP</span>
+printf 'net.core.rmem_max=5000000\nnet.core.wmem_max=5000000\n' | sudo tee /etc/sysctl.d/99-vaultchat-media.conf
+sudo sysctl --system</pre></div>
+        <p>Then the firewall from the port table. <code>scripts/ops/server-hardening-2026-08-10.sh</code> shows the <code>DOCKER-USER</code> rule shape and runs dry by default; it hardcodes the old box's interface and paths, so adapt it.</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <div class="step-h"><h3>Check out and configure</h3><span class="plate core sm">CORE-1</span></div>
+        <div class="code"><pre>git clone -b hetzner-deploy https://github.com/srihari8204/VaultChat.git ~/vaultchat &amp;&amp; cd ~/vaultchat
+cp deploy/docker-compose.box.yml.example docker-compose.box.yml &amp;&amp; chmod 600 docker-compose.box.yml
+grep -qx 'docker-compose.box.yml' .gitignore || echo 'docker-compose.box.yml' &gt;&gt; .gitignore
+awk '/SECTION A ---/,/END SECTION A/' deploy/env.example &gt; .env
+awk '/SECTION B ---/,/END SECTION B/' deploy/env.example &gt; vaultchat-backend/.env
+chmod 600 .env vaultchat-backend/.env     <span class="c"># replace every CHANGE_ME</span>
+mkdir -p secrets &amp;&amp; chmod 700 secrets     <span class="c"># fcm-service-account.json, games-signing.key, games-notify.pub</span>
+chmod 600 secrets/* &amp;&amp; sudo chown 1000:1000 secrets/*
+alias dc='docker compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.box.yml'</pre></div>
+        <p>Apply changes S1, S2, S4, S5 and S7 from <a href="#changes">Config changes</a> before the first start. The clone directory must be named <code>vaultchat</code> so container names match the repo's scripts.</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <div class="step-h"><h3>Database first</h3><span class="plate core sm">CORE-1</span></div>
+        <div class="code"><pre>dc up -d postgres pgbouncer redis
+docker exec vaultchat-postgres-1 pg_isready -U vaultchat</pre></div>
+      </div>
+    </li>
+    <li>
+      <div>
+        <div class="step-h"><h3>Schema before any API binary</h3><span class="plate core sm">CORE-1</span></div>
+        <p>A new binary against an old schema fails every request that touches a new column; the reverse is safe. On a fresh database run the ledger loop from <code>deploy/README.md</code> §3.2. When migrating, restore the dump instead and confirm the highest <code>schema_migrations</code> version matches the old box.</p>
+        <div class="code"><pre>docker exec vaultchat-postgres-1 psql -U vaultchat -d vaultchat -c \
+  "CREATE TABLE IF NOT EXISTS schema_migrations (version TEXT PRIMARY KEY, filename TEXT NOT NULL,
+   checksum TEXT NOT NULL, applied_at TIMESTAMPTZ NOT NULL DEFAULT NOW())"
+cd vaultchat-backend/migrations
+for f in $(ls *.sql | sort); do
+  v=${f%%_*}; cs=$(sed 's/\r$//' "$f" | sha256sum | cut -c1-16)
+  { sed 's/\r$//' "$f"
+    printf "INSERT INTO schema_migrations(version,filename,checksum) VALUES ('%s','%s','%s');\n" "$v" "$f" "$cs"
+  } | docker exec -i vaultchat-postgres-1 psql -U vaultchat -d vaultchat -v ON_ERROR_STOP=1 -1
+done</pre></div>
+      </div>
+    </li>
+    <li>
+      <div>
+        <div class="step-h"><h3>Start the standby</h3><span class="plate data sm">DB-2</span></div>
+        <p>Publish Postgres on CORE-1's private address only (S8), create a replication role and allow DB-2 in <code>pg_hba.conf</code>. Run the standby from the same <code>postgres:16</code> image as CORE-1: a physical replica needs the same major version and the same glibc collation behaviour, which a distro package on a different OS does not guarantee.</p>
+        <div class="code"><pre><span class="c"># CORE-1</span>
+docker exec -it vaultchat-postgres-1 psql -U vaultchat -c \
+  "CREATE ROLE replicator WITH REPLICATION LOGIN PASSWORD '&lt;strong password&gt;'"
+<span class="c"># pg_hba.conf:  host  replication  replicator  10.20.0.12/32  scram-sha-256   (then reload)</span>
+<span class="c"># DB-2</span>
+docker volume create pgstandby
+docker run --rm -it -v pgstandby:/var/lib/postgresql/data postgres:16 \
+  pg_basebackup -h 10.20.0.11 -U replicator -D /var/lib/postgresql/data -R -X stream -P
+docker run -d --name pg-standby --restart unless-stopped -v pgstandby:/var/lib/postgresql/data postgres:16
+<span class="c"># CORE-1: DB-2 should appear as streaming</span>
+docker exec vaultchat-postgres-1 psql -U vaultchat -c "SELECT client_addr, state FROM pg_stat_replication"</pre></div>
+      </div>
+    </li>
+    <li>
+      <div>
+        <div class="step-h"><h3>The API</h3><span class="plate core sm">CORE-1</span></div>
+        <div class="code"><pre>dc build --pull go-api          <span class="c"># golang:1.26-alpine is a floating tag</span>
+dc up -d --no-deps go-api
+dc up -d valhalla               <span class="c"># only after the tiles are in valhalla/custom_files</span></pre></div>
+      </div>
+    </li>
+    <li>
+      <div>
+        <div class="step-h"><h3>Call media</h3><span class="plate media sm">MEDIA-1</span></div>
+        <p>Same checkout. A <code>./.env</code> holding only <code>TURN_SECRET</code>, <code>TURN_EXTERNAL_IP</code> (MEDIA-1's public IP) and <code>LIVEKIT_KEYS</code>. Edit <code>livekit/livekit.yaml</code> first (S3). The certificate must exist before coturn ever starts, or Docker creates empty directories in its place and coturn runs with no TLS listener.</p>
+        <div class="code"><pre>sudo certbot certonly --standalone -d turn.corefinite.com
+<span class="c"># deploy hook: copy to coturn/certs/{cert,pkey}.pem, chown 65534:65534, chmod 644/640, restart coturn</span>
+docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d redis coturn
+docker compose -f docker-compose.yml -f docker-compose.prod.yml --profile sfu up -d livekit</pre></div>
+      </div>
+    </li>
+    <li>
+      <div>
+        <div class="step-h"><h3>Broadcasting</h3><span class="plate media sm">LIVE-1</span></div>
+        <p>A <code>./.env</code> with <code>GOLIVE_LIVEKIT_KEYS</code>, R2 values for <code>S3_ENDPOINT</code>, <code>S3_ACCESS_KEY</code>, <code>S3_SECRET_KEY</code> and <code>S3_REGION=auto</code> (a token limited to <code>vaultchat-broadcast</code>), <code>BROADCAST_BUCKET</code>, <code>GOLIVE_EGRESS_CPUS=12</code>, <code>GOLIVE_EGRESS_MEMORY=6g</code>. Edit <code>livekit/golive.yaml</code> first (S3).</p>
+        <div class="code"><pre>docker compose -f docker-compose.yml -f docker-compose.prod.yml --profile golive up -d golive-redis golive-livekit
+docker compose -f docker-compose.yml -f docker-compose.prod.yml --profile golive up -d --no-deps golive-egress
+docker logs vaultchat-golive-egress-1 2&gt;&amp;1 | grep -i cpu     <span class="c"># no "not enough cpu" line</span></pre></div>
+      </div>
+    </li>
+    <li>
+      <div>
+        <div class="step-h"><h3>Router last</h3><span class="plate core sm">CORE-1</span></div>
+        <p>Caddy started before its upstreams answers 502 to everything, including the health check you will use to judge the deploy.</p>
+        <div class="code"><pre>docker run --rm -v "$PWD/caddy/Caddyfile:/etc/caddy/Caddyfile:ro" caddy:2-alpine \
+  caddy validate --config /etc/caddy/Caddyfile
+dc up -d caddy
+curl -s localhost:8095/health</pre></div>
+      </div>
+    </li>
+    <li>
+      <div>
+        <div class="step-h"><h3>Edge and TLS</h3><span class="plate core sm">CORE-1</span></div>
+        <p>The vhosts point at <code>/etc/letsencrypt/live/…</code>, so certificates come first or <code>nginx -t</code> fails. Restore <code>/etc/letsencrypt</code> from the old box, or issue fresh ones once DNS points here.</p>
+        <div class="code"><pre>sudo certbot certonly --nginx -d api.corefinite.com -d stream.corefinite.com
+sudo certbot certonly --nginx -d admin.corefinite.com
+sudo cp nginx/sites/vaultchat.conf        /etc/nginx/sites-available/vaultchat
+sudo cp nginx/sites/vaultchat-stream.conf /etc/nginx/sites-available/vaultchat-stream
+sudo cp nginx/sites/admin.conf            /etc/nginx/sites-available/admin
+<span class="c"># also create /etc/nginx/vaultchat-stream-proxy.conf (proxy headers; old box only)</span>
+sudo ln -sf /etc/nginx/sites-available/{vaultchat,vaultchat-stream,admin} /etc/nginx/sites-enabled/
+sudo nginx -t &amp;&amp; sudo systemctl reload nginx</pre></div>
+      </div>
+    </li>
+    <li>
+      <div>
+        <div class="step-h"><h3>Backups and monitoring</h3><span class="plate core sm">CORE-1</span><span class="plate data sm">DB-2</span></div>
+        <p>Keep the repo's nightly job on CORE-1: <code>vaultchat-backend/scripts/backup-postgres.sh</code>, installed by <code>scripts/deploy-backup-offsite.sh</code>. It dumps inside the Postgres container, encrypts, uploads to R2 and alerts through Sentry. On DB-2, start monitoring and give it somewhere to send alerts.</p>
+        <div class="code"><pre><span class="c"># DB-2, after pointing monitoring/prometheus.yml at 10.20.0.11:8097 (S9)</span>
+docker compose -f docker-compose.yml -f docker-compose.prod.yml --profile monitoring up -d prometheus grafana</pre></div>
+      </div>
+    </li>
+    <li>
+      <div>
+        <div class="step-h"><h3>Verify</h3><span class="plate core sm">CORE-1</span></div>
+        <div class="code"><pre>curl -s localhost:8095/health                          <span class="c"># {"status":"ok","db":true,"redis":true}</span>
+curl -s -o /dev/null -w '%{http_code}\n' localhost:8095/ready   <span class="c"># 200</span>
+curl -s localhost:8095/build                           <span class="c"># "source" equals scripts/fingerprint-go.sh</span>
+curl -s -o /dev/null -w '%{http_code}\n' -X POST localhost:8095/calls/x/sfu-token   <span class="c"># 401</span>
+curl -s localhost:8095/golive/health                   <span class="c"># GOLIVE_HEALTHY, sharesCallingProject false</span>
+curl -sI localhost:8095/privacy | head -1               <span class="c"># 200</span></pre></div>
+        <p>Then from outside: TURN on 3478 and 5349 with a credential from <code>GET /user/turn</code>, a call and a broadcast between two phones, and the full <code>docs/GO_LIVE_SMOKE_TEST.md</code>.</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <div class="step-h"><h3>Measure before real users arrive</h3><span class="plate core sm">CORE-1</span></div>
+        <p>Run <code>scripts/bench/run.sh</code> on CORE-1 before real data lands, or on a clone of it. It seeds test users, so never point it at the live database. Enter the results in the calculator's planning figures.</p>
+      </div>
+    </li>
+  </ol>
+</section>
+
+<!-- ============================================================ CHANGES -->
+<section class="sec" id="changes" aria-labelledby="chg-h">
+  <div class="sec-h">
+    <h2 id="chg-h">Config the four-server split needs</h2>
+    <p>The repo describes one box. Moving media off it takes these edits. None are in the repo yet; each names the file and what breaks without it.</p>
+  </div>
+  <div class="tbl-wrap">
+    <table>
+      <thead><tr><th scope="col">#</th><th scope="col">Change</th><th scope="col">Where</th><th scope="col">Without it</th></tr></thead>
+      <tbody>
+        <tr><th scope="row">S1</th><td>Point Caddy's <code>/livekit</code> route at <code>10.20.0.21:7880</code> and <code>/golive-livekit</code> at <code>10.20.0.31:7890</code></td><td><code>caddy/Caddyfile</code></td><td>Signalling targets <code>host.docker.internal</code>, which is now empty; every call and broadcast join fails</td></tr>
+        <tr><th scope="row">S2</th><td>Add a Caddy site on CORE-1's private address, port 8097, that forwards only <code>/internal/livekit/webhook</code>, <code>/internal/golive/webhook</code> and <code>/internal/metrics</code> to go-api; publish it on <code>10.20.0.11:8097</code></td><td><code>caddy/Caddyfile</code>, <code>docker-compose.box.yml</code></td><td>Webhooks cannot reach go-api, so broadcasts never leave "starting"; Prometheus cannot scrape</td></tr>
+        <tr><th scope="row">S3</th><td>In both LiveKit YAMLs set <code>node_ip</code> to that server's public IP, the webhook URL to <code>http://10.20.0.11:8097/internal/…/webhook</code>, and the literal <code>api_key</code></td><td><code>livekit/livekit.yaml</code>, <code>livekit/golive.yaml</code></td><td>Clients get ICE candidates for the old box (65.21.229.167); webhooks go to a closed port</td></tr>
+        <tr><th scope="row">S4</th><td>Set <code>LIVEKIT_HTTP_URL=http://10.20.0.21:7880</code> and <code>GOLIVE_LIVEKIT_HTTP_URL=http://10.20.0.31:7890</code>; <code>TURN_HOST=turn.corefinite.com</code></td><td>CORE-1 <code>./.env</code></td><td>Server-side room and egress calls detour through the public edge; a slow edge ends live broadcasts</td></tr>
+        <tr><th scope="row">S5</th><td>Put broadcast segments on R2: create <code>vaultchat-broadcast</code>, give LIVE-1's egress R2 <code>S3_*</code>, and set CORE-1's <code>BROADCAST_S3_*</code> to the same bucket</td><td>LIVE-1 and CORE-1 <code>./.env</code></td><td>Writer and reader disagree about the store and every segment 404s. MinIO drops out of the serving path</td></tr>
+        <tr><th scope="row">S6</th><td>On MEDIA-1 set <code>TURN_EXTERNAL_IP</code> to its public IP, issue the <code>turn.</code> certificate with its deploy hook, add the UDP 443 redirect</td><td>MEDIA-1 <code>./.env</code>, host</td><td>The compose default advertises the old box's IP, so relayed calls fail</td></tr>
+        <tr><th scope="row">S7</th><td>Pin the compose network to <code>172.28.0.0/16</code> (<code>networks.default.ipam</code>), or set <code>TRUSTED_PROXIES</code> to the real subnet</td><td><code>docker-compose.box.yml</code></td><td>go-api trusts no proxy, keys per-IP limits on Caddy's address, and one busy user can lock everyone out of OTP (10 an hour)</td></tr>
+        <tr><th scope="row">S8</th><td>Publish Postgres on <code>10.20.0.11:5432</code> only, add a replication role and <code>pg_hba.conf</code> line for DB-2</td><td><code>docker-compose.box.yml</code>, Postgres config</td><td>No standby; a lost CORE-1 means restoring last night's dump</td></tr>
+        <tr><th scope="row">S9</th><td>Point Prometheus at <code>10.20.0.11:8097</code>, load <code>alerts.yml</code>, and add a Grafana contact point (or Alertmanager)</td><td><code>monitoring/prometheus.yml</code></td><td>Rules exist but notify nobody, which is the state today</td></tr>
+        <tr><th scope="row">S10</th><td>With LiveKit gone from CORE-1, drop go-api's <code>127.0.0.1:14000</code> publish, then land C1 (Caddy <code>dynamic a</code> upstream) and C2 (ShopBook job lock) before a second replica</td><td><code>docker-compose.box.yml</code>, <code>caddy/Caddyfile</code>, <code>shopbook_jobs.go</code></td><td>A host port blocks <code>--scale go-api=2</code>; without C2 two replicas send duplicate daily pushes</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- ============================================================ TRAPS -->
+<section class="sec" id="traps" aria-labelledby="trap-h">
+  <div class="sec-h">
+    <h2 id="trap-h">Traps the repo has already hit</h2>
+    <p>Each of these has broken production or a rebuild before, or would break this plan. Most fail silently: the stack looks healthy while a feature is dead.</p>
+  </div>
+
+  <div class="sub" style="margin-top:0"><h3>Found while writing this plan</h3></div>
+  <div class="trap-grid">
+    <article class="trap new"><h4>Following env.example as written breaks Go Live playback</h4><p>It puts R2 in <code>./.env</code> as <code>S3_*</code>. Compose also feeds those into both egress configs, so segments go to R2, while <code>BROADCAST_S3_*</code> still reads MinIO. Point both halves at one store (S5).</p><span class="src">deploy/env.example · docker-compose.yml egress · internal/storage/storage.go</span></article>
+    <article class="trap new"><h4><code>host.docker.internal</code> does not resolve inside go-api</h4><p><code>deploy/env.example</code> suggests <code>LIVEKIT_HTTP_URL=http://host.docker.internal:7880</code>, but only Caddy and the egress services get the host-gateway mapping. Use private IPs (S4), or add <code>extra_hosts</code> to go-api on a single box.</p><span class="src">docker-compose.yml extra_hosts · internal/livekit/token.go</span></article>
+    <article class="trap new"><h4>The old box's IP is baked into three defaults</h4><p><code>TURN_EXTERNAL_IP</code> in compose, <code>node_ip</code> in both LiveKit YAMLs and the <code>S3_PUBLIC_ENDPOINT</code> fallback all say 65.21.229.167. Set each one explicitly.</p><span class="src">docker-compose.yml · livekit/*.yaml</span></article>
+    <article class="trap new"><h4>The stream vhost includes a file the repo lacks</h4><p><code>vaultchat-stream.conf</code> includes <code>/etc/nginx/vaultchat-stream-proxy.conf</code>, which exists only on the old box. Copy it or write the proxy headers, or <code>nginx -t</code> fails.</p><span class="src">nginx/sites/vaultchat-stream.conf · docs/SERVER_INVENTORY.md §5</span></article>
+  </div>
+
+  <div class="sub"><h3>Compose and configuration</h3></div>
+  <div class="trap-grid">
+    <article class="trap"><h4>Profiles hide the media stack</h4><p>A plain <code>up -d</code> starts 8 of the 17 production containers. Start <code>sfu</code>, <code>golive</code> and <code>monitoring</code> services by name.</p><span class="src">docs/SERVER_INVENTORY.md §2.1</span></article>
+    <article class="trap"><h4>Never <code>--remove-orphans</code>, never <code>down -v</code></h4><p>The first deletes running media services compose does not list; the second deletes volumes, including data with no other copy.</p><span class="src">scripts/deploy.sh · 2026-08-15_audit.md P0-5</span></article>
+    <article class="trap"><h4>Two env files, not interchangeable</h4><p><code>./.env</code> feeds compose interpolation; <code>vaultchat-backend/.env</code> feeds the container. <code>S3_*</code> in the wrong one changes nothing and reports nothing.</p><span class="src">deploy/env.example header</span></article>
+    <article class="trap"><h4>The third compose file is load-bearing</h4><p>Drop <code>docker-compose.box.yml</code> and go-api still answers <code>/health</code> while writing attachments into a local MinIO no client can reach.</p><span class="src">deploy/README.md §2</span></article>
+    <article class="trap"><h4>LiveKit YAML gets no variable expansion</h4><p><code>${VAR}</code> in those files arrives as literal text. A placeholder <code>api_key</code> means every webhook is rejected.</p><span class="src">livekit/livekit.yaml · docs/GOLIVE_DEPLOY.md</span></article>
+    <article class="trap"><h4>Build with <code>--pull</code></h4><p><code>golang:1.26-alpine</code> floats. Production once sat on go1.26.5 for weeks after three standard-library fixes shipped.</p><span class="src">deploy/README.md §3.4</span></article>
+  </div>
+
+  <div class="sub"><h3>Network, TLS and media</h3></div>
+  <div class="trap-grid">
+    <article class="trap"><h4>UFW does not protect Docker ports</h4><p>Docker's DNAT runs before UFW. Published ports need <code>DOCKER-USER</code> drops matched on <code>--ctorigdstport</code>; a plain <code>--dport</code> match does nothing.</p><span class="src">docs/SERVER_INVENTORY.md §5</span></article>
+    <article class="trap"><h4>Egress below 4 CPUs says "ready" and does nothing</h4><p>Room-composite egress refuses to run, logs one line at start-up, then accepts requests that never produce a playlist.</p><span class="src">docker-compose.yml golive-egress</span></article>
+    <article class="trap"><h4>coturn needs its certificate before its first start</h4><p>Otherwise Docker creates directories at the mount paths. A root-owned 640 key is also unreadable to coturn's user. Either way there is no TLS listener.</p><span class="src">docs/REBUILD_RISKS.md §13</span></article>
+    <article class="trap"><h4>LiveKit needs Redis on the host's loopback</h4><p>It runs on the host network and dials <code>127.0.0.1:16379</code>. Without it every join returns HTTP 500 while the SFU looks healthy.</p><span class="src">docker-compose.prod.yml redis</span></article>
+    <article class="trap"><h4>Five certificates a week</h4><p>An iterated rebuild that reissues each time takes the API off HTTPS for seven days on the sixth try. Copy <code>/etc/letsencrypt</code>; test with <code>--dry-run</code>.</p><span class="src">docs/SERVER_INVENTORY.md §6</span></article>
+    <article class="trap"><h4>Calls and Go Live must never share keys or Redis</h4><p>go-api refuses a shared key pair. A shared Redis left broadcasts dying in "starting" with nothing in either log.</p><span class="src">docs/GOLIVE_DEPLOY.md · docker-compose.yml golive-redis</span></article>
+  </div>
+
+  <div class="sub"><h3>Data and secrets</h3></div>
+  <div class="trap-grid">
+    <article class="trap"><h4>Two keys can never be regenerated</h4><p><code>VAULTCHAT_MASTER_KEY</code> and <code>VAULTCHAT_LOOKUP_PEPPER</code> decrypt and index existing PII. A backup does not help; it is encrypted with the same key.</p><span class="src">deploy/env.example · SECRETS.md</span></article>
+    <article class="trap"><h4>Off-site backups failed silently for a week</h4><p>A revoked R2 token turned every upload into a warning line nobody read. Alert on backup age, not just on job exit.</p><span class="src">docs/BACKUP_VERIFICATION.md §2</span></article>
+    <article class="trap"><h4>The backup key lived next to the backups</h4><p>The passphrase for every encrypted off-site dump existed only on the box. Store it off the servers before anything else.</p><span class="src">docs/BACKUP_VERIFICATION.md §5</span></article>
+    <article class="trap"><h4>Dev OTP must stay off</h4><p>Without MSG91 the send now fails. <code>ALLOW_DEV_OTP</code> brings back the old behaviour of logging live codes into the container log.</p><span class="src">deploy/env.example Section B</span></article>
+  </div>
+</section>
+
+<!-- ============================================================ BACKUPS -->
+<section class="sec" id="backups" aria-labelledby="bk-h">
+  <div class="sec-h">
+    <h2 id="bk-h">Backups, recovery and monitoring</h2>
+    <p>Restoring today's database takes under ten seconds. What limits recovery is keys, credentials and how stale the newest copy is.</p>
+  </div>
+  <div class="tbl-wrap">
+    <table>
+      <thead><tr><th scope="col">If this happens</th><th scope="col">Single box today</th><th scope="col">With this plan</th></tr></thead>
+      <tbody>
+        <tr><td>One disk fails</td><td>RAID 1 carries on</td><td>Same</td></tr>
+        <tr><td>CORE-1 is lost</td><td>Restore last night's dump on a new box: up to 24 hours of data gone, hours to rebuild</td><td>Promote DB-2 (seconds of data), start the core stack on it from the repo and saved env files</td></tr>
+        <tr><td>A bad migration or mass delete</td><td>Nightly dump only</td><td>Nightly dump; add WAL archiving to R2 for point-in-time recovery</td></tr>
+        <tr><td>MEDIA-1 or LIVE-1 is lost</td><td>Calls and broadcasts die with everything else</td><td>Only that feature stops. Rebuild from the repo in minutes; no state lives there</td></tr>
+        <tr><td>The whole region is down</td><td>Restore from R2 elsewhere</td><td>Same: restore the newest R2 dump in another region</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="twocol">
+    <div>
+      <div class="sub" style="margin-top:22px"><h3>What to back up, and where</h3></div>
+      <div class="tbl-wrap">
+        <table>
+          <thead><tr><th scope="col">Item</th><th scope="col">How</th></tr></thead>
+          <tbody>
+            <tr><td>Postgres</td><td>Nightly <code>pg_dump</code>, AES-256 encrypted, 14 days in R2 <code>db-backups/</code>; standby on DB-2. Message bodies are excluded on purpose</td></tr>
+            <tr><td>Env files, box compose file, <code>secrets/</code>, LiveKit YAMLs</td><td>Encrypted copy in a password manager or vault, off the servers</td></tr>
+            <tr><td><code>.offsite-key</code></td><td>Password manager. Without it every off-site dump is unreadable</td></tr>
+            <tr><td><code>/etc/letsencrypt</code>, nginx vhosts, firewall scripts, systemd units</td><td>A private ops repository</td></tr>
+            <tr><td>Valhalla tiles</td><td>A copy on DB-2; rebuilding takes hours</td></tr>
+            <tr><td>R2 objects</td><td>Held only by Cloudflare; encrypted blobs with short retention. Decide whether that is acceptable</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <div>
+      <div class="sub" style="margin-top:22px"><h3>What to watch</h3></div>
+      <div class="tbl-wrap">
+        <table>
+          <thead><tr><th scope="col">Signal</th><th scope="col">From</th></tr></thead>
+          <tbody>
+            <tr><td>API down, crash loop, DB pool exhausted or cancelling, unbounded goroutines or heap</td><td>Rules already in <code>monitoring/alerts.yml</code></td></tr>
+            <tr><td><code>https://api.corefinite.com/health</code> and <code>/golive/health</code> from outside</td><td>An external uptime checker</td></tr>
+            <tr><td>Newest off-site dump older than 26 hours</td><td>Backup job plus an age check</td></tr>
+            <tr><td>Certificates expiring within 20 days, <code>turn.</code> included</td><td>Uptime checker or a cron probe</td></tr>
+            <tr><td>Host CPU, memory, disk, network on all four</td><td>node_exporter or the Beszel agent used today</td></tr>
+            <tr><td>Latency and connection ceilings</td><td>Waiting on the first bench run; the rules are drafted but commented out</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================ MIGRATION -->
+<section class="sec" id="migrate" aria-labelledby="mig-h">
+  <div class="sec-h">
+    <h2 id="mig-h">Moving off the current box</h2>
+    <p>For moving from 65.21.229.167 rather than starting empty. The hostnames stay, so users notice a short maintenance window and nothing else.</p>
+  </div>
+  <ol class="steps">
+    <li><div><div class="step-h"><h3>Copy what cannot be recreated</h3></div><p>Both env files, <code>docker-compose.box.yml</code>, <code>secrets/</code>, <code>.offsite-key</code>, <code>/root/rls-role-passwords.txt</code>, <code>/etc/letsencrypt</code>, the deployed LiveKit YAMLs with real keys, <code>/var/www/admin.corefinite.com</code>, the Valhalla tiles, Grafana's volume if dashboards were made by hand, and <code>/opt/vaultgames</code> with its image if games stay.</p></div></li>
+    <li><div><div class="step-h"><h3>Confirm backups upload again</h3></div><p>The off-site copy was failing from 6 September on a revoked R2 token. Take a fresh dump by hand and copy it off the box before touching anything.</p></div></li>
+    <li><div><div class="step-h"><h3>Build the new servers alongside</h3></div><p>Bring-up steps 1–14 with the restored data. Test with <code>curl --resolve api.corefinite.com:443:&lt;CORE-1 IP&gt;</code>; device tests need a build pointed at a staging hostname in <code>constants/server.ts</code>.</p></div></li>
+    <li><div><div class="step-h"><h3>Lower DNS TTLs</h3></div><p>Set <code>api</code>, <code>stream</code>, <code>admin</code> and <code>turn</code> to 60 seconds a day ahead.</p></div></li>
+    <li><div><div class="step-h"><h3>Maintenance window</h3></div><p>Stop go-api on the old box. Take final dumps of <code>vaultchat</code> (and <code>vaultgames</code> if kept), restore them on CORE-1, compare the migration ledger and row counts, then re-seed DB-2.</p></div></li>
+    <li><div><div class="step-h"><h3>Move objects</h3></div><p>MinIO holds broadcast segments (5.8 GB) and some legacy media (521 MB on 13 September). Mirror both to R2, or accept losing old broadcast replays.</p></div></li>
+    <li><div><div class="step-h"><h3>Switch DNS</h3></div><p><code>api</code>, <code>stream</code> and <code>admin</code> to CORE-1; <code>turn</code> to MEDIA-1; update the origin for the proxied names in Cloudflare.</p></div></li>
+    <li><div><div class="step-h"><h3>Verify</h3></div><p>The checks in bring-up step 13, <code>/build</code> equal to the fingerprint of the tree you deployed, and the two-phone smoke test.</p></div></li>
+    <li><div><div class="step-h"><h3>Keep the old box, then wipe it</h3></div><p>Leave it intact and stopped for 14 days as a rollback. When you wipe it, destroy the three loose env backups in <code>/home/srihari</code> that hold live credentials.</p></div></li>
+  </ol>
+</section>
+
+<!-- ============================================================ SOURCES -->
+<section class="sec" id="sources" aria-labelledby="src-h">
+  <div class="sec-h">
+    <h2 id="src-h">Sources</h2>
+    <p>Every claim above traces to one of these files on the <code>hetzner-deploy</code> branch.</p>
+  </div>
+  <div class="src-grid">
+    <div><a href="https://github.com/srihari8204/VaultChat/blob/hetzner-deploy/deploy/README.md" target="_blank" rel="noopener">deploy/README.md</a><span>Bare-box bring-up order and manual steps</span></div>
+    <div><a href="https://github.com/srihari8204/VaultChat/blob/hetzner-deploy/deploy/env.example" target="_blank" rel="noopener">deploy/env.example</a><span>Every variable, both env files</span></div>
+    <div><a href="https://github.com/srihari8204/VaultChat/blob/hetzner-deploy/docker-compose.yml" target="_blank" rel="noopener">docker-compose.yml</a><span>Services, profiles, egress CPU floor</span></div>
+    <div><a href="https://github.com/srihari8204/VaultChat/blob/hetzner-deploy/docker-compose.prod.yml" target="_blank" rel="noopener">docker-compose.prod.yml</a><span>Production ports and secret mounts</span></div>
+    <div><a href="https://github.com/srihari8204/VaultChat/blob/hetzner-deploy/docs/SERVER_INVENTORY.md" target="_blank" rel="noopener">docs/SERVER_INVENTORY.md</a><span>What runs on the current box</span></div>
+    <div><a href="https://github.com/srihari8204/VaultChat/blob/hetzner-deploy/docs/REBUILD_RISKS.md" target="_blank" rel="noopener">docs/REBUILD_RISKS.md</a><span>Rebuild hazards</span></div>
+    <div><a href="https://github.com/srihari8204/VaultChat/blob/hetzner-deploy/docs/SECOND_REPLICA_READINESS.md" target="_blank" rel="noopener">docs/SECOND_REPLICA_READINESS.md</a><span>Scaling go-api, C1 and C2</span></div>
+    <div><a href="https://github.com/srihari8204/VaultChat/blob/hetzner-deploy/vaultchat-backend-go/SCALEOUT.md" target="_blank" rel="noopener">vaultchat-backend-go/SCALEOUT.md</a><span>Redis adapter and cluster keys</span></div>
+    <div><a href="https://github.com/srihari8204/VaultChat/blob/hetzner-deploy/docs/SFU_DEPLOY.md" target="_blank" rel="noopener">docs/SFU_DEPLOY.md</a><span>Calling SFU and its bandwidth</span></div>
+    <div><a href="https://github.com/srihari8204/VaultChat/blob/hetzner-deploy/docs/GOLIVE_DEPLOY.md" target="_blank" rel="noopener">docs/GOLIVE_DEPLOY.md</a><span>Go Live isolation and CDN</span></div>
+    <div><a href="https://github.com/srihari8204/VaultChat/blob/hetzner-deploy/vaultchat-backend/loadtest/REPORT.md" target="_blank" rel="noopener">vaultchat-backend/loadtest/REPORT.md</a><span>Node benchmark behind the sizing</span></div>
+    <div><a href="https://github.com/srihari8204/VaultChat/blob/hetzner-deploy/docs/PERF_BASELINE.md" target="_blank" rel="noopener">docs/PERF_BASELINE.md</a><span>The Go bench harness, not yet run</span></div>
+    <div><a href="https://github.com/srihari8204/VaultChat/blob/hetzner-deploy/docs/BACKUP_VERIFICATION.md" target="_blank" rel="noopener">docs/BACKUP_VERIFICATION.md</a><span>Restore rehearsal and backup gaps</span></div>
+    <div><a href="https://github.com/srihari8204/VaultChat/blob/hetzner-deploy/docs/HTTP3_EDGE.md" target="_blank" rel="noopener">docs/HTTP3_EDGE.md</a><span>Optional HTTP/3 on UDP 8443</span></div>
+    <div><a href="https://github.com/srihari8204/VaultChat/blob/hetzner-deploy/caddy/Caddyfile" target="_blank" rel="noopener">caddy/Caddyfile</a><span>Routes and the internal block</span></div>
+    <div><a href="https://github.com/srihari8204/VaultChat/blob/hetzner-deploy/nginx/sites/vaultchat.conf" target="_blank" rel="noopener">nginx/sites/vaultchat.conf</a><span>TLS edge and latency measurement</span></div>
+    <div><a href="https://github.com/srihari8204/VaultChat/blob/hetzner-deploy/coturn/turnserver.conf" target="_blank" rel="noopener">coturn/turnserver.conf</a><span>TURN ports, quotas, private-range denials</span></div>
+    <div><a href="https://github.com/srihari8204/VaultChat/blob/hetzner-deploy/livekit/livekit.yaml" target="_blank" rel="noopener">livekit/livekit.yaml</a><span>Calling SFU config</span></div>
+    <div><a href="https://github.com/srihari8204/VaultChat/blob/hetzner-deploy/livekit/golive.yaml" target="_blank" rel="noopener">livekit/golive.yaml</a><span>Go Live SFU config</span></div>
+    <div><a href="https://github.com/srihari8204/VaultChat/blob/hetzner-deploy/monitoring/alerts.yml" target="_blank" rel="noopener">monitoring/alerts.yml</a><span>Alert rules</span></div>
+  </div>
+</section>
+
+<footer class="end">
+  <p>Prepared from the VaultChat repository at commit ee3e282. Planning figures are estimates until <code>scripts/bench/run.sh</code> has run on the new hardware; go-live needs the two-phone smoke test, not only these checks.</p>
+</footer>
+
+</div>
+</div>
+
+<script>
+(function () {
+  'use strict';
+  var $ = function (s, r) { return (r || document).querySelector(s); };
+  var $$ = function (s, r) { return Array.prototype.slice.call((r || document).querySelectorAll(s)); };
+  var reduceMotion = !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+
+  /* ---------- section nav ---------- */
+  var nav = $('#nav');
+  var links = $$('#nav a');
+  var byId = {};
+  links.forEach(function (a) { byId[a.getAttribute('href').slice(1)] = a; });
+  function setCurrent(id) {
+    var a = byId[id];
+    if (!a) return;
+    links.forEach(function (l) { l.removeAttribute('aria-current'); });
+    a.setAttribute('aria-current', 'true');
+    var left = a.offsetLeft - (nav.clientWidth - a.offsetWidth) / 2;
+    if (nav.scrollTo) nav.scrollTo({ left: Math.max(0, left), behavior: reduceMotion ? 'auto' : 'smooth' });
+  }
+  if ('IntersectionObserver' in window) {
+    var io = new IntersectionObserver(function (entries) {
+      entries.forEach(function (e) { if (e.isIntersecting) setCurrent(e.target.id); });
+    }, { rootMargin: '-30% 0px -65% 0px' });
+    Object.keys(byId).forEach(function (id) { var s = document.getElementById(id); if (s) io.observe(s); });
+  }
+
+  /* ---------- copy buttons ---------- */
+  $$('.code').forEach(function (box) {
+    var pre = $('pre', box);
+    var btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'copy';
+    btn.textContent = 'Copy';
+    btn.setAttribute('aria-label', 'Copy commands');
+    var reset = function () { btn.textContent = 'Copy'; };
+    var selectAll = function () {
+      try {
+        var range = document.createRange();
+        range.selectNodeContents(pre);
+        var sel = window.getSelection();
+        sel.removeAllRanges();
+        sel.addRange(range);
+        btn.textContent = 'Selected';
+      } catch (e) { btn.textContent = 'Copy failed'; }
+      setTimeout(reset, 2200);
+    };
+    btn.addEventListener('click', function () {
+      var text = pre.innerText;
+      try {
+        navigator.clipboard.writeText(text).then(function () {
+          btn.textContent = 'Copied';
+          setTimeout(reset, 1600);
+        }, selectAll);
+      } catch (e) { selectAll(); }
+    });
+    box.appendChild(btn);
+  });
+
+  /* ---------- checklist (this browser only) ---------- */
+  var KEY = 'vc-launch-topology-checks-v1';
+  var saved = {};
+  try { saved = JSON.parse(localStorage.getItem(KEY) || '{}') || {}; } catch (e) { saved = {}; }
+  var boxes = $$('.chk input[type="checkbox"]');
+  function persist() { try { localStorage.setItem(KEY, JSON.stringify(saved)); } catch (e) { /* storage unavailable */ } }
+  function counts() {
+    $$('.chk-group').forEach(function (g) {
+      var all = $$('input[type="checkbox"]', g);
+      var done = all.filter(function (i) { return i.checked; }).length;
+      var out = $('.chk-count', g);
+      if (out) out.textContent = done + ' of ' + all.length;
+    });
+    var total = boxes.filter(function (b) { return b.checked; }).length;
+    $('#chk-total').textContent = total + ' of ' + boxes.length + ' ticked';
+  }
+  boxes.forEach(function (b) {
+    if (saved[b.id]) b.checked = true;
+    b.addEventListener('change', function () { saved[b.id] = b.checked; persist(); counts(); });
+  });
+  var clr = $('#chk-clear'), armed = false, armTimer = null;
+  clr.addEventListener('click', function () {
+    if (!armed) {
+      armed = true;
+      clr.textContent = 'Click again to clear all';
+      armTimer = setTimeout(function () { armed = false; clr.textContent = 'Clear ticks'; }, 3000);
+      return;
+    }
+    clearTimeout(armTimer);
+    armed = false;
+    clr.textContent = 'Clear ticks';
+    boxes.forEach(function (b) { b.checked = false; });
+    saved = {};
+    persist();
+    counts();
+  });
+  counts();
+
+  /* ---------- sizing calculator ---------- */
+  var PRESETS = {
+    beta:   { users: 1000,    bcasts: 1,  viewers: 50 },
+    launch: { users: 10000,   bcasts: 2,  viewers: 300 },
+    growth: { users: 100000,  bcasts: 5,  viewers: 2000 },
+    scale:  { users: 1000000, bcasts: 20, viewers: 10000 }
+  };
+  var COMMON = { dau: 40, conc: 10, msgs: 40, peak: 3, fan: 3, call: 3, video: 40, part: 2.4, mb: 4, mdays: 30, phours: 6 };
+
+  var nf0 = new Intl.NumberFormat('en-US', { maximumFractionDigits: 0 });
+  var nf1 = new Intl.NumberFormat('en-US', { maximumFractionDigits: 1 });
+  function compact(n) {
+    if (!isFinite(n)) return '0';
+    if (n >= 1e6) return nf1.format(n / 1e6) + 'M';
+    if (n >= 1e4) return nf1.format(n / 1e3) + 'K';
+    if (n >= 100) return nf0.format(n);
+    return nf1.format(n);
+  }
+  function mbps(n) { return n >= 1000 ? nf1.format(n / 1000) + ' Gbps' : (n >= 10 ? nf0.format(n) : nf1.format(n)) + ' Mbps'; }
+  function gb(n) { return n >= 1000 ? nf1.format(n / 1000) + ' TB' : (n >= 10 ? nf0.format(n) : nf1.format(n)) + ' GB'; }
+  function tb(n) { return n >= 10 ? nf0.format(n) + ' TB' : nf1.format(n) + ' TB'; }
+  function esc(s) { return String(s).replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); }
+
+  function num(id, dflt, min, max) {
+    var el = document.getElementById(id);
+    var v = el ? parseFloat(el.value) : NaN;
+    if (!isFinite(v)) v = dflt;
+    if (min != null && v < min) v = min;
+    if (max != null && v > max) v = max;
+    return v;
+  }
+  function read() {
+    return {
+      users: num('in-users', 10000, 0), dau: num('in-dau', 40, 0, 100), conc: num('in-conc', 10, 0, 100),
+      msgs: num('in-msgs', 40, 0), peak: num('in-peak', 3, 1), fan: num('in-fan', 3, 1),
+      call: num('in-call', 3, 0, 100), video: num('in-video', 40, 0, 100), part: num('in-part', 2.4, 2),
+      bcasts: Math.round(num('in-bcasts', 2, 0)), viewers: num('in-viewers', 300, 0),
+      mb: num('in-mb', 4, 0), mdays: num('in-mdays', 30, 0), phours: num('in-phours', 6, 0, 24),
+      two: $('#in-two').checked,
+      f: {
+        sock: num('f-sock', 5000, 1), deliv: num('f-deliv', 1500, 1), vid: num('f-vid', 0.6, 0),
+        aud: num('f-aud', 0.04, 0), sfu: num('f-sfu', 600, 1), pnode: num('f-pnode', 1000, 1),
+        vcpu: num('f-vcpu', 4, 0.5), egress: num('f-egress', 12, 1), hls: num('f-hls', 2.5, 0),
+        row: num('f-row', 1.5, 0), dbcap: num('f-dbcap', 600, 1)
+      }
+    };
+  }
+
+  function model(x) {
+    var f = x.f;
+    var m = {};
+    m.sockets = x.users * x.conc / 100;
+    m.active = x.users * x.dau / 100;
+    m.msgsDay = m.active * x.msgs;
+    m.msgPerSec = m.msgsDay / 86400 * x.peak;
+    m.deliv = m.msgPerSec * x.fan;
+    m.replicas = Math.max(1, Math.ceil(m.sockets / f.sock), Math.ceil(m.deliv / f.deliv));
+    m.inCalls = m.sockets * x.call / 100;
+    m.calls = m.inCalls / x.part;
+    var perStream = (x.video / 100) * f.vid + (1 - x.video / 100) * f.aud;
+    m.sfu = m.calls * x.part * (x.part - 1) * perStream;
+    m.mediaNodes = Math.max(1, Math.ceil(m.sfu / f.sfu), Math.ceil(m.inCalls / f.pnode));
+    m.sfuTB = m.sfu * x.phours * 3600 * 30 / 8 / 1e6;
+    m.egressVcpu = x.bcasts * f.vcpu;
+    m.liveNodes = x.bcasts > 0 ? Math.max(1, Math.ceil(m.egressVcpu / f.egress)) : 0;
+    m.cdn = x.bcasts * x.viewers * f.hls;
+    m.dbGB = m.msgsDay * 365 * f.row / 1e6;
+    m.r2GB = m.active * x.mb * x.mdays / 1e3;
+    var rep = x.two ? 2 : 1;
+    m.cap = { sockets: rep * f.sock, deliv: rep * f.deliv, sfu: f.sfu, pnode: f.pnode, egress: f.egress, db: f.dbcap };
+    m.drivers = [
+      { name: 'Live connections on CORE-1', inline: 'live connections on CORE-1', pct: m.sockets / m.cap.sockets,
+        text: compact(m.sockets) + ' of ' + compact(m.cap.sockets) },
+      { name: 'Message deliveries per second', inline: 'message deliveries per second', pct: m.deliv / m.cap.deliv,
+        text: compact(m.deliv) + ' of ' + compact(m.cap.deliv) },
+      { name: 'Call media on MEDIA-1', inline: 'call media on MEDIA-1', pct: Math.max(m.sfu / m.cap.sfu, m.inCalls / m.cap.pnode),
+        text: mbps(m.sfu) + ' of ' + mbps(m.cap.sfu) + ' · ' + compact(m.inCalls) + ' of ' + compact(m.cap.pnode) + ' people' },
+      { name: 'Broadcast rendering on LIVE-1', inline: 'broadcast rendering on LIVE-1', pct: m.egressVcpu / m.cap.egress,
+        text: nf1.format(m.egressVcpu) + ' of ' + nf1.format(m.cap.egress) + ' vCPU' },
+      { name: 'Postgres growth in the first year', inline: 'Postgres growth in the first year', pct: m.dbGB / m.cap.db,
+        text: gb(m.dbGB) + ' of ' + gb(m.cap.db) }
+    ];
+    m.over = m.drivers.filter(function (d) { return d.pct >= 1; });
+    m.warn = m.drivers.filter(function (d) { return d.pct >= 0.7 && d.pct < 1; });
+    m.max = m.drivers.reduce(function (a, d) { return d.pct > a.pct ? d : a; }, m.drivers[0]);
+    return m;
+  }
+
+  var ICON = { ok: '#i-ok', warn: '#i-warn', over: '#i-over' };
+  var WORD = { ok: 'Fits', warn: 'Tight', over: 'Over' };
+  function stateOf(p) { return p >= 1 ? 'over' : (p >= 0.7 ? 'warn' : 'ok'); }
+  function pctText(p) { return p >= 1 ? nf1.format(p) + '× launch capacity' : Math.round(p * 100) + '% of launch capacity'; }
+
+  function render() {
+    var x = read();
+    var m = model(x);
+
+    /* verdict */
+    var v = $('#out-verdict');
+    var state = m.over.length ? 'over' : (m.warn.length ? 'warn' : 'ok');
+    v.setAttribute('data-state', state);
+    var head, lines = [];
+    if (state === 'over') {
+      head = 'Move to the growth topology';
+      lines.push('Over launch capacity: ' + m.over.map(function (d) { return d.inline + ' (' + pctText(d.pct) + ')'; }).join('; ') + '.');
+    } else if (state === 'warn') {
+      head = 'The launch topology fits, with little headroom';
+      lines.push('Near the limit: ' + m.warn.map(function (d) { return d.inline + ' (' + pctText(d.pct) + ')'; }).join('; ') + '. Plan the next step now.');
+    } else {
+      head = 'The four-server launch topology covers this load';
+      lines.push('Largest driver: ' + m.max.inline + ', at ' + pctText(m.max.pct) + '.');
+    }
+    if (state === 'ok' && x.users <= 2000 && x.bcasts <= 1 && m.sfu <= 100) {
+      lines.push('A single server in today’s shape would also carry this for a closed beta, with no standby and call media next to the database.');
+    }
+    if (m.sockets > 50000) {
+      lines.push('Connections drive the server count here, and 5,000 per process is what was tested, not a ceiling. Measure before buying.');
+    }
+    if (m.dbGB > 2000) {
+      lines.push('Postgres grows ' + gb(m.dbGB) + ' a year because every message stays in messages.content. Retention (audit P0-1) becomes a capacity decision.');
+    }
+    v.innerHTML = '<svg class="ico ' + state + '" aria-hidden="true"><use href="' + ICON[state] + '"/></svg>' +
+      '<div><h4>' + esc(head) + '</h4>' + lines.map(function (l) { return '<p>' + esc(l) + '</p>'; }).join('') + '</div>';
+
+    /* key figures */
+    var k = [
+      ['Live connections', compact(m.sockets), nf1.format(x.conc) + '% of ' + compact(x.users) + ' accounts'],
+      ['Deliveries per second', compact(m.deliv), nf1.format(m.msgPerSec) + ' messages/s × ' + nf1.format(x.fan)],
+      ['Call media through the SFU', mbps(m.sfu), compact(m.calls) + ' calls, ' + compact(m.inCalls) + ' people'],
+      ['Broadcast rendering', nf1.format(m.egressVcpu) + ' vCPU', x.bcasts + ' live × ' + nf1.format(x.f.vcpu) + ' vCPU'],
+      ['Postgres growth per year', gb(m.dbGB), compact(m.msgsDay) + ' messages a day'],
+      ['Attachments held in R2', gb(m.r2GB), nf0.format(x.mdays) + '-day retention']
+    ];
+    $('#out-kpis').innerHTML = k.map(function (t) {
+      return '<div class="kpi"><div class="l">' + esc(t[0]) + '</div><div class="v">' + esc(t[1]) + '</div><div class="s">' + esc(t[2]) + '</div></div>';
+    }).join('');
+
+    /* meters */
+    $('#out-meters').innerHTML = m.drivers.map(function (d) {
+      var s = stateOf(d.pct);
+      var w = Math.max(d.pct > 0 ? 2 : 0, Math.min(100, d.pct * 100));
+      return '<div class="meter" data-state="' + s + '">' +
+        '<div class="top"><b>' + esc(d.name) + '</b><span>' + esc(d.text) + '</span></div>' +
+        '<div class="track" role="img" aria-label="' + esc(d.name + ': ' + pctText(d.pct)) + '"><div class="fill" style="width:' + w.toFixed(1) + '%"></div></div>' +
+        '<div class="st"><svg aria-hidden="true"><use href="' + ICON[s] + '"/></svg><b>' + WORD[s] + '</b>' + esc(pctText(d.pct)) + '</div>' +
+        '</div>';
+    }).join('');
+
+    /* servers to provision */
+    var rows, total, note;
+    function row(role, plate, what, count, spec, why) {
+      return '<tr><td><span class="plate ' + role + ' sm">' + esc(plate) + '</span><span class="role">' + esc(what) + '</span></td>' +
+        '<td class="cnt">' + (count == null ? '—' : esc(count)) + '</td><td>' + spec.split(' · ').map(function (part) { return '<span class="nw">' + esc(part) + '</span>'; }).join(' · ') + '</td><td>' + esc(why) + '</td></tr>';
+    }
+    if (state !== 'over') {
+      var procs = m.replicas + ' go-api process' + (m.replicas > 1 ? 'es' : '') + ' needed';
+      rows = [
+        row('core', 'CORE-1', 'API and primary database', 1, '16 vCPU · 64 GB · 2 × 1 TB NVMe', procs + ' for ' + compact(m.sockets) + ' connections'),
+        row('data', 'DB-2', 'Standby and monitoring', 1, '8 vCPU · 32 GB · 2 × 1 TB NVMe', 'Redundancy; Postgres grows ' + gb(m.dbGB) + ' a year'),
+        row('media', 'MEDIA-1', 'Calls and TURN', 1, '8 vCPU · 16 GB · 1 Gbps', mbps(m.sfu) + ' of SFU egress at peak'),
+        row('media', 'LIVE-1', 'Go Live', x.bcasts > 0 ? 1 : 0, '16 vCPU · 32 GB · 1 Gbps', x.bcasts > 0 ? x.bcasts + ' live broadcast' + (x.bcasts > 1 ? 's' : '') + ' → ' + nf1.format(m.egressVcpu) + ' vCPU of rendering' : 'Skip while Go Live is off')
+      ];
+      total = 3 + (x.bcasts > 0 ? 1 : 0);
+      note = 'Launch topology';
+      $('#out-bom-h').textContent = 'Servers to provision: launch topology';
+    } else {
+      var app = Math.max(2, Math.ceil(m.replicas / 2));
+      var media = Math.max(2, m.mediaNodes);
+      var live = x.bcasts > 0 ? Math.max(1, m.liveNodes) : 0;
+      var dbSpec = m.dbGB <= 500 ? '16 vCPU · 64 GB · 2 × 1.92 TB NVMe'
+        : (m.dbGB <= 2000 ? '16 vCPU · 128 GB · 2 × 3.84 TB NVMe' : '32 vCPU · 256 GB · NVMe for 2 years of growth');
+      rows = [
+        row('core', 'APP', 'Caddy and 2 go-api processes each', app, '8 vCPU · 16 GB · 80 GB', m.replicas + ' processes for ' + compact(m.sockets) + ' connections and ' + compact(m.deliv) + ' deliveries/s; at least 2 servers'),
+        row('', 'LB', 'Managed load balancer', null, 'Least connections · WebSocket · no sticky sessions', 'Not a server you run; the client is WebSocket-only'),
+        row('data', 'DB', 'Primary and standby', 2, dbSpec, 'Grows ' + gb(m.dbGB) + ' a year'),
+        row('data', 'REDIS', 'Fan-out, presence, limits', 1, '4 vCPU · 16 GB', 'One endpoint; a managed Redis works through REDIS_URL'),
+        row('', 'GEO', 'Valhalla and Photon', 1, '8 vCPU · 32 GB · 200 GB', 'Keeps APP servers identical and stateless'),
+        row('media', 'MEDIA', 'LiveKit and coturn', media, '8 vCPU · 16 GB · 1–10 Gbps', mbps(m.sfu) + ' at peak, ' + compact(m.inCalls) + ' people in calls; at least 2'),
+        row('media', 'LIVE', 'Go Live SFU and egress', live, '16 vCPU · 32 GB', x.bcasts > 0 ? x.bcasts + ' live broadcasts → ' + nf1.format(m.egressVcpu) + ' vCPU of rendering' : 'Skip while Go Live is off'),
+        row('', 'OPS', 'Monitoring, logs, backups', 1, '4 vCPU · 16 GB · 500 GB', 'Survives an APP or DB outage')
+      ];
+      total = app + 2 + 1 + 1 + media + live + 1;
+      note = 'Growth topology, plus the load balancer';
+      $('#out-bom-h').textContent = 'Servers to provision: growth topology';
+    }
+    $('#out-bom').innerHTML = rows.join('');
+    $('#out-total').textContent = total;
+    $('#out-total-note').textContent = note;
+
+    $('#out-notes').textContent =
+      'Viewers are served by Cloudflare: about ' + mbps(m.cdn) + ' at peak, none of it from your servers. ' +
+      'SFU transfer is about ' + tb(m.sfuTB) + ' a month if the peak lasts ' + nf0.format(x.phours) + ' hours a day; choose media plans with that much included traffic.';
+  }
+
+  function setPreset(name) {
+    var p = PRESETS[name];
+    if (!p) return;
+    var all = {};
+    Object.keys(COMMON).forEach(function (k) { all[k] = COMMON[k]; });
+    Object.keys(p).forEach(function (k) { all[k] = p[k]; });
+    Object.keys(all).forEach(function (k) { var el = document.getElementById('in-' + k); if (el) el.value = all[k]; });
+    $$('.presets button').forEach(function (b) { b.setAttribute('aria-pressed', b.getAttribute('data-preset') === name ? 'true' : 'false'); });
+    render();
+  }
+  $$('.presets button').forEach(function (b) {
+    b.addEventListener('click', function () { setPreset(b.getAttribute('data-preset')); });
+  });
+  $('#calc-form').addEventListener('input', function (e) {
+    if (e.target && e.target.id && e.target.id.indexOf('in-') === 0 && e.target.id !== 'in-two') {
+      $$('.presets button').forEach(function (b) { b.setAttribute('aria-pressed', 'false'); });
+    }
+    render();
+  });
+  $('#calc-form').addEventListener('change', render);
+  $('#calc-form').addEventListener('submit', function (e) { e.preventDefault(); });
+  render();
+})();
+</script>
+</body>
+</html>
