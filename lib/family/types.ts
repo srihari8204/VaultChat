@@ -5,8 +5,11 @@
 // decrypted, in-memory view — it is never sent anywhere or persisted server-side.
 // Circles ride on top of existing groups; a Circle's id IS its group/chat id.
 
-import { type LatLng } from '../nav/geo';
-import { type Geofence } from './geofence';
+// `import type` (not `import { type … }`): both are erased by the bundler, but
+// only this form leaves NO runtime import behind, which keeps types.ts loadable
+// by pure/self-check runners that don't provide CommonJS globals.
+import type { LatLng } from '../nav/geo';
+import type { Geofence } from './geofence';
 
 /**
  * ONE reference distance, derived on the device that owns the place.

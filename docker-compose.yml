@@ -194,6 +194,10 @@ services:
       # and is the right answer when there is no CDN yet.
       PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-}
       BROADCAST_CDN_BASE: ${BROADCAST_CDN_BASE:-}
+      # Geocoder for GET /nav/geocode. Unset = public photon.komoot.io (works,
+      # but search terms leave the box). Set to http://photon:2322 once the
+      # `geocode` profile container has an index — see the photon service below.
+      GEOCODE_UPSTREAM: ${GEOCODE_UPSTREAM:-}
       # Disk-stored attachments MUST be shared with Node while both backends
       # can serve /uploads (strangler period) — same dir, both processes.
       UPLOAD_DIR: /data/uploads
@@ -375,6 +379,41 @@ services:
     environment:
       - server_threads=4
       - use_tiles_ignore_pbf=True   # after the first build, serve tiles without re-parsing the pbf
+
+  # ── photon — self-hosted geocoder for /nav/geocode (location-lock §7.1) ──
+  # routes/nav.go already proxies address search, rate-limits it per user and
+  # deliberately logs no queries. What it CANNOT do by itself is keep the search
+  # terms inside our infrastructure: with GEOCODE_UPSTREAM unset it falls back to
+  # the public photon.komoot.io, so komoot sees "what our users search for from
+  # this box's IP" (never who searched — the client identity stops at go-api).
+  # This container closes that last gap.
+  #
+  # Profile-gated, same reasoning as valhalla: Photon needs an OSM index that
+  # this repo does not ship. Without one it would fail its healthcheck on every
+  # `up`, so it must not be part of the default set.
+  #
+  # First run (index download is tens of GB for planet — take a country extract):
+  #   mkdir -p photon/data
+  #   dc --profile geocode up -d photon        # first boot fetches the index
+  #   dc logs photon -f                        # wait for "Photon server started"
+  # Then point the API at it and restart go-api:
+  #   GEOCODE_UPSTREAM=http://photon:2322  (set in vaultchat-backend/.env)
+  #   dc up -d go-api
+  #
+  # ponytail: country-extract indexes are rebuilt by re-pulling the archive, not
+  # incrementally — a stale index is a manual `rm -rf photon/data` + re-up.
+  photon:
+    image: rtuszik/photon-docker:latest
+    restart: unless-stopped
+    profiles: ["geocode"]
+    ports:
+      - "127.0.0.1:2322:2322"   # localhost only — reached in-network as photon:2322
+    volumes:
+      - ./photon/data:/photon/photon_data
+    environment:
+      # Country extract keeps the index to single-digit GB. Unset = full planet.
+      - REGION=${PHOTON_REGION:-in}
+      - UPDATE_STRATEGY=PARALLEL
 
   # coturn — TURN/STUN relay for WebRTC (calls + VaultBeam Tier-2 P2P). Host
   # networking because the relay allocates a UDP port range (min/max-port in

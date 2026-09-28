@@ -137,8 +137,10 @@ export async function processFix(circleId: string, fix: Fix, opts: ProcessOpts):
   await writeInside(circleId, inside);
 
   for (const ev of events) {
-    const verb = ev.type === 'enter' ? 'arrived at' : 'left';
-    const text = `${fix.name} ${verb} ${ev.name}`;
+    // The inbox text stays clean; only the message announced to the circle
+    // carries the marker, so a RECEIVER can recognise it as a family event
+    // instead of matching English (see events.ts).
+    const text = `${fix.name} ${ev.type === 'enter' ? 'arrived at' : 'left'} ${ev.name}`;
     await recordAlert({
       circleId, kind: ev.type, actorId: fix.userId, actorName: fix.name, text, at: fix.ts,
     });

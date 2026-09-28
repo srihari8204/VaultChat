@@ -13,6 +13,7 @@ import (
 	"vaultchat/backend-go/internal/db"
 	"vaultchat/backend-go/internal/metrics"
 	"vaultchat/backend-go/internal/redisx"
+	"vaultchat/backend-go/internal/workx"
 )
 
 // ── shared payload helpers ────────────────────────────────────────────
@@ -304,6 +305,27 @@ func (h *Hub) registerChatHandlersPeer(s *eventPeer) {
 	// chat — see registerRunRelay for why.
 	h.registerRunRelayPeer(s, d)
 
+	// Family Space Emergency Connect — the kill-safe leg (F7.1). Mirrors
+	// server.js: relay into the circle room, then wake only the members the
+	// relay did NOT reach, exactly like call_incoming. The payload is
+	// CONTENT-FREE — the alert text lives in the E2EE audit message, which this
+	// server cannot read.
+	//
+	// Membership gate is chatMemberAllowed, the same one live location and trips
+	// use: a Circle IS a chat, so it is the identical question.
+	s.On("family_emergency", func(args ...any) {
+		chatID := mstr(argMap("family_emergency", args), "chatId")
+		if chatID == "" || !h.chatMemberAllowed(d, chatID, s.Context()) {
+			return
+		}
+		s.To(Room("chat:"+chatID)).Emit("family_emergency",
+			map[string]any{"chatId": chatID, "userId": d.uid})
+
+		uid := d.uid
+		// bg, not s.Context(): the wake-up push outlives this handler and must
+		// not be cancelled when the socket's request context ends.
+		workx.Submit(func() { h.familyEmergencyWake(bg, chatID, uid) }) // bounded, not raw-spawned
+	})
 	// Typing — routed via fanOutToChat so it reaches every member's user-room
 	// and honours hide_typing ghost-mode.
 	//

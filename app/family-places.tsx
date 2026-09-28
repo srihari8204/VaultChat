@@ -25,6 +25,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../lib/theme';
 import { brandAlpha } from '../constants/theme';
 import SpaceGround, { useSpaceGlass } from '../components/spaces/SpaceGround';
+import { geocodeSearch, type GeoHit } from '../lib/nav/geocode';
 import { getPlaces, setPlaces, getDefaultRef, setDefaultRef } from '../lib/family/store';
 import { reloadPlaces } from '../lib/family/presence';
 import { isZoneActive, type Geofence, type ZoneSchedule } from '../lib/family/geofence';
@@ -152,7 +153,13 @@ export default function FamilyPlacesScreen() {
     }
     const m = q.match(COORD_RE);
     if (m) return { lat: Number(m[1]), lng: Number(m[2]) };
-    const hit = await Location.geocodeAsync(q);
+    // Server-proxied geocoder first, platform second — same order as
+    // location-lock.tsx / navigate.tsx. Places search used to call
+    // Location.geocodeAsync ALONE, which is dead on no-GMS devices, so on those
+    // phones the only way to create a place was still to stand inside it.
+    const hits = await geocodeSearch(q).catch(() => [] as GeoHit[]);
+    if (hits[0]) return { lat: hits[0].lat, lng: hits[0].lng };
+    const hit = await Location.geocodeAsync(q).catch(() => [] as Location.LocationGeocodedLocation[]);
     if (!hit[0]) { Alert.alert('Not found', `Could not find "${q}". Try an address, or "lat, lng".`); return null; }
     return { lat: hit[0].latitude, lng: hit[0].longitude };
   };

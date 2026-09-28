@@ -57,6 +57,10 @@ import { loadAlerts, recordAlert, useUnreadCount } from '../lib/family/alerts';
 import { deriveWatchAlerts, emptyWatchState } from '../lib/family/watchAlerts';
 import { emptyCrashState, feedSpeed, feedImpact, COUNTDOWN_S } from '../lib/family/crash';
 import { Accelerometer } from 'expo-sensors';
+import {
+  requestCheckin, confirmImOk, startEscalationTicker, stopEscalationTicker,
+} from '../lib/family/escalationService';
+import { MISSES_BEFORE_EMERGENCY } from '../lib/family/escalation';
 import { type CircleMember, type MemberPresence, STALE_MS, SPEED_ALERT_CHOICES, DEFAULT_SPEED_ALERT_KMH } from '../lib/family/types';
 import { sendMessage, getMessages, decryptFromChat, getChat, listChats, sendAnnouncement, isAnnouncement } from '../lib/chatService';
 import { getCurrentUserAsync } from './(constants)/authService';
@@ -456,8 +460,13 @@ export default function FamilySpaceScreen() {
         });
         if (!cancelled) setLocDenied(res.denied);
       } catch { if (!cancelled) setLocDenied(true); }
+
+      // The escalation ladder runs on the requesting guardian's device only,
+      // so it ticks wherever Family Space is open — a cold start settles any
+      // ladder that came due while away (advance() collapses those).
+      if (!cancelled) startEscalationTicker([active.id], me.id);
     })();
-    return () => { cancelled = true; unsub?.(); stopPresence(); };
+    return () => { cancelled = true; unsub?.(); stopPresence(); stopEscalationTicker(); };
   // `share` IS a dependency, and its absence was a real field bug: settings
   // load async, so a cold start ran this with share=false and never re-ran —
   // the switch showed ON, the self-dot worked (the watcher runs regardless),
@@ -1064,10 +1073,43 @@ export default function FamilySpaceScreen() {
     } catch (e: any) { Alert.alert('Check-in', e?.message ?? 'Could not send.'); }
   };
 
+  // ── Escalation ladder (F6) ───────────────────────────────────────────
+  /** Guardian asks a member to check in; the ladder escalates if they don't. */
+  const askCheckin = (m: CircleMember) => {
+    if (!active || !me) return;
+    Alert.alert(
+      `Ask ${m.name} to check in?`,
+      `They'll be asked now, reminded twice if there's no reply, and after ${MISSES_BEFORE_EMERGENCY} missed reminders the circle gets an emergency alert.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Ask', onPress: async () => {
+          try {
+            await requestCheckin({
+              circleId: active.id, subjectId: m.id, subjectName: m.name,
+              meId: me.id, meName: me.name,
+            });
+            setBump((b) => b + 1);
+          } catch (e: any) { Alert.alert('Check-in', e?.message ?? 'Could not send the request.'); }
+        } },
+      ],
+    );
+  };
+
+  /** Member answers a request. Harmless when no ladder is running for them. */
+  const sendImOk = async () => {
+    if (!active || !me) return;
+    setCheckin(false);
+    try {
+      await confirmImOk(active.id, me.id, me.name);
+      setBump((b) => b + 1);
+    } catch (e: any) { Alert.alert('Check-in', e?.message ?? 'Could not send.'); }
+  };
+
   // ── Member management (guardians) ────────────────────────────────────
   const memberActions = (m: CircleMember) => {
     if (!active || !me || m.id === me.id || !canRemove) return;
     Alert.alert(m.name, 'Manage this member', [
+      { text: 'Ask to check in', onPress: () => askCheckin(m) },
       { text: m.role === 'guardian' ? 'Make member' : 'Make guardian', onPress: async () => {
         try { await setGuardian(active.id, m.id, m.role !== 'guardian'); refreshMembers(); }
         catch (e: any) { Alert.alert('Role', e?.message ?? 'Could not change role.'); }
@@ -2077,6 +2119,13 @@ export default function FamilySpaceScreen() {
                 {picked ? `Send “${picked.label}”` : 'Choose a status'}
               </Text>
             </TouchableOpacity>
+            {/* Answers a guardian's check-in request and stops its ladder. Shown
+                always: the request arrives as a notification, and the member
+                should be able to answer it without hunting for context. */}
+            <TouchableOpacity onPress={sendImOk} style={[st.okBtn, { borderColor: colors.success }]}>
+              <Text style={{ fontSize: 16 }}>👍</Text>
+              <Text style={{ color: colors.success, fontWeight: '800', fontSize: 14 }}>I&apos;m OK — answer a check-in request</Text>
+            </TouchableOpacity>
             </ScrollView>
           </View>
         </KeyboardSafe>
@@ -2397,6 +2446,10 @@ const st = StyleSheet.create({
   // paddingHorizontal 24 reserves the corner the selected-state checkmark
   // occupies, so it never overprints the label on narrow tiles.
   checkBtn: { flexBasis: '47%', flexGrow: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, minHeight: 54, paddingHorizontal: 24, borderRadius: 16, borderWidth: 1 },
+  // okBtn uses minHeight for the same reason as checkBtn: its label is long and
+  // must not clip at large font scales.
+  okBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
+    minHeight: 48, borderRadius: 16, borderWidth: 1.5, marginTop: 10 },
   noteInput: { borderWidth: 1, borderRadius: 16, paddingHorizontal: 12, minHeight: 48, marginTop: 4, fontSize: 14.5 },
   sendCheckin: { marginTop: 10, minHeight: 52, borderRadius: 16, alignItems: 'center', justifyContent: 'center' },
   btnWide: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, minHeight: 52, borderRadius: 16, marginTop: 12 },
