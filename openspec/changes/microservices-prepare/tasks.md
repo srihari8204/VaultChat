@@ -27,7 +27,7 @@ A task is done only at the level it states.
 
 ## 5. Migration 139 (written)
 
-- [ ] 5.1 Write `vaultchat-backend/migrations/139_service_roles.sql` (roles, grants, sequences, `chat_membership` view, refusal checks) and `migrations/tests/139_service_roles_test.sql`; verify on a scratch Postgres by applying 001–139 and running the test
+- [x] 5.1 Write `vaultchat-backend/migrations/139_service_roles.sql` (roles, grants, sequences, `chat_membership` view, refusal checks) and `migrations/tests/139_service_roles_test.sql`; verify on a scratch Postgres by applying 001–139 and running the test
 
 ## 6. Shared helpers out of feature files (written)
 
