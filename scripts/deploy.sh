@@ -69,6 +69,16 @@ BAK="/home/srihari/deploy-predeploy.$STAMP"
 # "vaultchat" - so every command here would address a second, empty stack and
 # happily "deploy" into it while production kept running the old binary.
 DC="docker compose -p vaultchat -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.box.yml"
+# SKIP_MIGRATIONS=1 ships the BINARY ONLY and leaves the schema alone, for a
+# deploy whose migration is a separate, later decision — one that is inert for
+# the binary being shipped but not yet cleared to run (arming per-service
+# database roles, say).
+#
+# It is NOT a way past a migration the new code NEEDS. That pairing 500s every
+# request that touches the missing column, which is the entire reason step 5
+# runs before the binary. So the skip PRINTS what it deferred: a silent skip is
+# how a schema and a binary drift apart with nobody deciding to.
+SKIP_MIGRATIONS="${SKIP_MIGRATIONS:-0}"
 ASSUME_YES=0
 [ "${1:-}" = "--yes" ] && ASSUME_YES=1
 
@@ -259,6 +269,21 @@ say "5/8  migrations (BEFORE the binary: the API queries columns these create)"
 # notices line endings reports every migration as drifted from a Windows tree.
 # Observed: 80 of 81 "drifted", all of them purely CRLF, which is enough noise to
 # hide the one real mismatch.
+if [ "$SKIP_MIGRATIONS" = 1 ]; then
+  _ap=$(mktemp)
+  ssh "$HOST" "docker exec vaultchat-postgres-1 psql -U vaultchat -d vaultchat -tAc 'SELECT version FROM schema_migrations'" \
+    | tr -d ' \r' | grep . | sort > "$_ap" || true
+  PEND=$(ls vaultchat-backend/migrations/*.sql 2>/dev/null | xargs -n1 basename \
+    | sed 's/_.*//' | sort | comm -23 - "$_ap" | tr '\n' ' ')
+  rm -f "$_ap"
+  if [ -n "$(printf %s "$PEND" | tr -d ' ')" ]; then
+    printf '  SKIPPING pending migration(s): %s\n' "$PEND"
+    printf '  The binary about to ship must not need them. If it does, this deploy\n'
+    printf '  500s on every request that touches the missing schema.\n'
+  else
+    ok "no pending migrations anyway — the skip changed nothing"
+  fi
+else
 ssh "$HOST" "bash -s" <<REMOTE || rollback
 set -euo pipefail
 cd $ROOT/vaultchat-backend/migrations
@@ -283,6 +308,7 @@ for f in \$(ls *.sql 2>/dev/null | sort); do
 done
 echo "  applied \$PENDING migration(s); ledger now at \$(\$Q -c 'SELECT max(version) FROM schema_migrations' | tr -d ' \r')"
 REMOTE
+fi
 ok "schema is ahead of, or level with, the binary about to ship"
 
 # ───────────────────────────────────────────────────────────────────────────
