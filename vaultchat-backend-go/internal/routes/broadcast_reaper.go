@@ -56,6 +56,7 @@ import (
 
 	"vaultchat/backend-go/internal/db"
 	"vaultchat/backend-go/internal/golive"
+	"vaultchat/backend-go/internal/jobs"
 	"vaultchat/backend-go/internal/livekit"
 	"vaultchat/backend-go/internal/metrics"
 )
@@ -103,7 +104,7 @@ func StartBroadcastReaper(ctx context.Context) {
 			case <-ctx.Done():
 				return
 			case <-t.C:
-				reapStuckBroadcasts(ctx)
+				jobs.RunLocked(ctx, "broadcast-reaper", reapStuckBroadcasts)
 			}
 		}
 	}()

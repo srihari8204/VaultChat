@@ -32,6 +32,7 @@ import (
 
 	"vaultchat/backend-go/internal/db"
 	"vaultchat/backend-go/internal/golive"
+	"vaultchat/backend-go/internal/jobs"
 	"vaultchat/backend-go/internal/livekit"
 )
 
@@ -72,7 +73,7 @@ func StartGoLiveHostSweep(ctx context.Context) {
 			case <-ctx.Done():
 				return
 			case <-t.C:
-				goliveSweepAbandoned(ctx)
+				jobs.RunLocked(ctx, "golive-host-sweep", goliveSweepAbandoned)
 			}
 		}
 	}()

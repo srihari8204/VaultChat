@@ -74,7 +74,7 @@ is unchanged.
 
 ### D3. Job lock: transaction-scoped advisory lock held for the run
 
-`jobs.RunLocked(ctx, name, fn)` begins a transaction on `db.SysPool`, calls
+`jobs.RunLocked(ctx, name, fn)` begins a transaction on `db.Pool`, calls
 `pg_try_advisory_xact_lock(hash("vc:job:"+name))`, runs `fn` if it got the
 lock, then ends the transaction, which releases the lock. `fn` does its own
 queries on the pool as before; only the lock lives in the held transaction.
@@ -163,9 +163,12 @@ service still builds from one package. So they move to neutral files instead:
 
 ## Risks / Trade-offs
 
-- [Each running job holds one pooled connection for its lock] → Jobs are
-  short except retention; `DB_SYSTEM_POOL_MAX` or `DB_POOL_MAX` covers it.
-  The boot kick runs about a dozen jobs at once, well under the pool of 30.
+- [Each running job holds one pooled connection, and one PgBouncer server
+  connection, for its lock] → Jobs are short except the retention sweeps. The
+  lock is taken on `db.Pool` while the work runs on `db.SysPool`, so a split
+  system pool of 8 can never be filled by lock holders waiting on themselves;
+  on the default shared pool of 30, the fifteen or so jobs fit with room left,
+  and PgBouncer's 40 server connections cover them.
 - [Core restarts reopen the 15-minute HS256 window] → Only a holder of
   `JWT_SECRET` can use it, and after this change only core has that. Set
   `ACCESS_TOKEN_HS256=off` once the first Ed25519 deploy has run 15 minutes.

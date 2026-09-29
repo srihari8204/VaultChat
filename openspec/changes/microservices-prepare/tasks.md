@@ -12,8 +12,8 @@ A task is done only at the level it states.
 
 ## 2. Every job runs once (written)
 
-- [ ] 2.1 Add `jobs.RunLocked` (transaction-scoped advisory lock, FNV-1a key of the job name) with a test for the key and a DB-backed test that a second holder skips; verify with `go test ./internal/jobs/`
-- [ ] 2.2 Route every ticker through it: `jobs.StartAll`, broadcast reaper, Go Live host sweep, VaultBeam sweep, ShopBook tick; verify with `go build ./...` and `go vet ./...`
+- [x] 2.1 Add `jobs.RunLocked` (transaction-scoped advisory lock, FNV-1a key of the job name) with a test for the key and a DB-backed test that a second holder skips; verify with `go test ./internal/jobs/`
+- [x] 2.2 Route every ticker through it: `jobs.StartAll`, broadcast reaper, Go Live host sweep, VaultBeam sweep, ShopBook tick; verify with `go build ./...` and `go vet ./...`
 
 ## 3. Ed25519 access tokens (written)
 

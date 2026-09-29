@@ -139,7 +139,7 @@ func StartAll(ctx context.Context) {
 			return
 		}
 		go func() {
-			f(ctx) // boot kick, like Node
+			RunLocked(ctx, name, f) // boot kick, like Node
 			t := time.NewTicker(every)
 			defer t.Stop()
 			for {
@@ -147,7 +147,7 @@ func StartAll(ctx context.Context) {
 				case <-ctx.Done():
 					return
 				case <-t.C:
-					f(ctx)
+					RunLocked(ctx, name, f)
 				}
 			}
 		}()

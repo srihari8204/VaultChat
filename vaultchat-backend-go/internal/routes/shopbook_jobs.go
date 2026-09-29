@@ -20,6 +20,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"vaultchat/backend-go/internal/db"
+	"vaultchat/backend-go/internal/jobs"
 	"vaultchat/backend-go/internal/redisx"
 )
 
@@ -39,7 +40,7 @@ func StartShopBookJobs(ctx context.Context) {
 			case <-ctx.Done():
 				return
 			case <-t.C:
-				sbJobsTick(ctx)
+				jobs.RunLocked(ctx, "shopbook-jobs", sbJobsTick)
 			}
 		}
 	}()

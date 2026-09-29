@@ -364,9 +364,11 @@ func main() {
 	if services.Enabled(services.Core) {
 		go func() {
 			sweep := func() {
-				if err := routes.VaultbeamSweepExpired(ctx); err != nil {
-					log.Printf("[vaultbeam] sweep: %v", err)
-				}
+				jobs.RunLocked(ctx, "vaultbeam-sweep", func(ctx context.Context) {
+					if err := routes.VaultbeamSweepExpired(ctx); err != nil {
+						log.Printf("[vaultbeam] sweep: %v", err)
+					}
+				})
 			}
 			sweep()
 			for range time.Tick(time.Hour) {
