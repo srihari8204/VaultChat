@@ -108,6 +108,26 @@
 		file_server
 	}
 
+	# ── Maps → its own container, core as the fallback ───────────────
+	# openspec: microservices-maps-pilot. maps-api is the same image as go-api
+	# started with SERVICES=maps; go-api still serves /nav/* too.
+	#
+	# lb_policy first + active health checks: every request goes to maps-api
+	# while its /livez answers, and to go-api the moment it does not (a stopped
+	# container fails within one 5 s interval; lb_try_duration retries a request
+	# that hit it in between). /livez touches nothing, so a slow database never
+	# flips traffic. Undo the move by deleting this block and reloading Caddy.
+	@maps path /nav/*
+	handle @maps {
+		reverse_proxy maps-api:4000 go-api:4000 {
+			lb_policy first
+			lb_try_duration 5s
+			fail_duration 30s
+			health_uri /livez
+			health_interval 5s
+		}
+	}
+
 	# ── everything else → Go ─────────────────────────────────────────
 	handle {
 		reverse_proxy go-api:4000

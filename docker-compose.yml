@@ -213,6 +213,58 @@ services:
       redis:
         condition: service_started
 
+  # ── maps-api — Maps as its own service (openspec: microservices-maps-pilot) ──
+  # The SAME image as go-api, started as Maps only. Caddy sends /nav/* here
+  # first and falls back to go-api, which still serves the same paths, so this
+  # container can stop at any time without an outage.
+  #
+  # Profile "split": a plain `up -d` never starts it, and scripts/deploy.sh only
+  # ever touches go-api. It refuses to boot without its public key, internal
+  # key and database password, which deploy/maps-split.sh creates first.
+  #
+  # NO env_file, deliberately. vaultchat-backend/.env is core's: JWT_SECRET,
+  # the master key, push credentials. Maps gets only what it uses.
+  maps-api:
+    build:
+      context: ./vaultchat-backend-go
+    profiles: ["split"]
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    environment:
+      PORT: "4000"
+      SERVICES: maps
+      # Straight to Postgres: PgBouncer is configured with the vaultchat login
+      # only. Maps touches no tables — its one query is /ready's ping — so two
+      # connections are plenty. svc_maps comes from migration 139.
+      DB_HOST: postgres
+      DB_PORT: "5432"
+      DB_NAME: vaultchat
+      DB_USER: svc_maps
+      DB_PASS: ${SVC_MAPS_DB_PASS:-}
+      DB_POOL_MAX: "2"
+      # Same Redis as go-api, so the per-user /nav rate limits are shared
+      # while Caddy can send a user's requests to either process.
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      REDIS_PASS: ""
+      # Must match what go-api uses; deploy/maps-split.sh exports go-api's value.
+      VALHALLA_URL: ${VALHALLA_URL:-http://valhalla:8002}
+      GEOCODE_UPSTREAM: ${GEOCODE_UPSTREAM:-}
+      # Logins: verify with the public key only (mounted in the prod file).
+      ACCESS_TOKEN_PUBLIC_KEY_FILE: /run/secrets/access-token-pub/access-token.pub
+      # Core's bridge, with Maps' own key (core lists it in INTERNAL_SERVICE_KEYS).
+      NODE_INTERNAL_URL: http://go-api:4000
+      INTERNAL_EMIT_KEY: ${MAPS_INTERNAL_KEY:-}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+
   # ── pgbouncer — connection pooler in front of Postgres (P2.3) ────────
   # Transaction pooling: many app connections multiplex onto few server
   # connections, so scaling go-api replicas doesn't blow max_connections.

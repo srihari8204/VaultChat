@@ -99,10 +99,33 @@ services:
       # while the code still existed and the flag was a real revert lever; it is
       # not one any more, and leaving it would imply a rollback path that no
       # longer exists. Rolling Socket.IO back now means reverting the code.
+
+      # ── Service split (openspec: microservices-prepare, microservices-maps-pilot)
+      #
+      # Core signs access tokens with Ed25519; feature services verify them with
+      # the public key alone. SAFE TO SHIP BEFORE THE KEY EXISTS, and it must be:
+      # scripts/deploy.sh syncs this file and recreates go-api on every deploy.
+      #   * the key path comes from the root .env and is EMPTY by default, which
+      #     keeps go-api on HS256 exactly as before;
+      #   * the mount below is a DIRECTORY, which Docker creates empty when it is
+      #     missing, so it can never fail a start the way a missing file mount does.
+      # deploy/maps-split.sh `keys` creates the key and sets the path.
+      ACCESS_TOKEN_PRIVATE_KEY_FILE: ${ACCESS_TOKEN_PRIVATE_KEY_FILE:-}
+      # "off" once the switch has run 15 minutes (maps-split.sh hs256-off).
+      ACCESS_TOKEN_HS256: ${ACCESS_TOKEN_HS256:-}
+      # One internal key per feature service: maps=<key>,golive=<key>...
+      INTERNAL_SERVICE_KEYS: ${INTERNAL_SERVICE_KEYS:-}
     volumes:
       - ./secrets/fcm-service-account.json:/run/secrets/firebase-sa.json:ro
       - ./secrets/games-signing.key:/run/secrets/games-signing.key:ro
       - ./secrets/games-notify.pub:/run/secrets/games-notify.pub:ro
+      - ./secrets/access-token:/run/secrets/access-token:ro
+  maps-api:
+    # The PUBLIC key's own directory: Maps verifies logins, it never signs them,
+    # so it must not see secrets/access-token/ where the private key lives. No
+    # port is published; Caddy and Prometheus reach it on the compose network.
+    volumes:
+      - ./secrets/access-token-pub:/run/secrets/access-token-pub:ro
   postgres:
     ports: !override []      # in-network only
   redis:

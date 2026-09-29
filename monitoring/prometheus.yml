@@ -14,3 +14,10 @@ scrape_configs:
     metrics_path: /internal/metrics
     static_configs:
       - targets: ['go-api:4000']
+
+  # openspec: microservices-maps-pilot. Down (not alerting) while maps-api is
+  # stopped; Caddy serves /nav/* from go-api then.
+  - job_name: maps-api
+    metrics_path: /internal/metrics
+    static_configs:
+      - targets: ['maps-api:4000']
