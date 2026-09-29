@@ -438,26 +438,3 @@ func goliveRestartEgress(r *http.Request, room, identity string) {
 	goliveLog("EGRESS_RESTARTED", bid, room, identity, "egress_id="+egressID)
 }
 
-// isUUID reports whether s is shaped like a canonical UUID.
-//
-// Shape only — this is a filter for "could this be a user id", not validation.
-// The database is still the authority on whether the id exists and whether it
-// is the host; this just keeps non-user participants (egress, and any future
-// SIP or agent joiner) from reaching a uuid-typed column at all.
-func isUUID(s string) bool {
-	if len(s) != 36 {
-		return false
-	}
-	for i, c := range s {
-		if i == 8 || i == 13 || i == 18 || i == 23 {
-			if c != '-' {
-				return false
-			}
-			continue
-		}
-		if !(c >= '0' && c <= '9' || c >= 'a' && c <= 'f' || c >= 'A' && c <= 'F') {
-			return false
-		}
-	}
-	return true
-}

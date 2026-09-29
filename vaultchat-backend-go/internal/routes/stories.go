@@ -725,9 +725,3 @@ func storiesDelete(w http.ResponseWriter, r *http.Request) {
 	httpx.JSON(w, 200, map[string]any{"ok": true})
 }
 
-func truncRunes(s string, n int) string {
-	if runes := []rune(s); len(runes) > n {
-		return string(runes[:n])
-	}
-	return s
-}

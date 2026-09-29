@@ -418,14 +418,6 @@ func navMatrix(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// The slice of Valhalla's sources_to_targets response we actually read.
-type valhallaMatrix struct {
-	SourcesToTargets [][]struct {
-		Distance *float64 `json:"distance"` // kilometres, per directions_options
-		Time     *float64 `json:"time"`     // seconds
-	} `json:"sources_to_targets"`
-}
-
 // Map Valhalla's rows back onto the CALLER's original source indexes, in
 // metres and seconds.
 //

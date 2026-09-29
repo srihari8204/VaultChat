@@ -32,7 +32,6 @@ import (
 	"vaultchat/backend-go/internal/emitx"
 	"vaultchat/backend-go/internal/groups"
 	"vaultchat/backend-go/internal/httpx"
-	"vaultchat/backend-go/internal/vault"
 )
 
 const wfNoteMax = 300
@@ -49,10 +48,6 @@ const wfNoteMax = 300
 // Any query behind an ops screen must select spaceNameCols and resolve through
 // spaceName, exactly as the chat member list already does.
 const spaceNameCols = `u.first_name_cipher, u.last_name_cipher, u.email_cipher, u.name, u.email`
-
-func spaceName(fnc, lnc, ec, legacyName, legacyEmail *string) *string {
-	return vault.IdentityFromRow(fnc, lnc, ec, nil, nil, nil, legacyName, legacyEmail, nil, nil, nil).Name
-}
 
 var leaveKinds = map[string]bool{
 	"casual": true, "sick": true, "privilege": true, "unpaid": true, "other": true,

@@ -262,13 +262,6 @@ func syncVerify(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func orEmpty(v any) any {
-	if v == nil {
-		return ""
-	}
-	return v
-}
-
 // ── Trusted (emergency) contacts ───────────────────────────────────────
 
 func trustedList(w http.ResponseWriter, r *http.Request) {

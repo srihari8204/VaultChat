@@ -298,12 +298,13 @@ func TestSweepRunsAtStartupAndHourly(t *testing.T) {
 	}
 
 	// The startup call must come BEFORE the loop, or it is just the loop again.
-	startup := strings.Index(body, "sweep()\n\t\tfor range time.Tick(time.Hour)")
-	if startup < 0 {
+	// Indentation-insensitive: the block's nesting depth (it now sits inside
+	// the core-only branch) is not what this checks.
+	if !regexp.MustCompile(`sweep\(\)\n\s*for range time\.Tick\(time\.Hour\)`).MatchString(body) {
 		t.Error("no immediate sweep() precedes the hourly loop — the first cleanup is still start+1h")
 	}
 	// And the loop must still call it, or hourly cleanup is gone.
-	if !strings.Contains(body, "for range time.Tick(time.Hour) {\n\t\t\tsweep()") {
+	if !regexp.MustCompile(`for range time\.Tick\(time\.Hour\) \{\n\s*sweep\(\)`).MatchString(body) {
 		t.Error("the hourly loop no longer invokes the sweep")
 	}
 

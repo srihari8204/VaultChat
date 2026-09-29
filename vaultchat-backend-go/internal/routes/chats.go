@@ -186,55 +186,6 @@ func RegisterFamilySpace(mux *http.ServeMux) {
 	mux.Handle("/chats/{id}/", id)
 }
 
-// ─── RLS plumbing (Node req.dbQuery = one withUser tx per query) ───────
-
-func chatsQRow(ctx context.Context, uid, q string, args []any, dest ...any) error {
-	return db.WithUser(ctx, uid, func(tx pgx.Tx) error {
-		return tx.QueryRow(ctx, q, args...).Scan(dest...)
-	})
-}
-
-func chatsExecU(ctx context.Context, uid, q string, args ...any) error {
-	return db.WithUser(ctx, uid, func(tx pgx.Tx) error {
-		_, err := tx.Exec(ctx, q, args...)
-		return err
-	})
-}
-
-// chatsExecAffected is chatsExecU for writes whose guard lives in the SQL —
-// an `INSERT ... SELECT ... WHERE EXISTS` that legitimately matches nothing.
-//
-// chatsExecU discards the command tag, so "wrote one row" and "the WHERE EXISTS
-// rejected it" are indistinguishable, and the handler answers 200 either way.
-// That turned a mistyped roster id into a link that reported success and did
-// nothing — the parent then saw no child, forever, with nothing to look at.
-// Callers that guard in SQL must use this and check the count.
-func chatsExecAffected(ctx context.Context, uid, q string, args ...any) (int64, error) {
-	var n int64
-	err := db.WithUser(ctx, uid, func(tx pgx.Tx) error {
-		tag, err := tx.Exec(ctx, q, args...)
-		n = tag.RowsAffected()
-		return err
-	})
-	return n, err
-}
-
-func chatsQueryU(ctx context.Context, uid, q string, args []any, each func(pgx.Rows) error) error {
-	return db.WithUser(ctx, uid, func(tx pgx.Tx) error {
-		rows, err := tx.Query(ctx, q, args...)
-		if err != nil {
-			return err
-		}
-		defer rows.Close()
-		for rows.Next() {
-			if err := each(rows); err != nil {
-				return err
-			}
-		}
-		return rows.Err()
-	})
-}
-
 // ─── JS coercion helpers ───────────────────────────────────────────────
 
 // chatsTruthy mirrors JS truthiness for JSON-decoded values.

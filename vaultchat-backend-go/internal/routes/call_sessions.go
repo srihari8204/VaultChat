@@ -36,7 +36,6 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgconn"
 
 	"vaultchat/backend-go/internal/db"
 	"vaultchat/backend-go/internal/fcm"
@@ -197,11 +196,6 @@ func myRole(ctx context.Context, uid, callID string) (string, bool) {
 		return "", false
 	}
 	return role, true
-}
-
-func isUniqueViolation(err error) bool {
-	var pgErr *pgconn.PgError
-	return errors.As(err, &pgErr) && pgErr.Code == "23505"
 }
 
 // callLoad fetches a call the caller is allowed to see, or writes the error.

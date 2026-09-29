@@ -31,7 +31,7 @@ A task is done only at the level it states.
 
 ## 6. Shared helpers out of feature files (written)
 
-- [ ] 6.1 Move the DB, text, device-push and Valhalla helpers to neutral files and `spaceName` / `chatsAudienceAllowed` into `chats_helpers.go`, names unchanged; verify with `go build ./...` and `go test ./internal/routes/`
+- [x] 6.1 Move the DB, text, device-push and Valhalla helpers to neutral files and `spaceName` / `chatsAudienceAllowed` into `chats_helpers.go`, names unchanged; verify with `go build ./...` and `go test ./internal/routes/`
 
 ## 7. Review and validation (written)
 

@@ -2882,10 +2882,62 @@ func chatsSenderKeysGet(w http.ResponseWriter, r *http.Request) {
 	httpx.JSON(w, 200, out)
 }
 
-// chatsStrOr mirrors (v || def).toString() over a JSON any.
-func chatsStrOr(v any, def string) string {
-	if !chatsTruthy(v) {
-		return def
+func spaceName(fnc, lnc, ec, legacyName, legacyEmail *string) *string {
+	return vault.IdentityFromRow(fnc, lnc, ec, nil, nil, nil, legacyName, legacyEmail, nil, nil, nil).Name
+}
+
+// chatsAudienceAllowed reports whether uid may address `audience` in this space,
+// or returns a message explaining why not.
+//
+// Called from the message POST path next to the send_announcements check, so an
+// audience cannot be attached by a modified client that skipped the composer.
+//
+// The audience forms mirror the visibility rule ONE-FOR-ONE — same resolver,
+// same subtree — so "message my department" and "see my department" can never
+// disagree. That is the reason this is not a free-text field.
+func chatsAudienceAllowed(ctx context.Context, uid, chatID string, mem *chatsMem, audience string) string {
+	if audience == "" || audience == "space" {
+		return ""
 	}
-	return fmt.Sprintf("%v", v)
+	kind, arg, found := strings.Cut(audience, ":")
+	if !found || arg == "" {
+		return "Unknown announcement audience"
+	}
+	switch kind {
+	case "run":
+		// You may address a run you can see: ops, or its driver.
+		var one int
+		err := chatsQRow(ctx, uid,
+			`SELECT 1 FROM runs WHERE id = $1 AND chat_id = $2`, []any{arg, chatID}, &one)
+		if db.NoRows(err) {
+			return "That run is not in this space"
+		}
+		if err != nil {
+			log.Printf("[audience run] %v", err)
+			return "Could not check that audience"
+		}
+		return ""
+	case "role":
+		// A role key from this space type's catalog, not an arbitrary string.
+		if groups.FindRole(mem.roleCatalog, arg) == nil {
+			return "Unknown role for this space type"
+		}
+		return ""
+	case "subtree":
+		// The subtree beneath a roster entry — and you may only address one you
+		// can already SEE. Without this check, addressing a subtree would be a
+		// way to probe which roster ids exist.
+		var visible bool
+		if err := chatsQRow(ctx, uid,
+			`SELECT space_can_view_roster($1, $2, $3)`,
+			[]any{chatID, uid, arg}, &visible); err != nil {
+			log.Printf("[audience subtree] %v", err)
+			return "Could not check that audience"
+		}
+		if !visible && !mem.can(groups.PermViewSpaceOps) {
+			return "You cannot address that part of the space"
+		}
+		return ""
+	}
+	return "Unknown announcement audience"
 }
