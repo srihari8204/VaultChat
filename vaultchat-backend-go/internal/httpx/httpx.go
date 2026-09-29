@@ -1,7 +1,8 @@
 // Package httpx — JSON + auth plumbing matching the Node backend's contract
 // EXACTLY: response shapes {error: "..."}, the requireAuth 401 texts
-// ('Missing Bearer token' | 'token_expired' | 'invalid_token'), HS256 JWT with
-// {sub, email} claims (jwt.js).
+// ('Missing Bearer token' | 'token_expired' | 'invalid_token'), a JWT with
+// {sub, email} claims (jwt.js): HS256, or EdDSA once a key is configured
+// (accesskeys.go).
 package httpx
 
 import (
@@ -105,14 +106,25 @@ var bearerRe = regexp.MustCompile(`(?i)^Bearer\s+(.+)$`)
 
 func jwtSecret() []byte { return []byte(os.Getenv("JWT_SECRET")) }
 
-// VerifyAccess validates an HS256 access token and returns (sub, email).
+// VerifyAccess validates an access token and returns (sub, email). EdDSA
+// tokens verify against the Ed25519 public key; HS256 tokens only while
+// hs256Accepted (accesskeys.go), which is always in legacy mode.
 func VerifyAccess(token string) (string, string, error) {
 	parsed, err := jwt.Parse(token, func(t *jwt.Token) (any, error) {
-		if t.Method.Alg() != jwt.SigningMethodHS256.Alg() {
-			return nil, errors.New("bad alg")
+		switch t.Method.Alg() {
+		case jwt.SigningMethodEdDSA.Alg():
+			if accessPub == nil {
+				return nil, errors.New("no access public key")
+			}
+			return accessPub, nil
+		case jwt.SigningMethodHS256.Alg():
+			if !hs256Accepted(time.Now()) {
+				return nil, errors.New("hs256 no longer accepted")
+			}
+			return jwtSecret(), nil
 		}
-		return jwtSecret(), nil
-	}, jwt.WithValidMethods([]string{"HS256"}))
+		return nil, errors.New("bad alg")
+	}, jwt.WithValidMethods([]string{"EdDSA", "HS256"}))
 	if err != nil || !parsed.Valid {
 		if err != nil && strings.Contains(err.Error(), "expired") {
 			return "", "", errors.New("token_expired")

@@ -293,14 +293,19 @@ func authEnvTTL(name string, def int64) int64 {
 	return def
 }
 
-// authSignAccess mints the same HS256 {sub, email, iat, exp} token jwt.js does.
+// authSignAccess mints the same {sub, email, iat, exp} token jwt.js does:
+// EdDSA when core holds an Ed25519 key (so feature services can verify it with
+// the public key alone), HS256 over JWT_SECRET otherwise.
 func authSignAccess(userID string, email *string) (string, error) {
 	now := time.Now().Unix()
 	claims := jwt.MapClaims{
 		"sub":   userID,
 		"email": email,
 		"iat":   now,
-		"exp":   now + authEnvTTL("JWT_ACCESS_TTL", 15*60),
+		"exp":   now + httpx.AccessTTLSeconds(),
+	}
+	if key := httpx.AccessSigningKey(); key != nil {
+		return jwt.NewWithClaims(jwt.SigningMethodEdDSA, claims).SignedString(key)
 	}
 	return jwt.NewWithClaims(jwt.SigningMethodHS256, claims).
 		SignedString([]byte(os.Getenv("JWT_SECRET")))

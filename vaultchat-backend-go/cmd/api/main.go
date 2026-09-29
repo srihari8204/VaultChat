@@ -87,6 +87,15 @@ func main() {
 		log.Fatalf("[boot] %v", err)
 	}
 	log.Printf("[boot] services: %s", strings.Join(services.List(), ", "))
+	if err := httpx.LoadAccessKeys(); err != nil {
+		log.Fatalf("[boot] access-token key: %v", err)
+	}
+	switch {
+	case httpx.AccessSigningKey() != nil:
+		log.Printf("[boot] access tokens: signing Ed25519; HS256 from before the switch accepted for %ds", httpx.AccessTTLSeconds())
+	case httpx.HasAccessPublicKey():
+		log.Printf("[boot] access tokens: verifying Ed25519 only")
+	}
 	if services.Enabled(services.Core) {
 		if os.Getenv("JWT_SECRET") == "" {
 			log.Fatal("[boot] JWT_SECRET is empty — refusing to start: every authenticated route would accept forged tokens")
@@ -94,6 +103,11 @@ func main() {
 		if len(os.Getenv("JWT_SECRET")) < 32 {
 			log.Printf("[boot] WARNING: JWT_SECRET is under 32 chars — brute-forceable offline; rotate to 32+ random bytes")
 		}
+	} else if !httpx.HasAccessPublicKey() {
+		// Core signs logins; a feature service only verifies them, with the
+		// public key. Without it every authenticated request would be a 401.
+		log.Fatal("[boot] SERVICES excludes core but ACCESS_TOKEN_PUBLIC_KEY_FILE is unset — " +
+			"refusing to start: no user could authenticate")
 	} else if os.Getenv("NODE_INTERNAL_URL") == "" || os.Getenv("INTERNAL_EMIT_KEY") == "" {
 		// Without core this process holds no sockets; every live event goes to
 		// core's /internal/emit. emitx drops the post silently when either is

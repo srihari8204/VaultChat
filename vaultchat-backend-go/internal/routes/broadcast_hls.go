@@ -64,7 +64,16 @@ import (
 // break exactly the long streams this is for.
 const hlsTicketTTL = 24 * time.Hour
 
-func hlsSecret() []byte { return []byte(os.Getenv("JWT_SECRET")) }
+// hlsSecret prefers HLS_TICKET_SECRET so a Go Live process never needs the
+// login secret (openspec: microservices-prepare); JWT_SECRET is the fallback
+// every existing deployment already has. Core and Go Live must share the value
+// while Caddy can send Go Live's paths to either.
+func hlsSecret() []byte {
+	if s := os.Getenv("HLS_TICKET_SECRET"); s != "" {
+		return []byte(s)
+	}
+	return []byte(os.Getenv("JWT_SECRET"))
+}
 
 func hlsSign(id string, exp int64) string {
 	m := hmac.New(sha256.New, hlsSecret())
@@ -182,7 +191,7 @@ func hlsBucketExp(now time.Time) int64 {
 // hlsTicketOK verifies a ticket against a broadcast id.
 //
 // Constant-time compare, and the signature covers the expiry so the deadline
-// cannot be edited. An empty JWT_SECRET would make every ticket verify against
+// cannot be edited. An empty secret would make every ticket verify against
 // every other, so that is refused outright rather than silently accepted.
 func hlsTicketOK(id, ticket string) bool {
 	if len(hlsSecret()) == 0 || ticket == "" {

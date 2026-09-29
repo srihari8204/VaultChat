@@ -8,7 +8,7 @@ A task is done only at the level it states.
 
 - [x] 1.1 Add `internal/services` (parse `SERVICES`, `all` default, unknown name fatal) with a unit test pinning parsing and the ownership table; verify with `go test ./internal/services/`
 - [x] 1.2 Group route registration and job starts in `cmd/api/main.go` by service; move the nine Family Space groups into `RegisterFamilySpaceOnID` and `/user/sos` + `/contacts/trusted` into `RegisterFamilySafety`; verify with `go build ./...` and a test that `SERVICES=golive` serves `/golive/health` and 404s `/chats`
-- [ ] 1.3 Boot checks per mode: `JWT_SECRET` when core runs; public key, `NODE_INTERNAL_URL` and `INTERNAL_EMIT_KEY` when it does not; verify by starting the binary with `SERVICES=maps` and no key and seeing it refuse
+- [x] 1.3 Boot checks per mode: `JWT_SECRET` when core runs; public key, `NODE_INTERNAL_URL` and `INTERNAL_EMIT_KEY` when it does not; verify by starting the binary with `SERVICES=maps` and no key and seeing it refuse
 
 ## 2. Every job runs once (written)
 
@@ -17,8 +17,8 @@ A task is done only at the level it states.
 
 ## 3. Ed25519 access tokens (written)
 
-- [ ] 3.1 Load `ACCESS_TOKEN_PRIVATE_KEY_FILE` / `ACCESS_TOKEN_PUBLIC_KEY_FILE` in `httpx`; sign EdDSA in `authSignAccess` when the private key is loaded; verify EdDSA with the public key and HS256 only in the window; verify with `go test ./internal/httpx/` covering legacy, core-in-window, core-after-window, `ACCESS_TOKEN_HS256=off` and public-key-only
-- [ ] 3.2 `hlsSecret` prefers `HLS_TICKET_SECRET`; verify with the existing broadcast HLS tests
+- [x] 3.1 Load `ACCESS_TOKEN_PRIVATE_KEY_FILE` / `ACCESS_TOKEN_PUBLIC_KEY_FILE` in `httpx`; sign EdDSA in `authSignAccess` when the private key is loaded; verify EdDSA with the public key and HS256 only in the window; verify with `go test ./internal/httpx/` covering legacy, core-in-window, core-after-window, `ACCESS_TOKEN_HS256=off` and public-key-only
+- [x] 3.2 `hlsSecret` prefers `HLS_TICKET_SECRET`; verify with the existing broadcast HLS tests
 
 ## 4. Core internal endpoints (written)
 
