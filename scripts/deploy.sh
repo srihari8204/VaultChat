@@ -79,6 +79,12 @@ DC="docker compose -p vaultchat -f docker-compose.yml -f docker-compose.prod.yml
 # runs before the binary. So the skip PRINTS what it deferred: a silent skip is
 # how a schema and a binary drift apart with nobody deciding to.
 SKIP_MIGRATIONS="${SKIP_MIGRATIONS:-0}"
+# CONFIG_DEPLOY=1 deploys even when the box already runs this source's
+# fingerprint. The fingerprint covers Go files only, so a change that is all
+# compose, Caddy, monitoring or migrations (the Maps split, say) otherwise stops
+# at "nothing to deploy" and never ships. Every later step runs as usual: same
+# backup, migrations, build and verified restart of go-api.
+CONFIG_DEPLOY="${CONFIG_DEPLOY:-0}"
 ASSUME_YES=0
 [ "${1:-}" = "--yes" ] && ASSUME_YES=1
 
@@ -130,7 +136,10 @@ sync_tree_merge() {
 sync_files() {
   _d="$1"; shift
   if [ "$SYNC_IMPL" = rsync ]; then
-    rsync -az "$@" "$HOST:$_d/"
+    # -R keeps each file's relative path, as the tar branch below does. Without
+    # it monitoring/prometheus.yml landed as $_d/prometheus.yml, next to the
+    # compose files, and the one Prometheus reads never changed.
+    rsync -azR "$@" "$HOST:$_d/"
   else
     tar czf - "$@" | ssh "$HOST" "tar xzf - -C '$_d'"
   fi
@@ -162,8 +171,12 @@ ssh "$HOST" "test -d $ROOT/secrets" \
 FP_BOX_BEFORE=$(ssh "$HOST" "curl -s -m 10 http://127.0.0.1:8095/build" \
   | sed -n 's/.*"source":"\([^"]*\)".*/\1/p')
 if [ "$FP_BOX_BEFORE" = "$FP_LOCAL" ]; then
-  ok "box already runs $FP_LOCAL — nothing to deploy"
-  exit 0
+  if [ "$CONFIG_DEPLOY" = 1 ]; then
+    ok "box already runs $FP_LOCAL — CONFIG_DEPLOY=1, shipping config and migrations anyway"
+  else
+    ok "box already runs $FP_LOCAL — nothing to deploy (CONFIG_DEPLOY=1 ships config-only changes)"
+    exit 0
+  fi
 fi
 # Live calls survive a go-api restart badly: sockets drop and reconnect. Worth
 # one line of warning, not worth blocking on.

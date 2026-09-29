@@ -26,7 +26,8 @@ box and running; **device-verified** = checked on two phones.
 `deploy/maps-split.sh` is copied there by hand (deploy.sh does not sync
 `deploy/`). No Go change: go-api's `/build` stays `e0156aa0295d17a7`.
 
-- [ ] 4.0 `bash scripts/deploy.sh` (without `SKIP_MIGRATIONS`): ledger shows 139, go-api healthy
+- [x] 2.3 `scripts/deploy.sh`: `CONFIG_DEPLOY=1` ships a config-only change when the Go fingerprint already matches; rsync keeps relative paths (`-R`) so `monitoring/` files land where Prometheus reads them; verify with `bash -n` and shellcheck
+- [ ] 4.0 `CONFIG_DEPLOY=1 bash scripts/deploy.sh` (without `SKIP_MIGRATIONS`): ledger shows 139, go-api healthy, `/build` unchanged
 - [ ] 4.1 `preflight` passes: config landed, `svc_maps` exists
 - [ ] 4.2 `keys`: go-api boot log says `signing Ed25519`; 15 minutes later `hs256-off`
 - [ ] 4.3 `start`: `maps-api` boot log says `services: maps`, `/livez` answers inside the network
