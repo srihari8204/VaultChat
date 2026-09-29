@@ -22,8 +22,8 @@ A task is done only at the level it states.
 
 ## 4. Core internal endpoints (written)
 
-- [ ] 4.1 Per-service internal keys (`INTERNAL_SERVICE_KEYS`), constant-time compare, shared by `/internal/emit`, `/internal/chat-event` and the new endpoints; verify with a guard unit test
-- [ ] 4.2 `POST /internal/notify` and `POST /internal/users/cards`, core only; verify with handler tests for 403, bad input and the size caps
+- [x] 4.1 Per-service internal keys (`INTERNAL_SERVICE_KEYS`), constant-time compare, shared by `/internal/emit`, `/internal/chat-event` and the new endpoints; verify with a guard unit test
+- [x] 4.2 `POST /internal/notify` and `POST /internal/users/cards`, core only; verify with handler tests for 403, bad input and the size caps
 
 ## 5. Migration 139 (written)
 

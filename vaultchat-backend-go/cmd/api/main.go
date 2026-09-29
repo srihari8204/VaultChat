@@ -291,15 +291,19 @@ func main() {
 		// Caddy refuses /internal/* from outside, so only in-network callers reach
 		// these.
 		//
-		// Its only consumer was the VaultLens QueueEvents listener, which has been
-		// removed. Kept because it is generic transport, not VaultLens code: the
-		// legacy Node API still emits through it if that profile is ever started,
-		// and it is the escape hatch any future out-of-process worker would use.
-		// Retiring it is a separate decision from deleting VaultLens.
-		internalKey := os.Getenv("INTERNAL_EMIT_KEY")
+		// Its callers are the feature services that run without core (SERVICES):
+		// with no hub of their own, emitx posts every live event here. The legacy
+		// Node API still emits through it too if that profile is ever started.
+		//
+		// Keys: the shared INTERNAL_EMIT_KEY, or one per feature service in
+		// INTERNAL_SERVICE_KEYS (services.InternalCaller), constant-time compared.
 		guard := func(r *http.Request) bool {
-			return internalKey != "" && r.Header.Get("X-Internal-Key") == internalKey
+			_, ok := services.InternalCaller(r)
+			return ok
 		}
+		// Notifications and user names for feature services, which hold neither
+		// the push credentials nor the key that decrypts names.
+		routes.RegisterCoreInternal(mux, emitx.LocalToUids)
 		mux.HandleFunc("POST /internal/emit", func(w http.ResponseWriter, r *http.Request) {
 			if !guard(r) {
 				httpx.Err(w, http.StatusForbidden, "forbidden")
