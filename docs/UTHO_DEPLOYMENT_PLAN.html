@@ -350,6 +350,7 @@ footer.end{margin-top:56px;padding-top:18px;border-top:1px solid var(--line);fon
 
 <nav class="nav" id="nav" aria-label="Sections">
   <a href="#build">Build</a>
+  <a href="#buy">Buy</a>
   <a href="#decisions">Decisions</a>
   <a href="#network">Network</a>
   <a href="#storage">Storage</a>
@@ -424,6 +425,66 @@ footer.end{margin-top:56px;padding-top:18px;border-top:1px solid var(--line);fon
     <span class="k">Recommended</span><b>48 vCPU · 144 GB RAM · 2 × 1 TB volumes</b>
     <span class="k">Minimum</span><b>24 vCPU · 72 GB RAM</b>
     <span class="k">Outside Utho</span><b>Cloudflare DNS, CDN, R2 · FCM · Expo push · MSG91 · Resend · Klipy</b>
+  </div>
+</section>
+
+<!-- ============================================================ BUY -->
+<section class="sec" id="buy" aria-labelledby="buy-h">
+  <div class="sec-h">
+    <h2 id="buy-h">Buying the servers, step by step</h2>
+    <p>What to do after you log in, in order. Menu names follow Utho's documentation; if a label in your console differs slightly, the fields are the same. Ticks are saved in this browser only.</p>
+  </div>
+  <div class="chk-scope" data-word="done">
+  <div class="chk-top"><p class="chk-total">0 done</p><button type="button" class="btn chk-clear">Clear ticks</button></div>
+  <div class="chk-groups">
+    <section class="chk-group" aria-labelledby="bg1">
+      <header><h3 id="bg1">1. Before you start</h3><span class="chk-count"></span></header>
+      <label class="chk" for="b-1"><input type="checkbox" id="b-1"><span>Get Utho's quote for the four plan sizes and two 1 TB volumes (see <a href="#costs">Costs</a>), so you can check the price shown before each deploy.</span></label>
+      <label class="chk" for="b-2"><input type="checkbox" id="b-2"><span>Have an SSH key on your laptop. If not: <code>ssh-keygen -t ed25519 -C "you@vaultchat"</code>. You will paste the <code>.pub</code> file.</span></label>
+      <label class="chk" for="b-3"><input type="checkbox" id="b-3"><span>Write down your office or VPN IP addresses. These are the "admin IPs" for SSH.</span></label>
+      <label class="chk" for="b-4"><input type="checkbox" id="b-4"><span>Open a password-manager entry for Utho to collect IDs, IPs and root passwords as you go.</span></label>
+    </section>
+    <section class="chk-group" aria-labelledby="bg2">
+      <header><h3 id="bg2">2. Account</h3><span class="chk-count"></span></header>
+      <label class="chk" for="b-5"><input type="checkbox" id="b-5"><span>Log in and finish any profile or verification step Utho asks for.</span></label>
+      <label class="chk" for="b-6"><input type="checkbox" id="b-6"><span>Turn on two-factor authentication if the account settings offer it. This account can delete every server.</span></label>
+      <label class="chk" for="b-7"><input type="checkbox" id="b-7"><span>Add a payment method and credit. Utho reserves credit per server at deploy time, so cover four servers and two volumes for a month.</span></label>
+      <label class="chk" for="b-8"><input type="checkbox" id="b-8"><span>Create an API token only if you will use the Terraform starter, and store it in the password manager.</span></label>
+    </section>
+    <section class="chk-group" aria-labelledby="bg3">
+      <header><h3 id="bg3">3. SSH keys, VPC and firewalls</h3><span class="chk-count"></span></header>
+      <label class="chk" for="b-9"><input type="checkbox" id="b-9"><span><b>SSH Keys → Create SSH Key.</b> Name it after the person or laptop and paste the <code>.pub</code> contents. One key per admin.</span></label>
+      <label class="chk" for="b-10"><input type="checkbox" id="b-10"><span><b>VPC → Deploy VPC.</b> Location Mumbai, name <code>vaultchat-vpc</code>, network address <code>10.20.0.0</code>, network size <code>24</code>.</span></label>
+      <label class="chk" for="b-11"><input type="checkbox" id="b-11"><span><b>Firewall → Create New Firewall.</b> Name <code>fw-core</code>, then Deploy Firewall. Repeat for <code>fw-db</code>, <code>fw-media</code> and <code>fw-live</code>.</span></label>
+      <label class="chk" for="b-12"><input type="checkbox" id="b-12"><span>On each firewall's page, add the inbound rules from <a href="#network">Network</a>. Leave outbound open.</span></label>
+    </section>
+    <section class="chk-group" aria-labelledby="bg4">
+      <header><h3 id="bg4">4. Deploy the four servers</h3><span class="chk-count"></span></header>
+      <label class="chk" for="b-13"><input type="checkbox" id="b-13"><span><b>Cloud Instances → Deploy New.</b></span></label>
+      <label class="chk" for="b-14"><input type="checkbox" id="b-14"><span>Location <b>Mumbai</b>. Operating system <b>Ubuntu 24.04</b>, or 22.04 if 24.04 is not listed.</span></label>
+      <label class="chk" for="b-15"><input type="checkbox" id="b-15"><span>Billing <b>hourly</b> if offered, otherwise monthly. Move to longer terms after a stable week.</span></label>
+      <label class="chk" for="b-16"><input type="checkbox" id="b-16"><span>Plan for CORE-1: <b>dedicated CPU, 16 vCPU · 64 GB</b>. Compare the price shown with the quote before continuing.</span></label>
+      <label class="chk" for="b-17"><input type="checkbox" id="b-17"><span>Authentication: <b>SSH key</b>, with every admin key selected. Public IP <b>on</b>. Network <code>vaultchat-vpc</code>. Firewall <code>fw-core</code>. Weekly backups <b>on</b>. Hostname <code>core-1</code>. Then <b>Deploy Cloud</b>.</span></label>
+      <label class="chk" for="b-18"><input type="checkbox" id="b-18"><span>Repeat for <b>DB-2</b> (8 vCPU · 32 GB, <code>fw-db</code>, backups off), <b>MEDIA-1</b> (8 vCPU · 16 GB with the most included transfer, <code>fw-media</code>, backups off) and <b>LIVE-1</b> (dedicated CPU, 16 vCPU · 32 GB, <code>fw-live</code>, backups off).</span></label>
+      <label class="chk" for="b-19"><input type="checkbox" id="b-19"><span>If a server was deployed without its firewall, attach it from the firewall's page or the server's Firewall section.</span></label>
+    </section>
+    <section class="chk-group" aria-labelledby="bg5">
+      <header><h3 id="bg5">5. Disks</h3><span class="chk-count"></span></header>
+      <label class="chk" for="b-20"><input type="checkbox" id="b-20"><span><b>EBS → create a volume:</b> 1 TB, general-purpose SSD, Mumbai, named <code>core-1-data</code>. Repeat for <code>db-2-data</code>.</span></label>
+      <label class="chk" for="b-21"><input type="checkbox" id="b-21"><span>On each volume's page: <b>Attach/Detach → Attach</b>, pick the server, then Attach.</span></label>
+      <label class="chk" for="b-22"><input type="checkbox" id="b-22"><span>Do not format them yet. That happens in <a href="#storage">Storage</a>, before Docker is installed.</span></label>
+    </section>
+    <section class="chk-group" aria-labelledby="bg6">
+      <header><h3 id="bg6">6. Check each server</h3><span class="chk-count"></span></header>
+      <label class="chk" for="b-23"><input type="checkbox" id="b-23"><span>Record each server's public IP, VPC IP and instance ID in the password manager.</span></label>
+      <label class="chk" for="b-24"><input type="checkbox" id="b-24"><span>Log in with your key: <code>ssh root@&lt;public IP&gt;</code>.</span></label>
+      <label class="chk" for="b-25"><input type="checkbox" id="b-25"><span>Run <code>ip -4 addr</code>. If the public IP is not listed, Utho NATs it: note this for the coturn and LiveKit settings.</span></label>
+      <label class="chk" for="b-26"><input type="checkbox" id="b-26"><span>Run <code>lsblk</code> on CORE-1 and DB-2 and find the 1 TB volume.</span></label>
+      <label class="chk" for="b-27"><input type="checkbox" id="b-27"><span>From CORE-1, ping the other three VPC addresses.</span></label>
+      <label class="chk" for="b-28"><input type="checkbox" id="b-28"><span>Take a snapshot of each clean server, then continue with <a href="#steps">bring-up</a>.</span></label>
+      <label class="chk" for="b-29"><input type="checkbox" id="b-29"><span>Leave DNS at Cloudflare untouched until the cutover in <a href="#migrate">Migration</a>.</span></label>
+    </section>
+  </div>
   </div>
 </section>
 
@@ -539,9 +600,9 @@ sudo mkdir -p /etc/docker &amp;&amp; echo '{"data-root":"/data/docker","live-res
     <li><div><div class="step-h"><h3>Account and a throwaway test instance</h3><span class="plate sm">1–2 days</span></div>
       <p>Open the account, add SSH keys, create an API token. Start one small hourly instance in <code>inmumbaizone2</code> and answer the questions in <a href="#ask">Ask Utho</a> by testing: public IP on the interface, a UDP range rule, VPC reachability, <code>fio</code> on a block volume, ping from Indian mobile networks. Delete it afterwards.</p></div></li>
     <li><div><div class="step-h"><h3>Network</h3><span class="plate sm">console or Terraform</span></div>
-      <p>Create <code>vaultchat-vpc</code> (<code>10.20.0.0/24</code>) and the four Cloud Firewalls with the rules above.</p></div></li>
+      <p>Create <code>vaultchat-vpc</code> (<code>10.20.0.0/24</code>) and the four Cloud Firewalls with the rules above. Click-by-click in <a href="#buy">Buy</a>.</p></div></li>
     <li><div><div class="step-h"><h3>Instances and volumes</h3><span class="plate sm">all four</span></div>
-      <p>Create the four instances on Ubuntu 24.04 if Utho lists it, otherwise 22.04, with SSH keys, the VPC and their firewall, on hourly billing while you build. Attach the two 1 TB volumes and move Docker's data directory onto them as shown in <a href="#storage">Storage</a>. Record every public and VPC address.</p></div></li>
+      <p>Create the four instances on Ubuntu 24.04 if Utho lists it, otherwise 22.04, with SSH keys, the VPC and their firewall, on hourly billing while you build. Attach the two 1 TB volumes and move Docker's data directory onto them as shown in <a href="#storage">Storage</a>. Record every public and VPC address. Click-by-click in <a href="#buy">Buy</a>.</p></div></li>
     <li><div><div class="step-h"><h3>Bring-up</h3><span class="plate sm">launch plan steps 2–14</span></div>
       <p>Host preparation, database, schema, standby, API, call media, broadcasting, router, edge and TLS, backups and monitoring, in that order. Put the Utho addresses into changes S1 to S4, and apply the NAT setting if the test instance showed one.</p></div></li>
     <li><div><div class="step-h"><h3>Verify and measure</h3><span class="plate core sm">CORE-1</span></div>
@@ -646,7 +707,8 @@ resource "utho_cloud_instance" "vc" {
     <h2 id="ask-h">Settle these with Utho before paying</h2>
     <p>Each one changes a setting in this plan. Most can be answered on the throwaway test instance; the rest are questions for Utho sales or support. Ticks are saved in this browser only.</p>
   </div>
-  <div class="chk-top"><p id="chk-total">0 done</p><button type="button" class="btn" id="chk-clear">Clear ticks</button></div>
+  <div class="chk-scope" data-word="settled">
+  <div class="chk-top"><p class="chk-total">0 done</p><button type="button" class="btn chk-clear">Clear ticks</button></div>
   <div class="chk-groups">
     <section class="chk-group" aria-labelledby="a1">
       <header><h3 id="a1">Test on an instance</h3><span class="chk-count"></span></header>
@@ -669,6 +731,7 @@ resource "utho_cloud_instance" "vc" {
       <label class="chk" for="u-sla"><input type="checkbox" id="u-sla"><span>Support response times and the uptime SLA.</span></label>
       <label class="chk" for="u-mdb"><input type="checkbox" id="u-mdb"><span>Only if you want managed Postgres: version 16, superuser or BYPASSRLS, the three extensions, point-in-time restore.</span></label>
     </section>
+  </div>
   </div>
 </section>
 
@@ -794,39 +857,41 @@ resource "utho_cloud_instance" "vc" {
   var KEY = 'vc-utho-checks-v1';
   var saved = {};
   try { saved = JSON.parse(localStorage.getItem(KEY) || '{}') || {}; } catch (e) { saved = {}; }
-  var boxes = $$('.chk input[type="checkbox"]');
   function persist() { try { localStorage.setItem(KEY, JSON.stringify(saved)); } catch (e) { /* storage unavailable */ } }
-  function counts() {
-    $$('.chk-group').forEach(function (g) {
-      var all = $$('input[type="checkbox"]', g);
-      var done = all.filter(function (i) { return i.checked; }).length;
-      var out = $('.chk-count', g);
-      if (out) out.textContent = done + ' of ' + all.length;
-    });
-    var total = boxes.filter(function (b) { return b.checked; }).length;
-    $('#chk-total').textContent = total + ' of ' + boxes.length + ' settled';
-  }
-  boxes.forEach(function (b) {
-    if (saved[b.id]) b.checked = true;
-    b.addEventListener('change', function () { saved[b.id] = b.checked; persist(); counts(); });
-  });
-  var clr = $('#chk-clear'), armed = false, armTimer = null;
-  clr.addEventListener('click', function () {
-    if (!armed) {
-      armed = true;
-      clr.textContent = 'Click again to clear all';
-      armTimer = setTimeout(function () { armed = false; clr.textContent = 'Clear ticks'; }, 3000);
-      return;
+  $$('.chk-scope').forEach(function (scope) {
+    var boxes = $$('.chk input[type="checkbox"]', scope);
+    var word = scope.getAttribute('data-word') || 'done';
+    function counts() {
+      $$('.chk-group', scope).forEach(function (g) {
+        var all = $$('input[type="checkbox"]', g);
+        var done = all.filter(function (i) { return i.checked; }).length;
+        var out = $('.chk-count', g);
+        if (out) out.textContent = done + ' of ' + all.length;
+      });
+      var total = boxes.filter(function (b) { return b.checked; }).length;
+      $('.chk-total', scope).textContent = total + ' of ' + boxes.length + ' ' + word;
     }
-    clearTimeout(armTimer);
-    armed = false;
-    clr.textContent = 'Clear ticks';
-    boxes.forEach(function (b) { b.checked = false; });
-    saved = {};
-    persist();
+    boxes.forEach(function (b) {
+      if (saved[b.id]) b.checked = true;
+      b.addEventListener('change', function () { saved[b.id] = b.checked; persist(); counts(); });
+    });
+    var clr = $('.chk-clear', scope), armed = false, armTimer = null;
+    clr.addEventListener('click', function () {
+      if (!armed) {
+        armed = true;
+        clr.textContent = 'Click again to clear all';
+        armTimer = setTimeout(function () { armed = false; clr.textContent = 'Clear ticks'; }, 3000);
+        return;
+      }
+      clearTimeout(armTimer);
+      armed = false;
+      clr.textContent = 'Clear ticks';
+      boxes.forEach(function (b) { b.checked = false; delete saved[b.id]; });
+      persist();
+      counts();
+    });
     counts();
   });
-  counts();
 })();
 </script>
 </body>
