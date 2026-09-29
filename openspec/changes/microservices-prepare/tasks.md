@@ -35,11 +35,11 @@ A task is done only at the level it states.
 
 ## 7. Review and validation (written)
 
-- [ ] 7.1 Ponytail review of the whole diff; `go vet ./...`, `go test ./...`, `openspec validate microservices-prepare --strict`
+- [x] 7.1 Ponytail review of the whole diff; `go vet ./...`, `go test ./...`, `openspec validate microservices-prepare --strict`
 
 ## 8. Deploy (deployed)
 
-- [ ] 8.1 Copy to prod: `vaultchat-backend-go/cmd/api/main.go`, `internal/services/`, `internal/jobs/jobs.go`, `internal/jobs/lock.go`, `internal/httpx/httpx.go`, `internal/httpx/accesskeys.go`, and the changed `internal/routes/*.go` files; apply migration 139; rebuild go-api; confirm `GET /build` shows the new fingerprint, the migration ledger shows 139, and `/health`, a login and a message send work
+- [ ] 8.1 Copy to prod (vaultchat-backend-go/): `cmd/api/main.go`, `cmd/api/routes.go`, `internal/services/services.go`, `internal/services/internal_keys.go`, `internal/jobs/jobs.go`, `internal/jobs/lock.go`, `internal/httpx/httpx.go`, `internal/httpx/accesskeys.go`, and in `internal/routes/`: `auth.go`, `broadcast_hls.go`, `broadcast_reaper.go`, `golive_reaper.go`, `shopbook_jobs.go`, `chats.go`, `chats_helpers.go`, `user.go`, `contacts.go`, `calls.go`, `call_sessions.go`, `stories.go`, `nav.go`, `golive_webhook.go`, `spaces_ops.go`, `spaces_workforce.go`, `internal_core.go`, `shared_db.go`, `shared_text.go`, `devices_push.go`, `shared_valhalla.go`; and `vaultchat-backend/migrations/139_service_roles.sql`. Apply migration 139; rebuild go-api; confirm `GET /build` shows the new fingerprint, the ledger shows 139, the boot log says `services: calls, core, family, games, golive, maps, shopbook`, and `/health`, a login and a message send work
 - [ ] 8.2 Generate the Ed25519 key pair, mount the private key on core, restart, and after 15 minutes set `ACCESS_TOKEN_HS256=off`
 
 ## 9. Device verification (device-verified)

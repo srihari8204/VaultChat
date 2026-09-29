@@ -155,7 +155,8 @@ would rename several hundred call sites for no runtime difference while every
 service still builds from one package. So they move to neutral files instead:
 `shared_db.go` (`chatsQRow`, `chatsExecU`, `chatsExecAffected`,
 `chatsQueryU`, `isUniqueViolation`), `shared_text.go` (`chatsStrOr`,
-`truncRunes`, `orEmpty`), `devices_push.go` (`fcmTokensFor`,
+`truncRunes`, `orEmpty`, and `isUUID`, which core's new endpoints share with
+Go Live), `devices_push.go` (`fcmTokensFor`,
 `registerFcmDevice`, which Games borrows from Calls) and `shared_valhalla.go`
 (`valhallaMatrix`, which ShopBook borrows from Maps). `spaceName` and
 `chatsAudienceAllowed` move from Family Space files into
