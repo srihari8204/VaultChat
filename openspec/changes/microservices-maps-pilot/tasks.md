@@ -14,6 +14,7 @@ box and running; **device-verified** = checked on two phones.
 
 - [x] 2.1 `deploy/maps-split.sh` with `preflight`, `keys`, `hs256-off`, `start`, `route`, `stop`, `status`, `keys-rollback`, for `/home/srihari/vaultchat-clean` under `-p vaultchat`; config shipped by `scripts/deploy.sh`, checked in `preflight`; Caddy validated before reload; verify with `bash -n`, shellcheck and a dry run of every step against stub docker/curl
 - [x] 2.2 Retire `deploy/microservices-prepare.sh` (it targeted the stale checkout); verify it exits non-zero with a pointer to `scripts/deploy.sh`
+- [x] 2.3 `scripts/deploy.sh`: `CONFIG_DEPLOY=1` ships a config-only change when the Go fingerprint already matches; rsync keeps relative paths (`-R`) so `monitoring/` files land where Prometheus reads them; verify with `bash -n` and shellcheck
 
 ## 3. Review (written)
 
@@ -26,7 +27,6 @@ box and running; **device-verified** = checked on two phones.
 `deploy/maps-split.sh` is copied there by hand (deploy.sh does not sync
 `deploy/`). No Go change: go-api's `/build` stays `e0156aa0295d17a7`.
 
-- [x] 2.3 `scripts/deploy.sh`: `CONFIG_DEPLOY=1` ships a config-only change when the Go fingerprint already matches; rsync keeps relative paths (`-R`) so `monitoring/` files land where Prometheus reads them; verify with `bash -n` and shellcheck
 - [ ] 4.0 `CONFIG_DEPLOY=1 bash scripts/deploy.sh` (without `SKIP_MIGRATIONS`): ledger shows 139, go-api healthy, `/build` unchanged
 - [ ] 4.1 `preflight` passes: config landed, `svc_maps` exists
 - [ ] 4.2 `keys`: go-api boot log says `signing Ed25519`; 15 minutes later `hs256-off`
