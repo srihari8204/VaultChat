@@ -777,7 +777,7 @@ resource "utho_cloud_instance" "cc" {
       <thead><tr><th scope="col">Phase</th><th scope="col">State</th><th scope="col">Where it runs</th></tr></thead>
       <tbody>
         <tr><td>1. Launch on one go-api</td><td>The Utho build above</td><td>CORE-1, <code>SERVICES</code> unset (all)</td></tr>
-        <tr><td>2. Prepare the codebase</td><td>Written and tested; not deployed. OpenSpec change <code>microservices-prepare</code>, migration 139, <code>deploy/microservices-prepare.sh</code></td><td>Deploy on Hetzner first and run it a week, so Utho is built from the same tree; otherwise deploy it on CORE-1 after the Utho launch week</td></tr>
+        <tr><td>2. Prepare the codebase</td><td>Written and tested. OpenSpec change <code>microservices-prepare</code>, migration 139; deployed with <code>scripts/deploy.sh</code> (<code>SKIP_MIGRATIONS=1</code> to defer 139)</td><td>Deploy on Hetzner first and run it a week, so Utho is built from the same tree; otherwise deploy it on CORE-1 after the Utho launch week</td></tr>
         <tr><td>3. Move features out, one at a time</td><td>Not started</td><td>Maps, Games, ShopBook, Family Space, Calls as containers on CORE-1; Go Live on LIVE-1</td></tr>
         <tr><td>4. Split the code when a feature earns it</td><td>Not started</td><td>Unchanged servers</td></tr>
       </tbody>
@@ -808,7 +808,7 @@ resource "utho_cloud_instance" "cc" {
     <li><div><div class="step-h"><h3>Switch access tokens to Ed25519</h3><span class="plate core sm">CORE-1</span></div>
       <p>Mount the private key, restart go-api, run the two-phone check with a phone that was logged in before, then set <code>ACCESS_TOKEN_HS256=off</code>.</p></div></li>
     <li><div><div class="step-h"><h3>Move features out</h3><span class="plate sm">2–5 days each</span></div>
-      <p>Maps first, as the pilot, then Go Live onto LIVE-1 with the two firewall rules in <a href="#network">Network</a>, then Games, ShopBook, Family Space and Calls. Each gets a Caddy block that falls back to core, so pointing its paths back at core undoes the move.</p></div></li>
+      <p>Maps first, as the pilot (<code>openspec/changes/microservices-maps-pilot</code>, <code>deploy/maps-split.sh</code>), then Go Live onto LIVE-1 with the two firewall rules in <a href="#network">Network</a>, then Games, ShopBook, Family Space and Calls. Each gets a Caddy block that falls back to core, so pointing its paths back at core undoes the move.</p></div></li>
     <li><div><div class="step-h"><h3>Grow a server when one runs short</h3><span class="plate sm">as needed</span></div>
       <p>Maps (Valhalla needs the most memory) is the first service to get its own instance, then ShopBook. Any service can also run a second copy behind Caddy; the job locks keep its background work single-run.</p></div></li>
   </ol>
@@ -848,7 +848,8 @@ resource "utho_cloud_instance" "cc" {
     <div><a href="https://github.com/srihari8204/VaultChat/blob/claude/deployment-topology-architecture-ezbg6o/docs/MICROSERVICES_PLAN.html" target="_blank" rel="noopener">docs/MICROSERVICES_PLAN.html</a><span>The service split: core plus six feature services, their rules and the order to move them</span></div>
     <div><a href="https://github.com/srihari8204/VaultChat/tree/hetzner-deploy/openspec/changes/microservices-prepare" target="_blank" rel="noopener">openspec/changes/microservices-prepare</a><span>Phase 2 as built: SERVICES, job locks, Ed25519 tokens, core internal endpoints, per-service roles</span></div>
     <div><a href="https://github.com/srihari8204/VaultChat/blob/hetzner-deploy/vaultchat-backend/migrations/139_service_roles.sql" target="_blank" rel="noopener">vaultchat-backend/migrations/139_service_roles.sql</a><span>One NOLOGIN role per feature service and the chat_membership view</span></div>
-    <div><a href="https://github.com/srihari8204/VaultChat/blob/hetzner-deploy/deploy/microservices-prepare.sh" target="_blank" rel="noopener">deploy/microservices-prepare.sh</a><span>Deploy, migrate and roll back the preparation on a box</span></div>
+    <div><a href="https://github.com/srihari8204/VaultChat/blob/hetzner-deploy/scripts/deploy.sh" target="_blank" rel="noopener">scripts/deploy.sh</a><span>The deploy path: fingerprint gate, backup, migrations, go-api only, automatic rollback</span></div>
+    <div><a href="https://github.com/srihari8204/VaultChat/blob/hetzner-deploy/deploy/maps-split.sh" target="_blank" rel="noopener">deploy/maps-split.sh</a><span>Box-side steps of the Maps pilot: keys, HS256 off, start, route, stop</span></div>
   </div>
 </section>
 
