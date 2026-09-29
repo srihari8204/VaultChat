@@ -8,11 +8,13 @@ package main
 import (
 	"context"
 	"errors"
+	"io"
 	"log"
 	"net/http"
 	"os"
 	"os/signal"
 	"runtime"
+	"strings"
 	"sync/atomic"
 	"syscall"
 	"time"
@@ -25,6 +27,7 @@ import (
 	"vaultchat/backend-go/internal/realtime"
 	"vaultchat/backend-go/internal/redisx"
 	"vaultchat/backend-go/internal/routes"
+	"vaultchat/backend-go/internal/services"
 	"vaultchat/backend-go/internal/storage"
 )
 
@@ -80,11 +83,23 @@ func main() {
 	// its own: it could refuse to start on a secret that is short but real and
 	// already in production, turning a hardening change into an outage. Short
 	// secrets get a loud line in the log instead.
-	if os.Getenv("JWT_SECRET") == "" {
-		log.Fatal("[boot] JWT_SECRET is empty — refusing to start: every authenticated route would accept forged tokens")
+	if err := services.Load(); err != nil {
+		log.Fatalf("[boot] %v", err)
 	}
-	if len(os.Getenv("JWT_SECRET")) < 32 {
-		log.Printf("[boot] WARNING: JWT_SECRET is under 32 chars — brute-forceable offline; rotate to 32+ random bytes")
+	log.Printf("[boot] services: %s", strings.Join(services.List(), ", "))
+	if services.Enabled(services.Core) {
+		if os.Getenv("JWT_SECRET") == "" {
+			log.Fatal("[boot] JWT_SECRET is empty — refusing to start: every authenticated route would accept forged tokens")
+		}
+		if len(os.Getenv("JWT_SECRET")) < 32 {
+			log.Printf("[boot] WARNING: JWT_SECRET is under 32 chars — brute-forceable offline; rotate to 32+ random bytes")
+		}
+	} else if os.Getenv("NODE_INTERNAL_URL") == "" || os.Getenv("INTERNAL_EMIT_KEY") == "" {
+		// Without core this process holds no sockets; every live event goes to
+		// core's /internal/emit. emitx drops the post silently when either is
+		// unset, which would ship a service whose users never hear anything.
+		log.Fatal("[boot] SERVICES excludes core but NODE_INTERNAL_URL or INTERNAL_EMIT_KEY is unset — " +
+			"refusing to start: live events would have nowhere to go")
 	}
 
 	// REQUIRE_OBJECT_STORE — the guard that makes multi-replica safe.
@@ -222,167 +237,117 @@ func main() {
 		})
 	})
 
-	routes.RegisterContacts(mux)
-	routes.RegisterAppVersion(mux) // GET /app/version — the minimum-build gate
-	routes.RegisterTerms(mux)      // GET/POST /user/terms — recorded acceptance (F10)
-	routes.RegisterAppFlags(mux)   // GET /app/flags — the kill switch (F11)
-	routes.RegisterUsage(mux)      // POST /app/usage — aggregate screen counts (F9)
-	routes.RegisterLink(mux)
-	routes.RegisterGif(mux)
-	routes.RegisterStories(mux)
-	routes.RegisterNav(mux)
-	routes.RegisterGames(mux) // VaultGames mini-app launch token
-	routes.RegisterCommunities(mux)
-	routes.RegisterAuth(mux)
-	routes.RegisterCalls(mux)
-	routes.RegisterCallSessions(mux)
-	routes.RegisterBroadcasts(mux)
-	routes.RegisterBroadcastSocial(mux)
-	// Egress lifecycle → broadcast status. Under /internal/, which Caddy 404s
-	// from outside, and signature-verified on top of that.
-	routes.RegisterBroadcastWebhook(mux)
-	// Go Live runs its OWN LiveKit deployment (internal/golive), so it needs its
-	// own receiver — deliveries are signed with a different project's secret and
-	// the calling receiver above would reject them, correctly. Also carries the
-	// host-presence events the calling one has no reason to handle.
-	routes.RegisterGoLiveWebhook(mux)
-	// GET /golive/health — Go Live's own liveness. Reports the Go Live LiveKit
-	// only; a failure here can never mark the calling LiveKit unhealthy.
-	routes.RegisterGoLive(mux)
-	// Polls: the one thing the UNBOUNDED audience writes to. Live tallies come
-	// from Redis sets, the durable record from Postgres — same split the viewer
-	// and like counts already use.
-	routes.RegisterGoLivePolls(mux)
-	// Shareable Private Live invitations. The link IS the access mechanism —
-	// the host does not pick invitees up front. Redeeming writes an ordinary
-	// broadcast_invites row, so every existing gate applies unchanged.
-	routes.RegisterGoLiveInvites(mux)
-	routes.RegisterUploads(mux)
-	routes.RegisterChannels(mux)
-	routes.RegisterVaultbeam(mux)
-	routes.RegisterUser(mux)
-	routes.RegisterAdmin(mux)
-	routes.RegisterChats(mux)
-	routes.RegisterChatInvitations(mux) // Groups & Circles: /invitations (invitee side)
-	// Chat codes: open a direct chat with someone whose number you do not have.
-	// Redeeming goes through directChatEnsure, the same path POST /chats uses.
-	routes.RegisterChatCodes(mux)
-	routes.RegisterChatMembership(mux) // Groups & Circles: in-app accept (invitee side)
-	routes.RegisterShopBook(mux)
-	routes.RegisterShopBookStock(mux)
-	routes.RegisterShopBookBilling(mux)
-	routes.RegisterShopBookDocuments(mux)
-	routes.RegisterShopBookPayments(mux)
-	routes.RegisterShopBookKhata(mux) // walk-in customers (migration 111)
-	routes.RegisterShopBookPurchases(mux)
-	routes.RegisterShopBookReturns(mux)
-	routes.RegisterShopBookVerify(mux)
-	routes.RegisterShopBookAdmin(mux)
-	routes.RegisterShopBookAdmin2(mux)
+	registerRoutes(mux) // routes.go: each service this process runs
 
-	// ── Realtime: CC-Wire for the app, SSE for the admin console. ──
-	// Socket.IO is gone. /socket.io/ is no longer mounted and SOCKET_IO_ENABLED
-	// no longer does anything — the app dropped socket.io-client entirely and
-	// the admin console streams GET /admin/events (internal/realtime/admin_sse.go).
-	hub := realtime.New()
-	realtime.RegisterCCWire(mux, hub)   // CC-Wire v1 listener, no-op unless CCWIRE_WS=1
-	realtime.RegisterAdminSSE(mux, hub) // admin firehose, x-admin-key per request
+	// The phone's one live connection, and the bridge other services reach it
+	// through, belong to core. A process without core holds no sockets: emitx
+	// hooks stay nil, so its emits post to core's /internal/emit.
+	var hub *realtime.Hub
+	if services.Enabled(services.Core) {
+		// ── Realtime: CC-Wire for the app, SSE for the admin console. ──
+		// Socket.IO is gone. /socket.io/ is no longer mounted and SOCKET_IO_ENABLED
+		// no longer does anything — the app dropped socket.io-client entirely and
+		// the admin console streams GET /admin/events (internal/realtime/admin_sse.go).
+		hub = realtime.New()
+		realtime.RegisterCCWire(mux, hub)   // CC-Wire v1 listener, no-op unless CCWIRE_WS=1
+		realtime.RegisterAdminSSE(mux, hub) // admin firehose, x-admin-key per request
 
-	// Logout must invalidate parked CC-Wire resume sessions: a resume token
-	// that outlives the refresh token it was issued under would silently
-	// restore a session the user just ended.
-	routes.OnSessionRevoked = func(uid string) { hub.InvalidateResume(uid) }
+		// Logout must invalidate parked CC-Wire resume sessions: a resume token
+		// that outlives the refresh token it was issued under would silently
+		// restore a session the user just ended.
+		routes.OnSessionRevoked = func(uid string) { hub.InvalidateResume(uid) }
 
-	// Point emitx at the local hub so Go-served routes emit IN-PROCESS
-	// instead of bridging to Node. The admin firehose mirror that Node's
-	// broadcastNewMessage/broadcastChatEvent add on top of the pure
-	// fanOutToChat is composed here (FanOutToChat stays a pure port).
-	emitx.LocalToUids = func(uids []string, event string, payload any) {
-		for _, u := range uids {
-			hub.EmitToUid(u, event, payload)
+		// Point emitx at the local hub so Go-served routes emit IN-PROCESS
+		// instead of bridging to Node. The admin firehose mirror that Node's
+		// broadcastNewMessage/broadcastChatEvent add on top of the pure
+		// fanOutToChat is composed here (FanOutToChat stays a pure port).
+		emitx.LocalToUids = func(uids []string, event string, payload any) {
+			for _, u := range uids {
+				hub.EmitToUid(u, event, payload)
+			}
 		}
-	}
-	emitx.LocalToRooms = hub.EmitToRooms
-	emitx.LocalBroadcast = hub.EmitBroadcast
-	emitx.LocalFanOutChat = func(ctx context.Context, chatID, event string, payload any, senderID string) {
-		broadcastChat(ctx, hub, chatID, event, payload, senderID)
-	}
+		emitx.LocalToRooms = hub.EmitToRooms
+		emitx.LocalBroadcast = hub.EmitBroadcast
+		emitx.LocalFanOutChat = func(ctx context.Context, chatID, event string, payload any, senderID string) {
+			broadcastChat(ctx, hub, chatID, event, payload, senderID)
+		}
 
-	// Reverse bridge: Go owns sockets, so an in-network Node process can POST
-	// here to reach clients. Same key-guarded shape as Node's /internal/*;
-	// Caddy refuses /internal/* from outside, so only in-network callers reach
-	// these.
-	//
-	// Its only consumer was the VaultLens QueueEvents listener, which has been
-	// removed. Kept because it is generic transport, not VaultLens code: the
-	// legacy Node API still emits through it if that profile is ever started,
-	// and it is the escape hatch any future out-of-process worker would use.
-	// Retiring it is a separate decision from deleting VaultLens.
-	internalKey := os.Getenv("INTERNAL_EMIT_KEY")
-	guard := func(r *http.Request) bool {
-		return internalKey != "" && r.Header.Get("X-Internal-Key") == internalKey
-	}
-	mux.HandleFunc("POST /internal/emit", func(w http.ResponseWriter, r *http.Request) {
-		if !guard(r) {
-			httpx.Err(w, http.StatusForbidden, "forbidden")
-			return
+		// Reverse bridge: Go owns sockets, so an in-network Node process can POST
+		// here to reach clients. Same key-guarded shape as Node's /internal/*;
+		// Caddy refuses /internal/* from outside, so only in-network callers reach
+		// these.
+		//
+		// Its only consumer was the VaultLens QueueEvents listener, which has been
+		// removed. Kept because it is generic transport, not VaultLens code: the
+		// legacy Node API still emits through it if that profile is ever started,
+		// and it is the escape hatch any future out-of-process worker would use.
+		// Retiring it is a separate decision from deleting VaultLens.
+		internalKey := os.Getenv("INTERNAL_EMIT_KEY")
+		guard := func(r *http.Request) bool {
+			return internalKey != "" && r.Header.Get("X-Internal-Key") == internalKey
 		}
-		var b struct {
-			Rooms     []string `json:"rooms"`
-			UserIds   []string `json:"userIds"`
-			Event     string   `json:"event"`
-			Payload   any      `json:"payload"`
-			Broadcast bool     `json:"broadcast"`
-		}
-		_ = httpx.Body(r, &b)
-		if b.Event == "" {
-			httpx.Err(w, http.StatusBadRequest, "event required")
-			return
-		}
-		if b.Broadcast {
-			hub.EmitBroadcast(b.Event, b.Payload)
-			httpx.JSON(w, 200, map[string]any{"ok": true, "broadcast": true})
-			return
-		}
-		if len(b.Rooms) > 0 {
-			hub.EmitToRooms(b.Rooms, b.Event, b.Payload)
-		}
-		for _, u := range b.UserIds {
-			hub.EmitToUid(u, b.Event, b.Payload)
-		}
-		httpx.JSON(w, 200, map[string]any{"ok": true, "rooms": len(b.Rooms) + len(b.UserIds)})
-	})
-	mux.HandleFunc("POST /internal/chat-event", func(w http.ResponseWriter, r *http.Request) {
-		if !guard(r) {
-			httpx.Err(w, http.StatusForbidden, "forbidden")
-			return
-		}
-		var b struct {
-			Kind    string `json:"kind"`
-			ChatId  string `json:"chatId"`
-			Event   string `json:"event"`
-			Payload any    `json:"payload"`
-		}
-		_ = httpx.Body(r, &b)
-		if b.ChatId == "" {
-			httpx.Err(w, http.StatusBadRequest, "chatId required")
-			return
-		}
-		switch b.Kind {
-		case "new_message":
-			broadcastChat(r.Context(), hub, b.ChatId, "new_message", b.Payload, senderOf(b.Payload))
-		case "chat_event":
+		mux.HandleFunc("POST /internal/emit", func(w http.ResponseWriter, r *http.Request) {
+			if !guard(r) {
+				httpx.Err(w, http.StatusForbidden, "forbidden")
+				return
+			}
+			var b struct {
+				Rooms     []string `json:"rooms"`
+				UserIds   []string `json:"userIds"`
+				Event     string   `json:"event"`
+				Payload   any      `json:"payload"`
+				Broadcast bool     `json:"broadcast"`
+			}
+			_ = httpx.Body(r, &b)
 			if b.Event == "" {
+				httpx.Err(w, http.StatusBadRequest, "event required")
+				return
+			}
+			if b.Broadcast {
+				hub.EmitBroadcast(b.Event, b.Payload)
+				httpx.JSON(w, 200, map[string]any{"ok": true, "broadcast": true})
+				return
+			}
+			if len(b.Rooms) > 0 {
+				hub.EmitToRooms(b.Rooms, b.Event, b.Payload)
+			}
+			for _, u := range b.UserIds {
+				hub.EmitToUid(u, b.Event, b.Payload)
+			}
+			httpx.JSON(w, 200, map[string]any{"ok": true, "rooms": len(b.Rooms) + len(b.UserIds)})
+		})
+		mux.HandleFunc("POST /internal/chat-event", func(w http.ResponseWriter, r *http.Request) {
+			if !guard(r) {
+				httpx.Err(w, http.StatusForbidden, "forbidden")
+				return
+			}
+			var b struct {
+				Kind    string `json:"kind"`
+				ChatId  string `json:"chatId"`
+				Event   string `json:"event"`
+				Payload any    `json:"payload"`
+			}
+			_ = httpx.Body(r, &b)
+			if b.ChatId == "" {
+				httpx.Err(w, http.StatusBadRequest, "chatId required")
+				return
+			}
+			switch b.Kind {
+			case "new_message":
+				broadcastChat(r.Context(), hub, b.ChatId, "new_message", b.Payload, senderOf(b.Payload))
+			case "chat_event":
+				if b.Event == "" {
+					httpx.Err(w, http.StatusBadRequest, "bad kind")
+					return
+				}
+				broadcastChat(r.Context(), hub, b.ChatId, b.Event, b.Payload, "")
+			default:
 				httpx.Err(w, http.StatusBadRequest, "bad kind")
 				return
 			}
-			broadcastChat(r.Context(), hub, b.ChatId, b.Event, b.Payload, "")
-		default:
-			httpx.Err(w, http.StatusBadRequest, "bad kind")
-			return
-		}
-		httpx.JSON(w, 200, map[string]any{"ok": true})
-	})
+			httpx.JSON(w, 200, map[string]any{"ok": true})
+		})
+	}
 
 	// Reap expired VaultBeam relay objects: ONCE AT STARTUP, then hourly.
 	//
@@ -396,37 +361,47 @@ func main() {
 	// The interval is unchanged, the sweep is unchanged, and there is still
 	// exactly one scheduler - `sweep` is a name for the existing call, not a
 	// second implementation.
-	go func() {
-		sweep := func() {
-			if err := routes.VaultbeamSweepExpired(ctx); err != nil {
-				log.Printf("[vaultbeam] sweep: %v", err)
+	if services.Enabled(services.Core) {
+		go func() {
+			sweep := func() {
+				if err := routes.VaultbeamSweepExpired(ctx); err != nil {
+					log.Printf("[vaultbeam] sweep: %v", err)
+				}
 			}
-		}
-		sweep()
-		for range time.Tick(time.Hour) {
 			sweep()
-		}
-	}()
+			for range time.Tick(time.Hour) {
+				sweep()
+			}
+		}()
+	}
 
 	// The periodic jobs that lived in Node's server.js — sweepers + the
 	// scheduled-messages worker — so a Node-less prod loses nothing.
-	jobs.StartAll(ctx)
-	routes.StartShopBookJobs(ctx)
+	jobs.StartAll(ctx) // each job starts only with the service that owns it
+	if services.Enabled(services.ShopBook) {
+		routes.StartShopBookJobs(ctx)
+	}
 	// Releases hosts locked out by a broadcast whose egress died without ever
 	// sending a terminal webhook. broadcast_one_active_per_host is a UNIQUE
 	// index over the non-terminal statuses, so a single wedged row stops that
 	// account going live again permanently — see broadcast_reaper.go.
-	routes.StartBroadcastReaper(ctx)
+	if services.Enabled(services.GoLive) {
+		routes.StartBroadcastReaper(ctx)
+	}
 	// Host-disconnect grace period. Separate from the reaper above because it
 	// acts on a signal that one does not have — host_left_at, written by the Go
 	// Live webhook — which is what makes a 90-second verdict safe where the
 	// reaper could only justify twelve hours.
-	routes.StartGoLiveHostSweep(ctx)
+	if services.Enabled(services.GoLive) {
+		routes.StartGoLiveHostSweep(ctx)
+	}
 	// Retention observability: how many bodies exist, and how many are past
 	// their deadline. `message_bodies_overdue` should sit at ~0 — a non-zero
 	// value that persists is the signal that the expiry sweep has stopped and
 	// the three-hour guarantee is silently not being met.
-	routes.RegisterBodyGauges()
+	if services.Enabled(services.Core) {
+		routes.RegisterBodyGauges()
+	}
 	// pgxpool already counts these; this only exposes them, and only at scrape
 	// time. See internal/db/metrics.go for why there is no query tracer.
 	db.RegisterPoolGauges()
@@ -474,9 +449,12 @@ func main() {
 	// The whole thing is bounded by SHUTDOWN_TIMEOUT and must stay below the
 	// pod's terminationGracePeriodSeconds, or the kubelet SIGKILLs us partway
 	// through and none of the above happened.
-	wtServer, wtErr := realtime.StartCCWireWebTransport(hub)
-	if wtErr != nil {
-		log.Fatalf("[go-api] WebTransport setup failed: %v", wtErr)
+	var wtServer io.Closer
+	if hub != nil {
+		var wtErr error
+		if wtServer, wtErr = realtime.StartCCWireWebTransport(hub); wtErr != nil {
+			log.Fatalf("[go-api] WebTransport setup failed: %v", wtErr)
+		}
 	}
 	stop := make(chan os.Signal, 1)
 	signal.Notify(stop, syscall.SIGTERM, syscall.SIGINT)
@@ -512,7 +490,9 @@ func main() {
 	if wtServer != nil {
 		_ = wtServer.Close()
 	}
-	hub.Shutdown(10 * time.Second)
+	if hub != nil {
+		hub.Shutdown(10 * time.Second)
+	}
 
 	if err := srv.Shutdown(shutCtx); err != nil {
 		log.Printf("[go-api] shutdown: in-flight requests did not finish in %s: %v", total, err)

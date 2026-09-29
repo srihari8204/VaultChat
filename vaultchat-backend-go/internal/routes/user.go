@@ -45,13 +45,22 @@ import (
 
 const userPinBcryptRounds = 10
 
+// RegisterFamilySafety mounts the two safety surfaces the plan assigns to
+// Family Space: SOS events and trusted contacts. Their handlers stay beside the
+// rest of user.go and contacts.go until Family Space moves out.
+func RegisterFamilySafety(mux *http.ServeMux) {
+	mux.HandleFunc("POST /user/sos", httpx.RequireAuth(userSosPost))
+	mux.HandleFunc("GET /user/sos", httpx.RequireAuth(userSosGet))
+	mux.HandleFunc("GET /contacts/trusted", httpx.RequireAuth(trustedList))
+	mux.HandleFunc("POST /contacts/trusted", httpx.RequireAuth(trustedAdd))
+	mux.HandleFunc("DELETE /contacts/trusted/{userId}", httpx.RequireAuth(trustedRemove))
+}
+
 func RegisterUser(mux *http.ServeMux) {
 	mux.HandleFunc("GET /user/profile", httpx.RequireAuth(userProfileGet))
 	mux.HandleFunc("PUT /user/profile", httpx.RequireAuth(userProfilePut))
 	mux.HandleFunc("GET /user/security-overview", httpx.RequireAuth(userSecurityOverview))
 	mux.HandleFunc("POST /user/reports", httpx.RequireAuth(userReportsPost))
-	mux.HandleFunc("POST /user/sos", httpx.RequireAuth(userSosPost))
-	mux.HandleFunc("GET /user/sos", httpx.RequireAuth(userSosGet))
 	mux.HandleFunc("POST /user/security-events", httpx.RequireAuth(userSecurityEventsPost))
 	mux.HandleFunc("GET /user/security-events", httpx.RequireAuth(userSecurityEventsGet))
 	mux.HandleFunc("GET /user/breach-monitors", httpx.RequireAuth(userBreachMonitorsGet))

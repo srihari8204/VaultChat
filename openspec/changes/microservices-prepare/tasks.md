@@ -6,8 +6,8 @@ A task is done only at the level it states.
 
 ## 1. SERVICES setting (written)
 
-- [ ] 1.1 Add `internal/services` (parse `SERVICES`, `all` default, unknown name fatal) with a unit test pinning parsing and the ownership table; verify with `go test ./internal/services/`
-- [ ] 1.2 Group route registration and job starts in `cmd/api/main.go` by service; move the nine Family Space groups into `RegisterFamilySpaceOnID` and `/user/sos` + `/contacts/trusted` into `RegisterFamilySafety`; verify with `go build ./...` and a test that `SERVICES=golive` serves `/golive/health` and 404s `/chats`
+- [x] 1.1 Add `internal/services` (parse `SERVICES`, `all` default, unknown name fatal) with a unit test pinning parsing and the ownership table; verify with `go test ./internal/services/`
+- [x] 1.2 Group route registration and job starts in `cmd/api/main.go` by service; move the nine Family Space groups into `RegisterFamilySpaceOnID` and `/user/sos` + `/contacts/trusted` into `RegisterFamilySafety`; verify with `go build ./...` and a test that `SERVICES=golive` serves `/golive/health` and 404s `/chats`
 - [ ] 1.3 Boot checks per mode: `JWT_SECRET` when core runs; public key, `NODE_INTERNAL_URL` and `INTERNAL_EMIT_KEY` when it does not; verify by starting the binary with `SERVICES=maps` and no key and seeing it refuse
 
 ## 2. Every job runs once (written)

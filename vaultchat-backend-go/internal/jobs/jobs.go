@@ -28,6 +28,7 @@ import (
 	"vaultchat/backend-go/internal/fcm"
 	"vaultchat/backend-go/internal/httpx"
 	"vaultchat/backend-go/internal/metrics"
+	"vaultchat/backend-go/internal/services"
 	"vaultchat/backend-go/internal/storage"
 )
 
@@ -129,14 +130,14 @@ func retentionStaleDays() int {
 }
 
 // StartAll launches every job. ctx cancellation stops them (process lifetime).
+//
+// Each job belongs to one service (openspec: microservices-prepare) and starts
+// only in a process running that service; SERVICES unset runs all of them.
 func StartAll(ctx context.Context) {
-	// Report push state at boot rather than on the first send. Credential
-	// loading is otherwise lazy, so "is push armed?" was unanswerable until
-	// traffic arrived — and when the answer was "no", the only evidence was one
-	// line nobody was looking for. Cheap: parses a local file once.
-	fcm.Warm()
-
-	run := func(name string, every time.Duration, f func(context.Context)) {
+	run := func(service, name string, every time.Duration, f func(context.Context)) {
+		if !services.Enabled(service) {
+			return
+		}
 		go func() {
 			f(ctx) // boot kick, like Node
 			t := time.NewTicker(every)
@@ -153,17 +154,27 @@ func StartAll(ctx context.Context) {
 		log.Printf("[jobs] %s every %s", name, every)
 	}
 
-	run("sweep-expired-messages", sweepInterval, sweepExpiredMessages)
-	// Code chats with a 1h/3h option delete themselves whole (migration 120).
-	run("sweep-expired-chats", sweepInterval, sweepExpiredChats)
-	run("media-retention", sweepInterval, sweepDeliveredAttachments)
-	run("sweep-expired-stories", sweepInterval, sweepExpiredStories)
-	run("sweep-games-notify-seen", sweepInterval, sweepGamesNotifySeen)
-	run("sweep-screen-usage", sweepInterval, sweepScreenUsage)
-	run("sweep-games-live-tables", sweepInterval, sweepGamesLiveTables)
+	run(services.Games, "sweep-games-notify-seen", sweepInterval, sweepGamesNotifySeen)
+	run(services.Games, "sweep-games-live-tables", sweepInterval, sweepGamesLiveTables)
 	// Broadcast recordings had no lifecycle at all — see sweepEndedBroadcasts.
-	run("broadcast-retention", sweepInterval, sweepEndedBroadcasts)
-	run("scheduled-messages", schedInterval, sweepScheduledMessages)
+	run(services.GoLive, "broadcast-retention", sweepInterval, sweepEndedBroadcasts)
+
+	if !services.Enabled(services.Core) {
+		return
+	}
+	// Report push state at boot rather than on the first send. Credential
+	// loading is otherwise lazy, so "is push armed?" was unanswerable until
+	// traffic arrived — and when the answer was "no", the only evidence was one
+	// line nobody was looking for. Cheap: parses a local file once.
+	fcm.Warm()
+
+	run(services.Core, "sweep-expired-messages", sweepInterval, sweepExpiredMessages)
+	// Code chats with a 1h/3h option delete themselves whole (migration 120).
+	run(services.Core, "sweep-expired-chats", sweepInterval, sweepExpiredChats)
+	run(services.Core, "media-retention", sweepInterval, sweepDeliveredAttachments)
+	run(services.Core, "sweep-expired-stories", sweepInterval, sweepExpiredStories)
+	run(services.Core, "sweep-screen-usage", sweepInterval, sweepScreenUsage)
+	run(services.Core, "scheduled-messages", schedInterval, sweepScheduledMessages)
 
 	// Keep the message_bodies partition window ahead of the clock. Creation
 	// only — see partitions.go for why dropping is not in this file yet.
@@ -179,11 +190,11 @@ func StartAll(ctx context.Context) {
 	RegisterAttachmentPurposeGauges()
 	if os.Getenv("DELETE_ON_DELIVERY") == "true" {
 		log.Println("[delete-on-delivery] ENABLED")
-		run("delete-on-delivery", sweepInterval, sweepDeliveredMessages)
+		run(services.Core, "delete-on-delivery", sweepInterval, sweepDeliveredMessages)
 		// The body-store twin of the same rule. Runs under the SAME flag because
 		// it is the same policy applied to the new storage location — enabling
 		// one and not the other would leave whichever store is live unreclaimed.
-		run("delete-on-delivery-bodies", sweepInterval, sweepDeliveredBodies)
+		run(services.Core, "delete-on-delivery-bodies", sweepInterval, sweepDeliveredBodies)
 	}
 
 	// The hard ceiling, independent of delivery and independent of the flag
@@ -199,8 +210,8 @@ func StartAll(ctx context.Context) {
 	// this sweep, and the partition drop below reclaims the space afterwards.
 	// The sweep stays cheap precisely because ACK deletion has usually emptied
 	// the rows before it arrives.
-	run("expire-bodies", bodySweepInterval, sweepExpiredBodies)
-	run("drop-body-partitions", sweepInterval, DropExpiredPartitions)
+	run(services.Core, "expire-bodies", bodySweepInterval, sweepExpiredBodies)
+	run(services.Core, "drop-body-partitions", sweepInterval, DropExpiredPartitions)
 }
 
 // ── disappearing messages ──────────────────────────────────────────────

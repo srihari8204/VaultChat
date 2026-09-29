@@ -33,6 +33,7 @@ import (
 	"vaultchat/backend-go/internal/httpx"
 	"vaultchat/backend-go/internal/metrics"
 	"vaultchat/backend-go/internal/realtime"
+	"vaultchat/backend-go/internal/services"
 	"vaultchat/backend-go/internal/vault"
 )
 
@@ -154,6 +155,18 @@ func RegisterChats(mux *http.ServeMux) {
 	RegisterChatsAnonOnID(id)       // code chats: "keep this person" (migration 119)
 	RegisterChatMembershipOnID(id)  // Groups & Circles in-app membership (v2)
 	RegisterChatCalendarOnID(id)    // Groups & Circles shared calendar
+	// Family Space rides the chat router until it moves out; with SERVICES
+	// naming only core, these paths 404 here and Caddy sends them to family.
+	if services.Enabled(services.Family) {
+		RegisterFamilySpaceOnID(id)
+	}
+	mux.Handle("/chats/{id}/", id) // subtree forward; `id` re-matches the full path
+}
+
+// RegisterFamilySpaceOnID mounts Family Space's route groups on a /chats/{id}/
+// router: the chat router in a core process, or RegisterFamilySpace's own
+// router in a family-only one.
+func RegisterFamilySpaceOnID(id *http.ServeMux) {
 	RegisterSpaceRosterOnID(id)     // Spaces & Operations roster + visibility links
 	RegisterSpaceRunsOnID(id)       // Spaces & Operations run engine
 	RegisterSpaceOpsOnID(id)        // Spaces & Operations incidents, passes, shifts
@@ -163,7 +176,14 @@ func RegisterChats(mux *http.ServeMux) {
 	RegisterFamilyRelationsOnID(id) // Who each member is to you (migration 109)
 	RegisterSpaceTripsOnID(id)      // Server-backed family trips (migration 113)
 	RegisterSpaceItemsOnID(id)      // Shared BLE item finder (migration 114)
-	mux.Handle("/chats/{id}/", id)  // subtree forward; `id` re-matches the full path
+}
+
+// RegisterFamilySpace is the family-only process's /chats/{id}/ router:
+// Family Space's groups and nothing of chat's.
+func RegisterFamilySpace(mux *http.ServeMux) {
+	id := http.NewServeMux()
+	RegisterFamilySpaceOnID(id)
+	mux.Handle("/chats/{id}/", id)
 }
 
 // ─── RLS plumbing (Node req.dbQuery = one withUser tx per query) ───────

@@ -38,9 +38,6 @@ func RegisterContacts(mux *http.ServeMux) {
 	mux.HandleFunc("POST /contacts/sync/create", httpx.RequireAuth(syncCreate))
 	mux.HandleFunc("GET /contacts/sync/{code}", httpx.RequireAuth(syncStatus))
 	mux.HandleFunc("POST /contacts/sync/verify", httpx.RequireAuth(syncVerify))
-	mux.HandleFunc("GET /contacts/trusted", httpx.RequireAuth(trustedList))
-	mux.HandleFunc("POST /contacts/trusted", httpx.RequireAuth(trustedAdd))
-	mux.HandleFunc("DELETE /contacts/trusted/{userId}", httpx.RequireAuth(trustedRemove))
 }
 
 // POST /contacts/match — peppered phone-hash discovery.
