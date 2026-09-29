@@ -1,0 +1,833 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>VaultChat on Utho</title>
+<meta name="description" content="The VaultChat launch topology mapped onto Utho: zone, instances, VPC, firewall, storage, build order, costs to quote and questions to settle with Utho.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Sora:wght@600;700&family=Nunito+Sans:ital,wght@0,400;0,600;0,700;0,800;1,400&family=JetBrains+Mono:wght@400;500;700&display=swap">
+<style>
+:root{
+  color-scheme: light;
+  --ground:#EAF1FA; --card:#FFFFFF; --raised:#F3F7FC; --code:#EEF3FA;
+  --ink:#1B1526; --ink-2:rgba(27,21,38,.76); --ink-3:rgba(27,21,38,.62);
+  --line:rgba(49,76,118,.16); --line-2:rgba(49,76,118,.32);
+  --accent:#1552E0; --accent-wash:rgba(21,82,224,.10);
+  --core:#2a78d6; --core-wash:rgba(42,120,214,.12);
+  --media:#eb6834; --media-wash:rgba(235,104,52,.12);
+  --data:#1baf7a; --data-wash:rgba(27,175,122,.14);
+  --ext:#7d8799; --ext-wash:rgba(125,135,153,.13);
+  --ok:#05603A; --ok-mark:#0ca30c; --ok-wash:rgba(12,163,12,.11);
+  --warn:#7A4A00; --warn-mark:#fab219; --warn-wash:rgba(250,178,25,.20);
+  --bad:#B42318; --bad-mark:#d03b3b; --bad-wash:rgba(208,59,59,.12);
+  --shadow:0 1px 2px rgba(16,24,40,.05),0 8px 24px rgba(16,24,40,.06);
+  --bloom-a:rgba(51,221,254,.30); --bloom-b:rgba(23,119,254,.22); --bloom-c:rgba(140,73,252,.20);
+  --sans:"Nunito Sans",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  --display:"Sora","Nunito Sans",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --mono:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    color-scheme: dark;
+    --ground:#0A0810; --card:#15111E; --raised:#1D1829; --code:#110E19;
+    --ink:rgba(255,255,255,.95); --ink-2:rgba(255,255,255,.74); --ink-3:rgba(255,255,255,.58);
+    --line:rgba(255,255,255,.09); --line-2:rgba(255,255,255,.18);
+    --accent:#7FB6FF; --accent-wash:rgba(127,182,255,.13);
+    --core:#3987e5; --core-wash:rgba(57,135,229,.18);
+    --media:#d95926; --media-wash:rgba(217,89,38,.18);
+    --data:#199e70; --data-wash:rgba(25,158,112,.20);
+    --ext:#9aa3b2; --ext-wash:rgba(154,163,178,.13);
+    --ok:#3fcf6a; --ok-mark:#0ca30c; --ok-wash:rgba(12,163,12,.16);
+    --warn:#fab219; --warn-mark:#fab219; --warn-wash:rgba(250,178,25,.16);
+    --bad:#f07a7a; --bad-mark:#d03b3b; --bad-wash:rgba(208,59,59,.20);
+    --shadow:0 0 0 1px rgba(255,255,255,.02);
+    --bloom-a:rgba(51,221,254,.16); --bloom-b:rgba(23,119,254,.16); --bloom-c:rgba(140,73,252,.16);
+  }
+}
+:root[data-theme="dark"]{
+  color-scheme: dark;
+  --ground:#0A0810; --card:#15111E; --raised:#1D1829; --code:#110E19;
+  --ink:rgba(255,255,255,.95); --ink-2:rgba(255,255,255,.74); --ink-3:rgba(255,255,255,.58);
+  --line:rgba(255,255,255,.09); --line-2:rgba(255,255,255,.18);
+  --accent:#7FB6FF; --accent-wash:rgba(127,182,255,.13);
+  --core:#3987e5; --core-wash:rgba(57,135,229,.18);
+  --media:#d95926; --media-wash:rgba(217,89,38,.18);
+  --data:#199e70; --data-wash:rgba(25,158,112,.20);
+  --ext:#9aa3b2; --ext-wash:rgba(154,163,178,.13);
+  --ok:#3fcf6a; --ok-mark:#0ca30c; --ok-wash:rgba(12,163,12,.16);
+  --warn:#fab219; --warn-mark:#fab219; --warn-wash:rgba(250,178,25,.16);
+  --bad:#f07a7a; --bad-mark:#d03b3b; --bad-wash:rgba(208,59,59,.20);
+  --shadow:0 0 0 1px rgba(255,255,255,.02);
+  --bloom-a:rgba(51,221,254,.16); --bloom-b:rgba(23,119,254,.16); --bloom-c:rgba(140,73,252,.16);
+}
+
+*,*::before,*::after{box-sizing:border-box}
+html{scroll-behavior:smooth;scroll-padding-top:76px}
+@media (prefers-reduced-motion: reduce){html{scroll-behavior:auto}}
+body{margin:0;background:var(--ground);color:var(--ink);font:400 16px/1.6 var(--sans);-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
+.page{padding-inline:clamp(16px,3.5vw,32px);padding-block:20px 72px}
+.shell{max-width:1140px;margin:0 auto}
+a{color:var(--accent);text-underline-offset:2px}
+a:focus-visible,button:focus-visible,input:focus-visible,summary:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:6px}
+p{margin:0 0 12px}
+strong,b{font-weight:700}
+code{font:500 .86em/1.4 var(--mono);background:var(--code);border:1px solid var(--line);padding:.08em .34em;border-radius:5px;overflow-wrap:anywhere}
+.prose{max-width:74ch}
+.muted{color:var(--ink-2)}
+.fine{font-size:13.5px;color:var(--ink-3)}
+
+/* header */
+.hero{position:relative;overflow:hidden;border-radius:22px;background:var(--card);border:1px solid var(--line);padding:clamp(22px,4.2vw,46px);box-shadow:var(--shadow)}
+.hero::before{content:"";position:absolute;right:-12%;top:-35%;width:72%;height:170%;background:
+  radial-gradient(38% 34% at 72% 30%,var(--bloom-a),transparent 72%),
+  radial-gradient(42% 40% at 42% 58%,var(--bloom-b),transparent 72%),
+  radial-gradient(34% 30% at 84% 74%,var(--bloom-c),transparent 72%);pointer-events:none}
+.hero>*{position:relative}
+.eyebrow{font:600 12px/1.5 var(--mono);letter-spacing:.05em;text-transform:uppercase;color:var(--ink-3);margin:0}
+h1{font:700 clamp(31px,4.8vw,48px)/1.06 var(--display);letter-spacing:-.022em;margin:14px 0 14px;text-wrap:balance}
+.lede{font-size:clamp(16px,1.7vw,18.5px);line-height:1.55;color:var(--ink-2);max-width:64ch;margin:0}
+.facts{display:flex;flex-wrap:wrap;gap:8px;margin-top:22px}
+.fact{font-size:13px;line-height:1.3;padding:6px 11px;border-radius:12px;background:var(--raised);border:1px solid var(--line);color:var(--ink-2)}
+.fact b{color:var(--ink)}
+.fact.gap{background:var(--bad-wash);border-color:transparent;color:var(--ink)}
+
+/* nav */
+.nav{position:sticky;top:env(safe-area-inset-top,0px);z-index:30;display:flex;gap:4px;overflow-x:auto;scrollbar-width:none;margin:14px 0 0;padding:7px;border-radius:14px;border:1px solid var(--line);background:color-mix(in srgb,var(--ground) 80%,transparent);-webkit-backdrop-filter:blur(14px) saturate(1.3);backdrop-filter:blur(14px) saturate(1.3)}
+.nav::-webkit-scrollbar{display:none}
+.nav a{flex:0 0 auto;font:700 13px/1 var(--sans);color:var(--ink-2);text-decoration:none;padding:9px 12px;border-radius:999px}
+.nav a:hover{background:var(--accent-wash);color:var(--ink)}
+.nav a[aria-current="true"]{background:var(--ink);color:var(--card)}
+
+/* sections */
+.sec{margin-top:60px}
+.sec-h{margin-bottom:20px;max-width:76ch}
+.sec-h h2{font:700 clamp(23px,2.7vw,30px)/1.18 var(--display);letter-spacing:-.014em;margin:0 0 8px;text-wrap:balance}
+.sec-h p{margin:0;color:var(--ink-2)}
+h3{font:600 17px/1.3 var(--display);margin:0;text-wrap:balance}
+.sub{margin:36px 0 12px;display:flex;flex-wrap:wrap;align-items:baseline;justify-content:space-between;gap:6px 16px}
+.sub p{margin:0;font-size:14px;color:var(--ink-3)}
+
+/* role marks */
+.dot{display:inline-block;width:9px;height:9px;border-radius:2px;background:var(--ext);margin-right:7px;vertical-align:.02em;flex:0 0 auto}
+.dot.core{background:var(--core)}.dot.data{background:var(--data)}.dot.media{background:var(--media)}
+.plate{display:inline-flex;align-items:center;font:700 12.5px/1 var(--mono);letter-spacing:.04em;padding:6px 9px;border-radius:7px;border:1.5px solid var(--ext);background:var(--ext-wash);color:var(--ink);white-space:nowrap}
+.plate.core{border-color:var(--core);background:var(--core-wash)}
+.plate.data{border-color:var(--data);background:var(--data-wash)}
+.plate.media{border-color:var(--media);background:var(--media-wash)}
+.plate.sm{font-size:11.5px;padding:4px 7px;border-width:1.25px}
+
+/* server cards */
+.srv-grid{display:grid;gap:14px;grid-template-columns:1fr}
+@media (min-width:600px){.srv-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media (min-width:1040px){.srv-grid{grid-template-columns:repeat(4,minmax(0,1fr))}}
+.srv{display:flex;flex-direction:column;gap:14px;background:var(--card);border:1px solid var(--line);border-radius:16px;padding:16px 16px 14px}
+.srv-h{display:flex;flex-direction:column;align-items:flex-start;gap:9px}
+.srv-role{font:600 15.5px/1.3 var(--display);margin:0}
+.spec{margin:0;display:grid;gap:7px}
+.spec div{display:grid;grid-template-columns:66px minmax(0,1fr);gap:10px;font-size:14px;line-height:1.35}
+.spec dt{color:var(--ink-3)}
+.spec dd{margin:0;font-weight:700}
+.spec small{display:block;font-weight:400;color:var(--ink-3);font-size:12.5px;margin-top:1px}
+.runs{font-size:13.5px;line-height:1.5;color:var(--ink-2);margin:0;padding-top:12px;border-top:1px solid var(--line)}
+.ports{margin:auto 0 0;display:flex;flex-wrap:wrap;gap:5px;align-items:center;font-size:12.5px;color:var(--ink-3)}
+.ports span{margin-right:2px}
+.ports code{font-size:11.5px}
+.totals{display:flex;flex-wrap:wrap;gap:6px 26px;align-items:baseline;margin-top:14px;padding:14px 18px;border-radius:14px;background:var(--card);border:1px solid var(--line);font-size:14.5px}
+.totals .k{color:var(--ink-3)}
+.totals b{font-size:16px}
+
+/* callouts */
+.callout{display:grid;grid-template-columns:22px minmax(0,1fr);gap:12px;align-items:start;padding:14px 16px;border-radius:14px;border:1px solid var(--line);background:var(--card);margin:16px 0 0}
+.callout p{margin:0}
+.callout p+p{margin-top:8px}
+.ico{width:20px;height:20px;display:block;margin-top:2px}
+.ico.ok{color:var(--ok-mark)}.ico.warn{color:var(--warn-mark)}.ico.over{color:var(--bad-mark)}.ico.info{color:var(--accent)}
+.twocol{display:grid;gap:14px;margin-top:16px}
+@media (min-width:860px){.twocol{grid-template-columns:1fr 1fr}}
+.twocol .callout{margin:0}
+
+/* tables */
+.tbl-wrap{overflow-x:auto;border:1px solid var(--line);border-radius:14px;background:var(--card)}
+table{border-collapse:collapse;width:100%;font-size:14px;line-height:1.45}
+th,td{text-align:left;vertical-align:top;padding:10px 14px;border-bottom:1px solid var(--line)}
+thead th{font:700 11.5px/1.3 var(--sans);letter-spacing:.06em;text-transform:uppercase;color:var(--ink-3);background:var(--raised);white-space:nowrap}
+tbody tr:last-child td{border-bottom:0}
+tbody th{font-weight:700;white-space:nowrap}
+td.nw,th.nw{white-space:nowrap}
+.num{font-variant-numeric:tabular-nums;white-space:nowrap}
+.cmp td,.cmp th{min-width:150px}
+.cmp tbody th{min-width:128px;color:var(--ink-2);font-weight:600}
+.cmp .pick{background:var(--accent-wash)}
+.cmp thead th.pick{color:var(--ink)}
+.tbl-note{font-size:13px;color:var(--ink-3);margin:8px 2px 0}
+
+/* provenance tags */
+.tag{display:inline-block;font:700 10.5px/1 var(--sans);letter-spacing:.04em;text-transform:uppercase;padding:4px 7px;border-radius:999px;white-space:nowrap;color:var(--ink);border:1px solid var(--line-2)}
+.tag.m{background:var(--ok-wash);border-color:transparent}
+.tag.c{background:var(--raised)}
+.tag.e{background:var(--accent-wash);border-color:transparent}
+.tag.a{background:var(--warn-wash);border-color:transparent}
+.tag.g{background:var(--bad-wash);border-color:transparent}
+.tag.n{background:transparent}
+
+/* figure */
+.fig{background:var(--card);border:1px solid var(--line);border-radius:18px;padding:10px 10px 4px;margin:0}
+.fig-scroll{overflow-x:auto;-webkit-overflow-scrolling:touch}
+.fig svg{display:block;width:100%;min-width:1000px;height:auto;color:var(--ink)}
+.fig figcaption{font-size:14px;color:var(--ink-2);padding:10px 8px 10px;max-width:86ch}
+.svg-zone{fill:var(--raised);stroke:var(--line-2);stroke-dasharray:6 5}
+.svg-box{fill:var(--card);stroke-width:1.6}
+.svg-ext{fill:var(--raised);stroke:var(--line-2);stroke-width:1.2}
+.svg-client{fill:var(--card);stroke:var(--ink-3);stroke-width:1.2}
+.s-core{stroke:var(--core)}.s-media{stroke:var(--media)}.s-data{stroke:var(--data)}
+.f-core{fill:var(--core)}.f-media{fill:var(--media)}.f-data{fill:var(--data)}.f-ext{fill:var(--ext)}
+.p-core{fill:var(--core-wash);stroke:var(--core);stroke-width:1.4}
+.p-media{fill:var(--media-wash);stroke:var(--media);stroke-width:1.4}
+.p-data{fill:var(--data-wash);stroke:var(--data);stroke-width:1.4}
+.svg-t{fill:var(--ink);font:700 12.5px var(--sans)}
+.svg-t2{fill:var(--ink-2);font:400 12px var(--sans)}
+.svg-pl{fill:var(--ink);font:700 12px var(--mono)}
+.svg-m{fill:var(--ink-3);font:500 11px var(--mono)}
+.svg-lab{fill:var(--ink);font:700 11px var(--mono)}
+.svg-z{fill:var(--ink-3);font:800 11px var(--sans);letter-spacing:.09em}
+.svg-ln{stroke:var(--ink-2);stroke-width:1.4;fill:none}
+.svg-priv{stroke:var(--ink-3);stroke-width:1.4;fill:none}
+.svg-ah{fill:var(--ink-2)}
+
+/* request paths */
+.flows{display:grid;gap:12px}
+@media (min-width:940px){.flows{grid-template-columns:repeat(2,minmax(0,1fr))}}
+.flow{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:16px;display:flex;flex-direction:column;gap:12px}
+.flow h3{font-size:16px}
+.flow .why{font-size:13.5px;color:var(--ink-2);margin:4px 0 0}
+.hops{list-style:none;margin:0;padding:0;display:flex;flex-wrap:wrap;align-items:flex-end;gap:10px 4px}
+.hop{font:700 13px/1.2 var(--sans);padding:7px 10px;border-radius:9px;border:1.5px solid var(--ext);background:var(--ext-wash)}
+.hop small{display:block;font:500 10.5px/1.25 var(--mono);color:var(--ink-3);margin-top:2px}
+.hop.core{border-color:var(--core);background:var(--core-wash)}
+.hop.data{border-color:var(--data);background:var(--data-wash)}
+.hop.media{border-color:var(--media);background:var(--media-wash)}
+.hop.client{border-color:var(--line-2);background:var(--raised)}
+.edge{display:flex;flex-direction:column;align-items:center;gap:3px;font:500 10.5px/1.2 var(--mono);color:var(--ink-3);padding:0 2px 9px;text-align:center}
+.edge svg{width:44px;height:10px;display:block;color:var(--ink-2)}
+.lane-l{font:800 11px/1 var(--sans);letter-spacing:.07em;text-transform:uppercase;color:var(--ink-3);margin:2px 0 -4px}
+.flow .foot{font-size:13px;color:var(--ink-3);margin:0;padding-top:10px;border-top:1px solid var(--line)}
+
+/* calculator */
+.calc{background:var(--card);border:1px solid var(--line);border-radius:18px;padding:clamp(14px,2.4vw,24px)}
+.presets{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:20px}
+.presets button{font:700 13.5px/1 var(--sans);padding:10px 13px;border-radius:10px;border:1px solid var(--line-2);background:var(--raised);color:var(--ink);cursor:pointer}
+.presets button:hover{border-color:var(--accent)}
+.presets button[aria-pressed="true"]{background:var(--ink);color:var(--card);border-color:var(--ink)}
+.presets .lbl{font:800 11px/1 var(--sans);letter-spacing:.07em;text-transform:uppercase;color:var(--ink-3);align-self:center;margin-right:4px}
+.calc-grid{display:grid;gap:26px;grid-template-columns:minmax(0,1fr)}
+#calc-form,.calc-out{min-width:0}
+@media (min-width:1000px){.calc-grid{grid-template-columns:minmax(300px,370px) minmax(0,1fr)}}
+fieldset{border:0;padding:0;margin:0 0 18px;min-width:0}
+legend{font:800 11px/1 var(--sans);letter-spacing:.07em;text-transform:uppercase;color:var(--ink-3);margin-bottom:6px;padding:0}
+.fld{display:grid;grid-template-columns:minmax(0,1fr) 124px;align-items:center;gap:12px;padding:6px 0;border-bottom:1px solid var(--line)}
+.fld label{font-size:14px;line-height:1.3;color:var(--ink-2)}
+.inp{display:flex;align-items:center;border:1px solid var(--line-2);border-radius:9px;background:var(--raised);overflow:hidden}
+.inp:focus-within{border-color:var(--accent)}
+.inp input{width:100%;min-width:0;border:0;outline:0;background:transparent;color:var(--ink);font:700 14px/1 var(--sans);padding:8px 8px 8px 10px;font-variant-numeric:tabular-nums;text-align:right;-moz-appearance:textfield}
+.inp input::-webkit-outer-spin-button,.inp input::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
+.inp span{font:600 12px/1 var(--sans);color:var(--ink-3);padding-right:10px;white-space:nowrap}
+.tog{display:grid;grid-template-columns:18px minmax(0,1fr);gap:10px;align-items:start;font-size:14px;color:var(--ink-2);padding:12px 12px;border-radius:12px;background:var(--raised);border:1px solid var(--line);cursor:pointer}
+.tog input{width:17px;height:17px;margin:2px 0 0;accent-color:var(--accent)}
+details.adv{margin-top:14px;border:1px solid var(--line);border-radius:12px;background:var(--raised)}
+details.adv summary{cursor:pointer;padding:12px 14px;font:700 14px/1.3 var(--sans)}
+details.adv .adv-b{padding:0 14px 10px}
+.fld .tag{margin-left:4px;vertical-align:1px}
+.out-h{font:800 11px/1 var(--sans);letter-spacing:.07em;text-transform:uppercase;color:var(--ink-3);margin:24px 0 10px}
+.verdict{display:grid;grid-template-columns:22px minmax(0,1fr);gap:12px;align-items:start;padding:16px 18px;border-radius:14px}
+.verdict[data-state="ok"]{background:var(--ok-wash)}
+.verdict[data-state="warn"]{background:var(--warn-wash)}
+.verdict[data-state="over"]{background:var(--bad-wash)}
+.verdict h4{font:700 18px/1.3 var(--display);margin:0 0 4px;text-wrap:balance}
+.verdict p{margin:0;font-size:14px;color:var(--ink-2)}
+.verdict p+p{margin-top:6px}
+.kpis{display:grid;gap:10px;grid-template-columns:repeat(2,minmax(0,1fr))}
+@media (min-width:640px){.kpis{grid-template-columns:repeat(3,minmax(0,1fr))}}
+.kpi{padding:12px 14px;border-radius:12px;background:var(--raised);border:1px solid var(--line);min-width:0}
+.kpi .l{font-size:12.5px;line-height:1.3;color:var(--ink-3)}
+.kpi .v{font:800 24px/1.15 var(--sans);letter-spacing:-.01em;margin:5px 0 3px;overflow-wrap:anywhere}
+.kpi .s{font-size:12px;line-height:1.35;color:var(--ink-3)}
+.meters{display:grid;gap:14px}
+.meter .top{display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:2px 12px;font-size:14px}
+.meter .top b{font-weight:700}
+.meter .top span{color:var(--ink-3);font-size:13px;font-variant-numeric:tabular-nums}
+.meter .track{height:8px;border-radius:999px;background:var(--accent-wash);overflow:hidden;margin:7px 0 5px}
+.meter .fill{height:100%;border-radius:999px;background:var(--accent);width:0;transition:width .35s ease}
+@media (prefers-reduced-motion: reduce){.meter .fill{transition:none}}
+.meter[data-state="warn"] .track{background:var(--warn-wash)}
+.meter[data-state="warn"] .fill{background:var(--warn-mark)}
+.meter[data-state="over"] .track{background:var(--bad-wash)}
+.meter[data-state="over"] .fill{background:var(--bad-mark)}
+.meter .st{display:flex;align-items:center;gap:6px;font-size:12.5px;color:var(--ink-3)}
+.meter .st svg{width:14px;height:14px;flex:0 0 auto}
+.meter[data-state="ok"] .st svg{color:var(--ok-mark)}
+.meter[data-state="warn"] .st svg{color:var(--warn-mark)}
+.meter[data-state="over"] .st svg{color:var(--bad-mark)}
+.meter .st b{color:var(--ink);font-weight:700}
+.bom td:first-child{white-space:nowrap}
+.bom .nw{white-space:nowrap}
+.bom .cnt{font:800 16px/1.2 var(--sans);font-variant-numeric:tabular-nums;text-align:right;white-space:nowrap}
+.bom tfoot td{font-weight:700;background:var(--raised);border-bottom:0}
+.bom .role{display:block;font-size:12.5px;color:var(--ink-3);margin-top:3px}
+
+/* checklist */
+.chk-top{display:flex;flex-wrap:wrap;gap:10px 16px;align-items:center;justify-content:space-between;margin-bottom:12px}
+.chk-top p{margin:0;font-size:14px;color:var(--ink-3)}
+.btn{font:700 13px/1 var(--sans);padding:9px 12px;border-radius:10px;border:1px solid var(--line-2);background:var(--card);color:var(--ink);cursor:pointer}
+.btn:hover{border-color:var(--accent)}
+.chk-groups{display:grid;gap:14px}
+@media (min-width:900px){.chk-groups{grid-template-columns:repeat(2,minmax(0,1fr))}}
+.chk-group{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:14px 16px 6px}
+.chk-group header{display:flex;justify-content:space-between;align-items:baseline;gap:10px;margin-bottom:6px}
+.chk-count{font:700 12.5px/1 var(--sans);color:var(--ink-3);white-space:nowrap;font-variant-numeric:tabular-nums}
+.chk{display:grid;grid-template-columns:18px minmax(0,1fr);gap:10px;padding:10px 0;border-top:1px solid var(--line);font-size:14px;line-height:1.45;cursor:pointer}
+.chk input{width:17px;height:17px;margin:2px 0 0;accent-color:var(--accent)}
+.chk input:checked+span{color:var(--ink-3)}
+.chk .tag{margin-right:6px;vertical-align:1px}
+
+/* steps */
+.steps{counter-reset:s;list-style:none;margin:0;padding:0;display:grid;gap:12px}
+.steps>li{counter-increment:s;display:grid;grid-template-columns:36px minmax(0,1fr);gap:12px;background:var(--card);border:1px solid var(--line);border-radius:16px;padding:16px 16px 16px 14px}
+.steps>li::before{content:counter(s,decimal-leading-zero);font:700 14px/1.6 var(--mono);color:var(--accent)}
+.step-h{display:flex;flex-wrap:wrap;align-items:center;gap:8px 10px;margin-bottom:6px}
+.step-h h3{font-size:16px}
+.steps p{margin:0 0 8px;font-size:14.5px;color:var(--ink-2);max-width:80ch}
+.code{position:relative;margin:8px 0 2px;min-width:0}
+.code pre{margin:0;overflow-x:auto;padding:12px 14px;padding-right:74px;border-radius:12px;background:var(--code);border:1px solid var(--line);font:500 12.5px/1.65 var(--mono);color:var(--ink);tab-size:2}
+.code pre .c{color:var(--ink-3)}
+.copy{position:absolute;top:8px;right:8px;font:700 11.5px/1 var(--sans);padding:6px 9px;border-radius:7px;border:1px solid var(--line-2);background:var(--card);color:var(--ink-2);cursor:pointer}
+.copy:hover{color:var(--ink);border-color:var(--accent)}
+
+/* traps */
+.trap-grid{display:grid;gap:12px}
+@media (min-width:780px){.trap-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+.trap{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px 16px}
+.trap h4{font:700 15px/1.35 var(--sans);margin:0 0 5px}
+.trap p{font-size:14px;color:var(--ink-2);margin:0}
+.trap .src{display:block;font:500 11.5px/1.4 var(--mono);color:var(--ink-3);margin-top:8px;overflow-wrap:anywhere}
+.trap.new{border-color:color-mix(in srgb,var(--bad-mark) 40%,var(--line))}
+
+/* sources */
+.src-grid{display:grid;gap:10px 28px;font-size:14px}
+@media (min-width:760px){.src-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+.src-grid div{display:grid;grid-template-columns:minmax(0,1fr);gap:1px}
+.src-grid a{font:500 13px/1.4 var(--mono);overflow-wrap:anywhere}
+.src-grid span{color:var(--ink-3);font-size:13px}
+footer.end{margin-top:56px;padding-top:18px;border-top:1px solid var(--line);font-size:13.5px;color:var(--ink-3)}
+</style>
+</head>
+<body>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
+  <symbol id="i-arr" viewBox="0 0 44 10"><path d="M1 5H36" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M35 1.2L43 5L35 8.8Z" fill="currentColor"/></symbol>
+  <symbol id="i-arr2" viewBox="0 0 44 10"><path d="M8 5H36" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M35 1.2L43 5L35 8.8ZM9 1.2L1 5L9 8.8Z" fill="currentColor"/></symbol>
+  <symbol id="i-ok" viewBox="0 0 20 20"><circle cx="10" cy="10" r="9" fill="currentColor"/><path d="M6 10.4l2.7 2.7L14.2 7.4" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+  <symbol id="i-warn" viewBox="0 0 20 20"><path d="M10 1.8L19 17.6H1Z" fill="currentColor" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><path d="M10 7.3v4.9" stroke="#1B1526" stroke-width="2" stroke-linecap="round"/><circle cx="10" cy="14.9" r="1.15" fill="#1B1526"/></symbol>
+  <symbol id="i-over" viewBox="0 0 20 20"><circle cx="10" cy="10" r="9" fill="currentColor"/><path d="M6.8 6.8l6.4 6.4M13.2 6.8l-6.4 6.4" stroke="#fff" stroke-width="2" stroke-linecap="round"/></symbol>
+  <symbol id="i-info" viewBox="0 0 20 20"><circle cx="10" cy="10" r="9" fill="currentColor"/><path d="M10 9v5.2" stroke="#fff" stroke-width="2" stroke-linecap="round"/><circle cx="10" cy="6" r="1.2" fill="#fff"/></symbol>
+</svg>
+
+<div class="page">
+<div class="shell">
+
+<header class="hero">
+  <p class="eyebrow">Deployment plan · Utho, Mumbai · 29 Sep 2026</p>
+  <h1>VaultChat on Utho</h1>
+  <p class="lede">The four-server launch plan, mapped onto Utho: which zone, instance shapes, network, firewalls and storage to create, the order to build it in, and what to settle with Utho before paying. The architecture is unchanged; the launch topology page explains why each piece exists.</p>
+  <div class="facts">
+    <span class="fact">Zone <b>Mumbai · inmumbaizone2</b></span>
+    <span class="fact">Build <b>4 instances · 1 VPC · 4 firewalls · 2 volumes</b></span>
+    <span class="fact">Stays outside Utho <b>Cloudflare DNS, CDN and R2</b></span>
+    <span class="fact gap">Larger plan prices <b>need a quote</b></span>
+  </div>
+</header>
+
+<nav class="nav" id="nav" aria-label="Sections">
+  <a href="#build">Build</a>
+  <a href="#decisions">Decisions</a>
+  <a href="#network">Network</a>
+  <a href="#storage">Storage</a>
+  <a href="#steps">Steps</a>
+  <a href="#terraform">Terraform</a>
+  <a href="#costs">Costs</a>
+  <a href="#ask">Ask Utho</a>
+  <a href="#growth">Growth</a>
+  <a href="#migrate">Migration</a>
+  <a href="#sources">Sources</a>
+</nav>
+
+<!-- ============================================================ BUILD -->
+<section class="sec" id="build" aria-labelledby="build-h">
+  <div class="sec-h">
+    <h2 id="build-h">Four instances in Utho's Mumbai zone</h2>
+    <p>The same four roles as the launch plan. On Utho they are cloud instances in one zone, joined by one VPC, each behind its own Cloud Firewall. Pick the nearest Utho plan at or above each size, with dedicated CPU for CORE-1 and LIVE-1.</p>
+  </div>
+
+  <div class="srv-grid">
+    <article class="srv">
+      <div class="srv-h"><span class="plate core">CORE-1</span><h3 class="srv-role">API and primary database</h3></div>
+      <dl class="spec">
+        <div><dt>Plan</dt><dd>16 vCPU · 64 GB<small>dedicated CPU; min 8 vCPU · 32 GB</small></dd></div>
+        <div><dt>Disks</dt><dd>Plan disk + 1 TB volume<small>volume holds Docker data, so Postgres lives on it</small></dd></div>
+        <div><dt>Network</dt><dd>Public IPv4 · VPC<small>10.20.0.11, or as assigned</small></dd></div>
+        <div><dt>Firewall</dt><dd>fw-core</dd></div>
+        <div><dt>Backups</dt><dd>Utho weekly backup on<small>plus a snapshot before each deploy</small></dd></div>
+      </dl>
+      <p class="runs">nginx · Caddy · go-api · PgBouncer · Postgres 16 · Redis 7 · Valhalla · nightly backup job</p>
+      <p class="ports"><span>Open to the internet</span><code>80/tcp</code><code>443/tcp</code></p>
+    </article>
+    <article class="srv">
+      <div class="srv-h"><span class="plate data">DB-2</span><h3 class="srv-role">Standby and monitoring</h3></div>
+      <dl class="spec">
+        <div><dt>Plan</dt><dd>8 vCPU · 32 GB<small>64 GB if it must take over the core stack</small></dd></div>
+        <div><dt>Disks</dt><dd>Plan disk + 1 TB volume<small>same size as CORE-1's</small></dd></div>
+        <div><dt>Network</dt><dd>Public IPv4 · VPC<small>10.20.0.12; public IP for outbound only</small></dd></div>
+        <div><dt>Firewall</dt><dd>fw-db</dd></div>
+        <div><dt>Backups</dt><dd>None<small>it is the copy</small></dd></div>
+      </dl>
+      <p class="runs">Postgres 16 hot standby streaming from CORE-1 · Prometheus · Grafana with alerting</p>
+      <p class="ports"><span>Open to the internet</span><code>none</code></p>
+    </article>
+    <article class="srv">
+      <div class="srv-h"><span class="plate media">MEDIA-1</span><h3 class="srv-role">Calls: SFU and TURN</h3></div>
+      <dl class="spec">
+        <div><dt>Plan</dt><dd>8 vCPU · 16 GB<small>the plan with the largest included transfer</small></dd></div>
+        <div><dt>Disks</dt><dd>Plan disk<small>40–80 GB is enough</small></dd></div>
+        <div><dt>Network</dt><dd>Public IPv4 · VPC<small>10.20.0.21</small></dd></div>
+        <div><dt>Firewall</dt><dd>fw-media</dd></div>
+        <div><dt>Backups</dt><dd>None<small>nothing stateful; rebuild from the repo</small></dd></div>
+      </dl>
+      <p class="runs">LiveKit calling SFU · coturn · local Redis for LiveKit</p>
+      <p class="ports"><span>Open to the internet</span><code>3478</code><code>5349</code><code>443/udp</code><code>7881/tcp</code><code>7882/udp</code><code>49152–65535/udp</code></p>
+    </article>
+    <article class="srv">
+      <div class="srv-h"><span class="plate media">LIVE-1</span><h3 class="srv-role">Go Live broadcasting</h3></div>
+      <dl class="spec">
+        <div><dt>Plan</dt><dd>16 vCPU · 32 GB<small>dedicated CPU; min 8 vCPU; 4 per live broadcast</small></dd></div>
+        <div><dt>Disks</dt><dd>Plan disk<small>segments go straight to R2</small></dd></div>
+        <div><dt>Network</dt><dd>Public IPv4 · VPC<small>10.20.0.31</small></dd></div>
+        <div><dt>Firewall</dt><dd>fw-live</dd></div>
+        <div><dt>Backups</dt><dd>None<small>nothing stateful</small></dd></div>
+      </dl>
+      <p class="runs">Go Live SFU · egress (Chrome + ffmpeg → HLS) · local Redis for Go Live</p>
+      <p class="ports"><span>Open to the internet</span><code>7891/tcp</code><code>7892/udp</code></p>
+    </article>
+  </div>
+
+  <div class="totals" role="group" aria-label="Totals">
+    <span class="k">Recommended</span><b>48 vCPU · 144 GB RAM · 2 × 1 TB volumes</b>
+    <span class="k">Minimum</span><b>24 vCPU · 72 GB RAM</b>
+    <span class="k">Outside Utho</span><b>Cloudflare DNS, CDN, R2 · FCM · Expo push · MSG91 · Resend · Klipy</b>
+  </div>
+</section>
+
+<!-- ============================================================ DECISIONS -->
+<section class="sec" id="decisions" aria-labelledby="dec-h">
+  <div class="sec-h">
+    <h2 id="dec-h">Five choices specific to Utho</h2>
+    <p>Everything else carries over from the launch plan unchanged. These five are where Utho gives you an option the plan has to settle.</p>
+  </div>
+  <div class="tbl-wrap">
+    <table>
+      <thead><tr><th scope="col">Choice</th><th scope="col">Recommendation</th><th scope="col">Why</th><th scope="col">Change it if</th></tr></thead>
+      <tbody>
+        <tr><th scope="row">Region</th><td>All four in Mumbai, <code>inmumbaizone2</code>. Off-site copies in Noida, <code>innoida</code>, only if you want a second Indian location</td><td>The repo points at users in India, and India to the current German box costs about 200 ms per round trip. A VPC lives in one zone, so all four servers must share it</td><td>Most users are in North India: build in Noida instead</td></tr>
+        <tr><th scope="row">Postgres</th><td>Self-hosted on CORE-1 with a streaming standby on DB-2, as the repo runs it</td><td>Migration <code>133_rls_roles.sql</code> creates <code>vaultchat_sys</code> with <code>BYPASSRLS</code>, and go-api connects as a superuser today. Managed databases usually withhold both</td><td>Utho confirms managed PostgreSQL 16 with superuser or BYPASSRLS, <code>pg_trgm</code>, <code>pgcrypto</code>, <code>citext</code> and point-in-time restore</td></tr>
+        <tr><th scope="row">Object storage</th><td>Keep Cloudflare R2 for attachments, VaultBeam, broadcast segments and database dumps</td><td>No code or config change, no egress fees on HLS and downloads, and backups sit with a different company than the servers</td><td>You need every byte held in India: move to Utho Object Storage (S3-compatible) in Mumbai, after testing presigned uploads from phones</td></tr>
+        <tr><th scope="row">Disks</th><td>Docker's data directory on a dedicated 1 TB block volume on CORE-1 and DB-2</td><td>The volume can be resized, snapshotted and attached to a replacement instance; the instance itself stays disposable. No compose change is needed</td><td><code>fio</code> shows the volume much slower than the plan disk: use a plan with a larger local disk instead</td></tr>
+        <tr><th scope="row">Kubernetes, auto-scaling</th><td>Not at launch</td><td>LiveKit and coturn need host networking and a 16k-port UDP range, the tooling is Docker Compose, and the repo's k8s path covers only the API</td><td>You run 3 or more API servers: consider Utho Kubernetes for the API tier only</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- ============================================================ NETWORK -->
+<section class="sec" id="network" aria-labelledby="net-h">
+  <div class="sec-h">
+    <h2 id="net-h">One VPC, four firewalls, two layers of filtering</h2>
+    <p>Utho's Cloud Firewall is the outer layer: TCP, UDP or ICMP rules by port and source. Keep the host layer from the launch plan underneath it: UFW default-deny, <code>DOCKER-USER</code> drop rules, and the private ports allowed only from specific VPC peers.</p>
+  </div>
+
+  <div class="twocol" style="margin-top:0">
+    <div class="tbl-wrap">
+      <table>
+        <thead><tr><th scope="col" colspan="2">VPC</th></tr></thead>
+        <tbody>
+          <tr><th scope="row">Name</th><td><code>vaultchat-vpc</code></td></tr>
+          <tr><th scope="row">Zone</th><td><code>inmumbaizone2</code></td></tr>
+          <tr><th scope="row">Network</th><td><code>10.20.0.0</code>, size <code>24</code></td></tr>
+          <tr><th scope="row">Members</th><td><span class="plate core sm">CORE-1</span> .11 · <span class="plate data sm">DB-2</span> .12 · <span class="plate media sm">MEDIA-1</span> .21 · <span class="plate media sm">LIVE-1</span> .31</td></tr>
+          <tr><th scope="row">Private ports</th><td><code>7880</code> CORE-1 → MEDIA-1 · <code>7890</code> CORE-1 → LIVE-1 · <code>8097</code> MEDIA-1, LIVE-1, DB-2 → CORE-1 · <code>5432</code> DB-2 → CORE-1</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="callout" style="margin:0">
+      <svg class="ico warn" aria-hidden="true"><use href="#i-warn"/></svg>
+      <div>
+        <p><b>Check two things on a test instance first.</b></p>
+        <p>Is the public IP on the instance's own interface (<code>ip -4 addr</code>)? If Utho NATs it, set <code>TURN_EXTERNAL_IP</code> to <code>PUBLIC/PRIVATE</code> for coturn and keep LiveKit's <code>node_ip</code> at the public address, or relayed calls fail.</p>
+        <p>Do Cloud Firewall rules also filter VPC traffic? If they do, add the four private ports above as rules limited to the VPC range.</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="sub"><h3>Cloud Firewall rules</h3><p>Outgoing traffic is allowed on all four. Replace "admin IPs" with your office or VPN addresses.</p></div>
+  <div class="tbl-wrap">
+    <table>
+      <thead><tr><th scope="col">Firewall</th><th scope="col">Protocol</th><th scope="col">Port</th><th scope="col">Source</th><th scope="col">Carries</th></tr></thead>
+      <tbody>
+        <tr><td rowspan="3"><span class="plate core sm">fw-core</span></td><td>TCP</td><td class="num">443</td><td>Any</td><td>API, CC-Wire WebSocket, LiveKit signalling, HLS origin, admin</td></tr>
+        <tr><td>TCP</td><td class="num">80</td><td>Any</td><td>Redirect to HTTPS; ACME challenges</td></tr>
+        <tr><td>TCP</td><td class="num">22</td><td>Admin IPs</td><td>SSH</td></tr>
+        <tr><td><span class="plate data sm">fw-db</span></td><td>TCP</td><td class="num">22</td><td>Admin IPs</td><td>SSH. Grafana is reached through an SSH tunnel</td></tr>
+        <tr><td rowspan="8"><span class="plate media sm">fw-media</span></td><td>UDP, TCP</td><td class="num">3478</td><td>Any</td><td>STUN and TURN</td></tr>
+        <tr><td>UDP, TCP</td><td class="num">5349</td><td>Any</td><td>TURN over TLS/DTLS</td></tr>
+        <tr><td>UDP</td><td class="num">443</td><td>Any</td><td>Redirected to 3478 on the host, for networks that only allow 443</td></tr>
+        <tr><td>UDP</td><td class="num">49152–65535</td><td>Any</td><td>TURN relay allocations. Confirm a range rule is accepted</td></tr>
+        <tr><td>TCP</td><td class="num">7881</td><td>Any</td><td>Call media, TCP fallback</td></tr>
+        <tr><td>UDP</td><td class="num">7882</td><td>Any</td><td>Call media</td></tr>
+        <tr><td>TCP</td><td class="num">80</td><td>Any</td><td>ACME for <code>turn.corefinite.com</code>, at issue and renewal</td></tr>
+        <tr><td>TCP</td><td class="num">22</td><td>Admin IPs</td><td>SSH</td></tr>
+        <tr><td rowspan="3"><span class="plate media sm">fw-live</span></td><td>TCP</td><td class="num">7891</td><td>Any</td><td>Go Live media, TCP fallback</td></tr>
+        <tr><td>UDP</td><td class="num">7892</td><td>Any</td><td>Go Live media</td></tr>
+        <tr><td>TCP</td><td class="num">22</td><td>Admin IPs</td><td>SSH</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- ============================================================ STORAGE -->
+<section class="sec" id="storage" aria-labelledby="sto-h">
+  <div class="sec-h">
+    <h2 id="sto-h">Where the data lives</h2>
+    <p>On a cloud instance there is no RAID to configure; disk redundancy is Utho's. What protects the data is the standby, the dumps and the snapshots.</p>
+  </div>
+  <div class="tbl-wrap">
+    <table>
+      <thead><tr><th scope="col">Data</th><th scope="col">On Utho</th><th scope="col">Protected by</th></tr></thead>
+      <tbody>
+        <tr><td>Postgres: accounts, chats, key bundles</td><td>1 TB volume on CORE-1, via Docker's <code>data-root</code></td><td>Streaming standby on DB-2; nightly encrypted dump to R2; Utho weekly backup; a snapshot before every migration</td></tr>
+        <tr><td>Redis state</td><td>CORE-1 volume</td><td>Rebuildable; nothing to keep</td></tr>
+        <tr><td>Attachments, VaultBeam files, broadcast segments</td><td>Cloudflare R2, unchanged</td><td>Cloudflare's durability; retention jobs in go-api</td></tr>
+        <tr><td>Valhalla India tiles, 9.8 GB</td><td>CORE-1 volume</td><td>A copy on DB-2; rebuilding takes hours</td></tr>
+        <tr><td>Env files, <code>secrets/</code>, LiveKit YAMLs with real keys</td><td>CORE-1, MEDIA-1, LIVE-1</td><td>Encrypted copy in a password manager, off the servers</td></tr>
+        <tr><td>TLS certificates</td><td>CORE-1 (<code>api</code>, <code>stream</code>, <code>admin</code>); MEDIA-1 (<code>turn</code>)</td><td>Copied from the Hetzner box; a private ops repo</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="code" style="margin-top:14px"><pre><span class="c"># CORE-1 and DB-2, before installing Docker: put Docker's data on the volume</span>
+sudo mkfs.ext4 -L vcdata /dev/vdb           <span class="c"># check the device name with lsblk first</span>
+sudo mkdir -p /data &amp;&amp; echo 'LABEL=vcdata /data ext4 defaults,noatime 0 2' | sudo tee -a /etc/fstab
+sudo mount /data &amp;&amp; sudo mkdir -p /data/docker
+sudo mkdir -p /etc/docker &amp;&amp; echo '{"data-root":"/data/docker","live-restore":true,"log-driver":"json-file","log-opts":{"max-size":"10m","max-file":"3"}}' \
+  | sudo tee /etc/docker/daemon.json</pre></div>
+</section>
+
+<!-- ============================================================ STEPS -->
+<section class="sec" id="steps" aria-labelledby="steps-h">
+  <div class="sec-h">
+    <h2 id="steps-h">Build order on Utho</h2>
+    <p>Each phase needs the one before it. Phase 4 is the launch plan's bring-up steps 2 to 14, unchanged apart from the addresses.</p>
+  </div>
+  <ol class="steps">
+    <li><div><div class="step-h"><h3>Account and a throwaway test instance</h3><span class="plate sm">1–2 days</span></div>
+      <p>Open the account, add SSH keys, create an API token. Start one small hourly instance in <code>inmumbaizone2</code> and answer the questions in <a href="#ask">Ask Utho</a> by testing: public IP on the interface, a UDP range rule, VPC reachability, <code>fio</code> on a block volume, ping from Indian mobile networks. Delete it afterwards.</p></div></li>
+    <li><div><div class="step-h"><h3>Network</h3><span class="plate sm">console or Terraform</span></div>
+      <p>Create <code>vaultchat-vpc</code> (<code>10.20.0.0/24</code>) and the four Cloud Firewalls with the rules above.</p></div></li>
+    <li><div><div class="step-h"><h3>Instances and volumes</h3><span class="plate sm">all four</span></div>
+      <p>Create the four instances on Ubuntu 24.04 if Utho lists it, otherwise 22.04, with SSH keys, the VPC and their firewall, on hourly billing while you build. Attach the two 1 TB volumes and move Docker's data directory onto them as shown in <a href="#storage">Storage</a>. Record every public and VPC address.</p></div></li>
+    <li><div><div class="step-h"><h3>Bring-up</h3><span class="plate sm">launch plan steps 2–14</span></div>
+      <p>Host preparation, database, schema, standby, API, call media, broadcasting, router, edge and TLS, backups and monitoring, in that order. Put the Utho addresses into changes S1 to S4, and apply the NAT setting if the test instance showed one.</p></div></li>
+    <li><div><div class="step-h"><h3>Verify and measure</h3><span class="plate core sm">CORE-1</span></div>
+      <p><code>/health</code>, <code>/ready</code>, <code>/build</code> against the fingerprint, TURN from outside, a call and a broadcast between two phones, then <code>scripts/bench/run.sh</code> before real data lands.</p></div></li>
+    <li><div><div class="step-h"><h3>Cut over from Hetzner</h3><span class="plate sm">one maintenance window</span></div>
+      <p>The sequence in <a href="#migrate">Migration</a>.</p></div></li>
+    <li><div><div class="step-h"><h3>Switch billing</h3><span class="plate sm">after a stable week</span></div>
+      <p>Move the instances from hourly to monthly or longer billing (<code>billingcycle</code> accepts <code>monthly</code>, <code>3month</code>, <code>6month</code>, <code>12month</code>). Keep hourly until the plan sizes are proven.</p></div></li>
+  </ol>
+</section>
+
+<!-- ============================================================ TERRAFORM -->
+<section class="sec" id="terraform" aria-labelledby="tf-h">
+  <div class="sec-h">
+    <h2 id="tf-h">Optional: the network and instances as code</h2>
+    <p>Utho's Terraform provider (<code>uthoplatforms/utho</code>) covers VPCs, firewalls, instances, load balancers and DNS. Firewall rules and block volumes are not in it, so add those in the console or through the API. Plan IDs come from Utho's plan list.</p>
+  </div>
+  <div class="code"><pre>terraform {
+  required_providers {
+    utho = { source = "uthoplatforms/utho" }
+  }
+}
+
+provider "utho" { token = var.utho_token }
+
+resource "utho_vpc" "vc" {
+  dcslug  = "inmumbaizone2"
+  name    = "vaultchat-vpc"
+  planid  = var.vpc_plan_id
+  network = "10.20.0.0"
+  size    = "24"
+}
+
+resource "utho_firewall" "fw" {
+  for_each = toset(["fw-core", "fw-db", "fw-media", "fw-live"])
+  name     = each.key
+}
+
+locals {
+  servers = {
+    "core-1"  = { plan = var.plan_core,  fw = "fw-core",  backup = true  }
+    "db-2"    = { plan = var.plan_db,    fw = "fw-db",    backup = false }
+    "media-1" = { plan = var.plan_media, fw = "fw-media", backup = false }
+    "live-1"  = { plan = var.plan_live,  fw = "fw-live",  backup = false }
+  }
+}
+
+resource "utho_cloud_instance" "vc" {
+  for_each        = local.servers
+  name            = each.key
+  dcslug          = "inmumbaizone2"
+  image           = var.image           <span class="c"># ubuntu-24.04-x86_64 if listed, else ubuntu-22.04-x86_64</span>
+  planid          = each.value.plan
+  vpc_id          = utho_vpc.vc.id
+  firewall        = utho_firewall.fw[each.value.fw].id
+  enable_publicip = "true"
+  enablebackup    = each.value.backup
+  billingcycle    = "hourly"
+  sshkeys         = var.ssh_key_ids
+  root_password   = var.root_password   <span class="c"># required by the provider; password SSH stays off</span>
+}</pre></div>
+</section>
+
+<!-- ============================================================ COSTS -->
+<section class="sec" id="costs" aria-labelledby="cost-h">
+  <div class="sec-h">
+    <h2 id="cost-h">What to price</h2>
+    <p>Utho's larger plans are not listed in any public source reachable while writing this, so ask for a quote on exactly this list. The transfer figures come from the launch plan's calculator.</p>
+  </div>
+  <div class="twocol" style="margin-top:0">
+    <div class="tbl-wrap">
+      <table>
+        <thead><tr><th scope="col">Item</th><th scope="col" class="num">Qty</th><th scope="col">For</th></tr></thead>
+        <tbody>
+          <tr><td>Dedicated-CPU instance, 16 vCPU · 64 GB</td><td class="num">1</td><td>CORE-1</td></tr>
+          <tr><td>Instance, 8 vCPU · 32 GB</td><td class="num">1</td><td>DB-2</td></tr>
+          <tr><td>Instance, 8 vCPU · 16 GB, most included transfer</td><td class="num">1</td><td>MEDIA-1</td></tr>
+          <tr><td>Dedicated-CPU instance, 16 vCPU · 32 GB</td><td class="num">1</td><td>LIVE-1</td></tr>
+          <tr><td>Block storage, 1 TB</td><td class="num">2</td><td>Postgres primary and standby</td></tr>
+          <tr><td>VPC</td><td class="num">1</td><td>Private network</td></tr>
+          <tr><td>Public IPv4</td><td class="num">4</td><td>One per instance</td></tr>
+          <tr><td>Weekly backup</td><td class="num">1</td><td>CORE-1</td></tr>
+          <tr><td>Transfer on MEDIA-1</td><td class="num">—</td><td>About 1 TB a month at 10K users, about 9 TB at 100K, if the peak lasts 6 hours a day</td></tr>
+          <tr><td>Object storage</td><td class="num">0</td><td>Only if you leave R2</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="callout" style="margin:0">
+      <svg class="ico info" aria-hidden="true"><use href="#i-info"/></svg>
+      <div>
+        <p><b>Reference list prices</b>, as listed by a third-party comparison site (getdeploying.com) when this was written. Use them as a sanity check; Utho's console is the authority.</p>
+        <p>Basic 2 vCPU · 4 GB · 80 GB NVMe: $18.99 a month. 4 vCPU · 8 GB · 160 GB: $38.03. 6 vCPU · 16 GB · 320 GB: $58.35. Each includes 1 to 6 TB of transfer a month depending on plan; the overage rate is not published.</p>
+        <p>Block storage $5.29 per 100 GB a month, so the two 1 TB volumes are about $106 a month. Object storage $29.63 per TB a month.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================ ASK UTHO -->
+<section class="sec" id="ask" aria-labelledby="ask-h">
+  <div class="sec-h">
+    <h2 id="ask-h">Settle these with Utho before paying</h2>
+    <p>Each one changes a setting in this plan. Most can be answered on the throwaway test instance; the rest are questions for Utho sales or support. Ticks are saved in this browser only.</p>
+  </div>
+  <div class="chk-top"><p id="chk-total">0 done</p><button type="button" class="btn" id="chk-clear">Clear ticks</button></div>
+  <div class="chk-groups">
+    <section class="chk-group" aria-labelledby="a1">
+      <header><h3 id="a1">Test on an instance</h3><span class="chk-count"></span></header>
+      <label class="chk" for="u-nat"><input type="checkbox" id="u-nat"><span>The public IPv4 is on the instance's interface, or NAT-ed. Decides <code>TURN_EXTERNAL_IP</code> and LiveKit's <code>node_ip</code>.</span></label>
+      <label class="chk" for="u-range"><input type="checkbox" id="u-range"><span>A Cloud Firewall rule accepts the UDP range 49152–65535. If not, open UDP on MEDIA-1 and let UFW filter.</span></label>
+      <label class="chk" for="u-vpcfw"><input type="checkbox" id="u-vpcfw"><span>Whether Cloud Firewall rules also filter VPC traffic.</span></label>
+      <label class="chk" for="u-vpcip"><input type="checkbox" id="u-vpcip"><span>Whether VPC addresses can be chosen, or are assigned.</span></label>
+      <label class="chk" for="u-fio"><input type="checkbox" id="u-fio"><span>Block volume speed with <code>fio</code>, compared with the plan disk.</span></label>
+      <label class="chk" for="u-ubuntu"><input type="checkbox" id="u-ubuntu"><span>Ubuntu 24.04 is offered in <code>inmumbaizone2</code>.</span></label>
+      <label class="chk" for="u-latency"><input type="checkbox" id="u-latency"><span>Round-trip time from Jio, Airtel and Vi phones to the test instance.</span></label>
+    </section>
+    <section class="chk-group" aria-labelledby="a2">
+      <header><h3 id="a2">Ask Utho</h3><span class="chk-count"></span></header>
+      <label class="chk" for="u-plans"><input type="checkbox" id="u-plans"><span>Dedicated-CPU plans at 16 vCPU · 64 GB and 16 vCPU · 32 GB in Mumbai, with plan IDs and prices.</span></label>
+      <label class="chk" for="u-transfer"><input type="checkbox" id="u-transfer"><span>Included transfer per plan, the overage rate, and whether inbound and VPC traffic are free.</span></label>
+      <label class="chk" for="u-lb"><input type="checkbox" id="u-lb"><span>The network load balancer keeps client IPs or supports PROXY protocol. Per-IP OTP limits depend on it.</span></label>
+      <label class="chk" for="u-ddos"><input type="checkbox" id="u-ddos"><span>DDoS protection for UDP on the media instances.</span></label>
+      <label class="chk" for="u-vol"><input type="checkbox" id="u-vol"><span>Block volumes are replicated, and can be snapshotted.</span></label>
+      <label class="chk" for="u-ipv6"><input type="checkbox" id="u-ipv6"><span>IPv6 availability. Optional; TURN works on IPv4 alone.</span></label>
+      <label class="chk" for="u-sla"><input type="checkbox" id="u-sla"><span>Support response times and the uptime SLA.</span></label>
+      <label class="chk" for="u-mdb"><input type="checkbox" id="u-mdb"><span>Only if you want managed Postgres: version 16, superuser or BYPASSRLS, the three extensions, point-in-time restore.</span></label>
+    </section>
+  </div>
+</section>
+
+<!-- ============================================================ GROWTH -->
+<section class="sec" id="growth" aria-labelledby="gr-h">
+  <div class="sec-h">
+    <h2 id="gr-h">Growing on Utho</h2>
+    <p>When the launch plan's calculator says to move to the growth layout, Utho has a product for each piece.</p>
+  </div>
+  <div class="tbl-wrap">
+    <table>
+      <thead><tr><th scope="col">Need</th><th scope="col">Utho product</th><th scope="col">Setup note</th></tr></thead>
+      <tbody>
+        <tr><td>Two or more API servers</td><td>Load balancer, type <code>network</code>, TCP 443, with a target group and health checks</td><td>Keeps TLS and WebSockets on the API servers. Land C1 and C2 first. If client IPs are not preserved, use the <code>application</code> type with <code>X-Forwarded-For</code> and set <code>TRUSTED_PROXIES</code> to the balancer</td></tr>
+        <tr><td>Health checks</td><td>Target group health check</td><td>Point it at <code>/ready</code>, which returns 503 when the database is unreachable. Port 80 redirects everything today, so add a <code>/ready</code> location there first</td></tr>
+        <tr><td>Database on its own server</td><td>Instance plus a volume sized for two years of growth</td><td>PgBouncer moves with it, so replica count stays decoupled from Postgres connections</td></tr>
+        <tr><td>Shared Redis</td><td>Instance</td><td>go-api takes one endpoint through <code>REDIS_URL</code> or <code>REDIS_HOST</code></td></tr>
+        <tr><td>More call capacity</td><td>More media instances</td><td>LiveKit multi-node through a shared Redis; coturn behind DNS round robin</td></tr>
+        <tr><td>API auto-scaling</td><td>Utho Auto Scaling</td><td>Only after C1 and C2; every scale-in drops those servers' WebSockets, which then reconnect</td></tr>
+        <tr><td>Container platform</td><td>Utho Kubernetes</td><td>API tier only; media stays on instances</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- ============================================================ MIGRATION -->
+<section class="sec" id="migrate" aria-labelledby="mig-h">
+  <div class="sec-h">
+    <h2 id="mig-h">Moving from Hetzner to Utho</h2>
+    <p>The hostnames stay, so installed apps follow the DNS change. The data to move is small; most of the work is keys and checks.</p>
+  </div>
+  <ol class="steps">
+    <li><div><div class="step-h"><h3>Copy what cannot be recreated</h3></div><p>Both env files, <code>docker-compose.box.yml</code>, <code>secrets/</code>, <code>.offsite-key</code>, the RLS role passwords, <code>/etc/letsencrypt</code>, the deployed LiveKit YAMLs, the admin panel files. Put the keys in a password manager before anything else.</p></div></li>
+    <li><div><div class="step-h"><h3>Build Utho alongside</h3></div><p>Phases 1 to 5 above. Test with <code>curl --resolve api.corefinite.com:443:&lt;CORE-1 IP&gt;</code>, and with a staging app build for device tests.</p></div></li>
+    <li><div><div class="step-h"><h3>Move the bulk data directly</h3></div><p>Over SSH from Hetzner to Utho: Valhalla tiles (9.8 GB), and MinIO's broadcast segments (5.8 GB) only if you want old replays. At 100 Mbps, 16 GB takes about 22 minutes. The database dump was 3.4 MB compressed in September.</p></div></li>
+    <li><div><div class="step-h"><h3>Lower DNS TTLs</h3></div><p><code>api</code>, <code>stream</code>, <code>admin</code> and <code>turn</code> to 60 seconds a day ahead.</p></div></li>
+    <li><div><div class="step-h"><h3>Maintenance window</h3></div><p>Stop go-api on Hetzner, take the final dump, restore on CORE-1, compare the migration ledger and row counts, and re-seed DB-2.</p></div></li>
+    <li><div><div class="step-h"><h3>Switch DNS</h3></div><p><code>api</code>, <code>stream</code> and <code>admin</code> to CORE-1; <code>turn</code> to MEDIA-1; update the origin for the proxied names in Cloudflare.</p></div></li>
+    <li><div><div class="step-h"><h3>Verify</h3></div><p><code>/build</code> matches the deployed tree, then the two-phone smoke test on Utho.</p></div></li>
+    <li><div><div class="step-h"><h3>Keep Hetzner, then close it</h3></div><p>Leave it stopped for 14 days as a rollback, then cancel it and wipe the disks. JumpServer, Portainer, Beszel and SearXNG share that box but VaultChat does not need them; bring SearXNG only if you use <code>SEARXNG_URL</code>.</p></div></li>
+  </ol>
+</section>
+
+<!-- ============================================================ SOURCES -->
+<section class="sec" id="sources" aria-labelledby="src-h">
+  <div class="sec-h">
+    <h2 id="src-h">Sources</h2>
+    <p>utho.com itself could not be reached from the environment this was written in. Utho's products and settings were read from its public SDK and Terraform provider; prices come from a third-party listing. Confirm both in the Utho console.</p>
+  </div>
+  <div class="src-grid">
+    <div><a href="https://github.com/uthoplatforms/utho-go" target="_blank" rel="noopener">github.com/uthoplatforms/utho-go</a><span>Utho's Go SDK: instances, VPC, firewall rules (TCP, UDP, ICMP), load balancers, target groups, Kubernetes, object and block storage, auto scaling, monitoring</span></div>
+    <div><a href="https://github.com/uthoplatforms/terraform-provider-utho" target="_blank" rel="noopener">github.com/uthoplatforms/terraform-provider-utho</a><span>Zones <code>inmumbaizone2</code> and <code>innoida</code>, VPC network and size, load balancer types, weekly backups, billing cycles</span></div>
+    <div><a href="https://getdeploying.com/utho" target="_blank" rel="noopener">getdeploying.com/utho</a><span>Regions (Bangalore, Indore, Mumbai, Noida, Frankfurt, Los Angeles) and list prices</span></div>
+    <div><a href="https://digitalterminal.in/amp/story/tech-companies/utho-cloud-calls-on-indian-businesses-to-store-data-locally-to-safeguard-digital-sovereignty" target="_blank" rel="noopener">digitalterminal.in</a><span>Utho's data centres in Noida, Bangalore and Mumbai</span></div>
+    <div><a href="https://github.com/srihari8204/VaultChat/blob/claude/deployment-topology-architecture-ezbg6o/docs/LAUNCH_TOPOLOGY.html" target="_blank" rel="noopener">docs/LAUNCH_TOPOLOGY.html</a><span>The launch plan this maps onto: roles, ports, changes S1–S10, bring-up steps</span></div>
+    <div><a href="https://github.com/srihari8204/VaultChat/blob/hetzner-deploy/vaultchat-backend/migrations/133_rls_roles.sql" target="_blank" rel="noopener">vaultchat-backend/migrations/133_rls_roles.sql</a><span>The BYPASSRLS role that rules out most managed Postgres offers</span></div>
+  </div>
+</section>
+
+<footer class="end">
+  <p>Prepared from the VaultChat repository and Utho's public SDK and Terraform provider. Instance sizes are the launch plan's planning figures; confirm them with <code>scripts/bench/run.sh</code> on the Utho hardware before launch.</p>
+</footer>
+
+</div>
+</div>
+
+<script>
+(function () {
+  'use strict';
+  var $ = function (s, r) { return (r || document).querySelector(s); };
+  var $$ = function (s, r) { return Array.prototype.slice.call((r || document).querySelectorAll(s)); };
+  var reduceMotion = !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+
+  var nav = $('#nav');
+  var links = $$('#nav a');
+  var byId = {};
+  links.forEach(function (a) { byId[a.getAttribute('href').slice(1)] = a; });
+  function setCurrent(id) {
+    var a = byId[id];
+    if (!a) return;
+    links.forEach(function (l) { l.removeAttribute('aria-current'); });
+    a.setAttribute('aria-current', 'true');
+    var left = a.offsetLeft - (nav.clientWidth - a.offsetWidth) / 2;
+    if (nav.scrollTo) nav.scrollTo({ left: Math.max(0, left), behavior: reduceMotion ? 'auto' : 'smooth' });
+  }
+  if ('IntersectionObserver' in window) {
+    var io = new IntersectionObserver(function (entries) {
+      entries.forEach(function (e) { if (e.isIntersecting) setCurrent(e.target.id); });
+    }, { rootMargin: '-30% 0px -65% 0px' });
+    Object.keys(byId).forEach(function (id) { var s = document.getElementById(id); if (s) io.observe(s); });
+  }
+
+  $$('.code').forEach(function (box) {
+    var pre = $('pre', box);
+    var btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'copy';
+    btn.textContent = 'Copy';
+    btn.setAttribute('aria-label', 'Copy code');
+    var reset = function () { btn.textContent = 'Copy'; };
+    var selectAll = function () {
+      try {
+        var range = document.createRange();
+        range.selectNodeContents(pre);
+        var sel = window.getSelection();
+        sel.removeAllRanges();
+        sel.addRange(range);
+        btn.textContent = 'Selected';
+      } catch (e) { btn.textContent = 'Copy failed'; }
+      setTimeout(reset, 2200);
+    };
+    btn.addEventListener('click', function () {
+      try {
+        navigator.clipboard.writeText(pre.innerText).then(function () {
+          btn.textContent = 'Copied';
+          setTimeout(reset, 1600);
+        }, selectAll);
+      } catch (e) { selectAll(); }
+    });
+    box.appendChild(btn);
+  });
+
+  var KEY = 'vc-utho-checks-v1';
+  var saved = {};
+  try { saved = JSON.parse(localStorage.getItem(KEY) || '{}') || {}; } catch (e) { saved = {}; }
+  var boxes = $$('.chk input[type="checkbox"]');
+  function persist() { try { localStorage.setItem(KEY, JSON.stringify(saved)); } catch (e) { /* storage unavailable */ } }
+  function counts() {
+    $$('.chk-group').forEach(function (g) {
+      var all = $$('input[type="checkbox"]', g);
+      var done = all.filter(function (i) { return i.checked; }).length;
+      var out = $('.chk-count', g);
+      if (out) out.textContent = done + ' of ' + all.length;
+    });
+    var total = boxes.filter(function (b) { return b.checked; }).length;
+    $('#chk-total').textContent = total + ' of ' + boxes.length + ' settled';
+  }
+  boxes.forEach(function (b) {
+    if (saved[b.id]) b.checked = true;
+    b.addEventListener('change', function () { saved[b.id] = b.checked; persist(); counts(); });
+  });
+  var clr = $('#chk-clear'), armed = false, armTimer = null;
+  clr.addEventListener('click', function () {
+    if (!armed) {
+      armed = true;
+      clr.textContent = 'Click again to clear all';
+      armTimer = setTimeout(function () { armed = false; clr.textContent = 'Clear ticks'; }, 3000);
+      return;
+    }
+    clearTimeout(armTimer);
+    armed = false;
+    clr.textContent = 'Clear ticks';
+    boxes.forEach(function (b) { b.checked = false; });
+    saved = {};
+    persist();
+    counts();
+  });
+  counts();
+})();
+</script>
+</body>
+</html>
