@@ -66,8 +66,12 @@ deploy() {
   fi
 
   say "2/7 fetch the change"
-  git fetch -q origin hetzner-deploy
-  git cat-file -e "$TARGET^{commit}"
+  # Already present when it came from a bundle (git fetch <file>.bundle);
+  # otherwise fetch it, which needs a GitHub token as the password.
+  if ! git cat-file -e "$TARGET^{commit}" 2>/dev/null; then
+    git fetch -q origin hetzner-deploy
+    git cat-file -e "$TARGET^{commit}"
+  fi
 
   say "3/7 back up and copy $(changed_files | wc -l) files"
   mkdir -p "$STATE"
