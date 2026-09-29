@@ -1,0 +1,979 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>CrazzyChat Microservices</title>
+<meta name="description" content="The CrazzyChat Go backend split by feature into Go Live, Family Space, Games, Maps, ShopBook and Calls services around one core: boundaries from the code, rules, placement on Utho and the order to split.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Sora:wght@600;700&family=Nunito+Sans:ital,wght@0,400;0,600;0,700;0,800;1,400&family=JetBrains+Mono:wght@400;500;700&display=swap">
+<style>
+:root{
+  color-scheme: light;
+  --ground:#EAF1FA; --card:#FFFFFF; --raised:#F3F7FC; --code:#EEF3FA;
+  --ink:#1B1526; --ink-2:rgba(27,21,38,.76); --ink-3:rgba(27,21,38,.62);
+  --line:rgba(49,76,118,.16); --line-2:rgba(49,76,118,.32);
+  --accent:#1552E0; --accent-wash:rgba(21,82,224,.10);
+  --core:#2a78d6; --core-wash:rgba(42,120,214,.12);
+  --media:#eb6834; --media-wash:rgba(235,104,52,.12);
+  --data:#1baf7a; --data-wash:rgba(27,175,122,.14);
+  --ext:#7d8799; --ext-wash:rgba(125,135,153,.13);
+  --ok:#05603A; --ok-mark:#0ca30c; --ok-wash:rgba(12,163,12,.11);
+  --warn:#7A4A00; --warn-mark:#fab219; --warn-wash:rgba(250,178,25,.20);
+  --bad:#B42318; --bad-mark:#d03b3b; --bad-wash:rgba(208,59,59,.12);
+  --shadow:0 1px 2px rgba(16,24,40,.05),0 8px 24px rgba(16,24,40,.06);
+  --bloom-a:rgba(51,221,254,.30); --bloom-b:rgba(23,119,254,.22); --bloom-c:rgba(140,73,252,.20);
+  --sans:"Nunito Sans",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  --display:"Sora","Nunito Sans",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --mono:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    color-scheme: dark;
+    --ground:#0A0810; --card:#15111E; --raised:#1D1829; --code:#110E19;
+    --ink:rgba(255,255,255,.95); --ink-2:rgba(255,255,255,.74); --ink-3:rgba(255,255,255,.58);
+    --line:rgba(255,255,255,.09); --line-2:rgba(255,255,255,.18);
+    --accent:#7FB6FF; --accent-wash:rgba(127,182,255,.13);
+    --core:#3987e5; --core-wash:rgba(57,135,229,.18);
+    --media:#d95926; --media-wash:rgba(217,89,38,.18);
+    --data:#199e70; --data-wash:rgba(25,158,112,.20);
+    --ext:#9aa3b2; --ext-wash:rgba(154,163,178,.13);
+    --ok:#3fcf6a; --ok-mark:#0ca30c; --ok-wash:rgba(12,163,12,.16);
+    --warn:#fab219; --warn-mark:#fab219; --warn-wash:rgba(250,178,25,.16);
+    --bad:#f07a7a; --bad-mark:#d03b3b; --bad-wash:rgba(208,59,59,.20);
+    --shadow:0 0 0 1px rgba(255,255,255,.02);
+    --bloom-a:rgba(51,221,254,.16); --bloom-b:rgba(23,119,254,.16); --bloom-c:rgba(140,73,252,.16);
+  }
+}
+:root[data-theme="dark"]{
+  color-scheme: dark;
+  --ground:#0A0810; --card:#15111E; --raised:#1D1829; --code:#110E19;
+  --ink:rgba(255,255,255,.95); --ink-2:rgba(255,255,255,.74); --ink-3:rgba(255,255,255,.58);
+  --line:rgba(255,255,255,.09); --line-2:rgba(255,255,255,.18);
+  --accent:#7FB6FF; --accent-wash:rgba(127,182,255,.13);
+  --core:#3987e5; --core-wash:rgba(57,135,229,.18);
+  --media:#d95926; --media-wash:rgba(217,89,38,.18);
+  --data:#199e70; --data-wash:rgba(25,158,112,.20);
+  --ext:#9aa3b2; --ext-wash:rgba(154,163,178,.13);
+  --ok:#3fcf6a; --ok-mark:#0ca30c; --ok-wash:rgba(12,163,12,.16);
+  --warn:#fab219; --warn-mark:#fab219; --warn-wash:rgba(250,178,25,.16);
+  --bad:#f07a7a; --bad-mark:#d03b3b; --bad-wash:rgba(208,59,59,.20);
+  --shadow:0 0 0 1px rgba(255,255,255,.02);
+  --bloom-a:rgba(51,221,254,.16); --bloom-b:rgba(23,119,254,.16); --bloom-c:rgba(140,73,252,.16);
+}
+
+*,*::before,*::after{box-sizing:border-box}
+html{scroll-behavior:smooth;scroll-padding-top:76px}
+@media (prefers-reduced-motion: reduce){html{scroll-behavior:auto}}
+body{margin:0;background:var(--ground);color:var(--ink);font:400 16px/1.6 var(--sans);-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
+.page{padding-inline:clamp(16px,3.5vw,32px);padding-block:20px 72px}
+.shell{max-width:1140px;margin:0 auto}
+a{color:var(--accent);text-underline-offset:2px}
+a:focus-visible,button:focus-visible,input:focus-visible,summary:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:6px}
+p{margin:0 0 12px}
+strong,b{font-weight:700}
+code{font:500 .86em/1.4 var(--mono);background:var(--code);border:1px solid var(--line);padding:.08em .34em;border-radius:5px;overflow-wrap:anywhere}
+.prose{max-width:74ch}
+.muted{color:var(--ink-2)}
+.fine{font-size:13.5px;color:var(--ink-3)}
+
+/* header */
+.hero{position:relative;overflow:hidden;border-radius:22px;background:var(--card);border:1px solid var(--line);padding:clamp(22px,4.2vw,46px);box-shadow:var(--shadow)}
+.hero::before{content:"";position:absolute;right:-12%;top:-35%;width:72%;height:170%;background:
+  radial-gradient(38% 34% at 72% 30%,var(--bloom-a),transparent 72%),
+  radial-gradient(42% 40% at 42% 58%,var(--bloom-b),transparent 72%),
+  radial-gradient(34% 30% at 84% 74%,var(--bloom-c),transparent 72%);pointer-events:none}
+.hero>*{position:relative}
+.eyebrow{font:600 12px/1.5 var(--mono);letter-spacing:.05em;text-transform:uppercase;color:var(--ink-3);margin:0}
+h1{font:700 clamp(31px,4.8vw,48px)/1.06 var(--display);letter-spacing:-.022em;margin:14px 0 14px;text-wrap:balance}
+.lede{font-size:clamp(16px,1.7vw,18.5px);line-height:1.55;color:var(--ink-2);max-width:64ch;margin:0}
+.facts{display:flex;flex-wrap:wrap;gap:8px;margin-top:22px}
+.fact{font-size:13px;line-height:1.3;padding:6px 11px;border-radius:12px;background:var(--raised);border:1px solid var(--line);color:var(--ink-2)}
+.fact b{color:var(--ink)}
+.fact.gap{background:var(--bad-wash);border-color:transparent;color:var(--ink)}
+
+/* nav */
+.nav{position:sticky;top:env(safe-area-inset-top,0px);z-index:30;display:flex;gap:4px;overflow-x:auto;scrollbar-width:none;margin:14px 0 0;padding:7px;border-radius:14px;border:1px solid var(--line);background:color-mix(in srgb,var(--ground) 80%,transparent);-webkit-backdrop-filter:blur(14px) saturate(1.3);backdrop-filter:blur(14px) saturate(1.3)}
+.nav::-webkit-scrollbar{display:none}
+.nav a{flex:0 0 auto;font:700 13px/1 var(--sans);color:var(--ink-2);text-decoration:none;padding:9px 12px;border-radius:999px}
+.nav a:hover{background:var(--accent-wash);color:var(--ink)}
+.nav a[aria-current="true"]{background:var(--ink);color:var(--card)}
+
+/* sections */
+.sec{margin-top:60px}
+.sec-h{margin-bottom:20px;max-width:76ch}
+.sec-h h2{font:700 clamp(23px,2.7vw,30px)/1.18 var(--display);letter-spacing:-.014em;margin:0 0 8px;text-wrap:balance}
+.sec-h p{margin:0;color:var(--ink-2)}
+h3{font:600 17px/1.3 var(--display);margin:0;text-wrap:balance}
+.sub{margin:36px 0 12px;display:flex;flex-wrap:wrap;align-items:baseline;justify-content:space-between;gap:6px 16px}
+.sub p{margin:0;font-size:14px;color:var(--ink-3)}
+
+/* role marks */
+.dot{display:inline-block;width:9px;height:9px;border-radius:2px;background:var(--ext);margin-right:7px;vertical-align:.02em;flex:0 0 auto}
+.dot.core{background:var(--core)}.dot.data{background:var(--data)}.dot.media{background:var(--media)}
+.plate{display:inline-flex;align-items:center;font:700 12.5px/1 var(--mono);letter-spacing:.04em;padding:6px 9px;border-radius:7px;border:1.5px solid var(--ext);background:var(--ext-wash);color:var(--ink);white-space:nowrap}
+.plate.core{border-color:var(--core);background:var(--core-wash)}
+.plate.data{border-color:var(--data);background:var(--data-wash)}
+.plate.media{border-color:var(--media);background:var(--media-wash)}
+.plate.sm{font-size:11.5px;padding:4px 7px;border-width:1.25px}
+
+/* server cards */
+.srv-grid{display:grid;gap:14px;grid-template-columns:1fr}
+@media (min-width:600px){.srv-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media (min-width:1040px){.srv-grid{grid-template-columns:repeat(4,minmax(0,1fr))}}
+.srv{display:flex;flex-direction:column;gap:14px;background:var(--card);border:1px solid var(--line);border-radius:16px;padding:16px 16px 14px}
+.srv-h{display:flex;flex-direction:column;align-items:flex-start;gap:9px}
+.srv-role{font:600 15.5px/1.3 var(--display);margin:0}
+.spec{margin:0;display:grid;gap:7px}
+.spec div{display:grid;grid-template-columns:66px minmax(0,1fr);gap:10px;font-size:14px;line-height:1.35}
+.spec dt{color:var(--ink-3)}
+.spec dd{margin:0;font-weight:700}
+.spec small{display:block;font-weight:400;color:var(--ink-3);font-size:12.5px;margin-top:1px}
+.runs{font-size:13.5px;line-height:1.5;color:var(--ink-2);margin:0;padding-top:12px;border-top:1px solid var(--line)}
+.ports{margin:auto 0 0;display:flex;flex-wrap:wrap;gap:5px;align-items:center;font-size:12.5px;color:var(--ink-3)}
+.ports span{margin-right:2px}
+.ports code{font-size:11.5px}
+.totals{display:flex;flex-wrap:wrap;gap:6px 26px;align-items:baseline;margin-top:14px;padding:14px 18px;border-radius:14px;background:var(--card);border:1px solid var(--line);font-size:14.5px}
+.totals .k{color:var(--ink-3)}
+.totals b{font-size:16px}
+
+/* callouts */
+.callout{display:grid;grid-template-columns:22px minmax(0,1fr);gap:12px;align-items:start;padding:14px 16px;border-radius:14px;border:1px solid var(--line);background:var(--card);margin:16px 0 0}
+.callout p{margin:0}
+.callout p+p{margin-top:8px}
+.ico{width:20px;height:20px;display:block;margin-top:2px}
+.ico.ok{color:var(--ok-mark)}.ico.warn{color:var(--warn-mark)}.ico.over{color:var(--bad-mark)}.ico.info{color:var(--accent)}
+.twocol{display:grid;gap:14px;margin-top:16px}
+@media (min-width:860px){.twocol{grid-template-columns:1fr 1fr}}
+.twocol .callout{margin:0}
+
+/* tables */
+.tbl-wrap{overflow-x:auto;border:1px solid var(--line);border-radius:14px;background:var(--card)}
+table{border-collapse:collapse;width:100%;font-size:14px;line-height:1.45}
+th,td{text-align:left;vertical-align:top;padding:10px 14px;border-bottom:1px solid var(--line)}
+thead th{font:700 11.5px/1.3 var(--sans);letter-spacing:.06em;text-transform:uppercase;color:var(--ink-3);background:var(--raised);white-space:nowrap}
+tbody tr:last-child td{border-bottom:0}
+tbody th{font-weight:700;white-space:nowrap}
+td.nw,th.nw{white-space:nowrap}
+.num{font-variant-numeric:tabular-nums;white-space:nowrap}
+.cmp td,.cmp th{min-width:150px}
+.cmp tbody th{min-width:128px;color:var(--ink-2);font-weight:600}
+.cmp .pick{background:var(--accent-wash)}
+.cmp thead th.pick{color:var(--ink)}
+.tbl-note{font-size:13px;color:var(--ink-3);margin:8px 2px 0}
+
+/* provenance tags */
+.tag{display:inline-block;font:700 10.5px/1 var(--sans);letter-spacing:.04em;text-transform:uppercase;padding:4px 7px;border-radius:999px;white-space:nowrap;color:var(--ink);border:1px solid var(--line-2)}
+.tag.m{background:var(--ok-wash);border-color:transparent}
+.tag.c{background:var(--raised)}
+.tag.e{background:var(--accent-wash);border-color:transparent}
+.tag.a{background:var(--warn-wash);border-color:transparent}
+.tag.g{background:var(--bad-wash);border-color:transparent}
+.tag.n{background:transparent}
+
+/* figure */
+.fig{background:var(--card);border:1px solid var(--line);border-radius:18px;padding:10px 10px 4px;margin:0}
+.fig-scroll{overflow-x:auto;-webkit-overflow-scrolling:touch}
+.fig svg{display:block;width:100%;min-width:1000px;height:auto;color:var(--ink)}
+.fig figcaption{font-size:14px;color:var(--ink-2);padding:10px 8px 10px;max-width:86ch}
+.svg-zone{fill:var(--raised);stroke:var(--line-2);stroke-dasharray:6 5}
+.svg-box{fill:var(--card);stroke-width:1.6}
+.svg-ext{fill:var(--raised);stroke:var(--line-2);stroke-width:1.2}
+.svg-client{fill:var(--card);stroke:var(--ink-3);stroke-width:1.2}
+.s-core{stroke:var(--core)}.s-media{stroke:var(--media)}.s-data{stroke:var(--data)}
+.f-core{fill:var(--core)}.f-media{fill:var(--media)}.f-data{fill:var(--data)}.f-ext{fill:var(--ext)}
+.p-core{fill:var(--core-wash);stroke:var(--core);stroke-width:1.4}
+.p-media{fill:var(--media-wash);stroke:var(--media);stroke-width:1.4}
+.p-data{fill:var(--data-wash);stroke:var(--data);stroke-width:1.4}
+.svg-t{fill:var(--ink);font:700 12.5px var(--sans)}
+.svg-t2{fill:var(--ink-2);font:400 12px var(--sans)}
+.svg-pl{fill:var(--ink);font:700 12px var(--mono)}
+.svg-m{fill:var(--ink-3);font:500 11px var(--mono)}
+.svg-lab{fill:var(--ink);font:700 11px var(--mono)}
+.svg-z{fill:var(--ink-3);font:800 11px var(--sans);letter-spacing:.09em}
+.svg-ln{stroke:var(--ink-2);stroke-width:1.4;fill:none}
+.svg-priv{stroke:var(--ink-3);stroke-width:1.4;fill:none}
+.svg-ah{fill:var(--ink-2)}
+
+/* request paths */
+.flows{display:grid;gap:12px}
+@media (min-width:940px){.flows{grid-template-columns:repeat(2,minmax(0,1fr))}}
+.flow{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:16px;display:flex;flex-direction:column;gap:12px}
+.flow h3{font-size:16px}
+.flow .why{font-size:13.5px;color:var(--ink-2);margin:4px 0 0}
+.hops{list-style:none;margin:0;padding:0;display:flex;flex-wrap:wrap;align-items:flex-end;gap:10px 4px}
+.hop{font:700 13px/1.2 var(--sans);padding:7px 10px;border-radius:9px;border:1.5px solid var(--ext);background:var(--ext-wash)}
+.hop small{display:block;font:500 10.5px/1.25 var(--mono);color:var(--ink-3);margin-top:2px}
+.hop.core{border-color:var(--core);background:var(--core-wash)}
+.hop.data{border-color:var(--data);background:var(--data-wash)}
+.hop.media{border-color:var(--media);background:var(--media-wash)}
+.hop.client{border-color:var(--line-2);background:var(--raised)}
+.edge{display:flex;flex-direction:column;align-items:center;gap:3px;font:500 10.5px/1.2 var(--mono);color:var(--ink-3);padding:0 2px 9px;text-align:center}
+.edge svg{width:44px;height:10px;display:block;color:var(--ink-2)}
+.lane-l{font:800 11px/1 var(--sans);letter-spacing:.07em;text-transform:uppercase;color:var(--ink-3);margin:2px 0 -4px}
+.flow .foot{font-size:13px;color:var(--ink-3);margin:0;padding-top:10px;border-top:1px solid var(--line)}
+
+/* calculator */
+.calc{background:var(--card);border:1px solid var(--line);border-radius:18px;padding:clamp(14px,2.4vw,24px)}
+.presets{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:20px}
+.presets button{font:700 13.5px/1 var(--sans);padding:10px 13px;border-radius:10px;border:1px solid var(--line-2);background:var(--raised);color:var(--ink);cursor:pointer}
+.presets button:hover{border-color:var(--accent)}
+.presets button[aria-pressed="true"]{background:var(--ink);color:var(--card);border-color:var(--ink)}
+.presets .lbl{font:800 11px/1 var(--sans);letter-spacing:.07em;text-transform:uppercase;color:var(--ink-3);align-self:center;margin-right:4px}
+.calc-grid{display:grid;gap:26px;grid-template-columns:minmax(0,1fr)}
+#calc-form,.calc-out{min-width:0}
+@media (min-width:1000px){.calc-grid{grid-template-columns:minmax(300px,370px) minmax(0,1fr)}}
+fieldset{border:0;padding:0;margin:0 0 18px;min-width:0}
+legend{font:800 11px/1 var(--sans);letter-spacing:.07em;text-transform:uppercase;color:var(--ink-3);margin-bottom:6px;padding:0}
+.fld{display:grid;grid-template-columns:minmax(0,1fr) 124px;align-items:center;gap:12px;padding:6px 0;border-bottom:1px solid var(--line)}
+.fld label{font-size:14px;line-height:1.3;color:var(--ink-2)}
+.inp{display:flex;align-items:center;border:1px solid var(--line-2);border-radius:9px;background:var(--raised);overflow:hidden}
+.inp:focus-within{border-color:var(--accent)}
+.inp input{width:100%;min-width:0;border:0;outline:0;background:transparent;color:var(--ink);font:700 14px/1 var(--sans);padding:8px 8px 8px 10px;font-variant-numeric:tabular-nums;text-align:right;-moz-appearance:textfield}
+.inp input::-webkit-outer-spin-button,.inp input::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
+.inp span{font:600 12px/1 var(--sans);color:var(--ink-3);padding-right:10px;white-space:nowrap}
+.tog{display:grid;grid-template-columns:18px minmax(0,1fr);gap:10px;align-items:start;font-size:14px;color:var(--ink-2);padding:12px 12px;border-radius:12px;background:var(--raised);border:1px solid var(--line);cursor:pointer}
+.tog input{width:17px;height:17px;margin:2px 0 0;accent-color:var(--accent)}
+details.adv{margin-top:14px;border:1px solid var(--line);border-radius:12px;background:var(--raised)}
+details.adv summary{cursor:pointer;padding:12px 14px;font:700 14px/1.3 var(--sans)}
+details.adv .adv-b{padding:0 14px 10px}
+.fld .tag{margin-left:4px;vertical-align:1px}
+.out-h{font:800 11px/1 var(--sans);letter-spacing:.07em;text-transform:uppercase;color:var(--ink-3);margin:24px 0 10px}
+.verdict{display:grid;grid-template-columns:22px minmax(0,1fr);gap:12px;align-items:start;padding:16px 18px;border-radius:14px}
+.verdict[data-state="ok"]{background:var(--ok-wash)}
+.verdict[data-state="warn"]{background:var(--warn-wash)}
+.verdict[data-state="over"]{background:var(--bad-wash)}
+.verdict h4{font:700 18px/1.3 var(--display);margin:0 0 4px;text-wrap:balance}
+.verdict p{margin:0;font-size:14px;color:var(--ink-2)}
+.verdict p+p{margin-top:6px}
+.kpis{display:grid;gap:10px;grid-template-columns:repeat(2,minmax(0,1fr))}
+@media (min-width:640px){.kpis{grid-template-columns:repeat(3,minmax(0,1fr))}}
+.kpi{padding:12px 14px;border-radius:12px;background:var(--raised);border:1px solid var(--line);min-width:0}
+.kpi .l{font-size:12.5px;line-height:1.3;color:var(--ink-3)}
+.kpi .v{font:800 24px/1.15 var(--sans);letter-spacing:-.01em;margin:5px 0 3px;overflow-wrap:anywhere}
+.kpi .s{font-size:12px;line-height:1.35;color:var(--ink-3)}
+.meters{display:grid;gap:14px}
+.meter .top{display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:2px 12px;font-size:14px}
+.meter .top b{font-weight:700}
+.meter .top span{color:var(--ink-3);font-size:13px;font-variant-numeric:tabular-nums}
+.meter .track{height:8px;border-radius:999px;background:var(--accent-wash);overflow:hidden;margin:7px 0 5px}
+.meter .fill{height:100%;border-radius:999px;background:var(--accent);width:0;transition:width .35s ease}
+@media (prefers-reduced-motion: reduce){.meter .fill{transition:none}}
+.meter[data-state="warn"] .track{background:var(--warn-wash)}
+.meter[data-state="warn"] .fill{background:var(--warn-mark)}
+.meter[data-state="over"] .track{background:var(--bad-wash)}
+.meter[data-state="over"] .fill{background:var(--bad-mark)}
+.meter .st{display:flex;align-items:center;gap:6px;font-size:12.5px;color:var(--ink-3)}
+.meter .st svg{width:14px;height:14px;flex:0 0 auto}
+.meter[data-state="ok"] .st svg{color:var(--ok-mark)}
+.meter[data-state="warn"] .st svg{color:var(--warn-mark)}
+.meter[data-state="over"] .st svg{color:var(--bad-mark)}
+.meter .st b{color:var(--ink);font-weight:700}
+.bom td:first-child{white-space:nowrap}
+.bom .nw{white-space:nowrap}
+.bom .cnt{font:800 16px/1.2 var(--sans);font-variant-numeric:tabular-nums;text-align:right;white-space:nowrap}
+.bom tfoot td{font-weight:700;background:var(--raised);border-bottom:0}
+.bom .role{display:block;font-size:12.5px;color:var(--ink-3);margin-top:3px}
+
+/* checklist */
+.chk-top{display:flex;flex-wrap:wrap;gap:10px 16px;align-items:center;justify-content:space-between;margin-bottom:12px}
+.chk-top p{margin:0;font-size:14px;color:var(--ink-3)}
+.btn{font:700 13px/1 var(--sans);padding:9px 12px;border-radius:10px;border:1px solid var(--line-2);background:var(--card);color:var(--ink);cursor:pointer}
+.btn:hover{border-color:var(--accent)}
+.chk-groups{display:grid;gap:14px}
+@media (min-width:900px){.chk-groups{grid-template-columns:repeat(2,minmax(0,1fr))}}
+.chk-group{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:14px 16px 6px}
+.chk-group header{display:flex;justify-content:space-between;align-items:baseline;gap:10px;margin-bottom:6px}
+.chk-count{font:700 12.5px/1 var(--sans);color:var(--ink-3);white-space:nowrap;font-variant-numeric:tabular-nums}
+.chk{display:grid;grid-template-columns:18px minmax(0,1fr);gap:10px;padding:10px 0;border-top:1px solid var(--line);font-size:14px;line-height:1.45;cursor:pointer}
+.chk input{width:17px;height:17px;margin:2px 0 0;accent-color:var(--accent)}
+.chk input:checked+span{color:var(--ink-3)}
+.chk .tag{margin-right:6px;vertical-align:1px}
+
+/* steps */
+.steps{counter-reset:s;list-style:none;margin:0;padding:0;display:grid;gap:12px}
+.steps>li{counter-increment:s;display:grid;grid-template-columns:36px minmax(0,1fr);gap:12px;background:var(--card);border:1px solid var(--line);border-radius:16px;padding:16px 16px 16px 14px}
+.steps>li::before{content:counter(s,decimal-leading-zero);font:700 14px/1.6 var(--mono);color:var(--accent)}
+.step-h{display:flex;flex-wrap:wrap;align-items:center;gap:8px 10px;margin-bottom:6px}
+.step-h h3{font-size:16px}
+.steps p{margin:0 0 8px;font-size:14.5px;color:var(--ink-2);max-width:80ch}
+.code{position:relative;margin:8px 0 2px;min-width:0}
+.code pre{margin:0;overflow-x:auto;padding:12px 14px;padding-right:74px;border-radius:12px;background:var(--code);border:1px solid var(--line);font:500 12.5px/1.65 var(--mono);color:var(--ink);tab-size:2}
+.code pre .c{color:var(--ink-3)}
+.copy{position:absolute;top:8px;right:8px;font:700 11.5px/1 var(--sans);padding:6px 9px;border-radius:7px;border:1px solid var(--line-2);background:var(--card);color:var(--ink-2);cursor:pointer}
+.copy:hover{color:var(--ink);border-color:var(--accent)}
+
+/* traps */
+.trap-grid{display:grid;gap:12px}
+@media (min-width:780px){.trap-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+.trap{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px 16px}
+.trap h4{font:700 15px/1.35 var(--sans);margin:0 0 5px}
+.trap p{font-size:14px;color:var(--ink-2);margin:0}
+.trap .src{display:block;font:500 11.5px/1.4 var(--mono);color:var(--ink-3);margin-top:8px;overflow-wrap:anywhere}
+.trap.new{border-color:color-mix(in srgb,var(--bad-mark) 40%,var(--line))}
+
+/* sources */
+.src-grid{display:grid;gap:10px 28px;font-size:14px}
+@media (min-width:760px){.src-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+.src-grid div{display:grid;grid-template-columns:minmax(0,1fr);gap:1px}
+.src-grid a{font:500 13px/1.4 var(--mono);overflow-wrap:anywhere}
+.src-grid span{color:var(--ink-3);font-size:13px}
+footer.end{margin-top:56px;padding-top:18px;border-top:1px solid var(--line);font-size:13.5px;color:var(--ink-3)}
+
+/* microservices page additions */
+:root{--feat:#6a45cc;--feat-wash:rgba(106,69,204,.11)}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){--feat:#a98cf6;--feat-wash:rgba(169,140,246,.17)}}
+:root[data-theme="dark"]{--feat:#a98cf6;--feat-wash:rgba(169,140,246,.17)}
+.plate.feat{border-color:var(--feat);background:var(--feat-wash)}
+.dot.feat{background:var(--feat)}
+.s-feat{stroke:var(--feat)}
+.p-feat{fill:var(--feat-wash);stroke:var(--feat);stroke-width:1.4}
+.p-ext{fill:var(--ext-wash);stroke:var(--ext);stroke-width:1.2}
+.svg-bus{stroke:var(--ink-3);stroke-width:1.4;stroke-dasharray:5 4;fill:none}
+.fig.map svg{min-width:1060px}
+.legend{display:flex;flex-wrap:wrap;gap:6px 18px;font-size:13.5px;color:var(--ink-2);padding:10px 8px 0}
+.legend span{display:inline-flex;align-items:center}
+.svc-grid{display:grid;gap:14px;grid-template-columns:minmax(0,1fr)}
+@media (min-width:640px){.svc-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media (min-width:1040px){.svc-grid{grid-template-columns:repeat(3,minmax(0,1fr))}}
+.srv.wide{grid-column:1/-1}
+.own{margin:0;display:grid;gap:9px}
+.own div{display:grid;grid-template-columns:76px minmax(0,1fr);gap:10px;font-size:14px;line-height:1.45}
+.own dt{color:var(--ink-3);font-size:13px}
+.own dd{margin:0;color:var(--ink-2);min-width:0}
+.own dd b{color:var(--ink)}
+@media (min-width:860px){.srv.wide .own{grid-template-columns:repeat(2,minmax(0,1fr));column-gap:28px}}
+.srv-note{margin:0;font-size:14px;color:var(--ink-2)}
+.srv-foot{margin:auto 0 0;display:flex;flex-wrap:wrap;gap:8px 12px;align-items:center;padding-top:12px;border-top:1px solid var(--line)}
+.sz{font:500 12.5px/1.4 var(--mono);color:var(--ink-3)}
+.ev td,.ev th{min-width:170px}
+.ev td:nth-child(2){min-width:150px}
+.ev td:last-child{min-width:0;white-space:nowrap}
+.steps ol.inner{margin:2px 0 10px;padding-left:22px;display:grid;gap:6px;font-size:14.5px;color:var(--ink-2);max-width:82ch}
+.steps ol.inner b{color:var(--ink)}
+.gate{font-size:13.5px;color:var(--ink-3);margin:4px 0 0;max-width:82ch}
+.gate b{color:var(--ink)}
+.plain{margin:0;padding-left:20px;display:grid;gap:8px;max-width:80ch;color:var(--ink-2)}
+.plain b{color:var(--ink)}
+.callout ul{margin:6px 0 0;padding-left:18px;display:grid;gap:6px;color:var(--ink-2);font-size:14.5px}
+.callout h3{font-size:16px;margin:0 0 4px}
+.rules .trap h4{font-size:15.5px}
+.step-h .tag{white-space:normal;line-height:1.35}
+</style>
+</head>
+<body>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
+  <symbol id="i-arr" viewBox="0 0 44 10"><path d="M1 5H36" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M35 1.2L43 5L35 8.8Z" fill="currentColor"/></symbol>
+  <symbol id="i-arr2" viewBox="0 0 44 10"><path d="M8 5H36" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M35 1.2L43 5L35 8.8ZM9 1.2L1 5L9 8.8Z" fill="currentColor"/></symbol>
+  <symbol id="i-ok" viewBox="0 0 20 20"><circle cx="10" cy="10" r="9" fill="currentColor"/><path d="M6 10.4l2.7 2.7L14.2 7.4" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+  <symbol id="i-warn" viewBox="0 0 20 20"><path d="M10 1.8L19 17.6H1Z" fill="currentColor" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><path d="M10 7.3v4.9" stroke="#1B1526" stroke-width="2" stroke-linecap="round"/><circle cx="10" cy="14.9" r="1.15" fill="#1B1526"/></symbol>
+  <symbol id="i-over" viewBox="0 0 20 20"><circle cx="10" cy="10" r="9" fill="currentColor"/><path d="M6.8 6.8l6.4 6.4M13.2 6.8l-6.4 6.4" stroke="#fff" stroke-width="2" stroke-linecap="round"/></symbol>
+  <symbol id="i-info" viewBox="0 0 20 20"><circle cx="10" cy="10" r="9" fill="currentColor"/><path d="M10 9v5.2" stroke="#fff" stroke-width="2" stroke-linecap="round"/><circle cx="10" cy="6" r="1.2" fill="#fff"/></symbol>
+</svg>
+
+<div class="page">
+<div class="shell">
+
+<header class="hero">
+  <p class="eyebrow">Architecture plan · Go backend · 29 Sep 2026</p>
+  <h1>CrazzyChat Microservices</h1>
+  <p class="lede">The Go backend split by feature. Go Live, Family Space, Games, Maps, ShopBook and Calls each become their own service around one core, which keeps accounts, chat and the phone's live connection. The boundaries come from the code. The split happens one service at a time after launch, and the app never needs a new release for it.</p>
+  <div class="facts">
+    <span class="fact">Today <b>1 Go API · 42,000 lines · 406 routes</b></span>
+    <span class="fact">Target <b>core + 6 feature services</b></span>
+    <span class="fact">Servers <b>the same 4 on Utho</b></span>
+    <span class="fact">App release <b>not needed</b></span>
+  </div>
+</header>
+
+<nav class="nav" id="nav" aria-label="Sections">
+  <a href="#map">Map</a>
+  <a href="#services">Services</a>
+  <a href="#evidence">Evidence</a>
+  <a href="#rules">Rules</a>
+  <a href="#family">Family Space</a>
+  <a href="#placement">Placement</a>
+  <a href="#order">Order</a>
+  <a href="#repo">Repo changes</a>
+  <a href="#out">Not included</a>
+  <a href="#sources">Sources</a>
+</nav>
+
+<!-- ============================================================ MAP -->
+<section class="sec" id="map" aria-labelledby="map-h">
+  <div class="sec-h">
+    <h2 id="map-h">Seven services behind one front door</h2>
+    <p>The app keeps talking to <code>api.corefinite.com</code>. Caddy looks at each request's path and sends it to the service that owns it. Feature services call core over the private network for three things: live events to phones, push notifications and user names.</p>
+  </div>
+
+  <figure class="fig map">
+    <div class="fig-scroll">
+      <svg viewBox="0 0 1200 540" role="img" aria-labelledby="map-t map-d">
+        <title id="map-t">CrazzyChat service map</title>
+        <desc id="map-d">The app talks to one front door at api.corefinite.com. It routes paths to core and six feature services: Go Live, Family Space, Games, Maps, ShopBook and Calls. Feature services call core over the private network for live events, push and user names. All services share one Postgres cluster with a login per service.</desc>
+        <defs>
+          <marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10Z" class="svg-ah"/></marker>
+        </defs>
+
+        <rect x="450" y="12" width="300" height="40" rx="10" class="svg-client"/>
+        <text x="600" y="37" text-anchor="middle" class="svg-t">CrazzyChat app · Android and iOS</text>
+        <line x1="600" y1="52" x2="600" y2="82" class="svg-ln" marker-end="url(#ah)"/>
+
+        <rect x="20" y="86" width="1160" height="50" rx="12" class="svg-ext"/>
+        <text x="600" y="107" text-anchor="middle" class="svg-t">Front door · api.corefinite.com</text>
+        <text x="600" y="126" text-anchor="middle" class="svg-t2">nginx (TLS) → Caddy sends each path to the service that owns it; core is the fallback</text>
+
+        <line x1="150" y1="136" x2="150" y2="182" class="svg-ln" marker-end="url(#ah)"/>
+        <line x1="369" y1="136" x2="369" y2="182" class="svg-ln" marker-end="url(#ah)"/>
+        <line x1="517" y1="136" x2="517" y2="182" class="svg-ln" marker-end="url(#ah)"/>
+        <line x1="665" y1="136" x2="665" y2="182" class="svg-ln" marker-end="url(#ah)"/>
+        <line x1="813" y1="136" x2="813" y2="182" class="svg-ln" marker-end="url(#ah)"/>
+        <line x1="961" y1="136" x2="961" y2="182" class="svg-ln" marker-end="url(#ah)"/>
+        <line x1="1109" y1="136" x2="1109" y2="182" class="svg-ln" marker-end="url(#ah)"/>
+
+        <!-- core -->
+        <rect x="20" y="186" width="260" height="122" rx="12" class="svg-box s-core"/>
+        <rect x="34" y="198" width="52" height="22" rx="5" class="p-core"/>
+        <text x="60" y="213" text-anchor="middle" class="svg-pl">core</text>
+        <text x="34" y="241" class="svg-t">Accounts · chat · live connection</text>
+        <text x="34" y="260" class="svg-m">/auth /user /contacts /chats</text>
+        <text x="34" y="276" class="svg-m">/stories /channels /uploads</text>
+        <text x="34" y="292" class="svg-m">socket · push · SMS · email</text>
+
+        <!-- feature services -->
+        <rect x="300" y="186" width="138" height="122" rx="12" class="svg-box s-feat"/>
+        <rect x="312" y="198" width="60" height="22" rx="5" class="p-feat"/>
+        <text x="342" y="213" text-anchor="middle" class="svg-pl">golive</text>
+        <text x="312" y="241" class="svg-t">Go Live</text>
+        <text x="312" y="260" class="svg-m">/broadcasts/*</text>
+        <text x="312" y="276" class="svg-m">/golive/*</text>
+        <text x="312" y="292" class="svg-m">LiveKit webhooks</text>
+
+        <rect x="448" y="186" width="138" height="122" rx="12" class="svg-box s-feat"/>
+        <rect x="460" y="198" width="60" height="22" rx="5" class="p-feat"/>
+        <text x="490" y="213" text-anchor="middle" class="svg-pl">family</text>
+        <text x="460" y="241" class="svg-t">Family Space</text>
+        <text x="460" y="260" class="svg-m">/chats/{id}/…</text>
+        <text x="460" y="276" class="svg-m">16 space paths</text>
+        <text x="460" y="292" class="svg-m">/user/sos</text>
+
+        <rect x="596" y="186" width="138" height="122" rx="12" class="svg-box s-feat"/>
+        <rect x="608" y="198" width="52" height="22" rx="5" class="p-feat"/>
+        <text x="634" y="213" text-anchor="middle" class="svg-pl">games</text>
+        <text x="608" y="241" class="svg-t">Games</text>
+        <text x="608" y="260" class="svg-m">/games/*</text>
+        <text x="608" y="276" class="svg-m">launch token</text>
+        <text x="608" y="292" class="svg-m">matches · voice</text>
+
+        <rect x="744" y="186" width="138" height="122" rx="12" class="svg-box s-feat"/>
+        <rect x="756" y="198" width="46" height="22" rx="5" class="p-feat"/>
+        <text x="779" y="213" text-anchor="middle" class="svg-pl">maps</text>
+        <text x="756" y="241" class="svg-t">Maps</text>
+        <text x="756" y="260" class="svg-m">/nav/*</text>
+        <text x="756" y="276" class="svg-m">route · matrix</text>
+        <text x="756" y="292" class="svg-m">trace · geocode</text>
+
+        <rect x="892" y="186" width="138" height="122" rx="12" class="svg-box s-feat"/>
+        <rect x="904" y="198" width="74" height="22" rx="5" class="p-feat"/>
+        <text x="941" y="213" text-anchor="middle" class="svg-pl">shopbook</text>
+        <text x="904" y="241" class="svg-t">ShopBook</text>
+        <text x="904" y="260" class="svg-m">/shopbook/*</text>
+        <text x="904" y="276" class="svg-m">its admin API</text>
+        <text x="904" y="292" class="svg-m">orders · ledger</text>
+
+        <rect x="1040" y="186" width="138" height="122" rx="12" class="svg-box s-feat"/>
+        <rect x="1052" y="198" width="52" height="22" rx="5" class="p-feat"/>
+        <text x="1078" y="213" text-anchor="middle" class="svg-pl">calls</text>
+        <text x="1052" y="241" class="svg-t">Calls</text>
+        <text x="1052" y="260" class="svg-m">/calls/*</text>
+        <text x="1052" y="276" class="svg-m">/call/*</text>
+        <text x="1052" y="292" class="svg-m">ringing in core</text>
+
+        <!-- internal calls to core -->
+        <path d="M1109 308V330M961 308V330M813 308V330M665 308V330M517 308V330M369 308V330M1109 330H190V313" class="svg-bus" marker-end="url(#ah)"/>
+        <text x="650" y="349" text-anchor="middle" class="svg-m">live events · push · user names → core, over the private network</text>
+
+        <!-- what each service runs with -->
+        <rect x="20" y="364" width="260" height="40" rx="8" class="p-ext"/>
+        <text x="150" y="380" text-anchor="middle" class="svg-t2">Redis · FCM · MSG91 · Resend</text>
+        <text x="150" y="396" text-anchor="middle" class="svg-t2">R2 media · VaultBeam relay</text>
+
+        <rect x="300" y="364" width="138" height="40" rx="8" class="p-media"/>
+        <text x="369" y="380" text-anchor="middle" class="svg-t2">SFU · egress</text>
+        <text x="369" y="396" text-anchor="middle" class="svg-t2">own Redis · LIVE-1</text>
+
+        <rect x="448" y="364" width="138" height="40" rx="8" class="p-ext"/>
+        <text x="517" y="380" text-anchor="middle" class="svg-t2">reads membership</text>
+        <text x="517" y="396" text-anchor="middle" class="svg-t2">live, never copied</text>
+
+        <rect x="596" y="364" width="138" height="40" rx="8" class="p-ext"/>
+        <text x="665" y="380" text-anchor="middle" class="svg-t2">games server</text>
+        <text x="665" y="396" text-anchor="middle" class="svg-t2">LiveKit voice</text>
+
+        <rect x="744" y="364" width="138" height="40" rx="8" class="p-ext"/>
+        <text x="813" y="380" text-anchor="middle" class="svg-t2">Valhalla · India</text>
+        <text x="813" y="396" text-anchor="middle" class="svg-t2">Photon geocoder</text>
+
+        <rect x="892" y="364" width="138" height="40" rx="8" class="p-ext"/>
+        <text x="961" y="380" text-anchor="middle" class="svg-t2">R2 documents</text>
+        <text x="961" y="396" text-anchor="middle" class="svg-t2">distances via Maps</text>
+
+        <rect x="1040" y="364" width="138" height="40" rx="8" class="p-media"/>
+        <text x="1109" y="380" text-anchor="middle" class="svg-t2">LiveKit · coturn</text>
+        <text x="1109" y="396" text-anchor="middle" class="svg-t2">on MEDIA-1</text>
+
+        <!-- tables -->
+        <rect x="20" y="416" width="260" height="28" rx="7" class="p-data"/>
+        <text x="150" y="434" text-anchor="middle" class="svg-lab">about 50 tables</text>
+        <rect x="300" y="416" width="138" height="28" rx="7" class="p-data"/>
+        <text x="369" y="434" text-anchor="middle" class="svg-lab">9 tables</text>
+        <rect x="448" y="416" width="138" height="28" rx="7" class="p-data"/>
+        <text x="517" y="434" text-anchor="middle" class="svg-lab">18 + 2 tables</text>
+        <rect x="596" y="416" width="138" height="28" rx="7" class="p-data"/>
+        <text x="665" y="434" text-anchor="middle" class="svg-lab">3 tables</text>
+        <rect x="744" y="416" width="138" height="28" rx="7" class="p-ext"/>
+        <text x="813" y="434" text-anchor="middle" class="svg-lab">no tables</text>
+        <rect x="892" y="416" width="138" height="28" rx="7" class="p-data"/>
+        <text x="961" y="434" text-anchor="middle" class="svg-lab">31 tables</text>
+        <rect x="1040" y="416" width="138" height="28" rx="7" class="p-data"/>
+        <text x="1109" y="434" text-anchor="middle" class="svg-lab">3 tables</text>
+
+        <path d="M150 444V470M369 444V470M517 444V470M665 444V470M961 444V470M1109 444V470" class="svg-priv"/>
+
+        <rect x="20" y="470" width="1160" height="56" rx="12" class="p-data"/>
+        <text x="600" y="493" text-anchor="middle" class="svg-t">Postgres 16 · one cluster · primary on CORE-1, standby on DB-2</text>
+        <text x="600" y="512" text-anchor="middle" class="svg-t2">a login per service · each service writes only its own tables · membership is a read-only view owned by core</text>
+      </svg>
+    </div>
+    <div class="legend" aria-hidden="true">
+      <span><i class="dot core"></i>core</span>
+      <span><i class="dot feat"></i>feature services</span>
+      <span><i class="dot media"></i>media servers</span>
+      <span><i class="dot data"></i>database</span>
+      <span><i class="dot"></i>other systems</span>
+    </div>
+    <figcaption>Dashed lines are internal calls on the private network. Paths and table counts come from <code>internal/routes</code> at commit ee3e282.</figcaption>
+  </figure>
+</section>
+
+<!-- ============================================================ SERVICES -->
+<section class="sec" id="services" aria-labelledby="svc-h">
+  <div class="sec-h">
+    <h2 id="svc-h">What each service owns</h2>
+    <p>Each service owns its paths, its tables and its background jobs. No other service writes to its tables.</p>
+  </div>
+
+  <div class="svc-grid">
+    <article class="srv wide">
+      <div class="srv-h"><span class="plate core">core</span><h3 class="srv-role">Accounts, chat and the live connection</h3></div>
+      <dl class="own">
+        <div><dt>Paths</dt><dd><code>/auth</code> <code>/user</code> <code>/contacts</code> <code>/chats</code> <code>/stories</code> <code>/channels</code> <code>/communities</code> <code>/chat-codes</code> <code>/invitations</code> <code>/uploads</code> <code>/vaultbeam</code> <code>/app</code> <code>/api/admin</code>, and the CC-Wire socket</dd></div>
+        <div><dt>Owns</dt><dd>Users, devices and encryption keys; chats, members, messages, stories, channels and communities; attachments and VaultBeam transfers. <b>About 50 tables.</b></dd></div>
+        <div><dt>Jobs</dt><dd>Message, chat and story expiry; scheduled messages; delete-on-delivery; media retention; screen-usage sweep</dd></div>
+        <div><dt>Keeps</dt><dd>The socket gateway, the push, SMS and email keys, <code>VAULTCHAT_MASTER_KEY</code>, and the key that signs logins</dd></div>
+      </dl>
+      <p class="srv-note">These parts read users, blocks, devices, keys and membership on almost every request. Splitting them would turn each of those reads into a network call, so they stay together.</p>
+      <div class="srv-foot"><span class="tag c">Stays together</span><span class="sz">20,500 lines · about 190 routes · CORE-1</span></div>
+    </article>
+
+    <article class="srv">
+      <div class="srv-h"><span class="plate feat">golive</span><h3 class="srv-role">Go Live</h3></div>
+      <dl class="own">
+        <div><dt>Paths</dt><dd><code>/broadcasts/*</code> <code>/golive/*</code>, and Go Live's LiveKit webhooks</dd></div>
+        <div><dt>Owns</dt><dd>9 broadcast tables: sessions, invites, invite links, chat, comments, likes, polls, poll votes, viewers</dd></div>
+        <div><dt>Jobs</dt><dd>Broadcast retention, broadcast reaper, host sweep</dd></div>
+        <div><dt>Runs on</dt><dd><b>LIVE-1</b>, beside its SFU and egress, with its own Redis</dd></div>
+        <div><dt>Needs</dt><dd>User names and live events from core</dd></div>
+      </dl>
+      <div class="srv-foot"><span class="tag m">Small split</span><span class="sz">3,800 lines · 30 routes</span></div>
+    </article>
+
+    <article class="srv">
+      <div class="srv-h"><span class="plate feat">family</span><h3 class="srv-role">Family Space</h3></div>
+      <dl class="own">
+        <div><dt>Paths</dt><dd>16 space paths under <code>/chats/{id}/</code> (locations, trip, runs, devices, items, roster and more), plus <code>/user/sos</code> and <code>/contacts/trusted</code></dd></div>
+        <div><dt>Owns</dt><dd>18 space tables (<code>space_*</code>, runs, family relations, visitor passes), plus SOS events and trusted contacts</dd></div>
+        <div><dt>Jobs</dt><dd>None today</dd></div>
+        <div><dt>Runs on</dt><dd><b>CORE-1</b></dd></div>
+        <div><dt>Needs</dt><dd>Live membership (a read-only view), user names, live events and push from core. The live-location relay stays in core.</dd></div>
+      </dl>
+      <div class="srv-foot"><span class="tag g">Large split</span><span class="sz">5,100 lines · 62 routes (+5 safety)</span></div>
+    </article>
+
+    <article class="srv">
+      <div class="srv-h"><span class="plate feat">games</span><h3 class="srv-role">Games</h3></div>
+      <dl class="own">
+        <div><dt>Paths</dt><dd><code>/games/*</code>: launch token, matches, tables, voice token, notify, device token</dd></div>
+        <div><dt>Owns</dt><dd><code>games_matches</code>, <code>games_live_tables</code>, <code>games_notify_seen</code>; works with the games server at <code>games.corefinite.com</code></dd></div>
+        <div><dt>Jobs</dt><dd>Notify-seen and live-table sweeps</dd></div>
+        <div><dt>Runs on</dt><dd><b>CORE-1</b>, next to the games server</dd></div>
+        <div><dt>Needs</dt><dd>User names and push from core, and a LiveKit voice token</dd></div>
+      </dl>
+      <div class="srv-foot"><span class="tag m">Small split</span><span class="sz">1,300 lines · 9 routes</span></div>
+    </article>
+
+    <article class="srv">
+      <div class="srv-h"><span class="plate feat">maps</span><h3 class="srv-role">Maps</h3></div>
+      <dl class="own">
+        <div><dt>Paths</dt><dd><code>/nav/route</code> <code>/nav/matrix</code> <code>/nav/trace</code> <code>/nav/geocode</code></dd></div>
+        <div><dt>Owns</dt><dd>No tables. Runs Valhalla with the India tiles (9.8 GB) and Photon.</dd></div>
+        <div><dt>Jobs</dt><dd>None</dd></div>
+        <div><dt>Runs on</dt><dd><b>CORE-1</b> at launch; the first service to get its own server when CORE-1 runs short of memory</dd></div>
+        <div><dt>Serves</dt><dd>The app's routes and road distances, and ShopBook's distance matrix</dd></div>
+      </dl>
+      <div class="srv-foot"><span class="tag m">Small split · the pilot</span><span class="sz">560 lines · 4 routes</span></div>
+    </article>
+
+    <article class="srv">
+      <div class="srv-h"><span class="plate feat">shopbook</span><h3 class="srv-role">ShopBook</h3></div>
+      <dl class="own">
+        <div><dt>Paths</dt><dd><code>/shopbook/*</code> <code>/api/admin/shopbook/*</code></dd></div>
+        <div><dt>Owns</dt><dd>31 ShopBook tables: shops, products, stock, orders, invoices, payments, ledger, khata, purchases, returns and more</dd></div>
+        <div><dt>Jobs</dt><dd>ShopBook jobs, once each takes a lock (change C2)</dd></div>
+        <div><dt>Runs on</dt><dd><b>CORE-1</b></dd></div>
+        <div><dt>Needs</dt><dd>User names and push from core, distances from Maps, and its own admin key</dd></div>
+      </dl>
+      <div class="srv-foot"><span class="tag a">Medium split</span><span class="sz">9,300 lines · 96 routes</span></div>
+    </article>
+
+    <article class="srv">
+      <div class="srv-h"><span class="plate feat">calls</span><h3 class="srv-role">Calls</h3></div>
+      <dl class="own">
+        <div><dt>Paths</dt><dd><code>/calls/*</code> <code>/call/token</code> <code>/call/initiate</code> <code>/call/cancel</code></dd></div>
+        <div><dt>Owns</dt><dd><code>calls</code>, <code>call_invites</code>, <code>call_participants</code></dd></div>
+        <div><dt>Jobs</dt><dd>None</dd></div>
+        <div><dt>Runs on</dt><dd><b>CORE-1</b>, because it shares live call state with the socket gateway</dd></div>
+        <div><dt>Needs</dt><dd>Membership for group calls, push, and the socket gateway for ringing and in-call events</dd></div>
+      </dl>
+      <div class="srv-foot"><span class="tag g">Large split</span><span class="sz">1,400 lines · 12 routes</span></div>
+    </article>
+  </div>
+</section>
+
+<!-- ============================================================ EVIDENCE -->
+<section class="sec" id="evidence" aria-labelledby="ev-h">
+  <div class="sec-h">
+    <h2 id="ev-h">How tangled each feature is today</h2>
+    <p>Counted by a script over <code>internal/routes</code>: calls from one feature's files into another feature's functions, and SQL that reads or writes another feature's tables. Fewer entries mean a cheaper split.</p>
+  </div>
+  <div class="tbl-wrap">
+    <table class="ev">
+      <thead><tr><th scope="col">Service</th><th scope="col">Size</th><th scope="col">Uses from other features</th><th scope="col">Writes other features' tables</th><th scope="col">Split</th></tr></thead>
+      <tbody>
+        <tr><th scope="row">Maps</th><td>560 lines · 4 routes · no tables</td><td>Nothing</td><td>None</td><td><span class="tag m">Small</span></td></tr>
+        <tr><th scope="row">Go Live</th><td>3,800 lines · 30 routes · 9 tables</td><td>One database-error helper (2 calls); reads user names (3 queries)</td><td>None</td><td><span class="tag m">Small</span></td></tr>
+        <tr><th scope="row">Games</th><td>1,300 lines · 9 routes · 3 tables</td><td>Two push-device helpers from <code>calls.go</code>; reads users (4 queries)</td><td><code>devices</code> (2 writes, push registration)</td><td><span class="tag m">Small</span></td></tr>
+        <tr><th scope="row">ShopBook</th><td>9,300 lines · 96 routes · 31 tables</td><td>Admin-key check (18 calls), push (1); calls Valhalla directly with Maps' matrix type; reads users (15 queries)</td><td>None</td><td><span class="tag a">Medium</span></td></tr>
+        <tr><th scope="row">Family Space</th><td>5,100 lines · 62 routes · 18 tables</td><td>Chat membership check (42 calls), group permission check (18), group audit log (18), push (3); reads <code>chat_members</code> (12 queries); plus 145 calls to generic database and text helpers</td><td><code>chat_members</code> (3) and <code>chats</code> (2): sharing switch, role key, duty state, shift times, leave allowance</td><td><span class="tag g">Large</span></td></tr>
+        <tr><th scope="row">Calls</th><td>1,400 lines · 12 routes · 3 tables</td><td>Anonymous-chat helper (2 calls); reads <code>chat_members</code> (2 queries); ringing and in-call events run in the socket gateway</td><td><code>devices</code> (4 writes, push registration)</td><td><span class="tag g">Large</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="tbl-note">The other direction counts too. Chat code calls two functions that sit in Family Space files (<code>spaceName</code> 4 times, <code>chatsAudienceAllowed</code> once) and registers nine Family Space route groups on its <code>/chats/{id}</code> router. Both functions move into core during preparation.</p>
+</section>
+
+<!-- ============================================================ RULES -->
+<section class="sec rules" id="rules" aria-labelledby="rules-h">
+  <div class="sec-h">
+    <h2 id="rules-h">Rules every service follows</h2>
+    <p>They keep the phone's experience the same and stop a bug in one service from reaching another service's data.</p>
+  </div>
+  <div class="trap-grid">
+    <div class="trap"><h4>One front door</h4><p>The app keeps calling <code>https://api.corefinite.com</code> with the same paths. Caddy sends each path to its service, with core as the fallback. No app release and no new domains.</p></div>
+    <div class="trap"><h4>One live connection</h4><p>The phone keeps one CC-Wire socket, held by core. Services send live events through core's <code>POST /internal/emit</code>, which already exists; <code>emitx</code> uses it whenever the socket hub runs in another process.</p></div>
+    <div class="trap"><h4>Core signs logins, services check them</h4><p>Access tokens move from the shared HS256 <code>JWT_SECRET</code> to an Ed25519 key pair, the way the games launch token already works. Core keeps the private key; services get only the public key. Core accepts old tokens for their 15-minute life, then stops.</p></div>
+    <div class="trap"><h4>Secrets stay in core</h4><p><code>VAULTCHAT_MASTER_KEY</code>, the lookup pepper and the FCM, MSG91 and Resend keys never leave core. Names are stored encrypted, so services ask core for user names and send notifications through it.</p></div>
+    <div class="trap"><h4>Own tables, own login</h4><p>One Postgres cluster, one database login per service, with rights only on that service's tables. To change another service's data, call that service.</p></div>
+    <div class="trap"><h4>Read membership live, never copy it</h4><p>Membership and group permissions are read-only views that core owns. Removing someone from a family takes effect on their next request, in every service.</p></div>
+    <div class="trap"><h4>Account deletion still reaches everything</h4><p>Service tables keep their foreign keys to <code>users(id)</code> with <code>ON DELETE CASCADE</code>, so deleting an account in core still clears them. The few direct deletes in <code>user.go</code>, such as <code>family_relations</code>, move behind an internal call to the owning service.</p></div>
+    <div class="trap"><h4>Every job runs once</h4><p>Each background job takes a Postgres advisory lock, so a second copy of a service never runs it twice. For ShopBook this is launch change C2.</p></div>
+    <div class="trap"><h4>/internal stays private</h4><p>Caddy already refuses <code>/internal/*</code> from the internet. Each service gets its own internal key and listens only on the private network.</p></div>
+    <div class="trap"><h4>Same basics everywhere</h4><p><code>/health</code> for Caddy's checks, <code>/metrics</code> for Prometheus, and logs that carry a request ID set by Caddy, so one request can be followed across services.</p></div>
+  </div>
+</section>
+
+<!-- ============================================================ FAMILY -->
+<section class="sec" id="family" aria-labelledby="fam-h">
+  <div class="sec-h">
+    <h2 id="fam-h">Family Space without copying membership</h2>
+    <p>A Family Space is a group chat with more features, and every Family Space request checks that chat's membership. If the service kept its own copy of who belongs to a family, someone who was removed would keep seeing live locations until the copy caught up. So the service reads membership from core's live view, and the live-location relay stays in core's socket gateway, which already checks membership on every update.</p>
+  </div>
+
+  <div class="twocol">
+    <div class="callout">
+      <svg class="ico info" aria-hidden="true"><use href="#i-info"/></svg>
+      <div>
+        <h3>Moves into Family Space tables</h3>
+        <ul>
+          <li>From <code>chat_members</code>: <code>location_sharing_enabled</code>, <code>location_sharing_changed_at</code>, <code>role_key</code>, <code>duty_state</code></li>
+          <li>From <code>chats</code>: <code>shift_start</code>, <code>shift_end</code>, <code>shift_grace_minutes</code>, <code>run_delay_threshold_minutes</code>, <code>leave_allowance</code></li>
+          <li>Outside Family Space, only <code>groups.go</code> (3 places) and <code>chats.go</code> (1) read them</li>
+        </ul>
+      </div>
+    </div>
+    <div class="callout">
+      <svg class="ico ok" aria-hidden="true"><use href="#i-ok"/></svg>
+      <div>
+        <h3>Stays in core</h3>
+        <ul>
+          <li>Group membership, invitations and roles</li>
+          <li>Live location and trip updates over the socket</li>
+          <li><code>spaceName</code> and <code>chatsAudienceAllowed</code>, which sit in Family Space files today but serve chat</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  <div class="sub"><h3>The membership view</h3><p>Core owns it; Family Space and Calls only read it</p></div>
+  <div class="code"><pre>CREATE VIEW chat_membership AS
+  SELECT chat_id, user_id, role, joined_at
+    FROM chat_members
+   WHERE left_at IS NULL;
+
+GRANT SELECT ON chat_membership TO svc_family, svc_calls;</pre></div>
+
+  <div class="callout">
+    <svg class="ico warn" aria-hidden="true"><use href="#i-warn"/></svg>
+    <p><b>Test before switching traffic.</b> Remove a member from a test family, then, as that member, call every Family Space route and send a live-location update. Every one must be refused.</p>
+  </div>
+</section>
+
+<!-- ============================================================ PLACEMENT -->
+<section class="sec" id="placement" aria-labelledby="pl-h">
+  <div class="sec-h">
+    <h2 id="pl-h">Where they run on Utho</h2>
+    <p>The same four servers as the Utho plan. Feature services are extra containers on servers you are already buying; Go Live moves next to its media stack on LIVE-1.</p>
+  </div>
+  <div class="tbl-wrap">
+    <table>
+      <thead><tr><th scope="col">Server</th><th scope="col">Services</th><th scope="col">Also on the server</th></tr></thead>
+      <tbody>
+        <tr><td class="nw"><span class="plate sm core">CORE-1</span></td><td>core, Family Space, ShopBook, Games, Maps, Calls</td><td>nginx, Caddy, PgBouncer, Postgres primary, Redis, Valhalla, Photon, games server</td></tr>
+        <tr><td class="nw"><span class="plate sm data">DB-2</span></td><td>None</td><td>Postgres standby, Prometheus, Grafana</td></tr>
+        <tr><td class="nw"><span class="plate sm media">MEDIA-1</span></td><td>None</td><td>LiveKit for calls, coturn</td></tr>
+        <tr><td class="nw"><span class="plate sm media">LIVE-1</span></td><td>Go Live</td><td>Go Live SFU, egress, golive-redis</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="callout">
+    <svg class="ico info" aria-hidden="true"><use href="#i-info"/></svg>
+    <div>
+      <h3>Network changes on top of the launch plan</h3>
+      <ul>
+        <li><code>fw-core</code>: allow TCP 6432 (PgBouncer) from LIVE-1, <code>10.20.0.31</code>, so Go Live reaches the database.</li>
+        <li><code>fw-live</code>: allow TCP 4100 from CORE-1, <code>10.20.0.11</code>, so Caddy reaches the Go Live service.</li>
+        <li>Core's private listener on <code>10.20.0.11:8097</code> also serves <code>/internal/emit</code>, <code>/internal/notify</code> and <code>/internal/users/cards</code>, to LIVE-1 only.</li>
+        <li>Go Live's LiveKit webhooks stay on LIVE-1, so CORE-1 stops receiving them.</li>
+        <li>When CORE-1 runs short, move Maps (Valhalla needs the most memory) and then ShopBook to their own servers. Any service can also run a second copy behind Caddy.</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================ ORDER -->
+<section class="sec" id="order" aria-labelledby="ord-h">
+  <div class="sec-h">
+    <h2 id="ord-h">The order to split</h2>
+    <p>Launch first on the tested single API. Then prepare the codebase and move one feature at a time. Each move can be undone by pointing its paths back at core.</p>
+  </div>
+  <ol class="steps">
+    <li><div>
+      <div class="step-h"><h3>Launch on one Go API</h3><span class="plate sm">now</span></div>
+      <p>Go live on the four-server plan as it stands. Nothing on this page blocks the launch.</p>
+      <p class="gate"><b>Done when</b> the two-phone smoke test passes and a week of normal traffic has run.</p>
+    </div></li>
+    <li><div>
+      <div class="step-h"><h3>Prepare the codebase</h3><span class="tag e">estimate: 1 to 2 weeks</span></div>
+      <ol class="inner">
+        <li><b>Move shared helpers out of feature files.</b> Database helpers (<code>chatsQRow</code>, <code>chatsQueryU</code>, <code>chatsExecU</code>) and text helpers (<code>chatsStrOr</code>, <code>truncRunes</code>, <code>orEmpty</code>) go to shared packages; <code>spaceName</code> and <code>chatsAudienceAllowed</code> go to chat.</li>
+        <li><b>Add a <code>SERVICES</code> setting</b> to <code>cmd/api/main.go</code>. <code>SERVICES=all</code>, the default, keeps today's behaviour. <code>SERVICES=golive</code> starts only Go Live's routes and jobs and sends live events to core.</li>
+        <li><b>Lock every background job</b> with a Postgres advisory lock (C2).</li>
+        <li><b>Sign access tokens with Ed25519.</b></li>
+        <li><b>Add core's internal endpoints</b> for notifications and user names, with one internal key per service.</li>
+        <li><b>Create one database login per service</b>, built like <code>vaultchat_sys</code> in migration 133, with rights on its own tables only, and add the membership view.</li>
+      </ol>
+      <p class="gate"><b>Done when</b> no feature file calls another feature's code, and one image starts as core or as any single feature.</p>
+    </div></li>
+    <li><div>
+      <div class="step-h"><h3>Move features out, one at a time</h3><span class="tag e">estimate: 2 to 5 days each; 1 to 2 weeks for Family Space and Calls</span></div>
+      <ol class="inner">
+        <li><b>Maps, the pilot.</b> It sets the pattern: container, Caddy route with fallback, metrics.</li>
+        <li><b>Go Live, onto LIVE-1.</b> Needs Ed25519 tokens first, because it runs on another server.</li>
+        <li><b>Games.</b></li>
+        <li><b>ShopBook.</b> Needs the job locks.</li>
+        <li><b>Family Space.</b> Needs the column move, the membership view and the removal test.</li>
+        <li><b>Calls, last.</b> Ringing stays in core's socket gateway; tokens, call records and history move.</li>
+      </ol>
+      <p class="gate"><b>Done when</b>, for each service, a week passes with normal errors and latency on its own container. Then remove it from core's <code>SERVICES</code> list.</p>
+    </div></li>
+    <li><div>
+      <div class="step-h"><h3>Split the code when a feature earns it</h3></div>
+      <p>Give a feature its own binary, database schema, migrations and release version when it gets its own developer, its own release pace or its own load. Until then, one repository with separate containers already gives independent deploys, scaling and failure isolation.</p>
+    </div></li>
+  </ol>
+</section>
+
+<!-- ============================================================ REPO -->
+<section class="sec" id="repo" aria-labelledby="repo-h">
+  <div class="sec-h">
+    <h2 id="repo-h">What changes in the repo</h2>
+    <p>Per the repo's workflow, each step above starts as an OpenSpec change under <code>openspec/changes/</code>.</p>
+  </div>
+  <div class="tbl-wrap">
+    <table>
+      <thead><tr><th scope="col">File</th><th scope="col">Change</th></tr></thead>
+      <tbody>
+        <tr><td><code>vaultchat-backend-go/cmd/api/main.go</code></td><td>Group route registration and jobs by service; read <code>SERVICES</code></td></tr>
+        <tr><td><code>internal/routes/auth.go</code>, <code>internal/httpx/httpx.go</code></td><td>Sign access tokens with Ed25519; verify with the public key</td></tr>
+        <tr><td><code>internal/routes/chats_helpers.go</code> and new shared packages</td><td>Move the shared database and text helpers out of feature files</td></tr>
+        <tr><td><code>internal/jobs/jobs.go</code>, the reapers, <code>shopbook_jobs.go</code></td><td>An advisory lock per job</td></tr>
+        <tr><td><code>vaultchat-backend/migrations/</code> 138 onward</td><td>Service logins and grants, the membership view, the Family Space column move</td></tr>
+        <tr><td><code>caddy/Caddyfile</code></td><td>One block per feature service, with core as the fallback</td></tr>
+        <tr><td><code>docker-compose.yml</code>, <code>deploy/docker-compose.box.yml.example</code></td><td>One container per feature service; Go Live's on LIVE-1</td></tr>
+        <tr><td><code>monitoring/prometheus.yml</code></td><td>One scrape target per service</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="sub"><h3>Caddy: a feature first, core as fallback</h3><p><code>caddy/Caddyfile</code>, before the catch-all block</p></div>
+  <div class="code"><pre>@golive path /broadcasts /broadcasts/* /golive/*
+handle @golive {
+	reverse_proxy 10.20.0.31:4100 go-api:4000 {
+		lb_policy first          <span class="c"># Go Live's container first, core if it is down</span>
+		fail_duration 30s
+		health_uri /health
+		health_interval 5s
+	}
+}
+
+@family path_regexp ^/chats/[^/]+/(locations|trip|runs|devices|items|roster|links|ops|incidents|visitor-passes|attendance|leave|tasks|shift|duty|relations)(/|$)|^/chats/[^/]+/members/[^/]+/role-key$|^/(user/sos|contacts/trusted)(/|$)
+handle @family {
+	reverse_proxy family-api:4000 go-api:4000 {
+		lb_policy first
+		fail_duration 30s
+		health_uri /health
+	}
+}</pre></div>
+
+  <div class="sub"><h3>Compose: the same code, started as one feature</h3><p>LIVE-1's box file; new settings are marked</p></div>
+  <div class="code"><pre>golive-api:
+  build: { context: ./vaultchat-backend-go }
+  restart: unless-stopped
+  profiles: ["golive"]
+  env_file: [ ./golive-api.env ]      <span class="c"># Go Live's settings only, not core's .env</span>
+  environment:
+    SERVICES: golive                  <span class="c"># new: Go Live routes and jobs only</span>
+    DB_HOST: 10.20.0.11               <span class="c"># PgBouncer on CORE-1, private network</span>
+    DB_PORT: "6432"
+    DB_NAME: vaultchat
+    DB_USER: svc_golive               <span class="c"># new login, rights on broadcast tables only</span>
+    DB_PASS: ${SVC_GOLIVE_DB_PASS}
+    REDIS_URL: redis://golive-redis:6379/1
+    NODE_INTERNAL_URL: http://10.20.0.11:8097   <span class="c"># core's /internal/emit</span>
+  ports: ["10.20.0.31:4100:4000"]</pre></div>
+</section>
+
+<!-- ============================================================ OUT -->
+<section class="sec" id="out" aria-labelledby="out-h">
+  <div class="sec-h">
+    <h2 id="out-h">Not included</h2>
+  </div>
+  <ul class="plain">
+    <li><b>Chat's own parts stay in core.</b> Stories, channels, communities, invitations and chat codes are chat.</li>
+    <li><b>No second socket on the phone.</b> Every live event still arrives on the one CC-Wire connection.</li>
+    <li><b>No separate database servers at launch.</b> One Postgres cluster with a login per service is enough until one service's load hurts the others.</li>
+    <li><b>No message broker.</b> Live events already fan out through <code>/internal/emit</code> and Redis; <code>vaultchat-backend-go/SCALEOUT.md</code> describes when a log-based fan-out would pay off.</li>
+    <li><b>No Kubernetes requirement.</b> Docker Compose on each server keeps working; the <code>k8s/</code> folder can come later.</li>
+    <li><b>No app release and no domain change.</b></li>
+  </ul>
+</section>
+
+<!-- ============================================================ SOURCES -->
+<section class="sec" id="sources" aria-labelledby="src-h">
+  <div class="sec-h">
+    <h2 id="src-h">Sources</h2>
+    <p>Links point at commit ee3e282, the code this plan was counted from.</p>
+  </div>
+  <div class="src-grid">
+    <div><a href="https://github.com/srihari8204/VaultChat/blob/ee3e28220d43d9f2816fc2b91bc0d0af44ba4640/vaultchat-backend-go/cmd/api/main.go" target="_blank" rel="noopener">vaultchat-backend-go/cmd/api/main.go</a><span>Where every route group and background job starts today</span></div>
+    <div><a href="https://github.com/srihari8204/VaultChat/blob/ee3e28220d43d9f2816fc2b91bc0d0af44ba4640/vaultchat-backend-go/internal/routes/chats.go" target="_blank" rel="noopener">vaultchat-backend-go/internal/routes/chats.go</a><span>Registers the Family Space route groups on the chat router</span></div>
+    <div><a href="https://github.com/srihari8204/VaultChat/blob/ee3e28220d43d9f2816fc2b91bc0d0af44ba4640/vaultchat-backend-go/internal/emitx/emitx.go" target="_blank" rel="noopener">vaultchat-backend-go/internal/emitx/emitx.go</a><span>Sends live events over <code>/internal/emit</code> when the socket hub is elsewhere</span></div>
+    <div><a href="https://github.com/srihari8204/VaultChat/blob/ee3e28220d43d9f2816fc2b91bc0d0af44ba4640/vaultchat-backend-go/internal/httpx/httpx.go" target="_blank" rel="noopener">vaultchat-backend-go/internal/httpx/httpx.go</a><span>Today's HS256 access-token check</span></div>
+    <div><a href="https://github.com/srihari8204/VaultChat/blob/ee3e28220d43d9f2816fc2b91bc0d0af44ba4640/vaultchat-backend-go/internal/routes/games.go" target="_blank" rel="noopener">vaultchat-backend-go/internal/routes/games.go</a><span>The Ed25519 launch token the login change copies</span></div>
+    <div><a href="https://github.com/srihari8204/VaultChat/blob/ee3e28220d43d9f2816fc2b91bc0d0af44ba4640/vaultchat-backend-go/internal/realtime/handlers.go" target="_blank" rel="noopener">vaultchat-backend-go/internal/realtime/handlers.go</a><span>Live-location relay and call events in the socket gateway</span></div>
+    <div><a href="https://github.com/srihari8204/VaultChat/blob/ee3e28220d43d9f2816fc2b91bc0d0af44ba4640/vaultchat-backend/migrations/133_rls_roles.sql" target="_blank" rel="noopener">vaultchat-backend/migrations/133_rls_roles.sql</a><span>The pattern for per-service database logins</span></div>
+    <div><a href="https://github.com/srihari8204/VaultChat/blob/ee3e28220d43d9f2816fc2b91bc0d0af44ba4640/vaultchat-backend/migrations/079_broadcast.sql" target="_blank" rel="noopener">vaultchat-backend/migrations/079_broadcast.sql</a><span>Go Live's tables and their cascade from <code>users</code></span></div>
+    <div><a href="https://github.com/srihari8204/VaultChat/blob/ee3e28220d43d9f2816fc2b91bc0d0af44ba4640/caddy/Caddyfile" target="_blank" rel="noopener">caddy/Caddyfile</a><span>Refuses <code>/internal/*</code> from the internet</span></div>
+    <div><a href="https://github.com/srihari8204/VaultChat/blob/claude/deployment-topology-architecture-ezbg6o/docs/LAUNCH_TOPOLOGY.html" target="_blank" rel="noopener">docs/LAUNCH_TOPOLOGY.html</a><span>The four-server plan and changes C1, C2 and S1–S10 this builds on</span></div>
+  </div>
+</section>
+
+<footer class="end">
+  <p>Prepared from the CrazzyChat repository (srihari8204/VaultChat) at commit ee3e282. Line, route, table and call counts come from a script over <code>vaultchat-backend-go/internal/routes</code>; effort ranges are estimates for one developer.</p>
+</footer>
+
+</div>
+</div>
+
+<script>
+(function () {
+  'use strict';
+  var $ = function (s, r) { return (r || document).querySelector(s); };
+  var $$ = function (s, r) { return Array.prototype.slice.call((r || document).querySelectorAll(s)); };
+  var reduceMotion = !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+
+  var nav = $('#nav');
+  var links = $$('#nav a');
+  var byId = {};
+  links.forEach(function (a) { byId[a.getAttribute('href').slice(1)] = a; });
+  function setCurrent(id) {
+    var a = byId[id];
+    if (!a) return;
+    links.forEach(function (l) { l.removeAttribute('aria-current'); });
+    a.setAttribute('aria-current', 'true');
+    var left = a.offsetLeft - (nav.clientWidth - a.offsetWidth) / 2;
+    if (nav.scrollTo) nav.scrollTo({ left: Math.max(0, left), behavior: reduceMotion ? 'auto' : 'smooth' });
+  }
+  if ('IntersectionObserver' in window) {
+    var io = new IntersectionObserver(function (entries) {
+      entries.forEach(function (e) { if (e.isIntersecting) setCurrent(e.target.id); });
+    }, { rootMargin: '-30% 0px -65% 0px' });
+    Object.keys(byId).forEach(function (id) { var s = document.getElementById(id); if (s) io.observe(s); });
+  }
+
+  $$('.code').forEach(function (box) {
+    var pre = $('pre', box);
+    var btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'copy';
+    btn.textContent = 'Copy';
+    btn.setAttribute('aria-label', 'Copy code');
+    var reset = function () { btn.textContent = 'Copy'; };
+    var selectAll = function () {
+      try {
+        var range = document.createRange();
+        range.selectNodeContents(pre);
+        var sel = window.getSelection();
+        sel.removeAllRanges();
+        sel.addRange(range);
+        btn.textContent = 'Selected';
+      } catch (e) { btn.textContent = 'Copy failed'; }
+      setTimeout(reset, 2200);
+    };
+    btn.addEventListener('click', function () {
+      try {
+        navigator.clipboard.writeText(pre.innerText).then(function () {
+          btn.textContent = 'Copied';
+          setTimeout(reset, 1600);
+        }, selectAll);
+      } catch (e) { selectAll(); }
+    });
+    box.appendChild(btn);
+  });
+})();
+</script>
+</body>
+</html>
