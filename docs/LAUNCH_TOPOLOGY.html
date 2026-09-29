@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>VaultChat Launch Topology</title>
-<meta name="description" content="Deployment topology, architecture, server sizing and go-live prerequisites for running VaultChat on new servers.">
+<title>CrazzyChat Launch Topology</title>
+<meta name="description" content="Deployment topology, architecture, server sizing and go-live prerequisites for running CrazzyChat on new servers.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Sora:wght@600;700&family=Nunito+Sans:ital,wght@0,400;0,600;0,700;0,800;1,400&family=JetBrains+Mono:wght@400;500;700&display=swap">
@@ -337,9 +337,9 @@ footer.end{margin-top:56px;padding-top:18px;border-top:1px solid var(--line);fon
 <div class="shell">
 
 <header class="hero">
-  <p class="eyebrow">Deployment plan · VaultChat repo at ee3e282 · 28 Sep 2026</p>
-  <h1>VaultChat Launch Topology</h1>
-  <p class="lede">What it takes to run VaultChat on new servers: how many machines, what runs on each, how big they should be, and what to have ready before traffic moves. Everything here comes from the repo's compose files, service configs and ops notes. Measured figures and estimates are labelled as such.</p>
+  <p class="eyebrow">Deployment plan · CrazzyChat repo at ee3e282 · 28 Sep 2026</p>
+  <h1>CrazzyChat Launch Topology</h1>
+  <p class="lede">What it takes to run CrazzyChat on new servers: how many machines, what runs on each, how big they should be, and what to have ready before traffic moves. Everything here comes from the repo's compose files, service configs and ops notes. Measured figures and estimates are labelled as such.</p>
   <div class="facts">
     <span class="fact">Stack <b>Go API · Postgres 16 · Redis 7 · 2 × LiveKit · coturn · Valhalla</b></span>
     <span class="fact">Today <b>1 Hetzner box · 12 threads · 64 GB · 18 accounts</b></span>
@@ -612,7 +612,7 @@ footer.end{margin-top:56px;padding-top:18px;border-top:1px solid var(--line);fon
         <text x="105" y="140" text-anchor="middle" class="svg-m">stream.corefinite.com</text>
 
         <rect x="210" y="30" width="620" height="40" rx="9" class="svg-client"/>
-        <text x="520" y="55" text-anchor="middle" class="svg-t">VaultChat app on phones · Android and iOS</text>
+        <text x="520" y="55" text-anchor="middle" class="svg-t">CrazzyChat app on phones · Android and iOS</text>
 
         <rect x="860" y="30" width="190" height="120" rx="9" class="svg-ext"/>
         <text x="874" y="51" class="svg-t">Managed services</text>
@@ -1012,7 +1012,7 @@ chmod 600 .env vaultchat-backend/.env     <span class="c"># replace every CHANGE
 mkdir -p secrets &amp;&amp; chmod 700 secrets     <span class="c"># fcm-service-account.json, games-signing.key, games-notify.pub</span>
 chmod 600 secrets/* &amp;&amp; sudo chown 1000:1000 secrets/*
 alias dc='docker compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.box.yml'</pre></div>
-        <p>Apply changes S1, S2, S4, S5 and S7 from <a href="#changes">Config changes</a> before the first start. The clone directory must be named <code>vaultchat</code> so container names match the repo's scripts.</p>
+        <p>Apply changes S1, S2, S4, S5 and S7 from <a href="#changes">Config changes</a> before the first start. The app is CrazzyChat, but the clone directory must still be named <code>vaultchat</code> so container names match the repo's scripts; the database role, R2 buckets and Firebase project keep their <code>vaultchat</code> names too.</p>
       </div>
     </li>
     <li>
@@ -1309,7 +1309,7 @@ curl -sI localhost:8095/privacy | head -1               <span class="c"># 200</s
 </section>
 
 <footer class="end">
-  <p>Prepared from the VaultChat repository at commit ee3e282. Planning figures are estimates until <code>scripts/bench/run.sh</code> has run on the new hardware; go-live needs the two-phone smoke test, not only these checks.</p>
+  <p>Prepared from the CrazzyChat repository (srihari8204/VaultChat) at commit ee3e282. Planning figures are estimates until <code>scripts/bench/run.sh</code> has run on the new hardware; go-live needs the two-phone smoke test, not only these checks.</p>
 </footer>
 
 </div>

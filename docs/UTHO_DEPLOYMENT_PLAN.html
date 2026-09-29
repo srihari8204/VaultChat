@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>VaultChat on Utho</title>
-<meta name="description" content="The VaultChat launch topology mapped onto Utho: zone, instances, VPC, firewall, storage, build order, costs to quote and questions to settle with Utho.">
+<title>CrazzyChat on Utho</title>
+<meta name="description" content="The CrazzyChat launch topology mapped onto Utho: zone, instances, VPC, firewall, storage, build order, costs to quote and questions to settle with Utho.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Sora:wght@600;700&family=Nunito+Sans:ital,wght@0,400;0,600;0,700;0,800;1,400&family=JetBrains+Mono:wght@400;500;700&display=swap">
@@ -338,7 +338,7 @@ footer.end{margin-top:56px;padding-top:18px;border-top:1px solid var(--line);fon
 
 <header class="hero">
   <p class="eyebrow">Deployment plan · Utho, Mumbai · 29 Sep 2026</p>
-  <h1>VaultChat on Utho</h1>
+  <h1>CrazzyChat on Utho</h1>
   <p class="lede">The four-server launch plan, mapped onto Utho: which zone, instance shapes, network, firewalls and storage to create, the order to build it in, and what to settle with Utho before paying. The architecture is unchanged; the launch topology page explains why each piece exists.</p>
   <div class="facts">
     <span class="fact">Zone <b>Mumbai · inmumbaizone2</b></span>
@@ -440,7 +440,7 @@ footer.end{margin-top:56px;padding-top:18px;border-top:1px solid var(--line);fon
     <section class="chk-group" aria-labelledby="bg1">
       <header><h3 id="bg1">1. Before you start</h3><span class="chk-count"></span></header>
       <label class="chk" for="b-1"><input type="checkbox" id="b-1"><span>Get Utho's quote for the four plan sizes and two 1 TB volumes (see <a href="#costs">Costs</a>), so you can check the price shown before each deploy.</span></label>
-      <label class="chk" for="b-2"><input type="checkbox" id="b-2"><span>Have an SSH key on your laptop. If not: <code>ssh-keygen -t ed25519 -C "you@vaultchat"</code>. You will paste the <code>.pub</code> file.</span></label>
+      <label class="chk" for="b-2"><input type="checkbox" id="b-2"><span>Have an SSH key on your laptop. If not: <code>ssh-keygen -t ed25519 -a 100 -C "you@crazzychat-prod"</code>. You will paste the <code>.pub</code> file.</span></label>
       <label class="chk" for="b-3"><input type="checkbox" id="b-3"><span>Write down your office or VPN IP addresses. These are the "admin IPs" for SSH.</span></label>
       <label class="chk" for="b-4"><input type="checkbox" id="b-4"><span>Open a password-manager entry for Utho to collect IDs, IPs and root passwords as you go.</span></label>
     </section>
@@ -454,7 +454,7 @@ footer.end{margin-top:56px;padding-top:18px;border-top:1px solid var(--line);fon
     <section class="chk-group" aria-labelledby="bg3">
       <header><h3 id="bg3">3. SSH keys, VPC and firewalls</h3><span class="chk-count"></span></header>
       <label class="chk" for="b-9"><input type="checkbox" id="b-9"><span><b>SSH Keys → Create SSH Key.</b> Name it after the person or laptop and paste the <code>.pub</code> contents. One key per admin.</span></label>
-      <label class="chk" for="b-10"><input type="checkbox" id="b-10"><span><b>VPC → Deploy VPC.</b> Location Mumbai, name <code>vaultchat-vpc</code>, network address <code>10.20.0.0</code>, network size <code>24</code>.</span></label>
+      <label class="chk" for="b-10"><input type="checkbox" id="b-10"><span><b>VPC → Deploy VPC.</b> Location Mumbai, name <code>crazzychat-vpc</code>, network address <code>10.20.0.0</code>, network size <code>24</code>.</span></label>
       <label class="chk" for="b-11"><input type="checkbox" id="b-11"><span><b>Firewall → Create New Firewall.</b> Name <code>fw-core</code>, then Deploy Firewall. Repeat for <code>fw-db</code>, <code>fw-media</code> and <code>fw-live</code>.</span></label>
       <label class="chk" for="b-12"><input type="checkbox" id="b-12"><span>On each firewall's page, add the inbound rules from <a href="#network">Network</a>. Leave outbound open.</span></label>
     </section>
@@ -464,7 +464,7 @@ footer.end{margin-top:56px;padding-top:18px;border-top:1px solid var(--line);fon
       <label class="chk" for="b-14"><input type="checkbox" id="b-14"><span>Location <b>Mumbai</b>. Operating system <b>Ubuntu 24.04</b>, or 22.04 if 24.04 is not listed.</span></label>
       <label class="chk" for="b-15"><input type="checkbox" id="b-15"><span>Billing <b>hourly</b> if offered, otherwise monthly. Move to longer terms after a stable week.</span></label>
       <label class="chk" for="b-16"><input type="checkbox" id="b-16"><span>Plan for CORE-1: <b>dedicated CPU, 16 vCPU · 64 GB</b>. Compare the price shown with the quote before continuing.</span></label>
-      <label class="chk" for="b-17"><input type="checkbox" id="b-17"><span>Authentication: <b>SSH key</b>, with every admin key selected. Public IP <b>on</b>. Network <code>vaultchat-vpc</code>. Firewall <code>fw-core</code>. Weekly backups <b>on</b>. Hostname <code>core-1</code>. Then <b>Deploy Cloud</b>.</span></label>
+      <label class="chk" for="b-17"><input type="checkbox" id="b-17"><span>Authentication: <b>SSH key</b>, with every admin key selected. Public IP <b>on</b>. Network <code>crazzychat-vpc</code>. Firewall <code>fw-core</code>. Weekly backups <b>on</b>. Hostname <code>core-1</code>. Then <b>Deploy Cloud</b>.</span></label>
       <label class="chk" for="b-18"><input type="checkbox" id="b-18"><span>Repeat for <b>DB-2</b> (8 vCPU · 32 GB, <code>fw-db</code>, backups off), <b>MEDIA-1</b> (8 vCPU · 16 GB with the most included transfer, <code>fw-media</code>, backups off) and <b>LIVE-1</b> (dedicated CPU, 16 vCPU · 32 GB, <code>fw-live</code>, backups off).</span></label>
       <label class="chk" for="b-19"><input type="checkbox" id="b-19"><span>If a server was deployed without its firewall, attach it from the firewall's page or the server's Firewall section.</span></label>
     </section>
@@ -520,7 +520,7 @@ footer.end{margin-top:56px;padding-top:18px;border-top:1px solid var(--line);fon
       <table>
         <thead><tr><th scope="col" colspan="2">VPC</th></tr></thead>
         <tbody>
-          <tr><th scope="row">Name</th><td><code>vaultchat-vpc</code></td></tr>
+          <tr><th scope="row">Name</th><td><code>crazzychat-vpc</code></td></tr>
           <tr><th scope="row">Zone</th><td><code>inmumbaizone2</code></td></tr>
           <tr><th scope="row">Network</th><td><code>10.20.0.0</code>, size <code>24</code></td></tr>
           <tr><th scope="row">Members</th><td><span class="plate core sm">CORE-1</span> .11 · <span class="plate data sm">DB-2</span> .12 · <span class="plate media sm">MEDIA-1</span> .21 · <span class="plate media sm">LIVE-1</span> .31</td></tr>
@@ -600,7 +600,7 @@ sudo mkdir -p /etc/docker &amp;&amp; echo '{"data-root":"/data/docker","live-res
     <li><div><div class="step-h"><h3>Account and a throwaway test instance</h3><span class="plate sm">1–2 days</span></div>
       <p>Open the account, add SSH keys, create an API token. Start one small hourly instance in <code>inmumbaizone2</code> and answer the questions in <a href="#ask">Ask Utho</a> by testing: public IP on the interface, a UDP range rule, VPC reachability, <code>fio</code> on a block volume, ping from Indian mobile networks. Delete it afterwards.</p></div></li>
     <li><div><div class="step-h"><h3>Network</h3><span class="plate sm">console or Terraform</span></div>
-      <p>Create <code>vaultchat-vpc</code> (<code>10.20.0.0/24</code>) and the four Cloud Firewalls with the rules above. Click-by-click in <a href="#buy">Buy</a>.</p></div></li>
+      <p>Create <code>crazzychat-vpc</code> (<code>10.20.0.0/24</code>) and the four Cloud Firewalls with the rules above. Click-by-click in <a href="#buy">Buy</a>.</p></div></li>
     <li><div><div class="step-h"><h3>Instances and volumes</h3><span class="plate sm">all four</span></div>
       <p>Create the four instances on Ubuntu 24.04 if Utho lists it, otherwise 22.04, with SSH keys, the VPC and their firewall, on hourly billing while you build. Attach the two 1 TB volumes and move Docker's data directory onto them as shown in <a href="#storage">Storage</a>. Record every public and VPC address. Click-by-click in <a href="#buy">Buy</a>.</p></div></li>
     <li><div><div class="step-h"><h3>Bring-up</h3><span class="plate sm">launch plan steps 2–14</span></div>
@@ -628,9 +628,9 @@ sudo mkdir -p /etc/docker &amp;&amp; echo '{"data-root":"/data/docker","live-res
 
 provider "utho" { token = var.utho_token }
 
-resource "utho_vpc" "vc" {
+resource "utho_vpc" "cc" {
   dcslug  = "inmumbaizone2"
-  name    = "vaultchat-vpc"
+  name    = "crazzychat-vpc"
   planid  = var.vpc_plan_id
   network = "10.20.0.0"
   size    = "24"
@@ -650,13 +650,13 @@ locals {
   }
 }
 
-resource "utho_cloud_instance" "vc" {
+resource "utho_cloud_instance" "cc" {
   for_each        = local.servers
   name            = each.key
   dcslug          = "inmumbaizone2"
   image           = var.image           <span class="c"># ubuntu-24.04-x86_64 if listed, else ubuntu-22.04-x86_64</span>
   planid          = each.value.plan
-  vpc_id          = utho_vpc.vc.id
+  vpc_id          = utho_vpc.cc.id
   firewall        = utho_firewall.fw[each.value.fw].id
   enable_publicip = "true"
   enablebackup    = each.value.backup
@@ -771,7 +771,7 @@ resource "utho_cloud_instance" "vc" {
     <li><div><div class="step-h"><h3>Maintenance window</h3></div><p>Stop go-api on Hetzner, take the final dump, restore on CORE-1, compare the migration ledger and row counts, and re-seed DB-2.</p></div></li>
     <li><div><div class="step-h"><h3>Switch DNS</h3></div><p><code>api</code>, <code>stream</code> and <code>admin</code> to CORE-1; <code>turn</code> to MEDIA-1; update the origin for the proxied names in Cloudflare.</p></div></li>
     <li><div><div class="step-h"><h3>Verify</h3></div><p><code>/build</code> matches the deployed tree, then the two-phone smoke test on Utho.</p></div></li>
-    <li><div><div class="step-h"><h3>Keep Hetzner, then close it</h3></div><p>Leave it stopped for 14 days as a rollback, then cancel it and wipe the disks. JumpServer, Portainer, Beszel and SearXNG share that box but VaultChat does not need them; bring SearXNG only if you use <code>SEARXNG_URL</code>.</p></div></li>
+    <li><div><div class="step-h"><h3>Keep Hetzner, then close it</h3></div><p>Leave it stopped for 14 days as a rollback, then cancel it and wipe the disks. JumpServer, Portainer, Beszel and SearXNG share that box but CrazzyChat does not need them; bring SearXNG only if you use <code>SEARXNG_URL</code>.</p></div></li>
   </ol>
 </section>
 
@@ -792,7 +792,7 @@ resource "utho_cloud_instance" "vc" {
 </section>
 
 <footer class="end">
-  <p>Prepared from the VaultChat repository and Utho's public SDK and Terraform provider. Instance sizes are the launch plan's planning figures; confirm them with <code>scripts/bench/run.sh</code> on the Utho hardware before launch.</p>
+  <p>Prepared from the CrazzyChat repository (srihari8204/VaultChat) and Utho's public SDK and Terraform provider. Instance sizes are the launch plan's planning figures; confirm them with <code>scripts/bench/run.sh</code> on the Utho hardware before launch.</p>
 </footer>
 
 </div>
