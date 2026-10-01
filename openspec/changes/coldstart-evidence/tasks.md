@@ -65,6 +65,39 @@
       in/out, bytes in/out, decode fails, pre-handshake closes.
 - [ ] C5. Report medians with the sample count and the device, never a single run.
 
+### First measurement, 2026-10-01 — EMULATOR ONLY, C1-C5 remain open for handsets
+
+The emulator was stood up (`emulator-5554`, x86_64, Android 16 / API 36, 2048 MB,
+GMS 25.26.35), an x86_64 release APK installed, and the C3 procedure run as written.
+
+| Boundary | Device | Samples | Median | Range |
+|---|---|---|---|---|
+| `am start -W` TotalTime (first frame) | emulator x86_64 / API 36 | 5 | **2615 ms** | 2288-2813 |
+| same, after the socket-ladder fix | emulator x86_64 / API 36 | 5 | **2436 ms** | 2082-2853 |
+
+**The 2615 -> 2436 difference is NOT a claim.** The ranges overlap substantially and
+n=5; per this change’s own standard that is noise, not an improvement. Recorded so the
+next person does not re-derive it as a win.
+
+First launch measured 8095 ms and is **discarded, not averaged in** — it included
+first-run dexopt/ART profile work. That outlier is the reason this change insists on a
+sample count.
+
+**This does NOT close C1-C5.** The tasks say "per device" and an emulator is not a
+handset: no hardware-backed Keystore, no Doze/OEM battery behaviour, different CPU and
+I/O. Treat 2615 ms as an emulator floor, and do not compare it to any number in this
+repo measured to a different boundary (per this change's own founding complaint).
+
+What the `[perf]` timeline showed, which is a finding in its own right: **74 of the 77
+marks in a signed-out cold start were `socket_connect_start` /
+`socket_connect_no_token` / `transport_ccwire_unavailable`**, because
+`addPersistentListener` ran a private 30-attempt connect ladder per listener and seven
+are armed at boot. The boot marks this change exists to read were unreadable underneath
+it. Fixed by sharing one ladder (`lib/socket.ts`, `ensureConnectAttempt`). **Re-measured
+after the fix: 74 -> 13** attempts in the same 14s window, which is exactly what a single
+ramping ladder predicts (200+400+...+1400 then 1500s reaches ~14s at attempt ~13). The
+boot marks are now legible: 6 real marks against 13 noise rather than against 74.
+
 ## Phase D — act only on what C measured
 
 - [ ] D1. `shouldCheckRestore()` opens SQLite on the critical path to the chat list, on every

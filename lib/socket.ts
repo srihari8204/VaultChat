@@ -340,30 +340,54 @@ export function disconnect(): void {
  * initial connection so it arms even if called before sign-in completes.
  * Use this for app-global events like incoming calls. Returns an unsubscribe.
  */
+// ONE connect ladder for the whole app, not one per listener.
+//
+// MEASURED on an emulator 2026-10-01, signed out, ~14s after launch: 74
+// socket_connect_start / socket_connect_no_token / transport_ccwire_unavailable
+// triples — 74 of the 77 [perf] marks in the trace. The boot marks the
+// coldstart-evidence change wants to read were buried in noise from this one path.
+//
+// Cause: the ladder below used to live INSIDE addPersistentListener, so every
+// listener ran its own. The old comment here said "three times over (_layout
+// arms three persistent listeners)" and that undercounted — at boot there are
+// SEVEN: three in app/_layout.tsx (call_incoming, e2ee_rekey, new_message),
+// three armed by a loop in syncEngine.initSync (new_message, message_edited,
+// message_deleted), and one in backgroundConnection. Seven ladders x ~11
+// attempts in 14s is the 74. Each attempt is a SecureStore read that resolves
+// to "no token" before sign-in, so the cost scaled with listener count for no
+// benefit — adding a listener made the sign-in screen more expensive.
+//
+// The RAMP is kept verbatim because its reasoning still holds: the common early
+// failure is a local SecureStore read resolving in milliseconds, and a flat
+// 1500ms poll left the socket idle up to 1.5s after the token landed. Ramping
+// catches that in ~200ms while still reaching 1.5s for a genuinely down network.
+// What changed is that one ladder now serves every listener.
+//
+// Reset to null on completion so a later arm can start a fresh ladder: on
+// success getSocket() resolves immediately from the live socket, so that costs
+// one cheap call, and after an exhausted ladder a new listener deserves a retry.
+let connectLadder: Promise<void> | null = null;
+function ensureConnectAttempt(): void {
+  if (connectLadder) return;
+  connectLadder = (async () => {
+    for (let i = 0; i < 30; i++) {
+      try { await getSocket(); return; } catch {
+        await new Promise(r => setTimeout(r, Math.min(1500, 200 * (i + 1))));
+      }
+    }
+  })().finally(() => { connectLadder = null; });
+}
+
 export function addPersistentListener<T = any>(event: string, handler: (data: T) => void): () => void {
   let set = persistentListeners.get(event);
   if (!set) { set = new Set(); persistentListeners.set(event, set); }
   set.add(handler as any);
   if (socket) { try { socket.off(event, handler as any); socket.on(event, handler as any); } catch {} }
-  // Kick off / keep retrying a connection until signed in, so it actually attaches.
-  //
-  // The delay RAMPS rather than sitting flat at 1500ms. The overwhelmingly
-  // common early failure is "Not signed in" — a local SecureStore read that
-  // resolves in milliseconds — and a flat poll meant the socket idled up to a
-  // full 1.5s AFTER the token landed, on every cold launch, three times over
-  // (_layout arms three persistent listeners). Ramping catches that moment in
-  // ~200ms while still reaching the same 1.5s ceiling for the case that
-  // actually deserves patience: a network that is genuinely down, where fast
-  // retries would just churn sockets and radio.
-  let stop = false;
-  (async () => {
-    for (let i = 0; i < 30 && !stop; i++) {
-      try { await getSocket(); break; } catch {
-        await new Promise(r => setTimeout(r, Math.min(1500, 200 * (i + 1))));
-      }
-    }
-  })();
-  return () => { stop = true; persistentListeners.get(event)?.delete(handler as any); try { (persistentTarget ?? socket)?.off(event, handler as any); } catch {} };
+  // Kick off a connection so this listener actually attaches once signed in.
+  // Shared across every listener — see ensureConnectAttempt above for the ramp
+  // and for why it is one ladder rather than one per listener.
+  ensureConnectAttempt();
+  return () => { persistentListeners.get(event)?.delete(handler as any); try { (persistentTarget ?? socket)?.off(event, handler as any); } catch {} };
 }
 
 /**
