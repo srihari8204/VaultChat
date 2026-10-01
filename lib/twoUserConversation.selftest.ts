@@ -304,6 +304,36 @@ const warnOnce = (...a: any[]) => console.log('    [groupSession warn]', ...a.ma
   }
   writeFileSync(join(dir, 'groupSession.ts'), gsrc);
 
+  // mediaCrypto.ts: the per-file AES-256-GCM used for attachments and story media.
+  // Only its `react-native-get-random-values` side-effect import is dropped — Node
+  // 24 provides crypto.getRandomValues natively, and @noble reads it from there.
+  // Its react-native-quick-crypto / react-native-fs requires are already
+  // try/catch-guarded to null, so canStreamMedia() is simply false here and the
+  // base64 path (the one carrying the security property) runs verbatim.
+  {
+    const mcre = /^import 'react-native-get-random-values';$/m;
+    const mcsrc = readFileSync(join(ROOT, 'lib', 'mediaCrypto.ts'), 'utf8');
+    if (!mcre.test(mcsrc)) check('rewrite mediaCrypto shim import', false, 'mediaCrypto.ts changed its import block');
+    // The generated copy lives in a temp dir, so BARE package specifiers do not
+    // resolve from it — the same reason chatService's 'buffer' import is rewritten
+    // to node:buffer above. Point them at this repo's node_modules absolutely.
+    const nm = (sub: string) => pathToFileURL(join(ROOT, 'node_modules', sub)).href;
+    writeFileSync(join(dir, 'mediaCrypto.ts'),
+      mcsrc.replace(mcre, `// react-native-get-random-values dropped: Node has crypto.getRandomValues`)
+        .replace(/from '@noble\/ciphers\/aes\.js'/, `from '${nm('@noble/ciphers/aes.js')}'`)
+        .replace(/from '@noble\/hashes\/utils\.js'/, `from '${nm('@noble/hashes/utils.js')}'`)
+        .replace(/from 'buffer'/, `from 'node:buffer'`));
+  }
+  // storyKeys.ts: the per-viewer key wrap for encrypted stories (W7). Its ONLY
+  // import is e2eeSession.rn, for which this harness already builds a real
+  // per-user adapter, so the shipping file runs verbatim with one redirect.
+  {
+    const ssrc = readFileSync(join(ROOT, 'lib', 'storyKeys.ts'), 'utf8');
+    const re = /^import \{ e2eeEncrypt, e2eeDecrypt \} from '\.\.\/services\/crypto\/e2eeSession\.rn';$/m;
+    if (!re.test(ssrc)) check('rewrite storyKeys import', false, 'storyKeys.ts changed its import block');
+    writeFileSync(join(dir, 'storyKeys.ts'),
+      ssrc.replace(re, `import { e2eeEncrypt, e2eeDecrypt } from './e2ee.ts';`));
+  }
   writeFileSync(join(dir, 'msgIds.ts'), readFileSync(join(ROOT, 'lib', 'msgIds.ts'), 'utf8'));
   src = src.replace(/^import \{ normalizeMsgIds \} from '\.\/msgIds';$/m,
     `import { normalizeMsgIds } from './msgIds.ts';`);
@@ -855,6 +885,86 @@ async function main() {
   check('the REMOVED member cannot read what the group said afterwards',
     removedAfter.length === 1 && G.gc.looksEncrypted(removedAfter[0].content),
     'this is the whole point of rotating on removal');
+
+  // ── MEDIA + STORY E2EE: the key must ride INSIDE the envelope ────────────
+  //
+  // MEDIA_E2EE and STORY_E2EE have been true in production since 2026-06-28 and
+  // had NO test at any layer — not a device test, not an automated one. A grep for
+  // selftests touching mediaAttachments / storyKeys / mediaCrypto found nothing.
+  //
+  // The property that matters is not "AES works". It is that the per-file key
+  // reaches the recipient ONLY inside the E2E-encrypted message body, so a server
+  // holding both the ciphertext bytes and the stored row still cannot decrypt.
+  // That is a binding between two subsystems, which is exactly the kind of seam
+  // a layer test cannot see.
+  console.log(String.fromCharCode(10) + 'media + story E2EE (per-file key inside the E2E envelope)');
+  const Amc: any = await import(pathToFileURL(join(aliceDir, 'mediaCrypto.ts')).href);
+  const Bmc: any = await import(pathToFileURL(join(bobDir, 'mediaCrypto.ts')).href);
+  const Ask: any = await import(pathToFileURL(join(aliceDir, 'storyKeys.ts')).href);
+  const Bsk: any = await import(pathToFileURL(join(bobDir, 'storyKeys.ts')).href);
+
+  const FILE_BYTES = Buffer.from('pretend image bytes, binary-ish: \u00ff\u0000 end').toString('base64');
+  const mk = Amc.newMediaKey();
+  const cipherB64 = Amc.encryptMediaB64(FILE_BYTES, mk);
+  check('encrypting the file changes the bytes', cipherB64 !== FILE_BYTES);
+  check('a fresh media key per file (no reuse across two calls)',
+    JSON.stringify(Amc.newMediaKey()) !== JSON.stringify(mk));
+  check('the recipient decrypts the bytes back EXACTLY with the right key',
+    Bmc.decryptMediaB64(cipherB64, mk) === FILE_BYTES);
+  check('a WRONG media key cannot open the bytes (GCM tag rejects it)', (() => {
+    try { const bad = Bmc.decryptMediaB64(cipherB64, Amc.newMediaKey()); return bad !== FILE_BYTES; }
+    catch { return true; }   // throwing is also a correct refusal
+  })());
+
+  // The binding under test: buildMediaContent puts the key in the message BODY,
+  // which chatService then E2E-encrypts. So the stored row must not contain it.
+  const caption = 'look at this';
+  const mediaBody = JSON.stringify({ t: caption, mk });        // == buildMediaContent(caption, mk)
+  const mm = await A.sendMessage('c1', mediaBody);
+  const mrow = rowById(Number(mm.id))!;
+  check('the media message is stored as an E2E envelope, not the media body',
+    typeof mrow.content === 'string' && mrow.content !== mediaBody && A.looksEncrypted(mrow.content));
+  check('THE SERVER NEVER SEES THE MEDIA KEY — not in the row, not in meta',
+    !JSON.stringify({ c: mrow.content, m: mrow.meta }).includes(mk.k)
+    && !JSON.stringify({ c: mrow.content, m: mrow.meta }).includes(mk.n),
+    'if the key appears beside the ciphertext, encrypting the bytes bought nothing');
+  const bobBody = await textOf(B, mm.id);
+  check('the recipient recovers the body, and with it the key and caption', (() => {
+    try { const j = JSON.parse(String(bobBody)); return j.t === caption && j.mk.k === mk.k && j.mk.n === mk.n; }
+    catch { return false; }
+  })());
+  check('and can then open the attachment bytes with the recovered key', (() => {
+    try { return Bmc.decryptMediaB64(cipherB64, JSON.parse(String(bobBody)).mk) === FILE_BYTES; }
+    catch { return false; }
+  })());
+
+  // STORY: the same content key, wrapped SEPARATELY for each viewer over the
+  // author-to-viewer session. A viewer who was not in the audience has no wrap and
+  // therefore cannot decrypt — which is the correct outcome for an
+  // audience-scoped, ephemeral post, not a bug.
+  const storyMk = Amc.newMediaKey();
+  const storyCipher = Amc.encryptMediaB64(FILE_BYTES, storyMk);
+  const wraps = await Ask.wrapStoryKeyForViewers(['bob'], storyMk);
+  check('a story key is wrapped once per viewer', wraps.length === 1 && wraps[0].viewerId === 'bob');
+  check('the wrapped story key is an E2E envelope, not the key',
+    A.looksEncrypted(wraps[0].wrappedKey)
+    && !wraps[0].wrappedKey.includes(storyMk.k) && !wraps[0].wrappedKey.includes(storyMk.n),
+    'the server stores these wraps — they must be opaque to it');
+  const unwrapped = await Bsk.unwrapStoryKey('alice', wraps[0].wrappedKey);
+  check('the audience member unwraps the story key',
+    !!unwrapped && unwrapped.k === storyMk.k && unwrapped.n === storyMk.n);
+  check('and opens the story media with it',
+    !!unwrapped && Bmc.decryptMediaB64(storyCipher, unwrapped) === FILE_BYTES);
+  const notAudience = await Bsk.unwrapStoryKey('alice', wraps[0].wrappedKey.slice(0, -4) + 'AAAA');
+  check('a TAMPERED wrap yields no key rather than a wrong one', notAudience === null,
+    'unwrapStoryKey must return null, never a half-parsed MediaKey');
+  // wrapPayloadForViewers is the question-gate path (migration 117): what gets
+  // wrapped is the answer-locked envelope, not the bare key, so the two locks
+  // compose instead of the audience silently defeating the question.
+  const locked = 'ANSWER-LOCKED:' + storyCipher.slice(0, 24);
+  const pw = await Ask.wrapPayloadForViewers(['bob'], locked);
+  check('an arbitrary (answer-locked) payload wraps and unwraps unchanged',
+    (await Bsk.unwrapPayload('alice', pw[0].wrappedKey)) === locked);
 }
 
 main()
