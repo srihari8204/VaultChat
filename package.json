@@ -75,8 +75,6 @@
     "@any-routing/maplibre-engine": "^0.2.0",
     "@bufbuild/protobuf": "1.10.1",
     "@dr.pogodin/react-native-fs": "^2.39.0",
-    "@expo-google-fonts/nunito-sans": "^0.4.2",
-    "@expo-google-fonts/sora": "^0.4.2",
     "@expo/vector-icons": "^15.0.3",
     "@livekit/react-native": "^2.12.0",
     "@livekit/react-native-webrtc": "^144.1.2",

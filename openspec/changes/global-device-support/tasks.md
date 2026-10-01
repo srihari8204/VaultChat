@@ -20,7 +20,11 @@
 
 ## 2. Chrome ownership — status bar and keyboard
 
-- [ ] 2.1 Remove the `react-native` `StatusBar` import and its usage from the 42 screens that override the root bar; `app/_layout.tsx` becomes the only owner. Drop the 14 `backgroundColor`/`translucent` props that are no-ops on targetSdk 35+.
+- [ ] 2.1 Remove the `react-native` `StatusBar` import and its usage from the screens that
+      override the root bar; `app/_layout.tsx` becomes the only owner. Drop the
+      `backgroundColor`/`translucent` props that are no-ops on targetSdk 35+.
+      **COUNT CORRECTED 2026-10-02: 21 screens, not 42** — about half have already been
+      migrated by other work. Re-count before estimating.
 - [ ] 2.2 Add a guardrail asserting no file outside `app/_layout.tsx` imports `StatusBar` from `react-native`, with a documented-exemption mechanism matching the existing selftest idiom.
 - [x] 2.3 Fix `app/security-questions.tsx` — replace `behavior={undefined}` (inert on Android) with the shared `KeyboardSafe`. Account recovery must keep the focused field and its submit control visible.
       The gradient stays OUTSIDE the wrapper: `KeyboardSafe` avoids by padding, and an `absoluteFillObject` child resolves against the parent's PADDING box, so a background placed inside would be clipped by the keyboard inset. `keyboardOnly` because the CTA is inside a `flexGrow` ScrollView that already has `keyboardShouldPersistTaps`.
@@ -66,14 +70,42 @@
 - [ ] 4.3 Reference bundled faces by names that resolve on both platforms; the current names resolve on Android only and would fall back to the system font on iOS. See design.md Open Questions on whether the iOS scenario can be exercised.
 - [ ] 4.4 Add a guardrail failing when the type scale references a weight with no corresponding bundled file.
 - [ ] 4.5 Point `components/chat/chatStyles.ts` at the type scale — highest screens-fixed per line-touched in the repo. Do not migrate the remaining direct-`Text` files in this change; the ratchet in task 6 governs them.
-- [ ] 4.6 Remove the stale typography surface: the unused `@expo-google-fonts` dependencies, the inert `react-native.config.js` assets key, the second type scale in `components/themed-text.tsx` (migrating its one consumer), and the comments describing a runtime font load that no longer happens.
+- [~] 4.6 Remove the stale typography surface. **THREE OF FOUR DONE 2026-10-02.**
+      - [x] The unused `@expo-google-fonts/{nunito-sans,sora}` dependencies — removed from
+        `package.json`. Nothing imported them; the five `.ttf` files are committed under
+        `assets/fonts/` and are the real source now.
+      - [x] `components/themed-text.tsx` and its second type scale — **deleted**. The task
+        says "migrating its one consumer"; by 2026-10-02 it had ZERO importers (the only
+        remaining mentions are a regex and comments in `lib/a11yCoverage.selftest.ts`), so
+        there was nothing to migrate.
+      - [x] The comments describing a runtime font load — corrected in `constants/theme.ts`.
+        They claimed the fonts are "loaded in the root layout (U2)" and that the names match
+        "@expo-google-fonts exports", while `lib/startupColdPath.selftest.ts:89` actively
+        ASSERTS the root layout does not import them. Fonts are embedded at build time by
+        the `expo-font` config plugin, so there is no load and no fallback window.
+      - [ ] The `react-native.config.js` `assets: ['./assets/fonts']` key — **NOT removed,
+        deliberately, and it is not merely inert: it DUPLICATES every brand font in the
+        APK.** Measured in the shipped artifact: each of the five fonts appears twice, once
+        under `assets/fonts/` and once as a `res/*.ttf` resource, with byte-identical sizes
+        (113,232 / 113,340 / 113,328 / 57,936 / 57,980) — about **445 KB** of duplication.
+        Removing the key should reclaim it, but `expo-font` and the legacy
+        react-native-asset path register fonts through different Android mechanisms, so
+        getting it wrong loses the brand typeface app-wide and silently falls back to the
+        system font. That makes this task 4.7's problem, not a desk change: remove the key,
+        rebuild, and confirm the typeface on a device before believing it.
 - [ ] 4.7 **Device-verified**: on both devices at OS font scale 1.0 and 1.5 — chat list typeface identical for read and unread rows, no clipped labels.
 
 ## 5. Route integrity — reroute or delete, nothing left unrouted
 
 - [ ] 5.1 Act on the task 0.3 decision for `app/permissions.tsx`, `app/biometric-setup.tsx`, `app/security-questions.tsx`. If kept, wire a real entry point and cover it; if deleted, remove their now-unreferenced imports. Either way the copy "Skip — grant later in settings" must name a destination that exists, or be changed to describe what actually happens.
-- [ ] 5.2 Delete `utils/notifications.ts` — a duplicate notification-permission implementation with zero importers, superseded by `lib/push.ts`.
-- [ ] 5.3 `app/(tabs)/chats.tsx` — the long-press action sheet is unreachable and holds `doFavourite`, the **only** un-favourite path in the app. Rewire it to a reachable control; the capability is otherwise absent from the product.
+- [x] 5.2 Delete `utils/notifications.ts` — **already done** (verified 2026-10-02: the file does not exist). Superseded by `lib/push.ts`.
+- [x] 5.3 ~~`app/(tabs)/chats.tsx` — the long-press action sheet is unreachable and holds
+      `doFavourite`, the **only** un-favourite path in the app.~~ **ALREADY FIXED 2026-09-17**
+      (verified 2026-10-02). `chats.tsx:495-503` carries the dated reasoning: `setFavourite(id,
+      false)` was unreachable, so nothing could un-favourite a chat and the Favourites folder
+      filled up; the action is now a TOGGLE — if everything selected is already a favourite it
+      removes them. The symbol `doFavourite` no longer exists. The task was closed by a commit
+      that never updated this file, which is the pattern `docs/BACKLOG_REBASELINE.md` documents.
 - [x] 5.4 `app/(tabs)/mini.tsx` — the calculator (~150 lines, 4 `useState`) is unreachable because nothing passes `'calculator'` to the open handler. Reroute if wanted, delete if not.
 - [ ] 5.5 Add a route-coverage guardrail: every route file is reachable from at least one navigation path or carries a documented exemption.
 - [ ] 5.6 **Written → verified**: typecheck, full suite, guardrails green; confirm no dead imports remain from any deletion.

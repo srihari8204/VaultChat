@@ -303,9 +303,21 @@ export const MOTION = {
   springSoft:  { damping: 26, stiffness: 120, mass: 1 },
 } as const;
 
-// ─── Brand font families (loaded in the root layout — see U2) ─────────
-// Until the fonts load, the Text wrapper falls back to the system font.
-// Family names match @expo-google-fonts exports (loaded in the root layout, U2).
+// ─── Brand font families (EMBEDDED AT BUILD TIME, not loaded at runtime) ──
+//
+// Corrected 2026-10-02. The three lines here used to say the fonts are "loaded in
+// the root layout (U2)" and that the names "match @expo-google-fonts exports".
+// Neither is true any more and the first is actively enforced false:
+// lib/startupColdPath.selftest.ts:89 asserts the root layout does NOT import
+// @expo-google-fonts, because loading fonts on the cold path is what it exists to
+// prevent. There is no runtime load and therefore no "until the fonts load"
+// fallback window.
+//
+// What actually happens: the five .ttf files live in assets/fonts/ and are
+// registered by the `expo-font` config plugin in app.json, so Android embeds them
+// as resources at build time and these family names resolve natively from first
+// frame. The @expo-google-fonts packages are only where the files originally came
+// from — nothing imports them (removed from package.json in the same commit).
 export const FONT = {
   heading:     'Sora_700Bold',          // headings / titles
   headingBold: 'Sora_800ExtraBold',
