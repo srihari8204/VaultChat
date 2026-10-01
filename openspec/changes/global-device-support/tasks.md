@@ -92,10 +92,37 @@
 
 ## 4. Typography — shared component becomes authoritative
 
-- [ ] 4.1 `components/ui/Text.tsx` — a caller `fontWeight` must no longer change which typeface resolves. Android matches asset fonts by filename, so a weight with no bundled file silently falls back to the system font; select the bundled face that carries the requested weight instead.
+- [x] 4.1 **ALREADY DONE 2026-09-17** (verified 2026-10-02). `components/ui/Text.tsx` carries a
+      long dated comment describing exactly this defect — "Ask Android for one of them AND a
+      fontWeight and it looks for a weighted variant of that family that was never registered,
+      then falls back to Roboto: the brand font is lost exactly where emphasis was requested" —
+      and the `resolved` block implements the fix, mapping the caller's weight to the family
+      that IS that weight (`FONT.headingBold` / `heading` / `bodyBold` / `bodySemibold` /
+      `body`, with weights below 600 simply dropping the weight). Closed by a commit that never
+      updated this file; see `docs/BACKLOG_REBASELINE.md`. Task 4.4 below now proves the
+      mapping can only resolve to faces that exist.
 - [ ] 4.2 Fix the 22 sites that currently defeat the brand face, starting with `components/ui/ChatRow.tsx` (the chat list changes typeface between read and unread), the tab bar, and `components/ui/Avatar.tsx`.
 - [ ] 4.3 Reference bundled faces by names that resolve on both platforms; the current names resolve on Android only and would fall back to the system font on iOS. See design.md Open Questions on whether the iOS scenario can be exercised.
-- [ ] 4.4 Add a guardrail failing when the type scale references a weight with no corresponding bundled file.
+- [x] 4.4 **DONE 2026-10-02** — `lib/brandFonts.selftest.ts`, widened from "the type scale" to
+      the whole chain, because every link in it fails the same silent way:
+
+        constants/theme.ts FONT.*  ->  assets/fonts/<name>.ttf  ->  app.json expo-font list
+        ->  TYPOGRAPHY[variant].family  ->  the weight ladder in components/ui/Text.tsx
+
+      Android resolves these per-weight static faces BY FILENAME, so a missing file, an
+      unembedded file, or a ladder branch naming a face nobody bundled all produce the same
+      symptom: no error, no warning, Roboto on screen. The nastiest is a .ttf present on disk
+      but absent from app.json's expo-font list — it looks right in the repo and is simply
+      never embedded.
+
+      Also asserts there are no ORPHAN font files (dead weight in every APK), and that
+      `Text.tsx` still sets `fontWeight` only on the system fallback rather than beside a brand
+      family — the precise combination that makes Android hunt for an unregistered variant.
+
+      Both key failure modes proven: adding `FONT.bodyMedium = 'NunitoSans_500Medium'` produced
+      "has no NunitoSans_500Medium.ttf", and dropping Sora_800ExtraBold from the embed list
+      produced "on disk but never embedded". Current state: 5 declared faces, 5 files, 5
+      embedded, 4 used by the type scale.
 - [ ] 4.5 Point `components/chat/chatStyles.ts` at the type scale — highest screens-fixed per line-touched in the repo. Do not migrate the remaining direct-`Text` files in this change; the ratchet in task 6 governs them.
 - [~] 4.6 Remove the stale typography surface. **THREE OF FOUR DONE 2026-10-02.**
       - [x] The unused `@expo-google-fonts/{nunito-sans,sora}` dependencies — removed from
