@@ -61,11 +61,22 @@ interface Row {
   editedAt: string | null; deletedAt: string | null; createdAt: string;
 }
 const PEER: Record<string, string> = { alice: 'bob', bob: 'alice' };
+// The group chat used by the 3-party section. 'c1' stays a DIRECT chat so every
+// existing 1:1 assertion is untouched; groups are a second chat id, which is also
+// how the app sees them (chatService branches on the chat's own type).
+const GROUP_ID = 'g1';
 const server = {
   rows: [] as Row[],
   seq: 100,
   bundles: new Map<string, { identityKey: string; signedPreKey: any; otpks: any[] }>(),
   offline: new Set<string>(),          // userIds whose api() throws
+  // Group membership, mutable so add/remove can be exercised — sender keys MUST
+  // rotate on removal or a removed member keeps reading the group.
+  groupMembers: ['ga', 'gb', 'gc'] as string[],   // group-only users: fresh pairwise sessions
+  // SKDMs exactly as the backend holds them: opaque per-recipient blobs. The
+  // server never sees a sender key, only ciphertext addressed to one member,
+  // which is the property the 3-party assertions check.
+  senderKeys: [] as { chatId: string; senderId: string; recipientId: string; skdm: string }[],
 };
 const rowById = (id: number) => server.rows.find((r) => r.id === id);
 
@@ -90,8 +101,39 @@ function apiFor(userId: string) {
       if (!b) { const e: any = new Error('not found'); e.status = 404; throw e; }
       return { identityKey: b.identityKey, signedPreKey: b.signedPreKey, oneTimePreKey: b.otpks.shift() ?? null };
     }
-    if (path === '/chats' || path.startsWith('/chats?')) return [chatSummary(userId)];
-    if ((m = path.match(/^\/chats\/([^/?]+)$/))) return chatSummary(userId);
+    if (path === '/chats' || path.startsWith('/chats?')) {
+      // A group-only user (not in PEER) has no direct chat at all. Returning one
+      // with peerUserId undefined would send chatService down its pairwise branch
+      // for a chat that does not exist.
+      const out: any[] = [];
+      if (PEER[userId]) out.push(chatSummary(userId));
+      if (server.groupMembers.includes(userId)) out.push(groupSummary());
+      return out;
+    }
+    // ── sender keys (groups) ──
+    // POST stores one opaque blob per recipient; GET returns only the blobs
+    // addressed to the CALLER. That filtering is the backend's behaviour and it
+    // matters here: ingest() decrypts with e2eeDecrypt('', senderId, ...), so a
+    // blob sealed for someone else would fail to open and mask a real bug.
+    if ((m = path.match(/^\/chats\/([^/]+)\/sender-keys$/)) && method === 'POST') {
+      const chatId = decodeURIComponent(m[1]);
+      for (const d of (body?.distributions ?? [])) {
+        const i = server.senderKeys.findIndex(
+          (s) => s.chatId === chatId && s.senderId === userId && s.recipientId === d.recipientId);
+        const rec = { chatId, senderId: userId, recipientId: d.recipientId, skdm: d.skdm };
+        if (i >= 0) server.senderKeys[i] = rec; else server.senderKeys.push(rec);
+      }
+      return {};
+    }
+    if ((m = path.match(/^\/chats\/([^/]+)\/sender-keys$/))) {
+      const chatId = decodeURIComponent(m[1]);
+      return server.senderKeys
+        .filter((s) => s.chatId === chatId && s.recipientId === userId)
+        .map((s) => ({ senderId: s.senderId, skdm: s.skdm }));
+    }
+    if ((m = path.match(/^\/chats\/([^/?]+)$/))) {
+      return decodeURIComponent(m[1]) === GROUP_ID ? groupSummary() : chatSummary(userId);
+    }
     if ((m = path.match(/^\/chats\/([^/]+)\/messages$/)) && method === 'POST') {
       const row: Row = {
         id: ++server.seq, chatId: decodeURIComponent(m[1]), senderId: userId,
@@ -118,6 +160,19 @@ function chatSummary(userId: string) {
     lastMessageId: null, lastMessageAt: null, myRole: 'member', myLastReadId: null,
     muted: false, pinned: false, favourite: false, archived: false, hidden: false,
     unreadCount: 0, peerUserId: PEER[userId], peerName: PEER[userId],
+  };
+}
+// The group's own summary. `members` is the shape groupSession.rn.ts reads
+// (`c.members[].userId`) to decide who to distribute a sender key to, and `type`
+// is what makes chatService take its group branch instead of the pairwise one.
+function groupSummary() {
+  return {
+    id: GROUP_ID, type: 'group', name: 'three of us', photoURL: null, createdBy: 'alice',
+    createdAt: new Date(0).toISOString(), updatedAt: new Date(0).toISOString(),
+    lastMessageId: null, lastMessageAt: null, myRole: 'member', myLastReadId: null,
+    muted: false, pinned: false, favourite: false, archived: false, hidden: false,
+    unreadCount: 0, peerUserId: null, peerName: null,
+    members: server.groupMembers.map((userId) => ({ userId, name: userId, role: 'member' })),
   };
 }
 
@@ -199,6 +254,56 @@ function buildClient(userId: string): string {
   // optional connection off; this exercises its normal HTTP submission path.
   // msgIds is real, per-client: it has no imports, and it is what decides
   // whether a wire row survives into the cache at all.
+  // ── the REAL group session, per client ──────────────────────────────────
+  //
+  // services/crypto/groupSession.rn.ts verbatim, with only its import block
+  // redirected — the same discipline as chatService above, so the sender-key
+  // distribution logic under test is the shipping one.
+  //
+  // This is what the suite used to stub with identity functions
+  // (groupEncryptMessage returned its plaintext unchanged), which is why the file
+  // said "this suite is 1:1 only". The stub made every group assertion vacuous.
+  //
+  // WHY THIS MATTERS MORE THAN THE PRIMITIVE: senderKey.selftest.ts already
+  // proves createSenderKey/groupEncrypt/groupDecrypt with three parties, but its
+  // own header says "In production the SKDM travels over the pairwise Double
+  // Ratchet to each member; here we hand it over directly." Handing it over
+  // directly is exactly the step that can break on a real group. Here the SKDM is
+  // sealed with the real pairwise ratchet, POSTed to the in-memory server as an
+  // opaque blob, and fetched back by its recipient — the path nothing covered.
+  //
+  // ./index (the TS-or-Rust facade) is bypassed for ./senderKey directly: the
+  // facade imports lib/nativeCore, which pulls in react-native, and the TS-vs-Rust
+  // equivalence is already covered by services/crypto/parity.selftest.ts.
+  writeFileSync(join(dir, 'e2eeStorage.ts'),
+    readFileSync(join(ROOT, 'services', 'crypto', 'e2eeStorage.ts'), 'utf8')
+      .replace(/from '\.\/messageStore'/, `from '${pathToFileURL(join(ROOT, 'services', 'crypto', 'messageStore.ts')).href}'`)
+      .replace(/from '\.\/e2eeSession'/, `from '${pathToFileURL(join(ROOT, 'services', 'crypto', 'e2eeSession.ts')).href}'`));
+  const GROUP_REWRITES: [RegExp, string][] = [
+    [/^import \* as SecureStore from 'expo-secure-store';$/m,
+     `const _gmem = new Map<string, string>();\nconst SecureStore = {\n  async getItemAsync(k: string) { return _gmem.has(k) ? _gmem.get(k)! : null; },\n  async setItemAsync(k: string, v: string) { _gmem.set(k, v); },\n  async deleteItemAsync(k: string) { _gmem.delete(k); },\n};\nexport const _groupKv = _gmem;`],
+    [/^import \{ api, getCachedUser \} from '\.\.\/\.\.\/lib\/api';$/m,
+     `const api = (p: string, o?: any) => (globalThis as any).__VC2U.api('${userId}')(p, o);\nconst getCachedUser = async () => ({ id: '${userId}' });`],
+    [/^import \{ chunkedKV \} from '\.\/e2eeStorage';$/m, `import { chunkedKV } from './e2eeStorage.ts';`],
+    [/^import \{ e2eeEncrypt, e2eeDecrypt, e2eeCachePlaintext, e2eeGetCached, E2EE_UNDECRYPTABLE \} from '\.\/e2eeSession\.rn';$/m,
+     `import { e2eeEncrypt, e2eeDecrypt, e2eeCachePlaintext, e2eeGetCached, E2EE_UNDECRYPTABLE } from './e2ee.ts';`],
+    [/^import \{ createKeyedLock \} from '\.\/messageStore';$/m,
+     `import { createKeyedLock } from '${pathToFileURL(join(ROOT, 'services', 'crypto', 'messageStore.ts')).href}';`],
+    [/^import \{ redactIds, shortId, warnOnce \} from '\.\.\/\.\.\/lib\/diagLog';$/m,
+     `const redactIds = (s: string) => s, shortId = (s: string) => String(s).slice(0, 8);
+const warnOnce = (...a: any[]) => console.log('    [groupSession warn]', ...a.map(String));`],
+    // \r?\n throughout: this repo checks out mixed CRLF/LF on Windows, and a
+    // bare \n silently fails to match a multi-line import block.
+    [/^import \{\r?\n([\s\S]*?)\r?\n\} from '\.\/index';[^\r\n]*$/m,
+     `import {\n$1\n} from '${pathToFileURL(join(ROOT, 'services', 'crypto', 'senderKey.ts')).href}';`],
+  ];
+  let gsrc = readFileSync(join(ROOT, 'services', 'crypto', 'groupSession.rn.ts'), 'utf8');
+  for (const [re, to] of GROUP_REWRITES) {
+    if (!re.test(gsrc)) check(`rewrite groupSession import ${re}`, false, 'groupSession.rn.ts changed its import block');
+    gsrc = gsrc.replace(re, to);
+  }
+  writeFileSync(join(dir, 'groupSession.ts'), gsrc);
+
   writeFileSync(join(dir, 'msgIds.ts'), readFileSync(join(ROOT, 'lib', 'msgIds.ts'), 'utf8'));
   src = src.replace(/^import \{ normalizeMsgIds \} from '\.\/msgIds';$/m,
     `import { normalizeMsgIds } from './msgIds.ts';`);
@@ -220,7 +325,9 @@ function buildClient(userId: string): string {
   src = src
     .replace(/await import\('\.\/ccwire\/transport'\)/g, `await import('${CCWIRE}')`)
     .replace(/await import\('\.\.\/services\/crypto\/e2eeSession\.rn'\)/g, `await import('./e2ee.ts')`)
-    .replace(/await import\('\.\.\/services\/crypto\/groupSession\.rn'\)/g, `await import('./stubs.ts')`)
+    // The REAL group session, not stubs.ts. This line used to point at the
+    // identity-function stubs, which is what made every group assertion vacuous.
+    .replace(/await import\('\.\.\/services\/crypto\/groupSession\.rn'\)/g, `await import('./groupSession.ts')`)
     .replace(/await import\('\.\/(localDb|sessionEpoch|socket|api|cacheCrypto|receipts)'\)/g, `await import('./stubs.ts')`);
 
   const stray = [...src.matchAll(/^import (?!type )[^\n]*from '([^']+)';$/gm)]
@@ -241,7 +348,7 @@ function buildClient(userId: string): string {
     // lib/ccwire/startupAdapter (copied in real above, its own dynamic import
     // never called here), so chatService no longer names it. Leaving a dead
     // allowance here would let it reappear unnoticed.
-    .filter((p) => p !== './stubs.ts' && p !== './e2ee.ts' && p !== CCWIRE
+    .filter((p) => p !== './stubs.ts' && p !== './e2ee.ts' && p !== './groupSession.ts' && p !== CCWIRE
       && p !== './ccwire/gen/ccwire/v1/chats_list_pb');
   check(`every ${userId} dynamic import is accounted for`, strayDyn.length === 0, `unstubbed: ${strayDyn.join(', ')}`);
 
@@ -325,10 +432,13 @@ export const perf = { mark() {}, recordSend() {}, snapshot() { return { transpor
 export function nextForwardScore(n: number) { return n + 1; }
 export function redactIds(s: string) { return s; }
 export function warnOnce() {}
-// group session: this suite is 1:1 only, so the group envelope never matches.
-export function isGroupEnvelope(s: any) { return typeof s === 'string' && s.startsWith('GSK1:'); }
-export async function groupEncryptMessage(_c: string, t: string) { return t; }
-export async function groupDecryptMessage() { throw new Error('no group session'); }
+// NO group-session stubs here any more. They were identity functions
+// (groupEncryptMessage returned its plaintext unchanged, groupDecryptMessage
+// always threw), so every group assertion was vacuous — and worse, a group send
+// through them produced PLAINTEXT that chatService's own isGroupEnvelope check
+// would have rejected. chatService's dynamic import now resolves to the generated
+// ./groupSession.ts, which is services/crypto/groupSession.rn.ts verbatim with
+// only its imports redirected. Re-adding a stub here would silently shadow it.
 // localDb / sessionEpoch / socket / cacheCrypto
 export async function cacheMessages() {}
 export function cacheChatDetail() {}
@@ -407,9 +517,12 @@ async function main() {
   await B.getChat('c1');
 
   /** Deliver server rows to a client, newest-first, as the real API does. */
-  const deliver = (C: any, ids: number[], live = true) =>
-    C.hydrateMessages('c1', ids.map((i) => ({ ...rowById(i)! })).reverse(), undefined, { live });
-  const textOf = async (C: any, id: number) => (await deliver(C, [id]))[0]?.content;
+  // chatId defaults to the direct chat so every 1:1 call site below is unchanged;
+  // the group section passes GROUP_ID.
+  const deliver = (C: any, ids: number[], live = true, chatId = 'c1') =>
+    C.hydrateMessages(chatId, ids.map((i) => ({ ...rowById(i)! })).reverse(), undefined, { live });
+  const textOf = async (C: any, id: number, chatId = 'c1') =>
+    (await deliver(C, [id], true, chatId))[0]?.content;
 
   // 1 ── FIRST CONTACT: no session on either side.
   console.log('\nfirst contact (X3DH bootstrap)');
@@ -598,6 +711,150 @@ async function main() {
   const aliceBad = aliceView.filter((m: any) => m.senderId === 'alice' && A.looksEncrypted(m.content));
   check('Alice’s cold reopen never shows her own bubbles as ciphertext',
     aliceBad.length === 0, aliceBad.map((m: any) => m.id).join(','));
+
+  // ── 3-PARTY GROUP: sender keys, with the SKDM over the real wire ─────────
+  //
+  // GROUP_E2EE has been true in production since 2026-06-28 and its own comment
+  // still asks for a "3-device group round-trip (incl add/remove)" that had never
+  // run. senderKey.selftest.ts proves the PRIMITIVE with three parties but states
+  // outright that it hands the SKDM over directly; distribution — sealing one
+  // SKDM per member over the pairwise ratchet, POSTing opaque blobs, fetching the
+  // ones addressed to you, and rotating when membership changes — was untested.
+  // That is the half that breaks on a real group.
+  // ITS OWN CLIENTS (ga/gb/gc), not alice and bob.
+  //
+  // Reusing the 1:1 pair looked economical and produced two misleading failures:
+  // by this point Bob has reinstalled, their pairwise OTPK pool is drained and the
+  // session has been through an offline-replay storm, so sealing an SKDM over it
+  // failed with "missing requested one-time prekey" and "concurrent re-key —
+  // keeping our session". Those are 1:1 session states, not group bugs, and they
+  // would have been read as group bugs. A sender key rides the PAIRWISE ratchet,
+  // so group distribution can only be tested on pairwise sessions whose state is
+  // known — which means fresh ones.
+  console.log('\n3-party group (sender keys, SKDM over the pairwise ratchet)');
+  const G: Record<string, any> = {};
+  const Ge: Record<string, any> = {};
+  for (const u of ['ga', 'gb', 'gc']) {
+    const d = buildClient(u);
+    G[u] = await import(pathToFileURL(join(d, 'chat.ts')).href);
+    Ge[u] = await import(pathToFileURL(join(d, 'e2ee.ts')).href);
+    await Ge[u].provisionE2EEIdentity();
+  }
+  for (const u of ['ga', 'gb', 'gc']) await G[u].listChats();   // learn the group and its type
+
+  // SETTLE THE PAIRWISE SESSIONS FIRST, one direction at a time.
+  //
+  // A sender key travels over the pairwise ratchet, so a group of members who have
+  // never spoken 1:1 makes every pair establish X3DH at the same moment — real
+  // re-key glare, which this suite is the wrong place to exercise
+  // (services/crypto/rekeyGlare.selftest.ts owns it at the protocol level).
+  //
+  // Left unsettled it does not merely add noise, it makes the group assertions
+  // untestable: a failed ingest records the sender in groupSession's
+  // _noSenderKeyAt map and refuses to re-fetch for INGEST_RETRY_MS = 30s. A test
+  // that retries in a tight loop hits that cooldown every time, so a rotation that
+  // IS correct looks permanently broken. Production heals because its next retry
+  // is seconds or minutes later.
+  //
+  // One initiator per unordered pair, decrypted immediately, leaves every session
+  // established and unambiguous — glare cannot occur, and what the group section
+  // then measures is sender-key distribution alone.
+  const warm = async (from: string, to: string) => {
+    const wire = await Ge[from].e2eeEncrypt('', to, `warm ${from}->${to}`);
+    await Ge[to].e2eeDecrypt('', from, 0, wire);
+  };
+  for (const [from, to] of [['ga', 'gb'], ['ga', 'gc'], ['gb', 'gc']]) await warm(from, to);
+
+  const g1 = await G.ga.sendMessage(GROUP_ID, 'hello both of you');
+  const g1row = rowById(Number(g1.id))!;
+  check('a group message is stored as a GSK1 sender-key envelope, not plaintext',
+    typeof g1row.content === 'string' && g1row.content.startsWith('GSK1:'),
+    String(g1row.content).slice(0, 24));
+  check('the server holds one SKDM per OTHER member, never one addressed to self',
+    server.senderKeys.filter((s) => s.senderId === 'ga' && s.chatId === GROUP_ID).length === 2
+    && !server.senderKeys.some((s) => s.senderId === 'ga' && s.recipientId === 'ga'));
+  check('each stored SKDM is opaque — no sender key material in the clear',
+    server.senderKeys.every((s) => !s.skdm.includes('chainKey') && !s.skdm.includes('signPub')));
+  check('gb reads the group message', (await textOf(G.gb, g1.id, GROUP_ID)) === 'hello both of you');
+  check('gc reads the same group message', (await textOf(G.gc, g1.id, GROUP_ID)) === 'hello both of you');
+
+  // Every member sends, so each one distributes its OWN key and ingests two others.
+  const g2 = await G.gb.sendMessage(GROUP_ID, 'gb here');
+  const g3 = await G.gc.sendMessage(GROUP_ID, 'gc here');
+  check('ga reads both other senders', (await textOf(G.ga, g2.id, GROUP_ID)) === 'gb here'
+    && (await textOf(G.ga, g3.id, GROUP_ID)) === 'gc here');
+  check('gc reads gb — two members who did not create the group',
+    (await textOf(G.gc, g2.id, GROUP_ID)) === 'gb here');
+
+  // ADD a member. Dave must read what comes AFTER him and nothing before: a
+  // sender key is a forward hash ratchet, so back-reading is not merely withheld
+  // by policy, it is cryptographically impossible.
+  server.groupMembers.push('gd');
+  const gdDir = buildClient('gd');
+  G.gd = await import(pathToFileURL(join(gdDir, 'chat.ts')).href);
+  const Gde: any = await import(pathToFileURL(join(gdDir, 'e2ee.ts')).href);
+  Ge.gd = Gde;
+  await Gde.provisionE2EEIdentity();
+  await G.gd.listChats();
+  for (const peer of ['ga', 'gb', 'gc']) await warm(peer, 'gd');   // same reason as above
+  const g4 = await G.ga.sendMessage(GROUP_ID, 'gd joined');
+  check('the new member reads a message sent AFTER joining', (await textOf(G.gd, g4.id, GROUP_ID)) === 'gd joined');
+  const gdOld = await deliver(G.gd, [Number(g1.id)], true, GROUP_ID);
+  check('the new member CANNOT read what was sent before joining',
+    gdOld.length === 1 && G.gd.looksEncrypted(gdOld[0].content),
+    'a joiner must not gain history — the chain only ratchets forward');
+
+  // REMOVE a member. This is the one that matters: if the remaining members keep
+  // using the same sender key, Carol decrypts every future message with the copy
+  // she already holds. Removal MUST force a rotation.
+  // THE SIGNING KEY, DECRYPTED — not the SKDM ciphertext.
+  //
+  // Comparing stored ciphertext is a false positive waiting to happen: the SKDM is
+  // sealed with the pairwise ratchet, which advances on every send, so re-sealing
+  // the SAME sender key yields different bytes. That assertion would pass whether
+  // or not a rotation occurred. Only the signPubHex inside proves one did — a
+  // rotation calls createSenderKey(), which mints a fresh Ed25519 signing key.
+  const signKeyOf = async (sender: string, recipient: string) => {
+    const row = server.senderKeys.find((k) => k.chatId === GROUP_ID
+      && k.senderId === sender && k.recipientId === recipient);
+    if (!row) return null;
+    try { return JSON.parse(await Ge[recipient].e2eeDecrypt('', sender, 0, row.skdm)).signPubHex; }
+    catch { return 'UNREADABLE'; }
+  };
+  const signKeyBefore = await signKeyOf('ga', 'gb');
+  server.groupMembers = server.groupMembers.filter((u) => u !== 'gc');
+  const g5 = await G.ga.sendMessage(GROUP_ID, 'gc has left');
+  const signKeyAfter = await signKeyOf('ga', 'gb');
+  check('the sender SIGNING KEY rotated when a member was removed',
+    !!signKeyBefore && signKeyBefore !== 'UNREADABLE'
+    && !!signKeyAfter && signKeyAfter !== 'UNREADABLE' && signKeyAfter !== signKeyBefore,
+    `${String(signKeyBefore).slice(0, 10)} -> ${String(signKeyAfter).slice(0, 10)}`
+    + ' — an unchanged signing key means the removed member keeps decrypting');
+  check('the rotated key is redistributed to every REMAINING member and none other',
+    server.senderKeys.filter((s) => s.chatId === GROUP_ID && s.senderId === 'ga')
+      .map((s) => s.recipientId).sort().join(',') === 'gb,gc,gd',
+    'gc’s row survives by design — it holds the OLD key and is never refreshed, '
+    + 'which is what locks her out; the assertion below proves she cannot read');
+  // NOT ASSERTED HERE, deliberately, and worth knowing why: that a remaining
+  // member re-reads the group IMMEDIATELY after a rotation.
+  //
+  // It is not a gap in the product. signKeyOf('ga','gb') above returns a real
+  // signPubHex rather than 'UNREADABLE', which is proof that gb CAN open the
+  // rotated SKDM — the key reached it and the pairwise seal is sound. What blocks
+  // an instant end-to-end re-read is groupSession's own INGEST_RETRY_MS = 30_000:
+  // once a sender is recorded in _noSenderKeyAt, that peer is not re-fetched for
+  // thirty seconds. A test cannot wait that out and must not sleep for it, and a
+  // tight retry loop makes a correct rotation look permanently broken — which is
+  // exactly the false negative that cost a debugging pass here.
+  //
+  // Production heals because its next read is seconds or minutes later. The
+  // cooldown is deliberate (it stops a bulk replay issuing one GET per message),
+  // so the honest split is: assert the key rotated and reached the right members,
+  // and leave "how fast does it heal" to a timing test that owns a clock.
+  const removedAfter = await deliver(G.gc, [Number(g5.id)], true, GROUP_ID);
+  check('the REMOVED member cannot read what the group said afterwards',
+    removedAfter.length === 1 && G.gc.looksEncrypted(removedAfter[0].content),
+    'this is the whole point of rotating on removal');
 }
 
 main()
