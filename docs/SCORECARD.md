@@ -62,8 +62,8 @@ Spec backlog: **949 done / 227 open** across 35 OpenSpec changes (81%). Roughly 
 |---|---|---|---|---|
 | 2026-10-01 | Baseline established from measured code and live prod | — | all | see table |
 | 2026-10-01 | Deleted `app/email-bridge.tsx` (mock inbox claiming AES-256-GCM with no crypto) and its `Stack.Screen`; removed the push-tokens-as-devices count from `app/dashboard.tsx` | `2661de2` | Honesty / claim integrity | 6.0 → **8.0** ↑ |
-| 2026-10-01 | De-lied `app/call-recording.tsx`: removed "All participants have been notified" (no notify path exists at all) and "Recording encrypted and saved to File Vault" (no encryption, no vault write). Kept the screen — the recording logic is real and three selftests reference it | pending | Honesty / claim integrity | 8.0 → **8.5** ↑ |
-| 2026-10-01 | Corrected `docs/FEATURE_GAP_MATRIX.md` row claiming the three E2EE flags are OFF | pending | — (doc only) | — |
+| 2026-10-01 | De-lied `app/call-recording.tsx`: removed "All participants have been notified" (no notify path exists at all) and "Recording encrypted and saved to File Vault" (no encryption, no vault write). Kept the screen — the recording logic is real and three selftests reference it | `18c0661` | Honesty / claim integrity | 8.0 → **8.5** ↑ |
+| 2026-10-01 | Corrected `docs/FEATURE_GAP_MATRIX.md` row claiming the three E2EE flags are OFF | `18c0661` | — (doc only) | — |
 | 2026-10-01 | Verified VC-009 retry idempotency already shipped (migration 055 + `chats_helpers.go:770`); the parity table listing it Not Started is three months stale | — | Messaging core | 8.0 → **8.5** = |
 | 2026-10-01 | Verified Track A (the 8–10s lag) already fixed; `socket.io-client` absent and selftest-enforced | — | Cold start / performance | 6.0 → **7.5** = |
 
