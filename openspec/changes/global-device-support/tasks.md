@@ -141,7 +141,33 @@
 
 - [ ] 6.1 Record the task 0.1 counts as ratchet budgets: direct `Text` imports, and hardcoded user-visible strings. Each fails on an increase and lowers on improvement.
 - [ ] 6.2 Tighten `lib/themeCoverage.selftest.ts` so the black/white text exemption requires an adjacent non-themed `backgroundColor`. This is the rule that would have caught the mini-apps tab rendering black text on a dark themed surface.
-- [ ] 6.3 Add the direction-aware layout guardrail: flag `marginLeft`/`marginRight`/`paddingLeft`/`paddingRight`/`left`/`right` in direction-sensitive contexts, with documented exemptions. `lib/i18n/engine.ts` remains the single source of direction.
+- [x] 6.3 **DONE 2026-10-02** — `lib/directionRatchet.selftest.ts`, implemented as a RATCHET
+      rather than a flag-and-fix, because the premise needed checking first.
+
+      **No RTL locale ships.** `lib/i18n/index.ts` registers exactly three languages — en, hi,
+      te — all `dir: 'ltr'`, which `lib/i18n/i18n.selftest.ts:98` already asserts. With no RTL
+      locale reachable, a physical margin and a logical one render identically, so all **166**
+      physical-direction props across 72 files are currently correct on screen. Flagging them
+      as defects would have been wrong, and "fix 166 sites" is not work worth doing before the
+      locale that needs it exists.
+
+      So the guard holds the line instead: budget 166, fails on any increase, and fails
+      separately when the budget is STALE (left above the real count after conversions, which
+      is slack that silently re-admits regressions).
+
+      **It tightens itself.** It reads `lib/i18n/index.ts` rather than restating it, so the
+      moment a language declares `dir: 'rtl'` a non-zero count stops being cosmetic and fails
+      the build. Shipping RTL and converting the layout become one decision, which is the only
+      ordering that works.
+
+      `left`/`right` were deliberately NOT included: they are overwhelmingly absolute-position
+      offsets on overlays and badges, where the physical side is usually what is meant, and a
+      rule with that many false positives teaches people to ignore the guard. The four margin
+      and padding props are where the real mirroring work is.
+
+      Both failure modes proven, per the project rule that a guard which cannot fail is
+      decoration: adding three props produced `169 vs 166`, and registering an RTL language
+      produced "these are now VISIBLE layout defects".
 - [x] 6.4 Fix `app/(tabs)/mini.tsx`'s 11 hardcoded `#000000` text colours on themed dark surfaces — the bug 6.2 pins.
 - [ ] 6.5 **Written → verified**: full suite green with all new guardrails active; every new rule has a runnable assert-based selftest and none uses `require('fs')` in app code.
 
