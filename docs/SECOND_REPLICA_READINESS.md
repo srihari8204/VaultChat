@@ -1,5 +1,14 @@
 # Second go-api replica — readiness assessment
 
+> **TRANSPORT CITATION IS STALE (noted 2026-10-01).** Parts of this document reason
+> from `lib/socket.ts` constructing `ioClient(SERVER_URL, { transports: ['websocket'] })`.
+> That code no longer exists: `socket.io-client` is not a dependency, three selftests
+> enforce its absence (`lib/socket.transport.selftest.ts:14-15`,
+> `lib/nativeDeviceSupport.selftest.ts:41,44,51`), and `selectTransport()` returns
+> `ccwire` with no alternative (`lib/socket.ts:108-115`). Any conclusion resting on the
+> old citation must be re-derived against CC-Wire before it is relied on.
+
+
 Investigated 2026-09-13 against the live box (`root@65.21.229.167`), read-only.
 Closes the evidence gap behind architecture-review finding **P1-04** ("one of
 everything") and step 3 of `vaultchat-backend-go/SCALEOUT.md`.

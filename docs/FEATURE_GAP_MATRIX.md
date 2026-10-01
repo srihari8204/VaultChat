@@ -41,7 +41,7 @@
 | Story E2EE / Group E2EE / Media E2EE | Real per-viewer/sender-key crypto built; **all three flags are ON since 2026-06-28 and the two-device/three-device round-trip verification their own comments demand has NEVER RUN** (corrected 2026-10-01) | `flags.ts` (`STORY_E2EE`,`GROUP_E2EE`,`MEDIA_E2EE`) |
 | Group photo/description | Photo real; **description has no column/write** despite UI | `group-info.tsx` |
 | Delete-for-me | Only delete-for-everyone exists | `chats.js:939` |
-| chat-summary / tone-detector / translate | Work locally but **don't call the real LLM** sitting one import away (regex/phrasebook) | `chat-summary.tsx:42`, `translate.tsx:41` |
+| ~~chat-summary / tone-detector / translate~~ | **STALE — all three screens were DELETED in `6e3e586` and no routes reference them. Verified 2026-10-01.** | (removed) |
 | behavioral, trustscore, d2de-status, mini-apps, bot-api, game-play, whiteboard, auto-reply, meeting-scheduler | Real core, incomplete reach (single-feature, no engine, no sync, or only 1 game) | per-audit |
 
 ## ⚫ STUB / THEATER — UI only, hardcoded/fake, or no backend (honesty-mandate violations)
@@ -87,7 +87,7 @@ Usernames/@handles · emoji status · message threads · albums/grouped media ·
 9. **Build-or-cut the stubs:** storage-manager (real FS usage), smart-notifications, chat-themes/chat-wallpaper (have `chat.tsx` consume them), last-seen-privacy (route to `/user/settings`), vault-features fake-PIN, deepfake, decentralized-id, digital-wellbeing, family, zero-knowledge, watch-together, doc-scanner. Each → made real or removed from nav. Delete dead `generateAriaResponse` block (`ai-chat-bot.tsx:153-325`).
 
 ### P2 — Use the LLM you already have (cheap, high-impact — backend is live)
-10. Route **translate, chat-summary, tone-detector** through `aiAssist(...)` instead of regex/phrasebook.
+10. ~~Route **translate, chat-summary, tone-detector** through `aiAssist(...)`~~ — moot: those three screens no longer exist (deleted in `6e3e586`).
 
 ### P3 — Build the genuine functional gaps
 11. **Communities backend** (schema + routes) + wire client off the mockup.

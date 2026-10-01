@@ -6,25 +6,55 @@ are **staged only**.
 
 ## What is actually tracked in git
 
+> **RE-VERIFIED 2026-10-01 against the working tree. Three rows below were wrong.**
+> This audit was written on a machine (or at a time) where the release key existed.
+> It does not exist here, and the owner confirms **no release keystore has ever been
+> created and the app has never been uploaded to Play**. Corrected inline.
+
 | File | On disk | Tracked in git | Severity |
 |---|---|---|---|
-| `vaultchat-release.jks` | yes (4.4 KB) | **no** — ignored at `.gitignore:80` | — |
-| `keystore.properties` | yes (187 B) | **no** — ignored at `.gitignore:81` | — |
-| `.env` | yes (3.9 KB) | **no** — ignored by `*.env` at `.gitignore:49` | — |
+| `vaultchat-release.jks` | **NO — absent** (was recorded as "yes, 4.4 KB") | **no** — ignored at `.gitignore:80` | — |
+| `keystore.properties` | **NO — absent** (was recorded as "yes, 187 B") | **no** — ignored at `.gitignore:81` | — |
+| `.env` | **NO — absent.** `.env.local` (598 B) is what exists | **no** — ignored by `*.env` at `.gitignore:49` | — |
 | `google-services.json` | yes (1.3 KB) | **WAS TRACKED** → now `git rm --cached`, staged | low |
 | `vaultchat-backend/android/app/debug.keystore` | yes | tracked | none |
 | `vaultchat-backend/.env.example` | yes | tracked | none (placeholders) |
 
-**The upload keystore and its passwords were never in git.** The release signing
-key (`vaultchat-release.jks`) and `keystore.properties` (which holds
-`VAULTCHAT_STORE_PASSWORD` and `VAULTCHAT_KEY_PASSWORD`) are present on disk only
-and are correctly ignored. No rotation is required for them, and no Play App
-Signing key reset is warranted.
+**The upload keystore and its passwords were never in git** — and as of 2026-10-01
+they do not exist at all. There is no `vaultchat-release.jks` and no
+`keystore.properties` anywhere in this tree, so:
 
-`.env` is likewise untracked. It contains one genuinely sensitive value
-(`GOLIVE_LIVEKIT_API_SECRET`, alongside `GOLIVE_LIVEKIT_KEYS` /
-`GOLIVE_LIVEKIT_API_KEY`); the rest are public endpoints and `EXPO_PUBLIC_*`
-flags that ship in the bundle anyway. No exposure, no rotation required.
+- Every release build is signed with the **debug** key. `apksigner verify
+  --print-certs` on the current artifact reports `CN=Android Debug`. Google Play
+  will not accept it.
+- `plugins/withReleaseSigning.js` (wired at `app.json:191`) is the mechanism and
+  it is **ready** — it injects a `vaultchatRelease` signingConfig and repoints
+  `buildTypes.release` at it. It is a deliberate no-op while the credentials are
+  missing (`:38`, `:44`), which is exactly the state we are in. Create
+  `keystore.properties` with `VAULTCHAT_STORE_FILE`, `VAULTCHAT_STORE_PASSWORD`,
+  `VAULTCHAT_KEY_ALIAS`, `VAULTCHAT_KEY_PASSWORD` plus the `.jks` it names, and
+  the next prebuild signs properly with no code change.
+- **Nothing needs rotating and no Play App Signing reset is warranted** — but for
+  the opposite reason to the one originally recorded here. There is no key to
+  rotate and no listing to reset, not a safe key correctly stored.
+- When the key is created: back the `.jks` and `keystore.properties` up somewhere
+  that is not this machine, and update this file. Note that upload-key loss is
+  recoverable (Play App Signing is mandatory for new apps and Google holds the app
+  signing key; the *upload* key is resettable via support) — so this is important,
+  not catastrophic.
+
+**`.env` does not exist here** (corrected 2026-10-01), so the
+`GOLIVE_LIVEKIT_API_SECRET` originally described in this paragraph is not in this
+tree — those LiveKit credentials live on the production box in
+`docker-compose.box.yml` and `vaultchat-backend/.env`, neither of which is in any
+repo. See the prod deployment notes.
+
+What does exist is **`.env.local` (598 B)** — ignored at `.gitignore:51` and not
+tracked, verified. It holds one genuinely sensitive value, `SENTRY_AUTH_TOKEN`,
+plus `EXPO_PUBLIC_CRYPTO_BACKEND`, `EXPO_PUBLIC_SUPABASE_URL` and
+`EXPO_PUBLIC_SUPABASE_ANON_KEY` — the `EXPO_PUBLIC_*` three ship inside the JS
+bundle by design and are not secrets. No exposure, no rotation required; rotate
+`SENTRY_AUTH_TOKEN` if this file is ever shared.
 
 `vaultchat-backend/android/app/debug.keystore` is the standard Android debug
 keystore — password `android`, identical on every machine, cannot sign a Play

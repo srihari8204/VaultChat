@@ -1,6 +1,12 @@
 # VaultChat → WhatsApp Parity: Task Status vs. Current Source
 
-Verified against the working tree (branch `hetzner-deploy`), 2026-07-09.
+Verified against the working tree (branch `hetzner-deploy`), **2026-07-09**.
+
+> **THIS TABLE IS ITSELF NOW STALE (noted 2026-10-01).** It was accurate on its own
+> date and has not been re-run since; roughly three months of work has landed on top.
+> It carries the same hazard it warns the spreadsheet about one paragraph below.
+> **Check the code before treating any row as open.** Known wrong so far: VC-009
+> (see its row). Re-verify before planning from any P0 row.
 Source of tasks: `docs_latest/vaultchat-whatsapp-parity-tasks.xlsx` (112 tasks, VC-001…112).
 
 > The spreadsheet records **0 Done / 0% complete**. That is stale. The actual state is below.
@@ -67,7 +73,7 @@ These are not merely "incomplete" — they contradict the product's E2EE zero-kn
 | VC-006 | Speed | P2 | Heartbeat/ping tuning | **Done** | `server.js:57-58`, `lib/socket.ts:77` | — |
 | VC-007 | Speed | P2 | Binary payload (protobuf/msgpack) | Not Started | default JSON parser `server.js:55-60` | No binary parser either side |
 | VC-008 | Speed | P0 | Optimistic local insert on send | **Done** | `app/chat.tsx:806-824`, `lib/messageQueue.ts:100-106` | Queue is AsyncStorage, not sqlite (equivalent) |
-| VC-009 | Speed | P0 | Client-generated msg IDs (idempotency) | **Not Started** | `messageQueue.ts:74-76,144-147`; `routes/chats.js:734-853` | tempId never sent; no server dedup → retry duplicates |
+| VC-009 | Speed | P0 | Client-generated msg IDs (idempotency) | **DONE** (verified 2026-10-01) | migration `055` `UNIQUE (chat_id, sender_id, client_id) WHERE client_id IS NOT NULL`; `chats_helpers.go:770` `ON CONFLICT … DO NOTHING` + re-select at `:776`; CC-Wire forwards `client_msg_id → clientId` at `ccwire_messages.go:205`; test `chats_send_characterization_test.go:250` | Shipped at ACCOUNT grain, which is what per-device work needs. The old note below described the pre-CC-Wire code. |
 | VC-010 | Speed | P0 | Persisted outbound queue + backoff | **Done** | `messageQueue.ts:24-27,211-228` | — |
 | VC-011 | Speed | P0 | Ack → tick state machine | **Done** | `app/chat.tsx:3506-3517,3868-3875`; `006_delivery.sql:12-13` | — |
 | VC-012 | Speed | P0 | Mumbai VPS migration | **Not Started** | Hetzner/Finland `docker-compose.yml:107` | No ap-south region |

@@ -1,5 +1,19 @@
 # VaultChat — Performance & Architecture Audit
 
+> **TRANSPORT CITATION IS STALE (noted 2026-10-01).** Parts of this document reason
+> from `lib/socket.ts` constructing `ioClient(SERVER_URL, { transports: ['websocket'] })`.
+> That code no longer exists: `socket.io-client` is not a dependency, three selftests
+> enforce its absence (`lib/socket.transport.selftest.ts:14-15`,
+> `lib/nativeDeviceSupport.selftest.ts:41,44,51`), and `selectTransport()` returns
+> `ccwire` with no alternative (`lib/socket.ts:108-115`). Any conclusion resting on the
+> old citation must be re-derived against CC-Wire before it is relied on.
+
+> Specifically: this document lists the live transport as "Go + Socket.IO + Postgres" and
+> H1 recommends enabling the Socket.IO Redis adapter. Socket.IO is gone, and
+> `REDIS_ADAPTER=1` is already on in production (`docs/SECOND_REPLICA_READINESS.md:30`).
+> Treat this as the older of the two documents.
+
+
 _Principal-architect review of the actual codebase (RN 0.81 / Expo 54 + Go 1.26 + Rust + Kotlin). Every finding below is anchored to real files and lines. Savings figures are engineering estimates with stated rationale, not measurements._
 
 ---

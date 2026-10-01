@@ -36,7 +36,7 @@ distributable artifact; the artifact is currently debug-signed.
 | E2EE / crypto primitives | 8.5 | — | Real X3DH, Double Ratchet, X25519/Ed25519/HKDF/AES-GCM, signed + one-time prekeys, group sender keys, Shamir. **Cap: `MEDIA_E2EE`/`STORY_E2EE`/`GROUP_E2EE` are `true` in production and the round-trip verification their own comments demand has never run** |
 | Messaging core | 8.5 | = | Durable outbox, catch-up, receipts, offline edit/delete/react, local-first cache. Corrected up: retry idempotency (VC-009) is shipped — migration 055 `UNIQUE (chat_id, sender_id, client_id)` plus re-select on conflict — not open as the parity table claims |
 | Backend & data layer | 8.0 | — | Go, 138 migrations, contract tests, migration-ledger discipline. Cap: RLS is inert (the API connects as a superuser with `BYPASSRLS`) |
-| Honesty / claim integrity | 8.5 | ↑ | Was 6.0. Deleted a screen claiming "encrypted with AES-256-GCM" that ran no crypto; stopped reporting push-token rows as a device count. Cap: `VAULT_CACHE_ENCRYPTED=false` while the product is positioned as a vault; `chat-summary`/`tone-detector`/`translate` still claim LLM work they do with regex; call-recording needs a real notify + vault path, not just honest copy |
+| Honesty / claim integrity | 8.5 | ↑ | Was 6.0. Deleted a screen claiming "encrypted with AES-256-GCM" that ran no crypto; stopped reporting push-token rows as a device count. Cap: `VAULT_CACHE_ENCRYPTED=false` while the product is positioned as a vault; call-recording needs a real notify + vault path, not just honest copy; the 227-task backlog is unswept for other overclaims |
 | Cold start / performance | 7.5 | = | Corrected up from 6.0: the 8–10s lag (Track A) is **fixed** — `socket.io-client` is not a dependency and three selftests enforce its absence; the client is CC-Wire protobuf. Cap: no measured cold-start baseline exists (`coldstart-evidence`, 10 open) |
 | Location / navigation | 7.5 | — | Self-hosted Valhalla + Photon, real turn-by-turn, works without GMS. Cap: the Photon index is not loaded, so geocoding still exits to komoot |
 | 1:1 calls | 7.5 | — | LiveKit, native FCM ring, full-screen incoming from a cold start. Cap: 6 calls ever executed; no device matrix |
@@ -64,6 +64,8 @@ Spec backlog: **949 done / 227 open** across 35 OpenSpec changes (81%). Roughly 
 | 2026-10-01 | Deleted `app/email-bridge.tsx` (mock inbox claiming AES-256-GCM with no crypto) and its `Stack.Screen`; removed the push-tokens-as-devices count from `app/dashboard.tsx` | `2661de2` | Honesty / claim integrity | 6.0 → **8.0** ↑ |
 | 2026-10-01 | De-lied `app/call-recording.tsx`: removed "All participants have been notified" (no notify path exists at all) and "Recording encrypted and saved to File Vault" (no encryption, no vault write). Kept the screen — the recording logic is real and three selftests reference it | `18c0661` | Honesty / claim integrity | 8.0 → **8.5** ↑ |
 | 2026-10-01 | Corrected `docs/FEATURE_GAP_MATRIX.md` row claiming the three E2EE flags are OFF | `18c0661` | — (doc only) | — |
+| 2026-10-01 | Corrected all 8 stale source documents catalogued below: `SECRETS.md` (claimed a release keystore exists — the most harmful one), `docs_latest/parity-status-vs-source.md` (header warning + VC-009 row), the arm64-only claim in `responsive-breadth-and-toolchain`, and transport-citation stamps on `SECOND_REPLICA_READINESS` / `AKAMAI_K8S_TOPOLOGY` / `PERF_AUDIT` | pending | — (docs only) | — |
+| 2026-10-01 | **Self-correction:** the cap added two rows above cited `chat-summary`/`tone-detector`/`translate` as live overclaims. They were deleted in `6e3e586` and have no routes — I trusted `FEATURE_GAP_MATRIX.md` without checking, the exact error this file exists to stop | pending | Honesty / claim integrity | no change (**8.5**) |
 | 2026-10-01 | Verified VC-009 retry idempotency already shipped (migration 055 + `chats_helpers.go:770`); the parity table listing it Not Started is three months stale | — | Messaging core | 8.0 → **8.5** = |
 | 2026-10-01 | Verified Track A (the 8–10s lag) already fixed; `socket.io-client` absent and selftest-enforced | — | Cold start / performance | 6.0 → **7.5** = |
 
@@ -72,6 +74,10 @@ Spec backlog: **949 done / 227 open** across 35 OpenSpec changes (81%). Roughly 
 ## Corrections to repo documents
 
 Found while scoring. Each would mislead anyone planning from it.
+
+**All eight were corrected in the source documents on 2026-10-01** — each now carries an
+inline correction or a stale-citation stamp, so the error cannot be inherited by reading
+the document alone. This table is kept as the record of what was wrong and why.
 
 | Document | Wrong claim | Reality |
 |---|---|---|
