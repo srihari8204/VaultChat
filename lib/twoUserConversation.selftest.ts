@@ -146,10 +146,24 @@ const IMPORT_REWRITES: [RegExp, string][] = [
    `import { splitMeta, wrapEnvelope, unwrapEnvelope } from '${pathToFileURL(join(HERE, 'msgEnvelope.ts')).href}';`],
   [/^import perf from '\.\/perf';$/m, `import { perf as perf } from './stubs.ts';`],
   [/^import \{ SERVER_URL \} from '\.\.\/constants\/server';$/m, `import { SERVER_URL } from './stubs.ts';`],
-  // constants/flags.ts is owned by another agent right now, so it is pinned
-  // here at its shipping values rather than imported and raced.
+  // THE REAL constants/flags.ts, not a pinned copy.
+  //
+  // These used to be stubbed at hardcoded `true`s, with the note "owned by
+  // another agent right now, so it is pinned here rather than imported and
+  // raced". That reason was temporary and the pin outlived it — and a pin here
+  // is not a small thing: this suite is the ONLY end-to-end evidence that
+  // MEDIA_E2EE / STORY_E2EE / GROUP_E2EE work, and a pinned copy means it
+  // certifies the code path under values of its own choosing rather than the
+  // values that ship. If someone flipped GROUP_E2EE off in constants/flags.ts,
+  // this suite would have stayed green while group messages went plaintext.
+  //
+  // flags.ts imports nothing and is pure consts, so Node loads it directly —
+  // same file-URL redirect this list already uses for msgEnvelope.ts above.
+  // assertShippingFlags() below fails the run if the values are not the ones
+  // these tests are written against, so a future flip is caught loudly instead
+  // of silently changing what "passed" means.
   [/^import \{ E2EE_ENABLED, GROUP_E2EE, E2EE_STRICT, UPLOAD_PROGRESS \} from '\.\.\/constants\/flags';$/m,
-   `import { E2EE_ENABLED, GROUP_E2EE, E2EE_STRICT, UPLOAD_PROGRESS } from './stubs.ts';`],
+   `import { E2EE_ENABLED, GROUP_E2EE, E2EE_STRICT, UPLOAD_PROGRESS } from '${pathToFileURL(join(ROOT, 'constants', 'flags.ts')).href}';`],
   [/^import \{ redactIds, warnOnce \} from '\.\/diagLog';$/m, `import { redactIds, warnOnce } from './stubs.ts';`],
   // mid-file import (forwarding), pure but not on the path under test
   [/^import \{ nextForwardScore \} from '\.\/forwardPolicy';$/m, `import { nextForwardScore } from './stubs.ts';`],
@@ -305,8 +319,8 @@ export function httpErrorMessage(status: number) {
   return 'Something went wrong. Please try again.';
 }
 export const SERVER_URL = 'http://test';
-// Pinned copies of constants/flags.ts (owned by another agent this session).
-export const E2EE_ENABLED = true, GROUP_E2EE = true, E2EE_STRICT = true, UPLOAD_PROGRESS = true;
+// NO flag exports here any more — the rewrite list points chatService at the real
+// constants/flags.ts. See the comment there for why a pinned copy was dangerous.
 export const perf = { mark() {}, recordSend() {}, snapshot() { return { transport: 'test' }; } };
 export function nextForwardScore(n: number) { return n + 1; }
 export function redactIds(s: string) { return s; }
@@ -352,7 +366,29 @@ const H = {
 (globalThis as any).__VC2U = H;
 
 // ── the conversation ──────────────────────────────────────────────────────
+// The flags this suite's assertions are WRITTEN AGAINST, checked against the real
+// constants/flags.ts rather than assumed.
+//
+// Every "the server never sees plaintext" assertion below is conditional on these
+// being on. If one is flipped off, the right outcome is a LOUD failure here, not a
+// green run that quietly proves something weaker than its own test names claim.
+// Flipping a flag is a legitimate decision; silently changing what this suite
+// certifies is not. Whoever flips one updates this list and the affected
+// assertions together.
+const EXPECTED_FLAGS: Record<string, boolean> = {
+  E2EE_ENABLED: true, GROUP_E2EE: true, E2EE_STRICT: true, UPLOAD_PROGRESS: true,
+};
+async function assertShippingFlags() {
+  const real: any = await import(pathToFileURL(join(ROOT, 'constants', 'flags.ts')).href);
+  for (const [name, want] of Object.entries(EXPECTED_FLAGS)) {
+    check(`constants/flags.ts ${name} === ${want} (this suite is written for it)`,
+      real[name] === want,
+      `real value is ${String(real[name])} — update EXPECTED_FLAGS and the assertions it gates`);
+  }
+}
+
 async function main() {
+  await assertShippingFlags();
   const transport = await import(CCWIRE);
   check('the real submission coordinator loads with CC-Wire off', transport.ccwireStatus() === 'off');
   const aliceDir = buildClient('alice');
