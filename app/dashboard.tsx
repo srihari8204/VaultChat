@@ -35,8 +35,21 @@ function buildChecks(ov: SecurityOverview): Check[] {
       desc: ov.settings.discoverable === false ? "You're not discoverable by search" : "You're discoverable by phone/handle" },
     { name: 'Blocked Contacts', icon: 'ban-outline', ok: true,
       desc: `${ov.blockedContacts} contact${ov.blockedContacts === 1 ? '' : 's'} blocked` },
+    // `ov.linkedDevices` is deliberately NOT shown here or in the stats row.
+    //
+    // The server counts rows in `devices` (user.go:332) and those are PUSH
+    // REGISTRATIONS, not devices: one phone with a stale Expo token alongside a
+    // fresh one reads as "2 devices", and a reinstall adds another. So the number
+    // was wrong in the direction that alarms people — on a security screen, which
+    // is the worst place to be wrong — and there is no device-management UI for it
+    // to lead to anyway.
+    //
+    // Sessions ARE real: refresh_tokens with revoked_at IS NULL and expires_at in
+    // the future, and /user/sessions can revoke them one at a time or all at once.
+    // Show a device count again when per-device identity exists and means
+    // something (openspec: global-device-support / docs/LINKED_DEVICES_PLAN.md).
     { name: 'Active Sessions', icon: 'phone-portrait-outline', ok: ov.activeSessions <= 3,
-      desc: `${ov.activeSessions} signed-in session${ov.activeSessions === 1 ? '' : 's'} · ${ov.linkedDevices} device${ov.linkedDevices === 1 ? '' : 's'}` },
+      desc: `${ov.activeSessions} signed-in session${ov.activeSessions === 1 ? '' : 's'}` },
   ];
 }
 
@@ -133,7 +146,9 @@ function DashboardContent() {
         <View style={S.statsRow}>
           {[
             {label:'Active sessions',value:overview?String(overview.activeSessions):'—',icon:'phone-portrait-outline' as const,color:colors.primary},
-            {label:'Devices',value:overview?String(overview.linkedDevices):'—',icon:'laptop-outline' as const,color:colors.primary},
+            // No 'Devices' tile — see the note in securityChecks() above: the count
+            // is push registrations, not devices. Three tiles wrap 2+1 and flexGrow
+            // fills the last row, so removing it does not break the grid.
             {label:'Blocked',value:overview?String(overview.blockedContacts):'—',icon:'ban-outline' as const,color:colors.primary},
             {label:'Account age',value:overview?accountAge(overview.accountCreatedAt):'—',icon:'calendar-outline' as const,color:colors.primary},
           ].map((s,i)=>(

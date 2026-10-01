@@ -994,7 +994,6 @@ function RootLayoutInner() {
         <Stack.Screen name="story-viewer" />
         <Stack.Screen name="meeting-scheduler" />
         <Stack.Screen name="finance" options={{ headerShown: false }} />
-        <Stack.Screen name="email-bridge" />
         <Stack.Screen name="group-admin" />
         <Stack.Screen name="call-recording" />
         <Stack.Screen name="app-lock-chats" />
