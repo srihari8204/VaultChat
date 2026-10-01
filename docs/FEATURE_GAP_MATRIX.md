@@ -38,7 +38,7 @@
 | Call recording | Records device **mic only** (not remote stream); fake waveform; "notified"/"encrypted" claims do nothing | `call-recording.tsx:92,282` |
 | Group calls | Honestly downgrades to 1:1; needs SFU/mesh | `group-calls.tsx:83` |
 | Video stories | Backend accepts video; picker hardcoded to images | `status.tsx:106` |
-| Story E2EE / Group E2EE / Media E2EE | Real per-viewer/sender-key crypto built, **flags OFF** | `flags.ts` (`STORY_E2EE`,`GROUP_E2EE`,`MEDIA_E2EE`) |
+| Story E2EE / Group E2EE / Media E2EE | Real per-viewer/sender-key crypto built; **all three flags are ON since 2026-06-28 and the two-device/three-device round-trip verification their own comments demand has NEVER RUN** (corrected 2026-10-01) | `flags.ts` (`STORY_E2EE`,`GROUP_E2EE`,`MEDIA_E2EE`) |
 | Group photo/description | Photo real; **description has no column/write** despite UI | `group-info.tsx` |
 | Delete-for-me | Only delete-for-everyone exists | `chats.js:939` |
 | chat-summary / tone-detector / translate | Work locally but **don't call the real LLM** sitting one import away (regex/phrasebook) | `chat-summary.tsx:42`, `translate.tsx:41` |

@@ -304,10 +304,15 @@ export default function CallRecordingScreen() {
     ]);
   };
 
+  // Flips a flag on the local row and nothing else. It used to announce
+  // "Recording encrypted and saved to File Vault" — there is no encryption call
+  // and no vault write anywhere in this file, so the one sentence claimed two
+  // security properties the code does not have. Wiring this to the real File
+  // Vault is the fix; until then the message says what actually happened.
   const saveToVault = (id: string) => {
     const updated = recordings.map(r => (r.id === id ? { ...r, savedToVault: true } : r));
     saveRecordings(updated);
-    Alert.alert('Saved', 'Recording encrypted and saved to File Vault.');
+    Alert.alert('Marked', 'Kept on this device. Not encrypted and not in File Vault yet.');
   };
 
   // ── Render sections ──
@@ -350,10 +355,20 @@ export default function CallRecordingScreen() {
         ))}
       </View>
 
-      {/* Consent banner */}
+      {/* Consent banner.
+          This used to read "All participants have been notified" beside a
+          shield-checkmark. NOTHING IN THIS FILE NOTIFIES ANYONE — there is no
+          emit, no API call and no message send — so the app was assuring the
+          user that a legal obligation had been discharged when it had not.
+          In a two-party-consent jurisdiction that is the user's liability, not
+          a cosmetic string. Until a real notify path exists, say who is
+          actually responsible. */}
       <View style={s.consentBanner}>
-        <Ionicons name="shield-checkmark" size={16} color={colors.primary} style={{ marginRight: 8 }} />
-        <Text style={s.consentText}>All participants have been notified</Text>
+        {/* colors.danger, not colors.warning — the palette has no `warning`
+            token (constants/theme.ts:37 defines danger/success/online), and an
+            undefined colour renders as the platform default, silently. */}
+        <Ionicons name="alert-circle" size={16} color={colors.danger} style={{ marginRight: 8 }} />
+        <Text style={s.consentText}>Participants are not notified — tell them yourself</Text>
       </View>
     </View>
   );
@@ -436,7 +451,12 @@ export default function CallRecordingScreen() {
         </TouchableOpacity>
       </View>
       <Text style={s.idleText}>Tap to Start Recording</Text>
-      <Text style={s.idleHint}>All call participants will be notified when recording starts.</Text>
+      {/* Was: "All call participants will be notified when recording starts."
+          It is not true — see the consent banner above. */}
+      <Text style={s.idleHint}>
+        Records this device&apos;s microphone only. Participants are not notified
+        automatically — in many places you must tell them before recording.
+      </Text>
     </View>
   );
 
