@@ -28,7 +28,7 @@
 
 import React, { useCallback, useEffect, useState } from 'react';
 import {
-  View, Text, StyleSheet, ActivityIndicator, TouchableOpacity, StatusBar,
+  View, Text, StyleSheet, ActivityIndicator, TouchableOpacity,
   TextInput, Platform,
 } from 'react-native';
 import { useLocalSearchParams, useRouter, Stack } from 'expo-router';
@@ -144,7 +144,12 @@ export default function LiveJoinScreen() {
       <AuroraBackground />
         <Stack.Screen options={{ headerShown: false }} />
         {/* statusbar-exempt: live video fills the screen on a dark ground at every theme. */}
-        <StatusBar barStyle="light-content" />
+        {/* No StatusBar override. These three render states used to force
+            barStyle="light-content" while the surface follows the app palette
+            (colors.glassSoft / colors.primary over a transparent container), so
+            in LIGHT mode the clock and battery turned white on white and
+            disappeared. app/_layout.tsx owns the bar and already picks the right
+            glyphs for the theme. Guarded by lib/statusBarOwner.selftest.ts. */}
         <View style={s.body}>
           <Ionicons name="person-circle-outline" size={48} color={colors.primary} />
           <Text style={s.title}>Join the live</Text>
@@ -191,7 +196,6 @@ export default function LiveJoinScreen() {
     return (
       <View style={s.container}>
         <Stack.Screen options={{ headerShown: false }} />
-        <StatusBar barStyle="light-content" />
         <View style={s.body}>
           <ActivityIndicator size="large" color={colors.primary} />
           <Text style={s.title}>Joining live…</Text>
@@ -205,7 +209,6 @@ export default function LiveJoinScreen() {
     return (
       <View style={s.container}>
         <Stack.Screen options={{ headerShown: false }} />
-        <StatusBar barStyle="light-content" />
         <View style={s.body}>
           <Ionicons name="close-circle-outline" size={56} color={colors.danger} />
           <Text style={s.title}>This invitation isn’t valid</Text>
@@ -229,7 +232,7 @@ export default function LiveJoinScreen() {
 
 >
       <Stack.Screen options={{ headerShown: false }} />
-      <StatusBar barStyle="light-content" />
+      {/* No StatusBar override — same reason as the render states above. */}
       <View style={s.body}>
         <Ionicons name="lock-closed-outline" size={48} color={colors.primary} />
         <Text style={s.title}>This live is protected</Text>

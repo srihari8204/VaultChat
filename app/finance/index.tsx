@@ -12,7 +12,7 @@
 import React, { useCallback, useState } from 'react';
 import { useFinanceTheme } from '../../components/finance/useFinanceTheme';
 import { useTheme } from '../../lib/theme';
-import { View, Text, ScrollView, StyleSheet, StatusBar, Pressable } from 'react-native';
+import { View, Text, ScrollView, StyleSheet, Pressable } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { Stack, useRouter, useFocusEffect } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -82,7 +82,13 @@ export default function FinanceDashboard() {
   return (
     <View style={s.screen}>
       <Stack.Screen options={{ headerShown: false }} />
-      <StatusBar barStyle={scheme === 'dark' ? 'light-content' : 'dark-content'} backgroundColor="transparent" translucent />
+      {/* No StatusBar override. This was
+              barStyle={scheme === 'dark' ? 'light-content' : 'dark-content'}
+          which re-derives the decision app/_layout.tsx already makes from the same
+          `scheme` — a second copy, and somewhere for the two to drift apart. The
+          backgroundColor and translucent props came off with it: both are no-ops
+          under the edge-to-edge enforcement on modern targetSdk.
+          Guarded by lib/statusBarOwner.selftest.ts. */}
       <ScrollView
         contentContainerStyle={[s.scroll, { paddingTop: insets.top + 12, paddingBottom: insets.bottom + 32 }]}
         showsVerticalScrollIndicator={false}

@@ -5,7 +5,7 @@
 // settings (VB_AUTO_MAX_BYTES, enforced in the engine).
 
 import React from 'react';
-import { View, ScrollView, StyleSheet, TouchableOpacity, Switch, StatusBar, Platform } from 'react-native';
+import { View, ScrollView, StyleSheet, TouchableOpacity, Switch, Platform } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { Stack, useRouter } from 'expo-router';
 import { useTheme } from '../lib/theme';
@@ -19,7 +19,7 @@ import {
 
 export default function VaultBeamSettings() {
   const router = useRouter();
-  const { colors, scheme } = useTheme();
+  const { colors } = useTheme();   // scheme went with the StatusBar removed below
   const s = useVBSettings();
   const auto = s.mode === 'auto';
 
@@ -30,7 +30,14 @@ export default function VaultBeamSettings() {
     <View style={[styles.screen, { backgroundColor: C.bg }]}>
       <AuroraBackground />
       <Stack.Screen options={{ headerShown: false }} />
-      <StatusBar barStyle={scheme === 'dark' ? 'light-content' : 'dark-content'} />
+      {/* No <StatusBar> here. It used to be
+              barStyle={scheme === 'dark' ? 'light-content' : 'dark-content'}
+          which is the SAME decision app/_layout.tsx:883 already makes from the
+          same `scheme` — one theme-aware owner, and this was a second copy of it.
+          Duplicating it buys nothing and is a place for the two to disagree.
+          A screen may still own the bar when its surface is dark at EVERY theme
+          (a call, the camera, a media or story viewer) or when it goes immersive;
+          this screen follows the palette, so the root bar decides. */}
       <View style={[styles.header, { borderBottomColor: C.glassStroke }]}>
         <TouchableOpacity accessibilityRole="button" accessibilityLabel="Back" onPress={() => router.back()} hitSlop={10} style={styles.hBtn}>
           <Ionicons name="arrow-back" size={22} color={C.text} />

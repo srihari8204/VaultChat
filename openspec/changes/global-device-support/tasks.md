@@ -20,12 +20,39 @@
 
 ## 2. Chrome ownership — status bar and keyboard
 
-- [ ] 2.1 Remove the `react-native` `StatusBar` import and its usage from the screens that
-      override the root bar; `app/_layout.tsx` becomes the only owner. Drop the
-      `backgroundColor`/`translucent` props that are no-ops on targetSdk 35+.
-      **COUNT CORRECTED 2026-10-02: 21 screens, not 42** — about half have already been
-      migrated by other work. Re-count before estimating.
-- [ ] 2.2 Add a guardrail asserting no file outside `app/_layout.tsx` imports `StatusBar` from `react-native`, with a documented-exemption mechanism matching the existing selftest idiom.
+- [x] 2.1 **DONE 2026-10-02, and the premise was wrong twice over.**
+
+      The task says 42 screens. A first grep said 21. Both were counting the WORD
+      `StatusBar`, which appears in historical comments on seven screens that render nothing.
+      Only **16** files actually rendered the element, and most were CORRECT to:
+      always-dark call/camera/viewer surfaces, immersive screens that hide the bar, and
+      `reader.tsx` with its own palette.
+
+      Three were genuine defects, and two of them sit in nested directories that neither
+      earlier count reached (`app/*.tsx` globs miss them) — found only once the task 2.2
+      guardrail walked the whole tree:
+      - `app/live/join/[code].tsx` — **a real user-visible bug.** Three render states forced
+        `barStyle="light-content"` while the surface follows the app palette
+        (`colors.glassSoft` / `colors.primary` over a transparent container), so in LIGHT
+        mode the clock and battery were white on white and invisible.
+      - `app/finance/index.tsx` — re-derived `_layout`'s decision from the same `scheme`, plus
+        `backgroundColor`/`translucent` props that are no-ops under edge-to-edge.
+      - `app/vaultbeam-settings.tsx` — the same duplication; removed with its now-unused
+        `scheme` binding.
+
+      13 screens still render a bar and every one is a justified exemption in the guardrail.
+- [x] 2.2 **DONE 2026-10-02** — `lib/statusBarOwner.selftest.ts`. Implemented as a named
+      ALLOWLIST rather than a ban, because the rule is conditional: an always-dark surface
+      (call, camera, media/story viewer), an immersive screen that HIDES the bar, and
+      `app/reader.tsx` (its own light/sepia/dark palette, independent of the app theme) are
+      all right to own it. 13 exemptions, each with its reason. It also fails on a STALE
+      exemption, so the list cannot rot into a silent permission.
+
+      It strips comments before matching, which matters: the bare word `StatusBar` appears in
+      historical comments ("Was: `StatusBar.currentHeight` …") on seven screens, and counting
+      those is how task 2.1 came to believe 42 screens were involved. It also caught its own
+      first false positive — the comment left where a removed StatusBar used to be quotes the
+      element, so a naive match flagged the file that had just been fixed.
 - [x] 2.3 Fix `app/security-questions.tsx` — replace `behavior={undefined}` (inert on Android) with the shared `KeyboardSafe`. Account recovery must keep the focused field and its submit control visible.
       The gradient stays OUTSIDE the wrapper: `KeyboardSafe` avoids by padding, and an `absoluteFillObject` child resolves against the parent's PADDING box, so a background placed inside would be clipped by the keyboard inset. `keyboardOnly` because the CTA is inside a `flexGrow` ScrollView that already has `keyboardShouldPersistTaps`.
 - [x] 2.4 Route the 5 `behavior='padding'`-inside-`Modal` composers through `KeyboardSafe`: `app/family.tsx` (3 sheets), `app/group-notes.tsx`, `app/group-calendar.tsx`. A React Native `Modal` is its own window and never receives the activity's `adjustResize`.
