@@ -853,6 +853,81 @@ io.on('connection', (socket) => {
     socket.to(`chat:${chatId}`).emit('live_location_stop', { userId: socket.data.uid });
   });
 
+  // Family Space Emergency Connect — the kill-safe leg (F7.1).
+  //
+  // The escalating guardian's device emits this alongside the E2EE audit
+  // message. We relay it into the circle room AND wake members whose socket is
+  // dead, exactly like call_incoming above — that is the only path in this app
+  // proven to reach a killed phone.
+  //
+  // The payload is CONTENT-FREE by necessity and by policy: the alert text
+  // lives in the E2EE system message, which this server cannot read, and the
+  // client's own rule is never to put plaintext in a notification. The push
+  // says only "open the app"; the real line is decrypted on arrival.
+  socket.on('family_emergency', async ({ chatId }) => {
+    if (!chatId) return;
+    // Same membership gate (and per-socket cache) as live location — a Circle
+    // IS a chat, so this is the identical question.
+    socket.data.liveLocOk = socket.data.liveLocOk || {};
+    if (socket.data.liveLocOk[chatId] === undefined) {
+      try {
+        const r = await db.queryAs(socket.data.uid,
+          `SELECT 1 FROM chat_members WHERE chat_id = $1 AND user_id = $2 AND left_at IS NULL LIMIT 1`,
+          [chatId, socket.data.uid]);
+        socket.data.liveLocOk[chatId] = r.rowCount > 0;
+      } catch { socket.data.liveLocOk[chatId] = false; }
+    }
+    if (!socket.data.liveLocOk[chatId]) return;
+
+    socket.to(`chat:${chatId}`).emit('family_emergency', { chatId, userId: socket.data.uid });
+
+    try {
+      const mem = await db.query(
+        `SELECT user_id FROM chat_members WHERE chat_id = $1 AND left_at IS NULL AND user_id <> $2`,
+        [chatId, socket.data.uid],
+      );
+      // Who is ALREADY covered by the relay above? Exactly the sockets in the
+      // circle room — that is where the client both joins and registers its
+      // family_emergency listener (lib/family/presence.ts subscribeCircle).
+      //
+      // Gating on "has any live socket" was WRONG: `user:<uid>` is joined
+      // unconditionally on connect (see socket.join above), so a guardian with
+      // the app open on any other screen — the commonest running state — was
+      // skipped by the push AND missed by the room relay, and got nothing at
+      // all. Room membership is the only gate that matches the relay.
+      //
+      // One fetchSockets for the room, not one per member.
+      const inRoom = await io.in(`chat:${chatId}`).fetchSockets();
+      const covered = new Set(
+        inRoom.map((sk) => String(sk.data?.uid ?? '')).filter(Boolean),
+      );
+      const offline = mem.rows
+        .map((row) => row.user_id)
+        .filter((uid) => !covered.has(String(uid)));
+      if (!offline.length) return;
+
+      // devices.user_id is UUID (migrations/005_devices.sql) — casting the
+      // parameter to text[] makes Postgres resolve `uuid = text`, which has no
+      // operator and no implicit cast, so the statement throws and the
+      // best-effort catch below swallows it. Every other batch lookup in this
+      // repo uses ::uuid[] for exactly this reason.
+      const t = await db.query(
+        `SELECT push_token FROM devices WHERE user_id = ANY($1::uuid[]) AND push_token IS NOT NULL`,
+        [offline],
+      );
+      const tokens = t.rows.map((x) => x.push_token).filter(Boolean);
+      if (!tokens.length) return;
+
+      await sendPushToTokens(tokens, {
+        title: 'Family Space',
+        body: 'Emergency alert - open VaultChat',
+        channelId: 'family-critical',   // must match lib/family/notify.ts
+        sound: 'default',
+        data: { type: 'family-emergency', circleId: String(chatId) },
+      });
+    } catch (e) { /* best-effort wake-up push */ }
+  });
+
   // Route via fanOutToChat so it reaches every member's user-room (the chat
   // list shows "typing…" too, not just the open chat) and honours hide_typing
   // ghost-mode. chatId is included so each screen filters to the right chat.

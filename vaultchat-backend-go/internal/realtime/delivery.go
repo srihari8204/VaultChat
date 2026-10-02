@@ -282,8 +282,16 @@ func (h *Hub) startViewerSweep() {
 var expoHTTP = &http.Client{Timeout: 15 * time.Second}
 
 func (h *Hub) sendCallWakePush(ctx context.Context, calleeID, title, body string, data map[string]any) {
+	h.sendWakePush(ctx, calleeID, title, body, "calls", "incoming_call", data)
+}
+
+// sendWakePush is the same transport with the Android channel (and optional
+// iOS/Android category) left to the caller, so a non-call wake — Family Space
+// Emergency Connect — can route to its own channel instead of ringing like a
+// call. Pass an empty categoryID to omit it.
+func (h *Hub) sendWakePush(ctx context.Context, userID, title, body, channelID, categoryID string, data map[string]any) {
 	rows, err := db.SysPool.Query(ctx,
-		`SELECT push_token FROM devices WHERE user_id = $1 AND push_token IS NOT NULL`, calleeID)
+		`SELECT push_token FROM devices WHERE user_id = $1 AND push_token IS NOT NULL`, userID)
 	if err != nil {
 		return
 	}
@@ -301,8 +309,11 @@ func (h *Hub) sendCallWakePush(ctx context.Context, calleeID, title, body string
 
 	base := map[string]any{
 		"sound": "default", "title": title, "body": body, "data": data,
-		"priority": "high", "channelId": "calls", "categoryId": "incoming_call",
+		"priority": "high", "channelId": channelID,
 		"_displayInForeground": true,
+	}
+	if categoryID != "" {
+		base["categoryId"] = categoryID
 	}
 	var dead []string
 	for i := 0; i < len(tokens); i += 100 {
@@ -331,6 +342,57 @@ func (h *Hub) sendCallWakePush(ctx context.Context, calleeID, title, body string
 	}
 	if len(dead) > 0 {
 		_, _ = db.SysPool.Exec(ctx, `DELETE FROM devices WHERE push_token = ANY($1::text[])`, dead)
+	}
+}
+
+// familyEmergencyWake pushes the Emergency Connect alert to every circle member
+// the socket relay did NOT already reach.
+//
+// "Did not reach" means: not present in the circle's socket room. That room is
+// exactly where the client joins AND registers its family_emergency listener
+// (lib/family/presence.ts subscribeCircle), so room membership is the only gate
+// that matches the relay.
+//
+// Gating on hasLiveSocket() instead was WRONG: a socket joins `user:<uid>` on
+// connect but `chat:<id>` only while the Family screen is open, so a guardian
+// with the app running on any other screen — the commonest state — was missed
+// by the relay AND skipped by the push, receiving nothing at all.
+//
+// Failure direction is deliberate: if the roster is incomplete (e.g. a
+// multi-node deployment where FetchSockets sees only this node), the member is
+// treated as uncovered and gets a push. A duplicate alert is a far better
+// failure than a silent one.
+func (h *Hub) familyEmergencyWake(ctx context.Context, chatID, senderID string) {
+	rows, err := db.SysPool.Query(ctx,
+		`SELECT user_id FROM chat_members WHERE chat_id = $1 AND left_at IS NULL AND user_id <> $2`,
+		chatID, senderID)
+	if err != nil {
+		return
+	}
+	var members []string
+	for rows.Next() {
+		var uid string
+		if rows.Scan(&uid) == nil && uid != "" {
+			members = append(members, uid)
+		}
+	}
+	rows.Close()
+
+	// callRoster is generic over any socket room despite its name — it returns
+	// the distinct uids present, excluding the caller.
+	covered := map[string]bool{}
+	for _, uid := range h.callRoster(socket.Room("chat:"+chatID), senderID) {
+		covered[uid] = true
+	}
+
+	data := map[string]any{"type": "family-emergency", "circleId": chatID}
+	for _, uid := range members {
+		if covered[uid] {
+			continue // already alerted by the socket relay
+		}
+		// channelId must match FAMILY_CRITICAL_CHANNEL_ID in lib/family/notify.ts.
+		h.sendWakePush(ctx, uid, "Family Space", "Emergency alert - open VaultChat",
+			"family-critical", "", data)
 	}
 }
 

@@ -13,9 +13,9 @@
 import * as Location from 'expo-location';
 import { emit, getSocket, joinChatRoom, leaveChatRoom } from '../socket';
 import { newLiveKey, sealJSON, openJSON, putLiveKey, getLiveKey, clearLiveKey } from '../liveLocationCrypto';
-import { sendMessage, getMessages, type Message } from '../chatService';
+import { sendMessage, getMessages, decryptFromChat, type Message } from '../chatService';
 import { type Geofence } from './geofence';
-import { getPlaces } from './store';
+import { getPlaces, getSettings, getIngested, addIngested } from './store';
 import { readBattery } from './battery';
 import { processFix } from './fixPipeline';
 import { recordSample } from './history';
@@ -23,10 +23,18 @@ import {
   startBackgroundPresence, stopBackgroundPresence, updateBackgroundKey,
   hasBackgroundPermission, isBackgroundRunning,
 } from './background';
-import { type FamilyPing, type MemberPresence } from './types';
+import { nextMotion, shouldPublish, type MotionState } from './cadence';
+import { parseFamilyEvent, ingestAction } from './events';
+import { recordAlert } from './alerts';
+import { notifyFamilyAlert, notifyEmergencyConnect } from './notify';
+import { ESCALATION_GLYPH } from './escalation';
+import { onMemberConfirmedOk } from './escalationService';
+import { DEFAULT_FAMILY_SETTINGS, type FamilyPing, type MemberPresence } from './types';
 import { type LatLng } from '../nav/geo';
 
 const LIVE_WINDOW_MS = 24 * 3600 * 1000;
+/** Coalesce message-driven history refreshes (see scheduleRefresh). */
+const REFRESH_DEBOUNCE_MS = 1_500;
 const until = () => Date.now() + LIVE_WINDOW_MS;
 
 // ── broadcast state (my location → my circles) ──
@@ -41,6 +49,19 @@ const places = new Map<string, Geofence[]>();
 // every restart re-announced wherever you already were. It is now persisted by
 // fixPipeline.ts, which is also what lets the background task continue the run.
 let selfCb: ((p: MemberPresence) => void) | null = null;
+
+// ── publish cadence (F1.4 / F2.3) ────────────────────────────────────────────
+// The watcher still fires every 8 s / 15 m and every fix is still fed to the
+// geofence engine and the history store — only the network emit is rate-limited,
+// by motion state. `lastPublishAt = 0` means "publish the next fix immediately",
+// which is what makes toggling sharing on (and an SOS) feel instant.
+//
+// The BACKGROUND publisher is deliberately left alone: it already runs at
+// timeInterval 60 s / distanceInterval 75 m with pausesUpdatesAutomatically, so
+// it is coarser than anything this throttle would impose.
+let motion: MotionState = 'stationary';
+let lastPublishAt = 0;
+let baseIntervalMs = DEFAULT_FAMILY_SETTINGS.intervalMs;
 
 async function deliverKeys() {
   if (!myKey) return;
@@ -62,9 +83,14 @@ async function onFix(loc: Location.LocationObject) {
   // always show myself, now with the battery the roster chip was already drawing
   selfCb?.({ userId: myId, pos, speed: spd, ts, battery: bat.level, charging: bat.charging });
 
-  const blob = sharing && myKey
+  motion = nextMotion(motion, spd);
+  const now = Date.now();
+  const due = shouldPublish(lastPublishAt, now, motion, baseIntervalMs);
+
+  const blob = sharing && myKey && due
     ? sealJSON(myKey, { lat: pos.lat, lng: pos.lng, spd, ts, bat: bat.level, chg: bat.charging } as FamilyPing)
     : null;
+  if (blob) lastPublishAt = now;   // stamped once per fix, not once per circle
   const u = until();
 
   for (const cid of circleIds) {
@@ -90,6 +116,11 @@ export async function startPresence(o: StartPresenceOpts): Promise<void> {
   const perm = await Location.requestForegroundPermissionsAsync();
   if (perm.status !== 'granted') throw new Error('Location permission is required for Family Circle.');
   circleIds = o.circleIds; myId = o.myId; myName = o.myName || 'A member'; selfCb = o.onSelf; sharing = o.share;
+  // Fresh session: publish the very first fix, and honour the user's configured
+  // moving cadence as the floor. A bad/missing setting falls back in cadence.ts.
+  motion = 'stationary';
+  lastPublishAt = 0;
+  baseIntervalMs = (await getSettings().catch(() => DEFAULT_FAMILY_SETTINGS)).intervalMs;
   for (const cid of circleIds) places.set(cid, await getPlaces(cid));
   if (sharing) { myKey = newLiveKey(); await deliverKeys(); await handOffToBackground(); }
   watcher = await Location.watchPositionAsync(
@@ -119,6 +150,7 @@ export async function setSharing(share: boolean): Promise<void> {
   sharing = share;
   if (share) {
     myKey = newLiveKey();
+    lastPublishAt = 0;   // turning sharing on (incl. via SOS) publishes the next fix at once
     await deliverKeys();
     await handOffToBackground();
   } else {
@@ -164,19 +196,109 @@ function lkFromMessage(m: Message): string | null {
   try { const c = JSON.parse(m.content); return (c.live && typeof c.lk === 'string') ? c.lk : null; } catch { return null; }
 }
 
+/**
+ * Turn OTHER members' announcements — crossings, SOS, check-ins — into local
+ * alerts + notifications.
+ *
+ * These are all evaluated or composed on the sender's phone; every other
+ * device only ever saw them as messages in the thread, so the guardian's inbox
+ * stayed empty (F4.2 for crossings, F5.1 for SOS/check-ins). This closes that
+ * half, reusing the message list the key-capture pass already fetched — no
+ * extra round trip.
+ *
+ * Both `system` (crossings, SOS) and `text` (check-ins) are examined, because
+ * app/family.tsx sends check-ins as ordinary text. Every message looked at is
+ * marked ingested — INCLUDING ones that turn out not to be family events — so a
+ * chatty circle is decrypted at most once per message, not on every refresh.
+ */
+async function ingestFamilyEvents(circleId: string, meId: string, msgs: Message[]): Promise<void> {
+  const already = new Set(await getIngested(circleId));
+  const seen: string[] = [];
+  const now = Date.now();
+
+  for (const m of msgs) {
+    const id = String(m?.id ?? '');
+    if (!id || already.has(id)) continue;
+    seen.push(id);
+
+    if ((m.type !== 'system' && m.type !== 'text') || !m.content || m.deletedAt) continue;
+    // My own events are already in my inbox (fixPipeline for a crossing, the
+    // SOS/check-in handlers for the rest), and notifying someone about their
+    // own walk to the shops is noise.
+    if (!m.senderId || String(m.senderId) === String(meId)) continue;
+
+    let text = '';
+    try { text = await decryptFromChat(circleId, m.senderId, m.content, m.id); } catch { continue; }
+    const ev = parseFamilyEvent(text);
+    if (!ev) continue;
+
+    // A member's "I'm OK" cancels the ladder this device is running for them.
+    // The ladder lives only on the requesting guardian's device, so ingesting
+    // the confirmation IS the cancel path (see escalationService OWNERSHIP).
+    // Done before the age gate: a stale confirmation should still stop a
+    // ladder, even when it is too old to be worth announcing.
+    if (ev.text.startsWith(ESCALATION_GLYPH.ok)) {
+      await onMemberConfirmedOk(circleId, String(m.senderId)).catch(() => {});
+    }
+
+    const at = new Date(m.createdAt).getTime();
+    const action = ingestAction(now - at);
+    if (action === 'skip') continue;               // stale backlog — marked seen, dropped
+
+    const alert = await recordAlert({
+      circleId, kind: ev.kind, actorId: String(m.senderId), actorName: ev.actorName,
+      text: ev.text, at: Number.isFinite(at) ? at : now,
+    });
+    // recordAlert returns null when deduped — don't notify for a duplicate.
+    if (!alert || action !== 'notify') continue;
+
+    if (ev.text.startsWith(ESCALATION_GLYPH.emergency)) {
+      // Emergency Connect gets the full-screen alarm, not the ordinary tray
+      // notification. The age gate above already kept a stale backlog from
+      // sounding a siren on first open.
+      await notifyEmergencyConnect(ev.text, circleId);
+    } else {
+      await notifyFamilyAlert(alert, meId);
+    }
+  }
+
+  await addIngested(circleId, seen);
+}
+
 /** Subscribe to a circle's live member positions. Captures E2E keys from history + live 'location' messages. */
 export async function subscribeCircle(circleId: string, meId: string, onEvent: (e: PresenceEvent) => void): Promise<() => void> {
   await joinChatRoom(circleId);
   let disposed = false, refreshing = false;
+  let refreshT: ReturnType<typeof setTimeout> | null = null;
 
   const captureFromHistory = async () => {
     if (refreshing) return; refreshing = true;
     try {
       const msgs = await getMessages(circleId, { limit: 60 });
       for (const m of msgs) { const lk = lkFromMessage(m); if (lk && m.senderId) putLiveKey(circleId, String(m.senderId), lk); }
+      // Same fetch feeds the family-alert ingestion — never fail key capture over it.
+      await ingestFamilyEvents(circleId, meId, msgs).catch(() => {});
     } catch {} finally { refreshing = false; }
   };
   await captureFromHistory();
+
+  /**
+   * Trailing-debounced refresh for message-driven triggers.
+   *
+   * Ingestion widened the trigger from 'location' (rare) to every 'system' and
+   * 'text' message, and each refresh is a 60-message fetch. The `refreshing`
+   * flag only stops CONCURRENT runs, not repeated ones, so an active circle
+   * chat would otherwise fire one fetch per message. Coalescing a burst into a
+   * single pass costs at most a second and a half of latency on an event the
+   * user is about to be notified of anyway.
+   *
+   * The key-miss path in onUpd stays IMMEDIATE — a live position is waiting on
+   * that key.
+   */
+  const scheduleRefresh = () => {
+    if (disposed || refreshT) return;
+    refreshT = setTimeout(() => { refreshT = null; if (!disposed) captureFromHistory(); }, REFRESH_DEBOUNCE_MS);
+  };
 
   const s = await getSocket();
   const onUpd = (e: any) => {
@@ -203,13 +325,33 @@ export async function subscribeCircle(circleId: string, meId: string, onEvent: (
     clearLiveKey(circleId, String(e.userId));
     onEvent({ userId: String(e.userId), presence: null });
   };
-  const onNewMsg = (e: any) => { if (!disposed && e && String(e.chatId) === String(circleId) && e.type === 'location') captureFromHistory(); };
+  // 'location' re-captures a rotated live key; a crossing/SOS arrives as
+  // 'system' and a check-in as 'text' (see ingestFamilyEvents).
+  const onNewMsg = (e: any) => {
+    if (disposed || !e || String(e.chatId) !== String(circleId)) return;
+    if (e.type === 'location' || e.type === 'system' || e.type === 'text') scheduleRefresh();
+  };
+
+  // Emergency Connect relayed while the app is up. Faster than waiting for the
+  // audit message to be fetched and decrypted, and notifyEmergencyConnect uses
+  // a fixed id, so if ingestion also fires it refreshes the same alert rather
+  // than stacking a second siren.
+  const onEmergency = (e: any) => {
+    if (disposed || !e || String(e.chatId) !== String(circleId)) return;
+    if (String(e.userId ?? '') === String(meId)) return;   // our own escalation
+    notifyEmergencyConnect('Emergency alert in this circle - open to see details', circleId)
+      .catch(() => {});
+    scheduleRefresh();   // pull the audit line in for the inbox
+  };
 
   s.on('live_location_update', onUpd);
   s.on('live_location_stop', onStop);
   s.on('new_message', onNewMsg);
+  s.on('family_emergency', onEmergency);
   return () => {
     disposed = true;
+    if (refreshT) { clearTimeout(refreshT); refreshT = null; }
+    s.off('family_emergency', onEmergency);
     s.off('live_location_update', onUpd);
     s.off('live_location_stop', onStop);
     s.off('new_message', onNewMsg);

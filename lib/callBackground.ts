@@ -29,6 +29,15 @@ notifee.onBackgroundEvent(async ({ type, detail }) => {
     }
     return;
   }
+  // Family Space Emergency Connect: "Acknowledge" pressed on the alarm while
+  // backgrounded/killed. Lazy require, same as the two handlers above, so the
+  // headless load path stays light.
+  if (data?.type === 'family-emergency') {
+    if (type === EventType.ACTION_PRESS && detail?.pressAction?.id === 'family-emergency-ack') {
+      try { await require('./family/notify').cancelEmergencyConnect(); } catch {}
+    }
+    return;
+  }
   if (data?.type !== 'call') return;
   const id = detail?.pressAction?.id;
   if (type === EventType.ACTION_PRESS && id === 'decline') {
@@ -51,6 +60,17 @@ TaskManager.defineTask(CALL_BG_TASK, async ({ data, error }: any) => {
     const d = content?.data ?? content;
     if (d?.type === 'call' && d?.fromUid) {
       await displayIncomingCall({ fromUid: d.fromUid, callerName: d.callerName, callType: d.callType, chatId: d.chatId });
+      return;
+    }
+    // Emergency Connect wake-up push (F7.1). This is the ONLY path that reaches
+    // a guardian whose app is dead — the escalation ladder's own timer stops
+    // with the process. The push is content-free (the server cannot read the
+    // E2EE audit line), so the alarm shows a generic body; the real text is
+    // decrypted and inboxed when the app opens.
+    if (d?.type === 'family-emergency') {
+      const { notifyEmergencyConnect } = require('./family/notify');
+      await notifyEmergencyConnect('Emergency alert in your family circle - open to see details',
+                                   String(d.circleId ?? ''));
     }
   } catch {}
 });

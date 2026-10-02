@@ -28,6 +28,10 @@ import {
 } from '../lib/family/presence';
 import { requestBackgroundPermission } from '../lib/family/background';
 import { loadAlerts, recordAlert, useUnreadCount } from '../lib/family/alerts';
+import {
+  requestCheckin, confirmImOk, startEscalationTicker, stopEscalationTicker,
+} from '../lib/family/escalationService';
+import { MISSES_BEFORE_EMERGENCY } from '../lib/family/escalation';
 import { type CircleMember, type MemberPresence, STALE_MS } from '../lib/family/types';
 import { sendMessage, getMessages, decryptFromChat } from '../lib/chatService';
 import { getCurrentUserAsync } from './(constants)/authService';
@@ -127,9 +131,13 @@ export default function FamilySpaceScreen() {
           setPresences((prev) => { const n = { ...prev }; if (e.presence) n[e.userId] = e.presence; else delete n[e.userId]; return n; });
         });
         if (cancelled) u(); else unsub = u;
+        // The escalation ladder runs on the requesting guardian's device only,
+        // so it ticks wherever Family Space is open — a cold start settles any
+        // ladder that came due while away (advance() collapses those).
+        if (!cancelled) startEscalationTicker([active.id], me.id);
       } catch (err: any) { if (!cancelled) Alert.alert('Family Space', err?.message ?? 'Could not start location.'); }
     })();
-    return () => { cancelled = true; unsub?.(); stopPresence(); };
+    return () => { cancelled = true; unsub?.(); stopPresence(); stopEscalationTicker(); };
   }, [active?.id, me?.id]);
 
   // stop broadcasting when the screen loses focus (map still resumes on return)
@@ -288,10 +296,43 @@ export default function FamilySpaceScreen() {
     } catch (e: any) { Alert.alert('Check-in', e?.message ?? 'Could not send.'); }
   };
 
+  // ── Escalation ladder (F6) ───────────────────────────────────────────
+  /** Guardian asks a member to check in; the ladder escalates if they don't. */
+  const askCheckin = (m: CircleMember) => {
+    if (!active || !me) return;
+    Alert.alert(
+      `Ask ${m.name} to check in?`,
+      `They'll be asked now, reminded twice if there's no reply, and after ${MISSES_BEFORE_EMERGENCY} missed reminders the circle gets an emergency alert.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Ask', onPress: async () => {
+          try {
+            await requestCheckin({
+              circleId: active.id, subjectId: m.id, subjectName: m.name,
+              meId: me.id, meName: me.name,
+            });
+            setBump((b) => b + 1);
+          } catch (e: any) { Alert.alert('Check-in', e?.message ?? 'Could not send the request.'); }
+        } },
+      ],
+    );
+  };
+
+  /** Member answers a request. Harmless when no ladder is running for them. */
+  const sendImOk = async () => {
+    if (!active || !me) return;
+    setCheckin(false);
+    try {
+      await confirmImOk(active.id, me.id, me.name);
+      setBump((b) => b + 1);
+    } catch (e: any) { Alert.alert('Check-in', e?.message ?? 'Could not send.'); }
+  };
+
   // ── Member management (guardians) ────────────────────────────────────
   const memberActions = (m: CircleMember) => {
     if (!active || !me || m.id === me.id || myRole !== 'guardian') return;
     Alert.alert(m.name, 'Manage this member', [
+      { text: 'Ask to check in', onPress: () => askCheckin(m) },
       { text: m.role === 'guardian' ? 'Make member' : 'Make guardian', onPress: async () => {
         try { await setGuardian(active.id, m.id, m.role !== 'guardian'); refreshMembers(); }
         catch (e: any) { Alert.alert('Role', e?.message ?? 'Could not change role.'); }
@@ -574,6 +615,13 @@ export default function FamilySpaceScreen() {
             </View>
             <TextInput value={note} onChangeText={setNote} placeholder="Add a note (optional)" placeholderTextColor={colors.textFaint}
               style={[st.noteInput, { color: colors.text, borderColor: colors.border, backgroundColor: colors.surface }]} />
+            {/* Answers a guardian's check-in request and stops its ladder. Shown
+                always: the request arrives as a notification, and the member
+                should be able to answer it without hunting for context. */}
+            <TouchableOpacity onPress={sendImOk} style={[st.okBtn, { borderColor: colors.success }]}>
+              <Text style={{ fontSize: 16 }}>👍</Text>
+              <Text style={{ color: colors.success, fontWeight: '800', fontSize: 14 }}>I&apos;m OK — answer a check-in request</Text>
+            </TouchableOpacity>
           </View>
         </KeyboardAvoidingView>
       </Modal>
@@ -669,6 +717,8 @@ const st = StyleSheet.create({
   modalTitle: { fontSize: 17, fontWeight: '800', marginBottom: 6, textAlign: 'center' },
   checkGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
   checkBtn: { flexBasis: '47%', flexGrow: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, height: 52, borderRadius: 14, borderWidth: 1 },
+  okBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
+    height: 48, borderRadius: 13, borderWidth: 1.5, marginTop: 10 },
   noteInput: { borderWidth: 1, borderRadius: 12, paddingHorizontal: 12, height: 46, marginTop: 4, fontSize: 14.5 },
   saveBtn: { width: 46, height: 46, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
   mRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 13, borderTopWidth: StyleSheet.hairlineWidth },
