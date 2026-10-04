@@ -1,7 +1,8 @@
 // components/finance/chitti/AuctionsTab.tsx — record a month's auction
 // (winner, bid, commission → per-member dividend) and list past auctions.
+// The form's draft is held by the group screen, so it survives a tab switch.
 
-import React, { useState } from 'react';
+import React from 'react';
 import { View, Text, TouchableOpacity, Alert } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useFinanceTheme } from '../useFinanceTheme';
@@ -15,15 +16,22 @@ import {
 import { makeChittiStyles } from './chittiStyles';
 import { MonthChips } from './MonthChips';
 
-export function AuctionsTab({ group: g, members, auctions, month, onMonth, onChanged }: {
+export interface AuctionDraft { winnerId: string | null; bid: string; commission: string }
+export const EMPTY_AUCTION_DRAFT: AuctionDraft = { winnerId: null, bid: '', commission: '' };
+
+export function AuctionsTab({ group: g, members, auctions, month, onMonth, onChanged, draft, setDraft }: {
   group: ChittiGroup; members: ChittiMember[]; auctions: ChittiAuction[];
-  month: number; onMonth: (m: number) => void; onChanged: () => void;
+  month: number; onMonth: (m: number) => void;
+  /** Resolves once the group's rows are re-read, so Record stays latched until then. */
+  onChanged: () => Promise<void>;
+  draft: AuctionDraft; setDraft: React.Dispatch<React.SetStateAction<AuctionDraft>>;
 }) {
   const FIN = useFinanceTheme();
   const s = React.useMemo(() => makeChittiStyles(FIN), [FIN]);
-  const [winnerId, setWinnerId] = useState<string | null>(null);
-  const [bid, setBid] = useState('');
-  const [commission, setCommission] = useState('');
+  const { winnerId, bid, commission } = draft;
+  const setWinnerId = (id: string) => setDraft(d => ({ ...d, winnerId: id }));
+  const setBid = (t: string) => setDraft(d => ({ ...d, bid: t }));
+  const setCommission = (t: string) => setDraft(d => ({ ...d, commission: t }));
 
   const submitAuction = async () => {
     // `|| 0` SWALLOWED THE HARDENED PARSER (2026-09-17). num() answers NaN for
@@ -56,8 +64,8 @@ export function AuctionsTab({ group: g, members, auctions, month, onMonth, onCha
     try {
       await recordAuction(g, month, winnerId, winner?.name ?? '—', b, c);
     } catch (e: any) { return Alert.alert('Could not record the auction', e?.message ?? 'Nothing was saved. Try again.'); }
-    setBid(''); setCommission(''); setWinnerId(null);
-    onChanged();
+    setDraft(EMPTY_AUCTION_DRAFT);
+    await onChanged();
   };
   // Mirrors recordAuction exactly, so the preview can never promise a number
   // the recorded auction won't produce.
@@ -90,7 +98,7 @@ export function AuctionsTab({ group: g, members, auctions, month, onMonth, onCha
           <View style={s.winnerWrap} accessibilityRole="radiogroup" accessibilityLabel="Winner">
             {members.map(m => (
               <TouchableOpacity key={m.id} style={[s.winnerChip, winnerId === m.id && s.winnerChipOn]} onPress={() => setWinnerId(m.id)}
-                accessibilityRole="radio" accessibilityState={{ selected: winnerId === m.id }}
+                accessibilityRole="radio" accessibilityState={{ checked: winnerId === m.id }}
                 accessibilityLabel={`${m.name}, member ${m.number}`}>
                 <Text numberOfLines={1} style={[s.winnerTxt, winnerId === m.id && { color: FIN.onBrand }]}>{m.name}</Text>
               </TouchableOpacity>

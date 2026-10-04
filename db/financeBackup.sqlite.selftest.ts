@@ -66,6 +66,32 @@ try { if (!hasAddress(old)) old.exec(`ALTER TABLE chitti_members ADD COLUMN addr
 catch { reran = false; }
 check('migration is safe to run on every boot', reran && hasAddress(old));
 
+// ── 2b. ledger_entries.compounding: added to an old book, every loan unchanged ──
+check('ledger_entries has compounding (fresh install)', colsOf('ledger_entries').includes('compounding'));
+{
+  const book = new Database(':memory:');
+  book.exec(`CREATE TABLE ledger_entries (id TEXT PRIMARY KEY, user_id TEXT NOT NULL, direction TEXT NOT NULL,
+    name TEXT NOT NULL, mobile TEXT, interest_type TEXT NOT NULL, principal REAL NOT NULL, rate REAL NOT NULL,
+    rate_mode TEXT NOT NULL, period TEXT NOT NULL, start_date INTEGER NOT NULL, end_date INTEGER,
+    remaining REAL NOT NULL, status TEXT NOT NULL, notes TEXT, created_at INTEGER NOT NULL, last_updated INTEGER NOT NULL);`);
+  book.prepare(`INSERT INTO ledger_entries VALUES ('L1','u1','lend','Ramesh',NULL,'compound',100000,2,'percent','monthly',1,NULL,100000,'running',NULL,1,1)`).run();
+  // Mirrors the guard in financeDb.ts financeDb().
+  const hasCol = () => (book.pragma('table_info(ledger_entries)') as any[]).some(c => c.name === 'compounding');
+  if (!hasCol()) book.exec(`ALTER TABLE ledger_entries ADD COLUMN compounding INTEGER`);
+  check('compounding added to the old book', hasCol());
+  eq('an existing compound loan keeps NULL (read as yearly, its old amount)',
+    (book.prepare(`SELECT compounding FROM ledger_entries WHERE id = 'L1'`).get() as any).compounding, null);
+  let again = true;
+  try { if (!hasCol()) book.exec(`ALTER TABLE ledger_entries ADD COLUMN compounding INTEGER`); } catch { again = false; }
+  check('…and the guard is safe on every boot', again);
+  book.close();
+}
+const ledgerTs = readFileSync(join(__dirname, 'ledger.ts'), 'utf8');
+const restoreFn = /export async function restoreLedger\b[\s\S]*?\n}/.exec(ledgerTs)?.[0] ?? '';
+check('restoreLedger (undo) writes compounding back', restoreFn.includes('compounding'));
+const insertFn = /export async function insertLedger\b[\s\S]*?\n}/.exec(ledgerTs)?.[0] ?? '';
+check('insertLedger stores compounding', insertFn.includes('compounding'));
+
 // ── 3. restore semantics against the real engine ──
 // Seed a group with children, exactly as buildBackup would capture them.
 const put = (table: string, row: Record<string, any>) => {

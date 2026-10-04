@@ -18,9 +18,9 @@ import {
 import { nextAuction, chittiTermEnd, groupStatusFor } from '../../../utils/financeRules';
 import { listTimeline, type TimelineRow } from '../../../db/financeTimeline';
 import { makeChittiStyles, collectionStatus } from '../../../components/finance/chitti/chittiStyles';
-import { MembersTab } from '../../../components/finance/chitti/MembersTab';
+import { MembersTab, EMPTY_MEMBER_DRAFT, type MemberDraft } from '../../../components/finance/chitti/MembersTab';
 import { DuesTab } from '../../../components/finance/chitti/DuesTab';
-import { AuctionsTab } from '../../../components/finance/chitti/AuctionsTab';
+import { AuctionsTab, EMPTY_AUCTION_DRAFT, type AuctionDraft } from '../../../components/finance/chitti/AuctionsTab';
 import { HistoryTab } from '../../../components/finance/chitti/HistoryTab';
 
 type Tab = 'members' | 'collections' | 'auctions' | 'history';
@@ -39,6 +39,10 @@ export default function ChittiDetail() {
   const [historyFailed, setHistoryFailed] = useState(false);
   // Shared by the tiles, Dues and Auctions.
   const [month, setMonth] = useState(1);
+  // The half-typed member and auction forms live here, not in their tabs:
+  // only the open tab is rendered, and a switch must not lose what was typed.
+  const [memberDraft, setMemberDraft] = useState<MemberDraft>(EMPTY_MEMBER_DRAFT);
+  const [auctionDraft, setAuctionDraft] = useState<AuctionDraft>(EMPTY_AUCTION_DRAFT);
 
   const { status, begin, done, fail } = useLoadStatus();
   // Resolves once the group's rows are on screen (or the error is), so the
@@ -151,27 +155,22 @@ export default function ChittiDetail() {
         <Text style={s.formLabel} accessibilityRole="header">Group status</Text>
         <Segment<ChittiStatus>
           options={[{ k: 'active', label: 'Active' }, { k: 'closed', label: 'Closed' }, { k: 'draft', label: 'Draft' }]}
-          value={g.status} onChange={changeStatus} small
+          value={g.status} onChange={changeStatus} small label="Group status"
         />
 
         <View style={{ marginTop: 16 }}>
-          <Segment<Tab> options={[{ k: 'members', label: 'Members' }, { k: 'collections', label: 'Dues' }, { k: 'auctions', label: 'Auctions' }, { k: 'history', label: 'History' }]} value={tab} onChange={setTab} small />
+          <Segment<Tab> options={[{ k: 'members', label: 'Members' }, { k: 'collections', label: 'Dues' }, { k: 'auctions', label: 'Auctions' }, { k: 'history', label: 'History' }]} value={tab} tabs onChange={setTab} small />
         </View>
 
-        {/* Every tab stays mounted (hidden when not selected), so a half-typed
-            member or auction survives a switch to another tab. */}
-        <View style={tab !== 'members' && s.hidden}>
-          <MembersTab group={g} members={members} onChanged={reload} />
-        </View>
-        <View style={tab !== 'collections' && s.hidden}>
-          <DuesTab group={g} members={members} collections={collections} month={month} onMonth={setMonth} onChanged={reload} />
-        </View>
-        <View style={tab !== 'auctions' && s.hidden}>
-          <AuctionsTab group={g} members={members} auctions={auctions} month={month} onMonth={setMonth} onChanged={reload} />
-        </View>
-        <View style={tab !== 'history' && s.hidden}>
-          <HistoryTab timeline={timeline} failed={historyFailed} onRetry={reload} />
-        </View>
+        {/* Only the open tab renders (a large group's members used to render
+            in three hidden tabs on every reload); the form drafts are above. */}
+        {tab === 'members' && <MembersTab group={g} members={members} onChanged={reload} draft={memberDraft} setDraft={setMemberDraft} />}
+        {tab === 'collections' && <DuesTab group={g} members={members} collections={collections} month={month} onMonth={setMonth} onChanged={reload} />}
+        {tab === 'auctions' && (
+          <AuctionsTab group={g} members={members} auctions={auctions} month={month} onMonth={setMonth} onChanged={reload}
+            draft={auctionDraft} setDraft={setAuctionDraft} />
+        )}
+        {tab === 'history' && <HistoryTab timeline={timeline} failed={historyFailed} onRetry={reload} />}
         <View style={{ height: 30 }} />
       </ScrollView>
       </KeyboardSafe>

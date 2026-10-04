@@ -11,7 +11,8 @@ import { useLoadStatus } from '../../../components/finance/useLoad';
 import { formatINR, fmtDate, fmtDateTime, PERIOD_LABEL } from '../../../utils/financeFormat';
 import { getLedger, deleteLedger, snapshotLedger, restoreLedgerSnapshot, type LedgerEntry } from '../../../db/ledger';
 import { listTimeline, type TimelineRow } from '../../../db/financeTimeline';
-import { ledgerInterest } from '../../../utils/financeRules';
+import { ledgerInterest, ledgerInterestSoFar } from '../../../utils/financeRules';
+import { ledgerInterestTypeLabel } from '../../../lib/finance/compounding';
 import { sharePdf, pdfDocument, kvTable } from '../../../utils/financeIO';
 
 export default function LedgerDetail() {
@@ -47,12 +48,10 @@ export default function LedgerDetail() {
 
   // The same calculator the dashboard and reports sum with (utils/financeRules).
   const c = ledgerInterest(e);
-  // Interest run so far: the same calculator over start → today, shown while
-  // the term is still running (after the end date it is the row above).
-  // Zero before the start date.
-  const today = Date.now();
-  const accruing = !e.end_date || e.end_date > today;
-  const soFar = ledgerInterest({ ...e, end_date: Math.max(e.start_date, today) }).interest;
+  // Interest run so far (utils/financeRules): null once settled or past the
+  // end date, so a paid-off loan no longer shows interest still growing.
+  const soFar = ledgerInterestSoFar(e, Date.now());
+  const accruing = soFar != null;
   const sc = STATUS_COLORS[e.status];
   const lent = e.direction === 'lend';
 
@@ -61,11 +60,11 @@ export default function LedgerDetail() {
       { k: 'Direction', v: lent ? 'Lent' : 'Borrowed' },
       { k: 'Mobile', v: e.mobile ?? '—' },
       { k: 'Principal', v: formatINR(e.principal) },
-      { k: 'Interest type', v: e.interest_type === 'simple' ? 'Simple' : 'Compound' },
+      { k: 'Interest type', v: ledgerInterestTypeLabel(e) },
       { k: 'Rate', v: `${e.rate}${e.rate_mode === 'rupees' ? '₹ per ₹100' : '%'} ${PERIOD_LABEL[e.period]}` },
       { k: c.projected ? 'Interest (1-year projection)' : 'Interest to end date', v: formatINR(c.interest) },
       { k: c.projected ? 'Total after 1 year' : 'Total at end date', v: formatINR(c.total), tot: true },
-      ...(accruing ? [{ k: 'Interest so far (to today)', v: formatINR(soFar) }] : []),
+      ...(accruing ? [{ k: 'Interest so far (to today)', v: formatINR(soFar ?? 0) }] : []),
       { k: 'Remaining', v: formatINR(e.remaining) },
       { k: 'Start date', v: fmtDate(e.start_date) },
       { k: 'End date', v: e.end_date ? fmtDate(e.end_date) : '—' },
@@ -88,7 +87,9 @@ export default function LedgerDetail() {
               .catch((err: any) => { Alert.alert('Could not undo', err?.message ?? 'The ledger could not be restored.'); router.back(); });
           } },
           { text: 'Done', onPress: () => router.back() },
-        ], { cancelable: true, onDismiss: () => router.back() });
+          // Not dismissable: tapping outside or Back on Android used to drop
+          // the snapshot with no chance to undo. Undo or Done must be chosen.
+        ], { cancelable: false });
       } catch (err: any) { Alert.alert('Could not delete', err?.message ?? 'Try again'); }
     } },
   ]);
@@ -129,11 +130,11 @@ export default function LedgerDetail() {
 
         <Card style={{ marginTop: 12 }}>
           <RowLine k="Principal amount" v={formatINR(e.principal)} />
-          <RowLine k="Interest type" v={e.interest_type === 'simple' ? 'Simple' : 'Compound'} />
+          <RowLine k="Interest type" v={ledgerInterestTypeLabel(e)} />
           <RowLine k="Rate" v={`${e.rate}${e.rate_mode === 'rupees' ? '₹/₹100' : '%'} · ${PERIOD_LABEL[e.period]}`} />
           <RowLine k={c.projected ? 'Interest, 1-year projection' : 'Interest to end date'} v={formatINR(c.interest)} />
           <RowLine k={c.projected ? 'Total after 1 year' : 'Total at end date'} v={formatINR(c.total)} bold />
-          {accruing && <RowLine k="Interest so far (to today)" v={formatINR(soFar)} />}
+          {accruing && <RowLine k="Interest so far (to today)" v={formatINR(soFar ?? 0)} />}
           <RowLine k="Remaining" v={formatINR(e.remaining)} bold tone={e.remaining > 0 ? 'warn' : 'good'} />
           <RowLine k="Start date" v={fmtDate(e.start_date)} />
           <RowLine k="End date" v={e.end_date ? fmtDate(e.end_date) : '—'} />

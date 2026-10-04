@@ -72,21 +72,53 @@ export function normalizeMobile(raw: string): string | null {
 export interface LedgerTerms {
   principal: number; rate: number; rate_mode: 'rupees' | 'percent'; period: LedgerPeriod;
   interest_type: 'simple' | 'compound'; start_date: number; end_date: number | null;
+  /** Compounding periods per year; null/absent (every ledger made before it
+   *  could be chosen) is yearly, so no stored loan changes its amount. */
+  compounding?: number | null;
+}
+
+/** The ledger's compounding periods per year: 1 (yearly) unless a valid
+ *  whole number from 1 to 365 is stored. */
+export function ledgerCompounding(e: Pick<LedgerTerms, 'compounding'>): number {
+  const n = e.compounding;
+  return typeof n === 'number' && Number.isInteger(n) && n >= 1 && n <= 365 ? n : 1;
 }
 
 /**
  * Interest over the ledger's term — the ONE calculator the ledger detail,
- * dashboard and reports all use. Compound ledgers compound yearly. Without an
- * end date the term is one year and `projected` is true, so the caller can say
- * so instead of presenting a guess as a due amount.
+ * dashboard and reports all use. Compound ledgers compound as often as the
+ * ledger says (ledgerCompounding: yearly unless chosen). Without an end date
+ * the term is one year and `projected` is true, so the caller can say so
+ * instead of presenting a guess as a due amount.
  */
 export function ledgerInterest(e: LedgerTerms) {
   const annual = periodRateToAnnualPct(e.rate, e.rate_mode, e.period);
   const years = e.end_date ? Math.max(0, (e.end_date - e.start_date) / 31536000000) : 1;
   const res = e.interest_type === 'simple'
     ? simpleInterest(e.principal, annual, years)
-    : compoundInterest(e.principal, annual, years, 1);
+    : compoundInterest(e.principal, annual, years, ledgerCompounding(e));
   return { interest: round2(res.interest), total: round2(res.total), years, annual, projected: !e.end_date };
+}
+
+/**
+ * Interest run from the start to `now` — shown while the loan is open and its
+ * term still running (after the end date the full-term figure says it all).
+ * Null when settled: a completed loan stops accruing, and the figure used to
+ * keep growing after payoff. Zero before the start date.
+ */
+export function ledgerInterestSoFar(e: LedgerTerms & { status: LedgerStatus }, now: number): number | null {
+  if (e.status === 'completed' || (e.end_date != null && e.end_date <= now)) return null;
+  return ledgerInterest({ ...e, end_date: Math.max(e.start_date, now) }).interest;
+}
+
+/**
+ * What a total over several ledgers should say about compounding: null when
+ * none of them is compound, the one frequency when they all share it, else
+ * null for `n` (each ledger's own). Screens word it with compoundingWord.
+ */
+export function compoundingOfAll(rows: Pick<LedgerTerms, 'interest_type' | 'compounding'>[]): { any: boolean; n: number | null } {
+  const ns = new Set(rows.filter(r => r.interest_type === 'compound').map(ledgerCompounding));
+  return { any: ns.size > 0, n: ns.size === 1 ? [...ns][0] : null };
 }
 
 export type LedgerStatus = 'running' | 'overdue' | 'completed';

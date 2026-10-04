@@ -5,6 +5,7 @@
 import * as Notifications from 'expo-notifications';
 import type { ReminderFreq } from '../../db/reminders';
 import { splitNotifIds } from './notifyIds';
+import { osTriggerFor } from '../../lib/finance/reminderSchedule';
 
 export { snoozedNotifIds } from './notifyIds';
 
@@ -21,19 +22,15 @@ export async function ensureNotifyPermission(): Promise<boolean> {
   } catch { return false; }
 }
 
-/** Build the expo-notifications trigger for a frequency anchored at `at`. */
+/**
+ * The expo-notifications trigger for a series anchored at `at`. The fields
+ * come from lib/finance/reminderSchedule osTriggerFor: a recurring trigger is
+ * built from the anchor's day and time, so the phone alerts when the app says
+ * the reminder is due, even when the anchor is already in the past.
+ */
 function triggerFor(freq: ReminderFreq, at: number): any {
-  const d = new Date(Math.max(Date.now() + 1000, at));
-  const hour = d.getHours(), minute = d.getMinutes();
-  switch (freq) {
-    case 'daily':   return { type: 'daily', hour, minute };
-    // expo weekday: 1 = Sunday … 7 = Saturday
-    case 'weekly':  return { type: 'weekly', weekday: d.getDay() + 1, hour, minute };
-    case 'monthly': return { type: 'monthly', day: d.getDate(), hour, minute };
-    // expo yearly month uses Date ranges: 0 = January … 11 = December
-    case 'yearly':  return { type: 'yearly', month: d.getMonth(), day: d.getDate(), hour, minute };
-    default:        return { date: d };   // 'once'
-  }
+  const { trigger: t } = osTriggerFor(freq, at, Date.now());
+  return t.type === 'date' ? { date: new Date(t.at) } : t;
 }
 
 /** Schedule a (possibly recurring) local notification. Returns its id, or null. */

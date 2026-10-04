@@ -96,7 +96,9 @@ export default function NewChitti() {
             </View>
           </View>
 
-          {mismatch && <Text style={s.mismatch} accessibilityLiveRegion="polite">{mismatch} Check the amounts, or create it anyway if your group runs that way.</Text>}
+          {/* Not a live region: it is rebuilt on every keystroke, and Android
+              re-announced it while typing. Create confirms it out loud. */}
+          {mismatch && <Text style={s.mismatch}>{mismatch} Check the amounts, or create it anyway if your group runs that way.</Text>}
 
           <Label hint="(optional)">Foreman</Label>
           <Field label="Foreman, optional" value={foreman} onChangeText={setForeman} placeholder="Organizer name" />
@@ -105,7 +107,7 @@ export default function NewChitti() {
           <DateField label="Start date" value={fmtDate(start)} onPress={() => picker.open(new Date(start), (d) => setStart(d.getTime()))} />
 
           <Label>Status</Label>
-          <Segment<Exclude<ChittiStatus, 'closed'>> options={[{ k: 'active', label: 'Active' }, { k: 'draft', label: 'Draft' }]} value={status} onChange={setStatus} small />
+          <Segment<Exclude<ChittiStatus, 'closed'>> options={[{ k: 'active', label: 'Active' }, { k: 'draft', label: 'Draft' }]} value={status} onChange={setStatus} small label="Group status" />
 
           <View style={{ marginTop: 20 }}>
             <Btn label="Create Group" icon="checkmark" onPress={onSave} wide />

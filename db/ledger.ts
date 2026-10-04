@@ -30,6 +30,9 @@ export interface LedgerEntry {
   notes: string | null;
   created_at: number;
   last_updated: number;
+  /** Compound ledgers: periods per year. NULL (older rows, simple ledgers) is
+   *  yearly — read it through utils/financeRules ledgerCompounding. */
+  compounding: number | null;
 }
 
 export interface LedgerUpdate {
@@ -41,8 +44,8 @@ export interface LedgerUpdate {
   updated_at: number;
 }
 
-type NewLedger = Omit<LedgerEntry, 'id' | 'created_at' | 'last_updated' | 'remaining' | 'status'> &
-  Partial<Pick<LedgerEntry, 'remaining' | 'status'>>;
+type NewLedger = Omit<LedgerEntry, 'id' | 'created_at' | 'last_updated' | 'remaining' | 'status' | 'compounding'> &
+  Partial<Pick<LedgerEntry, 'remaining' | 'status' | 'compounding'>>;
 
 export async function insertLedger(row: NewLedger): Promise<LedgerEntry> {
   const d = await financeDb();
@@ -56,16 +59,17 @@ export async function insertLedger(row: NewLedger): Promise<LedgerEntry> {
     principal,
     remaining: fromPaise(toPaise(row.remaining ?? principal)),
     status: row.status ?? 'running',
+    compounding: row.compounding ?? null,
     created_at: t,
     last_updated: t,
   };
   await d.runAsync(
     `INSERT INTO ledger_entries
-       (id,user_id,direction,name,mobile,interest_type,principal,rate,rate_mode,period,start_date,end_date,remaining,status,notes,created_at,last_updated)
-     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+       (id,user_id,direction,name,mobile,interest_type,principal,rate,rate_mode,period,start_date,end_date,remaining,status,notes,created_at,last_updated,compounding)
+     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
     [full.id, full.user_id, full.direction, full.name, full.mobile, full.interest_type, full.principal,
      full.rate, full.rate_mode, full.period, full.start_date, full.end_date, full.remaining, full.status,
-     full.notes, full.created_at, full.last_updated],
+     full.notes, full.created_at, full.last_updated, full.compounding],
   );
   await addTimeline('ledger', full.id, 'created',
     `${full.direction === 'lend' ? 'Lent' : 'Borrowed'} ₹${full.principal.toLocaleString('en-IN')} @ ${full.rate}${full.rate_mode === 'rupees' ? '₹' : '%'} ${full.period}`);
@@ -137,10 +141,10 @@ export async function restoreLedger(e: LedgerEntry): Promise<void> {
   const d = await financeDb();
   await d.runAsync(
     `INSERT OR REPLACE INTO ledger_entries
-       (id,user_id,direction,name,mobile,interest_type,principal,rate,rate_mode,period,start_date,end_date,remaining,status,notes,created_at,last_updated)
-     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+       (id,user_id,direction,name,mobile,interest_type,principal,rate,rate_mode,period,start_date,end_date,remaining,status,notes,created_at,last_updated,compounding)
+     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
     [e.id, e.user_id, e.direction, e.name, e.mobile, e.interest_type, e.principal, e.rate, e.rate_mode,
-     e.period, e.start_date, e.end_date, e.remaining, e.status, e.notes, e.created_at, e.last_updated],
+     e.period, e.start_date, e.end_date, e.remaining, e.status, e.notes, e.created_at, e.last_updated, e.compounding ?? null],
   );
 }
 
@@ -201,7 +205,7 @@ export async function listLedgerUpdates(ledgerId: string): Promise<LedgerUpdate[
 }
 
 type EditableFields = Pick<LedgerEntry,
-  'name' | 'mobile' | 'interest_type' | 'principal' | 'rate' | 'rate_mode' | 'period' | 'start_date' | 'end_date' | 'notes'>;
+  'name' | 'mobile' | 'interest_type' | 'principal' | 'rate' | 'rate_mode' | 'period' | 'start_date' | 'end_date' | 'notes' | 'compounding'>;
 
 /** Edit a ledger's terms (not the balance). If principal grows and nothing has
  *  been repaid yet, remaining tracks the new principal. Appends a timeline note. */
@@ -212,8 +216,8 @@ export async function updateLedgerDetails(id: string, f: EditableFields): Promis
   const principal = fromPaise(toPaise(f.principal));
   const remaining = fromPaise(toPaise(cur.remaining === cur.principal ? principal : cur.remaining));
   await d.runAsync(
-    `UPDATE ledger_entries SET name=?, mobile=?, interest_type=?, principal=?, rate=?, rate_mode=?, period=?, start_date=?, end_date=?, notes=?, remaining=?, last_updated=? WHERE id=?`,
-    [f.name, f.mobile, f.interest_type, principal, f.rate, f.rate_mode, f.period, f.start_date, f.end_date, f.notes, remaining, now(), id],
+    `UPDATE ledger_entries SET name=?, mobile=?, interest_type=?, principal=?, rate=?, rate_mode=?, period=?, start_date=?, end_date=?, notes=?, compounding=?, remaining=?, last_updated=? WHERE id=?`,
+    [f.name, f.mobile, f.interest_type, principal, f.rate, f.rate_mode, f.period, f.start_date, f.end_date, f.notes, f.compounding, remaining, now(), id],
   );
   await addTimeline('ledger', id, 'edit', `Terms edited · ${f.name} · ₹${f.principal.toLocaleString('en-IN')} @ ${f.rate}${f.rate_mode === 'rupees' ? '₹' : '%'} ${f.period}`);
 }

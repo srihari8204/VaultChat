@@ -18,12 +18,12 @@
 
 import type { LedgerEntry } from '../../db/ledger';
 import type { LedgerPeriod } from '../../utils/finance';
-import { normalizeMobile } from '../../utils/financeRules';
+import { normalizeMobile, ledgerCompounding } from '../../utils/financeRules';
 import { fmtDate, num as parseAmount } from '../../utils/financeFormat';
 
 export const LEDGER_HEADERS = [
   'Name', 'Mobile', 'Direction', 'InterestType', 'Principal', 'Rate', 'RateMode', 'Period',
-  'Remaining', 'Status', 'Notes', 'Created', 'StartDate', 'EndDate',
+  'Remaining', 'Status', 'Notes', 'Created', 'StartDate', 'EndDate', 'Compounding',
 ];
 
 // ── writing ─────────────────────────────────────────────────────────
@@ -51,6 +51,8 @@ export function ledgerCsvRow(l: LedgerEntry): (string | number)[] {
   return [
     l.name, l.mobile ?? '', l.direction, l.interest_type, l.principal, l.rate, l.rate_mode, l.period,
     l.remaining, l.status, l.notes ?? '', fmtDate(l.created_at), isoOrBlank(l.start_date), isoOrBlank(l.end_date),
+    // Compound: periods per year (1 = yearly); blank for simple interest.
+    l.interest_type === 'compound' ? ledgerCompounding(l) : '',
   ];
 }
 
@@ -157,6 +159,8 @@ export function planLedgerImport(text: string, existing: LedgerEntry[], now: num
     if (mobRaw && !mobile) plan.badMobile++;
     const period = at(c, 'Period', 7);
     const status = at(c, 'Status', 9);
+    // Files exported before the column existed have none: yearly, as they were.
+    const perYear = Number(at(c, 'Compounding', 14).trim());
     plan.rows.push({
       direction, name, mobile,
       interest_type: at(c, 'InterestType', 3) === 'compound' ? 'compound' : 'simple',
@@ -166,6 +170,7 @@ export function planLedgerImport(text: string, existing: LedgerEntry[], now: num
       start_date: startDate, end_date: end, notes: at(c, 'Notes', 10).trim() || null,
       remaining: remCell === '' ? principal : rem,
       status: (['running', 'overdue', 'completed'].includes(status) ? status : 'running') as LedgerEntry['status'],
+      compounding: Number.isInteger(perYear) && perYear >= 1 && perYear <= 365 ? perYear : null,
     });
   }
   return plan;

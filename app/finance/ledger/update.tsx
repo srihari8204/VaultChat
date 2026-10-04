@@ -12,6 +12,7 @@ import { useLoadStatus } from '../../../components/finance/useLoad';
 import { formatINR, fmtDateTime, num } from '../../../utils/financeFormat';
 import { getLedger, addLedgerUpdate, type LedgerEntry } from '../../../db/ledger';
 import { round2 } from '../../../utils/interest';
+import { ledgerInterest, ledgerInterestSoFar } from '../../../utils/financeRules';
 
 export default function UpdateAmount() {
   const FIN = useFinanceTheme();
@@ -51,6 +52,9 @@ export default function UpdateAmount() {
     );
   }
 
+  const soFar = ledgerInterestSoFar(e, Date.now());
+  const full = ledgerInterest(e);
+
   const onSave = async () => {
     const rec = num(received), rem = num(remaining);
     if (!(rec > 0)) return Alert.alert('Received', 'Enter the amount received (greater than 0).');
@@ -64,15 +68,17 @@ export default function UpdateAmount() {
         : null;
     // Settling is final for the ledger (it moves to Completed), so it is said
     // out loud rather than inferred from a 0 in the box.
-    const settles = !odd && rem === 0 && e.remaining > 0;
+    const settles = rem === 0 && e.remaining > 0;
     if (odd) {
-      const go = await new Promise<boolean>((resolve) => Alert.alert('Check the amounts', `${odd} Save anyway?`, [
+      // One confirm, not two: when the odd amounts also settle the ledger, it says so here.
+      const end = settles ? ` Nothing will remain on ${e.name}'s ledger, so it is marked Completed.` : '';
+      const go = await new Promise<boolean>((resolve) => Alert.alert(settles ? 'Check the amounts and settle?' : 'Check the amounts', `${odd}${end} Save anyway?`, [
         { text: 'Go back', style: 'cancel', onPress: () => resolve(false) },
         { text: 'Save', onPress: () => resolve(true) },
       ], { cancelable: true, onDismiss: () => resolve(false) }));
       if (!go) return;
     }
-    if (settles) {
+    else if (settles) {
       const go = await new Promise<boolean>((resolve) => Alert.alert('Settle this ledger?',
         `Nothing will remain on ${e.name}'s ledger, so it is marked Completed.`, [
           { text: 'Go back', style: 'cancel', onPress: () => resolve(false) },
@@ -95,6 +101,10 @@ export default function UpdateAmount() {
             <Text numberOfLines={1} style={s.who} accessibilityRole="header">{e.name}</Text>
             <RowLine k="Principal" v={formatINR(e.principal)} />
             <RowLine k="Current remaining" v={formatINR(e.remaining)} bold tone={e.remaining > 0 ? 'warn' : 'good'} />
+            {/* The same interest figures as the ledger detail, so the amount
+                received can be judged against them; Remaining excludes interest. */}
+            {soFar != null && <RowLine k="Interest so far (to today)" v={formatINR(soFar)} />}
+            <RowLine k={full.projected ? 'Interest, 1-year projection' : 'Interest to end date'} v={formatINR(full.interest)} />
             <RowLine k="Last updated" v={fmtDateTime(e.last_updated)} />
           </Card>
 

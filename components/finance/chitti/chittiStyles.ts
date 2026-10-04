@@ -30,7 +30,6 @@ export const makeChittiStyles = (FIN: FinancePalette) => StyleSheet.create({
   heroFoot: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 12, paddingTop: 12, borderTopWidth: 1, borderTopColor: HERO_INK.rule },
   heroFootTxt: { color: HERO_INK.soft, fontSize: 12, fontWeight: '600' },
   tileRow: { marginTop: 12 },
-  hidden: { display: 'none' },
 
   addRow: { flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 16, backgroundColor: FIN.card, borderRadius: 12, padding: 10, borderWidth: 1, borderColor: FIN.glassEdge, ...FIN_SHADOW.rest },
   addRowTxt: { color: FIN.brandDeep, fontSize: 14.5, fontWeight: '700' },

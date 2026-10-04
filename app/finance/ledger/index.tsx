@@ -29,6 +29,8 @@ export default function LedgerList() {
   const [filter, setFilter] = useState<Filter>('all');
   const [rows, setRows] = useState<LedgerEntry[]>([]);
   const [pendingDelete, setPendingDelete] = useState<LedgerEntry | null>(null);
+  // The earlier delete a second long-press made final, so the snackbar says so.
+  const [madeFinal, setMadeFinal] = useState<string | null>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const snack = useRef(new Animated.Value(0)).current;
 
@@ -62,12 +64,16 @@ export default function LedgerList() {
     // only ever deleted the second. The first silently came back on the next
     // reload, after the user had been told it was gone. Only ONE delete can be
     // undoable at a time, so the earlier one is committed, not dropped.
+    const prev = timer.current && pendingDelete ? pendingDelete : null;
     if (timer.current) { clearTimeout(timer.current); if (pendingDelete) finalizeDelete(pendingDelete.id); }
     setPendingDelete(e);
+    setMadeFinal(prev ? prev.name : null);
     Animated.timing(snack, { toValue: 1, duration: 180, useNativeDriver: true }).start();
     timer.current = setTimeout(() => finalizeDelete(e.id), 30000);
     // accessibilityLiveRegion on the snackbar is Android-only; iOS hears it here.
-    if (Platform.OS === 'ios') AccessibilityInfo.announceForAccessibility(`${e.name} deleted. Undo is available for 30 seconds.`);
+    if (Platform.OS === 'ios') {
+      AccessibilityInfo.announceForAccessibility(`${e.name} deleted. Undo is available for 30 seconds.${prev ? ` Deleting ${prev.name} can no longer be undone.` : ''}`);
+    }
   };
 
   // FLUSH ON THE WAY OUT. The 30s timer dies with the screen, so leaving inside
@@ -114,7 +120,7 @@ export default function LedgerList() {
       <View style={s.filterWrap}>
         <Segment<Filter>
           options={[{ k: 'all', label: 'All' }, { k: 'lend', label: 'Lent' }, { k: 'borrow', label: 'Borrowed' }]}
-          value={filter} onChange={setFilter}
+          value={filter} tabs onChange={setFilter}
         />
       </View>
 
@@ -182,8 +188,10 @@ export default function LedgerList() {
 
       {pendingDelete && (
         <Animated.View accessibilityLiveRegion="polite" style={[s.snack, { bottom: insets.bottom + 84, opacity: snack, transform: [{ translateY: snack.interpolate({ inputRange: [0, 1], outputRange: [20, 0] }) }] }]}>
-          <Text style={s.snackTxt}>Ledger deleted</Text>
-          <TouchableOpacity onPress={undo} hitSlop={12} accessibilityRole="button" accessibilityLabel={`Undo deleting ${pendingDelete.name}`}><Text style={s.snackBtn}>UNDO</Text></TouchableOpacity>
+          <Text style={s.snackTxt}>
+            {pendingDelete.name} deleted{madeFinal ? `. Deleting ${madeFinal} is now final` : ''}
+          </Text>
+          <TouchableOpacity onPress={undo} style={s.snackAct} accessibilityRole="button" accessibilityLabel={`Undo deleting ${pendingDelete.name}`}><Text style={s.snackBtn}>UNDO</Text></TouchableOpacity>
         </Animated.View>
       )}
     </View>
@@ -204,7 +212,9 @@ const makeStyles = (FIN: FinancePalette) => StyleSheet.create({
   fab: { position: 'absolute', left: 16, right: 16, bottom: 20, flexDirection: 'row', gap: 8, backgroundColor: FIN.brandDeep, borderRadius: 14, paddingVertical: 15, alignItems: 'center', justifyContent: 'center', shadowColor: FIN.brandDeep, shadowOpacity: 0.35, shadowRadius: 10, shadowOffset: { width: 0, height: 4 }, elevation: 6 },
   fabTxt: { color: FIN.onBrand, fontSize: 15, fontWeight: '800' },
 
-  snack: { position: 'absolute', left: 16, right: 16, bottom: 84, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: FIN.text, borderRadius: 12, paddingVertical: 13, paddingHorizontal: 16 },
-  snackTxt: { color: FIN.cardSolid, fontSize: 14, fontWeight: '600' },
+  snack: { position: 'absolute', left: 16, right: 16, bottom: 84, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8, backgroundColor: FIN.text, borderRadius: 12, paddingVertical: 4, paddingLeft: 16, paddingRight: 4 },
+  snackTxt: { flex: 1, color: FIN.cardSolid, fontSize: 14, fontWeight: '600', paddingVertical: 9 },
+  // A 44dp target of its own, like the other finance controls.
+  snackAct: { minWidth: 44, minHeight: 44, paddingHorizontal: 12, alignItems: 'center', justifyContent: 'center' },
   snackBtn: { color: FIN.cardSolid, fontSize: 14, fontWeight: '800', letterSpacing: 0.5 },
 });

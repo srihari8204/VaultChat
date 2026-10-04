@@ -32,6 +32,8 @@ export default function EmiCalc() {
   // (2026-09-17).
   const [res, setRes] = useState<{ emi: number; totalInterest: number; totalPayment: number; months: number; P: number; R: number } | null>(null);
   const [showSchedule, setShowSchedule] = useState(false);
+  // On screen the schedule starts at 24 months; the rest is one tap away (and in the PDF).
+  const [showAll, setShowAll] = useState(false);
 
   const months = () => { const n = num(tenure) || 0; return unit === 'yr' ? Math.round(n * 12) : Math.round(n); };
 
@@ -102,7 +104,7 @@ export default function EmiCalc() {
               <Field label="Tenure" value={tenure} onChangeText={setTenure} placeholder="Enter tenure" keyboardType="numeric" />
             </View>
             <View style={{ flexGrow: 1, flexBasis: 132 }}>
-              <Segment<'yr' | 'mo'> options={[{ k: 'yr', label: 'Years' }, { k: 'mo', label: 'Months' }]} value={unit} onChange={setUnit} small />
+              <Segment<'yr' | 'mo'> options={[{ k: 'yr', label: 'Years' }, { k: 'mo', label: 'Months' }]} value={unit} onChange={setUnit} small label="Tenure in" />
             </View>
           </View>
 
@@ -136,17 +138,24 @@ export default function EmiCalc() {
                     <Text style={[s.schCell, s.schHeadTxt]}>Interest</Text>
                     <Text style={[s.schCell, s.schHeadTxt]}>Balance</Text>
                   </View>
-                  {schedule.slice(0, 24).map(r => (
+                  {(showAll ? schedule : schedule.slice(0, 24)).map(r => (
                     // One spoken row, not four separate numbers.
                     <View key={r.month} style={s.schRow} accessible
-                      accessibilityLabel={`Month ${r.month}: principal ${formatINR(r.principal)}, interest ${formatINR(r.interest)}, balance ${formatINR(r.balance)}`}>
+                      accessibilityLabel={`Month ${r.month}: EMI ${formatINR(r.emi)}, principal ${formatINR(r.principal)}, interest ${formatINR(r.interest)}, balance ${formatINR(r.balance)}`}>
                       <Text style={[s.schCell, { flex: 0.7, color: FIN.sub }]}>{r.month}</Text>
                       <Text style={s.schCell} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>{Math.round(r.principal).toLocaleString('en-IN')}</Text>
                       <Text style={s.schCell} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>{Math.round(r.interest).toLocaleString('en-IN')}</Text>
                       <Text style={s.schCell} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>{Math.round(r.balance).toLocaleString('en-IN')}</Text>
                     </View>
                   ))}
-                  {schedule.length > 24 && <Text style={s.schMore}>Showing first 24 of {schedule.length} months · full schedule in the PDF</Text>}
+                  {schedule.length > 24 && (<>
+                    <Text style={s.schMore}>
+                      {showAll ? `All ${schedule.length} months` : `Showing first 24 of ${schedule.length} months · full schedule in the PDF`}
+                    </Text>
+                    <View style={{ padding: 10, paddingTop: 0 }}>
+                      <Btn label={showAll ? 'Show first 24 months' : `Show all ${schedule.length} months`} kind="ghost" onPress={() => setShowAll(v => !v)} wide />
+                    </View>
+                  </>)}
                 </Card>
               )}
             </>
@@ -165,7 +174,7 @@ function Chip({ label, active, onPress }: { label: string; active: boolean; onPr
     <Pressable
       onPress={onPress}
       accessibilityRole="radio"
-      accessibilityState={{ selected: active }}
+      accessibilityState={{ checked: active }}
       accessibilityLabel={label}
       style={[s.chip, active && { backgroundColor: FIN.brandDeep, borderColor: FIN.brandDeep }]}
     >

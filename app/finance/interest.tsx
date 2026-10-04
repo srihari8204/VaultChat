@@ -120,6 +120,7 @@ export default function InterestCalc() {
       { k: 'Interest', v: formatINR(res.interest) },
       { k: 'Total payable', v: formatINR(res.total), tot: true },
       { k: 'Day count', v: conventionNote(res.timeMode) },
+      ...(res.type === 'compound' ? [{ k: 'Ledgers', v: LEDGER_NOTE }] : []),
     ]));
     try { await sharePdf(html, 'interest'); } catch (e: any) { Alert.alert('Share failed', e?.message ?? 'Try again'); }
   };
@@ -134,7 +135,7 @@ export default function InterestCalc() {
       <KeyboardSafe style={{ flex: 1 }} >
         <ScrollView contentContainerStyle={s.body} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
           <Label>Interest Type</Label>
-          <View style={s.radioRow}>
+          <View style={s.radioRow} accessibilityRole="radiogroup" accessibilityLabel="Interest type">
             <Radio label="Simple" active={type === 'simple'} onPress={() => setType('simple')} />
             <Radio label="Compound" active={type === 'compound'} onPress={() => setType('compound')} />
           </View>
@@ -143,25 +144,25 @@ export default function InterestCalc() {
           <Field label="Principal amount" value={principal} onChangeText={setPrincipal} placeholder="₹ 0" keyboardType="numeric" />
 
           <Label>Rate Type</Label>
-          <Segment<'percent' | 'rupees'> options={[{ k: 'percent', label: '% (percentage)' }, { k: 'rupees', label: '₹ per ₹100' }]} value={rateMode} onChange={setRateMode} />
+          <Segment<'percent' | 'rupees'> options={[{ k: 'percent', label: '% (percentage)' }, { k: 'rupees', label: '₹ per ₹100' }]} value={rateMode} onChange={setRateMode} label="Rate type" />
 
           <Label>{rateMode === 'rupees' ? 'Interest Rate (₹ per ₹100)' : 'Interest Rate (%)'}</Label>
           <Field label={rateMode === 'rupees' ? 'Interest rate, rupees per 100' : 'Interest rate, percent'} value={rate} onChangeText={setRate} placeholder="Enter rate" keyboardType="numeric" />
 
           <Label>Interest Period</Label>
-          <Segment<LedgerPeriod> options={[{ k: 'daily', label: 'Daily' }, { k: 'weekly', label: 'Weekly' }, { k: 'monthly', label: 'Monthly' }, { k: 'yearly', label: 'Yearly' }]} value={period} onChange={setPeriod} small />
+          <Segment<LedgerPeriod> options={[{ k: 'daily', label: 'Daily' }, { k: 'weekly', label: 'Weekly' }, { k: 'monthly', label: 'Monthly' }, { k: 'yearly', label: 'Yearly' }]} value={period} onChange={setPeriod} small label="Interest period" />
 
           {type === 'compound' && (
             <>
               <Label hint="(follows the period until you pick)">Compounded</Label>
               <Segment<string>
                 options={COMPOUNDING.map(c => ({ k: String(c.n), label: c.label }))}
-                value={String(perYear)} onChange={(k) => setPerYearPick(Number(k))} small
+                value={String(perYear)} onChange={(k) => setPerYearPick(Number(k))} small label="Compounded"
               />
             </>
           )}
 
-          <View style={[s.radioRow, { marginTop: 16 }]}>
+          <View style={[s.radioRow, { marginTop: 16 }]} accessibilityRole="radiogroup" accessibilityLabel="Enter the time as">
             <Radio label="Dates" active={timeMode === 'dates'} onPress={() => setTimeMode('dates')} />
             <Radio label="Duration" active={timeMode === 'duration'} onPress={() => setTimeMode('duration')} />
           </View>
@@ -202,6 +203,7 @@ export default function InterestCalc() {
                 <RowLine k="Daily interest" v={formatINR(daily)} />
                 <RowLine k="Duration" v={`${res.years.toFixed(2)} years`} />
                 <Text style={s.note}>{conventionNote(res.timeMode)}</Text>
+                {res.type === 'compound' && <Text style={s.note}>{LEDGER_NOTE}</Text>}
               </Card>
               <View style={s.btnRow}>
                 <Btn label="Share PDF" kind="ghost" icon="share-outline" onPress={onShare} wide />
@@ -214,6 +216,9 @@ export default function InterestCalc() {
     </View>
   );
 }
+
+/** A ledger with the same terms gives this answer only with the same compounding. */
+const LEDGER_NOTE = 'A ledger compounds as chosen on that ledger; ledgers saved before the choice existed compound yearly.';
 
 /** The day-count convention the duration was turned into years with. */
 function conventionNote(mode: 'dates' | 'duration'): string {

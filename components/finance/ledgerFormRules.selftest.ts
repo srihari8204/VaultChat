@@ -23,5 +23,8 @@ const m = checkLedgerForm({ ...good, mobile: '+91 98765 43210' });
 eq('mobile is stored normalised', 'ok' in m && m.ok.mobile, '9876543210');
 eq('end before start', title({ end: day(9) }), 'End date');
 eq('end on the start day', title({ end: day(10) }), 'ok');
+const field = (f: Partial<LedgerFormText>) => { const r = checkLedgerForm({ ...good, ...f }); return 'problem' in r ? r.problem.field : 'ok'; };
+eq('each problem names its field', [field({ name: '' }), field({ principal: '' }), field({ rate: 'x' }), field({ mobile: '1' }), field({ end: day(1) })],
+  ['name', 'principal', 'rate', 'mobile', 'end']);
 
 console.log(`ledgerFormRules: ${n} assertions passed`);

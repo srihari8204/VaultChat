@@ -52,15 +52,13 @@ export default function ChittiList() {
 
   return (
     <View style={s.screen}>
-      <FinHeader title="Lucky Draw" right={
-        <TouchableOpacity accessibilityRole="button" accessibilityLabel="New lucky draw group" onPress={() => router.push('/finance/chitti/new')} hitSlop={8}>
-          <Ionicons name="add-circle" size={26} color={FIN.brandDeep} />
-        </TouchableOpacity>
-      } />
+      {/* One way to add a group: the button at the foot. The header used to
+          carry a second one with a near-identical spoken name. */}
+      <FinHeader title="Lucky Draw" />
       <View style={s.filterWrap}>
         <Segment<Tab>
           options={[{ k: 'active', label: 'Active' }, { k: 'closed', label: 'Closed' }, { k: 'draft', label: 'Draft' }]}
-          value={tab} onChange={setTab}
+          value={tab} tabs onChange={setTab}
         />
       </View>
       <FlatList
@@ -89,7 +87,8 @@ export default function ChittiList() {
             <Ionicons name="chevron-forward" size={18} color={FIN.faint} />
           </TouchableOpacity>
         )}
-        ListFooterComponent={<View style={{ height: 90 }} />}
+        // Clears the button at the foot, which sits above the home indicator.
+        ListFooterComponent={<View style={{ height: 90 + insets.bottom }} />}
       />
       <TouchableOpacity style={[s.fab, { bottom: insets.bottom + 20 }]} activeOpacity={0.9} onPress={() => router.push('/finance/chitti/new')}
         accessibilityRole="button" accessibilityLabel="New Lucky Draw group">

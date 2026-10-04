@@ -2,7 +2,7 @@
 
 import React, { useCallback, useMemo, useState } from 'react';
 import { useFinanceTheme } from '../../components/finance/useFinanceTheme';
-import { View, Text, FlatList, StyleSheet, TouchableOpacity, Alert } from 'react-native';
+import { View, Text, FlatList, StyleSheet, TouchableOpacity, Alert, AccessibilityInfo } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { TABULAR, FIN_SHADOW, type FinancePalette } from '../../constants/financeTheme';
@@ -47,16 +47,15 @@ export default function Saved() {
 
   const { status, begin, done, fail } = useLoadStatus();
   // Interest calculations have no detail screen, so a tap opens a sheet with
-  // the saved figures and a Delete; Delete then asks once more.
+  // the saved figures and a red Delete that says it cannot be undone. That
+  // sheet is the confirmation: a second Alert used to be raised while the
+  // sheet's modal was still closing, which iOS may not present.
   const reloadRef = React.useRef<() => void>(() => {});
-  const deleteCalc = useCallback((r: InterestRow) => Alert.alert('Delete this calculation?',
-    'It is removed from Saved & History. This cannot be undone.', [
-      { text: 'Cancel', style: 'cancel' },
-      { text: 'Delete', style: 'destructive', onPress: () => {
-        deleteInterest(r.id).then(() => reloadRef.current())
-          .catch((e: any) => Alert.alert('Could not delete', e?.message ?? 'Try again.'));
-      } },
-    ]), []);
+  const deleteCalc = useCallback((r: InterestRow) => {
+    deleteInterest(r.id)
+      .then(() => { AccessibilityInfo.announceForAccessibility('Calculation deleted'); reloadRef.current(); })
+      .catch((e: any) => Alert.alert('Could not delete', e?.message ?? 'Try again.'));
+  }, []);
   const viewCalc = useCallback((r: InterestRow) => setViewing(r), []);
 
   const reload = useCallback(() => {
@@ -102,7 +101,7 @@ export default function Saved() {
       <View style={s.filterWrap}>
         <Segment<Tab>
           options={[{ k: 'all', label: 'All' }, { k: 'ledger', label: 'Ledger' }, { k: 'interest', label: 'Interest' }, { k: 'chitti', label: 'Lucky Draw' }]}
-          value={tab} onChange={setTab} small
+          value={tab} tabs onChange={setTab} small
         />
       </View>
       <FlatList
@@ -147,8 +146,9 @@ export default function Saved() {
           ...(viewing.type === 'compound' && viewing.frequency ? [`Compounded ${compoundingWord(viewing.frequency)}`] : []),
           `${viewing.time_years} years`, `Interest ${formatINR(viewing.interest)}`,
           `Total ${formatINR(viewing.total_amount)}`, `Saved ${fmtDate(viewing.created_at)}`,
+          '', 'Deleting removes it from Saved & History. It cannot be undone.',
         ].join('\n') : undefined}
-        actions={viewing ? [{ label: 'Delete', icon: 'trash-outline', destructive: true, onPress: () => deleteCalc(viewing) }] : []}
+        actions={viewing ? [{ label: 'Delete this calculation', icon: 'trash-outline', destructive: true, onPress: () => deleteCalc(viewing) }] : []}
         onClose={() => setViewing(null)}
       />
     </View>

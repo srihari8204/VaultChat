@@ -5,7 +5,7 @@
 
 import React, { useCallback, useMemo, useState } from 'react';
 import { useFinanceTheme } from '../../components/finance/useFinanceTheme';
-import { View, Text, ScrollView, StyleSheet, TouchableOpacity } from 'react-native';
+import { View, Text, FlatList, StyleSheet, TouchableOpacity } from 'react-native';
 import { useLocalSearchParams, useRouter, useFocusEffect } from 'expo-router';
 import { financeStatusColors, TABULAR, FIN_SHADOW, type FinancePalette, HERO_INK } from '../../constants/financeTheme';
 import { FinHeader, HeroCard, StatTile, TileGrid, Pill, EmptyState, LoadingState, ErrorState } from '../../components/finance/ui';
@@ -15,6 +15,7 @@ import { sumRupees } from '../../utils/money';
 import { formatINR, fmtDate, inrShort, PERIOD_LABEL } from '../../utils/financeFormat';
 import { listLedger, type LedgerEntry } from '../../db/ledger';
 import { sameCustomer } from '../../utils/financeRules';
+import { ledgerInterestTypeLabel } from '../../lib/finance/compounding';
 import { initialOf } from '../../lib/format';
 
 export default function CustomerProfile() {
@@ -82,70 +83,77 @@ export default function CustomerProfile() {
     );
   }
 
+  const header = (<>
+    <View style={s.head}>
+      <View style={s.avatar}><Text style={s.avatarTxt}>{initialOf(String(name ?? ''))}</Text></View>
+      <View style={{ flex: 1 }}>
+        <Text numberOfLines={1} style={s.name} accessibilityRole="header">{name}</Text>
+        {mobile ? <Text style={s.mobile}>{mobile}</Text> : null}
+        {aliases.length > 0 && (
+          <Text style={s.mobile} numberOfLines={2}>Also recorded as {aliases.join(', ')}</Text>
+        )}
+      </View>
+    </View>
+
+    {/* Totals only once the ledgers are read: ₹0 during loading or after a
+        failed read would be a figure, not a placeholder. */}
+    {ready && (<>
+    <HeroCard>
+      <Text style={s.heroLabel}>{netLabel} · OPEN BALANCES</Text>
+      <Text style={s.heroVal}>{inrShort(Math.abs(net))}</Text>
+      <View style={s.heroFoot}>
+        <Text style={s.heroFootTxt}>Owed to you {inrShort(totals.owedToYou)}</Text>
+        <Text style={s.heroFootTxt}>You owe {inrShort(totals.youOwe)}</Text>
+      </View>
+    </HeroCard>
+
+    <View style={s.tileRow}>
+      <TileGrid>
+      <StatTile value={String(rows.length)} label="Ledgers" tone="brand" />
+      <StatTile value={inrShort(totals.lent)} label="Total lent" tone="good" />
+      <StatTile value={inrShort(totals.borrowed)} label="Total borrowed" tone="bad" />
+      <StatTile value={String(rows.filter(r => r.status === 'completed').length)} label="Settled" tone="good" />
+      </TileGrid>
+    </View>
+    </>)}
+
+    <Text style={s.section} accessibilityRole="header">Ledgers</Text>
+  </>);
+
+  // A FlatList, so a customer with many ledgers renders only what is on screen.
   return (
     <View style={s.screen}>
       <FinHeader title="Customer" />
-      <ScrollView contentContainerStyle={s.body} showsVerticalScrollIndicator={false}>
-        <View style={s.head}>
-          <View style={s.avatar}><Text style={s.avatarTxt}>{initialOf(String(name ?? ''))}</Text></View>
-          <View style={{ flex: 1 }}>
-            <Text numberOfLines={1} style={s.name} accessibilityRole="header">{name}</Text>
-            {mobile ? <Text style={s.mobile}>{mobile}</Text> : null}
-            {aliases.length > 0 && (
-              <Text style={s.mobile} numberOfLines={2}>Also recorded as {aliases.join(', ')}</Text>
-            )}
-          </View>
-        </View>
-
-        {/* Totals only once the ledgers are read: ₹0 during loading or after a
-            failed read would be a figure, not a placeholder. */}
-        {ready && (<>
-        <HeroCard>
-          <Text style={s.heroLabel}>{netLabel} · OPEN BALANCES</Text>
-          <Text style={s.heroVal}>{inrShort(Math.abs(net))}</Text>
-          <View style={s.heroFoot}>
-            <Text style={s.heroFootTxt}>Owed to you {inrShort(totals.owedToYou)}</Text>
-            <Text style={s.heroFootTxt}>You owe {inrShort(totals.youOwe)}</Text>
-          </View>
-        </HeroCard>
-
-        <View style={s.tileRow}>
-          <TileGrid>
-          <StatTile value={String(rows.length)} label="Ledgers" tone="brand" />
-          <StatTile value={inrShort(totals.lent)} label="Total lent" tone="good" />
-          <StatTile value={inrShort(totals.borrowed)} label="Total borrowed" tone="bad" />
-          <StatTile value={String(rows.filter(r => r.status === 'completed').length)} label="Settled" tone="good" />
-          </TileGrid>
-        </View>
-        </>)}
-
-        <Text style={s.section}>Ledgers</Text>
-        {status === 'loading' && <LoadingState label="Loading ledgers" />}
-        {status === 'error' && (
-          <ErrorState title="Could not load ledgers" sub="This customer's totals could not be read. Nothing has been lost." onRetry={reload} />
-        )}
-        {status === 'ready' && rows.length === 0 && (
-          <EmptyState icon="person-outline" title="No ledgers" sub="This customer has no ledger entries." />
-        )}
-        {rows.map(e => {
+      <FlatList
+        data={status === 'ready' ? rows : []}
+        keyExtractor={e => e.id}
+        contentContainerStyle={s.body}
+        showsVerticalScrollIndicator={false}
+        ListHeaderComponent={header}
+        ListEmptyComponent={
+          status === 'loading' ? <LoadingState label="Loading ledgers" />
+            : status === 'error' ? <ErrorState title="Could not load ledgers" sub="This customer's totals could not be read. Nothing has been lost." onRetry={reload} />
+              : <EmptyState icon="person-outline" title="No ledgers" sub="This customer has no ledger entries." />
+        }
+        ListFooterComponent={<View style={{ height: 30 }} />}
+        renderItem={({ item: e }) => {
           const sc = STATUS_COLORS[e.status];
           const lent = e.direction === 'lend';
           return (
-            <TouchableOpacity key={e.id} style={s.card} activeOpacity={0.85}
+            <TouchableOpacity style={s.card} activeOpacity={0.85}
               accessibilityRole="button"
-              accessibilityLabel={`${lent ? 'Lent' : 'Borrowed'} ${formatINR(e.principal)}, ${formatINR(e.remaining)} remaining, ${sc.label}. Open ledger`}
+              accessibilityLabel={`${lent ? 'Lent' : 'Borrowed'} ${formatINR(e.principal)}, ${formatINR(e.remaining)} remaining, ${sc.label}, ${ledgerInterestTypeLabel(e)} interest. Open ledger`}
               onPress={() => router.push({ pathname: '/finance/ledger/[id]', params: { id: e.id } })}>
               <View style={[s.dot, { backgroundColor: lent ? FIN.good : FIN.bad }]} />
               <View style={{ flex: 1, minWidth: 0 }}>
                 <Text style={s.cardTitle}>{lent ? 'Lent' : 'Borrowed'} · {formatINR(e.principal)}</Text>
-                <Text style={s.cardSub}>{e.rate}{e.rate_mode === 'rupees' ? '₹' : '%'} · {PERIOD_LABEL[e.period]} · {fmtDate(e.created_at)}</Text>
+                <Text style={s.cardSub}>{e.rate}{e.rate_mode === 'rupees' ? '₹' : '%'} · {PERIOD_LABEL[e.period]} · {ledgerInterestTypeLabel(e)} · {fmtDate(e.created_at)}</Text>
               </View>
               <Pill label={sc.label} fg={sc.fg} bg={sc.bg} />
             </TouchableOpacity>
           );
-        })}
-        <View style={{ height: 30 }} />
-      </ScrollView>
+        }}
+      />
     </View>
   );
 }

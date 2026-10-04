@@ -3,7 +3,7 @@
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useFinanceTheme } from '../../components/finance/useFinanceTheme';
-import { View, Text, ScrollView, StyleSheet, TextInput, TouchableOpacity, AccessibilityInfo } from 'react-native';
+import { View, Text, SectionList, StyleSheet, TextInput, TouchableOpacity, AccessibilityInfo } from 'react-native';
 import { KeyboardSafe } from '../../components/ui';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter, useFocusEffect } from 'expo-router';
@@ -20,6 +20,10 @@ import { mobileMatches } from '../../lib/finance/searchQuery';
 /** At most this many of each kind are listed; the screen says when it cut. */
 const LEDGER_CAP = 40;
 const GROUP_CAP = 20;
+
+type SearchRow =
+  | { kind: 'ledger'; id: string; ledger: LedgerEntry }
+  | { kind: 'group'; id: string; group: ChittiGroup };
 
 export default function FinanceSearch() {
   const FIN = useFinanceTheme();
@@ -89,6 +93,13 @@ export default function FinanceSearch() {
   }, [groups, query, amount, hasAmount, memberHits]);
   const matchedGroups = useMemo(() => allGroups.slice(0, GROUP_CAP), [allGroups]);
 
+  const sections = useMemo(() => [
+    { key: 'ledgers', title: 'Ledgers', total: allLedgers.length, cap: LEDGER_CAP,
+      data: matchedLedgers.map((ledger): SearchRow => ({ kind: 'ledger', id: ledger.id, ledger })) },
+    { key: 'groups', title: 'Lucky Draw groups', total: allGroups.length, cap: GROUP_CAP,
+      data: matchedGroups.map((group): SearchRow => ({ kind: 'group', id: group.id, group })) },
+  ].filter(sec => sec.data.length > 0), [allLedgers, matchedLedgers, allGroups, matchedGroups]);
+
   const ready = status === 'ready';
   const empty = ready && query.length > 0 && matchedLedgers.length === 0 && matchedGroups.length === 0;
 
@@ -118,42 +129,51 @@ export default function FinanceSearch() {
       </View>
 
       <KeyboardSafe>
-      <ScrollView contentContainerStyle={s.body} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
-        {query.length === 0 && <EmptyState icon="search-outline" title="Search your finances" sub="Find ledgers and Lucky Draw groups by name, mobile number or amount." />}
-        {status === 'loading' && query.length > 0 && <LoadingState label="Reading your finance data" />}
-        {status === 'error' && (
-          <ErrorState title="Could not read your finance data" sub="Search results may be missing. Nothing has been lost." onRetry={reload} />
-        )}
-        {empty && <EmptyState icon="sad-outline" title="No matches" sub={`Nothing found for “${q}”.`} />}
-
-        {matchedLedgers.length > 0 && <Text style={s.section} accessibilityRole="header">Ledgers · {allLedgers.length}</Text>}
-        {allLedgers.length > LEDGER_CAP && <Text style={s.capped}>Showing the first {LEDGER_CAP} of {allLedgers.length}. Type more to narrow the search.</Text>}
-        {matchedLedgers.map(e => {
-          const sc = STATUS_COLORS[e.status];
-          return (
-            <TouchableOpacity key={e.id} style={s.card} activeOpacity={0.85}
-              accessibilityRole="button"
-              accessibilityLabel={`${e.name}, ${e.direction === 'lend' ? 'lent' : 'borrowed'} ${formatINR(e.principal)}, ${sc.label}. Open ledger`}
-              onPress={() => router.push({ pathname: '/finance/ledger/[id]', params: { id: e.id } })}>
-              <View style={[s.dot, { backgroundColor: e.direction === 'lend' ? FIN.good : FIN.bad }]} />
-              <View style={{ flex: 1, minWidth: 0 }}>
-                <Text style={s.title} numberOfLines={1}>{e.name}</Text>
-                <Text style={s.sub} numberOfLines={1}>{e.direction === 'lend' ? 'Lent' : 'Borrowed'}{e.mobile ? ` · ${e.mobile}` : ''}</Text>
-              </View>
-              <View style={{ alignItems: 'flex-end', gap: 5 }}>
-                <Text style={s.amt}>{formatINR(e.principal)}</Text>
-                <Pill label={sc.label} fg={sc.fg} bg={sc.bg} />
-              </View>
-            </TouchableOpacity>
-          );
-        })}
-
-        {matchedGroups.length > 0 && <Text style={s.section} accessibilityRole="header">Lucky Draw groups · {allGroups.length}</Text>}
-        {allGroups.length > GROUP_CAP && <Text style={s.capped}>Showing the first {GROUP_CAP} of {allGroups.length}. Type more to narrow the search.</Text>}
-        {matchedGroups.map(g => {
+      {/* A SectionList, so only the visible result rows render. */}
+      <SectionList<SearchRow, { key: string; title: string; total: number; cap: number }>
+        sections={sections}
+        keyExtractor={(row) => `${row.kind}-${row.id}`}
+        contentContainerStyle={s.body}
+        keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}
+        stickySectionHeadersEnabled={false}
+        ListHeaderComponent={<>
+          {query.length === 0 && <EmptyState icon="search-outline" title="Search your finances" sub="Find ledgers and Lucky Draw groups by name, mobile number or amount." />}
+          {status === 'loading' && query.length > 0 && <LoadingState label="Reading your finance data" />}
+          {status === 'error' && (
+            <ErrorState title="Could not read your finance data" sub="Search results may be missing. Nothing has been lost." onRetry={reload} />
+          )}
+          {empty && <EmptyState icon="sad-outline" title="No matches" sub={`Nothing found for “${q}”.`} />}
+        </>}
+        renderSectionHeader={({ section }) => (<>
+          <Text style={s.section} accessibilityRole="header">{section.title} · {section.total}</Text>
+          {section.total > section.cap && <Text style={s.capped}>Showing the first {section.cap} of {section.total}. Type more to narrow the search.</Text>}
+        </>)}
+        renderItem={({ item: row }) => {
+          if (row.kind === 'ledger') {
+            const e = row.ledger;
+            const sc = STATUS_COLORS[e.status];
+            return (
+              <TouchableOpacity style={s.card} activeOpacity={0.85}
+                accessibilityRole="button"
+                accessibilityLabel={`${e.name}, ${e.direction === 'lend' ? 'lent' : 'borrowed'} ${formatINR(e.principal)}, ${sc.label}. Open ledger`}
+                onPress={() => router.push({ pathname: '/finance/ledger/[id]', params: { id: e.id } })}>
+                <View style={[s.dot, { backgroundColor: e.direction === 'lend' ? FIN.good : FIN.bad }]} />
+                <View style={{ flex: 1, minWidth: 0 }}>
+                  <Text style={s.title} numberOfLines={1}>{e.name}</Text>
+                  <Text style={s.sub} numberOfLines={1}>{e.direction === 'lend' ? 'Lent' : 'Borrowed'}{e.mobile ? ` · ${e.mobile}` : ''}</Text>
+                </View>
+                <View style={{ alignItems: 'flex-end', gap: 5 }}>
+                  <Text style={s.amt}>{formatINR(e.principal)}</Text>
+                  <Pill label={sc.label} fg={sc.fg} bg={sc.bg} />
+                </View>
+              </TouchableOpacity>
+            );
+          }
+          const g = row.group;
           const hit = memberHits.get(g.id);
           return (
-            <TouchableOpacity key={g.id} style={s.card} activeOpacity={0.85}
+            <TouchableOpacity style={s.card} activeOpacity={0.85}
               accessibilityRole="button"
               accessibilityLabel={`Lucky Draw group ${g.name}${hit ? `, member ${hit.name}` : ''}, chit value ${inrShort(g.chit_value)}. Open group`}
               onPress={() => router.push({ pathname: '/finance/chitti/[id]', params: { id: g.id } })}>
@@ -167,9 +187,9 @@ export default function FinanceSearch() {
               <Text style={s.amt}>{inrShort(g.chit_value)}</Text>
             </TouchableOpacity>
           );
-        })}
-        <View style={{ height: 30 }} />
-      </ScrollView>
+        }}
+        ListFooterComponent={<View style={{ height: 30 }} />}
+      />
       </KeyboardSafe>
     </View>
   );

@@ -11,6 +11,7 @@
 
 import { simpleInterest, compoundInterest, type InterestType } from '../../utils/interest';
 import { periodRateToAnnualPct, type LedgerPeriod } from '../../utils/finance';
+import { ledgerCompounding, compoundingOfAll, type LedgerTerms } from '../../utils/financeRules';
 
 /** Compounding periods per year the calculator offers. */
 export const COMPOUNDING: { n: number; label: string; adverb: string }[] = [
@@ -44,4 +45,16 @@ export function calculateInterest(i: CalcInput): { interest: number; total: numb
     ? simpleInterest(i.principal, annual, i.years)
     : compoundInterest(i.principal, annual, i.years, i.perYear);
   return { ...r, annual };
+}
+
+/** How a ledger's interest grows, said in full: "Compound, compounded yearly". */
+export function ledgerInterestTypeLabel(e: Pick<LedgerTerms, 'interest_type' | 'compounding'>): string {
+  return e.interest_type === 'simple' ? 'Simple' : `Compound, compounded ${compoundingWord(ledgerCompounding(e))}`;
+}
+
+/** A footnote for a total over many ledgers, or null when none is compound. */
+export function ledgerCompoundingNote(rows: Pick<LedgerTerms, 'interest_type' | 'compounding'>[]): string | null {
+  const { any, n } = compoundingOfAll(rows);
+  if (!any) return null;
+  return n != null ? `Compound loans are compounded ${compoundingWord(n)}.` : 'Compound loans are compounded as set on each ledger.';
 }

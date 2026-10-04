@@ -20,6 +20,9 @@ eq('a mobile starting 91 is not stripped', mobileMatches('9123456789', '91234'),
 eq('no stored mobile', mobileMatches(null, '98765'), false);
 eq('names are not phone-shaped', phoneDigits('Ramesh'), null);
 eq('too short to be a number', phoneDigits('+9'), null);
+eq('+91 and two digits is too short (was "98", in most mobiles)', phoneDigits('+9198'), null);
+eq('… and matches nothing it should not', mobileMatches('9123498765', '+9198'), false);
+eq('+91 and three digits is a search', phoneDigits('+91 987'), '987');
 eq('digits out', phoneDigits('(98765) 43210'), '9876543210');
 
 console.log(`searchQuery: ${n} assertions passed`);

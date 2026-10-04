@@ -179,14 +179,21 @@ export function DateField({ value, onPress, label = 'Date', onClear }: {
   );
 }
 
-/** Segmented control: a recessed glass track with one raised chip. */
-export function Segment<T extends string>({ options, value, onChange, small }: {
+/**
+ * Segmented control: a recessed glass track with one raised chip. Most are
+ * form choices (Simple / Compound), announced as a radio group; `tabs` is for
+ * the ones that switch what the screen shows (a list filter, a report period).
+ */
+export function Segment<T extends string>({ options, value, onChange, small, tabs, label }: {
   options: { k: T; label: string }[]; value: T; onChange: (k: T) => void; small?: boolean;
+  tabs?: boolean;
+  /** The group's name for screen readers ("Interest type"). */
+  label?: string;
 }) {
   const FIN = useFinanceTheme();
   const s = React.useMemo(() => makeStyles(FIN), [FIN]);
   return (
-    <View style={s.segment} accessibilityRole="tablist">
+    <View style={s.segment} accessibilityRole={tabs ? 'tablist' : 'radiogroup'} accessibilityLabel={label}>
       {options.map(o => {
         const active = value === o.k;
         return (
@@ -195,8 +202,8 @@ export function Segment<T extends string>({ options, value, onChange, small }: {
             style={[s.segBtn, small && s.segBtnSm, active && s.segBtnOn]}
             onPress={() => onChange(o.k)}
             activeOpacity={0.85}
-            accessibilityRole="tab"
-            accessibilityState={{ selected: active }}
+            accessibilityRole={tabs ? 'tab' : 'radio'}
+            accessibilityState={tabs ? { selected: active } : { checked: active }}
             accessibilityLabel={o.label}
           >
             {/* Four segments including "Lucky Draw" (saved.tsx) leave ~62dp per
@@ -223,7 +230,7 @@ export function Radio({ label, active, onPress }: { label: string; active: boole
   return (
     <TouchableOpacity
       style={s.radio} onPress={onPress} activeOpacity={0.85} hitSlop={8}
-      accessibilityRole="radio" accessibilityState={{ selected: active }} accessibilityLabel={label}
+      accessibilityRole="radio" accessibilityState={{ checked: active }} accessibilityLabel={label}
     >
       <View style={[s.radioDot, active && { borderColor: FIN.brand }]}>{active && <View style={s.radioInner} />}</View>
       <Text style={[s.radioLabel, active && { color: FIN.brandInk, fontWeight: '700' }]}>{label}</Text>

@@ -1,8 +1,9 @@
 // components/finance/chitti/MembersTab.tsx — a group's members, with one
 // add/edit form card keyed by editingId. Members carry name, mobile
-// (validated) and address.
+// (validated) and address. The form's draft is held by the group screen, so
+// it survives a switch to another tab while only the open tab is rendered.
 
-import React, { useState } from 'react';
+import React from 'react';
 import { View, Text, TouchableOpacity, Alert } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useFinanceTheme } from '../useFinanceTheme';
@@ -13,27 +14,28 @@ import {
 } from '../../../db/chitti';
 import { makeChittiStyles } from './chittiStyles';
 
-export function MembersTab({ group: g, members, onChanged }: {
-  group: ChittiGroup; members: ChittiMember[]; onChanged: () => void;
+export interface MemberDraft { show: boolean; editingId: string | null; name: string; phone: string; address: string }
+export const EMPTY_MEMBER_DRAFT: MemberDraft = { show: false, editingId: null, name: '', phone: '', address: '' };
+
+export function MembersTab({ group: g, members, onChanged, draft, setDraft }: {
+  group: ChittiGroup; members: ChittiMember[];
+  /** Resolves once the group's rows are re-read, so Save stays latched until then. */
+  onChanged: () => Promise<void>;
+  draft: MemberDraft; setDraft: React.Dispatch<React.SetStateAction<MemberDraft>>;
 }) {
   const FIN = useFinanceTheme();
   const s = React.useMemo(() => makeChittiStyles(FIN), [FIN]);
 
-  const [showMemberForm, setShowMemberForm] = useState(false);
-  const [editingId, setEditingId] = useState<string | null>(null);
-  const [mName, setMName] = useState('');
-  const [mPhone, setMPhone] = useState('');
-  const [mAddress, setMAddress] = useState('');
+  const { show: showMemberForm, editingId, name: mName, phone: mPhone, address: mAddress } = draft;
+  const set = (p: Partial<MemberDraft>) => setDraft(d => ({ ...d, ...p }));
+  const setMName = (name: string) => set({ name });
+  const setMPhone = (phone: string) => set({ phone });
+  const setMAddress = (address: string) => set({ address });
 
-  const openAddMember = () => {
-    setEditingId(null); setMName(''); setMPhone(''); setMAddress('');
-    setShowMemberForm(true);
-  };
-  const openEditMember = (m: ChittiMember) => {
-    setEditingId(m.id); setMName(m.name); setMPhone(m.phone ?? ''); setMAddress(m.address ?? '');
-    setShowMemberForm(true);
-  };
-  const closeMemberForm = () => setShowMemberForm(false);
+  const openAddMember = () => setDraft({ ...EMPTY_MEMBER_DRAFT, show: true });
+  const openEditMember = (m: ChittiMember) =>
+    setDraft({ show: true, editingId: m.id, name: m.name, phone: m.phone ?? '', address: m.address ?? '' });
+  const closeMemberForm = () => set({ show: false });
 
   const saveMember = async () => {
     const name = mName.trim();
@@ -55,8 +57,8 @@ export function MembersTab({ group: g, members, onChanged }: {
         await insertMember({ group_id: g.id, name, phone, address, number: nextMemberNumber(members) });
       }
     } catch (e: any) { return Alert.alert('Could not save the member', e?.message ?? 'Try again.'); }
-    setShowMemberForm(false);
-    onChanged();
+    set({ show: false });
+    await onChanged();
   };
 
   const removeMember = (m: ChittiMember) => Alert.alert(

@@ -86,8 +86,14 @@ export async function shareTextFile(filename: string, content: string, mime: str
   const dir = FileSystem.cacheDirectory ?? FileSystem.documentDirectory ?? '';
   const uri = `${dir}${filename}`;
   await FileSystem.writeAsStringAsync(uri, content, { encoding: FileSystem.EncodingType.UTF8 });
-  if (await Sharing.isAvailableAsync()) {
-    await Sharing.shareAsync(uri, { mimeType: mime, dialogTitle: `Share ${filename}` });
+  // Like sharePdf: the cached copy (a ledger export or a sealed backup) is
+  // removed even when the share throws. Callers' own delete is idempotent.
+  try {
+    if (await Sharing.isAvailableAsync()) {
+      await Sharing.shareAsync(uri, { mimeType: mime, dialogTitle: `Share ${filename}` });
+    }
+  } finally {
+    await FileSystem.deleteAsync(uri, { idempotent: true }).catch(() => {});
   }
   return uri;
 }

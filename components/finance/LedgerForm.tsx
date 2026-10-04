@@ -6,25 +6,29 @@
 // owns its field state and the date picker; the screen decides what Save does.
 
 import React, { useState } from 'react';
-import { View, ScrollView, StyleSheet, Alert } from 'react-native';
+import { View, Text, ScrollView, StyleSheet, Alert } from 'react-native';
 import { KeyboardSafe } from '../ui';
 import { useFinanceTheme } from './useFinanceTheme';
 import { useDatePicker } from './useDatePicker';
 import { type FinancePalette } from '../../constants/financeTheme';
 import { Label, Field, Segment, Radio, Btn, DateField } from './ui';
-import { fmtDate } from '../../utils/financeFormat';
+import { fmtDate, formatINR } from '../../utils/financeFormat';
 import type { LedgerPeriod } from '../../utils/finance';
+import { ledgerInterest, ledgerCompounding } from '../../utils/financeRules';
+import { COMPOUNDING, ledgerInterestTypeLabel } from '../../lib/finance/compounding';
 import { checkLedgerForm } from './ledgerFormRules';
 
 export interface LedgerFormValues {
   direction: 'lend' | 'borrow'; name: string; mobile: string | null;
   interest_type: 'simple' | 'compound'; principal: number; rate: number; rate_mode: 'percent' | 'rupees';
   period: LedgerPeriod; start_date: number; end_date: number | null; notes: string | null;
+  /** Compound only: periods per year (null for simple interest). */
+  compounding: number | null;
 }
 
 export function LedgerForm({ initial, directionEditable, saveLabel, onSave }: {
   /** The stored ledger when editing; omitted for a new one. */
-  initial?: Omit<LedgerFormValues, 'mobile' | 'notes'> & { mobile: string | null; notes: string | null };
+  initial?: LedgerFormValues;
   /** Lend / Borrow can be chosen only when creating. */
   directionEditable: boolean;
   saveLabel: string;
@@ -46,20 +50,39 @@ export function LedgerForm({ initial, directionEditable, saveLabel, onSave }: {
   const [start, setStart] = useState<number>(initial?.start_date ?? Date.now());
   const [end, setEnd] = useState<number | null>(initial?.end_date ?? null);
   const [notes, setNotes] = useState(initial?.notes ?? '');
+  // Yearly unless chosen: every ledger was computed that way before the choice
+  // existed, so a stored NULL stays yearly (utils/financeRules ledgerCompounding).
+  const [perYear, setPerYear] = useState<number>(ledgerCompounding({ compounding: initial?.compounding }));
+  // After a refused Save the checks run live, so the marked field clears as
+  // soon as it is fixed.
+  const [tried, setTried] = useState(false);
 
   const pickDate = (which: 'start' | 'end') => {
     const cur = which === 'start' ? start : (end ?? Date.now());
     picker.open(new Date(cur), (d) => { if (which === 'start') setStart(d.getTime()); else setEnd(d.getTime()); });
   };
 
+  const checked = checkLedgerForm({ name, mobile, principal, rate, start, end });
+  const problem = tried && 'problem' in checked ? checked.problem : null;
+  const errorAt = (f: string) => (problem?.field === f ? problem.message : undefined);
+  const compounding = itype === 'compound' ? perYear : null;
+  // What these terms come to, and what the stored ones did, so an edit shows
+  // its effect on the interest before it is saved.
+  const terms = (v: Pick<LedgerFormValues, 'principal' | 'rate'>) => ({
+    principal: v.principal, rate: v.rate, rate_mode: rateMode, period, interest_type: itype, start_date: start, end_date: end, compounding,
+  });
+  const preview = 'ok' in checked ? ledgerInterest(terms(checked.ok)) : null;
+  const was = initial ? ledgerInterest(initial) : null;
+
   const submit = async () => {
-    const checked = checkLedgerForm({ name, mobile, principal, rate, start, end });
+    setTried(true);
     if ('problem' in checked) return Alert.alert(checked.problem.title, checked.problem.message);
     const c = checked.ok;
     try {
       await onSave({
         direction, name: c.name, mobile: c.mobile, interest_type: itype, principal: c.principal,
         rate: c.rate, rate_mode: rateMode, period, start_date: start, end_date: end, notes: notes.trim() || null,
+        compounding,
       });
     } catch (e: any) {
       Alert.alert('Could not save', e?.message ?? 'Try again');
@@ -80,36 +103,52 @@ export function LedgerForm({ initial, directionEditable, saveLabel, onSave }: {
           )}
 
           <Label>{who} Name</Label>
-          <Field label={`${who} name`} value={name} onChangeText={setName} placeholder="Enter name" />
+          <Field label={`${who} name`} value={name} onChangeText={setName} placeholder="Enter name" error={errorAt('name')} />
 
           <Label hint="(optional)">Mobile Number</Label>
-          <Field label="Mobile number, optional" value={mobile} onChangeText={setMobile} placeholder="Enter mobile number" keyboardType="phone-pad" />
+          <Field label="Mobile number, optional" value={mobile} onChangeText={setMobile} placeholder="Enter mobile number" keyboardType="phone-pad" error={errorAt('mobile')} />
 
           <Label>Principal Amount</Label>
-          <Field label="Principal amount" value={principal} onChangeText={setPrincipal} placeholder="₹ 0" keyboardType="numeric" />
+          <Field label="Principal amount" value={principal} onChangeText={setPrincipal} placeholder="₹ 0" keyboardType="numeric" error={errorAt('principal')} />
 
           <Label>Interest Type</Label>
-          <Segment<'simple' | 'compound'> options={[{ k: 'simple', label: 'Simple' }, { k: 'compound', label: 'Compound' }]} value={itype} onChange={setItype} />
+          <Segment<'simple' | 'compound'> options={[{ k: 'simple', label: 'Simple' }, { k: 'compound', label: 'Compound' }]} value={itype} onChange={setItype} label="Interest type" />
+          {itype === 'compound' && (<>
+            <Label>Compounded</Label>
+            <Segment<string>
+              options={COMPOUNDING.map(c => ({ k: String(c.n), label: c.label }))}
+              value={String(perYear)} onChange={(k) => setPerYear(Number(k))} small label="Compounded"
+            />
+          </>)}
 
           <Label>Rate Type</Label>
-          <Segment<'percent' | 'rupees'> options={[{ k: 'percent', label: '% (percentage)' }, { k: 'rupees', label: '₹ per ₹100' }]} value={rateMode} onChange={setRateMode} />
+          <Segment<'percent' | 'rupees'> options={[{ k: 'percent', label: '% (percentage)' }, { k: 'rupees', label: '₹ per ₹100' }]} value={rateMode} onChange={setRateMode} label="Rate type" />
 
           <Label>{rateMode === 'rupees' ? 'Interest Rate (₹ per ₹100)' : 'Interest Rate (%)'}</Label>
-          <Field label={rateMode === 'rupees' ? 'Interest rate, rupees per 100' : 'Interest rate, percent'} value={rate} onChangeText={setRate} placeholder="Enter rate" keyboardType="numeric" />
+          <Field label={rateMode === 'rupees' ? 'Interest rate, rupees per 100' : 'Interest rate, percent'} value={rate} onChangeText={setRate} placeholder="Enter rate" keyboardType="numeric" error={errorAt('rate')} />
 
           <Label>Interest Period</Label>
           <Segment<LedgerPeriod>
             options={[{ k: 'daily', label: 'Daily' }, { k: 'weekly', label: 'Weekly' }, { k: 'monthly', label: 'Monthly' }, { k: 'yearly', label: 'Yearly' }]}
-            value={period} onChange={setPeriod} small
+            value={period} onChange={setPeriod} small label="Interest period"
           />
 
           <Label>Start Date</Label>
           <DateField label="Start date" value={fmtDate(start)} onPress={() => pickDate('start')} />
           <Label hint="(optional)">End Date</Label>
           <DateField label="End date" value={end ? fmtDate(end) : ''} onPress={() => pickDate('end')} onClear={() => setEnd(null)} />
+          {errorAt('end') ? <Text style={s.err} accessibilityLiveRegion="polite">{errorAt('end')}</Text> : null}
 
           <Label hint="(optional)">Notes</Label>
           <Field label="Notes, optional" value={notes} onChangeText={setNotes} placeholder="Add a note" multiline />
+
+          {preview && (
+            <Text style={s.preview}>
+              {ledgerInterestTypeLabel({ interest_type: itype, compounding })}.{' '}
+              {preview.projected ? 'Interest over 1 year (no end date)' : 'Interest to end date'}: {formatINR(preview.interest)}
+              {was && was.interest !== preview.interest ? ` (was ${formatINR(was.interest)})` : ''}
+            </Text>
+          )}
 
           <View style={{ marginTop: 20 }}>
             <Btn label={saveLabel} icon="checkmark" onPress={submit} wide />
@@ -124,6 +163,8 @@ export function LedgerForm({ initial, directionEditable, saveLabel, onSave }: {
 const makeStyles = (FIN: FinancePalette) => StyleSheet.create({
   body: { padding: 16, paddingBottom: 40, alignSelf: 'center', width: '100%', maxWidth: FIN.contentMax },
   radioRow: { flexDirection: 'row', gap: 28, marginTop: 8, marginBottom: 4 },
+  err: { color: FIN.bad, fontSize: 12.5, fontWeight: '600', marginTop: 6 },
+  preview: { color: FIN.sub, fontSize: 13, lineHeight: 19, marginTop: 18 },
 });
 
 export default LedgerForm;

@@ -25,6 +25,7 @@ const base: LedgerEntry = {
   interest_type: 'compound', principal: 125000.5, rate: 2, rate_mode: 'percent', period: 'monthly',
   start_date: Date.UTC(2025, 0, 15), end_date: Date.UTC(2026, 0, 15), remaining: 0, status: 'completed',
   notes: 'paid in two parts\n"cash", then UPI', created_at: Date.UTC(2025, 0, 15), last_updated: 0,
+  compounding: 12,
 };
 const csv = toCsv(LEDGER_HEADERS, [ledgerCsvRow(base)]);
 const now = Date.UTC(2026, 9, 4);
@@ -40,6 +41,10 @@ assert.equal(r.status, 'completed');
 assert.equal(r.interest_type, 'compound');
 assert.equal(r.start_date, base.start_date);      // dates survive the round trip
 assert.equal(r.end_date, base.end_date);
+assert.equal(r.compounding, 12);                  // the compounding survives too
+// a compound ledger stored before the choice existed exports as yearly (1)
+assert.equal(ledgerCsvRow({ ...base, compounding: null })[14], 1);
+assert.equal(ledgerCsvRow({ ...base, interest_type: 'simple' })[14], '');
 
 // re-importing the same file into a book that already has it adds nothing
 const again = planLedgerImport(csv, [base], now);
@@ -65,6 +70,7 @@ assert.equal(bad.rows[0].start_date, now);
 assert.equal(bad.rows[0].end_date, null);
 assert.equal(bad.rows[0].remaining, 100);
 assert.equal(bad.rows[0].direction, 'borrow');
+assert.equal(bad.rows[0].compounding, null);       // no column: yearly, as before
 
 // an old export is de-duplicated on its Created day
 const oldCsv = 'Name,Mobile,Direction,InterestType,Principal,Rate,RateMode,Period,Remaining,Status,Notes,Created\n' +

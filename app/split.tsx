@@ -51,11 +51,11 @@ export default function SplitScreen() {
   // Space actually available to the panes, excluding the system insets, so a
   // notch or gesture bar cannot push a pane under the minimum.
   //
-  // BAR_H is subtracted for a stacked split: the control bar sits ABOVE the
-  // panes and consumes real height, so sizing them against the full window
-  // handed out 40dp that did not exist and pushed the bottom pane's composer
-  // off-screen. It costs nothing side-by-side, where the bar is not on the
-  // panes' axis — hence the axis check rather than a blanket subtraction.
+  // BAR_H is subtracted on both axes: the control bar sits ABOVE the panes
+  // and takes real height either way. Stacked, sizing the panes against the
+  // full window handed out height that did not exist and pushed the bottom
+  // pane's composer off-screen; side by side, each pane is that much shorter
+  // too, which is what preferredAxis must judge the layout by.
   const usableH = height - insets.top - insets.bottom - BAR_H;
   const axis = preferredAxis(width, usableH);
   const total = axis === 'vertical' ? width : usableH;
@@ -93,12 +93,9 @@ export default function SplitScreen() {
     setRatio(r => clampRatio(1 - r, total));
   }, [left, right, total]);
 
-  const closeSplit = useCallback(() => {
-    router.replace({ pathname: '/chat', params: { id: left } });
-  }, [router, left]);
   // Close ONE pane: the other chat carries on full screen.
   const closeLeft = useCallback(() => router.replace({ pathname: '/chat', params: { id: right } }), [router, right]);
-  const closeRight = closeSplit;
+  const closeRight = useCallback(() => router.replace({ pathname: '/chat', params: { id: left } }), [router, left]);
 
   // ── Refusals, stated plainly rather than rendering something broken ──
   if (!left || !right) {
@@ -119,18 +116,26 @@ export default function SplitScreen() {
 
       {/* Split control bar — swap / close, per the design's pane header */}
       <View style={[st.bar, { borderBottomColor: colors.glassStroke }]}>
-        <Ionicons name={vertical ? 'tablet-landscape-outline' : 'phone-portrait-outline'} size={15} color={colors.textDim} />
-        <Text style={[st.barTxt, { color: colors.textDim }]}>Split view</Text>
+        <Ionicons name={vertical ? 'tablet-landscape-outline' : 'phone-portrait-outline'} size={15} color={colors.textDim}
+          accessibilityLabel="Split view" />
+        {/* Stacked means a narrow window: the three buttons need the room. */}
+        {vertical && <Text style={[st.barTxt, { color: colors.textDim }]}>Split view</Text>}
         <View style={{ flex: 1 }} />
         <TouchableOpacity onPress={swap} hitSlop={{ left: 6, right: 6 }} style={st.barBtn}
           accessibilityRole="button" accessibilityLabel="Swap the two chats">
           <Ionicons name="swap-horizontal" size={17} color={colors.text} />
           <Text style={[st.barBtnTxt, { color: colors.text }]}>Swap</Text>
         </TouchableOpacity>
-        <TouchableOpacity onPress={closeSplit} hitSlop={{ left: 6, right: 6 }} style={st.barBtn}
-          accessibilityRole="button" accessibilityLabel="Close split view">
+        {/* Close either pane from the bar; the other chat carries on full screen. */}
+        <TouchableOpacity onPress={closeLeft} hitSlop={{ left: 6, right: 6 }} style={st.barBtn}
+          accessibilityRole="button" accessibilityLabel={`Close the ${vertical ? 'left' : 'top'} chat, keep the ${vertical ? 'right' : 'bottom'} one`}>
           <Ionicons name="close" size={17} color={colors.text} />
-          <Text style={[st.barBtnTxt, { color: colors.text }]}>Close</Text>
+          <Text style={[st.barBtnTxt, { color: colors.text }]}>{vertical ? 'Left' : 'Top'}</Text>
+        </TouchableOpacity>
+        <TouchableOpacity onPress={closeRight} hitSlop={{ left: 6, right: 6 }} style={st.barBtn}
+          accessibilityRole="button" accessibilityLabel={`Close the ${vertical ? 'right' : 'bottom'} chat, keep the ${vertical ? 'left' : 'top'} one`}>
+          <Ionicons name="close" size={17} color={colors.text} />
+          <Text style={[st.barBtnTxt, { color: colors.text }]}>{vertical ? 'Right' : 'Bottom'}</Text>
         </TouchableOpacity>
       </View>
 

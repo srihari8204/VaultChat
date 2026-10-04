@@ -10,17 +10,20 @@
 // white of HERO_INK (constants/financeTheme).
 
 import React from 'react';
-import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
+import { ScrollView, Text, TouchableOpacity, StyleSheet } from 'react-native';
 import { router } from 'expo-router';
 import { ErrorBoundary } from '../ErrorBoundary';
-import { HERO_INK } from '../../constants/financeTheme';
+import { HERO_INK, FALLBACK_GROUND } from '../../constants/financeTheme';
 
 export class FinanceErrorBoundary extends ErrorBoundary {
   render() {
     const out = super.render();
     if (!this.state.hasError) return out;
+    // In the flow below the fallback, not overlaid on it: at large font sizes
+    // the message and Try again grow, and the page scrolls instead of the
+    // Leave button covering them.
     return (
-      <View style={st.wrap}>
+      <ScrollView style={st.wrap} contentContainerStyle={st.content}>
         {out}
         <TouchableOpacity
           style={st.exit}
@@ -31,17 +34,17 @@ export class FinanceErrorBoundary extends ErrorBoundary {
         >
           <Text style={st.exitTxt}>Leave Vault Finance</Text>
         </TouchableOpacity>
-      </View>
+      </ScrollView>
     );
   }
 }
 
 const st = StyleSheet.create({
-  wrap: { flex: 1 },
-  // Overlaid on the fallback's own fixed-dark ground, below its Try again.
+  wrap: { flex: 1, backgroundColor: FALLBACK_GROUND },
+  content: { flexGrow: 1 },
   exit: {
-    position: 'absolute', left: 0, right: 0, bottom: 48, alignSelf: 'center',
-    alignItems: 'center', justifyContent: 'center', minHeight: 44, paddingHorizontal: 24,
+    alignSelf: 'center', alignItems: 'center', justifyContent: 'center',
+    minHeight: 44, paddingHorizontal: 24, marginBottom: 48,
   },
   exitTxt: { color: HERO_INK.strong, fontSize: 15, fontWeight: '700', textDecorationLine: 'underline' },
 });

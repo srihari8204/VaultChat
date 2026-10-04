@@ -33,6 +33,13 @@ export async function financeDb(): Promise<SQLite.SQLiteDatabase> {
       await d.execAsync(`ALTER TABLE reminders ADD COLUMN anchor_at INTEGER`);
       await d.execAsync(`UPDATE reminders SET anchor_at = next_at WHERE anchor_at IS NULL`);
     }
+    // Same again: ledger_entries.compounding (periods per year). Existing rows
+    // stay NULL, which utils/financeRules ledgerCompounding reads as yearly —
+    // the only way they were ever computed — so no stored loan changes amount.
+    const lcols = await d.getAllAsync<{ name: string }>(`PRAGMA table_info(ledger_entries)`);
+    if (!lcols.some(c => c.name === 'compounding')) {
+      await d.execAsync(`ALTER TABLE ledger_entries ADD COLUMN compounding INTEGER`);
+    }
     _db = d;
     return d;
   })();
@@ -67,7 +74,8 @@ CREATE TABLE IF NOT EXISTS ledger_entries (
   status        TEXT NOT NULL,          -- 'running' | 'overdue' | 'completed'
   notes         TEXT,
   created_at    INTEGER NOT NULL,
-  last_updated  INTEGER NOT NULL
+  last_updated  INTEGER NOT NULL,
+  compounding   INTEGER                 -- compound: periods per year; NULL = yearly
 );
 CREATE INDEX IF NOT EXISTS idx_ledger_user ON ledger_entries(user_id, created_at DESC);
 

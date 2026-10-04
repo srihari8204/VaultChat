@@ -5,7 +5,7 @@
 import React, { useCallback, useRef, useState } from 'react';
 import { useFinanceTheme } from '../../components/finance/useFinanceTheme';
 import { KeyboardSafe } from '../../components/ui';
-import { View, Text, ScrollView, StyleSheet, TouchableOpacity, Alert } from 'react-native';
+import { View, Text, ScrollView, StyleSheet, TouchableOpacity, Alert, AccessibilityInfo } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useFocusEffect } from 'expo-router';
 import { useDatePicker } from '../../components/finance/useDatePicker';
@@ -21,6 +21,7 @@ import {
 import { scheduleReminder, scheduleAt, cancel, snoozedNotifIds } from '../../components/finance/notify';
 import { isUnscheduled } from '../../components/finance/notifyIds';
 import { nextOccurrence } from '../../utils/financeRules';
+import { osTriggerFor, skipsSomePeriods } from '../../lib/finance/reminderSchedule';
 
 const FREQ_LABEL: Record<ReminderFreq, string> = { once: 'Once', daily: 'Daily', weekly: 'Weekly', monthly: 'Monthly', yearly: 'Yearly' };
 
@@ -47,10 +48,12 @@ export default function Reminders() {
   // The calendar opens a reminder by id: it is outlined and scrolled to once.
   const scroller = useRef<ScrollView>(null);
   const scrolledTo = useRef<string | null>(null);
-  const focusAt = (id: string, y: number) => {
-    if (id !== params.focus || scrolledTo.current === id) return;
-    scrolledTo.current = id;
+  const focusAt = (r: Reminder, y: number) => {
+    if (r.id !== params.focus || scrolledTo.current === r.id) return;
+    scrolledTo.current = r.id;
     scroller.current?.scrollTo({ y: Math.max(0, y - 12), animated: true });
+    // The outline is visual only; a screen reader hears which reminder opened.
+    AccessibilityInfo.announceForAccessibility(`Showing reminder ${r.title}, ${r.status === 'done' ? 'completed' : `due ${fmtDateTime(r.next_at)}`}`);
   };
 
   // One action per reminder at a time: two taps on Snooze scheduled two
@@ -85,10 +88,20 @@ export default function Reminders() {
     // its next occurrence.
     if (freq === 'once' && when <= Date.now()) return Alert.alert('When', 'Pick a time in the future.');
     const day = new Date(when).getDate();
-    if (freq === 'monthly' && day > 28 && !await confirm(
-      `Day ${day} is not in every month`,
-      `Phones schedule a monthly reminder on day ${day} only in months that have it, so some months will have no alert. Pick day 28 or earlier to be reminded every month.`,
-      'Keep day ' + day,
+    if (skipsSomePeriods(freq, when) && !await confirm(
+      freq === 'monthly' ? `Day ${day} is not in every month` : '29 February is not in every year',
+      freq === 'monthly'
+        ? `Phones schedule a monthly reminder on day ${day} only in months that have it, so some months will have no alert. Pick day 28 or earlier to be reminded every month.`
+        : 'Phones schedule a yearly reminder on 29 February only in leap years, so three years in four will have no alert. Pick 28 February or 1 March to be reminded every year.',
+      freq === 'monthly' ? 'Keep day ' + day : 'Keep 29 February',
+    )) return;
+    // Phones repeat by day and time with no start date, so a series that
+    // starts more than one period ahead also alerts before it starts.
+    const { earlyAt } = osTriggerFor(freq, when, Date.now());
+    if (earlyAt != null && !await confirm(
+      'Your phone will alert early',
+      `Phones repeat a reminder from today, so this one will also alert from ${fmtDateTime(earlyAt)}, before its first date, ${fmtDateTime(when)}.`,
+      'Add anyway',
     )) return;
     const ref = params.refType === 'ledger' || params.refType === 'chitti' ? params.refType : null;
     try {
@@ -157,7 +170,7 @@ export default function Reminders() {
             <Label>Repeat</Label>
             <Segment<ReminderFreq>
               options={[{ k: 'once', label: 'Once' }, { k: 'daily', label: 'Daily' }, { k: 'weekly', label: 'Weekly' }, { k: 'monthly', label: 'Monthly' }, { k: 'yearly', label: 'Yearly' }]}
-              value={freq} onChange={setFreq} small
+              value={freq} onChange={setFreq} small label="Repeat"
             />
             <Label>When</Label>
             <TouchableOpacity style={s.whenBtn} onPress={pickWhen} accessibilityRole="button"
@@ -180,7 +193,7 @@ export default function Reminders() {
         {active.length > 0 && <Text style={s.section}>Active</Text>}
         {active.map(r => (
           <View key={r.id} style={[s.card, s.activeCard, r.id === params.focus && s.focused]}
-            onLayout={(ev) => focusAt(r.id, ev.nativeEvent.layout.y)}>
+            onLayout={(ev) => focusAt(r, ev.nativeEvent.layout.y)}>
             <View style={s.reminderHeading}>
               <View style={s.dot} />
               <View style={{ flex: 1, minWidth: 0 }}>
@@ -202,7 +215,7 @@ export default function Reminders() {
         {done.length > 0 && <Text style={s.section}>Completed</Text>}
         {done.map(r => (
           <View key={r.id} style={[s.card, r.id === params.focus && s.focused]}
-            onLayout={(ev) => focusAt(r.id, ev.nativeEvent.layout.y)}>
+            onLayout={(ev) => focusAt(r, ev.nativeEvent.layout.y)}>
             <Ionicons name="checkmark-circle" size={18} color={FIN.good} />
             <View style={{ flex: 1, minWidth: 0 }}>
               <Text style={[s.title, { textDecorationLine: 'line-through' }]} numberOfLines={1}>{r.title}</Text>

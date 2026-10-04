@@ -28,12 +28,15 @@ import { listGroups } from '../../db/chitti';
 import { listReminders } from '../../db/reminders';
 import { sumRupees } from '../../utils/money';
 import { ledgerInterest, startOfDay } from '../../utils/financeRules';
+import { ledgerCompoundingNote } from '../../lib/finance/compounding';
 
 interface Totals {
   lent: number; borrowed: number; earned: number; pending: number;
   active: number; overdue: number; today: number; chitti: number;
+  /** How the summed compound loans compound, or null when none is compound. */
+  compounding: string | null;
 }
-const ZERO: Totals = { lent: 0, borrowed: 0, earned: 0, pending: 0, active: 0, overdue: 0, today: 0, chitti: 0 };
+const ZERO: Totals = { lent: 0, borrowed: 0, earned: 0, pending: 0, active: 0, overdue: 0, today: 0, chitti: 0, compounding: null };
 
 export default function FinanceDashboard() {
   const { scheme } = useTheme();
@@ -71,6 +74,7 @@ export default function FinanceDashboard() {
         if (l.status === 'overdue') acc.overdue += 1;
       }
       acc.chitti = groups.filter(g => g.status === 'active').length;
+      acc.compounding = ledgerCompoundingNote(ledgers.filter(l => l.direction === 'lend'));
       acc.today = reminders.filter(r => r.status === 'active' && r.next_at >= todayStart && r.next_at < todayEnd).length;
       setT(acc);
       done();
@@ -143,13 +147,14 @@ export default function FinanceDashboard() {
             <View style={s.heroFoot}>
               <Text style={s.heroFootTxt} numberOfLines={2}
                 accessibilityLabel={`Full-term interest on settled loans: ${inrShort(t.earned)}`}>
-                Settled loans, full term {inrShort(t.earned)}
+                Interest, settled loans (full term) {inrShort(t.earned)}
               </Text>
               <Text style={s.heroFootTxt} numberOfLines={2}
                 accessibilityLabel={`Full-term interest expected on open loans, to their end dates: ${inrShort(t.pending)}`}>
-                Open loans, full term {inrShort(t.pending)}
+                Interest, open loans (full term) {inrShort(t.pending)}
               </Text>
             </View>
+            {t.compounding && <Text style={s.heroNote}>{t.compounding}</Text>}
           </HeroCard>
 
           {/* Health tiles */}
@@ -220,6 +225,7 @@ const makeStyles = (FIN: FinancePalette) => StyleSheet.create({
     marginTop: 16, paddingTop: 12, borderTopWidth: 1, borderTopColor: HERO_INK.rule,
   },
   heroFootTxt: { color: HERO_INK.soft, fontSize: 12, fontWeight: '600', flexShrink: 1, ...TABULAR },
+  heroNote: { color: HERO_INK.soft, fontSize: 11.5, marginTop: 8 },
 
   section: { color: FIN.text, fontSize: 16, fontWeight: '800', marginTop: 24, marginBottom: 14, letterSpacing: -0.2 },
 

@@ -7,8 +7,9 @@ import assert from 'node:assert/strict';
 import {
   addMonths, startOfDay, isPastDue, ledgerDatesProblem, normalizeMobile, ledgerInterest,
   ledgerStatusFor, groupStatusFor, nextAuction, chittiTermEnd, nextOccurrence, occurrencesBetween,
-  advanceReminders, amountMatches, sameCustomer,
+  advanceReminders, amountMatches, sameCustomer, ledgerCompounding, compoundingOfAll, ledgerInterestSoFar,
 } from './financeRules';
+import { toPaise, fromPaise } from './money';
 
 let n = 0;
 const ok = (label: string, cond: boolean) => { assert.ok(cond, label); n++; };
@@ -46,6 +47,55 @@ ok('compound is more than simple over 2 years', compound.interest > simple.inter
 ok('compound ≈ P(1.12^2) − P', Math.abs(compound.interest - 25440) < 60);
 ok('no end date is a 1-year projection', ledgerInterest({ ...base, end_date: null, interest_type: 'simple' }).projected === true);
 eq('0% is zero interest', ledgerInterest({ ...base, rate: 0, interest_type: 'compound' }).interest, 0);
+
+// ── ledger compounding: chosen per ledger, yearly when not stored ──
+// Exact reference, P × ((den + num) / den)^k in BigInt, rounded half-up to
+// paise, compared through utils/money (toPaise / fromPaise).
+function exactPaise(rupees: bigint, num: bigint, den: bigint, k: number): number {
+  let N = rupees * 100n, D = 1n;
+  for (let i = 0; i < k; i++) { N *= den + num; D *= den; }
+  return Number((2n * N + D) / (2n * D));
+}
+const YEAR_MS = 31536000000;   // ledgerInterest's year: exactly 365 days
+const lt = (over: Partial<Parameters<typeof ledgerInterest>[0]>) => ledgerInterest({
+  principal: 100000, rate: 2, rate_mode: 'percent', period: 'monthly', interest_type: 'compound',
+  start_date: at(2026, 1, 1), end_date: at(2026, 1, 1) + YEAR_MS, ...over,
+});
+const exactCases: [string, Parameters<typeof lt>[0], number][] = [
+  // the re-rater's case: the calculator's monthly answer, now on a ledger
+  ['2%/month, monthly, 1 year', { compounding: 12 }, exactPaise(100000n, 2n, 100n, 12)],
+  ['2%/month, yearly (stored)', { compounding: 1 }, exactPaise(100000n, 24n, 100n, 1)],
+  ['10%/year, quarterly, 2 years', { rate: 10, period: 'yearly', compounding: 4, end_date: at(2026, 1, 1) + 2 * YEAR_MS }, exactPaise(100000n, 25n, 1000n, 8)],
+  ['₹2/₹100/month, monthly, 3 years on ₹50,000', { principal: 50000, rate_mode: 'rupees', compounding: 12, end_date: at(2026, 1, 1) + 3 * YEAR_MS }, exactPaise(50000n, 2n, 100n, 36)],
+  ['1%/week, weekly, 1 year on ₹10,000', { principal: 10000, rate: 1, period: 'weekly', compounding: 52 }, exactPaise(10000n, 1n, 100n, 52)],
+  ['0.1%/day, daily, 1 year', { rate: 0.1, period: 'daily', compounding: 365 }, exactPaise(100000n, 1n, 1000n, 365)],
+];
+for (const [label, over, want] of exactCases) {
+  const r = lt(over);
+  eq(`${label}: total to the paise`, toPaise(r.total), want);
+  eq(`${label}: P + interest reconciles`, toPaise(over.principal ?? 100000) + toPaise(r.interest), toPaise(r.total));
+}
+eq('the ledger now agrees with the calculator: ₹26,824.18', lt({ compounding: 12 }).interest, fromPaise(exactPaise(100000n, 2n, 100n, 12) - 10000000));
+// Existing loans do not change: a NULL (or absent) compounding is yearly,
+// exactly the amount every compound ledger showed before.
+eq('a stored NULL is yearly: still ₹24,000', lt({ compounding: null }).interest, 24000);
+eq('absent is yearly too', lt({}).interest, 24000);
+eq('junk compounding falls back to yearly', [0, -4, 2.5, 400, NaN].map(c => ledgerCompounding({ compounding: c })), [1, 1, 1, 1, 1]);
+eq('valid frequencies are kept', [1, 4, 12, 52, 365].map(c => ledgerCompounding({ compounding: c })), [1, 4, 12, 52, 365]);
+eq('simple interest ignores compounding', lt({ interest_type: 'simple', compounding: 365 }).interest, 24000);
+eq('no compound ledgers: nothing to say', compoundingOfAll([{ interest_type: 'simple', compounding: 12 }]), { any: false, n: null });
+eq('all yearly (stored NULL and 1)', compoundingOfAll([{ interest_type: 'compound', compounding: null }, { interest_type: 'compound', compounding: 1 }]), { any: true, n: 1 });
+eq('mixed frequencies', compoundingOfAll([{ interest_type: 'compound', compounding: 12 }, { interest_type: 'compound', compounding: 1 }]), { any: true, n: null });
+
+// ── interest so far: only while the loan is open and running ──
+{
+  const open = { ...base, interest_type: 'simple' as const, status: 'running' as const, end_date: at(2027, 1, 1) };
+  ok('half a year in: about half a year of interest', Math.abs(ledgerInterestSoFar(open, at(2026, 7, 2))! - 6000) < 50);
+  eq('nothing before the start', ledgerInterestSoFar(open, at(2025, 12, 1)), 0);
+  eq('a settled loan stops accruing (was: kept growing after payoff)', ledgerInterestSoFar({ ...open, status: 'completed' }, at(2026, 7, 2)), null);
+  eq('past the end date the full-term figure stands', ledgerInterestSoFar({ ...open, status: 'overdue' }, at(2027, 2, 1)), null);
+  ok('no end date keeps accruing', (ledgerInterestSoFar({ ...open, end_date: null }, at(2026, 7, 2)) ?? 0) > 0);
+}
 
 // ── ledger status ──
 const now = at(2026, 10, 4, 12);

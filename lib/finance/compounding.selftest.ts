@@ -4,7 +4,8 @@
 // once a year.
 
 import assert from 'node:assert/strict';
-import { calculateInterest, compoundingFor, compoundingWord, COMPOUNDING } from './compounding';
+import { calculateInterest, compoundingFor, compoundingWord, COMPOUNDING, ledgerInterestTypeLabel, ledgerCompoundingNote } from './compounding';
+import { ledgerInterest } from '../../utils/financeRules';
 import { round2 } from '../../utils/interest';
 
 let n = 0;
@@ -40,6 +41,24 @@ eq('0% is the principal back', calculateInterest({ ...base, rate: 0, type: 'comp
 eq('period → compounding', (['daily', 'weekly', 'monthly', 'yearly'] as const).map(compoundingFor), [365, 52, 12, 1]);
 eq('every default is offered', (['daily', 'weekly', 'monthly', 'yearly'] as const).every(p => COMPOUNDING.some(c => c.n === compoundingFor(p))), true);
 eq('words', [compoundingWord(12), compoundingWord(2)], ['monthly', '2 times a year']);
+
+// A ledger with the same terms and the same compounding gives the calculator's answer.
+{
+  const start = new Date(2026, 0, 1).getTime();
+  for (const perYear of [1, 4, 12, 52, 365]) {
+    const ledger = ledgerInterest({ principal: 100000, rate: 2, rate_mode: 'percent', period: 'monthly', interest_type: 'compound',
+      start_date: start, end_date: start + 31536000000, compounding: perYear });
+    eq(`ledger = calculator, ${compoundingWord(perYear)}`, ledger.total, round2(calculateInterest({ ...base, type: 'compound', perYear }).total));
+  }
+}
+// The ledger screens say how a compound ledger compounds.
+eq('label: stored NULL says yearly', ledgerInterestTypeLabel({ interest_type: 'compound', compounding: null }), 'Compound, compounded yearly');
+eq('label: monthly', ledgerInterestTypeLabel({ interest_type: 'compound', compounding: 12 }), 'Compound, compounded monthly');
+eq('label: simple', ledgerInterestTypeLabel({ interest_type: 'simple', compounding: 12 }), 'Simple');
+eq('note: none compound', ledgerCompoundingNote([{ interest_type: 'simple', compounding: null }]), null);
+eq('note: all yearly', ledgerCompoundingNote([{ interest_type: 'compound', compounding: null }]), 'Compound loans are compounded yearly.');
+eq('note: mixed', ledgerCompoundingNote([{ interest_type: 'compound', compounding: null }, { interest_type: 'compound', compounding: 12 }]),
+  'Compound loans are compounded as set on each ledger.');
 
 function ok(label: string, cond: boolean) { assert.ok(cond, label); n++; }
 

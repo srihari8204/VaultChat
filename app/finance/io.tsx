@@ -3,7 +3,7 @@
 
 import React, { useState } from 'react';
 import { useFinanceTheme } from '../../components/finance/useFinanceTheme';
-import { View, Text, ScrollView, StyleSheet, Alert } from 'react-native';
+import { View, Text, ScrollView, StyleSheet, Alert, AccessibilityInfo } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as DocumentPicker from 'expo-document-picker';
 import * as FileSystem from 'expo-file-system/legacy';
@@ -46,10 +46,11 @@ const ask = (title: string, message: string, action: string) => new Promise<bool
   ], { cancelable: true, onDismiss: () => resolve(false) }));
 
 /**
- * Sealing and opening run PBKDF2 synchronously (lib/backupCrypto; native
- * quick-crypto when installed, else JS) and hold the JS thread while they do.
- * Waiting one frame lets the busy state paint first, so the screen says what
- * it is doing instead of looking frozen.
+ * Sealing and opening run ~310k PBKDF2 rounds asynchronously
+ * (utils/financeBackupSeal → lib/vaultCrypto pbkdf2BytesAsync: quick-crypto's
+ * async pbkdf2 off the JS thread when installed, else @noble's pbkdf2Async,
+ * which yields between rounds). Waiting one frame first still lets the busy
+ * state paint before the work starts.
  */
 const nextFrame = () => new Promise<void>((resolve) => requestAnimationFrame(() => setTimeout(resolve, 0)));
 
@@ -68,6 +69,8 @@ export default function FinanceIO() {
   const [busy, setBusy] = useState<string | null>(null);
   const withBusy = async <T,>(label: string, work: () => T | Promise<T>): Promise<T> => {
     setBusy(label);
+    // The busy state is drawn, not focused: a screen reader hears it here.
+    AccessibilityInfo.announceForAccessibility(label);
     await nextFrame();
     try { return await work(); } finally { setBusy(null); }
   };
@@ -191,8 +194,10 @@ export default function FinanceIO() {
           'including changes you made after the backup was taken. Nothing else is deleted.',
           'Restore');
         if (!go) return;
-        const c = await restoreBackup(me.id, parsed);
-        setPw(''); setPw2('');
+        // The password goes once it has opened the file, whether or not the
+        // restore then succeeds (a failed restore rolls back; nothing changed).
+        let c: Awaited<ReturnType<typeof restoreBackup>>;
+        try { c = await restoreBackup(me.id, parsed); } finally { setPw(''); setPw2(''); }
         return Alert.alert('Restore complete',
           `${c.groups} Lucky Draw group${c.groups === 1 ? '' : 's'}, ${c.members} member${c.members === 1 ? '' : 's'}, ` +
           `${c.collections} due${c.collections === 1 ? '' : 's'}, ${c.auctions} auction${c.auctions === 1 ? '' : 's'} and ` +
@@ -229,13 +234,13 @@ export default function FinanceIO() {
         <Text style={s.label}>Data</Text>
         <Segment<Dataset>
           options={[{ k: 'ledger', label: 'Ledger' }, { k: 'chitti', label: 'Lucky Draw' }, { k: 'backup', label: 'Full Backup' }]}
-          value={dataset} onChange={setDataset}
+          value={dataset} tabs onChange={setDataset} label="Data"
         />
 
         {dataset !== 'backup' && (
           <>
             <Text style={s.label}>Format</Text>
-            <Segment<Format> options={[{ k: 'excel', label: 'Excel (.xls)' }, { k: 'csv', label: 'CSV' }]} value={format} onChange={setFormat} />
+            <Segment<Format> options={[{ k: 'excel', label: 'Excel (.xls)' }, { k: 'csv', label: 'CSV' }]} value={format} onChange={setFormat} label="Format" />
           </>
         )}
 

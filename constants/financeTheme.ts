@@ -114,6 +114,12 @@ export const HERO_INK = {
   rule: 'rgba(255,255,255,0.22)',
 } as const;
 
+/**
+ * The ground of components/ErrorBoundary's fallback, which is fixed dark there.
+ * The finance boundary puts its Leave button on the same ground, below it.
+ */
+export const FALLBACK_GROUND = '#03030E';
+
 /** Corner radii. Matches "Vault Finance / Scale" in Figma. */
 export const FIN_RADIUS = { xs: 8, sm: 12, md: 16, lg: 20, xl: 28, pill: 999 } as const;
 

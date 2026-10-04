@@ -12,6 +12,7 @@ import { useMe } from '../../components/finance/useMe';
 import { inrShort, fmtDate } from '../../utils/financeFormat';
 import { formatINR } from '../../utils/interest';
 import { ledgerInterest } from '../../utils/financeRules';
+import { ledgerInterestTypeLabel, ledgerCompoundingNote } from '../../lib/finance/compounding';
 import { sumRupees } from '../../utils/money';
 import { listLedger, type LedgerEntry } from '../../db/ledger';
 import { listGroups } from '../../db/chitti';
@@ -80,11 +81,16 @@ export default function Reports() {
   const label = period === 'month' ? 'This Month' : period === 'year' ? 'This Year' : 'All Time';
 
   const outstanding = sumRupees([r.lent, -r.collections]);
+  // The same full-term figures and words as the dashboard: each lent
+  // ledger's interest to its end date (a 1-year projection without one), not
+  // interest actually received or accrued so far.
+  const compoundNote = ledgerCompoundingNote(r.ledgers.filter(l => l.direction === 'lend'));
   const rows = () => [
     { k: 'Total lent', v: formatINR(r.lent) },
     { k: 'Total borrowed', v: formatINR(r.borrowed) },
-    { k: 'Interest earned', v: formatINR(r.earned) },
-    { k: 'Interest pending', v: formatINR(r.pending) },
+    { k: 'Interest, settled loans (full term)', v: formatINR(r.earned) },
+    { k: 'Interest, open loans (full term)', v: formatINR(r.pending) },
+    ...(compoundNote ? [{ k: 'Compounding', v: compoundNote }] : []),
     { k: 'Collections received', v: formatINR(r.collections) },
     { k: 'Outstanding', v: formatINR(outstanding), tot: true },
     { k: 'Active loans', v: String(r.active) },
@@ -99,8 +105,8 @@ export default function Reports() {
   };
   const onExcel = async () => {
     if (r.ledgers.length === 0) return Alert.alert('Nothing to export', `No ledgers were created ${label.toLowerCase()}.`);
-    const headers = ['Name', 'Direction', 'Principal', 'Remaining', 'Status', 'Rate', 'Period', 'Created'];
-    const data = r.ledgers.map(l => [l.name, l.direction, l.principal, l.remaining, l.status, l.rate, l.period, fmtDate(l.created_at)]);
+    const headers = ['Name', 'Direction', 'Principal', 'Remaining', 'Status', 'Rate', 'Period', 'Interest type', 'Created'];
+    const data = r.ledgers.map(l => [l.name, l.direction, l.principal, l.remaining, l.status, l.rate, l.period, ledgerInterestTypeLabel(l), fmtDate(l.created_at)]);
     try {
       const uri = await exportExcel(`vault-finance-${period}`, headers, data);
       // Names and amounts: once the share sheet has handed the file on, the
@@ -113,7 +119,7 @@ export default function Reports() {
     <View style={s.screen}>
       <FinHeader title="Reports" />
       <ScrollView contentContainerStyle={s.body} showsVerticalScrollIndicator={false}>
-        <Segment<Period> options={[{ k: 'month', label: 'Month' }, { k: 'year', label: 'Year' }, { k: 'all', label: 'All Time' }]} value={period} onChange={setPeriod} />
+        <Segment<Period> options={[{ k: 'month', label: 'Month' }, { k: 'year', label: 'Year' }, { k: 'all', label: 'All Time' }]} value={period} tabs onChange={setPeriod} />
 
         {status === 'loading' && <LoadingState label="Loading report" />}
         {status === 'error' && (
@@ -130,9 +136,10 @@ export default function Reports() {
           <StatTile value={inrShort(r.borrowed)} label="Total borrowed" tone="bad" />
         </View>
         <View style={[s.tileRow, { marginTop: 8 }]}>
-          <StatTile value={inrShort(r.earned)} label="Interest earned" tone="good" />
-          <StatTile value={inrShort(r.pending)} label="Interest pending" tone="warn" />
+          <StatTile value={inrShort(r.earned)} label="Interest, settled (full term)" tone="good" />
+          <StatTile value={inrShort(r.pending)} label="Interest, open (full term)" tone="warn" />
         </View>
+        {compoundNote && <Text style={s.note}>{compoundNote}</Text>}
 
         <Card style={{ marginTop: 16 }}>
           <RowLine k="Collections received" v={formatINR(r.collections)} />
@@ -159,5 +166,6 @@ const makeStyles = (FIN: FinancePalette) => StyleSheet.create({
   body: { padding: 16, alignSelf: 'center', width: '100%', maxWidth: FIN.contentMax },
   heading: { color: FIN.text, fontSize: 16, fontWeight: '800', marginTop: 18, marginBottom: 12 },
   tileRow: { flexDirection: 'row', gap: 8 },
+  note: { color: FIN.sub, fontSize: 12, marginTop: 8 },
   btnRow: { flexDirection: 'row', gap: 12, marginTop: 18 },
 });

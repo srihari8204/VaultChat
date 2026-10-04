@@ -15,7 +15,7 @@ import { listLedger, type LedgerEntry } from '../../db/ledger';
 import { listReminders, type Reminder } from '../../db/reminders';
 import { listGroups, type ChittiGroup } from '../../db/chitti';
 import { auctionDate } from '../../utils/financeRules';
-import { reminderOccurrences } from '../../lib/finance/reminderSchedule';
+import { historyOccurrences, phoneSkips } from '../../lib/finance/reminderSchedule';
 
 /** `key` is stable across reloads; `ref` is what tapping the event opens. */
 interface Ev {
@@ -61,10 +61,14 @@ export default function FinanceCalendar() {
       }
     }
     for (const r of data.reminders) {
-      if (r.status !== 'active') continue;
-      // Counted from the series' anchor, so earlier months show it too.
-      for (const at of reminderOccurrences(r, from, to)) {
-        evs.push({ key: `r-${r.id}-${at}`, at, label: r.title, tone: 'warn', ref: { kind: 'reminder', id: r.id } });
+      // Counted from the series' anchor, so earlier months show it too; a
+      // done reminder keeps the dates it ran on, up to when it was last due.
+      const done = r.status !== 'active';
+      for (const at of historyOccurrences(r, from, to)) {
+        // The phone repeats on the anchor's own day number, so a clamped
+        // day (30 Apr for a day-31 series) is due here but gets no alert.
+        const note = done ? ' (done)' : phoneSkips(r, at) ? ` (no phone alert this ${r.freq === 'yearly' ? 'year' : 'month'})` : '';
+        evs.push({ key: `r-${r.id}-${at}`, at, label: `${r.title}${note}`, tone: 'warn', ref: { kind: 'reminder', id: r.id } });
       }
     }
     for (const g of data.groups) {

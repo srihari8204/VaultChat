@@ -4,7 +4,7 @@
 // day does not exist in every month.
 
 import assert from 'node:assert/strict';
-import { advanceAnchored, reminderOccurrences, anchorOf } from './reminderSchedule';
+import { advanceAnchored, reminderOccurrences, anchorOf, osTriggerFor, phoneSkips, skipsSomePeriods, historyOccurrences } from './reminderSchedule';
 
 let n = 0;
 const eq = (label: string, a: unknown, b: unknown) => { assert.deepEqual(a, b, label); n++; };
@@ -55,6 +55,68 @@ eq('done reminders never move', advanceAnchored([{ ...monthly5, next_at: at(2026
     reminderOccurrences(snoozed, at(2026, 3, 1, 0), at(2026, 4, 1, 0)).map(ymd), [[2026, 3, 5], [2026, 3, 6]]);
   const once = { id: 'o', freq: 'once' as const, anchor_at: at(2026, 3, 1), next_at: at(2026, 3, 2), status: 'active' };
   eq('a snoozed one-off shows at its new time only', reminderOccurrences(once, at(2026, 3, 1, 0), at(2026, 4, 1, 0)).map(ymd), [[2026, 3, 2]]);
+}
+
+// ── the OS trigger follows the anchor, not max(now, anchor) ──
+{
+  // Picked for 5 Sep 09:00 (monthly), created on 4 Oct at 15:30: the app says
+  // 5 Oct 09:00, so the phone must too — not "the 4th at 15:30 every month".
+  const now = at(2026, 10, 4, 15, 30);
+  const { trigger, firstAt, earlyAt } = osTriggerFor('monthly', at(2026, 9, 5), now);
+  eq('monthly trigger is the anchor day and time', trigger, { type: 'monthly', day: 5, hour: 9, minute: 0 });
+  eq('first alert is the next occurrence', ymd(firstAt), [2026, 10, 5]);
+  eq('… at the anchor time', new Date(firstAt).getHours(), 9);
+  eq('no early alert for a past anchor', earlyAt, null);
+  // The trigger's day and time are the first alert's day and time.
+  eq('trigger day = first alert day', new Date(firstAt).getDate(), (trigger as { day: number }).day);
+
+  const daily = osTriggerFor('daily', at(2026, 9, 1, 7, 45), now);
+  eq('daily: anchor time', daily.trigger, { type: 'daily', hour: 7, minute: 45 });
+  eq('daily: tomorrow 07:45', ymd(daily.firstAt), [2026, 10, 5]);
+
+  const weekly = osTriggerFor('weekly', at(2026, 9, 7, 18), now);   // a Monday
+  eq('weekly: the anchor weekday (expo 1 = Sunday)', weekly.trigger, { type: 'weekly', weekday: 2, hour: 18, minute: 0 });
+  eq('weekly: next Monday', ymd(weekly.firstAt), [2026, 10, 5]);
+
+  const yearly = osTriggerFor('yearly', at(2025, 3, 15), now);
+  eq('yearly: anchor month (0-based) and day', yearly.trigger, { type: 'yearly', month: 2, day: 15, hour: 9, minute: 0 });
+  eq('yearly: next 15 Mar', ymd(yearly.firstAt), [2027, 3, 15]);
+
+  // A day-31 anchor keeps day 31 in the trigger even when the next occurrence is clamped.
+  const d31 = osTriggerFor('monthly', at(2026, 8, 31), at(2026, 9, 2));
+  eq('day-31 trigger stays on day 31', (d31.trigger as { day: number }).day, 31);
+  eq('… while the app series clamps to 30 Sep', ymd(d31.firstAt), [2026, 9, 30]);
+  eq('… and the phone skips that date', phoneSkips({ freq: 'monthly', next_at: d31.firstAt, anchor_at: at(2026, 8, 31) }, d31.firstAt), true);
+
+  // A one-off never fires in the past; a future one fires at its time.
+  eq('once in the past fires a second from now', osTriggerFor('once', at(2026, 1, 1), now).trigger, { type: 'date', at: now + 1000 });
+  eq('once in the future fires then', osTriggerFor('once', at(2026, 11, 1), now).trigger, { type: 'date', at: at(2026, 11, 1) });
+
+  // A series anchored two months ahead: the phone has no start date, so it
+  // also alerts on the 5th of the months before; the screen is told when.
+  eq('anchor two months ahead alerts early from 5 Oct', ymd(osTriggerFor('monthly', at(2026, 12, 5), now).earlyAt!), [2026, 10, 5]);
+  eq('anchor in the next period does not', osTriggerFor('monthly', at(2026, 11, 3), now).earlyAt, null);
+  eq('a skipped month is not an early alert', osTriggerFor('monthly', at(2026, 12, 31), at(2026, 11, 2)).earlyAt, null);
+  eq('daily three days ahead alerts from tomorrow', ymd(osTriggerFor('daily', at(2026, 10, 7), now).earlyAt!), [2026, 10, 5]);
+}
+
+// ── which periods the phone skips ──
+eq('day 29+ monthly skips some months', [28, 29, 31].map(d => skipsSomePeriods('monthly', at(2026, 1, d))), [false, true, true]);
+eq('29 Feb yearly skips three years in four', skipsSomePeriods('yearly', at(2028, 2, 29)), true);
+eq('28 Feb yearly does not', skipsSomePeriods('yearly', at(2028, 2, 28)), false);
+eq('daily never skips', skipsSomePeriods('daily', at(2026, 1, 31)), false);
+eq('a leap-day yearly series is skipped on 28 Feb 2029',
+  phoneSkips({ freq: 'yearly', next_at: 0, anchor_at: at(2028, 2, 29) }, at(2029, 2, 28)), true);
+eq('… but not on 29 Feb 2032', phoneSkips({ freq: 'yearly', next_at: 0, anchor_at: at(2028, 2, 29) }, at(2032, 2, 29)), false);
+
+// ── done reminders keep their history ──
+{
+  const done = { ...monthly5, next_at: at(2026, 4, 5), status: 'done' };
+  eq('a done reminder still shows in the months it ran', historyOccurrences(done, at(2026, 3, 1, 0), at(2026, 4, 1, 0)).map(ymd), [[2026, 3, 5]]);
+  eq('… including the day it was last due', historyOccurrences(done, at(2026, 4, 1, 0), at(2026, 5, 1, 0)).map(ymd), [[2026, 4, 5]]);
+  eq('… and not after it', historyOccurrences(done, at(2026, 5, 1, 0), at(2026, 6, 1, 0)), []);
+  const active = { ...monthly5, next_at: at(2026, 4, 5) };
+  eq('active reminders are unchanged', historyOccurrences(active, at(2026, 5, 1, 0), at(2026, 6, 1, 0)).map(ymd), [[2026, 5, 5]]);
 }
 
 console.log(`reminderSchedule: ${n} assertions passed`);
