@@ -22,7 +22,7 @@ import {
   View, StyleSheet, ScrollView, ActivityIndicator, TouchableOpacity, Alert,
   RefreshControl,
 } from 'react-native';
-import { Stack, useLocalSearchParams, useFocusEffect } from 'expo-router';
+import { Stack, useLocalSearchParams, useFocusEffect, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useSpaceColors, spaceHeader } from '../lib/spaces/theme';
 import type { SpacePalette as Palette } from '../lib/spaces/theme';
@@ -44,6 +44,7 @@ const CATEGORY: Record<string, { label: string; icon: keyof typeof Ionicons.glyp
 export default function SpaceIncidentsScreen() {
   const params = useLocalSearchParams<{ spaceId?: string; name?: string; groupType?: string; perms?: string }>();
   const colors = useSpaceColors(params.groupType);
+  const router = useRouter();
   const spaceId = String(params.spaceId || '');
   // incidentPatch requires view_space_ops; parents and drivers reach this list
   // from the Alerts tile and must not be shown buttons the server refuses.
@@ -106,8 +107,8 @@ export default function SpaceIncidentsScreen() {
     if (status === 'ack') { void setStatusNow(i, status); return; }
     Alert.alert(
       'Resolve this incident?',
-      'It moves to the resolved list for everyone watching this space.',
-      [{ text: 'Not yet', style: 'cancel' }, { text: 'Resolve', onPress: () => { void setStatusNow(i, status); } }],
+      'It moves to the resolved list for everyone watching this space, and cannot be reopened from here.',
+      [{ text: 'Not yet', style: 'cancel' }, { text: 'Resolve', style: 'destructive', onPress: () => { void setStatusNow(i, status); } }],
     );
   }, [setStatusNow]);
 
@@ -124,6 +125,8 @@ export default function SpaceIncidentsScreen() {
   }
 
   return (
+    <View style={s.screen}>
+      <AuroraBackground />
     <ScrollView
       style={s.screen} contentContainerStyle={s.body}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); void load(); }} tintColor={colors.primary} />}
@@ -174,6 +177,22 @@ export default function SpaceIncidentsScreen() {
               </Text>
             )}
 
+            {/* A photo is stored encrypted with the space's chat media, so it
+                is opened there rather than decrypted into this list. Ops only:
+                guardians see the category, not the reporter's photographs. */}
+            {!!i.mediaRef && canAct && (
+              <TouchableOpacity
+                style={s.media}
+                onPress={() => router.push({ pathname: '/media-gallery', params: { chatId: spaceId, tab: 'photos' } })}
+                accessibilityRole="button"
+                accessibilityLabel={`Photo attached to ${meta.label}. Open the space’s photos`}
+              >
+                <Ionicons name="image-outline" size={18} color={colors.primary} />
+                <Text style={{ color: colors.primary, fontWeight: '600', flex: 1 }}>Photo attached · open the space’s photos</Text>
+                <Ionicons name="chevron-forward" size={16} color={colors.textDim} />
+              </TouchableOpacity>
+            )}
+
             {!done && canAct && (
               <View style={s.actions}>
                 {i.status !== 'ack' && (
@@ -209,6 +228,7 @@ export default function SpaceIncidentsScreen() {
         resolve their own report — someone who could would also be able to make it vanish.
       </Text>
     </ScrollView>
+    </View>
   );
 }
 
@@ -235,7 +255,8 @@ const styles = (c: Palette) => StyleSheet.create({
   row: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   icon: { width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center' },
   actions: { flexDirection: 'row', gap: 8, marginTop: 4 },
-  btn: { flex: 1, paddingVertical: 11, borderRadius: 10, alignItems: 'center' },
+  btn: { flex: 1, minHeight: 44, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
+  media: { flexDirection: 'row', alignItems: 'center', gap: 8, minHeight: 44 },
   ghost: { borderWidth: 1, borderColor: c.glassStroke },
   ghostText: { color: c.text, fontWeight: '600' },
   solid: { backgroundColor: c.brandOnLight },

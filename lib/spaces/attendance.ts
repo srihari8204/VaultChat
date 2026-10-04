@@ -249,6 +249,36 @@ export const STATE_LABELS: Record<AttendanceState, string> = {
   unknown: 'No data',
 };
 
+/** The fields of a safe zone that choosing one needs (structural, so this
+ *  module stays free of the family store's types). */
+export interface ZoneLike { id: string; name: string; enabled?: boolean; expiresAt?: number }
+
+/** A name that says "this is where people work or study". */
+const WORKPLACE_NAME = /\b(work|workplace|office|school|college|campus|site|depot|factory|warehouse|shop|store|plant|hq)\b/i;
+
+/** Zones that can be read against today: switched on and not expired. */
+export function liveZones<Z extends ZoneLike>(zones: Z[], now = Date.now()): Z[] {
+  return zones.filter((z) => z.enabled !== false && !(z.expiresAt != null && z.expiresAt <= now));
+}
+
+/**
+ * The zone attendance is read against.
+ *
+ * The viewer's own choice wins while that zone still exists and is live. Then a
+ * zone NAMED like a workplace, because a space's first zone is often "Home" or a
+ * pickup point and reading attendance against it marks the whole team absent.
+ * Then the first live zone. A disabled or expired zone is never chosen.
+ */
+export function pickWorkZone<Z extends ZoneLike>(
+  zones: Z[], chosenId: string | null | undefined, now = Date.now(),
+): Z | null {
+  const live = liveZones(zones, now);
+  return live.find((z) => z.id === chosenId)
+    ?? live.find((z) => WORKPLACE_NAME.test(z.name))
+    ?? live[0]
+    ?? null;
+}
+
 // ── self-check ──
 if (require.main === module) {
   const at = (h: number, m = 0) => new Date(2026, 0, 5, h, m).getTime();
@@ -393,6 +423,21 @@ if (require.main === module) {
   for (const k of Object.keys(STATE_LABELS) as AttendanceState[]) {
     if (!STATE_LABELS[k]) throw new Error(`state ${k} has no label`);
   }
+
+  // zone choice: the viewer's pick, else a workplace name, never a dead zone
+  const zs = [
+    { id: 'h', name: 'Home' },
+    { id: 'o', name: 'Head Office' },
+    { id: 'x', name: 'Old site', enabled: false },
+    { id: 't', name: 'Pop-up', expiresAt: 1 },
+  ];
+  if (pickWorkZone(zs, null, 10)?.id !== 'o') throw new Error('a workplace-named zone beats the first zone');
+  if (pickWorkZone(zs, 'h', 10)?.id !== 'h') throw new Error('the viewer\'s choice wins');
+  if (pickWorkZone(zs, 'x', 10)?.id !== 'o') throw new Error('a disabled choice falls back');
+  if (pickWorkZone(zs, 't', 10)?.id !== 'o') throw new Error('an expired choice falls back');
+  if (pickWorkZone([{ id: 'a', name: 'Gate A' }], null)?.id !== 'a') throw new Error('no workplace name → first live zone');
+  if (pickWorkZone([], 'a') !== null) throw new Error('no zones → null');
+  if (liveZones(zs, 10).length !== 2) throw new Error('liveZones drops disabled and expired zones');
 
   console.log('spaces/attendance self-check OK');
 }

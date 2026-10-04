@@ -13,16 +13,16 @@
 //
 // The live vehicle position is NOT fetched by this screen. It arrives on the
 // sealed live-location socket the space already runs, tagged with the run id —
-// the server cannot read it, so there is no endpoint to call. Until this device
-// receives such a ping there is no position to draw, and the screen says so
-// rather than showing an empty map that reads as "the bus is nowhere".
+// the server cannot read it, so there is no endpoint to call. The map is drawn
+// only once this device has received such a ping; until then the screen says
+// so rather than showing an empty map that reads as "the bus is nowhere".
 //
 // Arrival is a WINDOW, never a single time. See lib/spaces/runs.ts for why.
 
 import { AppText as Text } from '../components/ui/Text';
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  View, StyleSheet, ScrollView, ActivityIndicator, TouchableOpacity, Alert, RefreshControl,
+  View, StyleSheet, ScrollView, ActivityIndicator, TouchableOpacity, RefreshControl,
 } from 'react-native';
 import { Stack, useLocalSearchParams, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -39,6 +39,8 @@ import {
 } from '../lib/spaces/runs';
 import { AuroraBackground } from '../components/ui';
 import LoadError from '../components/spaces/LoadError';
+import FamilyMap from '../components/family/FamilyMap';
+import { circleMembers } from '../lib/family/circle';
 
 /** How often rider and stop states are re-read while a started run is open.
  *  The vehicle's position arrives live on the socket; boarded/dropped marks
@@ -66,6 +68,9 @@ const FALLBACK_SECONDS_PER_STOP = 180;
  */
 const ASSUMED_SPEED_MPS = 7;
 
+/** A fix older than this is drawn faded, as on the operations map. */
+const STALE_MS = 90_000;
+
 export default function SpaceRunScreen() {
   const params = useLocalSearchParams<{ spaceId?: string; runId?: string; groupType?: string; name?: string }>();
   const colors = useSpaceColors(params.groupType);
@@ -85,6 +90,11 @@ export default function SpaceRunScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [showHistory, setShowHistory] = useState(false);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [historyError, setHistoryError] = useState<string | null>(null);
+  // The driver's name, from the space's member list this device already has.
+  // Null (and simply not shown) when the driver is not a listed member.
+  const [driverName, setDriverName] = useState<string | null>(null);
   // The vehicle's latest sealed position, and the trail this device has actually
   // received. The trail is what makes a path drawable — there is no server-side
   // copy to fall back on, so a device that was not listening has no path and
@@ -110,6 +120,16 @@ export default function SpaceRunScreen() {
   }, [spaceId, runId]);
 
   useFocusEffect(useCallback(() => { load(); }, [load]));
+
+  useEffect(() => {
+    const id = run?.driverId;
+    if (!id) { setDriverName(null); return; }
+    let live = true;
+    circleMembers(spaceId)
+      .then((ms) => { if (live) setDriverName(ms.find((m) => m.id === id)?.name ?? null); })
+      .catch(() => { if (live) setDriverName(null); });
+    return () => { live = false; };
+  }, [spaceId, run?.driverId]);
 
   // Re-read while the run is out. Each answer re-renders the rider cards, which
   // also moves their arrival window on (it is computed from "now" at render).
@@ -141,15 +161,24 @@ export default function SpaceRunScreen() {
     return () => { live = false; stop?.(); };
   }, [spaceId, runId, run?.status]));
 
-  const openHistory = useCallback(async () => {
-    setShowHistory(true);
-    if (events.length) return;
+  const loadHistory = useCallback(async () => {
+    setHistoryLoading(true);
     try {
       setEvents(await getRunEvents(spaceId, runId));
+      setHistoryError(null);
     } catch (e: any) {
-      Alert.alert('Could not load the history', e?.message ?? 'Try again.');
+      // Said in place, not as an Alert over an empty "Nothing recorded yet".
+      setHistoryError(e?.message ?? 'Check your connection and try again.');
+    } finally {
+      setHistoryLoading(false);
     }
-  }, [events.length, spaceId, runId]);
+  }, [spaceId, runId]);
+
+  const toggleHistory = useCallback(() => {
+    const next = !showHistory;
+    setShowHistory(next);
+    if (next && !events.length) void loadHistory();
+  }, [showHistory, events.length, loadHistory]);
 
   /** Name lookup for the timeline. Only riders the server sent us are named. */
   const nameOf = useCallback(
@@ -166,6 +195,12 @@ export default function SpaceRunScreen() {
     const done = [...stops].filter((s) => s.arrivedAt).sort((a, b) => a.seq - b.seq);
     return done.length ? done[done.length - 1].id : (stops.length ? [...stops].sort((a, b) => a.seq - b.seq)[0].id : null);
   }, [stops]);
+
+  // The first visible rider's stop, as the map's destination pin.
+  const myStopPin = useMemo(() => {
+    const st = stops.find((x) => x.id === riders[0]?.stopId);
+    return st && st.lat != null && st.lng != null ? { lat: st.lat, lng: st.lng, name: st.label } : null;
+  }, [stops, riders]);
 
   const s = styles(colors);
 
@@ -193,6 +228,8 @@ export default function SpaceRunScreen() {
   const active = run.status === 'started';
 
   return (
+    <View style={s.screen}>
+      <AuroraBackground />
     <ScrollView
       style={s.screen}
       contentContainerStyle={s.body}
@@ -228,6 +265,7 @@ export default function SpaceRunScreen() {
       <View style={s.card}>
         <Text style={s.cardTitle}>{run.vehicleLabel || 'Vehicle'}</Text>
         <Row icon="ellipse" label="Status" value={statusLabel(run)} colors={colors} />
+        {!!driverName && <Row icon="person-outline" label="Driver" value={driverName} colors={colors} />}
         {run.stale && active && (
           <View style={s.warn}>
             <Ionicons name="cloud-offline-outline" size={16} color={colors.warning} />
@@ -248,6 +286,18 @@ export default function SpaceRunScreen() {
         <Text style={s.cardTitle}>Live position</Text>
         {vehicle ? (
           <>
+            {/* Drawn only from positions this device received: the vehicle, the
+                trail behind it, and the first rider's stop when it has a place. */}
+            <FamilyMap
+              style={s.map}
+              members={[{
+                id: runId, name: run.vehicleLabel || run.name,
+                lat: vehicle.lat, lng: vehicle.lng, stale: Date.now() - vehicle.at > STALE_MS,
+              }]}
+              focusId={runId}
+              path={trail.length > 1 ? trail : undefined}
+              destination={myStopPin}
+            />
             <View style={s.row}>
               <Ionicons name="navigate" size={18} color={colors.success} />
               <Text style={s.muted}>Last update {ago(vehicle.at)}</Text>
@@ -290,17 +340,22 @@ export default function SpaceRunScreen() {
       </View>
 
       {/* history */}
-      <TouchableOpacity
-        style={s.card} onPress={openHistory} disabled={showHistory}
-        accessibilityRole="button" accessibilityState={{ expanded: showHistory }}
-        accessibilityLabel="What happened on this run"
-      >
-        <View style={s.row}>
+      <View style={s.card}>
+        <TouchableOpacity
+          style={[s.row, s.historyHead]} onPress={toggleHistory}
+          accessibilityRole="button" accessibilityState={{ expanded: showHistory }}
+          accessibilityLabel="What happened on this run"
+        >
           <Ionicons name="time-outline" size={18} color={colors.text} />
-          <Text style={s.cardTitle}>What happened</Text>
-        </View>
+          <Text style={[s.cardTitle, { flex: 1 }]}>What happened</Text>
+          <Ionicons name={showHistory ? 'chevron-up' : 'chevron-down'} size={18} color={colors.textDim} />
+        </TouchableOpacity>
         {!showHistory && <Text style={s.muted}>Tap to load the timeline.</Text>}
-        {showHistory && timeline.length === 0 && <Text style={s.muted}>Nothing recorded yet.</Text>}
+        {showHistory && historyLoading && <ActivityIndicator color={colors.primary} />}
+        {showHistory && historyError && !historyLoading && (
+          <LoadError colors={colors} title="Could not load the history" message={historyError} onRetry={() => { void loadHistory(); }} />
+        )}
+        {showHistory && !historyError && !historyLoading && timeline.length === 0 && <Text style={s.muted}>Nothing recorded yet.</Text>}
         {showHistory && timeline.map((t, i) => (
           <View key={`${t.at}-${i}`} style={s.stopRow}>
             <Text style={s.timeCell}>{new Date(t.at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</Text>
@@ -313,8 +368,9 @@ export default function SpaceRunScreen() {
             encrypted position updates during the run, and the server keeps no copy.
           </Text>
         )}
-      </TouchableOpacity>
+      </View>
     </ScrollView>
+    </View>
   );
 }
 
@@ -463,4 +519,6 @@ const styles = (c: Palette) => StyleSheet.create({
   },
   warnText: { color: c.text, flex: 1, fontSize: 13 },
   footnote: { color: c.textFaint, fontSize: 12, marginTop: 8, lineHeight: 17 },
+  map: { height: 220, width: '100%', borderRadius: 12, overflow: 'hidden' },
+  historyHead: { minHeight: 44 },
 });

@@ -33,6 +33,7 @@ import Donut from '../components/spaces/Donut';
 import { useTheme } from '../lib/theme';
 import { AuroraBackground } from '../components/ui';
 import LoadError from '../components/spaces/LoadError';
+import { familyOf } from '../lib/spaces/layout';
 
 interface Tile {
   key: string;
@@ -45,6 +46,22 @@ interface Tile {
 }
 
 const dash = (v: number | null | undefined) => (v == null ? '—' : String(v));
+
+/** [label, icon, route, permission needed to draw it] — the same gates as
+ *  space-admin's ENTRIES and lib/spaces/layout's sections. */
+type Shortcut = readonly [string, keyof typeof Ionicons.glyphMap, string, string | null];
+const SCHOOL_SHORTCUTS: readonly Shortcut[] = [
+  ['Runs', 'bus-outline', '/space-runs-admin', 'manage_runs'],
+  ['Roster', 'people-outline', '/space-roster', 'manage_roster'],
+  ['Attendance', 'calendar-number-outline', '/space-checkin', null],
+  ['Incidents', 'alert-circle-outline', '/space-incidents', null],
+  ['Visitors', 'qr-code-outline', '/space-visitors', 'manage_roster'],
+];
+const OFFICE_SHORTCUTS: readonly Shortcut[] = [
+  ['Incidents', 'alert-circle-outline', '/space-incidents', null],
+  ['Visitors', 'qr-code-outline', '/space-visitors', 'manage_roster'],
+  ['Settings', 'settings-outline', '/space-admin', 'view_space_ops'],
+];
 
 export default function SpaceOverviewScreen() {
   const router = useRouter();
@@ -77,10 +94,15 @@ export default function SpaceOverviewScreen() {
 
   useFocusEffect(useCallback(() => { load(); }, [load]));
 
-  const isSchool = useMemo(() => {
-    const t = String(params.groupType || sum?.groupType || '');
-    return t === 'school' || t === 'school_transport';
-  }, [params.groupType, sum?.groupType]);
+  // familyOf, not string equality: the type list is data, and 'college' or a
+  // new school_* type must get the school board, the same as the hub does.
+  const isSchool = useMemo(
+    () => familyOf(String(params.groupType || sum?.groupType || '')) === 'school',
+    [params.groupType, sum?.groupType],
+  );
+  // Presentation only — every screen behind these re-checks server-side. A
+  // shortcut the caller cannot use is not drawn (the space-admin rule).
+  const perms = useMemo(() => new Set(String(params.perms || '').split(',').filter(Boolean)), [params.perms]);
 
   // School Overview tiles (design screen 6) — unchanged.
   const schoolTiles: Tile[] = useMemo(() => {
@@ -99,16 +121,16 @@ export default function SpaceOverviewScreen() {
     ];
   }, [sum, isSchool]);
 
-  const s = styles(colors);
+  const s = useMemo(() => styles(colors), [colors]);
   // perms travel with every hop so Tasks/Leave keep their compose and decide
   // affordances when reached from here rather than from the hub.
   const go = (path: string) => router.push({
-    pathname: path as any,
+    pathname: path,
     params: {
       spaceId, name: params.name ?? '', groupType: params.groupType ?? '',
       perms: params.perms ?? '',
       // Roster reads this (it also derives it from perms).
-      canManage: String(params.perms || '').split(',').includes('manage_roster') ? '1' : '0',
+      canManage: perms.has('manage_roster') ? '1' : '0',
     },
   });
 
@@ -129,6 +151,8 @@ export default function SpaceOverviewScreen() {
   const tasksTotal = sum?.tasks ? sum.tasks.open + sum.tasks.overdue + sum.tasks.doneToday : 0;
 
   return (
+    <View style={s.screen}>
+      <AuroraBackground />
     <ScrollView
       style={s.screen}
       contentContainerStyle={s.body}
@@ -144,7 +168,11 @@ export default function SpaceOverviewScreen() {
         <>
           {/* An open emergency outranks every number on the screen. */}
           {sum.open.sos > 0 && (
-            <TouchableOpacity accessibilityRole="button" style={s.sos} onPress={() => go('/space-incidents')}>
+            <TouchableOpacity
+              accessibilityRole="button" style={s.sos} onPress={() => go('/space-incidents')}
+              accessibilityLabel={`${sum.open.sos === 1 ? 'An emergency alert is open' : `${sum.open.sos} emergency alerts are open`}. Open incidents`}
+            >
+              {/* White ink on the solid danger fill (no on-danger token exists). */}
               <Ionicons name="warning" size={20} color="#fff" />
               <Text style={s.sosText}>
                 {sum.open.sos === 1 ? 'An emergency alert is open' : `${sum.open.sos} emergency alerts are open`}
@@ -181,19 +209,19 @@ export default function SpaceOverviewScreen() {
               <>
                 {/* Top metric cards. */}
                 <View style={s.metrics}>
-                  <Metric c={colors} icon="people" tint={colors.primary} value={dash(w.members)} label="Total People" />
-                  <Metric c={colors} icon="pulse" tint={colors.success} value={dash(w.stillIn)} label="Active Now" />
-                  <Metric c={colors} icon="log-in" tint={colors.purple} value={dash(w.checkedIn)} label="Checked In" />
-                  <Metric c={colors} icon="airplane" tint={warningTint} value={dash(w.onLeave)} label="On Leave" />
+                  <Metric s={s} icon="people" tint={colors.primary} value={dash(w.members)} label="Total People" />
+                  <Metric s={s} icon="pulse" tint={colors.success} value={dash(w.stillIn)} label="Active Now" />
+                  <Metric s={s} icon="log-in" tint={colors.purple} value={dash(w.checkedIn)} label="Checked In" />
+                  <Metric s={s} icon="airplane" tint={warningTint} value={dash(w.onLeave)} label="On Leave" />
                   <Metric
-                    c={colors} icon="time" tint={(w.lateToday ?? 0) > 0 ? colors.danger : BIZ_GRAY}
+                    s={s} icon="time" tint={(w.lateToday ?? 0) > 0 ? colors.danger : BIZ_GRAY}
                     value={dash(w.lateToday)} label="Late Today"
                   />
                   <Metric
-                    c={colors} icon="hourglass" tint={w.leavePending > 0 ? warningTint : BIZ_GRAY}
+                    s={s} icon="hourglass" tint={w.leavePending > 0 ? warningTint : BIZ_GRAY}
                     value={dash(w.leavePending)} label="Leave Requests"
                   />
-                  <Metric c={colors} icon="qr-code" tint={visitorTint} value={dash(sum.open.visitors)} label="Visitors On Site" />
+                  <Metric s={s} icon="qr-code" tint={visitorTint} value={dash(sum.open.visitors)} label="Visitors On Site" />
                 </View>
                 {w.lateToday == null && (
                   <Text style={s.footnote}>
@@ -209,6 +237,7 @@ export default function SpaceOverviewScreen() {
                   <Text style={s.muted}>Today, from declared check-ins</Text>
                   <View style={s.monitorRow}>
                     <Donut
+                      accessibilityLabel={`${w.members} people: ${w.stillIn} active now, ${checkedOut} checked out, ${w.onLeave} on leave, ${noCheckIn} no check-in`}
                       centre={dash(w.members)}
                       label={'Total\nPeople'}
                       textColor={colors.text}
@@ -222,10 +251,10 @@ export default function SpaceOverviewScreen() {
                       ]}
                     />
                     <View style={{ flex: 1, gap: 8 }}>
-                      <Legend c={colors} color={colors.success} label="Active now" value={w.stillIn} />
-                      <Legend c={colors} color={colors.primary} label="Checked out" value={checkedOut} />
-                      <Legend c={colors} color={warningTint} label="On leave" value={w.onLeave} />
-                      <Legend c={colors} color={BIZ_GRAY} label="No check-in" value={noCheckIn} />
+                      <Legend s={s} color={colors.success} label="Active now" value={w.stillIn} />
+                      <Legend s={s} color={colors.primary} label="Checked out" value={checkedOut} />
+                      <Legend s={s} color={warningTint} label="On leave" value={w.onLeave} />
+                      <Legend s={s} color={BIZ_GRAY} label="No check-in" value={noCheckIn} />
                     </View>
                   </View>
                   <TouchableOpacity accessibilityRole="button" style={s.viewRow} onPress={() => go('/space-people')}>
@@ -259,6 +288,7 @@ export default function SpaceOverviewScreen() {
                     <Text style={s.sectionTitle}>TASKS SUMMARY</Text>
                     <View style={s.monitorRow}>
                       <Donut
+                        accessibilityLabel={`${tasksTotal} tasks: ${sum.tasks.open} to do, ${sum.tasks.overdue} overdue, ${sum.tasks.doneToday} done today`}
                         size={104} stroke={12}
                         centre={String(tasksTotal)}
                         label="Tasks"
@@ -272,9 +302,9 @@ export default function SpaceOverviewScreen() {
                         ]}
                       />
                       <View style={{ flex: 1, gap: 8 }}>
-                        <Legend c={colors} color={colors.primary} label="To do" value={sum.tasks.open} />
-                        <Legend c={colors} color={colors.danger} label="Overdue" value={sum.tasks.overdue} />
-                        <Legend c={colors} color={colors.success} label="Done today" value={sum.tasks.doneToday} />
+                        <Legend s={s} color={colors.primary} label="To do" value={sum.tasks.open} />
+                        <Legend s={s} color={colors.danger} label="Overdue" value={sum.tasks.overdue} />
+                        <Legend s={s} color={colors.success} label="Done today" value={sum.tasks.doneToday} />
                       </View>
                     </View>
                     <TouchableOpacity accessibilityRole="button" style={s.viewRow} onPress={() => go('/space-tasks')}>
@@ -307,10 +337,10 @@ export default function SpaceOverviewScreen() {
                     <Text style={s.sectionTitle}>LEAVE SUMMARY</Text>
                     <Text style={s.muted}>This month</Text>
                     <View style={s.chips}>
-                      <Chip c={colors} tint={colors.primary} value={sum.leaveMonth.requests} label="Requests" />
-                      <Chip c={colors} tint={warningTint} value={sum.leaveMonth.pending} label="Pending" />
-                      <Chip c={colors} tint={colors.success} value={sum.leaveMonth.approved} label="Approved" />
-                      <Chip c={colors} tint={colors.danger} value={sum.leaveMonth.declined} label="Declined" />
+                      <Chip s={s} tint={colors.primary} value={sum.leaveMonth.requests} label="Requests" />
+                      <Chip s={s} tint={warningTint} value={sum.leaveMonth.pending} label="Pending" />
+                      <Chip s={s} tint={colors.success} value={sum.leaveMonth.approved} label="Approved" />
+                      <Chip s={s} tint={colors.danger} value={sum.leaveMonth.declined} label="Declined" />
                     </View>
                     <TouchableOpacity accessibilityRole="button" style={s.viewRow} onPress={() => go('/space-leave')}>
                       <Text style={s.link}>View Leave</Text>
@@ -327,7 +357,7 @@ export default function SpaceOverviewScreen() {
             <View style={s.card}>
               <View style={s.rowBetween}>
                 <Text style={s.cardTitle}>{isSchool ? 'Live Buses' : 'Live Runs'}</Text>
-                <TouchableOpacity accessibilityRole="button" onPress={() => go('/space-ops-map')}>
+                <TouchableOpacity accessibilityRole="button" accessibilityLabel="Open the live map" onPress={() => go('/space-ops-map')} style={s.linkHit}>
                   <Text style={s.link}>Map</Text>
                 </TouchableOpacity>
               </View>
@@ -335,7 +365,8 @@ export default function SpaceOverviewScreen() {
                 <TouchableOpacity accessibilityRole="button"
                   key={r.id}
                   style={s.runRow}
-                  onPress={() => router.push({ pathname: '/space-run' as any, params: { spaceId, runId: r.id, groupType: params.groupType ?? '' } })}
+                  onPress={() => router.push({ pathname: '/space-run', params: { spaceId, runId: r.id, groupType: params.groupType ?? '', name: params.name ?? '' } })}
+                  accessibilityLabel={`${r.name}, ${r.status === 'started' ? `${r.total - r.pending} of ${r.total} done` : 'not started'}${r.stale && r.status === 'started' ? ', not reporting' : ''}`}
                 >
                   <View style={[s.dot, {
                     backgroundColor: r.status !== 'started' ? colors.textFaint
@@ -368,7 +399,7 @@ export default function SpaceOverviewScreen() {
                     <Ionicons name="location" size={18} color={BIZ_TEAL} />
                     <Text style={s.cardTitle}>Live Locations</Text>
                   </View>
-                  <TouchableOpacity accessibilityRole="button" onPress={() => go('/space-ops-map')}>
+                  <TouchableOpacity accessibilityRole="button" onPress={() => go('/space-ops-map')} style={s.linkHit}>
                     <Text style={s.link}>View Full Map</Text>
                   </TouchableOpacity>
                 </View>
@@ -382,10 +413,15 @@ export default function SpaceOverviewScreen() {
               <View style={s.card}>
                 <Text style={s.sectionTitle}>QUICK ACTIONS</Text>
                 <View style={s.actions}>
-                  <Action c={colors} icon="log-in" tint={colors.success} label="Check In" onPress={() => go('/space-checkin')} />
-                  <Action c={colors} icon="calendar" tint={warningTint} label="Request Leave" onPress={() => go('/space-leave')} />
-                  <Action c={colors} icon="clipboard" tint={colors.primary} label="Create Task" onPress={() => go('/space-tasks')} />
-                  <Action c={colors} icon="people" tint={colors.purple} label="People" onPress={() => go('/space-people')} />
+                  <Action s={s} icon="log-in" tint={colors.success} label="Check In" onPress={() => go('/space-checkin')} />
+                  <Action s={s} icon="calendar" tint={warningTint} label="Request Leave" onPress={() => go('/space-leave')} />
+                  {/* Creating a task is the assign right (space-tasks canAssign). */}
+                  {perms.has('view_space_ops') && (
+                    <Action s={s} icon="clipboard" tint={colors.primary} label="Create Task" onPress={() => go('/space-tasks')} />
+                  )}
+                  {perms.has('view_space_ops') && (
+                    <Action s={s} icon="people" tint={colors.purple} label="People" onPress={() => go('/space-people')} />
+                  )}
                 </View>
               </View>
             </>
@@ -393,17 +429,9 @@ export default function SpaceOverviewScreen() {
 
           {/* Shortcuts to the screens these numbers come from. */}
           <View style={s.card}>
-            {(isSchool ? ([
-              ['Runs', 'bus-outline', '/space-runs-admin'],
-              ['Roster', 'people-outline', '/space-roster'],
-              ['Attendance', 'calendar-number-outline', '/space-checkin'],
-              ['Incidents', 'alert-circle-outline', '/space-incidents'],
-              ['Visitors', 'qr-code-outline', '/space-visitors'],
-            ] as const) : ([
-              ['Incidents', 'alert-circle-outline', '/space-incidents'],
-              ['Visitors', 'qr-code-outline', '/space-visitors'],
-              ['Settings', 'settings-outline', '/space-admin'],
-            ] as const)).map(([label, icon, path]) => (
+            {(isSchool ? SCHOOL_SHORTCUTS : OFFICE_SHORTCUTS)
+              .filter(([, , , needs]) => !needs || perms.has(needs))
+              .map(([label, icon, path]) => (
               <TouchableOpacity accessibilityRole="button" key={label} style={s.linkRow} onPress={() => go(path)}>
                 <Ionicons name={icon} size={18} color={colors.primary} />
                 <Text style={s.linkRowText}>{label}</Text>
@@ -420,15 +448,19 @@ export default function SpaceOverviewScreen() {
         </>
       )}
     </ScrollView>
+    </View>
   );
 }
 
 /* ── Business dashboard pieces ─────────────────────────────────────── */
 
-function Metric({ c, icon, tint, value, label }: {
-  c: Palette; icon: keyof typeof Ionicons.glyphMap; tint: string; value: string; label: string;
+// The pieces take the screen's memoised styles rather than rebuilding them
+// per render.
+type Styles = ReturnType<typeof styles>;
+
+function Metric({ s, icon, tint, value, label }: {
+  s: Styles; icon: keyof typeof Ionicons.glyphMap; tint: string; value: string; label: string;
 }) {
-  const s = styles(c);
   return (
     <View style={[s.metric, { backgroundColor: tint + '14', borderColor: tint + '33' }]}>
       <View style={[s.metricIcon, { backgroundColor: tint + '26' }]}>
@@ -440,8 +472,7 @@ function Metric({ c, icon, tint, value, label }: {
   );
 }
 
-function Legend({ c, color, label, value }: { c: Palette; color: string; label: string; value: number }) {
-  const s = styles(c);
+function Legend({ s, color, label, value }: { s: Styles; color: string; label: string; value: number }) {
   return (
     <View style={s.legendRow}>
       <View style={[s.legendDot, { backgroundColor: color }]} />
@@ -451,8 +482,7 @@ function Legend({ c, color, label, value }: { c: Palette; color: string; label: 
   );
 }
 
-function Chip({ c, tint, value, label }: { c: Palette; tint: string; value: number; label: string }) {
-  const s = styles(c);
+function Chip({ s, tint, value, label }: { s: Styles; tint: string; value: number; label: string }) {
   return (
     <View style={[s.chip, { backgroundColor: tint + '14' }]}>
       <Text style={[s.chipValue, { color: tint }]}>{value}</Text>
@@ -461,10 +491,9 @@ function Chip({ c, tint, value, label }: { c: Palette; tint: string; value: numb
   );
 }
 
-function Action({ c, icon, tint, label, onPress }: {
-  c: Palette; icon: keyof typeof Ionicons.glyphMap; tint: string; label: string; onPress: () => void;
+function Action({ s, icon, tint, label, onPress }: {
+  s: Styles; icon: keyof typeof Ionicons.glyphMap; tint: string; label: string; onPress: () => void;
 }) {
-  const s = styles(c);
   return (
     <TouchableOpacity accessibilityRole="button" style={[s.action, { backgroundColor: tint + '1C', borderColor: tint + '40' }]} onPress={onPress}>
       <Ionicons name={icon} size={20} color={tint} />
@@ -495,10 +524,10 @@ const styles = (c: Palette) => StyleSheet.create({
   rowBetween: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   link: { color: c.primary, fontSize: 12.5, fontWeight: '700' },
   muted: { color: c.textDim, fontSize: 12.5 },
-  runRow: { flexDirection: 'row', alignItems: 'center', gap: 9, paddingVertical: 9 },
+  runRow: { flexDirection: 'row', alignItems: 'center', gap: 9, paddingVertical: 9, minHeight: 44 },
   dot: { width: 9, height: 9, borderRadius: 5 },
   runName: { color: c.text, flex: 1, fontSize: 14.5 },
-  linkRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 11 },
+  linkRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 11, minHeight: 44 },
   linkRowText: { color: c.text, flex: 1, fontSize: 14.5 },
   footnote: { color: c.textFaint, fontSize: 11.5, lineHeight: 16, marginTop: 4 },
 
@@ -516,7 +545,8 @@ const styles = (c: Palette) => StyleSheet.create({
   legendDot: { width: 10, height: 10, borderRadius: 5 },
   legendLabel: { color: c.textDim, fontSize: 12.5, flex: 1 },
   legendValue: { color: c.text, fontSize: 13, fontWeight: '800' },
-  viewRow: { flexDirection: 'row', alignItems: 'center', gap: 6, alignSelf: 'flex-end', paddingVertical: 2 },
+  viewRow: { flexDirection: 'row', alignItems: 'center', gap: 6, alignSelf: 'flex-end', minHeight: 44 },
+  linkHit: { minHeight: 44, minWidth: 44, justifyContent: 'center', alignItems: 'flex-end' },
   bigValue: { color: c.text, fontSize: 32, fontWeight: '800' },
   barTrack: { height: 8, borderRadius: 4, backgroundColor: c.border, overflow: 'hidden' },
   barFill: { height: 8, borderRadius: 4, backgroundColor: c.success },

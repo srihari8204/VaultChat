@@ -14,7 +14,7 @@ export interface DonutSegment {
 }
 
 export default function Donut({
-  segments, centre, label, size = 132, stroke = 14,
+  segments, centre, label, size = 132, stroke = 14, accessibilityLabel,
   track = 'rgba(255,255,255,0.08)', textColor = '#FFFFFF', labelColor = 'rgba(255,255,255,0.55)',
 }: {
   segments: DonutSegment[];
@@ -27,6 +27,9 @@ export default function Donut({
   track?: string;
   textColor?: string;
   labelColor?: string;
+  /** What the chart says in words — its colours alone are unreadable to a
+   *  screen reader. Defaults to the centre figure and its label. */
+  accessibilityLabel?: string;
 }) {
   const r = (size - stroke) / 2;
   const c = 2 * Math.PI * r;
@@ -50,7 +53,11 @@ export default function Donut({
   }) : [];
 
   return (
-    <View style={{ width: size, height: size, alignItems: 'center', justifyContent: 'center' }}>
+    <View
+      style={{ width: size, height: size, alignItems: 'center', justifyContent: 'center' }}
+      accessible accessibilityRole="image"
+      accessibilityLabel={accessibilityLabel ?? `${centre} ${label?.replace(/\n/g, ' ') ?? ''}`.trim()}
+    >
       {/* Rotated so the first segment starts at 12 o'clock. */}
       <Svg width={size} height={size} style={{ transform: [{ rotate: '-90deg' }], position: 'absolute' }}>
         <Circle cx={size / 2} cy={size / 2} r={r} stroke={track} strokeWidth={stroke} fill="none" />

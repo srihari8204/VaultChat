@@ -92,30 +92,40 @@ export const SEVERITY_OF: Record<AlertKind, AlertSeverity> = {
 
 // ── in-memory mirror + subscribers ──
 let alerts: FamilyAlert[] = [];
-let loaded = false;
+/** The one read of the store, shared by every caller (see loadAlerts). */
+let loading: Promise<FamilyAlert[]> | null = null;
 const subs = new Set<() => void>();
 // version is bumped BEFORE notifying so any getSnapshot() that runs synchronously
 // inside a subscriber already sees the invalidated cache (see snapshotFor).
 const emit = () => { version++; subs.forEach((c) => { try { c(); } catch {} }); };
 
+/** Write the mirror to the sealed store. REJECTS on a storage failure, so a
+ *  caller that promised the user something (a clear) can say it failed;
+ *  best-effort callers catch it themselves. */
 async function persist(): Promise<void> {
-  try {
-    const sealed = crypt().encField(JSON.stringify({ v: 1, a: alerts }));
-    if (sealed != null) await storage().setItem(KEY, sealed);
-  } catch { /* best-effort */ }
+  const sealed = crypt().encField(JSON.stringify({ v: 1, a: alerts }));
+  if (sealed != null) await storage().setItem(KEY, sealed);
 }
 
-export async function loadAlerts(): Promise<FamilyAlert[]> {
-  if (loaded) return alerts;
-  loaded = true;
-  try {
-    const raw = await storage().getItem(KEY);
-    const json = raw ? crypt().decField(raw) : null;
-    const parsed = json ? JSON.parse(json) : null;
-    if (Array.isArray(parsed?.a)) alerts = parsed.a as FamilyAlert[];
-  } catch { /* start empty */ }
-  emit();
-  return alerts;
+/**
+ * Read the store once. Every caller — including one that arrives while the
+ * first read is still in flight — awaits that SAME read, so nobody gets the
+ * empty pre-load list and draws a false "No alerts".
+ */
+export function loadAlerts(): Promise<FamilyAlert[]> {
+  if (!loading) {
+    loading = (async () => {
+      try {
+        const raw = await storage().getItem(KEY);
+        const json = raw ? crypt().decField(raw) : null;
+        const parsed = json ? JSON.parse(json) : null;
+        if (Array.isArray(parsed?.a)) alerts = parsed.a as FamilyAlert[];
+      } catch { /* start empty */ }
+      emit();
+      return alerts;
+    })();
+  }
+  return loading.then(() => alerts);
 }
 
 /** Dedupe key — the same crossing re-evaluated must not stack up. */
@@ -158,7 +168,9 @@ export async function recordAlert(input: RecordAlertInput): Promise<FamilyAlert 
   };
   alerts = [alert, ...alerts].slice(0, MAX_ALERTS);
   emit();
-  await persist();
+  // Best-effort: the alert is already on screen, and the escalation and
+  // notification paths that record it must not abort over a storage hiccup.
+  await persist().catch(() => {});
   return alert;
 }
 
@@ -187,21 +199,32 @@ export async function markAllRead(circleId?: string | null): Promise<void> {
     touched = true;
     return { ...a, read: true };
   });
-  if (touched) { emit(); await persist(); }
+  // Best-effort: callers fire this on a timer and do not handle a rejection.
+  if (touched) { emit(); await persist().catch(() => {}); }
 }
 
+/** Rejects when the store could not be written — and then puts the alerts
+ *  back, so the screen never shows "cleared" for history a restart restores. */
 export async function clearCircleAlerts(circleId: string): Promise<void> {
   await loadAlerts();
-  const before = alerts.length;
+  const prev = alerts;
   alerts = alerts.filter((a) => a.circleId !== circleId);
-  if (alerts.length !== before) { emit(); await persist(); }
+  if (alerts.length === prev.length) return;
+  emit();
+  try {
+    await persist();
+  } catch (e) {
+    alerts = prev;
+    emit();
+    throw e;
+  }
 }
 
 // Module-level so its identity is stable: an inline arrow would make
 // useSyncExternalStore tear down and re-add the subscription on every render.
 function subscribe(cb: () => void): () => void {
   subs.add(cb);
-  if (!loaded) loadAlerts();
+  void loadAlerts();
   return () => { subs.delete(cb); };
 }
 
@@ -310,7 +333,7 @@ export async function ingestFamEvent(chatId: string, content: unknown, myId: str
 
 /** Replace the in-memory mirror (self-check only — does not persist). */
 export function __setAlertsForTest(next: FamilyAlert[]): void {
-  alerts = next; loaded = true; version++;
+  alerts = next; loading = Promise.resolve(next); version++;
 }
 
 // ── self-check ──
@@ -375,6 +398,9 @@ if (require.main === module) {
   // Missing name falls back rather than failing — the alert still renders.
   const anon = parseFamEvent('{"famEvent":{"v":1,"kind":"leave","actorId":"u9","text":"left Work","at":9}}');
   if (!anon || anon.actorName !== 'A member') throw new Error('missing actorName must fall back');
+
+  // loadAlerts after a load: resolves to the CURRENT mirror, not a stale copy.
+  void loadAlerts().then((l) => { if (l !== alerts) throw new Error('loadAlerts must resolve to the current mirror'); });
 
   console.log('family/alerts self-check OK');
 }

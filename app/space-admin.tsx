@@ -61,7 +61,11 @@ const ENTRIES: Entry[] = [
   { key: 'roster', label: 'Roster & links', hint: 'People, and who is responsible for whom', icon: 'people-outline', route: '/space-roster', needs: 'manage_roster' },
   { key: 'links', label: 'Links', hint: 'Who is guardian of, supervises or teaches whom', icon: 'git-network-outline', sheet: 'links', needs: 'manage_roster' },
   { key: 'shift', label: 'Shift and lateness', hint: 'When the day starts, and when a run counts as late', icon: 'time-outline', sheet: 'shift', needs: 'edit_settings' },
-  { key: 'checkin', label: 'Check in & leave', hint: 'Declared arrivals, and time off', icon: 'log-in-outline', route: '/space-checkin' },
+  { key: 'checkin', label: 'Check in', hint: 'Declared arrivals and departures', icon: 'log-in-outline', route: '/space-checkin' },
+  // No gate on either: every member has their own leave and tasks, and the
+  // screens draw the decide/assign affordances from the perms passed below.
+  { key: 'leave', label: 'Leave', hint: 'Requests, approvals and allowance', icon: 'calendar-outline', route: '/space-leave' },
+  { key: 'tasks', label: 'Tasks', hint: 'Assigned work and its progress', icon: 'checkbox-outline', route: '/space-tasks' },
   { key: 'attendance', label: 'Attendance from location', hint: 'Worked out on this device', icon: 'calendar-number-outline', route: '/space-attendance', needs: 'view_space_ops' },
   { key: 'incidents', label: 'Incidents', hint: 'Breakdowns, emergencies, road problems', icon: 'alert-circle-outline', route: '/space-incidents', needs: 'view_space_ops' },
   { key: 'passes', label: 'Visitor passes', hint: 'Issue and admit visitors', icon: 'qr-code-outline', route: '/space-visitors', needs: 'manage_roster' },
@@ -94,6 +98,9 @@ export default function SpaceAdminScreen() {
   const [roster, setRoster] = useState<RosterEntry[]>([]);
   const [links, setLinks] = useState<SpaceLink[]>([]);
   const [linksError, setLinksError] = useState<string | null>(null);
+  // True until the first links read settles, so the sheet does not open on a
+  // false "No links yet".
+  const [linksLoading, setLinksLoading] = useState(false);
   const [sheet, setSheet] = useState<'shift' | 'links' | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -131,9 +138,10 @@ export default function SpaceAdminScreen() {
     // "No links yet".
     try { setLinks(await getLinks(spaceId)); setLinksError(null); }
     catch (e: any) { setLinksError(e?.message ?? 'Check your connection and try again.'); }
+    finally { setLinksLoading(false); }
   }, [spaceId]);
   const openSheet = useCallback((which: 'shift' | 'links') => {
-    if (which === 'links') void loadLinks();
+    if (which === 'links') { setLinksLoading(true); void loadLinks(); }
     setSheet(which);
   }, [loadLinks]);
 
@@ -180,10 +188,11 @@ export default function SpaceAdminScreen() {
       {openIncidents.some((i) => i.category === 'sos') && (
         <TouchableOpacity
           style={s.sos}
-          onPress={() => router.push({ pathname: '/space-incidents' as any, params: { spaceId, name: spaceName, groupType: params.groupType ?? '', perms: params.perms ?? '' } })}
+          onPress={() => router.push({ pathname: '/space-incidents', params: { spaceId, name: spaceName, groupType: params.groupType ?? '', perms: params.perms ?? '' } })}
           accessibilityRole="button"
           accessibilityLabel="An emergency alert is open. Open incidents"
         >
+          {/* White ink on the solid danger fill (no on-danger token exists). */}
           <Ionicons name="warning" size={20} color="#fff" />
           <Text style={s.sosText}>
             An emergency alert is open. Tap to see it.
@@ -237,7 +246,7 @@ export default function SpaceAdminScreen() {
             accessibilityRole="button"
             accessibilityLabel={`${e.label}${badge != null ? `, ${badge}` : ''}. ${e.hint}`}
             onPress={() => e.sheet ? openSheet(e.sheet) : router.push({
-              pathname: e.route as any,
+              pathname: e.route as string,
               params: {
                 spaceId, name: spaceName,
                 groupType: params.groupType ?? '',
@@ -277,7 +286,8 @@ export default function SpaceAdminScreen() {
       <ShiftSheet visible={sheet === 'shift'} onClose={() => setSheet(null)} colors={colors} spaceId={spaceId} />
       <SpaceLinksSheet
         visible={sheet === 'links'} onClose={() => setSheet(null)} colors={colors}
-        spaceId={spaceId} roster={roster} links={links} linksError={linksError} onChanged={loadLinks}
+        spaceId={spaceId} roster={roster} links={links} linksError={linksError} linksLoading={linksLoading}
+        onChanged={loadLinks}
       />
     </View>
   );

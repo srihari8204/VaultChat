@@ -44,6 +44,10 @@ export interface RunRider {
   stateAt: string | null;
   note: string | null;
   displayName: string;
+  /** The rider's guardians with an account — sent ONLY to the run's assigned
+   *  driver, and only by a server that has the field. Absent ≠ empty: absent
+   *  means "not told", [] means "nobody linked". */
+  guardians?: { userId: string; displayName: string }[];
 }
 
 export interface RunEvent {

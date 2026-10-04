@@ -13,22 +13,24 @@ import { AppText as Text } from '../ui/Text';
 import { KeyboardSafe } from '../ui/KeyboardSafe';
 import type { SpacePalette } from '../../lib/spaces/theme';
 import { setShift } from '../../lib/spaces/api';
-import { shiftBody, loadSavedShift, rememberShift, type ShiftForm } from '../../lib/spaces/shift';
+import { shiftBody, loadShift, rememberShift, type ShiftForm } from '../../lib/spaces/shift';
 
 export default function ShiftSheet({ visible, onClose, colors, spaceId }: {
   visible: boolean; onClose: () => void; colors: SpacePalette; spaceId: string;
 }) {
   const [form, setForm] = useState<ShiftForm>({ start: '', end: '', grace: '', delay: '' });
-  const [known, setKnown] = useState(false);
+  // Where the pre-fill came from: the server, this device's copy, or nowhere.
+  const [known, setKnown] = useState<'server' | 'device' | null>(null);
   const [busy, setBusy] = useState(false);
 
-  // Pre-fill with what THIS device last saved — the server has no read for it.
+  // Pre-fill with the server's shift (another admin's change included), or the
+  // copy this device last saw when the server cannot answer.
   useEffect(() => {
     if (!visible) return;
     let live = true;
-    loadSavedShift(spaceId).then((b) => {
+    loadShift(spaceId).then(({ shift: b, source }) => {
       if (!live) return;
-      setKnown(!!b);
+      setKnown(b ? source : null);
       setForm(b
         ? { start: b.shiftStart, end: b.shiftEnd, grace: String(b.shiftGraceMinutes), delay: b.runDelayThresholdMinutes ? String(b.runDelayThresholdMinutes) : '' }
         : { start: '', end: '', grace: '', delay: '' });
@@ -69,9 +71,11 @@ export default function ShiftSheet({ visible, onClose, colors, spaceId }: {
           <View style={[s.modal, { backgroundColor: colors.bg }]}>
             <Text style={[s.title, { color: colors.text }]}>Shift and lateness</Text>
             <Text style={{ color: colors.textDim, fontSize: 12.5 }}>
-              {known
-                ? 'Showing what was last saved from this device.'
-                : 'The current setting cannot be read back from the server, so these fields start empty. Saving replaces it.'}
+              {known === 'server'
+                ? 'The current setting for this space.'
+                : known === 'device'
+                  ? 'The server could not be asked, so this is what this device last saw.'
+                  : 'The current setting could not be read, so these fields start empty. Saving replaces it.'}
             </Text>
             <View style={s.pair}>
               <View style={{ flex: 1 }}>{field('start', 'Shift starts', '09:00')}</View>
@@ -83,7 +87,7 @@ export default function ShiftSheet({ visible, onClose, colors, spaceId }: {
               Leave both shift times empty to clear the shift. Times are local to the workplace.
             </Text>
             <View style={s.row}>
-              <TouchableOpacity style={s.btn} onPress={onClose} accessibilityRole="button">
+              <TouchableOpacity style={s.btn} onPress={onClose} accessibilityRole="button" accessibilityLabel="Cancel">
                 <Text style={{ color: colors.textDim }}>Cancel</Text>
               </TouchableOpacity>
               <TouchableOpacity
@@ -102,6 +106,7 @@ export default function ShiftSheet({ visible, onClose, colors, spaceId }: {
 }
 
 const s = StyleSheet.create({
+  // A fixed dark scrim behind the dialog, the same in both schemes.
   wrap: { flex: 1, backgroundColor: '#0008', alignItems: 'center', justifyContent: 'center', padding: 22 },
   modal: { width: '100%', borderRadius: 16, padding: 20, gap: 10 },
   title: { fontSize: 18, fontWeight: '700' },

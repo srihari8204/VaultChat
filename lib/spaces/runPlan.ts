@@ -1,20 +1,21 @@
 // lib/spaces/runPlan.ts — pure helpers for building a run's stop list and
 // manifest in app/space-runs-admin.tsx.
 //
-// The server replaces a run's stops as a WHOLE LIST (DELETE + INSERT in
-// spaces_runs.go runStopsSet), so every stop gets a NEW id on every save and
-// run_riders.stop_id is nulled by its ON DELETE SET NULL foreign key. Any edit
-// to the stops must therefore re-send the rider→stop assignments against the
-// new ids, or every rider silently falls back to "no stop". These helpers keep
-// that bookkeeping out of the screen and under a self-check
-// (lib/spaces/runPlan.selftest.ts).
+// The stop list is saved as a WHOLE LIST (PUT). A stop sent WITH its id is
+// updated in place by a current server (spaces_runs.go runStopsSet), keeping
+// its arrival mark and every rider's stop_id. An older server ignores the id,
+// re-creates every stop with a NEW id, and its ON DELETE SET NULL foreign key
+// nulls run_riders.stop_id — so against that server the rider→stop
+// assignments must be re-sent against the new ids (remapRiders), or every
+// rider silently falls back to "no stop". idsPreserved() tells the two apart
+// from the PUT's answer. Self-checked in lib/spaces/runPlan.selftest.ts.
 //
 // Pure — no react-native imports.
 
 import type { RunStop, RunRider } from './runs';
 export { parseClock } from './attendance';
 
-export interface StopPayload { label: string; lat?: number; lng?: number; plannedAt?: string }
+export interface StopPayload { id?: string; label: string; lat?: number; lng?: number; plannedAt?: string }
 
 /** "12.97, 77.59" → a valid coordinate, else null. */
 export function parseCoords(text: string): { lat: number; lng: number } | null {
@@ -74,9 +75,13 @@ export function clockOf(iso: string | null): string {
   return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
 }
 
-/** The PUT body for a stop list, keeping each stop's place and time. */
-export function stopPayload(stops: Pick<RunStop, 'label' | 'lat' | 'lng' | 'plannedAt'>[]): StopPayload[] {
+/** The PUT body for a stop list, keeping each stop's place and time, and the
+ *  existing stop's id (`prevId`) so a current server updates it in place. */
+export function stopPayload(
+  stops: (Pick<RunStop, 'label' | 'lat' | 'lng' | 'plannedAt'> & { prevId?: string | null })[],
+): StopPayload[] {
   return stops.map((s) => ({
+    ...(s.prevId ? { id: s.prevId } : {}),
     label: s.label,
     ...(s.lat != null && s.lng != null ? { lat: s.lat, lng: s.lng } : {}),
     ...(s.plannedAt ? { plannedAt: s.plannedAt } : {}),
@@ -99,4 +104,15 @@ export function remapRiders(
   const map = new Map<string, string>();
   previousIds.forEach((old, i) => { if (old && ordered[i]) map.set(old, ordered[i].id); });
   return riders.map((r) => ({ riderId: r.riderId, stopId: (r.stopId && map.get(r.stopId)) || null }));
+}
+
+/**
+ * Did the server keep the stop ids it was sent? True only when its answer lists
+ * `stopIds` and every stop sent with an id came back with that same id at its
+ * position — the in-place update, after which riders still point at their
+ * stops and need no remap. An older server's answer has no `stopIds`.
+ */
+export function idsPreserved(previousIds: (string | null)[], stopIds: unknown): boolean {
+  if (!Array.isArray(stopIds) || stopIds.length !== previousIds.length) return false;
+  return previousIds.every((old, i) => old == null || stopIds[i] === old);
 }

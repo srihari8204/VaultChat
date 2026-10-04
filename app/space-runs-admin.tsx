@@ -21,7 +21,7 @@ import { AppText as Text } from '../components/ui/Text';
 import React, { useCallback, useMemo, useState } from 'react';
 import {
   View, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator,
-  Alert, TextInput, Modal,
+  Alert, TextInput, Modal, RefreshControl,
 } from 'react-native';
 import { Stack, useLocalSearchParams, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -39,10 +39,15 @@ import { AuroraBackground } from '../components/ui';
 import { KeyboardSafe } from '../components/ui/KeyboardSafe';
 import LoadError from '../components/spaces/LoadError';
 import {
-  parseCoords, parseClock, plannedAtOn, clockOf, stopPayload, remapRiders, dayOf, stopDay,
+  parseCoords, parseClock, plannedAtOn, clockOf, stopPayload, remapRiders, idsPreserved, dayOf, stopDay,
 } from '../lib/spaces/runPlan';
 import { geocodeSearch } from '../lib/nav/geocode';
 import { permissionDenied } from '../lib/permissionDenied';
+import ChatDoorButton from '../components/spaces/ChatDoorButton';
+// The app's one cross-platform date+time picker (native dialog on Android,
+// inline sheet on iOS). Shared with finance; nothing in it is finance-specific
+// beyond its sheet colours.
+import { useDatePicker } from '../components/finance/useDatePicker';
 
 /** One stop as the editor holds it: its OLD server id (null when new) plus the
  *  fields the server stores. See lib/spaces/runPlan.ts for why the old id matters. */
@@ -73,7 +78,15 @@ export default function SpaceRunsAdminScreen() {
   const [newName, setNewName] = useState('');
   const [newKind, setNewKind] = useState('school_pickup');
   const [newVehicle, setNewVehicle] = useState('');
+  // When the run happens. Setting it here means stop times are anchored to the
+  // run's own day, so the per-stop "Day of the run" field is rarely needed.
+  const [newWhen, setNewWhen] = useState<Date | null>(null);
+  const [newRequireCode, setNewRequireCode] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  // A run that could not be opened, shown inline with a retry instead of an Alert.
+  const [openError, setOpenError] = useState<{ run: Run; message: string } | null>(null);
+  const picker = useDatePicker();
 
   // The run being edited, with its stops and manifest.
   const [editing, setEditing] = useState<{ run: Run; stops: RunStop[]; riders: RunRider[] } | null>(null);
@@ -97,6 +110,7 @@ export default function SpaceRunsAdminScreen() {
       setLoadError(e?.message ?? 'Could not load the runs.');
     } finally {
       setLoading(false);
+      setRefreshing(false);
     }
   }, [spaceId]);
 
@@ -105,8 +119,9 @@ export default function SpaceRunsAdminScreen() {
   const openRun = useCallback(async (r: Run) => {
     try {
       setEditing(await getRun(spaceId, r.id));
+      setOpenError(null);
     } catch (e: any) {
-      Alert.alert('Could not open the run', e?.message ?? 'Try again.');
+      setOpenError({ run: r, message: e?.message ?? 'Check your connection and try again.' });
     }
   }, [spaceId]);
 
@@ -117,8 +132,10 @@ export default function SpaceRunsAdminScreen() {
     try {
       const { id } = await createRun(spaceId, {
         name, kind: newKind, vehicleLabel: newVehicle.trim() || undefined,
+        ...(newWhen ? { scheduledAt: newWhen.toISOString() } : {}),
+        ...(newRequireCode ? { requireCode: true } : {}),
       });
-      setCreating(false); setNewName(''); setNewVehicle('');
+      setCreating(false); setNewName(''); setNewVehicle(''); setNewWhen(null); setNewRequireCode(false);
       await load();
       const full = await getRun(spaceId, id);
       setEditing(full);
@@ -127,7 +144,7 @@ export default function SpaceRunsAdminScreen() {
     } finally {
       setBusy(false);
     }
-  }, [newName, newKind, newVehicle, spaceId, load]);
+  }, [newName, newKind, newVehicle, newWhen, newRequireCode, spaceId, load]);
 
   const orderedStops = useMemo(
     () => [...(editing?.stops ?? [])].sort((a, b) => a.seq - b.seq),
@@ -135,22 +152,25 @@ export default function SpaceRunsAdminScreen() {
   );
 
   /**
-   * Save the whole stop list, then put every rider back on their stop.
+   * Save the whole stop list, keeping every rider on their stop.
    *
-   * The server re-creates the stops with new ids and its foreign key nulls
-   * every rider's stop, so the manifest has to be re-sent against the new ids
-   * in the same gesture — otherwise one stop edit quietly unassigns the run.
+   * Existing stops are sent with their ids, which a current server updates in
+   * place (riders and arrival marks kept). An older server re-creates every
+   * stop and its foreign key nulls each rider's stop, so then — and only then,
+   * per idsPreserved — the manifest is re-sent against the new ids in the same
+   * gesture; otherwise one stop edit would quietly unassign the run.
    */
   const saveStops = useCallback(async (drafts: StopDraft[]) => {
     if (!editing) return false;
     setBusy(true);
     try {
-      await setRunStops(spaceId, editing.run.id, stopPayload(drafts));
+      const res = await setRunStops(spaceId, editing.run.id, stopPayload(drafts));
+      const prevIds = drafts.map((d) => d.prevId);
       const saved = await getRun(spaceId, editing.run.id);
-      if (editing.riders.some((r) => r.stopId)) {
+      if (!idsPreserved(prevIds, res?.stopIds) && editing.riders.some((r) => r.stopId)) {
         try {
           await setRunRiders(spaceId, editing.run.id,
-            remapRiders(editing.riders, drafts.map((d) => d.prevId), saved.stops));
+            remapRiders(editing.riders, prevIds, saved.stops));
         } catch (e: any) {
           Alert.alert('Stops saved, rider stops were not',
             `${e?.message ?? 'The manifest could not be saved.'} Check each rider’s stop below.`);
@@ -159,19 +179,27 @@ export default function SpaceRunsAdminScreen() {
       setEditing(await getRun(spaceId, editing.run.id));
       return true;
     } catch (e: any) {
-      Alert.alert('Could not save the stops', e?.message ?? 'Try again.');
+      // unknown_stop: the list changed elsewhere since this editor loaded it.
+      // Re-read rather than let the admin retry against stale ids.
+      if (e?.body?.code === 'unknown_stop') {
+        Alert.alert('The stops changed', 'Someone else edited this run’s stops. The latest list is shown now — make your change again.');
+        getRun(spaceId, editing.run.id).then(setEditing).catch(() => {});
+      } else {
+        Alert.alert('Could not save the stops', e?.message ?? 'Try again.');
+      }
       return false;
     } finally {
       setBusy(false);
     }
   }, [editing, spaceId]);
 
-  /** Stop edits re-create the stops, which clears arrival marks already made. */
+  /** Stop edits on a run in progress: a current server keeps arrival marks on
+   *  stops it keeps, but an older one re-creates every stop and clears them. */
   const confirmStopEdit = useCallback((go: () => void) => {
     if (editing?.run.status !== 'started') { go(); return; }
     Alert.alert(
       'Change stops on a run in progress?',
-      'Arrival marks already recorded for this run’s stops will be cleared. Riders keep their state.',
+      'Arrival marks on a stop you remove are lost, and on an older server every recorded arrival may be cleared. Riders keep their state.',
       [{ text: 'Keep as is', style: 'cancel' }, { text: 'Change stops', style: 'destructive', onPress: go }],
     );
   }, [editing?.run.status]);
@@ -364,17 +392,35 @@ export default function SpaceRunsAdminScreen() {
       <Stack.Screen
         options={{
           ...spaceHeader(colors, params.name ? `${params.name} · Runs` : 'Runs'),
+          // The add button sits NEXT TO the chat door, not in place of it.
           headerRight: () => (
-            <TouchableOpacity accessibilityRole="button" accessibilityLabel="New run" onPress={() => setCreating(true)} style={{ paddingHorizontal: 8 }}>
-              <Ionicons name="add" size={24} color={colors.primary} />
-            </TouchableOpacity>
+            <View style={s.headerActions}>
+              <TouchableOpacity accessibilityRole="button" accessibilityLabel="New run" onPress={() => setCreating(true)} style={s.hit}>
+                <Ionicons name="add" size={24} color={colors.primary} />
+              </TouchableOpacity>
+              {!!spaceId && (
+                <ChatDoorButton
+                  colors={colors} chat={{ id: spaceId, name: params.name }}
+                  fallbackTitle="Runs" accessibilityLabel="Open the space chat"
+                />
+              )}
+            </View>
           ),
         }}
       />
 
-      <ScrollView contentContainerStyle={s.body}>
+      <ScrollView
+        contentContainerStyle={s.body}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); void load(); }} tintColor={colors.primary} />}
+      >
         {loadError && (
           <LoadError colors={colors} title="Could not load the runs" message={loadError} onRetry={() => { setLoading(true); void load(); }} />
+        )}
+        {openError && (
+          <LoadError
+            colors={colors} title={`Could not open ${openError.run.vehicleLabel || openError.run.name}`}
+            message={openError.message} onRetry={() => { void openRun(openError.run); }}
+          />
         )}
         {!loadError && runs.length === 0 && (
           <View style={s.card}>
@@ -435,10 +481,39 @@ export default function SpaceRunsAdminScreen() {
                   accessibilityState={{ checked: newKind === k.key }}
                   style={[s.kind, newKind === k.key && { backgroundColor: colors.brandOnLight }]}
                 >
+                  {/* White ink on the solid brandOnLight fill (deep blue in both schemes). */}
                   <Text style={[s.kindText, newKind === k.key && { color: '#fff' }]}>{k.label}</Text>
                 </TouchableOpacity>
               ))}
             </View>
+            {/* When: picked, not typed. Optional — an unscheduled run asks for
+                a day only when a stop is given a planned time. */}
+            <View style={s.pickRow}>
+              <TouchableOpacity
+                style={[s.addStop, { flex: 1 }]}
+                onPress={() => picker.open(newWhen ?? nextMorning(), setNewWhen, 'datetime')}
+                accessibilityRole="button"
+                accessibilityLabel={newWhen ? `Scheduled for ${whenLabel(newWhen)}. Change` : 'Set the date and time of the run'}
+              >
+                <Ionicons name="calendar-outline" size={18} color={colors.primary} />
+                <Text style={{ color: colors.primary, fontWeight: '600', flexShrink: 1 }}>
+                  {newWhen ? whenLabel(newWhen) : 'Set date and time (optional)'}
+                </Text>
+              </TouchableOpacity>
+              {newWhen && (
+                <TouchableOpacity onPress={() => setNewWhen(null)} style={s.iconHit} accessibilityRole="button" accessibilityLabel="Clear the date and time">
+                  <Ionicons name="close-circle-outline" size={19} color={colors.textDim} />
+                </TouchableOpacity>
+              )}
+            </View>
+            <TouchableOpacity
+              style={s.pickRow} onPress={() => setNewRequireCode((v) => !v)}
+              accessibilityRole="checkbox" accessibilityState={{ checked: newRequireCode }}
+              accessibilityLabel="Ask for a handover code when a rider is dropped off"
+            >
+              <Ionicons name={newRequireCode ? 'checkbox' : 'square-outline'} size={19} color={newRequireCode ? colors.primary : colors.textDim} />
+              <Text style={[s.pickText, newRequireCode && { color: colors.text }]}>Ask for a handover code at drop-off</Text>
+            </TouchableOpacity>
             <View style={s.modalRow}>
               <TouchableOpacity style={s.modalBtn} onPress={() => setCreating(false)} accessibilityRole="button">
                 <Text style={s.muted}>Cancel</Text>
@@ -455,6 +530,8 @@ export default function SpaceRunsAdminScreen() {
           </View>
         </View>
         </KeyboardSafe>
+        {/* Inside this Modal so it stacks above it on iOS. */}
+        {picker.element}
       </Modal>
 
       {/* ── edit ── */}
@@ -462,13 +539,13 @@ export default function SpaceRunsAdminScreen() {
         <KeyboardSafe keyboardOnly>
         <View style={[s.screen, { backgroundColor: colors.bg }]}>
           <View style={[s.sheetHeader, { paddingTop: insets.top + 12 }]}>
-            <TouchableOpacity accessibilityRole="button" accessibilityLabel="Close" onPress={() => setEditing(null)}><Ionicons name="close" size={24} color={colors.text} /></TouchableOpacity>
+            <TouchableOpacity accessibilityRole="button" accessibilityLabel="Close" onPress={() => setEditing(null)} style={s.hit}><Ionicons name="close" size={24} color={colors.text} /></TouchableOpacity>
             <Text style={s.sheetTitle} numberOfLines={1}>
               {editing?.run.vehicleLabel || editing?.run.name}
             </Text>
             {busy && <ActivityIndicator size="small" color={colors.primary} />}
             {editing && editing.run.status !== 'completed' && editing.run.status !== 'cancelled' && (
-              <TouchableOpacity onPress={() => cancelRun(editing.run)} accessibilityRole="button">
+              <TouchableOpacity onPress={() => cancelRun(editing.run)} accessibilityRole="button" style={s.hit}>
                 <Text style={{ color: colors.danger, fontWeight: '600' }}>Cancel run</Text>
               </TouchableOpacity>
             )}
@@ -682,6 +759,16 @@ export default function SpaceRunsAdminScreen() {
   );
 }
 
+/** Tomorrow at 07:00 local — the picker's starting point for a new run. */
+function nextMorning(): Date {
+  const d = new Date();
+  d.setDate(d.getDate() + 1);
+  d.setHours(7, 0, 0, 0);
+  return d;
+}
+const whenLabel = (d: Date) =>
+  d.toLocaleString([], { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+
 function statusLabel(r: Run): string {
   switch (r.status) {
     case 'scheduled': return 'Not started';
@@ -706,14 +793,16 @@ const styles = (c: Palette) => StyleSheet.create({
   row: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   dot: { width: 10, height: 10, borderRadius: 5 },
   section: { color: c.textDim, fontSize: 11.5, letterSpacing: 1, marginTop: 8 },
-  pickRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 9 },
+  pickRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 9, minHeight: 44 },
   pickText: { color: c.textDim, flex: 1, fontSize: 14.5 },
   seq: { color: c.textDim, width: 20, fontVariant: ['tabular-nums'] },
   addStop: { flexDirection: 'row', alignItems: 'center', gap: 8, minHeight: 44 },
-  iconHit: { minWidth: 36, minHeight: 44, alignItems: 'center', justifyContent: 'center' },
-  riderToggle: { flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1, minHeight: 36 },
+  iconHit: { minWidth: 44, minHeight: 44, alignItems: 'center', justifyContent: 'center' },
+  hit: { minWidth: 44, minHeight: 44, alignItems: 'center', justifyContent: 'center' },
+  headerActions: { flexDirection: 'row', alignItems: 'center' },
+  riderToggle: { flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1, minHeight: 44 },
   stopChip: {
-    flexDirection: 'row', alignItems: 'center', gap: 4, maxWidth: 160, minHeight: 36,
+    flexDirection: 'row', alignItems: 'center', gap: 4, maxWidth: 160, minHeight: 44,
     borderWidth: 1, borderColor: c.glassStroke, borderRadius: 16, paddingHorizontal: 10,
   },
   stopChipText: { color: c.textDim, fontSize: 12.5, flexShrink: 1 },
@@ -722,13 +811,17 @@ const styles = (c: Palette) => StyleSheet.create({
     color: c.text, fontSize: 15,
   },
   kinds: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
-  kind: { borderWidth: 1, borderColor: c.glassStroke, borderRadius: 20, paddingHorizontal: 12, paddingVertical: 7 },
+  kind: {
+    borderWidth: 1, borderColor: c.glassStroke, borderRadius: 22, paddingHorizontal: 14,
+    minHeight: 44, justifyContent: 'center',
+  },
   kindText: { color: c.textDim, fontSize: 12.5 },
+  // A fixed dark scrim behind the dialog, the same in both schemes.
   modalWrap: { flex: 1, backgroundColor: '#0008', alignItems: 'center', justifyContent: 'center', padding: 22 },
   modal: { width: '100%', backgroundColor: c.bg, borderRadius: 16, padding: 20, gap: 10 },
   modalTitle: { color: c.text, fontSize: 18, fontWeight: '700' },
   modalRow: { flexDirection: 'row', justifyContent: 'flex-end', gap: 10, marginTop: 4 },
-  modalBtn: { paddingHorizontal: 18, paddingVertical: 12, borderRadius: 10 },
+  modalBtn: { paddingHorizontal: 18, minHeight: 44, minWidth: 64, alignItems: 'center', justifyContent: 'center', borderRadius: 10 },
   primaryBtn: { backgroundColor: c.brandOnLight },
   primaryText: { color: '#fff', fontWeight: '700' },
   off: { opacity: 0.4 },

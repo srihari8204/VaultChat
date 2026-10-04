@@ -31,7 +31,7 @@ export default function ChatDoorButton({ colors, chat, fallbackTitle, accessibil
   const name = typeof chat.name === 'string' ? chat.name : fallbackTitle;
   return (
     <TouchableOpacity
-      onPress={() => router.push({ pathname: '/chat', params: { id: chat.id, name } } as any)}
+      onPress={() => router.push({ pathname: '/chat', params: { id: chat.id, ...(name ? { name } : {}) } })}
       accessibilityRole="button"
       accessibilityLabel={accessibilityLabel}
       style={{ minWidth: 44, minHeight: 44, alignItems: 'center', justifyContent: 'center' }}

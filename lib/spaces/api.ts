@@ -109,10 +109,17 @@ export const setRunStatus = (spaceId: string, runId: string, status: 'started' |
 export const setRunDriver = (spaceId: string, runId: string, driverId: string | null) =>
   api(`/chats/${spaceId}/runs/${runId}`, { method: 'PATCH', json: { driverId: driverId ?? '' } });
 
+/**
+ * Replace a run's stop list. A stop sent with its `id` is updated in place
+ * (arrival mark and riders' stop ids kept); `stopIds` lists the resulting ids
+ * in order. An older server ignores `id`, re-creates every stop and answers
+ * without `stopIds` — see lib/spaces/runPlan.ts idsPreserved.
+ */
 export const setRunStops = (
   spaceId: string, runId: string,
-  stops: { label: string; lat?: number; lng?: number; plannedAt?: string }[],
-) => api(`/chats/${spaceId}/runs/${runId}/stops`, { method: 'PUT', json: { stops } });
+  stops: { id?: string; label: string; lat?: number; lng?: number; plannedAt?: string }[],
+) => api<{ ok?: boolean; stops?: number; stopIds?: string[] }>(
+  `/chats/${spaceId}/runs/${runId}/stops`, { method: 'PUT', json: { stops } });
 
 /**
  * "The vehicle is here" — the ARRIVED step, before any pickup.
@@ -354,6 +361,12 @@ export const deviceHeartbeat = (spaceId: string, deviceId: string, battery?: num
   api(`/chats/${spaceId}/devices/${deviceId}/heartbeat`, {
     method: 'POST', json: battery == null ? {} : { battery },
   });
+
+/** The space's shift (edit_settings or view_space_ops; 403 otherwise). Empty
+ *  start/end means none is set. Read through lib/spaces/shift.ts loadShift. */
+export const getShift = (spaceId: string) =>
+  api<{ shiftStart: string; shiftEnd: string; shiftGraceMinutes: number; runDelayThresholdMinutes: number }>(
+    `/chats/${spaceId}/shift`);
 
 export const setShift = (
   spaceId: string, body: {

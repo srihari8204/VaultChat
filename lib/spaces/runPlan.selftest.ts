@@ -3,7 +3,7 @@
 // per-stop manifest (riders with no stop must stay markable).
 import assert from 'node:assert/strict';
 import {
-  parseCoords, parseClock, plannedAtOn, clockOf, stopPayload, remapRiders,
+  parseCoords, parseClock, plannedAtOn, clockOf, stopPayload, remapRiders, idsPreserved,
   parseDay, dayOf, stopDay,
 } from './runPlan';
 import { driverView, nextStop, type RunStop, type RunRider, type RiderState } from './runs';
@@ -68,6 +68,19 @@ const payload = stopPayload([
 assert.deepEqual(payload[0], { label: 'Stop 0', lat: 1, lng: 2, plannedAt: iso });
 assert.deepEqual(payload[1], { label: 'Stop 1' });
 assert.deepEqual(payload[2], { label: 'Stop 2' });
+
+// An existing stop carries its id so a current server updates it in place.
+assert.deepEqual(stopPayload([{ ...stop('a', 0), prevId: 'a' }, { ...stop('n', 1), prevId: null }]), [
+  { id: 'a', label: 'Stop 0' }, { label: 'Stop 1' },
+]);
+
+// ── in-place save vs an older server that re-issued every id ──
+assert.equal(idsPreserved(['s1', null, 's3'], ['s1', 'n9', 's3']), true, 'kept ids → no remap');
+assert.equal(idsPreserved(['s1', null], { ok: true }), false, 'old server: no stopIds → remap');
+assert.equal(idsPreserved(['s1', null], undefined), false);
+assert.equal(idsPreserved(['s1', 's2'], ['n1', 'n2']), false, 're-issued ids → remap');
+assert.equal(idsPreserved(['s1'], ['s1', 'extra']), false, 'length mismatch → remap');
+assert.equal(idsPreserved([], []), true);
 
 // ── remap after the server re-issues stop ids ──
 // Before: s1, s2, s3. Edit: remove s2, insert a new stop first. After save the

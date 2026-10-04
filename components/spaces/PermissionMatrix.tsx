@@ -46,6 +46,9 @@ export interface PermissionMatrixProps {
   error?: string | null;
   /** Show the full ALL_PERMISSIONS table rather than only what is granted. */
   showWithheld?: boolean;
+  /** The host screen's palette (a space screen passes its space palette, so
+   *  the matrix matches the sheet it sits in). Defaults to the app theme. */
+  colors?: Palette;
 }
 
 /** Human label, falling back to a readable form of the key — never mutating it. */
@@ -57,10 +60,11 @@ function label(p: string): string {
 }
 
 export default function PermissionMatrix({
-  role, loading, error, showWithheld = true,
+  role, loading, error, showWithheld = true, colors: given,
 }: PermissionMatrixProps) {
-  const { colors } = useTheme();
-  const s = styles(colors);
+  const theme = useTheme();
+  const colors = given ?? theme.colors;
+  const s = useMemo(() => styles(colors), [colors]);
 
   const granted = useMemo(
     () => new Set(role?.permissions ?? []),

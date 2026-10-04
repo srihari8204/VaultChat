@@ -16,8 +16,9 @@
 import { AppText as Text } from '../components/ui/Text';
 import React, { useCallback, useMemo, useState } from 'react';
 import {
-  View, StyleSheet, ScrollView, ActivityIndicator, TouchableOpacity,
+  View, StyleSheet, ScrollView, ActivityIndicator, TouchableOpacity, RefreshControl,
 } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Stack, useLocalSearchParams, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useSpaceColors, spaceHeader } from '../lib/spaces/theme';
@@ -27,15 +28,20 @@ import { getPlaces } from '../lib/family/store';
 import { circleMembers } from '../lib/family/circle';
 import { attendanceTiles } from '../lib/spaces/dashboard';
 import {
-  crossingsFromSamples, crossingsForDay, projectDay, summarise, makeShift,
+  crossingsFromSamples, crossingsForDay, projectDay, summarise, makeShift, pickWorkZone, liveZones,
   STATE_LABELS, type AttendanceState, type DayAttendance,
 } from '../lib/spaces/attendance';
+import type { Geofence } from '../lib/family/geofence';
 import { AuroraBackground } from '../components/ui';
 import LoadError from '../components/spaces/LoadError';
-import { loadSavedShift } from '../lib/spaces/shift';
+import { loadShift } from '../lib/spaces/shift';
 
 /** How many days back the weekly view folds. */
 const DAYS = 7;
+
+/** This viewer's chosen attendance zone for a space. A per-device convenience:
+ *  losing it only falls back to pickWorkZone's default. */
+const zoneKey = (spaceId: string) => `vc_space_att_zone_${spaceId}`;
 
 interface Row {
   userId: string;
@@ -54,10 +60,14 @@ export default function SpaceAttendanceScreen() {
 
   const [rows, setRows] = useState<Row[]>([]);
   const [zoneName, setZoneName] = useState<string | null>(null);
+  const [zones, setZones] = useState<Geofence[]>([]);
+  const [zoneId, setZoneId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
-  // The shift actually applied: route params, else the one this device saved
-  // from Admin → Shift and lateness (the server has no read for it).
+  // The shift actually applied: route params, else the server's (GET
+  // /chats/{id}/shift), else — when the server cannot answer — the copy this
+  // device last saw (lib/spaces/shift.ts loadShift).
   const [activeShift, setActiveShift] = useState<ReturnType<typeof makeShift>>(null);
   const [expanded, setExpanded] = useState<string | null>(null);
 
@@ -70,30 +80,41 @@ export default function SpaceAttendanceScreen() {
     [params.shiftStart, params.shiftEnd, params.shiftGrace],
   );
 
-  const load = useCallback(async () => {
-    setLoading(true);
+  const load = useCallback(async (chosen?: string) => {
     try {
-      const [places, members, saved] = await Promise.all([
+      const [places, members, saved, stored] = await Promise.all([
         getPlaces(spaceId),
         circleMembers(spaceId),
-        shift ? Promise.resolve(null) : loadSavedShift(spaceId),
+        shift ? Promise.resolve(null) : loadShift(spaceId).then((r) => r.shift),
+        chosen !== undefined ? Promise.resolve(chosen) : AsyncStorage.getItem(zoneKey(spaceId)).catch(() => null),
       ]);
       const sh = shift ?? (saved ? makeShift(saved.shiftStart, saved.shiftEnd, saved.shiftGraceMinutes) : null);
       setActiveShift(sh);
       setLoadError(null);
-      // The workplace is the space's first safe zone. A space with none has no
+      // The workplace zone: this viewer's pick, else one named like a workplace,
+      // else the first live zone (pickWorkZone). A space with none has no
       // attendance to report, which the empty state says outright rather than
       // showing everyone as absent.
-      const zone = places[0];
+      const zone = pickWorkZone(places, stored);
+      setZones(liveZones(places));
+      setZoneId(zone?.id ?? null);
       setZoneName(zone?.name ?? null);
       if (!zone) { setRows([]); return; }
 
+      // ONE read of the space's track cache, grouped by member here: the old
+      // per-member loop awaited one read per person, and caught each failure
+      // to [] — which drew a member whose read failed as "No data". A failed
+      // read now fails the screen, and says so.
       const from = Date.now() - DAYS * 24 * 3600_000;
-      const built: Row[] = [];
-      for (const m of members) {
-        const samples = await getTrack(spaceId, { from, userId: m.id }).catch(() => []);
+      const samples = await getTrack(spaceId, { from });
+      const byUser = new Map<string, typeof samples>();
+      for (const smp of samples) {
+        const list = byUser.get(smp.u);
+        if (list) list.push(smp); else byUser.set(smp.u, [smp]);
+      }
+      const built: Row[] = members.map((m) => {
         const crossings = crossingsFromSamples(
-          samples.map((s) => ({ lat: s.lat, lng: s.lng, ts: s.ts })),
+          (byUser.get(m.id) ?? []).map((x) => ({ lat: x.lat, lng: x.lng, ts: x.ts })),
           { lat: zone.center.lat, lng: zone.center.lng, radiusM: zone.radiusM },
         );
         const week: DayAttendance[] = [];
@@ -101,23 +122,26 @@ export default function SpaceAttendanceScreen() {
           const dayMs = Date.now() - d * 24 * 3600_000;
           week.push(projectDay(crossingsForDay(crossings, dayMs), sh, Math.min(Date.now(), endOfDay(dayMs))));
         }
-        built.push({
-          userId: m.id,
-          name: m.name,
-          today: week[week.length - 1],
-          week,
-        });
-      }
+        return { userId: m.id, name: m.name, today: week[week.length - 1], week };
+      });
       setRows(built);
     } catch (e: any) {
       // Not "No workplace set": a failed read is not an absent zone.
       setLoadError(e?.message ?? 'Could not load attendance.');
     } finally {
       setLoading(false);
+      setRefreshing(false);
     }
   }, [spaceId, shift]);
 
-  useFocusEffect(useCallback(() => { load(); }, [load]));
+  const chooseZone = useCallback((id: string) => {
+    if (id === zoneId) return;
+    AsyncStorage.setItem(zoneKey(spaceId), id).catch(() => { /* convenience only */ });
+    setRefreshing(true);
+    void load(id);
+  }, [zoneId, spaceId, load]);
+
+  useFocusEffect(useCallback(() => { void load(); }, [load]));
 
   const tiles = useMemo(
     () => attendanceTiles(rows.map((r) => r.today.state)),
@@ -141,10 +165,15 @@ export default function SpaceAttendanceScreen() {
   }
 
   return (
-    <ScrollView style={s.screen} contentContainerStyle={s.body}>
+    <View style={s.screen}>
+      <AuroraBackground />
+    <ScrollView
+      style={s.screen} contentContainerStyle={s.body}
+      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); void load(); }} tintColor={colors.primary} />}
+    >
       <Stack.Screen options={spaceHeader(colors, params.name ? `${params.name} · Attendance` : 'Attendance', { id: spaceId, name: params.name })} />
 
-      {loadError && <LoadError colors={colors} message={loadError} onRetry={() => { void load(); }} />}
+      {loadError && <LoadError colors={colors} message={loadError} onRetry={() => { setRefreshing(true); void load(); }} />}
 
       {!loadError && !zoneName && (
         <View style={s.card}>
@@ -153,6 +182,31 @@ export default function SpaceAttendanceScreen() {
             Attendance is read from a safe zone. Add one for the workplace and arrivals
             and departures start being recognised — there is nothing else to switch on.
           </Text>
+        </View>
+      )}
+
+      {/* Which zone counts as the workplace. Only drawn when there is a choice
+          to make; the pick is remembered on this device. */}
+      {!loadError && zones.length > 1 && (
+        <View style={s.card} accessibilityRole="radiogroup" accessibilityLabel="Workplace zone">
+          <Text style={s.cardTitle}>Workplace zone</Text>
+          <View style={s.zoneChips}>
+            {zones.map((z) => {
+              const on = z.id === zoneId;
+              return (
+                <TouchableOpacity
+                  key={z.id}
+                  style={[s.zoneChip, on && s.zoneChipOn]}
+                  onPress={() => chooseZone(z.id)}
+                  accessibilityRole="radio"
+                  accessibilityState={{ checked: on }}
+                  accessibilityLabel={`Read attendance against ${z.name}`}
+                >
+                  <Text style={[s.zoneChipText, on && { color: colors.primary }]} numberOfLines={1}>{z.name}</Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
         </View>
       )}
 
@@ -182,6 +236,10 @@ export default function SpaceAttendanceScreen() {
               key={r.userId}
               style={s.card}
               onPress={() => setExpanded(expanded === r.userId ? null : r.userId)}
+              accessibilityRole="button"
+              accessibilityState={{ expanded: expanded === r.userId }}
+              accessibilityLabel={`${r.name}, ${STATE_LABELS[r.today.state]} today`}
+              accessibilityHint="Shows the last seven days"
             >
               <View style={s.row}>
                 <View style={[s.badge, { backgroundColor: stateColour(r.today.state, colors) + '22' }]}>
@@ -201,10 +259,15 @@ export default function SpaceAttendanceScreen() {
 
               {expanded === r.userId && (
                 <View style={s.week}>
+                  {/* Each day says its state in words: the dot's colour alone
+                      is unreadable to a screen reader and to colour-blind eyes. */}
                   {r.week.map((d, i) => (
-                    <View key={i} style={s.weekCell}>
+                    <View
+                      key={dayLabel(DAYS - 1 - i)} style={s.weekCell}
+                      accessible accessibilityLabel={`${dayLabel(DAYS - 1 - i)}: ${STATE_LABELS[d.state]}`}
+                    >
                       <View style={[s.weekDot, { backgroundColor: stateColour(d.state, colors) }]} />
-                      <Text style={s.weekLabel}>{dayLabel(DAYS - 1 - i)}</Text>
+                      <Text style={s.weekLabel}>{dayLabel(DAYS - 1 - i)} · {STATE_LABELS[d.state]}</Text>
                     </View>
                   ))}
                   <Text style={s.footnote}>
@@ -237,6 +300,7 @@ export default function SpaceAttendanceScreen() {
         </>
       )}
     </ScrollView>
+    </View>
   );
 }
 
@@ -292,4 +356,11 @@ const styles = (c: Palette) => StyleSheet.create({
   weekDot: { width: 10, height: 10, borderRadius: 5 },
   weekLabel: { color: c.textDim, fontSize: 12.5 },
   footnote: { color: c.textFaint, fontSize: 11.5, lineHeight: 16 },
+  zoneChips: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  zoneChip: {
+    minHeight: 44, justifyContent: 'center', paddingHorizontal: 14, borderRadius: 22,
+    borderWidth: 1, borderColor: c.border, maxWidth: '100%',
+  },
+  zoneChipOn: { borderColor: c.primary, backgroundColor: c.primary + '18' },
+  zoneChipText: { color: c.text, fontSize: 13.5, fontWeight: '600' },
 });

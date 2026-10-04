@@ -24,8 +24,9 @@ import {
   View, StyleSheet, TouchableOpacity, ScrollView, ActivityIndicator,
   Alert, TextInput, Modal,
 } from 'react-native';
-import { Stack, useLocalSearchParams, useFocusEffect } from 'expo-router';
+import { Stack, useLocalSearchParams, useFocusEffect, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useSpaceColors, spaceHeader } from '../lib/spaces/theme';
 import type { SpacePalette as Palette } from '../lib/spaces/theme';
 import {
@@ -36,7 +37,8 @@ import { setBackgroundRun, hasBackgroundPermission } from '../lib/family/backgro
 import { ensureKeyDeliveredForRun } from '../lib/family/presence';
 import { feed, newDetectState, detectionText } from '../lib/spaces/detect';
 import { recordAlert, buildFamEvent } from '../lib/family/alerts';
-import { sendMessage } from '../lib/chatService';
+import { sendMessage, createDirectChat } from '../lib/chatService';
+import { Sheet, type SheetAction } from '../components/ui/Sheet';
 import { getCurrentUserAsync } from './(constants)/authService';
 import type { LatLng } from '../lib/nav/geo';
 import {
@@ -62,6 +64,8 @@ const INCIDENTS: { key: string; label: string; icon: any }[] = [
 export default function SpaceRunDriverScreen() {
   const params = useLocalSearchParams<{ spaceId?: string; runId?: string; groupType?: string }>();
   const colors = useSpaceColors(params.groupType);
+  const router = useRouter();
+  const insets = useSafeAreaInsets();
   const spaceId = String(params.spaceId || '');
   const runId = String(params.runId || '');
 
@@ -281,18 +285,38 @@ export default function SpaceRunDriverScreen() {
     apply(rider, state);
   }, [run, apply]);
 
-  const callParent = useCallback(() => {
-    // ponytail: honest stub. A driver is scoped to their own runs, and neither
-    // the run payload (runGet riders) nor /links visible to a driver names a
-    // rider's guardian, so there is nobody to dial. Replace with a direct call
-    // (as space-transport does for drivers) once runGet returns each rider's
-    // guardian user ids to the assigned driver.
-    Alert.alert(
-      'Call guardian',
-      'Guardian contacts are not shared with drivers yet. Call your transport office, '
-      + 'or use “Report a problem” so they can reach the family.',
-    );
-  }, []);
+  // Calling a guardian. runGet gives the ASSIGNED DRIVER each rider's
+  // guardians; a call needs the direct chat with them, opened (or created) the
+  // same way space-transport calls a driver.
+  const [guardianSheet, setGuardianSheet] = useState<{ title: string; actions: SheetAction[] } | null>(null);
+  const [calling, setCalling] = useState<string | null>(null);
+  const callGuardian = useCallback(async (g: { userId: string; displayName: string }) => {
+    if (calling) return;
+    setCalling(g.userId);
+    try {
+      const chat = await createDirectChat({ userId: g.userId });
+      router.push({ pathname: '/voicecall', params: { chatId: chat.id, peerUid: g.userId, peerName: g.displayName } });
+    } catch (e: any) {
+      Alert.alert('Could not start the call', e?.message ?? 'Check your connection and try again.');
+    } finally { setCalling(null); }
+  }, [calling, router]);
+  const callParent = useCallback((rider: RunRider) => {
+    const gs = rider.guardians;
+    if (!gs) {
+      // An older server does not send guardians, so there is nobody to dial.
+      Alert.alert(
+        'Call guardian',
+        'Guardian contacts are not shared with drivers on this server yet. Call your transport office, '
+        + 'or use “Report a problem” so they can reach the family.',
+      );
+      return;
+    }
+    if (gs.length === 1) { void callGuardian(gs[0]); return; }
+    setGuardianSheet({
+      title: `Call ${rider.displayName}’s guardian`,
+      actions: gs.map((g) => ({ label: g.displayName, icon: 'call-outline', onPress: () => { setGuardianSheet(null); void callGuardian(g); } })),
+    });
+  }, [callGuardian]);
 
   // The panic control (S5.6). Deliberately NOT one of the incident categories:
   // an incident is a form you fill in, and a driver in trouble is not filling in
@@ -324,12 +348,18 @@ export default function SpaceRunDriverScreen() {
             // rather than a channel nobody has open — but under its OWN
             // category, so it arrives with its own wording and its own
             // notification channel instead of looking like a blocked road.
-            fileIncident(spaceId, { category: 'sos', runId, note: '' })
+            // A failed send offers the retry right there: a driver in trouble
+            // must not have to find the panic control again.
+            // ponytail: not queued across app restarts; retry is one tap while
+            // the screen is open. Replace with the outbox once incidents have one.
+            const send = () => fileIncident(spaceId, { category: 'sos', runId, note: '' })
               .then(() => Alert.alert('Alert sent', 'The office has been alerted.'))
               .catch(() => Alert.alert(
-                'Alert raised on this device',
-                'It could not be sent yet and will need to be repeated when you have signal.',
+                'Alert not sent yet',
+                'It is raised on this device, but the office has not received it. Try again when you have signal.',
+                [{ text: 'Later', style: 'cancel' }, { text: 'Try again', onPress: () => { void send(); } }],
               ));
+            void send();
           },
         },
       ],
@@ -431,7 +461,7 @@ export default function SpaceRunDriverScreen() {
         <View style={[s.progressFill, { width: `${Math.round(prog.fraction * 100)}%` }]} />
       </View>
 
-      <ScrollView contentContainerStyle={s.body}>
+      <ScrollView contentContainerStyle={[s.body, { paddingBottom: 90 + insets.bottom }]}>
         {!started && (
           <View style={s.notice}>
             <Ionicons name="information-circle-outline" size={18} color={colors.primary} />
@@ -503,9 +533,19 @@ export default function SpaceRunDriverScreen() {
 
                 {r.state === 'pending' && started ? (
                   <View style={s.actions}>
-                    <TouchableOpacity style={s.iconBtn} onPress={callParent} accessibilityRole="button" accessibilityLabel={`Call ${r.displayName}’s guardian`}>
-                      <Ionicons name="call-outline" size={20} color={colors.primary} />
-                    </TouchableOpacity>
+                    {/* Hidden when the server says nobody is linked ([]); shown with
+                        an honest explanation when it cannot say (older server). */}
+                    {(!r.guardians || r.guardians.length > 0) && (
+                      <TouchableOpacity
+                        style={s.iconBtn} onPress={() => callParent(r)} disabled={!!calling}
+                        accessibilityRole="button" accessibilityLabel={`Call ${r.displayName}’s guardian`}
+                        accessibilityState={{ disabled: !!calling, busy: !!calling }}
+                      >
+                        {calling && r.guardians?.some((g) => g.userId === calling)
+                          ? <ActivityIndicator size="small" color={colors.primary} />
+                          : <Ionicons name="call-outline" size={20} color={colors.primary} />}
+                      </TouchableOpacity>
+                    )}
                     <TouchableOpacity
                       style={[s.actionBtn, s.absentBtn]}
                       onPress={() => onMark(r, 'absent')}
@@ -548,7 +588,7 @@ export default function SpaceRunDriverScreen() {
         )}
       </ScrollView>
 
-      <TouchableOpacity style={s.incidentBar} onPress={() => setIncidentOpen(true)} accessibilityRole="button">
+      <TouchableOpacity style={[s.incidentBar, { bottom: 20 + insets.bottom }]} onPress={() => setIncidentOpen(true)} accessibilityRole="button">
         <Ionicons name="alert-circle-outline" size={20} color={colors.danger} />
         <Text style={s.incidentText}>Report a problem</Text>
       </TouchableOpacity>
@@ -561,6 +601,7 @@ export default function SpaceRunDriverScreen() {
             <Text style={s.modalTitle}>Handover code</Text>
             <Text style={s.muted}>Ask the guardian for {codeFor?.rider.displayName}’s code.</Text>
             <TextInput
+              accessibilityLabel={`Handover code for ${codeFor?.rider.displayName ?? 'this rider'}`}
               style={s.codeInput}
               value={code}
               onChangeText={setCode}
@@ -592,7 +633,7 @@ export default function SpaceRunDriverScreen() {
       {/* incident */}
       <Modal visible={incidentOpen} transparent animationType="slide" onRequestClose={() => setIncidentOpen(false)}>
         <View style={s.sheetWrap}>
-          <View style={s.sheet}>
+          <View style={[s.sheet, { paddingBottom: 18 + insets.bottom }]}>
             <Text style={s.modalTitle}>Report a problem</Text>
             <TouchableOpacity style={[s.sheetRow, s.panicRow]} onPress={onPanic} accessibilityRole="button">
               <Ionicons name="alert-circle" size={22} color="#fff" />
@@ -611,6 +652,11 @@ export default function SpaceRunDriverScreen() {
           </View>
         </View>
       </Modal>
+
+      <Sheet
+        visible={!!guardianSheet} title={guardianSheet?.title}
+        actions={guardianSheet?.actions ?? []} onClose={() => setGuardianSheet(null)}
+      />
     </View>
   );
 }
@@ -667,7 +713,7 @@ const styles = (c: Palette) => StyleSheet.create({
   riderName: { color: c.text, fontSize: 18, fontWeight: '600' },
   riderState: { color: c.textDim, fontSize: 13, marginTop: 2 },
   actions: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  iconBtn: { padding: 10 },
+  iconBtn: { minWidth: 44, minHeight: 44, alignItems: 'center', justifyContent: 'center' },
   actionBtn: { paddingHorizontal: 14, paddingVertical: 12, borderRadius: 10, minWidth: 84, alignItems: 'center' },
   absentBtn: { backgroundColor: c.border },
   arriveBtn: {
@@ -698,7 +744,7 @@ const styles = (c: Palette) => StyleSheet.create({
     fontSize: 24, letterSpacing: 6, textAlign: 'center', color: c.text,
   },
   modalRow: { flexDirection: 'row', justifyContent: 'flex-end', gap: 10, marginTop: 4 },
-  modalBtn: { paddingHorizontal: 18, paddingVertical: 12, borderRadius: 10 },
+  modalBtn: { paddingHorizontal: 18, minHeight: 44, minWidth: 64, alignItems: 'center', justifyContent: 'center', borderRadius: 10 },
   sheetWrap: { flex: 1, backgroundColor: '#0008', justifyContent: 'flex-end' },
   sheet: { backgroundColor: c.bg, borderTopLeftRadius: 18, borderTopRightRadius: 18, padding: 18, gap: 4 },
   sheetRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 16 },

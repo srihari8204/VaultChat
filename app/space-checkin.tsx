@@ -1,5 +1,5 @@
-// app/space-checkin.tsx — check in, check out, and leave
-// (Employee design screens 9 and 11).
+// app/space-checkin.tsx — check in and check out (Employee design screen 9),
+// with a door to leave (app/space-leave.tsx owns requests and approvals).
 //
 // ── two kinds of "attendance", kept apart on purpose ──
 //
@@ -17,37 +17,29 @@
 import { AppText as Text } from '../components/ui/Text';
 import React, { useCallback, useMemo, useState } from 'react';
 import {
-  View, StyleSheet, ScrollView, ActivityIndicator, TouchableOpacity,
-  Alert, TextInput, Modal,
+  View, StyleSheet, ScrollView, ActivityIndicator, TouchableOpacity, Alert, RefreshControl,
 } from 'react-native';
-import { Stack, useLocalSearchParams, useFocusEffect } from 'expo-router';
+import { Stack, useLocalSearchParams, useFocusEffect, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useSpaceColors, spaceHeader } from '../lib/spaces/theme';
 import type { SpacePalette as Palette } from '../lib/spaces/theme';
 import {
-  getAttendance, checkIn, checkOut, getLeave, requestLeave, decideLeave,
+  getAttendance, checkIn, checkOut, getLeave,
   type AttendanceRecord, type LeaveRequest,
 } from '../lib/spaces/api';
 import { getCurrentUserAsync } from './(constants)/authService';
 import { AuroraBackground } from '../components/ui';
 import LoadError from '../components/spaces/LoadError';
-import { KeyboardSafe } from '../components/ui/KeyboardSafe';
 
-const LEAVE_KINDS: { key: string; label: string }[] = [
-  { key: 'casual', label: 'Casual' },
-  { key: 'sick', label: 'Sick' },
-  { key: 'privilege', label: 'Privilege' },
-  { key: 'unpaid', label: 'Unpaid' },
-];
 
 export default function SpaceCheckinScreen() {
   const params = useLocalSearchParams<{ spaceId?: string; name?: string; groupType?: string; perms?: string }>();
   const colors = useSpaceColors(params.groupType);
+  const router = useRouter();
   const spaceId = String(params.spaceId || '');
 
-  // Presentation gate only — the PATCH re-checks it. Drawing Approve/Decline
-  // for someone the server will refuse teaches them to distrust the app
-  // (Business design rule: only an eligible approver sees the buttons).
+  // Presentation only: whether to count requests waiting for this viewer's
+  // decision. Deciding happens on the leave screen, which the server re-checks.
   const canDecide = useMemo(
     () => String(params.perms || '').split(',').includes('view_space_ops'),
     [params.perms],
@@ -59,11 +51,7 @@ export default function SpaceCheckinScreen() {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [asking, setAsking] = useState(false);
-  const [kind, setKind] = useState('casual');
-  const [from, setFrom] = useState(today());
-  const [to, setTo] = useState(today());
-  const [reason, setReason] = useState('');
+  const [refreshing, setRefreshing] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -82,6 +70,7 @@ export default function SpaceCheckinScreen() {
       setLoadError(e?.message ?? 'Could not load today’s record.');
     } finally {
       setLoading(false);
+      setRefreshing(false);
     }
   }, [spaceId]);
 
@@ -108,39 +97,14 @@ export default function SpaceCheckinScreen() {
     } finally { setBusy(false); }
   }, [spaceId, load]);
 
-  const submitLeave = useCallback(async () => {
-    if (!isDay(from) || !isDay(to)) { Alert.alert('Dates', 'Use YYYY-MM-DD for both dates.'); return; }
-    if (to < from) { Alert.alert('Dates', 'The end date is before the start date.'); return; }
-    setBusy(true);
-    try {
-      await requestLeave(spaceId, { kind, fromDay: from, toDay: to, reason: reason.trim() || undefined });
-      setAsking(false); setReason('');
-      await load();
-    } catch (e: any) {
-      Alert.alert('Could not request leave', e?.message ?? 'Try again.');
-    } finally { setBusy(false); }
-  }, [spaceId, kind, from, to, reason, load]);
-
-  const decideNow = useCallback(async (l: LeaveRequest, status: 'approved' | 'rejected' | 'cancelled') => {
-    setBusy(true);
-    try { await decideLeave(spaceId, l.id, status); await load(); }
-    catch (e: any) { Alert.alert('Could not update', e?.message ?? 'Try again.'); }
-    finally { setBusy(false); }
-  }, [spaceId, load]);
-
-  // Reject and withdraw are confirmed; approve is the expected tap and stays one.
-  const decide = useCallback((l: LeaveRequest, status: 'approved' | 'rejected' | 'cancelled') => {
-    if (status === 'approved') { void decideNow(l, status); return; }
-    const who = l.userId === me ? 'your' : `${l.name || 'this'}’s`;
-    Alert.alert(
-      status === 'rejected' ? `Reject ${who} leave?` : 'Withdraw your leave request?',
-      `${l.kind}, ${l.fromDay}${l.toDay !== l.fromDay ? ` to ${l.toDay}` : ''}.`,
-      [
-        { text: 'Keep', style: 'cancel' },
-        { text: status === 'rejected' ? 'Reject' : 'Withdraw', style: 'destructive', onPress: () => { void decideNow(l, status); } },
-      ],
-    );
-  }, [decideNow, me]);
+  // The leave summary: the viewer's own pending requests, and — for an
+  // approver — other people's waiting for a decision.
+  const myPending = leave.filter((l) => l.userId === me && l.status === 'pending').length;
+  const toDecide = canDecide ? leave.filter((l) => l.userId !== me && l.status === 'pending').length : 0;
+  const openLeave = () => router.push({
+    pathname: '/space-leave',
+    params: { spaceId, name: params.name ?? '', groupType: params.groupType ?? '', perms: params.perms ?? '' },
+  });
 
   const s = styles(colors);
 
@@ -155,7 +119,12 @@ export default function SpaceCheckinScreen() {
   }
 
   return (
-    <ScrollView style={s.screen} contentContainerStyle={s.body}>
+    <View style={s.screen}>
+      <AuroraBackground />
+    <ScrollView
+      style={s.screen} contentContainerStyle={s.body}
+      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); void load(); }} tintColor={colors.primary} />}
+    >
       <Stack.Screen options={spaceHeader(colors, params.name ? `${params.name} · Attendance` : 'Attendance', { id: spaceId, name: params.name })} />
 
       {loadError && (
@@ -194,52 +163,26 @@ export default function SpaceCheckinScreen() {
         )}
       </View>}
 
-      {/* Leave (design screen 11) */}
-      <View style={s.card}>
-        <View style={s.rowBetween}>
+      {/* Leave lives on its own screen (requests, approvals, balance); this is
+          the door to it, with what is waiting. */}
+      <TouchableOpacity
+        style={[s.card, s.linkRow]} onPress={openLeave}
+        accessibilityRole="button"
+        accessibilityLabel={`Leave. ${loadError ? '' : `${myPending} of yours pending${canDecide ? `, ${toDecide} waiting for your decision` : ''}. `}Request or review leave`}
+      >
+        <Ionicons name="calendar-outline" size={20} color={colors.primary} />
+        <View style={{ flex: 1, minWidth: 0 }}>
           <Text style={s.cardTitle}>Leave</Text>
-          <TouchableOpacity onPress={() => setAsking(true)} accessibilityRole="button" accessibilityLabel="Request leave">
-            <Text style={s.link}>Request</Text>
-          </TouchableOpacity>
+          <Text style={s.muted}>
+            {loadError ? 'Request leave, or review requests'
+              : [
+                myPending ? `${myPending} of yours pending` : 'Nothing of yours pending',
+                canDecide && toDecide ? `${toDecide} waiting for your decision` : null,
+              ].filter(Boolean).join(' · ')}
+          </Text>
         </View>
-
-        {!loadError && leave.length === 0 && <Text style={s.muted}>No leave requested.</Text>}
-
-        {leave.map((l) => {
-          const ownPending = l.userId === me && l.status === 'pending';
-          return (
-            <View key={l.id} style={s.leaveRow}>
-              <View style={[s.leaveDot, { backgroundColor: statusColour(l.status, colors) }]} />
-              <View style={{ flex: 1, minWidth: 0 }}>
-                <Text style={s.leaveTitle} numberOfLines={1}>
-                  {l.userId === me ? 'You' : (l.name || 'Someone')} · {l.kind}
-                </Text>
-                <Text style={s.muted} numberOfLines={1}>
-                  {l.fromDay}{l.toDay !== l.fromDay ? ` → ${l.toDay}` : ''} · {l.days} {l.days === 1 ? 'day' : 'days'} · {l.status}
-                </Text>
-              </View>
-              {ownPending && (
-                <TouchableOpacity onPress={() => decide(l, 'cancelled')} disabled={busy} accessibilityRole="button" accessibilityLabel="Withdraw your leave request">
-                  <Text style={[s.link, { color: colors.textDim }]}>Withdraw</Text>
-                </TouchableOpacity>
-              )}
-              {/* Only an eligible approver gets the buttons, and never on their
-                  own request — the server enforces both, this just stops the
-                  screen drawing an action that always fails. */}
-              {canDecide && l.status === 'pending' && l.userId !== me && (
-                <View style={{ flexDirection: 'row', gap: 10 }}>
-                  <TouchableOpacity accessibilityRole="button" accessibilityLabel={`Reject leave for ${l.name || 'this person'}`} onPress={() => decide(l, 'rejected')} disabled={busy} style={s.iconHit}>
-                    <Ionicons name="close-circle-outline" size={21} color={colors.danger} />
-                  </TouchableOpacity>
-                  <TouchableOpacity accessibilityRole="button" accessibilityLabel={`Approve leave for ${l.name || 'this person'}`} onPress={() => decide(l, 'approved')} disabled={busy} style={s.iconHit}>
-                    <Ionicons name="checkmark-circle-outline" size={21} color={colors.success} />
-                  </TouchableOpacity>
-                </View>
-              )}
-            </View>
-          );
-        })}
-      </View>
+        <Ionicons name="chevron-forward" size={18} color={colors.textDim} />
+      </TouchableOpacity>
 
       {/* Today's team record. RLS returns only the caller's own row unless they
           run the space, so this list is short for an employee and complete for
@@ -269,60 +212,14 @@ export default function SpaceCheckinScreen() {
         worked out on your own device and never leaves it.
       </Text>
 
-      {/* request leave */}
-      <Modal visible={asking} transparent animationType="fade" onRequestClose={() => setAsking(false)}>
-        <KeyboardSafe keyboardOnly>
-        <View style={s.modalWrap}>
-          <View style={s.modal}>
-            <Text style={s.modalTitle}>Request leave</Text>
-            <View style={s.kinds}>
-              {LEAVE_KINDS.map((k) => (
-                <TouchableOpacity
-                  key={k.key}
-                  onPress={() => setKind(k.key)}
-                  accessibilityRole="radio" accessibilityState={{ checked: kind === k.key }}
-                  style={[s.kind, kind === k.key && { backgroundColor: colors.brandOnLight }]}
-                >
-                  <Text style={[s.kindText, kind === k.key && { color: '#fff' }]}>{k.label}</Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-            <View style={{ flexDirection: 'row', gap: 8 }}>
-              <TextInput style={[s.input, { flex: 1 }]} value={from} onChangeText={setFrom} placeholder="From YYYY-MM-DD" placeholderTextColor={colors.textDim} />
-              <TextInput style={[s.input, { flex: 1 }]} value={to} onChangeText={setTo} placeholder="To YYYY-MM-DD" placeholderTextColor={colors.textDim} />
-            </View>
-            <TextInput style={s.input} value={reason} onChangeText={setReason} placeholder="Reason (optional)" placeholderTextColor={colors.textDim} />
-            <View style={s.modalRow}>
-              <TouchableOpacity style={s.modalBtn} onPress={() => setAsking(false)} accessibilityRole="button">
-                <Text style={s.muted}>Cancel</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={[s.modalBtn, { backgroundColor: colors.brandOnLight }]} onPress={submitLeave} disabled={busy} accessibilityRole="button" accessibilityLabel="Submit leave request">
-                {busy ? <ActivityIndicator size="small" color="#fff" /> : <Text style={s.bigBtnText}>Submit</Text>}
-              </TouchableOpacity>
-            </View>
-          </View>
-        </View>
-        </KeyboardSafe>
-      </Modal>
     </ScrollView>
+    </View>
   );
 }
 
-function today(): string { return new Date().toISOString().slice(0, 10); }
-function isDay(s: string): boolean { return /^\d{4}-\d{2}-\d{2}$/.test(s) && !Number.isNaN(Date.parse(s)); }
 const clock = (d: Date) => d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
-function statusColour(st: LeaveRequest['status'], c: Palette): string {
-  switch (st) {
-    case 'approved': return c.success;
-    case 'rejected': return c.danger;
-    case 'cancelled': return c.textFaint;
-    default: return c.warning;
-  }
-}
-
 const styles = (c: Palette) => StyleSheet.create({
-  iconHit: { minWidth: 44, minHeight: 44, alignItems: 'center', justifyContent: 'center' },
   screen: { flex: 1, backgroundColor: 'transparent' },
   centre: { alignItems: 'center', justifyContent: 'center' },
   body: { padding: 16, gap: 10, paddingBottom: 40 },
@@ -332,21 +229,11 @@ const styles = (c: Palette) => StyleSheet.create({
   heroState: { color: c.text, fontSize: 18, fontWeight: '800' },
   cardTitle: { color: c.text, fontSize: 15.5, fontWeight: '700' },
   muted: { color: c.textDim, fontSize: 12.5, flexShrink: 1 },
-  rowBetween: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  link: { color: c.primary, fontSize: 12.5, fontWeight: '700' },
-  bigBtn: { marginTop: 8, paddingHorizontal: 28, paddingVertical: 13, borderRadius: 14 },
+  bigBtn: { marginTop: 8, paddingHorizontal: 28, paddingVertical: 13, borderRadius: 14, minHeight: 48, justifyContent: 'center' },
+  linkRow: { flexDirection: 'row', alignItems: 'center', gap: 12, minHeight: 44 },
   bigBtnText: { color: '#fff', fontWeight: '800', fontSize: 15 },
   leaveRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 9 },
   leaveDot: { width: 9, height: 9, borderRadius: 5 },
   leaveTitle: { color: c.text, fontSize: 14.5, fontWeight: '600' },
   footnote: { color: c.textFaint, fontSize: 11.5, lineHeight: 16 },
-  modalWrap: { flex: 1, backgroundColor: '#0008', alignItems: 'center', justifyContent: 'center', padding: 22 },
-  modal: { width: '100%', backgroundColor: c.bg, borderRadius: 16, padding: 20, gap: 10 },
-  modalTitle: { color: c.text, fontSize: 18, fontWeight: '700' },
-  input: { borderWidth: 1, borderColor: c.glassStroke, borderRadius: 10, padding: 12, color: c.text, fontSize: 14.5 },
-  kinds: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
-  kind: { borderWidth: 1, borderColor: c.glassStroke, borderRadius: 20, paddingHorizontal: 13, paddingVertical: 7 },
-  kindText: { color: c.textDim, fontSize: 12.5 },
-  modalRow: { flexDirection: 'row', justifyContent: 'flex-end', gap: 10, marginTop: 4 },
-  modalBtn: { paddingHorizontal: 18, paddingVertical: 12, borderRadius: 10 },
 });

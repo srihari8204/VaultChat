@@ -1,14 +1,11 @@
-// lib/spaces/shift.ts — the shift window editor's validation, and the copy of
-// the last shift this device saved.
+// lib/spaces/shift.ts — the shift window editor's validation, and where the
+// shift is read from.
 //
-// PATCH /chats/{id}/shift writes the shift, and the server uses it at once for
-// the "late today" count in the ops summary. There is NO endpoint that reads it
-// back, so the on-device attendance view (app/space-attendance.tsx) cannot ask
-// the server for it.
-// ponytail: the saved copy is device-local, so another administrator's change
-// is not seen here and a new device starts with none. Replace loadSavedShift
-// with a server read once GET /chats/{id}/shift (or shift fields in
-// /ops/summary) exists.
+// PATCH /chats/{id}/shift writes the shift; GET /chats/{id}/shift reads it back
+// (edit_settings or view_space_ops). loadShift() asks the server first and
+// keeps a copy on this device; the copy is used only when the server cannot
+// answer — a 403 for a member without those permissions, a 404 from an older
+// server without the read, or no connection.
 
 import { parseClock } from './attendance';
 
@@ -55,6 +52,42 @@ export function shiftBody(f: ShiftForm): { ok: true; body: ShiftBody } | { ok: f
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const storage = () => require('@react-native-async-storage/async-storage').default;
 const key = (spaceId: string) => `vc_space_shift_v1:${spaceId}`;
+
+/**
+ * Normalise GET /chats/{id}/shift. Empty start/end is the server saying "no
+ * shift" — a real answer, kept as such (makeShift turns it into null). Anything
+ * malformed is null, so the caller falls back rather than trusting it.
+ */
+export function shiftFromServer(o: unknown): ShiftBody | null {
+  const r = o as Record<string, unknown> | null;
+  if (!r || typeof r.shiftStart !== 'string' || typeof r.shiftEnd !== 'string') return null;
+  const grace = Number(r.shiftGraceMinutes);
+  const delay = Number(r.runDelayThresholdMinutes);
+  return {
+    shiftStart: r.shiftStart, shiftEnd: r.shiftEnd,
+    shiftGraceMinutes: Number.isFinite(grace) ? grace : 10,
+    ...(Number.isFinite(delay) && delay > 0 ? { runDelayThresholdMinutes: delay } : {}),
+  };
+}
+
+/**
+ * The space's shift: the server's answer (cached here), else this device's
+ * last copy. `source` says which, so a screen can say when it is showing the
+ * device copy.
+ */
+export async function loadShift(spaceId: string): Promise<{ shift: ShiftBody | null; source: 'server' | 'device' }> {
+  try {
+    // Lazy, like storage: keeps this module importable under tsx.
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { getShift } = require('./api') as typeof import('./api');
+    const body = shiftFromServer(await getShift(spaceId));
+    if (body) {
+      await rememberShift(spaceId, body);
+      return { shift: body, source: 'server' };
+    }
+  } catch { /* 403 / 404 (older server) / offline: fall back to the device copy */ }
+  return { shift: await loadSavedShift(spaceId), source: 'device' };
+}
 
 export async function loadSavedShift(spaceId: string): Promise<ShiftBody | null> {
   try {

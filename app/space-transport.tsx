@@ -42,6 +42,7 @@ import type { Run, RunStop, RunRider } from '../lib/spaces/runs';
 import { nextStop } from '../lib/spaces/runs';
 import { familyOf } from '../lib/spaces/layout';
 import { initialOf } from '../lib/format';
+import { circleMembers } from '../lib/family/circle';
 
 interface Loaded {
   run: Run;
@@ -57,6 +58,8 @@ function riderWords(state: string, kind: string): { text: string; tone: 'ok' | '
     case 'dropped': return { text: 'Dropped off safely', tone: 'ok' };
     case 'absent': return { text: 'Marked absent', tone: 'warn' };
     case 'no_show': return { text: 'Not at the stop', tone: 'warn' };
+    // Taken off this run on purpose — neither waiting nor a problem.
+    case 'cancelled': return { text: 'Not travelling on this run', tone: 'wait' };
     default: return { text: 'Waiting to be picked up', tone: 'wait' };
   }
 }
@@ -103,21 +106,23 @@ export default function SpaceTransportScreen() {
   // first. createDirectChat returns the existing one when there is one, so this
   // does not litter the chat list.
   const [callingDriver, setCallingDriver] = useState<string | null>(null);
+  // Drivers' names, from the space's member list this device already has.
+  const [names, setNames] = useState<Record<string, string>>({});
   const callDriver = useCallback(async (driverId: string) => {
     if (callingDriver) return;
     setCallingDriver(driverId);
     try {
       const chat = await createDirectChat({ userId: driverId });
       router.push({
-        pathname: '/voicecall' as any,
-        params: { chatId: chat.id, peerUid: driverId, peerName: 'Driver' },
+        pathname: '/voicecall',
+        params: { chatId: chat.id, peerUid: driverId, peerName: names[driverId] ?? 'Driver' },
       });
     } catch (e: any) {
       Alert.alert('Could not call the driver', e?.message ?? 'Check your connection and try again.');
     } finally {
       setCallingDriver(null);
     }
-  }, [callingDriver, router]);
+  }, [callingDriver, router, names]);
   const kindWord = familyOf(params.groupType) === 'school' ? 'bus' : 'vehicle';
 
   const [loaded, setLoaded] = useState<Loaded[] | null>(null);
@@ -146,6 +151,10 @@ export default function SpaceTransportScreen() {
         }
       }));
       setLoaded(out);
+      // Best-effort: without it the button simply says "Driver".
+      circleMembers(spaceId)
+        .then((ms) => setNames(Object.fromEntries(ms.map((m) => [m.id, m.name]))))
+        .catch(() => {});
     } catch (e: any) {
       setErr(e?.message || 'Could not load transport.');
       setLoaded([]);
@@ -184,7 +193,7 @@ export default function SpaceTransportScreen() {
         <View style={[s.card, { borderColor: colors.danger, borderWidth: 1 }]}>
           <Text style={s.cardTitle}>Could not load transport</Text>
           <Text style={s.muted}>{err}</Text>
-          <TouchableOpacity onPress={load} style={[s.btn, { backgroundColor: colors.brandOnLight }]} accessibilityRole="button">
+          <TouchableOpacity onPress={load} style={[s.btn, { backgroundColor: colors.brandOnLight }]} accessibilityRole="button" accessibilityLabel="Try again">
             <Text style={s.btnText}>Try again</Text>
           </TouchableOpacity>
         </View>
@@ -205,8 +214,9 @@ export default function SpaceTransportScreen() {
           </Text>
           {canOps && (
             <TouchableOpacity
-              onPress={() => router.push({ pathname: '/space-admin' as any, params: { spaceId, name: spaceName, groupType: params.groupType ?? '', perms: params.perms ?? '' } })}
+              onPress={() => router.push({ pathname: '/space-admin', params: { spaceId, name: spaceName, groupType: params.groupType ?? '', perms: params.perms ?? '' } })}
               style={[s.btn, { backgroundColor: colors.brandOnLight }]}
+              accessibilityRole="button"
             >
               <Text style={s.btnText}>Set up transport</Text>
             </TouchableOpacity>
@@ -282,7 +292,7 @@ export default function SpaceTransportScreen() {
                   It shows status, arrival window and position freshness — not a
                   map — so the label says "Track", not "Live … map". */}
               <TouchableOpacity
-                onPress={() => router.push({ pathname: '/space-run' as any, params: { spaceId, runId: run.id, name: spaceName, groupType: params.groupType ?? '' } })}
+                onPress={() => router.push({ pathname: '/space-run', params: { spaceId, runId: run.id, name: spaceName, groupType: params.groupType ?? '' } })}
                 style={[s.btn, { backgroundColor: colors.brandOnLight, flex: 1 }]}
                 accessibilityRole="button"
                 accessibilityLabel={`Track ${kindWord}: ${run.vehicleLabel || run.name}`}
@@ -297,12 +307,15 @@ export default function SpaceTransportScreen() {
                   onPress={() => callDriver(run.driverId!)}
                   disabled={callingDriver === run.driverId}
                   accessibilityRole="button"
-                  accessibilityLabel="Call the driver"
+                  accessibilityLabel={`Call the driver${names[run.driverId] ? `, ${names[run.driverId]}` : ''}`}
+                  accessibilityState={{ busy: callingDriver === run.driverId }}
                   style={[s.btn, { backgroundColor: colors.glassSoft, borderColor: colors.glassStroke, borderWidth: 1 },
                           callingDriver === run.driverId && { opacity: 0.6 }]}
                 >
                   <Ionicons name="call-outline" size={16} color={colors.text} />
-                  <Text style={[s.btnText, { color: colors.text }]}>Driver</Text>
+                  <Text style={[s.btnText, { color: colors.text }]} numberOfLines={1}>
+                    {names[run.driverId] ? `Call ${names[run.driverId].split(' ')[0]}` : 'Driver'}
+                  </Text>
                 </TouchableOpacity>
               )}
             </View>
@@ -340,7 +353,7 @@ const styles = (c: Palette) => StyleSheet.create({
   actions: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 2 },
   btn: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6,
-    borderRadius: 10, paddingVertical: 11, paddingHorizontal: 14, minWidth: 140,
+    borderRadius: 10, paddingVertical: 11, paddingHorizontal: 14, minWidth: 140, minHeight: 44,
   },
   btnText: { color: '#fff', fontWeight: '700', fontSize: 13.5 },
   footnote: { color: c.textFaint, fontSize: 11.5, lineHeight: 16, marginTop: 4 },

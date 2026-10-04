@@ -30,6 +30,9 @@ import { getWorkTasks, createWorkTask, setWorkTaskDone, type WorkTask } from '..
 import { AuroraBackground } from '../components/ui';
 import { KeyboardSafe } from '../components/ui/KeyboardSafe';
 import { circleMembers } from '../lib/family/circle';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+// The app's one cross-platform date picker (shared with finance).
+import { useDatePicker } from '../components/finance/useDatePicker';
 import type { CircleMember } from '../lib/family/types';
 
 /** Due choices, as whole local days from today. The due instant is the END of
@@ -43,6 +46,12 @@ const DUE: { days: number | null; label: string }[] = [
 function dueAtFor(days: number, nowMs = Date.now()): string {
   const d = new Date(nowMs);
   d.setDate(d.getDate() + days);
+  d.setHours(23, 59, 0, 0);
+  return d.toISOString();
+}
+/** A picked day's due instant: the end of that local day, like the presets. */
+function dueAtOn(day: Date): string {
+  const d = new Date(day);
   d.setHours(23, 59, 0, 0);
   return d.toISOString();
 }
@@ -90,6 +99,15 @@ export default function SpaceTasksScreen() {
   const [assignee, setAssignee] = useState<string | null>(null);
   const [dueDays, setDueDays] = useState<number | null>(null);
   const [members, setMembers] = useState<CircleMember[]>([]);
+  const [membersError, setMembersError] = useState(false);
+  // A due day picked from the calendar; overrides the preset chips.
+  const [dueCustom, setDueCustom] = useState<Date | null>(null);
+  const insets = useSafeAreaInsets();
+  const picker = useDatePicker();
+  const loadMembers = useCallback(() => {
+    setMembersError(false);
+    circleMembers(spaceId).then(setMembers).catch(() => setMembersError(true));
+  }, [spaceId]);
   const [saving, setSaving] = useState(false);
 
   const load = useCallback(async () => {
@@ -98,8 +116,9 @@ export default function SpaceTasksScreen() {
       setErr(null);
       setTasks(await getWorkTasks(spaceId));
     } catch (e: any) {
-      // A plain member with no ops rights is not an error state — the server
-      // simply has nothing scoped to them. Anything else is worth showing.
+      // A plain member with nothing assigned gets an EMPTY list from the
+      // server, not an error — so anything that throws here is a real failure
+      // and is shown as one.
       setErr(e?.message || 'Could not load tasks.');
       setTasks([]);
     }
@@ -136,9 +155,9 @@ export default function SpaceTasksScreen() {
       await createWorkTask(spaceId, {
         title: t, priority,
         ...(assignee ? { assigneeId: assignee } : {}),
-        ...(dueDays != null ? { dueAt: dueAtFor(dueDays) } : {}),
+        ...(dueCustom ? { dueAt: dueAtOn(dueCustom) } : dueDays != null ? { dueAt: dueAtFor(dueDays) } : {}),
       });
-      setTitle(''); setPriority('medium'); setAssignee(null); setDueDays(null); setCompose(false);
+      setTitle(''); setPriority('medium'); setAssignee(null); setDueDays(null); setDueCustom(null); setCompose(false);
       await load();
     } catch (e: any) {
       Alert.alert('Could not create the task', e?.message ?? 'Please try again.');
@@ -210,7 +229,7 @@ export default function SpaceTasksScreen() {
           <TouchableOpacity
             key={t.key}
             onPress={() => setTab(t.key)}
-            accessibilityRole="button"
+            accessibilityRole="tab"
             accessibilityState={{ selected: tab === t.key }}
             style={[s.tab, tab === t.key && { backgroundColor: colors.brandOnLight }]}
           >
@@ -233,7 +252,7 @@ export default function SpaceTasksScreen() {
           <View style={[s.card, { borderColor: colors.danger, borderWidth: 1 }]}>
             <Text style={s.cardTitle}>Could not load tasks</Text>
             <Text style={s.muted}>{err}</Text>
-            <TouchableOpacity onPress={load} style={[s.btn, { backgroundColor: colors.brandOnLight }]}>
+            <TouchableOpacity onPress={load} style={[s.btn, { backgroundColor: colors.brandOnLight }]} accessibilityRole="button" accessibilityLabel="Try again">
               <Text style={s.btnText}>Try again</Text>
             </TouchableOpacity>
           </View>
@@ -259,11 +278,13 @@ export default function SpaceTasksScreen() {
 
       {canAssign && (
         <TouchableOpacity
-          accessibilityRole="button" accessibilityLabel="New task" style={[s.fab, { backgroundColor: colors.brandOnLight }]}
+          accessibilityRole="button" accessibilityLabel="New task"
+          style={[s.fab, { backgroundColor: colors.brandOnLight, bottom: 28 + insets.bottom }]}
           onPress={() => {
             setCompose(true);
-            // Assignable people; without the list a task is created unassigned, as before.
-            circleMembers(spaceId).then(setMembers).catch(() => {});
+            // Assignable people; without the list a task is created unassigned —
+            // and the sheet says so (see membersError).
+            loadMembers();
           }}
         >
           <Ionicons name="add" size={26} color="#fff" />
@@ -273,7 +294,7 @@ export default function SpaceTasksScreen() {
       <Modal visible={compose} animationType="slide" transparent onRequestClose={() => setCompose(false)}>
         <KeyboardSafe keyboardOnly>
         <View style={s.sheetWrap}>
-          <View style={s.sheet}>
+          <View style={[s.sheet, { paddingBottom: 18 + insets.bottom }]}>
             <Text style={s.cardTitle}>New task</Text>
             <TextInput
               style={s.input}
@@ -283,6 +304,7 @@ export default function SpaceTasksScreen() {
               onChangeText={setTitle}
               autoFocus
               maxLength={200}
+              accessibilityLabel="Task title"
             />
             <View style={s.prioRow}>
               {PRIORITIES.map((p) => (
@@ -301,15 +323,38 @@ export default function SpaceTasksScreen() {
               {DUE.map((d) => (
                 <TouchableOpacity
                   key={String(d.days)}
-                  onPress={() => setDueDays(d.days)}
-                  accessibilityRole="radio" accessibilityState={{ checked: dueDays === d.days }}
+                  onPress={() => { setDueDays(d.days); setDueCustom(null); }}
+                  accessibilityRole="radio" accessibilityState={{ checked: !dueCustom && dueDays === d.days }}
                   accessibilityLabel={`Due: ${d.label}`}
-                  style={[s.prio, dueDays === d.days && { backgroundColor: colors.brandOnLight }]}
+                  style={[s.prio, !dueCustom && dueDays === d.days && { backgroundColor: colors.brandOnLight }]}
                 >
-                  <Text style={[s.prioText, dueDays === d.days && { color: '#fff' }]}>{d.label}</Text>
+                  <Text style={[s.prioText, !dueCustom && dueDays === d.days && { color: '#fff' }]}>{d.label}</Text>
                 </TouchableOpacity>
               ))}
             </View>
+            {/* Beyond the presets: any day, picked. */}
+            <TouchableOpacity
+              onPress={() => picker.open(dueCustom ?? new Date(), (d) => setDueCustom(d))}
+              accessibilityRole="radio" accessibilityState={{ checked: !!dueCustom }}
+              accessibilityLabel={dueCustom ? `Due: ${dueCustom.toLocaleDateString()}. Change` : 'Due on another day'}
+              style={[s.prio, { flex: 0 }, !!dueCustom && { backgroundColor: colors.brandOnLight }]}
+            >
+              <Text style={[s.prioText, !!dueCustom && { color: '#fff' }]}>
+                {dueCustom
+                  ? `Due ${dueCustom.toLocaleDateString([], { weekday: 'short', day: 'numeric', month: 'short' })}`
+                  : 'Another day…'}
+              </Text>
+            </TouchableOpacity>
+            {membersError && (
+              <View style={s.hintRow}>
+                <Text style={[s.muted, { flex: 1 }]}>
+                  Could not load people to assign, so this task will be unassigned.
+                </Text>
+                <TouchableOpacity onPress={loadMembers} style={s.hintBtn} accessibilityRole="button" accessibilityLabel="Try loading people again">
+                  <Text style={{ color: colors.primary, fontWeight: '700' }}>Try again</Text>
+                </TouchableOpacity>
+              </View>
+            )}
             {members.length > 0 && (
               <ScrollView style={{ maxHeight: 132 }} contentContainerStyle={[s.prioRow, { flexWrap: 'wrap' }]}>
                 {[{ id: null as string | null, name: 'Unassigned' }, ...members.map((m) => ({ id: m.id as string | null, name: m.name }))].map((m) => (
@@ -341,6 +386,8 @@ export default function SpaceTasksScreen() {
           </View>
         </View>
         </KeyboardSafe>
+        {/* Inside this Modal so it stacks above it on iOS. */}
+        {picker.element}
       </Modal>
     </View>
   );
@@ -350,7 +397,7 @@ const styles = (c: Palette) => StyleSheet.create({
   screen: { flex: 1, backgroundColor: 'transparent' },
   body: { padding: 16, gap: 8, paddingBottom: 90 },
   tabs: { flexDirection: 'row', gap: 8, paddingHorizontal: 16, paddingTop: 12 },
-  tab: { flex: 1, alignItems: 'center', backgroundColor: c.glassSoft, borderRadius: 999, paddingVertical: 9 },
+  tab: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: c.glassSoft, borderRadius: 999, minHeight: 44 },
   tabText: { color: c.textDim, fontWeight: '700', fontSize: 12.5 },
   centre: { alignItems: 'center', gap: 10, paddingVertical: 40 },
   card: { backgroundColor: c.glassSoft, borderRadius: 14, padding: 14, gap: 8 },
@@ -368,6 +415,7 @@ const styles = (c: Palette) => StyleSheet.create({
     position: 'absolute', right: 20, bottom: 28, width: 56, height: 56, borderRadius: 28,
     alignItems: 'center', justifyContent: 'center', elevation: 4,
   },
+  // A fixed dark scrim behind the sheet, the same in both schemes.
   sheetWrap: { flex: 1, backgroundColor: '#0008', justifyContent: 'flex-end' },
   // surfaceSolid, not card: card is a translucent glass pane in the dusk skin,
   // and a see-through sheet over the scrim is unreadable in both schemes.
@@ -377,9 +425,11 @@ const styles = (c: Palette) => StyleSheet.create({
     color: c.text, fontSize: 15,
   },
   prioRow: { flexDirection: 'row', gap: 8 },
-  prio: { flex: 1, alignItems: 'center', backgroundColor: c.bg, borderRadius: 10, paddingVertical: 10 },
+  prio: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: c.bg, borderRadius: 10, minHeight: 44, paddingHorizontal: 10 },
+  hintRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  hintBtn: { minHeight: 44, justifyContent: 'center' },
   prioText: { color: c.textDim, fontWeight: '700', fontSize: 13 },
-  btn: { alignItems: 'center', justifyContent: 'center', borderRadius: 10, paddingVertical: 12, paddingHorizontal: 14 },
+  btn: { alignItems: 'center', justifyContent: 'center', borderRadius: 10, paddingVertical: 12, paddingHorizontal: 14, minHeight: 44 },
   btnGhost: { backgroundColor: c.bg },
   btnText: { color: '#fff', fontWeight: '700', fontSize: 14 },
 });

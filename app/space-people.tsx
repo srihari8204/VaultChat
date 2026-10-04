@@ -12,9 +12,10 @@
 import { AppText as Text } from '../components/ui/Text';
 import React, { useCallback, useMemo, useState } from 'react';
 import {
-  View, StyleSheet, ScrollView, ActivityIndicator,
+  View, StyleSheet, ScrollView, FlatList, ActivityIndicator,
   RefreshControl, TextInput, Alert, TouchableOpacity, Modal,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { Stack, useLocalSearchParams, useFocusEffect } from 'expo-router';
 import { useSpaceColors, spaceHeader } from '../lib/spaces/theme';
@@ -42,6 +43,7 @@ const LABEL: Record<Person['status'], string> = {
 export default function SpacePeopleScreen() {
   const params = useLocalSearchParams<{ spaceId?: string; name?: string; groupType?: string }>();
   const colors = useSpaceColors(params.groupType);
+  const insets = useSafeAreaInsets();
   const spaceId = String(params.spaceId || '');
 
   const [people, setPeople] = useState<Person[]>([]);
@@ -166,6 +168,7 @@ export default function SpacePeopleScreen() {
 
   return (
     <View style={s.screen}>
+      <AuroraBackground />
       <Stack.Screen options={spaceHeader(colors, params.name ? `${params.name} · People` : 'People', { id: spaceId, name: params.name })} />
 
       <View style={s.head}>
@@ -180,26 +183,32 @@ export default function SpacePeopleScreen() {
           onChangeText={setQ}
           placeholder="Search people"
           placeholderTextColor={colors.textDim}
+          accessibilityLabel="Search people"
         />
       </View>
 
-      <ScrollView
+      {/* FlatList: a workplace's member list can run to hundreds. */}
+      <FlatList
+        data={filtered}
+        keyExtractor={(p) => p.userId}
         contentContainerStyle={s.body}
+        keyboardShouldPersistTaps="handled"
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load(); }} tintColor={colors.primary} />}
-      >
-        {loadError && (
-          <LoadError colors={colors} title="Could not load people" message={loadError} onRetry={() => { setLoading(true); void load(); }} />
-        )}
-        {!loadError && filtered.length === 0 && (
-          <Text style={s.muted}>{q.trim() ? 'Nobody matches.' : 'Nobody is in this space yet.'}</Text>
-        )}
-
-        {filtered.map((p) => {
+        ListHeaderComponent={
+          <>
+            {loadError && (
+              <LoadError colors={colors} title="Could not load people" message={loadError} onRetry={() => { setLoading(true); void load(); }} />
+            )}
+            {!loadError && filtered.length === 0 && (
+              <Text style={s.muted}>{q.trim() ? 'Nobody matches.' : 'Nobody is in this space yet.'}</Text>
+            )}
+          </>
+        }
+        renderItem={({ item: p }) => {
           const canEdit = !!viewer && canChangeRole(viewer.role, viewer.id, p.role, p.userId)
             && !!catalog?.some((d) => d.rank === p.role);
           return (
           <TouchableOpacity
-            key={p.userId}
             style={s.row}
             activeOpacity={canEdit ? 0.6 : 1}
             onPress={() => canEdit && openPicker(p)}
@@ -235,13 +244,14 @@ export default function SpacePeopleScreen() {
             {canEdit && <Ionicons name="chevron-forward" size={16} color={colors.textDim} />}
           </TouchableOpacity>
           );
-        })}
-
-        <Text style={s.footnote}>
-          Status is what people declared today. “No check-in” means nobody told us — it is not
-          the same as absent, and is never counted as one.
-        </Text>
-      </ScrollView>
+        }}
+        ListFooterComponent={
+          <Text style={s.footnote}>
+            Status is what people declared today. “No check-in” means nobody told us — it is not
+            the same as absent, and is never counted as one.
+          </Text>
+        }
+      />
 
       {/* ── Role picker ───────────────────────────────────────────────
           Selecting does NOT save. The confirmation is a separate step
@@ -249,7 +259,7 @@ export default function SpacePeopleScreen() {
           that should never happen on a mis-tap. */}
       <Modal visible={!!editing} transparent animationType="slide" onRequestClose={() => setEditing(null)}>
         <View style={s.sheetWrap}>
-          <View style={s.sheet}>
+          <View style={[s.sheet, { paddingBottom: 18 + insets.bottom }]}>
             <Text style={s.sheetTitle}>Change role</Text>
 
             {editing && (
@@ -317,6 +327,7 @@ export default function SpacePeopleScreen() {
                   )}
                   {chosen?.key === o.key && (
                     <PermissionMatrix
+                      colors={colors}
                       role={catalog?.find((d) => d.key === o.key) ?? null}
                       error={catalogErr}
                     />
@@ -332,12 +343,14 @@ export default function SpacePeopleScreen() {
                   {editing.name || 'This member'} · {labelFor(editing)} → {chosen.label}
                 </Text>
                 <View style={{ flexDirection: 'row', gap: 8 }}>
-                  <TouchableOpacity onPress={() => setConfirming(false)} style={[s.btn, s.btnGhost, { flex: 1 }]}>
+                  <TouchableOpacity onPress={() => setConfirming(false)} style={[s.btn, s.btnGhost, { flex: 1 }]} accessibilityRole="button">
                     <Text style={[s.btnText, { color: colors.text }]}>Cancel</Text>
                   </TouchableOpacity>
                   <TouchableOpacity
                     onPress={commit}
                     disabled={saving}
+                    accessibilityRole="button" accessibilityLabel="Confirm role change"
+                    accessibilityState={{ disabled: saving, busy: saving }}
                     style={[s.btn, { backgroundColor: colors.brandOnLight, flex: 1, opacity: saving ? 0.5 : 1 }]}
                   >
                     <Text style={s.btnText}>{saving ? 'Saving…' : 'Confirm'}</Text>
@@ -346,12 +359,14 @@ export default function SpacePeopleScreen() {
               </View>
             ) : (
               <View style={{ flexDirection: 'row', gap: 8 }}>
-                <TouchableOpacity onPress={() => setEditing(null)} style={[s.btn, s.btnGhost, { flex: 1 }]}>
+                <TouchableOpacity onPress={() => setEditing(null)} style={[s.btn, s.btnGhost, { flex: 1 }]} accessibilityRole="button">
                   <Text style={[s.btnText, { color: colors.text }]}>Cancel</Text>
                 </TouchableOpacity>
                 <TouchableOpacity
                   onPress={() => setConfirming(true)}
                   disabled={!chosen || chosen.current || saving}
+                  accessibilityRole="button"
+                  accessibilityState={{ disabled: !chosen || chosen.current || saving }}
                   style={[s.btn, {
                     backgroundColor: colors.brandOnLight, flex: 1,
                     opacity: !chosen || chosen.current || saving ? 0.5 : 1,
@@ -404,13 +419,14 @@ const styles = (c: Palette) => StyleSheet.create({
     borderWidth: 1, borderColor: c.glassStroke, borderRadius: 10,
     paddingHorizontal: 12, minHeight: 42, paddingVertical: 6, color: c.text,
   },
-  body: { padding: 16, gap: 4, paddingBottom: 40 },
-  row: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 10 },
+  body: { padding: 16, paddingBottom: 40 },
+  row: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 10, minHeight: 44 },
   avatar: { width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center' },
   name: { color: c.text, fontSize: 15, fontWeight: '600' },
   muted: { color: c.textDim, fontSize: 12.5, flexShrink: 1 },
   pill: { borderRadius: 999, paddingHorizontal: 9, paddingVertical: 4, flexDirection: 'row', alignItems: 'center', gap: 5 },
   pillDot: { width: 6, height: 6, borderRadius: 3 },
+  // A fixed dark scrim behind the sheet, the same in both schemes.
   sheetWrap: { flex: 1, backgroundColor: '#0008', justifyContent: 'flex-end' },
   // surfaceSolid, not card: card is a translucent glass pane in the dusk skin,
   // and a see-through sheet over the scrim is unreadable in both schemes.
@@ -427,7 +443,7 @@ const styles = (c: Palette) => StyleSheet.create({
   },
   currentTag: { color: c.textFaint, fontSize: 11, fontWeight: '800' },
   confirm: { backgroundColor: c.bg, borderRadius: 12, padding: 12, gap: 8 },
-  btn: { alignItems: 'center', justifyContent: 'center', borderRadius: 10, paddingVertical: 12 },
+  btn: { alignItems: 'center', justifyContent: 'center', borderRadius: 10, paddingVertical: 12, minHeight: 44 },
   btnGhost: { backgroundColor: c.bg },
   btnText: { color: '#fff', fontWeight: '700', fontSize: 14 },
   footnote: { color: c.textFaint, fontSize: 11.5, lineHeight: 16, marginTop: 10 },

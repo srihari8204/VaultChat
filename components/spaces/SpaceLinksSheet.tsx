@@ -27,7 +27,12 @@ const RELATIONS: { key: LinkRelation; label: string }[] = [
 ];
 const relLabel = (r: LinkRelation) => RELATIONS.find((x) => x.key === r)?.label ?? r;
 
-export default function SpaceLinksSheet({ visible, onClose, colors, spaceId, roster, links, linksError, onChanged }: {
+/** The picker draws at most this many rows; a search narrows past it. */
+const PICK_LIMIT = 100;
+
+export default function SpaceLinksSheet({
+  visible, onClose, colors, spaceId, roster, links, linksError, linksLoading, onChanged,
+}: {
   visible: boolean;
   onClose: () => void;
   colors: SpacePalette;
@@ -36,6 +41,9 @@ export default function SpaceLinksSheet({ visible, onClose, colors, spaceId, ros
   links: SpaceLink[];
   /** Set when the links could not be read, so the list is not drawn as "No links yet". */
   linksError?: string | null;
+  /** True until the first read of the links settles — "No links yet" is not
+   *  drawn for a list that has not arrived. */
+  linksLoading?: boolean;
   /** Re-read links (and anything they affect) after a write. */
   onChanged: () => void | Promise<void>;
 }) {
@@ -51,10 +59,11 @@ export default function SpaceLinksSheet({ visible, onClose, colors, spaceId, ros
     const m = new Map(roster.map((r) => [r.id, r.displayName]));
     return (id: string) => m.get(id) ?? 'Someone not on this list';
   }, [roster]);
-  const matches = useMemo(() => {
+  const allMatches = useMemo(() => {
     const q = query.trim().toLowerCase();
-    return roster.filter((r) => !r.archived && (!q || r.displayName.toLowerCase().includes(q))).slice(0, 100);
+    return roster.filter((r) => !r.archived && (!q || r.displayName.toLowerCase().includes(q)));
   }, [roster, query]);
+  const matches = allMatches.slice(0, PICK_LIMIT);
 
   const s = styles(colors);
 
@@ -125,6 +134,11 @@ export default function SpaceLinksSheet({ visible, onClose, colors, spaceId, ros
             />
             <ScrollView contentContainerStyle={s.body} keyboardShouldPersistTaps="handled">
               {matches.length === 0 && <Text style={s.muted}>Nobody on the roster matches.</Text>}
+              {allMatches.length > PICK_LIMIT && (
+                <Text style={s.muted}>
+                  Showing the first {PICK_LIMIT} of {allMatches.length}. Search to find anyone else.
+                </Text>
+              )}
               {matches.map((r) => (
                 <TouchableOpacity
                   key={r.id} style={s.row}
@@ -150,6 +164,8 @@ export default function SpaceLinksSheet({ visible, onClose, colors, spaceId, ros
                     style={[s.chip, relation === r.key && { backgroundColor: colors.brandOnLight }]}
                     accessibilityRole="radio" accessibilityState={{ checked: relation === r.key }}
                   >
+                    {/* White ink on the solid brand fill: brandOnLight is a deep
+                        blue in both schemes, so this keeps contrast. */}
                     <Text style={[s.chipText, relation === r.key && { color: '#fff' }]}>{r.label}</Text>
                   </TouchableOpacity>
                 ))}
@@ -172,6 +188,10 @@ export default function SpaceLinksSheet({ visible, onClose, colors, spaceId, ros
             <Text style={s.section}>CURRENT LINKS</Text>
             {linksError ? (
               <LoadError colors={colors} title="Could not load the links" message={linksError} onRetry={() => { void onChanged(); }} />
+            ) : linksLoading ? (
+              <View style={s.card} accessibilityLabel="Loading links">
+                <ActivityIndicator color={colors.primary} />
+              </View>
             ) : (
             <View style={s.card}>
               {links.length === 0 && <Text style={s.muted}>No links yet.</Text>}
@@ -216,7 +236,10 @@ const styles = (c: SpacePalette) => StyleSheet.create({
   },
   pickerText: { color: c.text, flex: 1, fontSize: 15 },
   chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
-  chip: { borderWidth: 1, borderColor: c.glassStroke, borderRadius: 20, paddingHorizontal: 12, paddingVertical: 8 },
+  chip: {
+    borderWidth: 1, borderColor: c.glassStroke, borderRadius: 22, paddingHorizontal: 14,
+    minHeight: 44, justifyContent: 'center',
+  },
   chipText: { color: c.textDim, fontSize: 12.5 },
   input: { borderWidth: 1, borderColor: c.glassStroke, borderRadius: 10, padding: 12, color: c.text, fontSize: 15 },
   primary: { backgroundColor: c.brandOnLight, borderRadius: 10, minHeight: 44, alignItems: 'center', justifyContent: 'center' },

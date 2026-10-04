@@ -34,6 +34,7 @@ import { sendMessage } from '../lib/chatService';
 import { getCurrentUserAsync } from './(constants)/authService';
 import { AuroraBackground } from '../components/ui';
 import LoadError from '../components/spaces/LoadError';
+import { KeyboardSafe } from '../components/ui/KeyboardSafe';
 
 /** A fix older than this is drawn faded — the map must not imply freshness. */
 const STALE_MS = 90_000;
@@ -84,15 +85,17 @@ export default function SpaceOpsMapScreen() {
     return () => clearInterval(t);
   }, []);
 
-  // One subscription per active run. Re-established when the run list changes.
+  // One subscription per active run, opened in PARALLEL (awaiting them one by
+  // one left the last bus dark until every earlier join had answered).
+  // Re-established when the run list changes.
   useEffect(() => {
     let live = true;
     const stops: (() => void)[] = [];
     (async () => {
       const me = await getCurrentUserAsync().catch(() => null);
       const myId = String((me as any)?.id ?? '');
-      for (const r of runs.filter((x) => x.status === 'started')) {
-        if (!live) break;
+      if (!live) return;
+      await Promise.all(runs.filter((x) => x.status === 'started').map(async (r) => {
         try {
           const off = await subscribeRun(spaceId, r.id, myId, (e) => {
             if (!e.ping) {
@@ -105,7 +108,7 @@ export default function SpaceOpsMapScreen() {
           });
           if (live) stops.push(off); else off();
         } catch { /* one run failing to subscribe must not take the others down */ }
-      }
+      }));
     })();
     return () => { live = false; stops.forEach((f) => f()); };
   }, [runs, spaceId]);
@@ -149,6 +152,9 @@ export default function SpaceOpsMapScreen() {
   // the server re-checks — the composer cannot address what the sender may not.
   const [instruction, setInstruction] = useState('');
   const [sending, setSending] = useState(false);
+  // Runs a partly-failed send did NOT reach. The text is kept with them, so
+  // "Retry the rest" resends to exactly those and nobody gets it twice.
+  const [unreached, setUnreached] = useState<string[] | null>(null);
 
   // Emergency mode (S5.7). It is a MODE rather than a label because it changes
   // what the composer does: addressing every active run at once instead of the
@@ -162,13 +168,7 @@ export default function SpaceOpsMapScreen() {
   const [emergency, setEmergency] = useState(false);
   const activeRuns = useMemo(() => runs.filter((r) => r.status === 'started'), [runs]);
 
-  const sendInstruction = useCallback(async () => {
-    const text = instruction.trim();
-    if (!text) return;
-    // In emergency mode the audience is every run that is out; otherwise it is
-    // the one the operator selected.
-    const targets = emergency ? activeRuns.map((r) => r.id) : (focus ? [focus] : []);
-    if (!targets.length) return;
+  const deliver = useCallback(async (targets: string[], text: string) => {
     setSending(true);
     try {
       // One addressed announcement per run rather than a space-wide one, so a
@@ -178,23 +178,54 @@ export default function SpaceOpsMapScreen() {
         sendMessage(spaceId, text, 'text', {
           meta: { announcement: true, audience: `run:${runId}` },
         })));
-      const failed = results.filter((r) => r.status === 'rejected').length;
-      setInstruction('');
-      if (failed) {
-        // Say WHICH count failed. "Partly sent" with no number is the message
-        // that makes an operator resend to everyone during an incident.
-        Alert.alert('Partly sent', `${targets.length - failed} of ${targets.length} runs reached. Try the rest again.`);
-      } else {
+      const missed = targets.filter((_, i) => results[i].status === 'rejected');
+      if (missed.length === 0) {
+        setInstruction('');
+        setUnreached(null);
         Alert.alert('Sent', targets.length === 1
           ? 'The instruction has gone to that run.'
-          : `The instruction has gone to all ${targets.length} runs on the road.`);
+          : `The instruction has gone to all ${targets.length} runs.`);
+        return;
       }
-    } catch (e: any) {
-      Alert.alert('Not sent', e?.message ?? 'Try again.');
+      // Keep the text and WHICH runs missed it. "Partly sent" with no number,
+      // and an empty box, is what makes an operator resend to everyone.
+      setUnreached(missed);
+      Alert.alert(
+        missed.length === targets.length ? 'Not sent' : 'Partly sent',
+        `${targets.length - missed.length} of ${targets.length} ${targets.length === 1 ? 'run' : 'runs'} reached. `
+        + 'The message is kept — use “Retry the rest” to send it to the others only.',
+      );
     } finally {
       setSending(false);
     }
-  }, [instruction, focus, spaceId, emergency, activeRuns]);
+  }, [spaceId]);
+
+  const sendInstruction = useCallback(() => {
+    const text = instruction.trim();
+    if (!text) return;
+    // In emergency mode the audience is every run that is out; otherwise it is
+    // the one the operator selected.
+    const targets = emergency ? activeRuns.map((r) => r.id) : (focus ? [focus] : []);
+    if (!targets.length) return;
+    if (!emergency) { void deliver(targets, text); return; }
+    // A broadcast to every vehicle on the road is one tap from a toggle: confirm it.
+    Alert.alert(
+      `Send to all ${targets.length} ${targets.length === 1 ? 'run' : 'runs'}?`,
+      'Every driver on the road and the guardians of their riders are notified.',
+      [{ text: 'Cancel', style: 'cancel' }, { text: 'Send to all', style: 'destructive', onPress: () => { void deliver(targets, text); } }],
+    );
+  }, [instruction, focus, emergency, activeRuns, deliver]);
+
+  // A new audience makes the old "not reached" list meaningless.
+  useEffect(() => { setUnreached(null); }, [focus, emergency]);
+
+  const retryRest = useCallback(() => {
+    const text = instruction.trim();
+    // Only runs still on the road: one that finished meanwhile has no audience.
+    const still = (unreached ?? []).filter((id) => activeRuns.some((r) => r.id === id));
+    if (!text || !still.length) { setUnreached(null); return; }
+    void deliver(still, text);
+  }, [instruction, unreached, activeRuns, deliver]);
 
   const s = styles(colors);
 
@@ -209,7 +240,8 @@ export default function SpaceOpsMapScreen() {
   }
 
   return (
-    <View style={s.screen}>
+    <KeyboardSafe style={s.screen} keyboardOnly>
+      <AuroraBackground />
       <Stack.Screen options={spaceHeader(colors, params.name ? `${params.name} · Operations` : 'Operations', { id: spaceId, name: params.name })} />
 
       <FamilyMap members={markers} focusId={focus} onSelect={setFocus} style={s.map} />
@@ -225,7 +257,7 @@ export default function SpaceOpsMapScreen() {
         </View>
       )}
 
-      <ScrollView style={s.list} contentContainerStyle={s.listBody}>
+      <ScrollView style={s.list} contentContainerStyle={s.listBody} keyboardShouldPersistTaps="handled">
         {/* Derived tiles (S3.2). Alert colour is reserved for what is actually
             wrong: riders still to collect on a running route is the normal state
             of a bus halfway round, and a dashboard that is red every morning is
@@ -254,6 +286,7 @@ export default function SpaceOpsMapScreen() {
             accessibilityState={{ checked: emergency }}
             accessibilityLabel="Emergency: address every run on the road at once"
           >
+            {/* White ink only on the solid danger fill (no on-danger token exists). */}
             <Ionicons
               name={emergency ? 'warning' : 'warning-outline'}
               size={18}
@@ -278,7 +311,8 @@ export default function SpaceOpsMapScreen() {
               <TextInput
                 style={s.input}
                 value={instruction}
-                onChangeText={setInstruction}
+                onChangeText={(t) => { setInstruction(t); if (unreached) setUnreached(null); }}
+                accessibilityLabel={emergency ? 'Instruction to every run on the road' : 'Instruction to this run'}
                 placeholder="Instruction to this vehicle…"
                 placeholderTextColor={colors.textDim}
                 multiline
@@ -293,6 +327,18 @@ export default function SpaceOpsMapScreen() {
                   : <Ionicons name="send" size={16} color="#fff" />}
               </TouchableOpacity>
             </View>
+            {!!unreached?.length && !sending && (
+              <TouchableOpacity
+                style={s.retry} onPress={retryRest}
+                accessibilityRole="button"
+                accessibilityLabel={`Retry the rest: send to the ${unreached.length} ${unreached.length === 1 ? 'run' : 'runs'} not reached`}
+              >
+                <Ionicons name="refresh" size={16} color={colors.primary} />
+                <Text style={{ color: colors.primary, fontWeight: '600' }}>
+                  Retry the rest ({unreached.length})
+                </Text>
+              </TouchableOpacity>
+            )}
             <Text style={s.footnote}>
               Goes to {emergency ? 'every driver on the road and the guardians of their riders' : 'this run’s driver and the guardians of its riders'}.
               It is an ordinary encrypted message in this space — addressing it limits who is
@@ -311,7 +357,7 @@ export default function SpaceOpsMapScreen() {
           const p = positions[r.id];
           const prog = progress(manifests[r.id] ?? []);
           const noFix = r.status === 'started' && !p;
-          const openRun = () => router.push({ pathname: '/space-run' as any, params: { spaceId, runId: r.id, groupType: params.groupType ?? '', name: params.name ?? '' } });
+          const openRun = () => router.push({ pathname: '/space-run', params: { spaceId, runId: r.id, groupType: params.groupType ?? '', name: params.name ?? '' } });
           return (
             <TouchableOpacity
               key={r.id}
@@ -358,7 +404,7 @@ export default function SpaceOpsMapScreen() {
           the server stores none of them, so this map shows only what has arrived while it has been open.
         </Text>
       </ScrollView>
-    </View>
+    </KeyboardSafe>
   );
 }
 
@@ -383,7 +429,7 @@ const styles = (c: Palette) => StyleSheet.create({
   map: { height: '46%', width: '100%' },
   banner: {
     flexDirection: 'row', gap: 8, alignItems: 'flex-start',
-    backgroundColor: '#F59E0B18', paddingHorizontal: 14, paddingVertical: 10,
+    backgroundColor: c.warning + '18', paddingHorizontal: 14, paddingVertical: 10,
   },
   bannerText: { color: c.text, flex: 1, fontSize: 12.5, lineHeight: 17 },
   list: { flex: 1 },
@@ -420,8 +466,12 @@ const styles = (c: Palette) => StyleSheet.create({
     flex: 1, color: c.text, borderWidth: 1, borderColor: c.glassStroke, borderRadius: 10,
     paddingHorizontal: 12, paddingVertical: 10, maxHeight: 110,
   },
+  retry: {
+    flexDirection: 'row', alignItems: 'center', gap: 6, alignSelf: 'flex-start',
+    minHeight: 44, paddingHorizontal: 12, borderRadius: 10, borderWidth: 1, borderColor: c.primary,
+  },
   send: {
-    width: 42, height: 42, borderRadius: 21, backgroundColor: c.brandOnLight,
+    width: 44, height: 44, borderRadius: 22, backgroundColor: c.brandOnLight,
     alignItems: 'center', justifyContent: 'center',
   },
   sendOff: { opacity: 0.4 },

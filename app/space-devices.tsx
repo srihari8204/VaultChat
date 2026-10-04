@@ -22,7 +22,7 @@
 //    locked.
 
 import { AppText as Text } from '../components/ui/Text';
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   View, StyleSheet, ScrollView, ActivityIndicator, TouchableOpacity,
   Alert, TextInput, Modal, RefreshControl,
@@ -41,6 +41,7 @@ import { bindThisPhone, unbindThisPhone, isBoundHere } from '../lib/spaces/devic
 import LoadError from '../components/spaces/LoadError';
 import { AuroraBackground } from '../components/ui';
 import { KeyboardSafe } from '../components/ui/KeyboardSafe';
+import ChatDoorButton from '../components/spaces/ChatDoorButton';
 
 const KINDS: { key: string; label: string; icon: keyof typeof Ionicons.glyphMap }[] = [
   { key: 'phone', label: 'Phone', icon: 'phone-portrait-outline' },
@@ -90,6 +91,11 @@ export default function SpaceDevicesScreen() {
   const [detailError, setDetailError] = useState<string | null>(null);
   const [msg, setMsg] = useState('');
   const [asking, setAsking] = useState(false);
+  const [renaming, setRenaming] = useState(false);
+  const [newLabel, setNewLabel] = useState('');
+  // Which device the detail sheet last asked about. Opening A then B quickly
+  // must not let A's late answers overwrite B's history.
+  const openReq = useRef(0);
 
   const load = useCallback(async () => {
     try { setDevices(await getDevices(spaceId)); setLoadError(null); }
@@ -103,8 +109,9 @@ export default function SpaceDevicesScreen() {
   }, []);
 
   const openDevice = useCallback(async (d: SpaceDevice) => {
+    const req = ++openReq.current;
     setOpen(d); setEvents([]); setCommands([]); setBoundHere(false); setDetailError(null);
-    isBoundHere(spaceId, d.id).then(setBoundHere).catch(() => {});
+    isBoundHere(spaceId, d.id).then((b) => { if (req === openReq.current) setBoundHere(b); }).catch(() => {});
     // Each part fails on its own, and a failure is SAID: an empty history on a
     // theft screen must mean "nothing happened", never "could not ask".
     const failed: string[] = [];
@@ -112,9 +119,12 @@ export default function SpaceDevicesScreen() {
       getDeviceEvents(spaceId, d.id).catch(() => { failed.push('history'); return [] as DeviceEvent[]; }),
       getDeviceCommands(spaceId, d.id).catch(() => { failed.push('requests'); return [] as DeviceCommand[]; }),
     ]);
+    if (req !== openReq.current) return; // another device was opened since
     setEvents(e); setCommands(c);
     setDetailError(failed.length ? `Could not load this device’s ${failed.join(' or ')}.` : null);
   }, [spaceId]);
+
+  const closeDevice = useCallback(() => { openReq.current++; setOpen(null); }, []);
 
   const onAdd = useCallback(async () => {
     const l = label.trim();
@@ -156,29 +166,46 @@ export default function SpaceDevicesScreen() {
             try {
               await updateDevice(spaceId, d.id, { archived: true });
               await unbindThisPhone({ spaceId, deviceId: d.id });
-              setOpen(null);
+              closeDevice();
               await load();
             } catch (e: any) { Alert.alert('Could not remove', e?.message ?? 'Try again.'); }
           },
         },
       ],
     );
-  }, [spaceId, load]);
+  }, [spaceId, load, closeDevice]);
 
-  const runAction = useCallback(async (d: SpaceDevice, action: string, payload?: string) => {
+  const onRename = useCallback(async () => {
+    const l = newLabel.trim();
+    if (!open || !l || l === open.label) { setRenaming(false); return; }
+    setBusy(true);
+    try {
+      await updateDevice(spaceId, open.id, { label: l });
+      setOpen({ ...open, label: l });
+      setRenaming(false);
+      await load();
+    } catch (e: any) { Alert.alert('Could not rename', e?.message ?? 'Try again.'); }
+    finally { setBusy(false); }
+  }, [newLabel, open, spaceId, load]);
+
+  const runAction = useCallback(async (d: SpaceDevice, action: string, payload?: string): Promise<boolean> => {
+    const req = openReq.current;
     setBusy(true);
     try {
       await issueDeviceCommand(spaceId, d.id, action, payload);
-      setCommands(await getDeviceCommands(spaceId, d.id).catch(() => commands));
+      const fresh = await getDeviceCommands(spaceId, d.id).catch(() => null);
+      if (fresh && req === openReq.current) setCommands(fresh); // still this device's sheet
       Alert.alert(
         'Sent to the device',
         // Never "Done." The device has not said anything yet.
         'The request is queued. The phone carries it out the next time crazzychat is open on it, and this screen will show when it did.',
       );
+      return true;
     } catch (e: any) {
       Alert.alert('Could not send', e?.message ?? 'Try again.');
+      return false;
     } finally { setBusy(false); }
-  }, [spaceId, commands]);
+  }, [spaceId]);
 
   const confirmAction = useCallback((d: SpaceDevice, a: typeof ACTIONS[number]) => {
     if (a.key === 'message') { setMsg(''); setAsking(true); return; }
@@ -211,13 +238,23 @@ export default function SpaceDevicesScreen() {
 
   return (
     <View style={s.screen}>
+      <AuroraBackground />
       <Stack.Screen
         options={{
           ...spaceHeader(colors, params.name ? `${params.name} · Devices` : 'Devices'),
+          // The add button sits NEXT TO the chat door, not in place of it.
           headerRight: () => (
-            <TouchableOpacity accessibilityRole="button" accessibilityLabel="Add a device" onPress={() => setAdding(true)} style={{ paddingHorizontal: 8 }}>
-              <Ionicons name="add" size={24} color={colors.primary} />
-            </TouchableOpacity>
+            <View style={s.headerActions}>
+              <TouchableOpacity accessibilityRole="button" accessibilityLabel="Add a device" onPress={() => setAdding(true)} style={s.hit}>
+                <Ionicons name="add" size={24} color={colors.primary} />
+              </TouchableOpacity>
+              {!!spaceId && (
+                <ChatDoorButton
+                  colors={colors} chat={{ id: spaceId, name: params.name }}
+                  fallbackTitle="Devices" accessibilityLabel="Open the space chat"
+                />
+              )}
+            </View>
           ),
         }}
       />
@@ -287,10 +324,10 @@ export default function SpaceDevicesScreen() {
       </ScrollView>
 
       {/* ── detail: screens 15, 17, 18 ── */}
-      <Modal visible={!!open} animationType="slide" onRequestClose={() => setOpen(null)}>
+      <Modal visible={!!open} animationType="slide" onRequestClose={closeDevice}>
         <View style={[s.screen, { backgroundColor: colors.bg }]}>
           <View style={[s.sheetHead, { paddingTop: insets.top + 12 }]}>
-            <TouchableOpacity accessibilityRole="button" accessibilityLabel="Close" onPress={() => setOpen(null)}>
+            <TouchableOpacity accessibilityRole="button" accessibilityLabel="Close" onPress={closeDevice} style={s.hit}>
               <Ionicons name="close" size={24} color={colors.text} />
             </TouchableOpacity>
             <Text style={s.sheetTitle} numberOfLines={1}>{open?.label}</Text>
@@ -381,6 +418,16 @@ export default function SpaceDevicesScreen() {
 
             {open && (open.ownerId === myId || String(params.perms || '').split(',').includes('view_space_ops')) && (
               <TouchableOpacity
+                style={[s.card, s.row]} onPress={() => { setNewLabel(open.label); setRenaming(true); }}
+                accessibilityRole="button" accessibilityLabel={`Rename ${open.label}`}
+              >
+                <Ionicons name="create-outline" size={19} color={colors.text} />
+                <Text style={s.actionText}>Rename</Text>
+              </TouchableOpacity>
+            )}
+
+            {open && (open.ownerId === myId || String(params.perms || '').split(',').includes('view_space_ops')) && (
+              <TouchableOpacity
                 style={[s.card, s.row]} onPress={() => archiveDevice(open)}
                 accessibilityRole="button" accessibilityLabel={`Remove ${open.label} from this space`}
               >
@@ -420,12 +467,15 @@ export default function SpaceDevicesScreen() {
           <View style={s.modal}>
             <Text style={s.modalTitle}>Add a device</Text>
             <TextInput style={s.input} value={label} onChangeText={setLabel} autoFocus
+              accessibilityLabel="Device name"
               placeholder="Name, e.g. Honda City" placeholderTextColor={colors.textDim} maxLength={80} />
             <View style={s.kinds}>
               {KINDS.map((k) => (
                 <TouchableOpacity key={k.key} onPress={() => setKind(k.key)}
                   accessibilityRole="radio" accessibilityState={{ checked: kind === k.key }}
+                  accessibilityLabel={k.label}
                   style={[s.kind, kind === k.key && { backgroundColor: colors.brandOnLight }]}>
+                  {/* White ink on the solid brandOnLight fill (deep blue in both schemes). */}
                   <Text style={[s.kindText, kind === k.key && { color: '#fff' }]}>{k.label}</Text>
                 </TouchableOpacity>
               ))}
@@ -445,11 +495,13 @@ export default function SpaceDevicesScreen() {
               </Text>
             )}
             <View style={s.modalRow}>
-              <TouchableOpacity style={s.modalBtn} onPress={() => setAdding(false)}>
+              <TouchableOpacity style={s.modalBtn} onPress={() => setAdding(false)} accessibilityRole="button">
                 <Text style={s.muted}>Cancel</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={[s.modalBtn, { backgroundColor: colors.brandOnLight }]}
-                onPress={onAdd} disabled={!label.trim() || busy}>
+              <TouchableOpacity style={[s.modalBtn, { backgroundColor: colors.brandOnLight }, (!label.trim() || busy) && s.off]}
+                onPress={onAdd} disabled={!label.trim() || busy}
+                accessibilityRole="button" accessibilityLabel="Add device"
+                accessibilityState={{ disabled: !label.trim() || busy, busy }}>
                 {busy ? <ActivityIndicator size="small" color="#fff" /> : <Text style={s.primaryText}>Add</Text>}
               </TouchableOpacity>
             </View>
@@ -466,15 +518,44 @@ export default function SpaceDevicesScreen() {
             <Text style={s.modalTitle}>Show a message</Text>
             <Text style={s.muted}>Whoever has the phone sees this when crazzychat is open on it. A phone number helps.</Text>
             <TextInput style={s.input} value={msg} onChangeText={setMsg} autoFocus multiline
+              accessibilityLabel="Message to show on the phone"
               placeholder="Lost phone — please call …" placeholderTextColor={colors.textDim} maxLength={300} />
             <View style={s.modalRow}>
-              <TouchableOpacity style={s.modalBtn} onPress={() => setAsking(false)}>
+              <TouchableOpacity style={s.modalBtn} onPress={() => setAsking(false)} accessibilityRole="button" disabled={busy}>
                 <Text style={s.muted}>Cancel</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={[s.modalBtn, { backgroundColor: colors.brandOnLight }]}
-                onPress={() => { const d = open; setAsking(false); if (d) runAction(d, 'message', msg.trim()); }}
-                disabled={!msg.trim() || busy}>
-                <Text style={s.primaryText}>Send</Text>
+              {/* Stays open while sending, so a failure keeps the typed text. */}
+              <TouchableOpacity style={[s.modalBtn, { backgroundColor: colors.brandOnLight }, (!msg.trim() || busy) && s.off]}
+                onPress={async () => { if (open && await runAction(open, 'message', msg.trim())) setAsking(false); }}
+                disabled={!msg.trim() || busy}
+                accessibilityRole="button" accessibilityLabel="Send message"
+                accessibilityState={{ disabled: !msg.trim() || busy, busy }}>
+                {busy ? <ActivityIndicator size="small" color="#fff" /> : <Text style={s.primaryText}>Send</Text>}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+        </KeyboardSafe>
+      </Modal>
+
+      {/* rename */}
+      <Modal visible={renaming} transparent animationType="fade" onRequestClose={() => setRenaming(false)}>
+        <KeyboardSafe keyboardOnly>
+        <View style={s.modalWrap}>
+          <View style={s.modal}>
+            <Text style={s.modalTitle}>Rename device</Text>
+            <TextInput style={s.input} value={newLabel} onChangeText={setNewLabel} autoFocus
+              accessibilityLabel="New device name" maxLength={80}
+              placeholder="Name, e.g. Honda City" placeholderTextColor={colors.textDim} />
+            <View style={s.modalRow}>
+              <TouchableOpacity style={s.modalBtn} onPress={() => setRenaming(false)} accessibilityRole="button" disabled={busy}>
+                <Text style={s.muted}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={[s.modalBtn, { backgroundColor: colors.brandOnLight }, (!newLabel.trim() || busy) && s.off]}
+                onPress={onRename} disabled={!newLabel.trim() || busy}
+                accessibilityRole="button" accessibilityLabel="Save name"
+                accessibilityState={{ disabled: !newLabel.trim() || busy, busy }}>
+                {busy ? <ActivityIndicator size="small" color="#fff" /> : <Text style={s.primaryText}>Save</Text>}
               </TouchableOpacity>
             </View>
           </View>
@@ -543,14 +624,21 @@ const styles = (c: Palette) => StyleSheet.create({
   },
   sheetTitle: { color: c.text, fontSize: 17, fontWeight: '700', flex: 1 },
   footnote: { color: c.textFaint, fontSize: 11.5, lineHeight: 16 },
+  // A fixed dark scrim behind the dialog, the same in both schemes.
   modalWrap: { flex: 1, backgroundColor: '#0008', alignItems: 'center', justifyContent: 'center', padding: 22 },
   modal: { width: '100%', backgroundColor: c.bg, borderRadius: 16, padding: 20, gap: 10 },
   modalTitle: { color: c.text, fontSize: 18, fontWeight: '700' },
   input: { borderWidth: 1, borderColor: c.glassStroke, borderRadius: 10, padding: 12, color: c.text, fontSize: 15 },
   kinds: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
-  kind: { borderWidth: 1, borderColor: c.glassStroke, borderRadius: 20, paddingHorizontal: 13, paddingVertical: 7 },
+  kind: {
+    borderWidth: 1, borderColor: c.glassStroke, borderRadius: 22, paddingHorizontal: 14,
+    minHeight: 44, justifyContent: 'center',
+  },
   kindText: { color: c.textDim, fontSize: 12.5 },
   modalRow: { flexDirection: 'row', justifyContent: 'flex-end', gap: 10, marginTop: 4 },
-  modalBtn: { paddingHorizontal: 18, paddingVertical: 12, borderRadius: 10 },
+  modalBtn: { paddingHorizontal: 18, minHeight: 44, minWidth: 64, alignItems: 'center', justifyContent: 'center', borderRadius: 10 },
+  off: { opacity: 0.5 },
+  hit: { minWidth: 44, minHeight: 44, alignItems: 'center', justifyContent: 'center' },
+  headerActions: { flexDirection: 'row', alignItems: 'center' },
   primaryText: { color: '#fff', fontWeight: '700' },
 });

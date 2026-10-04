@@ -28,21 +28,19 @@ import { Ionicons } from '@expo/vector-icons';
 import { useSpaceColors, spaceHeader } from '../lib/spaces/theme';
 import type { SpacePalette as Palette } from '../lib/spaces/theme';
 import { getCurrentUserAsync } from './(constants)/authService';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
-  getLeave, requestLeave, decideLeave, getLeaveBalance,
+  getLeave, requestLeave, decideLeave, getLeaveBalance, setLeaveAllowance,
   type LeaveRequest, type LeaveBalance,
 } from '../lib/spaces/api';
 import { AuroraBackground } from '../components/ui';
 import { KeyboardSafe } from '../components/ui/KeyboardSafe';
+import { ymd, dayOffset, allowanceBody, ALLOWANCE_KINDS, type AllowanceKind } from '../lib/spaces/leave';
+import { parseDay } from '../lib/spaces/runPlan';
+// The app's one cross-platform date picker (shared with finance).
+import { useDatePicker } from '../components/finance/useDatePicker';
 
 const KINDS = ['casual', 'sick', 'privilege', 'unpaid', 'other'];
-
-/** YYYY-MM-DD for an offset from today — the format the API expects. */
-function dayOffset(n: number): string {
-  const d = new Date();
-  d.setDate(d.getDate() + n);
-  return d.toISOString().slice(0, 10);
-}
 
 function pretty(day: string): string {
   const d = new Date(day + 'T00:00:00');
@@ -60,6 +58,15 @@ export default function SpaceLeaveScreen() {
     () => String(params.perms || '').split(',').includes('view_space_ops'),
     [params.perms],
   );
+  // Setting the allowance is a space setting (leaveAllowanceSet: edit_settings).
+  const canSetAllowance = useMemo(
+    () => String(params.perms || '').split(',').includes('edit_settings'),
+    [params.perms],
+  );
+  const insets = useSafeAreaInsets();
+  const picker = useDatePicker();
+  const [allowanceOpen, setAllowanceOpen] = useState(false);
+  const [allowanceForm, setAllowanceForm] = useState<Record<AllowanceKind, string>>({ casual: '', sick: '', privilege: '', unpaid: '' });
 
   const [rows, setRows] = useState<LeaveRequest[] | null>(null);
   const [tab, setTab] = useState<'mine' | 'pending' | 'history'>('mine');
@@ -103,7 +110,7 @@ export default function SpaceLeaveScreen() {
     try { await load(); } finally { setRefreshing(false); }
   }, [load]);
 
-  const decide = async (r: LeaveRequest, status: 'approved' | 'rejected') => {
+  const decideNow = async (r: LeaveRequest, status: 'approved' | 'rejected' | 'cancelled') => {
     setBusy(r.id);
     try {
       await decideLeave(spaceId, r.id, status);
@@ -115,7 +122,46 @@ export default function SpaceLeaveScreen() {
     }
   };
 
+  // Approve is the expected tap and stays one; decline and withdraw are confirmed.
+  const decide = (r: LeaveRequest, status: 'approved' | 'rejected' | 'cancelled') => {
+    if (status === 'approved') { void decideNow(r, status); return; }
+    const span = `${r.kind}, ${pretty(r.fromDay)}${r.toDay !== r.fromDay ? ` – ${pretty(r.toDay)}` : ''}`;
+    Alert.alert(
+      status === 'rejected' ? `Decline ${r.name || 'this'}’s leave?` : 'Withdraw your leave request?',
+      `${span}.`,
+      [
+        { text: 'Keep', style: 'cancel' },
+        { text: status === 'rejected' ? 'Decline' : 'Withdraw', style: 'destructive', onPress: () => { void decideNow(r, status); } },
+      ],
+    );
+  };
+
+  const openAllowance = () => {
+    const a = balance?.allowance ?? {};
+    setAllowanceForm({
+      casual: a.casual != null ? String(a.casual) : '', sick: a.sick != null ? String(a.sick) : '',
+      privilege: a.privilege != null ? String(a.privilege) : '', unpaid: a.unpaid != null ? String(a.unpaid) : '',
+    });
+    setAllowanceOpen(true);
+  };
+  const saveAllowance = async () => {
+    const r = allowanceBody(allowanceForm);
+    if ('error' in r) { Alert.alert('Check the allowance', r.error); return; }
+    setSaving(true);
+    try {
+      await setLeaveAllowance(spaceId, r.body);
+      setAllowanceOpen(false);
+      await load();
+    } catch (e: any) {
+      Alert.alert('Could not save the allowance', e?.message ?? 'Please try again.');
+    } finally { setSaving(false); }
+  };
+
   const submit = async () => {
+    if (parseDay(from) == null || parseDay(to) == null) {
+      Alert.alert('Check the dates', 'Choose both the first and the last day.');
+      return;
+    }
     if (from > to) {
       Alert.alert('Check the dates', 'The first day cannot be after the last day.');
       return;
@@ -173,12 +219,25 @@ export default function SpaceLeaveScreen() {
           Waiting for someone else who runs this space to decide.
         </Text>
       )}
+      {/* The requester can take back their own pending request. */}
+      {r.status === 'pending' && r.userId === meId && (
+        <TouchableOpacity
+          onPress={() => decide(r, 'cancelled')} disabled={busy === r.id}
+          style={[s.btn, s.btnGhost]}
+          accessibilityRole="button" accessibilityLabel={`Withdraw your ${r.kind} leave request`}
+          accessibilityState={{ disabled: busy === r.id, busy: busy === r.id }}
+        >
+          <Text style={[s.btnText, { color: colors.text }]}>{busy === r.id ? '…' : 'Withdraw'}</Text>
+        </TouchableOpacity>
+      )}
       {canDecide && r.status === 'pending' && r.userId !== meId && (
         <View style={{ flexDirection: 'row', gap: 8 }}>
           <TouchableOpacity
             onPress={() => decide(r, 'rejected')}
             disabled={busy === r.id}
             style={[s.btn, s.btnGhost, { flex: 1 }]}
+            accessibilityRole="button" accessibilityLabel={`Decline leave for ${r.name || 'this person'}`}
+            accessibilityState={{ disabled: busy === r.id }}
           >
             <Text style={[s.btnText, { color: colors.danger }]}>Decline</Text>
           </TouchableOpacity>
@@ -186,6 +245,8 @@ export default function SpaceLeaveScreen() {
             onPress={() => decide(r, 'approved')}
             disabled={busy === r.id}
             style={[s.btn, { backgroundColor: colors.success, flex: 1 }]}
+            accessibilityRole="button" accessibilityLabel={`Approve leave for ${r.name || 'this person'}`}
+            accessibilityState={{ disabled: busy === r.id, busy: busy === r.id }}
           >
             <Text style={s.btnText}>{busy === r.id ? '…' : 'Approve'}</Text>
           </TouchableOpacity>
@@ -207,7 +268,7 @@ export default function SpaceLeaveScreen() {
           <TouchableOpacity
             key={t.key}
             onPress={() => setTab(t.key)}
-            accessibilityRole="button"
+            accessibilityRole="tab"
             accessibilityState={{ selected: tab === t.key }}
             style={[s.tabBtn, tab === t.key && { backgroundColor: colors.brandOnLight }]}
           >
@@ -227,7 +288,14 @@ export default function SpaceLeaveScreen() {
             which is a different and alarming statement. */}
         {balance && (
           <View style={s.card}>
-            <Text style={s.cardTitle}>Your leave</Text>
+            <View style={s.rowTop}>
+              <Text style={[s.cardTitle, { flex: 1 }]}>Your leave</Text>
+              {canSetAllowance && (
+                <TouchableOpacity onPress={openAllowance} style={s.hit} accessibilityRole="button" accessibilityLabel="Set the leave allowance for this space">
+                  <Text style={{ color: colors.primary, fontWeight: '700' }}>Set allowance</Text>
+                </TouchableOpacity>
+              )}
+            </View>
             {Object.keys(balance.used).length === 0 && !balance.allowance && (
               <Text style={s.muted}>You have not taken any leave in {spaceName}.</Text>
             )}
@@ -248,7 +316,7 @@ export default function SpaceLeaveScreen() {
           <View style={[s.card, { borderColor: colors.danger, borderWidth: 1 }]}>
             <Text style={s.cardTitle}>Could not load leave</Text>
             <Text style={s.muted}>{err}</Text>
-            <TouchableOpacity onPress={load} style={[s.btn, { backgroundColor: colors.brandOnLight }]}>
+            <TouchableOpacity onPress={load} style={[s.btn, { backgroundColor: colors.brandOnLight }]} accessibilityRole="button" accessibilityLabel="Try again">
               <Text style={s.btnText}>Try again</Text>
             </TouchableOpacity>
           </View>
@@ -268,20 +336,25 @@ export default function SpaceLeaveScreen() {
         )}
       </ScrollView>
 
-      <TouchableOpacity accessibilityRole="button" accessibilityLabel="New leave request" style={[s.fab, { backgroundColor: colors.brandOnLight }]} onPress={() => setCompose(true)}>
+      <TouchableOpacity
+        accessibilityRole="button" accessibilityLabel="New leave request"
+        style={[s.fab, { backgroundColor: colors.brandOnLight, bottom: 28 + insets.bottom }]}
+        onPress={() => { setFrom(dayOffset(1)); setTo(dayOffset(1)); setCompose(true); }}
+      >
         <Ionicons name="add" size={26} color="#fff" />
       </TouchableOpacity>
 
       <Modal visible={compose} animationType="slide" transparent onRequestClose={() => setCompose(false)}>
         <KeyboardSafe keyboardOnly>
         <View style={s.sheetWrap}>
-          <View style={s.sheet}>
+          <View style={[s.sheet, { paddingBottom: 18 + insets.bottom }]}>
             <Text style={s.cardTitle}>Request leave</Text>
-            <View style={s.kindRow}>
+            <View style={s.kindRow} accessibilityRole="radiogroup" accessibilityLabel="Kind of leave">
               {KINDS.map((k) => (
                 <TouchableOpacity
                   key={k}
                   onPress={() => setKind(k)}
+                  accessibilityRole="radio" accessibilityState={{ checked: kind === k }}
                   style={[s.kind, kind === k && { backgroundColor: colors.brandOnLight }]}
                 >
                   <Text style={[s.kindText, kind === k && { color: '#fff' }]}>{k}</Text>
@@ -289,15 +362,29 @@ export default function SpaceLeaveScreen() {
               ))}
             </View>
             <View style={{ flexDirection: 'row', gap: 8 }}>
+              {/* Picked, not typed: no format to get wrong, and the day is the
+                  LOCAL calendar day (lib/spaces/leave.ts ymd). */}
               <View style={{ flex: 1 }}>
                 <Text style={s.label}>First day</Text>
-                <TextInput style={s.input} value={from} onChangeText={setFrom}
-                  placeholder="YYYY-MM-DD" placeholderTextColor={colors.textDim} />
+                <TouchableOpacity
+                  style={[s.input, s.dateBtn]}
+                  onPress={() => picker.open(new Date(parseDay(from) ?? Date.now()), (d) => {
+                    const v = ymd(d); setFrom(v); if (to < v) setTo(v);
+                  })}
+                  accessibilityRole="button" accessibilityLabel={`First day: ${pretty(from)}. Change`}
+                >
+                  <Text style={{ color: colors.text }}>{pretty(from)}</Text>
+                </TouchableOpacity>
               </View>
               <View style={{ flex: 1 }}>
                 <Text style={s.label}>Last day</Text>
-                <TextInput style={s.input} value={to} onChangeText={setTo}
-                  placeholder="YYYY-MM-DD" placeholderTextColor={colors.textDim} />
+                <TouchableOpacity
+                  style={[s.input, s.dateBtn]}
+                  onPress={() => picker.open(new Date(parseDay(to) ?? Date.now()), (d) => setTo(ymd(d)))}
+                  accessibilityRole="button" accessibilityLabel={`Last day: ${pretty(to)}. Change`}
+                >
+                  <Text style={{ color: colors.text }}>{pretty(to)}</Text>
+                </TouchableOpacity>
               </View>
             </View>
             <TextInput
@@ -307,17 +394,61 @@ export default function SpaceLeaveScreen() {
               value={reason}
               onChangeText={setReason}
               maxLength={300}
+              accessibilityLabel="Reason, optional"
             />
             <View style={{ flexDirection: 'row', gap: 8 }}>
-              <TouchableOpacity onPress={() => setCompose(false)} style={[s.btn, s.btnGhost, { flex: 1 }]}>
+              <TouchableOpacity onPress={() => setCompose(false)} style={[s.btn, s.btnGhost, { flex: 1 }]} accessibilityRole="button">
                 <Text style={[s.btnText, { color: colors.text }]}>Cancel</Text>
               </TouchableOpacity>
               <TouchableOpacity
                 onPress={submit}
                 disabled={saving}
                 style={[s.btn, { backgroundColor: colors.brandOnLight, flex: 1, opacity: saving ? 0.5 : 1 }]}
+                accessibilityRole="button" accessibilityLabel="Request leave"
+                accessibilityState={{ disabled: saving, busy: saving }}
               >
                 <Text style={s.btnText}>{saving ? 'Sending…' : 'Request'}</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+        </KeyboardSafe>
+        {/* Inside this Modal so it stacks above it on iOS. */}
+        {picker.element}
+      </Modal>
+
+      {/* allowance (edit_settings) */}
+      <Modal visible={allowanceOpen} animationType="slide" transparent onRequestClose={() => setAllowanceOpen(false)}>
+        <KeyboardSafe keyboardOnly>
+        <View style={s.sheetWrap}>
+          <View style={[s.sheet, { paddingBottom: 18 + insets.bottom }]}>
+            <Text style={s.cardTitle}>Leave allowance</Text>
+            <Text style={s.muted}>
+              Days per type for everyone in {spaceName}. Leave a type empty for no allowance (shown as
+              “not set”, never as zero). Saving replaces the whole allowance.
+            </Text>
+            {ALLOWANCE_KINDS.map((k) => (
+              <View key={k} style={s.rowTop}>
+                <Text style={[s.label, { flex: 1, marginBottom: 0 }]}>{k}</Text>
+                <TextInput
+                  style={[s.input, { width: 96 }]} value={allowanceForm[k]}
+                  onChangeText={(t) => setAllowanceForm((f) => ({ ...f, [k]: t }))}
+                  keyboardType="number-pad" maxLength={3} placeholder="not set"
+                  placeholderTextColor={colors.textDim} accessibilityLabel={`${k} leave, days per year`}
+                />
+              </View>
+            ))}
+            <View style={{ flexDirection: 'row', gap: 8 }}>
+              <TouchableOpacity onPress={() => setAllowanceOpen(false)} style={[s.btn, s.btnGhost, { flex: 1 }]} accessibilityRole="button">
+                <Text style={[s.btnText, { color: colors.text }]}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                onPress={saveAllowance} disabled={saving}
+                style={[s.btn, { backgroundColor: colors.brandOnLight, flex: 1, opacity: saving ? 0.5 : 1 }]}
+                accessibilityRole="button" accessibilityLabel="Save allowance"
+                accessibilityState={{ disabled: saving, busy: saving }}
+              >
+                <Text style={s.btnText}>{saving ? 'Saving…' : 'Save'}</Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -336,7 +467,7 @@ const styles = (c: Palette) => StyleSheet.create({
   cardTitle: { color: c.text, fontSize: 15, fontWeight: '700' },
   muted: { color: c.textDim, fontSize: 12.5, lineHeight: 17, flexShrink: 1 },
   tabs: { flexDirection: 'row', gap: 8, paddingHorizontal: 16, paddingTop: 12 },
-  tabBtn: { flex: 1, alignItems: 'center', backgroundColor: c.glassSoft, borderRadius: 999, paddingVertical: 9 },
+  tabBtn: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: c.glassSoft, borderRadius: 999, minHeight: 44 },
   tabText: { color: c.textDim, fontWeight: '700', fontSize: 12.5 },
   rowTop: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   status: { fontSize: 11.5, fontWeight: '800', textTransform: 'uppercase' },
@@ -345,6 +476,7 @@ const styles = (c: Palette) => StyleSheet.create({
     position: 'absolute', right: 20, bottom: 28, width: 56, height: 56, borderRadius: 28,
     alignItems: 'center', justifyContent: 'center', elevation: 4,
   },
+  // A fixed dark scrim behind the sheet, the same in both schemes.
   sheetWrap: { flex: 1, backgroundColor: '#0008', justifyContent: 'flex-end' },
   // surfaceSolid, not card: card is a translucent glass pane in the dusk skin,
   // and a see-through sheet over the scrim is unreadable in both schemes.
@@ -354,9 +486,11 @@ const styles = (c: Palette) => StyleSheet.create({
     color: c.text, fontSize: 14.5,
   },
   kindRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
-  kind: { backgroundColor: c.bg, borderRadius: 9, paddingHorizontal: 12, paddingVertical: 8 },
+  kind: { backgroundColor: c.bg, borderRadius: 9, paddingHorizontal: 14, minHeight: 44, justifyContent: 'center' },
   kindText: { color: c.textDim, fontWeight: '700', fontSize: 12.5 },
-  btn: { alignItems: 'center', justifyContent: 'center', borderRadius: 10, paddingVertical: 12, paddingHorizontal: 14 },
+  btn: { alignItems: 'center', justifyContent: 'center', borderRadius: 10, paddingVertical: 12, paddingHorizontal: 14, minHeight: 44 },
+  hit: { minHeight: 44, justifyContent: 'center' },
+  dateBtn: { minHeight: 44, justifyContent: 'center' },
   btnGhost: { backgroundColor: c.bg },
   btnText: { color: '#fff', fontWeight: '700', fontSize: 14 },
 });

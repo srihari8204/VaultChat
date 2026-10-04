@@ -14,11 +14,12 @@
 // code in the same second cannot both admit.
 
 import { AppText as Text } from '../components/ui/Text';
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   View, StyleSheet, ScrollView, ActivityIndicator, TouchableOpacity,
-  Alert, TextInput, Modal, RefreshControl,
+  Alert, TextInput, Modal, RefreshControl, Share,
 } from 'react-native';
+import * as Clipboard from 'expo-clipboard';
 import { Stack, useLocalSearchParams, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useSpaceColors, spaceHeader } from '../lib/spaces/theme';
@@ -31,6 +32,11 @@ import { KeyboardSafe } from '../components/ui/KeyboardSafe';
 import LoadError from '../components/spaces/LoadError';
 import { circleMembers } from '../lib/family/circle';
 import type { CircleMember } from '../lib/family/types';
+import ChatDoorButton from '../components/spaces/ChatDoorButton';
+
+/** A pass code in the list: only its last two characters, until revealed. A
+ *  code opens a door, and this list is read on screens other people can see. */
+const masked = (code: string) => `••••${code.slice(-2)}`;
 
 const HOURS = [2, 4, 8, 24];
 
@@ -52,6 +58,9 @@ export default function SpaceVisitorsScreen() {
   const [busy, setBusy] = useState(false);
   const [redeeming, setRedeeming] = useState(false);
   const [code, setCode] = useState('');
+  // The one row whose code is shown in full, if any.
+  const [revealed, setRevealed] = useState<string | null>(null);
+  const [signingOut, setSigningOut] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -63,8 +72,11 @@ export default function SpaceVisitorsScreen() {
       setLoading(false);
       setRefreshing(false);
     }
-    // Hosts are optional to offer: without the member list the pass is issued
-    // with the issuer as host, exactly as before.
+  }, [spaceId]);
+
+  // Hosts are optional to offer: without the member list the pass is issued
+  // with the issuer as host, exactly as before. Read once, not on every refresh.
+  useEffect(() => {
     circleMembers(spaceId).then(setMembers).catch(() => {});
   }, [spaceId]);
 
@@ -93,9 +105,15 @@ export default function SpaceVisitorsScreen() {
       });
       setIssuing(false); setName(''); setHostId(null);
       await load();
+      const message = `Visitor pass for ${visitorName}: ${res.code}. It works once, and expires in ${hours} hours.`;
       Alert.alert(
         `Pass for ${visitorName}`,
         `Code: ${res.code}\n\nGive this to them. It works once, and expires in ${hours} hours.`,
+        [
+          { text: 'Copy code', onPress: () => { Clipboard.setStringAsync(res.code).catch(() => {}); } },
+          { text: 'Share', onPress: () => { Share.share({ message }).catch(() => {}); } },
+          { text: 'Done', style: 'cancel' },
+        ],
       );
     } catch (e: any) {
       Alert.alert('Could not issue', e?.message ?? 'Try again.');
@@ -123,6 +141,26 @@ export default function SpaceVisitorsScreen() {
     }
   }, [code, spaceId, load]);
 
+  // Sign out the visitor on this row — the same redeem-with-exit the code
+  // dialog uses, without retyping a code the office already holds.
+  const signOut = useCallback((p: VisitorPass) => {
+    Alert.alert(`Sign ${p.visitorName} out?`, 'Their pass cannot be used again.', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Sign out', style: 'destructive',
+        onPress: async () => {
+          setSigningOut(p.id);
+          try {
+            await redeemVisitorPass(spaceId, p.code, true);
+            await load();
+          } catch (e: any) {
+            Alert.alert('Could not sign out', e?.message ?? 'Try again.');
+          } finally { setSigningOut(null); }
+        },
+      },
+    ]);
+  }, [spaceId, load]);
+
   const s = styles(colors);
 
   if (loading) {
@@ -137,13 +175,23 @@ export default function SpaceVisitorsScreen() {
 
   return (
     <View style={s.screen}>
+      <AuroraBackground />
       <Stack.Screen
         options={{
           ...spaceHeader(colors, params.name ? `${params.name} · Visitors` : 'Visitors'),
+          // The add button sits NEXT TO the chat door, not in place of it.
           headerRight: () => (
-            <TouchableOpacity accessibilityRole="button" accessibilityLabel="Issue a visitor pass" onPress={() => setIssuing(true)} style={{ paddingHorizontal: 8 }}>
-              <Ionicons name="add" size={24} color={colors.primary} />
-            </TouchableOpacity>
+            <View style={s.headerActions}>
+              <TouchableOpacity accessibilityRole="button" accessibilityLabel="Issue a visitor pass" onPress={() => setIssuing(true)} style={s.hit}>
+                <Ionicons name="add" size={24} color={colors.primary} />
+              </TouchableOpacity>
+              {!!spaceId && (
+                <ChatDoorButton
+                  colors={colors} chat={{ id: spaceId, name: params.name }}
+                  fallbackTitle="Visitors" accessibilityLabel="Open the space chat"
+                />
+              )}
+            </View>
           ),
         }}
       />
@@ -153,7 +201,8 @@ export default function SpaceVisitorsScreen() {
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); void load(); }} tintColor={colors.primary} />}
       >
         <TouchableOpacity style={s.scan} onPress={() => setRedeeming(true)} accessibilityRole="button">
-          <Ionicons name="qr-code-outline" size={20} color={colors.primary} />
+          {/* Codes are typed (they are read aloud at a gate); there is no scanner. */}
+          <Ionicons name="keypad-outline" size={20} color={colors.primary} />
           <Text style={s.scanText}>Admit or sign out a visitor by code</Text>
         </TouchableOpacity>
 
@@ -192,7 +241,27 @@ export default function SpaceVisitorsScreen() {
                           : `Expected · valid until ${clock(p.validTo)}`}
                   </Text>
                 </View>
-                {!p.redeemedAt && !expired && <Text style={s.code}>{p.code}</Text>}
+                {!p.redeemedAt && !expired && (
+                  <TouchableOpacity
+                    onPress={() => setRevealed(revealed === p.id ? null : p.id)} style={s.hit}
+                    accessibilityRole="button"
+                    accessibilityLabel={revealed === p.id ? `Code ${p.code.split('').join(' ')}. Hide code` : `Show ${p.visitorName}’s code`}
+                  >
+                    <Text style={s.code}>{revealed === p.id ? p.code : masked(p.code)}</Text>
+                  </TouchableOpacity>
+                )}
+                {inside && (
+                  <TouchableOpacity
+                    onPress={() => signOut(p)} disabled={signingOut === p.id}
+                    style={[s.rowBtn, signingOut === p.id && s.off]}
+                    accessibilityRole="button" accessibilityLabel={`Sign ${p.visitorName} out`}
+                    accessibilityState={{ disabled: signingOut === p.id, busy: signingOut === p.id }}
+                  >
+                    {signingOut === p.id
+                      ? <ActivityIndicator size="small" color={colors.primary} />
+                      : <Text style={s.ghostText}>Sign out</Text>}
+                  </TouchableOpacity>
+                )}
               </View>
             </View>
           );
@@ -212,6 +281,7 @@ export default function SpaceVisitorsScreen() {
             <Text style={s.modalTitle}>Issue a pass</Text>
             <TextInput
               style={s.input} value={name} onChangeText={setName} autoFocus
+              accessibilityLabel="Visitor's name"
               placeholder="Visitor's name" placeholderTextColor={colors.textDim} maxLength={120}
             />
             <View style={s.hours}>
@@ -269,7 +339,7 @@ export default function SpaceVisitorsScreen() {
             <TextInput
               style={[s.input, s.codeInput]} value={code} onChangeText={setCode} autoFocus
               placeholder="ABC234" placeholderTextColor={colors.textDim}
-              autoCapitalize="characters" maxLength={8}
+              autoCapitalize="characters" maxLength={8} accessibilityLabel="Visitor code"
             />
             <View style={s.modalRow}>
               <TouchableOpacity style={s.modalBtn} onPress={() => setRedeeming(false)} accessibilityRole="button">
@@ -318,16 +388,26 @@ const styles = (c: Palette) => StyleSheet.create({
   row: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   icon: { width: 34, height: 34, borderRadius: 17, alignItems: 'center', justifyContent: 'center' },
   code: { color: c.text, fontWeight: '700', letterSpacing: 2, fontVariant: ['tabular-nums'] },
+  // A fixed dark scrim behind the dialog, the same in both schemes.
   modalWrap: { flex: 1, backgroundColor: '#0008', alignItems: 'center', justifyContent: 'center', padding: 22 },
   modal: { width: '100%', backgroundColor: c.bg, borderRadius: 16, padding: 20, gap: 10 },
   modalTitle: { color: c.text, fontSize: 18, fontWeight: '700' },
   input: { borderWidth: 1, borderColor: c.glassStroke, borderRadius: 10, padding: 12, color: c.text, fontSize: 15 },
   codeInput: { fontSize: 22, letterSpacing: 6, textAlign: 'center' },
-  hours: { flexDirection: 'row', gap: 8 },
-  hour: { borderWidth: 1, borderColor: c.glassStroke, borderRadius: 20, paddingHorizontal: 14, paddingVertical: 7 },
+  hours: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  hour: {
+    borderWidth: 1, borderColor: c.glassStroke, borderRadius: 22, paddingHorizontal: 14,
+    minHeight: 44, justifyContent: 'center',
+  },
   hourText: { color: c.textDim, fontSize: 13 },
   modalRow: { flexDirection: 'row', justifyContent: 'flex-end', gap: 8, marginTop: 4 },
-  modalBtn: { paddingHorizontal: 16, paddingVertical: 12, borderRadius: 10 },
+  modalBtn: { paddingHorizontal: 16, minHeight: 44, alignItems: 'center', justifyContent: 'center', borderRadius: 10 },
+  hit: { minWidth: 44, minHeight: 44, alignItems: 'center', justifyContent: 'center' },
+  headerActions: { flexDirection: 'row', alignItems: 'center' },
+  rowBtn: {
+    minHeight: 44, minWidth: 84, paddingHorizontal: 12, borderRadius: 10, borderWidth: 1,
+    borderColor: c.glassStroke, alignItems: 'center', justifyContent: 'center',
+  },
   ghost: { borderWidth: 1, borderColor: c.glassStroke },
   ghostText: { color: c.text, fontWeight: '600' },
   solid: { backgroundColor: c.brandOnLight },

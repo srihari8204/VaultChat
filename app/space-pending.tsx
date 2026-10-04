@@ -12,7 +12,7 @@
 import { AppText as Text } from '../components/ui/Text';
 import React, { useCallback, useMemo, useState } from 'react';
 import {
-  View, StyleSheet, ScrollView, ActivityIndicator, TouchableOpacity,
+  View, StyleSheet, SectionList, ActivityIndicator, TouchableOpacity,
   RefreshControl,
 } from 'react-native';
 import { Stack, useLocalSearchParams, useRouter, useFocusEffect } from 'expo-router';
@@ -57,11 +57,12 @@ export default function SpacePendingScreen() {
 
   // Grouped by run for the eye, in the server's order. Map preserves insertion
   // order, so the first run listed is still the one with the earliest stop.
+  // A SectionList: a long manifest is virtualised instead of rendered whole.
   const byRun = useMemo(() => {
-    const m = new Map<string, { name: string; runId: string; items: PendingPickup[] }>();
+    const m = new Map<string, { name: string; runId: string; data: PendingPickup[] }>();
     for (const r of rows) {
-      const g = m.get(r.runId) ?? { name: r.runName, runId: r.runId, items: [] };
-      g.items.push(r);
+      const g = m.get(r.runId) ?? { name: r.runName, runId: r.runId, data: [] };
+      g.data.push(r);
       m.set(r.runId, g);
     }
     return [...m.values()];
@@ -80,73 +81,82 @@ export default function SpacePendingScreen() {
   }
 
   return (
-    <ScrollView
-      style={s.screen}
-      contentContainerStyle={s.body}
-      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load(); }} tintColor={colors.primary} />}
-    >
+    <View style={s.screen}>
+      <AuroraBackground />
       <Stack.Screen options={spaceHeader(colors, `Pending pickups${rows.length ? ` (${rows.length})` : ''}`, { id: spaceId, name: params.name })} />
-
-      {loadError && (
-        <LoadError colors={colors} title="Could not load pending pickups" message={loadError} onRetry={() => { setLoading(true); void load(); }} />
-      )}
-      {!loadError && rows.length === 0 && (
-        <View style={s.card}>
-          <Text style={s.cardTitle}>Nobody is waiting</Text>
-          <Text style={s.muted}>
-            Everyone on today’s active runs has been marked one way or the other.
-          </Text>
-        </View>
-      )}
-
-      {byRun.map((g) => (
-        <View key={g.runId} style={s.card}>
+      <SectionList
+        style={s.screen}
+        contentContainerStyle={s.body}
+        sections={byRun}
+        keyExtractor={(p) => `${p.runId}:${p.riderId}`}
+        stickySectionHeadersEnabled={false}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load(); }} tintColor={colors.primary} />}
+        ListHeaderComponent={
+          <>
+            {loadError && (
+              <LoadError colors={colors} title="Could not load pending pickups" message={loadError} onRetry={() => { setLoading(true); void load(); }} />
+            )}
+            {/* A failed refresh keeps the last list below the error — and says so. */}
+            {loadError && rows.length > 0 && (
+              <Text style={s.stale}>The list below is from the last successful refresh and may be out of date.</Text>
+            )}
+            {!loadError && rows.length === 0 && (
+              <View style={s.card}>
+                <Text style={s.cardTitle}>Nobody is waiting</Text>
+                <Text style={s.muted}>
+                  Everyone on today’s active runs has been marked one way or the other.
+                </Text>
+              </View>
+            )}
+          </>
+        }
+        renderSectionHeader={({ section: g }) => (
           <TouchableOpacity
-            style={s.rowBetween}
-            onPress={() => router.push({ pathname: '/space-run' as any, params: { spaceId, runId: g.runId, groupType: params.groupType ?? '', name: params.name ?? '' } })}
+            style={[s.rowBetween, s.sectionHead]}
+            onPress={() => router.push({ pathname: '/space-run', params: { spaceId, runId: g.runId, groupType: params.groupType ?? '', name: params.name ?? '' } })}
             accessibilityRole="button"
-            accessibilityLabel={`${g.name}, ${g.items.length} waiting. Open the run`}
+            accessibilityLabel={`${g.name}, ${g.data.length} waiting. Open the run`}
           >
-            <Text numberOfLines={1} style={s.cardTitle}>{g.name}</Text>
-            <Text style={s.link}>{g.items.length} waiting</Text>
+            <Text numberOfLines={1} style={[s.cardTitle, { flex: 1 }]}>{g.name}</Text>
+            <Text style={s.link}>{g.data.length} waiting</Text>
           </TouchableOpacity>
-
-          {g.items.map((p) => (
-            <View key={p.riderId} style={s.row}>
-              <View style={[s.avatar, { backgroundColor: colors.primary + '22' }]}>
-                <Text style={{ color: colors.primary, fontWeight: '800' }}>
-                  {initialOf(p.name)}
-                </Text>
-              </View>
-              <View style={{ flex: 1, minWidth: 0 }}>
-                <Text style={s.name} numberOfLines={1}>{p.name}</Text>
-                <Text style={s.muted} numberOfLines={1}>
-                  {p.stop || 'No stop set'}
-                  {p.plannedAt ? ` · due ${clock(p.plannedAt)}` : ''}
-                </Text>
-              </View>
-              {/* "Late" only when there IS a scheduled time to be late against.
-                  Without one the app has no opinion, and says nothing rather
-                  than implying the pickup is overdue. */}
-              {p.plannedAt && Date.parse(p.plannedAt) < Date.now() && (
-                <View style={[s.pill, { backgroundColor: colors.danger + '22' }]}>
-                  <Text style={{ color: colors.danger, fontSize: 11, fontWeight: '700' }}>overdue</Text>
-                </View>
-              )}
-              {p.runStatus === 'scheduled' && (
-                <View style={[s.pill, { backgroundColor: colors.border }]}>
-                  <Text style={{ color: colors.textDim, fontSize: 11 }}>not started</Text>
-                </View>
-              )}
+        )}
+        renderItem={({ item: p }) => (
+          <View style={s.row}>
+            <View style={[s.avatar, { backgroundColor: colors.primary + '22' }]}>
+              <Text style={{ color: colors.primary, fontWeight: '800' }}>
+                {initialOf(p.name)}
+              </Text>
             </View>
-          ))}
-        </View>
-      ))}
-
-      <Text style={s.footnote}>
-        Ordered by scheduled stop time, oldest first, as the server returned it. Pull to refresh.
-      </Text>
-    </ScrollView>
+            <View style={{ flex: 1, minWidth: 0 }}>
+              <Text style={s.name} numberOfLines={1}>{p.name}</Text>
+              <Text style={s.muted} numberOfLines={1}>
+                {p.stop || 'No stop set'}
+                {p.plannedAt ? ` · due ${clock(p.plannedAt)}` : ''}
+              </Text>
+            </View>
+            {/* "Late" only when there IS a scheduled time to be late against.
+                Without one the app has no opinion, and says nothing rather
+                than implying the pickup is overdue. */}
+            {p.plannedAt && Date.parse(p.plannedAt) < Date.now() && (
+              <View style={[s.pill, { backgroundColor: colors.danger + '22' }]}>
+                <Text style={{ color: colors.danger, fontSize: 11, fontWeight: '700' }}>overdue</Text>
+              </View>
+            )}
+            {p.runStatus === 'scheduled' && (
+              <View style={[s.pill, { backgroundColor: colors.border }]}>
+                <Text style={{ color: colors.textDim, fontSize: 11 }}>not started</Text>
+              </View>
+            )}
+          </View>
+        )}
+        ListFooterComponent={
+          <Text style={s.footnote}>
+            Ordered by scheduled stop time, oldest first, as the server returned it. Pull to refresh.
+          </Text>
+        }
+      />
+    </View>
   );
 }
 
@@ -155,15 +165,23 @@ const clock = (iso: string) => new Date(iso).toLocaleTimeString([], { hour: '2-d
 const styles = (c: Palette) => StyleSheet.create({
   screen: { flex: 1, backgroundColor: 'transparent' },
   centre: { alignItems: 'center', justifyContent: 'center' },
-  body: { padding: 16, gap: 10, paddingBottom: 40 },
+  body: { padding: 16, paddingBottom: 40 },
   card: { backgroundColor: c.glassSoft, borderRadius: 14, padding: 14, gap: 6 },
   cardTitle: { color: c.text, fontSize: 15.5, fontWeight: '700' },
   muted: { color: c.textDim, fontSize: 12.5, flexShrink: 1 },
   rowBetween: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   link: { color: c.primary, fontSize: 12.5, fontWeight: '700' },
-  row: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 8 },
+  row: {
+    flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 8, paddingHorizontal: 14,
+    backgroundColor: c.glassSoft,
+  },
+  sectionHead: {
+    minHeight: 44, gap: 8, paddingHorizontal: 14, marginTop: 10,
+    backgroundColor: c.glassSoft, borderTopLeftRadius: 14, borderTopRightRadius: 14,
+  },
+  stale: { color: c.warning, fontSize: 12.5, marginTop: 8 },
   avatar: { width: 34, height: 34, borderRadius: 17, alignItems: 'center', justifyContent: 'center' },
   name: { color: c.text, fontSize: 14.5, fontWeight: '600' },
   pill: { borderRadius: 999, paddingHorizontal: 8, paddingVertical: 3 },
-  footnote: { color: c.textFaint, fontSize: 11.5, lineHeight: 16 },
+  footnote: { color: c.textFaint, fontSize: 11.5, lineHeight: 16, marginTop: 12 },
 });
