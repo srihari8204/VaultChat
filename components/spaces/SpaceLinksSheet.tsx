@@ -14,6 +14,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { AppText as Text } from '../ui/Text';
 import { KeyboardSafe } from '../ui/KeyboardSafe';
+import LoadError from './LoadError';
 import type { SpacePalette } from '../../lib/spaces/theme';
 import {
   addLink, removeLink, type RosterEntry, type SpaceLink, type LinkRelation,
@@ -26,13 +27,15 @@ const RELATIONS: { key: LinkRelation; label: string }[] = [
 ];
 const relLabel = (r: LinkRelation) => RELATIONS.find((x) => x.key === r)?.label ?? r;
 
-export default function SpaceLinksSheet({ visible, onClose, colors, spaceId, roster, links, onChanged }: {
+export default function SpaceLinksSheet({ visible, onClose, colors, spaceId, roster, links, linksError, onChanged }: {
   visible: boolean;
   onClose: () => void;
   colors: SpacePalette;
   spaceId: string;
   roster: RosterEntry[];
   links: SpaceLink[];
+  /** Set when the links could not be read, so the list is not drawn as "No links yet". */
+  linksError?: string | null;
   /** Re-read links (and anything they affect) after a write. */
   onChanged: () => void | Promise<void>;
 }) {
@@ -167,6 +170,9 @@ export default function SpaceLinksSheet({ visible, onClose, colors, spaceId, ros
             </View>
 
             <Text style={s.section}>CURRENT LINKS</Text>
+            {linksError ? (
+              <LoadError colors={colors} title="Could not load the links" message={linksError} onRetry={() => { void onChanged(); }} />
+            ) : (
             <View style={s.card}>
               {links.length === 0 && <Text style={s.muted}>No links yet.</Text>}
               {links.map((l) => (
@@ -184,6 +190,7 @@ export default function SpaceLinksSheet({ visible, onClose, colors, spaceId, ros
                 </View>
               ))}
             </View>
+            )}
           </ScrollView>
         )}
       </View>

@@ -4,6 +4,7 @@
 import assert from 'node:assert/strict';
 import {
   parseCoords, parseClock, plannedAtOn, clockOf, stopPayload, remapRiders,
+  parseDay, dayOf, stopDay,
 } from './runPlan';
 import { driverView, nextStop, type RunStop, type RunRider, type RiderState } from './runs';
 
@@ -36,6 +37,27 @@ assert.equal(back.getMinutes(), 5);
 assert.equal(clockOf(iso), '07:05', 'a saved time pre-fills as the same wall clock');
 assert.equal(clockOf(null), '');
 assert.equal(clockOf('nonsense'), '');
+
+// ── the day a planned time lands on ──
+assert.equal(parseDay('2026-10-05'), new Date(2026, 9, 5).getTime(), 'local midnight of the typed day');
+assert.equal(parseDay(' 2026-10-05 '), new Date(2026, 9, 5).getTime());
+assert.equal(parseDay('2026-02-30'), null, 'an impossible date is refused, not rolled into March');
+assert.equal(parseDay('5/10/2026'), null);
+assert.equal(parseDay(''), null);
+assert.equal(dayOf(iso), '2026-10-04', 'pre-fills the LOCAL day of a saved time');
+assert.equal(dayOf(null), '');
+assert.equal(dayOf('nonsense'), '');
+assert.equal(parseDay(dayOf(iso)), new Date(2026, 9, 4).getTime(), 'round-trips');
+// A scheduled run anchors to its own day; whatever was typed is ignored.
+const sched = new Date(2026, 9, 6, 7, 0).toISOString();
+assert.equal(stopDay(sched, '2026-10-01'), Date.parse(sched));
+// An unscheduled run has no day until the admin gives one — never "today",
+// which made a time saved the evening before overdue as soon as the run began.
+assert.equal(stopDay(null, ''), null);
+assert.equal(stopDay(null, 'tomorrow'), null);
+assert.equal(new Date(plannedAtOn(stopDay(null, '2026-10-05')!, 7 * 60 + 45)).getDate(), 5);
+assert.equal(clockOf(plannedAtOn(stopDay(null, '2026-10-05')!, 7 * 60 + 45)), '07:45');
+assert.equal(stopDay('garbage', '2026-10-05'), new Date(2026, 9, 5).getTime(), 'an unreadable schedule falls back to the typed day');
 
 // ── stop payload keeps place and time (it used to send only the label) ──
 const payload = stopPayload([

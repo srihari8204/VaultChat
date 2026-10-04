@@ -93,6 +93,7 @@ export default function SpaceAdminScreen() {
   const [openIncidents, setOpenIncidents] = useState<Incident[]>([]);
   const [roster, setRoster] = useState<RosterEntry[]>([]);
   const [links, setLinks] = useState<SpaceLink[]>([]);
+  const [linksError, setLinksError] = useState<string | null>(null);
   const [sheet, setSheet] = useState<'shift' | 'links' | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -125,8 +126,11 @@ export default function SpaceAdminScreen() {
   }, [spaceId]);
 
   const loadLinks = useCallback(async () => {
-    try { setLinks(await getLinks(spaceId)); }
-    catch (e: any) { setLinks([]); setLoadError(e?.message ?? 'Could not load links.'); }
+    // The error is shown INSIDE the links sheet: the console's own error card
+    // sits behind that full-screen modal, and an empty list there reads as
+    // "No links yet".
+    try { setLinks(await getLinks(spaceId)); setLinksError(null); }
+    catch (e: any) { setLinksError(e?.message ?? 'Check your connection and try again.'); }
   }, [spaceId]);
   const openSheet = useCallback((which: 'shift' | 'links') => {
     if (which === 'links') void loadLinks();
@@ -273,7 +277,7 @@ export default function SpaceAdminScreen() {
       <ShiftSheet visible={sheet === 'shift'} onClose={() => setSheet(null)} colors={colors} spaceId={spaceId} />
       <SpaceLinksSheet
         visible={sheet === 'links'} onClose={() => setSheet(null)} colors={colors}
-        spaceId={spaceId} roster={roster} links={links} onChanged={loadLinks}
+        spaceId={spaceId} roster={roster} links={links} linksError={linksError} onChanged={loadLinks}
       />
     </View>
   );

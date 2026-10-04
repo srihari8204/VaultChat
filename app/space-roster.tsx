@@ -44,6 +44,7 @@ export default function SpaceRosterScreen() {
 
   const [roster, setRoster] = useState<RosterEntry[]>([]);
   const [links, setLinks] = useState<SpaceLink[]>([]);
+  const [linksError, setLinksError] = useState<string | null>(null);
   const [truncated, setTruncated] = useState(false);
   const [scoped, setScoped] = useState(true);
   const [loading, setLoading] = useState(true);
@@ -56,16 +57,22 @@ export default function SpaceRosterScreen() {
 
   const load = useCallback(async () => {
     try {
+      let linkErr: string | null = null;
       const [r, l] = await Promise.all([
         getRoster(spaceId),
         // Links are only visible from the subject end, so this comes back small
-        // for a parent and complete for ops — same call either way.
-        getLinks(spaceId).catch(() => [] as SpaceLink[]),
+        // for a parent and complete for ops — same call either way. A failure
+        // is kept for the links sheet rather than shown there as "No links yet".
+        getLinks(spaceId).catch((e: any) => {
+          linkErr = e?.message ?? 'Check your connection and try again.';
+          return [] as SpaceLink[];
+        }),
       ]);
       setRoster(r.roster || []);
       setTruncated(!!r.truncated);
       setScoped(!!r.scoped);
       setLinks(l || []);
+      setLinksError(linkErr);
       setLoadError(null);
     } catch (e: any) {
       setLoadError(e?.message ?? 'Could not load the roster.');
@@ -258,7 +265,7 @@ export default function SpaceRosterScreen() {
       </Modal>
       <SpaceLinksSheet
         visible={linksOpen} onClose={() => setLinksOpen(false)} colors={colors}
-        spaceId={spaceId} roster={roster} links={links} onChanged={load}
+        spaceId={spaceId} roster={roster} links={links} linksError={linksError} onChanged={load}
       />
     </View>
   );

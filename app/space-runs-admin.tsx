@@ -39,7 +39,7 @@ import { AuroraBackground } from '../components/ui';
 import { KeyboardSafe } from '../components/ui/KeyboardSafe';
 import LoadError from '../components/spaces/LoadError';
 import {
-  parseCoords, parseClock, plannedAtOn, clockOf, stopPayload, remapRiders,
+  parseCoords, parseClock, plannedAtOn, clockOf, stopPayload, remapRiders, dayOf, stopDay,
 } from '../lib/spaces/runPlan';
 import { geocodeSearch } from '../lib/nav/geocode';
 import { permissionDenied } from '../lib/permissionDenied';
@@ -78,7 +78,7 @@ export default function SpaceRunsAdminScreen() {
   // The run being edited, with its stops and manifest.
   const [editing, setEditing] = useState<{ run: Run; stops: RunStop[]; riders: RunRider[] } | null>(null);
   // The stop form: index into the ordered stops, or null for a new stop.
-  const [stopForm, setStopForm] = useState<{ index: number | null; label: string; where: string; time: string } | null>(null);
+  const [stopForm, setStopForm] = useState<{ index: number | null; label: string; where: string; time: string; day: string } | null>(null);
   // The rider whose stop is being picked.
   const [stopFor, setStopFor] = useState<RunRider | null>(null);
 
@@ -200,6 +200,11 @@ export default function SpaceRunsAdminScreen() {
       Alert.alert('Planned time', 'Use a 24-hour time such as 07:45, or leave it blank.');
       return;
     }
+    const base = minutes == null ? null : stopDay(editing.run.scheduledAt, stopForm.day);
+    if (minutes != null && base == null) {
+      Alert.alert('Which day?', 'This run has no scheduled date. Enter the day of the run, such as 2026-10-05, so the planned time is not measured against the wrong day.');
+      return;
+    }
     let place: { lat: number; lng: number } | null = null;
     if (where) {
       place = parseCoords(where);
@@ -214,13 +219,12 @@ export default function SpaceRunsAdminScreen() {
         place = { lat: hits[0].lat, lng: hits[0].lng };
       }
     }
-    const base = editing.run.scheduledAt ? Date.parse(editing.run.scheduledAt) : Date.now();
     const draft: StopDraft = {
       prevId: stopForm.index == null ? null : orderedStops[stopForm.index].id,
       label: stopForm.label.trim(),
       lat: place?.lat ?? null,
       lng: place?.lng ?? null,
-      plannedAt: minutes == null ? null : plannedAtOn(Number.isFinite(base) ? base : Date.now(), minutes),
+      plannedAt: minutes == null || base == null ? null : plannedAtOn(base, minutes),
     };
     const drafts = orderedStops.map(draftOf);
     if (stopForm.index == null) drafts.push(draft); else drafts[stopForm.index] = draft;
@@ -234,8 +238,11 @@ export default function SpaceRunsAdminScreen() {
       label: st?.label ?? '',
       where: st && st.lat != null && st.lng != null ? `${st.lat.toFixed(6)}, ${st.lng.toFixed(6)}` : '',
       time: clockOf(st?.plannedAt ?? null),
+      // Only asked for when the run has no scheduled day: this stop's day, a
+      // sibling's, or the day the run started — the admin can see and change it.
+      day: dayOf(st?.plannedAt ?? orderedStops.find((x) => x.plannedAt)?.plannedAt ?? editing?.run.startedAt ?? null),
     });
-  }, [orderedStops]);
+  }, [orderedStops, editing?.run.startedAt]);
 
   const removeStop = useCallback((st: RunStop) => {
     const riding = editing?.riders.filter((r) => r.stopId === st.id).length ?? 0;
@@ -613,6 +620,14 @@ export default function SpaceRunsAdminScreen() {
                 placeholder="Planned time, e.g. 07:45 (optional)" placeholderTextColor={colors.textDim}
                 accessibilityLabel="Planned time, 24-hour" keyboardType="numbers-and-punctuation" maxLength={5}
               />
+              {!!stopForm?.time.trim() && stopDay(editing?.run.scheduledAt ?? null, '') == null && (
+                <TextInput
+                  style={s.input} value={stopForm?.day ?? ''}
+                  onChangeText={(t) => setStopForm((f) => f && { ...f, day: t })}
+                  placeholder="Day of the run, e.g. 2026-10-05" placeholderTextColor={colors.textDim}
+                  accessibilityLabel="Day of the run, year-month-day" keyboardType="numbers-and-punctuation" maxLength={10}
+                />
+              )}
               <Text style={s.muted}>
                 The location gives guardians an arrival estimate and lets the driver’s phone
                 notice a route deviation. The planned time is what “running late” is measured against.

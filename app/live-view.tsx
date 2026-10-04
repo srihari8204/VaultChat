@@ -687,7 +687,14 @@ export default function LiveViewScreen() {
     else Alert.alert('Poll', 'Could not start the poll.');
   }, [id, pollDraft]);
 
+  // Set once the screen is on its way out, so a second tap on "Go back" / "End"
+  // (or a hardware back during the teardown awaits) cannot end the broadcast
+  // twice and pop two screens. Never reset: every path below navigates away.
+  const leaving = useRef(false);
+
   const stop = useCallback(async () => {
+    if (leaving.current) return;
+    leaving.current = true;
     // TEAR THE ROOM DOWN HERE, not in the unmount cleanup.
     //
     // Relying on unmount left the old LiveKit session alive: measured on device,
@@ -727,6 +734,8 @@ export default function LiveViewScreen() {
    * onto the Go Live list.
    */
   const leaveAsViewer = useCallback(async () => {
+    if (leaving.current) return;
+    leaving.current = true;
     const s = hostSession.current;
     hostSession.current = null;
     mediaLib.current = null;
@@ -758,12 +767,6 @@ export default function LiveViewScreen() {
     if (isOwner && !ended) { if (failed) void stop(); else confirmStop(); return; }
     void leaveAsViewer();
   };
-  const exitRef = useRef(exitScreen);
-  exitRef.current = exitScreen;
-  useEffect(() => {
-    const sub = BackHandler.addEventListener('hardwareBackPress', () => { exitRef.current(); return true; });
-    return () => sub.remove();
-  }, []);
 
   // ── THE IMMERSIVE STAGE ─────────────────────────────────────────
   //
@@ -848,6 +851,20 @@ export default function LiveViewScreen() {
   // the bar out from under a half-typed message is the kind of "helpful" that
   // loses the message.
   const pinned = chatOpen || inviteOpen || pollDraft !== null;
+
+  // Hardware back closes an open panel first (they only render on a ready
+  // stage), and only then leaves through exitScreen.
+  const backRef = useRef<() => void>(() => {});
+  backRef.current = () => {
+    if (stageReady && pollDraft !== null) setPollDraft(null);
+    else if (stageReady && inviteOpen) setInviteOpen(false);
+    else if (stageReady && chatOpen) setChatOpen(false);
+    else exitScreen();
+  };
+  useEffect(() => {
+    const sub = BackHandler.addEventListener('hardwareBackPress', () => { backRef.current(); return true; });
+    return () => sub.remove();
+  }, []);
   useEffect(() => {
     if (!stageReady || !chrome || pinned) return;
     const t = setTimeout(() => setChrome(false), 5000);

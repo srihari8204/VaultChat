@@ -87,6 +87,7 @@ export default function SpaceDevicesScreen() {
   const [open, setOpen] = useState<SpaceDevice | null>(null);
   const [events, setEvents] = useState<DeviceEvent[]>([]);
   const [commands, setCommands] = useState<DeviceCommand[]>([]);
+  const [detailError, setDetailError] = useState<string | null>(null);
   const [msg, setMsg] = useState('');
   const [asking, setAsking] = useState(false);
 
@@ -102,15 +103,17 @@ export default function SpaceDevicesScreen() {
   }, []);
 
   const openDevice = useCallback(async (d: SpaceDevice) => {
-    setOpen(d); setEvents([]); setCommands([]); setBoundHere(false);
+    setOpen(d); setEvents([]); setCommands([]); setBoundHere(false); setDetailError(null);
     isBoundHere(spaceId, d.id).then(setBoundHere).catch(() => {});
-    try {
-      const [e, c] = await Promise.all([
-        getDeviceEvents(spaceId, d.id).catch(() => [] as DeviceEvent[]),
-        getDeviceCommands(spaceId, d.id).catch(() => [] as DeviceCommand[]),
-      ]);
-      setEvents(e); setCommands(c);
-    } catch { /* the sheet still renders with what it has */ }
+    // Each part fails on its own, and a failure is SAID: an empty history on a
+    // theft screen must mean "nothing happened", never "could not ask".
+    const failed: string[] = [];
+    const [e, c] = await Promise.all([
+      getDeviceEvents(spaceId, d.id).catch(() => { failed.push('history'); return [] as DeviceEvent[]; }),
+      getDeviceCommands(spaceId, d.id).catch(() => { failed.push('requests'); return [] as DeviceCommand[]; }),
+    ]);
+    setEvents(e); setCommands(c);
+    setDetailError(failed.length ? `Could not load this device’s ${failed.join(' or ')}.` : null);
   }, [spaceId]);
 
   const onAdd = useCallback(async () => {
@@ -170,7 +173,7 @@ export default function SpaceDevicesScreen() {
       Alert.alert(
         'Sent to the device',
         // Never "Done." The device has not said anything yet.
-        'The request is queued. The phone carries it out the next time VaultChat is open on it, and this screen will show when it did.',
+        'The request is queued. The phone carries it out the next time crazzychat is open on it, and this screen will show when it did.',
       );
     } catch (e: any) {
       Alert.alert('Could not send', e?.message ?? 'Try again.');
@@ -332,7 +335,7 @@ export default function SpaceDevicesScreen() {
                       <Text style={s.actionText}>This is the phone I am using</Text>
                       <Text style={s.muted}>
                         {boundHere
-                          ? 'This phone reports in and carries out requests while VaultChat is open.'
+                          ? 'This phone reports in and carries out requests while crazzychat is open.'
                           : 'Turn on, on the phone itself, so it can receive requests.'}
                       </Text>
                     </View>
@@ -346,7 +349,7 @@ export default function SpaceDevicesScreen() {
                     disabled={busy || !a.supported}
                     accessibilityRole="button"
                     accessibilityState={{ disabled: busy || !a.supported }}
-                    accessibilityHint={a.supported ? undefined : 'Not available on VaultChat phones yet'}
+                    accessibilityHint={a.supported ? undefined : 'Not available on crazzychat phones yet'}
                   >
                     <Ionicons name={a.icon} size={19} color={a.danger ? colors.danger : colors.text} />
                     <View style={{ flex: 1 }}>
@@ -386,10 +389,14 @@ export default function SpaceDevicesScreen() {
               </TouchableOpacity>
             )}
 
+            {detailError && open && (
+              <LoadError colors={colors} message={detailError} onRetry={() => { void openDevice(open); }} />
+            )}
+
             {/* History + alerts (screens 13 and 17) */}
             <Text style={s.section}>HISTORY</Text>
             <View style={s.card}>
-              {events.length === 0 && <Text style={s.muted}>Nothing recorded yet.</Text>}
+              {events.length === 0 && !detailError && <Text style={s.muted}>Nothing recorded yet.</Text>}
               {events.map((e) => (
                 <View key={e.id} style={s.row}>
                   <View style={[s.dot, { backgroundColor: eventColour(e.kind, colors) }]} />
@@ -457,7 +464,7 @@ export default function SpaceDevicesScreen() {
         <View style={s.modalWrap}>
           <View style={s.modal}>
             <Text style={s.modalTitle}>Show a message</Text>
-            <Text style={s.muted}>Whoever has the phone sees this when VaultChat is open on it. A phone number helps.</Text>
+            <Text style={s.muted}>Whoever has the phone sees this when crazzychat is open on it. A phone number helps.</Text>
             <TextInput style={s.input} value={msg} onChangeText={setMsg} autoFocus multiline
               placeholder="Lost phone — please call …" placeholderTextColor={colors.textDim} maxLength={300} />
             <View style={s.modalRow}>

@@ -32,6 +32,39 @@ export function plannedAtOn(baseMs: number, minutes: number): string {
   return d.toISOString();
 }
 
+/** "2026-10-05" → local midnight of that calendar day (ms), else null. */
+export function parseDay(text: string): number | null {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(text.trim());
+  if (!m) return null;
+  const y = Number(m[1]), mo = Number(m[2]) - 1, d = Number(m[3]);
+  const t = new Date(y, mo, d);
+  // Rejects 2026-02-30 and the like, which Date would roll into March.
+  if (t.getFullYear() !== y || t.getMonth() !== mo || t.getDate() !== d) return null;
+  return t.getTime();
+}
+
+/** The local "YYYY-MM-DD" of an instant, for pre-filling a date field. */
+export function dayOf(iso: string | null): string {
+  if (!iso) return '';
+  const t = Date.parse(iso);
+  if (!Number.isFinite(t)) return '';
+  const d = new Date(t);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+/**
+ * The day a stop's planned time belongs to: the run's scheduled day, else the
+ * day the admin typed, else null (ask).
+ *
+ * Never "today": planned_at is a full instant and the server's delay check
+ * (runCheckDelays) fires once it has passed, so a time saved the evening
+ * before an unscheduled run would make every stop overdue the moment it starts.
+ */
+export function stopDay(scheduledAt: string | null, typedDay: string): number | null {
+  const t = scheduledAt ? Date.parse(scheduledAt) : NaN;
+  return Number.isFinite(t) ? t : parseDay(typedDay);
+}
+
 /** The local "HH:MM" of an instant, for pre-filling an edit form. */
 export function clockOf(iso: string | null): string {
   if (!iso) return '';
