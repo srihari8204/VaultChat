@@ -4,7 +4,10 @@
 //               members, today's highlights (decrypted check-ins/SOS)
 //   expanded  — full-screen live map + roster sheet
 // Circle CRUD (rename/roles/remove/leave/delete) lives in the ⋯ manage sheet;
-// all of it rides existing group endpoints. Positions stay E2EE end to end.
+// all of it rides existing group endpoints. Live pings ride the sealed E2EE
+// relay; the same privacy-reduced points are ALSO uploaded in plain form to the
+// space location store (lib/family/presence.ts → lib/location/publisher.ts),
+// which only circle members may read.
 
 import { AppText as Text } from '../components/ui/Text';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
@@ -79,6 +82,8 @@ import { KeyboardSafe } from '../components/ui';
 import { initialOf } from '../lib/format';
 
 const SOS_HOLD_MS = 1500;
+/** Oldest cached fix an SOS message may quote as the sender's position. */
+const SOS_FIX_MAX_AGE_MS = 5 * 60_000;
 const AVATAR_COLORS = ['#4A9FFF', '#EC4899', '#22C55E', '#F59E0B', '#A855F7', '#EF4444', '#14B8A6', '#F97316'];
 const colorFor = (id: string) => AVATAR_COLORS[[...id].reduce((a, c) => a + c.charCodeAt(0), 0) % AVATAR_COLORS.length];
 
@@ -263,8 +268,8 @@ export default function FamilySpaceScreen() {
   const [runs, setRuns] = useState<SpaceRun[]>([]);
   // This circle's saved Places (device-local geofences) — they name the FAMILY
   // NOW board's "At Home / At School" rows. Statuses are derived here on the
-  // viewing device from decrypted presences: positions are E2EE, so the server
-  // cannot compute "at school", and this screen never invents one.
+  // viewing device from decrypted presences: Places never leave this device, so
+  // the server cannot compute "at school", and this screen never invents one.
   const [places, setPlacesState] = useState<Geofence[]>([]);
 
   useEffect(() => { loadAlerts(); }, []);
@@ -608,8 +613,13 @@ export default function FamilySpaceScreen() {
     return () => { dead = true; };
   }, [active?.id, bump]);
 
-  /** Resolves to whether sharing is ON afterwards. */
-  const toggleShare = async (v: boolean): Promise<boolean> => {
+  /**
+   * Resolves to whether sharing is ON afterwards. `quiet` (the SOS path) skips
+   * every dialog and settings hand-off this would otherwise raise, so the SOS
+   * shows ONE outcome dialog instead of a stack of them (fireSos offers the
+   * one fix that matters inside that dialog).
+   */
+  const toggleShare = async (v: boolean, quiet = false): Promise<boolean> => {
     // setSharing asks for location permission when turning ON — that is the
     // moment it is genuinely needed. If it is refused, leave the switch OFF
     // rather than showing it on while nothing is being published.
@@ -625,7 +635,7 @@ export default function FamilySpaceScreen() {
     // a locked phone stops publishing and the family sees someone "vanish"
     // while the app believes it is sharing. Asked ONCE per circle, never
     // nagged — the flag records that we have asked, not that they said yes.
-    if (ok && v) {
+    if (ok && v && !quiet) {
       try {
         const askedKey = 'vc_family_bg_asked';
         const asked = await AsyncStorage.getItem(askedKey);
@@ -652,7 +662,7 @@ export default function FamilySpaceScreen() {
         }
       } catch { /* guidance is best-effort; sharing itself already succeeded */ }
     }
-    if (v && !ok) {
+    if (v && !ok && !quiet) {
       Alert.alert(
         'Location is turned off',
         `crazzychat needs location permission to share your position with ${active?.name ?? 'this space'}. `
@@ -661,7 +671,7 @@ export default function FamilySpaceScreen() {
       );
       return false;
     }
-    if (ok) await offerBackground();
+    if (ok && !quiet) await offerBackground();
     return ok;
   };
 
@@ -973,11 +983,15 @@ export default function FamilySpaceScreen() {
     // the user and the alert. The OS's cached fix is instant and prompt-free
     // (it throws without permission, which just means no coordinates); live
     // sharing, started right after, supplies the real position.
+    // The cache can be hours old, and a stale fix sent as "where I am" sends
+    // the circle to the wrong place — so it only goes when it is recent.
     try {
-      let where = '';
+      let where = ' (location unavailable)';
       try {
-        const c = await Location.getLastKnownPositionAsync();
-        if (c) where = ` (${c.coords.latitude.toFixed(5)}, ${c.coords.longitude.toFixed(5)})`;
+        const c = await Location.getLastKnownPositionAsync({ maxAge: SOS_FIX_MAX_AGE_MS });
+        if (c && Date.now() - c.timestamp <= SOS_FIX_MAX_AGE_MS) {
+          where = ` (${c.coords.latitude.toFixed(5)}, ${c.coords.longitude.toFixed(5)})`;
+        }
       } catch {}
       await sendMessage(active.id, `🆘 ${me.name} triggered an SOS — please respond${where}`, 'system');
     } catch (e: any) { Alert.alert('SOS', e?.message ?? 'Could not send SOS.'); return; }
@@ -986,10 +1000,26 @@ export default function FamilySpaceScreen() {
       text: `${me.name} triggered an SOS`,
     }).catch(() => {});
     setBump((b) => b + 1);
-    const live = await toggleShare(true).catch(() => false);
-    Alert.alert('SOS sent', live
-      ? 'Your circle has been alerted and your live location is on.'
-      : 'Your circle has been alerted. Your live location is NOT being shared.', [
+    const live = await toggleShare(true, true).catch(() => false);
+    // The one dialog after an SOS: what happened, plus the single fix that
+    // matters — location access when sharing could not start, or always-on
+    // location when it only runs while this screen is open — instead of the
+    // stack of dialogs toggleShare would otherwise raise.
+    const bgMissing = live && !(await canShareInBackground().catch(() => true));
+    if (bgMissing) bgAsked.current = true;
+    const fix = !live
+      ? [{ text: 'Open settings', onPress: () => { Linking.openSettings().catch(() => {}); } }]
+      : bgMissing
+        ? [{ text: 'Keep sharing when locked', onPress: async () => {
+            if (await requestBackgroundPermission()) { try { await setSharing(false); await setSharing(true); } catch {} }
+          } }]
+        : [];
+    Alert.alert('SOS sent', !live
+      ? 'Your circle has been alerted. Your live location is NOT being shared — check that location access is on.'
+      : bgMissing
+        ? 'Your circle has been alerted and your live location is on while crazzychat is open.'
+        : 'Your circle has been alerted and your live location is on.', [
+      ...fix,
       { text: 'Also alert trusted contacts', onPress: () => router.push('/emergency-sos' as any) },
       { text: 'OK' },
     ]);
@@ -2319,8 +2349,8 @@ export default function FamilySpaceScreen() {
             </TouchableOpacity>
             {/* High-speed alert for MY OWN device (spec: speed alerts). Tap the
                 threshold to cycle it. Off by default; detected on this phone —
-                the server never sees a speed. */}
-            <View accessibilityRole="button" style={[st.mRow, { borderColor: G.line }]}>
+                the alert is never computed server-side. */}
+            <View style={[st.mRow, { borderColor: G.line }]}>
               <Ionicons name="speedometer-outline" size={19} color={colors.primary} />
               <Text style={[st.mTxt, { color: colors.text, flex: 1 }]}>High-speed alert</Text>
               {speedAlert.enabled && (

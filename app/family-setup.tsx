@@ -66,7 +66,7 @@ export default function FamilySetupScreen() {
         <View style={[st.hero, { backgroundColor: G.pane, borderColor: G.edge }]}>
           <Ionicons name="people-circle" size={44} color={colors.primary} />
           <Text style={[st.heroTitle, { color: colors.text }]}>Your family, privately</Text>
-          <Text style={[st.heroSub, { color: colors.textDim }]}>See each other on a live map, get arrive/leave alerts, and send SOS. Live locations are end-to-end encrypted. Road distances, routes and history distances send points to crazzychat&apos;s routing server, which does not store them.</Text>
+          <Text style={[st.heroSub, { color: colors.textDim }]}>See each other on a live map, get arrive/leave alerts, and send SOS. Live updates between your phones are end-to-end encrypted, but each position you share (after your privacy setting) is also stored on crazzychat&apos;s server so the circle can see last-known spots and history. The server only shows it to circle members. Road distances, routes and history distances send points to crazzychat&apos;s routing server, which does not store them.</Text>
         </View>
 
         <Text style={[st.h, { color: colors.textDim }]}>Create a circle</Text>

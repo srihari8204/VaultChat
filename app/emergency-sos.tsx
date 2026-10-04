@@ -72,6 +72,12 @@ export default function EmergencySOSScreen() {
   // A failed load is NOT "no contacts": in an emergency that copy sends the
   // user off to set contacts up instead of retrying. Kept separate on purpose.
   const [loadError, setLoadError] = useState(false);
+  // Whether the list has loaded at least once. Until it has, the client knows
+  // nothing about who the contacts are, so an SOS goes to ALL of them (the
+  // server's default when no subset is sent) instead of being blocked.
+  const [everLoaded, setEverLoaded] = useState(false);
+  /** Contacts seen by the last successful load, to tell new ones from deselected ones. */
+  const knownIds = useRef<Set<string>>(new Set());
   /** The server's own count of contacts it pushed to — not our selection size. */
   const [notified, setNotified] = useState<number | null>(null);
   const [countdown, setCountdown] = useState<number | null>(null);
@@ -81,6 +87,8 @@ export default function EmergencySOSScreen() {
   // sender has to know, because the whole point of the alert is "come find me".
   const [sentNoLoc, setSentNoLoc] = useState(false);
   const [testMode, setTestMode] = useState(false);
+  /** Recipients fixed at countdown start: undefined = all trusted contacts. */
+  const [sendTo, setSendTo] = useState<string[] | undefined>(undefined);
   const [history, setHistory] = useState<SOSHistoryItem[]>([]);
   const [shakeEnabled, setShakeEnabled] = useState(true);
 
@@ -116,7 +124,12 @@ export default function EmergencySOSScreen() {
       const tc = await listTrustedContacts();
       const contacts = tc.map(c => ({ uid: c.userId, name: c.name || 'Unknown', vaultId: c.vaultId || c.userId.slice(0, 8) }));
       setTrustedContacts(contacts);
-      setSelectedContacts(contacts.map(c => c.uid));
+      // Keep the user's choices across a refocus: a contact they deselected
+      // stays deselected, a newly added one starts selected, a removed one goes.
+      const known = knownIds.current;
+      setSelectedContacts(prev => contacts.filter(c => !known.has(c.uid) || prev.includes(c.uid)).map(c => c.uid));
+      knownIds.current = new Set(contacts.map(c => c.uid));
+      setEverLoaded(true);
     } catch {
       setLoadError(true);
     }
@@ -165,11 +178,31 @@ export default function EmergencySOSScreen() {
     );
   };
 
+  /**
+   * Who the SOS goes to: `undefined` = every trusted contact (the server's
+   * default), else the selected subset. An EMPTY array must never be sent — the
+   * server reads it as "no subset" and alerts everyone the user just deselected.
+   */
+  const recipients = (): { ids: string[] | undefined } | 'none-set-up' | 'none-selected' => {
+    if (!everLoaded) return { ids: undefined };
+    if (trustedContacts.length === 0) return 'none-set-up';
+    const ids = selectedContacts.filter(uid => trustedContacts.some(c => c.uid === uid));
+    return ids.length ? { ids } : 'none-selected';
+  };
   const startCountdown = (isTest: boolean) => {
-    if (selectedContacts.length === 0) {
-      Alert.alert('No Contacts', 'Select at least one trusted contact to send SOS to.');
+    const to = recipients();
+    if (to === 'none-set-up') {
+      Alert.alert('No trusted contacts', 'Add at least one trusted contact so an SOS reaches someone.', [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Set up', onPress: () => router.push('/trusted-contacts') },
+      ]);
       return;
     }
+    if (to === 'none-selected') {
+      Alert.alert('No contacts selected', 'Select at least one trusted contact to send the SOS to.');
+      return;
+    }
+    setSendTo(to.ids);
     setTestMode(isTest);
     setCountdown(5);
     setSent(false);
@@ -180,7 +213,7 @@ export default function EmergencySOSScreen() {
       if (count <= 0) {
         clearInterval(countdownTimer.current);
         setCountdown(null);
-        triggerSOS(isTest);
+        triggerSOS(isTest, to.ids);
       } else {
         setCountdown(count);
         Vibration.vibrate(100);
@@ -196,15 +229,16 @@ export default function EmergencySOSScreen() {
     setCountdown(null);
   };
 
-  const triggerSOS = async (isTest: boolean) => {
+  const triggerSOS = async (isTest: boolean, contactIds: string[] | undefined) => {
     setSending(true);
     try {
       // Location is genuinely best-effort now — sosFix cannot throw, so a failed
       // or slow fix can no longer take the SOS down with it.
       const { lat, lng } = await sosFix();
 
-      // Dispatch via backend — pushes to the selected trusted contacts.
-      const res = await sendSOS(lat, lng, isTest, selectedContacts);
+      // Dispatch via backend — pushes to the selected trusted contacts, or to
+      // all of them when the list never loaded (contactIds undefined).
+      const res = await sendSOS(lat, lng, isTest, contactIds);
 
       setNotified(typeof res?.contactsNotified === 'number' ? res.contactsNotified : null);
       setSent(true);
@@ -254,6 +288,11 @@ export default function EmergencySOSScreen() {
                 accessibilityLiveRegion="assertive"
                 accessibilityLabel={`${testMode ? 'Test ' : ''}SOS sends in ${countdown} seconds`}
               >{countdown}</Text>
+              <Text style={styles.countdownTo}>
+                {sendTo === undefined
+                  ? 'To all your trusted contacts'
+                  : `To ${sendTo.length} trusted contact${sendTo.length === 1 ? '' : 's'}`}
+              </Text>
               <TouchableOpacity
                 onPress={cancelCountdown}
                 style={styles.cancelBtn}
@@ -275,7 +314,10 @@ export default function EmergencySOSScreen() {
               <Text style={styles.sentCheck}>✓</Text>
               <Text style={styles.sentText}>{testMode ? 'Test SOS Sent' : 'SOS Sent!'}</Text>
               <Text style={styles.sentSub}>
-                {notified == null ? 'Sent to your trusted contacts' : `${notified} contact(s) notified`}
+                {/* The server's count is who it is ALERTING, not who received it. */}
+                {notified == null ? 'Your trusted contacts are being alerted'
+                  : notified === 0 ? 'No trusted contacts to alert — add some so an SOS reaches someone.'
+                    : `Alerting ${notified} trusted contact${notified === 1 ? '' : 's'}`}
               </Text>
               {sentNoLoc && (
                 <Text style={styles.sentWarn}>
@@ -350,11 +392,13 @@ export default function EmergencySOSScreen() {
               </TouchableOpacity>
             )}
           </View>
-          {loading ? (
+          {loading && !everLoaded ? (
             <ActivityIndicator color={colors.accent} style={{ marginTop: 16 }} />
-          ) : loadError ? (
+          ) : loadError && !everLoaded ? (
             <View style={styles.emptyCard}>
-              <Text style={styles.emptyText}>Couldn&apos;t load your trusted contacts. Check your connection.</Text>
+              <Text style={styles.emptyText}>
+                Couldn&apos;t load your trusted contacts. Check your connection. An SOS still goes to all of them.
+              </Text>
               <TouchableOpacity onPress={loadTrustedContacts} style={styles.setupBtn} accessibilityRole="button" accessibilityLabel="Retry loading trusted contacts">
                 <Text style={styles.setupBtnText}>Retry</Text>
               </TouchableOpacity>
@@ -367,14 +411,22 @@ export default function EmergencySOSScreen() {
               </TouchableOpacity>
             </View>
           ) : (
-            trustedContacts.map(contact => (
+            <>
+            {loadError && (
+              <Text style={styles.refreshWarn} accessibilityLiveRegion="polite">
+                Couldn&apos;t refresh this list — showing the last one loaded.
+              </Text>
+            )}
+            {trustedContacts.map(contact => (
               <TouchableOpacity
                 key={contact.uid}
                 style={[styles.contactRow, selectedContacts.includes(contact.uid) && styles.contactSelected]}
                 onPress={() => toggleContact(contact.uid)}
+                // The recipients are fixed when the countdown starts.
+                disabled={countdown !== null || sending}
                 accessibilityRole="checkbox"
                 accessibilityLabel={`${contact.name}, @${contact.vaultId}`}
-                accessibilityState={{ checked: selectedContacts.includes(contact.uid) }}
+                accessibilityState={{ checked: selectedContacts.includes(contact.uid), disabled: countdown !== null || sending }}
               >
                 <View style={[styles.contactCheck, selectedContacts.includes(contact.uid) && styles.contactCheckActive]}>
                   {selectedContacts.includes(contact.uid) && <Ionicons name="checkmark" size={14} color={colors.accent} />}
@@ -384,7 +436,8 @@ export default function EmergencySOSScreen() {
                   <Text style={styles.contactId}>@{contact.vaultId}</Text>
                 </View>
               </TouchableOpacity>
-            ))
+            ))}
+            </>
           )}
         </View>
 
@@ -403,7 +456,7 @@ export default function EmergencySOSScreen() {
                   </Text>
                   <Text style={styles.historyTime}>{formatTime(item.createdAt)}</Text>
                 </View>
-                <Text style={styles.historyContacts}>{item.contactsNotified} notified</Text>
+                <Text style={styles.historyContacts}>{item.contactsNotified} alerted</Text>
               </View>
             ))
           )}
@@ -437,6 +490,7 @@ const makeStyles = (c: Palette, light: boolean) => StyleSheet.create({
   countdownContainer: { alignItems: 'center' },
   countdownLabel: { color: c.danger, fontSize: 18, fontWeight: '600', marginBottom: 10 },
   countdownNumber: { color: c.text, fontSize: 72, fontWeight: '900' },
+  countdownTo: { color: c.textDim, fontSize: 14, marginTop: 4, textAlign: 'center' },
   cancelBtn: { marginTop: 20, backgroundColor: 'rgba(255,60,110,0.15)', paddingHorizontal: 40, paddingVertical: 14, borderRadius: 12, borderWidth: 1, borderColor: c.danger },
   cancelBtnText: { color: c.danger, fontSize: 18, fontWeight: '800', letterSpacing: 2 },
 
@@ -475,7 +529,8 @@ const makeStyles = (c: Palette, light: boolean) => StyleSheet.create({
   contactName: { color: c.text, fontSize: 15, fontWeight: '600' },
   contactId: { color: c.textDim, fontSize: 12, marginTop: 2 },
   emptyCard: { alignItems: 'center', backgroundColor: c.glassSoft, borderRadius: 14, padding: 24, borderWidth: 1, borderColor: 'rgba(74,159,255,0.08)' },
-  emptyText: { color: c.textDim, fontSize: 14, marginBottom: 14 },
+  emptyText: { color: c.textDim, fontSize: 14, marginBottom: 14, textAlign: 'center' },
+  refreshWarn: { color: c.textDim, fontSize: 12, marginBottom: 8 },
   setupBtn: { backgroundColor: c.accent, paddingHorizontal: 20, paddingVertical: 10, borderRadius: 8 },
   setupBtnText: { color: '#FFF', fontSize: 14, fontWeight: '700' },
 

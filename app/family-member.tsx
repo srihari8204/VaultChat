@@ -73,8 +73,11 @@ export default function FamilyMemberScreen() {
   const [loading, setLoading] = useState(true);
   const [opening, setOpening] = useState(false);
   // Same gate as the history screen, so History cannot be reached sideways from
-  // here when the group withholds it. Starts denied.
-  const [mayViewHistory, setMayViewHistory] = useState(false);
+  // here when the group withholds it. Starts UNKNOWN, not denied: a first pull
+  // that fails has decided nothing, and reading it as "denied" told the viewer
+  // a false permission fact about themselves.
+  const [access, setAccess] = useState<'unknown' | 'allowed' | 'denied'>('unknown');
+  const mayViewHistory = access === 'allowed';
   // Blur has to cancel the write-back too: pull()'s awaits outlive the screen,
   // so without this it setStates onto a tree that is gone (2026-09-17).
   const alive = useRef(true);
@@ -111,7 +114,15 @@ export default function FamilyMemberScreen() {
 
   /** The last pull threw — shown, and the 15 s poll keeps retrying. */
   const [pullFailed, setPullFailed] = useState(false);
-  const [selfId, setSelfId] = useState<string | null>(null);
+  /** undefined = not resolved yet; null = lookup failed. Resolved on its own,
+   *  so a failed pull cannot bring Message/Call back onto your own row. */
+  const [selfId, setSelfId] = useState<string | null | undefined>(undefined);
+  useEffect(() => {
+    let live = true;
+    getCurrentUserAsync().then((me) => { if (live) setSelfId(me ? String(me.id) : null); })
+      .catch(() => { if (live) setSelfId(null); });
+    return () => { live = false; };
+  }, []);
 
   const pull = useCallback(async () => {
     if (!circleId || !userId) { setLoading(false); return; }
@@ -154,8 +165,7 @@ export default function FamilyMemberScreen() {
     const denied = !allowed && userId !== (me ? String(me.id) : null);
     const track = denied ? [] : await getTrack(circleId, { from: startOfToday(), userId });
     if (!alive.current) return;   // blurred mid-flight — nothing below may set state
-    setSelfId(me ? String(me.id) : null);
-    setMayViewHistory(!denied);
+    setAccess(denied ? 'denied' : 'allowed');
     setToday(track);
     setPlaces(ps);
     setLoading(false);
@@ -186,7 +196,9 @@ export default function FamilyMemberScreen() {
    * returns before deciding anything — so it is excluded rather than shown a
    * lock it did not earn.
    */
-  const withheld = !mayViewHistory && !!circleId && !!userId;
+  const withheld = access === 'denied' && !!circleId && !!userId;
+  /** Nothing has loaded yet and the last attempt failed: no claim either way. */
+  const unknown = access === 'unknown' && pullFailed;
 
   const last = today.length ? today[today.length - 1] : null;
   // Freshness tier (LIVE / RECENT / STALE / UNAVAILABLE) — a fix past the
@@ -302,8 +314,13 @@ export default function FamilyMemberScreen() {
     `This space does not share other members' location history with your role, so ${name}'s position is not available here.`,
   );
 
+  const loadFailedAlert = () => Alert.alert(
+    'Not loaded', `${name}'s location could not be loaded. Check your connection and try again.`,
+  );
+
   const route = () => {
     if (withheld) { lockedAlert(); return; }
+    if (unknown) { loadFailedAlert(); return; }
     if (!last) { Alert.alert('No location', `${name} is not sharing a location right now.`); return; }
     // Say WHICH position is being navigated to. A stale fix is a legitimate
     // destination, but calling it "live" when it is 20 minutes old is exactly
@@ -323,6 +340,7 @@ export default function FamilyMemberScreen() {
   /** Follow on the circle map (spec: Follow member). Needs a usable fix. */
   const follow = () => {
     if (withheld) { lockedAlert(); return; }
+    if (unknown) { loadFailedAlert(); return; }
     if (!last || tier === 'unavailable') {
       Alert.alert('Cannot follow', `${name} has no location to follow right now.`);
       return;
@@ -359,7 +377,7 @@ export default function FamilyMemberScreen() {
       }} />
       <SpaceGround aura={colorFor(userId)} />
       <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 40 }}>
-        {pullFailed && (
+        {pullFailed && !unknown && (
           <Text accessibilityLiveRegion="polite" style={{ color: G.dangerText, fontSize: 12.5, marginBottom: 10 }}>
             Couldn&apos;t refresh {name}&apos;s details — retrying automatically.
           </Text>
@@ -377,6 +395,7 @@ export default function FamilyMemberScreen() {
             </View>
             <Text style={{ color: fresh ? G.goodText : colors.textDim, fontSize: 12.5, marginTop: 2 }}>
               {withheld ? 'Location not shared with you'
+                : unknown ? 'Location not loaded'
                 : tier === 'live' ? 'Online'
                   : tier === 'recent' ? `Updated ${ago(last!.ts)}`
                     : tier === 'stale' ? `Last known · ${ago(last!.ts)}`
@@ -404,6 +423,17 @@ export default function FamilyMemberScreen() {
             plain wording as the lock notice on group-insights.tsx, because it
             is the same fact. Message and Call are untouched by it, so say so
             rather than leaving the screen looking broken. */}
+        {unknown && (
+          <View style={[st.notice, { backgroundColor: G.pane, borderColor: G.edge }]} accessibilityLiveRegion="polite">
+            <Ionicons name="cloud-offline-outline" size={15} color={G.dangerText} />
+            <Text style={{ color: colors.textDim, fontSize: 12.5, flex: 1 }}>
+              Couldn&apos;t load {name}&apos;s location and places. Check your connection.
+            </Text>
+            <TouchableOpacity onPress={pull} accessibilityRole="button" accessibilityLabel={`Retry loading ${name}'s details`} hitSlop={10}>
+              <Text style={{ color: G.accentText, fontSize: 12.5, fontWeight: '800' }}>Retry</Text>
+            </TouchableOpacity>
+          </View>
+        )}
         {withheld && (
           <View style={[st.notice, { backgroundColor: G.pane, borderColor: G.edge }]}>
             <Ionicons name="lock-closed-outline" size={15} color={colors.textDim} />
@@ -418,8 +448,8 @@ export default function FamilyMemberScreen() {
         {/* actions */}
         <View style={st.actions}>
           {/* Not on your own row: these opened a "direct chat" with yourself. */}
-          {userId !== selfId && action('chatbubble-ellipses', 'Message', () => openDirect('chat'))}
-          {userId !== selfId && action('call', 'Call', () => openDirect('voicecall'))}
+          {selfId !== undefined && userId !== selfId && action('chatbubble-ellipses', 'Message', () => openDirect('chat'))}
+          {selfId !== undefined && userId !== selfId && action('call', 'Call', () => openDirect('voicecall'))}
           {action('navigate-circle', 'Route', route)}
           {action('locate', 'Follow', follow)}
           {mayViewHistory && action('time', 'History', () => router.push({
@@ -467,6 +497,9 @@ export default function FamilyMemberScreen() {
             the track is withheld is how "0 m travelled · 0 km/h · nothing yet
             today" got stated as fact about someone whose day we never saw. The
             notice above is the answer for this viewer; these sections are not. */}
+        {/* A failed first load has no track and no places: every section below
+            would state "0 m / nothing today / no places" as fact, so none render. */}
+        {!unknown && (<>
         {!withheld && (<>
         <Text style={[st.h, { color: colors.textDim }]}>Today</Text>
         <View style={[st.statRow, { backgroundColor: G.pane, borderColor: G.edge }]}>
@@ -578,6 +611,7 @@ export default function FamilyMemberScreen() {
             </View>
           );
         })}
+        </>)}
       </ScrollView>
     </View>
   );

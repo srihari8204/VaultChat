@@ -132,13 +132,13 @@ export default function CommunitiesScreen() {
             </TouchableOpacity>
           )}
           ListFooterComponent={
-            // Only the owner can add groups (server-side rule mirrored by isOwner).
-            detail.isOwner ? (
-              <TouchableOpacity style={S.addRow} activeOpacity={0.7} accessibilityRole="button" accessibilityLabel="New group in this community" onPress={() => { setName(''); setModal('group'); }}>
-                <View style={S.addIcon}><Ionicons name="add" size={22} color={colors.primary} /></View>
-                <Text style={S.addTxt}>New group</Text>
-              </TouchableOpacity>
-            ) : null
+            // Any community member may add a group: the server only checks
+            // membership (POST /communities/:id/groups — communities.go /
+            // communities.js), and everyone who can open this screen is one.
+            <TouchableOpacity style={S.addRow} activeOpacity={0.7} accessibilityRole="button" accessibilityLabel="New group in this community" onPress={() => { setName(''); setModal('group'); }}>
+              <View style={S.addIcon}><Ionicons name="add" size={22} color={colors.primary} /></View>
+              <Text style={S.addTxt}>New group</Text>
+            </TouchableOpacity>
           }
         />
         {nameModal()}

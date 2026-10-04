@@ -4,8 +4,8 @@
 // (the "flash" alert channel), live distance outside the radius, Stop Alarm,
 // and one-tap navigate-back. Auto-resolves to a green "safe" state on return.
 
-import React, { useEffect, useRef, useMemo } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, Animated, Alert } from 'react-native';
+import React, { useEffect, useRef, useMemo, useState } from 'react';
+import { View, Text, TouchableOpacity, StyleSheet, Animated, Alert, ActivityIndicator } from 'react-native';
 import { Stack, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { type Costing } from '../lib/nav/routing';
@@ -24,6 +24,8 @@ export default function LockAlertScreen() {
   const lock = useLockView();
   const settings = useLockSettings();
   const flash = useRef(new Animated.Value(0)).current;
+  /** The mode whose route back is being planned. */
+  const [planning, setPlanning] = useState<Costing | null>(null);
 
   // A full-screen-intent launch from a killed app lands here before anything
   // else ran — make sure the lock session is restored.
@@ -45,12 +47,18 @@ export default function LockAlertScreen() {
   const over = Math.max(0, lock.distance - lock.radius);
   const bg = flash.interpolate({ inputRange: [0, 1], outputRange: ['#7F1D1D', '#DC2626'] });
 
-  const navBack = (costing: Costing) => {
-    // Surfaced, not swallowed: a failed route left the user on an empty
-    // Navigate screen with no idea why.
-    navigateBackToLock(costing).catch((e: any) =>
-      Alert.alert('Navigate back', e?.message ?? 'Could not plan a route back to the locked spot.'));
-    router.replace('/navigate');
+  const navBack = async (costing: Costing) => {
+    // Surfaced, not swallowed, and Navigate opens only once the route exists:
+    // replacing first left the user on an empty Navigate screen, with this
+    // alarm screen already gone, whenever planning failed.
+    if (planning) return;
+    setPlanning(costing);
+    try {
+      await navigateBackToLock(costing);
+      router.replace('/navigate');
+    } catch (e: any) {
+      Alert.alert('Navigate back', e?.message ?? 'Could not plan a route back to the locked spot.');
+    } finally { setPlanning(null); }
   };
 
   // Safe again (or lock gone) → green confirmation instead of red panic.
@@ -76,7 +84,7 @@ export default function LockAlertScreen() {
     <Animated.View style={[st.screen, { backgroundColor: bg }]}>
       <Stack.Screen options={{ headerShown: false }} />
       <Ionicons name="warning" size={92} color="#fff" />
-      <Text style={st.big} accessibilityLiveRegion="assertive">ALERT!</Text>
+      <Text style={st.big}>ALERT!</Text>
       <Text style={st.msg}>You have left the locked area</Text>
 
       <View style={st.distBox}>
@@ -87,28 +95,31 @@ export default function LockAlertScreen() {
         </Text>
       </View>
 
-      {lock.alarmPhase === 'alarming' ? (
-        <TouchableOpacity onPress={() => stopLockAlarm()} accessibilityRole="button" style={[st.btn, { backgroundColor: c.glassSoft }]}>
-          <Ionicons name="volume-mute" size={18} color="#DC2626" />
-          <Text style={[st.btnTxt, { color: '#DC2626' }]}>Stop Alarm</Text>
-        </TouchableOpacity>
-      ) : (
-        // One line per phase: after Stop Alarm the phase is 'silenced', and
-        // "Alarm starts in moments" was then simply false.
-        <Text style={[st.sub, { marginTop: 8 }]} accessibilityLiveRegion="polite">
-          {lock.alarmPhase === 'grace'
+      {/* One line per phase: after Stop Alarm the phase is 'silenced', and
+          "Alarm starts in moments" was then simply false. Always mounted, so
+          the assertive live region announces each phase CHANGE (a static
+          "ALERT!" heading carried it before and never changed). */}
+      <Text style={[st.sub, { marginTop: 0, marginBottom: 10 }]} accessibilityLiveRegion="assertive">
+        {lock.alarmPhase === 'alarming'
+          ? 'Alarm sounding — head back now'
+          : lock.alarmPhase === 'grace'
             ? 'Alarm starts in moments — head back now'
             : lock.alarmPhase === 'silenced'
               ? 'Alarm silenced — you are still outside the locked area'
               : 'You are outside the locked area — head back now'}
-        </Text>
+      </Text>
+      {lock.alarmPhase === 'alarming' && (
+        <TouchableOpacity onPress={() => stopLockAlarm()} accessibilityRole="button" style={[st.btn, { backgroundColor: c.glassSoft }]}>
+          <Ionicons name="volume-mute" size={18} color="#DC2626" />
+          <Text style={[st.btnTxt, { color: '#DC2626' }]}>Stop Alarm</Text>
+        </TouchableOpacity>
       )}
 
       <Text style={[st.distLabel, { marginTop: 26 }]}>NAVIGATE BACK</Text>
       <View style={st.navRow}>
-        <NavBtn icon="walk" label="Walk" onPress={() => navBack('pedestrian')} />
-        <NavBtn icon="bicycle" label="Cycle" onPress={() => navBack('bicycle')} />
-        <NavBtn icon="car" label="Drive" onPress={() => navBack('auto')} />
+        <NavBtn icon="walk" label="Walk" busy={planning === 'pedestrian'} onPress={() => navBack('pedestrian')} />
+        <NavBtn icon="bicycle" label="Cycle" busy={planning === 'bicycle'} onPress={() => navBack('bicycle')} />
+        <NavBtn icon="car" label="Drive" busy={planning === 'auto'} onPress={() => navBack('auto')} />
       </View>
 
       <TouchableOpacity onPress={() => (router.canGoBack() ? router.back() : router.replace('/location-lock'))} accessibilityRole="button" hitSlop={12} style={{ marginTop: 26 }}>
@@ -118,12 +129,12 @@ export default function LockAlertScreen() {
   );
 }
 
-function NavBtn({ icon, label, onPress }: { icon: any; label: string; onPress: () => void }) {
+function NavBtn({ icon, label, busy, onPress }: { icon: any; label: string; busy: boolean; onPress: () => void }) {
   const c = useColors();
   const st = useMemo(() => makeSt(c), [c]);
   return (
-    <TouchableOpacity onPress={onPress} accessibilityRole="button" accessibilityLabel={`Navigate back: ${label}`} style={st.navBtn}>
-      <Ionicons name={icon} size={22} color="#fff" />
+    <TouchableOpacity onPress={onPress} accessibilityRole="button" accessibilityLabel={`Navigate back: ${label}`} accessibilityState={{ busy }} style={st.navBtn}>
+      {busy ? <ActivityIndicator color="#fff" /> : <Ionicons name={icon} size={22} color="#fff" />}
       <Text style={{ color: '#fff', fontWeight: '700', fontSize: 12.5, marginTop: 3 }}>{label}</Text>
     </TouchableOpacity>
   );

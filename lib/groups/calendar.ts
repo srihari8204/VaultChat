@@ -26,6 +26,7 @@
 //   npx tsx lib/groups/calendar.ts
 
 import type { Task } from './tasks';
+import type { NotifPreview } from '../privacyPrefs';
 
 export type Recurrence = 'none' | 'daily' | 'weekly' | 'monthly' | 'yearly';
 
@@ -202,6 +203,22 @@ export function eventReminderItems(occ: Occurrence[], me: string): Task[] {
     });
   }
   return out;
+}
+
+/** Lock-screen text for an event reminder whose title must not be shown. */
+export const GENERIC_EVENT_REMINDER = 'An event in your shared calendar is coming up';
+
+/**
+ * What an event reminder may say on this phone's lock screen. A shared event
+ * reminds every member, so the title is often another member's words about
+ * their own plans, readable by whoever holds this phone. It shows only for an
+ * event this user created AND while the tray-privacy preference
+ * (lib/privacyPrefs) allows names; everything else gets generic text.
+ */
+export function eventReminderTitle(
+  item: Pick<Task, 'title' | 'createdBy'>, me: string, preview: NotifPreview,
+): string {
+  return item.createdBy === me && preview === 'name' ? item.title : GENERIC_EVENT_REMINDER;
 }
 
 // ── self-check ──

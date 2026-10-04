@@ -22,6 +22,8 @@ import {
   type ScheduledReminder, type PlannedReminder,
 } from './reminders';
 import type { Task } from './tasks';
+import { eventReminderTitle } from './calendar';
+import { getNotifPreview } from '../privacyPrefs';
 
 const KEY = (groupId: string) => `vc_group_task_reminders_${groupId}`;
 // Calendar event reminders reuse the same reconciler with their own bookkeeping,
@@ -43,7 +45,8 @@ const TASK_KIND = (groupId: string): ReminderKind => ({
 
 const EVENT_KIND = (groupId: string): ReminderKind => ({
   key: EVENT_KEY(groupId),
-  // Same lock-screen rule as tasks: the event title, never the group's name.
+  // Never the group's name; the body is already lock-screen-safe (see
+  // syncEventReminders).
   text: (r) => ({ ...reminderText(r), title: 'Upcoming event' }),
   data: (id) => ({ chatId: groupId, eventId: id, type: 'event_reminder' }),
 });
@@ -98,7 +101,12 @@ export async function syncEventReminders(
   now: number = Date.now(),
 ): Promise<{ booked: number; cancelled: number }> {
   if (!groupId || !me) return { booked: 0, cancelled: 0 };
-  return reconcile(EVENT_KIND(groupId), items, me, now);
+  // The lock-screen text is decided BEFORE reconciling, as the item title: the
+  // reconciler re-books on a title change, so switching the tray-privacy
+  // preference also rewrites reminders that are already booked.
+  const preview = await getNotifPreview();
+  const shown = items.map((it) => ({ ...it, title: eventReminderTitle(it, me, preview) }));
+  return reconcile(EVENT_KIND(groupId), shown, me, now);
 }
 
 async function reconcile(

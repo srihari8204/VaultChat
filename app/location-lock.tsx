@@ -66,6 +66,8 @@ export default function LocationLockScreen() {
   const [accuracy, setAccuracy] = useState<number | null>(null);
   const [myPos, setMyPos] = useState<LatLng | null>(null);
   const [arming, setArming] = useState(false);
+  /** The mode whose route back is being planned; Navigate opens only once it exists. */
+  const [planning, setPlanning] = useState<Costing | null>(null);
   const [saved, setSaved] = useState<{ name: string; coords: LatLng; radiusM: number }[]>([]);
   const [, tick] = useState(0);
 
@@ -175,10 +177,17 @@ export default function LocationLockScreen() {
     ]);
   };
 
-  const navBack = (costing: Costing) => {
-    navigateBackToLock(costing).catch((e: any) =>
-      Alert.alert('Navigate back', e?.message ?? 'Could not plan a route back to the locked spot.'));
-    router.push('/navigate');
+  // Navigate opens only once the route exists: opening it first left the user
+  // on an empty Navigate screen whenever planning failed.
+  const navBack = async (costing: Costing) => {
+    if (planning) return;
+    setPlanning(costing);
+    try {
+      await navigateBackToLock(costing);
+      router.push('/navigate');
+    } catch (e: any) {
+      Alert.alert('Navigate back', e?.message ?? 'Could not plan a route back to the locked spot.');
+    } finally { setPlanning(null); }
   };
 
   const accWarn = accuracy != null && radius < 2 * accuracy;
@@ -293,9 +302,10 @@ export default function LocationLockScreen() {
           {lock.state === 'outside' && !lock.navBack && (
             <View style={[st.row, { marginTop: 12, gap: 8 }]}>
               <Text style={{ color: colors.text, fontWeight: '700', fontSize: 13 }}>Navigate back:</Text>
-              <Chip active={false} label="Walk" onPress={() => navBack('pedestrian')} />
-              <Chip active={false} label="Cycle" onPress={() => navBack('bicycle')} />
-              <Chip active={false} label="Drive" onPress={() => navBack('auto')} />
+              <Chip active={planning === 'pedestrian'} label="Walk" onPress={() => navBack('pedestrian')} />
+              <Chip active={planning === 'bicycle'} label="Cycle" onPress={() => navBack('bicycle')} />
+              <Chip active={planning === 'auto'} label="Drive" onPress={() => navBack('auto')} />
+              {planning && <ActivityIndicator size="small" color={colors.primary} accessibilityLabel="Planning route back" />}
             </View>
           )}
 

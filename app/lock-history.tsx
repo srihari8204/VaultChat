@@ -70,10 +70,11 @@ export default function LockHistoryScreen() {
     setTrend(await distancePerDay(7));
   }, [filter, range]);
 
-  useEffect(() => {
-    reload().then(() => setLoad('ok'), () => setLoad('error'));
-  }, [reload]);
-  const retry = () => { setLoad('loading'); reload().then(() => setLoad('ok'), () => setLoad('error')); };
+  /** Every reload reports into `load`, so a failure is never silent. */
+  const refresh = useCallback(
+    () => reload().then(() => setLoad('ok'), () => setLoad('error')), [reload]);
+  useEffect(() => { refresh(); }, [refresh]);
+  const retry = () => { setLoad('loading'); refresh(); };
 
   const toggle = async (id: number) => {
     if (open === id) { setOpen(null); return; }
@@ -96,7 +97,7 @@ export default function LockHistoryScreen() {
       { text: 'Cancel', style: 'cancel' },
       { text: 'Delete all', style: 'destructive', onPress: async () => {
         try { await clearAllHistory(); } catch { Alert.alert('Delete failed', 'History could not be deleted. Try again.'); }
-        reload().catch(() => {});
+        refresh();
       } },
     ]);
   };
@@ -107,7 +108,7 @@ export default function LockHistoryScreen() {
       { text: 'Delete', style: 'destructive', onPress: async () => {
         try { await deleteSession(id); if (open === id) setOpen(null); }
         catch { Alert.alert('Delete failed', 'This session could not be deleted. Try again.'); }
-        reload().catch(() => {});
+        refresh();
       } },
     ]);
   };
@@ -179,6 +180,16 @@ export default function LockHistoryScreen() {
           <Text style={{ color: colors.danger, fontWeight: '600', fontSize: 13 }}>Delete all</Text>
         </TouchableOpacity>
       </View>
+      {/* The empty-list error below cannot show while sessions are listed, so a
+          failed reload (after a filter change, delete or note save) gets this. */}
+      {load === 'error' && sessions.length > 0 && (
+        <View accessibilityLiveRegion="polite" style={[st.rowBetween, st.errBanner, { borderColor: colors.danger, backgroundColor: colors.glass }]}>
+          <Text style={{ color: colors.text, fontSize: 13, flex: 1 }}>Couldn&apos;t refresh lock history. The list may be out of date.</Text>
+          <TouchableOpacity onPress={retry} accessibilityRole="button" accessibilityLabel="Retry loading lock history" hitSlop={12}>
+            <Text style={{ color: colors.primary, fontWeight: '700' }}>Retry</Text>
+          </TouchableOpacity>
+        </View>
+      )}
     </View>
   );
 
@@ -263,7 +274,7 @@ export default function LockHistoryScreen() {
                     onPress={async () => {
                       try { await setSessionNotes(s.id, noteDraft); }
                       catch { Alert.alert('Not saved', 'The note could not be saved. Try again.'); return; }
-                      reload().catch(() => {});
+                      refresh();
                     }}>
                     <Text style={{ color: colors.primary, fontWeight: '700', fontSize: 12 }}>Save</Text>
                   </TouchableOpacity>
@@ -309,6 +320,7 @@ const st = StyleSheet.create({
   trendCol: { alignItems: 'center', flex: 1 },
   trendBar: { width: 18, borderRadius: 5 },
   rowBetween: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  errBanner: { gap: 10, borderWidth: 1, borderRadius: 12, padding: 10, marginBottom: 8 },
   linkRow: { flexDirection: 'row', alignItems: 'center', gap: 5 },
   session: { borderWidth: 1, borderRadius: 12, padding: 12, marginTop: 10 },
   timeline: { borderTopWidth: StyleSheet.hairlineWidth, marginTop: 10, paddingTop: 8 },
