@@ -39,7 +39,9 @@ const settle = admin.slice(admin.indexOf('const settleReq'), admin.indexOf('cons
 assert.ok(settle.length > 0, 'settleReq exists');
 assert.ok(settle.indexOf('await approveJoinRequest') < settle.indexOf('setJoinReqs('),
   'the row is removed only after the server accepted');
-assert.match(admin, /accessibilityState=\{\{ busy: approving, disabled: !!acting \}\}/);
+// Round 8: the lock also covers an open Reject confirmation (`asking`).
+assert.match(admin, /const reqLocked = !!acting \|\| !!asking;/);
+assert.match(admin, /accessibilityState=\{\{ busy: approving, disabled: reqLocked \}\}/);
 
 // ── 4. scrims ──
 for (const f of ['app/group-calendar.tsx', 'app/group-members.tsx', 'components/groups/GroupEventComposer.tsx', 'components/groups/communityStyles.ts']) {

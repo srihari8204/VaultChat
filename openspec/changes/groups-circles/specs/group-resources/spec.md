@@ -54,7 +54,7 @@ reminders for tasks that have due dates.
 
 #### Scenario: Offline creation
 - **WHEN** a task is created without connectivity
-- **THEN** it is queued and synchronised when connectivity returns, because tasks ride the existing encrypted message spine
+- **THEN** it is not queued: the member is told it was not saved, the task is withdrawn from the list, and what they typed is kept so they can save it again when connectivity returns
 
 ### Requirement: Group calendar
 The system SHALL provide a shared calendar per group supporting one-off and
@@ -87,6 +87,14 @@ images, PDFs, voice notes and links.
 #### Scenario: Shared note
 - **WHEN** a member creates a group note
 - **THEN** it is encrypted and readable by every member of that group
+
+#### Scenario: Op index metadata
+- **WHEN** a member saves a note or task change and the app has found the server's op index in this session
+- **THEN** the change is sent encrypted with one plaintext op kind (`notes` or `tasks`) that the server indexes, so the server learns that the message is a notes or tasks op and when it was sent, but never its content or what the change does
+
+#### Scenario: No op kind before the index exists
+- **WHEN** the app has not found the op index on the server in this session
+- **THEN** note and task changes are sent without the op kind, and members still read them from the thread and their own history
 
 ### Requirement: Announcements
 The system SHALL let members holding the `send announcements` permission post a

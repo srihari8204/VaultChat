@@ -2,9 +2,10 @@
 //
 // Every change is one encrypted message in the group thread; the list you see
 // is the fold of every task event (lib/groups/tasks.ts). That is why this
-// screen has no save button, no sync spinner and no conflict dialog: creating a
-// task offline queues a message like any other, and the fold is order-
-// independent, so devices converge without anything here having to coordinate.
+// screen has no save button, no sync spinner and no conflict dialog: the fold
+// is order-independent, so devices converge without anything here having to
+// coordinate. A change is NOT queued offline: a failed send says "Not saved",
+// is taken back off the list, and keeps what was typed for a retry.
 
 import React, { useCallback, useMemo, useRef, useState } from 'react';
 import { KeyboardSafe } from '../components/ui';
@@ -29,6 +30,7 @@ import {
   type Task, type TaskOp,
 } from '../lib/groups/tasks';
 import { type CircleMember } from '../lib/family/types';
+import { userErrorText } from '../lib/userErrorText';
 
 const DUE_PRESETS: { label: string; ms: number | null }[] = [
   { label: 'No date', ms: null },
@@ -63,6 +65,8 @@ export default function GroupTasksScreen() {
   const [dueMs, setDueMs] = useState<number | null>(null);
   const [assignee, setAssignee] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  // Banner Retry in flight: the list stays on screen, as in group-notes.
+  const [retrying, setRetrying] = useState(false);
 
   // The ops the list was folded from: a new op is folded onto these, not onto
   // adds rebuilt from the folded list (which lost edits' order and authors).
@@ -109,7 +113,7 @@ export default function GroupTasksScreen() {
     opsRef.current = [...opsRef.current, op];
     setTasks(foldTasks(opsRef.current));
     try {
-      // Tagged 'tasks' so the server can index it; the op itself stays encrypted.
+      // Tagged 'tasks' once the server has the op index (opTag); the op itself stays encrypted.
       await sendGroupOp(groupId, 'tasks', encodeOp(op));
       return true;
     } catch (e) {
@@ -117,7 +121,7 @@ export default function GroupTasksScreen() {
       // not leave a change on screen that nobody received.
       opsRef.current = opsRef.current.filter((x) => x !== op);
       setTasks(foldTasks(opsRef.current));
-      Alert.alert('Not saved', e instanceof Error && e.message ? e.message : 'Could not reach the group. Try again.');
+      Alert.alert('Not saved', userErrorText(e, 'Could not reach the group. Try again.'));
       rebuild();
       return false;
     }
@@ -140,6 +144,12 @@ export default function GroupTasksScreen() {
   const toggle = (t: Task) => {
     if (!me) return;
     publish({ k: 'done', id: t.id, at: Date.now(), by: me, done: !t.done });
+  };
+
+  const retryInPlace = async () => {
+    if (retrying) return;
+    setRetrying(true);
+    try { await rebuild(); } finally { setRetrying(false); }
   };
 
   const remove = (t: Task) => {
@@ -243,9 +253,11 @@ export default function GroupTasksScreen() {
 
           {!loading && ordered.length > 0 && failed && (
             <TouchableOpacity accessibilityRole="button" accessibilityLabel="Couldn't refresh tasks. Showing what was loaded before. Retry"
-              onPress={() => { setLoading(true); rebuild(); }}
+              accessibilityState={{ busy: retrying, disabled: retrying }} disabled={retrying}
+              onPress={retryInPlace}
               style={[st.banner, { borderColor: colors.danger }]}>
-              <Ionicons name="cloud-offline-outline" size={15} color={colors.danger} />
+              {retrying ? <ActivityIndicator size="small" color={colors.danger} />
+                : <Ionicons name="cloud-offline-outline" size={15} color={colors.danger} />}
               <Text style={{ color: colors.danger, fontSize: 12.5, flex: 1 }}>Couldn’t refresh — this list may be out of date. Tap to retry.</Text>
             </TouchableOpacity>
           )}

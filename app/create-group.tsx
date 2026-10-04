@@ -15,6 +15,7 @@
 // product decision, not a refactor.
 
 import { useAuthHeader } from '../hooks/useAuthHeader';
+import { userErrorText } from '../lib/userErrorText';
 import { HEADER_TOP, SCREEN_BOTTOM } from '../constants/layout';
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
@@ -132,8 +133,8 @@ export default function CreateGroupScreen() {
           `Not invited: ${failed.join(', ')}. Open Group info → Add member to try again.`,
         );
       }
-    } catch (e: any) {
-      setError(e?.message ?? 'Could not create group');
+    } catch (e) {
+      setError(userErrorText(e, 'Could not create group'));
       setCreating(false);
     }
   };

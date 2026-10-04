@@ -18,6 +18,7 @@
 // The old screen simulated participants joining; nothing here is simulated.
 
 import { useAuthHeader } from '../hooks/useAuthHeader';
+import { userErrorText } from '../lib/userErrorText';
 import { HEADER_TOP } from '../constants/layout';
 import { brandAlpha, type Palette } from '../constants/theme';
 import { useLocalSearchParams, useRouter, Stack, useFocusEffect } from 'expo-router';
@@ -95,8 +96,8 @@ export default function GroupCallsScreen() {
         pathname: mode === 'video' ? '/videocall' : '/voicecall',
         params: { chatId: direct.id, peerUid: m.userId, peerName: m.name || m.email || 'Member' },
       });
-    } catch (e: any) {
-      Alert.alert('Could not start the call', e?.message ?? 'Try again.');
+    } catch (e) {
+      Alert.alert('Could not start the call', userErrorText(e, 'Try again.'));
     } finally { setOpening(null); }
   };
 
@@ -133,9 +134,9 @@ export default function GroupCallsScreen() {
           members: uids.join(','),
         },
       });
-    } catch (e: any) {
+    } catch (e) {
       setStarting(false);   // nothing opened: let the next tap try again
-      Alert.alert('Could not start the call', e?.message ?? 'Try again.');
+      Alert.alert('Could not start the call', userErrorText(e, 'Try again.'));
       return;
     }
     if (releaseTimer.current) clearTimeout(releaseTimer.current);

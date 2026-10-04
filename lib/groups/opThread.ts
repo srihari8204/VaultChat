@@ -17,7 +17,9 @@
 // tag, `opKind` ('notes' | 'tasks'; sendGroupOp), and a server that has the
 // index answers GET /chats/{id}/ops?kind= with only those messages. The tag
 // tells the server THAT a message is a notes or tasks op, never what it says:
-// the op itself stays inside the ciphertext. With the index a visit reads:
+// the op itself stays inside the ciphertext. It is sent only once a read this
+// session has found the index (opTag), so a server without it never learns
+// which messages are ops. With the index a visit reads:
 //   1. the index, which holds only ops, so only ops are decrypted from the server;
 //   2. this device's own history, as before (plaintext, kept current by
 //      syncEngine), which also brings in untagged ops from older apps;
@@ -27,7 +29,8 @@
 //      kind, and are re-used on every later visit. It is re-run when this
 //      device's history no longer reaches back to it (a busy group).
 // A server without the route answers 404/405, and the read falls back to the
-// unchanged paging read (collectOps). A 'legacy done' marker was not used:
+// unchanged paging read (collectOps); that answer is remembered for the app
+// session (opIndex), so later opens do not ask again. A 'legacy done' marker was not used:
 // older apps keep sending untagged ops, so legacy ops never end.
 //
 // Pure apart from `readGroupOps` and `sendGroupOp`, which load the real I/O
@@ -141,6 +144,12 @@ export async function collectOps<Op extends { by: string }>(
 export interface IndexedOpThreadIO extends OpThreadIO {
   /** One page of the op index, newest first. Throws (status 404/405) on a server without it. */
   indexPage(before?: number): Promise<Message[]>;
+  /**
+   * How many of this device's history rows are newer than message `after`,
+   * counting no further than OP_LOCAL_LIMIT. Read from local history itself:
+   * the merged list cannot tell a local row from an index row with the same id.
+   */
+  localRowsAfter(after: number): Promise<number>;
 }
 
 /** What one legacy back-scan found, kept in memory for the app session. */
@@ -177,12 +186,11 @@ export async function collectIndexedOps<Op extends { by: string }>(
   now: number = Date.now(),
 ): Promise<OpThreadResult<Op>> {
   const index = await pageBack((before) => io.indexPage(before), OP_INDEX_MAX_PAGES);
-  const indexIds = new Set(index.messages.map((m) => m.id));
 
   let scan = cache?.get();
   let raw: Message[] = [];   // legacy server messages read on THIS visit
   let merged = scan ? await io.withLocal([...index.messages, ...scan.unreadable.values()]) : [];
-  if (!scan || localGap(merged, indexIds, scan)) {
+  if (!scan || await localGap(io, scan)) {
     const prev = scan;
     let back: { messages: Message[]; complete: boolean } | null = null;
     try { back = await pageBack((before) => io.page(before), OP_MAX_PAGES); } catch { /* reported below */ }
@@ -224,28 +232,61 @@ export async function collectIndexedOps<Op extends { by: string }>(
   return { ops: [...out.values()], unreadable, complete: index.complete && scan.complete };
 }
 
+/**
+ * Whether this server has the op index, as learnt this app session (undefined
+ * until a read has asked). `false` stops every later read from asking again,
+ * so today's server costs one 404 per session, not one per open; `true` lets
+ * sendGroupOp tag ops (opTag).
+ * ponytail: remembered for the app session, like communityManagementSupported
+ * (serverContracts.ts), so an index deployed while the app is open is used,
+ * and ops are tagged, only after a restart. Until then reads take the paging
+ * path and untagged ops are found by the legacy scan, as an older app's are.
+ * Replace with a server-sent capability list if one is ever added.
+ */
+export interface OpIndexMemo { known?: boolean }
+const opIndex: OpIndexMemo = {};
+
 /** The index read, or the paging read on a server without the index (404/405). */
 export async function collectGroupOps<Op extends { by: string }>(
   io: IndexedOpThreadIO,
   decode: (body: string) => Op | null,
   cache: LegacyScanCache<Op> | null,
+  memo: OpIndexMemo = opIndex,
 ): Promise<OpThreadResult<Op>> {
+  if (memo.known === false) return collectOps<Op>(io, decode);
   try {
-    return await collectIndexedOps<Op>(io, decode, cache);
+    const r = await collectIndexedOps<Op>(io, decode, cache);
+    memo.known = true;
+    return r;
   } catch (e) {
     if (!isNoOpIndex(e)) throw e;
+    memo.known = false;
     return collectOps<Op>(io, decode);   // today's server: no index route
   }
 }
 
 /**
- * Whether this device's history (the newest OP_LOCAL_LIMIT rows) no longer
- * reaches back to the last legacy scan, so an untagged op could sit between
- * them: a group busier than that since the scan.
+ * The routing tag for one op send: `{ opKind }` only once a read this session
+ * has found the index, else nothing. Privacy over coverage: no server learns
+ * which messages are notes or tasks ops before it can use that to serve the
+ * index (today's server would just receive and drop it), and a send can never
+ * reach a server whose code writes the tag before migration 145 added the
+ * column. An untagged op stays correct: the legacy scan and local history
+ * read it, exactly as they read an older app's ops.
  */
-function localGap(merged: Message[], indexIds: Set<number>, scan: LegacyScan<unknown>): boolean {
-  const local = merged.filter((m) => !indexIds.has(m.id) && !scan.unreadable.has(m.id));
-  return local.length >= OP_LOCAL_LIMIT && Math.min(...local.map((m) => m.id)) > scan.high;
+export function opTag(kind: OpKind, memo: OpIndexMemo = opIndex): { opKind?: OpKind } {
+  return memo.known === true ? { opKind: kind } : {};
+}
+
+/**
+ * Whether this device's history (the newest OP_LOCAL_LIMIT rows, what
+ * withLocal merges) no longer reaches back to the last legacy scan, so an
+ * untagged op could sit between them: a group busier than that since the
+ * scan. A failed local read counts as a gap (rescan rather than miss ops).
+ */
+async function localGap(io: IndexedOpThreadIO, scan: LegacyScan<unknown>): Promise<boolean> {
+  const newer = await io.localRowsAfter(scan.high).catch(() => OP_LOCAL_LIMIT);
+  return newer >= OP_LOCAL_LIMIT;
 }
 
 // Memory only, per process: decoded ops are never written to disk here. Keyed
@@ -254,7 +295,12 @@ const MAX_SCANS = 20;
 const legacyScans = new Map<string, LegacyScan<unknown>>();
 function legacyScanCache<Op>(key: string): LegacyScanCache<Op> {
   return {
-    get: () => legacyScans.get(key) as LegacyScan<Op> | undefined,
+    get: () => {
+      // Re-inserted on read too, so the eviction below drops the least recently USED thread.
+      const scan = legacyScans.get(key);
+      if (scan) { legacyScans.delete(key); legacyScans.set(key, scan); }
+      return scan as LegacyScan<Op> | undefined;
+    },
     set: (scan) => {
       legacyScans.delete(key);
       legacyScans.set(key, scan as LegacyScan<unknown>);
@@ -277,6 +323,7 @@ export async function readGroupOps<Op extends { by: string }>(
 ): Promise<OpThreadResult<Op>> {
   const { getMessages, decryptFromChat, normalizeMsgIds } = await import('../chatService');
   const { unionWithLocalHistoryAsc } = await import('../messageHistory');
+  const { getCachedMessagesAfter } = await import('../localDb');
   const { api } = await import('../api');
   const chat = encodeURIComponent(groupId);
   const io: IndexedOpThreadIO = {
@@ -286,6 +333,7 @@ export async function readGroupOps<Op extends { by: string }>(
       return Array.isArray(rows) ? rows.map(normalizeMsgIds) : [];
     },
     withLocal: (server) => unionWithLocalHistoryAsc(groupId, server, OP_LOCAL_LIMIT),
+    localRowsAfter: async (after) => (await getCachedMessagesAfter(groupId, after, OP_LOCAL_LIMIT)).length,
     decrypt: (m) => decryptFromChat(groupId, m.senderId, m.content, m.id),
   };
   return collectGroupOps<Op>(io, decode, viewer ? legacyScanCache<Op>(`${viewer}|${groupId}|${kind}`) : null);
@@ -293,10 +341,10 @@ export async function readGroupOps<Op extends { by: string }>(
 
 /**
  * Send one op: encrypted for the group exactly like a message, plus the
- * plaintext routing tag `opKind`, which tells the server only THAT this is a
- * notes or tasks op (see the header). A server without the index ignores the
- * field. Sent over HTTP, the path sendMessage itself falls back to; CC-Wire's
- * frame has no field for the tag.
+ * plaintext routing tag `opKind` once this session has found the index
+ * (opTag), which tells the server only THAT this is a notes or tasks op (see
+ * the header). Sent over HTTP, the path sendMessage itself falls back to;
+ * CC-Wire's frame has no field for the tag.
  */
 export async function sendGroupOp(groupId: string, kind: OpKind, plaintext: string): Promise<void> {
   const { encryptForChat, cacheOwnPlaintext, normalizeMsgIds } = await import('../chatService');
@@ -306,7 +354,7 @@ export async function sendGroupOp(groupId: string, kind: OpKind, plaintext: stri
   const msg = normalizeMsgIds(await api<Message>(`/chats/${encodeURIComponent(groupId)}/messages`, {
     method: 'POST',
     // clientId once per op, so an internal retry (token refresh) is deduped by the server.
-    json: { content, type: 'text', replyToId: null, meta: null, clientId: Crypto.randomUUID(), opKind: kind },
+    json: { content, type: 'text', replyToId: null, meta: null, clientId: Crypto.randomUUID(), ...opTag(kind) },
   }));
   // The sender cannot open its own ciphertext; keep the readable copy (as sendMessage does).
   if (content !== plaintext) await cacheOwnPlaintext(groupId, msg?.id, plaintext);

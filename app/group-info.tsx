@@ -12,6 +12,7 @@
 // DELETE /chats/:id/members/:userId
 
 import { useAuthHeader } from '../hooks/useAuthHeader';
+import { userErrorText } from '../lib/userErrorText';
 import * as ImagePicker from 'expo-image-picker';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -139,11 +140,11 @@ export default function GroupInfoScreen() {
       setLoadError(null);
       setStale(false);
       if (chatId) writeCache<ChatDetail>(cacheKey, forCache(c));
-    } catch (e: any) {
+    } catch (e) {
       // Keep painted cache on error; only surface failure when nothing is shown.
       // Rendered as a screen (not an Alert) so there is a Back and a Retry —
       // the bare spinner used to trap the user.
-      if (!painted) setLoadError(e?.message ?? 'Check your connection and try again.');
+      if (!painted) setLoadError(userErrorText(e, 'Check your connection and try again.'));
       else setStale(true);
     } finally {
       if (!painted) setLoading(false);
@@ -176,7 +177,9 @@ export default function GroupInfoScreen() {
     (async () => {
       const local = pick(await unionWithLocalHistory(chatId, [], 400).catch(() => [] as Message[]));
       if (active && local.length) setMedia(local);
-      const server = await recentServerMedia(chatId, () => getMessages(chatId, { limit: 200 }));
+      // Keyed by the signed-in user as well, so an account switch never reuses another account's page.
+      const viewer = await getCurrentUserAsync().then(u => (u?.id != null ? String(u.id) : null), () => null);
+      const server = await recentServerMedia(viewer, chatId, () => getMessages(chatId, { limit: 200 }));
       if (!server) return;
       const merged = await unionWithLocalHistory(chatId, server, 400).catch(() => null);
       if (active && merged) setMedia(pick(merged));
@@ -205,8 +208,8 @@ export default function GroupInfoScreen() {
     try {
       await updateChat(chat.id, { name: n });
       patchChat(prev => ({ ...prev, name: n }));
-    } catch (e: any) {
-      Alert.alert('Rename failed', e?.message ?? 'Try again');
+    } catch (e) {
+      Alert.alert('Rename failed', userErrorText(e, 'Try again'));
     } finally {
       setSaving(false);
       setRenaming(false);
@@ -221,7 +224,7 @@ export default function GroupInfoScreen() {
     try {
       await updateChat(chat.id, { description: d });
       patchChat(prev => ({ ...prev, description: d || null }));
-    } catch (e: any) { Alert.alert('Could not save', e?.message ?? 'Try again'); }
+    } catch (e) { Alert.alert('Could not save', userErrorText(e, 'Try again')); }
     finally { setSaving(false); setEditingDesc(false); }
   }, [chat, isAdmin, descDraft, saving, patchChat]);
 
@@ -246,8 +249,8 @@ export default function GroupInfoScreen() {
       );
       await updateChat(chat.id, { photoURL: up.id });
       patchChat(prev => ({ ...prev, photoURL: up.id }));
-    } catch (e: any) {
-      Alert.alert('Photo upload failed', e?.message ?? 'Try again');
+    } catch (e) {
+      Alert.alert('Photo upload failed', userErrorText(e, 'Try again'));
     } finally {
       setPhotoBusy(false);
     }
@@ -256,26 +259,32 @@ export default function GroupInfoScreen() {
   // Leave and Remove: one at a time, taken when the confirmation OPENS (two
   // taps opened two dialogs and sent two requests); released by Cancel, an
   // Android outside-tap dismiss, or when the request settles.
+  // `memberBusy` mirrors the latch for drawing: the row being removed shows a
+  // spinner and every other Remove is disabled while it is held.
   const memberActionOpen = useRef(false);
+  const [memberBusy, setMemberBusy] = useState(false);
+  const [removingId, setRemovingId] = useState<string | null>(null);
   const onRemoveMember = useCallback((m: ChatMember) => {
     // Gated where the button is drawn (memberActions); the server re-checks.
     if (!chat || memberActionOpen.current) return;
     memberActionOpen.current = true;
-    const release = () => { memberActionOpen.current = false; };
+    setMemberBusy(true);
+    const release = () => { memberActionOpen.current = false; setMemberBusy(false); setRemovingId(null); };
     Alert.alert(
       'Remove from group?',
       `${m.name || m.email || 'This user'} will no longer be a member.`,
       [
         { text: 'Cancel', style: 'cancel', onPress: release },
         { text: 'Remove', style: 'destructive', onPress: async () => {
+            setRemovingId(m.userId);
             try {
               await removeChatMember(chat.id, m.userId);
               patchChat(prev => ({
                 ...prev,
                 members: prev.members.map(x => x.userId === m.userId ? { ...x, leftAt: new Date().toISOString() } : x),
               }));
-            } catch (e: any) {
-              Alert.alert('Remove failed', e?.message ?? 'Try again');
+            } catch (e) {
+              Alert.alert('Remove failed', userErrorText(e, 'Try again'));
             } finally { release(); }
           }
         },
@@ -292,7 +301,8 @@ export default function GroupInfoScreen() {
   const onLeave = useCallback(() => {
     if (!chat || !meId || memberActionOpen.current) return;
     memberActionOpen.current = true;
-    const release = () => { memberActionOpen.current = false; };
+    setMemberBusy(true);
+    const release = () => { memberActionOpen.current = false; setMemberBusy(false); };
     Alert.alert('Leave group?', 'You will lose access to future messages.', [
       { text: 'Cancel', style: 'cancel', onPress: release },
       { text: 'Leave', style: 'destructive', onPress: async () => {
@@ -300,10 +310,10 @@ export default function GroupInfoScreen() {
           try {
             await removeChatMember(chat.id, meId);
             router.replace('/(tabs)/chats');
-          } catch (e: any) {
+          } catch (e) {
             setLeaving(false);
             release();
-            Alert.alert('Leave failed', e?.message ?? 'Try again');
+            Alert.alert('Leave failed', userErrorText(e, 'Try again'));
           }
         }
       },
@@ -528,13 +538,15 @@ export default function GroupInfoScreen() {
               }).canRemove}
               authHeader={authHeader}
               onRemove={() => onRemoveMember(m)}
+              removing={removingId === m.userId}
+              locked={memberBusy}
             />
           </View>
         )}
         ListEmptyComponent={mq ? <Text style={[S.descPlaceholder, S.memberItem]}>No members match “{memberQuery.trim()}”.</Text> : null}
         ListFooterComponent={
           <TouchableOpacity style={S.leaveBtn} onPress={onLeave} activeOpacity={0.85} accessibilityRole="button"
-            disabled={leaving} accessibilityState={{ busy: leaving, disabled: leaving }}>
+            disabled={leaving || memberBusy} accessibilityState={{ busy: leaving, disabled: leaving || memberBusy }}>
             {leaving
               ? <ActivityIndicator size="small" color={colors.danger} />
               : <Text style={S.leaveTxt}>Leave group</Text>}

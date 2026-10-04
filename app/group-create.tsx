@@ -13,7 +13,8 @@
 // New chat; this one makes a typed Family Space group and makes it the active
 // space. Both invite rather than add. See the note at the top of that file.
 
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useRef, useState } from 'react';
+import { userErrorText } from '../lib/userErrorText';
 import { KeyboardSafe } from '../components/ui';
 import {
   View, StyleSheet, TouchableOpacity, ScrollView, TextInput, Alert,
@@ -25,7 +26,7 @@ import { useTheme } from '../lib/theme';
 import { AuroraBackground } from '../components/ui/AuroraBackground';
 import { AppText as Text } from '../components/ui/Text';
 import { brandAlpha } from '../constants/theme';
-import { GROUP_COLORS, GROUP_TYPES, groupTypeInfo, inkOn, type GroupType } from '../lib/groups/catalog';
+import { GROUP_COLORS, GROUP_TYPES, glyphOn, groupTypeInfo, inkOn, type GroupType } from '../lib/groups/catalog';
 import { saveGroup, setActiveGroupId } from '../lib/groups/store';
 import { createGroupChat } from '../lib/chatService';
 import { tint } from '../lib/tintColor';
@@ -48,6 +49,8 @@ export default function GroupCreateScreen() {
   const [icon, setIcon] = useState<string | null>(null);
   const [color, setColor] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  // The latch itself: `busy` is state, so two taps in one frame both read false.
+  const creatingRef = useRef(false);
 
   const info = useMemo(() => groupTypeInfo(type), [type]);
   // Explicit choice wins; otherwise the type's identity shows through.
@@ -57,7 +60,8 @@ export default function GroupCreateScreen() {
   const create = async () => {
     const n = name.trim();
     if (!n) { Alert.alert('Name it', 'Give your group a name.'); return; }
-    if (busy) return;
+    if (creatingRef.current) return;
+    creatingRef.current = true;
     setBusy(true);
     let id: string;
     try {
@@ -76,9 +80,10 @@ export default function GroupCreateScreen() {
         },
       );
       id = String(res.id);
-    } catch (e: any) {
+    } catch (e) {
+      creatingRef.current = false;
       setBusy(false);
-      Alert.alert('Could not create group', e?.message ?? 'Try again.');
+      Alert.alert('Could not create group', userErrorText(e, 'Try again.'));
       return;
     }
     // The group exists on the server from here on. A failure to record it on
@@ -89,8 +94,8 @@ export default function GroupCreateScreen() {
       await saveGroup({ id, name: n, groupType: type, icon: icon ?? null, color: color ?? null, privacy });
       await setActiveGroupId(id);
     } catch { savedHere = false; }
-    // Replace: Back should not return to a half-filled create form. `busy`
-    // stays set: this screen is leaving, and re-enabling Create first would
+    // Replace: Back should not return to a half-filled create form. The latch
+    // and `busy` stay set: this screen is leaving, and re-enabling Create first would
     // leave a frame where a second tap could start a second group.
     // `fresh` makes Add people say the group already exists with just you in it,
     // as create-group's "Create & add people" does.
@@ -109,7 +114,7 @@ export default function GroupCreateScreen() {
         {/* live preview — the identity the group will actually have */}
         <View style={[st.preview, { backgroundColor: colors.glassSoft, borderColor: colors.glassStroke }]}>
           <View style={[st.previewIcon, { backgroundColor: tint(shownColor, 0.13) }]}>
-            <Ionicons name={shownIcon} size={28} color={shownColor} />
+            <Ionicons name={shownIcon} size={28} color={glyphOn(shownColor, colors.bg, colors.text, 0.13)} />
           </View>
           <Text style={{ color: colors.text, fontSize: 17, fontWeight: '800' }} numberOfLines={1}>
             {name.trim() || info.label}
@@ -128,7 +133,7 @@ export default function GroupCreateScreen() {
                 accessibilityRole="radio" accessibilityLabel={`${g.label}. ${g.blurb}`} accessibilityState={{ selected: on, checked: on }}
                 style={[st.typeCell, { borderColor: on ? g.color : colors.border, backgroundColor: on ? tint(g.color, 0.1) : colors.card }]}
               >
-                <Ionicons name={g.icon} size={19} color={on ? g.color : colors.textDim} />
+                <Ionicons name={g.icon} size={19} color={on ? glyphOn(g.color, colors.bg, colors.text, 0.1) : colors.textDim} />
                 <Text style={{ color: on ? colors.text : colors.textDim, fontSize: 11.5, fontWeight: on ? '700' : '500' }} numberOfLines={1}>
                   {g.label}
                 </Text>
@@ -173,7 +178,7 @@ export default function GroupCreateScreen() {
             <TouchableOpacity accessibilityRole="radio" accessibilityLabel={`Icon ${ic.replace(/-/g, ' ')}`} key={ic} onPress={() => setIcon(ic)}
               accessibilityState={{ selected: shownIcon === ic, checked: shownIcon === ic }}
               style={[st.iconCell, { borderColor: shownIcon === ic ? shownColor : colors.border, backgroundColor: shownIcon === ic ? tint(shownColor, 0.1) : colors.card }]}>
-              <Ionicons name={ic} size={18} color={shownIcon === ic ? shownColor : colors.textDim} />
+              <Ionicons name={ic} size={18} color={shownIcon === ic ? glyphOn(shownColor, colors.bg, colors.text, 0.1) : colors.textDim} />
             </TouchableOpacity>
           ))}
         </View>

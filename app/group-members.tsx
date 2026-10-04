@@ -20,6 +20,8 @@
 // scripts/check-permission-mirror.ts proves the two still agree.
 
 import React, { useCallback, useMemo, useRef, useState } from 'react';
+import { userErrorText } from '../lib/userErrorText';
+import { tint } from '../lib/tintColor';
 import {
   View, StyleSheet, TouchableOpacity, Alert,
   ActivityIndicator, Modal, Image, Pressable, FlatList,
@@ -136,7 +138,7 @@ export default function GroupMembersScreen() {
   const act = async (label: string, fn: () => Promise<unknown>, target: string) => {
     setBusy(target);
     try { await fn(); await load(); }
-    catch (e: any) { Alert.alert(`Could not ${label}`, e?.message ?? 'Try again.'); }
+    catch (e) { Alert.alert(`Could not ${label}`, userErrorText(e, 'Try again.')); }
     finally { setBusy(null); setSheet(null); }
   };
 
@@ -195,7 +197,7 @@ export default function GroupMembersScreen() {
           setShareBusy(true);
           setSharing(false);
           try { await shareGroup(to.id, groupId); Alert.alert('Shared', `The card is in your chat with ${to.name ?? 'them'}.`); }
-          catch (e: any) { Alert.alert('Could not share', e?.message ?? 'Try again.'); }
+          catch (e) { Alert.alert('Could not share', userErrorText(e, 'Try again.')); }
           finally { shareRef.current = false; setShareBusy(false); }
         } },
       ],
@@ -515,7 +517,7 @@ function MemberSheet({ member, acts, avatar, onRole, onHandOver, onRemove, onClo
 
       {acts.canRemove && (
         <TouchableOpacity onPress={onRemove} accessibilityRole="button"
-          style={[st.opt, { borderColor: colors.danger + '55', marginTop: 8 }]}>
+          style={[st.opt, { borderColor: tint(colors.danger, 0.33), marginTop: 8 }]}>
           <Ionicons name="person-remove-outline" size={18} color={colors.danger} />
           <Text style={{ color: colors.danger, fontSize: 14, fontWeight: '700', flex: 1 }}>
             Remove from group

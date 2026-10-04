@@ -144,16 +144,37 @@ export function inkOn(fill: string): string {
 }
 
 /**
- * An icon colour for a group colour drawn as a GLYPH on the screen's ground
- * (e.g. on a faint tint of itself): the colour when it reaches WCAG's 3:1 for
- * non-text graphics against `ground`, otherwise `fallback` (the theme's text
- * ink). Group colours are data, so amber on the light ground (1.7:1) is not
- * always visible. A ground that is not #RRGGBB cannot be measured, so the
- * colour is kept.
+ * Whether the better ink for `fill` (inkOn) reaches 4.5:1 on it. Neither white
+ * nor the night ink does on some mid-tones (about 4.49:1 at best), and group
+ * colours are data, so a screen that fills a button with one needs a fallback.
  */
-export function glyphOn(color: string, ground: string, fallback: string): string {
+export function inkReadable(fill: string): boolean {
+  const f = hexColorOr(fill, '#000000');
+  const [a, b] = [luminance(f), luminance(inkOn(f))].sort((m, n) => n - m);
+  return (a + 0.05) / (b + 0.05) >= 4.5;
+}
+
+/** `top` laid over `base` at opacity `a` (both #RRGGBB), as the screen composites a tint. */
+function over(base: string, top: string, a: number): string {
+  return '#' + [1, 3, 5].map((i) => {
+    const v = Math.round(parseInt(base.slice(i, i + 2), 16) * (1 - a) + parseInt(top.slice(i, i + 2), 16) * a);
+    return v.toString(16).padStart(2, '0');
+  }).join('');
+}
+
+/**
+ * An icon colour for a group colour drawn as a GLYPH on the screen's ground:
+ * the colour when it reaches WCAG's 3:1 for non-text graphics against
+ * `ground`, otherwise `fallback` (the theme's text ink). Group colours are
+ * data, so amber on the light ground (1.7:1) is not always visible. `wash` is
+ * the opacity of the faint tint of the colour itself that the glyph sits on
+ * (tint(color, wash)); it is laid over `ground` before measuring. A ground
+ * that is not #RRGGBB cannot be measured, so the colour is kept.
+ */
+export function glyphOn(color: string, ground: string, fallback: string, wash = 0): string {
   if (!/^#[0-9a-fA-F]{6}$/.test(ground)) return color;
-  const [a, b] = [luminance(hexColorOr(color, '#000000')), luminance(ground)].sort((m, n) => n - m);
+  const c = hexColorOr(color, '#000000');
+  const [a, b] = [luminance(c), luminance(over(ground, c, wash))].sort((m, n) => n - m);
   return (a + 0.05) / (b + 0.05) >= 3 ? color : fallback;
 }
 
@@ -244,6 +265,19 @@ if (require.main === module) {
   if (glyphOn('#F59E0B', '#0A0810', '#fff') !== '#F59E0B') throw new Error('amber on the dark ground stays');
   if (glyphOn('#1552E0', '#D4E1F2', '#000') !== '#1552E0') throw new Error('deep blue on light stays');
   if (glyphOn('#123456', 'rgba(0,0,0,0.5)', '#000') !== '#123456') throw new Error('unmeasurable ground keeps the colour');
+  // …measured on the tint it sits on: the wash only ever lowers the contrast
+  if (over('#000000', '#FFFFFF', 0.5) !== '#808080' || over('#0A0810', '#F59E0B', 0) !== '#0a0810') throw new Error('over');
+  if (glyphOn('#5A6B7C', '#0A0810', '#fff') !== '#5A6B7C') throw new Error('slate on the dark ground, no wash, stays');
+  if (glyphOn('#5A6B7C', '#0A0810', '#fff', 0.5) !== '#fff') throw new Error('a heavy wash of itself drops it below 3:1');
+  for (const g of GROUP_COLORS) {
+    const kept = glyphOn(g.hex, '#0A0810', '#fff', 0.13);
+    if (kept !== g.hex && kept !== '#fff') throw new Error('glyphOn returns the colour or the fallback');
+  }
+
+  // a fill whose best ink misses 4.5:1 is flagged, so a button can fall back
+  if (!inkReadable('#F59E0B') || !inkReadable('#1552E0') || !inkReadable('#FFFFFF')) throw new Error('readable fills');
+  if (inkReadable('#777777')) throw new Error('mid grey: neither ink reaches 4.5:1');
+  for (const g of GROUP_COLORS) if (!inkReadable(g.hex)) throw new Error(`pick colour ${g.name} must be readable`);
 
   console.log('groups/catalog self-check OK');
 }

@@ -4,6 +4,7 @@
 // group. List your communities → open one → see its groups → tap to chat.
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { userErrorText } from '../lib/userErrorText';
 import {
   View, ScrollView, FlatList, TouchableOpacity, Alert, ActivityIndicator, BackHandler,
 } from 'react-native';
@@ -153,8 +154,8 @@ export default function CommunitiesScreen() {
     try {
       await attachGroupToCommunity(detail.id, g.id);
       await openCommunity(detail.id);
-    } catch (e: any) {
-      if (!notYet(e, 'Adding an existing group')) Alert.alert('Could not add the group', e?.message ?? 'Try again.');
+    } catch (e) {
+      if (!notYet(e, 'Adding an existing group')) Alert.alert('Could not add the group', userErrorText(e, 'Try again.'));
     } finally { setActing(null); }
   }, [detail, acting, openCommunity, notYet]);
 
@@ -171,9 +172,9 @@ export default function CommunitiesScreen() {
         clearCache('community:' + d.id).catch(() => {});
         closeDetail();
         loadList();
-      } catch (e: any) {
+      } catch (e) {
         if (!notYet(e, a === 'delete' ? 'Deleting a community' : 'Leaving a community')) {
-          Alert.alert(a === 'delete' ? 'Could not delete' : 'Could not leave', e?.message ?? 'Try again.');
+          Alert.alert(a === 'delete' ? 'Could not delete' : 'Could not leave', userErrorText(e, 'Try again.'));
         }
       } finally { setActing(null); }
     };
@@ -215,7 +216,7 @@ export default function CommunitiesScreen() {
         setModal(null); setName('');
         await openCommunity(detail.id);
       }
-    } catch (e: any) { Alert.alert(modal === 'edit' ? 'Could not save' : 'Could not create', e?.message ?? 'Try again'); }
+    } catch (e) { Alert.alert(modal === 'edit' ? 'Could not save' : 'Could not create', userErrorText(e, 'Try again')); }
     finally { setBusy(false); }
   }, [name, desc, modal, detail, busy, openCommunity, loadList, notYet]);
 

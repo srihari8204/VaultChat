@@ -15,6 +15,7 @@
 // believing they are in a group they are not.
 
 import React, { useCallback, useState } from 'react';
+import { userErrorText } from '../lib/userErrorText';
 import {
   View, StyleSheet, TouchableOpacity, ActivityIndicator, Alert, ScrollView, AccessibilityInfo, Platform,
 } from 'react-native';
@@ -25,7 +26,7 @@ import { AuroraBackground } from '../components/ui/AuroraBackground';
 import { AppText as Text } from '../components/ui/Text';
 import { brandAlpha } from '../constants/theme';
 import { requestToJoin, myInvitations } from '../lib/chatService';
-import { glyphOn, groupTypeInfo, hexColorOr, inkOn } from '../lib/groups/catalog';
+import { glyphOn, groupTypeInfo, hexColorOr, inkOn, inkReadable } from '../lib/groups/catalog';
 import { joinRefusal } from '../lib/groups/serverContracts';
 import { GroupNotFound } from '../components/groups/GroupNotFound';
 import { tint } from '../lib/tintColor';
@@ -50,10 +51,14 @@ export default function GroupJoinScreen() {
   // The card's route params are whatever the sender's message carried: draw only
   // a known glyph and a #RRGGBB colour, else the type's own.
   const accent = hexColorOr(params.color ? String(params.color) : null, type.color);
-  const ink = inkOn(accent);
-  // The accent as a glyph on the page (its tint is faint): the text ink when a
-  // light accent would not be visible on this theme's ground.
-  const glyph = glyphOn(accent, colors.bg, colors.text);
+  // The buttons fill with the accent and its better ink; a mid-tone where
+  // neither ink reaches 4.5:1 fills with the theme's primary instead.
+  const fill = inkReadable(accent) ? accent : colors.primary;
+  const ink = fill === accent ? inkOn(accent) : colors.onPrimary;
+  // The accent as a glyph on its own faint tint: the text ink when a light
+  // accent would not be visible there (measured on the hero's 0.13 tint, the
+  // heaviest; the notes' 0.07 is lighter).
+  const glyph = glyphOn(accent, colors.bg, colors.text, 0.13);
   const rawIcon = String(params.icon || '');
   const icon = (rawIcon && rawIcon in Ionicons.glyphMap ? rawIcon : type.icon) as keyof typeof Ionicons.glyphMap;
 
@@ -105,14 +110,14 @@ export default function GroupJoinScreen() {
       await requestToJoin(groupId);
       setState('asked');
       announce('asked');
-    } catch (e: any) {
+    } catch (e) {
       // A 409 that means "you already did this" is a state, not a failure: the
       // server's `code` once deployed, its wording until then
       // (lib/groups/serverContracts joinRefusal).
       const refusal = joinRefusal(e);
       if (refusal) { setState(refusal); announce(refusal); return; }
       setState('idle');
-      Alert.alert('Could not ask to join', e?.message ?? 'Try again.');
+      Alert.alert('Could not ask to join', userErrorText(e, 'Try again.'));
     }
   };
 
@@ -152,7 +157,7 @@ export default function GroupJoinScreen() {
               </Text>
             </View>
             <TouchableOpacity onPress={() => router.replace('/group-invitations')}
-              accessibilityRole="button" style={[st.btn, { backgroundColor: accent }]}>
+              accessibilityRole="button" style={[st.btn, { backgroundColor: fill }]}>
               <Ionicons name="mail-open-outline" size={18} color={ink} />
               <Text style={[st.btnTxt, { color: ink }]}>Open invitations</Text>
             </TouchableOpacity>
@@ -182,7 +187,7 @@ export default function GroupJoinScreen() {
             <TouchableOpacity onPress={ask} disabled={state !== 'idle'}
               accessibilityRole="button" accessibilityLabel={`Ask to join ${name}`}
               accessibilityState={{ disabled: state !== 'idle', busy: state === 'sending' }}
-              style={[st.btn, { backgroundColor: accent }]}>
+              style={[st.btn, { backgroundColor: fill }]}>
               {state === 'sending'
                 ? <ActivityIndicator color={ink} />
                 : <><Ionicons name="hand-right-outline" size={18} color={ink} />

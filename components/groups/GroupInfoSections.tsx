@@ -3,7 +3,7 @@
 // privacy, admin links) and one member row. The screen owns state and requests.
 
 import React from 'react';
-import { Image, Switch, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Image, Switch, TouchableOpacity, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../../lib/theme';
@@ -164,7 +164,7 @@ export function GroupInfoTools({
 }
 
 export function MemberRow({
-  member, meId, canRemove, authHeader, onRemove,
+  member, meId, canRemove, authHeader, onRemove, removing = false, locked = false,
 }: {
   member:     ChatMember;
   meId:       string | null;
@@ -172,8 +172,13 @@ export function MemberRow({
   canRemove:  boolean;
   authHeader: string | null;
   onRemove:   () => void;
+  /** This member's removal is in flight: a spinner in place of the button. */
+  removing?:  boolean;
+  /** Another Remove or Leave is in flight (or its confirmation is open). */
+  locked?:    boolean;
 }) {
   const S = useGroupInfoStyles();
+  const { colors } = useTheme();
   const isMe = member.userId === meId;
   const showRemove = canRemove;
   const letter = initialOf(member.name, member.email);
@@ -211,8 +216,12 @@ export function MemberRow({
         )}
       </View>
       {showRemove && (
-        <TouchableOpacity onPress={onRemove} style={S.removeBtn} activeOpacity={0.7} hitSlop={10} accessibilityRole="button" accessibilityLabel={`Remove ${display} from the group`}>
-          <Text style={S.removeBtnTxt}>Remove</Text>
+        <TouchableOpacity onPress={onRemove} style={[S.removeBtn, locked && !removing && { opacity: 0.5 }]} activeOpacity={0.7} hitSlop={10}
+          disabled={removing || locked} accessibilityState={{ busy: removing, disabled: removing || locked }}
+          accessibilityRole="button" accessibilityLabel={`Remove ${display} from the group`}>
+          {removing
+            ? <ActivityIndicator size="small" color={colors.danger} accessibilityLabel={`Removing ${display}`} />
+            : <Text style={S.removeBtnTxt}>Remove</Text>}
         </TouchableOpacity>
       )}
     </View>

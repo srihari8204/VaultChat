@@ -6,8 +6,8 @@
 // can — including the server.
 //
 // Like tasks, each change is one encrypted event and the list is the fold, so
-// editing offline just queues a message and devices converge without this
-// screen coordinating anything.
+// devices converge without this screen coordinating anything. A change is NOT
+// queued offline: a failed send says "Not saved" and is taken back off the list.
 
 import React, { useCallback, useMemo, useRef, useState } from 'react';
 import {
@@ -28,6 +28,7 @@ import { readGroupOps, sendGroupOp } from '../lib/groups/opThread';
 import { KeyboardSafe } from '../components/ui';
 import { GroupNotFound } from '../components/groups/GroupNotFound';
 import { ThreadGaps } from '../components/groups/ThreadGaps';
+import { userErrorText } from '../lib/userErrorText';
 
 const when = (ts: number) => {
   const d = new Date(ts), now = new Date();
@@ -92,7 +93,7 @@ export default function GroupNotesScreen() {
     opsRef.current = [...opsRef.current, op];
     setNotes(foldNotes(opsRef.current));
     try {
-      // Tagged 'notes' so the server can index it; the op itself stays encrypted.
+      // Tagged 'notes' once the server has the op index (opTag); the op itself stays encrypted.
       await sendGroupOp(groupId, 'notes', encodeNoteOp(op));
       return true;
     } catch (e) {
@@ -100,7 +101,7 @@ export default function GroupNotesScreen() {
       // (offline), the list must not keep showing a change nobody received.
       opsRef.current = opsRef.current.filter((x) => x !== op);
       setNotes(foldNotes(opsRef.current));
-      Alert.alert('Not saved', e instanceof Error && e.message ? e.message : 'Could not reach the group.');
+      Alert.alert('Not saved', userErrorText(e, 'Could not reach the group.'));
       rebuild();
       return false;
     }

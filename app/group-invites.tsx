@@ -18,6 +18,7 @@
 // so without a queue to see them in, everyone who says yes simply vanishes.
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { userErrorText } from '../lib/userErrorText';
 import { KeyboardSafe } from '../components/ui';
 import {
   View, StyleSheet, TouchableOpacity, SectionList, TextInput, Alert,
@@ -105,6 +106,9 @@ export default function GroupInvitesScreen() {
   // Resend / withdraw in flight, per invitation (double-tap guard).
   const [resending, setResending] = useState<number | null>(null);
   const [withdrawing, setWithdrawing] = useState<number | null>(null);
+  // A Turn-down / Withdraw confirmation is open for this row (its latch is taken).
+  const [asking, setAsking] = useState<string | null>(null);
+  const [withdrawAsk, setWithdrawAsk] = useState<number | null>(null);
 
   const refresh = useCallback(async () => {
     if (!chatId) { setLoading(false); return; }
@@ -157,15 +161,18 @@ export default function GroupInvitesScreen() {
       // on tap looks like the tap failed.
       setResults((prev) => prev.map((r) => (r.id === c.id ? { ...r, state: 'invited' } : r)));
       refresh();
-    } catch (e: any) {
-      Alert.alert('Could not invite', e?.message ?? 'Try again.');
+    } catch (e) {
+      Alert.alert('Could not invite', userErrorText(e, 'Try again.'));
     } finally { setInviting(null); }
   };
 
   // A link request is approved by user id on /join-requests; an invitation by its id.
   // The exact guard: `acting` inside an Alert callback is the value from when
-  // the Alert opened, so a second confirm could slip past it.
+  // the Alert opened, so a second confirm could slip past it. Turn-down takes
+  // it when its confirmation OPENS (so two cannot open), and while any row is
+  // acting or asking, every Waiting row's buttons are disabled and dimmed.
   const actingRef = useRef(false);
+  const queueLocked = acting != null || asking != null;
   const approve = async (p: QueueRow) => {
     if (actingRef.current) return;
     actingRef.current = true;
@@ -175,29 +182,33 @@ export default function GroupInvitesScreen() {
       else await approveMember(chatId, Number(p.id));
       await refresh();
     }
-    catch (e: any) { Alert.alert('Could not approve', e?.message ?? 'Try again.'); }
+    catch (e) { Alert.alert('Could not approve', userErrorText(e, 'Try again.')); }
     finally { actingRef.current = false; setActing(null); }
   };
 
   const decline = (p: QueueRow) => {
+    if (actingRef.current) return;
+    actingRef.current = true;
+    setAsking(queueKey(p));
+    const release = () => { actingRef.current = false; setAsking(null); };
     Alert.alert(
       p.requested ? 'Turn down this request?' : 'Turn down this person?',
       `${p.name ?? 'They'} will not join ${groupName}. You can invite them again later.`,
       [
-        { text: 'Cancel', style: 'cancel' },
+        { text: 'Cancel', style: 'cancel', onPress: release },
         { text: 'Turn down', style: 'destructive', onPress: async () => {
-          if (actingRef.current) return;
-          actingRef.current = true;
+          setAsking(null);
           setActing(queueKey(p));
           try {
             if (isLinkRow(p)) await rejectJoinRequest(chatId, String(p.userId));
             else await rejectMember(chatId, Number(p.id));
             await refresh();
           }
-          catch (e: any) { Alert.alert('Could not do that', e?.message ?? 'Try again.'); }
+          catch (e) { Alert.alert('Could not do that', userErrorText(e, 'Try again.')); }
           finally { actingRef.current = false; setActing(null); }
         } },
       ],
+      { cancelable: true, onDismiss: release },
     );
   };
 
@@ -205,7 +216,7 @@ export default function GroupInvitesScreen() {
     if (resending != null) return;
     setResending(inv.id);
     try { await resendInvitation(chatId, inv.id); await refresh(); }
-    catch (e: any) { Alert.alert('Could not renew', e?.message ?? 'Try again.'); }
+    catch (e) { Alert.alert('Could not renew', userErrorText(e, 'Try again.')); }
     finally { setResending(null); }
   };
 
@@ -214,24 +225,29 @@ export default function GroupInvitesScreen() {
   // still says who ended it. Offering the right one is the only way that
   // distinction survives contact with a user.
   const withdrawingRef = useRef(false);
+  // Like Turn-down, the latch is taken when the confirmation OPENS.
   const doWithdraw = (inv: Invitation) => {
+    if (withdrawingRef.current) return;
+    withdrawingRef.current = true;
+    setWithdrawAsk(inv.id);
+    const release = () => { withdrawingRef.current = false; setWithdrawAsk(null); };
     Alert.alert(
       inv.mine ? 'Withdraw your invitation?' : 'Revoke this invitation?',
       'It disappears from their invitations straight away.',
       [
-        { text: 'Keep it', style: 'cancel' },
+        { text: 'Keep it', style: 'cancel', onPress: release },
         { text: inv.mine ? 'Withdraw' : 'Revoke', style: 'destructive', onPress: async () => {
-          if (withdrawingRef.current) return;
-          withdrawingRef.current = true;
+          setWithdrawAsk(null);
           setWithdrawing(inv.id);
           try {
             if (inv.mine) await cancelInvitation(chatId, inv.id);
             else await revokeInvitation(chatId, inv.id);
             await refresh();
-          } catch (e: any) { Alert.alert('Could not do that', e?.message ?? 'Try again.'); }
+          } catch (e) { Alert.alert('Could not do that', userErrorText(e, 'Try again.')); }
           finally { withdrawingRef.current = false; setWithdrawing(null); }
         } },
       ],
+      { cancelable: true, onDismiss: release },
     );
   };
 
@@ -253,8 +269,8 @@ export default function GroupInvitesScreen() {
   ], [results, waiting, unanswered]);
   // Everything the rows, headers and footers draw besides `sections`.
   const rowDeps = useMemo(
-    () => ({ inviting, acting, resending, withdrawing, authHeader, loading, refreshFailed, colors }),
-    [inviting, acting, resending, withdrawing, authHeader, loading, refreshFailed, colors],
+    () => ({ inviting, acting, asking, resending, withdrawing, withdrawAsk, authHeader, loading, refreshFailed, colors }),
+    [inviting, acting, asking, resending, withdrawing, withdrawAsk, authHeader, loading, refreshFailed, colors],
   );
 
   // photoURL is an attachment id behind auth (users.photo_url), as in app/group-info.tsx.
@@ -411,8 +427,9 @@ export default function GroupInvitesScreen() {
           }
           if (item.kind === 'waiting') {
             const p = item.p;
+            const k = queueKey(p);
             return (
-              <View style={[st.row, { borderColor: colors.glassStroke }]}>
+              <View style={[st.row, { borderColor: colors.glassStroke }, queueLocked && acting !== k && asking !== k && st.rowWaiting]}>
                 {avatar(p.name, p.photoURL)}
                 <View style={{ flex: 1, minWidth: 0 }}>
                   <Text style={{ color: colors.text, fontWeight: '600', fontSize: 14 }} numberOfLines={1}>
@@ -425,16 +442,18 @@ export default function GroupInvitesScreen() {
                       : 'Invited, has not answered'}
                   </Text>
                 </View>
-                {acting === queueKey(p) ? <ActivityIndicator size="small" color={colors.primary} /> : (
+                {acting === k ? <ActivityIndicator size="small" color={colors.primary} accessibilityLabel="Working" /> : (
                   <>
                     {p.canApprove && (
                       <TouchableOpacity onPress={() => approve(p)} style={[st.pill, { backgroundColor: colors.success }]} hitSlop={6}
+                        disabled={queueLocked} accessibilityState={{ disabled: queueLocked }}
                         accessibilityRole="button" accessibilityLabel={`Approve ${p.name ?? 'crazzychat user'}`}>
                         <Text style={[st.pillTxt, { color: inkOn(colors.success) }]}>Approve</Text>
                       </TouchableOpacity>
                     )}
                     {p.canReject && (
-                      <TouchableOpacity accessibilityRole="button" accessibilityLabel={`Decline ${p.name ?? "crazzychat user"}`} onPress={() => decline(p)} style={st.rowBtn} hitSlop={8}>
+                      <TouchableOpacity accessibilityRole="button" accessibilityLabel={`Decline ${p.name ?? "crazzychat user"}`} onPress={() => decline(p)} style={st.rowBtn} hitSlop={8}
+                        disabled={queueLocked} accessibilityState={{ disabled: queueLocked }}>
                         <Ionicons name="close-circle" size={19} color={colors.danger} />
                       </TouchableOpacity>
                     )}
@@ -464,8 +483,8 @@ export default function GroupInvitesScreen() {
                   : <Ionicons name="refresh" size={17} color={colors.primary} />}
               </TouchableOpacity>
               <TouchableOpacity accessibilityRole="button" accessibilityLabel={`${inv.mine ? 'Withdraw' : 'Revoke'} the invitation to ${inv.name ?? inv.ref ?? "crazzychat user"}`}
-                accessibilityState={{ disabled: withdrawing != null, busy: withdrawing === inv.id }}
-                disabled={withdrawing != null} onPress={() => doWithdraw(inv)} style={st.rowBtn} hitSlop={8}>
+                accessibilityState={{ disabled: withdrawing != null || withdrawAsk != null, busy: withdrawing === inv.id }}
+                disabled={withdrawing != null || withdrawAsk != null} onPress={() => doWithdraw(inv)} style={st.rowBtn} hitSlop={8}>
                 {withdrawing === inv.id
                   ? <ActivityIndicator size="small" color={colors.danger} />
                   : <Ionicons name="close-circle" size={17} color={colors.danger} />}
@@ -497,6 +516,8 @@ const st = StyleSheet.create({
   row: { flexDirection: 'row', alignItems: 'center', gap: 11, paddingVertical: 11, borderBottomWidth: StyleSheet.hairlineWidth },
   rowIcon: { width: 32, height: 32, borderRadius: 16, alignItems: 'center', justifyContent: 'center' },
   rowBtn: { padding: 6 },
+  // Another Waiting row is acting (or its confirmation is open): its buttons are disabled.
+  rowWaiting: { opacity: 0.5 },
   avatar: { alignItems: 'center', justifyContent: 'center' },
   pill: { paddingHorizontal: 14, minHeight: 32, borderRadius: 16, alignItems: 'center', justifyContent: 'center', minWidth: 74 },
   pillTxt: { fontSize: 12.5, fontWeight: '800' },

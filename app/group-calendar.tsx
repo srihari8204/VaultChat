@@ -10,6 +10,7 @@
 // is exactly as private as a message in the same group.
 
 import React, { useCallback, useMemo, useRef, useState } from 'react';
+import { userErrorText } from '../lib/userErrorText';
 import {
   View, StyleSheet, TouchableOpacity, ScrollView, Alert, ActivityIndicator,
 } from 'react-native';
@@ -208,9 +209,9 @@ export default function GroupCalendarScreen() {
       setCursor(event.startsAt);
       await load();
       syncReminders(groupId, me, memo).catch(() => {});
-    } catch (e: any) {
+    } catch (e) {
       // The sheet stays open with everything typed, so Retry is one tap.
-      Alert.alert(editing ? 'Could not save' : 'Could not add', e?.message ?? 'Try again.');
+      Alert.alert(editing ? 'Could not save' : 'Could not add', userErrorText(e, 'Try again.'));
     } finally { setBusy(false); }
   };
 
@@ -239,7 +240,7 @@ export default function GroupCalendarScreen() {
             if (me) syncReminders(groupId, me, memo).catch(() => {});
             if (editing?.id === o.event.id) { setComposing(false); setEditing(null); }
           }
-          catch (e: any) { Alert.alert('Could not delete', e?.message ?? 'Try again.'); }
+          catch (e) { Alert.alert('Could not delete', userErrorText(e, 'Try again.')); }
           finally { setDeletingId(null); release(); }
         } },
       ],

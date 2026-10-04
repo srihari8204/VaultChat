@@ -76,8 +76,12 @@ sub-teams; billing/seat management.
 - **Shared resources reuse the E2EE message spine where the data is small and
   conversational** (announcements, tasks) and get their own encrypted tables
   where they are queryable (calendar events, album index). Tasks-as-messages
-  keeps assignment and completion inside the existing sync and offline queue;
-  calendar needs date-range queries a message log cannot serve.
+  keeps assignment and completion inside the existing encrypted sync; a change
+  made offline is not queued (the screen says it was not saved and keeps what
+  was typed). Calendar needs date-range queries a message log cannot serve.
+  Op messages carry a plaintext `opKind` ('notes' | 'tasks') so the server can
+  index them; it learns only that a message is an op, and the app sends the
+  tag only once it has found a server with the index.
 
 - **Privacy is per-member, per-group.** "Share precise / approximate / hidden"
   is enforced **client-side at seal time** — an approximate share seals a

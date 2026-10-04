@@ -8,8 +8,8 @@
 import assert from 'node:assert/strict';
 import type { Message } from '../chatService';
 import {
-  collectGroupOps, collectIndexedOps, collectOps, isNoOpIndex, OP_PAGE, OP_LOCAL_LIMIT, UNREADABLE_BODY,
-  type IndexedOpThreadIO, type LegacyScan, type LegacyScanCache,
+  collectGroupOps, collectIndexedOps, collectOps, isNoOpIndex, opTag, OP_PAGE, OP_LOCAL_LIMIT, UNREADABLE_BODY,
+  type IndexedOpThreadIO, type LegacyScan, type LegacyScanCache, type OpIndexMemo,
 } from './opThread';
 import { encodeNoteOp, decodeNoteOp, foldNotes, type NoteOp } from './notes';
 
@@ -50,6 +50,7 @@ function world(thread: Row[], local: Row[], opts: { noIndex?: number; indexFails
       }
       return [...byId.values()].sort((a, b) => a.id - b.id);
     },
+    localRowsAfter: async (after) => Math.min(local.filter((m) => m.id > after).length, OP_LOCAL_LIMIT),
     decrypt: async (m) => {
       calls.decrypt.set(m.id, (calls.decrypt.get(m.id) ?? 0) + 1);
       if (m.content === 'THROW') throw new Error('no sender key');
@@ -152,6 +153,29 @@ async function main() {
   assert.equal(foldNotes(v7.ops).find((n) => n.id === 'a')?.body, 'two', 'ops found by the first scan are kept');
   assert.equal(v7.complete, false, 'the 10-page rescan does not reach the old scan, and says so');
 
+  // ── 5b. The same busy group with TAGGED ops among the new rows (round-8 OI-1) ──
+  // Local history still outruns the scan, even though some of its rows are
+  // also index rows; an older app's untagged op between the scan and local
+  // history must not be hidden behind `complete: true`.
+  const c7b = memCache<NoteOp>();
+  await collectIndexedOps<NoteOp>(world(thread, local).io, decodeNoteOp, c7b, T0);
+  const floodTagged: Row[] = flood.map((m, i) => (i % 100 === 10
+    ? { ...op(m.id, 'u2', { k: 'add', id: `t${i}`, at: T0 + m.id, title: `T${i}` }), tagged: true } : m));
+  const gapOp = op(1500, 'u3', { k: 'add', id: 'gap', at: T0 + 1500, title: 'Gap' });
+  const wTagged = world([...thread, gapOp, ...floodTagged], floodTagged);
+  const v7b = await collectIndexedOps<NoteOp>(wTagged.io, decodeNoteOp, c7b, T0);
+  assert.ok(wTagged.calls.page > 0, 'tagged rows in local history do not hide the gap: the scan runs again');
+  assert.equal(v7b.complete, false, 'and an op it cannot reach is reported as a gap, never complete: true');
+  assert.equal(foldNotes(v7b.ops).filter((n) => n.id.startsWith('t')).length, 20, 'the tagged ops are all read');
+  // Within reach of the rescan, the untagged op is found.
+  const c7c = memCache<NoteOp>();
+  await collectIndexedOps<NoteOp>(world(thread, local).io, decodeNoteOp, c7c, T0);
+  const nearGap = op(4999, 'u3', { k: 'add', id: 'gap', at: T0 + 4999, title: 'Gap' });
+  const shortFlood = floodTagged.slice(0, OP_LOCAL_LIMIT - 1);   // the server thread: 1,999 new rows + the gap op
+  const localBusy = [...floodTagged.slice(0, OP_LOCAL_LIMIT - 1), row(9000, 'u1', 'local only')];
+  const v7c = await collectIndexedOps<NoteOp>(world([...thread, nearGap, ...shortFlood], localBusy).io, decodeNoteOp, c7c, T0);
+  assert.equal(foldNotes(v7c.ops).find((n) => n.id === 'gap')?.title, 'Gap', 'the rescan finds an untagged op it can reach');
+
   // ── 6. No viewer: nothing is remembered ──
   const w8 = world(thread, local);
   await collectIndexedOps<NoteOp>(w8.io, decodeNoteOp, null, T0);
@@ -173,16 +197,34 @@ async function main() {
   assert.equal(isNoOpIndex(null), false);
   for (const status of [404, 405]) {
     const c = memCache<NoteOp>();
+    const memo: OpIndexMemo = {};
     const w = world(thread, local, { noIndex: status });
-    const r = await collectGroupOps<NoteOp>(w.io, decodeNoteOp, c);
+    const r = await collectGroupOps<NoteOp>(w.io, decodeNoteOp, c, memo);
     const today = await collectOps<NoteOp>(world(thread, local).io, decodeNoteOp);
     assert.equal(fold(r.ops), fold(today.ops), `${status}: the paging read, unchanged`);
     assert.equal(r.complete, today.complete);
     assert.equal(w.calls.index, 1, `${status}: the index is asked once`);
     assert.equal(c.sets, 0, `${status}: the paging read keeps nothing in memory`);
+    // OI-2: the answer is remembered for the session; later opens do not ask again.
+    assert.equal(memo.known, false);
+    const again = await collectGroupOps<NoteOp>(w.io, decodeNoteOp, c, memo);
+    assert.equal(w.calls.index, 1, `${status}: a later open does not ask the index again`);
+    assert.equal(fold(again.ops), fold(today.ops), `${status}: and reads the same`);
+    assert.deepEqual(opTag('notes', memo), {}, `${status}: no tag is sent to a server without the index`);
   }
-  // Any other index failure is the load failing, as the first page always was.
-  await assert.rejects(collectGroupOps<NoteOp>(world(thread, local, { indexFails: true }).io, decodeNoteOp, memCache()));
+  // Any other index failure is the load failing, as the first page always was, and is not remembered.
+  const failMemo: OpIndexMemo = {};
+  await assert.rejects(collectGroupOps<NoteOp>(world(thread, local, { indexFails: true }).io, decodeNoteOp, memCache(), failMemo));
+  assert.equal(failMemo.known, undefined, 'a 500 says nothing about the index');
+  assert.deepEqual(opTag('tasks', failMemo), {}, 'nor tags a send');
+  // A server with the index: remembered, and sends are tagged from then on.
+  const okMemo: OpIndexMemo = {};
+  const wOk = world(thread, local);
+  await collectGroupOps<NoteOp>(wOk.io, decodeNoteOp, memCache(), okMemo);
+  await collectGroupOps<NoteOp>(wOk.io, decodeNoteOp, memCache(), okMemo);
+  assert.equal(okMemo.known, true);
+  assert.ok(wOk.calls.index >= 2, 'with the index, every open reads it');
+  assert.deepEqual(opTag('tasks', okMemo), { opKind: 'tasks' }, 'ops are tagged once the index is known');
 
   console.log('groups/opThread self-check OK');
 }

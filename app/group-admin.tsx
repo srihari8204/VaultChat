@@ -21,6 +21,7 @@
  */
 
 import { brandAlpha, type Palette } from '../constants/theme';
+import { userErrorText } from '../lib/userErrorText';
 import { Ionicons } from '@expo/vector-icons';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useCallback, useEffect, useRef, useState , useMemo} from 'react';
@@ -67,12 +68,12 @@ function useS() {
   return useMemo(() => makeStyles(colors), [colors]);
 }
 
-/** Everyone / Admins only — a pair of radios. */
 // The control labels are drawn above each radiogroup, which carries the same
 // label (and each radio repeats it), so the drawn text is hidden from screen
 // readers: as headers they made the label be read twice.
 const VISUAL_ONLY = { accessibilityElementsHidden: true, importantForAccessibility: 'no-hide-descendants' } as const;
 
+/** Everyone / Admins only — a pair of radios. */
 function PolicyToggle({ label, value, onChange }: { label: string; value: Policy; onChange: (p: Policy) => void }) {
   const s = useS();
   return (
@@ -164,9 +165,9 @@ export default function GroupAdminScreen() {
       setApprove(!!chat.approveMembers);
       if (chat.approveMembers) loadJoinReqs(chatId);
       if (chat.name) { setGroupName(chat.name); setSavedName(chat.name); }
-    } catch (e: any) {
+    } catch (e) {
       setLoadFailed(true);
-      flash('err', e?.message ?? 'Failed to load group');
+      flash('err', userErrorText(e, 'Failed to load group'));
     } finally {
       setLoading(false);
     }
@@ -187,8 +188,8 @@ export default function GroupAdminScreen() {
       await updateChat(chatId!, { name });
       setSavedName(name);
       flash('ok', 'Group name updated');
-    } catch (e: any) {
-      flash('err', e?.message ?? 'Rename failed');
+    } catch (e) {
+      flash('err', userErrorText(e, 'Rename failed'));
       setGroupName(savedName);
     } finally {
       setSavingName(false);
@@ -230,9 +231,13 @@ export default function GroupAdminScreen() {
   // One request at a time. The row stays until the server answers, with a
   // spinner on the button that was used and every row's buttons disabled, so a slow
   // or failed answer is visible on the row itself. Reject takes the latch when
-  // its confirmation OPENS; Cancel or an Android outside-tap releases it.
+  // its confirmation OPENS; Cancel or an Android outside-tap releases it. While
+  // that confirmation is up every row's buttons are disabled too (`asking`), so
+  // a tap that the latch would ignore is not offered.
   const reqActing = useRef(false);
   const [acting, setActing] = useState<{ uid: string; kind: 'approve' | 'reject' } | null>(null);
+  const [asking, setAsking] = useState<string | null>(null);
+  const reqLocked = !!acting || !!asking;
   const settleReq = async (r: JoinRequest, kind: 'approve' | 'reject') => {
     setActing({ uid: r.userId, kind });
     try {
@@ -241,7 +246,7 @@ export default function GroupAdminScreen() {
       setJoinReqs(list => list.filter(x => x.userId !== r.userId));
       flash('ok', kind === 'approve' ? 'Approved' : 'Request rejected');
       if (kind === 'approve') load();
-    } catch (e: any) { flash('err', e?.message ?? 'Failed'); loadJoinReqs(chatId!); }
+    } catch (e) { flash('err', userErrorText(e, 'Failed')); loadJoinReqs(chatId!); }
     finally { reqActing.current = false; setActing(null); }
   };
   const approveReq = (r: JoinRequest) => {
@@ -253,11 +258,12 @@ export default function GroupAdminScreen() {
   const rejectReq = (r: JoinRequest) => {
     if (reqActing.current) return;
     reqActing.current = true;
-    const release = () => { reqActing.current = false; };
+    setAsking(r.userId);
+    const release = () => { reqActing.current = false; setAsking(null); };
     const who = r.name || 'this person';
     Alert.alert('Reject join request?', `${who} will not join. They can ask again with the link.`, [
       { text: 'Cancel', style: 'cancel', onPress: release },
-      { text: 'Reject', style: 'destructive', onPress: () => { void settleReq(r, 'reject'); } },
+      { text: 'Reject', style: 'destructive', onPress: () => { setAsking(null); void settleReq(r, 'reject'); } },
     ], { cancelable: true, onDismiss: release });
   };
 
@@ -269,9 +275,9 @@ export default function GroupAdminScreen() {
     try {
       await setMemberRole(chatId!, m.userId, role);
       flash('ok', `${m.name || 'Member'} is now ${GROUP_ROLE_LABELS[role]}`);
-    } catch (e: any) {
+    } catch (e) {
       setMembers(prev);
-      flash('err', e?.message ?? 'Role change failed');
+      flash('err', userErrorText(e, 'Role change failed'));
     }
   };
 
@@ -286,9 +292,9 @@ export default function GroupAdminScreen() {
           try {
             await removeChatMember(chatId!, m.userId);
             flash('ok', `Removed ${name}`);
-          } catch (e: any) {
+          } catch (e) {
             setMembers(prev);
-            flash('err', e?.message ?? 'Remove failed');
+            flash('err', userErrorText(e, 'Remove failed'));
           }
         },
       },
@@ -456,19 +462,19 @@ export default function GroupAdminScreen() {
               const approving = mine && acting?.kind === 'approve';
               const rejecting = mine && acting?.kind === 'reject';
               return (
-                <View key={r.userId} style={s.memberRow}>
+                <View key={r.userId} style={[s.memberRow, reqLocked && !mine && asking !== r.userId && s.reqWaiting]}>
                   <View style={s.avatar}><Text style={s.avatarText}>{initialOf(r.name)}</Text></View>
                   <Text style={[s.memberName, { flex: 1 }]} numberOfLines={1}>{r.name || r.userId.slice(0, 8)}</Text>
-                  <TouchableOpacity style={s.reqApprove} onPress={() => approveReq(r)} disabled={!!acting}
+                  <TouchableOpacity style={s.reqApprove} onPress={() => approveReq(r)} disabled={reqLocked}
                     hitSlop={{ top: 8, bottom: 8, left: 8, right: 0 }}
                     accessibilityRole="button" accessibilityLabel={`Approve ${r.name || 'this person'}`}
-                    accessibilityState={{ busy: approving, disabled: !!acting }}>
+                    accessibilityState={{ busy: approving, disabled: reqLocked }}>
                     {approving
                       ? <ActivityIndicator size="small" color={colors.onPrimary} />
                       : <Text style={s.reqApproveTxt}>Approve</Text>}
                   </TouchableOpacity>
                   <TouchableOpacity accessibilityRole="button" accessibilityLabel={`Reject the join request from ${r.name || r.userId.slice(0, 8)}`}
-                    accessibilityState={{ busy: rejecting, disabled: !!acting }} disabled={!!acting}
+                    accessibilityState={{ busy: rejecting, disabled: reqLocked }} disabled={reqLocked}
                     style={s.reqReject} onPress={() => rejectReq(r)} hitSlop={10}>
                     {rejecting
                       ? <ActivityIndicator size="small" color={colors.danger} />
@@ -578,7 +584,6 @@ const makeStyles = (c: Palette) => StyleSheet.create({
 
   banner: { marginHorizontal: 16, marginBottom: 8, padding: 10, borderRadius: 10, borderWidth: 1 },
   bannerOk: { backgroundColor: brandAlpha(0.12), borderColor: brandAlpha(0.4) },
-  // danger is a #RRGGBB token in both palettes, so a hex alpha suffix is valid.
   bannerErr: { backgroundColor: tint(c.danger, 0.12), borderColor: tint(c.danger, 0.4) },
   bannerTxt: { color: c.text, fontSize: 12 },
 
@@ -627,6 +632,8 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   switchLabel: { color: c.text, fontSize: 14, fontWeight: '600' },
   switchSub: { color: c.textDim, fontSize: 12, marginTop: 2, flexShrink: 1 },
   linkRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 8, minHeight: 44 },
+  // Another request is being answered (or its Reject confirmation is open).
+  reqWaiting: { opacity: 0.5 },
   reqApprove: { backgroundColor: c.primary, borderRadius: 8, paddingHorizontal: 12, paddingVertical: 7, marginRight: 8, minWidth: 74, alignItems: 'center' },
   reqApproveTxt: { color: c.onPrimary, fontSize: 12, fontWeight: '800' },
   reqReject: { padding: 6 },

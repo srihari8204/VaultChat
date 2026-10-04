@@ -7,6 +7,7 @@
 // would bypass a member's per-group privacy setting.
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { userErrorText } from '../lib/userErrorText';
 import { KeyboardSafe } from '../components/ui';
 import {
   View, StyleSheet, TouchableOpacity, ScrollView, TextInput, Alert,
@@ -159,8 +160,8 @@ export default function GroupTripScreen() {
       setWhere('');
       // Start navigating immediately — a trip nobody is driving is just a pin.
       navigateTo(dest.lat, dest.lng, q);
-    } catch (e: any) {
-      Alert.alert('Could not start', e?.message ?? 'Try again.');
+    } catch (e) {
+      Alert.alert('Could not start', userErrorText(e, 'Try again.'));
     } finally { setBusy(false); }
   };
 
@@ -173,7 +174,7 @@ export default function GroupTripScreen() {
       // nobody else held.
       await joinTrip(trip, me);
       navigateTo(trip.destination.lat, trip.destination.lng, trip.destinationName);
-    } catch (e: any) { Alert.alert('Could not join', e?.message ?? 'Try again.'); }
+    } catch (e) { Alert.alert('Could not join', userErrorText(e, 'Try again.')); }
     finally { setActing(null); }
   };
 
@@ -184,7 +185,7 @@ export default function GroupTripScreen() {
         if (acting) return;
         setActing('leave');
         try { await leaveTrip(); setTrip(null); setPings([]); }
-        catch (e: any) { Alert.alert('Could not leave', e?.message ?? 'Try again.'); }
+        catch (e) { Alert.alert('Could not leave', userErrorText(e, 'Try again.')); }
         finally { setActing(null); }
       } },
     ]);
@@ -205,7 +206,7 @@ export default function GroupTripScreen() {
               `The server did not confirm, so others may still see the trip for up to ${Math.round(TRIP_TTL_MS / 3600_000)} hours. Check your connection.`);
           }
         }
-        catch (e: any) { Alert.alert('Could not end the trip', e?.message ?? 'Check your connection and try again.'); }
+        catch (e) { Alert.alert('Could not end the trip', userErrorText(e, 'Check your connection and try again.')); }
         finally { setActing(null); }
       } },
     ]);

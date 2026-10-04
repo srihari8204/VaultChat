@@ -19,6 +19,7 @@
 // into membership or somebody ends it.
 
 import React, { useCallback, useRef, useState } from 'react';
+import { userErrorText } from '../lib/userErrorText';
 import {
   View, StyleSheet, TouchableOpacity, FlatList, Alert,
   ActivityIndicator, RefreshControl,
@@ -95,8 +96,8 @@ export default function GroupInvitationsScreen() {
           `You have accepted. ${inv.name ?? 'The group'} admits new members only once an admin approves, so you will be added when they do.`,
         );
       }
-    } catch (e: any) {
-      Alert.alert('Could not accept', e?.message ?? 'Try again.');
+    } catch (e) {
+      Alert.alert('Could not accept', userErrorText(e, 'Try again.'));
       load();
     } finally { actingRef.current = false; setActing(null); }
   };
@@ -114,7 +115,7 @@ export default function GroupInvitationsScreen() {
           actingRef.current = true;
           setActing(inv.id);
           try { await rejectInvitation(inv.id); await load(); }
-          catch (e: any) { Alert.alert('Could not decline', e?.message ?? 'Try again.'); }
+          catch (e) { Alert.alert('Could not decline', userErrorText(e, 'Try again.')); }
           finally { actingRef.current = false; setActing(null); }
         } },
       ],
@@ -148,8 +149,9 @@ export default function GroupInvitationsScreen() {
         <View accessible accessibilityLabel={`${inv.name ?? 'A group'}, ${type.label}, ${members}. ${status} ${expiresIn(inv.expiresAt)}.`}>
         <View style={st.cardTop}>
           <View style={[st.icon, { backgroundColor: tint(accent, 0.13) }]}>
-            {/* A light server colour falls back to the text ink (lib/groups/catalog glyphOn). */}
-            <Ionicons name={icon} size={22} color={glyphOn(accent, colors.bg, colors.text)} />
+            {/* A light server colour falls back to the text ink (lib/groups/catalog glyphOn),
+                measured on this disc's own 0.13 tint over the ground. */}
+            <Ionicons name={icon} size={22} color={glyphOn(accent, colors.bg, colors.text, 0.13)} />
           </View>
           <View style={{ flex: 1, minWidth: 0 }}>
             <Text style={{ color: colors.text, fontWeight: '800', fontSize: 15.5 }} numberOfLines={1}>
