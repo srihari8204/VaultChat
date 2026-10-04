@@ -108,8 +108,13 @@ export default function AppLock() {
   // #32 unseal path: the PIN derives the key that opens the sealed tokens.
   // Resume path for a Device-PIN user: the session is already open in memory,
   // so the PIN is checked against pinStore (which owns the attempt backoff).
+  // A ref, not `busy`: busy is state, so a second completion in the same frame
+  // (keyboard submit + button, or MpinInput's autofill double-fire) still sees
+  // false and would spend a second PIN/MPIN attempt. Same latch as mpin-entry.
+  const inFlight = useRef(false);
   const submitSeal = async () => {
-    if (busy) return;
+    if (inFlight.current) return;
+    inFlight.current = true;
     setBusy(true); setError(null);
     try {
       const ok = mode === 'pin' ? await verifyPin(pin) : await loadSealedSession(pin);
@@ -123,7 +128,7 @@ export default function AppLock() {
         : 'That PIN did not unlock this device. Your messages are still here — try again.');
     } catch {
       if (alive.current) setError("Couldn't check your PIN. Try again.");
-    } finally { if (alive.current) setBusy(false); }
+    } finally { inFlight.current = false; if (alive.current) setBusy(false); }
   };
 
   // No cached user id means the MPIN cannot be checked at all; offer the exit
@@ -160,12 +165,14 @@ export default function AppLock() {
   };
 
   const submitMpin = async (value: string) => {
-    if (busy || !userId) { if (!userId) setError('Session error — sign in again.'); return; }
+    if (!userId) { setError('Session error — sign in again.'); return; }
+    if (inFlight.current) return;
+    inFlight.current = true;
     setBusy(true); setError(null);
     try {
       await verifyMpinRemote(userId, value);
       if (alive.current) enter();
-    } catch (e: any) {
+    } catch (e: unknown) {
       if (!alive.current) return;
       setMpin(''); doShake();
       // The MPIN is checked by the server; offline, only biometrics (or the
@@ -173,7 +180,7 @@ export default function AppLock() {
       setError(isOfflineError(e)
         ? `You're offline — use biometrics${devicePin ? ' or your device PIN' : ''}, or try again when connected.`
         : onboardingError(e, 'Incorrect MPIN'));
-    } finally { if (alive.current) setBusy(false); }
+    } finally { inFlight.current = false; if (alive.current) setBusy(false); }
   };
 
   return (

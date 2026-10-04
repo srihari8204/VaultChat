@@ -46,12 +46,13 @@ function formatExpiry(iso: string | null): string {
 type LinkAction = (link: InviteLink) => void;
 
 /** One invite link. Hoisted and memoised: the screen passes stable handlers. */
-const LinkRow = memo(function LinkRow({ item, revokeBusy, onCopy, onShare, onQr, onRevoke }: {
+/** The screen's styles are passed in: one StyleSheet per screen, not per row. */
+const LinkRow = memo(function LinkRow({ item, revokeBusy, onCopy, onShare, onQr, onRevoke, s }: {
   item: InviteLink; revokeBusy: boolean;
   onCopy: LinkAction; onShare: LinkAction; onQr: LinkAction; onRevoke: LinkAction;
+  s: ReturnType<typeof makeStyles>;
 }) {
   const { colors } = useTheme();
-  const s = useS();
   // An expired link no longer works either: nothing to copy, share or show.
   const dead = item.revoked || isExpired(item);
   return (
@@ -242,7 +243,7 @@ export default function InviteLinkScreen() {
             keyExtractor={l => String(l.id)}
             refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} colors={[colors.primary]} />}
             renderItem={({ item }) => (
-              <LinkRow item={item} revokeBusy={revokingId != null}
+              <LinkRow item={item} revokeBusy={revokingId != null} s={s}
                 onCopy={copyLink} onShare={shareLink} onQr={showQr} onRevoke={revoke} />
             )}
             ListEmptyComponent={<View style={{ alignItems: 'center', padding: 30 }}><Text style={s.empty}>No invite links yet</Text></View>}
@@ -256,7 +257,7 @@ export default function InviteLinkScreen() {
           <View style={s.qrCard} accessibilityViewIsModal>
             <Text style={s.qrTitle} accessibilityRole="header">Scan to join {groupName || 'group'}</Text>
             <View style={s.qrBox} accessible accessibilityRole="image" accessibilityLabel={`QR code for the invite link vaultchat.app/join/${qrCode ?? ''}`}>
-              {qrCode && <QRCode value={JOIN_BASE + qrCode} size={220} {...QR_COLORS} />}
+              {qrCode && <QRCode value={JOIN_BASE + qrCode} size={220} {...QR_COLORS} quietZone={20} />}
             </View>
             <Text style={s.qrCode} numberOfLines={1}>vaultchat.app/join/{qrCode}</Text>
             <TouchableOpacity style={s.qrClose} onPress={() => setQrCode(null)} accessibilityRole="button">
@@ -295,6 +296,8 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   qrBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.8)', alignItems: 'center', justifyContent: 'center', padding: 24 },
   qrCard: { backgroundColor: c.glassSoft, borderRadius: 24, padding: 24, alignItems: 'center', width: '100%', maxWidth: 320, borderWidth: 1, borderColor: c.glassStroke },
   qrTitle: { color: c.text, fontSize: 16, fontWeight: '800', marginBottom: 16, textAlign: 'center' },
+  // The QR draws its own white quiet zone (quietZone={20}, about 3-4 modules):
+  // this box is the theme's surface, dark in dark mode, and scanners need light round the code.
   qrBox: { backgroundColor: c.glassSoft, padding: 16, borderRadius: 16 },
   qrCode: { color: c.textDim, fontSize: 12, fontFamily: 'monospace', marginTop: 16 },
   qrClose: { marginTop: 20, paddingVertical: 12, paddingHorizontal: 40, borderRadius: 14, backgroundColor: c.primary },

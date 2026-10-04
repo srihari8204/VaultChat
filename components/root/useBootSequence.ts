@@ -18,7 +18,7 @@ import { registerForCalls } from '../../lib/CallService';
 import { setRingingPeer, setRingScreenPeer } from '../../lib/ringTracker';
 import { cancelIncomingCall } from '../../lib/callNotification';
 import { getAccessToken } from '../../lib/api';
-import { launchAllowed } from '../../lib/launchGate';
+import { currentLaunchDecision } from '../../lib/launchGate';
 import { hrefWithQuery, onDeliveredTap, openWhenUnlocked } from '../../lib/pendingLink';
 import { holdSecurityVerdict } from '../../lib/securityVerdict';
 import { E2EE_ENABLED } from '../../constants/flags';
@@ -46,6 +46,14 @@ export function useBootSequence(router: Router, pathRef: RefObject<string>): Com
     // The gap boot_effect_start → boot_unblocked is cold-start cost the user
     // actually feels; anything after boot_deferred_start is off that path.
     mark('boot_effect_start');
+
+    // THIS mount's launch decision. The root re-arms it during its first render
+    // (beginLaunchGate, before any effect), so read it here, once. The
+    // process-wide launchAllowed says how the FIRST mount decided; after a
+    // root remount it would gate /blocked and notification taps by that stale
+    // answer while the new gate is still deciding (app/index.tsx reads the
+    // same per-mount decision).
+    const launchDecision = currentLaunchDecision();
 
     // START THE SOCKET HANDSHAKE FIRST, but INSIDE the boot sequence.
     //
@@ -94,7 +102,7 @@ export function useBootSequence(router: Router, pathRef: RefObject<string>): Com
             holdSecurityVerdict(report);
             // AFTER the launch gate: its replace('/onboard' | '/app-lock') would
             // otherwise land on top of the verdict and hide it.
-            await launchAllowed;
+            await launchDecision;
             router.replace('/blocked');
           }
         })
@@ -136,7 +144,7 @@ export function useBootSequence(router: Router, pathRef: RefObject<string>): Com
     // Call routes are deliberately NOT gated: a ring must be answerable from
     // the lock screen, as the OS full-screen call already is.
     const openHref = (href: string) => {
-      void openWhenUnlocked(href, launchAllowed, () => pathRef.current,
+      void openWhenUnlocked(href, launchDecision, () => pathRef.current,
         (h) => router.push(h as Href)).catch(() => {});
     };
     const openLink = ({ pathname: path, params }: { pathname: string; params?: Record<string, string> }) =>
@@ -229,7 +237,17 @@ export function useBootSequence(router: Router, pathRef: RefObject<string>): Com
     // drain, no NetInfo reconnect flush and no periodic tick — queue messages
     // offline, restart, stop at the chat list, regain network, and nothing sent.
     // It also left `online` stale-true, since only initQueue's listener writes it.
-    import('../../lib/messageQueue').then(m => m.initQueue()).catch(() => {});
+    import('../../lib/messageQueue').then(m => {
+      // Report a forward the server rejects on this drain by the name its
+      // outbox row carries (queued before a restart, so no chat screen tracked
+      // it). Armed only once THIS mount's gate let the launch in: the Alert
+      // names a chat, and must not appear over the lock or sign-in screen.
+      // Never in the way of the drain itself.
+      void launchDecision.then(ok => ok
+        ? import('../chat/forwardRejectionReport').then(r => { r.armForwardRejectionReport(m.on); })
+        : undefined).catch(() => {});
+      m.initQueue();
+    }).catch(() => {});
 
     // ── Boot work that can wait for the first frame ────────────────────
     // Neither of these changes anything the user can see on the chat list, and

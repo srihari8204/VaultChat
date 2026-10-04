@@ -275,8 +275,8 @@ export const AuroraDark: Palette = {
   // tokens changed nothing on screen. Below AA for small text in dark (4.11:1
   // on #1777FE, 3.76:1 on #EF4444). BRAND_NIGHT '#010628' would pass (4.83 /
   // 5.27:1) but restyles every dark-mode button, so the value is NOT changed
-  // here: it waits on the owner's design decision (not yet listed in
-  // 2026-10-04_fix_status.md).
+  // here: it waits on the owner's design decision, listed in
+  // 2026-10-04_fix_status.md §5 ("Dark-mode ink on solid fills").
   onPrimary:   '#FFFFFF',
   onDanger:    '#FFFFFF',
   warning:     '#F59E0B',   // ≥7.44:1 on bg/card/surfaceSolid/surface/glass

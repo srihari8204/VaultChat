@@ -50,8 +50,10 @@ ok('a clean re-check releases only restrict, then leaves',
   /if \(report\.clean\) \{ clearRestrictVerdict\(\); leave\(\); return; \}/.test(screen));
 // app/_layout.tsx plus the boot sequence that runs the launch scan (scripts/rootLayoutSources).
 const layout = readRootLayout();
-ok('the launch scan holds its report, then routes to /blocked after the launch gate',
-  /holdSecurityVerdict\(report\);[\s\S]{0,400}await launchAllowed;\s*router\.replace\('\/blocked'/.test(layout));
+ok('the boot sequence reads the per-mount decision, not the process-wide one',
+  /const launchDecision = currentLaunchDecision\(\);/.test(layout) && !/\blaunchAllowed\b/.test(layout.replace(/\/\/.*$/gm, '')));
+ok('the launch scan holds its report, then routes to /blocked after THIS mount\'s launch gate',
+  /holdSecurityVerdict\(report\);[\s\S]{0,400}await launchDecision;\s*router\.replace\('\/blocked'/.test(layout));
 
 console.log(failures ? `\n${failures} FAILED` : '\nall passed');
 process.exit(failures ? 1 : 0);

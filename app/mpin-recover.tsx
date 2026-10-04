@@ -74,7 +74,7 @@ export default function MpinRecover() {
       if (!alive.current) return;
       if (!qs.length) { Alert.alert('No questions', 'No security questions are set for this account.'); router.back(); return; }
       setQuestions(qs); setPhase('answer');
-    } catch (e: any) {
+    } catch (e: unknown) {
       if (!alive.current) return;
       setOtpExpired(needsFreshOtp(e));
       setError(needsFreshOtp(e) ? FRESH_OTP_MESSAGE : onboardingError(e, 'Could not load your security questions.'));
@@ -97,7 +97,7 @@ export default function MpinRecover() {
         .map(q => ({ questionCode: q, answer: (answers[q] ?? '').trim() }));
       const t = await verifyRecoveryAnswers(userId, payload);
       setTicket(t); setPhase('setmpin');
-    } catch (e: any) {
+    } catch (e: unknown) {
       if (needsFreshOtp(e)) { setOtpExpired(true); setError(FRESH_OTP_MESSAGE); setPhase('loadError'); return; }
       setError(onboardingError(e, 'Answers don’t match'));
     } finally { verifying.current = false; setBusy(false); }
@@ -115,7 +115,7 @@ export default function MpinRecover() {
       // Not router.replace: /onboard and /mpin-entry must not stay under Chats,
       // and a new phone gets the restore offer (lib/postSignIn.ts).
       if (!(await openRestoreIfNewPhone())) resetTo('/(tabs)/chats');
-    } catch (e: any) {
+    } catch (e: unknown) {
       inFlight.current = false;
       setBusy(false); setMpinPhase('set'); setFirst(''); setConfirm('');
       // Inline, under the PIN cells, in the live region the other errors use.

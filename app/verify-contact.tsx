@@ -212,7 +212,7 @@ export default function VerifyContactScreen() {
               <Text style={S.number} accessibilityLabel={`Safety number: ${formatSafetyNumber(state.number).split(/\s+/).join(', ')}`}>{formatSafetyNumber(state.number)}</Text>
               {showQr && (
                 <View style={S.qrBox} accessible accessibilityRole="image" accessibilityLabel="Your safety number as a QR code">
-                  <QRCode value={safetyQrPayload(state.number)} size={200} {...QR_COLORS} />
+                  <QRCode value={safetyQrPayload(state.number)} size={200} {...QR_COLORS} quietZone={20} />
                 </View>
               )}
               <View style={S.cardBtns}>
@@ -313,6 +313,8 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   cardBtns: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center' },
   // The code itself is dark-on-white in both themes (scanners need that); this
   // is only the frame around it.
+  // The QR draws its own white quiet zone (quietZone={20}, about 3-4 modules):
+  // this box is the theme's surface, dark in dark mode, and scanners need light round the code.
   qrBox: { padding: 12, borderRadius: 12, backgroundColor: c.card },
   scanWrap: { flex: 1, backgroundColor: AuroraDark.bg, alignItems: 'center', justifyContent: 'center' },
   scanFrame: { width: 250, height: 250, borderWidth: 2, borderColor: c.primary, borderRadius: 20 },

@@ -12,12 +12,18 @@
 // even after the user has left the chat they forwarded from (the queue's bus is
 // module state in lib/messageQueue, alive for the whole JS runtime).
 //
-// ponytail: the tempId → name map is in memory only. A forward still queued
-// when the app is killed is not tracked after the restart, and its rejection
-// shows only as the red bubble in the target chat. Store the target's name with
-// the outbox row if that case needs a report too.
+// After an app restart the in-memory map is empty, so the outbox row carries the
+// target's name too (lib/messageQueue QueuedMessage.forwardTo, local only) and
+// the 'failed' event hands it back. The root's boot sequence arms this tracker
+// as the outbox starts draining, once the launch gate has let the launch in
+// (components/chat/forwardRejectionReport).
+//
+// ponytail: a launch that starts at the lock or sign-in screen is not armed at
+// boot (the Alert names a chat), only by the next forward; a rejection in that
+// window shows only as the red bubble in the target chat. Arming on unlock
+// would need an "unlocked" signal the lock screens do not publish today.
 
-type FailedEvent = { tempId: string; error: string };
+type FailedEvent = { tempId: string; error: string; forwardTo?: string };
 type SentEvent = { tempId: string };
 export interface ForwardQueueBus {
   (event: 'failed', fn: (e: FailedEvent) => void): () => void;
@@ -26,8 +32,8 @@ export interface ForwardQueueBus {
 
 export function forwardFeedback(on: ForwardQueueBus, onRejected: (name: string, error: string) => void) {
   const inFlight = new Map<string, string>();
-  const offFailed = on('failed', ({ tempId, error }) => {
-    const name = inFlight.get(tempId);
+  const offFailed = on('failed', ({ tempId, error, forwardTo }) => {
+    const name = inFlight.get(tempId) ?? forwardTo;
     if (name == null) return;
     inFlight.delete(tempId);
     onRejected(name, error);

@@ -101,7 +101,7 @@ export default function OnboardMpin() {
       await setMpinRemote(userId, setupTicket, v);
       onboarding.set({ userId, mpin: v });                  // mpin kept (RAM) for the success login
       router.replace({ pathname: '/onboard-success', params: { userId } });
-    } catch (e: any) {
+    } catch (e: unknown) {
       setBusy(false);
       setPhase('set'); setFirst(''); setConfirm('');
       Alert.alert('Could not finish setup', onboardingError(e, 'Please try again'));

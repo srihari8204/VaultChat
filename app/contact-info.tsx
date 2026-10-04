@@ -333,7 +333,7 @@ export default function ContactInfoScreen() {
 
         {/* Live Chat Viewers (#58) — share whether you're currently viewing this chat */}
         <View style={s.section}>
-          <Text style={s.sectionTitle}>Privacy</Text>
+          <Text style={s.sectionTitle} accessibilityRole="header">Privacy</Text>
           <View style={s.prefRow}>
             <View style={s.prefBody}>
               <Text style={s.prefTitle}>Share my viewing status</Text>
@@ -346,7 +346,7 @@ export default function ContactInfoScreen() {
         {/* About (peer's status text) */}
         {!!peer?.status && (
           <View style={s.section}>
-            <Text style={s.sectionTitle}>About</Text>
+            <Text style={s.sectionTitle} accessibilityRole="header">About</Text>
             <Text style={s.aboutText}>{peer.status}</Text>
           </View>
         )}
@@ -387,7 +387,7 @@ export default function ContactInfoScreen() {
         {sharedShown && media.length > 0 && (
           <View style={s.section}>
             <View style={s.sectionHeader}>
-              <Text style={s.sectionTitle}>Shared Media</Text>
+              <Text style={s.sectionTitle} accessibilityRole="header">Shared Media</Text>
               <TouchableOpacity onPress={() => router.push({ pathname: '/media-gallery', params: { chatId } })}
                 accessibilityRole="button" accessibilityLabel="See all shared media" hitSlop={12}>
                 <Text style={s.seeAll}>See All</Text>
@@ -404,7 +404,7 @@ export default function ContactInfoScreen() {
         {/* Shared Files */}
         {sharedShown && files.length > 0 && (
           <View style={s.section}>
-            <Text style={s.sectionTitle}>Shared Files</Text>
+            <Text style={s.sectionTitle} accessibilityRole="header">Shared Files</Text>
             {/* Files open through the gallery's Files tab (`open` = this message),
                 which downloads, decrypts and picks the in-app viewer (lib/docOpen)
                 — one copy of that path. */}
@@ -423,7 +423,7 @@ export default function ContactInfoScreen() {
         {/* Shared Links — preview card (OG) + tappable URL */}
         {sharedShown && links.length > 0 && (
           <View style={s.section}>
-            <Text style={s.sectionTitle}>Shared Links</Text>
+            <Text style={s.sectionTitle} accessibilityRole="header">Shared Links</Text>
             {links.slice(0, 20).map(l => (
               <TouchableOpacity key={`${l.id}-${l.url}`} activeOpacity={0.7} onPress={() => {
                 // Peer-supplied link: show where it goes before leaving the app.
@@ -447,7 +447,7 @@ export default function ContactInfoScreen() {
         {/* Groups in common (WhatsApp) */}
         {commonGroups.length > 0 && (
           <View style={s.section}>
-            <Text style={s.sectionTitle}>{commonGroups.length} group{commonGroups.length > 1 ? 's' : ''} in common</Text>
+            <Text style={s.sectionTitle} accessibilityRole="header">{commonGroups.length} group{commonGroups.length > 1 ? 's' : ''} in common</Text>
             {commonGroups.map(g => (
               <TouchableOpacity key={g.id} style={s.fileRow} activeOpacity={0.7}
                 onPress={() => router.push({ pathname: '/group-info', params: { id: g.id } })}

@@ -10,15 +10,20 @@
 //     on this mid-blue fill is light, so luminance alone cannot separate it
 //     from the white-ish meta line — the hue does.
 // A custom bubble colour (lib/chatBubbleTheme BUBBLE_THEMES) gets its own inks
-// (components/chat/bubbleFillInk): checked here for EVERY preset, in normal and
+// (lib/bubbleFillInk): checked here for EVERY preset, in normal and
 // high contrast — body and meta text >= 4.5:1, read tick >= 3:1 with a hue
 // apart from the meta ink the sent / delivered ticks use. The theme's own
 // bubbleMetaOut (time text on the default fill) is text too: >= 4.5:1.
+// The rest of your bubble's content on a custom colour (poll, location, file,
+// voice, the "unable to decrypt" / "not available" placeholders) must use those
+// inks too — checked by contrast (the voice note's unplayed `track` >= 3:1, a
+// graphic) and by pinning the components to them (`fillInk`), so Emerald is no
+// longer white at 2.54:1 beside a dark meta line.
 
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { PALETTES } from '../constants/theme';
-import { fillInks, contrastOn, chroma } from '../components/chat/bubbleFillInk';
+import { fillInks, contrastOn, chroma } from './bubbleFillInk';
 
 function rgba(v: string): [number, number, number, number] {
   if (v.startsWith('#')) {
@@ -72,6 +77,9 @@ for (const [id, fill] of presets) {
     assert.ok(read >= 3, `${tag}: read tick ${ink.tickRead} is ${read.toFixed(2)}:1 (< 3:1)`);
     assert.ok(chroma(ink.tickRead) >= 100, `${tag}: read tick ${ink.tickRead} has no clear hue`);
     assert.ok(chroma(ink.text) < 40, `${tag}: meta ink is neutral, so the read tick's hue sets it apart`);
+    const track = contrast(ink.track, fill);
+    assert.ok(track >= 3, `${tag}: unplayed wave ink ${ink.track} is ${track.toFixed(2)}:1 (< 3:1)`);
+    assert.notEqual(ink.track, ink.text, `${tag}: played (text) and unplayed (track) wave bars differ`);
     if (!hc) console.log(`${tag}: text ${text.toFixed(2)}:1, meta ${ink.meta} ${meta.toFixed(2)}:1, read ${ink.tickRead} ${read.toFixed(2)}:1`);
   }
 }
@@ -82,4 +90,40 @@ assert.ok(/export function idealText\(hex: string\): string \{\s*return fillInks
   'lib/chatBubbleTheme idealText delegates to fillInks(hex).text');
 assert.ok(/const mineMeta = current\.color \? fillInks\(current\.color\)\.meta : colors\.bubbleMetaOut;/
   .test(readFileSync('app/chat-themes.tsx', 'utf8')), 'the picker previews the time text in the chat\'s own meta ink');
+
+// Every own-bubble element drawn on the custom fill takes those inks
+// (MessageBubble computes ownFillInk once and passes it down).
+const bubble = readFileSync('components/chat/MessageBubble.tsx', 'utf8');
+assert.match(bubble, /const ownFillInk = useMemo\(\(\) => \(bubbleBg \? fillInks\(bubbleBg, vision\.highContrast\) : null\)/,
+  'MessageBubble derives the content inks from your bubble colour');
+for (const part of ['<AudioBubble', '<FileBubble', '<PollBubble', '<LocationBubble', '<TextBody']) {
+  const at = bubble.indexOf(part);
+  assert.ok(at > 0 && /fillInk=\{ownFillInk\}/.test(bubble.slice(at, bubble.indexOf('/>', at))), `${part} gets fillInk`);
+}
+const parts = readFileSync('components/chat/BubbleParts.tsx', 'utf8');
+const media = readFileSync('components/chat/MediaBubbles.tsx', 'utf8');
+const pins: [string, string, RegExp][] = [
+  ['poll question', parts, /S\.pollQuestionMine, fillInk && \{ color: fillInk\.text \}/],
+  ['poll option mark', parts, /S\.pollOptionMarkOn, fillInk && \{ color: checked \? fillInk\.text : fillInk\.meta \}/],
+  ['poll option label', parts, /S\.pollOptionLabelMine, fillInk && \{ color: fillInk\.text \}/],
+  ['poll option count', parts, /S\.pollOptionCountMine, fillInk && \{ color: fillInk\.meta \}/],
+  ['poll bar', parts, /S\.pollBarFillMine,\s*fillInk && \{ backgroundColor: fillInk\.text \}/],
+  ['poll footer', parts, /S\.pollFooterMine, fillInk && \{ color: fillInk\.meta \}/],
+  ['location icon', parts, /color=\{fillInk \? fillInk\.text : isMine \? colors\.bubbleOutText/],
+  ['location title', parts, /\{ fontWeight: '700' \}, fillInk && \{ color: fillInk\.text \}/],
+  ['location address', parts, /opacity: 0\.85 \}, fillInk && \{ color: fillInk\.meta, opacity: 1 \}/],
+  ['"Open in Maps"', parts, /color: fillInk \? fillInk\.text : isMine \? colors\.bubbleOutText : colors\.accentOn, fontSize: 12/],
+  ['file name (card and row)', media, /S\.fileNameMine, fillInk && \{ color: fillInk\.text \}[\s\S]*S\.fileNameMine, fillInk && \{ color: fillInk\.text \}/],
+  ['file size (card and row)', media, /S\.fileSizeMine, fillInk && \{ color: fillInk\.meta \}[\s\S]*S\.fileSizeMine, fillInk && \{ color: fillInk\.meta \}/],
+  ['voice wave bars', media, /fillInk && \{ backgroundColor: played \? fillInk\.text : fillInk\.track \}/],
+  ['voice progress bar', media, /S\.audioFillMine, fillInk && \{ backgroundColor: fillInk\.text \}/],
+  ['voice time', media, /S\.audioTimeMine, fillInk && \{ color: fillInk\.meta \}/],
+];
+for (const [what, src, re] of pins) assert.match(src, re, `${what} uses the custom-fill ink`);
+// Both italic placeholders ("🔒 unable to decrypt", "⧗ Message not available"):
+// the meta ink at full opacity (it is already the dimmest ink that keeps 4.5:1).
+assert.equal((parts.match(/\{ fontStyle: 'italic', opacity: 0\.7 \}, fillInk && \{ color: fillInk\.meta, opacity: 1 \}/g) ?? []).length, 2,
+  'both placeholders use the custom-fill meta ink');
+// lib/ must not reach into components/ for the inks.
+assert.doesNotMatch(themeSrc, /from '\.\.\/components\//, 'lib/chatBubbleTheme imports nothing from components/');
 console.log('chatBubbleTick: ok');

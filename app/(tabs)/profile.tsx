@@ -136,7 +136,7 @@ export default function ProfileScreen() {
         method: 'PUT',
         json: field === 'name' ? { name: name.trim() } : { status: status.trim() },
       });
-      setProfile(updated);
+      if (alive.current) setProfile(updated);
       return true;
     } catch (e: unknown) {
       Alert.alert('Save failed', userErrorText(e, 'Try again'));
@@ -181,7 +181,7 @@ export default function ProfileScreen() {
         method: 'PUT',
         json: { photoURL: up.id },
       });
-      setProfile(updated);
+      if (alive.current) setProfile(updated);
     } catch (e: unknown) {
       Alert.alert('Photo upload failed', userErrorText(e, 'Try again'));
     } finally {
@@ -197,7 +197,7 @@ export default function ProfileScreen() {
         method: 'PUT',
         json: { photoURL: '' },
       });
-      setProfile(updated);
+      if (alive.current) setProfile(updated);
     } catch (e: unknown) {
       Alert.alert('Could not remove photo', userErrorText(e, 'Try again'));
     } finally {

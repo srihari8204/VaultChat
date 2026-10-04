@@ -58,7 +58,7 @@ export default function MpinEntry() {
       // (lib/postSignIn.ts). Otherwise resetTo, not replace: the landing form
       // below this screen must not survive the sign-in (lib/authNav.ts).
       if (!(await openRestoreIfNewPhone())) resetTo('/(tabs)/chats');
-    } catch (e: any) {
+    } catch (e: unknown) {
       setMpin('');
       if (needsFreshOtp(e)) { setOtpExpired(true); setError(FRESH_OTP_MESSAGE); return; }
       doShake();

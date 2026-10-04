@@ -115,7 +115,14 @@ export default function ContactsScreen() {
   useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
 
   // ── Request permission + scan ─────────────────────────────
+  // One scan at a time. The AppState re-check below can fire while a scan is
+  // still inside requestPermissionsAsync (the system dialog backgrounds the app
+  // on some Androids), and a second scan would hash and match the whole book
+  // again in parallel. State can't guard it: both callers read it stale.
+  const scanningRef = useRef(false);
   const scan = useCallback(async () => {
+    if (scanningRef.current) return;
+    scanningRef.current = true;
     setScanning(true);
     setError(null);
     try {
@@ -220,6 +227,7 @@ export default function ContactsScreen() {
     } catch (e: unknown) {
       if (alive.current) setError(userErrorText(e, 'Contact scan failed'));
     } finally {
+      scanningRef.current = false;
       if (alive.current) { setScanning(false); setProgress(null); }
     }
   }, []);

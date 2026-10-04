@@ -156,7 +156,7 @@ export default function QRContactScreen() {
                 <Text style={s.qrId}>@{myVaultId || '…'}</Text>
                 <View style={s.qrBox} accessible={!!myVaultId} accessibilityRole="image" accessibilityLabel={myVaultId ? `Your QR code, VaultID ${myVaultId}` : undefined}>
                   {myVaultId
-                    ? <QRCode value={qrData} size={200} {...QR_COLORS} />
+                    ? <QRCode value={qrData} size={200} {...QR_COLORS} quietZone={20} />
                     : <Text style={{ color: colors.textDim }}>No VaultID yet</Text>}
                 </View>
                 <Text style={s.qrHint}>Show this to add you on crazzychat</Text>
@@ -243,6 +243,8 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   qrCard: { backgroundColor: c.glassSoft, borderRadius: 24, padding: 32, alignItems: 'center', width: '100%', maxWidth: 320, borderWidth: 1, borderColor: c.glassStroke },
   qrName: { color: c.text, fontSize: 20, fontWeight: '900', marginBottom: 4 },
   qrId: { color: c.accent, fontSize: 14, marginBottom: 20, fontWeight: '700' },
+  // The QR draws its own white quiet zone (quietZone={20}, about 3-4 modules):
+  // this box is the theme's surface, dark in dark mode, and scanners need light round the code.
   qrBox: { padding: 12, backgroundColor: c.glassSoft, borderRadius: 12, minWidth: 224, minHeight: 224, alignItems: 'center', justifyContent: 'center' },
   qrHint: { color: c.textDim, fontSize: 12, marginTop: 16, textAlign: 'center' },
   shareBtn: { marginTop: 24, backgroundColor: brandAlpha(0.13), borderRadius: 14, paddingVertical: 14, paddingHorizontal: 28, borderWidth: 1, borderColor: brandAlpha(0.3) },

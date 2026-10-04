@@ -4,7 +4,7 @@
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { resolveScoped } from './scopedChoice';
-import { fillInks } from '../components/chat/bubbleFillInk';
+import { fillInks } from './bubbleFillInk';
 
 export const BUBBLE_KEY = 'vc_bubble_color_';
 export const GLOBAL_BUBBLE = 'vc_global_bubble';
@@ -29,7 +29,7 @@ export const BUBBLE_THEMES: BubbleTheme[] = [
 
 /**
  * Ink for text on a user-picked bubble colour: the dark or light ink with the
- * higher WCAG contrast (components/chat/bubbleFillInk), chosen against that
+ * higher WCAG contrast (lib/bubbleFillInk), chosen against that
  * colour, not the app theme — the same ink the chat paints (chatStyles
  * idealText). A perceived-brightness cut-off put white on Emerald at 2.54:1.
  */

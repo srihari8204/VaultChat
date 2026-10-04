@@ -9,8 +9,13 @@
 //   * appForwardFeedback is ONE app-wide instance: a second call (a remounted
 //     screen) does not subscribe again, and nothing disposes it, so a rejection
 //     after the source chat closed is still reported;
-//   * app/chat.tsx uses the app-wide one with a module-scope reporter, and the
-//     notice is keyed by its count.
+//   * after an app restart (nothing tracked in memory) a rejection is still
+//     reported by the name the outbox row carries (forwardTo), and a plain
+//     send's failure (no forwardTo) is not;
+//   * app/chat.tsx uses the app-wide one with a module-scope reporter
+//     (forwardRejectionReport), stores the name on the row, and the notice is
+//     keyed by its count; the boot sequence arms it only after the launch gate
+//     let the launch in.
 
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
@@ -65,9 +70,27 @@ app1.track('t4', 'Dev');
 fire('failed', { tempId: 't4', chatId: 'd', error: 'blocked' });
 assert.deepEqual(appReported, ['Dev'], 'reported after the source chat closed, by the first reporter only');
 
+// After a restart: the in-memory map is empty; the row's forwardTo names it.
+fire('failed', { tempId: 'before-restart', chatId: 'e', error: 'blocked', forwardTo: 'Kim' });
+assert.deepEqual(appReported, ['Dev', 'Kim'], 'an untracked rejection is reported by the row\'s forwardTo');
+fire('failed', { tempId: 'plain-send', chatId: 'e', error: 'too large' });
+assert.equal(appReported.length, 2, 'a failed ordinary send (no forwardTo) is not a forward');
+
 const chat = readFileSync('app/chat.tsx', 'utf8');
-assert.match(chat, /appForwardFeedback\(onQueue, reportForwardRejection\)/, 'chat.tsx uses the app-wide tracker');
-assert.match(chat, /^function reportForwardRejection\(/m, 'the reporter is module scope, not one screen instance');
+assert.match(chat, /armForwardRejectionReport\(onQueue\)/, 'chat.tsx uses the app-wide tracker');
+const report = readFileSync('components/chat/forwardRejectionReport.ts', 'utf8');
+assert.match(report, /^export function reportForwardRejection\(/m, 'the reporter is module scope, not one screen instance');
+assert.match(report, /appForwardFeedback\(on, reportForwardRejection\)/, 'one app-wide tracker with that reporter');
+assert.match(chat, /enqueueMessage\(target\.id, \{[^}]*forwardTo: name \}\)/, 'the target name rides on the outbox row');
+const queue = readFileSync('lib/messageQueue.ts', 'utf8');
+assert.match(queue, /const payload = \{ content, type: item\.type, replyToId: item\.replyToId, meta: serverMeta, clientId: item\.clientId \};/,
+  'the POST payload is built field by field, so forwardTo never leaves the device');
+assert.match(queue, /emit\('failed', \{ tempId: item\.tempId, chatId: item\.chatId, error: item\.lastError, forwardTo: item\.forwardTo \}\)/,
+  'a rejection hands the row\'s forwardTo back');
+const boot = readFileSync('components/root/useBootSequence.ts', 'utf8');
+assert.match(boot, /launchDecision\.then\(ok => ok\s*\? import\('\.\.\/chat\/forwardRejectionReport'\)\.then\(r => \{ r\.armForwardRejectionReport\(m\.on\); \}\)/,
+  'the boot sequence arms the report only once this mount\'s gate allowed the launch');
+assert.match(boot, /m\.initQueue\(\);\s*\}\)\.catch/, 'and still drains the outbox whatever the gate says');
 assert.match(chat, /forwards\.track\(q\.tempId, name\)/, 'chat.tsx tracks each queued forward');
 assert.doesNotMatch(chat, /\.dispose\(\)/, 'no screen disposes the app-wide tracker');
 assert.match(chat, /<NoticeBar key=\{forwardNote\.n\}/, 'the notice is keyed by its count');

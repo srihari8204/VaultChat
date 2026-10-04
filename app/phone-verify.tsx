@@ -111,7 +111,7 @@ export default function PhoneVerify() {
       let verified;
       try {
         verified = await verifyPhoneOtp(phone, value);
-      } catch (e: any) {
+      } catch (e: unknown) {
         setCode('');
         setErr(onboardingError(e, 'That code didn’t match. Check it and try again.'));
         // A lockout answers with the seconds to wait; run them down here rather
@@ -122,7 +122,7 @@ export default function PhoneVerify() {
       }
       onboarding.set({ phoneTicket: verified.phoneTicket });
       try { await go(afterOtp(verified)); }
-      catch (e: any) { setStuck(true); setErr(onboardingError(e, 'Couldn’t finish signing in. Try again.')); }
+      catch (e: unknown) { setStuck(true); setErr(onboardingError(e, 'Couldn’t finish signing in. Try again.')); }
     } finally { inFlight.current = false; setBusy(false); }
   };
 
@@ -131,7 +131,7 @@ export default function PhoneVerify() {
     inFlight.current = true;
     setBusy(true); setErr(null);
     try { await go({ to: 'lookup' }); setStuck(false); }
-    catch (e: any) { setErr(onboardingError(e, 'Couldn’t finish signing in. Try again.')); }
+    catch (e: unknown) { setErr(onboardingError(e, 'Couldn’t finish signing in. Try again.')); }
     finally { inFlight.current = false; setBusy(false); }
   };
 
@@ -143,7 +143,7 @@ export default function PhoneVerify() {
     setErr(null);
     try {
       setCooldown(await resendPhoneOtp(phone, channel));
-    } catch (e: any) {
+    } catch (e: unknown) {
       setCooldown(retryAfterSec(e));               // 0 keeps the button live
       setErr(onboardingError(e, 'Could not send another code'));
     } finally { inFlight.current = false; }

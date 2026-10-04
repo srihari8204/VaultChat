@@ -156,18 +156,10 @@ export default function ChatsScreen() {
     }
     refreshInvites();
   }, [refreshInvites]));
-  useEffect(() => {
-    let off: (() => void) | null = null;
-    let dead = false;
-    const cancelStartup = afterInteractions(() => { (async () => {
-      try {
-        const { on } = await import('../../lib/socket');
-        const unsub = await on('invitation_created', () => refreshInvites());
-        if (dead) unsub(); else off = unsub;
-      } catch {}
-    })(); });
-    return () => { dead = true; cancelStartup(); off?.(); };
-  }, [refreshInvites]);
+  // PERSISTENT, like the realtime listeners below: a plain on() stayed on a
+  // socket replaced underneath this screen (profile's failed sign-out), and the
+  // banner then updated only on focus. Synchronous, so an unmount cannot leak it.
+  useEffect(() => addPersistentListener('invitation_created', () => { refreshInvites(); }), [refreshInvites]);
 
   // Core list load.
   const loadList = useCallback(async (refreshPreviews = true) => {

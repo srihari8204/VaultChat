@@ -15,7 +15,7 @@ import { type Palette, ELEVATION, ON_MEDIA_INK, brandAlpha } from '../../constan
 import { type Message } from '../../lib/chatService';
 import { chatCardMax } from '../../constants/layoutMath';
 import { tint } from '../../lib/tintColor';
-import { fillInks } from './bubbleFillInk';
+import { fillInks } from '../../lib/bubbleFillInk';
 
 
 // Optimistic bubbles carry a few extra fields beyond a server Message.
@@ -90,7 +90,7 @@ export function useS() {
 }
 
 // Pick black or white text for legibility on an arbitrary bubble color: the
-// higher WCAG contrast (./bubbleFillInk). A perceived-brightness cut-off put
+// higher WCAG contrast (lib/bubbleFillInk). A perceived-brightness cut-off put
 // white on Emerald at 2.54:1.
 export function idealText(hex: string): string {
   return hex.replace('#', '').length < 6 ? '#fff' : fillInks(hex).text;

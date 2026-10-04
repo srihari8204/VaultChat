@@ -63,7 +63,10 @@ import { ChatHeader } from '../components/chat/ChatHeader';
 import { MessageRow } from '../components/chat/MessageRow';
 import { InChatSearchBar } from '../components/chat/InChatSearchBar';
 import { ErrorBar, NoticeBar, KeyChangeBanner, ScreenshotBanner, MemoryBanner, LiveLocationBanner, PinnedBar } from '../components/chat/ChatBanners';
-import { appForwardFeedback, nextForwardNote, type ForwardNote } from '../components/chat/forwardFeedback';
+import { nextForwardNote, type ForwardNote } from '../components/chat/forwardFeedback';
+// A rejected forward is reported app-wide, by a module-scope reporter (it
+// outlives this screen); the boot sequence arms the same one.
+import { armForwardRejectionReport } from '../components/chat/forwardRejectionReport';
 import { userErrorText } from '../lib/userErrorText';
 import { chatActionErrorText } from '../components/chat/chatErrorText';
 import { getShareViewing } from '../lib/viewerPrefs';
@@ -136,16 +139,6 @@ const haptic = (style: Haptics.ImpactFeedbackStyle = Haptics.ImpactFeedbackStyle
 };
 
 const TYPING_IDLE_MS = 2500;
-
-// A forward the server REJECTS (blocked, not a member, too large) turns red in
-// the target chat only; say so wherever the user is now. Offline is not a
-// rejection — the outbox keeps the clock and retries, so no alert. Module
-// scope: the app-wide tracker (components/chat/forwardFeedback) outlives this
-// screen, so the report must not close over one mounted instance.
-function reportForwardRejection(name: string, error: string) {
-  Alert.alert(`Not forwarded to ${name}`,
-    `${error || 'The server refused it.'}\n\nIt is marked “not sent” in ${name}, where you can retry or cancel it.`);
-}
 
 // Module scope on purpose: the top-up below runs on every chat focus and every
 // foreground, and catchUp() is a network round trip even when it returns
@@ -396,9 +389,9 @@ export default function ChatScreen({ chatIdProp, embedded, onClosePane }: { chat
   const [forwardChats, setForwardChats] = useState<ChatSummary[]>([]);
   const [forwardLoading, setForwardLoading] = useState(false);
   // "Forwarding to X" after a forward is queued. Forwards still in flight are
-  // tracked app-wide (appForwardFeedback; reportForwardRejection at module
-  // scope) so a later rejection can say which chat it was for, even after this
-  // screen is gone — the red bubble itself is in the TARGET chat.
+  // tracked app-wide (components/chat/forwardRejectionReport) so a later
+  // rejection can say which chat it was for, even after this screen is gone or
+  // the app restarted — the red bubble itself is in the TARGET chat.
   const [forwardNote, setForwardNote] = useState<ForwardNote | null>(null);
   const clearForwardNote = useCallback(() => setForwardNote(null), []);
 
@@ -1456,9 +1449,11 @@ export default function ChatScreen({ chatIdProp, embedded, onClosePane }: { chat
       });
       // Subscribed before the enqueue starts the first send attempt; that
       // attempt is a network round trip, so track() below lands before it ends.
-      const forwards = appForwardFeedback(onQueue, reportForwardRejection);
-      const q = await enqueueMessage(target.id, { type: p.type as DisplayMessage['type'], plaintext: p.plaintext, meta: p.meta });
+      const forwards = armForwardRejectionReport(onQueue);
       const name = target.name || target.peerName || 'that chat';
+      // forwardTo: the name rides on the local outbox row (never sent), so a
+      // rejection after an app restart is still reported by it.
+      const q = await enqueueMessage(target.id, { type: p.type as DisplayMessage['type'], plaintext: p.plaintext, meta: p.meta, forwardTo: name });
       forwards.track(q.tempId, name);
       setForwardNote(prev => nextForwardNote(prev, name));
     } catch (e: unknown) {

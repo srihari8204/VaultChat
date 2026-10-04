@@ -144,6 +144,12 @@ export function setResumeLockCheck(check: Promise<boolean>): void {
  */
 let launchRouted = false;
 export function markLaunchRouted(): void { launchRouted = true; }
+/**
+ * lib/launchGate.beginLaunchGate, when a root REMOUNT re-arms the decision:
+ * the new mount's index has its own cold-start replace still to make, so a tap
+ * on '/' is held again rather than opened by the previous mount's mark.
+ */
+export function resetLaunchRouted(): void { launchRouted = false; }
 
 /**
  * Open `href` once the launch gate has decided and nothing is locking now;

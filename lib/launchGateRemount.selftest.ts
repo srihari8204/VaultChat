@@ -13,6 +13,7 @@ import { join } from 'node:path';
 import {
   beginLaunchGate, currentLaunchDecision, launchAllowed, launchGatePending, settleLaunchGate,
 } from './launchGate';
+import { clearLaunchLink, consumeLaunchLink, markLaunchRouted, openWhenUnlocked } from './pendingLink';
 
 let failures = 0;
 function ok(label: string, cond: boolean) {
@@ -47,6 +48,17 @@ async function main() {
   ok('launchAllowed still says how the first mount went', await peek(launchAllowed) === true);
   ok('a later visit after this mount decided is not cold', !launchGatePending());
 
+  console.log('\nA tap on the splash after a remount:');
+  markLaunchRouted(); // the previous mount's index routed
+  beginLaunchGate();
+  const fourth = currentLaunchDecision();
+  const opened: string[] = [];
+  clearLaunchLink();
+  settleLaunchGate(true);
+  await openWhenUnlocked('/chat?id=r', fourth, () => '/', (h) => { opened.push(h); });
+  ok('held for the new index to replay, not opened under its replace',
+    opened.length === 0 && consumeLaunchLink() === '/chat?id=r');
+
   console.log('\nRemount before the previous mount decided:');
   beginLaunchGate();
   const third = currentLaunchDecision();
@@ -65,6 +77,10 @@ async function main() {
   ok('index reads cold and the decision once, on its first render',
     /useState\(launchGatePending\)/.test(index) && /useState\(currentLaunchDecision\)/.test(index));
   ok('index no longer awaits the process-wide promise', !/await launchAllowed/.test(index));
+  const boot = read('components', 'root', 'useBootSequence.ts').replace(/\/\/.*$/gm, '');
+  ok('the boot sequence gates /blocked and taps by this mount\'s decision',
+    /const launchDecision = currentLaunchDecision\(\);/.test(boot) && !/\blaunchAllowed\b/.test(boot)
+    && /openWhenUnlocked\(href, launchDecision,/.test(boot));
   ok('pendingLink no longer keeps a process "decided" flag',
     !/launchGateDecided|gateDecided/.test(read('lib', 'pendingLink.ts').replace(/\/\/.*$/gm, '')));
 

@@ -9,6 +9,8 @@
 // outboxRecovery selftests read this file with app/chat.tsx as one source, and
 // receiptEvents EXECUTES onMemberDelivered / onMemberRead from it — keep their
 // names and the `chatId` / `setChat` / `queueNoteDelivered` identifiers.
+// Since the move, the live-location and pin payloads are typed and checked
+// (./socketPayloads) instead of being taken as `any`.
 
 import { useEffect, type Dispatch, type MutableRefObject, type SetStateAction } from 'react';
 import { applyMessage } from '../../lib/localDb';
@@ -29,6 +31,7 @@ import { noteDelivered as queueNoteDelivered } from '../../lib/messageQueue';
 import { getSocket, joinChatRoom, leaveChatRoom } from '../../lib/socket';
 import type { DisplayMessage } from './chatStyles';
 import { bumpPollVote } from './chatFormat';
+import { legacyLivePosition, pinnedIdOf, type LiveLocationEvent, type LiveLocationStopEvent, type PinnedEvent } from './socketPayloads';
 
 type SetS<T> = Dispatch<SetStateAction<T>>;
 export type LiveLoc = { userId: string; latitude: number; longitude: number; address?: string };
@@ -296,7 +299,7 @@ export function useChatSocket({
               : m));
         };
 
-        const onLiveLocation = (e: any) => {
+        const onLiveLocation = (e: LiveLocationEvent) => {
 
           const me = meIdRef.current;
           if (!e?.userId || e.userId === me) return;
@@ -309,11 +312,13 @@ export function useChatSocket({
             const pos = decryptPosition(key, e.blob);
             if (pos) setLiveLoc({ userId: e.userId, latitude: pos.lat, longitude: pos.lng, address: pos.address });
           } else if (e.latitude != null) {
-            // Legacy plaintext path (older sender).
-            setLiveLoc({ userId: e.userId, latitude: e.latitude, longitude: e.longitude, address: e.address });
+            // Legacy plaintext path (older sender): type- and range-checked
+            // (socketPayloads), so a malformed pair is dropped, not pinned.
+            const pos = legacyLivePosition(e);
+            if (pos) setLiveLoc({ userId: e.userId, ...pos });
           }
         };
-        const onLiveLocationStop = (e: any) => {
+        const onLiveLocationStop = (e: LiveLocationStopEvent) => {
           setLiveLoc(prev => (prev && e?.userId === prev.userId) ? null : prev);
           if (e?.userId) clearLiveKey(chatId, e.userId);
         };
@@ -332,7 +337,7 @@ export function useChatSocket({
         s.on('media_revoked',     onMediaRevoked);
         s.on('poll_voted',        onPollVoted);
         s.on('poll_unvoted',      onPollUnvoted);
-        const onPinned = (e: any) => setPinnedId(e?.messageId ?? null);
+        const onPinned = (e: PinnedEvent) => setPinnedId(pinnedIdOf(e));
         s.on('message_pinned',    onPinned);
 
         off.push(() => s.off('message_pinned', onPinned));

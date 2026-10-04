@@ -18,7 +18,8 @@ import { looksEncrypted, unvotePoll, voteOnPoll, type PollVoteSummary } from '..
 import { useS, type DisplayMessage } from './chatStyles';
 import { bumpPollVote, formatTtlRemaining, type TickState } from './chatFormat';
 import { obscureForInk, renderRichText, type BubbleInk } from './bubbleText';
-import { fillInks } from './bubbleFillInk';
+import { fillInks, type FillInks } from '../../lib/bubbleFillInk';
+import { userErrorText } from '../../lib/userErrorText';
 
 // ─── Poll bubble (in-chat voting) ────────────────────────────
 // Renders the question + the options as horizontal rows with a fill bar
@@ -28,11 +29,13 @@ import { fillInks } from './bubbleFillInk';
 // `onChange` with the optimistic next state. The chat screen owns the
 // authoritative store + socket reconciliation.
 export function PollBubble({
-  chatId, msg, isMine, votes, onChange, voteRef,
+  chatId, msg, isMine, votes, onChange, voteRef, fillInk,
 }: {
   chatId:   string;
   msg:      DisplayMessage;
   isMine:   boolean;
+  /** Inks for your bubble's custom colour (MessageBubble ownFillInk); null on the theme fill. */
+  fillInk?: FillInks | null;
   votes?:   PollVoteSummary;
   onChange?: (next: PollVoteSummary) => void;
   /** The bubble's "Vote for …" accessibility actions call this (options are nested in it). */
@@ -76,9 +79,9 @@ export function PollBubble({
       } else {
         await voteOnPoll(chatId, msg.id, idx);
       }
-    } catch (e: any) {
+    } catch (e: unknown) {
       // Rollback — server reject means our optimistic state is wrong.
-      Alert.alert('Vote failed', e?.message ?? 'Try again');
+      Alert.alert('Vote failed', userErrorText(e, 'Try again'));
       onChange?.({ counts, mine, total });
     } finally {
       setPending(null);
@@ -88,7 +91,7 @@ export function PollBubble({
 
   return (
     <View style={S.pollWrap}>
-      <Text style={[S.pollQuestion, isMine && S.pollQuestionMine]} numberOfLines={3}>
+      <Text style={[S.pollQuestion, isMine && S.pollQuestionMine, fillInk && { color: fillInk.text }]} numberOfLines={3}>
         {msg.content}
       </Text>
       {options.map((label, idx) => {
@@ -106,15 +109,15 @@ export function PollBubble({
             accessibilityLabel={`${label}, ${c} ${c === 1 ? 'vote' : 'votes'}`}
             accessibilityState={{ checked, disabled: pending != null, busy: pending === idx }}
           >
-            <Text style={[S.pollOptionMark, checked && S.pollOptionMarkOn]}>
+            <Text style={[S.pollOptionMark, checked && S.pollOptionMarkOn, fillInk && { color: checked ? fillInk.text : fillInk.meta }]}>
               {checked ? (allowMultiple ? '☑' : '◉') : (allowMultiple ? '☐' : '○')}
             </Text>
             <View style={{ flex: 1 }}>
               <View style={S.pollOptionLine}>
-                <Text style={[S.pollOptionLabel, isMine && S.pollOptionLabelMine]} numberOfLines={2}>
+                <Text style={[S.pollOptionLabel, isMine && S.pollOptionLabelMine, fillInk && { color: fillInk.text }]} numberOfLines={2}>
                   {label}
                 </Text>
-                <Text style={[S.pollOptionCount, isMine && S.pollOptionCountMine]}>
+                <Text style={[S.pollOptionCount, isMine && S.pollOptionCountMine, fillInk && { color: fillInk.meta }]}>
                   {c}
                 </Text>
               </View>
@@ -123,6 +126,7 @@ export function PollBubble({
                   style={[
                     S.pollBarFill,
                     isMine && S.pollBarFillMine,
+                    fillInk && { backgroundColor: fillInk.text },
                     { width: `${Math.round(pct * 100)}%` },
                   ]}
                 />
@@ -131,7 +135,7 @@ export function PollBubble({
           </TouchableOpacity>
         );
       })}
-      <Text style={[S.pollFooter, isMine && S.pollFooterMine]}>
+      <Text style={[S.pollFooter, isMine && S.pollFooterMine, fillInk && { color: fillInk.meta }]}>
         {total} {total === 1 ? 'vote' : 'votes'} · {allowMultiple ? 'multiple answers' : 'single answer'}
       </Text>
     </View>
@@ -197,7 +201,7 @@ export function parseLocation(plain: string): { lat: number; lng: number; addres
   return L && typeof L.lat === 'number' && typeof L.lng === 'number' ? L : null;
 }
 
-export function LocationBubble({ plain, isMine }: { plain: string; isMine: boolean }) {
+export function LocationBubble({ plain, isMine, fillInk }: { plain: string; isMine: boolean; fillInk?: FillInks | null }) {
   const S = useS();
   const { colors } = useTheme();
   // A 'location' message's (decrypted) content is JSON {lat,lng,address}.
@@ -214,18 +218,18 @@ export function LocationBubble({ plain, isMine }: { plain: string; isMine: boole
     >
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, minWidth: 190 }}>
         <View style={{ width: 40, height: 40, borderRadius: 8, backgroundColor: brandAlpha(0.18), alignItems: 'center', justifyContent: 'center' }}>
-          <Ionicons name={L?.live ? 'navigate' : 'location'} size={22} color={isMine ? colors.bubbleOutText : colors.accentOn} />
+          <Ionicons name={L?.live ? 'navigate' : 'location'} size={22} color={fillInk ? fillInk.text : isMine ? colors.bubbleOutText : colors.accentOn} />
         </View>
         <View style={{ flex: 1 }}>
-          <Text style={[S.bubbleTxt, isMine && S.bubbleTxtMine, { fontWeight: '700' }]}>
+          <Text style={[S.bubbleTxt, isMine && S.bubbleTxtMine, { fontWeight: '700' }, fillInk && { color: fillInk.text }]}>
             {L?.live ? 'Live location' : 'Location'}
           </Text>
           {ok && !!L.address && (
-            <Text style={[S.bubbleTxt, isMine && S.bubbleTxtMine, { fontSize: 12, opacity: 0.85 }]} numberOfLines={2}>
+            <Text style={[S.bubbleTxt, isMine && S.bubbleTxtMine, { fontSize: 12, opacity: 0.85 }, fillInk && { color: fillInk.meta, opacity: 1 }]} numberOfLines={2}>
               {L.address}
             </Text>
           )}
-          {ok && <Text style={{ color: isMine ? colors.bubbleOutText : colors.accentOn, fontSize: 12, fontWeight: '700', marginTop: 2 }}>Open in Maps ›</Text>}
+          {ok && <Text style={{ color: fillInk ? fillInk.text : isMine ? colors.bubbleOutText : colors.accentOn, fontSize: 12, fontWeight: '700', marginTop: 2 }}>Open in Maps ›</Text>}
         </View>
       </View>
     </TouchableOpacity>
@@ -236,8 +240,10 @@ export function LocationBubble({ plain, isMine }: { plain: string; isMine: boole
  * The text body of a bubble: the message (or ●●● Invisible Ink), its "Read as
  * page" chip and link card — or why there is no readable text.
  */
-export function TextBody({ msg, plain, isMine, inkHidden, txtColor, highlight, ink, readerArgs }: {
+export function TextBody({ msg, plain, isMine, inkHidden, txtColor, highlight, ink, readerArgs, fillInk }: {
   msg: DisplayMessage; plain: string; isMine: boolean; inkHidden: boolean; txtColor: string | null;
+  /** Your bubble's custom-colour inks: the italic placeholders use its meta ink (>= 4.5:1, no extra opacity). */
+  fillInk?: FillInks | null;
   highlight: string | null | undefined; ink: BubbleInk; readerArgs: Parameters<typeof ReaderAffordance>[0];
 }) {
   const S = useS();
@@ -270,7 +276,7 @@ export function TextBody({ msg, plain, isMine, inkHidden, txtColor, highlight, i
     ) : looksEncrypted(msg.content) ? (
       // Envelope that never decrypted (desynced ratchet / E2EE off): show the
       // standard lock indicator instead of a blank bubble or raw ciphertext.
-      <Text style={[S.bubbleTxt, isMine && S.bubbleTxtMine, { fontStyle: 'italic', opacity: 0.7 }]}>
+      <Text style={[S.bubbleTxt, isMine && S.bubbleTxtMine, { fontStyle: 'italic', opacity: 0.7 }, fillInk && { color: fillInk.meta, opacity: 1 }]}>
         🔒 unable to decrypt
       </Text>
     ) : msg.content == null && (msg.type === 'text' || msg.type === 'poll') ? (
@@ -306,7 +312,7 @@ export function TextBody({ msg, plain, isMine, inkHidden, txtColor, highlight, i
       // Scoped to text/poll on purpose. A media message legitimately has a
       // null body when it carries no caption; its bubble is the attachment,
       // which renders above this and must not be labelled unavailable.
-      <Text style={[S.bubbleTxt, isMine && S.bubbleTxtMine, { fontStyle: 'italic', opacity: 0.7 }]}>
+      <Text style={[S.bubbleTxt, isMine && S.bubbleTxtMine, { fontStyle: 'italic', opacity: 0.7 }, fillInk && { color: fillInk.meta, opacity: 1 }]}>
         ⧗ Message not available on this device
       </Text>
     ) : null
@@ -318,7 +324,7 @@ export function TextBody({ msg, plain, isMine, inkHidden, txtColor, highlight, i
  * filled bubble, or on the chat ground for media (transparent bubble) and
  * received messages; the read tick must stand out from the line on both:
  * tickRead on the fill, the accent off it. A custom bubble colour (`fill`)
- * gets inks chosen against that colour (./bubbleFillInk), not the theme's.
+ * gets inks chosen against that colour (lib/bubbleFillInk), not the theme's.
  */
 export function BubbleMetaLine({ msg, tickState, isMine, isMedia, fill }: {
   msg: DisplayMessage; tickState: TickState; isMine: boolean; isMedia: boolean;

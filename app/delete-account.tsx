@@ -118,7 +118,7 @@ export default function DeleteAccountScreen() {
     // block then and rely on the server's 400/403/423 below.
     try {
       await verifyMpinRemote(userId, mpin);
-    } catch (e: any) {
+    } catch (e: unknown) {
       setBusy(false);
       setMpin('');
       setAuthErr(`${onboardingError(e, 'Incorrect MPIN.')} Your account was not deleted.`);
@@ -136,13 +136,13 @@ export default function DeleteAccountScreen() {
       // through to get here) must not survive the deletion — replace swaps only
       // the top entry, so BACK led straight back into an account that is gone.
       resetTo('/onboard');
-    } catch (e: any) {
+    } catch (e: unknown) {
       setBusy(false);
       // The MPIN answers belong next to the MPIN field; anything else is a
       // failed request, said in words rather than a raw error. Keyed on the
       // server's error code only: a bare 403/400 from anything else on the way
       // (a proxy, an expired session) is not "wrong MPIN".
-      const code = e?.body?.error?.code;
+      const code = (e as { body?: { error?: { code?: unknown } } } | null)?.body?.error?.code;
       if (code === 'invalid_mpin') {
         setMpin('');
         setAuthErr('Incorrect MPIN. Your account was not deleted.');

@@ -29,7 +29,9 @@ import { getMedia, copyToCache } from '../../lib/mediaStore';
 import { thumbDataUri } from '../../lib/thumbnails';
 import { useConnectionState } from '../../lib/socket';
 import { useS, ON_MEDIA_SCRIM } from './chatStyles';
+import type { FillInks } from '../../lib/bubbleFillInk';
 import { formatBytes, formatRecDuration } from './chatFormat';
+import { chatActionErrorText } from './chatErrorText';
 
 /** Where a nested control registers its handler for the bubble's a11y action. */
 export type BubbleActionRef = MutableRefObject<(() => void) | null>;
@@ -39,7 +41,7 @@ export type BubbleActionRef = MutableRefObject<(() => void) | null>;
 // (Sharing.shareAsync). The /uploads route is auth-gated so we pass
 // the Bearer header on the download request.
 export function FileBubble({
-  attachmentId, filename, mime, size, authHeader, resolvedUri, isMine, thumb, pages, encrypted, actionRef,
+  attachmentId, filename, mime, size, authHeader, resolvedUri, isMine, thumb, pages, encrypted, actionRef, fillInk,
 }: {
   attachmentId: string;
   filename:     string;
@@ -52,6 +54,8 @@ export function FileBubble({
   thumb?:       string;   // PDF first-page preview (base64 jpeg)
   encrypted?:   boolean;  // meta.encrypted — see mediaStore.MediaKeyMissingError
   actionRef?:   BubbleActionRef;
+  /** Inks for your bubble's custom colour (lib/bubbleFillInk); null on the theme fill. */
+  fillInk?:     FillInks | null;
 }) {
   const S = useS();
   const { colors } = useTheme();
@@ -137,8 +141,8 @@ export function FileBubble({
         // iOS has no ACTION_VIEW; its share/open-in sheet is the equivalent.
         await Sharing.shareAsync(openUri, { mimeType: mime, dialogTitle: filename });
       }
-    } catch (e: any) {
-      Alert.alert('Could not open file', e?.message ?? 'Try again');
+    } catch (e: unknown) {
+      Alert.alert('Could not open file', chatActionErrorText(e, 'Try again'));
     } finally {
       setBusy(false);
     }
@@ -159,8 +163,8 @@ export function FileBubble({
             {busy ? <ActivityIndicator size="small" color={colors.onPrimary} /> : <Ionicons name="document-text" size={20} color={colors.onPrimary} />}
           </View>
           <View style={S.fileMeta}>
-            <Text style={[S.fileName, isMine && S.fileNameMine]} numberOfLines={1}>{filename}</Text>
-            <Text style={[S.fileSize, isMine && S.fileSizeMine]}>{subtitle}</Text>
+            <Text style={[S.fileName, isMine && S.fileNameMine, fillInk && { color: fillInk.text }]} numberOfLines={1}>{filename}</Text>
+            <Text style={[S.fileSize, isMine && S.fileSizeMine, fillInk && { color: fillInk.meta }]}>{subtitle}</Text>
           </View>
         </View>
       </TouchableOpacity>
@@ -174,8 +178,8 @@ export function FileBubble({
         {busy ? <ActivityIndicator size="small" color={colors.onPrimary} /> : <Ionicons name="document-text" size={22} color={colors.onPrimary} />}
       </View>
       <View style={S.fileMeta}>
-        <Text style={[S.fileName, isMine && S.fileNameMine]} numberOfLines={1}>{filename}</Text>
-        <Text style={[S.fileSize, isMine && S.fileSizeMine]}>{subtitle}</Text>
+        <Text style={[S.fileName, isMine && S.fileNameMine, fillInk && { color: fillInk.text }]} numberOfLines={1}>{filename}</Text>
+        <Text style={[S.fileSize, isMine && S.fileSizeMine, fillInk && { color: fillInk.meta }]}>{subtitle}</Text>
       </View>
     </TouchableOpacity>
   );
@@ -186,7 +190,7 @@ export function FileBubble({
 // auth-gated /uploads endpoint with a Bearer header. Mono speaker icon
 // stays bold while playing, otherwise dim.
 export function AudioBubble({
-  attachmentId, durationMs, waveform, resolvedUri, isMine, mime, encrypted, actionRef,
+  attachmentId, durationMs, waveform, resolvedUri, isMine, mime, encrypted, actionRef, fillInk,
 }: {
   attachmentId: string;
   durationMs:   number;
@@ -197,6 +201,8 @@ export function AudioBubble({
   mime?:        string;
   encrypted?:   boolean;  // meta.encrypted — see mediaStore.MediaKeyMissingError
   actionRef?:   BubbleActionRef;
+  /** Inks for your bubble's custom colour (lib/bubbleFillInk); null on the theme fill. */
+  fillInk?:     FillInks | null;
 }) {
   const S = useS();
   const { colors } = useTheme();
@@ -245,8 +251,8 @@ export function AudioBubble({
         await soundRef.current.playAsync();
         setPlaying(true);
       }
-    } catch (e: any) {
-      Alert.alert('Playback failed', e?.message ?? 'Try again');
+    } catch (e: unknown) {
+      Alert.alert('Playback failed', chatActionErrorText(e, 'Try again'));
     }
   }, [attachmentId, resolvedUri, playing, isMine, mime, encrypted]);
   if (actionRef) actionRef.current = togglePlay;
@@ -284,6 +290,7 @@ export function AudioBubble({
                     isMine
                       ? (played ? S.waveBarPlayedMine : S.waveBarUnplayedMine)
                       : (played ? S.waveBarPlayedTheirs : S.waveBarUnplayedTheirs),
+                    fillInk && { backgroundColor: played ? fillInk.text : fillInk.track },
                   ]}
                 />
               );
@@ -291,10 +298,10 @@ export function AudioBubble({
           </View>
         ) : (
           <View style={S.audioTrack}>
-            <View style={[S.audioFill, { width: `${pct * 100}%` }, isMine && S.audioFillMine]} />
+            <View style={[S.audioFill, { width: `${pct * 100}%` }, isMine && S.audioFillMine, fillInk && { backgroundColor: fillInk.text }]} />
           </View>
         )}
-        <Text style={[S.audioTime, isMine && S.audioTimeMine]}>
+        <Text style={[S.audioTime, isMine && S.audioTimeMine, fillInk && { color: fillInk.meta }]}>
           {playing
             ? `${formatRecDuration(position)} / ${formatRecDuration(durationMs)}`
             : `🎙️ ${formatRecDuration(durationMs)}${remaining > 0 ? '' : ''}`}

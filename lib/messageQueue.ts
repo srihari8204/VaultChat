@@ -90,6 +90,13 @@ export interface QueuedMessage {
    * fresh ratchet step.
    */
   ciphertext?: string;
+  /**
+   * A forward's target chat name, LOCAL ONLY: never part of the POST payload
+   * (postOnce builds it field by field). Carried on the 'failed' event so a
+   * rejection after an app restart can still be reported by name
+   * (components/chat/forwardFeedback). Absent on ordinary sends.
+   */
+  forwardTo?: string;
 }
 
 // ─── SERVER_ACCEPTED vs DELIVERED ─────────────────────────────────────
@@ -139,7 +146,7 @@ function isAwaitingDelivery(m: QueuedMessage): boolean {
 type QueueEvents = {
   pending: { msg: QueuedMessage };
   sent:    { tempId: string; chatId: string; real: Message | null }; // null = delete (no row)
-  failed:  { tempId: string; chatId: string; error: string };
+  failed:  { tempId: string; chatId: string; error: string; forwardTo?: string };
   retry:   { tempId: string; chatId: string; attempt: number };
 };
 type Listener<T> = (data: T) => void;
@@ -266,13 +273,16 @@ export async function enqueueMessage(
     plaintext?: string;
     replyToId?: number | null;
     meta?: Record<string, unknown> | null;
+    /** A forward: the target chat's name, kept on the local row only (QueuedMessage.forwardTo). */
+    forwardTo?: string;
   },
 ): Promise<QueuedMessage> {
   if (msg.meta && 'localUri' in msg.meta) {
     throw new Error('This file has not been uploaded yet — send it as media instead.');
   }
   return enqueue({ ...baseItem(chatId), type: msg.type, plaintext: msg.plaintext ?? '',
-    replyToId: msg.replyToId ?? null, meta: msg.meta ?? null });
+    replyToId: msg.replyToId ?? null, meta: msg.meta ?? null,
+    ...(msg.forwardTo ? { forwardTo: msg.forwardTo } : {}) });
 }
 
 /** Enqueue an edit of an existing message. Content is re-encrypted at flush. */
@@ -407,6 +417,7 @@ async function reBodyAwaiting(): Promise<void> {
         emit('failed', {
           tempId: m.tempId, chatId: m.chatId,
           error: 'Not delivered — this message expired before it reached them',
+          forwardTo: m.forwardTo,
         });
       } else if (status === 404 || status === 403) {
         // Deleted, or no longer ours. Nothing to recover.
@@ -763,7 +774,7 @@ export async function flush(): Promise<void> {
           // remains the way it leaves.
           item.state = 'FAILED';
           await put(item);
-          emit('failed', { tempId: item.tempId, chatId: item.chatId, error: item.lastError });
+          emit('failed', { tempId: item.tempId, chatId: item.chatId, error: item.lastError, forwardTo: item.forwardTo });
           continue;
         }
         // Transient (offline / 5xx / timeout) or WAITING_KEYS → clock stays,

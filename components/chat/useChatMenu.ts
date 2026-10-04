@@ -27,6 +27,7 @@ import {
 } from '../../lib/chatService';
 import { DISAPPEARING_PRESETS, formatDisappearing, formatScreenshotMode } from './chatFormat';
 import type { DisplayMessage } from './chatStyles';
+import { userErrorText } from '../../lib/userErrorText';
 
 export type OverflowMenu = { title: string; actions: MenuAction[] };
 
@@ -74,9 +75,9 @@ export function useChatMenu({
           setChat(prev => prev ? { ...prev, screenshotMode: o.mode } : prev);
           try {
             await setScreenshotMode(chatId, o.mode);
-          } catch (e: any) {
+          } catch (e: unknown) {
             setChat(prev => prev ? { ...prev, screenshotMode: current } : prev);
-            Alert.alert('Save failed', e?.message ?? 'Try again');
+            Alert.alert('Save failed', userErrorText(e, 'Try again'));
           }
         },
       })),
@@ -106,7 +107,7 @@ export function useChatMenu({
             await setChatNotifSound(chatId, ch.id);
             // Mark it locally too, so reopening the picker agrees with what was saved.
             setChat(prev => prev ? { ...prev, notifSound: ch.id as ChatDetail['notifSound'] } : prev);
-          } catch (e: any) { Alert.alert('Could not update', e?.message ?? 'Try again'); }
+          } catch (e: unknown) { Alert.alert('Could not update', userErrorText(e, 'Try again')); }
         },
       })),
     });
@@ -130,9 +131,9 @@ export function useChatMenu({
           setChat(prev => prev ? { ...prev, disappearingSeconds: opt.seconds } : prev);
           try {
             await setDisappearing(chatId, opt.seconds);
-          } catch (e: any) {
+          } catch (e: unknown) {
             setChat(prev => prev ? { ...prev, disappearingSeconds: current } : prev);
-            Alert.alert('Could not update', e?.message ?? 'Try again');
+            Alert.alert('Could not update', userErrorText(e, 'Try again'));
           }
         },
       })),
@@ -204,7 +205,7 @@ export function useChatMenu({
           try {
             await muteChat(chatId, !isMuted);
             setChat(prev => prev ? { ...prev, muted: !isMuted } : prev);
-          } catch (e: any) { Alert.alert('Mute failed', e?.message ?? 'Try again'); }
+          } catch (e: unknown) { Alert.alert('Mute failed', userErrorText(e, 'Try again')); }
         },
       },
       {
@@ -227,9 +228,9 @@ export function useChatMenu({
           setChat(prev => prev ? { ...prev, vanishMode: next } : prev);
           try {
             await setVanishMode(chatId, next);
-          } catch (e: any) {
+          } catch (e: unknown) {
             setChat(prev => prev ? { ...prev, vanishMode: !next } : prev);
-            Alert.alert('Could not update Vanish Mode', e?.message ?? 'Try again');
+            Alert.alert('Could not update Vanish Mode', userErrorText(e, 'Try again'));
           }
         },
       },
@@ -251,7 +252,7 @@ export function useChatMenu({
             // From a pane, replace would swap out the whole split screen.
             if (next) { if (embedded) onPaneEnded?.('Chat hidden.'); else router.replace('/(tabs)/chats'); }
             else setChat(prev => prev ? { ...prev, hidden: next } : prev);
-          } catch (e: any) { Alert.alert('Could not update', e?.message ?? 'Try again'); }
+          } catch (e: unknown) { Alert.alert('Could not update', userErrorText(e, 'Try again')); }
         },
       },
       {
@@ -313,7 +314,7 @@ export function useChatMenu({
                 // the whole split screen (same reason as the hidden Back).
                 if (embedded) onPaneEnded?.('Chat cleared from this device.');
                 else router.back();
-              } catch (e: any) { Alert.alert('Could not clear', e?.message ?? 'Try again'); }
+              } catch (e: unknown) { Alert.alert('Could not clear', userErrorText(e, 'Try again')); }
             } },
         ],
       ),
@@ -342,7 +343,7 @@ export function useChatMenu({
                   // you in a chat you no longer belong to.
                   if (embedded) onPaneEnded?.('You left this group.');
                   else router.replace('/(tabs)/chats');
-                } catch (e: any) { Alert.alert('Leave failed', e?.message ?? 'Try again'); }
+                } catch (e: unknown) { Alert.alert('Leave failed', userErrorText(e, 'Try again')); }
               } },
           ]),
         });
@@ -382,8 +383,8 @@ export function useChatMenu({
                   : 'You will both stay hidden until they save you too.',
               );
               getChat(chatId).then(setChat).catch(() => {});
-            } catch (e: any) {
-              Alert.alert('Could not save', e?.message ?? 'Try again.');
+            } catch (e: unknown) {
+              Alert.alert('Could not save', userErrorText(e, 'Try again.'));
             }
           },
         });
@@ -408,7 +409,7 @@ export function useChatMenu({
                 try {
                   await resetChatSession(chatId);
                   Alert.alert('Session reset', 'Send a message to re-establish encryption.');
-                } catch (e: any) { Alert.alert('Reset failed', e?.message ?? 'Try again'); }
+                } catch (e: unknown) { Alert.alert('Reset failed', userErrorText(e, 'Try again')); }
               } },
           ],
         ),
@@ -428,7 +429,7 @@ export function useChatMenu({
                   await blockUser(peer.userId);
                   Alert.alert('Blocked', `${peer.name || peer.email || 'User'} can no longer message you.`);
                   if (!embedded) router.back();
-                } catch (e: any) { Alert.alert('Block failed', e?.message ?? 'Try again'); }
+                } catch (e: unknown) { Alert.alert('Block failed', userErrorText(e, 'Try again')); }
               } },
           ],
         ),

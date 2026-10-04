@@ -128,7 +128,8 @@ export default function BackupPINScreen() {
           <Ionicons name="arrow-back" size={24} color={AUTH.text} />
         </TouchableOpacity>
         <View style={S.header}>
-          <View style={S.badge} accessibilityElementsHidden importantForAccessibility="no"><Text style={{fontSize:36}}>🔢</Text></View>
+          {/* Ionicons, not emoji: emoji draw differently per platform/OEM font (as app/permissions). */}
+          <View style={S.badge} accessibilityElementsHidden importantForAccessibility="no"><Ionicons name="keypad-outline" size={36} color={AUTH.accent} /></View>
           <Text style={S.title} accessibilityRole="header">{title}</Text>
           <Text style={S.sub}>{sub}</Text>
         </View>

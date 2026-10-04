@@ -10,7 +10,7 @@
 // props; see it.
 
 import { useRouter } from 'expo-router';
-import { memo, useCallback, useEffect, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Image, Text, TouchableOpacity, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { forwardLabel, isForwarded, isForwardedManyTimes } from '../../lib/forwardPolicy';
@@ -19,6 +19,8 @@ import { isViewedOnce, isViewedOnceSync, markViewedOnce } from '../../lib/viewOn
 import { isRevokedSync } from '../../lib/protectedMedia';
 
 import { useTheme } from '../../lib/theme';
+import { useVisionComfort } from '../../lib/visionComfort';
+import { fillInks } from '../../lib/bubbleFillInk';
 
 import { getAccessToken } from '../../lib/api';
 import { putLiveKey } from '../../lib/liveLocationCrypto';
@@ -214,6 +216,11 @@ function MessageBubble({
   // for legibility on the chosen background.
   const bubbleBg = bubbleColors && isMine ? bubbleColors.mine : null;
   const bubbleTxtColor = bubbleBg ? idealText(bubbleBg) : null;
+  // Everything else drawn ON that colour — poll, location, file, voice and the
+  // placeholders — takes its inks from the fill too (lib/bubbleFillInk), not
+  // from the theme's on-primary white: white on Emerald is 2.54:1.
+  const { profile: vision } = useVisionComfort();
+  const ownFillInk = useMemo(() => (bubbleBg ? fillInks(bubbleBg, vision.highContrast) : null), [bubbleBg, vision.highContrast]);
   // Init from content directly when it's already plaintext (the common case
   // after decrypt-at-ingest) → no decryption flash on first render.
   const [plain, setPlain] = useState<string>(() => looksEncrypted(msg.content) ? '' : (msg.content ?? ''));
@@ -680,6 +687,7 @@ function MessageBubble({
             mime={String(msg.meta?.mime || '')}
             encrypted={isEncMedia}
             actionRef={audioActionRef}
+            fillInk={ownFillInk}
           />
         ) : isFile ? (
           <FileBubble
@@ -694,6 +702,7 @@ function MessageBubble({
             pages={Number(msg.meta?.pages) || undefined}
             encrypted={isEncMedia}
             actionRef={fileActionRef}
+            fillInk={ownFillInk}
           />
         ) : isVaultbeam ? (
           <VaultBeamBubble msg={msg} isMine={isMine} plain={plain} actionRef={beamActionRef} onActionLabel={setBeamLabel} />
@@ -711,12 +720,13 @@ function MessageBubble({
             votes={pollVotesForMsg}
             onChange={onPollVoteChange}
             voteRef={pollVoteRef}
+            fillInk={ownFillInk}
           />
         ) : isLocation ? (
-          <LocationBubble plain={plain} isMine={isMine} />
+          <LocationBubble plain={plain} isMine={isMine} fillInk={ownFillInk} />
         ) : (
           <TextBody msg={msg} plain={plain} isMine={isMine} inkHidden={inkHidden} txtColor={bubbleTxtColor}
-            highlight={searchHl} ink={bodyInk} readerArgs={readerArgs} />
+            highlight={searchHl} ink={bodyInk} readerArgs={readerArgs} fillInk={ownFillInk} />
         )}
 
         {/* Caption under a photo/video. For plaintext media the decrypted

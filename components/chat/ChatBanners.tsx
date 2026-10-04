@@ -13,6 +13,7 @@ import { navigateTo } from '../../lib/nav/openNavigation';
 import { looksEncrypted, type ChatMember } from '../../lib/chatService';
 import { useS, type DisplayMessage } from './chatStyles';
 import { isProtectedMessage } from './protectedText';
+import { chatActionErrorText } from './chatErrorText';
 
 type Members = Map<string, ChatMember>;
 
@@ -106,8 +107,8 @@ export function KeyChangeBanner({ otherMembers, chatName }: { otherMembers: Chat
               const { acknowledgeKeyChange } = await import('../../lib/keyChange');
               await acknowledgeKeyChange(keyChange.peerId, keyChange.currentHex);
               setKeyChange(null);
-            } catch (e: any) {
-              Alert.alert('Could not dismiss', e?.message ?? 'Try again');
+            } catch (e: unknown) {
+              Alert.alert('Could not dismiss', chatActionErrorText(e, 'Try again'));
             }
           }}
         >

@@ -85,7 +85,7 @@ export default function OnboardSuccess() {
       // resetTo, not replace: the sign-up screens below this one must not
       // survive into the app (lib/authNav.ts).
       resetTo(next ?? '/(tabs)/chats');
-    } catch (e: any) {
+    } catch (e: unknown) {
       inFlight.current = false;
       setBusy(false);
       // A WAY OUT (2026-09-17). Back is swallowed and the gesture is disabled on

@@ -40,6 +40,8 @@
 // ponytail: a bare promise, no store, no context. It is one boolean that is
 // written once per launch and read once.
 
+import { resetLaunchRouted } from './pendingLink';
+
 let settle!: (allowed: boolean) => void;
 
 /**
@@ -81,6 +83,7 @@ export function beginLaunchGate(): void {
   let s!: (allowed: boolean) => void;
   const decision = new Promise<boolean>((r) => { s = r; });
   mount = { decision, settle: s, settled: false };
+  resetLaunchRouted(); // the previous mount's index routed, not this one's
 }
 
 /** True until THIS root mount's gate has decided: index's cold-start visit. */
