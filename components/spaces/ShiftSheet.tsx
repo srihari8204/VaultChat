@@ -68,9 +68,9 @@ export default function ShiftSheet({ visible, onClose, colors, spaceId }: {
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
       <KeyboardSafe keyboardOnly>
-        <View style={s.wrap}>
+        <View style={[s.wrap, { backgroundColor: colors.scrim }]}>
           <View style={[s.modal, { backgroundColor: colors.bg }]}>
-            <Text style={[s.title, { color: colors.text }]}>Shift and lateness</Text>
+            <Text style={[s.title, { color: colors.text }]} accessibilityRole="header">Shift and lateness</Text>
             <Text style={{ color: colors.textDim, fontSize: 12.5 }}>
               {known === 'server'
                 ? 'The current setting for this space.'
@@ -94,7 +94,7 @@ export default function ShiftSheet({ visible, onClose, colors, spaceId }: {
               <TouchableOpacity
                 style={[s.btn, { backgroundColor: colors.brandOnLight }, busy && { opacity: 0.4 }]}
                 onPress={save} disabled={busy}
-                accessibilityRole="button" accessibilityLabel="Save shift" accessibilityState={{ disabled: busy }}
+                accessibilityRole="button" accessibilityLabel="Save shift" accessibilityState={{ disabled: busy, busy }}
               >
                 {busy ? <ActivityIndicator size="small" color={colors.onBrand} /> : <Text style={{ color: colors.onBrand, fontWeight: '700' }}>Save</Text>}
               </TouchableOpacity>
@@ -107,8 +107,8 @@ export default function ShiftSheet({ visible, onClose, colors, spaceId }: {
 }
 
 const s = StyleSheet.create({
-  // A fixed dark scrim behind the dialog, the same in both schemes.
-  wrap: { flex: 1, backgroundColor: '#0008', alignItems: 'center', justifyContent: 'center', padding: 22 },
+  // The scrim colour is the theme's (Palette.scrim), set inline.
+  wrap: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 22 },
   modal: { width: '100%', borderRadius: 16, padding: 20, gap: 10 },
   title: { fontSize: 18, fontWeight: '700' },
   label: { fontSize: 12 },

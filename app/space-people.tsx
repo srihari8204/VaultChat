@@ -463,8 +463,8 @@ const styles = (c: Palette) => StyleSheet.create({
   muted: { color: c.textDim, fontSize: 12.5, flexShrink: 1 },
   pill: { borderRadius: 999, paddingHorizontal: 9, paddingVertical: 4, flexDirection: 'row', alignItems: 'center', gap: 5 },
   pillDot: { width: 6, height: 6, borderRadius: 3 },
-  // A fixed dark scrim behind the sheet, the same in both schemes.
-  sheetWrap: { flex: 1, backgroundColor: '#0008', justifyContent: 'flex-end' },
+  // The theme's scrim (Palette.scrim) behind the sheet.
+  sheetWrap: { flex: 1, backgroundColor: c.scrim, justifyContent: 'flex-end' },
   // surfaceSolid, not card: card is a translucent glass pane in the dusk skin,
   // and a see-through sheet over the scrim is unreadable in both schemes.
   sheet: { backgroundColor: c.surfaceSolid, borderTopLeftRadius: 18, borderTopRightRadius: 18, padding: 18, gap: 12 },

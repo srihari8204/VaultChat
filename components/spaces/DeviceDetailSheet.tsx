@@ -2,9 +2,11 @@
 // remote actions (design screens 15, 17 and 18), split out of
 // app/space-devices.tsx.
 //
-// The show-a-message and rename dialogs are rendered INSIDE this full-screen
-// Modal: on iOS a sibling Modal opened while another is presented does not
-// stack above it, so the dialog may never appear.
+// The show-a-message and rename dialogs are an overlay INSIDE this
+// full-screen Modal, not a second Modal: on iOS a Modal presented while
+// another is up may not stack above it, so the dialog might never appear.
+// An absolute-fill view in the same window has no presentation to get wrong
+// (the useDatePicker `inModal` approach).
 
 import React, { useMemo, useState } from 'react';
 import {
@@ -117,8 +119,12 @@ export default function DeviceDetailSheet({
   };
 
   return (
-    <Modal visible={!!open} animationType="slide" onRequestClose={onClose}>
+    // Android Back closes the open dialog first, then the sheet.
+    <Modal visible={!!open} animationType="slide" onRequestClose={dialog ? closeDialog : onClose}>
       <View style={[s.screen, { backgroundColor: colors.bg }]}>
+        {/* Hidden from screen readers while a dialog is up (Android has no
+            accessibilityViewIsModal), so focus cannot wander behind it. */}
+        <View style={s.screen} importantForAccessibility={dialog ? 'no-hide-descendants' : 'auto'}>
         <View style={[s.sheetHead, { paddingTop: insets.top + 12 }]}>
           <TouchableOpacity accessibilityRole="button" accessibilityLabel="Close" onPress={onClose} style={s.hit}>
             <Ionicons name="close" size={24} color={colors.text} />
@@ -257,9 +263,11 @@ export default function DeviceDetailSheet({
             ))}
           </View>
         </ScrollView>
+        </View>
 
-        {/* show-a-message / rename — inside this Modal so it stacks above it on iOS. */}
-        <Modal visible={dialog !== null} transparent animationType="fade" onRequestClose={closeDialog}>
+        {/* show-a-message / rename — an overlay in this Modal, not a nested Modal. */}
+        {dialog !== null && (
+          <View style={StyleSheet.absoluteFill} accessibilityViewIsModal>
           <KeyboardSafe keyboardOnly>
             <View style={s.modalWrap}>
               <View style={s.modal}>
@@ -297,7 +305,8 @@ export default function DeviceDetailSheet({
               </View>
             </View>
           </KeyboardSafe>
-        </Modal>
+          </View>
+        )}
       </View>
     </Modal>
   );
@@ -321,8 +330,8 @@ const styles = (c: Palette) => StyleSheet.create({
   },
   sheetTitle: { color: c.text, fontSize: 17, fontWeight: '700', flex: 1 },
   footnote: { color: c.textFaint, fontSize: 11.5, lineHeight: 16 },
-  // A fixed dark scrim behind the dialog, the same in both schemes.
-  modalWrap: { flex: 1, backgroundColor: '#0008', alignItems: 'center', justifyContent: 'center', padding: 22 },
+  // The theme's scrim (Palette.scrim) behind the dialog.
+  modalWrap: { flex: 1, backgroundColor: c.scrim, alignItems: 'center', justifyContent: 'center', padding: 22 },
   modal: { width: '100%', backgroundColor: c.bg, borderRadius: 16, padding: 20, gap: 10 },
   modalTitle: { color: c.text, fontSize: 18, fontWeight: '700' },
   input: { borderWidth: 1, borderColor: c.glassStroke, borderRadius: 10, padding: 12, color: c.text, fontSize: 15 },

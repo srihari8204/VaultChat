@@ -17,7 +17,8 @@ assert.deepEqual(planCommand(cmd(1, 'ring', { issuedAt: new Date(now - RING_MAX_
   { kind: 'refuse', result: 'cancelled' }, 'a stale ring is cancelled, not played hours later');
 assert.deepEqual(planCommand(cmd(2, 'message', { payload: '  Please call 555  ' }), now), { kind: 'message', text: 'Please call 555' });
 assert.deepEqual(planCommand(cmd(2, 'message', { payload: '   ' }), now), { kind: 'refuse', result: 'failed' });
-assert.equal((planCommand(cmd(2, 'message', { payload: 'x'.repeat(500) }), now) as any).text.length, 300);
+const long = planCommand(cmd(2, 'message', { payload: 'x'.repeat(500) }), now);
+assert.equal(long.kind === 'message' ? long.text.length : -1, 300);
 for (const a of ['lock', 'wipe', 'photo', 'locate', 'unknown']) {
   assert.deepEqual(planCommand(cmd(3, a), now), { kind: 'refuse', result: 'failed' },
     `${a} is reported as not done, never silently left waiting or pretended`);

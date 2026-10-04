@@ -25,6 +25,8 @@ import {
   planCommand, openCommands, parseBindings, withBinding, withoutBinding, type DeviceBinding,
 } from './deviceCommands';
 import { readBattery } from '../family/battery';
+import { errStatus } from './errors';
+import { flushSos } from './sosOutbox';
 import { startRingtone, stopRingtone } from '../sounds';
 
 /** Well inside the server's 15-minute staleness window (space_device_stale). */
@@ -67,7 +69,7 @@ async function perform(b: DeviceBinding, cmd: DeviceCommand): Promise<void> {
     ackDeviceCommand(b.spaceId, b.deviceId, cmd.id, r);
   if (plan.kind === 'refuse') { await ack(plan.result).catch(() => {}); return; }
   // Claim it first: a 409 means another session already took it.
-  try { await ack('delivered'); } catch (e: any) { if (e?.status === 409) return; }
+  try { await ack('delivered'); } catch (e) { if (errStatus(e) === 409) return; }
   if (plan.kind === 'ring') {
     await startRingtone().catch(() => {});
     const timer = setTimeout(() => { void stopRingtone(); }, RING_MS);
@@ -97,8 +99,8 @@ async function tick(): Promise<void> {
       if (b.ownerId !== myId) continue; // another account's phone binding
       try {
         await deviceHeartbeat(b.spaceId, b.deviceId, battery);
-      } catch (e: any) {
-        if (e?.status === 403 || e?.status === 404) {
+      } catch (e) {
+        if (errStatus(e) === 403 || errStatus(e) === 404) {
           bindings = withoutBinding(bindings, b);
           await saveBindings(bindings);
         }
@@ -114,15 +116,18 @@ async function tick(): Promise<void> {
 
 /**
  * Mount once at the app root. Polls only while the app is active, and checks
- * immediately on every return to the foreground.
+ * immediately on every return to the foreground. The same beat sends any
+ * driver emergency alert still waiting on this phone (lib/spaces/sosOutbox),
+ * so one pressed before the app was closed goes out when it is next opened.
  */
 export function useSpaceDeviceAgent(): void {
   useEffect(() => {
     let timer: ReturnType<typeof setInterval> | null = null;
+    const beat = () => { void tick(); void flushSos(); };
     const start = () => {
       if (timer) return;
-      void tick();
-      timer = setInterval(() => { void tick(); }, POLL_MS);
+      beat();
+      timer = setInterval(beat, POLL_MS);
     };
     const stop = () => { if (timer) { clearInterval(timer); timer = null; } };
     if (AppState.currentState === 'active') start();

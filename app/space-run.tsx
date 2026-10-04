@@ -23,7 +23,7 @@ import { AppText as Text } from '../components/ui/Text';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   View, StyleSheet, ScrollView, ActivityIndicator, TouchableOpacity, RefreshControl,
-  AccessibilityInfo, Platform,
+  AccessibilityInfo,
 } from 'react-native';
 import { Stack, useLocalSearchParams, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -435,13 +435,13 @@ function RiderCard({ rider, run, stops, reachedStopId, vehicle, colors, s, delay
   const whereText = `${myStop ? `at ${myStop.label}` : 'at the first stop'}${between > 0 ? ` · ${between} ${between === 1 ? 'stop' : 'stops'} away` : ''}`;
 
   // The window is recomputed every 30s, and a screen-reader user should hear
-  // it move without re-reading. Android: the card's polite live region below.
-  // iOS ignores live regions, so announce there — but only a MEANINGFUL change
-  // (a stop passed, arriving now, or the end moving by minutes:
-  // lib/spaces/runs windowWorthSaying), not every minute's new clock text.
+  // it move without re-reading — but only a MEANINGFUL change (a stop passed,
+  // arriving now, or the end moving by minutes: lib/spaces/runs
+  // windowWorthSaying), not every minute's new clock text. Announced the same
+  // way on both platforms: an Android live region on the card re-read the
+  // whole label on every new clock text, which is the verbosity this avoids.
   const lastSaid = useRef<SaidWindow | null>(null);
   useEffect(() => {
-    if (Platform.OS !== 'ios') return;
     if (!waiting) { lastSaid.current = null; return; }
     const next = { latest: win.latest, between };
     if (!lastSaid.current) { lastSaid.current = next; return; }
@@ -462,7 +462,6 @@ function RiderCard({ rider, run, stops, reachedStopId, vehicle, colors, s, delay
         late ? 'running behind the scheduled time' : null,
         rider.stateAt && rider.state !== 'pending' ? clock(rider.stateAt) : null,
       ].filter(Boolean).join(', ')}
-      accessibilityLiveRegion={waiting ? 'polite' : 'none'}
     >
       <Text numberOfLines={1} style={s.heroName}>{rider.displayName}</Text>
       <Text style={s.heroState}>{riderHeadline(rider.state, run)}</Text>

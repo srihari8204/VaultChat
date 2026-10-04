@@ -62,9 +62,14 @@ export function parseBindings(raw: string | null): DeviceBinding[] {
   try {
     const list = raw ? JSON.parse(raw) : [];
     if (!Array.isArray(list)) return [];
-    return list.filter((b: any) => b && typeof b.spaceId === 'string' && b.spaceId
-      && typeof b.deviceId === 'string' && b.deviceId && typeof b.ownerId === 'string' && b.ownerId)
-      .map((b: any) => ({ spaceId: b.spaceId, deviceId: b.deviceId, ownerId: b.ownerId, label: String(b.label ?? 'This phone') }));
+    type Row = { spaceId?: unknown; deviceId?: unknown; ownerId?: unknown; label?: unknown };
+    const ok = (b: Row): b is Row & { spaceId: string; deviceId: string; ownerId: string } =>
+      typeof b.spaceId === 'string' && !!b.spaceId && typeof b.deviceId === 'string' && !!b.deviceId
+      && typeof b.ownerId === 'string' && !!b.ownerId;
+    return (list as unknown[])
+      .filter((b): b is Row => !!b && typeof b === 'object')
+      .filter(ok)
+      .map((b) => ({ spaceId: b.spaceId, deviceId: b.deviceId, ownerId: b.ownerId, label: String(b.label ?? 'This phone') }));
   } catch { return []; }
 }
 

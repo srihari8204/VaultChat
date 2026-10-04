@@ -42,6 +42,7 @@ import { AuroraBackground } from '../components/ui';
 import { KeyboardSafe } from '../components/ui/KeyboardSafe';
 import ChatDoorButton from '../components/spaces/ChatDoorButton';
 import DeviceDetailSheet, { ago } from '../components/spaces/DeviceDetailSheet';
+import { errMsg } from '../lib/spaces/errors';
 
 const KINDS: { key: string; label: string; icon: keyof typeof Ionicons.glyphMap }[] = [
   { key: 'phone', label: 'Phone', icon: 'phone-portrait-outline' },
@@ -51,9 +52,6 @@ const KINDS: { key: string; label: string; icon: keyof typeof Ionicons.glyphMap 
   { key: 'pet', label: 'Pet', icon: 'paw-outline' },
   { key: 'other', label: 'Other', icon: 'cube-outline' },
 ];
-
-/** A thrown error's own words, when it has any. */
-const errorText = (e: unknown) => (e instanceof Error && e.message) || undefined;
 
 export default function SpaceDevicesScreen() {
   const params = useLocalSearchParams<{ spaceId?: string; name?: string; groupType?: string; perms?: string }>();
@@ -84,7 +82,7 @@ export default function SpaceDevicesScreen() {
 
   const load = useCallback(async () => {
     try { setDevices(await getDevices(spaceId)); setLoadError(null); }
-    catch (e) { setLoadError(errorText(e) ?? 'Could not load devices.'); }
+    catch (e) { setLoadError(errMsg(e) ?? 'Could not load devices.'); }
     finally { setLoading(false); setRefreshing(false); }
   }, [spaceId]);
 
@@ -127,7 +125,7 @@ export default function SpaceDevicesScreen() {
       }
       setAdding(false); setLabel(''); setIsThisPhone(true);
       await load();
-    } catch (e) { Alert.alert('Could not add', errorText(e) ?? 'Try again.'); }
+    } catch (e) { Alert.alert('Could not add', errMsg(e) ?? 'Try again.'); }
     finally { setBusy(false); }
   }, [label, kind, spaceId, load, isThisPhone, myId]);
 
@@ -136,7 +134,7 @@ export default function SpaceDevicesScreen() {
       if (boundHere) await unbindThisPhone({ spaceId, deviceId: d.id });
       else await bindThisPhone({ spaceId, deviceId: d.id, ownerId: myId, label: d.label });
       setBoundHere(!boundHere);
-    } catch (e) { Alert.alert('Could not update this phone', errorText(e) ?? 'Try again.'); }
+    } catch (e) { Alert.alert('Could not update this phone', errMsg(e) ?? 'Try again.'); }
   }, [boundHere, spaceId, myId]);
 
   const archiveDevice = useCallback((d: SpaceDevice) => {
@@ -150,7 +148,7 @@ export default function SpaceDevicesScreen() {
           onPress: async () => {
             try {
               await updateDevice(spaceId, d.id, { archived: true });
-            } catch (e) { Alert.alert('Could not remove', errorText(e) ?? 'Try again.'); return; }
+            } catch (e) { Alert.alert('Could not remove', errMsg(e) ?? 'Try again.'); return; }
             // The device IS removed now. Forgetting it on this phone is a
             // separate, local step, and its failure must not read as "not removed".
             closeDevice();
@@ -173,7 +171,7 @@ export default function SpaceDevicesScreen() {
       setOpen({ ...open, label: l });
       await load();
       return true;
-    } catch (e) { Alert.alert('Could not rename', errorText(e) ?? 'Try again.'); return false; }
+    } catch (e) { Alert.alert('Could not rename', errMsg(e) ?? 'Try again.'); return false; }
     finally { setBusy(false); }
   }, [open, spaceId, load]);
 
@@ -191,7 +189,7 @@ export default function SpaceDevicesScreen() {
       );
       return true;
     } catch (e) {
-      Alert.alert('Could not send', errorText(e) ?? 'Try again.');
+      Alert.alert('Could not send', errMsg(e) ?? 'Try again.');
       return false;
     } finally { setBusy(false); }
   }, [spaceId]);
@@ -401,8 +399,8 @@ const styles = (c: Palette) => StyleSheet.create({
   actionRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 12 },
   actionText: { color: c.text, fontSize: 14.5, flexShrink: 1 },
   footnote: { color: c.textFaint, fontSize: 11.5, lineHeight: 16 },
-  // A fixed dark scrim behind the dialog, the same in both schemes.
-  modalWrap: { flex: 1, backgroundColor: '#0008', alignItems: 'center', justifyContent: 'center', padding: 22 },
+  // The theme's scrim (Palette.scrim) behind the dialog.
+  modalWrap: { flex: 1, backgroundColor: c.scrim, alignItems: 'center', justifyContent: 'center', padding: 22 },
   modal: { width: '100%', backgroundColor: c.bg, borderRadius: 16, padding: 20, gap: 10 },
   modalTitle: { color: c.text, fontSize: 18, fontWeight: '700' },
   input: { borderWidth: 1, borderColor: c.glassStroke, borderRadius: 10, padding: 12, color: c.text, fontSize: 15 },

@@ -47,6 +47,7 @@ import { KeyboardSafe } from '../components/ui/KeyboardSafe';
 import LoadError from '../components/spaces/LoadError';
 import { useRunBroadcast } from '../components/spaces/useRunBroadcast';
 import { errMsg } from '../lib/spaces/errors';
+import { useDriverSos, SosNotices } from '../components/spaces/DriverSos';
 
 const INCIDENTS: { key: string; label: string; icon: keyof typeof Ionicons.glyphMap }[] = [
   { key: 'breakdown', label: 'Breakdown', icon: 'construct-outline' },
@@ -187,6 +188,11 @@ export default function SpaceRunDriverScreen() {
     });
   }, [callGuardian]);
 
+  // Emergency alerts kept on this phone until the office has them
+  // (components/spaces/DriverSos, lib/spaces/sosOutbox).
+  const sos = useDriverSos(spaceId, runId, myId);
+  const { sendSos } = sos;
+
   // The panic control (S5.6). Deliberately NOT one of the incident categories:
   // an incident is a form you fill in, and a driver in trouble is not filling in
   // a form. One confirmation to survive a pocket press, then it goes at the
@@ -195,7 +201,9 @@ export default function SpaceRunDriverScreen() {
     setIncidentOpen(false);
     Alert.alert(
       'Send an emergency alert?',
-      'Everyone running this space is alerted immediately.',
+      // Server-side, an SOS goes to the space's staff and to the guardians of
+      // this run's riders (spaces_ops.go incidentCreate).
+      'The office and the families on this run are alerted. With no signal, this phone keeps the alert and sends it as soon as it can.',
       [
         { text: 'Cancel', style: 'cancel' },
         {
@@ -217,23 +225,12 @@ export default function SpaceRunDriverScreen() {
             // rather than a channel nobody has open — but under its OWN
             // category, so it arrives with its own wording and its own
             // notification channel instead of looking like a blocked road.
-            // A failed send offers the retry right there: a driver in trouble
-            // must not have to find the panic control again.
-            // ponytail: not queued across app restarts; retry is one tap while
-            // the screen is open. Replace with the outbox once incidents have one.
-            const send = () => fileIncident(spaceId, { category: 'sos', runId, note: '' })
-              .then(() => Alert.alert('Alert sent', 'The office has been alerted.'))
-              .catch(() => Alert.alert(
-                'Alert not sent yet',
-                'It is raised on this device, but the office has not received it. Try again when you have signal.',
-                [{ text: 'Later', style: 'cancel' }, { text: 'Try again', onPress: () => { void send(); } }],
-              ));
-            void send();
+            void sendSos();
           },
         },
       ],
     );
-  }, [run?.vehicleLabel, run?.name, spaceId, runId]);
+  }, [run?.vehicleLabel, run?.name, spaceId, sendSos]);
 
   const onIncident = useCallback(async (category: string) => {
     setIncidentOpen(false);
@@ -358,6 +355,7 @@ export default function SpaceRunDriverScreen() {
         {loadError && (
           <LoadError colors={colors} title="Could not refresh the run" message={loadError} onRetry={() => { void load(); }} />
         )}
+        <SosNotices sos={sos} colors={colors} />
         {started && noLocation && (
           <View style={s.notice}>
             <Ionicons name="location-outline" size={18} color={colors.warning} />
@@ -487,7 +485,7 @@ export default function SpaceRunDriverScreen() {
         <KeyboardSafe keyboardOnly>
         <View style={s.modalWrap}>
           <View style={s.modal}>
-            <Text style={s.modalTitle}>Handover code</Text>
+            <Text style={s.modalTitle} accessibilityRole="header">Handover code</Text>
             <Text style={s.muted}>Ask the guardian for {codeFor?.rider.displayName}’s code.</Text>
             <TextInput
               accessibilityLabel={`Handover code for ${codeFor?.rider.displayName ?? 'this rider'}`}
@@ -625,8 +623,8 @@ const styles = (c: Palette) => StyleSheet.create({
     borderWidth: 1, borderColor: c.danger,
   },
   incidentText: { color: c.danger, fontWeight: '600' },
-  // Fixed dark scrims behind the dialog and sheet, the same in both schemes.
-  modalWrap: { flex: 1, backgroundColor: '#0008', alignItems: 'center', justifyContent: 'center', padding: 24 },
+  // The theme's scrim (Palette.scrim) behind the dialog and sheet.
+  modalWrap: { flex: 1, backgroundColor: c.scrim, alignItems: 'center', justifyContent: 'center', padding: 24 },
   modal: { width: '100%', backgroundColor: c.bg, borderRadius: 16, padding: 20, gap: 10 },
   modalTitle: { color: c.text, fontSize: 18, fontWeight: '700' },
   codeInput: {
@@ -635,7 +633,7 @@ const styles = (c: Palette) => StyleSheet.create({
   },
   modalRow: { flexDirection: 'row', justifyContent: 'flex-end', gap: 10, marginTop: 4 },
   modalBtn: { paddingHorizontal: 18, minHeight: 44, minWidth: 64, alignItems: 'center', justifyContent: 'center', borderRadius: 10 },
-  sheetWrap: { flex: 1, backgroundColor: '#0008', justifyContent: 'flex-end' },
+  sheetWrap: { flex: 1, backgroundColor: c.scrim, justifyContent: 'flex-end' },
   sheet: { backgroundColor: c.bg, borderTopLeftRadius: 18, borderTopRightRadius: 18, padding: 18, gap: 4 },
   sheetRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 16 },
   // Visually separated from the categories below it: this is not one more thing

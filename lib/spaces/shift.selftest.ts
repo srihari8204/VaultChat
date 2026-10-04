@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict';
 import { shiftBody, shiftFromServer } from './shift';
 
-const ok = (r: ReturnType<typeof shiftBody>) => { assert.ok(r.ok, JSON.stringify(r)); return (r as any).body; };
+const ok = (r: ReturnType<typeof shiftBody>) => { assert.ok(r.ok, JSON.stringify(r)); return r.body; };
 
 assert.deepEqual(ok(shiftBody({ start: '9:00', end: '17:30', grace: '', delay: '' })),
   { shiftStart: '09:00', shiftEnd: '17:30', shiftGraceMinutes: 10 }, 'blank grace is the server default, times normalised');

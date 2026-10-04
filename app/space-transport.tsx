@@ -107,8 +107,8 @@ export default function SpaceTransportScreen() {
   // This button used to push `/call` with `{ userId, video }`. There is no
   // `/call` route and never has been, and `/voicecall` takes
   // `{ chatId, peerUid, peerName }` — so the button navigated nowhere and the
-  // params would have been wrong even if it had. The `as any` on the pathname
-  // is what let both mistakes through the compiler.
+  // params would have been wrong even if it had. A cast on the pathname
+  // is what let both mistakes through the compiler; there is no cast now.
   //
   // A call needs a chat, so resolve (or create) the direct chat with the driver
   // first. createDirectChat returns the existing one when there is one, so this

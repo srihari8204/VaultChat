@@ -1,10 +1,13 @@
 // components/spaces/StopFormModal.tsx — the new/edit stop dialog, split out of
-// app/space-runs-admin.tsx. Rendered INSIDE the run editor's Modal so it stacks
-// above it on iOS. It turns the typed place into coordinates and the picked
-// date+time into an instant; the screen builds and saves the stop list.
+// app/space-runs-admin.tsx. An absolute-fill overlay INSIDE the run editor's
+// Modal, not a second Modal: on iOS a Modal presented over another may not
+// stack above it, and an overlay in the same window has nothing to stack. The
+// host Modal's Back closes it (space-runs-admin). It turns the typed place into
+// coordinates and the picked date+time into an instant; the screen builds and
+// saves the stop list.
 
 import React, { useEffect, useState } from 'react';
-import { View, TouchableOpacity, ActivityIndicator, TextInput, Modal, Alert } from 'react-native';
+import { View, TouchableOpacity, ActivityIndicator, TextInput, Alert, StyleSheet } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { AppText as Text } from '../ui/Text';
 import { KeyboardSafe } from '../ui/KeyboardSafe';
@@ -51,10 +54,12 @@ export default function StopFormModal({ initial, colors, s, busy, pickStart, sch
   const [planned, setPlanned] = useState<Date | null>(null);
   const [locating, setLocating] = useState(false);
 
+  const { close: closePicker } = picker;
   useEffect(() => {
-    if (!initial) return;
+    // Closing the form closes its picker too, so it is not open on next show.
+    if (!initial) { closePicker(); return; }
     setLabel(initial.label); setWhere(initial.where); setPlanned(initial.planned);
-  }, [initial]);
+  }, [initial, closePicker]);
 
   const fillHere = async () => {
     try {
@@ -98,8 +103,9 @@ export default function StopFormModal({ initial, colors, s, busy, pickStart, sch
   const offDay = !!planned && !!scheduledDay && dayOf(planned.toISOString()) !== scheduledDay;
   const working = busy || locating;
 
+  if (!initial) return null;
   return (
-    <Modal visible={!!initial} transparent animationType="fade" onRequestClose={onClose} onDismiss={picker.close}>
+    <View style={StyleSheet.absoluteFill} accessibilityViewIsModal>
       <KeyboardSafe keyboardOnly>
       <View style={s.modalWrap}>
         <View style={s.modal}>
@@ -163,9 +169,9 @@ export default function StopFormModal({ initial, colors, s, busy, pickStart, sch
         </View>
       </View>
       </KeyboardSafe>
-      {/* Last child: on iOS the picker is an overlay inside this Modal, not a
-          second Modal (components/ui/useDatePicker inModal). */}
+      {/* Last child: on iOS the picker is an overlay over this one, not a
+          Modal (components/ui/useDatePicker inModal). */}
       {picker.element}
-    </Modal>
+    </View>
   );
 }

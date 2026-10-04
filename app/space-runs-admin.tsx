@@ -21,7 +21,7 @@ import { AppText as Text } from '../components/ui/Text';
 import React, { useCallback, useMemo, useState } from 'react';
 import {
   View, ScrollView, TouchableOpacity, ActivityIndicator,
-  Alert, Modal, RefreshControl,
+  Alert, Modal, RefreshControl, StyleSheet,
 } from 'react-native';
 import { Stack, useLocalSearchParams, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -412,9 +412,18 @@ export default function SpaceRunsAdminScreen() {
       />
 
       {/* ── edit ── */}
-      <Modal visible={!!editing} animationType="slide" onRequestClose={() => setEditing(null)}>
+      {/* Android Back closes an open stop dialog first, then the editor. */}
+      <Modal
+        visible={!!editing} animationType="slide"
+        onRequestClose={() => { if (stopFor) setStopFor(null); else if (stopForm) setStopForm(null); else setEditing(null); }}
+      >
         <KeyboardSafe keyboardOnly>
-        <View style={[s.screen, { backgroundColor: colors.bg }]}>
+        {/* Hidden from screen readers while a stop dialog is up (Android has
+            no accessibilityViewIsModal). */}
+        <View
+          style={[s.screen, { backgroundColor: colors.bg }]}
+          importantForAccessibility={stopFor || stopForm ? 'no-hide-descendants' : 'auto'}
+        >
           <View style={[s.sheetHeader, { paddingTop: insets.top + 12 }]}>
             <TouchableOpacity accessibilityRole="button" accessibilityLabel="Close" onPress={() => setEditing(null)} style={s.hit}><Ionicons name="close" size={24} color={colors.text} /></TouchableOpacity>
             <Text style={s.sheetTitle} numberOfLines={1} accessibilityRole="header">
@@ -549,16 +558,17 @@ export default function SpaceRunsAdminScreen() {
         </View>
         </KeyboardSafe>
 
-        {/* ── stop form (inside the edit modal so it stacks above it) ── */}
+        {/* ── stop form and rider stop picker: overlays inside the edit modal,
+            not nested Modals, so there is no second presentation to stack on
+            iOS (the useDatePicker inModal approach) ── */}
         <StopFormModal
           initial={stopForm} colors={colors} s={s} busy={busy}
           pickStart={pickStart} scheduledAt={editing?.run.scheduledAt ?? null}
           onClose={() => setStopForm(null)} onSubmit={submitStop}
         />
 
-        {/* ── rider stop picker ── */}
-        <Modal visible={!!stopFor} transparent animationType="fade" onRequestClose={() => setStopFor(null)}>
-          <View style={s.modalWrap}>
+        {!!stopFor && (
+          <View style={[StyleSheet.absoluteFill, s.modalWrap]} accessibilityViewIsModal>
             <View style={s.modal}>
               <Text style={s.modalTitle} accessibilityRole="header">Stop for {stopFor?.displayName}</Text>
               <View accessibilityRole="radiogroup" accessibilityLabel={`Stop for ${stopFor?.displayName ?? 'this rider'}`}>
@@ -584,7 +594,7 @@ export default function SpaceRunsAdminScreen() {
               </View>
             </View>
           </View>
-        </Modal>
+        )}
       </Modal>
     </View>
   );

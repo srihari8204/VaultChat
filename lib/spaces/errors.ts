@@ -1,4 +1,4 @@
-// lib/spaces/errors.ts — reading a caught error without `catch (e: any)`.
+// lib/spaces/errors.ts — reading a caught error typed as `unknown`.
 //
 // lib/api throws an Error carrying `status` and the parsed `body`; other
 // sources may throw anything. These read those fields from `unknown`, so the
@@ -7,7 +7,7 @@
 type Shape = { message?: unknown; status?: unknown; statusCode?: unknown; body?: unknown };
 const shape = (e: unknown): Shape => (e && typeof e === 'object' ? (e as Shape) : {});
 
-/** The error's own words, when it has any. */
+/** The error's own words, if it carries a message. */
 export function errMsg(e: unknown): string | undefined {
   const m = shape(e).message;
   return typeof m === 'string' && m ? m : undefined;

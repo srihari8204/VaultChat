@@ -342,7 +342,7 @@ export default function SpaceTasksScreen() {
                 </TouchableOpacity>
               ))}
             </View>
-            {/* Beyond the presets: any day, picked. */}
+            {/* Beyond the presets, any other day, picked. */}
             <TouchableOpacity
               onPress={() => picker.open(dueCustom ?? new Date(), (d) => setDueCustom(d))}
               accessibilityRole="radio" accessibilityState={{ checked: !!dueCustom }}
@@ -436,8 +436,8 @@ const styles = (c: Palette) => StyleSheet.create({
     position: 'absolute', right: 20, bottom: 28, width: 56, height: 56, borderRadius: 28,
     alignItems: 'center', justifyContent: 'center', elevation: 4,
   },
-  // A fixed dark scrim behind the sheet, the same in both schemes.
-  sheetWrap: { flex: 1, backgroundColor: '#0008', justifyContent: 'flex-end' },
+  // The theme's scrim (Palette.scrim) behind the sheet.
+  sheetWrap: { flex: 1, backgroundColor: c.scrim, justifyContent: 'flex-end' },
   // surfaceSolid, not card: card is a translucent glass pane in the dusk skin,
   // and a see-through sheet over the scrim is unreadable in both schemes.
   sheet: { backgroundColor: c.surfaceSolid, borderTopLeftRadius: 18, borderTopRightRadius: 18, padding: 18, gap: 12 },

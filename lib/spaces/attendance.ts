@@ -309,7 +309,7 @@ if (require.main === module) {
   if (parseClock('09:00') !== 540) throw new Error('09:00 should be 540');
   if (parseClock('9:05') !== 545) throw new Error('single-digit hour should parse');
   for (const bad of [null, undefined, '', 'nine', '25:00', '09:70', 'x9:00']) {
-    if (parseClock(bad as any) !== null) throw new Error(`"${bad}" must not parse`);
+    if (parseClock(bad) !== null) throw new Error(`"${bad}" must not parse`);
   }
   if (makeShift(null, '17:00') !== null) throw new Error('a half-configured shift is no shift');
 

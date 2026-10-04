@@ -375,8 +375,8 @@ const styles = (c: Palette) => StyleSheet.create({
   },
   warnText: { color: c.text, flex: 1, fontSize: 13, lineHeight: 18 },
   footnote: { color: c.textFaint, fontSize: 11.5, lineHeight: 16, marginTop: 6 },
-  // A fixed dark scrim behind the dialog, the same in both schemes.
-  modalWrap: { flex: 1, backgroundColor: '#0008', alignItems: 'center', justifyContent: 'center', padding: 24 },
+  // The theme's scrim (Palette.scrim) behind the dialog.
+  modalWrap: { flex: 1, backgroundColor: c.scrim, alignItems: 'center', justifyContent: 'center', padding: 24 },
   modal: { width: '100%', backgroundColor: c.bg, borderRadius: 16, padding: 20, gap: 10 },
   modalTitle: { color: c.text, fontSize: 18, fontWeight: '700' },
   input: {

@@ -1,7 +1,9 @@
 // components/spaces/Donut.tsx — the dashboard donut, drawn with react-native-svg.
 //
 // No chart library: a donut is N stroked arcs on one circle. Values arrive
-// already computed from the server; this component only draws them.
+// already computed from the server; this component only draws them. Every
+// colour comes from the caller's palette: there are no built-in defaults, so
+// the chart can never fall back to ink tuned for one scheme only.
 
 import { AppText as Text } from '../ui/Text';
 import React from 'react';
@@ -15,7 +17,7 @@ export interface DonutSegment {
 
 export default function Donut({
   segments, centre, label, size = 132, stroke = 14, accessibilityLabel,
-  track = 'rgba(255,255,255,0.08)', textColor = '#FFFFFF', labelColor = 'rgba(255,255,255,0.55)',
+  track, textColor, labelColor,
 }: {
   segments: DonutSegment[];
   /** The number in the middle. */
@@ -24,9 +26,10 @@ export default function Donut({
   label?: string;
   size?: number;
   stroke?: number;
-  track?: string;
-  textColor?: string;
-  labelColor?: string;
+  /** The unfilled ring, e.g. the palette's `border`. */
+  track: string;
+  textColor: string;
+  labelColor: string;
   /** What the chart says in words — its colours alone are unreadable to a
    *  screen reader. Defaults to the centre figure and its label. */
   accessibilityLabel?: string;

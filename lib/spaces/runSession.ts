@@ -103,6 +103,8 @@ export interface RunPositionEvent {
  * request otherwise. So a caller must treat "no pings ever arrived" as a
  * possible answer and say so in the UI, rather than showing an empty map.
  */
+type RunWire = { userId?: unknown; runId?: unknown; blob?: unknown } | null;
+
 export async function subscribeRun(
   spaceId: string,
   runId: string,
@@ -115,8 +117,9 @@ export async function subscribeRun(
   const s = await getSocket();
   await emit(EV_SUB, { chatId: spaceId, runId }).catch(() => {});
 
-  const onUpd = (e: any) => {
-    if (disposed || !e?.userId || !e.blob) return;
+  // Socket payloads are untrusted wire data: read them as unknown fields.
+  const onUpd = (e?: RunWire) => {
+    if (disposed || !e?.userId || typeof e.blob !== 'string' || !e.blob) return;
     if (String(e.runId) !== String(runId)) return;
     if (String(e.userId) === String(meId)) return; // never echo my own vehicle
     const key = getLiveKey(spaceId, String(e.userId));
@@ -125,7 +128,7 @@ export async function subscribeRun(
     if (!ping) return; // stale key or corrupt blob — drop, never guess
     onEvent({ userId: String(e.userId), ping });
   };
-  const onEnd = (e: any) => {
+  const onEnd = (e?: RunWire) => {
     if (disposed || !e?.userId) return;
     if (String(e.runId) !== String(runId)) return;
     onEvent({ userId: String(e.userId), ping: null });
