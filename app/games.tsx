@@ -31,7 +31,7 @@ import * as Haptics from 'expo-haptics';
 import type { GameKind } from '../lib/gamesSocket';
 import { useQuickMatch } from '../lib/games/useQuickMatch';
 import Ionicons from '@expo/vector-icons/Ionicons';
-import { TableBackground, Panel, Btn, useType, GameGlyph, Coin, GameTopBar, GameChrome } from '../components/games/ui';
+import { TableBackground, Panel, Btn, useType, GameGlyph, Coin, GameTopBar, GameChrome, useAnnounce } from '../components/games/ui';
 import { C, S, R, E, white, alpha, ACCENT } from '../lib/games/theme';
 import { playSfx, setSoundEnabled, soundEnabled } from '../lib/games/sfx';
 import { useWallet } from '../lib/games/useWallet';
@@ -325,7 +325,7 @@ function Hub({ onBack, onOpen }: { onBack: () => void; onOpen: (g: GameKind, opt
         </View>
 
         <Panel style={{ gap: S[3], marginTop: S[2] }}>
-          <Text style={{ color: C.text, fontSize: t.md, fontWeight: '800' }}>Join a table by code</Text>
+          <Text accessibilityRole="header" style={{ color: C.text, fontSize: t.md, fontWeight: '800' }}>Join a table by code</Text>
           <Text style={{ color: C.muted, fontSize: t.sm, lineHeight: 18 }}>
             Someone shared a room code or invite link with you? Paste it here.
           </Text>
@@ -436,6 +436,8 @@ function CoinChip({ balance }: { balance: number | null }) {
   if (balance == null) return null;
   return (
     <View
+      // One stop; without `accessible` iOS ignores the label and reads the bare number.
+      accessible
       accessibilityLabel={`${balance} play coins`}
       style={{
         flexDirection: 'row', alignItems: 'center', gap: 5,
@@ -504,6 +506,15 @@ function GameCard({ entry, onOpen, onQuick }: { entry: Entry; onOpen: () => void
         onPress={() => { Haptics.selectionAsync().catch(() => {}); onOpen(); }}
         accessibilityRole="button"
         accessibilityLabel={`${entry.name}. ${entry.blurb}`}
+        // The card is one accessible element, so on iOS the Quick match button
+        // inside it cannot be focused on its own. It is offered here as an
+        // action (VoiceOver rotor / TalkBack actions menu) on the card itself.
+        accessibilityHint="Opens the ways to play. Quick match is in the actions."
+        accessibilityActions={[{ name: 'activate' }, { name: 'quickMatch', label: `Quick match at ${entry.name}` }]}
+        onAccessibilityAction={e => {
+          if (e.nativeEvent.actionName === 'quickMatch') onQuick();
+          else if (e.nativeEvent.actionName === 'activate') onOpen();
+        }}
         style={{
           flexDirection: 'row', alignItems: 'center', gap: S[3],
           padding: S[4], borderRadius: R[3],
@@ -556,6 +567,8 @@ function Searching({
   const C = useGamePalette();
   const t = useType();
   const pulse = useSharedValue(0);
+  // The status line below is Android's live region; iOS hears it from here.
+  useAnnounce(error ?? status);
 
   React.useEffect(() => {
     pulse.value = withRepeat(
@@ -581,7 +594,7 @@ function Searching({
       <Animated.View style={aBolt} accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
         <Ionicons name="flash" size={64} color={C.gold} />
       </Animated.View>
-      <Text style={{ color: C.text, fontSize: t.xl, fontWeight: '800', textAlign: 'center' }}>
+      <Text accessibilityRole="header" style={{ color: C.text, fontSize: t.xl, fontWeight: '800', textAlign: 'center' }}>
         {error ? 'No luck' : `Finding a ${entry.name} opponent…`}
       </Text>
       <Text accessibilityLiveRegion="polite" style={{ color: error ? C.bad : C.muted, fontSize: t.md, textAlign: 'center' }}>

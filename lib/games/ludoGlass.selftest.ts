@@ -21,6 +21,7 @@
 
 import { readFileSync } from 'fs';
 import { join } from 'path';
+import { boardSource, repoSource } from './boardSource.testkit';
 import { LR, LR_AMBIENT, LR_STAGE, SEAT, SHAPE, COLOR_NAMES, P, PL, PD, LG, TRACK, PAWN, PAWN_BODY, PAWN_BASE, seatA, ludoControls, ludoLayout } from './ludoGlass';
 
 // theme.ts is NOT imported: it pulls in react-native for Platform.select, which
@@ -36,7 +37,9 @@ function A(ok: boolean, what: string): void {
   console.log('  FAIL ' + what);
 }
 
-const src = readFileSync(join(__dirname, '..', '..', 'components', 'games', 'Ludo.tsx'), 'utf8');
+// The board and its split-out pieces (components/games/ludo/), plus the token
+// geometry, which moved to lib/games/ludoBoard.ts so it can be tested in Node.
+const src = boardSource('Ludo') + '\n' + repoSource('lib/games/ludoBoard.ts');
 const themeSrc = readFileSync(join(__dirname, 'theme.ts'), 'utf8');
 const accentLudo = themeSrc.match(/\bludo:\s*'(#[0-9A-Fa-f]{6})'/)?.[1] ?? '';
 
@@ -140,8 +143,11 @@ console.log('\nLudo glass\n');
     '5a. four distinct shape markers — the deuteranopia fallback');
   A(/\{SHAPE\[seat\]\}/.test(src), '5b. the pawn still carries its shape marker');
   A(/\{SHAPE\[player\.seat\]\}/.test(src), '5c. ...and so does the seat card');
-  A(/accessibilityLabel=\{`\$\{COLOR_NAMES\[seat\]\} token \$\{index \+ 1\}\$\{movable \? ', can move' : ''\}`\}/.test(src),
-    '5d. the token label still names the colour, the index and whether it can move');
+  // The wording itself is lib/games/boardLabels.ts (tested there); what matters
+  // here is that the token feeds it the colour, the index, the STEP (so the
+  // label says where the token is) and whether it can move.
+  A(/accessibilityLabel=\{ludoTokenLabel\(COLOR_NAMES\[seat\] \?\? 'Red', index, step, movable\)\}/.test(src),
+    '5d. the token label names the colour, the index, the position and whether it can move');
   A(/accessibilityLabel=\{tumbling \? 'Rolling the dice' : value == null \? 'Dice, not rolled' : `Dice showing \$\{value\}`\}/.test(src),
     '5e. the die still announces its real state');
   A(COLOR_NAMES.length === 4, '5f. four colour names, for the labels above');
@@ -251,7 +257,9 @@ console.log('\nLudo glass\n');
   A(!/\bC\.(text|muted|gold|gold2|goldDeep|bg|panel|line)\b/.test(src),
     '9a. no shared-palette colours left in Ludo.tsx');
   A(!/\bgoldLine\[/.test(src), '9b. ...and no shared gold hairline');
-  A(/import \{ S, R, D3, white \} from '\.\.\/\.\.\/lib\/games\/theme'/.test(src),
+  // Each split-out file imports only the shared tokens it uses; none imports C.
+  A(/import \{ S, R(?:, D3)?, white \} from '(?:\.\.\/)+lib\/games\/theme'/.test(src)
+    && !/import \{[^}]*\bC\b[^}]*\} from '(?:\.\.\/)+lib\/games\/theme'/.test(src),
     '9c. spacing, radii and elevation are still SHARED — only the light is local');
 }
 

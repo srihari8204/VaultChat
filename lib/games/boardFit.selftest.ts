@@ -13,6 +13,7 @@ import { join } from 'path';
 import { runInNewContext } from 'vm';
 import { transpileModule } from 'typescript';
 import { boardFit, BOARD_MIN, BOARD_GUTTER } from './boardFit';
+import { boardSource, readRepo } from './boardSource.testkit';
 
 let failed = 0;
 function A(ok: boolean, what: string): void {
@@ -152,7 +153,7 @@ console.log('\nBoard fit\n');
     '6e. an unchanged measurement returns the SAME object, so onLayout cannot loop');
 
   for (const f of ['Chess.tsx', 'Ludo.tsx', 'TicTacToe.tsx']) {
-    const src = readFileSync(join(ROOT, 'components/games', f), 'utf8');
+    const src = readRepo(`components/games/${f}`);
     const code = src.split('\n').filter(l => !/^\s*(\/\/|\*|\/\*)/.test(l)).join('\n');
     A(/useBoardBox\(/.test(code), `6b. ${f} sizes its board through the shared hook`);
     A(!/useBoardBox\(\s*\d+\s*,\s*\d+\s*\)/.test(code),
@@ -239,11 +240,11 @@ console.log('\nBoard fit\n');
     '8. games unlocks orientation on focus, including return to a mounted route');
   A(/<SafeAreaView/.test(route), '8a. games owns the safe container for hub and boards');
   for (const f of ['Chess.tsx', 'Ludo.tsx', 'TicTacToe.tsx', 'Rummy.tsx']) {
-    const code = readFileSync(join(ROOT, 'components/games', f), 'utf8');
+    const code = readRepo(`components/games/${f}`);
     A(!/usePortraitLock\(|ScreenOrientation\.lockAsync\(/.test(code),
       `8b. ${f} does not override the focused route orientation`);
   }
-  const rummy = readFileSync(join(ROOT, 'components/games/Rummy.tsx'), 'utf8');
+  const rummy = boardSource('Rummy');
   A(!/boxInsets|paddingTop: insets\.top|paddingBottom: insets\.bottom/.test(rummy),
     '8c. Rummy does not subtract or pad safe-area edges a second time');
 }
@@ -262,7 +263,7 @@ console.log('\nBoard fit\n');
 // it (an inner board sized `width: size`).
 {
   const ROOT = join(__dirname, '..', '..');
-  const src = readFileSync(join(ROOT, 'components/games/Chess.tsx'), 'utf8');
+  const src = boardSource('Chess');
   const code = src.split('\n').filter(l => !/^\s*(\/\/|\*|\/\*)/.test(l)).join('\n');
 
   const rim = Number((code.match(/const RIM = (\d+)/) ?? [])[1]);

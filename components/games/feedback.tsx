@@ -213,6 +213,7 @@ export function Sheet({
       <Pressable
         onPress={onClose}
         accessible={false}
+        accessibilityRole="none"
         style={{ flex: 1, justifyContent: 'flex-end', paddingTop: insets.top, paddingLeft: insets.left, paddingRight: insets.right }}
       >
         {/* Stop taps inside the sheet from dismissing it. */}
@@ -223,7 +224,7 @@ export function Sheet({
             palette, and this is the container every settings, rules, result,
             invite and history sheet renders inside, so it was the single most
             visible surface the restyle had missed. */}
-        <Pressable onPress={() => {}} accessible={false} style={{
+        <Pressable onPress={() => {}} accessible={false} accessibilityRole="none" style={{
           maxHeight: '100%', width: '100%', maxWidth: 720, alignSelf: 'center',
           backgroundColor: C.light ? C.panel : 'rgba(14,4,5,0.94)',
           borderTopLeftRadius: R[4], borderTopRightRadius: R[4],
@@ -232,7 +233,7 @@ export function Sheet({
           boxShadow: `${E[3]}, inset 0 1px 0 ${white(0.18)}`,
         }}>
           <View style={{ alignSelf: 'center', width: 40, height: 4, borderRadius: 2, backgroundColor: C.light ? C.line : white(0.30), marginBottom: S[2] }} />
-          <Text numberOfLines={2} style={{ color: C.text, fontSize: t.xl, fontWeight: '800' }}>{title}</Text>
+          <Text accessibilityRole="header" numberOfLines={2} style={{ color: C.text, fontSize: t.xl, fontWeight: '800' }}>{title}</Text>
           <ScrollView style={{ maxHeight: scrollCap, flexShrink: 1 }} keyboardShouldPersistTaps="handled" contentContainerStyle={{ gap: S[2] }}>
             {children}
           </ScrollView>
@@ -244,17 +245,23 @@ export function Sheet({
   );
 }
 
-/** One labelled row in a sheet, with a value on the right. */
+/**
+ * One labelled row in a sheet, with a value on the right. Pass `checked` for an
+ * on/off row (sound, coordinates) so it is announced as a switch with its state
+ * rather than as a button whose label happens to end in "On".
+ */
 export function SettingRow({
-  label, hint, value, onPress,
-}: { label: string; hint?: string; value: string; onPress: () => void }) {
+  label, hint, value, onPress, checked,
+}: { label: string; hint?: string; value: string; onPress: () => void; checked?: boolean }) {
   const C = useGamePalette();
   const t = useType();
   return (
     <Pressable
       onPress={onPress}
-      accessibilityRole="button"
-      accessibilityLabel={`${label}, ${value}`}
+      accessibilityRole={checked == null ? 'button' : 'switch'}
+      accessibilityState={checked == null ? undefined : { checked }}
+      accessibilityLabel={checked == null ? `${label}, ${value}` : label}
+      accessibilityHint={hint}
       style={{
         flexDirection: 'row', alignItems: 'center', gap: S[3],
         paddingVertical: S[3], paddingHorizontal: S[3],

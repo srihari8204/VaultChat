@@ -10,7 +10,7 @@ import { AuroraBackground } from '../ui/AuroraBackground';
 import { AppText as Text } from '../ui/Text';
 import React from 'react';
 import {
-  AccessibilityInfo, ActivityIndicator, Pressable, StyleSheet, View,
+  AccessibilityInfo, ActivityIndicator, Platform, Pressable, StyleSheet, View,
   useWindowDimensions, type LayoutChangeEvent, type ViewStyle, type StyleProp,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -360,7 +360,7 @@ const GOOD_STOPS = [0, 0.55, 1];
  * a loading spinner and pulls the eye off the board.
  */
 export function Btn({
-  label, onPress, kind = 'secondary', disabled, busy, icon, style, compact, accessibilityLabel,
+  label, onPress, kind = 'secondary', disabled, busy, icon, style, compact, accessibilityLabel, selected,
 }: {
   label: string;
   onPress?: () => void;
@@ -371,6 +371,8 @@ export function Btn({
   style?: StyleProp<ViewStyle>;
   compact?: boolean;
   accessibilityLabel?: string;
+  /** For a button that is one choice of several (bot strength, stake). */
+  selected?: boolean;
 }) {
   const C = useGamePalette();
   const t = useType();
@@ -465,7 +467,7 @@ export function Btn({
       onPress={press}
       disabled={off}
       accessibilityRole="button"
-      accessibilityState={{ disabled: off, busy: !!busy }}
+      accessibilityState={selected == null ? { disabled: off, busy: !!busy } : { disabled: off, busy: !!busy, selected }}
       accessibilityLabel={accessibilityLabel ?? label}
       style={[aStyle, { opacity: off ? 0.5 : 1, borderRadius: R[2] }, style]}
     >
@@ -513,6 +515,8 @@ export function Banner({ text, tone = 'info' }: { text: string; tone?: 'info' | 
   const t = useType();
   const accent = tone === 'win' ? C.win : tone === 'lose' ? C.lose : tone === 'turn' ? C.gold : goldLine[28];
   const glow = useSharedValue(0);
+  // A banner is a result or a status change: spoken on iOS, live region on Android.
+  useAnnounce(text);
 
   React.useEffect(() => {
     if (tone === 'win') {
@@ -555,6 +559,9 @@ export function PlayerRow({
   const t = useType();
   return (
     <View
+      // One stop per seat: without `accessible` iOS ignores the label and reads
+      // the name, subtitle and tag as three separate elements.
+      accessible
       accessibilityLabel={name + (tag ? ', ' + tag : '') + (subtitle ? ', ' + subtitle : '')}
       style={{
         flexDirection: 'row', alignItems: 'center', gap: S[3],
@@ -636,6 +643,24 @@ export function useReduceMotion(): boolean {
     return () => { alive = false; sub.remove(); };
   }, []);
   return on;
+}
+
+/**
+ * Speak a board's state change — whose turn it is, a result, a selection.
+ *
+ * iOS only by default: on Android the element that SHOWS the state carries
+ * `accessibilityLiveRegion`, and announcing as well would say it twice. Pass
+ * `everywhere` for a change no live region covers (a piece picked up).
+ * Repeats of the same message are not re-spoken.
+ */
+export function useAnnounce(message: string | null | undefined, everywhere = false): void {
+  const last = React.useRef<string | null>(null);
+  React.useEffect(() => {
+    if (!message) { last.current = null; return; }
+    if (message === last.current) return;
+    last.current = message;
+    if (everywhere || Platform.OS === 'ios') AccessibilityInfo.announceForAccessibility(message);
+  }, [message, everywhere]);
 }
 
 /** One dock slot. `ion` is an Ionicons name, not a `Btn` icon key. */

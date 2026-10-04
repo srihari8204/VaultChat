@@ -25,9 +25,11 @@ import { join } from 'path';
 // than beside the checks that use them — an import is hoisted whatever line it
 // is written on, so a mid-file one only makes the reading order a fiction.
 import { tableLink, gameInviteOf, inviteText } from './inviteLink';
+import { readRepo } from './boardSource.testkit';
 
 const ROOT = join(__dirname, '..', '..');
-const read = (p: string) => readFileSync(join(ROOT, p), 'utf8');
+// A board path reads the whole board: the main file and its split-out pieces.
+const read = (p: string) => (/^components\/games\/[A-Z]/.test(p) ? readRepo(p) : readFileSync(join(ROOT, p), 'utf8'));
 const code = (src: string) =>
   src.split('\n').filter(l => !/^\s*(\/\/|\*|\/\*)/.test(l)).join('\n');
 

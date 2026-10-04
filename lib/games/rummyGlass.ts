@@ -205,3 +205,51 @@ export const STAT = {
   deadwood: '#FF7D86',
   score: CYAN,
 } as const;
+
+/* ── named literals the board files used to inline (2026-10 split) ──── */
+//
+// Moved here when components/games/Rummy.tsx was split into
+// components/games/rummy/*, so the board files carry no colour literals and
+// every rummy colour stays in this one module. Values are unchanged except
+// MELD_INK.bad (see below).
+
+/** The table's frame and cloth overlays, as TableTop paints them. */
+export const TABLE_TOP = {
+  /** The dark glass frame under the brass rail, lit top-left. */
+  glass: ['#86664B', '#3D2B24', '#151018'] as const,
+  /** The cloth's sheen, cool and fading to a teal-black underside. */
+  sheen: '#DFFFF4',
+  sheenLow: '#041C22',
+  /** The drop where cloth meets frame. */
+  bevel: '#000000',
+  /** The frame's hairline and the dashed stitching on the cloth. */
+  rimLine: '#C6F1DF',
+  /** The quiet suit medallions printed into the cloth. */
+  suits: '#D7F7E9',
+  /** The house mark printed into the cloth, and its RUMMY line (= RAIL[1]). */
+  houseMark: '#FFF8F1',
+  houseSub: '#D9A93C',
+} as const;
+
+/** An opponent's seat capsule: avatar fills, icon and initials ink, the out dot, the name. */
+export const SEAT_AVATAR = {
+  bot: '#1C4F86',
+  human: '#2B6658',
+  botIcon: '#C6DFFF',
+  initials: '#E4FFF0',
+  out: '#9A8F8F',
+  name: '#fff',
+} as const;
+
+/** Ink on the three coloured action buttons (Declare, Drop, Discard). */
+export const ACTION_INK = { good: '#F2FFF7', danger: '#FFF1F2', blue: '#F0F8FF' } as const;
+
+/**
+ * The meld verdict on a group tray. The trays are LIGHT glass over the room,
+ * and the old red (#ff8080, and C.bad for the title) measured 3.2:1 there;
+ * `bad` is lifted to clear WCAG AA (4.7:1). `pure` measures 4.7:1 as it was.
+ */
+export const MELD_INK = { pure: '#5fe08c', bad: '#FFB4BA' } as const;
+
+/** The status pill's words when it is not your turn (11.5:1 on navy glass). */
+export const STATUS_INK = '#cfe8d8';

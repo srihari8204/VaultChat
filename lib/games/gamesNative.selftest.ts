@@ -11,12 +11,14 @@
 // So this asserts the shape of the dependency, not the pixels.
 
 import { readFileSync, existsSync } from 'node:fs';
+// A board is its main file plus its split-out pieces (components/games/<board>/).
+import { boardSource } from './boardSource.testkit';
 
 const HUB    = readFileSync('app/games.tsx', 'utf8');
-const TTT    = readFileSync('components/games/TicTacToe.tsx', 'utf8');
-const CHESS  = readFileSync('components/games/Chess.tsx', 'utf8');
-const LUDO   = readFileSync('components/games/Ludo.tsx', 'utf8');
-const RUMMY  = readFileSync('components/games/Rummy.tsx', 'utf8');
+const TTT    = boardSource('TicTacToe');
+const CHESS  = boardSource('Chess');
+const LUDO   = boardSource('Ludo');
+const RUMMY  = boardSource('Rummy');
 const HOOK   = readFileSync('lib/games/useGameSocket.ts', 'utf8');
 const FEEDBACK = readFileSync('components/games/feedback.tsx', 'utf8');
 const UI     = readFileSync('components/games/ui.tsx', 'utf8');
@@ -528,7 +530,8 @@ check('the root hides splash only after its auth/capture gate',
 // mirrored name for every square (the pawn on e4 read as "d5"). The VISIBLE
 // coordinates were always right, which is exactly why nobody saw it.
 check('chess names a square by the square, not by where it is drawn',
-  /squareLabel\(sq, piece/.test(CHESS) && /function squareLabel\(sq: number/.test(CHESS),
+  /chessSquareLabel\(sq, piece/.test(CHESS)
+    && /export function chessSquareLabel\(\s*sq: number/.test(readFileSync('lib/games/boardLabels.ts', 'utf8')),
   'on a flipped board the display index is a different square entirely');
 
 // The rummy server answers a join for a table it does not know by seating you

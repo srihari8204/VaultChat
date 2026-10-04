@@ -20,8 +20,7 @@
 // the one number both players are trusting.
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { establishGamesSession } from '../gamesSocket';
-import { GAMES_HTTP } from './origin';
+import { establishGamesSession, GAMES_HTTP } from '../gamesSocket';
 
 export interface WalletState {
   balance: number | null;

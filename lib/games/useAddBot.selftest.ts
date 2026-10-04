@@ -11,6 +11,7 @@
 import { readFileSync } from 'fs';
 import { join } from 'path';
 import { ADD_BOT_STALLED, ADD_BOT_TIMEOUT_MS } from './useAddBot';
+import { boardSource } from './boardSource.testkit';
 
 let failed = 0;
 function A(ok: boolean, what: string): void {
@@ -128,9 +129,9 @@ const unmount = (s: S): S => ({ ...s, timerLive: false });
 {
   const ROOT = join(__dirname, '..', '..');
   const hook = readFileSync(join(ROOT, 'lib/games/useAddBot.ts'), 'utf8');
-  const ludo = readFileSync(join(ROOT, 'components/games/Ludo.tsx'), 'utf8');
-  const chess = readFileSync(join(ROOT, 'components/games/Chess.tsx'), 'utf8');
-  const ttt = readFileSync(join(ROOT, 'components/games/TicTacToe.tsx'), 'utf8');
+  const ludo = boardSource('Ludo');
+  const chess = boardSource('Chess');
+  const ttt = boardSource('TicTacToe');
 
   A(/useEffect\(\(\) => stop, \[\]\)/.test(hook),
     '7a. the hook clears its timeout on unmount');

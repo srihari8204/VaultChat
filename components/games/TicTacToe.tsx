@@ -13,7 +13,7 @@ import { LinearGradient } from 'expo-linear-gradient';
  * the shared accents — see TEAL/PINK below.
  */
 
-import { useEffect, useId, useRef } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import { Pressable, ScrollView, Text, View, useWindowDimensions } from 'react-native';
 import Animated, {
   useSharedValue, useAnimatedStyle, withTiming, withRepeat, withSpring,
@@ -21,7 +21,7 @@ import Animated, {
 } from 'react-native-reanimated';
 import * as Haptics from 'expo-haptics';
 import { useGameSocket, isMyTurn, type AutoStart } from '../../lib/games/useGameSocket';
-import { TableBackground, Panel, Btn, Banner, PlayerRow, Reconnecting, RematchBtn, TurnClock, useType, useBoardBox, useReduceMotion } from './ui';
+import { TableBackground, Panel, Btn, Banner, PlayerRow, Reconnecting, RematchBtn, TurnClock, useType, useBoardBox, useReduceMotion, useAnnounce } from './ui';
 import { useAddBot, ADD_BOT_STALLED } from '../../lib/games/useAddBot';
 import { startBlockedReason } from '../../lib/games/startHint';
 import { useRematch } from '../../lib/games/useRematch';
@@ -32,6 +32,7 @@ import { playSfx, preloadSfx } from '../../lib/games/sfx';
 import { Toasts, Confetti, VoiceBar } from './feedback';
 import { useTableVoice } from '../../lib/games/useTableVoice';
 import { openInvite, shareResult } from '../../lib/games/invite';
+import { tttCellLabel } from '../../lib/games/boardLabels';
 
 /**
  * The two marks' colours.
@@ -62,6 +63,10 @@ export default function TicTacToe({ roomId, auto, autoBot }: { roomId: string } 
   const bot = useAddBot(send, state.lobby?.members?.length ?? 0);
   // Offered once, in the lobby — before a move is ever required.
   const rules = useFirstTimeRules('tictactoe');
+  // The rules from the board too, not only the lobby — a quick-match player
+  // never sees the lobby. Separate from the first-run sheet so it never pops
+  // up uninvited mid-game.
+  const [showRules, setShowRules] = useState(false);
   // The server's own clock, when it sends one. No deadline shows no clock — a
   // frozen zero would be this board inventing a fact about a game it does not
   // referee.
@@ -107,7 +112,7 @@ export default function TicTacToe({ roomId, auto, autoBot }: { roomId: string } 
     return (
       <TableBackground>
         <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', padding: S[5], gap: S[3] }}>
-          <Text style={{ fontSize: 46 }}>✕</Text>
+          <Text accessibilityElementsHidden importantForAccessibility="no" style={{ fontSize: 46 }}>✕</Text>
           <Text style={{ color: C.text, fontSize: t.lg, fontWeight: '800' }}>Could not reach the table</Text>
           <Text style={{ color: C.muted, fontSize: t.sm, textAlign: 'center' }}>{error}</Text>
           <Btn label="Try again" kind="gold" onPress={retry} />
@@ -122,7 +127,7 @@ export default function TicTacToe({ roomId, auto, autoBot }: { roomId: string } 
     return (
       <TableBackground>
         <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', gap: S[3] }}>
-          <Text style={{ fontSize: 46 }}>✕</Text>
+          <Text accessibilityElementsHidden importantForAccessibility="no" style={{ fontSize: 46 }}>✕</Text>
           <Text style={{ color: C.muted, fontSize: t.md }}>
             {phase === 'minting' ? 'Taking your seat…' : 'Joining the table…'}
           </Text>
@@ -137,7 +142,7 @@ export default function TicTacToe({ roomId, auto, autoBot }: { roomId: string } 
     return (
       <TableBackground>
         <ScrollView contentContainerStyle={{ padding: S[4], gap: S[3] }}>
-          <Text style={{ color: C.text, fontSize: t.xl, fontWeight: '800' }}>Tic-Tac-Toe</Text>
+          <Text accessibilityRole="header" style={{ color: C.text, fontSize: t.xl, fontWeight: '800' }}>Tic-Tac-Toe</Text>
           <Text style={{ color: C.muted, fontSize: t.sm, lineHeight: 19 }}>
             Three in a row. The table keeps score and calls the winner.
           </Text>
@@ -225,6 +230,7 @@ export default function TicTacToe({ roomId, auto, autoBot }: { roomId: string } 
                       send({ t: 'mark', cell: i });
                     }}
                     index={i}
+                    mySeat={me?.seat ?? null}
                   />
                 );
               })}
@@ -280,17 +286,19 @@ export default function TicTacToe({ roomId, auto, autoBot }: { roomId: string } 
         ) : (
           <Btn label="Invite a friend" icon="link" style={{ width: controlsWidth }} onPress={() => { void openInvite('tictactoe', roomId); }} disabled={!roomId} />
         )}
+        <Btn label="How to play" icon="rules" compact style={{ width: controlsWidth }} onPress={() => setShowRules(true)} />
       </ScrollView>
       </View>
       <Toasts events={events} />
       <Confetti show={finished && G.winnerId === state.you} />
+      <RulesSheet game="tictactoe" visible={showRules} onClose={() => setShowRules(false)} />
     </TableBackground>
   );
 }
 
 function Cell({
-  value, size, won, fresh, playable, onPress, index,
-}: { value: number; size: number; won: boolean; fresh: boolean; playable: boolean; onPress: () => void; index: number }) {
+  value, size, won, fresh, playable, onPress, index, mySeat,
+}: { value: number; size: number; won: boolean; fresh: boolean; playable: boolean; onPress: () => void; index: number; mySeat: number | null }) {
   const still = useReduceMotion();
   const pop = useSharedValue(value >= 0 ? 1 : 0);
   const glow = useSharedValue(0);
@@ -344,7 +352,7 @@ function Cell({
         onPress={onPress}
         disabled={!playable}
         accessibilityRole="button"
-        accessibilityLabel={`${cellLabel(index, value, playable)}${won ? ", winning line" : fresh ? ", latest move" : ""}`}
+        accessibilityLabel={`${tttCellLabel(index, value, mySeat, playable)}${won ? ', winning line' : fresh ? ', latest move' : ''}`}
         accessibilityState={{ disabled: !playable }}
         style={{ width: '100%', height: '100%', alignItems: 'center', justifyContent: 'center' }}
       >
@@ -382,12 +390,15 @@ function TurnLine({ mine, name }: { mine: boolean; name: string }) {
     return () => cancelAnimation(blink);
   }, [blink, still]);
   const a = useAnimatedStyle(() => ({ opacity: blink.value }));
+  const text = mine ? 'Your move' : `Waiting for ${name}`;
+  // iOS hears the turn change here; Android through the live region.
+  useAnnounce(text);
 
   return (
-    <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: S[2], padding: S[3], borderRadius: R[3], borderWidth: 1, borderColor: white(0.16), backgroundColor: white(0.06) }}>
+    <View accessible accessibilityLiveRegion="polite" accessibilityLabel={text} style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: S[2], padding: S[3], borderRadius: R[3], borderWidth: 1, borderColor: white(0.16), backgroundColor: white(0.06) }}>
       <Animated.View style={[{ width: 8, height: 8, borderRadius: 4, backgroundColor: mine ? TEAL : C.muted }, a]} />
       <Text style={{ flexShrink: 1, textAlign: 'center', color: C.text, fontSize: t.md, fontWeight: '700' }}>
-        {mine ? 'Your move' : `Waiting for ${name}`}
+        {text}
       </Text>
     </View>
   );
@@ -396,7 +407,7 @@ function TurnLine({ mine, name }: { mine: boolean; name: string }) {
 function SeatChip({ name, mark, active, stacked }: { name: string; mark: string; active: boolean; stacked: boolean }) {
   const t = useType();
   return (
-    <View style={{
+    <View accessible accessibilityLabel={`${name}, plays ${mark === '✕' ? 'crosses' : 'noughts'}${active ? ', to move' : ''}`} style={{
       flex: stacked ? undefined : 1, flexDirection: 'row', alignItems: 'center', gap: S[2],
       paddingVertical: S[2], paddingHorizontal: S[3], borderRadius: R[2],
       // Matches ui.tsx PlayerRow: an active seat is LIT, in its own mark's
@@ -413,10 +424,4 @@ function SeatChip({ name, mark, active, stacked }: { name: string; mark: string;
       <Text numberOfLines={1} style={{ flex: 1, color: C.text, fontSize: t.sm, fontWeight: '700' }}>{name}</Text>
     </View>
   );
-}
-
-function cellLabel(i: number, value: number, playable: boolean): string {
-  const where = `row ${Math.floor(i / 3) + 1}, column ${(i % 3) + 1}`;
-  if (value < 0) return `${where}, empty${playable ? ', tap to play' : ''}`;
-  return `${where}, ${MARK[value] === '✕' ? 'cross' : 'nought'}`;
 }

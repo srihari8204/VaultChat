@@ -29,8 +29,9 @@ import { AppState, type NativeEventSubscription } from "react-native";
 
 import { api } from "./api";
 
-/** The separately-deployed games origin (HTTPS). */
-const GAMES_HTTP = "https://games.corefinite.com";
+/** The separately-deployed games origin (HTTPS). Exported so the REST callers
+ * (wallet, leaderboard, /api/me) name the host from this one place. */
+export const GAMES_HTTP = "https://games.corefinite.com";
 /** The same origin as a WebSocket URL. */
 const GAMES_WS = GAMES_HTTP.replace(/^http/, "ws");
 

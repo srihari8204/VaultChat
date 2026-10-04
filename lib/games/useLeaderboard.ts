@@ -6,9 +6,8 @@
 // Node-run self-check exercises.
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { establishGamesSession } from '../gamesSocket';
+import { establishGamesSession, GAMES_HTTP } from '../gamesSocket';
 import { parseLeaderboard, type LeaderRow, type LeaderScope } from './leaderboard';
-import { GAMES_HTTP } from './origin';
 
 export interface LeaderboardState {
   rows: LeaderRow[];

@@ -6,8 +6,7 @@
 // of one edge. A layout bug here is not cosmetic — a Declare button under the
 // gesture bar is a hand the player cannot finish.
 
-import { readFileSync } from 'fs';
-import { join } from 'path';
+import { boardSource } from './boardSource.testkit';
 import { fanFor,
   metrics, seatSpots, pileTop, actionBarWidth, seatAvatar, seatHasDetail, seatContent, SEAT_CHROME_H, SEAT_CHROME_BASE, handWidthAt, secondsLeft, ranked, activeCount,
   allowsBots, newPrivateCode, normalizeCode, CARD_RATIO, CARD_MIN, CARD_COMFORT, filterBySeats, pickTable,
@@ -167,7 +166,7 @@ check('the hand never needs more width than the screen has', !overflowed, overfl
   // at all, so the SHEET carries it — asserted against the source, because the
   // guarantee is "always reachable", not "always in the bar".
   {
-    const src = readFileSync(join(__dirname, '..', '..', 'components/games/Rummy.tsx'), 'utf8');
+    const src = boardSource('Rummy');
     check('...and the settings sheet always offers Standings, whatever the width',
       /label="Standings"[\s\S]{0,220}setShowStandings\(true\)/.test(src),
       'the bar drops it on a narrow screen; the sheet must not');
@@ -435,7 +434,7 @@ console.log('\nRoom codes\n');
 // they test the MODEL against itself and never what renders. On the Redmi in
 // landscape that shipped as thirteen cards dealt and twelve on screen.
 {
-  const src = readFileSync(join(__dirname, '..', '..', 'components', 'games', 'Rummy.tsx'), 'utf8');
+  const src = boardSource('Rummy');
   const code = src.split('\n').filter(l => !/^\s*(\/\/|\*|\/\*)/.test(l)).join('\n');
 
   check('the hand never tucks with a NEGATIVE GAP — Yoga resolves it to 0',

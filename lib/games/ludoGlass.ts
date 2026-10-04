@@ -276,3 +276,15 @@ export const PAWN = {
   /** The shape marker, sitting on the pawn's own colour. */
   markerInk: 'rgba(0,0,0,0.82)',
 } as const;
+
+/**
+ * Pure white for the glints: the board's sheen, the pawn's one specular, the
+ * die's lit face and edge. Named so the board files carry no colour literals.
+ */
+export const GLINT = '#ffffff';
+
+/** The die face falls from GLINT through LR.text to `faceLo`; pips are `pipIdle` until a result is published. */
+export const DIE = { faceLo: '#DCE5F0', pipIdle: '#77718D' } as const;
+
+/** The warm middle of the dice tray's pool of light. */
+export const TRAY_WARM = '#FF8A3D';

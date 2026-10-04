@@ -14,104 +14,45 @@ import { chessTttLayout } from '../../lib/games/chessTttLayout';
  * The visual language is ported from games-web/chess.css: a board-first
  * near-black page rather than the maroon felt the other three games use,
  * classic cream/brown squares, and chess.com-style highlights.
+ *
+ * The pieces of this screen live beside it in components/games/chess/: the
+ * board's look (style.ts), a square (Square.tsx), the seats and status pill
+ * (Seat.tsx), the sheets and promotion picker (Sheets.tsx) and the lobby
+ * (Lobby.tsx). The read-outs (captured material, clocks, names) are pure and
+ * tested in lib/games/chessView.ts; what a screen reader says is
+ * lib/games/boardLabels.ts.
  */
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { Alert, Modal, Pressable, ScrollView, StyleSheet, Text, View, type ViewStyle } from 'react-native';
-import Ionicons from '@expo/vector-icons/Ionicons';
-import Svg, { Path, Ellipse, Defs, LinearGradient as SvgLinear, Stop } from 'react-native-svg';
+import { Alert, ScrollView, Text, View } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-import Animated, {
-  useSharedValue, useAnimatedStyle, withTiming, withRepeat,
-  Easing, cancelAnimation,
-} from 'react-native-reanimated';
 import * as Haptics from 'expo-haptics';
-import { useGameSocket, type GameState, type AutoStart } from '../../lib/games/useGameSocket';
+import { useGameSocket, type AutoStart } from '../../lib/games/useGameSocket';
 import {
-  TableBackground, Btn, Panel, PlayerRow, Reconnecting, RematchBtn, ActionDock, RoundBtn,
-  useType, useBoardBox, useReduceMotion,
+  TableBackground, Btn, Panel, Reconnecting, RematchBtn, ActionDock, RoundBtn,
+  useType, useBoardBox, useReduceMotion, useAnnounce,
 } from './ui';
 import { useRematch } from '../../lib/games/useRematch';
-import { RulesSheet, useFirstTimeRules } from './rules';
 import LeaderboardSheet from './LeaderboardSheet';
-import { C, S, R, white, alpha, ACCENT } from '../../lib/games/theme';
-import { CR, CR_AMBIENT, CR_BOKEH, CR_VIGNETTE, CR_LIT, g } from '../../lib/games/chessRoom';
-import { useAddBot, ADD_BOT_STALLED } from '../../lib/games/useAddBot';
-import { startBlockedReason } from '../../lib/games/startHint';
-import { PIECE_NAME } from '../../lib/games/pieceNames';
+import { S, R, white } from '../../lib/games/theme';
+import { CR, CR_AMBIENT, CR_BOKEH, CR_VIGNETTE, g } from '../../lib/games/chessRoom';
 import { playSfx, preloadSfx, soundEnabled, setSoundEnabled } from '../../lib/games/sfx';
 import { Toasts, Confetti, Sheet, SettingRow, VoiceBar, VoiceSheet } from './feedback';
-import { useTableVoice, type TableVoice } from '../../lib/games/useTableVoice';
+import { useTableVoice } from '../../lib/games/useTableVoice';
 import { openInvite, shareResult } from '../../lib/games/invite';
-
-type Piece = { t: 'p' | 'n' | 'b' | 'r' | 'q' | 'k'; c: 'w' | 'b' } | null;
-type Move = { from: number; to: number; promo?: string };
-
-/**
- * Filled glyphs for BOTH colours, tinted rather than outlined.
- *
- * The web uses the hollow set for white plus a -webkit-text-stroke outline;
- * RN has no text stroke, and a hollow glyph on a cream square is close to
- * invisible without one. Filled-and-tinted is what native chess apps do and it
- * reads correctly at phone sizes.
- */
-const GLYPH: Record<string, string> = { k: '♚', q: '♛', r: '♜', b: '♝', n: '♞', p: '♟' };
-const GLYPH_NAME: Record<string, string> = Object.fromEntries(Object.entries(GLYPH).map(([k, g]) => [g, PIECE_NAME[k]]));
-
-/** Fill + fake-stroke per side. See OutlinedGlyph. */
-type Ink = { w: { fill: string; line: string }; b: { fill: string; line: string } };
-
-type BoardTheme = {
-  light: string; dark: string; hl: string; sel: string;
-  /** Board rim. Defaults to the dark wood edge every painted theme uses. */
-  edge?: string;
-  /** Legal-move dot. The default is INK — it is drawn for light squares. */
-  dot?: string;
-  /** Capture ring. Same reasoning as `dot`. */
-  ring?: string;
-  /** Piece ink. Defaults to black-on-cream; only `glass` needs its own. */
-  ink?: Ink;
-};
-
-/** chess.com board themes, from games-web/chess.js BOARD_THEMES — plus `glass`. */
-const THEMES = {
-  /**
-   * The house board — a deep emerald table with warm ivory squares.
-   *
-   * THE KEY IS STILL `glass`, AND THAT IS DELIBERATE. It is the value written
-   * into AsyncStorage under BOARD_KEY by every player who has ever kept the
-   * default, and renaming it would silently invalidate their stored choice and
-   * drop them back to whatever the default happened to be that week. The key is
-   * storage; the colours are design. Only the colours moved.
-   *
-   * It used to be literally translucent — white at .16/.045 over the room —
-   * which read as glass but gave chess the one thing a board must not have:
-   * squares whose colour depends on what is behind them. The 2026-09-06
-   * redesign makes the BOARD opaque and puts the glass in the panels around it,
-   * which is both what the reference asks for and what every chess client does.
-   *
-   * Because the squares are opaque again, the BLACK pieces come back to black.
-   * The previous version played the dark side in the ice accent, because black
-   * on a dark translucent square is a silhouette on a shadow; on solid emerald
-   * that problem is gone. What replaces the tint is a champagne rim — the same
-   * trick the white pieces have always used, in the other direction — so an
-   * obsidian piece on an emerald square still has an edge.
-   */
-  glass:      { light: CR.ivory, dark: CR.emerald,
-                hl: 'rgba(233,196,106,.42)', sel: 'rgba(233,196,106,.62)',
-                edge: CR.gold, dot: 'rgba(24,38,32,.65)',
-                ring: 'rgba(24,38,32,.65)',
-                ink: { w: { fill: '#FBF4E6', line: '#2B2620' },
-                       b: { fill: '#14120F', line: '#E0B455' } } },
-  classic:    { light: '#ece6d3', dark: '#6f6253', hl: 'rgba(214,175,99,.50)', sel: 'rgba(214,175,99,.68)' },
-  green:      { light: '#ebecd0', dark: '#739552', hl: 'rgba(155,199,0,.45)',  sel: 'rgba(155,199,0,.55)' },
-  blue:       { light: '#dee3e6', dark: '#8ca2ad', hl: 'rgba(155,199,0,.41)',  sel: 'rgba(155,199,0,.55)' },
-  brown:      { light: '#f0d9b5', dark: '#b58863', hl: 'rgba(205,210,106,.45)', sel: 'rgba(205,210,106,.55)' },
-  midnight:   { light: '#b7c6d8', dark: '#3a4b66', hl: 'rgba(155,199,0,.41)',  sel: 'rgba(155,199,0,.55)' },
-  tournament: { light: '#e8e8e8', dark: '#7d8a99', hl: 'rgba(155,199,0,.41)',  sel: 'rgba(155,199,0,.55)' },
-} satisfies Record<string, BoardTheme>;
-type ThemeName = keyof typeof THEMES;
+import { chessSelectionAnnouncement } from '../../lib/games/boardLabels';
+import {
+  takenBy, clockFor, youName, opponentIsBot, roleOf, opponentName, pairUp, type Piece,
+} from '../../lib/games/chessView';
+import {
+  THEMES, isThemeName, FILES, PIECE_STROKE, RIM, RAIL_RATIO, RAIL_MIN, RAIL_MAX, FELT, RAIL_INK,
+  DRAW_OFFER_INK, type BoardTheme, type ThemeName, type Move,
+} from './chess/style';
+import { Square } from './chess/Square';
+import { Seat, StatusPill } from './chess/Seat';
+import { PlayersSheet, Swatches, PromoPicker } from './chess/Sheets';
+import { Lobby, Connecting } from './chess/Lobby';
 
 /**
  * The board the player last chose, remembered.
@@ -135,8 +76,6 @@ type ThemeName = keyof typeof THEMES;
  * ever painted, so this changes nothing for anyone who already chose.
  */
 const BOARD_KEY = 'vc_chess_board';
-const isThemeName = (v: unknown): v is ThemeName =>
-  typeof v === 'string' && Object.prototype.hasOwnProperty.call(THEMES, v);
 let boardPref: ThemeName = 'glass';
 AsyncStorage.getItem(BOARD_KEY)
   .then(v => { if (isThemeName(v)) boardPref = v; })
@@ -145,111 +84,6 @@ AsyncStorage.getItem(BOARD_KEY)
 /** Stable empties, so an absent board does not churn every consumer. */
 const NO_MOVES: Move[] = [];
 const NO_BOARD: Piece[] = [];
-
-const FILES = 'abcdefgh';
-// chess.css: `.sq.check { box-shadow: inset 0 0 0 60px rgba(225,90,90,.55) }`
-// with a 1s pulse to .3. OPAQUE here because the pulse below animates opacity —
-// a .55 colour at .55 opacity is .30 at rest, so the check marker was arriving
-// at half strength and reading as a faint blush rather than an alarm.
-const CHECK_RED = '#e15a5a';
-const DOT = 'rgba(40,35,28,.32)';
-
-/** Material value per piece letter, for the captured-material readout. */
-/**
- * The pieces, as vector paths on a 100x100 grid.
- *
- * THEY WERE UNICODE GLYPHS, and that was a device risk rather than a look. A
- * glyph is drawn by whatever font the platform resolves it to; every Android
- * skin ships its own symbol fonts, and OutlinedGlyph's own comment used to warn
- * that whether the outline set renders hollow is a font-fallback question — on
- * a skin that answers it the other way, the white king comes out solid black
- * and you cannot tell your own pieces from your opponent's. That was a question
- * of which phone, not whether.
- *
- * A path renders as one shape everywhere, and it takes a REAL stroke, which is
- * what the four offset copies below it were faking.
- *
- * Drawn in Figma first per the standing rule (file BamgQ9YetsdRxW2CfWM7By,
- * frame "Chess v2 - piece set (draft)"), and kept to absolute M/L/C/Z: that is
- * the only path grammar Figma's parser accepts. react-native-svg takes far
- * more, but authoring to the smaller grammar is what lets the design file and
- * the code hold the same string.
- */
-const BASE_WIDE = 'M 22 78 L 78 78 C 80.2 78 82 79.8 82 82 L 82 88 L 18 88 L 18 82 C 18 79.8 19.8 78 22 78 Z';
-const COLLAR = 'M 32 66 L 68 66 C 70.2 66 72 67.8 72 70 L 72 74 L 28 74 L 28 70 C 28 67.8 29.8 66 32 66 Z';
-
-const PIECE_PATH: Record<string, string> = {
-  // A head, a NECK, and a flared skirt. Without the waist the head and the body
-  // merge into one lump and it stops reading at board size, which is the only
-  // size it is ever seen at.
-  p: 'M 50 16 C 57.18 16 63 21.82 63 29 C 63 36.18 57.18 42 50 42 C 42.82 42 37 36.18 37 29 C 37 21.82 42.82 16 50 16 Z'
-   + ' M 44 41.5 C 42.6 44.8 41.4 47.8 41 50.6 C 40.1 56.8 36.6 63.8 32.4 70 L 30 76 L 70 76 L 67.6 70 C 63.4 63.8 59.9 56.8 59 50.6 C 58.6 47.8 57.4 44.8 56 41.5 C 54.2 42.7 52.2 43.3 50 43.3 C 47.8 43.3 45.8 42.7 44 41.5 Z'
-   + ' M 26 76 L 74 76 C 76.2 76 78 77.8 78 80 L 78 88 L 22 88 L 22 80 C 22 77.8 23.8 76 26 76 Z',
-  r: 'M 24 14 L 37 14 L 37 25 L 44 25 L 44 14 L 56 14 L 56 25 L 63 25 L 63 14 L 76 14 L 76 35 L 67 42 L 64 65 L 73 75 L 73 78 L 27 78 L 27 75 L 36 65 L 33 42 L 24 35 Z ' + BASE_WIDE,
-  b: 'M 50 11 C 53.31 11 56 13.69 56 17 C 56 20.31 53.31 23 50 23 C 46.69 23 44 20.31 44 17 C 44 13.69 46.69 11 50 11 Z'
-   + ' M 50 21 C 60 27 67 36.5 67 45 C 67 52 63.4 58.2 57.9 61.8 L 61.5 67 L 38.5 67 L 42.1 61.8 C 36.6 58.2 33 52 33 45 C 33 36.5 40 27 50 21 Z'
-   + ' M 36 67 L 64 67 C 66.2 67 68 68.8 68 71 L 68 74 L 32 74 L 32 71 C 32 68.8 33.8 67 36 67 Z ' + BASE_WIDE,
-  n: 'M 38 78 L 38 74 C 38 65 41.4 58.4 48.2 53.4 C 52.6 50.2 55.2 47.5 56.5 44.2 L 48.1 47.4 L 44.5 41.2 L 51.1 36.6 C 52.5 34.6 53.3 32.2 53.5 29.4 L 46.9 32 L 44.5 25.4 L 53.5 20.8 C 56.1 16.8 60.1 14.2 65.1 13.4 L 67.7 20.8 L 74.1 24.4 C 78.1 26.6 80.5 30.6 80.5 35.6 L 80.5 78 Z ' + BASE_WIDE,
-  q: 'M 50 10 C 53.04 10 55.5 12.46 55.5 15.5 C 55.5 18.54 53.04 21 50 21 C 46.96 21 44.5 18.54 44.5 15.5 C 44.5 12.46 46.96 10 50 10 Z'
-   + ' M 28 25 C 30.76 25 33 27.24 33 30 C 33 32.76 30.76 35 28 35 C 25.24 35 23 32.76 23 30 C 23 27.24 25.24 25 28 25 Z'
-   + ' M 72 25 C 74.76 25 77 27.24 77 30 C 77 32.76 74.76 35 72 35 C 69.24 35 67 32.76 67 30 C 67 27.24 69.24 25 72 25 Z'
-   + ' M 50 20 L 58 38 L 71 27 L 68 50 L 65.5 66 L 34.5 66 L 32 50 L 29 27 L 42 38 Z ' + COLLAR + ' ' + BASE_WIDE,
-  k: 'M 46.5 9 L 53.5 9 L 53.5 15 L 59.5 15 L 59.5 22 L 53.5 22 L 53.5 31 L 46.5 31 L 46.5 22 L 40.5 22 L 40.5 15 L 46.5 15 Z'
-   + ' M 46.5 30 C 38 32.6 32 39.5 32 47.6 C 32 52.2 33.9 56.4 37 59.5 L 34 66 L 66 66 L 63 59.5 C 66.1 56.4 68 52.2 68 47.6 C 68 39.5 62 32.6 53.5 30 Z ' + COLLAR + ' ' + BASE_WIDE,
-};
-
-/**
- * The outline, in VIEWBOX UNITS rather than pixels.
- *
- * Was 1.2 — a px count copied from chess.css's -webkit-text-stroke and faked
- * with four offset glyph copies. A path takes a real stroke, and expressing it
- * in the 100-unit grid means it scales WITH the board instead of getting
- * proportionally heavier as the squares get smaller.
- */
-const PIECE_STROKE = 2.2;
-
-/**
- * Fill and stroke per side, straight from chess.css:
- *   .piece.w { color: #f4f0e6; -webkit-text-stroke: 1.2px #2b2620 }
- *   .piece.b { color: #1d1a16; -webkit-text-stroke: 1.2px #000 }
- *
- * Black's stroke is BLACK — it thickens the glyph rather than outlining it. An
- * earlier pass here gave black a light stroke, which is a different piece set:
- * it turns a solid black knight into an engraved one.
- */
-const PIECE_INK = {
-  w: { fill: '#f4f0e6', line: '#2b2620' },
-  b: { fill: '#1d1a16', line: '#000000' },
-} as const;
-
-/** The bronze board frame, in dp. */
-const RIM = 3;
-
-/**
- * The felt rail between the frame and the grid, as a fraction of the board.
- *
- * THE COORDINATES LIVE ON IT, and that is the point. They used to be drawn
- * inside the first column and last row of squares, which is what chess.css
- * does — but it means eight squares carry a label a piece then stands on top
- * of, and on a phone the label and the piece fight for the same 40dp. A rail
- * is where a real board puts them.
- *
- * It is a RATIO rather than a constant because it has to hold its proportion
- * from a 320dp phone to a tablet; at 358dp it resolves to 19dp, which fits a
- * 10dp digit with air around it. Clamped so it can neither vanish on a small
- * screen nor eat the board on a large one.
- */
-const RAIL_RATIO = 0.053;
-const RAIL_MIN = 13;
-const RAIL_MAX = 26;
-
-/** The rail itself: the green felt a board's frame holds. */
-const FELT = '#12483A';
-const RAIL_INK = 'rgba(207,227,216,.85)';
-
-const VALUE: Record<string, number> = { p: 1, n: 3, b: 3, r: 5, q: 9, k: 0 };
-/** A full starting army, by letter. Used only to derive what has been taken. */
-const ARMY: Record<string, number> = { p: 8, n: 2, b: 2, r: 2, q: 1, k: 1 };
 
 export default function Chess({ roomId, auto, autoBot }: { roomId: string } & AutoStart) {
   const { phase, error, state, events, send, subscribe, retry } = useGameSocket('chess', roomId, { auto, autoBot });
@@ -341,6 +175,12 @@ export default function Chess({ roomId, auto, autoBot }: { roomId: string } & Au
     [sel, legal],
   );
   const targets = useMemo(() => new Set(movesFromSel.map(m => m.to)), [movesFromSel]);
+
+  // Picking a piece up changes nothing a live region shows, so it is spoken
+  // directly: which piece, and how many squares it can go to.
+  useAnnounce(sel != null ? chessSelectionAnnouncement(sel, board[sel] ?? null, movesFromSel.length) : null, true);
+  // The draw offer is a question; the banner carries a live region for Android.
+  useAnnounce(drawOffer && !G?.result ? 'Your opponent offers a draw' : null);
 
   const pickBoard = useCallback((n: ThemeName) => {
     setTheme(n);
@@ -565,6 +405,7 @@ export default function Chess({ roomId, auto, autoBot }: { roomId: string } & Au
                   onPress={onSquare}
                   stroke={stroke}
                   still={reduceMotion}
+                  interactive={mine && !state.spectator}
                 />
               );
             })}
@@ -600,7 +441,7 @@ export default function Chess({ roomId, auto, autoBot }: { roomId: string } & Au
             accessibilityElementsHidden
             importantForAccessibility="no"
             numberOfLines={1}
-            style={{ flex: 1, color: g(0.6), fontSize: 10, fontWeight: '800', letterSpacing: 1.5 }}
+            style={{ flex: 1, color: g(0.85), fontSize: 10, fontWeight: '800', letterSpacing: 1.5 }}
           >
             PLAY  •  CONNECT  •  CHALLENGE
           </Text>
@@ -651,16 +492,16 @@ export default function Chess({ roomId, auto, autoBot }: { roomId: string } & Au
         />
 
         {drawOffer && !G.result && (
-          <View style={{
+          <View accessibilityLiveRegion="polite" style={{
             width: controlsWidth, flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: S[2],
             padding: S[3], borderRadius: R[2],
             borderWidth: 1, borderColor: CR.lineSoft, backgroundColor: g(0.12),
           }}>
-            <Text style={{ width: '100%', color: '#ffd97a', fontSize: t.sm, fontWeight: '700' }}>
+            <Text style={{ width: '100%', color: DRAW_OFFER_INK, fontSize: t.sm, fontWeight: '700' }}>
               Your opponent offers a draw
             </Text>
-            <Btn label="Accept" kind="gold" compact onPress={() => { send({ t: 'draw-accept' }); setDrawOffer(false); }} />
-            <Btn label="No" compact onPress={() => setDrawOffer(false)} />
+            <Btn label="Accept" accessibilityLabel="Accept the draw" kind="gold" compact onPress={() => { send({ t: 'draw-accept' }); setDrawOffer(false); }} />
+            <Btn label="No" accessibilityLabel="Decline the draw" compact onPress={() => setDrawOffer(false)} />
           </View>
         )}
 
@@ -734,8 +575,8 @@ export default function Chess({ roomId, auto, autoBot }: { roomId: string } & Au
           importantForAccessibility="no"
           style={{ alignItems: 'center', marginTop: S[2] }}
         >
-          <Text style={{ color: g(0.55), fontSize: 10, fontWeight: '800', letterSpacing: 4 }}>CHESS</Text>
-          <Text style={{ color: CR.muted, opacity: 0.5, fontSize: 7.5, fontWeight: '600', letterSpacing: 2 }}>
+          <Text style={{ color: g(0.85), fontSize: 10, fontWeight: '800', letterSpacing: 4 }}>CHESS</Text>
+          <Text style={{ color: CR.muted, opacity: 0.85, fontSize: 9, fontWeight: '600', letterSpacing: 2 }}>
             MORE THAN A GAME
           </Text>
         </View>
@@ -753,11 +594,13 @@ export default function Chess({ roomId, auto, autoBot }: { roomId: string } & Au
           label="Coordinates"
           hint="Rank and file letters on the board edge"
           value={coords ? 'On' : 'Off'}
+          checked={coords}
           onPress={() => setCoords(v => !v)}
         />
         <SettingRow
           label="Sound"
           value={sound ? 'On' : 'Off'}
+          checked={sound}
           onPress={() => { const n = !sound; setSound(n); void setSoundEnabled(n); }}
         />
         {/* NO SCROLLER OF ITS OWN. Sheet already wraps its children in one, and
@@ -766,7 +609,7 @@ export default function Chess({ roomId, auto, autoBot }: { roomId: string } & Au
             sheet's own scroller carries this. */}
         {Array.isArray(G.history) && G.history.length > 0 && (
           <Panel style={{ marginTop: S[2] }}>
-            <Text style={{ color: CR.muted, fontSize: t.sm, fontWeight: '800', marginBottom: S[2] }}>Moves</Text>
+            <Text accessibilityRole="header" style={{ color: CR.muted, fontSize: t.sm, fontWeight: '800', marginBottom: S[2] }}>Moves</Text>
             <Text style={{ color: CR.muted, fontSize: 12, lineHeight: 20, fontFamily: 'monospace' }}>
               {pairUp(G.history)}
             </Text>
@@ -802,763 +645,4 @@ export default function Chess({ roomId, auto, autoBot }: { roomId: string } & Au
       )}
     </TableBackground>
   );
-}
-
-/* ── one square ─────────────────────────────────────────────────────── */
-
-/**
- * MEMOISED, and it takes `onPress(sq)` rather than a closure.
- *
- * 64 of these mount, each owning a shared value and an effect, and every one
- * was rebuilt on every render of the screen — including the one-second clock
- * tick, which is what put the 250ms frames in this board's p90. The two things
- * that defeated memoisation were an `onPress={() => onSquare(idx)}` literal per
- * square and the unstable `legal`/`board` fallbacks feeding it; both are fixed,
- * so a tick now re-renders the clock and nothing else. A real move still
- * re-renders the squares, which is the point.
- *
- * Ludo's BoardSvg and Rummy's HandCard are both already memoised for the same
- * reason — chess was the board that missed it.
- */
-const Square = React.memo(function Square({
-  d, sq, cell, bg, tint, check, piece, pieceSize,
-  target, capture, selected, last, slideFrom, onPress, stroke, ink, dot, ring, still,
-}: {
-  /** Where it is DRAWN (0 = top-left of the board as this player sees it). */
-  d: number;
-  /** Which square it actually IS (0 = a8). These differ when the board is flipped. */
-  sq: number;
-  cell: number; bg: string; tint: string | null; check: boolean; selected: boolean; last: boolean;
-  piece: Piece; pieceSize: number; target: boolean; capture: boolean;
-  slideFrom: { dx: number; dy: number; key: string } | null;
-  onPress: (sq: number) => void; stroke: number;
-  /** All three fall back to the painted-board defaults. See BoardTheme. */
-  ink?: Ink; dot?: string; ring?: string;
-  /** Reduced motion: the check marker holds instead of pulsing. */
-  still?: boolean;
-}) {
-  const pulse = useSharedValue(0);
-  useEffect(() => {
-    if (check && !still) {
-      pulse.value = withRepeat(withTiming(1, { duration: 500, easing: Easing.inOut(Easing.ease) }), -1, true);
-    } else {
-      cancelAnimation(pulse);
-      pulse.value = 0;
-    }
-    return () => cancelAnimation(pulse);
-  }, [check, still, pulse]);
-  const aCheck = useAnimatedStyle(() => ({ opacity: check ? 0.55 - pulse.value * 0.25 : 0 }));
-
-  return (
-    <Pressable
-      onPress={() => onPress(sq)}
-      accessibilityLabel={`${squareLabel(sq, piece, target, capture)}${check ? ", king in check" : ""}${last ? ", last move" : ""}`}
-      accessibilityRole="button"
-      accessibilityState={{ selected }}
-      style={{
-        position: 'absolute',
-        left: (d & 7) * cell, top: (d >> 3) * cell,
-        width: cell, height: cell,
-        backgroundColor: bg,
-        alignItems: 'center', justifyContent: 'center',
-      }}
-    >
-      {/* Keep the playing squares flat: glass belongs to the surrounding controls. */}
-      {tint ? <View pointerEvents="none" style={{ position: 'absolute', inset: 0, backgroundColor: tint }} /> : null}
-      {last && !selected ? <View pointerEvents="none" style={{ position: 'absolute', left: 3, top: 3, width: cell * 0.16, height: cell * 0.16, borderTopWidth: 2, borderLeftWidth: 2, borderColor: CR.gold2 }} /> : null}
-      <Animated.View pointerEvents="none" style={[{ position: 'absolute', inset: 0, backgroundColor: CHECK_RED }, aCheck]} />
-
-      {selected ? <View pointerEvents="none" style={{ position: 'absolute', inset: 1, borderWidth: 2.5, borderRadius: 3, borderColor: CR.gold2 }} /> : null}
-      {/* Capture ring sits behind the piece; the plain dot marks an empty target. */}
-      {target && capture ? (
-        <View pointerEvents="none" style={{
-          position: 'absolute', width: cell * 0.92, height: cell * 0.92,
-          borderRadius: cell * 0.46, borderWidth: Math.max(2, cell * 0.055), borderColor: ring ?? 'rgba(40,35,28,.3)',
-        }} />
-      ) : null}
-
-      {piece ? <PieceGlyph piece={piece} size={pieceSize} slideFrom={slideFrom} stroke={stroke} ink={ink} still={still} /> : null}
-
-      {target && !capture ? (
-        <View pointerEvents="none" style={{
-          position: 'absolute', width: cell * 0.3, height: cell * 0.3,
-          borderRadius: cell * 0.15, backgroundColor: dot ?? DOT,
-        }} />
-      ) : null}
-    </Pressable>
-  );
-});
-
-/**
- * The piece, with the last-move slide.
- *
- * Ported from chess.js: the piece is placed at its ORIGIN offset with no
- * animation, then released to zero. Keying on history length as well as the
- * squares means a repeated shuffle still animates each time rather than once.
- */
-function PieceGlyph({
-  piece, size, slideFrom, stroke, ink, still,
-}: {
-  piece: NonNullable<Piece>; size: number;
-  slideFrom: { dx: number; dy: number; key: string } | null; stroke: number; ink?: Ink;
-  still?: boolean;
-}) {
-  const x = useSharedValue(0);
-  const y = useSharedValue(0);
-  const played = useRef<string | null>(null);
-
-  useEffect(() => {
-    if (!slideFrom || played.current === slideFrom.key) return;
-    played.current = slideFrom.key;
-    // Reduced motion: the piece is simply THERE. The move still happened and
-    // the last-move highlight still marks it; only the travel is dropped.
-    if (still) { x.value = 0; y.value = 0; return; }
-    x.value = slideFrom.dx;
-    y.value = slideFrom.dy;
-    const spec = { duration: 200, easing: Easing.bezier(0.2, 0.8, 0.2, 1) };
-    x.value = withTiming(0, spec);
-    y.value = withTiming(0, spec);
-  }, [slideFrom, still, x, y]);
-
-  // Cast: a mixed [{translateX},{translateY}] tuple widens to a union RN's
-  // transform type will not accept.
-  const a = useAnimatedStyle(() => ({
-    transform: [{ translateX: x.value }, { translateY: y.value }] as ViewStyle['transform'],
-  }));
-
-  return (
-    <Animated.View style={a} pointerEvents="none">
-      <OutlinedGlyph t={piece.t} c={piece.c} size={size} stroke={stroke} ink={ink} />
-    </Animated.View>
-  );
-}
-
-/**
- * A piece glyph with a REAL outline, not a glow.
- *
- * The reference client draws white with the hollow glyph set plus a CSS
- * -webkit-text-stroke; RN has neither, and the soft textShadow that stood in
- * for it read as a halo — on the green board a white piece blurred into the
- * light squares instead of sitting on them.
- *
- * Four offset copies of the SAME glyph behind the fill give a crisp edge.
- * Deliberately NOT the hollow set (♔ vs ♚): whether ♔ renders hollow is a
- * font-fallback question, and on a device that answers it the other way the
- * white king would come out solid black. A board where you cannot tell your own
- * pieces apart is a worse bug than a soft edge; one glyph set always renders as
- * one shape.
- *
- * Shared with the promotion picker, which shows the same four pieces at four
- * times the size — the place a mismatched piece style is most obvious.
- */
-function OutlinedGlyph({
-  t, c, size, stroke, ink,
-}: { t: string; c: 'w' | 'b'; size: number; stroke: number; ink?: Ink }) {
-  const { fill, line } = (ink ?? PIECE_INK)[c];
-  // A letter with no path would draw NOTHING, and an empty square on a chess
-  // board reads as a piece that has been captured. Falling back to the pawn is
-  // wrong in a way somebody notices rather than wrong in a way nobody does.
-  const d = PIECE_PATH[t] ?? PIECE_PATH.p;
-  return (
-    <View style={{ alignItems: 'center', justifyContent: 'center' }}>
-      <Svg width={size} height={size} viewBox="0 0 100 100">
-        <Defs>
-          <SvgLinear id={`body${c}`} x1="0" y1="0" x2="1" y2="1">
-            <Stop offset="0" stopColor={c === 'w' ? '#FFFFFF' : '#66717C'} />
-            <Stop offset="0.4" stopColor={fill} />
-            <Stop offset="1" stopColor={c === 'w' ? '#C8C3B7' : '#0D131A'} />
-          </SvgLinear>
-          {/* Brass, lit from above: hot cap, body, dark underside. The same
-              three tones the board rim uses, so the pieces and the frame read
-              as one set of hardware rather than two golds. */}
-          <SvgLinear id={`plinth${c}`} x1="0" y1="0" x2="0" y2="1">
-            <Stop offset="0" stopColor={CR.gold2} />
-            <Stop offset="0.55" stopColor={CR.gold} />
-            <Stop offset="1" stopColor={CR.goldDeep} />
-          </SvgLinear>
-        </Defs>
-        {/* CONTACT SHADOW. Without it a piece floats on the square instead of
-            standing on it, and that is most of what made the old set read as
-            flat glyphs rather than objects. */}
-        <Ellipse cx="50" cy="91" rx="33" ry="5.2" fill="#000000" opacity={0.28} />
-        {/* The gold ring the piece stands in. Drawn BEFORE the piece so its own
-            base slab sits on top of it and only the rim shows. */}
-        <Ellipse
-          cx="50" cy="88.5" rx="31" ry="6.4"
-          fill={`url(#plinth${c})`}
-          stroke={CR.goldDeep} strokeWidth="1.1"
-        />
-        <Path d={d} fill={`url(#body${c})`} stroke={c === 'b' ? '#A0ABB4' : line} strokeWidth={stroke} strokeLinejoin="round" />
-        {/* Engraved details separate silhouettes at phone size without font glyphs. */}
-        <Path d="M 28 83 L 72 83" fill="none" stroke={c === 'w' ? line : '#DCE4E8'} strokeWidth="1.8" opacity={0.55} />
-        {t === 'r' ? <Path d="M 30 35 L 70 35 M 37 44 L 63 44 M 40 63 L 60 63" fill="none" stroke={c === 'w' ? line : '#DCE4E8'} strokeWidth="2.5" strokeLinecap="round" /> : null}
-        {t === 'b' ? <Path d="M 53 30 L 44 45" fill="none" stroke={c === 'w' ? line : '#DCE4E8'} strokeWidth="3" strokeLinecap="round" /> : null}
-        {t === 'n' ? <Ellipse cx="64" cy="29" rx="2.3" ry="2.3" fill={c === 'w' ? line : '#FFFFFF'} /> : null}
-        {t === 'q' || t === 'k' ? <Path d="M 37 62 L 63 62" fill="none" stroke={c === 'w' ? line : '#DCE4E8'} strokeWidth="2" strokeLinecap="round" /> : null}
-      </Svg>
-    </View>
-  );
-}
-
-/* ── chrome ─────────────────────────────────────────────────────────── */
-
-/**
- * A player card: who, what they are doing, and how long they have to do it.
- *
- * Every field is the LIVE one — `name` comes from the lobby roster, `clock`
- * from the server's clock frame through clockFor(), `role` from the same game
- * state the board renders, `bot` from the roster's own isBot flag. There is no
- * placeholder anywhere in here; an absent clock renders nothing rather than
- * a zero, exactly as TurnClock does in ui.tsx.
- *
- * The clock and bot badge wrap when the current width or font scale needs it.
- */
-function Seat({
-  name, role, bot, glyph, clock, taken, edge, active, width,
-}: {
-  name: string; role: string; bot: boolean; glyph: string; clock: string | null;
-  taken: string[]; edge: number; active: boolean; width: number;
-}) {
-  const t = useType();
-  const material = `${taken.join('')}${edge > 0 ? `  +${edge}` : ''}`;
-  const spokenMaterial = `${taken.map(g => GLYPH_NAME[g] ?? g).join(', ')}${edge > 0 ? `, ahead by ${edge}` : ''}`;
-  return (
-    <View
-      accessibilityLabel={
-        `${name}${bot ? ', bot' : ''}. ${role}.` +
-        (material ? ` Captured ${spokenMaterial}.` : '') +
-        (clock ? ` ${clock} on the clock.` : '')
-      }
-      style={{
-        width, flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: S[3],
-        paddingVertical: S[2], paddingHorizontal: S[3],
-        borderRadius: R[4], borderWidth: 1,
-        // An active seat is LIT and gold-edged. Gold is this screen's one
-        // accent and the seat to move is where it earns its place.
-        borderColor: active ? CR.lineSoft : white(0.16),
-        backgroundColor: white(active ? 0.12 : 0.07),
-        boxShadow: active
-          ? `0 10px 26px rgba(0,0,0,0.44), inset 0 1px 0 ${white(0.26)}, inset 0 -1px 0 rgba(0,0,0,0.32)`
-          : `0 6px 18px rgba(0,0,0,0.30), inset 0 1px 0 ${white(0.16)}, inset 0 -1px 0 rgba(0,0,0,0.30)`,
-      }}
-    >
-      {/* The sheen that makes a pane look like glass rather than a tinted box.
-          Gentle by necessity, not by taste: it brightens the surface exactly
-          where the role line sits, and CR.muted carries a contrast note that
-          had to be recomputed for it. */}
-      <LinearGradient
-        pointerEvents="none"
-        colors={[white(0.10), white(0.02), 'transparent']}
-        locations={[0, 0.5, 1]}
-        start={{ x: 0.08, y: 0 }}
-        end={{ x: 0.92, y: 1 }}
-        style={[StyleSheet.absoluteFillObject, { borderRadius: R[4] }]}
-      />
-      <View>
-        <View style={{
-          width: 40, height: 40, borderRadius: 20,
-          alignItems: 'center', justifyContent: 'center',
-          borderWidth: 1, borderColor: g(active ? 0.55 : 0.28),
-          backgroundColor: white(0.12),
-        }}>
-          <Text allowFontScaling={false} style={{ fontSize: 22, color: CR.gold2 }}>{glyph}</Text>
-        </View>
-        {/* THE AVATAR IS A GLYPH, NOT A PHOTO, and that is a protocol fact
-            rather than a style choice: the lobby roster is
-            {vaultId, name, isBot, wins} and carries no image anywhere, so a
-            photograph would need a server change. The crown is the reference's
-            seat mark and costs nothing. */}
-        <Text
-          accessibilityElementsHidden
-          importantForAccessibility="no"
-          style={{ position: 'absolute', top: -5, right: -3, fontSize: 12, color: CR.gold2 }}
-        >
-          ♛
-        </Text>
-      </View>
-
-      <View style={{ flexGrow: 1, flexShrink: 1, flexBasis: 96 }}>
-        <Text numberOfLines={1} style={{ color: CR.text, fontSize: t.md, fontWeight: '800' }}>{name}</Text>
-        <Text numberOfLines={1} style={{ color: CR.muted, fontSize: t.sm }}>
-          {material ? `${role}  ·  ${material}` : role}
-        </Text>
-      </View>
-
-      {clock ? (
-        <View style={{
-          flexDirection: 'row', alignItems: 'center', gap: S[1] + 2, maxWidth: '100%',
-          paddingHorizontal: S[3], paddingVertical: S[1] + 2, borderRadius: R.pill,
-          borderWidth: 1, borderColor: g(active ? 0.60 : 0.35),
-          backgroundColor: active ? g(0.16) : white(0.07),
-        }}>
-          <Ionicons name="time-outline" size={15} color={active ? '#FFDD9E' : CR.gold2} />
-          <Text
-            numberOfLines={1}
-            style={{ flexShrink: 1, color: active ? '#FFDD9E' : '#EFE3D0', fontSize: t.md, fontWeight: '800', fontFamily: 'monospace' }}
-          >
-            {clock}
-          </Text>
-        </View>
-      ) : null}
-
-      {/* AI PRO — the opponent's own mark, and only when the roster says bot. */}
-      {bot ? (
-        <View style={{
-          minWidth: 40, paddingHorizontal: S[1], paddingVertical: S[1], borderRadius: R[2], alignItems: 'center',
-          borderWidth: 1, borderColor: g(0.6), backgroundColor: g(0.14),
-        }}>
-          <Text style={{ color: CR.gold2, fontSize: 12, fontWeight: '800', letterSpacing: 0.4 }}>AI</Text>
-          <Text style={{ color: CR.line, fontSize: 7.5, fontWeight: '800', letterSpacing: 0.6 }}>PRO</Text>
-        </View>
-      ) : null}
-    </View>
-  );
-}
-
-/**
- * What the table is doing, in one pill.
- *
- * REPLACES the full-width Banner. The banner was a slab as wide as the board
- * carrying two words, and on a phone it cost more vertical space than the seat
- * card above it. The information did not shrink with it — this says strictly
- * more than the banner did, because connecting and reconnecting are now states
- * it can express rather than a separate row somewhere else.
- *
- * The dot is never the only signal. Every state ships a word, so the pill is
- * readable with no colour vision at all, and `accessibilityLiveRegion` is
- * carried over from Banner so the change is announced rather than merely drawn.
- */
-function StatusPill({
-  game, myColor, mine, spectator, phase, reconnecting, still, width,
-}: {
-  game: any; myColor: 'w' | 'b' | null; mine: boolean; spectator: boolean;
-  phase: string; reconnecting: boolean; still: boolean; width: number;
-}) {
-  const t = useType();
-  const s = statusOf(game, myColor, mine, spectator, phase, reconnecting);
-  const pulse = useSharedValue(0);
-
-  // Only the seat to move breathes, and only when the player has not asked the
-  // system for less motion.
-  const live = s.beat && !still;
-  useEffect(() => {
-    if (live) {
-      pulse.value = withRepeat(withTiming(1, { duration: 1000, easing: Easing.inOut(Easing.ease) }), -1, true);
-    } else {
-      cancelAnimation(pulse);
-      pulse.value = 0;
-    }
-    return () => cancelAnimation(pulse);
-  }, [live, pulse]);
-  const aDot = useAnimatedStyle(() => ({ opacity: 1 - pulse.value * 0.55 }));
-
-  return (
-    <View style={{ width, alignItems: 'center', gap: S[2] }}>
-      <View style={{ alignSelf: 'stretch', flexDirection: 'row', alignItems: 'center', gap: S[3] }}>
-        {/* The two rules the reference runs out to the edges. Decorative, and
-            hidden from a screen reader for exactly that reason. */}
-        <View accessibilityElementsHidden importantForAccessibility="no"
-          style={{ flex: 1, height: 1, backgroundColor: g(0.26) }} />
-        <View
-          accessibilityLiveRegion="polite"
-          accessibilityLabel={s.text}
-          style={{
-            flexDirection: 'row', alignItems: 'center', gap: S[2],
-            paddingVertical: S[2] + 2, paddingHorizontal: S[4],
-            borderRadius: R.pill, borderWidth: 1, borderColor: s.tone,
-            backgroundColor: alpha(s.tone, 0.14),
-            boxShadow: `0 8px 22px rgba(0,0,0,0.36), inset 0 1px 0 ${white(0.18)}`,
-          }}
-        >
-          <Animated.View
-            style={[{ width: 9, height: 9, borderRadius: 5, backgroundColor: s.tone }, aDot]}
-          />
-          <Text numberOfLines={1} style={{ color: CR.text, fontSize: t.md, fontWeight: '800' }}>{s.text}</Text>
-        </View>
-        <View accessibilityElementsHidden importantForAccessibility="no"
-          style={{ flex: 1, height: 1, backgroundColor: g(0.26) }} />
-      </View>
-      <Text
-        accessibilityElementsHidden
-        importantForAccessibility="no"
-        style={{ color: CR.muted, fontSize: 11.5, fontWeight: '500' }}
-      >
-        Good moves create great stories
-      </Text>
-    </View>
-  );
-}
-
-/**
- * The whole status vocabulary, in one place.
- *
- * Nothing here is invented: every branch is a state the socket already puts on
- * screen somewhere. `result` and `winner` come off the game frame, `check` off
- * the same frame the board reads, `phase` off the shared socket hook, and
- * `spectator` off the seat the server gave this client.
- */
-function statusOf(
-  game: any, myColor: 'w' | 'b' | null, mine: boolean,
-  spectator: boolean, phase: string, reconnecting: boolean,
-): { text: string; tone: string; beat?: boolean } {
-  if (game.result) {
-    const won = game.winner && game.winner === myColor;
-    return { text: resultText(game, myColor), tone: won ? CR.ok : game.winner ? CR.bad : CR.warn };
-  }
-  if (reconnecting) return { text: 'Reconnecting', tone: CR.warn, beat: true };
-  if (phase !== 'connected') return { text: 'Connecting', tone: CR.warn, beat: true };
-  if (spectator) return { text: 'Watching', tone: ACCENT.chess };
-  if (game.check) return { text: mine ? 'Check — your move' : 'Check', tone: CR.bad, beat: mine };
-  return mine
-    ? { text: 'Your move', tone: CR.line, beat: true }
-    : { text: 'Opponent’s move', tone: ACCENT.chess };
-}
-
-/**
- * Who is at this table.
- *
- * The seat cards above the board say who is playing and whose move it is; this
- * says what they have won, which side each is on, and how to get another person
- * here. It reads the SAME lobby roster the lobby screen renders — there is no
- * second player list to fall out of step with it.
- */
-function PlayersSheet({
-  visible, onClose, state, myColor, roomId,
-}: {
-  visible: boolean; onClose: () => void; state: GameState;
-  myColor: 'w' | 'b' | null; roomId: string;
-}) {
-  const t = useType();
-  const members = state.lobby?.members ?? [];
-
-  // A SIDE IS ONLY CLAIMED WHEN IT IS ACTUALLY DERIVABLE. The frame carries
-  // `color` for THIS client and nobody else, so the other seat's colour is an
-  // inference that holds for exactly two seated players and breaks the moment
-  // there are three. A roster that guesses is worse than one that says nothing.
-  const canSay = members.length === 2 && myColor != null;
-  const sideOf = (id: string): string | null => {
-    if (!canSay) return null;
-    const mineSide = myColor === 'w' ? 'White' : 'Black';
-    const theirs = myColor === 'w' ? 'Black' : 'White';
-    return id === state.you ? mineSide : theirs;
-  };
-
-  return (
-    <Sheet visible={visible} title="At this table" onClose={onClose}>
-      {members.length === 0 ? (
-        <Text style={{ color: CR.muted, fontSize: t.sm, lineHeight: 19 }}>
-          The table has not sent its seats yet.
-        </Text>
-      ) : members.map(m => (
-        <PlayerRow
-          key={m.vaultId}
-          name={m.name}
-          tag={m.vaultId === state.you ? 'you' : m.isBot ? 'bot' : undefined}
-          subtitle={
-            [sideOf(m.vaultId), typeof m.wins === 'number' ? `${m.wins} wins` : null]
-              .filter(Boolean).join('  ·  ') || undefined
-          }
-        />
-      ))}
-
-      {state.spectator ? (
-        <Text style={{ color: CR.muted, fontSize: t.sm, lineHeight: 19 }}>
-          You are watching this game, not playing it.
-        </Text>
-      ) : null}
-
-      {!!roomId && (
-        <Text style={{ color: CR.muted, fontSize: t.sm }} selectable>
-          Room code: <Text style={{ color: CR.gold2, fontWeight: '800' }}>{roomId}</Text>
-        </Text>
-      )}
-
-      <Btn
-        label="Invite a friend"
-        icon="link"
-        onPress={() => { void openInvite('chess', roomId); }}
-        disabled={!roomId}
-      />
-    </Sheet>
-  );
-}
-
-function Swatches({ value, onChange }: { value: ThemeName; onChange: (n: ThemeName) => void }) {
-  return (
-    <View style={{ flexDirection: 'row', gap: S[2], justifyContent: 'center', paddingVertical: S[2] }}>
-      {(Object.keys(THEMES) as ThemeName[]).map(n => (
-        <Pressable
-          key={n}
-          onPress={() => onChange(n)}
-          accessibilityRole="button"
-          accessibilityLabel={`${n} board`}
-          accessibilityState={{ selected: value === n }}
-          // 34dp is 10dp short of the 44dp floor this file uses elsewhere
-          // (Ludo.tsx's tokens). The row's own gap is 8dp, so a symmetric
-          // hitSlop of 5 would overlap the neighbour by 2dp either side —
-          // asymmetric instead: 5 top/bottom reaches 44 vertically, 4
-          // left/right reaches 42 horizontally with the gap untouched.
-          hitSlop={{ top: 5, bottom: 5, left: 4, right: 4 }}
-          style={{
-            width: 34, height: 34, borderRadius: R[1], overflow: 'hidden', flexDirection: 'row',
-            borderWidth: 2, borderColor: value === n ? CR.line : white(0.16),
-            // Every board theme is opaque now, so this backdrop is covered in
-            // all seven cases — it is kept because a translucent theme added
-            // later would otherwise preview against nothing. CR_LIT is the room
-            // as it actually composites, not CR.bg, which is the ground before
-            // the ambient wash and a colour no real pixel is.
-            backgroundColor: CR_LIT,
-          }}
-        >
-          <View style={{ flex: 1, backgroundColor: THEMES[n].light }} />
-          <View style={{ flex: 1, backgroundColor: THEMES[n].dark }} />
-        </Pressable>
-      ))}
-    </View>
-  );
-}
-
-function PromoPicker({
-  opts, color, onPick, onCancel, ink,
-}: {
-  opts: Move[]; color: 'w' | 'b'; onPick: (m: Move) => void; onCancel: () => void;
-  /** The board's ink. Without it the picker offers a BLACK queen while every
-   *  piece on the glass board behind it is ice — the exact mismatch
-   *  OutlinedGlyph's own comment warns is most obvious here. */
-  ink?: Ink;
-}) {
-  const seen = new Set<string>();
-  const choices = opts.filter(o => o.promo && !seen.has(o.promo) && seen.add(o.promo));
-  return (
-    // `accessible={false}`: the default would make this backdrop swallow its
-    // whole subtree into one unlabelled node, same defect as Sheet — the four
-    // "Promote to Q/R/B/N" buttons below would announce as nothing. Tapping
-    // the backdrop to cancel is a sighted-only convenience either way, so an
-    // explicit Cancel button carries that action for accessibility instead.
-    // In a Modal so hardware back cancels the promotion (onRequestClose) rather
-    // than reaching the hub's "Leave this table?" handler.
-    <Modal visible transparent animationType="fade" statusBarTranslucent onRequestClose={onCancel}>
-    <Pressable
-      onPress={onCancel}
-      accessible={false}
-      style={{ position: 'absolute', inset: 0, backgroundColor: 'rgba(3,12,9,.76)', alignItems: 'center', justifyContent: 'center' }}
-    >
-      <View style={{
-        flexDirection: 'row', alignItems: 'center', gap: S[3], padding: S[4], borderRadius: R[3],
-        backgroundColor: white(0.10), borderWidth: 1, borderColor: CR.lineSoft,
-        boxShadow: `0 20px 50px rgba(0,0,0,0.5), inset 0 1px 0 ${white(0.18)}`,
-      }}>
-        {choices.map(m => (
-          <Pressable key={m.promo} onPress={() => onPick(m)} accessibilityRole="button" accessibilityLabel={`Promote to ${PIECE_NAME[String(m.promo).toLowerCase()] ?? m.promo}`}>
-            <OutlinedGlyph t={m.promo as string} c={color} size={46} stroke={PIECE_STROKE} ink={ink} />
-          </Pressable>
-        ))}
-        {/* A bare Text in a Pressable is a ~16dp-tall target, and it is the only
-            AT-reachable way out of this picker — the backdrop tap is
-            sighted-only by design (see the comment above). */}
-        <Pressable
-          onPress={onCancel}
-          accessibilityRole="button"
-          accessibilityLabel="Cancel"
-          style={{ minHeight: 44, minWidth: 44, paddingHorizontal: S[2], alignItems: 'center', justifyContent: 'center' }}
-        >
-          <Text style={{ color: C.muted, fontSize: 13, fontWeight: '700' }}>Cancel</Text>
-        </Pressable>
-      </View>
-    </Pressable>
-    </Modal>
-  );
-}
-
-function Lobby({
-  state, events, onAddBot, onStart, botLevel, onBotLevel, voice, code,
-}: {
-  state: GameState; events: string[]; onAddBot: () => void; onStart: () => void;
-  botLevel: number; onBotLevel: (n: number) => void; voice: TableVoice; code: string;
-}) {
-  const t = useType();
-  const members = state.lobby?.members ?? [];
-  const host = state.lobby?.hostId === state.you;
-  // Offered once, in the lobby — before a move is ever required.
-  const rules = useFirstTimeRules('chess');
-  // The server can accept `addbot` and never seat one. The payload stays the
-  // caller's (chess sends a level); this only watches whether a seat appeared.
-  const bot = useAddBot(() => onAddBot(), members.length);
-  return (
-    <TableBackground bg={CR.bg} ambient={CR_AMBIENT} bokeh={CR_BOKEH} vignette={CR_VIGNETTE}>
-      <ScrollView contentContainerStyle={{ padding: S[4], gap: S[3] }}>
-        <Text style={{ color: CR.gold2, fontSize: t.xl, fontWeight: '800', letterSpacing: 0.4 }}>Chess</Text>
-        <Text style={{ color: CR.muted, fontSize: t.sm, lineHeight: 19 }}>
-          Every move is validated by the table, and your legal moves arrive from it — so the board you see is exactly the board your opponent sees.
-        </Text>
-        <Panel style={{ gap: S[2] }}>
-          {members.map(m => (
-            <PlayerRow
-              key={m.vaultId}
-              name={m.name}
-              tag={m.vaultId === state.you ? 'you' : m.isBot ? 'bot' : undefined}
-              subtitle={typeof m.wins === 'number' ? `${m.wins} wins` : undefined}
-            />
-          ))}
-          {members.length < 2 && (
-            <Text style={{ color: C.muted, fontSize: t.sm }}>Two players minimum — add a bot to start now.</Text>
-          )}
-        </Panel>
-        <View style={{ flexDirection: 'row', gap: S[2], alignItems: 'center' }}>
-          <Text style={{ flex: 1, color: C.muted, fontSize: t.sm }}>Bot strength</Text>
-          {[1, 2, 3].map(n => (
-            <Btn
-              key={n}
-              label={['Easy', 'Even', 'Hard'][n - 1]}
-              compact
-              kind={botLevel === n ? 'gold' : 'secondary'}
-              onPress={() => onBotLevel(n)}
-            />
-          ))}
-        </View>
-        {!!code && (
-          <Text style={{ color: C.muted, fontSize: t.sm }} selectable>
-            Room code: <Text style={{ color: CR.gold2, fontWeight: '800' }}>{code}</Text>
-          </Text>
-        )}
-        {/* Voice while you WAIT, not only once the game is running. A private
-            room is two people arriving at the same table; that is the moment
-            they want to talk. */}
-        <VoiceBar
-          phase={voice.phase}
-          error={voice.error}
-          canSpeak={voice.canSpeak}
-          muted={voice.muted}
-          participants={voice.participants}
-          onJoin={voice.join}
-          onLeave={voice.leave}
-          onToggleMute={voice.toggleMute}
-        />
-        <Btn label="How to play" icon="rules" onPress={rules.open} />
-        {/* Inviting belongs HERE, not only on the board. Chess had its invite
-            behind the first move — you could only ask someone to join a game
-            that had already started, which is the wrong moment and the reason
-            an empty chess lobby had no way out except a bot. */}
-        <Btn label="Invite a friend" icon="link" onPress={() => { void openInvite('chess', code); }} disabled={!code} />
-        <Btn label="Add a bot" icon="bot" onPress={() => bot.addBot()} />
-        {/* Seen on a device: the tap lands, no error comes back, and no bot
-            ever arrives — so "Start game" stays disabled forever and the
-            button is simply dead. There is no ack for `addbot`, so absence is
-            the only evidence we have; saying nothing is the real bug. */}
-        {bot.stalled && (
-          <Text style={{ color: CR.bad, fontSize: t.sm, lineHeight: 18 }}>{ADD_BOT_STALLED}</Text>
-        )}
-        <Btn label="Start game" kind="gold" onPress={onStart} disabled={!host || members.length < 2} />
-        {!!startBlockedReason(host, members.length) && (
-          <Text style={{ color: CR.muted, fontSize: t.sm, lineHeight: 18, textAlign: 'center' }}>{startBlockedReason(host, members.length)}</Text>
-        )}
-      </ScrollView>
-      <Toasts events={events} />
-      <RulesSheet game="chess" visible={rules.visible} onClose={rules.close} />
-    </TableBackground>
-  );
-}
-
-function Connecting({ phase, error, onRetry }: { phase: string; error: string | null; onRetry: () => void }) {
-  const t = useType();
-  return (
-    <TableBackground bg={CR.bg} ambient={CR_AMBIENT} bokeh={CR_BOKEH} vignette={CR_VIGNETTE} style={{ alignItems: 'center', justifyContent: 'center', padding: S[5], gap: S[3] }}>
-      <Text style={{ fontSize: 46 }}>♚</Text>
-      <Text style={{ color: C.text, fontSize: t.lg, fontWeight: '800' }}>
-        {error ? 'Could not reach the table' : 'Connecting…'}
-      </Text>
-      {error ? <Text style={{ color: C.muted, fontSize: t.sm, textAlign: 'center' }}>{error}</Text> : null}
-      {error ? <Btn label="Try again" kind="gold" onPress={onRetry} /> : null}
-    </TableBackground>
-  );
-}
-
-/* ── helpers ────────────────────────────────────────────────────────── */
-
-/** What each side has lost, plus the material edge. Presentation only. */
-function takenBy(board: Piece[]): { w: string[]; b: string[]; edge: number } {
-  const alive: Record<'w' | 'b', Record<string, number>> = { w: {}, b: {} };
-  for (const p of board) if (p) alive[p.c][p.t] = (alive[p.c][p.t] ?? 0) + 1;
-  const out = { w: [] as string[], b: [] as string[], edge: 0 };
-  for (const side of ['w', 'b'] as const) {
-    for (const letter of Object.keys(ARMY)) {
-      const gone = ARMY[letter] - (alive[side][letter] ?? 0);
-      for (let i = 0; i < gone; i++) out[side].push(GLYPH[letter]);
-      out.edge += (side === 'b' ? 1 : -1) * gone * VALUE[letter];
-    }
-  }
-  return out;
-}
-
-function clockFor(state: GameState, color: 'w' | 'b'): string | null {
-  const c = state.raw?.clock;
-  const ms = c && typeof c === 'object' ? c[color] : null;
-  if (typeof ms !== 'number' || !isFinite(ms)) return null;
-  const total = Math.max(0, Math.round(ms / 1000));
-  return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, '0')}`;
-}
-
-/** The name this client plays under. Falls back to a label, never to an id. */
-function youName(state: GameState): string {
-  const me = (state.lobby?.members ?? []).find(m => m.vaultId === state.you);
-  return me?.name ?? 'You';
-}
-
-/** Whether the other seat is a bot, from the roster the server sent. */
-function opponentIsBot(state: GameState): boolean {
-  const them = (state.lobby?.members ?? []).find(m => m.vaultId !== state.you);
-  return !!them?.isBot;
-}
-
-/**
- * What a seat is doing, for the card's second line.
- *
- * Derived from the same frame the board renders — there is no separate seat
- * state to fall out of step with it.
- */
-function roleOf(state: GameState, game: any, isYou: boolean, mine: boolean): string {
-  if (game?.result) return 'Game over';
-  if (isYou) {
-    if (state.spectator) return 'Watching';
-    return mine ? (game?.check ? 'You are in check' : 'Play your move') : 'Waiting';
-  }
-  const bot = opponentIsBot(state);
-  if (!mine) return bot ? 'Thinking…' : 'To move';
-  return bot ? 'AI Challenger' : 'Waiting';
-}
-
-function opponentName(state: GameState): string {
-  const them = (state.lobby?.members ?? []).find(m => m.vaultId !== state.you);
-  return them?.name ?? 'Opponent';
-}
-
-function resultText(game: any, myColor: 'w' | 'b' | null): string {
-  if (game.result === 'draw') return 'Draw';
-  if (game.winner) return `${game.winner === myColor ? 'You win' : 'You lose'}`;
-  return String(game.result ?? 'Game over');
-}
-
-function pairUp(history: string[]): string {
-  const out: string[] = [];
-  for (let i = 0; i < history.length; i += 2) {
-    out.push(`${i / 2 + 1}. ${history[i] ?? ''} ${history[i + 1] ?? ''}`.trimEnd());
-  }
-  return out.join('   ');
-}
-
-/**
- * What a screen reader says about a square.
- *
- * TAKES THE REAL SQUARE, NOT THE DRAWN POSITION. It used to take the display
- * index, so on a flipped board — every game the player has black — each square
- * was announced with its mirrored name: the pawn on e4 read as "d5", and a
- * player using a screen reader was told a position that does not exist. The
- * VISIBLE coordinates were always right (they undo the flip explicitly), which
- * is why this survived: it is invisible to anyone looking at the board.
- */
-function squareLabel(sq: number, piece: Piece, target: boolean, capture: boolean): string {
-  const name = `${FILES[sq & 7]}${8 - (sq >> 3)}`;
-  const what = piece ? `${piece.c === 'w' ? 'white' : 'black'} ${PIECE_NAME[piece.t] ?? piece.t}` : 'empty';
-  const hint = capture ? ', can capture' : target ? ', can move here' : '';
-  return `${name}, ${what}${hint}`;
 }
