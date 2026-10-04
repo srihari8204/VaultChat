@@ -2,7 +2,7 @@
 
 import React, { useCallback, useMemo, useState } from 'react';
 import { useFinanceTheme } from '../../../components/finance/useFinanceTheme';
-import { View, Text, ScrollView, StyleSheet, TouchableOpacity } from 'react-native';
+import { View, Text, FlatList, StyleSheet, TouchableOpacity } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -63,15 +63,20 @@ export default function ChittiList() {
           value={tab} onChange={setTab}
         />
       </View>
-      <ScrollView contentContainerStyle={s.body} showsVerticalScrollIndicator={false}>
-        {status === 'loading' ? (
+      <FlatList
+        data={status === 'ready' ? shown : []}
+        keyExtractor={(g) => g.id}
+        contentContainerStyle={s.body}
+        showsVerticalScrollIndicator={false}
+        ListEmptyComponent={status === 'loading' ? (
           <LoadingState label="Loading Lucky Draw groups" />
         ) : status === 'error' ? (
           <ErrorState title="Could not load groups" sub="Your Lucky Draw groups could not be read. Nothing has been lost." onRetry={reload} />
-        ) : shown.length === 0 ? (
+        ) : (
           <EmptyState icon="people-outline" title={`No ${tab} groups`} sub="Create a Lucky Draw group to track members and collections." />
-        ) : shown.map(g => (
-          <TouchableOpacity key={g.id} style={s.card} activeOpacity={0.85}
+        )}
+        renderItem={({ item: g }) => (
+          <TouchableOpacity style={s.card} activeOpacity={0.85}
             accessibilityRole="button"
             accessibilityLabel={`${g.name}, ${g.members} members, ${inrShort(g.installment)} a month, ${Math.round(progress[g.id] ?? 0)}% collected. Open group`}
             onPress={() => router.push({ pathname: '/finance/chitti/[id]', params: { id: g.id } })}>
@@ -83,9 +88,9 @@ export default function ChittiList() {
             </View>
             <Ionicons name="chevron-forward" size={18} color={FIN.faint} />
           </TouchableOpacity>
-        ))}
-        <View style={{ height: 90 }} />
-      </ScrollView>
+        )}
+        ListFooterComponent={<View style={{ height: 90 }} />}
+      />
       <TouchableOpacity style={[s.fab, { bottom: insets.bottom + 20 }]} activeOpacity={0.9} onPress={() => router.push('/finance/chitti/new')}
         accessibilityRole="button" accessibilityLabel="New Lucky Draw group">
         <Ionicons name="add" size={22} color={FIN.onBrand} />

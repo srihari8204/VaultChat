@@ -2,12 +2,14 @@
 
 import React, { useCallback, useMemo, useState } from 'react';
 import { useFinanceTheme } from '../../components/finance/useFinanceTheme';
-import { View, Text, ScrollView, StyleSheet, TouchableOpacity, Alert } from 'react-native';
+import { View, Text, FlatList, StyleSheet, TouchableOpacity, Alert } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { TABULAR, FIN_SHADOW, type FinancePalette } from '../../constants/financeTheme';
 import { FinHeader, Segment, Pill, EmptyState, LoadingState, ErrorState } from '../../components/finance/ui';
 import { useLoadStatus } from '../../components/finance/useLoad';
+import { Sheet } from '../../components/ui';
+import { compoundingWord } from '../../lib/finance/compounding';
 import { useMe } from '../../components/finance/useMe';
 import { formatINR, fmtDate, PERIOD_LABEL } from '../../utils/financeFormat';
 import { listLedger } from '../../db/ledger';
@@ -40,10 +42,12 @@ export default function Saved() {
   const me = useMe();
   const [tab, setTab] = useState<Tab>('all');
   const [items, setItems] = useState<SavedItem[]>([]);
+  // The interest calculation whose details sheet is open.
+  const [viewing, setViewing] = useState<InterestRow | null>(null);
 
   const { status, begin, done, fail } = useLoadStatus();
-  // Interest calculations have no detail screen, so a tap shows the saved
-  // figures with a Delete; Delete then asks once more before removing it.
+  // Interest calculations have no detail screen, so a tap opens a sheet with
+  // the saved figures and a Delete; Delete then asks once more.
   const reloadRef = React.useRef<() => void>(() => {});
   const deleteCalc = useCallback((r: InterestRow) => Alert.alert('Delete this calculation?',
     'It is removed from Saved & History. This cannot be undone.', [
@@ -53,12 +57,7 @@ export default function Saved() {
           .catch((e: any) => Alert.alert('Could not delete', e?.message ?? 'Try again.'));
       } },
     ]), []);
-  const viewCalc = useCallback((r: InterestRow) => Alert.alert(
-    `${r.type === 'simple' ? 'Simple' : 'Compound'} interest`,
-    [`Principal ${formatINR(r.principal)}`, rateText(r), `${r.time_years} years`,
-     `Interest ${formatINR(r.interest)}`, `Total ${formatINR(r.total_amount)}`, `Saved ${fmtDate(r.created_at)}`].join('\n'),
-    [{ text: 'Close', style: 'cancel' }, { text: 'Delete', style: 'destructive', onPress: () => deleteCalc(r) }],
-  ), [deleteCalc]);
+  const viewCalc = useCallback((r: InterestRow) => setViewing(r), []);
 
   const reload = useCallback(() => {
     if (!me) return;
@@ -106,17 +105,22 @@ export default function Saved() {
           value={tab} onChange={setTab} small
         />
       </View>
-      <ScrollView contentContainerStyle={s.body} showsVerticalScrollIndicator={false}>
-        {status === 'loading' ? (
+      <FlatList
+        data={status === 'ready' ? shown : []}
+        keyExtractor={(item) => `${item.kind}-${item.id}`}
+        contentContainerStyle={s.body}
+        showsVerticalScrollIndicator={false}
+        ListEmptyComponent={status === 'loading' ? (
           <LoadingState label="Loading your history" />
         ) : status === 'error' ? (
           <ErrorState title="Could not load history" sub="Your saved items could not be read. Nothing has been lost." onRetry={reload} />
-        ) : shown.length === 0 ? (
+        ) : (
           <EmptyState icon="bookmark-outline" title="Nothing saved yet" sub="Ledgers, interest calculations and Lucky Draw groups you create show up here." />
-        ) : shown.map(item => {
+        )}
+        renderItem={({ item }) => {
           const m = KIND_META[item.kind];
           return (
-            <TouchableOpacity key={`${item.kind}-${item.id}`} style={s.card} activeOpacity={0.85} onPress={item.onPress}
+            <TouchableOpacity style={s.card} activeOpacity={0.85} onPress={item.onPress}
               accessibilityRole="button"
               accessibilityLabel={`${m.label}: ${item.title}, ${formatINR(item.amount)}. ${item.sub}. ${item.kind === 'interest' ? 'Show details' : 'Open'}`}
               accessibilityActions={item.onDelete ? [{ name: 'delete', label: 'Delete' }] : undefined}
@@ -132,9 +136,21 @@ export default function Saved() {
               <Ionicons name="chevron-forward" size={16} color={FIN.faint} style={{ marginLeft: 6 }} />
             </TouchableOpacity>
           );
-        })}
-        <View style={{ height: 30 }} />
-      </ScrollView>
+        }}
+        ListFooterComponent={<View style={{ height: 30 }} />}
+      />
+      <Sheet
+        visible={!!viewing}
+        title={viewing ? `${viewing.type === 'simple' ? 'Simple' : 'Compound'} interest` : undefined}
+        message={viewing ? [
+          `Principal ${formatINR(viewing.principal)}`, rateText(viewing),
+          ...(viewing.type === 'compound' && viewing.frequency ? [`Compounded ${compoundingWord(viewing.frequency)}`] : []),
+          `${viewing.time_years} years`, `Interest ${formatINR(viewing.interest)}`,
+          `Total ${formatINR(viewing.total_amount)}`, `Saved ${fmtDate(viewing.created_at)}`,
+        ].join('\n') : undefined}
+        actions={viewing ? [{ label: 'Delete', icon: 'trash-outline', destructive: true, onPress: () => deleteCalc(viewing) }] : []}
+        onClose={() => setViewing(null)}
+      />
     </View>
   );
 }

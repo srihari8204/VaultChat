@@ -4,6 +4,7 @@ import React, { useCallback, useRef, useState } from 'react';
 import { useFinanceTheme } from '../../components/finance/useFinanceTheme';
 import { View, Text, ScrollView, StyleSheet, Alert } from 'react-native';
 import { useFocusEffect } from 'expo-router';
+import * as FileSystem from 'expo-file-system/legacy';
 import { type FinancePalette } from '../../constants/financeTheme';
 import { FinHeader, Segment, StatTile, Card, RowLine, Btn, EmptyState, LoadingState, ErrorState } from '../../components/finance/ui';
 import { useLoadStatus } from '../../components/finance/useLoad';
@@ -100,8 +101,12 @@ export default function Reports() {
     if (r.ledgers.length === 0) return Alert.alert('Nothing to export', `No ledgers were created ${label.toLowerCase()}.`);
     const headers = ['Name', 'Direction', 'Principal', 'Remaining', 'Status', 'Rate', 'Period', 'Created'];
     const data = r.ledgers.map(l => [l.name, l.direction, l.principal, l.remaining, l.status, l.rate, l.period, fmtDate(l.created_at)]);
-    try { await exportExcel(`vault-finance-${period}`, headers, data); }
-    catch (e: any) { Alert.alert('Export failed', e?.message ?? 'Try again'); }
+    try {
+      const uri = await exportExcel(`vault-finance-${period}`, headers, data);
+      // Names and amounts: once the share sheet has handed the file on, the
+      // cache copy goes, as the PDF export and app/finance/io.tsx already do.
+      if (uri) await FileSystem.deleteAsync(uri, { idempotent: true }).catch(() => {});
+    } catch (e: any) { Alert.alert('Export failed', e?.message ?? 'Try again'); }
   };
 
   return (

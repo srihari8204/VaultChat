@@ -14,7 +14,8 @@ import { fmtDateTime } from '../../utils/financeFormat';
 import { listLedger, type LedgerEntry } from '../../db/ledger';
 import { listReminders, type Reminder } from '../../db/reminders';
 import { listGroups, type ChittiGroup } from '../../db/chitti';
-import { auctionDate, occurrencesBetween } from '../../utils/financeRules';
+import { auctionDate } from '../../utils/financeRules';
+import { reminderOccurrences } from '../../lib/finance/reminderSchedule';
 
 /** `key` is stable across reloads; `ref` is what tapping the event opens. */
 interface Ev {
@@ -61,7 +62,8 @@ export default function FinanceCalendar() {
     }
     for (const r of data.reminders) {
       if (r.status !== 'active') continue;
-      for (const at of occurrencesBetween(r.freq, r.next_at, from, to)) {
+      // Counted from the series' anchor, so earlier months show it too.
+      for (const at of reminderOccurrences(r, from, to)) {
         evs.push({ key: `r-${r.id}-${at}`, at, label: r.title, tone: 'warn', ref: { kind: 'reminder', id: r.id } });
       }
     }
@@ -79,7 +81,7 @@ export default function FinanceCalendar() {
   const openEvent = (e: Ev) => {
     if (e.ref.kind === 'ledger') router.push({ pathname: '/finance/ledger/[id]', params: { id: e.ref.id } });
     else if (e.ref.kind === 'chitti') router.push({ pathname: '/finance/chitti/[id]', params: { id: e.ref.id } });
-    else router.push('/finance/reminders');
+    else router.push({ pathname: '/finance/reminders', params: { focus: e.ref.id } });
   };
 
   const byDay = useMemo(() => {
@@ -119,7 +121,7 @@ export default function FinanceCalendar() {
         )}
         <View style={s.monthHead}>
           <IconBtn icon="chevron-back" label="Previous month" onPress={() => step(-1)} />
-          <Text style={s.monthTitle}>{MON[monthIdx]} {year}</Text>
+          <Text style={s.monthTitle} accessibilityRole="header">{MON[monthIdx]} {year}</Text>
           <IconBtn icon="chevron-forward" label="Next month" onPress={() => step(1)} />
         </View>
 
@@ -150,7 +152,7 @@ export default function FinanceCalendar() {
         ) : dayEvents.map(e => (
           <TouchableOpacity key={e.key} style={s.evRow} activeOpacity={0.85} onPress={() => openEvent(e)}
             accessibilityRole="button"
-            accessibilityLabel={`${e.label}, ${fmtDateTime(e.at)}. Open ${e.ref.kind === 'reminder' ? 'reminders' : e.ref.kind === 'chitti' ? 'group' : 'ledger'}`}>
+            accessibilityLabel={`${e.label}, ${fmtDateTime(e.at)}. Open ${e.ref.kind === 'reminder' ? 'reminder' : e.ref.kind === 'chitti' ? 'group' : 'ledger'}`}>
             <View style={[s.evBar, { backgroundColor: toneColor(e.tone) }]} />
             <View style={{ flex: 1 }}>
               <Text style={s.evLabel}>{e.label}</Text>

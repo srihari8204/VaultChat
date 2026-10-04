@@ -19,6 +19,7 @@
 
 import React, { useState } from 'react';
 import { useFinanceTheme } from './useFinanceTheme';
+import { HERO_INK } from './heroInk';
 import { useTheme } from '../../lib/theme';
 import {
   View, Text, TextInput, TouchableOpacity, Pressable, StyleSheet, StatusBar,
@@ -631,7 +632,7 @@ return StyleSheet.create({
   hero: { borderRadius: FIN_RADIUS.lg, padding: 20, ...FIN_SHADOW.brand },
   heroRow: { flexDirection: 'row', alignItems: 'center' },
   heroStack: { flexDirection: 'column', gap: 12 },
-  heroDivider: { width: 1, alignSelf: 'stretch', backgroundColor: 'rgba(255,255,255,0.25)', marginHorizontal: 14 },
+  heroDivider: { width: 1, alignSelf: 'stretch', backgroundColor: HERO_INK.rule, marginHorizontal: 14 },
 
   pill: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: FIN_RADIUS.pill },
   pillTxt: { fontSize: 10.5, fontWeight: '800', letterSpacing: 0.3 },

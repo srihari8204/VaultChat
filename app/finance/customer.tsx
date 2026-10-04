@@ -5,6 +5,7 @@
 
 import React, { useCallback, useMemo, useState } from 'react';
 import { useFinanceTheme } from '../../components/finance/useFinanceTheme';
+import { HERO_INK } from '../../components/finance/heroInk';
 import { View, Text, ScrollView, StyleSheet, TouchableOpacity } from 'react-native';
 import { useLocalSearchParams, useRouter, useFocusEffect } from 'expo-router';
 import { financeStatusColors, TABULAR, FIN_SHADOW, type FinancePalette } from '../../constants/financeTheme';
@@ -53,6 +54,20 @@ export default function CustomerProfile() {
   }, [rows]);
 
   const mobile = mobileParam || (rows.find(r => r.mobile)?.mobile ?? null);
+  // Matched by mobile, rows can carry other spellings of the name ("Ramesh K");
+  // the header says so instead of showing only the one it was opened with.
+  const aliases = useMemo(() => {
+    const seen = new Set([String(name ?? '').trim().toLowerCase()]);
+    const out: string[] = [];
+    for (const r of rows) {
+      const k = r.name.trim().toLowerCase();
+      if (!seen.has(k)) { seen.add(k); out.push(r.name.trim()); }
+    }
+    return out;
+  }, [rows, name]);
+  // The net, said as words: "-₹12k" read as a minus sign is easy to miss.
+  const net = sumRupees([totals.owedToYou, -totals.youOwe]);
+  const netLabel = net > 0 ? 'NET · THEY OWE YOU' : net < 0 ? 'NET · YOU OWE THEM' : 'NET · SETTLED UP';
   const ready = status === 'ready';
 
   // Without a name there is nothing to look up: reload never starts, and the
@@ -75,8 +90,11 @@ export default function CustomerProfile() {
         <View style={s.head}>
           <View style={s.avatar}><Text style={s.avatarTxt}>{initialOf(String(name ?? ''))}</Text></View>
           <View style={{ flex: 1 }}>
-            <Text numberOfLines={1} style={s.name}>{name}</Text>
+            <Text numberOfLines={1} style={s.name} accessibilityRole="header">{name}</Text>
             {mobile ? <Text style={s.mobile}>{mobile}</Text> : null}
+            {aliases.length > 0 && (
+              <Text style={s.mobile} numberOfLines={2}>Also recorded as {aliases.join(', ')}</Text>
+            )}
           </View>
         </View>
 
@@ -84,8 +102,8 @@ export default function CustomerProfile() {
             failed read would be a figure, not a placeholder. */}
         {ready && (<>
         <HeroCard>
-          <Text style={s.heroLabel}>NET POSITION · OPEN BALANCES</Text>
-          <Text style={s.heroVal}>{inrShort(sumRupees([totals.owedToYou, -totals.youOwe]))}</Text>
+          <Text style={s.heroLabel}>{netLabel} · OPEN BALANCES</Text>
+          <Text style={s.heroVal}>{inrShort(Math.abs(net))}</Text>
           <View style={s.heroFoot}>
             <Text style={s.heroFootTxt}>Owed to you {inrShort(totals.owedToYou)}</Text>
             <Text style={s.heroFootTxt}>You owe {inrShort(totals.youOwe)}</Text>
@@ -141,11 +159,11 @@ const makeStyles = (FIN: FinancePalette) => StyleSheet.create({
   avatarTxt: { color: FIN.brandDeep, fontSize: 22, fontWeight: '800' },
   name: { color: FIN.text, fontSize: 20, fontWeight: '800' },
   mobile: { color: FIN.sub, fontSize: 13, marginTop: 2 },
-  // Fixed white on the always-dark FIN_HERO gradient (no scheme token applies).
-  heroLabel: { color: 'rgba(255,255,255,0.85)', fontSize: 10.5, fontWeight: '700', letterSpacing: 0.8 },
-  heroVal: { color: '#fff', fontSize: 28, fontWeight: '800', marginTop: 6, ...TABULAR },
-  heroFoot: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, justifyContent: 'space-between', marginTop: 12, paddingTop: 12, borderTopWidth: 1, borderTopColor: 'rgba(255,255,255,0.2)' },
-  heroFootTxt: { color: 'rgba(255,255,255,0.9)', fontSize: 12, fontWeight: '600' },
+  // Hero ink: the FIN_HERO gradient is dark in both schemes (components/finance/heroInk).
+  heroLabel: { color: HERO_INK.label, fontSize: 10.5, fontWeight: '700', letterSpacing: 0.8 },
+  heroVal: { color: HERO_INK.strong, fontSize: 28, fontWeight: '800', marginTop: 6, ...TABULAR },
+  heroFoot: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, justifyContent: 'space-between', marginTop: 12, paddingTop: 12, borderTopWidth: 1, borderTopColor: HERO_INK.rule },
+  heroFootTxt: { color: HERO_INK.soft, fontSize: 12, fontWeight: '600' },
   tileRow: { marginTop: 12 },
   section: { color: FIN.text, fontSize: 16, fontWeight: '800', marginTop: 20, marginBottom: 12 },
   card: { flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: FIN.card, borderRadius: 12, padding: 13, marginBottom: 9, borderWidth: 1, borderColor: FIN.glassEdge, ...FIN_SHADOW.rest },

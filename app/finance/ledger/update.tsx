@@ -62,11 +62,22 @@ export default function UpdateAmount() {
       : rem > e.remaining
         ? `The new remaining, ${formatINR(rem)}, is more than the current ${formatINR(e.remaining)}.`
         : null;
+    // Settling is final for the ledger (it moves to Completed), so it is said
+    // out loud rather than inferred from a 0 in the box.
+    const settles = !odd && rem === 0 && e.remaining > 0;
     if (odd) {
       const go = await new Promise<boolean>((resolve) => Alert.alert('Check the amounts', `${odd} Save anyway?`, [
         { text: 'Go back', style: 'cancel', onPress: () => resolve(false) },
         { text: 'Save', onPress: () => resolve(true) },
       ], { cancelable: true, onDismiss: () => resolve(false) }));
+      if (!go) return;
+    }
+    if (settles) {
+      const go = await new Promise<boolean>((resolve) => Alert.alert('Settle this ledger?',
+        `Nothing will remain on ${e.name}'s ledger, so it is marked Completed.`, [
+          { text: 'Go back', style: 'cancel', onPress: () => resolve(false) },
+          { text: 'Settle', onPress: () => resolve(true) },
+        ], { cancelable: true, onDismiss: () => resolve(false) }));
       if (!go) return;
     }
     try {
@@ -81,7 +92,7 @@ export default function UpdateAmount() {
       <KeyboardSafe style={{ flex: 1 }} >
         <ScrollView contentContainerStyle={s.body} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
           <Card>
-            <Text numberOfLines={1} style={s.who}>{e.name}</Text>
+            <Text numberOfLines={1} style={s.who} accessibilityRole="header">{e.name}</Text>
             <RowLine k="Principal" v={formatINR(e.principal)} />
             <RowLine k="Current remaining" v={formatINR(e.remaining)} bold tone={e.remaining > 0 ? 'warn' : 'good'} />
             <RowLine k="Last updated" v={fmtDateTime(e.last_updated)} />

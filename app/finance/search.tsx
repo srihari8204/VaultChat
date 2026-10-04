@@ -1,9 +1,10 @@
 // app/finance/search.tsx — universal finance search across ledgers & chitti.
 // Matches on name, mobile/phone (ledgers and Lucky Draw members) and amount.
 
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useFinanceTheme } from '../../components/finance/useFinanceTheme';
-import { View, Text, ScrollView, StyleSheet, TextInput, TouchableOpacity } from 'react-native';
+import { View, Text, ScrollView, StyleSheet, TextInput, TouchableOpacity, AccessibilityInfo } from 'react-native';
+import { KeyboardSafe } from '../../components/ui';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { financeStatusColors, TABULAR, FIN_SHADOW, type FinancePalette } from '../../constants/financeTheme';
@@ -14,6 +15,11 @@ import { formatINR, inrShort, num } from '../../utils/financeFormat';
 import { listLedger, type LedgerEntry } from '../../db/ledger';
 import { listGroups, listAllMembers, type ChittiGroup, type ChittiMember } from '../../db/chitti';
 import { amountMatches } from '../../utils/financeRules';
+import { mobileMatches } from '../../lib/finance/searchQuery';
+
+/** At most this many of each kind are listed; the screen says when it cut. */
+const LEDGER_CAP = 40;
+const GROUP_CAP = 20;
 
 export default function FinanceSearch() {
   const FIN = useFinanceTheme();
@@ -47,40 +53,54 @@ export default function FinanceSearch() {
   const amount = num(q.replace(/[₹\s]/g, ''));
   const hasAmount = Number.isFinite(amount) && amount > 0;
 
-  const matchedLedgers = useMemo(() => {
+  // All matches; the lists below show the first LEDGER_CAP / GROUP_CAP.
+  const allLedgers = useMemo(() => {
     if (!query) return [];
     return ledgers.filter(l =>
       l.name.toLowerCase().includes(query) ||
-      (l.mobile ?? '').toLowerCase().includes(query) ||
+      // "+91 98765 43210" finds the stored 9876543210 (lib/finance/searchQuery).
+      mobileMatches(l.mobile, q) ||
       // Exact, or the rupee digits start with the query (utils/financeRules).
       // `principal >= amount` matched every bigger loan, so a 5-digit mobile
       // prefix listed nearly the whole book.
       (hasAmount && amountMatches(amount, l.principal)),
-    ).slice(0, 40);
-  }, [ledgers, query, amount, hasAmount]);
+    );
+  }, [ledgers, query, q, amount, hasAmount]);
+  const matchedLedgers = useMemo(() => allLedgers.slice(0, LEDGER_CAP), [allLedgers]);
 
   // Members are matched by name or phone; a hit shows their group.
   const memberHits = useMemo(() => {
     if (!query) return new Map<string, ChittiMember>();
     const hits = new Map<string, ChittiMember>();
     for (const m of members) {
-      if (!hits.has(m.group_id) && (m.name.toLowerCase().includes(query) || (m.phone ?? '').includes(query))) hits.set(m.group_id, m);
+      if (!hits.has(m.group_id) && (m.name.toLowerCase().includes(query) || mobileMatches(m.phone, q))) hits.set(m.group_id, m);
     }
     return hits;
-  }, [members, query]);
+  }, [members, query, q]);
 
-  const matchedGroups = useMemo(() => {
+  const allGroups = useMemo(() => {
     if (!query) return [];
     return groups.filter(g =>
       g.name.toLowerCase().includes(query) ||
       (g.foreman ?? '').toLowerCase().includes(query) ||
       memberHits.has(g.id) ||
       (hasAmount && (amountMatches(amount, g.chit_value) || amountMatches(amount, g.installment))),
-    ).slice(0, 20);
+    );
   }, [groups, query, amount, hasAmount, memberHits]);
+  const matchedGroups = useMemo(() => allGroups.slice(0, GROUP_CAP), [allGroups]);
 
   const ready = status === 'ready';
   const empty = ready && query.length > 0 && matchedLedgers.length === 0 && matchedGroups.length === 0;
+
+  // Screen-reader users hear how many results a query found, once typing
+  // pauses (the list itself is silent while it changes).
+  const total = allLedgers.length + allGroups.length;
+  useEffect(() => {
+    if (!ready || !query) return;
+    const t = setTimeout(() => AccessibilityInfo.announceForAccessibility(
+      total === 0 ? 'No matches' : `${total} match${total === 1 ? '' : 'es'}`), 700);
+    return () => clearTimeout(t);
+  }, [ready, query, total]);
 
   return (
     <View style={s.screen}>
@@ -97,6 +117,7 @@ export default function FinanceSearch() {
         </View>
       </View>
 
+      <KeyboardSafe>
       <ScrollView contentContainerStyle={s.body} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
         {query.length === 0 && <EmptyState icon="search-outline" title="Search your finances" sub="Find ledgers and Lucky Draw groups by name, mobile number or amount." />}
         {status === 'loading' && query.length > 0 && <LoadingState label="Reading your finance data" />}
@@ -105,7 +126,8 @@ export default function FinanceSearch() {
         )}
         {empty && <EmptyState icon="sad-outline" title="No matches" sub={`Nothing found for “${q}”.`} />}
 
-        {matchedLedgers.length > 0 && <Text style={s.section}>Ledgers · {matchedLedgers.length}</Text>}
+        {matchedLedgers.length > 0 && <Text style={s.section} accessibilityRole="header">Ledgers · {allLedgers.length}</Text>}
+        {allLedgers.length > LEDGER_CAP && <Text style={s.capped}>Showing the first {LEDGER_CAP} of {allLedgers.length}. Type more to narrow the search.</Text>}
         {matchedLedgers.map(e => {
           const sc = STATUS_COLORS[e.status];
           return (
@@ -126,7 +148,8 @@ export default function FinanceSearch() {
           );
         })}
 
-        {matchedGroups.length > 0 && <Text style={s.section}>Lucky Draw groups · {matchedGroups.length}</Text>}
+        {matchedGroups.length > 0 && <Text style={s.section} accessibilityRole="header">Lucky Draw groups · {allGroups.length}</Text>}
+        {allGroups.length > GROUP_CAP && <Text style={s.capped}>Showing the first {GROUP_CAP} of {allGroups.length}. Type more to narrow the search.</Text>}
         {matchedGroups.map(g => {
           const hit = memberHits.get(g.id);
           return (
@@ -147,6 +170,7 @@ export default function FinanceSearch() {
         })}
         <View style={{ height: 30 }} />
       </ScrollView>
+      </KeyboardSafe>
     </View>
   );
 }
@@ -160,6 +184,7 @@ const makeStyles = (FIN: FinancePalette) => StyleSheet.create({
   input: { flex: 1, paddingVertical: 12, fontSize: 15, color: FIN.text },
   body: { padding: 16, paddingTop: 8, alignSelf: 'center', width: '100%', maxWidth: FIN.contentMax },
   section: { color: FIN.text, fontSize: 14, fontWeight: '800', marginTop: 12, marginBottom: 10 },
+  capped: { color: FIN.sub, fontSize: 12, marginTop: -4, marginBottom: 10 },
   card: { flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: FIN.card, borderRadius: 12, padding: 13, marginBottom: 9, borderWidth: 1, borderColor: FIN.glassEdge, ...FIN_SHADOW.rest },
   dot: { width: 9, height: 9, borderRadius: 5 },
   title: { color: FIN.text, fontSize: 14.5, fontWeight: '700' },

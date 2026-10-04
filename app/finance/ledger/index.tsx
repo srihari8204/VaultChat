@@ -3,7 +3,7 @@
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useFinanceTheme } from '../../../components/finance/useFinanceTheme';
-import { View, Text, ScrollView, StyleSheet, TouchableOpacity, Animated, Alert } from 'react-native';
+import { View, Text, FlatList, StyleSheet, TouchableOpacity, Animated, Alert, AccessibilityInfo, Platform } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -32,11 +32,19 @@ export default function LedgerList() {
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const snack = useRef(new Animated.Value(0)).current;
 
+  const pendingRef = useRef<LedgerEntry | null>(null);
+  pendingRef.current = pendingDelete;
+
   const { status, begin, done, fail } = useLoadStatus();
   const reload = useCallback(() => {
     if (!me) return;
     begin();
-    listLedger(me.id).then(r => { setRows(r); done(); }).catch(fail);
+    // The row whose delete is still in its undo window is not in the book as
+    // far as the user knows: opening another ledger and coming back used to
+    // show it again under a snackbar saying "Ledger deleted".
+    listLedger(me.id)
+      .then(r => { const p = pendingRef.current; setRows(p ? r.filter(x => x.id !== p.id) : r); done(); })
+      .catch(fail);
   }, [me, begin, done, fail]);
   useFocusEffect(reload);
 
@@ -58,14 +66,14 @@ export default function LedgerList() {
     setPendingDelete(e);
     Animated.timing(snack, { toValue: 1, duration: 180, useNativeDriver: true }).start();
     timer.current = setTimeout(() => finalizeDelete(e.id), 30000);
+    // accessibilityLiveRegion on the snackbar is Android-only; iOS hears it here.
+    if (Platform.OS === 'ios') AccessibilityInfo.announceForAccessibility(`${e.name} deleted. Undo is available for 30 seconds.`);
   };
 
   // FLUSH ON THE WAY OUT. The 30s timer dies with the screen, so leaving inside
   // the window abandoned a delete the snackbar had already reported as done —
   // the row reappeared on the next visit. A pending delete is a decision the
   // user already made; unmounting is not an undo.
-  const pendingRef = useRef<LedgerEntry | null>(null);
-  pendingRef.current = pendingDelete;
   useEffect(() => () => {
     if (timer.current) clearTimeout(timer.current);
     const p = pendingRef.current;
@@ -86,6 +94,8 @@ export default function LedgerList() {
   const undo = () => {
     if (!pendingDelete) return;
     if (timer.current) clearTimeout(timer.current);
+    // Cleared first, so the reload below shows the restored row.
+    pendingRef.current = null;
     restoreLedger(pendingDelete)
       .catch((err: any) => Alert.alert('Could not undo', err?.message ?? 'The ledger could not be restored.'))
       .finally(reload);
@@ -108,18 +118,23 @@ export default function LedgerList() {
         />
       </View>
 
-      <ScrollView contentContainerStyle={s.body} showsVerticalScrollIndicator={false}>
-        {status === 'loading' ? (
+      <FlatList
+        data={status === 'ready' ? shown : []}
+        keyExtractor={(e) => e.id}
+        contentContainerStyle={s.body}
+        showsVerticalScrollIndicator={false}
+        ListEmptyComponent={status === 'loading' ? (
           <LoadingState label="Loading your ledger book" />
         ) : status === 'error' ? (
           <ErrorState title="Could not load ledgers" sub="Your ledger book could not be read. Nothing has been lost." onRetry={reload} />
-        ) : shown.length === 0 ? (
+        ) : (
           <EmptyState icon="book-outline" title="No ledgers yet" sub="Add your first lend or borrow entry to start tracking." />
-        ) : shown.map(e => {
+        )}
+        renderItem={({ item: e }) => {
           const sc = STATUS_COLORS[e.status];
           const lent = e.direction === 'lend';
           return (
-            <TouchableOpacity key={e.id} style={s.card} activeOpacity={0.85}
+            <TouchableOpacity style={s.card} activeOpacity={0.85}
               onPress={() => router.push({ pathname: '/finance/ledger/[id]', params: { id: e.id } })}
               onLongPress={() => askDelete(e)}
               accessibilityRole="button"
@@ -152,10 +167,12 @@ export default function LedgerList() {
               </View>
             </TouchableOpacity>
           );
-        })}
-        {shown.length > 0 && <Text style={s.hint}>Long-press a ledger to delete (30-second undo)</Text>}
-        <View style={{ height: 90 }} />
-      </ScrollView>
+        }}
+        ListFooterComponent={<>
+          {status === 'ready' && shown.length > 0 && <Text style={s.hint}>Long-press a ledger to delete (30-second undo)</Text>}
+          <View style={{ height: 90 }} />
+        </>}
+      />
 
       <TouchableOpacity style={[s.fab, { bottom: insets.bottom + 20 }]} activeOpacity={0.9} onPress={() => router.push('/finance/ledger/new')}
         accessibilityRole="button" accessibilityLabel="Add new ledger">

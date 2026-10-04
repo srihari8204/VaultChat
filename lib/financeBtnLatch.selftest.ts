@@ -73,16 +73,17 @@ check('5b. Btn wires the Pressable to the guarded handler, not the raw prop',
 // the six swaps it for a raw Pressable, the guarantee is gone with no error.
 const COVERED = [
   'app/finance/ledger/update.tsx',
-  'app/finance/ledger/new.tsx',
+  'components/finance/LedgerForm.tsx',          // ledger/new and ledger/edit
   'app/finance/chitti/new.tsx',
-  'app/finance/chitti/[id].tsx',
+  'components/finance/chitti/MembersTab.tsx',   // split out of chitti/[id]
+  'components/finance/chitti/AuctionsTab.tsx',
   'app/finance/reminders.tsx',
   'app/finance/interest.tsx',
 ];
 for (const f of COVERED) {
   const src = code(read(f));
   check(`6. ${f} still saves through Btn`,
-    /<Btn\b/.test(src) && /from '.*components\/finance\/ui'/.test(read(f)),
+    /<Btn\b/.test(src) && /from '[^']*(components\/finance\/|\.\.?\/)ui'/.test(read(f)),
     'this screen no longer inherits the latch');
 }
 

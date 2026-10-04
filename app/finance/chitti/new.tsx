@@ -3,7 +3,7 @@
 import React, { useState } from 'react';
 import { useFinanceTheme } from '../../../components/finance/useFinanceTheme';
 import { KeyboardSafe } from '../../../components/ui';
-import { View, ScrollView, StyleSheet, Alert } from 'react-native';
+import { View, Text, ScrollView, StyleSheet, Alert } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useDatePicker } from '../../../components/finance/useDatePicker';
 import { type FinancePalette } from '../../../constants/financeTheme';
@@ -26,7 +26,17 @@ export default function NewChitti() {
   const [duration, setDuration] = useState('');
   const [foreman, setForeman] = useState('');
   const [start, setStart] = useState<number>(Date.now());
-  const [status, setStatus] = useState<ChittiStatus>('active');
+  // A new group is Active or a Draft. Closed is where a group ends up (by
+  // itself after its last auction, or from the group screen), not a start.
+  const [status, setStatus] = useState<Exclude<ChittiStatus, 'closed'>>('active');
+
+  // The installment × members check, shown next to the fields as they are
+  // typed (paise-exact), and still confirmed on Create.
+  const live = { cv: num(chitValue), inst: num(installment), mem: num(members) };
+  const mismatch = live.cv > 0 && live.inst > 0 && Number.isInteger(live.mem) && live.mem >= 1
+    && toPaise(live.inst) * live.mem !== toPaise(live.cv)
+    ? `${formatINR(live.inst)} × ${live.mem} members is ${formatINR((toPaise(live.inst) * live.mem) / 100)}, not the chit value ${formatINR(live.cv)}.`
+    : null;
 
   const onSave = async () => {
     if (!me) return;
@@ -86,6 +96,8 @@ export default function NewChitti() {
             </View>
           </View>
 
+          {mismatch && <Text style={s.mismatch} accessibilityLiveRegion="polite">{mismatch} Check the amounts, or create it anyway if your group runs that way.</Text>}
+
           <Label hint="(optional)">Foreman</Label>
           <Field label="Foreman, optional" value={foreman} onChangeText={setForeman} placeholder="Organizer name" />
 
@@ -93,7 +105,7 @@ export default function NewChitti() {
           <DateField label="Start date" value={fmtDate(start)} onPress={() => picker.open(new Date(start), (d) => setStart(d.getTime()))} />
 
           <Label>Status</Label>
-          <Segment<ChittiStatus> options={[{ k: 'active', label: 'Active' }, { k: 'draft', label: 'Draft' }, { k: 'closed', label: 'Closed' }]} value={status} onChange={setStatus} small />
+          <Segment<Exclude<ChittiStatus, 'closed'>> options={[{ k: 'active', label: 'Active' }, { k: 'draft', label: 'Draft' }]} value={status} onChange={setStatus} small />
 
           <View style={{ marginTop: 20 }}>
             <Btn label="Create Group" icon="checkmark" onPress={onSave} wide />
@@ -109,4 +121,5 @@ const makeStyles = (FIN: FinancePalette) => StyleSheet.create({
   screen: { flex: 1, backgroundColor: FIN.bg },
   body: { padding: 16, paddingBottom: 40, alignSelf: 'center', width: '100%', maxWidth: FIN.contentMax },
   row: { flexDirection: 'row', gap: 12 },
+  mismatch: { color: FIN.warn, fontSize: 12.5, lineHeight: 18, marginTop: 8 },
 });

@@ -100,7 +100,8 @@ ok('the interest duration no longer launders NaN through `|| 0`',
 ok('the interest duration rejects a box that did not parse',
   /Number\.isFinite\(dY\)/.test(interest) && interest.indexOf('Number.isFinite(dY)') < interest.indexOf('years = dY'));
 
-const chitti = fs.readFileSync('app/finance/chitti/[id].tsx', 'utf8');
+// The auctions tab moved out of app/finance/chitti/[id].tsx (round 4 split).
+const chitti = fs.readFileSync('components/finance/chitti/AuctionsTab.tsx', 'utf8');
 ok('the auction commission no longer launders NaN through `|| 0`',
   !/num\(commission\) \|\| 0/.test(chitti));
 ok('an unreadable commission is refused rather than recorded as none',
@@ -124,12 +125,14 @@ ok('skipped rows are reported rather than silently dropped', /plan\.badRemaining
 
 // 0% is a real loan — money lent to a relative at no interest — and finance.ts
 // prices it deliberately. `!(R > 0)` refused to record one at all.
-for (const f of ['app/finance/ledger/new.tsx', 'app/finance/ledger/edit.tsx']) {
+// new.tsx and edit.tsx share components/finance/LedgerForm; its checks live in ledgerFormRules.
+{
+  const f = 'components/finance/ledgerFormRules.ts';
   const src = fs.readFileSync(f, 'utf8');
-  ok(`${f} no longer refuses a 0% rate`, !/if \(!\(R > 0\)\) return Alert\.alert\('Rate'/.test(src));
+  ok(`${f} no longer refuses a 0% rate`, !/if \(!\(R > 0\)\)/.test(src));
   ok(`${f} still refuses a NaN or negative rate`,
-    /if \(!Number\.isFinite\(R\) \|\| R < 0\) return Alert\.alert\('Rate'/.test(src));
-  ok(`${f} still requires a principal above 0`, /if \(!\(P > 0\)\) return Alert\.alert\('Principal'/.test(src));
+    src.includes("if (!Number.isFinite(R) || R < 0) return no('Rate'"));
+  ok(`${f} still requires a principal above 0`, src.includes("if (!(P > 0)) return no('Principal'"));
 }
 
 const emiScreen = fs.readFileSync('app/finance/emi.tsx', 'utf8');

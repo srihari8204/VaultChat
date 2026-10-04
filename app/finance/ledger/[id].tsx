@@ -2,6 +2,7 @@
 
 import React, { useCallback, useState } from 'react';
 import { useFinanceTheme } from '../../../components/finance/useFinanceTheme';
+import { HERO_INK } from '../../../components/finance/heroInk';
 import { View, Text, ScrollView, StyleSheet, TouchableOpacity, Alert } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter, useFocusEffect } from 'expo-router';
@@ -9,7 +10,7 @@ import { financeStatusColors, FIN_HERO, TABULAR, type FinancePalette } from '../
 import { FinHeader, Card, HeroCard, RowLine, Pill, Btn, LoadingState, ErrorState } from '../../../components/finance/ui';
 import { useLoadStatus } from '../../../components/finance/useLoad';
 import { formatINR, fmtDate, fmtDateTime, PERIOD_LABEL } from '../../../utils/financeFormat';
-import { getLedger, deleteLedger, type LedgerEntry } from '../../../db/ledger';
+import { getLedger, deleteLedger, snapshotLedger, restoreLedgerSnapshot, type LedgerEntry } from '../../../db/ledger';
 import { listTimeline, type TimelineRow } from '../../../db/financeTimeline';
 import { ledgerInterest } from '../../../utils/financeRules';
 import { sharePdf, pdfDocument, kvTable } from '../../../utils/financeIO';
@@ -47,6 +48,12 @@ export default function LedgerDetail() {
 
   // The same calculator the dashboard and reports sum with (utils/financeRules).
   const c = ledgerInterest(e);
+  // Interest run so far: the same calculator over start → today, shown while
+  // the term is still running (after the end date it is the row above).
+  // Zero before the start date.
+  const today = Date.now();
+  const accruing = !e.end_date || e.end_date > today;
+  const soFar = ledgerInterest({ ...e, end_date: Math.max(e.start_date, today) }).interest;
   const sc = STATUS_COLORS[e.status];
   const lent = e.direction === 'lend';
 
@@ -59,6 +66,7 @@ export default function LedgerDetail() {
       { k: 'Rate', v: `${e.rate}${e.rate_mode === 'rupees' ? '₹ per ₹100' : '%'} ${PERIOD_LABEL[e.period]}` },
       { k: c.projected ? 'Interest (1-year projection)' : 'Interest to end date', v: formatINR(c.interest) },
       { k: c.projected ? 'Total after 1 year' : 'Total at end date', v: formatINR(c.total), tot: true },
+      ...(accruing ? [{ k: 'Interest so far (to today)', v: formatINR(soFar) }] : []),
       { k: 'Remaining', v: formatINR(e.remaining) },
       { k: 'Start date', v: fmtDate(e.start_date) },
       { k: 'End date', v: e.end_date ? fmtDate(e.end_date) : '—' },
@@ -66,11 +74,23 @@ export default function LedgerDetail() {
     try { await sharePdf(html, `ledger-${e.name}`); } catch (err: any) { Alert.alert('Share failed', err?.message ?? 'Try again'); }
   };
 
-  const onDelete = () => Alert.alert('Delete ledger?', `Delete ${e.name}? This cannot be undone here.`, [
+  // Like the list's long-press delete, this can be undone: the full record
+  // (repayments and timeline too) is read first and put back on Undo.
+  const onDelete = () => Alert.alert('Delete ledger?', `Delete ${e.name} with its repayments and timeline?`, [
     { text: 'Cancel', style: 'cancel' },
-    { text: 'Delete', style: 'destructive', onPress: () => {
-      deleteLedger(e.id).then(() => router.back())
-        .catch((err: any) => Alert.alert('Could not delete', err?.message ?? 'Try again'));
+    { text: 'Delete', style: 'destructive', onPress: async () => {
+      try {
+        const snap = await snapshotLedger(e.id);
+        await deleteLedger(e.id);
+        Alert.alert('Ledger deleted', `${e.name} was deleted.`, [
+          { text: 'Undo', onPress: () => {
+            if (!snap) return reload();
+            restoreLedgerSnapshot(snap).then(reload)
+              .catch((err: any) => { Alert.alert('Could not undo', err?.message ?? 'The ledger could not be restored.'); router.back(); });
+          } },
+          { text: 'Done', onPress: () => router.back() },
+        ], { cancelable: true, onDismiss: () => router.back() });
+      } catch (err: any) { Alert.alert('Could not delete', err?.message ?? 'Try again'); }
     } },
   ]);
 
@@ -114,6 +134,7 @@ export default function LedgerDetail() {
           <RowLine k="Rate" v={`${e.rate}${e.rate_mode === 'rupees' ? '₹/₹100' : '%'} · ${PERIOD_LABEL[e.period]}`} />
           <RowLine k={c.projected ? 'Interest, 1-year projection' : 'Interest to end date'} v={formatINR(c.interest)} />
           <RowLine k={c.projected ? 'Total after 1 year' : 'Total at end date'} v={formatINR(c.total)} bold />
+          {accruing && <RowLine k="Interest so far (to today)" v={formatINR(soFar)} />}
           <RowLine k="Remaining" v={formatINR(e.remaining)} bold tone={e.remaining > 0 ? 'warn' : 'good'} />
           <RowLine k="Start date" v={fmtDate(e.start_date)} />
           <RowLine k="End date" v={e.end_date ? fmtDate(e.end_date) : '—'} />
@@ -193,10 +214,10 @@ const makeStyles = (FIN: FinancePalette) => StyleSheet.create({
   name: { color: FIN.text, fontSize: 18, fontWeight: '800' },
   mobile: { color: FIN.sub, fontSize: 13, marginTop: 1 },
 
-  // Fixed white on the always-dark FIN_HERO gradient (no scheme token applies).
-  heroLabel: { color: 'rgba(255,255,255,0.85)', fontSize: 10.5, fontWeight: '700', letterSpacing: 0.8 },
-  heroVal: { color: '#fff', fontSize: 30, fontWeight: '800', marginTop: 6, ...TABULAR },
-  heroSub: { color: 'rgba(255,255,255,0.9)', fontSize: 12.5, marginTop: 6 },
+  // Hero ink: the FIN_HERO gradient is dark in both schemes (components/finance/heroInk).
+  heroLabel: { color: HERO_INK.label, fontSize: 10.5, fontWeight: '700', letterSpacing: 0.8 },
+  heroVal: { color: HERO_INK.strong, fontSize: 30, fontWeight: '800', marginTop: 6, ...TABULAR },
+  heroSub: { color: HERO_INK.soft, fontSize: 12.5, marginTop: 6 },
 
   notesLabel: { color: FIN.sub, fontSize: 12, fontWeight: '700', marginBottom: 4 },
   notes: { color: FIN.text, fontSize: 14, lineHeight: 20 },

@@ -3,9 +3,10 @@
 
 import React, { useMemo, useState } from 'react';
 import { useFinanceTheme } from '../../components/finance/useFinanceTheme';
+import { HERO_INK } from '../../components/finance/heroInk';
 import { KeyboardSafe } from '../../components/ui';
 import { View, Text, ScrollView, StyleSheet, Alert, Pressable } from 'react-native';
-import { TABULAR, type FinancePalette } from '../../constants/financeTheme';
+import { TABULAR, FIN as FIN_PRINT, type FinancePalette } from '../../constants/financeTheme';
 import { FinHeader, Label, Field, Segment, Btn, HeroCard, Card, RowLine } from '../../components/finance/ui';
 import { num } from '../../utils/financeFormat';
 import { formatINR } from '../../utils/interest';
@@ -66,9 +67,9 @@ export default function EmiCalc() {
       { k: 'Monthly EMI', v: formatINR(res.emi), tot: true },
       { k: 'Total interest', v: formatINR(res.totalInterest) },
       { k: 'Total payment', v: formatINR(res.totalPayment) },
-    // A printed document, not a themed screen: its colours match pdfDocument's
-    // fixed print palette (utils/financeIO), in light or dark mode alike.
-    ]) + '<h3 style="margin-top:20px;font-size:14px;color:#6D3FA8">Amortization schedule</h3>' +
+    // A printed document, not a themed screen: the light palette's brand, as
+    // pdfDocument's fixed print palette uses (utils/financeIO), in either mode.
+    ]) + `<h3 style="margin-top:20px;font-size:14px;color:${FIN_PRINT.brandDeep}">Amortization schedule</h3>` +
     htmlTable(['Month', 'EMI', 'Principal', 'Interest', 'Balance'],
       schedule.map(r => [r.month, formatINR(r.emi), formatINR(r.principal), formatINR(r.interest), formatINR(r.balance)]));
     try { await sharePdf(pdfDocument('EMI Report', body), 'emi'); } catch (e: any) { Alert.alert('Share failed', e?.message ?? 'Try again'); }
@@ -130,14 +131,16 @@ export default function EmiCalc() {
 
               {showSchedule && (
                 <Card style={{ marginTop: 12, padding: 0, overflow: 'hidden' }}>
-                  <View style={[s.schRow, s.schHead]}>
+                  <View style={[s.schRow, s.schHead]} importantForAccessibility="no-hide-descendants" accessibilityElementsHidden>
                     <Text style={[s.schCell, s.schHeadTxt, { flex: 0.7 }]}>Mo</Text>
                     <Text style={[s.schCell, s.schHeadTxt]}>Principal</Text>
                     <Text style={[s.schCell, s.schHeadTxt]}>Interest</Text>
                     <Text style={[s.schCell, s.schHeadTxt]}>Balance</Text>
                   </View>
                   {schedule.slice(0, 24).map(r => (
-                    <View key={r.month} style={s.schRow}>
+                    // One spoken row, not four separate numbers.
+                    <View key={r.month} style={s.schRow} accessible
+                      accessibilityLabel={`Month ${r.month}: principal ${formatINR(r.principal)}, interest ${formatINR(r.interest)}, balance ${formatINR(r.balance)}`}>
                       <Text style={[s.schCell, { flex: 0.7, color: FIN.sub }]}>{r.month}</Text>
                       <Text style={s.schCell} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>{Math.round(r.principal).toLocaleString('en-IN')}</Text>
                       <Text style={s.schCell} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>{Math.round(r.interest).toLocaleString('en-IN')}</Text>
@@ -179,9 +182,9 @@ const makeStyles = (FIN: FinancePalette) => StyleSheet.create({
   chip: { minHeight: 44, paddingHorizontal: 14, paddingVertical: 10, borderRadius: 999, borderWidth: 1, borderColor: FIN.border, backgroundColor: FIN.card, justifyContent: 'center' },
   chipText: { color: FIN.sub, fontSize: 13, fontWeight: '700' },
   btnRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 12, marginTop: 14 },
-  // Fixed white on the always-dark FIN_HERO gradient (no scheme token applies).
-  heroLabel: { color: 'rgba(255,255,255,0.85)', fontSize: 10.5, fontWeight: '700', letterSpacing: 0.8 },
-  heroVal: { color: '#fff', fontSize: 30, fontWeight: '800', marginTop: 6, ...TABULAR },
+  // Hero ink: the FIN_HERO gradient is dark in both schemes (components/finance/heroInk).
+  heroLabel: { color: HERO_INK.label, fontSize: 10.5, fontWeight: '700', letterSpacing: 0.8 },
+  heroVal: { color: HERO_INK.strong, fontSize: 30, fontWeight: '800', marginTop: 6, ...TABULAR },
 
   schRow: { flexDirection: 'row', paddingHorizontal: 12, paddingVertical: 9, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: FIN.line },
   schHead: { backgroundColor: FIN.card2 },

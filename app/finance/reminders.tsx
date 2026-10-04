@@ -1,7 +1,8 @@
 // app/finance/reminders.tsx — finance reminders (local notifications).
-// Opened standalone, or from a ledger with ?refType&refId&title to prefill.
+// Opened standalone, or from a ledger with ?refType&refId&title to prefill,
+// or from the calendar with ?focus=<reminder id> to show that reminder.
 
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useRef, useState } from 'react';
 import { useFinanceTheme } from '../../components/finance/useFinanceTheme';
 import { KeyboardSafe } from '../../components/ui';
 import { View, Text, ScrollView, StyleSheet, TouchableOpacity, Alert } from 'react-native';
@@ -26,7 +27,7 @@ const FREQ_LABEL: Record<ReminderFreq, string> = { once: 'Once', daily: 'Daily',
 export default function Reminders() {
   const FIN = useFinanceTheme();
   const s = React.useMemo(() => makeStyles(FIN), [FIN]);
-  const params = useLocalSearchParams<{ refType?: string; refId?: string; title?: string }>();
+  const params = useLocalSearchParams<{ refType?: string; refId?: string; title?: string; focus?: string }>();
   const me = useMe();
   const [rows, setRows] = useState<Reminder[]>([]);
   const [showAdd, setShowAdd] = useState(!!params.title);
@@ -42,6 +43,24 @@ export default function Reminders() {
     listReminders(me.id).then(r => { setRows(r); loadOk(); }).catch(loadFail);
   }, [me, beginLoad, loadOk, loadFail]);
   useFocusEffect(reload);
+
+  // The calendar opens a reminder by id: it is outlined and scrolled to once.
+  const scroller = useRef<ScrollView>(null);
+  const scrolledTo = useRef<string | null>(null);
+  const focusAt = (id: string, y: number) => {
+    if (id !== params.focus || scrolledTo.current === id) return;
+    scrolledTo.current = id;
+    scroller.current?.scrollTo({ y: Math.max(0, y - 12), animated: true });
+  };
+
+  // One action per reminder at a time: two taps on Snooze scheduled two
+  // alerts, and only the last id was kept to cancel.
+  const busy = useRef(new Set<string>());
+  const once = (r: Reminder, work: () => Promise<void>) => async () => {
+    if (busy.current.has(r.id)) return;
+    busy.current.add(r.id);
+    try { await work(); } finally { busy.current.delete(r.id); }
+  };
 
   const picker = useDatePicker();
   const pickWhen = () => picker.open(new Date(when), (d) => setWhen(d.getTime()), 'datetime');
@@ -78,18 +97,19 @@ export default function Reminders() {
         user_id: me.id,
         ref_type: ref,
         ref_id: ref ? params.refId ?? null : null,
-        title: title.trim(), freq, next_at: nextOccurrence(freq, when, Date.now()), notif_id: notifId,
+        // The picked time anchors the series; next_at is its next occurrence.
+        title: title.trim(), freq, next_at: nextOccurrence(freq, when, Date.now()), anchor_at: when, notif_id: notifId,
       });
       if (!notifId) warnUnscheduled();
       setShowAdd(false); setTitle(''); reload();
     } catch (e: any) { Alert.alert('Could not add the reminder', e?.message ?? 'Try again.'); }
   };
 
-  const onDone = async (r: Reminder) => {
+  const onDone = (r: Reminder) => once(r, async () => {
     try { await cancel(r.notif_id); await setReminderStatus(r.id, 'done'); reload(); }
     catch (e: any) { Alert.alert('Could not update the reminder', e?.message ?? 'Try again.'); }
-  };
-  const onSnooze = async (r: Reminder) => {
+  })();
+  const onSnooze = (r: Reminder) => once(r, async () => {
     try {
       const next = Date.now() + 86400000;
       const snoozeId = await scheduleAt('Vault Finance', r.title, next);
@@ -107,13 +127,13 @@ export default function Reminders() {
       }
       reload();
     } catch (e: any) { Alert.alert('Could not snooze the reminder', e?.message ?? 'Try again.'); }
-  };
+  })();
   const onDelete = (r: Reminder) => Alert.alert('Delete reminder?', r.title, [
     { text: 'Cancel', style: 'cancel' },
-    { text: 'Delete', style: 'destructive', onPress: async () => {
+    { text: 'Delete', style: 'destructive', onPress: once(r, async () => {
       try { await cancel(r.notif_id); await deleteReminder(r.id); reload(); }
       catch (e: any) { Alert.alert('Could not delete the reminder', e?.message ?? 'Try again.'); }
-    } },
+    }) },
   ]);
 
   const active = rows.filter(r => r.status === 'active');
@@ -129,7 +149,7 @@ export default function Reminders() {
         </TouchableOpacity>
       } />
       <KeyboardSafe>
-      <ScrollView contentContainerStyle={s.body} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+      <ScrollView ref={scroller} contentContainerStyle={s.body} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
         {showAdd && (
           <Card style={{ marginBottom: 8 }}>
             <Label>Title</Label>
@@ -159,7 +179,8 @@ export default function Reminders() {
 
         {active.length > 0 && <Text style={s.section}>Active</Text>}
         {active.map(r => (
-          <View key={r.id} style={[s.card, s.activeCard]}>
+          <View key={r.id} style={[s.card, s.activeCard, r.id === params.focus && s.focused]}
+            onLayout={(ev) => focusAt(r.id, ev.nativeEvent.layout.y)}>
             <View style={s.reminderHeading}>
               <View style={s.dot} />
               <View style={{ flex: 1, minWidth: 0 }}>
@@ -180,7 +201,8 @@ export default function Reminders() {
 
         {done.length > 0 && <Text style={s.section}>Completed</Text>}
         {done.map(r => (
-          <View key={r.id} style={s.card}>
+          <View key={r.id} style={[s.card, r.id === params.focus && s.focused]}
+            onLayout={(ev) => focusAt(r.id, ev.nativeEvent.layout.y)}>
             <Ionicons name="checkmark-circle" size={18} color={FIN.good} />
             <View style={{ flex: 1, minWidth: 0 }}>
               <Text style={[s.title, { textDecorationLine: 'line-through' }]} numberOfLines={1}>{r.title}</Text>
@@ -205,6 +227,7 @@ const makeStyles = (FIN: FinancePalette) => StyleSheet.create({
   title: { color: FIN.text, fontSize: 14.5, fontWeight: '700' },
   sub: { color: FIN.sub, fontSize: 12, marginTop: 2 },
   activeCard: { flexDirection: 'column', alignItems: 'stretch' },
+  focused: { borderColor: FIN.brand, borderWidth: 2 },
   reminderHeading: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   actions: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 4, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: FIN.border, paddingTop: 8 },
   iconBtn: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center', backgroundColor: FIN.cardStrong, borderRadius: 12 },

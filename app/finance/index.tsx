@@ -11,6 +11,7 @@
 
 import React, { useCallback, useState } from 'react';
 import { useFinanceTheme } from '../../components/finance/useFinanceTheme';
+import { HERO_INK } from '../../components/finance/heroInk';
 import { useTheme } from '../../lib/theme';
 import { View, Text, ScrollView, StyleSheet, StatusBar, Pressable } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
@@ -137,9 +138,18 @@ export default function FinanceDashboard() {
                 </View>
               </HeroSplit>
             </View>
+            {/* Full-term figures, not accrued or received interest: each
+                ledger's interest to its end date (a 1-year projection when it
+                has none) — what ledgerInterest computes. The words say so. */}
             <View style={s.heroFoot}>
-              <Text style={s.heroFootTxt} numberOfLines={1}>Interest earned {inrShort(t.earned)}</Text>
-              <Text style={s.heroFootTxt} numberOfLines={1}>Pending {inrShort(t.pending)}</Text>
+              <Text style={s.heroFootTxt} numberOfLines={2}
+                accessibilityLabel={`Full-term interest on settled loans: ${inrShort(t.earned)}`}>
+                Settled loans, full term {inrShort(t.earned)}
+              </Text>
+              <Text style={s.heroFootTxt} numberOfLines={2}
+                accessibilityLabel={`Full-term interest expected on open loans, to their end dates: ${inrShort(t.pending)}`}>
+                Open loans, full term {inrShort(t.pending)}
+              </Text>
             </View>
           </HeroCard>
 
@@ -202,17 +212,15 @@ const makeStyles = (FIN: FinancePalette) => StyleSheet.create({
   },
   badgeTxt: { color: FIN.onBrand, fontSize: 9.5, fontWeight: '800' },
 
-  // Hero text is fixed white: the FIN_HERO gradient behind it is saturated
-  // and dark in BOTH schemes, so no scheme token applies (FIN.onBrand turns
-  // dark in dark mode and would vanish on it).
-  heroLabel: { color: 'rgba(255,255,255,0.8)', fontSize: 10.5, fontWeight: '700', letterSpacing: 0.9 },
-  heroKey: { color: 'rgba(255,255,255,0.85)', fontSize: 12 },
-  heroVal: { color: '#fff', fontSize: 25, fontWeight: '800', marginTop: 2, letterSpacing: -0.6, ...TABULAR },
+  // Hero ink: the FIN_HERO gradient is dark in both schemes (components/finance/heroInk).
+  heroLabel: { color: HERO_INK.label, fontSize: 10.5, fontWeight: '700', letterSpacing: 0.9 },
+  heroKey: { color: HERO_INK.label, fontSize: 12 },
+  heroVal: { color: HERO_INK.strong, fontSize: 25, fontWeight: '800', marginTop: 2, letterSpacing: -0.6, ...TABULAR },
   heroFoot: {
     flexDirection: 'row', justifyContent: 'space-between', gap: 12,
-    marginTop: 16, paddingTop: 12, borderTopWidth: 1, borderTopColor: 'rgba(255,255,255,0.22)',
+    marginTop: 16, paddingTop: 12, borderTopWidth: 1, borderTopColor: HERO_INK.rule,
   },
-  heroFootTxt: { color: 'rgba(255,255,255,0.9)', fontSize: 12, fontWeight: '600', flexShrink: 1, ...TABULAR },
+  heroFootTxt: { color: HERO_INK.soft, fontSize: 12, fontWeight: '600', flexShrink: 1, ...TABULAR },
 
   section: { color: FIN.text, fontSize: 16, fontWeight: '800', marginTop: 24, marginBottom: 14, letterSpacing: -0.2 },
 

@@ -9,7 +9,7 @@ import * as DocumentPicker from 'expo-document-picker';
 import * as FileSystem from 'expo-file-system/legacy';
 import { type FinancePalette } from '../../constants/financeTheme';
 import { KeyboardSafe } from '../../components/ui';
-import { FinHeader, Segment, Btn, Card, Field, Label } from '../../components/finance/ui';
+import { FinHeader, Segment, Btn, Card, Field, Label, LoadingState } from '../../components/finance/ui';
 import { useMe } from '../../components/finance/useMe';
 import { listLedger, insertLedgers } from '../../db/ledger';
 import { listGroups, listMembers, listCollections, listAuctions } from '../../db/chitti';
@@ -45,6 +45,14 @@ const ask = (title: string, message: string, action: string) => new Promise<bool
     { text: action, onPress: () => resolve(true) },
   ], { cancelable: true, onDismiss: () => resolve(false) }));
 
+/**
+ * Sealing and opening run PBKDF2 synchronously (lib/backupCrypto; native
+ * quick-crypto when installed, else JS) and hold the JS thread while they do.
+ * Waiting one frame lets the busy state paint first, so the screen says what
+ * it is doing instead of looking frozen.
+ */
+const nextFrame = () => new Promise<void>((resolve) => requestAnimationFrame(() => setTimeout(resolve, 0)));
+
 const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
 
 export default function FinanceIO() {
@@ -56,6 +64,13 @@ export default function FinanceIO() {
   // The Full Backup password. Never stored: it exists only while typed here.
   const [pw, setPw] = useState('');
   const [pw2, setPw2] = useState('');
+  // What the screen is busy doing (sealing / opening a backup), or null.
+  const [busy, setBusy] = useState<string | null>(null);
+  const withBusy = async <T,>(label: string, work: () => T): Promise<T> => {
+    setBusy(label);
+    await nextFrame();
+    try { return work(); } finally { setBusy(null); }
+  };
 
   const onExport = async () => {
     if (!me) return;
@@ -80,9 +95,10 @@ export default function FinanceIO() {
         }
         const stamp = new Date().toISOString().slice(0, 10);
         const n = snap.groups.length + snap.ledgers.length;
-        const sealed = sealFinanceBackup(JSON.stringify(snap), pw);
+        const sealed = await withBusy('Locking the backup with your password…', () => sealFinanceBackup(JSON.stringify(snap), pw));
         await dropExport(await shareTextFile(`vault-finance-backup-${stamp}.json`, sealed, 'application/json'));
-        setPw2('');
+        // The password is not kept on screen once it has done its job.
+        setPw(''); setPw2('');
         // Explicit confirmation: this file is the only restore path, and the
         // share sheet is easy to dismiss by accident. Without this the user
         // cannot tell "backed up" from "nothing happened".
@@ -97,10 +113,12 @@ export default function FinanceIO() {
         const groups = await listGroups(me.id);
         if (groups.length === 0) return Alert.alert('Nothing to export', 'No Lucky Draw groups yet.');
         const data: (string | number)[][] = [];
-        for (const g of groups) {
-          const [members, cols, aucs] = await Promise.all([
-            listMembers(g.id), listCollections(g.id), listAuctions(g.id),
-          ]);
+        // Every group's reads at once; rows still come out in group order.
+        const perGroup = await Promise.all(groups.map(g => Promise.all([
+          listMembers(g.id), listCollections(g.id), listAuctions(g.id),
+        ])));
+        groups.forEach((g, gi) => {
+          const [members, cols, aucs] = perGroup[gi];
           for (const m of members) {
             const mine = cols.filter(c => c.member_id === m.id);
             const won = aucs.filter(a => a.winner_id === m.id).map(a => `M${a.month}`).join(' ');
@@ -112,7 +130,7 @@ export default function FinanceIO() {
               won,
             ]);
           }
-        }
+        });
         if (data.length === 0) return Alert.alert('Nothing to export', 'Your Lucky Draw groups have no members yet.');
         await dropExport(format === 'excel'
           ? await exportExcel('vault-lucky-draw', LD_HEADERS, data)
@@ -133,13 +151,20 @@ export default function FinanceIO() {
       if (res.canceled || !res.assets?.[0]) return;
       const asset = res.assets[0];
       const tooBig = () => Alert.alert('File too large', 'That file is bigger than any finance export. Pick the file this screen exported.');
-      if ((asset.size ?? 0) > MAX_IMPORT_BYTES) {
+      // Some providers report no size; the copied file's size on disk is read
+      // instead, so an oversized pick is refused BEFORE it is read into memory.
+      let size = asset.size;
+      if (size == null) {
+        const info = await FileSystem.getInfoAsync(asset.uri).catch(() => null);
+        size = info?.exists ? info.size : undefined;
+      }
+      if ((size ?? 0) > MAX_IMPORT_BYTES) {
         await FileSystem.deleteAsync(asset.uri, { idempotent: true }).catch(() => {});
         return tooBig();
       }
       const content = await FileSystem.readAsStringAsync(asset.uri);
       await FileSystem.deleteAsync(asset.uri, { idempotent: true }).catch(() => {});
-      // Some providers report no size; the length read is checked instead.
+      // Last guard, for a size neither source could give.
       if (content.length > MAX_IMPORT_BYTES) return tooBig();
 
       if (dataset === 'backup') {
@@ -148,7 +173,7 @@ export default function FinanceIO() {
         let text = content;
         if (isSealedFinanceBackup(content)) {
           if (!pw) return Alert.alert('Password needed', 'This backup is password-protected. Type its password in Backup password above, then restore again.');
-          try { text = openFinanceBackup(content, pw); } catch {
+          try { text = await withBusy('Unlocking the backup…', () => openFinanceBackup(content, pw)); } catch {
             return Alert.alert('Wrong password', 'That password does not open this backup. Nothing was changed.');
           }
         }
@@ -167,6 +192,7 @@ export default function FinanceIO() {
           'Restore');
         if (!go) return;
         const c = await restoreBackup(me.id, parsed);
+        setPw(''); setPw2('');
         return Alert.alert('Restore complete',
           `${c.groups} Lucky Draw group${c.groups === 1 ? '' : 's'}, ${c.members} member${c.members === 1 ? '' : 's'}, ` +
           `${c.collections} due${c.collections === 1 ? '' : 's'}, ${c.auctions} auction${c.auctions === 1 ? '' : 's'} and ` +
@@ -241,15 +267,16 @@ export default function FinanceIO() {
         <View style={{ marginTop: 16 }}>
           <Btn
             label={dataset === 'backup' ? 'Export Full Backup' : `Export ${dataset === 'ledger' ? 'Ledger' : 'Lucky Draw'}`}
-            icon="download-outline" onPress={onExport} wide
+            icon="download-outline" onPress={onExport} wide disabled={!!busy}
           />
         </View>
         <View style={{ marginTop: 12 }}>
           <Btn
             label={dataset === 'backup' ? 'Restore from Backup' : 'Import Ledger from CSV'}
-            kind="ghost" icon="cloud-upload-outline" onPress={onImport} wide
+            kind="ghost" icon="cloud-upload-outline" onPress={onImport} wide disabled={!!busy}
           />
         </View>
+        {busy && <LoadingState label={busy} />}
 
         <Text style={s.hint}>
           {dataset === 'backup'

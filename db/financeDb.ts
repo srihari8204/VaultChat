@@ -25,6 +25,14 @@ export async function financeDb(): Promise<SQLite.SQLiteDatabase> {
     if (!cols.some(c => c.name === 'address')) {
       await d.execAsync(`ALTER TABLE chitti_members ADD COLUMN address TEXT`);
     }
+    // Same additive pattern: reminders.anchor_at is the series' first
+    // occurrence (lib/finance/reminderSchedule). An existing row's best anchor
+    // is the next_at it already has.
+    const rcols = await d.getAllAsync<{ name: string }>(`PRAGMA table_info(reminders)`);
+    if (!rcols.some(c => c.name === 'anchor_at')) {
+      await d.execAsync(`ALTER TABLE reminders ADD COLUMN anchor_at INTEGER`);
+      await d.execAsync(`UPDATE reminders SET anchor_at = next_at WHERE anchor_at IS NULL`);
+    }
     _db = d;
     return d;
   })();
@@ -141,6 +149,7 @@ CREATE TABLE IF NOT EXISTS reminders (
   title      TEXT NOT NULL,
   freq       TEXT NOT NULL,            -- 'once'|'daily'|'weekly'|'monthly'|'yearly'
   next_at    INTEGER NOT NULL,
+  anchor_at  INTEGER,                  -- first occurrence; the series counts from it
   status     TEXT NOT NULL,            -- 'active' | 'done'
   notif_id   TEXT,                     -- expo-notifications identifier
   created_at INTEGER NOT NULL

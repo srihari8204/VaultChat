@@ -5,7 +5,7 @@
 // On-device only, tagged with the current user_id.
 
 import { financeDb, uuid, now } from './financeDb';
-import { addTimeline } from './financeTimeline';
+import { addTimeline, type TimelineRow } from './financeTimeline';
 import { toPaise, fromPaise } from '../utils/money';
 import type { LedgerStatus } from '../constants/financeTheme';
 import type { LedgerPeriod } from '../utils/finance';
@@ -144,6 +144,35 @@ export async function restoreLedger(e: LedgerEntry): Promise<void> {
   );
 }
 
+/** Everything deleteLedger removes: the row, its repayments and its history. */
+export interface LedgerSnapshot { entry: LedgerEntry; updates: LedgerUpdate[]; timeline: TimelineRow[] }
+
+/** Read a ledger's full record before deleting it, so the delete can be undone. */
+export async function snapshotLedger(id: string): Promise<LedgerSnapshot | null> {
+  const d = await financeDb();
+  const entry = await d.getFirstAsync<LedgerEntry>(`SELECT * FROM ledger_entries WHERE id = ?`, [id]);
+  if (!entry) return null;
+  const updates = await d.getAllAsync<LedgerUpdate>(`SELECT * FROM ledger_updates WHERE ledger_id = ?`, [id]);
+  const timeline = await d.getAllAsync<TimelineRow>(`SELECT * FROM finance_timeline WHERE ref_type = 'ledger' AND ref_id = ?`, [id]);
+  return { entry, updates, timeline };
+}
+
+/** Put a snapshotted ledger back exactly, all-or-nothing (row ids are kept). */
+export async function restoreLedgerSnapshot(snap: LedgerSnapshot): Promise<void> {
+  const d = await financeDb();
+  await d.withTransactionAsync(async () => {
+    await restoreLedger(snap.entry);
+    for (const u of snap.updates) {
+      await d.runAsync(`INSERT OR REPLACE INTO ledger_updates (id,ledger_id,received,remaining,note,updated_at) VALUES (?,?,?,?,?,?)`,
+        [u.id, u.ledger_id, u.received, u.remaining, u.note, u.updated_at]);
+    }
+    for (const t of snap.timeline) {
+      await d.runAsync(`INSERT OR REPLACE INTO finance_timeline (id,ref_type,ref_id,kind,detail,at) VALUES (?,?,?,?,?,?)`,
+        [t.id, t.ref_type, t.ref_id, t.kind, t.detail, t.at]);
+    }
+  });
+}
+
 /** Record a manual amount update: log it, set remaining + status, timeline it. */
 export async function addLedgerUpdate(ledgerId: string, rawReceived: number, rawRemaining: number, note: string | null): Promise<void> {
   const d = await financeDb();
@@ -194,4 +223,4 @@ export async function setLedgerStatus(id: string, status: LedgerStatus): Promise
   await d.runAsync(`UPDATE ledger_entries SET status = ?, last_updated = ? WHERE id = ?`, [status, now(), id]);
 }
 
-export default { insertLedger, insertLedgers, listLedger, getLedger, deleteLedger, restoreLedger, addLedgerUpdate, listLedgerUpdates, updateLedgerDetails, setLedgerStatus };
+export default { insertLedger, insertLedgers, listLedger, getLedger, deleteLedger, restoreLedger, snapshotLedger, restoreLedgerSnapshot, addLedgerUpdate, listLedgerUpdates, updateLedgerDetails, setLedgerStatus };
