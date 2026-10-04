@@ -45,7 +45,7 @@ export default function OnboardSecurity() {
     onboarding.set({
       securityAnswers: slots.map(sl => ({ questionCode: sl.questionCode as string, answer: sl.answer.trim() })),
     });
-    router.push('/onboard-mpin' as any);
+    router.push('/onboard-mpin');
   };
 
   return (

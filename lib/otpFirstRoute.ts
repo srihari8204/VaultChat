@@ -32,3 +32,17 @@ export function afterLookup(r: { exists?: unknown; userId?: unknown; conflict?: 
   if (r?.conflict) return { to: 'conflict' };
   return { to: 'signup' };
 }
+
+/**
+ * 403 `otp_required` (R4BE C15): the phoneTicket is missing or past its
+ * 15-minute life. Only a fresh SMS code fixes it, so callers send the person
+ * back to the number step rather than showing a generic failure. The server
+ * does not spend an MPIN attempt on this answer. Today's server never sends it.
+ */
+export function needsFreshOtp(e: unknown): boolean {
+  const err = e as { status?: unknown; body?: { error?: { code?: unknown } } } | null | undefined;
+  return err?.status === 403 && err?.body?.error?.code === 'otp_required';
+}
+
+/** The copy for that case, shared by the three screens that can meet it. */
+export const FRESH_OTP_MESSAGE = 'Your mobile number check has expired. Verify your number again to continue.';

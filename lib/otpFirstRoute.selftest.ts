@@ -5,7 +5,7 @@
 
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { afterLookup, afterOtp } from './otpFirstRoute';
+import { afterLookup, afterOtp, needsFreshOtp } from './otpFirstRoute';
 
 // 1. A C15 server answers on the verify call.
 assert.deepEqual(afterOtp({ ok: true, exists: true, userId: 'u1' } as any), { to: 'mpin', userId: 'u1' });
@@ -31,6 +31,19 @@ const ONB = readFileSync('lib/onboarding.ts', 'utf8');
 for (const fn of ['verifyMpinRemote', 'getRecoveryQuestions', 'verifyRecoveryAnswers']) {
   const body = ONB.slice(ONB.indexOf(`export async function ${fn}`));
   assert.ok(/possession(Headers|Ticket)\(/.test(body.slice(0, body.indexOf('\n}\n'))), `${fn} must carry the possession proof`);
+}
+
+// 5. An expired or missing ticket (403 otp_required, lib/api's error shape) is
+// told apart from a wrong MPIN, a lockout and an offline failure.
+assert.equal(needsFreshOtp({ status: 403, body: { error: { code: 'otp_required' } } }), true);
+assert.equal(needsFreshOtp({ status: 401, body: { error: { code: 'invalid_mpin' } } }), false);
+assert.equal(needsFreshOtp({ status: 403, body: { error: { code: 'forbidden' } } }), false);
+assert.equal(needsFreshOtp({ status: 403, body: { error: 'otp_required' } }), false);
+assert.equal(needsFreshOtp(new TypeError('Network request failed')), false);
+assert.equal(needsFreshOtp(null), false);
+// …and the three screens that can meet it route it back to the number step.
+for (const f of ['app/mpin-entry.tsx', 'app/mpin-recover.tsx', 'app/onboard-success.tsx']) {
+  assert.ok(/needsFreshOtp\(e\)/.test(readFileSync(f, 'utf8')), `${f} must map otp_required`);
 }
 
 console.log('otpFirstRoute selftest: ok');

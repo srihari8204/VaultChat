@@ -199,3 +199,48 @@ export function onDeliveredTap(sink: (href: string) => void): () => void {
   if (held) sink(held);
   return () => { if (tapSink === sink) tapSink = null; };
 }
+
+// ── Where the app last sent this process to authenticate ─────────────────
+//
+// launchAllowed (lib/launchGate) settles ONCE per process, so it says how this
+// launch began, not whether the user is past the lock NOW. app/index.tsx used to
+// return silently on `false`. That is right for the cold-start visit, which the
+// root gate has already replaced, but it left any LATER visit to '/' on the logo
+// with nothing to press. /blocked's exit did exactly that after a clean
+// re-check: the launch scan had REPLACED the lock or sign-in screen, so there
+// was nothing to go back to, and it replaced onto '/'.
+//
+// The root gate records where it sent the launch (null when it let it through),
+// and lib/authNav.resetTo records each later crossing of the sign-in boundary.
+
+/** The lock or sign-in route this process was last sent to; null once inside the app. */
+let edge: string | null = null;
+let gateDecided = false;
+
+/** Root gate (every branch) and resetTo: where the user now stands. */
+export function noteAuthEdge(next: string | null): void {
+  edge = next;
+  gateDecided = true;
+}
+/** The lock or sign-in route to return to, or null when the user is inside the app. */
+export function authEdge(): string | null { return edge; }
+/** False until the root gate has decided; read by index on its first render. */
+export function launchGateDecided(): boolean { return gateDecided; }
+
+/** The edge after a resetTo(href): a lock or sign-in route is one, anything else is inside. */
+export function edgeAfterReset(href: string): string | null {
+  return isLockOrAuthRoute(href.split('?')[0]) ? href : null;
+}
+
+/**
+ * What app/index.tsx does on a visit to '/'.
+ *   'route' — continue into the app (restore offer or Chats);
+ *   'wait'  — the cold-start visit: the root gate has already replaced it;
+ *   an href — a later visit while the user is still outside: go to that lock or
+ *             sign-in screen. Never 'route' for a launch the gate refused unless
+ *             a resetTo has since recorded the user inside.
+ */
+export function splashNext(allowed: boolean, coldVisit: boolean, current: string | null): 'route' | 'wait' | string {
+  if (coldVisit) return allowed ? 'route' : 'wait';
+  return current ?? 'route';
+}

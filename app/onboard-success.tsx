@@ -15,6 +15,7 @@ import { BRAND_GRADIENT_CTA } from '../constants/theme';
 import { resetTo } from '../lib/authNav';
 import { onboarding, verifyMpinRemote, uploadAndSetProfilePhoto, onboardingError } from '../lib/onboarding';
 import { deviceSecurityAvailable, enableMfa } from '../lib/mfa';
+import { FRESH_OTP_MESSAGE, needsFreshOtp } from '../lib/otpFirstRoute';
 import { AuthSky, BrandMark } from '../components/ui';
 import { type AuthPalette } from '../constants/authTheme';
 import { useAuthTheme } from '../lib/useAuthTheme';
@@ -93,6 +94,19 @@ export default function OnboardSuccess() {
       // The account already EXISTS by now: setMpinRemote succeeded on the
       // previous screen, which is precisely why back is blocked here. So signing
       // in is a correct recovery, not a workaround — offer it alongside retry.
+      //
+      // Except when the SMS proof has expired (403 otp_required, a sign-up that
+      // outlasted the ticket's 15 minutes): retrying cannot pass and the MPIN
+      // screen would meet the same refusal, so the only way on is a fresh code.
+      if (needsFreshOtp(e)) {
+        Alert.alert(
+          'Number check expired',
+          `${FRESH_OTP_MESSAGE} Your account is already created — after the code, sign in with the MPIN you just set.`,
+          [{ text: 'Verify number', onPress: () => { onboarding.reset(); resetTo('/onboard'); } }],
+          { cancelable: false },
+        );
+        return;
+      }
       Alert.alert(
         'Could not continue',
         onboardingError(e, 'Please try again'),

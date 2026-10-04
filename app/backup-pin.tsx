@@ -52,7 +52,7 @@ export default function BackupPINScreen() {
   const current = stage==="current"?cur:stage==="set"?pin:confirm;
   const setter  = stage==="current"?setCur:stage==="set"?setPin:setConfirm;
 
-  const leave = () => { if (router.canGoBack()) router.back(); else router.replace("/(tabs)/chats" as any); };
+  const leave = () => { if (router.canGoBack()) router.back(); else router.replace("/(tabs)/chats"); };
 
   const checkCurrent = async (val:string) => {
     if (busy || val.length < PIN_MIN) return;

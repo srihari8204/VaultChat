@@ -39,6 +39,8 @@ function MiniCenterIcon({ focused, styles }: { focused: boolean; styles: TabStyl
         end={{ x: 1, y: 1 }}
         style={[styles.centerBtn, focused && styles.centerBtnActive]}
       >
+        {/* Fixed white on the fixed brand disc in both themes, not a palette
+            ink: ≥3:1 (graphics) on every APPS_DISC_GRADIENT stop. */}
         <TabGlyph name="mini" size={28} color="#FFFFFF" active={focused} />
       </LinearGradient>
       <AppText variant="tiny" color={TAB_ICON_INK.mini[scheme]} style={styles.centerLabel} numberOfLines={normalLabels ? 1 : 2} maxFontSizeMultiplier={TAB_LABEL_MAX_SCALE}>Apps</AppText>

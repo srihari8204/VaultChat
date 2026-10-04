@@ -100,7 +100,7 @@ export default function OnboardMpin() {
       await saveSecurityQuestions(userId, setupTicket, st.securityAnswers);
       await setMpinRemote(userId, setupTicket, v);
       onboarding.set({ userId, mpin: v });                  // mpin kept (RAM) for the success login
-      router.replace({ pathname: '/onboard-success', params: { userId } } as any);
+      router.replace({ pathname: '/onboard-success', params: { userId } });
     } catch (e: any) {
       setBusy(false);
       setPhase('set'); setFirst(''); setConfirm('');

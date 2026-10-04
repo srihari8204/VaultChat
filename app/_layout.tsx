@@ -89,7 +89,7 @@ import '../lib/lock/background';   // registers the Location Lock geofence task 
                                    // rule: headless wakes need it defined at load
 import { getAccessToken, getLaunchSessionState } from '../lib/api';
 import { launchAllowed, settleLaunchGate } from '../lib/launchGate';
-import { hrefWithQuery, onDeliveredTap, openWhenUnlocked, stashLaunchLink } from '../lib/pendingLink';
+import { hrefWithQuery, noteAuthEdge, onDeliveredTap, openWhenUnlocked, stashLaunchLink } from '../lib/pendingLink';
 import { holdSecurityVerdict } from '../lib/securityVerdict';
 import { isMfaEnabled } from '../lib/mfa';
 import { E2EE_ENABLED } from '../constants/flags';
@@ -242,7 +242,10 @@ function RootLayoutInner() {
   // and a stashed link must replay exactly as it was tapped.
   const globalParams = useGlobalSearchParams();
   const segments = useSegments();
-  const launchHref = hrefWithQuery(pathname, globalParams, segments);
+  // Through a ref: the gate effect below runs once per launch (deps [router])
+  // and must stash the href of the render it ran after, which is the launch's.
+  const launchHrefRef = useRef('');
+  launchHrefRef.current = hrefWithQuery(pathname, globalParams, segments);
   /** Current route for the notification-tap gate; the boot effect outlives renders. */
   const pathRef = useRef(pathname);
   pathRef.current = pathname;
@@ -255,6 +258,7 @@ function RootLayoutInner() {
   // are left untouched; only signed-out/locked launches are redirected.
   useEffect(() => {
     let live = true;
+    const launchHref = launchHrefRef.current;
     const secure = Platform.OS === 'web' ? Promise.resolve(false) : setSecure(true);
     // WHERE THIS LAUNCH WAS TRYING TO GO, captured before anything redirects.
     //
@@ -284,15 +288,18 @@ function RootLayoutInner() {
         if (!live) return;
         if (!session.signedIn) {
           stashLaunchLink(launchHref);
+          noteAuthEdge('/onboard');
           settleLaunchGate(false);
           setLaunchGate('/onboard');
           router.replace('/onboard');
         } else if (mfaOn || session.sealedLocked) {
           stashLaunchLink(launchHref);
+          noteAuthEdge('/app-lock');
           settleLaunchGate(false);
           setLaunchGate('/app-lock');
           router.replace('/app-lock');
         } else {
+          noteAuthEdge(null);
           settleLaunchGate(true);
           setLaunchGate('allow');
         }
@@ -303,6 +310,7 @@ function RootLayoutInner() {
         // theoretical: a SecureStore read that throws lands here, and on some
         // Android skins that is the common cold-start failure.
         stashLaunchLink(launchHref);
+        noteAuthEdge('/onboard');
         settleLaunchGate(false);
         setLaunchGate('/onboard');
         router.replace('/onboard');

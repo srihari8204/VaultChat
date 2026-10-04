@@ -119,6 +119,15 @@ export default function AppLock() {
     } finally { if (alive.current) setBusy(false); }
   };
 
+  // No cached user id means the MPIN cannot be checked at all; offer the exit
+  // instead of an error with nothing to press. Also the Forgotten PIN Alert's
+  // destructive choice below.
+  const signInAgain = async () => {
+    await clearTokens().catch(() => {});
+    await setCachedUser(null).catch(() => {});
+    resetTo('/onboard');
+  };
+
   // The honest last resort, and it is the USER'S choice, not a silent redirect.
   // Signing in again replaces the sealed session; anything sealed under the old
   // PIN (cached message bodies) is unreadable afterwards, so say so first.
@@ -132,11 +141,7 @@ export default function AppLock() {
     [
       { text: 'Keep trying', style: 'cancel' },
       ...(mode === 'pin' ? [{ text: 'Use MPIN instead', onPress: () => { setError(null); setMode('mpin'); } }] : []),
-      { text: 'Sign in again', style: 'destructive', onPress: async () => {
-        await clearTokens().catch(() => {});
-        await setCachedUser(null).catch(() => {});
-        resetTo('/onboard');
-      } },
+      { text: 'Sign in again', style: 'destructive', onPress: () => { void signInAgain(); } },
     ],
   );
 
@@ -144,14 +149,7 @@ export default function AppLock() {
   // the sign-in screen (app/mpin-entry.tsx) — security questions, new MPIN.
   const forgotMpin = () => {
     if (userId) { router.push({ pathname: '/mpin-recover', params: { userId } }); return; }
-    signInAgain();
-  };
-  // No cached user id means the MPIN cannot be checked at all; offer the exit
-  // instead of an error with nothing to press.
-  const signInAgain = async () => {
-    await clearTokens().catch(() => {});
-    await setCachedUser(null).catch(() => {});
-    resetTo('/onboard');
+    void signInAgain();
   };
 
   const submitMpin = async (value: string) => {
@@ -281,5 +279,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   // 44pt touch floor for the 14pt text links.
   altHit: { minHeight: 44, justifyContent: 'center', paddingHorizontal: 12 },
   error: { color: c.danger, fontSize: 13, marginTop: 12, fontWeight: '600', textAlign: 'center' },
-  pinInput: { marginTop: 24, height: 56, borderRadius: 16, borderWidth: 1, borderColor: c.border, backgroundColor: c.card, color: c.text, fontSize: 24, fontWeight: '800', letterSpacing: 8, textAlign: 'center' },
+  // minHeight, not height, for the same reason as bioBtn: a pinned 56 clips
+  // the 24pt digits at large font scales.
+  pinInput: { marginTop: 24, minHeight: 56, borderRadius: 16, borderWidth: 1, borderColor: c.border, backgroundColor: c.card, color: c.text, fontSize: 24, fontWeight: '800', letterSpacing: 8, textAlign: 'center' },
 });

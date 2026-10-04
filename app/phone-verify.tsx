@@ -4,7 +4,8 @@ import { KeyboardSafe } from '../components/ui/KeyboardSafe';
 // the MOBILE NUMBER is the user's → phoneTicket, which /auth/profile/init needs
 // for a new account and /auth/mpin/verify + recovery need for an existing one.
 // Then: existing account → /mpin-entry, new → /onboard-profile
-// (lib/otpFirstRoute). 6 visible digits. Was app/email-verify.tsx; renamed with
+// (lib/otpFirstRoute); a number the server will not take ("conflict") stops
+// here with the code cleared and only "Use a different number". 6 visible digits. Was app/email-verify.tsx; renamed with
 // lib/onboardNav.selftest.ts, which pins its navigation.
 //
 // Auth appearance follows the selected app theme.
@@ -52,6 +53,10 @@ export default function PhoneVerify() {
   // e.g. offline during the account lookup. The code is spent, so Retry
   // repeats only that step.
   const [stuck, setStuck] = useState(false);
+  // The server will not take this number ("conflict"). The code is spent and a
+  // new one would meet the same answer, so the code card and both resend
+  // routes go away and the only way on is a different number.
+  const [conflict, setConflict] = useState(false);
   const [sheet, setSheet] = useState(false);
   // The SERVER's cooldown, not a guessed 30 — a button that goes live early
   // spends one of the few allowed sends on a certain 429. app/onboard.tsx put
@@ -85,9 +90,15 @@ export default function PhoneVerify() {
   // Back into this screen would be a dead end.
   const go = async (next: SignInNext) => {
     if (next.to === 'lookup') next = afterLookup(await lookupUser(phone, undefined, onboarding.get().phoneTicket));
-    if (next.to === 'mpin') router.replace({ pathname: '/mpin-entry', params: { userId: next.userId } } as any);
-    else if (next.to === 'signup') router.replace('/onboard-profile' as any);
-    else if (next.to === 'conflict') setErr('This mobile number can’t be used to sign up. Try a different number.');
+    if (next.to === 'mpin') router.replace({ pathname: '/mpin-entry', params: { userId: next.userId } });
+    else if (next.to === 'signup') router.replace('/onboard-profile');
+    else if (next.to === 'conflict') {
+      // The ticket proves a number nothing can be done with; drop it with the
+      // spent digits so neither outlives this answer.
+      onboarding.set({ phoneTicket: '' });
+      setCode(''); setStuck(false); setConflict(true);
+      setErr('This mobile number can’t be used to sign up. Use a different number.');
+    }
     else throw new Error('Couldn’t check this number. Try again.');
   };
 
@@ -141,7 +152,7 @@ export default function PhoneVerify() {
   // or a deep link straight here, there is no number to verify — start over
   // rather than POST an empty phone.
   const noPhone = !phone;
-  useEffect(() => { if (noPhone) router.replace('/onboard' as any); }, [noPhone, router]);
+  useEffect(() => { if (noPhone) router.replace('/onboard'); }, [noPhone, router]);
 
   const waiting = cooldown > 0;
   if (noPhone) return <View style={s.screen}><AuthSky /></View>;
@@ -173,7 +184,7 @@ export default function PhoneVerify() {
 
         {/* The code and its resend belong to one question, so they share one card. */}
         {/* Hidden once the code is accepted: it is spent. */}
-        {!stuck && <View style={s.card}>
+        {!stuck && !conflict && <View style={s.card}>
           <MpinInput value={code} onChange={setCode} onComplete={submit} secure={false} autoFocus onDark label="Verification code" />
 
           {busy && <ActivityIndicator color={AUTH.accent} style={{ marginTop: 18 }} />}
@@ -203,7 +214,13 @@ export default function PhoneVerify() {
           </Pressable>
         )}
 
-        <Pressable
+        {conflict && (
+          <Pressable onPress={() => router.back()} accessibilityRole="button" style={s.resendHit}>
+            <Text style={s.resend}>Use a different number</Text>
+          </Pressable>
+        )}
+
+        {!conflict && <Pressable
           onPress={() => setSheet(true)}
           disabled={waiting}
           accessibilityRole="button"
@@ -212,7 +229,7 @@ export default function PhoneVerify() {
           style={s.altHit}
         >
           <Text style={[s.alt, waiting && s.resendOff]}>Didn’t get it?</Text>
-        </Pressable>
+        </Pressable>}
       </ScrollView>
       </KeyboardSafe>
 

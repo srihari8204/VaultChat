@@ -63,7 +63,7 @@ export default function PermissionsScreen() {
   // any other way (a deep link), Done lands on Settings — the page this one
   // belongs to — rather than popping into whatever happened to be underneath.
   const fromSettings = useLocalSearchParams<{ from?: string }>().from === 'settings';
-  const done = () => { if (fromSettings && router.canGoBack()) router.back(); else router.replace('/settings' as any); };
+  const done = () => { if (fromSettings && router.canGoBack()) router.back(); else router.replace('/settings'); };
   const [granted,setGranted] = useState<Record<string,boolean>>({});
   /** The key being requested, or 'all' for the main button. */
   const [busy,setBusy] = useState<string | null>(null);

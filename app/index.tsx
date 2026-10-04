@@ -5,6 +5,8 @@
 // (lib/launchGate) and, only when the launch is allowed through, picks the
 // first screen: the restore offer on a new phone, otherwise Chats — with any
 // notification tap that arrived meanwhile opened on top (lib/pendingLink).
+// A later visit to '/' (after the decision) goes to the lock or sign-in screen
+// the user still stands at, or on into the app (lib/pendingLink.splashNext).
 
 import { type Href, router } from "expo-router";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -12,7 +14,7 @@ import { ActivityIndicator, Image, StyleSheet, TouchableOpacity, View } from "re
 import { AppText as Text } from "../components/ui/Text";
 import { AuroraDark, BRAND_NIGHT } from "../constants/theme";
 import { launchAllowed } from "../lib/launchGate";
-import { consumeLaunchLink, markLaunchRouted } from "../lib/pendingLink";
+import { authEdge, consumeLaunchLink, launchGateDecided, markLaunchRouted, splashNext } from "../lib/pendingLink";
 import { shouldCheckRestore } from "../lib/restoreGate";
 import { securityVerdict } from "../lib/securityVerdict";
 
@@ -25,6 +27,10 @@ export default function IndexScreen() {
   // One routing run at a time: a double tap on Retry ran two replaces and
   // could push a held link twice. Released only by a failure.
   const inFlight = useRef(false);
+  // Read once, on the first render: before the root gate has decided, this is
+  // the cold-start visit. Any later visit to '/' (/blocked's exit, a bare app
+  // link) comes after the decision and must route itself (lib/pendingLink).
+  const [coldVisit] = useState(() => !launchGateDecided());
 
   const route = useCallback(async () => {
     if (inFlight.current) return;
@@ -40,12 +46,20 @@ export default function IndexScreen() {
       // for good, because launchGate '/app-lock' can never equal pathname
       // '/(tabs)/chats' and the splash is only hidden when they match.
       //
-      // Wait for the root instead. `false` means it has already replaced the
-      // route, and there is nothing for this screen to do but stay out of the
-      // way. Cannot deadlock: settleLaunchGate is called on every settlement
-      // of the root's Promise.all — both redirect branches, the allow branch
-      // and the catch — and a Promise.all has no fourth outcome.
-      if (!(await launchAllowed)) return;
+      // Wait for the root instead. On the cold-start visit `false` means it
+      // has already replaced the route, and there is nothing for this screen
+      // to do but stay out of the way. Cannot deadlock: settleLaunchGate is
+      // called on every settlement of the root's Promise.all — both redirect
+      // branches, the allow branch and the catch — and a Promise.all has no
+      // fourth outcome.
+      //
+      // A LATER visit gets the same `false` (the gate settles once per
+      // process), and returning then left the user on this logo with nothing
+      // to press. It goes to the lock or sign-in screen the user still stands
+      // at, or on into the app once a sign-in or unlock has crossed them in.
+      const next = splashNext(await launchAllowed, coldVisit, authEdge());
+      if (next === "wait") return;
+      if (next !== "route") { router.replace(next as Href); return; }
       // The launch scan found a threat and is routing to /blocked: don't race it.
       if (securityVerdict()) return;
 
@@ -77,7 +91,7 @@ export default function IndexScreen() {
       inFlight.current = false;
       setFailed(true);
     }
-  }, []);
+  }, [coldVisit]);
 
   useEffect(() => { void route(); }, [route]);
 
@@ -138,8 +152,9 @@ const S = StyleSheet.create({
   bg: { flex: 1, backgroundColor: BRAND_NIGHT, alignItems: "center", justifyContent: "center" },
   // 200 and contain are app.json's expo-splash-screen values, verbatim.
   mark: { width: 200, height: 200 },
-  // Always on the night ground, so the dark palette's ink, not the theme's.
   wait: { marginTop: 32 },
   retry: { marginTop: 32, minHeight: 44, paddingHorizontal: 20, justifyContent: "center" },
+  // Always on the night ground, so the dark palette's ink, not the theme's
+  // (the spinner's colour above follows the same rule).
   retryTxt: { color: AuroraDark.accentOn, fontSize: 15, fontWeight: "700", textAlign: "center" },
 });

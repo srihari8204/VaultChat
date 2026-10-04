@@ -19,12 +19,16 @@
 // (a step that consumes its predecessor) must keep the stack below it.
 import { router } from 'expo-router';
 
-import { clearLaunchLink, consumeLaunchLink } from './pendingLink';
+import { clearLaunchLink, consumeLaunchLink, edgeAfterReset, noteAuthEdge } from './pendingLink';
 
 export function resetTo(href: string): void {
   // canDismiss() is false when there is nothing below us (cold start straight
   // onto this screen) — dismissAll() would throw, and there is nothing to pop.
   try { if (router.canDismiss()) router.dismissAll(); } catch { /* not a dismissable stack */ }
+  // Every crossing moves the sign-in boundary: into the app clears it, out to
+  // the sign-in flow sets it. app/index.tsx and app/blocked.tsx read it when
+  // they have nothing to go back to (lib/pendingLink.splashNext).
+  noteAuthEdge(edgeAfterReset(href));
 
   // REPLAY THE LAUNCH DEEP LINK, if this crossing is INTO the app.
   //

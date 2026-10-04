@@ -25,8 +25,9 @@ import {
   Linking,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { useRouter } from 'expo-router';
+import { type Href, useRouter } from 'expo-router';
 import { clearRestrictVerdict, holdSecurityVerdict, securityVerdict } from '../lib/securityVerdict';
+import { authEdge } from '../lib/pendingLink';
 import { runSecurityCheck } from '../services/securityService';
 import type { Palette } from '../constants/theme';
 import { useColors } from '../lib/theme';
@@ -152,9 +153,14 @@ export default function BlockedScreen() {
     return () => handler.remove();
   }, [verdict]);
 
+  // Nothing underneath is the usual case: the launch scan REPLACED the lock or
+  // sign-in screen the launch gate chose. Go back to that screen, not to '/',
+  // where the splash would wait on a gate that already said no. Once the user
+  // is inside the app (or the gate let the launch through) '/' routes on as
+  // before (lib/pendingLink.authEdge).
   const leave = () => {
     if (router.canGoBack()) router.back();
-    else router.replace('/' as any);
+    else router.replace((authEdge() ?? '/') as Href);
   };
 
   // A `restrict` verdict re-checked in place, instead of only "reopen the app".
@@ -179,7 +185,7 @@ export default function BlockedScreen() {
       'Contact Support',
       'Email: security@vaultchat.app\n\n' + (wiped
         ? 'Your encryption keys were wiped to protect your data. To restore access, reinstall crazzychat on a clean, unrooted device.'
-        : 'Your encryption keys are still on this device. Clear the indicator below and reopen crazzychat to regain access.'),
+        : 'Your encryption keys are still on this device. Clear the indicator listed on this screen, then tap Check again (or reopen crazzychat) to regain access.'),
       [
         { text: 'Close', style: 'cancel' },
         { text: 'Email support', onPress: () => {

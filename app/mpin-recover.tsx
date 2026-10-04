@@ -23,6 +23,7 @@ import {
 import { AuthSky, BrandMark, KeyboardSafe } from '../components/ui';
 import { openRestoreIfNewPhone } from '../lib/postSignIn';
 import { resetTo } from '../lib/authNav';
+import { FRESH_OTP_MESSAGE, needsFreshOtp } from '../lib/otpFirstRoute';
 import { type AuthPalette } from '../constants/authTheme';
 import { useAuthTheme } from '../lib/useAuthTheme';
 import { isWeakPin } from '../lib/weakPin';
@@ -39,6 +40,12 @@ export default function MpinRecover() {
   const [ticket, setTicket] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // 403 otp_required on any step: the SMS proof expired; only a fresh code
+  // (the number step) helps, so "Try again" would only repeat the refusal.
+  const [otpExpired, setOtpExpired] = useState(false);
+  // onConfirm's latch: the MPIN input can complete twice in one tick, and the
+  // second recoverMpin would spend the recovery ticket's only use.
+  const inFlight = useRef(false);
 
   // set-mpin phase
   const [mpinPhase, setMpinPhase] = useState<'set' | 'confirm'>('set');
@@ -63,7 +70,8 @@ export default function MpinRecover() {
       setQuestions(qs); setPhase('answer');
     } catch (e: any) {
       if (!alive.current) return;
-      setError(onboardingError(e, 'Could not load your security questions.'));
+      setOtpExpired(needsFreshOtp(e));
+      setError(needsFreshOtp(e) ? FRESH_OTP_MESSAGE : onboardingError(e, 'Could not load your security questions.'));
       setPhase('loadError');
     }
   }, [router, userId]);
@@ -83,14 +91,17 @@ export default function MpinRecover() {
       const t = await verifyRecoveryAnswers(userId, payload);
       setTicket(t); setPhase('setmpin');
     } catch (e: any) {
+      if (needsFreshOtp(e)) { setOtpExpired(true); setError(FRESH_OTP_MESSAGE); setPhase('loadError'); return; }
       setError(onboardingError(e, 'Answers don’t match'));
     } finally { setBusy(false); }
   };
 
   const onSet = (v: string) => { if (isWeakPin(v)) { setError('That MPIN is too easy to guess.'); setFirst(''); doShake(); return; } setError(null); setMpinPhase('confirm'); };
   const onConfirm = async (v: string) => {
+    if (inFlight.current) return;
     if (v !== first) { setError('The confirmation didn’t match the new MPIN. Create it again.'); setConfirm(''); setFirst(''); setMpinPhase('set'); doShake(); return; }
-    setBusy(true);
+    inFlight.current = true;
+    setBusy(true); setError(null);
     try {
       await recoverMpin(userId, ticket, v);
       onboarding.reset();
@@ -98,8 +109,10 @@ export default function MpinRecover() {
       // and a new phone gets the restore offer (lib/postSignIn.ts).
       if (!(await openRestoreIfNewPhone())) resetTo('/(tabs)/chats');
     } catch (e: any) {
+      inFlight.current = false;
       setBusy(false); setMpinPhase('set'); setFirst(''); setConfirm('');
-      Alert.alert('Could not reset', onboardingError(e, 'Try again'));
+      // Inline, under the PIN cells, in the live region the other errors use.
+      setError(onboardingError(e, 'Couldn’t reset your MPIN. Choose it again to retry.'));
     }
   };
 
@@ -129,13 +142,14 @@ export default function MpinRecover() {
               <Text style={s.title} accessibilityRole="header">Reset your MPIN</Text>
               {!!error && <Text style={s.error} accessibilityLiveRegion="polite">{error}</Text>}
               <Pressable
-                onPress={() => { void load(); }}
+                // dismissTo: back to the number step, or onto it when it is not
+                // in the stack (expo-router replaces then).
+                onPress={() => { if (otpExpired) router.dismissTo('/onboard'); else void load(); }}
                 accessibilityRole="button"
-                accessibilityLabel="Try again"
                 style={({ pressed }) => [s.ctaWrap, s.retryWrap, pressed && s.ctaDown]}
               >
                 <LinearGradient colors={[...BRAND_GRADIENT_CTA]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={s.cta}>
-                  <Text style={s.ctaTxt}>Try again</Text>
+                  <Text style={s.ctaTxt}>{otpExpired ? 'Verify your number again' : 'Try again'}</Text>
                 </LinearGradient>
               </Pressable>
             </View>

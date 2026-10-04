@@ -52,7 +52,7 @@ export default function OnboardLanding() {
       // The cooldown rides in the store rather than a route param: the nav
       // self-test pins this call to `router.push('/phone-verify'` exactly.
       onboarding.set({ otpResendInSec: await sendPhoneOtp(e164) });
-      router.push('/phone-verify' as any);
+      router.push('/phone-verify');
     } catch (e: any) {
       Alert.alert('Could not continue', onboardingError(e, 'Please try again'));
     } finally {

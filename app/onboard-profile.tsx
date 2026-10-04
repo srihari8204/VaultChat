@@ -108,7 +108,7 @@ export default function OnboardProfile() {
       firstName: firstName.trim(), lastName: lastName.trim(),
       status: status.slice(0, 139), dob: toLocalIsoDate(dob),
     });
-    router.push('/onboard-security' as any);
+    router.push('/onboard-security');
   };
 
   return (

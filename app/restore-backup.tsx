@@ -88,8 +88,12 @@ export default function RestoreBackupScreen() {
     resetTo('/(tabs)/chats');
   }, [answered]);
 
+  // A ref, not `busy`: two taps in one frame both read busy === null from the
+  // same render and started two restores.
+  const inFlight = useRef(false);
   const run = useCallback(async (from: 'cloud' | 'drive') => {
-    if (busy) return;
+    if (inFlight.current) return;
+    inFlight.current = true;
     setBusy(from);
     try {
       const n = from === 'cloud' ? await restoreCloudBackup() : await restoreFromGoogleDrive();
@@ -97,6 +101,7 @@ export default function RestoreBackupScreen() {
       if (!alive.current) return;
       setRestored(n);
     } catch (e: any) {
+      inFlight.current = false;
       if (!alive.current) return;
       setBusy(null);
       // Named plainly: the two real causes are "there isn't one" and "the
@@ -111,8 +116,9 @@ export default function RestoreBackupScreen() {
       );
       return;
     }
+    inFlight.current = false;
     if (alive.current) setBusy(null);
-  }, [busy]);
+  }, []);
 
   if (restored !== null) {
     return (
@@ -145,7 +151,7 @@ export default function RestoreBackupScreen() {
           {meta === null
             ? 'Looking for a backup…'
             : lookupFailed
-              ? 'Couldn’t check for a backup — you may be offline. Try again, or carry on and restore later from Settings → Chat backup.'
+              ? 'Couldn’t check for a backup — you may be offline. Try again, or carry on: while this phone has no chats yet, crazzychat offers this again the next time it opens, and you can restore any time from Settings → Chat backup.'
             : meta.exists
               ? 'We found a backup for this account. Restoring brings your messages and media onto this phone.'
               : 'No backup was found for this account. You can carry on — new messages will be backed up from here.'}

@@ -15,6 +15,7 @@ import { ActivityIndicator, Animated, Pressable, ScrollView, StyleSheet, Text, V
 import { MpinInput } from '../components/auth/MpinInput';
 import { onboarding, verifyMpinRemote, onboardingError } from '../lib/onboarding';
 import { resetTo } from '../lib/authNav';
+import { FRESH_OTP_MESSAGE, needsFreshOtp } from '../lib/otpFirstRoute';
 import { openRestoreIfNewPhone } from '../lib/postSignIn';
 import { AuthSky, BrandMark, KeyboardSafe } from '../components/ui';
 import { type AuthPalette } from '../constants/authTheme';
@@ -28,6 +29,12 @@ export default function MpinEntry() {
   const [mpin, setMpin] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // 403 otp_required: the SMS proof from the number step has expired. Another
+  // MPIN cannot fix that, so the way on is a fresh code (lib/otpFirstRoute).
+  const [otpExpired, setOtpExpired] = useState(false);
+  // A ref, not `busy`: SMS-style autofill and paste can complete the input
+  // twice in one tick, and both calls would read busy === false.
+  const inFlight = useRef(false);
   const shake = useRef(new Animated.Value(0)).current;
 
   const doShake = () => {
@@ -37,11 +44,12 @@ export default function MpinEntry() {
   };
 
   const submit = async (value: string) => {
-    if (busy) return;
+    if (inFlight.current) return;
     // Reached without the number step (process death, a stale deep link):
     // there is no account to check the MPIN against, so say so and go back to
     // the start instead of silently doing nothing.
     if (!userId) { setMpin(''); setError('Enter your mobile number first.'); resetTo('/onboard'); return; }
+    inFlight.current = true;
     setBusy(true); setError(null);
     try {
       await verifyMpinRemote(userId, value);
@@ -52,9 +60,10 @@ export default function MpinEntry() {
       if (!(await openRestoreIfNewPhone())) resetTo('/(tabs)/chats');
     } catch (e: any) {
       setMpin('');
+      if (needsFreshOtp(e)) { setOtpExpired(true); setError(FRESH_OTP_MESSAGE); return; }
       doShake();
       setError(onboardingError(e, 'Incorrect MPIN'));
-    } finally { setBusy(false); }
+    } finally { inFlight.current = false; setBusy(false); }
   };
 
   return (
@@ -77,9 +86,9 @@ export default function MpinEntry() {
         <Text style={s.title} accessibilityRole="header">Welcome back</Text>
         <Text style={s.sub}>Enter your 6-digit MPIN to unlock crazzychat</Text>
 
-        <View style={{ marginVertical: 28 }}>
+        {!otpExpired && <View style={{ marginVertical: 28 }}>
           <MpinInput value={mpin} onChange={setMpin} onComplete={submit} autoFocus shakeAnim={shake} onDark />
-        </View>
+        </View>}
 
         {busy && <ActivityIndicator color={AUTH.accent} />}
         {/* accessibilityLiveRegion so the failure is announced rather than only
@@ -89,18 +98,26 @@ export default function MpinEntry() {
           <Text style={s.error} accessibilityLiveRegion="polite">{error}</Text>
         )}
 
+        {otpExpired && (
+          // dismissTo: back to the number step below this screen, or onto it
+          // when nothing is below (expo-router replaces in that case).
+          <Pressable onPress={() => router.dismissTo('/onboard')} style={s.forgotHit} accessibilityRole="button">
+            <Text style={s.forgot}>Verify your number again</Text>
+          </Pressable>
+        )}
+
         {/* Without a userId there is no account to recover: same guard as submit. */}
-        <Pressable
+        {!otpExpired && <Pressable
           onPress={() => {
             if (!userId) { setError('Enter your mobile number first.'); resetTo('/onboard'); return; }
-            router.push({ pathname: '/mpin-recover', params: { userId } } as any);
+            router.push({ pathname: '/mpin-recover', params: { userId } });
           }}
           style={s.forgotHit}
           accessibilityRole="button"
           accessibilityHint="Reset your MPIN with your security questions"
         >
           <Text style={s.forgot}>Forgot MPIN?</Text>
-        </Pressable>
+        </Pressable>}
       </ScrollView>
       </KeyboardSafe>
     </View>

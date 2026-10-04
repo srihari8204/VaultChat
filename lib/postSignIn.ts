@@ -10,6 +10,7 @@
 import { router } from 'expo-router';
 
 import { shouldCheckRestore } from './restoreGate';
+import { noteAuthEdge } from './pendingLink';
 
 /**
  * On a phone with no chat history yet, open the restore offer and return
@@ -23,5 +24,8 @@ export async function openRestoreIfNewPhone(): Promise<boolean> {
   // restore-backup continues into Chats through resetTo('/(tabs)/chats').
   try { if (router.canDismiss()) router.dismissAll(); } catch { /* nothing to dismiss */ }
   router.replace('/restore-backup' as any);
+  // The user is now inside the app: a /blocked exit from here must not send
+  // them back to the sign-in screen the launch gate chose.
+  noteAuthEdge(null);
   return true;
 }
